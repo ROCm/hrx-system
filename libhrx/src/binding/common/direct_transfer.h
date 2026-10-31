@@ -40,9 +40,9 @@ iree_status_t iree_hal_streaming_direct_transfer_d2h(
     iree_hal_streaming_context_t* context, iree_hal_buffer_t* source_buffer,
     iree_device_size_t source_offset, void* target, iree_device_size_t length);
 
-// Runs a blocking transfer batch after this stream's preceding work on the
-// context's transfer queue. Descriptors and host bytes remain borrowed until
-// return. The caller executes host participation without a callback worker.
+// Runs a blocking transfer batch after this stream's preceding work on its
+// selected queue. Descriptors and host bytes remain borrowed until return.
+// The caller joins completion without a frontend callback worker.
 iree_status_t iree_hal_streaming_direct_transfer_and_wait(
     iree_hal_streaming_stream_t* stream, iree_host_size_t operation_count,
     const iree_hal_transfer_operation_t* operations);

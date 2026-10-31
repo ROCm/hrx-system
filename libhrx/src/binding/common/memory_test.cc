@@ -12,6 +12,7 @@
 #include <memory>
 #include <semaphore>
 #include <thread>
+#include <vector>
 
 #include "common/context.h"
 #include "common/device.h"
@@ -42,6 +43,10 @@ struct InjectedFlushQueue {
   std::atomic<int> injected_execute_count = 0;
   // Number of transfer batches accepted by the target queue.
   std::atomic<int> accepted_transfer_count = 0;
+  // Optional observer notified after the real queue accepts a transfer.
+  std::binary_semaphore* transfer_accepted = nullptr;
+  // Borrowed source of the observed upload, published through the observer.
+  const void* upload_source = nullptr;
   // Number of injected flush errors observed by the caller.
   std::atomic<int> injected_flush_count = 0;
   // Announces flush failure without timing-dependent polling.
@@ -127,6 +132,13 @@ iree_status_t InjectedFlushQueueTransfer(
                               operation_count, operations, barriers);
   if (iree_status_is_ok(status)) {
     queue->accepted_transfer_count.fetch_add(1, std::memory_order_acq_rel);
+    if (operation_count == 1 &&
+        operations[0].type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD) {
+      queue->upload_source = operations[0].upload.source;
+    }
+    if (queue->transfer_accepted) {
+      queue->transfer_accepted->release();
+    }
   }
   return status;
 }
@@ -406,6 +418,119 @@ TEST_F(CpuStreamingMemoryTest,
           device_pointer_, 8, stream_));
   EXPECT_EQ(stream_->pending_value, pending_value);
   EXPECT_EQ(host_callbacks_.thread, nullptr);
+}
+
+TEST_F(CpuStreamingMemoryTest, PageableUploadBorrowsSourceWithoutContextLock) {
+  constexpr size_t kLength = 1024 * 1024 + 123;
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
+      context_, kLength + 16, IREE_HAL_STREAMING_MEMORY_FLAG_NONE, &buffer_));
+  std::memset(buffer_->host_ptr, 0xcd, kLength + 16);
+  std::vector<uint8_t> source(kLength, 0x42);
+  iree_hal_semaphore_t* gate = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      context_->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_NONE, &gate));
+  std::binary_semaphore accepted(0);
+  InjectedFlushQueue queue = {};
+  iree_hal_queue_t* original_queue = stream_->queue;
+  InitializeInjectedFlushQueue(original_queue, &queue);
+  queue.execute_gate = gate;
+  queue.execute_gate_value = 1;
+  queue.transfer_accepted = &accepted;
+  EXPECT_EQ(original_queue, ReplaceStreamQueue(stream_, &queue.base));
+  iree_hal_queue_release(original_queue);
+
+  std::atomic<bool> returned(false);
+  std::thread caller([&] {
+    IREE_EXPECT_OK(iree_hal_streaming_memcpy_host_to_device(
+        context_, iree_hal_streaming_buffer_device_pointer(buffer_),
+        source.data(), source.size(), stream_));
+    returned.store(true, std::memory_order_release);
+  });
+  accepted.acquire();
+  EXPECT_EQ(queue.upload_source, source.data());
+  EXPECT_FALSE(returned.load(std::memory_order_acquire));
+  const bool acquired = iree_slim_mutex_try_lock(&context_->mutex);
+  EXPECT_TRUE(acquired);
+  if (acquired) {
+    iree_slim_mutex_unlock(&context_->mutex);
+  }
+
+  // An independent task queue operation can finish while this upload waits.
+  // It needs neither the borrowed source nor the upload's reserved stream tail.
+  iree_hal_semaphore_t* independent = nullptr;
+  IREE_EXPECT_OK(iree_hal_semaphore_create(
+      context_->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_NONE, &independent));
+  if (independent) {
+    uint64_t value = 1;
+    const iree_hal_semaphore_list_t signals = {1, &independent, &value};
+    iree_status_t status = iree_hal_queue_barrier(
+        original_queue, iree_hal_semaphore_list_empty(), signals, nullptr,
+        IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+    if (iree_status_is_ok(status)) {
+      status =
+          iree_hal_semaphore_wait(independent, value, iree_infinite_timeout(),
+                                  IREE_ASYNC_WAIT_FLAG_NONE);
+    }
+    IREE_EXPECT_OK(status);
+    iree_hal_semaphore_release(independent);
+  }
+  IREE_EXPECT_OK(iree_hal_semaphore_signal(gate, 1, nullptr));
+  caller.join();
+  EXPECT_EQ(0, std::memcmp(buffer_->host_ptr, source.data(), kLength));
+  const auto* bytes = static_cast<const uint8_t*>(buffer_->host_ptr);
+  for (size_t i = kLength; i < kLength + 16; ++i) {
+    EXPECT_EQ(bytes[i], 0xcd);
+  }
+  iree_hal_queue_retain(original_queue);
+  iree_hal_queue_release(ReplaceStreamQueue(stream_, original_queue));
+  iree_hal_semaphore_release(gate);
+  EXPECT_EQ(host_callbacks_.thread, nullptr);
+}
+
+TEST_F(CpuStreamingMemoryTest, PageableUploadValidationAndRejection) {
+  constexpr size_t kLength = 1024 * 1024 + 123;
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
+      context_, kLength, IREE_HAL_STREAMING_MEMORY_FLAG_NONE, &buffer_));
+  device_pointer_ = iree_hal_streaming_buffer_device_pointer(buffer_);
+  std::memset(buffer_->host_ptr, 0xcd, kLength);
+  std::vector<uint8_t> source(kLength + 1, 0x42);
+  const uint64_t pending_before = stream_->pending_value;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_hal_streaming_memcpy_host_to_device(
+          context_, device_pointer_, source.data(), source.size(), stream_));
+  EXPECT_EQ(stream_->pending_value, pending_before);
+
+  InjectedFlushQueue queue = {};
+  iree_hal_queue_t* original_queue = stream_->queue;
+  InitializeInjectedFlushQueue(original_queue, &queue);
+  queue.fail_transfer = true;
+  EXPECT_EQ(original_queue, ReplaceStreamQueue(stream_, &queue.base));
+  iree_hal_queue_release(original_queue);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_ABORTED,
+      iree_hal_streaming_memcpy_host_to_device(
+          context_, device_pointer_, source.data(), kLength, stream_));
+  EXPECT_EQ(queue.accepted_transfer_count.load(), 0);
+  const auto* bytes = static_cast<const uint8_t*>(buffer_->host_ptr);
+  for (size_t i = 0; i < kLength; ++i) {
+    EXPECT_EQ(bytes[i], 0xcd);
+  }
+  uint64_t value = 0;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_ABORTED,
+      iree_hal_semaphore_query(stream_->timeline_semaphore, &value));
+  iree_hal_queue_retain(original_queue);
+  iree_hal_queue_release(ReplaceStreamQueue(stream_, original_queue));
+  // A reserved host transaction fails its stream rather than leaving later
+  // work waiting for a value that can no longer be produced.
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
+                        iree_hal_streaming_stream_synchronize(stream_));
+  iree_hal_streaming_context_unregister_stream(context_, stream_);
+  iree_hal_streaming_stream_release(stream_);
+  stream_ = nullptr;
 }
 
 TEST_F(CpuStreamingMemoryTest,

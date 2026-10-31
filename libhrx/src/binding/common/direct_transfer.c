@@ -141,37 +141,37 @@ iree_status_t iree_hal_streaming_direct_transfer_d2d(
       iree_hal_streaming_context_wait_flags(context));
 }
 
-typedef struct iree_hal_streaming_host_download_t {
+typedef struct iree_hal_streaming_host_transfer_t {
   // Borrowed stream queue preserving its selected family, placement, and
   // priority.
   iree_hal_queue_t* queue;
-  // Number of row downloads in this transaction.
+  // Number of borrowed upload or download descriptors in this transaction.
   iree_host_size_t operation_count;
   // Borrowed capture, live on the caller until the transaction completes.
   const iree_hal_transfer_operation_t* operations;
   // Frontend context's scheduling policy for this blocking host call.
   iree_async_wait_flags_t wait_flags;
-} iree_hal_streaming_host_download_t;
+} iree_hal_streaming_host_transfer_t;
 
-static iree_status_t iree_hal_streaming_host_download_execute(void* user_data) {
-  const iree_hal_streaming_host_download_t* download = user_data;
+static iree_status_t iree_hal_streaming_host_transfer_execute(void* user_data) {
+  const iree_hal_streaming_host_transfer_t* transfer = user_data;
   return hrx_hal_queue_transfer_and_wait(
-      download->queue, download->operation_count, download->operations,
-      download->wait_flags);
+      transfer->queue, transfer->operation_count, transfer->operations,
+      transfer->wait_flags);
 }
 
-// Unregistered host memory is a blocking compatibility destination. Keep its
-// completion on the caller, ordered only after this stream, instead of making
-// it depend on unrelated application callbacks or allocating CPU-copy staging.
+// Borrowed host storage stays live through this blocking transaction. Order
+// it only after this stream, without unrelated application callbacks or a
+// frontend staging allocation. Native transfer completion releases the borrow.
 iree_status_t iree_hal_streaming_direct_transfer_and_wait(
     iree_hal_streaming_stream_t* stream, iree_host_size_t operation_count,
     const iree_hal_transfer_operation_t* operations) {
-  iree_hal_streaming_host_download_t download = {
+  iree_hal_streaming_host_transfer_t transfer = {
       .queue = stream->queue,
       .operation_count = operation_count,
       .operations = operations,
       .wait_flags = iree_hal_streaming_context_wait_flags(stream->context),
   };
   return iree_hal_streaming_execute_host_operation(
-      stream, iree_hal_streaming_host_download_execute, &download);
+      stream, iree_hal_streaming_host_transfer_execute, &transfer);
 }

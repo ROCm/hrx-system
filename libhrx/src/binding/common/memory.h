@@ -379,10 +379,6 @@ iree_status_t iree_hal_streaming_memory_import_managed(
 iree_status_t iree_hal_streaming_memory_free_host(
     iree_hal_streaming_context_t* context, void* ptr);
 
-// Synchronization: none; called during context destruction after streams idle.
-void iree_hal_streaming_memory_release_pageable_staging(
-    iree_hal_streaming_context_t* context);
-
 // Wraps an existing HAL buffer and registers it in the context pointer map.
 // The wrapper retains |buffer| for HRX interop, but callers must still ensure
 // the backing owner remains live for the duration required by the HAL API.
@@ -437,8 +433,9 @@ iree_status_t iree_hal_streaming_memcpy_peer(
     iree_hal_streaming_deviceptr_t src, iree_device_size_t size,
     iree_hal_streaming_stream_t* stream);
 
-// Memory copy helpers for different transfer types.
-// Synchronization: stream or blocking (async if stream, sync if NULL stream).
+// Outside capture, registered sources and small pageable snapshots remain
+// asynchronous when a stream is supplied. Large pageable sources stay borrowed
+// through a blocking transfer. NULL-stream copies complete on the caller.
 iree_status_t iree_hal_streaming_memcpy_host_to_device(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
     const void* src, iree_device_size_t size,

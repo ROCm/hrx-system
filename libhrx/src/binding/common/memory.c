@@ -634,20 +634,6 @@ static void iree_hal_streaming_temporary_host_buffer_free(
   iree_hal_streaming_buffer_free(buffer);
 }
 
-void iree_hal_streaming_memory_release_pageable_staging(
-    iree_hal_streaming_context_t* context) {
-  if (!context) {
-    return;
-  }
-  if (context->pageable_h2d_staging_buffer) {
-    iree_hal_streaming_buffer_t* buffer = context->pageable_h2d_staging_buffer;
-    context->pageable_h2d_staging_buffer = NULL;
-    context->pageable_h2d_staging_size = 0;
-    hrx_buffer_table_remove(&context->buffer_table, buffer->device_ptr);
-    iree_hal_streaming_buffer_free(buffer);
-  }
-}
-
 iree_hal_streaming_deviceptr_t iree_hal_streaming_buffer_device_pointer(
     iree_hal_streaming_buffer_t* buffer) {
   return buffer ? buffer->device_ptr : 0;
@@ -2460,36 +2446,6 @@ static void iree_hal_streaming_repeat_pattern(void* dst,
   }
 }
 
-static iree_status_t iree_hal_streaming_context_ensure_pageable_h2d_staging(
-    iree_hal_streaming_context_t* context, iree_device_size_t size,
-    iree_hal_streaming_buffer_t** out_staging) {
-  IREE_ASSERT_ARGUMENT(context);
-  IREE_ASSERT_ARGUMENT(out_staging);
-  *out_staging = NULL;
-
-  if (context->pageable_h2d_staging_buffer &&
-      context->pageable_h2d_staging_size >= size) {
-    *out_staging = context->pageable_h2d_staging_buffer;
-    return iree_ok_status();
-  }
-
-  if (context->pageable_h2d_staging_buffer) {
-    iree_hal_streaming_memory_release_pageable_staging(context);
-  }
-
-  iree_hal_streaming_buffer_t* staging = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_streaming_memory_allocate_host_with_context_mode(
-          context, size, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
-          IREE_HAL_BUFFER_USAGE_TRANSFER,
-          /*min_alignment=*/64, IREE_HAL_STREAMING_BUFFER_CONTEXT_BORROWED,
-          &staging));
-  context->pageable_h2d_staging_buffer = staging;
-  context->pageable_h2d_staging_size = size;
-  *out_staging = staging;
-  return iree_ok_status();
-}
-
 iree_status_t iree_hal_streaming_memory_free_host(
     iree_hal_streaming_context_t* context, void* ptr) {
   if (!ptr) {
@@ -3160,6 +3116,9 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
   iree_hal_streaming_buffer_ref_t dst_ref;
   iree_status_t dst_status =
       iree_hal_streaming_memory_lookup(context, dst, &dst_ref);
+  if (iree_status_is_ok(dst_status)) {
+    dst_status = iree_hal_streaming_buffer_ref_validate_range(&dst_ref, size);
+  }
 
   if (!iree_status_is_ok(dst_status)) {
     IREE_TRACE_ZONE_END(z0);
@@ -3170,11 +3129,7 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
       iree_all_bits_set((iree_hal_memory_type_t)dst_ref.buffer->memory_type,
                         IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
                             IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
-    iree_status_t status =
-        iree_hal_streaming_buffer_ref_validate_range(&dst_ref, size);
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_streaming_synchronize_host_access(context);
-    }
+    iree_status_t status = iree_hal_streaming_synchronize_host_access(context);
     if (iree_status_is_ok(status)) {
       memcpy((uint8_t*)dst_ref.buffer->host_ptr + dst_ref.offset, src, size);
     }
@@ -3205,43 +3160,29 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
       IREE_TRACE_ZONE_END(z0);
       return queue_status;
     }
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_streaming_stream_synchronize(stream));
-  }
-
-  if (stream && size >= staging_threshold) {
-    iree_hal_streaming_stream_t* copy_stream = stream;
-    iree_hal_streaming_buffer_t* staging = NULL;
-    iree_slim_mutex_lock(&context->mutex);
+    // A large pageable source stays borrowed through the blocking transaction.
+    // The selected HAL queue owns transport staging; the frontend needs no
+    // context-wide payload cache or lock across the copy and wait.
+    const iree_hal_transfer_operation_t operation = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+        .upload =
+            {
+                .source = src,
+                .target_buffer = dst_ref.buffer->buffer,
+                .target_offset = dst_ref.offset,
+                .length = size,
+            },
+    };
     iree_status_t status =
-        iree_hal_streaming_context_ensure_pageable_h2d_staging(context, size,
-                                                               &staging);
-    if (iree_status_is_ok(status)) {
-      memcpy(staging->host_ptr, src, size);
-    }
-    if (iree_status_is_ok(status)) {
-      const iree_hal_streaming_buffer_ref_t staging_ref = {
-          .buffer = staging,
-          .offset = 0,
-      };
-      status = iree_hal_streaming_enqueue_buffer_copy(copy_stream, staging_ref,
-                                                      dst_ref, size);
-    }
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_streaming_stream_synchronize(copy_stream);
-    }
-    iree_slim_mutex_unlock(&context->mutex);
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
-  } else {
-    // Blocking copies submit directly instead of materializing a temporary
-    // host-visible buffer and one-shot command buffer.
-    iree_status_t direct_status = iree_hal_streaming_direct_transfer_h2d(
-        context, src, dst_ref.buffer->buffer, dst_ref.offset, size);
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, direct_status);
+        iree_hal_streaming_direct_transfer_and_wait(stream, 1, &operation);
+    IREE_TRACE_ZONE_END(z0);
+    return status;
   }
 
+  iree_status_t status = iree_hal_streaming_direct_transfer_h2d(
+      context, src, dst_ref.buffer->buffer, dst_ref.offset, size);
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  return status;
 }
 
 iree_status_t iree_hal_streaming_memcpy_device_to_host(
