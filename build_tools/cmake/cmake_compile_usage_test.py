@@ -108,6 +108,7 @@ _iree_wasm_setup_bundler(WASM_TARGET module
                 variants.extend(("CUSTOM", "SCOPED_CUSTOM"))
             for variant in variants:
                 arguments = [
+                    "-Werror=dev",
                     f"-DCMAKE_PROJECT_INCLUDE={caller_hook.as_posix()}",
                     "-DFIXTURE_REQUIRE_CALLER=ON",
                     f"-DFIXTURE_SCOPED={'ON' if 'SCOPED' in variant else 'OFF'}",

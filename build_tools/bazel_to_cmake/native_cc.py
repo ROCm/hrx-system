@@ -20,9 +20,11 @@ def command(name, *parts):
 
 def interfaces(declarations):
     """Binds opaque requirements without copying native target properties."""
+    # Target conversion owns each dependency's CMake argument spelling,
+    # including quoted framework flags and native list expressions.
     return "".join(
         command("add_library", name, "INTERFACE IMPORTED GLOBAL")
-        + command("target_link_libraries", name, "INTERFACE", arguments((dependency,)))
+        + command("target_link_libraries", name, "INTERFACE", dependency)
         for name, dependency in declarations
     )
 

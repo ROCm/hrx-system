@@ -12,4 +12,6 @@ DEFAULT_ROOT_DIRS = ["package"]
 
 class CustomTargetConverter(TargetConverter):
     def _convert_unmatched_target(self, target):
+        if target == "//native:leaf":
+            return ['"iree::fixture::leaf"']
         return ["iree::fixture::" + target.rsplit(":", 1)[-1]]
