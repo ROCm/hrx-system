@@ -32,8 +32,8 @@ void Require(bool condition, const char* message) {
   }
 }
 
-// One runtime and module span every benchmark row. Only graphs are rebuilt
-// between rows; native drivers and devices are never cycled in this process.
+// One runtime and module span every benchmark row. Graphs and copy resources
+// are row-local; native drivers and devices are never cycled in this process.
 class HipRuntime {
  public:
   HipRuntime() {
@@ -176,6 +176,7 @@ enum class DownloadMode {
   kIdle,
   kPageable,
   kRegistered,
+  kCallerStaged,
 };
 
 enum class DownloadPriority {
@@ -183,13 +184,13 @@ enum class DownloadPriority {
   kLow,
 };
 
-// Owns one application's continuous download stream. The worker is necessary
-// because a pageable HIP copy may block its caller; it shares the existing
-// primary context and never creates another native driver or device.
-class BackgroundDownload {
+// Owns an application's download resources. Caller-staged downloads overlap
+// two registered windows while copying their completed contents on the caller.
+// The optional background thread shares the existing primary context.
+class DownloadWorkload {
  public:
-  BackgroundDownload(HipRuntime& runtime, size_t length, DownloadMode mode,
-                     int priority)
+  DownloadWorkload(HipRuntime& runtime, size_t length, DownloadMode mode,
+                   int priority)
       : runtime_(runtime),
         length_(length),
         allocation_length_(((length + 4095) & ~size_t{4095}) + 4096),
@@ -206,21 +207,37 @@ class BackgroundDownload {
       HipRuntime::Check(
           runtime_.Resolve<decltype(&hipHostRegister)>("hipHostRegister")(
               target_, allocation_length_, hipHostRegisterDefault));
+    } else if (mode_ == DownloadMode::kCallerStaged) {
+      staging_ = static_cast<uint8_t*>(
+          std::aligned_alloc(4096, 2 * kStagingWindowLength));
+      Require(staging_ != nullptr, "download staging allocation failed");
+      HipRuntime::Check(
+          runtime_.Resolve<decltype(&hipHostRegister)>("hipHostRegister")(
+              staging_, 2 * kStagingWindowLength, hipHostRegisterDefault));
     }
     HipRuntime::Check(
         runtime_.Resolve<decltype(&hipMalloc)>("hipMalloc")(&source_, length_));
-    HipRuntime::Check(runtime_.Resolve<decltype(&hipStreamCreateWithPriority)>(
-        "hipStreamCreateWithPriority")(&stream_, hipStreamNonBlocking,
-                                       priority));
-    HipRuntime::Check(runtime_.Resolve<decltype(&hipMemsetAsync)>(
-        "hipMemsetAsync")(source_, kPayload, length_, stream_));
-    HipRuntime::Check(synchronize_(stream_));
+    const size_t stream_count = staging_ ? 2 : 1;
+    for (size_t i = 0; i < stream_count; ++i) {
+      HipRuntime::Check(
+          runtime_.Resolve<decltype(&hipStreamCreateWithPriority)>(
+              "hipStreamCreateWithPriority")(&streams_[i], hipStreamNonBlocking,
+                                             priority));
+    }
+    auto fill = runtime_.Resolve<decltype(&hipMemsetAsync)>("hipMemsetAsync");
+    for (size_t offset = 0; offset < length_; offset += kStagingWindowLength) {
+      HipRuntime::Check(
+          fill(static_cast<uint8_t*>(source_) + offset, Payload(offset),
+               std::min(kStagingWindowLength, length_ - offset), streams_[0]));
+    }
+    HipRuntime::Check(synchronize_(streams_[0]));
+  }
+
+  void Start() {
     worker_ = std::thread([this] {
       HipRuntime::Check(set_device_(runtime_.device()));
       do {
-        HipRuntime::Check(
-            copy_(target_, source_, length_, hipMemcpyDeviceToHost, stream_));
-        HipRuntime::Check(synchronize_(stream_));
+        Run();
         if (completed_.fetch_add(1, std::memory_order_release) == 0) {
           completed_.notify_one();
         }
@@ -231,26 +248,70 @@ class BackgroundDownload {
     completed_.wait(0, std::memory_order_acquire);
   }
 
-  ~BackgroundDownload() {
+  ~DownloadWorkload() {
     Stop();
-    Require(std::all_of(target_, target_ + length_,
-                        [](uint8_t value) { return value == kPayload; }),
-            "background download payload mismatch");
+    for (size_t offset = 0; offset < length_; offset += kStagingWindowLength) {
+      const size_t count = std::min(kStagingWindowLength, length_ - offset);
+      const uint8_t payload = Payload(offset);
+      Require(
+          std::all_of(target_ + offset, target_ + offset + count,
+                      [payload](uint8_t value) { return value == payload; }),
+          "background download payload mismatch");
+    }
     Require(std::all_of(target_ + length_, target_ + allocation_length_,
                         [](uint8_t value) { return value == kGuard; }),
             "background download overwrote its guard");
-    HipRuntime::Check(runtime_.Resolve<decltype(&hipStreamDestroy)>(
-        "hipStreamDestroy")(stream_));
+    for (hipStream_t stream : streams_) {
+      if (stream) {
+        HipRuntime::Check(runtime_.Resolve<decltype(&hipStreamDestroy)>(
+            "hipStreamDestroy")(stream));
+      }
+    }
     HipRuntime::Check(runtime_.Resolve<decltype(&hipFree)>("hipFree")(source_));
     if (mode_ == DownloadMode::kRegistered) {
       HipRuntime::Check(runtime_.Resolve<decltype(&hipHostUnregister)>(
           "hipHostUnregister")(target_));
     }
+    if (staging_) {
+      HipRuntime::Check(runtime_.Resolve<decltype(&hipHostUnregister)>(
+          "hipHostUnregister")(staging_));
+      std::free(staging_);
+    }
     std::free(target_);
   }
 
-  BackgroundDownload(const BackgroundDownload&) = delete;
-  BackgroundDownload& operator=(const BackgroundDownload&) = delete;
+  DownloadWorkload(const DownloadWorkload&) = delete;
+  DownloadWorkload& operator=(const DownloadWorkload&) = delete;
+
+  void Run() {
+    if (!staging_) {
+      HipRuntime::Check(
+          copy_(target_, source_, length_, hipMemcpyDeviceToHost, streams_[0]));
+      HipRuntime::Check(synchronize_(streams_[0]));
+      return;
+    }
+    const auto enqueue = [&](size_t slot, size_t offset) {
+      HipRuntime::Check(copy_(staging_ + slot * kStagingWindowLength,
+                              static_cast<uint8_t*>(source_) + offset,
+                              std::min(kStagingWindowLength, length_ - offset),
+                              hipMemcpyDeviceToHost, streams_[slot]));
+    };
+    enqueue(0, 0);
+    if (length_ > kStagingWindowLength) {
+      enqueue(1, kStagingWindowLength);
+    }
+    size_t slot = 0;
+    for (size_t offset = 0; offset < length_; offset += kStagingWindowLength) {
+      HipRuntime::Check(synchronize_(streams_[slot]));
+      std::memcpy(target_ + offset, staging_ + slot * kStagingWindowLength,
+                  std::min(kStagingWindowLength, length_ - offset));
+      const size_t next_offset = offset + 2 * kStagingWindowLength;
+      if (next_offset < length_) {
+        enqueue(slot, next_offset);
+      }
+      slot ^= 1;
+    }
+  }
 
   void Stop() {
     stop_.store(true, std::memory_order_relaxed);
@@ -264,8 +325,13 @@ class BackgroundDownload {
   }
 
  private:
+  static constexpr size_t kStagingWindowLength = 512 * 1024;
   static constexpr uint8_t kPayload = 0xA5;
   static constexpr uint8_t kGuard = 0x3C;
+
+  static uint8_t Payload(size_t offset) {
+    return kPayload ^ static_cast<uint8_t>(offset / kStagingWindowLength);
+  }
 
   // Borrowed process runtime, alive until after the application thread joins.
   HipRuntime& runtime_;
@@ -279,8 +345,10 @@ class BackgroundDownload {
   hipDeviceptr_t source_ = nullptr;
   // CPU-owned destination retained through completion and unregistration.
   uint8_t* target_ = nullptr;
-  // Independent nonblocking stream, joined before destruction.
-  hipStream_t stream_ = nullptr;
+  // Registered bounded storage, reused only after GPU and CPU consumers finish.
+  uint8_t* staging_ = nullptr;
+  // Logical nonblocking streams; staged copies overlap one window per stream.
+  hipStream_t streams_[2] = {};
   // Cached copy entry point called by the background application thread.
   decltype(&hipMemcpyAsync) copy_ = nullptr;
   // Cached completion entry point for the background stream.
@@ -318,10 +386,11 @@ void DispatchDuringDownload(
   runtime.VerifyOutput();
   runtime.ResetOutput();
   const size_t length = state.range(0);
-  std::unique_ptr<BackgroundDownload> background;
+  std::unique_ptr<DownloadWorkload> background;
   if (mode != DownloadMode::kIdle) {
-    background = std::make_unique<BackgroundDownload>(runtime, length, mode,
-                                                      copy_priority);
+    background = std::make_unique<DownloadWorkload>(runtime, length, mode,
+                                                    copy_priority);
+    background->Start();
   }
   const uint64_t first = background ? background->completed() : 0;
   const auto start = std::chrono::steady_clock::now();
@@ -342,6 +411,20 @@ void DispatchDuringDownload(
   state.counters["download_bytes_per_second"] =
       static_cast<double>(count) * length /
       std::chrono::duration<double>(finish - start).count();
+}
+
+// Measures the complete download with the same resources and ownership as the
+// concurrent rows, without a competing dispatch or background application.
+void DownloadSerial(benchmark::State& state, DownloadMode mode) {
+  auto& runtime = Runtime();
+  const size_t length = state.range(0);
+  DownloadWorkload download(runtime, length, mode, /*priority=*/0);
+  download.Run();
+  for (auto _ : state) {
+    download.Run();
+  }
+  state.SetLabel(runtime.label());
+  state.SetBytesProcessed(state.iterations() * length);
 }
 
 // Owns the public capture and executable until every measured replay completes.
@@ -529,6 +612,12 @@ BENCHMARK_CAPTURE(DispatchDuringDownload, Registered, DownloadMode::kRegistered)
     ->Arg(64 * 1024 * 1024)
     ->MeasureProcessCPUTime()
     ->UseRealTime();
+BENCHMARK_CAPTURE(DispatchDuringDownload, CallerStaged,
+                  DownloadMode::kCallerStaged)
+    ->Name("HIP/ConcurrentDownload/CallerStaged")
+    ->Arg(64 * 1024 * 1024)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
 BENCHMARK_CAPTURE(DispatchDuringDownload, PageableLowPriority,
                   DownloadMode::kPageable, DownloadPriority::kLow)
     ->Name("HIP/ConcurrentDownload/PageableLowPriority")
@@ -538,6 +627,28 @@ BENCHMARK_CAPTURE(DispatchDuringDownload, PageableLowPriority,
 BENCHMARK_CAPTURE(DispatchDuringDownload, RegisteredLowPriority,
                   DownloadMode::kRegistered, DownloadPriority::kLow)
     ->Name("HIP/ConcurrentDownload/RegisteredLowPriority")
+    ->Arg(64 * 1024 * 1024)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+
+BENCHMARK_CAPTURE(DownloadSerial, Pageable, DownloadMode::kPageable)
+    ->Name("HIP/SerialDownload/Pageable")
+    ->Arg(4096)
+    ->Arg(1024 * 1024 + 123)
+    ->Arg(64 * 1024 * 1024)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+BENCHMARK_CAPTURE(DownloadSerial, Registered, DownloadMode::kRegistered)
+    ->Name("HIP/SerialDownload/Registered")
+    ->Arg(4096)
+    ->Arg(1024 * 1024 + 123)
+    ->Arg(64 * 1024 * 1024)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+BENCHMARK_CAPTURE(DownloadSerial, CallerStaged, DownloadMode::kCallerStaged)
+    ->Name("HIP/SerialDownload/CallerStaged")
+    ->Arg(4096)
+    ->Arg(1024 * 1024 + 123)
     ->Arg(64 * 1024 * 1024)
     ->MeasureProcessCPUTime()
     ->UseRealTime();
