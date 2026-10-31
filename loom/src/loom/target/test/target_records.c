@@ -19,6 +19,7 @@ static const loom_target_snapshot_t kTestLowSnapshot = {
     .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,
     .default_pointer_bitwidth = 64,
     .index_bitwidth = 64,
+    .maximum_index_bitwidth = 64,
     .offset_bitwidth = 64,
     .memory_spaces =
         {
@@ -38,6 +39,7 @@ static const loom_target_snapshot_t kTestQuirkySnapshot = {
     .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,
     .default_pointer_bitwidth = 64,
     .index_bitwidth = 32,
+    .maximum_index_bitwidth = 32,
     .offset_bitwidth = 64,
     .subgroup_size = 7,
     .memory_spaces =

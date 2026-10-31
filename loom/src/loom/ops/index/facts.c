@@ -436,9 +436,10 @@ iree_status_t loom_index_cmp_facts(loom_fact_context_t* context,
          loom_index_cmp_same_value_result(predicate, &result)) ||
         (loom_index_cast_scalar_type(module, loom_index_cmp_lhs(op),
                                      &operand_scalar_type) &&
-         loom_index_cmp_result_from_facts(context, operand_scalar_type,
-                                          predicate, &operand_facts[0],
-                                          &operand_facts[1], &result))) {
+         loom_index_cmp_result_from_value_facts(
+             context, module, operand_scalar_type, predicate,
+             loom_index_cmp_lhs(op), &operand_facts[0], loom_index_cmp_rhs(op),
+             &operand_facts[1], &result))) {
       result_facts[0] = loom_value_facts_exact_i64(result ? 1 : 0);
       return iree_ok_status();
     }

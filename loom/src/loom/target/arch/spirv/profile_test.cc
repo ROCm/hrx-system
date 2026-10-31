@@ -150,6 +150,7 @@ TEST(SpirvTargetProfileTest, PreservesExplicitZeroAndPresetValues) {
   EXPECT_EQ(facts->explicit_fields, explicit_fields);
   EXPECT_EQ(facts->storage.export_plan.linkage, LOOM_TARGET_LINKAGE_DEFAULT);
   EXPECT_EQ(facts->storage.snapshot.index_bitwidth, 32u);
+  EXPECT_EQ(facts->storage.snapshot.maximum_index_bitwidth, 32u);
   EXPECT_FALSE(loom_target_facts_field_is_explicit(
       facts, LOOM_TARGET_FACT_FIELD_DEFAULT_POINTER_BITWIDTH));
   const auto* spirv_facts = loom_spirv_target_facts_cast(facts);
@@ -297,6 +298,22 @@ TEST(SpirvTargetProfileTest, WidthDoesNotSatisfyDensePartitionRequirement) {
   EXPECT_FALSE(loom_target_snapshot_satisfies_specialization_requirement(
       &available, &required));
   required.subgroup_partition = LOOM_TARGET_SUBGROUP_PARTITION_UNSPECIFIED;
+  EXPECT_TRUE(loom_target_snapshot_satisfies_specialization_requirement(
+      &available, &required));
+}
+
+TEST(SpirvTargetProfileTest, IndexCarrierCapabilityMustMatch) {
+  loom_target_snapshot_t available =
+      *loom_spirv_low_target_bundle_vulkan1_3.snapshot;
+  loom_target_snapshot_t required = available;
+  EXPECT_TRUE(loom_target_snapshot_satisfies_specialization_requirement(
+      &available, &required));
+
+  required.maximum_index_bitwidth = 64;
+  EXPECT_FALSE(loom_target_snapshot_satisfies_specialization_requirement(
+      &available, &required));
+
+  available.maximum_index_bitwidth = 64;
   EXPECT_TRUE(loom_target_snapshot_satisfies_specialization_requirement(
       &available, &required));
 }

@@ -23,6 +23,7 @@ static const loom_target_snapshot_t kAie2pCoreSnapshot = {
     .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,
     .default_pointer_bitwidth = 32,
     .index_bitwidth = 32,
+    .maximum_index_bitwidth = 32,
     .offset_bitwidth = 32,
     .memory_spaces =
         {
@@ -66,6 +67,7 @@ static const loom_target_snapshot_t kAie2pArraySnapshot = {
     .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,
     .default_pointer_bitwidth = 32,
     .index_bitwidth = 32,
+    .maximum_index_bitwidth = 32,
     .offset_bitwidth = 32,
     .memory_spaces =
         {

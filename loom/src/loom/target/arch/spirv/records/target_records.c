@@ -22,6 +22,7 @@ static const loom_target_snapshot_t kSpirvVulkan13Snapshot = {
     .subgroup_partition = LOOM_TARGET_SUBGROUP_PARTITION_WORKGROUP_X_ALIGNED,
     .default_pointer_bitwidth = 64,
     .index_bitwidth = 32,
+    .maximum_index_bitwidth = 32,
     .offset_bitwidth = 64,
     .memory_spaces =
         {
@@ -42,6 +43,7 @@ static const loom_target_snapshot_t kSpirvVulkan13Subgroup32Snapshot = {
     .subgroup_partition = LOOM_TARGET_SUBGROUP_PARTITION_WORKGROUP_X_ALIGNED,
     .default_pointer_bitwidth = 64,
     .index_bitwidth = 32,
+    .maximum_index_bitwidth = 32,
     .offset_bitwidth = 64,
     .subgroup_size = 32,
     .memory_spaces =
