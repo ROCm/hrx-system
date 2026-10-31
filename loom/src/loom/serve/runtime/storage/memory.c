@@ -545,7 +545,12 @@ loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
 static void loom_serve_memory_pool_trim_cache(
     loom_serve_memory_pool_t* pool, uint64_t target_bytes,
     loom_serve_memory_demand_t additional) {
-  uint64_t projected = loom_serve_memory_pool_projected_bytes(pool, additional);
+  // Native disposal remains charged for admission, but its selected bytes
+  // already satisfy this much eviction. Retries must not replace those pending
+  // returns with additional idle slabs while the native worker retires them.
+  uint64_t projected =
+      loom_serve_memory_pool_projected_bytes(pool, additional) -
+      pool->retiring_bytes;
   for (iree_host_size_t i = 0;
        i < LOOM_SERVE_MEMORY_CLASS_COUNT && projected > target_bytes; ++i) {
     if (!pool->classes[i].cache) {

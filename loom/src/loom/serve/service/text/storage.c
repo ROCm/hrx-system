@@ -214,6 +214,13 @@ iree_status_t loom_serve_text_storage_initialize(
   return iree_ok_status();
 }
 
+typedef struct loom_serve_text_storage_block_run_t {
+  // First physical page in this logical-order run.
+  uint32_t first;
+  // Number of consecutive physical pages.
+  uint32_t count;
+} loom_serve_text_storage_block_run_t;
+
 iree_status_t loom_serve_text_storage_plan_snapshot(
     const loom_serve_text_storage_t* storage, iree_host_size_t carry_index,
     iree_hal_buffer_t* const* private_views, bool include_carry,
@@ -223,18 +230,40 @@ iree_status_t loom_serve_text_storage_plan_snapshot(
   *out_count = 0;
   *out_ranges = NULL;
   include_carry &= storage->carry_stride != 0;
+  uint32_t run_count = block_count ? 1 : 0;
+  for (uint32_t i = 1; i < block_count; ++i) {
+    run_count += (uint64_t)blocks[i - 1] + 1 != blocks[i];
+  }
   iree_host_size_t capacity = 5 + (include_carry ? 1 : 0);
   for (iree_host_size_t r = 0; r < storage->region_count; ++r) {
-    if (block_count && storage->regions[r].blocks.count >
-                           (IREE_HOST_SIZE_MAX - capacity) / block_count) {
+    if (run_count && storage->regions[r].blocks.count >
+                         (IREE_HOST_SIZE_MAX - capacity) / run_count) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "snapshot transfer plan exceeds host size");
     }
-    capacity += storage->regions[r].blocks.count * block_count;
+    capacity += storage->regions[r].blocks.count * run_count;
   }
+  // All planes consume the same ordered runs. Keep their construction scratch
+  // in the plan allocation instead of rediscovering adjacency for each plane.
+  iree_host_size_t allocation_size = 0, runs_offset = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      0, &allocation_size,
+      IREE_STRUCT_FIELD(capacity, loom_serve_snapshot_range_t, NULL),
+      IREE_STRUCT_FIELD(run_count, loom_serve_text_storage_block_run_t,
+                        &runs_offset)));
   loom_serve_snapshot_range_t* ranges = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      host_allocator, capacity, sizeof(*ranges), (void**)&ranges));
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, allocation_size, (void**)&ranges));
+  loom_serve_text_storage_block_run_t* runs =
+      (loom_serve_text_storage_block_run_t*)((uint8_t*)ranges + runs_offset);
+  uint32_t run_index = 0;
+  for (uint32_t i = 0; i < block_count; ++i) {
+    if (!i || (uint64_t)blocks[i - 1] + 1 != blocks[i]) {
+      runs[run_index++] = (loom_serve_text_storage_block_run_t){blocks[i], 1};
+    } else {
+      ++runs[run_index - 1].count;
+    }
+  }
   iree_host_size_t count = 0;
   for (iree_host_size_t i = 0; i < 5; ++i) {
     if (private_views[i]) {
@@ -250,12 +279,12 @@ iree_status_t loom_serve_text_storage_plan_snapshot(
   for (iree_host_size_t r = 0; r < storage->region_count; ++r) {
     const loom_serve_text_cache_region_t* region = &storage->regions[r];
     for (iree_host_size_t plane = 0; plane < region->blocks.count; ++plane) {
-      for (uint32_t block = 0; block < block_count; ++block) {
+      for (uint32_t run = 0; run < run_count; ++run) {
         ranges[count++] = (loom_serve_snapshot_range_t){
             region->allocation,
             region->blocks.origin + plane * region->blocks.stride +
-                blocks[block] * region->blocks.block_bytes,
-            region->blocks.block_bytes};
+                runs[run].first * region->blocks.block_bytes,
+            runs[run].count * region->blocks.block_bytes};
       }
     }
   }
