@@ -1,47 +1,109 @@
-# HRX CTS (Conformance Test Suite)
+# HRX Conformance Test Suite
 
-## Test Coverage
+The CTS exercises the public HRX library and HIP frontend through their shared
+library entry points. HRX tests use the Catch2 harness in `core/`; HIP tests load
+the exact built frontend DSO and use GoogleTest. Kernel fixtures are compiled for
+the AMD GPU targets enabled in the build and selected against the actual device.
 
-### Tested
+## Coverage
 
-| Category | Test file | What's tested |
-|----------|-----------|---------------|
-| `lifecycle` | lifecycle_test.cpp | GPU/CPU init/shutdown, version query, double-init error |
-| `status` | status_test.cpp | Status creation, codes, string conversion, ignore |
-| `device` | device_test.cpp | Property queries (name, arch, total_memory, compute_units, warp_size, max_shared_memory, clock_rate, pci_bus_id), device type, synchronize |
-| `allocator` | allocator_test.cpp | device_allocator() borrowed ref, allocate_buffer with params, import_buffer from host ptr, retain/release |
-| `memory` | memory_test.cpp | Stream-ordered buffer_allocate, map/unmap, read-back, zero-size rejection, buffer_get_size |
-| `transfer` | transfer_test.cpp | synchronous and stream-ordered H2D/D2H transfers, command-buffer ordering, out-of-range rejection |
-| `semaphore` | semaphore_test.cpp | Create, query, signal, wait, retain/release |
-| `stream` | stream_test.cpp | Create, flush, synchronize, query, get_semaphore, timeline position, wait_on |
-| `stream_ops` | stream_ops_test.cpp | fill_buffer, copy_buffer, update_buffer with verification |
-| `refcount` | refcount_test.cpp | Retain/release on device, semaphore, stream, buffer |
-| `virtual_memory` | virtual_memory_test.cpp | Scope-qualified capabilities, batched aliases of ordinary backing, permission updates, exact transfer output, unsupported construction |
-| `legacy_virtual_memory` / `legacy_virtual_memory_gpu` | legacy_virtual_memory_test.cpp | Scalar ABI support, native ROCr reservation/physical-handle lifecycle, scoped permissions and transfer output; CPU unsupported behavior |
+| Surface | Tests | Behavior exercised |
+|---------|-------|--------------------|
+| Runtime and devices | `lifecycle`, `status`, `device` | Initialization, shutdown, status ownership, device properties, and synchronization |
+| Allocation and ownership | `allocator`, `host_allocator`, `memory`, `refcount` | Borrowed allocators, host imports, stream-ordered allocation, mapping, and retain/release |
+| Queues and streams | `queue_ops`, `stream`, `stream_ops`, `semaphore` | Host calls, fills, copies, updates, execution barriers, timeline signals, and completion |
+| Transfers | `transfer` | Host/device copies, stream ordering, numerical output, and range rejection |
+| Executables | `executable` | Loading configured HSACO, function lookup, dispatch, and exact output |
+| Virtual memory | `virtual_memory`, `virtual_memory_gpu` | Scope-qualified capabilities, batched mapping, aliases, permissions, and backing ownership |
+| Legacy virtual memory ABI | `legacy_virtual_memory`, `legacy_virtual_memory_gpu` | Scalar reservation/physical-handle operations and explicit unsupported behavior on CPU |
+| C++ bindings | `cxx_api` | Public C++ wrapper ownership and calls |
+| HIP devices | `hip/device_selection_test.cpp`, `hip/occupancy_test.cpp` | Compatibility visibility, selected device identity, and launch occupancy |
+| HIP modules and graphs | `hip/module_execution_test.cpp`, `hip/module_library_execution_test.cpp` | Module/library ownership, arguments, globals, captured execution, and dependencies |
+| HIP progress | `hip/stream_progress_test.cpp` | Consumer completion after ordinary producer operations, without a later producer flush |
+| HIP events | `hip/event_test.cpp`, `hip/event_timing_test.cpp` | Event ownership, stream ordering, native timestamps, and elapsed-time queries |
+| HIP profiling | `hip/profile_test.cpp` | A finalized dispatch capture containing direct and graph dispatches with valid timestamps and no dropped records |
 
-### Not Yet Tested (needs kernels or infrastructure)
+Additional public HIP API tests live beside the adapter under
+[`src/binding/hip`](../src/binding/hip/BUILD.bazel), including arrays, registered
+memory, graph mutation and ownership, memory pools, virtual memory, cooperative
+launches, execution resources, and stream-value operations. The common adapter's
+CPU tests exercise the same graph and stream machinery through the task HAL.
 
-| Category | Why |
-|----------|-----|
-| `queue_dispatch` / `stream_dispatch` | Needs a compiled HAL executable binary |
-| `executable_load` / `export_count` / `export_info` | Needs kernel binary to load |
-| `executable_lookup_global` | Needs executable with global variables |
-| `queue_host_call` | Needs dispatch ordering infrastructure |
-| `stream_execution_barrier` | Not yet implemented in libhrx |
-| `multithread` | Concurrent stream/semaphore stress tests |
-| `multidevice` | Cross-device copy, cross-device semaphore (needs multi-GPU) |
-| `fork` | fork() safety for DataLoader scenarios |
+Coverage depends on the selected backend and its reported capabilities. A skipped
+case does not qualify that feature. Multi-device cases require multiple visible
+compatible GPUs; a single-device run cannot establish their behavior. Fork safety
+after runtime initialization has no CTS witness. Kernel-initiated HIP
+hostcall/printf is not implemented by the native GPU HAL; its explicit tests are
+separate from ordinary dispatch qualification.
 
-### Running
+## Selecting the runtime and device
+
+HRX tests default to `cpu:0`. `HRX_CTS_DEVICE=gpu:0` selects a GPU for the shared
+HRX harness; `--hrx-device` overrides it. HIP tests select GPUs through the HIP
+frontend and do not use `HRX_CTS_DEVICE`.
+
+`HRX_GPU_DRIVER` selects the GPU implementation for either API:
+
+| Value | Implementation |
+|-------|----------------|
+| `amdgpu` | Native AMD GPU HAL, with RDNA and CDNA enumeration |
+| `rdna` / `cdna` | Native AMD GPU HAL, restricted to that architecture family |
+| `legacy-amdgpu` | Legacy ROCr-based HAL; currently the HRX default |
+
+The requested driver must be compiled into the library. Backend selection is
+explicit in comparisons so that a default change cannot silently change the
+measured implementation. Compatibility visibility variables are processed before
+the frontend creates its device group.
+
+Bazel targets supply `--hrx-library` or `HRX_TEST_LIBAMDHIP64` for the exact library
+under test. A manually staged HIP executable needs `HRX_TEST_LIBAMDHIP64` set to
+that same build's frontend DSO; an ambient system HIP library is a different
+implementation.
+
+## Running focused checks
+
+From a configured repository root:
 
 ```bash
-# Build with CTS enabled
-cmake -S . -B build/hrx-runtime ... -DLIBHRX_BUILD_CTS=ON -DBUILD_TESTING=ON
+# Public HRX allocation and stream behavior on CPU.
+iree-bazel-test --config=asan --test_env=HRX_CTS_DEVICE=cpu:0 \
+  //libhrx/cts/tests/allocator:hrx_cts_allocator \
+  //libhrx/cts/tests/stream_ops:hrx_cts_stream_ops
 
-# Run all CTS tests
-ctest --test-dir build/hrx-runtime --output-on-failure
+# The same public HRX paths on the native AMD GPU HAL.
+iree-bazel-test --config=asan --test_env=HRX_CTS_DEVICE=gpu:0 \
+  --test_env=HRX_GPU_DRIVER=amdgpu \
+  //libhrx/cts/tests/allocator:hrx_cts_allocator \
+  //libhrx/cts/tests/stream_ops:hrx_cts_stream_ops \
+  //libhrx/cts/tests/executable:hrx_cts_executable
 
-# Run a specific category
-build/hrx-runtime/cts/tests/allocator/hrx_cts_allocator
-build/hrx-runtime/cts/tests/transfer/hrx_cts_transfer
+# Public HIP dispatch, independent stream progress, and dispatch capture.
+iree-bazel-test --config=asan --test_env=HRX_GPU_DRIVER=amdgpu \
+  //libhrx/cts/tests/hip:hip_module_execution_test \
+  //libhrx/cts/tests/hip:hip_stream_progress_test \
+  //libhrx/cts/tests/hip:hip_profile_test
 ```
+
+GPU targets declare their hardware requirements and need a compatible runner.
+The HIP DSO CTS targets currently select Linux; portable adapter tests and public
+HRX tests also cover Windows. With CMake, `LIBHRX_BUILD_CTS=ON` includes the CTS
+in the configured build, and CTest discovers its tests.
+
+## Submission measurements
+
+`//libhrx/cts/tests/hip:hip_dispatch_benchmark` measures public HIP direct launches
+and captured graphs with a reused runtime, module, and stream. Its output labels
+identify the selected driver, architecture, PCI device, and wait policy.
+
+`Enqueue` excludes the completion wait; `EndToEnd` includes it. `EventInterval`
+reports GPU timestamps around a graph, with encompassing host time in `host_ns`.
+The zero-dispatch interval measures the event pair itself. These intervals include
+timestamp-operation overhead and are distinct from ordinary completion latency.
+Every nonempty row checks actual kernel output.
+
+Performance runs use the canonical `--config=opt` build on a qualified, exclusive
+runner. Fixed iteration counts and repetitions bound hidden completion work in
+enqueue-only rows. `--hip_wait_mode=auto|spin|yield|blocking` selects the public HIP
+scheduling policy; matching this policy, device identity, CPU locality, and power
+settings is necessary when comparing backends. ASAN runs qualify correctness,
+not performance.
