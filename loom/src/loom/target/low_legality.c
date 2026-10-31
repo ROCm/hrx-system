@@ -670,6 +670,20 @@ static iree_status_t loom_target_low_legality_verify_op_index_carriers(
       64) {
     return iree_ok_status();
   }
+  // Structured results forward values materialized inside their regions. The
+  // preorder legality walk must visit those producers before diagnosing the
+  // aggregate: a target-owned producer diagnostic is more precise, and
+  // rejecting the parent would skip its children. Every unsupported carrier
+  // still originates at a checked producer or function boundary.
+  switch (op->kind) {
+    case LOOM_OP_SCF_IF:
+    case LOOM_OP_SCF_FOR:
+    case LOOM_OP_SCF_WHILE:
+    case LOOM_OP_SCF_SWITCH:
+      return iree_ok_status();
+    default:
+      break;
+  }
   const loom_value_id_t* results = loom_op_const_results(op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_target_low_legality_verify_index_value_carrier(
