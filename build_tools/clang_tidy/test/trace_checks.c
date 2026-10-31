@@ -247,6 +247,64 @@ int iree_clang_tidy_trace_zone_infinite_loop_return_balanced(void) {
   }
 }
 
+iree_status_t iree_clang_tidy_trace_zone_switch_local_balanced(int selector) {
+  switch (selector) {
+    case 0: {
+      IREE_TRACE_ZONE_BEGIN(switch_local_balanced_zone);
+      iree_status_t status = iree_clang_tidy_trace_status_source();
+      IREE_TRACE_ZONE_END(switch_local_balanced_zone);
+      IREE_RETURN_IF_ERROR(status);
+      break;
+    }
+    case 1:
+    case 2: {
+      IREE_TRACE_ZONE_BEGIN(switch_local_balanced_zone);
+      IREE_TRACE_ZONE_END(switch_local_balanced_zone);
+      IREE_RETURN_IF_ERROR(iree_clang_tidy_trace_status_source());
+      break;
+    }
+    default: {
+      IREE_TRACE_ZONE_BEGIN(switch_local_balanced_zone);
+      IREE_TRACE_ZONE_END(switch_local_balanced_zone);
+      break;
+    }
+  }
+  return IREE_STATUS_OK;
+}
+
+iree_status_t iree_clang_tidy_trace_zone_switch_local_unbalanced(int selector) {
+  switch (selector) {
+    case 0: {
+      IREE_TRACE_ZONE_BEGIN(switch_local_return_zone);
+      IREE_RETURN_IF_ERROR(iree_clang_tidy_trace_status_source());
+      IREE_TRACE_ZONE_END(switch_local_return_zone);
+      break;
+    }
+    default:
+      break;
+  }
+  return IREE_STATUS_OK;
+}
+
+iree_status_t iree_clang_tidy_trace_zone_do_local_balanced(int repeat) {
+  do {
+    IREE_TRACE_ZONE_BEGIN(do_local_balanced_zone);
+    iree_status_t status = iree_clang_tidy_trace_status_source();
+    IREE_TRACE_ZONE_END(do_local_balanced_zone);
+    IREE_RETURN_IF_ERROR(status);
+  } while (repeat);
+  return IREE_STATUS_OK;
+}
+
+iree_status_t iree_clang_tidy_trace_zone_do_local_unbalanced(int repeat) {
+  do {
+    IREE_TRACE_ZONE_BEGIN(do_local_return_zone);
+    IREE_RETURN_IF_ERROR(iree_clang_tidy_trace_status_source());
+    IREE_TRACE_ZONE_END(do_local_return_zone);
+  } while (repeat);
+  return IREE_STATUS_OK;
+}
+
 iree_status_t iree_clang_tidy_trace_zone_return_and_end(void) {
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_RETURN_AND_END_ZONE(z0, iree_clang_tidy_trace_status_source());
