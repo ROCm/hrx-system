@@ -233,9 +233,12 @@ static iree_status_t loom_serve_input_module_start(
       output, 0, iree_vm_buffer_length(output), &storage);
   iree_host_size_t count = 0;
   if (iree_status_is_ok(status) && capacity) {
+    IREE_TRACE_ZONE_BEGIN_NAMED(z_encode, "loom_serve_input_encode_prefix");
+    IREE_TRACE_ZONE_APPEND_VALUE_I64(z_encode, text.size);
     status = loom_serve_input_encode_prefix(
         module->tokenizer, text, flags, (iree_host_size_t)capacity,
         module->host_allocator, (int32_t*)storage.data, &count);
+    IREE_TRACE_ZONE_END(z_encode);
   }
   if (iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < count; ++i) {

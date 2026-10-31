@@ -924,21 +924,25 @@ iree_status_t loom_serve_text_chat_prepare_input(
     int32_t* out_tokens, iree_host_size_t* out_count,
     loom_serve_text_media_span_t** out_media_spans,
     iree_host_size_t* out_media_span_count) {
+  IREE_TRACE_ZONE_BEGIN(z0);
   *out_count = 0;
   *out_media_spans = NULL;
   *out_media_span_count = 0;
   const loom_serve_text_chat_policy_t* policy = chat->policy;
   const iree_string_view_t prompt = iree_string_builder_view(&chat->prompt);
   if (prompt_offset > prompt.size) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "input begins beyond the rendered prompt");
+    IREE_RETURN_AND_END_ZONE(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "input begins beyond the rendered prompt"));
   }
   const iree_string_view_t text =
       iree_string_view_substr(prompt, prompt_offset, IREE_HOST_SIZE_MAX);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, text.size);
   iree_vm_buffer_t* media_plan = NULL;
   iree_host_size_t marker_count = 0;
-  IREE_RETURN_IF_ERROR(loom_serve_text_media_build_input_plan(
-      chat, prompt_offset, host_allocator, &media_plan, &marker_count));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, loom_serve_text_media_build_input_plan(
+              chat, prompt_offset, host_allocator, &media_plan, &marker_count));
   iree_vm_buffer_t* input = NULL;
   iree_status_t status = iree_vm_buffer_wrap(
       IREE_VM_BUFFER_ACCESS_FLAG_READ,
@@ -1008,7 +1012,7 @@ iree_status_t loom_serve_text_chat_prepare_input(
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
   iree_vm_buffer_release(media_plan);
-  return status;
+  IREE_RETURN_AND_END_ZONE(z0, status);
 }
 
 // Function records have the same decoded name/argument semantics in client
@@ -1345,6 +1349,8 @@ iree_status_t loom_serve_text_chat_initialize(
     iree_string_view_t body, uint64_t request_id,
     iree_host_size_t default_max_tokens, iree_allocator_t host_allocator,
     loom_serve_text_chat_t* out_chat) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, body.size);
   memset(out_chat, 0, sizeof(*out_chat));
   out_chat->policy = policy;
   out_chat->max_tokens = default_max_tokens;
@@ -1363,9 +1369,14 @@ iree_status_t loom_serve_text_chat_initialize(
   iree_string_builder_initialize(host_allocator, &history.arguments);
   iree_string_builder_initialize(host_allocator, &history.reasoning);
   iree_string_builder_initialize(host_allocator, &history.calls);
+  IREE_TRACE_ZONE_BEGIN_NAMED(z_render, "loom_serve_text_chat_request_render");
   iree_status_t status = loom_serve_text_chat_request_render(body, &history);
+  IREE_TRACE_ZONE_END(z_render);
   if (iree_status_is_ok(status)) {
+    IREE_TRACE_ZONE_BEGIN_NAMED(z_options,
+                                "loom_serve_text_chat_resolve_options");
     status = loom_serve_text_chat_resolve_options(out_chat, body, request_id);
+    IREE_TRACE_ZONE_END(z_options);
   }
   iree_string_builder_deinitialize(&history.calls);
   iree_string_builder_deinitialize(&history.reasoning);
@@ -1377,7 +1388,7 @@ iree_status_t loom_serve_text_chat_initialize(
   if (!iree_status_is_ok(status)) {
     loom_serve_text_chat_deinitialize(out_chat);
   }
-  return status;
+  IREE_RETURN_AND_END_ZONE(z0, status);
 }
 
 void loom_serve_text_chat_deinitialize(loom_serve_text_chat_t* chat) {
