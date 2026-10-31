@@ -4,12 +4,13 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Rewrites CMake-generated MSVC linker response files."""
+"""Launches native linkers with line-wrapped MSVC response files."""
 
 from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -68,11 +69,33 @@ def rewrap_response_file(path: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Rewraps an MSVC response file to one argument per line."
+        description="Launches a native linker with line-wrapped response files.",
+        usage="%(prog)s [launcher ...] --iree-native-linker linker [arguments ...]",
     )
-    parser.add_argument("response_file", type=Path)
-    args = parser.parse_args()
-    rewrap_response_file(args.response_file)
+    command = sys.argv[1:]
+    if command == ["--help"]:
+        parser.print_help()
+        return
+    # CMake appends this boundary after the parent's evaluated arguments.
+    # The parent may itself use this spelling; the final marker is ours.
+    try:
+        boundary = len(command) - 1 - command[::-1].index("--iree-native-linker")
+    except ValueError:
+        parser.error("the native linker boundary is required")
+    del command[boundary]
+    if boundary == len(command):
+        parser.error("a native linker command is required")
+    # Parent launcher arguments belong to that launcher, including any @files.
+    # Only the native linker's own inputs are response files for us to rewrite.
+    for argument in command[boundary + 1 :]:
+        if argument.startswith("@"):
+            rewrap_response_file(Path(argument[1:]))
+    return_code = subprocess.call(command)
+    # Windows subprocess statuses are unsigned DWORDs, while Python's exit
+    # conversion uses a signed C int. Preserve every bit of native failures.
+    if sys.platform == "win32" and return_code >= 0x80000000:
+        return_code -= 0x100000000
+    sys.exit(return_code)
 
 
 if __name__ == "__main__":

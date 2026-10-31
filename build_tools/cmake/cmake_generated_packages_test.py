@@ -95,6 +95,13 @@ class CMakeGeneratedPackagesTest(unittest.TestCase):
             (consumer / "BUILD.bazel").write_text(
                 'cc_binary(name="probe", srcs=["main.c"], deps=["//package/wrapper"])\n'
             )
+            (source / "launcher.py").write_text(
+                "import subprocess, sys\n"
+                "from pathlib import Path\n"
+                "assert sys.argv[1] == 'parent configuration'\n"
+                "Path(__file__).with_suffix('.called').mkdir(exist_ok=True)\n"
+                "sys.exit(subprocess.call(sys.argv[2:]))\n"
+            )
             (source / "CMakeLists.txt").write_text(
                 """cmake_minimum_required(VERSION 3.26...4.2)
 project(native_defaults C CXX)
@@ -102,6 +109,9 @@ set(IREE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(IREE_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")
 set(IREE_PACKAGE_ROOT_DIR "${IREE_SOURCE_DIR}")
 set(IREE_PACKAGE_ROOT_PREFIX fixture)
+add_library(parent_configuration INTERFACE)
+set_property(TARGET parent_configuration PROPERTY LINK_LAUNCHER "${Python3_EXECUTABLE};-B;${CMAKE_CURRENT_SOURCE_DIR}/launcher.py;parent configuration")
+set(CMAKE_C_LINKER_LAUNCHER "$<TARGET_PROPERTY:parent_configuration,LINK_LAUNCHER>")
 foreach(helper iree_macros iree_copts iree_install_support iree_cc_library iree_cc_binary iree_configure_testing iree_python iree_add_all_subdirs iree_generated_cmake)
   include("${IREE_REPO_ROOT}/build_tools/cmake/${helper}.cmake")
 endforeach()
@@ -140,6 +150,7 @@ file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/paths-$<CONFIG>.txt" CONTENT
             )
             configure_project(source, build)
             build_project(build)
+            self.assertTrue((source / "launcher.called").is_dir())
             for program in (
                 (build / f"paths-{CONFIGURATION}.txt").read_text().splitlines()
             ):
