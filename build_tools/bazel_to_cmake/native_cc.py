@@ -64,7 +64,21 @@ def executable_inputs(
         # when Ninja creates a response file. SHELL parsing retains the inner
         # quotes so the linker receives each native path as one argument.
         grouped = " ".join(r'"\"' + artifact + r'\""' for artifact in artifacts)
-        links.insert(0, "[=[LINKER:SHELL:" + grouped + "]=]")
+        # Native interfaces cache evaluated link expressions. This archive-only
+        # interface has no compile requirements; DIRECT retains the closure's
+        # position before opaque native dependencies in the final link.
+        archive_interface = name + ".archives"
+        lines.append(command("add_library", archive_interface, "INTERFACE IMPORTED"))
+        lines.append(
+            command(
+                "set_property",
+                "TARGET",
+                archive_interface,
+                "PROPERTY INTERFACE_LINK_LIBRARIES_DIRECT",
+                "[=[LINKER:SHELL:" + grouped + "]=]",
+            )
+        )
+        links.insert(0, '"$<LINK_ONLY:' + archive_interface + '>"')
         lines.append(
             command(
                 "set_property",
