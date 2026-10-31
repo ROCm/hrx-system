@@ -25,6 +25,165 @@ uint64_t FirstOutputCount(const loom_serve_service_t& interface) {
   return count;
 }
 
+// Real source failures at two distinct ownership boundaries: request-local
+// output translation and model-wide publication after accepted device work.
+class FailedTextDiagnosticsTest : public SourceTextServiceTest {
+ protected:
+  bool NeedsStandaloneModel() const override { return false; }
+
+  void Prepare(bool publication) {
+    const auto control =
+        iree::testing::MakeTempFilePath("text_failure_control", ".loom");
+    const std::string original =
+        publication
+            ? "buffer.fill %c0_i32, %progress[%origin], %progress_bytes : i32"
+            : "%content = scalar.constant 1 : i64";
+    ASSERT_NO_FATAL_FAILURE(EditNativeProvider(
+        directory_ + "/control.loom", control, original,
+        "%failure = scalar.constant 0 : i32\n"
+        "  %diagnostic = buffer.constant utf8(\"source boundary failed\") : "
+        "buffer\n"
+        "  func.call @require(%failure, %diagnostic) : (i32, buffer)\n  " +
+            original));
+    auto model_options = ModelOptions();
+    model_options.row_count = 1;
+    model_options.sources.control = iree_make_cstring_view(control.c_str());
+    IREE_ASSERT_OK(loom_serve_text_model_allocate(
+        device_, storage_owner_, &model_options, host_allocator_, &model_));
+    IREE_ASSERT_OK(
+        loom_serve_telemetry_stream_allocate(256, host_allocator_, &stream_));
+    auto options = ServiceOptions();
+    options.row_count = 1;
+    options.max_sessions = 1;
+    IREE_ASSERT_OK(loom_serve_text_service_allocate(
+        model_, &options, stream_, host_allocator_, &service_));
+    interface_ = loom_serve_text_service_interface(service_);
+    Observe(interface_);
+  }
+
+  void TearDown() override {
+    loom_serve_text_service_free(service_, IREE_STATUS_OK);
+    loom_serve_telemetry_stream_free(stream_);
+    SourceTextServiceTest::TearDown();
+  }
+
+  bool Idle() {
+    const auto snapshot = interface_.snapshot(interface_.self);
+    return !interface_.is_pending(interface_.self) &&
+           !snapshot.active_requests && !snapshot.queued_requests;
+  }
+
+  void ExpectFailedEnds(size_t expected_count) {
+    uint64_t cursor = 0;
+    size_t count = 0;
+    const auto head = loom_serve_telemetry_stream_head(stream_);
+    while (cursor < head) {
+      loom_serve_telemetry_record_t record;
+      ASSERT_EQ(loom_serve_telemetry_stream_read(stream_, &cursor, &record),
+                LOOM_SERVE_TELEMETRY_READ_RECORD);
+      if (record.event != &LOOM_SERVE_TELEMETRY_REQUEST_END) {
+        continue;
+      }
+      ++count;
+      EXPECT_EQ(record.data.end.outcome, LOOM_SERVE_TELEMETRY_FAILED);
+      EXPECT_EQ(record.data.end.diagnostic.code, IREE_STATUS_INVALID_ARGUMENT);
+      EXPECT_EQ(std::string(record.data.end.diagnostic.message,
+                            record.data.end.diagnostic.length),
+                "source boundary failed");
+      EXPECT_FALSE(record.data.end.diagnostic.truncated);
+    }
+    EXPECT_EQ(count, expected_count);
+  }
+
+  // Model-borrowing service, retired before the fixture releases its model.
+  loom_serve_text_service_t* service_ = nullptr;
+  // Production owner callbacks, serialized by this test's driver.
+  loom_serve_service_t interface_ = {};
+  // Registration-style history, retained beyond service destruction.
+  loom_serve_telemetry_stream_t* stream_ = nullptr;
+};
+
+TEST_F(FailedTextDiagnosticsTest, OutputFailureRetainsRequestDiagnostic) {
+  ASSERT_NO_FATAL_FAILURE(Prepare(false));
+  for (size_t i = 0; i < 2; ++i) {
+    const int client = Send(Request(Message("user", "ab")));
+    loom_serve_http_connection_t* connection = nullptr;
+    ASSERT_NO_FATAL_FAILURE(Accept(client, interface_, &connection));
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] { return Idle(); }));
+    const std::string response = Read(client);
+    EXPECT_NE(response.find("source boundary failed"), std::string::npos);
+    EXPECT_NE(response.find("loom_output_error"), std::string::npos);
+    EXPECT_EQ(interface_.telemetry.counters->failed, i + 1);
+    EXPECT_EQ(interface_.telemetry.counters->cancelled, 0u);
+  }
+  // The second request is accepted: translation failure belongs to its request,
+  // not the model. Its captured diagnostic survives request storage reuse.
+  ExpectFailedEnds(2);
+}
+
+TEST_F(FailedTextDiagnosticsTest, ModelFailureReachesActiveQueuedAndControl) {
+  ASSERT_NO_FATAL_FAILURE(Prepare(true));
+  loom_serve_http_connection_t* connection = nullptr;
+  const int active =
+      Send(Request(Message("user", "ab")), "X-Loom-Session: active\r\n");
+  ASSERT_NO_FATAL_FAILURE(Accept(active, interface_, &connection));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
+    return std::string(interface_.snapshot(interface_.self).phase) == "execute";
+  }));
+  const int queued = Send(Request(Message("user", "ax")));
+  ASSERT_NO_FATAL_FAILURE(Accept(queued, interface_, &connection));
+  const loom_serve_text_checkpoint_request_t request = {
+      .action = LOOM_SERVE_TEXT_CHECKPOINT_ACTION_PIN,
+      .name = IREE_SV("retained"),
+      .session = IREE_SV("active"),
+  };
+  loom_serve_text_checkpoint_control_t* control = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_service_try_open_checkpoint(service_, &request,
+                                                             &control));
+  std::unique_ptr<loom_serve_text_checkpoint_control_t,
+                  decltype(&loom_serve_text_checkpoint_control_close)>
+      control_owner(control, loom_serve_text_checkpoint_control_close);
+  ASSERT_NE(control, nullptr);
+  EXPECT_EQ(interface_.snapshot(interface_.self).active_requests, 1u);
+  EXPECT_EQ(interface_.snapshot(interface_.self).queued_requests, 2u);
+
+  auto* notification = loom_serve_http_server_notification(server_);
+  size_t failures = 0;
+  while (!Idle()) {
+    const auto ticket = iree_notification_prepare_wait(notification);
+    bool progress = false;
+    iree_status_t status = interface_.advance(interface_.self, 0, &progress);
+    const bool failed = !iree_status_is_ok(status);
+    if (failed) {
+      ++failures;
+      EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
+    }
+    // The model owner consumes the returned failure before the next turn
+    // retires active, queued, and native control delivery receipts.
+    iree_status_free(status);
+    if (Idle() || progress || failed) {
+      iree_notification_cancel_wait(notification);
+    } else {
+      iree_notification_commit_wait(notification, ticket, IREE_DURATION_ZERO,
+                                    IREE_TIME_INFINITE_FUTURE);
+    }
+  }
+  EXPECT_EQ(failures, 1u);
+  EXPECT_EQ(interface_.telemetry.counters->failed, 3u);
+  EXPECT_EQ(interface_.telemetry.counters->cancelled, 0u);
+  EXPECT_EQ(Read(active, true).find("data: [DONE]"), std::string::npos);
+  EXPECT_TRUE(Read(queued, true).empty());
+  EXPECT_TRUE(loom_serve_text_checkpoint_control_is_complete(control));
+  loom_serve_text_service_free(service_, IREE_STATUS_OK);
+  service_ = nullptr;
+  ExpectFailedEnds(3);
+  iree_status_t status = loom_serve_text_checkpoint_control_status(control);
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
+  EXPECT_TRUE(iree_string_view_equal(iree_status_message(status),
+                                     IREE_SV("source boundary failed")));
+  iree_status_free(status);
+}
+
 TEST_F(SourceTextServiceTest, FirstOutputExcludesFramingAndEmptyCompletions) {
   for (const bool streaming : {false, true}) {
     SCOPED_TRACE(streaming ? "streaming" : "nonstreaming");

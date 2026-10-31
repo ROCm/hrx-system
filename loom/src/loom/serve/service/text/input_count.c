@@ -106,11 +106,11 @@ iree_status_t loom_serve_text_input_count_complete(
     return status;
   }
   if (stopping || loom_serve_http_connection_failed(request.connection)) {
-    loom_serve_text_telemetry_end(telemetry, request.receipt,
-                                  telemetry->failure_code
-                                      ? LOOM_SERVE_TELEMETRY_FAILED
-                                      : LOOM_SERVE_TELEMETRY_CANCELLED,
-                                  0, status);
+    const bool failed = !iree_status_is_ok(telemetry->failure);
+    loom_serve_text_telemetry_end(
+        telemetry, request.receipt,
+        failed ? LOOM_SERVE_TELEMETRY_FAILED : LOOM_SERVE_TELEMETRY_CANCELLED,
+        0, failed ? telemetry->failure : status);
     iree_status_free(status);
     loom_serve_http_connection_abort(request.connection);
     return iree_ok_status();
@@ -164,10 +164,10 @@ bool loom_serve_text_input_count_cancel(
     const loom_serve_text_input_count_request_t request = queue->requests[i];
     if (stopping || loom_serve_http_connection_failed(request.connection)) {
       loom_serve_text_telemetry_end(telemetry, request.receipt,
-                                    telemetry->failure_code
+                                    !iree_status_is_ok(telemetry->failure)
                                         ? LOOM_SERVE_TELEMETRY_FAILED
                                         : LOOM_SERVE_TELEMETRY_CANCELLED,
-                                    0, iree_ok_status());
+                                    0, telemetry->failure);
       loom_serve_http_connection_abort(request.connection);
       loom_serve_text_input_count_remove(queue, i);
       progress = true;

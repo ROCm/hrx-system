@@ -81,7 +81,7 @@ class TextCheckpointControlTest : public ::testing::Test {
     }
     loom_serve_text_checkpoint_control_close(control_);
     iree_string_builder_deinitialize(&scratch_);
-    loom_serve_telemetry_stream_free(telemetry_.stream);
+    loom_serve_text_telemetry_deinitialize(&telemetry_);
   }
 
   // Allocation owner independent of model and telemetry lifetimes.
@@ -117,8 +117,7 @@ TEST_F(TextCheckpointControlTest, CompletionHasIndependentResultStorage) {
   EXPECT_EQ(copied->position, 23u);
   EXPECT_EQ(copied->host_bytes, 96u);
   EXPECT_EQ(telemetry_.counters.completed, 1u);
-  loom_serve_telemetry_stream_free(telemetry_.stream);
-  telemetry_.stream = nullptr;
+  loom_serve_text_telemetry_deinitialize(&telemetry_);
   IREE_ASSERT_OK(loom_serve_text_checkpoint_control_status(control_));
   EXPECT_EQ(copied->position, 23u);
 }

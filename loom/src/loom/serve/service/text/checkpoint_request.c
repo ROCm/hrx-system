@@ -196,12 +196,12 @@ void loom_serve_text_checkpoint_request_abort(
   if (control->consumer.self) {
     const loom_serve_text_checkpoint_operation_t operation = *control;
     memset(control, 0, sizeof(*control));
-    const bool failed = telemetry->failure_code != IREE_STATUS_OK;
+    const bool failed = !iree_status_is_ok(telemetry->failure);
     operation.consumer.abort(
         operation.consumer.self,
         failed ? LOOM_SERVE_TELEMETRY_FAILED : LOOM_SERVE_TELEMETRY_CANCELLED,
-        iree_status_from_code(failed ? telemetry->failure_code
-                                     : IREE_STATUS_CANCELLED),
+        failed ? telemetry->failure
+               : iree_status_from_code(IREE_STATUS_CANCELLED),
         telemetry, &operation.receipt);
   }
 }
