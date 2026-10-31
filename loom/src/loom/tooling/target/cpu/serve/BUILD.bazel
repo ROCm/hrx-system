@@ -207,6 +207,42 @@ loom_cc_test(
     ],
 )
 
+loom_cc_test(
+    name = "jit_test",
+    srcs = ["//loom/src/loom/serve/runtime/program:jit_test.cc"],
+    args = [
+        "--jit_sources=$(rootpath //loom/src/loom/serve/runtime/program:testdata/jit/config.loom)",
+        "--invalid_sources=$(rootpath //loom/src/loom/serve/runtime/program:testdata/compilation/invalid.loom)",
+    ],
+    data = [
+        "//loom/src/loom/serve/runtime/program:testdata/compilation/invalid.loom",
+        "//loom/src/loom/serve/runtime/program:testdata/jit/config.loom",
+        "//loom/src/loom/serve/runtime/program:testdata/jit/stage.loom",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:x86_task_hal",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":test_compiler",
+        ":test_device",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/program:executable",
+        "//loom/src/loom/serve/runtime/program:jit",
+        "//loom/src/loom/serve/testing:jit",
+        "//loom/src/loom/serve/testing:stalled_stderr",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 # Acquires locked source, bytecode, and mixed packages before native execution.
 loom_py_test(
     name = "fetch_model_card_test",
