@@ -24,6 +24,7 @@ class CustomTargetConverter(TargetConverter):
         self._update_target_mappings(
             {
                 "//external:usage": ["authored_usage"],
+                "//external:suppressions": ["native_suppression_provider"],
                 "//package/producer:generator": [
                     "fixture::package::producer::generator"
                 ],

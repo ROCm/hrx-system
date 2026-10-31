@@ -23,12 +23,21 @@ include("${IREE_REPO_ROOT}/build_tools/cmake/iree_cc_test.cmake")
 include("${IREE_REPO_ROOT}/build_tools/cmake/iree_python.cmake")
 include("${IREE_REPO_ROOT}/build_tools/cmake/iree_add_all_subdirs.cmake")
 include("${IREE_REPO_ROOT}/build_tools/cmake/iree_generated_cmake.cmake")
+set(IREE_SANITIZER_SUPPRESSION_LEAF_LSAN "${IREE_SOURCE_DIR}/leaf.txt")
+set(IREE_SANITIZER_SUPPRESSION_DATA_LSAN "${IREE_SOURCE_DIR}/data.txt")
+add_library(native_suppression_provider INTERFACE)
 iree_generate_cmake()
 iree_add_subdirectory(package)
 if(TARGET authored_usage OR NOT PROJECT_NAME STREQUAL "generated_packages")
   message(FATAL_ERROR "Authored package scope leaked into its parent")
 endif()
 iree_finalize_target_dependencies()
+set(IREE_SANITIZER_SUPPRESSION_NATIVE_LSAN "${IREE_SOURCE_DIR}/native.txt")
+iree_target_sanitizer_suppressions(native_suppression_provider
+  SUPPRESSIONS lsan native)
+iree_finalize_sanitizer_suppressions()
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/environment-$<CONFIG>.txt"
+  CONTENT "$<TARGET_PROPERTY:fixture_package_probe,IREE_SANITIZER_ENVIRONMENT>")
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/paths-$<CONFIG>.txt"
   CONTENT "$<TARGET_FILE:fixture_package_probe>\n$<TARGET_FILE:fixture_package_authored_child_probe>\n$<TARGET_LINKER_FILE:fixture_package_library_with_generated_inputs_and_package_identity>\n")
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/link-inputs-$<CONFIG>.txt"

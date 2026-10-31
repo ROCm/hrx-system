@@ -52,6 +52,11 @@ cc_test(
 # The provider's private native import remains owned by its authored directory.
 cc_library(
     name = "scoped_requirements",
+    data = [
+        ":runtime_data",
+        "//package/producer:generator.py",
+        "//package/producer:value.h",
+    ],
     deps = [
         ":registration",
         "//package/authored/child:requirements",
@@ -62,4 +67,11 @@ cc_library(
     name = "registration",
     srcs = ["registration.cc"],
     alwayslink = True,
+    sanitizer_suppressions = {"lsan": "//:lsan_suppressions_leaf.txt"},
+    deps = ["//external:suppressions"],
+)
+
+cc_library(
+    name = "runtime_data",
+    sanitizer_suppressions = {"lsan": "//:lsan_suppressions_data.txt"},
 )

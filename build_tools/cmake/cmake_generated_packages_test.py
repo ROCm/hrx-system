@@ -36,6 +36,8 @@ class CMakeGeneratedPackagesTest(unittest.TestCase):
             shutil.copytree(FIXTURE, source)
             for template in source.rglob("BUILD.bazel.in"):
                 template.rename(template.with_suffix(""))
+            for name in ("leaf", "data", "native"):
+                (source / f"{name}.txt").write_text(f"leak:{name}\n")
             # Exercise add_subdirectory embedding with independent source and
             # binary roots, including a nested authored project and local import.
             host = source / "host"
@@ -71,6 +73,22 @@ class CMakeGeneratedPackagesTest(unittest.TestCase):
                 self.assertFalse((source / "package/CMakeLists.txt").exists())
 
             check(7)
+            environment = (owned / f"environment-{CONFIGURATION}.txt").read_text()
+            suppression = Path(
+                environment.removeprefix('LSAN_OPTIONS=suppressions="').removesuffix(
+                    '":allow_addr2line=1'
+                )
+            )
+            self.assertEqual(
+                suppression.read_text().split(),
+                ["leak:data", "leak:leaf", "leak:native"],
+            )
+            (source / "data.txt").write_text("leak:changed\n")
+            check(7)
+            self.assertEqual(
+                suppression.read_text().split(),
+                ["leak:changed", "leak:leaf", "leak:native"],
+            )
             paths = [generated, manifest, *programs]
             timestamps = [path.stat().st_mtime_ns for path in paths]
             check(7)

@@ -526,7 +526,6 @@ class BuildFileFunctions:
                         f"$<$<COMPILE_LANGUAGE:{language}>:{value}>"
                         for value in values or []
                     )
-                namespace = native_library.rsplit("::", 1)[0]
                 return native_cc.library(
                     self._libraries.libraries[native_library],
                     resolved,
@@ -540,17 +539,7 @@ class BuildFileFunctions:
                     compile_options=tuple(options),
                     cxx_standard=cxx_standard[3:] if cxx_standard else None,
                     cxx_features=tuple(cxx_features or []),
-                    data=tuple(
-                        namespace + target if target.startswith("::") else target
-                        for target in sorted(
-                            {
-                                target
-                                for dep in data or []
-                                for target in self._convert_target(dep)
-                                if target
-                            }
-                        )
-                    ),
+                    data=tuple(self._convert_data_locations(data) or ()),
                     sanitizer_suppressions=tuple(
                         value
                         for sanitizer, label in sorted(

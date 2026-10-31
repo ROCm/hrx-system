@@ -273,7 +273,7 @@ def library(
             "NAME",
             name,
             "DATA",
-            " ".join(data),
+            arguments(data),
             "OUT_TARGET_DATA _IREE_NATIVE_DATA",
         )
     emit(
