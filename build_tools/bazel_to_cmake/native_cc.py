@@ -18,15 +18,9 @@ def command(name, *parts):
     return f"{name}({' '.join(parts)})\n"
 
 
-def interfaces(declarations):
-    """Binds opaque requirements without copying native target properties."""
-    # Target conversion owns each dependency's CMake argument spelling,
-    # including quoted framework flags and native list expressions.
-    return "".join(
-        command("add_library", name, "INTERFACE IMPORTED GLOBAL")
-        + command("target_link_libraries", name, "INTERFACE", dependency)
-        for name, dependency in declarations
-    )
+def interface_name(name):
+    """Name of the declaration's native interface, separate from BUILD facts."""
+    return name.replace("::", "_") + ".native"
 
 
 def generated_dependencies(name, generated, producers):
@@ -53,7 +47,6 @@ def executable_inputs(
         ("target_include_directories", "PRIVATE", interface.includes),
         ("target_include_directories", "SYSTEM PRIVATE", interface.system_includes),
         ("target_compile_definitions", "PRIVATE", interface.defines),
-        ("target_compile_options", "PRIVATE", interface.options),
         ("target_link_options", "PRIVATE", interface.link_options),
     ):
         if values:
@@ -136,8 +129,7 @@ def executable_inputs(
 def library(
     declaration,
     resolved,
-    inherited,
-    links,
+    native_dependencies,
     *,
     sources,
     headers,
@@ -194,7 +186,7 @@ def library(
             "target_compile_options",
             compile_target,
             "PRIVATE",
-            ("${IREE_DEFAULT_COPTS}", *compile_options, *inherited.options),
+            ("${IREE_DEFAULT_COPTS}", *compile_options),
         )
         emit(
             "iree_set_cxx_options",
@@ -209,10 +201,27 @@ def library(
         if generated_headers:
             emit("target_sources", name, "PRIVATE", arguments(generated_headers))
 
-    # Opaque imports keep their owning native scope and late-bound requirements.
-    native_links = [*links, "${IREE_IMPLICIT_DEFS_CC_DEPS}"]
+    # Source requirements are already resolved. Native requirements retain
+    # ordinary edges and expand in their declaration's actual native scope.
+    defaults = ["${IREE_IMPLICIT_DEFS_CC_DEPS}"]
     if compiled:
-        native_links.extend(("${IREE_THREADS_DEPS}", "${IREE_DEFAULT_LINK_LIBRARIES}"))
+        defaults.extend(("${IREE_THREADS_DEPS}", "${IREE_DEFAULT_LINK_LIBRARIES}"))
+    native_interface = interface_name(declaration.name)
+    emit("add_library", native_interface, "INTERFACE")
+    emit(
+        "target_link_libraries",
+        native_interface,
+        "INTERFACE",
+        " ".join((*native_dependencies, *defaults)),
+    )
+    if compiled and not alwayslink:
+        emit(
+            "target_compile_options",
+            native_interface,
+            "INTERFACE ${IREE_INTERFACE_COPTS}",
+        )
+        emit("target_compile_options", name, "INTERFACE ${IREE_INTERFACE_COPTS}")
+    native_links = [*declaration.dependencies, *defaults]
     if compiled and alwayslink:
         native_links.insert(
             0, f'"$<GENEX_EVAL:$<TARGET_PROPERTY:{name},IREE_CC_OBJECTS>>"'
@@ -224,7 +233,7 @@ def library(
             "TARGET",
             compile_target,
             "PROPERTY LINK_LIBRARIES",
-            " ".join((*resolved.native, "${IREE_IMPLICIT_DEFS_CC_DEPS}")),
+            " ".join((*native_dependencies, *defaults)),
         )
     requirements(
         "target_include_directories",
@@ -243,7 +252,6 @@ def library(
         ("$<BUILD_INTERFACE:" + ";".join(resolved.system_includes) + ">",),
     )
     requirements("target_compile_definitions", name, scope, resolved.defines)
-    requirements("target_compile_options", name, "INTERFACE", resolved.options)
     requirements("target_link_options", name, "INTERFACE", resolved.link_options)
     requirements(
         "target_link_options",

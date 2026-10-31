@@ -25,6 +25,126 @@ FIXTURE = REPO_ROOT / "build_tools/cmake/testdata/generated_packages"
 
 
 class CMakeGeneratedPackagesTest(unittest.TestCase):
+    def test_native_defaults_bind_at_each_declaration(self):
+        with tempfile.TemporaryDirectory(prefix="cmake native defaults ") as temporary:
+            source, build = Path(temporary) / "source", Path(temporary) / "build"
+            source.mkdir()
+            shutil.copyfile(
+                FIXTURE / ".bazel_to_cmake.cfg.py", source / ".bazel_to_cmake.cfg.py"
+            )
+
+            def declarations(name, value):
+                return (
+                    f'cc_library(name="{name}", srcs=["value.c"], '
+                    f'defines=["EXPECTED_VALUE={value}"])\n'
+                    f'cc_binary(name="{name}_probe", srcs=["main.c"], '
+                    f'defines=["EXPECTED_VALUE={value}"], '
+                    f'deps=[":{name}", "//external:usage"])\n'
+                )
+
+            for name, value in (("first", 11), ("second", 22), ("inline", None)):
+                package = source / "package" / name
+                package.mkdir(parents=True)
+                (package / "value.c").write_text(
+                    "#if NATIVE_VALUE != EXPECTED_VALUE || IMPLICIT_VALUE != EXPECTED_VALUE * 10 || LATE_VALUE != 5\n"
+                    "#error Native declaration binding changed\n#endif\n"
+                    "#ifdef OPTION_VALUE\n#error Interface options affected their provider\n#endif\n"
+                    "int binding_value(void) { return NATIVE_VALUE; }\n"
+                )
+                (package / "main.c").write_text(
+                    "#if NATIVE_VALUE != EXPECTED_VALUE || IMPLICIT_VALUE != EXPECTED_VALUE * 10 || LATE_VALUE != 5 || LITERAL_VALUE != 31\n"
+                    "#error Native declaration binding changed\n#endif\n"
+                    "#if OPTION_VALUE != EXPECTED_VALUE\n#error Native compiler options changed\n#endif\n"
+                    "int binding_value(void);\n"
+                    "int main(void) { return binding_value() != EXPECTED_VALUE; }\n"
+                )
+                content = ""
+                if value is not None:
+                    content = declarations("value", value)
+                else:
+                    # A disabled declaration cannot own a shared binding that
+                    # is also needed by a later enabled declaration.
+                    content = (
+                        'iree_cmake_extra_content(inline=True, content="if(FALSE)")\n'
+                        'cc_library(name="disabled", deps=["//external:usage"])\n'
+                        'iree_cmake_extra_content(inline=True, content="endif()")\n'
+                    )
+                    for provider, value in (("first", 11), ("second", 22)):
+                        content += (
+                            'iree_cmake_extra_content(inline=True, content="""\n'
+                            f"set(IREE_IMPLICIT_DEFS_CC_DEPS implicit_{provider})\n"
+                            f"set(IREE_DEFAULT_LINK_LIBRARIES native_{provider})\n"
+                            f"set(IREE_INTERFACE_COPTS -DOPTION_VALUE={value})\n"
+                            '""")\n' + declarations(provider, value)
+                        )
+                (package / "BUILD.bazel").write_text(content)
+            wrapper = source / "package" / "wrapper"
+            wrapper.mkdir()
+            (wrapper / "BUILD.bazel").write_text(
+                'cc_library(name="wrapper", deps=["//package/first:value"])\n'
+            )
+            (source / "public.c").write_text(
+                "#if NATIVE_VALUE != 11 || IMPLICIT_VALUE != 110 || OPTION_VALUE != 11 || LATE_VALUE != 5\n"
+                "#error Native public interface changed\n#endif\n"
+                "int binding_value(void);\n"
+                "int main(void) { return binding_value() != 11; }\n"
+            )
+            consumer = source / "package" / "consumer"
+            consumer.mkdir()
+            shutil.copyfile(source / "public.c", consumer / "main.c")
+            (consumer / "BUILD.bazel").write_text(
+                'cc_binary(name="probe", srcs=["main.c"], deps=["//package/wrapper"])\n'
+            )
+            (source / "CMakeLists.txt").write_text(
+                """cmake_minimum_required(VERSION 3.26...4.2)
+project(native_defaults C CXX)
+set(IREE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+set(IREE_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+set(IREE_PACKAGE_ROOT_DIR "${IREE_SOURCE_DIR}")
+set(IREE_PACKAGE_ROOT_PREFIX fixture)
+foreach(helper iree_macros iree_copts iree_install_support iree_cc_library iree_cc_binary iree_configure_testing iree_python iree_add_all_subdirs iree_generated_cmake)
+  include("${IREE_REPO_ROOT}/build_tools/cmake/${helper}.cmake")
+endforeach()
+add_library(native_first INTERFACE IMPORTED)
+set_property(TARGET native_first PROPERTY INTERFACE_COMPILE_DEFINITIONS NATIVE_VALUE=11)
+add_library(native_second INTERFACE IMPORTED)
+set_property(TARGET native_second PROPERTY INTERFACE_COMPILE_DEFINITIONS NATIVE_VALUE=22)
+add_library(implicit_first INTERFACE IMPORTED)
+set_property(TARGET implicit_first PROPERTY INTERFACE_COMPILE_DEFINITIONS IMPLICIT_VALUE=110)
+add_library(implicit_second INTERFACE IMPORTED)
+set_property(TARGET implicit_second PROPERTY INTERFACE_COMPILE_DEFINITIONS IMPLICIT_VALUE=220)
+add_library(authored_usage INTERFACE IMPORTED)
+set_property(TARGET authored_usage PROPERTY INTERFACE_COMPILE_DEFINITIONS LITERAL_VALUE=31)
+iree_generate_cmake()
+set(IREE_IMPLICIT_DEFS_CC_DEPS implicit_first)
+set(IREE_DEFAULT_LINK_LIBRARIES native_first)
+set(IREE_INTERFACE_COPTS -DOPTION_VALUE=11)
+iree_add_subdirectory(package/first)
+set(IREE_IMPLICIT_DEFS_CC_DEPS implicit_second)
+set(IREE_DEFAULT_LINK_LIBRARIES native_second)
+set(IREE_INTERFACE_COPTS -DOPTION_VALUE=22)
+iree_add_subdirectory(package/second)
+iree_add_subdirectory(package/inline)
+target_compile_definitions(native_first INTERFACE LATE_VALUE=5)
+target_compile_definitions(native_second INTERFACE LATE_VALUE=5)
+set(IREE_IMPLICIT_DEFS_CC_DEPS "")
+set(IREE_INTERFACE_COPTS -DOPTION_VALUE=777)
+iree_add_subdirectory(package/wrapper)
+add_executable(public_probe public.c)
+target_link_libraries(public_probe PRIVATE fixture::package::wrapper)
+set(IREE_DEFAULT_LINK_LIBRARIES "")
+iree_add_subdirectory(package/consumer)
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/paths-$<CONFIG>.txt" CONTENT
+  "$<TARGET_FILE:fixture_package_first_value_probe>\n$<TARGET_FILE:fixture_package_second_value_probe>\n$<TARGET_FILE:fixture_package_inline_first_probe>\n$<TARGET_FILE:fixture_package_inline_second_probe>\n$<TARGET_FILE:public_probe>\n$<TARGET_FILE:fixture_package_consumer_probe>\n")
+"""
+            )
+            configure_project(source, build)
+            build_project(build)
+            for program in (
+                (build / f"paths-{CONFIGURATION}.txt").read_text().splitlines()
+            ):
+                run_command(program)
+
     def test_logical_package_generators_work_with_makefiles(self):
         make = shutil.which("gmake") or shutil.which("make")
         if make is None:

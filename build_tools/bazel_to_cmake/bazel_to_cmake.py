@@ -54,7 +54,6 @@ import json
 import os
 import sys
 from dataclasses import dataclass
-from functools import cache
 from pathlib import Path
 
 import bazel_to_cmake_converter
@@ -282,17 +281,6 @@ def evaluate_packages(root_dirs, input_files, configuration=None):
         for directory, package in packages.items()
         if package.converter.requires_native_scope
     }
-    if libraries:
-
-        @cache
-        def native_scope(directory):
-            if directory == Path(".") or directory in native_directories:
-                return directory.as_posix()
-            return native_scope(directory.parent)
-
-        libraries.native_scopes = {
-            directory.as_posix(): native_scope(directory) for directory in packages
-        }
     return packages, authored_directories, native_directories, libraries
 
 
