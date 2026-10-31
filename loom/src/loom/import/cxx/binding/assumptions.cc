@@ -18,7 +18,7 @@ std::vector<ProjectedPredicate> assumption_predicates(
   }
   return project_predicates(unit, diagnostics, call->expressionList->value,
                             PredicateSubject::Explicit,
-                            PredicateExpressionPolicy::SpeculatableValues);
+                            PredicateExpressionPolicy::MaterializableValues);
 }
 
 }  // namespace loom::cxx_import

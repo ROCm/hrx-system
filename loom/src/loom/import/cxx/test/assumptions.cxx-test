@@ -228,6 +228,51 @@ func.def public @derived_identity(%pair_index: i32) -> (i32) {
 
 // ====
 // RUN: roundtrip
+// Direct constexpr and consteval calls retain their converted C++ values.
+[[loom::assume]] void assume(bool);
+static constexpr int extent(int scale) { return scale * 4; }
+static consteval int maximum() { return 16; }
+int constant_call_bounds(int value) {
+  assume(0 <= value && value < extent(2) && value < maximum());
+  return value;
+}
+// ----
+func.def public @constant_call_bounds(%value$0: i32) -> (i32) {
+  %value$2 = scalar.assume %value$0 [ge(%value$0, 0)] : i32
+  %value$3 = scalar.assume %value$2 [lt(%value$2, 8)] : i32
+  %value$4 = scalar.assume %value$3 [lt(%value$3, 16)] : i32
+  func.return %value$4 : i32
+}
+
+// ====
+// RUN: pass combine,cse,dce
+// Direct record-pointer reads snapshot both mutable and const pointees. Nested
+// dot members preserve the same direct pointer dependency.
+[[loom::assume]] void assume(bool);
+struct Limits { int count; };
+struct Bounds { Limits limits; };
+int pointer_member_bounds(int index, Bounds* mutable_bounds,
+                          const Bounds* const_bounds) {
+  assume(0 <= index && index < mutable_bounds->limits.count &&
+         const_bounds->limits.count <= 16);
+  return index + mutable_bounds->limits.count + const_bounds->limits.count;
+}
+// ----
+func.def public @pointer_member_bounds(%index$0: i32, %mutable_bounds: buffer, %mutable_bounds_byte_offset: offset, %const_bounds: buffer, %const_bounds_byte_offset: offset) -> (i32) {
+  %index$6 = scalar.assume %index$0 [ge(%index$0, 0)] : i32
+  %11 = buffer.view %mutable_bounds[%mutable_bounds_byte_offset] : buffer -> view<1xi32>
+  %count$12 = view.load %11[0] : view<1xi32> -> i32
+  %index$13, %14 = scalar.assume %index$6, %count$12 [lt(%index$6, %count$12)] : i32, i32
+  %19 = buffer.view %const_bounds[%const_bounds_byte_offset] : buffer -> view<1xi32>
+  %count$20 = view.load %19[0] : view<1xi32> -> i32
+  %21 = scalar.assume %count$20 [le(%count$20, 16)] : i32
+  %28 = scalar.addi %index$13, %14 : i32
+  %35 = scalar.addi %28, %21 : i32
+  func.return %35 : i32
+}
+
+// ====
+// RUN: roundtrip
 // Constants on either side normalize without changing relation direction.
 [[loom::assume]] void assume(bool);
 int reversed_constants(int value) {

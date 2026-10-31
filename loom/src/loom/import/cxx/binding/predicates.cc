@@ -10,6 +10,7 @@
 #include <cxx/ast_interpreter.h>
 #include <cxx/attributes.h>
 #include <cxx/names.h>
+#include <cxx/standard_conversion.h>
 #include <cxx/symbols.h>
 #include <cxx/token.h>
 #include <cxx/types.h>
@@ -39,6 +40,26 @@ struct PredicateConstant {
 
 using PredicateOperand = std::variant<PredicateValue, PredicateConstant>;
 
+std::optional<cxx::ConstValue> predicate_scalar_constant(
+    cxx::TranslationUnit& unit, cxx::ExpressionAST* expression) {
+  if (auto constant = scalar_constant(unit, expression)) {
+    return constant;
+  }
+  auto* call =
+      cxx::ast_cast<cxx::CallExpressionAST>(unwrap_expression(expression));
+  auto* function = direct_callee(call);
+  if (!function || !function->isConstexpr() || function->isDeleted()) {
+    return std::nullopt;
+  }
+  cxx::StandardConversion conversion(&unit);
+  auto* constant =
+      conversion.convertConstantExpression(expression, expression->type);
+  if (!constant || !constant->constValue) {
+    return std::nullopt;
+  }
+  return *constant->constValue;
+}
+
 int64_t signed_payload(uint64_t value, int bit_count) {
   if (bit_count == 64) {
     return std::bit_cast<int64_t>(value);
@@ -53,7 +74,7 @@ int64_t signed_payload(uint64_t value, int bit_count) {
 
 std::optional<PredicateConstant> integer_predicate_constant(
     cxx::TranslationUnit& unit, cxx::ExpressionAST* expression, int bit_count) {
-  auto constant = scalar_constant(unit, expression);
+  auto constant = predicate_scalar_constant(unit, expression);
   if (!constant) {
     return std::nullopt;
   }
@@ -74,7 +95,7 @@ std::optional<PredicateConstant> integer_predicate_constant(
 
 std::optional<PredicateConstant> float_predicate_constant(
     cxx::TranslationUnit& unit, cxx::ExpressionAST* expression) {
-  auto constant = scalar_constant(unit, expression);
+  auto constant = predicate_scalar_constant(unit, expression);
   if (!constant) {
     return std::nullopt;
   }
@@ -132,7 +153,7 @@ std::optional<PredicateConstant> predicate_constant(
 
 std::optional<bool> constant_truth(cxx::TranslationUnit& unit,
                                    cxx::ExpressionAST* expression) {
-  auto constant = scalar_constant(unit, expression);
+  auto constant = predicate_scalar_constant(unit, expression);
   if (!constant) {
     return std::nullopt;
   }
@@ -167,14 +188,14 @@ bool is_numeric_source_type(cxx::TranslationUnit& unit, const cxx::Type* type) {
   return traits.is_arithmetic(type) || traits.is_enum(type);
 }
 
-// Admits exactly the scalar expression forms whose translated Loom operations
-// are unconditionally safe to speculate. An assumption condition is not
-// evaluated by C++, so partial operations such as integer division and shifts
-// cannot be introduced merely to retain their results as facts.
-class SpeculatablePredicateExpression {
+// Admits expression forms whose values can be materialized at the assumption
+// site without executing source side effects. Arithmetic must be total because
+// an assumption condition is not evaluated by C++. Direct pointer-member reads
+// snapshot the source object as ordinary C++ assumption lowering does.
+class MaterializablePredicateExpression {
  public:
-  SpeculatablePredicateExpression(cxx::TranslationUnit& unit,
-                                  Diagnostics& diagnostics)
+  MaterializablePredicateExpression(cxx::TranslationUnit& unit,
+                                    Diagnostics& diagnostics)
       : unit_(unit), diagnostics_(diagnostics) {}
 
   std::optional<PredicateValue> project(cxx::ExpressionAST* expression) {
@@ -282,6 +303,39 @@ class SpeculatablePredicateExpression {
     }
   }
 
+  bool admit_member(cxx::MemberExpressionAST* member) {
+    auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
+    if (!field || field->isStatic()) {
+      return false;
+    }
+    if (member->accessOp == cxx::TokenKind::T_DOT) {
+      return admit(member->baseExpression);
+    }
+    if (member->accessOp != cxx::TokenKind::T_MINUS_GREATER) {
+      return false;
+    }
+
+    auto* base = unwrap_expression(member->baseExpression);
+    auto* id = cxx::ast_cast<cxx::IdExpressionAST>(base);
+    auto traits = unit_.typeTraits();
+    auto* pointer = cxx::type_cast<cxx::PointerType>(traits.remove_cv(
+        traits.remove_reference(member->baseExpression->type)));
+    if (!id || !id->symbol || !pointer) {
+      diagnostics_.reject(
+          unit_, member,
+          "predicate pointer-member reads require a direct retained pointer "
+          "binding");
+    }
+    if (traits.is_volatile(pointer->elementType())) {
+      diagnostics_.reject(
+          unit_, member,
+          "predicate expressions cannot read volatile values because no "
+          "runtime comparison is emitted");
+    }
+    dependencies_.push_back({id->symbol, id});
+    return true;
+  }
+
   bool admit(cxx::ExpressionAST* expression) {
     if (!expression) {
       return false;
@@ -328,10 +382,7 @@ class SpeculatablePredicateExpression {
       return true;
     }
     if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression)) {
-      auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
-      return field && !field->isStatic() &&
-             member->accessOp == cxx::TokenKind::T_DOT &&
-             admit(member->baseExpression);
+      return admit_member(member);
     }
     if (auto* unary = cxx::ast_cast<cxx::UnaryExpressionAST>(expression)) {
       return admit_unary(unary);
@@ -373,6 +424,11 @@ std::optional<PredicateValue> predicate_value(
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
     if (!field || field->isStatic() ||
         member->accessOp != cxx::TokenKind::T_DOT) {
+      if (expression_policy ==
+          PredicateExpressionPolicy::MaterializableValues) {
+        return MaterializablePredicateExpression(unit, diagnostics)
+            .project(expression);
+      }
       diagnostics.reject(
           unit, member,
           "predicate member paths require direct non-static record fields");
@@ -398,8 +454,8 @@ std::optional<PredicateValue> predicate_value(
     }
     value.origin = PredicateValueOrigin::Result;
   } else {
-    return expression_policy == PredicateExpressionPolicy::SpeculatableValues
-               ? SpeculatablePredicateExpression(unit, diagnostics)
+    return expression_policy == PredicateExpressionPolicy::MaterializableValues
+               ? MaterializablePredicateExpression(unit, diagnostics)
                      .project(expression)
                : std::nullopt;
   }
@@ -410,9 +466,9 @@ std::optional<PredicateValue> predicate_value(
         "predicate expressions cannot read volatile values because no "
         "runtime comparison is emitted");
   }
-  if (expression_policy == PredicateExpressionPolicy::SpeculatableValues &&
+  if (expression_policy == PredicateExpressionPolicy::MaterializableValues &&
       value.origin == PredicateValueOrigin::Binding && !value.members.empty()) {
-    return SpeculatablePredicateExpression(unit, diagnostics)
+    return MaterializablePredicateExpression(unit, diagnostics)
         .project(expression);
   }
   return value;
