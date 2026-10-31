@@ -596,25 +596,22 @@ BENCHMARK_TEMPLATE(Dispatch, false, true)
     ->UseRealTime();
 BENCHMARK_TEMPLATE(Dispatch, true, false)
     ->Name("HIP/Graph/Enqueue")
-    ->Arg(1)
-    ->Arg(32)
-    ->Arg(256)
+    ->RangeMultiplier(2)
+    ->Range(1, 256)
     ->Arg(4096)
     ->UseRealTime();
 BENCHMARK_TEMPLATE(Dispatch, true, true)
     ->Name("HIP/Graph/EndToEnd")
-    ->Arg(1)
-    ->Arg(32)
-    ->Arg(256)
+    ->RangeMultiplier(2)
+    ->Range(1, 256)
     ->Arg(4096)
     ->UseRealTime();
 
 BENCHMARK(GraphEventInterval)
     ->Name("HIP/Graph/EventInterval")
     ->Arg(0)
-    ->Arg(1)
-    ->Arg(32)
-    ->Arg(256)
+    ->RangeMultiplier(2)
+    ->Range(1, 256)
     ->Arg(4096)
     ->UseManualTime();
 
