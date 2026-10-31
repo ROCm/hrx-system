@@ -68,6 +68,9 @@ typedef struct iree_hal_amd_gpu_transfer_t {
   bool host_wait_required;
   // Downloads finish on the host and cannot signal a native completion early.
   bool host_completion_required;
+  // This batch has multiple operations and every COPY slot also admits its
+  // transfer usage at PROGRAM. Publication needs no repeated contract query.
+  bool program_accessible;
 } iree_hal_amd_gpu_transfer_t;
 
 // A download copy owned by one native retirement record. The queue keeps its

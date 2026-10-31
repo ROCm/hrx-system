@@ -870,6 +870,111 @@ TEST_P(SubmissionTest, RejectedFileSuffixWaitsForAcceptedHostAccesses) {
   EXPECT_EQ(owner.status_code, IREE_STATUS_RESOURCE_EXHAUSTED);
 }
 
+TEST_P(SubmissionTest, CopyBatchesCaptureProgramCompatibilityAndKeepOwnership) {
+  const uint16_t types[] = {IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+                            IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS};
+  const iree_hal_buffer_binding_layout_t binding_layout = {
+      2 * sizeof(iree_hal_buffer_native_binding_t), 2, 0, types};
+  const iree_hal_queue_family_t family = {
+      .memory = {.domain = this, .queue_scope_id = 0},
+  };
+  for (uint16_t program_binding :
+       {uint16_t{0}, uint16_t{1},
+        uint16_t{IREE_HAL_BUFFER_NATIVE_BINDING_INDEX_NONE}}) {
+    for (auto program_usage :
+         {IREE_HAL_BUFFER_USAGE_TRANSFER, IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
+          IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET}) {
+      for (bool source : {false, true}) {
+        SCOPED_TRACE(::testing::Message()
+                     << "binding=" << program_binding
+                     << " usage=" << program_usage << " source=" << source);
+        std::array<iree_hal_memory_contract_t*, 2> contracts = {};
+        std::array<iree_hal_buffer_t*, 2> buffers = {};
+        std::array<std::array<uint8_t, 16>, 2> bytes = {};
+        std::array<bool, 2> destroyed = {};
+        const iree_hal_buffer_native_binding_t bindings[] = {
+            {.device_address = 0x1000}, {.device_address = 0x2000}};
+        for (size_t i = 0; i < buffers.size(); ++i) {
+          IREE_ASSERT_OK(iree_hal_memory_contract_create(
+              this, 2, &binding_layout, iree_allocator_system(),
+              &contracts[i]));
+          auto* scopes = contracts[i]->scopes;
+          scopes[0].usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+          scopes[0].interfaces = UINT64_C(1)
+                                 << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS;
+          scopes[0].bindings[IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS] = 0;
+          scopes[1] = scopes[0];
+          if (i) {
+            scopes[1].usage = program_usage;
+            scopes[1].bindings[IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS] =
+                program_binding;
+            if (program_binding == IREE_HAL_BUFFER_NATIVE_BINDING_INDEX_NONE) {
+              scopes[1].interfaces = 0;
+            }
+          }
+          IREE_ASSERT_OK(iree_hal_heap_buffer_wrap(
+              {}, IREE_HAL_MEMORY_TYPE_HOST_LOCAL, IREE_HAL_MEMORY_ACCESS_ALL,
+              IREE_HAL_BUFFER_USAGE_TRANSFER, bytes[i].size(),
+              iree_make_byte_span(bytes[i].data(), bytes[i].size()),
+              {[](void* data, iree_hal_buffer_t*) {
+                 *static_cast<bool*>(data) = true;
+               },
+               &destroyed[i]},
+              iree_allocator_system(), &buffers[i]));
+          buffers[i]->memory = {.contract = contracts[i], .bindings = bindings};
+        }
+        const iree_hal_transfer_operation_t operations[] = {
+            {
+                .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
+                .copy =
+                    {
+                        .source_buffer = buffers[0],
+                        .target_buffer = buffers[0],
+                        .target_offset = 4,
+                        .length = 4,
+                    },
+            },
+            {
+                .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
+                .copy =
+                    {
+                        .source_buffer = buffers[source ? 1 : 0],
+                        .target_buffer = buffers[source ? 0 : 1],
+                        .target_offset = 8,
+                        .length = 4,
+                    },
+            },
+        };
+        for (size_t count : {size_t{1}, size_t{2}}) {
+          iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
+          IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_transfer(
+              &pool_, GetParam(), &family, {}, {}, count, operations, &profile_,
+              nullptr, &capture));
+          const auto usage = source ? IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE
+                                    : IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET;
+          EXPECT_EQ(
+              capture->transfer.program_accessible,
+              count > 1 && program_binding == 0 && (program_usage & usage));
+          EXPECT_EQ(capture->transfer.staging_capacity, 0u);
+          if (count == 2) {
+            for (auto* buffer : buffers) {
+              iree_hal_buffer_release(buffer);
+            }
+            EXPECT_FALSE(destroyed[0]);
+            EXPECT_FALSE(destroyed[1]);
+          }
+          iree_hal_amd_gpu_pm4_submission_release(capture);
+        }
+        EXPECT_TRUE(destroyed[0]);
+        EXPECT_TRUE(destroyed[1]);
+        for (auto* contract : contracts) {
+          iree_hal_memory_contract_release(contract);
+        }
+      }
+    }
+  }
+}
+
 TEST_P(SubmissionTest, RejectedDownloadSuffixJoinsBeforeFailingPublicSignals) {
   iree_async_proactor_t* proactor = nullptr;
   IREE_ASSERT_OK(

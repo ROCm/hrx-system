@@ -10,8 +10,7 @@
 
 iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_transfer_packet(
     uint64_t kernel, uint64_t arguments, uint64_t length, uint32_t header) {
-  const uint32_t groups =
-      length > 256 * 1024 ? 256 : (uint32_t)((length + 1023) / 1024);
+  const uint32_t groups = iree_hal_amd_gpu_blit_workgroup_count(length);
   const iree_hal_amd_gpu_aql_dispatch_t dispatch = {
       .header = IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH | (1u << 16) | header,
       .workgroup_size = {64, 1, 1},

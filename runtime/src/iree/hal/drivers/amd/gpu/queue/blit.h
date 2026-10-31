@@ -32,6 +32,12 @@ typedef struct iree_hal_amd_gpu_blit_arguments_t {
 static_assert(sizeof(iree_hal_amd_gpu_blit_arguments_t) == 32,
               "blit arguments match the compiled ABI");
 
+// Each 64-lane group covers 1024 bytes per iteration. Small ranges need only
+// their active groups; larger ranges use the kernel's fixed 256-group stride.
+static inline uint32_t iree_hal_amd_gpu_blit_workgroup_count(uint64_t length) {
+  return length > 256 * 1024 ? 256 : (uint32_t)((length + 1023) / 1024);
+}
+
 // Selects relocation-free native instructions and their descriptor. The cold
 // owner places this once; no compiler or HSACO parser is in the runtime path.
 iree_status_t iree_hal_amd_gpu_blit_program_query(

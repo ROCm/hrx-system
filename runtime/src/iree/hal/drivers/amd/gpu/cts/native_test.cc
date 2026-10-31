@@ -687,15 +687,23 @@ TEST_P(GpuNativeTransferTest, CopiesPreserveEveryVectorAlignmentAndTail) {
       }
     }
   }
-  uint64_t uploaded = 1, filled = 2, copied = 3, downloaded = 4;
+  uint64_t uploaded = 1, filled = 2, primed = 3, copied = 4, downloaded = 5;
   IREE_ASSERT_OK(iree_hal_queue_upload(
       queues_[0], {}, {1, &timeline_, &uploaded}, source.data(), buffers_[0], 0,
       source.size(), Barriers()));
   IREE_ASSERT_OK(iree_hal_queue_fill(
       queues_[0], {1, &timeline_, &uploaded}, {1, &timeline_, &filled},
       buffers_[1], 0, kLength, &guard, sizeof(guard), Barriers(), 0));
+  // A byte upload can leave less than one argument record at the end of the
+  // staging allocation. The following batch must wrap and keep progressing.
+  std::array<uint8_t, 1000> staging_prefix;
+  std::fill(staging_prefix.begin(), staging_prefix.end(), guard);
+  IREE_ASSERT_OK(iree_hal_queue_upload(queues_[1], {1, &timeline_, &filled},
+                                       {1, &timeline_, &primed},
+                                       staging_prefix.data(), buffers_[1], 0,
+                                       staging_prefix.size(), Barriers()));
   IREE_ASSERT_OK(iree_hal_queue_transfer(
-      queues_[1], {1, &timeline_, &filled}, {1, &timeline_, &copied},
+      queues_[1], {1, &timeline_, &primed}, {1, &timeline_, &copied},
       copies.size(), copies.data(), Barriers()));
   IREE_ASSERT_OK(iree_hal_queue_download(
       queues_[1], {1, &timeline_, &copied}, {1, &timeline_, &downloaded},

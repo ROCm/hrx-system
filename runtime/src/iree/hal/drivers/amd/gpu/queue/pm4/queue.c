@@ -12,6 +12,7 @@
 #include "iree/base/threading/thread.h"
 #include "iree/hal/drivers/amd/gpu/dispatch.h"
 #include "iree/hal/drivers/amd/gpu/executable.h"
+#include "iree/hal/drivers/amd/gpu/queue/blit.h"
 #include "iree/hal/drivers/amd/gpu/queue/buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/drivers/amd/gpu/queue/control_program.h"
@@ -401,11 +402,19 @@ iree_hal_amd_gpu_pm4_publish_transfer(
   iree_hal_amd_gpu_transfer_t* transfer = &submission->transfer;
   const bool first = !transfer->cursor.index && !transfer->cursor.offset;
   iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
+  // Independent copies can overlap on shaders. Scalar copies keep their
+  // compact DMA packet; incompatible program views and rings too small for
+  // one shader argument record retain the queue path without extra backing.
+  const bool program =
+      transfer->program_accessible &&
+      arguments->capacity >= sizeof(iree_hal_amd_gpu_blit_arguments_t) &&
+      transfer->operations[transfer->cursor.index].type ==
+          IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
   if (arguments->capacity < transfer->staging_capacity) {
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_ARGUMENTS;
   }
   const uint64_t relative =
-      iree_align_uint64(arguments->end - arguments->begin, 8);
+      iree_align_uint64(arguments->end - arguments->begin, program ? 32 : 8);
   const uint64_t offset = relative & (arguments->capacity - 1);
   const uint64_t start = arguments->begin + relative;
   const uint64_t completed = (uint64_t)iree_atomic_load(
@@ -432,13 +441,18 @@ iree_hal_amd_gpu_pm4_publish_transfer(
       iree_min(queue->producer.ring.capacity / 2, 16384u);
   const uint32_t wait_words = first ? submission->native_wait_count * 7 : 0;
   iree_hal_amd_gpu_pm4_transfer_chunk_t chunk;
-  iree_status_t status = iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
-      transfer,
-      iree_min(IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS,
-               word_budget - wait_words - 96),
+  const uint32_t word_capacity = iree_min(
+      IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS, word_budget - wait_words - 96);
+  const iree_byte_span_t staging =
       iree_make_byte_span(arguments->memory.contents.data + offset,
-                          iree_min(available, staging_window_length)),
-      arguments->address + offset, &chunk);
+                          iree_min(available, staging_window_length));
+  iree_status_t status =
+      program ? iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
+                    transfer, &queue->options.programs->blit, word_capacity,
+                    staging, arguments->address + offset, &chunk)
+              : iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
+                    transfer, word_capacity, staging,
+                    arguments->address + offset, &chunk);
   if (!iree_status_is_ok(status)) {
     iree_hal_amd_gpu_pm4_abandon(queue, submission, status);
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;
@@ -451,6 +465,9 @@ iree_hal_amd_gpu_pm4_publish_transfer(
       first ? submission->before : (iree_hal_amd_gpu_pm4_barrier_t){0};
   // Every preceding publication drains its own CP DMA before retirement.
   before.execution &= ~IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
+  if (program) {
+    before.cache_control |= 1u;  // Publish resident builtin instructions.
+  }
   if (chunk.staging_length > chunk.download.length) {
     // Host-written transport bytes need visibility even with empty payload
     // barriers. This is the same mandatory publication as native kernargs.
