@@ -609,6 +609,7 @@ class BuildFileFunctions:
                     linkable_more_than_once="LINKABLE_MORE_THAN_ONCE"
                     in (kwargs.get("tags") or []),
                     msvc=Option("MSVC").evaluate(self._configuration),
+                    wasm=self._configuration.get("CMAKE_SYSTEM_PROCESSOR") == "wasm32",
                 )
             interface_blocks = defines_block + includes_block + system_includes_block
             return (

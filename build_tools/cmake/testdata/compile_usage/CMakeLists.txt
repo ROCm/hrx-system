@@ -35,7 +35,6 @@ target_compile_definitions(iree_fixture_leaf INTERFACE
   "$<$<COMPILE_LANGUAGE:C>:LANGUAGE_VALUE=19>")
 iree_generate_cmake()
 iree_add_subdirectory(package)
-iree_cc_unified_library(NAME unified ROOT ::branch)
 iree_generate_export_targets(EXPORT_SET fixture COMPONENT FixtureLibraries
   INSTALL_DESTINATION lib/cmake/fixture)
 
@@ -57,9 +56,6 @@ iree_cc_library(NAME requirements DEPS ::boundary ::cycle_a)
 add_executable(probe main.c)
 target_link_libraries(probe PRIVATE iree_fixture_branch iree_fixture_requirements)
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/probe-$<CONFIG>.txt" CONTENT "$<TARGET_FILE:probe>")
-add_executable(unified_probe main.c)
-target_link_libraries(unified_probe PRIVATE iree_fixture_unified iree_fixture_requirements)
-file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/unified_probe-$<CONFIG>.txt" CONTENT "$<TARGET_FILE:unified_probe>")
 
 if(FIXTURE_SCOPED)
   add_subdirectory(scoped)

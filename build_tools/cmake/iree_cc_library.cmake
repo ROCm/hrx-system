@@ -194,12 +194,6 @@ function(iree_cc_library)
         ${_RULE_HDR_TARGET_SRCS}
     )
 
-    # Keep track of objects transitively in our special property.
-    set_property(TARGET ${_NAME} PROPERTY
-      INTERFACE_IREE_TRANSITIVE_OBJECTS
-      "$<GENEX_EVAL:$<TARGET_PROPERTY:${_NAME},IREE_CC_OBJECTS>>")
-    _iree_cc_library_add_object_deps(${_NAME} ${_RULE_DEPS})
-
     # Wrap whole lists to preserve conditions spanning multiple directories.
     # This also avoids per-directory expression work in transitive consumers.
     target_include_directories(${_NAME}
@@ -280,11 +274,6 @@ function(iree_cc_library)
         ${_RULE_SRC_TARGET_SRCS}
         ${_RULE_HDR_TARGET_SRCS}
     )
-
-    set_property(TARGET ${_NAME} PROPERTY
-      INTERFACE_IREE_TRANSITIVE_OBJECTS
-      "$<GENEX_EVAL:$<TARGET_PROPERTY:${_NAME},IREE_CC_OBJECTS>>")
-    _iree_cc_library_add_object_deps(${_NAME} ${_RULE_DEPS})
 
     # INTERFACE library propagates objects and link dependencies to consumers.
     target_link_libraries(${_NAME}
@@ -397,13 +386,16 @@ function(iree_cc_library)
       INTERFACE
         ${_LINK_LIBRARIES}
     )
-    _iree_cc_library_add_object_deps(${_NAME} ${_RULE_DEPS})
     iree_add_data_dependencies(NAME ${_NAME} DATA ${_RULE_DATA}
       OUT_TARGET_DATA _DATA_TARGETS)
     target_compile_definitions(${_NAME}
       INTERFACE
         ${_RULE_DEFINES}
     )
+  endif()
+
+  if(CMAKE_SYSTEM_PROCESSOR STREQUAL "wasm32")
+    _iree_cc_library_add_wasm_deps(${_NAME} ${_RULE_DEPS})
   endif()
 
   if(_RULE_IS_INTERFACE OR _RULE_ALWAYSLINK)
@@ -486,144 +478,17 @@ function(iree_cc_library_add_external_objects target)
   set_property(TARGET ${target} APPEND PROPERTY IREE_CC_OBJECTS ${ARGN})
 endfunction()
 
-# _iree_cc_library_add_object_deps()
-#
-# Helper to add deps to an iree_cc_library. This only operates on the unaliased
-# raw name (i.e. 'iree_hal_hal'), not aliased names (i.e. 'iree::hal').
-#
-# This appends to two properties:
-#   INTERFACE_IREE_TRANSITIVE_OBJECTS: Transitive list of all objects from
-#     this library and all "iree::" prefixed dependent libraries. This will
-#     allow you to create mondo objects for any transitive libraries that are
-#     part of IREE, but it will not contain outside.
-#   INTERFACE_IREE_TRANSITIVE_OBJECT_LIBS: Transitive list of any dependency
-#     targets that are not under the "iree::" namespace but are encountered
-#     in the dependency dag.
-function(_iree_cc_library_add_object_deps name)
-  foreach(_DEP_TARGET ${ARGN})
+# Preserve transitive JS companions for the final WASM bundler. Generator
+# expressions allow providers to be declared after their consumers.
+function(_iree_cc_library_add_wasm_deps name)
+  foreach(_DEP_TARGET IN LISTS ARGN)
     if(_DEP_TARGET MATCHES "^iree::")
       set_property(TARGET ${name} APPEND PROPERTY
-        INTERFACE_IREE_TRANSITIVE_OBJECTS
-        "$<GENEX_EVAL:$<TARGET_PROPERTY:${_DEP_TARGET},INTERFACE_IREE_TRANSITIVE_OBJECTS>>"
-      )
+        IREE_WASM_JS_ENTRIES
+        "$<GENEX_EVAL:$<TARGET_PROPERTY:${_DEP_TARGET},IREE_WASM_JS_ENTRIES>>")
       set_property(TARGET ${name} APPEND PROPERTY
-      INTERFACE_IREE_TRANSITIVE_OBJECT_LIBS
-        "$<GENEX_EVAL:$<TARGET_PROPERTY:${_DEP_TARGET},INTERFACE_IREE_TRANSITIVE_OBJECT_LIBS>>"
-      )
-      # Propagate wasm JS companion metadata through the iree:: dep chain.
-      # These are genex recipe strings — they resolve at generation time after
-      # all targets are defined, making this fully order-independent.
-      if(CMAKE_SYSTEM_PROCESSOR STREQUAL "wasm32")
-        set_property(TARGET ${name} APPEND PROPERTY
-          IREE_WASM_JS_ENTRIES
-          "$<GENEX_EVAL:$<TARGET_PROPERTY:${_DEP_TARGET},IREE_WASM_JS_ENTRIES>>"
-        )
-        set_property(TARGET ${name} APPEND PROPERTY
-          IREE_WASM_JS_SRCS
-          "$<GENEX_EVAL:$<TARGET_PROPERTY:${_DEP_TARGET},IREE_WASM_JS_SRCS>>"
-        )
-      endif()
-    else()
-      set_property(TARGET ${name} APPEND PROPERTY
-        INTERFACE_IREE_TRANSITIVE_OBJECT_LIBS
-        ${_DEP_TARGET}
-      )
+        IREE_WASM_JS_SRCS
+        "$<GENEX_EVAL:$<TARGET_PROPERTY:${_DEP_TARGET},IREE_WASM_JS_SRCS>>")
     endif()
   endforeach()
-endfunction()
-
-# iree_cc_unified_library()
-#
-# Creates a unified library out of the iree:: namespaced transitive deps+self
-# of some ROOT library. The resulting library will contain the union of all
-# objects from all transitive library-deps in the iree:: namespace. Such
-# libraries are typically the only libraries that we install for outside use
-# and they must only be used by leaf demos or out of tree libraries/executables.
-# Commingling with any regular libraries will result in duplicate symbols.
-#
-# Note that the resulting library will not contain any libraries outside of the
-# iree:: namespace but will be configured to link to them. For external use
-# it is expected that they will be installed and used separately as needed.
-#
-# Compile and link options are forwarded from the ROOT target non-transitively.
-# Ensure that this target directly references all definitions that need to
-# be exported to end consumers.
-#
-# Parameters:
-# NAME: name of target
-# ROOT: Root target library to extract objects and deps from.
-function(iree_cc_unified_library)
-  cmake_parse_arguments(
-    _RULE
-    "SHARED"
-    "NAME;ROOT"
-    ""
-    ${ARGN}
-  )
-
-  # Replace dependencies passed by ::name with iree::package::name
-  iree_package_ns(_PACKAGE_NS)
-  list(TRANSFORM _RULE_ROOT REPLACE "^::" "${_PACKAGE_NS}::")
-
-  # Prefix the library with the package name, so we get: iree_package_name.
-  iree_package_name(_PACKAGE_NAME)
-  set(_NAME "${_PACKAGE_NAME}_${_RULE_NAME}")
-
-  # Evaluate the object and libs.
-  set(_OBJECTS "$<REMOVE_DUPLICATES:$<GENEX_EVAL:$<TARGET_PROPERTY:${_RULE_ROOT},INTERFACE_IREE_TRANSITIVE_OBJECTS>>>")
-  set(_LIBS "$<REMOVE_DUPLICATES:$<GENEX_EVAL:$<TARGET_PROPERTY:${_RULE_ROOT},INTERFACE_IREE_TRANSITIVE_OBJECT_LIBS>>>")
-
-  # For debugging, write out evaluated objects to a file.
-  # This cannot be enabled for Xcode given that Xcode does not support
-  # per-configuration sources.
-  if (NOT "${CMAKE_GENERATOR}" STREQUAL "Xcode")
-    file(GENERATE OUTPUT "${_RULE_NAME}.$<CONFIG>.contents.txt" CONTENT
-      "OBJECTS:\n${_OBJECTS}\n\nLIBS:\n${_LIBS}\n")
-  endif()
-  if(_RULE_SHARED)
-    add_library(${_NAME} SHARED ${_OBJECTS})
-  else()
-    add_library(${_NAME} STATIC ${_OBJECTS})
-  endif()
-
-  target_link_libraries(${_NAME}
-    PUBLIC
-      ${_LIBS}
-  )
-
-  # Forward compile usage requirements from the root library.
-  target_include_directories(${_NAME}
-    PUBLIC
-      $<TARGET_PROPERTY:${_RULE_ROOT},INTERFACE_INCLUDE_DIRECTORIES>
-  )
-  target_compile_options(${_NAME}
-    PRIVATE
-      $<TARGET_PROPERTY:${_RULE_ROOT},COMPILE_OPTIONS>
-  )
-  target_compile_definitions(${_NAME}
-    PUBLIC
-      $<TARGET_PROPERTY:${_RULE_ROOT},INTERFACE_COMPILE_DEFINITIONS>
-  )
-  target_link_libraries(${_NAME}
-    PUBLIC
-      $<TARGET_GENEX_EVAL:$<TARGET_NAME:${_RULE_ROOT}>,$<TARGET_PROPERTY:${_RULE_ROOT},INTERFACE_LINK_LIBRARIES>>
-  )
-  iree_target_sanitizer_suppressions("${_NAME}" DEPS "${_RULE_ROOT}")
-
-  iree_install_targets(
-    TARGETS ${_NAME}
-  )
-
-  # Alias the iree_package_name library to iree::package::name.
-  # This lets us more clearly map to Bazel and makes it possible to
-  # disambiguate the underscores in paths vs. the separators.
-  iree_add_alias_library(${_PACKAGE_NS}::${_RULE_NAME} ${_NAME})
-
-  # If the library name matches the final component of the package then treat
-  # it as a default. For example, foo/bar/ library 'bar' would end up as
-  # 'foo::bar'.
-  iree_package_dir(_PACKAGE_DIR)
-  if(${_RULE_NAME} STREQUAL ${_PACKAGE_DIR})
-    iree_add_alias_library(${_PACKAGE_NS} ${_NAME})
-  endif()
 endfunction()

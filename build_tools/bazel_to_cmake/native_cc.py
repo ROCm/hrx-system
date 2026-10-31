@@ -120,6 +120,7 @@ def library(
     testonly,
     linkable_more_than_once,
     msvc,
+    wasm,
 ):
     """Emits a static or interface library owned by a configured BUILD rule."""
     name = declaration.name.replace("::", "_")
@@ -170,11 +171,6 @@ def library(
         property(compile_target, "FOLDER", "${IREE_IDE_FOLDER}")
         property(name, "IREE_CC_OBJECT_TARGET", compile_target)
         property(name, "IREE_CC_OBJECTS", f"$<TARGET_OBJECTS:{compile_target}>")
-        property(
-            name,
-            "INTERFACE_IREE_TRANSITIVE_OBJECTS",
-            f"$<GENEX_EVAL:$<TARGET_PROPERTY:{name},IREE_CC_OBJECTS>>",
-        )
     else:
         emit("add_library", name, "INTERFACE")
         if generated_headers:
@@ -239,9 +235,8 @@ def library(
                 (f"$<TARGET_PROPERTY:{name},{key}>",),
             )
 
-    # Authored shared/unified products still consume these native interfaces.
-    # The source graph owns ordinary closure resolution above this boundary.
-    emit("_iree_cc_library_add_object_deps", name, " ".join(dependencies))
+    if wasm:
+        emit("_iree_cc_library_add_wasm_deps", name, " ".join(dependencies))
     lines.append(generated_dependencies(compile_target, generated_inputs, producers))
     if not testonly:
         emit("iree_install_targets", "TARGETS", name, "HDRS", arguments(headers))

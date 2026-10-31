@@ -30,6 +30,57 @@ def copy_source(source):
 
 
 class CMakeCompileUsageTest(unittest.TestCase):
+    def test_wasm_companions_reach_the_bundler_through_generated_libraries(self):
+        with tempfile.TemporaryDirectory(prefix="cmake wasm companions ") as temporary:
+            root = Path(temporary)
+            source, build = root / "source", root / "build"
+            package = source / "package"
+            package.mkdir(parents=True)
+            shutil.copyfile(
+                FIXTURE / ".bazel_to_cmake.cfg.py",
+                source / ".bazel_to_cmake.cfg.py",
+            )
+            (package / "BUILD.bazel").write_text(
+                'cc_library(name="middle", deps=["//native:leaf"])\n'
+                'cc_library(name="branch", deps=[":middle"])\n'
+            )
+            (source / "companion.mjs").write_text(
+                "export function createImports(context) { return {}; }\n"
+            )
+            (source / "main.mjs").write_text("createWasmImports({});\n")
+            (source / "module.wasm").write_bytes(b"\x00asm\x01\x00\x00\x00")
+            (
+                source / "CMakeLists.txt"
+            ).write_text("""cmake_minimum_required(VERSION 3.26...4.2)
+project(wasm_companions NONE)
+set(CMAKE_SYSTEM_PROCESSOR wasm32)
+set(IREE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+set(IREE_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+set(IREE_PACKAGE_ROOT_DIR "${IREE_SOURCE_DIR}")
+set(IREE_PACKAGE_ROOT_PREFIX iree/fixture)
+include("${IREE_REPO_ROOT}/build_tools/cmake/iree_macros.cmake")
+include("${IREE_REPO_ROOT}/build_tools/cmake/iree_install_support.cmake")
+include("${IREE_REPO_ROOT}/build_tools/cmake/iree_cc_library.cmake")
+include("${IREE_REPO_ROOT}/build_tools/cmake/iree_add_all_subdirs.cmake")
+include("${IREE_REPO_ROOT}/build_tools/cmake/iree_generated_cmake.cmake")
+include("${IREE_REPO_ROOT}/runtime/build_tools/cmake/iree_wasm_library.cmake")
+iree_generate_cmake()
+iree_add_subdirectory(package)
+# Providers arrive after the source-owned consumers, as with native imports.
+iree_cc_library(NAME leaf DEPS ::companion)
+iree_wasm_cc_library(NAME companion MODULE fixture SRCS companion.mjs)
+add_executable(module IMPORTED)
+set_property(TARGET module PROPERTY IMPORTED_LOCATION "${IREE_SOURCE_DIR}/module.wasm")
+_iree_wasm_setup_bundler(WASM_TARGET module
+  OUTPUT "${IREE_BINARY_DIR}/module.mjs" MAIN main.mjs
+  DEPS iree::fixture::branch)
+""")
+            configure_project(source, build)
+            self.assertEqual(
+                (build / "module.mjs.modules").read_text().splitlines(),
+                [f"fixture:{(source / 'companion.mjs').as_posix()}"],
+            )
+
     def test_native_requirements_and_relocated_consumer(self):
         with tempfile.TemporaryDirectory(prefix="cmake compile usage ") as temporary:
             root = Path(temporary)
@@ -41,12 +92,9 @@ class CMakeCompileUsageTest(unittest.TestCase):
             )
 
             def check():
-                build_project(build, "probe", "unified_probe")
-                for name in ("probe", "unified_probe"):
-                    executable = Path(
-                        (build / f"{name}-{CONFIGURATION}.txt").read_text()
-                    )
-                    self.assertEqual(run_command(str(executable)), "42\n")
+                build_project(build, "probe")
+                executable = Path((build / f"probe-{CONFIGURATION}.txt").read_text())
+                self.assertEqual(run_command(str(executable)), "42\n")
 
             # Exercise native imports through the resolved source-owned chain.
             version = tuple(
@@ -96,7 +144,7 @@ project(usage_consumer C)
 include("${FIXTURE_PREFIX}/lib/cmake/fixture/IREETargets-fixture.cmake")
 add_executable(probe main.c)
 target_compile_definitions(probe PRIVATE INSTALLED_CONSUMER=1)
-target_link_libraries(probe PRIVATE iree_fixture_unified)
+target_link_libraries(probe PRIVATE iree_fixture_branch)
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/probe-$<CONFIG>.txt" CONTENT "$<TARGET_FILE:probe>")
 """)
             source.rename(root / "source hidden")

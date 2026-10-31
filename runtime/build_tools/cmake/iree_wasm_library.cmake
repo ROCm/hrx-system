@@ -219,7 +219,7 @@ endfunction()
 # This function:
 #   1. Propagates IREE_WASM_JS_ENTRIES and IREE_WASM_JS_SRCS from deps using
 #      the same $<GENEX_EVAL:$<TARGET_PROPERTY:...>> pattern as
-#      _iree_cc_library_add_object_deps. This makes the collection fully
+#      _iree_cc_library_add_wasm_deps. This makes the collection fully
 #      order-independent — targets don't need to exist at configure time.
 #   2. Discovers the entry point from direct deps via generation-time genexes.
 #   3. Generates a manifest file via file(GENERATE) (evaluated at generation
