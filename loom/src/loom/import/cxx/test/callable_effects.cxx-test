@@ -16,3 +16,30 @@ unsigned combine(const unsigned* input, unsigned value) {
 // CHECK: *func.call pure @pure_middle*
 // CHECK: *func.call readonly @read_leaf*
 // CHECK: *func.call readonly @read_middle*
+
+// ====
+#include <loomcxx/pipeline.h>
+
+namespace loomt = loom::type;
+using Payload = loomt::tile<loomt::shape<4>, unsigned>;
+using Stream = loomt::channel<Payload>;
+using Slots = loomt::view<loomt::shape<2, 4>, unsigned>;
+
+struct Resources {
+  unsigned char* storage;
+  Stream stream;
+};
+
+[[loom::force_inline]] static Resources make_resources(loomt::pool pool, loomt::index storage_size, Slots slots) {
+  auto* storage = loom::buffer::alloca<unsigned char, loom::memory_space::workgroup, 64>(storage_size, pool);
+  auto stream = loom::channel::bind<loom::channel::discipline::fifo>(slots, loomt::index{2});
+  return {.storage = storage, .stream = stream};
+}
+
+Resources construct_resources(loomt::pool pool, loomt::index storage_size, Slots slots) {
+  return make_resources(pool, storage_size, slots);
+}
+
+// ----
+// CHECK: *buffer.alloca<workgroup>*
+// CHECK: *channel.bind<fifo>*

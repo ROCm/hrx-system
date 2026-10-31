@@ -467,7 +467,10 @@ class LowLowerSourcePlanTest : public ::testing::Test {
     // Fresh identity prevents commoning but does not make an unused result
     // observable. The source plan must agree with canonical DCE on that
     // distinction.
+    const loom_trait_flags_t old_dead_traits = dead_op->traits;
     dead_op->traits |= LOOM_TRAIT_UNIQUE_IDENTITY;
+    loom_module_update_op_direct_summaries(module_, dead_op, old_dead_traits,
+                                           dead_op->traits);
     const loom_value_id_t dead = loom_scalar_addi_result(dead_op);
     loom_op_t* dead_identity_op = nullptr;
     IREE_ASSERT_OK(loom_scalar_assume_build(

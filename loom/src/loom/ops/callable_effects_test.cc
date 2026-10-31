@@ -12,6 +12,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/test/ops.h"
 #include "loom/rewrite/rewriter.h"
 
 namespace loom {
@@ -28,6 +29,9 @@ class CallableEffectsTest : public ::testing::Test {
         loom_func_dialect_vtables(&vtable_count);
     IREE_ASSERT_OK(loom_context_register_dialect(
         &context_, LOOM_DIALECT_FUNC, vtables, (uint16_t)vtable_count));
+    vtables = loom_test_dialect_vtables(&vtable_count);
+    IREE_ASSERT_OK(loom_context_register_dialect(
+        &context_, LOOM_DIALECT_TEST, vtables, (uint16_t)vtable_count));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"),
                                         &block_pool_, nullptr,
@@ -127,6 +131,18 @@ class CallableEffectsTest : public ::testing::Test {
                                           LOOM_LOCATION_UNKNOWN, &return_op));
   }
 
+  void AppendAllocation(loom_func_like_t function) {
+    loom_builder_t builder = BodyBuilder(function);
+    loom_op_t* size_op = nullptr;
+    IREE_ASSERT_OK(loom_test_constant_build(
+        &builder, loom_attr_i64(16), loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+        LOOM_LOCATION_UNKNOWN, &size_op));
+    loom_op_t* allocation_op = nullptr;
+    IREE_ASSERT_OK(loom_test_alloc_build(
+        &builder, loom_test_constant_result(size_op), loom_type_pool(),
+        LOOM_LOCATION_UNKNOWN, &allocation_op));
+  }
+
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
   loom_module_t* module_ = nullptr;
@@ -198,6 +214,33 @@ TEST_F(CallableEffectsTest, DefinitionsUseBodyEffects) {
   EXPECT_TRUE(loom_callable_effects_may_access_memory(impure));
   EXPECT_EQ(loom_callable_effects_written_memory_spaces(impure),
             1u << LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN);
+}
+
+TEST_F(CallableEffectsTest, FreshIdentityPreventsPureCallCanonicalization) {
+  loom_func_like_t allocator = {};
+  BuildDefinition(IREE_SV("allocator"), &allocator);
+  AppendAllocation(allocator);
+  AppendReturn(allocator);
+  EXPECT_TRUE(
+      loom_region_has_unique_identities(loom_func_like_body(allocator)));
+  EXPECT_FALSE(loom_callable_effects_is_pure(allocator));
+  EXPECT_EQ(loom_callable_effects_callee_contract(
+                module_, loom_func_like_callee(allocator)),
+            LOOM_CALLABLE_EFFECT_CONTRACT_UNSPECIFIED);
+
+  loom_func_like_t caller = {};
+  BuildDefinition(IREE_SV("caller"), &caller);
+  loom_op_t* call_op = nullptr;
+  AppendCall(caller, allocator, &call_op);
+  AppendReturn(caller);
+
+  loom_rewriter_t rewriter = {};
+  loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_);
+  IREE_EXPECT_OK(loom_func_call_canonicalize(call_op, &rewriter));
+  loom_rewriter_deinitialize(&rewriter);
+
+  EXPECT_EQ(loom_func_call_effect_contract(call_op),
+            LOOM_CALLABLE_EFFECT_CONTRACT_UNSPECIFIED);
 }
 
 TEST_F(CallableEffectsTest, PropagationRefreshesCallerEffects) {
