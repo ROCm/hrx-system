@@ -1622,10 +1622,12 @@ class Translator final : private Initialization::Evaluation {
           }
           return {expression->type, address(expression)};
         }
-        if (!values_.contains(destination->binding)) {
+        if (values_.contains(destination->binding)) {
+          return {expression->type, *destination};
+        }
+        if (access == LvalueAccess::Write) {
           fail(owner, "mutation requires an owned automatic source binding");
         }
-        return {expression->type, *destination};
       }
     }
     if (preserve_identity || unit_.typeTraits().is_class(expression->type) ||

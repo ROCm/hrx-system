@@ -24,6 +24,79 @@ func.def @adjust(%value$6: i32, %delta: i32) -> (i32, %value$6 as i32) {
 }
 
 // ====
+constexpr double table[8] = {0.1, 0.2, 0.4, 0.8, 1.6, 3.2, 6.4, 12.8};
+
+static double lookup(const double (&values)[8], unsigned index) {
+  return values[index];
+}
+
+template <int N>
+static double lookup_template(const double (&values)[N], unsigned index) {
+  return values[index];
+}
+
+double immutable_references(double input, unsigned index) {
+  double first = lookup(table, index & 7u);
+  double second = lookup_template(table, (index + 1u) & 7u);
+  return (first + second + table[(index + 2u) & 7u]) * input;
+}
+
+// ----
+func.def public @immutable_references(%input: f64, %index: i32) -> (f64) {
+  %table_storage = global.load @table : buffer
+  %table_storage_byte_offset = index.constant 0 : offset
+  %table_view = buffer.view %table_storage[%table_storage_byte_offset] : buffer -> view<8xf64>
+  %6 = scalar.constant 7 : i32
+  %7 = scalar.andi %index, %6 : i32
+  %first = func.call readonly @lookup(%table_storage, %table_storage_byte_offset, %7) : (buffer, offset, i32) -> (f64)
+  %9 = scalar.constant 1 : i32
+  %10 = scalar.addi %index, %9 : i32
+  %11 = scalar.constant 7 : i32
+  %12 = scalar.andi %10, %11 : i32
+  %second = func.call readonly @lookup_template_8(%table_storage, %table_storage_byte_offset, %12) : (buffer, offset, i32) -> (f64)
+  %14 = scalar.addf %first, %second : f64
+  %15 = scalar.constant 2 : i32
+  %16 = scalar.addi %index, %15 : i32
+  %17 = scalar.constant 7 : i32
+  %18 = scalar.andi %16, %17 : i32
+  %19 = scalar.extui %18 : i32 to i64
+  %20 = scalar.assume %19 [range(%19, 0, 7)] : i64
+  %21 = index.cast %20 : i64 to index
+  %22 = view.load %table_view[%21] : view<8xf64> -> f64
+  %23 = scalar.addf %14, %22 : f64
+  %24 = scalar.mulf %23, %input : f64
+  func.return %24 : f64
+}
+
+func.def @lookup(%values: buffer, %values_byte_offset: offset, %index: i32) -> (f64) {
+  %29 = scalar.extui %index : i32 to i64
+  %30 = scalar.constant 8 : i64
+  %31 = scalar.muli %29, %30 : i64
+  %32 = index.cast %values_byte_offset : offset to i64
+  %33 = scalar.addi %32, %31 : i64
+  %34 = scalar.assume %33 [range(%33, 0, 9223372036854775807)] : i64
+  %35 = index.cast %34 : i64 to offset
+  %36 = buffer.view %values[%35] : buffer -> view<1xf64>
+  %37 = view.load %36[0] : view<1xf64> -> f64
+  func.return %37 : f64
+}
+
+func.def @lookup_template_8(%values: buffer, %values_byte_offset: offset, %index: i32) -> (f64) {
+  %42 = scalar.extui %index : i32 to i64
+  %43 = scalar.constant 8 : i64
+  %44 = scalar.muli %42, %43 : i64
+  %45 = index.cast %values_byte_offset : offset to i64
+  %46 = scalar.addi %45, %44 : i64
+  %47 = scalar.assume %46 [range(%46, 0, 9223372036854775807)] : i64
+  %48 = index.cast %47 : i64 to offset
+  %49 = buffer.view %values[%48] : buffer -> view<1xf64>
+  %50 = view.load %49[0] : view<1xf64> -> f64
+  func.return %50 : f64
+}
+
+global.rodata.def @table = align(8) bytes("9a9999999999b93f9a9999999999c93f9a9999999999d93f9a9999999999e93f9a9999999999f93f9a999999999909409a999999999919409a99999999992940")
+
+// ====
 using UInt4 = unsigned __attribute__((vector_size(16)));
 
 static void update_lane(UInt4& values, unsigned lane, unsigned amount) {
