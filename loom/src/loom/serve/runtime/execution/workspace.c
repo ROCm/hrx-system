@@ -467,11 +467,14 @@ static iree_device_size_t loom_serve_workspace_trim_locked(
   for (loom_serve_workspace_generation_t* generation = workspace->current;
        generation; generation = generation->next) {
     iree_hal_pool_trim(generation->pool, IREE_HAL_POOL_TRIM_FLAG_ALL, 0);
-    iree_hal_pool_trim(
-        generation->cache ? generation->cache : workspace->backing_pool,
-        IREE_HAL_POOL_TRIM_FLAG_ALL, 0);
-    // Child returns reach the cache synchronously. After trimming both layers,
-    // only backing still retained by the child contributes to reclamation.
+    if (!workspace->virtual_pool) {
+      iree_hal_pool_trim(
+          generation->cache ? generation->cache : workspace->backing_pool,
+          IREE_HAL_POOL_TRIM_FLAG_ALL, 0);
+    }
+    // Child returns reach their backing synchronously. Only backing still
+    // retained by the child contributes here; virtual returns progress after
+    // leaving the workspace lock.
     iree_hal_pool_stats_t statistics;
     iree_hal_pool_query_stats(generation->pool, &statistics);
     retained_bytes += statistics.bytes_committed;
@@ -504,6 +507,12 @@ bool loom_serve_workspace_trim_idle(loom_serve_workspace_t* workspace,
   bool pending = live || (workspace->idle.since && !workspace->idle.trimmed);
   if (!live && pending && now - workspace->idle.since >= timeout) {
     loom_serve_workspace_trim_locked(workspace);
+    // Idle maintenance only requests native work. Explicit physical-pressure
+    // reclamation instead advances the returns on its already-running owner.
+    if (workspace->virtual_pool) {
+      iree_hal_pool_trim(workspace->backing_pool, IREE_HAL_POOL_TRIM_FLAG_ALL,
+                         0);
+    }
     pending = false;
   }
   iree_slim_mutex_unlock(&workspace->mutex);
