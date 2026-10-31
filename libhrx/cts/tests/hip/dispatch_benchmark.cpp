@@ -481,18 +481,21 @@ class HipGraph {
   HipRuntime& runtime_;
   // Captured serial dispatch program, retained until after its executable.
   hipGraph_t graph_ = nullptr;
-  // Reused executable; every iteration waits before the next replay.
+  // Reused executable; each measured batch joins all of its replays.
   hipGraphExec_t executable_ = nullptr;
 };
 
-template <bool kGraph, bool kEndToEnd>
+template <bool kGraph, bool kEndToEnd, bool kBurst = false>
 void Dispatch(benchmark::State& state) {
   auto& runtime = Runtime();
   const int64_t dispatch_count = state.range(0);
+  const int64_t invocation_count = kBurst ? state.range(1) : 1;
   std::unique_ptr<HipGraph> graph;
   if constexpr (kGraph) {
     graph = std::make_unique<HipGraph>(runtime, dispatch_count);
-    graph->Launch();
+    for (int64_t i = 0; i < invocation_count; ++i) {
+      graph->Launch();
+    }
   } else {
     for (int64_t i = 0; i < dispatch_count; ++i) {
       runtime.Launch();
@@ -504,7 +507,9 @@ void Dispatch(benchmark::State& state) {
 
   for (auto _ : state) {
     if constexpr (kGraph) {
-      graph->Launch();
+      for (int64_t i = 0; i < invocation_count; ++i) {
+        graph->Launch();
+      }
     } else {
       for (int64_t i = 0; i < dispatch_count; ++i) {
         runtime.Launch();
@@ -520,7 +525,8 @@ void Dispatch(benchmark::State& state) {
   }
   runtime.VerifyOutput();
   state.SetLabel(runtime.label());
-  state.SetItemsProcessed(state.iterations() * dispatch_count);
+  state.SetItemsProcessed(state.iterations() * dispatch_count *
+                          invocation_count);
 }
 
 // Device event intervals include preparation and execution between two queue
@@ -605,6 +611,18 @@ BENCHMARK_TEMPLATE(Dispatch, true, true)
     ->RangeMultiplier(2)
     ->Range(1, 256)
     ->Arg(4096)
+    ->UseRealTime();
+
+// Repeated asynchronous launches keep invocation storage live until the stream
+// joins the complete batch. These distinguish submission latency from queue
+// capacity and steady execution throughput for small captured programs.
+BENCHMARK_TEMPLATE(Dispatch, true, false, true)
+    ->Name("HIP/Graph/BurstEnqueue")
+    ->ArgsProduct({{4, 16, 32, 64}, {8, 64}})
+    ->UseRealTime();
+BENCHMARK_TEMPLATE(Dispatch, true, true, true)
+    ->Name("HIP/Graph/BurstEndToEnd")
+    ->ArgsProduct({{4, 16, 32, 64}, {8, 64}})
     ->UseRealTime();
 
 BENCHMARK(GraphEventInterval)
