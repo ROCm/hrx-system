@@ -208,13 +208,103 @@ TEST_F(ElasticTextServiceTest, PrefixNativeBackingRetiresBeforeTrim) {
   CheckPrefixBackingRetirement(/*trim_first=*/true);
 }
 
+TEST_F(ElasticTextServiceTest, TrimPreservesSparseCacheWithoutPhysicalSavings) {
+  const uint64_t slab_size =
+      loom_serve_test_application_options_default().slab_size;
+  // Packing within one slab and replacing one live slab with another both
+  // leave the same footprint. Neither justifies moving a shared cache page.
+  for (uint64_t hole_extent : {UINT64_C(32), slab_size / 4}) {
+    auto options = ModelOptions();
+    options.context_capacity = slab_size / 8;
+    options.pool_capacity = slab_size / 2;
+    loom_serve_text_model_t* sparse = nullptr;
+    IREE_ASSERT_OK(loom_serve_text_model_allocate(
+        device_, storage_owner_, &options, host_allocator_, &sparse));
+    const auto release_model = [](loom_serve_text_model_t* model) {
+      IREE_EXPECT_OK(loom_serve_text_model_free(model));
+    };
+    const std::unique_ptr<loom_serve_text_model_t, decltype(release_model)>
+        owner(sparse, release_model);
+    auto* hole = loom_serve_text_model_row(sparse, 0);
+    auto* source = loom_serve_text_model_row(sparse, 1);
+    auto* upper_hole = loom_serve_text_model_row(sparse, 2);
+    const uint64_t first_hole_extent =
+        iree_min(hole_extent, options.context_capacity);
+    bool admitted = false;
+    IREE_ASSERT_OK(
+        loom_serve_text_row_try_reserve(hole, LOOM_SERVE_TEXT_RESERVE_FRESH,
+                                        nullptr, first_hole_extent, &admitted));
+    ASSERT_TRUE(admitted);
+    if (hole_extent > first_hole_extent) {
+      IREE_ASSERT_OK(loom_serve_text_row_try_reserve(
+          upper_hole, LOOM_SERVE_TEXT_RESERVE_FRESH, nullptr,
+          hole_extent - first_hole_extent, &admitted));
+      ASSERT_TRUE(admitted);
+    }
+    IREE_ASSERT_OK(loom_serve_text_row_try_reserve(
+        source, LOOM_SERVE_TEXT_RESERVE_FRESH, nullptr, 16, &admitted));
+    ASSERT_TRUE(admitted);
+    const int32_t tokens[] = {0, 1, 2};
+    IREE_ASSERT_OK(
+        loom_serve_text_row_prefill(source, IREE_ARRAYSIZE(tokens), tokens));
+    loom_serve_text_checkpoint_t* checkpoint = nullptr;
+    IREE_ASSERT_OK(loom_serve_text_row_try_pin(source, &checkpoint));
+    ASSERT_NE(checkpoint, nullptr);
+    std::unique_ptr<loom_serve_text_checkpoint_t,
+                    decltype(&loom_serve_text_checkpoint_release)>
+        endpoint(checkpoint, loom_serve_text_checkpoint_release);
+    IREE_ASSERT_OK(loom_serve_text_row_reset(hole));
+    IREE_ASSERT_OK(loom_serve_text_row_reset(upper_hole));
+    loom_serve_text_trim_result_t trim;
+    IREE_ASSERT_OK(loom_serve_text_model_trim(sparse, &trim));
+    EXPECT_EQ(trim.moved_blocks, 0u);
+    EXPECT_EQ(trim.copied_bytes, 0u);
+    EXPECT_EQ(trim.released_bytes, hole_extent == 32 ? 0 : slab_size);
+    EXPECT_EQ(loom_serve_text_model_memory_statistics(sparse).committed_bytes,
+              2 * slab_size);
+    IREE_ASSERT_OK(
+        loom_serve_text_row_try_restore(hole, checkpoint, &admitted));
+    ASSERT_TRUE(admitted);
+    Oracle oracle;
+    oracle.Consume("abxb");
+    const int32_t suffix = 1;
+    for (auto* branch : {source, hole}) {
+      IREE_ASSERT_OK(loom_serve_text_row_prefill(branch, 1, &suffix));
+      EXPECT_EQ(loom_serve_text_row_token(branch), oracle.Predict());
+    }
+  }
+}
+
 TEST_F(ElasticTextServiceTest, PrefixTailRetiresBeforeCompactionAndPeerReuse) {
-  auto* hole = loom_serve_text_model_row(model_, 0);
-  auto* source = loom_serve_text_model_row(model_, 1);
-  auto* peer = loom_serve_text_model_row(model_, 2);
+  const uint64_t slab_size =
+      loom_serve_test_application_options_default().slab_size;
+  auto options = ModelOptions();
+  options.context_capacity = slab_size / 8;
+  options.pool_capacity = slab_size / 2;
+  loom_serve_text_model_t* sparse = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_model_allocate(
+      device_, storage_owner_, &options, host_allocator_, &sparse));
+  const auto release_model = [](loom_serve_text_model_t* model) {
+    IREE_EXPECT_OK(loom_serve_text_model_free(model));
+  };
+  const std::unique_ptr<loom_serve_text_model_t, decltype(release_model)> owner(
+      sparse, release_model);
+  auto* anchor = loom_serve_text_model_row(sparse, 3);
+  bool anchored = false;
+  IREE_ASSERT_OK(loom_serve_text_row_try_reserve(
+      anchor, LOOM_SERVE_TEXT_RESERVE_FRESH, nullptr, 4, &anchored));
+  ASSERT_TRUE(anchored);
+  auto* hole = loom_serve_text_model_row(sparse, 0);
+  auto* source = loom_serve_text_model_row(sparse, 1);
+  auto* peer = loom_serve_text_model_row(sparse, 2);
   bool admitted = false;
   IREE_ASSERT_OK(loom_serve_text_row_try_reserve(
-      hole, LOOM_SERVE_TEXT_RESERVE_FRESH, nullptr, 32, &admitted));
+      hole, LOOM_SERVE_TEXT_RESERVE_FRESH, nullptr, options.context_capacity,
+      &admitted));
+  ASSERT_TRUE(admitted);
+  IREE_ASSERT_OK(loom_serve_text_row_try_reserve(
+      peer, LOOM_SERVE_TEXT_RESERVE_FRESH, nullptr,
+      options.context_capacity - 4, &admitted));
   ASSERT_TRUE(admitted);
   IREE_ASSERT_OK(loom_serve_text_row_try_reserve(
       source, LOOM_SERVE_TEXT_RESERVE_FRESH, nullptr, 16, &admitted));
@@ -234,27 +324,29 @@ TEST_F(ElasticTextServiceTest, PrefixTailRetiresBeforeCompactionAndPeerReuse) {
   // before the writer's next epoch. Its completed copy-source reference must
   // not survive that relocation under the old identity.
   IREE_ASSERT_OK(loom_serve_text_row_reset(hole));
+  IREE_ASSERT_OK(loom_serve_text_row_reset(peer));
   loom_serve_text_trim_result_t trim;
-  IREE_ASSERT_OK(loom_serve_text_model_trim(model_, &trim));
+  IREE_ASSERT_OK(loom_serve_text_model_trim(sparse, &trim));
   ASSERT_GT(trim.moved_blocks, 0u);
+  EXPECT_EQ(trim.released_bytes, slab_size);
   IREE_ASSERT_OK(loom_serve_text_row_try_reserve(
       peer, LOOM_SERVE_TEXT_RESERVE_FRESH, nullptr, 16, &admitted));
   ASSERT_TRUE(admitted);
-  const auto available = loom_serve_text_model_pool_usage(model_).available;
+  const auto available = loom_serve_text_model_pool_usage(sparse).available;
   const int32_t suffix = 1;
   IREE_ASSERT_OK(loom_serve_text_row_prefill(source, 1, &suffix));
   Oracle oracle;
   oracle.Consume("abxb");
   EXPECT_EQ(loom_serve_text_row_token(source), oracle.Predict());
   // Retirement must not release the old physical ID now owned by the peer.
-  ASSERT_EQ(loom_serve_text_model_pool_usage(model_).available, available);
+  ASSERT_EQ(loom_serve_text_model_pool_usage(sparse).available, available);
 
   IREE_ASSERT_OK(
       loom_serve_text_row_prefill(peer, IREE_ARRAYSIZE(tokens), tokens));
   Oracle prefix;
   prefix.Consume("abx");
   EXPECT_EQ(loom_serve_text_row_token(peer), prefix.Predict());
-  IREE_ASSERT_OK(loom_serve_text_model_trim(model_, &trim));
+  IREE_ASSERT_OK(loom_serve_text_model_trim(sparse, &trim));
   IREE_ASSERT_OK(loom_serve_text_row_try_reserve(
       hole, LOOM_SERVE_TEXT_RESERVE_CHECKPOINT, checkpoint, 16, &admitted));
   ASSERT_TRUE(admitted);
@@ -263,9 +355,12 @@ TEST_F(ElasticTextServiceTest, PrefixTailRetiresBeforeCompactionAndPeerReuse) {
   IREE_ASSERT_OK(loom_serve_text_row_reset(hole));
   IREE_ASSERT_OK(loom_serve_text_row_reset(source));
   IREE_ASSERT_OK(loom_serve_text_row_reset(peer));
-  EXPECT_EQ(loom_serve_text_model_pool_usage(model_).available, 252u);
+  IREE_ASSERT_OK(loom_serve_text_row_reset(anchor));
+  EXPECT_EQ(loom_serve_text_model_pool_usage(sparse).available,
+            options.pool_capacity - 4);
   endpoint.reset();
-  EXPECT_EQ(loom_serve_text_model_pool_usage(model_).available, 256u);
+  EXPECT_EQ(loom_serve_text_model_pool_usage(sparse).available,
+            options.pool_capacity);
 }
 
 TEST_F(RegisteredElasticTextServiceTest,
@@ -352,11 +447,12 @@ TEST_F(ElasticTextServiceTest,
   const iree_device_size_t slab_size =
       loom_serve_test_application_options_default().slab_size;
   auto options = ModelOptions();
-  // Reserve three KV slabs and one private-state slab. Four full reservations
-  // touch two KV slabs, but only three tokens in the upper half survive. Both
-  // trim phases return full reusable slabs; no long prompt is executed.
+  // Eight full reservations touch four KV slabs. Retain one low page and
+  // one upper page: dead backing retires first, then compaction must reduce
+  // the two live KV slabs to one. No long prompt is executed.
   options.context_capacity = slab_size / 8;
-  options.pool_capacity = 3 * slab_size / 4;
+  options.pool_capacity = slab_size;
+  options.row_count = 8;
   loom_serve_text_model_t* sparse = nullptr;
   IREE_ASSERT_OK(loom_serve_text_model_allocate(
       device_, storage_owner_, &options, host_allocator_, &sparse));
@@ -365,21 +461,25 @@ TEST_F(ElasticTextServiceTest,
   };
   const std::unique_ptr<loom_serve_text_model_t, decltype(release_model)>
       sparse_owner(sparse, release_model);
-  for (size_t i = 0; i < 4; ++i) {
+  for (size_t i = 0; i < options.row_count; ++i) {
     bool admitted = false;
     IREE_ASSERT_OK(loom_serve_text_row_try_reserve(
         loom_serve_text_model_row(sparse, i), LOOM_SERVE_TEXT_RESERVE_FRESH,
         nullptr, options.context_capacity, &admitted));
     ASSERT_TRUE(admitted);
   }
-  auto* row = loom_serve_text_model_row(sparse, 2);
+  auto* row = loom_serve_text_model_row(sparse, 4);
   const int32_t tokens[] = {0, 1, 2};
   IREE_ASSERT_OK(
       loom_serve_text_row_prefill(row, IREE_ARRAYSIZE(tokens), tokens));
   Oracle reference;
   reference.Consume("abx");
   ASSERT_EQ(loom_serve_text_row_token(row), reference.Predict());
-  for (size_t i : {0u, 1u, 3u}) {
+  auto* anchor = loom_serve_text_model_row(sparse, 0);
+  IREE_ASSERT_OK(
+      loom_serve_text_row_prefill(anchor, IREE_ARRAYSIZE(tokens), tokens));
+  loom_serve_text_row_release_reservation(anchor);
+  for (size_t i : {1u, 2u, 3u, 5u, 6u, 7u}) {
     IREE_ASSERT_OK(
         loom_serve_text_row_reset(loom_serve_text_model_row(sparse, i)));
   }
@@ -388,7 +488,7 @@ TEST_F(ElasticTextServiceTest,
   IREE_ASSERT_OK(loom_serve_text_row_try_pin(row, &checkpoint));
   ASSERT_NE(checkpoint, nullptr);
   const auto before = loom_serve_text_model_memory_statistics(sparse);
-  ASSERT_EQ(before.committed_bytes, 3 * slab_size);
+  ASSERT_EQ(before.committed_bytes, 5 * slab_size);
 
   auto* warm = loom_serve_text_model_row(model_, 0);
   IREE_ASSERT_OK(
@@ -417,7 +517,7 @@ TEST_F(ElasticTextServiceTest,
     const auto physical = loom_serve_memory_pool_statistics(
         loom_serve_pool_memory(storage_owner_));
     const auto returned = loom_serve_text_model_memory_statistics(sparse);
-    EXPECT_EQ(returned.committed_bytes, before.committed_bytes - slab_size);
+    EXPECT_EQ(returned.committed_bytes, before.committed_bytes - 2 * slab_size);
     EXPECT_EQ(returned.releasing_bytes, 0u);
     EXPECT_GE(physical.releasing_bytes, slab_size);
     ASSERT_NO_FATAL_FAILURE(advance_warm());
@@ -452,7 +552,7 @@ TEST_F(ElasticTextServiceTest,
   IREE_ASSERT_OK(loom_serve_text_model_complete_trim(sparse, &result, &complete,
                                                      &frontier));
   ASSERT_TRUE(complete);
-  EXPECT_EQ(result.released_bytes, 2 * slab_size);
+  EXPECT_EQ(result.released_bytes, 3 * slab_size);
   EXPECT_EQ(loom_serve_text_model_memory_statistics(sparse).committed_bytes,
             2 * slab_size);
 

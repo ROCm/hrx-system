@@ -423,9 +423,12 @@ void loom_serve_memory_operation_free(loom_serve_memory_operation_t* operation);
 // several logical ranges stays backed if any range needs it. The caller owns
 // readiness/retirement: these functions never wait for device work themselves.
 void loom_serve_virtual_buffer_begin_trim(loom_serve_virtual_buffer_t* buffer);
-void loom_serve_virtual_buffer_keep(loom_serve_virtual_buffer_t* buffer,
-                                    iree_device_size_t offset,
-                                    iree_device_size_t length);
+// Returns the physical extent newly added to the keep set, including unbacked
+// slabs. Summing these values gives the backing required by the union of kept
+// ranges, with shared slabs counted once and the final slab's actual size.
+uint64_t loom_serve_virtual_buffer_keep(loom_serve_virtual_buffer_t* buffer,
+                                        iree_device_size_t offset,
+                                        iree_device_size_t length);
 iree_status_t loom_serve_virtual_buffer_trim(
     loom_serve_virtual_buffer_t* buffer);
 
