@@ -658,6 +658,53 @@ TEST_P(GpuNativeTransferTest, ManyFillsAndUnalignedCopiesRetireInPieces) {
   EXPECT_EQ(output, expected);
 }
 
+TEST_P(GpuNativeTransferTest, CopiesPreserveEveryVectorAlignmentAndTail) {
+  std::array<uint8_t, 32> source;
+  for (size_t i = 0; i < source.size(); ++i) {
+    source[i] = static_cast<uint8_t>(i * 31 + 7);
+  }
+  const uint8_t guard = 0xCC;
+  std::vector<uint8_t> expected(kLength, guard), output(kLength, 0);
+  std::vector<iree_hal_transfer_operation_t> copies;
+  for (size_t source_alignment = 0; source_alignment < 16; ++source_alignment) {
+    for (size_t target_alignment = 0; target_alignment < 16;
+         ++target_alignment) {
+      for (size_t length : {size_t{16}, size_t{17}}) {
+        const size_t target_offset = copies.size() * 64 + target_alignment;
+        copies.push_back({
+            .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
+            .copy =
+                {
+                    .source_buffer = buffers_[0],
+                    .source_offset = source_alignment,
+                    .target_buffer = buffers_[1],
+                    .target_offset = target_offset,
+                    .length = length,
+                },
+        });
+        std::memcpy(expected.data() + target_offset,
+                    source.data() + source_alignment, length);
+      }
+    }
+  }
+  uint64_t uploaded = 1, filled = 2, copied = 3, downloaded = 4;
+  IREE_ASSERT_OK(iree_hal_queue_upload(
+      queues_[0], {}, {1, &timeline_, &uploaded}, source.data(), buffers_[0], 0,
+      source.size(), Barriers()));
+  IREE_ASSERT_OK(iree_hal_queue_fill(
+      queues_[0], {1, &timeline_, &uploaded}, {1, &timeline_, &filled},
+      buffers_[1], 0, kLength, &guard, sizeof(guard), Barriers(), 0));
+  IREE_ASSERT_OK(iree_hal_queue_transfer(
+      queues_[1], {1, &timeline_, &filled}, {1, &timeline_, &copied},
+      copies.size(), copies.data(), Barriers()));
+  IREE_ASSERT_OK(iree_hal_queue_download(
+      queues_[1], {1, &timeline_, &copied}, {1, &timeline_, &downloaded},
+      buffers_[1], 0, output.data(), output.size(), Barriers()));
+  ReleaseBuffers();
+  Wait(downloaded);
+  EXPECT_EQ(output, expected);
+}
+
 TEST_P(GpuNativeTransferTest, ZeroLengthOperationsAreOnlyABarrier) {
   const iree_hal_transfer_operation_t operations[] = {
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL, .fill = {}},
