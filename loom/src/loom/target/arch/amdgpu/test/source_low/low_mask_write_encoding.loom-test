@@ -1,52 +1,53 @@
-// RUN: emit amdgpu-native-words @reuse strategy=source fixed=%mask:physical_register:0:2 fixed=%replacement:physical_register:0:2 fixed=%source:physical_register:4:2
+// RUN: emit amdgpu-native-words @scalar_completion_loop strategy=source
 
-// Scalar overwrite drains only scalar destinations before address arithmetic.
+// The recurring SALU write uses only its scalar-destination dependency field.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
-  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @scalar_completion_loop(%value: reg<amdgpu.vgpr>, %source: reg<amdgpu.sgpr x2>) asm {
+  low.br ^loop
+^loop:
+  %mask = s_or_b64 %source, %source
+  %result = s_and_b64 %mask, %source
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
-  %replacement = s_or_b64 %source, %source
-  %result = s_and_b64 %replacement, %source
-  return
+  low.br ^loop
 }
 
 // ----
-0xD5010000
-0x00020080
-0x8C800404
+0x8C820000
 0xBF88FF9E
-0x8B800400
-0xBFB00000
+0x8B840002
+0xD5010001
+0x000A0080
+0xBFA0FFFA
 
 // ====
-// RUN: emit amdgpu-native-words @reuse strategy=source fixed=%mask:physical_register:0:2 fixed=%replacement:physical_register:0:2 fixed=%source:physical_register:4:2
 
-// VALU overwrite uses va_sdst instead of a full ALU drain.
+// RUN: emit amdgpu-native-words @vector_completion_loop strategy=source
+
+// The recurring VALU write uses only its scalar-destination dependency field.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
-  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @vector_completion_loop(%value: reg<amdgpu.vgpr>, %source: reg<amdgpu.sgpr x2>) asm {
+  low.br ^loop
+^loop:
+  %mask = v_cmp_eq_i32 %value, %value
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
-  %replacement = v_cmp_eq_i32 %value, %value
-  %again = v_cndmask_b32_src0_inline %selected, %replacement {false_value = 0}
-  %result = s_and_b64 %replacement, %source
-  return
+  %result = s_and_b64 %mask, %source
+  low.br ^loop
 }
 
 // ----
-0xD5010001
-0x00020080
-0xD4420000
+0xD4420002
 0x02020100
 0xBF88F19F
-0xBF870101
-0xD5010000
-0x00020280
-0x8B820400
-0xBFB00000
+0xBF870001
+0xD5010001
+0x000A0080
+0x8B840002
+0xBFA0FFF8
 
 // ====
+
 // RUN: emit amdgpu-native-words @reuse strategy=source
 
 // VALU VCC overwrites select their own dependency field.

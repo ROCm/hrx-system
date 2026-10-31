@@ -1,148 +1,159 @@
-// RUN: emit amdgpu-assembly @reuse strategy=source fixed=%mask:physical_register:0:2 fixed=%replacement:physical_register:0:2 fixed=%source:physical_register:4:2
+// RUN: emit amdgpu-assembly @scalar_completion_loop strategy=source
 
-// Scalar overwrite drains only scalar destinations before address arithmetic.
+// The next iteration overwrites the mask before ordinary scalar arithmetic.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
-  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @scalar_completion_loop(%value: reg<amdgpu.vgpr>, %source: reg<amdgpu.sgpr x2>) asm {
+  low.br ^loop
+^loop:
+  %mask = s_or_b64 %source, %source
+  %result = s_and_b64 %mask, %source
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
-  %replacement = s_or_b64 %source, %source
-  %result = s_and_b64 %replacement, %source
-  return
+  low.br ^loop
 }
 
 // ----
-  v_cndmask_b32 v0, 0, v0, s[0:1]
-  s_or_b64 s[0:1], s[4:5], s[4:5]
+.Lbb1:
+  s_or_b64 s[2:3], s[0:1], s[0:1]
   s_waitcnt_depctr 0xff9e
-  s_and_b64 s[0:1], s[0:1], s[4:5]
-  s_endpgm
+  s_and_b64 s[4:5], s[2:3], s[0:1]
+  v_cndmask_b32 v1, 0, v0, s[2:3]
+  s_branch .Lbb1
 
 // ====
 
-// RUN: emit amdgpu-assembly @reuse strategy=source fixed=%mask:physical_register:0:2 fixed=%replacement:physical_register:0:2 fixed=%source:physical_register:4:2
+// RUN: emit amdgpu-assembly @scalar_completion_loop strategy=source
 
-// Wave32 does not have the mask reuse hazard.
+// Wave32 does not retain lane-mask reads across ordinary scalar writes.
 amdgpu.target<gfx1151> @target {subgroup_size = 32}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
-  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @scalar_completion_loop(%value: reg<amdgpu.vgpr>, %source: reg<amdgpu.sgpr x2>) asm {
+  low.br ^loop
+^loop:
+  %mask = s_or_b64 %source, %source
+  %result = s_and_b64 %mask, %source
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
-  %replacement = s_or_b64 %source, %source
-  %result = s_and_b64 %replacement, %source
-  return
+  low.br ^loop
 }
 
 // ----
-  v_cndmask_b32 v0, 0, v0, s[0:1]
-  s_or_b64 s[0:1], s[4:5], s[4:5]
-  s_and_b64 s[0:1], s[0:1], s[4:5]
-  s_endpgm
+.Lbb1:
+  s_or_b64 s[2:3], s[0:1], s[0:1]
+  s_and_b64 s[4:5], s[2:3], s[0:1]
+  v_cndmask_b32 v1, 0, v0, s[2:3]
+  s_branch .Lbb1
 
 // ====
 
-// RUN: emit amdgpu-assembly @reuse strategy=source fixed=%mask:physical_register:0:2 fixed=%replacement:physical_register:0:2 fixed=%source:physical_register:4:2
+// RUN: emit amdgpu-assembly @scalar_nonpredicate_loop strategy=source
 
 // An ordinary scalar VALU source does not establish a lane-mask read.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
-  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @scalar_nonpredicate_loop(%source: reg<amdgpu.sgpr x2>) asm {
+  low.br ^loop
+^loop:
+  %mask = s_or_b64 %source, %source
   %word = slice %mask[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %selected = v_mov_b32_copy %word
-  %replacement = s_or_b64 %source, %source
-  %result = s_and_b64 %replacement, %source
-  return
+  %broadcast = v_mov_b32_copy %word
+  %result = s_and_b64 %mask, %source
+  low.br ^loop
 }
 
 // ----
-  v_mov_b32 v0, s0
-  s_or_b64 s[0:1], s[4:5], s[4:5]
-  s_and_b64 s[0:1], s[0:1], s[4:5]
-  s_endpgm
+.Lbb1:
+  s_or_b64 s[2:3], s[0:1], s[0:1]
+  v_mov_b32 v0, s2
+  s_and_b64 s[2:3], s[2:3], s[0:1]
+  s_branch .Lbb1
 
 // ====
 
-// RUN: emit amdgpu-assembly @reuse strategy=source fixed=%mask:physical_register:0:2 fixed=%replacement:physical_register:0:2 fixed=%source:physical_register:4:2
+// RUN: emit amdgpu-assembly @vector_completion_loop strategy=source
 
-// VALU overwrite uses va_sdst instead of a full ALU drain.
+// A recurring VALU definition overwrites the previous iteration's predicate.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
-  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @vector_completion_loop(%value: reg<amdgpu.vgpr>, %source: reg<amdgpu.sgpr x2>) asm {
+  low.br ^loop
+^loop:
+  %mask = v_cmp_eq_i32 %value, %value
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
-  %replacement = v_cmp_eq_i32 %value, %value
-  %again = v_cndmask_b32_src0_inline %selected, %replacement {false_value = 0}
-  %result = s_and_b64 %replacement, %source
-  return
+  %result = s_and_b64 %mask, %source
+  low.br ^loop
 }
 
 // ----
-  v_cndmask_b32 v1, 0, v0, s[0:1]
-  v_cmp_eq_i32 s[0:1], v0, v0
+.Lbb1:
+  v_cmp_eq_i32 s[2:3], v0, v0
   s_waitcnt_depctr 0xf19f
-  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
-  v_cndmask_b32 v0, 0, v1, s[0:1]
-  s_and_b64 s[2:3], s[0:1], s[4:5]
-  s_endpgm
+  s_delay_alu instid0(VALU_DEP_1)
+  v_cndmask_b32 v1, 0, v0, s[2:3]
+  s_and_b64 s[4:5], s[2:3], s[0:1]
+  s_branch .Lbb1
 
 // ====
 
-// RUN: emit amdgpu-assembly @reuse strategy=source fixed=%mask:physical_register:0:2 fixed=%replacement:physical_register:0:2 fixed=%source:physical_register:4:2
+// RUN: emit amdgpu-assembly @fallthrough_completion_loop strategy=source
 
-// A fallthrough block retains the predecessor mask read.
+// A fallthrough block overwrites the mask retained by its predecessor.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
-  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @fallthrough_completion_loop(%value: reg<amdgpu.vgpr>, %initial: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+  low.br ^read(%initial: reg<amdgpu.sgpr x2>)
+^read(%mask: reg<amdgpu.sgpr x2>):
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
   low.br ^consume
 ^consume:
-  %replacement = s_or_b64 %source, %source
-  %result = s_and_b64 %replacement, %source
-  return
+  %next = s_or_b64 %source, %source
+  %result = s_and_b64 %next, %source
+  low.br ^read(%next: reg<amdgpu.sgpr x2>)
 }
 
 // ----
-  v_cndmask_b32 v0, 0, v0, s[0:1]
 .Lbb1:
-  s_or_b64 s[0:1], s[4:5], s[4:5]
+  v_cndmask_b32 v1, 0, v0, s[0:1]
+.Lbb2:
+  s_or_b64 s[0:1], s[2:3], s[2:3]
   s_waitcnt_depctr 0xff9e
-  s_and_b64 s[0:1], s[0:1], s[4:5]
-  s_endpgm
+  s_and_b64 s[4:5], s[0:1], s[2:3]
+  s_branch .Lbb1
 
 // ====
 
-// RUN: emit amdgpu-assembly @reuse strategy=source fixed=%mask:physical_register:0:2 fixed=%replacement:physical_register:0:2 fixed=%source:physical_register:4:2
+// RUN: emit amdgpu-assembly @reverse_layout_completion_loop strategy=source
 
 // The join precedes its mask-reading predecessor in layout order.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>, %condition: reg<amdgpu.scc>) asm {
-  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
-  low.cond_br %condition, ^read_mask, ^skip : reg<amdgpu.scc>
-^skip:
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reverse_layout_completion_loop(%value: reg<amdgpu.vgpr>, %source: reg<amdgpu.sgpr x2>, %decision: reg<amdgpu.sgpr>) asm {
+  %threshold = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   low.br ^join
 ^join:
-  %replacement = s_or_b64 %source, %source
-  %result = s_and_b64 %replacement, %source
-  return
-^read_mask:
+  %mask = s_or_b64 %source, %source
+  %result = s_and_b64 %mask, %source
+  %condition = s_cmp_lt_u32 %decision, %threshold
+  low.cond_br %condition, ^read, ^skip : reg<amdgpu.scc>
+^skip:
+  low.br ^join
+^read:
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
   low.br ^join
 }
 
 // ----
-  s_cbranch_scc1 .Lbb3
 .Lbb1:
-.Lbb2:
-  s_or_b64 s[0:1], s[4:5], s[4:5]
+  s_or_b64 s[4:5], s[0:1], s[0:1]
   s_waitcnt_depctr 0xff9e
-  s_and_b64 s[0:1], s[0:1], s[4:5]
-  s_endpgm
+  s_and_b64 s[6:7], s[4:5], s[0:1]
+  s_cmp_lt_u32 s2, s0
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_cbranch_scc1 .Lbb3
+.Lbb2:
+  s_branch .Lbb1
 .Lbb3:
-  v_cndmask_b32 v0, 0, v0, s[0:1]
-  s_branch .Lbb2
+  v_cndmask_b32 v1, 0, v0, s[4:5]
+  s_branch .Lbb1
 
 // ====
 
@@ -171,47 +182,51 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value
 
 // ====
 
-// RUN: emit amdgpu-assembly @reuse strategy=source fixed=%mask:physical_register:0:2 fixed=%replacement:physical_register:0:2 fixed=%source:physical_register:4:2
+// RUN: emit amdgpu-assembly @carry_completion_loop strategy=source
 
-// Carry inputs are lane masks, including when the result has another mask.
+// The carry input remains a retained predicate after its last SSA use.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
-  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @carry_completion_loop(%value: reg<amdgpu.vgpr>, %initial: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+  low.br ^loop(%initial: reg<amdgpu.sgpr x2>)
+^loop(%mask: reg<amdgpu.sgpr x2>):
   %sum, %carry = v_add_co_ci_u32 %value, %value, %mask
-  %replacement = s_or_b64 %source, %source
-  %result = s_and_b64 %replacement, %source
-  return
+  %next = s_or_b64 %source, %source
+  %result = s_and_b64 %next, %source
+  low.br ^loop(%next: reg<amdgpu.sgpr x2>)
 }
 
 // ----
-  v_add_co_ci_u32 v0, s[0:1], v0, v0, s[0:1]
-  s_or_b64 s[0:1], s[4:5], s[4:5]
+.Lbb1:
+  v_add_co_ci_u32 v1, s[0:1], v0, v0, s[0:1]
+  s_or_b64 s[0:1], s[2:3], s[2:3]
   s_waitcnt_depctr 0xff9e
-  s_and_b64 s[0:1], s[0:1], s[4:5]
-  s_endpgm
+  s_and_b64 s[4:5], s[0:1], s[2:3]
+  s_branch .Lbb1
 
 // ====
 
-// RUN: emit amdgpu-assembly @reuse strategy=source fixed=%mask:physical_register:0:2 fixed=%replacement:physical_register:0:2 fixed=%source:physical_register:4:2
+// RUN: emit amdgpu-assembly @borrow_completion_loop strategy=source
 
-// Borrow inputs share the mask hazard contract.
+// The borrow input remains a retained predicate after its last SSA use.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
-  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @borrow_completion_loop(%value: reg<amdgpu.vgpr>, %initial: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+  low.br ^loop(%initial: reg<amdgpu.sgpr x2>)
+^loop(%mask: reg<amdgpu.sgpr x2>):
   %difference, %borrow = v_sub_co_ci_u32 %value, %value, %mask
-  %replacement = s_or_b64 %source, %source
-  %result = s_and_b64 %replacement, %source
-  return
+  %next = s_or_b64 %source, %source
+  %result = s_and_b64 %next, %source
+  low.br ^loop(%next: reg<amdgpu.sgpr x2>)
 }
 
 // ----
-  v_sub_co_ci_u32 v0, s[0:1], v0, v0, s[0:1]
-  s_or_b64 s[0:1], s[4:5], s[4:5]
+.Lbb1:
+  v_sub_co_ci_u32 v1, s[0:1], v0, v0, s[0:1]
+  s_or_b64 s[0:1], s[2:3], s[2:3]
   s_waitcnt_depctr 0xff9e
-  s_and_b64 s[0:1], s[0:1], s[4:5]
-  s_endpgm
+  s_and_b64 s[4:5], s[0:1], s[2:3]
+  s_branch .Lbb1
 
 // ====
 
