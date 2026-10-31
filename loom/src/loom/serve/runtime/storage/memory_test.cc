@@ -360,6 +360,65 @@ TEST_F(DedicatedNativeWorkerMemoryTest,
             3 * kSlabSize);
 }
 
+TEST_F(MemoryTest, PendingDisposalSatisfiesRepeatedEvictionDemand) {
+  ASSERT_NO_FATAL_FAILURE(
+      UseDeferredBacking(3 * kSlabSize, nullptr, /*distinct_classes=*/true));
+  const auto bulk = loom_serve_pool_weight_geometry(storage_owner);
+  const auto state = loom_serve_pool_state_geometry(storage_owner);
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+      pool, bulk, 3 * kSlabSize, 256, &statistics[0], &first));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+      pool, state, 2 * kSlabSize, 256, &statistics[1], &second));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(pool, state, kSlabSize, 256,
+                                                    &statistics[2], &third));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(first, 0, 3 * kSlabSize));
+  RoundTrip(loom_serve_virtual_buffer_handle(first), 0, 0x12345678);
+  loom_serve_virtual_buffer_begin_trim(first);
+  loom_serve_virtual_buffer_keep(first, 0, kSlabSize);
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_trim(first));
+  IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+  ASSERT_EQ(loom_serve_memory_pool_statistics(pool).cached_bytes,
+            2 * kSlabSize);
+
+  deferred_backing->DeferReturns();
+  const auto demand = loom_serve_virtual_buffer_missing_demand(third);
+  loom_serve_memory_admission_t admission;
+  IREE_ASSERT_OK(loom_serve_memory_pool_prepare(pool, demand, &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_DEFERRED);
+  deferred_backing->WaitForReturn();
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    IREE_ASSERT_OK(loom_serve_memory_pool_prepare(pool, demand, &admission));
+    EXPECT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_DEFERRED);
+    const auto memory = loom_serve_memory_pool_statistics(pool);
+    EXPECT_EQ(memory.committed_bytes, 3 * kSlabSize);
+    EXPECT_EQ(memory.releasing_bytes, kSlabSize);
+    EXPECT_EQ(memory.cached_bytes, kSlabSize);
+    EXPECT_EQ(statistics[1].pending_bytes, 0u);
+    EXPECT_EQ(statistics[1].committed_bytes, 0u);
+  }
+  // Explicit trim uses the same eventual footprint. This target is already
+  // satisfied by the disposal in flight and must preserve the other idle slab.
+  loom_serve_memory_pool_trim(pool, 2 * kSlabSize);
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool).cached_bytes, kSlabSize);
+
+  // A larger demand may select the remaining idle slab, but neither selected
+  // disposal grants physical capacity before its native return completes.
+  IREE_ASSERT_OK(loom_serve_memory_pool_prepare(
+      pool, loom_serve_virtual_buffer_missing_demand(second), &admission));
+  EXPECT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_DEFERRED);
+  const auto memory = loom_serve_memory_pool_statistics(pool);
+  EXPECT_EQ(memory.committed_bytes, 3 * kSlabSize);
+  EXPECT_EQ(memory.releasing_bytes, 2 * kSlabSize);
+  EXPECT_EQ(memory.cached_bytes, 0u);
+  CheckRetained(loom_serve_virtual_buffer_handle(first), 0, 0x12345678);
+  deferred_backing->CompleteReturns();
+  IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(second, 0, 2 * kSlabSize));
+  RoundTrip(loom_serve_virtual_buffer_handle(second), kSlabSize, 0x87654321);
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes,
+            3 * kSlabSize);
+}
+
 TEST_F(DedicatedNativeWorkerMemoryTest,
        FailedAcquisitionPreservesAnAdmittedStreamingCohort) {
   const auto bulk = loom_serve_pool_weight_geometry(storage_owner);
