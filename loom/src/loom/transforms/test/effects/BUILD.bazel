@@ -19,6 +19,7 @@ loom_check_test_suite(
         "cse.loom-test",
         "cse_scopes.loom-test",
         "dce.loom-test",
+        "register_captures.loom-test",
         "value_references.loom-test",
         "verify.loom-test",
     ],

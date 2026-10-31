@@ -222,7 +222,7 @@ TEST_F(CallableEffectsTest, FreshIdentityPreventsPureCallCanonicalization) {
   AppendAllocation(allocator);
   AppendReturn(allocator);
   EXPECT_TRUE(
-      loom_region_has_unique_identities(loom_func_like_body(allocator)));
+      loom_region_has_resource_identities(loom_func_like_body(allocator)));
   EXPECT_FALSE(loom_callable_effects_is_pure(allocator));
   EXPECT_EQ(loom_callable_effects_callee_contract(
                 module_, loom_func_like_callee(allocator)),

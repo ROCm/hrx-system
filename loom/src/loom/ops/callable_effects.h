@@ -43,6 +43,9 @@ bool loom_callable_effects_contract_satisfies(
 // Returns the strongest callable contract satisfied by |traits|. Pure is
 // returned when no runtime effects are present, read-only when deterministic
 // reads are the only effects, and unspecified for all other effect classes.
+// Local register storage relations preserve values across the callable
+// boundary; their distinct owners remain an operation-level optimization
+// constraint.
 loom_callable_effect_contract_t loom_callable_effects_classify_traits(
     loom_trait_flags_t traits);
 
