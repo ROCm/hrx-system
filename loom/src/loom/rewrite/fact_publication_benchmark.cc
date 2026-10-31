@@ -216,7 +216,7 @@ static void BM_LoopPublication(benchmark::State& state) {
 }
 BENCHMARK(BM_LoopPublication)
     ->ArgNames({"independent", "feedback", "loops", "rewrites"})
-    ->Apply([](benchmark::internal::Benchmark* benchmark) {
+    ->Apply([](::benchmark::Benchmark* benchmark) {
       for (int64_t rewrites : {0, 1}) {
         for (int64_t independent : {0, 32, 256, 2048}) {
           benchmark->Args({independent, 1, 1, rewrites});
