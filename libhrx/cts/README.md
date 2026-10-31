@@ -107,3 +107,18 @@ enqueue-only rows. `--hip_wait_mode=auto|spin|yield|blocking` selects the public
 scheduling policy; matching this policy, device identity, CPU locality, and power
 settings is necessary when comparing backends. ASAN runs qualify correctness,
 not performance.
+
+## Download measurements
+
+`//libhrx/cts/tests/hip:hip_transfer_benchmark` compares device-to-host copies into
+ordinary CPU memory and the same kind of allocation registered with
+`hipHostRegister`. Each iteration includes the public copy call and stream
+completion. Contiguous and pitched rows cover 4 KiB, 1 MiB, and 64 MiB of useful
+data; pitched rows have 4 KiB payloads and distinct source and destination
+padding. The reported bandwidth counts payload bytes. Allocation, registration,
+source initialization, and full output/padding validation stay outside timing.
+
+All rows reuse one frontend, device, and stream. The benchmark has the same
+backend labels and `--hip_wait_mode` choices as the submission benchmark. These
+serial measurements establish copy latency and bandwidth; they do not establish
+progress or interference between concurrent streams.
