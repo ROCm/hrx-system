@@ -6,6 +6,14 @@
 
 cmake_minimum_required(VERSION 3.26...4.2)
 
+# Resolve this environment setting once instead of querying it for every CMake
+# command. Preserve caller-provided variables and CMake's default for empty or
+# invalid values. The environment setting was introduced in CMake 3.27.
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.27 AND
+   NOT DEFINED CMAKE_MAXIMUM_RECURSION_DEPTH)
+  set(CMAKE_MAXIMUM_RECURSION_DEPTH "$ENV{CMAKE_MAXIMUM_RECURSION_DEPTH}")
+endif()
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # HRX is the top-level build/product. The runtime subtree is still the IREE
