@@ -3,6 +3,7 @@
 //
 // Custom Catch2 main for hrx CTS. Initializes hrx and selects a device.
 
+#include <atomic>
 #include <catch2/catch_session.hpp>
 #include <cstdio>
 #include <cstdlib>
@@ -17,17 +18,36 @@ std::string g_test_hip_library_path;
 
 namespace {
 
+// Includes cleanup failures that occur outside Catch's assertion boundary.
+std::atomic<bool> g_test_failure = false;
+
 void printStatusAndConsume(HrxLoader& loader, const char* context,
                            hrx_status_t status) {
   char* message = nullptr;
   size_t message_length = 0;
-  loader.status_to_string(status, &message, &message_length);
-  fprintf(stderr, "%s: %s\n", context, message ? message : "(unknown error)");
+  hrx_status_t formatting_status =
+      loader.status_to_string(status, &message, &message_length);
+  if (hrx_status_is_ok(formatting_status)) {
+    fprintf(stderr, "%s: %s\n", context, message);
+  } else {
+    fprintf(stderr, "%s: status %d (formatting failed with status %d)\n",
+            context, static_cast<int>(loader.status_code(status)),
+            static_cast<int>(loader.status_code(formatting_status)));
+    loader.status_ignore(formatting_status);
+  }
   loader.status_free_message(message);
   loader.status_ignore(status);
 }
 
 }  // namespace
+
+void ReportHrxTestFailure(const char* context, hrx_status_t status) noexcept {
+  if (hrx_status_is_ok(status)) {
+    return;
+  }
+  printStatusAndConsume(hrx(), context, status);
+  g_test_failure.store(true, std::memory_order_relaxed);
+}
 
 int main(int argc, char* argv[]) {
   Catch::Session session;
@@ -69,7 +89,7 @@ int main(int argc, char* argv[]) {
 
     if (hrx_device_spec == "none") {
       ret = session.run();
-      return ret;
+      return ret ? ret : static_cast<int>(g_test_failure.load());
     }
 
     // Parse device spec.
@@ -105,13 +125,18 @@ int main(int argc, char* argv[]) {
     if (!hrx_status_is_ok(status)) {
       std::string context = "Failed to get device " + hrx_device_spec;
       printStatusAndConsume(loader, context.c_str(), status);
+      ReportHrxTestFailure("Accelerator shutdown", type == HRX_ACCELERATOR_GPU
+                                                       ? loader.gpu_shutdown()
+                                                       : loader.cpu_shutdown());
       return 1;
     }
     g_test_device_type = type;
 
     char name[128] = {0};
-    loader.device_get_property(g_test_device, HRX_DEVICE_PROPERTY_NAME, name,
-                               sizeof(name));
+    ReportHrxTestFailure(
+        "Device name query",
+        loader.device_get_property(g_test_device, HRX_DEVICE_PROPERTY_NAME,
+                                   name, sizeof(name)));
     printf("Test device: %s (%s)\n", hrx_device_spec.c_str(), name);
 
   } catch (const HrxLoaderError& e) {
@@ -123,12 +148,12 @@ int main(int argc, char* argv[]) {
 
   // Shutdown.
   if (g_test_device) {
-    if (g_test_device_type == HRX_ACCELERATOR_GPU) {
-      hrx().status_ignore(hrx().gpu_shutdown());
-    } else {
-      hrx().status_ignore(hrx().cpu_shutdown());
-    }
+    ReportHrxTestFailure("Accelerator shutdown",
+                         g_test_device_type == HRX_ACCELERATOR_GPU
+                             ? hrx().gpu_shutdown()
+                             : hrx().cpu_shutdown());
+    g_test_device = nullptr;
   }
 
-  return ret;
+  return ret ? ret : static_cast<int>(g_test_failure.load());
 }
