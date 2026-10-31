@@ -208,6 +208,19 @@ static iree_status_t loom_cmd_dispatch_count_record_indirect(
     return loom_cmd_dispatch_count_emit_indirect_error(
         build, command, LOOM_ERR_LOWERING_054, params, IREE_ARRAYSIZE(params));
   }
+  const bool invocation_lifetime =
+      command->indirect_lifetime ==
+      LOOM_KERNEL_DISPATCH_INDIRECT_LIFETIME_INVOCATION;
+  if (invocation_lifetime &&
+      origin == LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_TRANSIENT) {
+    const loom_diagnostic_param_t params[] = {
+        loom_param_string(kernel_name),
+        loom_param_string(IREE_SV("caller-provided or immutable storage for "
+                                  "invocation-lifetime counts")),
+    };
+    return loom_cmd_dispatch_count_emit_indirect_error(
+        build, command, LOOM_ERR_LOWERING_054, params, IREE_ARRAYSIZE(params));
+  }
   if (origin == LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_TRANSIENT &&
       !has_preceding_wave) {
     const loom_diagnostic_param_t params[] = {
@@ -217,9 +230,11 @@ static iree_status_t loom_cmd_dispatch_count_record_indirect(
         build, command, LOOM_ERR_LOWERING_053, params, IREE_ARRAYSIZE(params));
   }
   *out_count = (loom_cmd_dispatch_count_t){
-      .kind = origin == LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_IMMUTABLE
-                  ? LOOM_CMD_DISPATCH_COUNT_KIND_INDIRECT_STATIC
-                  : LOOM_CMD_DISPATCH_COUNT_KIND_INDIRECT_DYNAMIC,
+      .kind =
+          invocation_lifetime ||
+                  origin == LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_IMMUTABLE
+              ? LOOM_CMD_DISPATCH_COUNT_KIND_INDIRECT_STATIC
+              : LOOM_CMD_DISPATCH_COUNT_KIND_INDIRECT_DYNAMIC,
       .payload.indirect_source_value = source_value,
   };
   return iree_ok_status();

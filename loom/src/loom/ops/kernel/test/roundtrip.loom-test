@@ -1,5 +1,24 @@
 // RUN: roundtrip
 
+kernel.entry.decl @lifetime_entry(%output: buffer)
+
+command.def public @indirect_lifetimes() launch(%counts: view<3xi32>, %output: buffer) {
+  kernel.dispatch @lifetime_entry[%counts](%output) indirect_lifetime(invocation) : [view<3xi32>](buffer)
+  kernel.dispatch @lifetime_entry[%counts](%output) indirect_lifetime(dispatch) : [view<3xi32>](buffer)
+  command.return
+}
+
+// ----
+kernel.entry.decl @lifetime_entry(%output: buffer)
+
+command.def public @indirect_lifetimes() launch(%counts: view<3xi32>, %output: buffer) {
+  kernel.dispatch @lifetime_entry[%counts](%output) indirect_lifetime(invocation) : [view<3xi32>](buffer)
+  kernel.dispatch @lifetime_entry[%counts](%output) indirect_lifetime(dispatch) : [view<3xi32>](buffer)
+  command.return
+}
+
+// ====
+
 test.target<low_core> @dispatch_target
 
 kernel.entry.decl target(@dispatch_target) @configured_entry(%output: buffer)

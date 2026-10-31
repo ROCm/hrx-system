@@ -260,9 +260,10 @@ static iree_status_t loom_kernel_launch_resolution_rewrite_launch(
   loom_builder_set_before(builder, launch_op);
   loom_op_t* dispatch_op = NULL;
   IREE_RETURN_IF_ERROR(loom_kernel_dispatch_build(
-      builder, entry_ref, counts.values, counts.count, arguments.values,
-      arguments.count, /*workgroup_size=*/NULL,
-      /*workgroup_size_count=*/0, launch_op->location, &dispatch_op));
+      builder, /*build_flags=*/0, entry_ref, counts.values, counts.count,
+      arguments.values, arguments.count, /*workgroup_size=*/NULL,
+      /*workgroup_size_count=*/0, /*indirect_lifetime=*/0, launch_op->location,
+      &dispatch_op));
   IREE_RETURN_IF_ERROR(loom_rewriter_erase(&resolution->rewriter, launch_op));
   *out_valid = true;
   return iree_ok_status();

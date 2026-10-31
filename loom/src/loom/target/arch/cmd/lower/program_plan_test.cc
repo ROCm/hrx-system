@@ -1500,11 +1500,20 @@ command.def public @dynamic_root() launch() {
   kernel.dispatch @dynamic_entry[%counts]() : [view<3xi32>]()
   command.return
 }
+
+command.def public @stable_invocation_root() launch(%count_storage: buffer) {
+  %origin = index.constant 4294967296 : offset
+  %table = buffer.view %count_storage[%origin] : buffer -> view<6xi32>
+  %counts = view.subview %table[3] : view<6xi32> -> view<3xi32>
+  kernel.dispatch @invocation_entry[%counts]() indirect_lifetime(invocation) : [view<3xi32>]()
+  command.return
+}
 )");
   ASSERT_NE(source_module, nullptr);
   const loom_symbol_ref_t program_refs[] = {
       FindSymbolRef(source_module.get(), IREE_SV("invocation_root")),
       FindSymbolRef(source_module.get(), IREE_SV("dynamic_root")),
+      FindSymbolRef(source_module.get(), IREE_SV("stable_invocation_root")),
   };
   loom_link_plan_materialization_t materialization = {
       .module = source_module.release(),
@@ -1522,7 +1531,7 @@ command.def public @dynamic_root() launch() {
   ASSERT_TRUE(valid);
   EXPECT_EQ(materialization.module, nullptr);
 
-  ASSERT_EQ(plan.root_count, 2u);
+  ASSERT_EQ(plan.root_count, 3u);
   const loom_cmd_program_root_t& invocation_root = plan.roots[0];
   EXPECT_EQ(invocation_root.launch_counts.binding_index, UINT32_MAX);
   EXPECT_EQ(invocation_root.launch_counts.required_byte_length, 0u);
@@ -1570,6 +1579,32 @@ command.def public @dynamic_root() launch() {
   EXPECT_EQ(dynamic_count_ref.root_index,
             dynamic_program.requirements.transient.binding_index);
 
+  const loom_cmd_program_root_t& stable_root = plan.roots[2];
+  EXPECT_EQ(stable_root.launch_counts.binding_index, UINT32_MAX);
+  EXPECT_EQ(stable_root.launch_counts.required_byte_length, 0u);
+  EXPECT_EQ(stable_root.transient.binding_index, UINT32_MAX);
+  iree_byte_span_t stable_data = iree_byte_span_empty();
+  IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(
+      &plan, 2, iree_allocator_system(), &stable_data));
+  loom_cmd_program_t stable_program = {};
+  IREE_ASSERT_OK(loom_cmd_program_parse(
+      iree_make_const_byte_span(stable_data.data, stable_data.data_length),
+      &stable_program));
+  ASSERT_EQ(stable_program.commands.count, 1u);
+  const loom_cmd_program_command_t stable_dispatch =
+      loom_cmd_program_command_at(&stable_program, 0);
+  EXPECT_EQ(stable_dispatch.kind,
+            LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_STATIC);
+  const loom_cmd_program_buffer_ref_t stable_count_ref =
+      loom_cmd_program_buffer_ref_at(
+          &stable_program,
+          stable_dispatch.payload.dispatch_indirect.workgroup_count_buffer_ref);
+  EXPECT_EQ(stable_count_ref.role, LOOM_CMD_PROGRAM_BUFFER_ROLE_REBINDABLE);
+  EXPECT_EQ(stable_count_ref.root_index, 0u);
+  EXPECT_EQ(stable_count_ref.byte_offset, UINT64_C(4294967308));
+  EXPECT_EQ(stable_count_ref.byte_length, 12u);
+
+  iree_allocator_free(iree_allocator_system(), stable_data.data);
   iree_allocator_free(iree_allocator_system(), dynamic_data.data);
   iree_allocator_free(iree_allocator_system(), invocation_data.data);
   loom_cmd_program_plan_deinitialize(&plan);

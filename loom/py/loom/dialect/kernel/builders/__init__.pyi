@@ -555,6 +555,7 @@ class KernelBuilder(DialectBuilder):
         workgroup_counts: list[ValueRef] = ...,
         arguments: list[ValueRef] = ...,
         workgroup_size: list[ValueRef] = ...,
+        indirect_lifetime: str | None = ...,
         location_id: int | None = ...,
     ) -> None: ...
     def yield_(

@@ -213,6 +213,10 @@ static iree_status_t loom_cmd_schedule_append_command(
           loom_type_is_view(first_count_type)
               ? LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_INDIRECT
               : LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_DIRECT;
+      command.indirect_lifetime =
+          loom_kernel_dispatch_has_indirect_lifetime(op)
+              ? loom_kernel_dispatch_indirect_lifetime(op)
+              : LOOM_KERNEL_DISPATCH_INDIRECT_LIFETIME_DISPATCH;
       command.source_arguments = command.arguments;
       break;
     }

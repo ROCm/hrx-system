@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/ir/ir.h"
+#include "loom/ops/kernel/ops.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -53,6 +54,8 @@ typedef struct loom_cmd_schedule_command_t {
   loom_cmd_schedule_value_slice_t source_arguments;
   // Classified source issue semantics.
   loom_cmd_schedule_command_kind_t kind;
+  // Authored indirect-count lifetime; dispatch is the default for other rows.
+  loom_kernel_dispatch_indirect_lifetime_t indirect_lifetime;
   // Physical count values interpreted according to |kind|.
   loom_cmd_schedule_value_slice_t workgroup_counts;
 } loom_cmd_schedule_command_t;

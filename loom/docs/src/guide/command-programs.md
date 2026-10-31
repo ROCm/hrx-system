@@ -155,12 +155,31 @@ ordinary scalar arithmetic can fold freely, while loads retain their explicit
 buffer/view identities and schedule ordering.
 
 Exact scalar results become direct dispatch commands. An exact aligned
-`view<3xi32>` rooted in an immutable parameter becomes a static indirect
-dispatch, allowing the device to fetch counts early. Invocation buffers and
-transient command storage use dynamic indirect dispatch: the device reads the
-tuple immediately before issuing that dispatch. A count-producing kernel must
-precede its consumer in the command schedule. Invocation buffers may instead
-arrive initialized by the caller, so they can drive the first dispatch.
+`view<3xi32>` supplies indirect XYZ counts. By default, the device observes the
+tuple immediately before issuing that dispatch, after its preceding command
+dependencies. A count-producing kernel precedes its consumer in the command
+schedule. Caller-provided buffers can also drive the first dispatch when the
+program's input dependencies establish their readiness.
+
+When the caller supplies counts that stay unchanged throughout the invocation,
+the dispatch can declare that lifetime explicitly:
+
+```loom
+kernel.dispatch @project_block[%counts](%weights, %input, %output) indirect_lifetime(invocation) : [view<3xi32>](view<8xf32>, buffer, buffer)
+```
+
+The tuple is initialized before the command program's input dependencies
+complete and remains unchanged until that invocation retires. This promise
+covers every alias and external access. The device may fetch these counts early
+and prepare several dispatches together. It does not need host-readable storage,
+and the declaration adds no synchronization. Each invocation may bind different
+count storage and values; concurrent writers use disjoint storage or wait for
+the previous invocation to retire.
+
+`indirect_lifetime(dispatch)` states the default lifetime explicitly. Immutable
+named parameters permit early fetch under either spelling. A transient allocation
+inside the command program cannot provide invocation-ready counts; its producer
+uses dispatch lifetime and an earlier command wave.
 
 Read-only launch expressions that still depend on device data become generated
 device kernels writing transient XYZ tuples. The command program orders those

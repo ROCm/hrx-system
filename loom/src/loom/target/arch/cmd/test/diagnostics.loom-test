@@ -256,3 +256,23 @@ command.def public @transient_parameter_base() launch() {
   kernel.dispatch @consume[%groups](%base) : [index](buffer)
   command.return
 }
+
+// ====
+
+// RUN: emit command-program @transient_invocation_counts
+
+kernel.entry.decl @produce_counts(%counts: view<3xi32>)
+
+kernel.entry.decl @consume_counts()
+
+command.def public @transient_invocation_counts() launch() {
+  %origin = index.constant 0 : offset
+  %producer_groups = index.constant 1 : index
+  %bytes = index.constant 12 : offset
+  %storage = buffer.alloca<global> align(4) %bytes : buffer
+  %counts = buffer.view %storage[%origin] : buffer -> view<3xi32>
+  kernel.dispatch @produce_counts[%producer_groups](%counts) : [index](view<3xi32>)
+  // ERROR@+1: LOWERING/054 {kernel_name="consume_counts", requirement="caller-provided or immutable storage for invocation-lifetime counts"}
+  kernel.dispatch @consume_counts[%counts]() indirect_lifetime(invocation) : [view<3xi32>]()
+  command.return
+}

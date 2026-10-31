@@ -1,5 +1,29 @@
 // RUN: verify
 
+// The count tuple may vary between invocations while remaining immutable
+// during each invocation. Dispatch lifetime retains ordered producer reads.
+kernel.entry.decl @lifetime_entry(%output: buffer)
+
+command.def public @indirect_lifetimes() launch(%counts: view<3xi32>, %output: buffer) {
+  kernel.dispatch @lifetime_entry[%counts](%output) indirect_lifetime(invocation) : [view<3xi32>](buffer)
+  kernel.dispatch @lifetime_entry[%counts](%output) indirect_lifetime(dispatch) : [view<3xi32>](buffer)
+  command.return
+}
+
+// ====
+
+kernel.entry.decl @direct_lifetime_entry()
+
+func.def @direct_counts_have_no_read_lifetime(%count: index) {
+  // ERROR@+1: STRUCTURE/014 {attr_name="indirect_lifetime", actual_value="1", expected_constraint="present only with indirect view<3xi32> counts"}
+  kernel.dispatch @direct_lifetime_entry[%count]() indirect_lifetime(invocation) : [index]()
+  // ERROR@+1: STRUCTURE/014 {attr_name="indirect_lifetime", actual_value="0", expected_constraint="present only with indirect view<3xi32> counts"}
+  kernel.dispatch @direct_lifetime_entry[%count]() indirect_lifetime(dispatch) : [index]()
+  func.return
+}
+
+// ====
+
 // Execution queries and collectives describe the strand's participating
 // invocations. They remain valid before outlining into the physical kernel.
 pipeline.def<kernel> @strand_execution_operations() run(%value: f32, %predicate: i1, %lane_index: i32, %lane_width: i32) {

@@ -1028,6 +1028,12 @@ static iree_status_t loom_kernel_verify_dispatch_workgroup_counts(
         counts.count == 1 ? IREE_SV("index or dense view<3xi32>")
                           : IREE_SV("index"));
   }
+  if (loom_kernel_dispatch_has_indirect_lifetime(op)) {
+    return loom_kernel_emit_attribute_value_constraint(
+        emitter, op, IREE_SV("indirect_lifetime"),
+        loom_kernel_dispatch_indirect_lifetime(op),
+        IREE_SV("present only with indirect view<3xi32> counts"));
+  }
   return iree_ok_status();
 }
 

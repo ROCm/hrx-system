@@ -173,6 +173,19 @@ KernelDimension = EnumDef(
     doc="Three-dimensional kernel coordinate axis.",
 )
 
+KernelIndirectLifetime = EnumDef(
+    "KernelIndirectLifetime",
+    [
+        EnumCase("dispatch", 0, doc="Counts are observed immediately before this dispatch, after its preceding command dependencies."),
+        EnumCase(
+            "invocation",
+            1,
+            doc="Counts are initialized before command-program input dependencies complete and remain unchanged through that invocation's retirement, including through aliases and external accesses.",
+        ),
+    ],
+    doc="Read lifetime of an indirect workgroup-count tuple. Invocation lifetime permits early fetch but does not require host-readable storage or synchronize its producer.",
+)
+
 KernelAsyncDirection = EnumDef(
     "KernelAsyncDirection",
     [
@@ -2175,7 +2188,14 @@ kernel_dispatch = Op(
         "symbols are invoked with kernel.launch instead. Counts are one to "
         "three index values or one dense view<3xi32> for indirect dispatch. "
         "An optional XYZ workgroup size overrides the executable entry "
-        "default for targets supporting dispatch-time workgroup sizes."
+        "default for targets supporting dispatch-time workgroup sizes. "
+        "For indirect counts, indirect_lifetime(invocation) promises that "
+        "the tuple is initialized before the command program's input "
+        "dependencies complete and remains unchanged until that invocation "
+        "retires, including through aliases and external work. Different "
+        "invocations may bind different tuples. Omission or dispatch lifetime "
+        "observes counts immediately before the dispatch after its preceding "
+        "dependencies. Immutable storage may always be fetched early."
     ),
     operands=[
         Operand("workgroup_counts", ANY, variadic=True),
@@ -2187,6 +2207,13 @@ kernel_dispatch = Op(
             "callee",
             "symbol",
             symbol_ref=SymbolReference("kernel entry", ["kernel_entry"]),
+        ),
+        AttrDef(
+            "indirect_lifetime",
+            "enum",
+            enum_def=KernelIndirectLifetime,
+            optional=True,
+            doc="Read lifetime of indirect counts; valid only with a dense view<3xi32> count operand. Omission means dispatch lifetime.",
         ),
     ],
     traits=[UNKNOWN_EFFECTS, COMMAND_EFFECT, NoAncestor("kernel.def")],
@@ -2213,6 +2240,10 @@ kernel_dispatch = Op(
             [Clause("workgroup_size", Refs("workgroup_size"))],
             anchor="workgroup_size",
         ),
+        OptionalGroup(
+            [Clause("indirect_lifetime", Attr("indirect_lifetime"))],
+            anchor="indirect_lifetime",
+        ),
         COLON,
         LBRACKET,
         TypesOf("workgroup_counts"),
@@ -2226,6 +2257,7 @@ kernel_dispatch = Op(
         "kernel.dispatch @fill[%count](%count, %output) : [index](index, buffer)",
         "kernel.dispatch @fill[%x, %y, %z](%count, %output) : [index, index, index](index, buffer)",
         "kernel.dispatch @fill[%counts](%count, %output) : [view<3xi32>](index, buffer)",
+        "kernel.dispatch @fill[%counts](%count, %output) indirect_lifetime(invocation) : [view<3xi32>](index, buffer)",
         "kernel.dispatch @fill[%count](%count, %output) workgroup_size(%x, %y, %z) : [index](index, buffer)",
     ],
 )

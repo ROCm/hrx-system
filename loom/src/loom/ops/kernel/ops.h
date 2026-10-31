@@ -145,6 +145,13 @@ typedef enum loom_kernel_workgroup_scan_direction_e {
   LOOM_KERNEL_WORKGROUP_SCAN_DIRECTION_COUNT_ = 2,
 } loom_kernel_workgroup_scan_direction_t;
 
+// Read lifetime of an indirect workgroup-count tuple. Invocation lifetime permits early fetch but does not require host-readable storage or synchronize its producer.
+typedef enum loom_kernel_dispatch_indirect_lifetime_e {
+  LOOM_KERNEL_DISPATCH_INDIRECT_LIFETIME_DISPATCH = 0,
+  LOOM_KERNEL_DISPATCH_INDIRECT_LIFETIME_INVOCATION = 1,
+  LOOM_KERNEL_DISPATCH_INDIRECT_LIFETIME_COUNT_ = 2,
+} loom_kernel_dispatch_indirect_lifetime_t;
+
 // LOOM_OP_KERNEL_DEF: Dispatchable source-level kernel entry. Kernel entries own launch and export contracts; ordinary func.def bodies remain helper/callable code.
 // kernel.def @entry() {
 //   %one = index.constant 1 : index
@@ -1190,15 +1197,21 @@ iree_status_t loom_kernel_launch_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_KERNEL_DISPATCH: Dispatch a resolved kernel.entry.decl with exact workgroup counts and device-ABI operands. Configured kernel.def and kernel.decl symbols are invoked with kernel.launch instead. Counts are one to three index values or one dense view<3xi32> for indirect dispatch. An optional XYZ workgroup size overrides the executable entry default for targets supporting dispatch-time workgroup sizes.
+// LOOM_OP_KERNEL_DISPATCH: Dispatch a resolved kernel.entry.decl with exact workgroup counts and device-ABI operands. Configured kernel.def and kernel.decl symbols are invoked with kernel.launch instead. Counts are one to three index values or one dense view<3xi32> for indirect dispatch. An optional XYZ workgroup size overrides the executable entry default for targets supporting dispatch-time workgroup sizes. For indirect counts, indirect_lifetime(invocation) promises that the tuple is initialized before the command program's input dependencies complete and remains unchanged until that invocation retires, including through aliases and external work. Different invocations may bind different tuples. Omission or dispatch lifetime observes counts immediately before the dispatch after its preceding dependencies. Immutable storage may always be fetched early.
 // kernel.dispatch @fill[%count](%count, %output) : [index](index, buffer)
 LOOM_DEFINE_ISA(loom_kernel_dispatch_isa, LOOM_OP_KERNEL_DISPATCH)
 LOOM_DEFINE_SEGMENTED_OPERANDS(loom_kernel_dispatch_workgroup_counts, 0)
 LOOM_DEFINE_SEGMENTED_OPERANDS(loom_kernel_dispatch_arguments, 1)
 LOOM_DEFINE_SEGMENTED_OPERANDS(loom_kernel_dispatch_workgroup_size, 2)
 LOOM_DEFINE_ATTR_SYMBOL(loom_kernel_dispatch_callee, 0)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_kernel_dispatch_indirect_lifetime, 1, loom_kernel_dispatch_indirect_lifetime_t)
+enum loom_kernel_dispatch_build_flag_bits_e {
+  LOOM_KERNEL_DISPATCH_BUILD_FLAG_HAS_INDIRECT_LIFETIME = 1u << 0,
+};
+typedef uint32_t loom_kernel_dispatch_build_flags_t;
 iree_status_t loom_kernel_dispatch_build(
     loom_builder_t* builder,
+    loom_kernel_dispatch_build_flags_t build_flags,
     loom_symbol_ref_t callee,
     const loom_value_id_t* workgroup_counts,
     iree_host_size_t workgroup_counts_count,
@@ -1206,6 +1219,7 @@ iree_status_t loom_kernel_dispatch_build(
     iree_host_size_t arguments_count,
     const loom_value_id_t* workgroup_size,
     iree_host_size_t workgroup_size_count,
+    loom_optional uint8_t indirect_lifetime,
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_kernel_dispatch_verify(

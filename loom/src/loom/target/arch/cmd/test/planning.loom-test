@@ -724,6 +724,37 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 // ====
 
+// RUN: emit command-program @stable_invocation_indirect_dispatch
+
+kernel.entry.decl @stable_count_entry(%output: buffer)
+
+command.def public @stable_invocation_indirect_dispatch() launch(%count_storage: buffer, %output: buffer) {
+  %origin = index.constant 4294967296 : offset
+  %table = buffer.view %count_storage[%origin] : buffer -> view<6xi32>
+  %counts = view.subview %table[3] : view<6xi32> -> view<3xi32>
+  kernel.dispatch @stable_count_entry[%counts](%output) indirect_lifetime(invocation) : [view<3xi32>](buffer)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 2}) @stable_invocation_indirect_dispatch() asm {
+  %6 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %7 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
+  %8 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %9 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %10 = cmd.constant.u64 0
+  %11 = cmd.constant.u64 -1
+  %12 = cmd.constant.u64 4294967296
+  %13 = cmd.constant.u64 24
+  %14 = cmd.constant.u64 4294967308
+  %15 = cmd.constant.u64 12
+  %16 = cmd.buffer.ref.binding %6, %14, %15
+  cmd.dispatch.indirect.static<%8, %9>[%16](%7, %10, %11)
+  return
+}
+
+// ====
+
 // RUN: emit command-program @dynamic_indirect_dispatch
 
 kernel.entry.decl @produce_counts(%counts: view<3xi32>)

@@ -1200,10 +1200,10 @@ static iree_status_t loom_cmd_launch_count_build_indirect_consumer(
   const loom_value_slice_t workgroup_size =
       loom_kernel_dispatch_workgroup_size(consumer);
   return loom_kernel_dispatch_build(
-      builder, loom_kernel_dispatch_callee(consumer), &count_view, 1,
-      consumer_arguments.values, consumer_arguments.count,
-      workgroup_size.values, workgroup_size.count, consumer->location,
-      out_dispatch);
+      builder, /*build_flags=*/0, loom_kernel_dispatch_callee(consumer),
+      &count_view, 1, consumer_arguments.values, consumer_arguments.count,
+      workgroup_size.values, workgroup_size.count, /*indirect_lifetime=*/0,
+      consumer->location, out_dispatch);
 }
 
 static iree_status_t loom_cmd_launch_count_build_tuple_view(
@@ -1272,10 +1272,10 @@ static iree_status_t loom_cmd_launch_count_rewrite_cluster(
       plan->producer_before != first_consumer) {
     loom_op_t* producer_dispatch = NULL;
     IREE_RETURN_IF_ERROR(loom_kernel_dispatch_build(
-        builder, producer_ref, &one, 1, producer_arguments,
+        builder, /*build_flags=*/0, producer_ref, &one, 1, producer_arguments,
         producer_argument_count, /*workgroup_size=*/NULL,
-        /*workgroup_size_count=*/0, first_consumer->location,
-        &producer_dispatch));
+        /*workgroup_size_count=*/0, /*indirect_lifetime=*/0,
+        first_consumer->location, &producer_dispatch));
     for (iree_host_size_t i = 0; i < plan->demand_count; ++i) {
       const loom_cmd_launch_count_demand_t* demand = &plan->demands[i];
       loom_builder_set_before(builder, demand->consumer);
@@ -1298,10 +1298,10 @@ static iree_status_t loom_cmd_launch_count_rewrite_cluster(
       builder, serial_op, loom_command_serial_body(serial_op));
   loom_op_t* producer_dispatch = NULL;
   IREE_RETURN_IF_ERROR(loom_kernel_dispatch_build(
-      builder, producer_ref, &one, 1, producer_arguments,
+      builder, /*build_flags=*/0, producer_ref, &one, 1, producer_arguments,
       producer_argument_count, /*workgroup_size=*/NULL,
-      /*workgroup_size_count=*/0, first_consumer->location,
-      &producer_dispatch));
+      /*workgroup_size_count=*/0, /*indirect_lifetime=*/0,
+      first_consumer->location, &producer_dispatch));
   loom_op_t* indirect_consumer = NULL;
   IREE_RETURN_IF_ERROR(loom_cmd_launch_count_build_indirect_consumer(
       builder, first_consumer, slab_view, &indirect_consumer));
