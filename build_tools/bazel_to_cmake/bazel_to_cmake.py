@@ -157,12 +157,12 @@ class Package:
     # Native fragments rendered after repository-wide declaration collection.
     converter: bazel_to_cmake_converter.Converter
 
-    def convert(self):
+    def convert(self, traversal="iree_add_all_subdirs()"):
         package = self.directory.as_posix()
         return (
             f"# Generated from {package}/{self.build_file.name}. Edit the BUILD declaration.\n"
             "set_property(DIRECTORY PROPERTY IREE_PACKAGE_SOURCE_DIR "
-            f'"${{IREE_SOURCE_DIR}}/{package}")\n' + self.converter.convert()
+            f'"${{IREE_SOURCE_DIR}}/{package}")\n' + self.converter.convert(traversal)
         )
 
 
@@ -220,9 +220,15 @@ def evaluate_packages(root_dirs, input_files, configuration=None):
         root_path = Path(repo_root) / root_dir
         if not root_path.is_dir():
             raise FileNotFoundError(f"Cannot find package root {root_path}")
-        for directory, _, _ in os.walk(root_path):
+        for directory, children, _ in os.walk(root_path):
             if (Path(directory) / "CMakeLists.txt").is_file():
                 authored_directories.add(Path(directory).relative_to(repo_root))
+            # Native children may be linked into the source tree. os.walk does
+            # not enter directory links; authored CMake still owns those scopes.
+            for child in children:
+                path = Path(directory) / child
+                if path.is_symlink() and (path / "CMakeLists.txt").is_file():
+                    authored_directories.add(path.relative_to(repo_root))
             package = evaluate_directory(
                 directory,
                 input_files,
@@ -266,11 +272,6 @@ def generate_build_tree(output_dir, root_dirs, configuration=None):
     packages, authored_directories, libraries = evaluate_packages(
         root_dirs, input_files, configuration
     )
-    for package in packages.values():
-        path = output_dir / package.directory / "CMakeLists.txt"
-        write_if_changed(path, package.convert())
-        output_files.add(path)
-
     # Native directory traversal must reach every declared package, including
     # leaves beneath directories that have no declarations of their own.
     # Authored CMake retains control of its children and directory scope.
@@ -286,6 +287,32 @@ def generate_build_tree(output_dir, root_dirs, configuration=None):
             ):
                 break
             traversal_directories.add(parent)
+    # The source walk owns the complete child graph. Native scopes remain real
+    # directories, but do not scan the filesystem again to discover their edges.
+    children = {}
+    for directory in sorted(entries | traversal_directories):
+        if directory != directory.parent:
+            children.setdefault(directory.parent, []).append(directory)
+
+    def traversal(directory):
+        lines = []
+        for child in children.get(directory, ()):
+            root = (
+                "IREE_SOURCE_DIR"
+                if child in authored_directories
+                else "IREE_GENERATED_CMAKE_DIR"
+            )
+            lines.append(
+                f'add_subdirectory("${{{root}}}/{child.as_posix()}" '
+                f'"${{CMAKE_CURRENT_BINARY_DIR}}/{child.name}")'
+            )
+        return "\n".join(lines)
+
+    for package in packages.values():
+        path = output_dir / package.directory / "CMakeLists.txt"
+        write_if_changed(path, package.convert(traversal(package.directory)))
+        output_files.add(path)
+
     for directory in sorted(traversal_directories):
         path = output_dir / directory / "CMakeLists.txt"
         write_if_changed(
@@ -293,7 +320,8 @@ def generate_build_tree(output_dir, root_dirs, configuration=None):
             "# Generated from descendant package declarations.\n"
             "set_property(DIRECTORY PROPERTY IREE_PACKAGE_SOURCE_DIR "
             f'"${{IREE_SOURCE_DIR}}/{directory.as_posix()}")\n'
-            "iree_add_all_subdirs()\n",
+            + traversal(directory)
+            + "\n",
         )
         output_files.add(path)
 

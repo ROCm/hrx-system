@@ -2714,9 +2714,9 @@ class Converter(object):
     """Conversion state tracking and full file template substitution."""
 
     def __init__(self):
-        # Header appears before package traversal with `iree_add_all_subdirs`.
+        # Header appears before child directory traversal.
         self.header = ""
-        # Body appears after `iree_add_all_subdirs`.
+        # Body appears after child directory traversal.
         self.body = ""
         # Deferred fragments resolve cross-package inputs after all declarations
         # have been evaluated, without changing their native lexical scope.
@@ -2726,7 +2726,7 @@ class Converter(object):
         self._fragments.extend([self.body, render])
         self.body = ""
 
-    def convert(self):
+    def convert(self, traversal="iree_add_all_subdirs()"):
         body = (
             "".join(
                 fragment() if callable(fragment) else fragment
@@ -2736,7 +2736,7 @@ class Converter(object):
         )
         converted_content = (
             "\niree_package_source_dir(_IREE_PACKAGE_SOURCE_DIR)\n"
-            f"{self.header}\n\niree_add_all_subdirs()\n\n{body}"
+            f"{self.header}\n\n{traversal}\n\n{body}"
         )
 
         # Cleanup newline characters. This is more convenient than ensuring all
