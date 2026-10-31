@@ -397,6 +397,101 @@ TEST_F(CpuStreamingMemoryTest,
   }
 }
 
+TEST_F(CpuStreamingMemoryTest, PageableUpdatesCaptureBytesBeforeReturning) {
+  constexpr size_t kAllocationSize = 256 * 1024 + 16;
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
+      context_, kAllocationSize, IREE_HAL_STREAMING_MEMORY_FLAG_NONE,
+      &buffer_));
+  device_pointer_ = iree_hal_streaming_buffer_device_pointer(buffer_);
+  iree_hal_semaphore_t* gate = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      context_->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_NONE, &gate));
+  InjectedFlushQueue queue = {};
+  iree_hal_queue_t* original_queue = stream_->queue;
+  InitializeInjectedFlushQueue(original_queue, &queue);
+  queue.execute_gate = gate;
+  EXPECT_EQ(original_queue, ReplaceStreamQueue(stream_, &queue.base));
+  iree_hal_queue_release(original_queue);
+
+  for (size_t length : {4096u, 65539u, 256u * 1024u}) {
+    SCOPED_TRACE(length);
+    std::vector<uint8_t> source(length);
+    std::vector<uint8_t> expected(kAllocationSize, 0xcd);
+    for (size_t i = 0; i < length; ++i) {
+      source[i] = static_cast<uint8_t>(i);
+      expected[3 + i] = source[i];
+    }
+    std::memset(buffer_->host_ptr, 0xcd, kAllocationSize);
+    ++queue.execute_gate_value;
+    const int accepted_before = queue.accepted_transfer_count.load();
+    IREE_EXPECT_OK(iree_hal_streaming_memcpy_host_to_device(
+        context_, device_pointer_ + 3, source.data(), length, stream_));
+    EXPECT_EQ(queue.accepted_transfer_count.load(), accepted_before + 1);
+    EXPECT_EQ(queue.injected_execute_count.load(), 0);
+    EXPECT_EQ(stream_->command_buffer, nullptr);
+    EXPECT_EQ(static_cast<const uint8_t*>(buffer_->host_ptr)[3], 0xcd);
+    std::memset(source.data(), 0xee, source.size());
+    IREE_EXPECT_OK(
+        iree_hal_semaphore_signal(gate, queue.execute_gate_value, nullptr));
+    IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize(stream_));
+    EXPECT_EQ(0,
+              std::memcmp(buffer_->host_ptr, expected.data(), expected.size()));
+  }
+
+  iree_hal_queue_retain(original_queue);
+  iree_hal_queue_release(ReplaceStreamQueue(stream_, original_queue));
+  iree_hal_semaphore_release(gate);
+}
+
+TEST_F(CpuStreamingMemoryTest,
+       PostAcceptFlushFailureJoinsCapturedUploadSnapshots) {
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
+      context_, 32, IREE_HAL_STREAMING_MEMORY_FLAG_NONE, &buffer_));
+  device_pointer_ = iree_hal_streaming_buffer_device_pointer(buffer_);
+  iree_hal_semaphore_t* gate = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      context_->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_NONE, &gate));
+  InjectedFlushQueue queue = {};
+  iree_hal_queue_t* original_queue = stream_->queue;
+  InitializeInjectedFlushQueue(original_queue, &queue);
+  queue.execute_gate = gate;
+  queue.fail_flush = true;
+  EXPECT_EQ(original_queue, ReplaceStreamQueue(stream_, &queue.base));
+  iree_hal_queue_release(original_queue);
+
+  std::array<uint8_t, 16> source;
+  source.fill(0x42);
+  std::memset(buffer_->host_ptr, 0xcd, 32);
+  ++queue.execute_gate_value;
+  std::atomic<bool> returned = false;
+  std::thread caller([&] {
+    iree_status_t status = iree_hal_streaming_memcpy_host_to_device(
+        context_, device_pointer_, source.data(), 16, stream_);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INTERNAL, status);
+    returned.store(true, std::memory_order_release);
+  });
+  // The real task queue has captured the source but cannot execute it yet.
+  queue.flush_observed.acquire();
+  EXPECT_FALSE(returned.load(std::memory_order_acquire));
+  EXPECT_EQ(static_cast<const uint8_t*>(buffer_->host_ptr)[0], 0xcd);
+  source.fill(0xee);
+  queue.fail_flush = false;
+  IREE_EXPECT_OK(
+      iree_hal_semaphore_signal(gate, queue.execute_gate_value, nullptr));
+  caller.join();
+  IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  const auto* bytes = static_cast<const uint8_t*>(buffer_->host_ptr);
+  for (size_t i = 0; i < 32; ++i) {
+    EXPECT_EQ(bytes[i], i < 16 ? 0x42 : 0xcd);
+  }
+
+  iree_hal_queue_retain(original_queue);
+  iree_hal_queue_release(ReplaceStreamQueue(stream_, original_queue));
+  iree_hal_semaphore_release(gate);
+}
+
 TEST_F(CpuStreamingMemoryTest,
        DownloadsValidateAllocationExtentsBeforeSubmitting) {
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(

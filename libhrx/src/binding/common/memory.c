@@ -2885,44 +2885,21 @@ iree_status_t iree_hal_streaming_memcpy_peer(
 static iree_status_t iree_hal_streaming_enqueue_host_update(
     iree_hal_streaming_stream_t* stream, const void* src,
     iree_hal_streaming_buffer_ref_t dst_ref, iree_device_size_t size) {
-  IREE_ASSERT_ARGUMENT(stream);
-  IREE_ASSERT_ARGUMENT(src);
-  if (!dst_ref.buffer || !dst_ref.buffer->buffer) {
+  if (!dst_ref.buffer->buffer) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "host update destination is not a device buffer");
   }
-  iree_device_size_t range_end = 0;
-  if (IREE_UNLIKELY(
-          !iree_device_size_checked_add(dst_ref.offset, size, &range_end) ||
-          range_end > dst_ref.buffer->size)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "host update exceeds destination buffer range");
-  }
-
-  const uint8_t* src_ptr = (const uint8_t*)src;
-  iree_device_size_t remaining = size;
-  iree_device_size_t chunk_offset = 0;
-  iree_slim_mutex_lock(&stream->mutex);
-  iree_status_t status = iree_hal_streaming_stream_begin_locked(stream);
-  while (remaining > 0 && iree_status_is_ok(status)) {
-    const iree_device_size_t this_chunk =
-        remaining < IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE
-            ? remaining
-            : IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE;
-    const iree_hal_buffer_ref_t target_ref = iree_hal_make_buffer_ref(
-        dst_ref.buffer->buffer, dst_ref.offset + chunk_offset, this_chunk);
-    status = iree_hal_command_buffer_update_buffer(
-        stream->command_buffer, src_ptr + chunk_offset, 0, target_ref,
-        IREE_HAL_UPDATE_FLAG_NONE);
-    chunk_offset += this_chunk;
-    remaining -= this_chunk;
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_streaming_command_buffer_barrier(
-        stream->command_buffer, IREE_HAL_BARRIER_FLAG_NONE);
-  }
-  iree_slim_mutex_unlock(&stream->mutex);
-  return status;
+  const iree_hal_transfer_operation_t operation = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE,
+      .update =
+          {
+              .source_buffer = src,
+              .target_buffer = dst_ref.buffer->buffer,
+              .target_offset = dst_ref.offset,
+              .length = size,
+          },
+  };
+  return iree_hal_streaming_direct_transfer_enqueue(stream, 1, &operation);
 }
 
 static iree_status_t iree_hal_streaming_resolve_device_row(
