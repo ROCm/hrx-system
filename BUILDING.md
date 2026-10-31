@@ -58,6 +58,14 @@ BUILD files, loaded Starlark data, converter code, or source globs change.
 This also applies to direct CMake invocations and embedding with
 `add_subdirectory`; each build tree owns its generated files.
 
+Configuration flows from native options and the toolchain into the Python
+converter, which selects BUILD declarations and resolves their compile, link,
+and generated-file dependencies. The emitted CMake then declares the native
+products and tests. CMake retains ownership of compiler behavior, final artifact
+paths, imported targets, and public library interfaces, including settings from
+an enclosing project. Native target properties are not exported back into the
+converter.
+
 `BUILD.bazel` owns product declarations, including sources, dependencies, and
 conditional implementations. Allocator and target configuration select those
 same declarations in both build systems. Native options, SDK installation, and
