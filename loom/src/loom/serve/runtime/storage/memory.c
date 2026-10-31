@@ -1697,14 +1697,22 @@ void loom_serve_virtual_buffer_begin_trim(loom_serve_virtual_buffer_t* buffer) {
   }
 }
 
-void loom_serve_virtual_buffer_keep(loom_serve_virtual_buffer_t* buffer,
-                                    iree_device_size_t offset,
-                                    iree_device_size_t length) {
+uint64_t loom_serve_virtual_buffer_keep(loom_serve_virtual_buffer_t* buffer,
+                                        iree_device_size_t offset,
+                                        iree_device_size_t length) {
+  if (!length) {
+    return 0;
+  }
+  uint64_t bytes = 0;
   const iree_device_size_t slab_size = buffer->geometry.slab_size;
   const iree_host_size_t end = (offset + length - 1) / slab_size + 1;
   for (iree_host_size_t i = offset / slab_size; i < end; ++i) {
-    buffer->slabs[i].keep = true;
+    if (!buffer->slabs[i].keep) {
+      buffer->slabs[i].keep = true;
+      bytes += loom_serve_memory_slab_length(buffer, i);
+    }
   }
+  return bytes;
 }
 
 iree_status_t loom_serve_virtual_buffer_trim(

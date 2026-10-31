@@ -259,6 +259,28 @@ TEST_F(ToolXmlTest, SemanticMistakesReachTheHarnessWithoutRepair) {
       R"([{"type":"function","function":{"name":"search","arguments":"{\"q\":\"where?\"}"}},{"type":"function","function":{"name":"search","arguments":"{\"query\":\"first\",\"query\":\"second\"}"}},{"type":"function","function":{"name":"undeclared","arguments":"{\"path\":\"123\"}"}},{"type":"function","function":{"name":"search","arguments":"{\"limit\":\"many\"}"}},{"type":"function","function":{"name":"search","arguments":"{}"}}])");
 }
 
+TEST_F(ToolXmlTest, CatalogPolicyDoesNotConstrainOutputTranslation) {
+  const auto schemas = IREE_SV(R"([
+    {"type":"custom","custom":{"name":"client_tool"}},
+    {"type":"function","function":{"name":"read","strict":true,
+      "parameters":{"properties":{"path":{"type":"string"}}}}},
+    {"type":"function","function":{"name":"ambiguous",
+      "parameters":{"properties":{"value":{"type":"integer"}}}}},
+    {"type":"function","function":{"name":"ambiguous",
+      "parameters":{"properties":{"value":{"type":"string"}}}}}
+  ])");
+  std::string calls;
+  IREE_ASSERT_OK(Parse(
+      IREE_SV("<tool_call><function=read><parameter=path>123</parameter>"
+              "<parameter=extra>true</parameter></function></tool_call>"
+              "<tool_call><function=ambiguous><parameter=value>123</parameter>"
+              "</function></tool_call>"),
+      schemas, &calls));
+  EXPECT_EQ(
+      calls,
+      R"([{"type":"function","function":{"name":"read","arguments":"{\"path\":\"123\",\"extra\":\"true\"}"}},{"type":"function","function":{"name":"ambiguous","arguments":"{\"value\":\"123\"}"}}])");
+}
+
 TEST_F(ToolXmlTest,
        CodingAndImageArgumentsUseRepresentationHintsNotConstraints) {
   const auto schemas = IREE_SV(R"([

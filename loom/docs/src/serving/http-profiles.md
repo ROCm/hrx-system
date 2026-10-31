@@ -261,24 +261,18 @@ unsupported or contradictory controls reject before admission. Reasoning-aware
 models return `reasoning_content` separately from answer `content`, in both SSE
 deltas and complete messages.
 
-`preserve_thinking` is a boolean source-policy control for reasoning in prior
-assistant messages. `chat_template_kwargs` accepts `enable_thinking`,
-`reasoning_effort`, and `preserve_thinking` with the same types. The source policy
-resolves top-level and nested spellings together; contradictory controls reject,
-and the nested object does not enable arbitrary template options or execution.
+`preserve_thinking` and `chat_template_kwargs` also pass to source policy. The
+model package defines which controls it consumes, their types, and how top-level
+and nested spellings combine. Native admission interprets only transport and
+resource controls; other request fields remain intact for the model program.
 
-`tools` accepts up to 4096 function declarations. Omitted `tool_choice` or
-`"auto"` allows tool calls. `"none"` disables tools for the current response,
-including when a client retains its tool catalog and prior tool calls while
-requesting a conversation summary. Function envelopes and unique catalog names
-are validated; declarations remain in the source-visible catalog, preserving
-the conversation prefix.
-Source sampling receives the original request, and the completion boundary
-rejects forbidden structured calls before publication.
-Parameter schemas and descriptive metadata pass through to model source without
-JSON Schema validation. Required or named tool choices and `strict:true` reject:
-the server does not implement constrained tool sampling. `store` may be omitted
-or false.
+`tools` accepts up to 4096 entries. The catalog, `tool_choice` (including
+`"required"` and named-function objects), parameter schemas, and metadata such
+as `strict` pass through to the model program. They are not a native execution
+allowlist or a promise of constrained generation. Model-specific prompting and
+sampling determine how choices affect generation. The server returns generated
+calls without checking their names against the catalog or rejecting them based
+on `tool_choice`. `store` may be omitted or false.
 The source policy owns tool grammar, safe output boundaries and canonical
 history. Generated calls become structured `tool_calls`; the server never runs
 the tools. Argument strings are opaque at the HTTP boundary: unknown functions,

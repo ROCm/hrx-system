@@ -338,8 +338,9 @@ TEST_P(TextStateTest, OptionalRootsRetainOriginsMapsAndCheckpointCarry) {
       ASSERT_NO_FATAL_FAILURE(
           CheckBytes(state.carry, state.storage.carry_stride, carry));
     }
-    // The restored endpoint uses newer physical IDs. Retiring the original
-    // prefix leaves holes, forcing compaction and publication of remapped IDs.
+    // The restored endpoint uses newer block IDs within the same slab.
+    // Retiring the original prefix leaves holes without releasing backing;
+    // the endpoint must retain its payload and usable sparse maps.
     loom_serve_text_state_row_reset(row);
     loom_serve_text_trim_result_t result;
     IREE_ASSERT_OK(loom_serve_text_state_submit_trim(&state, &result));
@@ -349,7 +350,8 @@ TEST_P(TextStateTest, OptionalRootsRetainOriginsMapsAndCheckpointCarry) {
       IREE_ASSERT_OK(
           loom_serve_text_state_complete_trim(&state, &result, &complete));
     }
-    EXPECT_GT(result.moved_blocks, 0u);
+    EXPECT_EQ(result.moved_blocks, 0u);
+    EXPECT_EQ(result.copied_bytes, 0u);
     ASSERT_NO_FATAL_FAILURE(CheckMaps());
     ASSERT_NO_FATAL_FAILURE(CacheContents(fork, false));
   }

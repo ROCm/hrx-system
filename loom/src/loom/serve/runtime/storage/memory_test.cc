@@ -782,6 +782,31 @@ TEST_F(DeviceMemoryTest, SparseGrowthTrimRegrowthAndSharedAdmission) {
   EXPECT_EQ(statistics[1].peak_bytes, 2 * kSlabSize);
 }
 
+TEST_F(MemoryTest, KeepFootprintCountsSharedSlabsAndUnbackedTail) {
+  const auto geometry = loom_serve_pool_weight_geometry(storage_owner);
+  const uint64_t tail = geometry.granularity;
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+      pool, geometry, 2 * kSlabSize + tail, 256, &statistics[0], &first));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(first, 0, 256));
+  RoundTrip(loom_serve_virtual_buffer_handle(first), 0, 0x12345678);
+  loom_serve_virtual_buffer_begin_trim(first);
+  EXPECT_EQ(loom_serve_virtual_buffer_keep(first, 0, 0), 0u);
+  EXPECT_EQ(loom_serve_virtual_buffer_keep(first, 0, 256), kSlabSize);
+  EXPECT_EQ(loom_serve_virtual_buffer_keep(first, 128, 256), 0u);
+  EXPECT_EQ(loom_serve_virtual_buffer_keep(first, kSlabSize - 128, 256),
+            kSlabSize);
+  EXPECT_EQ(loom_serve_virtual_buffer_keep(first, 2 * kSlabSize, tail), tail);
+  EXPECT_EQ(loom_serve_virtual_buffer_keep(first, 0, 2 * kSlabSize + tail), 0u);
+  EXPECT_EQ(statistics[0].committed_bytes, kSlabSize);
+  // Rebuilding the authoritative keep set after a layout preview must not
+  // retain its speculative marks or change existing payload.
+  loom_serve_virtual_buffer_begin_trim(first);
+  EXPECT_EQ(loom_serve_virtual_buffer_keep(first, 0, 256), kSlabSize);
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_trim(first));
+  EXPECT_EQ(statistics[0].committed_bytes, kSlabSize);
+  CheckRetained(loom_serve_virtual_buffer_handle(first), 0, 0x12345678);
+}
+
 TEST_F(MemoryTest, CohortAdmissionCountsUniqueSlabsAndLeavesDenialUntouched) {
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
       pool, loom_serve_pool_weight_geometry(storage_owner), 3 * kSlabSize, 256,

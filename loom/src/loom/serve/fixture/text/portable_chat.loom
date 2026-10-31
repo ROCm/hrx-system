@@ -36,7 +36,8 @@ func.def public @request_defaults(%options: buffer) -> (buffer) {
 }
 
 func.def public @request_options(%defaults: buffer, %request: buffer, %nonce: i64) -> (buffer) {
-  func.return %defaults : buffer
+  // Retain the original request as this policy's opaque request-local packet.
+  func.return %request : buffer
 }
 
 func.def public @chat_begin(%request: buffer, %tools: buffer) -> (buffer, i64) {

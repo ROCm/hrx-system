@@ -485,15 +485,20 @@ static void loom_serve_virtual_pool_query_stats(
   iree_slim_mutex_unlock(&pool->mutex);
 }
 
+static void loom_serve_virtual_pool_request_trim_locked(
+    loom_serve_virtual_pool_t* pool, iree_device_size_t min_bytes_to_keep) {
+  pool->trim_floor = min_bytes_to_keep;
+  pool->trim_requested = true;
+  ++pool->trim_generation;
+}
+
 static void loom_serve_virtual_pool_trim(iree_hal_pool_t* base_pool,
                                          iree_hal_pool_trim_flags_t flags,
                                          iree_device_size_t min_bytes_to_keep) {
   loom_serve_virtual_pool_t* pool =
       ((loom_serve_virtual_pool_source_t*)base_pool)->owner;
   iree_slim_mutex_lock(&pool->mutex);
-  pool->trim_floor = min_bytes_to_keep;
-  pool->trim_requested = true;
-  ++pool->trim_generation;
+  loom_serve_virtual_pool_request_trim_locked(pool, min_bytes_to_keep);
   loom_serve_virtual_pool_wake_locked(pool);
   iree_slim_mutex_unlock(&pool->mutex);
 }
@@ -869,6 +874,11 @@ bool loom_serve_virtual_pool_is_pending(loom_serve_virtual_pool_t* pool) {
 }
 
 iree_status_t loom_serve_virtual_pool_reclaim(loom_serve_virtual_pool_t* pool) {
+  // The serialized owner is already running. Only actual history/native
+  // completion should schedule it again if this return cannot finish now.
+  iree_slim_mutex_lock(&pool->mutex);
+  loom_serve_virtual_pool_request_trim_locked(pool, 0);
+  iree_slim_mutex_unlock(&pool->mutex);
   loom_serve_virtual_pool_advance_trim(pool);
   return iree_status_clone(pool->failure);
 }

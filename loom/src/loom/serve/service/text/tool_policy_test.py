@@ -18,7 +18,7 @@ CONTROL = Path(sys.argv.pop(1)).resolve()
 
 
 class ToolPolicyTest(unittest.TestCase):
-    def execute(self, calls, stream=True, messages=None, tools=None):
+    def execute(self, calls, stream=True, messages=None, tools=None, **options):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             tokenizer = directory / "tokenizer.json"
@@ -53,6 +53,7 @@ class ToolPolicyTest(unittest.TestCase):
                             }
                             for name in ("read", "list")
                         ],
+                        **options,
                     }
                 ),
                 encoding="utf-8",
@@ -140,6 +141,56 @@ class ToolPolicyTest(unittest.TestCase):
                     [call["function"] for call in calls],
                 )
                 self.assertFalse(value["reusable"])
+
+    def test_generated_calls_are_not_checked_against_request_policy(self):
+        calls = [self.call("yield", '{"result":"done"}')]
+        for stream in (False, True):
+            for options in (
+                {"tools": []},
+                {"tool_choice": "none"},
+                {"tool_choice": "required"},
+                {"tool_choice": {"type": "function", "function": {"name": "read"}}},
+            ):
+                with self.subTest(stream=stream, options=options):
+                    result = self.execute(json.dumps(calls), stream=stream, **options)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    value = json.loads(result.stdout)
+                    retained_request = json.loads(bytes(value["request_options"]))
+                    for name, expected in options.items():
+                        self.assertEqual(retained_request[name], expected)
+                    self.assertEqual(
+                        value["tool_calls"][0]["function"], calls[0]["function"]
+                    )
+                    self.assertIn('yield: {"result":"done"}', value["checkpoint"])
+
+    def test_native_admission_does_not_define_model_options(self):
+        # This policy ignores model options. Native transport must not impose
+        # another model's names, types, or template keyword vocabulary.
+        options = {
+            "temperature": {"schedule": [1, 0]},
+            "top_k": None,
+            "reasoning_effort": {"budget": 64},
+            "model_options": ["custom"],
+            "chat_template_kwargs": {"custom_option": True},
+            "parallel_tool_calls": False,
+            "response_format": {"type": "json_object"},
+        }
+        result = self.execute("[]", **options)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        value = json.loads(result.stdout)
+        self.assertEqual(value["prompt"], "user: hello\nassistant: ")
+        retained_request = json.loads(bytes(value["request_options"]))
+        for name, expected in options.items():
+            self.assertEqual(retained_request[name], expected)
+
+    def test_message_extensions_reach_source_unchanged(self):
+        messages = [{"role": "user", "content": "hello", "model_metadata": {"mode": 7}}]
+        result = self.execute("[]", messages=messages)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        value = json.loads(result.stdout)
+        self.assertEqual(
+            json.loads(bytes(value["request_options"]))["messages"], messages
+        )
 
     def test_harness_repairs_read_without_replaying_completed_image(self):
         tools = [

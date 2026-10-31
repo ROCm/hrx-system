@@ -385,7 +385,7 @@ TEST_F(VirtualPoolTest,
 }
 
 TEST_F(VirtualPoolTest, VirtualBackingTrimWaitsForActualHistoryCompletion) {
-  ASSERT_NO_FATAL_FAILURE(CreateVirtualPool());
+  ASSERT_NO_FATAL_FAILURE(CreateVirtualPool(/*with_workspace=*/true));
   auto* source = loom_serve_virtual_pool_handle(virtual_pool);
   struct Completion {
     // Accepted acquisitions deliver their terminal result on the owner.
@@ -449,7 +449,26 @@ TEST_F(VirtualPoolTest, VirtualBackingTrimWaitsForActualHistoryCompletion) {
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes, kSlabSize);
   ASSERT_NO_FATAL_FAILURE(CheckRetained(view.buffer, 0, 0x23571113));
 
+  std::atomic<size_t> wakes{0};
+  const loom_serve_wake_callback_t wake = {
+      [](void* self) { static_cast<std::atomic<size_t>*>(self)->fetch_add(1); },
+      &wakes};
+  loom_serve_virtual_pool_set_observer(virtual_pool, wake);
+  const auto detach_observer = [](loom_serve_virtual_pool_t* pool) {
+    loom_serve_virtual_pool_set_observer(pool, {});
+  };
+  const std::unique_ptr<loom_serve_virtual_pool_t, decltype(detach_observer)>
+      observer(virtual_pool, detach_observer);
+  // Physical admission retries run on the owner that also drives reclamation.
+  // Unchanged pressure cannot schedule that owner again while history waits.
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    iree_device_size_t retained = 0;
+    IREE_ASSERT_OK(loom_serve_workspace_trim(virtual_workspace, &retained));
+    EXPECT_TRUE(loom_serve_virtual_pool_is_reclaiming(virtual_pool));
+    EXPECT_EQ(wakes.load(), 0u);
+  }
   completion_gate.reset();
+  EXPECT_GT(wakes.load(), 0u);
   timeline_owner.reset();
   ASSERT_NO_FATAL_FAILURE(AwaitVirtualPool());
   iree_hal_pool_stats_t detached;
@@ -457,6 +476,15 @@ TEST_F(VirtualPoolTest, VirtualBackingTrimWaitsForActualHistoryCompletion) {
   EXPECT_EQ(detached.bytes_committed, 0u);
   // The common cache still owns the physical slab, available to any role.
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool).cached_bytes, kSlabSize);
+
+  // A completed empty trim must be quiet too. Reinstall after the outer wait
+  // relinquishes its temporary observer.
+  wakes.store(0);
+  loom_serve_virtual_pool_set_observer(virtual_pool, wake);
+  iree_device_size_t retained = 0;
+  IREE_ASSERT_OK(loom_serve_workspace_trim(virtual_workspace, &retained));
+  EXPECT_FALSE(loom_serve_virtual_pool_is_reclaiming(virtual_pool));
+  EXPECT_EQ(wakes.load(), 0u);
 }
 
 }  // namespace

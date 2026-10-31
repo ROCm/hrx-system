@@ -57,9 +57,10 @@ void loom_serve_virtual_pool_set_observer(loom_serve_virtual_pool_t* pool,
 // failure propagates here and preserves the range until outer teardown.
 iree_status_t loom_serve_virtual_pool_advance(loom_serve_virtual_pool_t* pool);
 
-// Advances only requested backing returns. Safe during physical reclamation:
-// no cold acquisition or recursive admission is attempted. Pending history and
-// native detaches finish through the same observer and subsequent owner calls.
+// Requests and advances all idle backing returns on the serialized physical
+// owner, without scheduling that already-running owner. No cold acquisition or
+// recursive admission is attempted. Pending history and native detaches finish
+// through the same observer and subsequent owner calls.
 iree_status_t loom_serve_virtual_pool_reclaim(loom_serve_virtual_pool_t* pool);
 bool loom_serve_virtual_pool_is_reclaiming(loom_serve_virtual_pool_t* pool);
 

@@ -394,10 +394,14 @@ Text policy owns the generated grammar and canonical history. Its
 `parse_tools(schemas: buffer, response: buffer, truncated: i64) -> buffer` root
 returns function records with a name and an opaque argument string; generic
 chat handling assigns IDs and encodes the same records for HTTP and SSE. The
-server does not execute tools, validate executable arguments, or repair calls.
-Those operations belong to the harness. `render_tool` must preserve the call
-data when formatting the next turn, and `complete_text` can authorize retained
-state reuse only when its canonical bytes match the generated history.
+server and model policy do not execute tools, enforce tool permissions, validate
+executable arguments, or repair calls. Those operations belong to the harness.
+Native admission passes model-specific request fields through without imposing
+a tool-choice or template-option vocabulary. Source policy consumes the fields
+needed for its own prompt, sampling, and output representation.
+`render_tool` must preserve the call data when formatting the next turn, and
+`complete_text` can authorize retained state reuse only when its canonical
+bytes match the generated history.
 `truncated` is one when generation reaches its token limit without EOS, and zero
 after EOS. A truncated response can retain complete calls while omitting an
 unfinished final call; its finish reason remains `length`, not `tool_calls`.
@@ -416,7 +420,7 @@ and uses property schemas only to distinguish representations:
 | String, including string-capable unions | Literal text, even when it looks like a number or JSON. |
 | Explicit nullable hint with `null` text | JSON null. |
 | Non-string hint with a complete JSON value | Original JSON spelling, without numeric conversion or type enforcement. |
-| Unknown property/tool, opaque schema, or non-JSON text | Literal string. |
+| Unknown property/tool, repeated tool name, opaque schema, or non-JSON text | Literal string. |
 
 Hints cover direct types, nullable type arrays, and `anyOf`/`oneOf` branches;
 they are not a JSON Schema evaluator or reference resolver. One framing newline
