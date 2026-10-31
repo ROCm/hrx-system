@@ -62,6 +62,15 @@ def executable_inputs(
     if artifacts:
         relative = f"CMakeFiles/iree/link/{response}.rsp"
         response_file = "${CMAKE_BINARY_DIR}/" + relative
+        # Only instantiated consumers require their response file. Tracking it
+        # here repairs deletion without requiring files for disabled packages.
+        lines.append(
+            command(
+                "set_property",
+                "DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS",
+                arguments((response_file,)),
+            )
+        )
         if msvc:
             lines.append(
                 command(

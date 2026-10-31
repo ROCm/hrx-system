@@ -87,6 +87,15 @@ iree_generated_files(NAME copy GENERATOR copy_tool
                 template.rename(template.with_suffix(""))
             for name in ("leaf", "data", "native"):
                 (source / f"{name}.txt").write_text(f"leak:{name}\n")
+            # Python sees declarations in packages that native configuration
+            # disables. Their link inputs must not require absent targets.
+            disabled = source / "package/disabled"
+            disabled.mkdir()
+            (disabled / "BUILD.bazel").write_text(
+                'iree_cmake_extra_content(content="return()")\n'
+                'cc_library(name="value", srcs=["//package:registration.cc"])\n'
+                'cc_binary(name="probe", srcs=["//package:main.c"], deps=[":value"])\n'
+            )
             # Exercise add_subdirectory embedding with independent source and
             # binary roots, including a nested authored project and local import.
             host = source / "host"
@@ -255,6 +264,34 @@ iree_generated_files(NAME copy GENERATOR copy_tool
             self.assertTrue(relocated_archive.is_relative_to(build / "archive outputs"))
             relocated_archive.unlink()
             check(15)
+
+            # A native directory may change artifact locations after bootstrap.
+            # Final links consume the actual target files, not predicted names.
+            declaration.write_text(
+                declaration.read_text() + '\niree_cmake_extra_content(content="""\n'
+                'set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native archives")\n'
+                f'set(CMAKE_{CONFIGURATION.upper()}_POSTFIX "_native")\n'
+                '""")\n'
+            )
+            configure_project(host, build, "-UCMAKE_ARCHIVE_OUTPUT_DIRECTORY")
+            archive.unlink()
+            check(15)
+            scoped_archive = Path(
+                (owned / f"paths-{CONFIGURATION}.txt").read_text().splitlines()[-1]
+            )
+            self.assertTrue(
+                scoped_archive.is_relative_to(owned / "package/native archives")
+            )
+            self.assertTrue(scoped_archive.stem.endswith("_native"))
+            scoped_archive.unlink()
+            check(15)
+            link_inputs = (owned / f"link-inputs-{CONFIGURATION}.txt").read_text()
+            for name in link_inputs.split(";"):
+                if name.endswith(".rsp"):
+                    response = Path(name)
+                    response.unlink()
+                    check(15)
+                    self.assertTrue(response.is_file())
 
             # Explicit native directory options keep their build semantics even
             # for a package that ordinarily uses a generated function scope.

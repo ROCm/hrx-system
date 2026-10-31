@@ -426,14 +426,13 @@ def generate_build_tree(output_dir, root_dirs, configuration=None):
         + ")\n"
     )
     if libraries:
-        response_files = libraries.response_files()
-        for path, content in response_files.items():
-            write_if_changed(path, content)
-        if response_files:
+        for path, content, condition in libraries.response_files():
+            # Authored directory and toolchain settings can change artifact
+            # names or disable packages after bootstrap. Native generation owns
+            # the final paths; instantiated consumers track missing-file repair.
             manifest += (
-                "set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS\n  "
-                + "\n  ".join(quote(path) for path in response_files)
-                + ")\n"
+                f"file(GENERATE OUTPUT {quote(path)} CONTENT [=[{content}]=] "
+                f'CONDITION "{condition}")\n'
             )
     write_if_changed(output_dir / "inputs.cmake", manifest)
 

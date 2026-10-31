@@ -77,8 +77,16 @@ class Library:
 
 
 @dataclass
+class LinkResponse:
+    # Stable name shared by consumers of the same ordered archive closure.
+    key: str
+    # Native products whose existence requires materializing the response file.
+    consumers: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Graph:
-    # Effective native output settings; parent/toolchain overrides remain native.
+    # Effective bootstrap settings; parent/toolchain target properties stay native.
     configuration: dict[str, str]
     # Native directory owning each source package and its private imports.
     native_scopes: dict[str, str] = field(default_factory=dict)
@@ -103,28 +111,42 @@ class Graph:
     # Declared generator target owning each fully qualified output path.
     producers: dict[str, str] = field(default_factory=dict)
     # Final link inputs interned once instead of restated for every consumer.
-    responses: dict[tuple[str, ...], str] = field(default_factory=dict)
+    responses: dict[tuple[str, ...], LinkResponse] = field(default_factory=dict)
 
-    def response(self, artifacts):
+    def response(self, artifacts, consumer):
         if artifacts not in self.responses:
             key = hashlib.sha256("\0".join(artifacts).encode()).hexdigest()[:20]
-            self.responses[artifacts] = key
-        return self.responses[artifacts]
+            self.responses[artifacts] = LinkResponse(key)
+        response = self.responses[artifacts]
+        response.consumers.append(consumer)
+        return response.key
 
     def response_files(self):
-        outputs = {}
+        """Native-generated link files, with artifact locations still symbolic."""
+        outputs = []
         if not self.responses:
             return outputs
         binary_root = Path(self.configuration["CMAKE_BINARY_DIR"])
-        owned_root = self.configuration["IREE_BINARY_DIR"]
-        relative_root = os.path.relpath(owned_root, binary_root).replace("\\", "/")
-        for artifacts, key in self.responses.items():
-            output = binary_root / "CMakeFiles/iree/link" / (key + ".rsp")
-            content = "".join(
-                '"' + artifact.replace("${IREE_BINARY_DIR}", relative_root) + '"\n'
-                for artifact in artifacts
+        relative_base = binary_root.as_posix().replace(",", "$<COMMA>")
+        for artifacts, response in self.responses.items():
+            output = binary_root / "CMakeFiles/iree/link" / (response.key + ".rsp")
+            # MSVC accepts native absolute paths, including another volume.
+            # POSIX link dependency files retain build-relative spelling so
+            # whitespace in the build root does not enter their prerequisites.
+            if not Option("MSVC").evaluate(self.configuration):
+                artifacts = tuple(
+                    f"$<PATH:RELATIVE_PATH,{artifact},{relative_base}>"
+                    for artifact in artifacts
+                )
+            content = "".join(f'"{artifact}"\n' for artifact in artifacts)
+            condition = (
+                "$<OR:"
+                + ",".join(
+                    f"$<TARGET_EXISTS:{consumer}>" for consumer in response.consumers
+                )
+                + ">"
             )
-            outputs[output] = content
+            outputs.append((output, content, condition))
         return outputs
 
     def add(self, library, aliases=()):
@@ -265,10 +287,10 @@ class Graph:
                         native.append(
                             f"$<GENEX_EVAL:$<TARGET_PROPERTY:{target},IREE_CC_OBJECTS>>"
                         )
-                    elif self.archive_pattern is None:
-                        native.append(provider.name)
+                    elif self.links_archive_files:
+                        artifacts.append(f"$<TARGET_LINKER_FILE:{target}>")
                     else:
-                        artifacts.append(self.archive(provider))
+                        native.append(provider.name)
             else:
                 native.append(dependency)
         return (
@@ -280,45 +302,18 @@ class Graph:
         )
 
     @cached_property
-    def archive_pattern(self):
-        """The configured toolchain's ordinary static product layout."""
-        if (
-            # Recursive generators need native target edges to enter each
-            # provider's build. Ninja can follow the owned artifact file edges.
-            self.configuration.get("CMAKE_GENERATOR") != "Ninja"
-            or not (
+    def links_archive_files(self):
+        """Whether final links can consume the source-resolved artifact closure."""
+        # Recursive generators need native target edges to enter each
+        # provider's build. Ninja can follow the owned artifact file edges.
+        return (
+            self.configuration.get("CMAKE_GENERATOR") == "Ninja"
+            and (
                 Option("MSVC").evaluate(self.configuration)
                 or self.configuration.get("CMAKE_SYSTEM_NAME") == "Linux"
             )
-            or self.configuration.get("CMAKE_CONFIGURATION_TYPES")
-            or any(
-                key.startswith("CMAKE_ARCHIVE_OUTPUT_DIRECTORY")
-                for key in self.configuration
-            )
-            or any(
-                key.startswith("CMAKE_") and key.endswith("_POSTFIX") and value
-                for key, value in self.configuration.items()
-            )
-            or any(
-                key in self.configuration
-                for key in (
-                    "CMAKE_STATIC_LIBRARY_PREFIX_C",
-                    "CMAKE_STATIC_LIBRARY_PREFIX_CXX",
-                    "CMAKE_STATIC_LIBRARY_SUFFIX_C",
-                    "CMAKE_STATIC_LIBRARY_SUFFIX_CXX",
-                )
-            )
-        ):
-            return None
-        prefix = self.configuration["CMAKE_STATIC_LIBRARY_PREFIX"]
-        suffix = self.configuration["CMAKE_STATIC_LIBRARY_SUFFIX"]
-        return "${IREE_BINARY_DIR}/%s/" + prefix + "%s" + suffix
-
-    def archive(self, library):
-        name = library.name.replace("::", "_")
-        if self.archive_pattern is None:
-            return f"$<TARGET_LINKER_FILE:{name}>"
-        return self.archive_pattern % (library.package, name)
+            and not self.configuration.get("CMAKE_CONFIGURATION_TYPES")
+        )
 
     def generated_inputs(self, name):
         if name not in self.inputs:
@@ -388,7 +383,11 @@ class BuildFileFunctions:
                     native,
                     generated,
                     self._libraries.producers,
-                    response=self._libraries.response(artifacts) if artifacts else None,
+                    response=(
+                        self._libraries.response(artifacts, target.replace("::", "_"))
+                        if artifacts
+                        else None
+                    ),
                     cxx=cxx,
                     msvc=Option("MSVC").evaluate(self._configuration),
                 )
