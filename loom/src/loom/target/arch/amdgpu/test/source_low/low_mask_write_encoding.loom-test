@@ -69,25 +69,55 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value
 0xBFB00000
 
 // ====
-// RUN: emit amdgpu-native-words @swap strategy=source fixed=%lhs:physical_register:1:1 fixed=%rhs:physical_register:0:1 fixed=%returned:physical_register:0:2
 
-// Saved mask units break the reversed return pair's physical copy cycle.
+// RUN: emit amdgpu-native-words @packet_permutation_loop strategy=source
+
+// Repeated packet-local copies encode both register fields and completion waits.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @swap(%value: reg<amdgpu.vgpr>, %lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x2>) asm {
-  %mask = concat(%rhs, %lhs) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @packet_permutation_loop(%value: reg<amdgpu.vgpr>, %source: reg<amdgpu.sgpr x2>) asm {
+  low.br ^loop
+^loop:
+  %first = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %second = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %mask = concat(%second, %first) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
-  %pair = concat(%lhs, %rhs) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  low.br ^exit(%pair: reg<amdgpu.sgpr x2>)
-^exit(%returned: reg<amdgpu.sgpr x2>):
-  return %returned
+  low.br ^loop
 }
 
 // ----
-0xBE820000
-0xBE830001
-0xD5010000
+0xBE830000
+0xBF88FF9E
+0xBE820001
+0xBF88FF9E
+0xD5010001
 0x000A0080
-0xBE800003
-0xBE810002
-0xBFB00000
+0xBFA0FFF9
+
+// ====
+
+// RUN: emit amdgpu-native-words @rotate strategy=source
+
+// Edge moves encode each completion wait before the next move or branch.
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @rotate(%value: reg<amdgpu.vgpr>, %seed: reg<amdgpu.sgpr x2>) asm {
+  low.br ^loop(%seed: reg<amdgpu.sgpr x2>)
+^loop(%current: reg<amdgpu.sgpr x2>):
+  %selected = v_cndmask_b32_src0_inline %value, %current {false_value = 0}
+  %first = slice %current[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %second = slice %current[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %swapped = concat(%second, %first) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  low.br ^loop(%swapped: reg<amdgpu.sgpr x2>)
+}
+
+// ----
+0xD5010001
+0x00020080
+0xBE830000
+0xBE820001
+0xBE800002
+0xBF88FF9E
+0xBE810003
+0xBF88FF9E
+0xBFA0FFF7

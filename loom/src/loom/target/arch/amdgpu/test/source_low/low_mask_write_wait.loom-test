@@ -254,33 +254,38 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value
 
 // ====
 
-// RUN: emit amdgpu-assembly @reuse strategy=source fixed=%mask:physical_register:0:2 fixed=%replacement:physical_register:0:2 fixed=%source:physical_register:4:2
+// RUN: emit amdgpu-assembly @edge_permutation_loop strategy=source
 
-// An edge copy waits inside the predecessor before the branch.
+// The fallthrough edge completes each overwritten mask word before its successor.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
-  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
-  %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
-  low.br ^consume(%source: reg<amdgpu.sgpr x2>)
-^consume(%replacement: reg<amdgpu.sgpr x2>):
-  %result = s_and_b64 %replacement, %source
-  return
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @edge_permutation_loop(%value: reg<amdgpu.vgpr>, %seed: reg<amdgpu.sgpr x2>) asm {
+  low.br ^loop(%seed: reg<amdgpu.sgpr x2>)
+^loop(%current: reg<amdgpu.sgpr x2>):
+  %selected = v_cndmask_b32_src0_inline %value, %current {false_value = 0}
+  %first = slice %current[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %second = slice %current[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %swapped = concat(%second, %first) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  low.br ^consume(%swapped: reg<amdgpu.sgpr x2>)
+^consume(%next: reg<amdgpu.sgpr x2>):
+  low.br ^loop(%next: reg<amdgpu.sgpr x2>)
 }
 
 // ----
-  v_cndmask_b32 v0, 0, v0, s[0:1]
-  s_mov_b32 s0, s4
-  s_waitcnt_depctr 0xff9e
-  s_mov_b32 s1, s5
-  s_waitcnt_depctr 0xff9e
 .Lbb1:
-  s_and_b64 s[0:1], s[0:1], s[4:5]
-  s_endpgm
+  v_cndmask_b32 v1, 0, v0, s[0:1]
+  s_mov_b32 s3, s0
+  s_mov_b32 s2, s1
+  s_mov_b32 s0, s2
+  s_waitcnt_depctr 0xff9e
+  s_mov_b32 s1, s3
+  s_waitcnt_depctr 0xff9e
+.Lbb2:
+  s_branch .Lbb1
 
 // ====
 
-// RUN: emit amdgpu-assembly @rotate strategy=source fixed=%seed:physical_register:0:2 fixed=%current:physical_register:0:2
+// RUN: emit amdgpu-assembly @rotate strategy=source
 
 // The backedge rotates mask DWORDs through allocator-generated copies.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
