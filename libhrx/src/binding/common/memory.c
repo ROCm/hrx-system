@@ -3115,7 +3115,6 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
     return iree_ok_status();
   }
 
-  const iree_device_size_t staging_threshold = 256 * 1024;
   if (stream) {
     iree_hal_streaming_buffer_ref_t src_ref;
     if (iree_hal_streaming_memory_try_lookup(
@@ -3131,7 +3130,7 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
       IREE_TRACE_ZONE_END(z0);
       return queue_status;
     }
-    if (size <= staging_threshold) {
+    if (size <= IREE_HAL_STREAMING_SMALL_TRANSFER_MAX_LENGTH) {
       iree_status_t queue_status =
           iree_hal_streaming_enqueue_host_update(stream, src, dst_ref, size);
       IREE_TRACE_ZONE_END(z0);

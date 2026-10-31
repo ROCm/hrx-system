@@ -206,6 +206,13 @@ struct iree_hal_streaming_context_t {
   // Serializes event record submission and |event_record_timeline| updates.
   iree_slim_mutex_t event_record_mutex;
 
+  // Lazily selected bulk queue, owned until joined context teardown. Context
+  // copies and shared-primary streams use it with their existing ordering.
+  iree_hal_queue_t* transfer_queue;
+  // Guards construction and borrowing of |transfer_queue|. Native acquisition
+  // happens outside stream locks; execution callbacks never take this mutex.
+  iree_slim_mutex_t transfer_queue_mutex;
+
   // Global context list node pointers for cleanup tracking.
   // These are used to link all contexts in a global list for proper cleanup.
   // Guarded by the context list mutex.

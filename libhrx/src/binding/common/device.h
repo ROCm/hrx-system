@@ -196,6 +196,15 @@ iree_hal_queue_placement_t iree_hal_streaming_queue_family_select_placement(
 iree_status_t iree_hal_streaming_device_acquire_primary_queue(
     iree_hal_streaming_device_t* device, iree_hal_queue_t** out_queue);
 
+// Acquires a bulk-transfer queue matching |primary_queue|'s family, placement,
+// priority, features, and execution resources. Reuses another provisioned queue
+// before acquiring dynamically. A static family with no compatible secondary
+// retains its primary queue. The caller owns one reference and keeps the device
+// alive; native allocation failures propagate without changing the policy.
+iree_status_t iree_hal_streaming_device_acquire_transfer_queue(
+    iree_hal_streaming_device_t* device, iree_hal_queue_t* primary_queue,
+    iree_hal_queue_t** out_queue);
+
 // Synchronization: none (queries device properties).
 iree_status_t iree_hal_streaming_device_name(
     iree_hal_streaming_device_ordinal_t ordinal, char* name,

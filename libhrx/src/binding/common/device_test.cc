@@ -129,4 +129,46 @@ TEST_F(StreamingDeviceQueueTest, AcquiresHostLocalFromDeviceLocalProvisioning) {
   iree_hal_device_release(viewed_entry.hal_device);
 }
 
+TEST_F(StreamingDeviceQueueTest, TransferQueuePreservesPrimaryProperties) {
+  iree_hal_queue_t* primary = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_streaming_device_select_primary_queue(&entry_, &primary));
+  IREE_ASSERT_OK(iree_hal_streaming_device_acquire_transfer_queue(
+      &entry_, primary, &acquired_));
+  EXPECT_NE(primary, acquired_);
+  EXPECT_EQ(iree_hal_queue_family(primary), iree_hal_queue_family(acquired_));
+  EXPECT_EQ(iree_hal_queue_priority(primary),
+            iree_hal_queue_priority(acquired_));
+  EXPECT_EQ(iree_hal_queue_placement(primary),
+            iree_hal_queue_placement(acquired_));
+  EXPECT_EQ(iree_hal_queue_features(primary),
+            iree_hal_queue_features(acquired_));
+  auto expected = iree_hal_queue_execution_resources(primary);
+  auto actual = iree_hal_queue_execution_resources(acquired_);
+  ASSERT_EQ(expected.count, actual.count);
+  for (iree_host_size_t i = 0; i < expected.count; ++i) {
+    EXPECT_EQ(expected.ordinals[i], actual.ordinals[i]);
+  }
+}
+
+TEST_F(StreamingDeviceQueueTest, TransferQueueReusesCompatibleProvisioning) {
+  iree_hal_queue_t* primary = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_streaming_device_select_primary_queue(&entry_, &primary));
+  IREE_ASSERT_OK(iree_hal_streaming_device_acquire_transfer_queue(
+      &entry_, primary, &acquired_));
+  ProvisionedQueueView view = {
+      .device = entry_.hal_device,
+      .queue = acquired_,
+  };
+  iree_hal_streaming_device_t viewed_entry = entry_;
+  viewed_entry.hal_device = view.Initialize();
+  iree_hal_queue_t* reused = nullptr;
+  IREE_EXPECT_OK(iree_hal_streaming_device_acquire_transfer_queue(
+      &viewed_entry, primary, &reused));
+  EXPECT_EQ(acquired_, reused);
+  iree_hal_queue_release(reused);
+  iree_hal_device_release(viewed_entry.hal_device);
+}
+
 }  // namespace

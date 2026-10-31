@@ -716,11 +716,11 @@ TEST_F(CpuStreamingMemoryTest,
 }
 
 TEST_F(CpuStreamingMemoryTest, PageableDownloadExtendsActiveStreamQueueLease) {
-  constexpr size_t kLength = 16;
+  constexpr size_t kLength = IREE_HAL_STREAMING_SMALL_TRANSFER_MAX_LENGTH + 1;
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
       context_, kLength, IREE_HAL_STREAMING_MEMORY_FLAG_NONE, &buffer_));
   std::memset(buffer_->host_ptr, 0x42, kLength);
-  std::array<uint8_t, kLength> destination = {};
+  std::vector<uint8_t> destination(kLength);
   iree_hal_semaphore_t* gate = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
       context_->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
@@ -752,11 +752,102 @@ TEST_F(CpuStreamingMemoryTest, PageableDownloadExtendsActiveStreamQueueLease) {
   EXPECT_FALSE(returned.load(std::memory_order_acquire));
   IREE_EXPECT_OK(iree_hal_semaphore_signal(gate, 1, nullptr));
   caller.join();
+  EXPECT_EQ(context_->transfer_queue, nullptr);
   for (uint8_t value : destination) {
     EXPECT_EQ(value, 0x42);
   }
   IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize(stream_));
   iree_hal_semaphore_release(gate);
+}
+
+TEST_F(CpuStreamingMemoryTest, BulkCopiesReuseOneContextQueue) {
+  constexpr size_t kSmall = IREE_HAL_STREAMING_SMALL_TRANSFER_MAX_LENGTH;
+  constexpr size_t kLength = kSmall + 17;
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
+      context_, kLength + 16, IREE_HAL_STREAMING_MEMORY_FLAG_NONE, &buffer_));
+  const auto pointer = iree_hal_streaming_buffer_device_pointer(buffer_);
+  std::memset(buffer_->host_ptr, 0x42, kLength + 16);
+  std::vector<uint8_t> host(kLength + 16, 0xcd);
+  IREE_ASSERT_OK(iree_hal_streaming_memcpy_device_to_host(
+      context_, host.data(), pointer, kSmall, stream_));
+  EXPECT_EQ(context_->transfer_queue, nullptr);
+  std::memset(host.data(), 0xa5, kLength);
+  IREE_ASSERT_OK(iree_hal_streaming_direct_transfer_h2d(
+      context_, host.data(), buffer_->buffer, 0, kLength));
+  auto* transfer_queue = context_->transfer_queue;
+  ASSERT_NE(transfer_queue, nullptr);
+  EXPECT_NE(transfer_queue, stream_->queue);
+  EXPECT_EQ(0, std::memcmp(host.data(), buffer_->host_ptr, kLength));
+  std::memset(host.data(), 0xcd, kLength);
+  IREE_ASSERT_OK(iree_hal_streaming_memcpy_device_to_host(
+      context_, host.data(), pointer, kLength, stream_));
+  EXPECT_EQ(context_->transfer_queue, transfer_queue);
+  EXPECT_EQ(0, std::memcmp(host.data(), buffer_->host_ptr, kLength));
+  for (size_t i = kLength; i < host.size(); ++i) {
+    EXPECT_EQ(host[i], 0xcd);
+  }
+
+  std::memset(host.data(), 0x3c, kLength);
+  IREE_ASSERT_OK(iree_hal_streaming_memcpy_host_to_device(
+      context_, pointer, host.data(), kLength, stream_));
+  EXPECT_EQ(context_->transfer_queue, transfer_queue);
+  EXPECT_EQ(0, std::memcmp(host.data(), buffer_->host_ptr, kLength));
+  for (size_t i = kLength; i < host.size(); ++i) {
+    EXPECT_EQ(static_cast<const uint8_t*>(buffer_->host_ptr)[i], 0x42);
+  }
+  std::memset(host.data(), 0xcd, kLength);
+  IREE_ASSERT_OK(iree_hal_streaming_direct_transfer_d2h(
+      context_, buffer_->buffer, 0, host.data(), kLength));
+  EXPECT_EQ(context_->transfer_queue, transfer_queue);
+  EXPECT_EQ(0, std::memcmp(host.data(), buffer_->host_ptr, kLength));
+  for (size_t i = kLength; i < host.size(); ++i) {
+    EXPECT_EQ(host[i], 0xcd);
+  }
+  EXPECT_EQ(host_callbacks_.thread, nullptr);
+}
+
+TEST_F(CpuStreamingMemoryTest, BulkBatchCountsItsSmallRows) {
+  constexpr size_t kRowLength =
+      IREE_HAL_STREAMING_SMALL_TRANSFER_MAX_LENGTH / 2 + 1;
+  constexpr size_t kLength = 2 * kRowLength;
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
+      context_, kLength, IREE_HAL_STREAMING_MEMORY_FLAG_NONE, &buffer_));
+  std::memset(buffer_->host_ptr, 0x42, kLength);
+  std::vector<uint8_t> host(kLength + 16, 0xcd);
+  iree_hal_transfer_operation_t operations[2] = {};
+  for (size_t i = 0; i < 2; ++i) {
+    operations[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+    operations[i].download.source_buffer = buffer_->buffer;
+    operations[i].download.source_offset = i * kRowLength;
+    operations[i].download.target = host.data() + i * kRowLength;
+    operations[i].download.length = kRowLength;
+  }
+  IREE_ASSERT_OK(
+      iree_hal_streaming_direct_transfer_and_wait(stream_, 2, operations));
+  ASSERT_NE(context_->transfer_queue, nullptr);
+  EXPECT_NE(context_->transfer_queue, stream_->queue);
+  EXPECT_EQ(0, std::memcmp(host.data(), buffer_->host_ptr, kLength));
+  for (size_t i = kLength; i < host.size(); ++i) {
+    EXPECT_EQ(host[i], 0xcd);
+  }
+}
+
+TEST_F(CpuStreamingMemoryTest, BulkCopiesPreserveExplicitStreamQueue) {
+  constexpr size_t kLength = IREE_HAL_STREAMING_SMALL_TRANSFER_MAX_LENGTH + 1;
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
+      context_, kLength, IREE_HAL_STREAMING_MEMORY_FLAG_NONE, &buffer_));
+  std::memset(buffer_->host_ptr, 0x42, kLength);
+  std::vector<uint8_t> host(kLength);
+  iree_hal_queue_t* explicit_queue = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_device_acquire_transfer_queue(
+      &device_entry_, context_->queue, &explicit_queue));
+  auto* original_queue = ReplaceStreamQueue(stream_, explicit_queue);
+  IREE_EXPECT_OK(iree_hal_streaming_memcpy_device_to_host(
+      context_, host.data(), iree_hal_streaming_buffer_device_pointer(buffer_),
+      kLength, stream_));
+  EXPECT_EQ(context_->transfer_queue, nullptr);
+  EXPECT_EQ(0, std::memcmp(host.data(), buffer_->host_ptr, kLength));
+  iree_hal_queue_release(ReplaceStreamQueue(stream_, original_queue));
 }
 
 TEST_F(CpuStreamingMemoryTest,

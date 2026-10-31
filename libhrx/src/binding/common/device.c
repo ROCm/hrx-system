@@ -100,6 +100,49 @@ iree_status_t iree_hal_streaming_device_acquire_primary_queue(
   return iree_hal_queue_acquire(family, &params, out_queue);
 }
 
+iree_status_t iree_hal_streaming_device_acquire_transfer_queue(
+    iree_hal_streaming_device_t* device, iree_hal_queue_t* primary_queue,
+    iree_hal_queue_t** out_queue) {
+  *out_queue = NULL;
+  const iree_hal_queue_family_t* family = iree_hal_queue_family(primary_queue);
+  const iree_hal_queue_family_spec_t* spec = iree_hal_queue_family_spec(family);
+  const iree_hal_queue_params_t params = {
+      .priority = iree_hal_queue_priority(primary_queue),
+      .placement = iree_hal_queue_placement(primary_queue),
+      .features = iree_hal_queue_features(primary_queue),
+      .execution_resources = iree_hal_queue_execution_resources(primary_queue),
+  };
+  for (iree_hal_queue_ordinal_t ordinal = 0;
+       ordinal < spec->provisioned_queue_count; ++ordinal) {
+    iree_hal_queue_t* queue = iree_hal_device_queue(
+        device->hal_device, iree_hal_queue_family_ordinal(family), ordinal);
+    if (queue == primary_queue ||
+        iree_hal_queue_priority(queue) != params.priority ||
+        iree_hal_queue_placement(queue) != params.placement ||
+        iree_hal_queue_features(queue) != params.features) {
+      continue;
+    }
+    const iree_hal_queue_execution_resource_list_t resources =
+        iree_hal_queue_execution_resources(queue);
+    if (resources.count != params.execution_resources.count ||
+        (resources.count &&
+         memcmp(resources.ordinals, params.execution_resources.ordinals,
+                resources.count * sizeof(*resources.ordinals)) != 0)) {
+      continue;
+    }
+    iree_hal_queue_retain(queue);
+    *out_queue = queue;
+    return iree_ok_status();
+  }
+  if (iree_any_bit_set(spec->flags,
+                       IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_DYNAMIC_ACQUISITION)) {
+    return iree_hal_queue_acquire(family, &params, out_queue);
+  }
+  iree_hal_queue_retain(primary_queue);
+  *out_queue = primary_queue;
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_streaming_device_by_ordinal(
     iree_hal_streaming_device_ordinal_t ordinal,
     iree_hal_streaming_device_t** out_device) {

@@ -121,6 +121,8 @@ iree_status_t iree_hal_streaming_context_create(
   context->event_record_timeline = (iree_hal_streaming_operation_timeline_t){0};
   context->event_record_queue = NULL;
   iree_slim_mutex_initialize(&context->event_record_mutex);
+  context->transfer_queue = NULL;
+  iree_slim_mutex_initialize(&context->transfer_queue_mutex);
 
   // Initialize default limits.
   // These are typical defaults matching CUDA/HIP behavior.
@@ -234,6 +236,9 @@ static void iree_hal_streaming_context_destroy(
   // retired. Stop that queue before releasing the storage its records use.
   iree_hal_queue_release(context->event_record_queue);
   context->event_record_queue = NULL;
+  iree_hal_queue_release(context->transfer_queue);
+  context->transfer_queue = NULL;
+  iree_slim_mutex_deinitialize(&context->transfer_queue_mutex);
 
   // Deinitialize symbol map and unload any statically-registered modules that
   // were on-demand loaded for this context.
