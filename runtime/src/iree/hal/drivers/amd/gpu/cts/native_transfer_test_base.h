@@ -104,7 +104,7 @@ class GpuNativeTransferTest : public GpuNativeTest,
   // capacity return to wake publication without relying on a later submit.
   void RunConcurrentTransfers(size_t lane_count, size_t iterations);
 
-  // Odd extent exercises byte copies and fill tails beyond the packet chunk.
+  // Odd extent exercises byte copies and staged fill tails.
   static constexpr size_t kLength = 32781;
   // Explicit source of buffers usable by the device's transfer family.
   iree_hal_pool_t* pool_ = nullptr;

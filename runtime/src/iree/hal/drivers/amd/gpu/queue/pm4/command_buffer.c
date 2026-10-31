@@ -539,8 +539,8 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_transfer(
     iree_status_t status = iree_ok_status();
     uint64_t position = 0;
     while (position < length && iree_status_is_ok(status)) {
-      const uint32_t part =
-          (uint32_t)iree_min(length - position, UINT64_C(0x03fffffc));
+      const uint32_t part = (uint32_t)iree_min(
+          length - position, IREE_HAL_AMD_GPU_PM4_DMA_MAX_PACKET_LENGTH);
       uint32_t command_offset = 0;
       uint32_t* words = NULL;
       status = iree_hal_amd_gpu_pm4_recording_commands(&buffer->recording, 7,

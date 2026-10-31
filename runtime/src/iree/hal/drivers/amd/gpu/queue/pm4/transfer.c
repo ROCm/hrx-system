@@ -14,9 +14,9 @@ iree_hal_amd_gpu_pm4_transfer_packet_t
 iree_hal_amd_gpu_pm4_transfer_emit_packet(
     const iree_hal_amd_gpu_pm4_transfer_span_t* span, uint64_t offset,
     iree_byte_span_t staging, uint64_t staging_address, uint32_t* words) {
-  // Keep the conservative packet policy independent of publication batching.
+  // Native packet capacity and available staging are independent limits.
   uint32_t length = (uint32_t)iree_min(
-      span->length - offset, IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_PACKET_LENGTH);
+      span->length - offset, IREE_HAL_AMD_GPU_PM4_DMA_MAX_PACKET_LENGTH);
   uint64_t source = span->source_address + offset;
   uint64_t target = span->target_address + offset;
   const bool fill = span->type == IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;

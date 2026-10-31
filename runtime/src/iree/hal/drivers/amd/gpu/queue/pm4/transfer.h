@@ -14,16 +14,10 @@ extern "C" {
 #endif  // __cplusplus
 
 enum {
-  // Conservative per-packet policy, independent of host retirement granularity.
-  IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_PACKET_LENGTH = 32736,
   // Reusable bulk staging; small transfers keep the initial argument storage.
   IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_STAGING_LENGTH = 1024 * 1024,
-  // Enough packets to consume a complete bulk window, including its short tail.
-  IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS =
-      ((IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_STAGING_LENGTH +
-        IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_PACKET_LENGTH - 1) /
-       IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_PACKET_LENGTH) *
-      7,
+  // Bounded command preparation, independent of payload or staging byte size.
+  IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS = 32 * 7,
 };
 
 // Admitted native DMA span, independent of direct or recorded ownership.

@@ -457,6 +457,63 @@ TEST_P(GpuNativeTransferTest, DeferredHostCallForwardsOutputsToNestedTransfer) {
   EXPECT_EQ(output, source);
 }
 
+TEST_P(GpuNativeTransferTest, BulkCopiesAndFillsCrossNativePacketBoundaries) {
+  using iree::hal::cts::Ref;
+  constexpr size_t kBulkLength = 32 * 1024 * 1024 + 37;
+  Ref<iree_hal_buffer_t> source_buffer, target_buffer;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(kBulkLength + 1, 4),
+      iree_infinite_timeout(), source_buffer.out()));
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(kBulkLength + 8, 4),
+      iree_infinite_timeout(), target_buffer.out()));
+  std::vector<uint8_t> source(kBulkLength), target(kBulkLength + 8, 0);
+  for (size_t i = 0; i < source.size(); ++i) {
+    source[i] = static_cast<uint8_t>((i * 29) ^ (i >> 9) ^ (i >> 24));
+  }
+  const uint8_t guard = 0xCC;
+  uint64_t completed = 0, uploaded = 1, filled = 2, copied = 3, downloaded = 4;
+  iree_status_t status = iree_hal_queue_upload(
+      queues_[0], {}, {1, &timeline_, &uploaded}, source.data(), source_buffer,
+      1, source.size(), Barriers());
+  if (iree_status_is_ok(status)) {
+    completed = uploaded;
+    status = iree_hal_queue_fill(
+        queues_[1], {1, &timeline_, &uploaded}, {1, &timeline_, &filled},
+        target_buffer, 0, target.size(), &guard, sizeof(guard), Barriers(), 0);
+  }
+  if (iree_status_is_ok(status)) {
+    completed = filled;
+    status = iree_hal_queue_copy(
+        queues_[0], {1, &timeline_, &filled}, {1, &timeline_, &copied},
+        source_buffer, 1, target_buffer, 3, source.size(), Barriers(), 0);
+  }
+  if (iree_status_is_ok(status)) {
+    completed = copied;
+    status = iree_hal_queue_download(
+        queues_[1], {1, &timeline_, &copied}, {1, &timeline_, &downloaded},
+        target_buffer, 0, target.data(), target.size(), Barriers());
+  }
+  if (iree_status_is_ok(status)) {
+    completed = downloaded;
+  }
+  // Captures own both buffers through the last packet and any host copy.
+  // Borrowed host bytes also survive an error after accepting a prefix.
+  source_buffer.reset();
+  target_buffer.reset();
+  if (completed) {
+    status = iree_status_join(
+        status, iree_hal_semaphore_wait(timeline_, completed,
+                                        iree_infinite_timeout(), 0));
+  }
+  IREE_ASSERT_OK(status);
+  EXPECT_TRUE(std::equal(source.begin(), source.end(), target.begin() + 3));
+  EXPECT_TRUE(std::all_of(target.begin(), target.begin() + 3,
+                          [guard](uint8_t value) { return value == guard; }));
+  EXPECT_TRUE(std::all_of(target.end() - 5, target.end(),
+                          [guard](uint8_t value) { return value == guard; }));
+}
+
 TEST_P(GpuNativeTransferTest,
        ConcurrentTransfersResumeAfterStagingCapacityReturns) {
   // One batch proves capacity-return progress without a later submission.

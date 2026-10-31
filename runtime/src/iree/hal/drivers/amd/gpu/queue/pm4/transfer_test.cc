@@ -51,17 +51,17 @@ TEST_F(TransferTest, CopySplitsAtPacketLimitWithoutStaging) {
   const iree_hal_amd_gpu_pm4_transfer_span_t span = {
       .source_address = 0x1234FFFFFFF0,
       .target_address = 0x567800000003,
-      .length = 32739,
+      .length = 32 * 1024 * 1024 + 3,
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
   };
   auto packet = Emit(span, 0, 0);
-  EXPECT_EQ(packet.length, 32736u);
+  EXPECT_EQ(packet.length, 32u * 1024 * 1024);
   EXPECT_EQ(packet.staging_length, 0u);
-  Expect({0xC0055000, 0x60300000, 0xFFFFFFF0, 0x1234, 3, 0x5678, 32736});
-  packet = Emit(span, 32736, 0);
+  Expect({0xC0055000, 0x60300000, 0xFFFFFFF0, 0x1234, 3, 0x5678, 0x2000000});
+  packet = Emit(span, 32 * 1024 * 1024, 0);
   EXPECT_EQ(packet.length, 3u);
   EXPECT_EQ(packet.staging_length, 0u);
-  Expect({0xC0055000, 0x60300000, 0x7FD0, 0x1235, 0x7FE3, 0x5678, 3});
+  Expect({0xC0055000, 0x60300000, 0x1FFFFF0, 0x1235, 0x2000003, 0x5678, 3});
 }
 
 TEST_F(TransferTest, FillRotatesPatternAcrossStagedEdgesAndImmediateBody) {
@@ -151,7 +151,7 @@ TEST_F(TransferTest, EmptyStagingEmitsNothingForStagedOperations) {
   }
 }
 
-TEST(TransferBatchTest, HostTransfersFillOneWindowAcrossPacketBoundaries) {
+TEST(TransferBatchTest, HostTransfersUseAvailableStagingInOnePacket) {
   constexpr size_t kLength = 1024 * 1024;
   constexpr uint64_t kDeviceAddress = UINT64_C(0x123400001003);
   constexpr uint64_t kStagingAddress = UINT64_C(0x567800002005);
@@ -190,30 +190,23 @@ TEST(TransferBatchTest, HostTransfersFillOneWindowAcrossPacketBoundaries) {
         &transfer, IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS,
         iree_make_byte_span(staging.data() + 1, kLength), kStagingAddress,
         &chunk));
-    ASSERT_EQ(chunk.word_count, 33u * 7);
+    ASSERT_EQ(chunk.word_count, 7u);
     EXPECT_EQ(chunk.staging_length, kLength);
     EXPECT_EQ(chunk.next.index, 0u);
     EXPECT_EQ(chunk.next.offset, kLength);
-    // All packets share one retirement extent. Check their complete native
-    // encoding, including the small final packet and high address words.
-    for (size_t i = 0; i < 33; ++i) {
-      const uint64_t offset = i * 32736;
-      const uint64_t source =
-          (download ? kDeviceAddress : kStagingAddress) + offset;
-      const uint64_t target =
-          (download ? kStagingAddress : kDeviceAddress) + offset;
-      const std::array<uint32_t, 7> expected = {
-          0xC0055000,
-          0x60300000,
-          static_cast<uint32_t>(source),
-          static_cast<uint32_t>(source >> 32),
-          static_cast<uint32_t>(target),
-          static_cast<uint32_t>(target >> 32),
-          i == 32 ? 1024u : 32736u};
-      EXPECT_EQ(
-          std::vector<uint32_t>(chunk.words + i * 7, chunk.words + (i + 1) * 7),
-          std::vector<uint32_t>(expected.begin(), expected.end()));
-    }
+    const uint64_t source = download ? kDeviceAddress : kStagingAddress;
+    const uint64_t target = download ? kStagingAddress : kDeviceAddress;
+    const std::array<uint32_t, 7> expected = {
+        0xC0055000,
+        0x60300000,
+        static_cast<uint32_t>(source),
+        static_cast<uint32_t>(source >> 32),
+        static_cast<uint32_t>(target),
+        static_cast<uint32_t>(target >> 32),
+        kLength};
+    EXPECT_EQ(
+        std::vector<uint32_t>(chunk.words, chunk.words + chunk.word_count),
+        std::vector<uint32_t>(expected.begin(), expected.end()));
     EXPECT_EQ(staging.front(), 0xCC);
     EXPECT_EQ(staging.back(), 0xCC);
     if (download) {
@@ -254,13 +247,85 @@ TEST(TransferBatchTest, DownloadRetirementStopsAtTheHostDestinationBoundary) {
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
       &transfer, IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS,
       iree_make_byte_span(staging.data(), staging.size()), 0x20000, &chunk));
-  EXPECT_EQ(chunk.word_count, 3u * 7);
+  EXPECT_EQ(chunk.word_count, 7u);
   EXPECT_EQ(chunk.next.index, 1u);
   EXPECT_EQ(chunk.next.offset, 0u);
   EXPECT_EQ(chunk.staging_length, host.size());
   EXPECT_EQ(chunk.download.length, host.size());
   EXPECT_EQ(chunk.download.source, staging.data());
   EXPECT_EQ(chunk.download.target, host.data());
+}
+
+TEST(TransferBatchTest, DeviceCopiesUseCommandCapacityWithoutStaging) {
+  constexpr uint64_t kLength = 64 * 1024 * 1024 + 1;
+  const iree_hal_buffer_native_binding_t source_binding = {
+      .device_address = UINT64_C(0x1234FFFFFFF0),
+  };
+  const iree_hal_buffer_native_binding_t target_binding = {
+      .device_address = UINT64_C(0x567800000003),
+  };
+  iree_hal_buffer_t source = {}, target = {};
+  source.memory.bindings = &source_binding;
+  target.memory.bindings = &target_binding;
+  iree_hal_amd_gpu_transfer_operation_t operation = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
+      .length = kLength,
+  };
+  operation.source.device = {
+      .buffer = &source,
+      .slot = {.index = 0, .type = IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS},
+  };
+  operation.target.device = {
+      .buffer = &target,
+      .slot = {.index = 0, .type = IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS},
+  };
+  iree_hal_amd_gpu_transfer_t transfer = {.count = 1, .operations = &operation};
+  iree_hal_amd_gpu_pm4_transfer_chunk_t chunk;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
+      &transfer, 14, iree_byte_span_empty(), 0, &chunk));
+  const std::vector<uint32_t> expected = {
+      0xC0055000, 0x60300000, 0xFFFFFFF0, 0x1234, 3,         0x5678, 0x2000000,
+      0xC0055000, 0x60300000, 0x1FFFFF0,  0x1235, 0x2000003, 0x5678, 0x2000000};
+  ASSERT_EQ(chunk.word_count, expected.size());
+  EXPECT_EQ(std::vector<uint32_t>(chunk.words, chunk.words + chunk.word_count),
+            expected);
+  EXPECT_EQ(chunk.next.index, 0u);
+  EXPECT_EQ(chunk.next.offset, kLength - 1);
+  EXPECT_EQ(chunk.staging_length, 0u);
+  EXPECT_EQ(chunk.download.length, 0u);
+  transfer.cursor = chunk.next;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
+      &transfer, 7, iree_byte_span_empty(), 0, &chunk));
+  ASSERT_EQ(chunk.word_count, 7u);
+  EXPECT_EQ(std::vector<uint32_t>(chunk.words, chunk.words + chunk.word_count),
+            (std::vector<uint32_t>{0xC0055000, 0x60300000, 0x3FFFFF0, 0x1235,
+                                   0x4000003, 0x5678, 1}));
+  EXPECT_EQ(chunk.next.index, 1u);
+  EXPECT_EQ(chunk.next.offset, 0u);
+  EXPECT_EQ(chunk.staging_length, 0u);
+}
+
+TEST_F(TransferTest, BulkFillPreservesPatternPhaseAcrossPacketBoundary) {
+  const iree_hal_amd_gpu_pm4_transfer_span_t span = {
+      .target_address = 0x567800001001,
+      .length = 32 * 1024 * 1024 + 7,
+      .pattern = 0xA1B2C3D4,
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+  };
+  auto packet = Emit(span, 0, 3);
+  ASSERT_EQ(packet.length, 3u);
+  EXPECT_EQ(packet.staging_length, 3u);
+  EXPECT_EQ(staging_[0], 0xD4);
+  EXPECT_EQ(staging_[1], 0xC3);
+  EXPECT_EQ(staging_[2], 0xB2);
+  packet = Emit(span, 3, 0);
+  EXPECT_EQ(packet.length, 32u * 1024 * 1024);
+  EXPECT_EQ(packet.staging_length, 0u);
+  Expect({0xC0055000, 0x40300000, 0xB2C3D4A1, 0, 0x1004, 0x5678, 0x2000000});
+  packet = Emit(span, 32 * 1024 * 1024 + 3, 0);
+  EXPECT_EQ(packet.length, 4u);
+  EXPECT_EQ(packet.staging_length, 0u);
+  Expect({0xC0055000, 0x40300000, 0xB2C3D4A1, 0, 0x2001004, 0x5678, 4});
 }
 
 }  // namespace
