@@ -210,6 +210,7 @@ class BuildFileFunctions(cc.BuildFileFunctions, GeneratedFileBuildFileFunctions)
         generated_files=None,
         configuration=None,
         libraries=None,
+        declarations=None,
     ):
         self._converter = converter
         self._targets = targets
@@ -218,6 +219,8 @@ class BuildFileFunctions(cc.BuildFileFunctions, GeneratedFileBuildFileFunctions)
         # None preserves symbolic selection for unconfigured package previews.
         self._configuration = configuration
         self._libraries = libraries
+        # Project-owned declarations shared across the source collection pass.
+        self._declarations = declarations if declarations is not None else {}
         self._repo_root = os.path.abspath(repo_root) if repo_root else ""
         if self._repo_root and build_dir and not os.path.isabs(build_dir):
             self._build_dir = os.path.join(self._repo_root, build_dir)
@@ -2807,6 +2810,7 @@ def evaluate_build_file(
     generated_files=None,
     configuration=None,
     libraries=None,
+    declarations=None,
 ):
     """Collects declarations; conversion follows repository-wide evaluation."""
     converter = Converter()
@@ -2832,6 +2836,7 @@ def evaluate_build_file(
         generated_files=generated_files,
         configuration=configuration,
         libraries=libraries,
+        declarations=declarations,
     )
 
     exec_namespace = GetDict(build_file_functions)

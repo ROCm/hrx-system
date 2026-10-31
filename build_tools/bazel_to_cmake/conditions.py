@@ -115,7 +115,7 @@ class All(Condition):
         return all(operand.evaluate(values) for operand in self.operands)
 
     def render(self):
-        return " AND ".join(_group(operand) for operand in self.operands)
+        return " AND ".join(_group(operand) for operand in self.operands) or "TRUE"
 
 
 @dataclass(frozen=True)
@@ -127,7 +127,7 @@ class Any(Condition):
         return any(operand.evaluate(values) for operand in self.operands)
 
     def render(self):
-        return " OR ".join(_group(operand) for operand in self.operands)
+        return " OR ".join(_group(operand) for operand in self.operands) or "FALSE"
 
 
 def _group(condition):

@@ -348,13 +348,9 @@ loom_library(
             str(REPO_ROOT / "loom/build_tools/bazel_to_cmake/testdata/configured"),
             repo_root=str(REPO_ROOT),
         )
-        self.assertIn(
-            """  SOURCES
-    "configured/second.loom"
-    "configured/first.loom"
-""",
-            output,
-        )
+        self.assertEqual(output.count("iree_native_test(\n"), 2)
+        self.assertIn("configured_first_test_execute_test_profile_test", output)
+        self.assertIn("configured_second_test_execute_test_profile_test", output)
         self.assertIn(
             """loom_module(
   NAME
@@ -365,19 +361,13 @@ loom_library(
 """,
             output,
         )
-        self.assertIn(
-            """  CONFIGS
-    "configured/first.loom"
-    "first.columns=4"
-    "configured/first.loom"
-    "first.rows=5"
-    "configured/second.loom"
-    "second.capacity=65"
-    "configured/second.loom"
-    "second.empty="
-""",
-            output,
-        )
+        for configuration in (
+            "first.columns=4",
+            "first.rows=5",
+            "second.capacity=65",
+            "second.empty=",
+        ):
+            self.assertIn('"--config=' + configuration + '"', output)
 
     def test_runtime_amdgpu_cts_uses_architecture_selector_variables(self):
         runtime_project = bazel_to_cmake_config.include_project(

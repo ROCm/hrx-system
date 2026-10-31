@@ -8,6 +8,7 @@ import dataclasses
 import importlib.util
 import os
 import re
+import sys
 from types import SimpleNamespace
 
 import bazel_to_cmake_config
@@ -31,6 +32,7 @@ def _load_loom_corpus_build_file_functions():
     if not spec or not spec.loader:
         raise RuntimeError(f"could not load Loom corpus converter from {module_path}")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module.LoomCorpusBuildFileFunctions
 
@@ -276,39 +278,6 @@ class LoomBuildFileFunctions(
         if not condition:
             return text
         return f"\nif({condition})\n{text}endif()\n\n"
-
-    def loom_target_profile(
-        self, name, family, selector, target_compatible_with=None, **kwargs
-    ):
-        condition = self._cmake_guard_condition(target_compatible_with)
-        requires = f"  REQUIRES\n    {condition}\n" if condition else ""
-        self._converter.body += (
-            "loom_target_profile(\n"
-            + self._convert_string_arg_block("NAME", name)
-            + self._convert_string_arg_block("FAMILY", family)
-            + self._convert_string_arg_block("SELECTOR", selector)
-            + requires
-            + ")\n\n"
-        )
-
-    def loom_target_set(
-        self, name, targets, allow_empty=False, visibility=None, **kwargs
-    ):
-        self._check_no_unhandled_kwargs("loom_target_set", kwargs)
-        targets_block, variable_block = self._convert_platform_select_deps(
-            name,
-            targets,
-            "TARGETS",
-            target_transform=self._loom_target_identity_label,
-        )
-        self._converter.body += (
-            variable_block
-            + "loom_target_set(\n"
-            + self._convert_string_arg_block("NAME", name)
-            + ("  ALLOW_EMPTY\n" if allow_empty else "")
-            + targets_block
-            + ")\n\n"
-        )
 
     def loom_amdgpu_target_profile(
         self, name, target, target_compatible_with=None, **kwargs

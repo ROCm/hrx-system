@@ -7,15 +7,16 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
 import bazel_to_cmake_config
 import bazel_to_cmake_requirements
 import bazel_to_cmake_targets
+from bazel_to_cmake_converter import Converter
 from conditions import all_of, any_of
 
 from build_tools.cmake.test_environment import (
@@ -26,6 +27,13 @@ from build_tools.cmake.test_environment import (
 )
 
 FIXTURE = REPO_ROOT / "build_tools/cmake/testdata/loom_corpus"
+
+
+class FixtureTargets(bazel_to_cmake_targets.TargetConverter):
+    def _convert_unmatched_target(self, target):
+        if target.startswith("//fixture"):
+            return [self._convert_to_cmake_path(target)]
+        return super()._convert_unmatched_target(target)
 
 
 class CMakeLoomCorpusTest(unittest.TestCase):
@@ -42,26 +50,32 @@ class CMakeLoomCorpusTest(unittest.TestCase):
                 REPO_ROOT / "build_tools/cmake/testdata/loom_binary/tool.c",
                 source / "tool.c",
             )
-            source_converter = SimpleNamespace(body="")
-            source_functions = project.build_file_functions(
-                converter=source_converter,
-                targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
-                build_dir=str(REPO_ROOT / "fixture"),
-                repo_root=str(REPO_ROOT),
+            declarations = {}
+
+            def functions(package, converter, configuration=None):
+                return project.build_file_functions(
+                    converter=converter,
+                    targets=FixtureTargets(repo_map={"@hrx": ""}),
+                    build_dir=str(REPO_ROOT / package),
+                    repo_root=str(REPO_ROOT),
+                    declarations=declarations,
+                    configuration=configuration,
+                )
+
+            source_converter = Converter()
+            source_functions = functions("fixture", source_converter)
+            nested_source_converter = Converter()
+            nested_source_functions = functions(
+                "fixture/nested", nested_source_converter
             )
-            nested_source_converter = SimpleNamespace(body="")
-            nested_source_functions = project.build_file_functions(
-                converter=nested_source_converter,
-                targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
-                build_dir=str(REPO_ROOT / "fixture/nested"),
-                repo_root=str(REPO_ROOT),
-            )
-            target_converter = SimpleNamespace(body="")
-            target_functions = project.build_file_functions(
-                converter=target_converter,
-                targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
-                build_dir=str(source),
-                repo_root=str(REPO_ROOT),
+            target_converter = Converter()
+            configuration = {
+                "IREE_BUILD_TESTS": "ON",
+                "FEATURE_DISABLED": "OFF",
+                "CMAKE_GENERATOR": os.environ["IREE_TEST_CMAKE_GENERATOR"],
+            }
+            target_functions = functions(
+                "fixture/target", target_converter, configuration
             )
             manifest = source_functions.loom_corpus_manifest(
                 "examples",
@@ -107,7 +121,7 @@ class CMakeLoomCorpusTest(unittest.TestCase):
                 target_functions.loom_target_profile(
                     name,
                     "amdgpu",
-                    "gfx90a",
+                    "gfx942" if name == "single" else "gfx90a",
                     target_compatible_with=[]
                     if predicate is None
                     else ["//config:" + name],
@@ -126,14 +140,64 @@ class CMakeLoomCorpusTest(unittest.TestCase):
                 target_functions.loom_corpus_catalog([manifest]),
                 execution_profiles=profiles,
             )
+            target_functions.loom_target_set(
+                "selected", targets=[":unconditional", ":single"]
+            )
+            target_functions.loom_corpus_build(
+                "compile",
+                target_functions.loom_corpus_catalog([manifest]),
+                profiles=[":selected"],
+            )
+            for qualifications, diagnostic in (
+                (
+                    {
+                        "xfails": {
+                            ":unconditional": {
+                                "examples/missing.loom:@case": "LOWER/001"
+                            }
+                        }
+                    },
+                    "unknown source",
+                ),
+                (
+                    {"all_roots_xfail": {":unconditional": ["examples/identity.loom"]}},
+                    "requires unique diagnostic xfails",
+                ),
+                (
+                    {
+                        "xfails": {
+                            ":unconditional": {
+                                "examples/identity.loom:@case": "LOWER/001"
+                            }
+                        },
+                        "excludes": {
+                            ":unconditional": {"examples/identity.loom": "inapplicable"}
+                        },
+                    },
+                    "conflicting exclusion",
+                ),
+            ):
+                with self.subTest(qualifications=qualifications):
+                    invalid = Converter()
+                    consumer = functions("fixture/target", invalid, configuration)
+                    consumer.loom_corpus_build(
+                        "invalid",
+                        consumer.loom_corpus_catalog([manifest]),
+                        profiles=[":unconditional"],
+                        **qualifications,
+                    )
+                    with self.assertRaisesRegex(ValueError, diagnostic):
+                        invalid.convert()
+
             converted_source = source / "converted_source.cmake"
-            converted_source.write_text(source_converter.body)
+            converted_source.write_text(source_converter.convert())
             converted_nested_source = source / "converted_nested_source.cmake"
-            converted_nested_source.write_text(nested_source_converter.body)
+            converted_nested_source.write_text(nested_source_converter.convert())
             converted_target = source / "converted_target.cmake"
-            converted_target.write_text(target_converter.body)
             for enabled in (True, False):
                 with self.subTest(enabled=enabled):
+                    configuration["FEATURE_ENABLED"] = "ON" if enabled else "OFF"
+                    converted_target.write_text(target_converter.convert())
                     configure_project(
                         source,
                         build,
@@ -155,6 +219,10 @@ class CMakeLoomCorpusTest(unittest.TestCase):
                         ),
                         expected_profiles,
                     )
+                    artifact_paths = (
+                        (build / "artifacts.txt").read_text().splitlines()[0].split(";")
+                    )
+                    self.assertEqual(len(artifact_paths), 4 if enabled else 2)
                     self.assertEqual(
                         {test["name"] for test in tests},
                         {
@@ -169,12 +237,10 @@ class CMakeLoomCorpusTest(unittest.TestCase):
                     self.assertEqual(
                         (build / "module_targets.txt").read_text().split(";"),
                         [
-                            "fixture_source_examples_identity",
-                            "fixture_source_examples_identity_library",
-                            "fixture_source_nested_nested_examples_nested_fixture",
-                            "fixture_source_nested_nested_examples_nested_fixture_library",
-                            "fixture_target_examples_identity_subjects",
-                            "fixture_target_examples_nested_fixture_subjects",
+                            "fixture_examples_identity",
+                            "fixture_examples_identity_library",
+                            "fixture_nested_examples_nested_fixture",
+                            "fixture_nested_examples_nested_fixture_library",
                         ],
                     )
                     for test in tests:
@@ -209,6 +275,14 @@ class CMakeLoomCorpusTest(unittest.TestCase):
                 path for path in artifacts if "examples_nested_fixture" in str(path)
             )
             report = next(path for path in reports if "examples_identity" in str(path))
+            selected_product = (
+                artifact.relative_to(build).as_posix()
+                if configuration["CMAKE_GENERATOR"].startswith("Ninja")
+                else "fixture_target_examples_identity"
+            )
+            build_project(build, selected_product)
+            self.assertTrue(artifact.is_file())
+            self.assertFalse(nested_artifact.exists())
             build_project(build, "fixture_target_compile")
             self.assertIn("func.def @identity", artifact.read_text())
             self.assertIn("func.def @nested", nested_artifact.read_text())

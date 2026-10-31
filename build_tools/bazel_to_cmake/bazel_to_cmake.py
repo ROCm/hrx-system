@@ -75,7 +75,8 @@ def parse_arguments():
     output.add_argument(
         "--preview",
         type=Path,
-        help="Print one package's generated CMake; accepts a directory or BUILD file.",
+        help="Print one package's generated CMake; accepts a directory or BUILD file. "
+        "Resolved corpus products require --configuration from a native build.",
     )
     parser.add_argument(
         "--configuration",
@@ -166,7 +167,12 @@ class Package:
 
 
 def evaluate_directory(
-    directory, input_files, generated_files, configuration=None, libraries=None
+    directory,
+    input_files,
+    generated_files,
+    configuration=None,
+    libraries=None,
+    declarations=None,
 ):
     """Collects a generated package; authored packages retain their native scope."""
     directory = Path(directory)
@@ -196,6 +202,7 @@ def evaluate_directory(
             generated_files=generated_files,
             configuration=configuration,
             libraries=libraries,
+            declarations=declarations,
         )
     except (NameError, NotImplementedError, KeyError) as error:
         raise RuntimeError(f"Cannot convert {build_file}: {error}") from error
@@ -205,6 +212,7 @@ def evaluate_directory(
 def evaluate_packages(root_dirs, input_files, configuration=None):
     """Establishes generated-file ownership before any consumer is emitted."""
     generated_files = {}
+    declarations = {}
     libraries = cc.Graph(configuration) if configuration is not None else None
     packages = {}
     authored_directories = set()
@@ -216,7 +224,12 @@ def evaluate_packages(root_dirs, input_files, configuration=None):
             if (Path(directory) / "CMakeLists.txt").is_file():
                 authored_directories.add(Path(directory).relative_to(repo_root))
             package = evaluate_directory(
-                directory, input_files, generated_files, configuration, libraries
+                directory,
+                input_files,
+                generated_files,
+                configuration,
+                libraries,
+                declarations,
             )
             if package is not None:
                 packages[package.directory] = package
