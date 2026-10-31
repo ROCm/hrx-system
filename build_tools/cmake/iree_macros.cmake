@@ -568,10 +568,8 @@ endfunction()
 #   base
 function(iree_package_dir PACKAGE_DIR)
   iree_package_ns(_PACKAGE_NS)
-  string(FIND "${_PACKAGE_NS}" "::" _END_OFFSET REVERSE)
-  math(EXPR _END_OFFSET "${_END_OFFSET} + 2")
-  string(SUBSTRING ${_PACKAGE_NS} ${_END_OFFSET} -1 _PACKAGE_DIR)
-  set(${PACKAGE_DIR} ${_PACKAGE_DIR} PARENT_SCOPE)
+  string(REGEX REPLACE "^.*::" "" _PACKAGE_DIR "${_PACKAGE_NS}")
+  set(${PACKAGE_DIR} "${_PACKAGE_DIR}" PARENT_SCOPE)
 endfunction()
 
 #-------------------------------------------------------------------------------
