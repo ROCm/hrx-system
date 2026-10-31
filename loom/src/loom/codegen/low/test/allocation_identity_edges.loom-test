@@ -186,3 +186,61 @@ value %right: test.i32 -> target_id[7:2]
 value %root: test.i32 -> target_id[0:4]
 value %pair: test.i32 -> target_id[5:4]
 value %joined: test.i32 -> target_id[0:4]
+
+// ====
+
+// The next iteration's required slot is reserved while a temporary from
+// another component remains live across its definition.
+// RUN: emit low-allocation-query @required_loop_1 values=%current0,%current1,%temporary,%next0,%next1
+
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @required_loop_1(%condition: reg<test.i32>, %seed0: reg<test.i32>, %seed1: reg<test.i32>, %step: reg<test.i32>) -> (reg<test.i32>) asm {
+  low.br.identity(0, 2) ^loop(%seed0: reg<test.i32>, %seed1: reg<test.i32>)
+^loop(%current0: reg<test.i32>, %current1: reg<test.i32>):
+  %retired = test.add.i32 %current0, %current0
+  %temporary = test.add.i32 %current1, %current1
+  %next0 = test.add.i32 %step, %retired
+  %next1 = test.add.i32 %temporary, %next0
+  low.cond_br %condition, ^back, ^exit : reg<test.i32>
+^back:
+  low.br.identity(0, 2) ^loop(%next0: reg<test.i32>, %next1: reg<test.i32>)
+^exit:
+  return %next1
+}
+
+// ----
+value %current0: test.i32 -> target_id[0:1]
+value %current1: test.i32 -> target_id[3:1]
+value %temporary: test.i32 -> target_id[3:1]
+value %next0: test.i32 -> target_id[0:1]
+value %next1: test.i32 -> target_id[3:1]
+
+// ====
+
+// The next iteration's required slot is reserved while a temporary from
+// another component remains live across its definition.
+// RUN: emit low-allocation-query @required_loop_4 values=%current0,%current1,%temporary,%next0,%next1
+
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @required_loop_4(%condition: reg<test.i32>, %seed0: reg<test.i32 x4>, %seed1: reg<test.i32 x4>, %step: reg<test.i32 x4>) -> (reg<test.i32 x4>) asm {
+  low.br.identity(0, 2) ^loop(%seed0: reg<test.i32 x4>, %seed1: reg<test.i32 x4>)
+^loop(%current0: reg<test.i32 x4>, %current1: reg<test.i32 x4>):
+  %retired = test.add.v4i32 %current0, %current0
+  %temporary = test.add.v4i32 %current1, %current1
+  %next0 = test.add.v4i32 %step, %retired
+  %next1 = test.add.v4i32 %temporary, %next0
+  low.cond_br %condition, ^back, ^exit : reg<test.i32>
+^back:
+  low.br.identity(0, 2) ^loop(%next0: reg<test.i32 x4>, %next1: reg<test.i32 x4>)
+^exit:
+  return %next1
+}
+
+// ----
+value %current0: test.i32 -> target_id[0:4]
+value %current1: test.i32 -> target_id[9:4]
+value %temporary: test.i32 -> target_id[12:4]
+value %next0: test.i32 -> target_id[0:4]
+value %next1: test.i32 -> target_id[9:4]
