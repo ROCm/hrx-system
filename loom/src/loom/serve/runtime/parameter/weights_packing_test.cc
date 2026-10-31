@@ -468,6 +468,15 @@ TEST_P(WeightPackingTest,
   }
   IREE_EXPECT_STATUS_IS(execution_code_,
                         loom_serve_residency_await(residencies_[0]));
+  uint64_t staging_bytes = 0;
+  EXPECT_FALSE(
+      loom_serve_weights_query_activation_workspace(plans_[0], &staging_bytes));
+  EXPECT_EQ(staging_bytes,
+            loom_serve_weights_activation_workspace(plans_[0]).allocation_size);
+  // Producer retirement does not join raw queue-allocation bookkeeping or
+  // backing returns. Settle those owners before inspecting global capacity;
+  // the failed producer's declared staging requirement remains charged.
+  ASSERT_NO_FATAL_FAILURE(TrimWorkspace());
   IREE_ASSERT_OK(loom_serve_residency_cache_query_status(ResidencyCache()));
   EXPECT_FALSE(loom_serve_residency_cache_is_reclaiming(ResidencyCache()));
   loom_serve_residency_admission_t admission;
