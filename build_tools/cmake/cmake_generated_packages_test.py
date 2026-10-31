@@ -24,6 +24,55 @@ FIXTURE = REPO_ROOT / "build_tools/cmake/testdata/generated_packages"
 
 
 class CMakeGeneratedPackagesTest(unittest.TestCase):
+    def test_logical_package_generators_work_with_makefiles(self):
+        make = shutil.which("gmake") or shutil.which("make")
+        if make is None:
+            self.skipTest("GNU Make is not available")
+        with tempfile.TemporaryDirectory(
+            prefix="cmake logical generator "
+        ) as temporary:
+            root = Path(temporary)
+            source, build = root / "source", root / "build"
+            source.mkdir()
+            input_file = source / "input.txt"
+            input_file.write_text("first")
+            (
+                source / "CMakeLists.txt"
+            ).write_text("""cmake_minimum_required(VERSION 3.26)
+project(logical_generator NONE)
+set(IREE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+set(IREE_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+set(IREE_PACKAGE_ROOT_DIR "${IREE_SOURCE_DIR}")
+set(IREE_PACKAGE_ROOT_PREFIX fixture)
+include("${IREE_REPO_ROOT}/build_tools/cmake/iree_macros.cmake")
+include("${IREE_REPO_ROOT}/build_tools/cmake/iree_generated_files.cmake")
+set(IREE_PACKAGE_SOURCE_DIR "${IREE_SOURCE_DIR}/logical")
+set(IREE_PACKAGE_BINARY_DIR "${IREE_BINARY_DIR}/logical")
+file(MAKE_DIRECTORY "${IREE_PACKAGE_BINARY_DIR}")
+add_executable(copy_tool IMPORTED)
+set_property(TARGET copy_tool PROPERTY IMPORTED_LOCATION "${CMAKE_COMMAND}")
+iree_generated_files(NAME copy GENERATOR copy_tool
+  OUTPUTS "${IREE_PACKAGE_BINARY_DIR}/output.txt"
+  INPUTS "${IREE_SOURCE_DIR}/input.txt"
+  ARGS -E copy_if_different "${IREE_SOURCE_DIR}/input.txt"
+    "${IREE_PACKAGE_BINARY_DIR}/output.txt")
+""")
+            configure_project(
+                source, build, "-G", "Unix Makefiles", f"-DCMAKE_MAKE_PROGRAM={make}"
+            )
+            output = build / "logical/output.txt"
+            build_project(build, "fixture_logical_copy")
+            self.assertEqual(output.read_text(), "first")
+            timestamp = output.stat().st_mtime_ns
+            build_project(build, "fixture_logical_copy")
+            self.assertEqual(output.stat().st_mtime_ns, timestamp)
+            input_file.write_text("second")
+            build_project(build, "fixture_logical_copy")
+            self.assertEqual(output.read_text(), "second")
+            output.unlink()
+            build_project(build, "fixture_logical_copy")
+            self.assertEqual(output.read_text(), "second")
+
     def test_embedded_packages_regenerate_without_source_outputs(self):
         with tempfile.TemporaryDirectory(
             prefix="cmake generated packages "

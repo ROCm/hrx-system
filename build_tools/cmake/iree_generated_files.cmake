@@ -14,7 +14,9 @@ function(iree_generated_files)
   iree_package_name(_PACKAGE_NAME)
   iree_package_binary_dir(_IREE_PACKAGE_BINARY_DIR)
   set(_GEN_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}")
-  set(_GEN_STAMP "${_IREE_PACKAGE_BINARY_DIR}/CMakeFiles/${_GEN_TARGET}.stamp")
+  # The native directory owns action state. A logical BUILD package need not
+  # have a CMake directory or a generator-created CMakeFiles subdirectory.
+  set(_GEN_STAMP "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${_GEN_TARGET}.stamp")
 
   iree_package_target_name(_GENERATOR_TARGET "${_RULE_GENERATOR}")
   if(TARGET "${_GENERATOR_TARGET}")
