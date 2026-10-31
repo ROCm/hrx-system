@@ -290,8 +290,12 @@ iree_status_t iree_hal_amd_gpu_aql_submission_transfer(
   iree_atomic_ref_count_init(&submission->transfer.ref_count);
   iree_status_t status = iree_hal_amd_gpu_transfer_initialize(
       family, IREE_HAL_MEMORY_SITE_PROGRAM,
-      IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_STAGING_LENGTH, count, operations,
-      layout, payload, &submission->transfer.capture);
+      (iree_hal_amd_gpu_transfer_staging_limits_t){
+          .upload_capacity = IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_UPLOAD_LENGTH,
+          .download_capacity =
+              IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_DOWNLOAD_LENGTH,
+      },
+      count, operations, layout, payload, &submission->transfer.capture);
   if (iree_status_is_ok(status)) {
     *out_submission = submission;
   } else {

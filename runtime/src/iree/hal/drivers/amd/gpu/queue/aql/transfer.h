@@ -18,11 +18,16 @@ extern "C" {
 enum {
   // Bounds caller publication work independently of the native ring size.
   IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_PACKETS = 16,
-  // Arguments and borrowed host staging together fit one power-of-two window.
-  // File staging is separate and does not inherit this queue-upload policy.
-  IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_STAGING_LENGTH =
+  // Short download retirements bound host-copy interference. Arguments and
+  // transport bytes share one power-of-two allocation. File staging is
+  // separate.
+  IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_DOWNLOAD_LENGTH =
       1024 * 1024 - IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_PACKETS *
                         sizeof(iree_hal_amd_gpu_blit_arguments_t),
+  // Upload preparation overlaps native reads; include arguments in the bound.
+  IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_UPLOAD_LENGTH =
+      16 * 1024 * 1024 - IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_PACKETS *
+                             sizeof(iree_hal_amd_gpu_blit_arguments_t),
 };
 
 // A bounded unpublished candidate. Its argument bytes and staging live in the
@@ -49,9 +54,9 @@ iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_transfer_packet(
 
 // Returns the argument/staging capacity for the next nonempty transfer piece.
 // A zero capacity queries growth for one largest captured host operation.
-// Once it fits, downloads can batch into the existing ring with a second window
-// for device/host overlap. The cached maximum and remaining descriptor count
-// bound the request without scanning the capture or increasing allocation.
+// A fitting host source stays in one publication. Larger sources and downloads
+// use two windows for device/host overlap. The cached maximum and current
+// descriptor bound the request without scanning the capture.
 uint64_t iree_hal_amd_gpu_aql_transfer_argument_length(
     const iree_hal_amd_gpu_transfer_t* transfer, uint64_t capacity);
 

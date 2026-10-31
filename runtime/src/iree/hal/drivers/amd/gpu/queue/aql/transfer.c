@@ -13,15 +13,23 @@ uint64_t iree_hal_amd_gpu_aql_transfer_argument_length(
   const uint64_t arguments = IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_PACKETS *
                              sizeof(iree_hal_amd_gpu_blit_arguments_t);
   const uint64_t length = arguments + transfer->staging_capacity;
-  if (!transfer->host_completion_required || length > capacity) {
+  if (length > capacity) {
     return length;
+  }
+  if (!transfer->host_completion_required) {
+    if (!transfer->staging_capacity ||
+        transfer->operations[transfer->cursor.index].length <=
+            transfer->staging_capacity) {
+      return length;
+    }
+    return iree_min(length, iree_max(arguments + 8, capacity / 2));
   }
   const uint64_t count = iree_min(transfer->count - transfer->cursor.index,
                                   IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_PACKETS);
   const uint64_t window = iree_max(
       arguments + 8,
       iree_min(capacity / 2,
-               arguments + IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_STAGING_LENGTH));
+               arguments + IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_DOWNLOAD_LENGTH));
   return iree_min(arguments + count * transfer->staging_capacity, window);
 }
 

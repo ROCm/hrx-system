@@ -295,8 +295,12 @@ static iree_status_t iree_hal_amd_gpu_pm4_submission_capture_transfer(
     submission->entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER;
     status = iree_hal_amd_gpu_transfer_initialize(
         family, IREE_HAL_MEMORY_SITE_QUEUE,
-        IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_STAGING_LENGTH, count, operations,
-        layout, payload, &submission->transfer);
+        (iree_hal_amd_gpu_transfer_staging_limits_t){
+            .upload_capacity = IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_UPLOAD_LENGTH,
+            .download_capacity =
+                IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_DOWNLOAD_LENGTH,
+        },
+        count, operations, layout, payload, &submission->transfer);
   }
   if (iree_status_is_ok(status)) {
     if (callback.fn) {

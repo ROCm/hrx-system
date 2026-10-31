@@ -427,13 +427,20 @@ iree_hal_amd_gpu_pm4_publish_transfer(
       used >= arguments->capacity
           ? 0
           : iree_min(arguments->capacity - used, arguments->capacity - offset);
-  // Two download windows let the device fill one while retirement copies the
-  // other into borrowed host memory, without growing the argument allocation.
-  const uint64_t staging_window_length =
+  // A source fitting one admitted span needs no publication boundary. Larger
+  // uploads overlap preparation with native reads in two bounded regions.
+  // Downloads keep short retirement copies so independent work can progress.
+  const uint64_t maximum_staging_length =
       transfer->host_completion_required
-          ? iree_min(arguments->capacity / 2,
-                     IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_STAGING_LENGTH)
-          : IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_STAGING_LENGTH;
+          ? IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_DOWNLOAD_LENGTH
+          : IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_UPLOAD_LENGTH;
+  const bool overlap = transfer->host_completion_required ||
+                       (transfer->staging_capacity &&
+                        transfer->operations[transfer->cursor.index].length >
+                            transfer->staging_capacity);
+  const uint64_t staging_window_length =
+      iree_min(overlap ? arguments->capacity / 2 : arguments->capacity,
+               maximum_staging_length);
   // Admission reserves launch capacity beyond native waits. Keep 96 words for
   // signals, retirement, notification, and alignment, leaving room for DMA
   // packets even at the maximum admitted native fan-in.

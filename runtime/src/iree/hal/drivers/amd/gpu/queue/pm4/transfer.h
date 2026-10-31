@@ -15,8 +15,10 @@ extern "C" {
 #endif  // __cplusplus
 
 enum {
-  // Reusable bulk staging; small transfers keep the initial argument storage.
-  IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_STAGING_LENGTH = 1024 * 1024,
+  // Short download retirements bound host-copy interference.
+  IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_DOWNLOAD_LENGTH = 1024 * 1024,
+  // Upload preparation overlaps native reads with two bounded regions.
+  IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_UPLOAD_LENGTH = 16 * 1024 * 1024,
   // Bounded command preparation, independent of payload or staging byte size.
   IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS = 32 * 7,
 };

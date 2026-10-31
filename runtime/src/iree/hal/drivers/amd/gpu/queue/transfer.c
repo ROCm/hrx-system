@@ -112,8 +112,8 @@ static bool iree_hal_amd_gpu_transfer_program_accessible(
 
 iree_status_t iree_hal_amd_gpu_transfer_initialize(
     const iree_hal_queue_family_t* family, iree_hal_memory_site_kind_t site,
-    uint32_t maximum_staging_capacity, iree_host_size_t count,
-    const iree_hal_transfer_operation_t* operations,
+    iree_hal_amd_gpu_transfer_staging_limits_t staging_limits,
+    iree_host_size_t count, const iree_hal_transfer_operation_t* operations,
     iree_hal_amd_gpu_transfer_layout_t layout, void* storage,
     iree_hal_amd_gpu_transfer_t* out_transfer) {
   *out_transfer = (iree_hal_amd_gpu_transfer_t){
@@ -200,6 +200,10 @@ iree_status_t iree_hal_amd_gpu_transfer_initialize(
       out_transfer->operations[out_transfer->count++] = operation;
       if (source->type != IREE_HAL_TRANSFER_OPERATION_TYPE_FILL &&
           source->type != IREE_HAL_TRANSFER_OPERATION_TYPE_COPY) {
+        const uint32_t maximum_staging_capacity =
+            source->type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD
+                ? staging_limits.download_capacity
+                : staging_limits.upload_capacity;
         out_transfer->staging_capacity =
             iree_max(out_transfer->staging_capacity,
                      (uint32_t)iree_min(length, maximum_staging_capacity));

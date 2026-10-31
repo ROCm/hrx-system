@@ -81,11 +81,58 @@ TEST(AqlTransferPacketTest, DownloadBatchUsesExistingWindowWithoutGrowth) {
     EXPECT_EQ(
         iree_hal_amd_gpu_aql_transfer_argument_length(&transfer, test.capacity),
         test.expected);
+    iree_hal_amd_gpu_transfer_operation_t operation = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+        .length = test.staging,
+    };
     auto upload = transfer;
+    upload.operations = &operation;
+    upload.count = 1;
+    upload.cursor.index = 0;
     upload.host_completion_required = false;
     EXPECT_EQ(
         iree_hal_amd_gpu_aql_transfer_argument_length(&upload, test.capacity),
         512u + test.staging);
+  }
+}
+
+TEST(AqlTransferPacketTest, LargeUploadsOverlapWithoutSplittingFittingSources) {
+  struct Case {
+    // Complete source payload; values above the staging bound require pieces.
+    uint64_t length;
+    // Existing power-of-two argument allocation or zero for the growth query.
+    uint64_t capacity;
+    // One publication's argument and source-byte reservation.
+    uint64_t expected;
+  };
+  constexpr uint64_t kBound = 16 * 1024 * 1024;
+  constexpr uint32_t kStaging = IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_UPLOAD_LENGTH;
+  const Case cases[] = {
+      {1, 1024, 513},
+      {1048699, 2097152, 1049211},
+      {kStaging, kBound, kBound},
+      {kStaging + 1, 0, kBound},
+      {kStaging + 1, kBound, kBound / 2},
+      {4 * kBound, kBound, kBound / 2},
+      {4 * kBound, 2 * kBound, kBound},
+  };
+  for (const auto& test : cases) {
+    SCOPED_TRACE(::testing::Message()
+                 << test.length << " in " << test.capacity);
+    iree_hal_amd_gpu_transfer_operation_t operation = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+        .length = test.length,
+    };
+    const iree_hal_amd_gpu_transfer_t transfer = {
+        .count = 1,
+        .operations = &operation,
+        .staging_capacity = static_cast<uint32_t>(
+            std::min(test.length, static_cast<uint64_t>(kStaging))),
+        .host_wait_required = true,
+    };
+    EXPECT_EQ(
+        iree_hal_amd_gpu_aql_transfer_argument_length(&transfer, test.capacity),
+        test.expected);
   }
 }
 

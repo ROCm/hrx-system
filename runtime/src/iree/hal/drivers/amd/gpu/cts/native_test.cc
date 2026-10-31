@@ -320,7 +320,7 @@ TEST_P(GpuNativeTransferTest, CapturedUpdatesAndDeferredHostTransfers) {
 TEST_P(GpuNativeTransferTest,
        BulkTransfersWrapStagingAndRetainDeferredBuffers) {
   using iree::hal::cts::Ref;
-  constexpr size_t kBulkLength = 3 * 1024 * 1024 + 37;
+  constexpr size_t kBulkLength = 17 * 1024 * 1024 + 37;
   Ref<iree_hal_buffer_t> buffer;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       pool_, iree_hal_make_pool_reservation_request(kBulkLength + 3, 4),
