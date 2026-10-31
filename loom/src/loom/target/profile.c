@@ -37,6 +37,7 @@ static bool loom_target_profile_snapshot_equal(
          lhs->codegen_format == rhs->codegen_format &&
          lhs->artifact_format == rhs->artifact_format &&
          lhs->subgroup_partition == rhs->subgroup_partition &&
+         lhs->maximum_index_bitwidth == rhs->maximum_index_bitwidth &&
          lhs->default_pointer_bitwidth == rhs->default_pointer_bitwidth &&
          lhs->index_bitwidth == rhs->index_bitwidth &&
          lhs->offset_bitwidth == rhs->offset_bitwidth &&
