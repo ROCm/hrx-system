@@ -1,12 +1,16 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <string>
+#include <thread>
 
 #include "benchmark/benchmark.h"
 #include "binding/hip/api.h"
@@ -56,14 +60,13 @@ class HipRuntime {
         Resolve<decltype(&hipStreamSynchronize)>("hipStreamSynchronize");
     graph_launch_ = Resolve<decltype(&hipGraphLaunch)>("hipGraphLaunch");
 
-    int device = 0;
-    Check(Resolve<decltype(&hipGetDevice)>("hipGetDevice")(&device));
+    Check(Resolve<decltype(&hipGetDevice)>("hipGetDevice")(&device_));
     hipDeviceProp_t properties = {};
     Check(Resolve<decltype(&hipGetDevicePropertiesR0600)>(
-        "hipGetDevicePropertiesR0600")(&properties, device));
+        "hipGetDevicePropertiesR0600")(&properties, device_));
     char pci_address[32] = {};
     Check(Resolve<decltype(&hipDeviceGetPCIBusId)>("hipDeviceGetPCIBusId")(
-        pci_address, sizeof(pci_address), device));
+        pci_address, sizeof(pci_address), device_));
     const char* driver = std::getenv("HRX_GPU_DRIVER");
     label_ = std::string(driver && driver[0] ? driver : "configured-default") +
              " " + properties.gcnArchName + " " + pci_address +
@@ -138,11 +141,14 @@ class HipRuntime {
   }
 
   hipStream_t stream() const { return stream_; }
+  int device() const { return device_; }
   const std::string& label() const { return label_; }
 
  private:
   // Exact built frontend DSO, closed only after synchronous runtime teardown.
   hrx::hip::testing::HipDso library_;
+  // Visible ordinal selected by the frontend, shared by application threads.
+  int device_ = 0;
   // Reused code object, retained through every graph and launch.
   hipModule_t module_ = nullptr;
   // Finite single-workitem kernel writing one exact output word.
@@ -164,6 +170,155 @@ class HipRuntime {
 HipRuntime& Runtime() {
   static HipRuntime runtime;
   return runtime;
+}
+
+enum class DownloadMode {
+  kIdle,
+  kPageable,
+  kRegistered,
+};
+
+// Owns one application's continuous download stream. The worker is necessary
+// because a pageable HIP copy may block its caller; it shares the existing
+// primary context and never creates another native driver or device.
+class BackgroundDownload {
+ public:
+  BackgroundDownload(HipRuntime& runtime, size_t length, DownloadMode mode)
+      : runtime_(runtime),
+        length_(length),
+        allocation_length_(((length + 4095) & ~size_t{4095}) + 4096),
+        mode_(mode) {
+    copy_ = runtime_.Resolve<decltype(&hipMemcpyAsync)>("hipMemcpyAsync");
+    synchronize_ = runtime_.Resolve<decltype(&hipStreamSynchronize)>(
+        "hipStreamSynchronize");
+    set_device_ = runtime_.Resolve<decltype(&hipSetDevice)>("hipSetDevice");
+    target_ =
+        static_cast<uint8_t*>(std::aligned_alloc(4096, allocation_length_));
+    Require(target_ != nullptr, "background download allocation failed");
+    std::memset(target_, kGuard, allocation_length_);
+    if (mode_ == DownloadMode::kRegistered) {
+      HipRuntime::Check(
+          runtime_.Resolve<decltype(&hipHostRegister)>("hipHostRegister")(
+              target_, allocation_length_, hipHostRegisterDefault));
+    }
+    HipRuntime::Check(
+        runtime_.Resolve<decltype(&hipMalloc)>("hipMalloc")(&source_, length_));
+    HipRuntime::Check(runtime_.Resolve<decltype(&hipStreamCreateWithFlags)>(
+        "hipStreamCreateWithFlags")(&stream_, hipStreamNonBlocking));
+    HipRuntime::Check(runtime_.Resolve<decltype(&hipMemsetAsync)>(
+        "hipMemsetAsync")(source_, kPayload, length_, stream_));
+    HipRuntime::Check(synchronize_(stream_));
+    worker_ = std::thread([this] {
+      HipRuntime::Check(set_device_(runtime_.device()));
+      do {
+        HipRuntime::Check(
+            copy_(target_, source_, length_, hipMemcpyDeviceToHost, stream_));
+        HipRuntime::Check(synchronize_(stream_));
+        if (completed_.fetch_add(1, std::memory_order_release) == 0) {
+          completed_.notify_one();
+        }
+      } while (!stop_.load(std::memory_order_relaxed));
+    });
+    // The timed foreground begins only after this stream has completed real
+    // work. Readiness does not depend on a scheduler delay or wall-clock timer.
+    completed_.wait(0, std::memory_order_acquire);
+  }
+
+  ~BackgroundDownload() {
+    Stop();
+    Require(std::all_of(target_, target_ + length_,
+                        [](uint8_t value) { return value == kPayload; }),
+            "background download payload mismatch");
+    Require(std::all_of(target_ + length_, target_ + allocation_length_,
+                        [](uint8_t value) { return value == kGuard; }),
+            "background download overwrote its guard");
+    HipRuntime::Check(runtime_.Resolve<decltype(&hipStreamDestroy)>(
+        "hipStreamDestroy")(stream_));
+    HipRuntime::Check(runtime_.Resolve<decltype(&hipFree)>("hipFree")(source_));
+    if (mode_ == DownloadMode::kRegistered) {
+      HipRuntime::Check(runtime_.Resolve<decltype(&hipHostUnregister)>(
+          "hipHostUnregister")(target_));
+    }
+    std::free(target_);
+  }
+
+  BackgroundDownload(const BackgroundDownload&) = delete;
+  BackgroundDownload& operator=(const BackgroundDownload&) = delete;
+
+  void Stop() {
+    stop_.store(true, std::memory_order_relaxed);
+    if (worker_.joinable()) {
+      worker_.join();
+    }
+  }
+
+  uint64_t completed() const {
+    return completed_.load(std::memory_order_acquire);
+  }
+
+ private:
+  static constexpr uint8_t kPayload = 0xA5;
+  static constexpr uint8_t kGuard = 0x3C;
+
+  // Borrowed process runtime, alive until after the application thread joins.
+  HipRuntime& runtime_;
+  // Useful bytes copied in each background transaction.
+  size_t length_;
+  // Page-aligned destination extent, including an untouched guard page.
+  size_t allocation_length_;
+  // Host destination registration policy, fixed throughout the row.
+  DownloadMode mode_;
+  // Device source retained until every background operation completes.
+  hipDeviceptr_t source_ = nullptr;
+  // CPU-owned destination retained through completion and unregistration.
+  uint8_t* target_ = nullptr;
+  // Independent nonblocking stream, joined before destruction.
+  hipStream_t stream_ = nullptr;
+  // Cached copy entry point called by the background application thread.
+  decltype(&hipMemcpyAsync) copy_ = nullptr;
+  // Cached completion entry point for the background stream.
+  decltype(&hipStreamSynchronize) synchronize_ = nullptr;
+  // Cached entry point selecting the existing primary context on the worker.
+  decltype(&hipSetDevice) set_device_ = nullptr;
+  // Complete downloads; the first increment releases constructor readiness.
+  std::atomic<uint64_t> completed_{0};
+  // Stop request observed only between joined downloads.
+  std::atomic<bool> stop_{false};
+  // Application copy thread, joined before releasing any captured resource.
+  std::thread worker_;
+};
+
+// Foreground latency includes one dispatch and its usable host completion.
+// Process CPU includes both callers and the runtime's service/retirement work.
+void DispatchDuringDownload(benchmark::State& state, DownloadMode mode) {
+  auto& runtime = Runtime();
+  runtime.Launch();
+  runtime.Wait();
+  runtime.VerifyOutput();
+  runtime.ResetOutput();
+  const size_t length = state.range(0);
+  std::unique_ptr<BackgroundDownload> background;
+  if (mode != DownloadMode::kIdle) {
+    background = std::make_unique<BackgroundDownload>(runtime, length, mode);
+  }
+  const uint64_t first = background ? background->completed() : 0;
+  const auto start = std::chrono::steady_clock::now();
+  for (auto _ : state) {
+    runtime.Launch();
+    runtime.Wait();
+  }
+  const auto finish = std::chrono::steady_clock::now();
+  const uint64_t count = background ? background->completed() - first : 0;
+  if (background) {
+    background->Stop();
+  }
+  runtime.VerifyOutput();
+  state.SetLabel(runtime.label());
+  state.SetItemsProcessed(state.iterations());
+  state.counters["downloads"] = static_cast<double>(count);
+  state.counters["download_bytes_per_second"] =
+      static_cast<double>(count) * length /
+      std::chrono::duration<double>(finish - start).count();
 }
 
 // Owns the public capture and executable until every measured replay completes.
@@ -335,5 +490,21 @@ BENCHMARK(GraphEventInterval)
     ->Arg(256)
     ->Arg(4096)
     ->UseManualTime();
+
+BENCHMARK_CAPTURE(DispatchDuringDownload, Idle, DownloadMode::kIdle)
+    ->Name("HIP/ConcurrentDownload/Idle")
+    ->Arg(64 * 1024 * 1024)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+BENCHMARK_CAPTURE(DispatchDuringDownload, Pageable, DownloadMode::kPageable)
+    ->Name("HIP/ConcurrentDownload/Pageable")
+    ->Arg(64 * 1024 * 1024)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+BENCHMARK_CAPTURE(DispatchDuringDownload, Registered, DownloadMode::kRegistered)
+    ->Name("HIP/ConcurrentDownload/Registered")
+    ->Arg(64 * 1024 * 1024)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
 
 }  // namespace
