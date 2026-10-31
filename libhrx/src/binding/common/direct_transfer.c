@@ -77,7 +77,7 @@ iree_status_t iree_hal_streaming_direct_transfer_h2d(
           },
   };
   return hrx_hal_queue_transfer_and_wait(
-      context->device_entry->hrx_device,
+      context->queue,
       /*operation_count=*/1, &operation,
       iree_hal_streaming_context_wait_flags(context));
 }
@@ -106,7 +106,7 @@ iree_status_t iree_hal_streaming_direct_transfer_d2h(
           },
   };
   return hrx_hal_queue_transfer_and_wait(
-      context->device_entry->hrx_device,
+      context->queue,
       /*operation_count=*/1, &operation,
       iree_hal_streaming_context_wait_flags(context));
 }
@@ -136,14 +136,15 @@ iree_status_t iree_hal_streaming_direct_transfer_d2d(
           },
   };
   return hrx_hal_queue_transfer_and_wait(
-      context->device_entry->hrx_device,
+      context->queue,
       /*operation_count=*/1, &operation,
       iree_hal_streaming_context_wait_flags(context));
 }
 
 typedef struct iree_hal_streaming_host_download_t {
-  // Borrowed device whose native transfer path performs host visibility work.
-  hrx_device_t device;
+  // Borrowed stream queue preserving its selected family, placement, and
+  // priority.
+  iree_hal_queue_t* queue;
   // Number of row downloads in this transaction.
   iree_host_size_t operation_count;
   // Borrowed capture, live on the caller until the transaction completes.
@@ -155,7 +156,7 @@ typedef struct iree_hal_streaming_host_download_t {
 static iree_status_t iree_hal_streaming_host_download_execute(void* user_data) {
   const iree_hal_streaming_host_download_t* download = user_data;
   return hrx_hal_queue_transfer_and_wait(
-      download->device, download->operation_count, download->operations,
+      download->queue, download->operation_count, download->operations,
       download->wait_flags);
 }
 
@@ -166,7 +167,7 @@ iree_status_t iree_hal_streaming_direct_transfer_and_wait(
     iree_hal_streaming_stream_t* stream, iree_host_size_t operation_count,
     const iree_hal_transfer_operation_t* operations) {
   iree_hal_streaming_host_download_t download = {
-      .device = stream->context->device_entry->hrx_device,
+      .queue = stream->queue,
       .operation_count = operation_count,
       .operations = operations,
       .wait_flags = iree_hal_streaming_context_wait_flags(stream->context),

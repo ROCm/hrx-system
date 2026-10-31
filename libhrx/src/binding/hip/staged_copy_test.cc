@@ -21,14 +21,13 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "libhrx/src/libhrx/device.h"
-#include "libhrx/src/libhrx/hrx_internal.h"
 
 namespace {
 
 // A transfer dependency that accepts the first row and refuses the second.
 // All accepted work uses the real task queue and its ordinary completion.
 struct RejectSecondTransferQueue {
-  // Queue interface borrowed by the HRX device while the test runs.
+  // Queue interface borrowed by the frontend context while the test runs.
   iree_hal_queue_t base;
   // Retained native queue that performs the accepted transfer.
   iree_hal_queue_t* target = nullptr;
@@ -110,8 +109,8 @@ class StagedCopyTest : public ::testing::Test {
       release_.release();
     }
     iree_hal_streaming_host_callback_queue_stop(&callbacks_);
-    if (original_transfer_queue_) {
-      device_entry_.hrx_device->transfer_queue = original_transfer_queue_;
+    if (original_context_queue_) {
+      contexts_[0]->queue = original_context_queue_;
       iree_hal_queue_release(&fault_queue_.base);
     }
     if (stream_) {
@@ -205,8 +204,8 @@ class StagedCopyTest : public ::testing::Test {
   std::atomic<bool> dependent_ran_{false};
   // Expected terminal stream status, including an injected dependency failure.
   iree_status_code_t expected_status_ = IREE_STATUS_OK;
-  // Borrowed native transfer queue restored before device teardown.
-  iree_hal_queue_t* original_transfer_queue_ = nullptr;
+  // Context's owned native queue, restored before context teardown.
+  iree_hal_queue_t* original_context_queue_ = nullptr;
   // CPU-only dependency wrapper, live until the frontend worker is joined.
   RejectSecondTransferQueue fault_queue_ = {};
 };
@@ -228,11 +227,11 @@ TEST_F(StagedCopyTest, GraphCopyBetweenContextsPreservesPitchesAndCompletes) {
   }
 }
 
-TEST_F(StagedCopyTest, RejectedUploadStopsRemainingRowsAndFailsDependents) {
+TEST_F(StagedCopyTest, ContextQueueRejectionStopsRowsAndFailsDependents) {
   host_source_.fill(0x5A);
-  original_transfer_queue_ = device_entry_.hrx_device->transfer_queue;
-  fault_queue_.Initialize(original_transfer_queue_);
-  device_entry_.hrx_device->transfer_queue = &fault_queue_.base;
+  original_context_queue_ = contexts_[0]->queue;
+  fault_queue_.Initialize(original_context_queue_);
+  contexts_[0]->queue = &fault_queue_.base;
   expected_status_ = IREE_STATUS_ABORTED;
   const iree_hip_staged_copy_endpoint_t source_endpoint = {
       .context = nullptr,

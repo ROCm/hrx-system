@@ -178,12 +178,18 @@ enum class DownloadMode {
   kRegistered,
 };
 
+enum class DownloadPriority {
+  kNormal,
+  kLow,
+};
+
 // Owns one application's continuous download stream. The worker is necessary
 // because a pageable HIP copy may block its caller; it shares the existing
 // primary context and never creates another native driver or device.
 class BackgroundDownload {
  public:
-  BackgroundDownload(HipRuntime& runtime, size_t length, DownloadMode mode)
+  BackgroundDownload(HipRuntime& runtime, size_t length, DownloadMode mode,
+                     int priority)
       : runtime_(runtime),
         length_(length),
         allocation_length_(((length + 4095) & ~size_t{4095}) + 4096),
@@ -203,8 +209,9 @@ class BackgroundDownload {
     }
     HipRuntime::Check(
         runtime_.Resolve<decltype(&hipMalloc)>("hipMalloc")(&source_, length_));
-    HipRuntime::Check(runtime_.Resolve<decltype(&hipStreamCreateWithFlags)>(
-        "hipStreamCreateWithFlags")(&stream_, hipStreamNonBlocking));
+    HipRuntime::Check(runtime_.Resolve<decltype(&hipStreamCreateWithPriority)>(
+        "hipStreamCreateWithPriority")(&stream_, hipStreamNonBlocking,
+                                       priority));
     HipRuntime::Check(runtime_.Resolve<decltype(&hipMemsetAsync)>(
         "hipMemsetAsync")(source_, kPayload, length_, stream_));
     HipRuntime::Check(synchronize_(stream_));
@@ -290,8 +297,22 @@ class BackgroundDownload {
 
 // Foreground latency includes one dispatch and its usable host completion.
 // Process CPU includes both callers and the runtime's service/retirement work.
-void DispatchDuringDownload(benchmark::State& state, DownloadMode mode) {
+void DispatchDuringDownload(
+    benchmark::State& state, DownloadMode mode,
+    DownloadPriority priority = DownloadPriority::kNormal) {
   auto& runtime = Runtime();
+  int copy_priority = 0;
+  if (priority == DownloadPriority::kLow) {
+    int greatest_priority = 0;
+    HipRuntime::Check(
+        runtime.Resolve<decltype(&hipDeviceGetStreamPriorityRange)>(
+            "hipDeviceGetStreamPriorityRange")(&copy_priority,
+                                               &greatest_priority));
+    if (copy_priority <= 0) {
+      state.SkipWithError("HIP device has no stream priority below normal");
+      return;
+    }
+  }
   runtime.Launch();
   runtime.Wait();
   runtime.VerifyOutput();
@@ -299,7 +320,8 @@ void DispatchDuringDownload(benchmark::State& state, DownloadMode mode) {
   const size_t length = state.range(0);
   std::unique_ptr<BackgroundDownload> background;
   if (mode != DownloadMode::kIdle) {
-    background = std::make_unique<BackgroundDownload>(runtime, length, mode);
+    background = std::make_unique<BackgroundDownload>(runtime, length, mode,
+                                                      copy_priority);
   }
   const uint64_t first = background ? background->completed() : 0;
   const auto start = std::chrono::steady_clock::now();
@@ -316,6 +338,7 @@ void DispatchDuringDownload(benchmark::State& state, DownloadMode mode) {
   state.SetLabel(runtime.label());
   state.SetItemsProcessed(state.iterations());
   state.counters["downloads"] = static_cast<double>(count);
+  state.counters["download_priority"] = copy_priority;
   state.counters["download_bytes_per_second"] =
       static_cast<double>(count) * length /
       std::chrono::duration<double>(finish - start).count();
@@ -503,6 +526,18 @@ BENCHMARK_CAPTURE(DispatchDuringDownload, Pageable, DownloadMode::kPageable)
     ->UseRealTime();
 BENCHMARK_CAPTURE(DispatchDuringDownload, Registered, DownloadMode::kRegistered)
     ->Name("HIP/ConcurrentDownload/Registered")
+    ->Arg(64 * 1024 * 1024)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+BENCHMARK_CAPTURE(DispatchDuringDownload, PageableLowPriority,
+                  DownloadMode::kPageable, DownloadPriority::kLow)
+    ->Name("HIP/ConcurrentDownload/PageableLowPriority")
+    ->Arg(64 * 1024 * 1024)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+BENCHMARK_CAPTURE(DispatchDuringDownload, RegisteredLowPriority,
+                  DownloadMode::kRegistered, DownloadPriority::kLow)
+    ->Name("HIP/ConcurrentDownload/RegisteredLowPriority")
     ->Arg(64 * 1024 * 1024)
     ->MeasureProcessCPUTime()
     ->UseRealTime();

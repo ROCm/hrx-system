@@ -3125,7 +3125,7 @@ static iree_status_t iree_hal_streaming_synchronize_host_access(
     iree_hal_streaming_context_t* context) {
   IREE_RETURN_IF_ERROR(iree_hal_streaming_context_synchronize_all());
   return hrx_hal_queue_transfer_and_wait(
-      context->device_entry->hrx_device,
+      context->queue,
       /*operation_count=*/0, NULL,
       iree_hal_streaming_context_wait_flags(context));
 }
