@@ -1,0 +1,155 @@
+// A completed shared callee folds exposed constant arguments before either
+// outer call clones its body. The inline pass itself owns that boundary.
+// RUN: pass inline-callables
+
+func.def inline @choose(%condition: i1, %value: i32) -> (i32) {
+  %result = scf.if %condition -> (i32) {
+    %doubled = scalar.addi %value, %value : i32
+    scf.yield %doubled : i32
+  } else {
+    %c0 = scalar.constant 0 : i32
+    scf.yield %c0 : i32
+  }
+  func.return %result : i32
+}
+
+func.def public inline @shared(%value: i32) -> (i32) {
+  %yes = scalar.constant true : i1
+  %result = func.call @choose(%yes, %value) : (i1, i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public @entry(%left: i32, %right: i32) -> (i32) {
+  %first = func.call @shared(%left) : (i32) -> (i32)
+  %second = func.call @shared(%right) : (i32) -> (i32)
+  %sum = scalar.addi %first, %second : i32
+  func.return %sum : i32
+}
+
+// ----
+func.def public inline @shared(%value: i32) -> (i32) {
+  %doubled = scalar.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.def public @entry(%left: i32, %right: i32) -> (i32) {
+  %doubled$17 = scalar.addi %left, %left : i32
+  %doubled$16 = scalar.addi %right, %right : i32
+  %sum = scalar.addi %doubled$17, %doubled$16 : i32
+  func.return %sum : i32
+}
+
+// ====
+
+// CFG callees reach the same completion boundary before batch classification.
+// RUN: pass inline-callables
+
+func.def inline @increment(%value: i32) -> (i32) {
+  %c1 = scalar.constant 1 : i32
+  %next = scalar.addi %value, %c1 : i32
+  func.return %next : i32
+}
+
+func.def public inline @shared(%condition: i1) -> (i32) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  %c2 = scalar.constant 2 : i32
+  %three = func.call @increment(%c2) : (i32) -> (i32)
+  func.return %three : i32
+^right:
+  %c4 = scalar.constant 4 : i32
+  %five = func.call @increment(%c4) : (i32) -> (i32)
+  func.return %five : i32
+}
+
+func.def public @entry(%first_condition: i1, %second_condition: i1) -> (i32) {
+  %first = func.call @shared(%first_condition) : (i1) -> (i32)
+  %second = func.call @shared(%second_condition) : (i1) -> (i32)
+  %sum = scalar.addi %first, %second : i32
+  func.return %sum : i32
+}
+
+// ----
+func.def public inline @shared(%condition: i1) -> (i32) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  %next$19 = scalar.constant 3 : i32
+  func.return %next$19 : i32
+^right:
+  %next$18 = scalar.constant 5 : i32
+  func.return %next$18 : i32
+}
+
+func.def public @entry(%first_condition: i1, %second_condition: i1) -> (i32) {
+  cfg.br ^_bb1
+^_bb1:
+  cfg.cond_br %first_condition, ^_bb2, ^_bb3
+^_bb2:
+  %next$25 = scalar.constant 3 : i32
+  cfg.br ^_bb4(%next$25: i32)
+^_bb3:
+  %next$26 = scalar.constant 5 : i32
+  cfg.br ^_bb4(%next$26: i32)
+^_bb4(%first: i32):
+  cfg.br ^_bb5
+^_bb5:
+  cfg.cond_br %second_condition, ^_bb6, ^_bb7
+^_bb6:
+  %next$21 = scalar.constant 3 : i32
+  cfg.br ^_bb8(%next$21: i32)
+^_bb7:
+  %next$22 = scalar.constant 5 : i32
+  cfg.br ^_bb8(%next$22: i32)
+^_bb8(%second: i32):
+  %sum = scalar.addi %first, %second : i32
+  func.return %sum : i32
+}
+
+// ====
+
+// A reusable contextual closure cannot acquire the first caller's target facts.
+// RUN: pass inline-callables,canonicalize
+
+test.target<low_core> @subgroup32 {subgroup_size = 32}
+
+test.target<low_core> @subgroup64 {subgroup_size = 64}
+
+func.def inline @subgroup_width() -> (index) {
+  %width = target.subgroup.size : index
+  func.return %width : index
+}
+
+func.def public inline @shared_width() -> (index) {
+  %width = func.call @subgroup_width() : () -> (index)
+  func.return %width : index
+}
+
+func.def target(@subgroup32) abi(object_function) @caller32() -> (index) {
+  %width = func.call @shared_width() : () -> (index)
+  func.return %width : index
+}
+
+func.def target(@subgroup64) abi(object_function) @caller64() -> (index) {
+  %width = func.call @shared_width() : () -> (index)
+  func.return %width : index
+}
+
+// ----
+test.target<low_core> @subgroup32 {subgroup_size = 32}
+
+test.target<low_core> @subgroup64 {subgroup_size = 64}
+
+func.def public inline @shared_width() -> (index) {
+  %width = target.subgroup.size : index
+  func.return %width : index
+}
+
+func.def target(@subgroup32) abi(object_function) @caller32() -> (index) {
+  %width = index.constant 32 : index
+  func.return %width : index
+}
+
+func.def target(@subgroup64) abi(object_function) @caller64() -> (index) {
+  %width = index.constant 64 : index
+  func.return %width : index
+}

@@ -25,11 +25,14 @@
 #include "loom/ops/op_defs.h"
 #include "loom/pass/options.h"
 #include "loom/pass/pipeline.h"
+#include "loom/pass/value_facts.h"
 #include "loom/rewrite/callable.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/target/function_version.h"
 #include "loom/target/pass_environment.h"
 #include "loom/target/provider.h"
+#include "loom/transforms/cleanup/canonicalizer.h"
+#include "loom/transforms/cleanup/pass_environment.h"
 
 //===----------------------------------------------------------------------===//
 // Statistics
@@ -1542,22 +1545,40 @@ static void loom_inline_enqueue_ready_entry(
   }
 }
 
+static iree_status_t loom_inline_refine_source_closure(
+    loom_inline_callables_plan_t* state, loom_func_like_t function);
+
 // Completes one executed call edge and propagates closure completion through
 // wrappers that were already transferred outward. A transfer may move its body
 // before calls carried by that body execute, but its caller must continue to
 // observe the transfer as an outstanding edge until those calls complete.
-static void loom_inline_complete_execution_entry(
-    const loom_inline_callables_plan_t* state,
+static iree_status_t loom_inline_complete_execution_entry(
+    loom_inline_callables_plan_t* state,
     loom_inline_execution_symbol_t* execution_symbols,
     loom_inline_execution_entry_t* execution_entries, uint32_t entry_index,
-    loom_inline_ready_entries_t* ready) {
+    loom_inline_ready_entries_t* ready, bool* availability_valid) {
   while (entry_index != LOOM_INLINE_PLAN_ENTRY_INVALID) {
     const loom_inline_plan_entry_t* entry = &state->entries[entry_index];
     loom_inline_execution_symbol_t* source =
         &execution_symbols[entry->source_symbol_id];
     IREE_ASSERT_GT(source->remaining_outgoing_count, 0u);
     if (--source->remaining_outgoing_count != 0) {
-      return;
+      return iree_ok_status();
+    }
+
+    if (!source->transfer_executed &&
+        source->first_clone_entry != LOOM_INLINE_PLAN_ENTRY_INVALID) {
+      const loom_func_like_t function =
+          state->symbols[entry->source_symbol_id].function;
+      // Source composition exposes constant arguments inside the completed
+      // callee. Fold those expressions once before its callers copy them.
+      // Prepared Low bodies carry retained machine plans and are already past
+      // source refinement; their clone observers preserve those plans intact.
+      if (!loom_low_func_def_isa(function.op)) {
+        IREE_RETURN_IF_ERROR(
+            loom_inline_refine_source_closure(state, function));
+        *availability_valid = false;
+      }
     }
 
     for (uint32_t clone_index = source->first_clone_entry;
@@ -1569,31 +1590,64 @@ static void loom_inline_complete_execution_entry(
       clone_index = next_clone;
     }
     if (!source->transfer_executed) {
-      return;
+      return iree_ok_status();
     }
     entry_index = source->transfer_entry;
   }
+  return iree_ok_status();
 }
 
 // Releases clone dependencies only after the materialization boundary
 // completes. A batch publishes every region's lexical order before any
 // completed caller becomes another clone's source.
-static void loom_inline_finish_clone(
-    const loom_inline_callables_plan_t* state,
+static iree_status_t loom_inline_finish_clone(
+    loom_inline_callables_plan_t* state,
     loom_inline_execution_symbol_t* execution_symbols,
     loom_inline_execution_entry_t* execution_entries, uint32_t entry_index,
-    loom_inline_ready_entries_t* ready) {
+    loom_inline_ready_entries_t* ready, bool* availability_valid) {
   const loom_inline_plan_entry_t* entry = &state->entries[entry_index];
   loom_inline_execution_symbol_t* target =
       &execution_symbols[entry->target_symbol_id];
-  loom_inline_complete_execution_entry(state, execution_symbols,
-                                       execution_entries, entry_index, ready);
+  IREE_RETURN_IF_ERROR(loom_inline_complete_execution_entry(
+      state, execution_symbols, execution_entries, entry_index, ready,
+      availability_valid));
   IREE_ASSERT_GT(target->remaining_clone_count, 0u);
   if (--target->remaining_clone_count == 0 &&
       target->transfer_entry != LOOM_INLINE_PLAN_ENTRY_INVALID) {
     loom_inline_enqueue_ready_entry(state, execution_entries,
                                     target->transfer_entry, ready);
   }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_inline_refine_source_closure(
+    loom_inline_callables_plan_t* state, loom_func_like_t function) {
+  const loom_cleanup_pass_capability_t* capability =
+      loom_cleanup_pass_capability_from_pass(state->pass);
+  const loom_cleanup_pattern_registry_t* registry =
+      loom_cleanup_pass_capability_pattern_registry(capability);
+  loom_cleanup_canonicalizer_context_t context = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_cleanup_pass_capability_resolve_canonicalizer_context(
+          capability, state->pass, state->module, function, &context));
+  const loom_canonicalizer_options_t options = {
+      .patterns =
+          loom_canonicalizer_pattern_registries_from_cleanup_registry(registry),
+      .target_facts = context.target_facts,
+      .math_policy = context.math_policy,
+  };
+  loom_pass_value_fact_owner_invalidate(state->pass->value_facts);
+  loom_canonicalizer_t canonicalizer;
+  IREE_RETURN_IF_ERROR(loom_canonicalizer_initialize(
+      state->module, state->pass->arena, state->pass->value_facts,
+      registry ? registry->special_value_policy : NULL,
+      registry ? registry->fact_refinement_policy : NULL, &canonicalizer));
+  loom_canonicalizer_result_t result;
+  iree_status_t status = loom_canonicalizer_run_function(
+      &canonicalizer, function, &options, &result);
+  loom_canonicalizer_deinitialize(&canonicalizer);
+  loom_pass_value_fact_owner_invalidate(state->pass->value_facts);
+  return status;
 }
 
 // Executes required edges without repeatedly cloning a growing callee closure.
@@ -1761,8 +1815,9 @@ static iree_status_t loom_inline_execute_plan(
            clone_index != LOOM_INLINE_PLAN_ENTRY_INVALID &&
            iree_status_is_ok(status);
            clone_index = execution_entries[clone_index].next_clone_entry) {
-        loom_inline_finish_clone(state, execution_symbols, execution_entries,
-                                 clone_index, &ready);
+        status = loom_inline_finish_clone(state, execution_symbols,
+                                          execution_entries, clone_index,
+                                          &ready, &transfer_availability_valid);
       }
       continue;
     }
@@ -1806,16 +1861,18 @@ static iree_status_t loom_inline_execute_plan(
     }
 
     if (entry->action == LOOM_INLINE_PLAN_ACTION_CLONE) {
-      loom_inline_finish_clone(state, execution_symbols, execution_entries,
-                               entry_index, &ready);
+      status = loom_inline_finish_clone(state, execution_symbols,
+                                        execution_entries, entry_index, &ready,
+                                        &transfer_availability_valid);
     } else {
       loom_inline_execution_symbol_t* target =
           &execution_symbols[entry->target_symbol_id];
       IREE_ASSERT_FALSE(target->transfer_executed);
       target->transfer_executed = true;
       if (target->remaining_outgoing_count == 0) {
-        loom_inline_complete_execution_entry(
-            state, execution_symbols, execution_entries, entry_index, &ready);
+        status = loom_inline_complete_execution_entry(
+            state, execution_symbols, execution_entries, entry_index, &ready,
+            &transfer_availability_valid);
       }
     }
   }

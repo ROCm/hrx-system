@@ -75,9 +75,11 @@ void loom_inline_callables_plan_append(
     loom_symbol_id_t target_symbol_id, loom_op_t* call_op);
 
 // Checks required-edge cycles and body legality, then executes the existing
-// clone/consume scheduler. Emits diagnostics through the owning pass and marks
-// that pass changed on mutation. The caller owns pruning and symbol compaction
-// after this returns; the plan and borrowed snapshots are then no longer used.
+// clone/consume scheduler. Completed source closures are simplified before
+// their callers clone them; prepared Low closures retain their machine plans.
+// Emits diagnostics through the owning pass and marks that pass changed on
+// mutation. The caller owns pruning and symbol compaction after this returns;
+// the plan and borrowed snapshots are then no longer used.
 iree_status_t loom_inline_callables_plan_execute(
     loom_inline_callables_plan_t* plan);
 
