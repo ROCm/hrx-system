@@ -149,6 +149,27 @@ TEST_F(PublisherTest, CapacityDeferralPreservesDetachedEntry) {
   EXPECT_FALSE(Handoff());
 }
 
+TEST_F(PublisherTest, RetainedContinuationYieldsToReadyEntries) {
+  Entry continuation;
+  Entry ready;
+  ASSERT_TRUE(Enqueue(&continuation));
+  ASSERT_EQ(Next(), &continuation);
+  ASSERT_FALSE(Enqueue(&ready));
+  // The detached capture retains its suffix while another capture gets a turn.
+  ASSERT_FALSE(Enqueue(&continuation));
+  ASSERT_TRUE(Handoff());
+  ASSERT_TRUE(AcquireService());
+  EXPECT_EQ(Next(), &ready);
+  ASSERT_EQ(Next(), &continuation);
+  // Recycling the last real entry must leave the stub linked correctly too.
+  ASSERT_FALSE(Enqueue(&continuation));
+  ASSERT_TRUE(Handoff());
+  ASSERT_TRUE(AcquireService());
+  EXPECT_EQ(Next(), &continuation);
+  EXPECT_EQ(Next(), nullptr);
+  EXPECT_FALSE(Handoff());
+}
+
 TEST_F(PublisherTest, CompletedEntriesMayBeFreedBeforeHandoff) {
   Entry* first = new Entry;
   Entry* second = new Entry;

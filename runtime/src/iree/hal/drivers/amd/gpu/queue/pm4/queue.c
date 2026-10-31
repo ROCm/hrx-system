@@ -1685,6 +1685,15 @@ iree_hal_amd_gpu_pm4_process_entry(iree_hal_amd_gpu_pm4_queue_t* queue,
       iree_containerof(entry, iree_hal_amd_gpu_pm4_submission_t, entry);
   iree_hal_amd_gpu_pm4_publication_result_t result =
       iree_hal_amd_gpu_pm4_process(queue, submission);
+  if (result == IREE_HAL_AMD_GPU_PM4_PUBLICATION_MORE &&
+      submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER) {
+    // Accepted transfer chunks are self-contained. Yield the retained suffix
+    // to ready submissions instead of keeping a bulk transfer ahead of them
+    // across every staging-credit wait. The final chunk alone signals users.
+    iree_hal_amd_gpu_publisher_enqueue(&queue->publisher,
+                                       &submission->entry.publication);
+    result = IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;
+  }
   if (result < IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_ARGUMENTS) {
     IREE_TRACE_ZONE_END(z0);
     return result;
@@ -1746,6 +1755,18 @@ static bool iree_hal_amd_gpu_pm4_handoff(
     iree_hal_amd_gpu_pm4_queue_t* queue,
     iree_hal_amd_gpu_publication_entry_t* remainder, bool capacity,
     uint64_t completed) {
+  if (capacity && remainder &&
+      (!queue->kernel || !queue->kernel->pending.byte_length)) {
+    iree_hal_amd_gpu_pm4_entry_t* entry =
+        iree_containerof(remainder, iree_hal_amd_gpu_pm4_entry_t, publication);
+    if (entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER) {
+      // Give ready work the next returned credit instead of immediately
+      // consuming it for another bulk chunk. Prepared KERNEL bytes must stay
+      // with their capture until native acceptance.
+      iree_hal_amd_gpu_publisher_enqueue(&queue->publisher, remainder);
+      remainder = NULL;
+    }
+  }
   bool more = iree_hal_amd_gpu_publisher_handoff(&queue->publisher, remainder);
   if (more && capacity) {
     iree_atomic_exchange(&queue->completed.waiting_for_capacity, 1,
