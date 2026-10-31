@@ -58,7 +58,7 @@ endfunction()
 
 function(_iree_collect_sanitizer_suppressions OUTPUT_VARIABLE TARGET_NAME)
   _iree_resolve_target(_TARGET "${TARGET_NAME}")
-  if(NOT _TARGET)
+  if("${_TARGET}" STREQUAL "")
     set(${OUTPUT_VARIABLE} "" PARENT_SCOPE)
     return()
   endif()
