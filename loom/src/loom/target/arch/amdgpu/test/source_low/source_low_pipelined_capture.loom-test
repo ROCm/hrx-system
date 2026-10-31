@@ -1,0 +1,81 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core> @decode_packet(%word: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm {
+  %low = v_cvt_pk_f32_fp8 %word
+  %high_word = v_lshrrev_b32_src0_inline %word, 16
+  %high = v_cvt_pk_f32_fp8 %high_word
+  %values = concat(%low, %high) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  return %values
+}
+
+kernel.def target(@target) @decode_panels() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %c0 = index.constant 0 : index
+  %panel_step = index.constant 1 : index
+  %pipeline_depth = index.constant 2 : index
+  %panel_count = index.constant 4 : index
+  %width = index.constant 64 : index
+  %origin = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %source = buffer.view %input[%origin] : buffer -> view<256xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<64x4xf32>
+  %empty = vector.splatf 0.0 : vector<4xf32>
+  %sum = scf.for %panel = [%c0 to %panel_count step %panel_step](%prior = %empty : vector<4xf32>) -> (vector<4xf32>) pipeline(%pipeline_depth) {
+    %offset = index.madd %panel, %width, %lane : index
+    %word = view.load %source[%offset] : view<256xi32> -> i32
+    %values = low.invoke @decode_packet(%word) : (i32) -> (vector<4xf32>)
+    %next = vector.addf %prior, %values : vector<4xf32>
+    scf.yield %next : vector<4xf32>
+  }
+  vector.store %sum, %destination[%lane, %c0] : vector<4xf32>, view<64x4xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @decode_panels() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %source = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination = resource<hal_binding> {extent = 1024, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %panel_step = s_mov_b32 1
+  %panel_count = s_mov_b32 4
+  %70 = v_mov_b32 0
+  %empty = concat(%70, %70, %70, %70) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %75 = v_lshlrev_b32_src0_inline %lane, 2
+  %word$76 = global_load_dword_saddr %75, %source : reg<amdgpu.vgpr>
+  low.br ^_bb1(%panel_step: reg<amdgpu.sgpr>, %empty: reg<amdgpu.vgpr x4>, %word$76: reg<amdgpu.vgpr>)
+^_bb1(%62: reg<amdgpu.sgpr>, %63: reg<amdgpu.vgpr x4>, %64: reg<amdgpu.vgpr>):
+  %77 = s_cmp_lt_i32 %62, %panel_count
+  low.cond_br %77, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %78 = v_mov_b32_copy %62
+  %79 = v_lshl_add_u32_shift_imm %78, %lane, 6
+  %80 = v_lshlrev_b32_src0_inline %79, 2
+  %word$81 = global_load_dword_saddr %80, %source : reg<amdgpu.vgpr>
+  %low$100 = v_cvt_pk_f32_fp8 %64
+  %high_word$101 = v_lshrrev_b32_src0_inline %64, 16
+  %high$102 = v_cvt_pk_f32_fp8 %high_word$101
+  %83 = slice %63[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %85 = v_pk_add_f32 %83, %low$100
+  %86 = slice %63[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %88 = v_pk_add_f32 %86, %high$102
+  %next$89 = concat(%85, %88) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %90 = s_add_u32 %62, %panel_step
+  low.br ^_bb1(%90: reg<amdgpu.sgpr>, %next$89: reg<amdgpu.vgpr x4>, %word$81: reg<amdgpu.vgpr>)
+^_bb3:
+  %low$2 = v_cvt_pk_f32_fp8 %64
+  %high_word$3 = v_lshrrev_b32_src0_inline %64, 16
+  %high$4 = v_cvt_pk_f32_fp8 %high_word$3
+  %92 = slice %63[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %94 = v_pk_add_f32 %92, %low$2
+  %95 = slice %63[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %97 = v_pk_add_f32 %95, %high$4
+  %next$98 = concat(%94, %97) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %99 = v_lshlrev_b32_src0_inline %lane, 4
+  global_store_dwordx4_saddr %99, %next$98, %destination
+  return
+}

@@ -400,13 +400,13 @@ TEST_F(BuilderTest, DirectIdentitySummaryUpdatesOnErase) {
       &builder_, loom_test_constant_result(size_op), loom_type_pool(),
       LOOM_LOCATION_UNKNOWN, &allocation_op));
 
-  EXPECT_EQ(module_->body->unique_identity_count, 1u);
-  EXPECT_TRUE(loom_region_has_unique_identities(module_->body));
+  EXPECT_EQ(module_->body->resource_identity_count, 1u);
+  EXPECT_TRUE(loom_region_has_resource_identities(module_->body));
   EXPECT_FALSE(loom_region_has_memory_accesses(module_->body));
 
   IREE_ASSERT_OK(loom_op_erase(module_, allocation_op));
-  EXPECT_EQ(module_->body->unique_identity_count, 0u);
-  EXPECT_FALSE(loom_region_has_unique_identities(module_->body));
+  EXPECT_EQ(module_->body->resource_identity_count, 0u);
+  EXPECT_FALSE(loom_region_has_resource_identities(module_->body));
 }
 
 TEST_F(BuilderTest, UnknownOpEffectsAreConservative) {
@@ -463,8 +463,8 @@ TEST_F(BuilderTest, NestedEffectSummariesPropagateToAncestors) {
   EXPECT_EQ(module_->body->write_effect_count, 1u);
   EXPECT_EQ(map_body->memory_access_count, 1u);
   EXPECT_EQ(module_->body->memory_access_count, 1u);
-  EXPECT_EQ(map_body->unique_identity_count, 1u);
-  EXPECT_EQ(module_->body->unique_identity_count, 1u);
+  EXPECT_EQ(map_body->resource_identity_count, 1u);
+  EXPECT_EQ(module_->body->resource_identity_count, 1u);
   EXPECT_EQ(loom_region_written_memory_spaces(map_body),
             1u << LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN);
   EXPECT_EQ(loom_region_written_memory_spaces(module_->body),
@@ -473,16 +473,16 @@ TEST_F(BuilderTest, NestedEffectSummariesPropagateToAncestors) {
   IREE_ASSERT_OK(loom_module_compute_uses(module_));
   EXPECT_EQ(map_body->memory_access_count, 1u);
   EXPECT_EQ(module_->body->memory_access_count, 1u);
-  EXPECT_EQ(map_body->unique_identity_count, 1u);
-  EXPECT_EQ(module_->body->unique_identity_count, 1u);
+  EXPECT_EQ(map_body->resource_identity_count, 1u);
+  EXPECT_EQ(module_->body->resource_identity_count, 1u);
 
   IREE_ASSERT_OK(loom_op_erase(module_, map_op));
   EXPECT_EQ(map_body->write_effect_count, 0u);
   EXPECT_EQ(module_->body->write_effect_count, 0u);
   EXPECT_EQ(map_body->memory_access_count, 0u);
   EXPECT_EQ(module_->body->memory_access_count, 0u);
-  EXPECT_EQ(map_body->unique_identity_count, 0u);
-  EXPECT_EQ(module_->body->unique_identity_count, 0u);
+  EXPECT_EQ(map_body->resource_identity_count, 0u);
+  EXPECT_EQ(module_->body->resource_identity_count, 0u);
   EXPECT_EQ(write_op->flags & LOOM_OP_FLAG_SUMMARIES_COUNTED, 0u);
   EXPECT_EQ(allocation_op->flags & LOOM_OP_FLAG_SUMMARIES_COUNTED, 0u);
   EXPECT_EQ(loom_region_written_memory_spaces(map_body), 0);

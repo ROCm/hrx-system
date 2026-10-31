@@ -843,7 +843,8 @@ enum loom_trait_bits_e {
   LOOM_TRAIT_DISTRIBUTION_TRANSFER = 1u << 22,
   // Op creates storage relations between SSA values. Passes use this as a
   // hot-path guard before asking a dialect-owned helper for exact source/result
-  // ranges.
+  // ranges. Fresh identities on these relations own local register contents,
+  // rather than separately addressable resources crossing callable boundaries.
   LOOM_TRAIT_STORAGE_RELATION = 1u << 23,
   // Op orders memory accesses without directly reading or writing a resource.
   // Generic effect queries treat fences as read/write barriers so existing
@@ -893,8 +894,8 @@ typedef uint32_t loom_trait_flags_t;
 // Absence (0) leaves effects unspecified and therefore conservative.
 typedef enum loom_callable_effect_contract_e {
   LOOM_CALLABLE_EFFECT_CONTRACT_UNSPECIFIED = 0,
-  // No memory, non-deterministic, fresh-identity, convergent, or observable
-  // effects.
+  // No memory, non-deterministic, fresh-resource, convergent, or observable
+  // effects. Function-local virtual-register ownership is independent.
   LOOM_CALLABLE_EFFECT_CONTRACT_PURE = 1,
   // Deterministic memory reads with no other effects.
   LOOM_CALLABLE_EFFECT_CONTRACT_READONLY = 2,
@@ -958,6 +959,17 @@ static inline bool loom_traits_is_isolated(loom_trait_flags_t traits) {
 // distinct identity. Prevents CSE but not DCE or LICM.
 static inline bool loom_traits_has_unique_identity(loom_trait_flags_t traits) {
   return (traits & LOOM_TRAIT_UNIQUE_IDENTITY) != 0;
+}
+
+// Returns true when an op creates a resource identity visible across callable
+// boundaries. Register storage relations create local owners for value
+// contents; their independent ownership still prevents direct CSE and
+// constrains motion, but does not make a value-returning callable allocate a
+// resource.
+static inline bool loom_traits_has_resource_identity(
+    loom_trait_flags_t traits) {
+  return (traits & (LOOM_TRAIT_UNIQUE_IDENTITY |
+                    LOOM_TRAIT_STORAGE_RELATION)) == LOOM_TRAIT_UNIQUE_IDENTITY;
 }
 
 // Returns true if the trait flags declare an op safe to execute on additional
@@ -2165,10 +2177,10 @@ typedef struct loom_region_t {
   // nested in this region. These ops remain live even when their SSA results
   // are unused.
   uint32_t observable_effect_count;
-  // Transitive count of fresh identities produced by all live ops nested in
-  // this region. Fresh identities prevent referentially transparent callable
-  // contracts but do not themselves imply memory or observable effects.
-  uint32_t unique_identity_count;
+  // Transitive count of fresh resource identities produced by live nested ops.
+  // Function-local register storage relations retain independent ownership
+  // without contributing to this callable effect summary.
+  uint32_t resource_identity_count;
   // Transitive count of actual or unknown memory accesses. Unlike read/write
   // effects, this excludes ordering and observations of non-memory state.
   uint32_t memory_access_count;
@@ -2270,10 +2282,10 @@ static inline bool loom_region_has_observable_effects(
   return region && region->observable_effect_count != 0;
 }
 
-// Returns true when any live op nested in |region| produces a fresh identity.
-static inline bool loom_region_has_unique_identities(
+// Returns true when any live nested op creates a fresh resource identity.
+static inline bool loom_region_has_resource_identities(
     const loom_region_t* region) {
-  return region && region->unique_identity_count != 0;
+  return region && region->resource_identity_count != 0;
 }
 
 // Returns true when any live nested op may access storage, including unknown

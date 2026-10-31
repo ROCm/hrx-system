@@ -1,0 +1,95 @@
+// RUN: with-low-asm pass canonicalize
+
+// Register captures create independent local owners, while callers exchange
+// the computed contents. The retained region summary permits pure inference.
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @capture_pair(%left: reg<test.i32>, %right: reg<test.i32>) -> (reg<test.i32 x2>) asm {
+  %copied = copy %left : reg<test.i32> -> reg<test.i32>
+  %moved = move %copied : reg<test.i32> -> reg<test.i32>
+  %pair = concat(%moved, %right) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  return %pair
+}
+
+func.def @invoke_capture(%left: i32, %right: i32) -> (vector<2xi32>) {
+  %result = low.invoke @capture_pair(%left, %right) : (i32, i32) -> (vector<2xi32>)
+  func.return %result : vector<2xi32>
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @capture_pair(%left: reg<test.i32>, %right: reg<test.i32>) -> (reg<test.i32 x2>) asm {
+  %copied = copy %left : reg<test.i32> -> reg<test.i32>
+  %moved = move %copied : reg<test.i32> -> reg<test.i32>
+  %pair = concat(%moved, %right) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  return %pair
+}
+
+func.def @invoke_capture(%left: i32, %right: i32) -> (vector<2xi32>) {
+  %result = low.invoke pure @capture_pair(%left, %right) : (i32, i32) -> (vector<2xi32>)
+  func.return %result : vector<2xi32>
+}
+
+// ====
+
+// RUN: verify
+
+// Explicit contracts and the inference query agree about local captures.
+test.target<low_core> @target
+
+low.func.def pure target<test.low.core>(@target) @capture_pair(%left: reg<test.i32>, %right: reg<test.i32>) -> (reg<test.i32 x2>) asm {
+  %copied = copy %left : reg<test.i32> -> reg<test.i32>
+  %moved = move %copied : reg<test.i32> -> reg<test.i32>
+  %pair = concat(%moved, %right) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  return %pair
+}
+
+// ====
+
+// RUN: with-low-asm pass canonicalize,low-cse
+
+// Pure results with consuming users retain independent register owners.
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @capture(%input: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = copy %input : reg<test.i32> -> reg<test.i32>
+  return %result
+}
+
+low.func.def target<test.low.core>(@target) @independent_calls(%input: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %first = low.func.call @capture(%input) : (reg<test.i32>) -> (reg<test.i32>)
+  %second = low.func.call @capture(%input) : (reg<test.i32>) -> (reg<test.i32>)
+  %first_owner = move %first : reg<test.i32> -> reg<test.i32>
+  %second_owner = move %second : reg<test.i32> -> reg<test.i32>
+  return %first_owner, %second_owner
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @capture(%input: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = copy %input : reg<test.i32> -> reg<test.i32>
+  return %result
+}
+
+low.func.def target<test.low.core>(@target) @independent_calls(%input: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %first = low.func.call pure @capture(%input) : (reg<test.i32>) -> (reg<test.i32>)
+  %second = low.func.call pure @capture(%input) : (reg<test.i32>) -> (reg<test.i32>)
+  %first_owner = move %first : reg<test.i32> -> reg<test.i32>
+  %second_owner = move %second : reg<test.i32> -> reg<test.i32>
+  return %first_owner, %second_owner
+}
+
+// ====
+
+// RUN: verify
+
+test.target<low_core> @target
+
+// Reserving addressable storage remains resource creation.
+// ERROR@+1: STRUCTURE/017 {contract_name="pure", identity_count="1"}
+low.func.def pure target<test.low.core>(@target) @reserve_storage() asm {
+  %storage = low.storage.reserve {byte_alignment = 4, byte_length = 16} : low.storage<private>
+  return
+}

@@ -247,7 +247,7 @@ ERR_STRUCTURE_017 = ErrorDef(
         "'{op_name}' declares {contract_name} but its body has {read_count} "
         "read-like, {write_count} write-like, {convergent_count} convergent, "
         "{observable_count} independently observable, and "
-        "{identity_count} fresh-identity effect(s)"
+        "{identity_count} fresh-resource effect(s)"
     ),
     params=(
         ErrorParam("op_name", ParamKind.STRING),

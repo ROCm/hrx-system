@@ -59,7 +59,7 @@ bool loom_callable_effects_is_pure(loom_func_like_t function) {
            !loom_region_has_write_effects(body) &&
            !loom_region_has_convergent_effects(body) &&
            !loom_region_has_observable_effects(body) &&
-           !loom_region_has_unique_identities(body);
+           !loom_region_has_resource_identities(body);
   }
   return loom_func_like_effect_contract(function) ==
          LOOM_CALLABLE_EFFECT_CONTRACT_PURE;
@@ -118,10 +118,10 @@ loom_callable_effect_contract_t loom_callable_effects_classify_traits(
     loom_trait_flags_t traits) {
   const loom_trait_flags_t forbidden_traits =
       LOOM_TRAIT_WRITES_MEMORY | LOOM_TRAIT_NON_DETERMINISTIC |
-      LOOM_TRAIT_UNKNOWN_EFFECTS | LOOM_TRAIT_UNIQUE_IDENTITY |
-      LOOM_TRAIT_CONVERGENT | LOOM_TRAIT_MEMORY_FENCE |
-      LOOM_TRAIT_OBSERVABLE_EFFECT;
-  if (iree_any_bit_set(traits, forbidden_traits)) {
+      LOOM_TRAIT_UNKNOWN_EFFECTS | LOOM_TRAIT_CONVERGENT |
+      LOOM_TRAIT_MEMORY_FENCE | LOOM_TRAIT_OBSERVABLE_EFFECT;
+  if (iree_any_bit_set(traits, forbidden_traits) ||
+      loom_traits_has_resource_identity(traits)) {
     return LOOM_CALLABLE_EFFECT_CONTRACT_UNSPECIFIED;
   }
   return iree_any_bit_set(traits, LOOM_TRAIT_READS_MEMORY)
