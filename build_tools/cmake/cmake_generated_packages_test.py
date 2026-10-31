@@ -58,9 +58,14 @@ class CMakeGeneratedPackagesTest(unittest.TestCase):
                 .read_text()
                 .splitlines()
             ]
+            archive = programs.pop()
 
             def check(value):
-                build_project(build)
+                build_project(
+                    build,
+                    "fixture_package_probe",
+                    "fixture_package_authored_child_probe",
+                )
                 self.assertEqual(run_command(str(programs[0])), f"{value}\n")
                 self.assertEqual(run_command(str(programs[1])), "23\n")
                 self.assertFalse((source / "package/CMakeLists.txt").exists())
@@ -100,6 +105,15 @@ class CMakeGeneratedPackagesTest(unittest.TestCase):
             check(15)
             (owned / "package/generated.h").unlink()
             check(15)
+            archive.unlink()
+            check(15)
+            link_inputs = (owned / f"link-inputs-{CONFIGURATION}.txt").read_text()
+            for name in link_inputs.split(";"):
+                if name.endswith(".rsp"):
+                    response = Path(name)
+                    response.unlink()
+                    check(15)
+                    self.assertTrue(response.is_file())
 
             extra = source / "package/value_extra.c"
             extra.write_text("int fixture_extra(void) { return 42; }\n")
@@ -128,6 +142,7 @@ class CMakeGeneratedPackagesTest(unittest.TestCase):
                     owned / f"package/group/nested/added/path-{CONFIGURATION}.txt"
                 ).read_text()
             )
+            build_project(build, "fixture_package_group_nested_added_probe")
             self.assertEqual(run_command(str(added_program)), "37\n")
             added_outputs = [
                 owned / ".iree/cmake/package" / directory / "CMakeLists.txt"
@@ -159,6 +174,18 @@ class CMakeGeneratedPackagesTest(unittest.TestCase):
                     Path("package/authored/CMakeLists.txt"),
                 },
             )
+            configure_project(
+                host,
+                build,
+                f"-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY={build / 'archive outputs'}",
+            )
+            check(15)
+            relocated_archive = Path(
+                (owned / f"paths-{CONFIGURATION}.txt").read_text().splitlines()[2]
+            )
+            self.assertTrue(relocated_archive.is_relative_to(build / "archive outputs"))
+            relocated_archive.unlink()
+            check(15)
 
 
 if __name__ == "__main__":

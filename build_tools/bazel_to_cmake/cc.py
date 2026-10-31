@@ -10,9 +10,14 @@ native dependencies remain target edges, evaluated by CMake in their owning
 scope. No native target properties or generator expressions are interpreted.
 """
 
+import hashlib
+import os
 import re
 from dataclasses import dataclass, field
+from functools import cached_property
+from pathlib import Path
 
+import native_cc
 from conditions import Option
 
 
@@ -56,16 +61,57 @@ class Library:
     dependencies: tuple[str, ...]
     # Compile and link requirements contributed by this declaration.
     interface: Interface
+    # Native compilation inputs, excluding source-only headers.
+    compiled: tuple[str, ...]
+    # Compiled objects retained regardless of ordinary archive symbol selection.
+    alwayslink: bool
+    # Generated sources and headers required before this declaration compiles.
+    generated: tuple[str, ...]
+    # Repository-relative package owning this declaration's artifact directory.
+    package: str
 
 
 @dataclass
 class Graph:
+    # Effective native output settings; parent/toolchain overrides remain native.
+    configuration: dict[str, str]
     # Source-owned declarations indexed by native name and default-package alias.
     libraries: dict[str, Library] = field(default_factory=dict)
     # Resolved transitive interfaces, computed once after source collection.
     resolved: dict[str, Interface] = field(default_factory=dict)
     # Active source dependency chain for a useful BUILD-cycle diagnostic.
     resolving: list[str] = field(default_factory=list)
+    # Ordered source link closure; dependents precede their providers.
+    links: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Generated compilation prerequisites inherited through source dependencies.
+    inputs: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Declared generator target owning each fully qualified output path.
+    producers: dict[str, str] = field(default_factory=dict)
+    # Final link inputs interned once instead of restated for every consumer.
+    responses: dict[tuple[str, ...], str] = field(default_factory=dict)
+
+    def response(self, artifacts):
+        if artifacts not in self.responses:
+            key = hashlib.sha256("\0".join(artifacts).encode()).hexdigest()[:20]
+            self.responses[artifacts] = key
+        return self.responses[artifacts]
+
+    def native_inputs(self):
+        lines, outputs = [], {}
+        if not self.responses:
+            return "", outputs
+        binary_root = Path(self.configuration["CMAKE_BINARY_DIR"])
+        owned_root = self.configuration["IREE_BINARY_DIR"]
+        relative_root = os.path.relpath(owned_root, binary_root).replace("\\", "/")
+        for artifacts, key in self.responses.items():
+            lines.append(native_cc.response(key, artifacts))
+            output = binary_root / "CMakeFiles/iree/link" / (key + ".rsp")
+            content = "".join(
+                '"' + artifact.replace("${IREE_BINARY_DIR}", relative_root) + '"\n'
+                for artifact in artifacts
+            )
+            outputs[output] = content
+        return "".join(lines), outputs
 
     def add(self, library, aliases=()):
         for name in (library.name, *aliases):
@@ -122,9 +168,150 @@ class Graph:
             )
         )
 
+    def link_inputs(self, name):
+        if name not in self.links:
+            library = self.libraries[name]
+            self.links[name] = self._ordered_links(
+                library.native_scope, (*library.dependencies, *library.interface.native)
+            )
+        return self.links[name]
+
+    def _ordered_links(self, native_scope, dependencies):
+        ordered = {}
+        for dependency in dependencies:
+            sequence = (dependency,)
+            provider = self.libraries.get(dependency)
+            if provider and provider.native_scope == native_scope:
+                sequence = (provider.name, *self.link_inputs(dependency))
+            for item in sequence:
+                # A shared provider moves after every dependent that reaches
+                # it. Child closures already retain this invariant.
+                ordered.pop(item, None)
+                ordered[item] = None
+        return tuple(ordered)
+
+    def executable_inputs(self, native_scope, dependencies):
+        interfaces, generated = [], {}
+        for dependency in dependencies:
+            provider = self.libraries.get(dependency)
+            if provider and provider.native_scope == native_scope:
+                interfaces.append(self.resolve(dependency))
+                generated.update(dict.fromkeys(self.generated_inputs(dependency)))
+            else:
+                interfaces.append(Interface(native=(dependency,)))
+        artifacts, native = [], []
+        cxx = False
+        for dependency in self._ordered_links(native_scope, dependencies):
+            provider = self.libraries.get(dependency)
+            if provider and provider.native_scope == native_scope:
+                if provider.compiled:
+                    target = provider.name.replace("::", "_")
+                    cxx |= any(
+                        re.search(r"\.(cc|cpp|cxx|c[+][+]|C)$", source)
+                        for source in provider.compiled
+                    )
+                    if provider.alwayslink:
+                        native.append(
+                            f"$<GENEX_EVAL:$<TARGET_PROPERTY:{target},IREE_CC_OBJECTS>>"
+                        )
+                    elif self.archive_pattern is None:
+                        native.append(provider.name)
+                    else:
+                        artifacts.append(self.archive(provider))
+            else:
+                native.append(dependency)
+        return (
+            Interface().with_dependencies(interfaces),
+            tuple(artifacts),
+            tuple(native),
+            tuple(generated),
+            cxx,
+        )
+
+    @cached_property
+    def archive_pattern(self):
+        """The configured toolchain's ordinary static product layout."""
+        if (
+            # Recursive generators need native target edges to enter each
+            # provider's build. Ninja can follow the owned artifact file edges.
+            self.configuration.get("CMAKE_GENERATOR") != "Ninja"
+            or not (
+                Option("MSVC").evaluate(self.configuration)
+                or self.configuration.get("CMAKE_SYSTEM_NAME") == "Linux"
+            )
+            or self.configuration.get("CMAKE_CONFIGURATION_TYPES")
+            or any(
+                key.startswith("CMAKE_ARCHIVE_OUTPUT_DIRECTORY")
+                for key in self.configuration
+            )
+            or any(
+                key.startswith("CMAKE_") and key.endswith("_POSTFIX") and value
+                for key, value in self.configuration.items()
+            )
+            or any(
+                key in self.configuration
+                for key in (
+                    "CMAKE_STATIC_LIBRARY_PREFIX_C",
+                    "CMAKE_STATIC_LIBRARY_PREFIX_CXX",
+                    "CMAKE_STATIC_LIBRARY_SUFFIX_C",
+                    "CMAKE_STATIC_LIBRARY_SUFFIX_CXX",
+                )
+            )
+        ):
+            return None
+        prefix = self.configuration["CMAKE_STATIC_LIBRARY_PREFIX"]
+        suffix = self.configuration["CMAKE_STATIC_LIBRARY_SUFFIX"]
+        return "${IREE_BINARY_DIR}/%s/" + prefix + "%s" + suffix
+
+    def archive(self, library):
+        name = library.name.replace("::", "_")
+        if self.archive_pattern is None:
+            return f"$<TARGET_LINKER_FILE:{name}>"
+        return self.archive_pattern % (library.package, name)
+
+    def generated_inputs(self, name):
+        if name not in self.inputs:
+            library = self.libraries[name]
+            inputs = dict.fromkeys(library.generated)
+            for dependency in library.dependencies:
+                if self._owns_dependency(library, dependency):
+                    inputs.update(dict.fromkeys(self.generated_inputs(dependency)))
+            self.inputs[name] = tuple(inputs)
+        return self.inputs[name]
+
 
 class BuildFileFunctions:
     """Source C/C++ rules and their native projections."""
+
+    def _native_source_paths(self, values):
+        paths, generated = [], []
+        package = self._current_package()
+        for value in sorted(values or []):
+            if (
+                value.startswith("$")
+                or os.path.isabs(value)
+                and not value.startswith("//")
+            ):
+                path = value
+                is_generated = value.startswith(
+                    ("${IREE_BINARY_DIR}", "${CMAKE_CURRENT_BINARY_DIR}")
+                )
+            else:
+                if value.startswith("//"):
+                    relative = value[2:].removeprefix(":").replace(":", "/")
+                else:
+                    relative = package + "/" + value.removeprefix(":")
+                if not os.path.splitext(relative)[1]:
+                    relative += ".stamp"
+                is_generated = not os.path.exists(
+                    os.path.join(self._repo_root, relative)
+                )
+                root = "IREE_BINARY_DIR" if is_generated else "IREE_SOURCE_DIR"
+                path = f"${{{root}}}/{relative}"
+            paths.append(path)
+            if is_generated:
+                generated.append(path)
+        return tuple(paths), tuple(generated)
 
     def _record_library_interface(
         self,
@@ -140,6 +327,7 @@ class BuildFileFunctions:
         testonly,
         target_compatible_with,
         cmake_package,
+        headers,
     ):
         if self._libraries is None:
             return None
@@ -183,9 +371,12 @@ class BuildFileFunctions:
                 }
             )
         )
-        compiled = any(
-            not re.search(r"\.(h|hh|h[+][+]|hm|hpp|hxx|H|HPP|in|txx|inc|inl)$", source)
-            for source in srcs or []
+        compiled = tuple(
+            source
+            for source in self._native_source_paths(srcs)[0]
+            if not re.search(
+                r"\.(h|hh|h[+][+]|hm|hpp|hxx|H|HPP|in|txx|inc|inl)$", source
+            )
         )
         interface = Interface(
             includes=tuple(
@@ -206,7 +397,19 @@ class BuildFileFunctions:
         )
         aliases = (namespace,) if name == namespace.rsplit("::", 1)[-1] else ()
         self._libraries.add(
-            Library(native_name, self._native_scope, dependencies, interface),
+            Library(
+                native_name,
+                self._native_scope,
+                dependencies,
+                interface,
+                compiled,
+                bool(alwayslink),
+                (
+                    *self._native_source_paths(srcs)[1],
+                    *self._native_source_paths(headers)[1],
+                ),
+                package,
+            ),
             aliases,
         )
         return native_name
@@ -290,6 +493,7 @@ class BuildFileFunctions:
             testonly,
             target_compatible_with,
             cmake_package,
+            (hdrs or []) + (textual_hdrs or []),
         )
 
         sanitizer_suppressions_block = self._convert_sanitizer_suppressions_block(
@@ -309,26 +513,61 @@ class BuildFileFunctions:
             self._converter.body += platform_linkopts_block
 
         def render():
-            interface_blocks = defines_block + includes_block + system_includes_block
             if native_library:
                 resolved = self._libraries.resolve(native_library)
                 inherited = self._libraries.inherited(native_library)
-                interface_blocks = "  RESOLVED\n" + "".join(
-                    self._convert_string_list_block(
-                        keyword, values, sort=False, quote=keyword != "LINK_LIBRARIES"
-                    )
-                    for keyword, values in (
-                        ("DEFINES", resolved.defines),
-                        ("INCLUDES", resolved.includes),
-                        ("SYSTEM_INCLUDES", resolved.system_includes),
-                        ("TRANSITIVE_COPTS", inherited.options),
-                        ("TRANSITIVE_LINKOPTS", inherited.link_options),
-                        (
-                            "LINK_LIBRARIES",
-                            self._libraries.link_dependencies(native_library),
-                        ),
-                    )
+                sources, _ = self._native_source_paths(srcs)
+                headers, generated_headers = self._native_source_paths(
+                    (hdrs or []) + (textual_hdrs or [])
                 )
+                options = list(copts or [])
+                for language, values in (("C", conlyopts), ("CXX", cxxopts)):
+                    options.extend(
+                        f"$<$<COMPILE_LANGUAGE:{language}>:{value}>"
+                        for value in values or []
+                    )
+                namespace = native_library.rsplit("::", 1)[0]
+                return native_cc.library(
+                    self._libraries.libraries[native_library],
+                    resolved,
+                    inherited,
+                    self._libraries.link_dependencies(native_library),
+                    sources=sources,
+                    headers=headers,
+                    generated_headers=generated_headers,
+                    generated_inputs=self._libraries.generated_inputs(native_library),
+                    producers=self._libraries.producers,
+                    compile_options=tuple(options),
+                    cxx_standard=cxx_standard[3:] if cxx_standard else None,
+                    cxx_features=tuple(cxx_features or []),
+                    data=tuple(
+                        namespace + target if target.startswith("::") else target
+                        for target in sorted(
+                            {
+                                target
+                                for dep in data or []
+                                for target in self._convert_target(dep)
+                                if target
+                            }
+                        )
+                    ),
+                    sanitizer_suppressions=tuple(
+                        value
+                        for sanitizer, label in sorted(
+                            (sanitizer_suppressions or {}).items()
+                        )
+                        for value in (
+                            sanitizer,
+                            self._sanitizer_suppression_name(label),
+                        )
+                    ),
+                    alwayslink=alwayslink,
+                    testonly=testonly,
+                    linkable_more_than_once="LINKABLE_MORE_THAN_ONCE"
+                    in (kwargs.get("tags") or []),
+                    msvc=Option("MSVC").evaluate(self._configuration),
+                )
+            interface_blocks = defines_block + includes_block + system_includes_block
             return (
                 f"iree_cc_library(\n"
                 f"{name_block}"
@@ -453,7 +692,7 @@ class BuildFileFunctions:
             self._converter.body += platform_deps_block
         if platform_linkopts_block:
             self._converter.body += platform_linkopts_block
-        self._converter.body += (
+        invocation = (
             f"{_cmake_rule}(\n"
             f"{name_block}"
             f"{hdrs_block}"
@@ -475,6 +714,48 @@ class BuildFileFunctions:
             f"{sanitizer_suppressions_block}"
             f")\n\n"
         )
+        if (
+            self._libraries is not None
+            and _cmake_rule == "iree_cc_test"
+            and Option("IREE_BUILD_TESTS").evaluate(self._configuration)
+            and all(
+                self._select_condition(label).evaluate(self._configuration)
+                for label in target_compatible_with or []
+            )
+        ):
+            target = self._convert_single_target(self._current_target_label(name))
+            namespace = target.rsplit("::", 1)[0]
+            dependencies = tuple(
+                namespace + native if native.startswith("::") else native
+                for native in sorted(
+                    {
+                        native
+                        for dep in deps or []
+                        for native in self._convert_target(dep)
+                        if native
+                    }
+                )
+            )
+
+            def render():
+                interface, artifacts, native, generated, cxx = (
+                    self._libraries.executable_inputs(self._native_scope, dependencies)
+                )
+                return invocation + native_cc.executable_inputs(
+                    target.replace("::", "_"),
+                    interface,
+                    artifacts,
+                    native,
+                    generated,
+                    self._libraries.producers,
+                    response=self._libraries.response(artifacts) if artifacts else None,
+                    cxx=cxx,
+                    msvc=Option("MSVC").evaluate(self._configuration),
+                )
+
+            self._converter.defer(render)
+        else:
+            self._converter.body += invocation
         self._emit_optional_local_cts_testdata_guard_end(did_emit_testdata_guard)
         self._emit_platform_guard_end(target_compatible_with)
 

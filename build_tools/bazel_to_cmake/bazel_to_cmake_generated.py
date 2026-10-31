@@ -36,6 +36,12 @@ class GeneratedFileBuildFileFunctions:
         for output, path in paths.items():
             self._register_target_files(output, [path])
         self._register_target_files(name, output_paths)
+        if self._libraries is not None:
+            label = self._current_target_label(name)
+            producer = self._convert_single_target(label).replace("::", "_")
+            self._libraries.producers.update(
+                (path, producer) for path in self._target_file_paths[label]
+            )
 
         # Match the action's exact-path or unique-basename output selection.
         basenames = {}

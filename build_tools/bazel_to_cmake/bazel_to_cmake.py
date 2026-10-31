@@ -205,7 +205,7 @@ def evaluate_directory(
 def evaluate_packages(root_dirs, input_files, configuration=None):
     """Establishes generated-file ownership before any consumer is emitted."""
     generated_files = {}
-    libraries = cc.Graph() if configuration is not None else None
+    libraries = cc.Graph(configuration) if configuration is not None else None
     packages = {}
     authored_directories = set()
     for root_dir in root_dirs:
@@ -220,7 +220,7 @@ def evaluate_packages(root_dirs, input_files, configuration=None):
             )
             if package is not None:
                 packages[package.directory] = package
-    return packages, authored_directories
+    return packages, authored_directories, libraries
 
 
 def write_if_changed(path, content):
@@ -250,7 +250,7 @@ def generate_build_tree(output_dir, root_dirs, configuration=None):
                 )
     input_files = set()
     output_files = set()
-    packages, authored_directories = evaluate_packages(
+    packages, authored_directories, libraries = evaluate_packages(
         root_dirs, input_files, configuration
     )
     for package in packages.values():
@@ -316,6 +316,17 @@ def generate_build_tree(output_dir, root_dirs, configuration=None):
         + "\n  ".join(quote(path) for path in sorted(input_files))
         + ")\n"
     )
+    if libraries:
+        native_inputs, native_outputs = libraries.native_inputs()
+        manifest += native_inputs
+        for path, content in native_outputs.items():
+            write_if_changed(path, content)
+        if native_outputs:
+            manifest += (
+                "set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS\n  "
+                + "\n  ".join(quote(path) for path in native_outputs)
+                + ")\n"
+            )
     write_if_changed(output_dir / "inputs.cmake", manifest)
 
 
@@ -331,7 +342,7 @@ def main(args):
             path = path.parent
         if not path.is_dir():
             raise FileNotFoundError(f"Cannot find package {path}")
-        packages, _ = evaluate_packages(
+        packages, _, _ = evaluate_packages(
             repo_cfg.DEFAULT_ROOT_DIRS, set(), configuration
         )
         package = packages.get(path.relative_to(repo_root))
