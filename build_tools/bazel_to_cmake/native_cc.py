@@ -33,12 +33,6 @@ def generated_dependencies(name, generated, producers):
     return "".join(lines)
 
 
-def response(key, artifacts):
-    return command(
-        "set", f"_IREE_LINK_INPUTS_{key}", arguments(artifacts), "PARENT_SCOPE"
-    )
-
-
 def executable_inputs(
     name, interface, artifacts, native, generated, producers, *, response, cxx, msvc
 ):
@@ -74,7 +68,7 @@ def executable_inputs(
                 "TARGET",
                 name,
                 "APPEND PROPERTY LINK_DEPENDS",
-                f'"${{_IREE_LINK_INPUTS_{response}}}" "{response_file}"',
+                arguments((*artifacts, response_file)),
             )
         )
     if cxx:

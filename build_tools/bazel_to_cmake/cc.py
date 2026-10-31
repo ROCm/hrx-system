@@ -96,22 +96,21 @@ class Graph:
             self.responses[artifacts] = key
         return self.responses[artifacts]
 
-    def native_inputs(self):
-        lines, outputs = [], {}
+    def response_files(self):
+        outputs = {}
         if not self.responses:
-            return "", outputs
+            return outputs
         binary_root = Path(self.configuration["CMAKE_BINARY_DIR"])
         owned_root = self.configuration["IREE_BINARY_DIR"]
         relative_root = os.path.relpath(owned_root, binary_root).replace("\\", "/")
         for artifacts, key in self.responses.items():
-            lines.append(native_cc.response(key, artifacts))
             output = binary_root / "CMakeFiles/iree/link" / (key + ".rsp")
             content = "".join(
                 '"' + artifact.replace("${IREE_BINARY_DIR}", relative_root) + '"\n'
                 for artifact in artifacts
             )
             outputs[output] = content
-        return "".join(lines), outputs
+        return outputs
 
     def add(self, library, aliases=()):
         for name in (library.name, *aliases):
