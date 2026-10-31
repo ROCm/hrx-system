@@ -374,6 +374,58 @@ TEST_P(GpuNativeTransferTest,
   }
 }
 
+TEST_P(GpuNativeTransferTest, SmallDownloadsRetainEveryHostDestination) {
+  constexpr size_t kDownloadCount = 37;
+  constexpr size_t kDownloadLength = 17;
+  std::array<uint8_t, kDownloadLength> source;
+  for (size_t i = 0; i < source.size(); ++i) {
+    source[i] = static_cast<uint8_t>(i * 29 + 7);
+  }
+  std::array<std::array<uint8_t, kDownloadLength + 2>, kDownloadCount> targets;
+  std::array<iree_hal_transfer_operation_t, kDownloadCount> downloads = {};
+  for (size_t i = 0; i < downloads.size(); ++i) {
+    targets[i].fill(0xCC);
+    downloads[i] = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+        .download =
+            {
+                .source_buffer = buffers_[0],
+                .source_offset = 3,
+                .target = targets[i].data() + 1,
+                .length = source.size(),
+            },
+    };
+  }
+  uint64_t ready = 1, produced = 1, downloaded = 2;
+  // Independent destinations require distinct retirement actions. The small
+  // argument ring must fit both packet arguments and a nonempty staging span,
+  // and the completion signal must cover every host copy across ring reuse.
+  IREE_ASSERT_OK(iree_hal_queue_transfer(
+      queues_[1], {1, &timeline_, &produced}, {1, &timeline_, &downloaded},
+      downloads.size(), downloads.data(), Barriers()));
+  const iree_hal_transfer_operation_t update = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE,
+      .update =
+          {
+              .source_buffer = source.data(),
+              .target_buffer = buffers_[0],
+              .target_offset = 3,
+              .length = source.size(),
+          },
+  };
+  IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], {1, &gate_, &ready},
+                                         {1, &timeline_, &produced}, 1, &update,
+                                         Barriers()));
+  ReleaseBuffers();
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, ready, nullptr));
+  Wait(downloaded);
+  for (const auto& target : targets) {
+    EXPECT_EQ(target.front(), 0xCC);
+    EXPECT_EQ(target.back(), 0xCC);
+    EXPECT_TRUE(std::equal(source.begin(), source.end(), target.begin() + 1));
+  }
+}
+
 TEST_P(GpuNativeTransferTest,
        HostStagingVisibilityIsIndependentOfPayloadBoundaries) {
   const iree_hal_barrier_list_t empty = {};

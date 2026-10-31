@@ -418,21 +418,26 @@ iree_hal_amd_gpu_pm4_publish_transfer(
       used >= arguments->capacity
           ? 0
           : iree_min(arguments->capacity - used, arguments->capacity - offset);
-  const uint32_t word_budget =
-      iree_min(queue->producer.ring.capacity / 2, 16384u);
-  const uint32_t wait_words = first ? submission->native_wait_count * 7 : 0;
+  // Two download windows let the device fill one while retirement copies the
+  // other into borrowed host memory, without growing the argument allocation.
+  const uint64_t staging_window_length =
+      transfer->host_completion_required
+          ? iree_min(arguments->capacity / 2,
+                     IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_STAGING_LENGTH)
+          : IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_STAGING_LENGTH;
   // Admission reserves launch capacity beyond native waits. Keep 96 words for
   // signals, retirement, notification, and alignment, leaving room for DMA
   // packets even at the maximum admitted native fan-in.
+  const uint32_t word_budget =
+      iree_min(queue->producer.ring.capacity / 2, 16384u);
+  const uint32_t wait_words = first ? submission->native_wait_count * 7 : 0;
   iree_hal_amd_gpu_pm4_transfer_chunk_t chunk;
   iree_status_t status = iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
       transfer,
       iree_min(IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS,
                word_budget - wait_words - 96),
-      iree_make_byte_span(
-          arguments->memory.contents.data + offset,
-          iree_min(available,
-                   IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_STAGING_LENGTH)),
+      iree_make_byte_span(arguments->memory.contents.data + offset,
+                          iree_min(available, staging_window_length)),
       arguments->address + offset, &chunk);
   if (!iree_status_is_ok(status)) {
     iree_hal_amd_gpu_pm4_abandon(queue, submission, status);
@@ -1896,7 +1901,7 @@ static bool iree_hal_amd_gpu_pm4_retire(
       return false;
     }
   }
-  const uint64_t limit = iree_min(published, position + 64);
+  uint64_t limit = iree_min(published, position + 64);
   const uint64_t initial = position;
   bool waiting_for_producer = false;
   for (; position != limit; ++position) {
@@ -1941,6 +1946,9 @@ static bool iree_hal_amd_gpu_pm4_retire(
         completion_code == IREE_STATUS_OK) {
       memcpy(action->download.target, action->download.source,
              action->download.length);
+      // Return staging credit before the next host copy, allowing publication
+      // and other queues' retirement to progress between bulk downloads.
+      limit = position + 1;
     }
     if (action->terminal) {
       if (submission->profiled) {

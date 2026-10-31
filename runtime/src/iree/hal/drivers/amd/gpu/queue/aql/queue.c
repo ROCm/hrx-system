@@ -1212,8 +1212,19 @@ iree_hal_amd_gpu_aql_publish_transfer(
   }
   iree_hal_amd_gpu_transfer_t* transfer = &submission->transfer.capture;
   const bool first = !transfer->cursor.index && !transfer->cursor.offset;
-  const uint64_t length =
-      iree_hal_amd_gpu_aql_transfer_argument_length(transfer);
+  uint64_t length = iree_hal_amd_gpu_aql_transfer_argument_length(transfer);
+  iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
+  if (transfer->host_completion_required && length <= arguments->capacity) {
+    // Preserve normal growth, then use two windows so device copies can overlap
+    // retirement's copies into borrowed host memory. Tiny rings must still fit
+    // the packet arguments and at least one aligned span of staging bytes.
+    const uint64_t minimum_length =
+        IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_PACKETS *
+            sizeof(iree_hal_amd_gpu_blit_arguments_t) +
+        8;
+    length =
+        iree_min(length, iree_max(arguments->capacity / 2, minimum_length));
+  }
   uint64_t offset = 0, end = 0;
   const iree_hal_amd_gpu_aql_publish_result_t prepared =
       iree_hal_amd_gpu_aql_arguments(queue, length, 8, &offset, &end);
@@ -1237,7 +1248,6 @@ iree_hal_amd_gpu_aql_publish_transfer(
       return IREE_HAL_AMD_GPU_AQL_PUBLISH_CAPACITY;
     }
   }
-  iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
   iree_hal_amd_gpu_aql_transfer_chunk_t chunk;
   *out_status = iree_hal_amd_gpu_aql_transfer_prepare_chunk(
       transfer, queue->options.programs->blit, capacity,
@@ -1815,7 +1825,7 @@ static bool iree_hal_amd_gpu_aql_retire(
     queue->feedback_failure_delivered = true;
   }
   const uint64_t initial = position;
-  const uint64_t limit = iree_min(published, position + 64);
+  uint64_t limit = iree_min(published, position + 64);
   for (; position < limit; ++position) {
     iree_hal_amd_gpu_aql_retirement_t* action =
         &queue->issued[position & (queue->options.retirement_capacity - 1)];
@@ -1844,6 +1854,9 @@ static bool iree_hal_amd_gpu_aql_retire(
         code == IREE_STATUS_OK && action->download.length) {
       memcpy(action->download.target, action->download.source,
              action->download.length);
+      // Return staging credit before the next host copy, allowing publication
+      // and other queues' retirement to progress between bulk downloads.
+      limit = position + 1;
     }
     if (submission->profiled) {
       const iree_hal_amd_gpu_profile_operation_t* operation =
