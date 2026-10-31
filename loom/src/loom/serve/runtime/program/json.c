@@ -351,12 +351,21 @@ static iree_status_t loom_serve_json_module_start(
       break;
     }
     case 1: {
-      IREE_RETURN_IF_ERROR(loom_serve_json_read_members(
-          module, call, input, 0, iree_vm_buffer_length(input)));
+      IREE_TRACE_ZONE_BEGIN_NAMED(z0, "loom_serve_json_members");
+      IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, iree_vm_buffer_length(input));
+      iree_status_t status = loom_serve_json_read_members(
+          module, call, input, 0, iree_vm_buffer_length(input));
+      IREE_TRACE_ZONE_END(z0);
+      IREE_RETURN_IF_ERROR(status);
       break;
     }
     case 2: {
-      IREE_RETURN_IF_ERROR(loom_serve_json_unescape(call, input));
+      IREE_TRACE_ZONE_BEGIN_NAMED(z0, "loom_serve_json_unescape");
+      IREE_TRACE_ZONE_APPEND_VALUE_I64(
+          z0, iree_vm_call_value_argument_load(call, 1));
+      iree_status_t status = loom_serve_json_unescape(call, input);
+      IREE_TRACE_ZONE_END(z0);
+      IREE_RETURN_IF_ERROR(status);
       break;
     }
     case 3:
@@ -366,9 +375,14 @@ static iree_status_t loom_serve_json_module_start(
       break;
     }
     case 5: {
-      IREE_RETURN_IF_ERROR(loom_serve_json_read_members(
+      IREE_TRACE_ZONE_BEGIN_NAMED(z0, "loom_serve_json_members_range");
+      IREE_TRACE_ZONE_APPEND_VALUE_I64(
+          z0, iree_vm_call_value_argument_load(call, 1));
+      iree_status_t status = loom_serve_json_read_members(
           module, call, input, iree_vm_call_value_argument_load(call, 0),
-          iree_vm_call_value_argument_load(call, 1)));
+          iree_vm_call_value_argument_load(call, 1));
+      IREE_TRACE_ZONE_END(z0);
+      IREE_RETURN_IF_ERROR(status);
       break;
     }
     default:

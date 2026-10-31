@@ -573,8 +573,11 @@ static void loom_serve_memory_pool_trim_cache(
     iree_hal_pool_stats_t cached;
     iree_hal_pool_query_stats(pool->classes[i].cache, &cached);
     const uint64_t bytes = count * size;
+    IREE_TRACE_ZONE_BEGIN_NAMED(z_trim, "loom_serve_memory_cache_trim");
+    IREE_TRACE_ZONE_APPEND_VALUE_I64(z_trim, bytes);
     iree_hal_pool_trim(pool->classes[i].cache, IREE_HAL_POOL_TRIM_FLAG_ALL,
                        cached.bytes_committed - bytes);
+    IREE_TRACE_ZONE_END(z_trim);
     projected -= bytes;
   }
   loom_serve_memory_pool_observe_retirement(pool);
@@ -675,10 +678,13 @@ iree_status_t loom_serve_memory_pool_prepare(
           pool->limit_bytes &&
       pool->reclaimer.fn) {
     const uint64_t target = pool->limit_bytes - additional_bytes;
+    IREE_TRACE_ZONE_BEGIN_NAMED(z_reclaim, "loom_serve_memory_reclaim");
+    IREE_TRACE_ZONE_APPEND_VALUE_I64(z_reclaim, additional_bytes);
     iree_status_t status = pool->reclaimer.fn(
         pool->reclaimer.user_data, target > pool->statistics.pending_bytes
                                        ? target - pool->statistics.pending_bytes
                                        : 0);
+    IREE_TRACE_ZONE_END(z_reclaim);
     if (!iree_status_is_ok(status)) {
       if (iree_status_is_ok(pool->failure)) {
         pool->failure = iree_status_clone(status);
