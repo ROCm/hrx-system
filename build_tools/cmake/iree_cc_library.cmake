@@ -32,10 +32,6 @@ include("${CMAKE_CURRENT_LIST_DIR}/../sanitizer/iree_sanitizer_suppressions.cmak
 # TESTONLY: When added, this target will only be built if user passes -DIREE_BUILD_TESTS=ON to CMake.
 # SHARED: If set, will compile to a shared object.
 # WINDOWS_DEF_FILE: If set, will add a windows .def file to a shared library link
-# RESOLVED: INCLUDES/DEFINES already contain the configured BUILD closure.
-# LINK_LIBRARIES: Native link edges for a resolved source declaration.
-# TRANSITIVE_COPTS: Compiler options inherited from source-owned dependencies.
-# TRANSITIVE_LINKOPTS: Link options inherited from source-owned dependencies.
 # Note:
 # By default, iree_cc_library will always create a library named iree_${NAME},
 # and alias target iree::${NAME}. The iree:: form should always be used.
@@ -77,9 +73,9 @@ function(iree_cc_library)
   iree_package_source_dir(_IREE_PACKAGE_SOURCE_DIR)
   cmake_parse_arguments(
     _RULE
-    "PUBLIC;TESTONLY;SHARED;ALWAYSLINK;LINKABLE_MORE_THAN_ONCE;RESOLVED"
+    "PUBLIC;TESTONLY;SHARED;ALWAYSLINK;LINKABLE_MORE_THAN_ONCE"
     "PACKAGE;NAME;WINDOWS_DEF_FILE;CXX_STANDARD"
-    "HDRS;TEXTUAL_HDRS;SRCS;COPTS;CXX_FEATURES;DEFINES;LINKOPTS;DATA;DEPS;INCLUDES;SYSTEM_INCLUDES;SANITIZER_SUPPRESSIONS;LINK_LIBRARIES;TRANSITIVE_COPTS;TRANSITIVE_LINKOPTS"
+    "HDRS;TEXTUAL_HDRS;SRCS;COPTS;CXX_FEATURES;DEFINES;LINKOPTS;DATA;DEPS;INCLUDES;SYSTEM_INCLUDES;SANITIZER_SUPPRESSIONS"
     ${ARGN}
   )
 
@@ -104,14 +100,6 @@ function(iree_cc_library)
 
   # Replace dependencies passed by ::name with iree::package::name
   list(TRANSFORM _RULE_DEPS REPLACE "^::" "${_PACKAGE_NS}::")
-  # Configured BUILD declarations carry their resolved compile interface and
-  # separate link edges. Authored native libraries retain native propagation.
-  if(_RULE_RESOLVED)
-    set(_LINK_LIBRARIES ${_RULE_LINK_LIBRARIES})
-  else()
-    set(_LINK_LIBRARIES ${_RULE_DEPS})
-  endif()
-  list(APPEND _LINK_LIBRARIES ${IREE_IMPLICIT_DEFS_CC_DEPS})
 
   # Bazel srcs can name generated files. Point missing sources at the binary
   # tree so target_sources can attach the producer custom command edge.
@@ -208,21 +196,18 @@ function(iree_cc_library)
       PRIVATE
         ${IREE_DEFAULT_COPTS}
         ${_RULE_COPTS}
-        ${_RULE_TRANSITIVE_COPTS}
       INTERFACE
         ${IREE_INTERFACE_COPTS}
-        ${_RULE_TRANSITIVE_COPTS}
     )
     target_link_options(${_NAME}
       PRIVATE
         ${IREE_DEFAULT_LINKOPTS}
       ${_LINKOPTS_SCOPE}
         ${_RULE_LINKOPTS}
-        ${_RULE_TRANSITIVE_LINKOPTS}
     )
     target_link_libraries(${_NAME}
       PUBLIC
-        ${_LINK_LIBRARIES}
+        ${_RULE_DEPS}
         ${IREE_THREADS_DEPS}
         ${IREE_DEFAULT_LINK_LIBRARIES}
     )
@@ -279,7 +264,7 @@ function(iree_cc_library)
     target_link_libraries(${_NAME}
       INTERFACE
         "$<GENEX_EVAL:$<TARGET_PROPERTY:${_NAME},IREE_CC_OBJECTS>>"
-        ${_LINK_LIBRARIES}
+        ${_RULE_DEPS}
         ${IREE_THREADS_DEPS}
         ${IREE_DEFAULT_LINK_LIBRARIES}
     )
@@ -295,7 +280,6 @@ function(iree_cc_library)
       INTERFACE
         ${IREE_DEFAULT_LINKOPTS}
         ${_RULE_LINKOPTS}
-        ${_RULE_TRANSITIVE_LINKOPTS}
     )
     target_compile_definitions(${_NAME}
       INTERFACE
@@ -309,7 +293,6 @@ function(iree_cc_library)
       PRIVATE
         ${IREE_DEFAULT_COPTS}
         ${_RULE_COPTS}
-        ${_RULE_TRANSITIVE_COPTS}
     )
 
     # Forward transitive compile properties from the INTERFACE library's
@@ -333,7 +316,7 @@ function(iree_cc_library)
     # create a circular reference.
     target_link_libraries(${_COMPILE_TARGET}
       PUBLIC
-        ${_LINK_LIBRARIES}
+        ${_RULE_DEPS}
     )
 
     iree_add_data_dependencies(NAME ${_NAME} DATA ${_RULE_DATA}
@@ -370,7 +353,6 @@ function(iree_cc_library)
       INTERFACE
         ${IREE_DEFAULT_LINKOPTS}
         ${_RULE_LINKOPTS}
-        ${_RULE_TRANSITIVE_LINKOPTS}
     )
     # Keep build-tree headers on their declaring library. INTERFACE_SOURCES
     # would make every transitive consumer rediscover the same source rules.
@@ -384,7 +366,7 @@ function(iree_cc_library)
     endif()
     target_link_libraries(${_NAME}
       INTERFACE
-        ${_LINK_LIBRARIES}
+        ${_RULE_DEPS}
     )
     iree_add_data_dependencies(NAME ${_NAME} DATA ${_RULE_DATA}
       OUT_TARGET_DATA _DATA_TARGETS)
@@ -396,10 +378,6 @@ function(iree_cc_library)
 
   if(CMAKE_SYSTEM_PROCESSOR STREQUAL "wasm32")
     _iree_cc_library_add_wasm_deps(${_NAME} ${_RULE_DEPS})
-  endif()
-
-  if(_RULE_IS_INTERFACE OR _RULE_ALWAYSLINK)
-    target_compile_options(${_NAME} INTERFACE ${_RULE_TRANSITIVE_COPTS})
   endif()
 
   if(NOT _RULE_IS_INTERFACE)
