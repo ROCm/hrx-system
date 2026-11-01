@@ -147,13 +147,11 @@ function(iree_finalize_test_build_targets)
         continue()
       endif()
       # The producer registry is complete here. Resolve each shared input once,
-      # including paths with no producer, instead of querying the filesystem
-      # again for every test/profile using it.
+      # including paths with no producer.
       string(SHA256 _LOOKUP_KEY "${_FILE}")
       if(NOT DEFINED _FILE_PRODUCER_${_LOOKUP_KEY})
-        get_filename_component(_CANONICAL_FILE "${_FILE}" ABSOLUTE)
-        cmake_path(NORMAL_PATH _CANONICAL_FILE)
-        string(SHA256 _FILE_KEY "${_CANONICAL_FILE}")
+        _iree_generated_output_key(_FILE_KEY "${_FILE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}")
         get_property(_PRODUCER GLOBAL
           PROPERTY "IREE_GENERATED_OUTPUT_PRODUCER_${_FILE_KEY}")
         set(_FILE_PRODUCER_${_LOOKUP_KEY} "${_PRODUCER}")

@@ -179,6 +179,25 @@ function(iree_finalize_target_dependencies)
   endforeach()
 endfunction()
 
+# File ownership is independent of whether a generated output exists yet.
+# Preserve path spelling for commands; only registry keys use native identity.
+function(_iree_generated_output_key OUTPUT_VARIABLE INPUT_PATH BASE_DIRECTORY)
+  set(_PATH "${INPUT_PATH}")
+  if(CMAKE_HOST_WIN32)
+    string(REPLACE "\\" "/" _PATH "${_PATH}")
+  endif()
+  cmake_path(ABSOLUTE_PATH _PATH BASE_DIRECTORY "${BASE_DIRECTORY}" NORMALIZE)
+  cmake_path(GET _PATH ROOT_PATH _ROOT)
+  if(NOT _PATH STREQUAL _ROOT)
+    string(REGEX REPLACE "/$" "" _PATH "${_PATH}")
+  endif()
+  if(CMAKE_HOST_WIN32)
+    string(TOLOWER "${_PATH}" _PATH)
+  endif()
+  string(SHA256 _KEY "${_PATH}")
+  set(${OUTPUT_VARIABLE} "${_KEY}" PARENT_SCOPE)
+endfunction()
+
 # Connects a generated output to a target that consumes it.
 #
 # Producers and consumers may be declared in either order because CMake
@@ -200,12 +219,9 @@ function(iree_generated_output_add_consumer INPUT_PATH CONSUMER_TARGET)
     endif()
   endif()
 
-  get_filename_component(_INPUT_PATH "${INPUT_PATH}" ABSOLUTE
-    BASE_DIR "${_IREE_PACKAGE_BINARY_DIR}")
-  cmake_path(NORMAL_PATH _INPUT_PATH)
-
   # Existing files may still have a producer, including outside the build tree.
-  string(SHA256 _INPUT_KEY "${_INPUT_PATH}")
+  _iree_generated_output_key(_INPUT_KEY "${INPUT_PATH}"
+    "${_IREE_PACKAGE_BINARY_DIR}")
   get_property(_PRODUCER_TARGET GLOBAL
     PROPERTY "IREE_GENERATED_OUTPUT_PRODUCER_${_INPUT_KEY}")
   if(DEFINED _PRODUCER_TARGET)
@@ -228,16 +244,14 @@ function(iree_register_generated_output_producer TARGET_NAME)
       "Generated output producer ${TARGET_NAME} was not found")
   endif()
   foreach(_OUTPUT IN LISTS _RULE_OUTPUTS)
-    get_filename_component(_OUTPUT_PATH "${_OUTPUT}" ABSOLUTE
-      BASE_DIR "${_IREE_PACKAGE_BINARY_DIR}")
-    cmake_path(NORMAL_PATH _OUTPUT_PATH)
-    string(SHA256 _OUTPUT_KEY "${_OUTPUT_PATH}")
+    _iree_generated_output_key(_OUTPUT_KEY "${_OUTPUT}"
+      "${_IREE_PACKAGE_BINARY_DIR}")
     get_property(_EXISTING_PRODUCER_TARGET GLOBAL
       PROPERTY "IREE_GENERATED_OUTPUT_PRODUCER_${_OUTPUT_KEY}")
     if(DEFINED _EXISTING_PRODUCER_TARGET AND
        NOT "${_EXISTING_PRODUCER_TARGET}" STREQUAL "${TARGET_NAME}")
       message(FATAL_ERROR
-        "Generated output ${_OUTPUT_PATH} has multiple producers: "
+        "Generated output ${_OUTPUT} has multiple producers: "
         "${_EXISTING_PRODUCER_TARGET} and ${TARGET_NAME}")
     endif()
     set_property(GLOBAL
