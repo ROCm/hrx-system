@@ -95,6 +95,7 @@ LOOMC_TARGET_CONFIGURED_PUBLIC_HDRS = [
 
 LOOMC_TARGET_CMD_PUBLIC_HDRS = [
     "include/loomc/target/cmd.h",
+    "include/loomc/target/cmd/compiler.h",
     "include/loomc/target/cmd/program.h",
 ]
 

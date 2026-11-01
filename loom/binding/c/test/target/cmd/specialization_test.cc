@@ -29,6 +29,16 @@
 
 namespace {
 
+using CommandCompilerPtr =
+    loomc::testing::HandlePtr<loomc_cmd_compiler_t, loomc_cmd_compiler_release>;
+
+CommandCompilerPtr CreateCommandCompiler(loomc_link_index_t* index) {
+  loomc_cmd_compiler_t* compiler = nullptr;
+  LOOMC_EXPECT_OK(loomc_cmd_compiler_create(
+      index, nullptr, loomc_allocator_system(), &compiler));
+  return CommandCompilerPtr(compiler);
+}
+
 using loomc::testing::HandlePtr;
 
 using CompilerPtr = HandlePtr<loomc_compiler_t, loomc_compiler_release>;
@@ -287,18 +297,17 @@ PassProgramPtr CreatePreparedLowPassProgram(loomc_context_t* context) {
   return PassProgramPtr(pass_program);
 }
 
+enum class CommandTargetPolicy { kFunctions, kDeclarations, kDeployment };
+
 class CommandTargetOptionsTest
-    : public ::testing::TestWithParam<std::tuple<bool, bool>> {};
+    : public ::testing::TestWithParam<std::tuple<CommandTargetPolicy, bool>> {};
 
 TEST_P(CommandTargetOptionsTest, PreservesProfilesInIndependentKernelRequests) {
-  const auto [bind_declarations, build_request] = GetParam();
+  const auto [policy, build_request] = GetParam();
+  const bool bind_declarations = policy == CommandTargetPolicy::kDeclarations;
   TargetEnvironmentPtr environment = CreateAmdgpuTargetEnvironment();
   ContextPtr context = CreateAmdgpuContext(environment.get());
   WorkspacePtr workspace = CreateWorkspace();
-  TargetProfilePtr first_profile =
-      CreateTargetProfile(environment.get(), "gfx1151");
-  TargetProfilePtr second_profile =
-      CreateTargetProfile(environment.get(), "gfx942");
   SourcePtr text_source = CreateTextSource("command_targets.loom", R"(
 target.decl @first_device
 target.decl @second_device
@@ -330,130 +339,155 @@ command.def public @dispatch() launch() {
   SourcePtr source =
       SerializeModule(module.get(), LOOMC_SOURCE_FORMAT_BYTECODE);
   LinkIndexPtr index = CreateLinkIndex(context.get(), {source.get()});
-  const loomc_target_binding_t bindings[] = {
-      {
-          .target_symbol = loomc_make_cstring_view("first_device"),
-          .target_profile = first_profile.get(),
-      },
-      {
-          .target_symbol = loomc_make_cstring_view("second_device"),
-          .target_profile = second_profile.get(),
-      },
-  };
-  const loomc_target_specialization_t specializations[] = {
-      {
-          .function_symbol = loomc_make_cstring_view("first"),
-          .target_profile = first_profile.get(),
-      },
-      {
-          .function_symbol = loomc_make_cstring_view("second"),
-          .target_profile = second_profile.get(),
-      },
-      {
-          .function_symbol = loomc_make_cstring_view("dispatch"),
-          .target_profile = second_profile.get(),
-      },
-  };
-  const loomc_target_specialization_options_t target_options = {
-      .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-      .structure_size = sizeof(target_options),
-      .specializations =
-          bind_declarations ? &specializations[2] : specializations,
-      .specialization_count = bind_declarations ? 1u : 3u,
-      .target_bindings = bind_declarations ? bindings : nullptr,
-      .target_binding_count = bind_declarations ? 2u : 0u,
-  };
-  KernelRequestCapture capture;
-  const loomc_request_sink_t sink = {
-      .publish = CaptureKernelRequest,
-      .user_data = &capture,
-  };
-  loomc_product_t* product = nullptr;
-  loomc_result_t* result = nullptr;
-  if (build_request) {
-    const loomc_request_root_t root = FindRequestRoot(index.get(), "dispatch");
-    loomc_request_t* request = nullptr;
-    LOOMC_ASSERT_OK(loomc_request_create(loomc_cmd_program_product_descriptor(),
-                                         source.get(), &root, 1, nullptr, 0,
-                                         loomc_allocator_system(), &request));
-    RequestPtr request_owner(request);
-    const loomc_cmd_program_request_options_t options = {
-        .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_REQUEST_OPTIONS,
-        .structure_size = sizeof(options),
-        .next = &target_options,
-        .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_TARGET_LISTING,
-        .request_sink = sink,
+  CommandCompilerPtr command_compiler = CreateCommandCompiler(index.get());
+  for (bool swapped : {false, true, false}) {
+    SCOPED_TRACE(swapped);
+    TargetProfilePtr first_profile =
+        CreateTargetProfile(environment.get(), swapped ? "gfx942" : "gfx1151");
+    TargetProfilePtr second_profile =
+        CreateTargetProfile(environment.get(), swapped ? "gfx1151" : "gfx942");
+    const loomc_target_binding_t bindings[] = {
+        {
+            .target_symbol = loomc_make_cstring_view("first_device"),
+            .target_profile = first_profile.get(),
+        },
+        {
+            .target_symbol = loomc_make_cstring_view("second_device"),
+            .target_profile = second_profile.get(),
+        },
     };
-    LOOMC_ASSERT_OK(loomc_cmd_program_product_build_request(
-        context.get(), workspace.get(), request, &options,
-        loomc_allocator_system(), &product, &result));
-  } else {
-    const loomc_cmd_program_product_options_t options = {
-        .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
-        .structure_size = sizeof(options),
-        .next = &target_options,
-        .link_index = index.get(),
-        .flags = LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
-        .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_TARGET_LISTING,
-        .request_sink = sink,
+    const loomc_target_specialization_t specializations[] = {
+        {
+            .function_symbol = loomc_make_cstring_view("first"),
+            .target_profile = first_profile.get(),
+        },
+        {
+            .function_symbol = loomc_make_cstring_view("second"),
+            .target_profile = second_profile.get(),
+        },
+        {
+            .function_symbol = loomc_make_cstring_view("dispatch"),
+            .target_profile = second_profile.get(),
+        },
     };
-    LOOMC_ASSERT_OK(loomc_cmd_program_product_build(workspace.get(), &options,
-                                                    loomc_allocator_system(),
-                                                    &product, &result));
-  }
-  ProductPtr product_owner(product);
-  ResultPtr result_owner(result);
-  ExpectSucceededResult(result);
-  ASSERT_EQ(capture.requests.size(), 2u);
-  ASSERT_EQ(loomc_result_artifact_count(result), 1u);
-  const loomc_artifact_t* listing = loomc_result_artifact_at(result, 0);
-  EXPECT_EQ(listing->kind, LOOMC_ARTIFACT_KIND_TEXT);
-  EXPECT_EQ(ToString(listing->format),
-            LOOMC_ARTIFACT_FORMAT_CMD_PROGRAM_LISTING);
-  EXPECT_GT(loomc_byte_sequence_length(listing->contents), 0u);
+    const loomc_target_specialization_options_t target_options = {
+        .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+        .structure_size = sizeof(target_options),
+        .specializations =
+            bind_declarations ? &specializations[2] : specializations,
+        .specialization_count = bind_declarations ? 1u : 3u,
+        .target_bindings = bind_declarations ? bindings : nullptr,
+        .target_binding_count = bind_declarations ? 2u : 0u,
+    };
+    KernelRequestCapture capture;
+    const loomc_request_sink_t sink = {
+        .publish = CaptureKernelRequest,
+        .user_data = &capture,
+    };
+    loomc_product_t* product = nullptr;
+    loomc_result_t* result = nullptr;
+    if (build_request) {
+      const loomc_request_root_t root =
+          FindRequestRoot(index.get(), "dispatch");
+      loomc_request_t* request = nullptr;
+      LOOMC_ASSERT_OK(loomc_request_create(
+          loomc_cmd_program_product_descriptor(), source.get(), &root, 1,
+          nullptr, 0, loomc_allocator_system(), &request));
+      RequestPtr request_owner(request);
+      const loomc_cmd_program_request_options_t options = {
+          .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_REQUEST_OPTIONS,
+          .structure_size = sizeof(options),
+          .next = policy == CommandTargetPolicy::kDeployment ? nullptr
+                                                             : &target_options,
+          .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_TARGET_LISTING,
+          .target_profile = policy == CommandTargetPolicy::kDeployment
+                                ? first_profile.get()
+                                : nullptr,
+          .request_sink = sink,
+      };
+      LOOMC_ASSERT_OK(loomc_cmd_program_product_build_request(
+          context.get(), workspace.get(), request, &options,
+          loomc_allocator_system(), &product, &result));
+    } else {
+      const loomc_cmd_program_product_options_t options = {
+          .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
+          .structure_size = sizeof(options),
+          .next = policy == CommandTargetPolicy::kDeployment ? nullptr
+                                                             : &target_options,
+          .compiler = command_compiler.get(),
+          .flags = LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
+          .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_TARGET_LISTING,
+          .target_profile = policy == CommandTargetPolicy::kDeployment
+                                ? first_profile.get()
+                                : nullptr,
+          .request_sink = sink,
+      };
+      LOOMC_ASSERT_OK(loomc_cmd_program_product_build(workspace.get(), &options,
+                                                      loomc_allocator_system(),
+                                                      &product, &result));
+    }
+    first_profile.reset();
+    second_profile.reset();
+    ProductPtr product_owner(product);
+    ResultPtr result_owner(result);
+    ExpectSucceededResult(result);
+    ASSERT_EQ(capture.requests.size(), 2u);
+    ASSERT_EQ(loomc_result_artifact_count(result), 1u);
+    const loomc_artifact_t* listing = loomc_result_artifact_at(result, 0);
+    EXPECT_EQ(listing->kind, LOOMC_ARTIFACT_KIND_TEXT);
+    EXPECT_EQ(ToString(listing->format),
+              LOOMC_ARTIFACT_FORMAT_CMD_PROGRAM_LISTING);
+    EXPECT_GT(loomc_byte_sequence_length(listing->contents), 0u);
 
-  CompilerPtr compiler = CreateCompiler(context.get());
-  PassProgramPtr pipeline = CreatePreparedLowPassProgram(context.get());
-  const loomc_compile_options_t compile_options = {
-      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      .structure_size = sizeof(compile_options),
-      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
-  };
-  for (const RequestPtr& request : capture.requests) {
-    loomc_request_binding_t binding = {};
-    ASSERT_TRUE(loomc_request_binding_at(request.get(), 0, &binding));
-    loomc_cmd_entry_requirement_t requirement = {};
-    ASSERT_TRUE(loomc_cmd_program_product_entry_requirement_at(
-        product, binding.requirement_ordinal, &requirement));
-    const bool first = ToString(requirement.symbol) == "first";
-    ASSERT_TRUE(first || ToString(requirement.symbol) == "second");
-    loomc_product_t* native_product = nullptr;
-    loomc_result_t* native_result = nullptr;
-    LOOMC_ASSERT_OK(loomc_compile_request(
-        compiler.get(), workspace.get(), pipeline.get(), request.get(),
-        &compile_options, loomc_allocator_system(), &native_product,
-        &native_result));
-    ProductPtr native_product_owner(native_product);
-    ResultPtr native_result_owner(native_result);
-    ExpectSucceededResult(native_result);
-    const loomc_artifact_t* artifact =
-        loomc_product_artifact_at(native_product, 0);
-    ASSERT_NE(artifact, nullptr);
-    const std::string text = ToString(artifact->contents);
-    EXPECT_NE(text.find(first ? "workgroup_size(32, 1, 1)"
-                              : "workgroup_size(64, 1, 1)"),
-              std::string::npos)
-        << text;
-    EXPECT_NE(text.find(first ? "target<amdgpu.rdna3_5.core>"
-                              : "target<amdgpu.cdna3.core>"),
-              std::string::npos)
-        << text;
+    CompilerPtr compiler = CreateCompiler(context.get());
+    PassProgramPtr pipeline = CreatePreparedLowPassProgram(context.get());
+    const loomc_compile_options_t compile_options = {
+        .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+        .structure_size = sizeof(compile_options),
+        .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
+    };
+    for (const RequestPtr& request : capture.requests) {
+      loomc_request_binding_t binding = {};
+      ASSERT_TRUE(loomc_request_binding_at(request.get(), 0, &binding));
+      loomc_cmd_entry_requirement_t requirement = {};
+      ASSERT_TRUE(loomc_cmd_program_product_entry_requirement_at(
+          product, binding.requirement_ordinal, &requirement));
+      const bool first = ToString(requirement.symbol) == "first";
+      ASSERT_TRUE(first || ToString(requirement.symbol) == "second");
+      loomc_product_t* native_product = nullptr;
+      loomc_result_t* native_result = nullptr;
+      LOOMC_ASSERT_OK(loomc_compile_request(
+          compiler.get(), workspace.get(), pipeline.get(), request.get(),
+          &compile_options, loomc_allocator_system(), &native_product,
+          &native_result));
+      ProductPtr native_product_owner(native_product);
+      ResultPtr native_result_owner(native_result);
+      ExpectSucceededResult(native_result);
+      const loomc_artifact_t* artifact =
+          loomc_product_artifact_at(native_product, 0);
+      ASSERT_NE(artifact, nullptr);
+      const std::string text = ToString(artifact->contents);
+      const bool rdna = policy == CommandTargetPolicy::kDeployment
+                            ? !swapped
+                            : first != swapped;
+      EXPECT_NE(text.find(rdna ? "workgroup_size(32, 1, 1)"
+                               : "workgroup_size(64, 1, 1)"),
+                std::string::npos)
+          << text;
+      EXPECT_NE(text.find(rdna ? "target<amdgpu.rdna3_5.core>"
+                               : "target<amdgpu.cdna3.core>"),
+                std::string::npos)
+          << text;
+    }
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(EntryPaths, CommandTargetOptionsTest,
-                         ::testing::Combine(::testing::Bool(),
-                                            ::testing::Bool()));
+INSTANTIATE_TEST_SUITE_P(
+    EntryPaths, CommandTargetOptionsTest,
+    ::testing::Combine(::testing::Values(CommandTargetPolicy::kFunctions,
+                                         CommandTargetPolicy::kDeclarations,
+                                         CommandTargetPolicy::kDeployment),
+                       ::testing::Bool()));
 
 TEST(TargetCmdSpecializationTest,
      CommandKernelRequestCompilesForIndependentTargetProfiles) {
@@ -481,13 +515,14 @@ command.def public @dispatch() launch() {
 }
 )");
   LinkIndexPtr index = CreateLinkIndex(context.get(), {source.get()});
+  CommandCompilerPtr command_compiler = CreateCommandCompiler(index.get());
 
   KernelRequestCapture request_capture;
   const loomc_cmd_program_product_options_t product_options = {
       .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
       .structure_size = sizeof(product_options),
       .next = nullptr,
-      .link_index = index.get(),
+      .compiler = command_compiler.get(),
       .root_symbol_ordinals = nullptr,
       .root_symbol_count = 0,
       .flags = LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
@@ -521,6 +556,7 @@ command.def public @dispatch() launch() {
 
   product_result_ptr.reset();
   product_ptr.reset();
+  command_compiler.reset();
   index.reset();
   source.reset();
   pass_program.reset();
@@ -702,11 +738,12 @@ kernel.def target(@device) @record(%groups: index) {
   } else {
     LinkIndexPtr index =
         CreateLinkIndex(context.get(), {commands.get(), kernels.get()});
+    CommandCompilerPtr command_compiler = CreateCommandCompiler(index.get());
     const loomc_cmd_program_product_options_t options = {
         .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
         .structure_size = sizeof(options),
         .next = &target_options,
-        .link_index = index.get(),
+        .compiler = command_compiler.get(),
         .flags = LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
         .request_sink =
             {
@@ -777,6 +814,7 @@ command.def public @dispatch() launch() {
 }
 )");
   LinkIndexPtr index = CreateLinkIndex(context.get(), {source.get()});
+  CommandCompilerPtr command_compiler = CreateCommandCompiler(index.get());
   const loomc_target_specialization_t specialization = {
       .function_symbol = loomc_make_cstring_view("missing"),
       .target_profile = profile.get(),
@@ -799,7 +837,7 @@ command.def public @dispatch() launch() {
         .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
         .structure_size = sizeof(options),
         .next = &target_options,
-        .link_index = index.get(),
+        .compiler = command_compiler.get(),
         .flags = LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
         .request_sink =
             {

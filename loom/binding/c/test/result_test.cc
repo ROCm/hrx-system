@@ -259,6 +259,97 @@ TEST(ResultTest, MetadataDiagnosticsRetainLocationWithoutSourceContents) {
   EXPECT_EQ(stored->related_locations[0].range.start, 1u);
 }
 
+struct AllocationDomain {
+  // Successful allocations not yet freed through this allocator domain.
+  size_t live_count = 0;
+
+  loomc_allocator_t allocator() {
+    return {this,
+            [](void* self, loomc_allocator_command_t command,
+               const void* params, void** pointer) -> loomc_status_t {
+              auto* domain = static_cast<AllocationDomain*>(self);
+              const bool had_allocation = *pointer != nullptr;
+              const auto backing = loomc_allocator_system();
+              loomc_status_t status =
+                  backing.ctl(backing.self, command, params, pointer);
+              if (loomc_status_is_ok(status)) {
+                if (command == LOOMC_ALLOCATOR_COMMAND_FREE && had_allocation) {
+                  --domain->live_count;
+                } else if (command != LOOMC_ALLOCATOR_COMMAND_FREE &&
+                           !had_allocation) {
+                  ++domain->live_count;
+                }
+              }
+              return status;
+            }};
+  }
+};
+
+TEST(ResultTest, CopiesDiagnosticSourcesAcrossIndependentAllocatorLifetimes) {
+  for (const auto retention :
+       {LOOMC_SOURCE_RETENTION_EXACT, LOOMC_SOURCE_RETENTION_METADATA_ONLY}) {
+    SCOPED_TRACE(retention);
+    AllocationDomain original_domain;
+    AllocationDomain destination_domain;
+    char contents[] = "snapshot";
+    const loomc_source_options_t source_options = {
+        .format = LOOMC_SOURCE_FORMAT_TEXT,
+        .identifier = loomc_make_cstring_view("retired.loom"),
+        .contents = loomc_make_byte_span(contents, sizeof(contents) - 1),
+        .storage = LOOMC_SOURCE_STORAGE_BORROWED,
+    };
+    loomc_source_t* source = nullptr;
+    LOOMC_ASSERT_OK(loomc_source_create(&source_options,
+                                        original_domain.allocator(), &source));
+    loomc_result_t* original = nullptr;
+    LOOMC_ASSERT_OK(loomc_result_create(
+        LOOMC_STATUS_FAILED_PRECONDITION, LOOMC_SOURCE_RETENTION_EXACT,
+        original_domain.allocator(), &original));
+    ResultPtr original_owner(original);
+    const loomc_diagnostic_related_location_t related[] = {
+        {
+            .label = loomc_make_cstring_view("same snapshot"),
+            .range = {.source = source, .start = 1, .end = 3},
+        },
+        {
+            .label = loomc_make_cstring_view("another range"),
+            .range = {.source = source, .start = 4, .end = 7},
+        },
+    };
+    const loomc_diagnostic_t diagnostic = {
+        .severity = LOOMC_DIAGNOSTIC_SEVERITY_ERROR,
+        .message = loomc_make_cstring_view("source rejected"),
+        .range = {.source = source, .start = 0, .end = 1},
+        .related_locations = related,
+        .related_location_count = 2,
+    };
+    LOOMC_ASSERT_OK(loomc_result_add_diagnostic(original, &diagnostic));
+    loomc_source_release(source);
+    loomc_result_t* copy = nullptr;
+    LOOMC_ASSERT_OK(loomc_result_create(LOOMC_STATUS_OK, retention,
+                                        destination_domain.allocator(), &copy));
+    ResultPtr copy_owner(copy);
+    LOOMC_ASSERT_OK(loomc_result_copy_diagnostics(copy, original));
+    const auto* copied = loomc_result_diagnostic_at(copy, 0);
+    ASSERT_NE(copied, nullptr);
+    ASSERT_NE(copied->range.source, source);
+    EXPECT_EQ(copied->related_locations[0].range.source, copied->range.source);
+    EXPECT_EQ(copied->related_locations[1].range.source, copied->range.source);
+    original_owner.reset();
+    EXPECT_EQ(original_domain.live_count, 0u);
+    EXPECT_GT(destination_domain.live_count, 0u);
+    contents[0] = 'X';
+    EXPECT_EQ(loomc_result_status_code(copy), LOOMC_STATUS_FAILED_PRECONDITION);
+    EXPECT_EQ(ToString(loomc_source_identifier(copied->range.source)),
+              "retired.loom");
+    EXPECT_EQ(ToString(loomc_source_contents(copied->range.source)),
+              retention == LOOMC_SOURCE_RETENTION_EXACT ? "snapshot" : "");
+    EXPECT_EQ(copied->related_locations[1].range.start, 4u);
+    copy_owner.reset();
+    EXPECT_EQ(destination_domain.live_count, 0u);
+  }
+}
+
 TEST(ResultTest, RejectsDiagnosticWithMissingRelatedLocations) {
   loomc_result_t* result = nullptr;
   LOOMC_ASSERT_OK(loomc_result_create(LOOMC_STATUS_FAILED_PRECONDITION,

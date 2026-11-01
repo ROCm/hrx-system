@@ -1,0 +1,39 @@
+// RUN: verify
+
+config.decl @extra : %value: index where [range(%value, 1, 9)]
+
+template.decl @choose(%mode: index) -> (index)
+
+template.def<@choose> priority(10) @uses_extra(%mode: index) -> (index) where [range(%mode, 1, 1)] {
+  %extra = config.get @extra : index
+  template.return %extra : index
+}
+
+template.def<@choose> priority(1) @fallback(%mode: index) -> (index) {
+  template.return %mode : index
+}
+
+config.decl @broken_count : index
+
+func.def @invalid() -> (i32) {
+  %unused = config.get @broken_count : index
+  // ERROR@+1: STRUCTURE/008 {actual_count="0", expected_count="1"}
+  func.return
+}
+
+kernel.def @broken() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %offset = index.constant 0 : offset
+  %position = index.constant 0 : index
+  %data = buffer.view %output[%offset] : buffer -> view<1xi32>
+  %value = func.call @invalid() : () -> (i32)
+  view.store %value, %data[%position] : i32, view<1xi32>
+  kernel.return
+}
+
+command.def public @broken_dispatch() launch(%output: buffer) {
+  kernel.launch @broken(%output) : (buffer)
+  command.return
+}

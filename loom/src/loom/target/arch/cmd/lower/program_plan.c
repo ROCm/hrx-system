@@ -932,7 +932,7 @@ iree_status_t loom_cmd_program_plan_build_from_materialization(
   const loom_cmd_program_kernel_source_t* effective_kernel_source = NULL;
   if (valid && iree_status_is_ok(status) && kernel_source != NULL) {
     projected_kernel_source = *kernel_source;
-    if (kernel_source->producer != NULL) {
+    if (kernel_source->provider.publish != NULL) {
       iree_host_size_t* projected_source_definitions = NULL;
       status =
           iree_arena_allocate_array(&scratch_arena, plan_module->symbols.count,
@@ -987,7 +987,7 @@ iree_status_t loom_cmd_program_plan_build_from_materialization(
   }
   if (valid && iree_status_is_ok(status) &&
       ((effective_kernel_source != NULL &&
-        effective_kernel_source->producer != NULL) ||
+        effective_kernel_source->provider.publish != NULL) ||
        launch_count_realization.kernel_count != 0)) {
     loom_cmd_program_kernel_site_root_t* kernel_site_roots = NULL;
     status = iree_arena_allocate_array(&scratch_arena, program_count,
@@ -1010,7 +1010,7 @@ iree_status_t loom_cmd_program_plan_build_from_materialization(
       }
     }
     if (iree_status_is_ok(status) && effective_kernel_source != NULL &&
-        effective_kernel_source->producer != NULL) {
+        effective_kernel_source->provider.publish != NULL) {
       status = loom_cmd_program_plan_publish_kernel_requests(
           &plan, plan_module, &source_facts, effective_kernel_source,
           kernel_site_roots, program_count, &scratch_arena);

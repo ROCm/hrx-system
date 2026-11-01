@@ -197,6 +197,7 @@ loom_cc_library(
         "//loom/src/loom/link:index_materializer",
         "//loom/src/loom/link:materialization_environment",
         "//loom/src/loom/link:module_index",
+        "//loom/src/loom/link:planner",
         "//loom/src/loom/link:template_candidate_loader",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:type_registry",

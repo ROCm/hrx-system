@@ -46,6 +46,11 @@ typedef struct loom_cmd_program_plan_index_options_t {
   // sink for its generated device producer.
   loom_cmd_program_kernel_request_sink_t kernel_request_sink;
 
+  // Optional source preparation owner. Empty selects invocation-local source
+  // preparation using materialization_environment. This provider is called only
+  // with a request sink and a surviving indexed kernel's complete site set.
+  loom_kernel_request_provider_t kernel_request_provider;
+
   // Bounded kernel semantic class collection policy.
   loom_kernel_class_collection_options_t kernel_class_collection;
 } loom_cmd_program_plan_index_options_t;
@@ -57,6 +62,7 @@ static inline void loom_cmd_program_plan_index_options_initialize(
       /*.verification=*/{},
       /*.live_kernel_entry_validator=*/{},
       /*.kernel_request_sink=*/{},
+      /*.kernel_request_provider=*/{},
       /*.kernel_class_collection=*/
       loom_kernel_class_collection_options_default(),
   };

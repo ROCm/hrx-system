@@ -17,9 +17,16 @@ package(
 
 loom_cc_library(
     name = "cmd",
-    srcs = ["program.c"],
+    srcs = [
+        "compiler.c",
+        "compiler.h",
+        "native_source_cache.c",
+        "native_source_cache.h",
+        "program.c",
+    ],
     hdrs = [
         "//loom/binding/c:include/loomc/target/cmd.h",
+        "//loom/binding/c:include/loomc/target/cmd/compiler.h",
         "//loom/binding/c:include/loomc/target/cmd/program.h",
     ],
     linkstatic = True,
@@ -32,8 +39,10 @@ loom_cc_library(
         "//loom/src/loom/target/arch/cmd/lower:program_plan_index",
         "//loom/src/loom/transforms/cleanup:configured",
         "//loom/src/loom/transforms/kernel:kernel_class_materializer",
+        "//loom/src/loom/transforms/kernel:kernel_request_producer",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/threading",
     ],
 )

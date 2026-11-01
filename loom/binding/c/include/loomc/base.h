@@ -322,6 +322,9 @@ typedef enum loomc_structure_type_e {
 
   /// `loomc_pass_report_options_t`.
   LOOMC_STRUCTURE_TYPE_PASS_REPORT_OPTIONS = 50,
+
+  /// Command compiler creation and retained-source storage policy.
+  LOOMC_STRUCTURE_TYPE_CMD_COMPILER_OPTIONS = 51,
 } loomc_structure_type_t;
 
 /// One loose string option entry.

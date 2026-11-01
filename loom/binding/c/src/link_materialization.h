@@ -22,8 +22,26 @@
 extern "C" {
 #endif
 
-typedef struct loomc_link_target_specializations_t
-    loomc_link_target_specializations_t;
+// One validated invocation assignment in the immutable source-index domain.
+typedef struct loomc_link_target_assignment_t {
+  // Index-wide source identity, including declaration aliases.
+  iree_host_size_t symbol_ordinal;
+
+  // Exact public profile borrowed from the original invocation row.
+  loomc_target_profile_t* profile;
+} loomc_link_target_assignment_t;
+
+// Producer-established source correspondence for explicit target assignments.
+typedef struct loomc_link_target_specializations_t {
+  // Arena-owned assignments ordered by source identity within each kind.
+  loomc_link_target_assignment_t* assignments;
+
+  // Number of function assignments preceding declaration assignments.
+  iree_host_size_t function_count;
+
+  // Total assignment count, including declaration aliases.
+  iree_host_size_t count;
+} loomc_link_target_specializations_t;
 
 // Homogeneous deployment specialization phase for one materialization.
 typedef enum loomc_link_deployment_specialization_phase_e {

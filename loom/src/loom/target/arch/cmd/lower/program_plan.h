@@ -110,9 +110,8 @@ iree_status_t loom_cmd_program_kernel_request_materialize(
 
 // Optional kernel source environment for command-plan construction.
 typedef struct loom_cmd_program_kernel_source_t {
-  // Invocation-local indexed request producer, or NULL when the selected
-  // roots reach only generated sources.
-  loom_kernel_request_producer_t* producer;
+  // Indexed request provider, empty when roots reach only generated sources.
+  loom_kernel_request_provider_t provider;
 
   // Invocation environment providing diagnostics and specialization.
   const loom_link_plan_materialization_environment_t* environment;

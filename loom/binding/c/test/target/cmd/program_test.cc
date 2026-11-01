@@ -25,6 +25,16 @@
 
 namespace {
 
+using CommandCompilerPtr =
+    loomc::testing::HandlePtr<loomc_cmd_compiler_t, loomc_cmd_compiler_release>;
+
+CommandCompilerPtr CreateCommandCompiler(loomc_link_index_t* index) {
+  loomc_cmd_compiler_t* compiler = nullptr;
+  LOOMC_EXPECT_OK(loomc_cmd_compiler_create(
+      index, nullptr, loomc_allocator_system(), &compiler));
+  return CommandCompilerPtr(compiler);
+}
+
 using loomc::testing::HandlePtr;
 
 using BuilderPtr =
@@ -371,6 +381,7 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
   LOOMC_ASSERT_OK(loomc_link_index_builder_add_source(
       builder.get(), kernel_bytecode.get(), &kernel_options, nullptr));
   LinkIndexPtr link_index = FinishIndex(builder.get());
+  CommandCompilerPtr command_compiler = CreateCommandCompiler(link_index.get());
   builder.reset();
 
   loomc_link_index_provider_t requester_provider = {};
@@ -395,7 +406,7 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
       .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
       .structure_size = sizeof(product_options),
       .next = nullptr,
-      .link_index = link_index.get(),
+      .compiler = command_compiler.get(),
       .root_symbol_ordinals = explicit_roots,
       .root_symbol_count = std::size(explicit_roots),
       .flags = LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
@@ -562,6 +573,7 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
   EXPECT_EQ(result, nullptr);
   EXPECT_EQ(reject_state.publish_count, 1u);
 
+  command_compiler.reset();
   link_index.reset();
   kernel_module.reset();
   requester_source.reset();
@@ -671,6 +683,7 @@ command.def public @entry() launch() {
     add_library("kernel", kernel_source.get());
     add_library("command", command_source.get());
     LinkIndexPtr index = FinishIndex(builder.get());
+    CommandCompilerPtr command_compiler = CreateCommandCompiler(index.get());
 
     loomc_link_index_symbol_t entry = {};
     ASSERT_TRUE(loomc_link_index_lookup_global(
@@ -680,7 +693,7 @@ command.def public @entry() launch() {
     const loomc_cmd_program_product_options_t options = {
         .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
         .structure_size = sizeof(options),
-        .link_index = index.get(),
+        .compiler = command_compiler.get(),
         .root_symbol_ordinals = root_symbol_ordinals,
         .root_symbol_count = std::size(root_symbol_ordinals),
         .request_sink = {.publish = CaptureRequest, .user_data = &capture},
@@ -753,11 +766,12 @@ command.def public @embed() launch(%checkpoint: buffer, %output: buffer) {
   LOOMC_ASSERT_OK(loomc_link_index_builder_add_source(
       builder.get(), source.get(), &source_options, nullptr));
   LinkIndexPtr index = FinishIndex(builder.get());
+  CommandCompilerPtr command_compiler = CreateCommandCompiler(index.get());
   RequestCapture capture;
   loomc_cmd_program_product_options_t options = {
       .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
       .structure_size = sizeof(options),
-      .link_index = index.get(),
+      .compiler = command_compiler.get(),
       .flags = LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
       .request_sink = {.publish = CaptureRequest, .user_data = &capture},
   };
@@ -788,6 +802,7 @@ command.def public @embed() launch(%checkpoint: buffer, %output: buffer) {
   EXPECT_EQ(unpublished_result, nullptr);
   result.reset();
   product.reset();
+  command_compiler.reset();
   index.reset();
   builder.reset();
   source.reset();
@@ -867,11 +882,12 @@ TEST(TargetCmdProgramTest, RejectsUnresolvedPipelineSpecializations) {
     LOOMC_ASSERT_OK(loomc_link_index_builder_add_source(
         builder.get(), source.get(), &source_options, nullptr));
     LinkIndexPtr index = FinishIndex(builder.get());
+    CommandCompilerPtr command_compiler = CreateCommandCompiler(index.get());
     RequestCapture capture;
     loomc_cmd_program_product_options_t options = {
         .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
         .structure_size = sizeof(options),
-        .link_index = index.get(),
+        .compiler = command_compiler.get(),
         .flags = LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
         .request_sink = {.publish = CaptureRequest, .user_data = &capture},
     };
@@ -949,13 +965,14 @@ command.def public @embed() launch(%output: buffer) {
       LOOMC_ASSERT_OK(loomc_link_index_builder_add_source(
           builder.get(), source.get(), &source_options, nullptr));
       LinkIndexPtr index = FinishIndex(builder.get());
+      CommandCompilerPtr command_compiler = CreateCommandCompiler(index.get());
       for (bool publish : {false, true}) {
         SCOPED_TRACE(publish);
         RequestCapture capture;
         loomc_cmd_program_product_options_t options = {
             .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
             .structure_size = sizeof(options),
-            .link_index = index.get(),
+            .compiler = command_compiler.get(),
             .flags = LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
         };
         if (publish) {
