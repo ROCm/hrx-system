@@ -7,9 +7,11 @@
 #include "loomc/module.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "iree/testing/gtest.h"
@@ -1032,6 +1034,72 @@ TEST(ModuleTest, ClonePreservesContextSourceRetention) {
       EXPECT_EQ(source_table->count, 0u);
     }
   }
+}
+
+TEST(ModuleTest, WorkspaceTrimReclaimsIdleBlocksDuringCloning) {
+  auto context = CreateContext();
+  auto source_workspace = CreateWorkspace();
+  auto source = CreateMixedSymbolModule(context.get(), source_workspace.get());
+  std::atomic<size_t> live_allocations = 0;
+  const loomc_allocator_t allocator = {
+      .self = &live_allocations,
+      .ctl = [](void* self, loomc_allocator_command_t command,
+                const void* params, void** inout_ptr) -> loomc_status_t {
+        auto* live = static_cast<std::atomic<size_t>*>(self);
+        const bool was_allocated =
+            (command == LOOMC_ALLOCATOR_COMMAND_FREE ||
+             command == LOOMC_ALLOCATOR_COMMAND_REALLOC) &&
+            *inout_ptr != nullptr;
+        const auto system = loomc_allocator_system();
+        auto status = system.ctl(system.self, command, params, inout_ptr);
+        if (loomc_status_is_ok(status)) {
+          if (command == LOOMC_ALLOCATOR_COMMAND_FREE) {
+            *live -= was_allocated;
+          } else if (!was_allocated) {
+            ++*live;
+          }
+        }
+        return status;
+      },
+  };
+  loomc_workspace_t* raw_workspace = nullptr;
+  LOOMC_ASSERT_OK(loomc_workspace_create(nullptr, allocator, &raw_workspace));
+  WorkspacePtr workspace(raw_workspace);
+  const size_t empty_allocations = live_allocations.load();
+  loomc_module_t* raw_retained = nullptr;
+  LOOMC_ASSERT_OK(loomc_module_clone(source.get(), workspace.get(),
+                                     loomc_allocator_system(), &raw_retained));
+  ModulePtr retained(raw_retained);
+
+  std::atomic<bool> complete = false;
+  loomc_status_t clone_status = loomc_ok_status();
+  std::thread compiler([&] {
+    for (int i = 0; i < 256 && loomc_status_is_ok(clone_status); ++i) {
+      loomc_module_t* clone = nullptr;
+      clone_status = loomc_module_clone(source.get(), workspace.get(),
+                                        loomc_allocator_system(), &clone);
+      loomc_module_release(clone);
+    }
+    complete.store(true, std::memory_order_release);
+  });
+  do {
+    loomc_workspace_trim(workspace.get());
+  } while (!complete.load(std::memory_order_acquire));
+  compiler.join();
+  LOOMC_ASSERT_OK(clone_status);
+
+  // The retained module remains readable while only its own blocks survive.
+  loomc_workspace_trim(workspace.get());
+  EXPECT_GT(live_allocations.load(), empty_allocations);
+  loomc_module_function_t function = {};
+  LOOMC_ASSERT_OK(loomc_module_lookup_function(
+      retained.get(), loomc_make_cstring_view("@entry"), &function));
+  EXPECT_EQ(function.kind, LOOMC_MODULE_FUNCTION_KIND_KERNEL);
+  retained.reset();
+  loomc_workspace_trim(workspace.get());
+  EXPECT_EQ(live_allocations.load(), empty_allocations);
+  workspace.reset();
+  EXPECT_EQ(live_allocations.load(), 0u);
 }
 
 TEST(ModuleTest, GetsFunctionsByPublicOrdinal) {

@@ -20,7 +20,7 @@ extern "C" {
 #endif
 
 // Model-resident source catalog, compiler and live device profile, with a
-// shared host compiler sink and catalog-local worker scratch. Compilation calls
+// shared host compiler sink and host-owned worker scratch. Compilation calls
 // on a catalog may overlap; parents and native requests use distinct worker
 // scratch and join shared pending native results without waiting on workers.
 // Execution of already prepared commands does not access this object.
@@ -62,8 +62,8 @@ iree_status_t loom_serve_jit_create(iree_hal_device_t* device,
 // in the device-owned cache. Source contents, selected configuration,
 // sanitizer semantics, stage specializations, and VM entry roots form exact
 // identities; authored locator or card pointer identity never authorizes a
-// hit. The catalog still owns its compiler workspace, publication/report, and
-// callbacks independently of every other model.
+// hit. The catalog owns its publication/report and callbacks independently of
+// every other model, and borrows scratch from the shared host's workers.
 iree_status_t loom_serve_jit_create_cached(
     loom_serve_jit_cache_t* cache, loom_serve_host_t* host,
     const loom_serve_sources_t* sources,

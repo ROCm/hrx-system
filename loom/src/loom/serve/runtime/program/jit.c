@@ -129,10 +129,9 @@ struct loom_serve_jit_t {
   struct {
     // Borrowed shared host compiler sink, never stopped by catalog teardown.
     loomc_task_sink_t sink;
-    // Mutable scratch indexed by the pool's mutually exclusive worker ordinal.
-    loomc_workspace_t** workspaces;
-    // Number of initialized workspace entries, including during setup failure.
-    iree_host_size_t workspace_count;
+    // Borrowed worker scratch owner, outliving this catalog and its
+    // completions.
+    loom_serve_host_t* host;
   } compilation;
 };
 
@@ -265,28 +264,6 @@ static void loom_serve_jit_identity_initialize(
   }
 }
 
-static iree_status_t loom_serve_jit_initialize_compilation(
-    loom_serve_jit_t* jit, loom_serve_host_t* host) {
-  const loomc_allocator_t host_allocator =
-      loomc_allocator_from_iree(jit->host_allocator);
-  jit->compilation.sink = loom_serve_host_compiler_sink(host);
-  const iree_host_size_t worker_count =
-      loomc_task_pool_worker_count(loom_serve_host_task_pool(host));
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      jit->host_allocator, worker_count, sizeof(*jit->compilation.workspaces),
-      (void**)&jit->compilation.workspaces));
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0; i < worker_count && iree_status_is_ok(status);
-       ++i) {
-    status = iree_status_from_loomc(loomc_workspace_create(
-        NULL, host_allocator, &jit->compilation.workspaces[i]));
-    if (iree_status_is_ok(status)) {
-      ++jit->compilation.workspace_count;
-    }
-  }
-  return status;
-}
-
 static void loom_serve_jit_native_release(loom_serve_jit_native_t* native,
                                           iree_allocator_t host_allocator) {
   if (!native || iree_atomic_ref_count_dec(&native->ref_count) != 1) {
@@ -336,10 +313,6 @@ static void loom_serve_jit_publication_release(
 }
 
 static void loom_serve_jit_destroy(loom_serve_jit_t* jit) {
-  for (iree_host_size_t i = 0; i < jit->compilation.workspace_count; ++i) {
-    loomc_workspace_release(jit->compilation.workspaces[i]);
-  }
-  iree_allocator_free(jit->host_allocator, jit->compilation.workspaces);
   for (iree_host_size_t i = 0; i < jit->natives.count; ++i) {
     loom_serve_jit_native_release(jit->natives.values[i], jit->host_allocator);
   }
@@ -508,9 +481,8 @@ static iree_status_t loom_serve_jit_create_impl(
         &jit->executables);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_jit_initialize_compilation(jit, host);
-  }
-  if (iree_status_is_ok(status)) {
+    jit->compilation.host = host;
+    jit->compilation.sink = loom_serve_host_compiler_sink(host);
     *out_jit = jit;
   } else {
     loom_serve_jit_release(jit);
@@ -1139,7 +1111,10 @@ static void loom_serve_jit_job_release(loom_serve_jit_job_t* job) {
   job->report.reused_kernels += job->reused_count;
   job->report.entries +=
       job->stage ? (job->stage->dispatch ? 1 : job->stage->entry_count) : 0;
-  job->report.workers = job->cache_hit ? 0 : jit->compilation.workspace_count;
+  job->report.workers =
+      job->cache_hit ? 0
+                     : loomc_task_pool_worker_count(
+                           loom_serve_host_task_pool(jit->compilation.host));
   job->report.stage_duration_sum_ns += iree_time_now() - job->start;
   job->status = status;
   loom_serve_jit_job_publish(job);
@@ -1312,8 +1287,10 @@ static void loom_serve_jit_task_execute(loomc_task_t* base,
   loom_serve_native_result_t* output =
       loom_serve_native_artifact_result(task->native->artifact);
   output->status = loom_serve_jit_compile_request(
-      job->jit, job->jit->compilation.workspaces[worker_ordinal], task->request,
-      task->native, &report);
+      job->jit,
+      loom_serve_host_compiler_workspace(job->jit->compilation.host,
+                                         worker_ordinal),
+      task->request, task->native, &report);
   output->status = iree_status_join(
       output->status,
       loom_serve_compilation_diagnostics_clone(
@@ -1556,7 +1533,8 @@ static void loom_serve_jit_job_execute(loomc_task_t* base,
       return;
     }
   }
-  loomc_workspace_t* workspace = jit->compilation.workspaces[worker_ordinal];
+  loomc_workspace_t* workspace =
+      loom_serve_host_compiler_workspace(jit->compilation.host, worker_ordinal);
   loomc_host_size_t root_ordinal = 0;
   iree_status_t status =
       loom_serve_jit_lookup_root(jit, job->root, &root_ordinal);

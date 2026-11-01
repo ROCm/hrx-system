@@ -585,6 +585,11 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
     }
   }
   *out_complete = load->phase == TEXT_LOAD_COMPLETE;
+  if (*out_complete) {
+    // All preparation producers have retired and returned their scratch.
+    // Reclaim the burst's idle storage before entering steady serving.
+    loom_serve_host_trim_compiler(host);
+  }
   return status;
 }
 
