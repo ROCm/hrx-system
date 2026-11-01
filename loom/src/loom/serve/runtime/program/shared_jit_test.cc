@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <array>
 #include <utility>
 
 #include "iree/testing/status_matchers.h"
@@ -193,6 +194,15 @@ class SharedJitTest : public loom_serve::testing::JitTest {
   }
 
   void Execute(loom_serve_jit_stage_t* stage, bool peer) {
+    Execute(
+        stage, peer,
+        loom_serve_jit_stage_dispatch(stage)
+            ? std::array<int32_t, 8>{105, 100, 100, 100, 100, 100, 100, 100}
+            : std::array<int32_t, 8>{105, 106, 107, 108, 109, 110, 111, 112});
+  }
+
+  void Execute(loom_serve_jit_stage_t* stage, bool peer,
+               const std::array<int32_t, 8>& expected) {
     auto* owner = peer ? peer_device_ : device_owner_;
     auto* pool = peer ? peer_pool_ : storage_owner_;
     auto* execution = peer ? peer_execution_ : execution_;
@@ -241,9 +251,7 @@ class SharedJitTest : public loom_serve::testing::JitTest {
       status = loom_serve_execution_feedback_wait(execution, completion);
     }
     IREE_ASSERT_OK(status);
-    for (size_t i = 0; i < output_.size(); ++i) {
-      EXPECT_EQ(output_[i], direct ? (i == 0 ? 105 : 100) : 105 + i);
-    }
+    EXPECT_EQ(output_, expected);
   }
 
   void CheckLiveStageArtifacts(bool direct) {
@@ -293,27 +301,34 @@ class SharedJitTest : public loom_serve::testing::JitTest {
 };
 
 TEST_P(SharedJitTest, PendingArtifactsLoadAndExecuteOnIndependentDevices) {
-  Compilation first, second;
+  Compilation first, second, remapped;
   NativeGate gate(loom_serve_jit_task_sink(jit_));
   first.Start(jit_, gate.sink());
   first.AwaitLayout();
   second.Start(peer_, loom_serve_jit_task_sink(peer_));
   second.AwaitLayout();
+  // The same pending producers serve a different parent's sparse, reordered
+  // binding map after that consumer has relinquished its serialized inputs.
+  remapped.Start(peer_, loom_serve_jit_task_sink(peer_),
+                 IREE_SV("selected_pair"));
+  remapped.AwaitLayout();
   // Relinquish the originating catalog while its producer and the other
   // device's subscription are both pending. Accepted jobs alone keep it alive.
   loom_serve_jit_release(std::exchange(jit_, nullptr));
   gate.Open();
   IREE_ASSERT_OK(first.Await());
   IREE_ASSERT_OK(second.Await());
+  IREE_ASSERT_OK(remapped.Await());
   EXPECT_EQ(compilation_.kernels, 8u);
   EXPECT_EQ(peer_report_.kernels, 0u);
-  EXPECT_EQ(peer_report_.reused_kernels, 8u);
+  EXPECT_EQ(peer_report_.reused_kernels, 10u);
   EXPECT_EQ(loom_serve_jit_cache_storage(peer_).executable_count, 8u);
   // Stages retain device-local loaded code and its exact immutable input after
   // both compilation catalogs have retired.
   loom_serve_jit_release(std::exchange(peer_, nullptr));
   Execute(first.stage(), false);
   Execute(second.stage(), true);
+  Execute(remapped.stage(), true, {100, 100, 107, 100, 100, 100, 100, 124});
   // A new catalog reuses the live stages without retaining their compilers.
   IREE_ASSERT_OK(CreatePeer());
   peer_report_ = {};

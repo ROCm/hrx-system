@@ -620,10 +620,12 @@ struct loom_serve_jit_request_t {
   loom_serve_jit_request_t* next_waiter;
   // Parent retained only while waiting for native publication.
   loom_serve_jit_job_t* job;
-  // Immutable request transferred by the product builder.
-  loomc_request_t* request;
   // Retained native result shared by equivalent requests.
   loom_serve_jit_native_t* native;
+  // Number of parent requirement bindings retained through native completion.
+  iree_host_size_t binding_count;
+  // Parent-local bindings independent of the serialized compilation input.
+  loomc_request_binding_t bindings[];
 };
 
 // Keys are process-local byte strings, not serialized cache artifacts. Each
@@ -769,12 +771,13 @@ static iree_status_t loom_serve_jit_acquire_request(
 static iree_status_t loom_serve_jit_plan_request(loom_serve_jit_t* jit,
                                                  loomc_task_sink_t sink,
                                                  loom_serve_jit_request_t* node,
+                                                 loomc_request_t* request,
                                                  bool* out_created) {
-  const iree_host_size_t root_count = loomc_request_root_count(node->request);
+  const iree_host_size_t root_count = loomc_request_root_count(request);
   iree_string_builder_t key;
   iree_string_builder_initialize(
       loom_serve_native_domain_allocator(jit->native_domain), &key);
-  iree_status_t status = loom_serve_jit_request_key(node->request, &key);
+  iree_status_t status = loom_serve_jit_request_key(request, &key);
   if (iree_status_is_ok(status)) {
     status = loom_serve_jit_acquire_request(jit, sink, node, &key, root_count,
                                             out_created);
@@ -939,11 +942,16 @@ static void loom_serve_jit_subscribe(loom_serve_jit_request_t* node,
 static iree_status_t loom_serve_jit_request_allocate(
     loom_serve_jit_job_t* job, loomc_request_t* request,
     loom_serve_jit_request_t** out_node) {
+  const iree_host_size_t binding_count = loomc_request_binding_count(request);
   loom_serve_jit_request_t* node = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(job->jit->host_allocator,
-                                             sizeof(*node), (void**)&node));
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_struct_array(
+      job->jit->host_allocator, sizeof(*node), binding_count,
+      sizeof(*node->bindings), (void**)&node));
   node->job = job;
-  node->request = request;
+  node->binding_count = binding_count;
+  for (iree_host_size_t i = 0; i < binding_count; ++i) {
+    loomc_request_binding_at(request, i, &node->bindings[i]);
+  }
   if (job->requests_tail) {
     job->requests_tail->next = node;
   } else {
@@ -1090,10 +1098,8 @@ static void loom_serve_jit_job_release(loom_serve_jit_job_t* job) {
   if (iree_status_is_ok(status) && !job->cache_hit) {
     for (loom_serve_jit_request_t* node = job->requests;
          !job->direct_dispatch && node; node = node->next) {
-      for (iree_host_size_t i = 0;
-           i < loomc_request_binding_count(node->request); ++i) {
-        loomc_request_binding_t binding;
-        loomc_request_binding_at(node->request, i, &binding);
+      for (iree_host_size_t i = 0; i < node->binding_count; ++i) {
+        const loomc_request_binding_t binding = node->bindings[i];
         loom_cmd_program_hal_entry_t* entry =
             &job->requirements[binding.requirement_ordinal];
         *entry = (loom_cmd_program_hal_entry_t){
@@ -1110,7 +1116,6 @@ static void loom_serve_jit_job_release(loom_serve_jit_job_t* job) {
   while (job->requests) {
     loom_serve_jit_request_t* node = job->requests;
     job->requests = node->next;
-    loomc_request_release(node->request);
     loom_serve_jit_native_release(node->native, jit->host_allocator);
     iree_allocator_free(jit->host_allocator, node);
   }
@@ -1235,10 +1240,11 @@ static void loom_serve_jit_artifact_ready(
 
 static iree_status_t loom_serve_jit_compile_request(
     loom_serve_jit_t* jit, loomc_workspace_t* workspace,
-    loom_serve_jit_request_t* node, loom_serve_compilation_report_t* report) {
+    loomc_request_t* request, loom_serve_jit_native_t* native,
+    loom_serve_compilation_report_t* report) {
   IREE_TRACE_ZONE_BEGIN(z0);
   loom_serve_native_result_t* output =
-      loom_serve_native_artifact_result(node->native->artifact);
+      loom_serve_native_artifact_result(native->artifact);
   const iree_allocator_t artifact_allocator =
       loom_serve_native_domain_allocator(jit->native_domain);
   const loomc_allocator_t host_allocator =
@@ -1255,8 +1261,8 @@ static iree_status_t loom_serve_jit_compile_request(
   if (iree_status_is_ok(status)) {
     loomc_result_t* result = NULL;
     const loomc_status_t operation = loomc_module_deserialize_request(
-        jit->kernel.context, workspace, node->request, host_allocator, &module,
-        roots, &result);
+        jit->kernel.context, workspace, request, host_allocator, &module, roots,
+        &result);
     status = loom_serve_compilation_result(operation, result, report);
   }
   for (iree_host_size_t i = 0;
@@ -1288,8 +1294,10 @@ typedef struct loom_serve_jit_task_t {
   loomc_task_t base;
   // Borrowed compilation retained by its pending native subscription.
   loom_serve_jit_job_t* job;
-  // Disjoint request and terminal result slot owned by the job.
-  loom_serve_jit_request_t* request;
+  // Borrowed terminal result retained by the job's pending subscription.
+  loom_serve_jit_native_t* native;
+  // Owned serialized input needed only by this native producer.
+  loomc_request_t* request;
 } loom_serve_jit_task_t;
 
 static void loom_serve_jit_task_execute(loomc_task_t* base,
@@ -1298,10 +1306,10 @@ static void loom_serve_jit_task_execute(loomc_task_t* base,
   loom_serve_jit_job_t* job = task->job;
   loom_serve_compilation_report_t report = {0};
   loom_serve_native_result_t* output =
-      loom_serve_native_artifact_result(task->request->native->artifact);
+      loom_serve_native_artifact_result(task->native->artifact);
   output->status = loom_serve_jit_compile_request(
       job->jit, job->jit->compilation.workspaces[worker_ordinal], task->request,
-      &report);
+      task->native, &report);
   output->status = iree_status_join(
       output->status,
       loom_serve_compilation_diagnostics_clone(
@@ -1312,7 +1320,8 @@ static void loom_serve_jit_task_execute(loomc_task_t* base,
 static void loom_serve_jit_task_destroy(loomc_task_t* base) {
   loom_serve_jit_task_t* task = (loom_serve_jit_task_t*)base;
   loom_serve_jit_t* jit = task->job->jit;
-  loom_serve_native_artifact_t* artifact = task->request->native->artifact;
+  loom_serve_native_artifact_t* artifact = task->native->artifact;
+  loomc_request_release(task->request);
   iree_allocator_free(jit->host_allocator, task);
   loom_serve_native_artifact_publish(artifact);
 }
@@ -1322,19 +1331,22 @@ static const loomc_task_vtable_t jit_task_vtable = {
     .destroy = loom_serve_jit_task_destroy,
 };
 
+// Transfers the input only when the sink accepts the native compilation task.
 static iree_status_t loom_serve_jit_submit_request(
-    loom_serve_jit_job_t* job, loom_serve_jit_request_t* request) {
+    loom_serve_jit_job_t* job, loom_serve_jit_native_t* native,
+    loomc_request_t* request) {
   loom_serve_jit_task_t* task = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(job->jit->host_allocator,
                                              sizeof(*task), (void**)&task));
   loomc_task_initialize(&jit_task_vtable, &task->base);
   task->job = job;
+  task->native = native;
   task->request = request;
   iree_status_t status =
       iree_status_from_loomc(loomc_task_sink_submit(job->sink, &task->base));
   if (!iree_status_is_ok(status)) {
-    // Rejection never executed the task. Its pending entry is terminalized by
-    // the publisher, including any concurrent parents already subscribed.
+    // Rejection leaves input ownership with the publisher, which terminalizes
+    // this native entry and any concurrent parents already subscribed.
     iree_allocator_free(job->jit->host_allocator, task);
   }
   return status;
@@ -1348,13 +1360,15 @@ static loomc_status_t loom_serve_jit_publish(void* user_data,
   iree_status_t status = loom_serve_jit_request_allocate(job, request, &node);
   if (iree_status_is_ok(status)) {
     bool created = false;
-    status = loom_serve_jit_plan_request(job->jit, job->sink, node, &created);
+    status = loom_serve_jit_plan_request(job->jit, job->sink, node, request,
+                                         &created);
     if (iree_status_is_ok(status)) {
       if (created) {
         // The parent reference spans publication, including inline completion
         // or rejection. Other requests may immediately reuse this native slot.
-        status = loom_serve_jit_submit_request(job, node);
+        status = loom_serve_jit_submit_request(job, node->native, request);
         if (iree_status_is_ok(status)) {
+          request = NULL;
           ++job->request_count;
         } else {
           loom_serve_native_artifact_result(node->native->artifact)->status =
@@ -1365,9 +1379,8 @@ static loomc_status_t loom_serve_jit_publish(void* user_data,
         ++job->reused_count;
       }
     }
-  } else {
-    loomc_request_release(request);
   }
+  loomc_request_release(request);
   IREE_TRACE_ZONE_END(z0);
   return loomc_status_from_iree(status);
 }
