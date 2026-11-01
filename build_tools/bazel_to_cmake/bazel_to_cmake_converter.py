@@ -2708,7 +2708,7 @@ class Converter(object):
         self._fragments.extend([self.body, render])
         self.body = ""
 
-    def convert(self, traversal="iree_add_all_subdirs()"):
+    def convert(self, traversal="iree_add_all_subdirs()", setup=None):
         body = (
             "".join(
                 fragment() if callable(fragment) else fragment
@@ -2718,7 +2718,7 @@ class Converter(object):
         )
         converted_content = (
             "\niree_package_source_dir(_IREE_PACKAGE_SOURCE_DIR)\n"
-            f"{self.header}\n\n{traversal}\n\n{body}"
+            f"{self.header}\n{setup() if setup else ''}\n{traversal}\n\n{body}"
         )
 
         # Cleanup newline characters. This is more convenient than ensuring all

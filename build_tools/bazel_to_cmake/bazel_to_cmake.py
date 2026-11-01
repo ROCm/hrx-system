@@ -157,9 +157,16 @@ class Package:
     build_file: Path
     # Native fragments rendered after repository-wide declaration collection.
     converter: bazel_to_cmake_converter.Converter
+    # Source graph supplying this package's resolved native leaf bindings.
+    libraries: cc.Graph | None = None
 
     def convert(self, traversal="iree_add_all_subdirs()"):
         package = self.directory.as_posix()
+        setup = (
+            (lambda: self.libraries.native_setup(package))
+            if self.libraries is not None
+            else None
+        )
         if not self.converter.requires_native_scope:
             # Defaults belong to this package's products, not its children.
             for kind in ("ARCHIVE", "LIBRARY", "RUNTIME"):
@@ -168,11 +175,14 @@ class Package:
                     f'  set(CMAKE_{kind}_OUTPUT_DIRECTORY "${{IREE_PACKAGE_BINARY_DIR}}")\n'
                     "endif()\n"
                 )
-            return source_package(self.directory, self.converter.convert(traversal))
+            return source_package(
+                self.directory, self.converter.convert(traversal, setup)
+            )
         return (
             f"# Generated from {package}/{self.build_file.name}. Edit the BUILD declaration.\n"
             "set_property(DIRECTORY PROPERTY IREE_PACKAGE_SOURCE_DIR "
-            f'"${{IREE_SOURCE_DIR}}/{package}")\n' + self.converter.convert(traversal)
+            f'"${{IREE_SOURCE_DIR}}/{package}")\n'
+            + self.converter.convert(traversal, setup)
         )
 
 
@@ -238,7 +248,7 @@ def evaluate_directory(
         )
     except (NameError, NotImplementedError, KeyError) as error:
         raise RuntimeError(f"Cannot convert {build_file}: {error}") from error
-    return Package(directory.relative_to(repo_root), build_file, converter)
+    return Package(directory.relative_to(repo_root), build_file, converter, libraries)
 
 
 def evaluate_packages(root_dirs, input_files, configuration=None):
@@ -281,6 +291,19 @@ def evaluate_packages(root_dirs, input_files, configuration=None):
         for directory, package in packages.items()
         if package.converter.requires_native_scope
     }
+    if libraries is not None:
+        for directory in packages:
+            scope = next(
+                (
+                    parent
+                    for parent in (directory, *directory.parents)
+                    if parent in native_directories
+                ),
+                Path("."),
+            )
+            libraries.native_scopes[directory.as_posix()] = scope.as_posix()
+        for name in libraries.libraries:
+            libraries.resolve(name)
     return packages, authored_directories, native_directories, libraries
 
 

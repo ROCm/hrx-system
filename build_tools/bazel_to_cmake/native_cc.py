@@ -18,9 +18,21 @@ def command(name, *parts):
     return f"{name}({' '.join(parts)})\n"
 
 
-def interface_name(name):
-    """Name of the declaration's native interface, separate from BUILD facts."""
-    return name.replace("::", "_") + ".native"
+def interfaces(bindings):
+    """Binds opaque leaves in their native lookup scope without graph copies."""
+    lines = []
+    for name, (dependencies, options) in bindings.items():
+        lines.append(command("if", "NOT TARGET", name))
+        lines.append(command("add_library", name, "INTERFACE"))
+        lines.append(
+            command("target_link_libraries", name, "INTERFACE", " ".join(dependencies))
+        )
+        if options:
+            lines.append(
+                command("target_compile_options", name, "INTERFACE", " ".join(options))
+            )
+        lines.append(command("endif"))
+    return "".join(lines)
 
 
 def generated_dependencies(name, generated, producers):
@@ -201,25 +213,12 @@ def library(
         if generated_headers:
             emit("target_sources", name, "PRIVATE", arguments(generated_headers))
 
-    # Source requirements are already resolved. Native requirements retain
-    # ordinary edges and expand in their declaration's actual native scope.
+    # Source requirements are resolved through native leaves. Public products
+    # retain ordinary native interfaces for SDK and authored consumers.
     defaults = ["${IREE_IMPLICIT_DEFS_CC_DEPS}"]
     if compiled:
         defaults.extend(("${IREE_THREADS_DEPS}", "${IREE_DEFAULT_LINK_LIBRARIES}"))
-    native_interface = interface_name(declaration.name)
-    emit("add_library", native_interface, "INTERFACE")
-    emit(
-        "target_link_libraries",
-        native_interface,
-        "INTERFACE",
-        " ".join((*native_dependencies, *defaults)),
-    )
     if compiled and not alwayslink:
-        emit(
-            "target_compile_options",
-            native_interface,
-            "INTERFACE ${IREE_INTERFACE_COPTS}",
-        )
         emit("target_compile_options", name, "INTERFACE ${IREE_INTERFACE_COPTS}")
     native_links = [*declaration.dependencies, *defaults]
     if compiled and alwayslink:

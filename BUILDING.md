@@ -66,6 +66,11 @@ paths, imported targets, and public library interfaces, including settings from
 an enclosing project. Native target properties are not exported back into the
 converter.
 
+Generated internal libraries are implementation details of BUILD. Native default
+dependencies and interface options are fixed during their source-root setup,
+before declaring the generated packages. Authored and imported target interfaces
+remain native and can be amended through normal CMake APIs.
+
 `BUILD.bazel` owns product declarations, including sources, dependencies, and
 conditional implementations. Allocator and target configuration select those
 same declarations in both build systems. Native options, SDK installation, and

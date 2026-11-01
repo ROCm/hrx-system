@@ -13,7 +13,7 @@ scope. No native target properties or generator expressions are interpreted.
 import hashlib
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import cached_property
 from pathlib import Path
 
@@ -31,6 +31,8 @@ class Interface:
     defines: tuple[str, ...] = ()
     # Link options inherited by final executables and shared libraries.
     link_options: tuple[str, ...] = ()
+    # Native leaves reached through source dependencies, with their lookup scopes.
+    native: tuple[str, ...] = ()
 
     def with_dependencies(self, dependencies):
         return Interface(
@@ -84,6 +86,10 @@ class LinkResponse:
 class Graph:
     # Effective bootstrap settings; parent/toolchain target properties stay native.
     configuration: dict[str, str]
+    # Authored native directory owning each source package's setup and imports.
+    native_scopes: dict[str, str] = field(default_factory=dict)
+    # Native leaf declarations needed at each generated package entry point.
+    native_bindings: dict[str, dict[str, tuple]] = field(default_factory=dict)
     # Source-owned declarations indexed by native name and default-package alias.
     libraries: dict[str, Library] = field(default_factory=dict)
     # Resolved transitive interfaces, computed once after source collection.
@@ -154,17 +160,57 @@ class Graph:
         result = library.interface.with_dependencies(
             [self.resolve(dependency) for dependency in library.dependencies]
         )
+        defaults = ["${IREE_IMPLICIT_DEFS_CC_DEPS}"]
+        if library.compiled:
+            defaults.extend(("${IREE_THREADS_DEPS}", "${IREE_DEFAULT_LINK_LIBRARIES}"))
+        options = (
+            ("${IREE_INTERFACE_COPTS}",)
+            if library.compiled and not library.alwayslink
+            else ()
+        )
+        result = replace(
+            result,
+            native=tuple(
+                dict.fromkeys(
+                    (
+                        *self.native_dependencies(
+                            library.package, library.dependencies
+                        ),
+                        self.bind_native(library.package, tuple(defaults), options),
+                    )
+                )
+            ),
+        )
         self.resolving.pop()
         self.resolved[library.name] = result
         return result
 
-    def native_dependencies(self, dependencies):
-        return tuple(
-            native_cc.interface_name(self.libraries[dependency].name)
-            if dependency in self.libraries
-            else dependency
-            for dependency in dependencies
+    def bind_native(self, package, dependencies, options=()):
+        scope = self.native_scopes[package]
+        identity = "\0".join((scope, *dependencies, "\1", *options))
+        name = (
+            re.sub(r"[^a-zA-Z0-9_]", "_", scope)
+            + "_native_"
+            + hashlib.sha256(identity.encode()).hexdigest()[:16]
         )
+        self.native_bindings.setdefault(package, {})[name] = (dependencies, options)
+        return name
+
+    def native_dependencies(self, package, dependencies):
+        return tuple(
+            dict.fromkeys(
+                native
+                for dependency in dependencies
+                for native in (
+                    self.resolve(dependency).native
+                    if dependency in self.libraries
+                    else (self.bind_native(package, (dependency,)),)
+                )
+            )
+        )
+
+    def native_setup(self, package):
+        return native_cc.interfaces(self.native_bindings.get(package, {}))
 
     def link_inputs(self, name):
         if name not in self.links:
@@ -187,7 +233,7 @@ class Graph:
                 ordered[item] = None
         return tuple(ordered)
 
-    def executable_inputs(self, dependencies):
+    def executable_inputs(self, package, dependencies):
         interfaces, generated = [], {}
         for dependency in dependencies:
             provider = self.libraries.get(dependency)
@@ -209,7 +255,7 @@ class Graph:
                     artifacts.append(f"$<TARGET_LINKER_FILE:{target}>")
                 else:
                     native.append(provider.name)
-        native.extend(self.native_dependencies(dependencies))
+        native.extend(self.native_dependencies(package, dependencies))
         return (
             Interface().with_dependencies(interfaces),
             tuple(artifacts),
@@ -285,7 +331,7 @@ class BuildFileFunctions:
 
         def render():
             interface, artifacts, native, generated, cxx = (
-                self._libraries.executable_inputs(dependencies)
+                self._libraries.executable_inputs(self._current_package(), dependencies)
             )
             return invocation + native_cc.executable_inputs(
                 target.replace("::", "_"),
@@ -546,7 +592,9 @@ class BuildFileFunctions:
                 return native_cc.library(
                     declaration,
                     resolved,
-                    self._libraries.native_dependencies(declaration.dependencies),
+                    self._libraries.native_dependencies(
+                        declaration.package, declaration.dependencies
+                    ),
                     sources=sources,
                     headers=headers,
                     generated_headers=generated_headers,

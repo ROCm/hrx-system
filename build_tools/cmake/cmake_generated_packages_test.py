@@ -25,7 +25,7 @@ FIXTURE = REPO_ROOT / "build_tools/cmake/testdata/generated_packages"
 
 
 class CMakeGeneratedPackagesTest(unittest.TestCase):
-    def test_native_defaults_bind_at_each_declaration(self):
+    def test_setup_defaults_and_live_native_interfaces(self):
         with tempfile.TemporaryDirectory(prefix="cmake native defaults ") as temporary:
             source, build = Path(temporary) / "source", Path(temporary) / "build"
             source.mkdir()
@@ -42,7 +42,7 @@ class CMakeGeneratedPackagesTest(unittest.TestCase):
                     f'deps=[":{name}", "//external:usage"])\n'
                 )
 
-            for name, value in (("first", 11), ("second", 22), ("inline", None)):
+            for name, value in (("first", 11), ("second", 11), ("inline", None)):
                 package = source / "package" / name
                 package.mkdir(parents=True)
                 (package / "value.c").write_text(
@@ -69,14 +69,8 @@ class CMakeGeneratedPackagesTest(unittest.TestCase):
                         'cc_library(name="disabled", deps=["//external:usage"])\n'
                         'iree_cmake_extra_content(inline=True, content="endif()")\n'
                     )
-                    for provider, value in (("first", 11), ("second", 22)):
-                        content += (
-                            'iree_cmake_extra_content(inline=True, content="""\n'
-                            f"set(IREE_IMPLICIT_DEFS_CC_DEPS implicit_{provider})\n"
-                            f"set(IREE_DEFAULT_LINK_LIBRARIES native_{provider})\n"
-                            f"set(IREE_INTERFACE_COPTS -DOPTION_VALUE={value})\n"
-                            '""")\n' + declarations(provider, value)
-                        )
+                    for provider in ("first", "second"):
+                        content += declarations(provider, 11)
                 (package / "BUILD.bazel").write_text(content)
             wrapper = source / "package" / "wrapper"
             wrapper.mkdir()
@@ -117,32 +111,21 @@ foreach(helper iree_macros iree_copts iree_install_support iree_cc_library iree_
 endforeach()
 add_library(native_first INTERFACE IMPORTED)
 set_property(TARGET native_first PROPERTY INTERFACE_COMPILE_DEFINITIONS NATIVE_VALUE=11)
-add_library(native_second INTERFACE IMPORTED)
-set_property(TARGET native_second PROPERTY INTERFACE_COMPILE_DEFINITIONS NATIVE_VALUE=22)
 add_library(implicit_first INTERFACE IMPORTED)
 set_property(TARGET implicit_first PROPERTY INTERFACE_COMPILE_DEFINITIONS IMPLICIT_VALUE=110)
-add_library(implicit_second INTERFACE IMPORTED)
-set_property(TARGET implicit_second PROPERTY INTERFACE_COMPILE_DEFINITIONS IMPLICIT_VALUE=220)
 add_library(authored_usage INTERFACE IMPORTED)
 set_property(TARGET authored_usage PROPERTY INTERFACE_COMPILE_DEFINITIONS LITERAL_VALUE=31)
-iree_generate_cmake()
 set(IREE_IMPLICIT_DEFS_CC_DEPS implicit_first)
 set(IREE_DEFAULT_LINK_LIBRARIES native_first)
 set(IREE_INTERFACE_COPTS -DOPTION_VALUE=11)
+iree_generate_cmake()
 iree_add_subdirectory(package/first)
-set(IREE_IMPLICIT_DEFS_CC_DEPS implicit_second)
-set(IREE_DEFAULT_LINK_LIBRARIES native_second)
-set(IREE_INTERFACE_COPTS -DOPTION_VALUE=22)
 iree_add_subdirectory(package/second)
 iree_add_subdirectory(package/inline)
 target_compile_definitions(native_first INTERFACE LATE_VALUE=5)
-target_compile_definitions(native_second INTERFACE LATE_VALUE=5)
-set(IREE_IMPLICIT_DEFS_CC_DEPS "")
-set(IREE_INTERFACE_COPTS -DOPTION_VALUE=777)
 iree_add_subdirectory(package/wrapper)
 add_executable(public_probe public.c)
 target_link_libraries(public_probe PRIVATE fixture::package::wrapper)
-set(IREE_DEFAULT_LINK_LIBRARIES "")
 iree_add_subdirectory(package/consumer)
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/paths-$<CONFIG>.txt" CONTENT
   "$<TARGET_FILE:fixture_package_first_value_probe>\n$<TARGET_FILE:fixture_package_second_value_probe>\n$<TARGET_FILE:fixture_package_inline_first_probe>\n$<TARGET_FILE:fixture_package_inline_second_probe>\n$<TARGET_FILE:public_probe>\n$<TARGET_FILE:fixture_package_consumer_probe>\n")
