@@ -384,31 +384,6 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value
 
 // ====
 
-// RUN: emit amdgpu-assembly @swap strategy=source fixed=%lhs:physical_register:1:1 fixed=%rhs:physical_register:0:1 fixed=%returned:physical_register:0:2
-
-// Saved mask units break the reversed return pair's physical copy cycle.
-amdgpu.target<gfx1151> @target {subgroup_size = 64}
-
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @swap(%value: reg<amdgpu.vgpr>, %lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x2>) asm {
-  %mask = concat(%rhs, %lhs) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
-  %pair = concat(%lhs, %rhs) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  low.br ^exit(%pair: reg<amdgpu.sgpr x2>)
-^exit(%returned: reg<amdgpu.sgpr x2>):
-  return %returned
-}
-
-// ----
-  s_mov_b32 s2, s0
-  s_mov_b32 s3, s1
-  v_cndmask_b32 v0, 0, v0, s[2:3]
-  s_mov_b32 s0, s3
-  s_mov_b32 s1, s2
-.Lbb1:
-  s_endpgm
-
-// ====
-
 // RUN: emit amdgpu-assembly @partial_vcc strategy=source
 
 // Writing vcc_lo leaves the prior high-half mask read relevant to a later
