@@ -358,7 +358,7 @@ static bool loom_symbolic_term_less(const loom_symbolic_term_t* lhs,
 LOOM_DEFINE_ADAPTIVE_SORT(loom_symbolic_expr_sort_terms, loom_symbolic_term_t,
                           loom_symbolic_term_less)
 
-static iree_status_t loom_symbolic_expr_context_lookup_facts_and_selected_value(
+iree_status_t loom_symbolic_expr_context_lookup_facts_and_selected_value(
     loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
     loom_value_facts_t* out_facts, loom_value_id_t* out_selected_value) {
 #ifndef NDEBUG

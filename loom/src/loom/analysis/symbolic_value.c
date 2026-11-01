@@ -132,6 +132,9 @@ typedef struct loom_symbolic_expr_condition_fact_frame_t {
   // Next producer operand requiring condition-refined facts.
   uint16_t next_operand;
 
+  // Proven select arm, or INVALID when the defining transfer function applies.
+  loom_value_id_t selected_value;
+
   // Defining operation whose transfer function computes the result facts.
   const loom_op_t* defining_op;
 
@@ -178,8 +181,10 @@ static iree_status_t loom_symbolic_expr_condition_fact_frame_begin(
   }
 
   loom_value_facts_t facts = {0};
+  loom_value_id_t selected_value = value_id;
   IREE_RETURN_IF_ERROR(
-      loom_symbolic_expr_context_lookup_facts(context, value_id, &facts));
+      loom_symbolic_expr_context_lookup_facts_and_selected_value(
+          context, value_id, &facts, &selected_value));
   IREE_RETURN_IF_ERROR(
       loom_symbolic_value_refine_retained_relations(context, value_id, &facts));
   if (memo_entry->state == LOOM_SYMBOLIC_VALUE_CONDITION_FACT_MEMO_VISITING) {
@@ -214,6 +219,8 @@ static iree_status_t loom_symbolic_expr_condition_fact_frame_begin(
       .value_ordinal = value_ordinal,
       .remaining_depth = remaining_depth,
       .next_operand = 0,
+      .selected_value =
+          selected_value != value_id ? selected_value : LOOM_VALUE_ID_INVALID,
       .defining_op = defining_op,
       .result_index = result_index,
       .base_facts = facts,
@@ -253,10 +260,16 @@ static iree_status_t loom_symbolic_value_lookup_condition_refined_facts_bounded(
 
   while (iree_status_is_ok(status) && frame_count > 0) {
     loom_symbolic_expr_condition_fact_frame_t* frame = &frames[frame_count - 1];
-    if (frame->next_operand < frame->defining_op->operand_count) {
+    const bool has_selected_value =
+        frame->selected_value != LOOM_VALUE_ID_INVALID;
+    const uint16_t operand_count =
+        has_selected_value ? 1 : frame->defining_op->operand_count;
+    if (frame->next_operand < operand_count) {
       const uint16_t operand_index = frame->next_operand++;
       const loom_value_id_t operand =
-          loom_op_const_operands(frame->defining_op)[operand_index];
+          has_selected_value
+              ? frame->selected_value
+              : loom_op_const_operands(frame->defining_op)[operand_index];
       bool operand_pending = false;
       status = loom_symbolic_expr_condition_fact_frame_begin(
           context, &transient_arena, operand,
@@ -269,32 +282,36 @@ static iree_status_t loom_symbolic_value_lookup_condition_refined_facts_bounded(
       continue;
     }
 
-    loom_value_facts_t result_facts_storage
-        [LOOM_SYMBOLIC_VALUE_CONDITION_FACT_STACK_VALUE_CAPACITY];
-    loom_value_facts_t* result_facts = result_facts_storage;
-    if (frame->defining_op->result_count >
-        IREE_ARRAYSIZE(result_facts_storage)) {
-      status = iree_arena_allocate_array(
-          &transient_arena, frame->defining_op->result_count,
-          sizeof(*result_facts), (void**)&result_facts);
+    loom_value_facts_t inferred_facts;
+    if (has_selected_value) {
+      inferred_facts = frame->operand_facts[0];
+    } else {
+      loom_value_facts_t result_facts_storage
+          [LOOM_SYMBOLIC_VALUE_CONDITION_FACT_STACK_VALUE_CAPACITY];
+      loom_value_facts_t* result_facts = result_facts_storage;
+      if (frame->defining_op->result_count >
+          IREE_ARRAYSIZE(result_facts_storage)) {
+        status = iree_arena_allocate_array(
+            &transient_arena, frame->defining_op->result_count,
+            sizeof(*result_facts), (void**)&result_facts);
+        if (!iree_status_is_ok(status)) {
+          continue;
+        }
+      }
+      for (uint16_t i = 0; i < frame->defining_op->result_count; ++i) {
+        result_facts[i] = loom_value_facts_unknown();
+      }
+      const loom_op_vtable_t* vtable =
+          loom_op_vtable(context->module, frame->defining_op);
+      loom_fact_context_t fact_context = context->fact_table->context;
+      status = vtable->infer_facts(&fact_context, context->module,
+                                   frame->defining_op, frame->operand_facts,
+                                   result_facts);
       if (!iree_status_is_ok(status)) {
         continue;
       }
+      inferred_facts = result_facts[frame->result_index];
     }
-    for (uint16_t i = 0; i < frame->defining_op->result_count; ++i) {
-      result_facts[i] = loom_value_facts_unknown();
-    }
-    const loom_op_vtable_t* vtable =
-        loom_op_vtable(context->module, frame->defining_op);
-    loom_fact_context_t fact_context = context->fact_table->context;
-    status =
-        vtable->infer_facts(&fact_context, context->module, frame->defining_op,
-                            frame->operand_facts, result_facts);
-    if (!iree_status_is_ok(status)) {
-      continue;
-    }
-
-    loom_value_facts_t inferred_facts = result_facts[frame->result_index];
     loom_condition_fact_scope_apply_to_value_facts(
         context->condition_scope, context->fact_table, frame->value_id,
         &inferred_facts);

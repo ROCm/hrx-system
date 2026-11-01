@@ -29,6 +29,13 @@ iree_status_t loom_symbolic_expr_context_lookup_facts(
     loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
     loom_value_facts_t* out_facts);
 
+// Returns edge-local facts and the value selected by the active conditions.
+// The selected value equals |value_id| when no select arm is proven.
+// |out_selected_value| may be NULL when only facts are needed.
+iree_status_t loom_symbolic_expr_context_lookup_facts_and_selected_value(
+    loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
+    loom_value_facts_t* out_facts, loom_value_id_t* out_selected_value);
+
 // Returns value facts after applying the active condition facts, producer fact
 // inference, and retained alias-local relations.
 iree_status_t loom_symbolic_value_lookup_condition_refined_facts(
