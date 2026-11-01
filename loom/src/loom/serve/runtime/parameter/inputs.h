@@ -78,9 +78,14 @@ iree_device_size_t loom_serve_weight_inputs_staging_alignment(
 
 // Links the source-facing "weights" capability beside "prepare":
 //   count() -> i32
-//   parameter(i32 source, buffer key) -> (buffer metadata, i64 byte_length)
-//   input(i32 source, buffer key, i64 offset, i64 length, i64 alignment) -> i64
+//   parameter(i32 source, buffer key, i64 key_offset, i64 key_length)
+//     -> (buffer metadata, i64 byte_length)
+//   input(i32 source, buffer key, i64 key_offset, i64 key_length,
+//         i64 offset, i64 length, i64 alignment) -> i64
 //   input_buffer(buffer data, i64 alignment) -> i64
+// Key ranges are readable byte spans borrowed only during the call. Lookup
+// retains the canonical index entry, so callers can immediately reuse key
+// storage. Invalid source ordinals and key ranges fail before capture.
 // parameter exposes the index format's opaque metadata; interpretation belongs
 // to the model policy. input captures a nonempty, in-bounds range and returns
 // its aligned staging offset. input_buffer snapshots a nonempty readable buffer
