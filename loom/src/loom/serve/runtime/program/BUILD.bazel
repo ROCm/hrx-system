@@ -492,6 +492,7 @@ loom_cc_library(
         "//loom/binding/c:loomc",
         "//loom/src/loom/target/arch/cmd:program",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/base/internal:path",
         "//runtime/src/iree/vm",
     ],
