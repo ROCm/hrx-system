@@ -361,6 +361,11 @@ class Types {
   bool requires_binding(const cxx::Type* input, cxx::AST* owner);
   // Returns a record's admitted source schema, or null for a non-record type.
   const RecordPartition* record(const cxx::Type* input, cxx::AST* owner);
+  // Whether this constructor executes an ordinary admitted record body. Loom
+  // source wrapper constructors retain their intrinsic projection paths.
+  bool is_user_record_constructor(const cxx::Type* type,
+                                  cxx::FunctionSymbol* constructor,
+                                  cxx::AST* owner);
   // Returns a fixed array's value schema, or null for a non-array type.
   const ArrayPartition* array(const cxx::Type* input, cxx::AST* owner);
   // Direct lookup of a member slice retained by its owning record's admission.

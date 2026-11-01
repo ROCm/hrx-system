@@ -55,7 +55,7 @@ struct Derived : Base {
 };
 static constexpr Derived base_table[1] = {{{7}, 9}};
 unsigned base_lookup(unsigned index) {
-  // ERROR@+1: LOWERING/059 "record storage requires a complete aggregate without unions, bases or nontrivial lifecycle operations"
+  // ERROR@+1: LOWERING/059 "record storage requires a complete baseless non-union type with aggregate or user-provided construction and trivial copy and destruction"
   return base_table[index % 1u].other;
 }
 

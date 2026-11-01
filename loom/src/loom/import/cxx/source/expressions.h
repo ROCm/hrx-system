@@ -25,6 +25,15 @@ cxx::ExpressionAST* strip_implicit_casts(cxx::ExpressionAST* expression);
 // parentheses, and frontend wrappers around selected member initializers.
 cxx::ExpressionAST* unwrap_expression(cxx::ExpressionAST* expression);
 
+// Returns a frontend-selected constructor conversion at the root of an
+// initializer, including transparent source initializer wrappers. Constructor
+// arguments are retained on the cast's expression in resolved parameter order.
+cxx::ImplicitCastExpressionAST* constructor_conversion(
+    cxx::ExpressionAST* initializer);
+
+// Whether two resolved source functions denote the same canonical entity.
+bool same_function(cxx::FunctionSymbol* left, cxx::FunctionSymbol* right);
+
 // Returns the string literal initializing one object, including a single
 // braced clause and transparent expression wrappers, or null otherwise.
 const cxx::StringLiteral* string_initializer(cxx::ExpressionAST* initializer);

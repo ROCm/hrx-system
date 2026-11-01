@@ -1,7 +1,7 @@
 // RUN: verify
 // Unions do not have an unconditional component partition.
 union Value { unsigned integer; float real; };
-// ERROR@+1: LOWERING/059 "record values require a complete aggregate without unions, bases or nontrivial lifecycle operations"
+// ERROR@+1: LOWERING/059 "record values require a complete baseless non-union type with aggregate or user-provided construction and trivial copy and destruction"
 Value entry(Value value) { return value; }
 
 // ====
@@ -14,25 +14,29 @@ Value entry() { return Value{}; }
 // Base subobjects need an explicit source-object contract.
 struct Base { unsigned base; };
 struct Value : Base { unsigned member; };
-// ERROR@+1: LOWERING/059 "record values require a complete aggregate without unions, bases or nontrivial lifecycle operations"
+// ERROR@+1: LOWERING/059 "record values require a complete baseless non-union type with aggregate or user-provided construction and trivial copy and destruction"
 Value entry(Value value) { return value; }
 
 // ====
-// Constructors must execute their semantics.
-struct Value { unsigned member; Value(unsigned x) : member(x) {} };
-// ERROR@+1: LOWERING/059 "record values require a complete aggregate without unions, bases or nontrivial lifecycle operations"
-unsigned entry(unsigned x) { Value value{x}; return value.member; }
+// Delegation requires lifecycle state beyond one destination initialization.
+struct Value {
+  unsigned member;
+  // ERROR@+1: LOWERING/059 "record value constructors cannot initialize bases or delegate"
+  Value() : Value(1u) {}
+  Value(unsigned value) : member(value) {}
+};
+unsigned entry() { Value value; return value.member; }
 
 // ====
 // Destructors cannot disappear in SSA value copies.
 struct Value { unsigned member; ~Value() {} };
-// ERROR@+1: LOWERING/059 "record values require a complete aggregate without unions, bases or nontrivial lifecycle operations"
+// ERROR@+1: LOWERING/059 "record values require a complete baseless non-union type with aggregate or user-provided construction and trivial copy and destruction"
 Value entry(Value value) { return value; }
 
 // ====
 // An aggregate with user-defined assignment is not a trivial value.
 struct Value { unsigned member; Value& operator=(const Value& rhs) { member=rhs.member+1; return *this; } };
-// ERROR@+1: LOWERING/059 "record values require a complete aggregate without unions, bases or nontrivial lifecycle operations"
+// ERROR@+1: LOWERING/059 "record values require a complete baseless non-union type with aggregate or user-provided construction and trivial copy and destruction"
 Value entry(Value value) { return value; }
 
 // ====

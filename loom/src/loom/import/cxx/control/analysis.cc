@@ -13,6 +13,7 @@
 #include <cxx/initialization.h>
 #include <cxx/symbols.h>
 #include <cxx/translation_unit.h>
+#include <cxx/type_traits.h>
 #include <cxx/types.h>
 
 #include <algorithm>
@@ -51,8 +52,10 @@ cxx::IdExpressionAST* address_identity(cxx::TranslationUnit& unit,
     if (auto* cast =
             cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression)) {
       if (cast->conversionFunction &&
-          cast->conversionFunction != address.source->copyConstructor() &&
-          cast->conversionFunction != address.source->moveConstructor()) {
+          !same_function(cast->conversionFunction,
+                         address.source->copyConstructor()) &&
+          !same_function(cast->conversionFunction,
+                         address.source->moveConstructor())) {
         return nullptr;
       }
       expression = cast->expression;
@@ -173,6 +176,15 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
       diagnostics_(diagnostics),
       types_(types),
       function_(function) {
+  if (function_ && function_->isConstructor() &&
+      cxx::isUserProvided(function_)) {
+    auto* definition = function_->declaration();
+    auto* function_body = definition ? definition->functionBody : nullptr;
+    for (auto* initializer :
+         cxx::ListView{cxx::ctor_initializers(function_body)}) {
+      accept(initializer);
+    }
+  }
   accept(body);
 }
 
@@ -770,16 +782,24 @@ void ControlFlow::analyze_default_constructor(const cxx::Type* type,
     type = types_.unqualified(array->elementType());
   }
   auto* record = types_.record(type, owner);
-  if (!record || !constructor ||
-      constructor != record->source->defaultConstructor() ||
-      !analyzed_constructors_.insert(constructor).second) {
+  if (!record || !constructor || cxx::isUserProvided(constructor) ||
+      !same_function(constructor, record->source->defaultConstructor())) {
+    return;
+  }
+  auto* canonical = constructor->canonical();
+  if (!analyzed_constructors_.insert(canonical).second) {
     return;
   }
   cxx::ASTRewriter::requireFunctionDefinition(&unit_, constructor);
   auto* definition = constructor->resolvedDefinition()->declaration();
   auto* body = definition ? definition->functionBody : nullptr;
   if (!body) {
-    return;
+    diagnostics_.reject(unit_, owner,
+                        "default record constructor has no source "
+                        "initialization plan");
+  }
+  if (cxx::ctor_initializers(body)) {
+    initializing_constructors_.insert(canonical);
   }
 
   // A synthesized constructor is an expression-local initialization plan, not
@@ -803,6 +823,12 @@ void ControlFlow::analyze_default_constructor(const cxx::Type* type,
     accept(initializer);
   }
   owners_ = std::move(enclosing_owners);
+}
+
+bool ControlFlow::default_constructor_initializes(
+    cxx::FunctionSymbol* constructor) const {
+  return constructor &&
+         initializing_constructors_.contains(constructor->canonical());
 }
 
 void ControlFlow::retain_call(cxx::CallExpressionAST* call,
@@ -1094,6 +1120,50 @@ bool ControlFlow::add_receiver_write(cxx::FieldSymbol* field) {
   return true;
 }
 
+void ControlFlow::retain_constructor_call(cxx::FunctionSymbol* constructor,
+                                          cxx::ExpressionAST* initializer,
+                                          CallArgument receiver,
+                                          bool storage_receiver,
+                                          cxx::AST* owner) {
+  DirectCall retained = {
+      .function = constructor,
+      .source = owner,
+      .arguments = {},
+      .receiver = std::nullopt,
+      .current_receiver = false,
+      .storage_receiver = storage_receiver,
+  };
+  if (initializer) {
+    cxx::Initializer source(initializer);
+    for (auto* argument : source.arguments()) {
+      retained.arguments.push_back(retain_call_argument(argument));
+    }
+  }
+  retained.receiver = std::move(receiver);
+  calls_.push_back(std::move(retained));
+}
+
+void ControlFlow::retain_constructor(cxx::VariableSymbol* variable,
+                                     cxx::ExpressionAST* initializer,
+                                     cxx::AST* owner) {
+  if (!types_.is_user_record_constructor(variable->type(),
+                                         variable->constructor(), owner)) {
+    return;
+  }
+  if (auto* conversion = constructor_conversion(initializer);
+      conversion &&
+      same_function(conversion->conversionFunction, variable->constructor())) {
+    initializer = conversion->expression;
+  }
+  retain_constructor_call(variable->constructor(), initializer,
+                          CallArgument{
+                              .source = nullptr,
+                              .identity_bindings = {variable},
+                              .write_binding = variable,
+                          },
+                          /*storage_receiver=*/false, owner);
+}
+
 void ControlFlow::retain_reference_initializers(cxx::VariableSymbol* variable,
                                                 cxx::ExpressionAST* initializer,
                                                 cxx::AST* owner) {
@@ -1205,8 +1275,18 @@ void ControlFlow::finalize_callable_effects() {
 }
 
 void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
-  cxx::ASTVisitor::visit(ast);
   auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(ast->symbol);
+  if (variable) {
+    if (auto* conversion = constructor_conversion(ast->initializer);
+        conversion &&
+        same_function(conversion->conversionFunction,
+                      variable->constructor()) &&
+        types_.is_user_record_constructor(
+            variable->type(), conversion->conversionFunction, ast)) {
+      bound_constructor_conversions_.insert(conversion);
+    }
+  }
+  cxx::ASTVisitor::visit(ast);
   if (variable) {
     if (unit_.typeTraits().is_lvalue_reference(variable->type()) &&
         ast->initializer) {
@@ -1220,8 +1300,47 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
       reference_aliases_[variable] = referent;
     }
     retain_reference_initializers(variable, ast->initializer, ast);
+    retain_constructor(variable, ast->initializer, ast);
     analyze_default_constructor(variable->type(), variable->constructor(), ast);
   }
+}
+
+void ControlFlow::visit(cxx::ImplicitCastExpressionAST* ast) {
+  cxx::ASTVisitor::visit(ast);
+  if (bound_constructor_conversions_.contains(ast) ||
+      !types_.is_user_record_constructor(ast->type, ast->conversionFunction,
+                                         ast)) {
+    return;
+  }
+  retain_constructor_call(ast->conversionFunction, ast->expression,
+                          CallArgument{.inherent_storage = true},
+                          /*storage_receiver=*/true, ast);
+}
+
+void ControlFlow::retain_member_constructor(
+    cxx::MemInitializerAST* initializer) {
+  auto* field = cxx::symbol_cast<cxx::FieldSymbol>(initializer->symbol);
+  if (!field || !types_.is_user_record_constructor(
+                    field->type(), initializer->constructor, initializer)) {
+    return;
+  }
+  auto* source = cxx::memInitializerClause(unit_.arena(), initializer);
+  retain_constructor_call(initializer->constructor, source,
+                          CallArgument{
+                              .write_binding = initializer->symbol,
+                              .inherent_storage = true,
+                          },
+                          /*storage_receiver=*/true, initializer);
+}
+
+void ControlFlow::visit(cxx::ParenMemInitializerAST* ast) {
+  cxx::ASTVisitor::visit(ast);
+  retain_member_constructor(ast);
+}
+
+void ControlFlow::visit(cxx::BracedMemInitializerAST* ast) {
+  cxx::ASTVisitor::visit(ast);
+  retain_member_constructor(ast);
 }
 
 void ControlFlow::visit(cxx::ConditionExpressionAST* ast) {
@@ -1244,11 +1363,23 @@ void ControlFlow::visit(cxx::BracedInitListAST* ast) {
 
 void ControlFlow::visit(cxx::TypeConstructionAST* ast) {
   cxx::ASTVisitor::visit(ast);
+  if (types_.is_user_record_constructor(ast->type, ast->constructorSymbol,
+                                        ast)) {
+    retain_constructor_call(ast->constructorSymbol, ast,
+                            CallArgument{.inherent_storage = true},
+                            /*storage_receiver=*/true, ast);
+  }
   analyze_default_constructor(ast->type, ast->constructorSymbol, ast);
 }
 
 void ControlFlow::visit(cxx::BracedTypeConstructionAST* ast) {
   cxx::ASTVisitor::visit(ast);
+  if (types_.is_user_record_constructor(ast->type, ast->constructorSymbol,
+                                        ast)) {
+    retain_constructor_call(ast->constructorSymbol, ast,
+                            CallArgument{.inherent_storage = true},
+                            /*storage_receiver=*/true, ast);
+  }
   analyze_default_constructor(ast->type, ast->constructorSymbol, ast);
 }
 

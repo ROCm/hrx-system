@@ -1759,8 +1759,13 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
     const auto target = target_definitions_.reference(symbol);
     const bool link_once =
         exported_.contains(symbol) && symbol->canonical()->isInline();
-    const loom_attribute_t source_signature = build_c_source_signature(
-        unit_, diagnostics_, module_, symbol, definition, types);
+    const bool required_inline =
+        symbol->isConstructor() || annotated(symbol, "force_inline");
+    const loom_attribute_t source_signature =
+        symbol->isConstructor()
+            ? loom_attr_absent()
+            : build_c_source_signature(unit_, diagnostics_, module_, symbol,
+                                       definition, types);
     check(loom_func_def_build(
         builder,
         (annotated(symbol, "device") ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_CC : 0) |
@@ -1769,9 +1774,7 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
                  : 0) |
             (annotated(symbol, "retain") ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_RETAIN
                                          : 0) |
-            (annotated(symbol, "force_inline")
-                 ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_INLINE_POLICY
-                 : 0) |
+            (required_inline ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_INLINE_POLICY : 0) |
             (link_once ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_LINKAGE : 0) |
             (loom_symbol_ref_is_valid(target)
                  ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_TARGET
@@ -1782,8 +1785,8 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
         annotated(symbol, "retain") ? LOOM_FUNC_RETAIN_RETAIN : 0,
         annotated(symbol, "device") ? LOOM_FUNC_CC_DEVICE : 0,
         /*effect_contract=*/0, /*temperature=*/0,
-        annotated(symbol, "force_inline") ? LOOM_INLINE_POLICY_INLINE : 0,
-        target, source_signature, 0, {}, 0, {},
+        required_inline ? LOOM_INLINE_POLICY_INLINE : 0, target,
+        source_signature, 0, {}, 0, {},
         callees_.at({symbol->canonical(), instance.receiver_abi}),
         arguments.data(), arguments.size(), results.data(), results.size(),
         tied_results.data(), tied_results.size(), predicates.data(),
