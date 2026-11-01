@@ -610,7 +610,7 @@ TEST_F(SemaphoreTest, HostSignalClearsOnlyCoveredCache) {
   ExpectAvailableSignals(8);
 }
 
-TEST_F(SemaphoreTest, ColdTimelineStartsFromPublishedOrCompletedValue) {
+TEST_F(SemaphoreTest, AvailabilityStartsFromPublishedOrCompletedValue) {
   auto* completed = Semaphore(4);
   auto* completed_submission = Submission(completed);
   EXPECT_EQ(Value(completed_submission), 4u);
@@ -680,28 +680,43 @@ TEST_F(SemaphoreTest, FailureDoesNotReclaimNativeReaders) {
   ExpectAvailableSignals(8);
 }
 
-TEST_F(SemaphoreTest, ColdAllocationFailureLeavesReadyPathUsable) {
+TEST_F(SemaphoreTest, FirstAvailabilityWaitDoesNotAllocate) {
   Allocator allocator;
   iree_hal_semaphore_t* semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
       proactor_, nullptr, 0, 4, allocator.get(), &semaphore));
   allocator.deny.store(true);
   iree_hal_semaphore_t* submission = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
-                        iree_hal_amd_gpu_semaphore_acquire_submission_semaphore(
-                            semaphore, &submission));
-  EXPECT_EQ(submission, nullptr);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_acquire_submission_semaphore(
+      semaphore, &submission));
+  EXPECT_EQ(allocator.live.load(), 1);
+  Completion completion;
+  iree_async_semaphore_timepoint_t timepoint = {
+      .callback =
+          [](void* user_data, iree_async_semaphore_timepoint_t*,
+             iree_status_t status) { Completion::Run(user_data, status); },
+      .user_data = &completion,
+  };
+  IREE_ASSERT_OK(iree_async_semaphore_acquire_timepoint(
+      reinterpret_cast<iree_async_semaphore_t*>(submission), 1, &timepoint));
+  EXPECT_EQ(completion.calls.load(), 0u);
   auto* signal = AcquireSignal();
   Publish(semaphore, 1, signal);
+  completion.done.acquire();
+  EXPECT_EQ(completion.calls.load(), 1u);
+  EXPECT_EQ(iree_status_code(completion.status), IREE_STATUS_OK);
+  EXPECT_EQ(Value(semaphore), 0u);
+  EXPECT_EQ(Value(submission), 1u);
   auto wait = AcquireWait(semaphore, 1);
   EXPECT_EQ(wait.signal, signal);
   iree_hal_amd_gpu_signal_release(wait.signal);
   iree_hal_amd_gpu_signal_release(signal);
+  iree_hal_semaphore_release(submission);
   iree_hal_semaphore_release(semaphore);
   EXPECT_EQ(allocator.live.load(), 0);
 }
 
-TEST_F(SemaphoreTest, TerminalFailurePrecedesColdAllocation) {
+TEST_F(SemaphoreTest, TerminalFailureRejectsAvailabilityAcquisition) {
   Allocator allocator;
   iree_hal_semaphore_t* semaphore = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
@@ -755,12 +770,14 @@ TEST_F(SemaphoreTest, FutureWaitFailureAndCancellationJoinInline) {
   iree_async_semaphore_wait_context_deinitialize(&context);
 }
 
-TEST_F(SemaphoreTest, ConcurrentColdInstallationKeepsOneChild) {
+TEST_F(SemaphoreTest, ConcurrentFirstAcquisitionReusesConstructedView) {
   Allocator allocator;
   for (uint64_t iteration = 0; iteration < 64; ++iteration) {
+    allocator.deny.store(false);
     iree_hal_semaphore_t* semaphore = nullptr;
     IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
         proactor_, nullptr, iteration, 4, allocator.get(), &semaphore));
+    allocator.deny.store(true);
     std::array<iree_hal_semaphore_t*, 4> children = {};
     std::array<std::thread, 4> threads;
     std::barrier<> start(4);
@@ -774,7 +791,7 @@ TEST_F(SemaphoreTest, ConcurrentColdInstallationKeepsOneChild) {
     for (auto& thread : threads) {
       thread.join();
     }
-    EXPECT_EQ(allocator.live.load(), 2);
+    EXPECT_EQ(allocator.live.load(), 1);
     for (auto* child : children) {
       EXPECT_EQ(child, children[0]);
       EXPECT_EQ(Value(child), iteration);
@@ -783,6 +800,22 @@ TEST_F(SemaphoreTest, ConcurrentColdInstallationKeepsOneChild) {
     iree_hal_semaphore_release(semaphore);
     EXPECT_EQ(allocator.live.load(), 0);
   }
+}
+
+TEST_F(SemaphoreTest, AvailabilityRetainsAllocationAfterParentRelease) {
+  Allocator allocator;
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
+      proactor_, nullptr, 7, 4, allocator.get(), &semaphore));
+  allocator.deny.store(true);
+  iree_hal_semaphore_t* submission = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_acquire_submission_semaphore(
+      semaphore, &submission));
+  iree_hal_semaphore_release(semaphore);
+  EXPECT_EQ(allocator.live.load(), 1);
+  EXPECT_EQ(Value(submission), 7u);
+  iree_hal_semaphore_release(submission);
+  EXPECT_EQ(allocator.live.load(), 0);
 }
 
 TEST_F(SemaphoreTest, PublicationCompletionAndReaderAcquisitionRace) {
