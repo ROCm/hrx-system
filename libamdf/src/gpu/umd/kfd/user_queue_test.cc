@@ -1186,6 +1186,106 @@ TEST_F(KfdUserQueueTest, MultiXccPm4InitializesEveryNativeContextHeader) {
   EXPECT_EQ(native_state_.observed_context_headers[1].debug_size, 4096u);
 }
 
+TEST_F(KfdUserQueueTest,
+       InitializesProtocolStorageWithoutRewritingSavePayload) {
+  // Recognizable native payload makes host writes visible independently of the
+  // fresh GTT allocator's zero-fill guarantee.
+  native_api_.buffer_create =
+      [](void* user_data, amdf_gpu_umd_device_t* device,
+         const amdf_gpu_kfd_buffer_create_info_t* create_info,
+         amdf_gpu_kfd_buffer_t** out_buffer,
+         amdf_gpu_kfd_buffer_result_t* out_result) {
+        const amdf_status_t status = FakeNativeState::BufferCreate(
+            user_data, device, create_info, out_buffer, out_result);
+        if (amdf_status_is_ok(status) && out_result->host_pointer) {
+          std::memset(out_result->host_pointer, 0xA5, create_info->byte_length);
+        }
+        return status;
+      };
+  const struct {
+    // Packet language whose native initialization is exercised.
+    amdf_queue_command_type_t command_type;
+    // Number of independently initialized compute contexts.
+    uint32_t context_count;
+    // Native debugger payload extent shared by all context headers.
+    uint32_t debug_byte_length;
+  } cases[] = {
+      {AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, 1, 2048},
+      {AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, 2, 4096},
+      {AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, 1, 2048},
+      {AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, 8, 20480},
+      {AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA, 0, 0},
+  };
+  const auto initial_topology = device_.topology;
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(test_case.command_type);
+    SCOPED_TRACE(test_case.context_count);
+    native_state_.Reset();
+    device_.topology = initial_topology;
+    if (test_case.context_count == 8) {
+      SelectAqlTopology();
+    } else if (test_case.context_count == 2) {
+      device_.topology.properties.gfx_ip = {12, 5, 0};
+      device_.topology.gc_ip = {12, 1, 0, true};
+      device_.topology.properties.topology.xcc_count = 2;
+    }
+    ASSERT_NO_FATAL_FAILURE(CreateQueue(test_case.command_type));
+    const auto& create = native_state_.observed_create;
+    const auto* ring = reinterpret_cast<const uint32_t*>(
+        native_state_.buffers[0].storage.data());
+    for (size_t i = 0; i < create.ring_size / sizeof(uint32_t); ++i) {
+      const uint32_t expected =
+          test_case.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL &&
+                  i % 16 == 0
+              ? 1u
+              : 0u;
+      ASSERT_EQ(ring[i], expected) << i;
+    }
+    ASSERT_NO_FATAL_FAILURE(MapQueue());
+    EXPECT_EQ(amdf_atomic_uint64_load_acquire(ReadIndex()), 0u);
+    EXPECT_EQ(amdf_atomic_uint64_load_acquire(WriteIndex()), 0u);
+    ASSERT_EQ(native_state_.observed_context_headers.size(),
+              test_case.context_count);
+    if (test_case.context_count != 0) {
+      const auto& context =
+          native_state_.buffers[create.eop_buffer_size ? 3 : 2];
+      const auto* bytes =
+          reinterpret_cast<const uint8_t*>(context.storage.data());
+      const size_t save_bytes =
+          test_case.context_count * create.ctx_save_restore_size;
+      for (uint32_t i = 0; i < test_case.context_count; ++i) {
+        const auto& header = native_state_.observed_context_headers[i];
+        const kfd_context_save_area_header expected = {
+            .wave_state = {},
+            .debug_offset = static_cast<uint32_t>(
+                save_bytes - i * create.ctx_save_restore_size),
+            .debug_size = test_case.debug_byte_length,
+            .err_payload_addr =
+                native_state_.buffers[1].device_address +
+                (test_case.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+                     ? 320u
+                     : 128u),
+            .err_event_id = 0,
+            .reserved1 = 0,
+        };
+        EXPECT_EQ(std::memcmp(&header, &expected, sizeof(expected)), 0);
+      }
+      for (size_t i = 0; i < context.byte_length; ++i) {
+        if (i < save_bytes && i % create.ctx_save_restore_size <
+                                  sizeof(kfd_context_save_area_header)) {
+          continue;
+        }
+        ASSERT_EQ(bytes[i], 0xA5) << i;
+      }
+    }
+    ASSERT_EQ(amdf_gpu_umd_user_queue_mapping_destroy(mapping_),
+              AMDF_STATUS_OK);
+    mapping_ = nullptr;
+    ASSERT_EQ(amdf_gpu_umd_user_queue_destroy(queue_), AMDF_STATUS_OK);
+    queue_ = nullptr;
+  }
+}
+
 TEST_F(KfdUserQueueTest, AqlReservationsMayLeadPublicationAndWrapTheRing) {
   SelectAqlTopology();
   auto create_info = MakeCreateInfo(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
