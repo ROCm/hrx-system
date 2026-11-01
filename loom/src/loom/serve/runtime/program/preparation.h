@@ -128,6 +128,14 @@ void loom_serve_preparation_module_begin(iree_vm_module_t* module,
 loom_serve_preparation_t* loom_serve_preparation_module_take(
     iree_vm_module_t* module);
 
+// Returns exclusive ownership of a discarded result to its originating module.
+// All views into the result become invalid. The module keeps one empty capture
+// and at most one small backing block for its next nonempty invocation; larger
+// backing and any previously recycled result are released. NULL is ignored.
+// Retained results continue to use take/free and never share this storage.
+void loom_serve_preparation_module_recycle(
+    iree_vm_module_t* module, loom_serve_preparation_t* preparation);
+
 // Invokes |entry| from |source_path| in |sources| once with borrowed
 // |arguments|. The source imports runner-private "prepare" capabilities:
 //   stage(buffer root, i64 tag) -> i32 stage
@@ -235,7 +243,7 @@ uint32_t loom_serve_preparation_local_sources(
     const loom_serve_preparation_t* preparation,
     const loom_model_file_list_t** out_sources);
 
-// Requested owned bytes, including spare array capacity and copied strings.
+// Owned backing bytes, including the capture header and arena capacity/padding.
 // NULL has no storage. This query does not traverse declarations.
 iree_host_size_t loom_serve_preparation_storage_size(
     const loom_serve_preparation_t* preparation);

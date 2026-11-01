@@ -468,7 +468,7 @@ static iree_status_t loom_serve_weight_prepare_policy(
       }
       job->span_preparers[i] = p;
     }
-    loom_serve_preparation_free(declaration);
+    loom_serve_preparation_module_recycle(libraries[0], declaration);
   }
   loom_serve_program_free(program);
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(libraries); ++i) {

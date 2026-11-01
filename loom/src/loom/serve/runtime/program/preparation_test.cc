@@ -8,6 +8,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
@@ -292,11 +293,12 @@ class PreparationCaptureTest : public PreparationTest {
   void SetUp() override {
     PreparationTest::SetUp();
     IREE_ASSERT_OK(loom_serve_preparation_module_create(
-        environment, card, nullptr, host_allocator, &module));
+        environment, card, nullptr, CaptureAllocator(), &module));
     const iree_string_view_t roots[] = {IREE_SV("request_stages"),
                                         IREE_SV("configure_cold_stage"),
                                         IREE_SV("conflicting_parameter_policy"),
                                         IREE_SV("no_stages"),
+                                        IREE_SV("large_catalog"),
                                         IREE_SV("shared_source"),
                                         IREE_SV("scoped_source"),
                                         IREE_SV("cold_source"),
@@ -319,7 +321,48 @@ class PreparationCaptureTest : public PreparationTest {
     iree_vm_module_release(module);
     loom_model_card_release(card);
     PreparationTest::TearDown();
+    EXPECT_EQ(capture_live_bytes, 0u);
   }
+
+  iree_allocator_t CaptureAllocator() {
+    return {
+        this,
+        +[](void* user_data, iree_allocator_command_t command,
+            const void* parameters, void** pointer) -> iree_status_t {
+          auto* self = static_cast<PreparationCaptureTest*>(user_data);
+          void* previous = command == IREE_ALLOCATOR_COMMAND_FREE ||
+                                   command == IREE_ALLOCATOR_COMMAND_REALLOC
+                               ? *pointer
+                               : nullptr;
+          const size_t previous_bytes =
+              previous ? self->capture_allocations.at(previous) : 0;
+          const auto system = iree_allocator_system();
+          auto status = system.ctl(system.self, command, parameters, pointer);
+          if (!iree_status_is_ok(status)) {
+            return status;
+          }
+          if (previous) {
+            self->capture_allocations.erase(previous);
+          }
+          self->capture_live_bytes -= previous_bytes;
+          if (command != IREE_ALLOCATOR_COMMAND_FREE) {
+            ++self->capture_allocation_calls;
+            const size_t bytes =
+                static_cast<const iree_allocator_alloc_params_t*>(parameters)
+                    ->byte_length;
+            self->capture_allocations[*pointer] = bytes;
+            self->capture_live_bytes += bytes;
+          }
+          return status;
+        }};
+  }
+
+  // Successful allocation/growth requests made by declaration ownership.
+  size_t capture_allocation_calls = 0;
+  // Exact requested backing bytes still owned by the module and captures.
+  size_t capture_live_bytes = 0;
+  // Allocator bookkeeping independent of the declaration representation.
+  std::unordered_map<void*, size_t> capture_allocations;
 
   iree_status_t Invoke(iree_string_view_t entry,
                        iree_vm_variant_span_t arguments = {},
@@ -666,6 +709,86 @@ TEST_F(PreparationCaptureTest, EmptyCaptureNeedsNoDeclarationStorage) {
   EXPECT_TRUE(loom_serve_preparation_code_equal(preparation, nullptr));
 }
 
+TEST_F(PreparationCaptureTest, RecycledCapturesKeepRetainedResultsIndependent) {
+  auto capture = [&](int64_t tag, loom_serve_preparation_t** output) {
+    iree_vm_variant_t argument = iree_vm_variant_from_i64(tag);
+    iree_vm_variant_t results[2] = {};
+    loom_serve_preparation_module_begin(module, 0, nullptr, 0);
+    IREE_ASSERT_OK(Invoke(IREE_SV("request_stages"), {&argument, 1},
+                          iree_vm_variant_span_from_array(results)));
+    *output = loom_serve_preparation_module_take(module);
+  };
+  const size_t module_bytes = capture_live_bytes;
+  capture(7, &preparation);
+  ASSERT_NE(preparation, nullptr);
+  EXPECT_EQ(loom_serve_preparation_storage_size(preparation),
+            capture_live_bytes - module_bytes);
+  capture(10, &second);
+  ASSERT_NE(second, nullptr);
+  const size_t allocation_calls = capture_allocation_calls;
+  const size_t backing_bytes = capture_live_bytes;
+  for (int64_t tag = 11; tag <= 40; ++tag) {
+    loom_serve_preparation_module_recycle(module, second);
+    second = nullptr;
+    capture(tag, &second);
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(capture_allocation_calls, allocation_calls);
+    EXPECT_EQ(capture_live_bytes, backing_bytes);
+    EXPECT_EQ(loom_serve_preparation_stage(preparation, 0)->tag, 7);
+    EXPECT_EQ(loom_serve_preparation_stage(second, 0)->tag, tag);
+  }
+  loom_serve_program_free(program);
+  program = nullptr;
+  iree_vm_module_release(module);
+  module = nullptr;
+  EXPECT_EQ(capture_live_bytes,
+            loom_serve_preparation_storage_size(preparation) +
+                loom_serve_preparation_storage_size(second));
+  for (auto* declaration : {preparation, second}) {
+    ASSERT_EQ(loom_serve_preparation_stage_count(declaration), 2u);
+    const auto* stage = loom_serve_preparation_stage(declaration, 0);
+    EXPECT_EQ(std::string(stage->root.data, stage->root.size), "stage_root");
+    const auto value = stage->config.bindings[0].value;
+    EXPECT_EQ(std::string(value.data, value.size),
+              declaration == preparation ? "7" : "40");
+  }
+}
+
+TEST_F(PreparationCaptureTest, RecyclingReleasesLargeBackingAndPartialResults) {
+  const size_t module_bytes = capture_live_bytes;
+  loom_serve_preparation_module_begin(module, 0, nullptr,
+                                      LOOM_SERVE_PREPARATION_FLAG_PARAMETERS);
+  IREE_ASSERT_OK(Invoke(IREE_SV("large_catalog")));
+  preparation = loom_serve_preparation_module_take(module);
+  ASSERT_NE(preparation, nullptr);
+  const size_t large_bytes = loom_serve_preparation_storage_size(preparation);
+  EXPECT_EQ(large_bytes, capture_live_bytes - module_bytes);
+  loom_serve_preparation_module_recycle(module, preparation);
+  preparation = nullptr;
+  // Only the reusable header remains after a large catalog is discarded.
+  const size_t recycled_header_bytes = capture_live_bytes - module_bytes;
+  EXPECT_LT(recycled_header_bytes, 1024u);
+  EXPECT_GT(large_bytes, 64 * 1024u);
+  const size_t allocation_calls = capture_allocation_calls;
+  loom_serve_preparation_module_begin(module, 0, nullptr, 0);
+  IREE_ASSERT_OK(Invoke(IREE_SV("no_stages")));
+  EXPECT_EQ(loom_serve_preparation_module_take(module), nullptr);
+  EXPECT_EQ(capture_allocation_calls, allocation_calls);
+  for (int i = 0; i < 3; ++i) {
+    loom_serve_preparation_module_begin(module, 0, nullptr,
+                                        LOOM_SERVE_PREPARATION_FLAG_PARAMETERS);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          Invoke(IREE_SV("conflicting_parameter_policy")));
+    preparation = loom_serve_preparation_module_take(module);
+    ASSERT_NE(preparation, nullptr);
+    ASSERT_EQ(loom_serve_preparation_stage_count(preparation), 1u);
+    loom_serve_preparation_module_recycle(module, preparation);
+    preparation = nullptr;
+  }
+  // TearDown releases the module's recycled partial result and checks all
+  // bytes.
+}
+
 TEST_F(PreparationCaptureTest, ForecastBelongsToColdControlNotDeviceIdentity) {
   iree_vm_variant_t arguments[] = {iree_vm_variant_from_i32(0)};
   loom_serve_preparation_module_begin(module, 0, nullptr, 0);
@@ -730,8 +853,7 @@ TEST_F(PreparationCaptureTest, IdentityAndStorageBelongToOwnedDeclarations) {
     EXPECT_EQ(loom_serve_preparation_code_equal(preparation, second),
               tag == 99);
     EXPECT_EQ(loom_serve_preparation_storage_size(second),
-              loom_serve_preparation_storage_size(preparation) +
-                  (tag == 100 ? 2 : 0));
+              loom_serve_preparation_storage_size(preparation));
     loom_serve_preparation_free(second);
     second = nullptr;
   }
