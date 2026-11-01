@@ -336,9 +336,9 @@ func.def target(@nested_narrow) @nested_conditioned_index(%input: index) -> (ind
   %inner_condition = index.cmp ult, %x, %c2 : index
   %inner_true = index.add %x, %c8 : index
   %inner_false = index.sub %x, %c2 : index
-  %17 = scf.select %inner_condition, %inner_true, %inner_false : index
+  %inner = scf.select %inner_condition, %inner_true, %inner_false : index
   %outer_false = index.sub %x, %c4 : index
-  %19 = scf.select %outer_condition, %17, %outer_false : index
+  %19 = scf.select %outer_condition, %inner, %outer_false : index
   %selected = index.assume %19 [range(%19, 0, 9)] : index
   func.return %selected : index
 }

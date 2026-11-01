@@ -737,6 +737,49 @@ TEST_F(CanonicalizerTest, EmptyFunctionNoOps) {
   EXPECT_EQ(count_live_ops(), 0);
 }
 
+TEST_F(CanonicalizerTest, EliminatedFactIdentityNamesAnonymousOperand) {
+  const loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_value_id_t input = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t dead_input = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_region_entry_block(body_), i32, &input));
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_region_entry_block(body_), i32, &dead_input));
+
+  loom_op_t* assume = NULL;
+  IREE_ASSERT_OK(loom_scalar_assume_build(
+      &builder_, &input, 1, /*predicates=*/nullptr, /*predicate_count=*/0, &i32,
+      1, LOOM_LOCATION_UNKNOWN, &assume));
+  const loom_value_id_t refined = loom_scalar_assume_results(assume).values[0];
+  loom_string_id_t refined_name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_builder_intern_string(&builder_, IREE_SV("refined"), &refined_name));
+  IREE_ASSERT_OK(loom_module_set_value_name(module_, refined, refined_name));
+
+  loom_op_t* dead_assume = NULL;
+  IREE_ASSERT_OK(loom_scalar_assume_build(
+      &builder_, &dead_input, 1, /*predicates=*/nullptr,
+      /*predicate_count=*/0, &i32, 1, LOOM_LOCATION_UNKNOWN, &dead_assume));
+  const loom_value_id_t dead_refined =
+      loom_scalar_assume_results(dead_assume).values[0];
+  loom_string_id_t dead_refined_name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_intern_string(&builder_, IREE_SV("dead_refined"),
+                                            &dead_refined_name));
+  IREE_ASSERT_OK(
+      loom_module_set_value_name(module_, dead_refined, dead_refined_name));
+
+  loom_op_t* use = NULL;
+  IREE_ASSERT_OK(
+      loom_test_use_build(&builder_, &refined, 1, LOOM_LOCATION_UNKNOWN, &use));
+
+  IREE_ASSERT_OK(run_canonicalize(func_like_));
+  EXPECT_EQ(loom_test_use_values(use).values[0], input);
+  EXPECT_TRUE(iree_string_view_equal(loom_module_value_name(module_, input),
+                                     IREE_SV("refined")));
+  EXPECT_TRUE(iree_string_view_equal(
+      loom_module_value_name(module_, dead_input), IREE_SV("dead_refined")));
+}
+
 TEST_F(CanonicalizerTest, RetainsUnusedFactIdentityWhenRequestedForCSE) {
   const loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
   loom_value_id_t lhs = LOOM_VALUE_ID_INVALID;

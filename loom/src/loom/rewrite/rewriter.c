@@ -809,10 +809,36 @@ static iree_status_t loom_rewriter_add_operand_users_except_to_worklist(
   return iree_ok_status();
 }
 
+static iree_status_t loom_rewriter_preserve_elided_fact_identity_names(
+    loom_rewriter_t* rewriter, const loom_op_t* op,
+    const loom_value_id_t* replacements) {
+  if (!loom_traits_are_fact_identity(op->traits)) {
+    return iree_ok_status();
+  }
+  IREE_ASSERT_EQ(op->operand_count, op->result_count,
+                 "fact identity must preserve value arity");
+  const loom_value_id_t* operands = loom_op_const_operands(op);
+  const loom_value_id_t* results = loom_op_const_results(op);
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    // A fact identity result can also be replaced by a newly materialized
+    // constant. That replacement already inherits the result name and the
+    // original operand must remain unchanged. Transfer the name backward only
+    // when the identity itself disappears or is replaced by its paired input.
+    if (replacements && replacements[i] != operands[i]) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(
+        loom_rewriter_copy_value_name(rewriter, results[i], operands[i]));
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_rewriter_replace_all_uses_and_erase(
     loom_rewriter_t* rewriter, loom_op_t* op,
     const loom_value_id_t* replacements, uint16_t count) {
   loom_value_id_t* results = loom_op_results(op);
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_elided_fact_identity_names(
+      rewriter, op, replacements));
   for (uint16_t i = 0; i < count; ++i) {
     if (results[i] == LOOM_VALUE_ID_INVALID) {
       continue;
@@ -936,6 +962,8 @@ iree_status_t loom_rewriter_replace_results_with_materialized_values_and_erase(
 }
 
 iree_status_t loom_rewriter_erase(loom_rewriter_t* rewriter, loom_op_t* op) {
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_elided_fact_identity_names(
+      rewriter, op, /*replacements=*/NULL));
   IREE_RETURN_IF_ERROR(
       loom_rewriter_add_subtree_providers_to_worklist(rewriter, op));
   if (!loom_rewriter_is_trivially_dead(rewriter, op)) {
