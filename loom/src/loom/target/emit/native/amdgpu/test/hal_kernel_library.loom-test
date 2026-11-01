@@ -26,9 +26,9 @@ low.kernel.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) workgroup_s
   %right = live_in<amdgpu.workgroup_id.y> : reg<amdgpu.sgpr>
   %group_z = live_in<amdgpu.workgroup_id.z> : reg<amdgpu.sgpr>
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %storage = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
+  %storage = storage {byte_alignment = 16, byte_length = 2048} : low.storage<workgroup>
   %base = storage_address %storage : low.storage<workgroup> -> reg<amdgpu.vgpr>
-  %offset = v_lshlrev_b32_src0_inline %lane, 4
+  %offset = v_lshlrev_b32_src0_inline %lane, 5
   %address = v_add_u32 %base, %offset
   %zero = s_mov_b32 0
   %use_dispatch = s_cmp_gt_u32 %group_z, %zero
@@ -49,7 +49,8 @@ low.kernel.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) workgroup_s
   low.br ^join(%preserved: reg<amdgpu.sgpr x2>)
 ^group_path:
   // Both original workgroup units need transport. Reuse the reversed mask's
-  // components through their forwarding chains instead of retaining inputs.
+  // components through their forwarding chains. Updating a separate copy
+  // must not invalidate the preserved provider.
   %saved_left = copy %left : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
   %saved_right = copy %right : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
   %moved_right = move %saved_right : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
@@ -60,6 +61,17 @@ low.kernel.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) workgroup_s
   %alias = low.assume %second_alias [range(%second_alias, 0, 1024)] : reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32_src0_inline %lane, %alias {false_value = 0}
   ds_write_b32 %address, %selected
+  // Keep an independent left copy, but overwrite the newest right copy.
+  // The join must select preserved bits rather than either updated value.
+  %preserved_left = copy %saved_left : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
+  %mutable_left = copy %preserved_left : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
+  %mutable_right = copy %moved_right : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
+  %changed_copy = s_addk_i32 %mutable_left, 1
+  %changed_source = s_addk_i32 %mutable_right, 1
+  %copied_result = copy %changed_copy : reg<amdgpu.sgpr> -> reg<amdgpu.vgpr>
+  %overwritten_result = copy %changed_source : reg<amdgpu.sgpr> -> reg<amdgpu.vgpr>
+  ds_write_b32 %address, %copied_result {offset = 4}
+  ds_write_b32 %address, %overwritten_result {offset = 16}
   %pair = concat(%left, %right) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   low.br ^join(%pair: reg<amdgpu.sgpr x2>)
 ^join(%identity: reg<amdgpu.sgpr x2>):
@@ -79,7 +91,7 @@ low.kernel.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) workgroup_s
 .type fixed_identity_sources,@function
 fixed_identity_sources:
   v_mov_b32 v1, 0
-  v_lshlrev_b32 v2, 4, v0
+  v_lshlrev_b32 v2, 5, v0
   s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
   v_add_u32 v1, v1, v2
   s_mov_b32 s5, 0
@@ -100,10 +112,19 @@ fixed_identity_sources:
   s_branch .Lbb5
 .Lbb4:
   s_mov_b32 s5, s2
-  s_mov_b32 s4, s3
+  s_mov_b32 s0, s3
+  s_mov_b32 s4, s0
   v_cndmask_b32 v0, 0, v0, s[4:5]
   ds_write_b32 v1, v0 offset:0
-  s_mov_b32 s0, s5
+  s_mov_b32 s6, s5
+  s_mov_b32 s1, s6
+  s_addk_i32 s1, 1
+  s_addk_i32 s0, 1
+  v_mov_b32 v0, s1
+  v_mov_b32 v2, s0
+  ds_write_b32 v1, v0 offset:4
+  ds_write_b32 v1, v2 offset:16
+  s_mov_b32 s0, s6
   s_mov_b32 s1, s4
 .Lbb5:
   v_mov_b32 v2, s0
@@ -116,7 +137,7 @@ fixed_identity_sources:
 .rodata
 .p2align 6
 .amdhsa_kernel fixed_identity_sources
-  .amdhsa_group_segment_fixed_size 1024
+  .amdhsa_group_segment_fixed_size 2048
   .amdhsa_private_segment_fixed_size 0
   .amdhsa_kernarg_size 0
   .amdhsa_user_sgpr_count 2
@@ -134,7 +155,7 @@ fixed_identity_sources:
   .amdhsa_system_sgpr_workgroup_info 0
   .amdhsa_system_vgpr_workitem_id 0
   .amdhsa_next_free_vgpr 4
-  .amdhsa_next_free_sgpr 7
+  .amdhsa_next_free_sgpr 8
   .amdhsa_reserve_vcc 0
   .amdhsa_float_round_mode_32 0
   .amdhsa_float_round_mode_16_64 0
@@ -166,11 +187,11 @@ fixed_identity_sources:
     - .name: 'fixed_identity_sources'
       .symbol: 'fixed_identity_sources.kd'
       .kernarg_segment_size: 0
-      .group_segment_fixed_size: 1024
+      .group_segment_fixed_size: 2048
       .private_segment_fixed_size: 0
       .kernarg_segment_align: 8
       .wavefront_size: 64
-      .sgpr_count: 7
+      .sgpr_count: 8
       .vgpr_count: 4
       .max_flat_workgroup_size: 64
       .reqd_workgroup_size:
