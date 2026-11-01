@@ -272,6 +272,115 @@ TEST_P(NestedSummaryTest, ResultDependencies) {
 
 INSTANTIATE_TEST_SUITE_P(Dependencies, NestedSummaryTest, ::testing::Bool());
 
+class SummaryChainTest
+    : public FactSummaryTest,
+      public ::testing::WithParamInterface<std::tuple<int, bool>> {};
+
+// Each result feeds the next branch's selector and both yielded values. A
+// head mutation closes that complete semantic dependency graph once, even
+// while numeric changes revisit joins. Separate publications must still
+// propagate each alternating edit, with or without rewrite notifications.
+TEST_P(SummaryChainTest, PublishesSemanticClosureOnce) {
+  const auto [branch_count, track_rewrites] = GetParam();
+  const auto type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_op_t* seed = nullptr;
+  loom_op_t* zero = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(1), type,
+                                          LOOM_LOCATION_UNKNOWN, &seed));
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(0), type,
+                                          LOOM_LOCATION_UNKNOWN, &zero));
+  auto value = loom_test_constant_result(seed);
+  for (int i = 0; i < branch_count; ++i) {
+    loom_op_t* branch = nullptr;
+    IREE_ASSERT_OK(loom_test_branch_build(&builder_, value, &type, 1, nullptr,
+                                          0, LOOM_LOCATION_UNKNOWN, &branch));
+    for (int region_index = 0; region_index < 2; ++region_index) {
+      auto nested = builder_;
+      auto* region = loom_op_regions(branch)[region_index];
+      loom_builder_enter_region(&nested, branch, region);
+      loom_builder_set_block(&nested, loom_region_entry_block(region));
+      loom_op_t* addition = nullptr;
+      IREE_ASSERT_OK(loom_test_addi_build(&nested, value,
+                                          loom_test_constant_result(zero), type,
+                                          LOOM_LOCATION_UNKNOWN, &addition));
+      const auto result = loom_test_addi_result(addition);
+      loom_op_t* yield = nullptr;
+      IREE_ASSERT_OK(loom_test_yield_build(&nested, &result, 1,
+                                           LOOM_LOCATION_UNKNOWN, &yield));
+    }
+    value = loom_op_results(branch)[0];
+  }
+  loom_op_t* end = nullptr;
+  IREE_ASSERT_OK(loom_test_yield_build(&builder_, nullptr, 0,
+                                       LOOM_LOCATION_UNKNOWN, &end));
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool_, &arena);
+  loom_pass_value_fact_owner_t owner;
+  loom_pass_value_fact_owner_initialize(&block_pool_, &owner);
+  const auto scope = loom_pass_value_fact_scope_function(function_);
+  loom_value_fact_table_t* facts = nullptr;
+  IREE_ASSERT_OK(
+      loom_pass_value_fact_owner_acquire(&owner, module_, scope, &facts));
+  loom_rewriter_t rewriter;
+  loom_rewriter_initialize(&rewriter, module_, &arena);
+  if (track_rewrites) {
+    IREE_ASSERT_OK(loom_rewriter_enable_worklist(&rewriter));
+  }
+  loom_rewriter_attach_value_facts(&rewriter, facts);
+  struct Observer {
+    // Normal publication consumer, including pending-membership retirement.
+    decltype(facts->summary_computed) previous;
+    // Completed joins since the most recent mutation batch.
+    size_t count = 0;
+  } observer{facts->summary_computed};
+  facts->summary_computed = {
+      .user_data = &observer,
+      .fn =
+          [](void* user_data, const loom_op_t* op) {
+            auto* observer = static_cast<Observer*>(user_data);
+            ++observer->count;
+            observer->previous.fn(observer->previous.user_data, op);
+          },
+  };
+  iree_host_size_t retained_rewrite_bytes = 0;
+  size_t publication_count = 0;
+  for (int64_t replacement : {2, 1, 2, 1}) {
+    observer.count = 0;
+    IREE_ASSERT_OK(loom_test_constant_rewrite_value(
+        &rewriter, seed, loom_attr_i64(replacement)));
+    IREE_ASSERT_OK(loom_rewriter_propagate_value_facts(&rewriter));
+    EXPECT_LE(observer.count, 2u * branch_count);
+    EXPECT_EQ(loom_value_fact_table_lookup(facts, value).range_lo, replacement);
+    EXPECT_EQ(loom_value_fact_table_lookup(facts, value).range_hi, replacement);
+    while (loom_rewriter_pop(&rewriter)) {
+    }
+    if (publication_count++ >= 2) {
+      EXPECT_EQ(arena.used_allocation_size, retained_rewrite_bytes);
+    }
+    retained_rewrite_bytes = arena.used_allocation_size;
+    loom_pass_value_fact_owner_t fresh_owner;
+    loom_pass_value_fact_owner_initialize(&block_pool_, &fresh_owner);
+    loom_value_fact_table_t* fresh = nullptr;
+    IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(&fresh_owner, module_,
+                                                      scope, &fresh));
+    for (iree_host_size_t i = 0; i < fresh->touched_count; ++i) {
+      const auto checked_value = fresh->touched_values[i];
+      EXPECT_TRUE(loom_value_fact_table_facts_equal_for_type(
+          module_, loom_module_value_type(module_, checked_value), facts,
+          loom_value_fact_table_lookup(facts, checked_value), fresh,
+          loom_value_fact_table_lookup(fresh, checked_value)));
+    }
+    loom_pass_value_fact_owner_deinitialize(&fresh_owner);
+  }
+  loom_rewriter_deinitialize(&rewriter);
+  loom_pass_value_fact_owner_deinitialize(&owner);
+  iree_arena_deinitialize(&arena);
+}
+
+INSTANTIATE_TEST_SUITE_P(LengthsAndRewriteNotifications, SummaryChainTest,
+                         ::testing::Combine(::testing::Values(1, 16, 64),
+                                            ::testing::Bool()));
+
 class NewBranchContextTest : public FactSummaryTest,
                              public ::testing::WithParamInterface<bool> {};
 

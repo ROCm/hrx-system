@@ -20,7 +20,7 @@
 enum loom_rewriter_fact_entry_flag_bits_e {
   // The equation has a pending entry in one inference queue.
   LOOM_REWRITER_FACT_PENDING = 1u << 0,
-  // The indexed direct-use closure has not yet published a semantic edit.
+  // The current publication has enrolled this semantic dependency.
   LOOM_REWRITER_FACT_INVALIDATED = 1u << 1,
   // Direct inputs changed: blocks publish semantic invalidation, and structured
   // operations refresh nested facts before joining their results.
@@ -33,6 +33,8 @@ enum loom_rewriter_fact_entry_flag_bits_e {
   LOOM_REWRITER_FACT_READY = 1u << 5,
   // A feedback solve owns this summary or one of its descendants.
   LOOM_REWRITER_FACT_ACTIVE = 1u << 6,
+  // This publication already forwarded the owner's semantic dependencies.
+  LOOM_REWRITER_FACT_INVALIDATION_PUBLISHED = 1u << 7,
 };
 
 typedef struct loom_rewriter_fact_entry_t {
@@ -88,8 +90,10 @@ struct loom_rewriter_pending_facts_t {
   loom_rewriter_fact_summary_t* ready;
   // Queue prefix suspended while a feedback solve publishes its own work.
   iree_host_size_t summary_floor;
-  // Semantic edits retained until their complete direct-use closure is queued.
+  // Semantic closure membership retained through the outer publication.
   loom_rewriter_fact_queue_t invalidations;
+  // First unconsumed semantic dependency; consumed rows retain membership.
+  iree_host_size_t invalidation_head;
   // Argument equations consumed before operation equations.
   loom_rewriter_fact_queue_t blocks;
   // An outer publication still owns the coherent observation boundary.
@@ -207,10 +211,12 @@ static void loom_rewriter_clear_fact_invalidations(loom_rewriter_t* rewriter) {
   loom_rewriter_fact_queue_t* queue = &rewriter->pending_facts->invalidations;
   for (iree_host_size_t i = 0; i < queue->count; ++i) {
     if (!(queue->values[i]->flags & LOOM_REWRITER_FACT_ACTIVE)) {
-      queue->values[i]->flags &= ~LOOM_REWRITER_FACT_INVALIDATED;
+      queue->values[i]->flags &= ~(LOOM_REWRITER_FACT_INVALIDATED |
+                                   LOOM_REWRITER_FACT_INVALIDATION_PUBLISHED);
     }
   }
   queue->count = 0;
+  rewriter->pending_facts->invalidation_head = 0;
 }
 
 static void loom_rewriter_clear_pending_facts(loom_rewriter_t* rewriter) {
@@ -226,6 +232,7 @@ static void loom_rewriter_clear_pending_facts(loom_rewriter_t* rewriter) {
   pending->ready = NULL;
   pending->summary_floor = 0;
   pending->invalidations.count = 0;
+  pending->invalidation_head = 0;
   pending->blocks.count = 0;
 }
 
@@ -1247,7 +1254,8 @@ static iree_status_t loom_rewriter_release_fact_summaries(
   for (; summary != stop; summary = summary->parent) {
     loom_rewriter_fact_entry_t* entry = summary->entry;
     entry->flags &= ~LOOM_REWRITER_FACT_ACTIVE;
-    if (entry->flags & LOOM_REWRITER_FACT_INVALIDATED) {
+    if ((entry->flags & LOOM_REWRITER_FACT_INVALIDATED) &&
+        !(entry->flags & LOOM_REWRITER_FACT_INVALIDATION_PUBLISHED)) {
       status = iree_status_join(
           status,
           loom_rewriter_append_fact_entry(
@@ -1409,8 +1417,11 @@ static iree_status_t loom_rewriter_update_op_facts(loom_rewriter_t* rewriter,
 
 // Publish semantic edits before evaluating equations: an unchanged current
 // row does not prove that downstream cyclic equations retain the same meaning.
-// Membership remains set through the closure because type/attribute edges can
-// cycle independently of operand SSA.
+// The IR is immutable throughout fact publication. Retain closure membership
+// until the outer publication finishes: later numeric updates can revisit a
+// summary, but cannot expose new semantic use edges. Type/attribute edges may
+// cycle independently of operand SSA, and held feedback owners resume only
+// their still-unpublished dependencies.
 static iree_status_t loom_rewriter_publish_fact_invalidations(
     loom_rewriter_t* rewriter) {
   loom_rewriter_pending_facts_t* pending = rewriter->pending_facts;
@@ -1444,23 +1455,29 @@ static iree_status_t loom_rewriter_publish_fact_invalidations(
       entry->flags &= ~LOOM_REWRITER_FACT_INPUTS_CHANGED;
     }
   }
-  for (iree_host_size_t i = 0;
-       i < pending->invalidations.count && iree_status_is_ok(status); ++i) {
-    loom_rewriter_fact_entry_t* entry = pending->invalidations.values[i];
+  while (pending->invalidation_head < pending->invalidations.count &&
+         iree_status_is_ok(status)) {
+    loom_rewriter_fact_entry_t* entry =
+        pending->invalidations.values[pending->invalidation_head++];
     loom_op_t* op = entry->owner;
-    if (entry->flags & LOOM_REWRITER_FACT_ACTIVE) {
+    if (entry->flags & (LOOM_REWRITER_FACT_ACTIVE |
+                        LOOM_REWRITER_FACT_INVALIDATION_PUBLISHED)) {
       continue;
     }
     if (op->flags & LOOM_OP_FLAG_DEAD) {
       continue;
     }
+    entry->flags |= LOOM_REWRITER_FACT_INVALIDATION_PUBLISHED;
     status = loom_rewriter_add_result_users_to_worklist(
         rewriter, op, LOOM_REWRITER_USER_CHANGE_FLAG_SEMANTIC);
     if (iree_status_is_ok(status)) {
       status = loom_rewriter_add_summary_ops_to_worklist(rewriter, op);
     }
   }
-  loom_rewriter_clear_fact_invalidations(rewriter);
+  if (!pending->publishing) {
+    // A direct CFG refresh is its own semantic publication boundary.
+    loom_rewriter_clear_fact_invalidations(rewriter);
+  }
   return status;
 }
 
@@ -1475,8 +1492,9 @@ iree_status_t loom_rewriter_propagate_value_facts(loom_rewriter_t* rewriter) {
   while (iree_status_is_ok(status) &&
          (pending->operation_head < pending->operations.count ||
           pending->summaries.count > pending->summary_floor || pending->ready ||
-          pending->blocks.count || pending->invalidations.count)) {
-    if (pending->invalidations.count) {
+          pending->blocks.count ||
+          pending->invalidation_head < pending->invalidations.count)) {
+    if (pending->invalidation_head < pending->invalidations.count) {
       // Publishing changed equations can expose another summary dependency.
       // Finish its semantic closure before evaluating the next queued owner.
       status = loom_rewriter_publish_fact_invalidations(rewriter);
@@ -1544,5 +1562,8 @@ iree_status_t loom_rewriter_propagate_value_facts(loom_rewriter_t* rewriter) {
 #endif
   }
   pending->publishing = was_publishing;
+  if (!was_publishing) {
+    loom_rewriter_clear_fact_invalidations(rewriter);
+  }
   return status;
 }
