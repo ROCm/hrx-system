@@ -110,10 +110,24 @@ class WeightInputsTest : public ::testing::Test {
                                iree_make_const_byte_span(key, std::strlen(key)),
                                1, allocator_, &key_buffer));
     }
+    iree_status_t status =
+        InvokeKey(source, key_buffer, 0, key ? std::strlen(key) : 0, offset,
+                  length, alignment);
+    iree_vm_buffer_release(key_buffer);
+    return status;
+  }
+
+  iree_status_t InvokeKey(int32_t source, iree_vm_buffer_t* key_buffer,
+                          int64_t key_offset, int64_t key_length,
+                          int64_t offset, int64_t length, int64_t alignment) {
+    iree_vm_buffer_retain(key_buffer);
     iree_vm_variant_t arguments[] = {
         iree_vm_variant_from_i32(source),
         iree_vm_buffer_variant_from_ptr_move(&types_, &key_buffer),
-        iree_vm_variant_from_i64(offset), iree_vm_variant_from_i64(length),
+        iree_vm_variant_from_i64(key_offset),
+        iree_vm_variant_from_i64(key_length),
+        iree_vm_variant_from_i64(offset),
+        iree_vm_variant_from_i64(length),
         iree_vm_variant_from_i64(alignment)};
     iree_vm_variant_t results[3] = {};
     auto status =
@@ -273,6 +287,59 @@ TEST_F(WeightInputsTest, InvalidSourceKeysRangesAndAlignmentsRejectAtCapture) {
                           test.key));
     EXPECT_EQ(loom_serve_weight_inputs_module_take(module_).count, 0u);
   }
+}
+
+TEST_F(WeightInputsTest, KeyRangesRejectBeforeCapture) {
+  iree_vm_buffer_t* key = nullptr;
+  IREE_ASSERT_OK(iree_vm_buffer_clone(IREE_VM_BUFFER_ACCESS_FLAG_READ,
+                                      iree_make_const_byte_span("same", 4), 1,
+                                      allocator_, &key));
+  const int64_t ranges[][2] = {{-1, 4}, {0, -1},        {4, 1},
+                               {5, 0},  {0, INT64_MAX}, {INT64_MAX, 1}};
+  for (const auto& range : ranges) {
+    loom_serve_weight_inputs_module_begin(module_);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                          InvokeKey(0, key, range[0], range[1], 0, 4, 1));
+    EXPECT_EQ(loom_serve_weight_inputs_module_take(module_).count, 0u);
+  }
+  iree_vm_buffer_release(key);
+}
+
+TEST_F(WeightInputsTest, ReusedKeyStorageDoesNotEscapeLookup) {
+  iree_vm_buffer_t* scratch = nullptr;
+  IREE_ASSERT_OK(iree_vm_buffer_create(16, 1, allocator_, &scratch));
+  auto* bytes = static_cast<uint8_t*>(iree_vm_buffer_data(scratch));
+  std::memcpy(bytes + 2, "same", 4);
+  loom_serve_weight_inputs_module_begin(module_);
+  IREE_ASSERT_OK(InvokeKey(0, scratch, 2, 4, 0, 4, 4));
+  EXPECT_NE(metadata_.find("\"dtype\":\"F32\""), std::string::npos);
+  std::memset(iree_vm_buffer_data(scratch), 0, 16);
+  std::memcpy(bytes + 5, "same", 4);
+  IREE_ASSERT_OK(InvokeKey(1, scratch, 5, 4, 8, 8, 16));
+  EXPECT_NE(metadata_.find("\"dtype\":\"BF16\""), std::string::npos);
+  std::memset(iree_vm_buffer_data(scratch), 0, 16);
+  iree_vm_buffer_release(scratch);
+  const auto recipe = loom_serve_weight_inputs_module_take(module_);
+  ASSERT_EQ(recipe.count, 2u);
+  loom_serve_program_free(program_);
+  program_ = nullptr;
+  iree_vm_module_release(module_);
+  module_ = nullptr;
+  iree_vm_environment_free(environment_);
+  environment_ = nullptr;
+  loom_serve_parameter_sources_release(catalog_);
+  catalog_ = nullptr;
+  const auto* first = loom_serve_weight_inputs_at(inputs_, recipe.first);
+  const auto* second = loom_serve_weight_inputs_at(inputs_, recipe.first + 1);
+  EXPECT_NE(first->entry, second->entry);
+  EXPECT_TRUE(iree_string_view_equal(first->entry->key, IREE_SV("same")));
+  EXPECT_TRUE(iree_string_view_equal(second->entry->key, IREE_SV("same")));
+  EXPECT_EQ(first->source, 0u);
+  EXPECT_EQ(first->span.parameter_offset, 0u);
+  EXPECT_EQ(first->span.length, 4u);
+  EXPECT_EQ(second->source, 1u);
+  EXPECT_EQ(second->span.parameter_offset, 8u);
+  EXPECT_EQ(second->span.length, 8u);
 }
 
 TEST_F(WeightInputsTest, DirectReadsValidateSourceZeroWithoutCapturingStaging) {

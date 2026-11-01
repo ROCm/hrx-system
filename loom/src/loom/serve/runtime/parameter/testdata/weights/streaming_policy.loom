@@ -1,4 +1,4 @@
-func.decl import("weights") @input(%source: i32, %key: buffer, %offset: i64, %length: i64, %alignment: i64) -> (i64)
+func.decl import("weights") @input(%source: i32, %key: buffer, %key_offset: i64, %key_length: i64, %offset: i64, %length: i64, %alignment: i64) -> (i64)
 
 func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 
@@ -10,13 +10,15 @@ func.def public @prepare_weight(%key: buffer) -> (i64) {
   %w = scalar.constant 119 : i32
   %wide = scalar.cmpi eq, %letter, %w : i32
   %c0 = scalar.constant 0 : i64
+  %key_extent = buffer.length %key
+  %key_length = index.cast %key_extent : offset to i64
   %bytes = scf.if %wide -> (i64) {
     %first_source = scalar.constant 0 : i32
     %second_source = scalar.constant 1 : i32
     %half = scalar.constant 1048592 : i64
     %alignment = scalar.constant 64 : i64
-    %first = func.call @input(%first_source, %key, %c0, %half, %alignment) : (i32, buffer, i64, i64, i64) -> (i64)
-    %second = func.call @input(%second_source, %key, %half, %half, %alignment) : (i32, buffer, i64, i64, i64) -> (i64)
+    %first = func.call @input(%first_source, %key, %c0, %key_length, %c0, %half, %alignment) : (i32, buffer, i64, i64, i64, i64, i64) -> (i64)
+    %second = func.call @input(%second_source, %key, %c0, %key_length, %half, %half, %alignment) : (i32, buffer, i64, i64, i64, i64, i64) -> (i64)
     %root = buffer.constant utf8("combine_wide") : buffer
     %stage = func.call @stage(%root, %c0) : (buffer, i64) -> (i32)
     %first_key = buffer.constant utf8("wide_first_offset") : buffer

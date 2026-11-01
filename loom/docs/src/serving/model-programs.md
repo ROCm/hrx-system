@@ -145,12 +145,19 @@ loader accepts explicit GGUF, safetensors, and other supported parameter files
 without inferring filenames.
 
 Weight policies can combine checkpoint ranges with values computed during
-preparation. `weights.input(source, key, offset, length, alignment)` captures
-a checkpoint range; `weights.input_buffer(data, alignment)` captures an immutable
+preparation. The import
+`weights.input(source, key, key_offset, key_length, offset, length, alignment)`
+captures a checkpoint range; `weights.input_buffer(data, alignment)` captures an immutable
 copy of a nonempty readable VM buffer. Both return the aligned offset in the
 packing command's input staging buffer. Computed bytes survive policy teardown
 and are reused if device parameters are reactivated; they do not create a file
 or another checkpoint visible through `weights.count` or `weights.parameter`.
+
+Both `weights.parameter(source, key, key_offset, key_length)` and `weights.input`
+resolve the named byte range of `key` during the call. A policy can build names
+in reusable scratch storage and pass only the used range. The captured entry
+and returned metadata refer to the retained checkpoint index; subsequent writes
+to the key buffer cannot change them.
 
 Request preparation can declare additional sources after the immutable cold
 source prefix, or bind that prefix to new stages. It cannot append shards to a

@@ -174,9 +174,16 @@ static iree_status_t loom_serve_weight_inputs_lookup(
                             "weight input key must not be null");
   }
   iree_vm_buffer_t* buffer = (iree_vm_buffer_t*)ref.object;
+  const uint64_t key_offset = iree_vm_call_value_argument_load(call, 1);
+  const uint64_t key_length = iree_vm_call_value_argument_load(call, 2);
+  if (key_offset > SIZE_MAX || key_length > SIZE_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "weight input key range is not addressable");
+  }
   iree_const_byte_span_t bytes = iree_const_byte_span_empty();
-  IREE_RETURN_IF_ERROR(iree_vm_buffer_map_read(
-      buffer, 0, iree_vm_buffer_length(buffer), &bytes));
+  IREE_RETURN_IF_ERROR(
+      iree_vm_buffer_map_read(buffer, (iree_host_size_t)key_offset,
+                              (iree_host_size_t)key_length, &bytes));
   return iree_io_parameter_index_lookup(
       module->inputs->sources[source].index,
       iree_make_string_view((const char*)bytes.data, bytes.data_length),
@@ -240,9 +247,9 @@ static iree_status_t loom_serve_weight_inputs_capture(
     loom_serve_weight_inputs_module_t* module,
     const iree_vm_call_packet_t* call,
     const iree_io_parameter_index_entry_t* entry) {
-  const int64_t offset = (int64_t)iree_vm_call_value_argument_load(call, 1);
-  const int64_t length = (int64_t)iree_vm_call_value_argument_load(call, 2);
-  const int64_t alignment = (int64_t)iree_vm_call_value_argument_load(call, 3);
+  const int64_t offset = (int64_t)iree_vm_call_value_argument_load(call, 3);
+  const int64_t length = (int64_t)iree_vm_call_value_argument_load(call, 4);
+  const int64_t alignment = (int64_t)iree_vm_call_value_argument_load(call, 5);
   if (offset < 0 || length <= 0 || (uint64_t)offset > entry->length ||
       (uint64_t)length > entry->length - (uint64_t)offset) {
     return iree_make_status(
@@ -381,14 +388,16 @@ static iree_status_t loom_serve_weight_inputs_module_start(
 static const iree_vm_module_signature_type_t inputs_count_results[] = {
     {IREE_VM_SCALAR_TYPE_I32, 0}};
 static const iree_vm_module_signature_type_t inputs_parameter_arguments[] = {
-    {IREE_VM_SCALAR_TYPE_I32, 0}, {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0}};
-static const iree_vm_module_signature_type_t inputs_parameter_results[] = {
-    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0}, {IREE_VM_SCALAR_TYPE_I64, 0}};
-static const iree_vm_module_signature_type_t inputs_input_arguments[] = {
     {IREE_VM_SCALAR_TYPE_I32, 0},
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
     {IREE_VM_SCALAR_TYPE_I64, 0},
-    {IREE_VM_SCALAR_TYPE_I64, 0},
+    {IREE_VM_SCALAR_TYPE_I64, 0}};
+static const iree_vm_module_signature_type_t inputs_parameter_results[] = {
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0}, {IREE_VM_SCALAR_TYPE_I64, 0}};
+static const iree_vm_module_signature_type_t inputs_input_arguments[] = {
+    {IREE_VM_SCALAR_TYPE_I32, 0}, {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
+    {IREE_VM_SCALAR_TYPE_I64, 0}, {IREE_VM_SCALAR_TYPE_I64, 0},
+    {IREE_VM_SCALAR_TYPE_I64, 0}, {IREE_VM_SCALAR_TYPE_I64, 0},
     {IREE_VM_SCALAR_TYPE_I64, 0}};
 static const iree_vm_module_signature_type_t inputs_input_results[] = {
     {IREE_VM_SCALAR_TYPE_I64, 0}};
@@ -396,11 +405,11 @@ static const iree_vm_module_signature_type_t inputs_buffer_arguments[] = {
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0}, {IREE_VM_SCALAR_TYPE_I64, 0}};
 static const iree_vm_module_callable_type_declaration_t inputs_callables[] = {
     {.signature = {.results = {inputs_count_results, 1, 1, 0, 0}}},
-    {.signature = {.arguments = {inputs_parameter_arguments, 2, 1, 1, 0},
-                   .results = {inputs_parameter_results, 2, 1, 1, 0}}},
     {.signature = {.arguments = {inputs_buffer_arguments, 2, 1, 1, 0},
                    .results = {inputs_input_results, 1, 1, 0, 0}}},
-    {.signature = {.arguments = {inputs_input_arguments, 5, 4, 1, 0},
+    {.signature = {.arguments = {inputs_parameter_arguments, 4, 3, 1, 0},
+                   .results = {inputs_parameter_results, 2, 1, 1, 0}}},
+    {.signature = {.arguments = {inputs_input_arguments, 7, 6, 1, 0},
                    .results = {inputs_input_results, 1, 1, 0, 0}}},
 };
 static const iree_vm_module_export_declaration_t inputs_exports[] = {
@@ -411,10 +420,10 @@ static const iree_vm_module_export_declaration_t inputs_exports[] = {
      .callable_type_ordinal = 3,
      .function_ordinal = 2},
     {.export_name = IREE_SVL("input_buffer"),
-     .callable_type_ordinal = 2,
+     .callable_type_ordinal = 1,
      .function_ordinal = 3},
     {.export_name = IREE_SVL("parameter"),
-     .callable_type_ordinal = 1,
+     .callable_type_ordinal = 2,
      .function_ordinal = 1},
 };
 
@@ -478,7 +487,7 @@ iree_status_t loom_serve_weight_inputs_module_create(
       .counts = {.function_count = 4,
                  .callable_type_count = 4,
                  .export_count = 4,
-                 .callable_fields = {.value_count = 10, .ref_count = 4}},
+                 .callable_fields = {.value_count = 14, .ref_count = 4}},
   };
   iree_status_t status = iree_vm_module_initialize(
       &inputs_module_vtable, &module->descriptor, &module->base);

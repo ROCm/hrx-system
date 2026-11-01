@@ -1,8 +1,8 @@
 func.decl import("weights") @count() -> (i32)
 
-func.decl import("weights") @parameter(%source: i32, %key: buffer) -> (buffer, i64)
+func.decl import("weights") @parameter(%source: i32, %key: buffer, %key_offset: i64, %key_length: i64) -> (buffer, i64)
 
-func.decl import("weights") @input(%source: i32, %key: buffer, %offset: i64, %length: i64, %alignment: i64) -> (i64)
+func.decl import("weights") @input(%source: i32, %key: buffer, %key_offset: i64, %key_length: i64, %offset: i64, %length: i64, %alignment: i64) -> (i64)
 
 func.decl import("weights") @input_buffer(%data: buffer, %alignment: i64) -> (i64)
 
@@ -113,11 +113,21 @@ func.def public @prepare_weight(%key: buffer) -> (i64) {
   %c16 = scalar.constant 16 : i64
   %c32 = scalar.constant 32 : i64
   %c64 = scalar.constant 64 : i64
+  %origin = index.constant 0 : offset
+  %key_start = index.constant 1 : offset
+  %key_start64 = scalar.constant 1 : i64
+  %key_extent = buffer.length %key
+  %key_length = index.cast %key_extent : offset to i64
+  %key_capacity = index.add %key_start, %key_extent : offset
+  %key_scratch = buffer.alloca<private> align(1) %key_capacity : buffer
+  buffer.copy %key[%origin], %key_scratch[%key_start], %key_extent
   %count = func.call @count() : () -> (i32)
   %pair = scalar.cmpi eq, %count, %c2 : i32
   func.call @check(%pair) : (i1)
-  %first_metadata, %first_length = func.call @parameter(%c0, %key) : (i32, buffer) -> (buffer, i64)
-  %second_metadata, %second_length = func.call @parameter(%c1, %key) : (i32, buffer) -> (buffer, i64)
+  %first_metadata, %first_length = func.call @parameter(%c0, %key_scratch, %key_start64, %key_length) : (i32, buffer, i64, i64) -> (buffer, i64)
+  %second_metadata, %second_length = func.call @parameter(%c1, %key_scratch, %key_start64, %key_length) : (i32, buffer, i64, i64) -> (buffer, i64)
+  // Metadata and deferred reads retain indexed identities, never this scratch.
+  buffer.store.i8 %c0, %key_scratch[%key_start]
   func.call @check_metadata(%first_metadata) : (buffer)
   func.call @check_metadata(%second_metadata) : (buffer)
   %first_sized = scalar.cmpi eq, %first_length, %c32 : i64
@@ -125,8 +135,9 @@ func.def public @prepare_weight(%key: buffer) -> (i64) {
   %sized = scalar.andi %first_sized, %second_sized : i1
   func.call @check(%sized) : (i1)
   // The padding tests that staging offsets, not checkpoint lengths, drive ABI.
-  %first = func.call @input(%c0, %key, %c0_i64, %first_length, %c64) : (i32, buffer, i64, i64, i64) -> (i64)
-  %origin = index.constant 0 : offset
+  buffer.copy %key[%origin], %key_scratch[%key_start], %key_extent
+  %first = func.call @input(%c0, %key_scratch, %key_start64, %key_length, %c0_i64, %first_length, %c64) : (i32, buffer, i64, i64, i64, i64, i64) -> (i64)
+  buffer.store.i8 %c0, %key_scratch[%key_start]
   %letter = buffer.load.i8.u %key[%origin]
   %low_bit = scalar.andi %letter, %c1 : i32
   %interleaved = scalar.extui %low_bit : i32 to i64
@@ -135,7 +146,9 @@ func.def public @prepare_weight(%key: buffer) -> (i64) {
     %offset = func.call @capture_generated(%letter, %c64) : (i32, i64) -> (i64)
     scf.yield %offset : i64
   } else {
-    %offset = func.call @input(%c1, %key, %c0_i64, %second_length, %c64) : (i32, buffer, i64, i64, i64) -> (i64)
+    buffer.copy %key[%origin], %key_scratch[%origin], %key_extent
+    %offset = func.call @input(%c1, %key_scratch, %c0_i64, %key_length, %c0_i64, %second_length, %c64) : (i32, buffer, i64, i64, i64, i64, i64) -> (i64)
+    buffer.store.i8 %c0, %key_scratch[%origin]
     scf.yield %offset : i64
   }
   %root = buffer.constant utf8("pack") : buffer

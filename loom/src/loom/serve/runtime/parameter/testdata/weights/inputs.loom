@@ -1,8 +1,8 @@
 func.decl import("weights") @count() -> (i32)
 
-func.decl import("weights") @parameter(%source: i32, %key: buffer) -> (buffer, i64)
+func.decl import("weights") @parameter(%source: i32, %key: buffer, %key_offset: i64, %key_length: i64) -> (buffer, i64)
 
-func.decl import("weights") @input(%source: i32, %key: buffer, %offset: i64, %length: i64, %alignment: i64) -> (i64)
+func.decl import("weights") @input(%source: i32, %key: buffer, %key_offset: i64, %key_length: i64, %offset: i64, %length: i64, %alignment: i64) -> (i64)
 
 func.decl import("weights") @input_buffer(%data: buffer, %alignment: i64) -> (i64)
 
@@ -12,9 +12,9 @@ func.def public @capture_buffer(%data: buffer, %alignment: i64) -> (i64, i32) {
   func.return %target, %count : i64, i32
 }
 
-func.def public @capture(%source: i32, %key: buffer, %offset: i64, %length: i64, %alignment: i64) -> (buffer, i32, i64) {
+func.def public @capture(%source: i32, %key: buffer, %key_offset: i64, %key_length: i64, %offset: i64, %length: i64, %alignment: i64) -> (buffer, i32, i64) {
   %count = func.call @count() : () -> (i32)
-  %metadata, %size = func.call @parameter(%source, %key) : (i32, buffer) -> (buffer, i64)
-  %target = func.call @input(%source, %key, %offset, %length, %alignment) : (i32, buffer, i64, i64, i64) -> (i64)
+  %metadata, %size = func.call @parameter(%source, %key, %key_offset, %key_length) : (i32, buffer, i64, i64) -> (buffer, i64)
+  %target = func.call @input(%source, %key, %key_offset, %key_length, %offset, %length, %alignment) : (i32, buffer, i64, i64, i64, i64, i64) -> (i64)
   func.return %metadata, %count, %target : buffer, i32, i64
 }
