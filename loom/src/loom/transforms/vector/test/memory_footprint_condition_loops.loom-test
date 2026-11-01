@@ -95,6 +95,37 @@ func.def @condition_declared_aliases(%output: buffer) {
 
 // RUN: pass vector-memory-footprint
 
+// Both endpoints remain within the table, and the successful edge makes the
+// midpoint strictly smaller than the right endpoint. The relation must
+// participate in the feedback solve so widening cannot admit index 8.
+func.def @condition_binary_search_midpoint(%table: buffer, %choose_right: i1) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %c7 = scalar.constant 7 : i32
+  %base = index.constant 0 : offset
+  %aligned = buffer.assume.alignment %table {minimum_alignment = 8} : buffer
+  %values = buffer.view %aligned[%base] : buffer -> view<8xf64>
+  %terminal_right, %terminal_left = scf.while(%right_before = %c7 : i32, %left_before = %c0 : i32) -> (i32, i32) {
+    %more = scalar.cmpi slt, %left_before, %right_before : i32
+    scf.condition %more, %right_before, %left_before : i1, i32, i32
+  } do(%right: i32, %left: i32) {
+    %sum = scalar.addi %left, %right : i32
+    %middle = scalar.divsi %sum, %c2 : i32
+    %middle_index = index.cast %middle : i32 to index
+    %value = view.load %values[%middle_index] : view<8xf64> -> f64
+    %next_left = scalar.addi %middle, %c1 : i32
+    %selected_right = scf.select %choose_right, %middle, %right : i32
+    %selected_left = scf.select %choose_right, %left, %next_left : i32
+    scf.yield %selected_right, %selected_left : i32, i32
+  }
+  func.return
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
 func.def @condition_header_includes_terminal(%output: buffer) {
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
