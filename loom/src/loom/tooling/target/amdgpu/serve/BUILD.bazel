@@ -918,6 +918,7 @@ loom_cc_test(
         "//loom/src/loom/serve/runtime/program:preparation",
         "//loom/src/loom/serve/runtime/program:stage_set",
         "//loom/src/loom/serve/runtime/program:target",
+        "//loom/src/loom/serve/service/text:stages_tests",
         "//loom/src/loom/serve/testing:jit",
         "//loom/src/loom/serve/testing:jit_module",
         "//runtime/src/iree/base",

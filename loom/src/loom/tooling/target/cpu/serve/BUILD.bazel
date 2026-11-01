@@ -235,6 +235,7 @@ loom_cc_test(
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/program:executable",
         "//loom/src/loom/serve/runtime/program:jit",
+        "//loom/src/loom/serve/service/text:stages_tests",
         "//loom/src/loom/serve/testing:jit",
         "//loom/src/loom/serve/testing:stalled_stderr",
         "//runtime/src/iree/base",

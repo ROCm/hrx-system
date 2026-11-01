@@ -43,6 +43,7 @@ typedef enum loom_serve_text_load_phase_e {
   TEXT_LOAD_WEIGHTS,
   TEXT_LOAD_RESIDENCY,
   TEXT_LOAD_ACTIVATE,
+  TEXT_LOAD_RECORD,
   TEXT_LOAD_LINK,
   TEXT_LOAD_READY,
   TEXT_LOAD_COMPLETE,
@@ -257,14 +258,6 @@ static iree_status_t loom_serve_text_load_link(loom_serve_text_load_t* load) {
       loom_serve_host_block_pool(loom_serve_device_host(model->device_owner)),
       &model->row_records);
   iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0;
-       i < model->stage_count && iree_status_is_ok(status); ++i) {
-    loom_serve_text_stage_t* stage = &model->stages[i];
-    status = loom_serve_jit_stage_record(
-        stage->compiled, iree_hal_queue_family(model->dispatch),
-        model->command_mode, NULL, stage->fixed_buffers, &stage->command);
-  }
-  IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(loom_serve_text_state_allocate(
       &model->state, model->device_owner, model->pool, model->execution));
   IREE_RETURN_IF_ERROR(
@@ -513,12 +506,25 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
         if (iree_any_bit_set(flags, LOOM_SERVE_TEXT_LOAD_FLAG_DEMAND)) {
           status = loom_serve_text_load_activate(load);
         }
-        load->phase = TEXT_LOAD_LINK;
+        load->phase = TEXT_LOAD_RECORD;
         break;
-      case TEXT_LOAD_LINK:
+      case TEXT_LOAD_RECORD:
         if (compiling) {
           return iree_ok_status();
         }
+        load->phase = TEXT_LOAD_LINK;
+        iree_slim_mutex_lock(&load->event.mutex);
+        load->event.pending = 1;
+        iree_slim_mutex_unlock(&load->event.mutex);
+        status = loom_serve_text_stages_record_async(
+            loom_serve_host_preparation_sink(host),
+            loomc_task_pool_worker_count(loom_serve_host_task_pool(host)),
+            iree_hal_queue_family(model->dispatch), model->command_mode,
+            model->stage_count, model->stages, loom_serve_text_load_complete,
+            load, load->host_allocator);
+        submitted = iree_status_is_ok(status);
+        break;
+      case TEXT_LOAD_LINK:
         if (!loom_serve_tokenizer_load_take(&load->tokenizer_load, &status,
                                             &model->source.tokenizer)) {
           return iree_ok_status();
