@@ -48,7 +48,8 @@ function(_iree_amdgpu_abs_binary_path out_var path)
   if(IS_ABSOLUTE "${path}")
     set(${out_var} "${path}" PARENT_SCOPE)
   else()
-    set(${out_var} "${CMAKE_CURRENT_BINARY_DIR}/${path}" PARENT_SCOPE)
+    iree_package_binary_dir(_PACKAGE_BINARY_DIR)
+    set(${out_var} "${_PACKAGE_BINARY_DIR}/${path}" PARENT_SCOPE)
   endif()
 endfunction()
 
@@ -148,6 +149,7 @@ endfunction()
 #                compiled as translation units or exposed as interface headers.
 # COPTS: additional flags to pass to clang.
 function(iree_amdgpu_library)
+  iree_package_binary_dir(_PACKAGE_BINARY_DIR)
   cmake_parse_arguments(
     _RULE
     "TESTONLY"
@@ -183,6 +185,7 @@ function(iree_amdgpu_library)
   else()
     set(_OUT "${_RULE_NAME}.a")
   endif()
+  _iree_amdgpu_abs_binary_path(_OUT "${_OUT}")
 
   _iree_amdgpu_bitcode_copts(
     _COPTS
@@ -200,7 +203,7 @@ function(iree_amdgpu_library)
     string(REPLACE "/" "_" _BITCODE_SRC_FRAGMENT "${_BITCODE_SRC_FRAGMENT}")
     string(REPLACE ":" "_" _BITCODE_SRC_FRAGMENT "${_BITCODE_SRC_FRAGMENT}")
     string(REPLACE "." "_" _BITCODE_SRC_FRAGMENT "${_BITCODE_SRC_FRAGMENT}")
-    set(_BITCODE_FILE "${_RULE_NAME}_${_BITCODE_SRC_FRAGMENT}.bc")
+    set(_BITCODE_FILE "${_PACKAGE_BINARY_DIR}/${_RULE_NAME}_${_BITCODE_SRC_FRAGMENT}.bc")
     list(APPEND _BITCODE_FILES ${_BITCODE_FILE})
     add_custom_command(
       OUTPUT
@@ -283,6 +286,7 @@ endfunction()
 # MINIMIZE: apply post-link symbol-table minimization. Only valid for opaque
 #           code-object data blobs whose kernels are not looked up by name.
 function(iree_amdgpu_binary)
+  iree_package_binary_dir(_PACKAGE_BINARY_DIR)
   cmake_parse_arguments(
     _RULE
     "MINIMIZE"
@@ -315,6 +319,7 @@ function(iree_amdgpu_binary)
   else()
     set(_OUT "${_RULE_NAME}.so")
   endif()
+  _iree_amdgpu_abs_binary_path(_OUT "${_OUT}")
 
   _iree_amdgpu_bitcode_copts(
     _COPTS
@@ -332,7 +337,7 @@ function(iree_amdgpu_binary)
     string(REPLACE "/" "_" _BITCODE_SRC_FRAGMENT "${_BITCODE_SRC_FRAGMENT}")
     string(REPLACE ":" "_" _BITCODE_SRC_FRAGMENT "${_BITCODE_SRC_FRAGMENT}")
     string(REPLACE "." "_" _BITCODE_SRC_FRAGMENT "${_BITCODE_SRC_FRAGMENT}")
-    set(_BITCODE_FILE "${_RULE_NAME}_${_BITCODE_SRC_FRAGMENT}.bc")
+    set(_BITCODE_FILE "${_PACKAGE_BINARY_DIR}/${_RULE_NAME}_${_BITCODE_SRC_FRAGMENT}.bc")
     list(APPEND _BITCODE_FILES ${_BITCODE_FILE})
     add_custom_command(
       OUTPUT
@@ -353,7 +358,7 @@ function(iree_amdgpu_binary)
     )
   endforeach()
 
-  set(_SOURCE_BITCODE_FILE "${_RULE_NAME}.srcs.bc")
+  set(_SOURCE_BITCODE_FILE "${_PACKAGE_BINARY_DIR}/${_RULE_NAME}.srcs.bc")
   add_custom_command(
     OUTPUT
       ${_SOURCE_BITCODE_FILE}
@@ -385,7 +390,7 @@ function(iree_amdgpu_binary)
     list(APPEND _INTERNALIZE_ARGS "-internalize")
   endif()
 
-  set(_LINKED_FILE "${_RULE_NAME}.bc")
+  set(_LINKED_FILE "${_PACKAGE_BINARY_DIR}/${_RULE_NAME}.bc")
   add_custom_command(
     OUTPUT
       ${_LINKED_FILE}
@@ -414,8 +419,8 @@ function(iree_amdgpu_binary)
         "iree_amdgpu_binary(MINIMIZE) requires llvm-objcopy in the AMDGPU "
         "device toolchain")
     endif()
-    set(_LINK_OUT "${_RULE_NAME}.linked.so")
-    set(_VERSION_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_NAME}.local.version")
+    set(_LINK_OUT "${_PACKAGE_BINARY_DIR}/${_RULE_NAME}.linked.so")
+    set(_VERSION_SCRIPT "${_PACKAGE_BINARY_DIR}/${_RULE_NAME}.local.version")
     file(WRITE "${_VERSION_SCRIPT}" "{\n  local:\n    *;\n};\n")
     list(APPEND _LINKOPTS "--version-script=${_VERSION_SCRIPT}")
   endif()
@@ -510,10 +515,11 @@ endfunction()
 # INTERNAL_HDRS: headers that should invalidate device compilation.
 # COPTS: additional flags to pass to clang.
 # OUTPUTS_OUT: Optional variable receiving generated output file names relative
-#              to the current binary directory.
+#              to the package binary directory.
 # OUTPUT_PATHS_OUT: Optional variable receiving absolute generated output paths.
 # TARGETS_OUT: Optional variable receiving generated CMake target names.
 function(iree_amdgpu_library_variants)
+  iree_package_binary_dir(_PACKAGE_BINARY_DIR)
   cmake_parse_arguments(
     _RULE
     "TESTONLY"
@@ -594,7 +600,7 @@ function(iree_amdgpu_library_variants)
 
     list(APPEND _VARIANT_OUTPUTS "${_VARIANT_OUTPUT}")
     list(APPEND _VARIANT_OUTPUT_PATHS
-      "${CMAKE_CURRENT_BINARY_DIR}/${_VARIANT_OUTPUT}")
+      "${_PACKAGE_BINARY_DIR}/${_VARIANT_OUTPUT}")
     list(APPEND _VARIANT_TARGETS "${_PACKAGE_NAME}_${_VARIANT_NAME}")
   endforeach()
 
@@ -616,6 +622,7 @@ endfunction()
 
 # Builds one device-library-linked HIP code object.
 function(_iree_amdgpu_hip_binary)
+  iree_package_binary_dir(_PACKAGE_BINARY_DIR)
   cmake_parse_arguments(
     _RULE
     ""
@@ -643,14 +650,18 @@ function(_iree_amdgpu_hip_binary)
   else()
     set(_OUT "${_RULE_NAME}.so")
   endif()
+  _iree_amdgpu_abs_binary_path(_OUT "${_OUT}")
   iree_resolve_source_files(_SOURCE_PATH "${_RULE_SRCS}")
-  set(_OFFLOAD_BUNDLE "${_RULE_NAME}.offload_bundle")
+  set(_OFFLOAD_BUNDLE "${_PACKAGE_BINARY_DIR}/${_RULE_NAME}.offload_bundle")
   file(GLOB _DEVICE_LIBRARIES CONFIGURE_DEPENDS
     "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_ROCM_DEVICE_LIB_PATH}/*.bc")
 
+  get_filename_component(_OUT_DIR "${_OUT}" DIRECTORY)
   add_custom_command(
     OUTPUT
       "${_OUT}"
+    COMMAND
+      ${CMAKE_COMMAND} "-E" "make_directory" "${_OUT_DIR}"
     COMMAND
       "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_CLANG_BINARY}"
       "--cuda-device-only"
@@ -703,7 +714,7 @@ endfunction()
 # COPTS: additional flags to pass to clang.
 # LINKOPTS: additional flags to pass to lld.
 # OUTPUTS_OUT: Optional variable receiving generated output file names relative
-#              to the current binary directory.
+#              to the package binary directory.
 # OUTPUT_PATHS_OUT: Optional variable receiving absolute generated output paths.
 # TARGETS_OUT: Optional variable receiving generated CMake target names.
 # INTERNALIZE: whether to internalize linked dependency symbols after lazy
@@ -712,6 +723,7 @@ endfunction()
 # SOURCE_FORMAT: source compilation pipeline. freestanding_c uses the HAL
 #                device build; hip links the ROCm device libraries.
 function(iree_amdgpu_binary_variants)
+  iree_package_binary_dir(_PACKAGE_BINARY_DIR)
   cmake_parse_arguments(
     _RULE
     "MINIMIZE"
@@ -831,7 +843,7 @@ function(iree_amdgpu_binary_variants)
 
     list(APPEND _VARIANT_OUTPUTS "${_VARIANT_OUTPUT}")
     list(APPEND _VARIANT_OUTPUT_PATHS
-      "${CMAKE_CURRENT_BINARY_DIR}/${_VARIANT_OUTPUT}")
+      "${_PACKAGE_BINARY_DIR}/${_VARIANT_OUTPUT}")
     list(APPEND _VARIANT_TARGETS "${_PACKAGE_NAME}_${_VARIANT_NAME}")
   endforeach()
 
