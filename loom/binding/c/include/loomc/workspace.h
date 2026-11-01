@@ -48,9 +48,10 @@ extern "C" {
 /// Mutable per-worker scratch workspace.
 ///
 /// @thread_safety
-/// A workspace is not internally synchronized. Calls that mutate the same
-/// workspace require external synchronization. Distinct workspaces may be used
-/// concurrently by different threads.
+/// Compiler operations using the same workspace require external
+/// synchronization. Distinct workspaces may be used concurrently by different
+/// threads. Retain, release, statistics queries, and trimming idle blocks are
+/// safe alongside compiler operations when the host allocator is thread-safe.
 typedef struct loomc_workspace_t loomc_workspace_t;
 
 /// Workspace creation options.
@@ -156,8 +157,9 @@ LOOMC_API_EXPORT void loomc_workspace_retain(loomc_workspace_t* workspace);
 /// remain valid.
 ///
 /// @thread_safety
-/// External synchronization is required if another thread may be using the same
-/// workspace.
+/// Safe alongside compiler operations, module release, and other trim calls
+/// when the host allocator is thread-safe. Only blocks idle when detached from
+/// the pool are freed; blocks returned afterward remain available for reuse.
 LOOMC_API_EXPORT void loomc_workspace_trim(loomc_workspace_t* workspace);
 
 /// Releases `workspace` and all storage it owns.
