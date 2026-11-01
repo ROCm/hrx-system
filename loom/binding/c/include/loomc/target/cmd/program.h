@@ -276,7 +276,10 @@ typedef struct loomc_cmd_program_t {
   ///
   /// The artifact identifier is `symbol`, its kind is
   /// `LOOMC_ARTIFACT_KIND_EXECUTABLE`, and its format is
-  /// `LOOMC_ARTIFACT_FORMAT_CMD_PROGRAM`.
+  /// `LOOMC_ARTIFACT_FORMAT_CMD_PROGRAM`. Command image contents are
+  /// contiguous; `loomc_byte_sequence_try_get_contiguous_span` borrows their
+  /// storage without copying. Retaining the contents sequence keeps that span
+  /// valid independently of the product lifetime.
   loomc_artifact_t artifact;
 
   /// Product-local entry requirement ordinals in root-local slot order.

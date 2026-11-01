@@ -29,6 +29,8 @@ using loomc::testing::HandlePtr;
 
 using BuilderPtr =
     HandlePtr<loomc_link_index_builder_t, loomc_link_index_builder_free>;
+using ByteSequencePtr =
+    HandlePtr<loomc_byte_sequence_t, loomc_byte_sequence_release>;
 using ContextPtr = HandlePtr<loomc_context_t, loomc_context_release>;
 using LinkIndexPtr = HandlePtr<loomc_link_index_t, loomc_link_index_release>;
 using ModulePtr = HandlePtr<loomc_module_t, loomc_module_release>;
@@ -279,7 +281,18 @@ command.def public @public_root() launch(%storage: buffer) {
   context.reset();
   listing_product.reset();
   EXPECT_EQ(ToString(listing->contents), listing_text);
-  EXPECT_FALSE(ToString(private_program.artifact.contents).empty());
+  const std::string image_contents =
+      ToString(private_program.artifact.contents);
+  EXPECT_FALSE(image_contents.empty());
+  loomc_byte_sequence_retain(private_program.artifact.contents);
+  ByteSequencePtr retained_image(private_program.artifact.contents);
+  loomc_byte_span_t image_span = {};
+  ASSERT_TRUE(loomc_byte_sequence_try_get_contiguous_span(retained_image.get(),
+                                                          &image_span));
+  product.reset();
+  EXPECT_EQ(std::string(reinterpret_cast<const char*>(image_span.data),
+                        image_span.data_length),
+            image_contents);
 }
 
 TEST(TargetCmdProgramTest,
@@ -567,6 +580,17 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
 
   EXPECT_EQ(ToString(private_program.symbol), "private_root");
   EXPECT_GT(loomc_byte_sequence_length(private_program.artifact.contents), 0u);
+  const std::string image_contents =
+      ToString(private_program.artifact.contents);
+  loomc_byte_sequence_retain(private_program.artifact.contents);
+  ByteSequencePtr retained_image(private_program.artifact.contents);
+  loomc_byte_span_t image_span = {};
+  ASSERT_TRUE(loomc_byte_sequence_try_get_contiguous_span(retained_image.get(),
+                                                          &image_span));
+  product_ptr.reset();
+  EXPECT_EQ(std::string(reinterpret_cast<const char*>(image_span.data),
+                        image_span.data_length),
+            image_contents);
 }
 
 TEST(TargetCmdProgramTest,

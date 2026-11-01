@@ -28,7 +28,7 @@ typedef struct loom_cmd_program_artifact_t {
   // Root symbol without an '@' sigil.
   iree_string_view_t symbol;
 
-  // Complete portable command-program bytes.
+  // Complete contiguous command image, independently retained by consumers.
   iree_byte_sequence_t* data;
 
   // Plan-wide entry indices in root-local executable/entry slot order.

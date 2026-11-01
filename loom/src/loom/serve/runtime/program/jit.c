@@ -143,8 +143,8 @@ struct loom_serve_jit_stage_t {
   iree_allocator_t host_allocator;
   // Borrowed direct launch contract, owned by the sole executable below.
   loom_serve_dispatch_t* dispatch;
-  // Owned contiguous portable command image.
-  iree_const_byte_span_t image;
+  // Retained contiguous command image shared with the compilation product.
+  loomc_byte_sequence_t* image;
   // Parsed program borrowing image.
   loom_cmd_program_t program;
   // Loaded entries in the command program's local slot order.
@@ -804,13 +804,14 @@ void loom_serve_jit_stage_free(loom_serve_jit_stage_t* stage) {
     loom_serve_executable_release(stage->executables[i]);
   }
   iree_allocator_free(stage->host_allocator, stage->entries);
-  iree_allocator_free(stage->host_allocator, (void*)stage->image.data);
+  loomc_byte_sequence_release(stage->image);
   iree_allocator_free(stage->host_allocator, stage);
 }
 
 iree_host_size_t loom_serve_jit_stage_storage_size(
     const loom_serve_jit_stage_t* stage) {
-  return sizeof(*stage) + stage->image.data_length +
+  return sizeof(*stage) +
+         (iree_host_size_t)loomc_byte_sequence_length(stage->image) +
          stage->entry_count * sizeof(*stage->entries) +
          stage->executable_count * sizeof(*stage->executables);
 }
@@ -977,12 +978,15 @@ static iree_status_t loom_serve_jit_job_allocate_stage(
   if (job->direct_dispatch) {
     return iree_ok_status();
   }
-  loomc_byte_span_t image;
-  IREE_RETURN_IF_ERROR(iree_status_from_loomc(loomc_byte_sequence_clone(
-      job->program.artifact.contents,
-      loomc_allocator_from_iree(jit->host_allocator), &image)));
-  stage->image = iree_const_byte_span_from_loomc(image);
-  return loom_cmd_program_parse(stage->image, &stage->program);
+  stage->image = job->program.artifact.contents;
+  loomc_byte_sequence_retain(stage->image);
+  loomc_byte_span_t image = loomc_byte_span_empty();
+  const bool contiguous =
+      loomc_byte_sequence_try_get_contiguous_span(stage->image, &image);
+  IREE_ASSERT(contiguous);
+  (void)contiguous;
+  return loom_cmd_program_parse(iree_const_byte_span_from_loomc(image),
+                                &stage->program);
 }
 
 static iree_status_t loom_serve_jit_job_bind(loom_serve_jit_job_t* job) {
