@@ -258,6 +258,22 @@ Planned roots use `low.func.def target<cmd.core> abi(command_program)`. Their
 zero-argument function signature is intentional: external resources enter
 through dense ABI tables declared by `abi_layout`.
 
+Execution stages and memory access scopes have distinct named clauses. Memory
+dependencies name the bytes that need visibility; a barrier consumes zero or
+more such dependencies:
+
+```loom
+%visible = cmd.memory.buffer source(transfer_write) target(dispatch_read) %range
+cmd.barrier source(transfer) target(dispatch) %visible
+cmd.barrier source(transfer|dispatch) target(command_process|dispatch) %visible, %other
+cmd.barrier source(transfer) target(dispatch)
+cmd.barrier<release_system> source(dispatch) target(none)
+```
+
+`|` combines members of a stage or access mask, and `none` names an empty mask.
+Omitted barrier flags mean no flags. An execution-only barrier has no dependency
+operands; it orders the selected stages without publishing payload memory.
+
 ```loom
 low.func.def target<cmd.core> abi(command_program)
     abi_layout({entry_count = 1, executable_count = 1,

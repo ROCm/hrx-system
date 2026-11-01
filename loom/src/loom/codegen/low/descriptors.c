@@ -30,6 +30,11 @@ bool loom_low_enum_domain_resolve_token(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_enum_domain_t* domain, iree_string_view_t token,
     int64_t* out_value) {
+  if (domain->kind == LOOM_LOW_ENUM_DOMAIN_KIND_BITSET &&
+      iree_string_view_equal(token, IREE_SV("none"))) {
+    *out_value = 0;
+    return true;
+  }
   for (uint16_t i = 0; i < domain->value_count; ++i) {
     const loom_low_enum_value_t* value =
         &descriptor_set->enum_values[domain->value_start + i];

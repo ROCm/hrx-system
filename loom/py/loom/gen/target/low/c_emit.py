@@ -375,6 +375,7 @@ def _asm_layout_row_lines(layouts: Sequence[CompiledAsmLayout]) -> list[list[str
             f".tied_result_count = {layout.tied_result_count},",
             f".operand_segment_count = {layout.operand_segment_count},",
             f".explicit_immediate_count = {layout.explicit_immediate_count},",
+            f".prefix_immediate_count = {layout.prefix_immediate_count},",
             f".native_assembly_value_count = {layout.native_assembly_value_count},",
             f".flags = {_asm_layout_flags_expr(layout)},",
         ]
@@ -1279,6 +1280,7 @@ def emit_source_for_views(
         [
             [
                 f".immediate_index = {immediate.immediate_index},",
+                f".format = {immediate.format.value},",
                 f".name_string_ref = {c_spelling.optional_string_expr(pool, immediate.name_label)},",
             ]
             for immediate in asm_table_storage.immediates

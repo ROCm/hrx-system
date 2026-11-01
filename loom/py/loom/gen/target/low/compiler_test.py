@@ -655,6 +655,7 @@ def test_assembly_layout_interning_preserves_every_projection(changes) -> None:
         assert tuple(storage.operand_segments[layout.operand_segment_start : layout.operand_segment_start + layout.operand_segment_count]) == asm_form.operand_segments
         assert tuple(storage.immediates[layout.immediate_start : layout.immediate_start + len(asm_form.immediates)]) == asm_form.immediates
         assert layout.explicit_immediate_count == asm_form.explicit_immediate_count
+        assert layout.prefix_immediate_count == asm_form.prefix_immediate_count
         assert layout.has_named_immediates == asm_form.has_named_immediates
         assert layout.requires_named_immediates == asm_form.requires_named_immediates
         assert layout.native_owns_immediate_syntax == asm_form.native_owns_immediate_syntax

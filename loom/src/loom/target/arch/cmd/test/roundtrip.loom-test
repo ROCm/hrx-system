@@ -71,11 +71,11 @@ low.func.def target<cmd.core> abi(command_program) @scoped_dependencies() asm {
   %c0 = cmd.constant.u64 0
   %sample_bytes = cmd.constant.u64 8
   %clock = cmd.buffer.ref.binding %feedback, %c0, %sample_bytes
-  %sample = cmd.memory.buffer %clock {source = ["transfer_write"], target = ["dispatch_read"]}
-  %payload = cmd.memory.global {source = ["dispatch_write"], target = ["dispatch_read", "indirect_command_read"]}
-  cmd.barrier(%sample, %payload) {source = ["transfer", "dispatch"], target = ["command_process", "dispatch"], flags = []}
-  cmd.barrier() {source = ["transfer"], target = ["dispatch"], flags = []}
-  cmd.barrier() {source = ["dispatch"], target = [], flags = ["release_system"]}
+  %sample = cmd.memory.buffer source(transfer_write) target(dispatch_read) %clock
+  cmd.barrier source(transfer) target(dispatch)
+  %payload = cmd.memory.global source(dispatch_write) target(dispatch_read|indirect_command_read)
+  cmd.barrier source(transfer|dispatch) target(command_process|dispatch) %sample, %payload
+  cmd.barrier<release_system> source(dispatch) target(none)
   return
 }
 
@@ -85,10 +85,10 @@ low.func.def target<cmd.core> abi(command_program) @scoped_dependencies() asm {
   %c0 = cmd.constant.u64 0
   %sample_bytes = cmd.constant.u64 8
   %clock = cmd.buffer.ref.binding %feedback, %c0, %sample_bytes
-  %sample = cmd.memory.buffer %clock {source = ["transfer_write"], target = ["dispatch_read"]}
-  %payload = cmd.memory.global {source = ["dispatch_write"], target = ["indirect_command_read", "dispatch_read"]}
-  cmd.barrier(%sample, %payload) {source = ["dispatch", "transfer"], target = ["command_process", "dispatch"], flags = []}
-  cmd.barrier() {source = ["transfer"], target = ["dispatch"], flags = []}
-  cmd.barrier() {source = ["dispatch"], target = [], flags = ["release_system"]}
+  %sample = cmd.memory.buffer source(transfer_write) target(dispatch_read) %clock
+  cmd.barrier source(transfer) target(dispatch)
+  %payload = cmd.memory.global source(dispatch_write) target(indirect_command_read|dispatch_read)
+  cmd.barrier source(dispatch|transfer) target(command_process|dispatch) %sample, %payload
+  cmd.barrier<release_system> source(dispatch) target(none)
   return
 }

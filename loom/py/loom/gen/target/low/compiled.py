@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from loom.gen.support.string_pool import CStringPool
 from loom.gen.target.low.validation import validate_u16_table_count
 from loom.target.low_descriptors import (
+    AsmImmediateFormat,
     AsmOperandSegmentDelimiter,
     AsmResultValueType,
     Constraint,
@@ -332,6 +333,7 @@ class CompiledAsmImmediate:
     immediate_index: int
     name_label: str | None
     name: str | None
+    format: AsmImmediateFormat = AsmImmediateFormat.TRAILING
 
 
 @dataclass(frozen=True, slots=True)
@@ -390,7 +392,9 @@ class CompiledAsmForm:
     immediates: tuple[CompiledAsmImmediate, ...]
     # Number of authored fields at the start of the complete immediate order.
     explicit_immediate_count: int
-    # An explicit alias or default selects named syntax for the entire form.
+    # Number of explicit fields appearing before SSA operands.
+    prefix_immediate_count: int
+    # A trailing alias or default selects named syntax for the trailing fields.
     has_named_immediates: bool
     # At least one field in the named dictionary has no descriptor default.
     requires_named_immediates: bool
@@ -421,9 +425,11 @@ class CompiledAsmLayout:
     operand_segment_count: int
     # Number of explicit spelling rows before the implicit descriptor suffix.
     explicit_immediate_count: int
+    # Number of explicit fields appearing before SSA operands.
+    prefix_immediate_count: int
     # Number of native assembly value rows.
     native_assembly_value_count: int
-    # Explicit aliases or defaults require named syntax for the entire form.
+    # Trailing aliases or defaults require named syntax for the trailing fields.
     has_named_immediates: bool
     # The named dictionary cannot be omitted after any positional prefix.
     requires_named_immediates: bool
@@ -531,6 +537,7 @@ class CompiledAsmTableStorage:
                 tied_result_count=len(asm_form.tied_results),
                 operand_segment_count=len(asm_form.operand_segments),
                 explicit_immediate_count=asm_form.explicit_immediate_count,
+                prefix_immediate_count=asm_form.prefix_immediate_count,
                 native_assembly_value_count=len(asm_form.native_assembly_values),
                 has_named_immediates=asm_form.has_named_immediates,
                 requires_named_immediates=asm_form.requires_named_immediates,

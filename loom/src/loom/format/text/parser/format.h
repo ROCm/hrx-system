@@ -22,6 +22,10 @@ iree_status_t loom_parse_format_flags(loom_parser_t* parser,
                                       const loom_op_vtable_t* vtable,
                                       loom_parsed_op_t* parsed);
 
+// Parses the contents of an instance-flag list, without its angle brackets.
+iree_status_t loom_parse_format_instance_flag_list(
+    loom_parser_t* parser, const loom_op_vtable_t* vtable, uint8_t* out_flags);
+
 // Transfers signature arguments to the next region entry, optionally cloning
 // their identities for regions that project a distinct copy of the signature.
 iree_status_t loom_parse_format_project_func_args(

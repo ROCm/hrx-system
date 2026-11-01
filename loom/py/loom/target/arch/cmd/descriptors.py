@@ -13,6 +13,7 @@ from pathlib import Path
 from loom.target.low_descriptors import (
     AsmForm,
     AsmImmediate,
+    AsmImmediateFormat,
     AsmOperandSegment,
     AsmOperandSegmentDelimiter,
     Descriptor,
@@ -381,7 +382,8 @@ def _memory_dependency_descriptor(*, ranged: bool) -> Descriptor:
                 results=("result",),
                 operands=("buffer",) if ranged else (),
                 immediates=tuple(
-                    AsmImmediate(name, name=name) for name in ("source", "target")
+                    AsmImmediate(name, format=AsmImmediateFormat.KEYWORD)
+                    for name in ("source", "target")
                 ),
             ),
         ),
@@ -405,14 +407,11 @@ _COMMAND_DESCRIPTORS = (
         ),
         asm_forms=(
             AsmForm(
-                operand_segments=(
-                    AsmOperandSegment(
-                        AsmOperandSegmentDelimiter.PAREN, ("dependencies",)
-                    ),
-                ),
-                immediates=tuple(
-                    AsmImmediate(name, name=name)
-                    for name in ("source", "target", "flags")
+                operands=("dependencies",),
+                immediates=(
+                    AsmImmediate("flags", format=AsmImmediateFormat.FLAGS),
+                    AsmImmediate("source", format=AsmImmediateFormat.KEYWORD),
+                    AsmImmediate("target", format=AsmImmediateFormat.KEYWORD),
                 ),
             ),
         ),

@@ -500,6 +500,7 @@ def _compile_view_asm_forms(
     asm_forms = compiler.compile_asm_forms_for_descriptors(
         compiled.string_pool,
         view_spec.descriptors,
+        compiled.enum_domains,
         label_scope=f"view_{view_spec.key}",
     )
     validation.validate_u16_table_count(len(asm_forms), f"descriptor set view '{view_spec.key}' asm form")

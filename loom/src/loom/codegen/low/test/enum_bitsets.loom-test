@@ -41,3 +41,56 @@ low.func.def target<test.low.core>(@target) @unknown_token() -> (reg<test.i32>) 
   %value = test.const.flags ["read", "typo"]
   return %value
 }
+
+// ====
+// RUN: roundtrip
+
+// Prefix masks, ordinary enums, and numeric clauses compose with a flat
+// variadic operand list and a trailing immediate. Defaults do not print.
+low.func.def target<test.low.core> @prefix_fields() asm {
+  %empty = test.collect.flags access(none) predicate(eq) 7
+  %source = test.const.i32 3
+  %one = test.collect.flags<write, volatile> access(execute|read|write|read) predicate(ne) offset(4) %source, 8
+  %many = test.collect.flags<none> access(read) predicate(eq) offset(0) %empty, %one, 9
+  %segmented_empty = test.collect.segmented<>, 10 {access = [], predicate = "eq"}
+  %segmented = test.collect.segmented<%source, %many>, 11 {access = ["read"], predicate = "ne"}
+  %flagged_segment = test.collect.segmented<read><%source>, 12 {access = [], predicate = "eq"}
+  return
+}
+
+// ----
+low.func.def target<test.low.core> @prefix_fields() asm {
+  %empty = test.collect.flags access(none) predicate(eq) 7
+  %source = test.const.i32 3
+  %one = test.collect.flags<write, volatile> access(read|write|execute) predicate(ne) offset(4) %source, 8
+  %many = test.collect.flags access(read) predicate(eq) %empty, %one, 9
+  %segmented_empty = test.collect.segmented<>, 10 {access = [], predicate = "eq"}
+  %segmented = test.collect.segmented<%source, %many>, 11 {access = ["read"], predicate = "ne"}
+  %flagged_segment = test.collect.segmented<read><%source>, 12 {access = [], predicate = "eq"}
+  return
+}
+
+// ====
+// RUN: format bytecode
+
+low.func.def target<test.low.core> @prefix_bytecode() asm {
+  %empty = test.collect.flags<none> access(none) predicate(eq) 5
+  %value = test.collect.flags<read|write> access(execute) predicate(ne) %empty, 6
+  return
+}
+
+// ----
+low.func.def target<test.low.core> @prefix_bytecode() asm {
+  %empty = test.collect.flags access(none) predicate(eq) 5
+  %value = test.collect.flags<read|write> access(execute) predicate(ne) %empty, 6
+  return
+}
+
+// ====
+// RUN: verify
+
+low.func.def target<test.low.core> @unknown_prefix_member() asm {
+  // ERROR@+1: PARSE/018 "access" "typo"
+  %value = test.collect.flags access(read|typo) predicate(eq) 1
+  return
+}

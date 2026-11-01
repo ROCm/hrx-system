@@ -1388,12 +1388,27 @@ typedef struct loom_low_schedule_alternative_t {
 static_assert(sizeof(loom_low_schedule_alternative_t) == 8,
               "loom_low_schedule_alternative_t must be 8 bytes");
 
+enum loom_low_asm_immediate_format_e {
+  // Positional or dictionary field following SSA operands.
+  LOOM_LOW_ASM_IMMEDIATE_FORMAT_TRAILING = 0,
+  // Named keyword(value) clause preceding SSA operands.
+  LOOM_LOW_ASM_IMMEDIATE_FORMAT_KEYWORD = 1,
+  // Optional leading <flags> mask, before keyword clauses and SSA operands.
+  LOOM_LOW_ASM_IMMEDIATE_FORMAT_FLAGS = 2,
+};
+typedef uint16_t loom_low_asm_immediate_format_t;
+
 typedef struct loom_low_asm_immediate_t {
   // Descriptor-local immediate index printed or parsed by this asm field.
   uint16_t immediate_index;
+  // Surface syntax and placement of this immediate.
+  loom_low_asm_immediate_format_t format;
   // Optional string-pool reference for a named immediate spelling.
   loom_string_ref_t name_string_ref;
 } loom_low_asm_immediate_t;
+
+static_assert(sizeof(loom_low_asm_immediate_t) == 8,
+              "loom_low_asm_immediate_t must be 8 bytes");
 
 typedef enum loom_low_native_asm_value_kind_e {
   // Unknown or uninitialized native assembly value kind.
@@ -1530,7 +1545,10 @@ typedef struct loom_low_asm_layout_t {
   // Number of delimited input operand segments for this asm form.
   uint16_t operand_segment_count;
   // Number of explicit spelling rows before the implicit descriptor suffix.
-  uint16_t explicit_immediate_count;
+  // Descriptors have at most 32 immediate fields.
+  uint8_t explicit_immediate_count;
+  // Number of explicit fields preceding SSA operands in immediate order.
+  uint8_t prefix_immediate_count;
   // Number of native assembly value rows for this asm form.
   uint16_t native_assembly_value_count;
   // Generation-owned syntax facts derived from the form and its descriptor.

@@ -2163,4 +2163,6 @@ def validate_enum_domain(domain: EnumDomain) -> tuple[EnumValue, ...]:
             raise ValueError(f"enum domain '{domain.name}' token '{value.token}' value does not fit i64")
         if domain.kind == EnumDomainKind.BITSET and (value.value <= 0 or value.value & (value.value - 1)):
             raise ValueError(f"bitset domain '{domain.name}' token '{value.token}' must name one positive bit")
+        if domain.kind == EnumDomainKind.BITSET and value.token == "none":
+            raise ValueError(f"bitset domain '{domain.name}' reserves 'none' for the empty mask")
     return tuple(sorted(domain.values, key=lambda value: value.token))

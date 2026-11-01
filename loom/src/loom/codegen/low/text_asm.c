@@ -87,6 +87,7 @@ static void loom_low_descriptor_text_asm_make_packet(
       .has_variadic_operands =
           loom_low_descriptor_has_variadic_operands(descriptor),
       .asm_immediate_count = layout->explicit_immediate_count,
+      .prefix_immediate_count = layout->prefix_immediate_count,
       .immediate_count = descriptor_layout->immediate_count,
       .immediate_attribute_field_index =
           builds_as_const ? loom_low_const_attrs_diagnostic_ref().index
@@ -512,6 +513,8 @@ static void loom_low_descriptor_text_asm_immediate_descriptor(
                         asm_immediate->immediate_index];
   out_immediate->field_name = loom_low_descriptor_set_string(
       descriptor_set, immediate->field_name_string_ref);
+  out_immediate->is_flag_list =
+      asm_immediate->format == LOOM_LOW_ASM_IMMEDIATE_FORMAT_FLAGS;
   out_immediate->has_default_value =
       iree_any_bit_set(immediate->flags, LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE);
   out_immediate->default_value = immediate->default_value;

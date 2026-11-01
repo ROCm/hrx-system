@@ -20,6 +20,11 @@ iree_status_t loom_print_instance_flags(loom_print_context_t* ctx,
                                         const loom_op_vtable_t* vtable,
                                         uint8_t flags);
 
+// Prints instance-flag keywords without their angle brackets.
+iree_status_t loom_print_instance_flag_list(loom_print_context_t* ctx,
+                                            const loom_op_vtable_t* vtable,
+                                            uint8_t flags);
+
 // Prints |op| using its generated assembly-format element stream.
 iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
                                          const loom_op_t* op,
