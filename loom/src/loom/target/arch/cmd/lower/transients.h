@@ -15,28 +15,17 @@
 #include "loom/ir/ir.h"
 #include "loom/target/arch/cmd/abi_layout.h"
 #include "loom/target/arch/cmd/lower/schedule.h"
+#include "loom/runtime/command/program.h"
 #include "loom/util/fact_table.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Aggregate issue-time storage required by command-program allocas.
-typedef struct loom_cmd_transient_requirement_t {
-  // Dense rebindable resource index, or UINT32_MAX when no slab is required.
-  uint32_t binding_index;
-
-  // Minimum byte length of the supplied transient slab.
-  uint64_t required_byte_length;
-
-  // Minimum required alignment of the supplied transient slab.
-  uint64_t minimum_alignment;
-} loom_cmd_transient_requirement_t;
-
 // Scratch-owned transient placement consumed by command low conversion.
 typedef struct loom_cmd_transient_layout_t {
   // Aggregate issue-time slab requirement.
-  loom_cmd_transient_requirement_t requirement;
+  loom_cmd_program_transient_requirement_t requirement;
 
   // Source values mapped to packed ranges within the transient slab.
   const loom_cmd_buffer_range_t* buffer_ranges;

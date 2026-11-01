@@ -18,7 +18,6 @@
 #include "loom/runtime/command/program.h"
 #include "loom/target/arch/cmd/abi_layout.h"
 #include "loom/target/arch/cmd/lower/parameters.h"
-#include "loom/target/arch/cmd/lower/transients.h"
 #include "loom/transforms/kernel/kernel_request_producer.h"
 
 #ifdef __cplusplus
@@ -162,7 +161,7 @@ typedef struct loom_cmd_program_root_t {
   loom_cmd_parameter_requirement_table_t parameters;
 
   // Aggregate issue-time storage required by command-program allocas.
-  loom_cmd_transient_requirement_t transient;
+  loom_cmd_program_transient_requirement_t transient;
 
   // Host-produced workgroup-count storage consumed by static dispatches.
   loom_cmd_program_launch_count_requirement_t launch_counts;

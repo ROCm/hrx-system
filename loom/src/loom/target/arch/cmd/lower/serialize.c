@@ -22,6 +22,7 @@
 #include "loom/runtime/command/program.h"
 #include "loom/target/arch/cmd/abi_layout.h"
 #include "loom/target/arch/cmd/descriptors/descriptors.h"
+#include "loom/target/arch/cmd/lower/program_writer.h"
 #include "loom/target/registers.h"
 
 enum { LOOM_CMD_SERIALIZE_INITIAL_CAPACITY = 32 };
@@ -120,10 +121,6 @@ typedef struct loom_cmd_serialize_build_t {
   iree_host_size_t value_count;
   // Immutable external resource counts declared by the function ABI.
   loom_cmd_program_requirements_t requirements;
-  // Source launch-buffer placements in signature order.
-  const loom_cmd_program_launch_binding_t* launch_bindings;
-  // Number of entries in |launch_bindings|.
-  uint32_t launch_binding_count;
   // Buffer ranges used by fills, copies, and indirect launch counts.
   loom_cmd_serialize_buffer_ref_table_t buffer_refs;
   // Executable-entry logical argument schemas.
@@ -136,12 +133,6 @@ typedef struct loom_cmd_serialize_build_t {
   uint32_t* entry_schema_indices;
   // Ordered command rows.
   loom_cmd_serialize_command_table_t commands;
-  // Compiler-owned named parameter requirements to persist.
-  const loom_cmd_parameter_requirement_table_t* parameter_requirements;
-  // Compiler-owned aggregate transient requirement to persist.
-  const loom_cmd_transient_requirement_t* transient_requirement;
-  // Total concatenated byte length of all parameter keys.
-  uint32_t parameter_key_length;
 } loom_cmd_serialize_build_t;
 
 static bool loom_cmd_serialize_packet_is(
@@ -889,303 +880,6 @@ static iree_status_t loom_cmd_serialize_function_body(
   return iree_ok_status();
 }
 
-static void loom_cmd_serialize_write_header(
-    const loom_cmd_serialize_build_t* build,
-    const loom_cmd_program_format_layout_t* layout, iree_byte_span_t data) {
-  memcpy(data.data + LOOM_CMD_PROGRAM_HEADER_MAGIC_OFFSET,
-         LOOM_CMD_PROGRAM_FORMAT_MAGIC, LOOM_CMD_PROGRAM_FORMAT_MAGIC_LENGTH);
-  iree_unaligned_store_le_u16(
-      data.data + LOOM_CMD_PROGRAM_HEADER_VERSION_OFFSET,
-      LOOM_CMD_PROGRAM_FORMAT_VERSION);
-  iree_unaligned_store_le_u16(data.data + LOOM_CMD_PROGRAM_HEADER_SIZE_OFFSET,
-                              LOOM_CMD_PROGRAM_HEADER_SIZE);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_TOTAL_LENGTH_OFFSET,
-      layout->total_length);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_FIXED_BUFFER_COUNT_OFFSET,
-      build->requirements.fixed_buffer_count);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_REBINDABLE_BINDING_COUNT_OFFSET,
-      build->requirements.rebindable_binding_count);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_EXECUTABLE_COUNT_OFFSET,
-      build->requirements.executable_count);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_ENTRY_COUNT_OFFSET,
-      build->requirements.entry_count);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_BUFFER_REF_COUNT_OFFSET,
-      (uint32_t)build->buffer_refs.count);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_ARGUMENT_DATA_LENGTH_OFFSET,
-      (uint32_t)build->argument_data.count);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_COMMAND_COUNT_OFFSET,
-      (uint32_t)build->commands.count);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_PARAMETER_ROOT_COUNT_OFFSET,
-      build->parameter_requirements
-          ? (uint32_t)build->parameter_requirements->root_count
-          : 0);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_PARAMETER_COUNT_OFFSET,
-      build->parameter_requirements
-          ? (uint32_t)build->parameter_requirements->count
-          : 0);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_PARAMETER_KEY_LENGTH_OFFSET,
-      build->parameter_key_length);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_ENTRY_SCHEMA_COUNT_OFFSET,
-      (uint32_t)build->entry_schemas.count);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_ENTRY_SCHEMA_KIND_COUNT_OFFSET,
-      (uint32_t)build->entry_schema_kinds.count);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_LAUNCH_BINDING_COUNT_OFFSET,
-      build->launch_binding_count);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_LAUNCH_BINDING_TABLE_OFFSET,
-      layout->launch_binding_offset);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_BUFFER_REF_TABLE_OFFSET,
-      layout->buffer_ref_offset);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_ENTRY_SCHEMA_TABLE_OFFSET,
-      layout->entry_schema_offset);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_ENTRY_SCHEMA_KIND_TABLE_OFFSET,
-      layout->entry_schema_kind_offset);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_ARGUMENT_DATA_OFFSET,
-      layout->argument_data_offset);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_COMMAND_TABLE_OFFSET,
-      layout->command_offset);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_PARAMETER_ROOT_TABLE_OFFSET,
-      layout->parameter_root_offset);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_PARAMETER_TABLE_OFFSET,
-      layout->parameter_offset);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_PARAMETER_KEY_TABLE_OFFSET,
-      layout->parameter_key_offset);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_TRANSIENT_BINDING_INDEX_OFFSET,
-      build->transient_requirement ? build->transient_requirement->binding_index
-                                   : UINT32_MAX);
-  iree_unaligned_store_le_u64(
-      data.data + LOOM_CMD_PROGRAM_HEADER_TRANSIENT_BYTE_LENGTH_OFFSET,
-      build->transient_requirement
-          ? build->transient_requirement->required_byte_length
-          : 0);
-  iree_unaligned_store_le_u64(
-      data.data + LOOM_CMD_PROGRAM_HEADER_TRANSIENT_MINIMUM_ALIGNMENT_OFFSET,
-      build->transient_requirement
-          ? build->transient_requirement->minimum_alignment
-          : 0);
-  iree_unaligned_store_le_u32(
-      data.data + LOOM_CMD_PROGRAM_HEADER_LAUNCH_COUNT_BINDING_INDEX_OFFSET,
-      build->requirements.launch_counts.binding_index);
-  iree_unaligned_store_le_u64(
-      data.data + LOOM_CMD_PROGRAM_HEADER_LAUNCH_COUNT_BYTE_LENGTH_OFFSET,
-      build->requirements.launch_counts.required_byte_length);
-  iree_unaligned_store_le_u64(
-      data.data + LOOM_CMD_PROGRAM_HEADER_LAUNCH_COUNT_MINIMUM_ALIGNMENT_OFFSET,
-      build->requirements.launch_counts.minimum_alignment);
-}
-
-static void loom_cmd_serialize_write_launch_bindings(
-    const loom_cmd_serialize_build_t* build,
-    const loom_cmd_program_format_layout_t* layout, iree_byte_span_t data) {
-  for (uint32_t i = 0; i < build->launch_binding_count; ++i) {
-    uint8_t* record = data.data + layout->launch_binding_offset +
-                      i * LOOM_CMD_PROGRAM_LAUNCH_BINDING_SIZE;
-    const loom_cmd_program_launch_binding_t binding = build->launch_bindings[i];
-    iree_unaligned_store_le_u32(
-        record + LOOM_CMD_PROGRAM_LAUNCH_BINDING_ROLE_OFFSET, binding.role);
-    iree_unaligned_store_le_u32(
-        record + LOOM_CMD_PROGRAM_LAUNCH_BINDING_ROOT_INDEX_OFFSET,
-        binding.root_index);
-  }
-}
-
-static void loom_cmd_serialize_write_buffer_refs(
-    const loom_cmd_serialize_build_t* build,
-    const loom_cmd_program_format_layout_t* layout, iree_byte_span_t data) {
-  for (uint32_t i = 0; i < build->buffer_refs.count; ++i) {
-    uint8_t* record = data.data + layout->buffer_ref_offset +
-                      i * LOOM_CMD_PROGRAM_BUFFER_REF_SIZE;
-    const loom_cmd_program_buffer_ref_t buffer_ref =
-        build->buffer_refs.values[i];
-    iree_unaligned_store_le_u32(
-        record + LOOM_CMD_PROGRAM_BUFFER_REF_ROLE_OFFSET, buffer_ref.role);
-    iree_unaligned_store_le_u32(
-        record + LOOM_CMD_PROGRAM_BUFFER_REF_ROOT_INDEX_OFFSET,
-        buffer_ref.root_index);
-    iree_unaligned_store_le_u64(
-        record + LOOM_CMD_PROGRAM_BUFFER_REF_BYTE_OFFSET_OFFSET,
-        buffer_ref.byte_offset);
-    iree_unaligned_store_le_u64(
-        record + LOOM_CMD_PROGRAM_BUFFER_REF_BYTE_LENGTH_OFFSET,
-        buffer_ref.byte_length);
-  }
-}
-
-static void loom_cmd_serialize_write_entry_schemas(
-    const loom_cmd_serialize_build_t* build,
-    const loom_cmd_program_format_layout_t* layout, iree_byte_span_t data) {
-  for (uint32_t i = 0; i < build->entry_schemas.count; ++i) {
-    uint8_t* record = data.data + layout->entry_schema_offset +
-                      i * LOOM_CMD_PROGRAM_ENTRY_SCHEMA_SIZE;
-    const loom_cmd_program_entry_schema_t schema =
-        build->entry_schemas.values[i];
-    iree_unaligned_store_le_u32(
-        record + LOOM_CMD_PROGRAM_ENTRY_SCHEMA_ENTRY_INDEX_OFFSET,
-        schema.entry_index);
-    iree_unaligned_store_le_u32(
-        record + LOOM_CMD_PROGRAM_ENTRY_SCHEMA_KIND_OFFSET_OFFSET,
-        schema.kind_offset);
-    iree_unaligned_store_le_u32(
-        record + LOOM_CMD_PROGRAM_ENTRY_SCHEMA_ARGUMENT_COUNT_OFFSET,
-        schema.argument_count);
-    iree_unaligned_store_le_u32(
-        record + LOOM_CMD_PROGRAM_ENTRY_SCHEMA_ARGUMENT_BYTE_LENGTH_OFFSET,
-        schema.argument_byte_length);
-  }
-  if (build->entry_schema_kinds.count != 0) {
-    memcpy(data.data + layout->entry_schema_kind_offset,
-           build->entry_schema_kinds.values, build->entry_schema_kinds.count);
-  }
-  if (build->argument_data.count != 0) {
-    memcpy(data.data + layout->argument_data_offset,
-           build->argument_data.values, build->argument_data.count);
-  }
-}
-
-static void loom_cmd_serialize_write_commands(
-    const loom_cmd_serialize_build_t* build,
-    const loom_cmd_program_format_layout_t* layout, iree_byte_span_t data) {
-  for (uint32_t i = 0; i < build->commands.count; ++i) {
-    uint8_t* record =
-        data.data + layout->command_offset + i * LOOM_CMD_PROGRAM_COMMAND_SIZE;
-    const loom_cmd_program_command_t command = build->commands.values[i];
-    iree_unaligned_store_le_u32(record + LOOM_CMD_PROGRAM_COMMAND_KIND_OFFSET,
-                                (uint32_t)command.kind);
-    iree_unaligned_store_le_u32(
-        record + LOOM_CMD_PROGRAM_COMMAND_ARGUMENT_OFFSET_OFFSET,
-        command.argument_offset);
-    iree_unaligned_store_le_u32(
-        record + LOOM_CMD_PROGRAM_COMMAND_ARGUMENT_SCHEMA_INDEX_OFFSET,
-        command.argument_schema_index);
-    uint32_t operands[5] = {0};
-    switch ((uint32_t)loom_cmd_program_command_kind_base(command.kind)) {
-      case LOOM_CMD_PROGRAM_COMMAND_KIND_TIMESTAMP:
-        operands[0] = command.payload.timestamp.target_buffer_ref;
-        break;
-      case LOOM_CMD_PROGRAM_COMMAND_KIND_FILL:
-        operands[0] = command.payload.fill.target_buffer_ref;
-        operands[1] = command.payload.fill.pattern;
-        operands[2] = command.payload.fill.pattern_length;
-        break;
-      case LOOM_CMD_PROGRAM_COMMAND_KIND_COPY:
-        operands[0] = command.payload.copy.source_buffer_ref;
-        operands[1] = command.payload.copy.target_buffer_ref;
-        break;
-      case LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_DIRECT:
-        operands[0] = command.payload.dispatch_direct.executable_index;
-        operands[1] = command.payload.dispatch_direct.entry_index;
-        operands[2] = command.payload.dispatch_direct.workgroup_count_x;
-        operands[3] = command.payload.dispatch_direct.workgroup_count_y;
-        operands[4] = command.payload.dispatch_direct.workgroup_count_z;
-        break;
-      case LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_STATIC:
-      case LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_DYNAMIC:
-        operands[0] = command.payload.dispatch_indirect.executable_index;
-        operands[1] = command.payload.dispatch_indirect.entry_index;
-        operands[2] =
-            command.payload.dispatch_indirect.workgroup_count_buffer_ref;
-        break;
-      case LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER_EXECUTION:
-        break;
-    }
-    for (uint32_t operand_index = 0; operand_index < IREE_ARRAYSIZE(operands);
-         ++operand_index) {
-      iree_unaligned_store_le_u32(
-          record + LOOM_CMD_PROGRAM_COMMAND_OPERAND_0_OFFSET +
-              operand_index * sizeof(uint32_t),
-          operands[operand_index]);
-    }
-  }
-}
-
-static void loom_cmd_serialize_write_parameters(
-    const loom_cmd_serialize_build_t* build,
-    const loom_cmd_program_format_layout_t* layout, iree_byte_span_t data) {
-  if (!build->parameter_requirements) {
-    return;
-  }
-  for (uint32_t i = 0; i < build->parameter_requirements->root_count; ++i) {
-    uint8_t* record = data.data + layout->parameter_root_offset +
-                      i * LOOM_CMD_PROGRAM_PARAMETER_ROOT_SIZE;
-    const loom_cmd_program_parameter_root_t* root =
-        &build->parameter_requirements->roots[i];
-    iree_unaligned_store_le_u32(
-        record + LOOM_CMD_PROGRAM_PARAMETER_ROOT_FIXED_BUFFER_INDEX_OFFSET,
-        root->fixed_buffer_index);
-    iree_unaligned_store_le_u64(
-        record + LOOM_CMD_PROGRAM_PARAMETER_ROOT_REQUIRED_BYTE_LENGTH_OFFSET,
-        root->required_byte_length);
-    iree_unaligned_store_le_u64(
-        record + LOOM_CMD_PROGRAM_PARAMETER_ROOT_MINIMUM_ALIGNMENT_OFFSET,
-        root->minimum_alignment);
-  }
-
-  uint32_t key_offset = 0;
-  for (uint32_t i = 0; i < build->parameter_requirements->count; ++i) {
-    uint8_t* record = data.data + layout->parameter_offset +
-                      i * LOOM_CMD_PROGRAM_PARAMETER_SIZE;
-    const loom_cmd_program_parameter_t* parameter =
-        &build->parameter_requirements->entries[i];
-    iree_unaligned_store_le_u32(
-        record + LOOM_CMD_PROGRAM_PARAMETER_KEY_OFFSET_OFFSET, key_offset);
-    iree_unaligned_store_le_u32(
-        record + LOOM_CMD_PROGRAM_PARAMETER_KEY_LENGTH_OFFSET,
-        (uint32_t)parameter->key.size);
-    iree_unaligned_store_le_u32(
-        record + LOOM_CMD_PROGRAM_PARAMETER_FIXED_BUFFER_INDEX_OFFSET,
-        parameter->fixed_buffer_index);
-    iree_unaligned_store_le_u64(
-        record + LOOM_CMD_PROGRAM_PARAMETER_BYTE_OFFSET_OFFSET,
-        parameter->byte_offset);
-    iree_unaligned_store_le_u64(
-        record + LOOM_CMD_PROGRAM_PARAMETER_BYTE_LENGTH_OFFSET,
-        parameter->byte_length);
-    iree_unaligned_store_le_u64(
-        record + LOOM_CMD_PROGRAM_PARAMETER_MINIMUM_ALIGNMENT_OFFSET,
-        parameter->minimum_alignment);
-    memcpy(data.data + layout->parameter_key_offset + key_offset,
-           parameter->key.data, parameter->key.size);
-    key_offset += (uint32_t)parameter->key.size;
-  }
-  IREE_ASSERT_EQ(key_offset, build->parameter_key_length);
-}
-
-static void loom_cmd_serialize_write_program(
-    const loom_cmd_serialize_build_t* build,
-    const loom_cmd_program_format_layout_t* layout, iree_byte_span_t data) {
-  IREE_ASSERT_EQ(data.data_length, layout->total_length);
-  memset(data.data, 0, data.data_length);
-  loom_cmd_serialize_write_header(build, layout, data);
-  loom_cmd_serialize_write_launch_bindings(build, layout, data);
-  loom_cmd_serialize_write_buffer_refs(build, layout, data);
-  loom_cmd_serialize_write_entry_schemas(build, layout, data);
-  loom_cmd_serialize_write_commands(build, layout, data);
-  loom_cmd_serialize_write_parameters(build, layout, data);
-}
-
 iree_status_t loom_cmd_program_plan_serialize_root(
     const loom_cmd_program_plan_t* plan, iree_host_size_t root_index,
     iree_allocator_t host_allocator, iree_byte_span_t* out_data) {
@@ -1198,8 +892,6 @@ iree_status_t loom_cmd_program_plan_serialize_root(
   const loom_op_t* function_op = root->function_op;
   const loom_cmd_parameter_requirement_table_t* parameter_requirements =
       &root->parameters;
-  const loom_cmd_transient_requirement_t* transient_requirement =
-      &root->transient;
   const loom_low_descriptor_set_t* descriptor_set =
       loom_cmd_core_descriptor_set();
   IREE_ASSERT(loom_low_func_def_isa(function_op));
@@ -1229,12 +921,9 @@ iree_status_t loom_cmd_program_plan_serialize_root(
                   root->abi_layout.rebindable_binding_count,
               .executable_count = root->abi_layout.executable_count,
               .entry_count = root->abi_layout.entry_count,
+              .transient = root->transient,
               .launch_counts = root->launch_counts,
           },
-      .launch_bindings = root->launch_bindings,
-      .launch_binding_count = root->launch_binding_count,
-      .parameter_requirements = parameter_requirements,
-      .transient_requirement = transient_requirement,
   };
   if (iree_status_is_ok(status) && build.value_count != 0) {
     status =
@@ -1257,7 +946,7 @@ iree_status_t loom_cmd_program_plan_serialize_root(
   if (iree_status_is_ok(status)) {
     status = loom_cmd_serialize_function_body(&build, body);
   }
-  if (iree_status_is_ok(status) && parameter_requirements) {
+  if (iree_status_is_ok(status)) {
     if (parameter_requirements->root_count > UINT32_MAX ||
         parameter_requirements->count > UINT32_MAX) {
       status = iree_make_status(
@@ -1270,32 +959,31 @@ iree_status_t loom_cmd_program_plan_serialize_root(
           iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                            "command parameter keys exceed the format limit");
     }
-    if (iree_status_is_ok(status)) {
-      build.parameter_key_length =
-          (uint32_t)parameter_requirements->key_storage_length;
-    }
   }
 
-  loom_cmd_program_format_layout_t layout = {0};
   if (iree_status_is_ok(status)) {
-    status = loom_cmd_program_format_calculate_layout(
-        build.launch_binding_count, (uint32_t)build.buffer_refs.count,
-        (uint32_t)build.entry_schemas.count,
-        (uint32_t)build.entry_schema_kinds.count,
-        (uint32_t)build.argument_data.count, (uint32_t)build.commands.count,
-        parameter_requirements ? (uint32_t)parameter_requirements->root_count
-                               : 0,
-        parameter_requirements ? (uint32_t)parameter_requirements->count : 0,
-        build.parameter_key_length, &layout);
-  }
-  uint8_t* data = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc(host_allocator, layout.total_length,
-                                   (void**)&data);
-  }
-  if (iree_status_is_ok(status)) {
-    *out_data = iree_make_byte_span(data, layout.total_length);
-    loom_cmd_serialize_write_program(&build, &layout, *out_data);
+    const loom_cmd_program_tables_t tables = {
+        .requirements = build.requirements,
+        .launch_bindings = root->launch_bindings,
+        .launch_binding_count = root->launch_binding_count,
+        .buffer_refs = build.buffer_refs.values,
+        .buffer_ref_count = (uint32_t)build.buffer_refs.count,
+        .entry_schemas = build.entry_schemas.values,
+        .entry_schema_count = (uint32_t)build.entry_schemas.count,
+        .entry_schema_kinds = build.entry_schema_kinds.values,
+        .entry_schema_kind_count = (uint32_t)build.entry_schema_kinds.count,
+        .argument_data = build.argument_data.values,
+        .argument_data_length = (uint32_t)build.argument_data.count,
+        .commands = build.commands.values,
+        .command_count = (uint32_t)build.commands.count,
+        .parameter_roots = parameter_requirements->roots,
+        .parameter_root_count = (uint32_t)parameter_requirements->root_count,
+        .parameters = parameter_requirements->entries,
+        .parameter_count = (uint32_t)parameter_requirements->count,
+        .parameter_key_length =
+            (uint32_t)parameter_requirements->key_storage_length,
+    };
+    status = loom_cmd_program_write(&tables, host_allocator, out_data);
   }
 
   if (loom_local_value_domain_is_acquired(&value_domain)) {

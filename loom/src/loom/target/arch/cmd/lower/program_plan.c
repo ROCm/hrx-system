@@ -59,7 +59,7 @@ typedef struct loom_cmd_program_root_build_t {
   // Owned immutable parameter requirements transferred to the final root.
   loom_cmd_parameter_requirement_table_t parameters;
   // Aggregate transient storage requirement transferred to the final root.
-  loom_cmd_transient_requirement_t transient;
+  loom_cmd_program_transient_requirement_t transient;
   // Owned atomic entry requirements transferred to the final root.
   uint32_t* entry_requirement_indices;
   // Number of entries in |entry_requirement_indices|.
@@ -485,7 +485,7 @@ static iree_status_t loom_cmd_program_plan_validate_timestamps(
     const loom_value_id_t* binding_values,
     const loom_cmd_buffer_binding_t* bindings, iree_host_size_t binding_count,
     const loom_cmd_buffer_range_t* ranges, iree_host_size_t range_count,
-    loom_cmd_transient_requirement_t* transient,
+    loom_cmd_program_transient_requirement_t* transient,
     iree_diagnostic_emitter_t emitter, bool* out_valid) {
   *out_valid = true;
   loom_module_value_ordinal_scratch_acquire(module);
@@ -570,7 +570,7 @@ static iree_status_t loom_cmd_program_plan_build_lower_plan(
     iree_arena_allocator_t* scratch_arena,
     iree_diagnostic_emitter_t diagnostic_emitter, bool* out_valid,
     loom_cmd_parameter_requirement_table_t* out_parameters,
-    loom_cmd_transient_requirement_t* out_transient,
+    loom_cmd_program_transient_requirement_t* out_transient,
     loom_cmd_lower_plan_t* out_lower_plan,
     uint32_t** out_entry_requirement_indices,
     uint32_t* out_entry_requirement_count) {
