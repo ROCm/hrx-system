@@ -1,17 +1,17 @@
 // RUN: verify
 union Record { unsigned integer; float real; };
-// ERROR@+1: LOWERING/059 "record storage requires a complete aggregate without unions, bases or nontrivial lifecycle operations"
+// ERROR@+1: LOWERING/059 "record storage requires a complete baseless non-union type with aggregate or user-provided construction and trivial copy and destruction"
 unsigned read(const Record* record) { return record->integer; }
 
 // ====
 struct Base { unsigned first; };
 struct Record : Base { unsigned second; };
-// ERROR@+1: LOWERING/059 "record storage requires a complete aggregate without unions, bases or nontrivial lifecycle operations"
+// ERROR@+1: LOWERING/059 "record storage requires a complete baseless non-union type with aggregate or user-provided construction and trivial copy and destruction"
 unsigned read(const Record* record) { return record->second; }
 
 // ====
 struct Record { unsigned value; ~Record() {} };
-// ERROR@+1: LOWERING/059 "record storage requires a complete aggregate without unions, bases or nontrivial lifecycle operations"
+// ERROR@+1: LOWERING/059 "record storage requires a complete baseless non-union type with aggregate or user-provided construction and trivial copy and destruction"
 unsigned read(const Record* record) { return record->value; }
 
 // ====

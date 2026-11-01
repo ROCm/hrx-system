@@ -894,6 +894,15 @@ class Translator final : private Initialization::Evaluation {
       }
       ++parameter_index;
     }
+    if (defined.source->symbol->isConstructor()) {
+      IREE_ASSERT(defined.implicit_object &&
+                  defined.implicit_object->abi == ImplicitObjectABI::Storage &&
+                  !receivers_.empty() && receivers_.back().storage);
+      initialization_.constructor_receiver(
+          *receivers_.back().storage, *receivers_.back().record,
+          defined.implicit_object->object_type, defined.source->symbol,
+          defined.source);
+    }
     auto returned =
         return_sequence({body->statementList, nullptr, lexical_fastmath_flags_,
                          control_->callable_exit_count(body)});
@@ -1085,8 +1094,13 @@ class Translator final : private Initialization::Evaluation {
                                                : LvalueAccess::Write));
       return;
     }
+    const bool user_record_constructor = types_.is_user_record_constructor(
+        variable->type(), variable->constructor(), owner);
+    const bool requires_initialization =
+        initializer || user_record_constructor ||
+        control_->default_constructor_initializes(variable->constructor());
     if (unit_.typeTraits().is_array(variable->type()) ||
-        control_->addressed(variable) ||
+        user_record_constructor || control_->addressed(variable) ||
         unit_.typeTraits().is_volatile(variable->type())) {
       auto contents =
           unit_.typeTraits().is_volatile(variable->type())
@@ -1097,7 +1111,7 @@ class Translator final : private Initialization::Evaluation {
       if (contents) {
         return;
       }
-      if (initializer) {
+      if (requires_initialization) {
         if (types_.address_domain(types_.unqualified(variable->type()),
                                   owner) == LOOM_SCALAR_TYPE_NONE) {
           types_.admit_construction(variable->constructor(), variable->type(),
@@ -2621,9 +2635,12 @@ class Translator final : private Initialization::Evaluation {
 
   struct SourceArguments {
     // Remaining arguments owned by an ordinary call's frontend list.
-    cxx::List<cxx::ExpressionAST*>* remaining;
+    cxx::List<cxx::ExpressionAST*>* remaining = nullptr;
     // Single argument supplied by overloaded subscript syntax.
-    cxx::ExpressionAST* single;
+    cxx::ExpressionAST* single = nullptr;
+    // Arguments recovered from a declaration initializer.
+    std::span<cxx::ExpressionAST* const> range;
+    size_t range_index = 0;
 
     cxx::ExpressionAST* next() {
       if (remaining) {
@@ -2631,11 +2648,35 @@ class Translator final : private Initialization::Evaluation {
         remaining = remaining->next;
         return argument;
       }
-      return std::exchange(single, nullptr);
+      if (single) {
+        return std::exchange(single, nullptr);
+      }
+      return range_index < range.size() ? range[range_index++] : nullptr;
     }
   };
 
-  std::optional<Value> emit_simple_call(cxx::ExpressionAST* call,
+  void call_constructor(StorageProjection destination,
+                        const RecordPartition& record,
+                        const cxx::Type* object_type,
+                        cxx::FunctionSymbol* constructor,
+                        std::span<cxx::ExpressionAST* const> arguments,
+                        cxx::AST* owner) override {
+    ReceiverArgument receiver = {
+        ImplicitObjectABI::Storage,
+        Value(destination.pointer),
+        &record,
+        std::nullopt,
+        false,
+        functions_.receiver_writes(constructor),
+        {},
+    };
+    auto result = emit_ordinary_call(
+        owner, constructor, SourceArguments{.range = arguments},
+        std::move(receiver), locations_.get(owner));
+    IREE_ASSERT(!result);
+  }
+
+  std::optional<Value> emit_simple_call(cxx::AST* call,
                                         cxx::FunctionSymbol* function,
                                         loom_symbol_ref_t callee,
                                         std::vector<loom_value_id_t> arguments,
@@ -2667,8 +2708,8 @@ class Translator final : private Initialization::Evaluation {
   }
 
   std::optional<Value> emit_evaluated_call(
-      cxx::ExpressionAST* call, cxx::FunctionSymbol* function,
-      loom_symbol_ref_t callee, std::optional<ReceiverArgument> receiver,
+      cxx::AST* call, cxx::FunctionSymbol* function, loom_symbol_ref_t callee,
+      std::optional<ReceiverArgument> receiver,
       std::vector<loom_value_id_t> arguments,
       std::vector<ReferenceWriteback> writebacks,
       std::vector<ReferenceOrigin> origins, loom_location_id_t source) {
@@ -2811,7 +2852,7 @@ class Translator final : private Initialization::Evaluation {
   }
 
   std::optional<Value> emit_ordinary_call(
-      cxx::ExpressionAST* call, cxx::FunctionSymbol* function,
+      cxx::AST* call, cxx::FunctionSymbol* function,
       SourceArguments source_arguments,
       std::optional<ReceiverArgument> receiver, loom_location_id_t source) {
     auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
@@ -3425,6 +3466,13 @@ class Translator final : private Initialization::Evaluation {
       return expression(initializer->expression);
     }
     if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(ast)) {
+      if (cast->conversionFunction &&
+          cast->conversionFunction->isConstructor() &&
+          types_.is_user_record_constructor(cast->type,
+                                            cast->conversionFunction, cast)) {
+        return initialization_.value(cast->type, cast->expression,
+                                     cast->conversionFunction, cast);
+      }
       if (cast->castKind == cxx::ImplicitCastKind::kLValueToRValueConversion) {
         if (auto* call =
                 cxx::ast_cast<cxx::CallExpressionAST>(cast->expression)) {

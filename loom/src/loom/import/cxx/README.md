@@ -2066,14 +2066,43 @@ while transporting zero values; a two-scalar record remains distinct from a
 pointer. Kernel parameters continue to use the ordinary launch binding ABI and
 reject record parameters.
 
-The admitted records are complete aggregates with public fields, trivial copying
-and destruction, and no unions or base classes. Fields recursively admit scalar,
-vector, pointer, record, and fixed-array values. Braced and parenthesized
-aggregate construction preserve positional, designated, and omitted-field
-initialization. Implicit default construction such as `Result()` executes the
-frontend's declaration-order member-initialization plan, including nested
-records and arrays. Bitfields and nontrivial lifecycle operations remain outside
-the SSA record contract.
+Admitted records are complete, baseless, non-union types with trivial copying
+and destruction. Fields recursively admit scalar, vector, pointer, record, and
+fixed-array values. Braced and parenthesized aggregate construction preserve
+positional, designated, and omitted-field initialization. Implicit default
+construction such as `Result()` executes the frontend's declaration-order
+member-initialization plan, including nested records and arrays. Bitfields and
+nontrivial lifecycle operations remain outside the SSA record contract.
+
+A record can also define its own constructors. The selected constructor runs
+its declaration-ordered member initializers and then its ordinary C++ body
+against the exact destination object. Explicit and default arguments, nested
+record and array construction, helper calls, and structured control flow use
+the same callable machinery as ordinary functions:
+
+```cpp
+struct Coefficients {
+  float values[2];
+
+  Coefficients(float scale) : values{scale, scale + 1.0f} {
+    if (scale < 0.0f) values[1] = -values[1];
+  }
+};
+
+float coefficient(float scale, unsigned lane) {
+  Coefficients coefficients(scale);
+  return coefficients.values[lane & 1u];
+}
+```
+
+Constructors are private inline callables with a storage receiver rather than
+exported C ABI functions. Ordinary inlining and private-fragment promotion
+return statically addressed objects to SSA values. Delegating constructors,
+base subobjects, unions, and nontrivial destruction remain rejected because
+they require lifecycle semantics beyond one destination initialization. The
+receiver must also have a source-layout object representation: records that
+store pointers, references, or semantic Loom values remain SSA aggregates and
+cannot use this constructor form.
 
 Automatic record objects become private storage when their identity is required.
 Their field and array-element addresses share that storage, while unaddressed

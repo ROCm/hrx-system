@@ -127,6 +127,12 @@ Value Initialization::value(const cxx::Type* type,
                             cxx::ExpressionAST* initializer,
                             cxx::FunctionSymbol* constructor, cxx::AST* owner,
                             std::optional<Value> retained) {
+  if (auto* conversion = constructor_conversion(initializer);
+      conversion && types_.is_user_record_constructor(
+                        type, conversion->conversionFunction, owner)) {
+    constructor = conversion->conversionFunction;
+    initializer = conversion->expression;
+  }
   type = types_.unqualified(type);
   cxx::List<cxx::ExpressionAST*>* elements = nullptr;
   cxx::VariableSymbol* implicit_element = nullptr;
@@ -154,12 +160,25 @@ Value Initialization::value(const cxx::Type* type,
     return evaluation_.convert(initializer, type, owner);
   }
 
-  if (constructor && !types_.array(type, owner)) {
+  const auto* array = types_.array(type, owner);
+  if (constructor && !array) {
     types_.admit_construction(constructor, type, owner);
+  }
+  if (!array && types_.is_user_record_constructor(type, constructor, owner)) {
+    std::vector<cxx::ExpressionAST*> arguments;
+    for (auto* element : cxx::ListView{elements}) {
+      arguments.push_back(element);
+    }
+    auto allocation =
+        storage_.allocate(type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, owner);
+    auto destination = storage_.project(allocation.pointer, type, owner);
+    evaluation_.call_constructor(destination, *types_.record(type, owner), type,
+                                 constructor, arguments, owner);
+    return objects_.load(destination, type, owner);
   }
   if (auto* record = types_.record(type, owner);
       record && constructor &&
-      constructor == record->source->defaultConstructor()) {
+      same_function(constructor, record->source->defaultConstructor())) {
     return default_record(
         *record, constructor,
         value_initialized &&
@@ -566,6 +585,12 @@ void Initialization::object(StorageProjection destination,
                             cxx::ExpressionAST* initializer,
                             cxx::FunctionSymbol* constructor, cxx::AST* owner,
                             bool retained) {
+  if (auto* conversion = constructor_conversion(initializer);
+      conversion && types_.is_user_record_constructor(
+                        type, conversion->conversionFunction, owner)) {
+    constructor = conversion->conversionFunction;
+    initializer = conversion->expression;
+  }
   if (unit_.typeTraits().is_array(type) &&
       unit_.typeTraits().is_char_type(
           unit_.typeTraits().get_element_type(type)) &&
@@ -661,9 +686,15 @@ void Initialization::object(StorageProjection destination,
 
   auto* object_type = type;
   auto* shape = types_.unqualified(type);
+  if (!types_.array(shape, owner) &&
+      types_.is_user_record_constructor(shape, constructor, owner)) {
+    evaluation_.call_constructor(destination, *types_.record(shape, owner),
+                                 object_type, constructor, elements, owner);
+    return;
+  }
   if (auto* record = types_.record(shape, owner);
       record && constructor &&
-      constructor == record->source->defaultConstructor()) {
+      same_function(constructor, record->source->defaultConstructor())) {
     default_storage_record(
         destination, *record, object_type, constructor,
         value_initialized &&
@@ -709,6 +740,15 @@ void Initialization::object(StorageProjection destination,
   objects_.store(destination, initialized, object_type, owner);
 }
 
+void Initialization::constructor_receiver(StorageProjection destination,
+                                          const RecordPartition& record,
+                                          const cxx::Type* object_type,
+                                          cxx::FunctionSymbol* constructor,
+                                          cxx::AST* owner) {
+  default_storage_record(destination, record, object_type, constructor,
+                         /*zero_initialize=*/false, /*retained=*/false, owner);
+}
+
 std::optional<ObjectRepresentation> Initialization::literal(
     const cxx::Type* type, cxx::ExpressionAST* initializer, cxx::AST* owner) {
   auto traits = unit_.typeTraits();
@@ -746,7 +786,7 @@ void Initialization::storage(StorageAllocation allocation,
       return;
     }
     cxx::Initializer source(initializer);
-    if (source.form() != cxx::InitializerForm::kList &&
+    if (!constructor && source.form() != cxx::InitializerForm::kList &&
         source.form() != cxx::InitializerForm::kParen) {
       diagnostics_.reject(
           unit_, owner, "automatic arrays require element-wise initialization");

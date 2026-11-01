@@ -12,6 +12,7 @@
 #include <cxx/memory_layout.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
+#include <cxx/type_traits.h>
 #include <cxx/types.h>
 
 #include <algorithm>
@@ -19,6 +20,7 @@
 #include <optional>
 
 #include "loom/import/cxx/source/error.h"
+#include "loom/import/cxx/source/expressions.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/type_registry.h"
@@ -45,6 +47,11 @@ const cxx::Attribute* type_binding(cxx::ClassSymbol* source) {
   }
   auto* primary = cxx::class_template_of(source);
   return primary == source ? nullptr : find(primary);
+}
+
+bool has_user_provided_constructor(cxx::ClassSymbol* source) {
+  return source &&
+         std::ranges::any_of(source->constructors(), cxx::isUserProvided);
 }
 
 const cxx::ParameterPackSymbol* template_argument_pack(
@@ -1121,13 +1128,15 @@ const RecordPartition* Types::record(const cxx::Type* input, cxx::AST* owner) {
     source = type->definition();
   }
   if (!source || !source->isComplete() || source->isUnion() ||
-      !source->baseClasses().empty() || !traits.is_aggregate(input) ||
+      !source->baseClasses().empty() ||
+      (!traits.is_aggregate(input) && !has_user_provided_constructor(source)) ||
       !traits.is_trivially_copyable(input) ||
       !traits.has_trivial_destructor(input)) {
     diagnostics_.reject(
         unit_, owner,
-        "record values require a complete aggregate without unions, bases "
-        "or nontrivial lifecycle operations");
+        "record values require a complete baseless non-union type with "
+        "aggregate or user-provided construction and trivial copy and "
+        "destruction");
   }
   auto result = std::make_unique<RecordPartition>();
   result->kind = ValueKind::Record;
@@ -1163,6 +1172,20 @@ const RecordPartition* Types::record(const cxx::Type* input, cxx::AST* owner) {
   auto* admitted = result.get();
   records_.emplace(source, std::move(result));
   return admitted;
+}
+
+bool Types::is_user_record_constructor(const cxx::Type* type,
+                                       cxx::FunctionSymbol* constructor,
+                                       cxx::AST* owner) {
+  if (!constructor || !constructor->isConstructor() ||
+      !cxx::isUserProvided(constructor)) {
+    return false;
+  }
+  type = unqualified(type);
+  while (auto* array = cxx::type_cast<cxx::BoundedArrayType>(type)) {
+    type = unqualified(array->elementType());
+  }
+  return record(type, owner) != nullptr;
 }
 
 void Types::append_component_names(const Partition& partition,
@@ -1416,13 +1439,15 @@ void Types::require_record_storage(const cxx::ClassType* input,
                         "Loom source types require SSA value transport");
   }
   if (!source || !source->isComplete() || source->isUnion() ||
-      !source->baseClasses().empty() || !traits.is_aggregate(input) ||
+      !source->baseClasses().empty() ||
+      (!traits.is_aggregate(input) && !has_user_provided_constructor(source)) ||
       !traits.is_trivially_copyable(input) ||
       !traits.has_trivial_destructor(input)) {
     diagnostics_.reject(
         unit_, owner,
-        "record storage requires a complete aggregate without unions, bases "
-        "or nontrivial lifecycle operations");
+        "record storage requires a complete baseless non-union type with "
+        "aggregate or user-provided construction and trivial copy and "
+        "destruction");
   }
   for (auto* symbol : source->members()) {
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(symbol);
@@ -1491,10 +1516,10 @@ bool Types::is_opaque_dialect(const cxx::Type* type, std::string_view name,
 
 // The frontend has selected the special member and checked accessibility,
 // deletion, cv and overload resolution. Source admission establishes trivial
-// lifecycle semantics before an implicit copy becomes an SSA value copy. An
-// admitted record's default constructor contributes only its canonical member
-// initialization plan; Initialization evaluates that plan against the current
-// object.
+// lifecycle semantics before an implicit copy becomes an SSA value copy.
+// Synthesized record constructors contribute their canonical member
+// initialization plans. User-provided record constructors retain ordinary
+// callable bodies over the exact destination storage.
 void Types::admit_construction(cxx::FunctionSymbol* constructor,
                                const cxx::Type* type, cxx::AST* owner) {
   if (!constructor) {
@@ -1531,7 +1556,7 @@ void Types::admit_construction(cxx::FunctionSymbol* constructor,
   } else if (admitted.kind == ValueKind::Tensor) {
     source = static_cast<const TensorPartition&>(admitted).source;
   }
-  if (source && constructor == source->defaultConstructor()) {
+  if (source && same_function(constructor, source->defaultConstructor())) {
     if (is_record) {
       return;
     }
@@ -1540,8 +1565,11 @@ void Types::admit_construction(cxx::FunctionSymbol* constructor,
         "default Loom source type construction requires source object "
         "initialization semantics");
   }
-  if (!source || (constructor != source->copyConstructor() &&
-                  constructor != source->moveConstructor())) {
+  if (is_record && cxx::isUserProvided(constructor)) {
+    return;
+  }
+  if (!source || (!same_function(constructor, source->copyConstructor()) &&
+                  !same_function(constructor, source->moveConstructor()))) {
     diagnostics_.reject(
         unit_, owner,
         is_record

@@ -1,0 +1,327 @@
+// RUN: pass inline-callables,promote-private-fragments,canonicalize,cse,dce
+// Constructor member initializers precede structured body mutations, and a
+// local with no address demand returns to ordinary SSA after inlining.
+struct Pair {
+  unsigned first;
+  unsigned second;
+
+  Pair(unsigned seed) : first(seed), second(seed + 1u) {
+    if (seed & 1u) this->second += 2u;
+  }
+};
+
+unsigned build(unsigned seed) {
+  Pair pair(seed);
+  return pair.first + pair.second;
+}
+
+// ----
+func.def public @build(%seed: i32) -> (i32) {
+  %35 = scalar.constant 1 : i32
+  %36 = scalar.addi %seed, %35 : i32
+  %39 = scalar.andi %seed, %35 : i32
+  %40 = scalar.constant 0 : i32
+  %41 = scalar.cmpi ne, %39, %40 : i32
+  %49 = scalar.constant 3 : i32
+  %50 = scalar.addi %seed, %49 : i32
+  %51 = scf.select %41, %50, %36 : i32
+  %26 = scalar.addi %seed, %51 : i32
+  func.return %26 : i32
+}
+
+// ====
+// Nested constructors retain their own member-initializer plans and use the
+// ordinary member-function machinery from the constructor body.
+struct Pair {
+  unsigned first;
+  unsigned second;
+
+  Pair(unsigned seed) : first(seed), second(seed + 1u) { adjust(); }
+
+  [[loom::force_inline]] void adjust() { first += 3u; }
+};
+
+struct Outer {
+  Pair pair;
+  unsigned tail;
+
+  Outer(unsigned seed) : pair(seed), tail(pair.second + 4u) {}
+};
+
+unsigned build(unsigned seed) {
+  Outer outer(seed);
+  return outer.pair.first + outer.pair.second + outer.tail;
+}
+
+// ----
+func.def public @build(%seed: i32) -> (i32) {
+  %87 = scalar.constant 1 : i32
+  %88 = scalar.addi %seed, %87 : i32
+  %100 = scalar.addi %seed, %88 : i32
+  %102 = scalar.addi %100, %88 : i32
+  %104 = scalar.constant 7 : i32
+  %105 = scalar.addi %102, %104 : i32
+  func.return %105 : i32
+}
+
+// ====
+// Default construction runs once per array element. Constructor overloads and
+// prvalue return transport preserve the selected explicit arguments.
+struct Cell {
+  unsigned value;
+  Cell() : value(1u) { ++value; }
+  Cell(unsigned seed) : value(seed + 1u) {}
+};
+
+struct Packet {
+  Cell cells[2];
+};
+
+unsigned build_array() {
+  Cell cells[2];
+  return cells[0].value + cells[1].value;
+}
+
+unsigned build_nested_array() {
+  Packet packet;
+  return packet.cells[0].value + packet.cells[1].value;
+}
+
+Cell build_value(unsigned seed) { return Cell(seed); }
+unsigned read_value(unsigned seed) { return build_value(seed).value; }
+
+// ----
+func.def public @build_array() -> (i32) {
+  %138 = scalar.constant 4 : i32
+  func.return %138 : i32
+}
+
+func.def public @build_nested_array() -> (i32) {
+  %139 = scalar.constant 4 : i32
+  func.return %139 : i32
+}
+
+func.def public @build_value(%seed: i32) -> (i32) {
+  %105 = scalar.constant 1 : i32
+  %106 = scalar.addi %seed, %105 : i32
+  func.return %106 : i32
+}
+
+func.def public @read_value(%seed: i32) -> (i32) {
+  %87 = func.call pure @build_value(%seed) : (i32) -> (i32)
+  func.return %87 : i32
+}
+
+// ====
+// Constructor conversions in array elements preserve each selected call and
+// construct directly into the element destination.
+struct Cell {
+  unsigned value;
+
+  Cell(unsigned seed) : value(seed + 1u) {
+    if (seed & 1u) value += 2u;
+  }
+};
+
+struct Packet {
+  Cell cells[2];
+  Packet(unsigned seed) : cells{seed, seed + 1u} {}
+};
+
+unsigned sum(unsigned seed) {
+  Packet packet(seed);
+  return packet.cells[0].value + packet.cells[1].value;
+}
+
+// ----
+func.def public @sum(%seed: i32) -> (i32) {
+  %66 = scalar.constant 1 : i32
+  %67 = scalar.addi %seed, %66 : i32
+  %70 = scalar.andi %seed, %66 : i32
+  %71 = scalar.constant 0 : i32
+  %72 = scalar.cmpi ne, %70, %71 : i32
+  %81 = scalar.constant 3 : i32
+  %82 = scalar.addi %seed, %81 : i32
+  %90 = scf.select %72, %82, %67 : i32
+  %88 = scalar.constant 2 : i32
+  %89 = scalar.addi %seed, %88 : i32
+  %55 = scalar.andi %67, %66 : i32
+  %57 = scalar.cmpi ne, %55, %71 : i32
+  %85 = scalar.constant 4 : i32
+  %86 = scalar.addi %seed, %85 : i32
+  %87 = scf.select %57, %86, %89 : i32
+  %36 = scalar.addi %90, %87 : i32
+  func.return %36 : i32
+}
+
+// ====
+// Out-of-line definitions, default arguments, copy initialization, and return
+// conversion all retain the constructor selected by the frontend.
+struct Defined {
+  unsigned value;
+  Defined(unsigned seed = 7u);
+};
+
+Defined::Defined(unsigned seed) : value(seed + 1u) {}
+
+struct DefaultDefined {
+  unsigned value = 3u;
+  DefaultDefined();
+};
+
+DefaultDefined::DefaultDefined() = default;
+
+Defined build_value(unsigned seed) { return seed; }
+unsigned read_default() { Defined value; return value.value; }
+unsigned read_copy(unsigned seed) { Defined value = seed; return value.value; }
+unsigned read_record_copy(unsigned seed) {
+  Defined source(seed);
+  Defined copy = source;
+  return copy.value;
+}
+Defined relay_record(unsigned seed) {
+  Defined source(seed);
+  return source;
+}
+unsigned read_relay(unsigned seed) { return relay_record(seed).value; }
+unsigned read_defaulted_definition() { DefaultDefined value; return value.value; }
+
+// ----
+func.def public @build_value(%seed: i32) -> (i32) {
+  %99 = scalar.constant 1 : i32
+  %100 = scalar.addi %seed, %99 : i32
+  func.return %100 : i32
+}
+
+func.def public @read_default() -> (i32) {
+  %102 = scalar.constant 8 : i32
+  func.return %102 : i32
+}
+
+func.def public @read_copy(%seed: i32) -> (i32) {
+  %89 = scalar.constant 1 : i32
+  %90 = scalar.addi %seed, %89 : i32
+  func.return %90 : i32
+}
+
+func.def public @read_record_copy(%seed: i32) -> (i32) {
+  %84 = scalar.constant 1 : i32
+  %85 = scalar.addi %seed, %84 : i32
+  func.return %85 : i32
+}
+
+func.def public @relay_record(%seed: i32) -> (i32) {
+  %73 = scalar.constant 1 : i32
+  %74 = scalar.addi %seed, %73 : i32
+  func.return %74 : i32
+}
+
+func.def public @read_relay(%seed: i32) -> (i32) {
+  %57 = func.call pure @relay_record(%seed) : (i32) -> (i32)
+  func.return %57 : i32
+}
+
+func.def public @read_defaulted_definition() -> (i32) {
+  %80 = scalar.constant 3 : i32
+  func.return %80 : i32
+}
+
+// ====
+// RUN: roundtrip
+// The retained constructor is a private storage-receiver callable over the
+// exact destination allocated by its construction site.
+struct Direct {
+  unsigned value;
+  Direct(unsigned seed) : value(seed + 1u) { this->value += 2u; }
+};
+unsigned build_direct(unsigned seed) {
+  Direct value(seed);
+  return value.value;
+}
+
+// ----
+func.def public @build_direct(%seed: i32) -> (i32) {
+  %2 = index.constant 4 : offset
+  %value_storage = buffer.alloca<private> align(4) %2 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<4xi8>
+  func.call @Direct__Direct_storage(%value_storage, %value_storage_byte_offset, %seed) : (buffer, offset, i32)
+  %6 = index.constant 0 : offset
+  %7 = index.add %value_storage_byte_offset, %6 : offset
+  %8 = index.assume %7 [range(%7, 0, 0)] : offset
+  %9 = buffer.view %value_storage[%8] : buffer -> view<1xi32>
+  %value_value = view.load %9[0] : view<1xi32> -> i32
+  func.return %value_value : i32
+}
+
+func.def inline @Direct__Direct_storage(%this: buffer, %this_byte_offset: offset, %seed: i32) {
+  %14 = index.constant 0 : offset
+  %15 = index.add %this_byte_offset, %14 : offset
+  %16 = scalar.constant 1 : i32
+  %17 = scalar.addi %seed, %16 : i32
+  %18 = buffer.view %this[%15] : buffer -> view<1xi32>
+  view.store %17, %18[0] : i32, view<1xi32>
+  %19 = scalar.constant 2 : i32
+  %20 = index.constant 0 : offset
+  %21 = index.add %this_byte_offset, %20 : offset
+  %22 = buffer.view %this[%21] : buffer -> view<1xi32>
+  %23 = view.load %22[0] : view<1xi32> -> i32
+  %24 = scalar.addi %23, %19 : i32
+  view.store %24, %22[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// RUN: with-checks pass inline-callables,promote-private-fragments,canonicalize,cse,dce
+// Dynamic element selection requires the constructed object to retain private
+// storage, but the constructor call itself is still a normal inlined callable.
+#include <hip/hip_runtime.h>
+
+struct Coefficients {
+  double values[2];
+
+  __device__ Coefficients() {
+    values[0] = 1.0;
+    values[1] = 2.0;
+  }
+};
+
+__global__ [[loom::workgroup_size(64, 1, 1)]] void scale(double* output, const double* input) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  Coefficients coefficients;
+  output[i] = coefficients.values[i & 1] * input[i];
+}
+
+// ----
+// CHECK: *buffer.alloca<private>*
+// CHECK-NOT: *Coefficients__Coefficients*
+
+// ====
+// RUN: verify
+// Check records remain declarative; constructor execution belongs in an
+// ordinary function that the record invokes.
+#include <loomcxx/check.h>
+struct Cell {
+  unsigned value;
+  Cell(unsigned seed) : value(seed + 1u) {}
+};
+LOOM_CHECK_CASE(direct_construction) {
+  // ERROR@+1: LOWERING/059 "user-provided constructors require an ordinary function called by the check case"
+  const Cell value(3u);
+  loom::check::expect_equal(value.value, 4u);
+}
+
+// ====
+// RUN: verify
+// Address-valued fields need a target-independent object representation rather
+// than a raw source-layout spill.
+struct Slice {
+  float* data;
+  unsigned length;
+  Slice(float* data, unsigned length) : data(data), length(length) {}
+};
+unsigned pointer_storage(float* data) {
+  // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+  Slice value(data, 1u);
+  return value.length;
+}

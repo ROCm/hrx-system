@@ -65,7 +65,7 @@ struct CallArgument {
 struct DirectCall {
   // Concrete semantic callable selected by overload resolution.
   cxx::FunctionSymbol* function;
-  // Call or overloaded operator expression owning diagnostics.
+  // Source call, operator, or construction construct owning diagnostics.
   cxx::AST* source;
   // Explicit argument facts in parameter order.
   std::vector<CallArgument> arguments;
@@ -219,6 +219,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Calls retained by the same source walk for sparse interprocedural effect
   // propagation before callable signatures are frozen.
   std::span<const DirectCall> calls() const { return calls_; }
+  // Whether this source function invokes a synthesized default constructor
+  // whose retained plan initializes at least one subobject.
+  bool default_constructor_initializes(cxx::FunctionSymbol* constructor) const;
   // Whether a reference parameter must carry durable storage identity.
   bool reference_requires_storage(cxx::Symbol* parameter) const;
   // Whether execution may modify the object named by a reference parameter.
@@ -276,7 +279,10 @@ class ControlFlow final : private cxx::ASTVisitor {
   void visit(cxx::ReturnStatementAST* ast) override;
   void visit(cxx::CallExpressionAST* ast) override;
   void visit(cxx::SubscriptExpressionAST* ast) override;
+  void visit(cxx::ImplicitCastExpressionAST* ast) override;
   void visit(cxx::InitDeclaratorAST* ast) override;
+  void visit(cxx::ParenMemInitializerAST* ast) override;
+  void visit(cxx::BracedMemInitializerAST* ast) override;
   void visit(cxx::ConditionExpressionAST* ast) override;
   void visit(cxx::BracedInitListAST* ast) override;
   void visit(cxx::TypeConstructionAST* ast) override;
@@ -303,6 +309,13 @@ class ControlFlow final : private cxx::ASTVisitor {
   void retain_call(cxx::SubscriptExpressionAST* call,
                    cxx::FunctionSymbol* function);
   void retain_call(const DirectOperatorCall& call, cxx::AST* source);
+  void retain_constructor_call(cxx::FunctionSymbol* constructor,
+                               cxx::ExpressionAST* initializer,
+                               CallArgument receiver, bool storage_receiver,
+                               cxx::AST* owner);
+  void retain_member_constructor(cxx::MemInitializerAST* initializer);
+  void retain_constructor(cxx::VariableSymbol* variable,
+                          cxx::ExpressionAST* initializer, cxx::AST* owner);
   void retain_reference_initializers(cxx::VariableSymbol* variable,
                                      cxx::ExpressionAST* initializer,
                                      cxx::AST* owner);
@@ -352,6 +365,10 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::vector<cxx::FieldSymbol*> receiver_writes_;
   // Calls retained once for sparse fixed-point propagation.
   std::vector<DirectCall> calls_;
+  // Constructor conversions whose destination is retained by the enclosing
+  // declaration instead of an anonymous temporary.
+  std::unordered_set<cxx::ImplicitCastExpressionAST*>
+      bound_constructor_conversions_;
   // Reference-returning call results whose callers require durable identity.
   // Their retained edges map that demand back to the actual source referent.
   std::unordered_set<cxx::AST*> identity_call_results_;
@@ -392,6 +409,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   cxx::StatementAST* active_switch_label_ = nullptr;
   // Canonical implicit constructor bodies visited once for this function.
   std::unordered_set<cxx::FunctionSymbol*> analyzed_constructors_;
+  // Synthesized default constructors with at least one retained member
+  // initializer. Empty plans preserve uninitialized automatic storage.
+  std::unordered_set<cxx::FunctionSymbol*> initializing_constructors_;
 };
 
 }  // namespace loom::cxx_import

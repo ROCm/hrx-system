@@ -44,6 +44,7 @@ loom_cc_library(
         ":representation",
         "//loom/src/loom/import/cxx/source",
         "//loom/src/loom/import/cxx/source:error",
+        "//loom/src/loom/import/cxx/source:expressions",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:type_registry",

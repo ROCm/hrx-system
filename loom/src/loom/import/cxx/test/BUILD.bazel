@@ -183,6 +183,7 @@ loom_check_test_suite(
         "predicate_contracts_invalid.cxx-test",
         "reciprocal.cxx-test",
         "record_arrays.cxx-test",
+        "record_constructors.cxx-test",
         "record_initialization.cxx-test",
         "record_memory.cxx-test",
         "record_memory_invalid.cxx-test",
@@ -407,6 +408,13 @@ loom_test(
 loom_test(
     name = "check_record_values_test",
     srcs = ["check_records.cxx"],
+    execution_profiles = [VM_REFERENCE_PROFILE],
+    target_compatible_with = _HOST_COMPATIBILITY,
+)
+
+loom_test(
+    name = "record_constructors_test",
+    srcs = ["record_constructors.cxx"],
     execution_profiles = [VM_REFERENCE_PROFILE],
     target_compatible_with = _HOST_COMPATIBILITY,
 )

@@ -250,6 +250,32 @@ void SourceToModuleThroughput(::benchmark::State& state,
 
 constexpr SourceToModuleInput kNoIncludes = {SourceLanguage::kCxx, "", nullptr,
                                              nullptr};
+constexpr SourceToModuleInput kAggregateRecord = {SourceLanguage::kCxx,
+                                                  R"cxx(struct Record {
+  unsigned first;
+  unsigned second;
+};
+unsigned construct_record(unsigned seed) {
+  Record record{seed, seed + 1u};
+  if (seed & 1u) record.second += 2u;
+  return record.first + record.second;
+}
+)cxx",
+                                                  nullptr, nullptr};
+constexpr SourceToModuleInput kUserConstructor = {SourceLanguage::kCxx,
+                                                  R"cxx(struct Record {
+  unsigned first;
+  unsigned second;
+  Record(unsigned seed) : first(seed), second(seed + 1u) {
+    if (seed & 1u) second += 2u;
+  }
+};
+unsigned construct_record(unsigned seed) {
+  Record record(seed);
+  return record.first + record.second;
+}
+)cxx",
+                                                  nullptr, nullptr};
 constexpr SourceToModuleInput kStdFloat = {
     SourceLanguage::kCxx, "#include <stdfloat>\n", nullptr, nullptr};
 constexpr SourceToModuleInput kNumeric = {
@@ -368,6 +394,10 @@ constexpr SourceToModuleInput kPipelineDefinitionPreambleCreate = {
     &kPipelineSources};
 
 BENCHMARK_CAPTURE(SourceToModule, NoIncludes, &kNoIncludes)
+    ->Unit(::benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(SourceToModule, AggregateRecord, &kAggregateRecord)
+    ->Unit(::benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(SourceToModule, UserConstructor, &kUserConstructor)
     ->Unit(::benchmark::kMicrosecond);
 BENCHMARK_CAPTURE(SourceToModule, StdFloat, &kStdFloat)
     ->Unit(::benchmark::kMicrosecond);

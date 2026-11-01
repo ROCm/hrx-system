@@ -39,6 +39,34 @@ cxx::ExpressionAST* unwrap_expression(cxx::ExpressionAST* expression) {
   }
 }
 
+cxx::ImplicitCastExpressionAST* constructor_conversion(
+    cxx::ExpressionAST* initializer) {
+  for (;;) {
+    if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(initializer)) {
+      initializer = nested->expression;
+      continue;
+    }
+    if (auto* equal = cxx::ast_cast<cxx::EqualInitializerAST>(initializer)) {
+      initializer = equal->expression;
+      continue;
+    }
+    if (auto* source =
+            cxx::ast_cast<cxx::DefaultInitializerExpressionAST>(initializer)) {
+      initializer = source->expression;
+      continue;
+    }
+    auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(initializer);
+    return cast && cast->conversionFunction &&
+                   cast->conversionFunction->isConstructor()
+               ? cast
+               : nullptr;
+  }
+}
+
+bool same_function(cxx::FunctionSymbol* left, cxx::FunctionSymbol* right) {
+  return left && right && left->canonical() == right->canonical();
+}
+
 bool is_current_object(cxx::ExpressionAST* expression) {
   expression = unwrap_expression(expression);
   if (cxx::ast_cast<cxx::ThisExpressionAST>(expression)) {

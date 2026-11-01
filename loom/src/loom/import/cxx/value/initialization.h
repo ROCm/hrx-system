@@ -12,6 +12,7 @@
 
 #include <array>
 #include <optional>
+#include <span>
 
 #include "loom/import/cxx/source/constants.h"
 #include "loom/import/cxx/value/objects.h"
@@ -56,6 +57,13 @@ class Initialization {
                                     const cxx::Type* type,
                                     cxx::ConditionalExpressionAST* expression,
                                     bool retained) = 0;
+    // Invokes one user-provided constructor with the exact destination object
+    // and explicit source arguments. The constructor definition owns member
+    // initialization followed by ordinary body translation.
+    virtual void call_constructor(
+        StorageProjection destination, const RecordPartition& record,
+        const cxx::Type* object_type, cxx::FunctionSymbol* constructor,
+        std::span<cxx::ExpressionAST* const> arguments, cxx::AST* owner) = 0;
 
    protected:
     ~Evaluation() = default;
@@ -101,6 +109,13 @@ class Initialization {
   void object(StorageProjection destination, const cxx::Type* type,
               cxx::ExpressionAST* initializer, cxx::FunctionSymbol* constructor,
               cxx::AST* owner, bool retained = false);
+  // Applies the frontend-owned member initialization plan at the entry of a
+  // retained user-provided constructor. The ordinary function translator then
+  // executes its compound body against the same storage receiver.
+  void constructor_receiver(StorageProjection destination,
+                            const RecordPartition& record,
+                            const cxx::Type* object_type,
+                            cxx::FunctionSymbol* constructor, cxx::AST* owner);
 
  private:
   Value from_elements(const cxx::Type* type,
