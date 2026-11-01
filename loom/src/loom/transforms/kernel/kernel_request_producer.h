@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/analysis/storage_access.h"
 #include "loom/link/materialization_environment.h"
 #include "loom/link/module_index.h"
 #include "loom/transforms/kernel/kernel_class_materializer.h"
@@ -90,6 +91,15 @@ void loom_kernel_request_producer_free(
 iree_status_t loom_kernel_request_materialize(
     const loom_kernel_request_t* request, iree_arena_block_pool_t* block_pool,
     iree_allocator_t allocator, loom_kernel_class_product_t* out_product);
+
+// Returns callback-live canonical storage effects for the accepted source
+// trace, before optional product materialization. Shape-only classes sharing
+// that trace reuse the same summary. Missing provider bodies remain opaque;
+// this query neither loads another source nor selects an implementation.
+// A caller retaining facts after publication copies the compact summary.
+iree_status_t loom_kernel_request_require_storage_access(
+    const loom_kernel_request_t* request,
+    const loom_storage_access_summary_t** out_summary);
 
 // Publishes every live semantic class of one indexed kernel definition.
 //

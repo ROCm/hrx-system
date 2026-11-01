@@ -986,6 +986,14 @@ typedef struct loom_low_encoding_field_value_t {
   uint64_t value;
 } loom_low_encoding_field_value_t;
 
+enum loom_low_enum_domain_kind_e {
+  // Exactly one of the domain's semantic values.
+  LOOM_LOW_ENUM_DOMAIN_KIND_ENUM = 0,
+  // A union of named independent bits, including the empty set.
+  LOOM_LOW_ENUM_DOMAIN_KIND_BITSET = 1,
+};
+typedef uint16_t loom_low_enum_domain_kind_t;
+
 typedef struct loom_low_enum_domain_t {
   // String-pool reference for the stable enum-domain name.
   loom_string_ref_t name_string_ref;
@@ -993,8 +1001,8 @@ typedef struct loom_low_enum_domain_t {
   uint32_t value_start;
   // Number of enum-value rows for this domain.
   uint16_t value_count;
-  // Reserved for future enum-domain flags.
-  uint16_t reserved;
+  // Whether the domain admits one value or a union of independent bits.
+  loom_low_enum_domain_kind_t kind;
 } loom_low_enum_domain_t;
 
 typedef struct loom_low_enum_value_t {
@@ -1380,12 +1388,27 @@ typedef struct loom_low_schedule_alternative_t {
 static_assert(sizeof(loom_low_schedule_alternative_t) == 8,
               "loom_low_schedule_alternative_t must be 8 bytes");
 
+enum loom_low_asm_immediate_format_e {
+  // Positional or dictionary field following SSA operands.
+  LOOM_LOW_ASM_IMMEDIATE_FORMAT_TRAILING = 0,
+  // Named keyword(value) clause preceding SSA operands.
+  LOOM_LOW_ASM_IMMEDIATE_FORMAT_KEYWORD = 1,
+  // Optional leading <flags> mask, before keyword clauses and SSA operands.
+  LOOM_LOW_ASM_IMMEDIATE_FORMAT_FLAGS = 2,
+};
+typedef uint16_t loom_low_asm_immediate_format_t;
+
 typedef struct loom_low_asm_immediate_t {
   // Descriptor-local immediate index printed or parsed by this asm field.
   uint16_t immediate_index;
+  // Surface syntax and placement of this immediate.
+  loom_low_asm_immediate_format_t format;
   // Optional string-pool reference for a named immediate spelling.
   loom_string_ref_t name_string_ref;
 } loom_low_asm_immediate_t;
+
+static_assert(sizeof(loom_low_asm_immediate_t) == 8,
+              "loom_low_asm_immediate_t must be 8 bytes");
 
 typedef enum loom_low_native_asm_value_kind_e {
   // Unknown or uninitialized native assembly value kind.
@@ -1522,7 +1545,10 @@ typedef struct loom_low_asm_layout_t {
   // Number of delimited input operand segments for this asm form.
   uint16_t operand_segment_count;
   // Number of explicit spelling rows before the implicit descriptor suffix.
-  uint16_t explicit_immediate_count;
+  // Descriptors have at most 32 immediate fields.
+  uint8_t explicit_immediate_count;
+  // Number of explicit fields preceding SSA operands in immediate order.
+  uint8_t prefix_immediate_count;
   // Number of native assembly value rows for this asm form.
   uint16_t native_assembly_value_count;
   // Generation-owned syntax facts derived from the form and its descriptor.
@@ -2231,6 +2257,18 @@ static inline bool loom_low_operand_requires_low_window_assignment(
 
 // Returns the stable diagnostic spelling for an immediate kind.
 iree_string_view_t loom_low_immediate_kind_name(loom_low_immediate_kind_t kind);
+
+// Tests a semantic value against an enum or named-bitset domain. Bitset
+// domains admit zero and unions of their declared independent bits.
+bool loom_low_enum_domain_contains_value(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_enum_domain_t* domain, int64_t value);
+
+// Resolves one stable token to its semantic value within |domain|.
+bool loom_low_enum_domain_resolve_token(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_enum_domain_t* domain, iree_string_view_t token,
+    int64_t* out_value);
 
 // Returns the stable diagnostic spelling for an effect kind.
 iree_string_view_t loom_low_effect_kind_name(loom_low_effect_kind_t kind);

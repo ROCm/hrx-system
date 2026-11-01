@@ -371,6 +371,34 @@ static iree_status_t loom_print_low_asm_immediate_value(
   if (value->kind == LOOM_ATTR_I64 && immediate->enum_domain != UINT16_MAX) {
     const loom_low_repr_environment_t* environment =
         &ctx->low_asm_environment.low_repr;
+    if (immediate->enum_is_bitset) {
+      // Canonical bit order is independent of token/table order. Verify the
+      // complete spelling before writing so invalid IR still prints intact.
+      uint64_t remaining = (uint64_t)value->i64;
+      while (remaining) {
+        const uint64_t bit = remaining & (0u - remaining);
+        if (iree_string_view_is_empty(environment->vtable->enum_value_token(
+                environment->state, statement->packet.descriptor_set,
+                immediate->enum_domain, (int64_t)bit))) {
+          return loom_print_attr(ctx, value, NULL);
+        }
+        remaining &= ~bit;
+      }
+      IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "[", true));
+      remaining = (uint64_t)value->i64;
+      while (remaining) {
+        const uint64_t bit = remaining & (0u - remaining);
+        const iree_string_view_t token = environment->vtable->enum_value_token(
+            environment->state, statement->packet.descriptor_set,
+            immediate->enum_domain, (int64_t)bit);
+        IREE_RETURN_IF_ERROR(loom_print_string_literal(ctx->stream, token));
+        remaining &= ~bit;
+        if (remaining) {
+          IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ", ", true));
+        }
+      }
+      return loom_print_emit_cstr(ctx, "]", true);
+    }
     const iree_string_view_t token = environment->vtable->enum_value_token(
         environment->state, statement->packet.descriptor_set,
         immediate->enum_domain, value->i64);
@@ -436,10 +464,112 @@ static iree_status_t loom_print_low_asm_named_immediates(
   return iree_ok_status();
 }
 
+static iree_status_t loom_print_low_asm_prefix_value(
+    loom_print_context_t* ctx, const loom_text_low_asm_statement_t* statement,
+    const loom_text_low_asm_immediate_descriptor_t* immediate,
+    const loom_attribute_t* value) {
+  if (value->kind != LOOM_ATTR_I64 || immediate->enum_domain == UINT16_MAX) {
+    return loom_print_attr(ctx, value, NULL);
+  }
+  const loom_low_repr_environment_t* environment =
+      &ctx->low_asm_environment.low_repr;
+  if (!immediate->enum_is_bitset) {
+    iree_string_view_t token = environment->vtable->enum_value_token(
+        environment->state, statement->packet.descriptor_set,
+        immediate->enum_domain, value->i64);
+    return iree_string_view_is_empty(token)
+               ? loom_print_attr(ctx, value, NULL)
+               : loom_output_stream_write(ctx->stream, token);
+  }
+  // Invalid IR remains printable as its numeric value, without a partial mask.
+  uint64_t remaining = (uint64_t)value->i64;
+  while (remaining) {
+    uint64_t bit = remaining & (0u - remaining);
+    if (iree_string_view_is_empty(environment->vtable->enum_value_token(
+            environment->state, statement->packet.descriptor_set,
+            immediate->enum_domain, (int64_t)bit))) {
+      return loom_print_attr(ctx, value, NULL);
+    }
+    remaining &= ~bit;
+  }
+  if (value->i64 == 0) {
+    return loom_output_stream_write_cstring(ctx->stream, "none");
+  }
+  remaining = (uint64_t)value->i64;
+  while (remaining) {
+    uint64_t bit = remaining & (0u - remaining);
+    IREE_RETURN_IF_ERROR(loom_output_stream_write(
+        ctx->stream, environment->vtable->enum_value_token(
+                         environment->state, statement->packet.descriptor_set,
+                         immediate->enum_domain, (int64_t)bit)));
+    remaining &= ~bit;
+    if (remaining) {
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '|'));
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_print_low_asm_prefix_immediates(
+    loom_print_context_t* ctx, const loom_text_low_asm_statement_t* statement) {
+  const loom_op_vtable_t* vtable = loom_op_vtable(ctx->module, statement->op);
+  for (uint16_t i = 0; i < statement->packet.prefix_immediate_count; ++i) {
+    loom_text_low_asm_immediate_descriptor_t immediate = {0};
+    const loom_named_attr_t* attr = NULL;
+    IREE_RETURN_IF_ERROR(loom_print_low_asm_find_immediate_attr(
+        ctx, statement, i, &immediate, &attr));
+    if (i == 0 && !immediate.is_flag_list) {
+      IREE_RETURN_IF_ERROR(loom_print_instance_flags(
+          ctx, vtable, statement->op->instance_flags));
+    }
+    const uint8_t instance_flags =
+        immediate.is_flag_list ? statement->op->instance_flags : 0;
+    if (!instance_flags &&
+        ((immediate.is_flag_list &&
+          (!attr ||
+           (attr->value.kind == LOOM_ATTR_I64 && attr->value.i64 == 0))) ||
+         !loom_print_low_asm_should_print_immediate_attr(&immediate, attr))) {
+      continue;
+    }
+    if (!immediate.is_flag_list) {
+      IREE_RETURN_IF_ERROR(loom_print_emit(ctx, immediate.spelling, false));
+    }
+    iree_host_size_t start = ctx->stream->offset;
+    IREE_RETURN_IF_ERROR(
+        loom_print_emit_cstr(ctx, immediate.is_flag_list ? "<" : "(", true));
+    loom_attribute_t default_value = loom_attr_i64(immediate.default_value);
+    IREE_RETURN_IF_ERROR(loom_print_low_asm_prefix_value(
+        ctx, statement, &immediate, attr ? &attr->value : &default_value));
+    if (instance_flags) {
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, ", "));
+      IREE_RETURN_IF_ERROR(
+          loom_print_instance_flag_list(ctx, vtable, instance_flags));
+    }
+    IREE_RETURN_IF_ERROR(
+        loom_print_emit_cstr(ctx, immediate.is_flag_list ? ">" : ")", true));
+    loom_print_did_write(ctx);
+    if (statement->has_immediate_attribute_field) {
+      loom_print_report_field(
+          ctx,
+          loom_print_field_ref(LOOM_PRINT_FIELD_ATTR,
+                               statement->immediate_attribute_field_index),
+          start, ctx->stream->offset);
+    }
+  }
+  if (statement->packet.prefix_immediate_count == 0) {
+    return loom_print_instance_flags(ctx, vtable,
+                                     statement->op->instance_flags);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_print_low_asm_positional_immediates(
     loom_print_context_t* ctx, const loom_text_low_asm_statement_t* statement) {
-  for (uint16_t i = 0; i < statement->packet.asm_immediate_count; ++i) {
-    if (i > 0 || statement->operand_count > 0) {
+  for (uint16_t i = statement->packet.prefix_immediate_count;
+       i < statement->packet.asm_immediate_count; ++i) {
+    if (i > statement->packet.prefix_immediate_count ||
+        statement->operand_count > 0 ||
+        statement->packet.operand_segment_count > 0) {
       IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ",", false));
     }
     loom_text_low_asm_immediate_descriptor_t immediate = {0};
@@ -477,7 +607,7 @@ static iree_status_t loom_print_low_asm_immediates(
   }
   if (statement->packet.has_named_immediates) {
     return loom_print_low_asm_named_immediates(
-        ctx, statement, /*immediate_start=*/0,
+        ctx, statement, statement->packet.prefix_immediate_count,
         statement->packet.immediate_count);
   }
   IREE_RETURN_IF_ERROR(
@@ -511,9 +641,7 @@ static iree_status_t loom_print_low_asm_packet(
     loom_print_context_t* ctx, const loom_text_low_asm_statement_t* statement) {
   IREE_RETURN_IF_ERROR(loom_print_low_asm_result_list(ctx, statement));
   IREE_RETURN_IF_ERROR(loom_print_emit(ctx, statement->packet.mnemonic, false));
-  IREE_RETURN_IF_ERROR(
-      loom_print_instance_flags(ctx, loom_op_vtable(ctx->module, statement->op),
-                                statement->op->instance_flags));
+  IREE_RETURN_IF_ERROR(loom_print_low_asm_prefix_immediates(ctx, statement));
   if (statement->packet.operand_segment_count != 0) {
     IREE_RETURN_IF_ERROR(loom_print_low_asm_operand_segments(ctx, statement));
   } else {

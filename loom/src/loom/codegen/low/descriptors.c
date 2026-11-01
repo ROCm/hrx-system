@@ -10,6 +10,44 @@
 
 #include "loom/util/stable_id.h"
 
+bool loom_low_enum_domain_contains_value(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_enum_domain_t* domain, int64_t value) {
+  uint64_t declared_bits = 0;
+  for (uint16_t i = 0; i < domain->value_count; ++i) {
+    const int64_t declared_value =
+        descriptor_set->enum_values[domain->value_start + i].value;
+    if (declared_value == value) {
+      return true;
+    }
+    declared_bits |= (uint64_t)declared_value;
+  }
+  return domain->kind == LOOM_LOW_ENUM_DOMAIN_KIND_BITSET && value >= 0 &&
+         ((uint64_t)value & ~declared_bits) == 0;
+}
+
+bool loom_low_enum_domain_resolve_token(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_enum_domain_t* domain, iree_string_view_t token,
+    int64_t* out_value) {
+  if (domain->kind == LOOM_LOW_ENUM_DOMAIN_KIND_BITSET &&
+      iree_string_view_equal(token, IREE_SV("none"))) {
+    *out_value = 0;
+    return true;
+  }
+  for (uint16_t i = 0; i < domain->value_count; ++i) {
+    const loom_low_enum_value_t* value =
+        &descriptor_set->enum_values[domain->value_start + i];
+    if (iree_string_view_equal(
+            token, loom_low_descriptor_set_string(descriptor_set,
+                                                  value->token_string_ref))) {
+      *out_value = value->value;
+      return true;
+    }
+  }
+  return false;
+}
+
 bool loom_low_operand_reads_after_write(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_operand_t* operand, uint16_t reg_class_id,

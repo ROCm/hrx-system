@@ -75,6 +75,12 @@ typedef iree_string_view_t (*loom_low_repr_enum_value_token_fn_t)(
     const loom_low_repr_descriptor_set_t* descriptor_set,
     uint16_t domain_ordinal, int64_t value);
 
+// Resolves one enum token at the text boundary. Bitsets also accept `none`.
+typedef bool (*loom_low_repr_resolve_enum_token_fn_t)(
+    const loom_low_repr_environment_state_t* state,
+    const loom_low_repr_descriptor_set_t* descriptor_set,
+    uint16_t domain_ordinal, iree_string_view_t token, int64_t* out_value);
+
 typedef struct loom_low_repr_environment_vtable_t {
   // All callbacks are required. Generic format readers and writers may omit
   // the entire environment only when they do not materialize scoped Low
@@ -90,6 +96,8 @@ typedef struct loom_low_repr_environment_vtable_t {
   loom_low_repr_resolve_packet_attributes_fn_t resolve_packet_attributes;
   // Recovers readable enum tokens at the format boundary.
   loom_low_repr_enum_value_token_fn_t enum_value_token;
+  // Resolves typed enum operands without materializing temporary strings.
+  loom_low_repr_resolve_enum_token_fn_t resolve_enum_token;
 } loom_low_repr_environment_vtable_t;
 
 // Borrowed codec environment supplied by the embedding compiler/tool.

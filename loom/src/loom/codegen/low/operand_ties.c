@@ -125,9 +125,9 @@ iree_status_t loom_low_operand_ties_materialize(
   }
   loom_op_t* replacement = NULL;
   if (iree_status_is_ok(status)) {
-    status = loom_low_build_resolved_descriptor_op(
+    status = loom_low_build_prepared_descriptor_op(
         &rewriter->builder, descriptor_set, descriptor, op->instance_flags,
-        operands, op->operand_count, loom_low_op_attrs(op), result_types,
+        operands, op->operand_count, loom_low_op_attrs_attr(op), result_types,
         op->result_count, ties, tie_count, op->location, &replacement);
   }
   loom_builder_restore(&rewriter->builder, saved_ip);

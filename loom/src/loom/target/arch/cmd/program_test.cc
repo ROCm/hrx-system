@@ -137,7 +137,7 @@ static constexpr uint32_t kValidArgumentBufferOffset = 4 + 8 + 8 + 8;
 static constexpr uint32_t kValidArgumentByteLength =
     kValidArgumentBufferOffset + LOOM_CMD_PROGRAM_BUFFER_REF_SIZE;
 
-static std::vector<uint8_t> BuildValidProgram() {
+static std::vector<uint8_t> BuildValidProgram(uint32_t dependency_count = 0) {
   static constexpr uint32_t kLaunchBindingCount = 2;
   static constexpr uint32_t kBufferRefCount = 2;
   static constexpr uint32_t kEntrySchemaCount = 1;
@@ -154,7 +154,7 @@ static std::vector<uint8_t> BuildValidProgram() {
       kFirstKeyLength + kSecondKeyLength;
   loom_cmd_program_format_layout_t layout = {};
   IREE_CHECK_OK(loom_cmd_program_format_calculate_layout(
-      kLaunchBindingCount, kBufferRefCount, kEntrySchemaCount,
+      kLaunchBindingCount, kBufferRefCount, dependency_count, kEntrySchemaCount,
       kEntrySchemaKindCount, kArgumentDataLength, kCommandCount,
       kParameterRootCount, kParameterCount, kParameterKeyLength, &layout));
   std::vector<uint8_t> data(layout.total_length, 0);
@@ -180,6 +180,9 @@ static std::vector<uint8_t> BuildValidProgram() {
   iree_unaligned_store_le_u32(
       data.data() + LOOM_CMD_PROGRAM_HEADER_BUFFER_REF_COUNT_OFFSET,
       kBufferRefCount);
+  iree_unaligned_store_le_u32(
+      data.data() + LOOM_CMD_PROGRAM_HEADER_MEMORY_DEPENDENCY_COUNT_OFFSET,
+      dependency_count);
   iree_unaligned_store_le_u32(
       data.data() + LOOM_CMD_PROGRAM_HEADER_ARGUMENT_DATA_LENGTH_OFFSET,
       kArgumentDataLength);
@@ -210,6 +213,9 @@ static std::vector<uint8_t> BuildValidProgram() {
   iree_unaligned_store_le_u32(
       data.data() + LOOM_CMD_PROGRAM_HEADER_BUFFER_REF_TABLE_OFFSET,
       layout.buffer_ref_offset);
+  iree_unaligned_store_le_u32(
+      data.data() + LOOM_CMD_PROGRAM_HEADER_MEMORY_DEPENDENCY_TABLE_OFFSET,
+      layout.memory_dependency_offset);
   iree_unaligned_store_le_u32(
       data.data() + LOOM_CMD_PROGRAM_HEADER_ENTRY_SCHEMA_TABLE_OFFSET,
       layout.entry_schema_offset);
@@ -349,6 +355,113 @@ TEST(CmdProgramTest, TimestampUsesOrdinaryBufferReferences) {
     EXPECT_EQ(target.byte_offset, 8u);
     EXPECT_EQ(target.byte_length, 8u);
   }
+}
+
+TEST(CmdProgramTest, ExplicitDependenciesPreserveScopesAndRanges) {
+  std::vector<uint8_t> data = BuildValidProgram(2);
+  const uint32_t dependency_offset = iree_unaligned_load_le_u32(
+      data.data() + LOOM_CMD_PROGRAM_HEADER_MEMORY_DEPENDENCY_TABLE_OFFSET);
+  const uint32_t command_offset = iree_unaligned_load_le_u32(
+      data.data() + LOOM_CMD_PROGRAM_HEADER_COMMAND_TABLE_OFFSET);
+  uint8_t* global = data.data() + dependency_offset;
+  iree_unaligned_store_le_u32(
+      global + LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_SOURCE_SCOPE_OFFSET,
+      LOOM_CMD_PROGRAM_ACCESS_DISPATCH_WRITE);
+  iree_unaligned_store_le_u32(
+      global + LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_TARGET_SCOPE_OFFSET,
+      LOOM_CMD_PROGRAM_ACCESS_INDIRECT_COMMAND_READ);
+  iree_unaligned_store_le_u32(
+      global + LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_BUFFER_REF_OFFSET,
+      LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_GLOBAL);
+  uint8_t* ranged = global + LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_SIZE;
+  iree_unaligned_store_le_u32(
+      ranged + LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_SOURCE_SCOPE_OFFSET,
+      LOOM_CMD_PROGRAM_ACCESS_TRANSFER_WRITE);
+  iree_unaligned_store_le_u32(
+      ranged + LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_TARGET_SCOPE_OFFSET,
+      LOOM_CMD_PROGRAM_ACCESS_DISPATCH_READ);
+  iree_unaligned_store_le_u32(
+      ranged + LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_BUFFER_REF_OFFSET, 1);
+  StoreCommand(
+      data, command_offset, 0, LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER, 0, 0,
+      LOOM_CMD_PROGRAM_STAGE_DISPATCH | LOOM_CMD_PROGRAM_STAGE_TRANSFER,
+      LOOM_CMD_PROGRAM_STAGE_COMMAND_PROCESS | LOOM_CMD_PROGRAM_STAGE_DISPATCH,
+      0, 0, 2);
+
+  loom_cmd_program_t program = {};
+  IREE_ASSERT_OK(loom_cmd_program_parse(AsByteSpan(data), &program));
+  EXPECT_EQ(program.maximum_barrier_dependency_count, 2u);
+  const auto boundary = loom_cmd_program_command_at(&program, 0);
+  EXPECT_EQ(boundary.payload.barrier.source_stages,
+            LOOM_CMD_PROGRAM_STAGE_DISPATCH | LOOM_CMD_PROGRAM_STAGE_TRANSFER);
+  EXPECT_EQ(
+      boundary.payload.barrier.target_stages,
+      LOOM_CMD_PROGRAM_STAGE_COMMAND_PROCESS | LOOM_CMD_PROGRAM_STAGE_DISPATCH);
+  EXPECT_EQ(boundary.payload.barrier.flags, 0u);
+  EXPECT_EQ(boundary.payload.barrier.first_dependency, 0u);
+  EXPECT_EQ(boundary.payload.barrier.dependency_count, 2u);
+  const auto first = loom_cmd_program_memory_dependency_at(&program, 0);
+  EXPECT_EQ(first.source_scope, LOOM_CMD_PROGRAM_ACCESS_DISPATCH_WRITE);
+  EXPECT_EQ(first.target_scope, LOOM_CMD_PROGRAM_ACCESS_INDIRECT_COMMAND_READ);
+  EXPECT_EQ(first.buffer_ref, LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_GLOBAL);
+  const auto second = loom_cmd_program_memory_dependency_at(&program, 1);
+  EXPECT_EQ(second.source_scope, LOOM_CMD_PROGRAM_ACCESS_TRANSFER_WRITE);
+  EXPECT_EQ(second.target_scope, LOOM_CMD_PROGRAM_ACCESS_DISPATCH_READ);
+  const auto range =
+      loom_cmd_program_buffer_ref_at(&program, second.buffer_ref);
+  EXPECT_EQ(range.role, LOOM_CMD_PROGRAM_BUFFER_ROLE_REBINDABLE);
+  EXPECT_EQ(range.root_index, 1u);
+  EXPECT_EQ(range.byte_offset, 0u);
+  EXPECT_EQ(range.byte_length, 12u);
+
+  // These bytes are an untrusted artifact boundary, not a compiler-owned plan.
+  const uint32_t invalid_offsets[] = {
+      dependency_offset +
+          LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_SOURCE_SCOPE_OFFSET,
+      dependency_offset +
+          LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_TARGET_SCOPE_OFFSET,
+      dependency_offset + LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_SIZE +
+          LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_BUFFER_REF_OFFSET,
+      command_offset + LOOM_CMD_PROGRAM_COMMAND_OPERAND_0_OFFSET,
+      command_offset + LOOM_CMD_PROGRAM_COMMAND_OPERAND_1_OFFSET,
+      command_offset + LOOM_CMD_PROGRAM_COMMAND_OPERAND_2_OFFSET,
+      command_offset + LOOM_CMD_PROGRAM_COMMAND_OPERAND_3_OFFSET,
+      command_offset + LOOM_CMD_PROGRAM_COMMAND_OPERAND_4_OFFSET,
+  };
+  for (uint32_t offset : invalid_offsets) {
+    SCOPED_TRACE(offset);
+    const uint32_t valid_value =
+        iree_unaligned_load_le_u32(data.data() + offset);
+    iree_unaligned_store_le_u32(data.data() + offset, 1u << 31);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          loom_cmd_program_parse(AsByteSpan(data), &program));
+    iree_unaligned_store_le_u32(data.data() + offset, valid_value);
+  }
+}
+
+TEST(CmdProgramTest, OnlyFullExecutionJoinsSplitWaves) {
+  std::vector<uint8_t> data = BuildValidProgram();
+  const uint32_t command_offset = iree_unaligned_load_le_u32(
+      data.data() + LOOM_CMD_PROGRAM_HEADER_COMMAND_TABLE_OFFSET);
+  StoreCommand(data, command_offset, 0, LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER,
+               0, 0, LOOM_CMD_PROGRAM_STAGE_TRANSFER,
+               LOOM_CMD_PROGRAM_STAGE_DISPATCH);
+  StoreCommand(data, command_offset, 1, LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER,
+               0, 0, LOOM_CMD_PROGRAM_STAGE_WORK, LOOM_CMD_PROGRAM_STAGE_WORK);
+  loom_cmd_program_t program = {};
+  IREE_ASSERT_OK(loom_cmd_program_parse(AsByteSpan(data), &program));
+  loom_cmd_program_barrier_wave_iterator_t iterator;
+  loom_cmd_program_barrier_wave_iterator_initialize(&program, &iterator);
+  loom_cmd_program_barrier_wave_t wave = {};
+  ASSERT_TRUE(loom_cmd_program_barrier_wave_iterator_next(&iterator, &wave));
+  EXPECT_EQ(wave.ordinal, 0u);
+  EXPECT_EQ(wave.commands.command_count, 1u);
+  EXPECT_EQ(wave.work_count, 0u);
+  ASSERT_TRUE(loom_cmd_program_barrier_wave_iterator_next(&iterator, &wave));
+  EXPECT_EQ(wave.ordinal, 1u);
+  EXPECT_EQ(wave.commands.first_command, 1u);
+  EXPECT_EQ(wave.commands.command_count, 4u);
+  EXPECT_EQ(wave.work_count, 3u);
 }
 
 TEST(CmdProgramTest, TimestampRejectsInvalidStorageAndPayload) {

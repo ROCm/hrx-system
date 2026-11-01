@@ -41,6 +41,12 @@ typedef struct loom_cmd_lower_constant_table_t {
 typedef struct loom_cmd_lower_types_t {
   // Interned attribute name used by low constant descriptors.
   loom_string_id_t value_attr_name;
+  // Interned source stage/access attribute name.
+  loom_string_id_t source_attr_name;
+  // Interned target stage/access attribute name.
+  loom_string_id_t target_attr_name;
+  // Interned minimum-coherence attribute name.
+  loom_string_id_t flags_attr_name;
   // Source buffer type used by buffer resource imports.
   loom_type_id_t buffer_source;
   // Source index type used by executable and entry resource imports.
@@ -71,6 +77,8 @@ typedef struct loom_cmd_lower_types_t {
   loom_type_t executable;
   // Executable-local entry-token resource register type.
   loom_type_t entry;
+  // Reusable memory-dependency descriptor register type.
+  loom_type_t memory_dependency;
 } loom_cmd_lower_types_t;
 
 typedef struct loom_cmd_lower_buffer_tuple_t {
@@ -126,6 +134,8 @@ typedef struct loom_cmd_lower_state_t {
   loom_cmd_lower_types_t types;
   // Source-to-low value map and imported ABI resources.
   loom_cmd_lower_resources_t resources;
+  // Immutable execution scope shared by all wave boundaries in this root.
+  loom_attribute_t wave_barrier_attributes;
   // Deduplicated portable constant tables grouped by representation.
   struct {
     // Unsigned 32-bit structural constants.
@@ -165,6 +175,28 @@ static iree_status_t loom_cmd_lower_initialize_types(
   IREE_RETURN_IF_ERROR(loom_low_build_register_type(state->descriptor_set,
                                                     CMD_CORE_REG_CLASS_ID_ENTRY,
                                                     1, &state->types.entry));
+  if (state->plan->dependencies.dependency_count) {
+    IREE_RETURN_IF_ERROR(loom_low_build_register_type(
+        state->descriptor_set, CMD_CORE_REG_CLASS_ID_MEMORY_DEPENDENCY, 1,
+        &state->types.memory_dependency));
+    IREE_RETURN_IF_ERROR(loom_module_intern_string(
+        state->module, IREE_SV("source"), &state->types.source_attr_name));
+    IREE_RETURN_IF_ERROR(loom_module_intern_string(
+        state->module, IREE_SV("target"), &state->types.target_attr_name));
+    IREE_RETURN_IF_ERROR(loom_module_intern_string(
+        state->module, IREE_SV("flags"), &state->types.flags_attr_name));
+    const loom_named_attr_t attributes[] = {
+        {.name_id = state->types.source_attr_name,
+         .value = loom_attr_i64(LOOM_CMD_PROGRAM_STAGE_WORK)},
+        {.name_id = state->types.target_attr_name,
+         .value = loom_attr_i64(LOOM_CMD_PROGRAM_STAGE_WORK)},
+        {.name_id = state->types.flags_attr_name, .value = loom_attr_i64(0)},
+    };
+    IREE_RETURN_IF_ERROR(loom_module_make_canonical_attr_dict(
+        state->module,
+        loom_make_named_attr_slice(attributes, IREE_ARRAYSIZE(attributes)),
+        &state->wave_barrier_attributes));
+  }
   IREE_RETURN_IF_ERROR(loom_module_intern_type_id(
       state->module, loom_type_buffer(), &state->types.buffer_source));
   IREE_RETURN_IF_ERROR(loom_module_intern_type_id(
@@ -539,10 +571,16 @@ static iree_status_t loom_cmd_lower_build_dispatch_operands(
   return iree_ok_status();
 }
 
+typedef enum loom_cmd_lower_execution_order_e {
+  LOOM_CMD_LOWER_EXECUTION_CONCURRENT = 0,
+  LOOM_CMD_LOWER_EXECUTION_AFTER_PREVIOUS_WAVE = 1,
+} loom_cmd_lower_execution_order_t;
+
 static iree_status_t loom_cmd_lower_build_direct_dispatch(
     loom_cmd_lower_state_t* state, const loom_op_t* source_op,
     const loom_cmd_lower_dispatch_t* dispatch,
-    loom_target_dispatch_workgroup_count_t workgroup_count, bool has_barrier) {
+    loom_target_dispatch_workgroup_count_t workgroup_count,
+    loom_cmd_lower_execution_order_t order) {
   IREE_ASSERT_LT(dispatch->executable_index,
                  state->plan->abi_layout.executable_count);
   IREE_ASSERT_LT(dispatch->entry_index, state->plan->abi_layout.entry_count);
@@ -569,11 +607,12 @@ static iree_status_t loom_cmd_lower_build_direct_dispatch(
       state, source_op, dispatch, prefix_operands,
       IREE_ARRAYSIZE(prefix_operands), &operands, &operand_count));
   loom_op_t* dispatch_op = NULL;
-  const uint32_t descriptor_ordinal =
-      has_barrier ? CMD_CORE_DESCRIPTOR_REF_DISPATCH_DIRECT_BARRIER
-                  : CMD_CORE_DESCRIPTOR_REF_DISPATCH_DIRECT;
   return loom_cmd_lower_build_descriptor_op(
-      state, descriptor_ordinal, operands, operand_count,
+      state,
+      order == LOOM_CMD_LOWER_EXECUTION_AFTER_PREVIOUS_WAVE
+          ? CMD_CORE_DESCRIPTOR_REF_DISPATCH_DIRECT_BARRIER
+          : CMD_CORE_DESCRIPTOR_REF_DISPATCH_DIRECT,
+      operands, operand_count,
       /*result_types=*/NULL, /*result_count=*/0, source_op->location,
       &dispatch_op);
 }
@@ -587,7 +626,8 @@ static iree_status_t loom_cmd_lower_build_indirect_dispatch(
     loom_cmd_lower_state_t* state, const loom_op_t* source_op,
     const loom_cmd_lower_dispatch_t* dispatch,
     loom_value_id_t workgroup_count_ref,
-    loom_cmd_lower_indirect_dispatch_kind_t kind, bool has_barrier) {
+    loom_cmd_lower_indirect_dispatch_kind_t kind,
+    loom_cmd_lower_execution_order_t order) {
   IREE_ASSERT_LT(dispatch->executable_index,
                  state->plan->abi_layout.executable_count);
   IREE_ASSERT_LT(dispatch->entry_index, state->plan->abi_layout.entry_count);
@@ -606,13 +646,15 @@ static iree_status_t loom_cmd_lower_build_indirect_dispatch(
   uint32_t descriptor_ordinal = 0;
   if (kind == LOOM_CMD_LOWER_INDIRECT_DISPATCH_KIND_STATIC) {
     descriptor_ordinal =
-        has_barrier ? CMD_CORE_DESCRIPTOR_REF_DISPATCH_INDIRECT_STATIC_BARRIER
-                    : CMD_CORE_DESCRIPTOR_REF_DISPATCH_INDIRECT_STATIC;
+        order == LOOM_CMD_LOWER_EXECUTION_AFTER_PREVIOUS_WAVE
+            ? CMD_CORE_DESCRIPTOR_REF_DISPATCH_INDIRECT_STATIC_BARRIER
+            : CMD_CORE_DESCRIPTOR_REF_DISPATCH_INDIRECT_STATIC;
   } else {
     IREE_ASSERT_EQ(kind, LOOM_CMD_LOWER_INDIRECT_DISPATCH_KIND_DYNAMIC);
     descriptor_ordinal =
-        has_barrier ? CMD_CORE_DESCRIPTOR_REF_DISPATCH_INDIRECT_DYNAMIC_BARRIER
-                    : CMD_CORE_DESCRIPTOR_REF_DISPATCH_INDIRECT_DYNAMIC;
+        order == LOOM_CMD_LOWER_EXECUTION_AFTER_PREVIOUS_WAVE
+            ? CMD_CORE_DESCRIPTOR_REF_DISPATCH_INDIRECT_DYNAMIC_BARRIER
+            : CMD_CORE_DESCRIPTOR_REF_DISPATCH_INDIRECT_DYNAMIC;
   }
   return loom_cmd_lower_build_descriptor_op(
       state, descriptor_ordinal, operands, operand_count,
@@ -623,7 +665,8 @@ static iree_status_t loom_cmd_lower_build_indirect_dispatch(
 static iree_status_t loom_cmd_lower_build_source_indirect_dispatch(
     loom_cmd_lower_state_t* state, const loom_op_t* source_op,
     const loom_cmd_lower_dispatch_t* dispatch, loom_value_id_t source_value,
-    loom_cmd_lower_indirect_dispatch_kind_t kind, bool has_barrier) {
+    loom_cmd_lower_indirect_dispatch_kind_t kind,
+    loom_cmd_lower_execution_order_t order) {
   IREE_ASSERT_LT(source_value, state->resources.source_value_count);
   const loom_cmd_lower_buffer_tuple_t* tuple =
       &state->resources.source_values[source_value].buffer;
@@ -633,12 +676,12 @@ static iree_status_t loom_cmd_lower_build_source_indirect_dispatch(
   IREE_RETURN_IF_ERROR(loom_cmd_lower_build_buffer_ref_from_tuple(
       state, tuple, source_op->location, &workgroup_count_ref));
   return loom_cmd_lower_build_indirect_dispatch(
-      state, source_op, dispatch, workgroup_count_ref, kind, has_barrier);
+      state, source_op, dispatch, workgroup_count_ref, kind, order);
 }
 
 static iree_status_t loom_cmd_lower_build_dispatch(
     loom_cmd_lower_state_t* state, iree_host_size_t dispatch_index,
-    bool has_barrier) {
+    loom_cmd_lower_execution_order_t order) {
   const loom_cmd_lower_dispatch_t* dispatch =
       &state->plan->dispatches[dispatch_index];
   const loom_cmd_dispatch_count_t* count =
@@ -647,16 +690,16 @@ static iree_status_t loom_cmd_lower_build_dispatch(
       state->plan->schedule->commands[dispatch_index].source_op;
   switch (count->kind) {
     case LOOM_CMD_DISPATCH_COUNT_KIND_DIRECT:
-      return loom_cmd_lower_build_direct_dispatch(
-          state, source_op, dispatch, count->payload.direct, has_barrier);
+      return loom_cmd_lower_build_direct_dispatch(state, source_op, dispatch,
+                                                  count->payload.direct, order);
     case LOOM_CMD_DISPATCH_COUNT_KIND_INDIRECT_STATIC:
       return loom_cmd_lower_build_source_indirect_dispatch(
           state, source_op, dispatch, count->payload.indirect_source_value,
-          LOOM_CMD_LOWER_INDIRECT_DISPATCH_KIND_STATIC, has_barrier);
+          LOOM_CMD_LOWER_INDIRECT_DISPATCH_KIND_STATIC, order);
     case LOOM_CMD_DISPATCH_COUNT_KIND_INDIRECT_DYNAMIC:
       return loom_cmd_lower_build_source_indirect_dispatch(
           state, source_op, dispatch, count->payload.indirect_source_value,
-          LOOM_CMD_LOWER_INDIRECT_DISPATCH_KIND_DYNAMIC, has_barrier);
+          LOOM_CMD_LOWER_INDIRECT_DISPATCH_KIND_DYNAMIC, order);
     default:
       IREE_ASSERT_UNREACHABLE("dispatch count kind is valid");
       IREE_BUILTIN_UNREACHABLE();
@@ -665,7 +708,7 @@ static iree_status_t loom_cmd_lower_build_dispatch(
 
 static iree_status_t loom_cmd_lower_build_timestamp(
     loom_cmd_lower_state_t* state, const loom_cmd_schedule_command_t* command,
-    bool has_barrier) {
+    loom_cmd_lower_execution_order_t order) {
   const loom_location_id_t location = command->source_op->location;
   loom_cmd_lower_buffer_tuple_t tuple =
       state->resources.source_values[command->arguments.values[0]].buffer;
@@ -678,33 +721,102 @@ static iree_status_t loom_cmd_lower_build_timestamp(
   loom_op_t* timestamp = NULL;
   return loom_cmd_lower_build_descriptor_op(
       state,
-      has_barrier ? CMD_CORE_DESCRIPTOR_REF_TIMESTAMP_BARRIER
-                  : CMD_CORE_DESCRIPTOR_REF_TIMESTAMP,
+      order == LOOM_CMD_LOWER_EXECUTION_AFTER_PREVIOUS_WAVE
+          ? CMD_CORE_DESCRIPTOR_REF_TIMESTAMP_BARRIER
+          : CMD_CORE_DESCRIPTOR_REF_TIMESTAMP,
       &target, 1, NULL, 0, location, &timestamp);
+}
+
+// Materialize the plan's shared descriptors once. Lowering only translates
+// already selected scopes and physical ranges; source effects are retired.
+static iree_status_t loom_cmd_lower_build_dependencies(
+    loom_cmd_lower_state_t* state, loom_value_id_t** out_values) {
+  const loom_cmd_dependency_plan_t* plan = &state->plan->dependencies;
+  *out_values = NULL;
+  if (!plan->dependency_count) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(state->scratch_arena, plan->dependency_count,
+                                sizeof(**out_values), (void**)out_values));
+  const loom_location_id_t location = state->source_program.op->location;
+  for (uint32_t i = 0; i < plan->dependency_count; ++i) {
+    const loom_cmd_memory_dependency_t dependency = plan->dependencies[i];
+    const loom_named_attr_t attributes[] = {
+        {.name_id = state->types.source_attr_name,
+         .value = loom_attr_i64(dependency.source)},
+        {.name_id = state->types.target_attr_name,
+         .value = loom_attr_i64(dependency.target)},
+    };
+    loom_value_id_t reference = LOOM_VALUE_ID_INVALID;
+    const bool bounded = dependency.range_index != UINT32_MAX;
+    if (bounded) {
+      const loom_cmd_buffer_binding_t* range =
+          &plan->ranges[dependency.range_index];
+      IREE_RETURN_IF_ERROR(loom_cmd_lower_build_buffer_ref(
+          state, range, range->byte_offset, range->byte_length, location,
+          &reference));
+    }
+    loom_op_t* operation = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_build_resolved_descriptor_op(
+        &state->builder, state->descriptor_set,
+        loom_cmd_lower_descriptor(
+            state, bounded ? CMD_CORE_DESCRIPTOR_REF_MEMORY_BUFFER
+                           : CMD_CORE_DESCRIPTOR_REF_MEMORY_GLOBAL),
+        /*access_flags=*/0, bounded ? &reference : NULL, bounded ? 1 : 0,
+        loom_make_named_attr_slice(attributes, IREE_ARRAYSIZE(attributes)),
+        &state->types.memory_dependency, 1, NULL, 0, location, &operation));
+    (*out_values)[i] = loom_op_results(operation)[0];
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_cmd_lower_build_commands(
     loom_cmd_lower_state_t* state) {
   const loom_cmd_schedule_plan_t* schedule = state->plan->schedule;
-  IREE_ASSERT(schedule->command_count == 0 ||
-              state->plan->dispatch_counts != NULL);
-  IREE_ASSERT(schedule->command_count == 0 || state->plan->dispatches != NULL);
-  IREE_ASSERT(schedule->wave_count == 0 || schedule->waves != NULL);
+  const loom_cmd_dependency_plan_t* dependencies = &state->plan->dependencies;
+  loom_value_id_t* values = NULL;
+  IREE_RETURN_IF_ERROR(loom_cmd_lower_build_dependencies(state, &values));
+  loom_value_id_t* operands = NULL;
+  if (dependencies->dependency_count) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->scratch_arena, dependencies->dependency_count, sizeof(*operands),
+        (void**)&operands));
+  }
   for (iree_host_size_t wave_index = 0; wave_index < schedule->wave_count;
        ++wave_index) {
     const loom_cmd_schedule_wave_t wave = schedule->waves[wave_index];
-    IREE_ASSERT_GT(wave.command_count, 0u);
+    const loom_cmd_wave_dependencies_t memory =
+        dependencies->waves ? dependencies->waves[wave_index]
+                            : (loom_cmd_wave_dependencies_t){0};
+    if (memory.count) {
+      for (uint32_t i = 0; i < memory.count; ++i) {
+        operands[i] =
+            values[dependencies->dependency_indices[memory.offset + i]];
+      }
+      loom_op_t* barrier = NULL;
+      IREE_RETURN_IF_ERROR(loom_low_build_prepared_descriptor_op(
+          &state->builder, state->descriptor_set,
+          loom_cmd_lower_descriptor(state, CMD_CORE_DESCRIPTOR_REF_BARRIER),
+          /*access_flags=*/0, operands, memory.count,
+          state->wave_barrier_attributes, NULL, 0, NULL, 0,
+          schedule->commands[wave.command_offset].source_op->location,
+          &barrier));
+    }
     for (iree_host_size_t i = 0; i < wave.command_count; ++i) {
+      const loom_cmd_lower_execution_order_t order =
+          wave_index && !i && !memory.count
+              ? LOOM_CMD_LOWER_EXECUTION_AFTER_PREVIOUS_WAVE
+              : LOOM_CMD_LOWER_EXECUTION_CONCURRENT;
       const iree_host_size_t command_index = wave.command_offset + i;
-      const bool has_barrier = wave_index != 0 && i == 0;
       const loom_cmd_schedule_command_t* command =
           &schedule->commands[command_index];
       if (command->kind == LOOM_CMD_SCHEDULE_COMMAND_KIND_TIMESTAMP) {
         IREE_RETURN_IF_ERROR(
-            loom_cmd_lower_build_timestamp(state, command, has_barrier));
+            loom_cmd_lower_build_timestamp(state, command, order));
       } else {
         IREE_RETURN_IF_ERROR(
-            loom_cmd_lower_build_dispatch(state, command_index, has_barrier));
+            loom_cmd_lower_build_dispatch(state, command_index, order));
       }
     }
   }

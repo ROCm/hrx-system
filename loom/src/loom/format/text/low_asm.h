@@ -87,6 +87,8 @@ typedef struct loom_text_low_asm_packet_descriptor_t {
   bool has_variadic_operands;
   // Number of immediate attributes addressed by the compact asm form.
   uint16_t asm_immediate_count;
+  // Number of explicit immediate fields preceding SSA operands.
+  uint16_t prefix_immediate_count;
   // Number of descriptor immediate attributes addressable by this asm packet.
   uint16_t immediate_count;
   // Operation attribute field index storing packet immediate attributes.
@@ -108,6 +110,10 @@ typedef struct loom_text_low_asm_immediate_descriptor_t {
   bool has_default_value;
   // Contract-local enum domain, or UINT16_MAX for a non-enum immediate.
   uint16_t enum_domain;
+  // True when a semantic enum value is a union of named independent bits.
+  bool enum_is_bitset;
+  // True for the leading <flags> field; other prefix fields use keyword(value).
+  bool is_flag_list;
   // Effective i64 value used when the packet omits this immediate.
   int64_t default_value;
 } loom_text_low_asm_immediate_descriptor_t;

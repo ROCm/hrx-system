@@ -588,19 +588,6 @@ static iree_status_t loom_low_verify_format_i64(
   return iree_ok_status();
 }
 
-static bool loom_low_verify_enum_domain_contains_value(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_enum_domain_t* domain, int64_t actual_value) {
-  for (uint16_t i = 0; i < domain->value_count; ++i) {
-    const loom_low_enum_value_t* value =
-        &descriptor_set->enum_values[domain->value_start + i];
-    if (value->value == actual_value) {
-      return true;
-    }
-  }
-  return false;
-}
-
 static iree_status_t loom_low_verify_i64_immediate_range(
     loom_low_function_verify_state_t* function_state, const loom_op_t* op,
     iree_string_view_t descriptor_key, uint16_t descriptor_attr_index,
@@ -784,6 +771,20 @@ static iree_status_t loom_low_verify_descriptor_immediate_attr(
           &descriptor_set->enum_domains[immediate->enum_domain_id];
       const iree_string_view_t domain_name = loom_low_descriptor_set_string(
           descriptor_set, domain->name_string_ref);
+      if (attr->value.kind == LOOM_ATTR_STRING_ARRAY &&
+          domain->kind == LOOM_LOW_ENUM_DOMAIN_KIND_BITSET) {
+        for (uint16_t i = 0; i < attr->value.count; ++i) {
+          const iree_string_view_t token = loom_low_verify_string_or_empty(
+              function_state->state->module, attr->value.string_ids[i]);
+          int64_t bit = 0;
+          if (!loom_low_enum_domain_resolve_token(descriptor_set, domain, token,
+                                                  &bit)) {
+            return loom_low_verify_emit_enum_domain_mismatch(
+                function_state, op, immediate_name, attrs_attr_index, token,
+                domain_name);
+          }
+        }
+      }
       if (attr->value.kind == LOOM_ATTR_STRING) {
         iree_string_view_t actual_token = loom_low_verify_string_or_empty(
             function_state->state->module, attr->value.string_id);
@@ -798,8 +799,8 @@ static iree_status_t loom_low_verify_descriptor_immediate_attr(
             (loom_attr_kind_t)attr->value.kind,
             loom_low_verify_expected_immediate_kind(immediate));
       }
-      if (loom_low_verify_enum_domain_contains_value(descriptor_set, domain,
-                                                     attr->value.i64)) {
+      if (loom_low_enum_domain_contains_value(descriptor_set, domain,
+                                              attr->value.i64)) {
         return iree_ok_status();
       }
       iree_string_view_t actual_value = iree_string_view_empty();

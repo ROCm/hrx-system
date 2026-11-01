@@ -156,5 +156,35 @@ TEST_F(LowBuilderTest, WriteSpaceSummarySurvivesCloningRebuildAndErasure) {
   EXPECT_EQ(loom_region_written_memory_spaces(module_->body), 0);
 }
 
+TEST_F(LowBuilderTest, SharesPreparedAttributesAcrossInstructions) {
+  const auto* descriptors = loom_test_low_core_descriptor_set();
+  const auto* descriptor =
+      &descriptors->descriptors
+           [TEST_LOW_CORE_DESCRIPTOR_REF_TEST_STATE_ASSIGN_I32_IMMEDIATE];
+  loom_builder_t builder = {};
+  loom_builder_initialize(module_, &module_->arena, loom_module_block(module_),
+                          &builder);
+  loom_string_id_t value_name = 0;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module_, IREE_SV("i32_value"), &value_name));
+  const loom_named_attr_t entry = {
+      .name_id = value_name,
+      .value = loom_attr_i64(7),
+  };
+  loom_attribute_t attributes = loom_attr_absent();
+  IREE_ASSERT_OK(loom_module_make_canonical_attr_dict(
+      module_, loom_make_named_attr_slice(&entry, 1), &attributes));
+  loom_op_t* instructions[2] = {};
+  for (auto& instruction : instructions) {
+    IREE_ASSERT_OK(loom_low_build_prepared_descriptor_op(
+        &builder, descriptors, descriptor, /*access_flags=*/0, nullptr, 0,
+        attributes, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN,
+        &instruction));
+    EXPECT_EQ(loom_low_op_attrs(instruction).entries, attributes.dict_entries);
+  }
+  IREE_ASSERT_OK(loom_op_erase(module_, instructions[0]));
+  EXPECT_EQ(loom_low_op_attrs(instructions[1]).entries[0].value.i64, 7);
+}
+
 }  // namespace
 }  // namespace loom

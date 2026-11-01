@@ -15,17 +15,19 @@ from loom.gen.target.low.low_descriptors import generate_descriptor_set
 from loom.ir import ScalarTypeKind
 from loom.target.low_descriptors import (
     AsmForm,
+    AsmImmediate,
     AsmOperandSegment,
     AsmOperandSegmentDelimiter,
     AsmResultValueType,
     Constraint,
     ConstraintKind,
+    ImmediateFlag,
     NativeAsmValue,
     NativeAsmValueKind,
     OperandFlag,
     OperandRole,
 )
-from loom.target.test.descriptors import TEST_LOW_ADD_I32_DESCRIPTOR, TEST_LOW_CORE_DESCRIPTOR_SET
+from loom.target.test.descriptors import TEST_LOW_ADD_I32_DESCRIPTOR, TEST_LOW_COLLECT_FLAGS_DESCRIPTOR, TEST_LOW_CORE_DESCRIPTOR_SET
 
 
 def _compile(descriptor):
@@ -87,6 +89,47 @@ def test_segments_preserve_canonical_order_with_variadic_suffix():
     )
     compiled = _compile(descriptor)
     assert [segment.has_variadic_operand for segment in compiled.asm_forms[0].operand_segments] == [False, True]
+
+
+@pytest.mark.parametrize("named_suffix", [False, True])
+def test_prefix_fields_preserve_independent_suffix_syntax(named_suffix):
+    descriptor = TEST_LOW_COLLECT_FLAGS_DESCRIPTOR
+    form = descriptor.asm_forms[0]
+    if named_suffix:
+        form = replace(form, immediates=(*form.immediates[:-1], AsmImmediate("literal", name="value")))
+    compiled = _compile(replace(descriptor, asm_forms=(form,)))
+    layout = compiled.asm_table_storage.layouts[compiled.asm_forms[0].layout_index]
+    assert layout.prefix_immediate_count == 4
+    assert layout.explicit_immediate_count == 5
+    assert layout.has_named_immediates == named_suffix
+    assert layout.requires_named_immediates == named_suffix
+
+
+@pytest.mark.parametrize("mutation", ["after_trailing", "flags_not_first", "flags_named", "flags_not_mask", "flags_default", "duplicate_keyword"])
+def test_prefix_grammar_is_validated_at_generation(mutation):
+    descriptor = TEST_LOW_COLLECT_FLAGS_DESCRIPTOR
+    fields = list(descriptor.asm_forms[0].immediates)
+    expected = "flags must be the first"
+    if mutation == "after_trailing":
+        fields[-2:] = reversed(fields[-2:])
+        expected = "prefix immediates must precede"
+    elif mutation == "flags_not_first":
+        fields[:2] = reversed(fields[:2])
+    elif mutation == "flags_named":
+        fields[0] = replace(fields[0], name="flags")
+    elif mutation in ("flags_not_mask", "flags_default"):
+        flags = (
+            replace(descriptor.immediates[0], enum_domain=descriptor.immediates[2].enum_domain)
+            if mutation == "flags_not_mask"
+            else replace(descriptor.immediates[0], flags=(ImmediateFlag.DEFAULT_VALUE,), default_value=1)
+        )
+        descriptor = replace(descriptor, immediates=(flags, *descriptor.immediates[1:]))
+    else:
+        fields[2] = replace(fields[2], name="access")
+        expected = "uses immediate name 'access' more than once"
+    descriptor = replace(descriptor, asm_forms=(replace(descriptor.asm_forms[0], immediates=tuple(fields)),))
+    with pytest.raises(ValueError, match=expected):
+        _compile(descriptor)
 
 
 def test_native_assembly_order_is_independent_of_low_packet_order():

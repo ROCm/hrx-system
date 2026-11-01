@@ -19,6 +19,7 @@
 #include "loom/pass/builder.h"
 #include "loom/pass/interpreter.h"
 #include "loom/pass/program.h"
+#include "loom/target/arch/cmd/lower/dependencies.h"
 #include "loom/target/arch/cmd/lower/dispatch_counts.h"
 #include "loom/target/arch/cmd/lower/launch_count_realization.h"
 #include "loom/target/arch/cmd/lower/lower.h"
@@ -477,95 +478,13 @@ static iree_status_t loom_cmd_program_plan_copy_u32_table(
   return iree_ok_status();
 }
 
-// Validate command-specific storage constraints against the placement owners'
-// completed rows. The scratch index borrows existing module storage and holds
-// no facts or IR-derived analysis of its own.
-static iree_status_t loom_cmd_program_plan_validate_timestamps(
-    loom_module_t* module, const loom_cmd_schedule_plan_t* schedule,
-    const loom_value_id_t* binding_values,
-    const loom_cmd_buffer_binding_t* bindings, iree_host_size_t binding_count,
-    const loom_cmd_buffer_range_t* ranges, iree_host_size_t range_count,
-    loom_cmd_transient_requirement_t* transient,
-    iree_diagnostic_emitter_t emitter, bool* out_valid) {
-  *out_valid = true;
-  loom_module_value_ordinal_scratch_acquire(module);
-  for (iree_host_size_t i = 0; i < binding_count; ++i) {
-    loom_module_value_ordinal_scratch_set(module, binding_values[i],
-                                          (loom_value_ordinal_t)i);
-  }
-  for (iree_host_size_t i = 0; i < range_count; ++i) {
-    loom_module_value_ordinal_scratch_set(
-        module, ranges[i].source_value,
-        (loom_value_ordinal_t)(binding_count + i));
-  }
-
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0;
-       i < schedule->command_count && *out_valid && iree_status_is_ok(status);
-       ++i) {
-    const loom_cmd_schedule_command_t* command = &schedule->commands[i];
-    if (command->kind != LOOM_CMD_SCHEDULE_COMMAND_KIND_TIMESTAMP) {
-      continue;
-    }
-    const loom_value_ordinal_t ordinal =
-        loom_module_value_ordinal_scratch_lookup(module,
-                                                 command->arguments.values[0]);
-    iree_string_view_t requirement = iree_string_view_empty();
-    if (ordinal == LOOM_VALUE_ORDINAL_INVALID) {
-      requirement = IREE_SV("an exactly placed buffer range");
-    } else {
-      loom_cmd_buffer_binding_t target;
-      if (ordinal < binding_count) {
-        target = bindings[ordinal];
-      } else {
-        const loom_cmd_buffer_range_t range = ranges[ordinal - binding_count];
-        target = (loom_cmd_buffer_binding_t){
-            .role = range.role,
-            .resource_index = range.resource_index,
-            .byte_offset = range.byte_offset,
-            .byte_length = range.byte_length,
-        };
-      }
-      if (target.role == LOOM_CMD_BUFFER_ROLE_FIXED) {
-        requirement = IREE_SV("writable invocation or transient storage");
-      } else if (target.byte_offset % LOOM_CMD_PROGRAM_TIMESTAMP_ALIGNMENT !=
-                     0 ||
-                 target.byte_length < LOOM_CMD_PROGRAM_TIMESTAMP_BYTE_LENGTH) {
-        requirement = IREE_SV("an aligned eight-byte destination");
-      } else if (target.resource_index == transient->binding_index) {
-        transient->minimum_alignment = iree_max(
-            transient->minimum_alignment, LOOM_CMD_PROGRAM_TIMESTAMP_ALIGNMENT);
-      }
-    }
-    if (!iree_string_view_is_empty(requirement)) {
-      const loom_diagnostic_param_t params[] = {loom_param_string(requirement)};
-      const loom_diagnostic_emission_t emission = {
-          .module = module,
-          .op = command->source_op,
-          .error = LOOM_ERR_LOWERING_071,
-          .params = params,
-          .param_count = IREE_ARRAYSIZE(params),
-      };
-      *out_valid = false;
-      status = iree_diagnostic_emit(emitter, &emission);
-    }
-  }
-  for (iree_host_size_t i = 0; i < range_count; ++i) {
-    loom_module_value_ordinal_scratch_clear(module, ranges[i].source_value);
-  }
-  for (iree_host_size_t i = 0; i < binding_count; ++i) {
-    loom_module_value_ordinal_scratch_clear(module, binding_values[i]);
-  }
-  loom_module_value_ordinal_scratch_release(module);
-  return status;
-}
-
 static iree_status_t loom_cmd_program_plan_build_lower_plan(
     loom_cmd_program_plan_t* plan, loom_module_t* plan_module,
     loom_op_t* root_program_op, const loom_cmd_schedule_plan_t* schedule,
     const loom_value_fact_table_t* source_facts,
     const loom_cmd_dispatch_count_t* dispatch_counts,
     const uint32_t* command_requirement_indices,
+    const loom_storage_access_summary_t* const* kernel_accesses,
     loom_cmd_program_symbol_index_t* symbol_index,
     iree_arena_allocator_t* scratch_arena,
     iree_diagnostic_emitter_t diagnostic_emitter, bool* out_valid,
@@ -728,26 +647,6 @@ static iree_status_t loom_cmd_program_plan_build_lower_plan(
     }
   }
 
-  uint32_t* owned_entry_requirement_indices = NULL;
-  if (has_timestamps) {
-    bool timestamps_valid = false;
-    IREE_RETURN_IF_ERROR(loom_cmd_program_plan_validate_timestamps(
-        plan_module, schedule,
-        binding_count ? argument_values + specialization_count_i64 : NULL,
-        bindings, binding_count, buffer_ranges, buffer_range_count,
-        &transient_layout.requirement, diagnostic_emitter, &timestamps_valid));
-    if (!timestamps_valid) {
-      return iree_ok_status();
-    }
-  }
-  *out_transient = transient_layout.requirement;
-  iree_status_t index_status = loom_cmd_program_plan_copy_u32_table(
-      entry_requirement_indices, entry_requirement_count, plan->host_allocator,
-      &owned_entry_requirement_indices);
-  if (!iree_status_is_ok(index_status)) {
-    return index_status;
-  }
-
   const bool has_transient =
       transient_layout.requirement.binding_index != UINT32_MAX;
   *out_lower_plan = (loom_cmd_lower_plan_t){
@@ -768,6 +667,22 @@ static iree_status_t loom_cmd_program_plan_build_lower_plan(
       .dispatch_counts = dispatch_counts,
       .dispatches = dispatches,
   };
+  if (has_timestamps || schedule->wave_count > 1) {
+    IREE_RETURN_IF_ERROR(loom_cmd_dependency_plan_build(
+        plan_module, source_facts,
+        binding_count ? argument_values + specialization_count_i64 : NULL,
+        out_lower_plan, kernel_accesses, entry_requirement_indices,
+        &transient_layout.requirement, diagnostic_emitter, scratch_arena,
+        out_valid, &out_lower_plan->dependencies));
+    if (!*out_valid) {
+      return iree_ok_status();
+    }
+  }
+  *out_transient = transient_layout.requirement;
+  uint32_t* owned_entry_requirement_indices = NULL;
+  IREE_RETURN_IF_ERROR(loom_cmd_program_plan_copy_u32_table(
+      entry_requirement_indices, entry_requirement_count, plan->host_allocator,
+      &owned_entry_requirement_indices));
   *out_entry_requirement_indices = owned_entry_requirement_indices;
   *out_entry_requirement_count = entry_requirement_count;
   *out_valid = true;
@@ -809,6 +724,9 @@ iree_status_t loom_cmd_program_plan_build_from_materialization(
   };
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(block_pool, &scratch_arena);
+  iree_arena_allocator_t access_arena;
+  iree_arena_initialize(block_pool, &access_arena);
+  loom_cmd_program_kernel_accesses_t accesses = {.arena = &access_arena};
 
   loom_cmd_program_root_build_t* root_builds = NULL;
   iree_status_t status =
@@ -886,6 +804,7 @@ iree_status_t loom_cmd_program_plan_build_from_materialization(
   }
 
   iree_host_size_t entry_requirement_capacity = 0;
+  bool needs_memory_plan = false;
   for (iree_host_size_t i = 0;
        valid && i < program_count && iree_status_is_ok(status); ++i) {
     loom_cmd_program_root_build_t* root = &root_builds[i];
@@ -900,6 +819,7 @@ iree_status_t loom_cmd_program_plan_build_from_materialization(
                              "command program roots have too many issue sites");
       } else {
         entry_requirement_capacity += root->schedule.command_count;
+        needs_memory_plan |= root->schedule.wave_count > 1;
       }
     }
   }
@@ -985,6 +905,16 @@ iree_status_t loom_cmd_program_plan_build_from_materialization(
     status = loom_cmd_program_plan_allocate_tables(
         program_count, entry_requirement_capacity, &plan);
   }
+  if (valid && iree_status_is_ok(status) && needs_memory_plan &&
+      entry_requirement_capacity) {
+    status = iree_arena_allocate_array(
+        &access_arena, entry_requirement_capacity,
+        sizeof(*accesses.by_requirement), (void**)&accesses.by_requirement);
+    if (iree_status_is_ok(status)) {
+      memset(accesses.by_requirement, 0,
+             entry_requirement_capacity * sizeof(*accesses.by_requirement));
+    }
+  }
   if (valid && iree_status_is_ok(status) &&
       ((effective_kernel_source != NULL &&
         effective_kernel_source->producer != NULL) ||
@@ -1013,14 +943,14 @@ iree_status_t loom_cmd_program_plan_build_from_materialization(
         effective_kernel_source->producer != NULL) {
       status = loom_cmd_program_plan_publish_kernel_requests(
           &plan, plan_module, &source_facts, effective_kernel_source,
-          kernel_site_roots, program_count, &scratch_arena);
+          kernel_site_roots, program_count, &accesses, &scratch_arena);
     }
     if (iree_status_is_ok(status) &&
         launch_count_realization.kernel_count != 0) {
       status = loom_cmd_program_plan_publish_generated_kernel_requests(
           &plan, plan_module, &launch_count_realization,
           effective_kernel_source->sink, kernel_site_roots, program_count,
-          &scratch_arena);
+          &accesses, &scratch_arena);
     }
     for (iree_host_size_t i = 0; i < program_count && iree_status_is_ok(status);
          ++i) {
@@ -1075,9 +1005,10 @@ iree_status_t loom_cmd_program_plan_build_from_materialization(
     symbol_index.root_generation = i + 1;
     status = loom_cmd_program_plan_build_lower_plan(
         &plan, plan_module, root->program_op, &root->schedule, &source_facts,
-        root->dispatch_counts, root->command_requirement_indices, &symbol_index,
-        &scratch_arena, diagnostic_emitter, &valid, &root->parameters,
-        &root->transient, &root->lower_plan, &root->entry_requirement_indices,
+        root->dispatch_counts, root->command_requirement_indices,
+        accesses.by_requirement, &symbol_index, &scratch_arena,
+        diagnostic_emitter, &valid, &root->parameters, &root->transient,
+        &root->lower_plan, &root->entry_requirement_indices,
         &root->entry_requirement_count);
   }
   for (iree_host_size_t i = 0;
@@ -1156,6 +1087,7 @@ iree_status_t loom_cmd_program_plan_build_from_materialization(
     loom_module_free(plan_module);
   }
   loom_cmd_launch_count_realization_deinitialize(&launch_count_realization);
+  iree_arena_deinitialize(&access_arena);
   iree_arena_deinitialize(&scratch_arena);
   if (iree_status_is_ok(status) && valid) {
     *out_valid = true;

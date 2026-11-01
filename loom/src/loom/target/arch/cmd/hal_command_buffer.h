@@ -43,8 +43,9 @@ typedef struct loom_cmd_program_hal_entry_t {
 // and releases writes after its last wave. This includes indirect count
 // buffers; queue execution provides completion ordering without inferring cache
 // actions.
-// Timestamp commands return UNIMPLEMENTED until clock capture is supported by
-// this materializer; they are never discarded or replaced by host samples.
+// Timestamps use the queue-family clock and preserve planned capture ordering.
+// Sample delivery follows explicit memory dependencies or normal completion;
+// unsupported queue capabilities fail through the HAL recording boundary.
 iree_status_t loom_cmd_program_hal_command_buffer_create(
     const iree_hal_queue_family_t* queue_family,
     iree_hal_command_buffer_mode_t mode, const loom_cmd_program_t* program,

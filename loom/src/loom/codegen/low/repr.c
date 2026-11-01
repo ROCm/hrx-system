@@ -136,12 +136,25 @@ static iree_string_view_t loom_low_repr_enum_value_token_impl(
   return iree_string_view_empty();
 }
 
+static bool loom_low_repr_resolve_enum_token_impl(
+    const loom_low_repr_environment_state_t* state,
+    const loom_low_repr_descriptor_set_t* descriptor_set_handle,
+    uint16_t domain_ordinal, iree_string_view_t token, int64_t* out_value) {
+  (void)state;
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_low_repr_descriptor_set(descriptor_set_handle);
+  return loom_low_enum_domain_resolve_token(
+      descriptor_set, &descriptor_set->enum_domains[domain_ordinal], token,
+      out_value);
+}
+
 static const loom_low_repr_environment_vtable_t kLowReprEnvironmentVtable = {
     .lookup_descriptor_set = loom_low_repr_lookup_descriptor_set_impl,
     .resolve_descriptor = loom_low_repr_resolve_descriptor_impl,
     .descriptor_key = loom_low_repr_descriptor_key_impl,
     .resolve_packet_attributes = loom_low_repr_resolve_packet_attributes_impl,
     .enum_value_token = loom_low_repr_enum_value_token_impl,
+    .resolve_enum_token = loom_low_repr_resolve_enum_token_impl,
 };
 
 void loom_low_repr_environment_initialize(
