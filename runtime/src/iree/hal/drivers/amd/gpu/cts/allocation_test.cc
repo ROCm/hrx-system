@@ -23,6 +23,7 @@
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
 #include "iree/hal/drivers/amd/gpu/device.h"
 #include "iree/hal/drivers/amd/gpu/image/hip_images.h"
+#include "iree/hal/drivers/amd/gpu/queue/aql/command_buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/semaphore.h"
 #include "iree/hal/drivers/amd/gpu/queue/signal.h"
 #include "iree/hal/drivers/amd/status.h"
@@ -853,9 +854,13 @@ TEST_P(GpuNativeRecordingProgressTest,
         IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0, recording.out()));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
     const uint32_t pattern = 0x1234CAFE;
-    IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
-        recording, iree_hal_make_buffer_ref(output, 0, 16), &pattern,
-        sizeof(pattern), 0));
+    // Nine native payloads exceed the bounded host template's eight packets.
+    constexpr uint32_t kFillCount = 9;
+    for (uint32_t i = 0; i < kFillCount; ++i) {
+      IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+          recording, iree_hal_make_buffer_ref(output, i * 4, 4), &pattern,
+          sizeof(pattern), 0));
+    }
     const iree_hal_barrier_t release = {
         .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
         .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
@@ -865,9 +870,14 @@ TEST_P(GpuNativeRecordingProgressTest,
     // The worker cannot finish its native call until this scope exits. Sealing
     // must allocate both resident and optional upload backing on this caller.
     IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+    if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
+      ASSERT_NE(
+          iree_hal_amd_gpu_aql_command_buffer_program(recording)->resident.pool,
+          nullptr);
+    }
     IREE_ASSERT_OK(iree_hal_queue_execute(
         queues_[1], {}, {1, &semaphores_[1], &one}, recording, {}, 0));
-    std::array<uint32_t, 4> observed = {};
+    std::array<uint32_t, kFillCount> observed = {};
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
@@ -903,15 +913,26 @@ TEST_P(GpuNativeRecordingProgressTest,
                                        {1, &semaphores_[0], &one}, pool_, 1,
                                        &request, output.out()));
   Wait(semaphores_[0]);
+  // Retain a shared source and copy to disjoint invocation destinations. Nine
+  // packets force resident storage, whose clone allocation is gated below.
+  constexpr uint32_t kCopyCount = 9;
+  constexpr uint32_t kCopyLength = kCopyCount * sizeof(uint32_t);
+  const uint32_t pattern = 0x1234CAFE;
+  uint64_t initialized = 2;
+  IREE_ASSERT_OK(iree_hal_queue_fill(
+      queues_[0], {}, {1, &semaphores_[0], &initialized}, output, 0,
+      kCopyLength, &pattern, sizeof(pattern), nullptr, 0));
+  Wait(semaphores_[0], initialized);
   Ref<iree_hal_command_buffer_t> recording;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       iree_hal_queue_family(queues_[0]), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0, recording.out()));
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, 1, recording.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
-  const uint32_t pattern = 0x1234CAFE;
-  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
-      recording, iree_hal_make_buffer_ref(output, 0, 16), &pattern,
-      sizeof(pattern), 0));
+  for (uint32_t i = 0; i < kCopyCount; ++i) {
+    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+        recording, iree_hal_make_buffer_ref(output, i * 4, 4),
+        iree_hal_make_indirect_buffer_ref(0, i * 4, 4), 0));
+  }
   const iree_hal_barrier_t release = {
       .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
       .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
@@ -919,6 +940,11 @@ TEST_P(GpuNativeRecordingProgressTest,
   };
   IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+  if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
+    ASSERT_NE(
+        iree_hal_amd_gpu_aql_command_buffer_program(recording)->resident.pool,
+        nullptr);
+  }
 
   CompletionPause pause{
       reinterpret_cast<iree_async_semaphore_t*>(semaphores_[3])};
@@ -926,15 +952,22 @@ TEST_P(GpuNativeRecordingProgressTest,
   IREE_ASSERT_OK(iree_hal_queue_barrier(
       queues_[0], {}, {1, &semaphores_[3], &one}, nullptr, 0));
   pause.entered.acquire();
+  iree_hal_buffer_binding_t binding = {
+      .buffer = output,
+      .offset = kCopyLength,
+      .length = kCopyLength,
+  };
   IREE_ASSERT_OK(iree_hal_queue_execute(
-      queues_[0], {}, {1, &semaphores_[1], &one}, recording, {}, 0));
+      queues_[0], {}, {1, &semaphores_[1], &one}, recording, {1, &binding}, 0));
   {
     // The first invocation owns the initial instance until host retirement.
     // An independent queue requests a clone; returned capacity must let it
     // finish while that unnecessary native allocation remains blocked.
     iree::hal::amd::gpu::cts::NativeMemoryGate::Hold hold(&memory_gate_);
-    IREE_ASSERT_OK(iree_hal_queue_execute(
-        queues_[1], {}, {1, &semaphores_[2], &one}, recording, {}, 0));
+    binding.offset = 2 * kCopyLength;
+    IREE_ASSERT_OK(iree_hal_queue_execute(queues_[1], {},
+                                          {1, &semaphores_[2], &one}, recording,
+                                          {1, &binding}, 0));
     hold.WaitEntered();
     recording.reset();
     pause.Join();
@@ -942,12 +975,13 @@ TEST_P(GpuNativeRecordingProgressTest,
     Wait(semaphores_[2]);
     EXPECT_EQ(iree_atomic_ref_count_load(&output.get()->resource.ref_count), 1);
   }
-  std::array<uint32_t, 4> observed = {};
+  std::array<uint32_t, 2 * kCopyCount> observed = {};
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
           {
               .source_buffer = output,
+              .source_offset = kCopyLength,
               .target = observed.data(),
               .length = sizeof(observed),
           },

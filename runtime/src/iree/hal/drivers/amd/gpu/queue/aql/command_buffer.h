@@ -31,9 +31,10 @@ typedef struct iree_hal_amd_gpu_aql_program_block_t {
   } dispatches;
 } iree_hal_amd_gpu_aql_program_block_t;
 
-// One native dispatch and bounded private data. The byte template and fixup
-// table follow this descriptor in the same host allocation. Each invocation
-// copies and patches its own argument-ring storage; no native instance exists.
+// A bounded immutable packet sequence and private data. The byte template and
+// fixup table follow this descriptor in the same host allocation. Each
+// invocation copies and patches its own argument-ring storage; no native
+// instance exists.
 typedef struct iree_hal_amd_gpu_aql_host_template_t {
   // Complete packet/private-data extent copied into each invocation.
   uint32_t byte_length;

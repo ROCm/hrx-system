@@ -18,6 +18,7 @@ _KERNELS = [
     "atomic_32",
     "atomic_64",
     "fill_unaligned",
+    "timestamp_resolve",
     "update_unaligned",
 ]
 
@@ -50,7 +51,7 @@ iree_runtime_cc_library(
         testonly = True,
         src = "%s.spvasm" % name,
         out = "%s_generated.spv" % name,
-        target_env = "vulkan1.3" if name.startswith("atomic_") else "spv1.0",
+        target_env = "vulkan1.3" if name.startswith("atomic_") or name == "timestamp_resolve" else "spv1.0",
     )
     for name in _KERNELS
 ]

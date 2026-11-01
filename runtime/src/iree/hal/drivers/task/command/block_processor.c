@@ -390,6 +390,7 @@ static iree_status_t iree_hal_cmd_region_tile_count(
       case IREE_HAL_CMD_ATOMIC_STORE:
       case IREE_HAL_CMD_ATOMIC_RMW:
       case IREE_HAL_CMD_FENCE:
+      case IREE_HAL_CMD_TIMESTAMP:
       case IREE_HAL_CMD_CACHE:
         tile_count += 1;
         break;
@@ -1405,6 +1406,19 @@ static uint32_t iree_hal_cmd_execute_update(const iree_hal_cmd_update_t* update,
   return tile_count;
 }
 
+// One worker captures the clock after winning this command's single tile.
+static uint32_t iree_hal_cmd_execute_timestamp(
+    const iree_hal_cmd_timestamp_t* command, void** binding_ptrs,
+    iree_atomic_int64_t* tile_index, int32_t region_epoch,
+    uint32_t worker_count) {
+  if (!iree_hal_cmd_claim_single_tile(tile_index, region_epoch, worker_count)) {
+    return 0;
+  }
+  const uint64_t timestamp = (uint64_t)iree_time_now();
+  memcpy(binding_ptrs[command->target_binding], &timestamp, sizeof(timestamp));
+  return 1;
+}
+
 static iree_status_t iree_hal_cmd_resolve_atomic_target(
     void** binding_ptrs, uint16_t target_binding, iree_hal_atomic_width_t width,
     iree_hal_atomic_target_error_mode_t target_error_mode, void** out_target) {
@@ -1611,6 +1625,11 @@ static uint32_t iree_hal_cmd_block_processor_process_region(
         tiles_completed += atomic_tiles;
         break;
       }
+      case IREE_HAL_CMD_TIMESTAMP:
+        tiles_completed += iree_hal_cmd_execute_timestamp(
+            (const iree_hal_cmd_timestamp_t*)cmd, binding_ptrs, tile_idx,
+            region_epoch, context->worker_count);
+        break;
       case IREE_HAL_CMD_FENCE:
         tiles_completed += iree_hal_cmd_execute_fence(
             (const iree_hal_cmd_fence_t*)cmd, tile_idx, region_epoch,
@@ -1941,6 +1960,10 @@ static iree_status_t iree_hal_cmd_block_processor_execute_single_worker(
           *out_tiles_executed += tiles;
           break;
         }
+        case IREE_HAL_CMD_TIMESTAMP:
+          *out_tiles_executed += iree_hal_cmd_execute_timestamp(
+              (const iree_hal_cmd_timestamp_t*)cmd, binding_ptrs, NULL, 0, 1);
+          break;
         case IREE_HAL_CMD_FENCE:
           *out_tiles_executed += iree_hal_cmd_execute_fence(
               (const iree_hal_cmd_fence_t*)cmd, /*tile_index=*/NULL,

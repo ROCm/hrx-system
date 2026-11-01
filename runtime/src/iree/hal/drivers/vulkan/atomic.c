@@ -401,7 +401,7 @@ void iree_hal_vulkan_atomic_record_command(
   const bool has_release =
       iree_any_bit_set(params.flags, IREE_HAL_ATOMIC_FLAG_RELEASE) &&
       iree_any_bit_set(atomic_access_mask, VK_ACCESS_2_SHADER_WRITE_BIT);
-  const iree_hal_vulkan_barrier_t pre_barrier = {
+  iree_hal_vulkan_barrier_t pre_barrier = {
       .source_stage_mask = source_stage_mask,
       .source_access_mask =
           has_release
@@ -410,7 +410,16 @@ void iree_hal_vulkan_atomic_record_command(
       .target_stage_mask = IREE_HAL_EXECUTION_STAGE_ATOMIC,
       .target_access_mask = has_release ? atomic_access_mask : 0,
   };
-  iree_hal_vulkan_barrier_record(syms, command_buffer, &pre_barrier);
+  const bool has_timestamps = iree_any_bit_set(
+      record_flags, IREE_HAL_VULKAN_ATOMIC_RECORD_FLAG_TRANSFER_TIMESTAMPS);
+  if (has_timestamps &&
+      (source_stage_mask & IREE_HAL_EXECUTION_STAGE_TRANSFER)) {
+    // Timestamp queries require ALL_COMMANDS coverage. Access scopes retain
+    // the authored domain, independently of this execution-stage promotion.
+    pre_barrier.source_stage_mask |= IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS;
+  }
+  iree_hal_vulkan_barrier_record(syms, VK_QUEUE_COMPUTE_BIT, command_buffer,
+                                 &pre_barrier);
 
   iree_hal_vulkan_atomic_record(pipelines, command_buffer, target_address,
                                 record_flags, params);
@@ -418,7 +427,7 @@ void iree_hal_vulkan_atomic_record_command(
   const bool has_acquire =
       iree_any_bit_set(params.flags, IREE_HAL_ATOMIC_FLAG_ACQUIRE) &&
       iree_any_bit_set(atomic_access_mask, VK_ACCESS_2_SHADER_READ_BIT);
-  const iree_hal_vulkan_barrier_t post_barrier = {
+  iree_hal_vulkan_barrier_t post_barrier = {
       .source_stage_mask = IREE_HAL_EXECUTION_STAGE_ATOMIC,
       .source_access_mask = has_acquire ? atomic_access_mask : 0,
       .target_stage_mask = target_stage_mask,
@@ -427,5 +436,10 @@ void iree_hal_vulkan_atomic_record_command(
               ? iree_hal_vulkan_barrier_target_access_mask(target_stage_mask)
               : 0,
   };
-  iree_hal_vulkan_barrier_record(syms, command_buffer, &post_barrier);
+  if (has_timestamps &&
+      (target_stage_mask & IREE_HAL_EXECUTION_STAGE_TRANSFER)) {
+    post_barrier.target_stage_mask |= IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS;
+  }
+  iree_hal_vulkan_barrier_record(syms, VK_QUEUE_COMPUTE_BIT, command_buffer,
+                                 &post_barrier);
 }

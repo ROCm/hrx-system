@@ -90,6 +90,7 @@ typedef enum iree_hal_task_queue_op_type_e {
   IREE_HAL_TASK_QUEUE_OP_ATOMIC_RMW,
   IREE_HAL_TASK_QUEUE_OP_DISPATCH,
   IREE_HAL_TASK_QUEUE_OP_MAP,
+  IREE_HAL_TASK_QUEUE_OP_TIMESTAMP,
 } iree_hal_task_queue_op_type_t;
 
 typedef uint32_t iree_hal_task_queue_op_flags_t;
@@ -316,6 +317,12 @@ struct iree_hal_task_queue_op_t {
       // Width, operand, operation, ordering, and scope of the update.
       iree_hal_atomic_rmw_params_t params;
     } atomic_rmw;
+    struct {
+      // Retained buffer containing the eight-byte timestamp destination.
+      iree_hal_buffer_t* target_buffer;
+      // Byte offset of the destination in |target_buffer|.
+      iree_device_size_t target_offset;
+    } timestamp;
     struct {
       iree_hal_executable_t* executable;
       iree_hal_executable_function_t export_ordinal;

@@ -247,6 +247,16 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "command_buffer_timestamp_tests",
+    deps = [
+        ":backends",
+        ":replay_cache_backends",
+        "//runtime/src/iree/hal/cts/command_buffer:timestamp_test",
+        "//runtime/src/iree/hal/cts/util:test_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "command_buffer_stress_tests",
     tags = [
         "manual",

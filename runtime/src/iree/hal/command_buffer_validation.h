@@ -82,6 +82,11 @@ iree_status_t iree_hal_command_buffer_barrier_validation(
     iree_hal_command_buffer_validation_state_t* validation_state,
     const iree_hal_barrier_t* barrier);
 
+iree_status_t iree_hal_command_buffer_timestamp_validation(
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_command_buffer_validation_state_t* validation_state,
+    iree_hal_buffer_ref_t target_ref);
+
 iree_status_t iree_hal_command_buffer_atomic_wait_validation(
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_command_buffer_validation_state_t* validation_state,

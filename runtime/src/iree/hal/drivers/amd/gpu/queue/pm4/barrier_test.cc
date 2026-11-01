@@ -83,7 +83,7 @@ TEST_P(BarrierTest, AtomicOrderingRetainsBothBoundaries) {
   for (uint32_t flags = 0; flags < 8; ++flags) {
     SCOPED_TRACE(flags);
     iree_hal_amd_gpu_pm4_barrier_t before = {}, after = {};
-    iree_hal_amd_gpu_pm4_barrier_atomic(
+    iree_hal_amd_gpu_pm4_barrier_control(
         &profile_, flags, IREE_HAL_EXECUTION_STAGE_DISPATCH, &before, &after);
     const bool system = (flags & IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE) ||
                         profile_.command_processor_bypasses_l2;
@@ -99,7 +99,7 @@ TEST_P(BarrierTest, AtomicOrderingRetainsBothBoundaries) {
                   : 0);
   }
   iree_hal_amd_gpu_pm4_barrier_t before = {}, after = {};
-  iree_hal_amd_gpu_pm4_barrier_atomic(
+  iree_hal_amd_gpu_pm4_barrier_control(
       &profile_, 0, IREE_HAL_EXECUTION_STAGE_ATOMIC, &before, &after);
   EXPECT_EQ(iree_hal_amd_gpu_pm4_barrier_word_count(before), 0u);
   EXPECT_EQ(iree_hal_amd_gpu_pm4_barrier_word_count(after), 0u);

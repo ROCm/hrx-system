@@ -1279,6 +1279,91 @@ TEST(ReplayRecorderTest, WrappedDeviceRecordsQueueExecuteWithSparseBindings) {
             summary.queue.last_execute_object_id);
 }
 
+TEST(ReplayRecorderTest, RecordsAndExecutesDirectAndIndirectTimestamps) {
+  std::vector<uint8_t> storage(65536, 0);
+  auto* recorder = CreateHostAllocationRecorder(&storage);
+  auto* source_group = CreateTaskDeviceGroup();
+  iree_hal_device_group_t* wrapped_group = nullptr;
+  IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
+      recorder, source_group, iree_allocator_system(), &wrapped_group));
+  auto* device = iree_hal_device_group_device_at(wrapped_group, 0);
+  auto* queue = iree_hal_device_queue(device, 0, 0);
+  ASSERT_NE(nullptr, queue);
+  iree_hal_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(CreateTestPool(wrapped_group, IREE_HAL_BUFFER_USAGE_TRANSFER,
+                                0, IREE_SV("replay.timestamps"), &pool));
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool, iree_hal_make_pool_reservation_request(64, 8),
+      iree_infinite_timeout(), &buffer));
+  iree_hal_command_buffer_t* command_buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      iree_hal_queue_family(queue), 0, IREE_HAL_COMMAND_CATEGORY_TRANSFER, 1,
+      &command_buffer));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+  IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
+      command_buffer, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      IREE_HAL_EXECUTION_STAGE_TRANSFER, iree_hal_make_buffer_ref(buffer, 8, 8),
+      0));
+  IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
+      command_buffer, IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      iree_hal_make_indirect_buffer_ref(0, 16, 8), 0));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
+  uint64_t one = 1;
+  const iree_hal_buffer_binding_t binding = {buffer, 8, 24};
+  IREE_ASSERT_OK(iree_hal_queue_execute(queue, {}, {1, &semaphore, &one},
+                                        command_buffer, {1, &binding}, 0));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      semaphore, one, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+  iree_hal_semaphore_release(semaphore);
+  iree_hal_command_buffer_release(command_buffer);
+  iree_hal_buffer_release(buffer);
+  iree_hal_pool_release(pool);
+  IREE_ASSERT_OK(iree_hal_replay_recorder_close(recorder));
+  iree_hal_replay_recorder_release(recorder);
+  iree_hal_device_group_release(wrapped_group);
+  iree_hal_device_group_release(source_group);
+
+  size_t timestamp_count = 0;
+  for (const auto& record : ParseOperationRecords(storage)) {
+    if (record.header.operation_code !=
+        IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_TIMESTAMP) {
+      continue;
+    }
+    ASSERT_LT(timestamp_count, 2u);
+    ASSERT_EQ(record.header.payload_type,
+              IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_TIMESTAMP);
+    ASSERT_EQ(record.payload.data_length,
+              sizeof(iree_hal_replay_command_buffer_timestamp_payload_t));
+    iree_hal_replay_command_buffer_timestamp_payload_t payload;
+    memcpy(&payload, record.payload.data, sizeof(payload));
+    EXPECT_EQ(payload.target_ref.buffer_id != IREE_HAL_REPLAY_OBJECT_ID_NONE,
+              timestamp_count == 0);
+    EXPECT_EQ(payload.target_ref.buffer_slot, 0u);
+    EXPECT_EQ(payload.target_ref.offset, timestamp_count == 0 ? 8u : 16u);
+    EXPECT_EQ(payload.target_ref.length, 8u);
+    EXPECT_EQ(payload.flags, 0u);
+    EXPECT_EQ(payload.source_stage_mask,
+              timestamp_count == 0 ? IREE_HAL_EXECUTION_STAGE_DISPATCH
+                                   : IREE_HAL_EXECUTION_STAGE_TRANSFER);
+    EXPECT_EQ(payload.target_stage_mask,
+              timestamp_count == 0 ? IREE_HAL_EXECUTION_STAGE_TRANSFER
+                                   : IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE);
+    ++timestamp_count;
+  }
+  EXPECT_EQ(timestamp_count, 2u);
+  auto* replay_group = CreateTaskDeviceGroup();
+  IREE_ASSERT_OK(iree_hal_replay_execute_file(GetCapturedFileContents(storage),
+                                              replay_group, nullptr,
+                                              iree_allocator_system()));
+  iree_hal_device_group_release(replay_group);
+}
+
 TEST(ReplayRecorderTest, RecordsAndReplaysCommandBufferAtomicOperations) {
   std::vector<uint8_t> storage(65536, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);

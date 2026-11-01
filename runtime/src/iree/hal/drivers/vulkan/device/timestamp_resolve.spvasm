@@ -1,0 +1,80 @@
+; Copyright 2026 The IREE Authors
+; SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+; Scatter a batch of eight-byte query results through published addresses.
+OpCapability Shader
+OpCapability PhysicalStorageBufferAddresses
+OpMemoryModel PhysicalStorageBuffer64 GLSL450
+OpEntryPoint GLCompute %main "main" %params %lane
+OpExecutionMode %main LocalSize 64 1 1
+OpDecorate %lane BuiltIn LocalInvocationIndex
+OpDecorate %Value Block
+OpMemberDecorate %Value 0 Offset 0
+OpDecorate %Values Block
+OpMemberDecorate %Values 0 Offset 0
+OpDecorate %ValuesArray ArrayStride 8
+OpDecorate %Slots Block
+OpMemberDecorate %Slots 0 Offset 0
+OpDecorate %SlotsArray ArrayStride 8
+OpDecorate %Params Block
+OpMemberDecorate %Params 0 Offset 0
+OpMemberDecorate %Params 1 Offset 8
+OpMemberDecorate %Params 2 Offset 16
+%void = OpTypeVoid
+%fn = OpTypeFunction %void
+%bool = OpTypeBool
+%u32 = OpTypeInt 32 0
+%v2 = OpTypeVector %u32 2
+%zero = OpConstant %u32 0
+%one = OpConstant %u32 1
+%two = OpConstant %u32 2
+%stride = OpConstant %u32 64
+%Value = OpTypeStruct %v2
+%ptrValue = OpTypePointer PhysicalStorageBuffer %Value
+%ValuesArray = OpTypeRuntimeArray %v2
+%Values = OpTypeStruct %ValuesArray
+%ptrValues = OpTypePointer PhysicalStorageBuffer %Values
+%SlotsArray = OpTypeRuntimeArray %ptrValue
+%Slots = OpTypeStruct %SlotsArray
+%ptrSlots = OpTypePointer PhysicalStorageBuffer %Slots
+%Params = OpTypeStruct %ptrValues %ptrSlots %u32
+%ptrParams = OpTypePointer PushConstant %Params
+%params = OpVariable %ptrParams PushConstant
+%pcValues = OpTypePointer PushConstant %ptrValues
+%pcSlots = OpTypePointer PushConstant %ptrSlots
+%pcU32 = OpTypePointer PushConstant %u32
+%pointer = OpTypePointer PhysicalStorageBuffer %ptrValue
+%vector = OpTypePointer PhysicalStorageBuffer %v2
+%inputU32 = OpTypePointer Input %u32
+%lane = OpVariable %inputU32 Input
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%sourceParam = OpAccessChain %pcValues %params %zero
+%source = OpLoad %ptrValues %sourceParam
+%slotsParam = OpAccessChain %pcSlots %params %one
+%slots = OpLoad %ptrSlots %slotsParam
+%countParam = OpAccessChain %pcU32 %params %two
+%count = OpLoad %u32 %countParam
+%first = OpLoad %u32 %lane
+OpBranch %loop
+%loop = OpLabel
+%index = OpPhi %u32 %first %entry %next %step
+%active = OpULessThan %bool %index %count
+OpLoopMerge %done %step None
+OpBranchConditional %active %copy %done
+%copy = OpLabel
+%targetPointer = OpAccessChain %pointer %slots %zero %index
+%target = OpLoad %ptrValue %targetPointer Aligned 8
+%sourceValue = OpAccessChain %vector %source %zero %index
+%value = OpLoad %v2 %sourceValue Aligned 8
+%targetValue = OpAccessChain %vector %target %zero
+OpStore %targetValue %value Aligned 8
+OpBranch %step
+%step = OpLabel
+%remaining = OpISub %u32 %count %index
+%more = OpUGreaterThan %bool %remaining %stride
+%advanced = OpIAdd %u32 %index %stride
+%next = OpSelect %u32 %more %advanced %count
+OpBranch %loop
+%done = OpLabel
+OpReturn
+OpFunctionEnd

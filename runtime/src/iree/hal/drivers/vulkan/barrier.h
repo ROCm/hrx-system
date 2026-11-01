@@ -22,10 +22,10 @@ typedef struct iree_hal_vulkan_barrier_t {
   // HAL execution stages consuming the dependency.
   iree_hal_execution_stage_t target_stage_mask;
 
-  // Vulkan memory accesses made available by the dependency.
+  // Memory accesses made available, before transfer polyfill expansion.
   VkAccessFlags2 source_access_mask;
 
-  // Vulkan memory accesses made visible by the dependency.
+  // Memory accesses made visible, before transfer polyfill expansion.
   VkAccessFlags2 target_access_mask;
 } iree_hal_vulkan_barrier_t;
 
@@ -68,16 +68,24 @@ VkAccessFlags2 iree_hal_vulkan_barrier_target_access_mask(
 VkAccessFlags2 iree_hal_vulkan_access_scope_mask(
     iree_hal_access_scope_t access_scope);
 
-// Records |barrier| into |command_buffer|.
+// Maps logical stages to the native engines that can implement them. An empty
+// scope remains empty unless memory accesses require an unscoped dependency.
+VkPipelineStageFlags2 iree_hal_vulkan_barrier_stage_mask(
+    VkQueueFlags queue_flags, iree_hal_execution_stage_t stage_mask,
+    VkAccessFlags2 access_mask);
+
+// Records |barrier| into |command_buffer|. Transfer stages and accesses include
+// compute polyfills only when |queue_flags| permits compute commands.
 void iree_hal_vulkan_barrier_record(const iree_hal_vulkan_device_syms_t* syms,
+                                    VkQueueFlags queue_flags,
                                     VkCommandBuffer command_buffer,
                                     const iree_hal_vulkan_barrier_t* barrier);
 
 // Records |barrier| over one exact native buffer range.
 void iree_hal_vulkan_buffer_barrier_record(
-    const iree_hal_vulkan_device_syms_t* syms, VkCommandBuffer command_buffer,
-    const iree_hal_vulkan_barrier_t* barrier, VkBuffer buffer,
-    VkDeviceSize offset, VkDeviceSize length);
+    const iree_hal_vulkan_device_syms_t* syms, VkQueueFlags queue_flags,
+    VkCommandBuffer command_buffer, const iree_hal_vulkan_barrier_t* barrier,
+    VkBuffer buffer, VkDeviceSize offset, VkDeviceSize length);
 
 #ifdef __cplusplus
 }  // extern "C"
