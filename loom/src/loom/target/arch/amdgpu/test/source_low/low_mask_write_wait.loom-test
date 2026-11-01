@@ -257,33 +257,10 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @borrow_compl
 
 // ====
 
-// RUN: emit amdgpu-assembly @reuse strategy=source fixed=%mask:physical_register:0:2 fixed=%replacement:physical_register:0:2 fixed=%source:physical_register:4:2
-
-// A resolved copy waits after each overwritten mask DWORD.
-amdgpu.target<gfx1151> @target {subgroup_size = 64}
-
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
-  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
-  %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
-  %replacement = copy %source : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr x2>
-  %result = s_and_b64 %replacement, %source
-  return
-}
-
-// ----
-  v_cndmask_b32 v0, 0, v0, s[0:1]
-  s_mov_b32 s0, s4
-  s_waitcnt_depctr 0xff9e
-  s_mov_b32 s1, s5
-  s_waitcnt_depctr 0xff9e
-  s_and_b64 s[0:1], s[0:1], s[4:5]
-  s_endpgm
-
-// ====
-
 // RUN: emit amdgpu-assembly @edge_permutation_loop strategy=source
 
-// The fallthrough edge completes each overwritten mask word before its successor.
+// The resolved move range completes each overwritten mask word independently,
+// at its own instruction offset, before the fallthrough successor.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
 low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @edge_permutation_loop(%value: reg<amdgpu.vgpr>, %seed: reg<amdgpu.sgpr x2>) asm {
