@@ -25,42 +25,6 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @partial_sour
 
 // ====
 
-// A copy defined in another block is unavailable on this path.
-// RUN: emit amdgpu-assembly @other_block strategy=source fixed=%lhs:physical_register:1:1 fixed=%rhs:physical_register:0:1 fixed=%saved_lhs:physical_register:4:1 fixed=%saved_rhs:physical_register:5:1 fixed=%returned:physical_register:0:2
-
-amdgpu.target<gfx1151> @target {subgroup_size = 64}
-
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @other_block(%condition: reg<amdgpu.scc>, %lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x2>) asm {
-  low.cond_br %condition, ^left, ^right : reg<amdgpu.scc>
-^left:
-  %saved_lhs = copy %lhs : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
-  %saved_rhs = copy %rhs : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
-  %left_pair = concat(%saved_rhs, %saved_lhs) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  low.br ^exit(%left_pair: reg<amdgpu.sgpr x2>)
-^right:
-  %right_pair = concat(%lhs, %rhs) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  low.br ^exit(%right_pair: reg<amdgpu.sgpr x2>)
-^exit(%returned: reg<amdgpu.sgpr x2>):
-  return %returned
-}
-
-// ----
-  s_cbranch_scc0 .Lbb2
-.Lbb1:
-  s_mov_b32 s4, s1
-  s_mov_b32 s5, s0
-  s_mov_b32 s0, s5
-  s_mov_b32 s1, s4
-  s_branch .Lbb3
-.Lbb2:
-  s_mov_b32 s2, s1
-  s_mov_b32 s1, s0
-  s_mov_b32 s0, s2
-.Lbb3:
-  s_endpgm
-
-// ====
-
 // Whole multi-unit components reuse matching contiguous saved subranges.
 // RUN: emit amdgpu-assembly @wide_components strategy=source fixed=%lhs:physical_register:2:2 fixed=%rhs:physical_register:0:2 fixed=%saved:physical_register:4:4 fixed=%returned:physical_register:0:4
 
@@ -84,33 +48,5 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @wide_compone
   s_mov_b32 s1, s7
   s_mov_b32 s2, s4
   s_mov_b32 s3, s5
-.Lbb1:
-  s_endpgm
-
-// ====
-
-// Later uses keep the original component's storage demand alive.
-// RUN: emit amdgpu-assembly @source_still_live strategy=source fixed=%lhs:physical_register:1:1 fixed=%rhs:physical_register:0:1 fixed=%returned:physical_register:0:2
-
-amdgpu.target<gfx1151> @target {subgroup_size = 64}
-
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @source_still_live(%value: reg<amdgpu.vgpr>, %lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>) asm {
-  %mask = concat(%rhs, %lhs) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
-  %pair = concat(%lhs, %rhs) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %sum = s_add_u32 %lhs, %rhs
-  low.br ^exit(%pair: reg<amdgpu.sgpr x2>)
-^exit(%returned: reg<amdgpu.sgpr x2>):
-  return %returned, %sum
-}
-
-// ----
-  s_mov_b32 s2, s0
-  s_mov_b32 s3, s1
-  v_cndmask_b32 v0, 0, v0, s[2:3]
-  s_add_u32 s4, s1, s0
-  s_mov_b32 s5, s1
-  s_mov_b32 s1, s0
-  s_mov_b32 s0, s5
 .Lbb1:
   s_endpgm

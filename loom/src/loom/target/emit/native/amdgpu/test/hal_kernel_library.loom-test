@@ -37,7 +37,7 @@ low.kernel.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) workgroup_s
   low.br.identity(0, 1) ^join(%dispatch: reg<amdgpu.sgpr x2>)
 ^select_path:
   %keep_dispatch = s_cmp_gt_u32 %left, %right
-  low.cond_br %keep_dispatch, ^aligned_path, ^group_path : reg<amdgpu.scc>
+  low.cond_br %keep_dispatch, ^aligned_path, ^group_select : reg<amdgpu.scc>
 ^aligned_path:
   // Materializing a larger mask provides a displaced copy of dispatch ID.
   // Its availability must not replace the already-aligned original.
@@ -47,6 +47,27 @@ low.kernel.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) workgroup_s
   ds_write_b32 %address, %dispatch_selected
   %preserved = concat(%dispatch) : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>
   low.br ^join(%preserved: reg<amdgpu.sgpr x2>)
+^group_select:
+  %duplicate_group = s_cmp_eq_i32 %left, %right
+  low.cond_br %duplicate_group, ^other_path, ^lifetime_select : reg<amdgpu.scc>
+^lifetime_select:
+  %keep_source = s_cmp_eq_i32 %left, %zero
+  low.cond_br %keep_source, ^live_path, ^group_path : reg<amdgpu.scc>
+^live_path:
+  // The original components remain live after the concat. Reusing saved
+  // providers must not drop their independent storage demand.
+  %live_mask = concat(%right, %left) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %live_selected = v_cndmask_b32_src0_inline %lane, %live_mask {false_value = 0}
+  ds_write_b32 %address, %live_selected
+  // This saved z component is not available along the disjoint other path.
+  %local_mask = concat(%left, %group_z) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %local_selected = v_cndmask_b32_src0_inline %lane, %local_mask {false_value = 0}
+  ds_write_b32 %address, %local_selected {offset = 20}
+  %live_pair = concat(%left, %right) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %sum = s_add_u32 %left, %right
+  %live_sum = copy %sum : reg<amdgpu.sgpr> -> reg<amdgpu.vgpr>
+  ds_write_b32 %address, %live_sum {offset = 4}
+  low.br ^join(%live_pair: reg<amdgpu.sgpr x2>)
 ^group_path:
   // Both original workgroup units need transport. Reuse the reversed mask's
   // components through their forwarding chains. Updating a separate copy
@@ -74,6 +95,9 @@ low.kernel.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) workgroup_s
   ds_write_b32 %address, %overwritten_result {offset = 16}
   %pair = concat(%left, %right) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   low.br ^join(%pair: reg<amdgpu.sgpr x2>)
+^other_path:
+  %other_pair = concat(%group_z, %group_z) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  low.br ^join(%other_pair: reg<amdgpu.sgpr x2>)
 ^join(%identity: reg<amdgpu.sgpr x2>):
   %stored = copy %identity : reg<amdgpu.sgpr x2> -> reg<amdgpu.vgpr x2>
   ds_write_b64 %address, %stored {offset = 8}
@@ -99,34 +123,61 @@ fixed_identity_sources:
   s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb2
 .Lbb1:
-  s_branch .Lbb5
+  s_branch .Lbb9
 .Lbb2:
   s_cmp_gt_u32 s2, s3
   s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb4
 .Lbb3:
-  s_mov_b32 s4, s0
-  s_mov_b32 s5, s1
-  v_cndmask_b32 v0, 0, v0, s[4:5]
+  s_mov_b32 s6, s0
+  s_mov_b32 s7, s1
+  v_cndmask_b32 v0, 0, v0, s[6:7]
   ds_write_b32 v1, v0 offset:0
-  s_branch .Lbb5
+  s_branch .Lbb9
 .Lbb4:
-  s_mov_b32 s5, s2
+  s_cmp_eq_i32 s2, s3
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_cbranch_scc1 .Lbb8
+.Lbb5:
+  s_cmp_eq_i32 s2, s5
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_cbranch_scc0 .Lbb7
+.Lbb6:
   s_mov_b32 s0, s3
-  s_mov_b32 s4, s0
-  v_cndmask_b32 v0, 0, v0, s[4:5]
+  s_mov_b32 s1, s2
+  v_cndmask_b32 v2, 0, v0, s[0:1]
+  ds_write_b32 v1, v2 offset:0
+  s_mov_b32 s6, s2
+  s_mov_b32 s7, s4
+  v_cndmask_b32 v0, 0, v0, s[6:7]
+  ds_write_b32 v1, v0 offset:20
+  s_add_u32 s0, s2, s3
+  v_mov_b32 v0, s0
+  ds_write_b32 v1, v0 offset:4
+  s_mov_b32 s0, s2
+  s_mov_b32 s1, s3
+  s_branch .Lbb9
+.Lbb7:
+  s_mov_b32 s7, s2
+  s_mov_b32 s0, s3
+  s_mov_b32 s6, s0
+  v_cndmask_b32 v0, 0, v0, s[6:7]
   ds_write_b32 v1, v0 offset:0
-  s_mov_b32 s6, s5
-  s_mov_b32 s1, s6
+  s_mov_b32 s5, s7
+  s_mov_b32 s1, s5
   s_addk_i32 s1, 1
   s_addk_i32 s0, 1
   v_mov_b32 v0, s1
   v_mov_b32 v2, s0
   ds_write_b32 v1, v0 offset:4
   ds_write_b32 v1, v2 offset:16
-  s_mov_b32 s0, s6
+  s_mov_b32 s0, s5
+  s_mov_b32 s1, s6
+  s_branch .Lbb9
+.Lbb8:
+  s_mov_b32 s0, s4
   s_mov_b32 s1, s4
-.Lbb5:
+.Lbb9:
   v_mov_b32 v2, s0
   v_mov_b32 v3, s1
   ds_write_b64 v1, v[2:3] offset:8
