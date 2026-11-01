@@ -33,9 +33,11 @@ typedef struct iree_hal_amd_gpu_semaphore_wait_context_t {
 // Creates a HAL timeline with independently retained native signal
 // acceleration. The proactor is borrowed through destruction. Frontier storage
 // is allocated inline at creation; only completed signals contribute to that
-// frontier. Submission availability has separate, lazily allocated host wait
-// state. This object owns no native backing, queue, worker, or device
-// reference. A NULL wait_context uses only public timeline observation.
+// frontier. The same allocation constructs a separately retained submission-
+// availability view. Its final reference releases the shared allocation after
+// the completed timeline is destroyed. This object owns no native backing,
+// queue, worker, or device reference. A NULL wait_context uses only public
+// timeline observation.
 iree_status_t iree_hal_amd_gpu_semaphore_create(
     iree_async_proactor_t* proactor,
     const iree_hal_amd_gpu_semaphore_wait_context_t* wait_context,
@@ -109,17 +111,19 @@ iree_status_t iree_hal_amd_gpu_semaphore_publish_completed(
     iree_hal_semaphore_t* semaphore, uint64_t value,
     const iree_async_frontier_t* frontier);
 
-// Acquires the lazily allocated host timeline for native submission admission.
+// Acquires the already constructed view for native submission admission.
 // Its value is covered either by a cached native producer or by the completed
 // timeline. Replacement by a higher producer preserves that predicate; only
 // completion or failure removes the last applicable cache reference.
 //
-// This cold path allocates outside the metadata lock, retains the returned HAL
-// semaphore, and propagates allocation or terminal failure. A caller registers
-// an ordinary async wait on the returned semaphore and then retries admission
-// on service. It never treats availability as execution completion. Consumers
-// without qualified native compatibility wait on the real semaphore instead.
-// The capture retains the original semaphore independently through resumption.
+// First acquisition activates availability notifications under the metadata
+// lock and publishes the current predicate. No allocation or semaphore creation
+// occurs. The returned view is retained; terminal failure returns no view. A
+// caller registers an ordinary async wait and then retries admission on
+// service. It never treats availability as execution completion. Consumers
+// without qualified native compatibility wait on the completed semaphore
+// instead. The capture retains the original semaphore independently through
+// resumption.
 iree_status_t iree_hal_amd_gpu_semaphore_acquire_submission_semaphore(
     iree_hal_semaphore_t* semaphore, iree_hal_semaphore_t** out_semaphore);
 

@@ -917,6 +917,131 @@ TEST_F(ParameterIndexProviderTest, ScatterBatchWritesAdjacentFileSpans) {
   EXPECT_EQ(0, std::memcmp(target_data, source_data, sizeof(source_data)));
 }
 
+TEST_F(ParameterIndexProviderTest, SingleTransferUsesCallerDependencies) {
+  enum class Operation { kSplat, kRead, kWrite };
+  for (auto operation :
+       {Operation::kSplat, Operation::kRead, Operation::kWrite}) {
+    for (bool surrounding_empty_spans : {false, true}) {
+      SCOPED_TRACE(static_cast<int>(operation));
+      SCOPED_TRACE(surrounding_empty_spans);
+      std::array<uint8_t, 8> expected;
+      expected.fill(0xA7);
+      auto file_bytes = expected;
+      if (operation == Operation::kWrite) {
+        file_bytes.fill(0);
+      }
+      Ref<iree_io_file_handle_t, iree_io_file_handle_release> file;
+      IREE_ASSERT_OK(iree_io_file_handle_wrap_host_allocation(
+          IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE,
+          iree_make_byte_span(file_bytes.data(), file_bytes.size()),
+          iree_io_file_handle_release_callback_null(), iree_allocator_system(),
+          file.out()));
+      Ref<iree_io_parameter_index_t, iree_io_parameter_index_release> index;
+      IREE_ASSERT_OK(
+          iree_io_parameter_index_create(iree_allocator_system(), index.out()));
+      if (operation == Operation::kSplat) {
+        IREE_ASSERT_OK(AddSplatEntry(index.get(), IREE_SV("value"), 8, 0xA7));
+      } else {
+        IREE_ASSERT_OK(
+            AddFileEntry(index.get(), IREE_SV("value"), 0, 8, file.get()));
+      }
+      Ref<iree_io_parameter_provider_t, iree_io_parameter_provider_release>
+          provider;
+      IREE_ASSERT_OK(iree_io_parameter_index_provider_create(
+          IREE_SV("model"), index.get(), IREE_HOST_SIZE_MAX,
+          iree_allocator_system(), provider.out()));
+      Ref<iree_hal_buffer_t, iree_hal_buffer_release> buffer;
+      buffer.reset(AllocateTransferBuffer(transfer_pool(), expected.size()));
+      std::array<Ref<iree_hal_semaphore_t, iree_hal_semaphore_release>, 2>
+          gates;
+      std::array<Ref<iree_hal_semaphore_t, iree_hal_semaphore_release>, 2> done;
+      for (size_t i = 0; i < gates.size(); ++i) {
+        IREE_ASSERT_OK(iree_hal_semaphore_create(
+            device(), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+            IREE_HAL_SEMAPHORE_FLAG_DEFAULT, gates[i].out()));
+        IREE_ASSERT_OK(iree_hal_semaphore_create(
+            device(), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+            IREE_HAL_SEMAPHORE_FLAG_DEFAULT, done[i].out()));
+      }
+      iree_hal_semaphore_t* gate_handles[] = {gates[0].get(), gates[1].get()};
+      iree_hal_semaphore_t* done_handles[] = {done[0].get(), done[1].get()};
+      ParameterRequest requests[] = {{IREE_SV("value"), {8, 8, 0}},
+                                     {IREE_SV("value"), {0, 0, 8}},
+                                     {IREE_SV("value"), {8, 8, 0}}};
+      const iree_io_parameter_enumerator_t enumerator = {
+          EnumerateParameterRequest,
+          surrounding_empty_spans ? requests : requests + 1};
+      const iree_host_size_t count = surrounding_empty_spans ? 3 : 1;
+      // Successive groups reuse the caller's same identities at new values.
+      for (uint64_t round = 0; round < 3; ++round) {
+        std::array<uint8_t, 8> initial = {};
+        if (operation == Operation::kWrite) {
+          initial = expected;
+        }
+        WriteBufferBytes(buffer.get(), iree_make_const_byte_span(
+                                           initial.data(), initial.size()));
+        uint64_t wait_values[] = {round * 10 + 3, round * 10 + 5};
+        uint64_t signal_values[] = {round * 10 + 7, round * 10 + 9};
+        const iree_hal_semaphore_list_t waits = {2, gate_handles, wait_values};
+        const iree_hal_semaphore_list_t signals = {2, done_handles,
+                                                   signal_values};
+        SubmissionTrace trace(queue());
+        if (operation == Operation::kWrite) {
+          IREE_EXPECT_OK(iree_io_parameter_provider_scatter(
+              provider.get(), device(), trace.queue(), waits, signals,
+              buffer.get(), IREE_SV("model"), count, enumerator));
+        } else {
+          IREE_EXPECT_OK(iree_io_parameter_provider_gather(
+              provider.get(), device(), trace.queue(), waits, signals,
+              IREE_SV("model"), buffer.get(), count, enumerator));
+        }
+        const auto& submissions = trace.submissions();
+        EXPECT_EQ(submissions.size(), 1u);
+        if (submissions.size() == 1) {
+          const auto expected_kind =
+              operation == Operation::kSplat  ? SubmissionTrace::Kind::kTransfer
+              : operation == Operation::kRead ? SubmissionTrace::Kind::kRead
+                                              : SubmissionTrace::Kind::kWrite;
+          EXPECT_EQ(submissions[0].kind, expected_kind);
+          const std::vector<SubmissionTrace::Timepoint> producer = {
+              {gate_handles[0], wait_values[0]},
+              {gate_handles[1], wait_values[1]}};
+          const std::vector<SubmissionTrace::Timepoint> completion = {
+              {done_handles[0], signal_values[0]},
+              {done_handles[1], signal_values[1]}};
+          EXPECT_EQ(submissions[0].waits, producer);
+          EXPECT_EQ(submissions[0].signals, completion);
+        }
+        if (round == 2) {
+          // Queue captures own the payload after the provider call returns.
+          provider.reset();
+          index.reset();
+          file.reset();
+        }
+        IREE_EXPECT_OK(
+            iree_hal_semaphore_signal(gates[0].get(), wait_values[0], nullptr));
+        uint64_t observed = 0;
+        IREE_EXPECT_OK(iree_hal_semaphore_query(done[0].get(), &observed));
+        EXPECT_EQ(observed, round ? signal_values[0] - 10 : 0);
+        IREE_EXPECT_OK(
+            iree_hal_semaphore_signal(gates[1].get(), wait_values[1], nullptr));
+        for (size_t i = 0; i < done.size(); ++i) {
+          IREE_EXPECT_OK(iree_hal_semaphore_wait(
+              done[i].get(), signal_values[i], iree_infinite_timeout(),
+              IREE_ASYNC_WAIT_FLAG_NONE));
+        }
+        if (operation == Operation::kWrite) {
+          EXPECT_EQ(file_bytes, expected);
+        } else {
+          ExpectBufferBytesEqual(
+              buffer.get(),
+              iree_make_const_byte_span(expected.data(), expected.size()));
+        }
+      }
+    }
+  }
+}
+
 TEST_F(ParameterIndexProviderTest, HonorsConcurrencyWithoutAnInternalCeiling) {
   enum class Operation { kLoad, kGather, kScatter };
   constexpr size_t kRows = 48;
@@ -1075,6 +1200,81 @@ TEST_F(ParameterIndexProviderTest, HonorsConcurrencyWithoutAnInternalCeiling) {
   }
 }
 
+TEST_F(ParameterIndexProviderTest, MixedTransfersKeepIndependentCompletion) {
+  for (bool splat_first : {false, true}) {
+    SCOPED_TRACE(splat_first);
+    std::array<uint8_t, 4> bytes = {1, 2, 3, 4};
+    Ref<iree_io_file_handle_t, iree_io_file_handle_release> file;
+    IREE_ASSERT_OK(iree_io_file_handle_wrap_host_allocation(
+        IREE_IO_FILE_ACCESS_READ,
+        iree_make_byte_span(bytes.data(), bytes.size()),
+        iree_io_file_handle_release_callback_null(), iree_allocator_system(),
+        file.out()));
+    Ref<iree_io_parameter_index_t, iree_io_parameter_index_release> index;
+    IREE_ASSERT_OK(
+        iree_io_parameter_index_create(iree_allocator_system(), index.out()));
+    IREE_ASSERT_OK(
+        AddFileEntry(index.get(), IREE_SV("file"), 0, 4, file.get()));
+    IREE_ASSERT_OK(AddSplatEntry(index.get(), IREE_SV("splat"), 4, 0xA7));
+    Ref<iree_io_parameter_provider_t, iree_io_parameter_provider_release>
+        provider;
+    IREE_ASSERT_OK(iree_io_parameter_index_provider_create(
+        IREE_SV("model"), index.get(), IREE_HOST_SIZE_MAX,
+        iree_allocator_system(), provider.out()));
+    Ref<iree_hal_buffer_t, iree_hal_buffer_release> buffer;
+    buffer.reset(AllocateTransferBuffer(transfer_pool(), 8));
+    Ref<iree_hal_semaphore_t, iree_hal_semaphore_release> gate;
+    Ref<iree_hal_semaphore_t, iree_hal_semaphore_release> done;
+    IREE_ASSERT_OK(iree_hal_semaphore_create(
+        device(), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, gate.out()));
+    IREE_ASSERT_OK(iree_hal_semaphore_create(
+        device(), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, done.out()));
+    auto* gate_ptr = gate.get();
+    auto* done_ptr = done.get();
+    uint64_t value = 1;
+    ParameterRequest requests[] = {{IREE_SV("file"), {0, 0, 4}},
+                                   {IREE_SV("splat"), {0, 4, 4}}};
+    if (splat_first) {
+      std::swap(requests[0], requests[1]);
+    }
+    SubmissionTrace trace(queue());
+    IREE_EXPECT_OK(iree_io_parameter_provider_gather(
+        provider.get(), device(), trace.queue(), {1, &gate_ptr, &value},
+        {1, &done_ptr, &value}, IREE_SV("model"), buffer.get(), 2,
+        {EnumerateParameterRequest, requests}));
+    const auto& submissions = trace.submissions();
+    EXPECT_EQ(submissions.size(), 3u);
+    if (submissions.size() == 3) {
+      const std::vector<SubmissionTrace::Timepoint> producer = {{gate_ptr, 1}};
+      const std::vector<SubmissionTrace::Timepoint> completion = {
+          {done_ptr, 1}};
+      for (size_t i = 0; i < 2; ++i) {
+        EXPECT_EQ(submissions[i].waits, producer);
+        EXPECT_EQ(submissions[i].signals.size(), 1u);
+        EXPECT_NE(submissions[i].signals, completion);
+      }
+      EXPECT_NE(submissions[0].signals, submissions[1].signals);
+      auto joins = submissions[0].signals;
+      joins.insert(joins.end(), submissions[1].signals.begin(),
+                   submissions[1].signals.end());
+      EXPECT_EQ(submissions[2].kind, SubmissionTrace::Kind::kTransfer);
+      EXPECT_EQ(submissions[2].waits, joins);
+      EXPECT_EQ(submissions[2].signals, completion);
+    }
+    provider.reset();
+    index.reset();
+    file.reset();
+    IREE_EXPECT_OK(iree_hal_semaphore_signal(gate.get(), 1, nullptr));
+    IREE_EXPECT_OK(iree_hal_semaphore_wait(
+        done.get(), 1, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+    const uint8_t expected[] = {1, 2, 3, 4, 0xA7, 0xA7, 0xA7, 0xA7};
+    ExpectBufferBytesEqual(
+        buffer.get(), iree_make_const_byte_span(expected, sizeof(expected)));
+  }
+}
+
 TEST_F(ParameterIndexProviderTest, EmptySpansPreserveBatchSynchronization) {
   // A device-produced window can contain mostly duplicate or inactive spans.
   // Empty entries carry no independent synchronization contract, including
@@ -1159,20 +1359,17 @@ TEST_F(ParameterIndexProviderTest, EmptySpansPreserveBatchSynchronization) {
             IREE_SV("model"), buffer.get(), requests.size(), enumerator));
       }
       const auto& submissions = trace.submissions();
-      EXPECT_EQ(submissions.size(), all_empty ? 1 : 2);
+      EXPECT_EQ(submissions.size(), 1u);
       const std::vector<SubmissionTrace::Timepoint> producer = {{gate_ptr, 1}};
       const std::vector<SubmissionTrace::Timepoint> completion = {
           {done_ptr, 1}};
-      if (submissions.size() == (all_empty ? 1u : 2u)) {
+      if (submissions.size() == 1) {
         EXPECT_EQ(submissions.front().waits, producer);
-        EXPECT_EQ(submissions.back().kind, SubmissionTrace::Kind::kTransfer);
-        EXPECT_EQ(submissions.back().signals, completion);
-        if (!all_empty) {
-          EXPECT_EQ(submissions.front().kind,
-                    scatter ? SubmissionTrace::Kind::kWrite
+        EXPECT_EQ(submissions.front().kind,
+                  all_empty ? SubmissionTrace::Kind::kTransfer
+                  : scatter ? SubmissionTrace::Kind::kWrite
                             : SubmissionTrace::Kind::kRead);
-          EXPECT_EQ(submissions.back().waits, submissions.front().signals);
-        }
+        EXPECT_EQ(submissions.front().signals, completion);
       }
       uint64_t observed = 99;
       IREE_EXPECT_OK(iree_hal_semaphore_query(done.get(), &observed));
@@ -1255,6 +1452,110 @@ TEST_F(ParameterIndexProviderTest, EmptySpansStillValidateKeyAccessAndRange) {
       EXPECT_TRUE(trace.submissions().empty());
       IREE_EXPECT_STATUS_IS(codes[i],
                             iree_hal_semaphore_query(done.get(), &value));
+    }
+  }
+}
+
+TEST_F(ParameterIndexProviderTest,
+       LateValidationFailureKeepsAcceptedOwnership) {
+  enum class Operation { kSplat, kRead, kWrite };
+  for (auto operation :
+       {Operation::kSplat, Operation::kRead, Operation::kWrite}) {
+    for (iree_host_size_t payload_count : {1, 2}) {
+      SCOPED_TRACE(static_cast<int>(operation));
+      SCOPED_TRACE(payload_count);
+      std::array<uint8_t, 12> file_bytes;
+      file_bytes.fill(operation == Operation::kWrite ? 0 : 0xA7);
+      Ref<iree_io_file_handle_t, iree_io_file_handle_release> file;
+      IREE_ASSERT_OK(iree_io_file_handle_wrap_host_allocation(
+          IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE,
+          iree_make_byte_span(file_bytes.data(), file_bytes.size()),
+          iree_io_file_handle_release_callback_null(), iree_allocator_system(),
+          file.out()));
+      Ref<iree_io_parameter_index_t, iree_io_parameter_index_release> index;
+      IREE_ASSERT_OK(
+          iree_io_parameter_index_create(iree_allocator_system(), index.out()));
+      if (operation == Operation::kSplat) {
+        IREE_ASSERT_OK(AddSplatEntry(index.get(), IREE_SV("value"), 12, 0xA7));
+      } else {
+        IREE_ASSERT_OK(
+            AddFileEntry(index.get(), IREE_SV("value"), 0, 12, file.get()));
+      }
+      Ref<iree_io_parameter_provider_t, iree_io_parameter_provider_release>
+          provider;
+      IREE_ASSERT_OK(iree_io_parameter_index_provider_create(
+          IREE_SV("model"), index.get(), IREE_HOST_SIZE_MAX,
+          iree_allocator_system(), provider.out()));
+      Ref<iree_hal_buffer_t, iree_hal_buffer_release> buffer;
+      buffer.reset(AllocateTransferBuffer(transfer_pool(), 8));
+      std::array<uint8_t, 8> expected;
+      expected.fill(operation == Operation::kWrite ? 0xA7 : 0);
+      WriteBufferBytes(buffer.get(), iree_make_const_byte_span(
+                                         expected.data(), expected.size()));
+      Ref<iree_hal_semaphore_t, iree_hal_semaphore_release> gate;
+      Ref<iree_hal_semaphore_t, iree_hal_semaphore_release> done;
+      IREE_ASSERT_OK(iree_hal_semaphore_create(
+          device(), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+          IREE_HAL_SEMAPHORE_FLAG_DEFAULT, gate.out()));
+      IREE_ASSERT_OK(iree_hal_semaphore_create(
+          device(), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+          IREE_HAL_SEMAPHORE_FLAG_DEFAULT, done.out()));
+      auto* gate_ptr = gate.get();
+      auto* done_ptr = done.get();
+      uint64_t value = 1;
+      ParameterRequest requests[] = {{IREE_SV("value"), {0, 0, 4}},
+                                     {IREE_SV("value"), {8, 4, 4}},
+                                     {IREE_SV("missing"), {0, 0, 0}}};
+      requests[payload_count] = requests[2];
+      SubmissionTrace trace(queue());
+      if (operation == Operation::kWrite) {
+        IREE_EXPECT_STATUS_IS(
+            IREE_STATUS_NOT_FOUND,
+            iree_io_parameter_provider_scatter(
+                provider.get(), device(), trace.queue(), {1, &gate_ptr, &value},
+                {1, &done_ptr, &value}, buffer.get(), IREE_SV("model"),
+                payload_count + 1, {EnumerateParameterRequest, requests}));
+      } else {
+        IREE_EXPECT_STATUS_IS(
+            IREE_STATUS_NOT_FOUND,
+            iree_io_parameter_provider_gather(
+                provider.get(), device(), trace.queue(), {1, &gate_ptr, &value},
+                {1, &done_ptr, &value}, IREE_SV("model"), buffer.get(),
+                payload_count + 1, {EnumerateParameterRequest, requests}));
+      }
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
+                            iree_hal_semaphore_query(done.get(), &value));
+      const auto& submissions = trace.submissions();
+      EXPECT_EQ(submissions.size(), payload_count - 1);
+      Ref<iree_hal_semaphore_t, iree_hal_semaphore_release> accepted;
+      uint64_t accepted_value = 0;
+      if (submissions.size() == 1 && submissions[0].signals.size() == 1) {
+        auto signal = submissions[0].signals[0];
+        iree_hal_semaphore_retain(signal.first);
+        accepted.reset(signal.first);
+        accepted_value = signal.second;
+      }
+      provider.reset();
+      index.reset();
+      file.reset();
+      IREE_EXPECT_OK(iree_hal_semaphore_signal(gate.get(), 1, nullptr));
+      if (accepted.get()) {
+        IREE_EXPECT_OK(iree_hal_semaphore_wait(accepted.get(), accepted_value,
+                                               iree_infinite_timeout(),
+                                               IREE_ASYNC_WAIT_FLAG_NONE));
+      }
+      if (operation == Operation::kWrite) {
+        for (size_t i = 0; i < file_bytes.size(); ++i) {
+          EXPECT_EQ(file_bytes[i], payload_count == 2 && i < 4 ? 0xA7 : 0);
+        }
+      } else {
+        if (payload_count == 2) {
+          std::fill_n(expected.begin(), 4, 0xA7);
+        }
+        ExpectBufferBytesEqual(
+            buffer.get(),
+            iree_make_const_byte_span(expected.data(), expected.size()));
+      }
     }
   }
 }

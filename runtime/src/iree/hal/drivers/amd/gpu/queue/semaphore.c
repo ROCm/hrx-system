@@ -7,7 +7,13 @@
 #include "iree/hal/drivers/amd/gpu/queue/semaphore.h"
 
 #include "iree/base/threading/processor.h"
-#include "iree/hal/utils/host_semaphore.h"
+
+typedef struct iree_hal_amd_gpu_submission_semaphore_t {
+  // Producer availability, independent of the completed timeline and frontier.
+  iree_async_semaphore_t async;
+  // Shared allocation, released after the public owner and all view users join.
+  void* allocation;
+} iree_hal_amd_gpu_submission_semaphore_t;
 
 typedef struct iree_hal_amd_gpu_semaphore_t {
   // Completed timeline, frontier, failure, and asynchronous host waits.
@@ -19,13 +25,18 @@ typedef struct iree_hal_amd_gpu_semaphore_t {
     // Owned reference, independent of producer and consumer executions.
     iree_hal_amd_gpu_signal_t* signal;
   } submitted;
-  // Optional owned host semaphore, installed once under async.mutex.
+  // Owned availability view constructed in this object's trailing allocation.
   iree_hal_semaphore_t* submission_semaphore;
+  // Enables availability publication after first acquisition, under
+  // async.mutex.
+  bool submission_observed;
   // Optional immutable device-owned policy, borrowed only by active waits.
   const iree_hal_amd_gpu_semaphore_wait_context_t* wait_context;
 } iree_hal_amd_gpu_semaphore_t;
 
 static const iree_hal_semaphore_vtable_t iree_hal_amd_gpu_semaphore_vtable;
+static const iree_hal_semaphore_vtable_t
+    iree_hal_amd_gpu_submission_semaphore_vtable;
 
 static iree_hal_amd_gpu_semaphore_t* iree_hal_amd_gpu_semaphore_cast(
     iree_hal_semaphore_t* base_value) {
@@ -44,12 +55,27 @@ iree_status_t iree_hal_amd_gpu_semaphore_create(
   IREE_RETURN_IF_ERROR(iree_async_semaphore_layout(
       sizeof(iree_hal_amd_gpu_semaphore_t), frontier_capacity, &frontier_offset,
       &total_size));
+  const iree_host_size_t submission_offset =
+      iree_host_align(total_size, iree_max_align_t);
+  iree_host_size_t submission_frontier_offset = 0;
+  iree_host_size_t submission_size = 0;
+  IREE_RETURN_IF_ERROR(iree_async_semaphore_layout(
+      sizeof(iree_hal_amd_gpu_submission_semaphore_t), 0,
+      &submission_frontier_offset, &submission_size));
   iree_hal_amd_gpu_semaphore_t* semaphore = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(host_allocator, total_size, (void**)&semaphore));
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+      host_allocator, submission_offset + submission_size, (void**)&semaphore));
   iree_async_semaphore_initialize(
       &iree_hal_amd_gpu_semaphore_vtable.async, proactor, initial_value,
       frontier_offset, frontier_capacity, host_allocator, &semaphore->async);
+  iree_hal_amd_gpu_submission_semaphore_t* submission =
+      (void*)((uint8_t*)semaphore + submission_offset);
+  iree_async_semaphore_initialize(
+      &iree_hal_amd_gpu_submission_semaphore_vtable.async, proactor,
+      initial_value, submission_frontier_offset, 0, host_allocator,
+      &submission->async);
+  submission->allocation = semaphore;
+  semaphore->submission_semaphore = iree_hal_semaphore_cast(&submission->async);
   semaphore->wait_context = wait_context;
   *out_semaphore = iree_hal_semaphore_cast(&semaphore->async);
   return iree_ok_status();
@@ -59,11 +85,21 @@ static void iree_hal_amd_gpu_semaphore_destroy(
     iree_async_semaphore_t* base_semaphore) {
   iree_hal_amd_gpu_semaphore_t* semaphore =
       (iree_hal_amd_gpu_semaphore_t*)base_semaphore;
-  iree_allocator_t host_allocator = semaphore->async.allocator;
   iree_hal_amd_gpu_signal_release(semaphore->submitted.signal);
-  iree_hal_semaphore_release(semaphore->submission_semaphore);
   iree_async_semaphore_deinitialize(&semaphore->async);
-  iree_allocator_free(host_allocator, semaphore);
+  // The availability view may outlive the public owner. Its last reference
+  // releases the common allocation; no parent access follows this release.
+  iree_hal_semaphore_release(semaphore->submission_semaphore);
+}
+
+static void iree_hal_amd_gpu_submission_semaphore_destroy(
+    iree_async_semaphore_t* base_semaphore) {
+  iree_hal_amd_gpu_submission_semaphore_t* semaphore =
+      (iree_hal_amd_gpu_submission_semaphore_t*)base_semaphore;
+  const iree_allocator_t host_allocator = semaphore->async.allocator;
+  void* allocation = semaphore->allocation;
+  iree_async_semaphore_deinitialize(&semaphore->async);
+  iree_allocator_free(host_allocator, allocation);
 }
 
 bool iree_hal_amd_gpu_semaphore_isa(iree_hal_semaphore_t* semaphore) {
@@ -83,8 +119,9 @@ static uint64_t iree_hal_amd_gpu_semaphore_query(
 }
 
 // Returns covered cache ownership before delivering submission notifications.
-// The enclosing call retains the parent, so its installed child can be borrowed
-// after unlocking. Cell release and callback dispatch never hold this mutex.
+// The enclosing call retains the parent, so its availability view can be
+// borrowed after unlocking. Cell release and callback dispatch never hold this
+// mutex.
 static iree_status_t iree_hal_amd_gpu_semaphore_update_submission(
     iree_hal_amd_gpu_semaphore_t* semaphore) {
   iree_slim_mutex_lock(&semaphore->async.mutex);
@@ -100,7 +137,8 @@ static iree_status_t iree_hal_amd_gpu_semaphore_update_submission(
   } else {
     value = semaphore->submitted.value;
   }
-  iree_hal_semaphore_t* submission_semaphore = semaphore->submission_semaphore;
+  iree_hal_semaphore_t* submission_semaphore =
+      semaphore->submission_observed ? semaphore->submission_semaphore : NULL;
   iree_slim_mutex_unlock(&semaphore->async.mutex);
   iree_hal_amd_gpu_signal_release(released_signal);
   if (IREE_UNLIKELY(!iree_status_is_ok(failure))) {
@@ -171,7 +209,8 @@ iree_status_t iree_hal_amd_gpu_semaphore_publish_signal(
     semaphore->submitted.value = value;
     semaphore->submitted.signal = signal;
   }
-  iree_hal_semaphore_t* submission_semaphore = semaphore->submission_semaphore;
+  iree_hal_semaphore_t* submission_semaphore =
+      semaphore->submission_observed ? semaphore->submission_semaphore : NULL;
   iree_slim_mutex_unlock(&semaphore->async.mutex);
   iree_hal_amd_gpu_signal_release(released_signal);
   if (IREE_UNLIKELY(!iree_status_is_ok(failure))) {
@@ -204,22 +243,10 @@ iree_status_t iree_hal_amd_gpu_semaphore_acquire_submission_semaphore(
   iree_hal_semaphore_t* submission_semaphore = semaphore->submission_semaphore;
   iree_status_t failure = (iree_status_t)iree_atomic_load(
       &semaphore->async.failure_status, iree_memory_order_acquire);
+  semaphore->submission_observed = true;
   iree_slim_mutex_unlock(&semaphore->async.mutex);
   if (IREE_UNLIKELY(!iree_status_is_ok(failure))) {
     return iree_status_clone(failure);
-  }
-  if (!submission_semaphore) {
-    iree_hal_semaphore_t* candidate = NULL;
-    IREE_RETURN_IF_ERROR(iree_hal_host_semaphore_create(
-        semaphore->async.proactor, 0, semaphore->async.allocator, &candidate));
-    iree_slim_mutex_lock(&semaphore->async.mutex);
-    if (!semaphore->submission_semaphore) {
-      semaphore->submission_semaphore = candidate;
-      candidate = NULL;
-    }
-    submission_semaphore = semaphore->submission_semaphore;
-    iree_slim_mutex_unlock(&semaphore->async.mutex);
-    iree_hal_semaphore_release(candidate);
   }
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_semaphore_update_submission(semaphore));
   iree_hal_semaphore_retain(submission_semaphore);
@@ -236,6 +263,15 @@ static iree_status_t iree_hal_amd_gpu_semaphore_signal(
       (iree_hal_amd_gpu_semaphore_t*)base_semaphore);
   iree_async_semaphore_dispatch_timepoints(base_semaphore, value);
   return status;
+}
+
+static iree_status_t iree_hal_amd_gpu_submission_semaphore_signal(
+    iree_async_semaphore_t* semaphore, uint64_t value,
+    const iree_async_frontier_t* frontier) {
+  IREE_RETURN_IF_ERROR(
+      iree_async_semaphore_advance_timeline(semaphore, value, frontier));
+  iree_async_semaphore_dispatch_timepoints(semaphore, value);
+  return iree_ok_status();
 }
 
 static void iree_hal_amd_gpu_semaphore_on_fail(
@@ -320,4 +356,23 @@ static const iree_hal_semaphore_vtable_t iree_hal_amd_gpu_semaphore_vtable = {
             .on_fail = iree_hal_amd_gpu_semaphore_on_fail,
         },
     .wait = iree_hal_amd_gpu_semaphore_wait,
+};
+
+static iree_status_t iree_hal_amd_gpu_submission_semaphore_wait(
+    iree_hal_semaphore_t* semaphore, uint64_t value, iree_timeout_t timeout,
+    iree_async_wait_flags_t flags) {
+  return iree_async_semaphore_multi_wait(
+      IREE_ASYNC_WAIT_MODE_ALL, (iree_async_semaphore_t**)&semaphore, &value, 1,
+      timeout, flags, iree_allocator_system());
+}
+
+static const iree_hal_semaphore_vtable_t
+    iree_hal_amd_gpu_submission_semaphore_vtable = {
+        .async =
+            {
+                .destroy = iree_hal_amd_gpu_submission_semaphore_destroy,
+                .query = iree_hal_amd_gpu_semaphore_query,
+                .signal = iree_hal_amd_gpu_submission_semaphore_signal,
+            },
+        .wait = iree_hal_amd_gpu_submission_semaphore_wait,
 };
