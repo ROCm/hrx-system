@@ -18,6 +18,7 @@
 #include "loom/serve/testing/stalled_stderr.h"
 #endif
 #include "loomc/iree.h"
+#include "loomc/workspace.h"
 
 IREE_FLAG(string, invalid_sources, "", "Malformed source catalog.");
 
@@ -668,11 +669,25 @@ TEST_P(JitTest, CompletedCatalogsRetireWithoutClosingSharedCompilerQueue) {
     loom_serve_jit_stage_free(stage);
   }
   IREE_ASSERT_OK(status);
+  // Catalog teardown returns scratch to the host. Inspect it after both
+  // completions, when no compiler task can still mutate the sampled pools.
+  uint64_t scratch_bytes = 0;
+  const auto worker_count =
+      iree_task_executor_worker_count(loom_serve_host_executor(host));
+  for (iree_host_size_t i = 0; i < worker_count; ++i) {
+    loomc_workspace_statistics_t statistics;
+    loomc_workspace_query_statistics(
+        loom_serve_host_compiler_workspace(host, i), &statistics);
+    scratch_bytes += statistics.block_system_allocation_bytes;
+  }
+  EXPECT_GT(scratch_bytes, 0u);
   EXPECT_EQ(compilation_.entries, 10u);
   EXPECT_EQ(compilation_.kernels, 8u);
   EXPECT_EQ(compilation_.reused_kernels, 2u);
   EXPECT_EQ(peer_report.entries, 8u);
   EXPECT_EQ(peer_report.kernels + peer_report.reused_kernels, 8u);
+  // Loaded executable ownership is independent of idle compiler scratch.
+  loom_serve_host_trim_compiler(host);
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       loom_serve_pool_storage(storage_owner_),
       iree_hal_make_pool_reservation_request(sizeof(input_), 0),

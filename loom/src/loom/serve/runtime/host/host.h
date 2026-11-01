@@ -13,6 +13,7 @@
 #include "loomc/target.h"
 #include "loomc/task.h"
 #include "loomc/task_pool.h"
+#include "loomc/workspace.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -69,6 +70,21 @@ void loom_serve_host_retain(loom_serve_host_t* host);
 // uses exactly this executor; it does not create another worker population.
 iree_task_executor_t* loom_serve_host_executor(const loom_serve_host_t* host);
 loomc_task_pool_t* loom_serve_host_task_pool(const loom_serve_host_t* host);
+
+// Target-independent compiler scratch owned once per physical worker, shared
+// across catalogs and both host queues. A compiler-enabled host is required.
+// Only the task executing at worker_ordinal starts compiler operations on this
+// workspace. Retained results keep their own arena blocks until release; reuse
+// never recycles live results. Host teardown releases its workspace ownership.
+loomc_workspace_t* loom_serve_host_compiler_workspace(
+    const loom_serve_host_t* host, iree_host_size_t worker_ordinal);
+
+// Returns idle compiler scratch to the host allocator after a preparation
+// burst. Active compiler operations and retained modules remain valid; blocks
+// returned after a pool is trimmed remain available for subsequent work.
+// Safe while other models compile. This is cold-path reclamation, not a
+// per-kernel operation. Device-only hosts have no compiler scratch to trim.
+void loom_serve_host_trim_compiler(loom_serve_host_t* host);
 
 // Shared backing for short-lived CPU work arenas. Each invocation owns its
 // arena and returns its blocks after all borrowers retire. The thread-safe pool

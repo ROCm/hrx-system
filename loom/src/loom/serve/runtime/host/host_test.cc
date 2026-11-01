@@ -35,6 +35,7 @@ TEST(HostTest, CompilerAdapterUsesApplicationExecutor) {
   EXPECT_EQ(loom_serve_host_target_providers(host, &target_provider_count),
             nullptr);
   EXPECT_EQ(target_provider_count, 0u);
+  loom_serve_host_trim_compiler(host);
   loom_serve_host_retain(host);
   loom_serve_host_release(host);
   EXPECT_NE(loom_serve_host_proactor_pool(host), nullptr);

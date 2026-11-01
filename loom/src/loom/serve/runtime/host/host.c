@@ -31,6 +31,10 @@ struct loom_serve_host_t {
   iree_hal_driver_t* task_driver;
   // Loom task adapter retaining the same executor, with no private workers.
   loomc_task_pool_t* task_pool;
+  // Target-independent scratch indexed by mutually exclusive worker ordinal.
+  loomc_workspace_t** compiler_workspaces;
+  // Initialized workspace entries, including during creation failure cleanup.
+  iree_host_size_t compiler_workspace_count;
   // Compiler scheduling domain shared by every independently owned catalog.
   loomc_task_queue_t* compiler_queue;
   // Preparation continuations progress independently of bulk native requests.
@@ -119,6 +123,26 @@ static iree_status_t loom_serve_host_create_compiler_environment(
   return iree_status_from_loomc(status);
 }
 
+static iree_status_t loom_serve_host_create_compiler_workspaces(
+    loom_serve_host_t* host) {
+  const iree_host_size_t worker_count =
+      loomc_task_pool_worker_count(host->task_pool);
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      host->host_allocator, worker_count, sizeof(*host->compiler_workspaces),
+      (void**)&host->compiler_workspaces));
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < worker_count && iree_status_is_ok(status);
+       ++i) {
+    status = iree_status_from_loomc(loomc_workspace_create(
+        NULL, loomc_allocator_from_iree(host->host_allocator),
+        &host->compiler_workspaces[i]));
+    if (iree_status_is_ok(status)) {
+      ++host->compiler_workspace_count;
+    }
+  }
+  return status;
+}
+
 iree_status_t loom_serve_host_create(
     iree_host_size_t worker_count,
     const loom_serve_compiler_options_t* compiler_options,
@@ -176,6 +200,9 @@ iree_status_t loom_serve_host_create(
         host->executor, loomc_allocator_from_iree(host_allocator),
         &host->task_pool));
   }
+  if (iree_status_is_ok(status) && compiler_options) {
+    status = loom_serve_host_create_compiler_workspaces(host);
+  }
   if (iree_status_is_ok(status)) {
     status = iree_status_from_loomc(loomc_task_queue_allocate(
         host->task_pool, loomc_allocator_from_iree(host_allocator),
@@ -228,6 +255,10 @@ void loom_serve_host_release(loom_serve_host_t* host) {
     loom_serve_native_cache_free(host->native_cache);
     iree_hal_driver_release(host->task_driver);
     iree_task_executor_release(host->executor);
+    for (iree_host_size_t i = 0; i < host->compiler_workspace_count; ++i) {
+      loomc_workspace_release(host->compiler_workspaces[i]);
+    }
+    iree_allocator_free(host->host_allocator, host->compiler_workspaces);
     loomc_target_environment_release(host->target_environment);
     iree_allocator_free(host->host_allocator, host->target_providers);
     iree_arena_block_pool_deinitialize(&host->block_pool);
@@ -241,6 +272,19 @@ iree_task_executor_t* loom_serve_host_executor(const loom_serve_host_t* host) {
 
 loomc_task_pool_t* loom_serve_host_task_pool(const loom_serve_host_t* host) {
   return host->task_pool;
+}
+
+loomc_workspace_t* loom_serve_host_compiler_workspace(
+    const loom_serve_host_t* host, iree_host_size_t worker_ordinal) {
+  return host->compiler_workspaces[worker_ordinal];
+}
+
+void loom_serve_host_trim_compiler(loom_serve_host_t* host) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  for (iree_host_size_t i = 0; i < host->compiler_workspace_count; ++i) {
+    loomc_workspace_trim(host->compiler_workspaces[i]);
+  }
+  IREE_TRACE_ZONE_END(z0);
 }
 
 iree_arena_block_pool_t* loom_serve_host_block_pool(loom_serve_host_t* host) {
