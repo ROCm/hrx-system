@@ -26,7 +26,6 @@ _AMDGPU_ARTIFACT_CHECK_TESTS = [
     "low_conversion_gfx1200.loom-test",
     "low_conversion_gfx1250.loom-test",
     "low_conversion_gfx950.loom-test",
-    "low_copy_sources.loom-test",
     "low_descriptor_assembly.loom-test",
     "low_destination_selection_wait.loom-test",
     "low_dpp_legacy.loom-test",

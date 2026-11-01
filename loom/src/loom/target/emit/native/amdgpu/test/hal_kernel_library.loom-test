@@ -26,9 +26,9 @@ low.kernel.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) workgroup_s
   %right = live_in<amdgpu.workgroup_id.y> : reg<amdgpu.sgpr>
   %group_z = live_in<amdgpu.workgroup_id.z> : reg<amdgpu.sgpr>
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %storage = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
+  %storage = storage {byte_alignment = 16, byte_length = 2048} : low.storage<workgroup>
   %base = storage_address %storage : low.storage<workgroup> -> reg<amdgpu.vgpr>
-  %offset = v_lshlrev_b32_src0_inline %lane, 4
+  %offset = v_lshlrev_b32_src0_inline %lane, 5
   %address = v_add_u32 %base, %offset
   %zero = s_mov_b32 0
   %use_dispatch = s_cmp_gt_u32 %group_z, %zero
@@ -37,7 +37,7 @@ low.kernel.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) workgroup_s
   low.br.identity(0, 1) ^join(%dispatch: reg<amdgpu.sgpr x2>)
 ^select_path:
   %keep_dispatch = s_cmp_gt_u32 %left, %right
-  low.cond_br %keep_dispatch, ^aligned_path, ^group_path : reg<amdgpu.scc>
+  low.cond_br %keep_dispatch, ^aligned_path, ^group_select : reg<amdgpu.scc>
 ^aligned_path:
   // Materializing a larger mask provides a displaced copy of dispatch ID.
   // Its availability must not replace the already-aligned original.
@@ -47,18 +47,57 @@ low.kernel.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) workgroup_s
   ds_write_b32 %address, %dispatch_selected
   %preserved = concat(%dispatch) : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>
   low.br ^join(%preserved: reg<amdgpu.sgpr x2>)
+^group_select:
+  %duplicate_group = s_cmp_eq_i32 %left, %right
+  low.cond_br %duplicate_group, ^other_path, ^lifetime_select : reg<amdgpu.scc>
+^lifetime_select:
+  %keep_source = s_cmp_eq_i32 %left, %zero
+  low.cond_br %keep_source, ^live_path, ^group_path : reg<amdgpu.scc>
+^live_path:
+  // The original components remain live after the concat. Reusing saved
+  // providers must not drop their independent storage demand.
+  %live_mask = concat(%right, %left) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %live_selected = v_cndmask_b32_src0_inline %lane, %live_mask {false_value = 0}
+  ds_write_b32 %address, %live_selected
+  // This saved z component is not available along the disjoint other path.
+  %local_mask = concat(%left, %group_z) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %local_selected = v_cndmask_b32_src0_inline %lane, %local_mask {false_value = 0}
+  ds_write_b32 %address, %local_selected {offset = 20}
+  %live_pair = concat(%left, %right) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %sum = s_add_u32 %left, %right
+  %live_sum = copy %sum : reg<amdgpu.sgpr> -> reg<amdgpu.vgpr>
+  ds_write_b32 %address, %live_sum {offset = 4}
+  low.br ^join(%live_pair: reg<amdgpu.sgpr x2>)
 ^group_path:
   // Both original workgroup units need transport. Reuse the reversed mask's
-  // components for the join instead of retaining the original inputs.
-  %mask = concat(%right, %left) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  // components through their forwarding chains. Updating a separate copy
+  // must not invalidate the preserved provider.
+  %saved_left = copy %left : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
+  %saved_right = copy %right : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
+  %moved_right = move %saved_right : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
+  %mask = concat(%moved_right, %saved_left) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   // The retained read belongs to the shared storage, not the last SSA alias.
   %first_alias = low.assume %mask [range(%mask, 0, 1024)] : reg<amdgpu.sgpr x2>
   %second_alias = low.assume %first_alias [range(%first_alias, 0, 1024)] : reg<amdgpu.sgpr x2>
   %alias = low.assume %second_alias [range(%second_alias, 0, 1024)] : reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32_src0_inline %lane, %alias {false_value = 0}
   ds_write_b32 %address, %selected
+  // Keep an independent left copy, but overwrite the newest right copy.
+  // The join must select preserved bits rather than either updated value.
+  %preserved_left = copy %saved_left : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
+  %mutable_left = copy %preserved_left : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
+  %mutable_right = copy %moved_right : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
+  %changed_copy = s_addk_i32 %mutable_left, 1
+  %changed_source = s_addk_i32 %mutable_right, 1
+  %copied_result = copy %changed_copy : reg<amdgpu.sgpr> -> reg<amdgpu.vgpr>
+  %overwritten_result = copy %changed_source : reg<amdgpu.sgpr> -> reg<amdgpu.vgpr>
+  ds_write_b32 %address, %copied_result {offset = 4}
+  ds_write_b32 %address, %overwritten_result {offset = 16}
   %pair = concat(%left, %right) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   low.br ^join(%pair: reg<amdgpu.sgpr x2>)
+^other_path:
+  %other_pair = concat(%group_z, %group_z) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  low.br ^join(%other_pair: reg<amdgpu.sgpr x2>)
 ^join(%identity: reg<amdgpu.sgpr x2>):
   %stored = copy %identity : reg<amdgpu.sgpr x2> -> reg<amdgpu.vgpr x2>
   ds_write_b64 %address, %stored {offset = 8}
@@ -76,7 +115,7 @@ low.kernel.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) workgroup_s
 .type fixed_identity_sources,@function
 fixed_identity_sources:
   v_mov_b32 v1, 0
-  v_lshlrev_b32 v2, 4, v0
+  v_lshlrev_b32 v2, 5, v0
   s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
   v_add_u32 v1, v1, v2
   s_mov_b32 s5, 0
@@ -84,25 +123,61 @@ fixed_identity_sources:
   s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb2
 .Lbb1:
-  s_branch .Lbb5
+  s_branch .Lbb9
 .Lbb2:
   s_cmp_gt_u32 s2, s3
   s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb4
 .Lbb3:
-  s_mov_b32 s4, s0
-  s_mov_b32 s5, s1
-  v_cndmask_b32 v0, 0, v0, s[4:5]
+  s_mov_b32 s6, s0
+  s_mov_b32 s7, s1
+  v_cndmask_b32 v0, 0, v0, s[6:7]
   ds_write_b32 v1, v0 offset:0
-  s_branch .Lbb5
+  s_branch .Lbb9
 .Lbb4:
-  s_mov_b32 s4, s3
-  s_mov_b32 s5, s2
-  v_cndmask_b32 v0, 0, v0, s[4:5]
-  ds_write_b32 v1, v0 offset:0
-  s_mov_b32 s0, s5
-  s_mov_b32 s1, s4
+  s_cmp_eq_i32 s2, s3
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_cbranch_scc1 .Lbb8
 .Lbb5:
+  s_cmp_eq_i32 s2, s5
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_cbranch_scc0 .Lbb7
+.Lbb6:
+  s_mov_b32 s0, s3
+  s_mov_b32 s1, s2
+  v_cndmask_b32 v2, 0, v0, s[0:1]
+  ds_write_b32 v1, v2 offset:0
+  s_mov_b32 s6, s2
+  s_mov_b32 s7, s4
+  v_cndmask_b32 v0, 0, v0, s[6:7]
+  ds_write_b32 v1, v0 offset:20
+  s_add_u32 s0, s2, s3
+  v_mov_b32 v0, s0
+  ds_write_b32 v1, v0 offset:4
+  s_mov_b32 s0, s2
+  s_mov_b32 s1, s3
+  s_branch .Lbb9
+.Lbb7:
+  s_mov_b32 s7, s2
+  s_mov_b32 s0, s3
+  s_mov_b32 s6, s0
+  v_cndmask_b32 v0, 0, v0, s[6:7]
+  ds_write_b32 v1, v0 offset:0
+  s_mov_b32 s5, s7
+  s_mov_b32 s1, s5
+  s_addk_i32 s1, 1
+  s_addk_i32 s0, 1
+  v_mov_b32 v0, s1
+  v_mov_b32 v2, s0
+  ds_write_b32 v1, v0 offset:4
+  ds_write_b32 v1, v2 offset:16
+  s_mov_b32 s0, s5
+  s_mov_b32 s1, s6
+  s_branch .Lbb9
+.Lbb8:
+  s_mov_b32 s0, s4
+  s_mov_b32 s1, s4
+.Lbb9:
   v_mov_b32 v2, s0
   v_mov_b32 v3, s1
   ds_write_b64 v1, v[2:3] offset:8
@@ -113,7 +188,7 @@ fixed_identity_sources:
 .rodata
 .p2align 6
 .amdhsa_kernel fixed_identity_sources
-  .amdhsa_group_segment_fixed_size 1024
+  .amdhsa_group_segment_fixed_size 2048
   .amdhsa_private_segment_fixed_size 0
   .amdhsa_kernarg_size 0
   .amdhsa_user_sgpr_count 2
@@ -131,7 +206,7 @@ fixed_identity_sources:
   .amdhsa_system_sgpr_workgroup_info 0
   .amdhsa_system_vgpr_workitem_id 0
   .amdhsa_next_free_vgpr 4
-  .amdhsa_next_free_sgpr 7
+  .amdhsa_next_free_sgpr 8
   .amdhsa_reserve_vcc 0
   .amdhsa_float_round_mode_32 0
   .amdhsa_float_round_mode_16_64 0
@@ -163,11 +238,11 @@ fixed_identity_sources:
     - .name: 'fixed_identity_sources'
       .symbol: 'fixed_identity_sources.kd'
       .kernarg_segment_size: 0
-      .group_segment_fixed_size: 1024
+      .group_segment_fixed_size: 2048
       .private_segment_fixed_size: 0
       .kernarg_segment_align: 8
       .wavefront_size: 64
-      .sgpr_count: 7
+      .sgpr_count: 8
       .vgpr_count: 4
       .max_flat_workgroup_size: 64
       .reqd_workgroup_size:
@@ -306,6 +381,175 @@ retained_dispatch_alias:
       .wavefront_size: 64
       .sgpr_count: 6
       .vgpr_count: 4
+      .max_flat_workgroup_size: 64
+      .reqd_workgroup_size:
+        - 64
+        - 1
+        - 1
+      .args: []
+.end_amdgpu_metadata
+
+// ====
+
+// A two-word transfer may reuse a whole subrange of one saved value, but not
+// combine independently saved words into a fictitious wider provider.
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+low.kernel.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) workgroup_size(64, 1, 1) @saved_source_extents() asm {
+  %dispatch = live_in<amdgpu.dispatch_id> : reg<amdgpu.sgpr x2>
+  %packet_pointer = live_in<amdgpu.dispatch_ptr> : reg<amdgpu.sgpr x2>
+  %argument_pointer = live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %group = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %storage = storage {byte_alignment = 16, byte_length = 2048} : low.storage<workgroup>
+  %base = storage_address %storage : low.storage<workgroup> -> reg<amdgpu.vgpr>
+  %offset = v_lshlrev_b32_src0_inline %lane, 5
+  %address = v_add_u32 %base, %offset
+  %zero = s_mov_b32 0
+  %use_dispatch = s_cmp_eq_i32 %group, %zero
+  low.cond_br %use_dispatch, ^identity_path, ^select_path : reg<amdgpu.scc>
+^identity_path:
+  low.br.identity(0, 1) ^join(%dispatch: reg<amdgpu.sgpr x2>)
+^select_path:
+  %one = s_mov_b32 1
+  %use_whole = s_cmp_eq_i32 %group, %one
+  low.cond_br %use_whole, ^whole_path, ^partial_path : reg<amdgpu.scc>
+^whole_path:
+  %aggregate = concat(%dispatch, %packet_pointer) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x4>
+  %saved = copy %aggregate : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr x4>
+  %whole = concat(%packet_pointer) : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>
+  %saved_words = copy %saved : reg<amdgpu.sgpr x4> -> reg<amdgpu.vgpr x4>
+  ds_write_b128 %address, %saved_words
+  low.br ^join(%whole: reg<amdgpu.sgpr x2>)
+^partial_path:
+  %first = slice %argument_pointer[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %second = slice %argument_pointer[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %saved_first = copy %first : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
+  %saved_second = copy %second : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
+  %partial = concat(%argument_pointer) : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>
+  %first_word = copy %saved_first : reg<amdgpu.sgpr> -> reg<amdgpu.vgpr>
+  %second_word = copy %saved_second : reg<amdgpu.sgpr> -> reg<amdgpu.vgpr>
+  ds_write_b32 %address, %first_word
+  ds_write_b32 %address, %second_word {offset = 4}
+  low.br ^join(%partial: reg<amdgpu.sgpr x2>)
+^join(%identity: reg<amdgpu.sgpr x2>):
+  %stored = copy %identity : reg<amdgpu.sgpr x2> -> reg<amdgpu.vgpr x2>
+  ds_write_b64 %address, %stored {offset = 16}
+  return
+}
+
+// ----
+.text
+.amdgcn_target "amdgcn-amd-amdhsa--gfx1151"
+.amdhsa_code_object_version 6
+
+.protected saved_source_extents
+.globl saved_source_extents
+.p2align 8
+.type saved_source_extents,@function
+saved_source_extents:
+  v_mov_b32 v1, 0
+  v_lshlrev_b32 v0, 5, v0
+  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
+  v_add_u32 v0, v1, v0
+  s_mov_b32 s7, 0
+  s_cmp_eq_i32 s6, s7
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  s_branch .Lbb5
+.Lbb2:
+  s_mov_b32 s7, 1
+  s_cmp_eq_i32 s6, s7
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_cbranch_scc0 .Lbb4
+.Lbb3:
+  s_mov_b32 s6, s0
+  s_mov_b32 s7, s1
+  v_mov_b32 v4, s4
+  v_mov_b32 v5, s5
+  v_mov_b32 v6, s6
+  v_mov_b32 v7, s7
+  ds_write_b128 v0, v[4:7] offset:0
+  s_mov_b32 s4, s6
+  s_mov_b32 s5, s7
+  s_branch .Lbb5
+.Lbb4:
+  s_mov_b32 s0, s2
+  s_mov_b32 s1, s3
+  v_mov_b32 v1, s0
+  v_mov_b32 v2, s1
+  ds_write_b32 v0, v1 offset:0
+  ds_write_b32 v0, v2 offset:4
+  s_mov_b32 s4, s2
+  s_mov_b32 s5, s3
+.Lbb5:
+  v_mov_b32 v2, s4
+  v_mov_b32 v3, s5
+  ds_write_b64 v0, v[2:3] offset:16
+  s_endpgm
+.Lfunc_end0:
+.size saved_source_extents, .Lfunc_end0-saved_source_extents
+
+.rodata
+.p2align 6
+.amdhsa_kernel saved_source_extents
+  .amdhsa_group_segment_fixed_size 2048
+  .amdhsa_private_segment_fixed_size 0
+  .amdhsa_kernarg_size 0
+  .amdhsa_user_sgpr_count 6
+  .amdhsa_user_sgpr_dispatch_ptr 1
+  .amdhsa_user_sgpr_queue_ptr 0
+  .amdhsa_user_sgpr_kernarg_segment_ptr 1
+  .amdhsa_user_sgpr_dispatch_id 1
+  .amdhsa_user_sgpr_private_segment_size 0
+  .amdhsa_wavefront_size32 0
+  .amdhsa_uses_dynamic_stack 0
+  .amdhsa_enable_private_segment 0
+  .amdhsa_system_sgpr_workgroup_id_x 1
+  .amdhsa_system_sgpr_workgroup_id_y 0
+  .amdhsa_system_sgpr_workgroup_id_z 0
+  .amdhsa_system_sgpr_workgroup_info 0
+  .amdhsa_system_vgpr_workitem_id 0
+  .amdhsa_next_free_vgpr 8
+  .amdhsa_next_free_sgpr 8
+  .amdhsa_reserve_vcc 0
+  .amdhsa_float_round_mode_32 0
+  .amdhsa_float_round_mode_16_64 0
+  .amdhsa_float_denorm_mode_32 3
+  .amdhsa_float_denorm_mode_16_64 3
+  .amdhsa_dx10_clamp 1
+  .amdhsa_ieee_mode 1
+  .amdhsa_fp16_overflow 0
+  .amdhsa_workgroup_processor_mode 1
+  .amdhsa_memory_ordered 1
+  .amdhsa_forward_progress 1
+  .amdhsa_shared_vgpr_count 0
+  .amdhsa_inst_pref_size 0
+  .amdhsa_exception_fp_ieee_invalid_op 0
+  .amdhsa_exception_fp_denorm_src 0
+  .amdhsa_exception_fp_ieee_div_zero 0
+  .amdhsa_exception_fp_ieee_overflow 0
+  .amdhsa_exception_fp_ieee_underflow 0
+  .amdhsa_exception_fp_ieee_inexact 0
+  .amdhsa_exception_int_div_zero 0
+.end_amdhsa_kernel
+
+.amdgpu_metadata
+  amdhsa.version:
+    - 1
+    - 2
+  amdhsa.target: 'amdgcn-amd-amdhsa--gfx1151'
+  amdhsa.kernels:
+    - .name: 'saved_source_extents'
+      .symbol: 'saved_source_extents.kd'
+      .kernarg_segment_size: 0
+      .group_segment_fixed_size: 2048
+      .private_segment_fixed_size: 0
+      .kernarg_segment_align: 8
+      .wavefront_size: 64
+      .sgpr_count: 8
+      .vgpr_count: 8
       .max_flat_workgroup_size: 64
       .reqd_workgroup_size:
         - 64
