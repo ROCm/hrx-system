@@ -392,6 +392,12 @@ if(IREE_SYNCHRONIZATION_DISABLE_UNSAFE)
   )
 endif()
 
+# Linux real-time APIs are linked only by declarations depending on :rt.
+set(IREE_RT_DEPS "")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(IREE_RT_DEPS rt)
+endif()
+
 # Find and add threads as dependency.
 if(IREE_TARGET_HAS_THREADS AND NOT ANDROID)
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)

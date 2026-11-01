@@ -19,7 +19,7 @@ class TargetConverter:
                 # Internal utilities to emulate various binary/library options.
                 f"{root_repo}//build_tools/bazel:pthreads": [],
                 f"{root_repo}//build_tools/bazel:dl": ["${CMAKE_DL_LIBS}"],
-                f"{root_repo}//build_tools/bazel:rt": [],
+                f"{root_repo}//build_tools/bazel:rt": ["${IREE_RT_DEPS}"],
                 # Tracy.
                 "@tracy_client//:runtime": ["tracy_client::runtime"],
                 # Misc single targets
