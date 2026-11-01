@@ -106,6 +106,44 @@ TEST(ConditionFactScopeTest, ContradictoryFragmentsRemainUnknown) {
             0u);
 }
 
+TEST(ConditionFactScopeTest, ContradictoryLocalDerivationAddsNoProof) {
+  loom_condition_integer_relation_t relations[] = {
+      {LOOM_SYMBOLIC_INTEGER_RELATION_LT, ValueOperand(1), ValueOperand(2)},
+      {LOOM_SYMBOLIC_INTEGER_RELATION_GE, ValueOperand(1), ValueOperand(2)},
+  };
+  const loom_condition_derivation_t derivation =
+      Derivation(relations, IREE_ARRAYSIZE(relations));
+  loom_condition_edge_projection_t projection = {
+      .source_derivation = derivation,
+      .visible_integer_relation_count = IREE_ARRAYSIZE(relations),
+  };
+  loom_condition_fact_scope_t local_scope = {};
+  loom_condition_fact_scope_initialize_local(nullptr, &derivation,
+                                             &local_scope);
+  loom_condition_fact_scope_t projected_scope = {};
+  loom_condition_fact_scope_initialize_projected(nullptr, &projection,
+                                                 &projected_scope);
+  for (auto* scope : {&local_scope, &projected_scope}) {
+    EXPECT_EQ(loom_condition_fact_scope_query_integer_order(
+                  scope, nullptr, ValueOperand(1), ValueOperand(2)),
+              LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL);
+    // An inconsistent fragment also cannot discard an independent parent fact.
+    loom_condition_integer_relation_t parent_relation = {
+        LOOM_SYMBOLIC_INTEGER_RELATION_NE, ValueOperand(1), ValueOperand(2)};
+    const loom_condition_derivation_t parent_derivation =
+        Derivation(&parent_relation, 1);
+    loom_condition_fact_scope_t parent = {};
+    loom_condition_fact_scope_initialize_local(nullptr, &parent_derivation,
+                                               &parent);
+    scope->parent = &parent;
+    EXPECT_EQ(loom_condition_fact_scope_query_integer_order(
+                  scope, nullptr, ValueOperand(1), ValueOperand(2)),
+              LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS |
+                  LOOM_INTEGER_ORDER_OUTCOME_BIT_GREATER);
+    scope->parent = nullptr;
+  }
+}
+
 TEST(ConditionFactScopeTest, ProjectedFragmentExposesRangeAndRelationFacts) {
   const loom_value_id_t value = 1;
   loom_condition_integer_relation_t relations[] = {

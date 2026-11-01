@@ -133,19 +133,13 @@ loom_condition_fact_scope_flat_exclusions(
     const loom_condition_fact_set_t* facts,
     const loom_value_fact_table_t* fact_table,
     const loom_condition_integer_relation_t* queried) {
-  loom_integer_order_outcome_bits_t exclusions = 0;
-  for (loom_integer_order_outcome_t outcome = 0;
-       outcome < LOOM_INTEGER_ORDER_OUTCOME_COUNT; ++outcome) {
-    loom_condition_integer_relation_t outcome_query = *queried;
-    outcome_query.relation = loom_integer_order_outcome_relation(outcome);
-    bool result = false;
-    if (loom_condition_fact_set_proves_integer_relation(
-            facts, fact_table, &outcome_query, &result) &&
-        !result) {
-      exclusions |= (loom_integer_order_outcome_bits_t)(1u << outcome);
-    }
-  }
-  return exclusions;
+  const loom_integer_order_outcome_bits_t outcomes =
+      loom_condition_fact_set_query_integer_order(
+          facts, fact_table, queried->left, queried->right);
+  // An inconsistent local derivation cannot establish a proof.
+  return outcomes ? LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL &
+                        (loom_integer_order_outcome_bits_t)~outcomes
+                  : 0;
 }
 
 static loom_integer_order_outcome_bits_t
@@ -153,19 +147,12 @@ loom_condition_fact_scope_projection_exclusions(
     const loom_condition_edge_projection_t* projection,
     const loom_value_fact_table_t* fact_table,
     const loom_condition_integer_relation_t* queried) {
-  loom_integer_order_outcome_bits_t exclusions = 0;
-  for (loom_integer_order_outcome_t outcome = 0;
-       outcome < LOOM_INTEGER_ORDER_OUTCOME_COUNT; ++outcome) {
-    loom_condition_integer_relation_t outcome_query = *queried;
-    outcome_query.relation = loom_integer_order_outcome_relation(outcome);
-    bool result = false;
-    if (loom_condition_edge_projection_proves_integer_relation(
-            projection, fact_table, &outcome_query, &result) &&
-        !result) {
-      exclusions |= (loom_integer_order_outcome_bits_t)(1u << outcome);
-    }
-  }
-  return exclusions;
+  const loom_integer_order_outcome_bits_t outcomes =
+      loom_condition_edge_projection_query_integer_order(
+          projection, fact_table, queried->left, queried->right);
+  return outcomes ? LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL &
+                        (loom_integer_order_outcome_bits_t)~outcomes
+                  : 0;
 }
 
 loom_integer_order_outcome_bits_t loom_condition_fact_scope_query_integer_order(

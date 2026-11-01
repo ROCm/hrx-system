@@ -1332,6 +1332,9 @@ TEST_F(ConditionFactsTest, RelationProofPreservesFactIdentityOperands) {
       condition_facts_.integer_relations[0];
   queried.left.value_id = loom_op_const_results(repeated_aliases)[0];
   queried.right.value_id = loom_op_const_results(repeated_aliases)[1];
+  EXPECT_EQ(loom_condition_fact_set_query_integer_order(
+                &condition_facts_, &fact_table_, queried.left, queried.right),
+            LOOM_INTEGER_ORDER_OUTCOME_BIT_EQUAL);
   bool result = false;
   EXPECT_TRUE(loom_condition_fact_set_proves_integer_relation(
       &condition_facts_, &fact_table_, &queried, &result));
@@ -1342,6 +1345,9 @@ TEST_F(ConditionFactsTest, RelationProofPreservesFactIdentityOperands) {
       &condition_facts_, &fact_table_, &queried, &result));
   EXPECT_FALSE(result);
   queried.right.value_id = other;
+  EXPECT_EQ(loom_condition_fact_set_query_integer_order(
+                &condition_facts_, &fact_table_, queried.left, queried.right),
+            LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL);
   EXPECT_FALSE(loom_condition_fact_set_proves_integer_relation(
       &condition_facts_, &fact_table_, &queried, &result));
 }
@@ -1881,6 +1887,7 @@ TEST_F(ConditionFactsTest, RelationProofMatchesConjunctionTruthTable) {
           condition_facts_.integer_relations[1] = {
               second, (swaps & 2) ? right : left, (swaps & 2) ? left : right};
           unsigned outcomes = 0;
+          loom_integer_order_outcome_bits_t order = 0;
           for (int64_t a : {-1, 0, 1}) {
             for (int64_t b : {-1, 0, 1}) {
               if (EvaluateRelation(first, (swaps & 1) ? b : a,
@@ -1888,9 +1895,15 @@ TEST_F(ConditionFactsTest, RelationProofMatchesConjunctionTruthTable) {
                   EvaluateRelation(second, (swaps & 2) ? b : a,
                                    (swaps & 2) ? a : b)) {
                 outcomes |= EvaluateRelation(queried, a, b) ? 2u : 1u;
+                order |= a < b   ? LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS
+                         : a > b ? LOOM_INTEGER_ORDER_OUTCOME_BIT_GREATER
+                                 : LOOM_INTEGER_ORDER_OUTCOME_BIT_EQUAL;
               }
             }
           }
+          EXPECT_EQ(loom_condition_fact_set_query_integer_order(
+                        &condition_facts_, &fact_table_, left, right),
+                    order);
           bool value = false;
           const bool proven = loom_condition_fact_set_proves_integer_relation(
               &condition_facts_, &fact_table_, &query, &value);

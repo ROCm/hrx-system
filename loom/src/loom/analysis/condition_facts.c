@@ -2014,31 +2014,42 @@ bool loom_condition_integer_relation_implies(
   return false;
 }
 
-bool loom_condition_fact_set_proves_integer_relation(
+loom_integer_order_outcome_bits_t loom_condition_fact_set_query_integer_order(
     const loom_condition_fact_set_t* facts,
     const loom_value_fact_table_t* fact_table,
-    const loom_condition_integer_relation_t* queried, bool* out_result) {
+    loom_condition_integer_operand_t left,
+    loom_condition_integer_operand_t right) {
   if (!facts) {
-    return false;
+    return LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL;
   }
   loom_integer_order_outcome_bits_t outcomes =
       LOOM_INTEGER_ORDER_OUTCOME_BIT_ALL;
   for (iree_host_size_t i = 0; i < facts->integer_relation_count; ++i) {
     const loom_condition_integer_relation_t* known =
         &facts->integer_relations[i];
-    if (loom_condition_integer_operands_equivalent_with_facts(
-            known->left, queried->left, fact_table) &&
+    if (loom_condition_integer_operands_equivalent_with_facts(known->left, left,
+                                                              fact_table) &&
         loom_condition_integer_operands_equivalent_with_facts(
-            known->right, queried->right, fact_table)) {
+            known->right, right, fact_table)) {
       outcomes &= loom_symbolic_integer_relation_outcomes(known->relation);
     } else if (loom_condition_integer_operands_equivalent_with_facts(
-                   known->left, queried->right, fact_table) &&
+                   known->left, right, fact_table) &&
                loom_condition_integer_operands_equivalent_with_facts(
-                   known->right, queried->left, fact_table)) {
+                   known->right, left, fact_table)) {
       outcomes &= loom_symbolic_integer_relation_outcomes(
           loom_symbolic_integer_relation_swap(known->relation));
     }
   }
+  return outcomes;
+}
+
+bool loom_condition_fact_set_proves_integer_relation(
+    const loom_condition_fact_set_t* facts,
+    const loom_value_fact_table_t* fact_table,
+    const loom_condition_integer_relation_t* queried, bool* out_result) {
+  const loom_integer_order_outcome_bits_t outcomes =
+      loom_condition_fact_set_query_integer_order(
+          facts, fact_table, queried->left, queried->right);
   return loom_symbolic_integer_relation_resolve(outcomes, queried->relation,
                                                 out_result);
 }

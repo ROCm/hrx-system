@@ -106,6 +106,16 @@ bool loom_condition_edge_projection_apply_to_value_facts(
     const loom_value_fact_table_t* fact_table, loom_value_id_t value_id,
     loom_value_facts_t* inout_facts);
 
+// Queries possible integer order outcomes in the source derivation after
+// mapping target operands through the edge. Contradictory relations return
+// zero.
+loom_integer_order_outcome_bits_t
+loom_condition_edge_projection_query_integer_order(
+    const loom_condition_edge_projection_t* projection,
+    const loom_value_fact_table_t* fact_table,
+    loom_condition_integer_operand_t left,
+    loom_condition_integer_operand_t right);
+
 // Proves one target-scope relation from the retained source derivation.
 bool loom_condition_edge_projection_proves_integer_relation(
     const loom_condition_edge_projection_t* projection,

@@ -1609,6 +1609,12 @@ TEST_F(FactTableComputeTest, ConditionLoopFactorsDuplicatePayloadRelations) {
       EXPECT_TRUE(loom_condition_edge_projection_proves_integer_relation(
           projection, &table_, &query, &result));
       EXPECT_TRUE(result);
+      EXPECT_EQ(loom_condition_edge_projection_query_integer_order(
+                    projection, &table_, query.left, query.right),
+                LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS);
+      EXPECT_EQ(loom_condition_edge_projection_query_integer_order(
+                    projection, &table_, query.right, query.left),
+                LOOM_INTEGER_ORDER_OUTCOME_BIT_GREATER);
     }
   }
 }
