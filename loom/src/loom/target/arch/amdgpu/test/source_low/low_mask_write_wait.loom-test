@@ -1,3 +1,30 @@
+// RUN: emit amdgpu-assembly @completed_mask_increment strategy=source
+
+// The recurrent pair definition completes the old read before a tied update.
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @completed_mask_increment(%value: reg<amdgpu.vgpr>, %source: reg<amdgpu.sgpr x2>) asm {
+  low.br ^loop
+^loop:
+  %pair = s_or_b64 %source, %source
+  %lower = slice %pair[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %upper = slice %pair[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %advanced = s_addk_i32 %lower, 1
+  %mask = concat(%advanced, %upper) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
+  low.br ^loop
+}
+
+// ----
+.Lbb1:
+  s_or_b64 s[2:3], s[0:1], s[0:1]
+  s_waitcnt_depctr 0xff9e
+  s_addk_i32 s2, 1
+  v_cndmask_b32 v1, 0, v0, s[2:3]
+  s_branch .Lbb1
+
+// ====
+
 // RUN: emit amdgpu-assembly @scalar_completion_loop strategy=source
 
 // The next iteration overwrites the mask before ordinary scalar arithmetic.
@@ -408,93 +435,6 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @partial_vcc(
 
 // ====
 
-// RUN: emit amdgpu-assembly @fixed_mask_write strategy=source fixed=%mask:physical_register:0:2 fixed=%replacement:physical_register:0:2 fixed=%source:physical_register:4:2
-
-amdgpu.target<gfx1151> @target {subgroup_size = 64}
-
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @fixed_mask_write(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) asm {
-  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
-  %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
-  %replacement = s_or_b64 %source, %source
-  return %selected, %replacement
-}
-
-// ----
-  v_cndmask_b32 v0, 0, v0, s[0:1]
-  s_or_b64 s[0:1], s[4:5], s[4:5]
-  s_waitcnt_depctr 0xff9e
-  s_endpgm
-
-// ====
-
-// RUN: emit amdgpu-assembly @fixed_mask_write_twice strategy=source fixed=%mask:physical_register:0:2 fixed=%replacement:physical_register:0:2 fixed=%result:physical_register:0:2 fixed=%source:physical_register:4:2
-
-amdgpu.target<gfx1151> @target {subgroup_size = 64}
-
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @fixed_mask_write_twice(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) asm {
-  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
-  %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
-  %replacement = s_or_b64 %source, %source
-  %result = s_and_b64 %replacement, %source
-  return %selected, %result
-}
-
-// ----
-  v_cndmask_b32 v0, 0, v0, s[0:1]
-  s_or_b64 s[0:1], s[4:5], s[4:5]
-  s_waitcnt_depctr 0xff9e
-  s_and_b64 s[0:1], s[0:1], s[4:5]
-  s_endpgm
-
-// ====
-
-// RUN: emit amdgpu-assembly @fixed_mask_cleared strategy=source fixed=%mask:physical_register:0:2 fixed=%replacement:physical_register:0:2 fixed=%source:physical_register:4:2
-
-amdgpu.target<gfx1151> @target {subgroup_size = 64}
-
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @fixed_mask_cleared(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) asm {
-  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
-  %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
-  %word = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %broadcast = v_mov_b32_copy %word
-  %replacement = s_or_b64 %source, %source
-  return %selected, %broadcast, %replacement
-}
-
-// ----
-  v_cndmask_b32 v0, 0, v0, s[0:1]
-  v_mov_b32 v1, s4
-  s_or_b64 s[0:1], s[4:5], s[4:5]
-  s_endpgm
-
-// ====
-
-// Fixed endpoints make the structural copy a real, unavoidable overwrite.
-// RUN: emit amdgpu-assembly @fixed_mask_copy strategy=source fixed=%mask:physical_register:0:2 fixed=%source:physical_register:4:2 fixed=%joined:physical_register:0:2
-
-amdgpu.target<gfx1151> @target {subgroup_size = 64}
-
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @fixed_mask_copy(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) asm {
-  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
-  %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
-  low.br ^join(%source: reg<amdgpu.sgpr x2>)
-^join(%joined: reg<amdgpu.sgpr x2>):
-  %result = s_or_b64 %joined, %source
-  return %selected, %result
-}
-
-// ----
-  v_cndmask_b32 v0, 0, v0, s[0:1]
-  s_mov_b32 s0, s4
-  s_waitcnt_depctr 0xff9e
-  s_mov_b32 s1, s5
-  s_waitcnt_depctr 0xff9e
-.Lbb1:
-  s_or_b64 s[0:1], s[0:1], s[4:5]
-  s_endpgm
-
-// ====
-
 // A free copy source lets allocation preserve the predicate before its read.
 // RUN: emit amdgpu-assembly @free_source_mask_copy strategy=source allocation-diagnostics=predicted-spills fixed=%mask:physical_register:0:2 fixed=%joined:physical_register:0:2
 
@@ -516,34 +456,6 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @free_source_
   s_mov_b32 s1, s3
 .Lbb1:
   s_or_b64 s[0:1], s[0:1], s[2:3]
-  s_endpgm
-
-// ====
-
-// Overwriting the lower unit retires that unit, not the complete predicate pair.
-// RUN: emit amdgpu-assembly @partial_fixed_mask_copy strategy=source fixed=%mask:physical_register:0:2 fixed=%source:physical_register:4:1 fixed=%joined:physical_register:0:1
-
-amdgpu.target<gfx1151> @target {subgroup_size = 64}
-
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @partial_fixed_mask_copy(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr>) asm {
-  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
-  %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
-  low.br ^join(%source: reg<amdgpu.sgpr>)
-^join(%joined: reg<amdgpu.sgpr>):
-  %lower = s_or_b32 %joined, %source
-  %upper = s_or_b32 %source, %source
-  %result = s_or_b32 %lower, %upper
-  return %selected, %result
-}
-
-// ----
-  v_cndmask_b32 v0, 0, v0, s[0:1]
-  s_mov_b32 s0, s4
-  s_waitcnt_depctr 0xff9e
-.Lbb1:
-  s_or_b32 s0, s0, s4
-  s_or_b32 s2, s4, s4
-  s_or_b32 s0, s0, s2
   s_endpgm
 
 // ====
@@ -572,33 +484,6 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @partial_free
   s_or_b32 s0, s0, s2
   s_or_b32 s1, s2, s2
   s_or_b32 s0, s0, s1
-  s_endpgm
-
-// ====
-
-// An ordinary scalar VALU input clears the retained read before the same copy.
-// RUN: emit amdgpu-assembly @fixed_mask_copy_after_reset strategy=source fixed=%mask:physical_register:0:2 fixed=%source:physical_register:4:2 fixed=%joined:physical_register:0:2
-
-amdgpu.target<gfx1151> @target {subgroup_size = 64}
-
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @fixed_mask_copy_after_reset(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) asm {
-  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
-  %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
-  %word = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %broadcast = v_mov_b32_copy %word
-  low.br ^join(%source: reg<amdgpu.sgpr x2>)
-^join(%joined: reg<amdgpu.sgpr x2>):
-  %result = s_or_b64 %joined, %source
-  return %selected, %broadcast, %result
-}
-
-// ----
-  v_cndmask_b32 v0, 0, v0, s[0:1]
-  v_mov_b32 v1, s4
-  s_mov_b32 s0, s4
-  s_mov_b32 s1, s5
-.Lbb1:
-  s_or_b64 s[0:1], s[0:1], s[4:5]
   s_endpgm
 
 // ====

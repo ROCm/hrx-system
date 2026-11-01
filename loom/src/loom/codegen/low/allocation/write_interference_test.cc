@@ -398,14 +398,17 @@ class WriteInterferenceTest : public ::testing::Test {
       loom_low_allocation_write_interference_note_fixed(table_, Origin(0),
                                                         &assignments_[0]);
     } else if (binding != BindingKind::Free) {
-      assignments_[2].location_base = assignments_[0].location_base;
-      for (uint32_t ordinal : {0u, 2u}) {
+      const uint32_t destination = (uint32_t)assignments_.size() - 1;
+      assignments_[destination].location_base = assignments_[0].location_base;
+      for (uint32_t ordinal : {0u, destination}) {
         loom_low_allocation_write_interference_note_fixed(
             table_, Origin(ordinal), &assignments_[ordinal]);
       }
       if (binding == BindingKind::ForcedWrite) {
-        loom_low_allocation_write_interference_note_fixed(table_, Origin(1),
-                                                          &assignments_[1]);
+        for (uint32_t ordinal = 1; ordinal < destination; ++ordinal) {
+          loom_low_allocation_write_interference_note_fixed(
+              table_, Origin(ordinal), &assignments_[ordinal]);
+        }
       }
     }
     return loom_low_allocation_write_interference_finalize(
@@ -660,12 +663,19 @@ TEST_F(WriteInterferenceTest, ReadWithoutSubsequentWrites) {
   EXPECT_EQ(Query(0, 0), kNoConflict);
 }
 
-TEST_F(WriteInterferenceTest, UnconditionalWriteKeepsItsFullExtent) {
+TEST_F(WriteInterferenceTest, UnconditionalWriteRespectsFixedOverlap) {
   Initialize(4, WriteKind::Instruction);
   ResetArenas();
   IREE_ASSERT_OK(BuildTable());
   EXPECT_EQ(Query(1, 11), 0u);
   EXPECT_EQ(Query(1, 10), kNoConflict);
+
+  // A fixed overlap is unavoidable. The physical emitter completes the write;
+  // retaining its placement constraint would reject the required assignment.
+  ResetArenas();
+  IREE_ASSERT_OK(BuildTable(BindingKind::ForcedWrite));
+  ExpectScratchPreserved();
+  EXPECT_EQ(Query(1, assignments_[0].location_base), kNoConflict);
 }
 
 TEST_P(WriteInterferenceBoundaryTest,
