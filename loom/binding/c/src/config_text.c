@@ -19,12 +19,6 @@ static loomc_status_t loomc_config_validate_string_view(
   return loomc_ok_status();
 }
 
-static bool loomc_config_options_empty(const loomc_config_options_t* options) {
-  return options == NULL || (options->binding_count == 0 &&
-                             loomc_string_view_is_empty(options->json_object) &&
-                             options->flags == 0);
-}
-
 loomc_status_t loomc_config_validate_text_options(
     const loomc_config_options_t* options) {
   if (options == NULL) {
@@ -90,29 +84,40 @@ static iree_status_t loomc_config_populate_set(
   return status;
 }
 
-loomc_status_t loomc_config_apply_text_to_module(
-    const loomc_config_apply_text_to_module_options_t* options) {
-  if (loomc_config_options_empty(options->config)) {
+static loomc_status_t loomc_config_report_text_status(loomc_result_t* result,
+                                                      loomc_status_t status) {
+  if (!loomc_status_is_ok(status) &&
+      loomc_status_is_result_diagnostic(status)) {
+    return loomc_result_fail_status_diagnostic_consume(
+        result, NULL, LOOMC_DIAGNOSTIC_SEVERITY_ERROR,
+        loomc_make_cstring_view("CONFIG/INVALID"), status);
+  }
+  return status;
+}
+
+loomc_status_t loomc_config_prepare_text_bindings(
+    const loomc_config_options_t* options, iree_allocator_t allocator,
+    loomc_result_t* result, loom_config_text_binding_set_t* out_bindings) {
+  loom_config_text_binding_set_initialize(allocator, out_bindings);
+  if (options == NULL) {
     return loomc_ok_status();
   }
+  return loomc_config_report_text_status(
+      result, loomc_status_from_iree(
+                  loomc_config_populate_set(options, allocator, out_bindings)));
+}
 
-  iree_allocator_t host_allocator =
-      iree_allocator_from_loomc(options->allocator);
-  loom_config_text_binding_set_t config_set;
-  loom_config_text_binding_set_initialize(host_allocator, &config_set);
-
-  loomc_status_t status = loomc_status_from_iree(
-      loomc_config_populate_set(options->config, host_allocator, &config_set));
+loomc_status_t loomc_config_apply_text_to_module(
+    const loomc_config_apply_text_to_module_options_t* options) {
   loom_config_application_result_t materialize_result = {0};
-  if (loomc_status_is_ok(status)) {
-    loom_config_text_materialize_options_t materialize_options;
-    loom_config_text_materialize_options_initialize(&materialize_options);
-    materialize_options.binding_set = &config_set;
-    materialize_options.applied_value_sink = options->applied_value_sink;
-    status = loomc_status_from_iree(loom_config_text_materialize_module(
-        options->module, &materialize_options, options->block_pool,
-        &materialize_result));
-  }
+  const loom_config_text_materialize_options_t materialize_options = {
+      .binding_set = options->bindings,
+      .applied_value_sink = options->applied_value_sink,
+  };
+  loomc_status_t status =
+      loomc_status_from_iree(loom_config_text_materialize_module(
+          options->module, &materialize_options, options->block_pool,
+          &materialize_result));
   if (loomc_status_is_ok(status) &&
       materialize_result.materialized_count != 0) {
     status = loomc_result_verify_loom_module(options->context, options->module,
@@ -120,21 +125,10 @@ loomc_status_t loomc_config_apply_text_to_module(
                                              /*max_errors=*/0, options->result);
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(options->result) &&
-      iree_any_bit_set(options->config->flags,
+      iree_any_bit_set(options->policy_flags,
                        LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED)) {
     status = loomc_status_from_iree(
         loom_config_require_resolved_module(options->module, NULL));
   }
-  if (!loomc_status_is_ok(status) &&
-      loomc_status_is_result_diagnostic(status)) {
-    loomc_string_view_t diagnostic_code = options->diagnostic_code;
-    if (loomc_string_view_is_empty(diagnostic_code)) {
-      diagnostic_code = loomc_make_cstring_view("CONFIG/INVALID");
-    }
-    status = loomc_result_fail_status_diagnostic_consume(
-        options->result, NULL, LOOMC_DIAGNOSTIC_SEVERITY_ERROR, diagnostic_code,
-        status);
-  }
-  loom_config_text_binding_set_deinitialize(&config_set);
-  return status;
+  return loomc_config_report_text_status(options->result, status);
 }

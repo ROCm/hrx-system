@@ -786,7 +786,7 @@ loomc_status_t loomc_cmd_program_product_build(
 
   if (loomc_status_is_ok(status)) {
     loomc_link_materialization_state_t materialization_state = {0};
-    loomc_link_materialization_state_initialize(
+    status = loomc_link_materialization_state_initialize(
         loomc_link_index_context(options->link_index), workspace,
         options->link_index, &options->config, target_specialization, result,
         &scratch_arena, allocator, &materialization_state);
@@ -798,12 +798,15 @@ loomc_status_t loomc_cmd_program_product_build(
         materialization_environment =
             loomc_link_materialization_state_environment(
                 &materialization_state);
-    status = loomc_cmd_program_product_build_indexed(
-        loomc_link_index_context(options->link_index), workspace,
-        loomc_link_index_module_index(options->link_index),
-        root_symbol_ordinals, root_symbol_count, &materialization_environment,
-        options->request_sink, options->artifact_flags, &scratch_arena, result,
-        allocator, &product);
+    if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
+      status = loomc_cmd_program_product_build_indexed(
+          loomc_link_index_context(options->link_index), workspace,
+          loomc_link_index_module_index(options->link_index),
+          root_symbol_ordinals, root_symbol_count, &materialization_environment,
+          options->request_sink, options->artifact_flags, &scratch_arena,
+          result, allocator, &product);
+    }
+    loomc_link_materialization_state_deinitialize(&materialization_state);
   }
   if (loomc_status_is_ok(status)) {
     *out_product = product;
@@ -881,7 +884,7 @@ loomc_status_t loomc_cmd_program_product_build_module(
   }
   if (loomc_status_is_ok(status)) {
     loomc_link_materialization_state_t materialization_state = {0};
-    loomc_link_materialization_state_initialize_overlay(
+    status = loomc_link_materialization_state_initialize_overlay(
         context, workspace, options->library_index, module_provider_ordinal,
         /*appended_source=*/NULL, &options->config, target_specialization,
         result, &scratch_arena, allocator, &materialization_state);
@@ -893,10 +896,14 @@ loomc_status_t loomc_cmd_program_product_build_module(
         materialization_environment =
             loomc_link_materialization_state_environment(
                 &materialization_state);
-    status = loomc_cmd_program_product_build_indexed(
-        context, workspace, module_index, root_symbol_ordinals,
-        root_symbol_count, &materialization_environment, options->request_sink,
-        options->artifact_flags, &scratch_arena, result, allocator, &product);
+    if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
+      status = loomc_cmd_program_product_build_indexed(
+          context, workspace, module_index, root_symbol_ordinals,
+          root_symbol_count, &materialization_environment,
+          options->request_sink, options->artifact_flags, &scratch_arena,
+          result, allocator, &product);
+    }
+    loomc_link_materialization_state_deinitialize(&materialization_state);
   }
   if (loomc_status_is_ok(status)) {
     *out_product = product;
@@ -947,7 +954,7 @@ loomc_status_t loomc_cmd_program_product_build_request(
 
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     loomc_link_materialization_state_t materialization_state = {0};
-    loomc_link_materialization_state_initialize_overlay(
+    status = loomc_link_materialization_state_initialize_overlay(
         context, workspace, options->library_index,
         request_overlay.request_provider_ordinal, loomc_request_source(request),
         &options->config, target_specialization, result, &scratch_arena,
@@ -960,11 +967,15 @@ loomc_status_t loomc_cmd_program_product_build_request(
         materialization_environment =
             loomc_link_materialization_state_environment(
                 &materialization_state);
-    status = loomc_cmd_program_product_build_indexed(
-        context, workspace, request_overlay.module_index,
-        request_overlay.root_symbol_ordinals, request_overlay.root_symbol_count,
-        &materialization_environment, options->request_sink,
-        options->artifact_flags, &scratch_arena, result, allocator, &product);
+    if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
+      status = loomc_cmd_program_product_build_indexed(
+          context, workspace, request_overlay.module_index,
+          request_overlay.root_symbol_ordinals,
+          request_overlay.root_symbol_count, &materialization_environment,
+          options->request_sink, options->artifact_flags, &scratch_arena,
+          result, allocator, &product);
+    }
+    loomc_link_materialization_state_deinitialize(&materialization_state);
   }
   if (loomc_status_is_ok(status)) {
     *out_product = product;

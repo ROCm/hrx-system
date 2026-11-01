@@ -10,6 +10,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/config/application.h"
+#include "loom/config/text_binding.h"
 #include "loom/error/source.h"
 #include "loom/ir/module.h"
 #include "loomc/config.h"
@@ -86,13 +87,16 @@ typedef struct loomc_config_apply_module_options_t {
   iree_arena_block_pool_t* block_pool;
 } loomc_config_apply_module_options_t;
 
-// Text and JSON config application options.
+// Application of normalized invocation configuration to one module.
 typedef struct loomc_config_apply_text_to_module_options_t {
   // Compiler context supplying target-aware diagnostic spelling.
   const loomc_context_t* context;
 
-  // Public text and JSON config options to materialize.
-  const loomc_config_options_t* config;
+  // Invocation-owned normalized bindings, or NULL for policy-only application.
+  const loom_config_text_binding_set_t* bindings;
+
+  // Final config validation and resolution policy.
+  loomc_config_policy_flags_t policy_flags;
 
   // Module receiving config materialization.
   loom_module_t* module;
@@ -106,14 +110,8 @@ typedef struct loomc_config_apply_text_to_module_options_t {
   // Result receiving config diagnostics.
   loomc_result_t* result;
 
-  // Diagnostic code used when config-domain statuses become result diagnostics.
-  loomc_string_view_t diagnostic_code;
-
   // Block pool for transient config materialization storage.
   iree_arena_block_pool_t* block_pool;
-
-  // Host allocator used for transient config set storage.
-  loomc_allocator_t allocator;
 } loomc_config_apply_text_to_module_options_t;
 
 // Validates config policy flags shared by all input representations.
@@ -129,7 +127,15 @@ LOOMC_API_PRIVATE loomc_status_t loomc_config_apply_module(
 LOOMC_API_PRIVATE loomc_status_t
 loomc_config_validate_text_options(const loomc_config_options_t* options);
 
-// Applies text and JSON config to a module and records config diagnostics.
+// Normalizes one validated invocation's JSON and explicit text bindings.
+// The initialized set owns storage from |allocator| even on failure. Syntax
+// errors become CONFIG/INVALID result diagnostics; values remain untyped until
+// matched with a materialized configuration symbol.
+LOOMC_API_PRIVATE loomc_status_t loomc_config_prepare_text_bindings(
+    const loomc_config_options_t* options, iree_allocator_t allocator,
+    loomc_result_t* result, loom_config_text_binding_set_t* out_bindings);
+
+// Applies normalized bindings to a module and records config diagnostics.
 LOOMC_API_PRIVATE loomc_status_t loomc_config_apply_text_to_module(
     const loomc_config_apply_text_to_module_options_t* options);
 

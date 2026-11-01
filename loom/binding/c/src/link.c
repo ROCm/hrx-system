@@ -749,17 +749,20 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
   loomc_link_materialization_state_t materialization_state = {0};
   loom_link_index_materialization_t index_materialization = {0};
   loomc_module_t* module = NULL;
-  loomc_link_materialization_state_initialize(
+  loomc_status_t status = loomc_link_materialization_state_initialize(
       linker->context, workspace, options->link_index, &options->config,
       target_specialization, result, &arena, linker->allocator,
       &materialization_state);
   materialization_state.specialization.deployment_profile =
       options->target_profile;
-  loomc_status_t status = loomc_link_module_overlay_initialize(
-      linker, workspace, options, &overlay);
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
+    status = loomc_link_module_overlay_initialize(linker, workspace, options,
+                                                  &overlay);
+  }
 
   iree_string_view_t* root_symbols = NULL;
-  if (loomc_status_is_ok(status) && options->root_symbol_count != 0) {
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
+      options->root_symbol_count != 0) {
     status = loomc_status_from_iree(iree_arena_allocate_array(
         &arena, options->root_symbol_count, sizeof(*root_symbols),
         (void**)&root_symbols));
@@ -840,6 +843,7 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
   }
 
   loom_link_index_materialization_deinitialize(&index_materialization);
+  loomc_link_materialization_state_deinitialize(&materialization_state);
   loomc_link_module_overlay_deinitialize(&overlay);
   loomc_module_release(module);
   iree_arena_deinitialize(&arena);
@@ -928,16 +932,18 @@ loomc_status_t loomc_link_request(loomc_linker_t* linker,
               .values = request_overlay.root_symbol_ordinals,
           },
   };
-  loomc_link_materialization_state_initialize_overlay(
-      linker->context, workspace, library_index,
-      request_overlay.request_provider_ordinal, input_source, config,
-      target_specialization, result, &scratch_arena, allocator,
-      &materialization_state);
-  const loom_link_plan_materialization_environment_t environment =
-      loomc_link_materialization_state_environment(&materialization_state);
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
+    status = loomc_link_materialization_state_initialize_overlay(
+        linker->context, workspace, library_index,
+        request_overlay.request_provider_ordinal, input_source, config,
+        target_specialization, result, &scratch_arena, allocator,
+        &materialization_state);
+  }
   const loomc_host_size_t before_diagnostics =
       loomc_result_diagnostic_count(result);
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
+    const loom_link_plan_materialization_environment_t environment =
+        loomc_link_materialization_state_environment(&materialization_state);
     const iree_status_t operation_status = loom_link_index_materialize(
         request_overlay.module_index, &plan_options, &environment,
         loomc_link_request_module_name(linker, options), &materialization);
@@ -992,6 +998,7 @@ loomc_status_t loomc_link_request(loomc_linker_t* linker,
   loomc_request_release(output_request);
   loomc_source_release(output_source);
   loom_link_index_materialization_deinitialize(&materialization);
+  loomc_link_materialization_state_deinitialize(&materialization_state);
   loomc_request_index_overlay_deinitialize(&request_overlay);
   iree_arena_deinitialize(&scratch_arena);
   loomc_result_release(result);

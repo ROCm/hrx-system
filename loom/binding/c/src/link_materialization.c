@@ -301,13 +301,12 @@ static iree_status_t loomc_link_materialization_prepare_module(
       (loomc_link_materialization_state_t*)user_data;
   const loomc_config_apply_text_to_module_options_t apply_options = {
       .context = state->composition.context,
-      .config = state->specialization.config,
+      .bindings = &state->specialization.config_bindings,
+      .policy_flags = state->specialization.config_policy_flags,
       .module = *inout_module,
       .source_resolver = (loom_source_resolver_t){0},
       .result = state->diagnostics.result,
-      .diagnostic_code = loomc_make_cstring_view("CONFIG/INVALID"),
       .block_pool = block_pool,
-      .allocator = loomc_allocator_from_iree(allocator),
   };
   loomc_status_t status = loomc_config_apply_text_to_module(&apply_options);
   if (!loomc_status_is_ok(status)) {
@@ -442,7 +441,7 @@ iree_status_t loomc_link_materialization_validate_command_kernel_entries(
   return iree_ok_status();
 }
 
-void loomc_link_materialization_state_initialize(
+loomc_status_t loomc_link_materialization_state_initialize(
     loomc_context_t* context, loomc_workspace_t* workspace,
     const loomc_link_index_t* link_index, const loomc_config_options_t* config,
     const loomc_target_specialization_options_t* target_specialization,
@@ -465,7 +464,7 @@ void loomc_link_materialization_state_initialize(
           },
       .specialization =
           {
-              .config = config,
+              .config_policy_flags = config ? config->flags : 0,
               .target = target_specialization,
           },
       .diagnostics =
@@ -475,9 +474,12 @@ void loomc_link_materialization_state_initialize(
       .arena = arena,
       .allocator = allocator,
   };
+  return loomc_config_prepare_text_bindings(
+      config, iree_allocator_from_loomc(allocator), result,
+      &out_state->specialization.config_bindings);
 }
 
-void loomc_link_materialization_state_initialize_overlay(
+loomc_status_t loomc_link_materialization_state_initialize_overlay(
     loomc_context_t* context, loomc_workspace_t* workspace,
     const loomc_link_index_t* library_index,
     iree_host_size_t appended_provider_ordinal,
@@ -486,12 +488,19 @@ void loomc_link_materialization_state_initialize_overlay(
     loomc_result_t* result, iree_arena_allocator_t* arena,
     loomc_allocator_t allocator,
     loomc_link_materialization_state_t* out_state) {
-  loomc_link_materialization_state_initialize(
+  loomc_status_t status = loomc_link_materialization_state_initialize(
       context, workspace, library_index, config, target_specialization, result,
       arena, allocator, out_state);
   out_state->composition.sources.appended.source = appended_source;
   out_state->composition.sources.appended.provider_ordinal =
       appended_provider_ordinal;
+  return status;
+}
+
+void loomc_link_materialization_state_deinitialize(
+    loomc_link_materialization_state_t* state) {
+  loom_config_text_binding_set_deinitialize(
+      &state->specialization.config_bindings);
 }
 
 loom_link_plan_materialization_environment_t
