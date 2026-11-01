@@ -1781,6 +1781,23 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "symbolic_value_test",
+    srcs = [
+        "symbolic_value.h",
+        "symbolic_value_test.cc",
+    ],
+    deps = [
+        ":symbolic_expr",
+        ":symbolic_expr_test_fixture",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scf",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "symbolic_quotient_test",
     srcs = ["symbolic_quotient_test.cc"],
     deps = [
