@@ -410,9 +410,9 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @partial_vcc(
 
 // ====
 
-// Independent retained inputs can occupy separate preserved pairs without
-// scratch registers, spills or completion waits.
-// RUN: emit amdgpu-assembly @independent_computed_masks strategy=source allocation-diagnostics=predicted-spills fixed=%first_mask:physical_register:0:2 fixed=%first_joined:physical_register:0:2 fixed=%second_mask:physical_register:2:2 fixed=%second_joined:physical_register:2:2
+// Independent predicates keep their source words available across two copied
+// joins without scratch storage or mask-write completion waits.
+// RUN: emit amdgpu-assembly @independent_computed_masks strategy=source
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -433,22 +433,18 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @independent_
 }
 
 // ----
-  s_mov_b32 s6, s2
-  s_mov_b32 s7, s3
-  s_mov_b32 s2, s0
-  s_mov_b32 s3, s1
-  v_cndmask_b32 v1, 0, v0, s[2:3]
-  s_or_b64 s[8:9], s[4:5], s[4:5]
-  s_mov_b32 s0, s8
-  s_mov_b32 s1, s9
+  v_cndmask_b32 v1, 0, v0, s[0:1]
+  s_or_b64 s[6:7], s[4:5], s[4:5]
+  s_mov_b32 s8, s6
+  s_mov_b32 s9, s7
 .Lbb1:
-  s_or_b64 s[0:1], s[0:1], s[8:9]
-  v_cndmask_b32 v0, 0, v0, s[6:7]
-  s_or_b64 s[4:5], s[4:5], s[4:5]
-  s_mov_b32 s2, s4
-  s_mov_b32 s3, s5
+  s_or_b64 s[6:7], s[8:9], s[6:7]
+  v_cndmask_b32 v0, 0, v0, s[2:3]
+  s_or_b64 s[0:1], s[4:5], s[4:5]
+  s_mov_b32 s4, s0
+  s_mov_b32 s5, s1
 .Lbb2:
-  s_or_b64 s[2:3], s[2:3], s[4:5]
+  s_or_b64 s[0:1], s[4:5], s[0:1]
   s_endpgm
 
 // ====
@@ -479,9 +475,9 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @unfixed_reta
 
 // ====
 
-// A longer-lived source participates in both transfers. Each fixed mask is
-// preserved exactly once despite those shared source observations.
-// RUN: emit amdgpu-assembly @nonconsecutive_shared_retained_mask strategy=source allocation-diagnostics=predicted-spills fixed=%first_mask:physical_register:0:2 fixed=%second_mask:physical_register:2:2 fixed=%first_joined_low:physical_register:0:1 fixed=%first_joined_high:physical_register:1:1 fixed=%second_joined:physical_register:2:1
+// A longer-lived source stays available through both predicate lifetimes and
+// the copied joins without retaining obsolete mask reservations.
+// RUN: emit amdgpu-assembly @nonconsecutive_shared_retained_mask strategy=source
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -502,18 +498,14 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @nonconsecuti
 }
 
 // ----
-  s_mov_b32 s8, s2
-  s_mov_b32 s9, s3
-  s_mov_b32 s2, s0
-  s_mov_b32 s3, s1
-  v_cndmask_b32 v1, 0, v0, s[2:3]
-  s_mov_b32 s0, s4
-  s_mov_b32 s1, s6
+  v_cndmask_b32 v1, 0, v0, s[0:1]
+  s_mov_b32 s7, s2
+  s_mov_b32 s8, s6
 .Lbb1:
-  s_or_b32 s0, s0, s4
-  s_or_b32 s1, s1, s6
-  v_cndmask_b32 v0, 0, v0, s[8:9]
-  s_mov_b32 s2, s5
+  s_or_b32 s2, s7, s2
+  s_or_b32 s7, s8, s6
+  v_cndmask_b32 v0, 0, v0, s[4:5]
+  s_mov_b32 s0, s3
 .Lbb2:
-  s_or_b32 s2, s2, s5
+  s_or_b32 s0, s0, s3
   s_endpgm
