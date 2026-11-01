@@ -378,6 +378,16 @@ bool loom_condition_integer_relation_implies(
     const loom_condition_integer_relation_t* known,
     const loom_condition_integer_relation_t* queried, bool* out_result);
 
+// Returns the possible integer order outcomes from the conjunction of
+// edge-local relations over |left| and |right|. Retained SSA identities and
+// exact scalar values participate in operand equivalence. No applicable
+// relation leaves every outcome possible; contradictory relations return zero.
+loom_integer_order_outcome_bits_t loom_condition_fact_set_query_integer_order(
+    const loom_condition_fact_set_t* facts,
+    const loom_value_fact_table_t* fact_table,
+    loom_condition_integer_operand_t left,
+    loom_condition_integer_operand_t right);
+
 // Attempts to evaluate |queried| from the conjunction of edge-local relations
 // in |facts| over the same operands. Retained SSA identities and exact scalar
 // values in |fact_table| participate in operand equivalence, so aliases retain

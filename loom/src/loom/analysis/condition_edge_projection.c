@@ -231,16 +231,25 @@ bool loom_condition_edge_projection_apply_to_value_facts(
       inout_facts);
 }
 
+loom_integer_order_outcome_bits_t
+loom_condition_edge_projection_query_integer_order(
+    const loom_condition_edge_projection_t* projection,
+    const loom_value_fact_table_t* fact_table,
+    loom_condition_integer_operand_t left,
+    loom_condition_integer_operand_t right) {
+  return loom_condition_fact_set_query_integer_order(
+      &projection->source_derivation.integer_facts, fact_table,
+      loom_condition_edge_projection_source_operand(projection, left),
+      loom_condition_edge_projection_source_operand(projection, right));
+}
+
 bool loom_condition_edge_projection_proves_integer_relation(
     const loom_condition_edge_projection_t* projection,
     const loom_value_fact_table_t* fact_table,
     const loom_condition_integer_relation_t* queried, bool* out_result) {
-  loom_condition_integer_relation_t source_query = *queried;
-  source_query.left = loom_condition_edge_projection_source_operand(
-      projection, source_query.left);
-  source_query.right = loom_condition_edge_projection_source_operand(
-      projection, source_query.right);
-  return loom_condition_fact_set_proves_integer_relation(
-      &projection->source_derivation.integer_facts, fact_table, &source_query,
-      out_result);
+  const loom_integer_order_outcome_bits_t outcomes =
+      loom_condition_edge_projection_query_integer_order(
+          projection, fact_table, queried->left, queried->right);
+  return loom_symbolic_integer_relation_resolve(outcomes, queried->relation,
+                                                out_result);
 }
