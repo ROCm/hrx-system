@@ -237,6 +237,8 @@ static iree_status_t iree_io_validate_parameter_range(
 // bytes as a proxy for outstanding work. An uncapped batch never introduces
 // dependencies between nonempty spans; load allocation and its payload remain
 // ordered. Zero-byte operations can share a timeline.
+// A gather/scatter retains its final transfer until enumeration completes; if
+// it is the only transfer, it signals the caller directly without a timeline.
 //
 // File I/O and transfer operations such as splats share the same timelines and
 // are submitted directly to the caller-selected queue.
@@ -385,37 +387,60 @@ static iree_status_t iree_io_parameter_index_provider_resolve_entry(
   return status;
 }
 
-typedef struct iree_io_parameter_file_transfer_t {
-  // Retained file backing the pending transfer.
-  iree_hal_file_t* file;
-  // Byte offset within |file|.
-  uint64_t file_offset;
+typedef enum iree_io_parameter_transfer_type_e {
+  IREE_IO_PARAMETER_TRANSFER_SPLAT = 0,
+  IREE_IO_PARAMETER_TRANSFER_READ,
+  IREE_IO_PARAMETER_TRANSFER_WRITE,
+} iree_io_parameter_transfer_type_t;
+
+typedef struct iree_io_parameter_transfer_t {
+  // Operation selecting the payload below.
+  iree_io_parameter_transfer_type_t type;
   // Buffer backing the pending transfer.
   iree_hal_buffer_t* buffer;
   // Byte offset within |buffer|.
   iree_device_size_t buffer_offset;
-  // Byte length of the pending transfer.
+  // Byte length of the pending transfer; zero means no pending operation.
   iree_device_size_t length;
-} iree_io_parameter_file_transfer_t;
+  union {
+    // File payload shared by reads and writes.
+    struct {
+      // Retained file backing the pending transfer.
+      iree_hal_file_t* handle;
+      // Byte offset within |handle|.
+      uint64_t offset;
+    } file;
+    // Splat payload borrowed from the provider's retained parameter index.
+    struct {
+      // Pattern bytes captured by the queue before submission returns.
+      const void* pattern;
+      // Number of bytes in |pattern|.
+      iree_host_size_t pattern_length;
+    } splat;
+  };
+} iree_io_parameter_transfer_t;
 
-static void iree_io_parameter_file_transfer_deinitialize(
-    iree_io_parameter_file_transfer_t* transfer) {
-  iree_hal_file_release(transfer->file);
+static void iree_io_parameter_transfer_deinitialize(
+    iree_io_parameter_transfer_t* transfer) {
+  if (transfer->type != IREE_IO_PARAMETER_TRANSFER_SPLAT) {
+    iree_hal_file_release(transfer->file.handle);
+  }
   memset(transfer, 0, sizeof(*transfer));
 }
 
-static bool iree_io_parameter_file_transfer_try_extend(
-    iree_io_parameter_file_transfer_t* transfer, iree_hal_file_t* file,
+static bool iree_io_parameter_transfer_try_extend_file(
+    iree_io_parameter_transfer_t* transfer, iree_hal_file_t* file,
     uint64_t file_offset, iree_hal_buffer_t* buffer,
     iree_device_size_t buffer_offset, iree_device_size_t length) {
-  if (!transfer->file || transfer->file != file || transfer->buffer != buffer) {
+  if (transfer->type == IREE_IO_PARAMETER_TRANSFER_SPLAT ||
+      transfer->file.handle != file || transfer->buffer != buffer) {
     return false;
   }
 
-  if (transfer->length > UINT64_MAX - transfer->file_offset) {
+  if (transfer->length > UINT64_MAX - transfer->file.offset) {
     return false;
   }
-  const uint64_t file_end_offset = transfer->file_offset + transfer->length;
+  const uint64_t file_end_offset = transfer->file.offset + transfer->length;
   iree_device_size_t buffer_end_offset = 0;
   if (!iree_device_size_checked_add(transfer->buffer_offset, transfer->length,
                                     &buffer_end_offset)) {
@@ -434,15 +459,18 @@ static bool iree_io_parameter_file_transfer_try_extend(
   return true;
 }
 
-static void iree_io_parameter_file_transfer_assign(
-    iree_io_parameter_file_transfer_t* transfer, iree_hal_file_t* file,
+static void iree_io_parameter_transfer_assign_file(
+    iree_io_parameter_transfer_t* transfer,
+    iree_io_parameter_transfer_type_t type, iree_hal_file_t* file,
     uint64_t file_offset, iree_hal_buffer_t* buffer,
     iree_device_size_t buffer_offset, iree_device_size_t length) {
-  transfer->file = file;
-  transfer->file_offset = file_offset;
-  transfer->buffer = buffer;
-  transfer->buffer_offset = buffer_offset;
-  transfer->length = length;
+  *transfer = (iree_io_parameter_transfer_t){
+      .type = type,
+      .buffer = buffer,
+      .buffer_offset = buffer_offset,
+      .length = length,
+      .file = {.handle = file, .offset = file_offset},
+  };
 }
 
 typedef struct {
@@ -482,13 +510,8 @@ static iree_status_t iree_io_parameter_op_batch_advance_timeline(
   }
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)timeline_index);
 
-  // Acquire the timeline semaphore used for this operation.
-  // We create the semaphores on-demand so that in cases where we don't perform
-  // any operations (loads that perform synchronous imports) or only a small
-  // amount of work we don't create so much garbage. The intent is that HAL
-  // devices pool
-  // semaphores but not all do - if we made that an expected requirement we
-  // could simplify this.
+  // Each active lane owns an independent failure and dependency domain.
+  // Empty batches, synchronous imports, and direct single transfers need none.
   iree_hal_semaphore_t* timeline_semaphore =
       batch->timeline_semaphores[timeline_index];
   const bool is_first_timeline_use = timeline_semaphore == NULL;
@@ -574,120 +597,93 @@ static iree_status_t iree_io_parameter_op_batch_enqueue_alloca(
   return iree_ok_status();
 }
 
-// Enqueues a splat operation in the batch into the |buffer| range.
-static iree_status_t iree_io_parameter_op_batch_enqueue_splat(
-    iree_io_parameter_op_batch_t* batch, iree_hal_buffer_t* buffer,
-    iree_device_size_t buffer_offset, iree_device_size_t length,
-    const void* pattern, iree_host_size_t pattern_length) {
-  IREE_ASSERT_ARGUMENT(batch);
-  IREE_ASSERT_ARGUMENT(buffer);
-  IREE_ASSERT_ARGUMENT(pattern);
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_io_parameter_op_step_t step;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_io_parameter_op_batch_advance_timeline(batch, length, &step));
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_queue_fill(batch->queue, step.wait_semaphore_list,
-                              step.signal_semaphore_list, buffer, buffer_offset,
-                              length, pattern, pattern_length,
-                              /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE));
-
-  IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+// Submits one resolved transfer with the caller-selected dependency endpoints.
+// The queue captures the payload before returning; ownership stays with caller.
+static iree_status_t iree_io_parameter_transfer_submit(
+    iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals,
+    const iree_io_parameter_transfer_t* transfer) {
+  switch (transfer->type) {
+    case IREE_IO_PARAMETER_TRANSFER_SPLAT:
+      return iree_hal_queue_fill(queue, waits, signals, transfer->buffer,
+                                 transfer->buffer_offset, transfer->length,
+                                 transfer->splat.pattern,
+                                 transfer->splat.pattern_length,
+                                 /*barriers=*/NULL, IREE_HAL_FILL_FLAG_NONE);
+    case IREE_IO_PARAMETER_TRANSFER_READ:
+      return iree_hal_queue_read(queue, waits, signals, transfer->file.handle,
+                                 transfer->file.offset, transfer->buffer,
+                                 transfer->buffer_offset, transfer->length,
+                                 /*barriers=*/NULL, IREE_HAL_READ_FLAG_NONE);
+    case IREE_IO_PARAMETER_TRANSFER_WRITE:
+      return iree_hal_queue_write(
+          queue, waits, signals, transfer->buffer, transfer->buffer_offset,
+          transfer->file.handle, transfer->file.offset, transfer->length,
+          /*barriers=*/NULL, IREE_HAL_WRITE_FLAG_NONE);
+    default:
+      IREE_CHECK_UNREACHABLE("unknown parameter transfer type");
+  }
 }
 
-// Enqueues a file read operation in the batch.
-static iree_status_t iree_io_parameter_op_batch_enqueue_file_read(
-    iree_io_parameter_op_batch_t* batch, iree_hal_file_t* source_file,
-    uint64_t source_file_offset, iree_hal_buffer_t* target_buffer,
-    iree_device_size_t target_buffer_offset, iree_device_size_t length,
-    iree_hal_read_flags_t flags) {
-  IREE_ASSERT_ARGUMENT(batch);
-  IREE_ASSERT_ARGUMENT(source_file);
-  IREE_ASSERT_ARGUMENT(target_buffer);
+static iree_status_t iree_io_parameter_op_batch_enqueue_transfer(
+    iree_io_parameter_op_batch_t* batch,
+    const iree_io_parameter_transfer_t* transfer) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_io_parameter_op_step_t step;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_io_parameter_op_batch_advance_timeline(batch, length, &step));
-
-  iree_status_t status = iree_hal_queue_read(
-      batch->queue, step.wait_semaphore_list, step.signal_semaphore_list,
-      source_file, source_file_offset, target_buffer, target_buffer_offset,
-      length, /*barriers=*/NULL, flags);
+      z0, iree_io_parameter_op_batch_advance_timeline(batch, transfer->length,
+                                                      &step));
+  iree_status_t status =
+      iree_io_parameter_transfer_submit(batch->queue, step.wait_semaphore_list,
+                                        step.signal_semaphore_list, transfer);
 
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
-static iree_status_t iree_io_parameter_op_batch_flush_file_read(
+static iree_status_t iree_io_parameter_op_batch_flush_transfer(
     iree_io_parameter_op_batch_t* batch,
-    iree_io_parameter_file_transfer_t* transfer) {
-  if (!transfer->file) {
+    iree_io_parameter_transfer_t* transfer) {
+  if (!transfer->length) {
     return iree_ok_status();
   }
-  iree_status_t status = iree_io_parameter_op_batch_enqueue_file_read(
-      batch, transfer->file, transfer->file_offset, transfer->buffer,
-      transfer->buffer_offset, transfer->length, 0);
-  iree_io_parameter_file_transfer_deinitialize(transfer);
-  return status;
-}
-
-// Enqueues a file write operation in the batch.
-static iree_status_t iree_io_parameter_op_batch_enqueue_file_write(
-    iree_io_parameter_op_batch_t* batch, iree_hal_buffer_t* source_buffer,
-    iree_device_size_t source_buffer_offset, iree_hal_file_t* target_file,
-    uint64_t target_file_offset, iree_device_size_t length,
-    iree_hal_write_flags_t flags) {
-  IREE_ASSERT_ARGUMENT(batch);
-  IREE_ASSERT_ARGUMENT(source_buffer);
-  IREE_ASSERT_ARGUMENT(target_file);
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_io_parameter_op_step_t step;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_io_parameter_op_batch_advance_timeline(batch, length, &step));
-
-  iree_status_t status = iree_hal_queue_write(
-      batch->queue, step.wait_semaphore_list, step.signal_semaphore_list,
-      source_buffer, source_buffer_offset, target_file, target_file_offset,
-      length, /*barriers=*/NULL, flags);
-
-  IREE_TRACE_ZONE_END(z0);
-  return status;
-}
-
-static iree_status_t iree_io_parameter_op_batch_flush_file_write(
-    iree_io_parameter_op_batch_t* batch,
-    iree_io_parameter_file_transfer_t* transfer) {
-  if (!transfer->file) {
-    return iree_ok_status();
-  }
-  iree_status_t status = iree_io_parameter_op_batch_enqueue_file_write(
-      batch, transfer->buffer, transfer->buffer_offset, transfer->file,
-      transfer->file_offset, transfer->length, 0);
-  iree_io_parameter_file_transfer_deinitialize(transfer);
+  iree_status_t status =
+      iree_io_parameter_op_batch_enqueue_transfer(batch, transfer);
+  iree_io_parameter_transfer_deinitialize(transfer);
   return status;
 }
 
 // Flushes any outstanding work in the |batch| and signals the user timeline.
 // Must only be called once at the end of the batch.
 static iree_status_t iree_io_parameter_op_batch_flush(
-    iree_io_parameter_op_batch_t* batch) {
+    iree_io_parameter_op_batch_t* batch,
+    iree_io_parameter_transfer_t* pending_transfer) {
   IREE_ASSERT_ARGUMENT(batch);
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_status_t status = iree_ok_status();
-  // Join all concurrent timelines and continue the user-provided timeline.
-  // If no queue operations were performed (all load imports, 0 entries, etc)
-  // this links the incoming waits directly to the outgoing signals.
-  if (batch->timeline_live_count == 0) {
+  if (batch->timeline_live_count && pending_transfer) {
+    status = iree_io_parameter_op_batch_flush_transfer(batch, pending_transfer);
+  }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
+
+  // A single transfer owns the group's complete readiness contract. Forward
+  // the caller's endpoints directly instead of creating a private join lane.
+  if (!batch->timeline_live_count && pending_transfer &&
+      pending_transfer->length) {
+    IREE_TRACE_ZONE_APPEND_TEXT(z0, "direct transfer completion");
+    status = iree_io_parameter_transfer_submit(
+        batch->queue, batch->wait_semaphore_list, batch->signal_semaphore_list,
+        pending_transfer);
+  } else if (batch->timeline_live_count == 0) {
+    // Empty batches and synchronous imports still preserve input dependencies.
     IREE_TRACE_ZONE_APPEND_TEXT(z0, "pass-through wait-signal");
     status = iree_hal_queue_transfer(
         batch->queue, batch->wait_semaphore_list, batch->signal_semaphore_list,
         /*operation_count=*/0, NULL, /*barriers=*/NULL);
   } else {
+    // Join all concurrent timelines and continue the user-provided timeline.
     IREE_TRACE_ZONE_APPEND_TEXT(z0, "timeline set wait chain");
     // Note that we allocate timelines on-demand up to timeline_live_count so
     // we can just pass the [0, timeline_live_count) range here.
@@ -703,7 +699,7 @@ static iree_status_t iree_io_parameter_op_batch_flush(
 
   // Report the total number of bytes transferred by the batch.
   IREE_TRACE({
-    uint64_t total_bytes = 0;
+    uint64_t total_bytes = pending_transfer ? pending_transfer->length : 0;
     for (iree_host_size_t i = 0; i < batch->concurrency; ++i) {
       total_bytes += batch->timeline_bytes_outstanding[i];
     }
@@ -721,7 +717,8 @@ static iree_status_t iree_io_parameter_op_batch_flush(
 // immediately failed. Returns the status provided to allow for propagating
 // failures.
 static iree_status_t iree_io_parameter_op_batch_end(
-    iree_io_parameter_op_batch_t* batch, iree_status_t status) {
+    iree_io_parameter_op_batch_t* batch,
+    iree_io_parameter_transfer_t* pending_transfer, iree_status_t status) {
   IREE_ASSERT_ARGUMENT(batch);
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_TEXT(
@@ -730,7 +727,7 @@ static iree_status_t iree_io_parameter_op_batch_end(
   // If the batch recording succeeded we flush now to finish any pending
   // operations and signal the semaphores.
   if (iree_status_is_ok(status)) {
-    status = iree_io_parameter_op_batch_flush(batch);
+    status = iree_io_parameter_op_batch_flush(batch, pending_transfer);
   }
 
   // If the batch recording failed (or our flush did) we need to propagate that
@@ -742,6 +739,9 @@ static iree_status_t iree_io_parameter_op_batch_end(
 
   // Resources are safe to release even if there are pending device operations
   // as the device guarantees the resources remain live.
+  if (pending_transfer) {
+    iree_io_parameter_transfer_deinitialize(pending_transfer);
+  }
   for (iree_host_size_t i = 0; i < batch->concurrency; ++i) {
     iree_hal_semaphore_release(batch->timeline_semaphores[i]);
   }
@@ -892,18 +892,31 @@ static iree_status_t iree_io_parameter_index_provider_load(
         switch (source_entry->type) {
           case IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_SPLAT: {
             IREE_ASSERT(!source_file);
-            status = iree_io_parameter_op_batch_enqueue_splat(
-                &batch, target_buffer, span.buffer_offset, span.length,
-                source_entry->storage.splat.pattern,
-                source_entry->storage.splat.pattern_length);
+            const iree_io_parameter_transfer_t transfer = {
+                .type = IREE_IO_PARAMETER_TRANSFER_SPLAT,
+                .buffer = target_buffer,
+                .buffer_offset = span.buffer_offset,
+                .length = span.length,
+                .splat =
+                    {
+                        .pattern = source_entry->storage.splat.pattern,
+                        .pattern_length =
+                            source_entry->storage.splat.pattern_length,
+                    },
+            };
+            status =
+                iree_io_parameter_op_batch_enqueue_transfer(&batch, &transfer);
             break;
           }
           case IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_FILE: {
             IREE_ASSERT(source_file);
-            status = iree_io_parameter_op_batch_enqueue_file_read(
-                &batch, source_file,
+            iree_io_parameter_transfer_t transfer;
+            iree_io_parameter_transfer_assign_file(
+                &transfer, IREE_IO_PARAMETER_TRANSFER_READ, source_file,
                 source_entry->storage.file.offset + span.parameter_offset,
-                target_buffer, span.buffer_offset, span.length, 0);
+                target_buffer, span.buffer_offset, span.length);
+            status =
+                iree_io_parameter_op_batch_enqueue_transfer(&batch, &transfer);
             break;
           }
           default: {
@@ -932,7 +945,7 @@ static iree_status_t iree_io_parameter_index_provider_load(
   }
 
   // Flush any outstanding batch operations and end the batch.
-  status = iree_io_parameter_op_batch_end(&batch, status);
+  status = iree_io_parameter_op_batch_end(&batch, NULL, status);
 
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -957,7 +970,7 @@ static iree_status_t iree_io_parameter_index_provider_gather(
       count, &batch);
 
   // Process each entry by enqueuing the appropriate operation.
-  iree_io_parameter_file_transfer_t pending_file_read = {0};
+  iree_io_parameter_transfer_t pending_transfer = {0};
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
     IREE_TRACE_ZONE_BEGIN_NAMED(
         z_entry, "iree_io_parameter_index_provider_gather_entry");
@@ -982,13 +995,21 @@ static iree_status_t iree_io_parameter_index_provider_gather(
       switch (source_entry->type) {
         case IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_SPLAT: {
           IREE_ASSERT(!source_file);
-          status = iree_io_parameter_op_batch_flush_file_read(
-              &batch, &pending_file_read);
+          status = iree_io_parameter_op_batch_flush_transfer(&batch,
+                                                             &pending_transfer);
           if (iree_status_is_ok(status)) {
-            status = iree_io_parameter_op_batch_enqueue_splat(
-                &batch, target_buffer, span.buffer_offset, span.length,
-                source_entry->storage.splat.pattern,
-                source_entry->storage.splat.pattern_length);
+            pending_transfer = (iree_io_parameter_transfer_t){
+                .type = IREE_IO_PARAMETER_TRANSFER_SPLAT,
+                .buffer = target_buffer,
+                .buffer_offset = span.buffer_offset,
+                .length = span.length,
+                .splat =
+                    {
+                        .pattern = source_entry->storage.splat.pattern,
+                        .pattern_length =
+                            source_entry->storage.splat.pattern_length,
+                    },
+            };
           }
           break;
         }
@@ -996,18 +1017,19 @@ static iree_status_t iree_io_parameter_index_provider_gather(
           IREE_ASSERT(source_file);
           const uint64_t source_file_offset =
               source_entry->storage.file.offset + span.parameter_offset;
-          if (iree_io_parameter_file_transfer_try_extend(
-                  &pending_file_read, source_file, source_file_offset,
+          if (iree_io_parameter_transfer_try_extend_file(
+                  &pending_transfer, source_file, source_file_offset,
                   target_buffer, span.buffer_offset, span.length)) {
             iree_hal_file_release(source_file);
             source_file = NULL;
           } else {
-            status = iree_io_parameter_op_batch_flush_file_read(
-                &batch, &pending_file_read);
+            status = iree_io_parameter_op_batch_flush_transfer(
+                &batch, &pending_transfer);
             if (iree_status_is_ok(status)) {
-              iree_io_parameter_file_transfer_assign(
-                  &pending_file_read, source_file, source_file_offset,
-                  target_buffer, span.buffer_offset, span.length);
+              iree_io_parameter_transfer_assign_file(
+                  &pending_transfer, IREE_IO_PARAMETER_TRANSFER_READ,
+                  source_file, source_file_offset, target_buffer,
+                  span.buffer_offset, span.length);
               source_file = NULL;
             }
           }
@@ -1027,15 +1049,8 @@ static iree_status_t iree_io_parameter_index_provider_gather(
 
     IREE_TRACE_ZONE_END(z_entry);
   }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_io_parameter_op_batch_flush_file_read(&batch, &pending_file_read);
-  } else {
-    iree_io_parameter_file_transfer_deinitialize(&pending_file_read);
-  }
-
   // Flush any outstanding batch operations and end the batch.
-  status = iree_io_parameter_op_batch_end(&batch, status);
+  status = iree_io_parameter_op_batch_end(&batch, &pending_transfer, status);
 
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -1100,7 +1115,7 @@ static iree_status_t iree_io_parameter_index_provider_scatter(
       count, &batch);
 
   // Process each entry by enqueuing the appropriate operation.
-  iree_io_parameter_file_transfer_t pending_file_write = {0};
+  iree_io_parameter_transfer_t pending_transfer = {0};
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
     IREE_TRACE_ZONE_BEGIN_NAMED(
         z_entry, "iree_io_parameter_index_provider_scatter_entry");
@@ -1127,18 +1142,19 @@ static iree_status_t iree_io_parameter_index_provider_scatter(
           IREE_ASSERT(target_file);
           const uint64_t target_file_offset =
               target_entry->storage.file.offset + span.parameter_offset;
-          if (iree_io_parameter_file_transfer_try_extend(
-                  &pending_file_write, target_file, target_file_offset,
+          if (iree_io_parameter_transfer_try_extend_file(
+                  &pending_transfer, target_file, target_file_offset,
                   source_buffer, span.buffer_offset, span.length)) {
             iree_hal_file_release(target_file);
             target_file = NULL;
           } else {
-            status = iree_io_parameter_op_batch_flush_file_write(
-                &batch, &pending_file_write);
+            status = iree_io_parameter_op_batch_flush_transfer(
+                &batch, &pending_transfer);
             if (iree_status_is_ok(status)) {
-              iree_io_parameter_file_transfer_assign(
-                  &pending_file_write, target_file, target_file_offset,
-                  source_buffer, span.buffer_offset, span.length);
+              iree_io_parameter_transfer_assign_file(
+                  &pending_transfer, IREE_IO_PARAMETER_TRANSFER_WRITE,
+                  target_file, target_file_offset, source_buffer,
+                  span.buffer_offset, span.length);
               target_file = NULL;
             }
           }
@@ -1158,15 +1174,8 @@ static iree_status_t iree_io_parameter_index_provider_scatter(
 
     IREE_TRACE_ZONE_END(z_entry);
   }
-  if (iree_status_is_ok(status)) {
-    status = iree_io_parameter_op_batch_flush_file_write(&batch,
-                                                         &pending_file_write);
-  } else {
-    iree_io_parameter_file_transfer_deinitialize(&pending_file_write);
-  }
-
   // Flush any outstanding batch operations and end the batch.
-  status = iree_io_parameter_op_batch_end(&batch, status);
+  status = iree_io_parameter_op_batch_end(&batch, &pending_transfer, status);
 
   IREE_TRACE_ZONE_END(z0);
   return status;
