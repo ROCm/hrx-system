@@ -712,6 +712,20 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "stages_tests",
+    testonly = True,
+    srcs = ["stages_test.cc"],
+    deps = [
+        ":model",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/serve/testing:jit",
+        "//loom/src/loom/serve/testing:native_allocator",
+        "//runtime/src/iree/testing:gtest",
+    ],
+    alwayslink = True,
+)
+
 loom_cc_test(
     name = "storage_test",
     srcs = ["storage_test.cc"],

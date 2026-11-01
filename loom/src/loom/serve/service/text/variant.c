@@ -95,46 +95,23 @@ iree_status_t loom_serve_text_variant_bind(
   return iree_ok_status();
 }
 
-static iree_status_t loom_serve_text_variant_record(
-    loom_serve_text_variant_job_t* job) {
+static void loom_serve_text_variant_recorded(void* user_data,
+                                             iree_status_t status) {
+  loom_serve_text_variant_job_t* job = user_data;
   loom_serve_text_variant_t* variant = job->variant;
-  IREE_RETURN_IF_ERROR(loom_serve_text_stages_rebind(
-      job->preparation, job->shared_count, variant->stage_count, job->baseline,
-      variant->stages, variant->host_allocator));
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      variant->host_allocator, variant->stage_count, sizeof(*variant->bindings),
-      (void**)&variant->bindings));
-  const iree_hal_queue_family_t* family =
-      iree_hal_queue_family(loom_serve_device_dispatch_queue(job->device));
-  iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < variant->stage_count && iree_status_is_ok(status); ++i) {
-    loom_serve_text_stage_t* stage = &variant->stages[i];
-    status = loom_serve_jit_stage_record(stage->compiled, family,
-                                         job->command_mode, NULL,
-                                         stage->fixed_buffers, &stage->command);
-    if (iree_status_is_ok(status)) {
-      variant->bindings[i] = loom_serve_text_stage_binding(stage);
-      variant->workspace_bytes =
-          iree_max(variant->workspace_bytes,
-                   variant->bindings[i].transient.required_byte_length);
-    }
-  }
-  return status;
-}
-
-static void loom_serve_text_variant_finish(loom_serve_text_variant_job_t* job,
-                                           iree_status_t status) {
-  loom_serve_text_variant_t* variant = job->variant;
-  if (iree_status_is_ok(status)) {
-    status = loom_serve_text_variant_record(job);
+    variant->bindings[i] = loom_serve_text_stage_binding(&variant->stages[i]);
+    variant->workspace_bytes =
+        iree_max(variant->workspace_bytes,
+                 variant->bindings[i].transient.required_byte_length);
   }
   variant->ready = iree_status_is_ok(status);
   loom_serve_jit_release(job->jit);
   const loom_serve_variant_completion_fn_t completion = job->completion;
-  void* user_data = job->user_data;
+  void* completion_user_data = job->user_data;
   iree_allocator_free(variant->host_allocator, job);
-  completion(user_data, status, variant, &variant->compilation);
+  completion(completion_user_data, status, variant, &variant->compilation);
 }
 
 static void loom_serve_text_variant_compiled(void* user_data,
@@ -150,7 +127,29 @@ static void loom_serve_text_variant_compiled(void* user_data,
     stages->values[i] = NULL;
   }
   loom_serve_stage_set_free(stages);
-  loom_serve_text_variant_finish(job, status);
+  loom_serve_text_variant_t* variant = job->variant;
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_text_stages_rebind(
+        job->preparation, job->shared_count, variant->stage_count,
+        job->baseline, variant->stages, variant->host_allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(
+        variant->host_allocator, variant->stage_count,
+        sizeof(*variant->bindings), (void**)&variant->bindings);
+  }
+  if (iree_status_is_ok(status)) {
+    loom_serve_host_t* host = loom_serve_device_host(job->device);
+    status = loom_serve_text_stages_record_async(
+        loom_serve_host_preparation_sink(host),
+        loomc_task_pool_worker_count(loom_serve_host_task_pool(host)),
+        iree_hal_queue_family(loom_serve_device_dispatch_queue(job->device)),
+        job->command_mode, variant->stage_count, variant->stages,
+        loom_serve_text_variant_recorded, job, variant->host_allocator);
+  }
+  if (!iree_status_is_ok(status)) {
+    loom_serve_text_variant_recorded(job, status);
+  }
 }
 
 static void loom_serve_text_variant_execute(loomc_task_t* task,
@@ -170,7 +169,7 @@ static void loom_serve_text_variant_release(loomc_task_t* task) {
         job->variant->host_allocator);
   }
   if (!iree_status_is_ok(status)) {
-    loom_serve_text_variant_finish(job, status);
+    loom_serve_text_variant_recorded(job, status);
   }
 }
 

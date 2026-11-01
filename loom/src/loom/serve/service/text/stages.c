@@ -7,6 +7,7 @@
 #include "loom/serve/service/text/stages.h"
 
 #include "loom/serve/service/text/state.h"
+#include "loomc/iree.h"
 
 static iree_status_t loom_serve_text_check_parameters(
     const loom_cmd_program_t* baseline, const loom_cmd_program_t* candidate) {
@@ -239,6 +240,133 @@ iree_status_t loom_serve_text_stages_rebind(
       iree_hal_buffer_retain(stages[i].fixed_buffers[j]);
     }
   }
+  return iree_ok_status();
+}
+
+typedef struct loom_serve_text_record_job_t loom_serve_text_record_job_t;
+
+typedef struct loom_serve_text_record_task_t {
+  // Queue ownership ends before releasing the task's joined job reference.
+  loomc_task_t task;
+  // Borrowed job retained until this task's terminal release.
+  loom_serve_text_record_job_t* job;
+  // Private outcome, joined only after every task has retired.
+  iree_status_t status;
+} loom_serve_text_record_task_t;
+
+struct loom_serve_text_record_job_t {
+  // Submission hold plus one reference for each offered task.
+  iree_atomic_ref_count_t ref_count;
+  // Next disjoint output slot; failure advances it past all remaining work.
+  iree_atomic_int64_t next_index;
+  // Allocator owning this job and its bounded inline task array.
+  iree_allocator_t host_allocator;
+  // Borrowed queue family shared by every stage in the model.
+  const iree_hal_queue_family_t* queue_family;
+  // Command retention policy selected by the model owner.
+  iree_hal_command_buffer_mode_t mode;
+  // Number of command slots, independent of the number of tasks.
+  iree_host_size_t stage_count;
+  // Borrowed immutable inputs and disjoint owned command outputs.
+  loom_serve_text_stage_t* stages;
+  // Terminal consumer after all borrowed accesses have retired.
+  loom_serve_text_stages_completion_fn_t completion;
+  // Borrowed completion payload.
+  void* user_data;
+  // Number of outcome slots in tasks, including unsubmitted zeroed slots.
+  iree_host_size_t task_count;
+  // Storage bounded by worker concurrency, not command count.
+  loom_serve_text_record_task_t tasks[];
+};
+
+static void loom_serve_text_record_job_release(
+    loom_serve_text_record_job_t* job) {
+  if (!job) {
+    return;
+  }
+  if (iree_atomic_ref_count_dec(&job->ref_count) != 1) {
+    return;
+  }
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < job->task_count; ++i) {
+    status = iree_status_join(status, job->tasks[i].status);
+  }
+  const loom_serve_text_stages_completion_fn_t completion = job->completion;
+  void* user_data = job->user_data;
+  iree_allocator_free(job->host_allocator, job);
+  completion(user_data, status);
+}
+
+static void loom_serve_text_record_execute(loomc_task_t* base,
+                                           loomc_host_size_t worker_ordinal) {
+  loom_serve_text_record_task_t* task = (void*)base;
+  loom_serve_text_record_job_t* job = task->job;
+  while (iree_status_is_ok(task->status)) {
+    const iree_host_size_t index = (iree_host_size_t)iree_atomic_fetch_add(
+        &job->next_index, 1, iree_memory_order_relaxed);
+    if (index >= job->stage_count) {
+      break;
+    }
+    loom_serve_text_stage_t* stage = &job->stages[index];
+    task->status = loom_serve_jit_stage_record(
+        stage->compiled, job->queue_family, job->mode, NULL,
+        stage->fixed_buffers, &stage->command);
+  }
+  if (!iree_status_is_ok(task->status)) {
+    iree_atomic_store(&job->next_index, job->stage_count,
+                      iree_memory_order_relaxed);
+  }
+}
+
+static void loom_serve_text_record_release(loomc_task_t* base) {
+  loom_serve_text_record_task_t* task = (void*)base;
+  loom_serve_text_record_job_release(task->job);
+}
+
+static const loomc_task_vtable_t loom_serve_text_record_vtable = {
+    .execute = loom_serve_text_record_execute,
+    .destroy = loom_serve_text_record_release,
+};
+
+iree_status_t loom_serve_text_stages_record_async(
+    loomc_task_sink_t sink, iree_host_size_t concurrency,
+    const iree_hal_queue_family_t* queue_family,
+    iree_hal_command_buffer_mode_t mode, iree_host_size_t stage_count,
+    loom_serve_text_stage_t* stages,
+    loom_serve_text_stages_completion_fn_t completion, void* user_data,
+    iree_allocator_t host_allocator) {
+  const iree_host_size_t task_count = iree_min(stage_count, concurrency);
+  loom_serve_text_record_job_t* job = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_struct_array(
+      host_allocator, sizeof(*job), task_count, sizeof(*job->tasks),
+      (void**)&job));
+  iree_atomic_ref_count_init(&job->ref_count);
+  job->host_allocator = host_allocator;
+  job->queue_family = queue_family;
+  job->mode = mode;
+  job->stage_count = stage_count;
+  job->stages = stages;
+  job->completion = completion;
+  job->user_data = user_data;
+  job->task_count = task_count;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < task_count && iree_status_is_ok(status);
+       ++i) {
+    loom_serve_text_record_task_t* task = &job->tasks[i];
+    loomc_task_initialize(&loom_serve_text_record_vtable, &task->task);
+    task->job = job;
+    iree_atomic_ref_count_inc(&job->ref_count);
+    status = iree_status_from_loomc(loomc_task_sink_submit(sink, &task->task));
+    if (!iree_status_is_ok(status)) {
+      // Previously accepted tasks still own their references. Stop claims,
+      // retain this failure, and consume only the rejected task's ownership.
+      iree_atomic_store(&job->next_index, stage_count,
+                        iree_memory_order_relaxed);
+      task->status = status;
+      loomc_task_destroy(&task->task);
+    }
+  }
+  loom_serve_text_record_job_release(job);
   return iree_ok_status();
 }
 
