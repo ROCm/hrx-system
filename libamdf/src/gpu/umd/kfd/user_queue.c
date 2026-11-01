@@ -136,9 +136,6 @@ static amdf_status_t amdf_gpu_kfd_user_queue_buffer_create(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  if (create_info->host_access != AMDF_GPU_KFD_BUFFER_HOST_ACCESS_NONE) {
-    memset(result.host_pointer, 0, create_info->byte_length);
-  }
   *out_buffer = (amdf_gpu_kfd_user_queue_buffer_t){
       .native = native,
       .device_address = result.device_address,
@@ -432,7 +429,14 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
         queue, &queue->plan.retirement.flush_trigger_storage,
         &queue->retirement_flush_trigger);
   }
+  if (amdf_status_is_ok(status)) {
+    memset(queue->ring.host_pointer, 0, queue->plan.ring.storage.byte_length);
+    memset(queue->control.host_pointer, 0,
+           queue->plan.control.storage.byte_length);
+  }
   if (amdf_status_is_ok(status) && queue->context.host_pointer != NULL) {
+    // Fresh KFD GTT backing is already zeroed. Native save/restore and debug
+    // payloads need no host writes; only the per-XCC headers describe them.
     for (uint32_t i = 0; i < queue->plan.compute.context_count; ++i) {
       const size_t context_byte_offset =
           (size_t)i * queue->plan.compute.context_save_restore_byte_length;
@@ -440,9 +444,11 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
           (struct kfd_context_save_area_header*)((uint8_t*)queue->context
                                                      .host_pointer +
                                                  context_byte_offset);
-      header->debug_offset =
-          queue->plan.compute.debug_byte_offset - (uint32_t)context_byte_offset;
-      header->debug_size = queue->plan.compute.debug_byte_length;
+      *header = (struct kfd_context_save_area_header){
+          .debug_offset = queue->plan.compute.debug_byte_offset -
+                          (uint32_t)context_byte_offset,
+          .debug_size = queue->plan.compute.debug_byte_length,
+      };
       if (queue->plan.control.error_payload_byte_length != 0) {
         header->err_payload_addr =
             queue->control.device_address +
