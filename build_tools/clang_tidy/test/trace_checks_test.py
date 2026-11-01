@@ -36,12 +36,16 @@ class TraceChecksTest(clang_tidy_test.ClangTidyAssertions):
                 "missing_end_zone",
                 "branch_missing_end_inner_zone",
                 "branch_conditional_end_zone",
+                "switch_local_return_zone",
+                "do_local_return_zone",
                 "[iree-trace-zone-balance]",
             ],
         )
         self.assertContainsNone(
             output,
             [
+                "switch_local_balanced_zone",
+                "do_local_balanced_zone",
                 "iree_clang_tidy_trace_zone_balanced",
                 "iree_clang_tidy_trace_zone_nested_balanced",
                 "iree_clang_tidy_trace_zone_single_exit_cleanup",
@@ -55,6 +59,8 @@ class TraceChecksTest(clang_tidy_test.ClangTidyAssertions):
                 "iree_clang_tidy_trace_zone_dynamic_end",
                 "iree_clang_tidy_trace_zone_dynamic_return_helper",
                 "iree_clang_tidy_trace_zone_switch_return_balanced",
+                "iree_clang_tidy_trace_zone_switch_local_balanced",
+                "iree_clang_tidy_trace_zone_do_local_balanced",
                 "iree_clang_tidy_trace_zone_infinite_loop_return_balanced",
                 "iree_clang_tidy_trace_zone_return_and_end",
                 "iree_clang_tidy_trace_zone_hrx_return_and_end_if_error",

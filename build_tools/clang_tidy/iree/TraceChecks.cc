@@ -174,9 +174,14 @@ class TraceZoneAnalyzer {
 
  private:
   bool isTraceMacroContainer(const Stmt* Statement) const {
+    // Authored do loops contain independent trace macros; a macro-expanded do
+    // loop can itself be a return helper and must retain that helper's
+    // semantics.
     return isa<CompoundStmt>(Statement) || isa<IfStmt>(Statement) ||
            isa<ForStmt>(Statement) || isa<WhileStmt>(Statement) ||
-           isa<SwitchStmt>(Statement) || isa<LabelStmt>(Statement);
+           (isa<DoStmt>(Statement) && !Statement->getBeginLoc().isMacroID()) ||
+           isa<SwitchStmt>(Statement) || isa<SwitchCase>(Statement) ||
+           isa<LabelStmt>(Statement);
   }
 
   SourceLocation expansionLocation(SourceLocation Location) const {

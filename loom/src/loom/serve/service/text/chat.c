@@ -1297,16 +1297,25 @@ static iree_status_t loom_serve_text_chat_request_render(
   IREE_RETURN_IF_ERROR(iree_json_enumerate_array_typed(
       history->chat->tool_schemas, loom_serve_text_chat_tool_limit, NULL));
   const iree_string_view_t inputs[] = {body, history->chat->tool_schemas};
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_render(
+  IREE_TRACE_ZONE_BEGIN_NAMED(z_begin, "loom_serve_text_chat_begin");
+  iree_status_t status = loom_serve_text_chat_render(
       history->chat->policy, history->chat->policy->chat_begin,
       IREE_ARRAYSIZE(inputs), inputs, 0, NULL, &history->chat->prompt,
-      history->chat->host_allocator, &history->state));
-  IREE_RETURN_IF_ERROR(iree_json_enumerate_array_typed(
-      fields[1].value, loom_serve_text_chat_history_message, history));
-  IREE_RETURN_IF_ERROR(loom_serve_text_chat_render(
+      history->chat->host_allocator, &history->state);
+  IREE_TRACE_ZONE_END(z_begin);
+  IREE_RETURN_IF_ERROR(status);
+  IREE_TRACE_ZONE_BEGIN_NAMED(z_messages, "loom_serve_text_chat_messages");
+  status = iree_json_enumerate_array_typed(
+      fields[1].value, loom_serve_text_chat_history_message, history);
+  IREE_TRACE_ZONE_END(z_messages);
+  IREE_RETURN_IF_ERROR(status);
+  IREE_TRACE_ZONE_BEGIN_NAMED(z_end, "loom_serve_text_chat_end");
+  status = loom_serve_text_chat_render(
       history->chat->policy, history->chat->policy->chat_end, 0, NULL, 1,
       &history->state, &history->chat->prompt, history->chat->host_allocator,
-      &history->chat->output.initial_state));
+      &history->chat->output.initial_state);
+  IREE_TRACE_ZONE_END(z_end);
+  IREE_RETURN_IF_ERROR(status);
   history->chat->output.state = history->chat->output.initial_state;
   return iree_ok_status();
 }

@@ -376,10 +376,12 @@ iree_status_t iree_hal_amd_fabric_memory_allocate(
   };
   iree_hal_amd_fabric_memory_t memory = {0};
   amdf_memory_release_info_t release_info = {0};
+  IREE_TRACE_ZONE_BEGIN_NAMED(z_create, "amdf_memory_create");
   iree_status_t status = IREE_HAL_AMD_STATUS_FROM_AMDF(
       api->memory_create(options->scope, &create_info, &memory.handle,
                          &release_info),
       "memory_create");
+  IREE_TRACE_ZONE_END(z_create);
   if (!amdf_status_is_ok(release_info.status)) {
     iree_hal_amd_report_failure(event_sink, IREE_SV("amd"), release_info.status,
                                 "memory_create cleanup");
