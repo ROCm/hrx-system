@@ -1362,6 +1362,65 @@ func.def public @call_test_prune_result(%kept: index, %dead: index) {
 
 // ====
 
+// RUN: pass refine-boundaries{max-iterations=16}
+
+// Loop feedback consumes only condition relations closed over the carried
+// tuple. Feeding the caller-derived limit into a recurrence whose update runs
+// through a callee would otherwise tighten its boundary by one on every outer
+// refinement round. The complete relation remains available in the loop body.
+func.def noinline @increment_condition_counter(%value: i32) -> (i32) {
+  %step = scalar.constant 1 : i32
+  %next = scalar.addi %value, %step : i32
+  func.return %next : i32
+}
+
+func.def @bounded_condition_loop(%limit: i32) -> (i32) {
+  %begin = scalar.constant 0 : i32
+  %result = scf.while(%before = %begin : i32) -> (i32) {
+    %more = scalar.cmpi slt, %before, %limit : i32
+    scf.condition %more, %before : i1, i32
+  } do(%current: i32) {
+    %next = func.call @increment_condition_counter(%current) : (i32) -> (i32)
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+func.def public @condition_loop_entry(%control: i32) -> (i32) {
+  %mask = scalar.constant 15 : i32
+  %limit = scalar.andi %control, %mask : i32
+  %result = func.call @bounded_condition_loop(%limit) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+func.def noinline @increment_condition_counter(%value: i32) -> (i32) {
+  %step = scalar.constant 1 : i32
+  %next = scalar.addi %value, %step : i32
+  func.return %next : i32
+}
+
+func.def @bounded_condition_loop(%limit: i32) -> (i32) {
+  %begin = scalar.constant 0 : i32
+  %result = scf.while(%before = %begin : i32) -> (i32) {
+    %more = scalar.cmpi slt, %before, %limit : i32
+    scf.condition %more, %before : i1, i32
+  } do(%current: i32) {
+    %next = func.call pure @increment_condition_counter(%current) : (i32) -> (i32)
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+func.def public @condition_loop_entry(%control: i32) -> (i32) {
+  %mask = scalar.constant 15 : i32
+  %limit = scalar.andi %control, %mask : i32
+  %result = func.call pure @bounded_condition_loop(%limit) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
 // RUN: pass refine-boundaries{max-iterations=1}
 
 // ERROR@+1: LOWERING/043 {pass_name="refine-boundaries", max_iterations="1"}

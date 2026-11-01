@@ -733,6 +733,69 @@ static iree_status_t loom_value_fact_condition_scratch_get(
   return iree_ok_status();
 }
 
+static iree_status_t loom_value_fact_condition_projection_update(
+    loom_value_fact_table_t* table, const loom_module_t* module,
+    loom_region_t* condition_region, loom_region_t* body,
+    const loom_op_t* condition,
+    const loom_value_fact_table_t* derivation_fact_table,
+    loom_condition_edge_projection_t* projection) {
+  const loom_block_t* body_block = loom_region_const_entry_block(body);
+  if (!condition || !body_block ||
+      condition->operand_count != body_block->arg_count + 1) {
+    loom_condition_edge_projection_reset(projection);
+    return iree_ok_status();
+  }
+  loom_value_fact_condition_scratch_t* scratch = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_value_fact_condition_scratch_get(table, module, &scratch));
+  IREE_RETURN_IF_ERROR(loom_condition_facts_query_complete(
+      &scratch->query, derivation_fact_table,
+      loom_op_const_operands(condition)[0], /*assumed_truth=*/true,
+      &projection->source_derivation));
+  return loom_condition_edge_projection_update_mapping(
+      projection, module, condition_region, body_block,
+      loom_op_const_operands(condition) + 1, body_block->arg_count);
+}
+
+static bool loom_value_fact_condition_operand_is_loop_carried(
+    const loom_condition_edge_projection_t* projection,
+    loom_condition_integer_operand_t operand) {
+  if (operand.kind != LOOM_CONDITION_INTEGER_OPERAND_VALUE) {
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < projection->mapping_count; ++i) {
+    if (projection->target_sources[i] == operand.value_id) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Retains coupled relations between loop-carried values. Unary bounds already
+// remain available through the ordinary body condition scope and do not repair
+// independently widened state. Ambient operands may depend on interprocedural
+// boundary summaries; feeding those dependencies back into the recurrence can
+// make an outer fixed point advance one endpoint per round.
+static void loom_value_fact_condition_projection_retain_feedback_relations(
+    loom_condition_edge_projection_t* projection) {
+  loom_condition_fact_set_t* facts =
+      &projection->source_derivation.integer_facts;
+  iree_host_size_t retained_count = 0;
+  for (iree_host_size_t i = 0; i < facts->integer_relation_count; ++i) {
+    const loom_condition_integer_relation_t relation =
+        facts->integer_relations[i];
+    if (!loom_value_fact_condition_operand_is_loop_carried(projection,
+                                                           relation.left) ||
+        !loom_value_fact_condition_operand_is_loop_carried(projection,
+                                                           relation.right)) {
+      continue;
+    }
+    facts->integer_relations[retained_count++] = relation;
+  }
+  facts->integer_relation_count = retained_count;
+  projection->visible_integer_relation_count = retained_count;
+}
+
 static iree_status_t loom_value_fact_table_retain_condition_body_facts(
     loom_value_fact_table_t* table, const loom_module_t* module,
     loom_region_t* condition_region, loom_region_t* body,
@@ -762,15 +825,9 @@ static iree_status_t loom_value_fact_table_retain_condition_body_facts(
     IREE_RETURN_IF_ERROR(loom_value_fact_table_set_region_condition_projection(
         table, body, projection));
   }
-  loom_value_fact_condition_scratch_t* scratch = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_value_fact_condition_scratch_get(table, module, &scratch));
-  IREE_RETURN_IF_ERROR(loom_condition_facts_query_complete(
-      &scratch->query, table, loom_op_const_operands(condition)[0],
-      /*assumed_truth=*/true, &projection->source_derivation));
-  IREE_RETURN_IF_ERROR(loom_condition_edge_projection_update_mapping(
-      projection, module, condition_region, body_block,
-      loom_op_const_operands(condition) + 1, body_block->arg_count));
+  IREE_RETURN_IF_ERROR(loom_value_fact_condition_projection_update(
+      table, module, condition_region, body, condition,
+      /*derivation_fact_table=*/table, projection));
   const bool has_integer_relations =
       projection->visible_integer_relation_count != 0;
   if (had_integer_relations != has_integer_relations) {
@@ -781,6 +838,28 @@ static iree_status_t loom_value_fact_table_retain_condition_body_facts(
     }
   }
   return iree_ok_status();
+}
+
+static void loom_value_fact_table_refine_condition_body_args(
+    loom_value_fact_table_t* table,
+    const loom_condition_edge_projection_t* projection,
+    const loom_op_t* condition, const loom_block_t* body_block,
+    loom_value_facts_t* facts, uint16_t count) {
+  bool condition_value = false;
+  if (!projection || !condition || condition->operand_count == 0 ||
+      !body_block ||
+      (loom_value_facts_as_exact_bool(
+           loom_value_fact_table_lookup(table,
+                                        loom_op_const_operands(condition)[0]),
+           &condition_value) &&
+       !condition_value)) {
+    return;
+  }
+  count = iree_min(count, body_block->arg_count);
+  for (uint16_t i = 0; i < count; ++i) {
+    (void)loom_condition_edge_projection_apply_to_value_facts(
+        projection, table, loom_block_arg_id(body_block, i), &facts[i]);
+  }
 }
 
 static iree_status_t loom_value_fact_loop_build_condition_induction(
@@ -939,6 +1018,23 @@ static iree_status_t loom_value_fact_table_compute_condition_loop_summary(
   IREE_RETURN_IF_ERROR(loom_value_fact_table_allocate_fact_array(
       scratch_arena, header_count, &next_facts));
 
+  // The successful condition edge is part of the loop transfer. Derive only
+  // consequences independent of the evolving loop envelope: using a
+  // provisional exact value to select one arm of an or/xor condition can
+  // otherwise make that value self-reinforcing. The stable derivation remains
+  // solve-local and never publishes provisional state to other consumers.
+  loom_condition_edge_projection_t feedback_projection;
+  loom_condition_edge_projection_initialize(scratch_arena,
+                                            &feedback_projection);
+  const loom_op_t* feedback_condition =
+      loom_value_fact_region_terminator(condition_region);
+  const loom_block_t* body_block = loom_region_const_entry_block(body);
+  IREE_RETURN_IF_ERROR(loom_value_fact_condition_projection_update(
+      table, module, condition_region, body, feedback_condition,
+      /*derivation_fact_table=*/NULL, &feedback_projection));
+  loom_value_fact_condition_projection_retain_feedback_relations(
+      &feedback_projection);
+
   loom_value_fact_induction_t induction = {.value = LOOM_VALUE_ID_INVALID};
   loom_loop_recurrence_facts_t recurrence =
       loom_value_fact_induction_facts(table, module, &induction);
@@ -955,6 +1051,10 @@ static iree_status_t loom_value_fact_table_compute_condition_loop_summary(
         table, module, header, condition, induction.value,
         recurrence.body_values, &forwarding,
         LOOM_VALUE_FACT_LOOP_OBSERVATION_BODY, forwarded_facts, result_count);
+
+    loom_value_fact_table_refine_condition_body_args(
+        table, &feedback_projection, condition, body_block, forwarded_facts,
+        result_count);
 
     IREE_RETURN_IF_ERROR(loom_value_fact_table_define_loop_entry_args(
         table, module, body, /*arg_offset=*/0, forwarded_facts, result_count));
@@ -1026,6 +1126,10 @@ static iree_status_t loom_value_fact_table_compute_condition_loop_summary(
         table, module, header, condition, induction.value,
         recurrence.body_values, &forwarding,
         LOOM_VALUE_FACT_LOOP_OBSERVATION_BODY, forwarded_facts, result_count);
+
+    loom_value_fact_table_refine_condition_body_args(
+        table, &feedback_projection, condition, body_block, forwarded_facts,
+        result_count);
 
     IREE_RETURN_IF_ERROR(loom_value_fact_table_define_loop_entry_args(
         table, module, body, /*arg_offset=*/0, forwarded_facts, result_count));

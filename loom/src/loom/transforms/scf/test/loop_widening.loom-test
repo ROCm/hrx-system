@@ -99,3 +99,69 @@ CHECK: func.def @wrapping_counter*
 CHECK: %lower = scalar.constant -128 : i64
 CHECK: %upper = scalar.constant 127 : i64
 CHECK-NOT: *test.fact_*
+
+// ====
+
+// The successful edge relation participates in the feedback solve. Without
+// it, independently widening the two endpoints admits one update past the
+// initial interval and eventually loses every useful bound. The second loop is
+// a soundness control: translating unsigned order through the provisional
+// nonnegative envelope would make that envelope self-reinforcing, so it stays
+// conservative until a stable carrier proof exists outside the feedback solve.
+func.def @guarded_interval_feedback(%choose: i1) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %c7 = scalar.constant 7 : i32
+  %signed_right, %signed_left = scf.while(%right_before = %c7 : i32, %left_before = %c0 : i32) -> (i32, i32) {
+    %more = scalar.cmpi slt, %left_before, %right_before : i32
+    scf.condition %more, %right_before, %left_before : i1, i32, i32
+  } do(%right_body: i32, %left_body: i32) {
+    %signed_right_lo = test.fact_range_lo %right_body : i32 -> i64
+    %signed_right_hi = test.fact_range_hi %right_body : i32 -> i64
+    %signed_left_lo = test.fact_range_lo %left_body : i32 -> i64
+    %signed_left_hi = test.fact_range_hi %left_body : i32 -> i64
+    %sum = scalar.addi %left_body, %right_body : i32
+    %middle = scalar.divsi %sum, %c2 : i32
+    %signed_middle_lo = test.fact_range_lo %middle : i32 -> i64
+    %signed_middle_hi = test.fact_range_hi %middle : i32 -> i64
+    test.use %signed_right_lo, %signed_right_hi, %signed_left_lo, %signed_left_hi, %signed_middle_lo, %signed_middle_hi : i64, i64, i64, i64, i64, i64
+    %next_left = scalar.addi %middle, %c1 : i32
+    %next_right = scf.select %choose, %middle, %right_body : i32
+    %selected_left = scf.select %choose, %left_body, %next_left : i32
+    scf.yield %next_right, %selected_left : i32, i32
+  }
+  test.use %signed_right, %signed_left : i32, i32
+
+  %unsigned_right, %unsigned_left = scf.while(%right_before = %c7 : i32, %left_before = %c0 : i32) -> (i32, i32) {
+    %more = scalar.cmpi ugt, %right_before, %left_before : i32
+    scf.condition %more, %right_before, %left_before : i1, i32, i32
+  } do(%right_body: i32, %left_body: i32) {
+    %unsigned_right_lo = test.fact_range_lo %right_body : i32 -> i64
+    %unsigned_right_hi = test.fact_range_hi %right_body : i32 -> i64
+    %unsigned_left_lo = test.fact_range_lo %left_body : i32 -> i64
+    %unsigned_left_hi = test.fact_range_hi %left_body : i32 -> i64
+    test.use %unsigned_right_lo, %unsigned_right_hi, %unsigned_left_lo, %unsigned_left_hi : i64, i64, i64, i64
+    %decremented_right = scalar.subi %right_body, %c1 : i32
+    %incremented_left = scalar.addi %left_body, %c1 : i32
+    %next_right = scf.select %choose, %decremented_right, %right_body : i32
+    %next_left = scf.select %choose, %left_body, %incremented_left : i32
+    scf.yield %next_right, %next_left : i32, i32
+  }
+  test.use %unsigned_right, %unsigned_left : i32, i32
+  func.return
+}
+
+// ----
+CHECK: func.def @guarded_interval_feedback*
+CHECK: %signed_right_lo = scalar.constant 1 : i64
+CHECK: %signed_right_hi = scalar.constant 7 : i64
+CHECK: %signed_left_lo = scalar.constant 0 : i64
+CHECK: %signed_left_hi = scalar.constant 6 : i64
+CHECK: %signed_middle_lo = scalar.constant 0 : i64
+CHECK: %signed_middle_hi = scalar.constant 6 : i64
+CHECK: %unsigned_right_lo = scalar.constant -2147483648 : i64
+CHECK: %unsigned_right_hi = scalar.constant 2147483647 : i64
+CHECK: %unsigned_left_lo = scalar.constant -2147483648 : i64
+CHECK: %unsigned_left_hi = scalar.constant 2147483647 : i64
+CHECK-NOT: *test.fact_*

@@ -616,7 +616,7 @@ func.def @xor_feedback_survives_cfg_lowering(%count: index) -> (i64, i64, i64) {
   cfg.br ^_bb1(%24: index, %next: index)
 ^_bb3:
   cfg.br ^_bb4(%20: index)
-^_bb4(%17: index):
+^_bb4(%last: index):
   %result_lower = scalar.constant 0 : i64
   %result_upper = scalar.constant 8064 : i64
   %result_divisor = scalar.constant 128 : i64

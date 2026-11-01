@@ -100,7 +100,7 @@ void reassigned([[loom::noalias]] const unsigned* input,
 kernel.def @reassigned() {
   %3 = index.constant 1 : index
   kernel.launch.config workgroups(%3, %3, %3) workgroup_size(%3, %3, %3) : index
-} launch(%0: buffer, %1: buffer, %replacement: buffer) {
+} launch(%input: buffer, %1: buffer, %replacement: buffer) {
   %output = buffer.assume.noalias %1 : buffer
   %34 = index.constant 0 : offset
   %22 = buffer.view %replacement[%34] : buffer -> view<1xi32>

@@ -68,7 +68,7 @@ void reassigned([[loom::assume_aligned(64)]] float* original, float* replacement
 kernel.def @reassigned() {
   %2 = index.constant 1 : index
   kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
-} launch(%0: buffer, %replacement: buffer) {
+} launch(%original: buffer, %replacement: buffer) {
   %11 = scalar.constant 1.0 : f32
   %21 = index.constant 0 : offset
   %20 = buffer.view %replacement[%21] : buffer -> view<1xf32>
