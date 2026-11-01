@@ -22,7 +22,7 @@ namespace loom::cxx_import {
 enum class PredicateValueOrigin {
   // A resolved source binding, optionally followed by record members.
   Binding,
-  // A speculatable scalar expression retained as its resulting SSA value.
+  // A materialized scalar expression retained as its resulting SSA value.
   Expression,
   // The typed result placeholder of an enclosing callable contract.
   Result,
@@ -83,12 +83,12 @@ enum class PredicateSubject {
 };
 
 // Selects whether predicate operands must name retained values directly or may
-// also form total scalar expressions that are safe to materialize. Function
-// and config contracts use direct identities; body-local assumptions can retain
-// derived SSA identities within their dominance scope.
+// also form side-effect-free expressions whose current values can be
+// materialized. Function and config contracts use direct identities; body-local
+// assumptions can retain derived SSA identities within their dominance scope.
 enum class PredicateExpressionPolicy {
   RetainedValues,
-  SpeculatableValues,
+  MaterializableValues,
 };
 
 // Returns whether |kind| accepts a scalar value with the resolved source type.
@@ -98,9 +98,10 @@ bool predicate_accepts_source_type(cxx::TranslationUnit& unit,
                                    const cxx::Type* type);
 
 // Projects a pure C++ conjunction into Loom predicate templates. Resolution
-// follows semantic symbols and frontend-selected implicit conversions; calls,
-// mutation, volatile reads, overloaded operators, and unrepresentable
-// constants diagnose before any result is returned.
+// follows semantic symbols and frontend-selected implicit conversions. Direct
+// constant-evaluated calls are accepted; runtime calls, mutation, volatile
+// reads, overloaded operators, and unrepresentable constants diagnose before
+// any result is returned.
 std::vector<ProjectedPredicate> project_predicates(
     cxx::TranslationUnit& unit, Diagnostics& diagnostics,
     cxx::ExpressionAST* expression,

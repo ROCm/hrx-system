@@ -211,7 +211,7 @@ TEST(AssumptionsTest, UsesUsualArithmeticConversionsForOrdering) {
   }
 }
 
-TEST(AssumptionsTest, RetainsSpeculatableDerivedScalarExpressions) {
+TEST(AssumptionsTest, RetainsMaterializedDerivedScalarExpressions) {
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);
   Source source(IREE_SV(R"cpp(
@@ -256,6 +256,49 @@ TEST(AssumptionsTest, RetainsSpeculatableDerivedScalarExpressions) {
   EXPECT_EQ(predicates[2].predicate.kind, LOOM_PREDICATE_NE);
   EXPECT_EQ(predicates[3].predicate.kind, LOOM_PREDICATE_EQ);
   EXPECT_EQ(predicates[4].predicate.kind, LOOM_PREDICATE_EQ);
+}
+
+TEST(AssumptionsTest, AdmitsConstexprCallsAndRecordPointerReads) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"cpp(
+                  [[loom::assume]] void assume(bool);
+                  constexpr int extent(int scale) { return scale * 4; }
+                  consteval int maximum() { return 16; }
+                  struct Bounds {
+                    int limit;
+                  };
+                  void entry(int index, Bounds* mutable_bounds, const Bounds* const_bounds) {
+                    assume(index < extent(2) && index < mutable_bounds->limit &&
+                           const_bounds->limit <= maximum());
+                  }
+                )cpp"),
+                IREE_SV("record_bounds.cxx"), options);
+  auto* call = source_call(source);
+  ASSERT_NE(call, nullptr);
+  auto predicates =
+      assumption_predicates(source.unit(), source.diagnostics(), call);
+  ASSERT_EQ(predicates.size(), 3u);
+
+  EXPECT_EQ(predicates[0].predicate.kind, LOOM_PREDICATE_LT);
+  EXPECT_EQ(predicates[0].predicate.args[1], 8);
+  EXPECT_EQ(predicates[0].values[0].origin, PredicateValueOrigin::Binding);
+
+  EXPECT_EQ(predicates[1].predicate.kind, LOOM_PREDICATE_LT);
+  ASSERT_EQ(predicates[1].value_count, 2u);
+  EXPECT_EQ(predicates[1].values[1].origin, PredicateValueOrigin::Expression);
+  ASSERT_EQ(predicates[1].values[1].dependencies.size(), 1u);
+  EXPECT_EQ(
+      cxx::to_string(predicates[1].values[1].dependencies[0].binding->name()),
+      "mutable_bounds");
+
+  EXPECT_EQ(predicates[2].predicate.kind, LOOM_PREDICATE_LE);
+  EXPECT_EQ(predicates[2].predicate.args[1], 16);
+  EXPECT_EQ(predicates[2].values[0].origin, PredicateValueOrigin::Expression);
+  ASSERT_EQ(predicates[2].values[0].dependencies.size(), 1u);
+  EXPECT_EQ(
+      cxx::to_string(predicates[2].values[0].dependencies[0].binding->name()),
+      "const_bounds");
 }
 
 TEST(AssumptionsTest, RejectsPartialDerivedScalarExpressions) {

@@ -36,6 +36,16 @@ void entry(unsigned value, unsigned other) {
 
 // ====
 // RUN: verify
+// A constexpr function is constant only when all of its arguments are.
+[[loom::assume]] void assume(bool);
+constexpr unsigned identity(unsigned value) { return value; }
+void entry(unsigned value, unsigned runtime_bound) {
+  // ERROR@+1: LOWERING/059 "predicate operands must be retained scalar values, compile-time constants, or scalar expressions safe to evaluate unconditionally"
+  assume(value < identity(runtime_bound));
+}
+
+// ====
+// RUN: verify
 // A comma expression cannot hide a call in an otherwise constant operand.
 [[loom::assume]] void assume(bool);
 unsigned opaque();
@@ -60,6 +70,26 @@ void entry(unsigned value, unsigned other) {
 void entry(unsigned value, unsigned other) {
   // ERROR@+1: LOWERING/059 "predicate operands must be retained scalar values, compile-time constants, or scalar expressions safe to evaluate unconditionally"
   assume(other < 32u && value < (other = 16u));
+}
+
+// ====
+// RUN: verify
+// Pointer arithmetic is partial and cannot become an implicit metadata load.
+[[loom::assume]] void assume(bool);
+struct Bounds { int limit; };
+void entry(int value, const Bounds* bounds, int offset) {
+  // ERROR@+1: LOWERING/059 "predicate pointer-member reads require a direct retained pointer binding"
+  assume(value < (bounds + offset)->limit);
+}
+
+// ====
+// RUN: verify
+// Volatile record storage cannot disappear into compile-time metadata.
+[[loom::assume]] void assume(bool);
+struct Bounds { int limit; };
+void entry(int value, const volatile Bounds* bounds) {
+  // ERROR@+1: LOWERING/059 "predicate expressions cannot read volatile values because no runtime comparison is emitted"
+  assume(value < bounds->limit);
 }
 
 // ====
