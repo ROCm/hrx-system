@@ -1130,7 +1130,7 @@ static void loom_cmd_serialize_write_parameters(
   for (uint32_t i = 0; i < build->parameter_requirements->root_count; ++i) {
     uint8_t* record = data.data + layout->parameter_root_offset +
                       i * LOOM_CMD_PROGRAM_PARAMETER_ROOT_SIZE;
-    const loom_cmd_parameter_root_requirement_t* root =
+    const loom_cmd_program_parameter_root_t* root =
         &build->parameter_requirements->roots[i];
     iree_unaligned_store_le_u32(
         record + LOOM_CMD_PROGRAM_PARAMETER_ROOT_FIXED_BUFFER_INDEX_OFFSET,
@@ -1147,7 +1147,7 @@ static void loom_cmd_serialize_write_parameters(
   for (uint32_t i = 0; i < build->parameter_requirements->count; ++i) {
     uint8_t* record = data.data + layout->parameter_offset +
                       i * LOOM_CMD_PROGRAM_PARAMETER_SIZE;
-    const loom_cmd_parameter_requirement_t* parameter =
+    const loom_cmd_program_parameter_t* parameter =
         &build->parameter_requirements->entries[i];
     iree_unaligned_store_le_u32(
         record + LOOM_CMD_PROGRAM_PARAMETER_KEY_OFFSET_OFFSET, key_offset);
@@ -1264,19 +1264,16 @@ iree_status_t loom_cmd_program_plan_serialize_root(
           IREE_STATUS_OUT_OF_RANGE,
           "command parameter requirement table exceeds the format limit");
     }
-    uint64_t parameter_key_length = 0;
-    for (iree_host_size_t i = 0;
-         i < parameter_requirements->count && iree_status_is_ok(status); ++i) {
-      if (!iree_checked_add_u64(parameter_key_length,
-                                parameter_requirements->entries[i].key.size,
-                                &parameter_key_length) ||
-          parameter_key_length > UINT32_MAX) {
-        status =
-            iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                             "command parameter keys exceed the format limit");
-      }
+    if (iree_status_is_ok(status) &&
+        parameter_requirements->key_storage_length > UINT32_MAX) {
+      status =
+          iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                           "command parameter keys exceed the format limit");
     }
-    build.parameter_key_length = (uint32_t)parameter_key_length;
+    if (iree_status_is_ok(status)) {
+      build.parameter_key_length =
+          (uint32_t)parameter_requirements->key_storage_length;
+    }
   }
 
   loom_cmd_program_format_layout_t layout = {0};

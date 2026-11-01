@@ -274,7 +274,7 @@ typedef struct loom_cmd_program_parameter_root_t {
 
 // One concrete immutable parameter placed in a fixed buffer root.
 typedef struct loom_cmd_program_parameter_t {
-  // Fully substituted parameter key borrowed from program storage.
+  // Fully substituted parameter key borrowed from its owning storage.
   iree_string_view_t key;
   // Dense fixed-buffer table index containing the parameter.
   uint32_t fixed_buffer_index;

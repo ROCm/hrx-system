@@ -118,6 +118,7 @@ loom_cc_library(
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops/command",
         "//loom/src/loom/target/arch/cmd:abi_layout",
+        "//loom/src/loom/target/arch/cmd:program",
         "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:fact_table",
         "//loom/src/loom/util:walk",
