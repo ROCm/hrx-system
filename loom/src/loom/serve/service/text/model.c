@@ -38,7 +38,7 @@
 
 typedef enum loom_serve_text_load_phase_e {
   TEXT_LOAD_PREPARE,
-  TEXT_LOAD_STAGES,
+  TEXT_LOAD_COMPILE,
   TEXT_LOAD_BIND,
   TEXT_LOAD_WEIGHTS,
   TEXT_LOAD_RESIDENCY,
@@ -64,6 +64,13 @@ struct loom_serve_text_load_t {
   bool cancelled;
   // Private task result transferred only by the task's final release.
   iree_status_t task_status;
+  // Independent control compilation; its final release publishes readiness.
+  struct {
+    // Intrusive task borrowing the initialized source and model catalog.
+    loomc_task_t task;
+    // Private compile result transferred at final task release.
+    iree_status_t status;
+  } control;
   // Independent tokenizer construction, joined before linking or retirement.
   loom_serve_tokenizer_load_t* tokenizer_load;
   // Terminal model outcome retained while tokenizer work is still retiring.
@@ -75,7 +82,9 @@ struct loom_serve_text_load_t {
     // Accepted foreground callbacks plus any active submission hold.
     iree_host_size_t pending;
     // Native stage compilation may overlap parameter preparation/activation.
-    bool compiling;
+    bool stages_compiling;
+    // Control bytecode is unavailable until its independent task retires.
+    bool control_compiling;
     // Immutable command layouts published by the accepted stage set.
     iree_host_size_t layout_count;
     // Owned callback outcome, consumed by advance.
@@ -196,6 +205,32 @@ static const loomc_task_vtable_t text_load_vtable = {
     .destroy = loom_serve_text_load_release,
 };
 
+static void loom_serve_text_load_control_execute(
+    loomc_task_t* task, loomc_host_size_t worker_ordinal) {
+  loom_serve_text_load_t* load =
+      (loom_serve_text_load_t*)((uint8_t*)task -
+                                offsetof(loom_serve_text_load_t, control.task));
+  load->control.status = loom_serve_text_source_compile_control(
+      load->model->jit, &load->options, &load->model->source);
+}
+
+static void loom_serve_text_load_control_release(loomc_task_t* task) {
+  loom_serve_text_load_t* load =
+      (loom_serve_text_load_t*)((uint8_t*)task -
+                                offsetof(loom_serve_text_load_t, control.task));
+  iree_slim_mutex_lock(&load->event.mutex);
+  load->event.status =
+      iree_status_join(load->event.status, load->control.status);
+  load->event.control_compiling = false;
+  load->event.wake(load->event.user_data);
+  iree_slim_mutex_unlock(&load->event.mutex);
+}
+
+static const loomc_task_vtable_t text_load_control_vtable = {
+    .execute = loom_serve_text_load_control_execute,
+    .destroy = loom_serve_text_load_control_release,
+};
+
 static void loom_serve_text_load_layout(void* user_data, iree_host_size_t index,
                                         const loom_cmd_program_t* program) {
   loom_serve_text_load_t* load = user_data;
@@ -217,7 +252,7 @@ static void loom_serve_text_load_compiled(void* user_data, iree_status_t status,
   loom_serve_stage_set_free(compiled);
   iree_slim_mutex_lock(&load->event.mutex);
   load->event.status = iree_status_join(load->event.status, status);
-  load->event.compiling = false;
+  load->event.stages_compiling = false;
   load->event.wake(load->event.user_data);
   iree_slim_mutex_unlock(&load->event.mutex);
 }
@@ -404,6 +439,7 @@ iree_status_t loom_serve_text_load_allocate(
   load->event.user_data = user_data;
   iree_slim_mutex_initialize(&load->event.mutex);
   loomc_task_initialize(&text_load_vtable, &load->task);
+  loomc_task_initialize(&text_load_control_vtable, &load->control.task);
   iree_status_t status = iree_allocator_malloc(
       host_allocator, sizeof(*load->model), (void**)&load->model);
   if (iree_status_is_ok(status)) {
@@ -446,7 +482,8 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
   load->event.status = iree_ok_status();
   const bool layouts_ready =
       load->event.layout_count == load->model->stage_count;
-  const bool compiling = load->event.compiling;
+  const bool stages_compiling = load->event.stages_compiling;
+  const bool control_compiling = load->event.control_compiling;
   iree_slim_mutex_unlock(&load->event.mutex);
   if (iree_status_is_ok(status) && load->cancelled) {
     status = iree_make_status(IREE_STATUS_CANCELLED, "model load cancelled");
@@ -458,7 +495,7 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
          load->phase != TEXT_LOAD_COMPLETE) {
     switch (load->phase) {
       case TEXT_LOAD_PREPARE:
-        load->phase = TEXT_LOAD_STAGES;
+        load->phase = TEXT_LOAD_COMPILE;
         iree_slim_mutex_lock(&load->event.mutex);
         load->event.pending = 1;
         iree_slim_mutex_unlock(&load->event.mutex);
@@ -466,10 +503,21 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
             loom_serve_host_compiler_sink(host), &load->task));
         submitted = iree_status_is_ok(status);
         break;
-      case TEXT_LOAD_STAGES:
+      case TEXT_LOAD_COMPILE:
         load->phase = TEXT_LOAD_BIND;
         iree_slim_mutex_lock(&load->event.mutex);
-        load->event.compiling = true;
+        load->event.control_compiling = true;
+        iree_slim_mutex_unlock(&load->event.mutex);
+        status = iree_status_from_loomc(loomc_task_sink_submit(
+            loom_serve_host_compiler_sink(host), &load->control.task));
+        if (!iree_status_is_ok(status)) {
+          iree_slim_mutex_lock(&load->event.mutex);
+          load->event.control_compiling = false;
+          iree_slim_mutex_unlock(&load->event.mutex);
+          break;
+        }
+        iree_slim_mutex_lock(&load->event.mutex);
+        load->event.stages_compiling = true;
         iree_slim_mutex_unlock(&load->event.mutex);
         status = loom_serve_stage_set_compile_catalog_async(
             model->jit, model->source.preparation, loom_serve_text_load_layout,
@@ -477,7 +525,7 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
         submitted = iree_status_is_ok(status);
         if (!submitted) {
           iree_slim_mutex_lock(&load->event.mutex);
-          load->event.compiling = false;
+          load->event.stages_compiling = false;
           iree_slim_mutex_unlock(&load->event.mutex);
         }
         break;
@@ -509,7 +557,7 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
         load->phase = TEXT_LOAD_RECORD;
         break;
       case TEXT_LOAD_RECORD:
-        if (compiling) {
+        if (stages_compiling) {
           return iree_ok_status();
         }
         load->phase = TEXT_LOAD_LINK;
@@ -525,6 +573,9 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
         submitted = iree_status_is_ok(status);
         break;
       case TEXT_LOAD_LINK:
+        if (control_compiling) {
+          return iree_ok_status();
+        }
         if (!loom_serve_tokenizer_load_take(&load->tokenizer_load, &status,
                                             &model->source.tokenizer)) {
           return iree_ok_status();
@@ -551,14 +602,15 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
     }
   }
   if (!submitted) {
-    // Rejected foreground work owes no callback. Independent stage work still
-    // owns layout bytes and model borrows until its terminal publication.
+    // Rejected foreground work owes no callback. Independent compilation still
+    // owns source, layout, and model borrows until every producer retires.
     iree_slim_mutex_lock(&load->event.mutex);
     load->event.pending = 0;
-    const bool stages_pending = load->event.compiling;
+    const bool compilation_pending =
+        load->event.stages_compiling || load->event.control_compiling;
     iree_slim_mutex_unlock(&load->event.mutex);
     load->phase = TEXT_LOAD_COMPLETE;
-    if (stages_pending) {
+    if (compilation_pending) {
       load->terminal_status = status;
       return iree_ok_status();
     }
