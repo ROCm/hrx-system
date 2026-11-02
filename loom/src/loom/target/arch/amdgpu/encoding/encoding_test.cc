@@ -313,6 +313,62 @@ TEST(AmdgpuEncodingTest, SMovB32UsesLiteralForLargeU32) {
   EXPECT_EQ(packet.bit_count, 64u);
 }
 
+TEST(AmdgpuEncodingTest, PacksDirectCallControlAcrossSelectedFamilies) {
+  bool tested_table = false;
+  for (uint16_t ordinal = 0;
+       ordinal < loom_amdgpu_target_info_descriptor_set_count(); ++ordinal) {
+    const loom_amdgpu_encoding_table_t* table =
+        loom_amdgpu_encoding_table_for_descriptor_set_ordinal(ordinal);
+    if (table == nullptr) {
+      continue;
+    }
+    tested_table = true;
+    SCOPED_TRACE(ordinal);
+    const bool cdna =
+        ordinal == LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA2 ||
+        ordinal == LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA3 ||
+        ordinal == LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA4 ||
+        ordinal == LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX9_4_GENERIC;
+
+    loom_amdgpu_encoding_packet_t packet = {};
+    IREE_ASSERT_OK(loom_amdgpu_encoding_pack_s_mov_b64_from_exec(
+        table, /*sdst=*/32, &packet));
+    EXPECT_EQ(packet.word_count, 1u);
+    EXPECT_EQ(packet.bit_count, 32u);
+    EXPECT_EQ(packet.words[0], UINT32_C(0xbea0017e));
+
+    IREE_ASSERT_OK(loom_amdgpu_encoding_pack_s_mov_b64_to_exec(
+        table, /*ssrc0=*/32, &packet));
+    EXPECT_EQ(packet.word_count, 1u);
+    EXPECT_EQ(packet.bit_count, 32u);
+    EXPECT_EQ(packet.words[0], UINT32_C(0xbefe0120));
+
+    IREE_ASSERT_OK(
+        loom_amdgpu_encoding_pack_s_getpc_b64(table, /*sdst=*/34, &packet));
+    EXPECT_EQ(packet.word_count, 1u);
+    EXPECT_EQ(packet.bit_count, 32u);
+    EXPECT_EQ(packet.words[0],
+              cdna ? UINT32_C(0xbea21c00) : UINT32_C(0xbea24700));
+
+    IREE_ASSERT_OK(loom_amdgpu_encoding_pack_s_swappc_b64(
+        table, /*sdst=*/30, /*ssrc0=*/34, &packet));
+    EXPECT_EQ(packet.word_count, 1u);
+    EXPECT_EQ(packet.bit_count, 32u);
+    EXPECT_EQ(packet.words[0],
+              cdna ? UINT32_C(0xbe9e1e22) : UINT32_C(0xbe9e4922));
+
+    IREE_ASSERT_OK(
+        loom_amdgpu_encoding_pack_s_setpc_b64(table, /*ssrc0=*/30, &packet));
+    EXPECT_EQ(packet.word_count, 1u);
+    EXPECT_EQ(packet.bit_count, 32u);
+    EXPECT_EQ(packet.words[0],
+              cdna ? UINT32_C(0xbe801d1e) : UINT32_C(0xbe80481e));
+  }
+  if (!tested_table) {
+    GTEST_SKIP() << "No AMDGPU encoding table selected";
+  }
+}
+
 TEST(AmdgpuEncodingTest, PacksSDelayAluSoppImmediate) {
   LOOM_AMDGPU_REQUIRE_ENCODING_TABLE(
       table, LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3, "amdgpu.rdna3.core");

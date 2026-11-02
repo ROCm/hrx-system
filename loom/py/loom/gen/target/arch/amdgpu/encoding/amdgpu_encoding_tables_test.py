@@ -52,6 +52,12 @@ def _encoding_contract(*descriptor_keys: str) -> _EncodingContract:
         inline_f32_sources=(),
         vector_source_vgprs=(256, 256),
         s_mov_b32_opcode=0,
+        s_mov_b64_opcode=1,
+        s_getpc_b64_opcode=2,
+        s_swappc_b64_opcode=3,
+        s_setpc_b64_opcode=4,
+        scalar_source_exec_lo=126,
+        scalar_destination_exec_lo=126,
         v_mov_b32_opcode=1,
         v_swap_b32_opcode=101,
     )
