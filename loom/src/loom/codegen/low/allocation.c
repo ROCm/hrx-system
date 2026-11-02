@@ -100,6 +100,7 @@ loom_low_allocation_make_interval_assignment_context(
       .target = &state->target,
       .liveness = &state->liveness,
       .value_domain = &model->context.value_domain,
+      .register_requirements = model->register_requirements,
       .schedule = state->options->schedule,
       .placement = &state->placement,
       .preferences = &state->preferences,

@@ -126,8 +126,18 @@ static iree_status_t loom_low_schedule_initialize_value_records(
       }
       const loom_low_reg_class_t* reg_class =
           &state->target.descriptor_set->reg_classes[value->register_class_id];
+      const loom_low_register_requirement_t requirement =
+          loom_low_register_requirements_get(state->register_requirements,
+                                             ordinal);
+      // A dead result needs a destination at definition, but has no lifetime
+      // to protect from spilling. Metadata-only observations still retain it.
+      const bool has_required_lifetime =
+          requirement != LOOM_LOW_REGISTER_REQUIREMENT_NONE &&
+          (requirement != LOOM_LOW_REGISTER_REQUIREMENT_NO_OPERAND_USES ||
+           loom_module_value_has_uses(state->module, value_id));
       if (iree_all_bits_set(reg_class->flags,
                             LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE) ||
+          has_required_lifetime ||
           (value_id < state->options->required_register_values.bit_count &&
            iree_bitmap_test(state->options->required_register_values,
                             value_id))) {
@@ -1852,6 +1862,7 @@ static iree_status_t loom_low_schedule_build(
       .body = model->context.body,
       .target = model->context.target,
       .value_domain = &model->context.value_domain,
+      .register_requirements = model->register_requirements,
       .storage_origins = model->context.storage_origins,
       .cfg_graph = &model->cfg_graph,
       .liveness_dataflow = &model->liveness_dataflow,

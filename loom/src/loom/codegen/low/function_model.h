@@ -14,6 +14,7 @@
 #include "loom/analysis/liveness_dataflow.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/function_requirements.h"
+#include "loom/codegen/low/register_requirements.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/local_value_domain.h"
@@ -66,6 +67,9 @@ typedef struct loom_low_function_context_t {
 typedef struct loom_low_function_model_t {
   // Prepared target, stable value ordinals, and physical-storage identities.
   loom_low_function_context_t context;
+  // Structural register requirements indexed by local value ordinal, or NULL
+  // when none exist. Native materialization adds its own requirements.
+  loom_low_register_requirement_t* register_requirements;
   // Read-only control-flow graph for the function body.
   loom_cfg_graph_t cfg_graph;
   // Canonical register liveness shared by source and scheduled-order consumers.

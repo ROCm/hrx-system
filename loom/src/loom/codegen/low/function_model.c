@@ -105,6 +105,9 @@ iree_status_t loom_low_function_model_build(
   if (prepared->error_count != 0) {
     return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(loom_low_register_requirements_build(
+      &prepared->value_domain, prepared->body, arena,
+      &out_model->register_requirements));
   out_model->cfg_graph = (loom_cfg_graph_t){
       .module = prepared->module,
       .region = prepared->body,

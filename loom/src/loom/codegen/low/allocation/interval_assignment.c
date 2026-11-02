@@ -19,7 +19,6 @@
 #include "loom/codegen/low/allocation/scalar_packing.h"
 #include "loom/codegen/low/allocation/search.h"
 #include "loom/codegen/low/allocation/spill_plan.h"
-#include "loom/codegen/low/allocation/spill_traffic.h"
 #include "loom/codegen/low/allocation/storage.h"
 #include "loom/codegen/low/allocation/write_interference.h"
 #include "loom/codegen/low/descriptors.h"
@@ -1316,7 +1315,7 @@ static uint32_t loom_low_allocation_interval_assignment_publish_assignment(
     loom_low_allocation_interval_assignment_state_t* state,
     const loom_low_allocation_assignment_t* assignment,
     loom_value_ordinal_t value_ordinal,
-    loom_low_allocation_spill_register_requirement_t spill_requirement) {
+    loom_low_register_requirement_t spill_requirement) {
   // Every allocatable interval publishes exactly once into fixed-capacity
   // result storage. Violating either invariant would corrupt the arena tail.
   IREE_ASSERT_LT(state->result.assignment_count, state->interval_count);
@@ -1329,8 +1328,7 @@ static uint32_t loom_low_allocation_interval_assignment_publish_assignment(
   }
   const uint32_t assignment_index = (uint32_t)state->result.assignment_count;
   state->result.assignments[state->result.assignment_count++] = *assignment;
-  if (spill_requirement !=
-          LOOM_LOW_ALLOCATION_SPILL_REGISTER_REQUIREMENT_NONE ||
+  if (spill_requirement != LOOM_LOW_REGISTER_REQUIREMENT_NONE ||
       (assignment->value_id <
            state->context->required_register_values.bit_count &&
        iree_bitmap_test(state->context->required_register_values,
@@ -1384,7 +1382,7 @@ static uint32_t loom_low_allocation_interval_assignment_publish_assignment(
 static iree_status_t loom_low_allocation_interval_assignment_append_assignment(
     loom_low_allocation_interval_assignment_state_t* state,
     const loom_low_allocation_assignment_t* assignment,
-    loom_low_allocation_spill_register_requirement_t spill_requirement,
+    loom_low_register_requirement_t spill_requirement,
     const loom_value_id_t* ignored_storage_lease_value_ids,
     uint16_t ignored_storage_lease_value_count,
     uint32_t* out_assignment_index) {
@@ -1418,10 +1416,11 @@ loom_low_allocation_interval_assignment_append_assignment_callback(
     uint16_t ignored_storage_lease_value_count) {
   loom_low_allocation_interval_assignment_state_t* state =
       (loom_low_allocation_interval_assignment_state_t*)user_data;
-  const loom_low_allocation_spill_register_requirement_t spill_requirement =
-      loom_low_allocation_spill_register_requirement_for_value(
-          state->context->module, state->context->liveness->region,
-          assignment->value_id);
+  const loom_low_register_requirement_t spill_requirement =
+      loom_low_register_requirements_get(
+          state->context->register_requirements,
+          loom_local_value_domain_ordinal(state->context->value_domain,
+                                          assignment->value_id));
   return loom_low_allocation_interval_assignment_append_assignment(
       state, assignment, spill_requirement, ignored_storage_lease_value_ids,
       ignored_storage_lease_value_count,
@@ -1565,9 +1564,10 @@ loom_low_allocation_interval_assignment_assign_fixed_interval(
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_interval_assignment_append_assignment(
           state, &fixed_value->assignment,
-          loom_low_allocation_spill_register_requirement_for_value(
-              state->context->module, state->context->liveness->region,
-              interval->value_id),
+          loom_low_register_requirements_get(
+              state->context->register_requirements,
+              loom_local_value_domain_ordinal(state->context->value_domain,
+                                              interval->value_id)),
           /*ignored_storage_lease_value_ids=*/NULL,
           /*ignored_storage_lease_value_count=*/0, NULL));
   *out_assigned = true;
@@ -1723,7 +1723,7 @@ static iree_status_t loom_low_allocation_interval_assignment_assign(
               state, &stored, value_ordinal);
       loom_low_allocation_interval_assignment_publish_assignment(
           state, &assignment, value_ordinal,
-          LOOM_LOW_ALLOCATION_SPILL_REGISTER_REQUIREMENT_NONE);
+          LOOM_LOW_REGISTER_REQUIREMENT_NONE);
       continue;
     }
 
@@ -1751,8 +1751,8 @@ static iree_status_t loom_low_allocation_interval_assignment_assign(
               state, &inherited_assignment, value_ordinal);
       loom_low_allocation_interval_assignment_publish_assignment(
           state, &assignment, value_ordinal,
-          loom_low_allocation_spill_register_requirement_for_value(
-              context->module, context->liveness->region, interval->value_id));
+          loom_low_register_requirements_get(context->register_requirements,
+                                             value_ordinal));
       continue;
     }
 
@@ -1843,9 +1843,9 @@ static iree_status_t loom_low_allocation_interval_assignment_assign(
               state, &search_context, entry, value_ordinal, &capacity,
               &location_base, &assigned));
     }
-    const loom_low_allocation_spill_register_requirement_t spill_requirement =
-        loom_low_allocation_spill_register_requirement_for_value(
-            context->module, context->liveness->region, interval->value_id);
+    const loom_low_register_requirement_t spill_requirement =
+        loom_low_register_requirements_get(context->register_requirements,
+                                           value_ordinal);
     // A producer lease needs physical storage at definition. Previously
     // assigned values can still spill; rebuilding the frame then closes their
     // leases before the stores and establishes new leases for the reloads.
@@ -1855,8 +1855,7 @@ static iree_status_t loom_low_allocation_interval_assignment_assign(
         (interval->value_id < context->required_register_values.bit_count &&
          iree_bitmap_test(context->required_register_values,
                           interval->value_id)) ||
-        spill_requirement !=
-            LOOM_LOW_ALLOCATION_SPILL_REGISTER_REQUIREMENT_NONE;
+        spill_requirement != LOOM_LOW_REGISTER_REQUIREMENT_NONE;
     const bool interval_requires_register =
         !capacity.is_spillable || requires_register;
     if (!assigned && interval_requires_register && capacity.is_bounded) {
@@ -1929,11 +1928,10 @@ static iree_status_t loom_low_allocation_interval_assignment_assign(
           requires_register ? IREE_SV("spill-traffic-register-exhausted")
                             : IREE_SV("unspillable-register-exhausted");
       if (spill_requirement ==
-          LOOM_LOW_ALLOCATION_SPILL_REGISTER_REQUIREMENT_NESTED_REGION_ARGUMENT) {
+          LOOM_LOW_REGISTER_REQUIREMENT_NESTED_REGION_ARGUMENT) {
         failure_code = IREE_SV("nested-region-argument-register-exhausted");
-      } else if (
-          spill_requirement ==
-          LOOM_LOW_ALLOCATION_SPILL_REGISTER_REQUIREMENT_NO_OPERAND_USES) {
+      } else if (spill_requirement ==
+                 LOOM_LOW_REGISTER_REQUIREMENT_NO_OPERAND_USES) {
         failure_code = IREE_SV("unspillable-register-exhausted");
       }
       IREE_RETURN_IF_ERROR(
