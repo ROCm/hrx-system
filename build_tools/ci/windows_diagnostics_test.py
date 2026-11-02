@@ -402,6 +402,195 @@ class WindowsDiagnosticsTest(unittest.TestCase):
                 "capture byte limit exceeded",
             )
 
+    def test_failed_bazel_tests_retain_runfiles_before_rebuild(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            workspace = root / "workspace with spaces"
+            output = workspace / "bazel-out/x64_windows-fastbuild"
+            binary_root = output / "bin"
+            compiler = binary_root / "tools/compiler.exe"
+            runtime = binary_root / "tools/runtime.dll"
+            symbols = compiler.with_suffix(".pdb")
+            source = workspace / "inputs/literal/name with spaces.loom"
+            installed = root / "sdk/runtime.dll"
+            originals = {
+                compiler: b"failed compiler image",
+                runtime: b"runtime image",
+                source: b"authored source",
+            }
+            manifests = []
+            logs = []
+            for index, suffix in enumerate(
+                (".runfiles_manifest", ".exe.runfiles_manifest")
+            ):
+                target = binary_root / f"tests/failure{index}"
+                wrapper = target.with_name(target.name + ("" if index == 0 else ".exe"))
+                fixture = binary_root / f"tests/input{index}.loombc"
+                manifest = target.with_name(target.name + suffix)
+                log = output / f"testlogs/tests/failure{index}/test.log"
+                logs.append(log)
+                manifests.append(manifest)
+                originals.update(
+                    {
+                        wrapper: b"test launcher",
+                        fixture: f"linked input {index}".encode(),
+                        log: b"Assertion failed: binding.type != INVALID\n",
+                    }
+                )
+                # Place symbols first to ensure manifest order cannot consume
+                # the budget before other tests' executable inputs are copied.
+                escaped_source = str(source).replace("\\", r"\b")
+                originals[manifest] = (
+                    f"_main/compiler.pdb {symbols}\n"
+                    f"_main/compiler.exe {compiler}\n"
+                    f"_main/runtime.dll {runtime}\n"
+                    f"_main/input.loombc {fixture}\n"
+                    f" _main/source\\sname\\n {escaped_source}\n"
+                    "_main/empty.py \n"
+                    f"sdk/runtime.dll {installed}\n"
+                ).encode()
+            for path, contents in {
+                **originals,
+                symbols: b"optional symbols" * 100,
+                installed: b"installed SDK image",
+            }.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(contents)
+            summary = "\n".join(
+                f"//tests:failure{index} FAILED in 0.1s\n  {log}"
+                for index, log in enumerate(logs)
+            )
+            summary += "\n//tests:success PASSED in 0.1s\n"
+
+            def native_tool(argv, **kwargs):
+                self.assertEqual(argv[:3], ["wevtutil.exe", "qe", "Application"])
+                kwargs["stdout"].write(b"<Events/>")
+                return subprocess.CompletedProcess(argv, 0)
+
+            # Exercise the actual failed-command boundary. Only the external
+            # event reader is replaced; capture follows real manifests/files.
+            with (
+                mock.patch.object(subprocess, "run", side_effect=native_tool),
+                mock.patch.object(
+                    diagnostics,
+                    "MAX_CAPTURE_BYTES",
+                    sum(len(contents) for contents in originals.values()),
+                ),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                result = diagnostics.run(
+                    [
+                        sys.executable,
+                        "-c",
+                        "import sys; print(sys.argv[1]); raise SystemExit(3)",
+                        summary,
+                    ],
+                    cwd=workspace,
+                    env=None,
+                    artifact_dir=root / "artifacts",
+                    label="failed Bazel tests",
+                )
+            self.assertEqual(result, 3)
+            phase = next((root / "artifacts").iterdir())
+            metadata = json.loads((phase / "manifest.json").read_text())
+            self.assertNotIn("capture_error", metadata)
+            records = {Path(record["path"]): record for record in metadata["files"]}
+            self.assertEqual(set(records), {*originals, symbols})
+            for path, contents in originals.items():
+                path.write_bytes(b"later build replaced the original")
+                record = records[path]
+                self.assertEqual((phase / record["copy"]).read_bytes(), contents)
+                self.assertEqual(record["sha256"], hashlib.sha256(contents).hexdigest())
+            self.assertEqual(records[symbols]["error"], "capture byte limit exceeded")
+            self.assertEqual(len(metadata["bazel_tests"]), 2)
+            for index, test in enumerate(metadata["bazel_tests"]):
+                self.assertEqual(test["manifest"], str(manifests[index]))
+                entries = {entry["name"]: entry for entry in test["runfiles"]}
+                self.assertEqual(entries["_main/source name\n"]["path"], str(source))
+                self.assertTrue(entries["_main/empty.py"]["empty"])
+                self.assertEqual(
+                    entries["sdk/runtime.dll"]["excluded"],
+                    "runfile is outside the build and source trees",
+                )
+
+    def test_bazel_manifest_and_input_failures_are_explicit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            artifacts = root / "artifacts"
+            artifacts.mkdir()
+            output = root / "bazel-out/config"
+            binary_root = output / "bin/tests"
+            binary_root.mkdir(parents=True)
+            missing_input = binary_root / "missing.loombc"
+            manifest = binary_root / "failure.runfiles_manifest"
+            manifest.write_text(
+                "malformed-entry\r\n"
+                "_main/relative relative/input.loombc\r\n"
+                f"_main/missing {missing_input}\r\n",
+                encoding="utf-8",
+                newline="",
+            )
+            logs = [
+                root / "outside/test.log",
+                root / "bazel-out/wrong-layout/test.log",
+                output / "testlogs/tests/no_manifest/test.log",
+                output / "testlogs/tests/failure/test.log",
+            ]
+            for log in logs:
+                log.parent.mkdir(parents=True, exist_ok=True)
+                log.touch()
+            capture = diagnostics.Capture(artifacts, {})
+            tests = diagnostics.capture_bazel_tests(
+                capture, root, "\n".join(f"  {log}" for log in logs)
+            )
+            self.assertEqual(len(tests), 4)
+            self.assertEqual(
+                tests[0]["error"], "test log is outside the Bazel output tree"
+            )
+            self.assertEqual(
+                tests[1]["error"],
+                "test log does not identify a configured Bazel test",
+            )
+            self.assertEqual(
+                tests[2]["error"], "failed test runfiles manifest is missing"
+            )
+            self.assertEqual(
+                tests[2]["manifest_candidates"],
+                [
+                    str(binary_root / f"no_manifest{suffix}")
+                    for suffix in (".runfiles_manifest", ".exe.runfiles_manifest")
+                ],
+            )
+            entries = tests[3]["runfiles"]
+            self.assertEqual(entries[0]["error"], "invalid runfiles manifest entry")
+            self.assertEqual(entries[0]["line"], 1)
+            self.assertEqual(
+                entries[1]["error"], "runfile target is not an absolute path"
+            )
+            self.assertIn("error", capture.files[str(missing_input)])
+            self.assertNotIn(str(logs[0]), capture.files)
+
+    def test_bazel_manifest_capture_limit_is_explicit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            output = root / "bazel-out/config"
+            log = output / "testlogs/tests/failure/test.log"
+            log.parent.mkdir(parents=True)
+            log.touch()
+            manifest = output / "bin/tests/failure.runfiles_manifest"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text("_main/empty.py \n")
+            capture = diagnostics.Capture(root, {})
+            capture.remaining_bytes = 0
+            tests = diagnostics.capture_bazel_tests(capture, root, f"  {log}\n")
+            self.assertEqual(
+                tests[0]["error"],
+                "failed test runfiles manifest could not be captured",
+            )
+            self.assertEqual(
+                capture.files[str(manifest)]["error"], "capture byte limit exceeded"
+            )
+
     def test_bad_crash_events_preserve_other_failure_evidence(self):
         for output, returncode in ((b"Access denied", 5), (b"invalid XML", 0)):
             with (

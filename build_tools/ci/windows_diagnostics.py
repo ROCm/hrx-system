@@ -11,6 +11,7 @@ Ninja's input query enumerates the failed link's objects and archives without
 running actions, and symbol tools inspect copies of those inputs. Application
 Control launch failures capture native block events and policy identities.
 Silent process failures capture native crash events and build-owned images.
+Failed Bazel tests retain their launchers and declared runfiles.
 Missing files, access errors, and capture limits appear in the manifest.
 """
 
@@ -207,6 +208,104 @@ def capture_process_images(capture: Capture, cwd: Path, output: str) -> None:
             path = cwd / path
         if path.suffix.lower() == ".exe" and path.resolve().is_relative_to(output_root):
             capture.file(path, copy=True)
+
+
+def capture_bazel_tests(capture: Capture, cwd: Path, output: str) -> list[dict]:
+    # Bazel prints a test.log path below each failed test in its final summary.
+    # The adjacent bin tree and runfiles manifest identify its inputs without
+    # another Bazel invocation, which could replace the failed program.
+    output_root = (cwd / "bazel-out").resolve()
+    source_root = cwd.resolve()
+    tests = []
+    inputs: dict[Path, None] = {}
+    for name in dict.fromkeys(
+        re.findall(r"^[ \t]+([^\r\n]+[/\\]test\.log)[ \t]*$", output, re.MULTILINE)
+    ):
+        log = (cwd / name).resolve()
+        test = {"log": str(log)}
+        tests.append(test)
+        if not log.is_relative_to(output_root):
+            test["error"] = "test log is outside the Bazel output tree"
+            continue
+        relative = log.relative_to(output_root)
+        if len(relative.parts) < 4 or relative.parts[1] != "testlogs":
+            test["error"] = "test log does not identify a configured Bazel test"
+            continue
+        capture.file(log, copy=True)
+        target = output_root / relative.parts[0] / "bin" / Path(*relative.parts[2:-1])
+        candidates = [
+            target.with_name(target.name + suffix)
+            for suffix in (".runfiles_manifest", ".exe.runfiles_manifest")
+        ]
+        manifest = next((path for path in candidates if path.is_file()), None)
+        if manifest is None:
+            test.update(
+                error="failed test runfiles manifest is missing",
+                manifest_candidates=[str(path) for path in candidates],
+            )
+            continue
+        record = capture.file(manifest, copy=True)
+        test["manifest"] = record["path"]
+        if "copy" not in record:
+            test["error"] = "failed test runfiles manifest could not be captured"
+            continue
+        for launcher in (target, target.with_name(target.name + ".exe")):
+            if launcher.is_file():
+                inputs[launcher] = None
+        runfiles = []
+        test["runfiles"] = runfiles
+        # Read the snapshot: a later action cannot change the inventory while
+        # we are preserving its files. Escaped manifests encode spaces only in
+        # logical names, and encode newlines/backslashes in both columns.
+        with (capture.directory / record["copy"]).open(
+            encoding="utf-8", newline="\n"
+        ) as stream:
+            for number, line in enumerate(stream, 1):
+                line = line.rstrip("\r\n")
+                escaped = line.startswith(" ")
+                logical, separator, physical = line[escaped:].partition(" ")
+                entry = {"name": logical}
+                runfiles.append(entry)
+                if not separator:
+                    entry.update(error="invalid runfiles manifest entry", line=number)
+                    continue
+                if escaped:
+                    entry["name"] = (
+                        logical.replace(r"\s", " ")
+                        .replace(r"\n", "\n")
+                        .replace(r"\b", "\\")
+                    )
+                    physical = physical.replace(r"\n", "\n").replace(r"\b", "\\")
+                if not physical:
+                    entry["empty"] = True
+                    continue
+                path = Path(physical)
+                entry["path"] = physical
+                if not path.is_absolute():
+                    entry["error"] = "runfile target is not an absolute path"
+                    continue
+                path = path.resolve()
+                entry["path"] = str(path)
+                if not any(
+                    path.is_relative_to(root) for root in (output_root, source_root)
+                ):
+                    entry["excluded"] = "runfile is outside the build and source trees"
+                    continue
+                inputs[path] = None
+    # Deduplicate shared compilers across failed tests, and preserve every test's
+    # executable and data before optional PDBs consume the remaining budget.
+    for path in inputs:
+        if path.suffix.lower() != ".pdb":
+            capture.file(path, copy=True)
+    symbols = dict.fromkeys(path for path in inputs if path.suffix.lower() == ".pdb")
+    for path in inputs:
+        if path.suffix.lower() in (".exe", ".dll"):
+            symbols_path = path.with_suffix(".pdb")
+            if symbols_path.is_file():
+                symbols[symbols_path] = None
+    for path in symbols:
+        capture.file(path, copy=True)
+    return tests
 
 
 def capture_access_failures(capture: Capture, cwd: Path, output: str) -> None:
@@ -462,6 +561,7 @@ def capture_failure(
     output = (directory / "output.log").read_text(encoding="utf-8", errors="replace")
     output = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", output)
     try:
+        metadata["bazel_tests"] = capture_bazel_tests(capture, cwd, output)
         capture_application_crashes(capture, cwd, build_dir, started_at)
         capture_application_control(capture, cwd, output, started_at)
         capture_resource_exhaustion(capture, cwd, output, started_at)
