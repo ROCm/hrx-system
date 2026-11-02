@@ -319,7 +319,8 @@ static iree_status_t loom_low_allocation_interval_assignment_record_failure(
     const loom_liveness_interval_t* interval,
     loom_value_ordinal_t value_ordinal,
     const loom_low_allocation_class_capacity_t* capacity, uint32_t budget_units,
-    bool interval_requires_register, iree_string_view_t failure_code) {
+    bool interval_requires_register, bool is_spill_traffic,
+    iree_string_view_t failure_code) {
   loom_low_allocation_failure_t failure = {
       .failure_code = failure_code,
       .op = loom_low_diagnostic_value_origin_op(state->context->module,
@@ -328,6 +329,7 @@ static iree_status_t loom_low_allocation_interval_assignment_record_failure(
       .value_id = interval->value_id,
       .value_class = interval->value_class,
       .descriptor_reg_class_id = capacity->descriptor_reg_class_id,
+      .is_spill_traffic = is_spill_traffic,
       .start_point =
           state->unit_liveness.values[value_ordinal].acquisition_start_point,
       .end_point =
@@ -1846,15 +1848,19 @@ static iree_status_t loom_low_allocation_interval_assignment_assign(
     const loom_low_register_requirement_t spill_requirement =
         loom_low_register_requirements_get(context->register_requirements,
                                            value_ordinal);
+    const bool is_spill_traffic =
+        spill_requirement ==
+            LOOM_LOW_REGISTER_REQUIREMENT_MATERIALIZED_TRAFFIC ||
+        (interval->value_id < context->required_register_values.bit_count &&
+         iree_bitmap_test(context->required_register_values,
+                          interval->value_id));
     // A producer lease needs physical storage at definition. Previously
     // assigned values can still spill; rebuilding the frame then closes their
     // leases before the stores and establishes new leases for the reloads.
     const bool requires_register =
         loom_low_allocation_storage_lease_state_value_has_records(
             context->storage_leases, context->liveness, interval->value_id) ||
-        (interval->value_id < context->required_register_values.bit_count &&
-         iree_bitmap_test(context->required_register_values,
-                          interval->value_id)) ||
+        is_spill_traffic ||
         spill_requirement != LOOM_LOW_REGISTER_REQUIREMENT_NONE;
     const bool interval_requires_register =
         !capacity.is_spillable || requires_register;
@@ -1937,7 +1943,7 @@ static iree_status_t loom_low_allocation_interval_assignment_assign(
       IREE_RETURN_IF_ERROR(
           loom_low_allocation_interval_assignment_record_failure(
               state, interval, value_ordinal, &capacity, budget_units,
-              requires_register, failure_code));
+              requires_register, is_spill_traffic, failure_code));
       ++context->target_constraints->error_count;
       return iree_ok_status();
     }
