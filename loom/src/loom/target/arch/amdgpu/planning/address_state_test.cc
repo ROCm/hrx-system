@@ -11,6 +11,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/encoding/encoding.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
@@ -259,6 +260,28 @@ TEST_F(AmdgpuAddressStateTest, StructuralPacketsHaveNoDescriptorRequirement) {
   const loom_amdgpu_address_state_requirement_t requirement = Requirement(2);
   EXPECT_EQ(requirement.mask, 0u);
   EXPECT_EQ(requirement.value, 0u);
+}
+
+TEST_F(AmdgpuAddressStateTest, DirectCallsRequireDefaultAddressState) {
+  loom_op_t call_op = {.kind = LOOM_OP_LOW_FUNC_CALL};
+  nodes_[1].op = &call_op;
+  nodes_[1].descriptor = nullptr;
+  nodes_[1].kind = LOOM_LOW_SCHEDULE_NODE_STRUCTURAL;
+  const loom_amdgpu_address_state_requirement_t requirement = Requirement(1);
+  EXPECT_EQ(requirement.mask, UINT8_MAX);
+  EXPECT_EQ(requirement.value, 0u);
+
+  const loom_amdgpu_address_state_requirement_t first_requirement =
+      Requirement(0);
+  loom_amdgpu_address_state_plan_t plan = {};
+  IREE_ASSERT_OK(BuildPlan(&plan));
+  ASSERT_EQ(plan.transition_count, 2u);
+  EXPECT_EQ(plan.transitions[0].node_index, 0u);
+  EXPECT_EQ(plan.transitions[0].mode_immediate, first_requirement.value);
+  EXPECT_EQ(plan.transitions[1].node_index, 1u);
+  EXPECT_EQ(plan.transitions[1].mode_immediate,
+            static_cast<uint16_t>(static_cast<uint16_t>(first_requirement.value)
+                                  << 8));
 }
 
 }  // namespace

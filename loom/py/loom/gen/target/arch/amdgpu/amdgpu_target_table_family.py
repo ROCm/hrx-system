@@ -89,6 +89,8 @@ def amdgpu_target_table_instruction_names_by_isa_key(
     for instruction_names in instruction_names_by_isa_key.values():
         instruction_names.update(
             (
+                "S_ADDC_U32",
+                "S_ADD_U32",
                 "S_SETPC_B64",
                 "S_SWAPPC_B64",
                 "V_SWAP_B32",

@@ -11,6 +11,7 @@
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/arch/amdgpu/abi/call_abi.h"
 #include "loom/target/arch/amdgpu/encoding/encoding.h"
 #include "loom/target/arch/amdgpu/planning/packet_plan.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
@@ -106,6 +107,8 @@ typedef struct loom_amdgpu_assembly_branch_state_t {
 typedef struct loom_amdgpu_assembly_emit_state_t {
   // Function-local storage layout shared by all storage-address packets.
   const loom_amdgpu_storage_layout_t* storage_layout;
+  // Native action selected for source-level low.return packets.
+  loom_amdgpu_function_return_mode_t return_mode;
   // Target packet plan and its emission-order consumption cursors.
   loom_amdgpu_assembly_packet_plan_state_t packet_plan;
   // Function-local branch placement and emission cursors.
@@ -115,6 +118,21 @@ typedef struct loom_amdgpu_assembly_emit_state_t {
   // Packet traversal and simulated architectural state.
   loom_amdgpu_assembly_traversal_state_t traversal;
 } loom_amdgpu_assembly_emit_state_t;
+
+static iree_status_t loom_amdgpu_append_symbol_ref(
+    const loom_native_assembly_packet_context_t* context,
+    loom_symbol_ref_t symbol_ref) {
+  const loom_module_t* module = context->schedule->module;
+  IREE_ASSERT(loom_symbol_ref_is_valid(symbol_ref));
+  IREE_ASSERT_EQ(symbol_ref.module_id, 0);
+  IREE_ASSERT_LT(symbol_ref.symbol_id, module->symbols.count);
+  const loom_symbol_t* symbol = &module->symbols.entries[symbol_ref.symbol_id];
+  IREE_ASSERT_LT(symbol->name_id, module->strings.count);
+  const iree_string_view_t name =
+      loom_string_table_get(&module->strings, symbol->name_id);
+  return iree_string_builder_append_format(context->builder, "@%.*s",
+                                           (int)name.size, name.data);
+}
 
 static iree_string_view_t loom_amdgpu_descriptor_key(
     const loom_native_assembly_packet_context_t* context) {
@@ -453,10 +471,7 @@ static iree_status_t loom_amdgpu_append_packet_symbol_attr(
         "AMDGPU assembly attribute '%.*s' references an unnamed symbol",
         (int)field_name.size, field_name.data);
   }
-  const iree_string_view_t name =
-      loom_string_table_get(&module->strings, symbol->name_id);
-  return iree_string_builder_append_format(context->builder, "@%.*s",
-                                           (int)name.size, name.data);
+  return loom_amdgpu_append_symbol_ref(context, symbol_ref);
 }
 
 static iree_status_t loom_amdgpu_append_packet_immediate(
@@ -3070,9 +3085,123 @@ static iree_status_t loom_amdgpu_append_vopd_or_descriptor_packet(
   return loom_amdgpu_append_vopd_pair_packet(context, pair);
 }
 
+static iree_status_t loom_amdgpu_append_call_packet(
+    void* user_data, const loom_native_assembly_packet_context_t* context) {
+  loom_amdgpu_assembly_emit_state_t* emit_state =
+      (loom_amdgpu_assembly_emit_state_t*)user_data;
+  const loom_low_allocation_call_moves_t* moves =
+      loom_low_allocation_find_call_moves_by_source_ordinal(
+          context->allocation, context->packet->node_index);
+  IREE_ASSERT_NE(moves, NULL);
+  IREE_ASSERT_LE(
+      moves->arguments.moves.count,
+      UINT32_MAX - LOOM_AMDGPU_CALL_ABI_CALL_CONTROL_INSTRUCTION_COUNT);
+  uint32_t instruction_offset = (uint32_t)moves->arguments.moves.count;
+  bool emitted_arguments = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_move_range(
+      context, emit_state, moves->arguments.moves,
+      /*instruction_offset_base=*/0, &emitted_arguments));
+  if (emitted_arguments) {
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(context->builder, "\n  "));
+  }
+  IREE_ASSERT_EQ(emit_state->traversal.current_vgpr_msb_mode, 0);
+
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      context->builder, "s_mov_b64 s[%" PRIu32 ":%" PRIu32 "], exec",
+      (uint32_t)LOOM_AMDGPU_CALL_ABI_SAVED_EXEC_BASE,
+      (uint32_t)LOOM_AMDGPU_CALL_ABI_SAVED_EXEC_BASE + 1u));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_wait_states_after_instruction(
+      emit_state, context, ++instruction_offset));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      context->builder, "\n  s_getpc_b64 s[%" PRIu32 ":%" PRIu32 "]",
+      (uint32_t)LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE,
+      (uint32_t)LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE + 1u));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_wait_states_after_instruction(
+      emit_state, context, ++instruction_offset));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      context->builder, "\n  s_add_u32 s%" PRIu32 ", s%" PRIu32 ", ",
+      (uint32_t)LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE,
+      (uint32_t)LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE));
+  const loom_symbol_ref_t callee =
+      loom_low_func_call_callee(context->packet->node->op);
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_symbol_ref(context, callee));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(context->builder, "@rel32_lo"));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_wait_states_after_instruction(
+      emit_state, context, ++instruction_offset));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      context->builder, "\n  s_addc_u32 s%" PRIu32 ", s%" PRIu32 ", ",
+      (uint32_t)LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE + 1u,
+      (uint32_t)LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE + 1u));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_symbol_ref(context, callee));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(context->builder, "@rel32_hi"));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_wait_states_after_instruction(
+      emit_state, context, ++instruction_offset));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      context->builder,
+      "\n  s_swappc_b64 s[%" PRIu32 ":%" PRIu32 "], s[%" PRIu32 ":%" PRIu32 "]",
+      (uint32_t)LOOM_AMDGPU_CALL_ABI_RETURN_ADDRESS_BASE,
+      (uint32_t)LOOM_AMDGPU_CALL_ABI_RETURN_ADDRESS_BASE + 1u,
+      (uint32_t)LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE,
+      (uint32_t)LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE + 1u));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_wait_states_after_instruction(
+      emit_state, context, ++instruction_offset));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      context->builder, "\n  s_mov_b64 exec, s[%" PRIu32 ":%" PRIu32 "]",
+      (uint32_t)LOOM_AMDGPU_CALL_ABI_SAVED_EXEC_BASE,
+      (uint32_t)LOOM_AMDGPU_CALL_ABI_SAVED_EXEC_BASE + 1u));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_wait_states_after_instruction(
+      emit_state, context, ++instruction_offset));
+
+  if (moves->results.moves.count == 0) {
+    return iree_ok_status();
+  }
+  IREE_ASSERT_LE(moves->results.moves.count,
+                 (iree_host_size_t)UINT32_MAX - instruction_offset);
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(context->builder, "\n  "));
+  return loom_amdgpu_emit_move_range(context, emit_state, moves->results.moves,
+                                     instruction_offset,
+                                     /*out_emitted=*/NULL);
+}
+
 static iree_status_t loom_amdgpu_append_return_packet(
     void* user_data, const loom_native_assembly_packet_context_t* context) {
-  (void)user_data;
+  loom_amdgpu_assembly_emit_state_t* emit_state =
+      (loom_amdgpu_assembly_emit_state_t*)user_data;
+  uint32_t instruction_offset = 0;
+  bool emitted_results = false;
+  if (loom_low_return_isa(context->packet->node->op)) {
+    const loom_low_allocation_exit_moves_t* moves =
+        loom_low_allocation_find_exit_moves_by_source_ordinal(
+            context->allocation, context->packet->node_index);
+    if (moves != NULL) {
+      IREE_ASSERT_LE(moves->results.moves.count, UINT32_MAX);
+      instruction_offset = (uint32_t)moves->results.moves.count;
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_move_range(
+          context, emit_state, moves->results.moves,
+          /*instruction_offset_base=*/0, &emitted_results));
+    }
+    if (emit_state->return_mode == LOOM_AMDGPU_FUNCTION_RETURN_MODE_CALLER) {
+      if (emitted_results) {
+        IREE_RETURN_IF_ERROR(
+            iree_string_builder_append_cstring(context->builder, "\n  "));
+      }
+      IREE_ASSERT_EQ(emit_state->traversal.current_vgpr_msb_mode, 0);
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          context->builder, "s_setpc_b64 s[%" PRIu32 ":%" PRIu32 "]",
+          (uint32_t)LOOM_AMDGPU_CALL_ABI_RETURN_ADDRESS_BASE,
+          (uint32_t)LOOM_AMDGPU_CALL_ABI_RETURN_ADDRESS_BASE + 1u));
+      return loom_amdgpu_append_wait_states_after_instruction(
+          emit_state, context, instruction_offset + 1u);
+    }
+  }
+  if (emitted_results) {
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(context->builder, "\n  "));
+  }
   return iree_string_builder_append_cstring(context->builder, "s_endpgm");
 }
 
@@ -3216,6 +3345,8 @@ static iree_status_t loom_amdgpu_append_structural_packet(
       return loom_amdgpu_append_concat_packet(user_data, context);
     case LOOM_OP_LOW_STORAGE_ADDRESS:
       return loom_amdgpu_append_storage_address_packet(user_data, context);
+    case LOOM_OP_LOW_FUNC_CALL:
+      return loom_amdgpu_append_call_packet(user_data, context);
     case LOOM_OP_LOW_RETURN:
     case LOOM_OP_LOW_UNREACHABLE:
       return loom_amdgpu_append_return_packet(user_data, context);
@@ -3280,6 +3411,9 @@ iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
       packet_plan ? &packet_plan->vopd_plan : NULL;
   const loom_amdgpu_instruction_layout_t* instruction_layout =
       options ? options->instruction_layout : NULL;
+  const loom_amdgpu_function_return_mode_t return_mode =
+      options ? options->return_mode
+              : LOOM_AMDGPU_FUNCTION_RETURN_MODE_END_PROGRAM;
   const loom_amdgpu_branch_layout_t* branch_layout =
       instruction_layout && instruction_layout->branches.island_count
           ? &instruction_layout->branches
@@ -3287,6 +3421,7 @@ iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
 
   loom_amdgpu_assembly_emit_state_t emit_state = {
       .storage_layout = storage_layout,
+      .return_mode = return_mode,
       .delay_layout = instruction_layout ? &instruction_layout->delays : NULL,
       .packet_plan =
           {

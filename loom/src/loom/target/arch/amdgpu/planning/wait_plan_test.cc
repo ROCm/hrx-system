@@ -696,6 +696,30 @@ TEST_F(AmdgpuWaitPlanTest, DirectCallQuiescesArgumentMovesBeforeControl) {
   EXPECT_EQ(state.cycle_count, 3u);
 }
 
+TEST_F(AmdgpuWaitPlanTest, ReturnMovesPrecedeControlTransfer) {
+  FinalizeSchedule();
+  moves_.push_back(Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1, 0));
+  const loom_low_allocation_exit_moves_t exit_moves = {
+      .source_ordinal = static_cast<uint32_t>(nodes_.size() - 1),
+      .result_count = 1,
+      .results = {.moves = {.start = 0, .count = 1}},
+  };
+  allocation_.exit_moves = &exit_moves;
+  allocation_.exit_move_count = 1;
+  allocation_.moves = moves_.data();
+  allocation_.move_count = moves_.size();
+
+  const loom_amdgpu_structural_packet_info_t structural =
+      loom_amdgpu_structural_packet_analyze(
+          &schedule_, &allocation_, exit_moves.source_ordinal,
+          LOOM_AMDGPU_STRUCTURAL_PACKET_ANALYSIS_FLAG_REQUIRE_ALLOCATION);
+  EXPECT_EQ(structural.instruction_count, 2u);
+  EXPECT_EQ(structural.scalar_alu_instruction_count, 1u);
+  ASSERT_EQ(structural.move_segment_count, 1u);
+  EXPECT_EQ(structural.move_segments[0].group, &exit_moves.results);
+  EXPECT_EQ(structural.move_segments[0].instruction_offset, 0u);
+}
+
 TEST_F(AmdgpuWaitPlanTest, RefinedCrossBlockMemoryOmitsDisjointWait) {
   testing::CfgGraph graph({{1}, {}});
   CrossBlockMemoryFixture fixture = {};

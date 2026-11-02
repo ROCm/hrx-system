@@ -53,9 +53,9 @@ typedef struct loom_amdgpu_address_state_plan_t {
 } loom_amdgpu_address_state_plan_t;
 
 // Returns the address-state bits required by a verified |packet| from an
-// addressability-accepted emission frame. Structural packets return an empty
-// requirement; their target-generated move sequences manage and restore
-// address state inside native emission.
+// addressability-accepted emission frame. Direct calls require the default
+// state inherited by helper entry; other descriptor-less structural packets
+// return an empty requirement.
 loom_amdgpu_address_state_requirement_t
 loom_amdgpu_address_state_requirement_for_packet(
     const loom_low_allocation_table_t* allocation,

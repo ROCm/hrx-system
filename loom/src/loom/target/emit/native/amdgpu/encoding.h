@@ -15,6 +15,7 @@
 #include "loom/codegen/low/schedule/types.h"
 #include "loom/target/emit/native/amdgpu/branch_layout.h"
 #include "loom/target/emit/native/amdgpu/delay_layout.h"
+#include "loom/target/emit/native/amdgpu/function_text.h"
 #include "loom/target/emit/native/amdgpu/storage_layout.h"
 #include "loom/target/emit/native/amdgpu/text_fixup.h"
 
@@ -74,6 +75,8 @@ typedef struct loom_amdgpu_encode_instruction_stream_options_t {
   const loom_amdgpu_storage_layout_t* storage_layout;
   // Optional encoding products requested by the caller.
   loom_amdgpu_encode_instruction_stream_flags_t flags;
+  // Native action selected for source-level low.return packets.
+  loom_amdgpu_function_return_mode_t return_mode;
 } loom_amdgpu_encode_instruction_stream_options_t;
 
 // Native placement decisions shared by binary and assembly emission. The
@@ -97,6 +100,10 @@ typedef struct loom_amdgpu_encoded_instruction_stream_t {
   const loom_amdgpu_hsaco_text_fixup_t* text_fixups;
   // Number of entries in |text_fixups|.
   iree_host_size_t text_fixup_count;
+  // Module-internal calls resolved after function text layout.
+  const loom_amdgpu_internal_call_fixup_t* internal_call_fixups;
+  // Number of entries in |internal_call_fixups|.
+  iree_host_size_t internal_call_fixup_count;
   // Target-owned instructions inserted during native encoding when capture was
   // requested.
   const loom_amdgpu_native_insertion_t* native_insertions;

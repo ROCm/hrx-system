@@ -206,7 +206,22 @@ loom_amdgpu_structural_packet_info_t loom_amdgpu_structural_packet_analyze(
     }
     return info;
   }
-  if (loom_low_return_isa(op) || loom_low_unreachable_isa(op)) {
+  if (loom_low_return_isa(op)) {
+    info.flags = LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MATERIALIZES;
+    if (allocation != NULL) {
+      const loom_low_allocation_exit_moves_t* moves =
+          loom_low_allocation_find_exit_moves_by_source_ordinal(allocation,
+                                                                node_index);
+      if (moves != NULL) {
+        loom_amdgpu_structural_packet_append_move_group(allocation,
+                                                        &moves->results, &info);
+      }
+    }
+    ++info.instruction_count;
+    info.scalar_alu_instruction_count = 1;
+    return info;
+  }
+  if (loom_low_unreachable_isa(op)) {
     info.flags = LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MATERIALIZES;
     info.instruction_count = 1;
     info.scalar_alu_instruction_count = 1;

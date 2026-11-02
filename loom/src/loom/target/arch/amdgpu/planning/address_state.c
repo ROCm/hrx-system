@@ -34,6 +34,10 @@ loom_amdgpu_address_state_requirement_for_packet(
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_view_t* packet) {
   loom_amdgpu_address_state_requirement_t requirement = {0};
+  if (loom_low_func_call_isa(packet->node->op)) {
+    requirement.mask = UINT8_MAX;
+    return requirement;
+  }
   const loom_low_descriptor_t* descriptor = packet->descriptor;
   if (descriptor == NULL) {
     return requirement;

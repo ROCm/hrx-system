@@ -96,6 +96,7 @@ loom_cc_test(
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
         "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
         "//loom/src/loom/target/arch/amdgpu/encoding",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
@@ -187,6 +188,7 @@ loom_cc_library(
     name = "structural_packet",
     srcs = ["structural_packet.c"],
     hdrs = ["structural_packet.h"],
+    visibility = _AMDGPU_NATIVE_PLANNING_VISIBILITY,
     deps = [
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low:packet",

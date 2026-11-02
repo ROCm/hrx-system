@@ -293,6 +293,10 @@ typedef struct loom_amdgpu_encoding_table_t {
   uint16_t s_swappc_b64_opcode;
   // SOP1 opcode used to return through an SGPR pair.
   uint16_t s_setpc_b64_opcode;
+  // SOP2 opcode used to add the low half of a PC-relative displacement.
+  uint16_t s_add_u32_opcode;
+  // SOP2 opcode used to add the high half plus the low-half carry.
+  uint16_t s_addc_u32_opcode;
   // Scalar-source selector naming EXEC_LO as a 64-bit EXEC pair.
   uint16_t scalar_source_exec_lo;
   // Scalar-destination selector naming EXEC_LO as a 64-bit EXEC pair.
@@ -494,6 +498,18 @@ iree_status_t loom_amdgpu_encoding_pack_s_swappc_b64(
 iree_status_t loom_amdgpu_encoding_pack_s_setpc_b64(
     const loom_amdgpu_encoding_table_t* table, uint16_t ssrc0,
     loom_amdgpu_encoding_packet_t* out_packet);
+
+// Packs an s_add_u32 with a mandatory 32-bit literal source. The literal form
+// is retained even when |imm32| is inline-encodable so callers may patch it
+// after final text layout.
+iree_status_t loom_amdgpu_encoding_pack_s_add_u32_literal(
+    const loom_amdgpu_encoding_table_t* table, uint16_t sdst, uint16_t ssrc0,
+    uint32_t imm32, loom_amdgpu_encoding_packet_t* out_packet);
+
+// Packs an s_addc_u32 with a mandatory 32-bit literal source.
+iree_status_t loom_amdgpu_encoding_pack_s_addc_u32_literal(
+    const loom_amdgpu_encoding_table_t* table, uint16_t sdst, uint16_t ssrc0,
+    uint32_t imm32, loom_amdgpu_encoding_packet_t* out_packet);
 
 // Packs a 32-bit VGPR-to-VGPR v_mov_b32 packet using the target table's VOP1
 // layout.

@@ -14,8 +14,10 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/arch/amdgpu/abi/call_abi.h"
 #include "loom/target/arch/amdgpu/encoding/encoding.h"
 #include "loom/target/arch/amdgpu/planning/packet_plan.h"
+#include "loom/target/arch/amdgpu/planning/structural_packet.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/branch_layout.h"
@@ -75,6 +77,8 @@ typedef struct loom_amdgpu_encode_inputs_t {
   const loom_amdgpu_storage_layout_t* storage_layout;
   // Optional encoding products requested by the caller.
   loom_amdgpu_encode_instruction_stream_flags_t flags;
+  // Native action selected for source-level low.return packets.
+  loom_amdgpu_function_return_mode_t return_mode;
   // Cached descriptor rows needed by native encoding helper packets.
   loom_amdgpu_native_descriptor_refs_t descriptors;
 } loom_amdgpu_encode_inputs_t;
@@ -117,6 +121,15 @@ typedef struct loom_amdgpu_encode_text_fixup_output_t {
   // Number of text literal fixups planned or written so far.
   iree_host_size_t count;
 } loom_amdgpu_encode_text_fixup_output_t;
+
+typedef struct loom_amdgpu_encode_internal_call_fixup_output_t {
+  // Module-internal call fixups, or NULL during the sizing pass.
+  loom_amdgpu_internal_call_fixup_t* values;
+  // Capacity of |values| in entries, or zero during the sizing pass.
+  iree_host_size_t capacity;
+  // Number of call fixups planned or written so far.
+  iree_host_size_t count;
+} loom_amdgpu_encode_internal_call_fixup_output_t;
 
 typedef struct loom_amdgpu_encode_native_insertion_output_t {
   // Native insertion rows, or NULL during the sizing pass.
@@ -178,6 +191,8 @@ typedef struct loom_amdgpu_encode_state_t {
   loom_amdgpu_encode_stream_output_t stream;
   // Relocation records emitted alongside the instruction stream.
   loom_amdgpu_encode_text_fixup_output_t text_fixups;
+  // Module-internal call records emitted alongside the instruction stream.
+  loom_amdgpu_encode_internal_call_fixup_output_t internal_call_fixups;
   // Optional target-owned insertion records emitted for reports.
   loom_amdgpu_encode_native_insertion_output_t native_insertions;
   // Function-local branch placement state.
@@ -726,6 +741,18 @@ static void loom_amdgpu_append_text_fixup(
     state->text_fixups.values[state->text_fixups.count] = *fixup;
   }
   ++state->text_fixups.count;
+}
+
+static void loom_amdgpu_append_internal_call_fixup(
+    loom_amdgpu_encode_state_t* state,
+    const loom_amdgpu_internal_call_fixup_t* fixup) {
+  if (state->internal_call_fixups.values != NULL) {
+    IREE_ASSERT_LT(state->internal_call_fixups.count,
+                   state->internal_call_fixups.capacity);
+    state->internal_call_fixups.values[state->internal_call_fixups.count] =
+        *fixup;
+  }
+  ++state->internal_call_fixups.count;
 }
 
 static iree_status_t loom_amdgpu_packet_lhs_pc_base(
@@ -1678,9 +1705,123 @@ static void loom_amdgpu_update_pc_registers_after_descriptor(
                                                    (uint64_t)packet_end);
 }
 
+static iree_status_t loom_amdgpu_append_call_control_packet(
+    loom_amdgpu_encode_state_t* state,
+    const loom_amdgpu_encoding_packet_t* encoded_packet,
+    uint32_t instruction_offset, uint64_t* out_packet_end) {
+  loom_amdgpu_append_encoding_packet(state, encoded_packet);
+  if (out_packet_end != NULL) {
+    *out_packet_end = state->stream.length;
+  }
+  return loom_amdgpu_encode_wait_states(state, &state->traversal.current_packet,
+                                        instruction_offset + 1u);
+}
+
+static iree_status_t loom_amdgpu_encode_call_packet(
+    loom_amdgpu_encode_state_t* state, const loom_low_packet_view_t* packet) {
+  const loom_low_allocation_call_moves_t* moves =
+      loom_low_allocation_find_call_moves_by_source_ordinal(
+          state->inputs.allocation, packet->node_index);
+  IREE_ASSERT_NE(moves, NULL);
+  IREE_ASSERT_LE(
+      moves->arguments.moves.count,
+      UINT32_MAX - LOOM_AMDGPU_CALL_ABI_CALL_CONTROL_INSTRUCTION_COUNT);
+  uint32_t instruction_offset = (uint32_t)moves->arguments.moves.count;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_encode_move_range(
+      state, moves->arguments.moves, /*instruction_offset_base=*/0));
+  if (state->delay_builder != NULL) {
+    loom_amdgpu_delay_layout_end_span(state->delay_builder);
+  }
+
+  loom_amdgpu_encoding_packet_t encoded_packet;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_s_mov_b64_from_exec(
+      state->inputs.encoding_table, LOOM_AMDGPU_CALL_ABI_SAVED_EXEC_BASE,
+      &encoded_packet));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_call_control_packet(
+      state, &encoded_packet, instruction_offset++, /*out_packet_end=*/NULL));
+
+  IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_s_getpc_b64(
+      state->inputs.encoding_table, LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE,
+      &encoded_packet));
+  uint64_t base_pc_byte_offset = 0;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_call_control_packet(
+      state, &encoded_packet, instruction_offset++, &base_pc_byte_offset));
+
+  uint64_t low_literal_byte_offset = 0;
+  const bool has_low_literal_byte_offset = iree_checked_add_u64(
+      state->stream.length, sizeof(uint32_t), &low_literal_byte_offset);
+  IREE_ASSERT(has_low_literal_byte_offset);
+  (void)has_low_literal_byte_offset;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_s_add_u32_literal(
+      state->inputs.encoding_table, LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE,
+      LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE, /*imm32=*/0, &encoded_packet));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_call_control_packet(
+      state, &encoded_packet, instruction_offset++, /*out_packet_end=*/NULL));
+
+  uint64_t high_literal_byte_offset = 0;
+  const bool has_high_literal_byte_offset = iree_checked_add_u64(
+      state->stream.length, sizeof(uint32_t), &high_literal_byte_offset);
+  IREE_ASSERT(has_high_literal_byte_offset);
+  (void)has_high_literal_byte_offset;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_s_addc_u32_literal(
+      state->inputs.encoding_table, LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE + 1u,
+      LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE + 1u, /*imm32=*/0,
+      &encoded_packet));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_call_control_packet(
+      state, &encoded_packet, instruction_offset++, /*out_packet_end=*/NULL));
+
+  IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_s_swappc_b64(
+      state->inputs.encoding_table, LOOM_AMDGPU_CALL_ABI_RETURN_ADDRESS_BASE,
+      LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE, &encoded_packet));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_call_control_packet(
+      state, &encoded_packet, instruction_offset++, /*out_packet_end=*/NULL));
+
+  IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_s_mov_b64_to_exec(
+      state->inputs.encoding_table, LOOM_AMDGPU_CALL_ABI_SAVED_EXEC_BASE,
+      &encoded_packet));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_call_control_packet(
+      state, &encoded_packet, instruction_offset++, /*out_packet_end=*/NULL));
+
+  const loom_amdgpu_internal_call_fixup_t fixup = {
+      .callee = loom_low_func_call_callee(packet->node->op),
+      .base_pc_byte_offset = base_pc_byte_offset,
+      .low_literal_byte_offset = low_literal_byte_offset,
+      .high_literal_byte_offset = high_literal_byte_offset,
+  };
+  loom_amdgpu_append_internal_call_fixup(state, &fixup);
+  loom_amdgpu_invalidate_pc_register_range(
+      state, LOOM_AMDGPU_CALL_ABI_RESERVED_SGPR_BASE,
+      LOOM_AMDGPU_CALL_ABI_RESERVED_SGPR_COUNT);
+
+  IREE_ASSERT_LE(moves->results.moves.count,
+                 (iree_host_size_t)UINT32_MAX - instruction_offset);
+  return loom_amdgpu_encode_move_range(state, moves->results.moves,
+                                       instruction_offset);
+}
+
 static iree_status_t loom_amdgpu_encode_return_packet(
     loom_amdgpu_encode_state_t* state, const loom_low_packet_view_t* packet) {
-  (void)packet;
+  uint32_t instruction_offset = 0;
+  if (loom_low_return_isa(packet->node->op)) {
+    const loom_low_allocation_exit_moves_t* moves =
+        loom_low_allocation_find_exit_moves_by_source_ordinal(
+            state->inputs.allocation, packet->node_index);
+    if (moves != NULL) {
+      IREE_ASSERT_LE(moves->results.moves.count, UINT32_MAX);
+      instruction_offset = (uint32_t)moves->results.moves.count;
+      IREE_RETURN_IF_ERROR(loom_amdgpu_encode_move_range(
+          state, moves->results.moves, /*instruction_offset_base=*/0));
+    }
+    if (state->inputs.return_mode == LOOM_AMDGPU_FUNCTION_RETURN_MODE_CALLER) {
+      loom_amdgpu_encoding_packet_t encoded_packet;
+      IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_s_setpc_b64(
+          state->inputs.encoding_table,
+          LOOM_AMDGPU_CALL_ABI_RETURN_ADDRESS_BASE, &encoded_packet));
+      loom_amdgpu_append_encoding_packet(state, &encoded_packet);
+      return loom_amdgpu_encode_wait_states(state, packet,
+                                            instruction_offset + 1u);
+    }
+  }
   return loom_amdgpu_encode_sopp_simm16(state,
                                         state->inputs.target->sopp.endpgm, 0);
 }
@@ -2103,6 +2244,8 @@ static iree_status_t loom_amdgpu_encode_packet(
       return loom_amdgpu_encode_storage_address_packet(state, packet);
     case LOOM_OP_LOW_COND_BR:
       return loom_amdgpu_encode_cond_branch_packet(state, packet);
+    case LOOM_OP_LOW_FUNC_CALL:
+      return loom_amdgpu_encode_call_packet(state, packet);
     case LOOM_OP_LOW_RETURN:
     case LOOM_OP_LOW_UNREACHABLE:
       return loom_amdgpu_encode_return_packet(state, packet);
@@ -2226,6 +2369,7 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_into_state(
   state->stream.length = 0;
   state->stream.instruction_count = 0;
   state->text_fixups.count = 0;
+  state->internal_call_fixups.count = 0;
   state->native_insertions.count = 0;
   state->traversal.current_vgpr_msb_mode = 0;
   state->packet_plan.next_address_state_index = 0;
@@ -2331,6 +2475,9 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
   const loom_amdgpu_encode_instruction_stream_flags_t flags =
       options ? options->flags
               : LOOM_AMDGPU_ENCODE_INSTRUCTION_STREAM_FLAG_NONE;
+  const loom_amdgpu_function_return_mode_t return_mode =
+      options ? options->return_mode
+              : LOOM_AMDGPU_FUNCTION_RETURN_MODE_END_PROGRAM;
   const loom_amdgpu_descriptor_set_info_t* target = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_encoding_target(schedule, &target));
   const loom_amdgpu_encoding_table_t* encoding_table =
@@ -2379,6 +2526,7 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
       .encoding_table = encoding_table,
       .storage_layout = storage_layout,
       .flags = flags,
+      .return_mode = return_mode,
       .descriptors = descriptors,
   };
   const loom_amdgpu_encode_packet_plan_state_t packet_plan_state = {
@@ -2485,6 +2633,13 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
         iree_arena_allocate_array(arena, sizing_state.text_fixups.count,
                                   sizeof(text_fixups[0]), (void**)&text_fixups);
   }
+  loom_amdgpu_internal_call_fixup_t* internal_call_fixups = NULL;
+  if (iree_status_is_ok(status) &&
+      sizing_state.internal_call_fixups.count != 0) {
+    status = iree_arena_allocate_array(
+        arena, sizing_state.internal_call_fixups.count,
+        sizeof(internal_call_fixups[0]), (void**)&internal_call_fixups);
+  }
   iree_host_size_t native_insertion_capacity =
       sizing_state.native_insertions.count;
   if (active_branch_layout != NULL &&
@@ -2518,6 +2673,11 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
               .values = text_fixups,
               .capacity = sizing_state.text_fixups.count,
           },
+      .internal_call_fixups =
+          {
+              .values = internal_call_fixups,
+              .capacity = sizing_state.internal_call_fixups.count,
+          },
       .native_insertions =
           {
               .values = native_insertions,
@@ -2545,6 +2705,8 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
                        branch_layout.group_count + branch_layout.island_count);
     IREE_ASSERT_EQ(writing_state.text_fixups.count,
                    sizing_state.text_fixups.count);
+    IREE_ASSERT_EQ(writing_state.internal_call_fixups.count,
+                   sizing_state.internal_call_fixups.count);
     IREE_ASSERT_EQ(writing_state.native_insertions.count,
                    native_insertion_capacity);
     *out_stream = (loom_amdgpu_encoded_instruction_stream_t){
@@ -2557,6 +2719,8 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
             },
         .text_fixups = text_fixups,
         .text_fixup_count = writing_state.text_fixups.count,
+        .internal_call_fixups = internal_call_fixups,
+        .internal_call_fixup_count = writing_state.internal_call_fixups.count,
         .native_insertions = native_insertions,
         .native_insertion_count = writing_state.native_insertions.count,
     };

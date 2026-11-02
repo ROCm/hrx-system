@@ -56,6 +56,8 @@ def _encoding_contract(*descriptor_keys: str) -> _EncodingContract:
         s_getpc_b64_opcode=2,
         s_swappc_b64_opcode=3,
         s_setpc_b64_opcode=4,
+        s_add_u32_opcode=5,
+        s_addc_u32_opcode=6,
         scalar_source_exec_lo=126,
         scalar_destination_exec_lo=126,
         v_mov_b32_opcode=1,

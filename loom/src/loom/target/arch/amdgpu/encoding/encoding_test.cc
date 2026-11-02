@@ -363,6 +363,20 @@ TEST(AmdgpuEncodingTest, PacksDirectCallControlAcrossSelectedFamilies) {
     EXPECT_EQ(packet.bit_count, 32u);
     EXPECT_EQ(packet.words[0],
               cdna ? UINT32_C(0xbe801d1e) : UINT32_C(0xbe80481e));
+
+    IREE_ASSERT_OK(loom_amdgpu_encoding_pack_s_add_u32_literal(
+        table, /*sdst=*/34, /*ssrc0=*/34, /*imm32=*/0, &packet));
+    EXPECT_EQ(packet.word_count, 2u);
+    EXPECT_EQ(packet.bit_count, 64u);
+    EXPECT_EQ(packet.words[0], UINT32_C(0x8022ff22));
+    EXPECT_EQ(packet.words[1], 0u);
+
+    IREE_ASSERT_OK(loom_amdgpu_encoding_pack_s_addc_u32_literal(
+        table, /*sdst=*/35, /*ssrc0=*/35, /*imm32=*/0, &packet));
+    EXPECT_EQ(packet.word_count, 2u);
+    EXPECT_EQ(packet.bit_count, 64u);
+    EXPECT_EQ(packet.words[0], UINT32_C(0x8223ff23));
+    EXPECT_EQ(packet.words[1], 0u);
   }
   if (!tested_table) {
     GTEST_SKIP() << "No AMDGPU encoding table selected";
