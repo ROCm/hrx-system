@@ -1855,14 +1855,18 @@ static bool loom_amdgpu_wait_state_matches_packet(
 }
 
 static iree_status_t loom_amdgpu_append_s_nop_cycles(
-    const loom_native_assembly_packet_context_t* context,
-    uint16_t cycle_count) {
+    const loom_native_assembly_packet_context_t* context, uint16_t cycle_count,
+    iree_string_view_t line_prefix, iree_string_view_t line_suffix) {
   while (cycle_count != 0) {
     const uint16_t chunk = cycle_count > LOOM_AMDGPU_WAIT_STATE_MAX_S_NOP_CYCLES
                                ? LOOM_AMDGPU_WAIT_STATE_MAX_S_NOP_CYCLES
                                : cycle_count;
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_string(context->builder, line_prefix));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        context->builder, "  s_nop %" PRIu16 "\n", (uint16_t)(chunk - 1)));
+        context->builder, "s_nop %" PRIu16, (uint16_t)(chunk - 1)));
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_string(context->builder, line_suffix));
     cycle_count -= chunk;
   }
   return iree_ok_status();
@@ -1871,10 +1875,12 @@ static iree_status_t loom_amdgpu_append_s_nop_cycles(
 static iree_status_t loom_amdgpu_append_wait_state_action(
     const loom_native_assembly_packet_context_t* context,
     const loom_amdgpu_wait_state_t* wait_state,
-    const loom_amdgpu_assembly_emit_state_t* state) {
+    const loom_amdgpu_assembly_emit_state_t* state,
+    iree_string_view_t line_prefix, iree_string_view_t line_suffix) {
   switch (wait_state->action) {
     case LOOM_AMDGPU_WAIT_STATE_ACTION_S_NOP:
-      return loom_amdgpu_append_s_nop_cycles(context, wait_state->cycle_count);
+      return loom_amdgpu_append_s_nop_cycles(context, wait_state->cycle_count,
+                                             line_prefix, line_suffix);
     case LOOM_AMDGPU_WAIT_STATE_ACTION_S_DELAY_ALU: {
       const uint16_t immediate =
           state->delay_layout
@@ -1882,22 +1888,40 @@ static iree_status_t loom_amdgpu_append_wait_state_action(
       if (immediate == 0) {
         return iree_ok_status();
       }
-      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
-          context->builder, "  s_delay_alu "));
+      IREE_RETURN_IF_ERROR(
+          iree_string_builder_append_string(context->builder, line_prefix));
+      IREE_RETURN_IF_ERROR(
+          iree_string_builder_append_cstring(context->builder, "s_delay_alu "));
       IREE_RETURN_IF_ERROR(
           loom_amdgpu_append_delay_alu_immediate(context, immediate));
-      return iree_string_builder_append_cstring(context->builder, "\n");
+      return iree_string_builder_append_string(context->builder, line_suffix);
     }
     case LOOM_AMDGPU_WAIT_STATE_ACTION_V_NOP:
       for (uint16_t i = 0; i < wait_state->cycle_count; ++i) {
         IREE_RETURN_IF_ERROR(
-            iree_string_builder_append_cstring(context->builder, "  v_nop\n"));
+            iree_string_builder_append_string(context->builder, line_prefix));
+        IREE_RETURN_IF_ERROR(
+            iree_string_builder_append_cstring(context->builder, "v_nop"));
+        IREE_RETURN_IF_ERROR(
+            iree_string_builder_append_string(context->builder, line_suffix));
       }
       return iree_ok_status();
-    case LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAIT_ALU:
-      return iree_string_builder_append_format(
-          context->builder, "  s_wait_alu depctr(%" PRIu16 ")\n",
-          wait_state->immediate);
+    case LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAIT_ALU: {
+      IREE_RETURN_IF_ERROR(
+          iree_string_builder_append_string(context->builder, line_prefix));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          context->builder, "s_wait_alu depctr(%" PRIu16 ")",
+          wait_state->immediate));
+      return iree_string_builder_append_string(context->builder, line_suffix);
+    }
+    case LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAITCNT_DEPCTR: {
+      IREE_RETURN_IF_ERROR(
+          iree_string_builder_append_string(context->builder, line_prefix));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          context->builder, "s_waitcnt_depctr 0x%04" PRIx16,
+          wait_state->immediate));
+      return iree_string_builder_append_string(context->builder, line_suffix);
+    }
     case LOOM_AMDGPU_WAIT_STATE_ACTION_UNKNOWN:
     default: {
       IREE_ASSERT_UNREACHABLE(
@@ -1923,8 +1947,8 @@ static iree_status_t loom_amdgpu_append_wait_states_before_packet(
         wait_state->instruction_offset != 0) {
       return iree_ok_status();
     }
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_append_wait_state_action(context, wait_state, state));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_append_wait_state_action(
+        context, wait_state, state, IREE_SV("  "), IREE_SV("\n")));
     ++state->packet_plan.next_wait_state_index;
   }
   return iree_ok_status();
@@ -1948,17 +1972,8 @@ static iree_status_t loom_amdgpu_append_wait_states_after_instruction(
         wait_state->instruction_offset != instruction_offset) {
       break;
     }
-    if (wait_state->action == LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAIT_ALU) {
-      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-          context->builder, "\n  s_wait_alu depctr(%" PRIu16 ")",
-          wait_state->immediate));
-    } else {
-      IREE_ASSERT_EQ(wait_state->action,
-                     LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAITCNT_DEPCTR);
-      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-          context->builder, "\n  s_waitcnt_depctr 0x%04" PRIx16,
-          wait_state->immediate));
-    }
+    IREE_RETURN_IF_ERROR(loom_amdgpu_append_wait_state_action(
+        context, wait_state, state, IREE_SV("\n  "), iree_string_view_empty()));
     ++state->packet_plan.next_wait_state_index;
   }
   return iree_ok_status();
@@ -2129,7 +2144,8 @@ static iree_status_t loom_amdgpu_append_move(
 static iree_status_t loom_amdgpu_emit_move_range(
     const loom_native_assembly_packet_context_t* context,
     loom_amdgpu_assembly_emit_state_t* emit_state,
-    loom_low_move_range_t move_range, bool* out_emitted) {
+    loom_low_move_range_t move_range, uint32_t instruction_offset_base,
+    bool* out_emitted) {
   if (out_emitted != NULL) {
     *out_emitted = false;
   }
@@ -2156,7 +2172,7 @@ static iree_status_t loom_amdgpu_emit_move_range(
     IREE_RETURN_IF_ERROR(loom_amdgpu_append_move(
         &move_state, &move->destination, &move->source));
     IREE_RETURN_IF_ERROR(loom_amdgpu_append_wait_states_after_instruction(
-        emit_state, context, (uint32_t)i + 1));
+        emit_state, context, instruction_offset_base + (uint32_t)i + 1));
   }
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_append_vgpr_msb_mode(&move_state, saved_mode));
@@ -2171,7 +2187,7 @@ static iree_status_t loom_amdgpu_emit_edge_copy_group(
     loom_amdgpu_assembly_emit_state_t* emit_state,
     const loom_low_allocation_edge_copy_group_t* group, bool* out_emitted) {
   return loom_amdgpu_emit_move_range(context, emit_state,
-                                     group->move_group.moves, out_emitted);
+                                     group->move_group.moves, 0, out_emitted);
 }
 
 static iree_status_t loom_amdgpu_append_packet_moves(
@@ -2183,7 +2199,7 @@ static iree_status_t loom_amdgpu_append_packet_moves(
           context->allocation, context->packet->node_index);
   return loom_amdgpu_emit_move_range(
       context, emit_state,
-      group == NULL ? (loom_low_move_range_t){0} : group->move_group.moves,
+      group == NULL ? (loom_low_move_range_t){0} : group->move_group.moves, 0,
       /*out_emitted=*/NULL);
 }
 

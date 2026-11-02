@@ -73,6 +73,48 @@ static void loom_amdgpu_structural_packet_analyze_packet_moves(
   }
 }
 
+const loom_low_move_group_t* loom_amdgpu_structural_packet_call_results(
+    const loom_amdgpu_structural_packet_info_t* info) {
+  IREE_ASSERT(
+      iree_any_bit_set(info->flags, LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CALL));
+  if (info->move_segment_count == 0) {
+    return NULL;
+  }
+  const loom_amdgpu_structural_move_segment_t* segment =
+      &info->move_segments[info->move_segment_count - 1];
+  return segment->instruction_offset + segment->group->moves.count ==
+                 info->instruction_count
+             ? segment->group
+             : NULL;
+}
+
+uint64_t loom_amdgpu_structural_packet_call_boundary_offset(
+    const loom_amdgpu_structural_packet_info_t* info) {
+  const loom_low_move_group_t* results =
+      loom_amdgpu_structural_packet_call_results(info);
+  const uint64_t result_count = results != NULL ? results->moves.count : 0;
+  IREE_ASSERT_GE(
+      info->instruction_count,
+      LOOM_AMDGPU_CALL_ABI_CALL_CONTROL_INSTRUCTION_COUNT + result_count);
+  return info->instruction_count -
+         LOOM_AMDGPU_CALL_ABI_CALL_CONTROL_INSTRUCTION_COUNT - result_count;
+}
+
+const loom_low_move_group_t* loom_amdgpu_structural_packet_call_arguments(
+    const loom_amdgpu_structural_packet_info_t* info) {
+  const uint64_t boundary =
+      loom_amdgpu_structural_packet_call_boundary_offset(info);
+  if (boundary == 0) {
+    return NULL;
+  }
+  IREE_ASSERT_NE(info->move_segment_count, 0);
+  const loom_amdgpu_structural_move_segment_t* segment =
+      &info->move_segments[0];
+  IREE_ASSERT_EQ(segment->instruction_offset, 0);
+  IREE_ASSERT_EQ(segment->group->moves.count, boundary);
+  return segment->group;
+}
+
 loom_amdgpu_structural_packet_info_t loom_amdgpu_structural_packet_analyze(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation, uint32_t node_index,

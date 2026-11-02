@@ -3221,7 +3221,8 @@ static iree_status_t loom_amdgpu_wait_plan_build_actions(
               builder->matrix_results, &packet,
               iree_any_bit_set(state->flags,
                                LOOM_AMDGPU_WAIT_NODE_STATE_MATRIX_RESULT),
-              state->minimum_instruction_count);
+              state->minimum_instruction_count,
+              iree_any_bit_set(state->flags, LOOM_AMDGPU_WAIT_NODE_STATE_CALL));
         }
       }
     }

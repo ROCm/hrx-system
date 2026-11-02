@@ -134,6 +134,18 @@ static inline uint64_t loom_amdgpu_structural_packet_control_transfer_count(
   return true_fallthrough || false_fallthrough ? 1 : 2;
 }
 
+// Returns the native instruction boundary after argument moves and before the
+// fixed direct-call control sequence. |info| must describe a call packet.
+uint64_t loom_amdgpu_structural_packet_call_boundary_offset(
+    const loom_amdgpu_structural_packet_info_t* info);
+
+// Returns the allocation-owned argument or result move group when nonempty.
+// Empty call transports return NULL without losing the call boundary.
+const loom_low_move_group_t* loom_amdgpu_structural_packet_call_arguments(
+    const loom_amdgpu_structural_packet_info_t* info);
+const loom_low_move_group_t* loom_amdgpu_structural_packet_call_results(
+    const loom_amdgpu_structural_packet_info_t* info);
+
 // Returns AMDGPU native scheduling facts for one structural low packet.
 loom_amdgpu_structural_packet_info_t loom_amdgpu_structural_packet_analyze(
     const loom_low_schedule_table_t* schedule,

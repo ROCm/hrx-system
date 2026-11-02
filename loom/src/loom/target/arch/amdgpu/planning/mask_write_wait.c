@@ -44,6 +44,8 @@ typedef struct loom_amdgpu_mask_write_event_t {
   uint16_t fields;
   // Whether the overwrite issues on VALU rather than SALU.
   bool is_vector;
+  // Whether this event drains every destination class before an opaque call.
+  bool is_boundary;
 } loom_amdgpu_mask_write_event_t;
 
 #define LOOM_AMDGPU_MASK_WRITE_EVENTS_PER_SEGMENT \
@@ -128,6 +130,26 @@ static uint16_t loom_amdgpu_mask_write_fields(const uint64_t bits[2],
   return fields;
 }
 
+static iree_status_t loom_amdgpu_mask_write_append_event(
+    loom_amdgpu_mask_write_wait_t* state,
+    loom_amdgpu_mask_write_event_t event) {
+  const uint32_t segment_index =
+      (uint32_t)(state->event_count /
+                 LOOM_AMDGPU_MASK_WRITE_EVENTS_PER_SEGMENT);
+  const iree_host_size_t offset =
+      state->event_count % LOOM_AMDGPU_MASK_WRITE_EVENTS_PER_SEGMENT;
+  void* segment = NULL;
+  if (offset == 0) {
+    IREE_RETURN_IF_ERROR(
+        loom_segmented_storage_append(&state->events, state->arena, &segment));
+  } else {
+    segment = loom_segmented_storage_segment(&state->events, segment_index);
+  }
+  ((loom_amdgpu_mask_write_event_t*)segment)[offset] = event;
+  ++state->event_count;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_amdgpu_mask_write_record(
     loom_amdgpu_mask_write_wait_t* state, const loom_low_packet_view_t* packet,
     uint32_t instruction_offset, const uint64_t writes[2],
@@ -160,21 +182,28 @@ static iree_status_t loom_amdgpu_mask_write_record(
   if (event.fields == 0 && (event.incoming[0] | event.incoming[1]) == 0) {
     return iree_ok_status();
   }
-  const uint32_t segment_index =
-      (uint32_t)(state->event_count /
-                 LOOM_AMDGPU_MASK_WRITE_EVENTS_PER_SEGMENT);
-  const iree_host_size_t offset =
-      state->event_count % LOOM_AMDGPU_MASK_WRITE_EVENTS_PER_SEGMENT;
-  void* segment = NULL;
-  if (offset == 0) {
-    IREE_RETURN_IF_ERROR(
-        loom_segmented_storage_append(&state->events, state->arena, &segment));
-  } else {
-    segment = loom_segmented_storage_segment(&state->events, segment_index);
-  }
-  ((loom_amdgpu_mask_write_event_t*)segment)[offset] = event;
-  ++state->event_count;
-  return iree_ok_status();
+  return loom_amdgpu_mask_write_append_event(state, event);
+}
+
+static iree_status_t loom_amdgpu_mask_write_record_boundary(
+    loom_amdgpu_mask_write_wait_t* state, const loom_low_packet_view_t* packet,
+    uint32_t instruction_offset) {
+  loom_amdgpu_mask_write_block_t* block =
+      &state->blocks[packet->node->block_index];
+  const uint16_t all_fields = LOOM_AMDGPU_MASK_WRITE_SA_SDST |
+                              LOOM_AMDGPU_MASK_WRITE_VA_VCC |
+                              LOOM_AMDGPU_MASK_WRITE_VA_SDST;
+  const bool has_local = (block->generated[0] | block->generated[1]) != 0;
+  loom_amdgpu_mask_write_event_t event = {
+      .incoming = {~block->killed[0], ~block->killed[1]},
+      .packet_index = packet->packet_index,
+      .instruction_offset = instruction_offset,
+      .fields = has_local ? all_fields : 0,
+      .is_boundary = true,
+  };
+  block->generated[0] = block->generated[1] = 0;
+  block->killed[0] = block->killed[1] = UINT64_MAX;
+  return loom_amdgpu_mask_write_append_event(state, event);
 }
 
 iree_status_t loom_amdgpu_mask_write_wait_collect(
@@ -183,12 +212,25 @@ iree_status_t loom_amdgpu_mask_write_wait_collect(
     loom_amdgpu_descriptor_traits_t traits) {
   iree_status_t status = iree_ok_status();
   if (packet->descriptor == NULL) {
+    const bool is_call = iree_any_bit_set(
+        structural->flags, LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CALL);
+    const uint64_t call_boundary =
+        is_call ? loom_amdgpu_structural_packet_call_boundary_offset(structural)
+                : 0;
+    IREE_ASSERT_LE(call_boundary, UINT32_MAX);
+    bool boundary_recorded = false;
     for (uint32_t segment_index = 0;
          segment_index < structural->move_segment_count &&
          iree_status_is_ok(status);
          ++segment_index) {
       const loom_amdgpu_structural_move_segment_t* segment =
           &structural->move_segments[segment_index];
+      if (is_call && !boundary_recorded &&
+          segment->instruction_offset > call_boundary) {
+        status = loom_amdgpu_mask_write_record_boundary(
+            state, packet, (uint32_t)call_boundary);
+        boundary_recorded = true;
+      }
       const loom_low_move_range_t moves = segment->group->moves;
       for (uint32_t i = 0; i < moves.count && iree_status_is_ok(status); ++i) {
         const loom_low_move_t* move =
@@ -205,6 +247,10 @@ iree_status_t loom_amdgpu_mask_write_wait_collect(
             state, packet, (uint32_t)(segment->instruction_offset + i + 1),
             writes, LOOM_AMDGPU_DESCRIPTOR_TRAIT_SCALAR_ALU);
       }
+    }
+    if (is_call && !boundary_recorded && iree_status_is_ok(status)) {
+      status = loom_amdgpu_mask_write_record_boundary(state, packet,
+                                                      (uint32_t)call_boundary);
     }
     return status;
   }
@@ -314,8 +360,14 @@ iree_status_t loom_amdgpu_mask_write_wait_resolve(
         event->incoming[0] & block->incoming[0],
         event->incoming[1] & block->incoming[1],
     };
-    const uint16_t fields = event->fields | loom_amdgpu_mask_write_fields(
-                                                incoming, event->is_vector);
+    const uint16_t all_fields = LOOM_AMDGPU_MASK_WRITE_SA_SDST |
+                                LOOM_AMDGPU_MASK_WRITE_VA_VCC |
+                                LOOM_AMDGPU_MASK_WRITE_VA_SDST;
+    const uint16_t fields =
+        event->fields |
+        (event->is_boundary && (incoming[0] | incoming[1]) != 0
+             ? all_fields
+             : loom_amdgpu_mask_write_fields(incoming, event->is_vector));
     if (fields == 0) {
       continue;
     }

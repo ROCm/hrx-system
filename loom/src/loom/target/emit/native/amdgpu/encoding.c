@@ -1199,7 +1199,8 @@ static iree_status_t loom_amdgpu_encode_wait_states(
 }
 
 static iree_status_t loom_amdgpu_encode_move_range(
-    loom_amdgpu_encode_state_t* state, loom_low_move_range_t move_range) {
+    loom_amdgpu_encode_state_t* state, loom_low_move_range_t move_range,
+    uint32_t instruction_offset_base) {
   const uint8_t saved_mode = state->traversal.current_vgpr_msb_mode;
   for (iree_host_size_t i = 0; i < move_range.count; ++i) {
     const loom_low_move_t* move =
@@ -1211,7 +1212,8 @@ static iree_status_t loom_amdgpu_encode_move_range(
             : loom_amdgpu_encode_move(state, &move->destination,
                                       &move->source));
     IREE_RETURN_IF_ERROR(loom_amdgpu_encode_wait_states(
-        state, &state->traversal.current_packet, (uint32_t)i + 1));
+        state, &state->traversal.current_packet,
+        instruction_offset_base + (uint32_t)i + 1));
   }
   return loom_amdgpu_encode_vgpr_msb_mode(state, saved_mode);
 }
@@ -1219,7 +1221,7 @@ static iree_status_t loom_amdgpu_encode_move_range(
 static iree_status_t loom_amdgpu_encode_edge_copy_group(
     loom_amdgpu_encode_state_t* state,
     const loom_low_allocation_edge_copy_group_t* group) {
-  return loom_amdgpu_encode_move_range(state, group->move_group.moves);
+  return loom_amdgpu_encode_move_range(state, group->move_group.moves, 0);
 }
 
 static iree_status_t loom_amdgpu_encode_packet_moves(
@@ -1227,9 +1229,9 @@ static iree_status_t loom_amdgpu_encode_packet_moves(
   const loom_low_allocation_packet_move_group_t* group =
       loom_low_allocation_find_packet_move_group_by_source_ordinal(
           state->inputs.allocation, packet->node_index);
-  return loom_amdgpu_encode_move_range(state, group == NULL
-                                                  ? (loom_low_move_range_t){0}
-                                                  : group->move_group.moves);
+  return loom_amdgpu_encode_move_range(
+      state,
+      group == NULL ? (loom_low_move_range_t){0} : group->move_group.moves, 0);
 }
 
 static iree_status_t loom_amdgpu_encode_copy_packet(

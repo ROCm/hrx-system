@@ -54,7 +54,12 @@ typedef struct loom_amdgpu_short_wait_prefix_t {
   loom_amdgpu_short_wait_reasons_t reasons;
   // Packet start relative to the block's bounded prefix.
   uint8_t packet_position;
+  // Native instruction boundary within the packet.
+  uint16_t instruction_offset;
 } loom_amdgpu_short_wait_prefix_t;
+
+static_assert(sizeof(loom_amdgpu_short_wait_prefix_t) == 12,
+              "short-wait prefixes must remain compact");
 
 typedef struct loom_amdgpu_short_wait_block_t {
   // Consumers in the first five native instruction slots.
@@ -667,6 +672,65 @@ void loom_amdgpu_short_wait_advance(loom_amdgpu_short_wait_t* state,
   state->position += cycles;
 }
 
+static void loom_amdgpu_short_wait_commit_queries(
+    loom_amdgpu_short_wait_t* state, const loom_low_packet_view_t* packet,
+    uint32_t instruction_offset) {
+  if (state->blocks == NULL) {
+    return;
+  }
+  IREE_ASSERT_LE(instruction_offset, UINT16_MAX);
+  loom_amdgpu_short_wait_block_t* block = &state->blocks[state->block_index];
+  for (unsigned offset = 0;
+       state->position + offset < LOOM_AMDGPU_SHORT_WAIT_MAX_CYCLES; ++offset) {
+    const unsigned position = (unsigned)state->position + offset;
+    loom_amdgpu_short_wait_reasons_t committed_reasons = 0;
+    unsigned reasons = state->query_reasons[offset];
+    while (reasons) {
+      const unsigned channel = iree_math_count_trailing_zeros_u32(reasons);
+      reasons &= reasons - 1;
+      if (position >= loom_amdgpu_short_wait_cycles[channel]) {
+        continue;
+      }
+      committed_reasons |= 1u << channel;
+      uint64_t* prefix = loom_amdgpu_short_wait_block_bits(
+          state, state->block_index,
+          state->channel_offsets[channel] + position);
+      const uint64_t* queries =
+          state->queries +
+          (state->channel_offsets[channel] + offset) * state->word_count;
+      for (iree_host_size_t word = 0; word < state->word_count; ++word) {
+        prefix[word] |= queries[word];
+      }
+    }
+    if (committed_reasons) {
+      block->prefix[position] = (loom_amdgpu_short_wait_prefix_t){
+          .packet_index = (uint32_t)packet->packet_index,
+          .reasons = block->prefix[position].reasons | committed_reasons,
+          .packet_position = (uint8_t)state->position,
+          .instruction_offset = (uint16_t)instruction_offset,
+      };
+      state->required_reasons |= committed_reasons;
+    }
+  }
+}
+
+loom_amdgpu_short_wait_match_t loom_amdgpu_short_wait_drain(
+    loom_amdgpu_short_wait_t* state, const loom_low_packet_view_t* packet,
+    uint32_t instruction_offset) {
+  memset(state->query_reasons, 0, sizeof(state->query_reasons));
+  const uint32_t physical_count =
+      state->banks.m0 + 1 +
+      ((state->enabled_reasons & LOOM_AMDGPU_SHORT_WAIT_DGEMM_PIPELINE) != 0);
+  IREE_ASSERT_LE(physical_count, UINT16_MAX);
+  const loom_amdgpu_short_wait_match_t match =
+      loom_amdgpu_short_wait_query_range(state, 0, (uint16_t)physical_count, 0,
+                                         state->enabled_reasons);
+  loom_amdgpu_short_wait_commit_queries(state, packet, instruction_offset);
+  state->drained_reasons |= state->enabled_reasons;
+  state->source_count = 0;
+  return match;
+}
+
 void loom_amdgpu_short_wait_drain_stores(loom_amdgpu_short_wait_t* state) {
   state->drained_reasons |= LOOM_AMDGPU_SHORT_WAIT_STORES;
   for (unsigned i = 0; i < state->source_count; ++i) {
@@ -696,41 +760,7 @@ void loom_amdgpu_short_wait_commit(loom_amdgpu_short_wait_t* state,
           1u << LOOM_AMDGPU_WAIT_STATE_REASON_VALU_TO_MATRIX_USE;
     }
   }
-  if (state->blocks != NULL) {
-    loom_amdgpu_short_wait_block_t* block = &state->blocks[state->block_index];
-    for (unsigned offset = 0;
-         state->position + offset < LOOM_AMDGPU_SHORT_WAIT_MAX_CYCLES;
-         ++offset) {
-      const unsigned position = (unsigned)state->position + offset;
-      loom_amdgpu_short_wait_reasons_t committed_reasons = 0;
-      unsigned reasons = state->query_reasons[offset];
-      while (reasons) {
-        const unsigned channel = iree_math_count_trailing_zeros_u32(reasons);
-        reasons &= reasons - 1;
-        if (position >= loom_amdgpu_short_wait_cycles[channel]) {
-          continue;
-        }
-        committed_reasons |= 1u << channel;
-        uint64_t* prefix = loom_amdgpu_short_wait_block_bits(
-            state, state->block_index,
-            state->channel_offsets[channel] + position);
-        const uint64_t* queries =
-            state->queries +
-            (state->channel_offsets[channel] + offset) * state->word_count;
-        for (iree_host_size_t word = 0; word < state->word_count; ++word) {
-          prefix[word] |= queries[word];
-        }
-      }
-      if (committed_reasons) {
-        block->prefix[position] = (loom_amdgpu_short_wait_prefix_t){
-            .packet_index = (uint32_t)packet->packet_index,
-            .reasons = block->prefix[position].reasons | committed_reasons,
-            .packet_position = (uint8_t)state->position,
-        };
-        state->required_reasons |= committed_reasons;
-      }
-    }
-  }
+  loom_amdgpu_short_wait_commit_queries(state, packet, 0);
   state->position += state->pending_cycles;
   if (state->pending_source.reasons[0]) {
     loom_amdgpu_short_wait_source_t* source = loom_amdgpu_short_wait_source(
@@ -968,7 +998,8 @@ iree_status_t loom_amdgpu_short_wait_resolve(
       const loom_amdgpu_short_wait_prefix_t* prefix = &block->prefix[position];
       const loom_low_packet_view_t packet =
           loom_low_packet_at(state->schedule, prefix->packet_index);
-      if (has_pending && pending.node_index == packet.node_index) {
+      if (has_pending && pending.node_index == packet.node_index &&
+          pending.instruction_offset == prefix->instruction_offset) {
         pending.cycle_count += (uint16_t)residual;
         pending.required_cycle_count += (uint16_t)residual;
       } else {
@@ -984,6 +1015,7 @@ iree_status_t loom_amdgpu_short_wait_resolve(
             .block_index = index,
             .node_index = packet.node_index,
             .scheduled_ordinal = packet.node->scheduled_ordinal,
+            .instruction_offset = prefix->instruction_offset,
             .producer_node = LOOM_LOW_SCHEDULE_NODE_NONE,
             .consumer_node = packet.node_index,
             .required_cycle_count = (uint16_t)required,

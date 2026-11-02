@@ -88,7 +88,7 @@ void loom_amdgpu_matrix_result_wait_begin_static_block(
 void loom_amdgpu_matrix_result_wait_collect(
     loom_amdgpu_matrix_result_wait_t* state,
     const loom_low_packet_view_t* packet, bool matrix_source,
-    uint8_t minimum_instruction_count);
+    uint8_t minimum_instruction_count, bool quiescent_boundary);
 iree_status_t loom_amdgpu_matrix_result_wait_end_static_block(
     loom_amdgpu_matrix_result_wait_t* state);
 
@@ -120,6 +120,12 @@ loom_amdgpu_matrix_result_match_t loom_amdgpu_matrix_result_wait_inspect(
 // matrix packet publishes its result after its own instruction has advanced.
 void loom_amdgpu_matrix_result_wait_advance(
     loom_amdgpu_matrix_result_wait_t* state, uint64_t instruction_count);
+
+// Returns the strongest live result window and starts a fresh physical epoch.
+// Opaque callees therefore inherit no caller-owned result retention.
+loom_amdgpu_matrix_result_match_t loom_amdgpu_matrix_result_wait_drain(
+    loom_amdgpu_matrix_result_wait_t* state);
+
 void loom_amdgpu_matrix_result_wait_commit(
     loom_amdgpu_matrix_result_wait_t* state,
     const loom_amdgpu_matrix_result_source_t* source);
