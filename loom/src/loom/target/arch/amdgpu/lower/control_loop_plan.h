@@ -78,6 +78,13 @@ typedef struct loom_amdgpu_loop_exit_adapter_t {
   loom_low_lower_block_ref_t block;
 } loom_amdgpu_loop_exit_adapter_t;
 
+typedef enum loom_amdgpu_loop_exit_kind_e {
+  // Lanes leave the loop for its final semantic continuation.
+  LOOM_AMDGPU_LOOP_EXIT_TERMINAL = 0,
+  // Lanes finish a nested loop but remain active in its parent loop.
+  LOOM_AMDGPU_LOOP_EXIT_LOCAL,
+} loom_amdgpu_loop_exit_kind_t;
+
 typedef enum loom_amdgpu_loop_validation_e {
   LOOM_AMDGPU_LOOP_VALIDATION_UNCHECKED = 0,
   LOOM_AMDGPU_LOOP_VALIDATION_SUPPORTED,
@@ -91,8 +98,16 @@ struct loom_amdgpu_loop_exit_plan_t {
   const loom_op_t* source_op;
   // Bit i is set when successor i exits the loop.
   uint8_t exit_successor_mask;
+  // Semantic lifetime crossed by the exit successors.
+  loom_amdgpu_loop_exit_kind_t kind;
+  // True after every exit successor has a retained ownership class.
+  bool classified;
   // True when the exit selector is lane-varying.
   bool is_divergent;
+  // True when a completed child loop supplies this parent resume site.
+  bool is_synthetic;
+  // True when the resume tuple contains every destination argument.
+  bool resume_full_tuple;
   // Dense selector among divergent exits that may resume the loop.
   uint16_t selector;
   // Low-only block restoring the active mask when no lane takes this exit.
@@ -117,9 +132,15 @@ struct loom_amdgpu_loop_exit_plan_t {
   loom_amdgpu_loop_exit_adapter_t* adapters;
   // Number of populated exit-edge adapters.
   uint16_t adapter_count;
+  // Completed child supplying a synthetic parent exit.
+  loom_amdgpu_loop_plan_t* child_loop;
 };
 
 struct loom_amdgpu_loop_plan_t {
+  // Dense retained natural-loop identity.
+  uint16_t loop_index;
+  // Number of records allocated in exit_plans.
+  uint32_t exit_plan_capacity;
   // Low-only block that saves parent EXEC before the loop header.
   loom_low_lower_block_ref_t entry_block;
   // Original low loop header destination reached after entry_block.
@@ -132,6 +153,8 @@ struct loom_amdgpu_loop_plan_t {
   loom_low_lower_block_ref_t restore_dest;
   // Shared semantic continuation reached after all loop-exit regions.
   uint16_t continuation_index;
+  // Parent-local continuation reached by normally completed child lanes.
+  uint16_t local_continuation_index;
   // Low value produced by entry_block, or INVALID before emission.
   loom_value_id_t saved_exec;
   // Native EXEC-mask carrier appended to the shared capture signature.
@@ -140,6 +163,14 @@ struct loom_amdgpu_loop_plan_t {
   loom_type_t selector_type;
   // True when exiting lanes must execute an exit region or retain values.
   bool capture_exits;
+  // True when terminal lanes forward through an enclosing loop capture.
+  bool forwards_to_parent;
+  // True when the shared capture is also the loop's initial state header.
+  bool entry_seeded;
+  // True after semantic capture state and every resume closure are planned.
+  bool prepared;
+  // True after every synthetic block and edge interposition is planned.
+  bool finalized;
   // Number of authored continuation arguments preceding private capture state.
   uint16_t capture_value_count;
   // Number of divergent exits assigned selector dispatch blocks.
@@ -148,12 +179,32 @@ struct loom_amdgpu_loop_plan_t {
   uint16_t resume_arg_offset;
   // Total nested resume arguments appended to the shared capture tuple.
   uint16_t resume_arg_count;
+  // First capture argument carrying the initial loop-header tuple.
+  uint16_t entry_arg_offset;
+  // Number of initial loop-header arguments retained by the state header.
+  uint16_t entry_arg_count;
+  // First capture argument carrying the parent-local completion tuple.
+  uint16_t local_arg_offset;
+  // Number of parent-local continuation arguments retained by the child.
+  uint16_t local_arg_count;
+  // Capture argument carrying the accumulated parent-local lane mask.
+  uint16_t local_mask_offset;
   // Number of direct exit edges collected during branch preparation.
   uint32_t exit_edge_count;
+  // Number of accounted exits reaching the final semantic continuation.
+  uint32_t terminal_exit_edge_count;
+  // Number of accounted exits completing only this nested loop.
+  uint32_t local_exit_edge_count;
   // Number of populated records in exit_plans.
   uint32_t exit_plan_count;
   // Boundary validation state for shared retirement.
   loom_amdgpu_loop_validation_t validation;
+  // Dispatch block resuming the first loop-header invocation.
+  loom_low_lower_block_ref_t entry_dispatch_block;
+  // Argument-bearing adapter resuming the first loop-header invocation.
+  loom_low_lower_block_ref_t entry_resume_block;
+  // Parent synthetic exit receiving this child's completed lane classes.
+  loom_amdgpu_loop_exit_plan_t* parent_exit;
   // Direct exit records, allocated inline to the loop's direct exit count.
   loom_amdgpu_loop_exit_plan_t exit_plans[];
 };

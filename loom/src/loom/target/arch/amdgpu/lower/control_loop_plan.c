@@ -64,16 +64,19 @@ static bool loom_amdgpu_try_find_loop_exit(loom_low_lower_context_t* context,
 }
 
 static iree_status_t loom_amdgpu_allocate_loop_plan(
-    loom_low_lower_context_t* context, uint32_t exit_capacity,
-    loom_amdgpu_loop_plan_t** out_plan) {
+    loom_low_lower_context_t* context, uint16_t loop_index,
+    uint32_t exit_capacity, loom_amdgpu_loop_plan_t** out_plan) {
   *out_plan = NULL;
   const iree_host_size_t plan_length =
       sizeof(**out_plan) + exit_capacity * sizeof(loom_amdgpu_loop_exit_plan_t);
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_plan_data(context, plan_length,
                                                          (void**)out_plan));
   **out_plan = (loom_amdgpu_loop_plan_t){
+      .loop_index = loop_index,
+      .exit_plan_capacity = exit_capacity,
       .saved_exec = LOOM_VALUE_ID_INVALID,
       .continuation_index = LOOM_CFG_LOOP_CONTINUATION_NONE,
+      .local_continuation_index = LOOM_CFG_LOOP_CONTINUATION_NONE,
   };
   return iree_ok_status();
 }
@@ -83,9 +86,9 @@ static iree_status_t loom_amdgpu_get_or_allocate_loop_plan(
     uint16_t loop_index, loom_amdgpu_loop_plan_t** out_plan) {
   *out_plan = NULL;
   const loom_cfg_natural_loop_t* loop = &loops->loops[loop_index];
-  if (loop->exits.count == 1) {
-    return loom_amdgpu_allocate_loop_plan(context, loop->direct_exit_count,
-                                          out_plan);
+  if (loop->exits.count == 1 && loop->direct_exit_count == 1) {
+    return loom_amdgpu_allocate_loop_plan(context, loop_index,
+                                          loop->direct_exit_count, out_plan);
   }
 
   loom_amdgpu_loop_plan_t** plans = NULL;
@@ -93,8 +96,11 @@ static iree_status_t loom_amdgpu_get_or_allocate_loop_plan(
       context, &loom_amdgpu_loop_plan_table_key,
       loops->loop_count * sizeof(*plans), (void**)&plans));
   if (plans[loop_index] == NULL) {
+    const uint32_t exit_capacity = loop->direct_exit_count == loop->exits.count
+                                       ? loop->direct_exit_count
+                                       : loop->exits.count;
     IREE_RETURN_IF_ERROR(loom_amdgpu_allocate_loop_plan(
-        context, loop->direct_exit_count, &plans[loop_index]));
+        context, loop_index, exit_capacity, &plans[loop_index]));
   }
   *out_plan = plans[loop_index];
   return iree_ok_status();
@@ -337,11 +343,71 @@ static iree_status_t loom_amdgpu_validate_divergent_loop(
     return loom_low_lower_emit_branch_constraint(
         context, source_op, IREE_SV("divergent_loop_single_continuation"));
   }
-  if (loop->direct_exit_count != loop->exits.count) {
-    return loom_low_lower_emit_branch_constraint(
-        context, source_op, IREE_SV("divergent_loop_direct_exits"));
-  }
   plan->continuation_index = (uint16_t)continuation;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_classify_loop_exit(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_value_fact_cfg_region_t* facts, uint16_t loop_index,
+    loom_amdgpu_loop_plan_t* plan, loom_amdgpu_loop_exit_plan_t* exit) {
+  const loom_cfg_loop_nest_t* loops = &facts->loops;
+  const loom_cfg_natural_loop_t* loop = &loops->loops[loop_index];
+  const uint16_t parent_loop_index = loop->parent_loop_index;
+  const loom_cfg_edge_index_span_t outgoing = loom_cfg_graph_successor_edges(
+      &facts->graph, source_op->parent_block->region_index);
+  bool classified = false;
+  for (uint8_t successor_index = 0; successor_index < 2; ++successor_index) {
+    if ((exit->exit_successor_mask & (1u << successor_index)) == 0) {
+      continue;
+    }
+    const uint16_t target =
+        facts->graph.edges[outgoing.values[successor_index]].target_block_index;
+    const loom_cfg_region_t* region = &facts->regions.blocks[target];
+    loom_amdgpu_loop_exit_kind_t kind = LOOM_AMDGPU_LOOP_EXIT_TERMINAL;
+    uint16_t local_continuation = LOOM_CFG_LOOP_CONTINUATION_NONE;
+    if (target != plan->continuation_index &&
+        region->continuation_index != plan->continuation_index) {
+      if (parent_loop_index == LOOM_CFG_LOOP_NEST_NONE ||
+          !loom_cfg_loop_nest_contains(loops, parent_loop_index, target) ||
+          loom_cfg_loop_nest_contains(loops, loop_index, target)) {
+        plan->validation = LOOM_AMDGPU_LOOP_VALIDATION_REJECTED;
+        return loom_low_lower_emit_branch_constraint(
+            context, source_op, IREE_SV("divergent_loop_single_continuation"));
+      }
+      kind = LOOM_AMDGPU_LOOP_EXIT_LOCAL;
+      local_continuation = target;
+      if (region->continuation_index != LOOM_CFG_REGION_CONTINUATION_NONE &&
+          loom_cfg_loop_nest_contains(loops, parent_loop_index,
+                                      region->continuation_index) &&
+          !loom_cfg_loop_nest_contains(loops, loop_index,
+                                       region->continuation_index)) {
+        local_continuation = region->continuation_index;
+      }
+    }
+    if (classified && exit->kind != kind) {
+      plan->validation = LOOM_AMDGPU_LOOP_VALIDATION_REJECTED;
+      return loom_low_lower_emit_branch_constraint(
+          context, source_op, IREE_SV("divergent_loop_exit_ownership_classes"));
+    }
+    exit->kind = kind;
+    classified = true;
+    if (kind == LOOM_AMDGPU_LOOP_EXIT_TERMINAL) {
+      ++plan->terminal_exit_edge_count;
+      continue;
+    }
+    if (plan->local_continuation_index == LOOM_CFG_LOOP_CONTINUATION_NONE) {
+      plan->local_continuation_index = local_continuation;
+    } else if (plan->local_continuation_index != local_continuation) {
+      plan->validation = LOOM_AMDGPU_LOOP_VALIDATION_REJECTED;
+      return loom_low_lower_emit_branch_constraint(
+          context, source_op,
+          IREE_SV("divergent_loop_single_local_continuation"));
+    }
+    ++plan->local_exit_edge_count;
+  }
+  IREE_ASSERT(classified);
+  exit->classified = true;
   return iree_ok_status();
 }
 
@@ -374,6 +440,9 @@ static iree_status_t loom_amdgpu_validate_loop_exit_regions(
     const loom_value_fact_cfg_region_t* facts, loom_amdgpu_loop_plan_t* plan) {
   for (uint32_t i = 0; i < plan->exit_plan_count; ++i) {
     const loom_amdgpu_loop_exit_plan_t* exit = &plan->exit_plans[i];
+    if (exit->is_synthetic || exit->kind == LOOM_AMDGPU_LOOP_EXIT_LOCAL) {
+      continue;
+    }
     loom_cfg_edge_index_span_t outgoing = loom_cfg_graph_successor_edges(
         &facts->graph, exit->source_op->parent_block->region_index);
     for (uint8_t successor_index = 0; successor_index < 2; ++successor_index) {
@@ -419,13 +488,30 @@ static iree_status_t loom_amdgpu_plan_loop_exit_adapter(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_finalize_loop_plan(
+static iree_status_t loom_amdgpu_prepare_loop_plan(
     loom_low_lower_context_t* context,
     const loom_value_fact_cfg_region_t* facts, uint16_t loop_index,
     loom_amdgpu_loop_plan_t* plan, iree_arena_allocator_t* analysis_arena) {
   const loom_cfg_loop_nest_t* loops = &facts->loops;
   const loom_cfg_natural_loop_t* loop = &loops->loops[loop_index];
   const loom_cfg_graph_t* graph = &facts->graph;
+  IREE_ASSERT(!plan->prepared);
+  IREE_ASSERT(!plan->finalized);
+  if (plan->local_exit_edge_count != 0) {
+    if (loop->parent_loop_index == LOOM_CFG_LOOP_NEST_NONE ||
+        plan->terminal_exit_edge_count == 0 ||
+        plan->local_continuation_index == LOOM_CFG_LOOP_CONTINUATION_NONE) {
+      plan->validation = LOOM_AMDGPU_LOOP_VALIDATION_REJECTED;
+      return loom_low_lower_emit_branch_constraint(
+          context, plan->exit_plans[plan->exit_plan_count - 1].source_op,
+          IREE_SV("divergent_loop_exit_ownership_classes"));
+    }
+    plan->forwards_to_parent = true;
+  }
+  plan->entry_seeded = plan->forwards_to_parent;
+  for (uint32_t i = 0; i < plan->exit_plan_count; ++i) {
+    plan->entry_seeded |= plan->exit_plans[i].is_synthetic;
+  }
   IREE_RETURN_IF_ERROR(loom_amdgpu_validate_loop_exit_regions(
       context, plan->exit_plans[plan->exit_plan_count - 1].source_op, facts,
       plan));
@@ -434,7 +520,6 @@ static iree_status_t loom_amdgpu_finalize_loop_plan(
   }
   const loom_cfg_edge_info_t* entry_edge =
       &graph->edges[loop->entries.unique_index];
-  const loom_block_t* header_block = graph->blocks[loop->header_index].block;
   const loom_low_lower_block_ref_t low_continuation =
       loom_low_lower_control_source_block(
           graph->blocks[plan->continuation_index].block);
@@ -458,9 +543,14 @@ static iree_status_t loom_amdgpu_finalize_loop_plan(
       loom_amdgpu_low_type_is_native_i1_mask(context, plan->exec_mask_type));
   plan->capture_value_count =
       loom_low_lower_control_argument_count(context, low_continuation);
-  plan->capture_exits = plan->capture_value_count != 0;
+  plan->capture_exits =
+      plan->capture_value_count != 0 || plan->forwards_to_parent;
   for (uint32_t i = 0; i < plan->exit_plan_count && !plan->capture_exits; ++i) {
     const loom_amdgpu_loop_exit_plan_t* exit = &plan->exit_plans[i];
+    if (exit->is_synthetic) {
+      plan->capture_exits = true;
+      break;
+    }
     const loom_cfg_edge_index_span_t outgoing = loom_cfg_graph_successor_edges(
         graph, exit->source_op->parent_block->region_index);
     for (uint8_t successor_index = 0; successor_index < 2; ++successor_index) {
@@ -473,8 +563,70 @@ static iree_status_t loom_amdgpu_finalize_loop_plan(
     }
   }
 
+  if (!plan->capture_exits) {
+    plan->prepared = true;
+    return iree_ok_status();
+  }
+
+  const uint32_t capture_source_count =
+      plan->exit_plan_count + (plan->entry_seeded ? 1 : 0);
+  if (capture_source_count > UINT16_MAX) {
+    return loom_low_lower_emit_branch_constraint(
+        context, plan->exit_plans[0].source_op,
+        IREE_SV("divergent_loop_resume_tuple_u16"));
+  }
+  uint16_t* capture_sources = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      analysis_arena, capture_source_count, sizeof(*capture_sources),
+      (void**)&capture_sources));
+  for (uint32_t i = 0; i < plan->exit_plan_count; ++i) {
+    capture_sources[i] =
+        plan->exit_plans[i].source_op->parent_block->region_index;
+  }
+  if (plan->entry_seeded) {
+    capture_sources[plan->exit_plan_count] = entry_edge->source_block_index;
+  }
+  if (plan->forwards_to_parent) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_control_retain_resume_closure(
+        context, graph->blocks[plan->local_continuation_index].block,
+        capture_sources, (uint16_t)capture_source_count));
+  }
+  for (uint32_t i = 0; i < plan->exit_plan_count; ++i) {
+    loom_amdgpu_loop_exit_plan_t* exit = &plan->exit_plans[i];
+    if (!exit->is_divergent || exit->resume_full_tuple) {
+      continue;
+    }
+    const uint8_t repeat_successor = exit->exit_successor_mask == 1 ? 1 : 0;
+    const loom_block_t* repeat_block =
+        exit->region != NULL
+            ? graph->blocks[exit->region->continuation_index].block
+            : loom_op_const_successors(exit->source_op)[repeat_successor];
+    IREE_RETURN_IF_ERROR(loom_low_lower_control_retain_resume_closure(
+        context, repeat_block, capture_sources,
+        (uint16_t)capture_source_count));
+  }
+  plan->prepared = true;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_materialize_loop_plan(
+    loom_low_lower_context_t* context,
+    const loom_value_fact_cfg_region_t* facts, uint16_t loop_index,
+    loom_amdgpu_loop_plan_t* plan, iree_arena_allocator_t* analysis_arena) {
+  const loom_cfg_loop_nest_t* loops = &facts->loops;
+  const loom_cfg_natural_loop_t* loop = &loops->loops[loop_index];
+  const loom_cfg_graph_t* graph = &facts->graph;
+  IREE_ASSERT(plan->prepared);
+  IREE_ASSERT(!plan->finalized);
+
+  const loom_cfg_edge_info_t* entry_edge =
+      &graph->edges[loop->entries.unique_index];
+  const loom_block_t* header_block = graph->blocks[loop->header_index].block;
   const loom_low_lower_block_ref_t low_header =
       loom_low_lower_control_source_block(header_block);
+  const loom_low_lower_block_ref_t low_continuation =
+      loom_low_lower_control_source_block(
+          graph->blocks[plan->continuation_index].block);
   IREE_RETURN_IF_ERROR(loom_low_lower_control_add_block(context, 0, low_header,
                                                         &plan->entry_block));
   IREE_RETURN_IF_ERROR(loom_low_lower_control_interpose_successor(
@@ -503,32 +655,10 @@ static iree_status_t loom_amdgpu_finalize_loop_plan(
       }
     }
     IREE_ASSERT_NE(plan->restore_dest, 0);
+    plan->finalized = true;
     return iree_ok_status();
   }
 
-  IREE_ASSERT_LE(plan->exit_plan_count, UINT16_MAX);
-  uint16_t* capture_sources = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      analysis_arena, plan->exit_plan_count, sizeof(*capture_sources),
-      (void**)&capture_sources));
-  for (uint32_t i = 0; i < plan->exit_plan_count; ++i) {
-    capture_sources[i] =
-        plan->exit_plans[i].source_op->parent_block->region_index;
-  }
-  for (uint32_t i = 0; i < plan->exit_plan_count; ++i) {
-    loom_amdgpu_loop_exit_plan_t* exit = &plan->exit_plans[i];
-    if (!exit->is_divergent) {
-      continue;
-    }
-    const uint8_t repeat_successor = exit->exit_successor_mask == 1 ? 1 : 0;
-    const loom_block_t* repeat_block =
-        exit->region != NULL
-            ? graph->blocks[exit->region->continuation_index].block
-            : loom_op_const_successors(exit->source_op)[repeat_successor];
-    IREE_RETURN_IF_ERROR(loom_low_lower_control_retain_resume_closure(
-        context, repeat_block, capture_sources,
-        (uint16_t)plan->exit_plan_count));
-  }
   for (uint32_t i = 0; i < plan->exit_plan_count; ++i) {
     loom_amdgpu_loop_exit_region_plan_t* region = plan->exit_plans[i].region;
     if (region != NULL) {
@@ -538,6 +668,15 @@ static iree_status_t loom_amdgpu_finalize_loop_plan(
   }
   plan->capture_value_count =
       loom_low_lower_control_argument_count(context, low_continuation);
+  if (plan->entry_seeded) {
+    plan->entry_arg_count =
+        loom_low_lower_control_argument_count(context, low_header);
+  }
+  if (plan->forwards_to_parent) {
+    plan->local_arg_count = loom_low_lower_control_argument_count(
+        context, loom_low_lower_control_source_block(
+                     graph->blocks[plan->local_continuation_index].block));
+  }
 
   uint32_t resume_arg_count = 0;
   for (uint32_t i = 0; i < plan->exit_plan_count; ++i) {
@@ -547,11 +686,16 @@ static iree_status_t loom_amdgpu_finalize_loop_plan(
     }
     const uint8_t repeat_successor = exit->exit_successor_mask == 1 ? 1 : 0;
     const loom_block_t* repeat_block =
-        exit->region != NULL
+        exit->is_synthetic
+            ? graph->blocks[exit->child_loop->local_continuation_index].block
+        : exit->region != NULL
             ? graph->blocks[exit->region->continuation_index].block
             : loom_op_const_successors(exit->source_op)[repeat_successor];
     resume_arg_count +=
-        exit->region != NULL
+        exit->resume_full_tuple
+            ? loom_low_lower_control_argument_count(
+                  context, loom_low_lower_control_source_block(repeat_block))
+        : exit->region != NULL
             ? exit->region->merge_arg_count
             : loom_low_lower_control_source_carriers(context, repeat_block)
                   .count;
@@ -563,26 +707,38 @@ static iree_status_t loom_amdgpu_finalize_loop_plan(
   }
   plan->resume_arg_count = (uint16_t)resume_arg_count;
 
-  uint16_t private_type_count = 1;
-  if (plan->divergent_exit_count > 1) {
+  const uint16_t dispatch_count =
+      (uint16_t)(plan->divergent_exit_count + (plan->entry_seeded ? 1 : 0));
+  uint32_t private_type_count = 1;
+  if (dispatch_count > 1) {
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_make_sgpr_type(context, &plan->selector_type));
     ++private_type_count;
   }
-  if ((uint32_t)private_type_count + plan->resume_arg_count > UINT16_MAX) {
+  private_type_count += plan->entry_arg_count;
+  private_type_count += plan->resume_arg_count;
+  private_type_count += plan->local_arg_count;
+  private_type_count += plan->forwards_to_parent ? 1 : 0;
+  if (private_type_count > UINT16_MAX) {
     return loom_low_lower_emit_branch_constraint(
         context, plan->exit_plans[0].source_op,
         IREE_SV("divergent_loop_resume_tuple_u16"));
   }
-  private_type_count += plan->resume_arg_count;
   loom_type_t* private_types = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       analysis_arena, private_type_count, sizeof(*private_types),
       (void**)&private_types));
   uint16_t private_index = 0;
   private_types[private_index++] = plan->exec_mask_type;
-  if (plan->divergent_exit_count > 1) {
+  if (dispatch_count > 1) {
     private_types[private_index++] = plan->selector_type;
+  }
+  const uint16_t entry_private_offset = private_index;
+  if (plan->entry_seeded) {
+    for (uint16_t i = 0; i < plan->entry_arg_count; ++i) {
+      private_types[private_index++] =
+          loom_low_lower_control_argument_type(context, low_header, i);
+    }
   }
   const uint16_t resume_private_offset = private_index;
   for (uint32_t i = 0; i < plan->exit_plan_count; ++i) {
@@ -592,17 +748,21 @@ static iree_status_t loom_amdgpu_finalize_loop_plan(
     }
     const uint8_t repeat_successor = exit->exit_successor_mask == 1 ? 1 : 0;
     const loom_block_t* repeat_block =
-        exit->region != NULL
+        exit->is_synthetic
+            ? graph->blocks[exit->child_loop->local_continuation_index].block
+        : exit->region != NULL
             ? graph->blocks[exit->region->continuation_index].block
             : loom_op_const_successors(exit->source_op)[repeat_successor];
     const loom_low_lower_block_ref_t resume_signature =
         loom_low_lower_control_source_block(repeat_block);
     exit->resume_arg_count =
-        exit->region != NULL
+        exit->resume_full_tuple
+            ? loom_low_lower_control_argument_count(context, resume_signature)
+        : exit->region != NULL
             ? exit->region->merge_arg_count
             : loom_low_lower_control_source_carriers(context, repeat_block)
                   .count;
-    if (exit->region != NULL) {
+    if (exit->resume_full_tuple || exit->region != NULL) {
       for (uint16_t j = 0; j < exit->resume_arg_count; ++j) {
         private_types[private_index++] =
             loom_low_lower_control_argument_type(context, resume_signature, j);
@@ -616,10 +776,23 @@ static iree_status_t loom_amdgpu_finalize_loop_plan(
       }
     }
   }
+  const uint16_t local_private_offset = private_index;
+  if (plan->forwards_to_parent) {
+    const loom_low_lower_block_ref_t local_continuation =
+        loom_low_lower_control_source_block(
+            graph->blocks[plan->local_continuation_index].block);
+    for (uint16_t i = 0; i < plan->local_arg_count; ++i) {
+      private_types[private_index++] =
+          loom_low_lower_control_argument_type(context, local_continuation, i);
+    }
+    private_types[private_index++] = plan->exec_mask_type;
+  }
   IREE_ASSERT_EQ(private_index, private_type_count);
   IREE_RETURN_IF_ERROR(loom_low_lower_control_add_block_with_appended_arguments(
       context, /*before=*/0, low_continuation, private_types,
-      private_type_count, &plan->capture_block));
+      (uint16_t)private_type_count, &plan->capture_block));
+  plan->entry_arg_offset =
+      (uint16_t)(plan->capture_value_count + entry_private_offset);
   plan->resume_arg_offset =
       (uint16_t)(plan->capture_value_count + resume_private_offset);
   private_index = resume_private_offset;
@@ -632,10 +805,26 @@ static iree_status_t loom_amdgpu_finalize_loop_plan(
         (uint16_t)(plan->capture_value_count + private_index);
     private_index += exit->resume_arg_count;
   }
-  IREE_ASSERT_EQ(private_index, private_type_count);
+  IREE_ASSERT_EQ(private_index, local_private_offset);
+  if (plan->forwards_to_parent) {
+    plan->local_arg_offset =
+        (uint16_t)(plan->capture_value_count + local_private_offset);
+    plan->local_mask_offset =
+        (uint16_t)(plan->local_arg_offset + plan->local_arg_count);
+  }
   IREE_RETURN_IF_ERROR(loom_low_lower_control_add_block(
       context, /*before=*/0, /*signature=*/0, &plan->restore_block));
-  plan->restore_dest = low_continuation;
+  if (!plan->forwards_to_parent) {
+    plan->restore_dest = low_continuation;
+  }
+  if (plan->entry_seeded) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_control_add_block(
+        context, /*before=*/0, /*signature=*/0, &plan->entry_dispatch_block));
+    if (plan->entry_arg_count != 0) {
+      IREE_RETURN_IF_ERROR(loom_low_lower_control_add_block(
+          context, /*before=*/0, /*signature=*/0, &plan->entry_resume_block));
+    }
+  }
 
   iree_bitmap_t visited_targets = {.bit_count = graph->block_count};
   const iree_host_size_t visited_word_count =
@@ -644,9 +833,15 @@ static iree_status_t loom_amdgpu_finalize_loop_plan(
       analysis_arena, visited_word_count, sizeof(*visited_targets.words),
       (void**)&visited_targets.words));
   iree_bitmap_reset_all(visited_targets);
-  uint16_t next_selector = 0;
+  uint16_t next_selector = plan->entry_seeded ? 1 : 0;
   for (uint32_t i = 0; i < plan->exit_plan_count; ++i) {
     loom_amdgpu_loop_exit_plan_t* exit = &plan->exit_plans[i];
+    if (exit->kind == LOOM_AMDGPU_LOOP_EXIT_LOCAL && exit->region != NULL) {
+      plan->validation = LOOM_AMDGPU_LOOP_VALIDATION_REJECTED;
+      return loom_low_lower_emit_branch_constraint(
+          context, exit->source_op,
+          IREE_SV("divergent_loop_local_exit_region"));
+    }
     if (exit->region != NULL) {
       const loom_type_t local_types[] = {
           plan->exec_mask_type,
@@ -657,6 +852,25 @@ static iree_status_t loom_amdgpu_finalize_loop_plan(
               context, /*before=*/0, low_continuation, local_types,
               IREE_ARRAYSIZE(local_types), &exit->local_capture_block));
     }
+    if (exit->is_synthetic) {
+      exit->selector = next_selector++;
+      IREE_RETURN_IF_ERROR(loom_low_lower_control_add_block(
+          context, /*before=*/0, /*signature=*/0, &exit->dispatch_block));
+      if (exit->resume_arg_count != 0) {
+        IREE_RETURN_IF_ERROR(loom_low_lower_control_add_block(
+            context, /*before=*/0, /*signature=*/0, &exit->resume_block));
+      }
+      exit->repeat_dest = loom_low_lower_control_source_block(
+          graph->blocks[exit->child_loop->local_continuation_index].block);
+      continue;
+    }
+    const uint16_t semantic_continuation_index =
+        exit->kind == LOOM_AMDGPU_LOOP_EXIT_LOCAL
+            ? plan->local_continuation_index
+            : plan->continuation_index;
+    const loom_low_lower_block_ref_t semantic_continuation =
+        loom_low_lower_control_source_block(
+            graph->blocks[semantic_continuation_index].block);
     loom_cfg_edge_index_span_t outgoing = loom_cfg_graph_successor_edges(
         graph, exit->source_op->parent_block->region_index);
     iree_host_size_t adapter_capacity = 0;
@@ -666,7 +880,7 @@ static iree_status_t loom_amdgpu_finalize_loop_plan(
       }
       const loom_cfg_edge_index_t edge_index = outgoing.values[successor_index];
       const uint16_t target = graph->edges[edge_index].target_block_index;
-      adapter_capacity += target == plan->continuation_index
+      adapter_capacity += target == semantic_continuation_index
                               ? 1
                               : facts->regions.blocks[target].exit_edges.count;
     }
@@ -681,10 +895,16 @@ static iree_status_t loom_amdgpu_finalize_loop_plan(
       }
       const loom_cfg_edge_index_t edge_index = outgoing.values[successor_index];
       const uint16_t target = graph->edges[edge_index].target_block_index;
-      if (target == plan->continuation_index) {
+      if (target == semantic_continuation_index) {
         IREE_RETURN_IF_ERROR(loom_amdgpu_plan_loop_exit_adapter(
-            context, facts, edge_index, low_continuation, exit));
+            context, facts, edge_index, semantic_continuation, exit));
         continue;
+      }
+      if (facts->regions.blocks[target].continuation_index !=
+          semantic_continuation_index) {
+        return loom_low_lower_emit_branch_constraint(
+            context, exit->source_op,
+            IREE_SV("divergent_loop_single_continuation"));
       }
       if (iree_bitmap_test(visited_targets, target)) {
         return loom_low_lower_emit_branch_constraint(
@@ -696,7 +916,7 @@ static iree_status_t loom_amdgpu_finalize_loop_plan(
           facts->regions.blocks[target].exit_edges;
       for (iree_host_size_t j = 0; j < retirement_edges.count; ++j) {
         IREE_RETURN_IF_ERROR(loom_amdgpu_plan_loop_exit_adapter(
-            context, facts, retirement_edges.values[j], low_continuation,
+            context, facts, retirement_edges.values[j], semantic_continuation,
             exit));
       }
     }
@@ -728,7 +948,125 @@ static iree_status_t loom_amdgpu_finalize_loop_plan(
                   graph->blocks[exit->region->continuation_index].block)
             : exit->source_repeat_dest;
   }
+  plan->finalized = true;
   return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_validate_loop_plan_once(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_value_fact_cfg_region_t* facts, uint16_t loop_index,
+    loom_amdgpu_loop_plan_t* plan) {
+  if (plan->validation != LOOM_AMDGPU_LOOP_VALIDATION_UNCHECKED) {
+    return iree_ok_status();
+  }
+  const uint32_t previous_error_count =
+      loom_low_lower_context_error_count(context);
+  IREE_RETURN_IF_ERROR(loom_amdgpu_validate_divergent_loop(
+      context, source_op, facts, loop_index, plan));
+  plan->validation =
+      loom_low_lower_context_error_count(context) == previous_error_count
+          ? LOOM_AMDGPU_LOOP_VALIDATION_SUPPORTED
+          : LOOM_AMDGPU_LOOP_VALIDATION_REJECTED;
+  for (uint32_t i = 0;
+       i < plan->exit_plan_count &&
+       plan->validation == LOOM_AMDGPU_LOOP_VALIDATION_SUPPORTED;
+       ++i) {
+    loom_amdgpu_loop_exit_plan_t* exit = &plan->exit_plans[i];
+    if (exit->is_synthetic || exit->classified) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(loom_amdgpu_classify_loop_exit(
+        context, exit->source_op, facts, loop_index, plan, exit));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_materialize_loop_tree(
+    loom_low_lower_context_t* context,
+    const loom_value_fact_cfg_region_t* facts, loom_amdgpu_loop_plan_t* plan,
+    iree_arena_allocator_t* analysis_arena) {
+  if (plan->finalized) {
+    return iree_ok_status();
+  }
+  IREE_ASSERT(plan->prepared);
+  for (uint32_t i = 0; i < plan->exit_plan_count; ++i) {
+    loom_amdgpu_loop_exit_plan_t* exit = &plan->exit_plans[i];
+    if (!exit->is_synthetic) {
+      continue;
+    }
+    IREE_ASSERT(exit->child_loop != NULL);
+    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_loop_tree(
+        context, facts, exit->child_loop, analysis_arena));
+  }
+  return loom_amdgpu_materialize_loop_plan(context, facts, plan->loop_index,
+                                           plan, analysis_arena);
+}
+
+static iree_status_t loom_amdgpu_complete_loop_plan(
+    loom_low_lower_context_t* context,
+    const loom_value_fact_cfg_region_t* facts, uint16_t loop_index,
+    loom_amdgpu_loop_plan_t* plan, iree_arena_allocator_t* analysis_arena) {
+  const loom_cfg_loop_nest_t* loops = &facts->loops;
+  const loom_cfg_natural_loop_t* loop = &loops->loops[loop_index];
+  if (plan->prepared || plan->finalized ||
+      plan->validation != LOOM_AMDGPU_LOOP_VALIDATION_SUPPORTED ||
+      plan->exit_edge_count != loop->exits.count) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_amdgpu_prepare_loop_plan(context, facts, loop_index,
+                                                     plan, analysis_arena));
+  if (!plan->prepared ||
+      plan->validation == LOOM_AMDGPU_LOOP_VALIDATION_REJECTED) {
+    return iree_ok_status();
+  }
+  if (!plan->forwards_to_parent) {
+    return loom_amdgpu_materialize_loop_tree(context, facts, plan,
+                                             analysis_arena);
+  }
+
+  const uint16_t parent_loop_index = loop->parent_loop_index;
+  IREE_ASSERT_NE(parent_loop_index, LOOM_CFG_LOOP_NEST_NONE);
+  loom_amdgpu_loop_plan_t* parent = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_get_or_allocate_loop_plan(
+      context, loops, parent_loop_index, &parent));
+  const loom_op_t* source_op = NULL;
+  for (uint32_t i = 0; i < plan->exit_plan_count; ++i) {
+    if (plan->exit_plans[i].kind == LOOM_AMDGPU_LOOP_EXIT_TERMINAL) {
+      source_op = plan->exit_plans[i].source_op;
+      break;
+    }
+  }
+  IREE_ASSERT(source_op != NULL);
+  IREE_RETURN_IF_ERROR(loom_amdgpu_validate_loop_plan_once(
+      context, source_op, facts, parent_loop_index, parent));
+  if (parent->validation == LOOM_AMDGPU_LOOP_VALIDATION_REJECTED) {
+    return iree_ok_status();
+  }
+  if (parent->continuation_index != plan->continuation_index) {
+    parent->validation = LOOM_AMDGPU_LOOP_VALIDATION_REJECTED;
+    return loom_low_lower_emit_branch_constraint(
+        context, source_op, IREE_SV("divergent_loop_single_continuation"));
+  }
+  IREE_ASSERT_LT(parent->exit_plan_count, parent->exit_plan_capacity);
+  loom_amdgpu_loop_exit_plan_t* parent_exit =
+      &parent->exit_plans[parent->exit_plan_count++];
+  *parent_exit = (loom_amdgpu_loop_exit_plan_t){
+      .loop = parent,
+      .source_op = source_op,
+      .kind = LOOM_AMDGPU_LOOP_EXIT_TERMINAL,
+      .classified = true,
+      .is_divergent = true,
+      .is_synthetic = true,
+      .resume_full_tuple = true,
+      .child_loop = plan,
+  };
+  plan->parent_exit = parent_exit;
+  parent->exit_edge_count += plan->terminal_exit_edge_count;
+  parent->terminal_exit_edge_count += plan->terminal_exit_edge_count;
+  IREE_ASSERT_LE(parent->exit_edge_count,
+                 loops->loops[parent_loop_index].exits.count);
+  return loom_amdgpu_complete_loop_plan(context, facts, parent_loop_index,
+                                        parent, analysis_arena);
 }
 
 static iree_status_t loom_amdgpu_try_prepare_loop_exit(
@@ -760,22 +1098,15 @@ static iree_status_t loom_amdgpu_try_prepare_loop_exit(
   loom_amdgpu_loop_plan_t* plan = NULL;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_get_or_allocate_loop_plan(context, loops, loop_index, &plan));
-  if (is_divergent &&
-      plan->validation == LOOM_AMDGPU_LOOP_VALIDATION_UNCHECKED) {
-    const uint32_t previous_error_count =
-        loom_low_lower_context_error_count(context);
-    IREE_RETURN_IF_ERROR(loom_amdgpu_validate_divergent_loop(
+  if (is_divergent) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_validate_loop_plan_once(
         context, source_op, facts, loop_index, plan));
-    plan->validation =
-        loom_low_lower_context_error_count(context) == previous_error_count
-            ? LOOM_AMDGPU_LOOP_VALIDATION_SUPPORTED
-            : LOOM_AMDGPU_LOOP_VALIDATION_REJECTED;
   }
   if (plan->validation == LOOM_AMDGPU_LOOP_VALIDATION_REJECTED) {
     return iree_ok_status();
   }
 
-  IREE_ASSERT_LT(plan->exit_plan_count, loop->direct_exit_count);
+  IREE_ASSERT_LT(plan->exit_plan_count, plan->exit_plan_capacity);
   loom_amdgpu_loop_exit_plan_t* exit_plan =
       &plan->exit_plans[plan->exit_plan_count++];
   *exit_plan = (loom_amdgpu_loop_exit_plan_t){
@@ -803,20 +1134,23 @@ static iree_status_t loom_amdgpu_try_prepare_loop_exit(
     region->exit = exit_plan;
     exit_plan->region = region;
   }
+  if (plan->validation == LOOM_AMDGPU_LOOP_VALIDATION_SUPPORTED) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_classify_loop_exit(
+        context, source_op, facts, loop_index, plan, exit_plan));
+  }
+  if (plan->validation == LOOM_AMDGPU_LOOP_VALIDATION_REJECTED) {
+    return iree_ok_status();
+  }
   plan->exit_edge_count += exit_successor_mask == 3 ? 2 : 1;
-  IREE_ASSERT_LE(plan->exit_edge_count, loop->direct_exit_count);
+  IREE_ASSERT_LE(plan->exit_edge_count, loop->exits.count);
   if (is_divergent) {
     loom_low_lower_set_branch_plan(
         context, source_op,
         loom_low_lower_plan_make(LOOM_AMDGPU_BRANCH_PLAN_DIVERGENT_LOOP,
                                  exit_plan));
   }
-  if (plan->exit_edge_count == loop->exits.count &&
-      plan->validation == LOOM_AMDGPU_LOOP_VALIDATION_SUPPORTED) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_finalize_loop_plan(
-        context, facts, loop_index, plan, analysis_arena));
-  }
-  return iree_ok_status();
+  return loom_amdgpu_complete_loop_plan(context, facts, loop_index, plan,
+                                        analysis_arena);
 }
 
 iree_status_t loom_amdgpu_loop_try_prepare_exit_region(

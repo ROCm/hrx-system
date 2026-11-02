@@ -5,9 +5,12 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//loom/build_tools/amdgpu:descriptor_sets.bzl", "loom_amdgpu_descriptor_set_compatible_with")
+load("//loom/build_tools/amdgpu:target_config.bzl", "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:defs.bzl", "loom_library", "loom_test", "loom_test_module")
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test", "loom_check_test_suite")
+load("//loom/target/amdgpu:execution_profiles.bzl", "AMD_GPU_HARDWARE_PROFILE")
 load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
 
 package(
@@ -819,6 +822,18 @@ loom_test_module(
         "workload_configuration",
     ]
 ]
+
+loom_test(
+    name = "early_returns_amdgpu_test",
+    benchmark_smoke = False,
+    case = "early_return_values",
+    compile_targets = ["//loom/target/amdgpu:gfx11-generic"],
+    execution_profiles = [AMD_GPU_HARDWARE_PROFILE],
+    module = ":early_returns_module",
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]) + loom_amdgpu_descriptor_set_compatible_with(
+        LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.gfx11.generic.core"],
+    ),
+)
 
 _AUTHORED_CXX_KERNEL_SOURCES = [
     "padded_vectors",
