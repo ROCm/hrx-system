@@ -15,6 +15,7 @@
 #include "loom/error/emitter.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
 #include "loom/target/emit/native/amdgpu/kernel_plan.h"
+#include "loom/target/emit/native/amdgpu/program_resources.h"
 #include "loom/target/reporting/report.h"
 
 #ifdef __cplusplus
@@ -26,6 +27,9 @@ typedef struct loom_amdgpu_kernel_plan_options_t {
   const loom_amdgpu_hal_kernel_abi_layout_t* abi_layout;
   // Verified ABI facts captured before allocation.
   const loom_amdgpu_hal_kernel_abi_verify_result_t* abi_verify;
+  // Optional complete helper-closure resource facts. Null for a call-free
+  // kernel, preserving its function-local storage and allocation resources.
+  const loom_amdgpu_program_resources_t* program_resources;
   // Structured diagnostic emitter for target-dependent admission failures.
   iree_diagnostic_emitter_t emitter;
   // Optional compile report receiving native planning facts.

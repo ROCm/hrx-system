@@ -29,8 +29,12 @@ typedef struct loom_amdgpu_kernel_record_options_t {
   const loom_amdgpu_hal_kernel_abi_verify_result_t* abi_verify;
   // Optional preflight result captured before kernel record construction.
   const loom_amdgpu_native_preflight_t* preflight;
+  // Transitive scalar-register floor required by the complete native program.
+  uint32_t minimum_sgpr_count;
   // Hardware allocation floor retained by final physical packet planning.
   uint32_t minimum_vgpr_count;
+  // Transitive accumulator-register floor required by the native program.
+  uint32_t minimum_agpr_count;
 } loom_amdgpu_kernel_record_options_t;
 
 // Builds the shared native record for one scheduled and allocated target-low

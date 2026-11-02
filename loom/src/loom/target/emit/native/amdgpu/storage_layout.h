@@ -70,6 +70,20 @@ iree_status_t loom_amdgpu_storage_layout_build(
     const loom_low_storage_layout_t* source_layout,
     iree_arena_allocator_t* arena, loom_amdgpu_storage_layout_t* out_layout);
 
+// Appends one already projected function layout to shared program segments.
+// The returned records use offsets after the current |segment_sizes| while
+// preserving the source function's value lookup index. |segment_sizes| is
+// advanced to include the appended layout and copied to |out_layout|.
+//
+// This operation composes independently compiled functions without changing
+// their source storage identities. The source records may already have nonzero
+// offsets; only their storage space, size, and alignment determine placement
+// in the shared segments.
+iree_status_t loom_amdgpu_storage_layout_append(
+    const loom_amdgpu_storage_layout_t* source_layout,
+    loom_amdgpu_storage_layout_segment_sizes_t* segment_sizes,
+    iree_arena_allocator_t* arena, loom_amdgpu_storage_layout_t* out_layout);
+
 // Resolves a verified low.storage.reserve or low.storage.view handle against a
 // previously built AMDGPU fixed-segment layout.
 void loom_amdgpu_storage_layout_lookup_reference(

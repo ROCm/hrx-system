@@ -200,6 +200,45 @@ TEST_F(AmdgpuStorageLayoutTest, ResolvesViewsAgainstProjectedOffsets) {
   ExpectReservation(layout, scratch, LOOM_STORAGE_SPACE_SCRATCH, 0, 8, 8);
 }
 
+TEST_F(AmdgpuStorageLayoutTest, AppendsFunctionLayoutsToSharedSegments) {
+  const loom_value_id_t private_storage =
+      Reserve(LOOM_STORAGE_SPACE_PRIVATE, 8, 8);
+  const loom_value_id_t private_view = View(private_storage, 2, 4);
+  const loom_value_id_t workgroup_storage =
+      Reserve(LOOM_STORAGE_SPACE_WORKGROUP, 12, 4);
+
+  loom_amdgpu_storage_layout_t source_layout = {};
+  IREE_ASSERT_OK(BuildLayout(&source_layout));
+  loom_amdgpu_storage_layout_segment_sizes_t segment_sizes = {
+      .group_segment_fixed_size = 6,
+      .private_segment_fixed_size = 3,
+  };
+  loom_amdgpu_storage_layout_t first_layout = {};
+  IREE_ASSERT_OK(loom_amdgpu_storage_layout_append(
+      &source_layout, &segment_sizes, &layout_arena_, &first_layout));
+  EXPECT_EQ(segment_sizes.group_segment_fixed_size, 20u);
+  EXPECT_EQ(segment_sizes.private_segment_fixed_size, 16u);
+  ExpectReservation(first_layout, private_storage, LOOM_STORAGE_SPACE_PRIVATE,
+                    8, 8, 8);
+  ExpectReservation(first_layout, workgroup_storage,
+                    LOOM_STORAGE_SPACE_WORKGROUP, 8, 12, 4);
+  loom_amdgpu_storage_layout_reference_t first_view_reference = {};
+  loom_amdgpu_storage_layout_lookup_reference(&first_layout, private_view,
+                                              &first_view_reference);
+  EXPECT_EQ(first_view_reference.reservation.byte_offset, 8u);
+  EXPECT_EQ(first_view_reference.byte_offset, 2u);
+
+  loom_amdgpu_storage_layout_t second_layout = {};
+  IREE_ASSERT_OK(loom_amdgpu_storage_layout_append(
+      &source_layout, &segment_sizes, &layout_arena_, &second_layout));
+  EXPECT_EQ(segment_sizes.group_segment_fixed_size, 32u);
+  EXPECT_EQ(segment_sizes.private_segment_fixed_size, 24u);
+  ExpectReservation(second_layout, private_storage, LOOM_STORAGE_SPACE_PRIVATE,
+                    16, 8, 8);
+  ExpectReservation(second_layout, workgroup_storage,
+                    LOOM_STORAGE_SPACE_WORKGROUP, 20, 12, 4);
+}
+
 TEST_F(AmdgpuStorageLayoutTest, RejectsStackStorage) {
   Reserve(LOOM_STORAGE_SPACE_STACK, 8, 4);
 

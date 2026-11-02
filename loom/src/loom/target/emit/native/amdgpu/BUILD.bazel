@@ -196,6 +196,30 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "program_resources",
+    srcs = ["program_resources.c"],
+    hdrs = ["program_resources.h"],
+    deps = [
+        ":function_plan",
+        ":storage_layout",
+        "//loom/src/loom/codegen/low:frame",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "program_resources_test",
+    srcs = ["program_resources_test.cc"],
+    deps = [
+        ":program_resources",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "spill_recipe",
     srcs = ["spill_recipe.c"],
     hdrs = ["spill_recipe.h"],
@@ -454,6 +478,7 @@ loom_cc_library(
         ":kernel_plan",
         ":kernel_record_build",
         ":kernel_report",
+        ":program_resources",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/error:emitter",
