@@ -1749,6 +1749,17 @@ iree_status_t loom_low_allocation_unit_liveness_retain_storage(
     if (relation->cause == LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT) {
       loom_low_allocation_unit_liveness_mark_independent_storage_extension(
           unit_liveness, relation->source_ordinal);
+    } else if (loom_low_placement_cause_is_edge(relation->cause) &&
+               relation->kind == LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE &&
+               iree_all_bits_set(
+                   relation->flags,
+                   LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD |
+                       LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE)) {
+      const loom_value_ordinal_t origin =
+          placement
+              ->tied_storage_origins_by_value_ordinal[relation->source_ordinal];
+      loom_low_allocation_unit_liveness_mark_independent_storage_extension(
+          unit_liveness, origin);
     }
   }
   return iree_ok_status();

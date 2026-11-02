@@ -199,16 +199,16 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @memory_repla
 
 // ----
 .Lbb1:
-  v_cndmask_b32 v1, 0, v0, s[2:3]
-  s_load_dwordx2 s[2:3], s[0:1], 0
+  v_cndmask_b32 v1, 0, v0, s[0:1]
+  s_load_dwordx2 s[0:1], s[2:3], 0
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  s_cmp_eq_u64 s[2:3], s[0:1]
+  s_cmp_eq_u64 s[0:1], s[2:3]
   s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb3
 .Lbb2:
   s_branch .Lbb1
 .Lbb3:
-  s_or_b64 s[2:3], s[2:3], s[0:1]
+  s_or_b64 s[0:1], s[0:1], s[2:3]
   s_endpgm
 
 // ====
