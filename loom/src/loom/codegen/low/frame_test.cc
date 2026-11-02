@@ -153,6 +153,67 @@ TEST_F(LowEmissionFrameTest, RejectsTargetlessFunctionBeforeScheduling) {
   EXPECT_EQ(diagnostic_count, 1u);
 }
 
+TEST_F(LowEmissionFrameTest, ResolvesSparseEntryValuesIntoLocalDomain) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @entry_values(%argument: reg<test.phys>) -> (reg<test.phys>, reg<test.phys>) asm {
+  %live = live_in<test.arg0> : reg<test.phys>
+  return %argument, %live
+}
+)");
+  loom_op_t* function = loom_block_op(loom_module_block(module.get()), 0);
+  loom_block_t* entry =
+      loom_region_entry_block(loom_low_func_def_body(function));
+  const loom_value_id_t argument = loom_block_arg_id(entry, 0);
+  const loom_value_id_t live = loom_low_live_in_result(loom_block_op(entry, 0));
+  const loom_low_allocation_abi_location_t argument_location = {
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .descriptor_reg_class_id = TEST_LOW_CORE_REG_CLASS_ID_TEST_PHYS,
+      .location_base = 6,
+  };
+  const loom_low_allocation_entry_value_t entry_value = {
+      .value_id = live,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = 5,
+  };
+  loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .function_target_facts = &target_facts_,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
+      .allocation_entry_locations = &argument_location,
+      .allocation_entry_location_count = 1,
+      .allocation_entry_values = &entry_value,
+      .allocation_entry_value_count = 1,
+  };
+  loom_low_emission_frame_t frame = {};
+  bool accepted = false;
+  IREE_ASSERT_OK(loom_low_emission_frame_build(module.get(), function, &options,
+                                               &arena_, &frame, &accepted));
+  ASSERT_TRUE(accepted);
+  ASSERT_EQ(frame.allocation.error_count, 0u);
+
+  const auto find_assignment = [&](loom_value_id_t value_id) {
+    for (iree_host_size_t i = 0; i < frame.allocation.assignment_count; ++i) {
+      if (frame.allocation.assignments[i].value_id == value_id) {
+        return &frame.allocation.assignments[i];
+      }
+    }
+    return static_cast<const loom_low_allocation_assignment_t*>(nullptr);
+  };
+  const loom_low_allocation_assignment_t* argument_assignment =
+      find_assignment(argument);
+  const loom_low_allocation_assignment_t* live_assignment =
+      find_assignment(live);
+  ASSERT_NE(argument_assignment, nullptr);
+  ASSERT_NE(live_assignment, nullptr);
+  EXPECT_EQ(argument_assignment->descriptor_reg_class_id,
+            TEST_LOW_CORE_REG_CLASS_ID_TEST_PHYS);
+  EXPECT_EQ(argument_assignment->location_base, 6u);
+  EXPECT_EQ(live_assignment->descriptor_reg_class_id,
+            TEST_LOW_CORE_REG_CLASS_ID_TEST_PHYS);
+  EXPECT_EQ(live_assignment->location_base, 5u);
+  EXPECT_EQ(frame.allocation.entry_moves.moves.count, 0u);
+}
+
 constexpr const char kLoopPlacementSource[] = R"(
 low.func.def target<test.low.core> @loop_placement(%source: reg<test.i32>) asm {
   %temporary = test.total.add.i32 %source, %source

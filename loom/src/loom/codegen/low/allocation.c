@@ -84,6 +84,57 @@ typedef struct loom_low_allocation_build_state_t {
       retained_assignments_by_value_ordinal;
 } loom_low_allocation_build_state_t;
 
+// Resolves sparse target-owned entry values once into the dense local value
+// domain consumed by assignment, numbering, and final move construction.
+static iree_status_t loom_low_allocation_resolve_entry_locations(
+    const loom_low_function_model_t* model,
+    const loom_low_allocation_options_t* source_options,
+    iree_arena_allocator_t* arena, loom_low_allocation_options_t* out_options) {
+  *out_options = *source_options;
+  IREE_ASSERT_NE(source_options->entry_value_count, 0u);
+  const loom_local_value_domain_t* value_domain = &model->context.value_domain;
+  IREE_ASSERT_LE(source_options->entry_location_count,
+                 value_domain->value_count);
+  iree_host_size_t location_count = source_options->entry_location_count;
+  for (iree_host_size_t i = 0; i < source_options->entry_value_count; ++i) {
+    const loom_value_ordinal_t ordinal = loom_local_value_domain_ordinal(
+        value_domain, source_options->entry_values[i].value_id);
+    location_count = iree_max(location_count, (iree_host_size_t)ordinal + 1);
+  }
+  loom_low_allocation_abi_location_t* locations = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, location_count, sizeof(*locations), (void**)&locations));
+  memset(locations, 0, location_count * sizeof(*locations));
+  if (source_options->entry_location_count != 0) {
+    memcpy(locations, source_options->entry_locations,
+           source_options->entry_location_count * sizeof(*locations));
+  }
+
+  for (iree_host_size_t i = 0; i < source_options->entry_value_count; ++i) {
+    const loom_low_allocation_entry_value_t* entry =
+        &source_options->entry_values[i];
+    const loom_value_ordinal_t ordinal =
+        loom_local_value_domain_ordinal(value_domain, entry->value_id);
+    loom_low_allocation_abi_location_t* location = &locations[ordinal];
+    IREE_ASSERT_EQ(location->location_kind,
+                   LOOM_LOW_ALLOCATION_LOCATION_UNASSIGNED);
+    IREE_ASSERT(entry->location_kind ==
+                    LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER ||
+                entry->location_kind == LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID);
+    const loom_type_t type =
+        loom_module_value_type(model->context.module, entry->value_id);
+    IREE_ASSERT(loom_low_type_is_register(type));
+    *location = (loom_low_allocation_abi_location_t){
+        .location_kind = entry->location_kind,
+        .descriptor_reg_class_id = loom_low_register_type_class_id(type),
+        .location_base = entry->location_base,
+    };
+  }
+  out_options->entry_locations = locations;
+  out_options->entry_location_count = location_count;
+  return iree_ok_status();
+}
+
 static loom_low_allocation_interval_assignment_context_t
 loom_low_allocation_make_interval_assignment_context(
     loom_low_allocation_build_state_t* state,
@@ -263,8 +314,9 @@ static iree_status_t loom_low_allocation_try_alternative_assignment(
   return status;
 }
 
-// Formal arguments occupy the local value domain's prefix. Unused arguments
-// have no assignment, and incoming identities need no move-plan workspace.
+// Formal arguments occupy the local value domain's prefix and sparse target
+// entry values have already been resolved into the same dense table. Unused
+// values have no assignment, and incoming identities need no move workspace.
 static const loom_low_allocation_assignment_t*
 loom_low_allocation_entry_destination(
     const loom_low_allocation_build_state_t* state, iree_host_size_t ordinal) {
@@ -710,6 +762,15 @@ static iree_status_t loom_low_allocate_function_impl(
   IREE_ASSERT(iree_any_bit_set(model->context.value_domain.flags,
                                LOOM_LOCAL_VALUE_DOMAIN_FLAG_REGION_TREE));
 
+  iree_arena_allocator_t decision_arena;
+  iree_arena_initialize(arena->block_pool, &decision_arena);
+  loom_low_allocation_options_t resolved_options;
+  iree_status_t status = iree_ok_status();
+  if (options->entry_value_count != 0) {
+    status = loom_low_allocation_resolve_entry_locations(
+        model, options, &decision_arena, &resolved_options);
+    options = &resolved_options;
+  }
   loom_low_allocation_build_state_t state = {
       .module = model->context.module,
       .options = options,
@@ -718,10 +779,7 @@ static iree_status_t loom_low_allocate_function_impl(
       .function_op = model->context.function_op,
       .target = model->context.target,
   };
-  iree_arena_allocator_t decision_arena;
-  iree_arena_initialize(arena->block_pool, &decision_arena);
-  iree_status_t status = iree_ok_status();
-  if (retained_location_table != NULL) {
+  if (iree_status_is_ok(status) && retained_location_table != NULL) {
     status = loom_low_allocation_index_retained_assignments(
         model, retained_location_table, &decision_arena, &state);
   }
