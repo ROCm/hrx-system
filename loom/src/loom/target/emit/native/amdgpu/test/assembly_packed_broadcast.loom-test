@@ -1,9 +1,12 @@
-// The unused neighboring source dword remains independently live.
-// RUN: emit amdgpu-assembly @preserve_neighbor strategy=source waits=none fixed=%factor:physical_register:0:1 fixed=%neighbor:physical_register:1:1 fixed=%values:physical_register:2:2 fixed=%addends:physical_register:4:2
+// The broadcast reads only the first dword of the source pair. Its neighboring
+// dword remains independently live and is consumed after the broadcast.
+// RUN: emit amdgpu-assembly @preserve_neighbor
 
 amdgpu.target<gfx942> @target
 
-low.func.def target<amdgpu.cdna3.core>(@target) @preserve_neighbor(%factor: reg<amdgpu.vgpr>, %neighbor: reg<amdgpu.vgpr>, %values: reg<amdgpu.vgpr x2>, %addends: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr>) asm {
+low.func.def schedule(locked) target<amdgpu.cdna3.core>(@target) @preserve_neighbor(%source: reg<amdgpu.vgpr x2>, %values: reg<amdgpu.vgpr x2>, %addends: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr>) asm {
+  %factor = slice %source[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %neighbor = slice %source[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %result = v_pk_fma_f32.broadcast_a %factor, %values, %addends
   %first = slice %result[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %neighbor_result = v_add_f32 %neighbor, %first
@@ -18,11 +21,11 @@ low.func.def target<amdgpu.cdna3.core>(@target) @preserve_neighbor(%factor: reg<
 // ====
 
 // Packed assembly uses pair spelling even for one scalar register.
-// RUN: emit amdgpu-assembly @scalar_register strategy=source waits=none fixed=%factor:physical_register:0:1 fixed=%values:physical_register:0:2 fixed=%addends:physical_register:2:2
+// RUN: emit amdgpu-assembly @scalar_register
 
 amdgpu.target<gfx942> @target
 
-low.func.def target<amdgpu.cdna3.core>(@target) @scalar_register(%factor: reg<amdgpu.sgpr>, %values: reg<amdgpu.vgpr x2>, %addends: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+low.func.def schedule(locked) target<amdgpu.cdna3.core>(@target) @scalar_register(%factor: reg<amdgpu.sgpr>, %values: reg<amdgpu.vgpr x2>, %addends: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %result = v_pk_fma_f32.broadcast_a %factor, %values, %addends
   return %result
 }
@@ -34,11 +37,11 @@ low.func.def target<amdgpu.cdna3.core>(@target) @scalar_register(%factor: reg<am
 // ====
 
 // All three selector bits clear while the instruction retains pair outputs.
-// RUN: emit amdgpu-native-words @fma strategy=source waits=none fixed=%multiplicand:physical_register:0:1 fixed=%multiplier:physical_register:2:1 fixed=%accumulator:physical_register:4:1
+// RUN: emit amdgpu-native-words @fma
 
 amdgpu.target<gfx942> @target
 
-low.func.def target<amdgpu.cdna3.core>(@target) @fma(%multiplicand: reg<amdgpu.vgpr>, %multiplier: reg<amdgpu.vgpr>, %accumulator: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
+low.func.def schedule(locked) target<amdgpu.cdna3.core>(@target) @fma(%multiplicand: reg<amdgpu.vgpr>, %multiplier: reg<amdgpu.vgpr>, %accumulator: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
   %result = v_pk_fma_f32.broadcast_a_b_c %multiplicand, %multiplier, %accumulator
   return %result
 }
@@ -51,118 +54,118 @@ low.func.def target<amdgpu.cdna3.core>(@target) @fma(%multiplicand: reg<amdgpu.v
 // ====
 
 // A literal source retains the independent high-half selector bits.
-// RUN: emit amdgpu-assembly @half_literal strategy=source waits=none fixed=%factor:physical_register:0:1 fixed=%values:physical_register:2:1
+// RUN: emit amdgpu-assembly @half_literal
 
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @half_literal(%factor: reg<amdgpu.vgpr>, %values: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3.core>(@target) @half_literal(%factor: reg<amdgpu.vgpr>, %values: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %result = v_pk_fma_f16.broadcast_a_c_src2_lit %factor, %values, 13653
   return %result
 }
 
 // ----
-  v_pk_fma_f16 v0, v0, v2, 13653 op_sel_hi:[0,1,0]
+  v_pk_fma_f16 v0, v0, v1, 13653 op_sel_hi:[0,1,0]
   s_endpgm
 
 // ====
 
 // RDNA4 encodes the same authored selector with a different machine field.
-// RUN: emit amdgpu-native-words @unsigned_literal strategy=source waits=none fixed=%values:physical_register:2:1 fixed=%addend:physical_register:4:1
+// RUN: emit amdgpu-native-words @unsigned_literal
 
 amdgpu.target<gfx1200> @target
 
-low.func.def target<amdgpu.rdna4.core>(@target) @unsigned_literal(%values: reg<amdgpu.vgpr>, %addend: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @unsigned_literal(%values: reg<amdgpu.vgpr>, %addend: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %result = v_pk_mad_u16.broadcast_b_c_src1_lit %values, %addend, 13653
   return %result
 }
 
 // ----
 0xCC090000
-0x0C11FF02
+0x0C05FF00
 0x00003555
 0xBFB00000
 
 // ====
 
 // BF16 shares the one-dword selector contract on profiles with native support.
-// RUN: emit amdgpu-native-words @brain_fma strategy=source waits=none fixed=%factor:physical_register:0:1 fixed=%values:physical_register:2:1 fixed=%addend:physical_register:4:1
+// RUN: emit amdgpu-native-words @brain_fma
 
 amdgpu.target<gfx1250> @target
 
-low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @brain_fma(%factor: reg<amdgpu.vgpr>, %values: reg<amdgpu.vgpr>, %addend: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna4.gfx125x.core>(@target) @brain_fma(%factor: reg<amdgpu.vgpr>, %values: reg<amdgpu.vgpr>, %addend: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %result = v_pk_fma_bf16.broadcast_a_c %factor, %values, %addend
   return %result
 }
 
 // ----
 0xCC110000
-0x14120500
+0x140A0300
 0xBFB00000
 
 // ====
 
 // Binary forms retain pair spelling with independently selected scalar inputs.
-// RUN: emit amdgpu-assembly @binary strategy=source waits=none fixed=%offset:physical_register:0:1 fixed=%factor:physical_register:2:1 fixed=%values:physical_register:4:2
+// RUN: emit amdgpu-assembly @binary
 
 amdgpu.target<gfx942> @target
 
-low.func.def target<amdgpu.cdna3.core>(@target) @binary(%offset: reg<amdgpu.sgpr>, %factor: reg<amdgpu.vgpr>, %values: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+low.func.def schedule(locked) target<amdgpu.cdna3.core>(@target) @binary(%offset: reg<amdgpu.sgpr>, %factor: reg<amdgpu.vgpr>, %values: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
   %sum = v_pk_add_f32.broadcast_lhs_rhs %offset, %factor
   %product = v_pk_mul_f32.broadcast_rhs %values, %factor
   return %sum, %product
 }
 
 // ----
-  v_pk_add_f32 v[0:1], s[0:1], v[2:3] op_sel_hi:[0,0]
-  v_pk_mul_f32 v[2:3], v[4:5], v[2:3] op_sel_hi:[1,0]
+  v_pk_add_f32 v[4:5], s[0:1], v[0:1] op_sel_hi:[0,0]
+  v_pk_mul_f32 v[0:1], v[2:3], v[0:1] op_sel_hi:[1,0]
   s_endpgm
 
 // ====
 
 // Binary half selectors remain independent of subtraction's negation bits.
-// RUN: emit amdgpu-assembly @half_subtract strategy=source waits=none fixed=%offset:physical_register:0:1 fixed=%values:physical_register:2:1
+// RUN: emit amdgpu-assembly @half_subtract
 
 amdgpu.target<gfx942> @target
 
-low.func.def target<amdgpu.cdna3.core>(@target) @half_subtract(%offset: reg<amdgpu.sgpr>, %values: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def schedule(locked) target<amdgpu.cdna3.core>(@target) @half_subtract(%offset: reg<amdgpu.sgpr>, %values: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %result = v_pk_add_f16.broadcast_lhs %offset, %values {neg_lo = 2, neg_hi = 2}
   return %result
 }
 
 // ----
-  v_pk_add_f16 v0, s0, v2 op_sel_hi:[0,1] neg_lo:[0,1] neg_hi:[0,1]
+  v_pk_add_f16 v0, s0, v0 op_sel_hi:[0,1] neg_lo:[0,1] neg_hi:[0,1]
   s_endpgm
 
 // ====
 
 // Broadcasting both operands retains the unused fixed encoding bit.
-// RUN: emit amdgpu-native-words @shift strategy=source waits=none fixed=%count:physical_register:0:1 fixed=%value:physical_register:2:1
+// RUN: emit amdgpu-native-words @shift
 
 amdgpu.target<gfx942> @target
 
-low.func.def target<amdgpu.cdna3.core>(@target) @shift(%count: reg<amdgpu.sgpr>, %value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def schedule(locked) target<amdgpu.cdna3.core>(@target) @shift(%count: reg<amdgpu.sgpr>, %value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %result = v_pk_lshlrev_b16.broadcast_shift_value %count, %value
   return %result
 }
 
 // ----
 0xD3844000
-0x00020400
+0x00020000
 0xBF810000
 
 // ====
 
 // BF16 uses the renamed RDNA4 selector field and preserves negation.
-// RUN: emit amdgpu-native-words @brain_subtract strategy=source waits=none fixed=%offset:physical_register:0:1 fixed=%values:physical_register:2:1
+// RUN: emit amdgpu-native-words @brain_subtract
 
 amdgpu.target<gfx1250> @target
 
-low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @brain_subtract(%offset: reg<amdgpu.sgpr>, %values: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna4.gfx125x.core>(@target) @brain_subtract(%offset: reg<amdgpu.sgpr>, %values: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %result = v_pk_add_bf16.broadcast_lhs %offset, %values {neg_lo = 2, neg_hi = 2}
   return %result
 }
 
 // ----
 0xCC234200
-0x52020400
+0x52020000
 0xBFB00000
