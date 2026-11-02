@@ -25,6 +25,34 @@ _AMDGPU_NATIVE_VISIBILITY = ["//loom/src/loom/target/emit/native/amdgpu:__pkg__"
 _AMDGPU_TOOLING_VISIBILITY = ["//loom/src/loom/tooling/target/amdgpu:__pkg__"]
 
 loom_cc_library(
+    name = "call_abi",
+    srcs = ["call_abi.c"],
+    hdrs = ["call_abi.h"],
+    visibility = _AMDGPU_ARCH_VISIBILITY + _AMDGPU_NATIVE_VISIBILITY,
+    deps = [
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low/allocation:call",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "call_abi_test",
+    srcs = ["call_abi_test.cc"],
+    deps = [
+        ":call_abi",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "asan",
     hdrs = ["asan.h"],
     visibility = (
