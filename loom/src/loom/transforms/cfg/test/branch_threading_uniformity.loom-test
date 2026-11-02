@@ -1,0 +1,272 @@
+// RUN: pass scf-to-cfg,cfg-simplify,cfg-converge,kernel-synchronization-legality
+
+// Partially active writer lanes reconverge before whole-wave publication.
+kernel.def @subgroup_publication() {
+  %c1 = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%value: i32) {
+  %c0 = index.constant 0 : index
+  %limit = index.constant 16 : index
+  %wave = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
+  %owner = index.cmp eq, %wave, %c0 : index
+  %active = index.cmp ult, %lane, %limit : index
+  %write = scalar.andi %owner, %active : i1
+  scf.if %write {
+    test.use %value : i32
+  }
+  scf.if %owner {
+    kernel.barrier<global> scope(subgroup) ordering(release)
+    test.use %value : i32
+  }
+  kernel.return
+}
+
+// ----
+kernel.def @subgroup_publication() {
+  %c1 = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%value: i32) {
+  %c0 = index.constant 0 : index
+  %limit = index.constant 16 : index
+  %wave = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
+  %owner = index.cmp eq, %wave, %c0 : index
+  %active = index.cmp ult, %lane, %limit : index
+  %write = scalar.andi %owner, %active : i1
+  cfg.cond_br %write, ^_bb1, ^_bb2
+^_bb1:
+  test.use %value : i32
+  cfg.br ^_bb2
+^_bb2:
+  cfg.cond_br %owner, ^_bb3, ^_bb4
+^_bb3:
+  kernel.barrier<global> scope(subgroup) ordering(release)
+  test.use %value : i32
+  cfg.br ^_bb4
+^_bb4:
+  kernel.return
+}
+
+// ====
+
+// RUN: pass scf-to-cfg,cfg-simplify,cfg-converge,kernel-synchronization-legality
+
+// A known-false incoming edge cannot skip subgroup reconvergence either.
+kernel.def @subgroup_false_edge() {
+  %c1 = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%value: i32) {
+  %c0 = index.constant 0 : index
+  %limit = index.constant 16 : index
+  %wave = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
+  %skip = index.cmp eq, %wave, %c0 : index
+  %active = index.cmp ult, %lane, %limit : index
+  %write = scalar.ori %skip, %active : i1
+  scf.if %write {
+    test.use %value : i32
+  }
+  scf.if %skip {
+    test.use %wave : index
+  } else {
+    kernel.barrier<global> scope(subgroup) ordering(release)
+    test.use %value : i32
+  }
+  kernel.return
+}
+
+// ----
+kernel.def @subgroup_false_edge() {
+  %c1 = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%value: i32) {
+  %c0 = index.constant 0 : index
+  %limit = index.constant 16 : index
+  %wave = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
+  %skip = index.cmp eq, %wave, %c0 : index
+  %active = index.cmp ult, %lane, %limit : index
+  %write = scalar.ori %skip, %active : i1
+  cfg.cond_br %write, ^_bb1, ^_bb2
+^_bb1:
+  test.use %value : i32
+  cfg.br ^_bb2
+^_bb2:
+  cfg.cond_br %skip, ^_bb3, ^_bb4
+^_bb3:
+  test.use %wave : index
+  cfg.br ^_bb5
+^_bb4:
+  kernel.barrier<global> scope(subgroup) ordering(release)
+  test.use %value : i32
+  cfg.br ^_bb5
+^_bb5:
+  kernel.return
+}
+
+// ====
+
+// RUN: pass scf-to-cfg,cfg-simplify,cfg-converge,kernel-synchronization-legality
+
+// Whole-wave writers still reconverge before a workgroup-wide decision.
+kernel.def @workgroup_publication() {
+  %c1 = index.constant 1 : index
+  %groups = index.constant 4 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%value: i32) {
+  %c0 = index.constant 0 : index
+  %group = kernel.workgroup.id<x> : index
+  %wave = kernel.subgroup.id : index
+  %owner = index.cmp eq, %group, %c0 : index
+  %active = index.cmp eq, %wave, %c0 : index
+  %write = scalar.andi %owner, %active : i1
+  scf.if %write {
+    test.use %value : i32
+  }
+  scf.if %owner {
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    test.use %value : i32
+  }
+  kernel.return
+}
+
+// ----
+kernel.def @workgroup_publication() {
+  %c1 = index.constant 1 : index
+  %groups = index.constant 4 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%value: i32) {
+  %c0 = index.constant 0 : index
+  %group = kernel.workgroup.id<x> : index
+  %wave = kernel.subgroup.id : index
+  %owner = index.cmp eq, %group, %c0 : index
+  %active = index.cmp eq, %wave, %c0 : index
+  %write = scalar.andi %owner, %active : i1
+  cfg.cond_br %write, ^_bb1, ^_bb2
+^_bb1:
+  test.use %value : i32
+  cfg.br ^_bb2
+^_bb2:
+  cfg.cond_br %owner, ^_bb3, ^_bb4
+^_bb3:
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  test.use %value : i32
+  cfg.br ^_bb4
+^_bb4:
+  kernel.return
+}
+
+// ====
+
+// RUN: pass scf-to-cfg,cfg-simplify,cfg-converge
+
+// Cluster-uniform decisions retain the same boundary across selected groups.
+kernel.def @cluster_decision() {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %groups = index.constant 4 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) cluster_size(%c2, %c1, %c1) : index
+} launch(%value: i32) {
+  %c0 = index.constant 0 : index
+  %cluster = kernel.cluster.id<x> : index
+  %group = kernel.workgroup.id<x> : index
+  %owner = index.cmp eq, %cluster, %c0 : index
+  %active = index.cmp eq, %group, %c0 : index
+  %write = scalar.andi %owner, %active : i1
+  scf.if %write {
+    test.use %value : i32
+  }
+  scf.if %owner {
+    test.use %cluster : index
+  }
+  kernel.return
+}
+
+// ----
+kernel.def @cluster_decision() {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %groups = index.constant 4 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) cluster_size(%c2, %c1, %c1) : index
+} launch(%value: i32) {
+  %c0 = index.constant 0 : index
+  %cluster = kernel.cluster.id<x> : index
+  %group = kernel.workgroup.id<x> : index
+  %owner = index.cmp eq, %cluster, %c0 : index
+  %active = index.cmp eq, %group, %c0 : index
+  %write = scalar.andi %owner, %active : i1
+  cfg.cond_br %write, ^_bb1, ^_bb2
+^_bb1:
+  test.use %value : i32
+  cfg.br ^_bb2
+^_bb2:
+  cfg.cond_br %owner, ^_bb3, ^_bb4
+^_bb3:
+  test.use %cluster : index
+  cfg.br ^_bb4
+^_bb4:
+  kernel.return
+}
+
+// ====
+
+// RUN: pass scf-to-cfg,cfg-simplify,cfg-converge
+
+// Equally uniform predecessors can still bypass a proven decision.
+kernel.def @uniform_predecessor() {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %groups = index.constant 4 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%groups, %groups, %c1) workgroup_size(%threads, %c1, %c1) cluster_size(%c2, %c2, %c1) : index
+} launch(%value: i32) {
+  %c0 = index.constant 0 : index
+  %cluster_x = kernel.cluster.id<x> : index
+  %cluster_y = kernel.cluster.id<y> : index
+  %owner = index.cmp eq, %cluster_x, %c0 : index
+  %active = index.cmp eq, %cluster_y, %c0 : index
+  %write = scalar.andi %owner, %active : i1
+  scf.if %write {
+    test.use %value : i32
+  }
+  scf.if %owner {
+    test.use %cluster_x : index
+  }
+  kernel.return
+}
+
+// ----
+kernel.def @uniform_predecessor() {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %groups = index.constant 4 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%groups, %groups, %c1) workgroup_size(%threads, %c1, %c1) cluster_size(%c2, %c2, %c1) : index
+} launch(%value: i32) {
+  %c0 = index.constant 0 : index
+  %cluster_x = kernel.cluster.id<x> : index
+  %cluster_y = kernel.cluster.id<y> : index
+  %owner = index.cmp eq, %cluster_x, %c0 : index
+  %active = index.cmp eq, %cluster_y, %c0 : index
+  %write = scalar.andi %owner, %active : i1
+  cfg.cond_br %write, ^_bb1, ^_bb2
+^_bb1:
+  test.use %value : i32
+  cfg.br ^_bb3
+^_bb2:
+  cfg.cond_br %owner, ^_bb3, ^_bb4
+^_bb3:
+  test.use %cluster_x : index
+  cfg.br ^_bb4
+^_bb4:
+  kernel.return
+}
