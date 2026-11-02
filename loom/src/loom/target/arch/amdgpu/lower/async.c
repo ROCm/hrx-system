@@ -17,6 +17,7 @@
 #include "loom/target/arch/amdgpu/lower/candidates/async_gather_candidates.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/legality.h"
+#include "loom/target/arch/amdgpu/lower/materializers.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
 #include "loom/target/arch/amdgpu/lower/memory_packet.h"
 #include "loom/target/arch/amdgpu/lower/source_alloca_layout.h"
@@ -383,8 +384,13 @@ static bool loom_amdgpu_async_gather_select(
     return false;
   }
 
-  out_selection->source_view = loom_kernel_async_gather_source(source_op);
-  out_selection->dest_view = loom_kernel_async_gather_dest(source_op);
+  const bool masked = loom_kernel_async_gather_mask_isa(source_op);
+  out_selection->source_view =
+      masked ? loom_kernel_async_gather_mask_source(source_op)
+             : loom_kernel_async_gather_source(source_op);
+  out_selection->dest_view = masked
+                                 ? loom_kernel_async_gather_mask_dest(source_op)
+                                 : loom_kernel_async_gather_dest(source_op);
   if (!loom_amdgpu_async_gather_select_source(
           module, descriptor_set, view_regions, out_selection->source_view,
           cache_policy, out_selection, out_diagnostic) ||
@@ -436,6 +442,7 @@ static iree_status_t loom_amdgpu_async_gather_resolve_selection(
     loom_amdgpu_async_gather_plan_t* out_plan) {
   *out_plan = (loom_amdgpu_async_gather_plan_t){
       .source = selection->source,
+      .condition = LOOM_VALUE_ID_INVALID,
       .dest_dynamic_term_count = selection->dest.dynamic_term_count,
       .dest_static_byte_offset = selection->dest_static_byte_offset,
       .packet_byte_count = selection->packet_byte_count,
@@ -484,6 +491,11 @@ iree_status_t loom_amdgpu_select_kernel_async_gather_plan(
   }
   IREE_RETURN_IF_ERROR(loom_amdgpu_async_gather_resolve_selection(
       context, &selection, out_plan));
+  if (loom_kernel_async_gather_mask_isa(source_op)) {
+    out_plan->condition = loom_kernel_async_gather_mask_predicate(source_op);
+    IREE_RETURN_IF_ERROR(loom_amdgpu_prepare_native_i1_mask(
+        context, out_plan->condition, &out_plan->condition_plan));
+  }
   *out_selected = true;
   return iree_ok_status();
 }
@@ -898,8 +910,11 @@ iree_status_t loom_amdgpu_select_kernel_async_tensor_load_plan(
 
 static bool loom_amdgpu_async_group_packet_counts(
     const loom_module_t* module, const loom_op_t* group_op,
-    uint32_t out_packet_counts[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT]) {
+    uint32_t out_packet_counts[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT],
+    uint32_t out_guaranteed_counts[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT]) {
   memset(out_packet_counts, 0,
+         sizeof(uint32_t) * LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT);
+  memset(out_guaranteed_counts, 0,
          sizeof(uint32_t) * LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT);
   IREE_ASSERT(loom_kernel_async_group_isa(group_op));
   loom_value_slice_t tokens = loom_kernel_async_group_tokens(group_op);
@@ -914,8 +929,10 @@ static bool loom_amdgpu_async_group_packet_counts(
     }
     const loom_op_t* token_op = loom_value_def_op(token);
     uint16_t counter_id = LOOM_AMDGPU_WAIT_COUNTER_NONE;
+    const bool masked = token_op->kind == LOOM_OP_KERNEL_ASYNC_GATHER_MASK;
     switch (token_op->kind) {
       case LOOM_OP_KERNEL_ASYNC_GATHER:
+      case LOOM_OP_KERNEL_ASYNC_GATHER_MASK:
         counter_id = LOOM_AMDGPU_WAIT_COUNTER_VMEM_LOAD;
         break;
       case LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER:
@@ -932,6 +949,9 @@ static bool loom_amdgpu_async_group_packet_counts(
       return false;
     }
     ++out_packet_counts[slot];
+    if (!masked) {
+      ++out_guaranteed_counts[slot];
+    }
   }
   return true;
 }
@@ -1014,8 +1034,9 @@ static bool loom_amdgpu_async_wait_stream_counts(
       continue;
     }
     uint32_t group_packet_counts[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT] = {0};
-    if (!loom_amdgpu_async_group_packet_counts(module, op,
-                                               group_packet_counts)) {
+    uint32_t guaranteed_counts[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT] = {0};
+    if (!loom_amdgpu_async_group_packet_counts(module, op, group_packet_counts,
+                                               guaranteed_counts)) {
       diagnostic->rejection_bits |=
           LOOM_AMDGPU_ASYNC_WAIT_REJECTION_GROUP_TOKEN;
       return false;
@@ -1026,7 +1047,10 @@ static bool loom_amdgpu_async_wait_stream_counts(
           group_index <= waited_group_index) {
         waited_packet_counts[slot] += group_packet_counts[slot];
       } else if (group_index > waited_group_index) {
-        newer_packet_counts[slot] += group_packet_counts[slot];
+        // A masked packet may execute with no active lanes and contribute
+        // nothing to the hardware counter. Only guaranteed younger packets
+        // may remain outstanding when an older group completes.
+        newer_packet_counts[slot] += guaranteed_counts[slot];
       }
     }
     ++group_index;
@@ -1187,6 +1211,24 @@ iree_status_t loom_amdgpu_lower_kernel_async_gather(
   iree_host_size_t attr_count = 0;
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_memory_attrs(
       context, &access, attrs, IREE_ARRAYSIZE(attrs), &attr_count));
+  loom_value_id_t saved_exec = LOOM_VALUE_ID_INVALID;
+  if (plan->condition != LOOM_VALUE_ID_INVALID) {
+    loom_value_id_t condition = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_prepared_native_i1_mask(
+        context, source_op, plan->condition, plan->condition_plan, &condition));
+    loom_type_t scc_type = loom_type_none();
+    IREE_RETURN_IF_ERROR(loom_amdgpu_make_scc_type(context, &scc_type));
+    const loom_type_t types[] = {
+        loom_module_value_type(loom_low_lower_context_module(context),
+                               condition),
+        scc_type,
+    };
+    loom_op_t* save = NULL;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_AND_SAVEEXEC_B64,
+        &condition, 1, loom_named_attr_slice_empty(), types, 2, &save));
+    saved_exec = loom_op_const_results(save)[0];
+  }
   loom_value_id_t operands[] = {low_vaddr, low_saddr, low_m0};
   loom_op_t* low_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
@@ -1194,8 +1236,13 @@ iree_status_t loom_amdgpu_lower_kernel_async_gather(
       loom_make_named_attr_slice(attrs, attr_count),
       /*result_types=*/NULL, /*result_count=*/0, /*tied_results=*/NULL,
       /*tied_result_count=*/0, source_op->location, &low_op));
-  loom_low_lower_elide_value(context,
-                             loom_kernel_async_gather_token(source_op));
+  if (plan->condition != LOOM_VALUE_ID_INVALID) {
+    loom_op_t* restore = NULL;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B64_EXEC,
+        &saved_exec, 1, loom_named_attr_slice_empty(), NULL, 0, &restore));
+  }
+  loom_low_lower_elide_value(context, loom_op_const_results(source_op)[0]);
   return iree_ok_status();
 }
 
@@ -1366,6 +1413,9 @@ void loom_amdgpu_mark_async_gather_plan_storage_demands(
                                                            &plan->source);
   loom_amdgpu_mark_source_memory_dynamic_terms_storage_demands(
       context, plan->dest_dynamic_terms, plan->dest_dynamic_term_count);
+  if (plan->condition != LOOM_VALUE_ID_INVALID) {
+    loom_low_lower_require_source_value_storage(context, plan->condition);
+  }
 }
 
 void loom_amdgpu_mark_cluster_gather_plan_storage_demands(
@@ -1699,6 +1749,7 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_async(
     case LOOM_OP_KERNEL_ASYNC_WAIT:
       return loom_amdgpu_low_legality_verify_kernel_async_wait(context, op);
     case LOOM_OP_KERNEL_ASYNC_GATHER:
+    case LOOM_OP_KERNEL_ASYNC_GATHER_MASK:
       return loom_amdgpu_low_legality_verify_kernel_async_gather(context, op);
     case LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER:
 #if LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_CLUSTER_GATHER
@@ -1718,7 +1769,6 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_async(
     case LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER_MASK:
     case LOOM_OP_KERNEL_ASYNC_COPY:
     case LOOM_OP_KERNEL_ASYNC_COPY_MASK:
-    case LOOM_OP_KERNEL_ASYNC_GATHER_MASK:
     case LOOM_OP_KERNEL_ASYNC_TENSOR_STORE_FROM_LDS:
       return loom_amdgpu_low_legality_reject_async_transfer(context, op);
     default:

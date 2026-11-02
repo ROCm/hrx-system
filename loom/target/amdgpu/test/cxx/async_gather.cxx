@@ -142,6 +142,103 @@ unsigned async_gather_record_count(loom::check::ordinal trial) {
   return kRecordCount;
 }
 
+void async_gather_masked_reference(unsigned active_lanes,
+                                   loom::type::buffer<int> input,
+                                   loom::type::buffer<int> output) {
+  auto source = loom::buffer::view<2, kSubgroupSize>(
+      input, {}, loom::encoding::layout::dense<2>());
+  auto destination = loom::buffer::view<2, kSubgroupSize>(
+      output, {}, loom::encoding::layout::dense<2>());
+  for (unsigned lane = 0; lane < kSubgroupSize; ++lane) {
+    unsigned neighbor = kSubgroupSize - 1u - lane;
+    loom::view::store(loom::view::load(source, 0, neighbor), destination, 0,
+                      lane);
+    int second = -2;
+    if (neighbor < active_lanes) {
+      second = loom::view::load(source, 1, neighbor);
+    }
+    loom::view::store(second, destination, 1, lane);
+  }
+}
+
+[[loom::kernel, loom::workgroup_size(kSubgroupSize, 1, 1),
+  loom::workgroup_count(1, 1, 1)]]
+void async_gather_masked(
+    unsigned active_lanes,
+    [[loom::noalias, loom::assume_aligned(64)]] const int* input,
+    [[loom::noalias, loom::assume_aligned(64)]] int* output) {
+  unsigned lane = loom::kernel::workitem::id.x;
+  unsigned neighbor = kSubgroupSize - 1u - lane;
+  auto source = loom::buffer::view<2, kSubgroupSize>(
+      input, {}, loom::encoding::layout::dense<2>());
+  auto* scratch = loom::buffer::alloca<int, loom::memory_space::workgroup, 16>(
+      2u * kSubgroupSize);
+  auto first_stage = loom::buffer::view<kSubgroupSize, 1, 1>(
+      scratch, {}, loom::encoding::layout::dense<3>());
+  auto second_stage = loom::buffer::view<kSubgroupSize, 1, 1>(
+      scratch + kSubgroupSize, {}, loom::encoding::layout::dense<3>());
+  loom::view::store(-1, first_stage, lane, 0, 0);
+  loom::view::store(-2, second_stage, lane, 0, 0);
+  loom::kernel::barrier<loom::memory_space::workgroup,
+                        loom::atomic::scope::workgroup,
+                        loom::atomic::ordering::acq_rel>();
+
+  auto first_source = loom::view::subview<1, 1>(source, {0, lane}, {});
+  auto second_source = loom::view::subview<1, 1>(source, {1, lane}, {});
+  bool live = lane < active_lanes;
+  auto first_transfer =
+      loom::kernel::async::gather<loom::cache::scope::device,
+                                  loom::cache::temporal::regular>(first_source,
+                                                                  first_stage);
+  auto first_group = loom::kernel::async::group(first_transfer);
+  auto second_transfer =
+      loom::kernel::async::gather_mask<loom::cache::scope::device,
+                                       loom::cache::temporal::regular>(
+          second_source, second_stage, live);
+  auto second_group = loom::kernel::async::group(second_transfer);
+
+  // A wholly inactive younger group cannot keep the older transfer pending.
+  loom::kernel::async::wait<1>(first_group);
+  loom::kernel::barrier<loom::memory_space::workgroup,
+                        loom::atomic::scope::workgroup,
+                        loom::atomic::ordering::acq_rel>();
+  output[lane] = loom::view::load(first_stage, neighbor, 0, 0);
+  loom::kernel::async::wait<0>(second_group);
+  loom::kernel::barrier<loom::memory_space::workgroup,
+                        loom::atomic::scope::workgroup,
+                        loom::atomic::ordering::acq_rel>();
+  // Every lane observes the result, including lanes inactive for the gather.
+  output[kSubgroupSize + lane] = loom::view::load(second_stage, neighbor, 0, 0);
+}
+
+unsigned async_gather_active_lanes(loom::check::ordinal trial) {
+  if (trial == 0) {
+    return 0u;
+  }
+  if (trial == 1) {
+    return 1u;
+  }
+  if (trial == 2) {
+    return 31u;
+  }
+  if (trial == 3) {
+    return 63u;
+  }
+  return kSubgroupSize;
+}
+
+LOOM_CHECK_SCENARIO(async_gather_masked_lanes) {
+  loom::check::trial<5>([](loom::check::ordinal trial,
+                           loom::check::entropy entropy) {
+    const auto active = loom::check::generate<async_gather_active_lanes>(trial);
+    const auto input = loom::check::iota<2u * kSubgroupSize, int>(1, 1);
+    const auto output = loom::check::fill<2u * kSubgroupSize, int>(-1);
+    loom::check::compare<async_gather_masked, async_gather_masked_reference>(
+        active, input, output,
+        [&] { loom::check::expect_bitwise(output, output); });
+  });
+}
+
 LOOM_CHECK_SCENARIO(async_gather_finite_counts) {
   loom::check::trial<8>([](loom::check::ordinal trial,
                            loom::check::entropy entropy) {
