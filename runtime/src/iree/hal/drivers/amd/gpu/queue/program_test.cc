@@ -47,6 +47,8 @@ class ProgramLifetimeTest : public ::testing::TestWithParam<LocalHostView> {
     std::vector<uint8_t> bytes;
     // Native allocation flags after admission.
     amdf_memory_flags_t flags;
+    // Native address alignment requested by the real storage owner.
+    uint64_t alignment;
   };
 
   void SetUp() override {
@@ -77,6 +79,7 @@ class ProgramLifetimeTest : public ::testing::TestWithParam<LocalHostView> {
                      : 0;
           profile->allocation.minimum_alignment = 256;
           profile->allocation.byte_length_granularity = 256;
+          profile->allocation.native_byte_length_granularity = 256;
           profile->allocation.maximum_byte_length = UINT32_MAX;
           return AMDF_STATUS_OK;
         };
@@ -116,7 +119,7 @@ class ProgramLifetimeTest : public ::testing::TestWithParam<LocalHostView> {
         return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
       }
       auto* memory = new Memory{scope, std::vector<uint8_t>(info->byte_length),
-                                info->required_flags};
+                                info->required_flags, info->minimum_alignment};
       ++self->live_count_;
       self->allocation_thread_ = std::this_thread::get_id();
       *out_memory = reinterpret_cast<amdf_memory_t*>(memory);
@@ -126,7 +129,7 @@ class ProgramLifetimeTest : public ::testing::TestWithParam<LocalHostView> {
                                 amdf_memory_info_t* info) {
       auto* memory = reinterpret_cast<Memory*>(handle);
       info->byte_length = memory->bytes.size();
-      info->alignment = 256;
+      info->alignment = memory->alignment;
       info->native_allocation_byte_length = memory->bytes.size();
       info->native_allocation_granularity = 256;
       info->flags = memory->flags;
@@ -135,7 +138,9 @@ class ProgramLifetimeTest : public ::testing::TestWithParam<LocalHostView> {
     api_.memory_query_address = [](amdf_memory_t* handle, uint32_t,
                                    amdf_memory_address_kind_t,
                                    uint64_t* out_address) {
-      *out_address = reinterpret_cast<uintptr_t>(handle) & ~UINT64_C(255);
+      auto* memory = reinterpret_cast<Memory*>(handle);
+      *out_address = iree_align_uint64(reinterpret_cast<uintptr_t>(handle),
+                                       memory->alignment);
       return AMDF_STATUS_OK;
     };
     api_.memory_map = [](amdf_memory_t* handle, const amdf_memory_map_info_t*,
@@ -163,6 +168,9 @@ class ProgramLifetimeTest : public ::testing::TestWithParam<LocalHostView> {
       EXPECT_TRUE(!memory->scope->local ||
                   memory->scope->owner->PublishesLocalWrites());
       memory->scope->owner->publication_thread_ = std::this_thread::get_id();
+      if (memory->scope->owner->fail_publish_) {
+        return amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
+      }
       return AMDF_STATUS_OK;
     };
     api_.host_mapping_destroy = [](amdf_host_mapping_t*) {
@@ -326,6 +334,8 @@ class ProgramLifetimeTest : public ::testing::TestWithParam<LocalHostView> {
   uint32_t allocate_count_ = 0;
   // Native acquisition ordinal to fail, or zero for success.
   uint32_t fail_allocate_ = 0;
+  // Native publication failure before any command can consume its storage.
+  bool fail_publish_ = false;
   // Native owners remaining alive across asynchronous release.
   std::atomic<uint32_t> live_count_ = 0;
   // Thread on which the most recent native acquisition ran.
@@ -741,5 +751,187 @@ INSTANTIATE_TEST_SUITE_P(LocalHostView, ProgramLifetimeTest,
                          ::testing::Values(LocalHostView::kUnavailable,
                                            LocalHostView::kPublishable,
                                            LocalHostView::kUnpublishable));
+
+class ProgramConstantsTest : public ProgramLifetimeTest {};
+
+TEST_P(ProgramConstantsTest, SharesPagesAndReusesAlignedHoles) {
+  iree_hal_amd_gpu_program_constant_t ranges[3] = {};
+  iree_byte_span_t contents[3];
+  uint64_t addresses[3];
+  const uint32_t lengths[] = {12, 20, 36};
+  const uint32_t alignments[] = {16, 64, 128};
+  for (uint32_t i = 0; i < 3; ++i) {
+    IREE_ASSERT_OK(iree_hal_amd_gpu_program_constant_allocate(
+        &pool_, lengths[i], alignments[i], &ranges[i], &contents[i],
+        &addresses[i]));
+    EXPECT_EQ(addresses[i] % alignments[i], 0u);
+    memset(contents[i].data, 0x51 + i, lengths[i]);
+    IREE_ASSERT_OK(iree_hal_amd_gpu_program_constant_publish(&ranges[i]));
+  }
+  EXPECT_EQ(allocate_count_, 1u);
+  EXPECT_EQ(ranges[0].page, ranges[2].page);
+  const uint64_t replaced_address = addresses[1];
+  iree_hal_amd_gpu_program_constant_release(&ranges[1]);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_program_constant_allocate(
+      &pool_, lengths[1], alignments[1], &ranges[1], &contents[1],
+      &addresses[1]));
+  EXPECT_EQ(addresses[1], replaced_address);
+  EXPECT_EQ(allocate_count_, 1u);
+  memset(contents[1].data, 0x52, lengths[1]);
+  iree_hal_amd_gpu_program_pool_trim(&pool_);
+  iree_hal_amd_gpu_context_join_memory(&context_);
+  EXPECT_EQ(live_count_, 1u);
+  for (uint32_t i = 0; i < 3; ++i) {
+    for (uint32_t j = 0; j < lengths[i]; ++j) {
+      EXPECT_EQ(contents[i].data[j], 0x51 + i);
+    }
+    iree_hal_amd_gpu_program_constant_release(&ranges[i]);
+  }
+  EXPECT_EQ(pool_.constants.count, 0u);
+  EXPECT_EQ(live_count_, 1u);
+  iree_hal_amd_gpu_program_pool_trim(&pool_);
+  iree_hal_amd_gpu_context_join_memory(&context_);
+  EXPECT_EQ(live_count_, 0u);
+}
+
+TEST_P(ProgramConstantsTest, AlignmentCanRequireAnotherPageWithoutLosingHoles) {
+  iree_hal_amd_gpu_program_constant_t ranges[4] = {};
+  iree_byte_span_t contents;
+  uint64_t address = 0;
+  for (uint32_t i = 0; i < 4; ++i) {
+    IREE_ASSERT_OK(iree_hal_amd_gpu_program_constant_allocate(
+        &pool_, i == 3 ? 16 : 80, 16, &ranges[i], &contents, &address));
+  }
+  EXPECT_EQ(allocate_count_, 1u);
+  const auto* first_page = ranges[0].page;
+  iree_hal_amd_gpu_program_constant_release(&ranges[1]);
+  iree_hal_amd_gpu_program_constant_t aligned = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_program_constant_allocate(
+      &pool_, 64, 128, &aligned, &contents, &address));
+  EXPECT_NE(aligned.page, first_page);
+  EXPECT_EQ(address % 128, 0u);
+  iree_hal_amd_gpu_program_constant_t remainder = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_program_constant_allocate(
+      &pool_, 192, 16, &remainder, &contents, &address));
+  EXPECT_EQ(remainder.page, aligned.page);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_program_constant_allocate(
+      &pool_, 64, 16, &ranges[1], &contents, &address));
+  EXPECT_EQ(ranges[1].page, first_page);
+  EXPECT_EQ(allocate_count_, 2u);
+  for (auto& range : ranges) {
+    iree_hal_amd_gpu_program_constant_release(&range);
+  }
+  iree_hal_amd_gpu_program_constant_release(&remainder);
+  iree_hal_amd_gpu_program_constant_release(&aligned);
+  iree_hal_amd_gpu_context_join_memory(&context_);
+  EXPECT_EQ(live_count_, 1u);
+}
+
+TEST_P(ProgramConstantsTest, ConstructorAndPublicationFailuresKeepOwnership) {
+  iree_hal_amd_gpu_program_constant_t range = {};
+  iree_byte_span_t contents;
+  uint64_t address = 0;
+  fail_allocate_ = 1;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        iree_hal_amd_gpu_program_constant_allocate(
+                            &pool_, 12, 16, &range, &contents, &address));
+  EXPECT_EQ(range.page, nullptr);
+  EXPECT_EQ(pool_.constants.count, 0u);
+  fail_allocate_ = 0;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_program_constant_allocate(
+      &pool_, 12, 16, &range, &contents, &address));
+  memset(contents.data, 0x5a, contents.data_length);
+  fail_publish_ = true;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INTERNAL,
+                        iree_hal_amd_gpu_program_constant_publish(&range));
+  iree_hal_amd_gpu_program_constant_release(&range);
+  fail_publish_ = false;
+  const uint32_t allocation_count = allocate_count_;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_program_constant_allocate(
+      &pool_, 12, 1024, &range, &contents, &address));
+  EXPECT_EQ(address % 1024, 0u);
+  EXPECT_LE(allocate_count_, allocation_count + 1);
+  memset(contents.data, 0x7b, contents.data_length);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_program_constant_publish(&range));
+  iree_hal_amd_gpu_program_constant_release(&range);
+  iree_hal_amd_gpu_program_pool_trim(&pool_);
+  iree_hal_amd_gpu_context_join_memory(&context_);
+  EXPECT_EQ(live_count_, 0u);
+}
+
+TEST_P(ProgramConstantsTest, ConcurrentSealingSharesOneNativePage) {
+  constexpr uint32_t kCount = 8;
+  iree_hal_amd_gpu_program_constant_t ranges[kCount] = {};
+  iree_byte_span_t contents[kCount];
+  uint64_t addresses[kCount];
+  std::barrier<> begin(kCount);
+  std::vector<std::thread> threads;
+  for (uint32_t i = 0; i < kCount; ++i) {
+    threads.emplace_back([&, i] {
+      begin.arrive_and_wait();
+      IREE_ASSERT_OK(iree_hal_amd_gpu_program_constant_allocate(
+          &pool_, 32, 32, &ranges[i], &contents[i], &addresses[i]));
+      memset(contents[i].data, 0x40 + i, 32);
+    });
+  }
+  for (auto& thread : threads) {
+    thread.join();
+  }
+  EXPECT_EQ(allocate_count_, 1u);
+  for (uint32_t i = 0; i < kCount; ++i) {
+    EXPECT_EQ(ranges[i].page, ranges[0].page);
+    for (uint32_t j = 0; j < 32; ++j) {
+      EXPECT_EQ(contents[i].data[j], 0x40 + i);
+    }
+    for (uint32_t j = 0; j < i; ++j) {
+      EXPECT_NE(addresses[i], addresses[j]);
+    }
+  }
+  threads.clear();
+  for (uint32_t i = 0; i < kCount; ++i) {
+    threads.emplace_back([&, i] {
+      begin.arrive_and_wait();
+      iree_hal_amd_gpu_program_constant_release(&ranges[i]);
+    });
+  }
+  for (auto& thread : threads) {
+    thread.join();
+  }
+  EXPECT_EQ(pool_.constants.count, 0u);
+}
+
+TEST_P(ProgramConstantsTest, ReuseAndTrimProgressWhileNativeGrowthIsBlocked) {
+  iree_hal_amd_gpu_program_constant_t first = {}, growing = {}, reused = {};
+  iree_byte_span_t contents;
+  uint64_t address = 0;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_program_constant_allocate(
+      &pool_, 256, 16, &first, &contents, &address));
+  const uint64_t first_address = address;
+  std::binary_semaphore entered{0}, resume{0};
+  allocate_entered_ = &entered;
+  allocate_resume_ = &resume;
+  std::thread recorder([&] {
+    iree_byte_span_t growing_contents;
+    uint64_t growing_address = 0;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_program_constant_allocate(
+        &pool_, 256, 16, &growing, &growing_contents, &growing_address));
+  });
+  entered.acquire();
+  iree_hal_amd_gpu_program_constant_release(&first);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_program_constant_allocate(
+      &pool_, 32, 16, &reused, &contents, &address));
+  EXPECT_EQ(address, first_address);
+  iree_hal_amd_gpu_program_pool_trim(&pool_);
+  iree_hal_amd_gpu_program_constant_release(&reused);
+  iree_hal_amd_gpu_program_pool_trim(&pool_);
+  resume.release();
+  recorder.join();
+  iree_hal_amd_gpu_program_constant_release(&growing);
+  iree_hal_amd_gpu_context_join_memory(&context_);
+  EXPECT_EQ(live_count_, 1u);
+}
+
+INSTANTIATE_TEST_SUITE_P(LocalHostView, ProgramConstantsTest,
+                         ::testing::Values(LocalHostView::kPublishable));
 
 }  // namespace

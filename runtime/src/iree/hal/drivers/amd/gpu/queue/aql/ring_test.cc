@@ -134,6 +134,93 @@ TEST_F(RingTest, CapacityPressureChangesNoReservationOrNativeBytes) {
             0x123400001000u);
 }
 
+TEST_F(RingTest, BatchReleaseSeesWholeSpanBeforeFirstHeader) {
+  struct Publication {
+    // Actual reserved ring observed by the native release dependency.
+    const iree_hal_amd_gpu_aql_ring_t* ring;
+    // Immutable complete packets expected before the first header is published.
+    const iree_hal_amd_gpu_aql_packet_t* source;
+    // Monotonic first packet position of the reserved span.
+    uint64_t position;
+    // Number of packets covered by this release.
+    uint32_t count;
+    // Native result supplied below the real publisher.
+    amdf_status_t status;
+    // Number of native release invocations.
+    uint32_t calls;
+  } publication = {};
+  const amdf_api_t api = {
+      .user_queue_mapping_flush =
+          [](amdf_user_queue_mapping_t* mapping) {
+            auto* publication = reinterpret_cast<Publication*>(mapping);
+            ++publication->calls;
+            for (uint32_t i = 0; i < publication->count; ++i) {
+              const auto& packet =
+                  publication->ring->packets[(publication->position + i) &
+                                             (publication->ring->capacity - 1)];
+              EXPECT_EQ(packet.words[0],
+                        i ? publication->source[i].words[0]
+                          : IREE_HAL_AMD_GPU_AQL_HEADER_INVALID);
+              EXPECT_EQ(std::memcmp(packet.words + 1,
+                                    publication->source[i].words + 1, 60),
+                        0);
+            }
+            return publication->status;
+          },
+  };
+  const iree_hal_amd_gpu_context_t context = {.api = &api};
+  const iree_hal_amd_gpu_user_queue_t storage = {
+      .context = &context,
+      .mapping = reinterpret_cast<amdf_user_queue_mapping_t*>(&publication),
+      .host_publish_executor = AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API,
+  };
+  std::array<iree_hal_amd_gpu_aql_packet_t, 8> source;
+  for (uint32_t i = 0; i < source.size(); ++i) {
+    source[i] = iree_hal_amd_gpu_aql_packet_barrier(
+        IREE_HAL_AMD_GPU_AQL_HEADER_BARRIER_AND |
+            IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED,
+        0, nullptr, (i + 1) * 64);
+  }
+  const auto saved_source = source;
+  const auto initial_packets = packets_;
+  for (amdf_status_t status :
+       {AMDF_STATUS_OK, amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST)}) {
+    for (uint32_t first = 0; first < packets_.size(); ++first) {
+      for (uint32_t count = 1; count <= packets_.size(); ++count) {
+        SCOPED_TRACE(::testing::Message() << "status=" << status << " first="
+                                          << first << " count=" << count);
+        packets_ = initial_packets;
+        ring_.reserved = ring_.consumed = first;
+        ring_.host_publish_executor = AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API;
+        uint64_t position;
+        ASSERT_TRUE(
+            iree_hal_amd_gpu_aql_ring_try_reserve(&ring_, count, &position));
+        publication = {&ring_, source.data(), position, count, status, 0};
+        EXPECT_EQ(iree_hal_amd_gpu_aql_ring_write_packets(
+                      &ring_, &storage, position, count, source.data()),
+                  status);
+        EXPECT_EQ(publication.calls, 1u);
+        EXPECT_EQ(packets_[first].words[0],
+                  amdf_status_is_ok(status)
+                      ? source[0].words[0]
+                      : IREE_HAL_AMD_GPU_AQL_HEADER_INVALID);
+        for (uint32_t i = count; i < packets_.size(); ++i) {
+          const uint32_t slot = (first + i) % packets_.size();
+          EXPECT_EQ(std::memcmp(&packets_[slot], &initial_packets[slot],
+                                sizeof(packets_[slot])),
+                    0);
+        }
+        EXPECT_EQ(
+            std::memcmp(source.data(), saved_source.data(), sizeof(source)), 0);
+        EXPECT_EQ(doorbell_, UINT64_MAX);
+        EXPECT_EQ(ring_.reserved, first + count);
+        EXPECT_EQ(iree_atomic_load(&write_index_, iree_memory_order_relaxed),
+                  first + count);
+      }
+    }
+  }
+}
+
 TEST_F(RingTest, CachedCreditAvoidsConsumptionReadsUntilNeeded) {
   uint64_t position;
   ASSERT_TRUE(iree_hal_amd_gpu_aql_ring_try_reserve(&ring_, 3, &position));

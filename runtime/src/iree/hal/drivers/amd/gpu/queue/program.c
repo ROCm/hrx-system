@@ -6,10 +6,263 @@
 
 #include "iree/hal/drivers/amd/gpu/queue/program.h"
 
+#include "iree/base/bitmap.h"
 #include "iree/hal/drivers/amd/status.h"
 
 static_assert(sizeof(iree_hal_amd_gpu_program_queue_t) <= 32,
               "two publisher candidates must fit in one cache line");
+
+// Native allocation granularity determines page capacity. The bitmap describes
+// small immutable byte ranges, not GPU pages; all bookkeeping stays on the CPU.
+enum { IREE_HAL_AMD_GPU_PROGRAM_CONSTANT_UNIT = 16 };
+
+struct iree_hal_amd_gpu_program_constant_page_t {
+  // Borrowed pool dominated by every range owner and cold acquisition caller.
+  iree_hal_amd_gpu_program_pool_t* pool;
+  // Previous available-list link, or NULL when the page is full/detached.
+  iree_hal_amd_gpu_program_constant_page_t** previous;
+  // Next page with unallocated bytes, protected by pool->constants.mutex.
+  iree_hal_amd_gpu_program_constant_page_t* next;
+  // Native address of byte zero, queried once during page construction.
+  uint64_t address;
+  // Complete logical page extent, in bytes.
+  uint64_t byte_length;
+  // Reserved bitmap units in bytes, protected by pool->constants.mutex.
+  uint64_t used_bytes;
+  // Host-only range bitmap stored after this descriptor.
+  iree_bitmap_t bitmap;
+  // Native backing and its persistent write-only host view.
+  iree_hal_amd_fabric_memory_t memory;
+  // Native release metadata secured before any range is exposed.
+  iree_hal_amd_gpu_memory_release_t release;
+  // Owns this descriptor after the pool has detached its final native release.
+  iree_allocator_t host_allocator;
+};
+
+static void iree_hal_amd_gpu_program_constant_page_link(
+    iree_hal_amd_gpu_program_constant_page_t* page) {
+  iree_hal_amd_gpu_program_pool_t* pool = page->pool;
+  page->previous = &pool->constants.pages;
+  page->next = pool->constants.pages;
+  if (page->next) {
+    page->next->previous = &page->next;
+  }
+  pool->constants.pages = page;
+}
+
+static void iree_hal_amd_gpu_program_constant_page_unlink(
+    iree_hal_amd_gpu_program_constant_page_t* page) {
+  *page->previous = page->next;
+  if (page->next) {
+    page->next->previous = page->previous;
+  }
+  page->previous = NULL;
+  page->next = NULL;
+}
+
+static void iree_hal_amd_gpu_program_constant_page_released(void* user_data) {
+  iree_hal_amd_gpu_program_constant_page_t* page = user_data;
+  iree_allocator_free(page->host_allocator, page);
+}
+
+static void iree_hal_amd_gpu_program_constant_page_free(
+    iree_hal_amd_gpu_program_constant_page_t* page) {
+  iree_hal_amd_gpu_context_release_memory(
+      page->pool->context, 1, &page->memory,
+      (iree_hal_amd_fabric_memory_release_callback_t){
+          .fn = iree_hal_amd_gpu_program_constant_page_released,
+          .user_data = page},
+      &page->release);
+}
+
+static void iree_hal_amd_gpu_program_constants_trim(
+    iree_hal_amd_gpu_program_pool_t* pool) {
+  iree_slim_mutex_lock(&pool->constants.mutex);
+  iree_hal_amd_gpu_program_constant_page_t* page = pool->constants.spare;
+  if (page) {
+    pool->constants.spare = NULL;
+    iree_hal_amd_gpu_program_constant_page_unlink(page);
+  }
+  iree_slim_mutex_unlock(&pool->constants.mutex);
+  if (page) {
+    iree_hal_amd_gpu_program_constant_page_free(page);
+  }
+}
+
+// Cold selection can search fragmented pages. Allocation and return never
+// inspect device bytes; a retained range makes its page stable after unlock.
+static bool iree_hal_amd_gpu_program_constant_try_allocate(
+    iree_hal_amd_gpu_program_pool_t* pool, uint64_t byte_length,
+    uint32_t alignment, iree_hal_amd_gpu_program_constant_t* out_constant) {
+  const uint64_t unit = IREE_HAL_AMD_GPU_PROGRAM_CONSTANT_UNIT;
+  for (iree_hal_amd_gpu_program_constant_page_t* page = pool->constants.pages;
+       page; page = page->next) {
+    if (page->byte_length - page->used_bytes < byte_length) {
+      continue;
+    }
+    uint64_t offset =
+        iree_align_uint64(page->address, alignment) - page->address;
+    while (offset <= page->byte_length - byte_length) {
+      const iree_host_size_t first = iree_bitmap_find_first_unset_span(
+          page->bitmap, offset / unit, byte_length / unit);
+      if (first == page->bitmap.bit_count) {
+        break;
+      }
+      const uint64_t candidate = first * unit;
+      offset = iree_align_uint64(page->address + candidate, alignment) -
+               page->address;
+      if (offset != candidate) {
+        continue;
+      }
+      iree_bitmap_set_span(page->bitmap, first, byte_length / unit);
+      page->used_bytes += byte_length;
+      if (page == pool->constants.spare) {
+        pool->constants.spare = NULL;
+      }
+      if (page->used_bytes == page->byte_length) {
+        iree_hal_amd_gpu_program_constant_page_unlink(page);
+      }
+      ++pool->constants.count;
+      *out_constant = (iree_hal_amd_gpu_program_constant_t){
+          .page = page, .offset = offset, .byte_length = byte_length};
+      return true;
+    }
+  }
+  return false;
+}
+
+static iree_status_t iree_hal_amd_gpu_program_constant_page_allocate(
+    iree_hal_amd_gpu_program_pool_t* pool, uint64_t minimum_length,
+    uint32_t alignment, iree_hal_amd_gpu_program_constant_page_t** out_page) {
+  *out_page = NULL;
+  const uint64_t unit = IREE_HAL_AMD_GPU_PROGRAM_CONSTANT_UNIT;
+  const uint64_t granularity = iree_max(
+      pool->resident.profile.allocation.native_byte_length_granularity, unit);
+  const uint64_t byte_length =
+      iree_host_size_ceil_div(minimum_length, granularity) * granularity;
+  const uint64_t bit_count = byte_length / unit;
+  iree_host_size_t total_size = 0, bitmap_offset = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      sizeof(iree_hal_amd_gpu_program_constant_page_t), &total_size,
+      IREE_STRUCT_FIELD(iree_bitmap_calculate_words(bit_count), uint64_t,
+                        &bitmap_offset)));
+  iree_hal_amd_gpu_program_constant_page_t* page = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(pool->host_allocator, total_size, (void**)&page));
+  *page = (iree_hal_amd_gpu_program_constant_page_t){
+      .pool = pool,
+      .byte_length = byte_length,
+      .bitmap = {.bit_count = bit_count,
+                 .words = (void*)((uint8_t*)page + bitmap_offset)},
+      .host_allocator = pool->host_allocator,
+  };
+  iree_status_t status = iree_hal_amd_fabric_memory_allocate(
+      pool->context->api, &pool->resident, byte_length, alignment,
+      pool->context->event_sink, &page->memory, NULL);
+  if (iree_status_is_ok(status)) {
+    status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+        pool->context->api->memory_query_address(
+            page->memory.handle, 0, AMDF_MEMORY_ADDRESS_GPU, &page->address),
+        "query immutable program data address");
+  }
+  if (iree_status_is_ok(status)) {
+    *out_page = page;
+  } else {
+    iree_hal_amd_gpu_program_constant_page_free(page);
+  }
+  return status;
+}
+
+iree_status_t iree_hal_amd_gpu_program_constant_allocate(
+    iree_hal_amd_gpu_program_pool_t* pool, uint32_t byte_length,
+    uint32_t alignment, iree_hal_amd_gpu_program_constant_t* out_constant,
+    iree_byte_span_t* out_contents, uint64_t* out_address) {
+  *out_constant = (iree_hal_amd_gpu_program_constant_t){0};
+  *out_contents = iree_byte_span_empty();
+  *out_address = 0;
+  const uint64_t length =
+      iree_align_uint64(byte_length, IREE_HAL_AMD_GPU_PROGRAM_CONSTANT_UNIT);
+  alignment = iree_max(alignment, IREE_HAL_AMD_GPU_PROGRAM_CONSTANT_UNIT);
+  iree_slim_mutex_lock(&pool->constants.mutex);
+  bool acquired = iree_hal_amd_gpu_program_constant_try_allocate(
+      pool, length, alignment, out_constant);
+  iree_slim_mutex_unlock(&pool->constants.mutex);
+  iree_status_t status = iree_ok_status();
+  if (!acquired) {
+    // Serialize only callers that need growth. Returns and acquisitions from
+    // existing pages continue while a native allocation blocks in the driver.
+    iree_slim_mutex_lock(&pool->constants.growth_mutex);
+    iree_slim_mutex_lock(&pool->constants.mutex);
+    acquired = iree_hal_amd_gpu_program_constant_try_allocate(
+        pool, length, alignment, out_constant);
+    iree_slim_mutex_unlock(&pool->constants.mutex);
+    if (!acquired) {
+      iree_hal_amd_gpu_program_constant_page_t* page = NULL;
+      status = iree_hal_amd_gpu_program_constant_page_allocate(
+          pool, length, alignment, &page);
+      if (iree_status_is_ok(status)) {
+        iree_bitmap_set_span(page->bitmap, 0,
+                             length / IREE_HAL_AMD_GPU_PROGRAM_CONSTANT_UNIT);
+        page->used_bytes = length;
+        iree_slim_mutex_lock(&pool->constants.mutex);
+        if (length < page->byte_length) {
+          iree_hal_amd_gpu_program_constant_page_link(page);
+        }
+        ++pool->constants.count;
+        iree_slim_mutex_unlock(&pool->constants.mutex);
+        *out_constant = (iree_hal_amd_gpu_program_constant_t){
+            .page = page, .byte_length = length};
+      }
+    }
+    iree_slim_mutex_unlock(&pool->constants.growth_mutex);
+  }
+  if (iree_status_is_ok(status)) {
+    const iree_hal_amd_gpu_program_constant_t constant = *out_constant;
+    *out_contents = iree_make_byte_span(
+        constant.page->memory.contents.data + constant.offset, byte_length);
+    *out_address = constant.page->address + constant.offset;
+  }
+  return status;
+}
+
+iree_status_t iree_hal_amd_gpu_program_constant_publish(
+    const iree_hal_amd_gpu_program_constant_t* constant) {
+  const iree_hal_amd_gpu_program_constant_page_t* page = constant->page;
+  return IREE_HAL_AMD_STATUS_FROM_AMDF(
+      page->pool->context->api->host_mapping_cache_control(
+          page->memory.mapping, AMDF_HOST_CACHE_OPERATION_FLUSH,
+          constant->offset, constant->byte_length),
+      "publish immutable program data");
+}
+
+void iree_hal_amd_gpu_program_constant_release(
+    iree_hal_amd_gpu_program_constant_t* constant) {
+  iree_hal_amd_gpu_program_constant_page_t* page = constant->page;
+  if (!page) {
+    return;
+  }
+  iree_hal_amd_gpu_program_pool_t* pool = page->pool;
+  iree_slim_mutex_lock(&pool->constants.mutex);
+  if (page->used_bytes == page->byte_length) {
+    iree_hal_amd_gpu_program_constant_page_link(page);
+  }
+  iree_bitmap_reset_span(
+      page->bitmap, constant->offset / IREE_HAL_AMD_GPU_PROGRAM_CONSTANT_UNIT,
+      constant->byte_length / IREE_HAL_AMD_GPU_PROGRAM_CONSTANT_UNIT);
+  page->used_bytes -= constant->byte_length;
+  --pool->constants.count;
+  const bool release = !page->used_bytes && pool->constants.spare;
+  if (release) {
+    iree_hal_amd_gpu_program_constant_page_unlink(page);
+  } else if (!page->used_bytes) {
+    pool->constants.spare = page;
+  }
+  iree_slim_mutex_unlock(&pool->constants.mutex);
+  *constant = (iree_hal_amd_gpu_program_constant_t){0};
+  if (release) {
+    iree_hal_amd_gpu_program_constant_page_free(page);
+  }
+}
 
 iree_status_t iree_hal_amd_gpu_program_pool_initialize(
     iree_hal_amd_gpu_context_t* context, uint32_t native_family_ordinal,
@@ -31,6 +284,8 @@ iree_status_t iree_hal_amd_gpu_program_pool_initialize(
       .queue_count = queue_count,
   };
   iree_slim_mutex_initialize(&out_pool->registry_mutex);
+  iree_slim_mutex_initialize(&out_pool->constants.growth_mutex);
+  iree_slim_mutex_initialize(&out_pool->constants.mutex);
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_context_query_program_memory(
       context, native_family_ordinal, &out_pool->access, &out_pool->upload,
       &out_pool->resident));
@@ -117,6 +372,7 @@ void iree_hal_amd_gpu_program_pool_trim(iree_hal_amd_gpu_program_pool_t* pool) {
     iree_hal_amd_gpu_program_trim(program);
   }
   iree_slim_mutex_unlock(&pool->registry_mutex);
+  iree_hal_amd_gpu_program_constants_trim(pool);
 }
 
 void iree_hal_amd_gpu_program_pool_deinitialize(
@@ -125,6 +381,10 @@ void iree_hal_amd_gpu_program_pool_deinitialize(
     return;
   }
   IREE_ASSERT(!pool->head);
+  IREE_ASSERT(!pool->constants.count);
+  iree_hal_amd_gpu_program_constants_trim(pool);
+  iree_slim_mutex_deinitialize(&pool->constants.growth_mutex);
+  iree_slim_mutex_deinitialize(&pool->constants.mutex);
   iree_slim_mutex_deinitialize(&pool->registry_mutex);
   pool->context = NULL;
 }
