@@ -315,15 +315,15 @@ class BuildFileFunctions:
             return
         target = self._convert_single_target(self._current_target_label(name))
         namespace = target.rsplit("::", 1)[0]
+        # A caller may select an implementation for an abstract dependency.
+        # Its declared position is significant to single-pass archive linkers.
         dependencies = tuple(
             namespace + native if native.startswith("::") else native
-            for native in sorted(
-                {
-                    native
-                    for dependency in deps or []
-                    for native in self._convert_target(dependency)
-                    if native
-                }
+            for native in dict.fromkeys(
+                native
+                for dependency in deps or []
+                for native in self._convert_target(dependency)
+                if native
             )
         )
         if implicit:
@@ -430,13 +430,11 @@ class BuildFileFunctions:
         namespace = native_name.rsplit("::", 1)[0]
         dependencies = tuple(
             namespace + dependency if dependency.startswith("::") else dependency
-            for dependency in sorted(
-                {
-                    native
-                    for dependency in deps or []
-                    for native in self._convert_target(dependency)
-                    if native
-                }
+            for dependency in dict.fromkeys(
+                native
+                for dependency in deps or []
+                for native in self._convert_target(dependency)
+                if native
             )
         )
         compiled = tuple(

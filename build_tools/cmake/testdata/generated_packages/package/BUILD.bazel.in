@@ -47,6 +47,7 @@ cc_test(
     deps = [
         ":library_with_generated_inputs_and_package_identity",
         ":scoped_requirements",
+        ":archive_provider",
     ],
 )
 
@@ -54,9 +55,25 @@ cc_binary(
     name = "tool",
     srcs = ["main.c"],
     deps = [
-        ":library_with_generated_inputs_and_package_identity",
+        ":selected_implementation",
         ":scoped_requirements",
     ],
+)
+
+# The final consumer selects the implementation after its abstract client.
+# Both direct binary dependencies and interface-library dependencies retain
+# that declared order even when the provider sorts before the client.
+cc_library(
+    name = "selected_implementation",
+    deps = [
+        ":library_with_generated_inputs_and_package_identity",
+        ":archive_provider",
+    ],
+)
+
+cc_library(
+    name = "archive_provider",
+    srcs = ["provider.c"],
 )
 
 # The provider's private native import remains owned by its authored directory.
