@@ -65,6 +65,23 @@ amdf_status_t iree_hal_amd_gpu_aql_ring_publish_header(
   return AMDF_STATUS_OK;
 }
 
+amdf_status_t iree_hal_amd_gpu_aql_ring_write_packets(
+    const iree_hal_amd_gpu_aql_ring_t* ring,
+    const iree_hal_amd_gpu_user_queue_t* storage, uint64_t position,
+    uint32_t packet_count, const iree_hal_amd_gpu_aql_packet_t* packets) {
+  const uint32_t first_slot = position & (ring->capacity - 1);
+  const uint32_t first_count =
+      iree_min(packet_count, ring->capacity - first_slot);
+  memcpy(ring->packets[first_slot].words + 1, packets[0].words + 1,
+         first_count * sizeof(*packets) - sizeof(uint32_t));
+  if (first_count < packet_count) {
+    memcpy(ring->packets, packets + first_count,
+           (packet_count - first_count) * sizeof(*packets));
+  }
+  return iree_hal_amd_gpu_aql_ring_publish_header(ring, storage, position,
+                                                  packets[0].words[0]);
+}
+
 void iree_hal_amd_gpu_aql_ring_notify(const iree_hal_amd_gpu_aql_ring_t* ring) {
   const iree_hal_memory_transition_recipe_info_t publication_fence = {
       .host = {.fence_after = IREE_HAL_HOST_CACHE_FENCE_X86_SFENCE},

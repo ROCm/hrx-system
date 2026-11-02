@@ -19,6 +19,8 @@ extern "C" {
 typedef struct iree_hal_amd_gpu_program_t iree_hal_amd_gpu_program_t;
 typedef struct iree_hal_amd_gpu_program_growth_t
     iree_hal_amd_gpu_program_growth_t;
+typedef struct iree_hal_amd_gpu_program_constant_page_t
+    iree_hal_amd_gpu_program_constant_page_t;
 
 // Device-owned native program storage. Recorders acquire backing and register
 // sealed programs on their callers. Invocation growth and retired releases use
@@ -41,6 +43,19 @@ typedef struct iree_hal_amd_gpu_program_pool_t {
   iree_hal_amd_gpu_program_t* head;
   // Installed native-domain coordinate extent, protected by registry_mutex.
   uint32_t queue_count;
+  // Shared immutable storage, independent of writable program instances.
+  struct {
+    // Coalesces cold page growth without blocking metadata returns.
+    iree_slim_mutex_t growth_mutex;
+    // Protects ranges independently of the cold program registry.
+    iree_slim_mutex_t mutex;
+    // Pages with available ranges, protected by mutex.
+    iree_hal_amd_gpu_program_constant_page_t* pages;
+    // At most one empty page retained until explicit trim, under mutex.
+    iree_hal_amd_gpu_program_constant_page_t* spare;
+    // Outstanding ranges, protected by mutex.
+    uint32_t count;
+  } constants;
 } iree_hal_amd_gpu_program_pool_t;
 
 // Captures placement for one native device; failure leaves a
@@ -61,6 +76,39 @@ void iree_hal_amd_gpu_program_pool_deinitialize(
 // lock.
 iree_status_t iree_hal_amd_gpu_program_pool_reserve_queues(
     iree_hal_amd_gpu_program_pool_t* pool, uint32_t queue_count);
+
+// One independently owned immutable range. Its command-program owner keeps
+// the range alive through all native readers; release requires no frontier or
+// queue wait because the final reader has already retired.
+typedef struct iree_hal_amd_gpu_program_constant_t {
+  // Borrowed page retained by this range until release.
+  iree_hal_amd_gpu_program_constant_page_t* page;
+  // Aligned byte offset within the page.
+  uint64_t offset;
+  // Reserved extent rounded to the page's bitmap unit, in bytes.
+  uint64_t byte_length;
+} iree_hal_amd_gpu_program_constant_t;
+
+// Acquires a range from qualified CPU-writable resident storage. The caller
+// has already selected this placement and supplies positive trusted geometry.
+// Native-page growth occurs on this recording caller, outside metadata locks.
+// The returned view is write-only; publish before exposing its device address.
+// Failure leaves out_constant empty.
+iree_status_t iree_hal_amd_gpu_program_constant_allocate(
+    iree_hal_amd_gpu_program_pool_t* pool, uint32_t byte_length,
+    uint32_t alignment, iree_hal_amd_gpu_program_constant_t* out_constant,
+    iree_byte_span_t* out_contents, uint64_t* out_address);
+
+// Publishes the initialized range using its qualified native host mapping.
+// Failure leaves ownership with the caller, with no accepted native reader.
+iree_status_t iree_hal_amd_gpu_program_constant_publish(
+    const iree_hal_amd_gpu_program_constant_t* constant);
+
+// Returns a retired range using host metadata only. An excess empty page's
+// presecured release goes to the existing native allocation domain. The empty
+// descriptor is accepted and the consumed descriptor is cleared.
+void iree_hal_amd_gpu_program_constant_release(
+    iree_hal_amd_gpu_program_constant_t* constant);
 
 // One independently writable native program placement. Pool ownership keeps
 // the backing alive; invocation leases cover every native command/data reader.

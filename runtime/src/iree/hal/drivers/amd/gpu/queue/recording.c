@@ -159,9 +159,21 @@ void iree_hal_amd_gpu_recording_write(
     iree_hal_amd_gpu_fixup_t* table) {
   const uint32_t data_offset =
       iree_hal_amd_gpu_recording_data_offset(recording);
-  memset(destination, 0, data_offset + recording->data.length);
-  iree_hal_amd_gpu_recording_copy(&recording->commands, destination);
-  iree_hal_amd_gpu_recording_copy(&recording->data, destination + data_offset);
+  memset(destination + recording->commands.length, 0,
+         data_offset - recording->commands.length);
+  iree_hal_amd_gpu_recording_write_sections(recording, destination,
+                                            destination + data_offset, table);
+}
+
+void iree_hal_amd_gpu_recording_write_sections(
+    const iree_hal_amd_gpu_recording_t* recording, uint8_t* commands,
+    uint8_t* data, iree_hal_amd_gpu_fixup_t* table) {
+  const uint32_t data_offset =
+      iree_hal_amd_gpu_recording_data_offset(recording);
+  memset(commands, 0, recording->commands.length);
+  memset(data, 0, recording->data.length);
+  iree_hal_amd_gpu_recording_copy(&recording->commands, commands);
+  iree_hal_amd_gpu_recording_copy(&recording->data, data);
   for (const iree_hal_amd_gpu_recording_chunk_t* chunk = recording->fixups.head;
        chunk; chunk = chunk->next) {
     const iree_hal_amd_gpu_recording_fixup_t* entries =

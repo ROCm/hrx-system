@@ -80,6 +80,18 @@ amdf_status_t iree_hal_amd_gpu_aql_ring_publish_header(
     const iree_hal_amd_gpu_user_queue_t* storage, uint64_t position,
     uint32_t header);
 
+// Copies a nonempty span of at most capacity packets into exclusively reserved
+// slots, then release-publishes the first header. The source is disjoint
+// immutable host storage. Later headers may become valid during the copy; the
+// first stays INVALID until the complete span is visible. One native release
+// covers the span, including a wrap. Failure leaves the first header INVALID
+// and requires the same terminal handling as publish_header. Notification
+// remains caller-owned.
+amdf_status_t iree_hal_amd_gpu_aql_ring_write_packets(
+    const iree_hal_amd_gpu_aql_ring_t* ring,
+    const iree_hal_amd_gpu_user_queue_t* storage, uint64_t position,
+    uint32_t packet_count, const iree_hal_amd_gpu_aql_packet_t* packets);
+
 // Fences host device stores and notifies the last reserved packet index.
 // Called once per accepted nonempty chunk, without reading the MMIO aperture.
 void iree_hal_amd_gpu_aql_ring_notify(const iree_hal_amd_gpu_aql_ring_t* ring);

@@ -15,6 +15,8 @@
 #include "iree/hal/drivers/amd/gpu/queue/timestamp.h"
 #include "iree/hal/utils/resource_set.h"
 
+enum { IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_FIXUPS = 256 };
+
 typedef struct iree_hal_amd_gpu_aql_command_buffer_t {
   // Public identity and external recording validation.
   iree_hal_command_buffer_t base;
@@ -82,6 +84,7 @@ void iree_hal_amd_gpu_aql_command_program_release(
   }
   const iree_allocator_t host_allocator = program->host_allocator;
   iree_hal_amd_gpu_profile_commands_release(program->profile);
+  iree_hal_amd_gpu_program_constant_release(&program->constants);
   iree_hal_amd_gpu_program_deinitialize(&program->resident);
   iree_allocator_free(host_allocator, program->blocks);
   iree_allocator_free(host_allocator, program->host_template);
@@ -301,6 +304,31 @@ static iree_status_t iree_hal_amd_gpu_aql_command_drain_timestamps(
   return iree_ok_status();
 }
 
+// Direct dispatches with no invocation inputs have immutable argument bytes.
+// Resolve their only relocations (packet kernarg pointers) once while sealing.
+// Profiling still replaces completion operands in each invocation's host copy.
+static iree_status_t iree_hal_amd_gpu_aql_command_write_constants(
+    iree_hal_amd_gpu_aql_command_buffer_t* buffer, uint8_t* commands) {
+  iree_byte_span_t contents;
+  uint64_t address = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_program_constant_allocate(
+      &buffer->pool->storage, buffer->recording.data.length,
+      buffer->recording.alignment, &buffer->program->constants, &contents,
+      &address));
+  iree_hal_amd_gpu_fixup_t
+      fixups[IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_FIXUPS];
+  iree_hal_amd_gpu_recording_write_sections(&buffer->recording, commands,
+                                            contents.data, fixups);
+  // Logical fixup addends include the original command section. Only private
+  // data occupies native storage, so subtract that section from the base.
+  const uint64_t base =
+      address - iree_hal_amd_gpu_recording_data_offset(&buffer->recording);
+  iree_hal_amd_gpu_fixup_apply(
+      fixups, iree_hal_amd_gpu_recording_fixup_count(&buffer->recording), &base,
+      commands);
+  return iree_hal_amd_gpu_program_constant_publish(&buffer->program->constants);
+}
+
 static iree_status_t iree_hal_amd_gpu_aql_command_end(
     iree_hal_amd_gpu_aql_command_buffer_t* buffer) {
   IREE_RETURN_IF_ERROR(
@@ -322,27 +350,44 @@ static iree_status_t iree_hal_amd_gpu_aql_command_end(
   if (length) {
     const uint32_t fixup_count =
         iree_hal_amd_gpu_recording_fixup_count(&buffer->recording);
-    // Bound host publication to eight cache lines of packet/private data and
-    // eight cache lines of fixup entries (32 disjoint DWORD stores). Larger
-    // recordings and device-produced headers keep resident materialization.
+    // Direct dispatch sequences admit a larger bounded host template. Native
+    // control packets retain the smaller bound on packet/private-data work.
+    const bool direct = buffer->program->block_count == 1 &&
+                        buffer->program->blocks[0].packet_count ==
+                            buffer->program->dispatch_count;
     if (buffer->program->block_count == 1 &&
-        !buffer->requires_device_publication && length <= 512 &&
-        fixup_count <= 512 / sizeof(iree_hal_amd_gpu_fixup_t)) {
-      const uint32_t fixup_offset = (uint32_t)iree_align_uint64(length, 16);
+        !buffer->requires_device_publication &&
+        ((length <= 512 &&
+          fixup_count <= 512 / sizeof(iree_hal_amd_gpu_fixup_t)) ||
+         (direct && buffer->program->dispatch_count <= 32 && length <= 8192 &&
+          fixup_count <= IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_FIXUPS))) {
+      const bool constants = direct && !buffer->inputs.count &&
+                             buffer->recording.data.length &&
+                             (buffer->pool->storage.resident.host_access &
+                              AMDF_MEMORY_MAP_FLAG_WRITE);
+      const uint32_t template_length =
+          constants ? buffer->recording.commands.length : (uint32_t)length;
+      const uint32_t template_fixup_count = constants ? 0 : fixup_count;
+      const uint32_t fixup_offset = iree_host_align(template_length, 16);
       IREE_RETURN_IF_ERROR(iree_allocator_malloc(
           buffer->host_allocator,
           sizeof(*buffer->program->host_template) + fixup_offset +
-              fixup_count * sizeof(iree_hal_amd_gpu_fixup_t),
+              template_fixup_count * sizeof(iree_hal_amd_gpu_fixup_t),
           (void**)&buffer->program->host_template));
       *buffer->program->host_template = (iree_hal_amd_gpu_aql_host_template_t){
-          .byte_length = (uint32_t)length,
+          .byte_length = template_length,
           .alignment = buffer->recording.alignment,
-          .fixup_count = fixup_count,
+          .fixup_count = template_fixup_count,
           .fixup_offset = fixup_offset,
       };
       uint8_t* contents = (void*)(buffer->program->host_template + 1);
-      iree_hal_amd_gpu_recording_write(&buffer->recording, contents,
-                                       (void*)(contents + fixup_offset));
+      if (constants) {
+        IREE_RETURN_IF_ERROR(
+            iree_hal_amd_gpu_aql_command_write_constants(buffer, contents));
+      } else {
+        iree_hal_amd_gpu_recording_write(&buffer->recording, contents,
+                                         (void*)(contents + fixup_offset));
+      }
     } else {
       iree_hal_amd_gpu_program_t* program = &buffer->program->resident;
       IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_program_initialize(

@@ -872,6 +872,39 @@ static uint64_t iree_hal_amd_gpu_aql_execute_argument_length(
                  : length;
 }
 
+// Keep bounded host patch/copy loops outside the resident publication path.
+static IREE_ATTRIBUTE_NOINLINE amdf_status_t
+iree_hal_amd_gpu_aql_publish_host_template(
+    iree_hal_amd_gpu_aql_queue_t* queue,
+    const iree_hal_amd_gpu_aql_command_program_t* program,
+    uint64_t packet_position, void* upload, uint64_t sample_address,
+    iree_hal_amd_gpu_aql_signal_t* samples) {
+  const iree_hal_amd_gpu_aql_program_block_t block = program->blocks[0];
+  iree_hal_amd_gpu_aql_packet_t* packets =
+      (void*)((uint8_t*)upload + block.offset);
+  // All invocation arguments precede the first header publication. One
+  // system acquire makes them visible to the complete native sequence.
+  packets[0].words[0] = (packets[0].words[0] & ~(3u << 9)) |
+                        IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM |
+                        IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED;
+  if (program->profile) {
+    for (uint32_t i = 0; i < block.packet_count; ++i) {
+      const uint64_t address =
+          sample_address
+              ? sample_address + i * sizeof(iree_hal_amd_gpu_aql_signal_t)
+              : 0;
+      packets[i].words[14] = (uint32_t)address;
+      packets[i].words[15] = (uint32_t)(address >> 32);
+      if (samples) {
+        samples[i] = (iree_hal_amd_gpu_aql_signal_t){.kind = 1, .value = 1};
+      }
+    }
+  }
+  return iree_hal_amd_gpu_aql_ring_write_packets(
+      &queue->producer.ring, &queue->storage, packet_position,
+      block.packet_count, packets);
+}
+
 static iree_hal_amd_gpu_aql_publish_result_t
 iree_hal_amd_gpu_aql_publish_execute(
     iree_hal_amd_gpu_aql_queue_t* queue,
@@ -1016,9 +1049,15 @@ iree_hal_amd_gpu_aql_publish_execute(
   // consume the pre-publication facts captured above.
   if (amdf_status_is_ok(publication_status)) {
     if (IREE_UNLIKELY(host_template)) {
-      publication_status = iree_hal_amd_gpu_aql_program_emit_host(
-          block.packet_count, upload, ring, &queue->storage, packet_position,
-          sample_address, samples);
+      if (block.packet_count == block.dispatches.count) {
+        publication_status = iree_hal_amd_gpu_aql_publish_host_template(
+            queue, invocation->program, packet_position, upload, sample_address,
+            samples);
+      } else {
+        publication_status = iree_hal_amd_gpu_aql_program_emit_host(
+            block.packet_count, upload, ring, &queue->storage, packet_position,
+            sample_address, samples);
+      }
     } else {
       publication_status = iree_hal_amd_gpu_aql_program_emit(
           queue->options.programs, program, invocation->instance, block.offset,

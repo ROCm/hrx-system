@@ -30,7 +30,7 @@
 namespace {
 
 enum class Arguments { kBindings, kNative };
-enum class BindingMode { kDirect, kTable };
+enum class BindingMode { kDirect, kTable, kNative };
 enum class Program { kDispatch, kTransfers };
 enum class Barriers { kDefault, kExplicitEmpty };
 enum class Timing { kSubmit, kCompletion, kSampledSubmit };
@@ -494,10 +494,21 @@ class NativeQueue {
                                                        reference, 0);
         }
       } else if (iree_status_is_ok(status)) {
+        struct {
+          // Fixed output address owned by this benchmark's device lane.
+          uint64_t output;
+          // Immutable scalar used by the same numerical kernel as bindings.
+          uint32_t value;
+        } arguments = {lane.address, value};
         status = iree_hal_command_buffer_dispatch(
             recording, lane.executable, lane.function, config,
-            iree_make_const_byte_span(&value, sizeof(value)), {1, &reference},
-            0);
+            bindings == BindingMode::kNative
+                ? iree_make_const_byte_span(&arguments, 12)
+                : iree_make_const_byte_span(&value, sizeof(value)),
+            {bindings == BindingMode::kNative ? 0u : 1u, &reference},
+            bindings == BindingMode::kNative
+                ? IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS
+                : IREE_HAL_DISPATCH_FLAG_NONE);
       }
     }
     if (iree_status_is_ok(status)) {
@@ -1554,6 +1565,28 @@ AQL_EXECUTE_CASE(TableBurstSubmit, kTable, kSubmit, 8);
 AQL_EXECUTE_CASE(DirectBurstCompletion, kDirect, kCompletion, 8);
 AQL_EXECUTE_CASE(TableBurstCompletion, kTable, kCompletion, 8);
 #undef AQL_EXECUTE_CASE
+
+// Fixed native arguments isolate immutable recorded data from per-invocation
+// binding resolution. Submit rows exclude the final wait; completed rows wait
+// directly on the submission, with no extra queue barrier. ACTIVE is explicit
+// in these rows so firmware/recording costs are distinct from host wake policy.
+#define FIXED_AQL_CASE(name, timing, burst_count)                         \
+  BENCHMARK_CAPTURE(BM_Execute, AqlFixed##name, BindingMode::kNative,     \
+                    Timing::timing, Program::kDispatch, burst_count,      \
+                    Capture::kNone, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,      \
+                    Completion::kSubmission, IREE_ASYNC_WAIT_FLAG_ACTIVE) \
+      ->Arg(1)                                                            \
+      ->Arg(16)                                                           \
+      ->Arg(32)                                                           \
+      ->Arg(64)                                                           \
+      ->Arg(4096)                                                         \
+      ->Iterations(200)                                                   \
+      ->UseRealTime()
+FIXED_AQL_CASE(Submit, kSubmit, 1);
+FIXED_AQL_CASE(Completion, kCompletion, 1);
+FIXED_AQL_CASE(BurstSubmit, kSubmit, 8);
+FIXED_AQL_CASE(BurstCompletion, kCompletion, 8);
+#undef FIXED_AQL_CASE
 
 // Keep the complete public wait boundary while isolating caller sleep/wakeup
 // from native preparation and retirement. ACTIVE is an application policy,
