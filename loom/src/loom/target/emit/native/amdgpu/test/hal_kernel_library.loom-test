@@ -256,6 +256,8 @@ fixed_identity_sources:
 
 // A retained predicate read through an alias of a fixed ABI input must follow
 // the entry copy's storage. The join selects dispatch or workgroup identity.
+// The entry copy may coalesce with its input; its storage identity still
+// governs later source selection and the kernel's total register extent.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
 low.kernel.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) workgroup_size(64, 1, 1) @retained_dispatch_alias() asm {

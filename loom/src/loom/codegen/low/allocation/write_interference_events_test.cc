@@ -266,6 +266,7 @@ TEST_F(WriteInterferenceEventsTest, CopiesClearOnlyProvedNonidentityWrites) {
       {UINT32_MAX, 2, 4, 1, 0, 1, 2},  // Destination may still coalesce.
       {3, 2, 6, 2, 0, 1, 1},           // Destination begins before the mask.
       {4, 2, 6, 0, 0, 2, 0},           // Full two-unit overwrite.
+      {2, 2, 6, 0, 0, 4, 0},           // Only the upper half overlaps the mask.
   };
   for (const auto& copy : cases) {
     SCOPED_TRACE(&copy - cases);
@@ -278,12 +279,12 @@ TEST_F(WriteInterferenceEventsTest, CopiesClearOnlyProvedNonidentityWrites) {
         {
             .origin = 1,
             .fixed_base = copy.destination_base,
-            .construction = {.width = 3, .retained_start = UINT32_MAX},
+            .construction = {.width = 4, .retained_start = UINT32_MAX},
         },
         {
             .origin = 2,
             .fixed_base = copy.source_base,
-            .construction = {.width = 2, .retained_start = UINT32_MAX},
+            .construction = {.width = 4, .retained_start = UINT32_MAX},
         },
     };
     loom_low_write_event_t points[4] = {};
