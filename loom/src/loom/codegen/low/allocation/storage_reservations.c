@@ -28,12 +28,29 @@ typedef struct loom_low_allocation_storage_segment_chain_t {
   uint32_t count;
   // True when this storage origin has tied or decomposed-read obligations.
   bool needs_reservation;
+  // True when the component contains a required control-flow edge identity.
+  bool has_required_edge_identity;
 } loom_low_allocation_storage_segment_chain_t;
 
 static bool loom_low_allocation_unit_liveness_can_refine_tie(
     const loom_low_allocation_unit_liveness_t* unit_liveness,
     const loom_low_placement_relation_t* relation) {
   return relation->cause == LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT &&
+         unit_liveness->values[relation->source_ordinal].unit_point_start !=
+             UINT32_MAX &&
+         unit_liveness->values[relation->result_ordinal].unit_point_start !=
+             UINT32_MAX;
+}
+
+static bool loom_low_allocation_unit_liveness_can_refine_edge_identity(
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
+    const loom_low_placement_relation_t* relation) {
+  return loom_low_placement_cause_is_edge(relation->cause) &&
+         relation->kind == LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE &&
+         iree_all_bits_set(
+             relation->flags,
+             LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD |
+                 LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE) &&
          unit_liveness->values[relation->source_ordinal].unit_point_start !=
              UINT32_MAX &&
          unit_liveness->values[relation->result_ordinal].unit_point_start !=
@@ -132,14 +149,45 @@ static iree_status_t loom_low_allocation_unit_liveness_build_storage_segments(
   }
   for (iree_host_size_t i = 0; i < placement->relation_count; ++i) {
     const loom_low_placement_relation_t* relation = &placement->relations[i];
-    if (!loom_low_allocation_unit_liveness_can_refine_tie(unit_liveness,
-                                                          relation)) {
+    const bool tied = loom_low_allocation_unit_liveness_can_refine_tie(
+        unit_liveness, relation);
+    const bool edge_identity =
+        loom_low_allocation_unit_liveness_can_refine_edge_identity(
+            unit_liveness, relation);
+    if (!tied && !edge_identity) {
       continue;
     }
     const loom_value_ordinal_t origin =
         placement
             ->tied_storage_origins_by_value_ordinal[relation->source_ordinal];
     chains[origin].needs_reservation = true;
+    chains[origin].has_required_edge_identity |= edge_identity;
+  }
+  // Edge identities can be cyclic, with a canonical representative defined by
+  // a later backedge. Make that origin available with the earliest member;
+  // sparse segment publication below retains every path-local lifetime end.
+  for (loom_value_ordinal_t i = 0; i < liveness->value_count; ++i) {
+    const loom_value_ordinal_t origin =
+        loom_low_allocation_unit_liveness_storage_origin(placement, i);
+    const loom_low_allocation_unit_liveness_value_t* member =
+        &unit_liveness->values[i];
+    if (!chains[origin].has_required_edge_identity || origin == i ||
+        member->unit_point_start == UINT32_MAX) {
+      continue;
+    }
+    loom_low_allocation_unit_liveness_value_t* root =
+        &unit_liveness->values[origin];
+    root->acquisition_start_point = iree_min(root->acquisition_start_point,
+                                             member->acquisition_start_point);
+    const loom_liveness_interval_t* interval =
+        loom_liveness_interval_for_value_ordinal(liveness, i);
+    for (uint32_t unit = 0; unit < interval->unit_count; ++unit) {
+      const uint32_t root_point = root->unit_point_start + unit;
+      const uint32_t member_point = member->unit_point_start + unit;
+      unit_liveness->start_points[root_point] =
+          iree_min(unit_liveness->start_points[root_point],
+                   unit_liveness->start_points[member_point]);
+    }
   }
 
   for (iree_host_size_t i = 0; i < unit_liveness->storage_segments.demand_count;
@@ -284,12 +332,19 @@ static iree_status_t loom_low_allocation_unit_liveness_refine_storage_segments(
   if (liveness->block_count < 2) {
     return iree_ok_status();
   }
-  bool has_cross_block_tie = false;
+  bool has_cross_block_identity = false;
   for (iree_host_size_t i = 0; i < placement->relation_count; ++i) {
     const loom_low_placement_relation_t* relation = &placement->relations[i];
-    if (!loom_low_allocation_unit_liveness_can_refine_tie(unit_liveness,
-                                                          relation)) {
+    const bool edge_identity =
+        loom_low_allocation_unit_liveness_can_refine_edge_identity(
+            unit_liveness, relation);
+    if (!edge_identity && !loom_low_allocation_unit_liveness_can_refine_tie(
+                              unit_liveness, relation)) {
       continue;
+    }
+    if (edge_identity) {
+      has_cross_block_identity = true;
+      break;
     }
     const loom_liveness_interval_t* source =
         &liveness->intervals
@@ -298,11 +353,11 @@ static iree_status_t loom_low_allocation_unit_liveness_refine_storage_segments(
         &liveness->intervals
              [liveness->value_interval_indices[relation->result_ordinal]];
     if (source->block_count > 1 || result->block_count > 1) {
-      has_cross_block_tie = true;
+      has_cross_block_identity = true;
       break;
     }
   }
-  if (!has_cross_block_tie &&
+  if (!has_cross_block_identity &&
       unit_liveness->storage_segments.demand_count == 0) {
     return iree_ok_status();
   }

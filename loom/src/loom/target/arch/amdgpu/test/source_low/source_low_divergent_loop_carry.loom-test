@@ -357,44 +357,44 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %failed$52 = v_cmp_ne_i32_src1_inline %odd {rhs = 0}
   %not_failed = v_cmp_eq_i32_src1_inline %odd {rhs = 0}
   %matched_success = s_and_b64 %matched$50, %not_failed
-  %65, %66 = s_and_saveexec_b64 %matched_success
-  low.cond_br %66, ^success_exit, ^_bb12 : reg<amdgpu.scc>
+  %66, %67 = s_and_saveexec_b64 %matched_success
+  low.cond_br %67, ^success_exit, ^_bb12 : reg<amdgpu.scc>
 ^success_exit:
-  %70 = v_mov_b32 1
-  %67 = s_mov_b64_exec_read
-  %68 = s_xor_b64 %65, %67
-  %69 = s_mov_b32 0
-  low.br.identity(3, 2) ^_bb8(%70: reg<amdgpu.vgpr>, %68: reg<amdgpu.sgpr x2>, %69: reg<amdgpu.sgpr>, %matched$50: reg<amdgpu.sgpr x2>, %failed$52: reg<amdgpu.sgpr x2>)
+  %71 = v_mov_b32 1
+  %68 = s_mov_b64_exec_read
+  %69 = s_xor_b64 %66, %68
+  %70 = s_mov_b32 0
+  low.br.identity(3, 2) ^_bb8(%71: reg<amdgpu.vgpr>, %69: reg<amdgpu.sgpr x2>, %70: reg<amdgpu.sgpr>, %matched$50: reg<amdgpu.sgpr x2>, %failed$52: reg<amdgpu.sgpr x2>)
 ^failure_check(%matched$27: reg<amdgpu.sgpr x2>, %failed$28: reg<amdgpu.sgpr x2>):
   %matched_failure = s_and_b64 %matched$27, %failed$28
-  %72, %73 = s_and_saveexec_b64 %matched_failure
-  low.cond_br %73, ^failure_exit, ^_bb13 : reg<amdgpu.scc>
+  %73, %74 = s_and_saveexec_b64 %matched_failure
+  low.cond_br %74, ^failure_exit, ^_bb13 : reg<amdgpu.scc>
 ^failure_exit:
-  %79 = v_mov_b32 4294967294
-  %74 = s_mov_b64_exec_read
-  %75 = s_xor_b64 %72, %74
-  %76 = s_mov_b32 1
-  %77 = s_mov_b32 0
-  %78 = concat(%77, %77) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  low.br ^_bb8(%79: reg<amdgpu.vgpr>, %75: reg<amdgpu.sgpr x2>, %76: reg<amdgpu.sgpr>, %78: reg<amdgpu.sgpr x2>, %78: reg<amdgpu.sgpr x2>)
+  %80 = v_mov_b32 4294967294
+  %75 = s_mov_b64_exec_read
+  %76 = s_xor_b64 %73, %75
+  %77 = s_mov_b32 1
+  %78 = s_mov_b32 0
+  %79 = concat(%78, %78) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  low.br ^_bb8(%80: reg<amdgpu.vgpr>, %76: reg<amdgpu.sgpr x2>, %77: reg<amdgpu.sgpr>, %79: reg<amdgpu.sgpr x2>, %79: reg<amdgpu.sgpr x2>)
 ^latch:
-  %80 = v_mov_b32 1
-  %next = v_add_u32 %counter, %80
+  %81 = v_mov_b32 1
+  %next = v_add_u32 %counter, %81
   low.br ^header(%next: reg<amdgpu.vgpr>)
 ^normal_exit:
-  %82 = v_mov_b32 4294967292
-  %60 = s_mov_b32 0
-  %61 = concat(%60, %60) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %64 = concat(%60, %60) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  low.br ^_bb8(%82: reg<amdgpu.vgpr>, %61: reg<amdgpu.sgpr x2>, %60: reg<amdgpu.sgpr>, %64: reg<amdgpu.sgpr x2>, %64: reg<amdgpu.sgpr x2>)
+  %83 = v_mov_b32 4294967292
+  %61 = s_mov_b32 0
+  %62 = concat(%61, %61) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %65 = concat(%61, %61) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  low.br ^_bb8(%83: reg<amdgpu.vgpr>, %62: reg<amdgpu.sgpr x2>, %61: reg<amdgpu.sgpr>, %65: reg<amdgpu.sgpr x2>, %65: reg<amdgpu.sgpr x2>)
 ^_bb8(%result: reg<amdgpu.vgpr>, %31: reg<amdgpu.sgpr x2>, %32: reg<amdgpu.sgpr>, %33: reg<amdgpu.sgpr x2>, %34: reg<amdgpu.sgpr x2>):
   %56, %57 = s_and_b64_scc %31, %31
   s_mov_b64_exec %56
   low.cond_br %57, ^_bb10, ^_bb9 : reg<amdgpu.scc>
 ^_bb9:
   s_mov_b64_exec %55
-  %83 = v_lshlrev_b32_src0_inline %lane_i32, 2
-  global_store_b32_saddr %83, %result, %output_view
+  %84 = v_lshlrev_b32_src0_inline %lane_i32, 2
+  global_store_b32_saddr %84, %result, %output_view
   return
 ^_bb10:
   %58 = s_mov_b32 0
@@ -403,10 +403,10 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
 ^_bb11:
   low.br ^failure_check(%33: reg<amdgpu.sgpr x2>, %34: reg<amdgpu.sgpr x2>)
 ^_bb12:
-  s_mov_b64_exec %65
+  s_mov_b64_exec %66
   low.br ^failure_check(%matched$50: reg<amdgpu.sgpr x2>, %failed$52: reg<amdgpu.sgpr x2>)
 ^_bb13:
-  s_mov_b64_exec %72
+  s_mov_b64_exec %73
   low.br ^latch
 }
 
@@ -487,48 +487,48 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %failed$67 = v_cmp_ne_i32_src1_inline %odd {rhs = 0}
   %not_failed = v_cmp_eq_i32_src1_inline %odd {rhs = 0}
   %matched_success = s_and_b64 %matched$65, %not_failed
-  %80, %81 = s_and_saveexec_b64 %matched_success
-  low.cond_br %81, ^success_exit, ^_bb16 : reg<amdgpu.scc>
+  %81, %82 = s_and_saveexec_b64 %matched_success
+  low.cond_br %82, ^success_exit, ^_bb16 : reg<amdgpu.scc>
 ^success_exit:
-  %82 = s_mov_b64_exec_read
-  %83 = s_xor_b64 %80, %82
-  %84 = s_mov_b32 0
-  low.br.identity(3, 2) ^_bb12(%c1: reg<amdgpu.vgpr>, %83: reg<amdgpu.sgpr x2>, %84: reg<amdgpu.sgpr>, %matched$65: reg<amdgpu.sgpr x2>, %failed$67: reg<amdgpu.sgpr x2>)
+  %83 = s_mov_b64_exec_read
+  %84 = s_xor_b64 %81, %83
+  %85 = s_mov_b32 0
+  low.br.identity(3, 2) ^_bb12(%c1: reg<amdgpu.vgpr>, %84: reg<amdgpu.sgpr x2>, %85: reg<amdgpu.sgpr>, %matched$65: reg<amdgpu.sgpr x2>, %failed$67: reg<amdgpu.sgpr x2>)
 ^resume_guard(%matched$31: reg<amdgpu.sgpr x2>, %failed$32: reg<amdgpu.sgpr x2>):
   %side = v_cmp_eq_i32 %counter, %lane_i32
-  %86, %87 = s_and_saveexec_b64 %side
-  low.cond_br %87, ^_bb19, ^_bb10 : reg<amdgpu.scc>
+  %87, %88 = s_and_saveexec_b64 %side
+  low.cond_br %88, ^_bb19, ^_bb10 : reg<amdgpu.scc>
 ^_bb9(%side_value$39: reg<amdgpu.vgpr>):
-  %90 = s_andn2_b64_exec %86, %side
-  low.cond_br %90, ^_bb18, ^_bb11 : reg<amdgpu.scc>
+  %91 = s_andn2_b64_exec %87, %side
+  low.cond_br %91, ^_bb18, ^_bb11 : reg<amdgpu.scc>
 ^failure_check(%side_value$29: reg<amdgpu.vgpr>):
   %matched_failure = s_and_b64 %matched$31, %failed$32
-  %92, %93 = s_and_saveexec_b64 %matched_failure
-  low.cond_br %93, ^failure_exit, ^_bb17 : reg<amdgpu.scc>
+  %93, %94 = s_and_saveexec_b64 %matched_failure
+  low.cond_br %94, ^failure_exit, ^_bb17 : reg<amdgpu.scc>
 ^failure_exit:
-  %99 = v_mov_b32 4294967294
-  %failure_result = v_sub_nc_u32 %99, %side_value$29
-  %94 = s_mov_b64_exec_read
-  %95 = s_xor_b64 %92, %94
-  %96 = s_mov_b32 1
-  %97 = s_mov_b32 0
-  %98 = concat(%97, %97) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  low.br ^_bb12(%failure_result: reg<amdgpu.vgpr>, %95: reg<amdgpu.sgpr x2>, %96: reg<amdgpu.sgpr>, %98: reg<amdgpu.sgpr x2>, %98: reg<amdgpu.sgpr x2>)
+  %100 = v_mov_b32 4294967294
+  %failure_result = v_sub_nc_u32 %100, %side_value$29
+  %95 = s_mov_b64_exec_read
+  %96 = s_xor_b64 %93, %95
+  %97 = s_mov_b32 1
+  %98 = s_mov_b32 0
+  %99 = concat(%98, %98) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  low.br ^_bb12(%failure_result: reg<amdgpu.vgpr>, %96: reg<amdgpu.sgpr x2>, %97: reg<amdgpu.sgpr>, %99: reg<amdgpu.sgpr x2>, %99: reg<amdgpu.sgpr x2>)
 ^latch:
   %next = v_add_u32 %counter, %c1
   low.br ^header(%next: reg<amdgpu.vgpr>)
 ^normal_exit:
-  %102 = v_mov_b32 4294967292
-  %75 = s_mov_b32 0
-  %76 = concat(%75, %75) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %79 = concat(%75, %75) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  low.br ^_bb12(%102: reg<amdgpu.vgpr>, %76: reg<amdgpu.sgpr x2>, %75: reg<amdgpu.sgpr>, %79: reg<amdgpu.sgpr x2>, %79: reg<amdgpu.sgpr x2>)
+  %103 = v_mov_b32 4294967292
+  %76 = s_mov_b32 0
+  %77 = concat(%76, %76) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %80 = concat(%76, %76) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  low.br ^_bb12(%103: reg<amdgpu.vgpr>, %77: reg<amdgpu.sgpr x2>, %76: reg<amdgpu.sgpr>, %80: reg<amdgpu.sgpr x2>, %80: reg<amdgpu.sgpr x2>)
 ^_bb10:
-  s_mov_b64_exec %86
-  %88 = v_mov_b32 0
-  low.br ^_bb9(%88: reg<amdgpu.vgpr>)
+  s_mov_b64_exec %87
+  %89 = v_mov_b32 0
+  low.br ^_bb9(%89: reg<amdgpu.vgpr>)
 ^_bb11:
-  s_mov_b64_exec %86
+  s_mov_b64_exec %87
   low.br ^failure_check(%side_value$39: reg<amdgpu.vgpr>)
 ^_bb12(%result: reg<amdgpu.vgpr>, %47: reg<amdgpu.sgpr x2>, %48: reg<amdgpu.sgpr>, %49: reg<amdgpu.sgpr x2>, %50: reg<amdgpu.sgpr x2>):
   %71, %72 = s_and_b64_scc %47, %47
@@ -536,8 +536,8 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   low.cond_br %72, ^_bb14, ^_bb13 : reg<amdgpu.scc>
 ^_bb13:
   s_mov_b64_exec %70
-  %103 = v_lshlrev_b32_src0_inline %lane_i32, 2
-  global_store_b32_saddr %103, %result, %output_view
+  %104 = v_lshlrev_b32_src0_inline %lane_i32, 2
+  global_store_b32_saddr %104, %result, %output_view
   return
 ^_bb14:
   %73 = s_mov_b32 0
@@ -546,15 +546,15 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
 ^_bb15:
   low.br ^resume_guard(%49: reg<amdgpu.sgpr x2>, %50: reg<amdgpu.sgpr x2>)
 ^_bb16:
-  s_mov_b64_exec %80
+  s_mov_b64_exec %81
   low.br ^resume_guard(%matched$65: reg<amdgpu.sgpr x2>, %failed$67: reg<amdgpu.sgpr x2>)
 ^_bb17:
-  s_mov_b64_exec %92
+  s_mov_b64_exec %93
   low.br ^latch
 ^_bb18:
-  s_mov_b64_exec %86
-  %89 = v_cndmask_b32 %c0, %side_value$39, %side
-  low.br ^failure_check(%89: reg<amdgpu.vgpr>)
+  s_mov_b64_exec %87
+  %90 = v_cndmask_b32 %c0, %side_value$39, %side
+  low.br ^failure_check(%90: reg<amdgpu.vgpr>)
 ^_bb19:
   low.br ^_bb9(%c1: reg<amdgpu.vgpr>)
 }

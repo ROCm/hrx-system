@@ -1430,6 +1430,88 @@ TEST_F(LowAllocationUnitLivenessTest,
           /*unit_offset=*/0, /*unit_count=*/1, /*program_point=*/12));
 }
 
+// A required loop-edge component can have its canonical representative in the
+// backedge producer, after both the seed and header in linear program order.
+TEST_F(LowAllocationUnitLivenessTest,
+       ReservesRequiredBranchComponentBeforeFirstAssignment) {
+  for (uint32_t width : {1u, 4u}) {
+    SCOPED_TRACE(width);
+    const loom_value_id_t value_ids[] = {0, 1, 2};
+    const uint32_t interval_indices[] = {0, 1, 2};
+    const loom_liveness_interval_t intervals[] = {
+        RegisterInterval(0, 1, 4, width),
+        RegisterInterval(1, 4, 7, width),
+        RegisterInterval(2, 10, 14, width),
+    };
+    loom_liveness_block_info_t blocks[3] = {};
+    blocks[0].end_point = 4;
+    blocks[1].start_point = 4;
+    blocks[1].end_point = 8;
+    blocks[2].start_point = 8;
+    blocks[2].end_point = 14;
+    loom_liveness_analysis_t liveness = Liveness(
+        value_ids, IREE_ARRAYSIZE(value_ids), interval_indices, intervals,
+        IREE_ARRAYSIZE(intervals), blocks, IREE_ARRAYSIZE(blocks));
+    const loom_liveness_segment_t segments[] = {{1, 4}, {4, 7}, {10, 14}};
+    const loom_liveness_segment_range_t segment_ranges[] = {
+        {0, 1}, {1, 1}, {2, 1}};
+    liveness.segments = segments;
+    liveness.segment_count = IREE_ARRAYSIZE(segments);
+    liveness.value_segment_ranges = segment_ranges;
+    loom_low_allocation_unit_liveness_value_t values[] = {
+        {0, 1}, {width, 4}, {width * 2, 10}};
+    std::vector<uint32_t> starts(width * 3), ends(width * 3);
+    for (uint32_t member = 0; member < 3; ++member) {
+      for (uint32_t unit = 0; unit < width; ++unit) {
+        starts[member * width + unit] = segments[member].start_point;
+        ends[member * width + unit] = segments[member].end_point;
+      }
+    }
+    uint64_t incomplete_words[] = {0};
+    loom_low_allocation_unit_liveness_t unit_liveness = {
+        .values = values,
+        .start_points = starts.data(),
+        .end_points = ends.data(),
+        .point_count = ends.size(),
+        .values_with_incomplete_storage_segments = {3, incomplete_words},
+    };
+    unit_liveness.storage_segments.entries = segments;
+    loom_low_placement_relation_t relations[2] = {};
+    for (uint32_t i = 0; i < 2; ++i) {
+      relations[i].source_ordinal = i * 2;
+      relations[i].result_ordinal = 1;
+      relations[i].unit_count = width;
+      relations[i].kind = LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE;
+      relations[i].cause = LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH;
+      relations[i].flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD |
+                           LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE;
+    }
+    const loom_value_ordinal_t origins[] = {2, 2, 2};
+    loom_low_placement_table_t placement = {
+        .value_count = 3,
+        .relations = relations,
+        .relation_count = 2,
+        .tied_storage_origins_by_value_ordinal = origins,
+    };
+    RetainAndPropagateStorage(&unit_liveness, &liveness, &placement);
+    EXPECT_EQ(values[2].acquisition_start_point, 1u);
+    for (uint32_t unit = 0; unit < width; ++unit) {
+      EXPECT_EQ(starts[width * 2 + unit], 1u);
+      EXPECT_EQ(ends[width * 2 + unit], 14u);
+    }
+    const auto reservation =
+        loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
+            &unit_liveness, &liveness, 2);
+    ASSERT_EQ(reservation.count, 2u);
+    const auto* retained =
+        unit_liveness.storage_segments.entries + reservation.start;
+    EXPECT_EQ(retained[0].start_point, 1u);
+    EXPECT_EQ(retained[0].end_point, 7u);
+    EXPECT_EQ(retained[1].start_point, 10u);
+    EXPECT_EQ(retained[1].end_point, 14u);
+  }
+}
+
 TEST_F(LowAllocationUnitLivenessTest,
        PropagatesConcatStartsThroughTiedResults) {
   loom_module_t* module = AllocateModule();

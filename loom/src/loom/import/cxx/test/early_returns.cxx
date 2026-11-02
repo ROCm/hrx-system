@@ -95,6 +95,44 @@ __device__ __forceinline__ int guarded_two_scans(const int* input,
   return -1;
 }
 
+__device__ __forceinline__ int nested_position(unsigned selected) {
+  for (unsigned row = 0; row < 4u; ++row) {
+    for (unsigned column = 0; column < 4u; ++column) {
+      if (row * 4u + column == selected) {
+        return (int)(row * 100u + column);
+      }
+    }
+  }
+  return -1;
+}
+
+__device__ __forceinline__ bool nested_contains(unsigned selected) {
+  for (unsigned row = 0; row < 4u; ++row) {
+    for (unsigned column = 0; column < 4u; ++column) {
+      if (row * 4u + column == selected) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+__device__ __forceinline__ int nested_position_3d(unsigned selected,
+                                                  unsigned plane_count,
+                                                  unsigned row_count,
+                                                  unsigned column_count) {
+  for (unsigned plane = 0; plane < plane_count; ++plane) {
+    for (unsigned row = 0; row < row_count; ++row) {
+      for (unsigned column = 0; column < column_count; ++column) {
+        if (plane * 4u + row * 2u + column == selected) {
+          return (int)(plane * 100u + row * 10u + column);
+        }
+      }
+    }
+  }
+  return -1;
+}
+
 __device__ __forceinline__ int classify(const int* input, unsigned index,
                                         unsigned length, int* trace,
                                         unsigned position) {
@@ -169,7 +207,7 @@ __global__
   if (lane >= length) {
     return;
   }
-  unsigned base = lane * 11u;
+  unsigned base = lane * 20u;
   output[base] = classify(input, lane + 1u, length, output, base + 1u);
   int total = 0;
   for (unsigned step = 0; step < 3u; ++step) {
@@ -186,6 +224,15 @@ __global__
   output[base + 8u] = guarded_first_negative(input, lane, length);
   output[base + 9u] = guarded_first_negative_forever(input, lane, length);
   output[base + 10u] = guarded_two_scans(input, lane, length);
+  output[base + 11u] = nested_position(lane);
+  output[base + 12u] = nested_position(lane & 15u);
+  output[base + 13u] = nested_contains(lane) ? 1 : 0;
+  output[base + 14u] = nested_contains(lane & 15u) ? 1 : 0;
+  output[base + 15u] = nested_contains(lane + 16u) ? 1 : 0;
+  output[base + 16u] = nested_position_3d(lane & 1u, 2u, 2u, 2u);
+  output[base + 17u] = nested_position_3d(lane & 3u, 1u, 2u, 2u);
+  output[base + 18u] = nested_position_3d(lane & 3u, 2u, 1u, 2u);
+  output[base + 19u] = nested_position_3d(lane & 7u, 2u, 2u, 2u);
 }
 
 template <unsigned Count>
@@ -221,7 +268,7 @@ void early_returns_oracle(loom::type::buffer<int> input,
                           loom::type::buffer<int> output, unsigned length) {
   static_cast<void>(input);
   loom::assume(length <= 64u);
-  auto output_values = loom::buffer::view<64, 11>(
+  auto output_values = loom::buffer::view<64, 20>(
       output, {}, loom::encoding::layout::dense<2>());
   for (unsigned lane = 0; lane < length; ++lane) {
     loom::assume(lane < 64u);
@@ -287,6 +334,14 @@ void early_returns_oracle(loom::type::buffer<int> input,
         }
       }
     }
+    int mixed_position =
+        lane < 16u ? (int)((lane / 4u) * 100u + lane % 4u) : -1;
+    unsigned selected = lane & 15u;
+    int all_position = (int)((selected / 4u) * 100u + selected % 4u);
+    unsigned selected_3d = lane & 7u;
+    int position_3d =
+        (int)((selected_3d / 4u) * 100u + ((selected_3d / 2u) & 1u) * 10u +
+              (selected_3d & 1u));
     loom::view::store(classified, output_values, lane, 0);
     loom::view::store(trace, output_values, lane, 1);
     loom::view::store(total, output_values, lane, 2);
@@ -298,6 +353,21 @@ void early_returns_oracle(loom::type::buffer<int> input,
     loom::view::store(guarded_first_negative, output_values, lane, 8);
     loom::view::store(guarded_first_negative, output_values, lane, 9);
     loom::view::store(guarded_two_scans, output_values, lane, 10);
+    loom::view::store(mixed_position, output_values, lane, 11);
+    loom::view::store(all_position, output_values, lane, 12);
+    loom::view::store(lane < 16u ? 1 : 0, output_values, lane, 13);
+    loom::view::store(1, output_values, lane, 14);
+    loom::view::store(0, output_values, lane, 15);
+    unsigned immediate = lane & 1u;
+    int immediate_position = (int)immediate;
+    unsigned plane0 = lane & 3u;
+    int plane0_position = (int)(((plane0 / 2u) & 1u) * 10u + (plane0 & 1u));
+    unsigned sparse = lane & 3u;
+    int sparse_position = sparse < 2u ? (int)sparse : -1;
+    loom::view::store(immediate_position, output_values, lane, 16);
+    loom::view::store(plane0_position, output_values, lane, 17);
+    loom::view::store(sparse_position, output_values, lane, 18);
+    loom::view::store(position_3d, output_values, lane, 19);
   }
 }
 
@@ -306,8 +376,8 @@ LOOM_CHECK_SCENARIO(early_return_values) {
       [](loom::check::ordinal trial, loom::check::entropy entropy) {
         const auto input = loom::check::fill<1, int>(0);
         loom::check::generate<early_return_input_1>(input);
-        const auto storage = loom::check::fill<736, int>(-123);
-        const auto output = loom::check::slice<704>(storage, 16);
+        const auto storage = loom::check::fill<1312, int>(-123);
+        const auto output = loom::check::slice<1280>(storage, 16);
         loom::check::compare<early_returns, early_returns_oracle>(
             input, output, 0u, [&] {
               loom::check::expect_bitwise(input, input);
@@ -318,8 +388,8 @@ LOOM_CHECK_SCENARIO(early_return_values) {
       [](loom::check::ordinal trial, loom::check::entropy entropy) {
         const auto input = loom::check::fill<1, int>(0);
         loom::check::generate<early_return_input_1>(input);
-        const auto storage = loom::check::fill<736, int>(-123);
-        const auto output = loom::check::slice<704>(storage, 16);
+        const auto storage = loom::check::fill<1312, int>(-123);
+        const auto output = loom::check::slice<1280>(storage, 16);
         loom::check::compare<early_returns, early_returns_oracle>(
             input, output, 1u, [&] {
               loom::check::expect_bitwise(input, input);
@@ -330,8 +400,8 @@ LOOM_CHECK_SCENARIO(early_return_values) {
       [](loom::check::ordinal trial, loom::check::entropy entropy) {
         const auto input = loom::check::fill<17, int>(0);
         loom::check::generate<early_return_input_17>(input);
-        const auto storage = loom::check::fill<736, int>(-123);
-        const auto output = loom::check::slice<704>(storage, 16);
+        const auto storage = loom::check::fill<1312, int>(-123);
+        const auto output = loom::check::slice<1280>(storage, 16);
         loom::check::compare<early_returns, early_returns_oracle>(
             input, output, 17u, [&] {
               loom::check::expect_bitwise(input, input);
@@ -342,8 +412,8 @@ LOOM_CHECK_SCENARIO(early_return_values) {
       [](loom::check::ordinal trial, loom::check::entropy entropy) {
         const auto input = loom::check::fill<33, int>(0);
         loom::check::generate<early_return_input_33>(input);
-        const auto storage = loom::check::fill<736, int>(-123);
-        const auto output = loom::check::slice<704>(storage, 16);
+        const auto storage = loom::check::fill<1312, int>(-123);
+        const auto output = loom::check::slice<1280>(storage, 16);
         loom::check::compare<early_returns, early_returns_oracle>(
             input, output, 33u, [&] {
               loom::check::expect_bitwise(input, input);
@@ -354,8 +424,8 @@ LOOM_CHECK_SCENARIO(early_return_values) {
       [](loom::check::ordinal trial, loom::check::entropy entropy) {
         const auto input = loom::check::fill<64, int>(0);
         loom::check::generate<early_return_input_64>(input);
-        const auto storage = loom::check::fill<736, int>(-123);
-        const auto output = loom::check::slice<704>(storage, 16);
+        const auto storage = loom::check::fill<1312, int>(-123);
+        const auto output = loom::check::slice<1280>(storage, 16);
         loom::check::compare<early_returns, early_returns_oracle>(
             input, output, 64u, [&] {
               loom::check::expect_bitwise(input, input);

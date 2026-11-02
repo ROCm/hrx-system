@@ -662,3 +662,57 @@ func.def public @early_then_two_loops(%first_limit: i32, %second_limit: i32, %se
   %30 = scalar.subi %29, %28 : i32
   func.return %30 : i32
 }
+
+// ====
+// A helper return exits two nested counted loops without a source-level flag.
+bool nested_matrix_finite(const double* values) {
+  for (int row = 0; row < 4; ++row) {
+    for (int column = 0; column < 4; ++column) {
+      double value = values[row * 4 + column];
+      if (value != value) return false;
+    }
+  }
+  return true;
+}
+
+// ----
+func.def public @nested_matrix_finite(%values: buffer, %values_byte_offset: offset) -> (i1) {
+  %row = scalar.constant 0 : i32
+  %4 = index.cast %row : i32 to index
+  %5 = scalar.constant 4 : i32
+  %6 = index.cast %5 : i32 to index
+  %7 = index.constant 1 : index
+  scf.for %row = [%4 to %6 step %7] {
+    %9 = index.cast %row : index to i32
+    %column = scalar.constant 0 : i32
+    %11 = index.cast %column : i32 to index
+    %12 = scalar.constant 4 : i32
+    %13 = index.cast %12 : i32 to index
+    %14 = index.constant 1 : index
+    scf.for %column = [%11 to %13 step %14] {
+      %16 = index.cast %column : index to i32
+      %17 = scalar.constant 4 : i32
+      %18 = scalar.muli %9, %17 : i32
+      %19 = scalar.addi %18, %16 : i32
+      %20 = scalar.extsi %19 : i32 to i64
+      %21 = scalar.constant 8 : i64
+      %22 = scalar.muli %20, %21 : i64
+      %23 = index.cast %values_byte_offset : offset to i64
+      %24 = scalar.addi %23, %22 : i64
+      %25 = scalar.assume %24 [range(%24, 0, 9223372036854775807)] : i64
+      %26 = index.cast %25 : i64 to offset
+      %27 = buffer.view %values[%26] : buffer -> view<1xf64>
+      %value = view.load %27[0] : view<1xf64> -> f64
+      %29 = scalar.cmpf une, %value, %value : f64
+      scf.if %29 {
+        %30 = scalar.constant 0 : i1
+        %31 = scalar.constant 1 : i1
+        func.exit %31 : i1 {
+          func.return %30 : i1
+        }
+      }
+    }
+  }
+  %32 = scalar.constant 1 : i1
+  func.return %32 : i1
+}
