@@ -578,7 +578,7 @@ void iree_hal_streaming_cleanup_global(void) {
   iree_hal_streaming_context_cleanup_thread(
       iree_hal_streaming_tls_get(device_registry->context_key));
 
-  // Force destroy all remaining contexts from the global list.
+  // Detach registry ownership; caller-owned context references remain live.
   iree_slim_mutex_lock(&device_registry->context_list.mutex);
   iree_hal_streaming_context_t* context_head =
       device_registry->context_list.head;

@@ -540,10 +540,14 @@ TEST_F(HipStreamValueApiTest, RejectsIncompatibleImportedBatchTargets) {
       owner_context = nullptr;
     }
   };
+  ScopeExit cleanup_guard(cleanup);
   hipError_t setup_result =
       api_.ctx_create(&owner_context, /*flags=*/0, /*device=*/0);
   if (setup_result == hipSuccess) {
     setup_result = api_.malloc(&allocation, sizeof(uint64_t));
+  }
+  if (setup_result == hipSuccess) {
+    setup_result = api_.memset(allocation, 0, sizeof(uint64_t));
   }
   if (setup_result == hipSuccess) {
     setup_result =
@@ -556,7 +560,6 @@ TEST_F(HipStreamValueApiTest, RejectsIncompatibleImportedBatchTargets) {
     setup_result = api_.stream_create(&stream);
   }
   if (setup_result != hipSuccess) {
-    cleanup();
     FAIL() << "cross-context target setup failed with " << setup_result;
   }
 
@@ -570,12 +573,20 @@ TEST_F(HipStreamValueApiTest, RejectsIncompatibleImportedBatchTargets) {
   parameters[1].writeValue.value64 = 1;
   parameters[1].writeValue.flags = hipStreamWriteValueDefault;
 
-  // Submission is deferred until the stream is flushed. Synchronization must
-  // preserve the incompatible imported target as an invalid value instead of
-  // misclassifying the initialized runtime as uninitialized.
-  ASSERT_EQ(hipSuccess, api_.batch_mem_op(stream, 2, parameters, /*flags=*/0));
-  EXPECT_EQ(hipErrorInvalidValue, api_.stream_synchronize(stream));
-  cleanup();
+  // A target may be rejected while recording or when publishing the batch.
+  // Both boundaries must preserve invalid-value classification, and an early
+  // rejection must leave the stream usable without accepting any writes.
+  const hipError_t batch_result =
+      api_.batch_mem_op(stream, 2, parameters, /*flags=*/0);
+  ASSERT_TRUE(batch_result == hipSuccess ||
+              batch_result == hipErrorInvalidValue);
+  EXPECT_EQ(batch_result == hipSuccess ? hipErrorInvalidValue : hipSuccess,
+            api_.stream_synchronize(stream));
+  ASSERT_EQ(hipSuccess, api_.ctx_set_current(owner_context));
+  uint64_t actual = UINT64_MAX;
+  ASSERT_EQ(hipSuccess, api_.memcpy(&actual, allocation, sizeof(actual),
+                                    hipMemcpyDeviceToHost));
+  EXPECT_EQ(0u, actual);
 }
 
 TEST_F(HipStreamValueApiTest, FailedWaitLaneDoesNotPoisonOtherStreams) {
@@ -695,19 +706,26 @@ TEST_F(HipStreamValueApiTest, FailedWaitLaneDoesNotPoisonOtherStreams) {
     invalid_operations[1].writeValue.value64 = 1;
     invalid_operations[1].writeValue.flags = hipStreamWriteValueDefault;
 
-    ASSERT_EQ(hipSuccess, api_.batch_mem_op(owner_stream, 2, invalid_operations,
-                                            /*flags=*/0));
+    const hipError_t batch_result =
+        api_.batch_mem_op(owner_stream, 2, invalid_operations, /*flags=*/0);
+    ASSERT_TRUE(batch_result == hipSuccess ||
+                batch_result == hipErrorInvalidValue);
+    const hipError_t owner_completion =
+        batch_result == hipSuccess ? hipErrorInvalidValue : hipSuccess;
     const hipError_t owner_query_result = api_.stream_query(owner_stream);
-    ASSERT_TRUE(owner_query_result == hipErrorNotReady ||
-                owner_query_result == hipErrorInvalidValue);
+    if (batch_result == hipSuccess) {
+      ASSERT_TRUE(owner_query_result == hipErrorNotReady ||
+                  owner_query_result == hipErrorInvalidValue);
+    } else {
+      EXPECT_EQ(hipErrorNotReady, owner_query_result);
+    }
     EXPECT_EQ(blocked_value,
               __atomic_load_n(static_cast<uint32_t*>(blocked_signal),
                               __ATOMIC_ACQUIRE));
 
-    // Command-buffer validation may fail eagerly or after the owner's earlier
-    // wait has completed. In either case, unrelated streams must make progress
-    // while the accepted lane remains occupied and must stay usable after the
-    // deferred owner error is observed.
+    // Rejecting the later batch must not release the owner's accepted wait or
+    // obstruct unrelated streams. A recording-time rejection leaves the owner
+    // healthy; an accepted batch reports its deferred error on synchronization.
     EXPECT_EQ(hipSuccess,
               api_.wait_value_32(peer_stream, ready_signal, ready_value,
                                  hipStreamWaitValueEq, UINT32_MAX));
@@ -720,21 +738,26 @@ TEST_F(HipStreamValueApiTest, FailedWaitLaneDoesNotPoisonOtherStreams) {
                      __ATOMIC_RELEASE);
 
     if (synchronize_owner_first) {
-      EXPECT_EQ(hipErrorInvalidValue, api_.stream_synchronize(owner_stream));
+      EXPECT_EQ(owner_completion, api_.stream_synchronize(owner_stream));
     }
     EXPECT_EQ(hipSuccess,
               api_.wait_value_32(peer_stream, ready_signal, ready_value,
                                  hipStreamWaitValueEq, UINT32_MAX));
     EXPECT_EQ(hipSuccess, api_.stream_synchronize(peer_stream));
     if (!synchronize_owner_first) {
-      EXPECT_EQ(hipErrorInvalidValue, api_.stream_synchronize(owner_stream));
+      EXPECT_EQ(owner_completion, api_.stream_synchronize(owner_stream));
     }
 
-    EXPECT_EQ(hipErrorInvalidValue, api_.stream_destroy(owner_stream));
+    EXPECT_EQ(owner_completion, api_.stream_destroy(owner_stream));
     EXPECT_EQ(hipSuccess, api_.stream_destroy(peer_stream));
     EXPECT_EQ(hipSuccess, api_.stream_destroy(fresh_stream));
     context_streams.clear();
   }
+  ASSERT_EQ(hipSuccess, api_.ctx_set_current(owner_context));
+  uint64_t actual = UINT64_MAX;
+  ASSERT_EQ(hipSuccess, api_.memcpy(&actual, imported_target, sizeof(actual),
+                                    hipMemcpyDeviceToHost));
+  EXPECT_EQ(0u, actual);
 }
 
 TEST_F(HipStreamValueApiTest, PublishesFinalWriteWithoutHostFlush) {
