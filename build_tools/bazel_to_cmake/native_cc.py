@@ -163,8 +163,6 @@ def library(
     name = declaration.name.replace("::", "_")
     compiled = bool(declaration.compiled)
     compile_target = name + ".objects" if compiled and alwayslink else name
-    interface = not compiled or alwayslink
-    scope = "INTERFACE" if interface else "PUBLIC"
     dependencies = (*declaration.dependencies, "${IREE_IMPLICIT_DEFS_CC_DEPS}")
     lines = []
 
@@ -234,46 +232,62 @@ def library(
             "PROPERTY LINK_LIBRARIES",
             " ".join((*native_dependencies, *defaults)),
         )
+    # Compilation consumes the resolved source requirements. Public consumers
+    # traverse direct requirements and native dependency edges instead of
+    # collecting the same transitive requirements again at every library.
+    if compiled:
+
+        def build_path(value):
+            if value.startswith("$<BUILD_INTERFACE:") and value.endswith(">"):
+                return value[len("$<BUILD_INTERFACE:") : -1]
+            return value
+
+        requirements(
+            "target_include_directories",
+            compile_target,
+            "PRIVATE",
+            (
+                "${IREE_SOURCE_DIR}",
+                "${IREE_BINARY_DIR}",
+                *(build_path(value) for value in resolved.includes),
+            ),
+        )
+        requirements(
+            "target_include_directories",
+            compile_target,
+            "SYSTEM PRIVATE",
+            tuple(build_path(value) for value in resolved.system_includes),
+        )
+        requirements(
+            "target_compile_definitions", compile_target, "PRIVATE", resolved.defines
+        )
+
+    usage = declaration.interface
     requirements(
         "target_include_directories",
         name,
-        scope,
+        "INTERFACE",
         (
             "$<BUILD_INTERFACE:${IREE_SOURCE_DIR};${IREE_BINARY_DIR};"
-            + ";".join(resolved.includes)
+            + ";".join(usage.includes)
             + ">",
         ),
     )
-    requirements(
-        "target_include_directories",
-        name,
-        "SYSTEM " + scope,
-        ("$<BUILD_INTERFACE:" + ";".join(resolved.system_includes) + ">",),
-    )
-    requirements("target_compile_definitions", name, scope, resolved.defines)
-    requirements("target_link_options", name, "INTERFACE", resolved.link_options)
+    if usage.system_includes:
+        requirements(
+            "target_include_directories",
+            name,
+            "SYSTEM INTERFACE",
+            ("$<BUILD_INTERFACE:" + ";".join(usage.system_includes) + ">",),
+        )
+    requirements("target_compile_definitions", name, "INTERFACE", usage.defines)
+    requirements("target_link_options", name, "INTERFACE", usage.link_options)
     requirements(
         "target_link_options",
         name,
-        "INTERFACE" if interface else "PRIVATE",
+        "INTERFACE" if not compiled or alwayslink else "PRIVATE",
         ("${IREE_DEFAULT_LINKOPTS}",),
     )
-    if compiled and alwayslink:
-        for operation, visibility, key in (
-            ("target_include_directories", "PUBLIC", "INTERFACE_INCLUDE_DIRECTORIES"),
-            (
-                "target_include_directories",
-                "SYSTEM PUBLIC",
-                "INTERFACE_SYSTEM_INCLUDE_DIRECTORIES",
-            ),
-            ("target_compile_definitions", "PUBLIC", "INTERFACE_COMPILE_DEFINITIONS"),
-        ):
-            requirements(
-                operation,
-                compile_target,
-                visibility,
-                (f"$<TARGET_PROPERTY:{name},{key}>",),
-            )
 
     if wasm:
         emit("_iree_cc_library_add_wasm_deps", name, " ".join(dependencies))
