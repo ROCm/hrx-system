@@ -613,7 +613,9 @@ def test_generation_emits_compare_and_select_rows() -> None:
     assert "SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_U_LESS_THAN_U8" in tables
     assert "SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_U_LESS_THAN_EQUAL_OFFSET64" in tables
     assert "SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_F_ORD_LESS_THAN_F32" in tables
-    assert "SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_UNORDERED_F64" in tables
+    assert "SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_F_UNORD_NOT_EQUAL_F64" in tables
+    assert "SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_ORDERED_" not in tables
+    assert "SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_UNORDERED_" not in tables
     assert "SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_SELECT_F32" in tables
     assert "SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_SELECT_I64" in tables
     assert "SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_SELECT_I32" in tables
@@ -865,7 +867,7 @@ def test_floating_packets_control_operation_contraction() -> None:
 
 
 def test_generation_emits_complete_ordinary_vector_float_comparisons() -> None:
-    assert len(ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS) == 126
+    assert len(ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS) == 108
     _assert_generated_ordinary_vector_instructions(ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS)
 
     assert len(ORDINARY_VECTOR_FLOAT_PRESERVE_COMPARE_INSTRUCTIONS) == 18

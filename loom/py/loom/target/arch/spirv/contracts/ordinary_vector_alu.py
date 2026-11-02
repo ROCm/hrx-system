@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from loom.dialect.vector import defs as vector
 from loom.dsl import Op
+from loom.target.arch.spirv.contracts.comparison import float_classification_rules
 from loom.target.arch.spirv.contracts.descriptor_rule import (
     descriptor_feature_guards as _feature_guards,
 )
@@ -462,6 +463,10 @@ def _float_compare_rules() -> tuple[DescriptorRule, ...]:
         for scalar in FLOAT_COMPARE_TYPES
         for lane_count in _LANE_COUNTS
         for predicate in FLOAT_COMPARE_PREDICATES
+    ) + tuple(
+        rule
+        for lane_count in _LANE_COUNTS
+        for rule in float_classification_rules(vector.vector_cmpf, lane_count)
     )
 
 

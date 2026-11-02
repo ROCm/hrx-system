@@ -44,6 +44,7 @@ from loom.target.arch.spirv.contracts.bfloat import (
     bfloat_narrow_rules,
     bfloat_widen_rules,
 )
+from loom.target.arch.spirv.contracts.comparison import float_classification_rules
 from loom.target.arch.spirv.contracts.cooperative_matrix import (
     COOPERATIVE_INITIALIZER_MATERIALIZER,
     COOPERATIVE_MATRIX_INITIALIZER_RULES,
@@ -1351,6 +1352,7 @@ def _compare_rules() -> tuple[DescriptorRule, ...]:
         for scalar in FLOAT_COMPARE_TYPES
         for predicate in FLOAT_COMPARE_PREDICATES
     )
+    rules.extend(float_classification_rules(scalar_comparison.scalar_cmpf))
     return tuple(rules)
 
 

@@ -406,7 +406,6 @@ FLOAT_COMPARE_PREDICATES = (
         "OpFOrdNotEqual",
         "LOOM_SPIRV_OP_F_ORD_NOT_EQUAL",
     ),
-    ComparePredicate("ord", "ordered", "OpOrdered", "LOOM_SPIRV_OP_ORDERED"),
     ComparePredicate(
         "ueq", "f_unord_equal", "OpFUnordEqual", "LOOM_SPIRV_OP_F_UNORD_EQUAL"
     ),
@@ -440,7 +439,6 @@ FLOAT_COMPARE_PREDICATES = (
         "OpFUnordNotEqual",
         "LOOM_SPIRV_OP_F_UNORD_NOT_EQUAL",
     ),
-    ComparePredicate("uno", "unordered", "OpUnordered", "LOOM_SPIRV_OP_UNORDERED"),
 )
 
 ORDERED_CLAMP_COMPARE_PREDICATES = tuple(

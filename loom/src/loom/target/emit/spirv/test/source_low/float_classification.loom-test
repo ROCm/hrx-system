@@ -1,0 +1,381 @@
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda+extended-types input=source-low validate
+// REQUIRES: spirv-dis, spirv-val
+
+// Orderedness classifies NaNs in either operand using Shader instructions.
+kernel.def @classify_f16() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%lhs: f16, %rhs: f16, %output: buffer) {
+  %base = index.constant 0 : offset
+  %outputs = buffer.view %output[%base] : buffer -> view<4xi32>
+  %ordered = scalar.cmpf ord, %lhs, %rhs : f16
+  %unordered = scalar.cmpf uno, %lhs, %rhs : f16
+  %ordered_word = scalar.extui %ordered : i1 to i32
+  %unordered_word = scalar.extui %unordered : i1 to i32
+  view.store %ordered_word, %outputs[0] : i32, view<4xi32>
+  view.store %unordered_word, %outputs[1] : i32, view<4xi32>
+  %left = vector.splat %lhs : vector<2xf16>
+  %right = vector.splat %rhs : vector<2xf16>
+  %ordered_lanes = vector.cmpf ord, %left, %right : vector<2xf16> -> vector<2xi1>
+  %unordered_lanes = vector.cmpf uno, %left, %right : vector<2xf16> -> vector<2xi1>
+  %ordered_lane = vector.extract %ordered_lanes[0] : vector<2xi1> -> i1
+  %unordered_lane = vector.extract %unordered_lanes[0] : vector<2xi1> -> i1
+  %ordered_lane_word = scalar.extui %ordered_lane : i1 to i32
+  %unordered_lane_word = scalar.extui %unordered_lane : i1 to i32
+  view.store %ordered_lane_word, %outputs[2] : i32, view<4xi32>
+  view.store %unordered_lane_word, %outputs[3] : i32, view<4xi32>
+  kernel.return
+}
+
+kernel.def @classify_f32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%lhs: f32, %rhs: f32, %output: buffer) {
+  %base = index.constant 0 : offset
+  %outputs = buffer.view %output[%base] : buffer -> view<4xi32>
+  %ordered = scalar.cmpf ord, %lhs, %rhs : f32
+  %unordered = scalar.cmpf uno, %lhs, %rhs : f32
+  %ordered_word = scalar.extui %ordered : i1 to i32
+  %unordered_word = scalar.extui %unordered : i1 to i32
+  view.store %ordered_word, %outputs[0] : i32, view<4xi32>
+  view.store %unordered_word, %outputs[1] : i32, view<4xi32>
+  %left = vector.splat %lhs : vector<3xf32>
+  %right = vector.splat %rhs : vector<3xf32>
+  %ordered_lanes = vector.cmpf ord, %left, %right : vector<3xf32> -> vector<3xi1>
+  %unordered_lanes = vector.cmpf uno, %left, %right : vector<3xf32> -> vector<3xi1>
+  %ordered_lane = vector.extract %ordered_lanes[0] : vector<3xi1> -> i1
+  %unordered_lane = vector.extract %unordered_lanes[0] : vector<3xi1> -> i1
+  %ordered_lane_word = scalar.extui %ordered_lane : i1 to i32
+  %unordered_lane_word = scalar.extui %unordered_lane : i1 to i32
+  view.store %ordered_lane_word, %outputs[2] : i32, view<4xi32>
+  view.store %unordered_lane_word, %outputs[3] : i32, view<4xi32>
+  kernel.return
+}
+
+kernel.def @classify_f64() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%lhs: f64, %rhs: f64, %output: buffer) {
+  %base = index.constant 0 : offset
+  %outputs = buffer.view %output[%base] : buffer -> view<4xi32>
+  %ordered = scalar.cmpf ord, %lhs, %rhs : f64
+  %unordered = scalar.cmpf uno, %lhs, %rhs : f64
+  %ordered_word = scalar.extui %ordered : i1 to i32
+  %unordered_word = scalar.extui %unordered : i1 to i32
+  view.store %ordered_word, %outputs[0] : i32, view<4xi32>
+  view.store %unordered_word, %outputs[1] : i32, view<4xi32>
+  %left = vector.splat %lhs : vector<4xf64>
+  %right = vector.splat %rhs : vector<4xf64>
+  %ordered_lanes = vector.cmpf ord, %left, %right : vector<4xf64> -> vector<4xi1>
+  %unordered_lanes = vector.cmpf uno, %left, %right : vector<4xf64> -> vector<4xi1>
+  %ordered_lane = vector.extract %ordered_lanes[0] : vector<4xi1> -> i1
+  %unordered_lane = vector.extract %unordered_lanes[0] : vector<4xi1> -> i1
+  %ordered_lane_word = scalar.extui %ordered_lane : i1 to i32
+  %unordered_lane_word = scalar.extui %unordered_lane : i1 to i32
+  view.store %ordered_lane_word, %outputs[2] : i32, view<4xi32>
+  view.store %unordered_lane_word, %outputs[3] : i32, view<4xi32>
+  kernel.return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability Float16
+               OpCapability Float64
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 GLSL450
+               OpEntryPoint GLCompute %classify_f16 "classify_f16"
+               OpEntryPoint GLCompute %classify_f32 "classify_f32"
+               OpEntryPoint GLCompute %classify_f64 "classify_f64"
+               OpExecutionMode %classify_f16 LocalSize 1 1 1
+               OpExecutionMode %classify_f32 LocalSize 1 1 1
+               OpExecutionMode %classify_f64 LocalSize 1 1 1
+               OpName %classify_f16 "classify_f16"
+               OpName %lhs "lhs"
+               OpName %rhs "rhs"
+               OpName %output "output"
+               OpName %ordered "ordered"
+               OpName %unordered "unordered"
+               OpName %ordered_word "ordered_word"
+               OpName %unordered_word "unordered_word"
+               OpName %left "left"
+               OpName %right "right"
+               OpName %ordered_lanes "ordered_lanes"
+               OpName %unordered_lanes "unordered_lanes"
+               OpName %ordered_lane "ordered_lane"
+               OpName %unordered_lane "unordered_lane"
+               OpName %ordered_lane_word "ordered_lane_word"
+               OpName %unordered_lane_word "unordered_lane_word"
+               OpName %classify_f32 "classify_f32"
+               OpName %lhs_0 "lhs"
+               OpName %rhs_0 "rhs"
+               OpName %output_0 "output"
+               OpName %ordered_0 "ordered"
+               OpName %unordered_0 "unordered"
+               OpName %ordered_word_0 "ordered_word"
+               OpName %unordered_word_0 "unordered_word"
+               OpName %left_0 "left"
+               OpName %right_0 "right"
+               OpName %ordered_lanes_0 "ordered_lanes"
+               OpName %unordered_lanes_0 "unordered_lanes"
+               OpName %ordered_lane_0 "ordered_lane"
+               OpName %unordered_lane_0 "unordered_lane"
+               OpName %ordered_lane_word_0 "ordered_lane_word"
+               OpName %unordered_lane_word_0 "unordered_lane_word"
+               OpName %classify_f64 "classify_f64"
+               OpName %lhs_1 "lhs"
+               OpName %rhs_1 "rhs"
+               OpName %output_1 "output"
+               OpName %ordered_1 "ordered"
+               OpName %unordered_1 "unordered"
+               OpName %ordered_word_1 "ordered_word"
+               OpName %unordered_word_1 "unordered_word"
+               OpName %left_1 "left"
+               OpName %right_1 "right"
+               OpName %ordered_lanes_1 "ordered_lanes"
+               OpName %unordered_lanes_1 "unordered_lanes"
+               OpName %ordered_lane_1 "ordered_lane"
+               OpName %unordered_lane_1 "unordered_lane"
+               OpName %ordered_lane_word_1 "ordered_lane_word"
+               OpName %unordered_lane_word_1 "unordered_lane_word"
+               OpModuleProcessed "iree.vulkan.bda.v1[classify_f16].root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1[classify_f16].constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1[classify_f16].constant_length=8"
+               OpModuleProcessed "iree.vulkan.bda.v1[classify_f16].bindings=1"
+               OpModuleProcessed "iree.vulkan.bda.parameters.v1[classify_f16]=c0,2;c4,2;b0"
+               OpModuleProcessed "iree.vulkan.bda.v1[classify_f32].root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1[classify_f32].constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1[classify_f32].constant_length=8"
+               OpModuleProcessed "iree.vulkan.bda.v1[classify_f32].bindings=1"
+               OpModuleProcessed "iree.vulkan.bda.parameters.v1[classify_f32]=c0,4;c4,4;b0"
+               OpModuleProcessed "iree.vulkan.bda.v1[classify_f64].root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1[classify_f64].constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1[classify_f64].constant_length=16"
+               OpModuleProcessed "iree.vulkan.bda.v1[classify_f64].bindings=1"
+               OpModuleProcessed "iree.vulkan.bda.parameters.v1[classify_f64]=c0,8;c8,8;b0"
+               OpDecorate %_runtimearr_ulong ArrayStride 8
+               OpDecorate %_struct_25 Block
+               OpMemberDecorate %_struct_25 0 Offset 0
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
+               OpDecorate %_arr_uint_uint_4 ArrayStride 4
+               OpDecorate %_struct_193 Block
+               OpMemberDecorate %_struct_193 0 Offset 0
+               OpMemberDecorate %_struct_193 1 Offset 8
+               OpMemberDecorate %_struct_193 2 Offset 16
+               OpMemberDecorate %_struct_193 3 Offset 20
+               OpMemberDecorate %_struct_193 4 Offset 24
+               OpMemberDecorate %_struct_193 5 Offset 28
+               OpMemberDecorate %_struct_193 6 Offset 32
+       %void = OpTypeVoid
+          %4 = OpTypeFunction %void
+       %half = OpTypeFloat 16
+       %uint = OpTypeInt 32 0
+%_ptr_PushConstant_uint = OpTypePointer PushConstant %uint
+        %int = OpTypeInt 32 1
+      %int_6 = OpConstant %int 6
+      %int_0 = OpConstant %int 0
+     %v2half = OpTypeVector %half 2
+      %int_1 = OpConstant %int 1
+      %ulong = OpTypeInt 64 0
+%_ptr_PushConstant_ulong = OpTypePointer PushConstant %ulong
+%_runtimearr_ulong = OpTypeRuntimeArray %ulong
+ %_struct_25 = OpTypeStruct %_runtimearr_ulong
+%_ptr_PhysicalStorageBuffer__struct_25 = OpTypePointer PhysicalStorageBuffer %_struct_25
+      %int_2 = OpConstant %int 2
+%_ptr_PhysicalStorageBuffer_ulong = OpTypePointer PhysicalStorageBuffer %ulong
+       %bool = OpTypeBool
+    %int_1_0 = OpConstant %int 1
+    %int_0_0 = OpConstant %int 0
+    %ulong_0 = OpConstant %ulong 0
+%_ptr_PhysicalStorageBuffer_int = OpTypePointer PhysicalStorageBuffer %int
+    %ulong_4 = OpConstant %ulong 4
+     %v2bool = OpTypeVector %bool 2
+    %ulong_8 = OpConstant %ulong 8
+   %ulong_12 = OpConstant %ulong 12
+      %float = OpTypeFloat 32
+    %int_1_1 = OpConstant %int 1
+    %int_0_1 = OpConstant %int 0
+  %ulong_0_0 = OpConstant %ulong 0
+  %ulong_4_0 = OpConstant %ulong 4
+    %v3float = OpTypeVector %float 3
+     %v3bool = OpTypeVector %bool 3
+  %ulong_8_0 = OpConstant %ulong 8
+ %ulong_12_0 = OpConstant %ulong 12
+     %double = OpTypeFloat 64
+   %ulong_32 = OpConstant %ulong 32
+      %int_3 = OpConstant %int 3
+    %int_1_2 = OpConstant %int 1
+    %int_0_2 = OpConstant %int 0
+  %ulong_0_1 = OpConstant %ulong 0
+  %ulong_4_1 = OpConstant %ulong 4
+   %v4double = OpTypeVector %double 4
+     %v4bool = OpTypeVector %bool 4
+  %ulong_8_1 = OpConstant %ulong 8
+ %ulong_12_1 = OpConstant %ulong 12
+     %uint_4 = OpConstant %uint 4
+%_arr_uint_uint_4 = OpTypeArray %uint %uint_4
+%_struct_193 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint %_arr_uint_uint_4
+%_ptr_PushConstant__struct_193 = OpTypePointer PushConstant %_struct_193
+          %2 = OpVariable %_ptr_PushConstant__struct_193 PushConstant
+%classify_f16 = OpFunction %void None %4
+          %5 = OpLabel
+         %12 = OpAccessChain %_ptr_PushConstant_uint %2 %int_6 %int_0
+         %13 = OpLoad %uint %12 Aligned 4
+         %15 = OpBitcast %v2half %13
+        %lhs = OpCompositeExtract %half %15 0
+         %18 = OpAccessChain %_ptr_PushConstant_uint %2 %int_6 %int_1
+         %19 = OpLoad %uint %18 Aligned 4
+         %20 = OpBitcast %v2half %19
+        %rhs = OpCompositeExtract %half %20 0
+         %28 = OpAccessChain %_ptr_PushConstant_ulong %2 %int_0
+         %29 = OpLoad %ulong %28 Aligned 8
+         %30 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer__struct_25 %29
+         %31 = OpAccessChain %_ptr_PushConstant_uint %2 %int_2
+         %32 = OpLoad %uint %31 Aligned 4
+         %34 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %30 %int_0 %32
+     %output = OpLoad %ulong %34 Aligned 8
+         %37 = OpFOrdEqual %bool %lhs %lhs
+         %38 = OpFOrdEqual %bool %rhs %rhs
+    %ordered = OpLogicalAnd %bool %37 %38
+         %40 = OpFUnordNotEqual %bool %lhs %lhs
+         %41 = OpFUnordNotEqual %bool %rhs %rhs
+  %unordered = OpLogicalOr %bool %40 %41
+%ordered_word = OpSelect %int %ordered %int_1_0 %int_0_0
+%unordered_word = OpSelect %int %unordered %int_1_0 %int_0_0
+         %48 = OpIAdd %ulong %output %ulong_0
+         %50 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %48
+               OpStore %50 %ordered_word Aligned 4
+         %52 = OpIAdd %ulong %output %ulong_4
+         %53 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %52
+               OpStore %53 %unordered_word Aligned 4
+       %left = OpCompositeConstruct %v2half %lhs %lhs
+      %right = OpCompositeConstruct %v2half %rhs %rhs
+         %57 = OpFOrdEqual %v2bool %left %left
+         %58 = OpFOrdEqual %v2bool %right %right
+%ordered_lanes = OpLogicalAnd %v2bool %57 %58
+         %60 = OpFUnordNotEqual %v2bool %left %left
+         %61 = OpFUnordNotEqual %v2bool %right %right
+%unordered_lanes = OpLogicalOr %v2bool %60 %61
+%ordered_lane = OpCompositeExtract %bool %ordered_lanes 0
+%unordered_lane = OpCompositeExtract %bool %unordered_lanes 0
+%ordered_lane_word = OpSelect %int %ordered_lane %int_1_0 %int_0_0
+%unordered_lane_word = OpSelect %int %unordered_lane %int_1_0 %int_0_0
+         %68 = OpIAdd %ulong %output %ulong_8
+         %69 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %68
+               OpStore %69 %ordered_lane_word Aligned 4
+         %71 = OpIAdd %ulong %output %ulong_12
+         %72 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %71
+               OpStore %72 %unordered_lane_word Aligned 4
+               OpReturn
+               OpFunctionEnd
+%classify_f32 = OpFunction %void None %4
+         %74 = OpLabel
+         %76 = OpAccessChain %_ptr_PushConstant_uint %2 %int_6 %int_0
+         %77 = OpLoad %uint %76 Aligned 4
+      %lhs_0 = OpBitcast %float %77
+         %79 = OpAccessChain %_ptr_PushConstant_uint %2 %int_6 %int_1
+         %80 = OpLoad %uint %79 Aligned 4
+      %rhs_0 = OpBitcast %float %80
+         %82 = OpAccessChain %_ptr_PushConstant_ulong %2 %int_0
+         %83 = OpLoad %ulong %82 Aligned 8
+         %84 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer__struct_25 %83
+         %85 = OpAccessChain %_ptr_PushConstant_uint %2 %int_2
+         %86 = OpLoad %uint %85 Aligned 4
+         %87 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %84 %int_0 %86
+   %output_0 = OpLoad %ulong %87 Aligned 8
+         %89 = OpFOrdEqual %bool %lhs_0 %lhs_0
+         %90 = OpFOrdEqual %bool %rhs_0 %rhs_0
+  %ordered_0 = OpLogicalAnd %bool %89 %90
+         %92 = OpFUnordNotEqual %bool %lhs_0 %lhs_0
+         %93 = OpFUnordNotEqual %bool %rhs_0 %rhs_0
+%unordered_0 = OpLogicalOr %bool %92 %93
+%ordered_word_0 = OpSelect %int %ordered_0 %int_1_1 %int_0_1
+%unordered_word_0 = OpSelect %int %unordered_0 %int_1_1 %int_0_1
+        %100 = OpIAdd %ulong %output_0 %ulong_0_0
+        %101 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %100
+               OpStore %101 %ordered_word_0 Aligned 4
+        %103 = OpIAdd %ulong %output_0 %ulong_4_0
+        %104 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %103
+               OpStore %104 %unordered_word_0 Aligned 4
+     %left_0 = OpCompositeConstruct %v3float %lhs_0 %lhs_0 %lhs_0
+    %right_0 = OpCompositeConstruct %v3float %rhs_0 %rhs_0 %rhs_0
+        %109 = OpFOrdEqual %v3bool %left_0 %left_0
+        %110 = OpFOrdEqual %v3bool %right_0 %right_0
+%ordered_lanes_0 = OpLogicalAnd %v3bool %109 %110
+        %112 = OpFUnordNotEqual %v3bool %left_0 %left_0
+        %113 = OpFUnordNotEqual %v3bool %right_0 %right_0
+%unordered_lanes_0 = OpLogicalOr %v3bool %112 %113
+%ordered_lane_0 = OpCompositeExtract %bool %ordered_lanes_0 0
+%unordered_lane_0 = OpCompositeExtract %bool %unordered_lanes_0 0
+%ordered_lane_word_0 = OpSelect %int %ordered_lane_0 %int_1_1 %int_0_1
+%unordered_lane_word_0 = OpSelect %int %unordered_lane_0 %int_1_1 %int_0_1
+        %120 = OpIAdd %ulong %output_0 %ulong_8_0
+        %121 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %120
+               OpStore %121 %ordered_lane_word_0 Aligned 4
+        %123 = OpIAdd %ulong %output_0 %ulong_12_0
+        %124 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %123
+               OpStore %124 %unordered_lane_word_0 Aligned 4
+               OpReturn
+               OpFunctionEnd
+%classify_f64 = OpFunction %void None %4
+        %126 = OpLabel
+        %128 = OpAccessChain %_ptr_PushConstant_uint %2 %int_6 %int_0
+        %129 = OpLoad %uint %128 Aligned 4
+        %130 = OpAccessChain %_ptr_PushConstant_uint %2 %int_6 %int_1
+        %131 = OpLoad %uint %130 Aligned 4
+        %132 = OpUConvert %ulong %129
+        %133 = OpUConvert %ulong %131
+        %135 = OpShiftLeftLogical %ulong %133 %ulong_32
+        %136 = OpBitwiseOr %ulong %135 %132
+      %lhs_1 = OpBitcast %double %136
+        %138 = OpAccessChain %_ptr_PushConstant_uint %2 %int_6 %int_2
+        %139 = OpLoad %uint %138 Aligned 4
+        %141 = OpAccessChain %_ptr_PushConstant_uint %2 %int_6 %int_3
+        %142 = OpLoad %uint %141 Aligned 4
+        %143 = OpUConvert %ulong %139
+        %144 = OpUConvert %ulong %142
+        %145 = OpShiftLeftLogical %ulong %144 %ulong_32
+        %146 = OpBitwiseOr %ulong %145 %143
+      %rhs_1 = OpBitcast %double %146
+        %148 = OpAccessChain %_ptr_PushConstant_ulong %2 %int_0
+        %149 = OpLoad %ulong %148 Aligned 8
+        %150 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer__struct_25 %149
+        %151 = OpAccessChain %_ptr_PushConstant_uint %2 %int_2
+        %152 = OpLoad %uint %151 Aligned 4
+        %153 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %150 %int_0 %152
+   %output_1 = OpLoad %ulong %153 Aligned 8
+        %155 = OpFOrdEqual %bool %lhs_1 %lhs_1
+        %156 = OpFOrdEqual %bool %rhs_1 %rhs_1
+  %ordered_1 = OpLogicalAnd %bool %155 %156
+        %158 = OpFUnordNotEqual %bool %lhs_1 %lhs_1
+        %159 = OpFUnordNotEqual %bool %rhs_1 %rhs_1
+%unordered_1 = OpLogicalOr %bool %158 %159
+%ordered_word_1 = OpSelect %int %ordered_1 %int_1_2 %int_0_2
+%unordered_word_1 = OpSelect %int %unordered_1 %int_1_2 %int_0_2
+        %166 = OpIAdd %ulong %output_1 %ulong_0_1
+        %167 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %166
+               OpStore %167 %ordered_word_1 Aligned 4
+        %169 = OpIAdd %ulong %output_1 %ulong_4_1
+        %170 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %169
+               OpStore %170 %unordered_word_1 Aligned 4
+     %left_1 = OpCompositeConstruct %v4double %lhs_1 %lhs_1 %lhs_1 %lhs_1
+    %right_1 = OpCompositeConstruct %v4double %rhs_1 %rhs_1 %rhs_1 %rhs_1
+        %175 = OpFOrdEqual %v4bool %left_1 %left_1
+        %176 = OpFOrdEqual %v4bool %right_1 %right_1
+%ordered_lanes_1 = OpLogicalAnd %v4bool %175 %176
+        %178 = OpFUnordNotEqual %v4bool %left_1 %left_1
+        %179 = OpFUnordNotEqual %v4bool %right_1 %right_1
+%unordered_lanes_1 = OpLogicalOr %v4bool %178 %179
+%ordered_lane_1 = OpCompositeExtract %bool %ordered_lanes_1 0
+%unordered_lane_1 = OpCompositeExtract %bool %unordered_lanes_1 0
+%ordered_lane_word_1 = OpSelect %int %ordered_lane_1 %int_1_2 %int_0_2
+%unordered_lane_word_1 = OpSelect %int %unordered_lane_1 %int_1_2 %int_0_2
+        %186 = OpIAdd %ulong %output_1 %ulong_8_1
+        %187 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %186
+               OpStore %187 %ordered_lane_word_1 Aligned 4
+        %189 = OpIAdd %ulong %output_1 %ulong_12_1
+        %190 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %189
+               OpStore %190 %unordered_lane_word_1 Aligned 4
+               OpReturn
+               OpFunctionEnd
