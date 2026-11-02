@@ -960,17 +960,14 @@ static iree_status_t iree_hal_amd_gpu_aql_command_control(
   iree_hal_amd_gpu_aql_packet_t* packet = NULL;
   IREE_RETURN_IF_ERROR(
       iree_hal_amd_gpu_aql_command_packets(buffer, 1, &packet_offset, &packet));
-  if (command.kind != IREE_HAL_AMD_GPU_CONTROL_TIMESTAMP) {
-    header |= IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED;
-  }
   *packet =
       program
           ? iree_hal_amd_gpu_aql_control_program_packet(
                 buffer->pool
                     ->control[iree_hal_amd_gpu_control_program_index(command)],
                 0, header, 0)
-          : iree_hal_amd_gpu_aql_packet_indirect_buffer(
-                header, 0, word_count, 0);
+          : iree_hal_amd_gpu_aql_packet_indirect_buffer(header, 0, word_count,
+                                                        0);
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
       buffer, packet_offset + (program ? 40 : 8), 0, data_offset,
       IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA));
