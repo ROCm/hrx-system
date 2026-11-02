@@ -462,15 +462,15 @@ iree_status_t loom_aie2p_bundle_plan_analyze(
                     "admitted AIE2P call must retain ABI transport");
         accepted = false;
         IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_analyze_move_range(
-            frame, call_moves->arguments, packet.node->op, diagnostic_emitter,
-            out_analysis, &accepted));
+            frame, call_moves->arguments.moves, packet.node->op,
+            diagnostic_emitter, out_analysis, &accepted));
         if (!accepted) {
           return iree_ok_status();
         }
         accepted = false;
         IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_analyze_move_range(
-            frame, call_moves->results, packet.node->op, diagnostic_emitter,
-            out_analysis, &accepted));
+            frame, call_moves->results.moves, packet.node->op,
+            diagnostic_emitter, out_analysis, &accepted));
         if (!accepted) {
           return iree_ok_status();
         }

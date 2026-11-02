@@ -1291,11 +1291,12 @@ static iree_status_t loom_aie2p_bundle_plan_append_call(
   // Keep the largest complete suffix of resolved parallel moves that fits in
   // JL's architectural delay window. Earlier transport remains before JL;
   // move order is unchanged, including any cycle-breaking scratch move.
-  iree_host_size_t delay_move_start = moves->arguments.count;
+  const loom_low_move_range_t argument_moves = moves->arguments.moves;
+  iree_host_size_t delay_move_start = argument_moves.count;
   iree_host_size_t delay_move_slot_count = 0;
   while (delay_move_start != 0) {
     const iree_host_size_t move_index =
-        moves->arguments.start + delay_move_start - 1;
+        argument_moves.start + delay_move_start - 1;
     const uint8_t step_count = loom_aie2p_descriptor_move_route_step_count(
         builder->move_route_ids_by_move[move_index]);
     if (delay_move_slot_count + step_count > delay_slot_count) {
@@ -1305,12 +1306,12 @@ static iree_status_t loom_aie2p_bundle_plan_append_call(
     --delay_move_start;
   }
   const loom_low_move_range_t before_call_moves = {
-      .start = moves->arguments.start,
+      .start = argument_moves.start,
       .count = delay_move_start,
   };
   const loom_low_move_range_t delay_moves = {
-      .start = moves->arguments.start + delay_move_start,
-      .count = moves->arguments.count - delay_move_start,
+      .start = argument_moves.start + delay_move_start,
+      .count = argument_moves.count - delay_move_start,
   };
 
   builder->pending.minimum_issue_cycle =
@@ -1390,7 +1391,7 @@ static iree_status_t loom_aie2p_bundle_plan_append_call(
   builder->pending.end_cycle = builder->next_issue_cycle;
   const uint32_t result_move_start_cycle = builder->next_issue_cycle;
   IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_move_range(
-      builder, moves->results, logical_issue_cycle));
+      builder, moves->results.moves, logical_issue_cycle));
   IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_flush_pending(
       builder, builder->pending.end_cycle));
   const uint32_t result_available_cycle =

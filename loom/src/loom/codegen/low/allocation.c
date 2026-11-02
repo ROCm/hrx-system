@@ -361,7 +361,7 @@ loom_low_allocation_append_boundary_moves(
     uint32_t point, const loom_low_allocation_abi_location_t* locations,
     const loom_value_ordinal_t* ordinals, uint16_t count,
     loom_low_allocation_boundary_direction_t direction,
-    loom_low_move_range_t* out_moves) {
+    loom_low_move_group_t* out_group) {
   iree_host_size_t raw_count = 0;
   for (uint16_t i = 0; i < count; ++i) {
     const loom_low_allocation_assignment_t* assignment =
@@ -385,11 +385,9 @@ loom_low_allocation_append_boundary_moves(
         from_abi ? assignment : &boundary, 0, assignment->location_count,
         &raw_count);
   }
-  loom_low_move_group_t group;
   IREE_RETURN_IF_ERROR(loom_low_allocation_move_plan_append_group(
-      &state->move_plan, owner_op, point, point, raw_count, &group,
+      &state->move_plan, owner_op, point, point, raw_count, out_group,
       /*out_input_flags=*/NULL));
-  *out_moves = group.moves;
   return iree_ok_status();
 }
 

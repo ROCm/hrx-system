@@ -644,8 +644,9 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_vm_function_call(
                   i - 16, (uint16_t)source->location_base, 1);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_vm_function_moves(frame->allocation.moves, moves->arguments,
-                                    &scratch->storage, stream);
+    status =
+        loom_vm_function_moves(frame->allocation.moves, moves->arguments.moves,
+                               &scratch->storage, stream);
   }
   if (iree_status_is_ok(status)) {
     // The allocator keeps live references outside the overwritten prefix.
@@ -664,8 +665,9 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_vm_function_call(
     // Reference copies retain their destination before replacing its owner,
     // just as on CFG edges. Unused physical owners are released on overwrite
     // or frame teardown; SSA does not promise destruction at last use.
-    status = loom_vm_function_moves(frame->allocation.moves, moves->results,
-                                    &scratch->storage, stream);
+    status =
+        loom_vm_function_moves(frame->allocation.moves, moves->results.moves,
+                               &scratch->storage, stream);
   }
   const uint16_t argument_overflow =
       values->argument_count - iree_min(16, values->argument_count);

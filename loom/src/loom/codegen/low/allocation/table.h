@@ -247,8 +247,9 @@ static_assert(sizeof(loom_low_allocation_packet_move_group_t) == 32,
               "packet transfer groups must retain their compact shape");
 #endif  // UINTPTR_MAX == UINT64_MAX
 
-// Call transport belongs to the call that consumes the arguments. Each range
-// indexes the allocation's common move table, after cycle resolution.
+// Call transport belongs to the call that consumes the arguments. Each group
+// indexes the allocation's common move and cycle-scratch tables after parallel
+// move resolution.
 typedef struct loom_low_allocation_call_moves_t {
   // Source-order ordinal of the retained low.func.call.
   uint32_t source_ordinal;
@@ -257,20 +258,21 @@ typedef struct loom_low_allocation_call_moves_t {
   // Complete semantic result count, including storage ABI results.
   uint16_t result_count;
   // Register transport immediately before transferring control to the callee.
-  loom_low_move_range_t arguments;
+  loom_low_move_group_t arguments;
   // Register transport immediately after the callee returns.
-  loom_low_move_range_t results;
+  loom_low_move_group_t results;
 } loom_low_allocation_call_moves_t;
 
 // Return transport belongs to the exit that produces the function results.
-// The range indexes the allocation's common move table after cycle resolution.
+// The group indexes the allocation's common move and cycle-scratch tables after
+// parallel move resolution.
 typedef struct loom_low_allocation_exit_moves_t {
   // Source-order ordinal of the owning low.return.
   uint32_t source_ordinal;
   // Complete semantic result count, including storage ABI results.
   uint16_t result_count;
   // Register transport immediately before leaving the function body.
-  loom_low_move_range_t results;
+  loom_low_move_group_t results;
 } loom_low_allocation_exit_moves_t;
 
 // Assignment-backed storage lease over target-visible physical units.
@@ -417,7 +419,7 @@ typedef struct loom_low_allocation_table_t {
   iree_host_size_t exit_move_count;
   // Final sequential physical move rows shared by all move groups.
   const loom_low_move_t* moves;
-  // Number of final move rows across edge and packet-local move groups.
+  // Number of final move rows across all retained move groups.
   iree_host_size_t move_count;
   // Final invocation-owned transport cells, indexed by MOVE_STORAGE locations.
   const loom_low_move_storage_t* move_storage;
@@ -425,7 +427,7 @@ typedef struct loom_low_allocation_table_t {
   iree_host_size_t move_storage_count;
   // Indices into |moves| for the first row writing each cycle-scratch location.
   const iree_host_size_t* scratch_move_indices;
-  // Number of final move rows across packet-local move groups.
+  // Number of packet-local final move rows, excluding boundary transport.
   iree_host_size_t packet_move_count;
   // Target storage-lease facts consumed by this allocation.
   loom_low_storage_lease_table_t storage_leases;
