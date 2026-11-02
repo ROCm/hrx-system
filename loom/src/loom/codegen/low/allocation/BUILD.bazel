@@ -170,6 +170,7 @@ loom_cc_library(
     deps = [
         ":active_unit",
         ":assignment",
+        ":content_identity",
         ":live_range",
         ":storage",
         ":unit_liveness",
@@ -197,6 +198,7 @@ loom_cc_library(
     hdrs = ["active_unit.h"],
     deps = [
         ":assignment",
+        ":content_identity",
         ":live_range",
         ":storage",
         ":unit_liveness",
@@ -326,6 +328,7 @@ loom_cc_library(
         ":active_set",
         ":assignment",
         ":assignment_map",
+        ":content_identity",
         ":live_range",
         ":physical_domains",
         ":preference",
@@ -365,6 +368,7 @@ loom_cc_test(
     name = "search_covering_spill_test",
     srcs = ["search_covering_spill_test.cc"],
     deps = [
+        ":content_identity",
         ":search",
         ":storage_lease",
         "//loom/src/loom/ir",
@@ -624,11 +628,34 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "content_identity",
+    hdrs = ["content_identity.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+# Content queries consume the facts without depending on lifetime construction.
+loom_cc_library(
+    name = "content_identity_builder",
+    srcs = ["content_identity.c"],
+    deps = [
+        ":content_identity",
+        ":unit_liveness",
+        "//loom/src/loom/codegen/low:placement",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "storage_lease",
     srcs = ["storage_lease.c"],
     hdrs = ["storage_lease.h"],
     deps = [
         ":assignment",
+        ":content_identity",
         ":live_range",
         ":storage",
         ":storage_lease_index",
@@ -636,7 +663,6 @@ loom_cc_library(
         ":unit_liveness",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:descriptors",
-        "//loom/src/loom/codegen/low:placement",
         "//loom/src/loom/codegen/low:storage_lease",
         "//loom/src/loom/ir",
         "//runtime/src/iree/base",
@@ -659,6 +685,8 @@ loom_cc_test(
     name = "storage_lease_test",
     srcs = ["storage_lease_test.cc"],
     deps = [
+        ":content_identity",
+        ":content_identity_builder",
         ":storage_lease",
         ":storage_lease_index",
         ":unit_liveness",
@@ -676,6 +704,7 @@ loom_cc_library(
     hdrs = ["live_range.h"],
     deps = [
         ":assignment",
+        ":content_identity",
         ":storage",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:descriptors",
@@ -910,6 +939,7 @@ loom_cc_test(
     name = "live_range_test",
     srcs = ["live_range_test.cc"],
     deps = [
+        ":content_identity",
         ":live_range",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -1376,6 +1406,7 @@ loom_cc_library(
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:placement",
+        "//loom/src/loom/codegen/low:register_requirements",
         "//loom/src/loom/codegen/low:storage_layout",
         "//loom/src/loom/codegen/low:storage_lease",
         "//loom/src/loom/codegen/low:storage_transport",

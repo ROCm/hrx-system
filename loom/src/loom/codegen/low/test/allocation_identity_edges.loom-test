@@ -106,7 +106,8 @@ value %second: test.i32 -> target_id[1:1]
 value %swapped: test.i32 -> target_id[2:2]
 
 // ====
-// Preserving one unit does not establish identity for the whole edge.
+// A repeated projection shares the unchanged first unit. The edge copy writes
+// the second unit only on the backedge, preserving the original pair on exit.
 // RUN: emit low-allocation-query @partial values=%current,%first,%repeated
 
 test.target<low_core> @target
@@ -125,8 +126,8 @@ low.func.def schedule(locked) target<test.low.core>(@target) @partial(%condition
 
 // ----
 value %current: test.i32 -> target_id[0:2]
-value %first: test.i32 -> target_id[3:1]
-value %repeated: test.i32 -> target_id[3:2]
+value %first: test.i32 -> target_id[0:1]
+value %repeated: test.i32 -> target_id[0:2]
 
 // ====
 // Required storage ties write new bits and cannot inherit copy identity.

@@ -32,9 +32,9 @@ low.func.def target<test.low.core>(@target) @partial_reload_lifetimes_32(%input:
 spills: 0
 materialized traffic: stores=2 reloads=2
 value %first: test.pressure.alias32 -> physical_register[0:2]
-value %second: test.pressure.alias32 -> physical_register[1:2]
-value %third: test.pressure.alias32 -> physical_register[2:2]
-value %fourth: test.pressure.alias32 -> physical_register[3:2]
+value %second: test.pressure.alias32 -> physical_register[2:2]
+value %third: test.pressure.alias32 -> physical_register[4:2]
+value %fourth: test.pressure.alias32 -> physical_register[4:2]
 value %fifth: test.pressure.alias32 -> physical_register[4:2]
 value %parts: test.pressure.alias32 -> physical_register[0:5]
 
@@ -74,9 +74,9 @@ low.func.def target<test.low.core>(@target) @partial_reload_lifetimes_64(%input:
 spills: 0
 materialized traffic: stores=2 reloads=2
 value %first: test.pressure.alias64 -> physical_register[0:2]
-value %second: test.pressure.alias64 -> physical_register[1:2]
-value %third: test.pressure.alias64 -> physical_register[2:2]
-value %fourth: test.pressure.alias64 -> physical_register[3:2]
+value %second: test.pressure.alias64 -> physical_register[2:2]
+value %third: test.pressure.alias64 -> physical_register[4:2]
+value %fourth: test.pressure.alias64 -> physical_register[4:2]
 value %fifth: test.pressure.alias64 -> physical_register[4:2]
 value %parts: test.pressure.alias64 -> physical_register[0:5]
 
@@ -95,3 +95,45 @@ low.func.def target<test.low.core>(@target) @oversized_reload() -> (reg<test.i32
   %result = copy %value : reg<test.pressure.alias32 x9> -> reg<test.i32 x9>
   return %result
 }
+
+// ====
+
+// A scalar projection can reserve its final aggregate unit while the wider
+// source is still live. The other aggregate units are acquired only as their
+// producers execute; this must fit the same six-register extent.
+// RUN: emit low-allocation-query @slice_before_full_use strategy=source spill-free spill-count values=%first,%second,%third,%fourth,%fifth,%parts
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @slice_before_full_use(%input: reg<test.pressure.alias32 x2>) -> (reg<test.i32 x10>, reg<test.pressure.alias32 x5>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 8} : low.storage<stack>
+  low.spill %input, %storage : reg<test.pressure.alias32 x2>, low.storage<stack>
+  %first = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x2>
+  %part0 = slice %first[0] : reg<test.pressure.alias32 x2> -> reg<test.pressure.alias32>
+  %value0 = copy %first : reg<test.pressure.alias32 x2> -> reg<test.i32 x2>
+  %second = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x2>
+  %part1 = slice %second[0] : reg<test.pressure.alias32 x2> -> reg<test.pressure.alias32>
+  %value1 = copy %second : reg<test.pressure.alias32 x2> -> reg<test.i32 x2>
+  %third = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x2>
+  %part2 = slice %third[0] : reg<test.pressure.alias32 x2> -> reg<test.pressure.alias32>
+  %value2 = copy %third : reg<test.pressure.alias32 x2> -> reg<test.i32 x2>
+  %fourth = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x2>
+  %part3 = slice %fourth[0] : reg<test.pressure.alias32 x2> -> reg<test.pressure.alias32>
+  %value3 = copy %fourth : reg<test.pressure.alias32 x2> -> reg<test.i32 x2>
+  %fifth = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x2>
+  %part4 = slice %fifth[0] : reg<test.pressure.alias32 x2> -> reg<test.pressure.alias32>
+  %value4 = copy %fifth : reg<test.pressure.alias32 x2> -> reg<test.i32 x2>
+  %payload = concat(%value0, %value1, %value2, %value3, %value4) : (reg<test.i32 x2>, reg<test.i32 x2>, reg<test.i32 x2>, reg<test.i32 x2>, reg<test.i32 x2>) -> reg<test.i32 x10>
+  %parts = concat(%part0, %part1, %part2, %part3, %part4) : (reg<test.pressure.alias32>, reg<test.pressure.alias32>, reg<test.pressure.alias32>, reg<test.pressure.alias32>, reg<test.pressure.alias32>) -> reg<test.pressure.alias32 x5>
+  return %payload, %parts
+}
+
+// ----
+spills: 0
+materialized traffic: stores=0 reloads=0
+value %first: test.pressure.alias32 -> physical_register[0:2]
+value %second: test.pressure.alias32 -> physical_register[2:2]
+value %third: test.pressure.alias32 -> physical_register[2:2]
+value %fourth: test.pressure.alias32 -> physical_register[4:2]
+value %fifth: test.pressure.alias32 -> physical_register[4:2]
+value %parts: test.pressure.alias32 -> physical_register[0:5]

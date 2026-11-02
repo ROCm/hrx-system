@@ -242,7 +242,8 @@ static bool loom_low_allocation_interval_assignment_find_entry_location(
           /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0,
           /*ignored_storage_lease_value_ids=*/NULL,
           /*ignored_storage_lease_value_count=*/0,
-          LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN)) {
+          LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN,
+          /*shared_content=*/NULL)) {
     return false;
   }
   *out_base = entry->location_base;
@@ -438,7 +439,7 @@ static iree_status_t loom_low_allocation_interval_assignment_record_failure(
               state->result.assignments, state->result.assignment_count,
               assignment_index, &candidate,
               /*ignored_value_ids=*/NULL,
-              /*ignored_value_count=*/0)) {
+              /*ignored_value_count=*/0, /*shared_content=*/NULL)) {
         continue;
       }
       saw_active_conflict = true;
@@ -884,7 +885,7 @@ loom_low_allocation_interval_assignment_try_relocate_independent_assignment(
             &state->active, state->context->target->descriptor_set,
             &state->unit_liveness, state->result.assignments,
             state->result.assignment_count, &remaining_candidate,
-            &assignment->value_id, 1) ||
+            &assignment->value_id, 1, /*shared_content=*/NULL) ||
         loom_low_allocation_search_assignment_residency_tier(
             search_context, &candidate) < current_residency_tier ||
         (protected_assignment != NULL &&
@@ -896,7 +897,7 @@ loom_low_allocation_interval_assignment_try_relocate_independent_assignment(
               state->unit_liveness.storage_segments.entries,
               state->unit_liveness.start_points,
               state->unit_liveness.end_points, state->unit_liveness.point_count,
-              &candidate, protected_assignment))) ||
+              &candidate, protected_assignment, /*shared_content=*/NULL))) ||
         (state->unit_liveness.write_interference != NULL &&
          loom_low_allocation_write_interference_conflicting_read(
              state->unit_liveness.write_interference, &write_assignments,
@@ -949,7 +950,8 @@ loom_low_allocation_interval_assignment_try_relocate_independent_assignment(
           state->unit_liveness.storage_segments.entries,
           state->unit_liveness.start_points, state->unit_liveness.end_points,
           state->unit_liveness.point_count, &candidate,
-          &state->result.assignments[state->relocation_assignment_indices[i]]);
+          &state->result.assignments[state->relocation_assignment_indices[i]],
+          /*shared_content=*/NULL);
     }
     if (!conflicts) {
       loom_low_allocation_active_unit_index_remove_assignment(
@@ -1036,7 +1038,7 @@ static bool loom_low_allocation_interval_assignment_entry_class_is_full(
   if (!loom_low_allocation_active_assignment_conflicts(
           &state->active.live_range_sweep, descriptors, &state->unit_liveness,
           state->result.assignments, state->result.assignment_count,
-          assignment_index, &point, NULL, 0)) {
+          assignment_index, &point, NULL, 0, /*shared_content=*/NULL)) {
     return false;
   }
   if (iree_bitmap_test(full_classes, input->descriptor_reg_class_id)) {
@@ -1055,7 +1057,7 @@ static bool loom_low_allocation_interval_assignment_entry_class_is_full(
         !loom_low_allocation_active_set_conflicts(
             &state->active, descriptors, &state->unit_liveness,
             state->result.assignments, state->result.assignment_count, &point,
-            NULL, 0)) {
+            NULL, 0, /*shared_content=*/NULL)) {
       return false;
     }
   }
@@ -1172,10 +1174,11 @@ loom_low_allocation_interval_assignment_try_relocate_entry_blocker(
               &state->active.live_range_sweep, descriptors,
               &state->unit_liveness, state->result.assignments,
               state->result.assignment_count, assignment_index, &requested,
-              NULL, 0) ||
+              NULL, 0, /*shared_content=*/NULL) ||
           loom_low_allocation_search_assignment_conflicts(
               search_context, &requested, &blocker->value_id, 1, NULL, 0,
-              LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN)) {
+              LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN,
+              /*shared_content=*/NULL)) {
         continue;
       }
       IREE_RETURN_IF_ERROR(
@@ -1263,7 +1266,8 @@ loom_low_allocation_interval_assignment_try_relocate_required_blocker(
             search_context, interval, capacity->descriptor_reg_class_id,
             capacity->location_kind, candidate_base, interval->unit_count,
             &ignored_value, 1, NULL, 0,
-            LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN)) {
+            LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN,
+            /*shared_content=*/NULL)) {
       continue;
     }
     const loom_low_allocation_assignment_t requested_assignment = {
@@ -1462,7 +1466,7 @@ loom_low_allocation_interval_assignment_try_relocate_blocker_callback(
             state->context->target->descriptor_set, &state->unit_liveness,
             state->result.assignments, state->result.assignment_count,
             assignment_index, &protected_assignment, ignored_value_ids,
-            ignored_value_count)) {
+            ignored_value_count, /*shared_content=*/NULL)) {
       continue;
     }
     // Relocating several independent values needs a joint placement decision.
@@ -1508,7 +1512,8 @@ loom_low_allocation_interval_assignment_try_relocate_blocker_callback(
           requested_assignment->location_count, ignored_with_conflict,
           ignored_value_count + 1, ignored_storage_lease_value_ids,
           ignored_storage_lease_value_count,
-          LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED)) {
+          LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED,
+          /*shared_content=*/NULL)) {
     return iree_ok_status();
   }
 
@@ -1558,7 +1563,8 @@ loom_low_allocation_interval_assignment_assign_fixed_interval(
           /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0,
           /*ignored_storage_lease_value_ids=*/NULL,
           /*ignored_storage_lease_value_count=*/0,
-          LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED)) {
+          LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED,
+          /*shared_content=*/NULL)) {
     return loom_low_allocation_target_constraints_emit_fixed_value_conflict(
         state->context->target_constraints, &fixed_value->assignment);
   }

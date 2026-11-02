@@ -4269,3 +4269,32 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_waitcnt_uses_descri
 // ----
   s_waitcnt vmcnt(63) lgkmcnt(0)
   s_endpgm
+
+// ====
+
+// A repeated component is transported on the backedge. Sharing its first
+// unit must leave the original pair intact when control instead exits.
+// RUN: emit amdgpu-assembly @partial_backedge_preserves_exit strategy=source waits=none
+
+amdgpu.target<gfx1100> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna3.core>(@target) @partial_backedge_preserves_exit(%condition: reg<amdgpu.scc>, %seed: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  low.br ^loop(%seed: reg<amdgpu.vgpr x2>)
+^loop(%current: reg<amdgpu.vgpr x2>):
+  %first = slice %current[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %repeated = concat(%first, %first) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.cond_br %condition, ^back, ^exit : reg<amdgpu.scc>
+^back:
+  low.br ^loop(%repeated: reg<amdgpu.vgpr x2>)
+^exit:
+  return %current
+}
+
+// ----
+.Lbb1:
+  s_cbranch_scc0 .Lbb3
+.Lbb2:
+  v_mov_b32 v1, v0
+  s_branch .Lbb1
+.Lbb3:
+  s_endpgm

@@ -12,6 +12,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/allocation/content_identity.h"
 #include "loom/codegen/low/allocation/storage_lease_index.h"
 #include "loom/codegen/low/allocation/unit_liveness.h"
 #include "loom/codegen/low/placement.h"
@@ -319,7 +320,7 @@ class LowAllocationStoragePressureSummaryTest
     scenario->schedule.target.descriptor_set = descriptor_set;
     scenario->lease_table = StorageLeaseTable(
         &scenario->schedule, scenario->records, scenario->record_count);
-    const loom_low_allocation_storage_identity_t storage_identity = {};
+    const loom_low_allocation_content_identity_t storage_identity = {};
     IREE_ASSERT_OK(loom_low_allocation_storage_lease_state_initialize(
         &scenario->lease_table, scenario->module, scenario->function_op,
         &scenario->value_domain, &scenario->liveness, &storage_identity,
@@ -656,11 +657,13 @@ struct StorageIdentityScenario {
   loom_low_placement_relation_range_t
       relation_ranges[kStorageIdentityMaxValueCount] = {};
   loom_value_ordinal_t storage_value_order[kStorageIdentityMaxValueCount] = {};
+  // Placement-retained destructive relation indices in source order.
+  uint32_t write_relation_indices[kStorageIdentityMaxRelationCount] = {};
   loom_low_placement_table_t placement = {};
   loom_low_allocation_unit_liveness_value_t
       unit_values[kStorageIdentityMaxValueCount] = {};
   loom_low_allocation_unit_liveness_t unit_liveness = {};
-  loom_low_allocation_storage_identity_t storage_identity = {};
+  loom_low_allocation_content_identity_t storage_identity = {};
   loom_low_allocation_storage_lease_state_t state = {};
 };
 
@@ -713,6 +716,12 @@ class LowAllocationStorageIdentityTest : public LowAllocationStorageLeaseTest {
 
     for (iree_host_size_t i = 0; i < relation_count; ++i) {
       scenario->relations[i] = relations[i];
+      if (iree_any_bit_set(relations[i].flags,
+                           LOOM_LOW_PLACEMENT_RELATION_FLAG_WRITES_STORAGE)) {
+        scenario->write_relation_indices[scenario->placement.storage
+                                             .write_relation_count++] =
+            (uint32_t)i;
+      }
       loom_low_placement_relation_range_t* range =
           &scenario->relation_ranges[relations[i].result_ordinal];
       if (range->count == 0) {
@@ -731,6 +740,8 @@ class LowAllocationStorageIdentityTest : public LowAllocationStorageLeaseTest {
     scenario->placement.relation_count = relation_count;
     scenario->placement.ranges_by_result_ordinal = scenario->relation_ranges;
     scenario->placement.storage.flags = storage_flags;
+    scenario->placement.storage.write_relation_indices =
+        scenario->write_relation_indices;
     scenario->placement.storage_value_order = scenario->storage_value_order;
     scenario->placement.storage_value_order_count = value_count;
 
@@ -753,9 +764,9 @@ class LowAllocationStorageIdentityTest : public LowAllocationStorageLeaseTest {
             i == 0 ? 1 : 2;
       }
     }
-    IREE_ASSERT_OK(loom_low_allocation_storage_identity_initialize(
-        &scenario->lease_table, &scenario->placement, &scenario->unit_liveness,
-        &arena_, &scenario->storage_identity));
+    IREE_ASSERT_OK(loom_low_allocation_content_identity_initialize(
+        &scenario->placement, &scenario->unit_liveness, &arena_,
+        &scenario->storage_identity));
     IREE_ASSERT_OK(loom_low_allocation_storage_lease_state_initialize(
         &scenario->lease_table, scenario->module, scenario->function_op,
         &scenario->value_domain, &scenario->liveness,
@@ -919,6 +930,15 @@ TEST_F(LowAllocationStorageIdentityTest,
     EXPECT_EQ(IdentityOrigin(scenario, kIdentityReconstructed, unit), unit);
     EXPECT_EQ(IdentityOrigin(scenario, kIdentityMaterializedCopy, unit), unit);
   }
+  // All transparent aliases reach a source that is later overwritten.
+  // Leases may still preserve those equal contents, but new physical sharing
+  // cannot replace the coalescer's destructive-write separation proof.
+  ASSERT_NE(scenario.storage_identity.written_origins.words, nullptr);
+  for (uint32_t unit = 0; unit < 4; ++unit) {
+    EXPECT_FALSE(loom_low_allocation_content_identity_units_share(
+        &scenario.storage_identity, unit,
+        scenario.unit_values[kIdentityCopy].unit_point_start + unit));
+  }
   EXPECT_EQ(IdentityOrigin(scenario, kIdentityLower, 0), 0u);
   EXPECT_EQ(IdentityOrigin(scenario, kIdentityLower, 1), 1u);
   EXPECT_EQ(IdentityOrigin(scenario, kIdentityUpper, 0), 2u);
@@ -939,18 +959,13 @@ TEST_F(LowAllocationStorageIdentityTest,
     }
   }
 
-  // Functions without leases never pay for identity state, even when their
-  // placement graph contains aliases.
+  // Content facts are shared independently of leases; empty lease state
+  // remains inert even when another allocation consumer requested them.
   const loom_low_storage_lease_table_t empty_lease_table = {};
-  loom_low_allocation_storage_identity_t no_lease_identity = {};
-  IREE_ASSERT_OK(loom_low_allocation_storage_identity_initialize(
-      &empty_lease_table, &scenario.placement, &scenario.unit_liveness, &arena_,
-      &no_lease_identity));
-  EXPECT_EQ(no_lease_identity.origins, nullptr);
   loom_low_allocation_storage_lease_state_t no_lease_state = {};
   IREE_ASSERT_OK(loom_low_allocation_storage_lease_state_initialize(
       &empty_lease_table, scenario.module, scenario.function_op,
-      &scenario.value_domain, &scenario.liveness, &no_lease_identity,
+      &scenario.value_domain, &scenario.liveness, &scenario.storage_identity,
       &scenario.unit_liveness, &arena_, &decision_arena_, &no_lease_state));
   EXPECT_EQ(no_lease_state.identity_origins, nullptr);
 
@@ -959,10 +974,10 @@ TEST_F(LowAllocationStorageIdentityTest,
   no_alias_placement.storage.flags = 0;
   no_alias_placement.storage_value_order = nullptr;
   no_alias_placement.storage_value_order_count = 0;
-  loom_low_allocation_storage_identity_t no_alias_identity = {};
-  IREE_ASSERT_OK(loom_low_allocation_storage_identity_initialize(
-      &scenario.lease_table, &no_alias_placement, &scenario.unit_liveness,
-      &arena_, &no_alias_identity));
+  loom_low_allocation_content_identity_t no_alias_identity = {};
+  IREE_ASSERT_OK(loom_low_allocation_content_identity_initialize(
+      &no_alias_placement, &scenario.unit_liveness, &arena_,
+      &no_alias_identity));
   EXPECT_EQ(no_alias_identity.origins, nullptr);
   loom_low_allocation_storage_lease_state_t no_alias_state = {};
   IREE_ASSERT_OK(loom_low_allocation_storage_lease_state_initialize(
@@ -1441,7 +1456,7 @@ TEST_P(LowAllocationStorageLeaseReleasePointTest,
   records[0].flags |= LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_FOR_PRESSURE;
   const loom_low_storage_lease_table_t lease_table =
       StorageLeaseTable(&schedule, records, IREE_ARRAYSIZE(records));
-  const loom_low_allocation_storage_identity_t storage_identity = {};
+  const loom_low_allocation_content_identity_t storage_identity = {};
 
   uint32_t unit_end_points[] = {point.program_point + 1};
   loom_low_allocation_unit_liveness_t unit_liveness = {
@@ -1655,7 +1670,7 @@ TEST_F(LowAllocationStorageLeaseTest,
   records[0].release_before_scheduled_ordinal_plus_one = 4;
   const loom_low_storage_lease_table_t lease_table =
       StorageLeaseTable(&schedule, records, IREE_ARRAYSIZE(records));
-  const loom_low_allocation_storage_identity_t storage_identity = {};
+  const loom_low_allocation_content_identity_t storage_identity = {};
   loom_low_allocation_unit_liveness_t unit_liveness = {};
   unit_liveness.storage_segments.entries = liveness.segments;
 
@@ -1762,7 +1777,7 @@ TEST_F(LowAllocationStorageLeaseTest, RejectsLeaseOutsideAllocationLiveness) {
   const loom_low_storage_lease_record_t records[] = {StorageLeaseRecord()};
   const loom_low_storage_lease_table_t lease_table =
       StorageLeaseTable(&schedule, records, IREE_ARRAYSIZE(records));
-  const loom_low_allocation_storage_identity_t storage_identity = {};
+  const loom_low_allocation_content_identity_t storage_identity = {};
 
   const loom_low_allocation_unit_liveness_t unit_liveness = {};
   loom_low_allocation_storage_lease_state_t state = {};

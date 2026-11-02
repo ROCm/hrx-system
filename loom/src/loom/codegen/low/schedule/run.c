@@ -1979,6 +1979,7 @@ static iree_status_t loom_low_schedule_build(
         .requirements = model->context.requirements,
         .value_ids = model->context.value_domain.value_ids,
         .value_count = model->context.value_domain.value_count,
+        .register_requirements = model->register_requirements,
         .value_producer_nodes =
             iree_any_bit_set(options->flags,
                              LOOM_LOW_SCHEDULE_FLAG_RETAIN_VALUE_PRODUCER_NODES)

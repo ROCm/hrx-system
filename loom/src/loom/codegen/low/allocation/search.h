@@ -16,6 +16,7 @@
 #include "loom/codegen/low/allocation/active_set.h"
 #include "loom/codegen/low/allocation/assignment.h"
 #include "loom/codegen/low/allocation/assignment_map.h"
+#include "loom/codegen/low/allocation/content_identity.h"
 #include "loom/codegen/low/allocation/physical_domains.h"
 #include "loom/codegen/low/allocation/preference.h"
 #include "loom/codegen/low/allocation/scalar_packing.h"
@@ -165,14 +166,17 @@ typedef struct loom_low_allocation_search_spill_victim_set_t {
 } loom_low_allocation_search_spill_victim_set_t;
 
 // Returns true when |candidate| conflicts with active assignments, fixed
-// values, reserved ranges, or storage leases.
+// values, reserved ranges, or storage leases. |shared_content| may justify
+// exact read-only overlap with active assignments during aggregate placement;
+// ordinary search and relocation pass NULL.
 bool loom_low_allocation_search_assignment_conflicts(
     loom_low_allocation_search_context_t* context,
     const loom_low_allocation_assignment_t* candidate,
     const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count,
     const loom_value_id_t* ignored_storage_lease_value_ids,
     uint16_t ignored_storage_lease_value_count,
-    loom_low_allocation_storage_release_policy_t release_policy);
+    loom_low_allocation_storage_release_policy_t release_policy,
+    const loom_low_allocation_content_identity_t* shared_content);
 
 // Returns true when the interval assignment candidate conflicts with active
 // assignments, fixed values, reserved ranges, or storage leases.
@@ -184,7 +188,8 @@ bool loom_low_allocation_search_location_conflicts(
     uint16_t ignored_value_count,
     const loom_value_id_t* ignored_storage_lease_value_ids,
     uint16_t ignored_storage_lease_value_count,
-    loom_low_allocation_storage_release_policy_t release_policy);
+    loom_low_allocation_storage_release_policy_t release_policy,
+    const loom_low_allocation_content_identity_t* shared_content);
 
 // Finds a concrete location for |interval| under |capacity| using the context's
 // packing plan. Placement preferences and hard conflicts remain primary.

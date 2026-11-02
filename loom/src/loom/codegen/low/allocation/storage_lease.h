@@ -13,6 +13,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/allocation/assignment.h"
+#include "loom/codegen/low/allocation/content_identity.h"
 #include "loom/codegen/low/allocation/storage_lease_index.h"
 #include "loom/codegen/low/allocation/table.h"
 #include "loom/codegen/low/allocation/unit_liveness.h"
@@ -24,26 +25,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-typedef struct loom_low_placement_table_t loom_low_placement_table_t;
-
-// Decision-lifetime structural content identity shared by every interval
-// assignment attempt for one function. Empty lease tables and placement graphs
-// without structural aliases leave this table inert.
-typedef struct loom_low_allocation_storage_identity_t {
-  // Canonical content origins indexed by allocation unit.
-  const uint32_t* origins;
-} loom_low_allocation_storage_identity_t;
-
-// Resolves final structural aliases once, after destructive-reuse refinement.
-// The result belongs to |arena| and can be shared by first-fit and repair
-// assignment attempts.
-iree_status_t loom_low_allocation_storage_identity_initialize(
-    const loom_low_storage_lease_table_t* lease_table,
-    const loom_low_placement_table_t* placement,
-    const loom_low_allocation_unit_liveness_t* unit_liveness,
-    iree_arena_allocator_t* arena,
-    loom_low_allocation_storage_identity_t* out_identity);
 
 typedef enum loom_low_allocation_storage_release_policy_e {
   // Active storage leases are hard conflicts.
@@ -116,7 +97,7 @@ iree_status_t loom_low_allocation_storage_lease_state_initialize(
     const loom_module_t* module, const loom_op_t* function_op,
     const loom_local_value_domain_t* value_domain,
     const loom_liveness_analysis_t* liveness,
-    const loom_low_allocation_storage_identity_t* storage_identity,
+    const loom_low_allocation_content_identity_t* content_identity,
     const loom_low_allocation_unit_liveness_t* unit_liveness,
     iree_arena_allocator_t* result_arena,
     iree_arena_allocator_t* decision_arena,

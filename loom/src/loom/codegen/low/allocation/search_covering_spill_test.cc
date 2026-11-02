@@ -7,6 +7,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/allocation/content_identity.h"
 #include "loom/codegen/low/allocation/search.h"
 #include "loom/codegen/low/allocation/storage_lease.h"
 #include "loom/ir/context.h"
@@ -465,7 +466,7 @@ TEST_F(LowAllocationCoveringSpillSearchTest,
       .records = lease_records,
       .record_count = IREE_ARRAYSIZE(lease_records),
   };
-  const loom_low_allocation_storage_identity_t storage_identity = {};
+  const loom_low_allocation_content_identity_t storage_identity = {};
   loom_low_allocation_storage_lease_state_t storage_leases = {};
   IREE_ASSERT_OK(loom_low_allocation_storage_lease_state_initialize(
       &lease_table, module, function_op, &value_domain, &liveness,

@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/allocation/assignment.h"
+#include "loom/codegen/low/allocation/content_identity.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/placement.h"
 #include "loom/ir/ir.h"
@@ -112,13 +113,17 @@ bool loom_low_allocation_live_range_values_overlap(
 // segments.
 // Assignment sparse segment ranges, when present, index |storage_segments|.
 // A missing range makes only that assignment's reservation continuous.
+// Optional |shared_content| allows read-only equal-content units to overlap
+// only at exactly corresponding physical locations. NULL requests disjoint
+// storage, as used by ordinary free-location search and relocation.
 bool loom_low_allocation_live_range_assignments_conflict(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_liveness_segment_t* storage_segments,
     const uint32_t* unit_start_points, const uint32_t* unit_end_points,
     iree_host_size_t unit_point_count,
     const loom_low_allocation_assignment_t* lhs,
-    const loom_low_allocation_assignment_t* rhs);
+    const loom_low_allocation_assignment_t* rhs,
+    const loom_low_allocation_content_identity_t* shared_content);
 
 // Returns true when active |existing| conflicts with |candidate| at or after
 // |sweep_point|. |inout_existing_segment_start| must have been initialized
@@ -132,7 +137,8 @@ bool loom_low_allocation_live_range_sweep_assignments_conflict(
     const uint32_t* unit_start_points, const uint32_t* unit_end_points,
     iree_host_size_t unit_point_count,
     const loom_low_allocation_assignment_t* existing,
-    const loom_low_allocation_assignment_t* candidate);
+    const loom_low_allocation_assignment_t* candidate,
+    const loom_low_allocation_content_identity_t* shared_content);
 
 #ifdef __cplusplus
 }  // extern "C"

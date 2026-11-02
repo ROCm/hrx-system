@@ -16,6 +16,7 @@
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/placement.h"
+#include "loom/codegen/low/register_requirements.h"
 #include "loom/codegen/low/storage_layout.h"
 #include "loom/codegen/low/storage_lease.h"
 #include "loom/codegen/low/storage_transport.h"
@@ -326,6 +327,9 @@ typedef struct loom_low_allocation_table_t {
   loom_low_storage_layout_t storage_layout;
   // Liveness analysis that produced the allocated intervals.
   loom_liveness_analysis_t liveness;
+  // Borrowed structural register requirements in the liveness value domain.
+  // NULL when the function snapshot has no structural requirements.
+  const loom_low_register_requirement_t* register_requirements;
   // Arena-owned physical reservations indexed by assignment segment ranges.
   // Borrows |liveness.segments| when no tied-source refinement is required.
   const loom_liveness_segment_t* storage_segments;
