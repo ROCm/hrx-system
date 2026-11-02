@@ -176,6 +176,19 @@ iree_status_t loom_target_entry_select_all_entries(
     iree_string_view_t entry_kind, iree_arena_allocator_t* arena,
     bool* out_selected, loom_target_entry_list_t* out_entries);
 
+// Selects all compatible functions using a caller-owned function-version
+// snapshot. This is equivalent to |loom_target_entry_select_all_entries| but
+// lets artifact planners share one immutable module observation across entry
+// selection and retained-call closure planning. |function_versions| must have
+// been built against the current |module| symbol table.
+iree_status_t loom_target_entry_select_all_entries_from_version_snapshot(
+    const loom_module_t* module, const loom_target_entry_options_t* options,
+    const loom_target_function_version_snapshot_t* function_versions,
+    loom_target_entry_predicate_t predicate,
+    loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
+    iree_string_view_t entry_kind, iree_arena_allocator_t* arena,
+    bool* out_selected, loom_target_entry_list_t* out_entries);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
