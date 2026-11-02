@@ -556,6 +556,10 @@ static void loom_amdgpu_wait_classification_finish_nodes(
                          LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_USES_VECTOR_ALU)) {
       node_state->flags |= LOOM_AMDGPU_WAIT_NODE_STATE_USES_VECTOR_ALU;
     }
+    if (iree_any_bit_set(structural.flags,
+                         LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CALL)) {
+      node_state->flags |= LOOM_AMDGPU_WAIT_NODE_STATE_CALL;
+    }
     if (has_valu_trans_use_depctr &&
         iree_any_bit_set(flags, LOOM_AMDGPU_WAIT_NODE_STATE_TRANSCENDENTAL)) {
       completion_node->producer_counter_mask |=

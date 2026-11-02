@@ -194,6 +194,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/arch/amdgpu/abi:call_abi",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//runtime/src/iree/base",
     ],
@@ -486,6 +487,7 @@ loom_cc_test(
     target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_GFX125X),
     deps = [
         ":storage_lease",
+        ":structural_packet",
         ":wait_plan",
         "//loom/src/loom/codegen/low:builder",
         "//loom/src/loom/codegen/low:immediates",

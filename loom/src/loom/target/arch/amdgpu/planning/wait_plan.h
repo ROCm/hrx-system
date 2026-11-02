@@ -90,6 +90,9 @@ typedef enum loom_amdgpu_wait_plan_reason_e {
   LOOM_AMDGPU_WAIT_PLAN_REASON_TENSOR_ISSUE_DRAIN = 16,
   // A GFX12.0 ordinary SYSTEM store must follow prior memory completion.
   LOOM_AMDGPU_WAIT_PLAN_REASON_SYSTEM_SCOPE_STORE = 17,
+  // A retained direct helper call starts with no outstanding counter work so
+  // independently planned frames cannot alias live results or memory effects.
+  LOOM_AMDGPU_WAIT_PLAN_REASON_CALLABLE_BOUNDARY = 18,
   // Total number of wait-plan reason values.
   LOOM_AMDGPU_WAIT_PLAN_REASON_COUNT,
 } loom_amdgpu_wait_plan_reason_t;

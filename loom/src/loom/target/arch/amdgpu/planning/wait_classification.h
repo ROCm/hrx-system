@@ -66,6 +66,8 @@ typedef enum loom_amdgpu_wait_node_state_flag_bits_e {
   LOOM_AMDGPU_WAIT_NODE_STATE_UNREFINED_MEMORY_WRITE = 1u << 20,
   // MFMA/SMFMAC opens a fixed result window retained across physical writes.
   LOOM_AMDGPU_WAIT_NODE_STATE_MATRIX_RESULT = 1u << 21,
+  // A retained direct helper call requires a quiescent target boundary.
+  LOOM_AMDGPU_WAIT_NODE_STATE_CALL = 1u << 22,
 } loom_amdgpu_wait_node_state_flag_bits_t;
 typedef uint32_t loom_amdgpu_wait_node_state_flags_t;
 

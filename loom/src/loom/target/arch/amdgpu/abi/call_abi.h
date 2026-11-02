@@ -35,6 +35,9 @@ enum {
   // function participating in a direct-call program.
   LOOM_AMDGPU_CALL_ABI_RESERVED_SGPR_BASE = 30,
   LOOM_AMDGPU_CALL_ABI_RESERVED_SGPR_COUNT = 6,
+  // Native scalar instructions in one direct call around the opaque callee:
+  // save EXEC, form the callee PC, transfer control, and restore EXEC.
+  LOOM_AMDGPU_CALL_ABI_CALL_CONTROL_INSTRUCTION_COUNT = 6,
 };
 
 // Register-bank demand for one side of a direct-call boundary.

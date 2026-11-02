@@ -277,6 +277,8 @@ iree_string_view_t loom_amdgpu_wait_plan_reason_name(
       return IREE_SV("amdgpu.tensor_issue_drain");
     case LOOM_AMDGPU_WAIT_PLAN_REASON_SYSTEM_SCOPE_STORE:
       return IREE_SV("amdgpu.system_scope_store");
+    case LOOM_AMDGPU_WAIT_PLAN_REASON_CALLABLE_BOUNDARY:
+      return IREE_SV("amdgpu.callable_boundary");
     case LOOM_AMDGPU_WAIT_PLAN_REASON_UNKNOWN:
     default:
       return IREE_SV("amdgpu.unknown");
@@ -309,6 +311,7 @@ static bool loom_amdgpu_wait_plan_reason_has_consumer(
     case LOOM_AMDGPU_WAIT_PLAN_REASON_LOOP_CARRIED_CONSERVATIVE_SSA_USE:
     case LOOM_AMDGPU_WAIT_PLAN_REASON_TENSOR_ISSUE_DRAIN:
     case LOOM_AMDGPU_WAIT_PLAN_REASON_SYSTEM_SCOPE_STORE:
+    case LOOM_AMDGPU_WAIT_PLAN_REASON_CALLABLE_BOUNDARY:
       return true;
     default:
       return false;
@@ -2751,6 +2754,26 @@ static iree_status_t loom_amdgpu_wait_plan_handle_program_exit(
       LOOM_LOW_SCHEDULE_NODE_NONE, outstanding_counter_mask);
 }
 
+static iree_status_t loom_amdgpu_wait_plan_handle_callable_boundary(
+    loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index) {
+  const loom_amdgpu_wait_node_state_t* node_state =
+      &builder->classification.node_states[node_index];
+  if (!iree_any_bit_set(node_state->flags, LOOM_AMDGPU_WAIT_NODE_STATE_CALL)) {
+    return iree_ok_status();
+  }
+
+  const uint32_t active_counter_mask =
+      loom_amdgpu_wait_plan_outstanding_counter_mask(
+          builder->outstanding_counts, LOOM_AMDGPU_WAIT_COUNTER_MASK_ALL);
+  if (active_counter_mask == 0) {
+    return iree_ok_status();
+  }
+  return loom_amdgpu_wait_plan_drain_mask(
+      builder, LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED,
+      LOOM_AMDGPU_WAIT_PLAN_REASON_CALLABLE_BOUNDARY, node_index,
+      LOOM_LOW_SCHEDULE_NODE_NONE, active_counter_mask);
+}
+
 static void loom_amdgpu_wait_plan_increment_outstanding_counts(
     uint32_t outstanding_counts[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT],
     uint32_t counter_mask) {
@@ -3075,6 +3098,8 @@ static iree_status_t loom_amdgpu_wait_plan_process_node(
       loom_amdgpu_wait_plan_handle_trans_result_use(builder, node_index));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_wait_plan_handle_barrier(builder, node_index));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_wait_plan_handle_callable_boundary(builder, node_index));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_wait_plan_handle_program_exit(builder, node_index));
   IREE_RETURN_IF_ERROR(

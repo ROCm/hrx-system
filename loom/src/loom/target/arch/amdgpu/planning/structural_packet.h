@@ -35,6 +35,8 @@ typedef enum loom_amdgpu_structural_packet_flag_bits_e {
   LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_USES_VECTOR_ALU = 1u << 3,
   // The materialized packet reads the target-visible SCC state.
   LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_READS_SCC = 1u << 4,
+  // The packet transfers control to a retained direct helper and resumes.
+  LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CALL = 1u << 5,
   // Taking the conditional branch skips the packet's final native branch.
   LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CONDITIONAL_TAIL = 1u << 6,
 } loom_amdgpu_structural_packet_flag_bits_t;
@@ -105,7 +107,8 @@ static inline uint64_t loom_amdgpu_structural_packet_control_transfer_count(
   if (op == NULL) {
     return 0;
   }
-  if (loom_low_return_isa(op) || loom_low_unreachable_isa(op)) {
+  if (loom_low_func_call_isa(op) || loom_low_return_isa(op) ||
+      loom_low_unreachable_isa(op)) {
     return 1;
   }
   if (loom_direct_branch_isa(op)) {

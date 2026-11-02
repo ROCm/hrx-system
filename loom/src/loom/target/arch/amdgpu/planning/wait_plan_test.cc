@@ -19,6 +19,7 @@
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/planning/storage_lease.h"
+#include "loom/target/arch/amdgpu/planning/structural_packet.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/util/cfg_graph_test_util.h"
 
@@ -90,6 +91,27 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
         loom_builder_intern_string(&builder_, IREE_SV("transfers"), &name));
     IREE_ASSERT_OK(loom_builder_intern_string(
         &builder_, IREE_SV("amdgpu.rdna4.gfx125x.core"), &descriptor_set));
+    loom_string_id_t helper_name = LOOM_STRING_ID_INVALID;
+    IREE_ASSERT_OK(
+        loom_builder_intern_string(&builder_, IREE_SV("helper"), &helper_name));
+    uint16_t helper_symbol = LOOM_SYMBOL_ID_INVALID;
+    IREE_ASSERT_OK(
+        loom_module_add_symbol(module_, helper_name, &helper_symbol));
+    loom_op_t* helper = nullptr;
+    IREE_ASSERT_OK(loom_low_func_def_build(
+        &builder_, LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_INLINE_POLICY, 0, 0, 0, 0,
+        LOOM_INLINE_POLICY_NOINLINE, 0, 0, descriptor_set, {}, 0, {}, {},
+        LOOM_STRING_ID_INVALID, {}, {0, helper_symbol}, nullptr, 0, nullptr, 0,
+        nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &helper));
+    call_target_ = loom_low_func_def_callee(helper);
+    loom_builder_t helper_builder;
+    loom_builder_initialize(
+        module_, &module_->arena,
+        loom_region_entry_block(loom_low_func_def_body(helper)),
+        &helper_builder);
+    loom_op_t* helper_return = nullptr;
+    IREE_ASSERT_OK(loom_low_return_build(
+        &helper_builder, nullptr, 0, LOOM_LOCATION_UNKNOWN, &helper_return));
     uint16_t symbol = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name, &symbol));
     loom_type_t argument_types[4];
@@ -161,6 +183,24 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
   void Delay() {
     AppendImmediate(LOOM_AMDGPU_DESCRIPTOR_REF_S_DELAY_ALU, IREE_SV("delay"),
                     0);
+  }
+
+  void Call() {
+    const uint32_t node_index = static_cast<uint32_t>(nodes_.size());
+    loom_op_t* call = nullptr;
+    IREE_ASSERT_OK(loom_low_func_call_build(&builder_, 0, 0, 0, call_target_,
+                                            nullptr, 0, nullptr, 0, nullptr, 0,
+                                            LOOM_LOCATION_UNKNOWN, &call));
+    loom_low_schedule_node_t node = {
+        .op = call,
+        .traits = call->traits,
+        .kind = LOOM_LOW_SCHEDULE_NODE_STRUCTURAL,
+    };
+    node.scheduled_ordinal = node_index;
+    nodes_.push_back(node);
+    call_moves_.push_back({.source_ordinal = node_index});
+    allocation_.call_moves = call_moves_.data();
+    allocation_.call_move_count = call_moves_.size();
   }
 
   void AppendImmediate(loom_amdgpu_descriptor_ref_t descriptor_ref,
@@ -459,6 +499,10 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
   std::vector<loom_low_schedule_memory_completion_edge_t> memory_completions_;
   // Descriptor counter hazards.
   std::vector<loom_low_schedule_hazard_use_t> hazards_;
+  // Empty ABI transports for retained direct-call boundary fixtures.
+  std::vector<loom_low_allocation_call_moves_t> call_moves_;
+  // Distinct zero-argument leaf helper reached by direct-call fixtures.
+  loom_symbol_ref_t call_target_ = loom_symbol_ref_null();
   // Immutable input assembled before the planner call.
   loom_low_schedule_table_t schedule_ = {};
   // Nonoverlapping physical SGPR tuples backing the function arguments.
@@ -510,6 +554,22 @@ TEST_F(AmdgpuWaitPlanTest, DependencyCompletionAlsoSatisfiesTheIssueBound) {
   Build();
   ASSERT_EQ(plan_.action_count, 1u);
   ExpectAction(0, 1, 0, LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_EFFECT);
+}
+
+TEST_F(AmdgpuWaitPlanTest, DirectCallDrainsOutstandingCounterWork) {
+  Tensor();
+  Call();
+  Build();
+  const loom_amdgpu_structural_packet_info_t structural =
+      loom_amdgpu_structural_packet_analyze(
+          &schedule_, &allocation_, /*node_index=*/1,
+          LOOM_AMDGPU_STRUCTURAL_PACKET_ANALYSIS_FLAG_REQUIRE_ALLOCATION);
+  EXPECT_TRUE(iree_any_bit_set(structural.flags,
+                               LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CALL));
+  EXPECT_EQ(structural.instruction_count, 6u);
+  EXPECT_EQ(structural.scalar_alu_instruction_count, 6u);
+  ASSERT_EQ(plan_.action_count, 1u);
+  ExpectAction(0, 1, 0, LOOM_AMDGPU_WAIT_PLAN_REASON_CALLABLE_BOUNDARY);
 }
 
 TEST_F(AmdgpuWaitPlanTest, RefinedCrossBlockMemoryOmitsDisjointWait) {

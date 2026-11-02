@@ -8,6 +8,7 @@
 
 #include "iree/base/bitfield.h"
 #include "loom/codegen/low/allocation/move_topology.h"
+#include "loom/target/arch/amdgpu/abi/call_abi.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
 static void loom_amdgpu_structural_packet_append_move_group(
@@ -105,6 +106,27 @@ loom_amdgpu_structural_packet_info_t loom_amdgpu_structural_packet_analyze(
     info.flags = LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MATERIALIZES;
     info.instruction_count = 1;
     info.vector_alu_instruction_count = 1;
+    return info;
+  }
+  if (loom_low_func_call_isa(op)) {
+    info.flags = LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MATERIALIZES |
+                 LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CALL;
+    const loom_low_allocation_call_moves_t* moves = NULL;
+    if (allocation != NULL) {
+      moves = loom_low_allocation_find_call_moves_by_source_ordinal(allocation,
+                                                                    node_index);
+      IREE_ASSERT(moves != NULL);
+      loom_amdgpu_structural_packet_append_move_group(allocation,
+                                                      &moves->arguments, &info);
+    }
+    info.instruction_count +=
+        LOOM_AMDGPU_CALL_ABI_CALL_CONTROL_INSTRUCTION_COUNT;
+    info.scalar_alu_instruction_count +=
+        LOOM_AMDGPU_CALL_ABI_CALL_CONTROL_INSTRUCTION_COUNT;
+    if (moves != NULL) {
+      loom_amdgpu_structural_packet_append_move_group(allocation,
+                                                      &moves->results, &info);
+    }
     return info;
   }
   if (loom_direct_branch_isa(op)) {
