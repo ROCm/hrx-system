@@ -17,10 +17,14 @@ class CustomBuildFileFunctions(BuildFileFunctions):
 
 
 class CustomTargetConverter(TargetConverter):
+    def _convert_unmatched_target(self, target):
+        return ["fixture::" + self._convert_to_cmake_path(target)]
+
     def _initialize(self):
         self._update_target_mappings(
             {
                 "//external:usage": ["authored_usage"],
+                "//external:suppressions": ["native_suppression_provider"],
                 "//package/producer:generator": [
                     "fixture::package::producer::generator"
                 ],

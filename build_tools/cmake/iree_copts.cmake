@@ -61,6 +61,24 @@
 #   ideally, private to that target (used in .c/cc files, not in a .h that leaks
 #   the include path requirements to all consumers of the API).
 
+# Native Ninja response files put all libraries on one physical line. MSVC
+# limits that line even when the complete command is in a response file.
+if(WIN32 AND CMAKE_GENERATOR MATCHES "^Ninja")
+  foreach(_LANGUAGE C CXX)
+    if(CMAKE_${_LANGUAGE}_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+      if(NOT Python3_EXECUTABLE)
+        message(FATAL_ERROR "MSVC-compatible Ninja links require a Python interpreter.")
+      endif()
+      # Generator expressions can expand the parent's argument list. Delimit
+      # the native command after that list instead of counting it here.
+      list(APPEND CMAKE_${_LANGUAGE}_LINKER_LAUNCHER --iree-native-linker)
+      list(PREPEND CMAKE_${_LANGUAGE}_LINKER_LAUNCHER
+        "${Python3_EXECUTABLE}" -B
+        "${CMAKE_CURRENT_LIST_DIR}/msvc_response_file.py")
+    endif()
+  endforeach()
+endif()
+
 set(IREE_CXX_STANDARD ${CMAKE_CXX_STANDARD})
 
 # Sets private language requirements on the target that owns compilation.
@@ -372,6 +390,12 @@ if(IREE_SYNCHRONIZATION_DISABLE_UNSAFE)
     ALL
       "-DIREE_SYNCHRONIZATION_DISABLE_UNSAFE=1"
   )
+endif()
+
+# Linux real-time APIs are linked only by declarations depending on :rt.
+set(IREE_RT_DEPS "")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(IREE_RT_DEPS rt)
 endif()
 
 # Find and add threads as dependency.

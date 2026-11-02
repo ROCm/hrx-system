@@ -12,21 +12,18 @@ LIBAMDF = build_requirement(
     id = "libamdf",
     label = Label("//libamdf/requirements:libamdf"),
     enabled_by = Label("//libamdf/config:enabled_setting"),
-    cmake_condition = "AMDF_BUILD",
 )
 
 LIBAMDF_GPU = build_requirement(
     id = "libamdf.gpu",
     label = Label("//libamdf/requirements:gpu"),
     enabled_by = Label("//libamdf/config/family:gpu"),
-    cmake_condition = "AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA",
 )
 
 LIBAMDF_XDNA = build_requirement(
     id = "libamdf.xdna",
     label = Label("//libamdf/requirements:xdna"),
     enabled_by = Label("//libamdf/config/family:xdna"),
-    cmake_condition = "AMDF_FAMILY_XDNA",
 )
 
 AMDGPU_RESOURCE = run_requirement(

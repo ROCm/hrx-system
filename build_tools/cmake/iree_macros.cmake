@@ -179,6 +179,25 @@ function(iree_finalize_target_dependencies)
   endforeach()
 endfunction()
 
+# File ownership is independent of whether a generated output exists yet.
+# Preserve path spelling for commands; only registry keys use native identity.
+function(_iree_generated_output_key OUTPUT_VARIABLE INPUT_PATH BASE_DIRECTORY)
+  set(_PATH "${INPUT_PATH}")
+  if(CMAKE_HOST_WIN32)
+    string(REPLACE "\\" "/" _PATH "${_PATH}")
+  endif()
+  cmake_path(ABSOLUTE_PATH _PATH BASE_DIRECTORY "${BASE_DIRECTORY}" NORMALIZE)
+  cmake_path(GET _PATH ROOT_PATH _ROOT)
+  if(NOT _PATH STREQUAL _ROOT)
+    string(REGEX REPLACE "/$" "" _PATH "${_PATH}")
+  endif()
+  if(CMAKE_HOST_WIN32)
+    string(TOLOWER "${_PATH}" _PATH)
+  endif()
+  string(SHA256 _KEY "${_PATH}")
+  set(${OUTPUT_VARIABLE} "${_KEY}" PARENT_SCOPE)
+endfunction()
+
 # Connects a generated output to a target that consumes it.
 #
 # Producers and consumers may be declared in either order because CMake
@@ -200,12 +219,9 @@ function(iree_generated_output_add_consumer INPUT_PATH CONSUMER_TARGET)
     endif()
   endif()
 
-  get_filename_component(_INPUT_PATH "${INPUT_PATH}" ABSOLUTE
-    BASE_DIR "${_IREE_PACKAGE_BINARY_DIR}")
-  cmake_path(NORMAL_PATH _INPUT_PATH)
-
   # Existing files may still have a producer, including outside the build tree.
-  string(SHA256 _INPUT_KEY "${_INPUT_PATH}")
+  _iree_generated_output_key(_INPUT_KEY "${INPUT_PATH}"
+    "${_IREE_PACKAGE_BINARY_DIR}")
   get_property(_PRODUCER_TARGET GLOBAL
     PROPERTY "IREE_GENERATED_OUTPUT_PRODUCER_${_INPUT_KEY}")
   if(DEFINED _PRODUCER_TARGET)
@@ -228,16 +244,14 @@ function(iree_register_generated_output_producer TARGET_NAME)
       "Generated output producer ${TARGET_NAME} was not found")
   endif()
   foreach(_OUTPUT IN LISTS _RULE_OUTPUTS)
-    get_filename_component(_OUTPUT_PATH "${_OUTPUT}" ABSOLUTE
-      BASE_DIR "${_IREE_PACKAGE_BINARY_DIR}")
-    cmake_path(NORMAL_PATH _OUTPUT_PATH)
-    string(SHA256 _OUTPUT_KEY "${_OUTPUT_PATH}")
+    _iree_generated_output_key(_OUTPUT_KEY "${_OUTPUT}"
+      "${_IREE_PACKAGE_BINARY_DIR}")
     get_property(_EXISTING_PRODUCER_TARGET GLOBAL
       PROPERTY "IREE_GENERATED_OUTPUT_PRODUCER_${_OUTPUT_KEY}")
     if(DEFINED _EXISTING_PRODUCER_TARGET AND
        NOT "${_EXISTING_PRODUCER_TARGET}" STREQUAL "${TARGET_NAME}")
       message(FATAL_ERROR
-        "Generated output ${_OUTPUT_PATH} has multiple producers: "
+        "Generated output ${_OUTPUT} has multiple producers: "
         "${_EXISTING_PRODUCER_TARGET} and ${TARGET_NAME}")
     endif()
     set_property(GLOBAL
@@ -380,9 +394,9 @@ function(iree_setup_c_src_root)
   endif()
 endfunction()
 
-# Authored CMake directories use their native source directory. Generated
-# package directories carry the original source explicitly; this property is
-# deliberately not inherited by authored children.
+# BUILD packages carry their source in a function variable or native directory
+# property. Authored children enter their own native scope without inheriting
+# that logical package identity.
 function(iree_package_source_dir OUTPUT_VARIABLE)
   if(DEFINED IREE_PACKAGE_SOURCE_DIR)
     set(_SOURCE_DIR "${IREE_PACKAGE_SOURCE_DIR}")
@@ -395,8 +409,8 @@ function(iree_package_source_dir OUTPUT_VARIABLE)
   set(${OUTPUT_VARIABLE} "${_SOURCE_DIR}" PARENT_SCOPE)
 endfunction()
 
-# Deferred declarations retain the owning package's binary directory without
-# modifying CMake's native directory variables.
+# Generated and deferred declarations retain their logical output directory.
+# CMake's native directory variables remain owned by its generator.
 function(iree_package_binary_dir OUTPUT_VARIABLE)
   if(DEFINED IREE_PACKAGE_BINARY_DIR)
     set(${OUTPUT_VARIABLE} "${IREE_PACKAGE_BINARY_DIR}" PARENT_SCOPE)
@@ -568,10 +582,8 @@ endfunction()
 #   base
 function(iree_package_dir PACKAGE_DIR)
   iree_package_ns(_PACKAGE_NS)
-  string(FIND "${_PACKAGE_NS}" "::" _END_OFFSET REVERSE)
-  math(EXPR _END_OFFSET "${_END_OFFSET} + 2")
-  string(SUBSTRING ${_PACKAGE_NS} ${_END_OFFSET} -1 _PACKAGE_DIR)
-  set(${PACKAGE_DIR} ${_PACKAGE_DIR} PARENT_SCOPE)
+  string(REGEX REPLACE "^.*::" "" _PACKAGE_DIR "${_PACKAGE_NS}")
+  set(${PACKAGE_DIR} "${_PACKAGE_DIR}" PARENT_SCOPE)
 endfunction()
 
 #-------------------------------------------------------------------------------
@@ -797,7 +809,8 @@ endfunction()
 # of potentially long target names.
 function(iree_add_empty_object _TARGET)
   if(NOT TARGET iree_cmake_empty_object)
-    set(_EMPTY_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/iree_empty_source.cc")
+    iree_package_binary_dir(_IREE_PACKAGE_BINARY_DIR)
+    set(_EMPTY_SOURCE "${_IREE_PACKAGE_BINARY_DIR}/iree_empty_source.cc")
     iree_make_empty_file("${_EMPTY_SOURCE}")
     add_library(iree_cmake_empty_object OBJECT "${_EMPTY_SOURCE}")
   endif()
@@ -915,7 +928,8 @@ function(iree_symlink_tool)
   iree_package_name(_PACKAGE_NAME)
   set(_TARGET "${_PACKAGE_NAME}_${_RULE_TARGET}")
   set(_FROM_TOOL_TARGET ${_RULE_FROM_TOOL_TARGET})
-  set(_TO_TOOL_PATH "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_TO_EXE_NAME}${CMAKE_EXECUTABLE_SUFFIX}")
+  iree_package_binary_dir(_IREE_PACKAGE_BINARY_DIR)
+  set(_TO_TOOL_PATH "${_IREE_PACKAGE_BINARY_DIR}/${_RULE_TO_EXE_NAME}${CMAKE_EXECUTABLE_SUFFIX}")
   get_filename_component(_TO_TOOL_DIR "${_TO_TOOL_PATH}" DIRECTORY)
   if(WIN32)
     set(_TO_TOOL_MATERIALIZATION_COMMAND
@@ -936,7 +950,7 @@ function(iree_symlink_tool)
     TARGET "${_TARGET}"
     POST_BUILD
     BYPRODUCTS
-      "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_TO_EXE_NAME}${CMAKE_EXECUTABLE_SUFFIX}"
+      "${_TO_TOOL_PATH}"
     COMMAND
       ${CMAKE_COMMAND} -E make_directory "${_TO_TOOL_DIR}"
     COMMAND

@@ -219,7 +219,7 @@ endfunction()
 # This function:
 #   1. Propagates IREE_WASM_JS_ENTRIES and IREE_WASM_JS_SRCS from deps using
 #      the same $<GENEX_EVAL:$<TARGET_PROPERTY:...>> pattern as
-#      _iree_cc_library_add_object_deps. This makes the collection fully
+#      _iree_cc_library_add_wasm_deps. This makes the collection fully
 #      order-independent — targets don't need to exist at configure time.
 #   2. Discovers the entry point from direct deps via generation-time genexes.
 #   3. Generates a manifest file via file(GENERATE) (evaluated at generation
@@ -337,6 +337,7 @@ endfunction()
 #   DEFINES: preprocessor definitions.
 #   TESTONLY: whether this is test-only.
 function(iree_wasm_cc_binary)
+  iree_package_binary_dir(_PACKAGE_BINARY_DIR)
   cmake_parse_arguments(
     _RULE
     "TESTONLY"
@@ -377,7 +378,7 @@ function(iree_wasm_cc_binary)
     target_link_libraries(${_WASM_NAME} PRIVATE ${_RULE_DEPS})
   endif()
 
-  set(_OUTPUT_MJS "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_NAME}.mjs")
+  set(_OUTPUT_MJS "${_PACKAGE_BINARY_DIR}/${_RULE_NAME}.mjs")
   _iree_wasm_setup_bundler(
     WASM_TARGET ${_WASM_NAME}
     OUTPUT "${_OUTPUT_MJS}"
@@ -395,6 +396,7 @@ endfunction()
 #
 # Parameters: same as iree_wasm_cc_binary.
 function(iree_wasm_cc_test)
+  iree_package_binary_dir(_PACKAGE_BINARY_DIR)
   cmake_parse_arguments(
     _RULE
     "TESTONLY"
@@ -407,7 +409,7 @@ function(iree_wasm_cc_test)
   iree_wasm_cc_binary(${ARGN})
 
   # Derive the output .mjs path (must match iree_wasm_cc_binary's output).
-  set(_OUTPUT_MJS "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_NAME}.mjs")
+  set(_OUTPUT_MJS "${_PACKAGE_BINARY_DIR}/${_RULE_NAME}.mjs")
 
   # Register a ctest that runs node on the bundle.
   if(_RULE_PACKAGE)

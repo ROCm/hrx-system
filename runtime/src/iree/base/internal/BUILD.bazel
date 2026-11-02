@@ -8,7 +8,6 @@
 # These are not part of the IREE API. Though they may be used by external
 # projects their API may change at any time.
 
-load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_fuzz.bzl", "iree_runtime_cc_fuzz")
@@ -408,15 +407,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
     ],
-)
-
-iree_cmake_extra_content(
-    content = """
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  target_link_libraries(iree_base_internal_shm PUBLIC rt)
-endif()
-""",
-    inline = True,
 )
 
 iree_runtime_cc_test(

@@ -33,14 +33,17 @@ set(IREE_CTEST_BUILD_TARGETS_FILE
 # generated CTest files so test runners can join CTest's selected names to the
 # corresponding build roots without relying on custom-property serialization.
 #
-# Rule owners must provide concrete, buildable target names. Targets are
-# validated after all repository directories have been processed.
+# TARGETS names concrete build roots; DEPENDENCIES and FILES retain native
+# references until all repository directories have declared their providers.
 #
 # Parameters:
 #   TEST_NAME: CTest test receiving the metadata.
 #   TARGETS: CMake targets whose transitive closure makes TEST_NAME runnable.
+#   DEPENDENCIES: Native target references to resolve to concrete build roots.
+#   FILES: Absolute runtime paths whose registered producers are build roots.
+#   RESOURCES: Runtime resource names whose aggregate includes these roots.
 function(iree_register_test_build_targets TEST_NAME)
-  cmake_parse_arguments(_RULE "" "" "TARGETS" ${ARGN})
+  cmake_parse_arguments(_RULE "" "" "TARGETS;DEPENDENCIES;FILES;RESOURCES" ${ARGN})
 
   if(NOT TEST "${TEST_NAME}")
     message(FATAL_ERROR
@@ -63,6 +66,12 @@ function(iree_register_test_build_targets TEST_NAME)
     "${TEST_NAME}")
   set_property(GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_TARGETS_${_TEST_KEY}"
     "${_BUILD_TARGETS}")
+  foreach(_FIELD DEPENDENCIES FILES RESOURCES)
+    if(NOT "${_RULE_${_FIELD}}" STREQUAL "")
+      set_property(GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_${_FIELD}_${_TEST_KEY}"
+        "${_RULE_${_FIELD}}")
+    endif()
+  endforeach()
 endfunction()
 
 # iree_register_test_resource_build_target
@@ -121,12 +130,66 @@ endfunction()
 function(iree_finalize_test_build_targets)
   get_property(_TEST_METADATA_KEYS
     GLOBAL PROPERTY IREE_TEST_BUILD_METADATA_KEYS)
+  set(_DEFAULT_ROOTS)
   foreach(_TEST_KEY IN LISTS _TEST_METADATA_KEYS)
     get_property(_TEST_NAME
       GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_NAME_${_TEST_KEY}")
     get_property(_BUILD_TARGETS
       GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_TARGETS_${_TEST_KEY}")
+    get_property(_DEPENDENCIES
+      GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_DEPENDENCIES_${_TEST_KEY}")
+    get_property(_FILES
+      GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_FILES_${_TEST_KEY}")
+    get_property(_RESOURCES
+      GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_RESOURCES_${_TEST_KEY}")
+    foreach(_FILE IN LISTS _FILES)
+      if(_FILE MATCHES "^\\$<")
+        continue()
+      endif()
+      # The producer registry is complete here. Resolve each shared input once,
+      # including paths with no producer.
+      string(SHA256 _LOOKUP_KEY "${_FILE}")
+      if(NOT DEFINED _FILE_PRODUCER_${_LOOKUP_KEY})
+        _iree_generated_output_key(_FILE_KEY "${_FILE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}")
+        get_property(_PRODUCER GLOBAL
+          PROPERTY "IREE_GENERATED_OUTPUT_PRODUCER_${_FILE_KEY}")
+        set(_FILE_PRODUCER_${_LOOKUP_KEY} "${_PRODUCER}")
+      endif()
+      list(APPEND _DEPENDENCIES ${_FILE_PRODUCER_${_LOOKUP_KEY}})
+    endforeach()
+    list(REMOVE_DUPLICATES _DEPENDENCIES)
+    set(_DEPENDENCY_ROOTS)
+    foreach(_DEPENDENCY IN LISTS _DEPENDENCIES)
+      if(NOT DEFINED _DEPENDENCY_ROOT_${_DEPENDENCY})
+        _iree_resolve_target(_ROOT "${_DEPENDENCY}")
+        if("${_ROOT}" STREQUAL "")
+          message(FATAL_ERROR
+            "CTest test ${_TEST_NAME} depends on missing target: ${_DEPENDENCY}")
+        endif()
+        get_property(_IMPORTED TARGET "${_ROOT}" PROPERTY IMPORTED)
+        if(_IMPORTED)
+          set(_ROOT "")
+        endif()
+        set(_DEPENDENCY_ROOT_${_DEPENDENCY} "${_ROOT}")
+      endif()
+      list(APPEND _DEPENDENCY_ROOTS ${_DEPENDENCY_ROOT_${_DEPENDENCY}})
+    endforeach()
+    list(APPEND _DEFAULT_ROOTS ${_DEPENDENCY_ROOTS})
+    list(APPEND _BUILD_TARGETS ${_DEPENDENCY_ROOTS})
+    list(REMOVE_DUPLICATES _BUILD_TARGETS)
+    set_property(GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_TARGETS_${_TEST_KEY}"
+      "${_BUILD_TARGETS}")
+    foreach(_RESOURCE IN LISTS _RESOURCES)
+      foreach(_ROOT IN LISTS _BUILD_TARGETS)
+        set_property(GLOBAL APPEND PROPERTY IREE_TEST_RESOURCE_BUILD_TARGETS
+          "${_RESOURCE}|${_ROOT}")
+      endforeach()
+    endforeach()
     foreach(_BUILD_TARGET IN LISTS _BUILD_TARGETS)
+      if(DEFINED _VALIDATED_ROOT_${_BUILD_TARGET})
+        continue()
+      endif()
       if(NOT TARGET "${_BUILD_TARGET}")
         message(FATAL_ERROR
           "CTest test ${_TEST_NAME} has missing IREE_BUILD_TARGETS target: "
@@ -154,8 +217,14 @@ function(iree_finalize_test_build_targets)
           "CTest test ${_TEST_NAME} has non-buildable interface library "
           "IREE_BUILD_TARGETS target: ${_BUILD_TARGET}")
       endif()
+      set(_VALIDATED_ROOT_${_BUILD_TARGET} ON)
     endforeach()
   endforeach()
+  if(NOT "${_DEFAULT_ROOTS}" STREQUAL "")
+    list(REMOVE_DUPLICATES _DEFAULT_ROOTS)
+    add_custom_target(iree-test-dependencies ALL)
+    add_dependencies(iree-test-dependencies ${_DEFAULT_ROOTS})
+  endif()
 
   _iree_collect_repository_ctests("${PROJECT_SOURCE_DIR}" _REPOSITORY_TESTS)
   foreach(_TEST_NAME IN LISTS _REPOSITORY_TESTS)
@@ -172,7 +241,7 @@ function(iree_finalize_test_build_targets)
   # Encode each entry independently instead of parsing and serializing the
   # growing catalog for every test. Publish only the completed JSON document.
   set(_CATALOG_TEMP "${IREE_CTEST_BUILD_TARGETS_FILE}.tmp")
-  file(WRITE "${_CATALOG_TEMP}"
+  string(CONCAT _CATALOG_JSON
     "{\n  \"kind\": \"ireeCtestBuildTargets\",\n  \"version\": 2,"
     "\n  \"temporaryDirectoryRoot\": \"${IREE_TEST_TMPDIR_ROOT}\","
     "\n  \"tests\": {")
@@ -198,10 +267,11 @@ function(iree_finalize_test_build_targets)
     math(EXPR _MEMBER_LENGTH "${_ENTRY_LENGTH} - 2")
     string(SUBSTRING "${_ENTRY}" 1 ${_MEMBER_LENGTH} _MEMBER)
     string(STRIP "${_MEMBER}" _MEMBER)
-    file(APPEND "${_CATALOG_TEMP}" "${_ENTRY_SEPARATOR}\n    ${_MEMBER}")
+    string(APPEND _CATALOG_JSON "${_ENTRY_SEPARATOR}\n    ${_MEMBER}")
     set(_ENTRY_SEPARATOR ",")
   endforeach()
-  file(APPEND "${_CATALOG_TEMP}" "\n  }\n}\n")
+  string(APPEND _CATALOG_JSON "\n  }\n}\n")
+  file(WRITE "${_CATALOG_TEMP}" "${_CATALOG_JSON}")
   file(RENAME "${_CATALOG_TEMP}" "${IREE_CTEST_BUILD_TARGETS_FILE}")
 
   get_property(_RESOURCE_BUILD_TARGETS
@@ -251,6 +321,9 @@ endfunction()
 # Parameters:
 #   TEST_NAME: the test name, e.g. iree/base/math_test
 function(iree_configure_test TEST_NAME)
+  if(DEFINED IREE_PACKAGE_BINARY_DIR)
+    set_property(TEST ${TEST_NAME} PROPERTY WORKING_DIRECTORY "${IREE_PACKAGE_BINARY_DIR}")
+  endif()
   set(_TEST_TMPDIR "${IREE_TEST_TMPDIR_ROOT}/${TEST_NAME}_test_tmpdir")
   set_property(GLOBAL APPEND PROPERTY IREE_TEST_TMPDIRS ${_TEST_TMPDIR})
   set_property(TEST ${TEST_NAME} APPEND PROPERTY ENVIRONMENT "TEST_TMPDIR=${_TEST_TMPDIR}")

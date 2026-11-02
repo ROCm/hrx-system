@@ -12,7 +12,6 @@ VULKAN_API = build_requirement(
     id = "vulkan.api",
     label = Label("//build_tools/vulkan/requirements:api"),
     enabled_by = Label("//build_tools/vulkan/config:available"),
-    cmake_condition = "IREE_VULKAN_AVAILABLE",
 )
 
 VULKAN_DEVICE_RESOURCE = run_requirement(

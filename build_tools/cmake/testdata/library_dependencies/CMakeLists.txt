@@ -65,7 +65,7 @@ iree_cc_library(NAME library
   SYSTEM_INCLUDES "$<1:${CMAKE_CURRENT_BINARY_DIR}/producer;${CMAKE_CURRENT_SOURCE_DIR}/inactive>")
 
 # A custom-command object models the Windows ELF loader's MASM bridge. Native
-# archives, unified libraries, and shared-tool composition must all retain it.
+# archives and shared-tool composition must both retain it.
 add_library(external OBJECT external.c)
 set(_EXTERNAL_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/external-$<CONFIG>.o")
 add_custom_command(OUTPUT "${_EXTERNAL_OBJECT}"
@@ -76,8 +76,6 @@ iree_cc_library_add_external_objects(iree_fixture_library "${_EXTERNAL_OBJECT}")
 
 iree_cc_library(NAME test_main SRCS main.c DEPS ::library)
 iree_cc_binary(NAME probe DEPS ::test_main)
-iree_cc_unified_library(NAME unified ROOT ::library)
-iree_cc_binary(NAME unified_probe SRCS main.c DEPS ::unified)
 include("${IREE_REPO_ROOT}/loom/build_tools/cmake/loomc_shared.cmake")
 _loomc_collect(iree_fixture_leaf runtime
   _OBJECTS _LIBRARIES _runtime_owned _OPTIONS)
@@ -127,7 +125,7 @@ iree_cc_test(
   DEPS ::test_main
 )
 
-# Private link requirements stay link-only when forwarded to the unified target.
+# Private link requirements stay link-only in composed shared libraries.
 add_library(private_usage INTERFACE)
 target_compile_definitions(private_usage INTERFACE PRIVATE_VALUE=7)
 get_target_property(_LIBRARY_OBJECT_TARGET iree_fixture_library IREE_CC_OBJECT_TARGET)
@@ -138,7 +136,6 @@ target_compile_definitions(${_LIBRARY_OBJECT_TARGET} PRIVATE LATE_VALUE=11)
 # interface header's consumer and the library's generated source.
 add_subdirectory(producer)
 iree_finalize_target_dependencies()
-cmake_language(DEFER CALL iree_finalize_compile_usage)
 
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/paths-$<CONFIG>.txt"
-  CONTENT "${_LIBRARY_OBJECT_TARGET}\n$<TARGET_FILE:iree_fixture_leaf>\n$<TARGET_FILE:iree_fixture_probe>\n$<TARGET_FILE:iree_fixture_unified_probe>\n$<TARGET_FILE:iree_fixture_collected_probe>\n$<TARGET_FILE:iree_fixture_runtime_tool_probe>\n$<TARGET_FILE:iree_fixture_tool_probe>\n$<TARGET_FILE:iree_fixture_source_less_test_with_a_long_target_name_matching_real_cts_binaries>\n")
+  CONTENT "${_LIBRARY_OBJECT_TARGET}\n$<TARGET_FILE:iree_fixture_leaf>\n$<TARGET_FILE:iree_fixture_probe>\n$<TARGET_FILE:iree_fixture_collected_probe>\n$<TARGET_FILE:iree_fixture_runtime_tool_probe>\n$<TARGET_FILE:iree_fixture_tool_probe>\n$<TARGET_FILE:iree_fixture_source_less_test_with_a_long_target_name_matching_real_cts_binaries>\n")

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 import unittest
@@ -22,6 +23,40 @@ FIXTURES = REPO_ROOT / "build_tools/cmake/testdata"
 
 
 class CMakeDataDependenciesTest(unittest.TestCase):
+    def test_generated_identity_survives_missing_and_existing_outputs(self):
+        with tempfile.TemporaryDirectory(prefix="cmake file identity ") as temporary:
+            root = Path(temporary)
+            source, build = root / "Source", root / "Build"
+            shutil.copytree(FIXTURES / "generated_file_identity", source)
+            output = build / "Generated/Result.txt"
+            (source / "CaseProbe").touch()
+            case_sensitive = os.name != "nt" and not (source / "caseprobe").exists()
+            configure_project(
+                source,
+                build,
+                f"-DCASE_SENSITIVE_FILESYSTEM={'ON' if case_sensitive else 'OFF'}",
+            )
+            build_project(build, "before")
+            self.assertEqual(output.read_text(), "first\n")
+            output.unlink()
+            build_project(build, "after")
+            self.assertEqual(output.read_text(), "first\n")
+            configure_project(source, build)
+            (source / "payload.txt").write_text("updated\n")
+            build_project(build, "before")
+            self.assertEqual(output.read_text(), "updated\n")
+            if case_sensitive:
+                build_project(build, "distinct_consumer")
+                self.assertEqual((build / "Generated/result.txt").read_text(), "")
+                self.assertEqual(output.read_text(), "updated\n")
+            diagnostic = configure_project(
+                source, build, "-DDUPLICATE_PRODUCER=ON", expect_failure=True
+            )
+            self.assertIn(
+                "has multiple producers: producer and duplicate",
+                " ".join(diagnostic.split()),
+            )
+
     def test_shared_staged_data_stays_fresh(self):
         with tempfile.TemporaryDirectory(prefix="cmake staged data ") as temporary:
             root = Path(temporary)

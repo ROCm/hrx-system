@@ -6,16 +6,55 @@
 
 """Bazel-to-CMake conversion for Loom corpus rules."""
 
+import re
+from collections import defaultdict
+from dataclasses import dataclass, field
+from pathlib import Path
+
 import bazel_to_cmake_requirements
+from conditions import Option, all_of, any_of
+from native_cc import arguments, command
+
+
+@dataclass
+class Corpus:
+    # Source-owned test module aliases, indexed by semantic program identity.
+    modules: dict[str, tuple[str, str]] = field(default_factory=dict)
+    # Manifest owners establish the exhaustive inventory before consumers emit.
+    manifests: dict[str, str] = field(default_factory=dict)
+
+    def programs(self, catalog):
+        for manifest in catalog["manifests"]:
+            if self.manifests.get(manifest["name"]) != manifest["package"]:
+                raise ValueError(f"Unknown Loom corpus manifest: {manifest['name']}")
+        result = catalog["programs"]
+        seen = set()
+        for program in result:
+            identity = program["identity"]
+            if identity in seen:
+                raise ValueError(f"Duplicate Loom corpus source: {identity}")
+            seen.add(identity)
+            if identity not in self.modules:
+                raise ValueError(
+                    f"Loom corpus source has no owning declaration: {identity}"
+                )
+        return result
 
 
 class LoomCorpusBuildFileFunctions:
     """Converts target-neutral catalogs and target-owned corpus rules."""
 
-    def _loom_target_identity_label(self, target):
-        if target.startswith("@"):
-            return target
-        return self._canonical_location_label(target)
+    @property
+    def _corpus(self):
+        if "loom.corpus" not in self._declarations:
+            self._declarations["loom.corpus"] = Corpus()
+        return self._declarations["loom.corpus"]
+
+    def _corpus_guard(self, predicate, text):
+        if self._configuration is not None:
+            return text if predicate.evaluate(self._configuration) else ""
+        rendered = predicate.render()
+        return f"if({rendered})\n{text}endif()\n" if rendered else text
 
     @staticmethod
     def _loom_corpus_target_stem(value):
@@ -163,6 +202,10 @@ class LoomCorpusBuildFileFunctions:
             raise ValueError(f"{name} does not reference a Loom corpus manifest")
         current_package = "//" + self._current_package()
         manifest_package = manifest["package"]
+        if current_package == manifest_package:
+            if manifest["name"] in self._corpus.manifests:
+                raise ValueError(f"Duplicate Loom corpus manifest: {manifest['name']}")
+            self._corpus.manifests[manifest["name"]] = manifest_package
         if current_package != manifest_package and not current_package.startswith(
             manifest_package + "/"
         ):
@@ -192,27 +235,45 @@ class LoomCorpusBuildFileFunctions:
                 for program in filegroup_programs
             ],
         )
-        self._converter.body += (
-            "loom_corpus_sources(\n"
-            + self._convert_string_arg_block("NAME", name)
-            + self._convert_string_arg_block("MANIFEST", manifest["name"])
-            + self._convert_string_list_block(
-                "MANIFEST_SRCS",
-                manifest["srcs"] if current_package == manifest_package else None,
-                sort=False,
+        if self._configuration is not None:
+            inventory = sorted(
+                path.name for path in Path(self._build_dir).glob("*.loom")
             )
-            + self._convert_string_list_block(
-                "SOURCE_IDS",
-                [program["source"] for program in local_programs] or None,
-                sort=False,
-            )
-            + self._convert_string_list_block(
-                "SRCS",
-                [program["source_name"] for program in local_programs] or None,
-                sort=False,
-            )
-            + ")\n\n"
+            declared = sorted(program["source_name"] for program in local_programs)
+            if inventory != declared:
+                raise ValueError(
+                    f"Loom corpus {current_package} inventory differs: "
+                    f"declared {declared}, found {inventory}"
+                )
+        # Native regeneration observes additions/removals; source evaluation
+        # owns the inventory and validates it before emitting any products.
+        self._converter.body += command(
+            "file",
+            "GLOB _LOOM_CORPUS_INVENTORY CONFIGURE_DEPENDS",
+            '"${_IREE_PACKAGE_SOURCE_DIR}/*.loom"',
         )
+        for program in local_programs:
+            identity = program["identity"]
+            if identity in self._corpus.modules:
+                raise ValueError(f"Duplicate Loom corpus source: {identity}")
+            target = self._convert_single_target(
+                self._current_target_label(program["target_name"])
+            ).replace("::", "_")
+            module = (
+                "${IREE_BINARY_DIR}/"
+                + self._current_package()
+                + "/"
+                + program["target_name"]
+                + ".loombc"
+            )
+            self._corpus.modules[identity] = (target, module)
+            self._converter.body += command(
+                "loom_test_module",
+                "NAME",
+                arguments((program["target_name"],)),
+                "SRCS",
+                arguments((program["source_name"],)),
+            )
 
     def loom_corpus_build(
         self,
@@ -231,80 +292,307 @@ class LoomCorpusBuildFileFunctions:
         if catalog["kind"] != "loom_corpus_catalog":
             raise ValueError(f"{name} does not reference a Loom corpus catalog")
 
-        manifest_names = [manifest["name"] for manifest in catalog["manifests"]]
-
-        xfail_values = []
-        for target in sorted(xfails or {}):
-            converted_targets = self._convert_target(
-                self._loom_target_identity_label(target)
+        self._converter.defer(
+            lambda: self._render_corpus_build(
+                name,
+                catalog,
+                profiles,
+                xfails or {},
+                all_roots_xfail or {},
+                excludes or {},
             )
-            if len(converted_targets) != 1:
-                raise NotImplementedError(f"loom_corpus_build xfail target: {target}")
-            for identity in sorted(xfails[target]):
-                source, separator, root = identity.partition(":@")
-                if not separator:
-                    raise ValueError(
-                        "loom_corpus_build xfail identity must use "
-                        f"'<source>:@<root>': {identity}"
-                    )
-                xfail_values.extend(
-                    [
-                        converted_targets[0],
-                        source,
-                        "@" + root,
-                        xfails[target][identity],
-                    ]
-                )
-
-        all_roots_xfail_values = []
-        for target in sorted(all_roots_xfail or {}):
-            converted_targets = self._convert_target(
-                self._loom_target_identity_label(target)
-            )
-            if len(converted_targets) != 1:
-                raise NotImplementedError(
-                    f"loom_corpus_build all-roots xfail target: {target}"
-                )
-            for source in sorted(all_roots_xfail[target]):
-                all_roots_xfail_values.extend([converted_targets[0], source])
-
-        exclude_values = []
-        for target in sorted(excludes or {}):
-            converted_targets = self._convert_target(
-                self._loom_target_identity_label(target)
-            )
-            if len(converted_targets) != 1:
-                raise NotImplementedError(
-                    f"loom_corpus_build exclusion target: {target}"
-                )
-            for source in sorted(excludes[target]):
-                exclude_values.extend(
-                    [
-                        converted_targets[0],
-                        source,
-                        excludes[target][source],
-                    ]
-                )
-
-        self._converter.body += (
-            "loom_corpus_build(\n"
-            + self._convert_string_arg_block("NAME", name)
-            + self._convert_string_list_block("MANIFESTS", manifest_names, sort=False)
-            + self._convert_target_list_block(
-                "PROFILES",
-                [self._loom_target_identity_label(profile) for profile in profiles],
-            )
-            + self._convert_string_list_block(
-                "XFAILS", xfail_values or None, sort=False
-            )
-            + self._convert_string_list_block(
-                "ALL_ROOTS_XFAIL", all_roots_xfail_values or None, sort=False
-            )
-            + self._convert_string_list_block(
-                "EXCLUDES", exclude_values or None, sort=False
-            )
-            + ")\n\n"
         )
+
+    def _render_corpus_build(
+        self, name, catalog, profiles, xfails, all_roots_xfail, excludes
+    ):
+        if self._configuration is None:
+            raise ValueError(
+                "Resolved corpus products need the native configuration; pass "
+                "--configuration <build>/.iree/configuration.json when previewing"
+            )
+        programs = self._corpus.programs(catalog)
+        identities = {program["identity"] for program in programs}
+        selected = {}
+        for reference in sorted(profiles):
+            for profile, predicate in self._loom_profiles.expand(
+                self._canonical_location_label(reference)
+            ).items():
+                selected[profile] = (
+                    any_of(selected[profile], predicate)
+                    if profile in selected
+                    else predicate
+                )
+        stems = {
+            profile: re.sub(
+                r"[:/+.]", "-", self._loom_profiles.profiles[profile].compiler
+            )
+            for profile in selected
+        }
+        if len(stems) != len(set(stems.values())):
+            raise ValueError(
+                f"Loom corpus {name} has colliding compiler output identities"
+            )
+        available = [
+            profile
+            for profile, predicate in selected.items()
+            if predicate.evaluate(self._configuration)
+            and self._loom_profiles.profiles[profile].available.evaluate(
+                self._configuration
+            )
+        ]
+
+        def qualifications(entries, *, roots=False):
+            for reference, sources in sorted(entries.items()):
+                members = self._loom_profiles.expand(
+                    self._canonical_location_label(reference)
+                )
+                for identity in sorted(sources):
+                    source, separator, root = (
+                        identity.partition(":@") if roots else (identity, "", "")
+                    )
+                    if source not in identities:
+                        raise ValueError(
+                            f"Loom corpus {name} qualifies unknown source {source}"
+                        )
+                    if roots and not separator:
+                        raise ValueError(
+                            f"Loom corpus xfail must use '<source>:@<root>': {identity}"
+                        )
+                    for profile, member_condition in members.items():
+                        predicate = all_of(
+                            member_condition,
+                            self._loom_profiles.profiles[profile].available,
+                        )
+                        if not predicate.evaluate(self._configuration):
+                            continue
+                        if profile not in available:
+                            raise ValueError(
+                                f"Loom corpus {name} qualifies unselected profile {profile}"
+                            )
+                        yield (
+                            profile,
+                            source,
+                            "@" + root if roots else None,
+                            sources[identity] if isinstance(sources, dict) else None,
+                        )
+
+        failures = defaultdict(dict)
+        for profile, source, root, diagnostic in qualifications(xfails, roots=True):
+            previous = failures[profile, source]
+            if not diagnostic or root in previous:
+                raise ValueError(
+                    f"Loom corpus {name} has empty or duplicate xfail {source}:{root} on {profile}"
+                )
+            previous[root] = diagnostic
+        all_failed = set()
+        for profile, source, _, _ in qualifications(all_roots_xfail):
+            key = profile, source
+            if key in all_failed or not failures[key]:
+                raise ValueError(
+                    f"Loom corpus {name} all-roots qualification requires unique diagnostic xfails: {key}"
+                )
+            all_failed.add(key)
+        excluded = set()
+        for profile, source, _, reason in qualifications(excludes):
+            key = profile, source
+            if not reason or key in excluded or failures[key]:
+                raise ValueError(
+                    f"Loom corpus {name} has empty, duplicate, or conflicting exclusion: {key}"
+                )
+            excluded.add(key)
+
+        package = (
+            self._convert_single_target(self._current_target_label(name))
+            .rsplit("::", 1)[0]
+            .replace("::", "_")
+        )
+        binary = "${IREE_BINARY_DIR}/" + self._current_package()
+        lines = [
+            "block(SCOPE_FOR VARIABLES)\nset(CMAKE_ADD_CUSTOM_COMMAND_DEPENDS_EXPLICIT_ONLY ON)\n"
+        ]
+        if available:
+            lines.append(command("_loom_host_tool", "_LOOM_CORPUS_LINK_TOOL loom-link"))
+        semantics = defaultdict(lambda: defaultdict(list))
+        semantic_targets = defaultdict(list)
+        # Ninja exposes file outputs as build entry points. Recursive/IDE
+        # generators need native per-program targets to retain narrow builds.
+        file_targets = self._configuration["CMAKE_GENERATOR"].startswith("Ninja")
+        aggregate = defaultdict(list)
+        output_kinds = ("ARTIFACTS", "COMPILE_REPORTS", "XFAIL_RESULTS")
+
+        def properties(target, outputs):
+            return command(
+                "set_target_properties",
+                target,
+                "PROPERTIES",
+                *(
+                    "LOOM_CORPUS_" + kind + " " + arguments((";".join(outputs[kind]),))
+                    for kind in output_kinds
+                ),
+            )
+
+        def action(outputs, tool, args, dependencies, description, directory):
+            return command(
+                "add_custom_command",
+                "OUTPUT",
+                arguments(outputs),
+                "COMMAND",
+                '"${CMAKE_COMMAND}" -E make_directory',
+                arguments((directory,)),
+                "COMMAND",
+                arguments(("$<TARGET_FILE:" + tool + ">", *args)),
+                "DEPENDS",
+                arguments(dependencies),
+                "WORKING_DIRECTORY",
+                '"${IREE_BINARY_DIR}"',
+                "COMMENT",
+                arguments((description,)),
+                "VERBATIM",
+            )
+
+        for program in programs:
+            identity, stem = program["identity"], program["target_name"]
+            semantic = program["manifest"]
+            outputs = defaultdict(list)
+            directory = binary + "/" + stem
+            subject = binary + "/" + stem + "_subjects.loombc"
+            active = [
+                profile for profile in available if (profile, identity) not in excluded
+            ]
+            if active:
+                source = (
+                    "${IREE_SOURCE_DIR}/"
+                    + program["package"][2:]
+                    + "/"
+                    + program["source_name"]
+                )
+                lines.append(
+                    command(
+                        "add_custom_command",
+                        "OUTPUT",
+                        arguments((subject,)),
+                        "COMMAND",
+                        arguments(
+                            (
+                                "${_LOOM_CORPUS_LINK_TOOL}",
+                                "--mode=link",
+                                "--to=bc",
+                                source,
+                                "--include-input-tests",
+                                "--strip-check=true",
+                                "--output=" + subject,
+                            )
+                        ),
+                        "DEPENDS",
+                        arguments(("${_LOOM_CORPUS_LINK_TOOL}", source)),
+                        'WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"',
+                        "COMMENT",
+                        arguments(
+                            ("Linking Loom module " + stem + "_subjects.loombc",)
+                        ),
+                        "VERBATIM",
+                    )
+                )
+            for profile in active:
+                compiler = self._loom_profiles.profiles[profile].compiler
+                prefix = directory + "/" + stems[profile]
+                diagnostics = failures[profile, identity]
+                require_all = (profile, identity) in all_failed
+                if not require_all:
+                    artifact, report = prefix + ".artifact", prefix + ".compile.json"
+                    lines.append(
+                        action(
+                            (artifact, report),
+                            "loom::tools::loom-compile",
+                            (
+                                subject,
+                                "--target=" + compiler,
+                                *("--exclude-root=" + root for root in diagnostics),
+                                "--output=" + artifact,
+                                "--compile-report=details",
+                                "--compile-report-output=" + report,
+                            ),
+                            ("loom::tools::loom-compile", subject),
+                            f"Compiling corpus program {identity} for {compiler}",
+                            directory,
+                        )
+                    )
+                    outputs["ARTIFACTS"].append(artifact)
+                    outputs["COMPILE_REPORTS"].append(report)
+                if diagnostics:
+                    stamp = prefix + ".xfails"
+                    args = [
+                        "--compiler=$<TARGET_FILE:loom::tools::loom-compile>",
+                        "--stamp-output=" + stamp,
+                    ]
+                    if require_all:
+                        args.append("--require-all-roots")
+                    for root, diagnostic in diagnostics.items():
+                        args.extend(
+                            (
+                                "--expected-root=" + root,
+                                "--expected-diagnostic=" + diagnostic,
+                            )
+                        )
+                    args.extend((subject, "--target=" + compiler))
+                    probe = "loom::build_tools::corpus::loom-corpus-compile-xfails"
+                    lines.append(
+                        action(
+                            (stamp,),
+                            probe,
+                            args,
+                            (probe, "loom::tools::loom-compile", subject),
+                            f"Probing corpus diagnostic xfails in {identity} for {compiler}",
+                            directory,
+                        )
+                    )
+                    outputs["XFAIL_RESULTS"].append(stamp)
+            if not file_targets:
+                target = package + "_" + stem
+                lines.append(
+                    command(
+                        "add_custom_target",
+                        target,
+                        "SOURCES",
+                        arguments(
+                            [value for kind in output_kinds for value in outputs[kind]]
+                        ),
+                    )
+                )
+                lines.append(properties(target, outputs))
+                semantic_targets[semantic].append(target)
+            for kind in output_kinds:
+                semantics[semantic][kind].extend(outputs[kind])
+        for semantic, outputs in semantics.items():
+            target = package + "_" + semantic
+            lines.append(
+                command(
+                    "add_custom_target",
+                    target,
+                    "DEPENDS",
+                    arguments(
+                        [value for kind in output_kinds for value in outputs[kind]]
+                        if file_targets
+                        else semantic_targets[semantic]
+                    ),
+                )
+            )
+            lines.append(properties(target, outputs))
+            for kind in output_kinds:
+                aggregate[kind].extend(outputs[kind])
+        target = package + "_" + name
+        lines.append(
+            command(
+                "add_custom_target",
+                target,
+                "DEPENDS",
+                " ".join(package + "_" + semantic for semantic in semantics),
+            )
+        )
+        lines.append(properties(target, aggregate))
+        lines.append("endblock()\n")
+        return "".join(lines)
 
     def loom_corpus_test(
         self,
@@ -413,76 +701,14 @@ class LoomCorpusBuildFileFunctions:
                         f"xfailed and allowed to fail for profile {profile_name}"
                     )
         del size, visibility
-        manifest_names = [manifest["name"] for manifest in catalog["manifests"]]
-
-        target_compatible_with = self._apply_loom_target_compatible_with(
-            target_compatible_with
-        )
         execution_names = set()
         for profile in execution_profiles:
-            if profile.kind != "loom_execution_profile":
-                raise ValueError(
-                    f"{name} execution profile was not created by "
-                    "loom_execution_profile"
-                )
-            profile_suffix = self._loom_test_name_suffix(profile.name)
-            if profile_suffix in execution_names:
+            suffix = self._loom_test_name_suffix(profile.name)
+            if suffix in execution_names:
                 raise ValueError(
                     f"{name} has colliding execution profiles: {profile.name}"
                 )
-            execution_names.add(profile_suffix)
-
-            profile_excludes = dict(excluded_sources)
-            selected_sources = profile_sources.get(profile.name)
-            profile_exclude_values = []
-            for source_identity in sorted(profile_excludes):
-                profile_exclude_values.extend(
-                    [source_identity, profile_excludes[source_identity]]
-                )
-            profile_xfail_values = []
-            for source_identity in sorted(
-                xfails_by_profile_and_source.get(profile.name, {})
-            ):
-                source_xfails = xfails_by_profile_and_source[profile.name][
-                    source_identity
-                ]
-                for record in sorted(source_xfails):
-                    profile_xfail_values.extend(
-                        [source_identity, record, source_xfails[record]]
-                    )
-            profile_allowed_failure_values = []
-            for source_identity in sorted(
-                allowed_failures_by_profile_and_source.get(profile.name, {})
-            ):
-                source_allowed_failures = allowed_failures_by_profile_and_source[
-                    profile.name
-                ][source_identity]
-                for record in sorted(source_allowed_failures):
-                    profile_allowed_failure_values.extend(
-                        [
-                            source_identity,
-                            record,
-                            source_allowed_failures[record],
-                        ]
-                    )
-            profile_config_values = []
-            for program in catalog["programs"]:
-                source_identity = program["identity"]
-                if source_identity in excluded_sources:
-                    continue
-                if (
-                    selected_sources is not None
-                    and source_identity not in selected_sources
-                ):
-                    continue
-                for symbol in sorted(program["configs"]):
-                    profile_config_values.extend(
-                        [
-                            source_identity,
-                            f"{symbol}={program['configs'][symbol]}",
-                        ]
-                    )
-
+            execution_names.add(suffix)
             policy = bazel_to_cmake_requirements.CollectedPackagePolicy(
                 build_requirements=profile.build_requirements,
                 run_requirements=profile.run_requirements,
@@ -498,50 +724,86 @@ class LoomCorpusBuildFileFunctions:
                     "loom-executor=" + profile.executor,
                 ]
             )
-            requirements = bazel_to_cmake_requirements.append_cmake_conditions(
-                target_compatible_with,
-                policy.cmake_conditions(),
+            requirements = bazel_to_cmake_requirements.append_conditions(
+                self._apply_loom_target_compatible_with(target_compatible_with),
+                policy.conditions(),
             )
-            condition = self._target_compatible_condition(requirements)
-            self._converter.body += (
-                "loom_corpus_test(\n"
-                + self._convert_string_arg_block("NAME", name)
-                + self._convert_string_arg_block("PROFILE", profile.name)
-                + self._convert_string_list_block(
-                    "MANIFESTS", manifest_names, sort=False
-                )
-                + self._convert_string_list_block(
-                    "SOURCES", selected_sources, sort=False
-                )
-                + self._convert_string_list_block(
-                    "EXCLUDES", profile_exclude_values or None, sort=False
-                )
-                + self._convert_string_list_block(
-                    "XFAILS", profile_xfail_values or None, sort=False
-                )
-                + self._convert_string_list_block(
-                    "ALLOWED_FAILURES",
-                    profile_allowed_failure_values or None,
-                    sort=False,
-                )
-                + self._convert_string_list_block(
-                    "CONFIGS", profile_config_values or None, sort=False
-                )
-                + self._convert_string_list_block(
-                    "ARGS", self._convert_test_location_args(args), sort=False
-                )
-                + self._convert_string_list_block(
-                    "RUNNER_ARGS",
-                    self._convert_test_location_args(profile.runner_args),
-                    sort=False,
-                )
-                + self._convert_string_list_block("LABELS", labels, sort=False)
-                + self._convert_string_arg_block(
-                    "RESOURCE_GROUP", policy.resource_group
-                )
-                + (f"  REQUIRES\n    {condition}\n" if condition else "")
-                + ")\n\n"
+            predicate = all_of(
+                Option("IREE_BUILD_TESTS"), self._loom_profile_condition(requirements)
             )
+            self._converter.defer(
+                lambda profile=profile, labels=labels, predicate=predicate, suffix=suffix, policy=policy: (
+                    self._render_corpus_execution(
+                        catalog,
+                        profile,
+                        suffix,
+                        labels,
+                        predicate,
+                        policy.resource_group,
+                        excluded_sources,
+                        profile_sources.get(profile.name),
+                        xfails_by_profile_and_source.get(profile.name, {}),
+                        allowed_failures_by_profile_and_source.get(profile.name, {}),
+                        args,
+                    )
+                )
+            )
+
+    def _render_corpus_execution(
+        self,
+        catalog,
+        profile,
+        suffix,
+        labels,
+        predicate,
+        resource_group,
+        excludes,
+        selected,
+        xfails,
+        allowed_failures,
+        args,
+    ):
+        lines = []
+        for program in self._corpus.programs(catalog):
+            identity = program["identity"]
+            if identity in excludes or (
+                selected is not None and identity not in selected
+            ):
+                continue
+            target, module = self._corpus.modules[identity]
+            name = program["target_name"] + "_test_execute_" + suffix + "_test"
+            runner_args = list(profile.runner_args or [])
+            for qualifications, flag in (
+                (xfails, "--xfail"),
+                (allowed_failures, "--allow-failure"),
+            ):
+                runner_args.extend(
+                    flag + "=" + record + "=" + diagnostic
+                    for record, diagnostic in sorted(
+                        qualifications.get(identity, {}).items()
+                    )
+                )
+            configurations = [
+                "--config=" + symbol + "=" + value
+                for symbol, value in sorted(program["configs"].items())
+            ]
+            lines.append(
+                self._native_test(
+                    name,
+                    "loom::tools::loom-test",
+                    args=[
+                        "{{" + module + "}}",
+                        *(self._convert_test_location_args(runner_args) or []),
+                        *configurations,
+                        *(self._convert_test_location_args(args) or []),
+                    ],
+                    labels=labels,
+                    resource_group=resource_group,
+                    working_directory="${IREE_BINARY_DIR}",
+                    dependencies=(target,),
+                )
+            )
+        return self._corpus_guard(predicate, "".join(lines))
 
     def loom_scenario_test(self, catalog, **kwargs):
         kwargs["catalog"] = catalog

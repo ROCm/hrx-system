@@ -16,56 +16,48 @@ HAL_AMDGPU = build_requirement(
     id = "runtime.hal.amdgpu",
     label = Label("//runtime/requirements:hal_amdgpu"),
     enabled_by = Label("//runtime/config/hal:driver_amdgpu"),
-    cmake_condition = "IREE_HAL_DRIVER_AMDGPU",
 )
 
 HAL_EXECUTABLE_LOADER_EMBEDDED_ELF = build_requirement(
     id = "runtime.hal.executable_loader.embedded_elf",
     label = Label("//runtime/requirements:hal_executable_loader_embedded_elf"),
     enabled_by = Label("//runtime/config/hal:executable_loader_embedded_elf"),
-    cmake_condition = "IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF",
 )
 
 HAL_TASK = build_requirement(
     id = "runtime.hal.task",
     label = Label("//runtime/requirements:hal_task"),
     enabled_by = Label("//runtime/config/hal:driver_task"),
-    cmake_condition = "IREE_HAL_DRIVER_TASK",
 )
 
 HAL_VULKAN = build_requirement(
     id = "runtime.hal.vulkan",
     label = Label("//runtime/requirements:hal_vulkan"),
     enabled_by = Label("//runtime/config/hal:driver_vulkan"),
-    cmake_condition = "IREE_HAL_DRIVER_VULKAN",
 )
 
 HAL_WEBGPU = build_requirement(
     id = "runtime.hal.webgpu",
     label = Label("//runtime/requirements:hal_webgpu"),
     enabled_by = Label("//runtime/config/hal:driver_webgpu"),
-    cmake_condition = "IREE_HAL_DRIVER_WEBGPU",
 )
 
 HAL_AMD = build_requirement(
     id = "runtime.hal.amd",
     label = Label("//runtime/requirements:hal_amd"),
     enabled_by = Label("//runtime/config/hal:driver_amd"),
-    cmake_condition = "IREE_HAL_DRIVER_AMD_GPU OR IREE_HAL_DRIVER_AMD_XDNA",
 )
 
 HAL_AMD_GPU = build_requirement(
     id = "runtime.hal.amd_gpu",
     label = Label("//runtime/requirements:hal_amd_gpu"),
     enabled_by = Label("//runtime/config/hal:driver_amd_gpu"),
-    cmake_condition = "IREE_HAL_DRIVER_AMD_GPU",
 )
 
 HAL_AMD_XDNA = build_requirement(
     id = "runtime.hal.amd_xdna",
     label = Label("//runtime/requirements:hal_amd_xdna"),
     enabled_by = Label("//runtime/config/hal:driver_amd_xdna"),
-    cmake_condition = "IREE_HAL_DRIVER_AMD_XDNA",
 )
 
 AMDGPU_RESOURCE = run_requirement(

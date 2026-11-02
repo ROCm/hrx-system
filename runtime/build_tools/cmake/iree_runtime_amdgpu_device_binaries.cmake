@@ -9,6 +9,7 @@ include_guard(GLOBAL)
 include(selectors)
 
 function(_iree_hal_amdgpu_source_generator_args out_args device_binary_targets_arg)
+  iree_package_binary_dir(_PACKAGE_BINARY_DIR)
   if(NOT IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_AVAILABLE)
     message(FATAL_ERROR
       "AMDGPU builtin device binary source mode requires the configured "
@@ -26,7 +27,7 @@ function(_iree_hal_amdgpu_source_generator_args out_args device_binary_targets_a
     "--binary-root"
     "${IREE_BINARY_DIR}"
     "--output-dir"
-    "${CMAKE_CURRENT_BINARY_DIR}"
+    "${_PACKAGE_BINARY_DIR}"
     "--device-binary-targets"
     "${device_binary_targets_arg}"
     "--clang"
@@ -44,6 +45,7 @@ function(_iree_hal_amdgpu_source_generator_args out_args device_binary_targets_a
 endfunction()
 
 function(iree_hal_amdgpu_source_device_binaries)
+  iree_package_binary_dir(_PACKAGE_BINARY_DIR)
   if(NOT IREE_HAL_DRIVER_AMDGPU OR
      NOT IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE STREQUAL "source")
     return()
@@ -55,7 +57,7 @@ function(iree_hal_amdgpu_source_device_binaries)
   _iree_hal_amdgpu_source_generator_args(_COMMAND "${_TARGETS_ARG}")
   set(_OUTPUTS)
   foreach(_ARCH IN LISTS _TARGETS)
-    list(APPEND _OUTPUTS "${CMAKE_CURRENT_BINARY_DIR}/amdgcn-amd-amdhsa--${_ARCH}.so")
+    list(APPEND _OUTPUTS "${_PACKAGE_BINARY_DIR}/amdgcn-amd-amdhsa--${_ARCH}.so")
   endforeach()
   add_custom_command(OUTPUT ${_OUTPUTS}
     COMMAND ${_COMMAND}
@@ -74,6 +76,7 @@ function(iree_hal_amdgpu_device_binaries)
   iree_amdgpu_expand_target_selectors(_TARGETS
     "${IREE_AMDGPU_TARGET_EXPANSION_DEVICE_BINARY}" ${_RULE_TARGETS})
   iree_package_source_dir(_SOURCE_DIR)
+  iree_package_binary_dir(_PACKAGE_BINARY_DIR)
   set(_BINARIES)
   foreach(_ARCH IN LISTS _TARGETS)
     set(_FILENAME "${_RULE_TARGET}--${_ARCH}.so")
@@ -85,7 +88,7 @@ function(iree_hal_amdgpu_device_binaries)
           "Use -DIREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE=source or regenerate the blob.")
       endif()
     else()
-      set(_BINARY "${CMAKE_CURRENT_BINARY_DIR}/source/${_FILENAME}")
+      set(_BINARY "${_PACKAGE_BINARY_DIR}/source/${_FILENAME}")
     endif()
     list(APPEND _BINARIES "${_BINARY}")
   endforeach()

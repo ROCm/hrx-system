@@ -6,6 +6,14 @@
 
 cmake_minimum_required(VERSION 3.26...4.2)
 
+# Resolve this environment setting once instead of querying it for every CMake
+# command. Preserve caller-provided variables and CMake's default for empty or
+# invalid values. The environment setting was introduced in CMake 3.27.
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.27 AND
+   NOT DEFINED CMAKE_MAXIMUM_RECURSION_DEPTH)
+  set(CMAKE_MAXIMUM_RECURSION_DEPTH "$ENV{CMAKE_MAXIMUM_RECURSION_DEPTH}")
+endif()
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # HRX is the top-level build/product. The runtime subtree is still the IREE
@@ -148,7 +156,6 @@ include(iree_spirv_asm_module)
 include(iree_spirv_registry_sources)
 include(iree_add_all_subdirs)
 include(iree_generated_cmake)
-iree_generate_cmake()
 include(iree_configure_testing)
 include(iree_native_test)
 include(iree_execution_test_suite)
@@ -233,6 +240,7 @@ endif()
 iree_runtime_configure_project()
 libhrx_configure_project()
 loom_configure_project()
+iree_generate_cmake()
 
 message(STATUS "HRX/IREE HAL drivers:")
 if(IREE_HAL_DRIVER_AMDGPU)
@@ -267,7 +275,6 @@ if(LOOM_BUILD)
   include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_module.cmake")
   include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_test.cmake")
   include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_check.cmake")
-  include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_corpus.cmake")
   iree_add_subdirectory(loom/target)
   iree_add_subdirectory(loom/py/loom)
   iree_add_subdirectory(loom/src)
@@ -291,7 +298,6 @@ if(IREE_CMAKE_TRY_FILE)
 endif()
 
 if(LOOM_BUILD)
-  loom_finalize_corpus()
   loom_finalize_module_libraries()
   loom_finalize_check_compile_tests()
   loom_finalize_execution_tests()
@@ -307,4 +313,3 @@ endif()
 
 # Register after callbacks that create targets, including Windows Python sources.
 cmake_language(DEFER CALL iree_write_target_map)
-cmake_language(DEFER CALL iree_finalize_compile_usage)

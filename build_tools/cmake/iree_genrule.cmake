@@ -24,6 +24,7 @@
 #              the default working dir for custom commands anyway.
 function(iree_genrule)
   iree_package_source_dir(_IREE_PACKAGE_SOURCE_DIR)
+  iree_package_binary_dir(_IREE_PACKAGE_BINARY_DIR)
   cmake_parse_arguments(
     _RULE
     ""
@@ -75,22 +76,28 @@ function(iree_genrule)
   string(REGEX REPLACE "([^\\]) " "\\1;" _CMD "${_CMD}")
 
   iree_resolve_source_files(_RULE_SRCS ${_RULE_SRCS})
+  set(_OUTPUTS)
+  foreach(_OUTPUT IN LISTS _RULE_OUTS)
+    cmake_path(ABSOLUTE_PATH _OUTPUT BASE_DIRECTORY "${_IREE_PACKAGE_BINARY_DIR}")
+    list(APPEND _OUTPUTS "${_OUTPUT}")
+  endforeach()
   add_custom_command(
     OUTPUT
-      ${_RULE_OUTS}
+      ${_OUTPUTS}
     COMMAND
       ${_CMD}
     DEPENDS
       ${_RULE_SRCS}
     COMMENT
       "Generating ${_RULE_OUTS}"
+    WORKING_DIRECTORY "${_IREE_PACKAGE_BINARY_DIR}"
     VERBATIM
   )
 
   add_custom_target("${_RULE_NAME}"
-    DEPENDS ${_RULE_OUTS}
+    DEPENDS ${_OUTPUTS}
   )
   iree_register_generated_compile_input("${_RULE_NAME}"
-    OUTPUTS ${_RULE_OUTS}
+    OUTPUTS ${_OUTPUTS}
   )
 endfunction()

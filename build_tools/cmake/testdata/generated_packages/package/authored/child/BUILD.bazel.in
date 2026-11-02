@@ -5,9 +5,15 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+cc_library(
+    name = "requirements",
+    deps = ["//external:usage"],
+)
 
 cc_binary(
     name = "probe",
     srcs = ["main.c"],
-    deps = ["//external:usage"],
+    deps = [":requirements"],
 )

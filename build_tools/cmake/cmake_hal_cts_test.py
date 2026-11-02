@@ -40,18 +40,19 @@ class CMakeHalCtsTest(unittest.TestCase):
                 build_project(build, "iree_hal_drivers_amd_gpu_cts_probe")
                 probe = (build / f"probe-{CONFIGURATION}.txt").read_text().strip()
                 run_command(probe, str(target_count))
-                self.assertEqual(len(list(build.glob("*_source_*.loombc"))), 3)
+                products = build / "cts"
+                self.assertEqual(len(list(products.glob("*_source_*.loombc"))), 3)
                 self.assertEqual(
-                    len(list(build.glob("*_corpus_*/*.bin"))), 3 * target_count
+                    len(list(products.glob("*_corpus_*/*.bin"))), 3 * target_count
                 )
                 timestamp = (
-                    (build / "primary_corpus_first-exact/one.kernel.bin")
+                    (products / "primary_corpus_first-exact/one.kernel.bin")
                     .stat()
                     .st_mtime_ns
                 )
                 build_project(build, "iree_hal_drivers_amd_gpu_cts_probe")
                 self.assertEqual(
-                    (build / "primary_corpus_first-exact/one.kernel.bin")
+                    (products / "primary_corpus_first-exact/one.kernel.bin")
                     .stat()
                     .st_mtime_ns,
                     timestamp,

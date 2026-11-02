@@ -6,8 +6,143 @@
 
 """Loom deployment-product projections shared by consuming projects."""
 
+from dataclasses import dataclass, field
+
+from bazel_to_cmake_converter import ConditionSelect, MixedDeps
+from conditions import Condition, Not, all_of, any_of
+
+
+@dataclass(frozen=True)
+class Profile:
+    # Compiler selector owned by the source profile declaration.
+    compiler: str
+    # Availability over bootstrap options; native target properties are opaque.
+    available: Condition
+
+
+@dataclass
+class Profiles:
+    # Source profiles and ordered sets, indexed by canonical BUILD label.
+    profiles: dict[str, Profile | list[tuple[str, Condition]]] = field(
+        default_factory=dict
+    )
+
+    def expand(self, label, active=()):
+        if label in active:
+            raise ValueError("Loom profile cycle: " + " -> ".join((*active, label)))
+        if label not in self.profiles:
+            raise ValueError(f"Unknown Loom profile or set: {label}")
+        value = self.profiles[label]
+        if isinstance(value, Profile):
+            return {label: all_of()}
+        result = {}
+        for member, selected in value:
+            for profile, inherited in self.expand(member, (*active, label)).items():
+                predicate = all_of(selected, inherited)
+                result[profile] = (
+                    any_of(result[profile], predicate)
+                    if profile in result
+                    else predicate
+                )
+        return result
+
 
 class LoomBinaryBuildFileFunctions:
+    @property
+    def _loom_profiles(self):
+        if "loom.profiles" not in self._declarations:
+            self._declarations["loom.profiles"] = Profiles()
+        return self._declarations["loom.profiles"]
+
+    def _loom_profile_condition(self, requirements):
+        if isinstance(requirements, ConditionSelect):
+            selected = [
+                (self._select_condition(label), values)
+                for label, values in requirements.conditions.items()
+                if label != "//conditions:default"
+            ]
+            predicates = [predicate for predicate, values in selected if values == []]
+            if requirements.conditions.get("//conditions:default") == []:
+                predicates.append(
+                    Not(any_of(*(predicate for predicate, _ in selected)))
+                )
+            return any_of(*predicates)
+        if isinstance(requirements, MixedDeps):
+            return all_of(
+                self._loom_profile_condition(requirements.unconditional),
+                *(
+                    self._loom_profile_condition(value)
+                    for value in requirements.selects
+                ),
+            )
+        predicates = [self._select_condition(label) for label in requirements or []]
+        if any(predicate is None for predicate in predicates):
+            raise NotImplementedError(f"Loom profile requirements: {requirements}")
+        return all_of(*predicates)
+
+    def _loom_profile_members(self, targets):
+        if isinstance(targets, MixedDeps):
+            return [
+                *self._loom_profile_members(targets.unconditional),
+                *(
+                    member
+                    for value in targets.selects
+                    for member in self._loom_profile_members(value)
+                ),
+            ]
+        if isinstance(targets, ConditionSelect):
+            predicates = [
+                self._select_condition(label)
+                for label in targets.conditions
+                if label != "//conditions:default"
+            ]
+            result = []
+            for label, members in targets.conditions.items():
+                predicate = (
+                    Not(any_of(*predicates))
+                    if label == "//conditions:default"
+                    else self._select_condition(label)
+                )
+                result.extend(
+                    (self._canonical_location_label(member), predicate)
+                    for member in members
+                )
+            return result
+        return [
+            (self._canonical_location_label(member), all_of()) for member in targets
+        ]
+
+    def _loom_target_identity_label(self, target):
+        if target.startswith("@"):
+            return target
+        return self._canonical_location_label(target)
+
+    def loom_target_set(
+        self, name, targets, allow_empty=False, visibility=None, **kwargs
+    ):
+        self._check_no_unhandled_kwargs("loom_target_set", kwargs)
+        label = self._current_target_label(name)
+        if label in self._loom_profiles.profiles:
+            raise ValueError(f"Duplicate Loom profile set: {label}")
+        members = self._loom_profile_members(targets)
+        if not members and not allow_empty:
+            raise ValueError(f"Loom profile set {label} must not be empty")
+        self._loom_profiles.profiles[label] = members
+        targets_block, variable_block = self._convert_platform_select_deps(
+            name,
+            targets,
+            "TARGETS",
+            target_transform=self._loom_target_identity_label,
+        )
+        self._converter.body += (
+            variable_block
+            + "loom_target_set(\n"
+            + self._convert_string_arg_block("NAME", name)
+            + ("  ALLOW_EMPTY\n" if allow_empty else "")
+            + targets_block
+            + ")\n\n"
+        )
+
     def _convert_select_condition(self, label):
         if isinstance(label, str) and label.startswith(
             "//loom/config/arch/amdgpu:descriptor_set_"
@@ -80,6 +215,13 @@ class LoomBinaryBuildFileFunctions:
     ):
         if self._should_skip_target(tags=tags, **kwargs):
             return
+        label = self._current_target_label(name)
+        if label in self._loom_profiles.profiles:
+            raise ValueError(f"Duplicate Loom profile: {label}")
+        self._loom_profiles.profiles[label] = Profile(
+            family + ":" + selector,
+            self._loom_profile_condition(target_compatible_with),
+        )
         condition = self._target_compatible_condition(target_compatible_with)
         requires = f"  REQUIRES\n    {condition}\n" if condition else ""
         self._converter.body += (
@@ -108,8 +250,8 @@ class LoomBinaryBuildFileFunctions:
         if self._should_skip_target(tags=tags, **kwargs):
             return
         output = out or name
-        self._register_target_files(name, [f"${{CMAKE_CURRENT_BINARY_DIR}}/{output}"])
-        self._register_target_files(output, [f"${{CMAKE_CURRENT_BINARY_DIR}}/{output}"])
+        self._register_target_files(name, [f"{self._package_binary_dir()}/{output}"])
+        self._register_target_files(output, [f"{self._package_binary_dir()}/{output}"])
         blocks = [
             self._convert_string_arg_block("NAME", name),
             self._convert_string_arg_block(

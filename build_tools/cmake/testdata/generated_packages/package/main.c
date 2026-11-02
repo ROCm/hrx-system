@@ -7,9 +7,17 @@
 
 #include <stdio.h>
 
+#if AUTHORED_VALUE != 23
+#error "The scoped native dependency did not reach its generated consumer"
+#endif
+
 int fixture_value(void);
+int fixture_registration = 0;
 
 int main(void) {
+  if (fixture_registration != 42) {
+    return 1;
+  }
   printf("%d\n", fixture_value());
   return 0;
 }
