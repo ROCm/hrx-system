@@ -299,6 +299,7 @@ static void loom_serve_text_record_job_release(
 
 static void loom_serve_text_record_execute(loomc_task_t* base,
                                            loomc_host_size_t worker_ordinal) {
+  IREE_TRACE_ZONE_BEGIN(z0);
   loom_serve_text_record_task_t* task = (void*)base;
   loom_serve_text_record_job_t* job = task->job;
   while (iree_status_is_ok(task->status)) {
@@ -316,6 +317,7 @@ static void loom_serve_text_record_execute(loomc_task_t* base,
     iree_atomic_store(&job->next_index, job->stage_count,
                       iree_memory_order_relaxed);
   }
+  IREE_TRACE_ZONE_END(z0);
 }
 
 static void loom_serve_text_record_release(loomc_task_t* base) {

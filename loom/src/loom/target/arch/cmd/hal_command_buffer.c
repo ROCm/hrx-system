@@ -380,11 +380,17 @@ iree_status_t loom_cmd_program_hal_command_buffer_create(
         IREE_STATUS_INVALID_ARGUMENT,
         "command resource counts do not match requirements");
   }
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, entry_count);
   loom_cmd_program_hal_layout_t* layouts = NULL;
   if (entry_count) {
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-        host_allocator, entry_count * sizeof(*layouts), (void**)&layouts));
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0,
+        iree_allocator_malloc(host_allocator, entry_count * sizeof(*layouts),
+                              (void**)&layouts));
   }
+  IREE_TRACE_ZONE_BEGIN_NAMED(z_layouts,
+                              "loom_cmd_program_hal_prepare_layouts");
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < entry_count && iree_status_is_ok(status);
        ++i) {
@@ -414,6 +420,7 @@ iree_status_t loom_cmd_program_hal_command_buffer_create(
                                      (void**)&layout->constants);
     }
   }
+  IREE_TRACE_ZONE_END(z_layouts);
   iree_hal_command_buffer_t* command_buffer = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_create(
@@ -422,20 +429,26 @@ iree_status_t loom_cmd_program_hal_command_buffer_create(
         program->requirements.rebindable_binding_count, &command_buffer);
   }
   if (iree_status_is_ok(status)) {
+    IREE_TRACE_ZONE_BEGIN_NAMED(z_record, "loom_cmd_program_hal_record");
     status = loom_cmd_program_hal_record(
         program, range ? *range : loom_cmd_program_command_range_all(program),
         fixed_bindings, entries, layouts, command_buffer);
+    IREE_TRACE_ZONE_END(z_record);
   }
+  IREE_TRACE_ZONE_BEGIN_NAMED(z_release,
+                              "loom_cmd_program_hal_release_layouts");
   for (iree_host_size_t i = 0; i < entry_count; ++i) {
     iree_allocator_free(host_allocator, layouts[i].constants);
     iree_allocator_free(host_allocator, layouts[i].bindings);
     iree_allocator_free(host_allocator, layouts[i].parameters);
   }
   iree_allocator_free(host_allocator, layouts);
+  IREE_TRACE_ZONE_END(z_release);
   if (iree_status_is_ok(status)) {
     *out_command_buffer = command_buffer;
   } else {
     iree_hal_command_buffer_release(command_buffer);
   }
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }

@@ -19,7 +19,9 @@ void loomc_task_execute(loomc_task_t* task, loomc_host_size_t worker_ordinal) {
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, worker_ordinal);
   const loomc_task_vtable_t* vtable = task->vtable;
   vtable->execute(task, worker_ordinal);
+  IREE_TRACE_ZONE_BEGIN_NAMED(z_destroy, "loomc_task_destroy");
   vtable->destroy(task);
+  IREE_TRACE_ZONE_END(z_destroy);
   IREE_TRACE_ZONE_END(z0);
 }
 

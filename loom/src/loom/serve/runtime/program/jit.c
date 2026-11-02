@@ -1058,6 +1058,8 @@ static void loom_serve_jit_job_release(loom_serve_jit_job_t* job) {
   if (iree_atomic_ref_count_dec(&job->ref_count) != 1) {
     return;
   }
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_TRACE_ZONE_APPEND_TEXT(z0, job->root.data, job->root.size);
   loom_serve_jit_t* jit = job->jit;
   iree_status_t status = job->status;
   for (loom_serve_jit_request_t* node = job->requests; node;
@@ -1118,6 +1120,7 @@ static void loom_serve_jit_job_release(loom_serve_jit_job_t* job) {
   job->report.stage_duration_sum_ns += iree_time_now() - job->start;
   job->status = status;
   loom_serve_jit_job_publish(job);
+  IREE_TRACE_ZONE_END(z0);
 }
 
 static void loom_serve_jit_native_complete(loom_serve_jit_t* jit,
@@ -1156,10 +1159,12 @@ static void loom_serve_jit_native_loaded(void* user_data, iree_status_t status,
 }
 
 static void loom_serve_jit_load_native(loom_serve_jit_native_t* native) {
+  IREE_TRACE_ZONE_BEGIN(z0);
   loom_serve_jit_t* jit = native->jit;
   native->load.completion = loom_serve_jit_native_loaded;
   native->load.user_data = native;
   loom_serve_executable_cache_load(jit->executables, &native->load);
+  IREE_TRACE_ZONE_END(z0);
 }
 
 // A device load may complete inline and retire its catalog. This task storage
@@ -1713,6 +1718,7 @@ iree_status_t loom_serve_jit_stage_record(
     const loom_cmd_program_command_range_t* range,
     iree_hal_buffer_t* const* fixed_buffers,
     iree_hal_command_buffer_t** out_command) {
+  IREE_TRACE_ZONE_BEGIN(z0);
   const iree_host_size_t fixed_buffer_count =
       stage->program.requirements.fixed_buffer_count;
   iree_hal_buffer_binding_t* fixed_bindings = NULL;
@@ -1737,6 +1743,7 @@ iree_status_t loom_serve_jit_stage_record(
         stage->host_allocator, out_command);
   }
   iree_allocator_free(stage->host_allocator, fixed_bindings);
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
