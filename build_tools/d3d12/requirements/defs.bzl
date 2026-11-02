@@ -12,7 +12,6 @@ D3D12_API = build_requirement(
     id = "d3d12.api",
     label = Label("//build_tools/d3d12/requirements:api"),
     enabled_by = Label("//build_tools/d3d12/config:available"),
-    cmake_condition = "IREE_D3D12_AVAILABLE",
 )
 
 D3D12_DEVICE_RESOURCE = run_requirement(

@@ -7,4 +7,8 @@
 
 #include "generated.h"
 
-int fixture_value(void) { return BASE_VALUE + HEADER_VALUE + ADJUSTMENT; }
+int fixture_provider(int value);
+
+int fixture_value(void) {
+  return fixture_provider(BASE_VALUE + HEADER_VALUE + ADJUSTMENT);
+}

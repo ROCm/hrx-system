@@ -60,11 +60,13 @@ set(IREE_SANITIZER_SUPPRESSION_SECOND_LSAN "{second.as_posix()}")
 set(IREE_SANITIZER_SUPPRESSION_FIRST_TSAN "{first.as_posix()}")
 set(IREE_SANITIZER_SUPPRESSION_SECOND_TSAN "{second.as_posix()}")
 iree_target_sanitizer_suppressions(host_root DEPS runtime_alias second_runtime)
-add_library(first_runtime INTERFACE)
-add_library(runtime_alias ALIAS first_runtime)
-iree_target_sanitizer_suppressions(first_runtime SUPPRESSIONS lsan first tsan first)
+add_library(OFF INTERFACE)
+add_library(runtime_alias ALIAS OFF)
+iree_target_sanitizer_suppressions(OFF SUPPRESSIONS lsan first tsan first)
+add_library(metadata_native INTERFACE)
+iree_target_sanitizer_suppressions(metadata_native SUPPRESSIONS lsan first tsan first)
 add_library(second_runtime INTERFACE)
-iree_target_sanitizer_suppressions(second_runtime DEPS first_runtime SUPPRESSIONS lsan second tsan second)
+iree_target_sanitizer_suppressions(second_runtime DEPS OFF metadata::native SUPPRESSIONS lsan second tsan second)
 iree_target_sanitizer_suppressions(tool_backed_root)
 iree_finalize_sanitizer_suppressions()
 set_property(TEST host PROPERTY ENVIRONMENT "$<TARGET_PROPERTY:host_root,IREE_SANITIZER_ENVIRONMENT>")
@@ -109,6 +111,15 @@ set_property(TEST tool-backed PROPERTY ENVIRONMENT "$<TARGET_PROPERTY:tool_backe
             second.write_text("leak:changed")
             build_project(build_dir, "host_root")
             self.assertEqual(merged.read_text().split(), ["leak:first", "leak:changed"])
+            extension.write_text(
+                extension.read_text().replace(
+                    "host_root DEPS runtime_alias second_runtime)",
+                    "host_root DEPS runtime_alias second_runtime "
+                    "ENV LSAN_OPTIONS=detect_leaks=0)",
+                )
+            )
+            output = configure_project(FIXTURE, build_dir, expect_failure=True)
+            self.assertIn("host_root sets LSAN_OPTIONS both explicitly", output)
 
     def test_rejects_invalid_build_metadata(self):
         cases = (

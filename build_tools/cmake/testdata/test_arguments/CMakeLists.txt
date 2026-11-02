@@ -16,6 +16,7 @@ set(IREE_TEST_TMPDIR_ROOT "${CMAKE_CURRENT_BINARY_DIR}/tmp")
 set(IREE_PACKAGE_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(IREE_PACKAGE_ROOT_PREFIX fixture)
 include("${IREE_REPO_ROOT}/build_tools/cmake/iree_macros.cmake")
+include("${IREE_REPO_ROOT}/build_tools/cmake/iree_add_all_subdirs.cmake")
 include("${IREE_REPO_ROOT}/build_tools/cmake/iree_copts.cmake")
 include("${IREE_REPO_ROOT}/build_tools/cmake/iree_configure_testing.cmake")
 include("${IREE_REPO_ROOT}/build_tools/cmake/iree_install_support.cmake")
@@ -85,7 +86,22 @@ iree_native_test(NAME source_working_directory SRC reader
 
 add_subdirectory(nested)
 add_subdirectory(converted)
+
+# These native providers deliberately follow their converted consumers.
+add_executable(direct_reader EXCLUDE_FROM_ALL reader.cc)
+add_executable(iree::tools::direct ALIAS direct_reader)
+iree_target_sanitizer_suppressions(direct_reader SUPPRESSIONS lsan fixture)
+add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/direct_generated.txt"
+  COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/fixture.txt"
+    "${CMAKE_CURRENT_BINARY_DIR}/direct_generated.txt"
+  DEPENDS fixture.txt VERBATIM)
+add_custom_target(generate_direct_data
+  DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/direct_generated.txt")
+iree_register_generated_output_producer(generate_direct_data
+  OUTPUTS direct_generated.txt)
+
 iree_finalize_target_dependencies()
 iree_finalize_sanitizer_suppressions()
 iree_finalize_execution_tool_environments()
+iree_finalize_test_build_targets()
 iree_create_ctest_customization()

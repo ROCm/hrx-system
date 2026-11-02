@@ -4,6 +4,7 @@
 # Composes a backend-owned compiled corpus with the shared CTS registry.
 # SRCS basenames are the logical names consumed by executable-data lookups.
 function(iree_runtime_hal_cts_testdata)
+  iree_package_binary_dir(_PACKAGE_BINARY_DIR)
   if(NOT IREE_BUILD_TESTS)
     return()
   endif()
@@ -59,7 +60,7 @@ function(iree_runtime_hal_cts_testdata)
     set(_REGISTRATION "${_FILE_NAME}_${_ORDINAL}.cc")
     math(EXPR _ORDINAL "${_ORDINAL} + 1")
     string(REPLACE "{BACKEND_NAME}" "${_BACKEND}" _REGISTRATION_CONTENT "${_CONTENT}")
-    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/${_REGISTRATION}" "${_REGISTRATION_CONTENT}")
+    file(WRITE "${_PACKAGE_BINARY_DIR}/${_REGISTRATION}" "${_REGISTRATION_CONTENT}")
     list(APPEND _REGISTRATIONS "${_REGISTRATION}")
   endforeach()
   iree_cc_library(

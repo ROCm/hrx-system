@@ -44,7 +44,7 @@ class BazelToCMakeTest(unittest.TestCase):
                     bazel_to_cmake.generate_build_tree(output, ["package"])
 
                 generate()
-                generated = output / "package/CMakeLists.txt"
+                generated = output / "package/package.cmake"
                 self.assertFalse((package / "CMakeLists.txt").exists())
                 self.assertIn("VALUE=1", generated.read_text())
                 manifest = output / "inputs.cmake"
@@ -129,13 +129,50 @@ class BazelToCMakeTest(unittest.TestCase):
                     {Path("group/CMakeLists.txt"), Path("group/nested/CMakeLists.txt")},
                 )
                 self.assertEqual(authored.read_text(), "project(authored)\n")
+                self.assertIn(
+                    'include("${IREE_GENERATED_CMAKE_DIR}/group/nested/package.cmake")',
+                    (output / "group/package.cmake").read_text(),
+                )
+                self.assertIn(
+                    'iree_add_subdirectory("authored")',
+                    (output / "group/nested/package.cmake").read_text(),
+                )
                 # A new authored parent takes over traversal and retires the
                 # generated entry; its contents are never replaced.
                 parent = source / "group/nested/CMakeLists.txt"
                 parent.write_text("add_subdirectory(authored)\n")
                 bazel_to_cmake.generate_build_tree(output, ["group"])
                 self.assertFalse((output / "group/nested/CMakeLists.txt").exists())
+                self.assertFalse((output / "group/nested/package.cmake").exists())
                 self.assertEqual(parent.read_text(), "add_subdirectory(authored)\n")
+                self.assertIn(
+                    'iree_add_subdirectory("nested")',
+                    (output / "group/package.cmake").read_text(),
+                )
+
+    def test_traversal_reaches_authored_directory_symlinks(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, output = root / "source", root / "build/.iree/cmake"
+            source.mkdir()
+            (source / "BUILD.bazel").write_text("package()\n")
+            native = root / "native"
+            native.mkdir()
+            (native / "CMakeLists.txt").write_text("project(native)\n")
+            try:
+                (source / "linked").symlink_to(native, target_is_directory=True)
+            except OSError as error:
+                self.skipTest(f"Directory symlinks are unavailable: {error}")
+            with (
+                mock.patch.object(bazel_to_cmake, "repo_root", str(source)),
+                mock.patch.object(bazel_to_cmake, "repo_cfg", SimpleNamespace()),
+            ):
+                bazel_to_cmake.generate_build_tree(output, ["."])
+            self.assertIn(
+                'iree_add_subdirectory("linked")',
+                (output / "package.cmake").read_text(),
+            )
+            self.assertFalse((output / "linked/CMakeLists.txt").exists())
 
     def test_failed_first_conversion_can_be_repaired(self):
         with tempfile.TemporaryDirectory() as temporary:

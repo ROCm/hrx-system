@@ -53,7 +53,6 @@ class CMakeLibraryDependenciesTest(unittest.TestCase):
                 build_project(
                     build,
                     "iree_fixture_probe",
-                    "iree_fixture_unified_probe",
                     "iree_fixture_collected_probe",
                     "iree_fixture_runtime_tool_probe",
                     "iree_fixture_tool_probe",

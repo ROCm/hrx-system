@@ -50,6 +50,7 @@ endfunction()
 #              archive extraction. Defaults ON.
 # TESTONLY: Only build generated targets when tests are enabled.
 function(iree_amdgpu_hal_cts_testdata)
+  iree_package_binary_dir(_PACKAGE_BINARY_DIR)
   cmake_parse_arguments(
     _RULE
     "TESTONLY"
@@ -248,7 +249,7 @@ function(iree_amdgpu_hal_cts_testdata)
     string(REPLACE "{IDENTIFIER}" "${_TARGET_IDENTIFIER}"
       _REGISTRATION_CONTENT "${_REGISTRATION_CONTENT}"
     )
-    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/${_REGISTRATION}"
+    file(WRITE "${_PACKAGE_BINARY_DIR}/${_REGISTRATION}"
       "${_REGISTRATION_CONTENT}"
     )
 

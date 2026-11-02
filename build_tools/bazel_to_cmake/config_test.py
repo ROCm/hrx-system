@@ -27,6 +27,58 @@ class _PythonBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
 
 
 class ConfigTest(unittest.TestCase):
+    def test_configured_selection_uses_effective_native_values(self):
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=SimpleNamespace(body=""),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={}),
+            build_dir="/repo/pkg",
+            repo_root="/repo",
+            configuration={
+                "CMAKE_SYSTEM_NAME": "Windows",
+                "CMAKE_C_COMPILER_ID": "Clang",
+                "MSVC": "ON",
+                "IREE_ENABLE_RUNTIME_TRACING": "ON",
+                "IREE_TRACING_MODE": "2",
+                "IREE_TRACING_PROVIDER": "console",
+            },
+        )
+        self.assertEqual(
+            functions.select(
+                {
+                    "//build_tools/bazel:cc_compiler_clang": ["-fexceptions"],
+                    "//build_tools/bazel:cc_compiler_clang_cl": ["/EHsc"],
+                    "//conditions:default": [],
+                }
+            ),
+            ["/EHsc"],
+        )
+        providers = {
+            "//runtime/config/base/tracing:provider_console": ":console",
+            "//runtime/config/base/tracing:provider_tracy": ":tracy",
+            "//conditions:default": ":disabled",
+        }
+        self.assertEqual(functions.select(providers), ":console")
+        functions._configuration["IREE_ENABLE_RUNTIME_TRACING"] = "OFF"
+        self.assertEqual(functions.select(providers), ":disabled")
+        with self.assertRaisesRegex(ValueError, "Ambiguous native selection"):
+            functions.select(
+                {
+                    "//build_tools/bazel:iree_is_windows": ["windows.c"],
+                    "@platforms//os:windows": ["other.c"],
+                }
+            )
+        with self.assertRaisesRegex(ValueError, "No matching native selection"):
+            functions.select({"@platforms//os:linux": ["linux.c"]})
+        self.assertEqual(
+            functions.select(
+                {
+                    "//build_tools/bazel:iree_is_windows": ["windows.c"],
+                    "@platforms//os:windows": ["windows.c"],
+                }
+            ),
+            ["windows.c"],
+        )
+
     def test_cc_library_compiles_linkstamp_as_a_native_source(self):
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
@@ -578,8 +630,8 @@ cc_library(
         )
 
         target_compatible_with = [
-            SimpleNamespace(cmake_condition="IREE_HAL_DRIVER_WEBGPU"),
-            SimpleNamespace(cmake_condition="IREE_HAL_DRIVER_WEBGPU"),
+            "//runtime/config/hal:driver_webgpu",
+            "//runtime/config/hal:driver_webgpu",
         ] + functions.select(
             {
                 "@platforms//cpu:wasm32": [],
@@ -687,10 +739,8 @@ cc_library(
         self.assertEqual(
             functions._target_compatible_condition(
                 [
-                    SimpleNamespace(cmake_condition="AMDF_BUILD"),
-                    SimpleNamespace(
-                        cmake_condition="AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA"
-                    ),
+                    "//libamdf/config:enabled_setting",
+                    "//libamdf/config/family:gpu",
                 ]
             ),
             "AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA)",
@@ -899,7 +949,7 @@ cc_library(
         self.assertIn(
             "iree_register_generated_compile_input(${_FILEGROUP_TARGET}\n"
             "  OUTPUTS\n"
-            '    "${CMAKE_CURRENT_BINARY_DIR}/device_headers.stamp"',
+            '    "${IREE_BINARY_DIR}/runtime/src/example/device_headers.stamp"',
             converter.body,
         )
 
@@ -1097,9 +1147,9 @@ cc_library(
             use_param_file=True,
         )
         content = converter.convert()
-        self.assertIn('"--header=${CMAKE_CURRENT_BINARY_DIR}/tables/values.h"', content)
+        self.assertIn('"--header=${IREE_BINARY_DIR}/pkg/tables/values.h"', content)
         self.assertIn(
-            '"--source"\n    "${CMAKE_CURRENT_BINARY_DIR}/tables/values.c"',
+            '"--source"\n    "${IREE_BINARY_DIR}/pkg/tables/values.c"',
             content,
         )
         self.assertEqual(
@@ -1140,7 +1190,6 @@ FEATURE = build_requirement(
     id = "alpha.feature",
     label = Label("//alpha/requirements:feature"),
     enabled_by = Label("//alpha/config:feature"),
-    cmake_condition = "ENABLE_ALPHA",
 )
 """,
                 encoding="utf-8",
@@ -1161,7 +1210,11 @@ cc_library(
     target_compatible_with = [LOCAL_FEATURE],
 )
 """,
-                SimpleNamespace(PROJECTS=[], REPO_MAP={}),
+                SimpleNamespace(
+                    PROJECTS=[],
+                    REPO_MAP={},
+                    CONDITION_MAPPINGS={"//alpha/config:feature": "ENABLE_ALPHA"},
+                ),
                 str(repo_root / "beta"),
                 repo_root=str(repo_root),
             )
@@ -1173,13 +1226,11 @@ cc_library(
             id="synthetic.broad",
             label="//synthetic:requires_broad",
             enabled_by="//synthetic:enable_broad",
-            cmake_condition="SYNTHETIC_BROAD",
         )
         host_requirement = bazel_to_cmake_requirements.build_requirement(
             id="synthetic.host",
             label="//synthetic:requires_host",
             enabled_by="//synthetic:enable_host",
-            cmake_condition="SYNTHETIC_HOST",
         )
         policy = bazel_to_cmake_requirements.ProjectRequirementPolicy(
             package_policies=[
@@ -1207,7 +1258,7 @@ cc_library(
         )
 
     def test_native_test_emits_target_compatible_guard(self):
-        converter = SimpleNamespace(body="")
+        converter = bazel_to_cmake_converter.Converter()
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
             targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
@@ -1225,14 +1276,14 @@ cc_library(
             ),
         )
 
-        self.assertIn('if(IREE_ARCH STREQUAL "wasm_32")', converter.body)
-        self.assertIn("iree_native_test(", converter.body)
-        self.assertIn("endif()", converter.body)
+        self.assertIn('if(IREE_ARCH STREQUAL "wasm_32")', converter.convert())
+        self.assertIn("add_test(", converter.convert())
+        self.assertIn("endif()", converter.convert())
 
     def test_executable_test_preserves_resource_lock(self):
         for resource_group in (None, "shared-device", "shared-storage"):
             with self.subTest(resource_group=resource_group):
-                converter = SimpleNamespace(body="")
+                converter = bazel_to_cmake_converter.Converter()
                 functions = bazel_to_cmake_converter.BuildFileFunctions(
                     converter=converter,
                     targets=bazel_to_cmake_targets.TargetConverter(
@@ -1246,17 +1297,17 @@ cc_library(
                     resource_group=resource_group,
                 )
                 if resource_group is None:
-                    self.assertNotIn("RESOURCE_GROUP", converter.body)
+                    self.assertNotIn("RESOURCE_GROUP", converter.convert())
                 else:
                     self.assertIn(
-                        "RESOURCE_GROUP\n    " + resource_group, converter.body
+                        'RESOURCE_LOCK "' + resource_group + '"', converter.convert()
                     )
 
     def test_native_test_rejects_multiple_files_in_single_file_locations(self):
         for kind in ("location", "rootpath", "execpath"):
             for field in ("args", "env"):
                 with self.subTest(kind=kind, field=field):
-                    converter = SimpleNamespace(body="")
+                    converter = bazel_to_cmake_converter.Converter()
                     functions = bazel_to_cmake_converter.BuildFileFunctions(
                         converter=converter,
                         targets=bazel_to_cmake_targets.TargetConverter(
@@ -1274,6 +1325,7 @@ cc_library(
                             src="//tools:runner",
                             **{field: value},
                         )
+                        converter.convert()
 
     def test_cc_binary_benchmark_converts_location_args_to_source_paths(self):
         converter = SimpleNamespace(body="")
@@ -1449,11 +1501,11 @@ iree_execution_test_suite(
         self.assertLess(exclusion, conversion)
 
     def test_native_test_omits_unresolved_external_location_env(self):
-        converter = SimpleNamespace(body="")
+        converter = bazel_to_cmake_converter.Converter()
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
             targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
-            build_dir="/repo/pkg",
+            build_dir="/repo/runtime/src/iree/fixture",
             repo_root="/repo",
         )
 
@@ -1466,10 +1518,10 @@ iree_execution_test_suite(
             },
         )
 
-        self.assertNotIn("ENV", converter.body)
-        self.assertNotIn("DATA", converter.body)
-        self.assertNotIn("@wasi_sdk", converter.body)
-        self.assertNotIn("TARGET_FILE:pkg_@wasi_sdk", converter.body)
+        self.assertNotIn("LLVM_OBJDUMP=", converter.convert())
+        self.assertIn('REQUIRED_FILES ""', converter.convert())
+        self.assertNotIn("@wasi_sdk", converter.convert())
+        self.assertNotIn("TARGET_FILE:pkg_@wasi_sdk", converter.convert())
 
     def test_cc_test_preserves_platform_link_options_and_locations(self):
         converter = SimpleNamespace(body="")

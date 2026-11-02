@@ -27,6 +27,7 @@ include(iree_c_embed_data)
 # PUBLIC: Add this so that generated libraries are exported under ${PACKAGE}::.
 function(iree_spirv_asm_module)
   iree_package_source_dir(_IREE_PACKAGE_SOURCE_DIR)
+  iree_package_binary_dir(_IREE_PACKAGE_BINARY_DIR)
   cmake_parse_arguments(
     _RULE
     "PUBLIC;TESTONLY"
@@ -66,6 +67,8 @@ function(iree_spirv_asm_module)
   else()
     set(_OUT "${_RULE_NAME}.spv")
   endif()
+  cmake_path(ABSOLUTE_PATH _OUT BASE_DIRECTORY "${_IREE_PACKAGE_BINARY_DIR}")
+  cmake_path(GET _OUT PARENT_PATH _OUTPUT_DIRECTORY)
 
   if(IS_ABSOLUTE "${_RULE_SRC}")
     set(_SRC_PATH "${_RULE_SRC}")
@@ -74,7 +77,7 @@ function(iree_spirv_asm_module)
   elseif(EXISTS "${IREE_SOURCE_DIR}/${_RULE_SRC}")
     set(_SRC_PATH "${IREE_SOURCE_DIR}/${_RULE_SRC}")
   else()
-    set(_SRC_PATH "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_SRC}")
+    set(_SRC_PATH "${_IREE_PACKAGE_BINARY_DIR}/${_RULE_SRC}")
   endif()
 
   set(_ASSEMBLE_ARGS)
@@ -86,6 +89,8 @@ function(iree_spirv_asm_module)
   add_custom_command(
     OUTPUT
       "${_OUT}"
+    COMMAND
+      "${CMAKE_COMMAND}" -E make_directory "${_OUTPUT_DIRECTORY}"
     COMMAND
       ${_ASSEMBLE_TOOL_COMMAND}
       ${_ASSEMBLE_ARGS}

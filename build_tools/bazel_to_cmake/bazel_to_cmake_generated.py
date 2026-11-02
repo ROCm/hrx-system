@@ -29,13 +29,17 @@ class GeneratedFileBuildFileFunctions:
         if self._should_skip_target(tags=tags):
             return
         outputs = list(outs) + list(output_directories or [])
-        paths = {
-            output: f"${{CMAKE_CURRENT_BINARY_DIR}}/{output}" for output in outputs
-        }
+        paths = {output: f"{self._package_binary_dir()}/{output}" for output in outputs}
         output_paths = list(paths.values())
         for output, path in paths.items():
             self._register_target_files(output, [path])
         self._register_target_files(name, output_paths)
+        if self._libraries is not None:
+            label = self._current_target_label(name)
+            producer = self._convert_single_target(label).replace("::", "_")
+            self._libraries.producers.update(
+                (path, producer) for path in self._target_file_paths[label]
+            )
 
         # Match the action's exact-path or unique-basename output selection.
         basenames = {}

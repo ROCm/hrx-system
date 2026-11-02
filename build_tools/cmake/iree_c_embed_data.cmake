@@ -27,6 +27,7 @@
 #
 function(iree_c_embed_data)
   iree_package_source_dir(_IREE_PACKAGE_SOURCE_DIR)
+  iree_package_binary_dir(_IREE_PACKAGE_BINARY_DIR)
   cmake_parse_arguments(
     _RULE
     "PUBLIC;TESTONLY;FLATTEN"
@@ -45,6 +46,8 @@ function(iree_c_embed_data)
     set(_IDENTIFIER ${_RULE_NAME})
   endif()
 
+  cmake_path(ABSOLUTE_PATH _RULE_H_FILE_OUTPUT BASE_DIRECTORY "${_IREE_PACKAGE_BINARY_DIR}")
+  cmake_path(ABSOLUTE_PATH _RULE_C_FILE_OUTPUT BASE_DIRECTORY "${_IREE_PACKAGE_BINARY_DIR}")
   set(_ARGS)
   list(APPEND _ARGS "--output_header=${_RULE_H_FILE_OUTPUT}")
   list(APPEND _ARGS "--output_impl=${_RULE_C_FILE_OUTPUT}")
@@ -56,7 +59,7 @@ function(iree_c_embed_data)
     list(APPEND _ARGS "--flatten")
   endif()
 
-  set(_RELATIVE_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+  set(_RELATIVE_BINARY_DIR "${_IREE_PACKAGE_BINARY_DIR}")
   cmake_path(RELATIVE_PATH _RELATIVE_BINARY_DIR BASE_DIRECTORY "${IREE_BINARY_DIR}")
 
   foreach(_SRC ${_RULE_SRCS})
@@ -89,7 +92,7 @@ function(iree_c_embed_data)
       # be able to get the correct behavior by passing a path relative to the
       # root dir).
       string(REGEX REPLACE "^${_RELATIVE_BINARY_DIR}/" "" _SRC_RELATIVE "${_SRC}")
-      list(APPEND _RESOLVED_SRCS "${CMAKE_CURRENT_BINARY_DIR}/${_SRC_RELATIVE}")
+      list(APPEND _RESOLVED_SRCS "${_IREE_PACKAGE_BINARY_DIR}/${_SRC_RELATIVE}")
     endif()
   endforeach(_SRC)
 
@@ -112,7 +115,7 @@ function(iree_c_embed_data)
         "${IREE_BINARY_DIR}"
         "${PROJECT_BINARY_DIR}"
         "${CMAKE_BINARY_DIR}"
-        "${CMAKE_CURRENT_BINARY_DIR}")
+        "${_IREE_PACKAGE_BINARY_DIR}")
       cmake_path(ABSOLUTE_PATH _BINARY_PREFIX NORMALIZE
         OUTPUT_VARIABLE _BINARY_PREFIX_ABSOLUTE)
       string(FIND "${_RESOLVED_SRC_ABSOLUTE}/" "${_BINARY_PREFIX_ABSOLUTE}/"

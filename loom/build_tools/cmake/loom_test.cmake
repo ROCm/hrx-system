@@ -86,6 +86,7 @@ function(_loom_declare_execution_test ID)
   iree_native_test(
     NAME "${_RULE_NAME}"
     SRC loom::tools::loom-test
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
     ARGS "{{${_MODULE}}}" ${_RULE_RUNNER_ARGS} ${_RULE_ARGS}
     DATA ${_DATA}
     LABELS ${_RULE_LABELS}
@@ -95,6 +96,7 @@ function(_loom_declare_execution_test ID)
     iree_native_test(
       NAME "${_RULE_NAME}_benchmark"
       SRC loom::tools::loom-benchmark
+      WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
       ARGS "{{${_MODULE}}}" ${_RULE_RUNNER_ARGS} --iterations=1 --warmup-iterations=0
         --output-format=jsonl --compile-report=none
       DATA ${_DATA}

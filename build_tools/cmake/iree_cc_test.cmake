@@ -170,7 +170,8 @@ function(iree_cc_test)
     # WASI: bundle the .wasm binary with JS companions and run via Node.js.
     # Uses _iree_wasm_setup_bundler for order-independent collection of JS
     # companion metadata and entry point discovery via genex chains.
-    set(_OUTPUT_MJS "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_NAME}.mjs")
+    iree_package_binary_dir(_IREE_PACKAGE_BINARY_DIR)
+    set(_OUTPUT_MJS "${_IREE_PACKAGE_BINARY_DIR}/${_RULE_NAME}.mjs")
     _iree_wasm_setup_bundler(
       WASM_TARGET ${_NAME}
       OUTPUT "${_OUTPUT_MJS}"

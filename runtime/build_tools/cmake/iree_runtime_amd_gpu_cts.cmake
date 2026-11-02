@@ -6,6 +6,7 @@ include_guard(GLOBAL)
 # Matches the source-once, configured-product contract in testdata.bzl. TARGETS
 # contains selector=capability-variable pairs generated from Loom's target table.
 function(iree_hal_amd_gpu_cts_testdata)
+  iree_package_binary_dir(_PACKAGE_BINARY_DIR)
   if(NOT IREE_BUILD_TESTS)
     return()
   endif()
@@ -61,7 +62,7 @@ function(iree_hal_amd_gpu_cts_testdata)
         LIBRARIES "::${_RULE_NAME}_source_${_PROGRAM}"
         TESTONLY
       )
-      list(APPEND _PRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/${_OUTPUT}")
+      list(APPEND _PRODUCTS "${_PACKAGE_BINARY_DIR}/${_OUTPUT}")
     endforeach()
     set(_REGISTRATION "${_RULE_NAME}_${_SELECTOR}")
     string(REPLACE "-" "_" _TARGET_NAME "${_SELECTOR}")

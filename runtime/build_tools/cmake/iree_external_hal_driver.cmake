@@ -116,6 +116,7 @@ endfunction()
 
 # Emit the selected external registry as one ordinary runtime library.
 function(iree_hal_driver_registry)
+  iree_package_binary_dir(_PACKAGE_BINARY_DIR)
   cmake_parse_arguments(_RULE "" "NAME" "DRIVERS" ${ARGN})
   set(IREE_EXTERNAL_HAL_DRIVERS_USED)
   get_property(IREE_EXTERNAL_HAL_DRIVERS_AVAILABLE GLOBAL
@@ -154,7 +155,7 @@ function(iree_hal_driver_registry)
   # Generate the external registry implementation even when it is empty. This
   # gives init.c one invariant across build systems and configurations.
   set(_INIT_EXTERNAL_C_TPL "${IREE_SOURCE_DIR}/runtime/src/iree/hal/drivers/init_external.c.in")
-  set(_INIT_EXTERNAL_C_SRC "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_NAME}.c")
+  set(_INIT_EXTERNAL_C_SRC "${_PACKAGE_BINARY_DIR}/${_RULE_NAME}.c")
   set(_INIT_EXTERNAL_DEPS)
   set(_INIT_EXTERNAL_REGISTER_INCLUDES)
   set(_INIT_EXTERNAL_REGISTER_CALLS)

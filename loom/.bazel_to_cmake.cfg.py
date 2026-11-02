@@ -8,11 +8,13 @@ import dataclasses
 import importlib.util
 import os
 import re
+import sys
 from types import SimpleNamespace
 
 import bazel_to_cmake_config
 import bazel_to_cmake_converter
 import bazel_to_cmake_requirements
+from conditions import Option, all_of, any_of
 from loom_binary import LoomBinaryBuildFileFunctions
 
 
@@ -30,6 +32,7 @@ def _load_loom_corpus_build_file_functions():
     if not spec or not spec.loader:
         raise RuntimeError(f"could not load Loom corpus converter from {module_path}")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module.LoomCorpusBuildFileFunctions
 
@@ -90,11 +93,11 @@ def _loom_amdgpu_config_cmake_options():
     return options
 
 
-_LOOM_NATIVE_ELF_CMAKE_CONDITION = (
-    "LOOM_ARTIFACT_AIE2P_ELF OR LOOM_ARTIFACT_AMDGPU_ELF OR LOOM_ARTIFACT_X86_ELF"
+_LOOM_NATIVE_ELF_CMAKE_CONDITION = any_of(
+    "LOOM_ARTIFACT_AIE2P_ELF", "LOOM_ARTIFACT_AMDGPU_ELF", "LOOM_ARTIFACT_X86_ELF"
 )
-_LOOM_NATIVE_OBJECT_ELF_CMAKE_CONDITION = (
-    "LOOM_ARTIFACT_AIE2P_ELF OR LOOM_ARTIFACT_X86_ELF"
+_LOOM_NATIVE_OBJECT_ELF_CMAKE_CONDITION = any_of(
+    "LOOM_ARTIFACT_AIE2P_ELF", "LOOM_ARTIFACT_X86_ELF"
 )
 
 _LOOM_CONFIG_CMAKE_OPTIONS = {
@@ -135,7 +138,9 @@ _LOOM_CONFIG_CMAKE_OPTIONS = {
     "//loom/config/serve:audio_decoding": "LOOM_SERVE_AUDIO_DECODING",
     "//loom/config/serve:flac": "LOOM_SERVE_AUDIO_CODEC_FLAC",
     "//loom/config/serve:gif": "LOOM_SERVE_IMAGE_CODEC_GIF",
-    "//loom/config/serve:image_input_enabled": "LOOM_BUILD AND LOOM_SERVE_IMAGE_INPUT",
+    "//loom/config/serve:image_input_enabled": all_of(
+        "LOOM_BUILD", "LOOM_SERVE_IMAGE_INPUT"
+    ),
     "//loom/config/serve:jpeg": "LOOM_SERVE_IMAGE_CODEC_JPEG",
     "//loom/config/serve:mp3": "LOOM_SERVE_AUDIO_CODEC_MP3",
     "//loom/config/serve:png": "LOOM_SERVE_IMAGE_CODEC_PNG",
@@ -219,9 +224,9 @@ class LoomBuildFileFunctions(
         policy = self._loom_package_policy()
         kwargs = dict(kwargs)
         kwargs["target_compatible_with"] = (
-            bazel_to_cmake_requirements.append_cmake_conditions(
+            bazel_to_cmake_requirements.append_conditions(
                 kwargs.get("target_compatible_with"),
-                policy.cmake_conditions(),
+                policy.conditions(),
             )
         )
         policy_tags = policy.tags(include_run_requirements=include_run_requirements)
@@ -239,9 +244,9 @@ class LoomBuildFileFunctions(
 
     def _apply_loom_target_compatible_with(self, target_compatible_with):
         policy = self._loom_package_policy()
-        return bazel_to_cmake_requirements.append_cmake_conditions(
+        return bazel_to_cmake_requirements.append_conditions(
             target_compatible_with,
-            policy.cmake_conditions(),
+            policy.conditions(),
         )
 
     def _cmake_guard_condition(self, target_compatible_with):
@@ -273,39 +278,6 @@ class LoomBuildFileFunctions(
         if not condition:
             return text
         return f"\nif({condition})\n{text}endif()\n\n"
-
-    def loom_target_profile(
-        self, name, family, selector, target_compatible_with=None, **kwargs
-    ):
-        condition = self._cmake_guard_condition(target_compatible_with)
-        requires = f"  REQUIRES\n    {condition}\n" if condition else ""
-        self._converter.body += (
-            "loom_target_profile(\n"
-            + self._convert_string_arg_block("NAME", name)
-            + self._convert_string_arg_block("FAMILY", family)
-            + self._convert_string_arg_block("SELECTOR", selector)
-            + requires
-            + ")\n\n"
-        )
-
-    def loom_target_set(
-        self, name, targets, allow_empty=False, visibility=None, **kwargs
-    ):
-        self._check_no_unhandled_kwargs("loom_target_set", kwargs)
-        targets_block, variable_block = self._convert_platform_select_deps(
-            name,
-            targets,
-            "TARGETS",
-            target_transform=self._loom_target_identity_label,
-        )
-        self._converter.body += (
-            variable_block
-            + "loom_target_set(\n"
-            + self._convert_string_arg_block("NAME", name)
-            + ("  ALLOW_EMPTY\n" if allow_empty else "")
-            + targets_block
-            + ")\n\n"
-        )
 
     def loom_amdgpu_target_profile(
         self, name, target, target_compatible_with=None, **kwargs
@@ -671,9 +643,9 @@ class LoomBuildFileFunctions(
             self._convert_string_list_block("LABELS", labels, sort=False),
             self._convert_string_arg_block("RESOURCE_GROUP", policy.resource_group),
         ]
-        self._emit_platform_guard_begin(policy.cmake_conditions())
+        self._emit_platform_guard_begin(policy.conditions())
         self._converter.body += "loom_execution_test(\n" + "".join(blocks) + ")\n\n"
-        self._emit_platform_guard_end(policy.cmake_conditions())
+        self._emit_platform_guard_end(policy.conditions())
 
     def loom_amdgpu_target_selectors_flag(self, **kwargs):
         return None
@@ -803,16 +775,6 @@ class LoomBuildFileFunctions(
             "${PROJECT_SOURCE_DIR}",
         ]
 
-    def _emit_rewritten_cmake_rule(self, old_rule_name, new_rule_name, emit):
-        body_start = len(self._converter.body)
-        emit()
-        emitted_body = self._converter.body[body_start:]
-        self._converter.body = self._converter.body[:body_start] + emitted_body.replace(
-            f"{old_rule_name}(",
-            f"{new_rule_name}(",
-            1,
-        )
-
     def loom_py_library(self, **kwargs):
         self.iree_py_library(**self._apply_loom_cmake_policy(kwargs))
 
@@ -846,16 +808,14 @@ class LoomBuildFileFunctions(
         )
 
     def loomc_cc_binary(self, runtime_only=False, **kwargs):
-        body_start = len(self._converter.body)
-        self._emit_rewritten_cmake_rule(
-            "iree_cc_binary", "loomc_cc_binary", lambda: self.loom_cc_binary(**kwargs)
+        self.loom_cc_binary(
+            _cmake_rule="loomc_cc_binary",
+            _cmake_options=("RUNTIME_ONLY",) if runtime_only else (),
+            _native_linking=Option("LOOM_LINK_SHARED_TOOLS").evaluate(
+                self._configuration or {}
+            ),
+            **kwargs,
         )
-        if runtime_only:
-            emitted_body = self._converter.body[body_start:]
-            emitted_body = emitted_body.replace(
-                "loomc_cc_binary(\n", "loomc_cc_binary(\n  RUNTIME_ONLY\n", 1
-            )
-            self._converter.body = self._converter.body[:body_start] + emitted_body
 
     def loomc_interop_headers(self, name, deps):
         self._converter.body += (
@@ -1030,6 +990,7 @@ class LoomBuildFileFunctions(
             )
         source_dir = f"${{IREE_BINARY_DIR}}/_deps/{repo_name}-src"
         archive_name = "loom_" + self._cmake_identifier(name)
+        self._converter.requires_native_scope = True
         self._loom_generated_external_repositories[repo_name] = source_dir
         urls_block = self._convert_string_list_block("URL", urls)
         self._converter.header += self._guard_cmake_text(
@@ -1068,19 +1029,12 @@ class LoomBuildFileFunctions(
         target_compatible_with = self._apply_loom_target_compatible_with(
             target_compatible_with
         )
-        runner_deps = (deps or []) + ["//loom/src/loom/tools/loom-check:main"]
-        name_block = self._convert_string_arg_block("NAME", name, quote=False)
-        srcs_block = self._convert_srcs_block([src])
-        deps_block, platform_deps_block = self._convert_platform_select_deps(
-            name, runner_deps
+        self.cc_binary(
+            name=name,
+            srcs=[src],
+            deps=(deps or []) + ["//loom/src/loom/tools/loom-check:main"],
+            target_compatible_with=target_compatible_with,
         )
-        if platform_deps_block:
-            self._converter.body += platform_deps_block
-        self._emit_platform_guard_begin(target_compatible_with)
-        self._converter.body += (
-            f"iree_cc_binary(\n{name_block}{srcs_block}{deps_block})\n\n"
-        )
-        self._emit_platform_guard_end(target_compatible_with)
 
     def loom_check_test(
         self,
@@ -1100,32 +1054,23 @@ class LoomBuildFileFunctions(
             target_compatible_with
         )
         self._loom_check_test_base_name(src)
-        combined_tags = (tags or []) + ["loom-check"]
-        name_block = self._convert_string_arg_block("NAME", name)
-        test_binary_block = self._convert_single_target_block("SRC", runner)
-        args_block = self._convert_string_list_block(
-            "ARGS",
-            self._convert_test_location_args(args or [])
-            + ["{{${_IREE_PACKAGE_SOURCE_DIR}/%s}}" % src],
-            sort=False,
-        )
-        data_block = self._convert_data_list_block(data)
-        env_block = self._convert_string_list_block(
-            "ENV", self._convert_test_env(env), sort=False
-        )
-        labels_block = self._convert_string_list_block("LABELS", combined_tags)
         self._emit_platform_guard_begin(target_compatible_with)
-        self._converter.body += (
-            f"iree_native_test(\n"
-            f"{name_block}"
-            f'  WORKING_DIRECTORY "${{IREE_ROOT_DIR}}"\n'
-            f"{args_block}"
-            f"{test_binary_block}"
-            f"{data_block}"
-            f"{env_block}"
-            f"{labels_block}"
-            f")\n\n"
+        self._converter.body += "if(IREE_BUILD_TESTS)\n"
+        self._converter.defer(
+            lambda: self._native_test(
+                name,
+                self._convert_single_target(runner),
+                args=(self._convert_test_location_args(args) or [])
+                + [
+                    "{{${IREE_SOURCE_DIR}/" + self._current_package() + "/" + src + "}}"
+                ],
+                data=sorted(self._convert_data_locations(data) or []),
+                environment=self._convert_test_env(env),
+                labels=sorted((tags or []) + ["loom-check"]),
+                working_directory="${IREE_ROOT_DIR}",
+            )
         )
+        self._converter.body += "endif()\n"
         self._emit_platform_guard_end(target_compatible_with)
 
     def loom_check_compile_tests(
@@ -1213,6 +1158,45 @@ class LoomBuildFileFunctions(
         )
         for src in srcs:
             self._loom_check_test_base_name(src)
+        if self._configuration is not None:
+            self._emit_platform_guard_begin(target_compatible_with)
+            self._converter.body += "if(IREE_BUILD_TESTS)\n"
+
+            def render():
+                lines = []
+                for source in srcs:
+                    source = self._normalize_label(source)
+                    base = self._loom_check_test_base_name(source)
+                    test_name = base.removeprefix(test_name_prefix_to_strip).replace(
+                        "/", "_"
+                    )
+                    logical = self._current_package() + "/" + source
+                    path = "${IREE_SOURCE_DIR}/" + logical
+                    lines.append(
+                        self._native_test(
+                            test_name,
+                            self._convert_single_target(runner),
+                            args=(self._convert_test_location_args(args) or [])
+                            + [
+                                "--source-prefix-map=${IREE_ROOT_DIR}/=",
+                                "--source-prefix-map={{" + path + "}}=" + logical,
+                                "{{" + path + "}}",
+                            ],
+                            data=sorted(self._convert_data_locations(data) or []),
+                            environment=self._convert_test_env(env),
+                            labels=list(tags or [])
+                            + ([] if "loom-check" in (tags or []) else ["loom-check"]),
+                            resource_group=resource_group,
+                            timeout=self._timeout_map[timeout] if timeout else None,
+                            working_directory="${IREE_ROOT_DIR}",
+                        )
+                    )
+                return "".join(lines)
+
+            self._converter.defer(render)
+            self._converter.body += "endif()\n"
+            self._emit_platform_guard_end(target_compatible_with)
+            return
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
         srcs_block = self._convert_string_list_block(
             "SRCS", [self._normalize_label(src) for src in srcs], sort=False
