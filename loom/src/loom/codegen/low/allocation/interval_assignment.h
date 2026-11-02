@@ -20,6 +20,7 @@
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/allocation/unit_liveness.h"
 #include "loom/codegen/low/placement.h"
+#include "loom/codegen/low/register_requirements.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ir/ir.h"
 #include "loom/target/residency.h"
@@ -61,6 +62,9 @@ typedef struct loom_low_allocation_interval_assignment_context_t {
   const loom_liveness_analysis_t* liveness;
   // Acquired value domain shared by liveness and consumption queries.
   const loom_local_value_domain_t* value_domain;
+  // Structural register requirements borrowed from the immutable function
+  // model.
+  const loom_low_register_requirement_t* register_requirements;
   // Optional final schedule defining |liveness|'s top-level operation order.
   const struct loom_low_schedule_table_t* schedule;
   // Function-local placement relations over |liveness|.

@@ -14,6 +14,7 @@
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/function.h"
 #include "loom/codegen/low/memory_access.h"
+#include "loom/codegen/low/register_requirements.h"
 #include "loom/codegen/low/representation_binding.h"
 #include "loom/codegen/low/schedule/dependency_incoming.h"
 #include "loom/codegen/low/schedule/dependency_index.h"
@@ -278,6 +279,9 @@ typedef struct loom_low_schedule_build_state_t {
   loom_low_register_type_resolver_t register_type_resolver;
   // Active function-local value domain for this scheduling run.
   const loom_local_value_domain_t* value_domain;
+  // Structural register requirements borrowed from the immutable function
+  // model.
+  const loom_low_register_requirement_t* register_requirements;
   // Canonical physical-storage identities borrowed from function preparation.
   const loom_value_ordinal_t* storage_origins;
   // Shared read-only control-flow graph for the function body.

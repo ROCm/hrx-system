@@ -1,0 +1,112 @@
+// Authored reloads cannot recursively spill. Their copies must drain the
+// eight-register bank before a third four-register load is admitted.
+// RUN: emit low-allocation-query @reloads_32 strategy=resource-stall spill-free spill-count values=%first,%second,%third
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @reloads_32(%input: reg<test.pressure.alias32 x4>) -> (reg<test.i32 x12>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 16} : low.storage<stack>
+  low.spill %input, %storage : reg<test.pressure.alias32 x4>, low.storage<stack>
+  %first = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x4>
+  %first_value = copy %first : reg<test.pressure.alias32 x4> -> reg<test.i32 x4>
+  %second = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x4>
+  %second_value = copy %second : reg<test.pressure.alias32 x4> -> reg<test.i32 x4>
+  %third = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x4>
+  %third_value = copy %third : reg<test.pressure.alias32 x4> -> reg<test.i32 x4>
+  %result = concat(%first_value, %second_value, %third_value) : (reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x12>
+  return %result
+}
+
+// ----
+spills: 0
+materialized traffic: stores=0 reloads=0
+value %first: test.pressure.alias32 -> physical_register[0:4]
+value %second: test.pressure.alias32 -> physical_register[4:4]
+value %third: test.pressure.alias32 -> physical_register[0:4]
+
+// ====
+
+// Authored reloads cannot recursively spill. Their copies must drain the
+// eight-register bank before a third four-register load is admitted.
+// RUN: emit low-allocation-query @reloads_64 strategy=resource-stall spill-free spill-count values=%first,%second,%third
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @reloads_64(%input: reg<test.pressure.alias64 x4>) -> (reg<test.i64 x12>) asm {
+  %storage = storage {byte_alignment = 8, byte_length = 32} : low.storage<stack>
+  low.spill %input, %storage : reg<test.pressure.alias64 x4>, low.storage<stack>
+  %first = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias64 x4>
+  %first_value = copy %first : reg<test.pressure.alias64 x4> -> reg<test.i64 x4>
+  %second = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias64 x4>
+  %second_value = copy %second : reg<test.pressure.alias64 x4> -> reg<test.i64 x4>
+  %third = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias64 x4>
+  %third_value = copy %third : reg<test.pressure.alias64 x4> -> reg<test.i64 x4>
+  %result = concat(%first_value, %second_value, %third_value) : (reg<test.i64 x4>, reg<test.i64 x4>, reg<test.i64 x4>) -> reg<test.i64 x12>
+  return %result
+}
+
+// ----
+spills: 0
+materialized traffic: stores=0 reloads=0
+value %first: test.pressure.alias64 -> physical_register[0:4]
+value %second: test.pressure.alias64 -> physical_register[4:4]
+value %third: test.pressure.alias64 -> physical_register[0:4]
+
+// ====
+
+// Spill payloads have the same requirement as reload results. Independent
+// copies may not exhaust the physical bank ahead of their stores.
+// RUN: emit low-allocation-query @spill_payloads strategy=resource-stall spill-free spill-count values=%first,%second,%third
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @spill_payloads(%input: reg<test.i32 x4>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 48} : low.storage<stack>
+  %first = copy %input : reg<test.i32 x4> -> reg<test.pressure.alias32 x4>
+  low.spill %first, %storage : reg<test.pressure.alias32 x4>, low.storage<stack>
+  %second = copy %input : reg<test.i32 x4> -> reg<test.pressure.alias32 x4>
+  low.spill %second, %storage {offset = 16} : reg<test.pressure.alias32 x4>, low.storage<stack>
+  %third = copy %input : reg<test.i32 x4> -> reg<test.pressure.alias32 x4>
+  low.spill %third, %storage {offset = 32} : reg<test.pressure.alias32 x4>, low.storage<stack>
+  return
+}
+
+// ----
+spills: 0
+materialized traffic: stores=0 reloads=0
+value %first: test.pressure.alias32 -> physical_register[0:4]
+value %second: test.pressure.alias32 -> physical_register[0:4]
+value %third: test.pressure.alias32 -> physical_register[0:4]
+
+// ====
+
+// A partial alias retains one unit from each load through the return. The
+// scheduler must distinguish those units from the consumed full payload.
+// RUN: emit low-allocation-query @partial_reload_aliases strategy=resource-stall spill-free spill-count values=%first,%second,%third,%parts
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @partial_reload_aliases(%input: reg<test.pressure.alias32 x4>) -> (reg<test.i32 x12>, reg<test.pressure.alias32 x3>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 16} : low.storage<stack>
+  low.spill %input, %storage : reg<test.pressure.alias32 x4>, low.storage<stack>
+  %first = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x4>
+  %first_value = copy %first : reg<test.pressure.alias32 x4> -> reg<test.i32 x4>
+  %first_part = slice %first[0] : reg<test.pressure.alias32 x4> -> reg<test.pressure.alias32>
+  %second = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x4>
+  %second_value = copy %second : reg<test.pressure.alias32 x4> -> reg<test.i32 x4>
+  %second_part = slice %second[0] : reg<test.pressure.alias32 x4> -> reg<test.pressure.alias32>
+  %third = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x4>
+  %third_value = copy %third : reg<test.pressure.alias32 x4> -> reg<test.i32 x4>
+  %third_part = slice %third[0] : reg<test.pressure.alias32 x4> -> reg<test.pressure.alias32>
+  %result = concat(%first_value, %second_value, %third_value) : (reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x12>
+  %parts = concat(%first_part, %second_part, %third_part) : (reg<test.pressure.alias32>, reg<test.pressure.alias32>, reg<test.pressure.alias32>) -> reg<test.pressure.alias32 x3>
+  return %result, %parts
+}
+
+// ----
+spills: 0
+materialized traffic: stores=1 reloads=1
+value %first: test.pressure.alias32 -> physical_register[0:4]
+value %second: test.pressure.alias32 -> physical_register[4:4]
+value %third: test.pressure.alias32 -> physical_register[4:4]
+value %parts: test.pressure.alias32 -> physical_register[0:3]

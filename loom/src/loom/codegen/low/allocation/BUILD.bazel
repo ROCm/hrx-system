@@ -530,17 +530,6 @@ loom_cc_test(
     ],
 )
 
-loom_cc_library(
-    name = "spill_traffic",
-    srcs = ["spill_traffic.c"],
-    hdrs = ["spill_traffic.h"],
-    deps = [
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops/low",
-        "//runtime/src/iree/base",
-    ],
-)
-
 loom_cc_test(
     name = "spill_plan_test",
     srcs = ["spill_plan_test.cc"],
@@ -878,7 +867,6 @@ loom_cc_library(
         ":scalar_packing",
         ":search",
         ":spill_plan",
-        ":spill_traffic",
         ":storage",
         ":storage_lease",
         ":table",
@@ -890,6 +878,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:placement",
+        "//loom/src/loom/codegen/low:register_requirements",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/ir",
         "//loom/src/loom/target:residency",

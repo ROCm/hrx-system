@@ -160,6 +160,9 @@ typedef struct loom_low_allocation_failure_t {
   loom_liveness_value_class_t value_class;
   // Descriptor-set-local register class ID for |value_class|.
   uint16_t descriptor_reg_class_id;
+  // The failed interval belongs to materialized spill traffic and cannot be
+  // repaired by assigning that traffic to another spill slot.
+  bool is_spill_traffic;
   // Program point where the failed interval starts, or UINT32_MAX for a move.
   uint32_t start_point;
   // Exclusive storage end of the failed interval, or UINT32_MAX for a move.

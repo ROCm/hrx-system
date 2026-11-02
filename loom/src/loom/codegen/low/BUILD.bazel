@@ -350,6 +350,18 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "register_requirements",
+    srcs = ["register_requirements.c"],
+    hdrs = ["register_requirements.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "function_model",
     srcs = ["function_model.c"],
     hdrs = ["function_model.h"],
@@ -358,6 +370,7 @@ loom_cc_library(
         ":diagnostics",
         ":function",
         ":function_requirements",
+        ":register_requirements",
         ":storage_identity",
         ":target_binding",
         "//loom/src/loom/analysis:liveness_dataflow",
@@ -680,7 +693,6 @@ loom_cc_library(
         "//loom/src/loom/codegen/low/allocation:packet_move",
         "//loom/src/loom/codegen/low/allocation:placement",
         "//loom/src/loom/codegen/low/allocation:search",
-        "//loom/src/loom/codegen/low/allocation:spill_traffic",
         "//loom/src/loom/codegen/low/allocation:storage",
         "//loom/src/loom/codegen/low/allocation:storage_lease",
         "//loom/src/loom/codegen/low/allocation:table",

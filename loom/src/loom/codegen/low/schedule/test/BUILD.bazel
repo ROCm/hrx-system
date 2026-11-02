@@ -48,3 +48,11 @@ loom_check_test(
         "//loom/config/arch:amdgpu",
     ]),
 )
+
+loom_check_test(
+    name = "result_lifetimes",
+    src = "result_lifetimes.loom-test",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/arch:amdgpu",
+    ]),
+)

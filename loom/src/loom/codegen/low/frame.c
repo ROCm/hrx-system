@@ -1104,6 +1104,22 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
           continue;
         }
       }
+      // Spill materialization places required temporaries near their uses.
+      // If scored scheduling makes those lifetimes unallocatable, retain
+      // that placement priority for the remaining repair rounds. Dependency
+      // and physical issue constraints still govern every scheduled node.
+      if (repair_options.schedule_strategy !=
+              LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY &&
+          loom_low_function_schedule(low_func_op) != LOOM_LOW_SCHEDULE_LOCKED &&
+          frame.allocation.failure.blocking_kind !=
+              LOOM_LOW_ALLOCATION_FAILURE_BLOCKING_INTERVAL_EXCEEDS_BUDGET &&
+          frame.allocation.failure.is_spill_traffic) {
+        repair_options.schedule_strategy =
+            LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY;
+        loom_low_emission_frame_advance_repair_iteration(statistics);
+        restore_frame_before_build = true;
+        continue;
+      }
       IREE_RETURN_IF_ERROR(
           loom_low_emission_frame_emit_diagnostics(frame_options, &frame));
       loom_low_emission_frame_publish(&frame, out_frame);
