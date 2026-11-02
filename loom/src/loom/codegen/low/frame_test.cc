@@ -157,7 +157,8 @@ TEST_F(LowEmissionFrameTest, ResolvesSparseEntryValuesIntoLocalDomain) {
   ModulePtr module = ParseModule(R"(
 low.func.def target<test.low.core> @entry_values(%argument: reg<test.phys>) -> (reg<test.phys>, reg<test.phys>) asm {
   %live = live_in<test.arg0> : reg<test.phys>
-  return %argument, %live
+  %copied = copy %live : reg<test.phys> -> reg<test.phys>
+  return %argument, %copied
 }
 )");
   loom_op_t* function = loom_block_op(loom_module_block(module.get()), 0);
@@ -165,6 +166,7 @@ low.func.def target<test.low.core> @entry_values(%argument: reg<test.phys>) -> (
       loom_region_entry_block(loom_low_func_def_body(function));
   const loom_value_id_t argument = loom_block_arg_id(entry, 0);
   const loom_value_id_t live = loom_low_live_in_result(loom_block_op(entry, 0));
+  const loom_value_id_t copied = loom_low_copy_result(loom_block_op(entry, 1));
   const loom_low_allocation_abi_location_t argument_location = {
       .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
       .descriptor_reg_class_id = TEST_LOW_CORE_REG_CLASS_ID_TEST_PHYS,
@@ -203,14 +205,20 @@ low.func.def target<test.low.core> @entry_values(%argument: reg<test.phys>) -> (
       find_assignment(argument);
   const loom_low_allocation_assignment_t* live_assignment =
       find_assignment(live);
+  const loom_low_allocation_assignment_t* copied_assignment =
+      find_assignment(copied);
   ASSERT_NE(argument_assignment, nullptr);
   ASSERT_NE(live_assignment, nullptr);
+  ASSERT_NE(copied_assignment, nullptr);
   EXPECT_EQ(argument_assignment->descriptor_reg_class_id,
             TEST_LOW_CORE_REG_CLASS_ID_TEST_PHYS);
   EXPECT_EQ(argument_assignment->location_base, 6u);
   EXPECT_EQ(live_assignment->descriptor_reg_class_id,
             TEST_LOW_CORE_REG_CLASS_ID_TEST_PHYS);
   EXPECT_EQ(live_assignment->location_base, 5u);
+  EXPECT_EQ(copied_assignment->descriptor_reg_class_id,
+            TEST_LOW_CORE_REG_CLASS_ID_TEST_PHYS);
+  EXPECT_EQ(copied_assignment->location_base, 5u);
   EXPECT_EQ(frame.allocation.entry_moves.moves.count, 0u);
 }
 
