@@ -9,7 +9,7 @@
 #ifndef LOOM_TARGET_EMIT_NATIVE_AMDGPU_KERNEL_PLAN_H_
 #define LOOM_TARGET_EMIT_NATIVE_AMDGPU_KERNEL_PLAN_H_
 
-#include "loom/target/arch/amdgpu/planning/packet_plan.h"
+#include "loom/target/emit/native/amdgpu/function_plan.h"
 #include "loom/target/emit/native/amdgpu/kernel_record.h"
 
 #ifdef __cplusplus
@@ -22,10 +22,10 @@ extern "C" {
 // placement before publishing this record. Byte and listing emission consume
 // it without running another compiler stage.
 typedef struct loom_amdgpu_kernel_plan_t {
+  // Function-local native decisions shared with callable helpers.
+  loom_amdgpu_function_plan_t function;
   // Native metadata and storage contract for the kernel.
   loom_amdgpu_kernel_record_t record;
-  // Native packet insertions and target scheduling decisions.
-  loom_amdgpu_packet_plan_t packet_plan;
 } loom_amdgpu_kernel_plan_t;
 
 #ifdef __cplusplus

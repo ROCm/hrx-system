@@ -397,7 +397,7 @@ static iree_status_t loom_amdgpu_kernel_report_record_summary(
                             "AMDGPU kernel instruction count overflowed");
   }
   const uint64_t coissued_instruction_count =
-      (uint64_t)plan->packet_plan.vopd_plan.pair_count;
+      (uint64_t)plan->function.packet_plan.vopd_plan.pair_count;
   const uint64_t text_length = result->kernel.text.data_length;
   loom_target_compile_report_record_emission(report, instruction_count,
                                              text_length, text_length);

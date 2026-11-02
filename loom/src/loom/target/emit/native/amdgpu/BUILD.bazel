@@ -377,11 +377,35 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "function_plan",
+    hdrs = ["function_plan.h"],
+    deps = [
+        ":preflight",
+        ":storage_layout",
+        "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
+    ],
+)
+
+loom_cc_library(
+    name = "function_plan_build",
+    srcs = ["function_plan_build.c"],
+    hdrs = ["function_plan_build.h"],
+    deps = [
+        ":function_plan",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "kernel_plan",
     hdrs = ["kernel_plan.h"],
     deps = [
+        ":function_plan",
         ":kernel_record",
-        "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
     ],
 )
 
@@ -390,11 +414,10 @@ loom_cc_library(
     srcs = ["kernel_plan_build.c"],
     hdrs = ["kernel_plan_build.h"],
     deps = [
+        ":function_plan_build",
         ":kernel_plan",
         ":kernel_record_build",
         ":kernel_report",
-        ":preflight",
-        ":storage_layout",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/error:emitter",

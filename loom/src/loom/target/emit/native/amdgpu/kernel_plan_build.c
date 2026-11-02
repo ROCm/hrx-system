@@ -17,10 +17,9 @@
 #include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/planning/occupancy.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
+#include "loom/target/emit/native/amdgpu/function_plan_build.h"
 #include "loom/target/emit/native/amdgpu/kernel_record_build.h"
 #include "loom/target/emit/native/amdgpu/kernel_report.h"
-#include "loom/target/emit/native/amdgpu/preflight.h"
-#include "loom/target/emit/native/amdgpu/storage_layout.h"
 
 IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static iree_status_t
 loom_amdgpu_kernel_plan_emit_private_segment_limit(
@@ -222,21 +221,17 @@ iree_status_t loom_amdgpu_kernel_plan_build(
   *out_accepted = false;
   *out_plan = (loom_amdgpu_kernel_plan_t){0};
 
-  loom_amdgpu_native_preflight_t preflight = {0};
-  const loom_amdgpu_native_preflight_options_t preflight_options = {
-      .emitter = options->emitter,
-  };
-  IREE_RETURN_IF_ERROR(loom_amdgpu_native_preflight_analyze(
-      &frame->schedule, &frame->allocation, &preflight_options, &preflight));
-  if (preflight.error_count != 0) {
+  bool function_accepted = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_function_plan_build(
+      frame, options->emitter, arena, &function_accepted, &out_plan->function));
+  if (!function_accepted) {
     return iree_ok_status();
   }
 
   // Private arrays and spill reservations share one hardware scratch segment.
   // Admit its final aligned extent before narrowing metadata or planning code.
-  loom_amdgpu_storage_layout_t storage_layout = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_build(
-      &frame->schedule.requirements.storage_layout, arena, &storage_layout));
+  const loom_amdgpu_storage_layout_t* storage_layout =
+      &out_plan->function.storage_layout;
   const loom_amdgpu_processor_properties_t* processor_properties =
       loom_amdgpu_target_processor_properties_from_resolved_target(
           &frame->schedule.target);
@@ -245,30 +240,27 @@ iree_status_t loom_amdgpu_kernel_plan_build(
           ->snapshot->subgroup_size;
   const uint32_t private_byte_limit =
       processor_properties->wavefront.max_scratch_bytes / wave_size;
-  if (storage_layout.segment_sizes.private_segment_fixed_size >
+  if (storage_layout->segment_sizes.private_segment_fixed_size >
       private_byte_limit) {
     return loom_amdgpu_kernel_plan_emit_private_segment_limit(
-        frame, storage_layout.segment_sizes.private_segment_fixed_size,
+        frame, storage_layout->segment_sizes.private_segment_fixed_size,
         private_byte_limit, options->emitter);
   }
-  if (storage_layout.segment_sizes.group_segment_fixed_size > UINT32_MAX) {
+  if (storage_layout->segment_sizes.group_segment_fixed_size > UINT32_MAX) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "AMDGPU kernel emission group segment size exceeds metadata limits");
   }
 
-  IREE_RETURN_IF_ERROR(loom_amdgpu_packet_plan_build(
-      &frame->schedule, &frame->allocation, arena,
-      /*out_vopd_rejections=*/NULL, &out_plan->packet_plan));
   const loom_amdgpu_kernel_record_options_t record_options = {
       .abi_layout = options->abi_layout,
       .abi_verify = options->abi_verify,
-      .preflight = &preflight,
+      .preflight = &out_plan->function.preflight,
       .minimum_vgpr_count =
-          out_plan->packet_plan.wait_states.minimum_vgpr_count,
+          out_plan->function.packet_plan.wait_states.minimum_vgpr_count,
   };
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_build(
-      &frame->schedule, &frame->allocation, &storage_layout, &record_options,
+      &frame->schedule, &frame->allocation, storage_layout, &record_options,
       &out_plan->record, arena));
 
   bool residency_accepted = false;
@@ -280,7 +272,7 @@ iree_status_t loom_amdgpu_kernel_plan_build(
   }
 
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_report_record_plan(
-      options->report, &out_plan->packet_plan));
+      options->report, &out_plan->function.packet_plan));
   *out_accepted = true;
   return iree_ok_status();
 }
