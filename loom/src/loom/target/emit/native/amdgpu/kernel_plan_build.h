@@ -43,6 +43,16 @@ iree_status_t loom_amdgpu_kernel_plan_build(
     iree_arena_allocator_t* arena, bool* out_accepted,
     loom_amdgpu_kernel_plan_t* out_plan);
 
+// Builds and admits the entry-only native plan around an already compiled
+// function plan. This is the common boundary for call-free kernels and entries
+// participating in a retained native program.
+iree_status_t loom_amdgpu_kernel_plan_build_from_function(
+    const loom_low_emission_frame_t* frame,
+    const loom_amdgpu_function_plan_t* function_plan,
+    const loom_amdgpu_kernel_plan_options_t* options,
+    iree_arena_allocator_t* arena, bool* out_accepted,
+    loom_amdgpu_kernel_plan_t* out_plan);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

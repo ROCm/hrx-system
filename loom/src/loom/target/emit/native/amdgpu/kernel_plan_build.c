@@ -218,20 +218,34 @@ iree_status_t loom_amdgpu_kernel_plan_build(
     const loom_amdgpu_kernel_plan_options_t* options,
     iree_arena_allocator_t* arena, bool* out_accepted,
     loom_amdgpu_kernel_plan_t* out_plan) {
-  *out_accepted = false;
-  *out_plan = (loom_amdgpu_kernel_plan_t){0};
-
+  loom_amdgpu_function_plan_t function_plan = {0};
   bool function_accepted = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_function_plan_build(
-      frame, options->emitter, arena, &function_accepted, &out_plan->function));
+      frame, options->emitter, arena, &function_accepted, &function_plan));
   if (!function_accepted) {
+    *out_accepted = false;
+    *out_plan = (loom_amdgpu_kernel_plan_t){0};
     return iree_ok_status();
   }
+  return loom_amdgpu_kernel_plan_build_from_function(
+      frame, &function_plan, options, arena, out_accepted, out_plan);
+}
+
+iree_status_t loom_amdgpu_kernel_plan_build_from_function(
+    const loom_low_emission_frame_t* frame,
+    const loom_amdgpu_function_plan_t* function_plan,
+    const loom_amdgpu_kernel_plan_options_t* options,
+    iree_arena_allocator_t* arena, bool* out_accepted,
+    loom_amdgpu_kernel_plan_t* out_plan) {
+  *out_accepted = false;
+  *out_plan = (loom_amdgpu_kernel_plan_t){
+      .function = *function_plan,
+  };
 
   // Private arrays and spill reservations share one hardware scratch segment.
   // Admit its final aligned extent before narrowing metadata or planning code.
   const loom_amdgpu_storage_layout_t* storage_layout =
-      &out_plan->function.storage_layout;
+      &function_plan->storage_layout;
   const loom_amdgpu_processor_properties_t* processor_properties =
       loom_amdgpu_target_processor_properties_from_resolved_target(
           &frame->schedule.target);
@@ -255,9 +269,9 @@ iree_status_t loom_amdgpu_kernel_plan_build(
   const loom_amdgpu_kernel_record_options_t record_options = {
       .abi_layout = options->abi_layout,
       .abi_verify = options->abi_verify,
-      .preflight = &out_plan->function.preflight,
+      .preflight = &function_plan->preflight,
       .minimum_vgpr_count =
-          out_plan->function.packet_plan.wait_states.minimum_vgpr_count,
+          function_plan->packet_plan.wait_states.minimum_vgpr_count,
   };
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_build(
       &frame->schedule, &frame->allocation, storage_layout, &record_options,
@@ -272,7 +286,7 @@ iree_status_t loom_amdgpu_kernel_plan_build(
   }
 
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_report_record_plan(
-      options->report, &out_plan->function.packet_plan));
+      options->report, &function_plan->packet_plan));
   *out_accepted = true;
   return iree_ok_status();
 }
