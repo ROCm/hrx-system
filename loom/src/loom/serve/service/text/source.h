@@ -62,16 +62,26 @@ typedef struct loom_serve_text_source_t {
   loom_serve_text_cache_selection_t cache;
 } loom_serve_text_source_t;
 
-// Consumes validated model options and produces source metadata plus the
-// caller-owned storage description. Both outputs retain partial ownership on
-// failure and must be deinitialized by their owners. No device memory, queue
-// submission or shared pool mutation occurs. Option views are borrowed only
-// through this call; source-returned state may retain its own copied inputs.
+// Consumes validated model options and produces preparation metadata plus the
+// caller-owned storage description. Control compilation is independent once
+// this returns. Both outputs retain partial ownership on failure and must be
+// deinitialized by their owners. No device memory, queue submission, or shared
+// pool mutation occurs. Option views are borrowed only through this call;
+// source-returned state may retain its own copied inputs.
 // jit supplies the source grammar, model-local report, and immutable VM cache.
 iree_status_t loom_serve_text_source_initialize(
     loom_serve_jit_t* jit, const loom_serve_text_options_t* options,
     iree_allocator_t host_allocator, loom_serve_text_source_t* out_source,
     loom_serve_text_storage_t* out_storage);
+
+// Compiles control bytecode after source initialization. Native compilation and
+// parameter preparation may run in parallel; linking and source destruction
+// require this call to retire first. Only module is written. Partial outputs
+// remain owned by source on failure. Options and jit are borrowed through
+// return.
+iree_status_t loom_serve_text_source_compile_control(
+    loom_serve_jit_t* jit, const loom_serve_text_options_t* options,
+    loom_serve_text_source_t* source);
 
 // Resolves source terminal semantics after the model owner joins tokenizer
 // construction and transfers the tokenizer into source. No device work occurs.

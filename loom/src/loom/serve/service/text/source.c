@@ -257,6 +257,12 @@ iree_status_t loom_serve_text_source_initialize(
       iree_hal_module_register_types(out_source->environment, &table));
   IREE_RETURN_IF_ERROR(
       iree_hal_module_types_resolve(table, &out_source->types));
+  return iree_ok_status();
+}
+
+iree_status_t loom_serve_text_source_compile_control(
+    loom_serve_jit_t* jit, const loom_serve_text_options_t* options,
+    loom_serve_text_source_t* source) {
   const iree_string_view_t generation_roots[] = {IREE_SVL("step"),
                                                  IREE_SVL("epoch"),
                                                  IREE_SVL("encode_epoch"),
@@ -285,11 +291,11 @@ iree_status_t loom_serve_text_source_initialize(
       IREE_SVL("request_options")};
   const bool encodes = options->mode == LOOM_SERVE_TEXT_MODE_ENCODE;
   return loom_serve_program_compile_service_cached(
-      jit, out_source->environment, &options->sources, options->sources.control,
+      jit, source->environment, &options->sources, options->sources.control,
       encodes ? IREE_ARRAYSIZE(encoding_roots)
               : IREE_ARRAYSIZE(generation_roots),
       encodes ? encoding_roots : generation_roots, (iree_string_view_list_t){0},
-      host_allocator, &out_source->module);
+      source->host_allocator, &source->module);
 }
 
 void loom_serve_text_source_deinitialize(loom_serve_text_source_t* source) {
