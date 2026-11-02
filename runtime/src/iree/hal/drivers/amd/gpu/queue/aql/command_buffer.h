@@ -31,10 +31,9 @@ typedef struct iree_hal_amd_gpu_aql_program_block_t {
   } dispatches;
 } iree_hal_amd_gpu_aql_program_block_t;
 
-// A bounded immutable packet sequence and private data. The byte template and
-// fixup table follow this descriptor in the same host allocation. Each
-// invocation copies and patches its own argument-ring storage; no native
-// instance exists.
+// Bounded native packets and any invocation-varying private data. The byte
+// template and fixup table follow in the same host allocation. Immutable
+// arguments may instead have a fixed device placement baked into the packets.
 typedef struct iree_hal_amd_gpu_aql_host_template_t {
   // Complete packet/private-data extent copied into each invocation.
   uint32_t byte_length;
@@ -69,6 +68,8 @@ typedef struct iree_hal_amd_gpu_aql_command_program_t {
   bool has_control;
   // Optional bounded native template, owned instead of resident storage.
   iree_hal_amd_gpu_aql_host_template_t* host_template;
+  // Immutable device-local arguments retained through every native reader.
+  iree_hal_amd_gpu_program_constant_t constants;
 } iree_hal_amd_gpu_aql_command_program_t;
 
 // Seals native templates and private arguments. maximum_packet_count is
