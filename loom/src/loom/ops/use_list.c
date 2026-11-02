@@ -383,6 +383,7 @@ iree_status_t loom_module_compute_uses(loom_module_t* module) {
   loom_region_reset_summaries(module->body);
   module->poison_op_count = 0;
   module->semantic_call_op_count = 0;
+  module->low_internal_call_op_count = 0;
   // Clear all use data and live definition data on every value. Definition
   // pointers to erased operations retain immutable producer semantics.
   for (iree_host_size_t i = 0; i < module->values.count; ++i) {

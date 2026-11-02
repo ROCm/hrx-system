@@ -752,6 +752,10 @@ enum loom_op_flag_bits_e {
   // from its immutable vtable so CFG, scheduling, and emission hot paths can
   // classify branches without resolving the operation kind.
   LOOM_OP_FLAG_DIRECT_BRANCH = 1u << 5,
+
+  // The operation implements a target-Low internal call boundary. This is
+  // cached from its immutable vtable for the module call inventory.
+  LOOM_OP_FLAG_LOW_INTERNAL_CALL = 1u << 6,
 };
 typedef uint8_t loom_op_flags_t;
 
@@ -2790,6 +2794,9 @@ typedef struct loom_module_t {
 
   // Number of live ordinary semantic call operations in the module.
   uint32_t semantic_call_op_count;
+
+  // Number of live target-Low internal call operations in the module.
+  uint32_t low_internal_call_op_count;
 } loom_module_t;
 
 // Returns true when the module contains any live poison materializer.
@@ -2800,6 +2807,12 @@ static inline bool loom_module_has_poison(const loom_module_t* module) {
 // Returns true when the module contains any live ordinary semantic call.
 static inline bool loom_module_has_semantic_calls(const loom_module_t* module) {
   return module && module->semantic_call_op_count != 0;
+}
+
+// Returns true when the module contains any live target-Low internal call.
+static inline bool loom_module_has_low_internal_calls(
+    const loom_module_t* module) {
+  return module && module->low_internal_call_op_count != 0;
 }
 
 // Returns a pointer to a value by ID.
