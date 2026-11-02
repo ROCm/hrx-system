@@ -247,7 +247,7 @@ static iree_status_t loom_aie2p_program_compose_report(
     const loom_aie2p_program_compiler_t* compiler,
     const loom_op_t* entry_function_op,
     loom_aie2p_program_helper_list_t direct_helpers,
-    const loom_aie2p_leaf_contribution_t* program,
+    const loom_aie2p_program_object_t* program,
     loom_target_compile_report_t* report) {
   const loom_symbol_ref_t entry_ref =
       loom_low_func_def_callee(entry_function_op);
@@ -255,6 +255,8 @@ static iree_status_t loom_aie2p_program_compose_report(
   uint64_t emitted_code_byte_count = report->emitted_code_byte_count;
   loom_target_compile_report_emission_breakdown_t emission_breakdown =
       report->emission_breakdown;
+  loom_target_compile_report_static_instruction_mix_t static_mix =
+      report->static_instruction_mix;
   for (iree_host_size_t i = 0; i < direct_helpers.count; ++i) {
     const loom_symbol_ref_t helper_ref = direct_helpers.values[i].function;
     const loom_aie2p_program_callable_t* helper =
@@ -275,6 +277,11 @@ static iree_status_t loom_aie2p_program_compose_report(
     };
     IREE_RETURN_IF_ERROR(loom_target_compile_report_merge_function_evidence(
         report, helper_report, &merge_options));
+    if (program->canonical_indices[i + 1] != i + 1) {
+      continue;
+    }
+    loom_target_compile_report_accumulate_static_mix(
+        &static_mix, &helper_report->static_instruction_mix);
     emitted_instruction_count += helper_report->emitted_instruction_count;
     emitted_code_byte_count += helper_report->emitted_code_byte_count;
     emission_breakdown.body_instruction_count +=
@@ -288,9 +295,17 @@ static iree_status_t loom_aie2p_program_compose_report(
   }
   loom_target_compile_report_record_emission(
       report, emitted_instruction_count, emitted_code_byte_count,
-      program->realization.code.byte_length);
+      program->contribution.realization.code.byte_length);
   loom_target_compile_report_record_emission_breakdown(report,
                                                        &emission_breakdown);
+  // Logical helpers retain their compilation evidence and dynamic calls, but
+  // physical instruction counts include each canonical body only once.
+  if (iree_any_bit_set(
+          report->detail_flags,
+          LOOM_TARGET_COMPILE_REPORT_DETAIL_STATIC_INSTRUCTION_MIX)) {
+    loom_target_compile_report_record_static_instruction_mix(report,
+                                                             &static_mix);
+  }
   return iree_ok_status();
 }
 
@@ -455,9 +470,9 @@ static iree_status_t loom_aie2p_program_compile_impl(
   if (!entry_compiled) {
     return iree_ok_status();
   }
-  loom_aie2p_leaf_contribution_t program = {0};
+  loom_aie2p_program_object_t program = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_program_object_merge(
-      contributions, direct_helpers.count + 1, arena, &program));
+      contributions, direct_helpers.count + 1, arena, scratch_arena, &program));
   if (entry_options->compile_report != NULL) {
     IREE_RETURN_IF_ERROR(loom_aie2p_program_compose_report(
         compiler, entry_function_op, direct_helpers, &program,
@@ -465,12 +480,13 @@ static iree_status_t loom_aie2p_program_compile_impl(
   }
   bool capacity_admitted = false;
   IREE_RETURN_IF_ERROR(loom_aie2p_program_capacity_admit(
-      module, entry_function_op, program.realization.code.byte_length,
+      module, entry_function_op,
+      program.contribution.realization.code.byte_length,
       entry_options->diagnostic_emitter, &capacity_admitted));
   if (!capacity_admitted) {
     return iree_ok_status();
   }
-  *out_contribution = program;
+  *out_contribution = program.contribution;
   *out_compiled = true;
   return iree_ok_status();
 }
