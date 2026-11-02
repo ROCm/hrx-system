@@ -574,28 +574,41 @@ loom_amdgpu_short_wait_match_t loom_amdgpu_short_wait_begin_packet(
            traits, LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ALU |
                        LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX_MEMORY_CONSUMER) ||
        structural->vector_alu_instruction_count != 0);
-  if (structural->moves.count != 0) {
-    for (iree_host_size_t i = 0; i < structural->moves.count && i < 3; ++i) {
-      const loom_low_move_t* move =
-          &state->allocation->moves[structural->moves.start + i];
-      for (uint32_t j = 0; j < loom_low_move_access_count(move); ++j) {
-        const loom_low_move_location_t* read = loom_low_move_read(move, j);
-        const loom_low_move_location_t* write = loom_low_move_write(move, j);
-        if (dot_reasons && read->location_kind ==
-                               LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
+  if (structural->move_segment_count != 0) {
+    for (uint32_t segment_index = 0;
+         segment_index < structural->move_segment_count; ++segment_index) {
+      const loom_amdgpu_structural_move_segment_t* segment =
+          &structural->move_segments[segment_index];
+      const loom_low_move_range_t moves = segment->group->moves;
+      for (iree_host_size_t i = 0; i < moves.count; ++i) {
+        const uint64_t instruction_offset = segment->instruction_offset + i;
+        if (instruction_offset >= 3) {
+          break;
+        }
+        const loom_low_move_t* move =
+            &state->allocation->moves[moves.start + i];
+        for (uint32_t j = 0; j < loom_low_move_access_count(move); ++j) {
+          const loom_low_move_location_t* read = loom_low_move_read(move, j);
+          const loom_low_move_location_t* write = loom_low_move_write(move, j);
+          if (dot_reasons &&
+              read->location_kind ==
+                  LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
+            loom_amdgpu_short_wait_match_t candidate =
+                loom_amdgpu_short_wait_query(
+                    state, read->descriptor_reg_class_id, read->location, 1,
+                    (uint32_t)instruction_offset, dot_reasons);
+            if (candidate.cycles > match.cycles) {
+              match = candidate;
+            }
+          }
           loom_amdgpu_short_wait_match_t candidate =
-              loom_amdgpu_short_wait_query(state, read->descriptor_reg_class_id,
-                                           read->location, 1, (uint32_t)i,
-                                           dot_reasons);
+              loom_amdgpu_short_wait_query(
+                  state, write->descriptor_reg_class_id, write->location, 1,
+                  (uint32_t)instruction_offset,
+                  LOOM_AMDGPU_SHORT_WAIT_STORE_VALU | dot_reasons);
           if (candidate.cycles > match.cycles) {
             match = candidate;
           }
-        }
-        loom_amdgpu_short_wait_match_t candidate = loom_amdgpu_short_wait_query(
-            state, write->descriptor_reg_class_id, write->location, 1,
-            (uint32_t)i, LOOM_AMDGPU_SHORT_WAIT_STORE_VALU | dot_reasons);
-        if (candidate.cycles > match.cycles) {
-          match = candidate;
         }
       }
     }

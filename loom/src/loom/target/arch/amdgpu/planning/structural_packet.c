@@ -10,16 +10,23 @@
 #include "loom/codegen/low/allocation/move_topology.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
-static void loom_amdgpu_structural_packet_analyze_move_range(
+static void loom_amdgpu_structural_packet_append_move_group(
     const loom_low_allocation_table_t* allocation,
-    loom_low_move_range_t move_range,
+    const loom_low_move_group_t* move_group,
     loom_amdgpu_structural_packet_info_t* out_info) {
+  const loom_low_move_range_t move_range = move_group->moves;
   out_info->flags |= LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MOVEMENT;
-  out_info->instruction_count += move_range.count;
-  out_info->moves = move_range;
   if (move_range.count == 0) {
     return;
   }
+  IREE_ASSERT_LT(out_info->move_segment_count,
+                 LOOM_AMDGPU_STRUCTURAL_PACKET_MOVE_SEGMENT_CAPACITY);
+  out_info->move_segments[out_info->move_segment_count++] =
+      (loom_amdgpu_structural_move_segment_t){
+          .group = move_group,
+          .instruction_offset = out_info->instruction_count,
+      };
+  out_info->instruction_count += move_range.count;
   out_info->flags |= LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MATERIALIZES;
   for (iree_host_size_t i = 0; i < move_range.count; ++i) {
     const loom_low_move_t* move = &allocation->moves[move_range.start + i];
@@ -60,8 +67,8 @@ static void loom_amdgpu_structural_packet_analyze_packet_moves(
     out_info->flags |= LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_FORWARDS_DEPENDENCIES;
   }
   if (group->move_group.moves.count != 0) {
-    loom_amdgpu_structural_packet_analyze_move_range(
-        allocation, group->move_group.moves, out_info);
+    loom_amdgpu_structural_packet_append_move_group(
+        allocation, &group->move_group, out_info);
   }
 }
 
@@ -106,8 +113,8 @@ loom_amdgpu_structural_packet_info_t loom_amdgpu_structural_packet_analyze(
           loom_low_allocation_find_edge_copy_group_by_source_ordinal(
               allocation, node_index);
       IREE_ASSERT(group != NULL);
-      loom_amdgpu_structural_packet_analyze_move_range(
-          allocation, group->move_group.moves, &info);
+      loom_amdgpu_structural_packet_append_move_group(
+          allocation, &group->move_group, &info);
     }
     const uint64_t control_transfer_count =
         loom_amdgpu_structural_packet_control_transfer_count(schedule, node);

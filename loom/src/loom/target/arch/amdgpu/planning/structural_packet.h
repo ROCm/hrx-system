@@ -40,19 +40,50 @@ typedef enum loom_amdgpu_structural_packet_flag_bits_e {
 } loom_amdgpu_structural_packet_flag_bits_t;
 typedef uint32_t loom_amdgpu_structural_packet_flags_t;
 
+// A final parallel-move group at its native instruction offset inside one
+// structural packet. The group remains owned by the allocation table.
+typedef struct loom_amdgpu_structural_move_segment_t {
+  // Allocation-owned final move rows and cycle-scratch metadata.
+  const loom_low_move_group_t* group;
+  // Native instruction offset of the first sequential move.
+  uint64_t instruction_offset;
+} loom_amdgpu_structural_move_segment_t;
+
+#define LOOM_AMDGPU_STRUCTURAL_PACKET_MOVE_SEGMENT_CAPACITY 2
+
 typedef struct loom_amdgpu_structural_packet_info_t {
   // Classification flags for the structural packet.
   loom_amdgpu_structural_packet_flags_t flags;
+  // Number of ordered entries in |move_segments|.
+  uint32_t move_segment_count;
   // Scheduled native instructions represented by the structural packet,
   // excluding target insertion overlays.
   uint64_t instruction_count;
-  // Final sequential physical moves emitted by the structural packet.
-  loom_low_move_range_t moves;
-  // Native vector-ALU instructions outside of |moves|.
+  // Ordered physical-move groups within the structural packet. Existing
+  // structural transfers use one leading segment; retained calls use argument
+  // and result segments separated by their native control sequence.
+  loom_amdgpu_structural_move_segment_t
+      move_segments[LOOM_AMDGPU_STRUCTURAL_PACKET_MOVE_SEGMENT_CAPACITY];
+  // Native vector-ALU instructions outside of |move_segments|.
   uint64_t vector_alu_instruction_count;
-  // Native scalar-ALU instructions outside of |moves|.
+  // Native scalar-ALU instructions outside of |move_segments|.
   uint64_t scalar_alu_instruction_count;
 } loom_amdgpu_structural_packet_info_t;
+
+#if UINTPTR_MAX == UINT64_MAX
+static_assert(sizeof(loom_amdgpu_structural_packet_info_t) == 64,
+              "structural packet analysis must remain a compact stack value");
+#endif  // UINTPTR_MAX == UINT64_MAX
+
+// Returns the total number of final sequential move instructions.
+static inline uint64_t loom_amdgpu_structural_packet_move_count(
+    const loom_amdgpu_structural_packet_info_t* info) {
+  uint64_t count = 0;
+  for (uint32_t i = 0; i < info->move_segment_count; ++i) {
+    count += info->move_segments[i].group->moves.count;
+  }
+  return count;
+}
 
 // Returns native issue progress guaranteed along every outgoing path.
 static inline uint64_t loom_amdgpu_structural_packet_minimum_instruction_count(

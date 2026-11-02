@@ -213,35 +213,42 @@ iree_status_t loom_amdgpu_sgpr_read_wait_collect_packet(
   };
   if (packet->descriptor == NULL) {
     iree_status_t status = iree_ok_status();
-    for (iree_host_size_t i = 0;
-         i < structural->moves.count && iree_status_is_ok(status); ++i) {
-      const loom_low_move_t* move =
-          &allocation->moves[structural->moves.start + i];
-      event = (loom_amdgpu_sgpr_read_wait_event_t){
-          .packet_index = packet->packet_index,
-          .instruction_offset = (uint32_t)i,
-          .kind = move->destination.descriptor_reg_class_id ==
-                              LOOM_AMDGPU_REG_CLASS_ID_VGPR ||
-                          move->source.descriptor_reg_class_id ==
-                              LOOM_AMDGPU_REG_CLASS_ID_VGPR
-                      ? LOOM_AMDGPU_SGPR_READ_WAIT_VECTOR
-                      : LOOM_AMDGPU_SGPR_READ_WAIT_SCALAR,
-      };
-      if (move->source.location_kind ==
-          LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
-        loom_amdgpu_sgpr_read_wait_set_range(
-            event.reads, move->source.descriptor_reg_class_id,
-            move->source.location, 1, false);
+    for (uint32_t segment_index = 0;
+         segment_index < structural->move_segment_count &&
+         iree_status_is_ok(status);
+         ++segment_index) {
+      const loom_amdgpu_structural_move_segment_t* segment =
+          &structural->move_segments[segment_index];
+      const loom_low_move_range_t moves = segment->group->moves;
+      for (iree_host_size_t i = 0; i < moves.count && iree_status_is_ok(status);
+           ++i) {
+        const loom_low_move_t* move = &allocation->moves[moves.start + i];
+        event = (loom_amdgpu_sgpr_read_wait_event_t){
+            .packet_index = packet->packet_index,
+            .instruction_offset = (uint32_t)(segment->instruction_offset + i),
+            .kind = move->destination.descriptor_reg_class_id ==
+                                LOOM_AMDGPU_REG_CLASS_ID_VGPR ||
+                            move->source.descriptor_reg_class_id ==
+                                LOOM_AMDGPU_REG_CLASS_ID_VGPR
+                        ? LOOM_AMDGPU_SGPR_READ_WAIT_VECTOR
+                        : LOOM_AMDGPU_SGPR_READ_WAIT_SCALAR,
+        };
+        if (move->source.location_kind ==
+            LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
+          loom_amdgpu_sgpr_read_wait_set_range(
+              event.reads, move->source.descriptor_reg_class_id,
+              move->source.location, 1, false);
+        }
+        if (move->destination.location_kind ==
+            LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
+          loom_amdgpu_sgpr_read_wait_set_range(
+              event.writes, move->destination.descriptor_reg_class_id,
+              move->destination.location, 1,
+              event.kind == LOOM_AMDGPU_SGPR_READ_WAIT_SCALAR);
+        }
+        status = loom_amdgpu_sgpr_read_wait_collect(
+            state, (uint16_t)packet->node->block_index, &event);
       }
-      if (move->destination.location_kind ==
-          LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
-        loom_amdgpu_sgpr_read_wait_set_range(
-            event.writes, move->destination.descriptor_reg_class_id,
-            move->destination.location, 1,
-            event.kind == LOOM_AMDGPU_SGPR_READ_WAIT_SCALAR);
-      }
-      status = loom_amdgpu_sgpr_read_wait_collect(
-          state, (uint16_t)packet->node->block_index, &event);
     }
     return status;
   }

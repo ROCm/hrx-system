@@ -666,13 +666,12 @@ static void loom_amdgpu_matrix_coexecution_query_packet_values(
 
 static uint16_t loom_amdgpu_matrix_coexecution_query_moves(
     loom_amdgpu_matrix_coexecution_t* coexecution, loom_low_move_range_t moves,
-    bool retain_consumers,
+    uint16_t vector_issue_count, bool retain_consumers,
     loom_amdgpu_matrix_coexecution_match_t* inout_match) {
   const loom_amdgpu_matrix_coexecution_query_flags_t query_flags =
       retain_consumers
           ? LOOM_AMDGPU_MATRIX_COEXECUTION_QUERY_FLAG_RETAIN_CONSUMER
           : 0;
-  uint16_t vector_issue_count = 0;
   for (iree_host_size_t i = 0; i < moves.count; ++i) {
     const loom_low_move_t* move =
         &coexecution->allocation->moves[moves.start + i];
@@ -770,8 +769,13 @@ static void loom_amdgpu_matrix_coexecution_inspect_packet_impl(
     loom_amdgpu_matrix_coexecution_query_packet_values(
         coexecution, packet, retain_consumers, inout_match);
   }
-  const uint16_t move_issue_count = loom_amdgpu_matrix_coexecution_query_moves(
-      coexecution, structural_info->moves, retain_consumers, inout_match);
+  uint16_t move_issue_count = 0;
+  for (uint32_t segment_index = 0;
+       segment_index < structural_info->move_segment_count; ++segment_index) {
+    move_issue_count = loom_amdgpu_matrix_coexecution_query_moves(
+        coexecution, structural_info->move_segments[segment_index].group->moves,
+        move_issue_count, retain_consumers, inout_match);
+  }
   *out_vector_issue_count = loom_amdgpu_matrix_coexecution_saturate_issue_count(
       coexecution,
       structural_info->vector_alu_instruction_count + move_issue_count);

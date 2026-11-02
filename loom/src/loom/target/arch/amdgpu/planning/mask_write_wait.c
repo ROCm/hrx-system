@@ -183,21 +183,28 @@ iree_status_t loom_amdgpu_mask_write_wait_collect(
     loom_amdgpu_descriptor_traits_t traits) {
   iree_status_t status = iree_ok_status();
   if (packet->descriptor == NULL) {
-    for (uint32_t i = 0;
-         i < structural->moves.count && iree_status_is_ok(status); ++i) {
-      const loom_low_move_t* move =
-          &state->allocation->moves[structural->moves.start + i];
-      if (move->destination.descriptor_reg_class_id !=
-          LOOM_AMDGPU_REG_CLASS_ID_SGPR) {
-        continue;
+    for (uint32_t segment_index = 0;
+         segment_index < structural->move_segment_count &&
+         iree_status_is_ok(status);
+         ++segment_index) {
+      const loom_amdgpu_structural_move_segment_t* segment =
+          &structural->move_segments[segment_index];
+      const loom_low_move_range_t moves = segment->group->moves;
+      for (uint32_t i = 0; i < moves.count && iree_status_is_ok(status); ++i) {
+        const loom_low_move_t* move =
+            &state->allocation->moves[moves.start + i];
+        if (move->destination.descriptor_reg_class_id !=
+            LOOM_AMDGPU_REG_CLASS_ID_SGPR) {
+          continue;
+        }
+        uint64_t writes[2] = {0};
+        loom_amdgpu_mask_write_set_range(
+            writes, move->destination.descriptor_reg_class_id,
+            move->destination.location, 1);
+        status = loom_amdgpu_mask_write_record(
+            state, packet, (uint32_t)(segment->instruction_offset + i + 1),
+            writes, LOOM_AMDGPU_DESCRIPTOR_TRAIT_SCALAR_ALU);
       }
-      uint64_t writes[2] = {0};
-      loom_amdgpu_mask_write_set_range(
-          writes, move->destination.descriptor_reg_class_id,
-          move->destination.location, 1);
-      status = loom_amdgpu_mask_write_record(
-          state, packet, i + 1, writes,
-          LOOM_AMDGPU_DESCRIPTOR_TRAIT_SCALAR_ALU);
     }
     return status;
   }

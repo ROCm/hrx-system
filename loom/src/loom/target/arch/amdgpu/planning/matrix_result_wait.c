@@ -747,26 +747,34 @@ loom_amdgpu_matrix_result_match_t loom_amdgpu_matrix_result_wait_inspect(
     const loom_amdgpu_structural_packet_info_t* structural,
     bool memory_consumer) {
   loom_amdgpu_matrix_result_match_t match = {0};
-  if (structural->moves.count != 0) {
-    for (iree_host_size_t i = 0; i < structural->moves.count; ++i) {
-      const loom_low_move_t* move =
-          &state->allocation->moves[structural->moves.start + i];
-      for (uint32_t j = 0; j < loom_low_move_access_count(move); ++j) {
-        const loom_low_move_location_t* read = loom_low_move_read(move, j);
-        const loom_low_move_location_t* write = loom_low_move_write(move, j);
-        if (read->location_kind ==
-            LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
-          loom_amdgpu_matrix_result_wait_match(
-              state, read->descriptor_reg_class_id, read->location, 1, i,
-              LOOM_AMDGPU_MATRIX_WAIT_RESULT_USE_VALU_READ,
-              (loom_amdgpu_matrix_instruction_t){0}, &match);
-        }
-        if (write->location_kind ==
-            LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
-          loom_amdgpu_matrix_result_wait_match(
-              state, write->descriptor_reg_class_id, write->location, 1, i,
-              LOOM_AMDGPU_MATRIX_WAIT_RESULT_USE_WRITE,
-              (loom_amdgpu_matrix_instruction_t){0}, &match);
+  if (structural->move_segment_count != 0) {
+    for (uint32_t segment_index = 0;
+         segment_index < structural->move_segment_count; ++segment_index) {
+      const loom_amdgpu_structural_move_segment_t* segment =
+          &structural->move_segments[segment_index];
+      const loom_low_move_range_t moves = segment->group->moves;
+      for (iree_host_size_t i = 0; i < moves.count; ++i) {
+        const loom_low_move_t* move =
+            &state->allocation->moves[moves.start + i];
+        const uint64_t instruction_offset = segment->instruction_offset + i;
+        for (uint32_t j = 0; j < loom_low_move_access_count(move); ++j) {
+          const loom_low_move_location_t* read = loom_low_move_read(move, j);
+          const loom_low_move_location_t* write = loom_low_move_write(move, j);
+          if (read->location_kind ==
+              LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
+            loom_amdgpu_matrix_result_wait_match(
+                state, read->descriptor_reg_class_id, read->location, 1,
+                instruction_offset,
+                LOOM_AMDGPU_MATRIX_WAIT_RESULT_USE_VALU_READ,
+                (loom_amdgpu_matrix_instruction_t){0}, &match);
+          }
+          if (write->location_kind ==
+              LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
+            loom_amdgpu_matrix_result_wait_match(
+                state, write->descriptor_reg_class_id, write->location, 1,
+                instruction_offset, LOOM_AMDGPU_MATRIX_WAIT_RESULT_USE_WRITE,
+                (loom_amdgpu_matrix_instruction_t){0}, &match);
+          }
         }
       }
     }
