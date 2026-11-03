@@ -314,6 +314,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low/transforms:cse",
         "//loom/src/loom/codegen/low/transforms:dce",
         "//loom/src/loom/codegen/low/transforms:operand_forms",
+        "//loom/src/loom/codegen/low/transforms:verification",
         "//loom/src/loom/codegen/low/transforms/pipeline:source_to_low",
         "//loom/src/loom/codegen/low/transforms/pipeline:target_legalize",
         "//loom/src/loom/sanitizer:materialize_assertions",

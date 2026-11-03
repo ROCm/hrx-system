@@ -30,8 +30,8 @@ func.def target(@target) @carry_fifo_states(%input: buffer, %output: buffer) {
 
 // ----
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @carry_fifo_states() asm {
-  %fifo0 = live_in<amd.xdna.aie2p.load_fifo.0> : reg<aie2p.eldfiforeg>
-  %fifo1 = live_in<amd.xdna.aie2p.load_fifo.1> : reg<aie2p.eldfiforeg>
+  %fifo0 = live_in<amd.xdna.aie2p.load_fifo.lda> : reg<aie2p.eldfiforeg>
+  %fifo1 = live_in<amd.xdna.aie2p.load_fifo.ldb> : reg<aie2p.eldfiforeg>
   %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %begin = mov.short 0

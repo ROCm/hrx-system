@@ -994,6 +994,23 @@ iree_status_t loom_low_lower_plan_declaration(
   return status;
 }
 
+iree_status_t loom_low_lower_declaration_plan_publish_call_interface(
+    const loom_low_lower_declaration_plan_t* plan,
+    loom_low_lower_call_interface_index_t* index) {
+  const loom_low_lower_function_boundary_t* boundary = &plan->boundary;
+  const loom_low_lower_call_interface_t interface = {
+      .argument_types = boundary->argument_types,
+      .argument_count = boundary->argument_count,
+      .result_types = boundary->physical_result_types,
+      .result_count = boundary->physical_result_count,
+      .tied_results = boundary->tied_results,
+      .tied_result_count = boundary->tied_result_count,
+  };
+  return loom_low_lower_call_interface_index_publish(
+      index, loom_func_like_callee(plan->source_declaration).symbol_id,
+      &interface);
+}
+
 static iree_status_t loom_low_lower_create_decl_op(
     loom_low_lower_context_t* context,
     const loom_low_lower_declaration_plan_t* plan) {
@@ -1183,7 +1200,16 @@ iree_status_t loom_low_lower_function_boundary_emit_resource_imports(
   loom_region_t* low_body = loom_low_lower_low_body(context);
   loom_builder_ip_t saved_ip = loom_builder_enter_region(
       &context->builder, context->low_func_op, low_body);
-  loom_builder_set_block(&context->builder, loom_region_entry_block(low_body));
+  loom_block_t* entry_block = loom_region_entry_block(low_body);
+  loom_builder_set_block(&context->builder, entry_block);
+  loom_op_t* insertion_op = entry_block->first_op;
+  while (insertion_op != NULL && (loom_low_live_in_isa(insertion_op) ||
+                                  loom_low_resource_isa(insertion_op))) {
+    insertion_op = insertion_op->next_op;
+  }
+  if (insertion_op != NULL) {
+    loom_builder_set_before(&context->builder, insertion_op);
+  }
   iree_status_t status = iree_ok_status();
   for (uint16_t i = 0; i < argument_count && iree_status_is_ok(status); ++i) {
     if (context->lowering->boundary.argument_map[i].kind !=

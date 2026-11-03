@@ -16,6 +16,7 @@
 #include "loom/codegen/low/transforms/operand_forms.h"
 #include "loom/codegen/low/transforms/pipeline/source_to_low.h"
 #include "loom/codegen/low/transforms/pipeline/target_legalize.h"
+#include "loom/codegen/low/transforms/verification.h"
 #include "loom/sanitizer/materialize_assertions.h"
 #include "loom/sanitizer/pipeline_passes.h"
 #include "loom/sanitizer/race_insertion.h"
@@ -375,6 +376,23 @@ static const loom_pass_requirement_def_t kMutableFunctionVersionRequirements[] =
         },
 };
 
+static const loom_pass_requirement_def_t kLowVerificationRequirements[] = {
+    {
+        .capability_type = &loom_low_pass_capability_type,
+        .key =
+            IREE_SVL(LOOM_LOW_PASS_REQUIREMENT_TARGET_LOW_DESCRIPTOR_REGISTRY),
+        .description =
+            IREE_SVL("Requires a pass environment target-low descriptor "
+                     "registry."),
+    },
+    {
+        .capability_type = &loom_target_pass_capability_type,
+        .key = IREE_SVL(LOOM_TARGET_PASS_REQUIREMENT_PROVIDER_ENVIRONMENT),
+        .description =
+            IREE_SVL("Requires the linked target provider environment."),
+    },
+};
+
 static const loom_pass_requirement_def_t kSourceCombineRequirements[] = {
     {
         .capability_type = &loom_cleanup_pass_capability_type,
@@ -721,6 +739,13 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .key = IREE_SVL("vector-to-scalar"),
         .info = loom_vector_to_scalar_pass_info,
         .function_run = loom_vector_to_scalar_run,
+    },
+    {
+        .key = IREE_SVL("verify-low"),
+        .info = loom_low_verification_pass_info,
+        .module_run = loom_low_verification_run,
+        .requirement_defs = kLowVerificationRequirements,
+        .requirement_count = IREE_ARRAYSIZE(kLowVerificationRequirements),
     },
 };
 

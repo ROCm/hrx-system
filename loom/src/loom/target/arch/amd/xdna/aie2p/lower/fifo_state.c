@@ -82,8 +82,8 @@ iree_status_t loom_aie2p_emit_fifo_state_preamble(
   }
 
   static const iree_string_view_t source_names[] = {
-      IREE_SVL("amd.xdna.aie2p.load_fifo.0"),
-      IREE_SVL("amd.xdna.aie2p.load_fifo.1"),
+      IREE_SVL("amd.xdna.aie2p.load_fifo.lda"),
+      IREE_SVL("amd.xdna.aie2p.load_fifo.ldb"),
   };
   const loom_value_id_t source_results[] = {
       loom_aie2p_load_fifo_state_fifo0(import->source_op),

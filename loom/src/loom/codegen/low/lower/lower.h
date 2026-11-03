@@ -1139,6 +1139,48 @@ typedef enum loom_low_control_flow_lowering_e {
   LOOM_LOW_CONTROL_FLOW_LOWERING_STRUCTURED_LOW = 1,
 } loom_low_control_flow_lowering_t;
 
+// Physical callable boundary retained once per planned source definition.
+// Direct calls consume this exact interface instead of independently mapping
+// their operands and results.
+typedef struct loom_low_lower_call_interface_t {
+  // Direct physical argument types in callable order.
+  const loom_type_t* argument_types;
+  // Number of direct physical arguments.
+  uint16_t argument_count;
+  // Physical result types in callable order.
+  const loom_type_t* result_types;
+  // Number of physical results.
+  uint16_t result_count;
+  // Physical result-to-argument ties.
+  const loom_tied_result_t* tied_results;
+  // Number of physical result ties.
+  uint16_t tied_result_count;
+} loom_low_lower_call_interface_t;
+
+typedef struct loom_low_lower_call_interface_index_t {
+  // Arena owning published interface records.
+  iree_arena_allocator_t* arena;
+  // Sparse module-symbol table of published callable interfaces.
+  const loom_low_lower_call_interface_t** interfaces;
+  // Number of entries in interfaces.
+  iree_host_size_t interface_count;
+} loom_low_lower_call_interface_index_t;
+
+// Initializes an empty direct-call interface index for a module symbol table.
+iree_status_t loom_low_lower_call_interface_index_initialize(
+    iree_arena_allocator_t* arena, iree_host_size_t symbol_count,
+    loom_low_lower_call_interface_index_t* out_index);
+
+// Returns a published module-local direct-call interface, or NULL.
+const loom_low_lower_call_interface_t* loom_low_lower_call_interface_index_find(
+    const loom_low_lower_call_interface_index_t* index,
+    loom_symbol_id_t symbol_id);
+
+// Copies one planned callable interface into its module-symbol slot.
+iree_status_t loom_low_lower_call_interface_index_publish(
+    loom_low_lower_call_interface_index_t* index, loom_symbol_id_t symbol_id,
+    const loom_low_lower_call_interface_t* interface);
+
 typedef struct loom_low_lower_options_t {
   // Module-local target record symbol used by the emitted low function.
   loom_symbol_ref_t target_ref;
@@ -1165,6 +1207,8 @@ typedef struct loom_low_lower_options_t {
   // declarations, definitions, and their direct calls are published.
   const loom_low_source_signature_projection_index_t*
       source_signature_projections;
+  // Physical interfaces published by callee plans before caller planning.
+  const loom_low_lower_call_interface_index_t* call_interfaces;
   // Structured diagnostic emitter for user legality and lowering failures.
   iree_diagnostic_emitter_t emitter;
   // Maximum number of errors to emit before aborting. Zero means no limit.
@@ -1261,6 +1305,11 @@ iree_status_t loom_low_lower_plan_function(
     const loom_low_lower_options_t* options, iree_arena_allocator_t* arena,
     loom_low_lower_result_t* out_result,
     loom_low_lower_function_plan_t** out_plan);
+
+// Publishes a planned definition's physical boundary for direct callers.
+iree_status_t loom_low_lower_function_plan_publish_call_interface(
+    const loom_low_lower_function_plan_t* plan,
+    loom_low_lower_call_interface_index_t* index);
 
 // Executes a retained plan once, replacing its source definition. The result
 // must be the one initialized by plan_function; execution adds emitted output

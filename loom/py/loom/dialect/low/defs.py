@@ -1506,9 +1506,6 @@ low_slice = Op(
     results=[Result("result", REGISTER)],
     structural_materialization=True,
     traits=[PURE, STORAGE_RELATION],
-    constraints=[
-        SameRegisterClass("source", "result"),
-    ],
     canonicalize="loom_low_slice_canonicalize",
     canonicalize_without_facts=True,
     verify="loom_low_slice_verify",

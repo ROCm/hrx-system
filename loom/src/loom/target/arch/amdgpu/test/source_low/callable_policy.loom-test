@@ -76,10 +76,9 @@ low.func.def noinline target<amdgpu.gfx11.generic.core> @load(%input_view: reg<a
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @buffer_call() asm {
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {extent = 4, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %value = low.func.call @load(%input) : (reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>)
-  %21 = v_mov_b32_copy %value
-  %22 = v_mov_b32 0
-  global_store_b32_saddr %22, %21, %output_view
+  %value = low.func.call @load(%input) : (reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>)
+  %21 = v_mov_b32 0
+  global_store_b32_saddr %21, %value, %output_view
   return
 }
 

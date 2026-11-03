@@ -203,17 +203,17 @@ iree_status_t loom_low_source_invocation_facts_compute(
     }
   }
 
-  loom_call_graph_t call_graph = {0};
   if (iree_status_is_ok(status)) {
-    status = loom_call_graph_build(module, &analysis_arena, &call_graph);
+    status = loom_call_graph_build(module, arena, &out_facts->call_graph);
   }
-  for (uint16_t scc = call_graph.scc_count;
+  const loom_call_graph_t* call_graph = &out_facts->call_graph;
+  for (uint16_t scc = call_graph->scc_count;
        iree_status_is_ok(status) && scc > 0; --scc) {
     const uint16_t scc_id = (uint16_t)(scc - 1);
     for (uint16_t node_index = 0;
-         iree_status_is_ok(status) && node_index < call_graph.node_count;
+         iree_status_is_ok(status) && node_index < call_graph->node_count;
          ++node_index) {
-      const loom_call_graph_node_t* node = &call_graph.nodes[node_index];
+      const loom_call_graph_node_t* node = &call_graph->nodes[node_index];
       if (node->scc_id != scc_id) {
         continue;
       }
@@ -251,7 +251,7 @@ iree_status_t loom_low_source_invocation_facts_compute(
       if (iree_status_is_ok(status)) {
         loom_low_source_invocation_collect_t collect = {
             .module = module,
-            .call_graph = &call_graph,
+            .call_graph = call_graph,
             .resolved_target =
                 target_version ? &target_version->resolved_target : NULL,
             .caller_facts = caller_facts,

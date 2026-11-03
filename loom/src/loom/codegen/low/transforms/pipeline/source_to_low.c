@@ -67,6 +67,130 @@ typedef struct loom_low_source_function_plan_t {
   loom_low_lower_result_t result;
 } loom_low_source_function_plan_t;
 
+typedef struct loom_low_source_function_plan_order_t {
+  // Function plans retained in source selection order for emission.
+  loom_low_source_function_plan_t* plans;
+  // Pointers into plans ordered with callees before callers for planning, or
+  // NULL when source order already satisfies the call-free module.
+  loom_low_source_function_plan_t** planning_order;
+  // Number of entries in plans and planning_order.
+  iree_host_size_t count;
+} loom_low_source_function_plan_order_t;
+
+typedef struct loom_low_source_function_plan_frame_t {
+  // Index of the function plan being visited.
+  uint16_t plan_index;
+  // Next call-graph callee to visit.
+  uint16_t callee_cursor;
+} loom_low_source_function_plan_frame_t;
+
+// Builds source-order and stable callee-first views over selected functions.
+// An iterative postorder visits each function and call edge once. Unrelated
+// functions retain source selection order; dependencies move only callees in
+// front of their callers.
+static iree_status_t loom_low_source_function_plan_order_build(
+    const loom_low_source_selection_list_t* selections,
+    iree_host_size_t function_count, const loom_call_graph_t* call_graph,
+    iree_arena_allocator_t* arena,
+    loom_low_source_function_plan_order_t* out_order) {
+  *out_order = (loom_low_source_function_plan_order_t){0};
+  if (function_count == 0) {
+    return iree_ok_status();
+  }
+
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, function_count,
+                                                 sizeof(*out_order->plans),
+                                                 (void**)&out_order->plans));
+  for (iree_host_size_t i = 0; i < selections->count; ++i) {
+    const loom_low_source_selection_t* selection = &selections->values[i];
+    if (selection->kind != LOOM_LOW_SOURCE_SELECTION_FUNCTION) {
+      continue;
+    }
+    out_order->plans[out_order->count++] =
+        (loom_low_source_function_plan_t){.selection = selection};
+  }
+  IREE_ASSERT_EQ(out_order->count, function_count);
+
+  if (call_graph->node_count == 0) {
+    return iree_ok_status();
+  }
+
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, function_count, sizeof(*out_order->planning_order),
+      (void**)&out_order->planning_order));
+
+  uint16_t* symbol_to_plan = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, call_graph->symbol_to_node_count, sizeof(*symbol_to_plan),
+      (void**)&symbol_to_plan));
+  memset(symbol_to_plan, 0xFF,
+         call_graph->symbol_to_node_count * sizeof(*symbol_to_plan));
+  for (iree_host_size_t i = 0; i < function_count; ++i) {
+    const loom_symbol_id_t symbol_id =
+        loom_func_like_callee(out_order->plans[i].selection->func).symbol_id;
+    IREE_ASSERT_LT(i, UINT16_MAX);
+    IREE_ASSERT_LT(symbol_id, call_graph->symbol_to_node_count);
+    symbol_to_plan[symbol_id] = (uint16_t)i;
+  }
+
+  uint8_t* visit_states = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, function_count, sizeof(*visit_states), (void**)&visit_states));
+  memset(visit_states, 0, function_count * sizeof(*visit_states));
+  loom_low_source_function_plan_frame_t* stack = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, function_count, sizeof(*stack), (void**)&stack));
+  uint16_t stack_count = 0;
+  iree_host_size_t planning_count = 0;
+  for (uint16_t root = 0; root < function_count; ++root) {
+    if (visit_states[root] != 0) {
+      continue;
+    }
+    visit_states[root] = 1;
+    stack[stack_count++] = (loom_low_source_function_plan_frame_t){
+        .plan_index = root,
+    };
+    while (stack_count != 0) {
+      loom_low_source_function_plan_frame_t* frame = &stack[stack_count - 1];
+      const loom_symbol_id_t symbol_id =
+          loom_func_like_callee(
+              out_order->plans[frame->plan_index].selection->func)
+              .symbol_id;
+      const loom_call_graph_node_t* node =
+          loom_call_graph_node(call_graph, symbol_id);
+      IREE_ASSERT(node != NULL);
+      bool pushed_callee = false;
+      while (frame->callee_cursor < node->callee_count) {
+        const loom_symbol_id_t callee_symbol_id =
+            node->callees[frame->callee_cursor++];
+        if (callee_symbol_id >= call_graph->symbol_to_node_count) {
+          continue;
+        }
+        const uint16_t callee_plan_index = symbol_to_plan[callee_symbol_id];
+        if (callee_plan_index == UINT16_MAX ||
+            visit_states[callee_plan_index] != 0) {
+          continue;
+        }
+        visit_states[callee_plan_index] = 1;
+        stack[stack_count++] = (loom_low_source_function_plan_frame_t){
+            .plan_index = callee_plan_index,
+        };
+        pushed_callee = true;
+        break;
+      }
+      if (pushed_callee) {
+        continue;
+      }
+      out_order->planning_order[planning_count++] =
+          &out_order->plans[frame->plan_index];
+      visit_states[frame->plan_index] = 2;
+      --stack_count;
+    }
+  }
+  IREE_ASSERT_EQ(planning_count, function_count);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_source_to_low_record_target_specialization(
     loom_target_compile_report_t* compile_report,
     const loom_low_source_selection_t* selection) {
@@ -509,6 +633,14 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     status = loom_low_source_invocation_facts_compute(
         pass, module, &selection_list, &selection_arena, &invocation_facts);
   }
+  loom_low_lower_call_interface_index_t call_interfaces = {0};
+  const loom_low_lower_call_interface_index_t* call_interface_index = NULL;
+  if (iree_status_is_ok(status) && !emitted_error_diagnostics &&
+      loom_module_has_semantic_calls(module)) {
+    status = loom_low_lower_call_interface_index_initialize(
+        &selection_arena, module->symbols.count, &call_interfaces);
+    call_interface_index = &call_interfaces;
+  }
   if (iree_status_is_ok(status) && !emitted_error_diagnostics &&
       selected_declaration_count != 0) {
     status = iree_arena_allocate_array(
@@ -530,6 +662,7 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
         .descriptor_registry = descriptor_registry,
         .policy = selection->policy,
         .source_signature_projections = &source_signature_index,
+        .call_interfaces = call_interface_index,
         .emitter = pass->diagnostic_emitter,
         .max_errors = state ? state->max_errors : 20,
         .control_flow_lowering = state ? state->control_flow_lowering
@@ -557,25 +690,28 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
               .selection = selection,
               .declaration = declaration_plan,
           };
+      if (call_interface_index != NULL) {
+        status = loom_low_lower_declaration_plan_publish_call_interface(
+            declaration_plan, &call_interfaces);
+      }
     }
     loom_low_lower_result_deinitialize(&lower_result);
   }
-  loom_low_source_function_plan_t* function_plans = NULL;
-  iree_host_size_t planned_function_count = 0;
-  if (iree_status_is_ok(status) && !emitted_error_diagnostics &&
-      selected_function_count != 0) {
-    status = iree_arena_allocate_array(
-        &selection_arena, selected_function_count, sizeof(*function_plans),
-        (void**)&function_plans);
+  loom_low_source_function_plan_order_t function_plan_order = {0};
+  if (iree_status_is_ok(status) && !emitted_error_diagnostics) {
+    status = loom_low_source_function_plan_order_build(
+        &selection_list, selected_function_count, &invocation_facts.call_graph,
+        &selection_arena, &function_plan_order);
   }
   for (iree_host_size_t i = 0;
-       i < selection_list.count && iree_status_is_ok(status) &&
+       i < function_plan_order.count && iree_status_is_ok(status) &&
        !emitted_error_diagnostics;
        ++i) {
-    const loom_low_source_selection_t* selection = &selection_list.values[i];
-    if (selection->kind != LOOM_LOW_SOURCE_SELECTION_FUNCTION) {
-      continue;
-    }
+    loom_low_source_function_plan_t* plan =
+        function_plan_order.planning_order != NULL
+            ? function_plan_order.planning_order[i]
+            : &function_plan_order.plans[i];
+    const loom_low_source_selection_t* selection = plan->selection;
     const loom_target_low_legality_provider_list_t* legality_provider_list =
         loom_low_pass_capability_legality_provider_list(low_capability);
     loom_value_fact_table_t* fact_table = NULL;
@@ -604,6 +740,7 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
         .storage_access = &storage_access,
         .representation_projections = &projection_index,
         .source_signature_projections = &source_signature_index,
+        .call_interfaces = call_interface_index,
         .emitter = pass->diagnostic_emitter,
         .max_errors = state ? state->max_errors : 20,
         .control_flow_lowering = state ? state->control_flow_lowering
@@ -614,9 +751,6 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
         .module_state = module_state,
         .report_allocator = source_low_report_allocator,
     };
-    loom_low_source_function_plan_t* plan =
-        &function_plans[planned_function_count++];
-    *plan = (loom_low_source_function_plan_t){.selection = selection};
     if (launch_config_program != NULL) {
       status = loom_kernel_launch_config_program_capture(
           launch_config_program, module, selection->func,
@@ -627,6 +761,11 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
       status = loom_low_lower_plan_function(module, selection->func,
                                             &lower_options, &selection_arena,
                                             &plan->result, &plan->function);
+    }
+    if (iree_status_is_ok(status) && plan->result.error_count == 0 &&
+        call_interface_index != NULL) {
+      status = loom_low_lower_function_plan_publish_call_interface(
+          plan->function, &call_interfaces);
     }
     loom_pass_value_fact_owner_invalidate(pass->value_facts);
     statistics->errors += (int64_t)plan->result.error_count;
@@ -665,10 +804,10 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
   }
   uint32_t function_count = 0;
   for (iree_host_size_t i = 0;
-       i < planned_function_count && iree_status_is_ok(status) &&
+       i < function_plan_order.count && iree_status_is_ok(status) &&
        !emitted_error_diagnostics;
        ++i) {
-    loom_low_source_function_plan_t* plan = &function_plans[i];
+    loom_low_source_function_plan_t* plan = &function_plan_order.plans[i];
     const loom_low_source_selection_t* selection = plan->selection;
     status = loom_low_lower_emit_function(plan->function, &plan->result);
     if (iree_status_is_ok(status) && compile_report != NULL) {
@@ -690,8 +829,8 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
       ++function_count;
     }
   }
-  for (iree_host_size_t i = 0; i < planned_function_count; ++i) {
-    loom_low_lower_result_deinitialize(&function_plans[i].result);
+  for (iree_host_size_t i = 0; i < function_plan_order.count; ++i) {
+    loom_low_lower_result_deinitialize(&function_plan_order.plans[i].result);
   }
   if (iree_status_is_ok(status) && !emitted_error_diagnostics) {
     status = loom_low_source_selection_finalize_policies(

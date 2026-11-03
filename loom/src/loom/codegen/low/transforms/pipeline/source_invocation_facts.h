@@ -14,6 +14,7 @@
 #include "loom/codegen/low/lower/source_selection.h"
 #include "loom/ir/ir.h"
 #include "loom/pass/types.h"
+#include "loom/util/call_graph.h"
 #include "loom/util/fact_table.h"
 
 #ifdef __cplusplus
@@ -23,6 +24,8 @@ extern "C" {
 typedef struct loom_low_source_invocation_facts_t {
   // Conservative argument facts indexed by private callee argument value ID.
   loom_value_fact_table_t arguments;
+  // Complete source call graph retained for dependent module planning.
+  loom_call_graph_t call_graph;
 } loom_low_source_invocation_facts_t;
 
 // Computes private, acyclic source-call argument facts before source lowering.

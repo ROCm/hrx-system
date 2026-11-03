@@ -43,6 +43,46 @@
 #include "loom/target/low_descriptor_registry.h"
 #include "loom/target/registers.h"
 
+iree_status_t loom_low_lower_call_interface_index_initialize(
+    iree_arena_allocator_t* arena, iree_host_size_t symbol_count,
+    loom_low_lower_call_interface_index_t* out_index) {
+  *out_index = (loom_low_lower_call_interface_index_t){
+      .arena = arena,
+      .interface_count = symbol_count,
+  };
+  if (symbol_count == 0) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, symbol_count, sizeof(*out_index->interfaces),
+      (void**)&out_index->interfaces));
+  memset(out_index->interfaces, 0,
+         symbol_count * sizeof(*out_index->interfaces));
+  return iree_ok_status();
+}
+
+const loom_low_lower_call_interface_t* loom_low_lower_call_interface_index_find(
+    const loom_low_lower_call_interface_index_t* index,
+    loom_symbol_id_t symbol_id) {
+  return index != NULL && symbol_id < index->interface_count
+             ? index->interfaces[symbol_id]
+             : NULL;
+}
+
+iree_status_t loom_low_lower_call_interface_index_publish(
+    loom_low_lower_call_interface_index_t* index, loom_symbol_id_t symbol_id,
+    const loom_low_lower_call_interface_t* interface) {
+  IREE_ASSERT(index != NULL);
+  IREE_ASSERT_LT(symbol_id, index->interface_count);
+  IREE_ASSERT(index->interfaces[symbol_id] == NULL);
+  loom_low_lower_call_interface_t* retained_interface = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      index->arena, sizeof(*retained_interface), (void**)&retained_interface));
+  *retained_interface = *interface;
+  index->interfaces[symbol_id] = retained_interface;
+  return iree_ok_status();
+}
+
 static const loom_target_bundle_t* loom_low_lower_options_bundle(
     const loom_low_lower_options_t* options) {
   return loom_target_facts_bundle(options->target_facts);
@@ -1268,6 +1308,8 @@ struct loom_low_lower_function_plan_t {
     const loom_low_lower_policy_t* policy;
     // Shared module state receiving published target resources.
     loom_low_lower_module_state_t* module_state;
+    // Module-scope physical callable interfaces retained for direct calls.
+    const loom_low_lower_call_interface_index_t* call_interfaces;
     // Diagnostic sink for target emission remarks.
     iree_diagnostic_emitter_t emitter;
     // Enabled target diagnostic remark categories.
@@ -1484,6 +1526,7 @@ iree_status_t loom_low_lower_plan_function(
               .target_facts = options->target_facts,
               .policy = options->policy,
               .module_state = options->module_state,
+              .call_interfaces = options->call_interfaces,
               .emitter = options->emitter,
               .diagnostic_flags = options->legality_diagnostic_flags,
               .control_flow_lowering = options->control_flow_lowering,
@@ -1593,6 +1636,7 @@ iree_status_t loom_low_lower_emit_function(loom_low_lower_function_plan_t* plan,
       .target_facts = plan->emission.target_facts,
       .policy = plan->emission.policy,
       .module_state = plan->emission.module_state,
+      .call_interfaces = plan->emission.call_interfaces,
       .emitter = plan->emission.emitter,
       .legality_diagnostic_flags = plan->emission.diagnostic_flags,
       .control_flow_lowering = plan->emission.control_flow_lowering,
@@ -1616,6 +1660,23 @@ iree_status_t loom_low_lower_emit_function(loom_low_lower_function_plan_t* plan,
   iree_status_t status = loom_low_lower_function_plan_execute(&context);
   loom_local_value_domain_release(&plan->frame.value_domain);
   return status;
+}
+
+iree_status_t loom_low_lower_function_plan_publish_call_interface(
+    const loom_low_lower_function_plan_t* plan,
+    loom_low_lower_call_interface_index_t* index) {
+  const loom_low_lower_function_boundary_t* boundary = &plan->frame.boundary;
+  const loom_low_lower_call_interface_t interface = {
+      .argument_types = boundary->argument_types,
+      .argument_count = boundary->argument_count,
+      .result_types = boundary->physical_result_types,
+      .result_count = boundary->physical_result_count,
+      .tied_results = boundary->tied_results,
+      .tied_result_count = boundary->tied_result_count,
+  };
+  return loom_low_lower_call_interface_index_publish(
+      index, loom_func_like_callee(plan->source_function).symbol_id,
+      &interface);
 }
 
 iree_status_t loom_low_lower_function(loom_module_t* module,

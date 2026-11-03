@@ -14,4 +14,9 @@
 #define LOOM_TARGET_PASS_REQUIREMENT_MUTABLE_FUNCTION_VERSIONS \
   "target.mutable-function-versions"
 
+// Pass requirement satisfied when the target capability exposes the linked
+// provider environment for the current compiler context.
+#define LOOM_TARGET_PASS_REQUIREMENT_PROVIDER_ENVIRONMENT \
+  "target.provider-environment"
+
 #endif  // LOOM_TARGET_PASS_REQUIREMENTS_H_
