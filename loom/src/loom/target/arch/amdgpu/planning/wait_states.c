@@ -2566,27 +2566,27 @@ iree_status_t loom_amdgpu_wait_state_plan_build(
   *out_plan = (loom_amdgpu_wait_state_plan_t){0};
 
   const bool has_vopd_pairs = vopd_plan != NULL && vopd_plan->pair_count != 0;
-  loom_amdgpu_wait_state_builder_t builder = {
-      .schedule = schedule,
-      .allocation = allocation,
-      .options = options != NULL ? *options
-                                 : (loom_amdgpu_wait_state_plan_options_t){0},
-      .processor_properties = processor_properties,
-      .matrix_wait_profile =
-          loom_amdgpu_matrix_wait_profile_from_feature_profile(
-              processor_properties->features.matrix),
-      .wait_plan = wait_plan,
-      .wait_packets = wait_packets,
-      .address_state = address_state,
-      .vopd_packets = has_vopd_pairs ? vopd_plan->packets : NULL,
-      .vopd_pairs = has_vopd_pairs ? vopd_plan->pairs : NULL,
-      .descriptor_set = schedule->target.descriptor_set,
-      .schedule_model = schedule->target.schedule_model,
-      .arena = arena,
-      .transient_arena = transient_arena,
-      .matrix_coexecution = matrix_coexecution,
-      .matrix_results = matrix_results,
-  };
+  loom_amdgpu_wait_state_builder_t builder = {0};
+  builder.schedule = schedule;
+  builder.allocation = allocation;
+  if (options != NULL) {
+    builder.options = *options;
+  }
+  builder.processor_properties = processor_properties;
+  builder.matrix_wait_profile =
+      loom_amdgpu_matrix_wait_profile_from_feature_profile(
+          processor_properties->features.matrix);
+  builder.wait_plan = wait_plan;
+  builder.wait_packets = wait_packets;
+  builder.address_state = address_state;
+  builder.vopd_packets = has_vopd_pairs ? vopd_plan->packets : NULL;
+  builder.vopd_pairs = has_vopd_pairs ? vopd_plan->pairs : NULL;
+  builder.descriptor_set = schedule->target.descriptor_set;
+  builder.schedule_model = schedule->target.schedule_model;
+  builder.arena = arena;
+  builder.transient_arena = transient_arena;
+  builder.matrix_coexecution = matrix_coexecution;
+  builder.matrix_results = matrix_results;
   loom_segmented_storage_initialize(
       sizeof(loom_amdgpu_wait_state_segment_t),
       iree_alignof(loom_amdgpu_wait_state_segment_t),

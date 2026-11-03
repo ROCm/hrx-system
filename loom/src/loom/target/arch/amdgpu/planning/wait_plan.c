@@ -3311,19 +3311,19 @@ iree_status_t loom_amdgpu_wait_plan_build(
   IREE_ASSERT(allocation->edge_copy_count == 0 ||
               allocation->first_coalesced_incoming_copy_by_value_ordinal !=
                   NULL);
-  loom_amdgpu_wait_plan_builder_t builder = {
-      .schedule = schedule,
-      .allocation = allocation,
-      .options =
-          options != NULL ? *options : (loom_amdgpu_wait_plan_options_t){0},
-      .arena = arena,
-      .transient_arena = transient_arena,
-      .producer_nodes = schedule->value_producer_nodes,
-      .insertion = {.address_state = address_state},
-      .processor_properties =
-          loom_amdgpu_target_processor_properties_from_resolved_target(
-              &schedule->target),
-  };
+  loom_amdgpu_wait_plan_builder_t builder = {0};
+  builder.schedule = schedule;
+  builder.allocation = allocation;
+  if (options != NULL) {
+    builder.options = *options;
+  }
+  builder.arena = arena;
+  builder.transient_arena = transient_arena;
+  builder.producer_nodes = schedule->value_producer_nodes;
+  builder.insertion.address_state = address_state;
+  builder.processor_properties =
+      loom_amdgpu_target_processor_properties_from_resolved_target(
+          &schedule->target);
   if (allocation->edge_copy_count != 0) {
     builder.first_coalesced_incoming_copy_by_value_ordinal =
         allocation->first_coalesced_incoming_copy_by_value_ordinal;
