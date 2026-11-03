@@ -20,16 +20,17 @@ struct iree_hal_amd_gpu_capture_block_t;
 // Queue-owned host storage for individually retained operation captures.
 // Callers acquire independently of final releases on
 // publisher/service/retirement threads. Returned blocks move to the acquisition
-// list only when it is empty. Links occupy dead payload, so live captures may
-// use the complete allocation. Neither list owns a reference to its queue; the
-// queue joins every user before deinitialization. Acquire, release,
+// list only when it is empty. Small captures share backing slabs; links occupy
+// dead payload, so live captures may use their complete block. Neither list
+// owns a reference to its queue; the queue joins every user before
+// deinitialization. Acquire, release,
 // preallocate, and trim are thread-safe; initialization and deinitialization
 // are exclusive.
 typedef struct iree_hal_amd_gpu_capture_pool_t {
   // Immutable usable bytes in every reusable allocation, at least
   // sizeof(void*).
   iree_host_size_t block_size;
-  // Thread-safe allocator for empty-pool misses and oversized captures.
+  // Thread-safe allocator for backing slabs and oversized captures.
   iree_allocator_t host_allocator;
   // Caller-owned available blocks, isolated from concurrent returns.
   struct iree_alignas(iree_hardware_destructive_interference_size) {
@@ -45,6 +46,9 @@ typedef struct iree_hal_amd_gpu_capture_pool_t {
     // Unowned blocks returned by any final-release thread.
     struct iree_hal_amd_gpu_capture_block_t* head;
   } returned;
+  // Serializes detached-slab accounting between concurrent cold trims. Capture
+  // acquisition and retirement never acquire this mutex.
+  iree_slim_mutex_t trim_mutex;
 } iree_hal_amd_gpu_capture_pool_t;
 
 // Initializes embedded state using the queue's already-validated block size.
@@ -58,19 +62,22 @@ void iree_hal_amd_gpu_capture_pool_initialize(
 void iree_hal_amd_gpu_capture_pool_deinitialize(
     iree_hal_amd_gpu_capture_pool_t* pool);
 
-// Adds count reusable blocks. Allocation failure frees the partial batch and
-// leaves the pool unchanged. Allocation and rollback run outside list locks.
+// Adds count reusable blocks in shared slabs. Allocation failure frees the
+// batch and leaves the pool unchanged. Allocation and rollback run outside
+// list locks.
 iree_status_t iree_hal_amd_gpu_capture_pool_preallocate(
     iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t count);
 
-// Returns unowned blocks to the host allocator without touching live captures.
-// Blocks released after detachment remain reusable until a subsequent trim.
-// Detachment takes bounded work; system frees happen outside both list locks.
+// Returns wholly unused slabs to the host allocator without touching live
+// captures. Free blocks sharing a slab with live captures remain reusable.
+// Blocks released after detachment participate in a subsequent trim. Detachment
+// takes bounded work; slab accounting and frees happen outside both list locks.
 void iree_hal_amd_gpu_capture_pool_trim(iree_hal_amd_gpu_capture_pool_t* pool);
 
 // Acquires at least minimum_size uninitialized bytes, with system allocation
-// alignment. Ordinary captures receive one whole reusable block; oversized
-// captures receive exactly minimum_size bytes. The returned extent must be
+// alignment. An empty pool grows by a slab of reusable blocks. Ordinary
+// captures receive one whole reusable block; oversized captures receive
+// exactly minimum_size bytes. The returned extent must be
 // preserved for release. Failure leaves out_storage empty.
 iree_status_t iree_hal_amd_gpu_capture_pool_acquire(
     iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t minimum_size,

@@ -44,8 +44,12 @@ TEST_F(GpuNativeTest, TrimReleasesUnusedCaptureCache) {
   iree_hal_amd_gpu_context_join_memory(context);
   const size_t before = allocator_.live_count.load();
   IREE_ASSERT_OK(iree_hal_device_trim(device_));
-  EXPECT_EQ(allocator_.live_count.load(),
-            before - options_.queue_count * options_.queue.capture_block_count);
+  const size_t after = allocator_.live_count.load();
+  // Each queue releases its preallocated capture backing; multiple captures
+  // may share one slab. Repeating trim must not retain another idle batch.
+  EXPECT_LE(after, before - options_.queue_count);
+  IREE_ASSERT_OK(iree_hal_device_trim(device_));
+  EXPECT_EQ(allocator_.live_count.load(), after);
   iree_hal_semaphore_t* done = nullptr;
   CreateSemaphore(&done);
   uint64_t value = 1;
