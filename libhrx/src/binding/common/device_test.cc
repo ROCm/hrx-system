@@ -161,8 +161,7 @@ TEST_F(StreamingDeviceQueueTest, TransferQueueReusesCompatibleProvisioning) {
       .device = entry_.hal_device,
       .queue = acquired_,
   };
-  iree_hal_streaming_device_t viewed_entry = entry_;
-  viewed_entry.hal_device = view.Initialize();
+  iree_hal_streaming_device_t viewed_entry = {.hal_device = view.Initialize()};
   iree_hal_queue_t* reused = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_device_acquire_transfer_queue(
       &viewed_entry, primary, &reused));

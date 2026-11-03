@@ -913,6 +913,7 @@ hrx_cc_test(
         ":hip_dso_test_util",
         "//build_tools/bazel:pthreads",
         "//libhrx/src/binding/common",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

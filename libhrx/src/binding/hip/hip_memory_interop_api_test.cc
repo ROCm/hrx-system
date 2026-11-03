@@ -15,6 +15,7 @@
 #include "common/context.h"
 #include "common/stream.h"
 #include "hip_dso_test_util.h"
+#include "iree/hal/semaphore.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -215,17 +216,16 @@ class HipMemoryInteropApiTest : public testing::Test {
 class ScopedStreamTimeline {
  public:
   ScopedStreamTimeline(iree_hal_streaming_stream_t* stream,
-                       iree_hal_semaphore_t* replacement,
-                       decltype(&iree_hal_resource_release) release)
+                       iree_hal_semaphore_t* replacement)
       : stream_(stream),
-        original_(std::exchange(stream->timeline_semaphore, replacement)),
-        release_(release) {}
+        original_(std::exchange(stream->timeline_semaphore, replacement)) {}
 
   ScopedStreamTimeline(const ScopedStreamTimeline&) = delete;
   ScopedStreamTimeline& operator=(const ScopedStreamTimeline&) = delete;
 
   ~ScopedStreamTimeline() {
-    release_(std::exchange(stream_->timeline_semaphore, original_));
+    iree_hal_semaphore_release(
+        std::exchange(stream_->timeline_semaphore, original_));
   }
 
  private:
@@ -233,30 +233,15 @@ class ScopedStreamTimeline {
   iree_hal_streaming_stream_t* stream_;
   // Owned timeline reference transferred back to |stream_| on exit.
   iree_hal_semaphore_t* original_;
-  // Resource release from the same DSO that created the replacement timeline.
-  decltype(&iree_hal_resource_release) release_;
 };
 
 TEST_F(HipMemoryInteropApiTest,
        SynchronousCopiesPreserveProducerFailureAndDestinationBytes) {
   const auto current_context =
-      dso_.ResolveLocalForTest<decltype(&iree_hal_streaming_context_current)>(
-          "iree_hal_streaming_context_current");
-  const auto create_semaphore =
-      dso_.ResolveLocalForTest<decltype(&iree_hal_semaphore_create)>(
-          "iree_hal_semaphore_create");
-  const auto fail_semaphore =
-      dso_.ResolveLocalForTest<decltype(&iree_hal_semaphore_fail)>(
-          "iree_hal_semaphore_fail");
-  const auto release_resource =
-      dso_.ResolveLocalForTest<decltype(&iree_hal_resource_release)>(
-          "iree_hal_resource_release");
+      dso_.Resolve<decltype(&hipCtxGetCurrent)>("hipCtxGetCurrent");
   const auto get_last_error =
       dso_.Resolve<decltype(&hipGetLastError)>("hipGetLastError");
   ASSERT_NE(nullptr, current_context) << dso_.error();
-  ASSERT_NE(nullptr, create_semaphore) << dso_.error();
-  ASSERT_NE(nullptr, fail_semaphore) << dso_.error();
-  ASSERT_NE(nullptr, release_resource) << dso_.error();
   ASSERT_NE(nullptr, get_last_error) << dso_.error();
 
   constexpr size_t kLength = 16;
@@ -275,18 +260,21 @@ TEST_F(HipMemoryInteropApiTest,
                               hipMemcpyHostToDevice));
   ASSERT_EQ(hipSuccess, synchronize_());
 
-  auto* context = current_context();
+  hipCtx_t context_handle = nullptr;
+  ASSERT_EQ(hipSuccess, current_context(&context_handle));
+  auto* context =
+      reinterpret_cast<iree_hal_streaming_context_t*>(context_handle);
   ASSERT_NE(nullptr, context);
   auto* stream = context->default_stream;
   ASSERT_NE(nullptr, stream);
   iree_hal_semaphore_t* failed_timeline = nullptr;
-  IREE_ASSERT_OK(create_semaphore(
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
       context->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       stream->pending_value, IREE_HAL_SEMAPHORE_FLAG_NONE, &failed_timeline));
-  fail_semaphore(failed_timeline,
-                 iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED));
+  iree_hal_semaphore_fail(
+      failed_timeline, iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED));
   {
-    ScopedStreamTimeline timeline(stream, failed_timeline, release_resource);
+    ScopedStreamTimeline timeline(stream, failed_timeline);
     EXPECT_EQ(hipErrorOutOfMemory,
               copy_(target, input.data(), kLength, hipMemcpyHostToDevice));
     EXPECT_EQ(hipErrorOutOfMemory,
