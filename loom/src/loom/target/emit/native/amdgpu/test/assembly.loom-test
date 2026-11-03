@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @gfx11_constants waits=none
+// RUN: emit amdgpu-assembly @gfx11_constants
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_constants(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>) asm {
@@ -12,15 +12,17 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_constants(%resource
 // ----
   v_mov_b32 v1, 9
   s_mov_b32 s4, 7
+  s_delay_alu instid0(VALU_DEP_1)
   v_add_u32 v1, 123, v1
   buffer_store_dword v1, v0, s[0:3], s4 offen offset:12
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
 // A direct body path that source control proves cannot reach its ordinary
 // result-bearing return terminates the wave without fabricating a result.
-// RUN: emit amdgpu-assembly @gfx11_unreachable_tail waits=none
+// RUN: emit amdgpu-assembly @gfx11_unreachable_tail
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_unreachable_tail() -> (reg<amdgpu.vgpr>) asm {
@@ -33,7 +35,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_unreachable_tail() 
 // ====
 
 // Compiler hints partition the low schedule but have no target representation.
-// RUN: emit amdgpu-assembly @gfx11_compiler_hint waits=none strategy=source
+// RUN: emit amdgpu-assembly @gfx11_compiler_hint
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_compiler_hint() asm {
@@ -51,7 +53,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_compiler_hint() asm
 // ====
 
 // The native encoder consumes the same trait rather than recognizing an ISA.
-// RUN: emit amdgpu-native @gfx11_compiler_hint_native waits=none strategy=source
+// RUN: emit amdgpu-native @gfx11_compiler_hint_native
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_compiler_hint_native() asm {
@@ -65,7 +67,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_compiler_hint_nativ
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_div_scale_vcc_state waits=none
+// RUN: emit amdgpu-assembly @gfx11_div_scale_vcc_state
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_div_scale_vcc_state(%value: reg<amdgpu.vgpr>) asm {
@@ -79,15 +81,18 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_div_scale_vcc_state
 
 // ----
   v_mov_b32 v1, 1065353216
+  s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_2) | instid1(VALU_DEP_1)
   v_div_scale_f32 v2, v0, v0, v1
   v_rcp_f32 v3, v2
+  s_waitcnt_depctr depctr(0)
   v_div_fmas_f32 v2, v2, v3, v2
+  s_delay_alu instid0(VALU_DEP_1)
   v_div_fixup_f32 v0, v2, v0, v1
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_control_messages waits=none
+// RUN: emit amdgpu-assembly @gfx11_control_messages
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_control_messages() asm {
@@ -104,16 +109,17 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_control_messages() 
 // ----
   s_sendmsg_rtn_b32 s0, message(128)
   s_mov_b32 s1, 1023
-  s_mov_b32 s2, 1024
+  s_waitcnt vmcnt(63) lgkmcnt(0)
   s_and_b32 s0, s0, s1
-  s_or_b32 s0, s0, s2
+  s_mov_b32 s1, 1024
+  s_or_b32 s0, s0, s1
   s_mov_b32 m0, s0
   s_sendmsg message(1)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_s_delay_alu waits=none
+// RUN: emit amdgpu-assembly @gfx11_s_delay_alu
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_s_delay_alu() asm {
@@ -137,7 +143,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_s_delay_alu() asm {
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_s_delay_alu_assembly waits=none
+// RUN: emit amdgpu-assembly @gfx11_s_delay_alu_assembly
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_s_delay_alu_assembly() asm {
@@ -151,7 +157,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_s_delay_alu_assembl
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_getpc waits=none
+// RUN: emit amdgpu-assembly @gfx11_getpc
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_getpc(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) asm {
@@ -166,11 +172,12 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_getpc(%resource: re
   s_getpc_b64 s[6:7]
   v_mov_b32 v1, s6
   buffer_store_dword v1, v0, s[0:3], s4 offen offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_getpc_assembly waits=none
+// RUN: emit amdgpu-assembly @gfx11_getpc_assembly
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_getpc_assembly(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) asm {
@@ -185,11 +192,12 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_getpc_assembly(%res
   s_getpc_b64 s[6:7]
   v_mov_b32 v1, s6
   buffer_store_dword v1, v0, s[0:3], s4 offen offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_rel32_pc_coalesced_copy waits=none strategy=source
+// RUN: emit amdgpu-assembly @gfx11_rel32_pc_coalesced_copy
 amdgpu.target<gfx1100> @gfx11_target
 
 global.rodata.decl @iree_asan_config
@@ -215,7 +223,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_rel32_pc_coalesced_
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_fmac waits=none
+// RUN: emit amdgpu-assembly @gfx11_fmac
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_fmac(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) asm {
@@ -227,11 +235,12 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_fmac(%resource: reg
 // ----
   v_fmac_f32 v0, v1, v2
   buffer_store_dword v0, v3, s[0:3], s4 offen offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_fma_mix_f16_lanes waits=none
+// RUN: emit amdgpu-assembly @gfx11_fma_mix_f16_lanes
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_fma_mix_f16_lanes(%addr: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
@@ -248,16 +257,20 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_fma_mix_f16_lanes(%
 // ----
   ds_load_u16_d16 v3, v2 offset:0
   ds_load_u16_d16_hi v3, v2 offset:2
+  s_waitcnt vmcnt(63) lgkmcnt(1)
   v_fma_mix_f32_f16lo_f32_f32 v4, v3, v0, v1
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
   v_fma_mix_f32_f16hi_f32_f32 v4, v3, v4, v1
   v_fma_mix_f32_f32_f16hi_f32 v0, v0, v3, v4
+  s_delay_alu instid0(VALU_DEP_1)
   v_fma_mix_f32_f32_f32_f16lo v0, v0, v1, v3
   ds_write_b32 v2, v0 offset:0
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_fma_mix_f16_lanes_assembly waits=none
+// RUN: emit amdgpu-assembly @gfx11_fma_mix_f16_lanes_assembly
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_fma_mix_f16_lanes_assembly(%addr: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
@@ -274,16 +287,20 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_fma_mix_f16_lanes_a
 // ----
   ds_load_u16_d16 v3, v2 offset:0
   ds_load_u16_d16_hi v3, v2 offset:2
+  s_waitcnt vmcnt(63) lgkmcnt(1)
   v_fma_mix_f32_f16lo_f32_f32 v4, v3, v0, v1
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
   v_fma_mix_f32_f16hi_f32_f32 v4, v3, v4, v1
   v_fma_mix_f32_f32_f16hi_f32 v0, v0, v3, v4
+  s_delay_alu instid0(VALU_DEP_1)
   v_fma_mix_f32_f32_f32_f16lo v0, v0, v1, v3
   ds_write_b32 v2, v0 offset:0
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_d16_high_consumer_blocks_tied_high_reload waits=none
+// RUN: emit amdgpu-assembly @gfx11_d16_high_consumer_blocks_tied_high_reload
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_d16_high_consumer_blocks_tied_high_reload(%addr: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
@@ -299,15 +316,18 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_d16_high_consumer_b
 // ----
   ds_load_u16_d16 v3, v2 offset:0
   ds_load_u16_d16_hi v3, v2 offset:2
+  s_waitcnt vmcnt(63) lgkmcnt(0)
   v_fma_mix_f32_f16hi_f32_f32 v0, v3, v0, v1
   ds_load_u16_d16_hi v3, v2 offset:4
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_delay_alu instid0(VALU_DEP_1)
   v_fma_mix_f32_f16hi_f32_f32 v0, v3, v0, v1
   ds_write_b32 v2, v0 offset:0
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_d16_full_consumer_blocks_tied_high_reload waits=none
+// RUN: emit amdgpu-assembly @gfx11_d16_full_consumer_blocks_tied_high_reload
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_d16_full_consumer_blocks_tied_high_reload(%addr: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
@@ -323,15 +343,18 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_d16_full_consumer_b
 // ----
   ds_load_u16_d16 v3, v2 offset:0
   ds_load_u16_d16_hi v3, v2 offset:2
+  s_waitcnt vmcnt(63) lgkmcnt(0)
   v_add_f32 v0, v3, v0
   ds_load_u16_d16_hi v3, v2 offset:4
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_delay_alu instid0(VALU_DEP_1)
   v_fma_mix_f32_f16hi_f32_f32 v0, v3, v0, v1
   ds_write_b32 v2, v0 offset:0
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_fma_mix_source2_literal waits=none
+// RUN: emit amdgpu-assembly @gfx11_fma_mix_source2_literal
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_fma_mix_source2_literal(%a: reg<amdgpu.vgpr>, %b_half: reg<amdgpu.vgpr>) asm {
@@ -345,7 +368,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_fma_mix_source2_lit
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_fma_mix_source0_half_literal waits=none
+// RUN: emit amdgpu-assembly @gfx11_fma_mix_source0_half_literal
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_fma_mix_source0_half_literal(%a_half: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>) asm {
@@ -359,7 +382,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_fma_mix_source0_hal
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_fma_mix_source2_literal_assembly waits=none
+// RUN: emit amdgpu-assembly @gfx11_fma_mix_source2_literal_assembly
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_fma_mix_source2_literal_assembly(%a: reg<amdgpu.vgpr>, %b_half: reg<amdgpu.vgpr>) asm {
@@ -373,7 +396,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_fma_mix_source2_lit
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_fma_mix_half_result_lanes waits=none
+// RUN: emit amdgpu-assembly @gfx11_fma_mix_half_result_lanes
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_fma_mix_half_result_lanes(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
@@ -385,13 +408,14 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_fma_mix_half_result
 
 // ----
   v_fma_mixlo_f16_f32_f32_f32 v0, v2, v3, v1
+  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
   v_fma_mixhi_f16_f16lo_f32_f32 v0, v2, v3, v1
   v_fma_mixlo_f16_f16lo_f32_f16hi v0, v2, v3, v2
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_fma_mix_half_result_lanes_assembly waits=none
+// RUN: emit amdgpu-assembly @gfx11_fma_mix_half_result_lanes_assembly
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_fma_mix_half_result_lanes_assembly(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
@@ -403,13 +427,14 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_fma_mix_half_result
 
 // ----
   v_fma_mixlo_f16_f32_f32_f32 v0, v2, v3, v1
+  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
   v_fma_mixhi_f16_f16lo_f32_f32 v0, v2, v3, v1
   v_fma_mixlo_f16_f16lo_f32_f16hi v0, v2, v3, v2
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_packed_fma_mad waits=none
+// RUN: emit amdgpu-assembly @gfx11_packed_fma_mad
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_packed_fma_mad(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
@@ -429,7 +454,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_packed_fma_mad(%acc
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_packed_fma_mad_literals waits=none
+// RUN: emit amdgpu-assembly @gfx11_packed_fma_mad_literals
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_packed_fma_mad_literals(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
@@ -447,7 +472,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_packed_fma_mad_lite
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_perm_zero_source_selector_literal waits=none
+// RUN: emit amdgpu-assembly @gfx11_perm_zero_source_selector_literal
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_perm_zero_source_selector_literal(%value: reg<amdgpu.vgpr>) asm {
@@ -461,7 +486,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_perm_zero_source_se
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx942_perm_register_selector waits=none
+// RUN: emit amdgpu-assembly @gfx942_perm_register_selector
 amdgpu.target<gfx942> @gfx942_target
 
 low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_perm_register_selector(%src0: reg<amdgpu.vgpr>, %src1: reg<amdgpu.vgpr>, %selectors: reg<amdgpu.sgpr>) asm {
@@ -475,7 +500,7 @@ low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_perm_register_sel
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_packed_fma_mad_assembly waits=none
+// RUN: emit amdgpu-assembly @gfx11_packed_fma_mad_assembly
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_packed_fma_mad_assembly(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
@@ -495,7 +520,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_packed_fma_mad_asse
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx942_packed_fma_f32 waits=none
+// RUN: emit amdgpu-assembly @gfx942_packed_fma_f32
 amdgpu.target<gfx942> @gfx942_target
 
 low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_packed_fma_f32(%a: reg<amdgpu.vgpr x2>, %b: reg<amdgpu.vgpr x2>, %c: reg<amdgpu.vgpr x2>) asm {
@@ -509,7 +534,7 @@ low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_packed_fma_f32(%a
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx942_packed_fma_f32_assembly waits=none
+// RUN: emit amdgpu-assembly @gfx942_packed_fma_f32_assembly
 amdgpu.target<gfx942> @gfx942_target
 
 low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_packed_fma_f32_assembly(%a: reg<amdgpu.vgpr x2>, %b: reg<amdgpu.vgpr x2>, %c: reg<amdgpu.vgpr x2>) asm {
@@ -523,7 +548,7 @@ low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_packed_fma_f32_as
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx942_mad_mix_half_result_lanes waits=none
+// RUN: emit amdgpu-assembly @gfx942_mad_mix_half_result_lanes
 amdgpu.target<gfx942> @gfx942_target
 
 low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_mad_mix_half_result_lanes(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
@@ -541,7 +566,7 @@ low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_mad_mix_half_resu
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx942_mad_mix_half_result_lanes_assembly waits=none
+// RUN: emit amdgpu-assembly @gfx942_mad_mix_half_result_lanes_assembly
 amdgpu.target<gfx942> @gfx942_target
 
 low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_mad_mix_half_result_lanes_assembly(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
@@ -559,7 +584,7 @@ low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_mad_mix_half_resu
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_scalar_f16_fma_forms waits=none
+// RUN: emit amdgpu-assembly @gfx11_scalar_f16_fma_forms
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_scalar_f16_fma_forms(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
@@ -579,7 +604,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_scalar_f16_fma_form
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_scalar_f16_fma_forms_assembly waits=none
+// RUN: emit amdgpu-assembly @gfx11_scalar_f16_fma_forms_assembly
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_scalar_f16_fma_forms_assembly(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
@@ -599,7 +624,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_scalar_f16_fma_form
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx1250_scalar_domain_fma_forms waits=none strategy=source
+// RUN: emit amdgpu-assembly @gfx1250_scalar_domain_fma_forms
 amdgpu.target<gfx1250> @gfx1250_target
 
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_scalar_domain_fma_forms(%acc32: reg<amdgpu.sgpr>, %a32: reg<amdgpu.sgpr>, %b32: reg<amdgpu.sgpr>, %acc16: reg<amdgpu.sgpr>, %a16: reg<amdgpu.sgpr>, %b16: reg<amdgpu.sgpr>) asm {
@@ -611,15 +636,15 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_scalar_
 }
 
 // ----
-  s_fmaak_f32 s6, s1, s2, 0x3f800000
-  s_fmamk_f32 s6, s1, 0x3f800000, s2
-  s_fmac_f32 s0, s1, s2
-  s_fmac_f16 s3, s4, s5
+  s_fmac_f16 s0, s1, s2
+  s_fmac_f32 s3, s4, s5
+  s_fmaak_f32 s0, s4, s5, 0x3f800000
+  s_fmamk_f32 s0, s4, 0x3f800000, s5
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx1250_scalar_domain_fma_forms_assembly waits=none strategy=source
+// RUN: emit amdgpu-assembly @gfx1250_scalar_domain_fma_forms_assembly
 amdgpu.target<gfx1250> @gfx1250_target
 
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_scalar_domain_fma_forms_assembly(%acc32: reg<amdgpu.sgpr>, %a32: reg<amdgpu.sgpr>, %b32: reg<amdgpu.sgpr>, %acc16: reg<amdgpu.sgpr>, %a16: reg<amdgpu.sgpr>, %b16: reg<amdgpu.sgpr>) asm {
@@ -631,15 +656,15 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_scalar_
 }
 
 // ----
-  s_fmaak_f32 s6, s1, s2, 0x3f800000
-  s_fmamk_f32 s6, s1, 0x3f800000, s2
-  s_fmac_f32 s0, s1, s2
-  s_fmac_f16 s3, s4, s5
+  s_fmac_f16 s0, s1, s2
+  s_fmac_f32 s3, s4, s5
+  s_fmaak_f32 s0, s4, s5, 0x3f800000
+  s_fmamk_f32 s0, s4, 0x3f800000, s5
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx942_scalar_f16_mad_forms waits=none
+// RUN: emit amdgpu-assembly @gfx942_scalar_f16_mad_forms
 amdgpu.target<gfx942> @gfx942_target
 
 low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_scalar_f16_mad_forms(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
@@ -661,7 +686,7 @@ low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_scalar_f16_mad_fo
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx942_scalar_f16_mad_forms_assembly waits=none
+// RUN: emit amdgpu-assembly @gfx942_scalar_f16_mad_forms_assembly
 amdgpu.target<gfx942> @gfx942_target
 
 low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_scalar_f16_mad_forms_assembly(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
@@ -683,7 +708,7 @@ low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_scalar_f16_mad_fo
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_scalar_f64_fma_form waits=none
+// RUN: emit amdgpu-assembly @gfx11_scalar_f64_fma_form
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_scalar_f64_fma_form(%a: reg<amdgpu.vgpr x2>, %b: reg<amdgpu.vgpr x2>, %c: reg<amdgpu.vgpr x2>) asm {
@@ -697,7 +722,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_scalar_f64_fma_form
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_scalar_f64_fma_form_assembly waits=none
+// RUN: emit amdgpu-assembly @gfx11_scalar_f64_fma_form_assembly
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_scalar_f64_fma_form_assembly(%a: reg<amdgpu.vgpr x2>, %b: reg<amdgpu.vgpr x2>, %c: reg<amdgpu.vgpr x2>) asm {
@@ -711,7 +736,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_scalar_f64_fma_form
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx942_scalar_f64_fma_forms waits=none
+// RUN: emit amdgpu-assembly @gfx942_scalar_f64_fma_forms
 amdgpu.target<gfx942> @gfx942_target
 
 low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_scalar_f64_fma_forms(%acc: reg<amdgpu.vgpr x2>, %a: reg<amdgpu.vgpr x2>, %b: reg<amdgpu.vgpr x2>, %c: reg<amdgpu.vgpr x2>) asm {
@@ -727,7 +752,7 @@ low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_scalar_f64_fma_fo
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx942_scalar_f64_fma_forms_assembly waits=none
+// RUN: emit amdgpu-assembly @gfx942_scalar_f64_fma_forms_assembly
 amdgpu.target<gfx942> @gfx942_target
 
 low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_scalar_f64_fma_forms_assembly(%acc: reg<amdgpu.vgpr x2>, %a: reg<amdgpu.vgpr x2>, %b: reg<amdgpu.vgpr x2>, %c: reg<amdgpu.vgpr x2>) asm {
@@ -859,11 +884,12 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_compression_pr
 }
 
 // ----
-  v_dual_mul_f32 v4, v5, v2 :: v_dual_mul_f32 v7, v0, v1
-  v_dual_add_f32 v0, v0, v1 :: v_dual_add_f32 v7, v5, v2
-  v_mov_b32 v0, v3
+  v_mov_b32 v4, v0
   s_delay_alu instid0(VALU_DEP_1)
-  v_mul_f32 v0, v0, v5
+  v_dual_mul_f32 v0, v4, v3 :: v_dual_mul_f32 v7, v1, v2
+  v_add_f32 v0, v1, v2
+  v_add_f32 v7, v3, v5
+  v_mul_f32 v0, v3, v5
   s_endpgm
 
 // ====
@@ -1106,7 +1132,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_fmac_pair_thro
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_v_mov_b32_dpp16 waits=none
+// RUN: emit amdgpu-assembly @gfx11_v_mov_b32_dpp16
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_v_mov_b32_dpp16(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) asm {
@@ -1118,11 +1144,12 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_v_mov_b32_dpp16(%re
 // ----
   v_mov_b32_dpp v0, v0, quad_perm:[1,0,3,2], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
   buffer_store_dword v0, v1, s[0:3], s4 offen offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_sgpr_shift_immediate waits=none
+// RUN: emit amdgpu-assembly @gfx11_sgpr_shift_immediate
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_sgpr_shift_immediate(%value: reg<amdgpu.sgpr>) asm {
@@ -1136,7 +1163,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_sgpr_shift_immediat
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_low16_shift_high waits=none
+// RUN: emit amdgpu-assembly @gfx11_low16_shift_high
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_low16_shift_high(%value: reg<amdgpu.vgpr>) asm {
@@ -1150,7 +1177,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_low16_shift_high(%v
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_low16_extract_full waits=none
+// RUN: emit amdgpu-assembly @gfx11_low16_extract_full
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_low16_extract_full(%value: reg<amdgpu.vgpr>) asm {
@@ -1164,7 +1191,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_low16_extract_full(
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_lshl_add_shift_immediate waits=none
+// RUN: emit amdgpu-assembly @gfx11_lshl_add_shift_immediate
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_lshl_add_shift_immediate(%value: reg<amdgpu.sgpr>, %addend: reg<amdgpu.vgpr>) asm {
@@ -1178,7 +1205,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_lshl_add_shift_imme
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_mad_u32_u24 waits=none
+// RUN: emit amdgpu-assembly @gfx11_mad_u32_u24
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_mad_u32_u24(%value: reg<amdgpu.sgpr>, %scale: reg<amdgpu.vgpr>, %addend: reg<amdgpu.vgpr>) asm {
@@ -1194,7 +1221,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_mad_u32_u24(%value:
 
 // Inline VOP3 sources keep the multiply-add at two words. A literal form would
 // append a third instruction word.
-// RUN: emit amdgpu-native-words @gfx11_mad_u32_u24_inline waits=none strategy=source
+// RUN: emit amdgpu-native-words @gfx11_mad_u32_u24_inline
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_mad_u32_u24_inline(%value: reg<amdgpu.vgpr>, %addend: reg<amdgpu.sgpr>) asm {
@@ -1215,7 +1242,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_mad_u32_u24_inline(
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_mad_u32_u24_literal waits=none
+// RUN: emit amdgpu-assembly @gfx11_mad_u32_u24_literal
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_mad_u32_u24_literal(%value: reg<amdgpu.sgpr>, %addend: reg<amdgpu.vgpr>) asm {
@@ -1229,7 +1256,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_mad_u32_u24_literal
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_bfi_b32_literal waits=none
+// RUN: emit amdgpu-assembly @gfx11_bfi_b32_literal
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_bfi_b32_literal(%insert: reg<amdgpu.vgpr>, %base: reg<amdgpu.vgpr>) asm {
@@ -1243,7 +1270,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_bfi_b32_literal(%in
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_salu_shift_inline waits=none
+// RUN: emit amdgpu-assembly @gfx11_salu_shift_inline
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_salu_shift_inline(%value: reg<amdgpu.sgpr>) asm {
@@ -1257,7 +1284,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_salu_shift_inline(%
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_salu_add_inline waits=none
+// RUN: emit amdgpu-assembly @gfx11_salu_add_inline
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_salu_add_inline(%position: reg<amdgpu.sgpr>) asm {
@@ -1271,7 +1298,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_salu_add_inline(%po
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_salu_mul_inline waits=none
+// RUN: emit amdgpu-assembly @gfx11_salu_mul_inline
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_salu_mul_inline(%value: reg<amdgpu.sgpr>) asm {
@@ -1285,7 +1312,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_salu_mul_inline(%va
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_salu_sub_inline waits=none
+// RUN: emit amdgpu-assembly @gfx11_salu_sub_inline
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_salu_sub_inline(%value: reg<amdgpu.sgpr>) asm {
@@ -1299,7 +1326,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_salu_sub_inline(%va
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_salu_and_inline waits=none
+// RUN: emit amdgpu-assembly @gfx11_salu_and_inline
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_salu_and_inline(%value: reg<amdgpu.sgpr>) asm {
@@ -1313,7 +1340,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_salu_and_inline(%va
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_salu_lshr_inline waits=none
+// RUN: emit amdgpu-assembly @gfx11_salu_lshr_inline
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_salu_lshr_inline(%value: reg<amdgpu.sgpr>) asm {
@@ -1327,7 +1354,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_salu_lshr_inline(%v
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_salu_ashr_inline waits=none
+// RUN: emit amdgpu-assembly @gfx11_salu_ashr_inline
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_salu_ashr_inline(%value: reg<amdgpu.sgpr>) asm {
@@ -1341,7 +1368,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_salu_ashr_inline(%v
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_storage_address waits=none
+// RUN: emit amdgpu-assembly @gfx11_storage_address
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_storage_address() asm {
@@ -1357,13 +1384,13 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_storage_address() a
 
 // ----
   v_mov_b32 v0, 12
-  v_mov_b32 v0, 4104
   v_mov_b32 v0, 148
+  v_mov_b32 v0, 4104
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_storage_address_view_assembly waits=none
+// RUN: emit amdgpu-assembly @gfx11_storage_address_view_assembly
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_storage_address_view_assembly() asm {
@@ -1400,9 +1427,9 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_scheduled_liveness_
 // ----
   s_load_dwordx2 s[4:5], s[0:1], s2 offset:0
   v_mov_b32 v1, 1
+  s_mov_b32 s0, 65535
   s_mov_b32 s6, 256
   s_mov_b32 s7, 822173696
-  s_mov_b32 s0, 65535
   s_waitcnt vmcnt(63) lgkmcnt(0)
   s_and_b32 s5, s5, s0
   buffer_store_dword v1, v0, s[4:7], s2 offen offset:0
@@ -1411,7 +1438,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_scheduled_liveness_
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_concat_source_existing_span waits=none
+// RUN: emit amdgpu-assembly @gfx11_concat_source_existing_span
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_concat_source_existing_span(%row: reg<amdgpu.sgpr>, %row_limit: reg<amdgpu.sgpr>, %output: reg<amdgpu.sgpr x2>, %metadata: reg<amdgpu.sgpr x2>, %input: reg<amdgpu.sgpr x2>, %lookup: reg<amdgpu.sgpr x2>, %thread: reg<amdgpu.vgpr>) asm {
@@ -1439,22 +1466,23 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_concat_source_exist
 }
 
 // ----
-  v_mov_b32 v1, 0
-  s_mov_b32 s9, 0
-  s_mov_b32 s3, 2
   s_add_u32 s0, s0, s2
+  v_mov_b32 v1, 0
   s_add_u32 s0, s0, s4
-  s_lshl_b64 s[2:3], s[8:9], s3
-  s_add_u32 s2, s6, s2
-  s_addc_u32 s3, s7, s3
-  s_cmp_lt_i32 s0, s1
+  s_mov_b32 s7, 0
+  s_mov_b32 s2, 2
+  s_lshl_b64 s[2:3], s[6:7], s2
+  s_add_u32 s2, s8, s2
+  s_addc_u32 s3, s9, s3
   global_load_b32 v1, v1, s[2:3] offset:0
+  s_cmp_lt_i32 s0, s1
+  s_waitcnt vmcnt(0) lgkmcnt(63)
   v_cmp_lt_i32 s[0:1], v1, v0
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_s_load_offset_only waits=none
+// RUN: emit amdgpu-assembly @gfx11_s_load_offset_only
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_s_load_offset_only(%kernarg: reg<amdgpu.sgpr x2>) asm {
@@ -1468,7 +1496,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_s_load_offset_only(
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_s_load_offset_only_x8 waits=none
+// RUN: emit amdgpu-assembly @gfx11_s_load_offset_only_x8
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_s_load_offset_only_x8(%kernarg: reg<amdgpu.sgpr x2>) asm {
@@ -1482,7 +1510,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_s_load_offset_only_
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_s_load_offset_only_tied waits=none
+// RUN: emit amdgpu-assembly @gfx11_s_load_offset_only_tied
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_s_load_offset_only_tied(%kernarg: reg<amdgpu.sgpr x2>) asm {
@@ -1496,7 +1524,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_s_load_offset_only_
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_s_load_tied_after_prior_kernarg_read waits=none
+// RUN: emit amdgpu-assembly @gfx11_s_load_tied_after_prior_kernarg_read
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_s_load_tied_after_prior_kernarg_read() asm {
@@ -1517,16 +1545,17 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_s_load_tied_after_p
 
 // ----
   s_load_dwordx4 s[4:7], s[0:1], 0
+  s_mov_b32 s2, 65535
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_mov_b32 s6, 16
+  s_mov_b32 s7, 822173696
   s_load_dwordx2 s[0:1], s[0:1], 16
-  s_mov_b32 s0, 65535
-  s_mov_b32 s2, 16
-  s_mov_b32 s3, 822173696
-  s_and_b32 s5, s5, s0
+  s_and_b32 s5, s5, s2
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_branch waits=none
+// RUN: emit amdgpu-assembly @gfx11_branch
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_branch() asm {
@@ -1546,7 +1575,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_branch() asm {
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_branch_args waits=none
+// RUN: emit amdgpu-assembly @gfx11_branch_args
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_branch_args(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.vgpr>) asm {
@@ -1561,11 +1590,12 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_branch_args(%resour
 .Lbb1:
   v_add_u32 v0, v0, v0
   buffer_store_dword v0, v1, s[0:3], s4 offen offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_block_entry_wait_preserves_later_load strategy=source
+// RUN: emit amdgpu-assembly @gfx11_block_entry_wait_preserves_later_load
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_block_entry_wait_preserves_later_load(%resource: reg<amdgpu.sgpr x4>, %vaddr0: reg<amdgpu.vgpr>, %vaddr1: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) asm {
@@ -1590,12 +1620,12 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_block_entry_wait_pr
   s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb3
 .Lbb1:
-  s_waitcnt vmcnt(0) lgkmcnt(63)
+  buffer_load_dword v3, v1, s[4:7], s2 offen offset:4
+  s_waitcnt vmcnt(1) lgkmcnt(63)
   v_add_u32 v0, v2, v0
-  buffer_load_dword v2, v1, s[4:7], s2 offen offset:4
 .Lbb2:
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_add_u32 v0, v2, v0
+  v_add_u32 v0, v3, v0
   buffer_store_dword v0, v1, s[4:7], s2 offen offset:8
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
@@ -1604,7 +1634,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_block_entry_wait_pr
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx942_extended_mfma_assembly waits=none
+// RUN: emit amdgpu-assembly @gfx942_extended_mfma_assembly
 amdgpu.target<gfx942> @gfx942_target
 
 low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_extended_mfma_assembly(%lhs_f16: reg<amdgpu.vgpr x2>, %rhs_f16: reg<amdgpu.vgpr x2>, %acc_f16: reg<amdgpu.vgpr x16>, %lhs_i8: reg<amdgpu.vgpr x2>, %rhs_i8: reg<amdgpu.vgpr x2>, %acc_i8: reg<amdgpu.vgpr x4>, %lhs_sparse: reg<amdgpu.vgpr x2>, %rhs_sparse: reg<amdgpu.vgpr x4>, %index: reg<amdgpu.vgpr>) asm {
@@ -1615,14 +1645,15 @@ low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_extended_mfma_ass
 }
 
 // ----
-  v_mfma_f32_32x32x8_f16 v[16:31], v[0:1], v[2:3], v[16:31]
-  v_mfma_i32_16x16x32_i8 v[8:11], v[4:5], v[6:7], v[8:11]
-  v_smfmac_f32_16x16x64_bf8_bf8 v[8:11], v[12:13], v[32:35], v14
+  v_mfma_i32_16x16x32_i8 v[4:7], v[0:1], v[2:3], v[4:7]
+  v_mfma_f32_32x32x8_f16 v[16:31], v[8:9], v[10:11], v[16:31]
+  s_nop 3
+  v_smfmac_f32_16x16x64_bf8_bf8 v[4:7], v[12:13], v[32:35], v14
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx950_extended_mfma_assembly waits=none
+// RUN: emit amdgpu-assembly @gfx950_extended_mfma_assembly
 amdgpu.target<gfx950> @gfx950_target
 
 low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @gfx950_extended_mfma_assembly(%lhs_f16: reg<amdgpu.vgpr x4>, %rhs_f16: reg<amdgpu.vgpr x4>, %acc_f16: reg<amdgpu.vgpr x4>, %lhs_i8: reg<amdgpu.vgpr x4>, %rhs_i8: reg<amdgpu.vgpr x4>, %acc_i8: reg<amdgpu.vgpr x16>, %lhs_scale: reg<amdgpu.vgpr x8>, %rhs_scale: reg<amdgpu.vgpr x8>, %scale_a: reg<amdgpu.vgpr>, %scale_b: reg<amdgpu.vgpr>, %lhs_sparse: reg<amdgpu.vgpr x4>, %rhs_sparse: reg<amdgpu.vgpr x8>, %index: reg<amdgpu.vgpr>) asm {
@@ -1634,15 +1665,17 @@ low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @gfx950_extended_mfma_ass
 }
 
 // ----
-  v_mfma_i32_32x32x32_i8 v[16:31], v[0:3], v[4:7], v[16:31]
-  v_mfma_f32_16x16x32_f16 v[32:35], v[8:11], v[12:15], v[32:35]
-  v_mfma_scale_f32_16x16x128_f8f6f4 v[32:35], v[40:47], v[48:55], v[32:35], v36, v37 cbsz:0 blgp:1
-  v_smfmac_f32_16x16x128_fp8_fp8 v[32:35], v[56:59], v[64:71], v38
+  v_mfma_f32_16x16x32_f16 v[8:11], v[0:3], v[4:7], v[8:11]
+  v_mfma_i32_32x32x32_i8 v[32:47], v[12:15], v[16:19], v[32:47]
+  s_nop 4
+  v_mfma_scale_f32_16x16x128_f8f6f4 v[8:11], v[24:31], v[48:55], v[8:11], v20, v21 cbsz:0 blgp:1
+  s_nop 9
+  v_smfmac_f32_16x16x128_fp8_fp8 v[8:11], v[56:59], v[64:71], v22
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx950_smem_dwordx4_stores waits=none
+// RUN: emit amdgpu-assembly @gfx950_smem_dwordx4_stores
 amdgpu.target<gfx950> @gfx950_target
 
 low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @gfx950_smem_dwordx4_stores(%base: reg<amdgpu.sgpr x2>, %resource: reg<amdgpu.sgpr x4>, %soffset: reg<amdgpu.sgpr>, %value32: reg<amdgpu.sgpr>, %value64: reg<amdgpu.sgpr x2>, %value128: reg<amdgpu.sgpr x4>) asm {
@@ -1656,17 +1689,19 @@ low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @gfx950_smem_dwordx4_stor
 }
 
 // ----
-  s_store_dword s0, s[12:13], s1 offset:4
-  s_store_dwordx2 s[2:3], s[12:13], s1 offset:8
-  s_store_dwordx4 s[8:11], s[12:13], s1 offset:16
-  s_buffer_store_dwordx4 s[8:11], s[4:7], s1 offset:32
-  s_scratch_load_dwordx2 s[2:3], s[12:13], s1 offset:20
-  s_scratch_store_dwordx2 s[2:3], s[12:13], s1 offset:24
+  s_store_dword s0, s[4:5], s1 offset:4
+  s_scratch_load_dwordx2 s[6:7], s[4:5], s1 offset:20
+  s_nop 0
+  s_store_dwordx2 s[2:3], s[4:5], s1 offset:8
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_scratch_store_dwordx2 s[6:7], s[4:5], s1 offset:24
+  s_store_dwordx4 s[12:15], s[4:5], s1 offset:16
+  s_buffer_store_dwordx4 s[12:15], s[8:11], s1 offset:32
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx1200_s_delay_alu waits=none
+// RUN: emit amdgpu-assembly @gfx1200_s_delay_alu
 amdgpu.target<gfx1200> @gfx1200_target
 
 low.func.def target<amdgpu.rdna4.core>(@gfx1200_target) @gfx1200_s_delay_alu() asm {
@@ -1680,7 +1715,7 @@ low.func.def target<amdgpu.rdna4.core>(@gfx1200_target) @gfx1200_s_delay_alu() a
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx1200_swmmac_assembly waits=none
+// RUN: emit amdgpu-assembly @gfx1200_swmmac_assembly
 amdgpu.target<gfx1200> @gfx1200_target
 
 low.func.def target<amdgpu.rdna4.core>(@gfx1200_target) @gfx1200_swmmac_assembly(%lhs_f16: reg<amdgpu.vgpr x4>, %rhs_f16: reg<amdgpu.vgpr x8>, %acc_f32: reg<amdgpu.vgpr x8>, %lhs_iu4: reg<amdgpu.vgpr x2>, %rhs_iu4: reg<amdgpu.vgpr x4>, %index: reg<amdgpu.vgpr>) asm {
@@ -1691,12 +1726,13 @@ low.func.def target<amdgpu.rdna4.core>(@gfx1200_target) @gfx1200_swmmac_assembly
 
 // ----
   v_swmmac_f32_16x16x32_f16 v[16:23], v[0:3], v[8:15], v6
+  s_delay_alu instid0(VALU_DEP_1)
   v_swmmac_i32_16x16x64_iu4 v[16:23], v[4:5], v[24:27], v6 neg_lo:[1,0,0] clamp
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx1250_s_delay_alu waits=none
+// RUN: emit amdgpu-assembly @gfx1250_s_delay_alu
 amdgpu.target<gfx1250> @gfx1250_target
 
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_s_delay_alu() asm {
@@ -1710,7 +1746,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_s_delay
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_branch_arg_cycle waits=none
+// RUN: emit amdgpu-assembly @gfx11_branch_arg_cycle
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_branch_arg_cycle(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
@@ -1725,11 +1761,12 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_branch_arg_cycle(%r
 .Lbb1:
   v_add_u32 v0, v1, v0
   buffer_store_dword v0, v2, s[0:3], s4 offen offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_loop_arg_cycle waits=none
+// RUN: emit amdgpu-assembly @gfx11_loop_arg_cycle
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_loop_arg_cycle(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
@@ -1745,7 +1782,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_loop_arg_cycle(%lhs
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_cond_branch waits=none
+// RUN: emit amdgpu-assembly @gfx11_cond_branch
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_cond_branch(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) asm {
@@ -1759,6 +1796,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_cond_branch(%lhs: r
 
 // ----
   s_cmp_lt_i32 s0, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb2
 .Lbb1:
   s_endpgm
@@ -1767,7 +1805,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_cond_branch(%lhs: r
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_scc_selects_with_interleaved_producers waits=none
+// RUN: emit amdgpu-assembly @gfx11_scc_selects_with_interleaved_producers
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_scc_selects_with_interleaved_producers(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %lower: reg<amdgpu.sgpr>, %upper: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.sgpr>, %false_value: reg<amdgpu.sgpr>) asm {
@@ -1784,18 +1822,21 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_scc_selects_with_in
 
 // ----
   s_cmp_lt_i32 s0, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cselect_b32 s0, s4, s5
-  s_cmp_lt_i32 s2, s3
   v_mov_b32 v1, s0
+  s_cmp_lt_i32 s2, s3
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cselect_b32 s0, s4, s5
   v_mov_b32 v2, s0
   buffer_store_dword v1, v0, s[8:11], s6 offen offset:0
   buffer_store_dword v2, v0, s[8:11], s6 offen offset:4
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx1250_scc_select_precedes_first_clobber waits=none strategy=source
+// RUN: emit amdgpu-assembly @gfx1250_scc_select_precedes_first_clobber
 amdgpu.target<gfx1250> @gfx1250_target
 
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_scc_select_precedes_first_clobber(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %offset: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.sgpr>, %false_value: reg<amdgpu.sgpr>) asm {
@@ -1810,16 +1851,18 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_scc_sel
 
 // ----
   s_cmp_lg_i32 s3, s0
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cselect_b32 s0, s1, s2
-  s_add_u32 s1, s3, s4
-  s_add_u32 s1, s1, s4
   v_mov_b32 v1, s0
-  buffer_store_dword v1, v0, s[8:11], s1 offen offset:0
+  s_add_u32 s0, s3, s4
+  s_add_u32 s0, s0, s4
+  buffer_store_dword v1, v0, s[8:11], s0 offen offset:0
+  s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_guarded_scalar_exec_mask waits=none
+// RUN: emit amdgpu-assembly @gfx11_guarded_scalar_exec_mask
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_guarded_scalar_exec_mask(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %x: reg<amdgpu.sgpr>, %y: reg<amdgpu.sgpr>, %payload: reg<amdgpu.vgpr>) asm {
@@ -1849,14 +1892,15 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_guarded_scalar_exec
 
 // ----
   s_mov_b32 s3, 0
-  s_mov_b32 s8, 1
-  s_mov_b64_exec_read s[10:11]
   s_cmp_eq_i32 s0, s3
-  s_cselect_b32 s0, s8, s3
+  s_mov_b32 s0, 1
+  s_cselect_b32 s8, s0, s3
   s_cmp_eq_i32 s1, s3
-  s_cselect_b32 s1, s8, s3
-  s_and_b32 s0, s0, s1
+  s_mov_b64_exec_read s[10:11]
+  s_cselect_b32 s0, s0, s3
+  s_and_b32 s0, s8, s0
   s_cmp_lg_i32 s0, s3
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cselect_b32 s0, s10, s3
   s_cselect_b32 s1, s11, s3
   s_and_saveexec_b64 s[0:1], s[0:1]
@@ -1865,11 +1909,12 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_guarded_scalar_exec
   buffer_store_dword v1, v0, s[4:7], s2 offen offset:0
 .Lbb2:
   s_mov_b64 exec, s[0:1]
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_vop3_cmp_f32_inline_sources waits=none
+// RUN: emit amdgpu-assembly @gfx11_vop3_cmp_f32_inline_sources
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vop3_cmp_f32_inline_sources(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
@@ -1885,7 +1930,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vop3_cmp_f32_inline
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_vop3_cmp_f32_inline_sources_assembly waits=none
+// RUN: emit amdgpu-assembly @gfx11_vop3_cmp_f32_inline_sources_assembly
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vop3_cmp_f32_inline_sources_assembly(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
@@ -1901,7 +1946,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vop3_cmp_f32_inline
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_scalar_compare_i32_source1_inline waits=none
+// RUN: emit amdgpu-assembly @gfx11_scalar_compare_i32_source1_inline
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_scalar_compare_i32_source1_inline(%value: reg<amdgpu.sgpr>) asm {
@@ -1915,6 +1960,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_scalar_compare_i32_
 
 // ----
   s_cmp_lg_i32 s0, 0
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb2
 .Lbb1:
   s_endpgm
@@ -1923,7 +1969,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_scalar_compare_i32_
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_scalar_compare_u64_source1_inline waits=none
+// RUN: emit amdgpu-assembly @gfx11_scalar_compare_u64_source1_inline
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_scalar_compare_u64_source1_inline(%mask: reg<amdgpu.sgpr x2>) asm {
@@ -1937,6 +1983,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_scalar_compare_u64_
 
 // ----
   s_cmp_lg_u64 s[0:1], 0
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb2
 .Lbb1:
   s_endpgm
@@ -1945,7 +1992,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_scalar_compare_u64_
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_exec_mask_branch waits=none
+// RUN: emit amdgpu-assembly @gfx11_exec_mask_branch
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_exec_mask_branch(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
@@ -1961,6 +2008,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_exec_mask_branch(%l
 
 // ----
   v_cmp_lt_i32 s[0:1], v0, v1
+  s_delay_alu instid0(VALU_DEP_1)
   s_and_saveexec_b64 s[0:1], s[0:1]
   s_cbranch_scc0 .Lbb2
 .Lbb1:
@@ -1970,7 +2018,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_exec_mask_branch(%l
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_predicated_tile_sweep_kq_reduction waits=none
+// RUN: emit amdgpu-assembly @gfx11_predicated_tile_sweep_kq_reduction
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_predicated_tile_sweep_kq_reduction(%src0_view: reg<amdgpu.sgpr x2>, %src1_view: reg<amdgpu.sgpr x2>, %dst_view: reg<amdgpu.sgpr x2>, %lane: reg<amdgpu.vgpr>) asm {
@@ -2020,30 +2068,38 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_predicated_tile_swe
   s_mov_b32 s7, 16
   s_mov_b32 s8, 128
   global_load_short_d16 v2, v1, s[0:1] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(63)
   v_cvt_f32_f16 v2, v2
+  s_delay_alu instid0(VALU_DEP_1)
   v_mov_b32 v3, v2
 .Lbb1:
   s_cmp_lt_i32 s6, s8
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb6
 .Lbb2:
   s_mov_b64_exec_read s[0:1]
   v_mov_b32 v2, v0
 .Lbb3:
   v_mov_b32 v4, 256
+  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
   v_cmp_lt_i32 s[10:11], v2, v4
   s_and_saveexec_b64 s[10:11], s[10:11]
   s_cbranch_scc0 .Lbb5
 .Lbb4:
-  v_mov_b32 v4, 15
-  v_mov_b32 v5, 64
-  v_lshrrev_b32 v6, 4, v2
-  v_mov_b32 v7, s6
+  v_dual_mov_b32 v4, 15 :: v_dual_mov_b32 v5, 64
+  v_mov_b32 v6, s6
+  v_lshrrev_b32 v7, 4, v2
+  s_delay_alu instid0(VALU_DEP_3)
   v_and_b32 v4, v2, v4
-  v_add_u32 v4, v7, v4
-  v_mad_u32_u24 v4, v6, 3072, v4
+  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_3)
+  v_add_u32 v4, v6, v4
   v_add_u32 v2, v2, v5
+  s_delay_alu instid0(VALU_DEP_2) | instid1(VALU_DEP_4)
+  v_mad_u32_u24 v4, v7, 3072, v4
+  s_delay_alu instid0(VALU_DEP_1)
   v_lshlrev_b32 v4, 2, v4
   global_load_b32 v4, v4, s[2:3] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(63)
   v_add_f32 v3, v3, v4
   s_branch .Lbb3
 .Lbb5:
@@ -2052,11 +2108,12 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_predicated_tile_swe
   s_branch .Lbb1
 .Lbb6:
   global_store_b32 v1, v3, s[4:5] offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_cvt_f32_ubyte_family waits=none
+// RUN: emit amdgpu-assembly @gfx11_cvt_f32_ubyte_family
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_cvt_f32_ubyte_family(%input: reg<amdgpu.vgpr>) asm {
@@ -2076,7 +2133,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_cvt_f32_ubyte_famil
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_buffer_off_zero waits=none
+// RUN: emit amdgpu-assembly @gfx11_buffer_off_zero
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_buffer_off_zero(%resource: reg<amdgpu.sgpr x4>) asm {
@@ -2087,12 +2144,14 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_buffer_off_zero(%re
 
 // ----
   buffer_load_dword v0, off, s[0:3], 0 offset:12
+  s_waitcnt vmcnt(0) lgkmcnt(63)
   buffer_store_dword v0, off, s[0:3], 0 offset:16
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_wide_buffer_off_zero waits=none
+// RUN: emit amdgpu-assembly @gfx11_wide_buffer_off_zero
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_wide_buffer_off_zero(%resource: reg<amdgpu.sgpr x4>) asm {
@@ -2103,12 +2162,14 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_wide_buffer_off_zer
 
 // ----
   buffer_load_b128 v[0:3], off, s[0:3], 0 offset:12
+  s_waitcnt vmcnt(0) lgkmcnt(63)
   buffer_store_b128 v[0:3], off, s[0:3], 0 offset:16
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_mask_select waits=none
+// RUN: emit amdgpu-assembly @gfx11_mask_select
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_mask_select(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>, %resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) asm {
@@ -2120,13 +2181,15 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_mask_select(%lhs: r
 
 // ----
   v_cmp_lt_i32 s[6:7], v0, v1
+  s_delay_alu instid0(VALU_DEP_1)
   v_cndmask_b32 v0, v3, v2, s[6:7]
   buffer_store_dword v0, v4, s[0:3], s4 offen offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_mask_select_inline waits=none
+// RUN: emit amdgpu-assembly @gfx11_mask_select_inline
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_mask_select_inline(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>, %resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) asm {
@@ -2138,13 +2201,15 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_mask_select_inline(
 
 // ----
   v_cmp_lt_i32 s[6:7], v0, v1
+  s_delay_alu instid0(VALU_DEP_1)
   v_cndmask_b32 v0, v2, 3, s[6:7]
   buffer_store_dword v0, v3, s[0:3], s4 offen offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_mask_select_src0_lit_src1_inline waits=none
+// RUN: emit amdgpu-assembly @gfx11_mask_select_src0_lit_src1_inline
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_mask_select_src0_lit_src1_inline(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) asm {
@@ -2156,13 +2221,15 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_mask_select_src0_li
 
 // ----
   v_cmp_lt_i32 s[6:7], v0, v1
+  s_delay_alu instid0(VALU_DEP_1)
   v_cndmask_b32 v0, 2147483647, 1, s[6:7]
   buffer_store_dword v0, v2, s[0:3], s4 offen offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_mask_select_src1_lit_src0_inline waits=none
+// RUN: emit amdgpu-assembly @gfx11_mask_select_src1_lit_src0_inline
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_mask_select_src1_lit_src0_inline(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) asm {
@@ -2174,13 +2241,15 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_mask_select_src1_li
 
 // ----
   v_cmp_lt_i32 s[6:7], v0, v1
+  s_delay_alu instid0(VALU_DEP_1)
   v_cndmask_b32 v0, 1, 2147483647, s[6:7]
   buffer_store_dword v0, v2, s[0:3], s4 offen offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_global_pointer waits=none
+// RUN: emit amdgpu-assembly @gfx11_global_pointer
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_global_pointer(%addr: reg<amdgpu.vgpr x2>) asm {
@@ -2191,12 +2260,14 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_global_pointer(%add
 
 // ----
   global_load_b128 v[4:7], v[0:1], off offset:-16
+  s_waitcnt vmcnt(0) lgkmcnt(63)
   global_store_b128 v[0:1], v[4:7], off offset:32
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_global_saddr waits=none
+// RUN: emit amdgpu-assembly @gfx11_global_saddr
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_global_saddr(%addr: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>) asm {
@@ -2207,12 +2278,14 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_global_saddr(%addr:
 
 // ----
   global_load_b128 v[4:7], v0, s[0:1] offset:4
+  s_waitcnt vmcnt(0) lgkmcnt(63)
   global_store_b128 v0, v[4:7], s[0:1] offset:8
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_b96_memory waits=none
+// RUN: emit amdgpu-assembly @gfx11_b96_memory
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_b96_memory(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %addr: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>) asm {
@@ -2225,14 +2298,17 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_b96_memory(%resourc
 
 // ----
   buffer_load_b96 v[2:4], v0, s[0:3], s4 offen offset:12
+  s_waitcnt vmcnt(0) lgkmcnt(63)
   buffer_store_b96 v[2:4], v0, s[0:3], s4 offen offset:16
   global_load_b96 v[2:4], v1, s[6:7] offset:4
+  s_waitcnt vmcnt(0) lgkmcnt(63)
   global_store_b96 v1, v[2:4], s[6:7] offset:8
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_ds_read_dead_result_aliases_address waits=none
+// RUN: emit amdgpu-assembly @gfx11_ds_read_dead_result_aliases_address
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_ds_read_dead_result_aliases_address(%addr: reg<amdgpu.vgpr>) asm {
@@ -2248,7 +2324,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_ds_read_dead_result
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_ds_load_u16_d16_pair waits=none
+// RUN: emit amdgpu-assembly @gfx11_ds_load_u16_d16_pair
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_ds_load_u16_d16_pair(%addr: reg<amdgpu.vgpr>) asm {
@@ -2261,12 +2337,13 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_ds_load_u16_d16_pai
 // ----
   ds_load_u16_d16 v1, v0 offset:0
   ds_load_u16_d16_hi v1, v0 offset:0
+  s_waitcnt vmcnt(63) lgkmcnt(0)
   ds_write_b32 v0, v1 offset:0
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_ds_byte_roundtrip waits=none
+// RUN: emit amdgpu-assembly @gfx11_ds_byte_roundtrip
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_ds_byte_roundtrip(%addr: reg<amdgpu.vgpr>) asm {
@@ -2277,12 +2354,13 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_ds_byte_roundtrip(%
 
 // ----
   ds_read_u8 v1, v0 offset:1
+  s_waitcnt vmcnt(63) lgkmcnt(0)
   ds_write_b8 v0, v1 offset:2
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx942_global_load_lds waits=none
+// RUN: emit amdgpu-assembly @gfx942_global_load_lds
 amdgpu.target<gfx942> @gfx942_target
 
 low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_global_load_lds(%addr64: reg<amdgpu.vgpr x2>, %addr32: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>, %m0: reg<amdgpu.m0>) asm {
@@ -2302,7 +2380,7 @@ low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_global_load_lds(%
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx942_buffer_load_lds waits=none
+// RUN: emit amdgpu-assembly @gfx942_buffer_load_lds
 amdgpu.target<gfx942> @gfx942_target
 
 low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_buffer_load_lds(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %m0: reg<amdgpu.m0>) asm {
@@ -2318,7 +2396,7 @@ low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_buffer_load_lds(%
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx942_m0_state_reuse strategy=resource-stall waits=none
+// RUN: emit amdgpu-assembly @gfx942_m0_state_reuse
 amdgpu.target<gfx942> @gfx942_target
 
 low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_m0_state_reuse(%value0: reg<amdgpu.vgpr>, %value1: reg<amdgpu.vgpr>) asm {
@@ -2331,14 +2409,16 @@ low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_m0_state_reuse(%v
 
 // ----
   s_mov_b32 m0, 0
+  s_nop 0
   ds_write_addtid_b32 v0 offset:0
   s_mov_b32 m0, 1024
+  s_nop 0
   ds_write_addtid_b32 v1 offset:0
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx950_global_load_lds waits=none
+// RUN: emit amdgpu-assembly @gfx950_global_load_lds
 amdgpu.target<gfx950> @gfx950_target
 
 low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @gfx950_global_load_lds(%addr64: reg<amdgpu.vgpr x2>, %addr32: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>, %m0: reg<amdgpu.m0>) asm {
@@ -2360,7 +2440,7 @@ low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @gfx950_global_load_lds(%
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx950_buffer_load_lds waits=none
+// RUN: emit amdgpu-assembly @gfx950_buffer_load_lds
 amdgpu.target<gfx950> @gfx950_target
 
 low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @gfx950_buffer_load_lds(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %m0: reg<amdgpu.m0>) asm {
@@ -2376,7 +2456,7 @@ low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @gfx950_buffer_load_lds(%
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx950_dwordx3_memory waits=none
+// RUN: emit amdgpu-assembly @gfx950_dwordx3_memory
 amdgpu.target<gfx950> @gfx950_target
 
 low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @gfx950_dwordx3_memory(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %addr: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>) asm {
@@ -2389,14 +2469,17 @@ low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @gfx950_dwordx3_memory(%r
 
 // ----
   buffer_load_dwordx3 v[2:4], v0, s[0:3], s4 offen offset:12
+  s_waitcnt vmcnt(0) lgkmcnt(15)
   buffer_store_dwordx3 v[2:4], v0, s[0:3], s4 offen offset:16
   global_load_dwordx3 v[2:4], v1, s[6:7] offset:4
+  s_waitcnt vmcnt(0) lgkmcnt(15)
   global_store_dwordx3 v1, v[2:4], s[6:7] offset:8
+  s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx950_narrow_vmem_loads waits=none
+// RUN: emit amdgpu-assembly @gfx950_narrow_vmem_loads
 amdgpu.target<gfx950> @gfx950_target
 
 low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @gfx950_narrow_vmem_loads(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %saddr: reg<amdgpu.sgpr x2>) asm {
@@ -2411,12 +2494,13 @@ low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @gfx950_narrow_vmem_loads
   buffer_load_ubyte v1, v0, s[0:3], s4 offen offset:4
   buffer_load_sshort v1, v0, s[0:3], s4 offen offset:8
   global_load_ubyte v1, v0, s[6:7] offset:12
+  s_nop 0
   global_load_sshort v0, v0, s[6:7] offset:16
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx950_v_mov_b32_sdwa waits=none
+// RUN: emit amdgpu-assembly @gfx950_v_mov_b32_sdwa
 amdgpu.target<gfx950> @gfx950_target
 
 low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @gfx950_v_mov_b32_sdwa(%value: reg<amdgpu.vgpr>) asm {
@@ -2432,7 +2516,7 @@ low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @gfx950_v_mov_b32_sdwa(%v
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx12_packed_half_atomics waits=none
+// RUN: emit amdgpu-assembly @gfx12_packed_half_atomics
 amdgpu.target<gfx1200> @gfx12_target
 
 low.func.def target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_packed_half_atomics(%resource: reg<amdgpu.sgpr x4>, %addr64: reg<amdgpu.vgpr x2>, %addr32: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>, %soffset: reg<amdgpu.sgpr>, %value0: reg<amdgpu.vgpr>, %value1: reg<amdgpu.vgpr>, %value2: reg<amdgpu.vgpr>, %value3: reg<amdgpu.vgpr>) asm {
@@ -2452,15 +2536,22 @@ low.func.def target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_packed_half_atomics
   buffer_atomic_pk_add_bf16 v1, v6, s[0:3], s4 offen offset:8 scope:SCOPE_DEV th:TH_ATOMIC_RETURN
   global_atomic_pk_add_f16 v6, v2, s[6:7] offset:12 scope:SCOPE_DEV
   global_atomic_pk_add_bf16 v0, v6, v3, s[6:7] offset:16 scope:SCOPE_DEV th:TH_ATOMIC_RETURN
+  s_wait_loadcnt loadcnt(0)
+  s_wait_storecnt storecnt(0)
   flat_atomic_pk_add_f16 v[4:5], v1 offset:20 scope:SCOPE_DEV
+  s_wait_storecnt storecnt(0)
+  s_wait_dscnt dscnt(0)
   flat_atomic_pk_add_bf16 v0, v[4:5], v0 offset:24 scope:SCOPE_DEV th:TH_ATOMIC_RETURN
+  s_wait_loadcnt loadcnt(0)
+  s_wait_dscnt dscnt(0)
   ds_pk_add_f16 v6, v0 offset:28
+  s_wait_dscnt dscnt(0)
   ds_pk_add_rtn_bf16 v0, v6, v0 offset:32
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx12_smem_wide_loads waits=none
+// RUN: emit amdgpu-assembly @gfx12_smem_wide_loads
 amdgpu.target<gfx1200> @gfx12_target
 
 low.func.def target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_smem_wide_loads(%base: reg<amdgpu.sgpr x2>, %resource: reg<amdgpu.sgpr x4>, %soffset: reg<amdgpu.sgpr>) asm {
@@ -2476,17 +2567,20 @@ low.func.def target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_smem_wide_loads(%ba
 
 // ----
   s_load_b96 s[8:10], s[0:1], s2 offset:4
+  s_wait_kmcnt kmcnt(0)
   s_buffer_load_b96 s[8:10], s[4:7], s2 offset:8
   s_buffer_load_b512 s[16:31], s[4:7], s2 offset:16
   s_load_i8 s3, s[0:1], s2 offset:20
+  s_wait_kmcnt kmcnt(0)
   s_load_u16 s3, s[0:1], s2 offset:24
   s_buffer_load_u8 s0, s[4:7], s2 offset:28
+  s_wait_kmcnt kmcnt(0)
   s_buffer_load_i16 s0, s[4:7], s2 offset:32
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx12_narrow_vmem_loads waits=none
+// RUN: emit amdgpu-assembly @gfx12_narrow_vmem_loads
 amdgpu.target<gfx1200> @gfx12_target
 
 low.func.def target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_narrow_vmem_loads(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %saddr: reg<amdgpu.sgpr x2>) asm {
@@ -2499,14 +2593,16 @@ low.func.def target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_narrow_vmem_loads(%
 
 // ----
   buffer_load_ubyte v1, v0, s[0:3], s4 offen offset:4
+  s_wait_loadcnt loadcnt(0)
   buffer_load_sshort v1, v0, s[0:3], s4 offen offset:8
+  s_wait_loadcnt loadcnt(0)
   global_load_ubyte v1, v0, s[6:7] offset:12
   global_load_sshort v0, v0, s[6:7] offset:16
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx12_vbuffer_vaddr_offset_forms waits=none
+// RUN: emit amdgpu-assembly @gfx12_vbuffer_vaddr_offset_forms
 amdgpu.target<gfx1200> @gfx12_target
 
 low.func.def target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_vbuffer_vaddr_offset_forms(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>) asm {
@@ -2518,13 +2614,15 @@ low.func.def target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_vbuffer_vaddr_offse
 
 // ----
   buffer_load_dword v1, v0, s[0:3], null offen offset:4608
+  s_wait_loadcnt loadcnt(0)
   buffer_store_short v1, v0, s[0:3], null offen offset:1031
   buffer_load_b96 v[0:2], v0, s[0:3], null offen offset:2049
+  s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx950_packed_half_atomics waits=none
+// RUN: emit amdgpu-assembly @gfx950_packed_half_atomics
 amdgpu.target<gfx950> @gfx950_target
 
 low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @gfx950_packed_half_atomics(%addr64: reg<amdgpu.vgpr x2>, %addr32: reg<amdgpu.vgpr>, %value0: reg<amdgpu.vgpr>, %value1: reg<amdgpu.vgpr>, %value2: reg<amdgpu.vgpr>) asm {
@@ -2537,14 +2635,17 @@ low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @gfx950_packed_half_atomi
 
 // ----
   flat_atomic_pk_add_f16 v[2:3], v0 offset:4
+  s_waitcnt vmcnt(0) lgkmcnt(0)
   flat_atomic_pk_add_bf16 v0, v[2:3], v1 offset:8 sc0
+  s_waitcnt vmcnt(0) lgkmcnt(0)
   ds_pk_add_f16 v5, v4 offset:12
+  s_waitcnt vmcnt(63) lgkmcnt(0)
   ds_pk_add_rtn_bf16 v0, v5, v0 offset:16
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_stress_fragment waits=none
+// RUN: emit amdgpu-assembly @gfx11_stress_fragment
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_stress_fragment(%s0: reg<amdgpu.sgpr>, %s1: reg<amdgpu.sgpr>, %v0: reg<amdgpu.vgpr>, %v1: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr x8>, %b: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %kernarg: reg<amdgpu.sgpr x2>, %resource: reg<amdgpu.sgpr x4>, %soffset: reg<amdgpu.sgpr>, %vaddr: reg<amdgpu.vgpr>) asm {
@@ -2570,20 +2671,23 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_stress_fragment(%s0
 }
 
 // ----
-  buffer_load_dword v11, v10, s[4:7], s8 offen offset:4
-  buffer_load_b128 v[12:15], v10, s[4:7], s8 offen offset:16
-  v_wmma_f32_16x16x16_f16 v[0:7], v[16:23], v[24:31], v[0:7]
+  buffer_load_dword v3, v2, s[4:7], s8 offen offset:4
+  buffer_load_b128 v[4:7], v2, s[4:7], s8 offen offset:16
+  v_add_u32 v0, v0, v1
+  s_buffer_load_dword s9, s[4:7], s8 offset:0
   s_load_dwordx2 s[10:11], s[0:1], s8 offset:16
-  s_buffer_load_dword s0, s[4:7], s8 offset:0
-  v_add_u32 v8, v8, v9
-  s_add_u32 s1, s2, s3
-  s_add_u32 s0, s1, s0
-  v_wmma_f32_16x16x16_f16 v[0:7], v[16:23], v[24:31], v[0:7]
-  v_add_u32 v4, v8, v11
-  buffer_store_dword v4, v10, s[4:7], s0 offen offset:8
-  buffer_store_b128 v[12:15], v10, s[4:7], s10 offen offset:32
-  buffer_store_b128 v[0:3], v10, s[4:7], s8 offen offset:48
-  s_waitcnt vmcnt(0) lgkmcnt(0)
+  s_add_u32 s0, s2, s3
+  v_wmma_f32_16x16x16_f16 v[8:15], v[16:23], v[24:31], v[8:15]
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_add_u32 s0, s0, s9
+  s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_1) | instid1(VALU_DEP_3)
+  v_wmma_f32_16x16x16_f16 v[8:15], v[16:23], v[24:31], v[8:15]
+  s_waitcnt vmcnt(1) lgkmcnt(63)
+  v_add_u32 v0, v0, v3
+  buffer_store_dword v0, v2, s[4:7], s0 offen offset:8
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  buffer_store_b128 v[4:7], v2, s[4:7], s10 offen offset:32
+  buffer_store_b128 v[8:11], v2, s[4:7], s8 offen offset:48
   s_waitcnt_depctr depctr(0)
   s_wait_idle
   s_endpgm
@@ -2718,7 +2822,7 @@ low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_trans_result_wait
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx942_valu_sgpr_read_wait_state strategy=source
+// RUN: emit amdgpu-assembly @gfx942_valu_sgpr_read_wait_state
 amdgpu.target<gfx942> @gfx942_target
 
 low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_valu_sgpr_read_wait_state(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %base_lo: reg<amdgpu.sgpr>, %base_hi: reg<amdgpu.sgpr>, %offset_lo: reg<amdgpu.vgpr>, %offset_hi: reg<amdgpu.vgpr>) asm {
@@ -2731,17 +2835,18 @@ low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_valu_sgpr_read_wa
 }
 
 // ----
-  v_add_co_u32 v0, s[2:3], s1, v0
   s_add_u32 s0, s0, s0
-  v_mov_b32 v0, s0
-  v_addc_co_u32 v0, s[2:3], v0, v1, s[2:3]
+  v_mov_b32 v3, s0
+  v_add_co_u32 v0, s[2:3], s1, v0
+  s_nop 1
+  v_addc_co_u32 v0, s[2:3], v3, v1, s[2:3]
   buffer_store_dword v0, v2, s[4:7], s1 offen offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx942_state_read_precedes_ssa_consumers strategy=resource-stall
+// RUN: emit amdgpu-assembly @gfx942_state_read_precedes_ssa_consumers
 amdgpu.target<gfx942> @gfx942_target
 
 low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_state_read_precedes_ssa_consumers(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %base_lo: reg<amdgpu.sgpr>, %base_hi: reg<amdgpu.sgpr>, %static_lo: reg<amdgpu.sgpr>, %static_hi: reg<amdgpu.sgpr>, %offset_lo: reg<amdgpu.vgpr>, %offset_hi: reg<amdgpu.vgpr>) asm {
@@ -2770,7 +2875,7 @@ low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_state_read_preced
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx950_valu_sgpr_read_wait_state strategy=source
+// RUN: emit amdgpu-assembly @gfx950_valu_sgpr_read_wait_state
 amdgpu.target<gfx950> @gfx950_target
 
 low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @gfx950_valu_sgpr_read_wait_state(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %base_lo: reg<amdgpu.sgpr>, %base_hi: reg<amdgpu.sgpr>, %offset_lo: reg<amdgpu.vgpr>, %offset_hi: reg<amdgpu.vgpr>) asm {
@@ -2783,17 +2888,18 @@ low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @gfx950_valu_sgpr_read_wa
 }
 
 // ----
-  v_add_co_u32 v0, s[2:3], s1, v0
   s_add_u32 s0, s0, s0
-  v_mov_b32 v0, s0
-  v_addc_co_u32 v0, s[2:3], v0, v1, s[2:3]
+  v_mov_b32 v3, s0
+  v_add_co_u32 v0, s[2:3], s1, v0
+  s_nop 1
+  v_addc_co_u32 v0, s[2:3], v3, v1, s[2:3]
   buffer_store_dword v0, v2, s[4:7], s1 offen offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx12_valu_sgpr_read_depctr strategy=source
+// RUN: emit amdgpu-assembly @gfx12_valu_sgpr_read_depctr
 amdgpu.target<gfx1200> @gfx12_target
 
 low.func.def target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_valu_sgpr_read_depctr(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %source: reg<amdgpu.sgpr>, %offset: reg<amdgpu.vgpr>) asm {
@@ -2816,7 +2922,7 @@ low.func.def target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_valu_sgpr_read_depc
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_trans_result_depctr strategy=source
+// RUN: emit amdgpu-assembly @gfx11_trans_result_depctr
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_trans_result_depctr(%input: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %resource: reg<amdgpu.sgpr x4>, %soffset: reg<amdgpu.sgpr>) asm {
@@ -2838,7 +2944,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_trans_result_depctr
 
 // Allocation-authored VGPR moves are vector-ALU consumers and must drain a
 // pending transcendental result before reading its physical register.
-// RUN: emit amdgpu-assembly @gfx11_trans_result_structural_copy strategy=source
+// RUN: emit amdgpu-assembly @gfx11_trans_result_structural_copy
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_trans_result_structural_copy(%input: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -2858,7 +2964,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_trans_result_struct
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_grouped_trans_lanes strategy=source
+// RUN: emit amdgpu-assembly @gfx11_grouped_trans_lanes
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_grouped_trans_lanes(%input0: reg<amdgpu.vgpr>, %input1: reg<amdgpu.vgpr>, %input2: reg<amdgpu.vgpr>, %input3: reg<amdgpu.vgpr>, %bias: reg<amdgpu.vgpr>, %resource: reg<amdgpu.sgpr x4>, %addr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) asm {
@@ -2907,7 +3013,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_grouped_trans_lanes
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_grouped_trans_lanes_b128_tail_depctr strategy=source
+// RUN: emit amdgpu-assembly @gfx11_grouped_trans_lanes_b128_tail_depctr
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_grouped_trans_lanes_b128_tail_depctr(%input0: reg<amdgpu.vgpr>, %input1: reg<amdgpu.vgpr>, %input2: reg<amdgpu.vgpr>, %input3: reg<amdgpu.vgpr>, %input4: reg<amdgpu.vgpr>, %input5: reg<amdgpu.vgpr>, %input6: reg<amdgpu.vgpr>, %input7: reg<amdgpu.vgpr>, %bias: reg<amdgpu.vgpr>, %resource: reg<amdgpu.sgpr x4>, %addr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) asm {
@@ -2965,31 +3071,32 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_grouped_trans_lanes
   v_add_f32 v12, v17, v0
   v_add_f32 v14, v19, v0
   v_add_f32 v15, v21, v0
-  v_dual_add_f32 v16, v0, v23 :: v_dual_add_f32 v17, v25, v0
-  v_rcp_f32 v0, v10
+  v_rcp_f32 v10, v10
   v_rcp_f32 v13, v13
-  v_rcp_f32 v10, v11
-  v_rcp_f32 v11, v12
-  v_rcp_f32 v12, v14
+  v_rcp_f32 v11, v11
+  v_rcp_f32 v12, v12
+  v_add_f32 v16, v23, v0
+  v_add_f32 v17, v25, v0
+  v_rcp_f32 v0, v14
   v_rcp_f32 v15, v15
-  v_rcp_f32 v14, v16
-  v_rcp_f32 v17, v17
-  v_mul_f32 v0, v0, v1
-  v_mul_f32 v1, v13, v2
-  v_mul_f32 v2, v10, v3
-  v_mul_f32 v3, v11, v4
-  v_mul_f32 v4, v12, v5
-  v_mul_f32 v5, v15, v6
-  v_mul_f32 v6, v14, v7
-  v_mul_f32 v7, v17, v8
-  buffer_store_b128 v[0:3], v9, s[0:3], s4 offen offset:0
-  buffer_store_b128 v[4:7], v9, s[0:3], s4 offen offset:16
+  v_mul_f32 v1, v10, v1
+  v_mul_f32 v2, v13, v2
+  v_mul_f32 v3, v11, v3
+  v_mul_f32 v4, v12, v4
+  v_rcp_f32 v10, v16
+  v_rcp_f32 v11, v17
+  v_mul_f32 v0, v0, v5
+  v_mul_f32 v13, v15, v6
+  buffer_store_b128 v[1:4], v9, s[0:3], s4 offen offset:0
+  v_dual_mul_f32 v2, v10, v7 :: v_dual_mul_f32 v3, v11, v8
+  v_mov_b32 v1, v13
+  buffer_store_b128 v[0:3], v9, s[0:3], s4 offen offset:16
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_trans_result_expired_by_valu_distance strategy=source
+// RUN: emit amdgpu-assembly @gfx11_trans_result_expired_by_valu_distance
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_trans_result_expired_by_valu_distance(%input: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %resource: reg<amdgpu.sgpr x4>, %soffset: reg<amdgpu.sgpr>) asm {
@@ -3006,16 +3113,17 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_trans_result_expire
 }
 
 // ----
-  v_rsq_f32 v0, v0
   v_add_f32 v3, v1, v1
+  v_rsq_f32 v0, v0
   s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
   v_add_f32 v3, v3, v1
   v_add_f32 v3, v3, v1
   s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
   v_add_f32 v3, v3, v1
   v_add_f32 v3, v3, v1
-  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
+  s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_1) | instid1(VALU_DEP_1)
   v_add_f32 v1, v3, v1
+  s_waitcnt_depctr depctr(0)
   v_mul_f32 v0, v0, v1
   buffer_store_dword v0, v2, s[0:3], s4 offen offset:0
   s_waitcnt_vscnt vscnt(0)
@@ -3088,7 +3196,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx_target) @wait_cross_block(%resource:
 
 // ====
 
-// RUN: emit amdgpu-assembly @wait_branch_arg_after_prior_wait strategy=source
+// RUN: emit amdgpu-assembly @wait_branch_arg_after_prior_wait
 amdgpu.target<gfx1100> @gfx_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx_target) @wait_branch_arg_after_prior_wait(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %value: reg<amdgpu.vgpr>) asm {
@@ -3107,12 +3215,11 @@ low.func.def target<amdgpu.rdna3.core>(@gfx_target) @wait_branch_arg_after_prior
 }
 
 // ----
-  buffer_load_dword v2, v1, s[4:7], s2 offen offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_add_u32 v0, v2, v0
-  buffer_load_b128 v[4:7], v1, s[4:7], s2 offen offset:16
+  buffer_load_dword v2, v0, s[4:7], s2 offen offset:0
+  buffer_load_b128 v[4:7], v0, s[4:7], s2 offen offset:16
   s_cmp_lt_i32 s0, s1
-  s_delay_alu instid0(SALU_CYCLE_1)
+  s_waitcnt vmcnt(1) lgkmcnt(63)
+  v_add_u32 v0, v2, v1
   s_cbranch_scc0 .Lbb3
 .Lbb1:
 .Lbb2:
@@ -3125,7 +3232,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx_target) @wait_branch_arg_after_prior
 
 // ====
 
-// RUN: emit amdgpu-assembly @wait_cross_block_descriptor_used_twice strategy=source
+// RUN: emit amdgpu-assembly @wait_cross_block_descriptor_used_twice
 amdgpu.target<gfx1100> @gfx_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx_target) @wait_cross_block_descriptor_used_twice(%kernarg: reg<amdgpu.sgpr x2>, %soffset: reg<amdgpu.sgpr>, %addr: reg<amdgpu.vgpr>, %lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %value0: reg<amdgpu.vgpr>, %value1: reg<amdgpu.vgpr>) asm {
@@ -3192,7 +3299,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx_target) @wait_fragment(%valu
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_coalesced_copy waits=none
+// RUN: emit amdgpu-assembly @gfx11_coalesced_copy
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_coalesced_copy(%s0: reg<amdgpu.sgpr>, %s1: reg<amdgpu.sgpr>, %a: reg<amdgpu.vgpr x8>, %b: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>) asm {
@@ -3208,16 +3315,18 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_coalesced_copy(%s0:
 }
 
 // ----
-  s_add_u32 s0, s1, s0
   v_wmma_f32_16x16x16_f16 v[0:7], v[8:15], v[16:23], v[0:7]
   s_add_u32 s0, s1, s0
+  s_add_u32 s0, s1, s0
+  s_delay_alu instid0(VALU_DEP_1)
   v_wmma_f32_16x16x16_f16 v[0:7], v[8:15], v[16:23], v[0:7]
   buffer_store_b128 v[0:3], v24, s[4:7], s0 offen offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_convergent_exec_state_fence strategy=resource-stall
+// RUN: emit amdgpu-assembly @gfx11_convergent_exec_state_fence
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_convergent_exec_state_fence(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>) asm {
@@ -3239,7 +3348,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_convergent_exec_sta
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_concat waits=none
+// RUN: emit amdgpu-assembly @gfx11_concat
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_concat(%r0: reg<amdgpu.sgpr>, %r1: reg<amdgpu.sgpr>, %r2: reg<amdgpu.sgpr>, %r3: reg<amdgpu.sgpr>, %value: reg<amdgpu.vgpr>, %vaddr: reg<amdgpu.vgpr>) asm {
@@ -3256,11 +3365,12 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_concat(%r0: reg<amd
   s_add_u32 s5, s2, s3
   s_add_u32 s4, s4, s5
   buffer_store_dword v0, v1, s[0:3], s4 offen offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_static_storage_precedes_load strategy=source
+// RUN: emit amdgpu-assembly @gfx11_static_storage_precedes_load
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_static_storage_precedes_load(%kernarg: reg<amdgpu.sgpr x2>) asm {
@@ -3277,7 +3387,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_static_storage_prec
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_waitcnt_uses_descriptor_defaults waits=none
+// RUN: emit amdgpu-assembly @gfx11_waitcnt_uses_descriptor_defaults
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_waitcnt_uses_descriptor_defaults() asm {
@@ -3293,7 +3403,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_waitcnt_uses_descri
 
 // A repeated component is transported on the backedge. Sharing its first
 // unit must leave the original pair intact when control instead exits.
-// RUN: emit amdgpu-assembly @partial_backedge_preserves_exit strategy=source waits=none
+// RUN: emit amdgpu-assembly @partial_backedge_preserves_exit
 
 amdgpu.target<gfx1100> @target
 

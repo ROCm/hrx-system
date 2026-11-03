@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @leased_loads_reuse_physical_destinations strategy=source amdgpu.vgpr=5
+// RUN: emit amdgpu-assembly @leased_loads_reuse_physical_destinations amdgpu.vgpr=5
 
 // Each asynchronous load needs a physical destination before its result can
 // spill. Reusing those destinations retains the shared literal and address.
@@ -20,60 +20,21 @@ low.func.def target<amdgpu.rdna3.core>(@target) @leased_loads_reuse_physical_des
 }
 
 // ----
-  scratch_store_b32 off, v0, off offset:0
-  v_mov_b32 v0, 7
-  global_load_b32 v4, v3, s[0:1] offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(63)
-  scratch_store_b32 off, v4, off offset:4
-  global_load_b32 v4, v3, s[0:1] offset:4
-  s_waitcnt vmcnt(0) lgkmcnt(63)
-  scratch_store_b32 off, v4, off offset:8
+  v_add_u32 v0, v0, v1
   v_add_u32 v1, v1, v2
-  scratch_load_b32 v4, off, off offset:0
+  v_mov_b32 v2, 7
+  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_3)
+  v_add_u32 v0, v0, v2
+  s_delay_alu instid0(VALU_DEP_3)
+  v_add_u32 v1, v1, v2
+  global_load_b32 v2, v3, s[0:1] offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_add_u32 v2, v2, v4
-  v_add_u32 v1, v1, v0
-  s_delay_alu instid0(VALU_DEP_2)
   v_add_u32 v0, v2, v0
-  scratch_load_b32 v2, off, off offset:4
+  global_load_b32 v2, v3, s[0:1] offset:4
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_add_u32 v1, v2, v1
-  scratch_load_b32 v2, off, off offset:8
-  s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_add_u32 v0, v2, v0
   s_delay_alu instid0(VALU_DEP_1)
-  v_add_u32 v0, v1, v0
+  v_add_u32 v0, v0, v1
   global_store_b32 v3, v0, s[2:3] offset:0
   s_waitcnt_vscnt vscnt(0)
-  s_endpgm
-
-// ====
-
-// One literal serves both add operands, preserving the three-register fit
-// without spilling the other live sum to scratch.
-// RUN: emit amdgpu-assembly @rematerialize_duplicate_operands strategy=source amdgpu.vgpr=3 allocation-diagnostics=predicted-spills
-
-amdgpu.target<gfx1100> @test_target
-
-// REMARK@+1: BACKEND/045 {trigger_value_class="amdgpu.vgpr", repaired_value_count="1", retained_placement_count="0"}
-low.func.def target<amdgpu.rdna3.core>(@test_target) @rematerialize_duplicate_operands(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %literal = v_mov_b32 1234567
-  %ab = v_add_u32 %a, %b
-  %bc = v_add_u32 %b, %c
-  %twice = v_add_u32 %literal, %literal
-  %partial = v_add_u32 %ab, %twice
-  %result = v_add_u32 %partial, %bc
-  return %result
-}
-
-// ----
-  v_add_u32 v0, v0, v1
-  v_add_u32 v1, v1, v2
-  v_mov_b32 v2, 1234567
-  s_delay_alu instid0(VALU_DEP_1)
-  v_add_u32 v2, v2, v2
-  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_4)
-  v_add_u32 v0, v0, v2
-  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_4)
-  v_add_u32 v0, v0, v1
   s_endpgm

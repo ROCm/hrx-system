@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @gfx1100_preserved_low_read strategy=source
+// RUN: emit amdgpu-assembly @gfx1100_preserved_low_read
 
 amdgpu.target<gfx1100> @target
 
@@ -18,7 +18,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @gfx1100_preserved_low_read(%see
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @gfx1151_preserved_low_read strategy=source
+// RUN: emit amdgpu-assembly @gfx1151_preserved_low_read
 
 amdgpu.target<gfx1151> @target
 
@@ -38,7 +38,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @gfx1151_preserved_low_read(%s
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @gfx1170_preserved_low_read strategy=source
+// RUN: emit amdgpu-assembly @gfx1170_preserved_low_read
 
 amdgpu.target<gfx1170> @target
 
@@ -58,7 +58,7 @@ low.func.def target<amdgpu.rdna4m.core>(@target) @gfx1170_preserved_low_read(%se
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @gfx1200_preserved_low_read strategy=source
+// RUN: emit amdgpu-assembly @gfx1200_preserved_low_read
 
 amdgpu.target<gfx1200> @target
 
@@ -78,7 +78,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @gfx1200_preserved_low_read(%see
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @gfx1250_preserved_low_read strategy=source
+// RUN: emit amdgpu-assembly @gfx1250_preserved_low_read
 
 amdgpu.target<gfx1250> @target
 
@@ -98,7 +98,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_preserved_low_r
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @gfx1151_pending_preserved_low_read strategy=source
+// RUN: emit amdgpu-assembly @gfx1151_pending_preserved_low_read
 
 // The low-half store waits for the older load, not the newest partial write.
 amdgpu.target<gfx1151> @target
@@ -122,7 +122,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @gfx1151_pending_preserved_low
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @gfx1151_pending_vmem_preserved_read strategy=source
+// RUN: emit amdgpu-assembly @gfx1151_pending_vmem_preserved_read
 
 amdgpu.target<gfx1151> @target
 
@@ -145,7 +145,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @gfx1151_pending_vmem_preserve
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @gfx1200_pending_preserved_low_read strategy=source
+// RUN: emit amdgpu-assembly @gfx1200_pending_preserved_low_read
 
 // The low-half store waits for the older load, not the newest partial write.
 amdgpu.target<gfx1200> @target
@@ -169,7 +169,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @gfx1200_pending_preserved_low_r
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @continued_chain_preserved_read strategy=source
+// RUN: emit amdgpu-assembly @continued_chain_preserved_read
 
 // Repeated high-half writes retain the original low-half completion source.
 amdgpu.target<gfx1151> @target
@@ -198,7 +198,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @continued_chain_preserved_rea
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @coalesced_copy_preserved_read strategy=source fixed=%seed:physical_register:4:1 fixed=%changed:physical_register:4:1 fixed=%copied:physical_register:4:1
+// RUN: emit amdgpu-assembly @coalesced_copy_preserved_read
 
 amdgpu.target<gfx1151> @target
 
@@ -211,15 +211,15 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @coalesced_copy_preserved_read
 }
 
 // ----
-  ds_load_u16_d16_hi v4, v0 offset:0
-  global_store_short v0, v4, s[0:1] offset:0
+  ds_load_u16_d16_hi v0, v1 offset:0
+  global_store_short v1, v0, s[0:1] offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  global_store_b32 v0, v4, s[0:1] offset:4
+  global_store_b32 v1, v0, s[0:1] offset:4
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @materialized_copy_preserved_read strategy=source fixed=%seed:physical_register:4:1 fixed=%changed:physical_register:4:1 fixed=%copied:physical_register:8:1
+// RUN: emit amdgpu-assembly @materialized_copy_preserved_read
 
 amdgpu.target<gfx1151> @target
 
@@ -232,16 +232,15 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @materialized_copy_preserved_r
 }
 
 // ----
-  ds_load_u16_d16_hi v4, v0 offset:0
+  ds_load_u16_d16_hi v0, v1 offset:0
+  global_store_short v1, v0, s[0:1] offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  v_mov_b32 v8, v4
-  global_store_short v0, v8, s[0:1] offset:0
-  global_store_b32 v0, v8, s[0:1] offset:4
+  global_store_b32 v1, v0, s[0:1] offset:4
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @coalesced_edge_preserved_read strategy=source fixed=%seed:physical_register:4:1 fixed=%changed:physical_register:4:1 fixed=%joined:physical_register:4:1
+// RUN: emit amdgpu-assembly @coalesced_edge_preserved_read
 
 amdgpu.target<gfx1151> @target
 
@@ -255,16 +254,16 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @coalesced_edge_preserved_read
 }
 
 // ----
-  ds_load_u16_d16_hi v4, v0 offset:0
+  ds_load_u16_d16_hi v0, v1 offset:0
 .Lbb1:
-  global_store_short v0, v4, s[0:1] offset:0
+  global_store_short v1, v0, s[0:1] offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  global_store_b32 v0, v4, s[0:1] offset:4
+  global_store_b32 v1, v0, s[0:1] offset:4
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @pending_edge_preserved_read strategy=source fixed=%loaded:physical_register:4:1 fixed=%changed:physical_register:4:1 fixed=%joined:physical_register:4:1
+// RUN: emit amdgpu-assembly @pending_edge_preserved_read
 
 amdgpu.target<gfx1151> @target
 
@@ -279,17 +278,17 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @pending_edge_preserved_read(%
 }
 
 // ----
-  ds_load_u16_d16 v4, v0 offset:0
-  ds_load_u16_d16_hi v4, v0 offset:2
+  ds_load_u16_d16 v1, v0 offset:0
+  ds_load_u16_d16_hi v1, v0 offset:2
 .Lbb1:
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  global_store_short v0, v4, s[0:1] offset:0
-  global_store_b32 v0, v4, s[0:1] offset:4
+  global_store_short v0, v1, s[0:1] offset:0
+  global_store_b32 v0, v1, s[0:1] offset:4
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @full_read_before_preserved strategy=source
+// RUN: emit amdgpu-assembly @full_read_before_preserved
 
 // The full-width consumer includes the pending half and still waits for it.
 amdgpu.target<gfx1151> @target
@@ -310,7 +309,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @full_read_before_preserved(%s
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @narrow_valu_read strategy=source
+// RUN: emit amdgpu-assembly @narrow_valu_read
 
 // VALU accesses retain the whole-DWORD D16 hazard even for a low-half operand.
 amdgpu.target<gfx1151> @target
@@ -331,7 +330,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @narrow_valu_read(%seed: reg<a
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @ready_vmem_preserved_read strategy=source
+// RUN: emit amdgpu-assembly @ready_vmem_preserved_read
 
 amdgpu.target<gfx1151> @target
 
@@ -351,7 +350,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @ready_vmem_preserved_read(%se
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @lds_short_preserved_read strategy=source
+// RUN: emit amdgpu-assembly @lds_short_preserved_read
 
 amdgpu.target<gfx1151> @target
 
@@ -365,13 +364,13 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @lds_short_preserved_read(%see
 // ----
   ds_load_u16_d16_hi v0, v1 offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  ds_write_b16 v1, v0 offset:2
   global_store_b32 v1, v0, s[0:1] offset:0
+  ds_write_b16 v1, v0 offset:2
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @vmem_preserved_to_lds strategy=source
+// RUN: emit amdgpu-assembly @vmem_preserved_to_lds
 
 amdgpu.target<gfx1151> @target
 
@@ -384,14 +383,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @vmem_preserved_to_lds(%seed: 
 
 // ----
   global_load_short_d16_hi v0, v1, s[0:1] offset:0
-  ds_write_b16 v1, v0 offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   global_store_b32 v1, v0, s[2:3] offset:0
+  ds_write_b16 v1, v0 offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @pending_vmem_preserved_to_lds strategy=source
+// RUN: emit amdgpu-assembly @pending_vmem_preserved_to_lds
 
 amdgpu.target<gfx1151> @target
 
@@ -406,15 +405,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @pending_vmem_preserved_to_lds
 // ----
   global_load_short_d16 v1, v0, s[0:1] offset:0
   global_load_short_d16_hi v1, v0, s[0:1] offset:2
-  s_waitcnt vmcnt(1) lgkmcnt(63)
-  ds_write_b16 v0, v1 offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   global_store_b32 v0, v1, s[2:3] offset:0
+  ds_write_b16 v0, v1 offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_preserved_to_lds strategy=source
+// RUN: emit amdgpu-assembly @buffer_preserved_to_lds
 
 amdgpu.target<gfx1151> @target
 
@@ -427,14 +425,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @buffer_preserved_to_lds(%seed
 
 // ----
   buffer_load_short_d16_hi v0, v1, s[0:3], s4 offen offset:0
-  ds_write_b8 v1, v0 offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   global_store_b32 v1, v0, s[6:7] offset:0
+  ds_write_b8 v1, v0 offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_offset_preserved_to_lds strategy=source
+// RUN: emit amdgpu-assembly @buffer_offset_preserved_to_lds
 
 amdgpu.target<gfx1151> @target
 
@@ -447,14 +445,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @buffer_offset_preserved_to_ld
 
 // ----
   buffer_load_short_d16_hi v0, v1, s[0:3], 0 offen offset:0
-  ds_write_b16 v1, v0 offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   global_store_b32 v1, v0, s[4:5] offset:0
+  ds_write_b16 v1, v0 offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @global_vaddr_preserved_to_lds strategy=source
+// RUN: emit amdgpu-assembly @global_vaddr_preserved_to_lds
 
 amdgpu.target<gfx1151> @target
 
@@ -467,14 +465,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @global_vaddr_preserved_to_lds
 
 // ----
   global_load_short_d16_hi v0, v[2:3], off offset:0
-  ds_write_b16 v1, v0 offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   global_store_b32 v1, v0, s[0:1] offset:0
+  ds_write_b16 v1, v0 offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @preserved_narrow_memory_consumers strategy=source
+// RUN: emit amdgpu-assembly @preserved_narrow_memory_consumers
 
 amdgpu.target<gfx1151> @target
 
@@ -500,7 +498,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @preserved_narrow_memory_consu
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @preserved_loop_argument strategy=source fixed=%seed:physical_register:4:1 fixed=%carried:physical_register:4:1 fixed=%changed:physical_register:4:1
+// RUN: emit amdgpu-assembly @preserved_loop_argument
 
 amdgpu.target<gfx1151> @target
 
@@ -520,13 +518,13 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @preserved_loop_argument(%seed
 // ----
 .Lbb1:
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  ds_load_u16_d16_hi v4, v0 offset:0
-  global_store_short v0, v4, s[0:1] offset:0
+  ds_load_u16_d16_hi v0, v1 offset:0
+  global_store_short v1, v0, s[0:1] offset:0
   s_cbranch_scc0 .Lbb3
 .Lbb2:
   s_branch .Lbb1
 .Lbb3:
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  global_store_b32 v0, v4, s[0:1] offset:4
+  global_store_b32 v1, v0, s[0:1] offset:4
   s_waitcnt_vscnt vscnt(0)
   s_endpgm

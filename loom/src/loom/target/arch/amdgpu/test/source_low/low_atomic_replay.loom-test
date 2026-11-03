@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @private_store_before_global_atomic strategy=source
+// RUN: emit amdgpu-assembly @private_store_before_global_atomic
 
 // An unrelated private store can still fault and replay a later global atomic.
 amdgpu.target<gfx1250> @target
@@ -11,16 +11,15 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @private_store_before_gl
 }
 
 // ----
-  scratch_store_b32 v0, v1, off offset:0
-  s_wait_xcnt xcnt(0)
   global_atomic_add_u32 v2, v0, v1, s[0:1] offset:0 scope:SCOPE_DEV th:TH_ATOMIC_RETURN
+  scratch_store_b32 v0, v1, off offset:0
   s_wait_loadcnt loadcnt(0)
   v_add_u32 v2, v2, v1
   s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @private_load_before_global_reduce strategy=source
+// RUN: emit amdgpu-assembly @private_load_before_global_reduce
 
 // No-return updates require the same translation boundary.
 amdgpu.target<gfx1250> @target
@@ -42,7 +41,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @private_load_before_glo
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @private_store_before_buffer_atomic strategy=source
+// RUN: emit amdgpu-assembly @private_store_before_buffer_atomic
 
 // Buffer atomics also cannot be replayed after another VMEM faults.
 amdgpu.target<gfx1250> @target
@@ -64,7 +63,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @private_store_before_bu
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @completed_private_store_before_atomic strategy=source
+// RUN: emit amdgpu-assembly @completed_private_store_before_atomic
 
 // A full memory wait also drains XCNT; no second wait is needed.
 amdgpu.target<gfx1250> @target
@@ -86,7 +85,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @completed_private_store
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @partial_private_store_before_atomic strategy=source
+// RUN: emit amdgpu-assembly @partial_private_store_before_atomic
 
 // A partial completion bound still permits the outstanding translation.
 amdgpu.target<gfx1250> @target
@@ -110,7 +109,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @partial_private_store_b
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @fallthrough_private_store_before_atomic strategy=source
+// RUN: emit amdgpu-assembly @fallthrough_private_store_before_atomic
 
 // A fallthrough edge emits no branch and retains outstanding translations.
 amdgpu.target<gfx1250> @target
@@ -135,7 +134,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @fallthrough_private_sto
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @branched_private_store_before_atomic strategy=source
+// RUN: emit amdgpu-assembly @branched_private_store_before_atomic
 
 // A hardware branch drains XCNT before either successor executes.
 amdgpu.target<gfx1250> @target
@@ -165,7 +164,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @branched_private_store_
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @smem_before_global_atomic strategy=source
+// RUN: emit amdgpu-assembly @smem_before_global_atomic
 
 // Scalar-memory completion satisfies the replay boundary.
 amdgpu.target<gfx1250> @target
@@ -182,13 +181,13 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @smem_before_global_atom
   s_load_dword s2, s[0:1], 0
   s_wait_kmcnt kmcnt(0)
   global_atomic_add_u32 v2, v0, v1, s[0:1] offset:0 scope:SCOPE_DEV th:TH_ATOMIC_RETURN
+  s_add_u32 s2, s2, s2
   s_wait_loadcnt loadcnt(0)
   v_add_u32 v2, v2, v1
-  s_add_u32 s2, s2, s2
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @private_store_before_ordinary_load strategy=source
+// RUN: emit amdgpu-assembly @private_store_before_ordinary_load
 
 // Ordinary memory accesses do not require a replay boundary.
 amdgpu.target<gfx1250> @target
@@ -201,15 +200,15 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @private_store_before_or
 }
 
 // ----
-  scratch_store_b32 v0, v1, off offset:0
   global_load_b32 v2, v0, s[0:1] offset:0
+  scratch_store_b32 v0, v1, off offset:0
   s_wait_loadcnt loadcnt(0)
   v_add_u32 v2, v2, v1
   s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @private_store_before_volatile_load strategy=source
+// RUN: emit amdgpu-assembly @private_store_before_volatile_load
 
 // Volatile memory ordering already completes prior accesses and translations.
 amdgpu.target<gfx1250> @target
@@ -230,7 +229,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @private_store_before_vo
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @gfx1200_private_store_before_global_atomic strategy=source
+// RUN: emit amdgpu-assembly @gfx1200_private_store_before_global_atomic
 
 // Gfx120x uses the same atomic encoding without the replay counter requirement.
 amdgpu.target<gfx1200> @target
@@ -243,15 +242,15 @@ low.func.def target<amdgpu.rdna4.core>(@target) @gfx1200_private_store_before_gl
 }
 
 // ----
+  global_atomic_add_u32 v2, v0, v1, s[0:1] offset:0 scope:SCOPE_DEV th:TH_ATOMIC_RETURN
   scratch_store_b32 v0, v1, off offset:0
-  global_atomic_add_u32 v0, v0, v1, s[0:1] offset:0 scope:SCOPE_DEV th:TH_ATOMIC_RETURN
   s_wait_loadcnt loadcnt(0)
-  v_add_u32 v0, v0, v1
+  v_add_u32 v0, v2, v1
   s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @global_store_before_tied_atomic strategy=source
+// RUN: emit amdgpu-assembly @global_store_before_tied_atomic
 
 // Same-wave memory ordering lets the atomic issue before store completion.
 // XCNT still protects the tied source from replay, and program exit drains the
@@ -275,7 +274,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @global_store_before_tie
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @private_store_before_flat_atomic strategy=source
+// RUN: emit amdgpu-assembly @private_store_before_flat_atomic
 
 // The generic atomic completes prior private stores before its memory effect.
 amdgpu.target<gfx1250> @target
@@ -294,7 +293,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @private_store_before_fl
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @empty_store_wait_drains_load_translation strategy=source
+// RUN: emit amdgpu-assembly @empty_store_wait_drains_load_translation
 
 // STORE_CNT is already empty, but its wait still completes the load translation.
 amdgpu.target<gfx1250> @target
@@ -310,8 +309,8 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @empty_store_wait_drains
 // ----
   scratch_load_b32 v2, v0, off offset:0
   s_wait_storecnt storecnt(0)
-  global_atomic_add_u32 v0, v1, s[0:1] offset:0 scope:SCOPE_DEV
   s_wait_loadcnt loadcnt(0)
   v_add_u32 v2, v2, v1
+  global_atomic_add_u32 v0, v1, s[0:1] offset:0 scope:SCOPE_DEV
   s_wait_storecnt storecnt(0)
   s_endpgm

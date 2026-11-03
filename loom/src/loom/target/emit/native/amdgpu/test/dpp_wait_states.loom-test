@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-wait-state-plan @dpp_arithmetic_chain strategy=source
+// RUN: emit amdgpu-wait-state-plan @dpp_arithmetic_chain
 
 amdgpu.target<gfx942> @target
 
@@ -20,7 +20,7 @@ state[3] reason=lane_permute_vgpr_read action=amdgpu.s_nop at=b0:n4/o4 producer=
 
 // ====
 
-// RUN: emit amdgpu-assembly @dpp_arithmetic_chain strategy=source
+// RUN: emit amdgpu-assembly @dpp_arithmetic_chain
 
 amdgpu.target<gfx942> @target
 
@@ -47,7 +47,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @dpp_arithmetic_chain(%lhs: reg<
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @dpp_observed_progress strategy=source
+// RUN: emit amdgpu-wait-state-plan @dpp_observed_progress
 
 amdgpu.target<gfx942> @target
 
@@ -65,7 +65,7 @@ state[0] reason=lane_permute_vgpr_read action=amdgpu.s_nop at=b0:n2/o2 producer=
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @dpp_sufficient_progress strategy=source
+// RUN: emit amdgpu-wait-state-plan @dpp_sufficient_progress
 
 amdgpu.target<gfx942> @target
 

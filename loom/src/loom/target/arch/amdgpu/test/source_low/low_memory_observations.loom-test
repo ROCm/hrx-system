@@ -1,6 +1,6 @@
 // Volatile reads order even when their results are unused and their addresses
 // differ. The branch case carries the same completion requirement to each edge.
-// RUN: emit amdgpu-assembly @volatile_reads strategy=source
+// RUN: emit amdgpu-assembly @volatile_reads
 
 amdgpu.target<gfx1151> @target
 
@@ -17,7 +17,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @volatile_reads(%offset: reg<a
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @volatile_branch strategy=source
+// RUN: emit amdgpu-assembly @volatile_branch
 
 amdgpu.target<gfx1151> @target
 
@@ -45,7 +45,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @volatile_branch(%offset: reg<
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @ordinary_reads strategy=source
+// RUN: emit amdgpu-assembly @ordinary_reads
 
 amdgpu.target<gfx1151> @target
 
@@ -61,7 +61,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @ordinary_reads(%offset: reg<a
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @volatile_read_write strategy=source
+// RUN: emit amdgpu-assembly @volatile_read_write
 
 amdgpu.target<gfx1151> @target
 
@@ -81,7 +81,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @volatile_read_write(%offset: 
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @volatile_writes strategy=source
+// RUN: emit amdgpu-assembly @volatile_writes
 
 amdgpu.target<gfx1151> @target
 
@@ -99,7 +99,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @volatile_writes(%offset: reg<
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @volatile_loop strategy=source
+// RUN: emit amdgpu-assembly @volatile_loop
 
 // This loop's load has no SSA consumer. Only its volatile observation requires
 // completion before the next iteration observes the memory again.

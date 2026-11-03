@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @cdna2_valu_to_matrix_fallthrough strategy=source
+// RUN: emit amdgpu-assembly @cdna2_valu_to_matrix_fallthrough
 
 amdgpu.target<gfx90a> @target
 
@@ -20,7 +20,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_valu_to_matrix_fallthroug
 
 // ====
 
-// RUN: emit amdgpu-assembly @cdna3_valu_to_matrix_fallthrough strategy=source
+// RUN: emit amdgpu-assembly @cdna3_valu_to_matrix_fallthrough
 
 amdgpu.target<gfx942> @target
 
@@ -42,7 +42,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @cdna3_valu_to_matrix_fallthroug
 
 // ====
 
-// RUN: emit amdgpu-assembly @cdna4_valu_to_matrix_fallthrough strategy=source
+// RUN: emit amdgpu-assembly @cdna4_valu_to_matrix_fallthrough
 
 amdgpu.target<gfx950> @target
 
@@ -64,7 +64,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @cdna4_valu_to_matrix_fallthroug
 
 // ====
 
-// RUN: emit amdgpu-assembly @transcendental_fallthrough strategy=source
+// RUN: emit amdgpu-assembly @transcendental_fallthrough
 
 amdgpu.target<gfx90a> @target
 
@@ -84,7 +84,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @transcendental_fallthrough(%inp
 
 // ====
 
-// RUN: emit amdgpu-assembly @scalar_result_fallthrough strategy=source
+// RUN: emit amdgpu-assembly @scalar_result_fallthrough
 
 amdgpu.target<gfx90a> @target
 
@@ -106,7 +106,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @scalar_result_fallthrough(%reso
 
 // ====
 
-// RUN: emit amdgpu-assembly @lane_permute_empty_edges strategy=source
+// RUN: emit amdgpu-assembly @lane_permute_empty_edges
 
 amdgpu.target<gfx90a> @target
 
@@ -131,7 +131,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @lane_permute_empty_edges(%input
 // ====
 
 // PERMLANE depends on VALU writers, whereas DPP also depends on loads.
-// RUN: emit amdgpu-assembly @load_to_permlane_fallthrough strategy=source
+// RUN: emit amdgpu-assembly @load_to_permlane_fallthrough
 
 amdgpu.target<gfx950> @target
 
@@ -152,7 +152,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @load_to_permlane_fallthrough(%r
 
 // ====
 
-// RUN: emit amdgpu-assembly @valu_to_permlane_fallthrough strategy=source
+// RUN: emit amdgpu-assembly @valu_to_permlane_fallthrough
 
 amdgpu.target<gfx950> @target
 
@@ -173,7 +173,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @valu_to_permlane_fallthrough(%i
 
 // ====
 
-// RUN: emit amdgpu-assembly @readfirstlane_fallthrough strategy=source
+// RUN: emit amdgpu-assembly @readfirstlane_fallthrough
 
 amdgpu.target<gfx90a> @target
 
@@ -193,7 +193,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @readfirstlane_fallthrough(%inpu
 
 // ====
 
-// RUN: emit amdgpu-assembly @subword_forwarding_fallthrough strategy=source
+// RUN: emit amdgpu-assembly @subword_forwarding_fallthrough
 
 amdgpu.target<gfx90a> @target
 
@@ -213,7 +213,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @subword_forwarding_fallthrough(
 
 // ====
 
-// RUN: emit amdgpu-assembly @joined_alu_windows strategy=source
+// RUN: emit amdgpu-assembly @joined_alu_windows
 
 amdgpu.target<gfx90a> @target
 
@@ -248,7 +248,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @joined_alu_windows(%input: reg<
 
 // ====
 
-// RUN: emit amdgpu-assembly @loop_carried_alu_window strategy=source
+// RUN: emit amdgpu-assembly @loop_carried_alu_window
 
 amdgpu.target<gfx90a> @target
 
@@ -281,7 +281,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @loop_carried_alu_window(%input:
 
 // ====
 
-// RUN: emit amdgpu-assembly @counter_wait_is_one_alu_slot strategy=source
+// RUN: emit amdgpu-assembly @counter_wait_is_one_alu_slot
 
 amdgpu.target<gfx90a> @target
 
@@ -306,7 +306,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @counter_wait_is_one_alu_slot(%i
 
 // ====
 
-// RUN: emit amdgpu-assembly @conditional_tail_progress strategy=source
+// RUN: emit amdgpu-assembly @conditional_tail_progress
 
 amdgpu.target<gfx90a> @target
 
@@ -343,7 +343,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @conditional_tail_progress(%inpu
 
 // ====
 
-// RUN: emit amdgpu-assembly @cdna3_transcendental_fallthrough strategy=source
+// RUN: emit amdgpu-assembly @cdna3_transcendental_fallthrough
 
 amdgpu.target<gfx942> @target
 
@@ -364,7 +364,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @cdna3_transcendental_fallthroug
 
 // ====
 
-// RUN: emit amdgpu-assembly @cdna3_readfirstlane_fallthrough strategy=source
+// RUN: emit amdgpu-assembly @cdna3_readfirstlane_fallthrough
 
 amdgpu.target<gfx942> @target
 
@@ -385,7 +385,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @cdna3_readfirstlane_fallthrough
 
 // ====
 
-// RUN: emit amdgpu-assembly @cdna3_subword_forwarding_fallthrough strategy=source
+// RUN: emit amdgpu-assembly @cdna3_subword_forwarding_fallthrough
 
 amdgpu.target<gfx942> @target
 
@@ -406,7 +406,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @cdna3_subword_forwarding_fallth
 
 // ====
 
-// RUN: emit amdgpu-assembly @cdna3_scalar_result_fallthrough strategy=source
+// RUN: emit amdgpu-assembly @cdna3_scalar_result_fallthrough
 
 amdgpu.target<gfx942> @target
 
@@ -428,7 +428,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @cdna3_scalar_result_fallthrough
 
 // ====
 
-// RUN: emit amdgpu-assembly @cdna4_scalar_result_fallthrough strategy=source
+// RUN: emit amdgpu-assembly @cdna4_scalar_result_fallthrough
 
 amdgpu.target<gfx950> @target
 
@@ -450,7 +450,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @cdna4_scalar_result_fallthrough
 
 // ====
 
-// RUN: emit amdgpu-assembly @cdna2_division_condition_f32 strategy=source
+// RUN: emit amdgpu-assembly @cdna2_division_condition_f32
 
 amdgpu.target<gfx90a> @target
 
@@ -471,7 +471,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_division_condition_f32(%i
 
 // ====
 
-// RUN: emit amdgpu-assembly @cdna2_division_condition_f64 strategy=source
+// RUN: emit amdgpu-assembly @cdna2_division_condition_f64
 
 amdgpu.target<gfx90a> @target
 
@@ -492,7 +492,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_division_condition_f64(%i
 
 // ====
 
-// RUN: emit amdgpu-assembly @cdna2_m0_fallthrough strategy=source
+// RUN: emit amdgpu-assembly @cdna2_m0_fallthrough
 
 amdgpu.target<gfx90a> @target
 
@@ -513,7 +513,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_m0_fallthrough(%input: re
 
 // ====
 
-// RUN: emit amdgpu-assembly @cdna3_division_condition_f32 strategy=source
+// RUN: emit amdgpu-assembly @cdna3_division_condition_f32
 
 amdgpu.target<gfx942> @target
 
@@ -534,7 +534,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @cdna3_division_condition_f32(%i
 
 // ====
 
-// RUN: emit amdgpu-assembly @cdna3_division_condition_f64 strategy=source
+// RUN: emit amdgpu-assembly @cdna3_division_condition_f64
 
 amdgpu.target<gfx942> @target
 
@@ -555,7 +555,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @cdna3_division_condition_f64(%i
 
 // ====
 
-// RUN: emit amdgpu-assembly @cdna3_m0_fallthrough strategy=source
+// RUN: emit amdgpu-assembly @cdna3_m0_fallthrough
 
 amdgpu.target<gfx942> @target
 
@@ -576,7 +576,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @cdna3_m0_fallthrough(%input: re
 
 // ====
 
-// RUN: emit amdgpu-assembly @cdna4_division_condition_f32 strategy=source
+// RUN: emit amdgpu-assembly @cdna4_division_condition_f32
 
 amdgpu.target<gfx950> @target
 
@@ -597,7 +597,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @cdna4_division_condition_f32(%i
 
 // ====
 
-// RUN: emit amdgpu-assembly @cdna4_division_condition_f64 strategy=source
+// RUN: emit amdgpu-assembly @cdna4_division_condition_f64
 
 amdgpu.target<gfx950> @target
 
@@ -618,7 +618,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @cdna4_division_condition_f64(%i
 
 // ====
 
-// RUN: emit amdgpu-assembly @cdna4_m0_fallthrough strategy=source
+// RUN: emit amdgpu-assembly @cdna4_m0_fallthrough
 
 amdgpu.target<gfx950> @target
 
@@ -639,7 +639,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @cdna4_m0_fallthrough(%input: re
 
 // ====
 
-// RUN: emit amdgpu-assembly @load_to_dpp_fallthrough strategy=source
+// RUN: emit amdgpu-assembly @load_to_dpp_fallthrough
 
 amdgpu.target<gfx90a> @target
 

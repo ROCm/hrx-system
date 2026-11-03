@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @diamond strategy=source
+// RUN: emit amdgpu-assembly @diamond
 
 // Both loads issue before the diamond. The older use preserves the younger
 // request; the final add still requires its completion.
@@ -38,7 +38,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @diamond(%address: reg<amdgpu.vg
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @completed_incoming_overwrite strategy=source fixed=%old:physical_register:4:1 fixed=%replacement:physical_register:4:1 fixed=%younger:physical_register:5:1 fixed=%used:physical_register:6:1
+// RUN: emit amdgpu-assembly @completed_incoming_overwrite
 
 // The first join consumes the old incoming result with a partial wait. Both
 // paths through the second diamond inherit that completion, so replacing its
@@ -72,8 +72,8 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @completed_incoming_overwrite(
 }
 
 // ----
-  global_load_b32 v4, v0, s[0:1] offset:0
-  global_load_b32 v5, v0, s[0:1] offset:4
+  global_load_b32 v1, v0, s[0:1] offset:0
+  global_load_b32 v2, v0, s[0:1] offset:4
   s_cbranch_scc0 .Lbb2
 .Lbb1:
   v_add_u32 v0, 1, v0
@@ -82,23 +82,23 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @completed_incoming_overwrite(
   v_add_u32 v0, 2, v0
 .Lbb3:
   s_waitcnt vmcnt(1) lgkmcnt(63)
-  v_add_u32 v6, v4, v0
+  v_add_u32 v0, v1, v0
   s_cbranch_scc0 .Lbb5
 .Lbb4:
-  v_add_u32 v0, 3, v6
+  v_add_u32 v0, 3, v0
   s_branch .Lbb6
 .Lbb5:
-  v_add_u32 v0, 4, v6
+  v_add_u32 v0, 4, v0
 .Lbb6:
-  v_mov_b32 v4, 42
+  v_mov_b32 v1, 42
   s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_1) | instid1(VALU_DEP_1)
-  v_add_u32 v0, v4, v0
+  v_add_u32 v0, v1, v0
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_add_u32 v0, v0, v5
+  v_add_u32 v0, v0, v2
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @incoming_and_local strategy=source
+// RUN: emit amdgpu-assembly @incoming_and_local
 
 // The join adds one new request to the retained incoming request. Successive
 // uses retire only the required prefix, including the final local result.
@@ -146,7 +146,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @incoming_and_local(%address: 
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @predecessor_completion strategy=source
+// RUN: emit amdgpu-assembly @predecessor_completion
 
 // Only one predecessor consumes the old result. Its positive wait must not
 // mark the whole counter empty or retire the younger result at the join.
@@ -187,7 +187,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @predecessor_completion(%address
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @optional_younger strategy=source fixed=%old:physical_register:5:1 fixed=%younger:physical_register:4:1 fixed=%delta:physical_register:4:1
+// RUN: emit amdgpu-assembly @optional_younger
 
 // The join cannot credit a request that only one predecessor issues. Coalesced
 // transport keeps that request pending until after the independent old use.
@@ -208,22 +208,22 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @optional_younger(%address: re
 }
 
 // ----
-  global_load_b32 v5, v0, s[0:1] offset:0
+  global_load_b32 v1, v0, s[0:1] offset:0
   s_cbranch_scc0 .Lbb2
 .Lbb1:
-  global_load_b32 v4, v0, s[0:1] offset:4
+  global_load_b32 v2, v0, s[0:1] offset:4
   s_branch .Lbb3
 .Lbb2:
-  v_mov_b32 v4, v0
+  v_mov_b32 v2, v0
 .Lbb3:
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_add_u32 v0, v5, v0
+  v_add_u32 v0, v1, v0
   s_delay_alu instid0(VALU_DEP_1)
-  v_add_u32 v0, v0, v4
+  v_add_u32 v0, v0, v2
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @unordered_scalar_pair strategy=source
+// RUN: emit amdgpu-assembly @unordered_scalar_pair
 
 // Issuing both scalar requests before the diamond does not establish ordered
 // completion. The older scalar use still requires a full scalar-memory wait.
@@ -261,7 +261,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @unordered_scalar_pair(%base: re
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @incoming_overwrite strategy=source fixed=%old:physical_register:4:1 fixed=%replacement:physical_register:4:1 fixed=%younger:physical_register:5:1
+// RUN: emit amdgpu-assembly @incoming_overwrite
 
 // The old result is dead, but its asynchronous register write must complete
 // before the replacement. Retain the disjoint younger load through that wait.
@@ -285,8 +285,9 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @incoming_overwrite(%add
 }
 
 // ----
-  global_load_b32 v4, v0, s[0:1] offset:0
-  global_load_b32 v5, v0, s[0:1] offset:4
+  global_load_b32 v1, v0, s[0:1] offset:0
+  s_wait_loadcnt loadcnt(0)
+  global_load_b32 v1, v0, s[0:1] offset:4
   s_cbranch_scc0 .Lbb2
 .Lbb1:
   v_add_u32 v0, 1, v0
@@ -294,16 +295,15 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @incoming_overwrite(%add
 .Lbb2:
   v_add_u32 v0, 2, v0
 .Lbb3:
-  s_wait_loadcnt loadcnt(1)
-  v_mov_b32 v4, 42
+  v_mov_b32 v2, 42
   s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_1) | instid1(VALU_DEP_1)
-  v_add_u32 v0, v4, v0
+  v_add_u32 v0, v2, v0
   s_wait_loadcnt loadcnt(0)
-  v_add_u32 v0, v0, v5
+  v_add_u32 v0, v0, v1
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna_diamond strategy=source
+// RUN: emit amdgpu-assembly @cdna_diamond
 
 // Both loads issue before the diamond. The older use preserves the younger
 // request; the final add still requires its completion.

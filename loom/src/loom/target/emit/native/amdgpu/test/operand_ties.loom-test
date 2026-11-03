@@ -1,5 +1,5 @@
 // A live seed requires a preload into the independent FMAC destination.
-// RUN: emit amdgpu-assembly @fmac strategy=source
+// RUN: emit amdgpu-assembly @fmac
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @fmac(%seed: reg<amdgpu.vgpr>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
@@ -15,7 +15,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @fmac(%seed: reg<amdgpu.vgpr>, %
 // ====
 
 // The copy can coalesce when the original seed has no later observer.
-// RUN: emit amdgpu-assembly @fmac strategy=source
+// RUN: emit amdgpu-assembly @fmac
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @fmac(%seed: reg<amdgpu.vgpr>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -30,7 +30,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @fmac(%seed: reg<amdgpu.vgpr>, %
 // ====
 
 // Scalar immediate updates use the same physical tie contract.
-// RUN: emit amdgpu-assembly @scalar_update strategy=source
+// RUN: emit amdgpu-assembly @scalar_update
 amdgpu.target<gfx942> @target
 
 low.func.def target<amdgpu.cdna3.core>(@target) @scalar_update(%seed: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
@@ -91,7 +91,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @independent_zero_accumulator(%l
 // ====
 
 // An independent WMMA result cannot early-clobber its live matrix inputs.
-// RUN: emit amdgpu-assembly @independent_wmma strategy=source
+// RUN: emit amdgpu-assembly @independent_wmma
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @independent_wmma(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %seed: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm {
@@ -106,7 +106,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @independent_wmma(%lhs: reg<amdg
 // ====
 
 // Packed floating dots have independent accumulator and destination fields.
-// RUN: emit amdgpu-assembly @independent_dots strategy=source
+// RUN: emit amdgpu-assembly @independent_dots
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @independent_dots(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %seed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
@@ -123,7 +123,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @independent_dots(%lhs: reg<amdg
 // ====
 
 // Preferred ALU spellings also admit an explicitly independent result.
-// RUN: emit amdgpu-assembly @independent_integer_arithmetic strategy=source
+// RUN: emit amdgpu-assembly @independent_integer_arithmetic
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @independent_integer_arithmetic(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {

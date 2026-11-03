@@ -1,7 +1,7 @@
 // Required constants and scratch addresses have a sole arithmetic or memory
 // consumer, plus a later EXEC writer. Recover their setup ownership before
 // cloning the pressure frontier; both partial reloads fit in eight VGPRs.
-// RUN: emit amdgpu-assembly @partial_reload_setup strategy=resource-stall amdgpu.vgpr=8
+// RUN: emit amdgpu-assembly @partial_reload_setup amdgpu.vgpr=8
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @partial_reload_setup(%input: reg<amdgpu.vgpr x2>, %output: reg<amdgpu.sgpr x2>) asm {

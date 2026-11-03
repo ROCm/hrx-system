@@ -1,7 +1,7 @@
 // Scheduling can move the authored wait past its load's arithmetic consumer.
 // The necessary planned wait before the comparison makes that full wait redundant
 // on every retry. The volatile observation must remain inside the loop.
-// RUN: emit amdgpu-assembly @poll strategy=latency-hiding
+// RUN: emit amdgpu-assembly @poll
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @poll(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm {
@@ -42,7 +42,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @poll(%address: reg<amdgpu.vgp
 
 // Native encoding consumes the same elision decision as assembly, including
 // branch offsets and fixed ALU delays after the removed instruction.
-// RUN: emit amdgpu-native-words @poll strategy=latency-hiding
+// RUN: emit amdgpu-native-words @poll
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @poll(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm {
@@ -85,7 +85,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @poll(%address: reg<amdgpu.vgp
 
 // Completing the older load does not complete the independent younger load.
 // The authored full wait must survive a planned partial wait.
-// RUN: emit amdgpu-assembly @partial_then_full strategy=source
+// RUN: emit amdgpu-assembly @partial_then_full
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @partial_then_full(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm {
@@ -113,7 +113,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @partial_then_full(%address: r
 
 // A completed VMEM epoch cannot discharge an independent LDS/SMEM counter.
 // Once both counters are drained, a repeated combined wait can disappear.
-// RUN: emit amdgpu-assembly @mixed_counters strategy=source
+// RUN: emit amdgpu-assembly @mixed_counters
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @mixed_counters(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm {
@@ -128,13 +128,13 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @mixed_counters(%address: reg<
 }
 
 // ----
-  ds_read_b32 v1, v0 offset:0
-  global_load_b32 v2, v0, s[0:1] offset:0
+  global_load_b32 v1, v0, s[0:1] offset:0
+  ds_read_b32 v2, v0 offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_add_u32 v2, v2, v0
+  v_add_u32 v1, v1, v0
   s_waitcnt vmcnt(0) lgkmcnt(0)
   s_delay_alu instid0(VALU_DEP_1)
-  v_add_u32 v1, v2, v1
+  v_add_u32 v1, v1, v2
   ds_write_b32 v0, v1 offset:0
   s_endpgm
 
@@ -142,7 +142,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @mixed_counters(%address: reg<
 
 // A new producer invalidates the empty-counter proof without undoing older
 // completion. A repetition after the second full drain is redundant.
-// RUN: emit amdgpu-assembly @new_producer strategy=source
+// RUN: emit amdgpu-assembly @new_producer
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @new_producer(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm {
@@ -165,7 +165,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @new_producer(%address: reg<am
 
 // Block-local counts do not include work arriving from a predecessor. One
 // drained incoming arm cannot justify removing the first wait at the join.
-// RUN: emit amdgpu-assembly @incoming_work strategy=source
+// RUN: emit amdgpu-assembly @incoming_work
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @incoming_work(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %condition: reg<amdgpu.scc>) asm {
@@ -199,7 +199,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @incoming_work(%address: reg<a
 
 // Authored partial bounds retain their spelling and insertion point, including
 // combined packets whose other counter has a redundant full bound.
-// RUN: emit amdgpu-assembly @authored_bounds strategy=source
+// RUN: emit amdgpu-assembly @authored_bounds
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @authored_bounds() asm {
@@ -220,7 +220,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @authored_bounds() asm {
 
 // Packed ALU dependency controls and wait-idle have additional semantics; they
 // are not scalar remaining-memory-operation bounds eligible for this elision.
-// RUN: emit amdgpu-assembly @other_wait_controls strategy=source
+// RUN: emit amdgpu-assembly @other_wait_controls
 amdgpu.target<gfx1201> @target
 
 low.func.def target<amdgpu.rdna4.core>(@target) @other_wait_controls() asm {
@@ -242,7 +242,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @other_wait_controls() asm {
 
 // Split-counter targets use the same proof without imposing a drain on the
 // independent store counter. Only the repeated load wait is redundant.
-// RUN: emit amdgpu-assembly @split_counters strategy=source
+// RUN: emit amdgpu-assembly @split_counters
 amdgpu.target<gfx1201> @target
 
 low.func.def target<amdgpu.rdna4.core>(@target) @split_counters(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm {
@@ -266,7 +266,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @split_counters(%address: reg<am
 
 // CDNA shares the VMEM load/store counter. The planned full wait for the load
 // drains both, making the later authored combined wait redundant.
-// RUN: emit amdgpu-assembly @shared_load_store_counter strategy=source
+// RUN: emit amdgpu-assembly @shared_load_store_counter
 amdgpu.target<gfx942> @target
 
 low.func.def target<amdgpu.cdna3.core>(@target) @shared_load_store_counter(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %local: reg<amdgpu.vgpr>) asm {
@@ -282,7 +282,8 @@ low.func.def target<amdgpu.cdna3.core>(@target) @shared_load_store_counter(%addr
   flat_store_dword v[0:1], v2 offset:0
   s_waitcnt vmcnt(0) lgkmcnt(0)
   flat_load_dword v0, v[0:1] offset:4
-  s_waitcnt vmcnt(0) lgkmcnt(0)
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  s_waitcnt vmcnt(63) lgkmcnt(0)
   v_add_u32 v0, v0, v2
   ds_write_b32 v3, v0 offset:0
   s_endpgm
@@ -291,7 +292,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @shared_load_store_counter(%addr
 
 // Removed waits cannot provide instruction slots for a fixed DPP hazard. Both
 // no-op cycles remain necessary even though two source packets separate the use.
-// RUN: emit amdgpu-assembly @fixed_delay strategy=source
+// RUN: emit amdgpu-assembly @fixed_delay
 amdgpu.target<gfx942> @target
 
 low.func.def target<amdgpu.cdna3.core>(@target) @fixed_delay(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -314,7 +315,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @fixed_delay(%lhs: reg<amdgpu.vg
 
 // An elided wait has no instruction between these independent ALU operations,
 // so packetization may pair them while retaining the initial full wait.
-// RUN: emit amdgpu-assembly @dual_issue strategy=source
+// RUN: emit amdgpu-assembly @dual_issue
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @dual_issue(%acc0: reg<amdgpu.vgpr>, %lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %acc1: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>) asm {
@@ -326,15 +327,15 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @dual_issue(%acc0: reg<amdgpu.
 }
 
 // ----
-  s_waitcnt vmcnt(0) lgkmcnt(63)
   v_dual_fmac_f32 v0, v1, v2 :: v_dual_fmac_f32 v3, v4, v5
+  s_waitcnt vmcnt(0) lgkmcnt(63)
   s_endpgm
 
 // ====
 
 // A removed authored wait supplies no explicit progress event. The retained
 // planned drain explains completion before the arithmetic consumer.
-// RUN: emit amdgpu-wait-counter-plan-json @retained_progress strategy=source
+// RUN: emit amdgpu-wait-counter-plan-json @retained_progress
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @retained_progress(%address: reg<amdgpu.vgpr>) asm {
@@ -351,7 +352,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @retained_progress(%address: r
 
 // Cache control is an opaque completion boundary. The wait after it cannot be
 // removed using a drain that completed before the control instruction issued.
-// RUN: emit amdgpu-assembly @cache_control_boundary strategy=source
+// RUN: emit amdgpu-assembly @cache_control_boundary
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @cache_control_boundary() asm {
@@ -371,7 +372,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @cache_control_boundary() asm 
 // ====
 
 // CDNA buffer invalidation advances VMEM even without a memory result.
-// RUN: emit amdgpu-assembly @cache_control_boundary strategy=source
+// RUN: emit amdgpu-assembly @cache_control_boundary
 amdgpu.target<gfx950> @target
 
 low.func.def target<amdgpu.cdna4.core>(@target) @cache_control_boundary() asm {
@@ -391,7 +392,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @cache_control_boundary() asm {
 // ====
 
 // The same proof boundary applies to split counters on RDNA4.
-// RUN: emit amdgpu-assembly @cache_control_boundary strategy=source
+// RUN: emit amdgpu-assembly @cache_control_boundary
 amdgpu.target<gfx1201> @target
 
 low.func.def target<amdgpu.rdna4.core>(@target) @cache_control_boundary() asm {
@@ -412,7 +413,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @cache_control_boundary() asm {
 
 // A drain before a timer request does not complete its asynchronous SGPR write.
 // Only the repeated wait after that request can be elided.
-// RUN: emit amdgpu-assembly @message_completion strategy=source
+// RUN: emit amdgpu-assembly @message_completion
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @message_completion(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {

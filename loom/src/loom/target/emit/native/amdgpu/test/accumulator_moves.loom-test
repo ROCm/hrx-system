@@ -5,7 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // The opcode, rather than an ACC selector, identifies each register bank.
-// RUN: emit amdgpu-assembly @native_transfers strategy=source
+// RUN: emit amdgpu-assembly @native_transfers
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @native_transfers(%vector: reg<amdgpu.vgpr>, %scalar: reg<amdgpu.sgpr>, %accumulator: reg<amdgpu.agpr>) -> (reg<amdgpu.agpr>, reg<amdgpu.agpr>, reg<amdgpu.vgpr>) asm {
@@ -24,7 +24,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @native_transfers(%vector: reg<a
 
 // ====
 
-// RUN: emit amdgpu-assembly @inline_initialization strategy=source
+// RUN: emit amdgpu-assembly @inline_initialization
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @inline_initialization() -> (reg<amdgpu.agpr>, reg<amdgpu.agpr>, reg<amdgpu.agpr>, reg<amdgpu.agpr>, reg<amdgpu.agpr>) asm {
@@ -45,7 +45,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @inline_initialization() -> (reg
 
 // ====
 
-// RUN: emit amdgpu-assembly @vector_to_accumulator strategy=source
+// RUN: emit amdgpu-assembly @vector_to_accumulator
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @vector_to_accumulator(%source: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.agpr x4>) asm {
@@ -61,7 +61,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @vector_to_accumulator(%source: 
 
 // ====
 
-// RUN: emit amdgpu-assembly @scalar_to_accumulator strategy=source
+// RUN: emit amdgpu-assembly @scalar_to_accumulator
 amdgpu.target<gfx942> @target
 
 low.func.def target<amdgpu.cdna3.core>(@target) @scalar_to_accumulator(%source: reg<amdgpu.sgpr x3>) -> (reg<amdgpu.agpr x3>) asm {
@@ -76,7 +76,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @scalar_to_accumulator(%source: 
 
 // ====
 
-// RUN: emit amdgpu-assembly @accumulator_to_vector strategy=source
+// RUN: emit amdgpu-assembly @accumulator_to_vector
 amdgpu.target<gfx950> @target
 
 low.func.def target<amdgpu.cdna4.core>(@target) @accumulator_to_vector(%source: reg<amdgpu.agpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
@@ -90,7 +90,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @accumulator_to_vector(%source: 
 
 // ====
 
-// RUN: emit amdgpu-assembly @portable_transfer strategy=source
+// RUN: emit amdgpu-assembly @portable_transfer
 amdgpu.target<gfx9-4-generic> @target
 
 low.func.def target<amdgpu.gfx9_4.generic.core>(@target) @portable_transfer(%source: reg<amdgpu.vgpr>) -> (reg<amdgpu.agpr>) asm {
@@ -104,7 +104,7 @@ low.func.def target<amdgpu.gfx9_4.generic.core>(@target) @portable_transfer(%sou
 // ====
 
 // Backedge cycles use scratch in the same bank and preserve every tuple unit.
-// RUN: emit amdgpu-assembly @loop_swap strategy=source
+// RUN: emit amdgpu-assembly @loop_swap
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @loop_swap(%lhs: reg<amdgpu.agpr x2>, %rhs: reg<amdgpu.agpr x2>) -> (reg<amdgpu.agpr x2>, reg<amdgpu.agpr x2>) asm {
@@ -143,7 +143,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @loop_swap(%lhs: reg<amdgpu.agpr
 // ====
 
 // Physical moves observe the VALU-to-MFMA and MFMA-to-VALU windows.
-// RUN: emit amdgpu-assembly @matrix_copy_windows strategy=source
+// RUN: emit amdgpu-assembly @matrix_copy_windows
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @matrix_copy_windows(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr x4>, %offset: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm {
@@ -172,7 +172,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @matrix_copy_windows(%lhs: reg<a
 // ====
 
 // Writing the payload bank observes the store retention window.
-// RUN: emit amdgpu-assembly @store_overwrite strategy=source
+// RUN: emit amdgpu-assembly @store_overwrite
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @store_overwrite(%payload: reg<amdgpu.agpr x4>, %source: reg<amdgpu.vgpr x4>, %offset: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.agpr x4>) asm {
@@ -192,7 +192,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @store_overwrite(%payload: reg<a
 
 // ====
 
-// RUN: emit amdgpu-native-words @native_transfers strategy=source
+// RUN: emit amdgpu-native-words @native_transfers
 amdgpu.target<gfx950> @target
 
 low.func.def target<amdgpu.cdna4.core>(@target) @native_transfers(%vector: reg<amdgpu.vgpr>, %scalar: reg<amdgpu.sgpr>, %accumulator: reg<amdgpu.agpr>) -> (reg<amdgpu.agpr>, reg<amdgpu.agpr>, reg<amdgpu.vgpr>) asm {
@@ -214,7 +214,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @native_transfers(%vector: reg<a
 
 // ====
 
-// RUN: emit amdgpu-native-words @inline_initialization strategy=source
+// RUN: emit amdgpu-native-words @inline_initialization
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @inline_initialization() -> (reg<amdgpu.agpr>, reg<amdgpu.agpr>, reg<amdgpu.agpr>, reg<amdgpu.agpr>, reg<amdgpu.agpr>) asm {

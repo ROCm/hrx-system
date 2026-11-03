@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-native-words @subtract_gfx942 strategy=source
+// RUN: emit amdgpu-native-words @subtract_gfx942
 
 amdgpu.target<gfx942> @target
 
@@ -23,7 +23,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @subtract_gfx942(%lhs_low: reg<a
 
 // ====
 
-// RUN: emit amdgpu-native-words @subtract_gfx950 strategy=source
+// RUN: emit amdgpu-native-words @subtract_gfx950
 
 amdgpu.target<gfx950> @target
 
@@ -48,7 +48,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @subtract_gfx950(%lhs_low: reg<a
 
 // ====
 
-// RUN: emit amdgpu-native-words @subtract_gfx1100 strategy=source
+// RUN: emit amdgpu-native-words @subtract_gfx1100
 
 amdgpu.target<gfx1100> @target
 
@@ -73,7 +73,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @subtract_gfx1100(%lhs_low: reg<
 
 // ====
 
-// RUN: emit amdgpu-native-words @subtract_gfx1151 strategy=source
+// RUN: emit amdgpu-native-words @subtract_gfx1151
 
 amdgpu.target<gfx1151> @target
 
@@ -98,7 +98,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @subtract_gfx1151(%lhs_low: re
 
 // ====
 
-// RUN: emit amdgpu-native-words @subtract_gfx1201 strategy=source
+// RUN: emit amdgpu-native-words @subtract_gfx1201
 
 amdgpu.target<gfx1201> @target
 
@@ -123,7 +123,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @subtract_gfx1201(%lhs_low: reg<
 
 // ====
 
-// RUN: emit amdgpu-native-words @subtract_gfx1250 strategy=source
+// RUN: emit amdgpu-native-words @subtract_gfx1250
 
 amdgpu.target<gfx1250> @target
 
@@ -148,7 +148,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @subtract_gfx1250(%lhs_l
 
 // ====
 
-// RUN: emit amdgpu-assembly @subtract_gfx1151 strategy=source
+// RUN: emit amdgpu-assembly @subtract_gfx1151
 
 amdgpu.target<gfx1151> @target
 

@@ -1,4 +1,4 @@
-// RUN: with-checks emit amdgpu-allocation-json @spill_materialization_converges strategy=source amdgpu.vgpr=97
+// RUN: with-checks emit amdgpu-allocation-json @spill_materialization_converges amdgpu.vgpr=97
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @spill_materialization_converges(%init: reg<amdgpu.vgpr x8>, %lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %cond: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr>) asm {
@@ -56,7 +56,7 @@ CHECK: *"function":"spill_materialization_converges"*"spill_count":0,"spill_plan
 
 // ====
 
-// RUN: emit amdgpu-allocation-json @spill_materialization_reaches_register_exhaustion strategy=source amdgpu.vgpr=16
+// RUN: emit amdgpu-allocation-json @spill_materialization_reaches_register_exhaustion amdgpu.vgpr=16
 
 amdgpu.target<gfx1100> @gfx11_target
 
@@ -83,7 +83,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @spill_materialization_rea
 
 // ====
 
-// RUN: emit amdgpu-allocation-json @gfx11_allocation_json_lds_wait strategy=source
+// RUN: emit amdgpu-allocation-json @gfx11_allocation_json_lds_wait
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_lds_wait(%addr0: reg<amdgpu.vgpr>, %addr1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -98,7 +98,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_lds
 
 // ====
 
-// RUN: emit amdgpu-allocation-json @gfx11_allocation_json_lds_budgeted_dead_result strategy=source amdgpu.vgpr=2
+// RUN: emit amdgpu-allocation-json @gfx11_allocation_json_lds_budgeted_dead_result amdgpu.vgpr=2
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_lds_budgeted_dead_result(%addr: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -115,7 +115,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_lds
 // Ordinary VMEM stores consume VGPR address and payload operands at issue, so
 // successive payload values can reuse a physical register while stores remain
 // outstanding. The scalar resource retains its separately modeled lease.
-// RUN: emit amdgpu-allocation-json @gfx11_allocation_json_global_store_vgpr_sources_issue_consumed strategy=source
+// RUN: emit amdgpu-allocation-json @gfx11_allocation_json_global_store_vgpr_sources_issue_consumed
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_global_store_vgpr_sources_issue_consumed(%addr: reg<amdgpu.vgpr>, %view: reg<amdgpu.sgpr x2>) asm {
@@ -127,11 +127,11 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_glo
 }
 
 // ----
-{"format":"loom.low.allocation.v0","function":"gfx11_allocation_json_global_store_vgpr_sources_issue_consumed","target":"gfx11_target","descriptor_set":"amdgpu.rdna3.core","allocation_mode":"virtual","assignment_count":4,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":0,"name":"addr","type":"reg<amdgpu.vgpr>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"amdgpu.vgpr"},"start_point":0,"end_point":4,"unit_count":1,"location":{"kind":"physical_register","base":0,"count":1}},{"index":1,"value":{"id":1,"name":"view","type":"reg<amdgpu.sgpr x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"amdgpu.sgpr"},"start_point":0,"end_point":4,"unit_count":2,"location":{"kind":"physical_register","base":0,"count":2}},{"index":2,"value":{"id":2,"name":"value0","type":"reg<amdgpu.vgpr>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"amdgpu.vgpr"},"start_point":1,"end_point":2,"unit_count":1,"location":{"kind":"physical_register","base":1,"count":1}},{"index":3,"value":{"id":3,"name":"value1","type":"reg<amdgpu.vgpr>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"amdgpu.vgpr"},"start_point":3,"end_point":4,"unit_count":1,"location":{"kind":"physical_register","base":1,"count":1}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}
+{"format":"loom.low.allocation.v0","function":"gfx11_allocation_json_global_store_vgpr_sources_issue_consumed","target":"gfx11_target","descriptor_set":"amdgpu.rdna3.core","allocation_mode":"virtual","assignment_count":4,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":0,"name":"addr","type":"reg<amdgpu.vgpr>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"amdgpu.vgpr"},"start_point":0,"end_point":4,"unit_count":1,"location":{"kind":"physical_register","base":0,"count":1}},{"index":1,"value":{"id":1,"name":"view","type":"reg<amdgpu.sgpr x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"amdgpu.sgpr"},"start_point":0,"end_point":4,"unit_count":2,"location":{"kind":"physical_register","base":0,"count":2}},{"index":2,"value":{"id":2,"name":"value0","type":"reg<amdgpu.vgpr>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"amdgpu.vgpr"},"start_point":1,"end_point":3,"unit_count":1,"location":{"kind":"physical_register","base":1,"count":1}},{"index":3,"value":{"id":3,"name":"value1","type":"reg<amdgpu.vgpr>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"amdgpu.vgpr"},"start_point":2,"end_point":4,"unit_count":1,"location":{"kind":"physical_register","base":2,"count":1}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}
 
 // ====
 
-// RUN: emit amdgpu-allocation-json @gfx11_allocation_json_global_load_saddr_source_reuse strategy=source amdgpu.sgpr=4
+// RUN: emit amdgpu-allocation-json @gfx11_allocation_json_global_load_saddr_source_reuse amdgpu.sgpr=4
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_global_load_saddr_source_reuse(%addr: reg<amdgpu.vgpr>, %load_base: reg<amdgpu.sgpr x2>, %keep: reg<amdgpu.sgpr x2>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) asm {
@@ -146,7 +146,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_glo
 
 // ====
 
-// RUN: emit amdgpu-allocation-json @gfx11_allocation_json_global_store_saddr_source_reuse strategy=source amdgpu.sgpr=4
+// RUN: emit amdgpu-allocation-json @gfx11_allocation_json_global_store_saddr_source_reuse amdgpu.sgpr=4
 amdgpu.target<gfx1100> @gfx11_target
 
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_global_store_saddr_source_reuse(%addr: reg<amdgpu.vgpr>, %store_base: reg<amdgpu.sgpr x2>, %keep: reg<amdgpu.sgpr x2>, %value: reg<amdgpu.vgpr>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>) asm {

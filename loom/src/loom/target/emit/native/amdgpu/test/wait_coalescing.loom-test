@@ -1,6 +1,6 @@
 // Coalesced slices change virtual ownership without emitting instructions.
 // Their result-release waits share one boundary and keep the strictest bound.
-// RUN: emit amdgpu-assembly @tuple_slice_waits strategy=source
+// RUN: emit amdgpu-assembly @tuple_slice_waits
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @tuple_slice_waits(%address: reg<amdgpu.vgpr>) asm {
@@ -26,7 +26,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @tuple_slice_waits(%address: r
 
 // An intervening ALU instruction separates completion boundaries, preserving
 // the partial wait before the first use and the full wait before the second.
-// RUN: emit amdgpu-assembly @alu_separates_slice_waits strategy=source
+// RUN: emit amdgpu-assembly @alu_separates_slice_waits
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @alu_separates_slice_waits(%address: reg<amdgpu.vgpr>) asm {
@@ -55,7 +55,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @alu_separates_slice_waits(%ad
 
 // A fallthrough edge preserves pending reads until the successor's first
 // hardware consumer, allowing the two reads to share one completion wait.
-// RUN: emit amdgpu-assembly @block_entry_coalesces_reads strategy=source
+// RUN: emit amdgpu-assembly @block_entry_coalesces_reads
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @block_entry_coalesces_reads(%address: reg<amdgpu.vgpr>) asm {
@@ -84,7 +84,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @block_entry_coalesces_reads(%
 
 // Authored waits keep their own insertion points and spelling. This loose
 // bound cannot retire the remaining load or be folded into a planned wait.
-// RUN: emit amdgpu-assembly @authored_wait_preserves_boundary strategy=source
+// RUN: emit amdgpu-assembly @authored_wait_preserves_boundary
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @authored_wait_preserves_boundary(%address: reg<amdgpu.vgpr>) asm {
@@ -102,9 +102,9 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @authored_wait_preserves_bound
 // ----
   ds_read_b128 v[4:7], v0 offset:0
   ds_read_b128 v[8:11], v0 offset:16
-  s_waitcnt vmcnt(63) lgkmcnt(2)
   s_waitcnt vmcnt(63) lgkmcnt(0)
   v_add_u32 v1, v4, v8
+  s_waitcnt vmcnt(63) lgkmcnt(2)
   ds_write_b32 v0, v1 offset:32
   s_endpgm
 
@@ -112,7 +112,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @authored_wait_preserves_bound
 
 // Different counters at a shared zero-work boundary can use one combined
 // hardware wait without changing either logical completion requirement.
-// RUN: emit amdgpu-assembly @mixed_counter_slices strategy=source
+// RUN: emit amdgpu-assembly @mixed_counter_slices
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @mixed_counter_slices(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm {
@@ -127,10 +127,10 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @mixed_counter_slices(%address
 }
 
 // ----
-  ds_read_b128 v[4:7], v0 offset:0
-  global_load_b128 v[8:11], v0, s[0:1] offset:0
+  global_load_b128 v[12:15], v0, s[0:1] offset:0
+  ds_read_b128 v[8:11], v0 offset:0
   s_waitcnt vmcnt(0) lgkmcnt(0)
-  v_add_u32 v1, v4, v8
+  v_add_u32 v1, v8, v12
   ds_write_b32 v0, v1 offset:32
   s_endpgm
 
@@ -138,7 +138,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @mixed_counter_slices(%address
 
 // Slices transfer pending storage ownership through free coalescing.
 // The partial write still waits for the preserved bits from the global load.
-// RUN: emit amdgpu-assembly @slice_continuation strategy=source
+// RUN: emit amdgpu-assembly @slice_continuation
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @slice_continuation(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -161,7 +161,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @slice_continuation(%address: 
 
 // The low register can stay live while a tied continuation updates the high
 // register. Lease handoff follows that subrange, not whole-source deadness.
-// RUN: emit amdgpu-assembly @slice_live_sibling strategy=source
+// RUN: emit amdgpu-assembly @slice_live_sibling
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @slice_live_sibling(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
@@ -185,7 +185,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @slice_live_sibling(%address: 
 
 // A tied continuation can update one subrange after retiring the pending wide
 // load without disturbing the other subrange.
-// RUN: emit amdgpu-assembly @shifted_slice strategy=source
+// RUN: emit amdgpu-assembly @shifted_slice
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @shifted_slice(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -208,7 +208,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @shifted_slice(%address: reg<a
 
 // Each concat input transfers its pending subrange into a wider identity. The
 // aggregate neither materializes moves nor retires either load early.
-// RUN: emit amdgpu-assembly @pending_concat strategy=source
+// RUN: emit amdgpu-assembly @pending_concat
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @pending_concat(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>) asm {

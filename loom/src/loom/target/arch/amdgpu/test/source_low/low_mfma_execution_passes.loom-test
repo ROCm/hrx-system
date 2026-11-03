@@ -1,5 +1,5 @@
 // Matrix execution passes are independent of the accumulator footprint.
-// RUN: emit amdgpu-assembly @cdna2_four_results_eight_passes strategy=source
+// RUN: emit amdgpu-assembly @cdna2_four_results_eight_passes
 
 amdgpu.target<gfx90a> @target
 
@@ -18,7 +18,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_four_results_eight_passes
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna2_sixteen_results_eight_passes strategy=source
+// RUN: emit amdgpu-assembly @cdna2_sixteen_results_eight_passes
 
 amdgpu.target<gfx90a> @target
 
@@ -37,7 +37,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_sixteen_results_eight_pas
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna2_four_results_two_passes strategy=source
+// RUN: emit amdgpu-assembly @cdna2_four_results_two_passes
 
 amdgpu.target<gfx90a> @target
 
@@ -56,7 +56,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_four_results_two_passes(%
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna2_thirty_two_results_sixteen_passes strategy=source
+// RUN: emit amdgpu-assembly @cdna2_thirty_two_results_sixteen_passes
 
 amdgpu.target<gfx90a> @target
 
@@ -76,7 +76,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_thirty_two_results_sixtee
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna3_sixteen_results_eight_passes strategy=source
+// RUN: emit amdgpu-assembly @cdna3_sixteen_results_eight_passes
 
 amdgpu.target<gfx942> @target
 
@@ -95,7 +95,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @cdna3_sixteen_results_eight_pas
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna4_sixteen_results_eight_passes strategy=source
+// RUN: emit amdgpu-assembly @cdna4_sixteen_results_eight_passes
 
 amdgpu.target<gfx950> @target
 
@@ -114,7 +114,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @cdna4_sixteen_results_eight_pas
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna4_narrow_sources_four_passes strategy=source
+// RUN: emit amdgpu-assembly @cdna4_narrow_sources_four_passes
 
 amdgpu.target<gfx950> @target
 
@@ -133,7 +133,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @cdna4_narrow_sources_four_passe
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna4_fp8_source_eight_passes strategy=source
+// RUN: emit amdgpu-assembly @cdna4_fp8_source_eight_passes
 
 amdgpu.target<gfx950> @target
 

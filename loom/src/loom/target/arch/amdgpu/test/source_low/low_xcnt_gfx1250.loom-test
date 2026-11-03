@@ -1,6 +1,6 @@
 // Inherited storage still publishes the hardware source-read lease attached to
 // the identity, not just the records attached to its original address value.
-// RUN: with-checks emit amdgpu-allocation-json @alias_attached_source_lease strategy=source amdgpu.vgpr=2 fixed=%address:physical_register:0:1 fixed=%loaded:physical_register:1:1 fixed=%reuse:physical_register:0:1 fixed=%base:physical_register:0:2
+// RUN: with-checks emit amdgpu-allocation-json @alias_attached_source_lease amdgpu.vgpr=2
 
 amdgpu.target<gfx1250> @target
 
@@ -21,7 +21,7 @@ CHECK: *"storage_release_actions":[{"index":0,"insertion_packet":2,"insertion_no
 
 // The source-read lease forces XCNT completion before the address is overwritten;
 // payload completion remains independently required before arithmetic.
-// RUN: emit amdgpu-assembly @alias_attached_source_lease strategy=source amdgpu.vgpr=2 fixed=%address:physical_register:0:1 fixed=%loaded:physical_register:1:1 fixed=%reuse:physical_register:0:1 fixed=%base:physical_register:0:2
+// RUN: emit amdgpu-assembly @alias_attached_source_lease amdgpu.vgpr=2
 
 amdgpu.target<gfx1250> @target
 
@@ -44,7 +44,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @alias_attached_source_l
 
 // ====
 
-// RUN: emit amdgpu-assembly @smem_base_reuse_requires_xcnt strategy=source amdgpu.sgpr=16 fixed=%kernarg:physical_register:0:2 fixed=%keep:physical_register:2:6 fixed=%loaded:physical_register:8:8
+// RUN: emit amdgpu-assembly @smem_base_reuse_requires_xcnt amdgpu.sgpr=16
 
 amdgpu.target<gfx1250> @target
 
@@ -83,28 +83,28 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @smem_base_reuse_require
 }
 
 // ----
-  s_load_dwordx8 s[8:15], s[0:1], 0
+  s_load_dwordx8 s[8:15], s[6:7], 0
   s_wait_xcnt xcnt(0)
-  s_mov_b32 s0, 0
+  s_mov_b32 s6, 0
   s_wait_kmcnt kmcnt(0)
-  s_add_u32 s0, s8, s0
-  s_add_u32 s0, s0, s9
-  s_add_u32 s0, s0, s10
-  s_add_u32 s0, s0, s11
-  s_add_u32 s0, s0, s12
-  s_add_u32 s0, s0, s13
-  s_add_u32 s0, s0, s14
-  s_add_u32 s0, s0, s15
+  s_add_u32 s6, s8, s6
+  s_add_u32 s6, s6, s9
+  s_add_u32 s6, s6, s10
+  s_add_u32 s6, s6, s11
+  s_add_u32 s6, s6, s12
+  s_add_u32 s6, s6, s13
+  s_add_u32 s6, s6, s14
+  s_add_u32 s6, s6, s15
+  s_add_u32 s0, s6, s0
+  s_add_u32 s0, s0, s1
   s_add_u32 s0, s0, s2
   s_add_u32 s0, s0, s3
   s_add_u32 s0, s0, s4
   s_add_u32 s0, s0, s5
-  s_add_u32 s0, s0, s6
-  s_add_u32 s0, s0, s7
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @getreg_implicit_drain_precedes_result_write strategy=source amdgpu.sgpr=5 fixed=%kernarg:physical_register:0:2 fixed=%keep:physical_register:2:2 fixed=%loaded:physical_register:4:1
+// RUN: emit amdgpu-assembly @getreg_implicit_drain_precedes_result_write amdgpu.sgpr=5
 
 amdgpu.target<gfx1250> @target
 
@@ -122,16 +122,16 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @getreg_implicit_drain_p
 // S_GETREG drains XCNT before writing its destination. Reusing the scalar-load
 // base as that destination therefore needs no explicit XCNT wait.
 // ----
-  s_load_dword s4, s[0:1], 0
-  s_getreg_b32 s0, hwreg(HW_REG_IB_STS2, 21, 4)
+  s_load_dword s4, s[2:3], 0
+  s_getreg_b32 s2, hwreg(HW_REG_IB_STS2, 21, 4)
   s_wait_kmcnt kmcnt(0)
-  s_add_u32 s0, s4, s0
-  s_add_u32 s0, s0, s2
-  s_add_u32 s0, s0, s3
+  s_add_u32 s2, s4, s2
+  s_add_u32 s0, s2, s0
+  s_add_u32 s0, s0, s1
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @vmem_address_reuse_requires_xcnt strategy=source amdgpu.vgpr=3 fixed=%addr:physical_register:0:1 fixed=%keep:physical_register:1:1 fixed=%loaded:physical_register:2:1
+// RUN: emit amdgpu-assembly @vmem_address_reuse_requires_xcnt amdgpu.vgpr=3
 
 amdgpu.target<gfx1250> @target
 
@@ -145,16 +145,15 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @vmem_address_reuse_requ
 
 // ----
   global_load_b32 v2, v0, s[0:1] offset:0
-  s_wait_xcnt xcnt(0)
-  v_mov_b32 v0, 7
   s_wait_loadcnt loadcnt(0)
   v_add_u32 v1, v2, v1
+  v_mov_b32 v2, 7
   s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
-  v_add_u32 v0, v1, v0
+  v_add_u32 v1, v1, v2
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @vmem_overwrite_uses_implicit_ordering strategy=source amdgpu.vgpr=3 fixed=%addr0:physical_register:0:1 fixed=%addr1:physical_register:1:1 fixed=%loaded0:physical_register:2:1
+// RUN: emit amdgpu-assembly @vmem_overwrite_uses_implicit_ordering amdgpu.vgpr=3
 
 amdgpu.target<gfx1250> @target
 
@@ -173,7 +172,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @vmem_overwrite_uses_imp
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @vmem_source_reuse_uses_minimum_xcnt strategy=source amdgpu.vgpr=6 fixed=%addr0:physical_register:0:1 fixed=%addr1:physical_register:1:1 fixed=%addr2:physical_register:2:1 fixed=%loaded0:physical_register:3:1 fixed=%loaded1:physical_register:4:1 fixed=%loaded2:physical_register:5:1
+// RUN: emit amdgpu-assembly @vmem_source_reuse_uses_minimum_xcnt amdgpu.vgpr=6
 
 amdgpu.target<gfx1250> @target
 
@@ -192,19 +191,18 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @vmem_source_reuse_uses_
   global_load_b32 v3, v0, s[0:1] offset:0
   global_load_b32 v4, v1, s[0:1] offset:4
   global_load_b32 v5, v2, s[0:1] offset:8
-  s_wait_xcnt xcnt(2)
-  v_mov_b32 v0, 7
   s_wait_loadcnt loadcnt(1)
   v_add_u32 v3, v3, v4
+  v_mov_b32 v4, 7
   s_wait_loadcnt loadcnt(0)
-  s_delay_alu instid0(VALU_DEP_1)
+  s_delay_alu instid0(VALU_DEP_2)
   v_add_u32 v3, v3, v5
-  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_3)
-  v_add_u32 v0, v3, v0
+  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
+  v_add_u32 v3, v3, v4
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cluster_source_reuse_requires_xcnt strategy=source amdgpu.vgpr=3 fixed=%lds:physical_register:0:1 fixed=%addr:physical_register:1:1 fixed=%keep:physical_register:2:1 fixed=%saddr:physical_register:4:2
+// RUN: emit amdgpu-assembly @cluster_source_reuse_requires_xcnt amdgpu.vgpr=3
 
 amdgpu.target<gfx1250> @target
 
@@ -219,7 +217,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @cluster_source_reuse_re
 
 // ----
   s_mov_b32 m0, 3
-  cluster_load_async_to_lds_b128 v0, v1, s[4:5]
+  cluster_load_async_to_lds_b128 v0, v1, s[0:1]
   s_wait_xcnt xcnt(0)
   v_mov_b32 v0, 16
   s_delay_alu instid0(VALU_DEP_1)
@@ -228,7 +226,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @cluster_source_reuse_re
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @vmem_exec_reuse_requires_xcnt strategy=source fixed=%addr:physical_register:0:1 fixed=%base:physical_register:0:2 fixed=%saved_exec:physical_register:2:2 fixed=%loaded:physical_register:1:1
+// RUN: emit amdgpu-assembly @vmem_exec_reuse_requires_xcnt
 
 amdgpu.target<gfx1250> @target
 
@@ -248,7 +246,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @vmem_exec_reuse_require
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @exec_drain_preserves_smem_source strategy=source fixed=%kernarg:physical_register:0:2 fixed=%saved_exec:physical_register:2:2 fixed=%loaded:physical_register:4:1 fixed=%keep:physical_register:5:1 fixed=%reuse:physical_register:0:1
+// RUN: emit amdgpu-assembly @exec_drain_preserves_smem_source
 
 amdgpu.target<gfx1250> @target
 
@@ -264,17 +262,16 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @exec_drain_preserves_sm
 // EXEC changes require VMEM XCNT completion. They do not complete the scalar
 // load's source read, so reusing its base still requires an XCNT wait.
 // ----
-  s_load_dword s4, s[0:1], 0
+  s_load_dword s5, s[0:1], 0
+  s_mov_b32 s6, 7
   s_mov_b64 exec, s[2:3]
-  s_wait_xcnt xcnt(0)
-  s_mov_b32 s0, 7
   s_wait_kmcnt kmcnt(0)
-  s_add_u32 s1, s4, s5
-  s_add_u32 s0, s1, s0
+  s_add_u32 s2, s5, s4
+  s_add_u32 s2, s2, s6
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cross_block_vmem_exec_reuse_requires_xcnt strategy=source fixed=%addr:physical_register:0:1 fixed=%value:physical_register:1:1 fixed=%base:physical_register:0:2 fixed=%saved_exec:physical_register:2:2
+// RUN: emit amdgpu-assembly @cross_block_vmem_exec_reuse_requires_xcnt
 
 amdgpu.target<gfx1250> @target
 
@@ -298,7 +295,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @cross_block_vmem_exec_r
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @native_branch_releases_xcnt_source strategy=source
+// RUN: emit amdgpu-assembly @native_branch_releases_xcnt_source
 
 amdgpu.target<gfx1250> @target
 
@@ -323,22 +320,22 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @native_branch_releases_
   global_load_b32 v2, v0, s[0:1] offset:0
   s_cbranch_scc0 .Lbb2
 .Lbb1:
-  v_mov_b32 v0, 7
   s_wait_loadcnt loadcnt(0)
-  v_add_u32 v1, v2, v1
+  v_add_u32 v0, v2, v1
+  v_mov_b32 v1, 7
   s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
-  v_add_u32 v0, v1, v0
+  v_add_u32 v0, v0, v1
   s_endpgm
 .Lbb2:
-  v_mov_b32 v0, 9
   s_wait_loadcnt loadcnt(0)
-  v_add_u32 v1, v2, v1
+  v_add_u32 v0, v2, v1
+  v_mov_b32 v1, 9
   s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
-  v_add_u32 v0, v1, v0
+  v_add_u32 v0, v0, v1
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @fallthrough_preserves_xcnt_source strategy=source
+// RUN: emit amdgpu-assembly @fallthrough_preserves_xcnt_source
 
 amdgpu.target<gfx1250> @target
 
@@ -357,15 +354,15 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @fallthrough_preserves_x
 // ----
   global_load_b32 v2, v0, s[0:1] offset:0
 .Lbb1:
-  v_mov_b32 v3, 7
   s_wait_loadcnt loadcnt(0)
-  v_add_u32 v2, v2, v1
+  v_add_u32 v1, v2, v1
+  v_mov_b32 v2, 7
   s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
-  v_add_u32 v1, v2, v3
+  v_add_u32 v1, v1, v2
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cross_block_smem_result_reuse_requires_kmcnt strategy=source amdgpu.sgpr=13 fixed=%kernarg:physical_register:0:2 fixed=%loaded:physical_register:8:4 fixed=%reuse:physical_register:8:1 fixed=%keep:physical_register:12:1
+// RUN: emit amdgpu-assembly @cross_block_smem_result_reuse_requires_kmcnt amdgpu.sgpr=13
 
 amdgpu.target<gfx1250> @target
 
@@ -388,21 +385,20 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @cross_block_smem_result
 // One path consumes the value and the other overwrites the same register; both
 // operations must wait for the SMEM writeback before touching s8.
 // ----
-  s_load_dwordx4 s[8:11], s[0:1], 0
+  s_load_dwordx4 s[4:7], s[0:1], 0
   s_cbranch_scc0 .Lbb2
 .Lbb1:
   s_wait_kmcnt kmcnt(0)
-  s_add_u32 s0, s8, s12
+  s_add_u32 s0, s4, s2
   s_branch .Lbb3
 .Lbb2:
-  s_wait_kmcnt kmcnt(0)
-  s_mov_b32 s8, 7
-  s_add_u32 s0, s8, s12
+  s_mov_b32 s0, 7
+  s_add_u32 s0, s0, s2
 .Lbb3:
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @smem_vmem_group_switch_releases_source strategy=source amdgpu.sgpr=6 fixed=%smem_base:physical_register:0:2 fixed=%smem_value:physical_register:2:1 fixed=%keep:physical_register:3:1 fixed=%global_base:physical_register:4:2 fixed=%addr:physical_register:0:1 fixed=%global_value:physical_register:1:1
+// RUN: emit amdgpu-assembly @smem_vmem_group_switch_releases_source amdgpu.sgpr=6
 
 amdgpu.target<gfx1250> @target
 
@@ -417,12 +413,12 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @smem_vmem_group_switch_
 }
 
 // ----
-  s_load_dword s2, s[0:1], 0
-  global_load_b32 v1, v0, s[4:5] offset:0
-  s_mov_b32 s0, 7
-  s_wait_kmcnt kmcnt(0)
-  s_add_u32 s1, s2, s3
-  s_add_u32 s0, s1, s0
+  global_load_b32 v1, v0, s[0:1] offset:0
   s_wait_loadcnt loadcnt(0)
   v_add_u32 v1, v1, v0
+  s_load_dword s5, s[2:3], 0
+  s_wait_kmcnt kmcnt(0)
+  s_add_u32 s4, s5, s4
+  s_mov_b32 s5, 7
+  s_add_u32 s4, s4, s5
   s_endpgm

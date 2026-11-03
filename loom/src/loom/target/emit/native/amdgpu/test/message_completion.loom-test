@@ -1,6 +1,6 @@
 // Returned messages write SGPRs asynchronously. Ordinary SSA use requires a
 // completion wait even though the instruction has no memory alias.
-// RUN: emit amdgpu-assembly @message_result strategy=source
+// RUN: emit amdgpu-assembly @message_result
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @message_result(%mask: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -18,7 +18,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @message_result(%mask: reg<amd
 // ====
 
 // RDNA4 splits scalar/message completion from LDS completion.
-// RUN: emit amdgpu-assembly @message_result strategy=source
+// RUN: emit amdgpu-assembly @message_result
 amdgpu.target<gfx1201> @target
 
 low.func.def target<amdgpu.rdna4.core>(@target) @message_result(%mask: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -37,7 +37,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @message_result(%mask: reg<amdgp
 
 // Completion before issue cannot release a later message. A partial wait does
 // not prove that an out-of-order scalar/message result is ready.
-// RUN: emit amdgpu-assembly @partial_message_wait strategy=source
+// RUN: emit amdgpu-assembly @partial_message_wait
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @partial_message_wait(%mask: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -51,9 +51,9 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @partial_message_wait(%mask: r
 // ----
   s_waitcnt vmcnt(63) lgkmcnt(0)
   s_sendmsg_rtn_b32 s1, message(131)
-  s_waitcnt vmcnt(63) lgkmcnt(1)
   s_waitcnt vmcnt(63) lgkmcnt(0)
   s_and_b32 s0, s1, s0
+  s_waitcnt vmcnt(63) lgkmcnt(1)
   s_endpgm
 
 // ====
@@ -61,7 +61,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @partial_message_wait(%mask: r
 // An unconsumed message result still owns its destination until completion.
 // Keeping the input live makes ordinary allocation reuse that destination for
 // the replacement in the successor block.
-// RUN: emit amdgpu-assembly @message_destination_reuse strategy=source
+// RUN: emit amdgpu-assembly @message_destination_reuse
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @message_destination_reuse(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
@@ -83,7 +83,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @message_destination_reuse(%in
 
 // Only one predecessor completed the result. An empty memory alias frontier
 // does not prove that the incoming message result is ready at the join.
-// RUN: emit amdgpu-assembly @message_join strategy=source
+// RUN: emit amdgpu-assembly @message_join
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @message_join(%input: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -118,7 +118,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @message_join(%input: reg<amdg
 
 // Fire-and-forget messages also advance LGKM/KM. A later control barrier must
 // account for them even though they have neither memory aliases nor SSA results.
-// RUN: emit amdgpu-assembly @message_send strategy=source
+// RUN: emit amdgpu-assembly @message_send
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @message_send(%input: reg<amdgpu.sgpr>) asm {
@@ -139,7 +139,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @message_send(%input: reg<amdg
 
 // Reading the clock preserves pending prefetches. Its LGKM completion also
 // completes earlier scalar/LDS reads, but the global load waits at its own use.
-// RUN: emit amdgpu-assembly @clock_during_prefetch strategy=source
+// RUN: emit amdgpu-assembly @clock_during_prefetch
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @clock_during_prefetch(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %address: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.vgpr>) asm {
@@ -158,18 +158,17 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @clock_during_prefetch(%base: 
   ds_read_b32 v0, v0 offset:0
   s_load_dword s3, s[0:1], s2 offset:0
   s_sendmsg_rtn_b32 s0, message(131)
-  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_waitcnt vmcnt(0) lgkmcnt(0)
+  v_add_u32 v0, v1, v0
   s_add_u32 s0, s0, s2
   s_add_u32 s0, s3, s0
-  s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_add_u32 v0, v1, v0
   s_endpgm
 
 // ====
 
 // On RDNA4, returned messages and scalar reads use KM; LDS and global reads
 // retain independent completion. Both halves of the timestamp remain live.
-// RUN: emit amdgpu-assembly @wide_clock_during_prefetch strategy=source
+// RUN: emit amdgpu-assembly @wide_clock_during_prefetch
 amdgpu.target<gfx1201> @target
 
 low.func.def target<amdgpu.rdna4.core>(@target) @wide_clock_during_prefetch(%base: reg<amdgpu.sgpr x2>, %mask: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %address: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.vgpr>) asm {
@@ -188,10 +187,10 @@ low.func.def target<amdgpu.rdna4.core>(@target) @wide_clock_during_prefetch(%bas
   ds_read_b32 v0, v0 offset:0
   s_load_dword s5, s[0:1], s4 offset:0
   s_sendmsg_rtn_b64 s[0:1], message(131)
-  s_wait_kmcnt kmcnt(0)
-  s_and_b64 s[0:1], s[0:1], s[2:3]
-  s_add_u32 s2, s5, s4
   s_wait_loadcnt loadcnt(0)
   s_wait_dscnt dscnt(0)
   v_add_u32 v0, v1, v0
+  s_wait_kmcnt kmcnt(0)
+  s_and_b64 s[0:1], s[0:1], s[2:3]
+  s_add_u32 s2, s5, s4
   s_endpgm

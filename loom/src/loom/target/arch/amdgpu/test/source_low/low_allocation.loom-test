@@ -1,6 +1,6 @@
 // A pending load and its non-writing identities share one register. The real
 // arithmetic consumer still waits for the memory result before reading it.
-// RUN: emit amdgpu-assembly @loaded_identity_chain strategy=source
+// RUN: emit amdgpu-assembly @loaded_identity_chain
 
 amdgpu.target<gfx1100> @target
 
@@ -586,7 +586,7 @@ CHECK: *"name":"payload","type":"reg<amdgpu.vgpr x3>"},"class":*,"start_point":1
 // ====
 
 // Native emit providers retain all fixed requests, including later pairs.
-// RUN: emit amdgpu-assembly @many_fixed_inputs strategy=source fixed=%left_0:physical_register:0:1 fixed=%right_0:physical_register:1:1 fixed=%left_1:physical_register:2:1 fixed=%right_1:physical_register:3:1 fixed=%left_2:physical_register:4:1 fixed=%right_2:physical_register:5:1 fixed=%left_3:physical_register:6:1 fixed=%right_3:physical_register:7:1 fixed=%left_4:physical_register:8:1 fixed=%right_4:physical_register:9:1 fixed=%left_5:physical_register:10:1 fixed=%right_5:physical_register:11:1 fixed=%left_6:physical_register:12:1 fixed=%right_6:physical_register:13:1 fixed=%left_7:physical_register:14:1 fixed=%right_7:physical_register:15:1 fixed=%left_8:physical_register:16:1 fixed=%right_8:physical_register:17:1
+// RUN: emit amdgpu-assembly @many_fixed_inputs
 
 amdgpu.target<gfx1100> @target
 

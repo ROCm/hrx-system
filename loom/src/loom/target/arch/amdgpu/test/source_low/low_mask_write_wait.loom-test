@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @completed_mask_increment strategy=source
+// RUN: emit amdgpu-assembly @completed_mask_increment
 
 // The recurrent pair definition completes the old read before a tied update.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -25,7 +25,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @completed_ma
 
 // ====
 
-// RUN: emit amdgpu-assembly @scalar_completion_loop strategy=source
+// RUN: emit amdgpu-assembly @scalar_completion_loop
 
 // The next iteration overwrites the mask before ordinary scalar arithmetic.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -49,7 +49,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @scalar_compl
 
 // ====
 
-// RUN: emit amdgpu-assembly @scalar_completion_loop strategy=source
+// RUN: emit amdgpu-assembly @scalar_completion_loop
 
 // Wave32 does not retain lane-mask reads across ordinary scalar writes.
 amdgpu.target<gfx1151> @target {subgroup_size = 32}
@@ -72,7 +72,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @scalar_compl
 
 // ====
 
-// RUN: emit amdgpu-assembly @scalar_nonpredicate_loop strategy=source
+// RUN: emit amdgpu-assembly @scalar_nonpredicate_loop
 
 // An ordinary scalar VALU source does not establish a lane-mask read.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -96,7 +96,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @scalar_nonpr
 
 // ====
 
-// RUN: emit amdgpu-assembly @vector_completion_loop strategy=source
+// RUN: emit amdgpu-assembly @vector_completion_loop
 
 // A recurring VALU definition overwrites the previous iteration's predicate.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -121,7 +121,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @vector_compl
 
 // ====
 
-// RUN: emit amdgpu-assembly @fallthrough_completion_loop strategy=source
+// RUN: emit amdgpu-assembly @fallthrough_completion_loop
 
 // A fallthrough block overwrites the mask retained by its predecessor.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -148,7 +148,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @fallthrough_
 
 // ====
 
-// RUN: emit amdgpu-assembly @reverse_layout_completion_loop strategy=source
+// RUN: emit amdgpu-assembly @reverse_layout_completion_loop
 
 // The join precedes its mask-reading predecessor in layout order.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -184,7 +184,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reverse_layo
 
 // ====
 
-// RUN: emit amdgpu-assembly @reuse strategy=source
+// RUN: emit amdgpu-assembly @reuse
 
 // A loop header sees a mask read arriving from its backedge.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -209,7 +209,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value
 
 // ====
 
-// RUN: emit amdgpu-assembly @carry_completion_loop strategy=source
+// RUN: emit amdgpu-assembly @carry_completion_loop
 
 // The carry input remains a retained predicate after its last SSA use.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -233,7 +233,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @carry_comple
 
 // ====
 
-// RUN: emit amdgpu-assembly @borrow_completion_loop strategy=source
+// RUN: emit amdgpu-assembly @borrow_completion_loop
 
 // The borrow input remains a retained predicate after its last SSA use.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -257,7 +257,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @borrow_compl
 
 // ====
 
-// RUN: emit amdgpu-assembly @edge_permutation_loop strategy=source
+// RUN: emit amdgpu-assembly @edge_permutation_loop
 
 // The resolved move range completes each overwritten mask word independently,
 // at its own instruction offset, before the fallthrough successor.
@@ -289,7 +289,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @edge_permuta
 
 // ====
 
-// RUN: emit amdgpu-assembly @rotate strategy=source
+// RUN: emit amdgpu-assembly @rotate
 
 // The backedge rotates mask DWORDs through allocator-generated copies.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -317,7 +317,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @rotate(%valu
 
 // ====
 
-// RUN: emit amdgpu-assembly @reuse strategy=source
+// RUN: emit amdgpu-assembly @reuse
 
 // VALU VCC overwrites select their own dependency field.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -339,7 +339,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value
 
 // ====
 
-// RUN: emit amdgpu-assembly @reuse strategy=source
+// RUN: emit amdgpu-assembly @reuse
 
 // SALU VCC overwrites select their own dependency field.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -361,7 +361,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value
 
 // ====
 
-// RUN: emit amdgpu-assembly @partial_vcc strategy=source
+// RUN: emit amdgpu-assembly @partial_vcc
 
 // Writing vcc_lo leaves the prior high-half mask read relevant to a later
 // full-mask overwrite even without an intervening predicate use.
@@ -389,7 +389,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @partial_vcc(
 
 // Independent predicates keep their source words available across two copied
 // joins without scratch storage or mask-write completion waits.
-// RUN: emit amdgpu-assembly @independent_computed_masks strategy=source
+// RUN: emit amdgpu-assembly @independent_computed_masks
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -428,7 +428,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @independent_
 
 // Retained-read rejection also occurs without any fixed-value index. A free
 // source can simply choose a register outside the retained mask.
-// RUN: emit amdgpu-assembly @unfixed_retained_mask strategy=source
+// RUN: emit amdgpu-assembly @unfixed_retained_mask
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -454,7 +454,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @unfixed_reta
 
 // A longer-lived source stays available through both predicate lifetimes and
 // the copied joins without retaining obsolete mask reservations.
-// RUN: emit amdgpu-assembly @nonconsecutive_shared_retained_mask strategy=source
+// RUN: emit amdgpu-assembly @nonconsecutive_shared_retained_mask
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 

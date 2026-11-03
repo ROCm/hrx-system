@@ -1,5 +1,5 @@
 // Scalar-memory completion remains anchored before a zero-instruction identity.
-// RUN: emit amdgpu-assembly @scalar_load_assumption strategy=source
+// RUN: emit amdgpu-assembly @scalar_load_assumption
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @scalar_load_assumption(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %addend: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -17,7 +17,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scalar_load_assumption(%base: r
 
 // ====
 
-// RUN: emit amdgpu-native-words @scalar_load_assumption strategy=source
+// RUN: emit amdgpu-native-words @scalar_load_assumption
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @scalar_load_assumption(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %addend: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -37,7 +37,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scalar_load_assumption(%base: r
 // ====
 
 // A chain of identities preserves the load wait and subsequent store drain.
-// RUN: emit amdgpu-assembly @global_load_assumptions strategy=source
+// RUN: emit amdgpu-assembly @global_load_assumptions
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @global_load_assumptions(%resource: reg<amdgpu.sgpr x4>, %address: reg<amdgpu.vgpr>, %offset: reg<amdgpu.sgpr>) asm {
@@ -59,7 +59,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @global_load_assumptions(%resour
 
 // ====
 
-// RUN: emit amdgpu-native-words @global_load_assumptions strategy=source
+// RUN: emit amdgpu-native-words @global_load_assumptions
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @global_load_assumptions(%resource: reg<amdgpu.sgpr x4>, %address: reg<amdgpu.vgpr>, %offset: reg<amdgpu.sgpr>) asm {
@@ -84,7 +84,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @global_load_assumptions(%resour
 // ====
 
 // Multiple pending LDS reads meet at one relational fact identity.
-// RUN: emit amdgpu-assembly @local_load_assumptions strategy=source
+// RUN: emit amdgpu-assembly @local_load_assumptions
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @local_load_assumptions(%address: reg<amdgpu.vgpr>) asm {
@@ -106,7 +106,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @local_load_assumptions(%address
 
 // ====
 
-// RUN: emit amdgpu-native-words @local_load_assumptions strategy=source
+// RUN: emit amdgpu-native-words @local_load_assumptions
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @local_load_assumptions(%address: reg<amdgpu.vgpr>) asm {

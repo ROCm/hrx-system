@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-native-words @scalar_completion_loop strategy=source
+// RUN: emit amdgpu-native-words @scalar_completion_loop
 
 // The recurring SALU write uses only its scalar-destination dependency field.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -22,7 +22,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @scalar_compl
 
 // ====
 
-// RUN: emit amdgpu-native-words @vector_completion_loop strategy=source
+// RUN: emit amdgpu-native-words @vector_completion_loop
 
 // The recurring VALU write uses only its scalar-destination dependency field.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -48,7 +48,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @vector_compl
 
 // ====
 
-// RUN: emit amdgpu-native-words @reuse strategy=source
+// RUN: emit amdgpu-native-words @reuse
 
 // VALU VCC overwrites select their own dependency field.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -70,7 +70,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value
 
 // ====
 
-// RUN: emit amdgpu-native-words @packet_permutation_loop strategy=source
+// RUN: emit amdgpu-native-words @packet_permutation_loop
 
 // Repeated packet-local copies encode both register fields and completion waits.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -96,7 +96,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @packet_permu
 
 // ====
 
-// RUN: emit amdgpu-native-words @rotate strategy=source
+// RUN: emit amdgpu-native-words @rotate
 
 // Edge moves encode each completion wait before the next move or branch.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}

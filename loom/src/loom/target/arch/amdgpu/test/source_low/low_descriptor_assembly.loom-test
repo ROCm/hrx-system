@@ -18,7 +18,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @vop3_lshl_add_shift_src2_litera
 
 // LLVM MC encodes SRC1=4 in the middle VOP3 word. Keeping the native words
 // here covers the descriptor-to-encoder path that assembly text cannot see.
-// RUN: emit amdgpu-native-words @vop3_lshl_add_shift_src2_literal_native waits=none strategy=source fixed=%value:physical_register:11:1 fixed=%result:physical_register:13:1
+// RUN: emit amdgpu-native-words @vop3_lshl_add_shift_src2_literal_native
 
 amdgpu.target<gfx1100> @target
 
@@ -28,14 +28,14 @@ low.func.def target<amdgpu.rdna3.core>(@target) @vop3_lshl_add_shift_src2_litera
 }
 
 // ----
-0xD646000D
-0x03FD090B
+0xD6460000
+0x03FD0900
 0x00003C00
 0xBFB00000
 
 // ====
 
-// RUN: emit amdgpu-assembly @cdna3_med3_numeric fixed=%a:physical_register:0:1 fixed=%b:physical_register:1:1 fixed=%c:physical_register:2:1 fixed=%result:physical_register:3:1 fixed=%addr:physical_register:4:1 fixed=%output:physical_register:0:2
+// RUN: emit amdgpu-assembly @cdna3_med3_numeric
 
 amdgpu.target<gfx942> @cdna3_target
 
@@ -46,14 +46,14 @@ low.func.def target<amdgpu.cdna3.core>(@cdna3_target) @cdna3_med3_numeric(%a: re
 }
 
 // ----
-  v_med3_f32 v3, v0, v1, v2
-  global_store_dword v4, v3, s[0:1] offset:0
+  v_med3_f32 v0, v0, v1, v2
+  global_store_dword v3, v0, s[0:1] offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @rdna3_med3_numeric fixed=%a:physical_register:0:1 fixed=%b:physical_register:1:1 fixed=%c:physical_register:2:1 fixed=%result:physical_register:3:1 fixed=%addr:physical_register:4:1 fixed=%output:physical_register:0:2
+// RUN: emit amdgpu-assembly @rdna3_med3_numeric
 
 amdgpu.target<gfx1100> @rdna3_target
 
@@ -64,14 +64,14 @@ low.func.def target<amdgpu.rdna3.core>(@rdna3_target) @rdna3_med3_numeric(%a: re
 }
 
 // ----
-  v_med3_f32 v3, v0, v1, v2
-  global_store_b32 v4, v3, s[0:1] offset:0
+  v_med3_f32 v0, v0, v1, v2
+  global_store_b32 v3, v0, s[0:1] offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @rdna4_med3_numeric fixed=%a:physical_register:0:1 fixed=%b:physical_register:1:1 fixed=%c:physical_register:2:1 fixed=%result:physical_register:3:1 fixed=%addr:physical_register:4:1 fixed=%output:physical_register:0:2
+// RUN: emit amdgpu-assembly @rdna4_med3_numeric
 
 amdgpu.target<gfx1200> @rdna4_target
 
@@ -82,14 +82,14 @@ low.func.def target<amdgpu.rdna4.core>(@rdna4_target) @rdna4_med3_numeric(%a: re
 }
 
 // ----
-  v_med3_num_f32 v3, v0, v1, v2
-  global_store_b32 v4, v3, s[0:1] offset:0
+  v_med3_num_f32 v0, v0, v1, v2
+  global_store_b32 v3, v0, s[0:1] offset:0
   s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @wave32_physical_lane_id strategy=source waits=none fixed=%lane:physical_register:11:1
+// RUN: emit amdgpu-assembly @wave32_physical_lane_id
 
 amdgpu.target<gfx1100> @lane_target
 
@@ -99,12 +99,12 @@ low.func.def target<amdgpu.rdna3.core>(@lane_target) @wave32_physical_lane_id() 
 }
 
 // ----
-  v_mbcnt_lo_u32_b32 v11, -1, 0
+  v_mbcnt_lo_u32_b32 v0, -1, 0
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @wave64_physical_lane_id strategy=source waits=none fixed=%low_lane:physical_register:11:1 fixed=%lane:physical_register:13:1
+// RUN: emit amdgpu-assembly @wave64_physical_lane_id
 
 amdgpu.target<gfx950> @lane_target
 
@@ -115,6 +115,6 @@ low.func.def target<amdgpu.cdna4.core>(@lane_target) @wave64_physical_lane_id() 
 }
 
 // ----
-  v_mbcnt_lo_u32_b32 v11, -1, 0
-  v_mbcnt_hi_u32_b32 v13, -1, v11
+  v_mbcnt_lo_u32_b32 v0, -1, 0
+  v_mbcnt_hi_u32_b32 v0, -1, v0
   s_endpgm

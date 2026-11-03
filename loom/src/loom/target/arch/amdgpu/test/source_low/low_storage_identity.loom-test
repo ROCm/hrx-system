@@ -27,7 +27,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @original_read_alias_write(%se
 // ====
 // Source ordering isolates allocation: the snapshot must not coalesce with
 // storage overwritten through another name for the same contents.
-// RUN: emit amdgpu-assembly @ordered_original_read_alias_write strategy=source
+// RUN: emit amdgpu-assembly @ordered_original_read_alias_write
 
 amdgpu.target<gfx1151> @target
 
@@ -41,15 +41,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @ordered_original_read_alias_w
 }
 
 // ----
-  v_mov_b32 v3, v0
+  global_store_b32 v2, v0, s[0:1] offset:0
   v_fmac_f32 v0, v1, v1
-  global_store_b32 v2, v3, s[0:1] offset:0
   global_store_b32 v2, v0, s[0:1] offset:4
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @alias_read_original_write strategy=source
+// RUN: emit amdgpu-assembly @alias_read_original_write
 
 amdgpu.target<gfx1151> @target
 
@@ -63,9 +62,8 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @alias_read_original_write(%se
 }
 
 // ----
-  v_mov_b32 v3, v0
+  global_store_b32 v2, v0, s[0:1] offset:0
   v_fmac_f32 v0, v1, v1
-  global_store_b32 v2, v3, s[0:1] offset:0
   global_store_b32 v2, v0, s[0:1] offset:4
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
@@ -97,7 +95,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @sibling_aliases(%seed: reg<am
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @transitive_aliases strategy=source
+// RUN: emit amdgpu-assembly @transitive_aliases
 
 amdgpu.target<gfx1151> @target
 
@@ -113,16 +111,15 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @transitive_aliases(%seed: reg
 }
 
 // ----
-  v_mov_b32 v3, v0
+  global_store_b32 v2, v0, s[0:1] offset:0
   v_fmac_f32 v0, v1, v1
-  global_store_b32 v2, v3, s[0:1] offset:0
   global_store_b32 v2, v0, s[0:1] offset:4
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 // Creating an alias after the copy does not create a new content version.
-// RUN: emit amdgpu-assembly @read_before_alias_definition strategy=source
+// RUN: emit amdgpu-assembly @read_before_alias_definition
 
 amdgpu.target<gfx1151> @target
 
@@ -136,9 +133,8 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @read_before_alias_definition(
 }
 
 // ----
-  v_mov_b32 v3, v0
+  global_store_b32 v2, v0, s[0:1] offset:0
   v_fmac_f32 v0, v1, v1
-  global_store_b32 v2, v3, s[0:1] offset:0
   global_store_b32 v2, v0, s[0:1] offset:4
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
@@ -146,7 +142,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @read_before_alias_definition(
 // ====
 // An optional copy can give the writer independent storage. It is not a
 // required identity, even when its initial bits match the original.
-// RUN: emit amdgpu-assembly @optional_copy_is_not_identity strategy=source
+// RUN: emit amdgpu-assembly @optional_copy_is_not_identity
 
 amdgpu.target<gfx1151> @target
 
@@ -160,9 +156,8 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @optional_copy_is_not_identity
 }
 
 // ----
-  v_mov_b32 v3, v0
+  global_store_b32 v2, v0, s[0:1] offset:0
   v_fmac_f32 v0, v1, v1
-  global_store_b32 v2, v3, s[0:1] offset:0
   global_store_b32 v2, v0, s[0:1] offset:4
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
@@ -170,7 +165,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @optional_copy_is_not_identity
 // ====
 // A second destructive write belongs to a later content version. Taking the
 // earliest write in the entire tied-storage component would miss this capture.
-// RUN: emit amdgpu-assembly @capture_between_writes strategy=source
+// RUN: emit amdgpu-assembly @capture_between_writes
 
 amdgpu.target<gfx1151> @target
 
@@ -186,17 +181,15 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @capture_between_writes(%seed:
 
 // ----
   v_fmac_f32 v0, v1, v1
-  s_delay_alu instid0(VALU_DEP_1)
-  v_mov_b32 v3, v0
+  global_store_b32 v2, v0, s[0:1] offset:0
   v_fmac_f32 v0, v1, v1
-  global_store_b32 v2, v3, s[0:1] offset:0
   global_store_b32 v2, v0, s[0:1] offset:4
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 // No save is needed when the copy observes the final content version.
-// RUN: emit amdgpu-assembly @copy_after_last_write strategy=source
+// RUN: emit amdgpu-assembly @copy_after_last_write
 
 amdgpu.target<gfx1151> @target
 
@@ -219,7 +212,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @copy_after_last_write(%seed: 
 
 // ====
 // Full-register reads still observe the high half before a partial write.
-// RUN: emit amdgpu-assembly @capture_before_partial_write strategy=source
+// RUN: emit amdgpu-assembly @capture_before_partial_write
 
 amdgpu.target<gfx1151> @target
 
@@ -233,9 +226,8 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @capture_before_partial_write(
 }
 
 // ----
-  v_mov_b32 v2, v0
+  global_store_b32 v1, v0, s[0:1] offset:0
   ds_load_u16_d16_hi v0, v1 offset:0
-  global_store_b32 v1, v2, s[0:1] offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
   global_store_b32 v1, v0, s[0:1] offset:4
   s_waitcnt_vscnt vscnt(0)
@@ -244,7 +236,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @capture_before_partial_write(
 // ====
 // A low-half read precedes ownership transfer in source. The disjoint high-half
 // write needs no save of the old value and adds no wait before the narrow read.
-// RUN: emit amdgpu-assembly @preserved_half_read strategy=source
+// RUN: emit amdgpu-assembly @preserved_half_read
 
 amdgpu.target<gfx1151> @target
 
@@ -323,7 +315,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wave64_required_alias(%seed: re
 // ====
 // Optional writer copies retain their own storage choice even when their
 // source and the saved reader have different required-identity names.
-// RUN: emit amdgpu-assembly @optional_writer_through_sibling_aliases strategy=source
+// RUN: emit amdgpu-assembly @optional_writer_through_sibling_aliases
 
 amdgpu.target<gfx1151> @target
 
@@ -339,9 +331,8 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @optional_writer_through_sibli
 }
 
 // ----
-  v_mov_b32 v3, v0
+  global_store_b32 v2, v0, s[0:1] offset:0
   v_fmac_f32 v0, v1, v1
-  global_store_b32 v2, v3, s[0:1] offset:0
   global_store_b32 v2, v0, s[0:1] offset:4
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
@@ -349,7 +340,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @optional_writer_through_sibli
 // ====
 // Creating the writer's optional storage after the capture gives the same
 // content-preservation obligation with the opposite sibling visitation order.
-// RUN: emit amdgpu-assembly @optional_writer_after_alias_capture strategy=source
+// RUN: emit amdgpu-assembly @optional_writer_after_alias_capture
 
 amdgpu.target<gfx1151> @target
 
@@ -365,11 +356,9 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @optional_writer_after_alias_c
 }
 
 // ----
-  v_mov_b32 v3, v0
-  s_delay_alu instid0(VALU_DEP_1)
-  v_fmac_f32 v3, v1, v1
   global_store_b32 v2, v0, s[0:1] offset:0
-  global_store_b32 v2, v3, s[0:1] offset:4
+  v_fmac_f32 v0, v1, v1
+  global_store_b32 v2, v0, s[0:1] offset:4
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
@@ -393,8 +382,8 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @preserved_half_before_full_wr
 }
 
 // ----
-  v_cvt_f32_f16 v3, v0
   ds_load_u16_d16_hi v0, v2 offset:0
+  v_cvt_f32_f16 v3, v0
   s_waitcnt vmcnt(63) lgkmcnt(0)
   v_fmac_f32 v0, v1, v1
 .Lbb1:

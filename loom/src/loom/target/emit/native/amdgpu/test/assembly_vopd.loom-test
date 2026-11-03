@@ -425,12 +425,12 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vopd_commutes_binar
 }
 
 // ----
-  v_dual_mul_f32 v3, v1, v0 :: v_dual_add_f32 v4, v0, v1
-  v_dual_min_f32 v3, v1, v0 :: v_dual_max_f32 v4, v0, v1
-  v_mov_b32 v3, v1
+  v_mov_b32 v2, v1
   s_delay_alu instid0(VALU_DEP_1)
-  v_dual_mul_f32 v0, v3, v2 :: v_dual_add_f32 v1, v2, v3
-  v_dual_min_f32 v0, v3, v2 :: v_dual_max_f32 v1, v2, v3
+  v_dual_mul_f32 v4, v0, v1 :: v_dual_mul_f32 v5, v3, v2
+  v_dual_add_f32 v4, v0, v1 :: v_dual_add_f32 v5, v3, v2
+  v_dual_min_f32 v4, v0, v1 :: v_dual_min_f32 v5, v3, v2
+  v_dual_max_f32 v0, v0, v1 :: v_dual_max_f32 v3, v3, v2
   s_endpgm
 
 // ====

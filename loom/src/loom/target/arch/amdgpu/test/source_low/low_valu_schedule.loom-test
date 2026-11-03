@@ -2,7 +2,7 @@
 // family uses its own timing model and shared wave issue capacity. These
 // operations cannot form VOPD pairs.
 
-// RUN: emit amdgpu-assembly @independent_chains strategy=resource-stall
+// RUN: emit amdgpu-assembly @independent_chains
 
 amdgpu.target<gfx942> @target
 
@@ -35,7 +35,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @independent_chains(%a: reg<amdg
 
 // ====
 
-// RUN: emit amdgpu-assembly @independent_chains strategy=resource-stall
+// RUN: emit amdgpu-assembly @independent_chains
 
 amdgpu.target<gfx950> @target
 
@@ -68,7 +68,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @independent_chains(%a: reg<amdg
 
 // ====
 
-// RUN: emit amdgpu-assembly @independent_chains strategy=resource-stall
+// RUN: emit amdgpu-assembly @independent_chains
 
 amdgpu.target<gfx9-4-generic> @target
 
@@ -101,7 +101,7 @@ low.func.def target<amdgpu.gfx9_4.generic.core>(@target) @independent_chains(%a:
 
 // ====
 
-// RUN: emit amdgpu-assembly @independent_chains strategy=resource-stall
+// RUN: emit amdgpu-assembly @independent_chains
 
 amdgpu.target<gfx1100> @target
 
@@ -134,7 +134,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @independent_chains(%a: reg<amdg
 
 // ====
 
-// RUN: emit amdgpu-assembly @independent_chains strategy=resource-stall
+// RUN: emit amdgpu-assembly @independent_chains
 
 amdgpu.target<gfx1151> @target
 
@@ -167,7 +167,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @independent_chains(%a: reg<am
 
 // ====
 
-// RUN: emit amdgpu-assembly @independent_chains strategy=resource-stall
+// RUN: emit amdgpu-assembly @independent_chains
 
 amdgpu.target<gfx11-generic> @target
 
@@ -200,7 +200,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) @independent_chains(%a: 
 
 // ====
 
-// RUN: emit amdgpu-assembly @independent_chains strategy=resource-stall
+// RUN: emit amdgpu-assembly @independent_chains
 
 amdgpu.target<gfx1170> @target
 
@@ -233,7 +233,7 @@ low.func.def target<amdgpu.rdna4m.core>(@target) @independent_chains(%a: reg<amd
 
 // ====
 
-// RUN: emit amdgpu-assembly @independent_chains strategy=resource-stall
+// RUN: emit amdgpu-assembly @independent_chains
 
 amdgpu.target<gfx1200> @target
 
@@ -266,7 +266,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @independent_chains(%a: reg<amdg
 
 // ====
 
-// RUN: emit amdgpu-assembly @independent_chains strategy=resource-stall
+// RUN: emit amdgpu-assembly @independent_chains
 
 amdgpu.target<gfx12-generic> @target
 
@@ -299,7 +299,7 @@ low.func.def target<amdgpu.gfx12.generic.core>(@target) @independent_chains(%a: 
 
 // ====
 
-// RUN: emit amdgpu-assembly @independent_chains strategy=resource-stall
+// RUN: emit amdgpu-assembly @independent_chains
 
 amdgpu.target<gfx1250> @target
 
@@ -332,7 +332,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @independent_chains(%a: 
 
 // ====
 
-// RUN: emit amdgpu-assembly @independent_chains strategy=resource-stall
+// RUN: emit amdgpu-assembly @independent_chains
 
 amdgpu.target<gfx1250-a0> @target
 
@@ -365,7 +365,7 @@ low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@target) @independent_chains(%
 
 // ====
 
-// RUN: emit amdgpu-assembly @independent_chains strategy=resource-stall
+// RUN: emit amdgpu-assembly @independent_chains
 
 amdgpu.target<gfx1251> @target
 
@@ -398,7 +398,7 @@ low.func.def target<amdgpu.rdna4.gfx1251.core>(@target) @independent_chains(%a: 
 
 // ====
 
-// RUN: emit amdgpu-assembly @independent_chains strategy=resource-stall
+// RUN: emit amdgpu-assembly @independent_chains
 
 amdgpu.target<gfx12-5-generic> @target
 

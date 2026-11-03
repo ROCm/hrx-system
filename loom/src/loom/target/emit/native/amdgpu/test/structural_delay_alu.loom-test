@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-wait-state-plan @identity_edge strategy=source
+// RUN: emit amdgpu-wait-state-plan @identity_edge
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @identity_edge(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %accumulator: reg<amdgpu.vgpr x8>, %step: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.sgpr>) asm {
@@ -13,7 +13,7 @@ amdgpu.wait_state_plan states=0 progress=2 hazards=0
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @coalesced_input_keeps_producer strategy=source
+// RUN: emit amdgpu-wait-state-plan @coalesced_input_keeps_producer
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @coalesced_input_keeps_producer(%input: reg<amdgpu.vgpr>, %filler: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -30,7 +30,7 @@ state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n3/o3 produ
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @cycle_ignores_unread_producer strategy=source
+// RUN: emit amdgpu-wait-state-plan @cycle_ignores_unread_producer
 amdgpu.target<gfx1151> @target
 
 // The exchange reads only v1 and v2; the producer in v0 is not an input.
@@ -46,7 +46,7 @@ amdgpu.wait_state_plan states=0 progress=4 hazards=0
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @coalesced_input_keeps_producer_rdna4 strategy=source
+// RUN: emit amdgpu-wait-state-plan @coalesced_input_keeps_producer_rdna4
 amdgpu.target<gfx1200> @target
 
 low.func.def target<amdgpu.rdna4.core>(@target) @coalesced_input_keeps_producer_rdna4(%input: reg<amdgpu.vgpr>, %filler: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -63,7 +63,7 @@ state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n3/o3 produ
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @identity_edge_retains_matrix_wait strategy=source
+// RUN: emit amdgpu-wait-state-plan @identity_edge_retains_matrix_wait
 amdgpu.target<gfx942> @target
 
 // Coalesced block arguments carry the pending result window to the return.
@@ -80,7 +80,7 @@ state[0] reason=matrix_result_use action=amdgpu.s_nop at=b1:n2/o0 producer=n0 co
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @conditional_branch_reads_scc strategy=source
+// RUN: emit amdgpu-wait-state-plan @conditional_branch_reads_scc
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @conditional_branch_reads_scc(%index: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>) asm {
@@ -98,7 +98,7 @@ state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n1/o1 produ
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @result_operand strategy=source
+// RUN: emit amdgpu-wait-state-plan @result_operand
 amdgpu.target<gfx1201> @target
 
 low.func.def target<amdgpu.rdna4.core>(@target) @result_operand(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr>) asm {

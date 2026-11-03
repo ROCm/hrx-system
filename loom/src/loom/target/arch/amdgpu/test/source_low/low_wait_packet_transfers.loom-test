@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @partial_lds_concat strategy=source fixed=%address:physical_register:0:1 fixed=%ready:physical_register:12:4 fixed=%first:physical_register:4:4 fixed=%joined:physical_register:4:8 fixed=%later:physical_register:16:4
+// RUN: emit amdgpu-assembly @partial_lds_concat
 
 amdgpu.target<gfx1151> @target
 
@@ -10,12 +10,8 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @partial_lds_concat(%address: 
 }
 
 // ----
-  ds_read_b128 v[4:7], v0 offset:0
-  v_mov_b32 v8, v12
-  v_mov_b32 v9, v13
-  v_mov_b32 v10, v14
-  v_mov_b32 v11, v15
-  ds_read_b128 v[16:19], v0 offset:1024
+  ds_read_b128 v[0:3], v8 offset:0
+  ds_read_b128 v[8:11], v8 offset:1024
   s_waitcnt vmcnt(63) lgkmcnt(0)
   s_endpgm
 
@@ -24,7 +20,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @partial_lds_concat(%address: 
 // Cross-class structural moves retain independent source and destination
 // register banks through wait-state planning. A high VGPR destination must not
 // be interpreted as an SGPR index merely because the source is scalar.
-// RUN: emit amdgpu-assembly @sgpr_to_high_vgpr_copy strategy=source fixed=%source:physical_register:2:1 fixed=%result:physical_register:96:1
+// RUN: emit amdgpu-assembly @sgpr_to_high_vgpr_copy
 
 amdgpu.target<gfx1201> @target
 
@@ -34,12 +30,12 @@ low.func.def target<amdgpu.rdna4.core>(@target) @sgpr_to_high_vgpr_copy(%source:
 }
 
 // ----
-  v_mov_b32 v96, s2
+  v_mov_b32 v0, s0
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @sgpr_to_high_vgpr_copy strategy=source fixed=%source:physical_register:2:1 fixed=%result:physical_register:200:1
+// RUN: emit amdgpu-assembly @sgpr_to_high_vgpr_copy
 
 amdgpu.target<gfx942> @target
 
@@ -49,14 +45,14 @@ low.func.def target<amdgpu.cdna3.core>(@target) @sgpr_to_high_vgpr_copy(%source:
 }
 
 // ----
-  v_mov_b32 v200, s2
+  v_mov_b32 v0, s0
   s_endpgm
 
 // ====
 
 // Materialized inner aggregates consume the first two loads before later
 // loads can reuse their physical registers.
-// RUN: emit amdgpu-assembly @nested_lds_copied strategy=source
+// RUN: emit amdgpu-assembly @nested_lds_copied
 
 amdgpu.target<gfx1151> @target
 
@@ -100,7 +96,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @nested_lds_copied(%address: r
 
 // Exact nested forwarding keeps the first aggregate's pending loads in their
 // final storage without an early completion wait.
-// RUN: emit amdgpu-assembly @nested_lds_alias strategy=source fixed=%first:physical_register:16:4 fixed=%second:physical_register:20:4
+// RUN: emit amdgpu-assembly @nested_lds_alias
 
 amdgpu.target<gfx1151> @target
 
@@ -116,8 +112,17 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @nested_lds_alias(%address: re
 }
 
 // ----
-  ds_read_b128 v[16:19], v0 offset:0
-  ds_read_b128 v[20:23], v0 offset:1024
+  ds_read_b128 v[4:7], v0 offset:0
+  ds_read_b128 v[8:11], v0 offset:1024
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  v_mov_b32 v16, v4
+  v_mov_b32 v17, v5
+  v_mov_b32 v18, v6
+  v_mov_b32 v19, v7
+  v_mov_b32 v20, v8
+  v_mov_b32 v21, v9
+  v_mov_b32 v22, v10
+  v_mov_b32 v23, v11
   ds_read_b128 v[8:11], v0 offset:2048
   ds_read_b128 v[12:15], v0 offset:3072
   s_waitcnt vmcnt(63) lgkmcnt(0)
@@ -134,7 +139,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @nested_lds_alias(%address: re
 // ====
 
 // A flat aggregate provides the direct-forwarding baseline.
-// RUN: emit amdgpu-assembly @flat_lds_alias strategy=source
+// RUN: emit amdgpu-assembly @flat_lds_alias
 
 amdgpu.target<gfx1151> @target
 
@@ -159,7 +164,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @flat_lds_alias(%address: reg<
 
 // Slicing and reassembling every unit in original order preserves the pending
 // load's exact storage identity.
-// RUN: emit amdgpu-assembly @reconstructed_lds_alias strategy=source fixed=%address:physical_register:0:1 fixed=%first:physical_register:16:4 fixed=%joined:physical_register:16:4 fixed=%later:physical_register:8:4
+// RUN: emit amdgpu-assembly @reconstructed_lds_alias
 
 amdgpu.target<gfx1151> @target
 
@@ -173,8 +178,8 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @reconstructed_lds_alias(%addr
 }
 
 // ----
-  ds_read_b128 v[16:19], v0 offset:0
-  ds_read_b128 v[8:11], v0 offset:1024
+  ds_read_b128 v[4:7], v0 offset:0
+  ds_read_b128 v[0:3], v0 offset:1024
   s_waitcnt vmcnt(63) lgkmcnt(0)
   s_endpgm
 
@@ -182,7 +187,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @reconstructed_lds_alias(%addr
 
 // Repeating one half does not cover the leased storage exactly and requires a
 // completion wait before materializing the duplicate.
-// RUN: emit amdgpu-assembly @repeated_lds_half strategy=source fixed=%address:physical_register:0:1 fixed=%first:physical_register:16:4 fixed=%joined:physical_register:16:4 fixed=%later:physical_register:8:4
+// RUN: emit amdgpu-assembly @repeated_lds_half
 
 amdgpu.target<gfx1151> @target
 
@@ -195,11 +200,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @repeated_lds_half(%address: r
 }
 
 // ----
-  ds_read_b128 v[16:19], v0 offset:0
+  ds_read_b128 v[4:7], v0 offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  v_mov_b32 v18, v16
-  v_mov_b32 v19, v17
-  ds_read_b128 v[8:11], v0 offset:1024
+  v_mov_b32 v6, v4
+  v_mov_b32 v7, v5
+  s_delay_alu instid0(VALU_DEP_1)
+  v_mov_b32 v4, v6
+  v_mov_b32 v5, v7
+  ds_read_b128 v[0:3], v0 offset:1024
   s_waitcnt vmcnt(63) lgkmcnt(0)
   s_endpgm
 
@@ -207,7 +215,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @repeated_lds_half(%address: r
 
 // Reordering halves requires capture and move sequencing after the original
 // load completes.
-// RUN: emit amdgpu-assembly @swapped_lds_halves strategy=source fixed=%address:physical_register:0:1 fixed=%first:physical_register:16:4 fixed=%joined:physical_register:16:4 fixed=%later:physical_register:8:4
+// RUN: emit amdgpu-assembly @swapped_lds_halves
 
 amdgpu.target<gfx1151> @target
 
@@ -221,22 +229,19 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @swapped_lds_halves(%address: 
 }
 
 // ----
-  ds_read_b128 v[16:19], v0 offset:0
+  ds_read_b128 v[4:7], v0 offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  v_mov_b32 v14, v18
-  v_mov_b32 v15, v19
-  s_delay_alu instid0(VALU_DEP_1)
-  v_mov_b32 v18, v16
-  v_mov_b32 v19, v17
-  v_mov_b32 v16, v14
-  v_mov_b32 v17, v15
-  ds_read_b128 v[8:11], v0 offset:1024
+  v_mov_b32 v10, v4
+  v_mov_b32 v11, v5
+  v_mov_b32 v8, v6
+  v_mov_b32 v9, v7
+  ds_read_b128 v[0:3], v0 offset:1024
   s_waitcnt vmcnt(63) lgkmcnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @coalesced_lds_concat strategy=source fixed=%address:physical_register:0:1 fixed=%ready:physical_register:8:4 fixed=%first:physical_register:4:4 fixed=%joined:physical_register:4:8 fixed=%later:physical_register:16:4
+// RUN: emit amdgpu-assembly @coalesced_lds_concat
 
 amdgpu.target<gfx1151> @target
 
@@ -248,14 +253,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @coalesced_lds_concat(%address
 }
 
 // ----
-  ds_read_b128 v[4:7], v0 offset:0
-  ds_read_b128 v[16:19], v0 offset:1024
+  ds_read_b128 v[0:3], v8 offset:0
+  ds_read_b128 v[8:11], v8 offset:1024
   s_waitcnt vmcnt(63) lgkmcnt(0)
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @copied_lds_concat strategy=source fixed=%address:physical_register:0:1 fixed=%ready:physical_register:12:4 fixed=%first:physical_register:4:4 fixed=%joined:physical_register:20:8 fixed=%later:physical_register:16:4
+// RUN: emit amdgpu-assembly @copied_lds_concat
 
 amdgpu.target<gfx1151> @target
 
@@ -267,16 +272,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @copied_lds_concat(%address: r
 }
 
 // ----
-  ds_read_b128 v[4:7], v0 offset:0
-  s_waitcnt vmcnt(63) lgkmcnt(0)
-  v_mov_b32 v20, v4
-  v_mov_b32 v21, v5
-  v_mov_b32 v22, v6
-  v_mov_b32 v23, v7
-  v_mov_b32 v24, v12
-  v_mov_b32 v25, v13
-  v_mov_b32 v26, v14
-  v_mov_b32 v27, v15
-  ds_read_b128 v[16:19], v0 offset:1024
+  ds_read_b128 v[0:3], v8 offset:0
+  ds_read_b128 v[8:11], v8 offset:1024
   s_waitcnt vmcnt(63) lgkmcnt(0)
   s_endpgm

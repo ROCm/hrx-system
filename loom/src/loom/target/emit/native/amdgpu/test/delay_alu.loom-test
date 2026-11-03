@@ -1,5 +1,5 @@
 // One native VOPD producer needs one hint across separate uses of its results.
-// RUN: emit amdgpu-assembly @split_vopd_results strategy=source
+// RUN: emit amdgpu-assembly @split_vopd_results
 
 amdgpu.target<gfx1100> @target
 
@@ -21,7 +21,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @split_vopd_results(%a: reg<amdg
 // ====
 
 // Completing a VALU producer leaves the older independent VALU producer outstanding.
-// RUN: emit amdgpu-assembly @independent_valu_producer strategy=source
+// RUN: emit amdgpu-assembly @independent_valu_producer
 
 amdgpu.target<gfx1100> @target
 
@@ -40,16 +40,16 @@ low.func.def target<amdgpu.rdna3.core>(@target) @independent_valu_producer(%a: r
   v_dual_add_f32 v0, v0, v1 :: v_dual_mul_f32 v3, v3, v2
   s_delay_alu instid0(VALU_DEP_1)
   v_readfirstlane_b32 s1, v0
-  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_3)
-  s_add_u32 s0, s0, s1
   v_add_f32 v0, v3, v3
+  s_delay_alu instid0(VALU_DEP_2) | instid1(VALU_DEP_4)
+  s_add_u32 s0, s0, s1
   s_endpgm
 
 // ====
 
 // Both encoded selectors complete their producers, including unconsumed results.
 // Intervening VALU issues advance the retained completion identities.
-// RUN: emit amdgpu-assembly @two_vopd_producers strategy=source
+// RUN: emit amdgpu-assembly @two_vopd_producers
 
 amdgpu.target<gfx1100> @target
 
@@ -65,19 +65,19 @@ low.func.def target<amdgpu.rdna3.core>(@target) @two_vopd_producers(%a: reg<amdg
 }
 
 // ----
-  v_dual_add_f32 v4, v0, v1 :: v_dual_mul_f32 v5, v3, v2
-  v_dual_add_f32 v0, v0, v1 :: v_dual_mul_f32 v3, v3, v2
-  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
-  v_add_f32 v0, v4, v0
-  s_delay_alu instid0(VALU_DEP_1)
-  v_readfirstlane_b32 s0, v0
-  v_add_f32 v0, v5, v3
+  v_dual_add_f32 v4, v1, v0 :: v_dual_add_f32 v5, v0, v1
+  v_dual_mul_f32 v0, v3, v2 :: v_dual_mul_f32 v1, v2, v3
+  s_delay_alu instid0(VALU_DEP_2) | instskip(NEXT) | instid1(VALU_DEP_1)
+  v_add_f32 v2, v4, v5
+  v_readfirstlane_b32 s0, v2
+  s_delay_alu instid0(VALU_DEP_3)
+  v_add_f32 v0, v0, v1
   s_endpgm
 
 // ====
 
 // A new memory-separated epoch must not reuse earlier completion bits.
-// RUN: emit amdgpu-assembly @new_producer_epoch strategy=source
+// RUN: emit amdgpu-assembly @new_producer_epoch
 
 amdgpu.target<gfx1100> @target
 
@@ -94,11 +94,11 @@ low.func.def target<amdgpu.rdna3.core>(@target) @new_producer_epoch(%a: reg<amdg
 }
 
 // ----
-  v_dual_add_f32 v4, v0, v1 :: v_dual_mul_f32 v5, v3, v2
+  v_dual_add_f32 v4, v3, v2 :: v_dual_mul_f32 v5, v0, v1
   s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_2) | instid1(VALU_DEP_1)
   v_readfirstlane_b32 s0, v4
-  ds_write_b32 v0, v5 offset:0
-  v_dual_add_f32 v0, v0, v1 :: v_dual_mul_f32 v3, v3, v2
-  v_readfirstlane_b32 s1, v0
-  v_add_f32 v0, v3, v3
+  v_dual_mul_f32 v0, v0, v1 :: v_dual_add_f32 v7, v3, v2
+  ds_write_b32 v3, v5 offset:0
+  v_readfirstlane_b32 s1, v7
+  v_add_f32 v0, v0, v0
   s_endpgm

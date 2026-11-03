@@ -1,7 +1,7 @@
 // Scalar input capture and result readiness are separate hardware events.
 // Fixed assignments force the overwrite; available spare SGPRs cannot hide it.
 
-// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx942 strategy=source fixed=%resource:physical_register:32:4 fixed=%offset:physical_register:40:1 fixed=%next_offset:physical_register:40:1 fixed=%first:physical_register:8:1 fixed=%second:physical_register:12:1
+// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx942
 
 amdgpu.target<gfx942> @target
 
@@ -13,14 +13,15 @@ low.func.def target<amdgpu.cdna3.core>(@target) @buffer_scalar_capture_gfx942(%r
 }
 
 // ----
-  buffer_load_dword v8, v0, s[32:35], s40 offen offset:0
-  s_add_u32 s40, s40, 4
-  buffer_load_dword v12, v0, s[32:35], s40 offen offset:0
+  s_add_u32 s1, s0, 4
+  buffer_load_dword v1, v0, s[4:7], s0 offen offset:0
+  s_nop 0
+  buffer_load_dword v0, v0, s[4:7], s1 offen offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx950 strategy=source fixed=%resource:physical_register:32:4 fixed=%offset:physical_register:40:1 fixed=%next_offset:physical_register:40:1 fixed=%first:physical_register:8:1 fixed=%second:physical_register:12:1
+// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx950
 
 amdgpu.target<gfx950> @target
 
@@ -32,14 +33,15 @@ low.func.def target<amdgpu.cdna4.core>(@target) @buffer_scalar_capture_gfx950(%r
 }
 
 // ----
-  buffer_load_dword v8, v0, s[32:35], s40 offen offset:0
-  s_add_u32 s40, s40, 4
-  buffer_load_dword v12, v0, s[32:35], s40 offen offset:0
+  s_add_u32 s1, s0, 4
+  buffer_load_dword v1, v0, s[4:7], s0 offen offset:0
+  s_nop 0
+  buffer_load_dword v0, v0, s[4:7], s1 offen offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx9_4_generic strategy=source fixed=%resource:physical_register:32:4 fixed=%offset:physical_register:40:1 fixed=%next_offset:physical_register:40:1 fixed=%first:physical_register:8:1 fixed=%second:physical_register:12:1
+// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx9_4_generic
 
 amdgpu.target<gfx9-4-generic> @target
 
@@ -51,14 +53,15 @@ low.func.def target<amdgpu.gfx9_4.generic.core>(@target) @buffer_scalar_capture_
 }
 
 // ----
-  buffer_load_dword v8, v0, s[32:35], s40 offen offset:0
-  s_add_u32 s40, s40, 4
-  buffer_load_dword v12, v0, s[32:35], s40 offen offset:0
+  s_add_u32 s1, s0, 4
+  buffer_load_dword v1, v0, s[4:7], s0 offen offset:0
+  s_nop 0
+  buffer_load_dword v0, v0, s[4:7], s1 offen offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx1100 strategy=source fixed=%resource:physical_register:32:4 fixed=%offset:physical_register:40:1 fixed=%next_offset:physical_register:40:1 fixed=%first:physical_register:8:1 fixed=%second:physical_register:12:1
+// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx1100
 
 amdgpu.target<gfx1100> @target
 
@@ -70,14 +73,14 @@ low.func.def target<amdgpu.rdna3.core>(@target) @buffer_scalar_capture_gfx1100(%
 }
 
 // ----
-  buffer_load_dword v8, v0, s[32:35], s40 offen offset:0
-  s_add_u32 s40, s40, 4
-  buffer_load_dword v12, v0, s[32:35], s40 offen offset:0
+  s_add_u32 s1, s0, 4
+  buffer_load_dword v1, v0, s[4:7], s0 offen offset:0
+  buffer_load_dword v0, v0, s[4:7], s1 offen offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx11_generic strategy=source fixed=%resource:physical_register:32:4 fixed=%offset:physical_register:40:1 fixed=%next_offset:physical_register:40:1 fixed=%first:physical_register:8:1 fixed=%second:physical_register:12:1
+// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx11_generic
 
 amdgpu.target<gfx11-generic> @target
 
@@ -89,14 +92,14 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) @buffer_scalar_capture_g
 }
 
 // ----
-  buffer_load_dword v8, v0, s[32:35], s40 offen offset:0
-  s_add_u32 s40, s40, 4
-  buffer_load_dword v12, v0, s[32:35], s40 offen offset:0
+  s_add_u32 s1, s0, 4
+  buffer_load_dword v1, v0, s[4:7], s0 offen offset:0
+  buffer_load_dword v0, v0, s[4:7], s1 offen offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx1151 strategy=source fixed=%resource:physical_register:32:4 fixed=%offset:physical_register:40:1 fixed=%next_offset:physical_register:40:1 fixed=%first:physical_register:8:1 fixed=%second:physical_register:12:1
+// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx1151
 
 amdgpu.target<gfx1151> @target
 
@@ -108,14 +111,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @buffer_scalar_capture_gfx1151
 }
 
 // ----
-  buffer_load_dword v8, v0, s[32:35], s40 offen offset:0
-  s_add_u32 s40, s40, 4
-  buffer_load_dword v12, v0, s[32:35], s40 offen offset:0
+  s_add_u32 s1, s0, 4
+  buffer_load_dword v1, v0, s[4:7], s0 offen offset:0
+  buffer_load_dword v0, v0, s[4:7], s1 offen offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx1170 strategy=source fixed=%resource:physical_register:32:4 fixed=%offset:physical_register:40:1 fixed=%next_offset:physical_register:40:1 fixed=%first:physical_register:8:1 fixed=%second:physical_register:12:1
+// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx1170
 
 amdgpu.target<gfx1170> @target
 
@@ -127,14 +130,14 @@ low.func.def target<amdgpu.rdna4m.core>(@target) @buffer_scalar_capture_gfx1170(
 }
 
 // ----
-  buffer_load_dword v8, v0, s[32:35], s40 offen offset:0
-  s_add_u32 s40, s40, 4
-  buffer_load_dword v12, v0, s[32:35], s40 offen offset:0
+  s_add_u32 s1, s0, 4
+  buffer_load_dword v1, v0, s[4:7], s0 offen offset:0
+  buffer_load_dword v0, v0, s[4:7], s1 offen offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx1201 strategy=source fixed=%resource:physical_register:32:4 fixed=%offset:physical_register:40:1 fixed=%next_offset:physical_register:40:1 fixed=%first:physical_register:8:1 fixed=%second:physical_register:12:1
+// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx1201
 
 amdgpu.target<gfx1201> @target
 
@@ -146,14 +149,14 @@ low.func.def target<amdgpu.rdna4.core>(@target) @buffer_scalar_capture_gfx1201(%
 }
 
 // ----
-  buffer_load_dword v8, v0, s[32:35], s40 offen offset:0
-  s_add_u32 s40, s40, 4
-  buffer_load_dword v12, v0, s[32:35], s40 offen offset:0
+  s_add_u32 s1, s0, 4
+  buffer_load_dword v1, v0, s[4:7], s0 offen offset:0
+  buffer_load_dword v0, v0, s[4:7], s1 offen offset:0
   s_wait_loadcnt loadcnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx12_generic strategy=source fixed=%resource:physical_register:32:4 fixed=%offset:physical_register:40:1 fixed=%next_offset:physical_register:40:1 fixed=%first:physical_register:8:1 fixed=%second:physical_register:12:1
+// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx12_generic
 
 amdgpu.target<gfx12-generic> @target
 
@@ -165,14 +168,14 @@ low.func.def target<amdgpu.gfx12.generic.core>(@target) @buffer_scalar_capture_g
 }
 
 // ----
-  buffer_load_dword v8, v0, s[32:35], s40 offen offset:0
-  s_add_u32 s40, s40, 4
-  buffer_load_dword v12, v0, s[32:35], s40 offen offset:0
+  s_add_u32 s1, s0, 4
+  buffer_load_dword v1, v0, s[4:7], s0 offen offset:0
+  buffer_load_dword v0, v0, s[4:7], s1 offen offset:0
   s_wait_loadcnt loadcnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx12_5_generic strategy=source fixed=%resource:physical_register:32:4 fixed=%offset:physical_register:40:1 fixed=%next_offset:physical_register:40:1 fixed=%first:physical_register:8:1 fixed=%second:physical_register:12:1
+// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx12_5_generic
 
 amdgpu.target<gfx12-5-generic> @target
 
@@ -184,15 +187,14 @@ low.func.def target<amdgpu.gfx12_5.generic.core>(@target) @buffer_scalar_capture
 }
 
 // ----
-  buffer_load_dword v8, v0, s[32:35], s40 offen offset:0
-  s_wait_xcnt xcnt(0)
-  s_add_u32 s40, s40, 4
-  buffer_load_dword v12, v0, s[32:35], s40 offen offset:0
+  s_add_u32 s1, s0, 4
+  buffer_load_dword v1, v0, s[4:7], s0 offen offset:0
+  buffer_load_dword v2, v0, s[4:7], s1 offen offset:0
   s_wait_loadcnt loadcnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx1250 strategy=source fixed=%resource:physical_register:32:4 fixed=%offset:physical_register:40:1 fixed=%next_offset:physical_register:40:1 fixed=%first:physical_register:8:1 fixed=%second:physical_register:12:1
+// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx1250
 
 amdgpu.target<gfx1250> @target
 
@@ -204,15 +206,14 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @buffer_scalar_capture_g
 }
 
 // ----
-  buffer_load_dword v8, v0, s[32:35], s40 offen offset:0
-  s_wait_xcnt xcnt(0)
-  s_add_u32 s40, s40, 4
-  buffer_load_dword v12, v0, s[32:35], s40 offen offset:0
+  s_add_u32 s1, s0, 4
+  buffer_load_dword v1, v0, s[4:7], s0 offen offset:0
+  buffer_load_dword v2, v0, s[4:7], s1 offen offset:0
   s_wait_loadcnt loadcnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx1250_a0 strategy=source fixed=%resource:physical_register:32:4 fixed=%offset:physical_register:40:1 fixed=%next_offset:physical_register:40:1 fixed=%first:physical_register:8:1 fixed=%second:physical_register:12:1
+// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx1250_a0
 
 amdgpu.target<gfx1250-a0> @target
 
@@ -224,15 +225,14 @@ low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@target) @buffer_scalar_captur
 }
 
 // ----
-  buffer_load_dword v8, v0, s[32:35], s40 offen offset:0
-  s_wait_xcnt xcnt(0)
-  s_add_u32 s40, s40, 4
-  buffer_load_dword v12, v0, s[32:35], s40 offen offset:0
+  s_add_u32 s1, s0, 4
+  buffer_load_dword v1, v0, s[4:7], s0 offen offset:0
+  buffer_load_dword v2, v0, s[4:7], s1 offen offset:0
   s_wait_loadcnt loadcnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx1251 strategy=source fixed=%resource:physical_register:32:4 fixed=%offset:physical_register:40:1 fixed=%next_offset:physical_register:40:1 fixed=%first:physical_register:8:1 fixed=%second:physical_register:12:1
+// RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx1251
 
 amdgpu.target<gfx1251> @target
 
@@ -244,15 +244,14 @@ low.func.def target<amdgpu.rdna4.gfx1251.core>(@target) @buffer_scalar_capture_g
 }
 
 // ----
-  buffer_load_dword v8, v0, s[32:35], s40 offen offset:0
-  s_wait_xcnt xcnt(0)
-  s_add_u32 s40, s40, 4
-  buffer_load_dword v12, v0, s[32:35], s40 offen offset:0
+  s_add_u32 s1, s0, 4
+  buffer_load_dword v1, v0, s[4:7], s0 offen offset:0
+  buffer_load_dword v2, v0, s[4:7], s1 offen offset:0
   s_wait_loadcnt loadcnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @global_atomic_scalar_capture strategy=source fixed=%base:physical_register:32:2 fixed=%replacement:physical_register:32:1 fixed=%old:physical_register:8:1
+// RUN: emit amdgpu-assembly @global_atomic_scalar_capture
 
 amdgpu.target<gfx942> @target
 
@@ -263,13 +262,13 @@ low.func.def target<amdgpu.cdna3.core>(@target) @global_atomic_scalar_capture(%b
 }
 
 // ----
-  global_atomic_add v8, v0, v1, s[32:33] offset:0 sc0
-  s_mov_b32 s32, 0
+  global_atomic_add v0, v0, v1, s[0:1] offset:0 sc0
+  s_mov_b32 s0, 0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @global_reduce_scalar_capture strategy=source fixed=%base:physical_register:32:2 fixed=%replacement:physical_register:32:1
+// RUN: emit amdgpu-assembly @global_reduce_scalar_capture
 
 amdgpu.target<gfx950> @target
 
@@ -280,13 +279,13 @@ low.func.def target<amdgpu.cdna4.core>(@target) @global_reduce_scalar_capture(%b
 }
 
 // ----
-  global_atomic_add v0, v1, s[32:33] offset:0
-  s_mov_b32 s32, 0
+  global_atomic_add v0, v1, s[0:1] offset:0
+  s_mov_b32 s0, 0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_atomic_scalar_capture strategy=source fixed=%base:physical_register:32:4 fixed=%replacement:physical_register:32:1 fixed=%old:physical_register:8:1
+// RUN: emit amdgpu-assembly @buffer_atomic_scalar_capture
 
 amdgpu.target<gfx1151> @target
 
@@ -297,13 +296,13 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @buffer_atomic_scalar_capture(
 }
 
 // ----
-  buffer_atomic_add_u32 v8, v0, s[32:35], s0 offen offset:0 glc
-  s_mov_b32 s32, 0
+  buffer_atomic_add_u32 v1, v0, s[0:3], s4 offen offset:0 glc
+  s_mov_b32 s0, 0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @global_store_scalar_capture strategy=source fixed=%base:physical_register:32:2 fixed=%replacement:physical_register:32:1
+// RUN: emit amdgpu-assembly @global_store_scalar_capture
 
 amdgpu.target<gfx1201> @target
 
@@ -314,13 +313,13 @@ low.func.def target<amdgpu.rdna4.core>(@target) @global_store_scalar_capture(%ba
 }
 
 // ----
-  global_store_b32 v0, v1, s[32:33] offset:0
-  s_mov_b32 s32, 0
+  global_store_b32 v0, v1, s[0:1] offset:0
+  s_mov_b32 s0, 0
   s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @global_store_scalar_capture_xcnt strategy=source fixed=%base:physical_register:32:2 fixed=%replacement:physical_register:32:1
+// RUN: emit amdgpu-assembly @global_store_scalar_capture_xcnt
 
 amdgpu.target<gfx1250> @target
 
@@ -331,14 +330,13 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @global_store_scalar_cap
 }
 
 // ----
-  global_store_b32 v0, v1, s[32:33] offset:0
-  s_wait_xcnt xcnt(0)
-  s_mov_b32 s32, 0
+  global_store_b32 v0, v1, s[0:1] offset:0
+  s_mov_b32 s2, 0
   s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @ldsdma_scalar_capture strategy=source fixed=%base:physical_register:32:2 fixed=%replacement:physical_register:32:1
+// RUN: emit amdgpu-assembly @ldsdma_scalar_capture
 
 amdgpu.target<gfx942> @target
 
@@ -350,15 +348,15 @@ low.func.def target<amdgpu.cdna3.core>(@target) @ldsdma_scalar_capture(%base: re
 }
 
 // ----
-  global_load_lds_dword v0, s[32:33] offset:0
-  s_mov_b32 s32, 0
+  global_load_lds_dword v0, s[0:1] offset:0
+  s_mov_b32 s0, 0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   ds_read_b32 v0, v0 offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @tensor_dgroup_capture strategy=source fixed=%d0:physical_register:0:4 fixed=%d1:physical_register:8:8 fixed=%replacement:physical_register:0:1
+// RUN: emit amdgpu-assembly @tensor_dgroup_capture
 
 amdgpu.target<gfx1250> @target
 

@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @carried_loads_preserve_address_parts strategy=source
+// RUN: emit amdgpu-assembly @carried_loads_preserve_address_parts
 
 amdgpu.target<gfx1151> @target
 
@@ -41,46 +41,48 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @carried_loads_preserve_addres
 // Reserving the next concat must not drain earlier global loads.
 // The loop consumes carried results with the waits required by their order.
 // ----
+  global_load_b32 v1, v0, s[0:1] offset:0
+  global_load_b32 v2, v0, s[0:1] offset:4
+  global_load_b32 v3, v0, s[0:1] offset:8
+  v_mov_b32 v4, 0
   s_mov_b32 s3, 0
   s_mov_b32 s4, 16
-  v_mov_b32 v1, 0
-  global_load_b32 v2, v0, s[0:1] offset:0
-  global_load_b32 v3, v0, s[0:1] offset:4
-  global_load_b32 v4, v0, s[0:1] offset:8
   s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_mov_b32 v5, v3
   s_mov_b32 s5, s3
+  v_mov_b32 v3, v1
 .Lbb1:
   s_cmp_lt_i32 s5, s2
   s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb3
 .Lbb2:
   s_waitcnt vmcnt(1) lgkmcnt(63)
-  v_add_u32 v2, v2, v3
-  s_waitcnt vmcnt(0) lgkmcnt(63)
-  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
-  v_add_u32 v2, v2, v4
-  v_add_u32 v1, v2, v1
-  global_load_b32 v2, v0, s[0:1] offset:12
+  v_add_u32 v1, v3, v2
   s_add_u32 s6, s0, s4
   s_addc_u32 s7, s1, s3
-  global_load_b32 v3, v0, s[6:7] offset:0
-  s_add_u32 s6, s0, s4
-  s_addc_u32 s7, s1, s4
-  global_load_b32 v4, v0, s[6:7] offset:0
+  s_add_u32 s8, s0, s4
+  s_addc_u32 s9, s1, s4
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v1, v1, v5
+  global_load_b32 v2, v0, s[6:7] offset:0
+  global_load_b32 v3, v0, s[0:1] offset:12
   s_add_u32 s5, s5, s4
+  global_load_b32 v5, v0, s[8:9] offset:0
+  v_add_u32 v4, v1, v4
   s_branch .Lbb1
 .Lbb3:
   s_waitcnt vmcnt(1) lgkmcnt(63)
-  v_add_u32 v0, v2, v3
+  v_add_u32 v0, v3, v2
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
+  v_add_u32 v0, v0, v5
   v_add_u32 v0, v0, v4
-  v_add_u32 v0, v0, v1
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @carried_loads_reuse_address_at_capacity strategy=source amdgpu.sgpr=8
+// RUN: emit amdgpu-assembly @carried_loads_reuse_address_at_capacity amdgpu.sgpr=8
 
 amdgpu.target<gfx1151> @target
 
@@ -123,12 +125,12 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @carried_loads_reuse_address_a
 // concat without draining it. The next iteration waits for each carried result
 // at its first consumer, independently of scalar register capacity.
 // ----
+  global_load_b32 v1, v0, s[0:1] offset:0
+  global_load_b32 v2, v0, s[0:1] offset:4
+  global_load_b32 v3, v0, s[0:1] offset:8
+  v_mov_b32 v4, 0
   s_mov_b32 s3, 0
   s_mov_b32 s4, 16
-  v_mov_b32 v1, 0
-  global_load_b32 v2, v0, s[0:1] offset:0
-  global_load_b32 v3, v0, s[0:1] offset:4
-  global_load_b32 v4, v0, s[0:1] offset:8
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_mov_b32 s5, s3
 .Lbb1:
@@ -137,32 +139,32 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @carried_loads_reuse_address_a
   s_cbranch_scc0 .Lbb3
 .Lbb2:
   s_waitcnt vmcnt(1) lgkmcnt(63)
-  v_add_u32 v2, v2, v3
+  v_add_u32 v1, v1, v2
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
-  v_add_u32 v2, v2, v4
-  v_add_u32 v1, v2, v1
-  global_load_b32 v2, v0, s[0:1] offset:12
+  v_add_u32 v1, v1, v3
+  v_add_u32 v4, v1, v4
+  global_load_b32 v1, v0, s[0:1] offset:12
   s_add_u32 s6, s0, s4
   s_addc_u32 s7, s1, s3
-  global_load_b32 v3, v0, s[6:7] offset:0
+  global_load_b32 v2, v0, s[6:7] offset:0
   s_add_u32 s6, s0, s4
   s_addc_u32 s7, s1, s4
-  global_load_b32 v4, v0, s[6:7] offset:0
+  global_load_b32 v3, v0, s[6:7] offset:0
   s_add_u32 s5, s5, s4
   s_branch .Lbb1
 .Lbb3:
   s_waitcnt vmcnt(1) lgkmcnt(63)
-  v_add_u32 v0, v2, v3
+  v_add_u32 v0, v1, v2
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
+  v_add_u32 v0, v0, v3
   v_add_u32 v0, v0, v4
-  v_add_u32 v0, v0, v1
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @concat_source_at_residency_cliff strategy=source fixed=%pressure:physical_register:0:90 fixed=%base:physical_register:90:2 fixed=%zero:physical_register:92:1 fixed=%increment:physical_register:93:1
+// RUN: emit amdgpu-assembly @concat_source_at_residency_cliff
 
 // Reserving s96:s97 would lower modeled CDNA occupancy from eight waves
 // to seven. Captured addresses reuse the earlier pair without a wait.
@@ -186,13 +188,13 @@ low.func.def target<amdgpu.cdna3.core>(@target) @concat_source_at_residency_clif
 }
 
 // ----
-  s_mov_b32 s92, 0
-  s_mov_b32 s93, 16
-  s_add_u32 s94, s90, s93
-  s_addc_u32 s95, s91, s92
-  global_load_dword v1, v0, s[94:95] offset:0
-  s_add_u32 s94, s90, s93
+  s_mov_b32 s92, 16
+  s_add_u32 s94, s90, s92
+  s_mov_b32 s93, 0
   s_addc_u32 s95, s91, s93
+  global_load_dword v1, v0, s[94:95] offset:0
+  s_add_u32 s94, s90, s92
+  s_addc_u32 s95, s91, s92
   global_load_dword v0, v0, s[94:95] offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   v_add_u32 v0, v1, v0
@@ -200,7 +202,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @concat_source_at_residency_clif
 
 // ====
 
-// RUN: emit amdgpu-assembly @smem_result_reuse_requires_full_drain strategy=source fixed=%kernarg:physical_register:0:2 fixed=%wide:physical_register:8:8 fixed=%noise0:physical_register:4:1 fixed=%noise1:physical_register:6:2 fixed=%noise2:physical_register:16:4 fixed=%sum:physical_register:10:1
+// RUN: emit amdgpu-assembly @smem_result_reuse_requires_full_drain
 
 amdgpu.target<gfx1100> @target
 
@@ -221,10 +223,11 @@ low.func.def target<amdgpu.rdna3.core>(@target) @smem_result_reuse_requires_full
 // a full drain, even though a positional remaining-count bound would be three.
 // ----
   s_load_dwordx8 s[8:15], s[0:1], 0
-  s_load_dword s4, s[0:1], 32
-  s_load_dwordx2 s[6:7], s[0:1], 40
-  s_load_dwordx4 s[16:19], s[0:1], 48
-  s_mov_b32 s0, 4
+  s_load_dword s2, s[0:1], 32
+  s_load_dwordx2 s[4:5], s[0:1], 40
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  s_add_u32 s10, s10, s0
+  s_load_dwordx4 s[12:15], s[0:1], 48
+  s_mov_b32 s0, 4
+  s_add_u32 s0, s10, s0
+  s_waitcnt vmcnt(63) lgkmcnt(0)
   s_endpgm

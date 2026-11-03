@@ -1,6 +1,6 @@
 // SC1 selects system coherence independently of SC0 return control. These
 // words match LLVM MC on gfx942 and gfx950, including device-scope defaults.
-// RUN: emit amdgpu-native-words @global_reduce waits=none strategy=source fixed=%offset:physical_register:0:1 fixed=%value:physical_register:1:1 fixed=%address:physical_register:0:2
+// RUN: emit amdgpu-native-words @global_reduce
 
 amdgpu.target<gfx942> @target
 
@@ -15,10 +15,11 @@ low.func.def target<amdgpu.cdna3.core>(@target) @global_reduce(%offset: reg<amdg
 0x00000100
 0xDF088000
 0x00000100
+0xBF8C0F70
 0xBF810000
 
 // ====
-// RUN: emit amdgpu-native-words @global_rmw waits=none strategy=source fixed=%offset:physical_register:0:1 fixed=%value:physical_register:2:2 fixed=%address:physical_register:0:2 fixed=%device:physical_register:4:2 fixed=%system:physical_register:6:2
+// RUN: emit amdgpu-native-words @global_rmw
 
 amdgpu.target<gfx950> @target
 
@@ -31,12 +32,13 @@ low.func.def target<amdgpu.cdna4.core>(@target) @global_rmw(%offset: reg<amdgpu.
 // ----
 0xDD898000
 0x04000200
+0xBF800000
 0xDF898000
-0x06000200
+0x00000200
 0xBF810000
 
 // ====
-// RUN: emit amdgpu-native-words @flat_rmw waits=none strategy=source fixed=%address:physical_register:0:2 fixed=%value:physical_register:2:1 fixed=%device:physical_register:4:1 fixed=%system:physical_register:5:1
+// RUN: emit amdgpu-native-words @flat_rmw
 
 amdgpu.target<gfx942> @target
 
@@ -48,13 +50,14 @@ low.func.def target<amdgpu.cdna3.core>(@target) @flat_rmw(%address: reg<amdgpu.v
 
 // ----
 0xDD090000
-0x04000200
+0x03000200
+0xBF8C0070
 0xDF090000
-0x05000200
+0x00000200
 0xBF810000
 
 // ====
-// RUN: emit amdgpu-native-words @flat_cmpxchg waits=none strategy=source fixed=%address:physical_register:0:2 fixed=%pair:physical_register:4:4 fixed=%device:physical_register:8:2 fixed=%system:physical_register:10:2
+// RUN: emit amdgpu-native-words @flat_cmpxchg
 
 amdgpu.target<gfx950> @target
 
@@ -66,7 +69,8 @@ low.func.def target<amdgpu.cdna4.core>(@target) @flat_cmpxchg(%address: reg<amdg
 
 // ----
 0xDD850000
-0x08000400
+0x02000400
+0xBF8C0070
 0xDF850000
-0x0A000400
+0x00000400
 0xBF810000

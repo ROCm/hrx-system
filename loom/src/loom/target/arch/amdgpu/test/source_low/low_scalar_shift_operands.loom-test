@@ -103,7 +103,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @arithmetic_shift_counts_gfx942(
 
 // ====
 
-// RUN: emit amdgpu-native-words @scalar_shift_encoding_gfx942 strategy=source waits=none fixed=%value:physical_register:0:2 fixed=%left:physical_register:2:2 fixed=%logical:physical_register:4:2 fixed=%arithmetic:physical_register:6:2
+// RUN: emit amdgpu-native-words @scalar_shift_encoding_gfx942
 
 amdgpu.target<gfx942> @target
 
@@ -117,7 +117,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @scalar_shift_encoding_gfx942(%v
 // ----
 0x8E828000
 0x8F84A000
-0x9086BF00
+0x9080BF00
 0xBF810000
 
 // ====
@@ -227,7 +227,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @arithmetic_shift_counts_gfx950(
 
 // ====
 
-// RUN: emit amdgpu-native-words @scalar_shift_encoding_gfx950 strategy=source waits=none fixed=%value:physical_register:0:2 fixed=%left:physical_register:2:2 fixed=%logical:physical_register:4:2 fixed=%arithmetic:physical_register:6:2
+// RUN: emit amdgpu-native-words @scalar_shift_encoding_gfx950
 
 amdgpu.target<gfx950> @target
 
@@ -241,7 +241,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @scalar_shift_encoding_gfx950(%v
 // ----
 0x8E828000
 0x8F84A000
-0x9086BF00
+0x9080BF00
 0xBF810000
 
 // ====
@@ -351,7 +351,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @arithmetic_shift_counts_gfx1100
 
 // ====
 
-// RUN: emit amdgpu-native-words @scalar_shift_encoding_gfx1100 strategy=source waits=none fixed=%value:physical_register:0:2 fixed=%left:physical_register:2:2 fixed=%logical:physical_register:4:2 fixed=%arithmetic:physical_register:6:2
+// RUN: emit amdgpu-native-words @scalar_shift_encoding_gfx1100
 
 amdgpu.target<gfx1100> @target
 
@@ -365,7 +365,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scalar_shift_encoding_gfx1100(%
 // ----
 0x84828000
 0x8584A000
-0x8686BF00
+0x8680BF00
 0xBFB00000
 
 // ====
@@ -511,7 +511,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @arithmetic_shift_counts_gfx11
 
 // ====
 
-// RUN: emit amdgpu-native-words @scalar_shift_encoding_gfx1151 strategy=source waits=none fixed=%value:physical_register:0:2 fixed=%left:physical_register:2:2 fixed=%logical:physical_register:4:2 fixed=%arithmetic:physical_register:6:2
+// RUN: emit amdgpu-native-words @scalar_shift_encoding_gfx1151
 
 amdgpu.target<gfx1151> @target
 
@@ -525,7 +525,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @scalar_shift_encoding_gfx1151
 // ----
 0x84828000
 0x8584A000
-0x8686BF00
+0x8680BF00
 0xBFB00000
 
 // ====
@@ -635,7 +635,7 @@ low.func.def target<amdgpu.rdna4m.core>(@target) @arithmetic_shift_counts_gfx117
 
 // ====
 
-// RUN: emit amdgpu-native-words @scalar_shift_encoding_gfx1170 strategy=source waits=none fixed=%value:physical_register:0:2 fixed=%left:physical_register:2:2 fixed=%logical:physical_register:4:2 fixed=%arithmetic:physical_register:6:2
+// RUN: emit amdgpu-native-words @scalar_shift_encoding_gfx1170
 
 amdgpu.target<gfx1170> @target
 
@@ -649,7 +649,7 @@ low.func.def target<amdgpu.rdna4m.core>(@target) @scalar_shift_encoding_gfx1170(
 // ----
 0x84828000
 0x8584A000
-0x8686BF00
+0x8680BF00
 0xBFB00000
 
 // ====
@@ -759,7 +759,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @arithmetic_shift_counts_gfx1200
 
 // ====
 
-// RUN: emit amdgpu-native-words @scalar_shift_encoding_gfx1200 strategy=source waits=none fixed=%value:physical_register:0:2 fixed=%left:physical_register:2:2 fixed=%logical:physical_register:4:2 fixed=%arithmetic:physical_register:6:2
+// RUN: emit amdgpu-native-words @scalar_shift_encoding_gfx1200
 
 amdgpu.target<gfx1200> @target
 
@@ -773,7 +773,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @scalar_shift_encoding_gfx1200(%
 // ----
 0x84828000
 0x8584A000
-0x8686BF00
+0x8680BF00
 0xBFB00000
 
 // ====
@@ -883,7 +883,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @arithmetic_shift_counts
 
 // ====
 
-// RUN: emit amdgpu-native-words @scalar_shift_encoding_gfx1250 strategy=source waits=none fixed=%value:physical_register:0:2 fixed=%left:physical_register:2:2 fixed=%logical:physical_register:4:2 fixed=%arithmetic:physical_register:6:2
+// RUN: emit amdgpu-native-words @scalar_shift_encoding_gfx1250
 
 amdgpu.target<gfx1250> @target
 
@@ -897,5 +897,5 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @scalar_shift_encoding_g
 // ----
 0x84828000
 0x8584A000
-0x8686BF00
+0x8680BF00
 0xBFB00000

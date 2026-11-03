@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @continuous_global_gfx1151 strategy=source fixed=%seed0:physical_register:4:1 fixed=%seed1:physical_register:5:1 fixed=%carried0:physical_register:4:1 fixed=%carried1:physical_register:5:1 fixed=%third:physical_register:4:1 fixed=%fourth:physical_register:5:1 fixed=%first:physical_register:6:1 fixed=%second:physical_register:7:1
+// RUN: emit amdgpu-assembly @continuous_global_gfx1151
 
 amdgpu.target<gfx1151> @target
 
@@ -27,31 +27,31 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @continuous_global_gfx1151(%ba
 // Each old carried value is consumed before its register receives a new load.
 // ----
 .Lbb1:
-  global_load_b32 v6, v1, s[0:1] offset:0
-  global_load_b32 v7, v1, s[0:1] offset:4
+  s_waitcnt vmcnt(1) lgkmcnt(63)
+  v_add_u32 v0, v2, v0
+  global_load_b32 v2, v3, s[0:1] offset:0
+  global_load_b32 v4, v3, s[0:1] offset:4
+  s_waitcnt vmcnt(2) lgkmcnt(63)
+  v_add_u32 v5, v0, v1
+  global_load_b32 v0, v3, s[0:1] offset:8
+  global_load_b32 v1, v3, s[0:1] offset:12
   s_waitcnt vmcnt(3) lgkmcnt(63)
-  v_add_u32 v0, v0, v4
-  global_load_b32 v4, v1, s[0:1] offset:8
-  s_waitcnt vmcnt(3) lgkmcnt(63)
-  v_add_u32 v0, v0, v5
-  global_load_b32 v5, v1, s[0:1] offset:12
-  s_waitcnt vmcnt(3) lgkmcnt(63)
-  v_add_u32 v0, v0, v6
+  v_add_u32 v2, v5, v2
   s_waitcnt vmcnt(2) lgkmcnt(63)
   s_delay_alu instid0(VALU_DEP_1)
-  v_add_u32 v0, v0, v7
+  v_add_u32 v2, v2, v4
   s_cbranch_scc0 .Lbb3
 .Lbb2:
   s_branch .Lbb1
 .Lbb3:
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_add_u32 v1, v4, v5
-  s_delay_alu instid0(VALU_DEP_1)
   v_add_u32 v0, v0, v1
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v0, v2, v0
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @continuous_global_gfx1250 strategy=source fixed=%seed0:physical_register:4:1 fixed=%seed1:physical_register:5:1 fixed=%carried0:physical_register:4:1 fixed=%carried1:physical_register:5:1 fixed=%third:physical_register:4:1 fixed=%fourth:physical_register:5:1 fixed=%first:physical_register:6:1 fixed=%second:physical_register:7:1
+// RUN: emit amdgpu-assembly @continuous_global_gfx1250
 
 amdgpu.target<gfx1250> @target
 
@@ -80,31 +80,31 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @continuous_global_gfx12
 // Each old carried value is consumed before its register receives a new load.
 // ----
 .Lbb1:
-  global_load_b32 v6, v1, s[0:1] offset:0
-  global_load_b32 v7, v1, s[0:1] offset:4
+  s_wait_loadcnt loadcnt(1)
+  v_add_u32 v0, v2, v0
+  global_load_b32 v2, v3, s[0:1] offset:0
+  global_load_b32 v4, v3, s[0:1] offset:4
+  s_wait_loadcnt loadcnt(2)
+  v_add_u32 v5, v0, v1
+  global_load_b32 v0, v3, s[0:1] offset:8
+  global_load_b32 v1, v3, s[0:1] offset:12
   s_wait_loadcnt loadcnt(3)
-  v_add_u32 v0, v0, v4
-  global_load_b32 v4, v1, s[0:1] offset:8
-  s_wait_loadcnt loadcnt(3)
-  v_add_u32 v0, v0, v5
-  global_load_b32 v5, v1, s[0:1] offset:12
-  s_wait_loadcnt loadcnt(3)
-  v_add_u32 v0, v0, v6
+  v_add_u32 v2, v5, v2
   s_wait_loadcnt loadcnt(2)
   s_delay_alu instid0(VALU_DEP_1)
-  v_add_u32 v0, v0, v7
+  v_add_u32 v2, v2, v4
   s_cbranch_scc0 .Lbb3
 .Lbb2:
   s_branch .Lbb1
 .Lbb3:
   s_wait_loadcnt loadcnt(0)
-  v_add_u32 v1, v4, v5
-  s_delay_alu instid0(VALU_DEP_1)
   v_add_u32 v0, v0, v1
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v0, v2, v0
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @continuous_lds_gfx1100 strategy=source fixed=%seed0:physical_register:4:1 fixed=%seed1:physical_register:5:1 fixed=%carried0:physical_register:4:1 fixed=%carried1:physical_register:5:1 fixed=%third:physical_register:4:1 fixed=%fourth:physical_register:5:1 fixed=%first:physical_register:6:1 fixed=%second:physical_register:7:1
+// RUN: emit amdgpu-assembly @continuous_lds_gfx1100
 
 amdgpu.target<gfx1100> @target
 
@@ -133,32 +133,32 @@ low.func.def target<amdgpu.rdna3.core>(@target) @continuous_lds_gfx1100(%address
 // Each old carried value is consumed before its register receives a new load.
 // ----
 .Lbb1:
-  ds_read_b32 v6, v1 offset:0
-  ds_read_b32 v7, v1 offset:4
-  s_waitcnt vmcnt(63) lgkmcnt(3)
-  v_add_u32 v0, v0, v4
-  ds_read_b32 v4, v1 offset:8
-  s_waitcnt vmcnt(63) lgkmcnt(3)
+  s_waitcnt vmcnt(63) lgkmcnt(1)
+  v_add_u32 v0, v2, v0
+  ds_read_b32 v2, v3 offset:0
+  ds_read_b32 v4, v3 offset:4
+  s_waitcnt vmcnt(63) lgkmcnt(2)
   s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_2) | instid1(VALU_DEP_1)
-  v_add_u32 v0, v0, v5
-  ds_read_b32 v5, v1 offset:12
-  s_waitcnt vmcnt(63) lgkmcnt(3)
-  v_add_u32 v0, v0, v6
+  v_add_u32 v1, v0, v1
+  ds_read_b32 v0, v3 offset:8
+  s_waitcnt vmcnt(63) lgkmcnt(2)
+  v_add_u32 v2, v1, v2
+  ds_read_b32 v1, v3 offset:12
   s_waitcnt vmcnt(63) lgkmcnt(2)
   s_delay_alu instid0(VALU_DEP_1)
-  v_add_u32 v0, v0, v7
+  v_add_u32 v2, v2, v4
   s_cbranch_scc0 .Lbb3
 .Lbb2:
   s_branch .Lbb1
 .Lbb3:
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  v_add_u32 v1, v4, v5
-  s_delay_alu instid0(VALU_DEP_1)
   v_add_u32 v0, v0, v1
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v0, v2, v0
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @partial_completion_keeps_both_bases_reusable strategy=source amdgpu.sgpr=4
+// RUN: emit amdgpu-assembly @partial_completion_keeps_both_bases_reusable amdgpu.sgpr=4
 
 amdgpu.target<gfx1151> @target
 
@@ -179,8 +179,8 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @partial_completion_keeps_both
 // bases can be reused without completing the younger load.
 // ----
   global_load_b32 v1, v0, s[0:1] offset:0
-  global_load_b32 v2, v0, s[2:3] offset:0
-  s_waitcnt vmcnt(1) lgkmcnt(63)
+  global_load_b32 v1, v0, s[2:3] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(63)
   v_add_u32 v0, v1, v0
 .Lbb1:
   s_mov_b32 s0, 1

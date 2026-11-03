@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @copied_backedge_completes_result strategy=source fixed=%base:physical_register:0:2 fixed=%offset:physical_register:0:1 fixed=%seed:physical_register:8:1 fixed=%carried:physical_register:8:1 fixed=%future:physical_register:4:1
+// RUN: emit amdgpu-assembly @copied_backedge_completes_result
 
 amdgpu.target<gfx1151> @target
 
@@ -25,14 +25,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @copied_backedge_completes_res
 .Lbb1:
   s_add_u32 s4, s0, s2
   s_addc_u32 s5, s1, s3
-  global_load_b32 v4, v0, s[4:5] offset:0
-  v_add_u32 v1, v8, v0
+  global_load_b32 v2, v1, s[4:5] offset:0
+  v_add_u32 v0, v0, v1
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_mov_b32 v8, v4
+  v_mov_b32 v0, v2
   s_branch .Lbb1
 
 // ====
-// RUN: emit amdgpu-assembly @younger_backedge_result_does_not_retain_address strategy=source fixed=%base:physical_register:0:2 fixed=%offset:physical_register:0:1 fixed=%seed:physical_register:8:1 fixed=%carried:physical_register:8:1 fixed=%future:physical_register:4:1 fixed=%pending:physical_register:5:1 fixed=%younger:physical_register:5:1 fixed=%initial_pending:physical_register:5:1
+// RUN: emit amdgpu-assembly @younger_backedge_result_does_not_retain_address
 
 amdgpu.target<gfx1151> @target
 
@@ -58,18 +58,16 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @younger_backedge_result_does_
   s_mov_b32 s2, 16
   s_mov_b32 s3, 0
 .Lbb1:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_add_u32 v0, v0, v1
   s_add_u32 s4, s0, s2
   s_addc_u32 s5, s1, s3
-  s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_add_u32 v1, v8, v5
-  global_load_b32 v4, v0, s[4:5] offset:0
-  global_load_b32 v5, v0, s[4:5] offset:4
-  s_waitcnt vmcnt(1) lgkmcnt(63)
-  v_mov_b32 v8, v4
+  global_load_b32 v0, v2, s[4:5] offset:0
+  global_load_b32 v1, v2, s[4:5] offset:4
   s_branch .Lbb1
 
 // ====
-// RUN: emit amdgpu-assembly @both_paths_complete_result strategy=source amdgpu.sgpr=2
+// RUN: emit amdgpu-assembly @both_paths_complete_result amdgpu.sgpr=2
 
 amdgpu.target<gfx1151> @target
 
@@ -104,7 +102,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @both_paths_complete_result(%b
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @bypass_reuses_captured_base strategy=source amdgpu.sgpr=2
+// RUN: emit amdgpu-assembly @bypass_reuses_captured_base amdgpu.sgpr=2
 
 amdgpu.target<gfx1151> @target
 
@@ -132,7 +130,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @bypass_reuses_captured_base(%
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @new_producer_captures_base_before_edge strategy=source amdgpu.sgpr=2
+// RUN: emit amdgpu-assembly @new_producer_captures_base_before_edge amdgpu.sgpr=2
 
 amdgpu.target<gfx1151> @target
 
@@ -150,15 +148,15 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @new_producer_captures_base_be
 // was captured. Reusing the base does not require result completion.
 // ----
   global_load_b32 v1, v0, s[0:1] offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_add_u32 v1, v1, v0
-  global_load_b32 v0, v0, s[0:1] offset:4
+  global_load_b32 v2, v0, s[0:1] offset:4
+  s_waitcnt vmcnt(1) lgkmcnt(63)
+  v_add_u32 v0, v1, v0
 .Lbb1:
   s_mov_b32 s0, 16
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @translation_and_result_complete_before_backedge strategy=source fixed=%base:physical_register:0:2 fixed=%offset:physical_register:0:1 fixed=%seed:physical_register:8:1 fixed=%carried:physical_register:8:1 fixed=%future:physical_register:4:1
+// RUN: emit amdgpu-assembly @translation_and_result_complete_before_backedge
 
 amdgpu.target<gfx1250> @target
 
@@ -185,14 +183,14 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @translation_and_result_
 .Lbb1:
   s_add_u32 s4, s0, s2
   s_addc_u32 s5, s1, s3
-  global_load_b32 v4, v0, s[4:5] offset:0
-  v_add_u32 v1, v8, v0
+  global_load_b32 v2, v1, s[4:5] offset:0
+  v_add_u32 v0, v0, v1
   s_wait_loadcnt loadcnt(0)
-  v_mov_b32 v8, v4
+  v_mov_b32 v0, v2
   s_branch .Lbb1
 
 // ====
-// RUN: emit amdgpu-assembly @translation_release_keeps_younger_result_pending strategy=source fixed=%base:physical_register:0:2 fixed=%offset:physical_register:0:1 fixed=%seed:physical_register:8:1 fixed=%carried:physical_register:8:1 fixed=%future:physical_register:4:1 fixed=%pending:physical_register:5:1 fixed=%younger:physical_register:5:1 fixed=%initial_pending:physical_register:5:1
+// RUN: emit amdgpu-assembly @translation_release_keeps_younger_result_pending
 
 amdgpu.target<gfx1250> @target
 
@@ -218,12 +216,10 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @translation_release_kee
   s_mov_b32 s2, 16
   s_mov_b32 s3, 0
 .Lbb1:
+  s_wait_loadcnt loadcnt(0)
+  v_add_u32 v0, v0, v1
   s_add_u32 s4, s0, s2
   s_addc_u32 s5, s1, s3
-  s_wait_loadcnt loadcnt(0)
-  v_add_u32 v1, v8, v5
-  global_load_b32 v4, v0, s[4:5] offset:0
-  global_load_b32 v5, v0, s[4:5] offset:4
-  s_wait_loadcnt loadcnt(1)
-  v_mov_b32 v8, v4
+  global_load_b32 v0, v2, s[4:5] offset:0
+  global_load_b32 v1, v2, s[4:5] offset:4
   s_branch .Lbb1

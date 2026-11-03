@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-native-words @wide_shifts_gfx942 strategy=source
+// RUN: emit amdgpu-native-words @wide_shifts_gfx942
 
 amdgpu.target<gfx942> @target
 
@@ -17,28 +17,28 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wide_shifts_gfx942(%value: reg<
 
 // ----
 0xD28F0004
-0x00020080
-0xD28F0006
-0x00020081
-0xD28F0008
-0x00020082
-0xD28F000A
-0x0002009F
-0xD28F000C
-0x000200A0
-0xD28F000E
-0x000200BF
-0xD28F0010
-0x000200C0
-0xD28F0012
-0x00020000
+0x00020400
 0xD28F0000
-0x00020102
+0x00020500
+0xD28F0006
+0x00020480
+0xD28F0008
+0x00020481
+0xD28F000A
+0x00020482
+0xD28F000C
+0x0002049F
+0xD28F000E
+0x000204A0
+0xD28F0010
+0x000204BF
+0xD28F0002
+0x000204C0
 0xBF810000
 
 // ====
 
-// RUN: emit amdgpu-native-words @wide_shifts_gfx950 strategy=source
+// RUN: emit amdgpu-native-words @wide_shifts_gfx950
 
 amdgpu.target<gfx950> @target
 
@@ -57,28 +57,28 @@ low.func.def target<amdgpu.cdna4.core>(@target) @wide_shifts_gfx950(%value: reg<
 
 // ----
 0xD28F0004
-0x00020080
-0xD28F0006
-0x00020081
-0xD28F0008
-0x00020082
-0xD28F000A
-0x0002009F
-0xD28F000C
-0x000200A0
-0xD28F000E
-0x000200BF
-0xD28F0010
-0x000200C0
-0xD28F0012
-0x00020000
+0x00020400
 0xD28F0000
-0x00020102
+0x00020500
+0xD28F0006
+0x00020480
+0xD28F0008
+0x00020481
+0xD28F000A
+0x00020482
+0xD28F000C
+0x0002049F
+0xD28F000E
+0x000204A0
+0xD28F0010
+0x000204BF
+0xD28F0002
+0x000204C0
 0xBF810000
 
 // ====
 
-// RUN: emit amdgpu-native-words @wide_shifts_gfx1100 strategy=source
+// RUN: emit amdgpu-native-words @wide_shifts_gfx1100
 
 amdgpu.target<gfx1100> @target
 
@@ -97,28 +97,28 @@ low.func.def target<amdgpu.rdna3.core>(@target) @wide_shifts_gfx1100(%value: reg
 
 // ----
 0xD73C0004
-0x02020080
-0xD73C0006
-0x02020081
-0xD73C0008
-0x02020082
-0xD73C000A
-0x0202009F
-0xD73C000C
-0x020200A0
-0xD73C000E
-0x020200BF
-0xD73C0010
-0x020200C0
-0xD73C0012
-0x02020000
+0x02020400
 0xD73C0000
-0x02020102
+0x02020500
+0xD73C0006
+0x02020480
+0xD73C0008
+0x02020481
+0xD73C000A
+0x02020482
+0xD73C000C
+0x0202049F
+0xD73C000E
+0x020204A0
+0xD73C0010
+0x020204BF
+0xD73C0002
+0x020204C0
 0xBFB00000
 
 // ====
 
-// RUN: emit amdgpu-native-words @wide_shifts_gfx1151 strategy=source
+// RUN: emit amdgpu-native-words @wide_shifts_gfx1151
 
 amdgpu.target<gfx1151> @target
 
@@ -137,28 +137,28 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @wide_shifts_gfx1151(%value: r
 
 // ----
 0xD73C0004
-0x02020080
-0xD73C0006
-0x02020081
-0xD73C0008
-0x02020082
-0xD73C000A
-0x0202009F
-0xD73C000C
-0x020200A0
-0xD73C000E
-0x020200BF
-0xD73C0010
-0x020200C0
-0xD73C0012
-0x02020000
+0x02020400
 0xD73C0000
-0x02020102
+0x02020500
+0xD73C0006
+0x02020480
+0xD73C0008
+0x02020481
+0xD73C000A
+0x02020482
+0xD73C000C
+0x0202049F
+0xD73C000E
+0x020204A0
+0xD73C0010
+0x020204BF
+0xD73C0002
+0x020204C0
 0xBFB00000
 
 // ====
 
-// RUN: emit amdgpu-native-words @wide_shifts_gfx1201 strategy=source
+// RUN: emit amdgpu-native-words @wide_shifts_gfx1201
 
 amdgpu.target<gfx1201> @target
 
@@ -177,28 +177,28 @@ low.func.def target<amdgpu.rdna4.core>(@target) @wide_shifts_gfx1201(%value: reg
 
 // ----
 0xD51F0004
-0x02020080
-0xD51F0006
-0x02020081
-0xD51F0008
-0x02020082
-0xD51F000A
-0x0202009F
-0xD51F000C
-0x020200A0
-0xD51F000E
-0x020200BF
-0xD51F0010
-0x020200C0
-0xD51F0012
-0x02020000
+0x02020400
 0xD51F0000
-0x02020102
+0x02020500
+0xD51F0006
+0x02020480
+0xD51F0008
+0x02020481
+0xD51F000A
+0x02020482
+0xD51F000C
+0x0202049F
+0xD51F000E
+0x020204A0
+0xD51F0010
+0x020204BF
+0xD51F0002
+0x020204C0
 0xBFB00000
 
 // ====
 
-// RUN: emit amdgpu-native-words @wide_shifts_gfx1250 strategy=source
+// RUN: emit amdgpu-native-words @wide_shifts_gfx1250
 
 amdgpu.target<gfx1250> @target
 
@@ -217,28 +217,28 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @wide_shifts_gfx1250(%va
 
 // ----
 0xD51F0004
-0x02020080
-0xD51F0006
-0x02020081
-0xD51F0008
-0x02020082
-0xD51F000A
-0x0202009F
-0xD51F000C
-0x020200A0
-0xD51F000E
-0x020200BF
-0xD51F0010
-0x020200C0
-0xD51F0012
-0x02020000
+0x02020400
 0xD51F0000
-0x02020102
+0x02020500
+0xD51F0006
+0x02020480
+0xD51F0008
+0x02020481
+0xD51F000A
+0x02020482
+0xD51F000C
+0x0202049F
+0xD51F000E
+0x020204A0
+0xD51F0010
+0x020204BF
+0xD51F0002
+0x020204C0
 0xBFB00000
 
 // ====
 
-// RUN: emit amdgpu-native-words @wide_right_shifts_gfx942 strategy=source
+// RUN: emit amdgpu-native-words @wide_right_shifts_gfx942
 
 amdgpu.target<gfx942> @target
 
@@ -261,10 +261,10 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wide_right_shifts_gfx942(%value
 0x90800200
 0xD2900004
 0x00020402
-0xD2900006
-0x00020500
-0xD2910008
+0xD2910006
 0x00020402
+0xD2900008
+0x00020500
 0xD2910000
 0x00020500
 0xD290000A
@@ -279,7 +279,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wide_right_shifts_gfx942(%value
 
 // ====
 
-// RUN: emit amdgpu-native-words @wide_right_shifts_gfx950 strategy=source
+// RUN: emit amdgpu-native-words @wide_right_shifts_gfx950
 
 amdgpu.target<gfx950> @target
 
@@ -302,10 +302,10 @@ low.func.def target<amdgpu.cdna4.core>(@target) @wide_right_shifts_gfx950(%value
 0x90800200
 0xD2900004
 0x00020402
-0xD2900006
-0x00020500
-0xD2910008
+0xD2910006
 0x00020402
+0xD2900008
+0x00020500
 0xD2910000
 0x00020500
 0xD290000A
@@ -320,7 +320,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @wide_right_shifts_gfx950(%value
 
 // ====
 
-// RUN: emit amdgpu-native-words @wide_right_shifts_gfx1100 strategy=source
+// RUN: emit amdgpu-native-words @wide_right_shifts_gfx1100
 
 amdgpu.target<gfx1100> @target
 
@@ -339,16 +339,14 @@ low.func.def target<amdgpu.rdna3.core>(@target) @wide_right_shifts_gfx1100(%valu
 }
 
 // ----
-0x85840200
-0x86800200
 0xD73D0004
 0x02020402
 0xD73D0006
 0x02020500
-0xD73E0008
-0x02020402
 0xD73E0000
 0x02020500
+0xD73E0008
+0x02020402
 0xD73D000A
 0x02020480
 0xD73D000C
@@ -357,11 +355,13 @@ low.func.def target<amdgpu.rdna3.core>(@target) @wide_right_shifts_gfx1100(%valu
 0x02020480
 0xD73E0002
 0x020204BF
+0x85840200
+0x86800200
 0xBFB00000
 
 // ====
 
-// RUN: emit amdgpu-native-words @wide_right_shifts_gfx1151 strategy=source
+// RUN: emit amdgpu-native-words @wide_right_shifts_gfx1151
 
 amdgpu.target<gfx1151> @target
 
@@ -380,16 +380,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @wide_right_shifts_gfx1151(%va
 }
 
 // ----
-0x85840200
-0x86800200
 0xD73D0004
 0x02020402
 0xD73D0006
 0x02020500
-0xD73E0008
-0x02020402
 0xD73E0000
 0x02020500
+0xD73E0008
+0x02020402
 0xD73D000A
 0x02020480
 0xD73D000C
@@ -398,11 +396,13 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @wide_right_shifts_gfx1151(%va
 0x02020480
 0xD73E0002
 0x020204BF
+0x85840200
+0x86800200
 0xBFB00000
 
 // ====
 
-// RUN: emit amdgpu-native-words @wide_right_shifts_gfx1201 strategy=source
+// RUN: emit amdgpu-native-words @wide_right_shifts_gfx1201
 
 amdgpu.target<gfx1201> @target
 
@@ -421,16 +421,14 @@ low.func.def target<amdgpu.rdna4.core>(@target) @wide_right_shifts_gfx1201(%valu
 }
 
 // ----
-0x85840200
-0x86800200
 0xD73D0004
 0x02020402
 0xD73D0006
 0x02020500
-0xD73E0008
-0x02020402
 0xD73E0000
 0x02020500
+0xD73E0008
+0x02020402
 0xD73D000A
 0x02020480
 0xD73D000C
@@ -439,11 +437,13 @@ low.func.def target<amdgpu.rdna4.core>(@target) @wide_right_shifts_gfx1201(%valu
 0x02020480
 0xD73E0002
 0x020204BF
+0x85840200
+0x86800200
 0xBFB00000
 
 // ====
 
-// RUN: emit amdgpu-native-words @wide_right_shifts_gfx1250 strategy=source
+// RUN: emit amdgpu-native-words @wide_right_shifts_gfx1250
 
 amdgpu.target<gfx1250> @target
 
@@ -462,16 +462,14 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @wide_right_shifts_gfx12
 }
 
 // ----
-0x85840200
-0x86800200
 0xD73D0004
 0x02020402
 0xD73D0006
 0x02020500
-0xD73E0008
-0x02020402
 0xD73E0000
 0x02020500
+0xD73E0008
+0x02020402
 0xD73D000A
 0x02020480
 0xD73D000C
@@ -480,4 +478,6 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @wide_right_shifts_gfx12
 0x02020480
 0xD73E0002
 0x020204BF
+0x85840200
+0x86800200
 0xBFB00000

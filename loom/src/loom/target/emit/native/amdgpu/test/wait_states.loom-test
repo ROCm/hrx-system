@@ -32,7 +32,7 @@ state[0] reason=valu_to_matrix_use action=amdgpu.s_nop at=b0:n2/o2 producer=n0 c
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @gfx942_mfma_result_wait_state_observed_progress strategy=source
+// RUN: emit amdgpu-wait-state-plan @gfx942_mfma_result_wait_state_observed_progress
 
 amdgpu.target<gfx942> @gfx942_target
 
@@ -65,7 +65,7 @@ amdgpu.wait_state_plan states=0 progress=3 hazards=0
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @gfx11_wmma_dependency_delay_alu strategy=source
+// RUN: emit amdgpu-wait-state-plan @gfx11_wmma_dependency_delay_alu
 
 amdgpu.target<gfx11-generic> @gfx11_target
 
@@ -84,7 +84,7 @@ state[1] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n3/o3 produ
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_wmma_dependency_delay_alu strategy=source
+// RUN: emit amdgpu-assembly @gfx11_wmma_dependency_delay_alu
 
 amdgpu.target<gfx11-generic> @gfx11_target
 
@@ -105,7 +105,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) @gfx11_wmma_depend
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @gfx11_valu_dependency_delay_alu strategy=source
+// RUN: emit amdgpu-wait-state-plan @gfx11_valu_dependency_delay_alu
 
 amdgpu.target<gfx1100> @gfx11_target
 
@@ -121,7 +121,7 @@ state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n1/o1 produ
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @gfx11_valu_dependency_delay_alu_ignores_salu_gap strategy=source
+// RUN: emit amdgpu-wait-state-plan @gfx11_valu_dependency_delay_alu_ignores_salu_gap
 
 amdgpu.target<gfx1100> @gfx11_target
 
@@ -140,7 +140,7 @@ state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n4/o4 produ
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_valu_dependency_delay_alu_ignores_salu_gap_assembly strategy=source
+// RUN: emit amdgpu-assembly @gfx11_valu_dependency_delay_alu_ignores_salu_gap_assembly
 
 amdgpu.target<gfx1100> @gfx11_target
 
@@ -161,10 +161,10 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_valu_dependency_del
   s_add_u32 s0, s1, s1
   s_add_u32 s0, s0, s1
   s_add_u32 s0, s0, s1
-  s_delay_alu instid0(VALU_DEP_1)
+  v_mov_b32 v1, s0
+  s_delay_alu instid0(VALU_DEP_2)
   v_lshlrev_b32 v0, 2, v0
   global_load_b32 v0, v0, s[2:3] offset:0
-  v_mov_b32 v1, s0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   global_store_b32 v1, v0, s[4:5] offset:0
   s_waitcnt_vscnt vscnt(0)
@@ -172,7 +172,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_valu_dependency_del
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_vmem_address_uses_implicit_valu_wait strategy=source
+// RUN: emit amdgpu-assembly @gfx11_vmem_address_uses_implicit_valu_wait
 
 amdgpu.target<gfx1100> @gfx11_target
 
@@ -217,7 +217,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vmem_address_uses_i
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_vmem_store_byte_payload_uses_implicit_valu_wait strategy=source
+// RUN: emit amdgpu-assembly @gfx11_vmem_store_byte_payload_uses_implicit_valu_wait
 
 amdgpu.target<gfx1100> @gfx11_target
 
@@ -235,7 +235,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vmem_store_byte_pay
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_vmem_store_short_payload_uses_implicit_valu_wait strategy=source
+// RUN: emit amdgpu-assembly @gfx11_vmem_store_short_payload_uses_implicit_valu_wait
 
 amdgpu.target<gfx1100> @gfx11_target
 
@@ -253,7 +253,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vmem_store_short_pa
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_vmem_store_b32_payload_uses_implicit_valu_wait strategy=source
+// RUN: emit amdgpu-assembly @gfx11_vmem_store_b32_payload_uses_implicit_valu_wait
 
 amdgpu.target<gfx1100> @gfx11_target
 
@@ -271,7 +271,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vmem_store_b32_payl
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_vmem_store_b64_payload_uses_implicit_valu_wait strategy=source
+// RUN: emit amdgpu-assembly @gfx11_vmem_store_b64_payload_uses_implicit_valu_wait
 
 amdgpu.target<gfx1100> @gfx11_target
 
@@ -292,7 +292,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vmem_store_b64_payl
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_vmem_store_b128_payload_uses_implicit_valu_wait strategy=source
+// RUN: emit amdgpu-assembly @gfx11_vmem_store_b128_payload_uses_implicit_valu_wait
 
 amdgpu.target<gfx1100> @gfx11_target
 
@@ -317,7 +317,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_vmem_store_b128_pay
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx12_vmem_store_b128_payload_uses_implicit_valu_wait strategy=source
+// RUN: emit amdgpu-assembly @gfx12_vmem_store_b128_payload_uses_implicit_valu_wait
 
 amdgpu.target<gfx1200> @gfx12_target
 
@@ -342,7 +342,7 @@ low.func.def target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_vmem_store_b128_pay
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx942_vmem_store_b128_packed_payload strategy=source
+// RUN: emit amdgpu-assembly @gfx942_vmem_store_b128_packed_payload
 
 amdgpu.target<gfx942> @gfx942_target
 
@@ -369,7 +369,7 @@ low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_vmem_store_b128_p
 
 // A store retains its payload across an edge. Keeping the replacement input
 // live makes ordinary allocation reuse the payload storage for the new value.
-// RUN: emit amdgpu-wait-state-plan @gfx942_cross_block_store_data_reuse strategy=source
+// RUN: emit amdgpu-wait-state-plan @gfx942_cross_block_store_data_reuse
 
 amdgpu.target<gfx942> @gfx942_target
 
@@ -389,7 +389,7 @@ state[1] reason=readfirstlane_vgpr_read action=amdgpu.s_nop at=b1:n3/o1 producer
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @gfx11_packed_dot_dependency_delay_alu strategy=source
+// RUN: emit amdgpu-wait-state-plan @gfx11_packed_dot_dependency_delay_alu
 
 amdgpu.target<gfx1100> @gfx11_target
 
@@ -405,7 +405,7 @@ state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n1/o1 produ
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @gfx11_packed_dot_dependency_delay_alu_observed_progress strategy=source
+// RUN: emit amdgpu-wait-state-plan @gfx11_packed_dot_dependency_delay_alu_observed_progress
 
 amdgpu.target<gfx1100> @gfx11_target
 
@@ -422,7 +422,7 @@ state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n2/o2 produ
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @gfx11_vopd_delay_alu_binary_pairs strategy=source
+// RUN: emit amdgpu-wait-state-plan @gfx11_vopd_delay_alu_binary_pairs
 
 amdgpu.target<gfx1100> @gfx11_target
 
@@ -440,7 +440,7 @@ state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n2/o2 produ
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @gfx12_generic_wmma_dependency_delay_alu strategy=source
+// RUN: emit amdgpu-wait-state-plan @gfx12_generic_wmma_dependency_delay_alu
 
 amdgpu.target<gfx12-generic> @gfx12_generic_target
 
@@ -456,7 +456,7 @@ state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n1/o1 produ
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @gfx12_generic_swmmac_dependency_delay_alu strategy=source
+// RUN: emit amdgpu-wait-state-plan @gfx12_generic_swmmac_dependency_delay_alu
 
 amdgpu.target<gfx12-generic> @gfx12_generic_target
 
@@ -472,7 +472,7 @@ state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n1/o1 produ
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @gfx1200_trans_dependency_delay_alu strategy=source
+// RUN: emit amdgpu-wait-state-plan @gfx1200_trans_dependency_delay_alu
 
 amdgpu.target<gfx1200> @gfx1200_target
 
@@ -488,7 +488,7 @@ state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n1/o1 produ
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @gfx1200_trans_dependency_delay_alu_ignores_salu_gap strategy=source
+// RUN: emit amdgpu-wait-state-plan @gfx1200_trans_dependency_delay_alu_ignores_salu_gap
 
 amdgpu.target<gfx1200> @gfx1200_target
 
@@ -590,7 +590,7 @@ state[0] reason=valu_sgpr_read action=amdgpu.s_nop at=b0:n1/o1 producer=n0 consu
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @gfx942_valu_sgpr_to_vmem_wait_state_observed_progress strategy=source
+// RUN: emit amdgpu-wait-state-plan @gfx942_valu_sgpr_to_vmem_wait_state_observed_progress
 
 amdgpu.target<gfx942> @gfx942_target
 
@@ -607,7 +607,7 @@ state[0] reason=valu_sgpr_read action=amdgpu.s_nop at=b0:n2/o2 producer=n0 consu
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @gfx11_dpp_vgpr_read_wait_state strategy=source
+// RUN: emit amdgpu-wait-state-plan @gfx11_dpp_vgpr_read_wait_state
 
 amdgpu.target<gfx1100> @gfx11_target
 
@@ -623,7 +623,7 @@ state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n1/o1 produ
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @gfx11_dpp_vgpr_read_wait_state_observed_progress strategy=source
+// RUN: emit amdgpu-wait-state-plan @gfx11_dpp_vgpr_read_wait_state_observed_progress
 
 amdgpu.target<gfx1100> @gfx11_target
 
@@ -642,7 +642,7 @@ state[1] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n3/o3 produ
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @gfx942_readfirstlane_vgpr_read_wait_state strategy=source
+// RUN: emit amdgpu-wait-state-plan @gfx942_readfirstlane_vgpr_read_wait_state
 
 amdgpu.target<gfx942> @gfx942_target
 
@@ -658,7 +658,7 @@ state[0] reason=readfirstlane_vgpr_read action=amdgpu.s_nop at=b0:n1/o1 producer
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @gfx950_sdwa_dst_sel_forwarding_wait_state strategy=source
+// RUN: emit amdgpu-wait-state-plan @gfx950_sdwa_dst_sel_forwarding_wait_state
 
 amdgpu.target<gfx950> @gfx950_target
 
@@ -674,7 +674,7 @@ state[0] reason=dst_sel_forwarding_use action=amdgpu.s_nop at=b0:n1/o1 producer=
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @gfx950_sdwa_dword_dst_sel_no_wait_state strategy=source
+// RUN: emit amdgpu-wait-state-plan @gfx950_sdwa_dword_dst_sel_no_wait_state
 
 amdgpu.target<gfx950> @gfx950_target
 
@@ -689,7 +689,7 @@ amdgpu.wait_state_plan states=0 progress=3 hazards=0
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @gfx950_sdwa_dst_sel_waw_wait_state strategy=source
+// RUN: emit amdgpu-wait-state-plan @gfx950_sdwa_dst_sel_waw_wait_state
 
 amdgpu.target<gfx950> @gfx950_target
 
@@ -700,12 +700,11 @@ low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @gfx950_sdwa_dst_sel_waw_
 }
 
 // ----
-amdgpu.wait_state_plan states=1 progress=3 hazards=1
-state[0] reason=dst_sel_forwarding_use action=amdgpu.s_nop at=b0:n1/o1 producer=n0 consumer=n1 required=1 observed=0 residual=1
+amdgpu.wait_state_plan states=0 progress=3 hazards=0
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @wait_records_across_empty_blocks strategy=source
+// RUN: emit amdgpu-wait-state-plan @wait_records_across_empty_blocks
 
 // Packet order crosses an intermediate block with no waits. Each dependent
 // pair still contributes its own record after packets without hazard events.

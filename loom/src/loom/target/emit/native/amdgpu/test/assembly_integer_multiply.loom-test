@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @multiply_gfx942 strategy=source
+// RUN: emit amdgpu-assembly @multiply_gfx942
 
 amdgpu.target<gfx942> @target
 
@@ -19,7 +19,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @multiply_gfx942(%vector: reg<am
 
 // ====
 
-// RUN: emit amdgpu-native-words @multiply_gfx942 strategy=source
+// RUN: emit amdgpu-native-words @multiply_gfx942
 
 amdgpu.target<gfx942> @target
 
@@ -44,7 +44,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @multiply_gfx942(%vector: reg<am
 
 // ====
 
-// RUN: emit amdgpu-assembly @multiply_gfx1100 strategy=source
+// RUN: emit amdgpu-assembly @multiply_gfx1100
 
 amdgpu.target<gfx1100> @target
 
@@ -60,8 +60,8 @@ low.func.def target<amdgpu.rdna3.core>(@target) @multiply_gfx1100(%vector: reg<a
 
 // ----
   v_mul_hi_u32 v1, 64, v0
-  v_mul_hi_u32 v2, s0, 64
   v_mul_hi_u32 v0, 2166572391, v0
+  v_mul_hi_u32 v2, s0, 64
   v_mul_hi_u32 v3, s0, 2166572391
   s_mul_hi_u32 s1, 2166572391, s0
   s_mul_hi_i32 s0, 1717986919, s0
@@ -69,7 +69,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @multiply_gfx1100(%vector: reg<a
 
 // ====
 
-// RUN: emit amdgpu-native-words @multiply_gfx1100 strategy=source
+// RUN: emit amdgpu-native-words @multiply_gfx1100
 
 amdgpu.target<gfx1100> @target
 
@@ -86,11 +86,11 @@ low.func.def target<amdgpu.rdna3.core>(@target) @multiply_gfx1100(%vector: reg<a
 // ----
 0xD72D0001
 0x020200C0
-0xD72D0002
-0x02018000
 0xD72D0000
 0x020200FF
 0x81234567
+0xD72D0002
+0x02018000
 0xD72D0003
 0x0201FE00
 0x81234567
@@ -102,7 +102,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @multiply_gfx1100(%vector: reg<a
 
 // ====
 
-// RUN: emit amdgpu-assembly @multiply_gfx1201 strategy=source
+// RUN: emit amdgpu-assembly @multiply_gfx1201
 
 amdgpu.target<gfx1201> @target
 
@@ -118,8 +118,8 @@ low.func.def target<amdgpu.rdna4.core>(@target) @multiply_gfx1201(%vector: reg<a
 
 // ----
   v_mul_hi_u32 v1, 64, v0
-  v_mul_hi_u32 v2, s0, 64
   v_mul_hi_u32 v0, 2166572391, v0
+  v_mul_hi_u32 v2, s0, 64
   v_mul_hi_u32 v3, s0, 2166572391
   s_mul_hi_u32 s1, 2166572391, s0
   s_mul_hi_i32 s0, 1717986919, s0
@@ -127,7 +127,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @multiply_gfx1201(%vector: reg<a
 
 // ====
 
-// RUN: emit amdgpu-native-words @multiply_gfx1201 strategy=source
+// RUN: emit amdgpu-native-words @multiply_gfx1201
 
 amdgpu.target<gfx1201> @target
 
@@ -144,11 +144,11 @@ low.func.def target<amdgpu.rdna4.core>(@target) @multiply_gfx1201(%vector: reg<a
 // ----
 0xD72D0001
 0x020200C0
-0xD72D0002
-0x02018000
 0xD72D0000
 0x020200FF
 0x81234567
+0xD72D0002
+0x02018000
 0xD72D0003
 0x0201FE00
 0x81234567
@@ -160,7 +160,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @multiply_gfx1201(%vector: reg<a
 
 // ====
 
-// RUN: emit amdgpu-assembly @multiply_gfx1250 strategy=source
+// RUN: emit amdgpu-assembly @multiply_gfx1250
 
 amdgpu.target<gfx1250> @target
 
@@ -176,8 +176,8 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @multiply_gfx1250(%vecto
 
 // ----
   v_mul_hi_u32 v1, 64, v0
-  v_mul_hi_u32 v2, s0, 64
   v_mul_hi_u32 v0, 2166572391, v0
+  v_mul_hi_u32 v2, s0, 64
   v_mul_hi_u32 v3, s0, 2166572391
   s_mul_hi_u32 s1, 2166572391, s0
   s_mul_hi_i32 s0, 1717986919, s0
@@ -185,7 +185,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @multiply_gfx1250(%vecto
 
 // ====
 
-// RUN: emit amdgpu-native-words @multiply_gfx1250 strategy=source
+// RUN: emit amdgpu-native-words @multiply_gfx1250
 
 amdgpu.target<gfx1250> @target
 
@@ -202,11 +202,11 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @multiply_gfx1250(%vecto
 // ----
 0xD72D0001
 0x020200C0
-0xD72D0002
-0x02018000
 0xD72D0000
 0x020200FF
 0x81234567
+0xD72D0002
+0x02018000
 0xD72D0003
 0x0201FE00
 0x81234567
@@ -218,7 +218,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @multiply_gfx1250(%vecto
 
 // ====
 
-// RUN: emit amdgpu-assembly @multiply_low_gfx942 strategy=source
+// RUN: emit amdgpu-assembly @multiply_low_gfx942
 
 amdgpu.target<gfx942> @target
 
@@ -235,7 +235,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @multiply_low_gfx942(%vector: re
 
 // ====
 
-// RUN: emit amdgpu-native-words @multiply_low_gfx942 strategy=source
+// RUN: emit amdgpu-native-words @multiply_low_gfx942
 
 amdgpu.target<gfx942> @target
 
@@ -254,7 +254,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @multiply_low_gfx942(%vector: re
 
 // ====
 
-// RUN: emit amdgpu-assembly @multiply_low_gfx1100 strategy=source
+// RUN: emit amdgpu-assembly @multiply_low_gfx1100
 
 amdgpu.target<gfx1100> @target
 
@@ -268,14 +268,14 @@ low.func.def target<amdgpu.rdna3.core>(@target) @multiply_low_gfx1100(%vector: r
 
 // ----
   v_mul_lo_u32 v1, 64, v0
-  v_mul_lo_u32 v2, s0, 64
   v_mul_lo_u32 v0, 2166572391, v0
+  v_mul_lo_u32 v2, s0, 64
   v_mul_lo_u32 v3, s0, 2166572391
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-native-words @multiply_low_gfx1100 strategy=source
+// RUN: emit amdgpu-native-words @multiply_low_gfx1100
 
 amdgpu.target<gfx1100> @target
 
@@ -290,11 +290,11 @@ low.func.def target<amdgpu.rdna3.core>(@target) @multiply_low_gfx1100(%vector: r
 // ----
 0xD72C0001
 0x020200C0
-0xD72C0002
-0x02018000
 0xD72C0000
 0x020200FF
 0x81234567
+0xD72C0002
+0x02018000
 0xD72C0003
 0x0201FE00
 0x81234567
@@ -302,7 +302,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @multiply_low_gfx1100(%vector: r
 
 // ====
 
-// RUN: emit amdgpu-assembly @multiply_low_gfx1201 strategy=source
+// RUN: emit amdgpu-assembly @multiply_low_gfx1201
 
 amdgpu.target<gfx1201> @target
 
@@ -316,14 +316,14 @@ low.func.def target<amdgpu.rdna4.core>(@target) @multiply_low_gfx1201(%vector: r
 
 // ----
   v_mul_lo_u32 v1, 64, v0
-  v_mul_lo_u32 v2, s0, 64
   v_mul_lo_u32 v0, 2166572391, v0
+  v_mul_lo_u32 v2, s0, 64
   v_mul_lo_u32 v3, s0, 2166572391
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-native-words @multiply_low_gfx1201 strategy=source
+// RUN: emit amdgpu-native-words @multiply_low_gfx1201
 
 amdgpu.target<gfx1201> @target
 
@@ -338,11 +338,11 @@ low.func.def target<amdgpu.rdna4.core>(@target) @multiply_low_gfx1201(%vector: r
 // ----
 0xD72C0001
 0x020200C0
-0xD72C0002
-0x02018000
 0xD72C0000
 0x020200FF
 0x81234567
+0xD72C0002
+0x02018000
 0xD72C0003
 0x0201FE00
 0x81234567
@@ -350,7 +350,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @multiply_low_gfx1201(%vector: r
 
 // ====
 
-// RUN: emit amdgpu-assembly @multiply_low_gfx1250 strategy=source
+// RUN: emit amdgpu-assembly @multiply_low_gfx1250
 
 amdgpu.target<gfx1250> @target
 
@@ -364,14 +364,14 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @multiply_low_gfx1250(%v
 
 // ----
   v_mul_lo_u32 v1, 64, v0
-  v_mul_lo_u32 v2, s0, 64
   v_mul_lo_u32 v0, 2166572391, v0
+  v_mul_lo_u32 v2, s0, 64
   v_mul_lo_u32 v3, s0, 2166572391
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-native-words @multiply_low_gfx1250 strategy=source
+// RUN: emit amdgpu-native-words @multiply_low_gfx1250
 
 amdgpu.target<gfx1250> @target
 
@@ -386,11 +386,11 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @multiply_low_gfx1250(%v
 // ----
 0xD72C0001
 0x020200C0
-0xD72C0002
-0x02018000
 0xD72C0000
 0x020200FF
 0x81234567
+0xD72C0002
+0x02018000
 0xD72C0003
 0x0201FE00
 0x81234567

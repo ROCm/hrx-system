@@ -1,5 +1,5 @@
 // The selectors stay relative to their own consecutive native consumers.
-// RUN: emit amdgpu-assembly @adjacent_gfx1100 strategy=source
+// RUN: emit amdgpu-assembly @adjacent_gfx1100
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @adjacent_gfx1100(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %increment: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -19,7 +19,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @adjacent_gfx1100(%a: reg<amdgpu
 // ====
 
 // The selectors stay relative to their own consecutive native consumers.
-// RUN: emit amdgpu-assembly @adjacent_gfx1151 strategy=source
+// RUN: emit amdgpu-assembly @adjacent_gfx1151
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @adjacent_gfx1151(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %increment: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -39,7 +39,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @adjacent_gfx1151(%a: reg<amdg
 // ====
 
 // The selectors stay relative to their own consecutive native consumers.
-// RUN: emit amdgpu-assembly @adjacent_gfx1200 strategy=source
+// RUN: emit amdgpu-assembly @adjacent_gfx1200
 amdgpu.target<gfx1200> @target
 
 low.func.def target<amdgpu.rdna4.core>(@target) @adjacent_gfx1200(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %increment: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -59,7 +59,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @adjacent_gfx1200(%a: reg<amdgpu
 // ====
 
 // The selectors stay relative to their own consecutive native consumers.
-// RUN: emit amdgpu-assembly @adjacent_gfx942 strategy=source
+// RUN: emit amdgpu-assembly @adjacent_gfx942
 amdgpu.target<gfx942> @target
 
 low.func.def target<amdgpu.cdna3.core>(@target) @adjacent_gfx942(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %increment: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -79,7 +79,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @adjacent_gfx942(%a: reg<amdgpu.
 // ====
 
 // The native immediate carries NEXT and both original selectors.
-// RUN: emit amdgpu-native-words @adjacent_words strategy=source
+// RUN: emit amdgpu-native-words @adjacent_words
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @adjacent_words(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %increment: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -99,7 +99,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @adjacent_words(%a: reg<amdgpu.v
 // ====
 
 // A literal-bearing move occupies two words but one skipped instruction.
-// RUN: emit amdgpu-assembly @literal_gap strategy=source
+// RUN: emit amdgpu-assembly @literal_gap
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @literal_gap(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %increment: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.vgpr>) asm {
@@ -121,7 +121,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @literal_gap(%a: reg<amdgpu.vgpr
 // ====
 
 // A VOPD instruction advances the native skip distance once.
-// RUN: emit amdgpu-assembly @vopd_gap strategy=source
+// RUN: emit amdgpu-assembly @vopd_gap
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @vopd_gap(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>, %d: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.vgpr>) asm {
@@ -144,7 +144,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @vopd_gap(%a: reg<amdgpu.vgpr>, 
 // ====
 
 // Authored delay metadata ends the preceding compiler pairing window.
-// RUN: emit amdgpu-assembly @authored_hint_boundary strategy=source
+// RUN: emit amdgpu-assembly @authored_hint_boundary
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @authored_hint_boundary(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %increment: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -158,16 +158,15 @@ low.func.def target<amdgpu.rdna3.core>(@target) @authored_hint_boundary(%a: reg<
 // ----
   v_add_f32 v0, v0, v1
   s_delay_alu instid0(VALU_DEP_1)
+  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
   v_readfirstlane_b32 s1, v0
-  s_delay_alu instid0(VALU_DEP_1)
-  s_delay_alu instid0(VALU_DEP_1)
   s_add_u32 s0, s1, s0
   s_endpgm
 
 // ====
 
 // A block entry does not inherit a pending pairing candidate.
-// RUN: emit amdgpu-assembly @block_boundary strategy=source
+// RUN: emit amdgpu-assembly @block_boundary
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @block_boundary(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %increment: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -290,7 +289,7 @@ kernel_layout:
 // ====
 
 // TRANS32 and VALU selectors retain their distinct consumers in a paired hint.
-// RUN: emit amdgpu-assembly @trans_consumer strategy=source
+// RUN: emit amdgpu-assembly @trans_consumer
 amdgpu.target<gfx1200> @target {subgroup_size = 32}
 
 low.func.def target<amdgpu.rdna4.core>(@target) @trans_consumer(%input: reg<amdgpu.vgpr>, %increment: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {

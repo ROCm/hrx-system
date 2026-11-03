@@ -6,7 +6,7 @@
 
 // A 64-bit aperture read supplies the high address word. The low word is zero;
 // a 32-bit move from the same inline source cannot construct a flat LDS pointer.
-// RUN: emit amdgpu-native-words @shared_base_gfx942 strategy=source
+// RUN: emit amdgpu-native-words @shared_base_gfx942
 
 amdgpu.target<gfx942> @target
 
@@ -22,7 +22,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @shared_base_gfx942() -> (reg<am
 
 // ====
 
-// RUN: emit amdgpu-native-words @shared_base_gfx950 strategy=source
+// RUN: emit amdgpu-native-words @shared_base_gfx950
 
 amdgpu.target<gfx950> @target
 
@@ -38,7 +38,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @shared_base_gfx950() -> (reg<am
 
 // ====
 
-// RUN: emit amdgpu-native-words @shared_base_gfx1100 strategy=source
+// RUN: emit amdgpu-native-words @shared_base_gfx1100
 
 amdgpu.target<gfx1100> @target
 
@@ -54,7 +54,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @shared_base_gfx1100() -> (reg<a
 
 // ====
 
-// RUN: emit amdgpu-native-words @shared_base_gfx1151 strategy=source
+// RUN: emit amdgpu-native-words @shared_base_gfx1151
 
 amdgpu.target<gfx1151> @target
 
@@ -70,7 +70,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @shared_base_gfx1151() -> (reg
 
 // ====
 
-// RUN: emit amdgpu-native-words @shared_base_gfx1201 strategy=source
+// RUN: emit amdgpu-native-words @shared_base_gfx1201
 
 amdgpu.target<gfx1201> @target
 
@@ -86,7 +86,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @shared_base_gfx1201() -> (reg<a
 
 // ====
 
-// RUN: emit amdgpu-native-words @shared_base_gfx1250 strategy=source
+// RUN: emit amdgpu-native-words @shared_base_gfx1250
 
 amdgpu.target<gfx1250> @target
 
@@ -102,7 +102,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @shared_base_gfx1250() -
 
 // ====
 
-// RUN: emit amdgpu-assembly @shared_base_assembly strategy=source
+// RUN: emit amdgpu-assembly @shared_base_assembly
 
 amdgpu.target<gfx1151> @target
 

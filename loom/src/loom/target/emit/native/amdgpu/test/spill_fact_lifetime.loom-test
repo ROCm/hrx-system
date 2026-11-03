@@ -1,7 +1,7 @@
 // Spilling a loop argument must leave its incoming payload independently
 // spillable after native lowering replaces the abstract edge store. The
 // three recurrences share one loaded seed and need successive repair rounds.
-// RUN: emit amdgpu-assembly @shared_loop_payload amdgpu.vgpr=4 strategy=resource-stall
+// RUN: emit amdgpu-assembly @shared_loop_payload amdgpu.vgpr=4
 
 amdgpu.target<gfx90a> @target
 
@@ -97,7 +97,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @shared_loop_payload(%source: re
 // Multiword loop payloads need contiguous reload storage plus a scratch
 // address. Requirements belonging to removed abstract stores must not pin
 // the incoming values throughout subsequent allocation rounds.
-// RUN: emit amdgpu-assembly @shared_wide_loop_payload amdgpu.vgpr=6 strategy=source
+// RUN: emit amdgpu-assembly @shared_wide_loop_payload amdgpu.vgpr=6
 
 amdgpu.target<gfx90a> @target
 
@@ -122,54 +122,61 @@ low.func.def target<amdgpu.cdna2.core>(@target) @shared_wide_loop_payload(%sourc
 }
 
 // ----
-  s_mov_b32 s5, 0
-  s_mov_b32 s6, 1
   v_mov_b32 v0, 0
   global_load_dwordx2 v[0:1], v0, s[0:1] offset:0
-  v_mov_b32 v2, 0
+  v_mov_b32 v2, 16
   s_waitcnt vmcnt(0) lgkmcnt(15)
   scratch_store_dwordx2 v2, v[0:1], off offset:0
-  v_mov_b32 v2, 8
-  scratch_store_dwordx2 v2, v[0:1], off offset:0
+  v_mov_b32 v0, 8
+  v_mov_b32 v1, 16
+  scratch_load_dwordx2 v[2:3], v1, off offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  scratch_store_dwordx2 v0, v[2:3], off offset:0
+  v_mov_b32 v0, 16
+  scratch_load_dwordx2 v[0:1], v0, off offset:0
+  s_mov_b32 s0, 0
+  s_mov_b32 s1, 1
+  s_waitcnt vmcnt(0) lgkmcnt(15)
 .Lbb1:
-  v_mov_b32 v2, 8
+  s_add_u32 s0, s0, s1
+  s_cmp_lt_u32 s0, s4
+  v_mov_b32 v2, 16
   s_waitcnt vmcnt(0) lgkmcnt(15)
   scratch_load_dwordx2 v[2:3], v2, off offset:0
+  v_mov_b32 v4, 8
   s_waitcnt vmcnt(0) lgkmcnt(15)
-  v_add_f64 v[2:3], v[2:3], v[0:1]
+  v_add_f64 v[0:1], v[0:1], v[2:3]
+  scratch_load_dwordx2 v[2:3], v4, off offset:0
+  v_mov_b32 v4, 16
+  scratch_load_dwordx2 v[4:5], v4, off offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  v_add_f64 v[2:3], v[2:3], v[4:5]
   v_mov_b32 v4, 0
-  global_store_dwordx2 v4, v[2:3], s[2:3] offset:0
-  v_mov_b32 v2, 0
-  scratch_load_dwordx2 v[2:3], v2, off offset:0
+  scratch_store_dwordx2 v4, v[0:1], off offset:0
+  v_mov_b32 v0, 0
+  global_store_dwordx2 v0, v[2:3], s[2:3] offset:0
+  v_mov_b32 v0, 0
+  v_mov_b32 v1, 0
+  scratch_load_dwordx2 v[2:3], v1, off offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
-  v_add_f64 v[2:3], v[2:3], v[0:1]
-  v_mov_b32 v4, 24
-  scratch_store_dwordx2 v4, v[2:3], off offset:0
-  v_mov_b32 v2, 0
-  v_mov_b32 v3, 24
-  scratch_load_dwordx2 v[4:5], v3, off offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(15)
-  global_store_dwordx2 v2, v[4:5], s[2:3] offset:8
-  s_add_u32 s5, s5, s6
-  s_cmp_lt_u32 s5, s4
+  global_store_dwordx2 v0, v[2:3], s[2:3] offset:8
   s_cbranch_scc0 .Lbb3
 .Lbb2:
-  v_mov_b32 v2, 8
-  scratch_load_dwordx2 v[2:3], v2, off offset:0
+  v_mov_b32 v0, 8
+  v_mov_b32 v1, 16
+  scratch_load_dwordx2 v[2:3], v0, off offset:0
+  s_nop 0
+  scratch_load_dwordx2 v[0:1], v1, off offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
-  v_add_f64 v[2:3], v[2:3], v[0:1]
-  v_mov_b32 v4, 16
-  scratch_store_dwordx2 v4, v[2:3], off offset:0
+  v_add_f64 v[0:1], v[2:3], v[0:1]
   v_mov_b32 v2, 0
-  v_mov_b32 v3, 24
-  scratch_load_dwordx2 v[4:5], v3, off offset:0
+  v_mov_b32 v3, 8
+  scratch_load_dwordx2 v[4:5], v2, off offset:0
+  s_nop 0
+  scratch_store_dwordx2 v3, v[0:1], off offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
-  scratch_store_dwordx2 v2, v[4:5], off offset:0
-  v_mov_b32 v2, 8
-  v_mov_b32 v3, 16
-  scratch_load_dwordx2 v[4:5], v3, off offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(15)
-  scratch_store_dwordx2 v2, v[4:5], off offset:0
+  v_mov_b32 v0, v4
+  v_mov_b32 v1, v5
   s_branch .Lbb1
 .Lbb3:
   s_waitcnt vmcnt(0) lgkmcnt(15)
@@ -179,7 +186,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @shared_wide_loop_payload(%sourc
 
 // The held scratch payload predates the fence. Completing each later reload
 // before opening another keeps the six-register schedule free of added spills.
-// RUN: emit amdgpu-assembly @required_payload_across_fence strategy=resource-stall amdgpu.vgpr=6
+// RUN: emit amdgpu-assembly @required_payload_across_fence amdgpu.vgpr=6
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @required_payload_across_fence(%held: reg<amdgpu.vgpr x2>, %output: reg<amdgpu.sgpr x2>) asm {

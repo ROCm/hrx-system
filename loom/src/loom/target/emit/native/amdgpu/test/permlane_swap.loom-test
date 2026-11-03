@@ -1,6 +1,6 @@
 // The compact and e64 encodings share one destructive two-register contract.
 // Named controls remain independent in Low and use LLVM's canonical spelling.
-// RUN: emit amdgpu-assembly @permlane_swap_forms strategy=source waits=none
+// RUN: emit amdgpu-assembly @permlane_swap_forms
 
 amdgpu.target<gfx950> @target
 
@@ -20,21 +20,30 @@ low.func.def target<amdgpu.cdna4.core>(@target) @permlane_swap_forms(%lhs: reg<a
 
 // ----
   v_permlane16_swap_b32 v0, v1
+  s_nop 1
   v_permlane16_swap_b32_e64 v0, v1
+  s_nop 1
   v_permlane16_swap_b32_e64 v0, v1 bound_ctrl:1
+  s_nop 1
   v_permlane16_swap_b32_e64 v0, v1 fi:1
+  s_nop 1
   v_permlane16_swap_b32_e64 v0, v1 bound_ctrl:1 fi:1
+  s_nop 1
   v_permlane32_swap_b32 v0, v1
+  s_nop 1
   v_permlane32_swap_b32_e64 v0, v1
+  s_nop 1
   v_permlane32_swap_b32_e64 v0, v1 bound_ctrl:1
+  s_nop 1
   v_permlane32_swap_b32_e64 v0, v1 fi:1
+  s_nop 1
   v_permlane32_swap_b32_e64 v0, v1 bound_ctrl:1 fi:1
   s_endpgm
 
 // ====
 
 // Native words distinguish both opcodes and every OP_SEL control combination.
-// RUN: emit amdgpu-native-words @permlane_swap_words strategy=source waits=none
+// RUN: emit amdgpu-native-words @permlane_swap_words
 
 amdgpu.target<gfx950> @target
 
@@ -54,21 +63,30 @@ low.func.def target<amdgpu.cdna4.core>(@target) @permlane_swap_words(%lhs: reg<a
 
 // ----
 0x7E00B301
+0xBF800001
 0xD1990000
 0x00000101
+0xBF800001
 0xD1991000
 0x00000101
+0xBF800001
 0xD1990800
 0x00000101
+0xBF800001
 0xD1991800
 0x00000101
+0xBF800001
 0x7E00B501
+0xBF800001
 0xD19A0000
 0x00000101
+0xBF800001
 0xD19A1000
 0x00000101
+0xBF800001
 0xD19A0800
 0x00000101
+0xBF800001
 0xD19A1800
 0x00000101
 0xBF810000
@@ -77,7 +95,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @permlane_swap_words(%lhs: reg<a
 
 // A write immediately consumed through the first destructive input needs the
 // full two-cycle gfx950 lane-permute forwarding distance.
-// RUN: emit amdgpu-wait-state-plan @permlane16_first_input_hazard strategy=source
+// RUN: emit amdgpu-wait-state-plan @permlane16_first_input_hazard
 
 amdgpu.target<gfx950> @target
 
@@ -94,7 +112,7 @@ state[0] reason=lane_permute_vgpr_read action=amdgpu.s_nop at=b0:n1/o1 producer=
 // ====
 
 // The final assembly realizes the planner requirement as an s_nop 1.
-// RUN: emit amdgpu-assembly @permlane16_first_input_assembly strategy=source
+// RUN: emit amdgpu-assembly @permlane16_first_input_assembly
 
 amdgpu.target<gfx950> @target
 
@@ -113,7 +131,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @permlane16_first_input_assembly
 // ====
 
 // The second destructive input has the same forwarding restriction.
-// RUN: emit amdgpu-wait-state-plan @permlane32_second_input_hazard strategy=source
+// RUN: emit amdgpu-wait-state-plan @permlane32_second_input_hazard
 
 amdgpu.target<gfx950> @target
 
@@ -130,7 +148,7 @@ state[0] reason=lane_permute_vgpr_read action=amdgpu.s_nop at=b0:n1/o1 producer=
 // ====
 
 // One intervening VALU instruction leaves one cycle of the e64 hazard.
-// RUN: emit amdgpu-wait-state-plan @permlane16_partial_progress strategy=source
+// RUN: emit amdgpu-wait-state-plan @permlane16_partial_progress
 
 amdgpu.target<gfx950> @target
 
@@ -148,7 +166,7 @@ state[0] reason=lane_permute_vgpr_read action=amdgpu.s_nop at=b0:n2/o2 producer=
 // ====
 
 // Two intervening instructions satisfy the e64 forwarding distance exactly.
-// RUN: emit amdgpu-wait-state-plan @permlane32_sufficient_progress strategy=source
+// RUN: emit amdgpu-wait-state-plan @permlane32_sufficient_progress
 
 amdgpu.target<gfx950> @target
 

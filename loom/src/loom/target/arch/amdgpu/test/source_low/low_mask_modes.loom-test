@@ -1,7 +1,7 @@
 // The read-retention rule follows processor capability and execution width,
 // not an architecture-name prefix or the width of the predicate value.
 
-// RUN: emit amdgpu-assembly @retained_mask_mode strategy=source
+// RUN: emit amdgpu-assembly @retained_mask_mode
 
 amdgpu.target<gfx1100> @target {subgroup_size = 64}
 
@@ -14,14 +14,14 @@ low.func.def target<amdgpu.rdna3.core>(@target) @retained_mask_mode(%value: reg<
 
 // ----
   v_cmp_eq_i32 s[0:1], v0, v0
+  s_mov_b32 s2, 1
   s_delay_alu instid0(VALU_DEP_1)
   v_cndmask_b32 v0, v0, v0, s[0:1]
-  s_mov_b32 s2, 1
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @retained_mask_mode strategy=source
+// RUN: emit amdgpu-assembly @retained_mask_mode
 
 amdgpu.target<gfx1100> @target {subgroup_size = 32}
 
@@ -34,14 +34,14 @@ low.func.def target<amdgpu.rdna3.core>(@target) @retained_mask_mode(%value: reg<
 
 // ----
   v_cmp_eq_i32 s[0:1], v0, v0
+  s_mov_b32 s2, 1
   s_delay_alu instid0(VALU_DEP_1)
   v_cndmask_b32 v0, v0, v0, s[0:1]
-  s_mov_b32 s0, 1
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @retained_mask_mode strategy=source
+// RUN: emit amdgpu-assembly @retained_mask_mode
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -54,14 +54,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @retained_mask_mode(%value: re
 
 // ----
   v_cmp_eq_i32 s[0:1], v0, v0
+  s_mov_b32 s2, 1
   s_delay_alu instid0(VALU_DEP_1)
   v_cndmask_b32 v0, v0, v0, s[0:1]
-  s_mov_b32 s2, 1
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @retained_mask_mode strategy=source
+// RUN: emit amdgpu-assembly @retained_mask_mode
 
 amdgpu.target<gfx1151> @target {subgroup_size = 32}
 
@@ -74,14 +74,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @retained_mask_mode(%value: re
 
 // ----
   v_cmp_eq_i32 s[0:1], v0, v0
+  s_mov_b32 s2, 1
   s_delay_alu instid0(VALU_DEP_1)
   v_cndmask_b32 v0, v0, v0, s[0:1]
-  s_mov_b32 s0, 1
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @retained_mask_mode strategy=source
+// RUN: emit amdgpu-assembly @retained_mask_mode
 
 amdgpu.target<gfx1170> @target {subgroup_size = 64}
 
@@ -94,14 +94,14 @@ low.func.def target<amdgpu.rdna4m.core>(@target) @retained_mask_mode(%value: reg
 
 // ----
   v_cmp_eq_i32 s[0:1], v0, v0
+  s_mov_b32 s2, 1
   s_delay_alu instid0(VALU_DEP_1)
   v_cndmask_b32 v0, v0, v0, s[0:1]
-  s_mov_b32 s2, 1
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @retained_mask_mode strategy=source
+// RUN: emit amdgpu-assembly @retained_mask_mode
 
 amdgpu.target<gfx1170> @target {subgroup_size = 32}
 
@@ -114,14 +114,14 @@ low.func.def target<amdgpu.rdna4m.core>(@target) @retained_mask_mode(%value: reg
 
 // ----
   v_cmp_eq_i32 s[0:1], v0, v0
+  s_mov_b32 s2, 1
   s_delay_alu instid0(VALU_DEP_1)
   v_cndmask_b32 v0, v0, v0, s[0:1]
-  s_mov_b32 s0, 1
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @retained_mask_mode strategy=source
+// RUN: emit amdgpu-assembly @retained_mask_mode
 
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
@@ -134,14 +134,14 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) @retained_mask_mode(%val
 
 // ----
   v_cmp_eq_i32 s[0:1], v0, v0
+  s_mov_b32 s2, 1
   s_delay_alu instid0(VALU_DEP_1)
   v_cndmask_b32 v0, v0, v0, s[0:1]
-  s_mov_b32 s2, 1
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @retained_mask_mode strategy=source
+// RUN: emit amdgpu-assembly @retained_mask_mode
 
 amdgpu.target<gfx11-generic> @target {subgroup_size = 32}
 
@@ -154,14 +154,14 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) @retained_mask_mode(%val
 
 // ----
   v_cmp_eq_i32 s[0:1], v0, v0
+  s_mov_b32 s2, 1
   s_delay_alu instid0(VALU_DEP_1)
   v_cndmask_b32 v0, v0, v0, s[0:1]
-  s_mov_b32 s0, 1
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @retained_mask_mode strategy=source
+// RUN: emit amdgpu-assembly @retained_mask_mode
 
 amdgpu.target<gfx1200> @target {subgroup_size = 64}
 
@@ -174,14 +174,14 @@ low.func.def target<amdgpu.rdna4.core>(@target) @retained_mask_mode(%value: reg<
 
 // ----
   v_cmp_eq_i32 s[0:1], v0, v0
+  s_mov_b32 s2, 1
   s_delay_alu instid0(VALU_DEP_1)
   v_cndmask_b32 v0, v0, v0, s[0:1]
-  s_mov_b32 s0, 1
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @retained_mask_mode strategy=source
+// RUN: emit amdgpu-assembly @retained_mask_mode
 
 amdgpu.target<gfx1200> @target {subgroup_size = 32}
 
@@ -194,14 +194,14 @@ low.func.def target<amdgpu.rdna4.core>(@target) @retained_mask_mode(%value: reg<
 
 // ----
   v_cmp_eq_i32 s[0:1], v0, v0
+  s_mov_b32 s2, 1
   s_delay_alu instid0(VALU_DEP_1)
   v_cndmask_b32 v0, v0, v0, s[0:1]
-  s_mov_b32 s0, 1
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @retained_mask_mode strategy=source
+// RUN: emit amdgpu-assembly @retained_mask_mode
 
 amdgpu.target<gfx1250> @target {subgroup_size = 32}
 
@@ -214,14 +214,14 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @retained_mask_mode(%val
 
 // ----
   v_cmp_eq_i32 s[0:1], v0, v0
+  s_mov_b32 s2, 1
   s_delay_alu instid0(VALU_DEP_1)
   v_cndmask_b32 v0, v0, v0, s[0:1]
-  s_mov_b32 s0, 1
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @retained_mask_mode strategy=source
+// RUN: emit amdgpu-assembly @retained_mask_mode
 
 amdgpu.target<gfx942> @target {subgroup_size = 64}
 
@@ -241,7 +241,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @retained_mask_mode(%value: reg<
 
 // ====
 
-// RUN: emit amdgpu-assembly @retained_mask_mode strategy=source
+// RUN: emit amdgpu-assembly @retained_mask_mode
 
 amdgpu.target<gfx950> @target {subgroup_size = 64}
 

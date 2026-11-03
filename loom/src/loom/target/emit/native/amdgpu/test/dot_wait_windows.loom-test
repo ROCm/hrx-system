@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @dot_forward_accumulator strategy=source
+// RUN: emit amdgpu-assembly @dot_forward_accumulator
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @dot_forward_accumulator(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>, %other_acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -12,7 +12,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @dot_forward_accumulator(%lhs: r
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @dot_read_input strategy=source
+// RUN: emit amdgpu-assembly @dot_read_input
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @dot_read_input(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>, %other_acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -27,7 +27,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @dot_read_input(%lhs: reg<amdgpu
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @dot_read_other strategy=source
+// RUN: emit amdgpu-assembly @dot_read_other
 amdgpu.target<gfx942> @target
 
 low.func.def target<amdgpu.cdna3.core>(@target) @dot_read_other(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>, %other_acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -46,7 +46,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @dot_read_other(%lhs: reg<amdgpu
 // A generic write cannot reuse a pending dot destination before its write
 // window closes. Keeping the multiplicands live makes ordinary allocation
 // place the replacement in the dead accumulator storage.
-// RUN: emit amdgpu-assembly @dot_result_reuse strategy=source
+// RUN: emit amdgpu-assembly @dot_result_reuse
 amdgpu.target<gfx950> @target
 
 low.func.def target<amdgpu.cdna4.core>(@target) @dot_result_reuse(%acc: reg<amdgpu.vgpr>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
@@ -62,7 +62,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @dot_result_reuse(%acc: reg<amdg
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @matching_native_dot_overwrite strategy=source
+// RUN: emit amdgpu-assembly @matching_native_dot_overwrite
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @matching_native_dot_overwrite(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc0: reg<amdgpu.vgpr>, %acc1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -76,7 +76,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @matching_native_dot_overwrite(%
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @distinct_dot_accumulator strategy=source
+// RUN: emit amdgpu-assembly @distinct_dot_accumulator
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @distinct_dot_accumulator(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -91,7 +91,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @distinct_dot_accumulator(%lhs: 
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @packed_nibble_dot_chain strategy=source
+// RUN: emit amdgpu-assembly @packed_nibble_dot_chain
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @packed_nibble_dot_chain(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -106,7 +106,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @packed_nibble_dot_chain(%lhs: r
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @bf16_dot_forwarding strategy=source
+// RUN: emit amdgpu-assembly @bf16_dot_forwarding
 amdgpu.target<gfx950> @target
 
 low.func.def target<amdgpu.cdna4.core>(@target) @bf16_dot_forwarding(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -123,7 +123,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @bf16_dot_forwarding(%lhs: reg<a
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @dot_memory_consumer strategy=source
+// RUN: emit amdgpu-assembly @dot_memory_consumer
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @dot_memory_consumer(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>, %offset: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm {
@@ -139,7 +139,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @dot_memory_consumer(%lhs: reg<a
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @dot_matrix_interlock strategy=source
+// RUN: emit amdgpu-assembly @dot_matrix_interlock
 amdgpu.target<gfx942> @target
 
 low.func.def target<amdgpu.cdna3.core>(@target) @dot_matrix_interlock(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>, %matrix_acc: reg<amdgpu.vgpr x4>) asm {
@@ -153,7 +153,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @dot_matrix_interlock(%lhs: reg<
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @fallthrough_dot_read strategy=source
+// RUN: emit amdgpu-assembly @fallthrough_dot_read
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @fallthrough_dot_read(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -174,7 +174,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @fallthrough_dot_read(%lhs: reg<
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @join_preserves_opcode_identity strategy=source
+// RUN: emit amdgpu-assembly @join_preserves_opcode_identity
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @join_preserves_opcode_identity(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %initial: reg<amdgpu.vgpr>, %choice: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -206,7 +206,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @join_preserves_opcode_identity(
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @loop_dot_operand_read strategy=source
+// RUN: emit amdgpu-assembly @loop_dot_operand_read
 amdgpu.target<gfx942> @target
 
 low.func.def target<amdgpu.cdna3.core>(@target) @loop_dot_operand_read(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %initial: reg<amdgpu.vgpr>, %choice: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {

@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @global_d16_high_vector_address strategy=source
+// RUN: emit amdgpu-assembly @global_d16_high_vector_address
 
 // The implicit preserved source is not the address. The native 64-bit VGPR
 // address form has no scalar base even though the preserved source is one unit.
@@ -18,7 +18,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @global_d16_high_vector_addres
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @global_d16_high_scalar_address strategy=source
+// RUN: emit amdgpu-assembly @global_d16_high_scalar_address
 
 amdgpu.target<gfx1151> @target
 

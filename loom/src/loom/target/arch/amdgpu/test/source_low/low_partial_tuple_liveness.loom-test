@@ -1,5 +1,5 @@
 // Dead tuple words can be reused while other words cross a live-through block.
-// RUN: emit amdgpu-assembly @partial_tuple_cfg strategy=source
+// RUN: emit amdgpu-assembly @partial_tuple_cfg
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -28,7 +28,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @partial_tuple_cfg(%bindings: 
 
 // A loop-carried handoff reads the high pair before its next producer in layout
 // order. The pair must survive the backedge and remain distinct from the payload.
-// RUN: emit amdgpu-assembly @partial_tuple_reverse_layout strategy=source
+// RUN: emit amdgpu-assembly @partial_tuple_reverse_layout
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -69,7 +69,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @partial_tuple_reverse_layout(
 
 // A repeated high-word read protects that word through the loop backedge even
 // though the last read in layout order precedes the temporary's definition.
-// RUN: emit amdgpu-assembly @partial_tuple_loop strategy=source
+// RUN: emit amdgpu-assembly @partial_tuple_loop
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -94,9 +94,8 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @partial_tuple_loop(%bindings:
 .Lbb1:
   v_mov_b32 v0, s2
 .Lbb2:
-  s_mov_b64_exec_read s[6:7]
   s_cmp_eq_i32 s3, s4
-  s_delay_alu instid0(SALU_CYCLE_1)
+  s_mov_b64_exec_read s[6:7]
   s_cbranch_scc1 .Lbb1
 .Lbb3:
   s_endpgm
@@ -105,7 +104,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @partial_tuple_loop(%bindings:
 
 // Alternative successors demand different tuple words. Both demands protect
 // their words before the branch; alternatives cannot discard either use.
-// RUN: emit amdgpu-assembly @partial_tuple_alternatives strategy=source
+// RUN: emit amdgpu-assembly @partial_tuple_alternatives
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -126,13 +125,12 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @partial_tuple_alternatives(%b
 
 // ----
   s_mov_b32 s1, 0
-  s_mov_b64_exec_read s[2:3]
   s_cmp_eq_i32 s0, s1
-  s_delay_alu instid0(SALU_CYCLE_1)
+  s_mov_b64_exec_read s[0:1]
   s_cbranch_scc0 .Lbb2
 .Lbb1:
-  s_and_b64 s[0:1], s[2:3], s[4:5]
+  s_and_b64 s[0:1], s[0:1], s[4:5]
   s_endpgm
 .Lbb2:
-  s_and_b64 s[0:1], s[2:3], s[6:7]
+  s_and_b64 s[0:1], s[0:1], s[6:7]
   s_endpgm

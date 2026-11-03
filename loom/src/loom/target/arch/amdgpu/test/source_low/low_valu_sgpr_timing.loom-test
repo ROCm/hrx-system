@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @compare_masks strategy=resource-stall
+// RUN: emit amdgpu-assembly @compare_masks
 
 // Independent compares issue before scalar instructions consume their masks.
 
@@ -21,7 +21,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @compare_masks(%lhs: reg<amdgp
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @read_lanes strategy=resource-stall
+// RUN: emit amdgpu-assembly @read_lanes
 
 // State-read fences preserve EXEC ordering without waiting for another lane
 // read's SGPR result. Independent lane reads fill that result-latency gap.

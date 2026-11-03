@@ -3,7 +3,7 @@
 // precede other live operands so ordinary allocation naturally reuses their
 // dead storage for the replacement writes under test.
 
-// RUN: emit amdgpu-assembly @two_pass_input strategy=source
+// RUN: emit amdgpu-assembly @two_pass_input
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @two_pass_input(%seed: reg<amdgpu.vgpr x4>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
@@ -21,7 +21,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @two_pass_input(%seed: reg<amdgp
 
 // ====
 
-// RUN: emit amdgpu-assembly @eight_pass_input strategy=source
+// RUN: emit amdgpu-assembly @eight_pass_input
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @eight_pass_input(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %seed: reg<amdgpu.agpr x4>) -> (reg<amdgpu.agpr x4>, reg<amdgpu.agpr>) asm {
@@ -39,7 +39,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @eight_pass_input(%lhs: reg<amdg
 
 // ====
 
-// RUN: emit amdgpu-assembly @sixteen_pass_input strategy=source
+// RUN: emit amdgpu-assembly @sixteen_pass_input
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @sixteen_pass_input(%seed: reg<amdgpu.vgpr x16>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x16>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
@@ -57,7 +57,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @sixteen_pass_input(%seed: reg<a
 
 // ====
 
-// RUN: emit amdgpu-assembly @four_pass_input strategy=source
+// RUN: emit amdgpu-assembly @four_pass_input
 amdgpu.target<gfx942> @target
 
 low.func.def target<amdgpu.cdna3.core>(@target) @four_pass_input(%seed: reg<amdgpu.vgpr x4>, %lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
@@ -75,7 +75,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @four_pass_input(%seed: reg<amdg
 
 // ====
 
-// RUN: emit amdgpu-assembly @later_xdl_input strategy=source
+// RUN: emit amdgpu-assembly @later_xdl_input
 amdgpu.target<gfx950> @target
 
 low.func.def target<amdgpu.cdna4.core>(@target) @later_xdl_input(%seed: reg<amdgpu.vgpr x4>, %lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
@@ -93,7 +93,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @later_xdl_input(%seed: reg<amdg
 
 // ====
 
-// RUN: emit amdgpu-assembly @later_sgemm_has_no_input_wait strategy=source
+// RUN: emit amdgpu-assembly @later_sgemm_has_no_input_wait
 amdgpu.target<gfx942> @target
 
 low.func.def target<amdgpu.cdna3.core>(@target) @later_sgemm_has_no_input_wait(%seed: reg<amdgpu.vgpr x4>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
@@ -110,7 +110,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @later_sgemm_has_no_input_wait(%
 
 // ====
 
-// RUN: emit amdgpu-assembly @dgemm_has_no_input_wait strategy=source
+// RUN: emit amdgpu-assembly @dgemm_has_no_input_wait
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @dgemm_has_no_input_wait(%seed: reg<amdgpu.vgpr x2>, %lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
@@ -127,7 +127,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @dgemm_has_no_input_wait(%seed: 
 
 // ====
 
-// RUN: emit amdgpu-assembly @unrelated_write strategy=source
+// RUN: emit amdgpu-assembly @unrelated_write
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @unrelated_write(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %seed: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr>) asm {
@@ -144,7 +144,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @unrelated_write(%lhs: reg<amdgp
 
 // ====
 
-// RUN: emit amdgpu-assembly @empty_edges_retain_input strategy=source
+// RUN: emit amdgpu-assembly @empty_edges_retain_input
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @empty_edges_retain_input(%seed: reg<amdgpu.vgpr x4>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
@@ -168,7 +168,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @empty_edges_retain_input(%seed:
 
 // ====
 
-// RUN: emit amdgpu-assembly @join_retains_input strategy=source
+// RUN: emit amdgpu-assembly @join_retains_input
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @join_retains_input(%seed: reg<amdgpu.vgpr x4>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %choice: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
@@ -199,7 +199,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @join_retains_input(%seed: reg<a
 
 // ====
 
-// RUN: emit amdgpu-assembly @backedge_retains_input strategy=source
+// RUN: emit amdgpu-assembly @backedge_retains_input
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @backedge_retains_input(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr x4>) asm {

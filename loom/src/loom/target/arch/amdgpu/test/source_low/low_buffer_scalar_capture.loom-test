@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @buffer_base_capture strategy=source fixed=%resource:physical_register:32:4 fixed=%next_resource:physical_register:32:4 fixed=%offset:physical_register:40:1 fixed=%first:physical_register:8:4 fixed=%second:physical_register:12:4
+// RUN: emit amdgpu-assembly @buffer_base_capture
 
 // The next descriptor overwrites the first load's base before either result
 // completes. Both result tuples still require completion before returning.
@@ -21,21 +21,21 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @buffer_base_capture(%base: re
 }
 
 // ----
-  s_mov_b32 s0, s32
-  s_mov_b32 s1, s33
-  s_mov_b32 s34, 1024
-  s_mov_b32 s35, 822173696
   s_mov_b32 s2, 16
-  s_mov_b32 s3, 0
-  buffer_load_b128 v[8:11], v0, s[32:35], s40 offen offset:0
-  s_add_u32 s32, s0, s2
-  s_addc_u32 s33, s1, s3
-  buffer_load_b128 v[12:15], v0, s[32:35], s40 offen offset:0
+  s_add_u32 s8, s0, s2
+  s_mov_b32 s2, 0
+  s_addc_u32 s9, s1, s2
+  s_mov_b32 s10, 1024
+  s_mov_b32 s11, 822173696
+  s_mov_b32 s2, s10
+  s_mov_b32 s3, s11
+  buffer_load_b128 v[4:7], v0, s[0:3], s4 offen offset:0
+  buffer_load_b128 v[0:3], v0, s[8:11], s4 offen offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_bound_capture strategy=source fixed=%resource:physical_register:32:4 fixed=%next_resource:physical_register:32:4 fixed=%next_bound:physical_register:34:1 fixed=%offset:physical_register:40:1 fixed=%first:physical_register:8:2 fixed=%second:physical_register:12:2
+// RUN: emit amdgpu-assembly @buffer_bound_capture
 
 // Changing the bound affects the second load, not the outstanding first load.
 amdgpu.target<gfx1100> @target
@@ -52,23 +52,19 @@ low.func.def target<amdgpu.rdna3.core>(@target) @buffer_bound_capture(%base: reg
 }
 
 // ----
-  s_mov_b32 s2, 1024
   s_mov_b32 s3, 822173696
-  s_mov_b32 s32, s0
-  s_mov_b32 s33, s1
-  s_mov_b32 s34, s2
-  s_mov_b32 s35, s3
-  buffer_load_b64 v[8:9], v0, s[32:35], s40 offen offset:0
-  s_mov_b32 s34, 0
-  s_mov_b32 s32, s0
-  s_mov_b32 s33, s1
-  s_mov_b32 s35, s3
-  buffer_load_b64 v[12:13], v0, s[32:35], s40 offen offset:0
+  s_mov_b32 s2, 1024
+  s_mov_b32 s10, 0
+  buffer_load_b64 v[2:3], v0, s[0:3], s4 offen offset:0
+  s_mov_b32 s8, s0
+  s_mov_b32 s9, s1
+  s_mov_b32 s11, s3
+  buffer_load_b64 v[0:1], v0, s[8:11], s4 offen offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_offset_capture strategy=source fixed=%resource:physical_register:32:4 fixed=%offset:physical_register:40:1 fixed=%next_offset:physical_register:40:1 fixed=%first:physical_register:8:1 fixed=%second:physical_register:12:1
+// RUN: emit amdgpu-assembly @buffer_offset_capture
 
 // The generic gfx11 contract also captures SOFFSET independently of the result.
 amdgpu.target<gfx11-generic> @target
@@ -81,14 +77,14 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) @buffer_offset_capture(%
 }
 
 // ----
-  buffer_load_dword v8, v0, s[32:35], s40 offen offset:0
-  s_add_u32 s40, s40, 4
-  buffer_load_dword v12, v0, s[32:35], s40 offen offset:0
+  s_add_u32 s1, s0, 4
+  buffer_load_dword v1, v0, s[4:7], s0 offen offset:0
+  buffer_load_dword v0, v0, s[4:7], s1 offen offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_narrow_capture strategy=source fixed=%resource:physical_register:32:4 fixed=%offset:physical_register:40:1 fixed=%next_offset:physical_register:40:1 fixed=%loaded:physical_register:8:1 fixed=%output:physical_register:44:2
+// RUN: emit amdgpu-assembly @buffer_narrow_capture
 
 // Narrow loads share scalar capture, but storing their result still waits for it.
 amdgpu.target<gfx1151> @target
@@ -101,15 +97,15 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @buffer_narrow_capture(%resour
 }
 
 // ----
-  buffer_load_ubyte v8, v0, s[32:35], s40 offen offset:0
-  s_add_u32 s40, s40, 1
+  buffer_load_ubyte v1, v0, s[0:3], s4 offen offset:0
+  s_add_u32 s0, s4, 1
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  global_store_b32 v0, v8, s[44:45] offset:0
+  global_store_b32 v0, v1, s[6:7] offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_tied_half_capture strategy=source fixed=%resource:physical_register:32:4 fixed=%offset:physical_register:40:1 fixed=%next_offset:physical_register:40:1 fixed=%low_half:physical_register:8:1 fixed=%loaded:physical_register:8:1 fixed=%output:physical_register:44:2
+// RUN: emit amdgpu-assembly @buffer_tied_half_capture
 
 // The tied low half remains intact while the high half loads. Capturing the
 // scalar offset does not make the high-half result ready for its consumer.
@@ -123,15 +119,15 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @buffer_tied_half_capture(%res
 }
 
 // ----
-  buffer_load_short_d16_hi v8, v0, s[32:35], s40 offen offset:0
-  s_add_u32 s40, s40, 2
+  buffer_load_short_d16_hi v0, v1, s[0:3], s4 offen offset:0
+  s_add_u32 s0, s4, 2
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  global_store_b32 v0, v8, s[44:45] offset:0
+  global_store_b32 v1, v0, s[6:7] offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_result_overwrite_waits strategy=source fixed=%resource:physical_register:32:4 fixed=%loaded:physical_register:8:1 fixed=%replacement:physical_register:8:1
+// RUN: emit amdgpu-assembly @buffer_result_overwrite_waits
 
 // Result storage is still owned by the outstanding load, even if its SSA value
 // is unused. Reusing that VGPR must wait before issuing the replacement write.
@@ -144,13 +140,13 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @buffer_result_overwrite_waits
 }
 
 // ----
-  buffer_load_dword v8, off, s[32:35], 0 offset:0
+  buffer_load_dword v0, off, s[0:3], 0 offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_mov_b32 v8, 42
+  v_mov_b32 v0, 42
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_store_source_lifetime strategy=source fixed=%resource:physical_register:32:4 fixed=%replacement:physical_register:32:1
+// RUN: emit amdgpu-assembly @buffer_store_source_lifetime
 
 // Store scalar inputs are captured before memory completion too. The store
 // itself still completes before termination.
@@ -163,7 +159,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @buffer_store_source_lifetime(
 }
 
 // ----
-  buffer_store_dword v0, off, s[32:35], 0 offset:0
-  s_mov_b32 s32, 0
+  buffer_store_dword v0, off, s[0:3], 0 offset:0
+  s_mov_b32 s0, 0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm

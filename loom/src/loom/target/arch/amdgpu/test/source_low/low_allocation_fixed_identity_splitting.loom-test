@@ -1,6 +1,6 @@
 // A hard storage identity carries its fixed binding onto a detached repair
 // result. Further cuts before that identity cannot shorten the fixed interval.
-// RUN: emit amdgpu-assembly @fixed_identity strategy=source amdgpu.sgpr=6 fixed=%mask:physical_register:0:2 fixed=%joined:physical_register:0:1
+// RUN: emit amdgpu-assembly @fixed_identity amdgpu.sgpr=6
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -15,12 +15,8 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @fixed_identi
 }
 
 // ----
-  s_mov_b32 s0, s2
-  s_mov_b32 s1, s3
-  s_mov_b32 s2, s0
-  s_mov_b32 s3, s1
-  v_cndmask_b32 v0, 0, v0, s[2:3]
-  s_mov_b32 s0, s4
+  v_cndmask_b32 v0, 0, v0, s[0:1]
+  s_mov_b32 s3, s2
 .Lbb1:
-  s_or_b32 s0, s0, s4
+  s_or_b32 s2, s3, s2
   s_endpgm

@@ -1,5 +1,5 @@
 // Profitable VOPD replication places its copy after the complete preamble.
-// RUN: emit amdgpu-assembly @replicate_entry_argument strategy=resource-stall
+// RUN: emit amdgpu-assembly @replicate_entry_argument
 
 amdgpu.target<gfx1100> @target
 
@@ -36,7 +36,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @replicate_entry_argument(%lhs: 
 // ====
 
 // Profitable VOPD replication places its copy after the complete preamble.
-// RUN: emit amdgpu-assembly @replicate_live_in strategy=resource-stall
+// RUN: emit amdgpu-assembly @replicate_live_in
 
 amdgpu.target<gfx1100> @target
 
@@ -74,7 +74,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @replicate_live_in(%lhs: reg<amd
 // ====
 
 // Replicating a body result keeps its transfer after the defining instruction.
-// RUN: emit amdgpu-assembly @replicate_body_result strategy=resource-stall
+// RUN: emit amdgpu-assembly @replicate_body_result
 
 amdgpu.target<gfx1100> @target
 
@@ -114,7 +114,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @replicate_body_result(%lhs: reg
 // ====
 
 // A successor argument's replica belongs in its own block, not the preamble.
-// RUN: emit amdgpu-assembly @replicate_successor_argument strategy=resource-stall
+// RUN: emit amdgpu-assembly @replicate_successor_argument
 
 amdgpu.target<gfx1100> @target
 
@@ -154,7 +154,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @replicate_successor_argument(%l
 // ====
 
 // With no entry declarations, a formal argument's copy precedes the body.
-// RUN: emit amdgpu-assembly @replicate_empty_preamble strategy=resource-stall
+// RUN: emit amdgpu-assembly @replicate_empty_preamble
 
 amdgpu.target<gfx1100> @target
 

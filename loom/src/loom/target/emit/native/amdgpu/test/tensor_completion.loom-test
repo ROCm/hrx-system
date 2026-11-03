@@ -1,6 +1,6 @@
 // A nonzero wait cannot complete the newest producer. The LDS consumer needs
 // a full drain even when the authored bound exceeds the local pending count.
-// RUN: emit amdgpu-assembly @newest_tensor_consumer strategy=source
+// RUN: emit amdgpu-assembly @newest_tensor_consumer
 amdgpu.target<gfx1250> @target
 
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @newest_tensor_consumer(%d0: reg<amdgpu.sgpr x4>, %d1: reg<amdgpu.sgpr x8>, %address: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -21,7 +21,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @newest_tensor_consumer(
 // ====
 
 // A wait on only one incoming path cannot discharge the other path's transfer.
-// RUN: emit amdgpu-assembly @tensor_completion_join strategy=source
+// RUN: emit amdgpu-assembly @tensor_completion_join
 amdgpu.target<gfx1251> @target
 
 low.func.def target<amdgpu.rdna4.gfx1251.core>(@target) @tensor_completion_join(%d0: reg<amdgpu.sgpr x4>, %d1: reg<amdgpu.sgpr x8>, %address: reg<amdgpu.vgpr>, %left: reg<amdgpu.sgpr>, %right: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -59,7 +59,7 @@ low.func.def target<amdgpu.rdna4.gfx1251.core>(@target) @tensor_completion_join(
 
 // A partial wait leaves a producer pending at the backedge. The next iteration's
 // LDS read must wait for that preceding dynamic execution to finish.
-// RUN: emit amdgpu-assembly @tensor_loop_backedge strategy=source
+// RUN: emit amdgpu-assembly @tensor_loop_backedge
 amdgpu.target<gfx1251> @target
 
 low.func.def target<amdgpu.rdna4.gfx1251.core>(@target) @tensor_loop_backedge(%d0: reg<amdgpu.sgpr x4>, %d1: reg<amdgpu.sgpr x8>, %address: reg<amdgpu.vgpr>, %left: reg<amdgpu.sgpr>, %right: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -79,11 +79,10 @@ low.func.def target<amdgpu.rdna4.gfx1251.core>(@target) @tensor_loop_backedge(%d
 .Lbb1:
   s_wait_tensorcnt tensorcnt(0)
   ds_read_b32 v1, v0 offset:0
+  s_cmp_lt_i32 s4, s5
   s_wait_dscnt dscnt(0)
   tensor_load_to_lds s[0:3], s[8:15]
   s_wait_tensorcnt 10
-  s_cmp_lt_i32 s4, s5
-  s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc1 .Lbb1
 .Lbb2:
   s_wait_tensorcnt 0

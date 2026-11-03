@@ -1,7 +1,7 @@
 // Six computed values overflow the small vector budget. Required reloads must
 // make progress before future store addresses overflow the scalar bank too.
 // The exact assembly covers spill insertion, address carries, and EXEC repair.
-// RUN: emit amdgpu-assembly @computed_snapshot strategy=resource-stall amdgpu.vgpr=6 amdgpu.sgpr=12
+// RUN: emit amdgpu-assembly @computed_snapshot amdgpu.vgpr=6 amdgpu.sgpr=12
 
 amdgpu.target<gfx90a> @target
 
