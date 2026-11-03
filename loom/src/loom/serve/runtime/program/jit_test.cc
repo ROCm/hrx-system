@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <thread>
 
+#include "iree/base/internal/arena.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -246,8 +247,25 @@ TEST_P(JitConcurrentTest, DirectStagesJoinNativesAndRetainExecutableOutput) {
 INSTANTIATE_TEST_SUITE_P(SharedWorkers, JitConcurrentTest,
                          ::testing::Values(1, 4));
 
-TEST_P(JitTest, LogicalScalarCommandArgumentsReachNativeKernels) {
-  IREE_ASSERT_OK(Compile(nullptr, 0, IREE_SV("boolean_arguments")));
+TEST_P(JitTest, MixedArgumentsSurviveRecordingScratchReuseAndTrim) {
+  IREE_ASSERT_OK(Compile("3", 0, IREE_SV("mixed_arguments")));
+  IREE_ASSERT_OK(Compile("5", 1, IREE_SV("mixed_arguments")));
+  // Recordings retain their own arguments. Reuse the last returned arena block
+  // for different host work, then release its backing before either executes.
+  auto* block_pool =
+      loom_serve_host_block_pool(loom_serve_device_host(device_owner_));
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(block_pool, &arena);
+  void* scratch = nullptr;
+  const auto scratch_size =
+      iree_arena_block_pool_max_allocation_size(block_pool);
+  auto status = iree_arena_allocate(&arena, scratch_size, &scratch);
+  if (iree_status_is_ok(status)) {
+    memset(scratch, 0xA5, scratch_size);
+  }
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_trim(block_pool);
+  IREE_ASSERT_OK(status);
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       loom_serve_pool_storage(storage_owner_),
       iree_hal_make_pool_reservation_request(sizeof(input_), 0),
@@ -260,8 +278,10 @@ TEST_P(JitTest, LogicalScalarCommandArgumentsReachNativeKernels) {
   IREE_ASSERT_OK(
       loom_serve_execution_transfer(execution_, 1, &upload, &completion));
   const iree_hal_buffer_binding_t binding = {buffer_, 0, sizeof(input_)};
-  IREE_ASSERT_OK(loom_serve_execution_execute(execution_, commands_[0],
-                                              {1, &binding}, &completion));
+  for (auto* command : commands_) {
+    IREE_ASSERT_OK(loom_serve_execution_execute(execution_, command,
+                                                {1, &binding}, &completion));
+  }
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download = {buffer_, 0, output_.data(), sizeof(output_)},
@@ -271,7 +291,8 @@ TEST_P(JitTest, LogicalScalarCommandArgumentsReachNativeKernels) {
   IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
   EXPECT_EQ(output_[0], 17);
   EXPECT_EQ(output_[1], -23);
-  for (size_t i = 2; i < output_.size(); ++i) {
+  EXPECT_EQ(output_[2], input_[2] + 5 + 7);
+  for (size_t i = 3; i < output_.size(); ++i) {
     EXPECT_EQ(output_[i], input_[i]);
   }
 }

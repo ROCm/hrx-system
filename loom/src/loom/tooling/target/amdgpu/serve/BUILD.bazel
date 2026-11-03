@@ -922,6 +922,7 @@ loom_cc_test(
         "//loom/src/loom/serve/testing:jit",
         "//loom/src/loom/serve/testing:jit_module",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/module/hal:types",

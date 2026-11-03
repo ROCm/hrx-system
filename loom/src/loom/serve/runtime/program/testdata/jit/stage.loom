@@ -171,6 +171,18 @@ command.def public @boolean_arguments() launch(%storage: buffer) {
   command.return
 }
 
+// Alternate entry layouts and reuse the scalar entry after binding-only work.
+command.def public @mixed_arguments() launch(%storage: buffer) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %disabled = scalar.constant false : i1
+  %enabled = scalar.constant true : i1
+  kernel.launch @store_boolean(%c0, %enabled, %storage) : (index, i1, buffer)
+  kernel.launch @increment_2(%storage) : (buffer)
+  kernel.launch @store_boolean(%c1, %disabled, %storage) : (index, i1, buffer)
+  command.return
+}
+
 kernel.def @temporary_write() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
