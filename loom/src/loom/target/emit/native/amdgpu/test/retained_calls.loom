@@ -1,12 +1,12 @@
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
-low.func.def pure target<amdgpu.rdna3.core>(@target) @increment(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def pure target<amdgpu.gfx11.generic.core>(@target) @increment(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %c1 = v_mov_b32 1
   %result = v_add_u32 %value, %c1
   return %result
 }
 
-low.func.def target<amdgpu.rdna3.core>(@target) @store_incremented(%lane: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @store_incremented(%lane: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   %incremented = low.func.call pure noinline @increment(%lane) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
   %byte_offset = v_lshlrev_b32_src0_inline %lane, 2
   global_store_b32_saddr %byte_offset, %incremented, %output
