@@ -3741,7 +3741,7 @@ TEST_F(ModuleTest, BlockFindOp) {
   loom_module_free(module);
 }
 
-TEST(ModuleSemanticCallInventoryTest, TracksMutationAndRebuild) {
+TEST(ModuleCallInventoryTest, TracksMutationAndRebuild) {
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(32 * 1024, iree_allocator_system(),
                                    &block_pool);
@@ -3773,6 +3773,8 @@ TEST(ModuleSemanticCallInventoryTest, TracksMutationAndRebuild) {
       /*result_types=*/NULL, /*result_count=*/0, /*tied_results=*/NULL,
       /*tied_result_count=*/0, LOOM_LOCATION_UNKNOWN, &low_call));
   EXPECT_FALSE(loom_module_has_semantic_calls(module));
+  EXPECT_TRUE(loom_module_has_low_internal_calls(module));
+  EXPECT_EQ(module->low_internal_call_op_count, 1u);
 
   loom_op_t* first_call = NULL;
   IREE_ASSERT_OK(loom_test_invoke_build(
@@ -3789,10 +3791,14 @@ TEST(ModuleSemanticCallInventoryTest, TracksMutationAndRebuild) {
 
   IREE_ASSERT_OK(loom_op_erase(module, first_call));
   EXPECT_EQ(module->semantic_call_op_count, 1u);
+  EXPECT_EQ(module->low_internal_call_op_count, 1u);
   IREE_ASSERT_OK(loom_module_compute_uses(module));
   EXPECT_EQ(module->semantic_call_op_count, 1u);
+  EXPECT_EQ(module->low_internal_call_op_count, 1u);
   IREE_ASSERT_OK(loom_op_erase(module, second_call));
   EXPECT_FALSE(loom_module_has_semantic_calls(module));
+  IREE_ASSERT_OK(loom_op_erase(module, low_call));
+  EXPECT_FALSE(loom_module_has_low_internal_calls(module));
 
   loom_module_free(module);
   loom_context_deinitialize(&context);

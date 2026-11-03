@@ -135,13 +135,17 @@ loom_amdgpu_kernel_plan_emit_unsatisfied_residency_requirement(
 static iree_status_t loom_amdgpu_kernel_plan_admit_residency(
     const loom_low_emission_frame_t* frame,
     const loom_amdgpu_kernel_record_t* record,
+    const loom_amdgpu_program_resources_t* program_resources,
     iree_diagnostic_emitter_t emitter, loom_target_compile_report_t* report,
     iree_arena_allocator_t* arena, bool* out_accepted) {
   *out_accepted = false;
   const uint32_t* allocation_direct_resource_units =
-      frame->allocation.physical_extents.ends_by_reg_class;
+      program_resources != NULL
+          ? program_resources->direct_resource_units
+          : frame->allocation.physical_extents.ends_by_reg_class;
   const iree_host_size_t direct_resource_unit_count =
-      frame->allocation.physical_extents.count;
+      program_resources != NULL ? program_resources->direct_resource_unit_count
+                                : frame->allocation.physical_extents.count;
   IREE_ASSERT(frame->residency.model != NULL);
   IREE_ASSERT_EQ(direct_resource_unit_count,
                  frame->residency.model->direct_resources.resource_count);
@@ -221,7 +225,8 @@ iree_status_t loom_amdgpu_kernel_plan_build(
   loom_amdgpu_function_plan_t function_plan = {0};
   bool function_accepted = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_function_plan_build(
-      frame, options->emitter, arena, &function_accepted, &function_plan));
+      frame, options->emitter, /*packet_options=*/NULL, arena,
+      &function_accepted, &function_plan));
   if (!function_accepted) {
     *out_accepted = false;
     *out_plan = (loom_amdgpu_kernel_plan_t){0};
@@ -244,8 +249,15 @@ iree_status_t loom_amdgpu_kernel_plan_build_from_function(
 
   // Private arrays and spill reservations share one hardware scratch segment.
   // Admit its final aligned extent before narrowing metadata or planning code.
-  const loom_amdgpu_storage_layout_t* storage_layout =
-      &function_plan->storage_layout;
+  loom_amdgpu_storage_layout_t metadata_storage_layout =
+      function_plan->storage_layout;
+  const loom_amdgpu_program_resources_t* program_resources =
+      options->program_resources;
+  if (program_resources != NULL) {
+    metadata_storage_layout.segment_sizes =
+        program_resources->storage_segment_sizes;
+  }
+  const loom_amdgpu_storage_layout_t* storage_layout = &metadata_storage_layout;
   const loom_amdgpu_processor_properties_t* processor_properties =
       loom_amdgpu_target_processor_properties_from_resolved_target(
           &frame->schedule.target);
@@ -270,8 +282,16 @@ iree_status_t loom_amdgpu_kernel_plan_build_from_function(
       .abi_layout = options->abi_layout,
       .abi_verify = options->abi_verify,
       .preflight = &function_plan->preflight,
+      .minimum_sgpr_count =
+          program_resources != NULL ? program_resources->sgpr_count : 0,
       .minimum_vgpr_count =
-          function_plan->packet_plan.wait_states.minimum_vgpr_count,
+          program_resources != NULL &&
+                  program_resources->vgpr_count >
+                      function_plan->packet_plan.wait_states.minimum_vgpr_count
+              ? program_resources->vgpr_count
+              : function_plan->packet_plan.wait_states.minimum_vgpr_count,
+      .minimum_agpr_count =
+          program_resources != NULL ? program_resources->agpr_count : 0,
   };
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_build(
       &frame->schedule, &frame->allocation, storage_layout, &record_options,
@@ -279,8 +299,8 @@ iree_status_t loom_amdgpu_kernel_plan_build_from_function(
 
   bool residency_accepted = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_plan_admit_residency(
-      frame, &out_plan->record, options->emitter, options->report, arena,
-      &residency_accepted));
+      frame, &out_plan->record, program_resources, options->emitter,
+      options->report, arena, &residency_accepted));
   if (!residency_accepted) {
     return iree_ok_status();
   }

@@ -941,7 +941,7 @@ static PlanMetrics BuildReferencePlan(PacketPlanFixture& fixture,
     loom_amdgpu_wait_plan_t plan = {};
     AbortOnError(loom_amdgpu_wait_plan_build(
         &fixture.frame().schedule, &fixture.frame().allocation,
-        &fixture.address_state(), /*matrix_arena=*/nullptr,
+        /*options=*/nullptr, &fixture.address_state(), /*matrix_arena=*/nullptr,
         /*out_matrix_results=*/nullptr, fixture.plan_arena(),
         fixture.transient_arena(), &plan));
     metrics.wait_action_count = plan.action_count;
@@ -953,7 +953,7 @@ static PlanMetrics BuildReferencePlan(PacketPlanFixture& fixture,
     loom_amdgpu_packet_plan_t plan = {};
     AbortOnError(loom_amdgpu_packet_plan_build(
         &fixture.frame().schedule, &fixture.frame().allocation,
-        fixture.plan_arena(),
+        /*options=*/nullptr, fixture.plan_arena(),
         /*out_vopd_rejections=*/nullptr, &plan));
     metrics.wait_action_count = plan.wait_plan.action_count;
     metrics.hazard_record_count = plan.wait_plan.hazard_plan.record_count +
@@ -1041,7 +1041,8 @@ static void BenchmarkPlan(benchmark::State& state, const FixtureSpec& spec,
       loom_amdgpu_wait_plan_t plan = {};
       AbortOnError(loom_amdgpu_wait_plan_build(
           &fixture.frame().schedule, &fixture.frame().allocation,
-          &fixture.address_state(), /*matrix_arena=*/nullptr,
+          /*options=*/nullptr, &fixture.address_state(),
+          /*matrix_arena=*/nullptr,
           /*out_matrix_results=*/nullptr, fixture.plan_arena(),
           fixture.transient_arena(), &plan));
       benchmark::DoNotOptimize(plan);
@@ -1049,7 +1050,7 @@ static void BenchmarkPlan(benchmark::State& state, const FixtureSpec& spec,
       loom_amdgpu_packet_plan_t plan = {};
       AbortOnError(loom_amdgpu_packet_plan_build(
           &fixture.frame().schedule, &fixture.frame().allocation,
-          fixture.plan_arena(),
+          /*options=*/nullptr, fixture.plan_arena(),
           /*out_vopd_rejections=*/nullptr, &plan));
       benchmark::DoNotOptimize(plan);
     }

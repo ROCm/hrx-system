@@ -166,12 +166,15 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
     allocation_.assignment_count = 4;
     allocation_.assignment_indices_by_value_ordinal = assignment_indices_;
     physical_extents_.assign(descriptors_->reg_class_count, 0);
+    fixed_physical_extents_.assign(descriptors_->reg_class_count, 0);
     for (const loom_low_allocation_assignment_t& assignment : assignments_) {
       physical_extents_[assignment.descriptor_reg_class_id] =
           std::max(physical_extents_[assignment.descriptor_reg_class_id],
                    assignment.location_base + assignment.location_count);
     }
     allocation_.physical_extents.ends_by_reg_class = physical_extents_.data();
+    allocation_.physical_extents.fixed_ends_by_reg_class =
+        fixed_physical_extents_.data();
     allocation_.physical_extents.count = physical_extents_.size();
   }
 
@@ -211,6 +214,26 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
     return loom_low_move_t{
         .destination = Physical(register_class, destination),
         .source = Physical(register_class, source),
+    };
+  }
+
+  static const loom_amdgpu_call_state_t* QueryCallState(
+      void* user_data, loom_symbol_ref_t callee) {
+    auto* test = static_cast<AmdgpuWaitPlanTest*>(user_data);
+    IREE_ASSERT_EQ(callee.module_id, test->call_target_.module_id);
+    IREE_ASSERT_EQ(callee.symbol_id, test->call_target_.symbol_id);
+    return &test->call_state_;
+  }
+
+  loom_amdgpu_wait_plan_options_t CallOptions(uint32_t counter_mask) {
+    call_state_.counter_mask =
+        static_cast<loom_amdgpu_wait_counter_mask_t>(counter_mask);
+    return loom_amdgpu_wait_plan_options_t{
+        .call_states =
+            {
+                .query = QueryCallState,
+                .user_data = this,
+            },
     };
   }
 
@@ -408,7 +431,8 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
     schedule_.hazard_use_count = hazards_.size();
   }
 
-  iree_status_t BuildPlan() {
+  iree_status_t BuildPlan(
+      const loom_amdgpu_wait_plan_options_t* options = nullptr) {
     if (allocation_.storage_leases.schedule == nullptr) {
       loom_low_storage_lease_provider_t provider = {};
       loom_amdgpu_storage_lease_provider(&provider);
@@ -416,19 +440,30 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
           &schedule_, &provider, &module_->arena, &allocation_.storage_leases));
     }
     const loom_amdgpu_address_state_plan_t address_state = {};
-    return loom_amdgpu_wait_plan_build(&schedule_, &allocation_, &address_state,
-                                       /*matrix_arena=*/nullptr,
+    return loom_amdgpu_wait_plan_build(&schedule_, &allocation_, options,
+                                       &address_state, /*matrix_arena=*/nullptr,
                                        /*out_matrix_results=*/nullptr, &arena_,
                                        &transient_arena_, &plan_);
   }
 
-  void Build() {
+  void Build(const loom_amdgpu_wait_plan_options_t* options = nullptr) {
     FinalizeSchedule();
-    IREE_ASSERT_OK(BuildPlan());
+    IREE_ASSERT_OK(BuildPlan(options));
   }
 
-  void BuildWaitStates() {
-    Build();
+  void BuildWaitStates(bool callable = false,
+                       loom_amdgpu_call_fixed_hazard_mask_t fixed_hazard_mask =
+                           LOOM_AMDGPU_CALL_FIXED_HAZARD_ALL) {
+    call_state_.fixed_hazard_mask = fixed_hazard_mask;
+    const loom_amdgpu_wait_plan_options_t wait_options = {
+        .call_states =
+            {
+                .query = QueryCallState,
+                .user_data = this,
+            },
+        .callable = callable,
+    };
+    Build(&wait_options);
     loom_amdgpu_wait_packet_plan_t wait_packets = {};
     IREE_ASSERT_OK(
         loom_amdgpu_wait_packet_plan_build(&plan_, &arena_, &wait_packets));
@@ -436,9 +471,18 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
         .schedule = &schedule_,
         .allocation = &allocation_,
     };
+    const loom_amdgpu_wait_state_plan_options_t wait_state_options = {
+        .call_states =
+            {
+                .query = QueryCallState,
+                .user_data = this,
+            },
+        .callable = callable,
+    };
     IREE_ASSERT_OK(loom_amdgpu_wait_state_plan_build(
-        &schedule_, &allocation_, facts_.properties.processor, &address_state,
-        &plan_, &wait_packets, /*vopd_plan=*/nullptr,
+        &schedule_, &allocation_, &wait_state_options,
+        facts_.properties.processor, &address_state, &plan_, &wait_packets,
+        /*vopd_plan=*/nullptr,
         /*matrix_coexecution=*/nullptr, /*matrix_results=*/nullptr, &arena_,
         &transient_arena_, &wait_state_plan_));
   }
@@ -589,6 +633,8 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
   std::vector<loom_low_move_t> moves_;
   // Maximum assigned or moved location by descriptor register class.
   std::vector<uint32_t> physical_extents_;
+  // Maximum used ABI-fixed location by descriptor register class.
+  std::vector<uint32_t> fixed_physical_extents_;
   // Distinct zero-argument leaf helper reached by direct-call fixtures.
   loom_symbol_ref_t call_target_ = loom_symbol_ref_null();
   // Immutable input assembled before the planner call.
@@ -603,6 +649,7 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
   loom_low_allocation_table_t allocation_ = {};
   // Actual production planner result inspected by each test.
   loom_amdgpu_wait_plan_t plan_ = {};
+  loom_amdgpu_call_state_t call_state_ = {};
   // Fixed-delay plan produced after counter waits are materialized.
   loom_amdgpu_wait_state_plan_t wait_state_plan_ = {};
 };
@@ -656,8 +703,8 @@ TEST_F(AmdgpuWaitPlanTest, DirectCallDrainsOutstandingCounterWork) {
           LOOM_AMDGPU_STRUCTURAL_PACKET_ANALYSIS_FLAG_REQUIRE_ALLOCATION);
   EXPECT_TRUE(iree_any_bit_set(structural.flags,
                                LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CALL));
-  EXPECT_EQ(structural.instruction_count, 6u);
-  EXPECT_EQ(structural.scalar_alu_instruction_count, 6u);
+  EXPECT_EQ(structural.instruction_count, 4u);
+  EXPECT_EQ(structural.scalar_alu_instruction_count, 4u);
   EXPECT_EQ(loom_amdgpu_structural_packet_call_boundary_offset(&structural),
             0u);
   EXPECT_EQ(loom_amdgpu_structural_packet_call_arguments(&structural), nullptr);
@@ -666,10 +713,89 @@ TEST_F(AmdgpuWaitPlanTest, DirectCallDrainsOutstandingCounterWork) {
   ExpectAction(0, 1, 0, LOOM_AMDGPU_WAIT_PLAN_REASON_CALLABLE_BOUNDARY);
 }
 
+TEST_F(AmdgpuWaitPlanTest, DirectCallPreservesCountersUnusedByCallee) {
+  Tensor();
+  Call();
+  const loom_amdgpu_wait_plan_options_t options =
+      CallOptions(LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE);
+  Build(&options);
+
+  EXPECT_EQ(plan_.action_count, 0u);
+}
+
+TEST_F(AmdgpuWaitPlanTest, DirectCallDrainsCountersUsedByCallee) {
+  Tensor();
+  Call();
+  const loom_amdgpu_wait_plan_options_t options =
+      CallOptions(LOOM_AMDGPU_WAIT_COUNTER_MASK_TENSOR);
+  Build(&options);
+
+  ASSERT_EQ(plan_.action_count, 1u);
+  ExpectAction(0, 1, 0, LOOM_AMDGPU_WAIT_PLAN_REASON_CALLABLE_BOUNDARY);
+}
+
+TEST_F(AmdgpuWaitPlanTest, CallableReturnsWithProducedCountersEmpty) {
+  Tensor();
+  const loom_amdgpu_wait_plan_options_t options = {.callable = true};
+  Build(&options);
+
+  EXPECT_EQ(plan_.produced_counter_mask, LOOM_AMDGPU_WAIT_COUNTER_MASK_TENSOR);
+  ASSERT_EQ(plan_.action_count, 1u);
+  ExpectAction(0, 1, 0, LOOM_AMDGPU_WAIT_PLAN_REASON_CALLABLE_BOUNDARY);
+}
+
+TEST_F(AmdgpuWaitPlanTest, OrdinaryPlanSkipsFixedHazardSummary) {
+  Build();
+
+  EXPECT_EQ(plan_.fixed_hazard_mask, 0u);
+}
+
+TEST_F(AmdgpuWaitPlanTest, PublishesAllocatedFixedHazardFamilies) {
+  const loom_amdgpu_wait_plan_options_t options = {.callable = true};
+  Build(&options);
+
+  EXPECT_EQ(plan_.fixed_hazard_mask,
+            LOOM_AMDGPU_CALL_FIXED_HAZARD_SHORT_WAIT |
+                LOOM_AMDGPU_CALL_FIXED_HAZARD_DELAY_ALU |
+                LOOM_AMDGPU_CALL_FIXED_HAZARD_MASK_WRITE |
+                LOOM_AMDGPU_CALL_FIXED_HAZARD_SGPR_READ);
+}
+
+TEST_F(AmdgpuWaitPlanTest, PublishesTransportFixedHazardFamilies) {
+  Call({Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1, 0)});
+  const loom_amdgpu_wait_plan_options_t options = {.callable = true};
+  Build(&options);
+
+  EXPECT_EQ(plan_.fixed_hazard_mask, LOOM_AMDGPU_CALL_FIXED_HAZARD_ALL);
+}
+
+TEST_F(AmdgpuWaitPlanTest, PublishesImplicitFixedHazardFamilies) {
+  Append(LOOM_AMDGPU_DESCRIPTOR_REF_S_ADD_U32, loom_named_attr_slice_empty());
+  std::fill(physical_extents_.begin(), physical_extents_.end(), 0);
+  const loom_amdgpu_wait_plan_options_t options = {.callable = true};
+  Build(&options);
+
+  EXPECT_EQ(plan_.fixed_hazard_mask, LOOM_AMDGPU_CALL_FIXED_HAZARD_DELAY_ALU);
+}
+
+TEST_F(AmdgpuWaitPlanTest, CallableReusesAuthoredCounterDrains) {
+  Tensor();
+  Wait(0);
+  const loom_amdgpu_wait_plan_options_t options = {.callable = true};
+  Build(&options);
+
+  ASSERT_EQ(plan_.action_count, 2u);
+  ExpectAction(0, 1, 0, LOOM_AMDGPU_WAIT_PLAN_REASON_EXPLICIT_PACKET);
+  EXPECT_EQ(plan_.actions[1].node_index, 1u);
+  EXPECT_EQ(plan_.actions[1].counter_id, LOOM_AMDGPU_WAIT_COUNTER_X);
+  EXPECT_EQ(plan_.actions[1].reason,
+            LOOM_AMDGPU_WAIT_PLAN_REASON_EXPLICIT_PACKET);
+}
+
 TEST_F(AmdgpuWaitPlanTest, DirectCallQuiescesArgumentMovesBeforeControl) {
   Call({Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1, 0)},
        {Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 3, 2)});
-  BuildWaitStates();
+  BuildWaitStates(/*callable=*/false, LOOM_AMDGPU_CALL_FIXED_HAZARD_DELAY_ALU);
 
   const loom_amdgpu_structural_packet_info_t structural =
       loom_amdgpu_structural_packet_analyze(
@@ -691,6 +817,35 @@ TEST_F(AmdgpuWaitPlanTest, DirectCallQuiescesArgumentMovesBeforeControl) {
   EXPECT_EQ(state.action, LOOM_AMDGPU_WAIT_STATE_ACTION_S_NOP);
   EXPECT_EQ(state.node_index, 0u);
   EXPECT_EQ(state.instruction_offset, 1u);
+  EXPECT_EQ(state.required_cycle_count, 4u);
+  EXPECT_EQ(state.observed_cycle_count, 1u);
+  EXPECT_EQ(state.cycle_count, 3u);
+}
+
+TEST_F(AmdgpuWaitPlanTest, DirectCallCreditsControlToInstructionWindows) {
+  Call({Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1, 0)});
+  BuildWaitStates(/*callable=*/false, LOOM_AMDGPU_CALL_FIXED_HAZARD_SHORT_WAIT);
+
+  EXPECT_EQ(wait_state_plan_.state_count, 0u);
+}
+
+TEST_F(AmdgpuWaitPlanTest, DirectCallUsesPublishedFixedHazardMask) {
+  Call({Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1, 0)});
+  BuildWaitStates(/*callable=*/false, /*fixed_hazard_mask=*/0);
+
+  EXPECT_EQ(wait_state_plan_.state_count, 0u);
+}
+
+TEST_F(AmdgpuWaitPlanTest, CallableReturnQuiescesResultMovesBeforeControl) {
+  Call({}, {Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 0, 1)});
+  BuildWaitStates(/*callable=*/true);
+
+  ASSERT_EQ(wait_state_plan_.state_count, 1u);
+  const loom_amdgpu_wait_state_t& state = wait_state_plan_.states[0];
+  EXPECT_EQ(state.reason, LOOM_AMDGPU_WAIT_STATE_REASON_CALLABLE_BOUNDARY);
+  EXPECT_EQ(state.action, LOOM_AMDGPU_WAIT_STATE_ACTION_S_NOP);
+  EXPECT_EQ(state.node_index, 1u);
+  EXPECT_EQ(state.instruction_offset, 0u);
   EXPECT_EQ(state.required_cycle_count, 4u);
   EXPECT_EQ(state.observed_cycle_count, 1u);
   EXPECT_EQ(state.cycle_count, 3u);
@@ -728,6 +883,29 @@ TEST_F(AmdgpuWaitPlanTest, RefinedCrossBlockMemoryOmitsDisjointWait) {
   ConfigureRefinedAcyclicMemory(graph, &fixture);
   IREE_ASSERT_OK(BuildPlan());
   EXPECT_EQ(plan_.action_count, 0u);
+}
+
+TEST_F(AmdgpuWaitPlanTest, CallableDrainsProducedCountersAcrossBlocks) {
+  testing::CfgGraph graph({{1}, {}});
+  CrossBlockMemoryFixture fixture = {};
+  ConfigureRefinedAcyclicMemory(graph, &fixture);
+  const loom_amdgpu_wait_plan_options_t options = {.callable = true};
+  IREE_ASSERT_OK(BuildPlan(&options));
+
+  EXPECT_EQ(plan_.produced_counter_mask,
+            LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE |
+                LOOM_AMDGPU_WAIT_COUNTER_MASK_TENSOR |
+                LOOM_AMDGPU_WAIT_COUNTER_MASK_X);
+  ASSERT_EQ(plan_.action_count, 2u);
+  const uint32_t return_node = static_cast<uint32_t>(nodes_.size() - 1);
+  EXPECT_EQ(plan_.actions[0].node_index, return_node);
+  EXPECT_EQ(plan_.actions[0].counter_id, LOOM_AMDGPU_WAIT_COUNTER_VMEM_STORE);
+  EXPECT_EQ(plan_.actions[0].reason,
+            LOOM_AMDGPU_WAIT_PLAN_REASON_CALLABLE_BOUNDARY);
+  EXPECT_EQ(plan_.actions[1].node_index, return_node);
+  EXPECT_EQ(plan_.actions[1].counter_id, LOOM_AMDGPU_WAIT_COUNTER_TENSOR);
+  EXPECT_EQ(plan_.actions[1].reason,
+            LOOM_AMDGPU_WAIT_PLAN_REASON_CALLABLE_BOUNDARY);
 }
 
 TEST_F(AmdgpuWaitPlanTest, RefinedCrossBlockMemoryWaitsForExactCompletion) {

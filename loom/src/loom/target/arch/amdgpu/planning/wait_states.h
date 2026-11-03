@@ -27,6 +27,7 @@
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/codegen/low/packet_hazard_plan.h"
+#include "loom/target/arch/amdgpu/abi/call_abi.h"
 #include "loom/target/arch/amdgpu/planning/matrix_wait_states.h"
 
 #ifdef __cplusplus
@@ -40,6 +41,14 @@ struct loom_amdgpu_matrix_coexecution_t;
 struct loom_amdgpu_matrix_result_wait_t;
 struct loom_amdgpu_processor_info_t;
 struct loom_amdgpu_address_state_plan_t;
+
+// Interprocedural state available while planning fixed hardware waits.
+typedef struct loom_amdgpu_wait_state_plan_options_t {
+  // Exact machine-state contracts for direct callees.
+  loom_amdgpu_call_state_provider_t call_states;
+  // Whether this function returns to a native caller.
+  bool callable;
+} loom_amdgpu_wait_state_plan_options_t;
 
 // Maximum number of cycles a single `s_nop` packet can wait. The SOPP SIMM16
 // operand is encoded as wait_cycles - 1, and current AMDGPU targets use a
@@ -94,8 +103,10 @@ typedef enum loom_amdgpu_wait_state_reason_e {
   LOOM_AMDGPU_WAIT_STATE_REASON_SGPR_READ_DEPENDENCY = 19,
   // A direct helper call retires caller-owned fixed physical dependencies.
   LOOM_AMDGPU_WAIT_STATE_REASON_CALLABLE_BOUNDARY = 20,
+  // One-shot invocation transport retires dependencies before the body CFG.
+  LOOM_AMDGPU_WAIT_STATE_REASON_INVOCATION_ENTRY = 21,
   // Number of wait-state reasons, including UNKNOWN.
-  LOOM_AMDGPU_WAIT_STATE_REASON_COUNT_ = 21,
+  LOOM_AMDGPU_WAIT_STATE_REASON_COUNT_ = 22,
 } loom_amdgpu_wait_state_reason_t;
 
 typedef enum loom_amdgpu_wait_state_action_e {
@@ -163,6 +174,8 @@ typedef struct loom_amdgpu_wait_state_plan_t {
   loom_low_packet_hazard_plan_t hazard_plan;
   // Wait states in scheduled packet order.
   const loom_amdgpu_wait_state_t* states;
+  // Prefix of |states| emitted once before the first body block label.
+  iree_host_size_t entry_state_count;
   // Number of wait-state records.
   iree_host_size_t state_count;
   // Hardware allocation floor needed by final physical operand hazards.
@@ -190,6 +203,7 @@ iree_string_view_t loom_amdgpu_wait_state_action_name(
 iree_status_t loom_amdgpu_wait_state_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
+    const loom_amdgpu_wait_state_plan_options_t* options,
     const struct loom_amdgpu_processor_properties_t* processor_properties,
     const struct loom_amdgpu_address_state_plan_t* address_state,
     const struct loom_amdgpu_wait_plan_t* wait_plan,

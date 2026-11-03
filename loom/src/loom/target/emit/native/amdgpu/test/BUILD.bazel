@@ -46,6 +46,7 @@ loom_check_test_suite(
         ("dot_wait_windows", "gfx90a", "amdgpu.cdna2.core"),
         ("matrix_result_windows", "gfx90a", "amdgpu.cdna2.core"),
         ("operand_ties", "gfx1100", "amdgpu.rdna3.core"),
+        ("retained_calls", "gfx11-generic", "amdgpu.gfx11.generic.core"),
         ("shift_allocation", "gfx90a", "amdgpu.cdna2.core"),
     ]
 ]

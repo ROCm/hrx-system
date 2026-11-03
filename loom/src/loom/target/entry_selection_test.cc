@@ -376,5 +376,58 @@ func.def public @targetless() {
       IREE_SV("targetless")));
 }
 
+TEST_F(TargetEntrySelectionTest, CallerOwnedSnapshotSelectsAllEntries) {
+  ModulePtr module = ParseModule(R"(
+test.target<low_core> @generic
+
+func.def public @refined() {
+  func.return
+}
+
+func.def public target(@generic) @authored() {
+  func.return
+}
+)");
+
+  loom_symbol_fact_table_t symbol_facts = {};
+  loom_symbol_fact_table_initialize(&symbol_facts, &analysis_arena_);
+  const loom_func_symbol_facts_t* function_facts =
+      LookupFunctionFacts(module.get(), IREE_SV("refined"), &symbol_facts);
+  const loom_target_facts_t* function_target_facts = RefineFunctionFacts(
+      module.get(), function_facts, LOOM_TEST_TARGET_KIND_QUIRKY);
+  loom_target_function_version_t function_version = {};
+  function_version.base.type = &loom_target_function_version_type;
+  function_version.base.function =
+      FindFunction(module.get(), IREE_SV("refined"));
+  function_version.function_target_facts = function_target_facts;
+  loom_function_version_t* version_values[] = {&function_version.base};
+  const loom_function_version_list_t function_versions = {
+      .values = version_values,
+      .count = IREE_ARRAYSIZE(version_values),
+  };
+  loom_target_function_version_snapshot_t snapshot = {};
+  IREE_ASSERT_OK(loom_target_function_version_snapshot_build(
+      module.get(), &function_versions, &analysis_arena_, &snapshot));
+
+  loom_target_entry_options_t options = {};
+  loom_target_entry_diagnostic_emitter_t diagnostic_emitter = {};
+  loom_target_entry_diagnostic_emitter_initialize(
+      module.get(), &options, LOOM_EMITTER_VERIFIER, &diagnostic_emitter);
+  const loom_target_entry_predicate_t predicate = {.fn = AcceptEntry};
+  bool selected = false;
+  loom_target_entry_list_t entries = {};
+  IREE_ASSERT_OK(loom_target_entry_select_all_entries_from_version_snapshot(
+      module.get(), &options, &snapshot, predicate, &diagnostic_emitter,
+      IREE_SV("test"), &analysis_arena_, &selected, &entries));
+
+  ASSERT_TRUE(selected);
+  ASSERT_EQ(entries.count, 2u);
+  EXPECT_EQ(entries.values[0].function_version, &function_version);
+  EXPECT_EQ(entries.values[0].target_facts, function_target_facts);
+  EXPECT_EQ(entries.values[1].function_version, nullptr);
+  EXPECT_TRUE(
+      iree_string_view_equal(entries.values[1].func_name, IREE_SV("authored")));
+}
+
 }  // namespace
 }  // namespace loom

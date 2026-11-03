@@ -32,10 +32,17 @@ iree_status_t loom_amdgpu_mask_write_wait_allocate(
 
 // Collects mask reads and physical overwrites from the owning final-packet
 // traversal. Structural moves are already resolved into native execution order.
+// |quiescent_call_boundary| selects whether a structural call restores this
+// family before transferring control.
 iree_status_t loom_amdgpu_mask_write_wait_collect(
     loom_amdgpu_mask_write_wait_t* state, const loom_low_packet_view_t* packet,
     const loom_amdgpu_structural_packet_info_t* structural,
-    loom_amdgpu_descriptor_traits_t traits);
+    loom_amdgpu_descriptor_traits_t traits, bool quiescent_call_boundary);
+
+// Retires every mask-read destination class at a quiescent native boundary.
+iree_status_t loom_amdgpu_mask_write_wait_collect_boundary(
+    loom_amdgpu_mask_write_wait_t* state, const loom_low_packet_view_t* packet,
+    uint32_t instruction_offset);
 
 // Propagates retained block summaries over the schedule CFG and emits waits.
 // No IR or allocation traversal is performed during resolution.

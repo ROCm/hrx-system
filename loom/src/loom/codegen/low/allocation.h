@@ -62,6 +62,11 @@ typedef struct loom_low_allocation_options_t {
   const loom_low_allocation_abi_location_t* entry_locations;
   // Number of entries in |entry_locations|, at most the formal argument count.
   iree_host_size_t entry_location_count;
+  // Sparse invocation-entry coordinates for non-argument SSA values. These are
+  // resolved once into the local value domain before allocation begins.
+  const loom_low_allocation_entry_value_t* entry_values;
+  // Number of entries in |entry_values|.
+  iree_host_size_t entry_value_count;
   // Borrowed outgoing locations indexed by function result. These constrain
   // each return boundary, not SSA lifetimes.
   const loom_low_allocation_abi_location_t* exit_locations;

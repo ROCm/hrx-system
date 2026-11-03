@@ -46,6 +46,74 @@ loom_amdgpu_wait_classification_allocate(
   return iree_ok_status();
 }
 
+static loom_amdgpu_call_fixed_hazard_mask_t
+loom_amdgpu_wait_classification_allocation_fixed_hazards(
+    const loom_low_schedule_table_t* schedule,
+    const loom_low_allocation_table_t* allocation) {
+  if (allocation == NULL) {
+    return 0;
+  }
+  const loom_low_descriptor_set_t* descriptor_set =
+      schedule->target.descriptor_set;
+  IREE_ASSERT_EQ(allocation->physical_extents.count,
+                 descriptor_set->reg_class_count);
+  loom_amdgpu_call_fixed_hazard_mask_t hazards = 0;
+  for (uint16_t class_id = 0; class_id < descriptor_set->reg_class_count;
+       ++class_id) {
+    if (allocation->physical_extents.ends_by_reg_class[class_id] == 0 &&
+        allocation->physical_extents.fixed_ends_by_reg_class[class_id] == 0) {
+      continue;
+    }
+    hazards |= loom_amdgpu_call_fixed_hazards_for_register_class(
+        class_id, loom_amdgpu_reg_class_traits(descriptor_set, class_id));
+  }
+  return hazards;
+}
+
+static loom_amdgpu_call_fixed_hazard_mask_t
+loom_amdgpu_wait_classification_implicit_fixed_hazards(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor) {
+  if (descriptor == NULL) {
+    return 0;
+  }
+  loom_amdgpu_call_fixed_hazard_mask_t hazards = 0;
+  for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
+    const loom_low_operand_t* operand =
+        loom_low_descriptor_operand(descriptor_set, descriptor, i);
+    if (operand->source_value_index != LOOM_LOW_ID_NONE ||
+        !iree_any_bit_set(operand->flags,
+                          LOOM_LOW_OPERAND_FLAG_STATE_READ |
+                              LOOM_LOW_OPERAND_FLAG_STATE_WRITE)) {
+      continue;
+    }
+    IREE_ASSERT_NE(operand->reg_class_alt_count, 0u);
+    const uint16_t register_class =
+        descriptor_set->reg_class_alts[operand->reg_class_alt_start]
+            .reg_class_id;
+    hazards |= loom_amdgpu_call_fixed_hazards_for_register_class(
+        register_class,
+        loom_amdgpu_reg_class_traits(descriptor_set, register_class));
+  }
+  return hazards;
+}
+
+static loom_amdgpu_call_fixed_hazard_mask_t
+loom_amdgpu_wait_classification_fixed_hazards(
+    const loom_low_schedule_table_t* schedule,
+    const loom_low_allocation_table_t* allocation) {
+  loom_amdgpu_call_fixed_hazard_mask_t hazards =
+      loom_amdgpu_wait_classification_allocation_fixed_hazards(schedule,
+                                                               allocation);
+  const loom_low_descriptor_set_t* descriptor_set =
+      schedule->target.descriptor_set;
+  for (iree_host_size_t i = 0; i < schedule->node_count; ++i) {
+    hazards |= loom_amdgpu_wait_classification_implicit_fixed_hazards(
+        descriptor_set, schedule->nodes[i].descriptor);
+  }
+  return hazards;
+}
+
 static bool loom_amdgpu_wait_effect_is_dependency_memory(
     const loom_low_schedule_effect_use_t* effect_use) {
   if ((effect_use->effect_flags & LOOM_LOW_EFFECT_FLAG_DEPENDENCY) == 0) {
@@ -568,6 +636,8 @@ static void loom_amdgpu_wait_classification_finish_nodes(
     }
     completion_node->producer_counter_mask |=
         frontier_node->read_counter_mask | frontier_node->write_counter_mask;
+    classification->produced_counter_mask |=
+        (loom_amdgpu_wait_counter_mask_t)completion_node->producer_counter_mask;
     completion_node->write_counter_mask = frontier_node->write_counter_mask;
     completion_node->reset_counter_mask =
         node_state->explicit_wait_counter_mask |
@@ -617,11 +687,15 @@ loom_amdgpu_wait_classification_build(
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_processor_properties_t* processor_properties,
     const loom_amdgpu_wait_packet_target_t* wait_packet_target,
-    iree_arena_allocator_t* arena,
+    bool summarize_fixed_hazards, iree_arena_allocator_t* arena,
     loom_amdgpu_wait_classification_t* IREE_RESTRICT out_classification) {
   *out_classification = (loom_amdgpu_wait_classification_t){0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_classification_allocate(
       schedule, arena, out_classification));
+  if (summarize_fixed_hazards) {
+    out_classification->fixed_hazard_mask =
+        loom_amdgpu_wait_classification_fixed_hazards(schedule, allocation);
+  }
   loom_amdgpu_wait_classification_classify_hazards(schedule,
                                                    out_classification);
   loom_amdgpu_wait_classification_classify_effects(schedule,

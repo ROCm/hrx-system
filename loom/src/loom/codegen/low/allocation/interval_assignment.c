@@ -1433,6 +1433,65 @@ loom_low_allocation_interval_assignment_append_assignment_callback(
       /*out_assignment_index=*/NULL);
 }
 
+// Entry coordinates are the natural storage roots for values supplied by the
+// invocation ABI. Claim an available coordinate before structural coalescing
+// chooses storage for one of its consumers. Later values can then coalesce
+// around the published root, while clobbers and interference still make the
+// preference movable and produce entry transport when required.
+static iree_status_t
+loom_low_allocation_interval_assignment_assign_entry_interval(
+    loom_low_allocation_interval_assignment_state_t* state,
+    const loom_low_allocation_interval_order_entry_t* order_entry,
+    loom_value_ordinal_t value_ordinal, bool* out_assigned) {
+  *out_assigned = false;
+  const loom_low_allocation_interval_assignment_context_t* context =
+      state->context;
+  if (value_ordinal >= context->entry_location_count ||
+      context->entry_locations[value_ordinal].location_kind ==
+          LOOM_LOW_ALLOCATION_LOCATION_UNASSIGNED ||
+      loom_low_allocation_interval_assignment_repairs_fragmentation(
+          context, order_entry->interval->value_class.register_class_id) ||
+      loom_low_allocation_target_constraints_fixed_value_for_value_ordinal(
+          context->target_constraints, value_ordinal) != NULL) {
+    return iree_ok_status();
+  }
+
+  loom_low_allocation_class_capacity_t capacity = {0};
+  IREE_RETURN_IF_ERROR(loom_low_allocation_target_constraints_interval_capacity(
+      context->target_constraints, context->liveness, context->placement,
+      order_entry->interval, &capacity));
+  loom_low_allocation_search_context_t search_context =
+      loom_low_allocation_interval_assignment_search_context(state);
+  uint32_t location_base = 0;
+  if (!loom_low_allocation_interval_assignment_find_entry_location(
+          state, &search_context, order_entry->interval, value_ordinal,
+          &capacity, &location_base)) {
+    return iree_ok_status();
+  }
+
+  const loom_low_allocation_assignment_t assignment = {
+      .value_id = order_entry->interval->value_id,
+      .descriptor_reg_class_id = capacity.descriptor_reg_class_id,
+      .start_point = order_entry->acquisition_start_point,
+      .end_point = loom_low_allocation_live_range_interval_storage_end_point(
+          order_entry->interval),
+      .unit_count = order_entry->interval->unit_count,
+      .location_kind = capacity.location_kind,
+      .location_base = location_base,
+      .location_count = order_entry->interval->unit_count,
+  };
+  IREE_RETURN_IF_ERROR(
+      loom_low_allocation_interval_assignment_append_assignment(
+          state, &assignment,
+          loom_low_register_requirements_get(context->register_requirements,
+                                             value_ordinal),
+          /*ignored_storage_lease_value_ids=*/NULL,
+          /*ignored_storage_lease_value_count=*/0,
+          /*out_assignment_index=*/NULL));
+  *out_assigned = true;
+  return iree_ok_status();
+}
+
 // Relocates the sole single-use independent assignment blocking a single-use
 // concat source's retained result slice. The blocker stays within the physical
 // extent ordinary allocation would require for the source and does not regress
@@ -1761,6 +1820,14 @@ static iree_status_t loom_low_allocation_interval_assignment_assign(
           state, &assignment, value_ordinal,
           loom_low_register_requirements_get(context->register_requirements,
                                              value_ordinal));
+      continue;
+    }
+
+    bool assigned_entry_interval = false;
+    IREE_RETURN_IF_ERROR(
+        loom_low_allocation_interval_assignment_assign_entry_interval(
+            state, entry, value_ordinal, &assigned_entry_interval));
+    if (assigned_entry_interval) {
       continue;
     }
 

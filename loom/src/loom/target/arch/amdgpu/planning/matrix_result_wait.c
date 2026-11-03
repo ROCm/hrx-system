@@ -78,7 +78,7 @@ typedef struct loom_amdgpu_matrix_result_block_t {
   loom_amdgpu_matrix_result_frontier_t* outgoing;
   // Guaranteed native issue progress, saturated at UINT8_MAX.
   uint8_t minimum_instruction_count;
-  // Whether the block contains an opaque boundary that retires all incoming
+  // Whether the block contains a quiescent boundary that retires all incoming
   // result windows before its retained suffix.
   bool quiescent_boundary;
 } loom_amdgpu_matrix_result_block_t;

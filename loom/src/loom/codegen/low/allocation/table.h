@@ -388,7 +388,7 @@ typedef struct loom_low_allocation_table_t {
   iree_host_size_t copy_decision_count;
   // Final parallel entry transport, executed once before all body block
   // labels. CFG backedges never execute this group. Sources are external ABI
-  // coordinates; destinations are the finalized argument assignments.
+  // coordinates; destinations are the finalized entry-value assignments.
   loom_low_move_group_t entry_moves;
   // Edge-copy records grouped by Low direct-branch terminator source order.
   const loom_low_allocation_edge_copy_t* edge_copies;

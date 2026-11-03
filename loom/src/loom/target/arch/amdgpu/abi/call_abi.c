@@ -18,6 +18,58 @@ static bool loom_amdgpu_call_abi_add_count(uint16_t* count,
   return true;
 }
 
+loom_amdgpu_call_fixed_hazard_mask_t
+loom_amdgpu_call_fixed_hazards_for_register_class(
+    uint16_t register_class,
+    loom_amdgpu_reg_class_traits_t register_class_traits) {
+  if (register_class == LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
+    return LOOM_AMDGPU_CALL_FIXED_HAZARD_SHORT_WAIT |
+           LOOM_AMDGPU_CALL_FIXED_HAZARD_MATRIX_RESULT |
+           LOOM_AMDGPU_CALL_FIXED_HAZARD_MATRIX_COEXECUTION |
+           LOOM_AMDGPU_CALL_FIXED_HAZARD_DELAY_ALU;
+  }
+  if (register_class == LOOM_AMDGPU_REG_CLASS_ID_SGPR) {
+    return LOOM_AMDGPU_CALL_FIXED_HAZARD_SHORT_WAIT |
+           LOOM_AMDGPU_CALL_FIXED_HAZARD_DELAY_ALU |
+           LOOM_AMDGPU_CALL_FIXED_HAZARD_MASK_WRITE |
+           LOOM_AMDGPU_CALL_FIXED_HAZARD_SGPR_READ;
+  }
+  if (register_class == LOOM_AMDGPU_REG_CLASS_ID_SCC) {
+    return LOOM_AMDGPU_CALL_FIXED_HAZARD_DELAY_ALU;
+  }
+  loom_amdgpu_call_fixed_hazard_mask_t hazards = 0;
+  if (iree_any_bit_set(register_class_traits,
+                       LOOM_AMDGPU_REG_CLASS_TRAIT_AGPR)) {
+    hazards |= LOOM_AMDGPU_CALL_FIXED_HAZARD_SHORT_WAIT |
+               LOOM_AMDGPU_CALL_FIXED_HAZARD_MATRIX_RESULT;
+  }
+  if (iree_any_bit_set(register_class_traits, LOOM_AMDGPU_REG_CLASS_TRAIT_M0)) {
+    hazards |= LOOM_AMDGPU_CALL_FIXED_HAZARD_SHORT_WAIT |
+               LOOM_AMDGPU_CALL_FIXED_HAZARD_MASK_WRITE;
+  }
+  if (iree_any_bit_set(register_class_traits,
+                       LOOM_AMDGPU_REG_CLASS_TRAIT_VCC)) {
+    hazards |= LOOM_AMDGPU_CALL_FIXED_HAZARD_SHORT_WAIT |
+               LOOM_AMDGPU_CALL_FIXED_HAZARD_MASK_WRITE |
+               LOOM_AMDGPU_CALL_FIXED_HAZARD_SGPR_READ;
+  }
+  return hazards;
+}
+
+loom_amdgpu_call_state_t loom_amdgpu_call_state_resolve(
+    loom_amdgpu_call_state_provider_t provider, loom_symbol_ref_t callee) {
+  if (provider.query == NULL) {
+    return (loom_amdgpu_call_state_t){
+        .counter_mask = UINT8_MAX,
+        .fixed_hazard_mask = LOOM_AMDGPU_CALL_FIXED_HAZARD_ALL,
+    };
+  }
+  const loom_amdgpu_call_state_t* state =
+      provider.query(provider.user_data, callee);
+  IREE_ASSERT(state != NULL);
+  return *state;
+}
+
 bool loom_amdgpu_call_abi_add_low_type(
     const loom_low_descriptor_set_t* descriptor_set, loom_type_t low_type,
     loom_amdgpu_call_abi_requirements_t* inout_requirements) {

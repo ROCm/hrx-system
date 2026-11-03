@@ -368,30 +368,11 @@ void loom_amdgpu_short_wait_begin_block(loom_amdgpu_short_wait_t* state,
   state->source_count = 0;
 }
 
-static loom_amdgpu_short_wait_match_t loom_amdgpu_short_wait_query_range(
-    loom_amdgpu_short_wait_t* state, uint32_t base, uint16_t count,
+static loom_amdgpu_short_wait_match_t
+loom_amdgpu_short_wait_match_local_sources(
+    const loom_amdgpu_short_wait_t* state, uint32_t base, uint16_t count,
     uint32_t instruction_offset, loom_amdgpu_short_wait_reasons_t reasons) {
   loom_amdgpu_short_wait_match_t match = {0};
-  if (state->blocks != NULL && state->position + instruction_offset <
-                                   LOOM_AMDGPU_SHORT_WAIT_MAX_CYCLES) {
-    unsigned incoming_reasons = reasons & ~state->drained_reasons;
-    while (incoming_reasons) {
-      const unsigned channel =
-          iree_math_count_trailing_zeros_u32(incoming_reasons);
-      incoming_reasons &= incoming_reasons - 1;
-      if (state->position + instruction_offset <
-          loom_amdgpu_short_wait_cycles[channel]) {
-        uint64_t* queries = state->queries + (state->channel_offsets[channel] +
-                                              instruction_offset) *
-                                                 state->word_count;
-        if (!(state->query_reasons[instruction_offset] & (1u << channel))) {
-          memset(queries, 0, state->word_count * sizeof(*queries));
-          state->query_reasons[instruction_offset] |= 1u << channel;
-        }
-        loom_amdgpu_short_wait_set_range(queries, base, count);
-      }
-    }
-  }
   for (unsigned i = 0; i < state->source_count; ++i) {
     const loom_amdgpu_short_wait_source_t* source = &state->sources[i];
     const uint64_t observed =
@@ -418,6 +399,33 @@ static loom_amdgpu_short_wait_match_t loom_amdgpu_short_wait_query_range(
     }
   }
   return match;
+}
+
+static loom_amdgpu_short_wait_match_t loom_amdgpu_short_wait_query_range(
+    loom_amdgpu_short_wait_t* state, uint32_t base, uint16_t count,
+    uint32_t instruction_offset, loom_amdgpu_short_wait_reasons_t reasons) {
+  if (state->blocks != NULL && state->position + instruction_offset <
+                                   LOOM_AMDGPU_SHORT_WAIT_MAX_CYCLES) {
+    unsigned incoming_reasons = reasons & ~state->drained_reasons;
+    while (incoming_reasons) {
+      const unsigned channel =
+          iree_math_count_trailing_zeros_u32(incoming_reasons);
+      incoming_reasons &= incoming_reasons - 1;
+      if (state->position + instruction_offset <
+          loom_amdgpu_short_wait_cycles[channel]) {
+        uint64_t* queries = state->queries + (state->channel_offsets[channel] +
+                                              instruction_offset) *
+                                                 state->word_count;
+        if (!(state->query_reasons[instruction_offset] & (1u << channel))) {
+          memset(queries, 0, state->word_count * sizeof(*queries));
+          state->query_reasons[instruction_offset] |= 1u << channel;
+        }
+        loom_amdgpu_short_wait_set_range(queries, base, count);
+      }
+    }
+  }
+  return loom_amdgpu_short_wait_match_local_sources(
+      state, base, count, instruction_offset, reasons);
 }
 
 loom_amdgpu_short_wait_match_t loom_amdgpu_short_wait_query(
@@ -730,6 +738,20 @@ loom_amdgpu_short_wait_match_t loom_amdgpu_short_wait_drain(
                                          state->enabled_reasons);
   loom_amdgpu_short_wait_commit_queries(state, packet, instruction_offset);
   state->drained_reasons |= state->enabled_reasons;
+  state->source_count = 0;
+  return match;
+}
+
+loom_amdgpu_short_wait_match_t loom_amdgpu_short_wait_drain_local(
+    loom_amdgpu_short_wait_t* state) {
+  const uint32_t physical_count =
+      state->banks.m0 + 1 +
+      ((state->enabled_reasons & LOOM_AMDGPU_SHORT_WAIT_DGEMM_PIPELINE) != 0);
+  IREE_ASSERT_LE(physical_count, UINT16_MAX);
+  const loom_amdgpu_short_wait_match_t match =
+      loom_amdgpu_short_wait_match_local_sources(
+          state, 0, (uint16_t)physical_count, /*instruction_offset=*/0,
+          state->enabled_reasons);
   state->source_count = 0;
   return match;
 }

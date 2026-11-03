@@ -20,6 +20,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/schedule/types.h"
+#include "loom/target/arch/amdgpu/abi/call_abi.h"
 #include "loom/target/arch/amdgpu/planning/address_state.h"
 #include "loom/target/arch/amdgpu/planning/vopd_plan.h"
 #include "loom/target/arch/amdgpu/planning/wait_packets.h"
@@ -29,6 +30,14 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Interprocedural policy shared by AMDGPU packet-planning phases.
+typedef struct loom_amdgpu_packet_plan_options_t {
+  // Exact machine-state contracts for direct callees.
+  loom_amdgpu_call_state_provider_t call_states;
+  // Whether this function participates as a callable helper.
+  bool callable;
+} loom_amdgpu_packet_plan_options_t;
 
 typedef struct loom_amdgpu_packet_plan_t {
   // Schedule table this plan was built from.
@@ -54,6 +63,7 @@ typedef struct loom_amdgpu_packet_plan_t {
 iree_status_t loom_amdgpu_packet_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
+    const loom_amdgpu_packet_plan_options_t* options,
     iree_arena_allocator_t* arena,
     loom_amdgpu_vopd_rejection_table_t* out_vopd_rejections,
     loom_amdgpu_packet_plan_t* out_plan);

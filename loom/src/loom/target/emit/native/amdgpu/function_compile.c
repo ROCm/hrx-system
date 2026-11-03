@@ -101,6 +101,8 @@ iree_status_t loom_amdgpu_function_compile(
       .loop_execution = options->loop_execution,
       .allocation_fixed_values = options->allocation_fixed_values,
       .allocation_fixed_value_count = options->allocation_fixed_value_count,
+      .allocation_entry_values = options->allocation_entry_values,
+      .allocation_entry_value_count = options->allocation_entry_value_count,
       .allocation_entry_locations = options->allocation_entry_locations,
       .allocation_entry_location_count =
           options->allocation_entry_location_count,
@@ -145,9 +147,13 @@ iree_status_t loom_amdgpu_function_compile(
   }
 
   bool plan_accepted = false;
+  const loom_amdgpu_packet_plan_options_t packet_options = {
+      .call_states = options->call_states,
+      .callable = options->callable,
+  };
   IREE_RETURN_IF_ERROR(loom_amdgpu_function_plan_build(
-      &out_compilation->frame, options->emitter, arena, &plan_accepted,
-      &out_compilation->plan));
+      &out_compilation->frame, options->emitter, &packet_options, arena,
+      &plan_accepted, &out_compilation->plan));
   if (!plan_accepted) {
     return loom_amdgpu_function_compile_record_rejection(out_compilation,
                                                          options->report);

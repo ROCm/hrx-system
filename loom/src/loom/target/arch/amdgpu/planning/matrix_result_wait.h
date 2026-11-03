@@ -122,7 +122,7 @@ void loom_amdgpu_matrix_result_wait_advance(
     loom_amdgpu_matrix_result_wait_t* state, uint64_t instruction_count);
 
 // Returns the strongest live result window and starts a fresh physical epoch.
-// Opaque callees therefore inherit no caller-owned result retention.
+// Callers use this at boundaries whose callee contract includes result state.
 loom_amdgpu_matrix_result_match_t loom_amdgpu_matrix_result_wait_drain(
     loom_amdgpu_matrix_result_wait_t* state);
 

@@ -66,7 +66,8 @@ void loom_amdgpu_matrix_coexecution_begin_static_block(
 void loom_amdgpu_matrix_coexecution_commit_static_packet(
     loom_amdgpu_matrix_coexecution_t* coexecution,
     const loom_low_packet_view_t* packet,
-    const loom_amdgpu_structural_packet_info_t* structural_info);
+    const loom_amdgpu_structural_packet_info_t* structural_info,
+    bool quiescent_boundary);
 
 // Commits two final VOPD components as one vector issue slot. Matrix-source
 // packets are never legal VOPD components.
@@ -104,7 +105,7 @@ void loom_amdgpu_matrix_coexecution_advance(
     loom_amdgpu_matrix_coexecution_t* coexecution, uint16_t issue_count);
 
 // Returns the strongest live release window and starts a fresh physical
-// epoch. Opaque callees therefore inherit no caller-owned matrix retention.
+// epoch. Callers use this when the callee contract includes release state.
 loom_amdgpu_matrix_coexecution_match_t loom_amdgpu_matrix_coexecution_drain(
     loom_amdgpu_matrix_coexecution_t* coexecution);
 

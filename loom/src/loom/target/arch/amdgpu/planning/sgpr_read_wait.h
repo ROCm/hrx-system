@@ -22,7 +22,7 @@ enum {
   LOOM_AMDGPU_SGPR_READ_WAIT_VECTOR = 2,
   // A native interlock or dependency wait completes selected destinations.
   LOOM_AMDGPU_SGPR_READ_WAIT_DRAIN = 3,
-  // An opaque call completes every pending scalar destination class.
+  // A quiescent native boundary completes every pending destination class.
   LOOM_AMDGPU_SGPR_READ_WAIT_BOUNDARY = 4,
 };
 
@@ -71,13 +71,20 @@ iree_status_t loom_amdgpu_sgpr_read_wait_collect(
 
 // Collects final descriptor operands or sequential structural moves. A VOPD
 // second packet shares the first packet's single native instruction boundary.
+// |quiescent_call_boundary| selects whether a structural call restores this
+// family before transferring control.
 iree_status_t loom_amdgpu_sgpr_read_wait_collect_packet(
     loom_amdgpu_sgpr_read_wait_t* state,
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_view_t* packet,
     const loom_low_packet_view_t* second_packet,
     const loom_amdgpu_structural_packet_info_t* structural,
-    loom_amdgpu_descriptor_traits_t traits);
+    loom_amdgpu_descriptor_traits_t traits, bool quiescent_call_boundary);
+
+// Retires every pending scalar destination class at a quiescent boundary.
+iree_status_t loom_amdgpu_sgpr_read_wait_collect_boundary(
+    loom_amdgpu_sgpr_read_wait_t* state, const loom_low_packet_view_t* packet,
+    uint32_t instruction_offset);
 
 // Consumes a retained ALU-counter action; the packed bound is decoded once by
 // counter planning, including explicit partial destination-field waits.

@@ -22,6 +22,7 @@
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/packet_hazard_plan.h"
 #include "loom/codegen/low/schedule/types.h"
+#include "loom/target/arch/amdgpu/abi/call_abi.h"
 #include "loom/target/arch/amdgpu/planning/address_state.h"
 #include "loom/target/arch/amdgpu/planning/wait_counters.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
@@ -46,6 +47,16 @@ typedef enum loom_amdgpu_wait_plan_action_flag_bits_e {
   LOOM_AMDGPU_WAIT_PLAN_ACTION_FLAG_STORAGE_RELEASE = 1u << 0,
 } loom_amdgpu_wait_plan_action_flag_bits_t;
 typedef uint8_t loom_amdgpu_wait_plan_action_flags_t;
+
+// Optional interprocedural policy for one function's counter plan.
+typedef struct loom_amdgpu_wait_plan_options_t {
+  // Exact machine-state contracts for direct callees. When absent, calls use
+  // the conservative contract covering every counter and fixed-hazard family.
+  loom_amdgpu_call_state_provider_t call_states;
+  // Whether this function is a callable helper and must restore its published
+  // machine state at each return.
+  bool callable;
+} loom_amdgpu_wait_plan_options_t;
 
 typedef enum loom_amdgpu_wait_plan_reason_e {
   // Unknown or uninitialized wait reason.
@@ -90,8 +101,8 @@ typedef enum loom_amdgpu_wait_plan_reason_e {
   LOOM_AMDGPU_WAIT_PLAN_REASON_TENSOR_ISSUE_DRAIN = 16,
   // A GFX12.0 ordinary SYSTEM store must follow prior memory completion.
   LOOM_AMDGPU_WAIT_PLAN_REASON_SYSTEM_SCOPE_STORE = 17,
-  // A retained direct helper call starts with no outstanding counter work so
-  // independently planned frames cannot alias live results or memory effects.
+  // A retained direct helper call crosses an independently planned counter
+  // domain whose named counters are empty at helper entry and return.
   LOOM_AMDGPU_WAIT_PLAN_REASON_CALLABLE_BOUNDARY = 18,
   // Total number of wait-plan reason values.
   LOOM_AMDGPU_WAIT_PLAN_REASON_COUNT,
@@ -156,6 +167,11 @@ typedef struct loom_amdgpu_wait_plan_t {
   const uint64_t* elided_wait_nodes;
   // Union of native descriptor traits retained by node classification.
   loom_amdgpu_descriptor_traits_t descriptor_traits;
+  // Union of logical counters produced anywhere in the function.
+  loom_amdgpu_wait_counter_mask_t produced_counter_mask;
+  // Fixed physical hazard families touched by a callable helper. Ordinary
+  // kernel plans leave this empty because they are not consumed as callees.
+  loom_amdgpu_call_fixed_hazard_mask_t fixed_hazard_mask;
   // Native DOT identities requiring independent fixed-delay channels.
   uint8_t dot_identity_mask;
 } loom_amdgpu_wait_plan_t;
@@ -191,6 +207,7 @@ iree_string_view_t loom_amdgpu_wait_plan_residual_action_name(
 // allocation, including pending result writes and issued memory source reads.
 // Planned waits share insertion points across zero-instruction packets, but
 // never across block entries or transitions retained in |address_state|.
+// |options| may be NULL for an ordinary independently planned function.
 // The address-state overlay is borrowed only for this call.
 // When |out_matrix_results| is present, this traversal retains static MFMA
 // exits and source facts in |matrix_arena| for the subsequent fixed-wait
@@ -201,6 +218,7 @@ iree_string_view_t loom_amdgpu_wait_plan_residual_action_name(
 iree_status_t loom_amdgpu_wait_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
+    const loom_amdgpu_wait_plan_options_t* options,
     const loom_amdgpu_address_state_plan_t* address_state,
     iree_arena_allocator_t* matrix_arena,
     struct loom_amdgpu_matrix_result_wait_t** out_matrix_results,

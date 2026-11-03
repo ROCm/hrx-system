@@ -436,8 +436,9 @@ iree_status_t loom_target_entry_select_entry(
       entry_kind, out_selected, out_entry);
 }
 
-iree_status_t loom_target_entry_select_all_entries(
+iree_status_t loom_target_entry_select_all_entries_from_version_snapshot(
     const loom_module_t* module, const loom_target_entry_options_t* options,
+    const loom_target_function_version_snapshot_t* function_versions,
     loom_target_entry_predicate_t predicate,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
     iree_string_view_t entry_kind, iree_arena_allocator_t* arena,
@@ -453,10 +454,6 @@ iree_status_t loom_target_entry_select_all_entries(
 
   loom_symbol_fact_table_t fact_table = {0};
   loom_target_entry_initialize_fact_table(arena, &fact_table);
-  loom_target_function_version_snapshot_t function_versions = {0};
-  IREE_RETURN_IF_ERROR(loom_target_function_version_snapshot_build(
-      module, options ? options->function_versions : NULL, arena,
-      &function_versions));
 
   uint16_t entry_count = 0;
   const loom_block_t* module_block =
@@ -471,7 +468,7 @@ iree_status_t loom_target_entry_select_all_entries(
     bool compatible = false;
     loom_target_entry_t candidate = {0};
     IREE_RETURN_IF_ERROR(loom_target_entry_try_entry(
-        module, &fact_table, &function_versions, symbol_id, predicate,
+        module, &fact_table, function_versions, symbol_id, predicate,
         diagnostic_emitter, entry_kind, options ? options->flags : 0,
         /*require_compatible=*/false, &compatible, &candidate));
     if (!compatible) {
@@ -496,4 +493,19 @@ iree_status_t loom_target_entry_select_all_entries(
   };
   *out_selected = true;
   return iree_ok_status();
+}
+
+iree_status_t loom_target_entry_select_all_entries(
+    const loom_module_t* module, const loom_target_entry_options_t* options,
+    loom_target_entry_predicate_t predicate,
+    loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
+    iree_string_view_t entry_kind, iree_arena_allocator_t* arena,
+    bool* out_selected, loom_target_entry_list_t* out_entries) {
+  loom_target_function_version_snapshot_t function_versions = {0};
+  IREE_RETURN_IF_ERROR(loom_target_function_version_snapshot_build(
+      module, options ? options->function_versions : NULL, arena,
+      &function_versions));
+  return loom_target_entry_select_all_entries_from_version_snapshot(
+      module, options, &function_versions, predicate, diagnostic_emitter,
+      entry_kind, arena, out_selected, out_entries);
 }

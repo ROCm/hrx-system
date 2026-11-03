@@ -448,6 +448,9 @@ iree_status_t loom_amdgpu_kernel_record_build(
   if (entry_envelope->minimum_sgpr_count > next_free_sgpr) {
     next_free_sgpr = entry_envelope->minimum_sgpr_count;
   }
+  if (options->minimum_sgpr_count > next_free_sgpr) {
+    next_free_sgpr = options->minimum_sgpr_count;
+  }
   uint32_t next_free_vgpr = preflight->next_free_vgpr;
   if (entry_envelope->minimum_vgpr_count > next_free_vgpr) {
     next_free_vgpr = entry_envelope->minimum_vgpr_count;
@@ -464,9 +467,13 @@ iree_status_t loom_amdgpu_kernel_record_build(
   // within the same hardware allocation as the architectural VGPRs.
   const uint32_t accum_offset =
       has_accumulators && next_free_vgpr != 0 ? (next_free_vgpr - 1u) / 4u : 0;
+  const uint32_t next_free_agpr =
+      preflight->next_free_agpr > options->minimum_agpr_count
+          ? preflight->next_free_agpr
+          : options->minimum_agpr_count;
   const uint32_t total_vgpr_count =
-      preflight->next_free_agpr != 0
-          ? ((next_free_vgpr + 3u) & ~UINT32_C(3)) + preflight->next_free_agpr
+      next_free_agpr != 0
+          ? ((next_free_vgpr + 3u) & ~UINT32_C(3)) + next_free_agpr
           : next_free_vgpr;
 
   iree_string_view_t descriptor_symbol = iree_string_view_empty();
@@ -511,7 +518,7 @@ iree_status_t loom_amdgpu_kernel_record_build(
                       storage_layout->segment_sizes.private_segment_fixed_size,
               .sgpr_count = next_free_sgpr,
               .vgpr_count = total_vgpr_count,
-              .agpr_count = preflight->next_free_agpr,
+              .agpr_count = next_free_agpr,
               .max_flat_workgroup_size = max_flat_workgroup_size,
               .required_workgroup_size = hal_kernel->required_workgroup_size,
               .has_required_workgroup_size = has_required_workgroup_size,

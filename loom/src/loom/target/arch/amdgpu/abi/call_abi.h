@@ -12,11 +12,15 @@
 #include "loom/codegen/low/allocation/call.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/ir/types.h"
+#include "loom/target/arch/amdgpu/refs/target_refs.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+// A callable helper returns with the exact EXEC mask it received. Structured
+// AMDGPU control lowering restores the incoming mask at every function exit;
+// authored target assembly follows the same callee-preserved ABI contract.
 enum {
   // SGPR4-SGPR29 carry scalar arguments and results. The remaining low SGPRs
   // are available to the helper body or reserved for call control below.
@@ -27,17 +31,15 @@ enum {
   LOOM_AMDGPU_CALL_ABI_VGPR_COUNT = 32,
   // SGPR30:31 hold the return address written by S_SWAPPC_B64.
   LOOM_AMDGPU_CALL_ABI_RETURN_ADDRESS_BASE = 30,
-  // SGPR32:33 preserve the caller's EXEC mask across the call.
-  LOOM_AMDGPU_CALL_ABI_SAVED_EXEC_BASE = 32,
-  // SGPR34:35 hold the resolved callee PC at a direct call.
-  LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE = 34,
+  // SGPR32:33 hold the resolved callee PC at a direct call.
+  LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE = 32,
   // Contiguous SGPR range unavailable to ordinary allocation in every
   // function participating in a direct-call program.
   LOOM_AMDGPU_CALL_ABI_RESERVED_SGPR_BASE = 30,
-  LOOM_AMDGPU_CALL_ABI_RESERVED_SGPR_COUNT = 6,
-  // Native scalar instructions in one direct call around the opaque callee:
-  // save EXEC, form the callee PC, transfer control, and restore EXEC.
-  LOOM_AMDGPU_CALL_ABI_CALL_CONTROL_INSTRUCTION_COUNT = 6,
+  LOOM_AMDGPU_CALL_ABI_RESERVED_SGPR_COUNT = 4,
+  // Native scalar instructions before one retained direct callee: form the
+  // callee PC and transfer control. EXEC is callee-preserved.
+  LOOM_AMDGPU_CALL_ABI_CALL_CONTROL_INSTRUCTION_COUNT = 4,
 };
 
 // Register-bank demand for one side of a direct-call boundary.
@@ -47,6 +49,60 @@ typedef struct loom_amdgpu_call_abi_requirements_t {
   // Number of contiguous 32-bit VGPR units.
   uint16_t vgpr_count;
 } loom_amdgpu_call_abi_requirements_t;
+
+// Independently planned fixed-hazard families that a callable may observe or
+// perturb through its physical register footprint.
+typedef uint8_t loom_amdgpu_call_fixed_hazard_mask_t;
+enum {
+  LOOM_AMDGPU_CALL_FIXED_HAZARD_SHORT_WAIT = 1u << 0,
+  LOOM_AMDGPU_CALL_FIXED_HAZARD_MATRIX_RESULT = 1u << 1,
+  LOOM_AMDGPU_CALL_FIXED_HAZARD_MATRIX_COEXECUTION = 1u << 2,
+  LOOM_AMDGPU_CALL_FIXED_HAZARD_DELAY_ALU = 1u << 3,
+  LOOM_AMDGPU_CALL_FIXED_HAZARD_MASK_WRITE = 1u << 4,
+  LOOM_AMDGPU_CALL_FIXED_HAZARD_SGPR_READ = 1u << 5,
+  LOOM_AMDGPU_CALL_FIXED_HAZARD_ALL =
+      LOOM_AMDGPU_CALL_FIXED_HAZARD_SHORT_WAIT |
+      LOOM_AMDGPU_CALL_FIXED_HAZARD_MATRIX_RESULT |
+      LOOM_AMDGPU_CALL_FIXED_HAZARD_MATRIX_COEXECUTION |
+      LOOM_AMDGPU_CALL_FIXED_HAZARD_DELAY_ALU |
+      LOOM_AMDGPU_CALL_FIXED_HAZARD_MASK_WRITE |
+      LOOM_AMDGPU_CALL_FIXED_HAZARD_SGPR_READ,
+};
+
+// Returns the fixed-hazard families that can observe accesses to
+// |register_class| with the generated target-owned |register_class_traits|.
+loom_amdgpu_call_fixed_hazard_mask_t
+loom_amdgpu_call_fixed_hazards_for_register_class(
+    uint16_t register_class,
+    loom_amdgpu_reg_class_traits_t register_class_traits);
+
+// Machine state contract for one independently planned callable helper.
+//
+// The caller establishes the named state before transferring control, and the
+// helper restores it before returning. State absent from this summary passes
+// through the call unchanged.
+typedef struct loom_amdgpu_call_state_t {
+  // Logical wait-counter bits the helper may issue. Each named counter is
+  // empty on helper entry and return.
+  uint8_t counter_mask;
+  // Fixed physical hazard families touched by the helper. Each named family
+  // is quiescent on helper entry and return.
+  loom_amdgpu_call_fixed_hazard_mask_t fixed_hazard_mask;
+} loom_amdgpu_call_state_t;
+
+// Symbol-indexed call-state summaries available while planning one caller.
+typedef struct loom_amdgpu_call_state_provider_t {
+  // Returns the immutable state contract for |callee|.
+  const loom_amdgpu_call_state_t* (*query)(void* user_data,
+                                           loom_symbol_ref_t callee);
+  // Opaque value passed to |query|.
+  void* user_data;
+} loom_amdgpu_call_state_provider_t;
+
+// Resolves the immutable state contract for |callee|. An absent provider
+// conservatively returns every representable counter and fixed-hazard family.
+loom_amdgpu_call_state_t loom_amdgpu_call_state_resolve(
+    loom_amdgpu_call_state_provider_t provider, loom_symbol_ref_t callee);
 
 // Adds the physical direct-call carrier required by one target-low type.
 // Returns false unless the type is an SGPR or VGPR range from |descriptor_set|

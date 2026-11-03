@@ -44,7 +44,7 @@ typedef struct loom_amdgpu_mask_write_event_t {
   uint16_t fields;
   // Whether the overwrite issues on VALU rather than SALU.
   bool is_vector;
-  // Whether this event drains every destination class before an opaque call.
+  // Whether this event drains every destination class at a native boundary.
   bool is_boundary;
 } loom_amdgpu_mask_write_event_t;
 
@@ -185,7 +185,7 @@ static iree_status_t loom_amdgpu_mask_write_record(
   return loom_amdgpu_mask_write_append_event(state, event);
 }
 
-static iree_status_t loom_amdgpu_mask_write_record_boundary(
+iree_status_t loom_amdgpu_mask_write_wait_collect_boundary(
     loom_amdgpu_mask_write_wait_t* state, const loom_low_packet_view_t* packet,
     uint32_t instruction_offset) {
   loom_amdgpu_mask_write_block_t* block =
@@ -209,11 +209,13 @@ static iree_status_t loom_amdgpu_mask_write_record_boundary(
 iree_status_t loom_amdgpu_mask_write_wait_collect(
     loom_amdgpu_mask_write_wait_t* state, const loom_low_packet_view_t* packet,
     const loom_amdgpu_structural_packet_info_t* structural,
-    loom_amdgpu_descriptor_traits_t traits) {
+    loom_amdgpu_descriptor_traits_t traits, bool quiescent_call_boundary) {
   iree_status_t status = iree_ok_status();
   if (packet->descriptor == NULL) {
-    const bool is_call = iree_any_bit_set(
-        structural->flags, LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CALL);
+    const bool is_call =
+        quiescent_call_boundary &&
+        iree_any_bit_set(structural->flags,
+                         LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CALL);
     const uint64_t call_boundary =
         is_call ? loom_amdgpu_structural_packet_call_boundary_offset(structural)
                 : 0;
@@ -229,7 +231,7 @@ iree_status_t loom_amdgpu_mask_write_wait_collect(
                                                         segment_index);
       if (is_call && !boundary_recorded &&
           segment.instruction_offset > call_boundary) {
-        status = loom_amdgpu_mask_write_record_boundary(
+        status = loom_amdgpu_mask_write_wait_collect_boundary(
             state, packet, (uint32_t)call_boundary);
         boundary_recorded = true;
       }
@@ -251,8 +253,8 @@ iree_status_t loom_amdgpu_mask_write_wait_collect(
       }
     }
     if (is_call && !boundary_recorded && iree_status_is_ok(status)) {
-      status = loom_amdgpu_mask_write_record_boundary(state, packet,
-                                                      (uint32_t)call_boundary);
+      status = loom_amdgpu_mask_write_wait_collect_boundary(
+          state, packet, (uint32_t)call_boundary);
     }
     return status;
   }

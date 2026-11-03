@@ -101,6 +101,11 @@ typedef struct loom_low_emission_frame_options_t {
   const loom_low_allocation_abi_location_t* allocation_entry_locations;
   // Number of entries in |allocation_entry_locations|.
   iree_host_size_t allocation_entry_location_count;
+  // Sparse invocation-entry coordinates for non-argument SSA values, passed
+  // unchanged through allocation repair.
+  const loom_low_allocation_entry_value_t* allocation_entry_values;
+  // Number of entries in |allocation_entry_values|.
+  iree_host_size_t allocation_entry_value_count;
   // Borrowed outgoing locations indexed by function result, passed unchanged
   // through allocation repair. These constrain exits, not SSA lifetimes.
   const loom_low_allocation_abi_location_t* allocation_exit_locations;

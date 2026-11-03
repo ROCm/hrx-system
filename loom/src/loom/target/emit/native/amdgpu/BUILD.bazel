@@ -196,6 +196,95 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "program_resources",
+    srcs = ["program_resources.c"],
+    hdrs = ["program_resources.h"],
+    deps = [
+        ":function_plan",
+        ":storage_layout",
+        "//loom/src/loom/codegen/low:frame",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "program_resources_test",
+    srcs = ["program_resources_test.cc"],
+    deps = [
+        ":program_resources",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "program_call",
+    srcs = ["program_call.c"],
+    hdrs = ["program_call.h"],
+    deps = [
+        ":function_compile",
+        "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/codegen/low/allocation:call",
+        "//loom/src/loom/codegen/low/allocation:storage",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:parameter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/amdgpu:error_defs",
+        "//loom/src/loom/target/arch/amdgpu/abi:call_abi",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "program_compile",
+    srcs = ["program_compile.c"],
+    hdrs = ["program_compile.h"],
+    deps = [
+        ":function_compile",
+        ":program_call",
+        ":program_resources",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/analysis:symbol_references",
+        "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:parameter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/amdgpu:artifact_key",
+        "//loom/src/loom/target/arch/amdgpu:error_defs",
+        "//loom/src/loom/target/arch/amdgpu:facts",
+        "//loom/src/loom/target/arch/amdgpu:target_identity",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "program_call_test",
+    srcs = ["program_call_test.cc"],
+    deps = [
+        ":program_call",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/amdgpu/planning:wait_counters",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "spill_recipe",
     srcs = ["spill_recipe.c"],
     hdrs = ["spill_recipe.h"],
@@ -410,6 +499,7 @@ loom_cc_library(
         ":spill_lowering",
         "//loom/src/loom/codegen/low:allocation_materialization",
         "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/target/arch/amdgpu/abi:call_abi",
         "//loom/src/loom/target/arch/amdgpu/planning:descriptor_semantics",
         "//loom/src/loom/target/arch/amdgpu/planning:occupancy",
         "//loom/src/loom/target/arch/amdgpu/planning:placement",
@@ -454,6 +544,7 @@ loom_cc_library(
         ":kernel_plan",
         ":kernel_record_build",
         ":kernel_report",
+        ":program_resources",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/error:emitter",
@@ -567,6 +658,23 @@ loom_cc_library(
         ":kernel_plan",
         "//loom/src/loom/codegen/low:frame",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "program_emission",
+    srcs = ["program_emission.c"],
+    hdrs = ["program_emission.h"],
+    deps = [
+        ":encoding",
+        ":kernel_assembly",
+        ":kernel_emission",
+        ":kernel_plan",
+        ":program_compile",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
@@ -690,8 +798,11 @@ loom_cc_library(
         ":kernel_emission",
         ":kernel_plan_build",
         ":kernel_report",
+        ":program_compile",
+        ":program_emission",
         ":runtime_globals",
         "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:emitter",
@@ -700,6 +811,7 @@ loom_cc_library(
         "//loom/src/loom/ops/global",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:entry_selection",
+        "//loom/src/loom/target:function_version",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/arch/amdgpu:amdhsa_target_id",

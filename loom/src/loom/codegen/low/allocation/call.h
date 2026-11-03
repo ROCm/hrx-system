@@ -52,6 +52,19 @@ typedef struct loom_low_allocation_abi_location_t {
 static_assert(sizeof(loom_low_allocation_abi_location_t) == 8,
               "ABI locations must remain compact");
 
+// Sparse binding from one function-local SSA value to its invocation-entry
+// coordinate. The allocator resolves the value's register class and width from
+// its Low register type, then treats the coordinate as an entry preference and
+// transport source rather than a lifetime constraint.
+typedef struct loom_low_allocation_entry_value_t {
+  // Function-local SSA value available at invocation entry.
+  loom_value_id_t value_id;
+  // Register-like allocation kind containing the incoming value.
+  loom_low_allocation_location_kind_t location_kind;
+  // Physical view or first linear register unit in the value's register class.
+  uint32_t location_base;
+} loom_low_allocation_entry_value_t;
+
 typedef struct loom_low_call_contract_t {
   // ABI registers indexed by logical argument. A missing suffix or UNASSIGNED
   // entry is stored through the target's storage ABI before register transport

@@ -13,6 +13,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/allocation/table.h"
 #include "loom/codegen/low/schedule/types.h"
+#include "loom/target/arch/amdgpu/abi/call_abi.h"
 #include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/planning/wait_completion.h"
 #include "loom/target/arch/amdgpu/planning/wait_frontier.h"
@@ -66,7 +67,7 @@ typedef enum loom_amdgpu_wait_node_state_flag_bits_e {
   LOOM_AMDGPU_WAIT_NODE_STATE_UNREFINED_MEMORY_WRITE = 1u << 20,
   // MFMA/SMFMAC opens a fixed result window retained across physical writes.
   LOOM_AMDGPU_WAIT_NODE_STATE_MATRIX_RESULT = 1u << 21,
-  // A retained direct helper call requires a quiescent target boundary.
+  // Node is a retained direct helper call.
   LOOM_AMDGPU_WAIT_NODE_STATE_CALL = 1u << 22,
 } loom_amdgpu_wait_node_state_flag_bits_t;
 typedef uint32_t loom_amdgpu_wait_node_state_flags_t;
@@ -124,21 +125,29 @@ typedef struct loom_amdgpu_wait_classification_t {
   iree_host_size_t matrix_result_node_count;
   // Union of native descriptor traits established by node classification.
   loom_amdgpu_descriptor_traits_t descriptor_traits;
+  // Union of logical counters produced anywhere in the function.
+  loom_amdgpu_wait_counter_mask_t produced_counter_mask;
+  // Fixed physical hazard families touched by a callable helper. Empty when
+  // callable-state summarization was not requested.
+  loom_amdgpu_call_fixed_hazard_mask_t fixed_hazard_mask;
   // Native DOT identities present in this function, retained for fixed waits.
   uint8_t dot_identity_mask;
 } loom_amdgpu_wait_classification_t;
 
 // Initializes target wait state once from |schedule| and |allocation|. All
-// returned tables are owned by |arena|. Classification flags, decoded bounds,
-// and row counts remain stable; the documented completion fields are refined
-// by their owning downstream analyses. Mutable per-producer epochs use the
-// returned producer ordinals but are allocated separately by the action owner.
+// returned tables are owned by |arena|. |summarize_fixed_hazards| additionally
+// scans callable-only implicit physical state for an interprocedural summary;
+// ordinary kernel planning leaves that summary empty and avoids the scan.
+// Classification flags, decoded bounds, and row counts remain stable; the
+// documented completion fields are refined by their owning downstream
+// analyses. Mutable per-producer epochs use the returned producer ordinals but
+// are allocated separately by the action owner.
 iree_status_t loom_amdgpu_wait_classification_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_processor_properties_t* processor_properties,
     const loom_amdgpu_wait_packet_target_t* wait_packet_target,
-    iree_arena_allocator_t* arena,
+    bool summarize_fixed_hazards, iree_arena_allocator_t* arena,
     loom_amdgpu_wait_classification_t* IREE_RESTRICT out_classification);
 
 #ifdef __cplusplus
