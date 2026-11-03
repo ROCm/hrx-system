@@ -6,10 +6,10 @@
 
 // FLAT has no scalar-base operand. Its bank, width and cache flags all survive
 // native printing, including the fixed return bit of compare/exchange.
-// RUN: emit amdgpu-assembly @flat_banks strategy=source waits=none
+// RUN: emit amdgpu-assembly @flat_banks
 amdgpu.target<gfx90a> @target
 
-low.func.def target<amdgpu.cdna2.core>(@target) @flat_banks(%address: reg<amdgpu.vgpr x2>, %pair: reg<amdgpu.agpr x2>, %wide_pair: reg<amdgpu.agpr x4>) asm {
+low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @flat_banks(%address: reg<amdgpu.vgpr x2>, %pair: reg<amdgpu.agpr x2>, %wide_pair: reg<amdgpu.agpr x4>) asm {
   %byte = flat_load_ubyte %address {offset = 1, glc = 1} : reg<amdgpu.agpr>
   %wide = flat_load_dwordx4 %address {offset = 16, slc = 1} : reg<amdgpu.agpr x4>
   flat_store_byte %address, %byte {offset = 32, glc = 1}
@@ -21,19 +21,22 @@ low.func.def target<amdgpu.cdna2.core>(@target) @flat_banks(%address: reg<amdgpu
 // ----
   flat_load_ubyte acc2, v[0:1] offset:1 glc
   flat_load_dwordx4 acc[8:11], v[0:1] offset:16 slc
+  s_waitcnt vmcnt(0) lgkmcnt(0)
   flat_store_byte v[0:1], acc2 offset:32 glc
   flat_store_dwordx4 v[0:1], acc[8:11] offset:48 slc
+  s_waitcnt vmcnt(0) lgkmcnt(0)
   flat_atomic_cmpswap acc0, v[0:1], acc[0:1] offset:0 glc slc
+  s_waitcnt vmcnt(0) lgkmcnt(0)
   flat_atomic_cmpswap_x2 acc[0:1], v[0:1], acc[4:7] offset:0 glc
   s_endpgm
 
 // ====
 
 // CDNA's return control is independent of the programmable cache scope.
-// RUN: emit amdgpu-assembly @atomic_return_flags strategy=source waits=none
+// RUN: emit amdgpu-assembly @atomic_return_flags
 amdgpu.target<gfx950> @target
 
-low.func.def target<amdgpu.cdna4.core>(@target) @atomic_return_flags(%address: reg<amdgpu.vgpr x2>, %offset: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %value: reg<amdgpu.vgpr>, %pair: reg<amdgpu.vgpr x2>, %wide_pair: reg<amdgpu.vgpr x4>) asm {
+low.func.def schedule(locked) target<amdgpu.cdna4.core>(@target) @atomic_return_flags(%address: reg<amdgpu.vgpr x2>, %offset: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %value: reg<amdgpu.vgpr>, %pair: reg<amdgpu.vgpr x2>, %wide_pair: reg<amdgpu.vgpr x4>) asm {
   %loaded = flat_load_dword %address {nt = 1, sc0 = 1, sc1 = 1} : reg<amdgpu.vgpr>
   flat_atomic_add %address, %value {sc1 = 1}
   %old = flat_atomic_add_rtn %address, %value {sc1 = 1} : reg<amdgpu.vgpr>
@@ -45,11 +48,17 @@ low.func.def target<amdgpu.cdna4.core>(@target) @atomic_return_flags(%address: r
 }
 // ----
   flat_load_dword v6, v[0:1] offset:0 nt sc0 sc1
+  s_waitcnt vmcnt(0) lgkmcnt(0)
   flat_atomic_add v[0:1], v2 offset:0 sc1
+  s_waitcnt vmcnt(0) lgkmcnt(0)
   flat_atomic_add v0, v[0:1], v2 offset:0 sc0 sc1
+  s_waitcnt vmcnt(63) lgkmcnt(0)
   global_atomic_add v3, v2, s[0:1] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
   global_atomic_add v0, v3, v2, s[0:1] offset:0 sc0 sc1
+  s_nop 0
   global_atomic_cmpswap v0, v3, v[4:5], s[0:1] offset:0 sc0
+  s_nop 0
   global_atomic_cmpswap_x2 v[0:1], v3, v[8:11], s[0:1] offset:0 sc0
   s_endpgm
 
@@ -57,10 +66,10 @@ low.func.def target<amdgpu.cdna4.core>(@target) @atomic_return_flags(%address: r
 
 // Buffer atomics have one read/write data operand, followed by vector address,
 // resource and scalar offset. Their return mode is a native flag.
-// RUN: emit amdgpu-assembly @buffer_operands strategy=source waits=none
+// RUN: emit amdgpu-assembly @buffer_operands
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @buffer_operands(%resource: reg<amdgpu.sgpr x4>, %offset: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr>, %value: reg<amdgpu.vgpr>, %pair: reg<amdgpu.vgpr x2>, %wide_pair: reg<amdgpu.vgpr x4>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3.core>(@target) @buffer_operands(%resource: reg<amdgpu.sgpr x4>, %offset: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr>, %value: reg<amdgpu.vgpr>, %pair: reg<amdgpu.vgpr x2>, %wide_pair: reg<amdgpu.vgpr x4>) asm {
   buffer_atomic_add_u32 %value, %resource, %offset, %base {offset = 4}
   %old = buffer_atomic_add_u32_rtn %value, %resource, %offset, %base {offset = 8}
   %compared = buffer_atomic_cmpswap_b32_rtn %pair, %resource, %offset, %base
@@ -72,16 +81,17 @@ low.func.def target<amdgpu.rdna3.core>(@target) @buffer_operands(%resource: reg<
   buffer_atomic_add_u32 v0, v1, s[0:3], s4 offen offset:8 glc
   buffer_atomic_cmpswap_b32 v[2:3], v1, s[0:3], s4 offen offset:0 glc
   buffer_atomic_cmpswap_b64 v[4:7], v1, s[0:3], s4 offen offset:0 glc
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
 // RDNA4 temporal hints have distinct load/store/atomic spellings. Encoding
 // three changes its load/store meaning at system scope.
-// RUN: emit amdgpu-assembly @temporal_hints strategy=source waits=none
+// RUN: emit amdgpu-assembly @temporal_hints
 amdgpu.target<gfx1201> @target
 
-low.func.def target<amdgpu.rdna4.core>(@target) @temporal_hints(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @temporal_hints(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>) asm {
   %regular = flat_load_dword %address
   %non_temporal = flat_load_dword %address {th = 1}
   %high_temporal = flat_load_dword %address {scope = 1, th = 2}
@@ -109,13 +119,29 @@ low.func.def target<amdgpu.rdna4.core>(@target) @temporal_hints(%address: reg<am
 }
 // ----
   flat_load_dword v3, v[0:1] offset:0
+  s_wait_loadcnt loadcnt(0)
+  s_wait_dscnt dscnt(0)
   flat_load_dword v3, v[0:1] offset:0 th:TH_LOAD_NT
+  s_wait_loadcnt loadcnt(0)
+  s_wait_dscnt dscnt(0)
   flat_load_dword v3, v[0:1] offset:0 scope:SCOPE_SE th:TH_LOAD_HT
+  s_wait_loadcnt loadcnt(0)
+  s_wait_dscnt dscnt(0)
   flat_load_dword v3, v[0:1] offset:0 scope:SCOPE_DEV th:TH_LOAD_LU
+  s_wait_loadcnt loadcnt(0)
+  s_wait_dscnt dscnt(0)
   flat_load_dword v3, v[0:1] offset:0 th:TH_LOAD_NT_RT
+  s_wait_loadcnt loadcnt(0)
+  s_wait_dscnt dscnt(0)
   flat_load_dword v3, v[0:1] offset:0 th:TH_LOAD_RT_NT
+  s_wait_loadcnt loadcnt(0)
+  s_wait_dscnt dscnt(0)
   flat_load_dword v3, v[0:1] offset:0 th:TH_LOAD_NT_HT
+  s_wait_loadcnt loadcnt(0)
+  s_wait_dscnt dscnt(0)
   flat_load_dword v3, v[0:1] offset:0 scope:SCOPE_SYS th:TH_LOAD_BYPASS
+  s_wait_loadcnt loadcnt(0)
+  s_wait_dscnt dscnt(0)
   flat_store_b32 v[0:1], v2 offset:0
   flat_store_b32 v[0:1], v2 offset:0 th:TH_STORE_NT
   flat_store_b32 v[0:1], v2 offset:0 scope:SCOPE_SE th:TH_STORE_HT
@@ -124,12 +150,25 @@ low.func.def target<amdgpu.rdna4.core>(@target) @temporal_hints(%address: reg<am
   flat_store_b32 v[0:1], v2 offset:0 th:TH_STORE_RT_NT
   flat_store_b32 v[0:1], v2 offset:0 th:TH_STORE_NT_HT
   flat_store_b32 v[0:1], v2 offset:0 th:TH_STORE_NT_WB
+  s_wait_storecnt storecnt(0)
   flat_store_b32 v[0:1], v2 offset:0 scope:SCOPE_SYS th:TH_STORE_BYPASS
+  s_wait_storecnt storecnt(0)
+  s_wait_dscnt dscnt(0)
   flat_atomic_add_u32 v[0:1], v2 offset:0
+  s_wait_storecnt storecnt(0)
+  s_wait_dscnt dscnt(0)
   flat_atomic_add_u32 v[0:1], v2 offset:0 th:TH_ATOMIC_NT
+  s_wait_storecnt storecnt(0)
+  s_wait_dscnt dscnt(0)
   flat_atomic_add_u32 v[0:1], v2 offset:0 th:TH_ATOMIC_CASCADE_RT
+  s_wait_storecnt storecnt(0)
+  s_wait_dscnt dscnt(0)
   flat_atomic_add_u32 v[0:1], v2 offset:0 th:TH_ATOMIC_CASCADE_NT
+  s_wait_storecnt storecnt(0)
+  s_wait_dscnt dscnt(0)
   flat_atomic_add_u32 v3, v[0:1], v2 offset:0 th:TH_ATOMIC_RETURN
+  s_wait_loadcnt loadcnt(0)
+  s_wait_dscnt dscnt(0)
   flat_atomic_add_u32 v0, v[0:1], v2 offset:0 scope:SCOPE_DEV th:TH_ATOMIC_NT_RETURN
   s_endpgm
 
@@ -137,10 +176,10 @@ low.func.def target<amdgpu.rdna4.core>(@target) @temporal_hints(%address: reg<am
 
 // The scalar offset can be a register or an encoded inline zero. LDS transfers
 // keep their implicit m0 read in Low without printing it as a memory operand.
-// RUN: emit amdgpu-assembly @buffer_address_forms strategy=source waits=none
+// RUN: emit amdgpu-assembly @buffer_address_forms
 amdgpu.target<gfx90a> @target
 
-low.func.def target<amdgpu.cdna2.core>(@target) @buffer_address_forms(%resource: reg<amdgpu.sgpr x4>, %address: reg<amdgpu.vgpr>, %offset: reg<amdgpu.sgpr>, %m0: reg<amdgpu.m0>) asm {
+low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @buffer_address_forms(%resource: reg<amdgpu.sgpr x4>, %address: reg<amdgpu.vgpr>, %offset: reg<amdgpu.sgpr>, %m0: reg<amdgpu.m0>) asm {
   %full = buffer_load_dword %resource, %address, %offset {offset = 4, glc = 1} : reg<amdgpu.vgpr>
   %vector = buffer_load_u8_vaddr_offset %resource, %address {offset = 8, slc = 1} : reg<amdgpu.vgpr>
   %scalar = buffer_load_dword_off_zero %resource {glc = 1, slc = 1} : reg<amdgpu.vgpr>
@@ -156,22 +195,26 @@ low.func.def target<amdgpu.cdna2.core>(@target) @buffer_address_forms(%resource:
   buffer_load_dword v1, v0, s[4:7], s0 offen offset:4 glc
   buffer_load_ubyte v2, v0, s[4:7], 0 offen offset:8 slc
   buffer_load_dword v3, off, s[4:7], 0 offset:0 glc slc
+  s_waitcnt vmcnt(2) lgkmcnt(15)
   buffer_store_dword v1, v0, s[4:7], s0 offen offset:0 glc
+  s_waitcnt vmcnt(1) lgkmcnt(15)
   buffer_store_byte v2, v0, s[4:7], 0 offen offset:0 slc
+  s_waitcnt vmcnt(0) lgkmcnt(15)
   buffer_store_dword v3, off, s[4:7], 0 offset:0 glc slc
   buffer_load_dword v0, s[4:7], s0 offen offset:0 glc lds
   buffer_load_dword v0, s[4:7], 0 offen offset:0 slc lds
   buffer_load_dword off, s[4:7], 0 offset:0 glc slc lds
+  s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
 
 // A high-half write preserves the low half through an explicit Low operand,
 // while native memory syntax contains just the shared physical destination.
-// RUN: emit amdgpu-assembly @partial_loads strategy=source waits=none
+// RUN: emit amdgpu-assembly @partial_loads
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @partial_loads(%resource: reg<amdgpu.sgpr x4>, %address: reg<amdgpu.vgpr>, %offset: reg<amdgpu.sgpr>, %base: reg<amdgpu.sgpr x2>, %pointer: reg<amdgpu.vgpr x2>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3.core>(@target) @partial_loads(%resource: reg<amdgpu.sgpr x4>, %address: reg<amdgpu.vgpr>, %offset: reg<amdgpu.sgpr>, %base: reg<amdgpu.sgpr x2>, %pointer: reg<amdgpu.vgpr x2>) asm {
   %buffer_low = buffer_load_d16_b16 %resource, %address, %offset {glc = 1}
   %buffer_full = buffer_load_d16_hi_b16 %buffer_low, %resource, %address, %offset {offset = 2, dlc = 1}
   %buffer_vector_low = buffer_load_d16_b16_vaddr_offset %resource, %address {slc = 1}
@@ -197,10 +240,10 @@ low.func.def target<amdgpu.rdna3.core>(@target) @partial_loads(%resource: reg<am
 
 // RDNA4 uses scope and temporal controls for ordinary buffer/global accesses,
 // including the null scalar-offset form used after address legalization.
-// RUN: emit amdgpu-assembly @scoped_address_forms strategy=source waits=none
+// RUN: emit amdgpu-assembly @scoped_address_forms
 amdgpu.target<gfx1201> @target
 
-low.func.def target<amdgpu.rdna4.core>(@target) @scoped_address_forms(%resource: reg<amdgpu.sgpr x4>, %address: reg<amdgpu.vgpr>, %offset: reg<amdgpu.sgpr>, %base: reg<amdgpu.sgpr x2>, %pointer: reg<amdgpu.vgpr x2>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @scoped_address_forms(%resource: reg<amdgpu.sgpr x4>, %address: reg<amdgpu.vgpr>, %offset: reg<amdgpu.sgpr>, %base: reg<amdgpu.sgpr x2>, %pointer: reg<amdgpu.vgpr x2>) asm {
   %buffer_full = buffer_load_dword %resource, %address, %offset {scope = 2, th = 1}
   %buffer_vector = buffer_load_dword_vaddr_offset %resource, %address {offset = 4096, scope = 3, th = 3}
   buffer_store_dword %buffer_full, %resource, %address, %offset {scope = 2, th = 7}
@@ -214,22 +257,29 @@ low.func.def target<amdgpu.rdna4.core>(@target) @scoped_address_forms(%resource:
 // ----
   buffer_load_dword v1, v0, s[4:7], s0 offen offset:0 scope:SCOPE_DEV th:TH_LOAD_NT
   buffer_load_dword v4, v0, s[4:7], null offen offset:4096 scope:SCOPE_SYS th:TH_LOAD_BYPASS
+  s_wait_loadcnt loadcnt(1)
   buffer_store_dword v1, v0, s[4:7], s0 offen offset:0 scope:SCOPE_DEV th:TH_STORE_NT_WB
+  s_wait_loadcnt loadcnt(0)
+  s_wait_storecnt storecnt(0)
   buffer_store_dword v4, v0, s[4:7], null offen offset:4096 scope:SCOPE_SYS th:TH_STORE_BYPASS
   global_load_b32 v1, v0, s[2:3] offset:0 scope:SCOPE_DEV th:TH_LOAD_LU
   global_load_b32 v4, v[2:3], off offset:0 scope:SCOPE_SYS th:TH_LOAD_BYPASS
+  s_wait_loadcnt loadcnt(1)
   global_store_b32 v0, v1, s[2:3] offset:0 scope:SCOPE_DEV th:TH_STORE_WB
+  s_wait_loadcnt loadcnt(0)
+  s_wait_storecnt storecnt(0)
   global_store_b32 v[2:3], v4, off offset:0 scope:SCOPE_SYS th:TH_STORE_BYPASS
+  s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====
 
 // Immediate-only SMEM uses a positional offset. Register-offset forms retain
 // their additional named offset, for global, scratch and buffer accesses.
-// RUN: emit amdgpu-assembly @scalar_address_forms strategy=source waits=none
+// RUN: emit amdgpu-assembly @scalar_address_forms
 amdgpu.target<gfx90a> @target
 
-low.func.def target<amdgpu.cdna2.core>(@target) @scalar_address_forms(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %resource: reg<amdgpu.sgpr x4>, %vector: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @scalar_address_forms(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %resource: reg<amdgpu.sgpr x4>, %vector: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %word = s_load_dword_offset_only %base
   %pair = s_load_dwordx2_offset_only %base {offset = 32}
   %dynamic = s_load_dwordx4 %base, %offset {offset = 48}
@@ -250,6 +300,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @scalar_address_forms(%base: reg
   s_load_dwordx4 s[12:15], s[0:1], s2 offset:48
   s_scratch_load_dwordx4 s[16:19], s[0:1], 64
   s_buffer_load_dword s10, s[4:7], s2 offset:16
+  s_waitcnt vmcnt(63) lgkmcnt(0)
   s_store_dword s3, s[0:1], 0
   s_store_dwordx2 s[8:9], s[0:1], 32
   s_store_dwordx4 s[12:15], s[0:1], s2 offset:48
@@ -263,10 +314,10 @@ low.func.def target<amdgpu.cdna2.core>(@target) @scalar_address_forms(%base: reg
 
 // RDNA4's narrow and three-word scalar loads share the immediate-only form,
 // including offsets wider than the earlier 21-bit field.
-// RUN: emit amdgpu-assembly @scalar_narrow_offsets strategy=source waits=none
+// RUN: emit amdgpu-assembly @scalar_narrow_offsets
 amdgpu.target<gfx1201> @target
 
-low.func.def target<amdgpu.rdna4.core>(@target) @scalar_narrow_offsets(%base: reg<amdgpu.sgpr x2>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @scalar_narrow_offsets(%base: reg<amdgpu.sgpr x2>) asm {
   %byte = s_load_u8_offset_only %base
   %half = s_load_i16_offset_only %base {offset = 12}
   %triple = s_load_b96_offset_only %base {offset = 3430008}
@@ -274,6 +325,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @scalar_narrow_offsets(%base: re
 }
 // ----
   s_load_u8 s2, s[0:1], 0
+  s_wait_kmcnt kmcnt(0)
   s_load_i16 s2, s[0:1], 12
   s_load_b96 s[4:6], s[0:1], 3430008
   s_endpgm
