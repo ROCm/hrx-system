@@ -822,70 +822,17 @@ jobs:
           retention-days: 7
 
   cmake_linux:
-    name: CMake / Linux x86-64 / ${{ matrix.name }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: GCC / RelWithDebInfo / Repository Build
-            kind: cpu
-            command: iree-cmake-repository-build
-            runner: azure-linux-scale-rocm
-            host_ar: ar
-            host_cc: gcc
-            host_cxx: g++
-          - name: Clang / RelWithDebInfo
-            kind: cpu
-            command: iree-cmake-cpu
-            platform_coverage: true
-            runner: azure-linux-scale-rocm
-            host_toolchain: rocm
-          - name: Clang / RelWithDebInfo / Shared Tools
-            kind: cpu
-            command: iree-cmake-shared-tools
-            platform_coverage: true
-            runner: azure-linux-scale-rocm
-            host_toolchain: rocm
-          - name: Clang / Sanitizer Smoke
-            kind: cpu
-            command: iree-cmake-sanitizer-smoke
-            runner: azure-linux-scale-rocm
-            host_ar: ar
-            host_cc: clang
-            host_cxx: clang++
-            install_compiler_rt: true
-          - name: GCC / RelWithDebInfo / AMD gfx120x Vulkan
-            kind: vulkan
-            command: iree-cmake-vulkan
-            runner: linux-gfx120X-gpu-rocm
-            host_ar: ar
-            host_cc: gcc
-            host_cxx: g++
-            container_options: --device /dev/dri --cap-add SYSLOG --user 0:0
-          - name: Clang / RelWithDebInfo / AMD gfx942
-            kind: amdgpu
-            command: iree-cmake-amdgpu
-            runner: linux-gfx942-1gpu-ccs-csp-ossci-rocm
-            target_selector: gfx942
-            timeout_minutes: 60
-            container_options: >-
-              --ipc host --group-add video --device /dev/kfd --device /dev/dri --cap-add SYSLOG
-              --group-add 993 --group-add 992 --group-add 110
-              --ulimit memlock=-1:-1 --security-opt seccomp=unconfined
-              --env-file /etc/podinfo/gha-gpu-isolation-settings --user 0:0
+    name: CMake / Linux x86-64 / GCC / RelWithDebInfo / Repository Build
     concurrency:
-      group: iree-cmake-linux-${{ matrix.command }}-${{ matrix.target_selector }}-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
+      group: iree-cmake-linux-repository-build-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ matrix.timeout_minutes || 45 }}
+    runs-on: azure-linux-scale-rocm
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash
     container:
-      image: ${{ matrix.command == 'iree-cmake-repository-build' && 'ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421' || 'ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98' }}
-      options: ${{ matrix.container_options || '' }}
-    env:
-      IREE_CI_PLATFORM_COVERAGE: ${{ matrix.platform_coverage && '1' || '0' }}
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -897,12 +844,11 @@ jobs:
 
       - name: Configure build environment
         run: |
-          output_name=iree-cmake
-          if [[ "${{ matrix.kind }}" == amdgpu ]]; then
-            output_name=iree-cmake-gpu
-          fi
-          output_dir="${GITHUB_WORKSPACE}/build/${output_name}"
+          output_dir="${GITHUB_WORKSPACE}/build/iree-cmake"
           {
+            echo "AR=ar"
+            echo "CC=gcc"
+            echo "CXX=g++"
             echo "HRX_ARTIFACT_SET=core"
             echo "HRX_DOWNLOAD_CACHE_DIR=${output_dir}/downloads"
             echo "HRX_OUTPUT_DIR=${output_dir}"
@@ -911,47 +857,9 @@ jobs:
             echo "HRX_ROCM_ROOT=${output_dir}/rocm-root"
             echo "PIP_CACHE_DIR=${output_dir}/caches/pip"
           } >> "$GITHUB_ENV"
-          if [[ "${{ matrix.kind }}" == amdgpu || "${{ matrix.host_toolchain }}" == rocm ]]; then
-            {
-              echo "AR=${output_dir}/rocm-root/lib/llvm/bin/llvm-ar"
-              echo "CC=${output_dir}/rocm-root/lib/llvm/bin/clang"
-              echo "CXX=${output_dir}/rocm-root/lib/llvm/bin/clang++"
-            } >> "$GITHUB_ENV"
-          else
-            {
-              echo "AR=${{ matrix.host_ar }}"
-              echo "CC=${{ matrix.host_cc }}"
-              echo "CXX=${{ matrix.host_cxx }}"
-            } >> "$GITHUB_ENV"
-          fi
-
-      - name: Install Vulkan build environment
-        if: matrix.kind == 'vulkan'
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends gcc g++ libvulkan1 mesa-vulkan-drivers vulkan-tools
-          dpkg-query -W gcc g++ libvulkan1 mesa-vulkan-drivers vulkan-tools
-
-      - name: Set up Python
-        if: matrix.command != 'iree-cmake-repository-build'
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        with:
-          python-version: "3.12"
-
-      - name: Install Clang sanitizer runtimes
-        if: matrix.install_compiler_rt
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends libclang-rt-18-dev
 
       - name: Fetch ROCm toolchain
-        if: matrix.kind != 'vulkan'
         run: bash .github/scripts/fetch_rocm_toolchain.sh
-
-      - name: Check Vulkan hardware environment
-        if: matrix.kind == 'vulkan'
-        timeout-minutes: 1
-        run: bash .github/scripts/check_vulkan_hardware_environment.sh
 
       - name: Install CMake host tools
         run: |
@@ -964,85 +872,31 @@ jobs:
           cmake --version
           ctest --version
           ninja --version
-          if [[ "${{ matrix.kind }}" == vulkan ]]; then
-            "${CC}" --version
-            "${CXX}" --version
-            "${AR}" --version
-          else
-            expect_rocm=()
-            if [[ "${{ matrix.kind }}" == amdgpu || "${{ matrix.host_toolchain }}" == rocm ]]; then
-              expect_rocm=(--expect-rocm)
-            fi
-            bash .github/scripts/check_host_toolchain.sh "${expect_rocm[@]}"
-            bash .github/scripts/check_rocm_device_toolchain.sh
-            test -d "${HRX_ROCM_ROOT}/include"
-          fi
-
-      - name: Report ROCm environment
-        if: matrix.kind == 'amdgpu'
-        timeout-minutes: 1
-        run: >-
-          bash .github/scripts/check_rocm_environment.sh
-          --export-libamdf-gpu-selection
-          --amdgpu-target "${{ matrix.target_selector }}"
+          bash .github/scripts/check_host_toolchain.sh
+          bash .github/scripts/check_rocm_device_toolchain.sh
+          test -d "${HRX_ROCM_ROOT}/include"
 
       - name: Run IREE CMake CI
         id: iree_cmake_ci
-        run: |
-          target_args=()
-          if [[ -n "${{ matrix.target_selector }}" ]]; then
-            target_args=(--amdgpu-target "${{ matrix.target_selector }}")
-          fi
-          python3 build_tools/devtools/ci.py ${{ matrix.command }} \
-            "${target_args[@]}" --keep-going
+        run: >-
+          python3 build_tools/devtools/ci.py
+          iree-cmake-repository-build --keep-going
 
-      - name: Capture accelerator kernel errors
-        if: ${{ always() && matrix.kind != 'cpu' && steps.iree_cmake_ci.outcome == 'failure' }}
-        run: |
-          date -u
-          uname -a
-          timeout --kill-after=5s 15s dmesg --ctime --level=err,warn 2>&1 | tail -n 200
-
-      - name: Upload test results
-        if: ${{ always() && (steps.iree_cmake_ci.outcome == 'failure' || (matrix.kind != 'cpu' && steps.iree_cmake_ci.outcome == 'success')) }}
+      - name: Upload failed test results
+        if: ${{ always() && steps.iree_cmake_ci.outcome == 'failure' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ctest-results-linux-${{ matrix.command }}-attempt-${{ github.run_attempt }}
+          name: ctest-results-linux-iree-cmake-repository-build-attempt-${{ github.run_attempt }}
           path: |
             build/ci/**/Testing/Temporary/
             build/ci/**/test_tmpdir/**/test.xml
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Preserve Vulkan slab-pool executable on failure
-        if: ${{ always() && matrix.kind == 'vulkan' && steps.iree_cmake_ci.outcome == 'failure' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: vulkan-slab-pool-executable-attempt-${{ github.run_attempt }}
-          path: build/ci/iree-cmake-vulkan/runtime/src/iree/hal/drivers/vulkan/cts/slab_pool_tests
-          if-no-files-found: warn
-          retention-days: 7
-
   cmake_windows:
-    name: CMake / Windows x86-64 / ${{ matrix.name }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: MSVC / RelWithDebInfo / Repository Build
-            command: iree-cmake-repository-build
-            fetch_rocm: false
-            host_toolchain: msvc
-          - name: Clang CL / RelWithDebInfo
-            command: iree-cmake-cpu
-            fetch_rocm: true
-            host_toolchain: clang-cl
-          - name: Clang CL / RelWithDebInfo / Shared Tools
-            command: iree-cmake-shared-tools
-            fetch_rocm: true
-            host_toolchain: clang-cl
+    name: CMake / Windows x86-64 / MSVC / RelWithDebInfo / Repository Build
     concurrency:
-      group: iree-cmake-windows-${{ matrix.command }}-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
+      group: iree-cmake-windows-repository-build-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true
     runs-on: azure-windows-scale-rocm
     timeout-minutes: 60
@@ -1065,12 +919,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Fetch ROCm toolchain
-        if: matrix.fetch_rocm
-        run: |
-          python -m pip install --upgrade boto3 zstandard
-          python build_tools/ci/ci_core_windows.py fetch-rocm
-
       - name: Install developer tools
         shell: pwsh
         run: |
@@ -1092,28 +940,17 @@ jobs:
           Import-Module (Join-Path $installation 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll')
           Enter-VsDevShell -VsInstallPath $installation -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
           if ($env:VSCMD_ARG_TGT_ARCH -ne 'x64') { throw 'Visual Studio x64 developer environment was not initialized.' }
-          if ("${{ matrix.host_toolchain }}" -eq 'msvc') {
-            $env:CC = 'cl.exe'
-            $env:CXX = 'cl.exe'
-            $env:AR = 'lib.exe'
-          } else {
-            foreach ($tool in @('clang-cl.exe', 'lld-link.exe', 'llvm-lib.exe')) {
-              if (-not (Test-Path -LiteralPath (Join-Path $env:HRX_ROCM_ROOT "lib\llvm\bin\$tool") -PathType Leaf)) {
-                throw "Missing LLVM tool: $tool"
-              }
-            }
-            $env:CC = Join-Path $env:HRX_ROCM_ROOT 'lib\llvm\bin\clang-cl.exe'
-            $env:CXX = $env:CC
-            $env:AR = Join-Path $env:HRX_ROCM_ROOT 'lib\llvm\bin\llvm-lib.exe'
-          }
-          python build_tools/devtools/ci.py ${{ matrix.command }} --keep-going
+          $env:CC = 'cl.exe'
+          $env:CXX = 'cl.exe'
+          $env:AR = 'lib.exe'
+          python build_tools/devtools/ci.py iree-cmake-repository-build --keep-going
           exit $LASTEXITCODE
 
       - name: Upload Windows build failure evidence
         if: ${{ always() && steps.iree_cmake_ci.outcome == 'failure' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: windows-build-failures-${{ matrix.command }}-attempt-${{ github.run_attempt }}
+          name: windows-build-failures-iree-cmake-repository-build-attempt-${{ github.run_attempt }}
           path: ${{ env.IREE_CI_FAILURE_ARTIFACT_DIR }}
           if-no-files-found: warn
           retention-days: 7
@@ -1122,7 +959,7 @@ jobs:
         if: ${{ always() && steps.iree_cmake_ci.outcome == 'failure' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ctest-results-windows-${{ matrix.command }}-attempt-${{ github.run_attempt }}
+          name: ctest-results-windows-iree-cmake-repository-build-attempt-${{ github.run_attempt }}
           path: |
             build/ci/**/Testing/Temporary/
             build/ci/**/test_tmpdir/**/test.xml

@@ -44,11 +44,12 @@ CMAKE_SANITIZER_SMOKE_CTEST_REGEXES = (
     "^iree/base/status_test$",
     "^loom/format/bytecode/varint_test$",
 )
+# Full repository builds execute one smoke at each shipping product boundary:
+# Loom source compilation and execution through the runtime, and LibAMDF public
+# API negotiation through a dynamically loaded provider.
 CMAKE_REPOSITORY_SMOKE_CTEST_REGEXES = (
-    "^iree/base/status_test$",
-    "^iree/hal/drivers/amd/xdna/",
-    "^libamdf/src/xdna/",
-    "^loom/format/bytecode/varint_test$",
+    "^loom/tools/loom-run/execution_test$",
+    "^libamdf/cts/core/query_dynamic$",
 )
 BAZEL_REPOSITORY_DEVICE_TARGETS = (
     "//runtime/src/iree/hal/drivers/amdgpu/util:pm4_dispatch_test_kernels",
