@@ -688,6 +688,22 @@ static void loom_amdgpu_wait_state_delay_alu_clear_all(
   builder->scc_delay_alu = (loom_amdgpu_delay_alu_info_t){0};
 }
 
+// Starts a new native block. A direct fallthrough emits no control transfer,
+// so an SCC producer can remain adjacent to a consumer in the next IR block.
+// Other per-register facts are block-local and their storage is cleared by the
+// caller before this reset.
+static void loom_amdgpu_wait_state_delay_alu_begin_block(
+    loom_amdgpu_wait_state_builder_t* builder, bool preserves_fallthrough_scc) {
+  if (!preserves_fallthrough_scc) {
+    loom_amdgpu_wait_state_delay_alu_clear_all(builder);
+    return;
+  }
+  builder->delay_alu.valu_count = 0;
+  builder->delay_alu.trans_count = 0;
+  builder->delay_alu.completed.valu = 0;
+  builder->delay_alu.completed.trans = 0;
+}
+
 static void loom_amdgpu_wait_state_delay_alu_match_assignment(
     loom_amdgpu_wait_state_builder_t* builder,
     const loom_low_allocation_assignment_t* assignment,
@@ -2380,6 +2396,7 @@ static iree_status_t loom_amdgpu_wait_state_plan_build_with_scratch(
   iree_host_size_t address_state_cursor = 0;
   builder->delay_alu.epoch = 1;
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_plan_entry_moves(builder));
+  bool previous_block_falls_through = false;
   for (iree_host_size_t block_index = 0;
        block_index < builder->schedule->block_count; ++block_index) {
     if (block_index > UINT32_MAX) {
@@ -2394,7 +2411,8 @@ static iree_status_t loom_amdgpu_wait_state_plan_build_with_scratch(
              builder->sgprs.count * sizeof(*builder->sgprs.states));
     }
     if (builder->has_delay_alu) {
-      loom_amdgpu_wait_state_delay_alu_clear_all(builder);
+      loom_amdgpu_wait_state_delay_alu_begin_block(
+          builder, previous_block_falls_through);
     }
     if (builder->short_wait != NULL) {
       loom_amdgpu_short_wait_begin_block(builder->short_wait,
@@ -2496,6 +2514,18 @@ static iree_status_t loom_amdgpu_wait_state_plan_build_with_scratch(
     }
     if (builder->matrix_results != NULL) {
       loom_amdgpu_matrix_result_wait_end_block(builder->matrix_results);
+    }
+    previous_block_falls_through = false;
+    if (block->scheduled_node_count != 0) {
+      const loom_low_packet_view_t last_packet =
+          loom_low_packet_at_block_ordinal(builder->schedule,
+                                           (uint32_t)block_index,
+                                           block->scheduled_node_count - 1);
+      previous_block_falls_through =
+          last_packet.node->op != NULL &&
+          loom_direct_branch_isa(last_packet.node->op) &&
+          loom_amdgpu_structural_packet_control_transfer_count(
+              builder->schedule, last_packet.node) == 0;
     }
   }
   if (builder->short_wait != NULL) {
