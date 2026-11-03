@@ -166,9 +166,9 @@ TEST_F(RelocationTest, RepeatedPlanesCrossBatchAndAddressBoundaries) {
   EXPECT_EQ(loom_serve_virtual_buffer_handle(buffer), handle);
   loom_serve_virtual_buffer_begin_trim(buffer);
   for (uint32_t plane = 0; plane < region.count; ++plane) {
-    loom_serve_virtual_buffer_keep(buffer,
-                                   region.origin + plane * region.stride,
-                                   kLiveBlocks * region.block_bytes);
+    IREE_ASSERT_OK(loom_serve_virtual_buffer_keep(
+        buffer, region.origin + plane * region.stride,
+        kLiveBlocks * region.block_bytes, nullptr));
   }
   IREE_ASSERT_OK(loom_serve_virtual_buffer_trim(buffer));
   std::vector<uint32_t> observed(kLiveBlocks * region.block_bytes /

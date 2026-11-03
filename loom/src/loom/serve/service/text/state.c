@@ -458,22 +458,36 @@ static void loom_serve_text_row_release_tail(loom_serve_text_state_row_t* row) {
 
 // Marks the exact slab union for either the current sparse layout or the
 // compact prefix, including private state sharing slabs with cache planes.
-static uint64_t loom_serve_text_keep_backing(loom_serve_text_state_t* state,
-                                             bool compact) {
+static iree_status_t loom_serve_text_keep_range(
+    loom_serve_virtual_buffer_t* buffer, iree_device_size_t offset,
+    iree_device_size_t length, uint64_t* inout_bytes) {
+  uint64_t added_bytes = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_serve_virtual_buffer_keep(buffer, offset, length, &added_bytes));
+  *inout_bytes += added_bytes;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_serve_text_keep_backing(
+    loom_serve_text_state_t* state, bool compact, uint64_t* out_bytes) {
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, state->cache.pool.capacity);
   uint64_t bytes = 0;
-  for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT &&
+                               iree_status_is_ok(status);
        ++i) {
     if (state->memory.buffers[i]) {
       loom_serve_virtual_buffer_begin_trim(state->memory.buffers[i]);
       if (state->memory.private_lengths[i]) {
-        bytes += loom_serve_virtual_buffer_keep(
-            state->memory.buffers[i], 0, state->memory.private_lengths[i]);
+        status = loom_serve_text_keep_range(state->memory.buffers[i], 0,
+                                            state->memory.private_lengths[i],
+                                            &bytes);
       }
     }
   }
-  for (iree_host_size_t i = 0; i < state->row_count; ++i) {
+  for (iree_host_size_t i = 0;
+       i < state->row_count && iree_status_is_ok(status); ++i) {
     loom_serve_text_state_row_t* row = state->rows[i];
     // An active prefix pin can leave a completed COW source until the next
     // epoch. Retire it before moving IDs so no deferred release names a block
@@ -482,52 +496,60 @@ static uint64_t loom_serve_text_keep_backing(loom_serve_text_state_t* state,
     if (row->recurrent.slot == UINT32_MAX) {
       continue;
     }
-    for (iree_host_size_t binding = TEXT_CONTROL; binding <= TEXT_PROGRESS;
-         ++binding) {
+    for (iree_host_size_t binding = TEXT_CONTROL;
+         binding <= TEXT_PROGRESS && iree_status_is_ok(status); ++binding) {
       iree_hal_buffer_t* view = row->buffers[binding];
       if (binding != TEXT_RECURRENT && view) {
-        bytes += loom_serve_virtual_buffer_keep(
+        status = loom_serve_text_keep_range(
             state->memory.buffers[1], iree_hal_buffer_byte_offset(view),
-            iree_hal_buffer_byte_length(view));
+            iree_hal_buffer_byte_length(view), &bytes);
       }
     }
   }
-  for (uint32_t i = 0; i < state->recurrent.pool.capacity; ++i) {
+  for (uint32_t i = 0;
+       i < state->recurrent.pool.capacity && iree_status_is_ok(status); ++i) {
     if (state->recurrent.pool.references[i]) {
       iree_hal_buffer_t* view = state->recurrent.buffers[i];
-      bytes += loom_serve_virtual_buffer_keep(
+      status = loom_serve_text_keep_range(
           state->memory.buffers[1], iree_hal_buffer_byte_offset(view),
-          iree_hal_buffer_byte_length(view));
+          iree_hal_buffer_byte_length(view), &bytes);
     }
   }
   const uint32_t block_count =
       compact ? state->cache.pool.capacity - state->cache.pool.available
               : state->cache.pool.capacity;
   const uint32_t range_blocks = compact ? block_count : 1;
-  for (iree_host_size_t i = 0; i < state->storage.region_count; ++i) {
+  for (iree_host_size_t i = 0;
+       i < state->storage.region_count && iree_status_is_ok(status); ++i) {
     const loom_serve_text_cache_region_t* region = &state->storage.regions[i];
-    for (uint32_t block = 0; block < block_count; block += range_blocks) {
+    for (uint32_t block = 0; block < block_count && iree_status_is_ok(status);
+         block += range_blocks) {
       if (!compact && !state->cache.pool.references[block]) {
         continue;
       }
-      for (iree_host_size_t plane = 0; plane < region->blocks.count; ++plane) {
-        bytes += loom_serve_virtual_buffer_keep(
+      for (iree_host_size_t plane = 0;
+           plane < region->blocks.count && iree_status_is_ok(status); ++plane) {
+        status = loom_serve_text_keep_range(
             state->memory.buffers[region->allocation],
             region->blocks.origin + plane * region->blocks.stride +
                 block * region->blocks.block_bytes,
-            range_blocks * region->blocks.block_bytes);
+            range_blocks * region->blocks.block_bytes, &bytes);
       }
     }
   }
+  if (out_bytes) {
+    *out_bytes = bytes;
+  }
   IREE_TRACE_ZONE_END(z0);
-  return bytes;
+  return status;
 }
 
 // Reclaims only unowned physical slabs. The map need not be compact: a denied
 // relocation must still be able to release dead backing under pressure.
 static iree_status_t loom_serve_text_trim_backing(
     loom_serve_text_state_t* state) {
-  loom_serve_text_keep_backing(state, /*compact=*/false);
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_keep_backing(state, /*compact=*/false, NULL));
   loom_serve_virtual_buffer_t*
       buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
   iree_host_size_t count = 0;
@@ -658,18 +680,22 @@ static iree_status_t loom_serve_text_submit_compaction(
     loom_serve_text_state_t* state, loom_serve_text_trim_result_t* out_result) {
   out_result->moved_blocks = loom_serve_block_pool_plan_compaction(
       &state->cache.pool, state->cache.destinations);
-  if (out_result->moved_blocks) {
-    const uint64_t compact_bytes =
-        loom_serve_text_keep_backing(state, /*compact=*/true);
+  iree_status_t status = iree_ok_status();
+  uint64_t compact_bytes = 0;
+  if (out_result->moved_blocks && iree_status_is_ok(status)) {
+    status =
+        loom_serve_text_keep_backing(state, /*compact=*/true, &compact_bytes);
     // Preview marks cannot escape into admission or asynchronous trimming:
     // every source stays live until relocation and map publication complete.
-    loom_serve_text_keep_backing(state, /*compact=*/false);
-    if (compact_bytes >= state->memory.statistics.committed_bytes) {
+    if (iree_status_is_ok(status)) {
+      status = loom_serve_text_keep_backing(state, /*compact=*/false, NULL);
+    }
+    if (iree_status_is_ok(status) &&
+        compact_bytes >= state->memory.statistics.committed_bytes) {
       out_result->moved_blocks = 0;
     }
   }
-  iree_status_t status = iree_ok_status();
-  if (out_result->moved_blocks) {
+  if (iree_status_is_ok(status) && out_result->moved_blocks) {
     bool admitted = false;
     status = loom_serve_text_try_back_compaction(
         state, out_result->moved_blocks, &admitted);
@@ -1698,9 +1724,12 @@ iree_status_t loom_serve_text_state_row_prepare_reserve(
   reservation->restore_count = restore_count;
   reservation->commitments = commitments;
   reservation->commitment_count = commitment_count;
-  reservation->footprint_bytes =
-      loom_serve_memory_ranges_footprint(commitment_count, commitments)
-          .total_bytes;
+  loom_serve_memory_footprint_t footprint = {0};
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_memory_ranges_footprint(commitment_count, commitments,
+                                                &footprint);
+  }
+  reservation->footprint_bytes = footprint.total_bytes;
   iree_allocator_free(state->host_allocator, ranges);
   if (iree_status_is_ok(status)) {
     *out_reservation = reservation;

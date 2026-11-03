@@ -386,6 +386,14 @@ class MemoryTest : public ::testing::Test {
     }
   }
 
+  uint64_t Keep(loom_serve_virtual_buffer_t* buffer, uint64_t offset,
+                uint64_t length) {
+    uint64_t added_bytes = 0;
+    IREE_EXPECT_OK(
+        loom_serve_virtual_buffer_keep(buffer, offset, length, &added_bytes));
+    return added_bytes;
+  }
+
   void CreateVirtualPool(bool with_workspace = false) {
     IREE_ASSERT_OK(loom_serve_virtual_pool_allocate(
         pool, loom_serve_pool_weight_geometry(storage_owner),

@@ -1485,7 +1485,8 @@ TEST_P(WeightsTest, MutableGrowthReclaimsIdleParametersWithoutDiscardingState) {
   IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
   EXPECT_EQ(observed, value);
   loom_serve_virtual_buffer_begin_trim(state_);
-  loom_serve_virtual_buffer_keep(state_, 0, sizeof(value));
+  IREE_ASSERT_OK(
+      loom_serve_virtual_buffer_keep(state_, 0, sizeof(value), nullptr));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_trim(state_));
   ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes,

@@ -314,10 +314,11 @@ typedef struct loom_serve_memory_footprint_t {
 
 // Physical footprint of the caller-validated range union. Overlapping views
 // count each slot once. Runs on the pool's serialized owner without querying
-// native availability, committing storage, or changing trim/admission state.
-// Saturates if the sum exceeds uint64_t.
-loom_serve_memory_footprint_t loom_serve_memory_ranges_footprint(
-    iree_host_size_t range_count, const loom_serve_memory_range_t* ranges);
+// native availability, committing storage, or retaining transient union marks.
+// Sparse query metadata may allocate. Sums saturate at uint64_t.
+iree_status_t loom_serve_memory_ranges_footprint(
+    iree_host_size_t range_count, const loom_serve_memory_range_t* ranges,
+    loom_serve_memory_footprint_t* out_footprint);
 
 // Admits and commits the union of missing slabs across all ranges. Overlapping
 // ranges and views sharing a slab are counted once. False is ordinary capacity
@@ -423,12 +424,13 @@ void loom_serve_memory_operation_free(loom_serve_memory_operation_t* operation);
 // several logical ranges stays backed if any range needs it. The caller owns
 // readiness/retirement: these functions never wait for device work themselves.
 void loom_serve_virtual_buffer_begin_trim(loom_serve_virtual_buffer_t* buffer);
-// Returns the physical extent newly added to the keep set, including unbacked
-// slabs. Summing these values gives the backing required by the union of kept
-// ranges, with shared slabs counted once and the final slab's actual size.
-uint64_t loom_serve_virtual_buffer_keep(loom_serve_virtual_buffer_t* buffer,
-                                        iree_device_size_t offset,
-                                        iree_device_size_t length);
+// Adds a range to the keep set. Optional out_added_bytes receives the physical
+// extent newly added, including unbacked slabs. Summing these values gives the
+// backing required by the union of kept ranges, with shared slabs counted once
+// and the final slab's actual size. Sparse trim markers may allocate metadata.
+iree_status_t loom_serve_virtual_buffer_keep(
+    loom_serve_virtual_buffer_t* buffer, iree_device_size_t offset,
+    iree_device_size_t length, uint64_t* out_added_bytes);
 iree_status_t loom_serve_virtual_buffer_trim(
     loom_serve_virtual_buffer_t* buffer);
 

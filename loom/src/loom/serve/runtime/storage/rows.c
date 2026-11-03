@@ -136,8 +136,9 @@ iree_status_t loom_serve_rows_release_row(loom_serve_rows_t* state,
     loom_serve_virtual_buffer_begin_trim(state->reservations[i]);
     for (iree_host_size_t row = 0; row < state->row_count; ++row) {
       if (state->rows[row]) {
-        loom_serve_virtual_buffer_keep(
-            state->reservations[i], row * state->strides[i], state->strides[i]);
+        IREE_RETURN_IF_ERROR(loom_serve_virtual_buffer_keep(
+            state->reservations[i], row * state->strides[i], state->strides[i],
+            NULL));
       }
     }
     buffers[count++] = state->reservations[i];

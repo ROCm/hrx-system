@@ -295,7 +295,7 @@ TEST_F(VirtualPoolTest, VirtualBackingWaitsForIncompatibleNativeReturn) {
   ASSERT_NO_FATAL_FAILURE(
       RoundTrip(loom_serve_virtual_buffer_handle(first), 0, 0x12345678));
   loom_serve_virtual_buffer_begin_trim(first);
-  loom_serve_virtual_buffer_keep(first, 0, kSlabSize);
+  Keep(first, 0, kSlabSize);
   IREE_ASSERT_OK(loom_serve_virtual_buffer_trim(first));
   IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
   ASSERT_NO_FATAL_FAILURE(CreateVirtualPool());

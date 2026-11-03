@@ -1117,11 +1117,12 @@ static iree_status_t loom_serve_residency_acquire_parameters(
   *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY;
   IREE_RETURN_IF_ERROR(
       loom_serve_residency_cache_query_status(residency->cache));
-  const uint64_t additional_state = state
-                                        ? loom_serve_memory_ranges_footprint(
-                                              state->range_count, state->ranges)
-                                              .missing_bytes
-                                        : 0;
+  loom_serve_memory_footprint_t footprint = {0};
+  if (state) {
+    IREE_RETURN_IF_ERROR(loom_serve_memory_ranges_footprint(
+        state->range_count, state->ranges, &footprint));
+  }
+  const uint64_t additional_state = footprint.missing_bytes;
   if (!loom_serve_residency_admit_working_set(residency, additional_state,
                                               residency->private_bytes, true)) {
     return iree_ok_status();

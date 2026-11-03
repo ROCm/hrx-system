@@ -13,6 +13,7 @@
 #include "iree/hal/memory/slab_cache.h"
 #include "iree/hal/memory/tlsf.h"
 #include "iree/hal/pool_wait.h"
+#include "loom/serve/runtime/storage/backing_directory.h"
 
 struct loom_serve_memory_pool_t {
   // Allocator owning pool, buffer, and slab metadata.
@@ -90,21 +91,6 @@ struct loom_serve_memory_pool_t {
   iree_status_t failure;
 };
 
-typedef struct loom_serve_memory_slab_t {
-  // Owned physical handle, or null for uncommitted storage.
-  iree_hal_buffer_t* physical;
-  // Whether physical is currently mapped into its virtual slot.
-  bool mapped;
-  // Whether a current retained range requires this slab.
-  bool keep;
-  // Missing slab selected by the current serialized commitment transaction.
-  bool pending_commit;
-  // Temporary union mark scoped to one serialized footprint query.
-  bool counted;
-  // Accepted asynchronous operation excludes another editor of this slot.
-  bool in_flight;
-} loom_serve_memory_slab_t;
-
 // Mapping serialization and failure are properties of the native reservation,
 // including when several independently resident buffers occupy its ranges.
 typedef struct loom_serve_memory_target_t {
@@ -159,8 +145,8 @@ struct loom_serve_virtual_buffer_t {
   uint8_t regular_class;
   // Physical class of the last slot, which may be shorter than a regular slab.
   uint8_t tail_class;
-  // Owned physical-slot directory, replaceable only at a retired boundary.
-  loom_serve_memory_slab_t* slabs;
+  // Sparse physical-slot state, proportional to touched slots, not extent.
+  loom_serve_backing_directory_t backing;
 };
 
 typedef struct loom_serve_memory_edit_t {
@@ -169,7 +155,7 @@ typedef struct loom_serve_memory_edit_t {
   // Slab index within buffer.
   iree_host_size_t index;
   // Result written exclusively by the last queue completion before publication.
-  loom_serve_memory_slab_t result;
+  loom_serve_backing_entry_t result;
 } loom_serve_memory_edit_t;
 
 typedef struct loom_serve_memory_stage_t {
@@ -759,38 +745,54 @@ static iree_device_size_t loom_serve_memory_slab_length(
                   buffer->byte_length - index * buffer->geometry.slab_size);
 }
 
-loom_serve_memory_footprint_t loom_serve_memory_ranges_footprint(
-    iree_host_size_t range_count, const loom_serve_memory_range_t* ranges) {
-  loom_serve_memory_footprint_t footprint = {0};
-  for (iree_host_size_t r = 0; r < range_count; ++r) {
-    const loom_serve_memory_range_t* range = &ranges[r];
-    const iree_device_size_t slab_size = range->buffer->geometry.slab_size;
+iree_status_t loom_serve_memory_ranges_footprint(
+    iree_host_size_t range_count, const loom_serve_memory_range_t* ranges,
+    loom_serve_memory_footprint_t* out_footprint) {
+  *out_footprint = (loom_serve_memory_footprint_t){0};
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t r = 0; r < range_count && iree_status_is_ok(status);
+       ++r) {
+    loom_serve_virtual_buffer_t* buffer = ranges[r].buffer;
+    const iree_device_size_t slab_size = buffer->geometry.slab_size;
     const iree_host_size_t end =
-        (range->offset + range->length - 1) / slab_size + 1;
-    for (iree_host_size_t i = range->offset / slab_size; i < end; ++i) {
-      loom_serve_memory_slab_t* slab = &range->buffer->slabs[i];
-      if (!slab->counted) {
-        slab->counted = true;
-        const uint64_t length = loom_serve_memory_slab_length(range->buffer, i);
-        footprint.total_bytes +=
-            iree_min(length, UINT64_MAX - footprint.total_bytes);
-        if (!slab->physical && !slab->in_flight) {
-          footprint.missing_bytes +=
-              iree_min(length, UINT64_MAX - footprint.missing_bytes);
+        (ranges[r].offset + ranges[r].length - 1) / slab_size + 1;
+    for (iree_host_size_t i = ranges[r].offset / slab_size;
+         i < end && iree_status_is_ok(status); ++i) {
+      loom_serve_backing_entry_t* entry = NULL;
+      status = loom_serve_backing_directory_insert(&buffer->backing, i, &entry);
+      if (iree_status_is_ok(status) && !entry->counted) {
+        entry->counted = true;
+        const uint64_t length = loom_serve_memory_slab_length(buffer, i);
+        out_footprint->total_bytes +=
+            iree_min(length, UINT64_MAX - out_footprint->total_bytes);
+        if (!entry->physical && !entry->in_flight) {
+          out_footprint->missing_bytes +=
+              iree_min(length, UINT64_MAX - out_footprint->missing_bytes);
         }
       }
     }
   }
   for (iree_host_size_t r = 0; r < range_count; ++r) {
-    const loom_serve_memory_range_t* range = &ranges[r];
-    const iree_device_size_t slab_size = range->buffer->geometry.slab_size;
+    loom_serve_virtual_buffer_t* buffer = ranges[r].buffer;
+    const iree_device_size_t slab_size = buffer->geometry.slab_size;
     const iree_host_size_t end =
-        (range->offset + range->length - 1) / slab_size + 1;
-    for (iree_host_size_t i = range->offset / slab_size; i < end; ++i) {
-      range->buffer->slabs[i].counted = false;
+        (ranges[r].offset + ranges[r].length - 1) / slab_size + 1;
+    for (iree_host_size_t i = ranges[r].offset / slab_size; i < end; ++i) {
+      loom_serve_backing_entry_t* entry =
+          loom_serve_backing_directory_find(&buffer->backing, i);
+      if (entry && entry->counted) {
+        entry->counted = false;
+        if (!entry->physical && !entry->in_flight && !entry->keep) {
+          loom_serve_backing_directory_remove(&buffer->backing, entry);
+        }
+      }
     }
   }
-  return footprint;
+  for (iree_host_size_t r = 0; r < range_count && iree_status_is_ok(status);
+       ++r) {
+    status = loom_serve_backing_directory_shrink(&ranges[r].buffer->backing);
+  }
+  return status;
 }
 
 static uint64_t* loom_serve_memory_slab_demand(
@@ -830,22 +832,16 @@ static iree_status_t loom_serve_virtual_buffer_allocate_metadata(
   const iree_host_size_t base_size =
       sizeof(loom_serve_virtual_buffer_t) +
       (arena ? 0 : sizeof(loom_serve_memory_target_t));
-  if (count >
-      (IREE_HOST_SIZE_MAX - base_size) / sizeof(loom_serve_memory_slab_t)) {
+  if (count > IREE_HOST_SIZE_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "virtual buffer metadata is too large");
+                            "virtual buffer has too many physical slots");
   }
   loom_serve_virtual_buffer_t* buffer = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(pool->host_allocator, base_size, (void**)&buffer));
-  iree_status_t status = iree_allocator_malloc_array(
-      pool->host_allocator, count, sizeof(*buffer->slabs),
-      (void**)&buffer->slabs);
-  if (!iree_status_is_ok(status)) {
-    iree_allocator_free(pool->host_allocator, buffer);
-    return status;
-  }
   buffer->pool = pool;
+  loom_serve_backing_directory_initialize(pool->host_allocator,
+                                          &buffer->backing);
   buffer->statistics = statistics;
   buffer->arena = arena;
   buffer->target =
@@ -886,7 +882,7 @@ iree_status_t loom_serve_virtual_buffer_allocate(
     statistics->reserved_bytes += buffer->byte_length;
     *out_buffer = buffer;
   } else {
-    iree_allocator_free(pool->host_allocator, buffer->slabs);
+    loom_serve_backing_directory_deinitialize(&buffer->backing);
     iree_allocator_free(pool->host_allocator, buffer);
   }
   return status;
@@ -971,7 +967,7 @@ iree_status_t loom_serve_virtual_buffer_allocate_in_arena(
     statistics->reserved_bytes += buffer->byte_length;
     *out_buffer = buffer;
   } else {
-    iree_allocator_free(arena->pool->host_allocator, buffer->slabs);
+    loom_serve_backing_directory_deinitialize(&buffer->backing);
     iree_allocator_free(arena->pool->host_allocator, buffer);
   }
   return status;
@@ -1035,8 +1031,10 @@ loom_serve_memory_demand_t loom_serve_virtual_buffer_missing_demand(
     demand.cached_bytes[buffer->regular_class] = regular_bytes;
   }
   if (regular_count < buffer->slab_count) {
-    const loom_serve_memory_slab_t* tail = &buffer->slabs[regular_count];
-    if (!tail->physical && !tail->in_flight) {
+    const loom_serve_backing_entry_t* tail =
+        loom_serve_backing_directory_find_const(&buffer->backing,
+                                                regular_count);
+    if (!tail || (!tail->physical && !tail->in_flight)) {
       *loom_serve_memory_slab_demand(&demand, buffer, regular_count) +=
           loom_serve_memory_slab_length(buffer, regular_count);
     }
@@ -1048,22 +1046,24 @@ loom_serve_memory_demand_t loom_serve_virtual_buffer_missing_demand(
 // mutates this accounting or another operation's slab metadata.
 static void loom_serve_memory_slab_publish(
     loom_serve_virtual_buffer_t* buffer, iree_host_size_t index,
-    const loom_serve_memory_slab_t* result) {
+    const loom_serve_backing_entry_t* result) {
   loom_serve_memory_pool_t* pool = buffer->pool;
-  loom_serve_memory_slab_t* slab = &buffer->slabs[index];
+  loom_serve_backing_entry_t* entry =
+      loom_serve_backing_directory_find(&buffer->backing, index);
+  IREE_ASSERT(entry);
   const uint64_t length = loom_serve_memory_slab_length(buffer, index);
-  if ((slab->physical || slab->in_flight) && !result->physical) {
+  if ((entry->physical || entry->in_flight) && !result->physical) {
     *loom_serve_memory_slab_demand(&pool->demand, buffer, index) -= length;
     if (length == buffer->geometry.slab_size) {
       --buffer->backed_regular_count;
     }
   }
-  if (slab->physical && !result->physical) {
+  if (entry->physical && !result->physical) {
     pool->statistics.committed_bytes -= length;
     pool->statistics.released_bytes += length;
     buffer->statistics->committed_bytes -= length;
     buffer->statistics->released_bytes += length;
-  } else if (!slab->physical && result->physical) {
+  } else if (!entry->physical && result->physical) {
     pool->statistics.committed_bytes += length;
     pool->statistics.peak_bytes =
         iree_max(pool->statistics.peak_bytes, pool->statistics.committed_bytes);
@@ -1071,9 +1071,15 @@ static void loom_serve_memory_slab_publish(
     buffer->statistics->peak_bytes = iree_max(
         buffer->statistics->peak_bytes, buffer->statistics->committed_bytes);
   }
-  slab->physical = result->physical;
-  slab->mapped = result->mapped;
-  slab->in_flight = false;
+  const bool keep = entry->keep;
+  *entry = *result;
+  entry->index = index;
+  entry->occupied = true;
+  entry->keep |= keep;
+  entry->in_flight = false;
+  if (!entry->physical && !entry->keep) {
+    loom_serve_backing_directory_remove(&buffer->backing, entry);
+  }
 }
 
 static void loom_serve_memory_pool_collect(loom_serve_memory_pool_t* pool) {
@@ -1116,7 +1122,10 @@ static void loom_serve_memory_pool_collect(loom_serve_memory_pool_t* pool) {
     for (iree_host_size_t i = 0; i < operation->count; ++i) {
       const loom_serve_memory_edit_t* edit = &operation->edits[i];
       if (operation->growing) {
-        edit->buffer->slabs[edit->index].in_flight = false;
+        loom_serve_backing_entry_t* entry = loom_serve_backing_directory_find(
+            &edit->buffer->backing, edit->index);
+        IREE_ASSERT(entry);
+        entry->in_flight = false;
         continue;
       }
       if (edit->buffer->target->mapping_completion == mapping_completion) {
@@ -1177,7 +1186,7 @@ static void loom_serve_memory_operation_complete(
   const bool second_ok = iree_status_is_ok(operation->stages[1].status);
   for (iree_host_size_t i = 0; !operation->growing && i < operation->count;
        ++i) {
-    loom_serve_memory_slab_t* result = &operation->edits[i].result;
+    loom_serve_backing_entry_t* result = &operation->edits[i].result;
     if (operation->releasing) {
       if (first_ok) {
         result->mapped = false;
@@ -1419,14 +1428,10 @@ iree_status_t loom_serve_virtual_buffer_grow_async(
   IREE_ASSERT(!buffer->target->mapping_completion && !buffer->previous_handle);
   const iree_device_size_t byte_length = iree_device_align(length, slab_size);
   const uint64_t count = byte_length / slab_size;
-  if (count > IREE_HOST_SIZE_MAX / sizeof(*buffer->slabs)) {
+  if (count > IREE_HOST_SIZE_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "virtual buffer metadata is too large");
+                            "virtual buffer has too many physical slots");
   }
-  loom_serve_memory_slab_t* slabs = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      pool->host_allocator, count, sizeof(*slabs), (void**)&slabs));
-  memcpy(slabs, buffer->slabs, buffer->slab_count * sizeof(*slabs));
   const iree_hal_virtual_buffer_options_t options = {
       .byte_length = byte_length,
       .min_alignment = buffer->alignment,
@@ -1444,7 +1449,6 @@ iree_status_t loom_serve_virtual_buffer_grow_async(
   }
   if (!iree_status_is_ok(status)) {
     iree_hal_buffer_release(handle);
-    iree_allocator_free(pool->host_allocator, slabs);
     return status;
   }
   operation->growing = buffer;
@@ -1452,19 +1456,21 @@ iree_status_t loom_serve_virtual_buffer_grow_async(
   operation->value = value;
   iree_hal_semaphore_retain(readiness);
   iree_host_size_t edit_count = 0;
-  for (iree_host_size_t i = 0; i < buffer->slab_count; ++i) {
-    IREE_ASSERT(!slabs[i].in_flight);
-    if (slabs[i].physical) {
+  for (iree_host_size_t i = 0; i < buffer->backing.capacity; ++i) {
+    loom_serve_backing_entry_t* entry = &buffer->backing.entries[i];
+    if (entry->occupied) {
+      IREE_ASSERT(!entry->in_flight);
+    }
+    if (entry->occupied && entry->physical) {
       operation->edits[edit_count++] =
-          (loom_serve_memory_edit_t){buffer, i, slabs[i]};
-      slabs[i].in_flight = true;
+          (loom_serve_memory_edit_t){buffer, entry->index, *entry};
+      entry->in_flight = true;
     }
   }
+  IREE_ASSERT(edit_count == operation->count);
   buffer->previous_handle = buffer->handle;
   buffer->handle = handle;
-  iree_allocator_free(pool->host_allocator, buffer->slabs);
-  buffer->slabs = slabs;
-  buffer->slab_count = count;
+  buffer->slab_count = (iree_host_size_t)count;
   buffer->byte_length = byte_length;
   buffer->tail_class = buffer->regular_class;
   pool->statistics.reserved_bytes += byte_length;
@@ -1503,59 +1509,75 @@ iree_status_t loom_serve_memory_pool_commit_with_demand_async(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
   iree_host_size_t count = 0;
   loom_serve_memory_demand_t additional = {0};
-  for (iree_host_size_t r = 0; r < range_count; ++r) {
-    const loom_serve_memory_range_t* range = &ranges[r];
-    const iree_device_size_t slab_size = range->buffer->geometry.slab_size;
+  for (iree_host_size_t r = 0; r < range_count && iree_status_is_ok(status);
+       ++r) {
+    loom_serve_virtual_buffer_t* buffer = ranges[r].buffer;
+    const iree_device_size_t slab_size = buffer->geometry.slab_size;
     const iree_host_size_t end =
-        (range->offset + range->length - 1) / slab_size + 1;
-    for (iree_host_size_t i = range->offset / slab_size; i < end; ++i) {
-      loom_serve_memory_slab_t* slab = &range->buffer->slabs[i];
-      IREE_ASSERT(!slab->in_flight);
-      if (!slab->physical && !slab->pending_commit) {
-        slab->pending_commit = true;
+        (ranges[r].offset + ranges[r].length - 1) / slab_size + 1;
+    for (iree_host_size_t i = ranges[r].offset / slab_size;
+         i < end && iree_status_is_ok(status); ++i) {
+      loom_serve_backing_entry_t* entry = NULL;
+      status = loom_serve_backing_directory_insert(&buffer->backing, i, &entry);
+      if (!iree_status_is_ok(status)) {
+        break;
+      }
+      IREE_ASSERT(!entry->in_flight);
+      if (!entry->physical && !entry->pending_commit) {
+        entry->pending_commit = true;
         ++count;
-        *loom_serve_memory_slab_demand(&additional, range->buffer, i) +=
-            loom_serve_memory_slab_length(range->buffer, i);
+        *loom_serve_memory_slab_demand(&additional, buffer, i) +=
+            loom_serve_memory_slab_length(buffer, i);
       }
     }
   }
   loom_serve_memory_demand_t demand = additional;
   loom_serve_memory_demand_add(&demand, immediate);
-  loom_serve_memory_admission_t admission;
-  status = loom_serve_memory_pool_prepare(pool, demand, &admission);
+  loom_serve_memory_admission_t admission =
+      LOOM_SERVE_MEMORY_ADMISSION_CAPACITY;
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_memory_pool_prepare(pool, demand, &admission);
+  }
   const bool admitted = admission == LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE;
   loom_serve_memory_operation_t* operation = NULL;
   if (iree_status_is_ok(status) && admitted && count) {
     status = loom_serve_memory_operation_allocate(pool, count, &operation);
   }
-  iree_host_size_t index = 0;
+  iree_host_size_t edit_index = 0;
   for (iree_host_size_t r = 0; r < range_count; ++r) {
-    const loom_serve_memory_range_t* range = &ranges[r];
-    const iree_device_size_t slab_size = range->buffer->geometry.slab_size;
+    loom_serve_virtual_buffer_t* buffer = ranges[r].buffer;
+    const iree_device_size_t slab_size = buffer->geometry.slab_size;
     const iree_host_size_t end =
-        (range->offset + range->length - 1) / slab_size + 1;
-    for (iree_host_size_t i = range->offset / slab_size; i < end; ++i) {
-      loom_serve_memory_slab_t* slab = &range->buffer->slabs[i];
-      if (slab->pending_commit) {
-        slab->pending_commit = false;
-        if (operation) {
-          operation->edits[index++] = (loom_serve_memory_edit_t){
-              .buffer = range->buffer,
-              .index = i,
-          };
-          slab->in_flight = true;
-          const uint64_t length =
-              loom_serve_memory_slab_length(range->buffer, i);
-          range->buffer->statistics->pending_bytes += length;
-          if (length == range->buffer->geometry.slab_size) {
-            ++range->buffer->backed_regular_count;
-          }
+        (ranges[r].offset + ranges[r].length - 1) / slab_size + 1;
+    for (iree_host_size_t i = ranges[r].offset / slab_size; i < end; ++i) {
+      loom_serve_backing_entry_t* entry =
+          loom_serve_backing_directory_find(&buffer->backing, i);
+      if (!entry || !entry->pending_commit) {
+        continue;
+      }
+      entry->pending_commit = false;
+      if (operation) {
+        operation->edits[edit_index++] =
+            (loom_serve_memory_edit_t){.buffer = buffer, .index = i};
+        entry->in_flight = true;
+        const uint64_t length = loom_serve_memory_slab_length(buffer, i);
+        buffer->statistics->pending_bytes += length;
+        if (length == buffer->geometry.slab_size) {
+          ++buffer->backed_regular_count;
         }
+      } else if (!entry->physical && !entry->keep) {
+        loom_serve_backing_directory_remove(&buffer->backing, entry);
       }
     }
   }
+  IREE_ASSERT(!operation || edit_index == count);
+  if (!operation && iree_status_is_ok(status)) {
+    for (iree_host_size_t r = 0; r < range_count && iree_status_is_ok(status);
+         ++r) {
+      status = loom_serve_backing_directory_shrink(&ranges[r].buffer->backing);
+    }
+  }
   if (operation) {
-    operation->count = count;
     operation->readiness = readiness;
     operation->value = value;
     iree_hal_semaphore_retain(readiness);
@@ -1596,13 +1618,16 @@ iree_status_t loom_serve_memory_pool_trim_async(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
   iree_host_size_t count = 0;
   for (iree_host_size_t b = 0; b < buffer_count; ++b) {
-    for (iree_host_size_t i = 0; i < buffers[b]->slab_count; ++i) {
-      const loom_serve_memory_slab_t* slab = &buffers[b]->slabs[i];
-      if (!slab->keep && slab->physical) {
-        IREE_ASSERT(!slab->in_flight);
+    for (iree_host_size_t i = 0; i < buffers[b]->backing.capacity; ++i) {
+      const loom_serve_backing_entry_t* entry = &buffers[b]->backing.entries[i];
+      if (entry->occupied && !entry->keep && entry->physical) {
+        IREE_ASSERT(!entry->in_flight);
         ++count;
       }
     }
+  }
+  for (iree_host_size_t b = 0; b < buffer_count; ++b) {
+    loom_serve_backing_directory_discard_empty(&buffers[b]->backing);
   }
   if (!count) {
     iree_status_t status =
@@ -1622,13 +1647,14 @@ iree_status_t loom_serve_memory_pool_trim_async(
   iree_host_size_t index = 0;
   for (iree_host_size_t b = 0; b < buffer_count; ++b) {
     loom_serve_virtual_buffer_t* buffer = buffers[b];
-    for (iree_host_size_t i = 0; i < buffer->slab_count; ++i) {
-      loom_serve_memory_slab_t* slab = &buffer->slabs[i];
-      if (!slab->keep && slab->physical) {
+    for (iree_host_size_t i = 0; i < buffer->backing.capacity; ++i) {
+      loom_serve_backing_entry_t* entry = &buffer->backing.entries[i];
+      if (entry->occupied && !entry->keep && entry->physical) {
         operation->edits[index++] =
-            (loom_serve_memory_edit_t){buffer, i, *slab};
-        slab->in_flight = true;
-        const uint64_t length = loom_serve_memory_slab_length(buffer, i);
+            (loom_serve_memory_edit_t){buffer, entry->index, *entry};
+        entry->in_flight = true;
+        const uint64_t length =
+            loom_serve_memory_slab_length(buffer, entry->index);
         buffer->statistics->releasing_bytes += length;
         pool->statistics.releasing_bytes += length;
       }
@@ -1727,27 +1753,37 @@ iree_status_t loom_serve_virtual_buffer_commit(
 }
 
 void loom_serve_virtual_buffer_begin_trim(loom_serve_virtual_buffer_t* buffer) {
-  for (iree_host_size_t i = 0; i < buffer->slab_count; ++i) {
-    buffer->slabs[i].keep = false;
+  loom_serve_backing_directory_discard_empty(&buffer->backing);
+  for (iree_host_size_t i = 0; i < buffer->backing.capacity; ++i) {
+    if (buffer->backing.entries[i].occupied) {
+      buffer->backing.entries[i].keep = false;
+    }
   }
 }
 
-uint64_t loom_serve_virtual_buffer_keep(loom_serve_virtual_buffer_t* buffer,
-                                        iree_device_size_t offset,
-                                        iree_device_size_t length) {
-  if (!length) {
-    return 0;
+iree_status_t loom_serve_virtual_buffer_keep(
+    loom_serve_virtual_buffer_t* buffer, iree_device_size_t offset,
+    iree_device_size_t length, uint64_t* out_added_bytes) {
+  if (out_added_bytes) {
+    *out_added_bytes = 0;
   }
-  uint64_t bytes = 0;
+  if (!length) {
+    return iree_ok_status();
+  }
   const iree_device_size_t slab_size = buffer->geometry.slab_size;
   const iree_host_size_t end = (offset + length - 1) / slab_size + 1;
   for (iree_host_size_t i = offset / slab_size; i < end; ++i) {
-    if (!buffer->slabs[i].keep) {
-      buffer->slabs[i].keep = true;
-      bytes += loom_serve_memory_slab_length(buffer, i);
+    loom_serve_backing_entry_t* entry = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_serve_backing_directory_insert(&buffer->backing, i, &entry));
+    if (!entry->keep) {
+      if (out_added_bytes) {
+        *out_added_bytes += loom_serve_memory_slab_length(buffer, i);
+      }
+      entry->keep = true;
     }
   }
-  return bytes;
+  return iree_ok_status();
 }
 
 iree_status_t loom_serve_virtual_buffer_trim(
@@ -1769,14 +1805,14 @@ iree_status_t loom_serve_virtual_buffer_free(
   }
   loom_serve_memory_pool_t* pool = buffer->pool;
   loom_serve_memory_pool_collect(pool);
+  loom_serve_backing_directory_discard_empty(&buffer->backing);
   if (buffer->arena && !buffer->target->detached) {
     // A range cannot clear the native target's failure by detaching siblings.
     // Its owner completes ordinary asynchronous trim before returning the
     // lease; freeing metadata must never wait on another bank's mapping
     // frontier.
     IREE_RETURN_IF_ERROR(iree_status_clone(buffer->target->failure));
-    IREE_ASSERT(!buffer->backed_regular_count &&
-                !buffer->slabs[buffer->slab_count - 1].physical);
+    IREE_ASSERT(!buffer->backing.count);
   }
   if (buffer->previous_handle) {
     IREE_RETURN_IF_ERROR(iree_hal_virtual_buffer_detach(buffer->previous_handle,
@@ -1792,18 +1828,25 @@ iree_status_t loom_serve_virtual_buffer_free(
   // Sources stay owned if detach fails, so the caller can retry cleanup. A
   // clean, empty reservation has no mapping to remove; in particular its
   // construction failure cleanup needs no native edit.
-  if (!buffer->arena && (buffer->backed_regular_count ||
-                         buffer->slabs[buffer->slab_count - 1].physical ||
-                         !iree_status_is_ok(buffer->target->failure))) {
+  if (!buffer->arena &&
+      (buffer->backing.count || !iree_status_is_ok(buffer->target->failure))) {
     IREE_RETURN_IF_ERROR(
         iree_hal_virtual_buffer_detach(buffer->handle, pool->mapping_scope));
   }
-  for (iree_host_size_t i = 0; i < buffer->slab_count; ++i) {
-    IREE_ASSERT(!buffer->slabs[i].in_flight);
-    iree_hal_buffer_release(buffer->slabs[i].physical);
-    const loom_serve_memory_slab_t empty = {0};
-    loom_serve_memory_slab_publish(buffer, i, &empty);
+  for (iree_host_size_t i = 0; i < buffer->backing.capacity; ++i) {
+    loom_serve_backing_entry_t* entry = &buffer->backing.entries[i];
+    if (!entry->occupied) {
+      continue;
+    }
+    IREE_ASSERT(!entry->in_flight);
+    IREE_ASSERT(entry->physical);
+    const iree_host_size_t index = entry->index;
+    iree_hal_buffer_release(entry->physical);
+    entry->keep = false;
+    const loom_serve_backing_entry_t empty = {0};
+    loom_serve_memory_slab_publish(buffer, index, &empty);
   }
+  IREE_ASSERT(!buffer->backing.count);
   iree_hal_buffer_release(buffer->handle);
   if (buffer->arena) {
     iree_hal_memory_tlsf_free(&buffer->arena->ranges, buffer->block_index,
@@ -1814,7 +1857,7 @@ iree_status_t loom_serve_virtual_buffer_free(
     pool->statistics.reserved_bytes -= buffer->byte_length;
   }
   buffer->statistics->reserved_bytes -= buffer->byte_length;
-  iree_allocator_free(pool->host_allocator, buffer->slabs);
+  loom_serve_backing_directory_deinitialize(&buffer->backing);
   iree_allocator_free(pool->host_allocator, buffer);
   return iree_ok_status();
 }
