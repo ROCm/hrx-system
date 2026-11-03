@@ -39,6 +39,42 @@ func.def public @call_header_identity(%value: i32) -> (i32) {
 }
 
 // ====
+// An explicit noinline policy survives import and C++ rendering independently
+// of ordinary C++ linkage.
+[[loom::noinline]] static unsigned retained_identity(unsigned value) {
+  return value;
+}
+unsigned call_retained_identity(unsigned value) {
+  return retained_identity(value);
+}
+// ----
+func.def public @call_retained_identity(%value: i32) -> (i32) {
+  %2 = func.call pure @retained_identity(%value) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def noinline @retained_identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+// ====
+// RUN: verify
+// ERROR@+1: LOWERING/059 "force_inline and noinline cannot be combined"
+[[loom::force_inline, loom::noinline]] unsigned conflicting(unsigned value) {
+  return value;
+}
+
+// ====
+// RUN: verify
+// ERROR@+1: LOWERING/059 "inline policy takes no argument clause"
+[[loom::noinline(1)]] unsigned parameterized(unsigned value) { return value; }
+
+// ====
+// RUN: verify
+// ERROR@+1: LOWERING/059 "inline policy requires an ordinary source function"
+[[loom::noinline]] constexpr unsigned global_value = 1u;
+
+// ====
 // INPUT: cxx root=entry
 // RUN: verify
 // Explicit source roots must identify one concrete definition.

@@ -1488,6 +1488,8 @@ class CxxRenderer(CxxConfigRenderer):
         inline_policy = resolved.attr("inline_policy")
         if inline_policy == "inline":
             attributes.append("loom::force_inline")
+        elif inline_policy == "noinline":
+            attributes.append("loom::noinline")
         elif inline_policy is not None:
             raise CxxRenderError(
                 function,

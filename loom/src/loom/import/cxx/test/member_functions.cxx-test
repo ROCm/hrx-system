@@ -8,6 +8,7 @@ struct Pair {
   unsigned operator()(unsigned value) const { return sum(value); }
   static unsigned twice(unsigned value) { return value * 2u; }
   template <unsigned Amount>
+  [[loom::noinline]]
   unsigned add() const {
     return x + Amount;
   }
@@ -62,7 +63,7 @@ func.def @Pair__twice(%value: i32) -> (i32) {
   func.return %38 : i32
 }
 
-func.def @Pair__add_6_value(%this_x: i32, %this_y: i32) -> (i32) {
+func.def noinline @Pair__add_6_value(%this_x: i32, %this_y: i32) -> (i32) {
   %42 = scalar.constant 6 : i32
   %43 = scalar.addi %this_x, %42 : i32
   func.return %43 : i32
