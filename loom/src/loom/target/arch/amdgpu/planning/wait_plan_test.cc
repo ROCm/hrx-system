@@ -448,8 +448,11 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
     IREE_ASSERT_OK(BuildPlan(options));
   }
 
-  void BuildWaitStates() {
-    Build();
+  void BuildWaitStates(bool callable = false) {
+    const loom_amdgpu_wait_plan_options_t wait_options = {
+        .callable = callable,
+    };
+    Build(&wait_options);
     loom_amdgpu_wait_packet_plan_t wait_packets = {};
     IREE_ASSERT_OK(
         loom_amdgpu_wait_packet_plan_build(&plan_, &arena_, &wait_packets));
@@ -457,9 +460,13 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
         .schedule = &schedule_,
         .allocation = &allocation_,
     };
+    const loom_amdgpu_wait_state_plan_options_t wait_state_options = {
+        .callable = callable,
+    };
     IREE_ASSERT_OK(loom_amdgpu_wait_state_plan_build(
-        &schedule_, &allocation_, facts_.properties.processor, &address_state,
-        &plan_, &wait_packets, /*vopd_plan=*/nullptr,
+        &schedule_, &allocation_, &wait_state_options,
+        facts_.properties.processor, &address_state, &plan_, &wait_packets,
+        /*vopd_plan=*/nullptr,
         /*matrix_coexecution=*/nullptr, /*matrix_results=*/nullptr, &arena_,
         &transient_arena_, &wait_state_plan_));
   }
@@ -758,6 +765,21 @@ TEST_F(AmdgpuWaitPlanTest, DirectCallQuiescesArgumentMovesBeforeControl) {
   EXPECT_EQ(state.action, LOOM_AMDGPU_WAIT_STATE_ACTION_S_NOP);
   EXPECT_EQ(state.node_index, 0u);
   EXPECT_EQ(state.instruction_offset, 1u);
+  EXPECT_EQ(state.required_cycle_count, 4u);
+  EXPECT_EQ(state.observed_cycle_count, 1u);
+  EXPECT_EQ(state.cycle_count, 3u);
+}
+
+TEST_F(AmdgpuWaitPlanTest, CallableReturnQuiescesResultMovesBeforeControl) {
+  Call({}, {Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 0, 1)});
+  BuildWaitStates(/*callable=*/true);
+
+  ASSERT_EQ(wait_state_plan_.state_count, 1u);
+  const loom_amdgpu_wait_state_t& state = wait_state_plan_.states[0];
+  EXPECT_EQ(state.reason, LOOM_AMDGPU_WAIT_STATE_REASON_CALLABLE_BOUNDARY);
+  EXPECT_EQ(state.action, LOOM_AMDGPU_WAIT_STATE_ACTION_S_NOP);
+  EXPECT_EQ(state.node_index, 1u);
+  EXPECT_EQ(state.instruction_offset, 0u);
   EXPECT_EQ(state.required_cycle_count, 4u);
   EXPECT_EQ(state.observed_cycle_count, 1u);
   EXPECT_EQ(state.cycle_count, 3u);

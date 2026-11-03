@@ -79,6 +79,11 @@ iree_status_t loom_amdgpu_sgpr_read_wait_collect_packet(
     const loom_amdgpu_structural_packet_info_t* structural,
     loom_amdgpu_descriptor_traits_t traits);
 
+// Retires every pending scalar destination class at an opaque boundary.
+iree_status_t loom_amdgpu_sgpr_read_wait_collect_boundary(
+    loom_amdgpu_sgpr_read_wait_t* state, const loom_low_packet_view_t* packet,
+    uint32_t instruction_offset);
+
 // Consumes a retained ALU-counter action; the packed bound is decoded once by
 // counter planning, including explicit partial destination-field waits.
 iree_status_t loom_amdgpu_sgpr_read_wait_collect_wait(

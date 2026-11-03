@@ -165,6 +165,8 @@ typedef struct loom_amdgpu_wait_state_builder_t {
   const loom_low_allocation_table_t* allocation;
   // Canonical authored-wait elisions, which supply no instruction progress.
   const loom_amdgpu_wait_plan_t* wait_plan;
+  // Interprocedural fixed-state contracts for this function and its callees.
+  loom_amdgpu_wait_state_plan_options_t options;
   // Concrete counter waits supplying store-source issue progress.
   const loom_amdgpu_wait_packet_plan_t* wait_packets;
   // Concrete address transitions separating replayable memory clauses.
@@ -1620,24 +1622,9 @@ static iree_status_t loom_amdgpu_wait_state_apply_move_phase(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_wait_state_apply_call_packet(
+static iree_status_t loom_amdgpu_wait_state_drain_callable_boundary(
     loom_amdgpu_wait_state_builder_t* builder,
-    const loom_low_packet_view_t* packet,
-    const loom_amdgpu_wait_state_packet_info_t* info,
-    bool processor_has_valu_sgpr_read_hazard) {
-  IREE_ASSERT(iree_any_bit_set(info->structural.flags,
-                               LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CALL));
-  const uint64_t boundary_offset =
-      loom_amdgpu_structural_packet_call_boundary_offset(&info->structural);
-  IREE_ASSERT_LE(boundary_offset, UINT32_MAX);
-  const uint32_t boundary = (uint32_t)boundary_offset;
-
-  const loom_low_move_group_t* arguments =
-      loom_amdgpu_structural_packet_call_arguments(&info->structural);
-  if (arguments != NULL) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_apply_move_phase(
-        builder, packet, arguments, 0, processor_has_valu_sgpr_read_hazard));
-  }
+    const loom_low_packet_view_t* packet, uint32_t boundary) {
   if (builder->replay_clause != NULL) {
     loom_amdgpu_replay_clause_break(builder->replay_clause);
   }
@@ -1688,22 +1675,50 @@ static iree_status_t loom_amdgpu_wait_state_apply_call_packet(
   if (builder->has_delay_alu) {
     loom_amdgpu_wait_state_delay_alu_clear_all(builder);
   }
+  return iree_ok_status();
+}
+
+static void loom_amdgpu_wait_state_advance_scalar_control(
+    loom_amdgpu_wait_state_builder_t* builder, uint64_t instruction_count) {
+  if (builder->short_wait != NULL) {
+    loom_amdgpu_short_wait_advance(builder->short_wait, instruction_count);
+  }
+  if (builder->matrix_results != NULL) {
+    loom_amdgpu_matrix_result_wait_advance(builder->matrix_results,
+                                           instruction_count);
+  }
+  loom_amdgpu_delay_alu_advance(
+      &builder->delay_alu, LOOM_AMDGPU_DELAY_ALU_TYPE_SALU, instruction_count);
+  builder->current_position += instruction_count;
+}
+
+static iree_status_t loom_amdgpu_wait_state_apply_call_packet(
+    loom_amdgpu_wait_state_builder_t* builder,
+    const loom_low_packet_view_t* packet,
+    const loom_amdgpu_wait_state_packet_info_t* info,
+    bool processor_has_valu_sgpr_read_hazard) {
+  IREE_ASSERT(iree_any_bit_set(info->structural.flags,
+                               LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CALL));
+  const uint64_t boundary_offset =
+      loom_amdgpu_structural_packet_call_boundary_offset(&info->structural);
+  IREE_ASSERT_LE(boundary_offset, UINT32_MAX);
+  const uint32_t boundary = (uint32_t)boundary_offset;
+
+  const loom_low_move_group_t* arguments =
+      loom_amdgpu_structural_packet_call_arguments(&info->structural);
+  if (arguments != NULL) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_apply_move_phase(
+        builder, packet, arguments, 0, processor_has_valu_sgpr_read_hazard));
+  }
+  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_drain_callable_boundary(
+      builder, packet, boundary));
 
   const loom_low_move_group_t* results =
       loom_amdgpu_structural_packet_call_results(&info->structural);
   const uint64_t result_count = results != NULL ? results->moves.count : 0;
   const uint64_t control_count =
       info->instruction_count - boundary_offset - result_count;
-  if (builder->short_wait != NULL) {
-    loom_amdgpu_short_wait_advance(builder->short_wait, control_count);
-  }
-  if (builder->matrix_results != NULL) {
-    loom_amdgpu_matrix_result_wait_advance(builder->matrix_results,
-                                           control_count);
-  }
-  loom_amdgpu_delay_alu_advance(&builder->delay_alu,
-                                LOOM_AMDGPU_DELAY_ALU_TYPE_SALU, control_count);
-  builder->current_position += control_count;
+  loom_amdgpu_wait_state_advance_scalar_control(builder, control_count);
 
   if (results != NULL) {
     IREE_ASSERT_LE(boundary_offset + control_count, UINT32_MAX);
@@ -1711,6 +1726,34 @@ static iree_status_t loom_amdgpu_wait_state_apply_call_packet(
         builder, packet, results, (uint32_t)(boundary_offset + control_count),
         processor_has_valu_sgpr_read_hazard));
   }
+
+  IREE_ASSERT_LE(info->instruction_count, UINT32_MAX);
+  builder->packet_instruction_counts[packet->packet_index] =
+      (uint32_t)info->instruction_count;
+  ++builder->progress_event_count;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_wait_state_apply_callable_return_packet(
+    loom_amdgpu_wait_state_builder_t* builder,
+    const loom_low_packet_view_t* packet,
+    const loom_amdgpu_wait_state_packet_info_t* info,
+    bool processor_has_valu_sgpr_read_hazard) {
+  IREE_ASSERT(loom_low_return_isa(packet->node->op));
+  IREE_ASSERT_NE(info->instruction_count, 0u);
+  IREE_ASSERT_EQ(info->structural.trailing_moves, NULL);
+  const uint64_t boundary_offset = info->instruction_count - 1u;
+  IREE_ASSERT_LE(boundary_offset, UINT32_MAX);
+  const uint32_t boundary = (uint32_t)boundary_offset;
+
+  if (info->structural.leading_moves != NULL) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_apply_move_phase(
+        builder, packet, info->structural.leading_moves, 0,
+        processor_has_valu_sgpr_read_hazard));
+  }
+  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_drain_callable_boundary(
+      builder, packet, boundary));
+  loom_amdgpu_wait_state_advance_scalar_control(builder, 1);
 
   IREE_ASSERT_LE(info->instruction_count, UINT32_MAX);
   builder->packet_instruction_counts[packet->packet_index] =
@@ -1735,12 +1778,30 @@ static iree_status_t loom_amdgpu_wait_state_apply_packet(
         builder->sgpr_reads, builder->allocation, packet, NULL,
         &info.structural, info.descriptor_traits));
   }
+  if (builder->options.callable && loom_low_return_isa(packet->node->op)) {
+    IREE_ASSERT_NE(info.instruction_count, 0u);
+    const uint64_t boundary_offset = info.instruction_count - 1u;
+    IREE_ASSERT_LE(boundary_offset, UINT32_MAX);
+    const uint32_t boundary = (uint32_t)boundary_offset;
+    if (builder->mask_writes != NULL) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_mask_write_wait_collect_boundary(
+          builder->mask_writes, packet, boundary));
+    }
+    if (builder->sgpr_reads != NULL) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_sgpr_read_wait_collect_boundary(
+          builder->sgpr_reads, packet, boundary));
+    }
+  }
   const bool processor_has_valu_sgpr_read_hazard =
       loom_amdgpu_wait_state_has_scheduling(
           builder, LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES);
   if (iree_any_bit_set(info.structural.flags,
                        LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CALL)) {
     return loom_amdgpu_wait_state_apply_call_packet(
+        builder, packet, &info, processor_has_valu_sgpr_read_hazard);
+  }
+  if (builder->options.callable && loom_low_return_isa(packet->node->op)) {
+    return loom_amdgpu_wait_state_apply_callable_return_packet(
         builder, packet, &info, processor_has_valu_sgpr_read_hazard);
   }
   const uint32_t structural_move_segment_count =
@@ -2055,8 +2116,7 @@ static iree_status_t loom_amdgpu_wait_state_finalize(
         *loom_amdgpu_wait_state_stream_at(&builder->entry_states, i);
   }
 
-  const iree_host_size_t body_output_start =
-      builder->entry_states.state_count;
+  const iree_host_size_t body_output_start = builder->entry_states.state_count;
   if (stream_count == 0) {
     return iree_ok_status();
   }
@@ -2072,8 +2132,7 @@ static iree_status_t loom_amdgpu_wait_state_finalize(
     iree_host_size_t left_index = 0;
     iree_host_size_t right_index = 0;
     for (iree_host_size_t output_index = body_output_start;
-         output_index < builder->state_count;
-         ++output_index) {
+         output_index < builder->state_count; ++output_index) {
       const bool take_left =
           right_index == streams[1]->state_count ||
           (left_index != streams[0]->state_count &&
@@ -2418,6 +2477,7 @@ static void loom_amdgpu_wait_state_plan_publish(
 iree_status_t loom_amdgpu_wait_state_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
+    const loom_amdgpu_wait_state_plan_options_t* options,
     const loom_amdgpu_processor_properties_t* processor_properties,
     const loom_amdgpu_address_state_plan_t* address_state,
     const loom_amdgpu_wait_plan_t* wait_plan,
@@ -2433,6 +2493,8 @@ iree_status_t loom_amdgpu_wait_state_plan_build(
   loom_amdgpu_wait_state_builder_t builder = {
       .schedule = schedule,
       .allocation = allocation,
+      .options = options != NULL ? *options
+                                 : (loom_amdgpu_wait_state_plan_options_t){0},
       .processor_properties = processor_properties,
       .matrix_wait_profile =
           loom_amdgpu_matrix_wait_profile_from_feature_profile(

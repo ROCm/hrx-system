@@ -207,6 +207,18 @@ static void loom_amdgpu_sgpr_read_wait_packet_operands(
   }
 }
 
+iree_status_t loom_amdgpu_sgpr_read_wait_collect_boundary(
+    loom_amdgpu_sgpr_read_wait_t* state, const loom_low_packet_view_t* packet,
+    uint32_t instruction_offset) {
+  const loom_amdgpu_sgpr_read_wait_event_t event = {
+      .packet_index = packet->packet_index,
+      .instruction_offset = instruction_offset,
+      .kind = LOOM_AMDGPU_SGPR_READ_WAIT_BOUNDARY,
+  };
+  return loom_amdgpu_sgpr_read_wait_collect(
+      state, (uint16_t)packet->node->block_index, &event);
+}
+
 iree_status_t loom_amdgpu_sgpr_read_wait_collect_packet(
     loom_amdgpu_sgpr_read_wait_t* state,
     const loom_low_allocation_table_t* allocation,
@@ -236,13 +248,8 @@ iree_status_t loom_amdgpu_sgpr_read_wait_collect_packet(
                                                         segment_index);
       if (is_call && !boundary_recorded &&
           segment.instruction_offset > call_boundary) {
-        event = (loom_amdgpu_sgpr_read_wait_event_t){
-            .packet_index = packet->packet_index,
-            .instruction_offset = (uint32_t)call_boundary,
-            .kind = LOOM_AMDGPU_SGPR_READ_WAIT_BOUNDARY,
-        };
-        status = loom_amdgpu_sgpr_read_wait_collect(
-            state, (uint16_t)packet->node->block_index, &event);
+        status = loom_amdgpu_sgpr_read_wait_collect_boundary(
+            state, packet, (uint32_t)call_boundary);
         boundary_recorded = true;
       }
       const loom_low_move_range_t moves = segment.group->moves;
@@ -277,13 +284,8 @@ iree_status_t loom_amdgpu_sgpr_read_wait_collect_packet(
       }
     }
     if (is_call && !boundary_recorded && iree_status_is_ok(status)) {
-      event = (loom_amdgpu_sgpr_read_wait_event_t){
-          .packet_index = packet->packet_index,
-          .instruction_offset = (uint32_t)call_boundary,
-          .kind = LOOM_AMDGPU_SGPR_READ_WAIT_BOUNDARY,
-      };
-      status = loom_amdgpu_sgpr_read_wait_collect(
-          state, (uint16_t)packet->node->block_index, &event);
+      status = loom_amdgpu_sgpr_read_wait_collect_boundary(
+          state, packet, (uint32_t)call_boundary);
     }
     return status;
   }

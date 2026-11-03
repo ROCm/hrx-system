@@ -37,6 +37,11 @@ iree_status_t loom_amdgpu_mask_write_wait_collect(
     const loom_amdgpu_structural_packet_info_t* structural,
     loom_amdgpu_descriptor_traits_t traits);
 
+// Retires every mask-read destination class at an opaque native boundary.
+iree_status_t loom_amdgpu_mask_write_wait_collect_boundary(
+    loom_amdgpu_mask_write_wait_t* state, const loom_low_packet_view_t* packet,
+    uint32_t instruction_offset);
+
 // Propagates retained block summaries over the schedule CFG and emits waits.
 // No IR or allocation traversal is performed during resolution.
 iree_status_t loom_amdgpu_mask_write_wait_resolve(

@@ -42,6 +42,7 @@ increment:
   v_mov_b32 v1, 1
   s_delay_alu instid0(VALU_DEP_1)
   v_add_u32 v0, v0, v1
+  s_nop 3
   s_setpc_b64 s[30:31]
 .Lfunc_end1:
 .size increment, .Lfunc_end1-increment

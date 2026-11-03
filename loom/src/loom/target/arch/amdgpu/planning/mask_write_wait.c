@@ -185,7 +185,7 @@ static iree_status_t loom_amdgpu_mask_write_record(
   return loom_amdgpu_mask_write_append_event(state, event);
 }
 
-static iree_status_t loom_amdgpu_mask_write_record_boundary(
+iree_status_t loom_amdgpu_mask_write_wait_collect_boundary(
     loom_amdgpu_mask_write_wait_t* state, const loom_low_packet_view_t* packet,
     uint32_t instruction_offset) {
   loom_amdgpu_mask_write_block_t* block =
@@ -229,7 +229,7 @@ iree_status_t loom_amdgpu_mask_write_wait_collect(
                                                         segment_index);
       if (is_call && !boundary_recorded &&
           segment.instruction_offset > call_boundary) {
-        status = loom_amdgpu_mask_write_record_boundary(
+        status = loom_amdgpu_mask_write_wait_collect_boundary(
             state, packet, (uint32_t)call_boundary);
         boundary_recorded = true;
       }
@@ -251,8 +251,8 @@ iree_status_t loom_amdgpu_mask_write_wait_collect(
       }
     }
     if (is_call && !boundary_recorded && iree_status_is_ok(status)) {
-      status = loom_amdgpu_mask_write_record_boundary(state, packet,
-                                                      (uint32_t)call_boundary);
+      status = loom_amdgpu_mask_write_wait_collect_boundary(
+          state, packet, (uint32_t)call_boundary);
     }
     return status;
   }

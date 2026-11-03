@@ -27,6 +27,7 @@
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/codegen/low/packet_hazard_plan.h"
+#include "loom/target/arch/amdgpu/abi/call_abi.h"
 #include "loom/target/arch/amdgpu/planning/matrix_wait_states.h"
 
 #ifdef __cplusplus
@@ -40,6 +41,14 @@ struct loom_amdgpu_matrix_coexecution_t;
 struct loom_amdgpu_matrix_result_wait_t;
 struct loom_amdgpu_processor_info_t;
 struct loom_amdgpu_address_state_plan_t;
+
+// Interprocedural state available while planning fixed hardware waits.
+typedef struct loom_amdgpu_wait_state_plan_options_t {
+  // Exact machine-state contracts for direct callees.
+  loom_amdgpu_call_state_provider_t call_states;
+  // Whether this function returns to a native caller.
+  bool callable;
+} loom_amdgpu_wait_state_plan_options_t;
 
 // Maximum number of cycles a single `s_nop` packet can wait. The SOPP SIMM16
 // operand is encoded as wait_cycles - 1, and current AMDGPU targets use a
@@ -194,6 +203,7 @@ iree_string_view_t loom_amdgpu_wait_state_action_name(
 iree_status_t loom_amdgpu_wait_state_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
+    const loom_amdgpu_wait_state_plan_options_t* options,
     const struct loom_amdgpu_processor_properties_t* processor_properties,
     const struct loom_amdgpu_address_state_plan_t* address_state,
     const struct loom_amdgpu_wait_plan_t* wait_plan,
