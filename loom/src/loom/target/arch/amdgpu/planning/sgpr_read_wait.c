@@ -38,7 +38,7 @@ typedef struct loom_amdgpu_sgpr_read_wait_block_t {
   iree_host_size_t event_start;
   // Number of retained native events in this block.
   iree_host_size_t event_count;
-  // An opaque boundary kills every incoming VALU-read pair before block exit.
+  // A quiescent boundary kills every incoming VALU-read pair before block exit.
   bool quiescent_boundary;
   // The generated row now contains resolved outgoing state.
   bool resolved;
@@ -225,14 +225,16 @@ iree_status_t loom_amdgpu_sgpr_read_wait_collect_packet(
     const loom_low_packet_view_t* packet,
     const loom_low_packet_view_t* second_packet,
     const loom_amdgpu_structural_packet_info_t* structural,
-    loom_amdgpu_descriptor_traits_t traits) {
+    loom_amdgpu_descriptor_traits_t traits, bool quiescent_call_boundary) {
   loom_amdgpu_sgpr_read_wait_event_t event = {
       .packet_index = packet->packet_index,
   };
   if (packet->descriptor == NULL) {
     iree_status_t status = iree_ok_status();
-    const bool is_call = iree_any_bit_set(
-        structural->flags, LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CALL);
+    const bool is_call =
+        quiescent_call_boundary &&
+        iree_any_bit_set(structural->flags,
+                         LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CALL);
     const uint64_t call_boundary =
         is_call ? loom_amdgpu_structural_packet_call_boundary_offset(structural)
                 : 0;

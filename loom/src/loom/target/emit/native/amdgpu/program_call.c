@@ -14,7 +14,6 @@
 #include "loom/error/parameter.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
-#include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/registers.h"
 
 typedef struct loom_amdgpu_program_ordered_clobber_t {

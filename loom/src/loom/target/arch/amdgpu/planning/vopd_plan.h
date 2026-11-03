@@ -21,6 +21,7 @@
 #include "iree/base/string_builder.h"
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/packet.h"
+#include "loom/target/arch/amdgpu/abi/call_abi.h"
 #include "loom/target/arch/amdgpu/planning/address_state.h"
 #include "loom/target/arch/amdgpu/planning/vopd_component.h"
 #include "loom/target/arch/amdgpu/planning/wait_packets.h"
@@ -233,6 +234,7 @@ iree_status_t loom_amdgpu_vopd_plan_build(
     const loom_amdgpu_address_state_plan_t* address_state,
     const loom_amdgpu_wait_plan_t* wait_plan,
     const loom_amdgpu_wait_packet_plan_t* wait_packets,
+    loom_amdgpu_call_state_provider_t call_states,
     struct loom_amdgpu_matrix_coexecution_t* matrix_coexecution,
     iree_arena_allocator_t* arena, iree_arena_allocator_t* transient_arena,
     loom_amdgpu_vopd_rejection_table_t* out_rejections,

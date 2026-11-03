@@ -51,10 +51,10 @@ typedef uint8_t loom_amdgpu_wait_plan_action_flags_t;
 // Optional interprocedural policy for one function's counter plan.
 typedef struct loom_amdgpu_wait_plan_options_t {
   // Exact machine-state contracts for direct callees. When absent, calls use
-  // the conservative contract covering every logical counter.
+  // the conservative contract covering every counter and fixed-hazard family.
   loom_amdgpu_call_state_provider_t call_states;
   // Whether this function is a callable helper and must restore its published
-  // counter state at each return.
+  // machine state at each return.
   bool callable;
 } loom_amdgpu_wait_plan_options_t;
 
@@ -169,6 +169,9 @@ typedef struct loom_amdgpu_wait_plan_t {
   loom_amdgpu_descriptor_traits_t descriptor_traits;
   // Union of logical counters produced anywhere in the function.
   loom_amdgpu_wait_counter_mask_t produced_counter_mask;
+  // Fixed physical hazard families touched by a callable helper. Ordinary
+  // kernel plans leave this empty because they are not consumed as callees.
+  loom_amdgpu_call_fixed_hazard_mask_t fixed_hazard_mask;
   // Native DOT identities requiring independent fixed-delay channels.
   uint8_t dot_identity_mask;
 } loom_amdgpu_wait_plan_t;

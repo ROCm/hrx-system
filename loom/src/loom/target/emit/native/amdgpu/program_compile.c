@@ -400,6 +400,8 @@ static iree_status_t loom_amdgpu_program_compile_retained(
     }
     callable->call_state.counter_mask =
         callable->compilation.plan.packet_plan.wait_plan.produced_counter_mask;
+    callable->call_state.fixed_hazard_mask =
+        callable->compilation.plan.packet_plan.wait_plan.fixed_hazard_mask;
     IREE_RETURN_IF_ERROR(loom_amdgpu_program_callable_prepare_clobbers(
         descriptor_set, arena, scratch_arena, callable));
     loom_amdgpu_program_call_table_publish(&call_table, callable);

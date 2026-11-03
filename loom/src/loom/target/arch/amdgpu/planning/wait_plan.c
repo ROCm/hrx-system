@@ -2774,6 +2774,13 @@ static uint32_t loom_amdgpu_wait_plan_call_boundary_drain_mask(
   return counter_mask & ~builder->known_empty_counter_mask;
 }
 
+static loom_amdgpu_call_state_t loom_amdgpu_wait_plan_call_state(
+    const loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index) {
+  return loom_amdgpu_call_state_resolve(
+      builder->options.call_states,
+      loom_low_func_call_callee(builder->schedule->nodes[node_index].op));
+}
+
 static iree_status_t loom_amdgpu_wait_plan_handle_callable_return(
     loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index) {
   if (!builder->options.callable ||
@@ -2800,18 +2807,11 @@ static iree_status_t loom_amdgpu_wait_plan_handle_callable_boundary(
     return iree_ok_status();
   }
 
-  uint32_t callee_counter_mask = LOOM_AMDGPU_WAIT_COUNTER_MASK_ALL;
-  if (builder->options.call_states.query != NULL) {
-    const loom_amdgpu_call_state_t* call_state =
-        builder->options.call_states.query(
-            builder->options.call_states.user_data,
-            loom_low_func_call_callee(builder->schedule->nodes[node_index].op));
-    IREE_ASSERT(call_state != NULL);
-    callee_counter_mask = call_state->counter_mask;
-  }
+  const loom_amdgpu_call_state_t call_state =
+      loom_amdgpu_wait_plan_call_state(builder, node_index);
   const uint32_t drain_counter_mask =
       loom_amdgpu_wait_plan_call_boundary_drain_mask(builder, node_index,
-                                                     callee_counter_mask);
+                                                     call_state.counter_mask);
   if (drain_counter_mask == 0) {
     return iree_ok_status();
   }
@@ -3266,12 +3266,19 @@ static iree_status_t loom_amdgpu_wait_plan_build_actions(
               &builder->classification.node_states[node_index];
           const loom_low_packet_view_t packet =
               loom_low_packet_at(schedule, packet_index);
+          const bool is_call =
+              iree_any_bit_set(state->flags, LOOM_AMDGPU_WAIT_NODE_STATE_CALL);
+          const bool quiescent_boundary =
+              is_call &&
+              iree_any_bit_set(
+                  loom_amdgpu_wait_plan_call_state(builder, node_index)
+                      .fixed_hazard_mask,
+                  LOOM_AMDGPU_CALL_FIXED_HAZARD_MATRIX_RESULT);
           loom_amdgpu_matrix_result_wait_collect(
               builder->matrix_results, &packet,
               iree_any_bit_set(state->flags,
                                LOOM_AMDGPU_WAIT_NODE_STATE_MATRIX_RESULT),
-              state->minimum_instruction_count,
-              iree_any_bit_set(state->flags, LOOM_AMDGPU_WAIT_NODE_STATE_CALL));
+              state->minimum_instruction_count, quiescent_boundary);
         }
       }
     }
@@ -3327,7 +3334,8 @@ iree_status_t loom_amdgpu_wait_plan_build(
   loom_amdgpu_wait_actions_initialize(&builder.actions);
   iree_status_t status = loom_amdgpu_wait_classification_build(
       schedule, allocation, builder.processor_properties,
-      &builder.wait_packet_target, transient_arena, &builder.classification);
+      &builder.wait_packet_target, builder.options.callable, transient_arena,
+      &builder.classification);
   if (iree_status_is_ok(status) && out_matrix_results != NULL) {
     status = loom_amdgpu_matrix_result_wait_allocate(
         schedule, allocation,
@@ -3394,6 +3402,7 @@ iree_status_t loom_amdgpu_wait_plan_build(
         .elided_wait_nodes = builder.elided_wait_nodes,
         .descriptor_traits = builder.classification.descriptor_traits,
         .produced_counter_mask = builder.classification.produced_counter_mask,
+        .fixed_hazard_mask = builder.classification.fixed_hazard_mask,
         .dot_identity_mask = builder.classification.dot_identity_mask,
     };
     if (builder.hazard_plan.progress == &builder.progress) {

@@ -104,6 +104,8 @@ typedef struct loom_amdgpu_vopd_plan_builder_t {
   const loom_amdgpu_wait_plan_t* wait_plan;
   // Optional planned wait packets that block second-component fusion.
   const loom_amdgpu_wait_packet_plan_t* wait_packets;
+  // Exact fixed-state contracts for direct callees.
+  loom_amdgpu_call_state_provider_t call_states;
   // Arena owning exact-size tables retained by the completed plan.
   iree_arena_allocator_t* arena;
   // Arena owning analysis scratch discarded after packet-plan construction.
@@ -1367,8 +1369,20 @@ static void loom_amdgpu_vopd_commit_static_packet(
   }
   const loom_amdgpu_structural_packet_info_t* structural_info =
       visible->packet.descriptor == NULL ? &visible->structural : NULL;
+  bool quiescent_boundary = false;
+  if (structural_info != NULL &&
+      iree_any_bit_set(structural_info->flags,
+                       LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CALL)) {
+    const loom_amdgpu_call_state_t call_state = loom_amdgpu_call_state_resolve(
+        builder->call_states,
+        loom_low_func_call_callee(visible->packet.node->op));
+    quiescent_boundary =
+        iree_any_bit_set(call_state.fixed_hazard_mask,
+                         LOOM_AMDGPU_CALL_FIXED_HAZARD_MATRIX_COEXECUTION);
+  }
   loom_amdgpu_matrix_coexecution_commit_static_packet(
-      builder->matrix_coexecution, &visible->packet, structural_info);
+      builder->matrix_coexecution, &visible->packet, structural_info,
+      quiescent_boundary);
 }
 
 static iree_status_t loom_amdgpu_vopd_plan_block(
@@ -1509,9 +1523,11 @@ static iree_status_t loom_amdgpu_vopd_plan_unpaired_matrix_stream(
         structural = loom_amdgpu_structural_packet_analyze(
             builder->schedule, builder->allocation, packet.node_index, 0);
       }
-      loom_amdgpu_matrix_coexecution_commit_static_packet(
-          builder->matrix_coexecution, &packet,
-          packet.descriptor == NULL ? &structural : NULL);
+      const loom_amdgpu_vopd_visible_packet_t visible = {
+          .packet = packet,
+          .structural = structural,
+      };
+      loom_amdgpu_vopd_commit_static_packet(builder, &visible);
     }
     IREE_RETURN_IF_ERROR(loom_amdgpu_matrix_coexecution_end_static_block(
         builder->matrix_coexecution));
@@ -1801,6 +1817,7 @@ iree_status_t loom_amdgpu_vopd_plan_build(
     const loom_amdgpu_address_state_plan_t* address_state,
     const loom_amdgpu_wait_plan_t* wait_plan,
     const loom_amdgpu_wait_packet_plan_t* wait_packets,
+    loom_amdgpu_call_state_provider_t call_states,
     loom_amdgpu_matrix_coexecution_t* matrix_coexecution,
     iree_arena_allocator_t* arena, iree_arena_allocator_t* transient_arena,
     loom_amdgpu_vopd_rejection_table_t* out_rejections,
@@ -1818,6 +1835,7 @@ iree_status_t loom_amdgpu_vopd_plan_build(
           .address_state = address_state,
           .wait_plan = wait_plan,
           .wait_packets = wait_packets,
+          .call_states = call_states,
           .arena = arena,
           .transient_arena = transient_arena,
           .matrix_coexecution = matrix_coexecution,
@@ -1845,6 +1863,7 @@ iree_status_t loom_amdgpu_vopd_plan_build(
       .address_state = address_state,
       .wait_plan = wait_plan,
       .wait_packets = wait_packets,
+      .call_states = call_states,
       .arena = arena,
       .transient_arena = transient_arena,
       .matrix_coexecution = matrix_coexecution,

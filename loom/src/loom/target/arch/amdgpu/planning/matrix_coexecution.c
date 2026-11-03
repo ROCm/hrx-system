@@ -135,7 +135,7 @@ typedef struct loom_amdgpu_matrix_coexecution_block_t {
   loom_amdgpu_matrix_coexecution_consumer_t* consumers;
   // Saturated native vector issue count for the block.
   uint8_t vector_issue_count;
-  // Whether an opaque boundary retires every incoming release before the
+  // Whether a quiescent boundary retires every incoming release before the
   // retained suffix represented by this block.
   bool quiescent_boundary;
   // True after final wait-state planning publishes refined outgoing state.
@@ -876,7 +876,8 @@ static void loom_amdgpu_matrix_coexecution_advance_static(
 void loom_amdgpu_matrix_coexecution_commit_static_packet(
     loom_amdgpu_matrix_coexecution_t* coexecution,
     const loom_low_packet_view_t* packet,
-    const loom_amdgpu_structural_packet_info_t* structural_info) {
+    const loom_amdgpu_structural_packet_info_t* structural_info,
+    bool quiescent_boundary) {
   IREE_ASSERT_EQ(packet->node->block_index, coexecution->active_block_index);
   const loom_amdgpu_matrix_coexecution_source_t* source = NULL;
   if (packet->descriptor != NULL &&
@@ -900,9 +901,10 @@ void loom_amdgpu_matrix_coexecution_commit_static_packet(
   if (source != NULL) {
     loom_amdgpu_matrix_coexecution_publish_source(coexecution, packet, source);
   }
-  if (structural_info != NULL &&
-      iree_any_bit_set(structural_info->flags,
-                       LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CALL)) {
+  if (quiescent_boundary) {
+    IREE_ASSERT(structural_info != NULL);
+    IREE_ASSERT(iree_any_bit_set(structural_info->flags,
+                                 LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CALL));
     loom_amdgpu_matrix_coexecution_block_t* block =
         &coexecution->blocks[coexecution->active_block_index];
     block->quiescent_boundary = true;
