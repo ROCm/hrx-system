@@ -385,11 +385,12 @@ static iree_status_t loom_serve_weight_query_preparer(
 
 static iree_status_t loom_serve_weight_prepare_policy(
     loom_serve_weight_preparation_t* job) {
+  IREE_TRACE_ZONE_BEGIN(z0);
   loom_serve_weights_t* weights = job->weights;
   const iree_allocator_t host_allocator = weights->host_allocator;
   iree_vm_environment_t* environment = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_vm_environment_allocate(host_allocator, &environment));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_vm_environment_allocate(host_allocator, &environment));
   loom_serve_program_t* program = NULL;
   iree_vm_module_t* libraries[4] = {NULL, NULL, NULL, NULL};
   const iree_string_view_t roots[] = {IREE_SVL("prepare_weight")};
@@ -437,6 +438,8 @@ static iree_status_t loom_serve_weight_prepare_policy(
                                          sizeof(*job->span_preparers),
                                          (void**)&job->span_preparers);
   }
+  IREE_TRACE_ZONE_BEGIN_NAMED(z_queries, "loom_serve_weight_query_preparers");
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z_queries, weights->span_count);
   for (iree_host_size_t i = 0;
        i < weights->span_count && iree_status_is_ok(status); ++i) {
     loom_serve_preparation_t* declaration = NULL;
@@ -470,11 +473,15 @@ static iree_status_t loom_serve_weight_prepare_policy(
     }
     loom_serve_preparation_module_recycle(libraries[0], declaration);
   }
+  IREE_TRACE_ZONE_END(z_queries);
+  IREE_TRACE_ZONE_BEGIN_NAMED(z_release, "loom_serve_weight_release_policy");
   loom_serve_program_free(program);
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(libraries); ++i) {
     iree_vm_module_release(libraries[i]);
   }
   iree_vm_environment_free(environment);
+  IREE_TRACE_ZONE_END(z_release);
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
@@ -579,6 +586,7 @@ static void loom_serve_weight_preparation_compiled(
 
 static void loom_serve_weight_preparation_execute(
     loomc_task_t* task, loomc_host_size_t worker_ordinal) {
+  IREE_TRACE_ZONE_BEGIN(z0);
   loom_serve_weight_preparation_t* job = (loom_serve_weight_preparation_t*)task;
   const iree_allocator_t host_allocator = job->weights->host_allocator;
   iree_status_t status =
@@ -594,6 +602,7 @@ static void loom_serve_weight_preparation_execute(
                               "weight input lanes exceed device address space");
   }
   job->status = status;
+  IREE_TRACE_ZONE_END(z0);
 }
 
 static void loom_serve_weight_preparation_destroy(loomc_task_t* task) {

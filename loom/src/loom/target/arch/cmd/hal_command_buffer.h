@@ -36,6 +36,9 @@ typedef struct loom_cmd_program_hal_entry_t {
 // allocates none of their backing storage. |out_command_buffer| is untouched on
 // failure. |mode| selects HAL recording policy, including retained profiling
 // metadata when a caller intends to profile these reusable commands.
+// |scratch_allocator| supplies only transient reflection and recording storage;
+// no allocation from it survives this call. HAL objects use the queue family's
+// allocator. An arena may be reset immediately after recording completes.
 // A non-NULL range selects complete contiguous barrier waves. NULL selects the
 // complete program. Ranges retain the original binding/parameter layout; the
 // caller preserves live workspace and orders successive ranges with semaphores.
@@ -52,7 +55,7 @@ iree_status_t loom_cmd_program_hal_command_buffer_create(
     iree_host_size_t fixed_buffer_count,
     const iree_hal_buffer_binding_t* fixed_bindings,
     iree_host_size_t entry_count, const loom_cmd_program_hal_entry_t* entries,
-    iree_allocator_t host_allocator,
+    iree_allocator_t scratch_allocator,
     iree_hal_command_buffer_t** out_command_buffer);
 
 #ifdef __cplusplus

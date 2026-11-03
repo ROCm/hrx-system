@@ -37,6 +37,7 @@ void loom_serve_program_free(loom_serve_program_t* program) {
   if (!program) {
     return;
   }
+  IREE_TRACE_ZONE_BEGIN(z0);
   iree_vm_process_release(program->process);
   if (program->invocation) {
     iree_vm_invocation_deinitialize(program->invocation);
@@ -44,6 +45,7 @@ void loom_serve_program_free(loom_serve_program_t* program) {
   iree_vm_program_release(program->program);
   loom_model_card_release(program->card);
   iree_allocator_free(program->host_allocator, program);
+  IREE_TRACE_ZONE_END(z0);
 }
 
 static iree_status_t loom_serve_program_module_create(
@@ -270,10 +272,12 @@ iree_status_t loom_serve_program_link(iree_vm_module_t* module,
                                       iree_vm_module_span_t libraries,
                                       iree_allocator_t host_allocator,
                                       loom_serve_program_t** out_program) {
+  IREE_TRACE_ZONE_BEGIN(z0);
   *out_program = NULL;
   loom_serve_program_t* program = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*program),
-                                             (void**)&program));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_allocator_malloc(host_allocator, sizeof(*program),
+                                (void**)&program));
   program->host_allocator = host_allocator;
   iree_vm_module_t* string_module = NULL;
   iree_vm_module_t** linked_libraries = NULL;
@@ -312,6 +316,7 @@ iree_status_t loom_serve_program_link(iree_vm_module_t* module,
   } else {
     loom_serve_program_free(program);
   }
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
 

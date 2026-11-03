@@ -295,6 +295,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/cmd:program",
         "//loom/src/loom/util:digest",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
     ],

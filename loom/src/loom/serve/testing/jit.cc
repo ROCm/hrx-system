@@ -13,6 +13,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/serve/testing/compiler.h"
 #include "loom/serve/testing/device.h"
+#include "loom/serve/testing/native_allocator.h"
 
 IREE_FLAG(string, jit_sources, "", "Portable test source catalog.");
 
@@ -25,6 +26,8 @@ struct JitTestApplication {
   iree_host_size_t worker_count;
   // Independent HAL owners sharing that host's executor and compiler services.
   iree_host_size_t device_count;
+  // Device allocation dependency outliving the shared group and its resources.
+  NativeAllocator device_allocator{};
   // Process-owned physical device group shared by matching test cases.
   loom_serve_device_group_t* group = nullptr;
 };
@@ -78,7 +81,8 @@ iree_status_t AcquireJitTestApplication(iree_host_size_t worker_count,
       };
     }
     status = loom_serve_device_group_allocate(
-        host, device_count, options.data(), host_allocator, &group);
+        host, device_count, options.data(),
+        selected->device_allocator.allocator(), &group);
     for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
          ++i) {
       const loom_serve_pool_options_t pool_options = {};
