@@ -32,9 +32,8 @@ static void iree_hal_device_spec_fuzz_parse(iree_const_byte_span_t bytes) {
   // Every accepted image must already be canonical. Reserializing may not
   // normalize, reorder, discard, or otherwise change any byte.
   iree_byte_span_t canonical_bytes = iree_byte_span_empty();
-  status = iree_hal_device_spec_serialize(spec, iree_allocator_system(),
-                                          &canonical_bytes);
-  iree_hal_device_spec_fuzz_assert(iree_status_is_ok(status));
+  IREE_CHECK_OK(iree_hal_device_spec_serialize(spec, iree_allocator_system(),
+                                               &canonical_bytes));
   iree_hal_device_spec_fuzz_assert(canonical_bytes.data_length ==
                                    bytes.data_length);
   iree_hal_device_spec_fuzz_assert(
@@ -42,10 +41,9 @@ static void iree_hal_device_spec_fuzz_parse(iree_const_byte_span_t bytes) {
 
   // Canonical output must remain parseable and preserve its fingerprint.
   iree_hal_device_spec_t* reparsed_spec = NULL;
-  status =
+  IREE_CHECK_OK(
       iree_hal_device_spec_parse(iree_const_cast_byte_span(canonical_bytes),
-                                 iree_allocator_system(), &reparsed_spec);
-  iree_hal_device_spec_fuzz_assert(iree_status_is_ok(status));
+                                 iree_allocator_system(), &reparsed_spec));
   iree_hal_device_spec_fuzz_assert(
       iree_hal_device_spec_fingerprint(spec) ==
       iree_hal_device_spec_fingerprint(reparsed_spec));
@@ -53,9 +51,8 @@ static void iree_hal_device_spec_fuzz_parse(iree_const_byte_span_t bytes) {
   // Do not rely on the non-cryptographic fingerprint to establish equivalence.
   // Serializing the reparsed object must produce the same canonical bytes.
   iree_byte_span_t reparsed_bytes = iree_byte_span_empty();
-  status = iree_hal_device_spec_serialize(
-      reparsed_spec, iree_allocator_system(), &reparsed_bytes);
-  iree_hal_device_spec_fuzz_assert(iree_status_is_ok(status));
+  IREE_CHECK_OK(iree_hal_device_spec_serialize(
+      reparsed_spec, iree_allocator_system(), &reparsed_bytes));
   iree_hal_device_spec_fuzz_assert(reparsed_bytes.data_length ==
                                    canonical_bytes.data_length);
   iree_hal_device_spec_fuzz_assert(memcmp(reparsed_bytes.data,
@@ -94,84 +91,87 @@ static const std::vector<uint8_t>& iree_hal_device_spec_fuzz_seed(void) {
     physical_device.partition_count = 1;
     physical_device.physical_device_affinity = 1;
 
-    iree_hal_device_identity_spec_t identity = {};
-    identity.logical_device_id = iree_make_cstring_view("fuzz-device-0");
-    identity.display_name = iree_make_cstring_view("Fuzz Device");
-    identity.driver_id = iree_make_cstring_view("fuzz-driver");
-    identity.driver_version = iree_make_cstring_view("1.2.3");
-    identity.backend_id = iree_make_cstring_view("fuzz-backend");
-    identity.device_path = iree_make_cstring_view("fuzz://device/0");
-    identity.vendor_name = iree_make_cstring_view("Fuzz Vendor");
-    identity.vendor_id = 0x1002;
-    identity.device_id = 0x744c;
-    identity.revision_id = 1;
-    identity.physical_device_count = 1;
-    identity.physical_devices = &physical_device;
+    iree_hal_device_identity_spec_t identity = {
+        .logical_device_id = iree_make_cstring_view("fuzz-device-0"),
+        .display_name = iree_make_cstring_view("Fuzz Device"),
+        .driver_id = iree_make_cstring_view("fuzz-driver"),
+        .driver_version = iree_make_cstring_view("1.2.3"),
+        .backend_id = iree_make_cstring_view("fuzz-backend"),
+        .device_path = iree_make_cstring_view("fuzz://device/0"),
+        .vendor_name = iree_make_cstring_view("Fuzz Vendor"),
+        .vendor_id = 0x1002,
+        .device_id = 0x744c,
+        .revision_id = 1,
+        .physical_device_count = 1,
+        .physical_devices = &physical_device,
+    };
 
-    iree_hal_memory_heap_spec_t memory_heap = {};
-    memory_heap.name = iree_make_cstring_view("device-local");
-    memory_heap.capacity_bytes = UINT64_C(8) * 1024 * 1024 * 1024;
-    memory_heap.allocation_granularity = 4096;
-    memory_heap.allocation_alignment = 256;
-    memory_heap.maximum_allocation_size = UINT64_C(4) * 1024 * 1024 * 1024;
-    memory_heap.physical_device_affinity = 1;
+    iree_hal_memory_heap_spec_t memory_heap = {
+        .name = iree_make_cstring_view("device-local"),
+        .capacity_bytes = UINT64_C(8) * 1024 * 1024 * 1024,
+        .allocation_granularity = 4096,
+        .allocation_alignment = 256,
+        .maximum_allocation_size = UINT64_C(4) * 1024 * 1024 * 1024,
+        .physical_device_affinity = 1,
+    };
 
-    iree_hal_memory_type_spec_t memory_type = {};
-    memory_type.heap_index = 0;
-    memory_type.memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-    memory_type.allowed_buffer_usage = IREE_HAL_BUFFER_USAGE_DEFAULT;
-    memory_type.allowed_memory_access = IREE_HAL_MEMORY_ACCESS_ALL;
-    memory_type.minimum_alignment = 256;
-    memory_type.optimal_transfer_granularity = 4096;
+    iree_hal_memory_type_spec_t memory_type = {
+        .heap_index = 0,
+        .memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+        .allowed_buffer_usage = IREE_HAL_BUFFER_USAGE_DEFAULT,
+        .allowed_memory_access = IREE_HAL_MEMORY_ACCESS_ALL,
+        .minimum_alignment = 256,
+        .optimal_transfer_granularity = 4096,
+    };
 
-    iree_hal_external_buffer_handle_spec_t external_buffer_handle = {};
-    external_buffer_handle.handle_type_mask =
-        IREE_HAL_TOPOLOGY_HANDLE_TYPE_OPAQUE_FD |
-        IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF;
-    external_buffer_handle.direction_flags =
-        IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
-        IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT;
-    external_buffer_handle.allowed_buffer_usage =
-        IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE_READ;
-    external_buffer_handle.allowed_memory_access =
-        IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE;
-    external_buffer_handle.compatible_memory_type_mask = 1u;
-    external_buffer_handle.flags =
-        IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_CROSS_PROCESS |
-        IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_OWNING;
+    iree_hal_external_buffer_handle_spec_t external_buffer_handle = {
+        .handle_type_mask = IREE_HAL_TOPOLOGY_HANDLE_TYPE_OPAQUE_FD |
+                            IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF,
+        .direction_flags = IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
+                           IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
+        .allowed_buffer_usage =
+            IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE_READ,
+        .allowed_memory_access =
+            IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+        .compatible_memory_type_mask = 1u,
+        .flags = IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_CROSS_PROCESS |
+                 IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_OWNING,
+    };
 
-    iree_hal_device_memory_spec_t memory = {};
-    memory.heap_count = 1;
-    memory.heaps = &memory_heap;
-    memory.memory_type_count = 1;
-    memory.memory_types = &memory_type;
-    memory.external_buffer_handle_count = 1;
-    memory.external_buffer_handles = &external_buffer_handle;
+    iree_hal_device_memory_spec_t memory = {
+        .heap_count = 1,
+        .heaps = &memory_heap,
+        .memory_type_count = 1,
+        .memory_types = &memory_type,
+        .external_buffer_handle_count = 1,
+        .external_buffer_handles = &external_buffer_handle,
+    };
 
-    iree_hal_virtual_memory_class_spec_t virtual_memory_class = {};
-    virtual_memory_class.compatible_memory_type_mask = 1u;
-    virtual_memory_class.allowed_buffer_usage = IREE_HAL_BUFFER_USAGE_DEFAULT;
-    virtual_memory_class.allowed_memory_access = IREE_HAL_MEMORY_ACCESS_ALL;
-    virtual_memory_class.minimum_page_size = 4096;
-    virtual_memory_class.recommended_page_size = 65536;
-    virtual_memory_class.maximum_reservation_size = UINT64_C(1) << 40;
-    virtual_memory_class.maximum_physical_allocation_size = UINT64_C(1) << 32;
-    virtual_memory_class.operation_flags =
-        IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_RESERVE |
-        IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_RELEASE |
-        IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_PHYSICAL_ALLOCATE |
-        IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_PHYSICAL_FREE |
-        IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_MAP |
-        IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_UNMAP |
-        IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_PROTECT |
-        IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_ADVISE;
-    virtual_memory_class.protection_flags =
-        IREE_HAL_MEMORY_PROTECTION_READ_WRITE;
-    virtual_memory_class.advice_flags = IREE_HAL_MEMORY_ADVICE_WILL_NEED;
+    iree_hal_virtual_memory_class_spec_t virtual_memory_class = {
+        .compatible_memory_type_mask = 1u,
+        .allowed_buffer_usage = IREE_HAL_BUFFER_USAGE_DEFAULT,
+        .allowed_memory_access = IREE_HAL_MEMORY_ACCESS_ALL,
+        .minimum_page_size = 4096,
+        .recommended_page_size = 65536,
+        .maximum_reservation_size = UINT64_C(1) << 40,
+        .maximum_physical_allocation_size = UINT64_C(1) << 32,
+        .operation_flags =
+            IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_RESERVE |
+            IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_RELEASE |
+            IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_PHYSICAL_ALLOCATE |
+            IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_PHYSICAL_FREE |
+            IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_MAP |
+            IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_UNMAP |
+            IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_PROTECT |
+            IREE_HAL_VIRTUAL_MEMORY_OPERATION_FLAG_ADVISE,
+        .protection_flags = IREE_HAL_MEMORY_PROTECTION_READ_WRITE,
+        .advice_flags = IREE_HAL_MEMORY_ADVICE_WILL_NEED,
+    };
 
-    iree_hal_device_virtual_memory_spec_t virtual_memory = {};
-    virtual_memory.class_count = 1;
-    virtual_memory.classes = &virtual_memory_class;
+    iree_hal_device_virtual_memory_spec_t virtual_memory = {
+        .class_count = 1,
+        .classes = &virtual_memory_class,
+    };
 
     iree_hal_queue_family_spec_t queue_family = {};
     const iree_hal_queue_priority_t queue_priorities[] = {-1, 0};
@@ -211,24 +211,22 @@ static const std::vector<uint8_t>& iree_hal_device_spec_fuzz_seed(void) {
                               IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_PROFILING;
     queue_family.flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_DYNAMIC_ACQUISITION;
 
-    iree_hal_external_timepoint_handle_spec_t external_timepoint_handle = {};
-    external_timepoint_handle.handle_type =
-        IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE;
-    external_timepoint_handle.direction_flags =
-        IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
-        IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT;
-    external_timepoint_handle.compatibility =
-        IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_WAIT |
-        IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_SIGNAL;
-    external_timepoint_handle.flags =
-        IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_CROSS_PROCESS |
-        IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_OWNING;
+    iree_hal_external_timepoint_handle_spec_t external_timepoint_handle = {
+        .handle_type = IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE,
+        .direction_flags = IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
+                           IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
+        .compatibility = IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_WAIT |
+                         IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_SIGNAL,
+        .flags = IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_CROSS_PROCESS |
+                 IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_OWNING,
+    };
 
-    iree_hal_device_queue_spec_t queues = {};
-    queues.family_count = 1;
-    queues.families = &queue_family;
-    queues.external_timepoint_handle_count = 1;
-    queues.external_timepoint_handles = &external_timepoint_handle;
+    iree_hal_device_queue_spec_t queues = {
+        .family_count = 1,
+        .families = &queue_family,
+        .external_timepoint_handle_count = 1,
+        .external_timepoint_handles = &external_timepoint_handle,
+    };
 
     iree_hal_device_dispatch_spec_t dispatch = {};
     dispatch.launch.maximum_workgroup_invocations = 1024;
@@ -256,26 +254,30 @@ static const std::vector<uint8_t>& iree_hal_device_spec_fuzz_seed(void) {
     dispatch.addressing.address_space_bits = 64;
     dispatch.addressing.minimum_buffer_device_address_alignment = 256;
 
-    iree_hal_device_timing_spec_t timing = {};
-    timing.timestamp_valid_bits = 64;
-    timing.timestamp_frequency_hz = UINT64_C(1000000000);
-    timing.flags = IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS |
-                   IREE_HAL_DEVICE_TIMING_SPEC_FLAG_HOST_CORRELATION |
-                   IREE_HAL_DEVICE_TIMING_SPEC_FLAG_HARDWARE_COUNTERS;
+    iree_hal_device_timing_spec_t timing = {
+        .timestamp_valid_bits = 64,
+        .timestamp_frequency_hz = UINT64_C(1000000000),
+        .flags = IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS |
+                 IREE_HAL_DEVICE_TIMING_SPEC_FLAG_HOST_CORRELATION |
+                 IREE_HAL_DEVICE_TIMING_SPEC_FLAG_HARDWARE_COUNTERS,
+    };
 
-    iree_hal_executable_target_t executable_target = {};
-    executable_target.family = iree_make_cstring_view("amdgpu");
-    executable_target.target_key = iree_make_cstring_view("gfx1100:xnack-");
-    executable_target.kind = IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT;
-    executable_target.priority = 100;
-    executable_target.physical_device_affinity = 1;
+    iree_hal_executable_target_t executable_target = {
+        .family = iree_make_cstring_view("amdgpu"),
+        .target_key = iree_make_cstring_view("gfx1100:xnack-"),
+        .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
+        .priority = 100,
+        .physical_device_affinity = 1,
+    };
 
-    iree_hal_device_executable_spec_t executables = {};
-    executables.target_count = 1;
-    executables.targets = &executable_target;
+    iree_hal_device_executable_spec_t executables = {
+        .target_count = 1,
+        .targets = &executable_target,
+    };
 
-    iree_hal_device_sanitizer_spec_t sanitizer = {};
-    sanitizer.flags = IREE_HAL_DEVICE_SANITIZER_FLAG_ASAN;
+    iree_hal_device_sanitizer_spec_t sanitizer = {
+        .flags = IREE_HAL_DEVICE_SANITIZER_FLAG_ASAN,
+    };
     sanitizer.asan.pool_options.mode = IREE_HAL_ASAN_POOL_MODE_SHADOW;
     sanitizer.asan.pool_options.shadow_granule_size = 8;
     sanitizer.asan.pool_options.redzone_size = 64;
@@ -283,32 +285,32 @@ static const std::vector<uint8_t>& iree_hal_device_spec_fuzz_seed(void) {
     sanitizer.asan.pool_options.quarantine_size = 1024 * 1024;
 
     static const uint8_t facet_payload[] = {0x00, 0x7f, 0x80, 0xff};
-    iree_hal_device_spec_facet_t facet = {};
-    facet.schema_id = iree_make_cstring_view("fuzz.example.facet");
-    facet.schema_version = 7;
-    facet.payload =
-        iree_make_const_byte_span(facet_payload, sizeof(facet_payload));
+    iree_hal_device_spec_facet_t facet = {
+        .schema_id = iree_make_cstring_view("fuzz.example.facet"),
+        .schema_version = 7,
+        .payload =
+            iree_make_const_byte_span(facet_payload, sizeof(facet_payload)),
+    };
 
-    iree_hal_device_spec_params_t params = {};
-    params.identity = &identity;
-    params.memory = &memory;
-    params.virtual_memory = &virtual_memory;
-    params.queues = &queues;
-    params.dispatch = &dispatch;
-    params.timing = &timing;
-    params.executables = &executables;
-    params.sanitizer = &sanitizer;
-    params.facet_count = 1;
-    params.facets = &facet;
+    iree_hal_device_spec_params_t params = {
+        .identity = &identity,
+        .memory = &memory,
+        .virtual_memory = &virtual_memory,
+        .queues = &queues,
+        .dispatch = &dispatch,
+        .timing = &timing,
+        .executables = &executables,
+        .sanitizer = &sanitizer,
+        .facet_count = 1,
+        .facets = &facet,
+    };
 
     iree_hal_device_spec_t* spec = NULL;
-    iree_status_t status =
-        iree_hal_device_spec_create(&params, iree_allocator_system(), &spec);
-    iree_hal_device_spec_fuzz_assert(iree_status_is_ok(status));
+    IREE_CHECK_OK(
+        iree_hal_device_spec_create(&params, iree_allocator_system(), &spec));
     iree_byte_span_t bytes = iree_byte_span_empty();
-    status =
-        iree_hal_device_spec_serialize(spec, iree_allocator_system(), &bytes);
-    iree_hal_device_spec_fuzz_assert(iree_status_is_ok(status));
+    IREE_CHECK_OK(
+        iree_hal_device_spec_serialize(spec, iree_allocator_system(), &bytes));
     std::vector<uint8_t> result(bytes.data, bytes.data + bytes.data_length);
     iree_allocator_free(iree_allocator_system(), bytes.data);
     iree_hal_device_spec_release(spec);
