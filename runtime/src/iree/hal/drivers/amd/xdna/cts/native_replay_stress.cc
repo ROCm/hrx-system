@@ -96,8 +96,11 @@ class NativeReplayStress : public CtsTestBase<> {
     const iree_hal_pool_scope_t scope = {
         .family_count = 1,
         .families = &family,
-        .host = {.access = IREE_HAL_MEMORY_ACCESS_ALL,
-                 .modes = IREE_HAL_MAPPING_MODE_SCOPED},
+        .host =
+            {
+                .access = IREE_HAL_MEMORY_ACCESS_ALL,
+                .modes = IREE_HAL_MAPPING_MODE_SCOPED,
+            },
     };
     iree_hal_slab_pool_options_t options;
     iree_hal_slab_pool_options_initialize(&options);
