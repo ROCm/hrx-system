@@ -1,12 +1,12 @@
-// RUN: emit amdgpu-vopd-plan-json @gfx11_same_bank_rejection strategy=source fixed=%source0:physical_register:5:1 fixed=%source1:physical_register:1:1 fixed=%copy0:physical_register:2:1 fixed=%copy1:physical_register:3:1
+// RUN: emit amdgpu-vopd-plan-json @gfx11_dependent_rejection
 
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @gfx11_same_bank_rejection(%source0: reg<amdgpu.vgpr>, %source1: reg<amdgpu.vgpr>) asm {
-  %copy0 = v_mov_b32_copy %source0
-  %copy1 = v_mov_b32_copy %source1
+low.func.def target<amdgpu.rdna3.core>(@target) @gfx11_dependent_rejection(%source0: reg<amdgpu.vgpr>, %source1: reg<amdgpu.vgpr>) asm {
+  %difference = v_sub_f32 %source0, %source1
+  %result = v_sub_f32 %difference, %source1
   return
 }
 
 // ----
-{"format":"loom.amdgpu.vopd_plan.v0","function":"gfx11_same_bank_rejection","target":"target","descriptor_set":"amdgpu.rdna3.core","pair_count":0,"rejection_count":1,"packet_count":3,"pairs":[],"rejections":[{"index":0,"reason":"register_constraints","register_constraints":["src0_bank"],"block":0,"first":{"packet":0,"node":0,"descriptor":"amdgpu.v_mov_b32_copy","op_id":8,"op":"mov_b32","vdst":2,"src0":5,"vsrc1":0,"flags":0,"literal_u32":null},"second":{"packet":1,"node":1,"descriptor":"amdgpu.v_mov_b32_copy","op_id":8,"op":"mov_b32","vdst":3,"src0":1,"vsrc1":0,"flags":0,"literal_u32":null}}],"packets":[{"index":0,"role":"none","pair":null},{"index":1,"role":"none","pair":null},{"index":2,"role":"none","pair":null}]}
+{"format":"loom.amdgpu.vopd_plan.v0","function":"gfx11_dependent_rejection","target":"target","descriptor_set":"amdgpu.rdna3.core","pair_count":0,"rejection_count":1,"packet_count":3,"pairs":[],"rejections":[{"index":0,"reason":"first_result_used_by_second","block":0,"first":{"packet":0,"node":0,"descriptor":"amdgpu.v_sub_f32","op_id":5,"op":"sub_f32","vdst":0,"src0":0,"vsrc1":1,"flags":0,"literal_u32":null},"second":{"packet":1,"node":1,"descriptor":"amdgpu.v_sub_f32","op_id":5,"op":"sub_f32","vdst":0,"src0":0,"vsrc1":1,"flags":0,"literal_u32":null}}],"packets":[{"index":0,"role":"none","pair":null},{"index":1,"role":"none","pair":null},{"index":2,"role":"none","pair":null}]}

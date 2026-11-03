@@ -587,6 +587,7 @@ loom_cc_test(
 loom_cc_library(
     name = "vopd_plan",
     srcs = [
+        "vopd_component.c",
         "vopd_plan.c",
         "//loom/src/loom/target/arch/amdgpu/descriptors:vopd_data.c",
     ],
@@ -619,6 +620,19 @@ loom_cc_library(
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "vopd_component_test",
+    srcs = ["vopd_component_test.cc"],
+    deps = [
+        ":vopd_plan",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
