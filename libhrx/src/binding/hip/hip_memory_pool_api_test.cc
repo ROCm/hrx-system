@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <cstdint>
+#include <initializer_list>
 
 #include "binding/hip/api.h"
 #include "binding/hip/hip_dso_test_util.h"
@@ -157,6 +158,30 @@ TEST_F(HipMemoryPoolApiTest, ZeroByteAllocationReturnsNull) {
   EXPECT_EQ(hipSuccess,
             api_.malloc_from_pool_async(&pointer, /*size=*/0, pool, stream_));
   EXPECT_EQ(nullptr, pointer);
+}
+
+TEST_F(HipMemoryPoolApiTest, DefaultPoolHandlesAreBorrowed) {
+  const auto get_pool =
+      library_.Resolve<decltype(&hipMemGetMemPool)>("hipMemGetMemPool");
+  const auto set_pool =
+      library_.Resolve<decltype(&hipMemSetMemPool)>("hipMemSetMemPool");
+  ASSERT_NE(nullptr, get_pool) << library_.error();
+  ASSERT_NE(nullptr, set_pool) << library_.error();
+  hipMemLocation location = {
+      .type = hipMemLocationTypeDevice,
+      .id = device_,
+  };
+  for (auto type : {hipMemAllocationTypePinned, hipMemAllocationTypeManaged}) {
+    SCOPED_TRACE(type);
+    hipMemPool_t pool = nullptr;
+    ASSERT_EQ(hipSuccess, get_pool(&pool, &location, type));
+    ASSERT_NE(nullptr, pool);
+    EXPECT_EQ(hipErrorInvalidValue, api_.mem_pool_destroy(pool));
+    ASSERT_EQ(hipSuccess, set_pool(&location, type, pool));
+    hipMemPool_t selected_pool = nullptr;
+    ASSERT_EQ(hipSuccess, get_pool(&selected_pool, &location, type));
+    EXPECT_EQ(pool, selected_pool);
+  }
 }
 
 TEST_F(HipMemoryPoolApiTest, GraphAllocationReleasesSelectedPool) {

@@ -401,6 +401,40 @@ static void iree_hip_mem_pool_release(struct hipMemPool_st* pool) {
   iree_allocator_free(iree_allocator_system(), pool);
 }
 
+// Default handles and managed-pool selections belong to the runtime. Explicitly
+// created handles remain application-owned and must be destroyed by the caller.
+static void iree_hip_mem_pool_trim(void) {
+  struct hipMemPool_st* default_pools = NULL;
+  iree_hip_mem_pool_registry_lock();
+  struct hipMemPool_st** current = &iree_hip_mem_pool_registry_head;
+  while (*current) {
+    struct hipMemPool_st* pool = *current;
+    if (pool->is_default) {
+      *current = pool->next_live_pool;
+      pool->next_live_pool = default_pools;
+      default_pools = pool;
+    } else {
+      current = &pool->next_live_pool;
+    }
+  }
+  iree_hip_managed_mem_pool_selection_t* selections =
+      iree_hip_managed_mem_pool_selection_head;
+  iree_hip_managed_mem_pool_selection_head = NULL;
+  iree_slim_mutex_unlock(&iree_hip_mem_pool_registry_mutex);
+
+  while (selections) {
+    iree_hip_managed_mem_pool_selection_t* next = selections->next;
+    iree_hip_mem_pool_release(selections->pool);
+    iree_allocator_free(iree_allocator_system(), selections);
+    selections = next;
+  }
+  while (default_pools) {
+    struct hipMemPool_st* next = default_pools->next_live_pool;
+    iree_hip_mem_pool_release(default_pools);
+    default_pools = next;
+  }
+}
+
 static hipError_t iree_hip_mem_pool_registry_acquire(
     hipMemPool_t pool, struct hipMemPool_st** out_pool) {
   if (out_pool) {
@@ -1973,6 +2007,7 @@ HIPAPI hipError_t hipHALDeinit(void) {
   iree_slim_mutex_lock(&iree_hip_global_init_mutex);
   const hipError_t result = iree_hip_execution_context_reset_all();
   iree_hip_deinitialize_per_thread_stream_key();
+  iree_hip_mem_pool_trim();
   iree_hal_streaming_cleanup_global();
   iree_hip_stream_trim();
   iree_hip_function_handle_trim();

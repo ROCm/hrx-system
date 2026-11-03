@@ -2491,6 +2491,11 @@ HIPAPI hipError_t hipDeviceSetMemPool(int device, hipMemPool_t pool);
 HIPAPI hipError_t hipDeviceGetMemPool(hipMemPool_t* pool, int device);
 HIPAPI hipError_t hipDeviceGetDefaultMemPool(hipMemPool_t* pool_out,
                                              int device);
+HIPAPI hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
+                                   hipMemAllocationType type);
+HIPAPI hipError_t hipMemSetMemPool(hipMemLocation* location,
+                                   hipMemAllocationType type,
+                                   hipMemPool_t pool);
 
 // Async memory allocation
 HIPAPI hipError_t hipMallocAsync(void** ptr, size_t size, hipStream_t stream);
