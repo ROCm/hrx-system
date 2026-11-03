@@ -1,260 +1,9 @@
-// Replayable clauses retain physical register uses across zero-instruction
-// block edges. Scalar loads overwrite an earlier address; vector loads reuse
-// their own address. Explicit XNACK OFF disables both protections, while
-// gfx1250 always requires scalar protection and has no VMEM clause hazard.
-
-// RUN: emit amdgpu-assembly @gfx90a_sgpr_any strategy=source fixed=%first_address:physical_register:0:2 fixed=%second_address:physical_register:2:2 fixed=%first:physical_register:4:1 fixed=%second:physical_register:0:1
-amdgpu.target<gfx90a> @target
-
-low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @gfx90a_sgpr_any(%first_address: reg<amdgpu.sgpr x2>, %second_address: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
-  %first = s_load_dword_offset_only %first_address
-  low.br ^next
-^next:
-  %second = s_load_dword_offset_only %second_address
-  return %first, %second
-}
-
-// ----
-  s_load_dword s4, s[0:1], 0
-.Lbb1:
-  s_nop 0
-  s_load_dword s0, s[2:3], 0
-  s_waitcnt vmcnt(63) lgkmcnt(0)
-  s_endpgm
-
-// ====
-
-// RUN: emit amdgpu-assembly @gfx90a_vgpr_any strategy=source fixed=%first_address:physical_register:0:2 fixed=%second_address:physical_register:2:2 fixed=%first:physical_register:0:1 fixed=%second:physical_register:2:1
-amdgpu.target<gfx90a> @target
-
-low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @gfx90a_vgpr_any(%first_address: reg<amdgpu.vgpr x2>, %second_address: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %first = global_load_dword_vaddr %first_address : reg<amdgpu.vgpr>
-  low.br ^next
-^next:
-  %second = global_load_dword_vaddr %second_address : reg<amdgpu.vgpr>
-  return %first, %second
-}
-
-// ----
-  global_load_dword v0, v[0:1], off offset:0
-.Lbb1:
-  s_nop 0
-  global_load_dword v2, v[2:3], off offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(15)
-  s_endpgm
-
-// ====
-
-// RUN: emit amdgpu-assembly @gfx90a_sgpr_on strategy=source fixed=%first_address:physical_register:0:2 fixed=%second_address:physical_register:2:2 fixed=%first:physical_register:4:1 fixed=%second:physical_register:0:1
-amdgpu.target<gfx90a> @target {features = [xnack]}
-
-low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @gfx90a_sgpr_on(%first_address: reg<amdgpu.sgpr x2>, %second_address: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
-  %first = s_load_dword_offset_only %first_address
-  low.br ^next
-^next:
-  %second = s_load_dword_offset_only %second_address
-  return %first, %second
-}
-
-// ----
-  s_load_dword s4, s[0:1], 0
-.Lbb1:
-  s_nop 0
-  s_load_dword s0, s[2:3], 0
-  s_waitcnt vmcnt(63) lgkmcnt(0)
-  s_endpgm
-
-// ====
-
-// RUN: emit amdgpu-assembly @gfx90a_vgpr_on strategy=source fixed=%first_address:physical_register:0:2 fixed=%second_address:physical_register:2:2 fixed=%first:physical_register:0:1 fixed=%second:physical_register:2:1
-amdgpu.target<gfx90a> @target {features = [xnack]}
-
-low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @gfx90a_vgpr_on(%first_address: reg<amdgpu.vgpr x2>, %second_address: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %first = global_load_dword_vaddr %first_address : reg<amdgpu.vgpr>
-  low.br ^next
-^next:
-  %second = global_load_dword_vaddr %second_address : reg<amdgpu.vgpr>
-  return %first, %second
-}
-
-// ----
-  global_load_dword v0, v[0:1], off offset:0
-.Lbb1:
-  s_nop 0
-  global_load_dword v2, v[2:3], off offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(15)
-  s_endpgm
-
-// ====
-
-// RUN: emit amdgpu-assembly @gfx90a_sgpr_off strategy=source fixed=%first_address:physical_register:0:2 fixed=%second_address:physical_register:2:2 fixed=%first:physical_register:4:1 fixed=%second:physical_register:0:1
-amdgpu.target<gfx90a> @target {features = [-xnack]}
-
-low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @gfx90a_sgpr_off(%first_address: reg<amdgpu.sgpr x2>, %second_address: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
-  %first = s_load_dword_offset_only %first_address
-  low.br ^next
-^next:
-  %second = s_load_dword_offset_only %second_address
-  return %first, %second
-}
-
-// ----
-  s_load_dword s4, s[0:1], 0
-.Lbb1:
-  s_load_dword s0, s[2:3], 0
-  s_waitcnt vmcnt(63) lgkmcnt(0)
-  s_endpgm
-
-// ====
-
-// RUN: emit amdgpu-assembly @gfx90a_vgpr_off strategy=source fixed=%first_address:physical_register:0:2 fixed=%second_address:physical_register:2:2 fixed=%first:physical_register:0:1 fixed=%second:physical_register:2:1
-amdgpu.target<gfx90a> @target {features = [-xnack]}
-
-low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @gfx90a_vgpr_off(%first_address: reg<amdgpu.vgpr x2>, %second_address: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %first = global_load_dword_vaddr %first_address : reg<amdgpu.vgpr>
-  low.br ^next
-^next:
-  %second = global_load_dword_vaddr %second_address : reg<amdgpu.vgpr>
-  return %first, %second
-}
-
-// ----
-  global_load_dword v0, v[0:1], off offset:0
-.Lbb1:
-  global_load_dword v2, v[2:3], off offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(15)
-  s_endpgm
-
-// ====
-
-// RUN: emit amdgpu-assembly @gfx942_sgpr_any strategy=source fixed=%first_address:physical_register:0:2 fixed=%second_address:physical_register:2:2 fixed=%first:physical_register:4:1 fixed=%second:physical_register:0:1
-amdgpu.target<gfx942> @target
-
-low.func.def schedule(locked) target<amdgpu.cdna3.core>(@target) @gfx942_sgpr_any(%first_address: reg<amdgpu.sgpr x2>, %second_address: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
-  %first = s_load_dword_offset_only %first_address
-  low.br ^next
-^next:
-  %second = s_load_dword_offset_only %second_address
-  return %first, %second
-}
-
-// ----
-  s_load_dword s4, s[0:1], 0
-.Lbb1:
-  s_nop 0
-  s_load_dword s0, s[2:3], 0
-  s_waitcnt vmcnt(63) lgkmcnt(0)
-  s_endpgm
-
-// ====
-
-// RUN: emit amdgpu-assembly @gfx942_vgpr_any strategy=source fixed=%first_address:physical_register:0:2 fixed=%second_address:physical_register:2:2 fixed=%first:physical_register:0:1 fixed=%second:physical_register:2:1
-amdgpu.target<gfx942> @target
-
-low.func.def schedule(locked) target<amdgpu.cdna3.core>(@target) @gfx942_vgpr_any(%first_address: reg<amdgpu.vgpr x2>, %second_address: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %first = global_load_dword_vaddr %first_address : reg<amdgpu.vgpr>
-  low.br ^next
-^next:
-  %second = global_load_dword_vaddr %second_address : reg<amdgpu.vgpr>
-  return %first, %second
-}
-
-// ----
-  global_load_dword v0, v[0:1], off offset:0
-.Lbb1:
-  s_nop 0
-  global_load_dword v2, v[2:3], off offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(15)
-  s_endpgm
-
-// ====
-
-// RUN: emit amdgpu-assembly @gfx950_sgpr_any strategy=source fixed=%first_address:physical_register:0:2 fixed=%second_address:physical_register:2:2 fixed=%first:physical_register:4:1 fixed=%second:physical_register:0:1
-amdgpu.target<gfx950> @target
-
-low.func.def schedule(locked) target<amdgpu.cdna4.core>(@target) @gfx950_sgpr_any(%first_address: reg<amdgpu.sgpr x2>, %second_address: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
-  %first = s_load_dword_offset_only %first_address
-  low.br ^next
-^next:
-  %second = s_load_dword_offset_only %second_address
-  return %first, %second
-}
-
-// ----
-  s_load_dword s4, s[0:1], 0
-.Lbb1:
-  s_nop 0
-  s_load_dword s0, s[2:3], 0
-  s_waitcnt vmcnt(63) lgkmcnt(0)
-  s_endpgm
-
-// ====
-
-// RUN: emit amdgpu-assembly @gfx950_vgpr_any strategy=source fixed=%first_address:physical_register:0:2 fixed=%second_address:physical_register:2:2 fixed=%first:physical_register:0:1 fixed=%second:physical_register:2:1
-amdgpu.target<gfx950> @target
-
-low.func.def schedule(locked) target<amdgpu.cdna4.core>(@target) @gfx950_vgpr_any(%first_address: reg<amdgpu.vgpr x2>, %second_address: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %first = global_load_dword_vaddr %first_address : reg<amdgpu.vgpr>
-  low.br ^next
-^next:
-  %second = global_load_dword_vaddr %second_address : reg<amdgpu.vgpr>
-  return %first, %second
-}
-
-// ----
-  global_load_dword v0, v[0:1], off offset:0
-.Lbb1:
-  s_nop 0
-  global_load_dword v2, v[2:3], off offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(15)
-  s_endpgm
-
-// ====
-
-// RUN: emit amdgpu-assembly @gfx1250_sgpr_any strategy=source fixed=%first_address:physical_register:0:2 fixed=%second_address:physical_register:2:2 fixed=%first:physical_register:4:1 fixed=%second:physical_register:0:1
-amdgpu.target<gfx1250> @target
-
-low.func.def schedule(locked) target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_sgpr_any(%first_address: reg<amdgpu.sgpr x2>, %second_address: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
-  %first = s_load_dword_offset_only %first_address
-  low.br ^next
-^next:
-  %second = s_load_dword_offset_only %second_address
-  return %first, %second
-}
-
-// ----
-  s_load_dword s4, s[0:1], 0
-.Lbb1:
-  s_wait_xcnt xcnt(0)
-  s_load_dword s0, s[2:3], 0
-  s_wait_kmcnt kmcnt(0)
-  s_endpgm
-
-// ====
-
-// RUN: emit amdgpu-assembly @gfx1250_vgpr_any strategy=source fixed=%first_address:physical_register:0:2 fixed=%second_address:physical_register:2:2 fixed=%first:physical_register:4:1 fixed=%second:physical_register:0:1
-amdgpu.target<gfx1250> @target
-
-low.func.def schedule(locked) target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_vgpr_any(%first_address: reg<amdgpu.vgpr x2>, %second_address: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %first = flat_load_dword %first_address
-  low.br ^next
-^next:
-  %second = flat_load_dword %second_address
-  return %first, %second
-}
-
-// ----
-  flat_load_dword v4, v[0:1] offset:0
-.Lbb1:
-  flat_load_dword v0, v[2:3] offset:0
-  s_wait_loadcnt loadcnt(0)
-  s_wait_dscnt dscnt(0)
-  s_endpgm
-
-// ====
+// End-to-end replay-clause witnesses use ordinary allocation. Native
+// clause-state tests cover exact target mode selection, physical aliasing,
+// register-bank separation, and state transitions.
 
 // The third load overwrites an address used before the immediately prior load.
-// RUN: emit amdgpu-assembly @scalar_clause_history strategy=source fixed=%left:physical_register:0:2 fixed=%middle:physical_register:2:2 fixed=%right:physical_register:4:2 fixed=%first:physical_register:8:1 fixed=%second:physical_register:9:1 fixed=%third:physical_register:0:1
+// RUN: emit amdgpu-assembly @scalar_clause_history
 amdgpu.target<gfx90a> @target
 
 low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @scalar_clause_history(%left: reg<amdgpu.sgpr x2>, %middle: reg<amdgpu.sgpr x2>, %right: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
@@ -265,109 +14,17 @@ low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @scalar_clause_
 }
 
 // ----
-  s_load_dword s8, s[0:1], 0
-  s_load_dword s9, s[2:3], 0
+  s_load_dword s6, s[0:1], 0
   s_nop 0
-  s_load_dword s0, s[4:5], 0
+  s_load_dword s0, s[2:3], 0
+  s_load_dword s1, s[4:5], 0
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  s_endpgm
-
-// ====
-
-// Independent loads remain in one clause.
-// RUN: emit amdgpu-assembly @scalar_independent strategy=source fixed=%base:physical_register:0:2 fixed=%first:physical_register:4:1 fixed=%second:physical_register:5:1
-amdgpu.target<gfx90a> @target
-
-low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @scalar_independent(%base: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
-  %first = s_load_dword_offset_only %base
-  %second = s_load_dword_offset_only %base {offset = 4}
-  return %first, %second
-}
-
-// ----
-  s_load_dword s4, s[0:1], 0
-  s_load_dword s5, s[0:1], 4
-  s_waitcnt vmcnt(63) lgkmcnt(0)
-  s_endpgm
-
-// ====
-
-// A wide result overlaps an earlier address near a bit-plane word boundary.
-// RUN: emit amdgpu-assembly @vector_wide_overlap strategy=source fixed=%left:physical_register:62:2 fixed=%right:physical_register:66:2 fixed=%first:physical_register:68:4 fixed=%second:physical_register:60:4
-amdgpu.target<gfx90a> @target
-
-low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @vector_wide_overlap(%left: reg<amdgpu.vgpr x2>, %right: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm {
-  %first = global_load_dwordx4_vaddr %left : reg<amdgpu.vgpr x4>
-  %second = global_load_dwordx4_vaddr %right : reg<amdgpu.vgpr x4>
-  return %first, %second
-}
-
-// ----
-  global_load_dwordx4 v[68:71], v[62:63], off offset:0
-  s_nop 0
-  global_load_dwordx4 v[60:63], v[66:67], off offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(15)
-  s_endpgm
-
-// ====
-
-// A later load can make an otherwise independent clause unsafe.
-// RUN: emit amdgpu-assembly @vector_second_self_alias strategy=source fixed=%left:physical_register:0:2 fixed=%right:physical_register:2:2 fixed=%first:physical_register:4:1 fixed=%second:physical_register:2:1
-amdgpu.target<gfx90a> @target
-
-low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @vector_second_self_alias(%left: reg<amdgpu.vgpr x2>, %right: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %first = global_load_dword_vaddr %left : reg<amdgpu.vgpr>
-  %second = global_load_dword_vaddr %right : reg<amdgpu.vgpr>
-  return %first, %second
-}
-
-// ----
-  global_load_dword v4, v[0:1], off offset:0
-  s_nop 0
-  global_load_dword v2, v[2:3], off offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(15)
-  s_endpgm
-
-// ====
-
-// Equal register numbers in scalar, vector and accumulator banks do not alias.
-// RUN: emit amdgpu-assembly @vgpr_distinct_banks strategy=source fixed=%offset:physical_register:4:1 fixed=%base:physical_register:0:2 fixed=%first:physical_register:0:1 fixed=%second:physical_register:1:1
-amdgpu.target<gfx90a> @target
-
-low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @vgpr_distinct_banks(%offset: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %first = global_load_dword_saddr %offset, %base : reg<amdgpu.vgpr>
-  %second = global_load_dword_saddr %offset, %base {offset = 4} : reg<amdgpu.vgpr>
-  return %first, %second
-}
-
-// ----
-  global_load_dword v0, v4, s[0:1] offset:0
-  global_load_dword v1, v4, s[0:1] offset:4
-  s_waitcnt vmcnt(0) lgkmcnt(15)
-  s_endpgm
-
-// ====
-
-// Equal register numbers in scalar, vector and accumulator banks do not alias.
-// RUN: emit amdgpu-assembly @agpr_distinct_banks strategy=source fixed=%offset:physical_register:0:1 fixed=%base:physical_register:0:2 fixed=%first:physical_register:0:1 fixed=%second:physical_register:1:1
-amdgpu.target<gfx90a> @target
-
-low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @agpr_distinct_banks(%offset: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.agpr>, reg<amdgpu.agpr>) asm {
-  %first = global_load_dword_saddr %offset, %base : reg<amdgpu.agpr>
-  %second = global_load_dword_saddr %offset, %base {offset = 4} : reg<amdgpu.agpr>
-  return %first, %second
-}
-
-// ----
-  global_load_dword acc0, v0, s[0:1] offset:0
-  global_load_dword acc1, v0, s[0:1] offset:4
-  s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
 
 // Only a concrete non-memory instruction separates a replayable clause.
-// RUN: emit amdgpu-assembly @vector_alu_separator strategy=source fixed=%left:physical_register:0:2 fixed=%right:physical_register:2:2 fixed=%first:physical_register:0:1 fixed=%second:physical_register:2:1
+// RUN: emit amdgpu-assembly @vector_alu_separator
 amdgpu.target<gfx90a> @target
 
 low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @vector_alu_separator(%left: reg<amdgpu.vgpr x2>, %right: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
@@ -380,14 +37,14 @@ low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @vector_alu_sep
 // ----
   global_load_dword v0, v[0:1], off offset:0
   s_mov_b32 s0, 7
-  global_load_dword v2, v[2:3], off offset:0
+  global_load_dword v1, v[2:3], off offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
 
 // Only a concrete non-memory instruction separates a replayable clause.
-// RUN: emit amdgpu-assembly @vector_completion strategy=source fixed=%left:physical_register:0:2 fixed=%right:physical_register:2:2 fixed=%first:physical_register:0:1 fixed=%second:physical_register:2:1
+// RUN: emit amdgpu-assembly @vector_completion
 amdgpu.target<gfx90a> @target
 
 low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @vector_completion(%left: reg<amdgpu.vgpr x2>, %right: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
@@ -400,14 +57,14 @@ low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @vector_complet
 // ----
   global_load_dword v0, v[0:1], off offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
-  global_load_dword v2, v[2:3], off offset:0
+  global_load_dword v1, v[2:3], off offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
 
 // Only a concrete non-memory instruction separates a replayable clause.
-// RUN: emit amdgpu-assembly @vector_elided_wait strategy=source fixed=%left:physical_register:0:2 fixed=%right:physical_register:2:2 fixed=%first:physical_register:0:1 fixed=%second:physical_register:2:1
+// RUN: emit amdgpu-assembly @vector_elided_wait
 amdgpu.target<gfx90a> @target
 
 low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @vector_elided_wait(%left: reg<amdgpu.vgpr x2>, %right: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
@@ -422,14 +79,14 @@ low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @vector_elided_
   s_waitcnt vmcnt(63) lgkmcnt(0)
   global_load_dword v0, v[0:1], off offset:0
   s_nop 0
-  global_load_dword v2, v[2:3], off offset:0
+  global_load_dword v1, v[2:3], off offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
 
 // Scalar and vector instructions terminate one another's replay clauses.
-// RUN: emit amdgpu-assembly @mixed_memory_classes strategy=source fixed=%left:physical_register:0:2 fixed=%scalar:physical_register:0:2 fixed=%right:physical_register:2:2 fixed=%first:physical_register:0:1 fixed=%middle:physical_register:2:1 fixed=%second:physical_register:2:1
+// RUN: emit amdgpu-assembly @mixed_memory_classes
 amdgpu.target<gfx90a> @target
 
 low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @mixed_memory_classes(%left: reg<amdgpu.vgpr x2>, %scalar: reg<amdgpu.sgpr x2>, %right: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr>, reg<amdgpu.vgpr>) asm {
@@ -442,14 +99,14 @@ low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @mixed_memory_c
 // ----
   global_load_dword v0, v[0:1], off offset:0
   s_load_dword s2, s[0:1], 0
-  global_load_dword v2, v[2:3], off offset:0
+  global_load_dword v1, v[2:3], off offset:0
   s_waitcnt vmcnt(0) lgkmcnt(0)
   s_endpgm
 
 // ====
 
 // A store after a load definition starts a fresh replayable clause.
-// RUN: emit amdgpu-assembly @load_then_store strategy=source fixed=%left:physical_register:0:2 fixed=%right:physical_register:2:2 fixed=%value:physical_register:4:1 fixed=%loaded:physical_register:5:1
+// RUN: emit amdgpu-assembly @load_then_store
 amdgpu.target<gfx90a> @target
 
 low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @load_then_store(%left: reg<amdgpu.vgpr x2>, %right: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -459,7 +116,7 @@ low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @load_then_stor
 }
 
 // ----
-  global_load_dword v5, v[0:1], off offset:0
+  global_load_dword v0, v[0:1], off offset:0
   s_nop 0
   global_store_dword v[2:3], v4, off offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
@@ -468,7 +125,7 @@ low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @load_then_stor
 // ====
 
 // A clause containing only stores has no register definitions to preserve.
-// RUN: emit amdgpu-assembly @store_then_load strategy=source fixed=%left:physical_register:0:2 fixed=%right:physical_register:2:2 fixed=%value:physical_register:4:1 fixed=%loaded:physical_register:2:1
+// RUN: emit amdgpu-assembly @store_then_load
 amdgpu.target<gfx90a> @target
 
 low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @store_then_load(%left: reg<amdgpu.vgpr x2>, %right: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -478,34 +135,15 @@ low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @store_then_loa
 }
 
 // ----
-  global_store_dword v[0:1], v4, off offset:0
-  global_load_dword v2, v[2:3], off offset:0
+  global_store_dword v[0:1], v2, off offset:0
+  global_load_dword v0, v[4:5], off offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
-  s_endpgm
-
-// ====
-
-// A returning atomic consumes store data and defines a load result.
-// RUN: emit amdgpu-assembly @returning_atomic_clause strategy=source fixed=%left:physical_register:0:2 fixed=%right:physical_register:2:2 fixed=%value:physical_register:4:1 fixed=%loaded:physical_register:5:1 fixed=%old:physical_register:6:1
-amdgpu.target<gfx90a> @target
-
-low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @returning_atomic_clause(%left: reg<amdgpu.vgpr x2>, %right: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %loaded = global_load_dword_vaddr %left : reg<amdgpu.vgpr>
-  %old = flat_atomic_add_rtn %right, %value : reg<amdgpu.vgpr>
-  return %loaded, %old
-}
-
-// ----
-  global_load_dword v5, v[0:1], off offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(15)
-  flat_atomic_add v6, v[2:3], v4 offset:0 glc
-  s_waitcnt vmcnt(0) lgkmcnt(0)
   s_endpgm
 
 // ====
 
 // Descriptor-backed loads protect the vector offset used by an earlier load.
-// RUN: emit amdgpu-assembly @buffer_address_overlap strategy=source fixed=%left:physical_register:0:1 fixed=%right:physical_register:1:1 fixed=%resource:physical_register:0:4 fixed=%first:physical_register:2:1 fixed=%second:physical_register:0:1
+// RUN: emit amdgpu-assembly @buffer_address_overlap
 amdgpu.target<gfx90a> @target
 
 low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @buffer_address_overlap(%left: reg<amdgpu.vgpr>, %right: reg<amdgpu.vgpr>, %resource: reg<amdgpu.sgpr x4>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
@@ -515,16 +153,16 @@ low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @buffer_address
 }
 
 // ----
-  buffer_load_dword v2, v0, s[0:3], 0 offen offset:0
+  buffer_load_dword v0, v0, s[0:3], 0 offen offset:0
   s_nop 0
-  buffer_load_dword v0, v1, s[0:3], 0 offen offset:0
+  buffer_load_dword v1, v1, s[0:3], 0 offen offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
 
 // Branch instructions end the physical clause on both taken and untaken paths.
-// RUN: emit amdgpu-assembly @branch_break strategy=source fixed=%choose:physical_register:0:1 fixed=%left:physical_register:0:2 fixed=%middle:physical_register:2:2 fixed=%right:physical_register:4:2 fixed=%first:physical_register:0:1 fixed=%second:physical_register:2:1 fixed=%third:physical_register:4:1
+// RUN: emit amdgpu-assembly @branch_break
 amdgpu.target<gfx90a> @target
 
 low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @branch_break(%choose: reg<amdgpu.scc>, %left: reg<amdgpu.vgpr x2>, %middle: reg<amdgpu.vgpr x2>, %right: reg<amdgpu.vgpr x2>) asm {
@@ -544,17 +182,17 @@ low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @branch_break(%
   global_load_dword v0, v[0:1], off offset:0
   s_cbranch_scc0 .Lbb2
 .Lbb1:
-  global_load_dword v2, v[2:3], off offset:0
+  global_load_dword v0, v[2:3], off offset:0
   s_branch .Lbb3
 .Lbb2:
-  global_load_dword v4, v[4:5], off offset:0
+  global_load_dword v0, v[4:5], off offset:0
 .Lbb3:
   s_endpgm
 
 // ====
 
 // A coalesced slice has no instruction to separate the two scalar loads.
-// RUN: emit amdgpu-assembly @scalar_slice strategy=source fixed=%left:physical_register:0:2 fixed=%right:physical_register:2:2 fixed=%first:physical_register:4:2 fixed=%second:physical_register:0:2
+// RUN: emit amdgpu-assembly @scalar_slice
 amdgpu.target<gfx90a> @target
 
 low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @scalar_slice(%left: reg<amdgpu.sgpr x2>, %right: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>) asm {
@@ -570,63 +208,3 @@ low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @scalar_slice(%
   s_load_dwordx2 s[0:1], s[2:3], 0
   s_waitcnt vmcnt(63) lgkmcnt(0)
   s_endpgm
-
-// ====
-
-// Scalar stores have the same load/store clause boundary as vector stores.
-// RUN: emit amdgpu-assembly @scalar_load_store strategy=source fixed=%left:physical_register:0:2 fixed=%right:physical_register:2:2 fixed=%value:physical_register:4:1 fixed=%loaded:physical_register:6:1
-amdgpu.target<gfx90a> @target
-
-low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @scalar_load_store(%left: reg<amdgpu.sgpr x2>, %right: reg<amdgpu.sgpr x2>, %value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
-  %loaded = s_load_dword_offset_only %left
-  s_store_dword_offset_only %value, %right
-  return %loaded
-}
-
-// ----
-  s_load_dword s6, s[0:1], 0
-  s_waitcnt vmcnt(63) lgkmcnt(0)
-  s_store_dword s4, s[2:3], 0
-  s_endpgm
-
-// ====
-
-// Private-memory instructions retain the entire preceding VMEM clause.
-// RUN: emit amdgpu-assembly @scratch_address_overlap strategy=source fixed=%left:physical_register:0:1 fixed=%right:physical_register:1:1 fixed=%first:physical_register:2:1 fixed=%second:physical_register:0:1
-amdgpu.target<gfx90a> @target
-
-low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @scratch_address_overlap(%left: reg<amdgpu.vgpr>, %right: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %first = scratch_load_dword_vaddr %left : reg<amdgpu.vgpr>
-  %second = scratch_load_dword_vaddr %right : reg<amdgpu.vgpr>
-  return %first, %second
-}
-
-// ----
-  scratch_load_dword v2, v0, off offset:0
-  s_nop 0
-  scratch_load_dword v0, v1, off offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(15)
-  s_endpgm
-
-// ====
-
-// Native words consume the same replay insertion as assembly.
-// RUN: emit amdgpu-native-words @gfx90a_sgpr_any strategy=source fixed=%first_address:physical_register:0:2 fixed=%second_address:physical_register:2:2 fixed=%first:physical_register:4:1 fixed=%second:physical_register:0:1
-amdgpu.target<gfx90a> @target
-
-low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @gfx90a_sgpr_any(%first_address: reg<amdgpu.sgpr x2>, %second_address: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
-  %first = s_load_dword_offset_only %first_address
-  low.br ^next
-^next:
-  %second = s_load_dword_offset_only %second_address
-  return %first, %second
-}
-
-// ----
-0xC0020100
-0x00000000
-0xBF800000
-0xC0020001
-0x00000000
-0xBF8CC07F
-0xBF810000

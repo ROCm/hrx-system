@@ -313,6 +313,19 @@ loom_cc_test(
     ],
 )
 
+loom_cc_test(
+    name = "replay_clause_test",
+    srcs = ["replay_clause_test.cc"],
+    deps = [
+        ":wait_states",
+        "//loom/src/loom/target/arch/amdgpu:facts",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "wait_counters",
     hdrs = ["wait_counters.h"],
