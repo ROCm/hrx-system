@@ -452,9 +452,9 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
   }
 
   void BuildWaitStates(bool callable = false,
-                       loom_amdgpu_call_fixed_hazard_mask_t fixed_hazard_mask =
-                           LOOM_AMDGPU_CALL_FIXED_HAZARD_ALL) {
-    call_state_.fixed_hazard_mask = fixed_hazard_mask;
+                       loom_amdgpu_call_fixed_state_mask_t fixed_state_mask =
+                           LOOM_AMDGPU_CALL_FIXED_STATE_ALL) {
+    call_state_.fixed_state_mask = fixed_state_mask;
     const loom_amdgpu_wait_plan_options_t wait_options = {
         .call_states =
             {
@@ -744,38 +744,38 @@ TEST_F(AmdgpuWaitPlanTest, CallableReturnsWithProducedCountersEmpty) {
   ExpectAction(0, 1, 0, LOOM_AMDGPU_WAIT_PLAN_REASON_CALLABLE_BOUNDARY);
 }
 
-TEST_F(AmdgpuWaitPlanTest, OrdinaryPlanSkipsFixedHazardSummary) {
+TEST_F(AmdgpuWaitPlanTest, OrdinaryPlanSkipsFixedStateSummary) {
   Build();
 
-  EXPECT_EQ(plan_.fixed_hazard_mask, 0u);
+  EXPECT_EQ(plan_.fixed_state_mask, 0u);
 }
 
-TEST_F(AmdgpuWaitPlanTest, PublishesAllocatedFixedHazardFamilies) {
+TEST_F(AmdgpuWaitPlanTest, PublishesAllocatedFixedStateFamilies) {
   const loom_amdgpu_wait_plan_options_t options = {.callable = true};
   Build(&options);
 
-  EXPECT_EQ(plan_.fixed_hazard_mask,
-            LOOM_AMDGPU_CALL_FIXED_HAZARD_SHORT_WAIT |
-                LOOM_AMDGPU_CALL_FIXED_HAZARD_DELAY_ALU |
-                LOOM_AMDGPU_CALL_FIXED_HAZARD_MASK_WRITE |
-                LOOM_AMDGPU_CALL_FIXED_HAZARD_SGPR_READ);
+  EXPECT_EQ(plan_.fixed_state_mask,
+            LOOM_AMDGPU_CALL_FIXED_STATE_SHORT_WAIT |
+                LOOM_AMDGPU_CALL_FIXED_STATE_DELAY_ALU |
+                LOOM_AMDGPU_CALL_FIXED_STATE_MASK_WRITE |
+                LOOM_AMDGPU_CALL_FIXED_STATE_SGPR_READ);
 }
 
-TEST_F(AmdgpuWaitPlanTest, PublishesTransportFixedHazardFamilies) {
+TEST_F(AmdgpuWaitPlanTest, PublishesTransportFixedStateFamilies) {
   Call({Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1, 0)});
   const loom_amdgpu_wait_plan_options_t options = {.callable = true};
   Build(&options);
 
-  EXPECT_EQ(plan_.fixed_hazard_mask, LOOM_AMDGPU_CALL_FIXED_HAZARD_ALL);
+  EXPECT_EQ(plan_.fixed_state_mask, LOOM_AMDGPU_CALL_FIXED_STATE_ALL);
 }
 
-TEST_F(AmdgpuWaitPlanTest, PublishesImplicitFixedHazardFamilies) {
+TEST_F(AmdgpuWaitPlanTest, PublishesImplicitFixedStateFamilies) {
   Append(LOOM_AMDGPU_DESCRIPTOR_REF_S_ADD_U32, loom_named_attr_slice_empty());
   std::fill(physical_extents_.begin(), physical_extents_.end(), 0);
   const loom_amdgpu_wait_plan_options_t options = {.callable = true};
   Build(&options);
 
-  EXPECT_EQ(plan_.fixed_hazard_mask, LOOM_AMDGPU_CALL_FIXED_HAZARD_DELAY_ALU);
+  EXPECT_EQ(plan_.fixed_state_mask, LOOM_AMDGPU_CALL_FIXED_STATE_DELAY_ALU);
 }
 
 TEST_F(AmdgpuWaitPlanTest, CallableReusesAuthoredCounterDrains) {
@@ -792,10 +792,10 @@ TEST_F(AmdgpuWaitPlanTest, CallableReusesAuthoredCounterDrains) {
             LOOM_AMDGPU_WAIT_PLAN_REASON_EXPLICIT_PACKET);
 }
 
-TEST_F(AmdgpuWaitPlanTest, DirectCallQuiescesArgumentMovesBeforeControl) {
+TEST_F(AmdgpuWaitPlanTest, DirectCallInvalidatesArgumentDelayHistory) {
   Call({Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1, 0)},
        {Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 3, 2)});
-  BuildWaitStates(/*callable=*/false, LOOM_AMDGPU_CALL_FIXED_HAZARD_DELAY_ALU);
+  BuildWaitStates(/*callable=*/false, LOOM_AMDGPU_CALL_FIXED_STATE_DELAY_ALU);
 
   const loom_amdgpu_structural_packet_info_t structural =
       loom_amdgpu_structural_packet_analyze(
@@ -811,44 +811,53 @@ TEST_F(AmdgpuWaitPlanTest, DirectCallQuiescesArgumentMovesBeforeControl) {
   EXPECT_EQ(
       loom_amdgpu_structural_packet_call_results(&structural)->moves.count, 1u);
 
-  ASSERT_EQ(wait_state_plan_.state_count, 1u);
-  const loom_amdgpu_wait_state_t& state = wait_state_plan_.states[0];
-  EXPECT_EQ(state.reason, LOOM_AMDGPU_WAIT_STATE_REASON_CALLABLE_BOUNDARY);
-  EXPECT_EQ(state.action, LOOM_AMDGPU_WAIT_STATE_ACTION_S_NOP);
-  EXPECT_EQ(state.node_index, 0u);
-  EXPECT_EQ(state.instruction_offset, 1u);
-  EXPECT_EQ(state.required_cycle_count, 4u);
-  EXPECT_EQ(state.observed_cycle_count, 1u);
-  EXPECT_EQ(state.cycle_count, 3u);
-}
-
-TEST_F(AmdgpuWaitPlanTest, DirectCallCreditsControlToInstructionWindows) {
-  Call({Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1, 0)});
-  BuildWaitStates(/*callable=*/false, LOOM_AMDGPU_CALL_FIXED_HAZARD_SHORT_WAIT);
-
   EXPECT_EQ(wait_state_plan_.state_count, 0u);
 }
 
-TEST_F(AmdgpuWaitPlanTest, DirectCallUsesPublishedFixedHazardMask) {
-  Call({Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1, 0)});
-  BuildWaitStates(/*callable=*/false, /*fixed_hazard_mask=*/0);
-
-  EXPECT_EQ(wait_state_plan_.state_count, 0u);
-}
-
-TEST_F(AmdgpuWaitPlanTest, CallableReturnQuiescesResultMovesBeforeControl) {
-  Call({}, {Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 0, 1)});
-  BuildWaitStates(/*callable=*/true);
+TEST_F(AmdgpuWaitPlanTest, DirectCallTracksResultMovesInFreshHintEpoch) {
+  Call({Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1, 0)},
+       {Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 3, 2)});
+  Call({Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 4, 3)});
+  BuildWaitStates(/*callable=*/false, LOOM_AMDGPU_CALL_FIXED_STATE_DELAY_ALU);
 
   ASSERT_EQ(wait_state_plan_.state_count, 1u);
   const loom_amdgpu_wait_state_t& state = wait_state_plan_.states[0];
-  EXPECT_EQ(state.reason, LOOM_AMDGPU_WAIT_STATE_REASON_CALLABLE_BOUNDARY);
-  EXPECT_EQ(state.action, LOOM_AMDGPU_WAIT_STATE_ACTION_S_NOP);
+  EXPECT_EQ(state.reason, LOOM_AMDGPU_WAIT_STATE_REASON_DELAY_ALU_DEPENDENCY);
+  EXPECT_EQ(state.action, LOOM_AMDGPU_WAIT_STATE_ACTION_S_DELAY_ALU);
   EXPECT_EQ(state.node_index, 1u);
   EXPECT_EQ(state.instruction_offset, 0u);
   EXPECT_EQ(state.required_cycle_count, 4u);
   EXPECT_EQ(state.observed_cycle_count, 1u);
   EXPECT_EQ(state.cycle_count, 3u);
+}
+
+TEST_F(AmdgpuWaitPlanTest, DirectCallScalarResultMoveSatisfiesItsHintWindow) {
+  Call({}, {Move(LOOM_AMDGPU_REG_CLASS_ID_SGPR, 3, 2)});
+  Call({Move(LOOM_AMDGPU_REG_CLASS_ID_SGPR, 4, 3)});
+  BuildWaitStates(/*callable=*/false, LOOM_AMDGPU_CALL_FIXED_STATE_DELAY_ALU);
+
+  EXPECT_EQ(wait_state_plan_.state_count, 0u);
+}
+
+TEST_F(AmdgpuWaitPlanTest, DirectCallCreditsControlToInstructionWindows) {
+  Call({Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1, 0)});
+  BuildWaitStates(/*callable=*/false, LOOM_AMDGPU_CALL_FIXED_STATE_SHORT_WAIT);
+
+  EXPECT_EQ(wait_state_plan_.state_count, 0u);
+}
+
+TEST_F(AmdgpuWaitPlanTest, DirectCallUsesPublishedFixedStateMask) {
+  Call({Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1, 0)});
+  BuildWaitStates(/*callable=*/false, /*fixed_state_mask=*/0);
+
+  EXPECT_EQ(wait_state_plan_.state_count, 0u);
+}
+
+TEST_F(AmdgpuWaitPlanTest, CallableReturnDoesNotSerializeOptionalResultHints) {
+  Call({}, {Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 0, 1)});
+  BuildWaitStates(/*callable=*/true);
+
+  EXPECT_EQ(wait_state_plan_.state_count, 0u);
 }
 
 TEST_F(AmdgpuWaitPlanTest, ReturnMovesPrecedeControlTransfer) {

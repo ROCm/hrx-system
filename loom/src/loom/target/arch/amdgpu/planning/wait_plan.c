@@ -3272,8 +3272,8 @@ static iree_status_t loom_amdgpu_wait_plan_build_actions(
               is_call &&
               iree_any_bit_set(
                   loom_amdgpu_wait_plan_call_state(builder, node_index)
-                      .fixed_hazard_mask,
-                  LOOM_AMDGPU_CALL_FIXED_HAZARD_MATRIX_RESULT);
+                      .fixed_state_mask,
+                  LOOM_AMDGPU_CALL_FIXED_STATE_MATRIX_RESULT);
           loom_amdgpu_matrix_result_wait_collect(
               builder->matrix_results, &packet,
               iree_any_bit_set(state->flags,
@@ -3402,7 +3402,7 @@ iree_status_t loom_amdgpu_wait_plan_build(
         .elided_wait_nodes = builder.elided_wait_nodes,
         .descriptor_traits = builder.classification.descriptor_traits,
         .produced_counter_mask = builder.classification.produced_counter_mask,
-        .fixed_hazard_mask = builder.classification.fixed_hazard_mask,
+        .fixed_state_mask = builder.classification.fixed_state_mask,
         .dot_identity_mask = builder.classification.dot_identity_mask,
     };
     if (builder.hazard_plan.progress == &builder.progress) {

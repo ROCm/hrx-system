@@ -127,15 +127,15 @@ typedef struct loom_amdgpu_wait_classification_t {
   loom_amdgpu_descriptor_traits_t descriptor_traits;
   // Union of logical counters produced anywhere in the function.
   loom_amdgpu_wait_counter_mask_t produced_counter_mask;
-  // Fixed physical hazard families touched by a callable helper. Empty when
+  // Fixed physical state families touched by a callable helper. Empty when
   // callable-state summarization was not requested.
-  loom_amdgpu_call_fixed_hazard_mask_t fixed_hazard_mask;
+  loom_amdgpu_call_fixed_state_mask_t fixed_state_mask;
   // Native DOT identities present in this function, retained for fixed waits.
   uint8_t dot_identity_mask;
 } loom_amdgpu_wait_classification_t;
 
 // Initializes target wait state once from |schedule| and |allocation|. All
-// returned tables are owned by |arena|. |summarize_fixed_hazards| additionally
+// returned tables are owned by |arena|. |summarize_fixed_states| additionally
 // scans callable-only implicit physical state for an interprocedural summary;
 // ordinary kernel planning leaves that summary empty and avoids the scan.
 // Classification flags, decoded bounds, and row counts remain stable; the
@@ -147,7 +147,7 @@ iree_status_t loom_amdgpu_wait_classification_build(
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_processor_properties_t* processor_properties,
     const loom_amdgpu_wait_packet_target_t* wait_packet_target,
-    bool summarize_fixed_hazards, iree_arena_allocator_t* arena,
+    bool summarize_fixed_states, iree_arena_allocator_t* arena,
     loom_amdgpu_wait_classification_t* IREE_RESTRICT out_classification);
 
 #ifdef __cplusplus
