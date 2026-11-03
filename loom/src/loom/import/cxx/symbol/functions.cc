@@ -148,6 +148,16 @@ std::string_view private_operator_name(cxx::FunctionSymbol* function) {
   }
 }
 
+loom_inline_policy_t source_inline_policy(cxx::FunctionSymbol* function) {
+  if (annotated(function, "noinline")) {
+    return LOOM_INLINE_POLICY_NOINLINE;
+  }
+  if (annotated(function, "force_inline")) {
+    return LOOM_INLINE_POLICY_INLINE;
+  }
+  return LOOM_INLINE_POLICY_UNSPECIFIED;
+}
+
 }  // namespace
 
 void Functions::select(std::span<const iree_string_view_t> roots) {
@@ -585,6 +595,7 @@ bool Functions::admit_declaration(
         });
   }
   if (function) {
+    bool found_inline_policy = false;
     bool found_retain = false;
     visit_loom_attributes(
         unit_, attributes,
@@ -593,6 +604,37 @@ bool Functions::admit_declaration(
             diagnostics_.reject(
                 unit_, attribute,
                 "function where contracts must follow the parameter list");
+          }
+          if (name == "force_inline" || name == "noinline") {
+            if (found_inline_policy) {
+              diagnostics_.reject(
+                  unit_, attribute,
+                  "one inline policy is allowed per declaration");
+            }
+            found_inline_policy = true;
+            if (attribute->attributeArgumentClause) {
+              diagnostics_.reject(unit_, attribute,
+                                  "inline policy takes no argument clause");
+            }
+            if (annotated(function, "force_inline") &&
+                annotated(function, "noinline")) {
+              diagnostics_.reject(
+                  unit_, attribute,
+                  "force_inline and noinline cannot be combined");
+            }
+            if (function->isConstructor() || annotated(function, "kernel") ||
+                annotated(function, "op") || annotated(function, "assume") ||
+                annotated(function, "check_case") ||
+                annotated(function, "check_scenario") ||
+                annotated(function, "check_benchmark") ||
+                annotated(function, "command_program") ||
+                annotated(function, "pipeline") ||
+                annotated(function, "template_def") ||
+                launches_.is_configuration(function)) {
+              diagnostics_.reject(
+                  unit_, attribute,
+                  "inline policy requires an ordinary source function");
+            }
           }
           if (name != "retain") {
             return;
@@ -624,6 +666,11 @@ bool Functions::admit_declaration(
     visit_loom_attributes(
         unit_, attributes,
         [&](std::string_view name, cxx::AttributeAST* attribute) {
+          if (name == "force_inline" || name == "noinline") {
+            diagnostics_.reject(
+                unit_, attribute,
+                "inline policy requires an ordinary source function");
+          }
           if (name == "retain") {
             diagnostics_.reject(
                 unit_, attribute,
@@ -1439,7 +1486,8 @@ void Functions::build_declarations(Types& types, Locations& locations,
     if (annotated(symbol, "retain")) {
       flags |= LOOM_FUNC_DECL_BUILD_FLAG_HAS_RETAIN;
     }
-    if (annotated(symbol, "force_inline")) {
+    const loom_inline_policy_t inline_policy = source_inline_policy(symbol);
+    if (inline_policy != LOOM_INLINE_POLICY_UNSPECIFIED) {
       flags |= LOOM_FUNC_DECL_BUILD_FLAG_HAS_INLINE_POLICY;
     }
     if (!predicates.empty()) {
@@ -1454,9 +1502,8 @@ void Functions::build_declarations(Types& types, Locations& locations,
         annotated(symbol, "retain") ? LOOM_FUNC_RETAIN_RETAIN : 0,
         import_module, import_symbol,
         annotated(symbol, "device") ? LOOM_FUNC_CC_DEVICE : 0,
-        /*effect_contract=*/0, /*temperature=*/0,
-        annotated(symbol, "force_inline") ? LOOM_INLINE_POLICY_INLINE : 0,
-        target, source_signature, /*abi=*/0, {}, LOOM_STRING_ID_INVALID, {},
+        /*effect_contract=*/0, /*temperature=*/0, inline_policy, target,
+        source_signature, /*abi=*/0, {}, LOOM_STRING_ID_INVALID, {},
         callees_.at({symbol->canonical(), ImplicitObjectABI::None}),
         arguments.data(), arguments.size(), results.data(), results.size(),
         tied_results.data(), tied_results.size(), predicates.data(),
@@ -1759,8 +1806,9 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
     const auto target = target_definitions_.reference(symbol);
     const bool link_once =
         exported_.contains(symbol) && symbol->canonical()->isInline();
-    const bool required_inline =
-        symbol->isConstructor() || annotated(symbol, "force_inline");
+    const loom_inline_policy_t inline_policy =
+        symbol->isConstructor() ? LOOM_INLINE_POLICY_INLINE
+                                : source_inline_policy(symbol);
     const loom_attribute_t source_signature =
         symbol->isConstructor()
             ? loom_attr_absent()
@@ -1774,7 +1822,9 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
                  : 0) |
             (annotated(symbol, "retain") ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_RETAIN
                                          : 0) |
-            (required_inline ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_INLINE_POLICY : 0) |
+            (inline_policy != LOOM_INLINE_POLICY_UNSPECIFIED
+                 ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_INLINE_POLICY
+                 : 0) |
             (link_once ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_LINKAGE : 0) |
             (loom_symbol_ref_is_valid(target)
                  ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_TARGET
@@ -1784,8 +1834,7 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
         link_once ? LOOM_SYMBOL_LINKAGE_LINK_ONCE : 0,
         annotated(symbol, "retain") ? LOOM_FUNC_RETAIN_RETAIN : 0,
         annotated(symbol, "device") ? LOOM_FUNC_CC_DEVICE : 0,
-        /*effect_contract=*/0, /*temperature=*/0,
-        required_inline ? LOOM_INLINE_POLICY_INLINE : 0, target,
+        /*effect_contract=*/0, /*temperature=*/0, inline_policy, target,
         source_signature, 0, {}, 0, {},
         callees_.at({symbol->canonical(), instance.receiver_abi}),
         arguments.data(), arguments.size(), results.data(), results.size(),

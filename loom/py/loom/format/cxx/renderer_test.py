@@ -1666,6 +1666,18 @@ func.def inline @math.double(%input: vector<4xf32>) -> (vector<4xf32>) {
     )
 
 
+def test_projects_noinline_function_policy() -> None:
+    source = """\
+func.def public noinline @math.identity(%input: i32) -> (i32) {
+  func.return %input : i32
+}
+"""
+
+    result = render_module(load_module(source.encode()))
+
+    assert '[[loom::symbol("math.identity"), loom::noinline]]' in result
+
+
 def test_projects_multiple_function_results_through_a_record() -> None:
     source = """\
 func.def public inline @math.sum_pair(%input: i32) -> (i32) {

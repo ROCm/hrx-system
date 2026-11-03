@@ -11,7 +11,7 @@ struct Description {
 Description describe(Buffer buffer);
 [[loom::import("trace")]] void consume(Description description);
 [[loom::import("trace")]] void consume(Description description);
-unsigned linked(unsigned value);
+[[loom::noinline]] unsigned linked(unsigned value);
 Description entry(Buffer buffer) {
   Description description = describe(buffer);
   consume(description);
@@ -31,7 +31,7 @@ func.decl import("hal", "buffer.describe") @describe(%7: hal.buffer) -> (hal.buf
 
 func.decl import("trace") @consume(%10: hal.buffer, %11: index)
 
-func.decl @linked(%12: i32) -> (i32)
+func.decl noinline @linked(%12: i32) -> (i32)
 
 // ====
 // Dependent view types bind each declaration to its own argument and result
