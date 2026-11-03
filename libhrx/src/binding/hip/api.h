@@ -596,6 +596,8 @@ typedef enum hipEventFlags {
   hipEventReleaseToSystem = 0x80000000
 } hipEventFlags_t;
 
+#define hipEventRecordDefault 0x00
+#define hipEventRecordExternal 0x01
 #define hipEventWaitExternal 0x01
 #define hipEventDisableSystemFence 0x20000000u
 
@@ -2026,6 +2028,8 @@ HIPAPI hipError_t hipStreamGetCaptureInfo_v2(
 HIPAPI hipError_t hipEventCreate(hipEvent_t* phEvent);
 HIPAPI hipError_t hipEventCreateWithFlags(hipEvent_t* event, unsigned flags);
 HIPAPI hipError_t hipEventRecord(hipEvent_t hEvent, hipStream_t hStream);
+HIPAPI hipError_t hipEventRecordWithFlags(hipEvent_t event, hipStream_t stream,
+                                          unsigned int flags);
 HIPAPI hipError_t hipEventQuery(hipEvent_t hEvent);
 HIPAPI hipError_t hipEventSynchronize(hipEvent_t hEvent);
 HIPAPI hipError_t hipEventDestroy(hipEvent_t hEvent);

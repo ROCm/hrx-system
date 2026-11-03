@@ -738,9 +738,11 @@ iree_status_t iree_hal_streaming_capture_try_record_noop(
 // Snapshots the active capture frontier into |event| in the same graph-wide
 // transaction used by node recorders. Returns |*out_was_capturing| false when
 // the stream is not capturing.
+// An external record also adds an event-record node after that frontier and
+// advances the stream to the new node in the same transaction.
 iree_status_t iree_hal_streaming_capture_try_record_event(
     iree_hal_streaming_stream_t* stream, iree_hal_streaming_event_t* event,
-    bool* out_was_capturing);
+    bool capture_external_record, bool* out_was_capturing);
 
 // Invalidates the capture session containing |stream|. Returns the session
 // status observed before invalidation, or NONE if origin termination had

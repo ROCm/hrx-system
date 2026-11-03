@@ -548,6 +548,74 @@ TEST_F(GraphExecTest, BatchMemoryNodePreservesResolvedWriteSemantics) {
   EXPECT_EQ(47u, *reinterpret_cast<uint64_t*>(mapping.contents.data));
 }
 
+TEST_F(GraphExecTest,
+       ExternalCaptureKeepsTheIncomingFrontierAndReplaysTheRecord) {
+  iree_hal_streaming_event_t* first = nullptr;
+  iree_hal_streaming_event_t* second = nullptr;
+  iree_hal_streaming_graph_t* graph = nullptr;
+  iree_hal_streaming_graph_exec_t* executable = nullptr;
+  ScopeExit release_handles([&] {
+    iree_hal_streaming_graph_exec_release(executable);
+    if (first) {
+      iree_hal_streaming_event_clear_capture(first);
+    }
+    if (second) {
+      iree_hal_streaming_event_clear_capture(second);
+    }
+    iree_hal_streaming_graph_release(graph);
+    iree_hal_streaming_event_release(first);
+    iree_hal_streaming_event_release(second);
+  });
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      context_, IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      iree_allocator_system(), &first));
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      context_, IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      iree_allocator_system(), &second));
+  IREE_ASSERT_OK(iree_hal_streaming_begin_capture(
+      stream_, IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL));
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(
+      first, stream_, /*capture_external_record=*/true));
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(
+      second, stream_, /*capture_external_record=*/true));
+  IREE_ASSERT_OK(iree_hal_streaming_end_capture(stream_, &graph));
+  ASSERT_EQ(2u, graph->node_count);
+  auto* first_node = graph->node_blocks->nodes[0];
+  auto* second_node = graph->node_blocks->nodes[1];
+  ASSERT_EQ(IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD, first_node->type);
+  ASSERT_EQ(IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD, second_node->type);
+  EXPECT_EQ(first, first_node->attrs.event.event);
+  EXPECT_EQ(second, second_node->attrs.event.event);
+  ASSERT_EQ(1u, second_node->dependency_count);
+  EXPECT_EQ(first_node, second_node->dependencies[0]);
+  EXPECT_EQ(0u, first->capture_dependency_count);
+  ASSERT_EQ(1u, second->capture_dependency_count);
+  EXPECT_EQ(first_node, second->capture_dependencies[0]);
+
+  // Retiring the public handles detaches metadata, while graph-owned event
+  // references continue to serve each later launch.
+  iree_hal_streaming_event_clear_capture(first);
+  iree_hal_streaming_event_clear_capture(second);
+  EXPECT_EQ(nullptr, first->capture_graph);
+  EXPECT_EQ(nullptr, second->capture_graph);
+  // Borrowed from the graph node after the caller releases its references.
+  iree_hal_streaming_event_t* recorded_second = second;
+  iree_hal_streaming_event_release(first);
+  first = nullptr;
+  iree_hal_streaming_event_release(second);
+  second = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &executable));
+  for (int launch = 0; launch < 2; ++launch) {
+    iree_hal_streaming_graph_exec_launch_result_t result;
+    IREE_ASSERT_OK(
+        iree_hal_streaming_graph_exec_launch(executable, stream_, &result));
+    EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS, result);
+    IREE_ASSERT_OK(iree_hal_streaming_event_synchronize(recorded_second));
+    EXPECT_EQ(nullptr, recorded_second->capture_graph);
+  }
+}
+
 // A replayed event record ends its event's association with the graph a
 // capture-time record left on it, and the launch releases every reference it
 // takes over exactly once.
@@ -590,7 +658,8 @@ TEST_F(GraphExecTest, ReplayedEventRecordsDropEveryCapturedGraphReference) {
   IREE_ASSERT_OK(iree_hal_streaming_begin_capture(
       stream_, IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL));
   for (iree_hal_streaming_event_t* event : events) {
-    IREE_ASSERT_OK(iree_hal_streaming_event_record(event, stream_));
+    IREE_ASSERT_OK(iree_hal_streaming_event_record(
+        event, stream_, /*capture_external_record=*/false));
   }
   iree_hal_streaming_graph_t* captured_graph = nullptr;
   IREE_ASSERT_OK(iree_hal_streaming_end_capture(stream_, &captured_graph));

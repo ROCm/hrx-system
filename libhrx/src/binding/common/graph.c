@@ -2523,7 +2523,7 @@ iree_status_t iree_hal_streaming_capture_try_record_noop(
 
 iree_status_t iree_hal_streaming_capture_try_record_event(
     iree_hal_streaming_stream_t* stream, iree_hal_streaming_event_t* event,
-    bool* out_was_capturing) {
+    bool capture_external_record, bool* out_was_capturing) {
   IREE_ASSERT_ARGUMENT(stream);
   IREE_ASSERT_ARGUMENT(event);
   IREE_ASSERT_ARGUMENT(out_was_capturing);
@@ -2535,9 +2535,15 @@ iree_status_t iree_hal_streaming_capture_try_record_event(
     return status;
   }
 
+  // Reserve frontier storage before an external node can mutate the graph.
+  if (capture_external_record && stream->capture_dependency_capacity == 0) {
+    status = iree_hal_streaming_grow_capture_dependencies(stream, 1);
+  }
+
   iree_hal_streaming_graph_t* dropped_graph = NULL;
   iree_slim_mutex_lock(&event->mutex);
-  if (event->capture_dependency_capacity < stream->capture_dependency_count) {
+  if (iree_status_is_ok(status) &&
+      event->capture_dependency_capacity < stream->capture_dependency_count) {
     iree_host_size_t allocation_size = 0;
     if (IREE_UNLIKELY(!iree_host_size_checked_mul(
             stream->capture_dependency_count,
@@ -2552,6 +2558,13 @@ iree_status_t iree_hal_streaming_capture_try_record_event(
       event->capture_dependency_capacity = stream->capture_dependency_count;
     }
   }
+  iree_hal_streaming_graph_node_t* external_node = NULL;
+  if (iree_status_is_ok(status) && capture_external_record) {
+    status = iree_hal_streaming_graph_add_event_node(
+        transaction.graph, stream->capture_dependencies,
+        stream->capture_dependency_count,
+        IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD, event, &external_node);
+  }
   if (iree_status_is_ok(status)) {
     if (stream->capture_dependency_count > 0) {
       memcpy(event->capture_dependencies, stream->capture_dependencies,
@@ -2564,6 +2577,10 @@ iree_status_t iree_hal_streaming_capture_try_record_event(
       iree_hal_streaming_graph_retain(transaction.graph);
       dropped_graph = event->capture_graph;
       event->capture_graph = transaction.graph;
+    }
+    if (capture_external_record) {
+      stream->capture_dependencies[0] = external_node;
+      stream->capture_dependency_count = 1;
     }
   }
   iree_slim_mutex_unlock(&event->mutex);
