@@ -44,32 +44,44 @@ iree_status_t loom_serve_weight_inputs_validate_direct(
     const loom_serve_weight_inputs_t* inputs, iree_string_view_t key,
     iree_device_size_t byte_length);
 
-// One validated input range in a source-selected tensor transformation.
+// One validated source range for a final tensor or a preparation command.
 typedef struct loom_serve_weight_input_t {
   // Canonical source key and metadata, borrowed from its immutable index.
   const iree_io_parameter_index_entry_t* entry;
-  // Byte placement relative to this tensor's input staging region.
+  // Byte placement relative to the tensor or its command's input staging.
   iree_io_parameter_span_t span;
   // Independent checkpoint ordinal; identical keys in peers remain distinct.
   uint32_t source;
 } loom_serve_weight_input_t;
 
-// Captured input extent for one final tensor. Empty recipes use canonical
-// source-zero reads, with optional equal-size in-place preparation.
+// Captured input extent for one final tensor. A command consumes these bytes
+// through staging; without a command they cover the complete tensor directly.
+// Empty recipes use canonical source-zero reads, with optional equal-size
+// in-place preparation.
 typedef struct loom_serve_weight_input_recipe_t {
   // First input ordinal in the plan's immutable range table.
   uint32_t first;
   // Number of consecutive input ranges in declaration order.
   uint32_t count;
-  // Required input staging bytes, including source-selected alignment gaps.
+  // Captured extent, including source-selected alignment gaps.
   iree_device_size_t byte_length;
+  // Captured payload bytes, excluding alignment gaps.
+  iree_device_size_t payload_length;
+  // Maximum input alignment within this recipe.
+  iree_device_size_t alignment;
 } loom_serve_weight_input_recipe_t;
+
+// Includes a command's captured recipe in reusable staging geometry. Direct
+// recipes need no staging. Rejects unaddressable combined lane alignment.
+iree_status_t loom_serve_weight_inputs_reserve_staging(
+    loom_serve_weight_inputs_t* inputs,
+    loom_serve_weight_input_recipe_t recipe);
 
 // Borrows a validated range after policy capture has completed.
 const loom_serve_weight_input_t* loom_serve_weight_inputs_at(
     const loom_serve_weight_inputs_t* inputs, uint32_t ordinal);
 
-// Largest captured tensor input extent, aligned for reuse by independent lanes.
+// Largest staged input extent, aligned for reuse by independent lanes.
 // Zero means no out-of-place preparation. No allocation occurs here.
 iree_device_size_t loom_serve_weight_inputs_staging_length(
     const loom_serve_weight_inputs_t* inputs);
@@ -88,10 +100,12 @@ iree_device_size_t loom_serve_weight_inputs_staging_alignment(
 // storage. Invalid source ordinals and key ranges fail before capture.
 // parameter exposes the index format's opaque metadata; interpretation belongs
 // to the model policy. input captures a nonempty, in-bounds range and returns
-// its aligned staging offset. input_buffer snapshots a nonempty readable buffer
-// into the same staging recipe. Later writes and VM teardown do not affect
-// captured bytes; snapshots live until the plan and its reads retire. Alignment
-// is a positive power of two. count and source ordinals describe only declared
+// its aligned offset within the recipe. Without a command, the recipe must
+// cover the final tensor contiguously; otherwise offsets address command input
+// staging. input_buffer snapshots a nonempty readable buffer into that recipe.
+// Later writes and VM teardown do not affect captured bytes; snapshots live
+// until the plan and its reads retire. Alignment is a positive power of two.
+// count and source ordinals describe only declared
 // checkpoints, never generated buffers. The plan outlives the module and all
 // source programs borrowing returned metadata.
 iree_status_t loom_serve_weight_inputs_module_create(

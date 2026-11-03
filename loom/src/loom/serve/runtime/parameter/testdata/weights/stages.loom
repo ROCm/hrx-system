@@ -62,6 +62,39 @@ command.def public @raw() launch(%weights: buffer, %output: buffer) {
   command.return
 }
 
+kernel.def @copy_raw_kernel() {
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  kernel.launch.config workgroups(%c8, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%data: view<8xi32>, %output: buffer) {
+  %c0 = index.constant 0 : offset
+  %element = kernel.workgroup.id<x> : index
+  %value = view.load %data[%element] : view<8xi32> -> i32
+  %destination = buffer.view %output[%c0] : buffer -> view<8xi32>
+  view.store %value, %destination[%element] : i32, view<8xi32>
+  kernel.return
+}
+
+// These consumers expose distinct policy selections for direct-range boundary
+// validation; each reflected tensor has the same complete 32-byte extent.
+command.def public @direct_gap() launch(%weights: buffer, %output: buffer) {
+  %data = command.parameter %weights, "size" : view<8xi32>
+  kernel.launch @copy_raw_kernel(%data, %output) : (view<8xi32>, buffer)
+  command.return
+}
+
+command.def public @direct_short() launch(%weights: buffer, %output: buffer) {
+  %data = command.parameter %weights, "missing" : view<8xi32>
+  kernel.launch @copy_raw_kernel(%data, %output) : (view<8xi32>, buffer)
+  command.return
+}
+
+command.def public @direct_incomplete() launch(%weights: buffer, %output: buffer) {
+  %data = command.parameter %weights, "raw" : view<8xi32>
+  kernel.launch @copy_raw_kernel(%data, %output) : (view<8xi32>, buffer)
+  command.return
+}
+
 command.def public @domains() launch(%base: buffer, %adapter: buffer, %output: buffer) {
   %left = command.parameter %base, "raw" : view<8xi32>
   %right = command.parameter %adapter, "raw" : view<8xi32>
