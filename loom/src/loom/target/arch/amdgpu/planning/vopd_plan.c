@@ -1377,8 +1377,8 @@ static void loom_amdgpu_vopd_commit_static_packet(
         builder->call_states,
         loom_low_func_call_callee(visible->packet.node->op));
     quiescent_boundary =
-        iree_any_bit_set(call_state.fixed_hazard_mask,
-                         LOOM_AMDGPU_CALL_FIXED_HAZARD_MATRIX_COEXECUTION);
+        iree_any_bit_set(call_state.fixed_state_mask,
+                         LOOM_AMDGPU_CALL_FIXED_STATE_MATRIX_COEXECUTION);
   }
   loom_amdgpu_matrix_coexecution_commit_static_packet(
       builder->matrix_coexecution, &visible->packet, structural_info,

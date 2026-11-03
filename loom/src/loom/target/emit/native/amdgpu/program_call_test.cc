@@ -194,7 +194,7 @@ TEST_F(AmdgpuProgramCallTest, PublishesCarrierAndClobberContracts) {
       &table));
   callable.call_state.counter_mask = LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD |
                                      LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS;
-  callable.call_state.fixed_hazard_mask = LOOM_AMDGPU_CALL_FIXED_HAZARD_ALL;
+  callable.call_state.fixed_state_mask = LOOM_AMDGPU_CALL_FIXED_STATE_ALL;
   loom_amdgpu_program_call_table_publish(&table, &callable);
   const loom_low_call_contract_provider_t provider =
       loom_amdgpu_program_call_table_provider(&table);
@@ -214,8 +214,8 @@ TEST_F(AmdgpuProgramCallTest, PublishesCarrierAndClobberContracts) {
       loom_amdgpu_program_call_table_state_provider(&table);
   EXPECT_EQ(state_provider.query(state_provider.user_data, function_ref_),
             &callable.call_state);
-  EXPECT_EQ(callable.call_state.fixed_hazard_mask,
-            LOOM_AMDGPU_CALL_FIXED_HAZARD_ALL);
+  EXPECT_EQ(callable.call_state.fixed_state_mask,
+            LOOM_AMDGPU_CALL_FIXED_STATE_ALL);
 }
 
 TEST_F(AmdgpuProgramCallTest, EmptySignatureHasNoCarrierPointers) {

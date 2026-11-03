@@ -151,7 +151,7 @@ typedef struct loom_amdgpu_wait_state_packet_info_t {
   // Structural packet classification for non-descriptor low packets.
   loom_amdgpu_structural_packet_info_t structural;
   // Fixed-state families that this direct callee may observe or perturb.
-  loom_amdgpu_call_fixed_hazard_mask_t call_fixed_hazards;
+  loom_amdgpu_call_fixed_state_mask_t call_fixed_states;
   // Number of target instructions represented by this packet.
   uint64_t instruction_count;
   // Delay-ALU producer class for this packet.
@@ -1265,7 +1265,7 @@ static iree_status_t loom_amdgpu_wait_state_packet_analyze(
           loom_amdgpu_call_state_resolve(
               builder->options.call_states,
               loom_low_func_call_callee(packet->node->op));
-      out_info->call_fixed_hazards = call_state.fixed_hazard_mask;
+      out_info->call_fixed_states = call_state.fixed_state_mask;
     }
     out_info->delay_alu_type = loom_amdgpu_wait_state_structural_delay_alu_type(
         builder, &out_info->structural);
@@ -1653,14 +1653,14 @@ static iree_status_t loom_amdgpu_wait_state_apply_move_phase(
 static iree_status_t loom_amdgpu_wait_state_drain_callable_boundary(
     loom_amdgpu_wait_state_builder_t* builder,
     const loom_low_packet_view_t* packet, uint32_t boundary,
-    loom_amdgpu_call_fixed_hazard_mask_t fixed_hazards) {
+    loom_amdgpu_call_fixed_state_mask_t fixed_states) {
   if (builder->replay_clause != NULL) {
     loom_amdgpu_replay_clause_break(builder->replay_clause);
   }
 
   if (builder->matrix_coexecution != NULL &&
-      iree_any_bit_set(fixed_hazards,
-                       LOOM_AMDGPU_CALL_FIXED_HAZARD_MATRIX_COEXECUTION)) {
+      iree_any_bit_set(fixed_states,
+                       LOOM_AMDGPU_CALL_FIXED_STATE_MATRIX_COEXECUTION)) {
     const loom_amdgpu_matrix_coexecution_match_t coexecution_match =
         loom_amdgpu_matrix_coexecution_drain(builder->matrix_coexecution);
     if (coexecution_match.residual_issue_count != 0) {
@@ -1679,8 +1679,7 @@ static iree_status_t loom_amdgpu_wait_state_drain_callable_boundary(
 
   loom_amdgpu_wait_state_match_t boundary_match = {0};
   if (builder->short_wait != NULL &&
-      iree_any_bit_set(fixed_hazards,
-                       LOOM_AMDGPU_CALL_FIXED_HAZARD_SHORT_WAIT)) {
+      iree_any_bit_set(fixed_states, LOOM_AMDGPU_CALL_FIXED_STATE_SHORT_WAIT)) {
     const loom_amdgpu_short_wait_match_t short_match =
         loom_amdgpu_short_wait_drain(builder->short_wait, packet, boundary);
     loom_amdgpu_wait_state_merge_boundary_match(
@@ -1689,8 +1688,8 @@ static iree_status_t loom_amdgpu_wait_state_drain_callable_boundary(
         short_match.observed_cycles, short_match.cycles, &boundary_match);
   }
   if (builder->matrix_results != NULL &&
-      iree_any_bit_set(fixed_hazards,
-                       LOOM_AMDGPU_CALL_FIXED_HAZARD_MATRIX_RESULT)) {
+      iree_any_bit_set(fixed_states,
+                       LOOM_AMDGPU_CALL_FIXED_STATE_MATRIX_RESULT)) {
     const loom_amdgpu_matrix_result_match_t matrix_match =
         loom_amdgpu_matrix_result_wait_drain(builder->matrix_results);
     if (matrix_match.source != NULL) {
@@ -1701,19 +1700,9 @@ static iree_status_t loom_amdgpu_wait_state_drain_callable_boundary(
           matrix_match.remaining, &boundary_match);
     }
   }
-  const bool drains_delay_alu =
-      iree_any_bit_set(fixed_hazards, LOOM_AMDGPU_CALL_FIXED_HAZARD_DELAY_ALU);
-  if (drains_delay_alu) {
-    loom_amdgpu_wait_state_delay_alu_match_boundary(
-        builder, LOOM_AMDGPU_WAIT_STATE_REASON_CALLABLE_BOUNDARY,
-        &boundary_match);
-  }
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_append(
       builder, packet, packet, &boundary_match, boundary,
       LOOM_AMDGPU_WAIT_STATE_ACTION_S_NOP));
-  if (builder->has_delay_alu && drains_delay_alu) {
-    loom_amdgpu_wait_state_delay_alu_clear_all(builder);
-  }
   return iree_ok_status();
 }
 
@@ -1790,7 +1779,17 @@ static iree_status_t loom_amdgpu_wait_state_apply_call_packet(
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_prepare_call_control(
       builder, packet, boundary, control_count));
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_drain_callable_boundary(
-      builder, packet, boundary, info->call_fixed_hazards));
+      builder, packet, boundary, info->call_fixed_states));
+  // S_DELAY_ALU producer identities only drive optional scheduling hints. An
+  // ALU-using callee makes the caller's local identities stale, so discard them
+  // after the opaque control transfer and before recording caller-side result
+  // moves. A helper with no ALU-visible physical state leaves the identities
+  // valid across the call.
+  if (builder->has_delay_alu &&
+      iree_any_bit_set(info->call_fixed_states,
+                       LOOM_AMDGPU_CALL_FIXED_STATE_DELAY_ALU)) {
+    loom_amdgpu_wait_state_delay_alu_clear_all(builder);
+  }
 
   if (results != NULL) {
     IREE_ASSERT_LE(boundary_offset + control_count, UINT32_MAX);
@@ -1824,7 +1823,7 @@ static iree_status_t loom_amdgpu_wait_state_apply_callable_return_packet(
         processor_has_valu_sgpr_read_hazard));
   }
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_drain_callable_boundary(
-      builder, packet, boundary, LOOM_AMDGPU_CALL_FIXED_HAZARD_ALL));
+      builder, packet, boundary, LOOM_AMDGPU_CALL_FIXED_STATE_ALL));
   loom_amdgpu_wait_state_advance_scalar_control(builder, 1);
 
   IREE_ASSERT_LE(info->instruction_count, UINT32_MAX);
@@ -1843,15 +1842,15 @@ static iree_status_t loom_amdgpu_wait_state_apply_packet(
   if (builder->mask_writes != NULL) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_mask_write_wait_collect(
         builder->mask_writes, packet, &info.structural, info.descriptor_traits,
-        iree_any_bit_set(info.call_fixed_hazards,
-                         LOOM_AMDGPU_CALL_FIXED_HAZARD_MASK_WRITE)));
+        iree_any_bit_set(info.call_fixed_states,
+                         LOOM_AMDGPU_CALL_FIXED_STATE_MASK_WRITE)));
   }
   if (builder->sgpr_reads != NULL) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_sgpr_read_wait_collect_packet(
         builder->sgpr_reads, builder->allocation, packet, NULL,
         &info.structural, info.descriptor_traits,
-        iree_any_bit_set(info.call_fixed_hazards,
-                         LOOM_AMDGPU_CALL_FIXED_HAZARD_SGPR_READ)));
+        iree_any_bit_set(info.call_fixed_states,
+                         LOOM_AMDGPU_CALL_FIXED_STATE_SGPR_READ)));
   }
   if (builder->options.callable && loom_low_return_isa(packet->node->op)) {
     IREE_ASSERT_NE(info.instruction_count, 0u);

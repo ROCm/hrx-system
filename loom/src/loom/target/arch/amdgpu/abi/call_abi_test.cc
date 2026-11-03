@@ -28,65 +28,65 @@ const loom_amdgpu_call_state_t* QueryCallState(void* user_data,
 TEST(AmdgpuCallAbiTest, ResolvesCallState) {
   loom_amdgpu_call_state_t exact = {
       .counter_mask = 3,
-      .fixed_hazard_mask = LOOM_AMDGPU_CALL_FIXED_HAZARD_DELAY_ALU,
+      .fixed_state_mask = LOOM_AMDGPU_CALL_FIXED_STATE_DELAY_ALU,
   };
   const loom_amdgpu_call_state_t resolved = loom_amdgpu_call_state_resolve(
       {.query = QueryCallState, .user_data = &exact}, loom_symbol_ref_null());
   EXPECT_EQ(resolved.counter_mask, exact.counter_mask);
-  EXPECT_EQ(resolved.fixed_hazard_mask, exact.fixed_hazard_mask);
+  EXPECT_EQ(resolved.fixed_state_mask, exact.fixed_state_mask);
 
   const loom_amdgpu_call_state_t conservative =
       loom_amdgpu_call_state_resolve({}, loom_symbol_ref_null());
   EXPECT_EQ(conservative.counter_mask, UINT8_MAX);
-  EXPECT_EQ(conservative.fixed_hazard_mask, LOOM_AMDGPU_CALL_FIXED_HAZARD_ALL);
+  EXPECT_EQ(conservative.fixed_state_mask, LOOM_AMDGPU_CALL_FIXED_STATE_ALL);
 }
 
-TEST(AmdgpuCallAbiTest, ClassifiesFixedHazardRegisterFamilies) {
+TEST(AmdgpuCallAbiTest, ClassifiesFixedStateRegisterFamilies) {
   struct Case {
     uint16_t register_class;
     loom_amdgpu_reg_class_traits_t traits;
-    loom_amdgpu_call_fixed_hazard_mask_t expected;
+    loom_amdgpu_call_fixed_state_mask_t expected;
   };
   const Case cases[] = {
       {
           LOOM_AMDGPU_REG_CLASS_ID_SGPR,
           0,
-          LOOM_AMDGPU_CALL_FIXED_HAZARD_SHORT_WAIT |
-              LOOM_AMDGPU_CALL_FIXED_HAZARD_DELAY_ALU |
-              LOOM_AMDGPU_CALL_FIXED_HAZARD_MASK_WRITE |
-              LOOM_AMDGPU_CALL_FIXED_HAZARD_SGPR_READ,
+          LOOM_AMDGPU_CALL_FIXED_STATE_SHORT_WAIT |
+              LOOM_AMDGPU_CALL_FIXED_STATE_DELAY_ALU |
+              LOOM_AMDGPU_CALL_FIXED_STATE_MASK_WRITE |
+              LOOM_AMDGPU_CALL_FIXED_STATE_SGPR_READ,
       },
       {
           LOOM_AMDGPU_REG_CLASS_ID_VGPR,
           0,
-          LOOM_AMDGPU_CALL_FIXED_HAZARD_SHORT_WAIT |
-              LOOM_AMDGPU_CALL_FIXED_HAZARD_MATRIX_RESULT |
-              LOOM_AMDGPU_CALL_FIXED_HAZARD_MATRIX_COEXECUTION |
-              LOOM_AMDGPU_CALL_FIXED_HAZARD_DELAY_ALU,
+          LOOM_AMDGPU_CALL_FIXED_STATE_SHORT_WAIT |
+              LOOM_AMDGPU_CALL_FIXED_STATE_MATRIX_RESULT |
+              LOOM_AMDGPU_CALL_FIXED_STATE_MATRIX_COEXECUTION |
+              LOOM_AMDGPU_CALL_FIXED_STATE_DELAY_ALU,
       },
       {
           LOOM_AMDGPU_REG_CLASS_ID_SCC,
           0,
-          LOOM_AMDGPU_CALL_FIXED_HAZARD_DELAY_ALU,
+          LOOM_AMDGPU_CALL_FIXED_STATE_DELAY_ALU,
       },
       {
           LOOM_LOW_REG_CLASS_NONE,
           LOOM_AMDGPU_REG_CLASS_TRAIT_AGPR,
-          LOOM_AMDGPU_CALL_FIXED_HAZARD_SHORT_WAIT |
-              LOOM_AMDGPU_CALL_FIXED_HAZARD_MATRIX_RESULT,
+          LOOM_AMDGPU_CALL_FIXED_STATE_SHORT_WAIT |
+              LOOM_AMDGPU_CALL_FIXED_STATE_MATRIX_RESULT,
       },
       {
           LOOM_LOW_REG_CLASS_NONE,
           LOOM_AMDGPU_REG_CLASS_TRAIT_M0,
-          LOOM_AMDGPU_CALL_FIXED_HAZARD_SHORT_WAIT |
-              LOOM_AMDGPU_CALL_FIXED_HAZARD_MASK_WRITE,
+          LOOM_AMDGPU_CALL_FIXED_STATE_SHORT_WAIT |
+              LOOM_AMDGPU_CALL_FIXED_STATE_MASK_WRITE,
       },
       {
           LOOM_LOW_REG_CLASS_NONE,
           LOOM_AMDGPU_REG_CLASS_TRAIT_VCC,
-          LOOM_AMDGPU_CALL_FIXED_HAZARD_SHORT_WAIT |
-              LOOM_AMDGPU_CALL_FIXED_HAZARD_MASK_WRITE |
-              LOOM_AMDGPU_CALL_FIXED_HAZARD_SGPR_READ,
+          LOOM_AMDGPU_CALL_FIXED_STATE_SHORT_WAIT |
+              LOOM_AMDGPU_CALL_FIXED_STATE_MASK_WRITE |
+              LOOM_AMDGPU_CALL_FIXED_STATE_SGPR_READ,
       },
       {
           LOOM_AMDGPU_REG_CLASS_ID_EXEC,
@@ -96,7 +96,7 @@ TEST(AmdgpuCallAbiTest, ClassifiesFixedHazardRegisterFamilies) {
   };
   for (const Case& test_case : cases) {
     SCOPED_TRACE(test_case.register_class);
-    EXPECT_EQ(loom_amdgpu_call_fixed_hazards_for_register_class(
+    EXPECT_EQ(loom_amdgpu_call_fixed_states_for_register_class(
                   test_case.register_class, test_case.traits),
               test_case.expected);
   }

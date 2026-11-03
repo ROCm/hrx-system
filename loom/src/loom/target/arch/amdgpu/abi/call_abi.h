@@ -50,44 +50,51 @@ typedef struct loom_amdgpu_call_abi_requirements_t {
   uint16_t vgpr_count;
 } loom_amdgpu_call_abi_requirements_t;
 
-// Independently planned fixed-hazard families that a callable may observe or
+// Independently planned fixed-state families that a callable may observe or
 // perturb through its physical register footprint.
-typedef uint8_t loom_amdgpu_call_fixed_hazard_mask_t;
+//
+// Every family except DELAY_ALU is quiescent at the callable boundary.
+// DELAY_ALU identifies optional scheduling-hint history instead: an opaque
+// callee invalidates the caller's producer identities without requiring the
+// caller or callee to wait.
+typedef uint8_t loom_amdgpu_call_fixed_state_mask_t;
 enum {
-  LOOM_AMDGPU_CALL_FIXED_HAZARD_SHORT_WAIT = 1u << 0,
-  LOOM_AMDGPU_CALL_FIXED_HAZARD_MATRIX_RESULT = 1u << 1,
-  LOOM_AMDGPU_CALL_FIXED_HAZARD_MATRIX_COEXECUTION = 1u << 2,
-  LOOM_AMDGPU_CALL_FIXED_HAZARD_DELAY_ALU = 1u << 3,
-  LOOM_AMDGPU_CALL_FIXED_HAZARD_MASK_WRITE = 1u << 4,
-  LOOM_AMDGPU_CALL_FIXED_HAZARD_SGPR_READ = 1u << 5,
-  LOOM_AMDGPU_CALL_FIXED_HAZARD_ALL =
-      LOOM_AMDGPU_CALL_FIXED_HAZARD_SHORT_WAIT |
-      LOOM_AMDGPU_CALL_FIXED_HAZARD_MATRIX_RESULT |
-      LOOM_AMDGPU_CALL_FIXED_HAZARD_MATRIX_COEXECUTION |
-      LOOM_AMDGPU_CALL_FIXED_HAZARD_DELAY_ALU |
-      LOOM_AMDGPU_CALL_FIXED_HAZARD_MASK_WRITE |
-      LOOM_AMDGPU_CALL_FIXED_HAZARD_SGPR_READ,
+  LOOM_AMDGPU_CALL_FIXED_STATE_SHORT_WAIT = 1u << 0,
+  LOOM_AMDGPU_CALL_FIXED_STATE_MATRIX_RESULT = 1u << 1,
+  LOOM_AMDGPU_CALL_FIXED_STATE_MATRIX_COEXECUTION = 1u << 2,
+  LOOM_AMDGPU_CALL_FIXED_STATE_DELAY_ALU = 1u << 3,
+  LOOM_AMDGPU_CALL_FIXED_STATE_MASK_WRITE = 1u << 4,
+  LOOM_AMDGPU_CALL_FIXED_STATE_SGPR_READ = 1u << 5,
+  LOOM_AMDGPU_CALL_FIXED_STATE_ALL =
+      LOOM_AMDGPU_CALL_FIXED_STATE_SHORT_WAIT |
+      LOOM_AMDGPU_CALL_FIXED_STATE_MATRIX_RESULT |
+      LOOM_AMDGPU_CALL_FIXED_STATE_MATRIX_COEXECUTION |
+      LOOM_AMDGPU_CALL_FIXED_STATE_DELAY_ALU |
+      LOOM_AMDGPU_CALL_FIXED_STATE_MASK_WRITE |
+      LOOM_AMDGPU_CALL_FIXED_STATE_SGPR_READ,
 };
 
-// Returns the fixed-hazard families that can observe accesses to
+// Returns the fixed-state families that can observe accesses to
 // |register_class| with the generated target-owned |register_class_traits|.
-loom_amdgpu_call_fixed_hazard_mask_t
-loom_amdgpu_call_fixed_hazards_for_register_class(
+loom_amdgpu_call_fixed_state_mask_t
+loom_amdgpu_call_fixed_states_for_register_class(
     uint16_t register_class,
     loom_amdgpu_reg_class_traits_t register_class_traits);
 
 // Machine state contract for one independently planned callable helper.
 //
-// The caller establishes the named state before transferring control, and the
-// helper restores it before returning. State absent from this summary passes
-// through the call unchanged.
+// The caller establishes every named quiescent state before transferring
+// control, and the helper restores it before returning. DELAY_ALU history is
+// invalidated by the opaque call instead of restored. State absent from this
+// summary passes through the call unchanged.
 typedef struct loom_amdgpu_call_state_t {
   // Logical wait-counter bits the helper may issue. Each named counter is
   // empty on helper entry and return.
   uint8_t counter_mask;
-  // Fixed physical hazard families touched by the helper. Each named family
-  // is quiescent on helper entry and return.
-  loom_amdgpu_call_fixed_hazard_mask_t fixed_hazard_mask;
+  // Fixed physical state families touched by the helper. Boundary-state
+  // families are quiescent on helper entry and return; DELAY_ALU invalidates
+  // optional caller hint history.
+  loom_amdgpu_call_fixed_state_mask_t fixed_state_mask;
 } loom_amdgpu_call_state_t;
 
 // Symbol-indexed call-state summaries available while planning one caller.
@@ -100,7 +107,7 @@ typedef struct loom_amdgpu_call_state_provider_t {
 } loom_amdgpu_call_state_provider_t;
 
 // Resolves the immutable state contract for |callee|. An absent provider
-// conservatively returns every representable counter and fixed-hazard family.
+// conservatively returns every representable counter and fixed-state family.
 loom_amdgpu_call_state_t loom_amdgpu_call_state_resolve(
     loom_amdgpu_call_state_provider_t provider, loom_symbol_ref_t callee);
 
