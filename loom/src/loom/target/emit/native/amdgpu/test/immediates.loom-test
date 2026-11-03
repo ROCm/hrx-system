@@ -6,10 +6,10 @@
 
 // FMA residuals encode negation and 1.0 in the instruction at both widths,
 // including with a scalar multiplicand. No literal word or move is needed.
-// RUN: emit amdgpu-native-words @fma_residuals strategy=source waits=none fixed=%a:physical_register:0:1 fixed=%b:physical_register:0:1 fixed=%c:physical_register:1:1 fixed=%wide_a:physical_register:2:2 fixed=%wide_b:physical_register:2:2 fixed=%wide_c:physical_register:4:2 fixed=%residual:physical_register:6:1 fixed=%unit_residual:physical_register:7:1 fixed=%wide_residual:physical_register:8:2 fixed=%wide_unit_residual:physical_register:10:2
+// RUN: emit amdgpu-native-words @fma_residuals
 amdgpu.target<gfx90a> @target
 
-low.func.def target<amdgpu.cdna2.core>(@target) @fma_residuals(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.sgpr>, %c: reg<amdgpu.vgpr>, %wide_a: reg<amdgpu.vgpr x2>, %wide_b: reg<amdgpu.sgpr x2>, %wide_c: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @fma_residuals(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.sgpr>, %c: reg<amdgpu.vgpr>, %wide_a: reg<amdgpu.vgpr x2>, %wide_b: reg<amdgpu.sgpr x2>, %wide_c: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
   %residual = v_fma_f32_neg_a %a, %b, %c
   %unit_residual = v_fma_f32_neg_a_one %a, %b
   %wide_residual = v_fma_f64_neg_a %wide_a, %wide_b, %wide_c
@@ -18,14 +18,14 @@ low.func.def target<amdgpu.cdna2.core>(@target) @fma_residuals(%a: reg<amdgpu.vg
 }
 
 // ----
-0xD1CB0006
-0x24040100
-0xD1CB0007
-0x23C80100
-0xD1CC0008
-0x24100502
-0xD1CC000A
-0x23C80502
+0xD1CB0000
+0x24000101
+0xD1CB0001
+0x23C80101
+0xD1CC0002
+0x24080504
+0xD1CC0004
+0x23C80504
 0xBF810000
 
 // ====
@@ -67,10 +67,10 @@ low.func.def target<amdgpu.rdna3.core>(@target) @missing_implicit_immediate() as
 
 // Empty, sparse and fully spelled dictionaries retain the same field identity.
 // Omitted fields use descriptor defaults; the final store sets every modifier.
-// RUN: emit amdgpu-native-words @sparse_store_fields strategy=source waits=none fixed=%addr:physical_register:0:1 fixed=%value:physical_register:1:1 fixed=%base:physical_register:0:2
+// RUN: emit amdgpu-native-words @sparse_store_fields
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @sparse_store_fields(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3.core>(@target) @sparse_store_fields(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm {
   global_store_b32_saddr %addr, %value, %base
   global_store_b32_saddr %addr, %value, %base {offset = 12}
   global_store_b32_saddr %addr, %value, %base {slc = 1}
@@ -89,16 +89,16 @@ low.func.def target<amdgpu.rdna3.core>(@target) @sparse_store_fields(%addr: reg<
 0x00000100
 0xDC6AE00C
 0x00000100
+0xBC7C0000
 0xBFB00000
 
 // ====
 
 // Flat atomics use both address VGPRs and encode SADDR as NULL, not s0.
-// Encodings are independently assembled for GFX11 by LLVM MC.
-// RUN: emit amdgpu-native-words @flat_atomic_addresses strategy=source waits=none fixed=%address:physical_register:0:2 fixed=%value:physical_register:2:1 fixed=%wide:physical_register:4:2 fixed=%pair:physical_register:8:4 fixed=%old:physical_register:12:1 fixed=%old_wide:physical_register:14:2 fixed=%compared:physical_register:16:1 fixed=%compared_wide:physical_register:18:2
+// RUN: emit amdgpu-native-words @flat_atomic_addresses
 amdgpu.target<gfx1151> @target
 
-low.func.def target<amdgpu.rdna3_5.core>(@target) @flat_atomic_addresses(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %wide: reg<amdgpu.vgpr x2>, %pair: reg<amdgpu.vgpr x4>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @flat_atomic_addresses(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %wide: reg<amdgpu.vgpr x2>, %pair: reg<amdgpu.vgpr x4>) asm {
   flat_atomic_add_u32 %address, %value
   %old = flat_atomic_add_u32_rtn %address, %value
   %old_wide = flat_atomic_add_u64_rtn %address, %wide
@@ -109,25 +109,29 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @flat_atomic_addresses(%addres
 
 // ----
 0xDCD40000
-0x007C0200
+0x007C0004
+0xBC7C0000
+0xBF89FC07
 0xDCD44000
-0x0C7C0200
+0x007C0004
+0xBF890007
 0xDD0C4000
-0x0E7C0400
+0x007C0204
+0xBF890007
 0xDCD04000
-0x107C0400
+0x007C0204
+0xBF890007
 0xDD084000
-0x127C0800
+0x007C0804
 0xBFB00000
 
 // ====
 
 // VFLAT's GV address mode requires NULL in SADDR for loads, stores and atomics.
-// Native words are assembled independently by LLVM MC.
-// RUN: emit amdgpu-native-words @flat_addresses_gfx1200 strategy=source waits=none fixed=%address:physical_register:0:2 fixed=%value:physical_register:2:1 fixed=%wide:physical_register:4:2 fixed=%pair:physical_register:8:4 fixed=%loaded:physical_register:20:1 fixed=%loaded_wide:physical_register:22:2 fixed=%old:physical_register:24:1 fixed=%old_wide:physical_register:26:2 fixed=%compared:physical_register:28:1 fixed=%compared_wide:physical_register:30:2
+// RUN: emit amdgpu-native-words @flat_addresses_gfx1200
 amdgpu.target<gfx1200> @target
 
-low.func.def target<amdgpu.rdna4.core>(@target) @flat_addresses_gfx1200(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %wide: reg<amdgpu.vgpr x2>, %pair: reg<amdgpu.vgpr x4>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @flat_addresses_gfx1200(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %wide: reg<amdgpu.vgpr x2>, %pair: reg<amdgpu.vgpr x4>) asm {
   %loaded = flat_load_dword %address
   %loaded_wide = flat_load_dwordx2 %address
   flat_store_b32 %address, %value
@@ -143,45 +147,58 @@ low.func.def target<amdgpu.rdna4.core>(@target) @flat_addresses_gfx1200(%address
 
 // ----
 0xEC05007C
-0x00000014
-0x00000000
+0x00000001
+0x00000004
 0xEC05407C
-0x00000016
-0x00000000
+0x00000006
+0x00000004
+0xBFC00000
+0xBFC60000
 0xEC06807C
-0x01000000
 0x00000000
+0x00000004
 0xEC06C07C
-0x02000000
-0x00000000
-0xEC0D407C
 0x01000000
-0x00000000
+0x00000004
+0xBFC10000
+0xBFC60000
 0xEC0D407C
-0x01100018
 0x00000000
+0x00000004
+0xBFC10000
+0xBFC60000
+0xEC0D407C
+0x00100000
+0x00000004
+0xBFC00000
+0xBFC60000
 0xEC10C07C
-0x02000000
-0x00000000
+0x01000000
+0x00000004
+0xBFC10000
+0xBFC60000
 0xEC10C07C
-0x0210001A
-0x00000000
+0x01100000
+0x00000004
+0xBFC00000
+0xBFC60000
 0xEC0D007C
-0x0210001C
-0x00000000
+0x01100000
+0x00000004
+0xBFC00000
+0xBFC60000
 0xEC10807C
-0x0410001E
-0x00000000
+0x04100000
+0x00000004
 0xBFB00000
 
 // ====
 
 // VFLAT's GV address mode requires NULL in SADDR for loads, stores and atomics.
-// Native words are assembled independently by LLVM MC.
-// RUN: emit amdgpu-native-words @flat_addresses_gfx1250 strategy=source waits=none fixed=%address:physical_register:0:2 fixed=%value:physical_register:2:1 fixed=%wide:physical_register:4:2 fixed=%pair:physical_register:8:4 fixed=%loaded:physical_register:20:1 fixed=%loaded_wide:physical_register:22:2 fixed=%old:physical_register:24:1 fixed=%old_wide:physical_register:26:2 fixed=%compared:physical_register:28:1 fixed=%compared_wide:physical_register:30:2
+// RUN: emit amdgpu-native-words @flat_addresses_gfx1250
 amdgpu.target<gfx1250> @target
 
-low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @flat_addresses_gfx1250(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %wide: reg<amdgpu.vgpr x2>, %pair: reg<amdgpu.vgpr x4>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna4.gfx125x.core>(@target) @flat_addresses_gfx1250(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %wide: reg<amdgpu.vgpr x2>, %pair: reg<amdgpu.vgpr x4>) asm {
   %loaded = flat_load_dword %address
   %loaded_wide = flat_load_dwordx2 %address
   flat_store_b32 %address, %value
@@ -197,33 +214,47 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @flat_addresses_gfx1250(
 
 // ----
 0xEC05007C
-0x00000014
-0x00000000
+0x00000001
+0x00000004
 0xEC05407C
-0x00000016
-0x00000000
+0x00000006
+0x00000004
+0xBFC00000
+0xBFC60000
 0xEC06807C
-0x01000000
 0x00000000
+0x00000004
 0xEC06C07C
-0x02000000
-0x00000000
-0xEC0D407C
 0x01000000
-0x00000000
+0x00000004
+0xBFC10000
+0xBFC60000
 0xEC0D407C
-0x01100018
 0x00000000
+0x00000004
+0xBFC10000
+0xBFC60000
+0xEC0D407C
+0x00100001
+0x00000004
+0xBFC00000
+0xBFC60000
 0xEC10C07C
-0x02000000
-0x00000000
+0x01000000
+0x00000004
+0xBFC10000
+0xBFC60000
 0xEC10C07C
-0x0210001A
-0x00000000
+0x01100006
+0x00000004
+0xBFC00000
+0xBFC60000
 0xEC0D007C
-0x0210001C
-0x00000000
+0x01100001
+0x00000004
+0xBFC00000
+0xBFC60000
 0xEC10807C
-0x0410001E
-0x00000000
+0x04100006
+0x00000004
 0xBFB00000
