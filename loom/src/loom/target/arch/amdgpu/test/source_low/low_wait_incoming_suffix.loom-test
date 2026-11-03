@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @guarded_suffix_gfx1151 strategy=source
+// RUN: emit amdgpu-assembly @guarded_suffix_gfx1151
 
 // The issue path preserves its younger load at the old-only add. Both
 // the final add and the skip path still require completion.
@@ -34,7 +34,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @guarded_suffix_gfx1151(%addre
   s_endpgm
 
 // ====
-// RUN: with-checks emit amdgpu-assembly @guarded_suffix_gfx942 strategy=source
+// RUN: with-checks emit amdgpu-assembly @guarded_suffix_gfx942
 
 // The issue path preserves its younger load at the old-only add. Both
 // the final add and the skip path still require completion.
@@ -58,7 +58,7 @@ CHECK: s_waitcnt vmcnt(1)*
 CHECK: s_waitcnt vmcnt(0)*
 
 // ====
-// RUN: with-checks emit amdgpu-assembly @guarded_suffix_gfx1250 strategy=source
+// RUN: with-checks emit amdgpu-assembly @guarded_suffix_gfx1250
 
 // The issue path preserves its younger load at the old-only add. Both
 // the final add and the skip path still require completion.
@@ -82,7 +82,7 @@ CHECK: s_wait_loadcnt loadcnt(1)
 CHECK: s_wait_loadcnt loadcnt(0)
 
 // ====
-// RUN: with-checks emit amdgpu-assembly @two_local_requests strategy=source
+// RUN: with-checks emit amdgpu-assembly @two_local_requests
 
 // Completion of the incoming result retains two local requests; consuming
 // the first local result then retains only the second.
@@ -107,7 +107,7 @@ CHECK: s_waitcnt vmcnt(1)*
 CHECK: s_waitcnt vmcnt(0)*
 
 // ====
-// RUN: with-checks emit amdgpu-assembly @joined_producer_suffix strategy=source fixed=%left_value:physical_register:4:1 fixed=%right_value:physical_register:4:1 fixed=%old:physical_register:4:1 fixed=%younger:physical_register:5:1
+// RUN: with-checks emit amdgpu-assembly @joined_producer_suffix
 
 // Either coalesced predecessor supplies an older result. The join issues
 // one younger request before consuming that result.
@@ -133,7 +133,7 @@ CHECK: s_waitcnt vmcnt(1)*
 CHECK: s_waitcnt vmcnt(0)*
 
 // ====
-// RUN: with-checks emit amdgpu-assembly @incoming_result_overwrite strategy=source fixed=%old:physical_register:4:1 fixed=%replacement:physical_register:4:1 fixed=%younger:physical_register:5:1
+// RUN: emit amdgpu-assembly @incoming_result_overwrite
 
 // A physical overwrite is a completion consumer even when the old SSA
 // result is dead. The younger destination remains live and disjoint.
@@ -150,12 +150,18 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @incoming_result_overwrite(%ad
 }
 
 // ----
-CHECK: s_waitcnt vmcnt(1)*
-CHECK: v_mov_b32 v4, 42
-CHECK: s_waitcnt vmcnt(0)*
+  global_load_b32 v1, v0, s[0:1] offset:0
+.Lbb1:
+  global_load_b32 v0, v0, s[0:1] offset:4
+  s_waitcnt vmcnt(1) lgkmcnt(63)
+  v_mov_b32 v1, 42
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v0, v1, v0
+  s_endpgm
 
 // ====
-// RUN: with-checks emit amdgpu-assembly @retired_incoming_result_overwrite strategy=source fixed=%old:physical_register:4:1 fixed=%replacement:physical_register:4:1 fixed=%younger:physical_register:5:1
+// RUN: emit amdgpu-assembly @retired_incoming_result_overwrite
 
 // Reading the incoming value retires its exact result lease. Reusing its
 // register does not drain a younger load into another register.
@@ -173,12 +179,18 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @retired_incoming_result_overw
 }
 
 // ----
-CHECK: s_waitcnt vmcnt(1)*
-CHECK: v_mov_b32 v4, 42
-CHECK-NOT: s_waitcnt vmcnt(0)*
+  global_load_b32 v1, v0, s[0:1] offset:0
+.Lbb1:
+  global_load_b32 v2, v0, s[0:1] offset:4
+  s_waitcnt vmcnt(1) lgkmcnt(63)
+  v_add_u32 v0, v1, v0
+  v_mov_b32 v1, 42
+  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
+  v_add_u32 v0, v0, v1
+  s_endpgm
 
 // ====
-// RUN: with-checks emit amdgpu-assembly @no_local_request strategy=source
+// RUN: with-checks emit amdgpu-assembly @no_local_request
 
 // Without a younger request, the incoming result requires a full wait.
 amdgpu.target<gfx1151> @target
@@ -196,7 +208,7 @@ CHECK: s_waitcnt vmcnt(0)*
 CHECK-NOT: s_waitcnt vmcnt(1)*
 
 // ====
-// RUN: with-checks emit amdgpu-assembly @scalar_requests_are_unordered strategy=source
+// RUN: with-checks emit amdgpu-assembly @scalar_requests_are_unordered
 
 // A younger scalar-memory packet cannot prove the older scalar result
 // complete with a nonzero threshold.
@@ -217,7 +229,7 @@ CHECK: s_waitcnt *lgkmcnt(0)
 CHECK-NOT: s_waitcnt *lgkmcnt(1)
 
 // ====
-// RUN: with-checks emit amdgpu-assembly @legacy_flat_suffix_is_not_ordered strategy=source
+// RUN: with-checks emit amdgpu-assembly @legacy_flat_suffix_is_not_ordered
 
 // A flat request can complete in another memory domain. It cannot count
 // as a guaranteed younger VMEM completion.
@@ -237,27 +249,7 @@ CHECK: s_waitcnt vmcnt(0)*
 CHECK-NOT: s_waitcnt vmcnt(1)*
 
 // ====
-// RUN: with-checks emit amdgpu-assembly @explicit_completion_before_overwrite strategy=source fixed=%old:physical_register:4:1 fixed=%replacement:physical_register:4:1 fixed=%younger:physical_register:5:1
-
-// GFX1250 reports counter completion in order even though result writes
-// can return out of order. The explicit bound releases the older result.
-amdgpu.target<gfx1250> @target
-
-low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @explicit_completion_before_overwrite(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
-  %old = global_load_b32_saddr %address, %base
-  %younger = global_load_b32_saddr %address, %base {offset = 4}
-  s_wait_loadcnt {loadcnt = 1}
-  %replacement = v_mov_b32 42
-  return %replacement
-}
-
-// ----
-CHECK: s_wait_loadcnt loadcnt(1)
-CHECK: v_mov_b32 v4, 42
-CHECK-NOT: s_wait_loadcnt loadcnt(0)
-
-// ====
-// RUN: with-checks emit amdgpu-assembly @alternating_block_pipeline strategy=source fixed=%seed:physical_register:4:1 fixed=%carried:physical_register:4:1 fixed=%future:physical_register:4:1 fixed=%first:physical_register:5:1 fixed=%incoming:physical_register:5:1
+// RUN: with-checks emit amdgpu-assembly @alternating_block_pipeline
 
 // A two-block recurrence consumes each incoming result after issuing the
 // next load. Each physical destination is retired before the next reuse.
@@ -286,7 +278,7 @@ CHECK: s_waitcnt vmcnt(1)*
 CHECK: s_waitcnt vmcnt(0)*
 
 // ====
-// RUN: emit amdgpu-assembly @incoming_edge_copy strategy=source fixed=%old:physical_register:4:1 fixed=%joined:physical_register:8:1 fixed=%younger:physical_register:5:1
+// RUN: emit amdgpu-assembly @incoming_edge_copy
 
 // A materialized edge copy reads the incoming result. Completing that copy
 // preserves a disjoint younger result until its use in the successor.
@@ -304,18 +296,16 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @incoming_edge_copy(%address: 
 }
 
 // ----
-  global_load_b32 v4, v0, s[0:1] offset:0
+  global_load_b32 v1, v0, s[0:1] offset:0
 .Lbb1:
-  global_load_b32 v5, v0, s[0:1] offset:4
-  s_waitcnt vmcnt(1) lgkmcnt(63)
-  v_mov_b32 v8, v4
+  global_load_b32 v0, v0, s[0:1] offset:4
 .Lbb2:
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_add_u32 v0, v8, v5
+  v_add_u32 v0, v1, v0
   s_endpgm
 
 // ====
-// RUN: with-checks emit amdgpu-assembly @incoming_flat_result_is_not_ordered strategy=source
+// RUN: with-checks emit amdgpu-assembly @incoming_flat_result_is_not_ordered
 
 // A generic-address producer cannot borrow a known global suffix: its
 // completion may arrive through a different memory domain.

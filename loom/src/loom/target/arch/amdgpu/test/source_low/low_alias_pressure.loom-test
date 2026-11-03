@@ -85,8 +85,9 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @two_inherited_aliases(%seed: 
   v_mov_b32 v2, v3
   global_store_b128 v4, v[0:3], s[0:1] offset:0
   v_fmac_f32 v1, v3, v3
-  global_store_b32 v4, v1, s[0:1] offset:16
+  s_delay_alu instid0(VALU_DEP_1)
   v_fmac_f32 v3, v1, v1
+  global_store_b32 v4, v1, s[0:1] offset:16
   global_store_b32 v4, v3, s[0:1] offset:20
   s_waitcnt_vscnt vscnt(0)
   s_endpgm

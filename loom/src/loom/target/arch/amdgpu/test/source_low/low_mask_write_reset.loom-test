@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @scalar_read_reset strategy=source
+// RUN: emit amdgpu-assembly @scalar_read_reset
 
 // The broadcast clears the mask latch before the next iteration overwrites it.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -22,7 +22,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @scalar_read_
 
 // ====
 
-// RUN: emit amdgpu-assembly @scalar_read_reset strategy=source
+// RUN: emit amdgpu-assembly @scalar_read_reset
 
 // The broadcast clears the mask latch before the next iteration overwrites it.
 amdgpu.target<gfx1100> @target {subgroup_size = 64}
@@ -46,7 +46,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3.core>(@target) @scalar_read_re
 
 // ====
 
-// RUN: emit amdgpu-assembly @scalar_read_reset strategy=source
+// RUN: emit amdgpu-assembly @scalar_read_reset
 
 // The broadcast clears the mask latch before the next iteration overwrites it.
 amdgpu.target<gfx1170> @target {subgroup_size = 64}
@@ -70,7 +70,7 @@ low.func.def schedule(locked) target<amdgpu.rdna4m.core>(@target) @scalar_read_r
 
 // ====
 
-// RUN: emit amdgpu-assembly @carry_replaces_mask strategy=source
+// RUN: emit amdgpu-assembly @carry_replaces_mask
 
 // The carry read resets the old latch before writing its result. Its current
 // predicate read still protects the scalar update feeding the next iteration.
@@ -96,7 +96,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @carry_replac
 
 // ====
 
-// RUN: emit amdgpu-assembly @late_reset strategy=source
+// RUN: emit amdgpu-assembly @late_reset
 
 // A reset after an overwrite cannot erase its already-required wait.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -121,7 +121,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @late_reset(%
 
 // ====
 
-// RUN: emit amdgpu-assembly @exec_read strategy=source
+// RUN: emit amdgpu-assembly @exec_read
 
 // EXEC-only VALU operands leave the previous iteration's mask read live.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -145,7 +145,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @exec_read(%v
 
 // ====
 
-// RUN: emit amdgpu-assembly @literal_read strategy=source
+// RUN: emit amdgpu-assembly @literal_read
 
 // A literal VALU operand is not a scalar register read.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -169,7 +169,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @literal_read
 
 // ====
 
-// RUN: emit amdgpu-assembly @m0_read_reset strategy=source
+// RUN: emit amdgpu-assembly @m0_read_reset
 
 // The implicit native M0 input resets the previous mask read.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -192,7 +192,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @m0_read_rese
 
 // ====
 
-// RUN: emit amdgpu-assembly @vcc_read_reset strategy=source
+// RUN: emit amdgpu-assembly @vcc_read_reset
 
 // Reading VCC resets the incoming SGPR mask, then protects its own overwrite.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -218,7 +218,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @vcc_read_res
 
 // ====
 
-// RUN: emit amdgpu-assembly @scalar_resets_vcc strategy=source
+// RUN: emit amdgpu-assembly @scalar_resets_vcc
 
 // An ordinary scalar VALU read also clears prior VCC mask history.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -241,7 +241,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @scalar_reset
 
 // ====
 
-// RUN: emit amdgpu-assembly @successor_reset strategy=source
+// RUN: emit amdgpu-assembly @successor_reset
 
 // A successor reset kills the retained mask before control returns to its writer.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -268,7 +268,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @successor_re
 
 // ====
 
-// RUN: emit amdgpu-assembly @partial_join_reset strategy=source
+// RUN: emit amdgpu-assembly @partial_join_reset
 
 // One cleared arm cannot discard the mask arriving through the other arm.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -307,7 +307,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @partial_join
 
 // ====
 
-// RUN: emit amdgpu-assembly @complete_join_reset strategy=source
+// RUN: emit amdgpu-assembly @complete_join_reset
 
 // The overwrite needs no wait when both incoming paths reset the mask latch.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -348,7 +348,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @complete_joi
 
 // ====
 
-// RUN: emit amdgpu-assembly @loop_header_reset strategy=source
+// RUN: emit amdgpu-assembly @loop_header_reset
 
 // A loop-header reset kills the mask read carried around the backedge.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -375,7 +375,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @loop_header_
 
 // ====
 
-// RUN: emit amdgpu-assembly @scalar_read_reset strategy=source
+// RUN: emit amdgpu-assembly @scalar_read_reset
 
 // Other wave and processor contracts retain their own hazard behavior.
 amdgpu.target<gfx1151> @target {subgroup_size = 32}
@@ -399,7 +399,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @scalar_read_
 
 // ====
 
-// RUN: emit amdgpu-assembly @scalar_read_reset strategy=source
+// RUN: emit amdgpu-assembly @scalar_read_reset
 
 // Other wave and processor contracts retain their own hazard behavior.
 amdgpu.target<gfx942> @target {subgroup_size = 64}
@@ -423,7 +423,7 @@ low.func.def schedule(locked) target<amdgpu.cdna3.core>(@target) @scalar_read_re
 
 // ====
 
-// RUN: emit amdgpu-assembly @scalar_read_reset strategy=source
+// RUN: emit amdgpu-assembly @scalar_read_reset
 
 // Other wave and processor contracts retain their own hazard behavior.
 amdgpu.target<gfx1200> @target {subgroup_size = 64}

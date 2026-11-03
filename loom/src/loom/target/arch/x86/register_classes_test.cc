@@ -106,7 +106,7 @@ uint64_t DescriptorFeatureBits(const loom_low_descriptor_set_t* descriptor_set,
   return descriptor_set->feature_mask_words[layout.feature_mask_word_start];
 }
 
-TEST(X86RegisterClassesTest, ViewsPreserveRegisterVocabularyAndCapacity) {
+TEST(X86RegisterClassesTest, ViewsPreserveVocabularyCapacityAndAliasing) {
   struct Case {
     // Actual generated descriptor view consumed by parsing and allocation.
     const loom_low_descriptor_set_t* descriptor_set;
@@ -131,11 +131,17 @@ TEST(X86RegisterClassesTest, ViewsPreserveRegisterVocabularyAndCapacity) {
       LOOM_X86_REGISTER_CLASS_XMM,   LOOM_X86_REGISTER_CLASS_YMM,
       LOOM_X86_REGISTER_CLASS_ZMM,   LOOM_X86_REGISTER_CLASS_K,
   };
+  enum RegisterClassIndex : uint16_t {
+    kXmmIndex = 2,
+    kYmmIndex,
+    kZmmIndex,
+  };
   const auto* storage = loom_x86_avx512_features_core_descriptor_set();
   for (const Case& test_case : cases) {
     const auto* descriptor_set = test_case.descriptor_set;
     SCOPED_TRACE(ToString(loom_low_descriptor_set_string(
         descriptor_set, descriptor_set->key_string_ref)));
+    uint16_t alias_set_ids[IREE_ARRAYSIZE(register_classes)] = {};
     for (uint16_t kind = 0; kind < IREE_ARRAYSIZE(register_classes); ++kind) {
       const auto register_class = register_classes[kind];
       const uint16_t storage_id = register_class;
@@ -158,6 +164,7 @@ TEST(X86RegisterClassesTest, ViewsPreserveRegisterVocabularyAndCapacity) {
         ASSERT_TRUE(found);
         EXPECT_EQ(class_id, storage_id);
         EXPECT_EQ(reg_class->allocatable_count, test_case.capacities[kind]);
+        alias_set_ids[kind] = reg_class->alias_set_id;
         EXPECT_EQ(
             loom_low_reg_class_uses_contiguous_physical_register_candidates(
                 reg_class),
@@ -166,6 +173,18 @@ TEST(X86RegisterClassesTest, ViewsPreserveRegisterVocabularyAndCapacity) {
         IREE_ASSERT_OK(
             loom_low_build_register_type(descriptor_set, storage_id, 1, &type));
         EXPECT_EQ(loom_x86_logical_register_class(class_id), register_class);
+      }
+    }
+    uint16_t vector_alias_set_id = 0;
+    for (const uint16_t class_index : {kXmmIndex, kYmmIndex, kZmmIndex}) {
+      if (test_case.capacities[class_index] == 0) {
+        continue;
+      }
+      if (vector_alias_set_id == 0) {
+        vector_alias_set_id = alias_set_ids[class_index];
+        EXPECT_NE(vector_alias_set_id, 0u);
+      } else {
+        EXPECT_EQ(alias_set_ids[class_index], vector_alias_set_id);
       }
     }
   }

@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @scc_compare_rematerializes_across_clobber strategy=source waits=none
+// RUN: emit amdgpu-assembly @scc_compare_rematerializes_across_clobber
 
 amdgpu.target<gfx1100> @target
 
@@ -14,15 +14,17 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scc_compare_rematerializes_acro
 }
 
 // ----
-s_cmp_lt_u32 s0, s1
+  s_cmp_lt_u32 s0, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cselect_b32 s3, s0, s2
   s_add_u32 s3, s3, s1
   s_cmp_lt_u32 s0, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cselect_b32 s0, s3, s2
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @scc_compare_rematerializes_at_source_boundary strategy=source waits=none
+// RUN: emit amdgpu-assembly @scc_compare_rematerializes_at_source_boundary
 
 amdgpu.target<gfx1100> @target
 
@@ -42,9 +44,11 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scc_compare_rematerializes_at_s
 
 // ----
   s_cmp_lt_u32 s0, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cselect_b32 s3, s0, s2
   s_addk_i32 s3, 1
   s_cmp_lt_u32 s0, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb2
 .Lbb1:
   s_endpgm
@@ -52,7 +56,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scc_compare_rematerializes_at_s
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @scc_compare_rematerializes_across_block_clobber strategy=source waits=none
+// RUN: emit amdgpu-assembly @scc_compare_rematerializes_across_block_clobber
 
 amdgpu.target<gfx1100> @target
 
@@ -70,16 +74,18 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scc_compare_rematerializes_acro
 }
 
 // ----
-s_cmp_lt_u32 s0, s1
+  s_cmp_lt_u32 s0, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cselect_b32 s3, s0, s2
 .Lbb1:
   s_add_u32 s3, s3, s1
   s_cmp_lt_u32 s0, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cselect_b32 s0, s3, s2
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @scc_compare_survives_intervening_block strategy=source waits=none
+// RUN: emit amdgpu-assembly @scc_compare_survives_intervening_block
 
 amdgpu.target<gfx1100> @target
 
@@ -99,16 +105,18 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scc_compare_survives_intervenin
 
 // ----
   s_cmp_lt_u32 s0, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cselect_b32 s3, s0, s2
 .Lbb1:
   s_add_u32 s3, s3, s1
 .Lbb2:
   s_cmp_lt_u32 s0, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cselect_b32 s0, s3, s2
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @scc_compare_survives_producer_tail strategy=source waits=none
+// RUN: emit amdgpu-assembly @scc_compare_survives_producer_tail
 
 amdgpu.target<gfx1100> @target
 
@@ -124,15 +132,17 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scc_compare_survives_producer_t
 
 // ----
   s_cmp_lt_u32 s0, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cselect_b32 s3, s0, s2
   s_add_u32 s3, s3, s1
 .Lbb1:
   s_cmp_lt_u32 s0, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cselect_b32 s0, s3, s2
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @scc_compare_survives_diamond strategy=source waits=none
+// RUN: emit amdgpu-assembly @scc_compare_survives_diamond
 
 amdgpu.target<gfx1100> @target
 
@@ -153,6 +163,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scc_compare_survives_diamond(%o
 
 // ----
   s_cmp_lt_u32 s0, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb2
 .Lbb1:
   s_add_u32 s3, s0, s1
@@ -161,11 +172,12 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scc_compare_survives_diamond(%o
   s_mov_b32 s3, s0
 .Lbb3:
   s_cmp_lt_u32 s0, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cselect_b32 s0, s3, s2
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @scc_compare_survives_loop_backedge strategy=source waits=none
+// RUN: emit amdgpu-assembly @scc_compare_survives_loop_backedge
 
 amdgpu.target<gfx1100> @target
 
@@ -191,9 +203,11 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scc_compare_survives_loop_backe
   s_mov_b32 s4, s0
 .Lbb1:
   s_cmp_lt_u32 s0, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cselect_b32 s5, s4, s2
   s_add_u32 s4, s4, s3
   s_cmp_lt_u32 s4, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb3
 .Lbb2:
   s_branch .Lbb1
@@ -201,7 +215,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scc_compare_survives_loop_backe
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @scc_compare_crosses_transparent_blocks strategy=source waits=none
+// RUN: emit amdgpu-assembly @scc_compare_crosses_transparent_blocks
 
 amdgpu.target<gfx1100> @target
 
@@ -222,11 +236,12 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scc_compare_crosses_transparent
   s_cmp_lt_u32 s1, s0
 .Lbb1:
 .Lbb2:
+  s_delay_alu instid0(SALU_CYCLE_2)
   s_cselect_b32 s0, s1, s2
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @scc_copy_crosses_transparent_blocks strategy=source waits=none
+// RUN: emit amdgpu-assembly @scc_copy_crosses_transparent_blocks
 
 amdgpu.target<gfx1100> @target
 
@@ -248,11 +263,12 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scc_copy_crosses_transparent_bl
   s_cmp_lt_u32 s1, s0
 .Lbb1:
 .Lbb2:
+  s_delay_alu instid0(SALU_CYCLE_2)
   s_cselect_b32 s0, s1, s2
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @scc_block_argument_crosses_transparent_block strategy=source waits=none
+// RUN: emit amdgpu-assembly @scc_block_argument_crosses_transparent_block
 
 amdgpu.target<gfx1100> @target
 
@@ -271,11 +287,12 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scc_block_argument_crosses_tran
   s_cmp_lt_u32 s1, s0
 .Lbb1:
 .Lbb2:
+  s_delay_alu instid0(SALU_CYCLE_2)
   s_cselect_b32 s0, s1, s2
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @scc_compare_rematerializes_for_repeated_assertion_branches strategy=source waits=none
+// RUN: emit amdgpu-assembly @scc_compare_rematerializes_for_repeated_assertion_branches
 
 amdgpu.target<gfx1100> @target
 
@@ -296,10 +313,12 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scc_compare_rematerializes_for_
 
 // ----
   s_cmp_lt_u32 s2, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb3
 .Lbb1:
   s_add_u32 s0, s2, s0
   s_cmp_lt_u32 s2, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb3
 .Lbb2:
   s_endpgm
@@ -307,7 +326,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scc_compare_rematerializes_for_
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @imported_scc_clobber_is_diagnosed strategy=source waits=none
+// RUN: emit amdgpu-assembly @imported_scc_clobber_is_diagnosed
 
 amdgpu.target<gfx1100> @target
 

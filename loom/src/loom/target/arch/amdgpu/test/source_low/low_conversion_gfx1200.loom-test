@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @gfx1200_packed8_encode waits=none
+// RUN: emit amdgpu-assembly @gfx1200_packed8_encode
 
 amdgpu.target<gfx1200> @target
 
@@ -13,6 +13,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @gfx1200_packed8_encode(%a: reg<
 // ----
   v_cvt_pk_fp8_f32 v4, v0, v1
   v_cvt_pk_bf8_f32 v0, v0, v1
+  s_delay_alu instid0(VALU_DEP_2) | instskip(NEXT) | instid1(VALU_DEP_2)
   v_cvt_pk_fp8_f32 v4, v2, v3, op_sel:[0,0,1]
   v_cvt_pk_bf8_f32 v0, v2, v3, op_sel:[0,0,1]
   s_endpgm

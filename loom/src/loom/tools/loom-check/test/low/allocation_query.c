@@ -43,13 +43,6 @@ typedef struct loom_check_test_low_allocation_options_t {
   loom_low_schedule_strategy_t schedule_strategy;
   // Structured allocator diagnostics requested by the RUN line.
   loom_low_allocation_diagnostic_flags_t allocation_diagnostic_flags;
-  // Low allocation budget overrides parsed from the RUN line.
-  loom_low_allocation_budget_t
-      allocation_budgets[LOOM_CHECK_LOW_EMIT_MAX_ALLOCATION_BUDGETS];
-  // Number of entries in |allocation_budgets|.
-  iree_host_size_t allocation_budget_count;
-  // Fixed low allocation requests parsed from the RUN line.
-  loom_check_low_emit_fixed_value_spec_list_t allocation_fixed_values;
   // Presence of unique options and requested aggregate observations.
   loom_check_test_low_allocation_option_flags_t flags;
 } loom_check_test_low_allocation_options_t;
@@ -233,10 +226,9 @@ static iree_status_t loom_check_test_low_allocation_parse_option(
     options->flags |= LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_HAS_DIAGNOSTICS;
     return iree_ok_status();
   }
-  return loom_check_low_emit_parse_allocation_option(
-      token, IREE_SV("low-allocation-query"), options->allocation_budgets,
-      IREE_ARRAYSIZE(options->allocation_budgets),
-      &options->allocation_budget_count, &options->allocation_fixed_values);
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "unknown low-allocation-query option '%.*s'",
+                          (int)name.size, name.data);
 }
 
 static iree_status_t loom_check_test_low_allocation_parse_options(
@@ -245,10 +237,6 @@ static iree_status_t loom_check_test_low_allocation_parse_options(
   *out_options = (loom_check_test_low_allocation_options_t){
       .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
   };
-  IREE_RETURN_IF_ERROR(loom_check_low_emit_fixed_value_spec_list_initialize(
-      request->target_options, request->case_arena,
-      &out_options->allocation_fixed_values));
-
   iree_string_view_t symbol_name = iree_string_view_empty();
   iree_string_view_t option_text = iree_string_view_empty();
   iree_string_view_split(request->target_options, ' ', &symbol_name,
@@ -630,8 +618,6 @@ static iree_status_t loom_check_test_low_allocation_execute(
 
   const loom_low_emission_frame_options_t frame_options = {
       .schedule_strategy = options.schedule_strategy,
-      .allocation_budgets = options.allocation_budgets,
-      .allocation_budget_count = options.allocation_budget_count,
       .allocation_diagnostic_flags = options.allocation_diagnostic_flags,
   };
   loom_low_emission_frame_t frame = {0};
@@ -641,8 +627,6 @@ static iree_status_t loom_check_test_low_allocation_execute(
   bool accepted = false;
   IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(
       request, native_module, options.function_symbol_name, &frame_options,
-      options.allocation_fixed_values.specs,
-      options.allocation_fixed_values.count,
       spill_free ? &spill_free_options : NULL, &frame, &accepted));
   const bool failure_requested = iree_any_bit_set(
       options.flags, LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_FAILURE);

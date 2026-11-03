@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @concat_reservation_preserves_residency strategy=source fixed=%pressure:physical_register:0:47 fixed=%address:physical_register:47:1 fixed=%output:physical_register:0:2
+// RUN: emit amdgpu-assembly @concat_reservation_preserves_residency
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -48,11 +48,11 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @concat_reservation_preserves_
 
 // ----
   ds_read_b128 v[48:51], v47 offset:0
+  ds_read_b128 v[52:55], v47 offset:32
+  s_waitcnt vmcnt(63) lgkmcnt(0)
   ds_read_b128 v[52:55], v47 offset:16
-  ds_read_b128 v[56:59], v47 offset:32
-  s_waitcnt vmcnt(63) lgkmcnt(2)
   global_store_b32 v47, v48, s[0:1] offset:0
-  s_waitcnt vmcnt(63) lgkmcnt(1)
+  s_waitcnt vmcnt(63) lgkmcnt(0)
   global_store_b32 v47, v52, s[0:1] offset:4
   global_store_b128 v47, v[0:3], s[0:1] offset:16
   global_store_b128 v47, v[4:7], s[0:1] offset:32
@@ -73,7 +73,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @concat_reservation_preserves_
 
 // ====
 
-// RUN: emit amdgpu-assembly @d16_concat_reserves_past_addresses waits=none
+// RUN: emit amdgpu-assembly @d16_concat_reserves_past_addresses
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -104,17 +104,20 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @d16_concat_reserves_past_addr
 
 // ----
   v_add_u32 v2, v1, v0
-  ds_load_u16_d16 v4, v2 offset:0
+  s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_1) | instid1(VALU_DEP_1)
   v_add_u32 v3, v2, v0
-  ds_load_u16_d16 v5, v3 offset:0
+  ds_load_u16_d16 v4, v2 offset:0
   v_add_u32 v8, v3, v0
-  ds_load_u16_d16 v6, v8 offset:0
-  v_add_u32 v0, v8, v0
-  ds_load_u16_d16 v7, v0 offset:0
+  ds_load_u16_d16 v5, v3 offset:0
   ds_load_u16_d16_hi v4, v2 offset:2
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v0, v8, v0
+  ds_load_u16_d16 v6, v8 offset:0
   ds_load_u16_d16_hi v5, v3 offset:2
+  ds_load_u16_d16 v7, v0 offset:0
   ds_load_u16_d16_hi v6, v8 offset:2
   ds_load_u16_d16_hi v7, v0 offset:2
+  s_waitcnt vmcnt(63) lgkmcnt(0)
   ds_write_b32 v1, v4 offset:64
   ds_write_b32 v1, v5 offset:68
   ds_write_b32 v1, v6 offset:72
@@ -126,7 +129,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @d16_concat_reserves_past_addr
 // Materialize the LDS address only after the payload is ready so it can reuse
 // the released payload register instead of raising the function from two to
 // three VGPRs.
-// RUN: emit amdgpu-assembly @storage_address_follows_payload strategy=resource-stall waits=none
+// RUN: emit amdgpu-assembly @storage_address_follows_payload
 
 amdgpu.target<gfx1100> @target
 
@@ -141,6 +144,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @storage_address_follows_payload
 
 // ----
   v_add_u32 v0, v0, v1
+  s_delay_alu instid0(VALU_DEP_1)
   v_add_u32 v0, v0, v1
   v_mov_b32 v1, 0
   ds_write_b32 v1, v0 offset:0
@@ -148,7 +152,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @storage_address_follows_payload
 
 // ====
 
-// RUN: emit amdgpu-assembly @d16_tied_sources_assemble_aligned_concat waits=none
+// RUN: emit amdgpu-assembly @d16_tied_sources_assemble_aligned_concat
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -206,6 +210,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @d16_tied_sources_assemble_ali
   ds_load_u16_d16_hi v13, v0 offset:22
   ds_load_u16_d16_hi v14, v0 offset:26
   ds_load_u16_d16_hi v15, v0 offset:30
+  s_waitcnt vmcnt(63) lgkmcnt(0)
   ds_write_b32 v0, v8 offset:64
   ds_write_b32 v0, v9 offset:68
   ds_write_b32 v0, v10 offset:72
@@ -218,114 +223,10 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @d16_tied_sources_assemble_ali
 
 // ====
 
-// Slice identities inflate semantic pressure without consuming new registers.
-// Packing the address above the tuple leaves room for the tied partial write
-// while preserving the original word and sibling, without spilling the address.
-// RUN: emit amdgpu-assembly @pack_address_above_reloaded_tuple strategy=source amdgpu.vgpr=6
-
-amdgpu.target<gfx1151> @target
-
-low.func.def target<amdgpu.rdna3_5.core>(@target) @pack_address_above_reloaded_tuple(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>) asm {
-  %storage = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
-  %loaded = global_load_b128_saddr %address, %input
-  low.spill %loaded, %storage : reg<amdgpu.vgpr x4>, low.storage<private>
-  %reloaded = low.reload %storage : low.storage<private> -> reg<amdgpu.vgpr x4>
-  %original = slice %reloaded[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %editable = copy %original : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
-  %continued = ds_load_u16_d16_hi %editable, %address
-  %sibling = slice %reloaded[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %combined = v_add_u32 %continued, %original
-  %result = v_add_u32 %combined, %sibling
-  ds_write_b32 %address, %result {offset = 16}
-  return
-}
-
-// ----
-  global_load_b128 v[1:4], v0, s[0:1] offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(63)
-  scratch_store_b128 off, v[1:4], off offset:0
-  scratch_load_b128 v[1:4], off, off offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_mov_b32 v1, v2
-  ds_load_u16_d16_hi v1, v0 offset:0
-  s_waitcnt vmcnt(63) lgkmcnt(0)
-  v_add_u32 v1, v1, v2
-  s_delay_alu instid0(VALU_DEP_1)
-  v_add_u32 v1, v1, v4
-  ds_write_b32 v0, v1 offset:16
-  s_waitcnt_vscnt vscnt(0)
-  s_endpgm
-
-// ====
-
-// Both spill operands need physical VGPRs at entry. Packing must recover from
-// a failed first-fit assignment before native spill packets are expanded.
-// RUN: emit amdgpu-assembly @pack_required_spill_operands strategy=source amdgpu.vgpr=5
-
-amdgpu.target<gfx1151> @target
-
-low.func.def target<amdgpu.rdna3_5.core>(@target) @pack_required_spill_operands(%scalar: reg<amdgpu.vgpr>, %wide: reg<amdgpu.vgpr x4>) asm {
-  %storage = storage {byte_alignment = 16, byte_length = 32} : low.storage<private>
-  low.spill %scalar, %storage {offset = 16} : reg<amdgpu.vgpr>, low.storage<private>
-  low.spill %wide, %storage : reg<amdgpu.vgpr x4>, low.storage<private>
-  return
-}
-
-// ----
-  scratch_store_b32 off, v0, off offset:16
-  scratch_store_b128 off, v[1:4], off offset:0
-  s_waitcnt_vscnt vscnt(0)
-  s_endpgm
-
-// ====
-
-// A shared full reload replaces three narrow scratch loads after temporary
-// pressure spills the tuple. The live scalar packs above the reloaded range.
-// RUN: emit amdgpu-assembly @overlapping_slice_reloads strategy=source amdgpu.vgpr=5
-
-amdgpu.target<gfx1151> @target
-
-low.func.def target<amdgpu.rdna3_5.core>(@target) @overlapping_slice_reloads(%blocker: reg<amdgpu.vgpr>, %wide: reg<amdgpu.vgpr x4>, %output: reg<amdgpu.sgpr x2>) asm {
-  %temporary = v_add_u32 %blocker, %blocker
-  %pressure = v_add_u32 %blocker, %temporary
-  %head = slice %wide[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x3>
-  %first = slice %head[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
-  %second = slice %head[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
-  %sum = v_add_u32 %first, %second
-  %tail = slice %wide[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
-  %third = slice %tail[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %fourth = slice %tail[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %sum1 = v_add_u32 %sum, %third
-  %sum2 = v_add_u32 %sum1, %fourth
-  %out = v_add_u32 %sum2, %pressure
-  %address = v_mov_b32 0
-  global_store_b32_saddr %address, %out, %output
-  return
-}
-
-// ----
-  scratch_store_b128 off, v[0:3], off offset:0
-  v_add_u32 v0, v4, v4
-  s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_3) | instid1(VALU_DEP_1)
-  v_add_u32 v0, v4, v0
-  scratch_load_b128 v[1:4], off, off offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_add_u32 v1, v1, v2
-  v_add_u32 v1, v1, v3
-  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
-  v_add_u32 v1, v1, v4
-  v_add_u32 v0, v1, v0
-  v_mov_b32 v1, 0
-  global_store_b32 v1, v0, s[0:1] offset:0
-  s_waitcnt_vscnt vscnt(0)
-  s_endpgm
-
-// ====
-
 // Storage addresses consume VALU issue and latency just like their emitted
 // moves. The second address fills the first address latency before either
 // LDS read; neither move is a zero-cost alias.
-// RUN: emit amdgpu-assembly @address_issue_wave32 strategy=resource-stall waits=none
+// RUN: emit amdgpu-assembly @address_issue_wave32
 
 amdgpu.target<gfx1100> @target
 
@@ -349,8 +250,12 @@ low.func.def target<amdgpu.rdna3.core>(@target) @address_issue_wave32(%lhs: reg<
   v_mov_b32 v4, 4096
   ds_read_b32 v3, v3 offset:0
   ds_read_b32 v4, v4 offset:0
+  s_waitcnt vmcnt(63) lgkmcnt(2)
   v_mul_f32 v0, v2, v0
+  s_waitcnt vmcnt(63) lgkmcnt(1)
+  s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_1) | instid1(VALU_DEP_1)
   v_add_f32 v0, v3, v0
+  s_waitcnt vmcnt(63) lgkmcnt(0)
   v_add_f32 v0, v0, v4
   ds_write_b32 v1, v0 offset:0
   s_endpgm
@@ -359,7 +264,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @address_issue_wave32(%lhs: reg<
 
 // The wave64 model uses the same native address move contract with its own
 // issue interval. Each address feeds a load before opening the next one.
-// RUN: emit amdgpu-assembly @address_issue_wave64 strategy=resource-stall waits=none
+// RUN: emit amdgpu-assembly @address_issue_wave64
 
 amdgpu.target<gfx90a> @target
 
@@ -383,8 +288,11 @@ low.func.def target<amdgpu.cdna2.core>(@target) @address_issue_wave64(%lhs: reg<
   ds_read_b32 v3, v3 offset:0
   v_mov_b32 v4, 4096
   ds_read_b32 v4, v4 offset:0
+  s_waitcnt vmcnt(63) lgkmcnt(2)
   v_mul_f32 v0, v2, v0
+  s_waitcnt vmcnt(63) lgkmcnt(1)
   v_add_f32 v0, v3, v0
+  s_waitcnt vmcnt(63) lgkmcnt(0)
   v_add_f32 v0, v0, v4
   ds_write_b32 v1, v0 offset:0
   s_endpgm

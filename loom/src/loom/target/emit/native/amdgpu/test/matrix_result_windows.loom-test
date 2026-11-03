@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @long_window_survives_forwarding strategy=source
+// RUN: emit amdgpu-assembly @long_window_survives_forwarding
 
 amdgpu.target<gfx90a> @target
 
@@ -20,26 +20,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @long_window_survives_forwarding
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @sequential_copies_credit_prior_moves strategy=source fixed=%acc:physical_register:0:4 fixed=%result:physical_register:0:4 fixed=%lane:physical_register:0:1 fixed=%prefix:physical_register:4:1 fixed=%tuple:physical_register:8:2
-
-amdgpu.target<gfx90a> @target
-
-low.func.def target<amdgpu.cdna2.core>(@target) @sequential_copies_credit_prior_moves(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr x4>, %prefix: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
-  %result = v_mfma_f32_16x16x4f32 %lhs, %rhs, %acc
-  %lane = slice %result[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %tuple = concat(%prefix, %lane) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  return %tuple
-}
-
-// ----
-  v_mfma_f32_16x16x4f32 v[0:3], v5, v6, v[0:3]
-  s_nop 9
-  v_mov_b32 v8, v4
-  v_mov_b32 v9, v0
-  s_endpgm
-
-// ====
-// RUN: emit amdgpu-assembly @join_retains_strongest_predecessor strategy=source fixed=%acc:physical_register:0:4 fixed=%long:physical_register:0:4 fixed=%short:physical_register:0:4 fixed=%carried:physical_register:0:4
+// RUN: emit amdgpu-assembly @join_retains_strongest_predecessor
 
 amdgpu.target<gfx90a> @target
 
@@ -63,18 +44,18 @@ low.func.def target<amdgpu.cdna2.core>(@target) @join_retains_strongest_predeces
   s_cmp_lt_u32 s1, s0
   s_cbranch_scc0 .Lbb2
 .Lbb1:
-  v_mfma_f32_16x16x4f32 v[0:3], v4, v5, v[0:3]
+  v_mfma_f32_16x16x4f32 v[4:7], v0, v1, v[4:7]
   s_branch .Lbb3
 .Lbb2:
-  v_mfma_f32_4x4x1f32 v[0:3], v4, v5, v[0:3]
+  v_mfma_f32_4x4x1f32 v[4:7], v0, v1, v[4:7]
 .Lbb3:
   s_nop 9
-  global_store_dwordx4 v6, v[0:3], s[2:3] offset:0
+  global_store_dwordx4 v2, v[4:7], s[2:3] offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @coalesced_edge_preserves_window strategy=source fixed=%acc:physical_register:0:4 fixed=%result:physical_register:0:4 fixed=%carried:physical_register:0:4
+// RUN: emit amdgpu-assembly @coalesced_edge_preserves_window
 
 amdgpu.target<gfx90a> @target
 
@@ -89,16 +70,16 @@ low.func.def target<amdgpu.cdna2.core>(@target) @coalesced_edge_preserves_window
 }
 
 // ----
-  v_mfma_f32_16x16x4f32 v[0:3], v4, v5, v[0:3]
+  v_mfma_f32_16x16x4f32 v[4:7], v0, v1, v[4:7]
 .Lbb1:
 .Lbb2:
   s_nop 10
-  global_store_dwordx4 v6, v[0:3], s[0:1] offset:0
+  global_store_dwordx4 v2, v[4:7], s[0:1] offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @nonmatching_forwarding_identity strategy=source
+// RUN: emit amdgpu-assembly @nonmatching_forwarding_identity
 
 amdgpu.target<gfx942> @target
 
@@ -119,7 +100,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @nonmatching_forwarding_identity
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @exact_floor_exceeds_partial_overlap strategy=source
+// RUN: emit amdgpu-assembly @exact_floor_exceeds_partial_overlap
 
 amdgpu.target<gfx942> @target
 
@@ -136,28 +117,28 @@ low.func.def target<amdgpu.cdna3.core>(@target) @exact_floor_exceeds_partial_ove
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @overwrite_preserves_memory_window strategy=source fixed=%acc:physical_register:0:2 fixed=%result:physical_register:0:2 fixed=%overwrite:physical_register:0:1
+// RUN: emit amdgpu-assembly @overwrite_preserves_memory_window
 
 amdgpu.target<gfx90a> @target
 
-low.func.def target<amdgpu.cdna2.core>(@target) @overwrite_preserves_memory_window(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %acc: reg<amdgpu.vgpr x2>, %replacement: reg<amdgpu.vgpr>, %address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) asm {
+// Keeping the multiplicands live makes ordinary allocation reuse the dead
+// accumulator result for the store payload.
+low.func.def target<amdgpu.cdna2.core>(@target) @overwrite_preserves_memory_window(%acc: reg<amdgpu.vgpr x2>, %lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %replacement: reg<amdgpu.vgpr>, %address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
   %result = v_mfma_f64_4x4x4f64 %lhs, %rhs, %acc
   %overwrite = v_mov_b32_copy %replacement
   global_store_dword_saddr %address, %overwrite, %base
-  return
+  return %lhs, %rhs
 }
 
 // ----
-  v_mfma_f64_4x4x4f64 v[0:1], v[2:3], v[4:5], v[0:1]
-  s_nop 5
-  v_mov_b32 v0, v6
-  s_nop 1
-  global_store_dword v7, v0, s[0:1] offset:0
+  v_mov_b32 v0, v0
+  global_store_dword v1, v0, s[0:1] offset:0
+  v_mfma_f64_4x4x4f64 v[2:3], v[4:5], v[6:7], v[2:3]
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-wait-state-plan @accumulator_bank_forwarding strategy=source
+// RUN: emit amdgpu-wait-state-plan @accumulator_bank_forwarding
 
 amdgpu.target<gfx90a> @target
 
@@ -173,7 +154,7 @@ state[0] reason=matrix_result_use action=amdgpu.s_nop at=b0:n1/o1 producer=n0 co
 state[1] reason=matrix_result_use action=amdgpu.s_nop at=b0:n2/o2 producer=n1 consumer=n2 required=6 observed=0 residual=6 matrix=mfma_gfx90a/valu_read/pass4
 
 // ====
-// RUN: emit amdgpu-wait-state-plan @register_banks_are_disjoint strategy=source fixed=%acc:physical_register:0:4 fixed=%result:physical_register:0:4 fixed=%overwrite:physical_register:0:1
+// RUN: emit amdgpu-wait-state-plan @register_banks_are_disjoint
 
 amdgpu.target<gfx942> @target
 
@@ -187,7 +168,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @register_banks_are_disjoint(%lh
 amdgpu.wait_state_plan states=0 progress=3 hazards=0
 
 // ====
-// RUN: emit amdgpu-assembly @taken_branch_has_one_issue_slot strategy=source
+// RUN: emit amdgpu-assembly @taken_branch_has_one_issue_slot
 
 amdgpu.target<gfx90a> @target
 
@@ -226,7 +207,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @taken_branch_has_one_issue_slot
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @backedge_preserves_window strategy=source fixed=%initial:physical_register:0:4 fixed=%carried:physical_register:0:4 fixed=%next:physical_register:0:4
+// RUN: emit amdgpu-assembly @backedge_preserves_window
 
 amdgpu.target<gfx90a> @target
 
@@ -252,12 +233,13 @@ low.func.def target<amdgpu.cdna2.core>(@target) @backedge_preserves_window(%lhs:
   s_mov_b32 s3, 0
   s_mov_b32 s4, 1
 .Lbb1:
-  s_nop 8
+  s_nop 6
   global_store_dwordx4 v6, v[0:3], s[0:1] offset:0
 .Lbb2:
+  s_nop 0
+  v_mfma_f32_16x16x4f32 v[0:3], v4, v5, v[0:3]
   s_add_u32 s3, s3, s4
   s_cmp_lt_u32 s3, s2
-  v_mfma_f32_16x16x4f32 v[0:3], v4, v5, v[0:3]
   s_cbranch_scc0 .Lbb4
 .Lbb3:
   s_branch .Lbb1

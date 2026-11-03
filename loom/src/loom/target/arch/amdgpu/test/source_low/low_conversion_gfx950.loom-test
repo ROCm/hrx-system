@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @gfx950_scalef32_packed8_conversions waits=none
+// RUN: emit amdgpu-assembly @gfx950_scalef32_packed8_conversions
 
 amdgpu.target<gfx950> @target
 
@@ -22,7 +22,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_packed8_convers
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @gfx950_scalef32_fp4_conversions waits=none
+// RUN: emit amdgpu-assembly @gfx950_scalef32_fp4_conversions
 
 amdgpu.target<gfx950> @target
 
@@ -43,7 +43,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_fp4_conversions
 // LLVM encodes the fixed-register instructions as
 // [02 00 50 d2 00 03 02 00 03 00 51 d2 00 03 02 00
 //  04 00 3f d2 00 03 02 00].
-// RUN: emit amdgpu-native-words @gfx950_scalef32_fp4_conversion_words waits=none strategy=source fixed=%fp4:physical_register:0:1 fixed=%scale:physical_register:1:1 fixed=%f16:physical_register:2:1 fixed=%bf16:physical_register:3:1 fixed=%f32:physical_register:4:2
+// RUN: emit amdgpu-native-words @gfx950_scalef32_fp4_conversion_words
 
 amdgpu.target<gfx950> @target
 
@@ -57,14 +57,14 @@ low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_fp4_conversion_
 // ----
 0xD2500002
 0x00020300
-0xD2510003
+0xD2510002
 0x00020300
-0xD23F0004
+0xD23F0000
 0x00020300
 0xBF810000
 
 // ====
-// RUN: emit amdgpu-assembly @gfx950_scalef32_fp4_byte_conversions waits=none
+// RUN: emit amdgpu-assembly @gfx950_scalef32_fp4_byte_conversions
 
 amdgpu.target<gfx950> @target
 
@@ -103,7 +103,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_fp4_byte_conver
 // LLVM encodes the fixed-register F16 byte-selector instructions as
 // [02 00 50 d2 00 03 02 00 03 10 50 d2 00 03 02 00
 //  04 08 50 d2 00 03 02 00 05 18 50 d2 00 03 02 00].
-// RUN: emit amdgpu-native-words @gfx950_scalef32_f16_fp4_byte_words waits=none strategy=source fixed=%fp4:physical_register:0:1 fixed=%scale:physical_register:1:1 fixed=%byte0:physical_register:2:1 fixed=%byte1:physical_register:3:1 fixed=%byte2:physical_register:4:1 fixed=%byte3:physical_register:5:1
+// RUN: emit amdgpu-native-words @gfx950_scalef32_f16_fp4_byte_words
 
 amdgpu.target<gfx950> @target
 
@@ -118,11 +118,11 @@ low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_f16_fp4_byte_wo
 // ----
 0xD2500002
 0x00020300
-0xD2501003
+0xD2501002
 0x00020300
-0xD2500804
+0xD2500802
 0x00020300
-0xD2501805
+0xD2501800
 0x00020300
 0xBF810000
 
@@ -130,7 +130,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_f16_fp4_byte_wo
 // LLVM encodes the fixed-register BF16 byte-selector instructions as
 // [02 00 51 d2 00 03 02 00 03 10 51 d2 00 03 02 00
 //  04 08 51 d2 00 03 02 00 05 18 51 d2 00 03 02 00].
-// RUN: emit amdgpu-native-words @gfx950_scalef32_bf16_fp4_byte_words waits=none strategy=source fixed=%fp4:physical_register:0:1 fixed=%scale:physical_register:1:1 fixed=%byte0:physical_register:2:1 fixed=%byte1:physical_register:3:1 fixed=%byte2:physical_register:4:1 fixed=%byte3:physical_register:5:1
+// RUN: emit amdgpu-native-words @gfx950_scalef32_bf16_fp4_byte_words
 
 amdgpu.target<gfx950> @target
 
@@ -145,16 +145,16 @@ low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_bf16_fp4_byte_w
 // ----
 0xD2510002
 0x00020300
-0xD2511003
+0xD2511002
 0x00020300
-0xD2510804
+0xD2510802
 0x00020300
-0xD2511805
+0xD2511800
 0x00020300
 0xBF810000
 
 // ====
-// RUN: emit amdgpu-assembly @gfx950_packed8_encode_f32 waits=none
+// RUN: emit amdgpu-assembly @gfx950_packed8_encode_f32
 
 amdgpu.target<gfx950> @target
 

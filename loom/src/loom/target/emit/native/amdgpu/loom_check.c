@@ -30,39 +30,21 @@
 #include "loom/tools/loom-check/low_emit.h"
 #include "loomc/iree.h"
 
-typedef enum loom_amdgpu_loom_check_wait_mode_e {
-  LOOM_AMDGPU_LOOM_CHECK_WAIT_MODE_AUTO = 0,
-  LOOM_AMDGPU_LOOM_CHECK_WAIT_MODE_NONE = 1,
-} loom_amdgpu_loom_check_wait_mode_t;
-
 enum loom_amdgpu_loom_check_option_flag_bits_e {
-  LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_SCHEDULE_STRATEGY = 1u << 0,
-  LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_SCHEDULE_DIAGNOSTICS = 1u << 1,
-  LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_WAIT_MODE = 1u << 2,
-  LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_ALLOCATION_DIAGNOSTICS = 1u << 3,
+  LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_SCHEDULE_DIAGNOSTICS = 1u << 0,
+  LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_ALLOCATION_DIAGNOSTICS = 1u << 1,
 };
 typedef uint8_t loom_amdgpu_loom_check_option_flags_t;
 
 typedef struct loom_amdgpu_loom_check_emit_options_t {
   // Module-local target-low function symbol selected by the RUN line.
   iree_string_view_t function_symbol_name;
-  // Candidate selection strategy used by low frame.
-  loom_low_schedule_strategy_t schedule_strategy;
   // Low scheduler diagnostic feedback requested by the RUN line.
   loom_low_schedule_diagnostic_flags_t schedule_diagnostic_flags;
   // Low allocator diagnostic feedback requested by the RUN line.
   loom_low_allocation_diagnostic_flags_t allocation_diagnostic_flags;
-  // Wait-packet materialization mode for the emitted fragment.
-  loom_amdgpu_loom_check_wait_mode_t wait_mode;
   // Parsed loom_amdgpu_loom_check_option_flag_bits_e bits.
   loom_amdgpu_loom_check_option_flags_t option_flags;
-  // Low allocation budget overrides parsed from target options.
-  loom_low_allocation_budget_t
-      allocation_budgets[LOOM_CHECK_LOW_EMIT_MAX_ALLOCATION_BUDGETS];
-  // Number of entries in |allocation_budgets|.
-  iree_host_size_t allocation_budget_count;
-  // Fixed low allocation requests parsed from target options.
-  loom_check_low_emit_fixed_value_spec_list_t allocation_fixed_values;
 } loom_amdgpu_loom_check_emit_options_t;
 
 typedef struct loom_amdgpu_loom_check_spill_lowering_context_t {
@@ -102,20 +84,6 @@ static iree_status_t loom_amdgpu_loom_check_parse_key_value_option(
   iree_string_view_split(token, '=', &name, &value);
   name = iree_string_view_trim(name);
   value = iree_string_view_trim(value);
-  if (iree_string_view_equal(name, IREE_SV("strategy"))) {
-    if (iree_any_bit_set(
-            options->option_flags,
-            LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_SCHEDULE_STRATEGY)) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "duplicate AMDGPU assembly option 'strategy'");
-    }
-    IREE_RETURN_IF_ERROR(loom_check_low_emit_parse_schedule_strategy(
-        value, IREE_SV("AMDGPU assembly"), &options->schedule_strategy));
-    options->option_flags |=
-        LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_SCHEDULE_STRATEGY;
-    *out_matched = true;
-    return iree_ok_status();
-  }
   if (iree_string_view_equal(name, IREE_SV("diagnostics"))) {
     if (iree_any_bit_set(
             options->option_flags,
@@ -147,27 +115,6 @@ static iree_status_t loom_amdgpu_loom_check_parse_key_value_option(
     *out_matched = true;
     return iree_ok_status();
   }
-  if (iree_string_view_equal(name, IREE_SV("waits"))) {
-    if (iree_any_bit_set(options->option_flags,
-                         LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_WAIT_MODE)) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "duplicate AMDGPU assembly option 'waits'");
-    }
-    if (iree_string_view_equal(value, IREE_SV("auto"))) {
-      options->wait_mode = LOOM_AMDGPU_LOOM_CHECK_WAIT_MODE_AUTO;
-    } else if (iree_string_view_equal(value, IREE_SV("none"))) {
-      options->wait_mode = LOOM_AMDGPU_LOOM_CHECK_WAIT_MODE_NONE;
-    } else {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AMDGPU assembly option 'waits' expected 'auto' or 'none', got "
-          "'%.*s'",
-          (int)value.size, value.data);
-    }
-    options->option_flags |= LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_WAIT_MODE;
-    *out_matched = true;
-    return iree_ok_status();
-  }
   return iree_ok_status();
 }
 
@@ -179,19 +126,15 @@ static iree_status_t loom_amdgpu_loom_check_parse_option(
   if (matched) {
     return iree_ok_status();
   }
-  return loom_check_low_emit_parse_allocation_option(
-      token, IREE_SV("AMDGPU assembly"), options->allocation_budgets,
-      IREE_ARRAYSIZE(options->allocation_budgets),
-      &options->allocation_budget_count, &options->allocation_fixed_values);
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "unknown AMDGPU assembly option '%.*s'",
+                          (int)token.size, token.data);
 }
 
 static iree_status_t loom_amdgpu_loom_check_parse_emit_options(
     const loom_check_emit_provider_request_t* request,
     loom_amdgpu_loom_check_emit_options_t* out_options) {
-  *out_options = (loom_amdgpu_loom_check_emit_options_t){
-      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_LATENCY_HIDING,
-      .wait_mode = LOOM_AMDGPU_LOOM_CHECK_WAIT_MODE_AUTO,
-  };
+  *out_options = (loom_amdgpu_loom_check_emit_options_t){0};
 
   iree_string_view_t symbol_name = iree_string_view_empty();
   iree_string_view_t option_text = iree_string_view_empty();
@@ -212,8 +155,6 @@ static iree_status_t loom_amdgpu_loom_check_parse_emit_options(
                             "required");
   }
 
-  IREE_RETURN_IF_ERROR(loom_check_low_emit_fixed_value_spec_list_initialize(
-      option_text, request->case_arena, &out_options->allocation_fixed_values));
   while (!iree_string_view_is_empty(option_text)) {
     iree_string_view_t token = iree_string_view_empty();
     iree_string_view_t remaining = iree_string_view_empty();
@@ -229,14 +170,8 @@ static iree_status_t loom_amdgpu_loom_check_parse_emit_options(
 }
 
 static iree_status_t loom_amdgpu_loom_check_emit_assembly(
-    const loom_low_emission_frame_t* frame,
-    const loom_amdgpu_loom_check_emit_options_t* options,
-    iree_string_builder_t* builder, iree_arena_allocator_t* arena) {
-  if (options->wait_mode == LOOM_AMDGPU_LOOM_CHECK_WAIT_MODE_NONE) {
-    return loom_amdgpu_emit_assembly_fragment(
-        &frame->schedule, &frame->allocation, builder, arena);
-  }
-
+    const loom_low_emission_frame_t* frame, iree_string_builder_t* builder,
+    iree_arena_allocator_t* arena) {
   loom_amdgpu_packet_plan_t packet_plan = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_packet_plan_build(
       &frame->schedule, &frame->allocation, /*options=*/NULL, arena,
@@ -258,14 +193,8 @@ static iree_status_t loom_amdgpu_loom_check_emit_assembly(
 }
 
 static iree_status_t loom_amdgpu_loom_check_encode_native(
-    const loom_low_emission_frame_t* frame,
-    const loom_amdgpu_loom_check_emit_options_t* options,
-    iree_arena_allocator_t* arena, iree_const_byte_span_t* out_text) {
-  if (options->wait_mode == LOOM_AMDGPU_LOOM_CHECK_WAIT_MODE_NONE) {
-    return loom_amdgpu_encode_instruction_stream(
-        &frame->schedule, &frame->allocation, out_text, arena);
-  }
-
+    const loom_low_emission_frame_t* frame, iree_arena_allocator_t* arena,
+    iree_const_byte_span_t* out_text) {
   loom_amdgpu_packet_plan_t packet_plan = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_packet_plan_build(
       &frame->schedule, &frame->allocation, /*options=*/NULL, arena,
@@ -331,21 +260,6 @@ static iree_status_t loom_amdgpu_loom_check_emit_vopd_plan_json(
       &rejections, &packet_plan));
   return loom_amdgpu_vopd_plan_format_json(&packet_plan.vopd_plan, &rejections,
                                            builder);
-}
-
-static bool loom_amdgpu_loom_check_needs_storage_leases(
-    iree_string_view_t target_name,
-    const loom_amdgpu_loom_check_emit_options_t* options) {
-  if (iree_string_view_equal(target_name, IREE_SV("amdgpu-vopd-plan-json")) ||
-      iree_string_view_equal(target_name, IREE_SV("amdgpu-allocation-json")) ||
-      iree_string_view_equal(target_name,
-                             IREE_SV("amdgpu-wait-counter-plan-json")) ||
-      iree_string_view_equal(target_name, IREE_SV("amdgpu-wait-state-plan")) ||
-      iree_string_view_equal(target_name,
-                             IREE_SV("amdgpu-wait-state-plan-json"))) {
-    return true;
-  }
-  return options->wait_mode == LOOM_AMDGPU_LOOM_CHECK_WAIT_MODE_AUTO;
 }
 
 static iree_status_t loom_amdgpu_loom_check_lower_spill_traffic(
@@ -521,11 +435,6 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
   };
   loom_low_storage_lease_provider_t storage_lease_provider = {0};
   loom_amdgpu_storage_lease_provider(&storage_lease_provider);
-  const loom_low_storage_lease_provider_t* selected_storage_lease_provider =
-      loom_amdgpu_loom_check_needs_storage_leases(request->target_name,
-                                                  &options)
-          ? &storage_lease_provider
-          : NULL;
   loom_low_schedule_pair_affinity_list_t schedule_pair_affinities =
       loom_low_schedule_pair_affinity_list_empty();
   loom_low_schedule_structural_state_read_list_t schedule_state_reads =
@@ -541,7 +450,7 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
     return iree_ok_status();
   }
   const loom_low_emission_frame_options_t frame_options = {
-      .schedule_strategy = options.schedule_strategy,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
       .schedule_flags =
           LOOM_LOW_SCHEDULE_FLAG_RETAIN_VALUE_PRODUCER_NODES |
           LOOM_LOW_SCHEDULE_FLAG_RETAIN_ACYCLIC_MEMORY_COMPLETIONS,
@@ -550,20 +459,16 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
           LOOM_LOW_ALLOCATION_FLAG_RETAIN_STORAGE_RELEASE_ACTION_INDEX,
       .schedule_diagnostic_flags = options.schedule_diagnostic_flags,
       .allocation_diagnostic_flags = options.allocation_diagnostic_flags,
-      .allocation_budgets = options.allocation_budgets,
-      .allocation_budget_count = options.allocation_budget_count,
       .residency_query = loom_amdgpu_occupancy_residency_view,
       .schedule_pair_affinities = schedule_pair_affinities,
       .schedule_structural_state_reads = schedule_state_reads,
       .schedule_structural_models = {.values = &storage_address_model,
                                      .count = 1},
-      .storage_lease_provider = selected_storage_lease_provider,
+      .storage_lease_provider = &storage_lease_provider,
   };
   IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(
       request, native_module, options.function_symbol_name, &frame_options,
-      options.allocation_fixed_values.specs,
-      options.allocation_fixed_values.count, &spill_free_options, &frame,
-      &frame_accepted));
+      &spill_free_options, &frame, &frame_accepted));
   if (request->diagnostic_collector != NULL &&
       loom_check_diagnostic_collector_has_error(
           request->diagnostic_collector)) {
@@ -574,14 +479,14 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
   }
   if (iree_string_view_equal(request->target_name, IREE_SV("amdgpu-native"))) {
     iree_const_byte_span_t text = iree_const_byte_span_empty();
-    return loom_amdgpu_loom_check_encode_native(&frame, &options,
-                                                request->case_arena, &text);
+    return loom_amdgpu_loom_check_encode_native(&frame, request->case_arena,
+                                                &text);
   }
   if (iree_string_view_equal(request->target_name,
                              IREE_SV("amdgpu-native-words"))) {
     iree_const_byte_span_t text = iree_const_byte_span_empty();
     IREE_RETURN_IF_ERROR(loom_amdgpu_loom_check_encode_native(
-        &frame, &options, request->case_arena, &text));
+        &frame, request->case_arena, &text));
     return loom_amdgpu_loom_check_format_native_words(
         text, &request->result->actual_output);
   }
@@ -616,7 +521,7 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
         &frame, &request->result->actual_output, request->case_arena);
   }
   return loom_amdgpu_loom_check_emit_assembly(
-      &frame, &options, &request->result->actual_output, request->case_arena);
+      &frame, &request->result->actual_output, request->case_arena);
 }
 
 static iree_status_t loom_amdgpu_loom_check_emit_provider_append_names(

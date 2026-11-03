@@ -47,9 +47,7 @@
 //                           Analysis targets include liveness-json @function,
 //                           low-schedule-json @function [strategy=...]
 //                           [diagnostics=...],
-//                           low-allocation @function
-//                           [diagnostics=...] [class=units...]
-//                           [fixed=%value:<kind>:<base>:<count>],
+//                           low-allocation @function [diagnostics=...],
 //                           low-allocation-json @function for the full
 //                           allocation table, diagnostics include
 //                           predicted-spills, copy-decisions, and

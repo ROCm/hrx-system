@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @gfx1100_vmem_to_lds_continuation strategy=source
+// RUN: emit amdgpu-assembly @gfx1100_vmem_to_lds_continuation
 
 amdgpu.target<gfx1100> @target
 
@@ -20,7 +20,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @gfx1100_vmem_to_lds_continuatio
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @gfx1151_vmem_to_lds_continuation strategy=source
+// RUN: emit amdgpu-assembly @gfx1151_vmem_to_lds_continuation
 
 amdgpu.target<gfx1151> @target
 
@@ -42,7 +42,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @gfx1151_vmem_to_lds_continuat
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @gfx1200_vmem_to_lds_continuation strategy=source
+// RUN: emit amdgpu-assembly @gfx1200_vmem_to_lds_continuation
 
 amdgpu.target<gfx1200> @target
 
@@ -64,7 +64,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @gfx1200_vmem_to_lds_continuatio
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @gfx1250_vmem_to_lds_continuation strategy=source
+// RUN: emit amdgpu-assembly @gfx1250_vmem_to_lds_continuation
 
 amdgpu.target<gfx1250> @target
 
@@ -86,7 +86,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_vmem_to_lds_con
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @gfx942_vmem_to_valu_continuation strategy=source
+// RUN: emit amdgpu-assembly @gfx942_vmem_to_valu_continuation
 
 amdgpu.target<gfx942> @target
 
@@ -108,7 +108,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @gfx942_vmem_to_valu_continuatio
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @gfx950_vmem_to_valu_continuation strategy=source
+// RUN: emit amdgpu-assembly @gfx950_vmem_to_valu_continuation
 
 amdgpu.target<gfx950> @target
 
@@ -130,7 +130,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_vmem_to_valu_continuatio
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @gfx1200_vmem_to_valu_continuation strategy=source
+// RUN: emit amdgpu-assembly @gfx1200_vmem_to_valu_continuation
 
 amdgpu.target<gfx1200> @target
 
@@ -152,7 +152,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @gfx1200_vmem_to_valu_continuati
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @gfx1250_vmem_to_valu_continuation strategy=source
+// RUN: emit amdgpu-assembly @gfx1250_vmem_to_valu_continuation
 
 amdgpu.target<gfx1250> @target
 
@@ -174,7 +174,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_vmem_to_valu_co
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @lds_to_vmem_continuation strategy=source
+// RUN: emit amdgpu-assembly @lds_to_vmem_continuation
 
 amdgpu.target<gfx1100> @target
 
@@ -195,7 +195,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @lds_to_vmem_continuation(%addre
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @continued_result_materialized_copy strategy=source fixed=%loaded:physical_register:4:1 fixed=%continued:physical_register:4:1 fixed=%copied:physical_register:8:1
+// RUN: emit amdgpu-assembly @continued_result_materialized_copy
 
 amdgpu.target<gfx1151> @target
 
@@ -210,17 +210,15 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @continued_result_materialized
 // The forced move is the first actual read of the continued value. Its LDS
 // wait must precede the move; the old VMEM half completed before continuation.
 // ----
-  global_load_short_d16 v4, v0, s[0:1] offset:0
+  global_load_short_d16 v2, v0, s[0:1] offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  ds_load_u16_d16_hi v4, v0 offset:0
+  ds_load_u16_d16_hi v2, v0 offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  v_mov_b32 v8, v4
-  s_delay_alu instid0(VALU_DEP_1)
-  v_add_u32 v0, v8, v1
+  v_add_u32 v0, v2, v1
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @materialized_copy_before_continuation strategy=source fixed=%loaded:physical_register:4:1 fixed=%copied:physical_register:8:1 fixed=%continued:physical_register:8:1
+// RUN: emit amdgpu-assembly @materialized_copy_before_continuation
 
 amdgpu.target<gfx1151> @target
 
@@ -235,16 +233,15 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @materialized_copy_before_cont
 // A materialized copy has already completed the preserved half's load.
 // The continuation must not add another VMEM wait.
 // ----
-  global_load_b32 v4, v0, s[0:1] offset:0
+  global_load_b32 v2, v0, s[0:1] offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_mov_b32 v8, v4
-  ds_load_u16_d16_hi v8, v0 offset:0
+  ds_load_u16_d16_hi v2, v0 offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  v_add_u32 v0, v8, v1
+  v_add_u32 v0, v2, v1
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @continued_result_coalesced_edge strategy=source fixed=%loaded:physical_register:4:1 fixed=%continued:physical_register:4:1 fixed=%joined:physical_register:4:1
+// RUN: emit amdgpu-assembly @continued_result_coalesced_edge
 
 amdgpu.target<gfx1151> @target
 
@@ -260,16 +257,16 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @continued_result_coalesced_ed
 // Coalescing the edge leaves VMEM pending, but not the older LDS write.
 // The successor's whole-register read must complete the remaining VMEM result.
 // ----
-  ds_load_u16_d16 v4, v0 offset:0
+  ds_load_u16_d16 v2, v0 offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  global_load_short_d16_hi v4, v0, s[0:1] offset:0
+  global_load_short_d16_hi v2, v0, s[0:1] offset:0
 .Lbb1:
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_add_u32 v0, v4, v1
+  v_add_u32 v0, v2, v1
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @same_vmem_continuation_remains_overlapped strategy=source
+// RUN: emit amdgpu-assembly @same_vmem_continuation_remains_overlapped
 
 amdgpu.target<gfx1151> @target
 
@@ -290,7 +287,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @same_vmem_continuation_remain
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @same_lds_continuation_remains_overlapped strategy=source
+// RUN: emit amdgpu-assembly @same_lds_continuation_remains_overlapped
 
 amdgpu.target<gfx1200> @target
 
@@ -310,7 +307,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @same_lds_continuation_remains_o
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @coalesced_slice_before_continuation strategy=source
+// RUN: emit amdgpu-assembly @coalesced_slice_before_continuation
 
 amdgpu.target<gfx1151> @target
 
@@ -333,7 +330,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @coalesced_slice_before_contin
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @mixed_continuation_loop strategy=source fixed=%loaded:physical_register:4:1 fixed=%continued:physical_register:4:1
+// RUN: emit amdgpu-assembly @mixed_continuation_loop
 
 amdgpu.target<gfx1151> @target
 
@@ -362,14 +359,13 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @mixed_continuation_loop(%addr
   s_mov_b32 s3, 1
   s_mov_b32 s4, 0
 .Lbb1:
-  global_load_short_d16 v4, v0, s[0:1] offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(63)
-  ds_load_u16_d16_hi v4, v0 offset:0
-  s_waitcnt vmcnt(63) lgkmcnt(0)
-  v_add_u32 v2, v4, v1
+  global_load_short_d16 v2, v0, s[0:1] offset:0
   s_sub_u32 s2, s2, s3
   s_cmp_gt_i32 s2, s4
-  s_delay_alu instid0(SALU_CYCLE_1)
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  ds_load_u16_d16_hi v2, v0 offset:0
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  v_add_u32 v2, v2, v1
   s_cbranch_scc0 .Lbb3
 .Lbb2:
   s_branch .Lbb1

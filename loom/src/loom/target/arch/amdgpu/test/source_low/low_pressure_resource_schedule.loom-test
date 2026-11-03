@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @combined_pressure strategy=resource-stall diagnostics=candidates
+// RUN: emit amdgpu-assembly @combined_pressure diagnostics=candidates
 
 amdgpu.target<gfx942> @target
 

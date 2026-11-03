@@ -1,5 +1,5 @@
 // Reassembling the same mask preserves its bits without copies or dependencies.
-// RUN: emit amdgpu-assembly @mask_identity strategy=source
+// RUN: emit amdgpu-assembly @mask_identity
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -21,7 +21,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @mask_identit
 
 // ====
 
-// RUN: emit amdgpu-assembly @loop_before_read strategy=source
+// RUN: emit amdgpu-assembly @loop_before_read
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -48,7 +48,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @loop_before_
 
 // ====
 
-// RUN: emit amdgpu-assembly @loop_identity strategy=source
+// RUN: emit amdgpu-assembly @loop_identity
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -69,7 +69,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @loop_identit
 
 // ====
 
-// RUN: emit amdgpu-assembly @carried_mask_update strategy=source
+// RUN: emit amdgpu-assembly @carried_mask_update
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -91,7 +91,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @carried_mask_update(%initial:
 
 // ====
 
-// RUN: emit amdgpu-assembly @loop_mask_reset strategy=source
+// RUN: emit amdgpu-assembly @loop_mask_reset
 
 // The compare must not reuse the carried mask before the later broadcast
 // clears its read latch. The backedge copies occur after that reset.
@@ -119,7 +119,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @loop_mask_re
 
 // ====
 
-// RUN: emit amdgpu-assembly @loop_mask_reset strategy=source
+// RUN: emit amdgpu-assembly @loop_mask_reset
 
 // A legal ordering closes the mask window before the compare and permits
 // copy-free loop coalescing at the smaller register extent.
@@ -211,7 +211,7 @@ CHECK: *"name":"mask","type":"reg<amdgpu.sgpr x2>"*,"location":{"kind":"physical
 // The local mask is dead in SSA, but its read crosses the backedge to the write.
 // Redefining the mask needs a dependency; the independent scalar result
 // must still stay outside the retained pair.
-// RUN: emit amdgpu-assembly @local_mask_backedge strategy=source
+// RUN: emit amdgpu-assembly @local_mask_backedge
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -242,7 +242,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @local_mask_b
 // ====
 
 // A scalar VALU read closes that window before the next iteration's write.
-// RUN: emit amdgpu-assembly @reset_mask_backedge strategy=source
+// RUN: emit amdgpu-assembly @reset_mask_backedge
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -277,7 +277,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reset_mask_b
 // Either path can retain a distinct mask while a wider structural copy chain
 // aliases its source. Each copy keeps both possible masks protected across
 // repeated placement choices, including the subsequent scalar write.
-// RUN: emit amdgpu-assembly @branch_retained_copy strategy=source
+// RUN: emit amdgpu-assembly @branch_retained_copy
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -311,7 +311,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @branch_retai
 // ====
 
 // A retained mask with no subsequent writes has snapshots but no constraints.
-// RUN: emit amdgpu-assembly @retained_without_writes strategy=source
+// RUN: emit amdgpu-assembly @retained_without_writes
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -328,7 +328,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @retained_wit
 
 // A copied mask can retain a previous iteration's read. Its permuted backedge
 // requires real register moves, not a forced identity or scratch spill.
-// RUN: emit amdgpu-assembly @copied_mask_loop strategy=source
+// RUN: emit amdgpu-assembly @copied_mask_loop
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -358,7 +358,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @copied_mask_
 // ====
 
 // Consistent copied identities still coalesce completely.
-// RUN: emit amdgpu-assembly @copied_mask_identity strategy=source
+// RUN: emit amdgpu-assembly @copied_mask_identity
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -382,7 +382,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @copied_mask_
 
 // A longer copy chain has the same permutation conflict. The exit keeps the
 // selected value observable, and no metadata reference is needed to trigger it.
-// RUN: emit amdgpu-assembly @copied_mask_chain strategy=source
+// RUN: emit amdgpu-assembly @copied_mask_chain
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -421,7 +421,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @copied_mask_
 
 // A contradiction within the loop's copy component must not remove write
 // exclusions against the independent mask retained by the other branch.
-// RUN: emit amdgpu-assembly @copied_mask_branch strategy=source
+// RUN: emit amdgpu-assembly @copied_mask_branch
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -464,7 +464,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @copied_mask_
 
 // The ordinary scalar VALU input retires the mask read before its permuted
 // backedge copies overwrite the loop-carried pair.
-// RUN: emit amdgpu-assembly @after_reset_loop strategy=source
+// RUN: emit amdgpu-assembly @after_reset_loop
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 

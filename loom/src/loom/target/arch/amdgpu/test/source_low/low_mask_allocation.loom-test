@@ -14,7 +14,7 @@ CHECK: *"name":"result","type":"reg<amdgpu.sgpr>"*,"location":{"kind":"physical_
 
 // ====
 
-// RUN: emit amdgpu-assembly @wave64_overlaps_sixteen_carry_predicates strategy=resource-stall
+// RUN: emit amdgpu-assembly @wave64_overlaps_sixteen_carry_predicates
 
 amdgpu.target<gfx1100> @target {subgroup_size = 64}
 
@@ -107,7 +107,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @wave64_overlaps_sixteen_carry_p
 
 // ====
 
-// RUN: emit amdgpu-assembly @wave32_keeps_default_carry_schedule strategy=resource-stall
+// RUN: emit amdgpu-assembly @wave32_keeps_default_carry_schedule
 
 amdgpu.target<gfx1100> @target {subgroup_size = 32}
 
@@ -130,7 +130,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @wave32_keeps_default_carry_sche
 
 // ====
 
-// RUN: emit amdgpu-assembly @cdna3_keeps_default_carry_schedule strategy=resource-stall
+// RUN: emit amdgpu-assembly @cdna3_keeps_default_carry_schedule
 
 amdgpu.target<gfx942> @target {subgroup_size = 64}
 
@@ -153,7 +153,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @cdna3_keeps_default_carry_sched
 
 // ====
 
-// RUN: emit amdgpu-assembly @rdna4_keeps_default_carry_schedule strategy=resource-stall
+// RUN: emit amdgpu-assembly @rdna4_keeps_default_carry_schedule
 
 amdgpu.target<gfx1200> @target {subgroup_size = 64}
 
@@ -179,7 +179,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @rdna4_keeps_default_carry_sched
 
 // The loop carries the mask and reload in the same storage. The memory write
 // releases both remembered words for the scalar result; the pointer stays live.
-// RUN: emit amdgpu-assembly @memory_replaces_carried_mask strategy=source
+// RUN: emit amdgpu-assembly @memory_replaces_carried_mask
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -215,7 +215,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @memory_repla
 
 // The mask is dead before the sorting loop, but its retained physical read
 // still excludes that pair from the backedge's cycle scratch.
-// RUN: emit amdgpu-assembly @loop_swap_preserves_dead_mask strategy=source
+// RUN: emit amdgpu-assembly @loop_swap_preserves_dead_mask
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
@@ -249,7 +249,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @loop_swap_pr
 
 // A scalar read releases the old mask pair for cycle scratch. The next
 // predicate retains a different pair before the sorting loop begins.
-// RUN: emit amdgpu-assembly @loop_swap_after_mask_reset_and_retain strategy=source
+// RUN: emit amdgpu-assembly @loop_swap_after_mask_reset_and_retain
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 

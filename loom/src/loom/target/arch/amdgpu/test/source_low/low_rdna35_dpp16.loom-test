@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @gfx1151_dpp16_uniform_rhs waits=none
+// RUN: emit amdgpu-assembly @gfx1151_dpp16_uniform_rhs
 
 amdgpu.target<gfx1151> @target
 
@@ -18,20 +18,25 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @gfx1151_dpp16_uniform_rhs(%cr
 
 // ----
   v_add_f32_e64_dpp v0, v0, s0, quad_perm:[1,0,3,2], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
   v_add_f32_e64_dpp v0, v0, 1065353216, quad_perm:[1,0,3,2], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
   v_sub_f32_e64_dpp v0, v0, s0, quad_perm:[2,3,0,1], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
   v_sub_f32_e64_dpp v0, v0, 1073741824, quad_perm:[2,3,0,1], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
   v_mul_f32_e64_dpp v0, v0, s0, quad_perm:[1,0,3,2], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
   v_mul_f32_e64_dpp v0, v0, 1056964608, quad_perm:[1,0,3,2], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
   v_min_f32_e64_dpp v0, v0, s0, quad_perm:[2,3,0,1], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
   v_min_f32_e64_dpp v0, v0, 3212836864, quad_perm:[2,3,0,1], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
   v_max_f32_e64_dpp v0, v0, s0, quad_perm:[1,0,3,2], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  s_delay_alu instid0(VALU_DEP_1)
   v_max_f32_e64_dpp v0, v0, 1082130432, quad_perm:[1,0,3,2], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx1170_dpp16_uniform_rhs waits=none
+// RUN: emit amdgpu-assembly @gfx1170_dpp16_uniform_rhs
 
 amdgpu.target<gfx1170> @target
 
@@ -45,7 +50,9 @@ low.func.def target<amdgpu.rdna4m.core>(@target) @gfx1170_dpp16_uniform_rhs(%cro
 
 // ----
   v_min_num_f32_e64_dpp v0, v0, s0, quad_perm:[1,0,3,2], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
   v_min_num_f32_e64_dpp v0, v0, 3212836864, quad_perm:[1,0,3,2], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
   v_max_num_f32_e64_dpp v0, v0, s0, quad_perm:[2,3,0,1], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  s_delay_alu instid0(VALU_DEP_1)
   v_max_num_f32_e64_dpp v0, v0, 1082130432, quad_perm:[2,3,0,1], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
   s_endpgm

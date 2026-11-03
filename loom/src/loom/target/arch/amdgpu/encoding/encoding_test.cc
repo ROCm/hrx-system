@@ -1031,6 +1031,41 @@ TEST(AmdgpuEncodingTest, PacksCdna4VMovB32DppLaneControl) {
   EXPECT_EQ(packet.words[1], UINT32_C(0xff094002));
 }
 
+TEST(AmdgpuEncodingTest, MatrixRegisterBanksPreserveHighIndexBits) {
+  LOOM_AMDGPU_REQUIRE_ENCODING_TABLE(
+      table, LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA2, "amdgpu.cdna2.core");
+  // The matrix source selectors keep their vector-selector bit regardless of
+  // register bank. ACC selects A/B independently; ACC_CD selects both C and D.
+  for (uint32_t source : {0u, 254u}) {
+    for (uint32_t destination : {2u, 252u}) {
+      for (uint32_t banks = 0; banks < 8; ++banks) {
+        SCOPED_TRACE(::testing::Message()
+                     << "source " << source << " destination " << destination
+                     << " banks " << banks);
+        const loom_amdgpu_encoding_field_value_t fields[] = {
+            {LOOM_AMDGPU_ENCODING_FIELD_VDST, {}, destination},
+            {LOOM_AMDGPU_ENCODING_FIELD_SRC0, {}, 0x100u | source},
+            {LOOM_AMDGPU_ENCODING_FIELD_SRC1, {}, 0x100u | source},
+            {LOOM_AMDGPU_ENCODING_FIELD_SRC2, {}, 0x100u | destination},
+            {LOOM_AMDGPU_ENCODING_FIELD_ACC, {}, banks & 3u},
+            {LOOM_AMDGPU_ENCODING_FIELD_ACC_CD, {}, banks >> 2},
+        };
+        loom_amdgpu_encoding_packet_t packet = {};
+        IREE_ASSERT_OK(loom_amdgpu_encoding_pack(
+            table, LOOM_AMDGPU_ENCODING_FORMAT_VOP3P_MFMA, /*opcode=*/0x6F,
+            fields, IREE_ARRAYSIZE(fields), &packet));
+        ASSERT_EQ(packet.word_count, 2u);
+        EXPECT_EQ(packet.bit_count, 64u);
+        EXPECT_EQ(packet.words[0],
+                  0xD3EF0000u | destination | ((banks & 4u) << 13));
+        EXPECT_EQ(packet.words[1],
+                  (0x100u | source) | ((0x100u | source) << 9) |
+                      ((0x100u | destination) << 18) | ((banks & 3u) << 27));
+      }
+    }
+  }
+}
+
 TEST(AmdgpuEncodingTest, PacksCdna3SparseMatrixFma) {
   LOOM_AMDGPU_REQUIRE_ENCODING_TABLE(
       table, LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA3, "amdgpu.cdna3.core");

@@ -187,7 +187,7 @@ static iree_status_t loom_x86_loom_check_emit_provider_execute(
       .allocation_reserved_range_count = reserved_range_count,
   };
   IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(
-      request, native_module, function_symbol_name, &frame_options, NULL, 0,
+      request, native_module, function_symbol_name, &frame_options,
       &spill_free_options, &frame, &frame_accepted));
   if (request->diagnostic_collector != NULL &&
       loom_check_diagnostic_collector_has_error(

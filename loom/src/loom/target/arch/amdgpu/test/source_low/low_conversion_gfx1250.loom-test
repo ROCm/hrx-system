@@ -30,34 +30,33 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_native_packed_f
 }
 
 // ----
-  v_cvt_pk_f16_fp8 v6, v0
-  v_cvt_pk_f16_bf8 v6, v1
-  v_cvt_f16_fp8 v6, v0
-  v_cvt_f16_fp8 v6, v0, byte_sel:1
-  v_cvt_f16_fp8 v6, v0, byte_sel:2
-  v_cvt_f16_fp8 v6, v0, byte_sel:3
-  v_cvt_pk_bf16_f32 v0, v0, v1
-  v_cvt_f16_bf8 v6, v1
-  v_cvt_f16_bf8 v6, v1, byte_sel:1
-  v_cvt_f16_bf8 v6, v1, byte_sel:2
+  v_cvt_pk_bf16_f32 v6, v0, v1
+  v_cvt_pk_f16_fp8 v7, v0
+  v_cvt_pk_f16_bf8 v7, v1
+  v_cvt_f16_fp8 v7, v0
+  v_cvt_f16_fp8 v7, v0, byte_sel:1
+  v_pk_add_bf16 v7, v6, v3
+  v_cvt_f16_fp8 v8, v0, byte_sel:2
+  v_cvt_f16_fp8 v0, v0, byte_sel:3
+  v_cvt_f16_bf8 v0, v1
+  v_cvt_f16_bf8 v0, v1, byte_sel:1
+  v_pk_mul_bf16 v0, v7, v3
+  v_cvt_f16_bf8 v7, v1, byte_sel:2
   v_cvt_f16_bf8 v1, v1, byte_sel:3
   v_cvt_scale_pk8_f16_fp4 v[8:11], v2, v3, scale_sel:0
   v_cvt_scale_pk8_bf16_fp4 v[8:11], v2, v3, scale_sel:0
+  v_pk_fma_bf16 v0, v6, v3, v0
   v_cvt_scale_pk8_f32_fp4 v[8:15], v2, v3, scale_sel:0
   v_cvt_scale_pk8_f16_fp8 v[8:11], v[4:5], v3, scale_sel:0
   v_cvt_scale_pk8_bf16_fp8 v[8:11], v[4:5], v3, scale_sel:0
   v_cvt_scale_pk8_f32_fp8 v[8:15], v[4:5], v3, scale_sel:0
   v_cvt_scale_pk8_f16_bf8 v[8:11], v[4:5], v3, scale_sel:0
   v_cvt_scale_pk8_bf16_bf8 v[8:11], v[4:5], v3, scale_sel:0
-  v_cvt_scale_pk8_f32_bf8 v[8:15], v[4:5], v3, scale_sel:3
-  v_pk_add_bf16 v1, v0, v3
-  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
-  v_pk_mul_bf16 v1, v1, v3
-  v_pk_fma_bf16 v0, v0, v3, v1
+  v_cvt_scale_pk8_f32_bf8 v[0:7], v[4:5], v3, scale_sel:3
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @gfx1250_packed8_encode waits=none
+// RUN: emit amdgpu-assembly @gfx1250_packed8_encode
 
 amdgpu.target<gfx1250> @target
 
@@ -78,8 +77,10 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_packed8_encode(
   v_cvt_pk_bf8_f32 v0, v0, v1
   v_cvt_pk_fp8_f16 v1, v2
   v_cvt_pk_bf8_f16 v2, v2
+  s_delay_alu instid0(VALU_DEP_4) | instskip(NEXT) | instid1(VALU_DEP_4)
   v_cvt_pk_fp8_f32 v6, v3, v4, op_sel:[0,0,1]
   v_cvt_pk_bf8_f32 v0, v3, v4, op_sel:[0,0,1]
+  s_delay_alu instid0(VALU_DEP_4) | instskip(NEXT) | instid1(VALU_DEP_4)
   v_cvt_pk_fp8_f16 v1, v5, op_sel:[0,1]
   v_cvt_pk_bf8_f16 v2, v5, op_sel:[0,1]
   s_endpgm

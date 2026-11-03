@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-native-words @packed_signs waits=none strategy=source
+// RUN: emit amdgpu-native-words @packed_signs
 
 amdgpu.target<gfx942> @target
 

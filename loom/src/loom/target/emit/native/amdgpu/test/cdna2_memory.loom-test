@@ -1,6 +1,6 @@
 // CDNA2 selects global-to-LDS through the LDS bit on ordinary global loads.
 // Both address forms preserve their offset and cache modifiers.
-// RUN: emit amdgpu-assembly @global_to_lds strategy=source waits=none
+// RUN: emit amdgpu-assembly @global_to_lds
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @global_to_lds(%address: reg<amdgpu.vgpr x2>, %offset: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %m0: reg<amdgpu.m0>) asm {
@@ -32,7 +32,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @global_to_lds(%address: reg<amd
 
 // ====
 
-// RUN: emit amdgpu-native-words @global_to_lds strategy=source waits=none
+// RUN: emit amdgpu-native-words @global_to_lds
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @global_to_lds(%address: reg<amdgpu.vgpr x2>, %offset: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %m0: reg<amdgpu.m0>) asm {

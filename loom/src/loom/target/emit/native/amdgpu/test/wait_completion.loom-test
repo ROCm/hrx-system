@@ -1,6 +1,6 @@
 // Partial completion retires only the oldest producers. New work remains
 // pending when the block publishes its outgoing completion state.
-// RUN: emit amdgpu-assembly @partial_completion_then_new_producer strategy=source
+// RUN: emit amdgpu-assembly @partial_completion_then_new_producer
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @partial_completion_then_new_producer(%address: reg<amdgpu.vgpr>) asm {
@@ -22,9 +22,9 @@ low.func.def target<amdgpu.rdna3.core>(@target) @partial_completion_then_new_pro
   ds_read_b32 v1, v0 offset:0
   ds_read_b32 v2, v0 offset:4
   ds_read_b32 v3, v0 offset:8
-  s_waitcnt vmcnt(63) lgkmcnt(2)
-  v_add_u32 v1, v1, v0
   ds_read_b32 v4, v0 offset:12
+  s_waitcnt vmcnt(63) lgkmcnt(3)
+  v_add_u32 v1, v1, v0
   s_waitcnt vmcnt(63) lgkmcnt(1)
   v_add_u32 v2, v2, v3
   s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
@@ -39,7 +39,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @partial_completion_then_new_pro
 
 // A full drain starts another producer epoch without restarting retirement at
 // the block's beginning. Its completion cannot cover a later load.
-// RUN: emit amdgpu-assembly @full_completion_then_new_producer strategy=source
+// RUN: emit amdgpu-assembly @full_completion_then_new_producer
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @full_completion_then_new_producer(%address: reg<amdgpu.vgpr>) asm {
@@ -60,12 +60,12 @@ low.func.def target<amdgpu.rdna3.core>(@target) @full_completion_then_new_produc
   ds_read_b32 v1, v0 offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
   ds_read_b32 v2, v0 offset:4
-  s_waitcnt vmcnt(63) lgkmcnt(0)
+  ds_read_b32 v3, v0 offset:8
+  s_waitcnt vmcnt(63) lgkmcnt(1)
   v_add_u32 v1, v1, v2
-  ds_read_b32 v2, v0 offset:8
 .Lbb1:
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  v_add_u32 v1, v1, v2
+  v_add_u32 v1, v1, v3
   ds_write_b32 v0, v1 offset:12
   s_endpgm
 
@@ -73,7 +73,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @full_completion_then_new_produc
 
 // Empty waits may advance past non-producers, but never past a producer that
 // has not yet issued. Zero-instruction identities preserve that ordering.
-// RUN: emit amdgpu-assembly @empty_completion_before_producer strategy=source
+// RUN: emit amdgpu-assembly @empty_completion_before_producer
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @empty_completion_before_producer(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -96,7 +96,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @empty_completion_before_produce
 
 // Each incoming path contributes its own completion state. A wait on one arm
 // leaves the other arm's load pending at the merge.
-// RUN: emit amdgpu-assembly @completion_on_one_incoming_path strategy=source
+// RUN: emit amdgpu-assembly @completion_on_one_incoming_path
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @completion_on_one_incoming_path(%address: reg<amdgpu.vgpr>, %lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) asm {
@@ -134,7 +134,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @completion_on_one_incoming_path
 
 // Counter retirement is independent on targets with separate LDS and scalar
 // completion instructions.
-// RUN: emit amdgpu-assembly @independent_counter_retirement strategy=source
+// RUN: emit amdgpu-assembly @independent_counter_retirement
 amdgpu.target<gfx1201> @target
 
 low.func.def target<amdgpu.rdna4.core>(@target) @independent_counter_retirement(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %address: reg<amdgpu.vgpr>) asm {
@@ -159,7 +159,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @independent_counter_retirement(
 // ====
 
 // A nonzero authored threshold leaves the newest LDS result pending.
-// RUN: emit amdgpu-assembly @authored_partial_shared_wait strategy=source
+// RUN: emit amdgpu-assembly @authored_partial_shared_wait
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @authored_partial_shared_wait(%address: reg<amdgpu.vgpr>) asm {
@@ -186,7 +186,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @authored_partial_shared_wait(%a
 // ====
 
 // Separate hardware counters also distinguish a partial wait from a reset.
-// RUN: emit amdgpu-assembly @authored_partial_split_wait strategy=source
+// RUN: emit amdgpu-assembly @authored_partial_split_wait
 amdgpu.target<gfx1201> @target
 
 low.func.def target<amdgpu.rdna4.core>(@target) @authored_partial_split_wait(%address: reg<amdgpu.vgpr>) asm {
@@ -201,9 +201,9 @@ low.func.def target<amdgpu.rdna4.core>(@target) @authored_partial_split_wait(%ad
 // ----
   ds_read_b32 v1, v0 offset:0
   ds_read_b32 v2, v0 offset:4
-  s_wait_dscnt dscnt(1)
   s_wait_dscnt dscnt(0)
   v_add_u32 v1, v1, v2
+  s_wait_dscnt dscnt(1)
   ds_write_b32 v0, v1 offset:8
   s_endpgm
 
@@ -211,7 +211,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @authored_partial_split_wait(%ad
 
 // Unconstrained and partial LGKM fields remain pending even when another
 // field in the same instruction fully drains vector memory.
-// RUN: emit amdgpu-assembly @independent_explicit_wait_fields strategy=source
+// RUN: emit amdgpu-assembly @independent_explicit_wait_fields
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @independent_explicit_wait_fields(%address: reg<amdgpu.vgpr>) asm {
@@ -233,7 +233,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @independent_explicit_wait_field
 // ====
 
 // A scalar-result full wait also completes earlier LDS work sharing LGKM.
-// RUN: emit amdgpu-assembly @scalar_wait_completes_local_result strategy=source
+// RUN: emit amdgpu-assembly @scalar_wait_completes_local_result
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @scalar_wait_completes_local_result(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %address: reg<amdgpu.vgpr>) asm {
@@ -260,7 +260,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scalar_wait_completes_local_res
 // ====
 
 // Coupling works in both directions: an LDS full wait completes scalar work.
-// RUN: emit amdgpu-assembly @local_wait_completes_scalar_result strategy=source
+// RUN: emit amdgpu-assembly @local_wait_completes_scalar_result
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @local_wait_completes_scalar_result(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %address: reg<amdgpu.vgpr>) asm {
@@ -274,8 +274,8 @@ low.func.def target<amdgpu.rdna3.core>(@target) @local_wait_completes_scalar_res
 }
 
 // ----
-  s_load_dword s3, s[0:1], s2 offset:0
   ds_read_b32 v1, v0 offset:0
+  s_load_dword s3, s[0:1], s2 offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
   v_add_u32 v1, v1, v0
   s_add_u32 s0, s3, s2
@@ -288,7 +288,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @local_wait_completes_scalar_res
 
 // A coupled full wait cannot complete work issued after it, even when the
 // new producer belongs to the counter completed as a side effect.
-// RUN: emit amdgpu-assembly @new_scalar_after_local_drain strategy=source
+// RUN: emit amdgpu-assembly @new_scalar_after_local_drain
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @new_scalar_after_local_drain(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %address: reg<amdgpu.vgpr>) asm {
@@ -303,12 +303,11 @@ low.func.def target<amdgpu.rdna3.core>(@target) @new_scalar_after_local_drain(%b
 }
 
 // ----
-  s_load_dword s3, s[0:1], s2 offset:0
   ds_read_b32 v1, v0 offset:0
-  s_waitcnt vmcnt(63) lgkmcnt(0)
-  v_add_u32 v1, v1, v0
+  s_load_dword s3, s[0:1], s2 offset:0
   s_load_dword s4, s[0:1], s2 offset:4
   s_waitcnt vmcnt(63) lgkmcnt(0)
+  v_add_u32 v1, v1, v0
   s_add_u32 s0, s3, s4
   s_delay_alu instid0(VALU_DEP_1)
   v_add_u32 v1, s0, v1
@@ -319,7 +318,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @new_scalar_after_local_drain(%b
 
 // A planned partial LDS wait does not prove that a scalar-memory result in
 // the same LGKM counter has completed.
-// RUN: emit amdgpu-assembly @partial_local_wait_preserves_scalar_result strategy=source
+// RUN: emit amdgpu-assembly @partial_local_wait_preserves_scalar_result
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @partial_local_wait_preserves_scalar_result(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %address: reg<amdgpu.vgpr>) asm {
@@ -335,9 +334,9 @@ low.func.def target<amdgpu.rdna3.core>(@target) @partial_local_wait_preserves_sc
 }
 
 // ----
-  s_load_dword s3, s[0:1], s2 offset:0
   ds_read_b32 v1, v0 offset:0
   ds_read_b32 v2, v0 offset:4
+  s_load_dword s3, s[0:1], s2 offset:0
   s_waitcnt vmcnt(63) lgkmcnt(1)
   v_add_u32 v1, v1, v0
   s_waitcnt vmcnt(63) lgkmcnt(0)
@@ -351,7 +350,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @partial_local_wait_preserves_sc
 // ====
 
 // Completion credited on one predecessor cannot cover the pending arm.
-// RUN: emit amdgpu-assembly @coupled_completion_on_one_path strategy=source
+// RUN: emit amdgpu-assembly @coupled_completion_on_one_path
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @coupled_completion_on_one_path(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %address: reg<amdgpu.vgpr>, %limit: reg<amdgpu.sgpr>) asm {
@@ -391,7 +390,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @coupled_completion_on_one_path(
 
 // A planned drain of incoming LDS work also releases incoming scalar work
 // before another use in the receiving block.
-// RUN: emit amdgpu-assembly @coupled_incoming_completion strategy=source
+// RUN: emit amdgpu-assembly @coupled_incoming_completion
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @coupled_incoming_completion(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %address: reg<amdgpu.vgpr>) asm {
@@ -422,7 +421,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @coupled_incoming_completion(%ba
 
 // Loop-carried instances are pending again after the backedge. Coupled
 // completion of one iteration cannot release the next iteration's loads.
-// RUN: emit amdgpu-assembly @coupled_loop_carried_completion strategy=source
+// RUN: emit amdgpu-assembly @coupled_loop_carried_completion
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @coupled_loop_carried_completion(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %address: reg<amdgpu.vgpr>, %limit: reg<amdgpu.sgpr>) asm {
@@ -452,20 +451,20 @@ low.func.def target<amdgpu.rdna3.core>(@target) @coupled_loop_carried_completion
   ds_read_b32 v1, v0 offset:0
   s_mov_b32 s5, 0
   s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_mov_b32 s6, s4
 .Lbb1:
   s_waitcnt vmcnt(63) lgkmcnt(0)
   v_add_u32 v1, v1, v0
-  s_add_u32 s4, s4, s2
+  s_add_u32 s4, s6, s2
+  s_load_dword s6, s[0:1], s2 offset:0
+  s_mov_b32 s7, 1
+  s_add_u32 s5, s5, s7
   s_delay_alu instid0(VALU_DEP_1)
   v_add_u32 v1, s4, v1
+  s_cmp_lt_i32 s5, s3
   ds_write_b32 v0, v1 offset:4
-  s_load_dword s4, s[0:1], s2 offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
   ds_read_b32 v1, v0 offset:0
-  s_mov_b32 s6, 1
-  s_add_u32 s5, s5, s6
-  s_cmp_lt_i32 s5, s3
-  s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb3
 .Lbb2:
   s_branch .Lbb1
@@ -477,7 +476,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @coupled_loop_carried_completion
 // Completed register history cannot hide a later outstanding write. Reusing
 // its physical result in a successor still needs completion without an SSA
 // consumer, even after the producing block's linear lease interval has ended.
-// RUN: emit amdgpu-assembly @retired_history_before_pending_write strategy=source fixed=%pending:physical_register:4:1 fixed=%replacement:physical_register:4:1
+// RUN: emit amdgpu-assembly @retired_history_before_pending_write
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @retired_history_before_pending_write(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.vgpr>, %increment: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -497,17 +496,17 @@ low.func.def target<amdgpu.rdna3.core>(@target) @retired_history_before_pending_
   s_waitcnt vmcnt(63) lgkmcnt(0)
   ds_bpermute_b32 v3, v0, v3 offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  ds_bpermute_b32 v4, v0, v3 offset:0
+  ds_bpermute_b32 v0, v0, v3 offset:0
 .Lbb1:
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  v_add_u32 v4, v1, v2
+  v_add_u32 v0, v1, v2
   s_endpgm
 
 // ====
 
 // The incoming frontier carries a coupled full drain through an intermediate
 // block. The later scalar use needs no second LGKM wait.
-// RUN: emit amdgpu-assembly @transitive_coupled_completion strategy=source
+// RUN: emit amdgpu-assembly @transitive_coupled_completion
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @transitive_coupled_completion(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %address: reg<amdgpu.vgpr>) asm {
@@ -540,7 +539,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @transitive_coupled_completion(%
 
 // Separate hardware counters preserve the scalar dependency through the same
 // CFG: completing LDS in the intermediate block cannot complete SMEM.
-// RUN: emit amdgpu-assembly @transitive_independent_completion strategy=source
+// RUN: emit amdgpu-assembly @transitive_independent_completion
 amdgpu.target<gfx1201> @target
 
 low.func.def target<amdgpu.rdna4.core>(@target) @transitive_independent_completion(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %address: reg<amdgpu.vgpr>) asm {
@@ -574,7 +573,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @transitive_independent_completi
 
 // Both incoming paths complete the shared counter. The merge consumes their
 // resolved states, including completion of the unused scalar dependency.
-// RUN: emit amdgpu-assembly @transitive_completion_on_both_paths strategy=source
+// RUN: emit amdgpu-assembly @transitive_completion_on_both_paths
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @transitive_completion_on_both_paths(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %address: reg<amdgpu.vgpr>, %limit: reg<amdgpu.sgpr>) asm {
@@ -616,7 +615,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @transitive_completion_on_both_p
 
 // A later load repopulates the outgoing scalar counter after a coupled drain.
 // Completion of the earlier load cannot cover this new producer at the join.
-// RUN: emit amdgpu-assembly @transitive_completion_before_new_producer strategy=source
+// RUN: emit amdgpu-assembly @transitive_completion_before_new_producer
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @transitive_completion_before_new_producer(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %address: reg<amdgpu.vgpr>) asm {
@@ -638,11 +637,10 @@ low.func.def target<amdgpu.rdna3.core>(@target) @transitive_completion_before_ne
   s_load_dword s3, s[0:1], s2 offset:0
   ds_read_b32 v1, v0 offset:0
 .Lbb1:
+  s_load_dword s4, s[0:1], s2 offset:4
   s_waitcnt vmcnt(63) lgkmcnt(0)
   v_add_u32 v1, v1, v0
-  s_load_dword s4, s[0:1], s2 offset:4
 .Lbb2:
-  s_waitcnt vmcnt(63) lgkmcnt(0)
   s_add_u32 s0, s3, s4
   v_add_u32 v1, s0, v1
   ds_write_b32 v0, v1 offset:8
@@ -652,7 +650,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @transitive_completion_before_ne
 
 // A not-yet-processed incoming arm contributes conservative static state.
 // The earlier resolved arm alone cannot discharge the merged dependency.
-// RUN: emit amdgpu-assembly @completion_before_unresolved_predecessor strategy=source
+// RUN: emit amdgpu-assembly @completion_before_unresolved_predecessor
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @completion_before_unresolved_predecessor(%address: reg<amdgpu.vgpr>, %lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) asm {
@@ -688,7 +686,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @completion_before_unresolved_pr
 // ====
 
 // The authored bound completes the oldest ordered result, but not the latest.
-// RUN: emit amdgpu-assembly @authored_partial_retires_oldest strategy=source
+// RUN: emit amdgpu-assembly @authored_partial_retires_oldest
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @authored_partial_retires_oldest(%address: reg<amdgpu.vgpr>) asm {
@@ -706,6 +704,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @authored_partial_retires_oldest
   ds_read_b32 v2, v0 offset:4
   s_waitcnt vmcnt(63) lgkmcnt(1)
   v_add_u32 v1, v1, v0
+  s_waitcnt vmcnt(63) lgkmcnt(1)
   s_waitcnt vmcnt(63) lgkmcnt(0)
   s_delay_alu instid0(VALU_DEP_1)
   v_add_u32 v1, v1, v2
@@ -715,7 +714,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @authored_partial_retires_oldest
 // ====
 
 // The same ordered-prefix proof applies to a standalone LDS counter.
-// RUN: emit amdgpu-assembly @authored_partial_split_retires_oldest strategy=source
+// RUN: emit amdgpu-assembly @authored_partial_split_retires_oldest
 amdgpu.target<gfx1201> @target
 
 low.func.def target<amdgpu.rdna4.core>(@target) @authored_partial_split_retires_oldest(%address: reg<amdgpu.vgpr>) asm {
@@ -733,6 +732,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @authored_partial_split_retires_
   ds_read_b32 v2, v0 offset:4
   s_wait_dscnt dscnt(1)
   v_add_u32 v1, v1, v0
+  s_wait_dscnt dscnt(1)
   s_wait_dscnt dscnt(0)
   s_delay_alu instid0(VALU_DEP_1)
   v_add_u32 v1, v1, v2
@@ -742,7 +742,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @authored_partial_split_retires_
 // ====
 
 // A shared bound proves an ordered LDS prefix, not which scalar load finished.
-// RUN: emit amdgpu-assembly @authored_partial_preserves_scalar_result strategy=source
+// RUN: emit amdgpu-assembly @authored_partial_preserves_scalar_result
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @authored_partial_preserves_scalar_result(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %address: reg<amdgpu.vgpr>) asm {
@@ -759,13 +759,14 @@ low.func.def target<amdgpu.rdna3.core>(@target) @authored_partial_preserves_scal
 }
 
 // ----
-  s_load_dword s3, s[0:1], s2 offset:0
   ds_read_b32 v1, v0 offset:0
   ds_read_b32 v2, v0 offset:4
+  s_load_dword s3, s[0:1], s2 offset:0
   s_waitcnt vmcnt(63) lgkmcnt(1)
   v_add_u32 v1, v1, v0
   s_waitcnt vmcnt(63) lgkmcnt(0)
   s_add_u32 s0, s3, s2
+  s_waitcnt vmcnt(63) lgkmcnt(1)
   s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
   v_add_u32 v1, v1, v2
   v_add_u32 v1, s0, v1
@@ -776,7 +777,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @authored_partial_preserves_scal
 
 // Two scalar loads may complete out of order. A partial bound cannot retire
 // the oldest scalar identity, even with no other memory classes in flight.
-// RUN: emit amdgpu-assembly @authored_partial_scalar_order_is_unknown strategy=source
+// RUN: emit amdgpu-assembly @authored_partial_scalar_order_is_unknown
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @authored_partial_scalar_order_is_unknown(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -791,16 +792,16 @@ low.func.def target<amdgpu.rdna3.core>(@target) @authored_partial_scalar_order_i
 // ----
   s_load_dword s3, s[0:1], s2 offset:0
   s_load_dword s4, s[0:1], s2 offset:4
-  s_waitcnt vmcnt(63) lgkmcnt(1)
   s_waitcnt vmcnt(63) lgkmcnt(0)
   s_add_u32 s0, s3, s2
   s_add_u32 s0, s0, s4
+  s_waitcnt vmcnt(63) lgkmcnt(1)
   s_endpgm
 
 // ====
 
 // Same-class VMEM result order is a target fact, not implied by a wait opcode.
-// RUN: emit amdgpu-assembly @authored_partial_ordered_vector_results strategy=source
+// RUN: emit amdgpu-assembly @authored_partial_ordered_vector_results
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @authored_partial_ordered_vector_results(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
@@ -817,6 +818,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @authored_partial_ordered_vector
   global_load_b32 v2, v0, s[0:1] offset:4
   s_waitcnt vmcnt(1) lgkmcnt(63)
   v_add_u32 v0, v1, v0
+  s_waitcnt vmcnt(1) lgkmcnt(63)
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_delay_alu instid0(VALU_DEP_1)
   v_add_u32 v0, v0, v2
@@ -826,7 +828,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @authored_partial_ordered_vector
 
 // Counter completion is ordered even when physical result writes are not.
 // The authored bound completes the older result without a duplicate wait.
-// RUN: emit amdgpu-assembly @authored_partial_ordered_completion strategy=source
+// RUN: emit amdgpu-assembly @authored_partial_ordered_completion
 amdgpu.target<gfx1201> @target
 
 low.func.def target<amdgpu.rdna4.core>(@target) @authored_partial_ordered_completion(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
@@ -843,6 +845,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @authored_partial_ordered_comple
   global_load_b32 v2, v0, s[0:1] offset:4
   s_wait_loadcnt loadcnt(1)
   v_add_u32 v0, v1, v0
+  s_wait_loadcnt loadcnt(1)
   s_wait_loadcnt loadcnt(0)
   s_delay_alu instid0(VALU_DEP_1)
   v_add_u32 v0, v0, v2
@@ -852,7 +855,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @authored_partial_ordered_comple
 
 // A block with no local producer still has incoming work. A nonzero hardware
 // bound must not be normalized to the local count of zero and become a reset.
-// RUN: emit amdgpu-assembly @authored_partial_preserves_incoming_work strategy=source
+// RUN: emit amdgpu-assembly @authored_partial_preserves_incoming_work
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @authored_partial_preserves_incoming_work(%address: reg<amdgpu.vgpr>) asm {
@@ -881,7 +884,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @authored_partial_preserves_inco
 
 // Bounds greater than the local producer count and all-ones no-wait fields
 // cannot claim completion. Repeating them does not change that fact.
-// RUN: emit amdgpu-assembly @authored_loose_bounds_preserve_work strategy=source
+// RUN: emit amdgpu-assembly @authored_loose_bounds_preserve_work
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @authored_loose_bounds_preserve_work(%address: reg<amdgpu.vgpr>) asm {
@@ -908,7 +911,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @authored_loose_bounds_preserve_
 
 // Retirement continues across partial bounds and new issues in the same epoch.
 // A later full drain starts a new epoch with independent pending work.
-// RUN: emit amdgpu-assembly @authored_partial_then_new_work strategy=source
+// RUN: emit amdgpu-assembly @authored_partial_then_new_work
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @authored_partial_then_new_work(%address: reg<amdgpu.vgpr>) asm {
@@ -932,12 +935,15 @@ low.func.def target<amdgpu.rdna3.core>(@target) @authored_partial_then_new_work(
   ds_read_b32 v1, v0 offset:0
   ds_read_b32 v2, v0 offset:4
   s_waitcnt vmcnt(63) lgkmcnt(1)
-  ds_read_b32 v3, v0 offset:8
   v_add_u32 v1, v1, v0
   s_waitcnt vmcnt(63) lgkmcnt(1)
-  s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_1) | instid1(VALU_DEP_1)
+  ds_read_b32 v3, v0 offset:8
+  s_waitcnt vmcnt(63) lgkmcnt(1)
+  s_delay_alu instid0(VALU_DEP_1)
   v_add_u32 v1, v1, v2
+  s_waitcnt vmcnt(63) lgkmcnt(1)
   s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_delay_alu instid0(VALU_DEP_1)
   v_add_u32 v1, v1, v3
   ds_read_b32 v2, v0 offset:12
 .Lbb1:
@@ -951,7 +957,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @authored_partial_then_new_work(
 // Bounds between and after trailing issues shorten the backedge's pending
 // suffix without invalidating its producer upper bound. Staged waits remain
 // at the two fragment consumers, with no backedge copies forcing completion.
-// RUN: emit amdgpu-assembly @authored_partial_loop_suffix strategy=source
+// RUN: emit amdgpu-assembly @authored_partial_loop_suffix
 amdgpu.target<gfx1100> @target {subgroup_size = 32}
 
 low.func.def target<amdgpu.rdna3.core>(@target) @authored_partial_loop_suffix(%address: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr x8>, %initial_acc: reg<amdgpu.vgpr x8>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr x8>) asm {
@@ -1008,7 +1014,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @authored_partial_loop_suffix(%a
 
 // A partial threshold has its own progress action. It is neither elapsed work
 // nor a full reset, including for a coupled counter with no local producers.
-// RUN: emit amdgpu-wait-counter-plan-json @authored_bound_progress strategy=source
+// RUN: emit amdgpu-wait-counter-plan-json @authored_bound_progress
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @authored_bound_progress(%address: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -1020,13 +1026,13 @@ low.func.def target<amdgpu.rdna3.core>(@target) @authored_bound_progress(%addres
 }
 
 // ----
-{"format":"loom.low.packet_hazard_plan.v1","function":"authored_bound_progress","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":4,"hazard_count":1,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":2,"packet":2,"node":2,"block":0,"scheduled_ordinal":2,"class_id":3,"class_name":"amdgpu.lds","action":"bound","units":1},{"index":3,"packet":2,"node":2,"block":0,"scheduled_ordinal":2,"class_id":4,"class_name":"amdgpu.smem","action":"bound","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":5,"reason_name":"amdgpu.read_result_reuse","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":1,"consumer_node":3,"insertion_packet":3,"block":0,"scheduled_ordinal":3,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":1,"observed":0,"residual":1}]}
+{"format":"loom.low.packet_hazard_plan.v1","function":"authored_bound_progress","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":4,"hazard_count":1,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":2,"packet":3,"node":2,"block":0,"scheduled_ordinal":3,"class_id":3,"class_name":"amdgpu.lds","action":"bound","units":1},{"index":3,"packet":3,"node":2,"block":0,"scheduled_ordinal":3,"class_id":4,"class_name":"amdgpu.smem","action":"bound","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":5,"reason_name":"amdgpu.read_result_reuse","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":1,"consumer_node":3,"insertion_packet":2,"block":0,"scheduled_ordinal":2,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":1,"observed":0,"residual":1}]}
 
 // ====
 
 // A counter instruction orders issue but its partial threshold cannot hide
 // the pending memory dependency from a later read.
-// RUN: emit amdgpu-assembly @partial_wait_memory_dependency strategy=source
+// RUN: emit amdgpu-assembly @partial_wait_memory_dependency
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @partial_wait_memory_dependency(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {

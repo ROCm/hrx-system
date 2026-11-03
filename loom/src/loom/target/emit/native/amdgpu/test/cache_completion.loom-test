@@ -1,6 +1,6 @@
 // Scalar invalidation must complete before a following read. The return also
 // needs the separate completion of the load issued after that invalidation.
-// RUN: emit amdgpu-assembly @scalar_invalidate strategy=source
+// RUN: emit amdgpu-assembly @scalar_invalidate
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @scalar_invalidate(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -19,7 +19,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @scalar_invalidate(%base: reg<
 // ====
 
 // A partial scalar wait does not establish completion of an invalidation.
-// RUN: emit amdgpu-assembly @partial_scalar_invalidate strategy=source
+// RUN: emit amdgpu-assembly @partial_scalar_invalidate
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @partial_scalar_invalidate(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -40,7 +40,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @partial_scalar_invalidate(%base
 // ====
 
 // An authored full wait covers the invalidation without a second planned wait.
-// RUN: emit amdgpu-assembly @completed_scalar_invalidate strategy=source
+// RUN: emit amdgpu-assembly @completed_scalar_invalidate
 amdgpu.target<gfx1201> @target
 
 low.func.def target<amdgpu.rdna4.core>(@target) @completed_scalar_invalidate(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -63,7 +63,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @completed_scalar_invalidate(%ba
 // ====
 
 // Only one path completes the invalidation, so the join must wait before reading.
-// RUN: emit amdgpu-assembly @scalar_invalidate_join strategy=source
+// RUN: emit amdgpu-assembly @scalar_invalidate_join
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @scalar_invalidate_join(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %condition: reg<amdgpu.scc>) -> (reg<amdgpu.sgpr>) asm {
@@ -95,7 +95,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @scalar_invalidate_join(%base:
 // ====
 
 // The completed read from a previous iteration cannot complete a new invalidation.
-// RUN: emit amdgpu-assembly @scalar_invalidate_loop strategy=source
+// RUN: emit amdgpu-assembly @scalar_invalidate_loop
 amdgpu.target<gfx1250> @target
 
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @scalar_invalidate_loop(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %wanted: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -128,7 +128,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @scalar_invalidate_loop(
 
 // CDNA scalar writeback and invalidation use LGKM even without an SSA result.
 // Each control drains earlier work before producing its own completion event.
-// RUN: emit amdgpu-assembly @scalar_cache_controls strategy=source
+// RUN: emit amdgpu-assembly @scalar_cache_controls
 amdgpu.target<gfx942> @target
 
 low.func.def target<amdgpu.cdna3.core>(@target) @scalar_cache_controls(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -160,7 +160,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @scalar_cache_controls(%base: re
 
 // Discarding two lines increments LGKM twice, but an unordered scalar operation
 // always needs a zero wait. A partial wait cannot release the later read.
-// RUN: emit amdgpu-assembly @scalar_cache_discard strategy=source
+// RUN: emit amdgpu-assembly @scalar_cache_discard
 amdgpu.target<gfx950> @target
 
 low.func.def target<amdgpu.cdna4.core>(@target) @scalar_cache_discard(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -187,7 +187,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @scalar_cache_discard(%base: reg
 // ====
 
 // Vector writeback must complete before kernel exit, even across a block edge.
-// RUN: emit amdgpu-assembly @vector_writeback_exit strategy=source
+// RUN: emit amdgpu-assembly @vector_writeback_exit
 amdgpu.target<gfx1201> @target
 
 low.func.def target<amdgpu.rdna4.core>(@target) @vector_writeback_exit() asm {
@@ -207,7 +207,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @vector_writeback_exit() asm {
 
 // Invalidation participates in LOAD completion order without an SSA result.
 // It preserves partial waits for following loads and needs no wait before them.
-// RUN: emit amdgpu-assembly @vector_invalidate_partial_loads strategy=source
+// RUN: emit amdgpu-assembly @vector_invalidate_partial_loads
 amdgpu.target<gfx1201> @target
 
 low.func.def target<amdgpu.rdna4.core>(@target) @vector_invalidate_partial_loads(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
@@ -233,7 +233,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @vector_invalidate_partial_loads
 // ====
 
 // CDNA invalidation contributes to VM_CNT while keeping following loads ordered.
-// RUN: emit amdgpu-assembly @buffer_invalidate_partial_loads strategy=source
+// RUN: emit amdgpu-assembly @buffer_invalidate_partial_loads
 amdgpu.target<gfx942> @target
 
 low.func.def target<amdgpu.cdna3.core>(@target) @buffer_invalidate_partial_loads(%resource: reg<amdgpu.sgpr x4>, %address: reg<amdgpu.vgpr>, %offset: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -259,7 +259,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @buffer_invalidate_partial_loads
 
 // CDNA writeback produces a fresh VM_CNT event after its barrier-before drain.
 // A successor invalidation must wait for that event, then produces its own.
-// RUN: emit amdgpu-assembly @buffer_writeback_invalidate strategy=source
+// RUN: emit amdgpu-assembly @buffer_writeback_invalidate
 amdgpu.target<gfx950> @target
 
 low.func.def target<amdgpu.cdna4.core>(@target) @buffer_writeback_invalidate() asm {
@@ -283,7 +283,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @buffer_writeback_invalidate() a
 // ====
 
 // Only one predecessor completes writeback. The exit must complete the other.
-// RUN: emit amdgpu-assembly @vector_writeback_join strategy=source
+// RUN: emit amdgpu-assembly @vector_writeback_join
 amdgpu.target<gfx1250> @target
 
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @vector_writeback_join(%condition: reg<amdgpu.scc>) asm {
@@ -313,7 +313,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @vector_writeback_join(%
 
 // Cache controls have no address-storage leases. The barrier still preserves
 // an authored XCNT wait after the control instead of reusing an earlier proof.
-// RUN: emit amdgpu-assembly @invalidate_explicit_source_wait strategy=source
+// RUN: emit amdgpu-assembly @invalidate_explicit_source_wait
 amdgpu.target<gfx1250> @target
 
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @invalidate_explicit_source_wait() asm {
@@ -334,7 +334,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @invalidate_explicit_sou
 
 // Native words include automatic LOAD completion before writeback and STORE
 // completion before exit. Cache controls have no scalar address operand.
-// RUN: emit amdgpu-native-words @vector_cache_native_words strategy=source
+// RUN: emit amdgpu-native-words @vector_cache_native_words
 amdgpu.target<gfx1201> @target
 
 low.func.def target<amdgpu.rdna4.core>(@target) @vector_cache_native_words() asm {
@@ -357,7 +357,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @vector_cache_native_words() asm
 // ====
 
 // The corresponding CDNA controls and both completion waits encode with VM_CNT.
-// RUN: emit amdgpu-native-words @buffer_cache_native_words strategy=source
+// RUN: emit amdgpu-native-words @buffer_cache_native_words
 amdgpu.target<gfx942> @target
 
 low.func.def target<amdgpu.cdna3.core>(@target) @buffer_cache_native_words() asm {

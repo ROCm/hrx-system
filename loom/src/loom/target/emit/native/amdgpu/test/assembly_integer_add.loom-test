@@ -1,6 +1,6 @@
 // Carry chains preserve SCC while encoding zero and the largest unsigned
 // inline constant in either source position. Words are checked with LLVM MC.
-// RUN: emit amdgpu-native-words @add_inline strategy=source
+// RUN: emit amdgpu-native-words @add_inline
 
 amdgpu.target<gfx942> @target
 

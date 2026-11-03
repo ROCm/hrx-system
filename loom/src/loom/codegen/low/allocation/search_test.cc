@@ -75,10 +75,11 @@ class LowAllocationSearchTest : public ::testing::Test {
   loom_context_t context_;
 };
 
-loom_liveness_value_class_t RegisterValueClass(uint64_t descriptor_set_id) {
+loom_liveness_value_class_t RegisterValueClass(uint64_t descriptor_set_id,
+                                               uint16_t register_class_id = 0) {
   loom_liveness_value_class_t value_class = {
       .type_kind = LOOM_TYPE_REGISTER,
-      .register_class_id = 0,
+      .register_class_id = register_class_id,
       .register_descriptor_set_stable_id = descriptor_set_id,
   };
   return value_class;
@@ -168,12 +169,12 @@ loom_liveness_block_info_t Block(uint32_t start_point, uint32_t end_point) {
 }
 
 loom_value_id_t DefineValue(loom_module_t* module, uint64_t descriptor_set_id,
-                            uint32_t unit_count) {
+                            uint32_t unit_count,
+                            uint16_t register_class_id = 0) {
   loom_value_id_t value_id = LOOM_VALUE_ID_INVALID;
   IREE_CHECK_OK(loom_module_define_value(
       module,
-      loom_low_register_type(descriptor_set_id, /*register_class_id=*/0,
-                             unit_count),
+      loom_low_register_type(descriptor_set_id, register_class_id, unit_count),
       &value_id));
   return value_id;
 }
@@ -751,6 +752,192 @@ TEST_F(LowAllocationSearchTest, ExplicitCandidateOrderAndSoftPreference) {
                                           /*max_units=*/1, /*relation=*/nullptr,
                                           &descriptor_set, &retained),
             UINT32_MAX);
+  loom_module_free(module);
+}
+
+TEST_F(LowAllocationSearchTest,
+       RejectsRegisterOrdinalWhoseUnassignedPeerIsOccupied) {
+  loom_module_t* module = AllocateModule();
+  const uint64_t descriptor_set_id = 37;
+  const loom_value_id_t candidate_value =
+      DefineValue(module, descriptor_set_id, /*unit_count=*/1,
+                  /*register_class_id=*/0);
+  const loom_value_id_t peer_value =
+      DefineValue(module, descriptor_set_id, /*unit_count=*/1,
+                  /*register_class_id=*/1);
+  const loom_value_id_t blocker_value =
+      DefineValue(module, descriptor_set_id, /*unit_count=*/1,
+                  /*register_class_id=*/1);
+  loom_module_value_ordinal_scratch_acquire(module);
+  loom_module_value_ordinal_scratch_set(module, candidate_value,
+                                        /*ordinal=*/0);
+  loom_module_value_ordinal_scratch_set(module, peer_value, /*ordinal=*/1);
+  loom_module_value_ordinal_scratch_set(module, blocker_value, /*ordinal=*/2);
+
+  const loom_liveness_value_class_t candidate_class =
+      RegisterValueClass(descriptor_set_id, /*register_class_id=*/0);
+  const loom_liveness_value_class_t peer_class =
+      RegisterValueClass(descriptor_set_id, /*register_class_id=*/1);
+  const loom_liveness_interval_t intervals[] = {
+      Interval(candidate_value, /*start=*/2, /*end=*/6, candidate_class,
+               /*unit_count=*/1),
+      Interval(peer_value, /*start=*/2, /*end=*/6, peer_class,
+               /*unit_count=*/1),
+      Interval(blocker_value, /*start=*/0, /*end=*/10, peer_class,
+               /*unit_count=*/1),
+  };
+  const uint32_t interval_indices[] = {0, 1, 2};
+  const loom_value_id_t value_ids[] = {candidate_value, peer_value,
+                                       blocker_value};
+  const loom_liveness_block_info_t blocks[] = {
+      Block(/*start_point=*/0, /*end_point=*/12),
+  };
+  const loom_liveness_analysis_t liveness = {
+      .blocks = blocks,
+      .block_count = IREE_ARRAYSIZE(blocks),
+      .intervals = intervals,
+      .interval_count = IREE_ARRAYSIZE(intervals),
+      .value_ids = value_ids,
+      .value_count = IREE_ARRAYSIZE(value_ids),
+      .value_interval_indices = interval_indices,
+  };
+  loom_low_allocation_unit_liveness_value_t unit_values[] = {
+      {0, 2}, {1, 2}, {2, 0}};
+  uint32_t unit_end_points[] = {6, 6, 10};
+  uint64_t edge_handoff_words[] = {0};
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .values = unit_values,
+      .end_points = unit_end_points,
+      .point_count = IREE_ARRAYSIZE(unit_end_points),
+      .values_with_incomplete_storage_segments = {liveness.value_count,
+                                                  edge_handoff_words},
+  };
+
+  loom_low_reg_class_t reg_classes[] = {
+      RegClass(/*allocatable_count=*/2,
+               LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
+                   LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS),
+      RegClass(/*allocatable_count=*/2,
+               LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
+                   LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS),
+  };
+  reg_classes[0].physical_register_candidate_start = 0;
+  reg_classes[0].candidate_lookup = {
+      .ordinal_start = 0,
+      .register_base = 0,
+      .register_count = 2,
+  };
+  reg_classes[0].physical_atomic_unit_count = 1;
+  reg_classes[1].physical_register_candidate_start = 2;
+  reg_classes[1].candidate_lookup = {
+      .ordinal_start = 2,
+      .register_base = 2,
+      .register_count = 2,
+  };
+  reg_classes[1].physical_atomic_unit_count = 1;
+  const loom_low_physical_register_t physical_registers[] = {
+      {0, 0, 1, 0}, {0, 1, 1, 0}, {0, 2, 1, 0}, {0, 3, 1, 0}};
+  const uint16_t physical_atomic_units[] = {0, 1, 2, 3};
+  const uint16_t candidate_ordinals[] = {0, 1, 0, 1};
+  const uint16_t candidate_ids[] = {0, 1, 2, 3};
+  const uint16_t allocation_ordinals[] = {0, 1, 0, 1};
+  loom_low_descriptor_set_t descriptor_set = {
+      .stable_id = descriptor_set_id,
+      .reg_classes = reg_classes,
+      .reg_class_count = IREE_ARRAYSIZE(reg_classes),
+      .physical_registers = physical_registers,
+      .physical_register_count = IREE_ARRAYSIZE(physical_registers),
+      .physical_register_candidate_ids = candidate_ids,
+      .physical_register_allocation_ordinals = allocation_ordinals,
+      .physical_register_candidate_count = IREE_ARRAYSIZE(candidate_ids),
+      .physical_register_candidate_ordinals = candidate_ordinals,
+      .physical_register_candidate_ordinal_count =
+          IREE_ARRAYSIZE(candidate_ordinals),
+      .physical_register_atomic_units = physical_atomic_units,
+      .physical_register_atomic_unit_count =
+          IREE_ARRAYSIZE(physical_atomic_units),
+      .physical_register_unit_count = IREE_ARRAYSIZE(physical_atomic_units),
+  };
+  const loom_low_resolved_target_t target = ResolvedTarget(&descriptor_set);
+  uint32_t max_assigned_location_end_by_reg_class[] = {0, 0};
+  loom_low_allocation_target_constraints_t target_constraints = {
+      .target = &target,
+      .max_assigned_location_end_by_reg_class =
+          max_assigned_location_end_by_reg_class,
+  };
+
+  const loom_low_allocation_assignment_t assignments[] = {
+      Assignment(blocker_value, /*start=*/0, /*end=*/10, peer_class,
+                 /*location_base=*/2, /*location_count=*/1,
+                 /*unit_point_start=*/2),
+  };
+  const uint32_t assignment_indices_by_value_ordinal[] = {UINT32_MAX,
+                                                          UINT32_MAX, 0};
+  const loom_low_allocation_assignment_map_t assignment_map = {
+      .module = module,
+      .liveness = &liveness,
+      .assignments = assignments,
+      .assignment_count = IREE_ARRAYSIZE(assignments),
+      .assignment_indices_by_value_ordinal =
+          assignment_indices_by_value_ordinal,
+  };
+  loom_low_allocation_active_set_t active_set = {};
+  IREE_ASSERT_OK(loom_low_allocation_active_set_initialize(
+      &descriptor_set, &unit_liveness, /*assignment_capacity=*/1,
+      /*program_point_count=*/13,
+      /*unit_capacity=*/IREE_ARRAYSIZE(physical_atomic_units), &arena_,
+      &active_set));
+  loom_low_allocation_active_set_insert(
+      &active_set, &descriptor_set, assignments, IREE_ARRAYSIZE(assignments),
+      /*assignment_index=*/0);
+
+  loom_low_placement_relation_t relation = {
+      .result_ordinal = 0,
+      .source_ordinal = 1,
+      .unit_count = 1,
+      .kind = LOOM_LOW_PLACEMENT_RELATION_SAME_REGISTER_ORDINAL,
+      .flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD,
+  };
+  const loom_low_placement_relation_range_t result_ranges[] = {
+      {0, 1}, {0, 0}, {0, 0}};
+  const uint32_t source_relation_indices[] = {0};
+  const loom_low_placement_relation_range_t source_ranges[] = {
+      {0, 0}, {0, 1}, {0, 0}};
+  const loom_low_placement_table_t placement = {
+      .value_ids = value_ids,
+      .value_count = IREE_ARRAYSIZE(value_ids),
+      .relations = &relation,
+      .relation_count = 1,
+      .location_relation_count = 1,
+      .hard_location_relation_count = 1,
+      .ranges_by_result_ordinal = result_ranges,
+      .relation_indices_by_source_ordinal = source_relation_indices,
+      .ranges_by_source_ordinal = source_ranges,
+  };
+  loom_low_allocation_storage_lease_state_t storage_leases = {};
+  loom_low_allocation_search_context_t context = {
+      .module = module,
+      .descriptor_set = &descriptor_set,
+      .liveness = &liveness,
+      .unit_liveness = &unit_liveness,
+      .target_constraints = &target_constraints,
+      .assignment_map = &assignment_map,
+      .placement = &placement,
+      .active_set = &active_set,
+      .storage_leases = &storage_leases,
+  };
+
+  uint32_t location_base = UINT32_MAX;
+  EXPECT_TRUE(loom_low_allocation_search_find_free_location(
+      &context, &intervals[0], Capacity(/*max_units=*/2), &location_base));
+  // Candidate zero itself is free, but it would commit the unassigned peer to
+  // the occupied physical register 2. The complete ordinal-one pair is free.
+  EXPECT_EQ(location_base, 1u);
+
+  loom_module_value_ordinal_scratch_clear(module, candidate_value);
+  loom_module_value_ordinal_scratch_clear(module, peer_value);
+  loom_module_value_ordinal_scratch_clear(module, blocker_value);
+  loom_module_value_ordinal_scratch_release(module);
   loom_module_free(module);
 }
 

@@ -23,26 +23,3 @@ func.def @liveness_symbol_anchor() {
 
 // ERROR@+1: SYMBOL/003 {symbol_name="liveness_wrong_kind", expected_kind="function body"}
 test.target<low_core> @liveness_wrong_kind
-
-// ====
-
-// Fixed binding lists are sized from their complete RUN options.
-// RUN: emit low-allocation-summary @many_fixed_values fixed=%value_0:target_id:7:1 fixed=%value_1:target_id:9:1 fixed=%value_2:target_id:11:1 fixed=%value_3:target_id:13:1 fixed=%value_4:target_id:15:1 fixed=%value_5:target_id:17:1 fixed=%value_6:target_id:19:1 fixed=%value_7:target_id:21:1 fixed=%value_8:target_id:23:1 fixed=%value_9:target_id:25:1 fixed=%value_10:target_id:27:1 fixed=%value_11:target_id:29:1 fixed=%value_12:target_id:31:1 fixed=%value_13:target_id:33:1 fixed=%value_14:target_id:35:1 fixed=%value_15:target_id:37:1 fixed=%value_16:target_id:39:1 fixed=%value_17:target_id:41:1
-
-test.target<low_core> @target
-
-low.func.def target<test.low.core>(@target) @many_fixed_values(%value_0: reg<test.i32>, %value_1: reg<test.i32>, %value_2: reg<test.i32>, %value_3: reg<test.i32>, %value_4: reg<test.i32>, %value_5: reg<test.i32>, %value_6: reg<test.i32>, %value_7: reg<test.i32>, %value_8: reg<test.i32>, %value_9: reg<test.i32>, %value_10: reg<test.i32>, %value_11: reg<test.i32>, %value_12: reg<test.i32>, %value_13: reg<test.i32>, %value_14: reg<test.i32>, %value_15: reg<test.i32>, %value_16: reg<test.i32>, %value_17: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
-  return %value_0, %value_1, %value_2, %value_3, %value_4, %value_5, %value_6, %value_7, %value_8, %value_9, %value_10, %value_11, %value_12, %value_13, %value_14, %value_15, %value_16, %value_17
-}
-
-// ----
-low-allocation @many_fixed_values
-target: target
-descriptor_set: test.low.core
-mode: virtual
-assignments: 18
-remarks: 0
-spills: 0
-copies: coalesced=0 materialized=0
-classes:
-  test.i32: assignments=18 units=18 target_ids=42 physical=0 spill_slots=0 unassigned=0

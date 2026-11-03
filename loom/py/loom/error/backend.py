@@ -845,43 +845,6 @@ ERR_BACKEND_036 = ErrorDef(
     fix_hint="Provide at most one fixed allocation request per SSA value",
 )
 
-# ERR_BACKEND_037: Fixed allocation selector is unresolved.
-ERR_BACKEND_037 = ErrorDef(
-    domain=ErrorDomain.BACKEND,
-    code=37,
-    severity=Severity.ERROR,
-    summary="Fixed allocation selector is unresolved.",
-    message=(
-        "cannot apply fixed allocation request for '@{function_name}': "
-        "selector '%{value_name}' does not name a value in the low function"
-    ),
-    params=(
-        ErrorParam("function_name", ParamKind.STRING),
-        ErrorParam("value_name", ParamKind.STRING),
-    ),
-    fix_hint="Use an SSA value name or numeric value id from the selected low function",
-)
-
-# ERR_BACKEND_038: Fixed allocation selector is ambiguous.
-ERR_BACKEND_038 = ErrorDef(
-    domain=ErrorDomain.BACKEND,
-    code=38,
-    severity=Severity.ERROR,
-    summary="Fixed allocation selector is ambiguous.",
-    message=(
-        "cannot apply fixed allocation request for '@{function_name}': "
-        "selector '%{value_name}' matches value ids {first_value_id} and "
-        "{second_value_id}"
-    ),
-    params=(
-        ErrorParam("function_name", ParamKind.STRING),
-        ErrorParam("value_name", ParamKind.STRING),
-        ErrorParam("first_value_id", ParamKind.U32),
-        ErrorParam("second_value_id", ParamKind.U32),
-    ),
-    fix_hint="Use a numeric value id or give the intended SSA value a unique name",
-)
-
 # ERR_BACKEND_039: Schedule pressure cliff references an unknown register class.
 ERR_BACKEND_039 = ErrorDef(
     domain=ErrorDomain.BACKEND,
@@ -1361,8 +1324,6 @@ ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_034,
     ERR_BACKEND_035,
     ERR_BACKEND_036,
-    ERR_BACKEND_037,
-    ERR_BACKEND_038,
     ERR_BACKEND_039,
     ERR_BACKEND_040,
     ERR_BACKEND_041,

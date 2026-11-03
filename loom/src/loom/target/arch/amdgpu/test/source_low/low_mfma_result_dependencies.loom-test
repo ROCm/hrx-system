@@ -1,5 +1,5 @@
 // Result consumers select distinct MFMA pipeline and forwarding windows.
-// RUN: emit amdgpu-assembly @cdna2_dgemm_memory strategy=source
+// RUN: emit amdgpu-assembly @cdna2_dgemm_memory
 
 amdgpu.target<gfx90a> @target
 
@@ -19,7 +19,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_dgemm_memory(%lhs: reg<am
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna2_dgemm_arithmetic strategy=source
+// RUN: emit amdgpu-assembly @cdna2_dgemm_arithmetic
 
 amdgpu.target<gfx90a> @target
 
@@ -37,7 +37,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_dgemm_arithmetic(%lhs: re
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna4_dgemm_memory strategy=source
+// RUN: emit amdgpu-assembly @cdna4_dgemm_memory
 
 amdgpu.target<gfx950> @target
 
@@ -57,7 +57,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @cdna4_dgemm_memory(%lhs: reg<am
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna4_dgemm_arithmetic strategy=source
+// RUN: emit amdgpu-assembly @cdna4_dgemm_arithmetic
 
 amdgpu.target<gfx950> @target
 
@@ -76,7 +76,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @cdna4_dgemm_arithmetic(%lhs: re
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna2_dgemm_lds strategy=source
+// RUN: emit amdgpu-assembly @cdna2_dgemm_lds
 
 amdgpu.target<gfx90a> @target
 
@@ -95,7 +95,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_dgemm_lds(%lhs: reg<amdgp
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna2_small_dgemm_chain strategy=source
+// RUN: emit amdgpu-assembly @cdna2_small_dgemm_chain
 
 amdgpu.target<gfx90a> @target
 
@@ -113,7 +113,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_small_dgemm_chain(%lhs: r
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna2_two_pass_chain strategy=source
+// RUN: emit amdgpu-assembly @cdna2_two_pass_chain
 
 amdgpu.target<gfx90a> @target
 
@@ -130,7 +130,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_two_pass_chain(%lhs: reg<
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna3_two_pass_chain strategy=source
+// RUN: emit amdgpu-assembly @cdna3_two_pass_chain
 
 amdgpu.target<gfx942> @target
 
@@ -148,7 +148,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @cdna3_two_pass_chain(%lhs: reg<
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna3_sgemm_memory strategy=source
+// RUN: emit amdgpu-assembly @cdna3_sgemm_memory
 
 amdgpu.target<gfx942> @target
 
@@ -167,7 +167,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @cdna3_sgemm_memory(%lhs: reg<am
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @different_mfma_accumulator_chain strategy=source
+// RUN: emit amdgpu-assembly @different_mfma_accumulator_chain
 
 amdgpu.target<gfx942> @target
 
@@ -186,7 +186,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @different_mfma_accumulator_chai
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna4_same_input_formats strategy=source
+// RUN: emit amdgpu-assembly @cdna4_same_input_formats
 
 amdgpu.target<gfx950> @target
 
@@ -203,7 +203,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @cdna4_same_input_formats(%lhs: 
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna4_changed_input_formats strategy=source
+// RUN: emit amdgpu-assembly @cdna4_changed_input_formats
 
 amdgpu.target<gfx950> @target
 
@@ -221,7 +221,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @cdna4_changed_input_formats(%lh
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna4_matrix_result_as_scale strategy=source
+// RUN: emit amdgpu-assembly @cdna4_matrix_result_as_scale
 
 amdgpu.target<gfx950> @target
 

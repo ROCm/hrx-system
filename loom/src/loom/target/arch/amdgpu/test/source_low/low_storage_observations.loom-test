@@ -161,8 +161,8 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @nested_tuple_preserves_compon
   s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb3
 .Lbb2:
-  s_add_u32 s1, s1, 1
   v_add_u32 v4, v4, v3
+  s_add_u32 s1, s1, 1
   v_mov_b32 v5, v1
   s_branch .Lbb1
 .Lbb3:

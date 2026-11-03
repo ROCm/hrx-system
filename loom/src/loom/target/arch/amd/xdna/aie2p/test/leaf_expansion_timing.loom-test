@@ -96,7 +96,7 @@ coissued components: 7
 // The byte store reads r0 at cycle 7, so reusing r0 for the add's cycle-1 write
 // waits until cycle 6. That independent stall does not move the store-to-release
 // deadline from cycle 10. RET and its delay window end at cycle 14.
-// RUN: emit aie2p-leaf @independent_deadline fixed=%old:physical_register:253:1 fixed=%next:physical_register:253:1 report=emission
+// RUN: emit aie2p-leaf @independent_deadline report=emission
 
 aie2p.target<core> @target
 
@@ -117,7 +117,7 @@ coissued components: 0
 
 // A second store consumes the delayed add at cycle 7. This time release must
 // follow that actual producer at cycle 17, including the full memory separation.
-// RUN: emit aie2p-leaf @dependent_deadline fixed=%old:physical_register:253:1 fixed=%next:physical_register:253:1 report=emission
+// RUN: emit aie2p-leaf @dependent_deadline report=emission
 
 aie2p.target<core> @target
 
@@ -315,7 +315,7 @@ code: 98 2b 06 00 98 6b 16 00 b8 18 b0 1f 00 00 00 00 00 00 00 00 00 00 18 36 0a
 
 // The store still reads r0 at stage seven. Its following stage-one write must
 // wait six cycles: accepting signed timing never drops a positive WAR bound.
-// RUN: emit aie2p-leaf @immediate_overwrite fixed=%old:physical_register:253:1 fixed=%next:physical_register:253:1 report=code
+// RUN: emit aie2p-leaf @immediate_overwrite report=code
 
 aie2p.target<core> @target
 

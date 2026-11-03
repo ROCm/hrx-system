@@ -5,7 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // Global, buffer and private packets address accumulator payloads directly.
-// RUN: emit amdgpu-assembly @memory_banks strategy=source
+// RUN: emit amdgpu-assembly @memory_banks
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @memory_banks(%address: reg<amdgpu.vgpr x2>, %offset: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %resource: reg<amdgpu.sgpr x4>, %soffset: reg<amdgpu.sgpr>) asm {
@@ -35,15 +35,15 @@ low.func.def target<amdgpu.cdna2.core>(@target) @memory_banks(%address: reg<amdg
   global_store_short v2, acc1, s[0:1] offset:2
   scratch_store_dword off, acc2, s2 offset:4
   global_store_dwordx2 v[0:1], acc[4:5], off offset:8
-  buffer_store_dwordx3 acc[6:8], v2, s[4:7], s2 offen offset:16
   scratch_store_dwordx4 v2, acc[12:15], off offset:32
+  buffer_store_dwordx3 acc[6:8], v2, s[4:7], s2 offen offset:16
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
 
 // Result and update data share the physical selector, including compare pairs.
-// RUN: emit amdgpu-native-words @atomic_banks strategy=source waits=none
+// RUN: emit amdgpu-native-words @atomic_banks
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @atomic_banks(%offset: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %pair: reg<amdgpu.agpr x2>, %value: reg<amdgpu.agpr>) asm {
@@ -55,37 +55,19 @@ low.func.def target<amdgpu.cdna2.core>(@target) @atomic_banks(%offset: reg<amdgp
 // ----
 0xDD058000
 0x00800000
+0xBF800000
 0xDD098000
 0x00800200
+0xBF8C0F70
 0xDC708000
 0x00800000
-0xBF810000
-
-// ====
-
-// The high payload indices must not change the accumulator selector.
-// RUN: emit amdgpu-native-words @high_payload strategy=source waits=none fixed=%value:physical_register:252:4
-amdgpu.target<gfx942> @target
-
-low.func.def target<amdgpu.cdna3.core>(@target) @high_payload(%offset: reg<amdgpu.vgpr>, %resource: reg<amdgpu.sgpr x4>, %base: reg<amdgpu.sgpr x2>, %value: reg<amdgpu.agpr x4>) asm {
-  buffer_store_dwordx4_vaddr_offset %value, %resource, %offset {offset = 16, nt = 1, sc0 = 1, sc1 = 1}
-  global_store_dwordx4_saddr %offset, %value, %base {offset = 32}
-  scratch_store_b128_offset_only %value {offset = 64}
-  return
-}
-// ----
-0xE07ED010
-0x8080FC00
-0xDC7C8020
-0x0084FC00
-0xDC7C4040
-0x00FFFC00
+0xBF8C0F70
 0xBF810000
 
 // ====
 
 // Native SCRATCH uses dword spellings even when Low spells widths in bits.
-// RUN: emit amdgpu-assembly @scratch_banks strategy=source
+// RUN: emit amdgpu-assembly @scratch_banks
 amdgpu.target<gfx950> @target
 
 low.func.def target<amdgpu.cdna4.core>(@target) @scratch_banks(%offset: reg<amdgpu.vgpr>, %value: reg<amdgpu.agpr x4>) asm {
@@ -106,7 +88,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @scratch_banks(%offset: reg<amdg
 // ====
 
 // A low-half accumulator definition can feed every narrow memory store.
-// RUN: emit amdgpu-assembly @partial_payload strategy=source
+// RUN: emit amdgpu-assembly @partial_payload
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @partial_payload(%address: reg<amdgpu.vgpr x2>, %offset: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %resource: reg<amdgpu.sgpr x4>, %soffset: reg<amdgpu.sgpr>) asm {
@@ -122,8 +104,8 @@ low.func.def target<amdgpu.cdna2.core>(@target) @partial_payload(%address: reg<a
   s_waitcnt vmcnt(0) lgkmcnt(15)
   flat_store_short v[0:1], acc0 offset:0
   global_store_byte v2, acc0, s[0:1] offset:0
-  buffer_store_short acc0, v2, s[4:7], s2 offen offset:0
   scratch_store_short off, acc0, s2 offset:0
+  buffer_store_short acc0, v2, s[4:7], s2 offen offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 

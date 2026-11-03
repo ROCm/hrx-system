@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @gfx11_vopd_register_moves_different_banks strategy=source fixed=%source0:physical_register:5:1 fixed=%source1:physical_register:2:1 fixed=%copy0:physical_register:0:1 fixed=%copy1:physical_register:1:1
+// RUN: emit amdgpu-assembly @gfx11_vopd_register_moves_different_banks
 
 amdgpu.target<gfx1100> @target
 
@@ -9,12 +9,13 @@ low.func.def target<amdgpu.rdna3.core>(@target) @gfx11_vopd_register_moves_diffe
 }
 
 // ----
-  v_dual_mov_b32 v0, v5 :: v_dual_mov_b32 v1, v2
+  v_mov_b32 v0, v0
+  v_mov_b32 v0, v1
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_vopd_register_moves_same_bank strategy=source fixed=%source0:physical_register:5:1 fixed=%source1:physical_register:1:1 fixed=%copy0:physical_register:2:1 fixed=%copy1:physical_register:3:1
+// RUN: emit amdgpu-assembly @gfx11_vopd_register_moves_same_bank
 
 amdgpu.target<gfx1100> @target
 
@@ -25,13 +26,13 @@ low.func.def target<amdgpu.rdna3.core>(@target) @gfx11_vopd_register_moves_same_
 }
 
 // ----
-  v_mov_b32 v2, v5
-  v_mov_b32 v3, v1
+  v_mov_b32 v0, v0
+  v_mov_b32 v0, v1
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx1170_vopd_register_moves_same_bank strategy=source fixed=%source0:physical_register:5:1 fixed=%source1:physical_register:1:1 fixed=%copy0:physical_register:2:1 fixed=%copy1:physical_register:3:1
+// RUN: emit amdgpu-assembly @gfx1170_vopd_register_moves_same_bank
 
 amdgpu.target<gfx1170> @target
 
@@ -42,12 +43,13 @@ low.func.def target<amdgpu.rdna4m.core>(@target) @gfx1170_vopd_register_moves_sa
 }
 
 // ----
-  v_dual_mov_b32 v2, v5 :: v_dual_mov_b32 v3, v1
+  v_mov_b32 v0, v0
+  v_mov_b32 v0, v1
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx1170_vopd_cndmask_add strategy=source fixed=%false_value:physical_register:1:1 fixed=%true_value:physical_register:2:1 fixed=%selected:physical_register:0:1 fixed=%lhs:physical_register:4:1 fixed=%rhs:physical_register:5:1 fixed=%sum:physical_register:3:1
+// RUN: emit amdgpu-assembly @gfx1170_vopd_cndmask_add
 
 amdgpu.target<gfx1170> @target
 
@@ -58,12 +60,12 @@ low.func.def target<amdgpu.rdna4m.core>(@target) @gfx1170_vopd_cndmask_add(%fals
 }
 
 // ----
-  v_dual_cndmask_b32 v0, v1, v2 :: v_dual_add_f32 v3, v4, v5
+  v_dual_cndmask_b32 v0, v0, v1 :: v_dual_add_f32 v3, v2, v3
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @vopd_pairs_across_coalesced_copy strategy=source fixed=%a0:physical_register:0:1 fixed=%b0:physical_register:1:1 fixed=%a1:physical_register:2:1 fixed=%b1:physical_register:3:1 fixed=%product:physical_register:4:1 fixed=%product_copy:physical_register:4:1 fixed=%sum:physical_register:5:1
+// RUN: emit amdgpu-assembly @vopd_pairs_across_coalesced_copy
 
 amdgpu.target<gfx1100> @target
 
@@ -75,7 +77,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @vopd_pairs_across_coalesced_cop
 }
 
 // ----
-  v_dual_mul_f32 v4, v1, v0 :: v_dual_add_f32 v5, v2, v3
+  v_dual_add_f32 v0, v0, v1 :: v_dual_mul_f32 v3, v3, v2
   s_endpgm
 
 // ====
@@ -129,7 +131,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_vopd_placement(
 
 // ====
 
-// RUN: emit amdgpu-assembly @rdna3_vopd_shared_broadcast strategy=resource-stall
+// RUN: emit amdgpu-assembly @rdna3_vopd_shared_broadcast
 
 amdgpu.target<gfx1100> @target
 
@@ -164,7 +166,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @rdna3_vopd_shared_broadcast(%lh
 
 // ====
 
-// RUN: emit amdgpu-assembly @rdna3_vopd_explicit_detached_replica strategy=resource-stall
+// RUN: emit amdgpu-assembly @rdna3_vopd_explicit_detached_replica
 
 amdgpu.target<gfx1100> @target
 
@@ -200,7 +202,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @rdna3_vopd_explicit_detached_re
 
 // ====
 
-// RUN: emit amdgpu-assembly @rdna4_vopd_shared_broadcast strategy=resource-stall
+// RUN: emit amdgpu-assembly @rdna4_vopd_shared_broadcast
 
 amdgpu.target<gfx1200> @target
 
@@ -235,7 +237,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @rdna4_vopd_shared_broadcast(%lh
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx1250_vopd_shared_broadcast strategy=resource-stall
+// RUN: emit amdgpu-assembly @gfx1250_vopd_shared_broadcast
 
 amdgpu.target<gfx1250> @target
 
@@ -270,7 +272,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_vopd_shared_bro
 
 // ====
 
-// RUN: emit amdgpu-assembly @rdna3_vopd_shared_rhs_sub strategy=resource-stall
+// RUN: emit amdgpu-assembly @rdna3_vopd_shared_rhs_sub
 
 amdgpu.target<gfx1100> @target
 
@@ -305,7 +307,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @rdna3_vopd_shared_rhs_sub(%lhs:
 
 // ====
 
-// RUN: emit amdgpu-assembly @rdna3_vopd_shared_broadcast_break_even strategy=resource-stall
+// RUN: emit amdgpu-assembly @rdna3_vopd_shared_broadcast_break_even
 
 amdgpu.target<gfx1100> @target
 
@@ -326,43 +328,4 @@ low.func.def target<amdgpu.rdna3.core>(@target) @rdna3_vopd_shared_broadcast_bre
   s_delay_alu instid0(VALU_DEP_1)
   v_dual_mul_f32 v0, v0, v4 :: v_dual_mul_f32 v1, v1, v5
   v_dual_mul_f32 v0, v2, v4 :: v_dual_mul_f32 v1, v3, v5
-  s_endpgm
-
-// ====
-
-// RUN: emit amdgpu-assembly @rdna3_vopd_rejected_replica strategy=resource-stall amdgpu.vgpr=9
-
-// A rejected pair-replication trial leaves the original operand uses and no
-// replica move in the selected program.
-amdgpu.target<gfx1100> @target
-
-low.func.def target<amdgpu.rdna3.core>(@target) @rdna3_vopd_rejected_replica(%lhs: reg<amdgpu.vgpr x8>, %shared: reg<amdgpu.vgpr>) asm {
-  %lhs0 = slice %lhs[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %difference0 = v_sub_f32 %lhs0, %shared
-  %lhs1 = slice %lhs[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %difference1 = v_sub_f32 %lhs1, %shared
-  %lhs2 = slice %lhs[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %difference2 = v_sub_f32 %lhs2, %shared
-  %lhs3 = slice %lhs[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %difference3 = v_sub_f32 %lhs3, %shared
-  %lhs4 = slice %lhs[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %difference4 = v_sub_f32 %lhs4, %shared
-  %lhs5 = slice %lhs[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %difference5 = v_sub_f32 %lhs5, %shared
-  %lhs6 = slice %lhs[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %difference6 = v_sub_f32 %lhs6, %shared
-  %lhs7 = slice %lhs[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %difference7 = v_sub_f32 %lhs7, %shared
-  return
-}
-
-// ----
-  v_sub_f32 v0, v0, v8
-  v_sub_f32 v1, v1, v8
-  v_sub_f32 v0, v2, v8
-  v_sub_f32 v1, v3, v8
-  v_sub_f32 v0, v4, v8
-  v_sub_f32 v1, v5, v8
-  v_sub_f32 v0, v6, v8
-  v_sub_f32 v1, v7, v8
   s_endpgm

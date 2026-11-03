@@ -130,6 +130,75 @@ class TargetPressureScoringTest : public ::testing::Test {
   iree_arena_allocator_t arena_;
 };
 
+TEST_F(TargetPressureScoringTest, CompletionDomainsSharePressureSets) {
+  const loom_low_reg_class_t classes[] = {
+      {.alloc_unit_bits = 32, .allocatable_count = 3},
+      {.alloc_unit_bits = 32, .allocatable_count = 4, .alias_set_id = 1},
+      {.alloc_unit_bits = 64, .allocatable_count = 4, .alias_set_id = 1},
+      {.alloc_unit_bits = 32},
+      {.alloc_unit_bits = 32, .allocatable_count = 2},
+  };
+  const loom_low_descriptor_set_t descriptors = {
+      .reg_classes = classes,
+      .reg_class_count = IREE_ARRAYSIZE(classes),
+  };
+  loom_low_schedule_value_record_t values[IREE_ARRAYSIZE(classes)] = {};
+  for (uint16_t reg_class_id = 0; reg_class_id < IREE_ARRAYSIZE(classes);
+       ++reg_class_id) {
+    values[reg_class_id].register_class_id = reg_class_id;
+    if (reg_class_id != 4) {
+      values[reg_class_id].flags |=
+          LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER;
+    }
+  }
+  loom_local_value_domain_t value_domain = {
+      .value_count = IREE_ARRAYSIZE(values),
+  };
+  uint32_t capacities[] = {3, 4, 4, UINT32_MAX, 2};
+  loom_low_schedule_pressure_set_limit_t pressure_sets[2] = {};
+  pressure_sets[1] = {
+      .live_unit_limit = 4,
+      .unspillable_completion_domain_id = UINT16_MAX,
+      .has_multiple_active_reg_classes = 1,
+  };
+  loom_low_schedule_build_state_t state = {
+      .scratch_arena = &arena_,
+      .target = {.descriptor_set = &descriptors},
+      .value_domain = &value_domain,
+      .values = values,
+      .pressure_limits =
+          {
+              .by_reg_class = capacities,
+              .pressure_sets = pressure_sets,
+          },
+  };
+
+  IREE_ASSERT_OK(
+      loom_low_schedule_target_pressure_initialize_completion_domains(&state));
+
+  EXPECT_EQ(state.pressure_limits.unspillable_completion_domain_count, 2);
+  const uint16_t* domain_ids =
+      state.pressure_limits.unspillable_completion_domain_ids_by_reg_class;
+  EXPECT_EQ(domain_ids[0], 0);
+  EXPECT_EQ(domain_ids[1], 1);
+  EXPECT_EQ(domain_ids[2], 1);
+  EXPECT_EQ(domain_ids[3], UINT16_MAX);
+  EXPECT_EQ(domain_ids[4], UINT16_MAX);
+  EXPECT_EQ(pressure_sets[1].unspillable_completion_domain_id, 1);
+  const loom_low_schedule_completion_domain_t* domains =
+      state.pressure_limits.unspillable_completion_domains;
+  EXPECT_EQ(domains[0].capacity, 3);
+  EXPECT_EQ(domains[0].reg_class_id, 0);
+  EXPECT_EQ(domains[1].capacity, 4);
+  EXPECT_EQ(domains[1].reg_class_id, 2);
+  for (iree_host_size_t i = 0; i < value_domain.value_count; ++i) {
+    EXPECT_EQ(state.value_unspillable_completions[i].activation_units,
+              UINT32_MAX);
+    EXPECT_EQ(state.value_unspillable_completions[i].sink,
+              LOOM_LOW_SCHEDULE_NODE_NONE);
+  }
+}
+
 TEST_F(TargetPressureScoringTest, GrowthUsesCanonicalBankAndOwnership) {
   loom_low_schedule_dependency_graph_t graph;
   loom_low_schedule_dependency_graph_initialize(&graph);

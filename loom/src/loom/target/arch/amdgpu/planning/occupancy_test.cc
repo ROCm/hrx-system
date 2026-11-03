@@ -107,6 +107,17 @@ static const loom_target_residency_constraint_t* FindConstraint(
   return nullptr;
 }
 
+static const loom_amdgpu_occupancy_register_class_t* FindRegisterClass(
+    const loom_amdgpu_occupancy_table_t& table, iree_string_view_t name) {
+  for (iree_host_size_t i = 0; i < table.register_class_count; ++i) {
+    if (iree_string_view_equal(table.register_classes[i].register_class,
+                               name)) {
+      return &table.register_classes[i];
+    }
+  }
+  return nullptr;
+}
+
 TEST_F(AmdgpuOccupancyTargetResourcesTest,
        PlanningCeilingMatchesFinalLaunchAccounting) {
   for (const auto* name :
@@ -383,6 +394,60 @@ TEST_F(AmdgpuOccupancyTargetResourcesTest,
   const auto* accumulator = FindConstraint(constraints, IREE_SV("amdgpu.agpr"));
   ASSERT_NE(accumulator, nullptr);
   EXPECT_EQ(accumulator->units, 0u);
+}
+
+TEST_F(AmdgpuOccupancyTargetResourcesTest, CountsScratchSpillTraffic) {
+  loom_amdgpu_target_facts_t facts = {};
+  facts.base.fact_type = &loom_amdgpu_target_fact_type;
+  loom_amdgpu_target_identity_initialize(
+      loom_amdgpu_target_info_find_target(IREE_SV("gfx1100")), &facts.identity);
+  facts.base.storage.snapshot.subgroup_size = 32;
+  loom_target_fact_field_set_insert(&facts.base.explicit_fields,
+                                    LOOM_TARGET_FACT_FIELD_SUBGROUP_SIZE);
+  loom_target_bundle_storage_rebind(&facts.base.storage);
+  loom_amdgpu_target_facts_initialize(&facts);
+
+  const auto* model = loom_amdgpu_occupancy_model_for_properties(
+      facts.properties.processor, /*wave_size=*/32);
+  std::vector<uint32_t> physical_extents(model->descriptor_reg_class_count, 0);
+  physical_extents[LOOM_AMDGPU_REG_CLASS_ID_VGPR] = 5;
+  const loom_low_allocation_assignment_t assignment = {
+      .descriptor_reg_class_id = LOOM_AMDGPU_REG_CLASS_ID_VGPR,
+  };
+  const loom_low_allocation_spill_plan_t spill_plan = {
+      .assignment_index = 0,
+      .slot_space = LOOM_LOW_SPILL_SLOT_SPACE_SCRATCH,
+      .byte_size = 12,
+      .store_count = 2,
+      .reload_count = 3,
+  };
+  const loom_low_allocation_table_t allocation = {
+      .target = {.target_facts = &facts.base},
+      .assignments = &assignment,
+      .assignment_count = 1,
+      .physical_extents =
+          {
+              .ends_by_reg_class = physical_extents.data(),
+              .count = physical_extents.size(),
+          },
+      .spill_plans = &spill_plan,
+      .spill_plan_count = 1,
+  };
+
+  loom_amdgpu_occupancy_table_t table = {};
+  IREE_ASSERT_OK(loom_amdgpu_occupancy_build(&allocation, /*options=*/nullptr,
+                                             &arena_, &table));
+  EXPECT_EQ(table.spill_count, 1u);
+  EXPECT_EQ(table.scratch_spill_bytes, 12u);
+  EXPECT_EQ(table.spill_store_count, 2u);
+  EXPECT_EQ(table.spill_reload_count, 3u);
+  const auto* vector = FindRegisterClass(table, IREE_SV("amdgpu.vgpr"));
+  ASSERT_NE(vector, nullptr);
+  EXPECT_EQ(vector->allocated_units, 5u);
+  EXPECT_EQ(vector->spill_count, 1u);
+  EXPECT_EQ(vector->spill_bytes, 12u);
+  EXPECT_EQ(vector->spill_store_count, 2u);
+  EXPECT_EQ(vector->spill_reload_count, 3u);
 }
 
 TEST_F(AmdgpuOccupancyTargetResourcesTest, AccountsForBothCdnaRegisterBanks) {

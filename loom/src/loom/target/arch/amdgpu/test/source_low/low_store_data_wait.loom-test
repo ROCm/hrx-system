@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @wide_store_reuse strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%base:physical_register:0:2 fixed=%replacement:physical_register:0:1
+// RUN: emit amdgpu-assembly @wide_store_reuse
 
 amdgpu.target<gfx942> @target
 
@@ -10,14 +10,13 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wide_store_reuse(%address: reg<
 
 // The payload remains readable for two slots after the wide store issues.
 // ----
-  global_store_dwordx4 v8, v[0:3], s[0:1] offset:0
-  s_nop 1
+  global_store_dwordx4 v0, v[4:7], s[0:1] offset:0
   v_mov_b32 v0, 42
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @wide_store_last_component strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:3 fixed=%base:physical_register:0:2 fixed=%replacement:physical_register:2:1
+// RUN: emit amdgpu-assembly @wide_store_last_component
 
 amdgpu.target<gfx942> @target
 
@@ -29,14 +28,13 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wide_store_last_component(%addr
 
 // Overlap with the last payload VGPR is still a hazard.
 // ----
-  global_store_dwordx3 v8, v[0:2], s[0:1] offset:0
-  s_nop 1
-  v_mov_b32 v2, 42
+  global_store_dwordx3 v0, v[2:4], s[0:1] offset:0
+  v_mov_b32 v0, 42
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @wide_store_one_slot strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%base:physical_register:0:2 fixed=%replacement:physical_register:0:1 fixed=%gap:physical_register:6:1
+// RUN: emit amdgpu-assembly @wide_store_one_slot
 
 amdgpu.target<gfx942> @target
 
@@ -48,15 +46,14 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wide_store_one_slot(%address: r
 }
 
 // ----
-  global_store_dwordx4 v8, v[0:3], s[0:1] offset:0
-  v_mov_b32 v6, 7
-  s_nop 0
-  v_add_u32 v0, v6, v6
+  global_store_dwordx4 v0, v[4:7], s[0:1] offset:0
+  v_mov_b32 v0, 7
+  v_add_u32 v0, v0, v0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @wide_store_two_slots strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%base:physical_register:0:2 fixed=%replacement:physical_register:0:1 fixed=%first:physical_register:6:1 fixed=%second:physical_register:7:1
+// RUN: emit amdgpu-assembly @wide_store_two_slots
 
 amdgpu.target<gfx942> @target
 
@@ -69,15 +66,15 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wide_store_two_slots(%address: 
 }
 
 // ----
-  global_store_dwordx4 v8, v[0:3], s[0:1] offset:0
-  v_mov_b32 v6, 7
-  v_add_u32 v7, v6, v6
-  v_add_u32 v0, v7, v7
+  global_store_dwordx4 v0, v[4:7], s[0:1] offset:0
+  v_mov_b32 v0, 7
+  v_add_u32 v0, v0, v0
+  v_add_u32 v0, v0, v0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @wide_store_disjoint_write strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%base:physical_register:0:2 fixed=%replacement:physical_register:4:1
+// RUN: emit amdgpu-assembly @wide_store_disjoint_write
 
 amdgpu.target<gfx942> @target
 
@@ -88,13 +85,13 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wide_store_disjoint_write(%addr
 }
 
 // ----
-  global_store_dwordx4 v8, v[0:3], s[0:1] offset:0
-  v_mov_b32 v4, 42
+  global_store_dwordx4 v0, v[4:7], s[0:1] offset:0
+  v_mov_b32 v0, 42
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @narrow_store_reuse strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:2 fixed=%base:physical_register:0:2 fixed=%replacement:physical_register:0:1
+// RUN: emit amdgpu-assembly @narrow_store_reuse
 
 amdgpu.target<gfx942> @target
 
@@ -105,13 +102,13 @@ low.func.def target<amdgpu.cdna3.core>(@target) @narrow_store_reuse(%address: re
 }
 
 // ----
-  global_store_dwordx2 v8, v[0:1], s[0:1] offset:0
+  global_store_dwordx2 v0, v[2:3], s[0:1] offset:0
   v_mov_b32 v0, 42
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @wide_store_fallthrough strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%base:physical_register:0:2 fixed=%replacement:physical_register:0:1
+// RUN: emit amdgpu-assembly @wide_store_fallthrough
 
 amdgpu.target<gfx942> @target
 
@@ -125,15 +122,14 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wide_store_fallthrough(%address
 
 // An elided fallthrough branch supplies no issue progress.
 // ----
-  global_store_dwordx4 v8, v[0:3], s[0:1] offset:0
+  global_store_dwordx4 v0, v[4:7], s[0:1] offset:0
 .Lbb1:
-  s_nop 1
   v_mov_b32 v0, 42
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @wide_store_empty_fallthroughs strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%base:physical_register:0:2 fixed=%replacement:physical_register:0:1
+// RUN: emit amdgpu-assembly @wide_store_empty_fallthroughs
 
 amdgpu.target<gfx942> @target
 
@@ -149,16 +145,15 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wide_store_empty_fallthroughs(%
 
 // Zero-work blocks forward the same retention window.
 // ----
-  global_store_dwordx4 v8, v[0:3], s[0:1] offset:0
+  global_store_dwordx4 v0, v[4:7], s[0:1] offset:0
 .Lbb1:
 .Lbb2:
-  s_nop 1
   v_mov_b32 v0, 42
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @wide_store_join strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%base:physical_register:0:2 fixed=%replacement:physical_register:0:1
+// RUN: emit amdgpu-assembly @wide_store_join
 
 amdgpu.target<gfx942> @target
 
@@ -178,17 +173,16 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wide_store_join(%address: reg<a
 // ----
   s_cbranch_scc0 .Lbb2
 .Lbb1:
-  global_store_dwordx4 v8, v[0:3], s[0:1] offset:0
+  global_store_dwordx4 v0, v[4:7], s[0:1] offset:0
   s_branch .Lbb3
 .Lbb2:
 .Lbb3:
-  s_nop 0
   v_mov_b32 v0, 42
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @wide_store_cdna4 strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%base:physical_register:0:2 fixed=%replacement:physical_register:0:1
+// RUN: emit amdgpu-assembly @wide_store_cdna4
 
 amdgpu.target<gfx950> @target
 
@@ -199,14 +193,13 @@ low.func.def target<amdgpu.cdna4.core>(@target) @wide_store_cdna4(%address: reg<
 }
 
 // ----
-  global_store_dwordx4 v8, v[0:3], s[0:1] offset:0
-  s_nop 1
+  global_store_dwordx4 v0, v[4:7], s[0:1] offset:0
   v_mov_b32 v0, 42
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_store_scalar_offset strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%replacement:physical_register:0:1 fixed=%resource:physical_register:4:4 fixed=%offset:physical_register:8:1
+// RUN: emit amdgpu-assembly @buffer_store_scalar_offset
 
 amdgpu.target<gfx942> @target
 
@@ -218,14 +211,13 @@ low.func.def target<amdgpu.cdna3.core>(@target) @buffer_store_scalar_offset(%add
 
 // The SGPR-SOFFSET buffer form requires one VALU slot.
 // ----
-  buffer_store_dwordx4 v[0:3], v8, s[4:7], s8 offen offset:0
-  s_nop 0
+  buffer_store_dwordx4 v[4:7], v0, s[0:3], s4 offen offset:0
   v_mov_b32 v0, 42
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @buffer_store_inline_offset strategy=source fixed=%data:physical_register:0:4 fixed=%replacement:physical_register:0:1 fixed=%resource:physical_register:4:4
+// RUN: emit amdgpu-assembly @buffer_store_inline_offset
 
 amdgpu.target<gfx942> @target
 
@@ -237,14 +229,14 @@ low.func.def target<amdgpu.cdna3.core>(@target) @buffer_store_inline_offset(%dat
 
 // An inline SOFFSET retains the two-slot window.
 // ----
-  buffer_store_dwordx4 v[0:3], off, s[4:7], 0 offset:0
+  buffer_store_dwordx4 v[0:3], off, s[0:3], 0 offset:0
   s_nop 1
   v_mov_b32 v0, 42
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @wide_store_alias_reuse strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%base:physical_register:0:2 fixed=%replacement:physical_register:0:1
+// RUN: emit amdgpu-assembly @wide_store_alias_reuse
 
 amdgpu.target<gfx942> @target
 
@@ -257,14 +249,13 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wide_store_alias_reuse(%address
 
 // The zero-work slice contributes no issue slot before the destructive use.
 // ----
-  global_store_dwordx4 v8, v[0:3], s[0:1] offset:0
-  s_nop 1
-  v_add_u32 v0, v0, v0
+  global_store_dwordx4 v0, v[4:7], s[0:1] offset:0
+  v_add_u32 v0, v4, v4
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @wide_store_edge_copy strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%base:physical_register:0:2 fixed=%input:physical_register:6:1 fixed=%replacement:physical_register:0:1
+// RUN: emit amdgpu-assembly @wide_store_edge_copy
 
 amdgpu.target<gfx942> @target
 
@@ -277,15 +268,13 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wide_store_edge_copy(%address: 
 
 // The materialized edge copy is itself a VALU payload overwrite.
 // ----
-  global_store_dwordx4 v8, v[0:3], s[0:1] offset:0
-  s_nop 1
-  v_mov_b32 v0, v6
+  global_store_dwordx4 v0, v[4:7], s[0:1] offset:0
 .Lbb1:
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @wide_store_non_valu_writer strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%base:physical_register:0:2 fixed=%replacement:physical_register:0:1
+// RUN: emit amdgpu-assembly @wide_store_non_valu_writer
 
 amdgpu.target<gfx942> @target
 
@@ -297,14 +286,14 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wide_store_non_valu_writer(%add
 
 // An ordinary VGPR writer requires one slot, rather than the VALU's two.
 // ----
-  global_store_dwordx4 v8, v[0:3], s[0:1] offset:0
+  global_store_dwordx4 v4, v[0:3], s[0:1] offset:0
   s_nop 0
-  ds_read_b32 v0, v8 offset:0
+  ds_read_b32 v0, v4 offset:0
   s_waitcnt vmcnt(0) lgkmcnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @wide_compare_swap_reuse strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%base:physical_register:0:2 fixed=%old:physical_register:6:2 fixed=%replacement:physical_register:0:1
+// RUN: emit amdgpu-assembly @wide_compare_swap_reuse
 
 amdgpu.target<gfx942> @target
 
@@ -316,14 +305,13 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wide_compare_swap_reuse(%addres
 
 // A 64-bit CAS reads four payload VGPRs: expected and desired values.
 // ----
-  global_atomic_cmpswap_x2 v[6:7], v8, v[0:3], s[0:1] offset:0 sc0
-  s_nop 1
-  v_mov_b32 v0, 42
+  global_atomic_cmpswap_x2 v[0:1], v0, v[4:7], s[0:1] offset:0 sc0
+  v_mov_b32 v2, 42
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @wide_store_backedge strategy=source fixed=%address:physical_register:8:1 fixed=%base:physical_register:0:2 fixed=%value:physical_register:0:1 fixed=%data:physical_register:0:4
+// RUN: emit amdgpu-assembly @wide_store_backedge
 
 amdgpu.target<gfx942> @target
 
@@ -342,18 +330,18 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wide_store_backedge(%address: r
 // ----
 .Lbb1:
   s_nop 0
-  v_mov_b32 v0, 42
-  v_mov_b32 v1, v0
-  v_mov_b32 v2, v0
-  v_mov_b32 v3, v0
-  global_store_dwordx4 v8, v[0:3], s[0:1] offset:0
+  v_mov_b32 v4, 42
+  v_mov_b32 v5, v4
+  v_mov_b32 v6, v4
+  v_mov_b32 v7, v4
+  global_store_dwordx4 v0, v[4:7], s[0:1] offset:0
   s_cbranch_scc1 .Lbb1
 .Lbb2:
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @wide_store_explicit_completion strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%base:physical_register:0:2 fixed=%replacement:physical_register:0:1
+// RUN: emit amdgpu-assembly @wide_store_explicit_completion
 
 amdgpu.target<gfx942> @target
 
@@ -366,13 +354,13 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wide_store_explicit_completion(
 
 // A full counter drain retires the payload without an additional fixed delay.
 // ----
-  global_store_dwordx4 v8, v[0:3], s[0:1] offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(15)
+  global_store_dwordx4 v0, v[4:7], s[0:1] offset:0
   v_mov_b32 v0, 42
+  s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @wide_store_generic strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%base:physical_register:0:2 fixed=%replacement:physical_register:0:1
+// RUN: emit amdgpu-assembly @wide_store_generic
 
 amdgpu.target<gfx9-4-generic> @target
 
@@ -384,14 +372,13 @@ low.func.def target<amdgpu.gfx9_4.generic.core>(@target) @wide_store_generic(%ad
 
 // The payload remains readable for two slots after the wide store issues.
 // ----
-  global_store_dwordx4 v8, v[0:3], s[0:1] offset:0
-  s_nop 1
+  global_store_dwordx4 v0, v[4:7], s[0:1] offset:0
   v_mov_b32 v0, 42
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @flat_store_reuse strategy=source fixed=%address:physical_register:8:2 fixed=%data:physical_register:0:4 fixed=%replacement:physical_register:0:1
+// RUN: emit amdgpu-assembly @flat_store_reuse
 
 amdgpu.target<gfx942> @target
 
@@ -403,14 +390,13 @@ low.func.def target<amdgpu.cdna3.core>(@target) @flat_store_reuse(%address: reg<
 
 // Flat stores retain the same wide payload window.
 // ----
-  flat_store_dwordx4 v[8:9], v[0:3] offset:0
-  s_nop 1
+  flat_store_dwordx4 v[0:1], v[4:7] offset:0
   v_mov_b32 v0, 42
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @wide_store_prefix_progress strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%base:physical_register:0:2 fixed=%gap:physical_register:6:1 fixed=%replacement:physical_register:0:1
+// RUN: emit amdgpu-assembly @wide_store_prefix_progress
 
 amdgpu.target<gfx942> @target
 
@@ -425,16 +411,15 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wide_store_prefix_progress(%add
 
 // The successor's independent first instruction supplies one of the two slots.
 // ----
-  global_store_dwordx4 v8, v[0:3], s[0:1] offset:0
+  global_store_dwordx4 v0, v[4:7], s[0:1] offset:0
 .Lbb1:
-  v_mov_b32 v6, 7
-  s_nop 0
-  v_add_u32 v0, v6, v6
+  v_mov_b32 v0, 7
+  v_add_u32 v0, v0, v0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @wide_store_prefix_delay_shared strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%base:physical_register:0:2 fixed=%first:physical_register:0:1 fixed=%second:physical_register:1:1
+// RUN: emit amdgpu-assembly @wide_store_prefix_delay_shared
 
 amdgpu.target<gfx942> @target
 
@@ -451,9 +436,8 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wide_store_prefix_delay_shared(
 
 // A delay protecting the first overwrite also retires the successor's obligation.
 // ----
-  global_store_dwordx4 v8, v[0:3], s[0:1] offset:0
+  global_store_dwordx4 v0, v[4:7], s[0:1] offset:0
 .Lbb1:
-  s_nop 1
   v_mov_b32 v0, 7
 .Lbb2:
   v_mov_b32 v1, 42
@@ -461,7 +445,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wide_store_prefix_delay_shared(
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @wide_store_two_branch_transfer strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%base:physical_register:0:2 fixed=%replacement:physical_register:0:1
+// RUN: emit amdgpu-assembly @wide_store_two_branch_transfer
 
 amdgpu.target<gfx942> @target
 
@@ -479,23 +463,21 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wide_store_two_branch_transfer(
 
 // The taken conditional executes only one of the two emitted branch instructions.
 // ----
-  global_store_dwordx4 v8, v[0:3], s[0:1] offset:0
+  global_store_dwordx4 v4, v[0:3], s[0:1] offset:0
   s_cbranch_scc1 .Lbb2
   s_branch .Lbb3
 .Lbb1:
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 .Lbb2:
-  s_nop 0
-  v_mov_b32 v0, 42
-  v_mov_b32 v8, v0
+  v_mov_b32 v4, 42
   s_branch .Lbb1
 .Lbb3:
   s_branch .Lbb1
 
 // ====
 // Register numbers from different banks do not alias.
-// RUN: emit amdgpu-assembly @accumulator_store_vector_write strategy=source fixed=%data:physical_register:0:4 fixed=%replacement:physical_register:0:1
+// RUN: emit amdgpu-assembly @accumulator_store_vector_write
 
 amdgpu.target<gfx90a> @target
 
@@ -513,7 +495,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @accumulator_store_vector_write(
 
 // ====
 // High accumulator payloads fit the tracked bank even with one live VGPR.
-// RUN: emit amdgpu-assembly @high_accumulator_store_reload strategy=source fixed=%data:physical_register:252:4 fixed=%replacement:physical_register:252:4
+// RUN: emit amdgpu-assembly @high_accumulator_store_reload
 
 amdgpu.target<gfx942> @target
 
@@ -524,15 +506,15 @@ low.func.def target<amdgpu.cdna3.core>(@target) @high_accumulator_store_reload(%
 }
 
 // ----
-  global_store_dwordx4 v0, acc[252:255], s[0:1] offset:0
+  global_store_dwordx4 v0, acc[0:3], s[0:1] offset:0
   s_nop 0
-  global_load_dwordx4 acc[252:255], v0, s[0:1] offset:0
+  global_load_dwordx4 acc[0:3], v0, s[0:1] offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
 // The accumulator-only private path retains its window across fallthroughs.
-// RUN: emit amdgpu-assembly @accumulator_scratch_fallthrough strategy=source fixed=%data:physical_register:0:4 fixed=%replacement:physical_register:0:4
+// RUN: emit amdgpu-assembly @accumulator_scratch_fallthrough
 
 amdgpu.target<gfx950> @target
 
@@ -555,7 +537,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @accumulator_scratch_fallthrough
 
 // ====
 // A matrix write must protect a wide accumulator payload just like a VGPR one.
-// RUN: emit amdgpu-assembly @accumulator_store_matrix_write strategy=source fixed=%data:physical_register:0:4 fixed=%replacement:physical_register:0:4
+// RUN: emit amdgpu-assembly @accumulator_store_matrix_write
 
 amdgpu.target<gfx90a> @target
 
@@ -575,7 +557,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @accumulator_store_matrix_write(
 
 // ====
 // A scalar-offset buffer store uses the shorter window in either bank.
-// RUN: emit amdgpu-assembly @accumulator_buffer_matrix_write strategy=source fixed=%data:physical_register:0:4 fixed=%replacement:physical_register:0:4
+// RUN: emit amdgpu-assembly @accumulator_buffer_matrix_write
 
 amdgpu.target<gfx942> @target
 
@@ -594,7 +576,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @accumulator_buffer_matrix_write
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna2_wide_store_reuse strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%base:physical_register:0:2 fixed=%replacement:physical_register:0:1
+// RUN: emit amdgpu-assembly @cdna2_wide_store_reuse
 
 amdgpu.target<gfx90a> @target
 
@@ -605,14 +587,13 @@ low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_wide_store_reuse(%address
 }
 
 // ----
-  global_store_dwordx4 v8, v[0:3], s[0:1] offset:0
-  s_nop 0
+  global_store_dwordx4 v0, v[4:7], s[0:1] offset:0
   v_mov_b32 v0, 42
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna2_wide_store_last_component strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:3 fixed=%base:physical_register:0:2 fixed=%replacement:physical_register:2:1
+// RUN: emit amdgpu-assembly @cdna2_wide_store_last_component
 
 amdgpu.target<gfx90a> @target
 
@@ -623,14 +604,13 @@ low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_wide_store_last_component
 }
 
 // ----
-  global_store_dwordx3 v8, v[0:2], s[0:1] offset:0
-  s_nop 0
-  v_mov_b32 v2, 42
+  global_store_dwordx3 v0, v[2:4], s[0:1] offset:0
+  v_mov_b32 v0, 42
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna2_buffer_store_scalar_offset strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%replacement:physical_register:0:1 fixed=%resource:physical_register:4:4 fixed=%offset:physical_register:8:1
+// RUN: emit amdgpu-assembly @cdna2_buffer_store_scalar_offset
 
 amdgpu.target<gfx90a> @target
 
@@ -641,13 +621,13 @@ low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_buffer_store_scalar_offse
 }
 
 // ----
-  buffer_store_dwordx4 v[0:3], v8, s[4:7], s8 offen offset:0
+  buffer_store_dwordx4 v[4:7], v0, s[0:3], s4 offen offset:0
   v_mov_b32 v0, 42
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna2_buffer_store_inline_offset strategy=source fixed=%data:physical_register:0:4 fixed=%replacement:physical_register:0:1 fixed=%resource:physical_register:4:4
+// RUN: emit amdgpu-assembly @cdna2_buffer_store_inline_offset
 
 amdgpu.target<gfx90a> @target
 
@@ -658,14 +638,14 @@ low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_buffer_store_inline_offse
 }
 
 // ----
-  buffer_store_dwordx4 v[0:3], off, s[4:7], 0 offset:0
+  buffer_store_dwordx4 v[0:3], off, s[0:3], 0 offset:0
   s_nop 0
   v_mov_b32 v0, 42
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna2_wide_store_non_valu_writer strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%base:physical_register:0:2 fixed=%replacement:physical_register:0:1
+// RUN: emit amdgpu-assembly @cdna2_wide_store_non_valu_writer
 
 amdgpu.target<gfx90a> @target
 
@@ -676,14 +656,14 @@ low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_wide_store_non_valu_write
 }
 
 // ----
-  global_store_dwordx4 v8, v[0:3], s[0:1] offset:0
+  global_store_dwordx4 v4, v[0:3], s[0:1] offset:0
   s_nop 0
-  ds_read_b32 v0, v8 offset:0
+  ds_read_b32 v0, v4 offset:0
   s_waitcnt vmcnt(0) lgkmcnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna2_wide_compare_swap_reuse strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%base:physical_register:0:2 fixed=%old:physical_register:6:2 fixed=%replacement:physical_register:0:1
+// RUN: emit amdgpu-assembly @cdna2_wide_compare_swap_reuse
 
 amdgpu.target<gfx90a> @target
 
@@ -694,14 +674,13 @@ low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_wide_compare_swap_reuse(%
 }
 
 // ----
-  global_atomic_cmpswap_x2 v[6:7], v8, v[0:3], s[0:1] offset:0 glc
-  s_nop 0
-  v_mov_b32 v0, 42
+  global_atomic_cmpswap_x2 v[0:1], v0, v[4:7], s[0:1] offset:0 glc
+  v_mov_b32 v2, 42
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna2_wide_store_backedge strategy=source fixed=%address:physical_register:8:1 fixed=%base:physical_register:0:2 fixed=%value:physical_register:0:1 fixed=%data:physical_register:0:4
+// RUN: emit amdgpu-assembly @cdna2_wide_store_backedge
 
 amdgpu.target<gfx90a> @target
 
@@ -718,18 +697,18 @@ low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_wide_store_backedge(%addr
 
 // ----
 .Lbb1:
-  v_mov_b32 v0, 42
-  v_mov_b32 v1, v0
-  v_mov_b32 v2, v0
-  v_mov_b32 v3, v0
-  global_store_dwordx4 v8, v[0:3], s[0:1] offset:0
+  v_mov_b32 v4, 42
+  v_mov_b32 v5, v4
+  v_mov_b32 v6, v4
+  v_mov_b32 v7, v4
+  global_store_dwordx4 v0, v[4:7], s[0:1] offset:0
   s_cbranch_scc1 .Lbb1
 .Lbb2:
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @cdna2_wide_store_one_slot strategy=source fixed=%address:physical_register:8:1 fixed=%data:physical_register:0:4 fixed=%base:physical_register:0:2 fixed=%replacement:physical_register:0:1 fixed=%gap:physical_register:6:1
+// RUN: emit amdgpu-assembly @cdna2_wide_store_one_slot
 
 amdgpu.target<gfx90a> @target
 
@@ -741,8 +720,8 @@ low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_wide_store_one_slot(%addr
 }
 
 // ----
-  global_store_dwordx4 v8, v[0:3], s[0:1] offset:0
-  v_mov_b32 v6, 7
-  v_add_u32 v0, v6, v6
+  global_store_dwordx4 v0, v[4:7], s[0:1] offset:0
+  v_mov_b32 v0, 7
+  v_add_u32 v0, v0, v0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm

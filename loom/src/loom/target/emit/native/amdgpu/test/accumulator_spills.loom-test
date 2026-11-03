@@ -6,7 +6,7 @@
 
 // Arbitrary tuples use the same 4/2/1-unit chunks as vector registers.
 // CDNA2 needs a VGPR address even when every payload stays in AGPRs.
-// RUN: emit amdgpu-assembly @tuple_spill strategy=source
+// RUN: emit amdgpu-assembly @tuple_spill
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @tuple_spill(%value: reg<amdgpu.agpr x7>) -> (reg<amdgpu.agpr x7>) asm {
@@ -23,11 +23,11 @@ low.func.def target<amdgpu.cdna2.core>(@target) @tuple_spill(%value: reg<amdgpu.
   v_mov_b32 v0, 24
   scratch_store_dword v0, acc6, off offset:0
   v_mov_b32 v0, 0
+  v_mov_b32 v1, 16
+  v_mov_b32 v2, 24
+  scratch_load_dword acc6, v2, off offset:0
+  scratch_load_dwordx2 acc[4:5], v1, off offset:0
   scratch_load_dwordx4 acc[0:3], v0, off offset:0
-  v_mov_b32 v0, 16
-  scratch_load_dwordx2 acc[4:5], v0, off offset:0
-  v_mov_b32 v0, 24
-  scratch_load_dword acc6, v0, off offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
@@ -35,7 +35,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @tuple_spill(%value: reg<amdgpu.
 
 // A nested storage view changes chunk alignment in the private segment.
 // CDNA3 can address these chunks directly with their immediate offsets.
-// RUN: emit amdgpu-assembly @view_spill strategy=source
+// RUN: emit amdgpu-assembly @view_spill
 amdgpu.target<gfx942> @target
 
 low.func.def target<amdgpu.cdna3.core>(@target) @view_spill(%value: reg<amdgpu.agpr x7>) -> (reg<amdgpu.agpr x7>) asm {
@@ -50,14 +50,14 @@ low.func.def target<amdgpu.cdna3.core>(@target) @view_spill(%value: reg<amdgpu.a
   scratch_store_dword off, acc0, off offset:20
   v_accvgpr_mov_b32 acc0, acc1
   v_accvgpr_mov_b32 acc1, acc2
+  v_accvgpr_mov_b32 acc7, acc6
+  v_accvgpr_mov_b32 acc6, acc5
+  v_accvgpr_mov_b32 acc5, acc4
+  v_accvgpr_mov_b32 acc4, acc3
   scratch_store_dwordx2 off, acc[0:1], off offset:24
-  v_accvgpr_mov_b32 acc0, acc3
-  v_accvgpr_mov_b32 acc1, acc4
-  v_accvgpr_mov_b32 acc2, acc5
-  v_accvgpr_mov_b32 acc3, acc6
-  scratch_store_dwordx4 off, acc[0:3], off offset:32
-  s_nop 0
+  scratch_store_dwordx4 off, acc[4:7], off offset:32
   scratch_load_dword acc0, off, off offset:20
+  s_nop 0
   scratch_load_dwordx2 acc[2:3], off, off offset:24
   scratch_load_dwordx4 acc[4:7], off, off offset:32
   s_waitcnt vmcnt(0) lgkmcnt(15)
@@ -72,7 +72,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @view_spill(%value: reg<amdgpu.a
 // ====
 
 // Beyond the immediate range, CDNA4 also needs VGPR addresses for AGPR data.
-// RUN: emit amdgpu-assembly @large_offset_spill strategy=source
+// RUN: emit amdgpu-assembly @large_offset_spill
 amdgpu.target<gfx950> @target
 
 low.func.def target<amdgpu.cdna4.core>(@target) @large_offset_spill(%value: reg<amdgpu.agpr x7>) -> (reg<amdgpu.agpr x7>) asm {
@@ -87,19 +87,19 @@ low.func.def target<amdgpu.cdna4.core>(@target) @large_offset_spill(%value: reg<
   v_accvgpr_mov_b32 acc0, acc1
   v_accvgpr_mov_b32 acc1, acc2
   v_mov_b32 v0, 8200
+  v_accvgpr_mov_b32 acc7, acc6
+  v_accvgpr_mov_b32 acc6, acc5
+  v_accvgpr_mov_b32 acc5, acc4
+  v_accvgpr_mov_b32 acc4, acc3
   scratch_store_dwordx2 v0, acc[0:1], off offset:0
-  v_accvgpr_mov_b32 acc0, acc3
-  v_accvgpr_mov_b32 acc1, acc4
-  v_accvgpr_mov_b32 acc2, acc5
-  v_accvgpr_mov_b32 acc3, acc6
   v_mov_b32 v0, 8208
-  scratch_store_dwordx4 v0, acc[0:3], off offset:0
+  scratch_store_dwordx4 v0, acc[4:7], off offset:0
   v_mov_b32 v0, 8196
+  v_mov_b32 v1, 8200
+  v_mov_b32 v2, 8208
   scratch_load_dword acc0, v0, off offset:0
-  v_mov_b32 v0, 8200
-  scratch_load_dwordx2 acc[2:3], v0, off offset:0
-  v_mov_b32 v0, 8208
-  scratch_load_dwordx4 acc[4:7], v0, off offset:0
+  scratch_load_dwordx2 acc[2:3], v1, off offset:0
+  scratch_load_dwordx4 acc[4:7], v2, off offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   v_accvgpr_mov_b32 acc1, acc2
   v_accvgpr_mov_b32 acc2, acc3
@@ -112,7 +112,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @large_offset_spill(%value: reg<
 // ====
 
 // Per-lane spills and reloads preserve the surrounding execution mask.
-// RUN: emit amdgpu-assembly @masked_spill strategy=source
+// RUN: emit amdgpu-assembly @masked_spill
 amdgpu.target<gfx90a> @target
 
 low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @masked_spill(%address: reg<amdgpu.vgpr x2>, %mask: reg<amdgpu.sgpr x2>, %value: reg<amdgpu.agpr x4>) asm {
@@ -133,40 +133,5 @@ low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @masked_spill(%
   s_waitcnt vmcnt(0) lgkmcnt(15)
   flat_store_dwordx4 v[0:1], acc[0:3] offset:0
   s_mov_b64 exec, s[0:1]
-  s_waitcnt vmcnt(0) lgkmcnt(15)
-  s_endpgm
-
-// ====
-
-// The ordinary allocator repairs three live four-word memory results with
-// only eight AGPRs. Generated reloads and VGPR addresses cannot spill again.
-// RUN: emit amdgpu-assembly @pressure strategy=source amdgpu.agpr=8
-amdgpu.target<gfx90a> @target
-
-low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @pressure(%address: reg<amdgpu.vgpr x2>) asm {
-  %first = flat_load_dwordx4 %address : reg<amdgpu.agpr x4>
-  %second = flat_load_dwordx4 %address {offset = 16} : reg<amdgpu.agpr x4>
-  %third = flat_load_dwordx4 %address {offset = 32} : reg<amdgpu.agpr x4>
-  flat_store_dwordx4 %address, %first {offset = 48}
-  flat_store_dwordx4 %address, %second {offset = 64}
-  flat_store_dwordx4 %address, %third {offset = 80}
-  return
-}
-// ----
-  flat_load_dwordx4 acc[0:3], v[0:1] offset:0
-  flat_load_dwordx4 acc[4:7], v[0:1] offset:16
-  v_mov_b32 v2, 0
-  s_waitcnt vmcnt(0) lgkmcnt(0)
-  scratch_store_dwordx4 v2, acc[4:7], off offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(15)
-  flat_load_dwordx4 acc[4:7], v[0:1] offset:32
-  s_waitcnt vmcnt(0) lgkmcnt(0)
-  flat_store_dwordx4 v[0:1], acc[0:3] offset:48
-  v_mov_b32 v2, 0
-  s_waitcnt vmcnt(63) lgkmcnt(0)
-  scratch_load_dwordx4 acc[0:3], v2, off offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(15)
-  flat_store_dwordx4 v[0:1], acc[0:3] offset:64
-  flat_store_dwordx4 v[0:1], acc[4:7] offset:80
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm

@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @clock_words strategy=source fixed=%narrow:physical_register:0:1 fixed=%wide:physical_register:2:2 fixed=%low:physical_register:4:1 fixed=%high:physical_register:5:1
+// RUN: emit amdgpu-assembly @clock_words
 
 // Both halves of the wide asynchronous result must be complete before use.
 amdgpu.target<gfx1100> @gpu
@@ -17,13 +17,13 @@ low.func.def target<amdgpu.rdna3.core>(@gpu) @clock_words() -> (reg<amdgpu.sgpr>
   s_sendmsg_rtn_b32 s0, message(131)
   s_sendmsg_rtn_b64 s[2:3], message(131)
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  s_xor_b32 s4, s2, s0
-  s_xor_b32 s5, s3, s0
+  s_xor_b32 s1, s2, s0
+  s_xor_b32 s0, s3, s0
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-native-words @clock_words strategy=source fixed=%narrow:physical_register:0:1 fixed=%wide:physical_register:2:2 fixed=%low:physical_register:4:1 fixed=%high:physical_register:5:1
+// RUN: emit amdgpu-native-words @clock_words
 
 // Both halves of the wide asynchronous result must be complete before use.
 amdgpu.target<gfx1100> @gpu
@@ -42,13 +42,13 @@ low.func.def target<amdgpu.rdna3.core>(@gpu) @clock_words() -> (reg<amdgpu.sgpr>
 0xBE804C83
 0xBE824D83
 0xBF89FC07
-0x8D040002
-0x8D050003
+0x8D010002
+0x8D000003
 0xBFB00000
 
 // ====
 
-// RUN: emit amdgpu-assembly @clock_words strategy=source fixed=%narrow:physical_register:0:1 fixed=%wide:physical_register:2:2 fixed=%low:physical_register:4:1 fixed=%high:physical_register:5:1
+// RUN: emit amdgpu-assembly @clock_words
 
 // Both halves of the wide asynchronous result must be complete before use.
 amdgpu.target<gfx1151> @gpu
@@ -67,13 +67,13 @@ low.func.def target<amdgpu.rdna3_5.core>(@gpu) @clock_words() -> (reg<amdgpu.sgp
   s_sendmsg_rtn_b32 s0, message(131)
   s_sendmsg_rtn_b64 s[2:3], message(131)
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  s_xor_b32 s4, s2, s0
-  s_xor_b32 s5, s3, s0
+  s_xor_b32 s1, s2, s0
+  s_xor_b32 s0, s3, s0
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-native-words @clock_words strategy=source fixed=%narrow:physical_register:0:1 fixed=%wide:physical_register:2:2 fixed=%low:physical_register:4:1 fixed=%high:physical_register:5:1
+// RUN: emit amdgpu-native-words @clock_words
 
 // Both halves of the wide asynchronous result must be complete before use.
 amdgpu.target<gfx1151> @gpu
@@ -92,13 +92,13 @@ low.func.def target<amdgpu.rdna3_5.core>(@gpu) @clock_words() -> (reg<amdgpu.sgp
 0xBE804C83
 0xBE824D83
 0xBF89FC07
-0x8D040002
-0x8D050003
+0x8D010002
+0x8D000003
 0xBFB00000
 
 // ====
 
-// RUN: emit amdgpu-assembly @clock_words strategy=source fixed=%narrow:physical_register:0:1 fixed=%wide:physical_register:2:2 fixed=%low:physical_register:4:1 fixed=%high:physical_register:5:1
+// RUN: emit amdgpu-assembly @clock_words
 
 // Both halves of the wide asynchronous result must be complete before use.
 amdgpu.target<gfx1170> @gpu
@@ -117,13 +117,13 @@ low.func.def target<amdgpu.rdna4m.core>(@gpu) @clock_words() -> (reg<amdgpu.sgpr
   s_sendmsg_rtn_b32 s0, message(131)
   s_sendmsg_rtn_b64 s[2:3], message(131)
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  s_xor_b32 s4, s2, s0
-  s_xor_b32 s5, s3, s0
+  s_xor_b32 s1, s2, s0
+  s_xor_b32 s0, s3, s0
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-native-words @clock_words strategy=source fixed=%narrow:physical_register:0:1 fixed=%wide:physical_register:2:2 fixed=%low:physical_register:4:1 fixed=%high:physical_register:5:1
+// RUN: emit amdgpu-native-words @clock_words
 
 // Both halves of the wide asynchronous result must be complete before use.
 amdgpu.target<gfx1170> @gpu
@@ -142,13 +142,13 @@ low.func.def target<amdgpu.rdna4m.core>(@gpu) @clock_words() -> (reg<amdgpu.sgpr
 0xBE804C83
 0xBE824D83
 0xBF89FC07
-0x8D040002
-0x8D050003
+0x8D010002
+0x8D000003
 0xBFB00000
 
 // ====
 
-// RUN: emit amdgpu-assembly @clock_words strategy=source fixed=%narrow:physical_register:0:1 fixed=%wide:physical_register:2:2 fixed=%low:physical_register:4:1 fixed=%high:physical_register:5:1
+// RUN: emit amdgpu-assembly @clock_words
 
 // Both halves of the wide asynchronous result must be complete before use.
 amdgpu.target<gfx1200> @gpu
@@ -167,13 +167,13 @@ low.func.def target<amdgpu.rdna4.core>(@gpu) @clock_words() -> (reg<amdgpu.sgpr>
   s_sendmsg_rtn_b32 s0, message(131)
   s_sendmsg_rtn_b64 s[2:3], message(131)
   s_wait_kmcnt kmcnt(0)
-  s_xor_b32 s4, s2, s0
-  s_xor_b32 s5, s3, s0
+  s_xor_b32 s1, s2, s0
+  s_xor_b32 s0, s3, s0
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-native-words @clock_words strategy=source fixed=%narrow:physical_register:0:1 fixed=%wide:physical_register:2:2 fixed=%low:physical_register:4:1 fixed=%high:physical_register:5:1
+// RUN: emit amdgpu-native-words @clock_words
 
 // Both halves of the wide asynchronous result must be complete before use.
 amdgpu.target<gfx1200> @gpu
@@ -192,13 +192,13 @@ low.func.def target<amdgpu.rdna4.core>(@gpu) @clock_words() -> (reg<amdgpu.sgpr>
 0xBE804C83
 0xBE824D83
 0xBFC70000
-0x8D040002
-0x8D050003
+0x8D010002
+0x8D000003
 0xBFB00000
 
 // ====
 
-// RUN: emit amdgpu-assembly @clock_words strategy=source fixed=%narrow:physical_register:0:1 fixed=%wide:physical_register:2:2 fixed=%low:physical_register:4:1 fixed=%high:physical_register:5:1
+// RUN: emit amdgpu-assembly @clock_words
 
 // Both halves of the wide asynchronous result must be complete before use.
 amdgpu.target<gfx1250> @gpu
@@ -217,13 +217,13 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@gpu) @clock_words() -> (reg<amdg
   s_sendmsg_rtn_b32 s0, message(131)
   s_sendmsg_rtn_b64 s[2:3], message(131)
   s_wait_kmcnt kmcnt(0)
-  s_xor_b32 s4, s2, s0
-  s_xor_b32 s5, s3, s0
+  s_xor_b32 s1, s2, s0
+  s_xor_b32 s0, s3, s0
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-native-words @clock_words strategy=source fixed=%narrow:physical_register:0:1 fixed=%wide:physical_register:2:2 fixed=%low:physical_register:4:1 fixed=%high:physical_register:5:1
+// RUN: emit amdgpu-native-words @clock_words
 
 // Both halves of the wide asynchronous result must be complete before use.
 amdgpu.target<gfx1250> @gpu
@@ -242,13 +242,13 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@gpu) @clock_words() -> (reg<amdg
 0xBE804C83
 0xBE824D83
 0xBFC70000
-0x8D040002
-0x8D050003
+0x8D010002
+0x8D000003
 0xBFB00000
 
 // ====
 
-// RUN: emit amdgpu-assembly @clock_words strategy=source fixed=%narrow:physical_register:0:1 fixed=%wide:physical_register:2:2 fixed=%low:physical_register:4:1 fixed=%high:physical_register:5:1
+// RUN: emit amdgpu-assembly @clock_words
 
 // Both halves of the wide asynchronous result must be complete before use.
 amdgpu.target<gfx1251> @gpu
@@ -267,13 +267,13 @@ low.func.def target<amdgpu.rdna4.gfx1251.core>(@gpu) @clock_words() -> (reg<amdg
   s_sendmsg_rtn_b32 s0, message(131)
   s_sendmsg_rtn_b64 s[2:3], message(131)
   s_wait_kmcnt kmcnt(0)
-  s_xor_b32 s4, s2, s0
-  s_xor_b32 s5, s3, s0
+  s_xor_b32 s1, s2, s0
+  s_xor_b32 s0, s3, s0
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-native-words @clock_words strategy=source fixed=%narrow:physical_register:0:1 fixed=%wide:physical_register:2:2 fixed=%low:physical_register:4:1 fixed=%high:physical_register:5:1
+// RUN: emit amdgpu-native-words @clock_words
 
 // Both halves of the wide asynchronous result must be complete before use.
 amdgpu.target<gfx1251> @gpu
@@ -292,13 +292,13 @@ low.func.def target<amdgpu.rdna4.gfx1251.core>(@gpu) @clock_words() -> (reg<amdg
 0xBE804C83
 0xBE824D83
 0xBFC70000
-0x8D040002
-0x8D050003
+0x8D010002
+0x8D000003
 0xBFB00000
 
 // ====
 
-// RUN: emit amdgpu-assembly @clock_words strategy=source fixed=%narrow:physical_register:0:1 fixed=%wide:physical_register:2:2 fixed=%low:physical_register:4:1 fixed=%high:physical_register:5:1
+// RUN: emit amdgpu-assembly @clock_words
 
 // Both halves of the wide asynchronous result must be complete before use.
 amdgpu.target<gfx1250-a0> @gpu
@@ -317,13 +317,13 @@ low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@gpu) @clock_words() -> (reg<a
   s_sendmsg_rtn_b32 s0, message(131)
   s_sendmsg_rtn_b64 s[2:3], message(131)
   s_wait_kmcnt kmcnt(0)
-  s_xor_b32 s4, s2, s0
-  s_xor_b32 s5, s3, s0
+  s_xor_b32 s1, s2, s0
+  s_xor_b32 s0, s3, s0
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-native-words @clock_words strategy=source fixed=%narrow:physical_register:0:1 fixed=%wide:physical_register:2:2 fixed=%low:physical_register:4:1 fixed=%high:physical_register:5:1
+// RUN: emit amdgpu-native-words @clock_words
 
 // Both halves of the wide asynchronous result must be complete before use.
 amdgpu.target<gfx1250-a0> @gpu
@@ -342,6 +342,6 @@ low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@gpu) @clock_words() -> (reg<a
 0xBE804C83
 0xBE824D83
 0xBFC70000
-0x8D040002
-0x8D050003
+0x8D010002
+0x8D000003
 0xBFB00000

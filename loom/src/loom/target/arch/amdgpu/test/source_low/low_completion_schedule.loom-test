@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @counter_tracked_effect_braid strategy=resource-stall
+// RUN: emit amdgpu-assembly @counter_tracked_effect_braid
 
 amdgpu.target<gfx1100> @target {subgroup_size = 32}
 
@@ -34,7 +34,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @counter_tracked_effect_braid(%a
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @prefetch_alias_preserves_compute_overlap strategy=source fixed=%current:physical_register:0:1 fixed=%prefetched:physical_register:8:2
+// RUN: emit amdgpu-assembly @prefetch_alias_preserves_compute_overlap
 
 amdgpu.target<gfx1100> @target {subgroup_size = 32}
 
@@ -52,13 +52,13 @@ low.func.def schedule(locked) target<amdgpu.rdna3.core>(@target) @prefetch_alias
 }
 
 // ----
+  v_mov_b32 v7, v0
 .Lbb1:
-  ds_write_b32 v2, v0 offset:0
-  global_load_b64 v[8:9], v1, s[0:1] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  ds_write_b32 v2, v7 offset:0
+  global_load_b64 v[6:7], v1, s[0:1] offset:0
   v_mul_f32 v0, v3, v4
   ds_write_b32 v2, v0 offset:4
-  s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_mov_b32 v0, v9
   s_branch .Lbb1
 
 // ====
@@ -97,7 +97,7 @@ node 2 <- 0, 1
 timing 0 -> 2: separation=0 source=event-pair quality=exact
 
 // ====
-// RUN: emit amdgpu-assembly @barrier_overlaps_arithmetic strategy=resource-stall
+// RUN: emit amdgpu-assembly @barrier_overlaps_arithmetic
 
 amdgpu.target<gfx1100> @target {subgroup_size = 32}
 
@@ -121,7 +121,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @barrier_overlaps_arithmetic(%ad
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @split_barrier_overlaps_arithmetic strategy=resource-stall
+// RUN: emit amdgpu-assembly @split_barrier_overlaps_arithmetic
 
 amdgpu.target<gfx1200> @target {subgroup_size = 32}
 

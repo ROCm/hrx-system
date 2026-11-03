@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @vector_queue_aliases strategy=source fixed=%address:physical_register:0:1 fixed=%base:physical_register:0:2 fixed=%seed:physical_register:8:4 fixed=%future:physical_register:12:4
+// RUN: emit amdgpu-assembly @vector_queue_aliases
 
 amdgpu.target<gfx1151> @target
 
@@ -21,23 +21,22 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @vector_queue_aliases(%address
 // entry transport copies remain; the backedge leaves the result pending.
 
 // ----
-  v_mov_b32 v12, v8
-  v_mov_b32 v13, v9
-  v_mov_b32 v14, v10
-  v_mov_b32 v15, v11
 .Lbb1:
   s_cbranch_scc0 .Lbb3
 .Lbb2:
+  global_load_b128 v[8:11], v4, s[0:1] offset:0
+  v_add_u32 v0, v0, v1
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_add_u32 v1, v12, v13
-  global_load_b128 v[12:15], v0, s[0:1] offset:0
+  v_mov_b32 v0, v8
+  v_mov_b32 v1, v9
+  v_mov_b32 v2, v10
+  v_mov_b32 v3, v11
   s_branch .Lbb1
 .Lbb3:
-  s_waitcnt vmcnt(0) lgkmcnt(63)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @vector_queue_aliases_split_counter strategy=source fixed=%address:physical_register:0:1 fixed=%base:physical_register:0:2 fixed=%seed:physical_register:8:4 fixed=%future:physical_register:12:4
+// RUN: emit amdgpu-assembly @vector_queue_aliases_split_counter
 
 amdgpu.target<gfx1250> @target
 
@@ -59,23 +58,22 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @vector_queue_aliases_sp
 // The same allocation works with the separate load completion counter.
 
 // ----
-  v_mov_b32 v12, v8
-  v_mov_b32 v13, v9
-  v_mov_b32 v14, v10
-  v_mov_b32 v15, v11
 .Lbb1:
   s_cbranch_scc0 .Lbb3
 .Lbb2:
+  global_load_b128 v[8:11], v4, s[0:1] offset:0
+  v_add_u32 v0, v0, v1
   s_wait_loadcnt loadcnt(0)
-  v_add_u32 v1, v12, v13
-  global_load_b128 v[12:15], v0, s[0:1] offset:0
+  v_mov_b32 v0, v8
+  v_mov_b32 v1, v9
+  v_mov_b32 v2, v10
+  v_mov_b32 v3, v11
   s_branch .Lbb1
 .Lbb3:
-  s_wait_loadcnt loadcnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @fixed_slice_preserves_header_location strategy=source fixed=%address:physical_register:0:1 fixed=%base:physical_register:0:2 fixed=%seed:physical_register:8:4 fixed=%future:physical_register:12:4 fixed=%lane0:physical_register:8:1
+// RUN: emit amdgpu-assembly @fixed_slice_preserves_header_location
 
 amdgpu.target<gfx1151> @target
 
@@ -101,19 +99,19 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @fixed_slice_preserves_header_
 .Lbb1:
   s_cbranch_scc0 .Lbb3
 .Lbb2:
-  v_add_u32 v1, v8, v9
-  global_load_b128 v[12:15], v0, s[0:1] offset:0
+  global_load_b128 v[8:11], v4, s[0:1] offset:0
+  v_add_u32 v0, v0, v1
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_mov_b32 v8, v12
-  v_mov_b32 v9, v13
-  v_mov_b32 v10, v14
-  v_mov_b32 v11, v15
+  v_mov_b32 v0, v8
+  v_mov_b32 v1, v9
+  v_mov_b32 v2, v10
+  v_mov_b32 v3, v11
   s_branch .Lbb1
 .Lbb3:
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @late_slice_preserves_old_payload strategy=source fixed=%address:physical_register:0:1 fixed=%base:physical_register:0:2 fixed=%seed:physical_register:8:4 fixed=%future:physical_register:12:4
+// RUN: emit amdgpu-assembly @late_slice_preserves_old_payload
 
 amdgpu.target<gfx1151> @target
 
@@ -139,19 +137,19 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @late_slice_preserves_old_payl
 .Lbb1:
   s_cbranch_scc0 .Lbb3
 .Lbb2:
-  global_load_b128 v[12:15], v0, s[0:1] offset:0
-  v_add_u32 v1, v8, v9
+  global_load_b128 v[8:11], v4, s[0:1] offset:0
+  v_add_u32 v0, v0, v1
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_mov_b32 v8, v12
-  v_mov_b32 v9, v13
-  v_mov_b32 v10, v14
-  v_mov_b32 v11, v15
+  v_mov_b32 v0, v8
+  v_mov_b32 v1, v9
+  v_mov_b32 v2, v10
+  v_mov_b32 v3, v11
   s_branch .Lbb1
 .Lbb3:
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @leased_slice_preserves_source_storage strategy=source fixed=%address:physical_register:0:1 fixed=%base:physical_register:0:2 fixed=%seed:physical_register:8:4 fixed=%future:physical_register:12:4
+// RUN: emit amdgpu-assembly @leased_slice_preserves_source_storage
 
 amdgpu.target<gfx1250> @target
 
@@ -177,21 +175,18 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @leased_slice_preserves_
 .Lbb1:
   s_cbranch_scc0 .Lbb3
 .Lbb2:
-  global_store_b32 v8, v9, s[0:1] offset:0
-  s_wait_storecnt storecnt(0)
-  global_load_b128 v[12:15], v0, s[0:1] offset:0
   s_wait_loadcnt loadcnt(0)
-  v_mov_b32 v8, v12
-  v_mov_b32 v9, v13
-  v_mov_b32 v10, v14
-  v_mov_b32 v11, v15
+  global_store_b32 v0, v1, s[0:1] offset:0
+  s_wait_storecnt storecnt(0)
+  global_load_b128 v[0:3], v4, s[0:1] offset:0
   s_branch .Lbb1
 .Lbb3:
+  s_wait_loadcnt loadcnt(0)
   s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @anchored_component_blocks_dependent_relocation strategy=source fixed=%address:physical_register:0:1 fixed=%base:physical_register:0:2 fixed=%seed0:physical_register:8:4 fixed=%seed1:physical_register:12:4 fixed=%future0:physical_register:12:4 fixed=%future1:physical_register:16:4 fixed=%lane1:physical_register:12:1
+// RUN: emit amdgpu-assembly @anchored_component_blocks_dependent_relocation
 
 amdgpu.target<gfx1151> @target
 
@@ -217,18 +212,18 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @anchored_component_blocks_dep
 .Lbb1:
   s_cbranch_scc0 .Lbb3
 .Lbb2:
-  v_add_u32 v1, v8, v12
-  global_load_b128 v[12:15], v0, s[0:1] offset:0
-  global_load_b128 v[16:19], v0, s[0:1] offset:16
+  global_load_b128 v[12:15], v8, s[0:1] offset:0
+  global_load_b128 v[16:19], v8, s[0:1] offset:16
+  v_add_u32 v0, v0, v4
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_mov_b32 v8, v12
-  v_mov_b32 v9, v13
-  v_mov_b32 v10, v14
-  v_mov_b32 v11, v15
-  v_mov_b32 v12, v16
-  v_mov_b32 v13, v17
-  v_mov_b32 v14, v18
-  v_mov_b32 v15, v19
+  v_mov_b32 v0, v12
+  v_mov_b32 v1, v13
+  v_mov_b32 v2, v14
+  v_mov_b32 v3, v15
+  v_mov_b32 v4, v16
+  v_mov_b32 v5, v17
+  v_mov_b32 v6, v18
+  v_mov_b32 v7, v19
   s_branch .Lbb1
 .Lbb3:
   s_endpgm

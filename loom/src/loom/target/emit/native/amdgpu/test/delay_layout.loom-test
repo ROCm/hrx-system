@@ -1,5 +1,5 @@
 // The selectors stay relative to their own consecutive native consumers.
-// RUN: emit amdgpu-assembly @adjacent_gfx1100 strategy=source
+// RUN: emit amdgpu-assembly @adjacent_gfx1100
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @adjacent_gfx1100(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %increment: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -19,7 +19,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @adjacent_gfx1100(%a: reg<amdgpu
 // ====
 
 // The selectors stay relative to their own consecutive native consumers.
-// RUN: emit amdgpu-assembly @adjacent_gfx1151 strategy=source
+// RUN: emit amdgpu-assembly @adjacent_gfx1151
 amdgpu.target<gfx1151> @target
 
 low.func.def target<amdgpu.rdna3_5.core>(@target) @adjacent_gfx1151(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %increment: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -39,7 +39,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @adjacent_gfx1151(%a: reg<amdg
 // ====
 
 // The selectors stay relative to their own consecutive native consumers.
-// RUN: emit amdgpu-assembly @adjacent_gfx1200 strategy=source
+// RUN: emit amdgpu-assembly @adjacent_gfx1200
 amdgpu.target<gfx1200> @target
 
 low.func.def target<amdgpu.rdna4.core>(@target) @adjacent_gfx1200(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %increment: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -59,7 +59,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) @adjacent_gfx1200(%a: reg<amdgpu
 // ====
 
 // The selectors stay relative to their own consecutive native consumers.
-// RUN: emit amdgpu-assembly @adjacent_gfx942 strategy=source
+// RUN: emit amdgpu-assembly @adjacent_gfx942
 amdgpu.target<gfx942> @target
 
 low.func.def target<amdgpu.cdna3.core>(@target) @adjacent_gfx942(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %increment: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -79,7 +79,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @adjacent_gfx942(%a: reg<amdgpu.
 // ====
 
 // The native immediate carries NEXT and both original selectors.
-// RUN: emit amdgpu-native-words @adjacent_words strategy=source
+// RUN: emit amdgpu-native-words @adjacent_words
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @adjacent_words(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %increment: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -99,7 +99,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @adjacent_words(%a: reg<amdgpu.v
 // ====
 
 // A literal-bearing move occupies two words but one skipped instruction.
-// RUN: emit amdgpu-assembly @literal_gap strategy=source fixed=%literal:physical_register:8:1
+// RUN: emit amdgpu-assembly @literal_gap
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @literal_gap(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %increment: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.vgpr>) asm {
@@ -114,68 +114,14 @@ low.func.def target<amdgpu.rdna3.core>(@target) @literal_gap(%a: reg<amdgpu.vgpr
   v_add_f32 v0, v0, v1
   s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_1) | instid1(VALU_DEP_2)
   v_readfirstlane_b32 s1, v0
-  v_mov_b32 v8, 305419896
+  v_mov_b32 v0, 305419896
   s_add_u32 s0, s1, s0
   s_endpgm
 
 // ====
 
-// Expanded structural moves reach the five-instruction limit or exceed it.
-// RUN: emit amdgpu-assembly @expanded_moves_3 strategy=source fixed=%wide:physical_register:4:3 fixed=%copy:physical_register:8:3
-amdgpu.target<gfx1100> @target
-
-low.func.def target<amdgpu.rdna3.core>(@target) @expanded_moves_3(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %wide: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.vgpr x3>) asm {
-  %first = v_add_f32 %a, %b
-  %read_first = v_readfirstlane_b32 %first
-  %copy = copy %wide : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr x3>
-  %second = v_mul_f32 %a, %b
-  %read_second = v_readfirstlane_b32 %second
-  return %read_first, %read_second, %copy
-}
-
-// ----
-  v_add_f32 v2, v0, v1
-  s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_4) | instid1(VALU_DEP_1)
-  v_readfirstlane_b32 s0, v2
-  v_mov_b32 v8, v4
-  v_mov_b32 v9, v5
-  v_mov_b32 v10, v6
-  v_mul_f32 v0, v0, v1
-  v_readfirstlane_b32 s1, v0
-  s_endpgm
-
-// ====
-
-// Expanded structural moves reach the five-instruction limit or exceed it.
-// RUN: emit amdgpu-assembly @expanded_moves_4 strategy=source fixed=%wide:physical_register:4:4 fixed=%copy:physical_register:8:4
-amdgpu.target<gfx1100> @target
-
-low.func.def target<amdgpu.rdna3.core>(@target) @expanded_moves_4(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %wide: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.vgpr x4>) asm {
-  %first = v_add_f32 %a, %b
-  %read_first = v_readfirstlane_b32 %first
-  %copy = copy %wide : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
-  %second = v_mul_f32 %a, %b
-  %read_second = v_readfirstlane_b32 %second
-  return %read_first, %read_second, %copy
-}
-
-// ----
-  v_add_f32 v2, v0, v1
-  s_delay_alu instid0(VALU_DEP_1)
-  v_readfirstlane_b32 s0, v2
-  v_mov_b32 v8, v4
-  v_mov_b32 v9, v5
-  v_mov_b32 v10, v6
-  v_mov_b32 v11, v7
-  v_mul_f32 v0, v0, v1
-  s_delay_alu instid0(VALU_DEP_1)
-  v_readfirstlane_b32 s1, v0
-  s_endpgm
-
-// ====
-
 // A VOPD instruction advances the native skip distance once.
-// RUN: emit amdgpu-assembly @vopd_gap strategy=source fixed=%a:physical_register:0:1 fixed=%b:physical_register:1:1 fixed=%c:physical_register:2:1 fixed=%d:physical_register:3:1 fixed=%left:physical_register:4:1 fixed=%right:physical_register:5:1
+// RUN: emit amdgpu-assembly @vopd_gap
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @vopd_gap(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>, %d: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.vgpr>) asm {
@@ -191,14 +137,14 @@ low.func.def target<amdgpu.rdna3.core>(@target) @vopd_gap(%a: reg<amdgpu.vgpr>, 
   v_add_f32 v4, v0, v1
   s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_1) | instid1(VALU_DEP_1)
   v_readfirstlane_b32 s0, v4
-  v_dual_add_f32 v4, v1, v0 :: v_dual_mul_f32 v5, v2, v3
-  v_readfirstlane_b32 s1, v4
+  v_dual_add_f32 v0, v0, v1 :: v_dual_mul_f32 v3, v3, v2
+  v_readfirstlane_b32 s1, v0
   s_endpgm
 
 // ====
 
 // Authored delay metadata ends the preceding compiler pairing window.
-// RUN: emit amdgpu-assembly @authored_hint_boundary strategy=source
+// RUN: emit amdgpu-assembly @authored_hint_boundary
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @authored_hint_boundary(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %increment: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -212,16 +158,15 @@ low.func.def target<amdgpu.rdna3.core>(@target) @authored_hint_boundary(%a: reg<
 // ----
   v_add_f32 v0, v0, v1
   s_delay_alu instid0(VALU_DEP_1)
+  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
   v_readfirstlane_b32 s1, v0
-  s_delay_alu instid0(VALU_DEP_1)
-  s_delay_alu instid0(VALU_DEP_1)
   s_add_u32 s0, s1, s0
   s_endpgm
 
 // ====
 
 // A block entry does not inherit a pending pairing candidate.
-// RUN: emit amdgpu-assembly @block_boundary strategy=source
+// RUN: emit amdgpu-assembly @block_boundary
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @block_boundary(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %increment: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
@@ -239,31 +184,6 @@ low.func.def target<amdgpu.rdna3.core>(@target) @block_boundary(%a: reg<amdgpu.v
   v_readfirstlane_b32 s1, v0
 .Lbb1:
   s_add_u32 s0, s1, s0
-  s_endpgm
-
-// ====
-
-// A VGPR-MSB transition has no deterministic skip contribution.
-// RUN: emit amdgpu-assembly @vgpr_mode_boundary strategy=source fixed=%a:physical_register:0:1 fixed=%b:physical_register:1:1 fixed=%first:physical_register:2:1 fixed=%high_a:physical_register:512:1 fixed=%high_b:physical_register:513:1 fixed=%second:physical_register:514:1
-amdgpu.target<gfx1250> @target
-
-low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @vgpr_mode_boundary(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %high_a: reg<amdgpu.vgpr>, %high_b: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
-  %first = v_add_f32 %a, %b
-  %read_first = v_readfirstlane_b32 %first
-  %second = v_add_f32 %high_a, %high_b
-  %read_second = v_readfirstlane_b32 %second
-  return %read_first, %read_second
-}
-
-// ----
-  v_add_f32 v2, v0, v1
-  s_delay_alu instid0(VALU_DEP_1)
-  v_readfirstlane_b32 s0, v2
-  s_set_vgpr_msb 138
-  v_add_f32 v2, v0, v1
-  s_delay_alu instid0(VALU_DEP_1)
-  v_readfirstlane_b32 s1, v2
-  s_set_vgpr_msb 35328
   s_endpgm
 
 // ====
@@ -368,34 +288,8 @@ kernel_layout:
 
 // ====
 
-// A fixed low-bank producer and high-bank structural copy keep the consumer's
-// hint before its own VGPR bank transition.
-// RUN: emit amdgpu-assembly @structural_consumer strategy=source fixed=%second:physical_register:0:1 fixed=%copy:physical_register:512:1
-amdgpu.target<gfx1250> @target
-
-low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @structural_consumer(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.vgpr>) asm {
-  %first = v_add_f32 %a, %b
-  %scalar = v_readfirstlane_b32 %first
-  %second = v_mul_f32 %a, %b
-  %copy = copy %second : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
-  return %scalar, %copy
-}
-
-// ----
-  v_add_f32 v2, v0, v1
-  s_delay_alu instid0(VALU_DEP_1)
-  v_readfirstlane_b32 s0, v2
-  v_mul_f32 v0, v0, v1
-  s_delay_alu instid0(VALU_DEP_1)
-  s_set_vgpr_msb 128
-  v_mov_b32 v0, v0
-  s_set_vgpr_msb 32768
-  s_endpgm
-
-// ====
-
 // TRANS32 and VALU selectors retain their distinct consumers in a paired hint.
-// RUN: emit amdgpu-assembly @trans_consumer strategy=source
+// RUN: emit amdgpu-assembly @trans_consumer
 amdgpu.target<gfx1200> @target {subgroup_size = 32}
 
 low.func.def target<amdgpu.rdna4.core>(@target) @trans_consumer(%input: reg<amdgpu.vgpr>, %increment: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
