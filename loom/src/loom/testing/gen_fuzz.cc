@@ -101,8 +101,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   if (iree_status_is_ok(status)) {
     // Verify the generated module. Verification errors mean the generator
     // produced invalid IR — that's a generator bug, so we trap.
-    loom_verify_options_t options = {};
-    options.sink = {loom_diagnostic_stderr_sink, NULL};
+    loom_verify_options_t options = {
+        .sink = {loom_diagnostic_stderr_sink, NULL},
+    };
     loom_verify_result_t result = {};
     status = loom_verify_module(module, &options, &result);
     trap_with_status(status);
