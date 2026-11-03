@@ -130,6 +130,11 @@ endfunction()
 function(iree_finalize_test_build_targets)
   get_property(_TEST_METADATA_KEYS
     GLOBAL PROPERTY IREE_TEST_BUILD_METADATA_KEYS)
+  string(CONCAT _CATALOG_JSON
+    "{\n  \"kind\": \"ireeCtestBuildTargets\",\n  \"version\": 2,"
+    "\n  \"temporaryDirectoryRoot\": \"${IREE_TEST_TMPDIR_ROOT}\","
+    "\n  \"tests\": {")
+  set(_ENTRY_SEPARATOR "")
   set(_DEFAULT_ROOTS)
   foreach(_TEST_KEY IN LISTS _TEST_METADATA_KEYS)
     get_property(_TEST_NAME
@@ -178,8 +183,6 @@ function(iree_finalize_test_build_targets)
     list(APPEND _DEFAULT_ROOTS ${_DEPENDENCY_ROOTS})
     list(APPEND _BUILD_TARGETS ${_DEPENDENCY_ROOTS})
     list(REMOVE_DUPLICATES _BUILD_TARGETS)
-    set_property(GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_TARGETS_${_TEST_KEY}"
-      "${_BUILD_TARGETS}")
     foreach(_RESOURCE IN LISTS _RESOURCES)
       foreach(_ROOT IN LISTS _BUILD_TARGETS)
         set_property(GLOBAL APPEND PROPERTY IREE_TEST_RESOURCE_BUILD_TARGETS
@@ -219,6 +222,23 @@ function(iree_finalize_test_build_targets)
       endif()
       set(_VALIDATED_ROOT_${_BUILD_TARGET} ON)
     endforeach()
+
+    # Publish each resolved entry while its names and roots are still in scope.
+    set(_BUILD_TARGETS_JSON "[]")
+    if(NOT "${_BUILD_TARGETS}" STREQUAL "")
+      # These are validated native target names, so none needs JSON escaping.
+      list(JOIN _BUILD_TARGETS "\", \"" _BUILD_TARGETS_JSON)
+      set(_BUILD_TARGETS_JSON "[\"${_BUILD_TARGETS_JSON}\"]")
+    endif()
+    # Let CMake escape the member name, then append the member without its
+    # enclosing object braces. Per-entry work is independent of catalog size.
+    string(JSON _ENTRY SET "{}" "${_TEST_NAME}" "${_BUILD_TARGETS_JSON}")
+    string(LENGTH "${_ENTRY}" _ENTRY_LENGTH)
+    math(EXPR _MEMBER_LENGTH "${_ENTRY_LENGTH} - 2")
+    string(SUBSTRING "${_ENTRY}" 1 ${_MEMBER_LENGTH} _MEMBER)
+    string(STRIP "${_MEMBER}" _MEMBER)
+    string(APPEND _CATALOG_JSON "${_ENTRY_SEPARATOR}\n    ${_MEMBER}")
+    set(_ENTRY_SEPARATOR ",")
   endforeach()
   if(NOT "${_DEFAULT_ROOTS}" STREQUAL "")
     list(REMOVE_DUPLICATES _DEFAULT_ROOTS)
@@ -238,38 +258,7 @@ function(iree_finalize_test_build_targets)
     endif()
   endforeach()
 
-  # Encode each entry independently instead of parsing and serializing the
-  # growing catalog for every test. Publish only the completed JSON document.
   set(_CATALOG_TEMP "${IREE_CTEST_BUILD_TARGETS_FILE}.tmp")
-  string(CONCAT _CATALOG_JSON
-    "{\n  \"kind\": \"ireeCtestBuildTargets\",\n  \"version\": 2,"
-    "\n  \"temporaryDirectoryRoot\": \"${IREE_TEST_TMPDIR_ROOT}\","
-    "\n  \"tests\": {")
-  set(_ENTRY_SEPARATOR "")
-  foreach(_TEST_KEY IN LISTS _TEST_METADATA_KEYS)
-    get_property(_TEST_NAME
-      GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_NAME_${_TEST_KEY}")
-    get_property(_BUILD_TARGETS
-      GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_TARGETS_${_TEST_KEY}")
-    set(_BUILD_TARGETS_JSON "[]")
-    set(_BUILD_TARGET_INDEX 0)
-    foreach(_BUILD_TARGET IN LISTS _BUILD_TARGETS)
-      string(JSON _BUILD_TARGETS_JSON
-        SET "${_BUILD_TARGETS_JSON}"
-        ${_BUILD_TARGET_INDEX}
-        "\"${_BUILD_TARGET}\"")
-      math(EXPR _BUILD_TARGET_INDEX "${_BUILD_TARGET_INDEX} + 1")
-    endforeach()
-    # Let CMake escape the member name, then append the member without its
-    # enclosing object braces. Per-entry work is independent of catalog size.
-    string(JSON _ENTRY SET "{}" "${_TEST_NAME}" "${_BUILD_TARGETS_JSON}")
-    string(LENGTH "${_ENTRY}" _ENTRY_LENGTH)
-    math(EXPR _MEMBER_LENGTH "${_ENTRY_LENGTH} - 2")
-    string(SUBSTRING "${_ENTRY}" 1 ${_MEMBER_LENGTH} _MEMBER)
-    string(STRIP "${_MEMBER}" _MEMBER)
-    string(APPEND _CATALOG_JSON "${_ENTRY_SEPARATOR}\n    ${_MEMBER}")
-    set(_ENTRY_SEPARATOR ",")
-  endforeach()
   string(APPEND _CATALOG_JSON "\n  }\n}\n")
   file(WRITE "${_CATALOG_TEMP}" "${_CATALOG_JSON}")
   file(RENAME "${_CATALOG_TEMP}" "${IREE_CTEST_BUILD_TARGETS_FILE}")
