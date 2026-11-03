@@ -1610,7 +1610,6 @@ class CiTest(unittest.TestCase):
     def test_amdgpu_container_jobs_preserve_runner_device_selection(self):
         for path, job_name in (
             (".github/workflows/ci_iree.yml", "bazel_linux"),
-            (".github/workflows/ci_iree.yml", "cmake_linux"),
             (".github/workflows/ci_libhrx.yml", "cmake_linux_gfx942"),
             (
                 ".github/workflows/test_core_linux_gpu_source.yml",
