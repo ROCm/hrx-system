@@ -24,6 +24,11 @@ enum loom_low_schedule_resource_pressure_flag_bits_e {
   LOOM_LOW_SCHEDULE_RESOURCE_PRESSURE_FLAG_CANDIDATE_TOUCHED = 1u << 0,
 };
 
+// Builds dense bounded-unspillable completion domains after the scheduler has
+// resolved per-class and shared pressure-set capacities.
+iree_status_t loom_low_schedule_target_pressure_initialize_completion_domains(
+    loom_low_schedule_build_state_t* state);
+
 // Resolves function-local packing-resource capacities and leaves resources
 // inactive when direct register pressure already carries the same signal.
 iree_status_t loom_low_schedule_target_pressure_initialize_packing_resources(
