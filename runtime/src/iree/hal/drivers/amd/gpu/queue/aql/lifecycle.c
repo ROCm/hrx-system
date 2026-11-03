@@ -20,12 +20,6 @@ void iree_hal_amd_gpu_aql_queue_fail_issued(iree_hal_amd_gpu_aql_queue_t* queue,
         queue->issued[i & (queue->options.retirement_capacity - 1)].submission;
     iree_status_t status = iree_status_from_code(code);
     iree_hal_amd_gpu_aql_submission_fail(submission, status);
-    iree_hal_semaphore_list_fail(submission->signals, status);
-  }
-  if (end && queue->frontier.tracker) {
-    iree_async_frontier_tracker_fail_axis(queue->frontier.tracker,
-                                          queue->frontier.axis,
-                                          iree_status_from_code(code));
   }
   queue->failure_delivered = true;
 }
@@ -73,6 +67,13 @@ bool iree_hal_amd_gpu_aql_queue_retire_failed(iree_hal_queue_t* base,
                       iree_memory_order_release);
     iree_atomic_store(&queue->completed.count, position + 1,
                       iree_memory_order_release);
+  }
+  // Native stop and issued retirement precede failed frontier publication.
+  // Public operation failures follow each capture's final payload release.
+  if (end && queue->frontier.tracker) {
+    iree_async_frontier_tracker_fail_axis(queue->frontier.tracker,
+                                          queue->frontier.axis,
+                                          iree_status_from_code(code));
   }
   if (iree_hal_amd_gpu_publisher_handoff(&queue->publisher, NULL)) {
     iree_hal_amd_gpu_publication_notify(queue->options.publication,

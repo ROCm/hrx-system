@@ -12,8 +12,10 @@
 #include <semaphore>
 #include <thread>
 
+#include "iree/async/proactor_platform.h"
 #include "iree/hal/drivers/amd/gpu/queue/host_wait.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/state.h"
+#include "iree/hal/drivers/amd/gpu/queue/semaphore.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -97,7 +99,12 @@ class DeviceFailureTest : public ::testing::Test {
     iree_hal_amd_gpu_queue_membership_initialize(&membership_);
     IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_barrier_profile_initialize({11, 0, 0},
                                                                    &barriers_));
+    IREE_ASSERT_OK(iree_async_proactor_create_platform(
+        iree_async_proactor_options_default(), iree_allocator_system(),
+        &proactor_));
     for (uint32_t i = 0; i < queues_.size(); ++i) {
+      IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
+          proactor_, nullptr, 0, 2, iree_allocator_system(), &outputs_[i]));
       auto& queue = queues_[i];
       native_[i] = {.owner = this, .ordinal = i};
       queue.context = &context_;
@@ -148,6 +155,10 @@ class DeviceFailureTest : public ::testing::Test {
       iree_slim_mutex_deinitialize(&queue.pending.completion_mutex);
     }
     EXPECT_TRUE(iree_hal_amd_gpu_queue_membership_deinitialize(&membership_));
+    for (auto* semaphore : outputs_) {
+      iree_hal_semaphore_release(semaphore);
+    }
+    iree_async_proactor_release(proactor_);
   }
 
   void Start(uint32_t timeout_ms = 30000, bool notify_failure = true) {
@@ -169,9 +180,11 @@ class DeviceFailureTest : public ::testing::Test {
         refs[j] = iree_hal_make_buffer_ref(buffer, 0, bytes_[i][j].size());
       }
       iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
+      uint64_t value = 1;
       IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
-          &queues_[i].captures, false, {}, {}, nullptr, &function_, {}, {}, {},
-          {refs.size(), refs.data()}, &barriers_, nullptr, 0, &capture));
+          &queues_[i].captures, false, {}, {1, &outputs_[i], &value}, nullptr,
+          &function_, {}, {}, {}, {refs.size(), refs.data()}, &barriers_,
+          nullptr, 0, &capture));
       for (auto ref : refs) {
         iree_hal_buffer_release(ref.buffer);
       }
@@ -244,6 +257,10 @@ class DeviceFailureTest : public ::testing::Test {
   iree_hal_amd_gpu_pm4_barrier_profile_t barriers_ = {};
   // Six independently retained application buffers.
   std::array<std::array<std::array<uint8_t, 16>, 3>, 2> bytes_ = {};
+  // Independent operation outputs; neither is failed by the test controller.
+  std::array<iree_hal_semaphore_t*, 2> outputs_ = {};
+  // Actual async service backing the public completion identities.
+  iree_async_proactor_t* proactor_ = nullptr;
   // First native execution error, preserved separately from native cleanup.
   amdf_status_t native_error_ =
       amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
@@ -284,6 +301,28 @@ TEST_F(DeviceFailureTest, StopsAllQueuesBeforeReleasingAnyCapture) {
   EXPECT_EQ(deadlines_.load(), 0u);
 }
 
+TEST_F(DeviceFailureTest, PublicFailureWaitsForNativeStop) {
+  hold_stop_ = true;
+  Start();
+  stop_entered_.acquire();
+  EXPECT_EQ(stopped_.load(), 0u);
+  EXPECT_EQ(released_.load(), 0u);
+  for (auto* semaphore : outputs_) {
+    uint64_t value = UINT64_MAX;
+    IREE_EXPECT_OK(iree_hal_semaphore_query(semaphore, &value));
+    EXPECT_EQ(value, 0u);
+  }
+  resume_stop_.release();
+  Join();
+  EXPECT_EQ(stopped_.load(), 2u);
+  EXPECT_EQ(released_.load(), 6u);
+  for (auto* semaphore : outputs_) {
+    uint64_t value = 0;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
+                          iree_hal_semaphore_query(semaphore, &value));
+  }
+}
+
 TEST_F(DeviceFailureTest, NativeRemovalFailureRetainsEveryCapture) {
   stop_status_ = amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
   Start();
@@ -293,6 +332,11 @@ TEST_F(DeviceFailureTest, NativeRemovalFailureRetainsEveryCapture) {
   EXPECT_EQ(membership_.terminal.status, stop_status_);
   EXPECT_EQ(iree_hal_amd_gpu_completion_query_status(&completion_),
             native_error_);
+  for (auto* semaphore : outputs_) {
+    uint64_t value = UINT64_MAX;
+    IREE_EXPECT_OK(iree_hal_semaphore_query(semaphore, &value));
+    EXPECT_EQ(value, 0u);
+  }
 }
 
 TEST_F(DeviceFailureTest, ExistingPublisherReportsBlockedNativeStop) {
