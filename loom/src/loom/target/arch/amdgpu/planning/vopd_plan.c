@@ -100,6 +100,8 @@ typedef struct loom_amdgpu_vopd_plan_builder_t {
   const loom_amdgpu_processor_properties_t* processor_properties;
   // Optional address-state transitions that block second-component fusion.
   const loom_amdgpu_address_state_plan_t* address_state;
+  // Logical wait decisions that may elide authored packets.
+  const loom_amdgpu_wait_plan_t* wait_plan;
   // Optional planned wait packets that block second-component fusion.
   const loom_amdgpu_wait_packet_plan_t* wait_packets;
   // Arena owning exact-size tables retained by the completed plan.
@@ -475,8 +477,7 @@ static loom_amdgpu_vopd_visible_packet_t loom_amdgpu_vopd_classify_packet(
   };
   loom_amdgpu_vopd_packet_flags_t* packet_flags =
       &builder->packet_flags[packet_index];
-  if (builder->wait_packets != NULL &&
-      loom_amdgpu_wait_plan_elides_node(builder->wait_packets->wait_plan,
+  if (loom_amdgpu_wait_plan_elides_node(builder->wait_plan,
                                         visible.packet.node_index)) {
     if (!iree_any_bit_set(*packet_flags,
                           LOOM_AMDGPU_VOPD_PACKET_FLAG_INSERTION_BLOCKED)) {
@@ -1499,8 +1500,7 @@ static iree_status_t loom_amdgpu_vopd_plan_unpaired_matrix_stream(
          packet_index < packet_end; ++packet_index) {
       const loom_low_packet_view_t packet =
           loom_low_packet_at(builder->schedule, packet_index);
-      if (builder->wait_packets != NULL &&
-          loom_amdgpu_wait_plan_elides_node(builder->wait_packets->wait_plan,
+      if (loom_amdgpu_wait_plan_elides_node(builder->wait_plan,
                                             packet.node_index)) {
         continue;
       }
@@ -1799,6 +1799,7 @@ iree_status_t loom_amdgpu_vopd_plan_build(
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_processor_properties_t* processor_properties,
     const loom_amdgpu_address_state_plan_t* address_state,
+    const loom_amdgpu_wait_plan_t* wait_plan,
     const loom_amdgpu_wait_packet_plan_t* wait_packets,
     loom_amdgpu_matrix_coexecution_t* matrix_coexecution,
     iree_arena_allocator_t* arena, iree_arena_allocator_t* transient_arena,
@@ -1815,6 +1816,7 @@ iree_status_t loom_amdgpu_vopd_plan_build(
           .allocation = allocation,
           .processor_properties = processor_properties,
           .address_state = address_state,
+          .wait_plan = wait_plan,
           .wait_packets = wait_packets,
           .arena = arena,
           .transient_arena = transient_arena,
@@ -1841,6 +1843,7 @@ iree_status_t loom_amdgpu_vopd_plan_build(
       .allocation = allocation,
       .processor_properties = processor_properties,
       .address_state = address_state,
+      .wait_plan = wait_plan,
       .wait_packets = wait_packets,
       .arena = arena,
       .transient_arena = transient_arena,

@@ -340,7 +340,7 @@ iree_status_t loom_amdgpu_wait_packet_plan_build(
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_allocate(&builder));
   loom_amdgpu_wait_packet_build_packets(&builder);
   *out_plan = (loom_amdgpu_wait_packet_plan_t){
-      .wait_plan = wait_plan,
+      .schedule = wait_plan->schedule,
       .packets = builder.packets,
       .packet_count = builder.packet_count,
       .immediates = builder.immediates,
@@ -365,7 +365,7 @@ static iree_string_view_t loom_amdgpu_wait_packet_json_symbol_name(
 
 static iree_string_view_t loom_amdgpu_wait_packet_json_function_name(
     const loom_amdgpu_wait_packet_plan_t* plan) {
-  const loom_low_schedule_table_t* schedule = plan->wait_plan->schedule;
+  const loom_low_schedule_table_t* schedule = plan->schedule;
   if (loom_low_function_def_isa(schedule->function_op)) {
     return loom_amdgpu_wait_packet_json_symbol_name(
         schedule->module, loom_low_function_callee(schedule->function_op));
@@ -394,7 +394,7 @@ iree_status_t loom_amdgpu_wait_packet_plan_format_json(
     iree_string_builder_t* builder) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(builder, &stream);
-  const loom_low_schedule_table_t* schedule = plan->wait_plan->schedule;
+  const loom_low_schedule_table_t* schedule = plan->schedule;
   loom_json_object_writer_t object;
   IREE_RETURN_IF_ERROR(loom_json_object_begin(&stream, &object));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
