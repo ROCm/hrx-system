@@ -7,6 +7,7 @@
 #include "loom/serve/runtime/storage/memory.h"
 
 #include "iree/async/semaphore.h"
+#include "iree/base/internal/atomic_slist.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/base/threading/notification.h"
 #include "iree/hal/memory/slab_cache.h"
@@ -72,8 +73,10 @@ struct loom_serve_memory_pool_t {
     // Apply once all accepted source operations have published.
     bool pending;
   } trim;
-  // Owner-only list of queue operations awaiting result publication.
-  loom_serve_memory_operation_t* operations;
+  // Owner-only list of accepted operations awaiting result publication.
+  loom_serve_memory_operation_t* pending_operations;
+  // Callback-to-owner handoff of operations ready for publication.
+  iree_atomic_slist_t completed_operations;
   // Owner wake copied into operations and capacity observations.
   struct {
     // Nonblocking callback; detachment joins every accepted copy.
@@ -196,8 +199,12 @@ struct loom_serve_memory_operation_t {
   iree_hal_semaphore_list_t mapping_waits;
   // Borrowed pool outliving the operation and every reservation.
   loom_serve_memory_pool_t* pool;
-  // Owner-only link while results still need publication.
-  loom_serve_memory_operation_t* next;
+  // Next operation in the owner-only pending publication list.
+  loom_serve_memory_operation_t* pending_next;
+  // Previous link naming this operation in the owner-only pending list.
+  loom_serve_memory_operation_t** pending_previous_link;
+  // Callback-to-owner handoff after the final native completion claim.
+  iree_atomic_slist_entry_t completed_entry;
   // Readiness signaled after native mapping publication, retained by this job.
   iree_hal_semaphore_t* readiness;
   // Caller-selected readiness payload.
@@ -288,7 +295,7 @@ static uint64_t loom_serve_memory_demand_total(
 // Concurrent acquisition snapshots cannot safely supply that subtraction.
 static void loom_serve_memory_pool_observe_retirement(
     loom_serve_memory_pool_t* pool) {
-  if (!pool->operations) {
+  if (!pool->pending_operations) {
     for (iree_host_size_t i = 0; i < LOOM_SERVE_MEMORY_CLASS_COUNT; ++i) {
       pool->demand.cached_bytes[i] -= pool->failed_demand.cached_bytes[i];
     }
@@ -296,7 +303,7 @@ static void loom_serve_memory_pool_observe_retirement(
     pool->failed_demand = (loom_serve_memory_demand_t){0};
   }
   uint64_t retained_bytes = pool->demand.uncached_bytes;
-  if (!pool->operations) {
+  if (!pool->pending_operations) {
     for (iree_host_size_t i = 0; i < LOOM_SERVE_MEMORY_CLASS_COUNT; ++i) {
       if (!pool->classes[i].cache) {
         continue;
@@ -313,7 +320,7 @@ static void loom_serve_memory_pool_observe_retirement(
   iree_hal_pool_query_stats(pool->storage_pool, &native);
   pool->statistics.peak_bytes =
       iree_max(pool->statistics.peak_bytes, native.bytes_committed);
-  if (!pool->operations) {
+  if (!pool->pending_operations) {
     // Accepted constructors can lose backing before publishing their failure.
     // Until this join, their protected demand already covers that charge.
     pool->statistics.abandoned_bytes = native.bytes_abandoned;
@@ -455,6 +462,7 @@ iree_status_t loom_serve_memory_pool_allocate(
       iree_hal_device_group_memory_domain(group), IREE_HAL_MEMORY_SCOPE_ANY};
   pool->limit_bytes = limit_bytes ? limit_bytes : UINT64_MAX;
   iree_slim_mutex_initialize(&pool->capacity_mutex);
+  iree_atomic_slist_initialize(&pool->completed_operations);
   iree_notification_initialize(&pool->capacity_notification);
   pool->slab_cache = storage_pool;
   iree_status_t status = iree_ok_status();
@@ -499,7 +507,7 @@ void loom_serve_memory_pool_free(loom_serve_memory_pool_t* pool) {
     return;
   }
   IREE_ASSERT(!pool->statistics.reserved_bytes &&
-              !pool->statistics.committed_bytes && !pool->operations);
+              !pool->statistics.committed_bytes && !pool->pending_operations);
   if (!loom_serve_memory_capacity_is_idle(pool)) {
     iree_hal_pool_wait_cancel(pool->capacity_wait);
     iree_notification_await(&pool->capacity_notification,
@@ -510,6 +518,7 @@ void loom_serve_memory_pool_free(loom_serve_memory_pool_t* pool) {
   iree_status_free(pool->capacity_status);
   iree_status_free(pool->failure);
   iree_notification_deinitialize(&pool->capacity_notification);
+  iree_atomic_slist_deinitialize(&pool->completed_operations);
   iree_slim_mutex_deinitialize(&pool->capacity_mutex);
   for (iree_host_size_t i = 0; i < LOOM_SERVE_MEMORY_CLASS_COUNT; ++i) {
     iree_hal_pool_release(pool->classes[i].cache);
@@ -614,8 +623,8 @@ loom_serve_wake_callback_t loom_serve_memory_pool_set_observer(
   pool->observer.wake = wake;
   pool->observer.user_data = user_data;
   iree_slim_mutex_unlock(&pool->capacity_mutex);
-  for (loom_serve_memory_operation_t* operation = pool->operations; operation;
-       operation = operation->next) {
+  for (loom_serve_memory_operation_t* operation = pool->pending_operations;
+       operation; operation = operation->pending_next) {
     iree_slim_mutex_lock(&operation->mutex);
     operation->observer.wake = wake;
     operation->observer.user_data = user_data;
@@ -626,7 +635,7 @@ loom_serve_wake_callback_t loom_serve_memory_pool_set_observer(
 
 bool loom_serve_memory_pool_is_pending(loom_serve_memory_pool_t* pool) {
   loom_serve_memory_pool_collect(pool);
-  if (pool->operations) {
+  if (pool->pending_operations) {
     return true;
   }
   return loom_serve_memory_pool_observe_capacity(pool);
@@ -634,8 +643,8 @@ bool loom_serve_memory_pool_is_pending(loom_serve_memory_pool_t* pool) {
 
 iree_status_t loom_serve_memory_pool_await(loom_serve_memory_pool_t* pool) {
   while (loom_serve_memory_pool_is_pending(pool)) {
-    if (pool->operations) {
-      loom_serve_memory_operation_await(pool->operations);
+    if (pool->pending_operations) {
+      loom_serve_memory_operation_await(pool->pending_operations);
     } else {
       iree_notification_await(&pool->capacity_notification,
                               loom_serve_memory_capacity_is_idle, pool,
@@ -697,8 +706,8 @@ iree_status_t loom_serve_memory_pool_prepare(
   // Another class's idle bytes cannot satisfy this demand. At a joined source
   // epoch they can be returned, but native disposal must finish before those
   // bytes become available for a different physical extent.
-  if (!pool->operations && loom_serve_memory_pool_projected_bytes(
-                               pool, additional) > pool->limit_bytes) {
+  if (!pool->pending_operations && loom_serve_memory_pool_projected_bytes(
+                                       pool, additional) > pool->limit_bytes) {
     loom_serve_memory_pool_trim_cache(pool, pool->limit_bytes, additional);
   }
   // Reclamation can schedule a physical trim. Resolve that boundary before
@@ -707,7 +716,7 @@ iree_status_t loom_serve_memory_pool_prepare(
   if (loom_serve_memory_pool_projected_bytes(pool, additional) >
       pool->limit_bytes) {
     deferred |= loom_serve_memory_pool_observe_capacity(pool) ||
-                pool->operations != NULL;
+                pool->pending_operations != NULL;
   }
   if (!pool->trim.pending && loom_serve_memory_pool_projected_bytes(
                                  pool, additional) <= pool->limit_bytes) {
@@ -1074,16 +1083,19 @@ static void loom_serve_memory_pool_collect(loom_serve_memory_pool_t* pool) {
   iree_slim_mutex_unlock(&pool->capacity_mutex);
   pool->capacity_failed |= !iree_status_is_ok(capacity_status);
   pool->failure = iree_status_join(pool->failure, capacity_status);
-  loom_serve_memory_operation_t** link = &pool->operations;
-  while (*link) {
-    loom_serve_memory_operation_t* operation = *link;
+  iree_atomic_slist_entry_t* completed = NULL;
+  iree_atomic_slist_flush(&pool->completed_operations,
+                          IREE_ATOMIC_SLIST_FLUSH_ORDER_APPROXIMATE_LIFO,
+                          &completed, NULL);
+  while (completed) {
+    iree_atomic_slist_entry_t* next = completed->next;
+    loom_serve_memory_operation_t* operation = iree_containerof(
+        completed, loom_serve_memory_operation_t, completed_entry);
+    // The completion link is visible before readiness and wake callbacks run.
+    // Join the operation mutex once so publication owns the completed result
+    // and no callback retains access after the caller observes |published|.
     iree_slim_mutex_lock(&operation->mutex);
-    const bool complete = operation->complete;
     iree_slim_mutex_unlock(&operation->mutex);
-    if (!complete) {
-      link = &operation->next;
-      continue;
-    }
     iree_hal_semaphore_t* mapping_completion =
         operation->stages[operation->releasing ? 0 : 1].semaphore;
     if (operation->growing) {
@@ -1135,11 +1147,17 @@ static void loom_serve_memory_pool_collect(loom_serve_memory_pool_t* pool) {
         }
       }
     }
+    *operation->pending_previous_link = operation->pending_next;
+    if (operation->pending_next) {
+      operation->pending_next->pending_previous_link =
+          operation->pending_previous_link;
+    }
+    operation->pending_next = NULL;
+    operation->pending_previous_link = NULL;
     operation->published = true;
-    *link = operation->next;
-    operation->next = NULL;
+    completed = next;
   }
-  if (!pool->operations) {
+  if (!pool->pending_operations) {
     loom_serve_memory_pool_observe_retirement(pool);
     if (pool->trim.pending) {
       loom_serve_memory_pool_trim_cache(pool, pool->trim.target_bytes,
@@ -1185,6 +1203,8 @@ static void loom_serve_memory_operation_complete(
   // Readiness can wake the owner on another thread. Its completion query must
   // join publication and our last callback access before it can free us.
   iree_slim_mutex_lock(&operation->mutex);
+  iree_atomic_slist_push(&operation->pool->completed_operations,
+                         &operation->completed_entry);
   if (operation->readiness && iree_status_is_ok(status)) {
     status =
         iree_hal_semaphore_signal(operation->readiness, operation->value, NULL);
@@ -1263,8 +1283,12 @@ static void loom_serve_memory_operation_enqueue(
     loom_serve_memory_pool_t* pool, loom_serve_memory_operation_t* operation) {
   operation->observer.wake = pool->observer.wake;
   operation->observer.user_data = pool->observer.user_data;
-  operation->next = pool->operations;
-  pool->operations = operation;
+  operation->pending_next = pool->pending_operations;
+  operation->pending_previous_link = &pool->pending_operations;
+  if (operation->pending_next) {
+    operation->pending_next->pending_previous_link = &operation->pending_next;
+  }
+  pool->pending_operations = operation;
   iree_atomic_store(&operation->pending, 3, iree_memory_order_relaxed);
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < 2; ++i) {

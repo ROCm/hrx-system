@@ -1508,6 +1508,12 @@ TEST_F(MemoryTest, DisjointMappingsFollowTheirReservationNotTheSharedPool) {
     EXPECT_EQ(mapping_waits[2].size(), 1u);  // Only its own allocation.
     loom_serve_memory_operation_await(operations[2]);
     IREE_ASSERT_OK(loom_serve_memory_operation_query_status(operations[2]));
+    loom_serve_memory_operation_free(operations[2]);
+    operations[2] = nullptr;
+    // Publishing and freeing the independent operation must unlink it while
+    // both older edits remain blocked in the same pool.
+    EXPECT_FALSE(loom_serve_memory_operation_is_complete(operations[0]));
+    EXPECT_FALSE(loom_serve_memory_operation_is_complete(operations[1]));
     RoundTrip(loom_serve_virtual_buffer_handle(second), 0, 0x12345678);
     gate.reset();
     for (auto* operation : operations) {
