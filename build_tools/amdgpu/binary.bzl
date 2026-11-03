@@ -34,14 +34,15 @@ _CLANG_RESOURCE_INCLUDE_FLAG = "-isystem $$(dirname $(location %s))" % (
     AMDGPU_CLANG_RESOURCE_MARKER,
 ) if AMDGPU_CLANG_RESOURCE_MARKER else ""
 
-def _incompatible_filegroup(name, kwargs):
+def _incompatible_filegroup(name, srcs, kwargs):
     filegroup_kwargs = {}
     for attr in ["tags", "testonly", "visibility"]:
         if attr in kwargs:
             filegroup_kwargs[attr] = kwargs[attr]
     native.filegroup(
         name = name,
-        srcs = [],
+        # Preserve source ownership when device compilation is disabled.
+        srcs = srcs,
         target_compatible_with = _INCOMPATIBLE_TARGET,
         **filegroup_kwargs
     )
@@ -123,7 +124,7 @@ def iree_amdgpu_library(
         **kwargs: any additional attributes to pass to the underlying rules.
     """
     if not AMDGPU_DEVICE_TOOLCHAIN_AVAILABLE:
-        _incompatible_filegroup(name, kwargs)
+        _incompatible_filegroup(name, srcs + internal_hdrs, kwargs)
         return
     if not srcs:
         fail("iree_amdgpu_library requires at least one source")
@@ -295,7 +296,7 @@ def iree_amdgpu_binary(
         **kwargs: any additional attributes to pass to the underlying rules.
     """
     if not AMDGPU_DEVICE_TOOLCHAIN_AVAILABLE:
-        _incompatible_filegroup(name, kwargs)
+        _incompatible_filegroup(name, srcs + internal_hdrs, kwargs)
         return
     if not srcs:
         fail("iree_amdgpu_binary requires at least one source")
@@ -462,7 +463,7 @@ def iree_amdgpu_hip_binary(
       **kwargs: Additional attributes for the output target.
     """
     if not AMDGPU_HIP_DEVICE_LIBRARIES_AVAILABLE:
-        _incompatible_filegroup(name, kwargs)
+        _incompatible_filegroup(name, srcs, kwargs)
         return
     if target != "amdgcn-amd-amdhsa":
         fail("HIP device sources require target amdgcn-amd-amdhsa")
