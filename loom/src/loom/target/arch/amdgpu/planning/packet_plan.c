@@ -63,8 +63,8 @@ iree_status_t loom_amdgpu_packet_plan_build(
         iree_arena_checkpoint_save(&transient_arena);
     status = loom_amdgpu_vopd_plan_build(
         schedule, allocation, processor_properties, &out_plan->address_state,
-        &out_plan->wait_packets, matrix_coexecution, arena, &transient_arena,
-        out_vopd_rejections, &out_plan->vopd_plan);
+        &out_plan->wait_plan, &out_plan->wait_packets, matrix_coexecution,
+        arena, &transient_arena, out_vopd_rejections, &out_plan->vopd_plan);
     iree_arena_checkpoint_restore(&vopd_checkpoint);
   }
   if (iree_status_is_ok(status) && matrix_coexecution != NULL) {
@@ -78,8 +78,9 @@ iree_status_t loom_amdgpu_packet_plan_build(
         iree_arena_checkpoint_save(&transient_arena);
     status = loom_amdgpu_wait_state_plan_build(
         schedule, allocation, processor_properties, &out_plan->address_state,
-        &out_plan->wait_packets, &out_plan->vopd_plan, matrix_coexecution,
-        matrix_results, arena, &transient_arena, &out_plan->wait_states);
+        &out_plan->wait_plan, &out_plan->wait_packets, &out_plan->vopd_plan,
+        matrix_coexecution, matrix_results, arena, &transient_arena,
+        &out_plan->wait_states);
     iree_arena_checkpoint_restore(&wait_state_checkpoint);
   }
   iree_arena_deinitialize(&transient_arena);

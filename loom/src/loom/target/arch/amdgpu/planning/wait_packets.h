@@ -76,8 +76,8 @@ typedef struct loom_amdgpu_wait_packet_t {
 
 // Concrete wait-packet insertion table for one scheduled AMDGPU function.
 typedef struct loom_amdgpu_wait_packet_plan_t {
-  // Logical wait plan this concrete packet plan was built from.
-  const loom_amdgpu_wait_plan_t* wait_plan;
+  // Schedule table this concrete packet plan was built from.
+  const loom_low_schedule_table_t* schedule;
   // Planned concrete wait packets in scheduled insertion order.
   const loom_amdgpu_wait_packet_t* packets;
   // Number of concrete packet rows.

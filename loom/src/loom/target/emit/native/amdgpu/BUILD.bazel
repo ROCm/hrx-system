@@ -377,11 +377,57 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "function_plan",
+    hdrs = ["function_plan.h"],
+    deps = [
+        ":preflight",
+        ":storage_layout",
+        "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
+    ],
+)
+
+loom_cc_library(
+    name = "function_compile",
+    srcs = ["function_compile.c"],
+    hdrs = ["function_compile.h"],
+    deps = [
+        ":function_plan",
+        ":function_plan_build",
+        ":spill_lowering",
+        "//loom/src/loom/codegen/low:allocation_materialization",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/target/arch/amdgpu/planning:descriptor_semantics",
+        "//loom/src/loom/target/arch/amdgpu/planning:occupancy",
+        "//loom/src/loom/target/arch/amdgpu/planning:placement",
+        "//loom/src/loom/target/arch/amdgpu/planning:storage_lease",
+        "//loom/src/loom/target/arch/amdgpu/planning:vopd_plan",
+        "//loom/src/loom/target/reporting:low",
+        "//loom/src/loom/target/reporting:report",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "function_plan_build",
+    srcs = ["function_plan_build.c"],
+    hdrs = ["function_plan_build.h"],
+    deps = [
+        ":function_plan",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "kernel_plan",
     hdrs = ["kernel_plan.h"],
     deps = [
+        ":function_plan",
         ":kernel_record",
-        "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
     ],
 )
 
@@ -390,11 +436,10 @@ loom_cc_library(
     srcs = ["kernel_plan_build.c"],
     hdrs = ["kernel_plan_build.h"],
     deps = [
+        ":function_plan_build",
         ":kernel_plan",
         ":kernel_record_build",
         ":kernel_report",
-        ":preflight",
-        ":storage_layout",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/error:emitter",
@@ -625,16 +670,14 @@ loom_cc_library(
     hdrs = ["hal_kernel_library.h"],
     visibility = _AMDGPU_HAL_KERNEL_LIBRARY_VISIBILITY,
     deps = [
+        ":function_compile",
         ":hsaco",
         ":hsaco_build",
         ":kernel_emission",
         ":kernel_plan_build",
         ":kernel_report",
         ":runtime_globals",
-        ":spill_lowering",
         "//loom/src/loom/analysis:symbol_facts",
-        "//loom/src/loom/codegen/low:allocation_materialization",
-        "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:emitter",
@@ -657,11 +700,6 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu/abi:tsan",
         "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
         "//loom/src/loom/target/arch/amdgpu/matrix:contract",
-        "//loom/src/loom/target/arch/amdgpu/planning:descriptor_semantics",
-        "//loom/src/loom/target/arch/amdgpu/planning:occupancy",
-        "//loom/src/loom/target/arch/amdgpu/planning:placement",
-        "//loom/src/loom/target/arch/amdgpu/planning:storage_lease",
-        "//loom/src/loom/target/arch/amdgpu/planning:vopd_plan",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//loom/src/loom/target/reporting:artifact_manifest_collect",
         "//loom/src/loom/target/reporting:low",

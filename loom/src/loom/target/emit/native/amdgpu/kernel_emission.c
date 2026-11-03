@@ -19,12 +19,12 @@ iree_status_t loom_amdgpu_kernel_emission_build(
     iree_arena_allocator_t* table_arena) {
   *out_result = (loom_amdgpu_kernel_emission_result_t){0};
   const loom_amdgpu_kernel_record_t* record = &plan->record;
-  const loom_amdgpu_packet_plan_t* packet_plan = &plan->packet_plan;
+  const loom_amdgpu_packet_plan_t* packet_plan = &plan->function.packet_plan;
 
   loom_amdgpu_encoded_instruction_stream_t stream = {0};
   const loom_amdgpu_encode_instruction_stream_options_t encode_options = {
       .packet_plan = packet_plan,
-      .storage_layout = &record->storage_layout,
+      .storage_layout = &plan->function.storage_layout,
       .flags =
           iree_any_bit_set(
               flags, LOOM_AMDGPU_KERNEL_EMISSION_FLAG_CAPTURE_NATIVE_INSERTIONS)

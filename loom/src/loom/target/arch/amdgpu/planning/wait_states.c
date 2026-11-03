@@ -1982,6 +1982,7 @@ iree_status_t loom_amdgpu_wait_state_plan_build(
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_processor_properties_t* processor_properties,
     const loom_amdgpu_address_state_plan_t* address_state,
+    const loom_amdgpu_wait_plan_t* wait_plan,
     const loom_amdgpu_wait_packet_plan_t* wait_packets,
     const struct loom_amdgpu_vopd_plan_t* vopd_plan,
     loom_amdgpu_matrix_coexecution_t* matrix_coexecution,
@@ -1998,7 +1999,7 @@ iree_status_t loom_amdgpu_wait_state_plan_build(
       .matrix_wait_profile =
           loom_amdgpu_matrix_wait_profile_from_feature_profile(
               processor_properties->features.matrix),
-      .wait_plan = wait_packets->wait_plan,
+      .wait_plan = wait_plan,
       .wait_packets = wait_packets,
       .address_state = address_state,
       .vopd_packets = has_vopd_pairs ? vopd_plan->packets : NULL,

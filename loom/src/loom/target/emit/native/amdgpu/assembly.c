@@ -71,6 +71,8 @@ typedef enum loom_amdgpu_register_part_mask_e {
 typedef struct loom_amdgpu_assembly_packet_plan_state_t {
   // Address-state plan consumed in scheduled insertion order.
   const loom_amdgpu_address_state_plan_t* address_state;
+  // Logical wait decisions used to elide authored packets.
+  const loom_amdgpu_wait_plan_t* wait_plan;
   // Wait-packet plan consumed in scheduled insertion order.
   const loom_amdgpu_wait_packet_plan_t* wait_packets;
   // Wait-state plan consumed in scheduled insertion order.
@@ -3027,10 +3029,9 @@ static iree_status_t loom_amdgpu_append_vopd_or_descriptor_packet(
     void* user_data, const loom_native_assembly_packet_context_t* context) {
   loom_amdgpu_assembly_emit_state_t* state =
       (loom_amdgpu_assembly_emit_state_t*)user_data;
-  if (state != NULL && state->packet_plan.wait_packets != NULL &&
-      loom_amdgpu_wait_plan_elides_node(
-          state->packet_plan.wait_packets->wait_plan,
-          context->packet->node_index)) {
+  if (state != NULL &&
+      loom_amdgpu_wait_plan_elides_node(state->packet_plan.wait_plan,
+                                        context->packet->node_index)) {
     return iree_ok_status();
   }
   if (state == NULL || state->packet_plan.vopd_plan == NULL) {
@@ -3253,6 +3254,8 @@ iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
       options ? options->packet_plan : NULL;
   const loom_amdgpu_address_state_plan_t* address_state =
       packet_plan ? &packet_plan->address_state : NULL;
+  const loom_amdgpu_wait_plan_t* wait_plan =
+      packet_plan ? &packet_plan->wait_plan : NULL;
   const loom_amdgpu_wait_packet_plan_t* wait_packets =
       packet_plan ? &packet_plan->wait_packets : NULL;
   const loom_amdgpu_wait_state_plan_t* wait_states =
@@ -3272,6 +3275,7 @@ iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
       .packet_plan =
           {
               .address_state = address_state,
+              .wait_plan = wait_plan,
               .wait_packets = wait_packets,
               .wait_states = wait_states,
               .vopd_plan = vopd_plan,
