@@ -107,6 +107,7 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_index_reserve(
 // The string key and optional metadata will be copied into the index and
 // need not remain valid after the call returns. Referenced file handles will
 // be retained for the lifetime of the index.
+// Duplicate keys are retained in insertion order; lookup returns the first.
 IREE_API_EXPORT iree_status_t
 iree_io_parameter_index_add(iree_io_parameter_index_t* index,
                             const iree_io_parameter_index_entry_t* entry);
@@ -117,7 +118,8 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_index_get(
     iree_io_parameter_index_t* index, iree_host_size_t i,
     const iree_io_parameter_index_entry_t** out_entry);
 
-// Performs a file entry lookup of |key| in the index and returns it.
+// Returns the first entry with |key|, or NOT_FOUND when no entry matches.
+// Lookup uses an insertion-maintained index with expected constant probe count.
 // The returned |out_entry| is valid for the lifetime of the index.
 IREE_API_EXPORT iree_status_t iree_io_parameter_index_lookup(
     iree_io_parameter_index_t* index, iree_string_view_t key,
