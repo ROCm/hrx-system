@@ -149,8 +149,9 @@ constexpr InstanceState kStates[] = {
     {"reused clone", true, 41, 1, false, false},
 };
 
-class ProgramPreparationTest : public ::testing::TestWithParam<
-                        std::tuple<uint32_t, uint32_t, bool, bool, bool>> {};
+class ProgramPreparationTest
+    : public ::testing::TestWithParam<
+          std::tuple<uint32_t, uint32_t, bool, bool, bool>> {};
 
 TEST_P(ProgramPreparationTest, CapturedPreparationMatchesEmittedPackets) {
   const auto [state_index, value_count, first, profiling, fixups] = GetParam();

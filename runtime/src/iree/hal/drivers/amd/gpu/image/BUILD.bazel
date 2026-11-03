@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/amdgpu:binary.bzl", "iree_amdgpu_binary_variants_embed_data")
+load("//build_tools/bazel:package_boundary.bzl", "iree_package_boundary")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_fuzz.bzl", "iree_runtime_cc_fuzz")
@@ -14,6 +15,11 @@ package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],
+)
+
+iree_package_boundary(
+    allowed_descendant_paths = ["testdata/**"],
+    reason = "Device source fixtures belong to the image tests and their embedded code-object libraries; they are inputs to those libraries, not an independent runtime component.",
 )
 
 iree_runtime_cc_library(

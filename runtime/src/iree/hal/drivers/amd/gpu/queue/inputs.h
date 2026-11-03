@@ -101,8 +101,9 @@ iree_status_t iree_hal_amd_gpu_command_inputs_add_binding(
     bool whole_transfer, uint32_t* out_value);
 
 // Accumulates scalar target alignment and atomic capabilities, if required,
-// on the dense queue or program input. Timestamps require no atomic capabilities.
-// Direct targets qualify now; indirect targets qualify once at table capture.
+// on the dense queue or program input. Timestamps require no atomic
+// capabilities. Direct targets qualify now; indirect targets qualify once at
+// table capture.
 iree_status_t iree_hal_amd_gpu_command_inputs_add_control(
     iree_hal_amd_gpu_command_inputs_t* inputs, iree_hal_buffer_ref_t reference,
     iree_hal_amd_gpu_control_t command, uint32_t* out_value);

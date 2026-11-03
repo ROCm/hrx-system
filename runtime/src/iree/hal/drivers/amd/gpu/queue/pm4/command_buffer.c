@@ -396,8 +396,8 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_control(
                        !(command.flags & IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE);
   iree_hal_amd_gpu_pm4_barrier_t after = {0};
   iree_hal_amd_gpu_pm4_barrier_control(&buffer->profile, program, command.flags,
-                                      source_stage, &buffer->pending_barrier,
-                                      &after);
+                                       source_stage, &buffer->pending_barrier,
+                                       &after);
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_flush_barrier(buffer));
   uint32_t offset = 0;
   uint32_t* words = NULL;

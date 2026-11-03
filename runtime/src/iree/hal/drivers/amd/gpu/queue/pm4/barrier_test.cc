@@ -84,8 +84,8 @@ TEST_P(BarrierTest, AtomicOrderingRetainsBothBoundaries) {
     SCOPED_TRACE(flags);
     iree_hal_amd_gpu_pm4_barrier_t before = {}, after = {};
     iree_hal_amd_gpu_pm4_barrier_control(&profile_, false, flags,
-                                        IREE_HAL_EXECUTION_STAGE_DISPATCH,
-                                        &before, &after);
+                                         IREE_HAL_EXECUTION_STAGE_DISPATCH,
+                                         &before, &after);
     const bool system = (flags & IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE) ||
                         profile_.command_processor_bypasses_l2;
     EXPECT_EQ(before.execution, 1u);
@@ -111,8 +111,8 @@ TEST_P(BarrierTest, ShaderAtomicsUseTheirRequestedScope) {
     SCOPED_TRACE(flags);
     iree_hal_amd_gpu_pm4_barrier_t before = {}, after = {};
     iree_hal_amd_gpu_pm4_barrier_control(&profile_, true, flags,
-                                        IREE_HAL_EXECUTION_STAGE_ATOMIC,
-                                        &before, &after);
+                                         IREE_HAL_EXECUTION_STAGE_ATOMIC,
+                                         &before, &after);
     const bool system = (flags & IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE) != 0;
     EXPECT_EQ(before.execution, 1u);
     EXPECT_EQ(before.cache_control,
