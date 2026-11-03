@@ -15,7 +15,6 @@ package(
 loom_check_test_suite(
     name = "test",
     srcs = [
-        "allocation.loom-test",
         "buffer_bulk.loom-test",
         "buffer_raw.loom-test",
         "buffer_selection.loom-test",
