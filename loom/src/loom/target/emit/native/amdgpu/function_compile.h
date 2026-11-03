@@ -33,6 +33,10 @@ typedef struct loom_amdgpu_function_compile_options_t {
   const loom_low_allocation_fixed_value_t* allocation_fixed_values;
   // Number of entries in |allocation_fixed_values|.
   iree_host_size_t allocation_fixed_value_count;
+  // Sparse values supplied in physical coordinates at function entry.
+  const loom_low_allocation_entry_value_t* allocation_entry_values;
+  // Number of entries in |allocation_entry_values|.
+  iree_host_size_t allocation_entry_value_count;
   // Incoming locations indexed by formal argument.
   const loom_low_allocation_abi_location_t* allocation_entry_locations;
   // Number of entries in |allocation_entry_locations|.

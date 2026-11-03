@@ -111,6 +111,12 @@ loom_amdgpu_short_wait_match_t loom_amdgpu_short_wait_drain(
     loom_amdgpu_short_wait_t* state, const loom_low_packet_view_t* packet,
     uint32_t instruction_offset);
 
+// Retires only locally produced dependencies without querying CFG inputs.
+// One-shot function-entry transport uses this before the body block boundary;
+// backedges to that body must neither supply nor replay the entry dependency.
+loom_amdgpu_short_wait_match_t loom_amdgpu_short_wait_drain_local(
+    loom_amdgpu_short_wait_t* state);
+
 // Completes store payload reads without advancing independent ALU windows.
 void loom_amdgpu_short_wait_drain_stores(loom_amdgpu_short_wait_t* state);
 

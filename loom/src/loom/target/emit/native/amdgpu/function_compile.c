@@ -101,6 +101,8 @@ iree_status_t loom_amdgpu_function_compile(
       .loop_execution = options->loop_execution,
       .allocation_fixed_values = options->allocation_fixed_values,
       .allocation_fixed_value_count = options->allocation_fixed_value_count,
+      .allocation_entry_values = options->allocation_entry_values,
+      .allocation_entry_value_count = options->allocation_entry_value_count,
       .allocation_entry_locations = options->allocation_entry_locations,
       .allocation_entry_location_count =
           options->allocation_entry_location_count,

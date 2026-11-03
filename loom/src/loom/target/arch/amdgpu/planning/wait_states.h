@@ -94,8 +94,10 @@ typedef enum loom_amdgpu_wait_state_reason_e {
   LOOM_AMDGPU_WAIT_STATE_REASON_SGPR_READ_DEPENDENCY = 19,
   // A direct helper call retires caller-owned fixed physical dependencies.
   LOOM_AMDGPU_WAIT_STATE_REASON_CALLABLE_BOUNDARY = 20,
+  // One-shot invocation transport retires dependencies before the body CFG.
+  LOOM_AMDGPU_WAIT_STATE_REASON_INVOCATION_ENTRY = 21,
   // Number of wait-state reasons, including UNKNOWN.
-  LOOM_AMDGPU_WAIT_STATE_REASON_COUNT_ = 21,
+  LOOM_AMDGPU_WAIT_STATE_REASON_COUNT_ = 22,
 } loom_amdgpu_wait_state_reason_t;
 
 typedef enum loom_amdgpu_wait_state_action_e {
@@ -163,6 +165,8 @@ typedef struct loom_amdgpu_wait_state_plan_t {
   loom_low_packet_hazard_plan_t hazard_plan;
   // Wait states in scheduled packet order.
   const loom_amdgpu_wait_state_t* states;
+  // Prefix of |states| emitted once before the first body block label.
+  iree_host_size_t entry_state_count;
   // Number of wait-state records.
   iree_host_size_t state_count;
   // Hardware allocation floor needed by final physical operand hazards.
