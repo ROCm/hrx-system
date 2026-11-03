@@ -69,18 +69,6 @@ class TextStagesTest : public loom_serve::testing::JitTest {
     if (HasFatalFailure()) {
       return;
     }
-    loom_serve_jit_release(jit_);
-    jit_ = nullptr;
-    const iree_string_view_t providers[] = {IREE_SV("config.loom"),
-                                            IREE_SV("stage.loom")};
-    const loom_serve_sources_t sources = {
-        .base_directory = iree_make_cstring_view(directory_.c_str()),
-        .count = IREE_ARRAYSIZE(providers),
-        .values = providers,
-    };
-    IREE_ASSERT_OK(loom_serve_jit_create(
-        device_, dispatch_, loom_serve_device_host(device_owner_), &sources,
-        nullptr, &compilation_, native_allocator_.allocator(), &jit_));
     for (size_t i = 0; i < stages_.size(); ++i) {
       const std::string delta = std::to_string(i + 1);
       const loomc_config_binding_t binding = {
@@ -175,8 +163,6 @@ class TextStagesTest : public loom_serve::testing::JitTest {
 
   // Owns compiled inputs and disjoint recorded outputs until execution drains.
   std::array<loom_serve_text_stage_t, 3> stages_ = {};
-  // Allocation dependency for compiler products and recording scratch.
-  loom_serve::testing::NativeAllocator native_allocator_;
   // Joins asynchronous completion before the outer test consumes results.
   std::mutex mutex_;
   // Completion notification without wall-clock assumptions.
@@ -258,7 +244,10 @@ TEST_P(TextStagesTest, RecordingFailureJoinsOtherAcceptedTasks) {
   RecordingSink sink;
   IREE_ASSERT_OK(StartRecording(sink.sink(), 4, iree_allocator_system()));
   ASSERT_EQ(sink.tasks.size(), 3u);
-  native_allocator_.FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC);
+  // Command buffers belong to the device; temporary recording arrays may be
+  // served entirely from the host's reusable arena blocks.
+  loom_serve::testing::NativeAllocator::ForDevice(device_owner_)
+      .FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC);
   sink.RetireOne();
   EXPECT_EQ(record_completions_, 0u);
   sink.RetireOne();
