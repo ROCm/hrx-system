@@ -381,6 +381,19 @@ typedef struct loomc_module_serialize_options_t {
   /// structure_size to include this field; absent fields default to false.
   /// Bytecode preserves location information independently of this option.
   bool print_locations;
+
+  /// Optional top-level operation dialect to select during current-IR text
+  /// printing. Empty prints the complete module. A nonempty namespace prints
+  /// each matching top-level operation unchanged and in module order, without
+  /// file headers or operations from other dialects. Referenced encodings are
+  /// printed inline because their module-level aliases are not part of the
+  /// selected dialect.
+  ///
+  /// Filtered text is an inspection view and may reference symbols declared by
+  /// omitted operations. Serialization APIs reject this option because they
+  /// promise a self-contained module export. Requires `structure_size` to
+  /// include this field; absent fields default to the complete module.
+  loomc_string_view_t top_level_dialect;
 } loomc_module_serialize_options_t;
 
 /// Module deserialization options.
@@ -772,7 +785,9 @@ LOOMC_API_EXPORT loomc_status_t loomc_module_function_get_export_info(
 ///
 /// @param module Module to inspect, without modifying its IR or target state.
 /// @param options Text presentation, location, and source identifier options.
-/// `NULL` selects defaults. `format` must be unknown or text.
+/// `NULL` selects defaults. `format` must be unknown or text. A nonempty
+/// `top_level_dialect` selects only matching top-level operations; the result
+/// remains inspection text and may omit referenced symbol definitions.
 /// @param allocator Host allocator used for source-owned storage.
 /// @param out_source Receives one retained text source on success, or NULL on
 /// failure.

@@ -213,6 +213,10 @@ loomc_status_t loomc_module_validate_serialize_options(
     }
     LOOMC_RETURN_IF_ERROR(
         loomc_module_validate_string_view(options->identifier));
+    if (LOOMC_MODULE_SERIALIZE_OPTIONS_HAS_FIELD(options, top_level_dialect)) {
+      LOOMC_RETURN_IF_ERROR(
+          loomc_module_validate_string_view(options->top_level_dialect));
+    }
   }
   loomc_module_text_presentation_t text_presentation =
       LOOMC_MODULE_TEXT_PRESENTATION_DEFAULT;
@@ -267,6 +271,10 @@ loomc_status_t loomc_module_resolve_serialize_options(
   out_options->print_locations =
       LOOMC_MODULE_SERIALIZE_OPTIONS_HAS_FIELD(options, print_locations) &&
       options->print_locations;
+  out_options->top_level_dialect =
+      LOOMC_MODULE_SERIALIZE_OPTIONS_HAS_FIELD(options, top_level_dialect)
+          ? options->top_level_dialect
+          : loomc_string_view_empty();
   return loomc_ok_status();
 }
 
@@ -482,6 +490,11 @@ loomc_status_t loomc_module_serialize_explicit_source(
   loomc_module_resolved_serialize_options_t resolved_options = {0};
   LOOMC_RETURN_IF_ERROR(loomc_module_resolve_serialize_options(
       options, required_format, &resolved_options));
+  if (!loomc_string_view_is_empty(resolved_options.top_level_dialect)) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "top_level_dialect is only supported by current-IR text printing");
+  }
   const loom_module_t* internal_module = NULL;
   LOOMC_RETURN_IF_ERROR(
       loomc_module_require_internal(module, &internal_module));

@@ -302,6 +302,37 @@ func.def @entry() {
   }
 }
 
+TEST(ModuleTest, PrintsSelectedTopLevelDialectForInspection) {
+  auto context = CreateContext();
+  auto workspace = CreateWorkspace();
+  auto module = CreateMixedSymbolModule(context.get(), workspace.get());
+  const loomc_module_serialize_options_t options = {
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      .structure_size = sizeof(options),
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .top_level_dialect = loomc_make_cstring_view("global"),
+  };
+
+  loomc_source_t* raw_output = nullptr;
+  LOOMC_ASSERT_OK(loomc_module_print_text_to_source(
+      module.get(), &options, loomc_allocator_system(), &raw_output));
+  SourcePtr output(raw_output);
+  const loomc_byte_span_t contents = loomc_source_contents(output.get());
+  const std::string text(reinterpret_cast<const char*>(contents.data),
+                         contents.data_length);
+  EXPECT_NE(text.find("global.constant"), std::string::npos);
+  EXPECT_NE(text.find("global.variable"), std::string::npos);
+  EXPECT_EQ(text.find("func.def"), std::string::npos);
+  EXPECT_EQ(text.find("kernel.def"), std::string::npos);
+
+  raw_output = reinterpret_cast<loomc_source_t*>(0x1);
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_INVALID_ARGUMENT,
+      loomc_module_serialize_text_to_source(
+          module.get(), &options, loomc_allocator_system(), &raw_output));
+  EXPECT_EQ(raw_output, nullptr);
+}
+
 TEST(ModuleTest, VerificationBoundsAndRetainsDiagnostics) {
   auto context = CreateContext();
   auto workspace = CreateWorkspace();

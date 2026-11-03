@@ -47,6 +47,9 @@ typedef struct loomc_module_resolved_serialize_options_t {
   loomc_module_text_presentation_t text_presentation;
   // Whether textual output includes operation source locations.
   bool print_locations;
+
+  // Optional top-level operation dialect selected for current-IR printing.
+  loomc_string_view_t top_level_dialect;
 } loomc_module_resolved_serialize_options_t;
 
 // Decodes one resolved source format into internal module storage.
