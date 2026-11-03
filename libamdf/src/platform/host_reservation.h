@@ -18,9 +18,12 @@ amdf_status_t amdf_platform_host_reservation_query_capabilities(
     amdf_memory_reservation_capabilities_t* out_capabilities);
 
 // Reserves an inaccessible range with native alignment when minimum_alignment
-// is zero, or the stronger supplied alignment. Failure publishes no address.
+// is zero, or the stronger supplied alignment. The entire interval lies within
+// the inclusive address bounds. Failure publishes no address.
 amdf_status_t amdf_platform_host_reservation_create(uint64_t byte_length,
                                                     uint64_t minimum_alignment,
+                                                    uint64_t minimum_address,
+                                                    uint64_t maximum_address,
                                                     void** out_pointer);
 
 // Replaces a validated range using a prepared native source. Platforms with

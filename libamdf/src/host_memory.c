@@ -11,6 +11,11 @@
 #include "libamdf/src/memory_resource.h"
 #include "libamdf/src/platform/host_memory.h"
 
+amdf_status_t amdf_host_memory_sample_observation(
+    amdf_memory_scope_observation_t* out_observation) {
+  return amdf_platform_host_memory_sample_observation(out_observation);
+}
+
 amdf_status_t amdf_host_memory_query_description(
     amdf_memory_host_description_t* out_description) {
   amdf_cache_transition_t transition;
@@ -259,7 +264,7 @@ amdf_status_t amdf_host_memory_prepare(
           &amdf_host_backing_vtable;
       memory->accesses[memory->backing_access_ordinal].native = backing;
       memory->info.native_allocation_byte_length = native_length;
-      status = amdf_platform_host_backing_prepare(native_length, backing);
+      status = amdf_platform_host_backing_prepare(native_length, 0, backing);
     }
   } else {
     status = amdf_platform_host_memory_allocate(

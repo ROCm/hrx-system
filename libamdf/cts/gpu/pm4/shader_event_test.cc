@@ -89,6 +89,9 @@ TEST_F(Pm4ShaderEventTest, PublishesAndWakesWithoutCommandProcessorInterrupts) {
           std::memcmp(records->host.pointer, expected.data(), sizeof(expected)),
           0);
     }
+    // The shader publication oracle precedes any native join. Retire this
+    // publication before reusing the fixture's single pending KERNEL slot.
+    ASSERT_NO_FATAL_FAILURE(queue->WaitRetired(api_));
 
     // Join the finite shader after observation, including on an oracle failure.
     // Ring consumption alone would not establish shader execution completion.

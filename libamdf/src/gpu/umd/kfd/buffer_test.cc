@@ -474,6 +474,68 @@ class KfdBufferNativeTest : public ::testing::Test {
   uint32_t expected_metadata_free_count_ = 1;
 };
 
+TEST_F(KfdBufferNativeTest, MemoryCacheRequirementsReachNativeAllocation) {
+  device_.native_lifetime = AMDF_NATIVE_LIFETIME_PROCESS;
+  device_.topology.memory_features = AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY;
+  struct Case {
+    // Native profile ordinal: cached SYSTEM, uncached SYSTEM, LOCAL, REGISTER.
+    uint32_t profile_ordinal;
+    // Exact optional cache property required by this allocation.
+    amdf_memory_flags_t required_flags;
+    // Allocation flags that the real memory owner must pass into KFD.
+    uint32_t native_flags;
+  };
+  constexpr uint32_t writable = UINT32_C(1) << 31;
+  const Case cases[] = {
+      {0, 0, KFD_IOC_ALLOC_MEM_FLAGS_GTT | writable},
+      {1, 0,
+       KFD_IOC_ALLOC_MEM_FLAGS_GTT | writable |
+           KFD_IOC_ALLOC_MEM_FLAGS_COHERENT | KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED},
+      {2, 0, KFD_IOC_ALLOC_MEM_FLAGS_VRAM | writable},
+      {2, AMDF_MEMORY_FLAG_DEVICE_UNCACHED,
+       KFD_IOC_ALLOC_MEM_FLAGS_VRAM | writable |
+           KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED},
+      {3, 0,
+       KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | writable |
+           KFD_IOC_ALLOC_MEM_FLAGS_COHERENT},
+      {3, AMDF_MEMORY_FLAG_DEVICE_UNCACHED,
+       KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | writable |
+           KFD_IOC_ALLOC_MEM_FLAGS_COHERENT | KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED},
+  };
+  // Reject only at the native allocation boundary after recording its flags.
+  // This uses real memory/profile/buffer code without acquiring GPU resources.
+  native_.allocation_errors.assign(std::size(cases), ENOMEM);
+  expected_metadata_free_count_ = 2 * std::size(cases);
+  alignas(4096) uint8_t registered_pages[4096] = {};
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(test_case.profile_ordinal);
+    SCOPED_TRACE(test_case.required_flags);
+    amdf_memory_native_profile_t profile = {};
+    ASSERT_EQ(amdf_gpu_umd_device_query_memory_profile(
+                  &device_, test_case.profile_ordinal, &profile),
+              AMDF_STATUS_OK);
+    ASSERT_EQ(test_case.required_flags & ~profile.supported_flags, 0u);
+    const amdf_memory_native_create_info_t info = {
+        .device_access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+        .required_flags = test_case.required_flags,
+        .byte_length = 4096,
+        .registered_host_pointer =
+            (profile.roles & AMDF_MEMORY_PROFILE_ROLE_REGISTER) != 0
+                ? registered_pages
+                : nullptr,
+    };
+    amdf_gpu_umd_memory_t* memory = nullptr;
+    amdf_gpu_umd_memory_result_t result = {.device_address = 0xdead};
+    const auto status = amdf_gpu_umd_memory_prepare(
+        &device_, 0, nullptr, &profile, &info, &memory, &result);
+    EXPECT_EQ(amdf_status_code(status), ENOMEM);
+    EXPECT_EQ(native_.allocation.flags, test_case.native_flags);
+    EXPECT_EQ(result.device_address, 0xdeadu);
+    ASSERT_NE(memory, nullptr);
+    ASSERT_EQ(amdf_gpu_umd_memory_destroy(memory), AMDF_STATUS_OK);
+  }
+}
+
 TEST_F(KfdBufferNativeTest, ImportsResidencyWithoutAnImplicitDeviceMapping) {
   native_.import_descriptor = device_.render_descriptor;
   ASSERT_EQ(amdf_gpu_kfd_buffer_prepare_import(

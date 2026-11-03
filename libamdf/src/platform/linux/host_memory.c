@@ -8,9 +8,11 @@
 #include "libamdf/src/platform/host_memory.h"
 
 #include <fcntl.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <linux/mempolicy.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <sys/utsname.h>
@@ -31,10 +33,70 @@ enum {
   AMDF_LINUX_HOST_FOLIO_SIZE = 2u << 20,
 };
 
+amdf_status_t amdf_platform_host_memory_sample_observation(
+    amdf_memory_scope_observation_t* out_observation) {
+  const int descriptor = open("/proc/meminfo", O_RDONLY | O_CLOEXEC);
+  if (descriptor < 0) {
+    return amdf_linux_error(errno);
+  }
+  // Both fields precede the detailed native counters. Retain only this small
+  // snapshot; the kernel owns the source and no monitoring state survives.
+  char buffer[4096];
+  size_t length = 0;
+  uint64_t capacity_kib = 0;
+  uint64_t available_kib = 0;
+  bool has_capacity = false;
+  bool has_available = false;
+  amdf_status_t status = AMDF_STATUS_OK;
+  while (amdf_status_is_ok(status) && !(has_capacity && has_available)) {
+    ssize_t count;
+    do {
+      count = read(descriptor, buffer + length, sizeof(buffer) - 1 - length);
+    } while (count < 0 && errno == EINTR);
+    if (count < 0) {
+      status = amdf_linux_error(errno);
+    } else if (count == 0) {
+      status = amdf_linux_error(EPROTO);
+    } else {
+      length += (size_t)count;
+      buffer[length] = 0;
+      const char* capacity = strstr(buffer, "MemTotal:");
+      const char* available = strstr(buffer, "MemAvailable:");
+      has_capacity =
+          capacity != NULL && strchr(capacity, '\n') != NULL &&
+          sscanf(capacity, "MemTotal: %" SCNu64 " kB", &capacity_kib) == 1;
+      has_available = available != NULL && strchr(available, '\n') != NULL &&
+                      sscanf(available, "MemAvailable: %" SCNu64 " kB",
+                             &available_kib) == 1;
+      if (!(has_capacity && has_available) && length == sizeof(buffer) - 1) {
+        status = amdf_linux_error(EOVERFLOW);
+      }
+    }
+  }
+  int owned_descriptor = descriptor;
+  const amdf_status_t close_status = amdf_linux_file_close(&owned_descriptor);
+  if (!amdf_status_is_ok(close_status)) {
+    status = close_status;
+  }
+  if (amdf_status_is_ok(status)) {
+    out_observation->capacity_byte_length = capacity_kib * UINT64_C(1024);
+    out_observation->available_byte_length =
+        (available_kib < capacity_kib ? available_kib : capacity_kib) *
+        UINT64_C(1024);
+  }
+  return status;
+}
+
 static amdf_status_t amdf_linux_host_backing_map(int descriptor,
                                                  uint64_t byte_length,
+                                                 uint64_t minimum_alignment,
                                                  void** out_pointer) {
-  if (byte_length < AMDF_LINUX_HOST_FOLIO_SIZE) {
+  uint64_t alignment = minimum_alignment;
+  if (byte_length >= AMDF_LINUX_HOST_FOLIO_SIZE &&
+      alignment < AMDF_LINUX_HOST_FOLIO_SIZE) {
+    alignment = AMDF_LINUX_HOST_FOLIO_SIZE;
+  }
+  if (alignment == 0) {
     void* pointer = mmap(NULL, (size_t)byte_length, PROT_READ | PROT_WRITE,
                          MAP_SHARED, descriptor, 0);
     if (pointer == MAP_FAILED) {
@@ -45,7 +107,7 @@ static amdf_status_t amdf_linux_host_backing_map(int descriptor,
   }
   void* pointer = NULL;
   amdf_status_t status = amdf_platform_host_reservation_create(
-      byte_length, AMDF_LINUX_HOST_FOLIO_SIZE, &pointer);
+      byte_length, alignment, 0, UINTPTR_MAX, &pointer);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -65,7 +127,8 @@ static amdf_status_t amdf_linux_host_backing_map(int descriptor,
 }
 
 amdf_status_t amdf_platform_host_backing_prepare(
-    uint64_t byte_length, amdf_platform_host_backing_t* backing) {
+    uint64_t byte_length, uint64_t minimum_alignment,
+    amdf_platform_host_backing_t* backing) {
   *backing = (amdf_platform_host_backing_t){.handle = UINTPTR_MAX};
   const int descriptor =
       memfd_create("libamdf", MFD_CLOEXEC | MFD_ALLOW_SEALING);
@@ -81,7 +144,8 @@ amdf_status_t amdf_platform_host_backing_prepare(
                    F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL) != 0) {
     status = amdf_linux_error(errno);
   } else {
-    status = amdf_linux_host_backing_map(descriptor, byte_length, &pointer);
+    status = amdf_linux_host_backing_map(descriptor, byte_length,
+                                         minimum_alignment, &pointer);
   }
   if (amdf_status_is_ok(status)) {
     backing->pointer = pointer;

@@ -82,8 +82,8 @@ typedef struct amdf_api_t {
   ///
   /// The operation is thread-safe and performs no allocation, locking or lazy
   /// initialization. It reads the snapshot established by endpoint_open, not
-  /// live driver state. The caller initializes `out_info` and its
-  /// complete extension chain before the call. No output is modified when
+  /// live driver state. The caller initializes `out_info` and its optional
+  /// output extension before the call. No output is modified when
   /// validation fails.
   amdf_status_t(AMDF_CALL* endpoint_query_info)(amdf_endpoint_t* endpoint,
                                                 amdf_endpoint_info_t* out_info);
@@ -852,6 +852,20 @@ typedef struct amdf_api_t {
       amdf_kernel_queue_t* queue, amdf_memory_reservation_t* reservation,
       uint32_t access_ordinal, uint32_t update_count,
       const amdf_memory_mapping_update_t* updates, uint64_t* out_submission);
+
+  /// Samples current physical capacity and native allocation headroom.
+  /// Requires AVAILABLE_BYTES in the scope's immutable flags; unsupported
+  /// scopes return UNSUPPORTED. The caller initializes the output header.
+  /// Success publishes a complete snapshot; failure leaves output unchanged.
+  ///
+  /// This explicit cold query may enter the OS/driver. It waits for no device
+  /// work and creates no execution resource or worker. It tracks no
+  /// allocations. Values include external memory pressure and native residency
+  /// policy; they are advisory and do not reserve storage or establish
+  /// execution dependencies.
+  amdf_status_t(AMDF_CALL* memory_scope_sample_observation)(
+      amdf_memory_scope_t* scope,
+      amdf_memory_scope_observation_t* out_observation);
 } amdf_api_t;
 
 /// Function type used to acquire the immutable API table.

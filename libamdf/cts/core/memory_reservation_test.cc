@@ -8,6 +8,8 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <string>
+#include <tuple>
 #include <vector>
 
 #include "amdf/amdf.h"
@@ -17,7 +19,9 @@
 
 namespace {
 
-class HostReservationTest : public ::testing::TestWithParam<uint64_t> {
+class HostReservationTest
+    : public ::testing::TestWithParam<
+          std::tuple<uint64_t, amdf_memory_reservation_flags_t>> {
  protected:
   void SetUp() override {
     ASSERT_EQ(amdf_cts_provider_query_api()(AMDF_ABI_VERSION_LATEST,
@@ -68,7 +72,8 @@ class HostReservationTest : public ::testing::TestWithParam<uint64_t> {
     }
     ASSERT_NE(scope_, nullptr);
     ASSERT_NE(profile_.roles & AMDF_MEMORY_PROFILE_ROLE_CREATE, 0u);
-    unit_ = std::max(GetParam(), capabilities_.mapping_granularity);
+    unit_ =
+        std::max(std::get<0>(GetParam()), capabilities_.mapping_granularity);
     ASSERT_EQ(unit_ % capabilities_.mapping_granularity, 0u);
     access_ = capabilities_.required_access | AMDF_MEMORY_ACCESS_READ |
               AMDF_MEMORY_ACCESS_WRITE;
@@ -109,8 +114,10 @@ class HostReservationTest : public ::testing::TestWithParam<uint64_t> {
         .byte_length = length,
         .minimum_alignment = unit_,
         .access_count = 1,
+        .flags = std::get<1>(GetParam()),
         .accesses = &access,
     };
+    ASSERT_EQ(create.flags & ~capabilities_.supported_flags, 0u);
     ASSERT_EQ(
         api_->memory_reservation_create(instance_, &create, &reservation_),
         AMDF_STATUS_OK);
@@ -640,10 +647,17 @@ TEST_P(HostReservationTest, ReadOnlyMappingAndViewDoNotGrantWriteOperations) {
   EXPECT_EQ(unchanged, view);
 }
 
-INSTANTIATE_TEST_SUITE_P(MappingUnit, HostReservationTest,
-                         ::testing::Values(uint64_t{0}, UINT64_C(2) << 20),
-                         [](const auto& info) {
-                           return info.param == 0 ? "Native" : "TwoMiB";
-                         });
+INSTANTIATE_TEST_SUITE_P(
+    MappingUnit, HostReservationTest,
+    ::testing::Combine(
+        ::testing::Values(uint64_t{0}, UINT64_C(2) << 20),
+        ::testing::Values(
+            amdf_memory_reservation_flags_t{0},
+            amdf_memory_reservation_flags_t{
+                AMDF_MEMORY_RESERVATION_FLAG_REQUIRE_COMMON_ADDRESS})),
+    [](const auto& info) {
+      return std::string(std::get<0>(info.param) == 0 ? "Native" : "TwoMiB") +
+             (std::get<1>(info.param) == 0 ? "Independent" : "Common");
+    });
 
 }  // namespace

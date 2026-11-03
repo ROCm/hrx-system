@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "amdf/amdf.h"
@@ -101,6 +102,110 @@ TEST_F(GpuDeviceFixture, InactivatesAdvertisedQueuesBeforeReleasingOwners) {
           queue, release);
       ASSERT_EQ(gpu_api_->kernel_queue_inactivate(queue), AMDF_STATUS_OK);
       EXPECT_EQ(gpu_api_->kernel_queue_inactivate(queue), AMDF_STATUS_OK);
+    }
+  }
+}
+
+class GpuMemoryObservationTest : public GpuDeviceFixture {};
+
+class GpuQueuePriorityTest : public GpuDeviceFixture {};
+
+TEST_F(GpuQueuePriorityTest, ConstructsEveryAdvertisedPriority) {
+  amdf_endpoint_info_t endpoint_info = {
+      .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
+      .structure_size = sizeof(endpoint_info),
+  };
+  ASSERT_EQ(api_->endpoint_query_info(endpoint_, &endpoint_info),
+            AMDF_STATUS_OK);
+  bool tested = false;
+  for (uint32_t ordinal = 0; ordinal < endpoint_info.queue_family_count;
+       ++ordinal) {
+    SCOPED_TRACE(ordinal);
+    amdf_queue_family_info_t family = {
+        .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
+        .structure_size = sizeof(family),
+    };
+    ASSERT_EQ(
+        api_->endpoint_query_queue_family_info(endpoint_, ordinal, &family),
+        AMDF_STATUS_OK);
+    if (!(family.user_queue_capabilities &
+          AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER)) {
+      continue;
+    }
+    for (amdf_queue_priority_t priority :
+         {AMDF_QUEUE_PRIORITY_LOW, AMDF_QUEUE_PRIORITY_NORMAL,
+          AMDF_QUEUE_PRIORITY_HIGH}) {
+      SCOPED_TRACE(priority);
+      if (!(family.priority_capabilities & (1u << priority))) {
+        continue;
+      }
+      const amdf_gpu_user_queue_create_info_t create = {
+          .type = AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO,
+          .structure_size = sizeof(create),
+          .queue_family_ordinal = ordinal,
+          .priority = priority,
+          .producer_mode = AMDF_QUEUE_PRODUCER_MODE_SINGLE,
+          .required_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
+      };
+      amdf_user_queue_t* queue = nullptr;
+      ASSERT_EQ(gpu_api_->user_queue_create(device_, &create, &queue),
+                AMDF_STATUS_OK);
+      const auto release = [this](amdf_user_queue_t* value) {
+        EXPECT_EQ(api_->user_queue_destroy(value), AMDF_STATUS_OK);
+      };
+      const std::unique_ptr<amdf_user_queue_t, decltype(release)> owner(
+          queue, release);
+      amdf_user_queue_info_t info = {
+          .type = AMDF_STRUCTURE_TYPE_USER_QUEUE_INFO,
+          .structure_size = sizeof(info),
+      };
+      ASSERT_EQ(api_->user_queue_query_info(queue, &info), AMDF_STATUS_OK);
+      EXPECT_EQ(info.priority, priority);
+      tested = true;
+    }
+  }
+  if (!tested) {
+    GTEST_SKIP() << "endpoint has no host-published user queues";
+  }
+}
+
+TEST_F(GpuMemoryObservationTest, PhysicalStorageReportsCapacityAndHeadroom) {
+  amdf_memory_scope_info_t system_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
+      .structure_size = sizeof(system_info),
+  };
+  ASSERT_EQ(api_->memory_scope_query_info(system_scope_, &system_info),
+            AMDF_STATUS_OK);
+  for (amdf_memory_scope_t* scope : {system_scope_, local_scope_}) {
+    if (!scope) {
+      continue;
+    }
+    amdf_memory_scope_info_t info = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
+        .structure_size = sizeof(info),
+    };
+    ASSERT_EQ(api_->memory_scope_query_info(scope, &info), AMDF_STATUS_OK);
+    SCOPED_TRACE(info.kind);
+    EXPECT_GT(info.capacity_byte_length, 0u);
+    if (info.flags & AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED) {
+      EXPECT_EQ(info.capacity_byte_length, system_info.capacity_byte_length);
+    }
+    amdf_memory_scope_observation_t observation = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_OBSERVATION,
+        .structure_size = sizeof(observation),
+    };
+    if (info.flags & AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES) {
+      ASSERT_EQ(api_->memory_scope_sample_observation(scope, &observation),
+                AMDF_STATUS_OK);
+      EXPECT_GT(observation.capacity_byte_length, 0u);
+      if (!(info.flags & AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED)) {
+        EXPECT_EQ(observation.capacity_byte_length, info.capacity_byte_length);
+      }
+      EXPECT_LE(observation.available_byte_length,
+                observation.capacity_byte_length);
+    } else {
+      EXPECT_EQ(api_->memory_scope_sample_observation(scope, &observation),
+                amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
     }
   }
 }
@@ -379,6 +484,7 @@ TEST_F(GpuEndpointTest, ReturnsQualifiedCachedProfile) {
   EXPECT_GT(info.compute.local_data_share_byte_length, 0u);
   EXPECT_GT(info.topology.xcc_count, 0u);
   EXPECT_GT(info.topology.shader_engine_count_per_xcc, 0u);
+  RecordProperty("native_unique_id", std::to_string(info.unique_id));
 
   amdf_gpu_endpoint_info_t second_info = {
       .type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO,
@@ -387,6 +493,25 @@ TEST_F(GpuEndpointTest, ReturnsQualifiedCachedProfile) {
   ASSERT_TRUE(amdf_status_is_ok(
       gpu_api_->endpoint_query_info(endpoint_, &second_info)));
   EXPECT_EQ(std::memcmp(&info, &second_info, sizeof(info)), 0);
+
+  // Consumers compiled against the original record still receive its complete
+  // prefix. A partial new field is never written beyond their declared extent.
+  for (uint32_t size : {uint32_t(offsetof(amdf_gpu_endpoint_info_t, unique_id)),
+                        uint32_t(sizeof(info) - 1)}) {
+    amdf_gpu_endpoint_info_t prefix = {
+        .type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO,
+        .structure_size = size,
+        .unique_id = UINT64_C(0xa5a5a5a5a5a5a5a5),
+    };
+    ASSERT_EQ(gpu_api_->endpoint_query_info(endpoint_, &prefix),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(prefix.structure_size, size);
+    EXPECT_EQ(prefix.unique_id, UINT64_C(0xa5a5a5a5a5a5a5a5));
+    prefix.structure_size = info.structure_size;
+    EXPECT_EQ(std::memcmp(&prefix, &info,
+                          offsetof(amdf_gpu_endpoint_info_t, unique_id)),
+              0);
+  }
 }
 
 TEST_F(GpuEndpointTest, RejectsMalformedOutputWithoutMutation) {

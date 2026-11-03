@@ -14,7 +14,7 @@
 // SGPRs. This is the fixed 256-byte prefix of amd_queue_t/amd_queue_v2_t;
 // asynchronous scratch reclamation is not enabled. Storage is 64-byte aligned.
 typedef struct amdf_gpu_kfd_aql_descriptor_t {
-  // HSA native producer protocol: zero for multi-producer, one for single.
+  // HSA queue type: zero for multi-producer, one for single, two cooperative.
   uint32_t queue_type;
   // Native HSA queue features (kernel dispatch).
   uint32_t features;

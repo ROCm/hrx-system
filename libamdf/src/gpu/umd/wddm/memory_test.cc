@@ -58,6 +58,8 @@ struct FakeMemoryState {
   // Address returned by the native mapping request, including unexpected
   // output.
   uint64_t mapped_device_address = UINT64_C(0x100000);
+  // Aligned native mapping coordinate expected before any malformed result.
+  uint64_t expected_mapping_address = UINT64_C(0x100000);
   // Number of native mapping requests issued for allocation chunks.
   uint32_t map_request_count = 0;
   // Reserved device VA extent, including any caller-required alignment slack.
@@ -174,7 +176,8 @@ NTSTATUS APIENTRY FakeMapGpuVirtualAddress(D3DDDI_MAPGPUVIRTUALADDRESS* map) {
   const uint64_t chunk_byte_length = 65536 / current_state->allocation_count;
   const uint64_t byte_offset = ordinal * chunk_byte_length;
   EXPECT_EQ(map->Protection.NoAccess, 0u);
-  EXPECT_EQ(map->BaseAddress, UINT64_C(0x100000) + byte_offset);
+  EXPECT_EQ(map->BaseAddress,
+            current_state->expected_mapping_address + byte_offset);
   EXPECT_EQ(map->hAllocation, 0x20u + ordinal);
   EXPECT_EQ(map->Protection.Write, current_state->expected_write);
   EXPECT_EQ(map->Protection.Execute, current_state->expected_execute);
@@ -373,6 +376,79 @@ TEST_F(WindowsGpuMemoryTest, OwnsNativeAndOveralignedHostStorage) {
   }
 }
 
+TEST_F(WindowsGpuMemoryTest, RemappableSystemStorageSharesOneAlignedSection) {
+  for (uint64_t alignment :
+       {UINT64_C(65536), UINT64_C(131072), UINT64_C(2) << 20}) {
+    SCOPED_TRACE(alignment);
+    state_ = {};
+    state_.allocation_domain = AMDF_WKMI_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
+    state_.expected_synchronous_destroy = 1;
+    state_.reservation_byte_length = alignment;
+    state_.expected_mapping_address =
+        (UINT64_C(0x100000) + alignment - 1) & ~(alignment - 1);
+    state_.mapped_device_address = state_.expected_mapping_address;
+    create_info_.minimum_alignment = alignment;
+    create_info_.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE |
+                                  AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+                                  AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE;
+    ASSERT_EQ(amdf_gpu_umd_device_query_memory_profile(&device_, 0, &profile_),
+              AMDF_STATUS_OK);
+    EXPECT_NE(profile_.supported_flags & AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE,
+              0u);
+    amdf_gpu_umd_memory_t* memory = nullptr;
+    amdf_gpu_umd_memory_result_t result = {};
+    ASSERT_EQ(amdf_gpu_umd_memory_prepare(&device_, 0, nullptr, &profile_,
+                                          &create_info_, &memory, &result),
+              AMDF_STATUS_OK);
+    auto* pointer = static_cast<uint32_t*>(state_.host_pointer);
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(pointer) % alignment, 0u);
+    EXPECT_EQ(result.alignment, alignment);
+    const uintptr_t section = amdf_gpu_umd_memory_host_mapping_source(memory);
+    ASSERT_NE(section, UINTPTR_MAX);
+    void* alias = MapViewOfFile(reinterpret_cast<HANDLE>(section),
+                                FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, 65536);
+    ASSERT_NE(alias, nullptr);
+    auto* alias_words = static_cast<uint32_t*>(alias);
+    pointer[0] = 0x13579BDFu;
+    EXPECT_EQ(alias_words[0], 0x13579BDFu);
+    alias_words[16383] = 0x2468ACE0u;
+    EXPECT_EQ(pointer[16383], 0x2468ACE0u);
+    EXPECT_EQ(amdf_gpu_umd_memory_remaining_backing_byte_length(memory),
+              65536u);
+    EXPECT_NE(UnmapViewOfFile(alias), 0);
+    EXPECT_EQ(amdf_gpu_umd_memory_destroy(memory), AMDF_STATUS_OK);
+    MEMORY_BASIC_INFORMATION information = {};
+    ASSERT_NE(VirtualQuery(pointer, &information, sizeof(information)), 0u);
+    EXPECT_EQ(information.State, MEM_FREE);
+    EXPECT_EQ(state_.metadata_free_count, 1u);
+  }
+}
+
+TEST_F(WindowsGpuMemoryTest, FailedGpuReclamationKeepsRemappableBackingAlive) {
+  state_.allocation_domain = AMDF_WKMI_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
+  state_.expected_synchronous_destroy = 1;
+  create_info_.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE |
+                                AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+                                AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE;
+  ASSERT_EQ(amdf_gpu_umd_device_query_memory_profile(&device_, 0, &profile_),
+            AMDF_STATUS_OK);
+  amdf_gpu_umd_memory_t* memory = nullptr;
+  amdf_gpu_umd_memory_result_t result = {};
+  ASSERT_EQ(amdf_gpu_umd_memory_prepare(&device_, 0, nullptr, &profile_,
+                                        &create_info_, &memory, &result),
+            AMDF_STATUS_OK);
+  auto* pointer = static_cast<uint32_t*>(state_.host_pointer);
+  pointer[0] = 0x31415926u;
+  state_.destroy_status = kStatusNoMemory;
+  EXPECT_FALSE(amdf_status_is_ok(amdf_gpu_umd_memory_destroy(memory)));
+  EXPECT_EQ(amdf_gpu_umd_memory_remaining_backing_byte_length(memory), 65536u);
+  EXPECT_EQ(state_.metadata_free_count, 0u);
+  EXPECT_EQ(pointer[0], 0x31415926u);
+  state_.destroy_status = 0;
+  EXPECT_EQ(amdf_gpu_umd_memory_destroy(memory), AMDF_STATUS_OK);
+  EXPECT_EQ(state_.metadata_free_count, 1u);
+}
+
 TEST_F(WindowsGpuMemoryTest, BorrowsHostViewsAcrossNativeAllocationChunks) {
   state_.allocation_domain = AMDF_WKMI_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
   state_.allocation_count = 2;
@@ -436,6 +512,58 @@ TEST_F(WindowsGpuMemoryTest, BorrowsHostViewsAcrossNativeAllocationChunks) {
   EXPECT_EQ(state_.metadata_free_count, 1u);
 }
 
+TEST_F(WindowsGpuMemoryTest, ReservationBorrowsTheExactCommonProcessAddress) {
+  constexpr uint64_t alignment = 2 * 1024 * 1024;
+  void* process_address =
+      VirtualAlloc(nullptr, 2 * alignment, MEM_RESERVE, PAGE_NOACCESS);
+  ASSERT_NE(process_address, nullptr);
+  const uint64_t common_address =
+      (reinterpret_cast<uintptr_t>(process_address) + alignment - 1) &
+      ~(alignment - 1);
+  kmt_.reserve_gpu_virtual_address =
+      [](D3DDDI_RESERVEGPUVIRTUALADDRESS* reserve) {
+        EXPECT_EQ(reserve->BaseAddress, current_state->mapped_device_address);
+        EXPECT_EQ(reserve->Size, UINT64_C(65536));
+        reserve->VirtualAddress = reserve->BaseAddress;
+        return static_cast<NTSTATUS>(0);
+      };
+  kmt_.map_gpu_virtual_address = [](D3DDDI_MAPGPUVIRTUALADDRESS* map) {
+    EXPECT_EQ(map->BaseAddress, current_state->mapped_device_address);
+    EXPECT_EQ(map->Protection.NoAccess, 1u);
+    map->VirtualAddress = map->BaseAddress;
+    map->PagingFenceValue = current_state->next_paging_fence++;
+    return kStatusPending;
+  };
+  kmt_.free_gpu_virtual_address =
+      [](const D3DKMT_FREEGPUVIRTUALADDRESS* release) {
+        EXPECT_EQ(release->BaseAddress, current_state->mapped_device_address);
+        EXPECT_EQ(release->Size, UINT64_C(65536));
+        return static_cast<NTSTATUS>(0);
+      };
+  state_.mapped_device_address = common_address;
+  amdf_gpu_umd_device_t* devices[] = {&device_};
+  amdf_gpu_umd_memory_reservation_t* reservation = nullptr;
+  ASSERT_EQ(amdf_gpu_umd_memory_reservation_create(
+                device_.host_allocator, 1, devices, 65536, alignment,
+                common_address, &reservation),
+            AMDF_STATUS_OK);
+  uint64_t address = 0;
+  uint32_t owner = 0;
+  uint64_t granularity = 0;
+  amdf_memory_access_t required_access = 0;
+  amdf_gpu_umd_memory_reservation_query_access(reservation, 0, &address, &owner,
+                                               &granularity, &required_access);
+  EXPECT_EQ(address, common_address);
+  EXPECT_EQ(amdf_gpu_umd_memory_reservation_destroy(reservation),
+            AMDF_STATUS_OK);
+  MEMORY_BASIC_INFORMATION information = {};
+  ASSERT_NE(VirtualQuery(process_address, &information, sizeof(information)),
+            0u);
+  EXPECT_EQ(information.State, MEM_RESERVE);
+  EXPECT_EQ(information.AllocationBase, process_address);
+  EXPECT_NE(VirtualFree(process_address, 0, MEM_RELEASE), 0);
+}
+
 TEST_F(WindowsGpuMemoryTest,
        ReservationMapsRangesAcrossPreparedAllocationChunks) {
   state_.allocation_count = 2;
@@ -469,7 +597,7 @@ TEST_F(WindowsGpuMemoryTest,
   amdf_gpu_umd_device_t* devices[] = {&device_};
   amdf_gpu_umd_memory_reservation_t* reservation = nullptr;
   ASSERT_EQ(amdf_gpu_umd_memory_reservation_create(
-                device_.host_allocator, 1, devices, 65536, 0, &reservation),
+                device_.host_allocator, 1, devices, 65536, 0, 0, &reservation),
             AMDF_STATUS_OK);
   state_.operations.clear();
   const amdf_gpu_umd_mapping_update_t update = {
@@ -576,7 +704,7 @@ TEST_F(WindowsGpuMemoryTest,
   amdf_gpu_umd_device_t* devices[] = {&device_, &second};
   amdf_gpu_umd_memory_reservation_t* reservation = nullptr;
   ASSERT_EQ(amdf_gpu_umd_memory_reservation_create(
-                device_.host_allocator, 2, devices, 65536, 0, &reservation),
+                device_.host_allocator, 2, devices, 65536, 0, 0, &reservation),
             AMDF_STATUS_OK);
   kmt_.map_gpu_virtual_address = [](D3DDDI_MAPGPUVIRTUALADDRESS* map) {
     current_state->operations.push_back(Operation::kMap);
@@ -643,7 +771,7 @@ TEST_F(WindowsGpuMemoryTest,
   amdf_gpu_umd_device_t* devices[] = {&device_};
   amdf_gpu_umd_memory_reservation_t* reservation = nullptr;
   ASSERT_EQ(amdf_gpu_umd_memory_reservation_create(
-                device_.host_allocator, 1, devices, 65536, 0, &reservation),
+                device_.host_allocator, 1, devices, 65536, 0, 0, &reservation),
             AMDF_STATUS_OK);
   kmt_.map_gpu_virtual_address = [](D3DDDI_MAPGPUVIRTUALADDRESS*) {
     current_state->operations.push_back(Operation::kMap);
@@ -667,7 +795,7 @@ TEST_F(WindowsGpuMemoryTest, FailedDetachReadinessPreservesOwnerAndAddress) {
   amdf_gpu_umd_device_t* devices[] = {&device_};
   amdf_gpu_umd_memory_reservation_t* reservation = nullptr;
   ASSERT_EQ(amdf_gpu_umd_memory_reservation_create(
-                device_.host_allocator, 1, devices, 65536, 0, &reservation),
+                device_.host_allocator, 1, devices, 65536, 0, 0, &reservation),
             AMDF_STATUS_OK);
   kmt_.map_gpu_virtual_address = [](D3DDDI_MAPGPUVIRTUALADDRESS* map) {
     current_state->operations.push_back(Operation::kMap);
@@ -1151,6 +1279,70 @@ TEST_F(WindowsGpuMemoryTest,
       EXPECT_EQ(profile.atomic_operations_64,
                 atomic_update_64 ? operations : 0u);
       EXPECT_NE(profile.visibility.describe_site, nullptr);
+    }
+  }
+  EXPECT_TRUE(state_.operations.empty());
+}
+
+TEST_F(WindowsGpuMemoryTest,
+       ShaderCapabilitiesKeepPlatformAndMappingIndependent) {
+  constexpr amdf_atomic_operations_t kLoadStore =
+      AMDF_ATOMIC_OPERATION_LOAD | AMDF_ATOMIC_OPERATION_STORE;
+  constexpr amdf_atomic_operations_t kPcie =
+      kLoadStore | AMDF_ATOMIC_OPERATION_ADD | AMDF_ATOMIC_OPERATION_FETCH_ADD |
+      AMDF_ATOMIC_OPERATION_EXCHANGE | AMDF_ATOMIC_OPERATION_COMPARE_EXCHANGE;
+  constexpr amdf_atomic_operations_t kInteger =
+      kPcie | AMDF_ATOMIC_OPERATION_AND | AMDF_ATOMIC_OPERATION_OR |
+      AMDF_ATOMIC_OPERATION_XOR | AMDF_ATOMIC_OPERATION_FETCH_AND |
+      AMDF_ATOMIC_OPERATION_FETCH_OR | AMDF_ATOMIC_OPERATION_FETCH_XOR;
+  for (uint32_t major : {9u, 10u, 11u, 12u}) {
+    SCOPED_TRACE(major);
+    device_.memory_capabilities.program_gfx_major = major;
+    for (bool integrated : {false, true}) {
+      device_.memory_capabilities.program_host_is_fabric = integrated;
+      for (bool platform_rmw : {false, true}) {
+        device_.memory_capabilities.program_host_rmw_supported = platform_rmw;
+        for (bool atomic64 : {false, true}) {
+          device_.memory_capabilities.atomic_update_64_supported = atomic64;
+          for (uint32_t ordinal : {0u, 1u, 2u, 3u}) {
+            amdf_memory_native_profile_t profile = {};
+            ASSERT_EQ(amdf_gpu_umd_device_query_memory_profile(
+                          &device_, ordinal, &profile),
+                      AMDF_STATUS_OK);
+            for (bool fine : {false, true}) {
+              // Owned/registered SYSTEM permits FINE_GRAIN. LOCAL and imported
+              // memory have their own explicit native acquisition contract.
+              if (fine && ordinal != 0 && ordinal != 2) {
+                continue;
+              }
+              const amdf_memory_flags_t flags =
+                  profile.guaranteed_flags |
+                  (fine ? AMDF_MEMORY_FLAG_HOST_COHERENT : 0);
+              const auto operations =
+                  amdf_memory_native_profile_program_atomics(
+                      &profile, flags,
+                      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE);
+              const amdf_atomic_operations_t remote32 =
+                  platform_rmw ? (integrated ? kInteger : kPcie) : kLoadStore;
+              const amdf_atomic_operations_t remote64 =
+                  atomic64 ? remote32 : remote32 & ~kLoadStore;
+              const bool import = ordinal == 3;
+              EXPECT_EQ(operations.device_scope_32, import ? 0u
+                                                    : !fine || major == 12
+                                                        ? kInteger
+                                                        : remote32);
+              EXPECT_EQ(operations.device_scope_64, import ? 0u
+                                                    : !fine || major == 12
+                                                        ? kInteger
+                                                        : remote64);
+              EXPECT_EQ(operations.system_scope_32, fine ? remote32 : 0u);
+              EXPECT_EQ(operations.system_scope_64, fine ? remote64 : 0u);
+              EXPECT_EQ(operations.fabric_scope_32, 0u);
+              EXPECT_EQ(operations.fabric_scope_64, 0u);
+            }
+          }
+        }
+      }
     }
   }
   EXPECT_TRUE(state_.operations.empty());

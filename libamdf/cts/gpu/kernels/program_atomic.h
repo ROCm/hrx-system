@@ -47,6 +47,14 @@ struct Record {
 };
 static_assert(sizeof(Record) == 40);
 
+struct Variant {
+  // Physical atomic word width, either 32 or 64 bits.
+  uint32_t bit_width;
+  // System scope uses live CPU publication; device scope joins before CPU
+  // reads.
+  bool system_scope;
+};
+
 struct Arguments {
   // Device address of the complete Control, including its leading guard.
   uint64_t control;
@@ -60,17 +68,20 @@ struct Arguments {
   uint64_t generation;
   // Uniform atomic width, either 32 or 64 bits.
   uint32_t bit_width;
+  // Nonzero selects system-scope instructions, zero selects device scope.
+  uint32_t system_scope;
 };
 static_assert(sizeof(Arguments) == 48);
 
-inline constexpr std::array<uint32_t, 6> kArgumentByteOffsets = {
-    offsetof(Arguments, control),    offsetof(Arguments, records),
-    offsetof(Arguments, initial),    offsetof(Arguments, mismatch),
-    offsetof(Arguments, generation), offsetof(Arguments, bit_width)};
-inline constexpr std::array<uint32_t, 6> kArgumentByteLengths = {8, 8, 8,
-                                                                 8, 8, 4};
-inline constexpr std::array<std::string_view, 6> kArgumentValueKinds = {
-    "global_buffer", "global_buffer", "by_value",
+inline constexpr std::array<uint32_t, 7> kArgumentByteOffsets = {
+    offsetof(Arguments, control),     offsetof(Arguments, records),
+    offsetof(Arguments, initial),     offsetof(Arguments, mismatch),
+    offsetof(Arguments, generation),  offsetof(Arguments, bit_width),
+    offsetof(Arguments, system_scope)};
+inline constexpr std::array<uint32_t, 7> kArgumentByteLengths = {8, 8, 8, 8,
+                                                                 8, 4, 4};
+inline constexpr std::array<std::string_view, 7> kArgumentValueKinds = {
+    "global_buffer", "global_buffer", "by_value", "by_value",
     "by_value",      "by_value",      "by_value"};
 
 }  // namespace kernels::program_atomic

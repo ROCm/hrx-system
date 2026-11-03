@@ -44,7 +44,8 @@ static bool amdf_gpu_queue_family_properties_validate(
       AMDF_QUEUE_PRIORITY_CAPABILITY_HIGH;
   const amdf_user_queue_capabilities_t known_user_capabilities =
       AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
-      AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER;
+      AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER |
+      AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH;
   const amdf_kernel_queue_capabilities_t known_kernel_capabilities =
       AMDF_KERNEL_QUEUE_CAPABILITY_VECTOR_SUBMIT |
       AMDF_KERNEL_QUEUE_CAPABILITY_VIRTUAL_MEMORY |
@@ -96,6 +97,11 @@ static bool amdf_gpu_queue_family_properties_validate(
       (properties->roles & AMDF_QUEUE_ROLE_CACHE_CONTROL) != 0;
   if (has_cache_control != (properties->cache_operations != 0) ||
       has_cache_control != (properties->cache_transition_kinds != 0)) {
+    return false;
+  }
+  if ((properties->user_queue_capabilities &
+       AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH) != 0 &&
+      (properties->roles & AMDF_QUEUE_ROLE_COMPUTE) == 0) {
     return false;
   }
   const bool has_atomic_operations =
@@ -205,6 +211,7 @@ bool amdf_gpu_endpoint_profile_initialize(
   profile.info.gfx_ip.minor = properties->gfx_ip.minor;
   profile.info.gfx_ip.stepping = properties->gfx_ip.stepping;
   profile.info.asic_revision = properties->asic_revision;
+  profile.info.unique_id = properties->unique_id;
   profile.info.compute.wavefront_size = properties->compute.wavefront_size;
   profile.info.compute.compute_unit_count =
       properties->compute.compute_unit_count;

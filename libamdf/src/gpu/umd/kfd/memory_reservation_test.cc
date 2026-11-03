@@ -282,10 +282,9 @@ class KfdMemoryReservationTest : public ::testing::Test {
       EXPECT_EQ(amdf_gpu_umd_memory_reservation_destroy(reservation_),
                 AMDF_STATUS_OK);
     }
-    // Failure cases deliberately abandon native ownership. There is no real
-    // GPU in this dependency test, so retire those retained host intervals
-    // only after checking that production teardown preserved them.
-    for (const auto& [address, length] : abandoned_intervals_) {
+    // Retire test-owned borrowed ranges and intervals preserved by native
+    // failure only after checking that production teardown left them intact.
+    for (const auto& [address, length] : owned_intervals_) {
       EXPECT_EQ(munmap(reinterpret_cast<void*>(address), length), 0);
     }
     EXPECT_FALSE(memory_lock_.occupied);
@@ -294,11 +293,12 @@ class KfdMemoryReservationTest : public ::testing::Test {
     native_state = nullptr;
   }
 
-  void Create(uint64_t byte_length = 32768, uint64_t minimum_alignment = 4096) {
+  void Create(uint64_t byte_length = 32768, uint64_t minimum_alignment = 4096,
+              uint64_t common_address = 0) {
     amdf_gpu_umd_device_t* devices[] = {&device_};
     ASSERT_EQ(amdf_gpu_umd_memory_reservation_create(
                   amdf_allocator_system(), 1, devices, byte_length,
-                  minimum_alignment, &reservation_),
+                  minimum_alignment, common_address, &reservation_),
               AMDF_STATUS_OK);
     uint32_t owner = 0;
     uint64_t granularity = 0;
@@ -334,8 +334,8 @@ class KfdMemoryReservationTest : public ::testing::Test {
   amdf_gpu_umd_memory_reservation_t* reservation_ = nullptr;
   // Published reservation base, valid through checked final removal.
   uint64_t address_ = 0;
-  // Host intervals retained by consuming native failure, not production owners.
-  std::vector<std::pair<uintptr_t, size_t>> abandoned_intervals_;
+  // Test-owned intervals borrowed by creation or retained by native failure.
+  std::vector<std::pair<uintptr_t, size_t>> owned_intervals_;
 };
 
 struct ReservationGeometry {
@@ -400,6 +400,26 @@ INSTANTIATE_TEST_SUITE_P(
                       ReservationGeometry{2 * 1024 * 1024 + 4096,
                                           4 * 1024 * 1024, 2 * 1024 * 1024,
                                           4 * 1024 * 1024}));
+
+TEST_F(KfdMemoryReservationTest, BorrowsTheExactCommonProcessAddress) {
+  constexpr uint64_t length = 32768;
+  void* pointer =
+      mmap(nullptr, length, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(pointer, MAP_FAILED);
+  owned_intervals_.emplace_back(reinterpret_cast<uintptr_t>(pointer), length);
+  ASSERT_NO_FATAL_FAILURE(
+      Create(length, 4096, reinterpret_cast<uintptr_t>(pointer)));
+  EXPECT_EQ(address_, reinterpret_cast<uintptr_t>(pointer));
+  const auto status = amdf_gpu_umd_memory_reservation_destroy(reservation_);
+  reservation_ = nullptr;
+  ASSERT_EQ(status, AMDF_STATUS_OK);
+  ASSERT_EQ(mprotect(pointer, length, PROT_READ | PROT_WRITE), 0);
+  *static_cast<uint32_t*>(pointer) = 0x13579BDF;
+  EXPECT_EQ(*static_cast<uint32_t*>(pointer), 0x13579BDFu);
+  EXPECT_EQ(native_.allocation_count, 0u);
+  EXPECT_EQ(native_.context_count, 0u);
+  EXPECT_EQ(native_.gem_count, 0u);
+}
 
 TEST_F(KfdMemoryReservationTest, ResumesBothNativeWaitProtocols) {
   ASSERT_NO_FATAL_FAILURE(Create());
@@ -641,7 +661,7 @@ TEST_F(KfdMemoryReservationTest, FailedFinalClearPreservesAllNativeOwnership) {
   EXPECT_EQ(native_.context_count, 1u);
   EXPECT_TRUE(IsReserved(address_));
   EXPECT_TRUE(IsReserved(native_.transport_address));
-  abandoned_intervals_ = {{address_, 32768}, {native_.transport_address, 4096}};
+  owned_intervals_ = {{address_, 32768}, {native_.transport_address, 4096}};
 }
 
 TEST_F(KfdMemoryReservationTest, PreparationFailurePreservesOutput) {
@@ -650,7 +670,7 @@ TEST_F(KfdMemoryReservationTest, PreparationFailurePreservesOutput) {
   auto* sentinel = reinterpret_cast<amdf_gpu_umd_memory_reservation_t*>(1);
   auto* output = sentinel;
   EXPECT_EQ(amdf_gpu_umd_memory_reservation_create(
-                amdf_allocator_system(), 1, devices, 32768, 4096, &output),
+                amdf_allocator_system(), 1, devices, 32768, 4096, 0, &output),
             amdf_linux_error(EIO));
   EXPECT_EQ(output, sentinel);
   EXPECT_EQ(native_.allocation_count, 0u);

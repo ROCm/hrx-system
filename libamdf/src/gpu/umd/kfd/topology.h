@@ -53,7 +53,7 @@ typedef struct amdf_gpu_kfd_topology_t {
   } memory_peers;
   // Physical placement features supported by the native device.
   amdf_gpu_device_features_t memory_features;
-  // Native integrated-package identity; owned cached SYSTEM storage is also
+  // Native integrated-package identity; owned SYSTEM storage is also
   // local to this GPU without requiring a distinct VRAM heap.
   bool integrated;
   // Native SR-IOV function identity; KFD cannot expose the HDP remap to VFs.
@@ -72,6 +72,8 @@ typedef struct amdf_gpu_kfd_topology_t {
   uint64_t gtt_byte_length;
   // Number of native compute queues exposed by this KFD node.
   uint32_t compute_queue_count;
+  // Cooperative scheduling resources exposed by this KFD node, or zero.
+  uint32_t global_wave_sync_count;
   // Qualified AQL scalar trap-reservation feature, or zero when unknown.
   amdf_queue_format_features_t aql_scalar_register_features;
   // Native SDMA engines and exact packet-ABI identity.

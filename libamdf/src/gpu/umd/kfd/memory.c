@@ -78,24 +78,22 @@ static void amdf_gpu_kfd_memory_plan(
       (create_info->device_access & AMDF_MEMORY_ACCESS_WRITE) != 0
           ? AMDF_GPU_KFD_ALLOC_MEM_FLAGS_WRITABLE
           : 0;
+  if ((plan->flags & AMDF_MEMORY_FLAG_DEVICE_UNCACHED) != 0) {
+    // Explicit UC keeps this policy independent of placement and CPU snooping,
+    // including GPUs where COHERENT alone permits a cached GPU mapping.
+    plan->native_flags |= KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED;
+  }
   if (profile->memory_class == AMDF_MEMORY_CLASS_LOCAL) {
     plan->native_flags |= KFD_IOC_ALLOC_MEM_FLAGS_VRAM;
     if ((plan->flags & AMDF_MEMORY_FLAG_HOST_VISIBLE) != 0) {
       plan->native_flags |= KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
     }
   } else {
-    // CPU snooping does not require uncached GPU payload access. Only control
-    // and registered profiles request KFD's coherent GPU mapping policy.
-    if (profile->ordinal == AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_CONTROL ||
+    // CPU snooping does not require uncached GPU payload access. Uncached
+    // and registered storage also requests KFD's coherent mapping policy.
+    if ((plan->flags & AMDF_MEMORY_FLAG_DEVICE_UNCACHED) != 0 ||
         (profile->roles & AMDF_MEMORY_PROFILE_ROLE_REGISTER) != 0) {
       plan->native_flags |= KFD_IOC_ALLOC_MEM_FLAGS_COHERENT;
-    }
-    if (profile->ordinal == AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_CONTROL) {
-      // On GMC9, COHERENT alone may still select cached memory on an APU or
-      // GC9.5. This backing can also be attached to another GPU: every control
-      // allocation requests UC, regardless of which GPU allocates it. CPU
-      // snooping remains enabled without GPU-cached copies of control words.
-      plan->native_flags |= KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED;
     }
     if ((profile->roles & AMDF_MEMORY_PROFILE_ROLE_REGISTER) != 0) {
       const uintptr_t pointer = (uintptr_t)create_info->registered_host_pointer;
@@ -347,7 +345,7 @@ amdf_status_t amdf_gpu_umd_memory_prepare_import(
   if (amdf_status_is_ok(status) &&
       (memory->flags & AMDF_MEMORY_FLAG_DEVICE_ADDRESS) != 0) {
     status = amdf_gpu_umd_memory_reservation_create(
-        device->host_allocator, 1, &device, memory->byte_length, alignment,
+        device->host_allocator, 1, &device, memory->byte_length, alignment, 0,
         &memory->default_reservation);
     if (amdf_status_is_ok(status)) {
       const amdf_gpu_umd_mapping_update_t update = {

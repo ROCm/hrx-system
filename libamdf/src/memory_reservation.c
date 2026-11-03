@@ -109,7 +109,8 @@ static amdf_status_t amdf_memory_reservation_query_profile(
   }
   const amdf_memory_reservation_capabilities_t* capabilities =
       &out_profile->capabilities;
-  if ((access->access & ~capabilities->supported_access) != 0 ||
+  if ((create_info->flags & ~capabilities->supported_flags) != 0 ||
+      (access->access & ~capabilities->supported_access) != 0 ||
       (access->access & capabilities->required_access) !=
           capabilities->required_access ||
       create_info->byte_length > capabilities->maximum_byte_length ||
@@ -121,6 +122,51 @@ static amdf_status_t amdf_memory_reservation_query_profile(
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
   return AMDF_STATUS_OK;
+}
+
+static amdf_status_t amdf_memory_reservation_acquire_common_address(
+    amdf_memory_reservation_t* reservation,
+    const amdf_memory_reservation_create_info_t* create_info,
+    const amdf_memory_reservation_profile_t* profiles) {
+  amdf_memory_reservation_capabilities_t host = {0};
+  amdf_status_t status =
+      amdf_platform_host_reservation_query_capabilities(&host);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  uint64_t minimum_address = host.minimum_address;
+  uint64_t maximum_address = host.maximum_address;
+  uint64_t alignment = create_info->minimum_alignment;
+  if (alignment < host.reservation_granularity) {
+    alignment = host.reservation_granularity;
+  }
+  uint64_t maximum_alignment = host.maximum_alignment;
+  for (uint32_t i = 0; i < create_info->access_count; ++i) {
+    const amdf_memory_reservation_capabilities_t* capabilities =
+        &profiles[i].capabilities;
+    if (minimum_address < capabilities->minimum_address) {
+      minimum_address = capabilities->minimum_address;
+    }
+    if (maximum_address > capabilities->maximum_address) {
+      maximum_address = capabilities->maximum_address;
+    }
+    if (alignment < capabilities->reservation_granularity) {
+      alignment = capabilities->reservation_granularity;
+    }
+    if (maximum_alignment > capabilities->maximum_alignment) {
+      maximum_alignment = capabilities->maximum_alignment;
+    }
+  }
+  if (alignment > maximum_alignment || minimum_address > maximum_address ||
+      create_info->byte_length > host.maximum_byte_length ||
+      create_info->byte_length % host.reservation_granularity != 0 ||
+      create_info->byte_length - 1 > maximum_address - minimum_address) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  reservation->common_byte_length = create_info->byte_length;
+  return amdf_platform_host_reservation_create(
+      create_info->byte_length, alignment, minimum_address, maximum_address,
+      &reservation->common_address);
 }
 
 amdf_status_t AMDF_CALL amdf_memory_reservation_create(
@@ -136,8 +182,10 @@ amdf_status_t AMDF_CALL amdf_memory_reservation_create(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  if (create_info->reserved != 0 || create_info->byte_length == 0 ||
-      create_info->access_count == 0 || create_info->accesses == NULL ||
+  if ((create_info->flags &
+       ~AMDF_MEMORY_RESERVATION_FLAG_REQUIRE_COMMON_ADDRESS) != 0 ||
+      create_info->byte_length == 0 || create_info->access_count == 0 ||
+      create_info->accesses == NULL ||
       (create_info->minimum_alignment & (create_info->minimum_alignment - 1)) !=
           0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
@@ -174,6 +222,11 @@ amdf_status_t AMDF_CALL amdf_memory_reservation_create(
     reservation->access_count = count;
     reservation->accesses =
         (amdf_memory_reservation_access_state_t*)(reservation + 1);
+    if ((create_info->flags &
+         AMDF_MEMORY_RESERVATION_FLAG_REQUIRE_COMMON_ADDRESS) != 0) {
+      status = amdf_memory_reservation_acquire_common_address(
+          reservation, create_info, profiles);
+    }
     for (uint32_t i = 0; i < count && amdf_status_is_ok(status); ++i) {
       if (reservation->accesses[i].vtable != NULL) {
         continue;
@@ -479,6 +532,10 @@ amdf_memory_reservation_destroy(amdf_memory_reservation_t* reservation) {
         status = release_status;
       }
     }
+  }
+  if (amdf_status_is_ok(status) && reservation->common_address != NULL) {
+    status = amdf_platform_host_reservation_destroy(
+        reservation->common_address, reservation->common_byte_length);
   }
   amdf_free(reservation->host_allocator, reservation);
   return status;

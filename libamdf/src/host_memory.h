@@ -19,6 +19,11 @@ extern "C" {
 amdf_status_t amdf_host_memory_query_description(
     amdf_memory_host_description_t* out_description);
 
+// Samples the current physical capacity and headroom of shared system RAM.
+// This explicit cold query acquires no execution resource or library state.
+amdf_status_t amdf_host_memory_sample_observation(
+    amdf_memory_scope_observation_t* out_observation);
+
 // Prepares system backing in the resource's private host backing slot.
 // Borrowed pages remain caller-owned; allocation owns only the host VM range.
 // When export_backing is true, the first export materializes physical pages

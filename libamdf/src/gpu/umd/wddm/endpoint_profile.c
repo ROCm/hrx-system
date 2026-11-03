@@ -11,6 +11,7 @@
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/wddm/wkmi/adapter.h"
 #include "libamdf/src/gpu/umd/wddm/wkmi/endpoint_properties.h"
+#include "libamdf/src/host_memory.h"
 #include "libamdf/src/platform/windows/endpoint.h"
 
 amdf_status_t amdf_gpu_umd_create_endpoint_profile(
@@ -63,6 +64,27 @@ amdf_status_t amdf_gpu_umd_create_endpoint_profile(
     }
   }
 
+  if (amdf_status_is_ok(status) && profile_available) {
+    const amdf_kmt_api_t* kmt = &platform_endpoint->instance->kmt;
+    profile.memory.flags =
+        (provider_properties.is_discrete
+             ? 0
+             : AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED) |
+        (kmt->query_video_memory_info ? AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES
+                                      : 0);
+    if (provider_properties.is_discrete) {
+      D3DKMT_SEGMENTGROUPSIZEINFO sizes = {
+          .PhysicalAdapterIndex = platform_endpoint->physical_adapter_index,
+      };
+      status = amdf_kmt_query_adapter_info(kmt, platform_endpoint->adapter,
+                                           KMTQAITYPE_GETSEGMENTGROUPSIZE,
+                                           &sizes, sizeof(sizes));
+      if (amdf_status_is_ok(status)) {
+        profile.memory.capacity_byte_length = sizes.LocalMemory;
+      }
+    }
+  }
+
   amdf_status_t release_status = AMDF_STATUS_OK;
   if (adapter.native != NULL) {
     release_status = amdf_gpu_wddm_wkmi_adapter_deinitialize(&adapter);
@@ -86,6 +108,47 @@ amdf_status_t amdf_gpu_umd_create_endpoint_profile(
   if (amdf_status_is_ok(status)) {
     *owned_profile = profile;
     *out_profile = owned_profile;
+  }
+  return status;
+}
+
+amdf_status_t amdf_gpu_umd_sample_memory_scope(
+    const amdf_platform_endpoint_t* endpoint, amdf_memory_scope_flags_t flags,
+    amdf_memory_scope_observation_t* out_observation) {
+  const amdf_kmt_api_t* kmt = &endpoint->instance->kmt;
+  D3DKMT_QUERYVIDEOMEMORYINFO query = {
+      .hProcess = GetCurrentProcess(),
+      .hAdapter = endpoint->adapter,
+      .MemorySegmentGroup = D3DKMT_MEMORY_SEGMENT_GROUP_LOCAL,
+      .PhysicalAdapterIndex = endpoint->physical_adapter_index,
+  };
+  amdf_status_t status =
+      amdf_kmt_make_status(kmt->query_video_memory_info(&query));
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  amdf_memory_scope_observation_t observation = {0};
+  if (flags & AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED) {
+    status = amdf_host_memory_sample_observation(&observation);
+  } else {
+    D3DKMT_SEGMENTGROUPSIZEINFO sizes = {
+        .PhysicalAdapterIndex = endpoint->physical_adapter_index,
+    };
+    status = amdf_kmt_query_adapter_info(kmt, endpoint->adapter,
+                                         KMTQAITYPE_GETSEGMENTGROUPSIZE, &sizes,
+                                         sizeof(sizes));
+    observation.capacity_byte_length = sizes.LocalMemory;
+    observation.available_byte_length = sizes.LocalMemory;
+  }
+  if (amdf_status_is_ok(status)) {
+    const uint64_t headroom = query.CurrentUsage < query.Budget
+                                  ? query.Budget - query.CurrentUsage
+                                  : 0;
+    out_observation->capacity_byte_length = observation.capacity_byte_length;
+    out_observation->available_byte_length =
+        observation.available_byte_length < headroom
+            ? observation.available_byte_length
+            : headroom;
   }
   return status;
 }

@@ -140,7 +140,8 @@ TEST_F(HostExportTest, DiscoversCachedLimitAndFreshExportOwnership) {
   EXPECT_EQ(service_.maximum_byte_length, UINT64_C(64) << 20);
   EXPECT_EQ(fcntl(service_.native_handle, F_GETFD), FD_CLOEXEC);
   amdf_platform_host_backing_t backing = {};
-  ASSERT_EQ(amdf_platform_host_backing_prepare(4096, &backing), AMDF_STATUS_OK);
+  ASSERT_EQ(amdf_platform_host_backing_prepare(4096, 0, &backing),
+            AMDF_STATUS_OK);
   EXPECT_EQ(ftruncate(backing.handle, 8192), -1);
   EXPECT_EQ(errno, EPERM);
   EXPECT_EQ(ftruncate(backing.handle, 0), -1);
@@ -211,7 +212,8 @@ TEST_F(HostExportTest, NativeCreateFailurePreservesCallerOutputAndBacking) {
   Initialize();
   ASSERT_EQ(service_.availability, AMDF_STATUS_OK);
   amdf_platform_host_backing_t backing = {};
-  ASSERT_EQ(amdf_platform_host_backing_prepare(4096, &backing), AMDF_STATUS_OK);
+  ASSERT_EQ(amdf_platform_host_backing_prepare(4096, 0, &backing),
+            AMDF_STATUS_OK);
   std::memset(backing.pointer, 0xC3, 4096);
   for (int error : {ENOMEM, ENOSPC, EINVAL}) {
     native_.create_error = error;

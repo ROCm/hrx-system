@@ -34,6 +34,15 @@ struct NativeDeviceInfo {
       .virtual_address_alignment = 4096,
       .pte_fragment_size = 2 * 1024 * 1024,
   };
+  // Native local-memory capacity, reserved bytes, and global usage snapshot.
+  drm_amdgpu_memory_info memory = {
+      .vram =
+          {
+              .total_heap_size = UINT64_C(2) << 30,
+              .usable_heap_size = UINT64_C(1536) << 20,
+              .heap_usage = UINT64_C(512) << 20,
+          },
+  };
   // Real descriptor borrowed by the query and closed by profile construction.
   int descriptor = -1;
   // Error at native file opening, or zero for success.
@@ -81,15 +90,21 @@ extern "C" int __wrap_ioctl(int descriptor, unsigned long request, ...) {
   EXPECT_EQ(descriptor, native_device_info->descriptor);
   EXPECT_EQ(request, DRM_IOCTL_AMDGPU_INFO);
   const auto* query = static_cast<const drm_amdgpu_info*>(argument);
-  EXPECT_EQ(query->query, AMDGPU_INFO_DEV_INFO);
-  EXPECT_EQ(query->return_size, sizeof(drm_amdgpu_info_device));
   ++native_device_info->query_count;
   if (native_device_info->query_error != 0) {
     errno = native_device_info->query_error;
     return -1;
   }
-  *reinterpret_cast<drm_amdgpu_info_device*>(query->return_pointer) =
-      native_device_info->info;
+  if (query->query == AMDGPU_INFO_MEMORY) {
+    EXPECT_EQ(query->return_size, sizeof(drm_amdgpu_memory_info));
+    *reinterpret_cast<drm_amdgpu_memory_info*>(query->return_pointer) =
+        native_device_info->memory;
+  } else {
+    EXPECT_EQ(query->query, AMDGPU_INFO_DEV_INFO);
+    EXPECT_EQ(query->return_size, sizeof(drm_amdgpu_info_device));
+    *reinterpret_cast<drm_amdgpu_info_device*>(query->return_pointer) =
+        native_device_info->info;
+  }
   return 0;
 }
 
@@ -220,12 +235,14 @@ TEST_F(KfdTopologyTest, DiscoversMemoryAndSdmaWithoutComputeStorageMetadata) {
   WriteProperties(
       "num_sdma_engines 2\n"
       "num_sdma_xgmi_engines 14\n"
-      "num_sdma_queues_per_engine 8\n");
+      "num_sdma_queues_per_engine 8\n"
+      "num_gws 64\n");
   amdf_gpu_kfd_topology_t topology = {};
   ASSERT_EQ(amdf_gpu_kfd_topology_initialize(
                 &endpoint_, amdf_allocator_system(), &topology),
             AMDF_STATUS_OK);
   EXPECT_EQ(topology.gpu_id, 53458u);
+  EXPECT_EQ(topology.properties.unique_id, 0u);
   EXPECT_EQ(topology.properties.gfx_ip.major, 9u);
   EXPECT_EQ(topology.properties.gfx_ip.minor, 4u);
   EXPECT_EQ(topology.properties.gfx_ip.stepping, 2u);
@@ -240,6 +257,7 @@ TEST_F(KfdTopologyTest, DiscoversMemoryAndSdmaWithoutComputeStorageMetadata) {
   EXPECT_EQ(topology.sdma.engine_count, 2u);
   EXPECT_EQ(topology.sdma.xgmi_engine_count, 14u);
   EXPECT_EQ(topology.sdma.queue_count_per_engine, 8u);
+  EXPECT_EQ(topology.global_wave_sync_count, 64u);
   EXPECT_TRUE(topology.sdma.ip.exact);
   EXPECT_EQ(topology.sdma.ip.major, 4u);
   EXPECT_EQ(topology.sdma.ip.minor, 4u);
@@ -247,6 +265,35 @@ TEST_F(KfdTopologyTest, DiscoversMemoryAndSdmaWithoutComputeStorageMetadata) {
   EXPECT_EQ(topology.context_save_restore_byte_length, 0u);
   EXPECT_EQ(topology.control_stack_byte_length, 0u);
   amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
+}
+
+TEST_F(KfdTopologyTest, PreservesFullWidthNativeUniqueId) {
+  for (uint64_t unique_id :
+       {UINT64_C(0), UINT64_C(0xfedcba9876543210), UINT64_MAX}) {
+    const std::string properties =
+        "unique_id " + std::to_string(unique_id) + "\n";
+    WriteProperties(properties.c_str());
+    amdf_gpu_kfd_topology_t topology = {};
+    ASSERT_EQ(amdf_gpu_kfd_topology_initialize(
+                  &endpoint_, amdf_allocator_system(), &topology),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(topology.properties.unique_id, unique_id);
+    amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
+  }
+}
+
+TEST_F(KfdTopologyTest, RejectsMalformedOrDuplicateNativeUniqueId) {
+  for (const char* properties :
+       {"unique_id -1\n", "unique_id 18446744073709551616\n",
+        "unique_id 1tail\n", "unique_id 0\nunique_id 1\n"}) {
+    SCOPED_TRACE(properties);
+    WriteProperties(properties);
+    amdf_gpu_kfd_topology_t topology = {.gpu_id = 123};
+    EXPECT_EQ(amdf_gpu_kfd_topology_initialize(
+                  &endpoint_, amdf_allocator_system(), &topology),
+              amdf_linux_error(EPROTO));
+    EXPECT_EQ(topology.gpu_id, 123u);
+  }
 }
 
 TEST_F(KfdTopologyTest, LocalAdmissionUsesInitializedAllocationDomains) {
@@ -809,6 +856,59 @@ TEST_F(KfdTopologyTest, MissingEndpointLeavesOutputUnchanged) {
                 &endpoint_, amdf_allocator_system(), &topology),
             amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
   EXPECT_EQ(std::memcmp(&topology, &original, sizeof(topology)), 0);
+}
+
+TEST_F(KfdTopologyTest,
+       LocalMemoryObservationIncludesNativeReservationsAndUsage) {
+  amdf_memory_scope_observation_t observation = {};
+  ASSERT_EQ(
+      amdf_gpu_umd_sample_memory_scope(
+          &endpoint_, AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES, &observation),
+      AMDF_STATUS_OK);
+  EXPECT_EQ(observation.capacity_byte_length, UINT64_C(2) << 30);
+  EXPECT_EQ(observation.available_byte_length, UINT64_C(1) << 30);
+  EXPECT_EQ(native_.query_count, 1u);
+  EXPECT_EQ(fcntl(native_.descriptor, F_GETFD), -1);
+  EXPECT_EQ(errno, EBADF);
+
+  native_.memory.vram.heap_usage = UINT64_C(2) << 30;
+  ASSERT_EQ(
+      amdf_gpu_umd_sample_memory_scope(
+          &endpoint_, AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES, &observation),
+      AMDF_STATUS_OK);
+  EXPECT_EQ(observation.available_byte_length, 0u);
+}
+
+TEST_F(KfdTopologyTest, FailedLocalMemoryObservationPreservesOutput) {
+  amdf_memory_scope_observation_t observation = {
+      .capacity_byte_length = UINT64_MAX,
+      .available_byte_length = UINT64_MAX,
+  };
+  const auto expected = observation;
+  native_.query_error = EIO;
+  EXPECT_EQ(
+      amdf_gpu_umd_sample_memory_scope(
+          &endpoint_, AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES, &observation),
+      amdf_linux_error(EIO));
+  EXPECT_EQ(std::memcmp(&observation, &expected, sizeof(observation)), 0);
+  EXPECT_EQ(fcntl(native_.descriptor, F_GETFD), -1);
+  EXPECT_EQ(errno, EBADF);
+}
+
+TEST_F(KfdTopologyTest, UnifiedMemoryObservationDoesNotOpenAnExecutionFile) {
+  amdf_memory_scope_observation_t observation = {};
+  native_.open_error = EACCES;
+  ASSERT_EQ(amdf_gpu_umd_sample_memory_scope(
+                &endpoint_,
+                AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED |
+                    AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES,
+                &observation),
+            AMDF_STATUS_OK);
+  EXPECT_GT(observation.capacity_byte_length, 0u);
+  EXPECT_LE(observation.available_byte_length,
+            observation.capacity_byte_length);
+  EXPECT_EQ(native_.query_count, 0u);
+  EXPECT_EQ(native_.descriptor, -1);
 }
 
 TEST_F(KfdTopologyTest, IncompleteCpuRouteDoesNotPublishTopology) {

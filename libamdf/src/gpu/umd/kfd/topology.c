@@ -165,6 +165,7 @@ static amdf_status_t amdf_gpu_kfd_read_node(
     SDMA_XGMI_ENGINE_COUNT,
     SDMA_QUEUE_COUNT_PER_ENGINE,
     IO_LINK_COUNT,
+    GLOBAL_WAVE_SYNC_COUNT,
     PROPERTY_COUNT,
   };
   const char* names[PROPERTY_COUNT] = {
@@ -190,9 +191,12 @@ static amdf_status_t amdf_gpu_kfd_read_node(
       "num_sdma_xgmi_engines",
       "num_sdma_queues_per_engine",
       "io_links_count",
+      "num_gws",
   };
   uint32_t values[PROPERTY_COUNT] = {0};
   uint32_t present = 0;
+  uint64_t unique_id = 0;
+  bool unique_id_present = false;
   char text[8192];
   amdf_status_t status =
       amdf_gpu_kfd_read_attribute(directory, "properties", text, sizeof(text));
@@ -209,8 +213,16 @@ static amdf_status_t amdf_gpu_kfd_read_node(
     char* end = NULL;
     errno = 0;
     const unsigned long long value = strtoull(separator + 1, &end, 10);
-    if (errno || end == separator + 1 || *end != '\n') {
+    if (errno || separator[1] < '0' || separator[1] > '9' ||
+        end == separator + 1 || *end != '\n') {
       return amdf_linux_error(EPROTO);
+    }
+    if (strcmp(cursor, "unique_id") == 0) {
+      if (unique_id_present) {
+        return amdf_linux_error(EPROTO);
+      }
+      unique_id = (uint64_t)value;
+      unique_id_present = true;
     }
     for (uint32_t i = 0; i < PROPERTY_COUNT; ++i) {
       if (strcmp(cursor, names[i]) != 0) {
@@ -266,6 +278,7 @@ static amdf_status_t amdf_gpu_kfd_read_node(
           },
       .asic_revision = (values[CAPABILITY] & HSA_CAP_ASIC_REVISION_MASK) >>
                        HSA_CAP_ASIC_REVISION_SHIFT,
+      .unique_id = unique_id,
       .compute =
           {
               .wavefront_size = values[WAVE_SIZE],
@@ -283,6 +296,7 @@ static amdf_status_t amdf_gpu_kfd_read_node(
           },
   };
   topology->compute_queue_count = values[COMPUTE_QUEUE_COUNT];
+  topology->global_wave_sync_count = values[GLOBAL_WAVE_SYNC_COUNT];
   topology->memory_peers.count = values[P2P_LINK_COUNT];
   topology->sdma.engine_count = values[SDMA_ENGINE_COUNT];
   topology->sdma.xgmi_engine_count = values[SDMA_XGMI_ENGINE_COUNT];

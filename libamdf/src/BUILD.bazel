@@ -258,6 +258,7 @@ amdf_cc_library(
 amdf_cc_test(
     name = "memory_test",
     srcs = [
+        "memory_atomic_test.cc",
         "memory_construction_test.cc",
         "memory_reservation_test.cc",
         "memory_test.cc",
@@ -271,6 +272,7 @@ amdf_cc_test(
         ":host_mapping",
         ":instance",
         ":memory",
+        ":memory_pair",
         ":memory_reservation",
         ":memory_scope",
         ":memory_scope_state",

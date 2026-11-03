@@ -80,10 +80,9 @@ amdf_status_t amdf_platform_endpoint_open(
     status = amdf_make_api_status(AMDF_STATUS_CODE_NOT_FOUND);
   }
   if (amdf_status_is_ok(status)) {
-    status = amdf_windows_query_host_locality(
-        &instance->host_locality, &instance->kmt, endpoint->adapter,
-        physical_adapter_index, &endpoint->host_numa_node,
-        instance->host_allocator);
+    status = amdf_windows_query_endpoint_metadata(
+        &instance->endpoint_metadata, &instance->kmt, endpoint->adapter,
+        physical_adapter_index, &endpoint->metadata, instance->host_allocator);
   }
 
   if (amdf_status_is_ok(status)) {
@@ -103,7 +102,12 @@ amdf_status_t amdf_platform_endpoint_open(
 
 uint32_t amdf_platform_endpoint_host_numa_node(
     const amdf_platform_endpoint_t* endpoint) {
-  return endpoint->host_numa_node;
+  return endpoint->metadata.host_numa_node;
+}
+
+const amdf_endpoint_pci_address_t* amdf_platform_endpoint_pci_address(
+    const amdf_platform_endpoint_t* endpoint) {
+  return &endpoint->metadata.pci_address;
 }
 
 amdf_queue_publication_modes_t

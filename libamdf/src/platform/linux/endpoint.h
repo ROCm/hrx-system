@@ -17,6 +17,8 @@ struct amdf_platform_endpoint_t {
   amdf_endpoint_info_t info;
   // OS attachment node with online CPUs at open, or UINT32_MAX when unknown.
   uint32_t host_numa_node;
+  // Physical PCI attachment address captured without opening an execution file.
+  amdf_endpoint_pci_address_t pci_address;
 };
 
 #ifdef __cplusplus

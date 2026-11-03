@@ -315,4 +315,53 @@ TEST(GpuMemoryPairTest, SystemStoresDoNotGrantOtherAccessOrQueueContracts) {
   expect_no_reach();
 }
 
+TEST(GpuMemoryPairTest, ShaderAtomicPairsRequireTheExactPhysicalDomain) {
+  const amdf_endpoint_id_t first = {{17, 31}};
+  const amdf_endpoint_id_t second = {{17, 32}};
+  constexpr amdf_memory_access_t kReadWrite =
+      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
+  const amdf_memory_atomic_capabilities_t operations = {
+      .device_scope_32 =
+          AMDF_ATOMIC_OPERATION_LOAD | AMDF_ATOMIC_OPERATION_COMPARE_EXCHANGE,
+      .device_scope_64 =
+          AMDF_ATOMIC_OPERATION_LOAD | AMDF_ATOMIC_OPERATION_FETCH_AND,
+  };
+  const auto producer =
+      amdf_gpu_umd_memory_describe_program_site(kReadWrite, &first, operations);
+  auto consumer =
+      amdf_gpu_umd_memory_describe_program_site(kReadWrite, &first, operations);
+  amdf_memory_pair_atomics_t atomics = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_ATOMICS,
+      .structure_size = sizeof(atomics),
+  };
+  amdf_memory_pair_info_t pair = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+      .structure_size = sizeof(pair),
+      .next = &atomics,
+  };
+  ASSERT_EQ(amdf_memory_pair_compose(&producer, &consumer, &pair),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(pair.atomic_reach.scope_32, AMDF_ATOMIC_SCOPE_DEVICE);
+  EXPECT_EQ(atomics.producer.device_scope_32, operations.device_scope_32);
+  EXPECT_EQ(atomics.consumer.device_scope_64, operations.device_scope_64);
+  EXPECT_EQ(pair.release.executor, AMDF_CACHE_TRANSITION_EXECUTOR_PROGRAM);
+  EXPECT_EQ(pair.acquire.executor, AMDF_CACHE_TRANSITION_EXECUTOR_PROGRAM);
+
+  consumer = amdf_gpu_umd_memory_describe_program_site(kReadWrite, &second,
+                                                       operations);
+  ASSERT_EQ(amdf_memory_pair_compose(&producer, &consumer, &pair),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(pair.atomic_reach.scope_32, AMDF_ATOMIC_SCOPE_NONE);
+  const amdf_memory_atomic_capabilities_t empty = {};
+  EXPECT_EQ(std::memcmp(&atomics.producer, &empty, sizeof(empty)), 0);
+  EXPECT_EQ(std::memcmp(&atomics.consumer, &empty, sizeof(empty)), 0);
+  // A matching endpoint alone cannot grant transactions to an empty peer.
+  consumer =
+      amdf_gpu_umd_memory_describe_program_site(kReadWrite, &first, empty);
+  ASSERT_EQ(amdf_memory_pair_compose(&producer, &consumer, &pair),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(std::memcmp(&atomics.producer, &empty, sizeof(empty)), 0);
+  EXPECT_EQ(std::memcmp(&atomics.consumer, &empty, sizeof(empty)), 0);
+}
+
 }  // namespace

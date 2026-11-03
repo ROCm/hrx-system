@@ -10,6 +10,7 @@
 
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/child_tracker.h"
+#include "libamdf/src/host_memory.h"
 #include "libamdf/src/structure.h"
 
 #if defined(AMDF_HAVE_GPU)
@@ -42,6 +43,11 @@ amdf_instance_create(const amdf_instance_create_info_t* create_info,
   }
 
   amdf_instance_t* instance = NULL;
+  amdf_memory_scope_observation_t memory = {0};
+  status = amdf_host_memory_sample_observation(&memory);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
   status = amdf_calloc(host_allocator, sizeof(*instance),
                        amdf_alignof(amdf_instance_t), (void**)&instance);
   if (!amdf_status_is_ok(status)) {
@@ -51,6 +57,10 @@ amdf_instance_create(const amdf_instance_create_info_t* create_info,
   instance->native_lifetime = create_info->native_lifetime;
   instance->system_memory_scope.kind = AMDF_MEMORY_SCOPE_KIND_SYSTEM;
   instance->system_memory_scope.owner.instance = instance;
+  instance->system_memory_scope.flags = AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED |
+                                        AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES;
+  instance->system_memory_scope.capacity_byte_length =
+      memory.capacity_byte_length;
   amdf_child_tracker_initialize(&instance->children);
   status = amdf_platform_instance_create(host_allocator, &instance->platform);
   if (amdf_status_is_ok(status)) {

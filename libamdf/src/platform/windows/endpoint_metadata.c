@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "libamdf/src/platform/windows/host_locality.h"
+#include "libamdf/src/platform/windows/endpoint_metadata.h"
 
 // The property declarations become definitions after initguid.h.
 // clang-format off
@@ -18,9 +18,9 @@
 
 #include "libamdf/src/allocator.h"
 
-amdf_status_t amdf_windows_host_locality_api_initialize(
-    amdf_windows_host_locality_api_t* out_api) {
-  amdf_windows_host_locality_api_t api = {0};
+amdf_status_t amdf_windows_endpoint_metadata_api_initialize(
+    amdf_windows_endpoint_metadata_api_t* out_api) {
+  amdf_windows_endpoint_metadata_api_t api = {0};
   api.module =
       LoadLibraryExW(L"cfgmgr32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
   if (api.module == NULL) {
@@ -41,8 +41,8 @@ amdf_status_t amdf_windows_host_locality_api_initialize(
   return AMDF_STATUS_OK;
 }
 
-amdf_status_t amdf_windows_host_locality_api_deinitialize(
-    amdf_windows_host_locality_api_t* api) {
+amdf_status_t amdf_windows_endpoint_metadata_api_deinitialize(
+    amdf_windows_endpoint_metadata_api_t* api) {
   if (api->module != NULL && !FreeLibrary(api->module)) {
     return amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError());
   }
@@ -80,20 +80,17 @@ static amdf_status_t amdf_windows_pnp_device_instance(WCHAR* key,
 }
 
 static amdf_status_t amdf_windows_device_host_numa_node(
-    const amdf_windows_host_locality_api_t* api, WCHAR* instance,
+    const amdf_windows_endpoint_metadata_api_t* api, DEVINST device,
     uint32_t* out_numa_node) {
-  DEVINST device;
-  CONFIGRET result =
-      api->locate_device(&device, instance, CM_LOCATE_DEVNODE_NORMAL);
-  if (result != CR_SUCCESS) {
-    return amdf_make_status(AMDF_STATUS_DOMAIN_WIN32,
-                            api->map_error(result, ERROR_GEN_FAILURE));
+  if (api->get_node_masks == NULL) {
+    *out_numa_node = UINT32_MAX;
+    return AMDF_STATUS_OK;
   }
   ULONG length = sizeof(uint32_t);
   uint32_t node = UINT32_MAX;
   DEVPROPTYPE type = 0;
-  result = api->get_property(device, &DEVPKEY_Device_Numa_Node, &type,
-                             (PBYTE)&node, &length, 0);
+  const CONFIGRET result = api->get_property(device, &DEVPKEY_Device_Numa_Node,
+                                             &type, (PBYTE)&node, &length, 0);
   if (result == CR_NO_SUCH_VALUE) {
     *out_numa_node = UINT32_MAX;
     return AMDF_STATUS_OK;
@@ -124,13 +121,85 @@ static amdf_status_t amdf_windows_device_host_numa_node(
   return AMDF_STATUS_OK;
 }
 
-amdf_status_t amdf_windows_query_host_locality(
-    const amdf_windows_host_locality_api_t* api, const amdf_kmt_api_t* kmt,
+// The PCI bus driver documents both its single-segment and explicit segment
+// location forms. Unknown/non-PCI forms carry no address guarantee.
+static bool amdf_windows_parse_pci_location(
+    const WCHAR* location, amdf_endpoint_pci_address_t* out_address) {
+  const WCHAR* prefixes[] = {L"PCI segment ", L" bus ", L", device ",
+                             L", function "};
+  const uint32_t limits[] = {65535, 255, 31, 7};
+  uint32_t values[4] = {0};
+  const uint32_t first = wcsncmp(location, L"PCI bus ", 8) == 0 ? 1 : 0;
+  for (uint32_t field = first; field < 4; ++field) {
+    const WCHAR* prefix =
+        first == 1 && field == 1 ? L"PCI bus " : prefixes[field];
+    const size_t length = wcslen(prefix);
+    if (wcsncmp(location, prefix, length) != 0) {
+      return false;
+    }
+    location += length;
+    if (*location < L'0' || *location > L'9') {
+      return false;
+    }
+    while (*location >= L'0' && *location <= L'9') {
+      const uint32_t digit = (uint32_t)(*location - L'0');
+      if (values[field] > limits[field] / 10 ||
+          (values[field] == limits[field] / 10 && digit > limits[field] % 10)) {
+        return false;
+      }
+      values[field] = values[field] * 10 + digit;
+      ++location;
+    }
+  }
+  if (*location != L'\0') {
+    return false;
+  }
+  out_address->available = 1;
+  out_address->domain = values[0];
+  out_address->bus = values[1];
+  out_address->device = values[2];
+  out_address->function = values[3];
+  return true;
+}
+
+static amdf_status_t amdf_windows_device_pci_address(
+    const amdf_windows_endpoint_metadata_api_t* api, DEVINST device,
+    amdf_endpoint_pci_address_t* out_address) {
+  // The documented PCI location grammar is bounded by the address widths.
+  WCHAR location[128];
+  ULONG length = sizeof(location);
+  DEVPROPTYPE type = 0;
+  const CONFIGRET result = api->get_property(
+      device, &DEVPKEY_Device_LocationInfo, &type, (PBYTE)location, &length, 0);
+  if (result == CR_NO_SUCH_VALUE) {
+    *out_address = (amdf_endpoint_pci_address_t){0};
+    return AMDF_STATUS_OK;
+  }
+  if (result != CR_SUCCESS) {
+    return amdf_make_status(AMDF_STATUS_DOMAIN_WIN32,
+                            api->map_error(result, ERROR_GEN_FAILURE));
+  }
+  if (type != DEVPROP_TYPE_STRING || length == 0 || length > sizeof(location) ||
+      length % sizeof(WCHAR) != 0 ||
+      location[length / sizeof(WCHAR) - 1] != L'\0' ||
+      wcslen(location) + 1 != length / sizeof(WCHAR)) {
+    return amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, ERROR_INVALID_DATA);
+  }
+  amdf_endpoint_pci_address_t address = {0};
+  amdf_windows_parse_pci_location(location, &address);
+  *out_address = address;
+  return AMDF_STATUS_OK;
+}
+
+amdf_status_t amdf_windows_query_endpoint_metadata(
+    const amdf_windows_endpoint_metadata_api_t* api, const amdf_kmt_api_t* kmt,
     D3DKMT_HANDLE adapter, uint32_t physical_adapter_index,
-    uint32_t* out_numa_node, amdf_allocator_t host_allocator) {
+    amdf_windows_endpoint_metadata_t* out_metadata,
+    amdf_allocator_t host_allocator) {
+  amdf_windows_endpoint_metadata_t metadata = {.host_numa_node = UINT32_MAX};
   if (api->locate_device == NULL || api->get_property == NULL ||
-      api->map_error == NULL || api->get_node_masks == NULL) {
-    *out_numa_node = UINT32_MAX;
+      api->map_error == NULL) {
+    *out_metadata = metadata;
     return AMDF_STATUS_OK;
   }
   UINT capacity = 0;
@@ -166,13 +235,26 @@ amdf_status_t amdf_windows_query_host_locality(
   if (amdf_status_is_ok(status)) {
     status = amdf_windows_pnp_device_instance(key, &instance);
   }
-  uint32_t node = UINT32_MAX;
+  DEVINST device = 0;
   if (amdf_status_is_ok(status)) {
-    status = amdf_windows_device_host_numa_node(api, instance, &node);
+    const CONFIGRET result =
+        api->locate_device(&device, instance, CM_LOCATE_DEVNODE_NORMAL);
+    if (result != CR_SUCCESS) {
+      status = amdf_make_status(AMDF_STATUS_DOMAIN_WIN32,
+                                api->map_error(result, ERROR_GEN_FAILURE));
+    }
+  }
+  if (amdf_status_is_ok(status)) {
+    status = amdf_windows_device_host_numa_node(api, device,
+                                                &metadata.host_numa_node);
+  }
+  if (amdf_status_is_ok(status)) {
+    status =
+        amdf_windows_device_pci_address(api, device, &metadata.pci_address);
   }
   amdf_free(host_allocator, key);
   if (amdf_status_is_ok(status)) {
-    *out_numa_node = node;
+    *out_metadata = metadata;
   }
   return status;
 }

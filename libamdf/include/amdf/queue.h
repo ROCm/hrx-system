@@ -151,13 +151,18 @@ enum amdf_queue_host_publication_flag_bits_e {
   AMDF_QUEUE_HOST_PUBLICATION_FLAG_KERNEL_CALL = 1u << 2,
 };
 
-/// Direct producer operations implemented by one user queue.
+/// Native publication and scheduling contracts established by one user queue.
 typedef uint64_t amdf_user_queue_capabilities_t;
 enum amdf_user_queue_capability_bits_e {
   /// The queue can be mapped into the host process.
   AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER = UINT64_C(1) << 0,
   /// The queue can be mapped into a device producer.
   AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER = UINT64_C(1) << 1,
+  /// Native scheduling permits cooperative grid synchronization for a dispatch
+  /// whose complete grid fits its available execution resources. The caller
+  /// supplies the kernel's synchronization state and residency validation.
+  /// Requested during construction; never enabled by mapping an ordinary queue.
+  AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH = UINT64_C(1) << 2,
 };
 
 /// Optional kernel-mediated queue operations.
@@ -217,13 +222,14 @@ typedef struct amdf_queue_family_info_t {
   uint32_t reserved;
   /// Atomic operations encoded by this command representation.
   amdf_atomic_capabilities_t atomic_capabilities;
-  /// Direct producer operations supported by user queues.
+  /// Native publication and scheduling contracts supported by user queues.
   amdf_user_queue_capabilities_t user_queue_capabilities;
   /// Optional operations supported by kernel-mediated queues.
   amdf_kernel_queue_capabilities_t kernel_queue_capabilities;
   /// Supported direct-publication producer modes.
   amdf_queue_producer_modes_t producer_modes;
-  /// Supported scheduling priorities.
+  /// Supported user-queue scheduling priorities, or zero without user
+  /// publication. Kernel queue creation has no priority selector.
   amdf_queue_priority_capabilities_t priority_capabilities;
   /// Supported explicit primary-ring placements for user publication.
   amdf_queue_placement_capabilities_t placement_capabilities;
@@ -284,7 +290,7 @@ typedef struct amdf_user_queue_info_t {
   amdf_queue_priority_t priority;
   /// Achieved primary-ring locality, or DEFAULT when no guarantee is exposed.
   amdf_queue_placement_t placement;
-  /// Direct producer operations achieved by this queue.
+  /// Native publication and scheduling contracts achieved by this queue.
   amdf_user_queue_capabilities_t capabilities;
   /// Semantic operations achieved by this queue.
   amdf_queue_roles_t roles;

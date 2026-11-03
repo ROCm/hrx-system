@@ -11,10 +11,23 @@
 #define NOMINMAX
 #include <windows.h>
 
+#include "libamdf/src/platform/host_reservation.h"
 #include "libamdf/src/platform/windows/host_cache.h"
 
+amdf_status_t amdf_platform_host_memory_sample_observation(
+    amdf_memory_scope_observation_t* out_observation) {
+  MEMORYSTATUSEX memory = {.dwLength = sizeof(memory)};
+  if (!GlobalMemoryStatusEx(&memory)) {
+    return amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError());
+  }
+  out_observation->capacity_byte_length = memory.ullTotalPhys;
+  out_observation->available_byte_length = memory.ullAvailPhys;
+  return AMDF_STATUS_OK;
+}
+
 amdf_status_t amdf_platform_host_backing_prepare(
-    uint64_t byte_length, amdf_platform_host_backing_t* backing) {
+    uint64_t byte_length, uint64_t minimum_alignment,
+    amdf_platform_host_backing_t* backing) {
   *backing = (amdf_platform_host_backing_t){.handle = UINTPTR_MAX};
   HANDLE section =
       CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
@@ -23,21 +36,23 @@ amdf_status_t amdf_platform_host_backing_prepare(
     return amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError());
   }
   backing->handle = (uintptr_t)section;
-  void* pointer = MapViewOfFile(section, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0,
-                                (SIZE_T)byte_length);
-  if (pointer == NULL) {
-    return amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError());
+  amdf_status_t status = amdf_platform_host_reservation_create(
+      byte_length, minimum_alignment, 0, UINTPTR_MAX, &backing->pointer);
+  if (amdf_status_is_ok(status)) {
+    status = amdf_platform_host_reservation_replace(
+        backing->pointer, byte_length, byte_length, backing->handle, 0,
+        AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE);
   }
-  backing->pointer = pointer;
-  return AMDF_STATUS_OK;
+  return status;
 }
 
 amdf_status_t amdf_platform_host_backing_destroy(
     amdf_platform_host_backing_t* backing, uint64_t byte_length) {
-  (void)byte_length;
   if (backing->pointer != NULL) {
-    if (!UnmapViewOfFile(backing->pointer)) {
-      return amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError());
+    const amdf_status_t status =
+        amdf_platform_host_reservation_destroy(backing->pointer, byte_length);
+    if (!amdf_status_is_ok(status)) {
+      return status;
     }
     backing->pointer = NULL;
   }

@@ -13,6 +13,7 @@
 #include "libamdf/src/gpu/umd/wddm/device.h"
 #include "libamdf/src/gpu/umd/wddm/memory.h"
 #include "libamdf/src/gpu/umd/wddm/memory_profile.h"
+#include "libamdf/src/platform/host_memory.h"
 #include "libamdf/src/platform/windows/host_cache.h"
 
 typedef struct amdf_windows_gpu_memory_plan_t {
@@ -41,8 +42,9 @@ struct amdf_gpu_umd_memory_t {
   uint32_t allocation_count;
   // Maximum byte length represented by each native handle except the tail.
   uint64_t maximum_native_allocation_byte_length;
-  // First byte of the host reservation owned by system memory.
-  void* host_reservation;
+  // Owned VirtualAlloc base, or a section handle with HOST_MAPPING_SOURCE.
+  // The latter uses UINTPTR_MAX when no section remains owned.
+  void* host_storage;
   // Host-visible allocation base, or `NULL` for local memory.
   void* host_pointer;
   // Aggregate physical allocation length in bytes.
@@ -63,9 +65,7 @@ struct amdf_gpu_umd_memory_t {
 
 uintptr_t amdf_gpu_umd_memory_host_mapping_source(
     amdf_gpu_umd_memory_t* memory) {
-  (void)memory;
-  amdf_assert(false && "WDDM does not advertise HOST_MAPPING_SOURCE");
-  return 0;
+  return (uintptr_t)memory->host_storage;
 }
 
 amdf_gpu_wddm_memory_span_t amdf_gpu_wddm_memory_span(
@@ -131,6 +131,14 @@ static void amdf_windows_gpu_memory_plan(
 
 static amdf_status_t amdf_windows_gpu_memory_allocate_host_storage(
     const amdf_windows_gpu_memory_plan_t* plan, amdf_gpu_umd_memory_t* memory) {
+  if ((plan->achieved_flags & AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE) != 0) {
+    amdf_platform_host_backing_t backing;
+    const amdf_status_t status = amdf_platform_host_backing_prepare(
+        plan->byte_length, plan->alignment, &backing);
+    memory->host_storage = (void*)backing.handle;
+    memory->host_pointer = backing.pointer;
+    return status;
+  }
   uint64_t reservation_byte_length = plan->byte_length;
   DWORD allocation_type = MEM_RESERVE | MEM_COMMIT;
   if (plan->alignment > AMDF_WINDOWS_GPU_RESERVATION_GRANULARITY) {
@@ -141,17 +149,17 @@ static amdf_status_t amdf_windows_gpu_memory_allocate_host_storage(
     allocation_type = MEM_RESERVE;
   }
 
-  memory->host_reservation = VirtualAlloc(NULL, (SIZE_T)reservation_byte_length,
-                                          allocation_type, PAGE_READWRITE);
-  if (memory->host_reservation == NULL) {
+  memory->host_storage = VirtualAlloc(NULL, (SIZE_T)reservation_byte_length,
+                                      allocation_type, PAGE_READWRITE);
+  if (memory->host_storage == NULL) {
     return amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError());
   }
   if ((allocation_type & MEM_COMMIT) != 0) {
-    memory->host_pointer = memory->host_reservation;
+    memory->host_pointer = memory->host_storage;
     return AMDF_STATUS_OK;
   }
   uint64_t aligned_pointer = 0;
-  if (!amdf_windows_gpu_align_up((uint64_t)(uintptr_t)memory->host_reservation,
+  if (!amdf_windows_gpu_align_up((uint64_t)(uintptr_t)memory->host_storage,
                                  plan->alignment, &aligned_pointer)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
   }
@@ -350,13 +358,24 @@ static amdf_status_t amdf_windows_gpu_memory_free_device_address(
 
 static amdf_status_t amdf_windows_gpu_memory_free_host_storage(
     amdf_gpu_umd_memory_t* memory) {
-  if (memory->host_reservation == NULL) {
+  if ((memory->flags & AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE) != 0) {
+    amdf_platform_host_backing_t backing = {
+        .handle = (uintptr_t)memory->host_storage,
+        .pointer = memory->host_pointer,
+    };
+    const amdf_status_t status =
+        amdf_platform_host_backing_destroy(&backing, memory->byte_length);
+    memory->host_storage = (void*)backing.handle;
+    memory->host_pointer = backing.pointer;
+    return status;
+  }
+  if (memory->host_storage == NULL) {
     return AMDF_STATUS_OK;
   }
-  if (!VirtualFree(memory->host_reservation, 0, MEM_RELEASE)) {
+  if (!VirtualFree(memory->host_storage, 0, MEM_RELEASE)) {
     return amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError());
   }
-  memory->host_reservation = NULL;
+  memory->host_storage = NULL;
   memory->host_pointer = NULL;
   return AMDF_STATUS_OK;
 }
@@ -366,10 +385,12 @@ uint64_t amdf_gpu_umd_memory_remaining_backing_byte_length(
   // A reserved but uncommitted host interval and empty GPU VA retain no
   // payload. A partially released allocation group conservatively retains its
   // full extent, including native alignment and its short final allocation.
+  const bool owns_host_storage =
+      (memory->flags & AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE) != 0
+          ? (uintptr_t)memory->host_storage != UINTPTR_MAX
+          : memory->host_storage != NULL && memory->host_pointer != NULL;
   return memory->resource != 0 || memory->allocation_count != 0 ||
-                 memory->shared_handle != NULL ||
-                 (memory->host_reservation != NULL &&
-                  memory->host_pointer != NULL)
+                 memory->shared_handle != NULL || owns_host_storage
              ? memory->byte_length
              : 0;
 }
@@ -597,6 +618,9 @@ amdf_status_t amdf_gpu_umd_memory_prepare(
       maximum_native_allocation_byte_length;
   memory->byte_length = plan.byte_length;
   memory->flags = plan.achieved_flags;
+  if ((memory->flags & AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE) != 0) {
+    memory->host_storage = (void*)UINTPTR_MAX;
+  }
   memory->device_access = create_info->device_access;
   if ((profile->roles & AMDF_MEMORY_PROFILE_ROLE_REGISTER) != 0) {
     memory->host_pointer = create_info->registered_host_pointer;

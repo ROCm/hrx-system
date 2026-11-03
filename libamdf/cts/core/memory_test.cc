@@ -113,6 +113,50 @@ class HostMemoryTest : public ::testing::Test {
   std::vector<uint8_t> storage_;
 };
 
+TEST_F(HostMemoryTest, SamplesSharedPhysicalCapacityWithoutCreatingDevices) {
+  EXPECT_GT(scope_info_.capacity_byte_length, 0u);
+  EXPECT_EQ(scope_info_.flags, AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED |
+                                   AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES);
+  amdf_memory_scope_observation_t observation = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_OBSERVATION,
+      .structure_size = sizeof(observation),
+  };
+  ASSERT_EQ(api_->memory_scope_sample_observation(scope_, &observation),
+            AMDF_STATUS_OK);
+  EXPECT_GT(observation.capacity_byte_length, 0u);
+  EXPECT_LE(observation.available_byte_length,
+            observation.capacity_byte_length);
+
+  // Profile count does not multiply the physical storage. Requerying after
+  // sampling returns the same immutable discovery record.
+  amdf_memory_scope_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
+      .structure_size = sizeof(info),
+  };
+  ASSERT_EQ(api_->memory_scope_query_info(scope_, &info), AMDF_STATUS_OK);
+  EXPECT_EQ(info.capacity_byte_length, scope_info_.capacity_byte_length);
+}
+
+TEST_F(HostMemoryTest, ObservationFailurePreservesCallerOutput) {
+  amdf_memory_scope_observation_t observation = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_OBSERVATION,
+      .structure_size = sizeof(observation),
+      .capacity_byte_length = UINT64_MAX,
+      .available_byte_length = UINT64_MAX,
+  };
+  const auto expected = observation;
+  EXPECT_EQ(api_->memory_scope_sample_observation(nullptr, &observation),
+            amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+  EXPECT_EQ(std::memcmp(&observation, &expected, sizeof(observation)), 0);
+  EXPECT_EQ(api_->memory_scope_sample_observation(scope_, nullptr),
+            amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+  observation.next = &observation;
+  const auto extended = observation;
+  EXPECT_EQ(api_->memory_scope_sample_observation(scope_, &observation),
+            amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
+  EXPECT_EQ(std::memcmp(&observation, &extended, sizeof(observation)), 0);
+}
+
 TEST_F(HostMemoryTest, ProfileWithoutDevicesDescribesCpuOnlyStorage) {
   amdf_memory_profile_t expected = {};
   ASSERT_NO_FATAL_FAILURE(

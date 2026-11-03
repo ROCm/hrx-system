@@ -43,7 +43,8 @@ TEST(LinuxGpuMemoryProfileTest, InstanceLifetimeExposesOwnedSystemMemory) {
   EXPECT_EQ(profile.guaranteed_flags, AMDF_MEMORY_FLAG_HOST_VISIBLE |
                                           AMDF_MEMORY_FLAG_SHAREABLE |
                                           AMDF_MEMORY_FLAG_HOST_COHERENT |
-                                          AMDF_MEMORY_FLAG_DEVICE_ADDRESS);
+                                          AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+                                          AMDF_MEMORY_FLAG_DEVICE_UNCACHED);
   EXPECT_EQ(profile.guaranteed_device_access, AMDF_MEMORY_ACCESS_READ);
   EXPECT_EQ(profile.supported_device_access, AMDF_MEMORY_ACCESS_READ |
                                                  AMDF_MEMORY_ACCESS_WRITE |
@@ -104,15 +105,16 @@ TEST(LinuxGpuMemoryProfileTest, UnifiedCachedSystemStorageCanBeDeviceLocal) {
             AMDF_HOST_CACHE_INSTRUCTION_X86_CLFLUSH);
   EXPECT_EQ(host.invalidate.host_instruction,
             AMDF_HOST_CACHE_INSTRUCTION_X86_CLFLUSH);
-  // Control and arbitrary registered pages do not inherit the owned cached
-  // allocation's device-local contract.
-  for (uint32_t ordinal :
-       {uint32_t{AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_CONTROL},
-        uint32_t{AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_COUNT}}) {
-    EXPECT_EQ(QueryProfile(&device, ordinal).supported_flags &
-                  AMDF_MEMORY_FLAG_DEVICE_LOCAL,
-              0u);
-  }
+  // GPU cache policy does not change the locality of owned unified pages.
+  EXPECT_NE(QueryProfile(&device, AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_UNCACHED)
+                    .supported_flags &
+                AMDF_MEMORY_FLAG_DEVICE_LOCAL,
+            0u);
+  // Arbitrary registered pages do not establish physical placement.
+  EXPECT_EQ(QueryProfile(&device, AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_COUNT)
+                    .supported_flags &
+                AMDF_MEMORY_FLAG_DEVICE_LOCAL,
+            0u);
   device.topology.integrated = false;
   EXPECT_EQ(QueryProfile(&device, AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_CACHED)
                     .supported_flags &
@@ -231,13 +233,16 @@ TEST(LinuxGpuMemoryProfileTest, CachedPayloadAndControlBothSnoopHostCaches) {
   const auto cached =
       QueryProfile(&device, AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_CACHED);
   const auto control =
-      QueryProfile(&device, AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_CONTROL);
+      QueryProfile(&device, AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_UNCACHED);
   EXPECT_EQ(cached.memory_class, AMDF_MEMORY_CLASS_SYSTEM);
   EXPECT_EQ(cached.roles, control.roles);
   EXPECT_NE(cached.guaranteed_flags & AMDF_MEMORY_FLAG_HOST_COHERENT, 0u);
-  EXPECT_EQ(cached.guaranteed_flags, control.guaranteed_flags);
+  EXPECT_EQ(cached.guaranteed_flags,
+            control.guaranteed_flags & ~AMDF_MEMORY_FLAG_DEVICE_UNCACHED);
+  EXPECT_NE(control.guaranteed_flags & AMDF_MEMORY_FLAG_DEVICE_UNCACHED, 0u);
   EXPECT_EQ(cached.supported_flags,
-            control.supported_flags & ~AMDF_MEMORY_FLAG_QUEUE_STORAGE);
+            control.supported_flags & ~(AMDF_MEMORY_FLAG_QUEUE_STORAGE |
+                                        AMDF_MEMORY_FLAG_DEVICE_UNCACHED));
   EXPECT_EQ(cached.atomic_operations_32, 0u);
   EXPECT_EQ(cached.atomic_operations_64, 0u);
   EXPECT_NE(control.atomic_operations_32, 0u);
@@ -327,9 +332,10 @@ TEST(LinuxGpuMemoryProfileTest, ProcessLifetimeUsesDenseOptionalProfiles) {
   EXPECT_EQ(registered_profile.guaranteed_flags,
             AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_HOST_COHERENT |
                 AMDF_MEMORY_FLAG_DEVICE_ADDRESS);
-  EXPECT_EQ(
-      registered_profile.supported_flags,
-      registered_profile.guaranteed_flags | AMDF_MEMORY_FLAG_QUEUE_STORAGE);
+  EXPECT_EQ(registered_profile.supported_flags,
+            registered_profile.guaranteed_flags |
+                AMDF_MEMORY_FLAG_QUEUE_STORAGE |
+                AMDF_MEMORY_FLAG_DEVICE_UNCACHED);
   EXPECT_EQ(registered_profile.guaranteed_device_access,
             AMDF_MEMORY_ACCESS_READ);
   EXPECT_EQ(registered_profile.supported_device_access,
@@ -1501,6 +1507,124 @@ TEST(LinuxGpuMemoryProfileTest, SystemSignalsDoNotRequireCpuAtomicOps) {
       }
     }
   }
+}
+
+TEST(LinuxGpuMemoryProfileTest, ShaderTransactionsFollowNativeMappingAndRoute) {
+  constexpr amdf_atomic_operations_t kLoadStore =
+      AMDF_ATOMIC_OPERATION_LOAD | AMDF_ATOMIC_OPERATION_STORE;
+  constexpr amdf_atomic_operations_t kPcie =
+      kLoadStore | AMDF_ATOMIC_OPERATION_ADD | AMDF_ATOMIC_OPERATION_FETCH_ADD |
+      AMDF_ATOMIC_OPERATION_EXCHANGE | AMDF_ATOMIC_OPERATION_COMPARE_EXCHANGE;
+  constexpr amdf_atomic_operations_t kInteger =
+      kPcie | AMDF_ATOMIC_OPERATION_AND | AMDF_ATOMIC_OPERATION_OR |
+      AMDF_ATOMIC_OPERATION_XOR | AMDF_ATOMIC_OPERATION_FETCH_AND |
+      AMDF_ATOMIC_OPERATION_FETCH_OR | AMDF_ATOMIC_OPERATION_FETCH_XOR;
+  struct PolicyCase {
+    // Native GC IP, distinct from the shader target's advertised gfx version.
+    amdf_gpu_kfd_ip_version_t gc;
+    // Whether the native mapping forwards even ordinary cached atomics.
+    bool forwards_cached;
+    // Whether the GPU preserves device atomicity without a PCIe RMW route.
+    bool device_fallback;
+    // Whether cached SYSTEM mappings support system-scope shader instructions.
+    bool cached_system_scope;
+  };
+  constexpr PolicyCase kCases[] = {
+      {{9, 0, 1, true}, false, false, false},
+      {{9, 0, 10, true}, false, false, false},
+      {{9, 4, 2, true}, false, false, false},
+      {{9, 4, 3, true}, true, true, true},
+      {{9, 4, 4, true}, true, true, true},
+      {{9, 5, 0, true}, true, true, true},
+      {{10, 3, 0, true}, false, false, false},
+      {{11, 0, 0, true}, false, false, false},
+      {{11, 5, 1, true}, false, false, false},
+      {{12, 0, 1, true}, false, true, true},
+  };
+  for (const auto& policy : kCases) {
+    SCOPED_TRACE(policy.gc.major * 10000 + policy.gc.minor * 100 +
+                 policy.gc.revision);
+    for (bool integrated : {false, true}) {
+      SCOPED_TRACE(integrated);
+      for (uint32_t widths = 0; widths < 4; ++widths) {
+        SCOPED_TRACE(widths);
+        amdf_gpu_umd_device_t device = {
+            .native_lifetime = AMDF_NATIVE_LIFETIME_PROCESS,
+            .page_size = 4096,
+        };
+        device.topology.virtual_address.end = UINT64_C(1) << 48;
+        device.topology.gc_ip = policy.gc;
+        device.topology.integrated = integrated;
+        device.topology.host_atomics = {(widths & 1) != 0, (widths & 2) != 0};
+        device.topology.memory_features = AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY;
+        for (uint32_t ordinal = 0; ordinal < 4; ++ordinal) {
+          SCOPED_TRACE(ordinal);
+          const auto profile = QueryProfile(&device, ordinal);
+          const auto operations = amdf_memory_native_profile_program_atomics(
+              &profile, profile.guaranteed_flags,
+              AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE);
+          const bool local = ordinal == 2;
+          const bool forwarded = policy.forwards_cached || ordinal == 1 ||
+                                 (ordinal == 3 && policy.gc.major < 12);
+          const bool device_integer = !forwarded || policy.device_fallback;
+          const bool system_scope =
+              !local && (forwarded || policy.cached_system_scope);
+          const amdf_atomic_operations_t remote32 =
+              widths & 1 ? (integrated ? kInteger : kPcie) : kLoadStore;
+          const amdf_atomic_operations_t remote64 =
+              widths & 2 ? (integrated ? kInteger : kPcie) : kLoadStore;
+          EXPECT_EQ(operations.device_scope_32,
+                    device_integer ? kInteger : remote32);
+          EXPECT_EQ(operations.device_scope_64,
+                    device_integer ? kInteger : remote64);
+          EXPECT_EQ(operations.system_scope_32, system_scope ? remote32 : 0u);
+          EXPECT_EQ(operations.system_scope_64, system_scope ? remote64 : 0u);
+          EXPECT_EQ(operations.fabric_scope_32, 0u);
+          EXPECT_EQ(operations.fabric_scope_64, 0u);
+          // Neither returning subtraction nor no-result subtraction is a
+          // native shader transaction; a compiler chooses ADD or a CAS loop.
+          EXPECT_EQ(operations.device_scope_32 &
+                        (AMDF_ATOMIC_OPERATION_SUBTRACT |
+                         AMDF_ATOMIC_OPERATION_FETCH_SUBTRACT),
+                    0u);
+        }
+      }
+    }
+  }
+}
+
+TEST(LinuxGpuMemoryProfileTest, ShaderPolicyRequiresExactGcAndExactLocalRoute) {
+  auto source = MakeDiscreteGfx942Device();
+  source.topology.gc_ip = {9, 4, 3, true};
+  const auto backing = QueryProfile(&source, 2);
+  auto consumer = source;
+  auto candidate = QueryProfile(&consumer, 0);
+  ASSERT_TRUE(
+      backing.construction.query_access(&backing, &candidate, &candidate));
+  auto operations = amdf_memory_native_profile_program_atomics(
+      &candidate, candidate.guaranteed_flags,
+      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE);
+  EXPECT_NE(operations.device_scope_32 & AMDF_ATOMIC_OPERATION_COMPARE_EXCHANGE,
+            0u);
+  EXPECT_EQ(operations.system_scope_32, 0u);
+  consumer.topology.gpu_id = 73;
+  uint32_t source_id = source.topology.gpu_id;
+  consumer.topology.memory_peers.count = 1;
+  consumer.topology.memory_peers.gpu_ids = &source_id;
+  candidate = QueryProfile(&consumer, 0);
+  ASSERT_TRUE(
+      backing.construction.query_access(&backing, &candidate, &candidate));
+  operations = amdf_memory_native_profile_program_atomics(
+      &candidate, candidate.guaranteed_flags,
+      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE);
+  const amdf_memory_atomic_capabilities_t empty = {};
+  EXPECT_EQ(std::memcmp(&operations, &empty, sizeof(empty)), 0);
+  source.topology.gc_ip.exact = false;
+  const auto unqualified = QueryProfile(&source, 0);
+  operations = amdf_memory_native_profile_program_atomics(
+      &unqualified, unqualified.guaranteed_flags,
+      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE);
+  EXPECT_EQ(std::memcmp(&operations, &empty, sizeof(empty)), 0);
 }
 
 }  // namespace

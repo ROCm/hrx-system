@@ -30,8 +30,11 @@ amdf_status_t amdf_gpu_kfd_aql_descriptor_initialize(
     amdf_gpu_kfd_aql_descriptor_t* out_descriptor) {
   amdf_gpu_kfd_aql_descriptor_t descriptor = {
       .queue_type =
-          create_info->producer_mode == AMDF_QUEUE_PRODUCER_MODE_SINGLE ? 1u
-                                                                        : 0u,
+          (create_info->required_capabilities &
+           AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH) != 0
+              ? 2u
+          : create_info->producer_mode == AMDF_QUEUE_PRODUCER_MODE_SINGLE ? 1u
+                                                                          : 0u,
       .features = 1,
       .packet_count = (uint32_t)(plan->ring.primary_byte_length / 64),
       .group_segment_aperture_base_hi = plan->aql.apertures.group_base_hi,

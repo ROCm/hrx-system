@@ -22,9 +22,10 @@
    AMDF_MEMORY_FLAG_HOST_FILE_IO)
 
 // Properties established separately for each device consumer.
-#define AMDF_MEMORY_ACCESS_FLAGS                                     \
-  (AMDF_MEMORY_FLAG_QUEUE_STORAGE | AMDF_MEMORY_FLAG_HOST_COHERENT | \
-   AMDF_MEMORY_FLAG_DEVICE_ADDRESS | AMDF_MEMORY_FLAG_MAPPING_SOURCE)
+#define AMDF_MEMORY_ACCESS_FLAGS                                       \
+  (AMDF_MEMORY_FLAG_QUEUE_STORAGE | AMDF_MEMORY_FLAG_HOST_COHERENT |   \
+   AMDF_MEMORY_FLAG_DEVICE_ADDRESS | AMDF_MEMORY_FLAG_MAPPING_SOURCE | \
+   AMDF_MEMORY_FLAG_DEVICE_UNCACHED)
 
 // One native placement/acquisition contract for a single consumer. Scope
 // selection composes these native facts into backing and access capabilities;
@@ -51,6 +52,12 @@ typedef struct amdf_memory_native_profile_t {
   amdf_atomic_operations_t atomic_operations_32;
   // Atomic operations on naturally aligned 64-bit words.
   amdf_atomic_operations_t atomic_operations_64;
+  // Qualifies shader transactions from this selected profile and exact native
+  // flags. NULL supplies an empty guarantee. Reads cached construction metadata
+  // only; no allocation, native operation, or execution is permitted here.
+  amdf_memory_atomic_capabilities_t (*query_program_atomics)(
+      const struct amdf_memory_native_profile_t* profile,
+      amdf_memory_flags_t flags);
   // Complete numeric envelope common to the produced address kinds.
   amdf_memory_address_capabilities_t device_address;
   // Native allocation limits, or zero without CREATE.
@@ -87,6 +94,11 @@ typedef struct amdf_memory_native_profile_t {
     amdf_status_t (*describe_site)(
         const amdf_memory_site_query_t* query,
         amdf_memory_site_description_t* out_description);
+    // Describes the native program's payload-fence protocol and atomic domains.
+    // NULL means no program-site protocol is qualified by this profile.
+    amdf_memory_site_description_t (*describe_program)(
+        amdf_memory_access_t access, const amdf_device_t* device,
+        amdf_memory_atomic_capabilities_t operations);
     // Describes host policy for the exact import transport (NONE for owned or
     // registered pages), achieved flags, and the backing mapping properties.
     // NULL means prospective host visibility is unavailable. Mapping creation
@@ -98,6 +110,19 @@ typedef struct amdf_memory_native_profile_t {
     const void* data;
   } visibility;
 } amdf_memory_native_profile_t;
+
+// Applies native shader policy and permissions at both prospective and achieved
+// construction boundaries. The result is retained with an established access.
+static inline amdf_memory_atomic_capabilities_t
+amdf_memory_native_profile_program_atomics(
+    const amdf_memory_native_profile_t* profile, amdf_memory_flags_t flags,
+    amdf_memory_access_t access) {
+  return amdf_memory_atomic_capabilities_filter(
+      profile->query_program_atomics != NULL
+          ? profile->query_program_atomics(profile, flags)
+          : (amdf_memory_atomic_capabilities_t){0},
+      access);
+}
 
 // Explicit consumer group selected for one native backing preparation.
 typedef struct amdf_memory_native_group_t {

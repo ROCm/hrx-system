@@ -107,7 +107,9 @@ bool amdf_gpu_kfd_aql_queue_plan(const amdf_gpu_kfd_topology_t* topology,
                   AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER,
               .producer_modes = AMDF_QUEUE_PRODUCER_MODE_BIT_SINGLE |
                                 AMDF_QUEUE_PRODUCER_MODE_BIT_MULTI,
-              .priority_capabilities = AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL,
+              .priority_capabilities = AMDF_QUEUE_PRIORITY_CAPABILITY_LOW |
+                                       AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL |
+                                       AMDF_QUEUE_PRIORITY_CAPABILITY_HIGH,
               .minimum_ring_byte_length = 4096,
               .maximum_ring_byte_length = UINT64_C(1) << 31,
               .ring_byte_length_alignment = 4096,

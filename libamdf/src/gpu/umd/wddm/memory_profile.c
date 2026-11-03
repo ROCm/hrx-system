@@ -6,8 +6,53 @@
 
 #include "libamdf/src/gpu/umd/wddm/memory_profile.h"
 
+#include "libamdf/src/device.h"
+#include "libamdf/src/endpoint.h"
 #include "libamdf/src/gpu/umd/memory.h"
 #include "libamdf/src/platform/windows/endpoint.h"
+
+static amdf_memory_site_description_t amdf_gpu_wddm_describe_program_site(
+    amdf_memory_access_t access, const amdf_device_t* device,
+    amdf_memory_atomic_capabilities_t operations) {
+  return amdf_gpu_umd_memory_describe_program_site(
+      access, &amdf_endpoint_get_cached_info(device->endpoint)->id, operations);
+}
+
+static amdf_memory_atomic_capabilities_t amdf_gpu_wddm_query_program_atomics(
+    const amdf_memory_native_profile_t* profile, amdf_memory_flags_t flags) {
+  const amdf_windows_gpu_memory_capabilities_t* capabilities =
+      profile->construction.data;
+  const uint32_t major = capabilities->program_gfx_major;
+  if (major < 9 || major > 12 ||
+      (profile->roles & AMDF_MEMORY_PROFILE_ROLE_IMPORT) != 0) {
+    return (amdf_memory_atomic_capabilities_t){0};
+  }
+  const amdf_atomic_operations_t integer =
+      amdf_gpu_umd_program_atomic_integer_operations();
+  const bool fine = (flags & AMDF_MEMORY_FLAG_HOST_COHERENT) != 0;
+  const amdf_atomic_operations_t remote =
+      capabilities->program_host_is_fabric &&
+              capabilities->program_host_rmw_supported
+          ? integer
+          : amdf_gpu_umd_program_atomic_pcie_operations(
+                capabilities->program_host_rmw_supported != 0);
+  const amdf_atomic_operations_t remote_64 =
+      capabilities->atomic_update_64_supported
+          ? remote
+          : remote &
+                ~(AMDF_ATOMIC_OPERATION_LOAD | AMDF_ATOMIC_OPERATION_STORE);
+  // WKMI's FINE_GRAIN policy selects the coherent access protocol. GC12
+  // additionally distinguishes device/system instructions on cached pages.
+  amdf_memory_atomic_capabilities_t result = {
+      .device_scope_32 = !fine || major == 12 ? integer : remote,
+      .device_scope_64 = !fine || major == 12 ? integer : remote_64,
+  };
+  if (fine && profile->memory_class == AMDF_MEMORY_CLASS_SYSTEM) {
+    result.system_scope_32 = remote;
+    result.system_scope_64 = remote_64;
+  }
+  return result;
+}
 
 amdf_status_t amdf_windows_gpu_query_memory_capabilities(
     const amdf_platform_endpoint_t* endpoint,
@@ -99,7 +144,10 @@ amdf_status_t amdf_gpu_wddm_query_memory_profile(
       amdf_windows_gpu_maximum_alignment(capabilities);
   amdf_memory_native_profile_t profile = {
       .ordinal = memory_profile_ordinal,
-      .visibility = {.describe_site = amdf_gpu_umd_memory_describe_site},
+      .query_program_atomics = amdf_gpu_wddm_query_program_atomics,
+      .construction = {.data = capabilities},
+      .visibility = {.describe_site = amdf_gpu_umd_memory_describe_site,
+                     .describe_program = amdf_gpu_wddm_describe_program_site},
       .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU,
       .guaranteed_device_access = guaranteed_device_access,
       .supported_device_access = AMDF_MEMORY_ACCESS_READ |
@@ -137,9 +185,9 @@ amdf_status_t amdf_gpu_wddm_query_memory_profile(
     profile.guaranteed_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE |
                                AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
                                AMDF_MEMORY_FLAG_HOST_FILE_IO;
-    profile.supported_flags = profile.guaranteed_flags |
-                              AMDF_MEMORY_FLAG_QUEUE_STORAGE |
-                              AMDF_MEMORY_FLAG_MAPPING_SOURCE;
+    profile.supported_flags =
+        profile.guaranteed_flags | AMDF_MEMORY_FLAG_QUEUE_STORAGE |
+        AMDF_MEMORY_FLAG_MAPPING_SOURCE | AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE;
     if (capabilities->cache_coherent_memory_supported) {
       profile.supported_flags |= AMDF_MEMORY_FLAG_HOST_COHERENT;
       // WDDM's CPU-visible updates are at least 32 bits; the adapter reports

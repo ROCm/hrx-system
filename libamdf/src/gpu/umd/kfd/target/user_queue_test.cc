@@ -45,6 +45,10 @@ TEST(KfdTargetUserQueueTest, DiscoversPlacementWithoutAnAddressDomain) {
                                                     &plans);
     ASSERT_EQ(plans.count, 3u);
     for (uint32_t i = 0; i < plans.count; ++i) {
+      EXPECT_EQ(plans.values[i].family.priority_capabilities,
+                AMDF_QUEUE_PRIORITY_CAPABILITY_LOW |
+                    AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL |
+                    AMDF_QUEUE_PRIORITY_CAPABILITY_HIGH);
       EXPECT_EQ(plans.values[i].family.placement_capabilities,
                 AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
                     (mode ? AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL : 0));
@@ -72,6 +76,37 @@ TEST(KfdTargetUserQueueTest, DiscoversPlacementWithoutAnAddressDomain) {
   for (uint32_t i = 0; i < plans.count; ++i) {
     EXPECT_EQ(plans.values[i].family.placement_capabilities,
               AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL);
+  }
+}
+
+TEST(KfdTargetUserQueueTest,
+     CooperativeAdmissionRequiresNativeSchedulingFacts) {
+  const amdf_gpu_kfd_ip_version_t identities[] = {
+      {9, 4, 3, true},   {10, 3, 0, true}, {11, 5, 1, true},
+      {11, 5, 1, false}, {12, 0, 1, true}, {12, 1, 0, true},
+  };
+  for (const auto& identity : identities) {
+    for (uint32_t resource_count : {0u, 64u}) {
+      auto topology = MakeTopology();
+      topology.gc_ip = identity;
+      topology.properties.gfx_ip = {identity.major, identity.minor,
+                                    identity.revision};
+      topology.properties.compute.wavefront_size =
+          identity.major == 9 ? 64 : 32;
+      topology.global_wave_sync_count = resource_count;
+      amdf_gpu_kfd_user_queue_plans_t plans;
+      amdf_gpu_kfd_target_user_queue_plans_initialize(&topology, 4096, 64,
+                                                      &plans);
+      for (uint32_t i = 0; i < plans.count; ++i) {
+        const auto& family = plans.values[i].family;
+        const bool supported = identity.exact && identity.major <= 11 &&
+                               resource_count != 0 &&
+                               (family.roles & AMDF_QUEUE_ROLE_COMPUTE) != 0;
+        EXPECT_EQ((family.user_queue_capabilities &
+                   AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH) != 0,
+                  supported);
+      }
+    }
   }
 }
 

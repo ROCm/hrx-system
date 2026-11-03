@@ -122,7 +122,8 @@ static amdf_status_t amdf_gpu_memory_reservation_prepare(
     }
     status = amdf_gpu_umd_memory_reservation_create(
         allocator, count, devices, create_info->byte_length,
-        create_info->minimum_alignment, &native);
+        create_info->minimum_alignment, (uintptr_t)reservation->common_address,
+        &native);
   }
   amdf_free(allocator, devices);
   if (amdf_status_is_ok(status)) {

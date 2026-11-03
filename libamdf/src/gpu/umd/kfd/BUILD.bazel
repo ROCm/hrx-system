@@ -405,6 +405,8 @@ amdf_cc_library(
     target_compatible_with = KFD_COMPATIBILITY,
     deps = [
         ":topology",
+        "//libamdf/src:device",
+        "//libamdf/src:endpoint",
         "//libamdf/src:memory_profile",
         "//libamdf/src/gpu/umd:memory",
         "//libamdf/src/platform/linux:dma_buf",
@@ -484,12 +486,14 @@ amdf_cc_library(
     deps = [
         ":topology",
         "//libamdf/src:allocator",
+        "//libamdf/src:host_memory",
         "//libamdf/src/gpu:endpoint_profile",
         "//libamdf/src/gpu/umd:endpoint_profile",
         "//libamdf/src/gpu/umd/kfd/target:user_queue",
         "//libamdf/src/platform/linux:endpoint",
         "//libamdf/src/platform/linux:file",
         "//libamdf/src/platform/linux:host_cache",
+        "//third_party:linux_amdgpu_uapi",
     ],
 )
 

@@ -8,6 +8,38 @@
 
 #include "amdf/gpu.h"
 
+amdf_memory_site_description_t amdf_gpu_umd_memory_describe_program_site(
+    amdf_memory_access_t access, const amdf_endpoint_id_t* endpoint_id,
+    amdf_memory_atomic_capabilities_t operations) {
+  amdf_memory_site_description_t description = {
+      .release = {.kind = AMDF_CACHE_TRANSITION_KIND_GLOBAL,
+                  .executor = AMDF_CACHE_TRANSITION_EXECUTOR_PROGRAM,
+                  .operation = AMDF_CACHE_OPERATION_RELEASE_TO_SYSTEM},
+      .acquire = {.kind = AMDF_CACHE_TRANSITION_KIND_GLOBAL,
+                  .executor = AMDF_CACHE_TRANSITION_EXECUTOR_PROGRAM,
+                  .operation = AMDF_CACHE_OPERATION_ACQUIRE_FROM_SYSTEM},
+      .atomic_operations =
+          amdf_memory_atomic_capabilities_filter(operations, access),
+      .device_atomic_domain = {{endpoint_id->words[0], endpoint_id->words[1]}},
+  };
+  if ((access & AMDF_MEMORY_ACCESS_READ) != 0) {
+    description.capabilities |= AMDF_MEMORY_SITE_CAPABILITY_READ;
+  }
+  if ((access & AMDF_MEMORY_ACCESS_WRITE) != 0) {
+    description.capabilities |= AMDF_MEMORY_SITE_CAPABILITY_WRITE;
+  }
+  if (operations.system_scope_32 != 0) {
+    description.atomic_reach.scope_32 = AMDF_ATOMIC_SCOPE_SYSTEM;
+  }
+  if (operations.system_scope_64 != 0) {
+    description.atomic_reach.scope_64 = AMDF_ATOMIC_SCOPE_SYSTEM;
+  }
+  if (operations.system_scope_32 != 0 || operations.system_scope_64 != 0) {
+    description.atomic_domain.words[0] = UINT64_C(0x43505553544f5245);
+  }
+  return description;
+}
+
 amdf_status_t amdf_gpu_umd_memory_describe_site(
     const amdf_memory_site_query_t* query,
     amdf_memory_site_description_t* out_description) {
@@ -109,6 +141,20 @@ amdf_status_t amdf_gpu_umd_memory_describe_system_store_site(
       // that both sites access the same backing.
       description.atomic_domain.words[0] = UINT64_C(0x43505553544f5245);
     }
+    description.atomic_operations = amdf_memory_atomic_capabilities_filter(
+        (amdf_memory_atomic_capabilities_t){
+            .system_scope_32 =
+                description.atomic_reach.scope_32 == AMDF_ATOMIC_SCOPE_SYSTEM
+                    ? query->atomic_operations_32 &
+                          family->atomic_capabilities.operations_32
+                    : 0,
+            .system_scope_64 =
+                description.atomic_reach.scope_64 == AMDF_ATOMIC_SCOPE_SYSTEM
+                    ? query->atomic_operations_64 &
+                          family->atomic_capabilities.operations_64
+                    : 0,
+        },
+        query->access);
   }
   *out_description = description;
   return AMDF_STATUS_OK;

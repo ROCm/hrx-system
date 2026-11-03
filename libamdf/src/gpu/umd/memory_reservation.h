@@ -41,11 +41,13 @@ amdf_status_t amdf_gpu_umd_query_memory_reservation_capabilities(
     amdf_memory_reservation_capabilities_t* out_capabilities);
 
 // Reserves one common GPU address for the explicitly live device group.
+// A nonzero common_address borrows an already-reserved process interval and
+// requires that exact GPU address; its lifetime remains with the caller.
 // Failure consumes partial metadata/resources and preserves the output.
 amdf_status_t amdf_gpu_umd_memory_reservation_create(
     amdf_allocator_t host_allocator, uint32_t device_count,
     amdf_gpu_umd_device_t* const* devices, uint64_t byte_length,
-    uint64_t minimum_alignment,
+    uint64_t minimum_alignment, uint64_t common_address,
     amdf_gpu_umd_memory_reservation_t** out_reservation);
 
 // Reads complete immutable address and alias-domain facts established by

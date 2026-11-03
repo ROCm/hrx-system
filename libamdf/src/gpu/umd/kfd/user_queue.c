@@ -63,6 +63,8 @@ struct amdf_gpu_umd_user_queue_t {
   } device_doorbell;
   // KFD queue identifier, valid after native creation succeeds.
   uint32_t queue_identifier;
+  // Admitted KFD scheduling priority, preserved when scratch reconnects CP.
+  uint32_t native_priority;
   // Whether construction acquired a native queue, including identifier zero.
   bool queue_created;
   // Whether terminal native removal was attempted, excluding ordinary destroy.
@@ -319,7 +321,7 @@ static bool amdf_gpu_kfd_user_queue_select_plan(
     const amdf_gpu_queue_family_properties_t* family = &plan->family;
     if (create_info->command_type == family->command_type &&
         create_info->format_version == family->format_version &&
-        create_info->priority == AMDF_QUEUE_PRIORITY_NORMAL &&
+        (family->priority_capabilities & (1u << create_info->priority)) != 0 &&
         (family->producer_modes & (1u << create_info->producer_mode)) != 0 &&
         (create_info->required_capabilities &
          ~family->user_queue_capabilities) == 0 &&
@@ -378,6 +380,12 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
       !amdf_gpu_kfd_user_queue_select_plan(device, create_info, &plan)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
+  const bool cooperative =
+      (create_info->required_capabilities &
+       AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH) != 0;
+  if (cooperative && create_info->priority != AMDF_QUEUE_PRIORITY_NORMAL) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
 
   amdf_gpu_kfd_aql_descriptor_t aql_descriptor = {0};
   if (plan.aql.xcc_count != 0) {
@@ -407,6 +415,10 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
   queue->device = device;
   queue->native_api = device->user_queue_native_api;
   queue->plan = plan;
+  queue->native_priority = create_info->priority == AMDF_QUEUE_PRIORITY_LOW ? 0
+                           : create_info->priority == AMDF_QUEUE_PRIORITY_HIGH
+                               ? KFD_MAX_QUEUE_PRIORITY
+                               : 7;
   queue->scratch_service = create_info->scratch_service;
   amdf_atomic_uint64_initialize(&queue->terminal_status, AMDF_STATUS_OK);
 
@@ -500,7 +512,7 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
         .gpu_id = device->topology.gpu_id,
         .queue_type = queue->plan.native_queue_type,
         .queue_percentage = KFD_MAX_QUEUE_PERCENTAGE,
-        .queue_priority = 7,
+        .queue_priority = queue->native_priority,
         .eop_buffer_address = queue->end_of_pipe.device_address,
         .eop_buffer_size = queue->plan.compute.end_of_pipe_storage.byte_length,
         .ctx_save_restore_address = queue->context.device_address,
@@ -518,6 +530,10 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
   }
 
   size_t doorbell_byte_offset = 0;
+  if (amdf_status_is_ok(status) && cooperative) {
+    status = queue->native_api->queue_enable_cooperative(
+        queue->native_api->user_data, device, queue->queue_identifier);
+  }
   if (amdf_status_is_ok(status)) {
     const size_t mapping_byte_length = queue->plan.doorbell.mapping_byte_length;
     const uint64_t mapping_mask = mapping_byte_length - 1;
@@ -559,10 +575,13 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
             {
                 .words = {device->topology.gpu_id, (uintptr_t)queue},
             },
-        .capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
-                        (queue->device_doorbell.native != NULL
-                             ? AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER
-                             : 0),
+        .capabilities =
+            AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
+            (cooperative ? AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH
+                         : 0) |
+            (queue->device_doorbell.native != NULL
+                 ? AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER
+                 : 0),
         .placement = queue->plan.ring.placement,
         .ring_byte_length = queue->plan.ring.primary_byte_length,
         .metadata_ring_byte_length = queue->plan.ring.metadata_byte_length,
@@ -767,7 +786,7 @@ static amdf_status_t amdf_gpu_kfd_user_queue_set_active(
       .queue_id = queue->queue_identifier,
       .ring_size = (uint32_t)queue->plan.ring.primary_byte_length,
       .queue_percentage = active ? KFD_MAX_QUEUE_PERCENTAGE : 0,
-      .queue_priority = 7,
+      .queue_priority = queue->native_priority,
   };
   const amdf_status_t status = queue->native_api->queue_update(
       queue->native_api->user_data, queue->device, &update);

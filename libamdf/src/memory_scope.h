@@ -44,6 +44,15 @@ struct amdf_memory_scope_t {
       void* owner;
     } private_storage;
   } owner;
+  // Immutable physical storage and sampling capabilities set by the owner.
+  amdf_memory_scope_flags_t flags;
+  // Physical capacity captured before publishing this borrowed scope.
+  uint64_t capacity_byte_length;
+  // Native LOCAL/PRIVATE observer, or NULL without AVAILABLE_BYTES. SYSTEM
+  // scopes use the platform host observer directly.
+  amdf_status_t (*sample_observation)(
+      const amdf_memory_scope_t* scope,
+      amdf_memory_scope_observation_t* out_observation);
 };
 
 // Complete live consumer set used by cold capability queries and construction.
@@ -107,6 +116,11 @@ amdf_status_t AMDF_CALL amdf_device_enumerate_memory_scopes(
 // Copies complete immutable storage facts without native operations.
 amdf_status_t AMDF_CALL amdf_memory_scope_query_info(
     amdf_memory_scope_t* scope, amdf_memory_scope_info_t* out_info);
+
+// Samples the scope's native allocation headroom without ordering device work.
+amdf_status_t AMDF_CALL amdf_memory_scope_sample_observation(
+    amdf_memory_scope_t* scope,
+    amdf_memory_scope_observation_t* out_observation);
 
 // Queries complete backing and caller-ordered live access capabilities.
 amdf_status_t AMDF_CALL amdf_memory_scope_query_device_profile(

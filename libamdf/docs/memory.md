@@ -935,7 +935,9 @@ before releasing their dependency.
 `memory_query_pair_info` describes the visibility transitions from one site's
 writes to another site's reads. The producer must permit writes and the
 consumer must permit reads; incompatible permissions return `UNSUPPORTED`.
-A DEVICE site selects `{memory, access_ordinal, queue_family_ordinal}`. A HOST
+A DEVICE site selects `{memory, access_ordinal, queue_family_ordinal}`. A PROGRAM
+site selects `{memory, access_ordinal}` and describes shader execution on that
+device access independently of queue-command capabilities. A HOST
 site supplies `value.host.mapping`. An ordinary mapping knows its backing;
 `value.host.source_memory` is null. A reservation view instead requires that
 explicit source handle. Its visibility answer is conditional on corresponding
@@ -1301,6 +1303,91 @@ pair query describes only its two named sites; other mapped accesses retain
 their own operation and reach requirements. Atomic reach does not replace the
 protocol's execution dependency, release/acquire operations, or final-use
 boundary. A successful visibility query can still report atomic reach NONE.
+
+### Shader transactions
+
+Shader capability queries use the same selected backing and consumer access as
+construction. Chain `amdf_memory_program_atomics_t` to a prospective access output
+or an achieved `amdf_memory_access_info_t`. The extension reports separate
+32-bit and 64-bit transaction masks at device, fabric, and system scope:
+
+```c
+amdf_memory_program_atomics_t program = {
+    .type = AMDF_STRUCTURE_TYPE_MEMORY_PROGRAM_ATOMICS,
+    .structure_size = sizeof(program),
+};
+amdf_memory_access_capabilities_t access = {
+    .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
+    .structure_size = sizeof(access),
+    .next = &program,
+};
+amdf_memory_profile_t profile = {
+    .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+    .structure_size = sizeof(profile),
+};
+// device_access contains the same initialized device, permissions, and native
+// flags that construction will use. The query creates no native allocation.
+amdf_status_t status = api->memory_scope_query_device_profile(
+    scope, profile_ordinal, 1, &device_access, &profile, &access);
+// Handle query failure before inspecting its outputs.
+if (amdf_status_is_ok(status)) {
+  const amdf_atomic_operations_t required =
+      AMDF_ATOMIC_OPERATION_LOAD | AMDF_ATOMIC_OPERATION_COMPARE_EXCHANGE;
+  const bool can_use_device_cas_loop =
+      (program.operations.device_scope_32 & required) == required;
+  // Select an implementation using can_use_device_cas_loop.
+}
+```
+
+The mask describes transactions the program actually emits. A native returning
+compare/exchange is `COMPARE_EXCHANGE`; a no-result addition is `ADD`; an
+addition returning the old word is `FETCH_ADD`. A compiler implementing AND
+with a load and CAS loop checks LOAD and COMPARE_EXCHANGE, rather than requiring
+a native AND. STORE does not authorize an exchange implementation. These are
+integer physical-word guarantees, not floating-point or packed-subword
+capabilities. Read-only accesses retain LOAD/WAIT, write-only accesses retain
+STORE, and RMW operations require both permissions. Unsupported transactions
+have absent bits in a successful query result.
+
+The selected native mapping matters. On Linux GC9–11, ordinary cached backing
+can provide device-scope integer atomics while system scope remains absent.
+An uncached mapping can forward transactions over PCIe, whose RMW support and
+widths are independent of ordinary load/store coherence. GC12 and newer CDNA
+have different forwarding and scope behavior. Windows likewise separates its
+selected fine-grain mapping policy, CPU-visible update width, and native
+AtomicOps route. The query captures those facts; callers do not choose a native
+instruction from host visibility, architecture name, or queue capability alone.
+Queries neither change placement nor force an allocation into control storage.
+
+### Atomic relationships between programs and other sites
+
+A per-access mask qualifies instructions on that access. Mutual atomicity with
+another participant is a separate property. Select PROGRAM in the existing
+prospective or concrete pair query, and chain `amdf_memory_pair_atomics_t` to
+its output. `producer` and `consumer` each contain the same six width/scope
+masks. Every transaction in one side's cell is mutually atomic with every
+transaction in the matching cell on the other side. An absent relation clears
+both masks. The relation applies to those exact sites and is not transitive.
+
+For example, a shader producer may support CAS and ADD while a host consumer
+supports only LOAD, STORE, and WAIT. That establishes the CPU publication and
+observation protocol without claiming simultaneous CPU and GPU RMW support.
+Matching device-scope masks on two different GPUs likewise do not establish
+cross-device atomicity. A third participant needs its own relationship query.
+
+The pair's release/acquire fields still describe payload visibility separately
+from the atomic cell. PROGRAM cache operations are implemented by the compiler
+or the program emitter. An atomic READY store can publish earlier payload writes
+only with the release required by that program's protocol; host observation
+needs the matching acquire. Device-scope operations on ordinary backing can
+instead be followed by a queue release and completion join before the CPU reads
+results. Neither approach makes object lifetime automatic.
+
+Prospective guarantees cover constructions with the same request. Achieved
+queries return the facts captured with the exact allocation, registration, or
+import, without querying the driver again. Pool and graph implementations can
+retain those facts during setup. Native policy queries, allocation probes, and
+per-operation discovery are unnecessary on submission paths.
 
 ## Executable storage
 

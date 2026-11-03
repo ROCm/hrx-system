@@ -33,6 +33,7 @@ TEST(QueryApiTest, NegotiatesSupportedVersion) {
   EXPECT_NE(api->instance_enumerate_memory_scopes, nullptr);
   EXPECT_NE(api->device_enumerate_memory_scopes, nullptr);
   EXPECT_NE(api->memory_scope_query_info, nullptr);
+  EXPECT_NE(api->memory_scope_sample_observation, nullptr);
   EXPECT_NE(api->memory_scope_query_device_profile, nullptr);
   EXPECT_NE(api->memory_scope_query_pair_info, nullptr);
   EXPECT_NE(api->memory_create, nullptr);
@@ -96,7 +97,7 @@ TEST(QueryApiTest, RejectsReversedVersionRangeWithoutPublishingOutput) {
 TEST(QueryApiTest, RejectsOlderAbisWithoutPublishingOutput) {
   const auto* const sentinel =
       reinterpret_cast<const amdf_api_t*>(uintptr_t{1});
-  for (amdf_abi_version_t version = AMDF_ABI_VERSION_1;
+  for (amdf_abi_version_t version = AMDF_ABI_VERSION(1);
        version < AMDF_ABI_VERSION_LATEST; ++version) {
     const amdf_api_t* api = sentinel;
     EXPECT_EQ(amdf_cts_provider_query_api()(version, version, &api),
@@ -105,12 +106,12 @@ TEST(QueryApiTest, RejectsOlderAbisWithoutPublishingOutput) {
   }
 }
 
-TEST(QueryApiTest, RejectsConstructionCapabilitiesWithoutPayloadGeometry) {
+TEST(QueryApiTest, RejectsOlderVersionRangeWithoutPublishingOutput) {
   const auto* const sentinel =
       reinterpret_cast<const amdf_api_t*>(uintptr_t{1});
   const amdf_api_t* api = sentinel;
-  EXPECT_EQ(amdf_cts_provider_query_api()(AMDF_ABI_VERSION_1,
-                                          AMDF_ABI_VERSION_2, &api),
+  EXPECT_EQ(amdf_cts_provider_query_api()(AMDF_ABI_VERSION(1),
+                                          AMDF_ABI_VERSION_LATEST - 1, &api),
             amdf_make_api_status(AMDF_STATUS_CODE_VERSION_MISMATCH));
   EXPECT_EQ(api, sentinel);
 }

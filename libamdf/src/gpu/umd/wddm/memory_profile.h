@@ -29,6 +29,12 @@ typedef struct amdf_windows_gpu_memory_capabilities_t {
   uint32_t cache_coherent_memory_supported;
   // Nonzero when naturally aligned GPU 64-bit updates are atomic to the CPU.
   uint32_t atomic_update_64_supported;
+  // GPU shader ISA generation supplied by the parsed native adapter record.
+  uint32_t program_gfx_major;
+  // Nonzero when the CPU-facing route supports both 32/64-bit AtomicOps.
+  uint32_t program_host_rmw_supported;
+  // Nonzero for an integrated CPU/GPU fabric with integer bitwise atomics.
+  uint32_t program_host_is_fabric;
 } amdf_windows_gpu_memory_capabilities_t;
 
 // Queries GPU MMU and CPU-visible update widths through the endpoint adapter.
