@@ -4,9 +4,13 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-static unsigned increment(unsigned* value) { return ++*value; }
+[[loom::noinline]] static unsigned increment(unsigned* value) {
+  return ++*value;
+}
 
-static void publish(unsigned* output, unsigned value) { *output = value; }
+[[loom::noinline]] static void publish(unsigned* output, unsigned value) {
+  *output = value;
+}
 
 [[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
 void call_lifetimes_kernel(const unsigned* parameters, unsigned* output) {

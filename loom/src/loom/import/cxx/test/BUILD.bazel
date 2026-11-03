@@ -809,6 +809,7 @@ loom_test_module(
         "packed_slices",
         "parameter_noalias",
         "pointer_walk",
+        "retained_calls",
         "short_circuit",
         "structured_break",
         "subgroup_shuffles",
@@ -830,6 +831,18 @@ loom_test(
     compile_targets = ["//loom/target/amdgpu:gfx11-generic"],
     execution_profiles = [AMD_GPU_HARDWARE_PROFILE],
     module = ":early_returns_module",
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]) + loom_amdgpu_descriptor_set_compatible_with(
+        LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.gfx11.generic.core"],
+    ),
+)
+
+loom_test(
+    name = "retained_calls_amdgpu_test",
+    benchmark_smoke = False,
+    case = "retained_call_values",
+    compile_targets = ["//loom/target/amdgpu:gfx11-generic"],
+    execution_profiles = [AMD_GPU_HARDWARE_PROFILE],
+    module = ":retained_calls_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]) + loom_amdgpu_descriptor_set_compatible_with(
         LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.gfx11.generic.core"],
     ),

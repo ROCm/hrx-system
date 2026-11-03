@@ -156,9 +156,21 @@ static loom_target_call_policy_t loom_amdgpu_select_call_policy(
     loom_call_like_kind_t kind, loom_call_like_t call,
     loom_func_like_t callee) {
   (void)resolved_target;
-  (void)module;
-  if (kind != LOOM_CALL_LIKE_KIND_LOW_INTERNAL) {
+  if (kind != LOOM_CALL_LIKE_KIND_SEMANTIC &&
+      kind != LOOM_CALL_LIKE_KIND_LOW_INTERNAL) {
     return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
+  }
+  if (kind == LOOM_CALL_LIKE_KIND_SEMANTIC) {
+    // A borrowed buffer has an address carrier and may cross into a helper as
+    // an argument. A buffer result also transports allocation identity and
+    // alias/lifetime state, which the fixed register ABI does not represent.
+    // Keep those calls semantic so required inlining owns that state.
+    const loom_value_id_t* results = loom_op_const_results(callee.op);
+    for (uint16_t i = 0; i < callee.op->result_count; ++i) {
+      if (loom_type_is_buffer(loom_module_value_type(module, results[i]))) {
+        return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
+      }
+    }
   }
   const bool explicit_noinline =
       loom_call_like_inline_policy(call) == LOOM_INLINE_POLICY_NOINLINE ||

@@ -7,9 +7,18 @@ func.def noinline @callee(%value: i32) -> (i32) {
 }
 
 func.def public target(@target) @callee_noinline(%value: i32) -> (i32) {
-  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="callee", failure_code="target_requires_inline"}
   %result = func.call @callee(%value) : (i32) -> (i32)
   func.return %result : i32
+}
+
+// ----
+low.func.def noinline target<amdgpu.gfx11.generic.core> @callee(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  return %value
+}
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @callee_noinline(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %result = low.func.call pure @callee(%value) : (reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>)
+  return %result
 }
 
 // ====
@@ -21,9 +30,74 @@ func.def @callee(%value: i32) -> (i32) {
 }
 
 func.def public target(@target) @call_noinline(%value: i32) -> (i32) {
-  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="callee", failure_code="target_requires_inline"}
   %result = func.call noinline @callee(%value) : (i32) -> (i32)
   func.return %result : i32
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> @callee(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  return %value
+}
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @call_noinline(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %result = low.func.call pure noinline @callee(%value) : (reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>)
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def noinline @load(%input: buffer, %offset: offset) -> (i32) {
+  %input_view = buffer.view %input[%offset] : buffer -> view<1xi32>
+  %value = view.load %input_view[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+kernel.def target(@target) @buffer_call() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base_offset = index.constant 0 : offset
+  %value = func.call @load(%input, %base_offset) : (buffer, offset) -> (i32)
+  %output_view = buffer.view %output[%base_offset] : buffer -> view<1xi32>
+  view.store %value, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.func.def noinline target<amdgpu.gfx11.generic.core> @load(%input_view: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %16 = v_mov_b32 0
+  %value = global_load_b32_saddr %16, %input_view
+  return %value
+}
+
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @buffer_call() asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {extent = 4, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %value = low.func.call @load(%input) : (reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>)
+  %21 = v_mov_b32_copy %value
+  %22 = v_mov_b32 0
+  global_store_b32_saddr %22, %21, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def noinline @make_buffer() -> (buffer) {
+  %length = index.constant 4 : offset
+  %storage = buffer.alloca<private> align(4) %length : buffer
+  func.return %storage : buffer
+}
+
+func.def public target(@target) @owned_buffer_result() -> (offset) {
+  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="make_buffer", failure_code="target_requires_inline"}
+  %storage = func.call @make_buffer() : () -> (buffer)
+  %length = buffer.length %storage
+  func.return %length : offset
 }
 
 // ====
