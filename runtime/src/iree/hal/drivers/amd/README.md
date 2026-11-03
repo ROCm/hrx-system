@@ -311,11 +311,14 @@ Placement is independent of the access-family set and its order. A pool can
 require backing on one physical GPU while exposing that allocation only to a
 peer's families or CPU families. Construction qualifies any private native owner
 attachment without publishing extra HAL scopes or bindings.
-Required placement selects the corresponding physical node in the sealed group;
-an unavailable route yields no candidate. Preferred placement can select another
-qualified route and reports the achieved placement. Automatic selection prefers
-qualified device-local backing when the requested access and host preferences
-permit it. SYSTEM scopes make no enforced host NUMA placement promise.
+Required placement selects the corresponding physical GPU or host NUMA node
+in the sealed group when the native profile can enforce it; an unavailable
+route yields no candidate. Preferred placement can select another qualified
+route and reports the achieved placement. Automatic selection favors qualified
+device-local backing, including SYSTEM allocations that libamdf qualifies as
+local to every consumer on unified-memory systems. Explicit host requirements
+and preferences participate in that selection. Placement identifies the native
+allocation domain; it does not prevent native eviction or imply cache coherence.
 
 One allocation can publish several address interfaces for several native
 devices. A host mapping is acquired only when public or engine-private access
@@ -332,10 +335,71 @@ No buffer adds a fabric reference or discovers native addresses at submission.
 Owned allocation, host registration and native import/export classes are
 qualified together against the selected scope. Imports preserve caller-owned
 storage and its physical placement; owned-backing placement does not relocate
-an imported allocation. Unqualified native transports and uncached device-access
-requirements yield no candidate. Queue visibility uses libamdf's exact
-queue-family recipes; program-side visibility remains unqualified by that native
-query.
+an imported allocation. Unqualified native transports yield no candidate.
+`IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED` requests uncached device access through
+libamdf's qualified profile; it does not change public host mapping properties.
+Queue and program visibility use their exact native site recipes, captured
+alongside the pool's immutable access contract.
+
+### Atomic access and visibility
+
+Pool construction qualifies atomic requirements separately for host accesses,
+queue commands, and executable programs. Each site describes operation masks
+for 32-bit and 64-bit words at device and system scope. A CPU+GPU+NPU pool can
+therefore require CPU/GPU atomics while granting ordinary NPU reads and writes.
+`iree_hal_pool_query_atomic_operations` and its buffer equivalent return these
+captured facts without native discovery. An absent bit means the contract
+makes no guarantee for that operation.
+
+Single-site support does not establish mutual atomicity. The exact
+producer/consumer pair's `producer_atomics` and `consumer_atomics` masks
+describe which operations are mutually atomic in each width/scope cell.
+The guarantee is not transitive: CPU/GPU A and CPU/GPU B guarantees do not
+establish GPU A/GPU B atomicity. Payload visibility still requires the pair's
+release/acquire actions and an execution dependency. Prepared transition keys
+use the existing fixed table lookup during recording.
+
+The `atomics.queue_zero_compute` pool requirement and
+`IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE` operation flag require an implementation
+that consumes no compute resources. A shader fallback cannot satisfy them.
+The queue family and the target pool must both qualify the operation; the
+zero-compute pool/buffer query reports their captured intersection. A wait
+can still occupy its hardware FIFO, so its producer needs an independently
+progressing queue. This requirement does not promise queue residency under
+hardware oversubscription.
+
+### Virtual backing contracts
+
+A virtual buffer declares its candidate source pools before reserving
+addresses. Sources contribute at the sites they support: a GPU-local pool
+can back GPU-only ranges, while a shared pool can back CPU+GPU ranges in the
+same virtual buffer. Each requested site needs at least one source. Each
+source must serve at least one requested site.
+
+The resulting host properties, atomic guarantees, and transition requirements
+remain fixed for the virtual buffer's lifetime. Site guarantees intersect the
+sources serving that site; pair guarantees combine sources serving both sites.
+`iree_hal_virtual_buffer_query_pool_compatibility` checks a pool against that
+contract without allocation, native calls, or an installed-mapping lookup.
+A concrete scope includes every admitted site sharing its native page tables;
+`ANY` requires coverage of the complete native root. Mapping rejects backing
+that would weaken those guarantees before changing native page tables.
+
+`IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS` opts into the same numeric
+base address at every admitted host and program binding. Zero flags permit
+independent native addresses. Common addresses do not grant CPU access to
+GPU-only backing. CPU visibility of a physical allocation also does not imply
+that its host view can be remapped: cached host backing and CPU-visible VRAM
+can have different mapping-source capabilities. Capability queries qualify
+the complete source and access set before acquiring addresses or payload.
+
+`iree_hal_queue_map` orders mapping batches through ordinary semaphore
+dependencies. The AMD backend maintains an ordered source-range index per
+native page-table projection for consumers such as file I/O. Updates reserve
+metadata before native mutation and publish affected intervals together under
+the existing query lock. They preserve split, clear, and coalesce behavior
+without rebuilding the entire index. Installed physical backing remains
+caller-owned; it stays live through its last use and checked mapping removal.
 
 ## File transfers
 
