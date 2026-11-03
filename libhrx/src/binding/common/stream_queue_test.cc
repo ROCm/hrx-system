@@ -606,7 +606,8 @@ TEST_F(StreamQueueLeaseTest,
   std::unique_ptr<iree_hal_streaming_event_t,
                   decltype(&iree_hal_streaming_event_release)>
       event(raw_event, iree_hal_streaming_event_release);
-  IREE_ASSERT_OK(iree_hal_streaming_event_record(event.get(), stream));
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(
+      event.get(), stream, /*capture_external_record=*/false));
   uint64_t gate_value = 1;
   IREE_ASSERT_OK(iree_hal_streaming_stream_wait_semaphores(
       stream, {1, &tail_gate, &gate_value}));
@@ -845,7 +846,8 @@ TEST_P(StreamQueueDependencyTest, TransitiveWaitLeavesProducerQueueAvailable) {
                                                                  1, nullptr));
     EXPECT_NE(context_->queue, context_->event_record_queue);
   } else {
-    IREE_ASSERT_OK(iree_hal_streaming_event_record(event, source));
+    IREE_ASSERT_OK(iree_hal_streaming_event_record(
+        event, source, /*capture_external_record=*/false));
   }
 
   switch (GetParam()) {
