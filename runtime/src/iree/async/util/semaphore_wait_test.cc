@@ -31,6 +31,8 @@ struct Wait {
   iree_async_semaphore_wait_tracker_t* tracker = nullptr;
   // Allocator used by each registration, including callback-driven reuse.
   iree_allocator_t allocator = iree_allocator_system();
+  // Whether producer failure completes immediately or joins all dependencies.
+  iree_async_semaphore_wait_flags_t flags = IREE_ASYNC_SEMAPHORE_WAIT_FLAG_NONE;
   // Number of completed registrations, read after producer threads join.
   uint32_t completions = 0;
   // Terminal result of the last registration.
@@ -46,7 +48,7 @@ struct Wait {
 
   iree_status_t Allocate() {
     return iree_async_semaphore_wait_tracker_allocate(
-        context, &operation, {Consume, this}, allocator, &tracker);
+        context, &operation, {Consume, this}, flags, allocator, &tracker);
   }
 
   iree_status_t Begin() {
@@ -276,6 +278,102 @@ TEST_F(SemaphoreWaitTest, FailureCancelsRemainingRegistrations) {
   IREE_ASSERT_OK(
       iree_async_semaphore_signal(semaphores[1], values[1], nullptr));
   EXPECT_EQ(wait.completions, 1u);
+}
+
+TEST_F(SemaphoreWaitTest, DependencyJoinPreservesEveryInputAfterFailure) {
+  for (iree_host_size_t failed_index : {0u, 1u, 2u}) {
+    for (bool already_failed : {false, true}) {
+      SCOPED_TRACE(failed_index);
+      SCOPED_TRACE(already_failed);
+      std::array semaphores = {Semaphore(), Semaphore(), Semaphore()};
+      std::array<uint64_t, 3> values = {2, 4, 6};
+      auto wait = MakeWait(values.size(), semaphores.data(), values.data());
+      wait.flags = IREE_ASYNC_SEMAPHORE_WAIT_FLAG_JOIN;
+      if (already_failed) {
+        iree_async_semaphore_fail(
+            semaphores[failed_index],
+            iree_make_status(IREE_STATUS_DATA_LOSS, "producer failed"));
+      }
+      IREE_ASSERT_OK(wait.Begin());
+      if (!already_failed) {
+        iree_async_semaphore_fail(
+            semaphores[failed_index],
+            iree_make_status(IREE_STATUS_DATA_LOSS, "producer failed"));
+      }
+      EXPECT_EQ(wait.completions, 0u);
+      const auto second = (failed_index + 1) % values.size();
+      const auto last = (failed_index + 2) % values.size();
+      IREE_ASSERT_OK(iree_async_semaphore_signal(semaphores[second],
+                                                 values[second], nullptr));
+      EXPECT_EQ(wait.completions, 0u);
+      IREE_ASSERT_OK(
+          iree_async_semaphore_signal(semaphores[last], values[last], nullptr));
+      EXPECT_EQ(wait.completions, 1u);
+      EXPECT_EQ(wait.code, IREE_STATUS_DATA_LOSS);
+    }
+  }
+}
+
+TEST_F(SemaphoreWaitTest, DependencyJoinRetainsFirstFailure) {
+  std::array semaphores = {Semaphore(), Semaphore()};
+  std::array<uint64_t, 2> values = {1, 1};
+  auto wait = MakeWait(values.size(), semaphores.data(), values.data());
+  wait.flags = IREE_ASYNC_SEMAPHORE_WAIT_FLAG_JOIN;
+  IREE_ASSERT_OK(wait.Begin());
+  iree_async_semaphore_fail(
+      semaphores[0], iree_make_status(IREE_STATUS_DATA_LOSS, "first producer"));
+  EXPECT_EQ(wait.completions, 0u);
+  iree_async_semaphore_fail(
+      semaphores[1], iree_make_status(IREE_STATUS_ABORTED, "second producer"));
+  EXPECT_EQ(wait.completions, 1u);
+  EXPECT_EQ(wait.code, IREE_STATUS_DATA_LOSS);
+}
+
+TEST_F(SemaphoreWaitTest, DependencyJoinCanCancelAfterProducerFailure) {
+  std::array semaphores = {Semaphore(), Semaphore()};
+  std::array<uint64_t, 2> values = {1, 1};
+  auto wait = MakeWait(values.size(), semaphores.data(), values.data());
+  wait.flags = IREE_ASYNC_SEMAPHORE_WAIT_FLAG_JOIN;
+  IREE_ASSERT_OK(wait.Begin());
+  iree_async_semaphore_fail(
+      semaphores[0],
+      iree_make_status(IREE_STATUS_DATA_LOSS, "producer failed"));
+  EXPECT_EQ(wait.completions, 0u);
+  iree_async_semaphore_wait_context_request_cancellation(&context_,
+                                                         &wait.operation);
+  EXPECT_EQ(wait.completions, 1u);
+  EXPECT_EQ(wait.code, IREE_STATUS_CANCELLED);
+  EXPECT_EQ(semaphores[1]->timepoints.count, 0u);
+}
+
+TEST_F(SemaphoreWaitTest, ConcurrentDependencyFailureAndCancellation) {
+  for (int iteration = 0; iteration < 64; ++iteration) {
+    std::array semaphores = {Semaphore(), Semaphore(), Semaphore()};
+    std::array<uint64_t, 3> values = {1, 1, 1};
+    auto wait = MakeWait(values.size(), semaphores.data(), values.data());
+    wait.flags = IREE_ASYNC_SEMAPHORE_WAIT_FLAG_JOIN;
+    IREE_ASSERT_OK(wait.Begin());
+    std::barrier<> start(3);
+    std::thread failed([&] {
+      start.arrive_and_wait();
+      iree_async_semaphore_fail(
+          semaphores[0], iree_make_status(IREE_STATUS_DATA_LOSS, "producer"));
+      IREE_EXPECT_OK(iree_async_semaphore_signal(semaphores[1], 1, nullptr));
+    });
+    std::thread completed([&] {
+      start.arrive_and_wait();
+      IREE_EXPECT_OK(iree_async_semaphore_signal(semaphores[2], 1, nullptr));
+    });
+    start.arrive_and_wait();
+    iree_async_semaphore_wait_context_request_cancellation(&context_,
+                                                           &wait.operation);
+    failed.join();
+    completed.join();
+    EXPECT_EQ(wait.completions, 1u);
+    EXPECT_TRUE(wait.code == IREE_STATUS_DATA_LOSS ||
+                wait.code == IREE_STATUS_CANCELLED);
+    EXPECT_EQ(wait.tracker, nullptr);
+  }
 }
 
 TEST_F(SemaphoreWaitTest, CancellationCompletesOnCancelingThread) {

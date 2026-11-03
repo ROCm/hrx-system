@@ -722,6 +722,8 @@ struct FakeNative {
     return self->destroy_failure;
   }
 
+  // Optional borrowed extension state for additional native API dependencies.
+  void* user_data = nullptr;
   // Native consumers carry exact identity independently from aliased page
   // tables.
   std::array<Device, 2> native_devices = {};

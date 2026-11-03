@@ -84,6 +84,7 @@ class Pm4LifecycleTest : public ::testing::Test {
           {[](void* data, iree_hal_buffer_t*) {
              auto* self = static_cast<Pm4LifecycleTest*>(data);
              EXPECT_TRUE(self->native_stopped_);
+             self->ExpectPending();
              ++self->destroyed_;
            },
            this},
@@ -121,6 +122,27 @@ class Pm4LifecycleTest : public ::testing::Test {
                       iree_memory_order_relaxed);
     iree_hal_amd_gpu_pm4_queue_close(&queue_.base);
   }
+  void ExpectPending() {
+    uint64_t value = UINT64_MAX;
+    IREE_EXPECT_OK(iree_hal_semaphore_query(semaphore_, &value));
+    EXPECT_EQ(value, 0u);
+  }
+  void ExpectFailed() {
+    uint64_t value = 0;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
+                          iree_hal_semaphore_query(semaphore_, &value));
+  }
+  void FailIssued() {
+    iree_hal_amd_gpu_pm4_queue_fail_issued(&queue_, IREE_STATUS_ABORTED);
+    ExpectPending();
+    iree_async_single_frontier_t frontier;
+    iree_async_single_frontier_initialize(&frontier, queue_.frontier.axis, 1);
+    bool satisfied = true;
+    IREE_EXPECT_OK(iree_async_frontier_tracker_query(
+        queue_.frontier.tracker,
+        iree_async_single_frontier_as_const_frontier(&frontier), &satisfied));
+    EXPECT_FALSE(satisfied);
+  }
   void StopAndRetire() {
     amdf_status_t status = AMDF_STATUS_OK;
     ASSERT_TRUE(
@@ -146,9 +168,6 @@ class Pm4LifecycleTest : public ::testing::Test {
     EXPECT_EQ(
         iree_atomic_load(&queue_.completed.count, iree_memory_order_acquire),
         iree_atomic_load(&queue_.producer.count, iree_memory_order_acquire));
-    uint64_t value = 0;
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
-                          iree_hal_semaphore_query(semaphore_, &value));
     iree_async_single_frontier_t frontier;
     iree_async_single_frontier_initialize(&frontier, queue_.frontier.axis, 1);
     bool satisfied = false;
@@ -205,6 +224,7 @@ class Pm4LifecycleTest : public ::testing::Test {
 
 TEST_F(Pm4LifecycleTest, NativeStopPrecedesSixBufferReleases) {
   Capture();
+  FailIssued();
   EXPECT_TRUE(iree_hal_amd_gpu_pm4_queue_is_host_idle(&queue_.base));
   EXPECT_FALSE(iree_hal_amd_gpu_pm4_queue_is_idle(&queue_.base));
   ASSERT_TRUE(iree_hal_amd_gpu_publisher_try_acquire(&queue_.publisher));
@@ -218,6 +238,7 @@ TEST_F(Pm4LifecycleTest, NativeStopPrecedesSixBufferReleases) {
   EXPECT_FALSE(iree_hal_amd_gpu_publisher_handoff(&queue_.publisher, nullptr));
   StopAndRetire();
   EXPECT_EQ(destroyed_, 6u);
+  ExpectFailed();
   EXPECT_TRUE(iree_hal_amd_gpu_pm4_queue_is_idle(&queue_.base));
   ASSERT_TRUE(iree_hal_amd_gpu_pm4_queue_try_inactivate(&queue_.base, &status));
   EXPECT_EQ(native_stops_, 1u);
@@ -228,10 +249,13 @@ TEST_F(Pm4LifecycleTest, NativeStopPrecedesSixBufferReleases) {
 
 TEST_F(Pm4LifecycleTest, UnpublishedSuffixRetainsItsIndependentHostOwnership) {
   Capture(true);
+  FailIssued();
   StopAndRetire();
   EXPECT_EQ(destroyed_, 0u);
+  ExpectPending();
   iree_hal_amd_gpu_pm4_submission_release(capture_);
   EXPECT_EQ(destroyed_, 6u);
+  ExpectFailed();
 }
 
 }  // namespace

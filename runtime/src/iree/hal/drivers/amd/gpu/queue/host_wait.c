@@ -43,7 +43,7 @@ iree_status_t iree_hal_amd_gpu_host_wait_prepare(
       context, &wait->operation,
       (iree_async_semaphore_wait_enqueue_callback_t){
           .fn = iree_hal_amd_gpu_host_wait_complete, .user_data = wait},
-      host_allocator, &wait->tracker);
+      IREE_ASYNC_SEMAPHORE_WAIT_FLAG_JOIN, host_allocator, &wait->tracker);
 }
 
 void iree_hal_amd_gpu_host_wait_register(iree_hal_amd_gpu_host_wait_t* wait) {

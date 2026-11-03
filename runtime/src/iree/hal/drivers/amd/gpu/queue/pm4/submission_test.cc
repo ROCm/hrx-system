@@ -902,7 +902,7 @@ TEST_P(SubmissionTest, RejectedDownloadSuffixJoinsBeforeFailingPublicSignals) {
   iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_transfer(
       &pool_, GetParam(), &family, {}, {1, &semaphore, &value}, 1, &operation,
-      &profile_, nullptr, &capture));
+      &profile_, nullptr, {}, &capture));
   ASSERT_TRUE(capture->transfer.host_completion_required);
   iree_hal_amd_gpu_pm4_submission_retain(capture);
   iree_hal_amd_gpu_pm4_submission_retain(capture);

@@ -414,8 +414,6 @@ static void iree_hal_amd_gpu_file_staging_copy_failed(void* user_data,
                                            status);
   }
   iree_hal_amd_gpu_file_staging_progress(staging);
-  iree_hal_semaphore_list_fail(*slot->request->signals,
-                               iree_status_clone(status));
   if (retired) {
     iree_hal_amd_gpu_file_staging_step_completed(slot, status);
   } else {
@@ -1378,10 +1376,9 @@ static iree_status_t iree_hal_amd_gpu_file_staging_bucket(
 iree_status_t iree_hal_amd_gpu_file_staging_acquire(
     iree_hal_amd_gpu_file_staging_t* staging,
     const iree_hal_amd_fabric_file_transfer_t* transfer,
-    const iree_hal_semaphore_list_t* signals,
     iree_hal_amd_gpu_file_staging_request_t* request) {
-  *request = (iree_hal_amd_gpu_file_staging_request_t){
-      .staging = staging, .transfer = transfer, .signals = signals};
+  *request = (iree_hal_amd_gpu_file_staging_request_t){.staging = staging,
+                                                       .transfer = transfer};
   return iree_hal_amd_gpu_file_staging_bucket(
       staging, transfer->async.file->proactor, &request->bucket);
 }

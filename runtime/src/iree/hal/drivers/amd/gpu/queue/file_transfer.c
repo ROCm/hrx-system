@@ -72,9 +72,9 @@ static void iree_hal_amd_gpu_file_transfer_native_complete(
     const iree_async_single_frontier_t* frontier, bool retired) {
   iree_hal_amd_gpu_file_transfer_t* operation = user_data;
   if (!retired) {
-    // Report logical failure promptly while native work still borrows file
-    // bytes. Only the final callback may advance or release captured storage.
-    iree_hal_semaphore_list_fail(operation->signals, status);
+    // The native owner retains this failure through its final callback. An
+    // early notification cannot publish completion while file bytes are live.
+    iree_status_free(status);
     return;
   }
   if (frontier) {
@@ -346,8 +346,7 @@ static void iree_hal_amd_gpu_file_transfer_start(void* user_data,
     }
     if (iree_status_is_ok(status)) {
       status = iree_hal_amd_gpu_file_staging_acquire(
-          operation->executor->staging, transfer, &operation->signals,
-          &operation->staging);
+          operation->executor->staging, transfer, &operation->staging);
     }
   }
   if (!iree_status_is_ok(status)) {

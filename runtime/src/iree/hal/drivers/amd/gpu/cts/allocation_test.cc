@@ -1090,16 +1090,22 @@ TEST_F(GpuNativeMemoryProgressTest,
       struct Callback {
         // Exact other native queue used for a reentrant asynchronous callback.
         iree_hal_queue_t* next_queue;
+        // Original output point passed through to the nested queue operation.
+        iree_hal_semaphore_t* completion;
         // Actual callback executor identity, published through called.
         std::thread::id thread;
-        // Joins callback entry without depending on the return cache boundary.
+        // Joins callback entry independently of the nested queue operation.
         std::binary_semaphore called{0};
-      } callback = {.next_queue = queues_[1]};
+      } callback = {.next_queue = queues_[1], .completion = done};
       const auto call = iree_hal_make_host_call(
           +[](void* user_data, const uint64_t arguments[4],
               iree_hal_host_call_context_t* context) {
             auto* callback = static_cast<Callback*>(user_data);
             callback->thread = std::this_thread::get_id();
+            EXPECT_EQ(context->signal_semaphore_list.count, 1u);
+            EXPECT_EQ(context->signal_semaphore_list.semaphores[0],
+                      callback->completion);
+            EXPECT_EQ(context->signal_semaphore_list.payload_values[0], 1u);
             iree_status_t status = iree_hal_queue_barrier(
                 callback->next_queue, {}, context->signal_semaphore_list,
                 nullptr, 0);
@@ -1119,8 +1125,8 @@ TEST_F(GpuNativeMemoryProgressTest,
       EXPECT_NE(callback.thread, std::this_thread::get_id());
       IREE_ASSERT_OK(
           iree_hal_semaphore_wait(done, 1, iree_infinite_timeout(), 0));
-      // Both entry and return GPU boundaries have completed while the native
-      // allocation owner is still held. The scoped gate joins on all exits.
+      // Entry and nested work complete while the native allocation owner is
+      // still held. The scoped gate joins on all exits.
     }
     IREE_ASSERT_OK(
         iree_hal_semaphore_wait(allocated, 1, iree_infinite_timeout(), 0));

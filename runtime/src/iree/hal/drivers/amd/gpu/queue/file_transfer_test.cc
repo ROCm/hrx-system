@@ -258,6 +258,8 @@ class FileTransferTest : public ::testing::Test {
     iree_hal_semaphore_release(dependency);
   }
 
+  void FailedNativeWork(iree_hal_memory_access_t access);
+
   // Real host semaphore backend; no poll thread is necessary.
   iree_async_proactor_t* proactor_ = nullptr;
   // Retained public completion through the assertion boundary.
@@ -296,7 +298,7 @@ TEST_F(FileTransferTest, DeferredDependencyRetainsParentThroughCompletion) {
   Transfer(IREE_HAL_MEMORY_ACCESS_READ, true, 0, true);
 }
 
-TEST_F(FileTransferTest, FailedNativeWorkRetainsFileUntilRetirement) {
+void FileTransferTest::FailedNativeWork(iree_hal_memory_access_t access) {
   Device device;
   iree_hal_queue_family_t family = {.device = device.get()};
   NativeQueue queue;
@@ -323,11 +325,16 @@ TEST_F(FileTransferTest, FailedNativeWorkRetainsFileUntilRetirement) {
       .submit = NativeQueue::Submit,
   };
   auto buffer = iree::hal::testing::MakeMappedTransferBuffer();
+  const std::array<uint8_t, 64> expected = contents_;
+  if (access == IREE_HAL_MEMORY_ACCESS_WRITE) {
+    buffer->device_contents = expected;
+    contents_.fill(0);
+  }
   const uint64_t before = 17, after = 29;
   uint64_t value = 1;
   IREE_ASSERT_OK(iree_hal_amd_gpu_file_transfer_submit(
-      &executor, {}, {1, &completion_, &value}, file_,
-      IREE_HAL_MEMORY_ACCESS_READ, 5, buffer.get(), 5, 50, &before, &after));
+      &executor, {}, {1, &completion_, &value}, file_, access, 5, buffer.get(),
+      5, 50, &before, &after));
   iree_hal_file_release(file_);
   file_ = nullptr;
   EXPECT_EQ(queue.submissions, 1u);
@@ -337,24 +344,37 @@ TEST_F(FileTransferTest, FailedNativeWorkRetainsFileUntilRetirement) {
   callback.fn(callback.user_data, iree_status_from_code(IREE_STATUS_ABORTED),
               nullptr, false);
   uint64_t completed_value = 0;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_ABORTED,
-      iree_hal_semaphore_query(completion_, &completed_value));
+  IREE_EXPECT_OK(iree_hal_semaphore_query(completion_, &completed_value));
+  EXPECT_EQ(completed_value, 0u);
   EXPECT_FALSE(file_released_);
   EXPECT_FALSE(device.destroyed);
-  // The accepted copy may still access the file bytes after public failure.
+  // The accepted copy can still access file bytes after an internal error.
   NativeQueue::Copy(&queue.pending_operation);
+  const auto& actual = access == IREE_HAL_MEMORY_ACCESS_READ
+                           ? buffer->device_contents
+                           : contents_;
   for (size_t i = 5; i < 55; ++i) {
-    EXPECT_EQ(buffer->device_contents[i], contents_[i]);
+    EXPECT_EQ(actual[i], expected[i]);
   }
   callback.fn(callback.user_data, iree_status_from_code(IREE_STATUS_ABORTED),
               nullptr, true);
   EXPECT_TRUE(file_released_);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_ABORTED,
+      iree_hal_semaphore_query(completion_, &completed_value));
   EXPECT_EQ(queue.host_owners.load(), 0);
   iree_hal_device_release(device.get());
   EXPECT_TRUE(device.destroyed);
   EXPECT_EQ(queue.submissions, 1u);
   EXPECT_EQ(failures, 1u);
+}
+
+TEST_F(FileTransferTest, FailedNativeReadPublishesOnlyAfterRetirement) {
+  FailedNativeWork(IREE_HAL_MEMORY_ACCESS_READ);
+}
+
+TEST_F(FileTransferTest, FailedNativeWritePublishesOnlyAfterRetirement) {
+  FailedNativeWork(IREE_HAL_MEMORY_ACCESS_WRITE);
 }
 
 }  // namespace

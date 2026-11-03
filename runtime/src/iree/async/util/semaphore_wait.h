@@ -22,6 +22,17 @@ extern "C" {
 typedef struct iree_async_semaphore_wait_tracker_t
     iree_async_semaphore_wait_tracker_t;
 
+// Internal consumer policy for dependency waits. Public proactor waits use
+// NONE and preserve their fail-fast contract.
+enum iree_async_semaphore_wait_flag_bits_e {
+  IREE_ASYNC_SEMAPHORE_WAIT_FLAG_NONE = 0u,
+  // An ALL dependency wait retains every timepoint after a producer failure.
+  // Completion reports the first failure only after every dependency resolves.
+  // Explicit cancellation and registration failure still terminate the wait.
+  IREE_ASYNC_SEMAPHORE_WAIT_FLAG_JOIN = 1u << 0,
+};
+typedef uint32_t iree_async_semaphore_wait_flags_t;
+
 // Checks for immediate completion without allocating a tracker or registering
 // timepoints. Returns a clone of the first observed failure, or OK with
 // |out_ready| indicating satisfaction. Every operand's failure is observed
@@ -91,7 +102,7 @@ iree_status_t iree_async_semaphore_wait_tracker_allocate(
     iree_async_semaphore_wait_context_t* context,
     iree_async_semaphore_wait_operation_t* operation,
     iree_async_semaphore_wait_enqueue_callback_t enqueue_callback,
-    iree_allocator_t allocator,
+    iree_async_semaphore_wait_flags_t flags, iree_allocator_t allocator,
     iree_async_semaphore_wait_tracker_t** out_tracker);
 
 // Registers all timepoints represented by |tracker|. Synchronous timepoint

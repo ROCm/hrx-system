@@ -34,8 +34,6 @@ typedef struct iree_hal_amd_gpu_file_staging_request_t {
   iree_hal_amd_gpu_file_staging_bucket_t* bucket;
   // Borrowed file and buffer facts, immutable through the entire operation.
   const iree_hal_amd_fabric_file_transfer_t* transfer;
-  // Borrowed public outcomes, failed even when native retirement is unproven.
-  const iree_hal_semaphore_list_t* signals;
   // Next unassigned transfer-relative byte.
   uint64_t cursor;
   // Exclusive transfer-relative end of this physical range.
@@ -92,13 +90,12 @@ iree_status_t iree_hal_amd_gpu_file_staging_prepare(
     iree_hal_memory_effects_t* before, iree_hal_memory_effects_t* after);
 
 // Acquires one staging use spanning all physical ranges of a qualified file
-// operation. The parent capture borrows the device and retains transfer/signals
+// operation. The parent capture borrows the device and retains the transfer
 // through release completion. Acquisition allocates only per-proactor metadata;
 // native backing and registration attachment are demand-driven by submit.
 iree_status_t iree_hal_amd_gpu_file_staging_acquire(
     iree_hal_amd_gpu_file_staging_t* staging,
     const iree_hal_amd_fabric_file_transfer_t* transfer,
-    const iree_hal_semaphore_list_t* signals,
     iree_hal_amd_gpu_file_staging_request_t* request);
 
 // Begins one dependency-ready nonempty copy range on an acquired staging use.

@@ -6,9 +6,12 @@
 
 #include <array>
 #include <memory>
+#include <semaphore>
 
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
+#include "iree/hal/drivers/amd/gpu/queue/aql/queue.h"
+#include "iree/hal/drivers/amd/gpu/queue/pm4/queue.h"
 #include "iree/hal/drivers/amd/gpu/queue/semaphore.h"
 #include "iree/hal/slab_pool.h"
 #include "iree/testing/status_matchers.h"
@@ -183,6 +186,154 @@ TEST_P(GpuNativeQueueLifetimeTest, RecordedOutputSurvivesMembershipGrowth) {
       iree_hal_semaphore_wait(done, two, iree_infinite_timeout(), 0));
   for (uint32_t value : observed) {
     EXPECT_EQ(value, pattern);
+  }
+}
+
+TEST_P(GpuNativeQueueLifetimeTest,
+       FailedDependencyPreservesBorrowedDownloadJoin) {
+  struct Download {
+    // Host destination retained by the source view through its final access.
+    std::array<uint32_t, 16> data = {};
+    // Release of the exact source view captured by the download.
+    std::atomic<bool> retired = false;
+    // Cleanup joins the actual download even when the completion assertion
+    // fails.
+    std::binary_semaphore completed{0};
+  };
+  struct Gates {
+    // Borrowed host gates, outliving this cleanup scope.
+    std::array<iree_hal_semaphore_t*, 2> semaphores;
+    void Release() {
+      for (auto*& semaphore : semaphores) {
+        if (semaphore) {
+          IREE_EXPECT_OK(iree_hal_semaphore_signal(semaphore, 1, nullptr));
+          semaphore = nullptr;
+        }
+      }
+    }
+    ~Gates() { Release(); }
+  };
+  Ref<iree_hal_buffer_t> source;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(64, 4),
+      iree_infinite_timeout(), source.out()));
+  Ref<iree_hal_semaphore_t> initialized;
+  CreateSemaphore(initialized.out());
+  uint64_t one = 1;
+  iree_hal_semaphore_t* initialized_handle = initialized;
+  constexpr uint32_t pattern = 0x1234CAFE;
+  IREE_ASSERT_OK(iree_hal_queue_fill(
+      queues_[0], {}, {1, &initialized_handle, &one}, source, 0, 64, &pattern,
+      sizeof(pattern), nullptr, IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_wait(initialized, 1, iree_infinite_timeout(), 0));
+  for (bool already_failed : {false, true}) {
+    for (bool failed_first : {false, true}) {
+      for (bool shared_output : {false, true}) {
+        for (bool transfer_join : {false, true}) {
+          SCOPED_TRACE(already_failed);
+          SCOPED_TRACE(failed_first);
+          SCOPED_TRACE(shared_output);
+          SCOPED_TRACE(transfer_join);
+          Ref<iree_hal_queue_t> failing_queue;
+          IREE_ASSERT_OK(AcquireQueue(failing_queue.out()));
+          auto downloaded = std::make_shared<Download>();
+          auto owner = std::make_unique<std::shared_ptr<Download>>(downloaded);
+          Ref<iree_hal_buffer_t> view;
+          IREE_ASSERT_OK(iree_hal_subspan_buffer_create_with_callback(
+              source, iree_hal_buffer_byte_offset(source), 64,
+              {[](void* user_data, iree_hal_buffer_t*) {
+                 std::unique_ptr<std::shared_ptr<Download>> owner(
+                     static_cast<std::shared_ptr<Download>*>(user_data));
+                 (*owner)->retired.store(true);
+                 (*owner)->completed.release();
+               },
+               owner.get()},
+              iree_allocator_system(), view.out()));
+          owner.release();
+          Ref<iree_hal_semaphore_t> copy_gate, error_gate, copied, failed,
+              joined;
+          CreateSemaphore(copy_gate.out());
+          CreateSemaphore(error_gate.out());
+          CreateSemaphore(copied.out());
+          CreateSemaphore(failed.out());
+          CreateSemaphore(joined.out());
+          iree_hal_semaphore_t* copy_gate_handle = copy_gate;
+          iree_hal_semaphore_t* error_gate_handle = error_gate;
+          iree_hal_semaphore_t* copied_handle = copied;
+          iree_hal_semaphore_t* failed_handle = failed;
+          Gates gates{{copy_gate, error_gate}};
+          IREE_ASSERT_OK(
+              iree_hal_queue_download(queues_[0], {1, &copy_gate_handle, &one},
+                                      {1, &copied_handle, &one}, view, 0,
+                                      downloaded->data.data(), 64, nullptr));
+          view.reset();
+          const auto call = iree_hal_make_host_call(
+              [](void*, const uint64_t[4], iree_hal_host_call_context_t*) {
+                return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                        "host operation failed");
+              },
+              nullptr);
+          const uint64_t arguments[4] = {};
+          IREE_ASSERT_OK(iree_hal_queue_host_call(
+              failing_queue, {1, &error_gate_handle, &one},
+              {1, &failed_handle, &one}, call, arguments,
+              IREE_HAL_HOST_CALL_FLAG_NONE));
+          if (already_failed) {
+            IREE_ASSERT_OK(iree_hal_semaphore_signal(error_gate, 1, nullptr));
+            gates.semaphores[1] = nullptr;
+            failing_queue.reset();
+          }
+          iree_hal_semaphore_t* waits[] = {
+              failed_first ? failed_handle : copied_handle,
+              failed_first ? copied_handle : failed_handle};
+          uint64_t values[] = {1, 1};
+          iree_hal_semaphore_t* output = shared_output ? copied_handle : joined;
+          uint64_t output_value = shared_output ? 2 : 1;
+          if (transfer_join) {
+            IREE_ASSERT_OK(iree_hal_queue_transfer(
+                queues_[0], {2, waits, values}, {1, &output, &output_value}, 0,
+                nullptr, nullptr));
+          } else {
+            IREE_ASSERT_OK(iree_hal_queue_barrier(
+                queues_[0], {2, waits, values}, {1, &output, &output_value},
+                nullptr, IREE_HAL_QUEUE_BARRIER_FLAG_NONE));
+          }
+          if (!already_failed) {
+            IREE_ASSERT_OK(iree_hal_semaphore_signal(error_gate, 1, nullptr));
+            gates.semaphores[1] = nullptr;
+            failing_queue.reset();
+          }
+          // Final release above joins the producer's signal callbacks. This
+          // existing cold metadata transaction then joins publication of the
+          // consumer's admission attempt, not its still-gated GPU work.
+          iree_notification_t notification;
+          iree_notification_initialize(&notification);
+          iree_status_t admission_status =
+              command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4
+                  ? iree_hal_amd_gpu_pm4_queue_reserve_frontiers(
+                        queues_[0], options_.queue_count, &notification)
+                  : iree_hal_amd_gpu_aql_queue_reserve_frontiers(
+                        queues_[0], options_.queue_count, &notification);
+          iree_notification_deinitialize(&notification);
+          IREE_ASSERT_OK(admission_status);
+          uint64_t value = UINT64_MAX;
+          IREE_EXPECT_OK(iree_hal_semaphore_query(output, &value));
+          EXPECT_EQ(value, 0u);
+          EXPECT_FALSE(downloaded->retired.load());
+          gates.Release();
+          IREE_EXPECT_STATUS_IS(
+              IREE_STATUS_DATA_LOSS,
+              iree_hal_semaphore_wait(output, output_value,
+                                      iree_infinite_timeout(), 0));
+          EXPECT_TRUE(downloaded->retired.load());
+          downloaded->completed.acquire();
+          for (uint32_t actual : downloaded->data) {
+            EXPECT_EQ(actual, pattern);
+          }
+        }
+      }
+    }
   }
 }
 

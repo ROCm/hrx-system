@@ -1089,7 +1089,7 @@ static void iree_async_proactor_posix_commit_semaphore_wait(
   iree_async_semaphore_wait_tracker_t* tracker = NULL;
   status = iree_async_semaphore_wait_tracker_allocate(
       &proactor->semaphore_wait_context, wait_op, enqueue_callback,
-      proactor->base.allocator, &tracker);
+      IREE_ASYNC_SEMAPHORE_WAIT_FLAG_NONE, proactor->base.allocator, &tracker);
   if (!iree_status_is_ok(status)) {
     wait_op->base.next = (iree_async_operation_t*)reserved_completion;
     iree_async_proactor_posix_publish_completion(

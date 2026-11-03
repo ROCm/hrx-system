@@ -17,10 +17,11 @@ extern "C" {
 #endif  // __cplusplus
 
 // Reports the outcome and lifetime of one native queue operation. A failure
-// may be reported before retirement: retired=false fails dependents but leaves
-// every borrowed resource live. Exactly one retired=true callback ends those
-// borrows after publication and all accepted native users have joined. Rejected
-// work can retire immediately. A failed device may never prove retirement.
+// may be reported before retirement: retired=false permits internal failure
+// handling but leaves every borrowed resource live. Exactly one retired=true
+// callback carries the first failure and ends those borrows after publication
+// and all accepted native users have joined. Rejected work can retire
+// immediately. A failed device may never prove retirement.
 // Callbacks consume status and borrow the completed queue frontier for the
 // call. The frontier may be NULL when no native work retired. Calls may run
 // before submit returns; the submitter separately joins its borrowed arguments.

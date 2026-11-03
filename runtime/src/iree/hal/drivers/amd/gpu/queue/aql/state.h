@@ -156,7 +156,8 @@ struct iree_hal_amd_gpu_aql_queue_t {
       iree_atomic_int32_t closed;
   // Sticky terminal failure; it never supplies resource-reclamation credit.
   iree_atomic_int32_t failure;
-  // Completion owner has reported failure to all accepted native captures.
+  // Issued captures have recorded the native error after publication joined.
+  // Public failure waits for native stop and each capture's final release.
   bool failure_delivered;
   // Logical shader failure has been reported without stopping retirement.
   bool feedback_failure_delivered;
@@ -167,8 +168,8 @@ struct iree_hal_amd_gpu_aql_queue_t {
 // Frees joined queue metadata after the device releases native ownership.
 void iree_hal_amd_gpu_aql_queue_destroy(iree_hal_queue_t* queue);
 
-// Fails issued timelines after publication joins, without releasing native
-// ownership. Only the exclusive completion owner inspects issued captures.
+// Records issued failures after publication joins without publishing public
+// completion. Only the exclusive completion owner inspects issued captures.
 void iree_hal_amd_gpu_aql_queue_fail_issued(iree_hal_amd_gpu_aql_queue_t* queue,
                                             iree_status_code_t code);
 

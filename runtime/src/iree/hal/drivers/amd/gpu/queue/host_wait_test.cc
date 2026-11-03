@@ -191,7 +191,7 @@ TEST_F(HostWaitTest, AllWaitsResolveBeforeContinuation) {
   Check(completion);
 }
 
-TEST_F(HostWaitTest, FailureCancelsPeerThatWillNeverSignal) {
+TEST_F(HostWaitTest, FailureWaitsForPeerBeforeContinuation) {
   std::array<iree_hal_semaphore_t*, 2> semaphores = {Semaphore(), Semaphore()};
   std::array<uint64_t, 2> values = {1, 1};
   Completion completion;
@@ -200,13 +200,15 @@ TEST_F(HostWaitTest, FailureCancelsPeerThatWillNeverSignal) {
                        completion, wait));
   iree_hal_semaphore_fail(semaphores[1],
                           iree_make_status(IREE_STATUS_DATA_LOSS, "producer"));
+  EXPECT_EQ(completion.calls.load(), 0u);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(semaphores[0], 1, nullptr));
   Check(completion, IREE_STATUS_DATA_LOSS);
   EXPECT_EQ(reinterpret_cast<iree_async_semaphore_t*>(semaphores[0])
                 ->timepoints.count,
             0u);
 }
 
-TEST_F(HostWaitTest, FailureDuringRegistrationJoinsEarlierTimepoint) {
+TEST_F(HostWaitTest, FailureDuringRegistrationJoinsEarlierAndLaterInputs) {
   std::array<iree_hal_semaphore_t*, 3> semaphores = {Semaphore(), Semaphore(),
                                                      Semaphore()};
   std::array<uint64_t, 3> values = {1, 1, 1};
@@ -216,6 +218,10 @@ TEST_F(HostWaitTest, FailureDuringRegistrationJoinsEarlierTimepoint) {
   Wait wait;
   IREE_ASSERT_OK(Begin({semaphores.size(), semaphores.data(), values.data()},
                        completion, wait));
+  EXPECT_EQ(completion.calls.load(), 0u);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(semaphores[0], 1, nullptr));
+  EXPECT_EQ(completion.calls.load(), 0u);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(semaphores[2], 1, nullptr));
   Check(completion, IREE_STATUS_ABORTED);
   for (auto* semaphore : semaphores) {
     EXPECT_EQ(
