@@ -949,7 +949,7 @@ TEST_P(SubmissionTest, CopyBatchesCaptureProgramCompatibilityAndKeepOwnership) {
           iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
           IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_transfer(
               &pool_, GetParam(), &family, {}, {}, count, operations, &profile_,
-              nullptr, &capture));
+              nullptr, {}, &capture));
           const auto usage = source ? IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE
                                     : IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET;
           EXPECT_EQ(

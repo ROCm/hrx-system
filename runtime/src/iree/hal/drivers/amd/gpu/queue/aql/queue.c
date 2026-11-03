@@ -2018,7 +2018,7 @@ static iree_status_t iree_hal_amd_gpu_aql_host_call_enter(
   submission->has_host_owner = true;
   iree_atomic_fetch_add(&queue->pending.host_owners, 1,
                         iree_memory_order_relaxed);
-  iree_hal_amd_gpu_aql_enqueue(queue, submission);
+  iree_hal_amd_gpu_aql_enqueue_entry(queue, &submission->entry);
   return iree_ok_status();
 }
 
