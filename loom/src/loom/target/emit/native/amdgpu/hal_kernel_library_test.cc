@@ -458,6 +458,21 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
         ParseSource(iree_make_cstring_view(kSource), out_module));
   }
 
+  void ParseGfx11KernelWithLeafCall(loom_module_t** out_module) {
+    static const char kSource[] =
+        "amdgpu.target<gfx1100> @gfx_target\n"
+        "low.func.def target<amdgpu.rdna3.core>(@gfx_target) @leaf() {\n"
+        "  low.return\n"
+        "}\n"
+        "low.kernel.def target<amdgpu.rdna3.core>(@gfx_target) "
+        "workgroup_size(64, 1, 1) @loom_kernel() {\n"
+        "  low.func.call @leaf() : ()\n"
+        "  low.return\n"
+        "}\n";
+    ASSERT_NO_FATAL_FAILURE(
+        ParseSource(iree_make_cstring_view(kSource), out_module));
+  }
+
   void ParseGfx11DynamicHalKernel(loom_module_t** out_module) {
     static const char kSource[] =
         "amdgpu.target<gfx1100> @gfx_target\n"
@@ -801,6 +816,59 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsGfx942Kernel) {
 
   EXPECT_TRUE(emitted) << DiagnosticSummary(capture);
   EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
+}
+
+TEST_F(AmdgpuHalKernelLibraryTest, EmitsPrivateLeafCallInKernelProgram) {
+  loom_module_t* module = nullptr;
+  ASSERT_NO_FATAL_FAILURE(ParseGfx11KernelWithLeafCall(&module));
+
+  DiagnosticCapture capture;
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      .diagnostic_sink = capture.sink(),
+      .max_errors = 20,
+      .capture_target_listing = true,
+  };
+  bool emitted = false;
+  loom_amdgpu_hal_kernel_library_t library = {};
+  IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
+      module, &options, iree_allocator_system(), &emitted, &library));
+
+  ASSERT_TRUE(emitted) << DiagnosticSummary(capture);
+  EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
+  std::string listing;
+  IREE_ASSERT_OK(
+      CloneByteSequenceToString(library.target_listing_data, &listing));
+  EXPECT_NE(listing.find("s_add_u32 s34, s34, @leaf@rel32_lo"),
+            std::string::npos);
+  EXPECT_NE(listing.find("s_addc_u32 s35, s35, @leaf@rel32_hi"),
+            std::string::npos);
+  EXPECT_NE(listing.find("s_swappc_b64 s[30:31], s[34:35]"), std::string::npos);
+  EXPECT_NE(listing.find(".type leaf,@function\nleaf:\n"), std::string::npos);
+  EXPECT_NE(listing.find("s_setpc_b64 s[30:31]"), std::string::npos);
+
+  ASSERT_NE(library.hsaco_data, nullptr);
+  std::string hsaco;
+  IREE_ASSERT_OK(CloneByteSequenceToString(library.hsaco_data, &hsaco));
+  const std::vector<Section> sections = ReadSections(hsaco);
+  const Section& dynamic_symbol_table = FindSection(sections, ".dynsym");
+  const Section& dynamic_string_table = FindSection(sections, ".dynstr");
+  const Section& text = FindSection(sections, ".text");
+  const DynamicSymbol entry = FindDynamicSymbol(
+      hsaco, dynamic_symbol_table, dynamic_string_table, "loom_kernel");
+  ASSERT_EQ(entry.section_index, text.index);
+  ASSERT_GE(entry.value, text.address);
+  const size_t entry_file_offset =
+      (size_t)(text.offset + (entry.value - text.address));
+  ASSERT_EQ(entry.size, 40u);
+  ASSERT_LE(entry_file_offset + entry.size, hsaco.size());
+  // S_GETPC_B64 captures entry byte 8. The private leaf starts at byte 36,
+  // so the paired literal adds must receive the exact 28-byte displacement.
+  EXPECT_EQ(LoadLeU32(hsaco, entry_file_offset + 12u), 28u);
+  EXPECT_EQ(LoadLeU32(hsaco, entry_file_offset + 20u), 0u);
+
+  loom_amdgpu_hal_kernel_library_deinitialize(&library,
+                                              iree_allocator_system());
+  loom_module_free(module);
 }
 
 TEST_F(AmdgpuHalKernelLibraryTest, RetainsRequestedArtifactMetadata) {

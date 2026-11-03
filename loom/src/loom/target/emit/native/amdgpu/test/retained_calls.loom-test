@@ -1,0 +1,118 @@
+// RUN: emit amdgpu-kernel-assembly
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @increment(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %one = v_mov_b32 1
+  %result = v_add_u32 %value, %one
+  return %result
+}
+
+low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @loom_kernel() asm {
+  %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %incremented = low.func.call pure noinline @increment(%tid) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
+  %sum = v_add_u32 %tid, %incremented
+  return
+}
+
+// ----
+.text
+.amdgcn_target "amdgcn-amd-amdhsa--gfx1100"
+.amdhsa_code_object_version 6
+
+.protected loom_kernel
+.globl loom_kernel
+.p2align 8
+.type loom_kernel,@function
+loom_kernel:
+  v_mov_b32 v2, v0
+  s_nop 2
+  v_mov_b32 v0, v2
+  s_nop 2
+  s_mov_b64 s[32:33], exec
+  s_getpc_b64 s[34:35]
+  s_add_u32 s34, s34, @increment@rel32_lo
+  s_addc_u32 s35, s35, @increment@rel32_hi
+  s_swappc_b64 s[30:31], s[34:35]
+  s_mov_b64 exec, s[32:33]
+  v_add_u32 v0, v2, v0
+  s_endpgm
+
+
+.type increment,@function
+increment:
+  v_mov_b32 v1, 1
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v0, v0, v1
+  s_setpc_b64 s[30:31]
+.Lfunc_end1:
+.size increment, .Lfunc_end1-increment
+.Lfunc_end0:
+.size loom_kernel, .Lfunc_end0-loom_kernel
+
+.rodata
+.p2align 6
+.amdhsa_kernel loom_kernel
+  .amdhsa_group_segment_fixed_size 0
+  .amdhsa_private_segment_fixed_size 0
+  .amdhsa_kernarg_size 0
+  .amdhsa_user_sgpr_count 0
+  .amdhsa_user_sgpr_dispatch_ptr 0
+  .amdhsa_user_sgpr_queue_ptr 0
+  .amdhsa_user_sgpr_kernarg_segment_ptr 0
+  .amdhsa_user_sgpr_dispatch_id 0
+  .amdhsa_user_sgpr_private_segment_size 0
+  .amdhsa_wavefront_size32 1
+  .amdhsa_uses_dynamic_stack 0
+  .amdhsa_enable_private_segment 0
+  .amdhsa_system_sgpr_workgroup_id_x 0
+  .amdhsa_system_sgpr_workgroup_id_y 0
+  .amdhsa_system_sgpr_workgroup_id_z 0
+  .amdhsa_system_sgpr_workgroup_info 0
+  .amdhsa_system_vgpr_workitem_id 0
+  .amdhsa_next_free_vgpr 3
+  .amdhsa_next_free_sgpr 36
+  .amdhsa_reserve_vcc 0
+  .amdhsa_float_round_mode_32 0
+  .amdhsa_float_round_mode_16_64 0
+  .amdhsa_float_denorm_mode_32 3
+  .amdhsa_float_denorm_mode_16_64 3
+  .amdhsa_dx10_clamp 1
+  .amdhsa_ieee_mode 1
+  .amdhsa_fp16_overflow 0
+  .amdhsa_workgroup_processor_mode 1
+  .amdhsa_memory_ordered 1
+  .amdhsa_forward_progress 1
+  .amdhsa_shared_vgpr_count 0
+  .amdhsa_inst_pref_size 0
+  .amdhsa_exception_fp_ieee_invalid_op 0
+  .amdhsa_exception_fp_denorm_src 0
+  .amdhsa_exception_fp_ieee_div_zero 0
+  .amdhsa_exception_fp_ieee_overflow 0
+  .amdhsa_exception_fp_ieee_underflow 0
+  .amdhsa_exception_fp_ieee_inexact 0
+  .amdhsa_exception_int_div_zero 0
+.end_amdhsa_kernel
+
+.amdgpu_metadata
+  amdhsa.version:
+    - 1
+    - 2
+  amdhsa.target: 'amdgcn-amd-amdhsa--gfx1100'
+  amdhsa.kernels:
+    - .name: 'loom_kernel'
+      .symbol: 'loom_kernel.kd'
+      .kernarg_segment_size: 0
+      .group_segment_fixed_size: 0
+      .private_segment_fixed_size: 0
+      .kernarg_segment_align: 8
+      .wavefront_size: 32
+      .sgpr_count: 36
+      .vgpr_count: 3
+      .max_flat_workgroup_size: 64
+      .reqd_workgroup_size:
+        - 64
+        - 1
+        - 1
+      .args: []
+.end_amdgpu_metadata

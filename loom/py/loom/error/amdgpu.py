@@ -1188,6 +1188,100 @@ ERR_AMDGPU_053 = ErrorDef(
     fix_hint="Reduce private arrays or register spills, or split the kernel",
 )
 
+# ERR_AMDGPU_054: AMDGPU direct helper definition is unsupported.
+ERR_AMDGPU_054 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=54,
+    severity=Severity.ERROR,
+    summary="AMDGPU direct helper definition is unsupported.",
+    message=(
+        "AMDGPU function '@{function_name}' cannot retain direct call to "
+        "'@{callee_name}': helper requirement '{reason_key}' is not satisfied"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("callee_name", ParamKind.STRING),
+        ErrorParam("reason_key", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Use a private module-local low.func.def helper with a body, or inline "
+        "the call before native emission"
+    ),
+)
+
+# ERR_AMDGPU_055: AMDGPU direct helper ABI cannot carry a value.
+ERR_AMDGPU_055 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=55,
+    severity=Severity.ERROR,
+    summary="AMDGPU direct helper ABI cannot carry a value.",
+    message=(
+        "AMDGPU helper '@{function_name}' {side} {index} has type "
+        "{actual_type}, which the direct-call ABI rejected for reason "
+        "'{reason_key}' after requiring {sgpr_count} SGPR and {vgpr_count} "
+        "VGPR units"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("side", ParamKind.STRING),
+        ErrorParam("index", ParamKind.U32),
+        ErrorParam("actual_type", ParamKind.TYPE),
+        ErrorParam("sgpr_count", ParamKind.U32),
+        ErrorParam("vgpr_count", ParamKind.U32),
+        ErrorParam("reason_key", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Use AMDGPU SGPR/VGPR register values within the direct-call carrier "
+        "bank limits, or inline the helper"
+    ),
+)
+
+# ERR_AMDGPU_056: AMDGPU direct helper target is incompatible with its entry.
+ERR_AMDGPU_056 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=56,
+    severity=Severity.ERROR,
+    summary="AMDGPU direct helper target is incompatible with its entry.",
+    message=(
+        "AMDGPU kernel '@{entry_name}' uses target '{entry_target_key}' and "
+        "descriptor set '{entry_descriptor_set}', but direct helper "
+        "'@{helper_name}' uses target '{helper_target_key}' and descriptor set "
+        "'{helper_descriptor_set}'"
+    ),
+    params=(
+        ErrorParam("entry_name", ParamKind.STRING),
+        ErrorParam("entry_target_key", ParamKind.STRING),
+        ErrorParam("entry_descriptor_set", ParamKind.STRING),
+        ErrorParam("helper_name", ParamKind.STRING),
+        ErrorParam("helper_target_key", ParamKind.STRING),
+        ErrorParam("helper_descriptor_set", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Specialize the helper for the kernel's exact AMDGPU target and "
+        "representation, or inline it before native emission"
+    ),
+)
+
+# ERR_AMDGPU_057: nested retained AMDGPU helper calls are unsupported.
+ERR_AMDGPU_057 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=57,
+    severity=Severity.ERROR,
+    summary="Nested retained AMDGPU helper calls are unsupported.",
+    message=(
+        "AMDGPU retained helper '@{helper_name}' directly calls "
+        "'@{callee_name}', but the current native call contract requires "
+        "helpers to be leaves"
+    ),
+    params=(
+        ErrorParam("helper_name", ParamKind.STRING),
+        ErrorParam("callee_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Inline calls within the helper while retaining the kernel-to-helper boundary"
+    ),
+)
+
 ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_001,
     ERR_AMDGPU_006,
@@ -1238,4 +1332,8 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_051,
     ERR_AMDGPU_052,
     ERR_AMDGPU_053,
+    ERR_AMDGPU_054,
+    ERR_AMDGPU_055,
+    ERR_AMDGPU_056,
+    ERR_AMDGPU_057,
 )

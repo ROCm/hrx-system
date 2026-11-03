@@ -1,0 +1,51 @@
+amdgpu.target<gfx1100> @target
+
+low.func.def pure target<amdgpu.rdna3.core>(@target) @increment(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %c1 = v_mov_b32 1
+  %result = v_add_u32 %value, %c1
+  return %result
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @store_incremented(%lane: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
+  %incremented = low.func.call pure noinline @increment(%lane) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
+  %byte_offset = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %byte_offset, %incremented, %output
+  return
+}
+
+kernel.def target(@target) @retained_leaf_call() {
+  %c1 = index.constant 1 : index
+  %lanes = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%lanes, %c1, %c1) : index
+} launch(%output: buffer) {
+  %lane_index = kernel.workitem.id<x> : index
+  %lane_i32 = index.cast %lane_index : index to i32
+  %lane = vector.splat %lane_i32 : vector<1xi32>
+  low.invoke @store_incremented(%lane, %output) : (vector<1xi32>, buffer)
+  kernel.return
+}
+
+func.def @retained_leaf_call_oracle(%output: buffer) {
+  %base = index.constant 0 : offset
+  %values = buffer.view %output[%base] : buffer -> view<64xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  %c1 = scalar.constant 1 : i32
+  scf.for %lane = [%begin to %end step %step] {
+    %lane_i32 = index.cast %lane : index to i32
+    %incremented = scalar.addi %lane_i32, %c1 : i32
+    view.store %incremented, %values[%lane] : i32, view<64xi32>
+  }
+  func.return
+}
+
+check.scenario @retained_leaf_call_executes {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %output = check.generate.fill value(-1) : tensor<64xi32>
+    check.compare<@retained_leaf_call, @retained_leaf_call_oracle>(%output) : (tensor<64xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<64xi32>
+    }
+  }
+  check.return
+}
