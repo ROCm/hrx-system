@@ -20,13 +20,19 @@ iree_status_t iree_hal_amd_gpu_aql_dispatch_prepare(
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "AQL dynamic stacks require an allocation policy");
   }
-  if (function->base.kernarg->requirements) {
+  const uint32_t requirements =
+      function->base.kernarg->requirements &
+      ~((flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE) &&
+                !iree_hal_dispatch_uses_indirect_arguments(flags)
+            ? IREE_HAL_AMD_GPU_KERNARG_REQUIREMENT_GRID_SYNC
+            : 0u);
+  if (requirements) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "kernel '%.*s' requires argument services 0x%x that this queue "
         "has not provisioned",
         (int)metadata->reflection_name.size, metadata->reflection_name.data,
-        function->base.kernarg->requirements);
+        requirements);
   }
   if (metadata->has_workgroup_cluster_size) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
@@ -35,6 +41,20 @@ iree_status_t iree_hal_amd_gpu_aql_dispatch_prepare(
   return iree_hal_amd_gpu_dispatch_prepare(
       &function->base, maximum_group_segment_byte_length, true, config,
       constants, binding_count, flags, out_dispatch);
+}
+
+iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_grid_sync_packet(
+    uint64_t kernel_object, uint64_t grid_sync) {
+  const iree_hal_amd_gpu_aql_dispatch_t packet = {
+      .header = IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH | (1u << 16) |
+                IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+                IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM,
+      .workgroup_size = {1, 1, 1},
+      .grid_size = {1, 1, 1},
+      .kernel_object = kernel_object,
+      .kernarg_address = grid_sync,
+  };
+  return iree_hal_amd_gpu_aql_packet_dispatch(&packet);
 }
 
 iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_dispatch_packet(

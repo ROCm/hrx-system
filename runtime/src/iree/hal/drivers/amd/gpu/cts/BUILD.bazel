@@ -226,7 +226,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:registry",
         "//runtime/src/iree/hal/drivers/amd:driver",
-        "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
+        "//runtime/src/iree/hal/drivers/amd/gpu/target:selection",
     ],
     alwayslink = True,
 )
@@ -415,6 +415,26 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:code",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:program",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:ring",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "cooperative_test",
+    srcs = ["cooperative_test.cc"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":test_device",
+        ":testdata",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:pool_test_util",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image:cooperative_images",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

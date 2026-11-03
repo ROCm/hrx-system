@@ -37,6 +37,73 @@ class DispatchTest : public ::testing::Test {
   iree_hal_amd_gpu_dispatch_geometry_t dispatch_ = {};
 };
 
+TEST_F(DispatchTest, CooperativeGridStateIsPrivateAndCompletelyReinitialized) {
+  layout_.requirements = IREE_HAL_AMD_GPU_KERNARG_REQUIREMENT_GRID_SYNC;
+  layout_.grid_sync_offset = 13;
+  layout_.byte_length = 32;
+  dispatch_ = {
+      .workgroup_size = {32, 4, 1},
+      .workgroup_count = {3, 2, 1},
+      .partial_size = {1, 4, 1},
+  };
+  uint8_t arguments[32];
+  memset(arguments, 0xa5, sizeof(arguments));
+  iree_hal_amd_gpu_grid_sync_t state;
+  memset(&state, 0xa5, sizeof(state));
+  const uint64_t address = UINT64_C(0x123456780000);
+  for (int replay = 0; replay < 2; ++replay) {
+    iree_hal_amd_gpu_dispatch_emplace_grid_sync(&layout_, &dispatch_, address,
+                                                arguments, &state);
+    EXPECT_EQ(state.multi_grid_sync, 0u);
+    EXPECT_EQ(state.grid_ordinal, 0u);
+    EXPECT_EQ(state.grid_count, 1u);
+    EXPECT_EQ(state.preceding_workitem_count, 0u);
+    EXPECT_EQ(state.total_workitem_count, 65u * 8u);
+    EXPECT_EQ(state.single_grid_sync[0], 0u);
+    EXPECT_EQ(state.single_grid_sync[1], 0u);
+    EXPECT_EQ(state.workgroup_count, 6u);
+    EXPECT_EQ(state.reserved, 0u);
+    uint64_t pointer = 0;
+    memcpy(&pointer, arguments + 13, sizeof(pointer));
+    EXPECT_EQ(pointer, address);
+    for (size_t i = 0; i < sizeof(arguments); ++i) {
+      if (i < 13 || i >= 21) {
+        EXPECT_EQ(arguments[i], 0xa5);
+      }
+    }
+    state.single_grid_sync[0] = 0x01230004;
+    state.single_grid_sync[1] = 7;
+  }
+}
+
+TEST(GridSyncStrategyTest, CompilerBarrierFamiliesRemainDistinctFromAdmission) {
+  const struct {
+    // Physical compiler ISA identity.
+    iree_hal_amd_gpu_gfxip_version_t gfxip;
+    // Device-library grid-barrier implementation.
+    iree_hal_amd_gpu_grid_sync_strategy_t strategy;
+  } cases[] = {
+      {{8, 0, 3}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_NONE},
+      {{9, 0, 10}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_GWS},
+      {{9, 4, 1}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_GWS},
+      {{9, 4, 2}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_MEMORY},
+      {{9, 4, 3}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_GWS},
+      {{9, 5, 0}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_MEMORY},
+      {{10, 1, 0}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_GWS},
+      {{10, 3, 0}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_GWS},
+      {{11, 0, 0}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_MEMORY},
+      {{11, 5, 1}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_MEMORY},
+      {{11, 7, 0}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_MEMORY},
+      {{12, 0, 1}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_MEMORY},
+      {{12, 5, 0}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_MEMORY},
+      {{13, 0, 0}, IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_NONE},
+  };
+  for (const auto& test : cases) {
+    EXPECT_EQ(iree_hal_amd_gpu_grid_sync_select_strategy(test.gfxip),
+              test.strategy);
+  }
+}
+
 TEST_F(DispatchTest, DefaultGeometryUsesRequiredMetadata) {
   auto config = iree_hal_make_static_dispatch_config(7, 3, 2);
   IREE_ASSERT_OK(Prepare(config));
@@ -101,7 +168,7 @@ TEST_F(DispatchTest, GeometryAndLdsRespectExecutableLimits) {
 
 TEST_F(DispatchTest, DirectArgumentsRespectDenseAndNativeExtents) {
   const auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
-  std::array<uint8_t, 24> constants = {};
+  std::array<uint8_t, 40> constants = {};
   layout_.byte_length = 24;
   layout_.native_byte_length = 12;
   layout_.constant_byte_length = 8;
@@ -111,6 +178,7 @@ TEST_F(DispatchTest, DirectArgumentsRespectDenseAndNativeExtents) {
   const auto native = IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS;
   IREE_ASSERT_OK(Prepare(config, native, {constants.data(), 12}));
   IREE_ASSERT_OK(Prepare(config, native, {constants.data(), 24}));
+  IREE_ASSERT_OK(Prepare(config, native, {constants.data(), 40}));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Prepare(config, native, {constants.data(), 11}));
 }

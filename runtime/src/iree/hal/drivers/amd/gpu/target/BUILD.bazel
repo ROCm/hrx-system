@@ -24,6 +24,32 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "selection",
+    srcs = ["selection.c"],
+    hdrs = ["selection.h"],
+    deps = [
+        ":identity",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:device_spec_builder",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "selection_test",
+    srcs = ["selection_test.cc"],
+    deps = [
+        ":identity",
+        ":selection",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:device_spec_builder",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "code_object",
     srcs = ["code_object.c"],
     hdrs = ["code_object.h"],

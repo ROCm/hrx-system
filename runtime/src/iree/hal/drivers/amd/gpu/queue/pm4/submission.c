@@ -246,8 +246,8 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_control(
     const bool incompatible = command.target_error_mode ==
                               IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE;
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_control_validate_target(
-        family, target, incompatible ? 0 : required,
-        incompatible ? required : 0));
+        family, IREE_HAL_MEMORY_SITE_QUEUE, target, incompatible ? 0 : required,
+        incompatible ? required : 0, command.flags));
   }
   iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
   void* payload = NULL;
@@ -257,12 +257,6 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_control(
   submission->entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_CONTROL;
   submission->control.target = reference;
   submission->control.command = command;
-  iree_hal_amd_gpu_pm4_barrier_control(
-      profile, command.flags,
-      (command.flags & IREE_HAL_ATOMIC_FLAG_RELEASE)
-          ? IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE
-          : 0,
-      &submission->before, &submission->after);
   iree_hal_buffer_retain(target);
   *out_submission = submission;
   return iree_ok_status();
@@ -301,8 +295,12 @@ static iree_status_t iree_hal_amd_gpu_pm4_submission_capture_transfer(
     submission->entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER;
     status = iree_hal_amd_gpu_transfer_initialize(
         family, IREE_HAL_MEMORY_SITE_QUEUE,
-        IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_STAGING_LENGTH, count, operations,
-        layout, payload, &submission->transfer);
+        (iree_hal_amd_gpu_transfer_staging_limits_t){
+            .upload_capacity = IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_UPLOAD_LENGTH,
+            .download_capacity =
+                IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_DOWNLOAD_LENGTH,
+        },
+        count, operations, layout, payload, &submission->transfer);
   }
   if (iree_status_is_ok(status)) {
     if (callback.fn) {

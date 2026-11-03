@@ -37,7 +37,7 @@ std::string Decode(const char* input) {
 void ExpectDecodeError(iree_status_code_t expected_code, const char* input) {
   iree_string_view_t encoded = iree_make_cstring_view(input);
   iree_host_size_t max_size = iree_base64_decoded_size(encoded);
-  std::vector<uint8_t> buffer(max_size + 1);  // Extra byte to avoid zero-size.
+  std::vector<uint8_t> buffer(max_size);
   iree_host_size_t actual_length = 0;
   IREE_EXPECT_STATUS_IS(
       expected_code,
@@ -181,6 +181,7 @@ TEST(Base64Decode, InvalidCharacter) {
 
 TEST(Base64Decode, InvalidLengthMod4Is1) {
   // After stripping padding, length mod 4 == 1 is invalid.
+  ExpectDecodeError(IREE_STATUS_INVALID_ARGUMENT, "\n");
   ExpectDecodeError(IREE_STATUS_INVALID_ARGUMENT, "Z");
   ExpectDecodeError(IREE_STATUS_INVALID_ARGUMENT, "ZZZZZ");
 }
@@ -199,6 +200,15 @@ TEST(Base64Decode, BufferTooSmall) {
       IREE_STATUS_OUT_OF_RANGE,
       iree_base64_decode(encoded, iree_make_byte_span(buffer, sizeof(buffer)),
                          &actual_length));
+}
+
+TEST(Base64Decode, EmptyOutputBuffer) {
+  iree_host_size_t actual_length = 123;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_base64_decode(IREE_SV("Zg=="), iree_byte_span_empty(),
+                         &actual_length));
+  EXPECT_EQ(actual_length, 0u);
 }
 
 //===----------------------------------------------------------------------===//

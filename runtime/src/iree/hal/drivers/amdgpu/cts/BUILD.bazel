@@ -8,6 +8,7 @@
 
 load("//build_tools/amdgpu:cts.bzl", "iree_amdgpu_hal_cts_testdata")
 load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
+load("//build_tools/bazel:package_boundary.bzl", "iree_package_boundary")
 load("//build_tools/bazel:select.bzl", "iree_select")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
@@ -17,6 +18,11 @@ package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],
+)
+
+iree_package_boundary(
+    allowed_descendant_paths = ["testdata/**"],
+    reason = "Device source fixtures belong to the CTS and its embedded code-object libraries; their ABI dependencies and target variants are owned together with the host tests.",
 )
 
 iree_cmake_extra_content(

@@ -113,7 +113,9 @@ class GpuNativeDispatchTest
   void RunIndirect(bool recorded);
 
   enum class ControlKind { kTimestamp, kWait, kStore, kRmw };
-  void RunControlOrdering(ControlKind kind, iree_hal_atomic_width_t width);
+  void RunControlOrdering(
+      ControlKind kind, iree_hal_atomic_width_t width,
+      iree_hal_atomic_flags_t flags = IREE_HAL_ATOMIC_FLAG_NONE);
 
   // Native capability restriction; allocation and execution remain real.
   iree::hal::amd::gpu::cts::NativeMemoryGate memory_gate_;
@@ -137,6 +139,14 @@ TEST_P(GpuNativeDispatchTest, ExecutableGlobalsPreservePlacementAndVisibility) {
       executable, IREE_SV("image_value"), &token));
   iree_hal_buffer_t* global = nullptr;
   IREE_ASSERT_OK(iree_hal_executable_global_buffer(executable, token, &global));
+  iree_hal_memory_scope_t queue_scope;
+  IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
+      group_, {IREE_HAL_MEMORY_SITE_QUEUE, iree_hal_queue_family(queues_[0])},
+      &queue_scope));
+  EXPECT_TRUE(iree_all_bits_set(
+      iree_hal_buffer_query_atomic_operations(global, queue_scope)
+          .device_scope_32,
+      IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD));
   iree_hal_executable_function_t function;
   IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
       executable, IREE_SV("image_increment"), &function));
@@ -192,6 +202,17 @@ TEST_P(GpuNativeDispatchTest, ExecutableGlobalsPreservePlacementAndVisibility) {
           {1, &semaphore, &ready}, 1, &update, nullptr));
       completed = ready;
     }
+    const iree_hal_atomic_rmw_params_t add = {
+        .operand = 3,
+        .flags = IREE_HAL_ATOMIC_FLAG_RELEASE,
+        .width = IREE_HAL_ATOMIC_WIDTH_32,
+        .operation = IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+    };
+    uint64_t updated = completed + 1;
+    IREE_ASSERT_OK(iree_hal_queue_atomic_rmw(
+        queue, {completed ? 1u : 0u, &semaphore, &completed},
+        {1, &semaphore, &updated}, global, 0, add, nullptr));
+    completed = updated;
     uint64_t after = completed + 1;
     IREE_ASSERT_OK(iree_hal_queue_dispatch(
         queue, {completed ? 1u : 0u, &semaphore, &completed},
@@ -224,7 +245,7 @@ TEST_P(GpuNativeDispatchTest, ExecutableGlobalsPreservePlacementAndVisibility) {
                                              iree_infinite_timeout(),
                                              IREE_ASYNC_WAIT_FLAG_NONE));
     }
-    EXPECT_EQ(observed, values[i] + increment);
+    EXPECT_EQ(observed, values[i] + 3 + increment);
     iree_hal_queue_dispatch_concurrency_t concurrency;
     IREE_ASSERT_OK(iree_hal_queue_query_dispatch_concurrency(
         queue, executable, function, concurrency_params,
@@ -506,6 +527,11 @@ void GpuNativeDispatchTest::RunIndirect(bool recorded) {
   for (uint32_t i = 0; i < kInvocations; ++i) {
     const auto& shape = shapes[(i / 3) % shapes.size()];
     memcpy(control.data() + i * 8 + 4, shape.data(), 12);
+    if (recorded && (i & 1)) {
+      // Static counts are immutable throughout the recording's invocation.
+      // Dynamic counts retain poison until their in-recording producer runs.
+      memcpy(control.data() + i * 8, shape.data(), 12);
+    }
     const uint64_t address = output_address + i * kOutputLength;
     const iree_hal_amd_gpu_kernarg_inputs_t inputs = {
         .block_count = {7, 9, 11},
@@ -596,10 +622,12 @@ void GpuNativeDispatchTest::RunIndirect(bool recorded) {
         config.workgroup_count_ref,
         iree_hal_make_buffer_ref(buffers[0], i * 32 + 16, 12)};
     if (recorded) {
-      IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
-          recording, executable, producer, producer_config, {},
-          {references.size(), references.data()}, 0));
-      IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &boundary));
+      if (!(i & 1)) {
+        IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+            recording, executable, producer, producer_config, {},
+            {references.size(), references.data()}, 0));
+        IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &boundary));
+      }
       IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
           recording, executable, consumer, config, constants, bindings, flags));
     } else {
@@ -905,7 +933,8 @@ TEST_P(GpuNativeDispatchTest,
 }
 
 void GpuNativeDispatchTest::RunControlOrdering(ControlKind kind,
-                                               iree_hal_atomic_width_t width) {
+                                               iree_hal_atomic_width_t width,
+                                               iree_hal_atomic_flags_t flags) {
   Create();
   if (HasFatalFailure() || IsSkipped()) {
     return;
@@ -926,18 +955,19 @@ void GpuNativeDispatchTest::RunControlOrdering(ControlKind kind,
       operation = IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD;
       break;
   }
+  const bool zero_compute = (flags & IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE) != 0;
+  const iree_hal_atomic_operation_capabilities_t operations = {
+      .device_scope_32 = width == IREE_HAL_ATOMIC_WIDTH_32 ? operation : 0,
+      .device_scope_64 = width == IREE_HAL_ATOMIC_WIDTH_64 ? operation : 0,
+  };
   const iree_hal_pool_family_access_t access = {
       .family = family,
       .usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
       .atomics =
           {
-              .queue =
-                  {
-                      .device_scope_32 =
-                          width == IREE_HAL_ATOMIC_WIDTH_32 ? operation : 0,
-                      .device_scope_64 =
-                          width == IREE_HAL_ATOMIC_WIDTH_64 ? operation : 0,
-                  },
+              .queue = operations,
+              .queue_zero_compute =
+                  zero_compute ? operations : decltype(operations){},
           },
   };
   const iree_hal_pool_scope_t scope = {
@@ -1014,6 +1044,7 @@ void GpuNativeDispatchTest::RunControlOrdering(ControlKind kind,
       const iree_hal_atomic_wait_params_t params = {
           .value = kGuard & mask,
           .mask = mask,
+          .flags = flags,
           .width = width,
           .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
       };
@@ -1022,6 +1053,7 @@ void GpuNativeDispatchTest::RunControlOrdering(ControlKind kind,
     } else if (kind == ControlKind::kStore) {
       const iree_hal_atomic_store_params_t params = {
           .value = 7,
+          .flags = flags,
           .width = width,
       };
       IREE_ASSERT_OK(iree_hal_command_buffer_atomic_store(recording, source, 0,
@@ -1030,6 +1062,7 @@ void GpuNativeDispatchTest::RunControlOrdering(ControlKind kind,
     } else {
       const iree_hal_atomic_rmw_params_t params = {
           .operand = 1,
+          .flags = flags,
           .width = width,
           .operation = IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
       };
@@ -1048,6 +1081,7 @@ void GpuNativeDispatchTest::RunControlOrdering(ControlKind kind,
       ASSERT_NE(program->host_template, nullptr);
       ASSERT_EQ(program->block_count, 1u);
       const bool timestamp = kind == ControlKind::kTimestamp;
+      const bool shader = !timestamp && !zero_compute;
       const bool standalone_release = dispatch && !ordered;
       EXPECT_EQ(program->blocks[0].packet_count,
                 1u + dispatch + standalone_release);
@@ -1060,6 +1094,7 @@ void GpuNativeDispatchTest::RunControlOrdering(ControlKind kind,
       }
       EXPECT_EQ(packets[dispatch && !before_dispatch].words[0],
                 (1u << 16) |
+                    (shader ? IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH : 0) |
                     (ordered ? IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED : 0) |
                     (standalone_release
                          ? 0
@@ -1094,8 +1129,8 @@ void GpuNativeDispatchTest::RunControlOrdering(ControlKind kind,
                                 actual.data(), sizeof(actual), nullptr));
     IREE_ASSERT_OK(
         iree_hal_semaphore_wait(done, completion, iree_infinite_timeout(), 0));
-    // Shader and CP writes are disjoint within one cache line. No timestamp
-    // padding or payload dependency is required between concurrent siblings.
+    // User and control writes are disjoint within one cache line. No padding
+    // or payload dependency is required between concurrent siblings.
     EXPECT_EQ(actual[0], kGuard + dispatch);
     if (kind == ControlKind::kTimestamp) {
       EXPECT_NE(actual[1], kGuard);
@@ -1137,6 +1172,42 @@ TEST_P(GpuNativeDispatchTest, Rmw32OrderingPreservesIndependentShaderWrites) {
 
 TEST_P(GpuNativeDispatchTest, Rmw64OrderingPreservesIndependentShaderWrites) {
   RunControlOrdering(ControlKind::kRmw, IREE_HAL_ATOMIC_WIDTH_64);
+}
+
+TEST_P(GpuNativeDispatchTest,
+       ZeroComputeWait32OrderingPreservesIndependentShaderWrites) {
+  RunControlOrdering(ControlKind::kWait, IREE_HAL_ATOMIC_WIDTH_32,
+                     IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE);
+}
+
+TEST_P(GpuNativeDispatchTest,
+       ZeroComputeWait64OrderingPreservesIndependentShaderWrites) {
+  RunControlOrdering(ControlKind::kWait, IREE_HAL_ATOMIC_WIDTH_64,
+                     IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE);
+}
+
+TEST_P(GpuNativeDispatchTest,
+       ZeroComputeStore32OrderingPreservesIndependentShaderWrites) {
+  RunControlOrdering(ControlKind::kStore, IREE_HAL_ATOMIC_WIDTH_32,
+                     IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE);
+}
+
+TEST_P(GpuNativeDispatchTest,
+       ZeroComputeStore64OrderingPreservesIndependentShaderWrites) {
+  RunControlOrdering(ControlKind::kStore, IREE_HAL_ATOMIC_WIDTH_64,
+                     IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE);
+}
+
+TEST_P(GpuNativeDispatchTest,
+       ZeroComputeRmw32OrderingPreservesIndependentShaderWrites) {
+  RunControlOrdering(ControlKind::kRmw, IREE_HAL_ATOMIC_WIDTH_32,
+                     IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE);
+}
+
+TEST_P(GpuNativeDispatchTest,
+       ZeroComputeRmw64OrderingPreservesIndependentShaderWrites) {
+  RunControlOrdering(ControlKind::kRmw, IREE_HAL_ATOMIC_WIDTH_64,
+                     IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE);
 }
 
 TEST_P(GpuNativeDispatchTest, FixedArgumentsSurviveQueuedReplayAndTrim) {

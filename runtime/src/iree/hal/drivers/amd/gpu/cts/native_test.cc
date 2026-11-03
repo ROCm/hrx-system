@@ -24,6 +24,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/signal.h"
 #include "iree/hal/drivers/amd/status.h"
 #include "iree/hal/memory/fixed_block_pool.h"
+#include "iree/hal/memory_backend.h"
 #include "iree/hal/slab_pool.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -320,7 +321,7 @@ TEST_P(GpuNativeTransferTest, CapturedUpdatesAndDeferredHostTransfers) {
 TEST_P(GpuNativeTransferTest,
        BulkTransfersWrapStagingAndRetainDeferredBuffers) {
   using iree::hal::cts::Ref;
-  constexpr size_t kBulkLength = 3 * 1024 * 1024 + 37;
+  constexpr size_t kBulkLength = 17 * 1024 * 1024 + 37;
   Ref<iree_hal_buffer_t> buffer;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       pool_, iree_hal_make_pool_reservation_request(kBulkLength + 3, 4),
@@ -371,6 +372,60 @@ TEST_P(GpuNativeTransferTest,
     EXPECT_EQ(target.front(), 0xCC);
     EXPECT_EQ(target.back(), 0xCC);
     EXPECT_TRUE(std::equal(source.begin(), source.end(), target.begin() + 1));
+  }
+}
+
+TEST_P(GpuNativeTransferTest, SmallDownloadsRetainEveryHostDestination) {
+  constexpr size_t kDownloadCount = 37;
+  constexpr size_t kDownloadLength = 17;
+  std::array<uint8_t, kDownloadCount * kDownloadLength> source;
+  for (size_t i = 0; i < source.size(); ++i) {
+    source[i] = static_cast<uint8_t>(i * 29 + 7);
+  }
+  std::array<std::array<uint8_t, kDownloadLength + 2>, kDownloadCount> targets;
+  std::array<iree_hal_transfer_operation_t, kDownloadCount> downloads = {};
+  for (size_t i = 0; i < downloads.size(); ++i) {
+    targets[i].fill(0xCC);
+    downloads[i] = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+        .download =
+            {
+                .source_buffer = buffers_[0],
+                .source_offset = 3 + i * kDownloadLength,
+                .target = targets[i].data() + 1,
+                .length = kDownloadLength,
+            },
+    };
+  }
+  uint64_t ready = 1, produced = 1, downloaded = 2;
+  // The small argument ring bounds each download run. Distinct row identities
+  // and guarded destinations prove each retirement scatters the correct bytes,
+  // and completion covers every host copy across partial rows and ring reuse.
+  IREE_ASSERT_OK(iree_hal_queue_transfer(
+      queues_[1], {1, &timeline_, &produced}, {1, &timeline_, &downloaded},
+      downloads.size(), downloads.data(), Barriers()));
+  const iree_hal_transfer_operation_t update = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE,
+      .update =
+          {
+              .source_buffer = source.data(),
+              .target_buffer = buffers_[0],
+              .target_offset = 3,
+              .length = source.size(),
+          },
+  };
+  IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], {1, &gate_, &ready},
+                                         {1, &timeline_, &produced}, 1, &update,
+                                         Barriers()));
+  ReleaseBuffers();
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, ready, nullptr));
+  Wait(downloaded);
+  for (size_t i = 0; i < targets.size(); ++i) {
+    const auto& target = targets[i];
+    EXPECT_EQ(target.front(), 0xCC);
+    EXPECT_EQ(target.back(), 0xCC);
+    const auto first = source.begin() + i * kDownloadLength;
+    EXPECT_TRUE(std::equal(first, first + kDownloadLength, target.begin() + 1));
   }
 }
 
@@ -455,6 +510,63 @@ TEST_P(GpuNativeTransferTest, DeferredHostCallForwardsOutputsToNestedTransfer) {
     value ^= 0xA5;
   }
   EXPECT_EQ(output, source);
+}
+
+TEST_P(GpuNativeTransferTest, BulkCopiesAndFillsCrossNativePacketBoundaries) {
+  using iree::hal::cts::Ref;
+  constexpr size_t kBulkLength = 32 * 1024 * 1024 + 37;
+  Ref<iree_hal_buffer_t> source_buffer, target_buffer;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(kBulkLength + 1, 4),
+      iree_infinite_timeout(), source_buffer.out()));
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(kBulkLength + 8, 4),
+      iree_infinite_timeout(), target_buffer.out()));
+  std::vector<uint8_t> source(kBulkLength), target(kBulkLength + 8, 0);
+  for (size_t i = 0; i < source.size(); ++i) {
+    source[i] = static_cast<uint8_t>((i * 29) ^ (i >> 9) ^ (i >> 24));
+  }
+  const uint8_t guard = 0xCC;
+  uint64_t completed = 0, uploaded = 1, filled = 2, copied = 3, downloaded = 4;
+  iree_status_t status = iree_hal_queue_upload(
+      queues_[0], {}, {1, &timeline_, &uploaded}, source.data(), source_buffer,
+      1, source.size(), Barriers());
+  if (iree_status_is_ok(status)) {
+    completed = uploaded;
+    status = iree_hal_queue_fill(
+        queues_[1], {1, &timeline_, &uploaded}, {1, &timeline_, &filled},
+        target_buffer, 0, target.size(), &guard, sizeof(guard), Barriers(), 0);
+  }
+  if (iree_status_is_ok(status)) {
+    completed = filled;
+    status = iree_hal_queue_copy(
+        queues_[0], {1, &timeline_, &filled}, {1, &timeline_, &copied},
+        source_buffer, 1, target_buffer, 3, source.size(), Barriers(), 0);
+  }
+  if (iree_status_is_ok(status)) {
+    completed = copied;
+    status = iree_hal_queue_download(
+        queues_[1], {1, &timeline_, &copied}, {1, &timeline_, &downloaded},
+        target_buffer, 0, target.data(), target.size(), Barriers());
+  }
+  if (iree_status_is_ok(status)) {
+    completed = downloaded;
+  }
+  // Captures own both buffers through the last packet and any host copy.
+  // Borrowed host bytes also survive an error after accepting a prefix.
+  source_buffer.reset();
+  target_buffer.reset();
+  if (completed) {
+    status = iree_status_join(
+        status, iree_hal_semaphore_wait(timeline_, completed,
+                                        iree_infinite_timeout(), 0));
+  }
+  IREE_ASSERT_OK(status);
+  EXPECT_TRUE(std::equal(source.begin(), source.end(), target.begin() + 3));
+  EXPECT_TRUE(std::all_of(target.begin(), target.begin() + 3,
+                          [guard](uint8_t value) { return value == guard; }));
+  EXPECT_TRUE(std::all_of(target.end() - 5, target.end(),
+                          [guard](uint8_t value) { return value == guard; }));
 }
 
 TEST_P(GpuNativeTransferTest,
@@ -546,6 +658,61 @@ TEST_P(GpuNativeTransferTest, ManyFillsAndUnalignedCopiesRetireInPieces) {
   Wait(downloaded);
   std::vector<uint8_t> expected(kLength, guard);
   std::memcpy(expected.data() + 3, source.data() + 1, kLength - 4);
+  EXPECT_EQ(output, expected);
+}
+
+TEST_P(GpuNativeTransferTest, CopiesPreserveEveryVectorAlignmentAndTail) {
+  std::array<uint8_t, 32> source;
+  for (size_t i = 0; i < source.size(); ++i) {
+    source[i] = static_cast<uint8_t>(i * 31 + 7);
+  }
+  const uint8_t guard = 0xCC;
+  std::vector<uint8_t> expected(kLength, guard), output(kLength, 0);
+  std::vector<iree_hal_transfer_operation_t> copies;
+  for (size_t source_alignment = 0; source_alignment < 16; ++source_alignment) {
+    for (size_t target_alignment = 0; target_alignment < 16;
+         ++target_alignment) {
+      for (size_t length : {size_t{16}, size_t{17}}) {
+        const size_t target_offset = copies.size() * 64 + target_alignment;
+        copies.push_back({
+            .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
+            .copy =
+                {
+                    .source_buffer = buffers_[0],
+                    .source_offset = source_alignment,
+                    .target_buffer = buffers_[1],
+                    .target_offset = target_offset,
+                    .length = length,
+                },
+        });
+        std::memcpy(expected.data() + target_offset,
+                    source.data() + source_alignment, length);
+      }
+    }
+  }
+  uint64_t uploaded = 1, filled = 2, primed = 3, copied = 4, downloaded = 5;
+  IREE_ASSERT_OK(iree_hal_queue_upload(
+      queues_[0], {}, {1, &timeline_, &uploaded}, source.data(), buffers_[0], 0,
+      source.size(), Barriers()));
+  IREE_ASSERT_OK(iree_hal_queue_fill(
+      queues_[0], {1, &timeline_, &uploaded}, {1, &timeline_, &filled},
+      buffers_[1], 0, kLength, &guard, sizeof(guard), Barriers(), 0));
+  // A byte upload can leave less than one argument record at the end of the
+  // staging allocation. The following batch must wrap and keep progressing.
+  std::array<uint8_t, 1000> staging_prefix;
+  std::fill(staging_prefix.begin(), staging_prefix.end(), guard);
+  IREE_ASSERT_OK(iree_hal_queue_upload(queues_[1], {1, &timeline_, &filled},
+                                       {1, &timeline_, &primed},
+                                       staging_prefix.data(), buffers_[1], 0,
+                                       staging_prefix.size(), Barriers()));
+  IREE_ASSERT_OK(iree_hal_queue_transfer(
+      queues_[1], {1, &timeline_, &primed}, {1, &timeline_, &copied},
+      copies.size(), copies.data(), Barriers()));
+  IREE_ASSERT_OK(iree_hal_queue_download(
+      queues_[1], {1, &timeline_, &copied}, {1, &timeline_, &downloaded},
+      buffers_[1], 0, output.data(), output.size(), Barriers()));
+  ReleaseBuffers();
+  Wait(downloaded);
   EXPECT_EQ(output, expected);
 }
 
@@ -851,7 +1018,16 @@ TEST_F(GpuNativeTest, NonfinalReleaseFromFailedDependencyCallback) {
   EXPECT_EQ(allocator_.live_count.load(), 0u);
 }
 
-TEST_F(GpuNativeTest, RecordedAtomicsFollowReplacementBacking) {
+class GpuNativeAtomicTest : public GpuNativeTest,
+                            public ::testing::WithParamInterface<
+                                std::pair<amdf_queue_command_type_t, bool>> {
+ protected:
+  amdf_queue_command_type_t command_type() const override {
+    return GetParam().first;
+  }
+};
+
+TEST_P(GpuNativeAtomicTest, RecordedAtomicsFollowReplacementBacking) {
   using iree::hal::cts::Ref;
   Create();
   if (HasFatalFailure()) {
@@ -895,6 +1071,17 @@ TEST_F(GpuNativeTest, RecordedAtomicsFollowReplacementBacking) {
       iree_hal_buffer_query_atomic_operations(target, queue_scope);
   ASSERT_TRUE(iree_all_bits_set(atomic_operations.device_scope_32,
                                 IREE_HAL_ATOMIC_OPERATION_FLAG_STORE));
+  const auto transitions = iree_hal_buffer_transition_table(target);
+  iree_hal_memory_transition_pair_t pair;
+  IREE_ASSERT_OK(iree_hal_memory_transition_prepare_pair(
+      transitions, queue_scope, queue_scope, IREE_HAL_MEMORY_TRANSITION_RELEASE,
+      &pair));
+  const auto pair_info =
+      iree_hal_memory_transition_query_info(transitions, pair);
+  EXPECT_EQ(pair_info.producer_atomics.device_scope_32,
+            atomic_operations.device_scope_32);
+  EXPECT_EQ(pair_info.consumer_atomics.device_scope_32,
+            atomic_operations.device_scope_32);
   const bool supports_add =
       iree_all_bits_set(atomic_operations.device_scope_32,
                         IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD);
@@ -902,12 +1089,19 @@ TEST_F(GpuNativeTest, RecordedAtomicsFollowReplacementBacking) {
   Ref<iree_hal_command_buffer_t> commands;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       access.family, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_ATOMIC, 0, commands.out()));
+      IREE_HAL_COMMAND_CATEGORY_ATOMIC, GetParam().second ? 1 : 0,
+      commands.out()));
+  const auto reference =
+      GetParam().second
+          ? iree_hal_make_indirect_buffer_ref(0, 0, sizeof(uint32_t))
+          : iree_hal_make_buffer_ref(target, 0, sizeof(uint32_t));
+  const iree_hal_buffer_binding_t binding = {target, 0, sizeof(uint32_t)};
+  const iree_hal_buffer_binding_table_t table = {GetParam().second ? 1u : 0u,
+                                                 &binding};
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(commands));
   IREE_ASSERT_OK(iree_hal_command_buffer_atomic_store(
       commands, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
-      IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
-      iree_hal_make_buffer_ref(target, 0, sizeof(uint32_t)),
+      IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, reference,
       {
           .value = 99,
           .flags = IREE_HAL_ATOMIC_FLAG_RELEASE,
@@ -916,8 +1110,7 @@ TEST_F(GpuNativeTest, RecordedAtomicsFollowReplacementBacking) {
   if (supports_add) {
     IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(
         commands, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
-        IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
-        iree_hal_make_buffer_ref(target, 0, sizeof(uint32_t)),
+        IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, reference,
         {
             .operand = 1,
             .flags =
@@ -957,7 +1150,7 @@ TEST_F(GpuNativeTest, RecordedAtomicsFollowReplacementBacking) {
                                       {1, &timeline, &mapped}, 1, &mapping, 0));
     IREE_ASSERT_OK(iree_hal_queue_execute(queues_[0], {1, &timeline, &mapped},
                                           {1, &timeline, &executed}, commands,
-                                          {}, 0));
+                                          table, 0));
     uint32_t result = 0;
     IREE_ASSERT_OK(iree_hal_queue_download(
         queues_[0], {1, &timeline, &executed}, {1, &timeline, &read},
@@ -969,7 +1162,55 @@ TEST_F(GpuNativeTest, RecordedAtomicsFollowReplacementBacking) {
   IREE_ASSERT_OK(iree_hal_virtual_buffer_detach(target, all));
 }
 
-TEST_F(GpuNativeTest, BatchedMappingsReplaceProtectAndReleaseNativeBacking) {
+INSTANTIATE_TEST_SUITE_P(
+    Protocol, GpuNativeAtomicTest,
+    ::testing::Values(std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, false),
+                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, true),
+                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, false),
+                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, true)),
+    [](const auto& info) {
+      return std::string(info.param.first == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+                             ? "Aql"
+                             : "Pm4") +
+             (info.param.second ? "Indirect" : "Direct");
+    });
+
+class GpuNativeVirtualBufferTest : public GpuNativeTest {
+ protected:
+  // Exercise the production protocol selected for each physical target.
+  amdf_queue_command_type_t command_type() const override {
+    return AMDF_QUEUE_COMMAND_TYPE_UNKNOWN;
+  }
+
+  // Qualify the complete source contract without acquiring physical backing.
+  // The public constructor must still succeed when a factory supplies a plan.
+  iree_status_t QueryPoolSupport(iree_hal_pool_scope_t scope,
+                                 const iree_hal_slab_pool_options_t& options,
+                                 bool* out_supported) {
+    *out_supported = false;
+    const iree_hal_slab_pool_plan_callback_t callback = {
+        .fn =
+            +[](void* user_data, iree_hal_slab_pool_plan_t* plan) {
+              *static_cast<bool*>(user_data) = true;
+              iree_hal_slab_pool_plan_destroy(plan);
+              return iree_ok_status();
+            },
+        .user_data = out_supported,
+    };
+    const auto* backend = iree_hal_device_memory_backend(device_);
+    iree_status_t status = iree_ok_status();
+    for (iree_host_size_t i = 0;
+         i < backend->factory_count && iree_status_is_ok(status); ++i) {
+      const auto* factory = backend->factories[i];
+      status = factory->query(factory->self, group_, scope, &options, callback,
+                              iree_allocator_system());
+    }
+    return status;
+  }
+};
+
+TEST_F(GpuNativeVirtualBufferTest,
+       BatchedMappingsReplaceProtectAndReleaseNativeBacking) {
   using iree::hal::cts::Ref;
   Create();
   if (HasFatalFailure()) {
@@ -1149,6 +1390,170 @@ TEST_F(GpuNativeTest, BatchedMappingsReplaceProtectAndReleaseNativeBacking) {
   iree_hal_pool_stats_t statistics;
   iree_hal_pool_query_stats(pool, &statistics);
   EXPECT_EQ(statistics.reservation_count, 0u);
+}
+
+TEST_F(GpuNativeVirtualBufferTest,
+       MixedBackingPreservesCommonHostAndGpuAddresses) {
+  using iree::hal::cts::Ref;
+  Create();
+  if (HasFatalFailure() || IsSkipped()) {
+    return;
+  }
+  uint32_t physical_node = IREE_HAL_TOPOLOGY_NODE_ORDINAL_INVALID;
+  const auto* topology = iree_hal_device_group_topology(group_);
+  for (iree_host_size_t i = 0; i < iree_hal_topology_node_count(topology);
+       ++i) {
+    const auto* node = iree_hal_topology_node_at(topology, i);
+    if (node->kind == IREE_HAL_TOPOLOGY_NODE_KIND_PHYSICAL_DEVICE &&
+        node->device_ordinal ==
+            iree_hal_device_topology_info(device_)->topology_index) {
+      physical_node = node->ordinal;
+      break;
+    }
+  }
+  ASSERT_NE(physical_node, IREE_HAL_TOPOLOGY_NODE_ORDINAL_INVALID);
+  iree_hal_pool_family_access_t family = {
+      .family = iree_hal_queue_family(queues_[0]),
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE,
+  };
+  iree_hal_slab_pool_options_t pool_options;
+  iree_hal_slab_pool_options_initialize(&pool_options);
+  pool_options.placement = {IREE_HAL_POOL_PLACEMENT_REQUIRED, physical_node};
+  bool supported = false;
+  IREE_ASSERT_OK(QueryPoolSupport({1, &family, {}}, pool_options, &supported));
+  if (!supported) {
+    GTEST_SKIP() << "no device-local remappable backing route";
+  }
+  Ref<iree_hal_pool_t> local_pool;
+  IREE_ASSERT_OK(
+      iree_hal_slab_pool_create(group_, {1, &family, {}}, &pool_options,
+                                iree_allocator_system(), local_pool.out()));
+  pool_options.placement = {};
+  // The CPU-accessible half requires cached host backing. Public visibility
+  // alone can select a device-local allocation with a fixed CPU aperture.
+  const iree_hal_pool_scope_t scope = {
+      1,
+      &family,
+      {IREE_HAL_MEMORY_ACCESS_ALL, IREE_HAL_MAPPING_MODE_PERSISTENT,
+       IREE_HAL_HOST_MEMORY_PROPERTY_WRITE_BACK}};
+  IREE_ASSERT_OK(QueryPoolSupport(scope, pool_options, &supported));
+  if (!supported) {
+    GTEST_SKIP() << "no cached host-accessible remappable backing route";
+  }
+  Ref<iree_hal_pool_t> shared_pool;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(group_, scope, &pool_options,
+                                           iree_allocator_system(),
+                                           shared_pool.out()));
+  family.interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS;
+  iree_hal_pool_t* sources[] = {local_pool, shared_pool};
+  iree_hal_virtual_buffer_capabilities_t capabilities;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
+      group_, scope, {IREE_ARRAYSIZE(sources), sources},
+      iree_allocator_system(), &capabilities));
+  if (!capabilities.max_byte_length ||
+      !iree_all_bits_set(capabilities.supported_flags,
+                         IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS)) {
+    GTEST_SKIP() << "mixed backing does not support a common host/GPU address";
+  }
+  const auto unit = std::max(capabilities.reservation_granularity,
+                             capabilities.mapping_granularity);
+  // Retain both generations until all mappings are removed. The virtual buffer
+  // owns addresses, while the caller owns the physical backing and its
+  // lifetime.
+  std::array<std::array<Ref<iree_hal_buffer_t>, 2>, 2> backings;
+  const iree_hal_virtual_buffer_options_t options = {
+      .byte_length = 2 * unit,
+      .mapping_granularity = unit,
+      .flags = IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
+  };
+  Ref<iree_hal_buffer_t> target;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_create(
+      group_, scope, {IREE_ARRAYSIZE(sources), sources}, &options,
+      iree_allocator_system(), target.out()));
+  iree_hal_memory_scope_t host, program;
+  IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
+      group_, {IREE_HAL_MEMORY_SITE_HOST, nullptr}, &host));
+  IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
+      group_, {IREE_HAL_MEMORY_SITE_PROGRAM, family.family}, &program));
+  const iree_hal_memory_scope_t all = {
+      iree_hal_device_group_memory_domain(group_), IREE_HAL_MEMORY_SCOPE_ANY};
+  EXPECT_TRUE(iree_hal_virtual_buffer_query_pool_compatibility(target, program,
+                                                               local_pool));
+  EXPECT_FALSE(iree_hal_virtual_buffer_query_pool_compatibility(target, host,
+                                                                local_pool));
+  EXPECT_TRUE(iree_hal_virtual_buffer_query_pool_compatibility(target, all,
+                                                               shared_pool));
+  const iree_hal_buffer_native_binding_slot_t slot = {
+      .index = target.get()
+                   ->memory.contract->scopes[program.id]
+                   .bindings[IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS],
+      .type = IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+  };
+  const auto address =
+      iree_hal_buffer_native_binding(target, slot).device_address;
+  Ref<iree_hal_semaphore_t> completion;
+  CreateSemaphore(completion.out());
+  iree_hal_semaphore_t* timeline = completion;
+  for (size_t epoch = 0; epoch < backings.size(); ++epoch) {
+    for (size_t i = 0; i < backings[epoch].size(); ++i) {
+      IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+          sources[i], iree_hal_make_pool_reservation_request(unit, unit),
+          iree_infinite_timeout(), backings[epoch][i].out()));
+    }
+    std::array<iree_hal_memory_mapping_t, 2> mappings = {{
+        {
+            .target = target,
+            .scope = program,
+            .target_range = {0, unit},
+            .source = backings[epoch][0],
+            .access = IREE_HAL_MEMORY_ACCESS_ALL,
+        },
+        {
+            .target = target,
+            .scope = all,
+            .target_range = {unit, unit},
+            .source = backings[epoch][1],
+            .access = IREE_HAL_MEMORY_ACCESS_ALL,
+        },
+    }};
+    auto invalid = mappings[0];
+    invalid.scope = host;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_PERMISSION_DENIED,
+        iree_hal_queue_map(queues_[0], {}, {}, 1, &invalid, 0));
+    uint64_t mapped = epoch * 3 + 1, copied = mapped + 1, returned = mapped + 2;
+    IREE_ASSERT_OK(iree_hal_queue_map(queues_[0], {}, {1, &timeline, &mapped},
+                                      mappings.size(), mappings.data(), 0));
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(
+        timeline, mapped, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+    iree_byte_span_t host_view;
+    IREE_ASSERT_OK(
+        iree_hal_buffer_native_host_span(target, unit, 512, &host_view));
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(host_view.data), address + unit);
+    EXPECT_EQ(iree_hal_buffer_native_binding(target, slot).device_address,
+              address);
+    auto* words = reinterpret_cast<uint32_t*>(host_view.data);
+    for (uint32_t i = 0; i < 128; ++i) {
+      words[i] = i < 64 ? 0x1000u * (epoch + 1) + i : 0;
+    }
+    IREE_ASSERT_OK(iree_hal_buffer_flush_host_range(target, unit, 512));
+    IREE_ASSERT_OK(iree_hal_queue_copy(queues_[0], {1, &timeline, &mapped},
+                                       {1, &timeline, &copied}, target, unit,
+                                       target, 0, 256, nullptr, 0));
+    IREE_ASSERT_OK(iree_hal_queue_copy(queues_[1], {1, &timeline, &copied},
+                                       {1, &timeline, &returned}, target, 0,
+                                       target, unit + 256, 256, nullptr, 0));
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(timeline, returned,
+                                           iree_infinite_timeout(),
+                                           IREE_ASYNC_WAIT_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_buffer_invalidate_host_range(target, unit, 512));
+    for (uint32_t i = 0; i < 64; ++i) {
+      EXPECT_EQ(words[i], 0x1000u * (epoch + 1) + i);
+      EXPECT_EQ(words[64 + i], words[i]);
+    }
+  }
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_detach(target, all));
 }
 
 }  // namespace

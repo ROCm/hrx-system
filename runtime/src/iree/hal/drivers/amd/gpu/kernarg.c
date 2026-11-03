@@ -111,6 +111,10 @@ static iree_status_t iree_hal_amd_gpu_kernarg_analyze(
           iree_hal_amd_gpu_kernarg_runtime_fields[kind];
       expected_size = field.size;
       layout->requirements |= field.requirements;
+      if (kind ==
+          IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_MULTIGRID_SYNC_ARG) {
+        layout->grid_sync_offset = (uint16_t)argument->offset;
+      }
       ++layout->runtime_copy_count;
       if (kind >=
               IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_X &&
@@ -314,12 +318,14 @@ void iree_hal_amd_gpu_kernarg_layout_emplace_native(
     const iree_hal_amd_gpu_kernarg_layout_t* layout,
     iree_const_byte_span_t constants,
     const iree_hal_amd_gpu_kernarg_inputs_t* inputs, void* target) {
-  if (constants.data_length) {
-    memcpy(target, constants.data, constants.data_length);
+  const iree_host_size_t copy_length =
+      iree_min(constants.data_length, layout->byte_length);
+  if (copy_length) {
+    memcpy(target, constants.data, copy_length);
   }
-  if (constants.data_length < layout->byte_length) {
-    memset((uint8_t*)target + constants.data_length, 0,
-           layout->byte_length - constants.data_length);
+  if (copy_length < layout->byte_length) {
+    memset((uint8_t*)target + copy_length, 0,
+           layout->byte_length - copy_length);
   }
   iree_hal_amd_gpu_kernarg_copy(
       layout->runtime_copy_count,

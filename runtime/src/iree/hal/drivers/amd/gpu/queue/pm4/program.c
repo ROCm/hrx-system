@@ -20,23 +20,30 @@ iree_status_t iree_hal_amd_gpu_pm4_program_pool_initialize(
   iree_hal_amd_gpu_gfxip_version_t gfxip = {
       context->target_info.gfx_ip.major, context->target_info.gfx_ip.minor,
       context->target_info.gfx_ip.stepping};
-  iree_const_byte_span_t fixup_code, blit_code;
-  iree_hal_amd_gpu_image_kernel_t fixup_kernel, blit_kernel;
+  iree_const_byte_span_t code[2 + IREE_HAL_AMD_GPU_CONTROL_PROGRAM_COUNT];
+  iree_hal_amd_gpu_image_kernel_t kernels[IREE_ARRAYSIZE(code)];
   IREE_RETURN_IF_ERROR(
-      iree_hal_amd_gpu_fixup_program_query(gfxip, &fixup_code, &fixup_kernel));
+      iree_hal_amd_gpu_fixup_program_query(gfxip, &code[0], &kernels[0]));
   IREE_RETURN_IF_ERROR(
-      iree_hal_amd_gpu_blit_program_query(gfxip, &blit_code, &blit_kernel));
-  const uint64_t blit_offset = iree_align_uint64(fixup_code.data_length, 256);
-  const uint64_t byte_length =
-      blit_offset + iree_align_uint64(blit_code.data_length, 256) + 256;
+      iree_hal_amd_gpu_blit_program_query(gfxip, &code[1], &kernels[1]));
+  iree_status_t status = iree_ok_status();
+  for (uint32_t i = 0;
+       i < IREE_HAL_AMD_GPU_CONTROL_PROGRAM_COUNT && iree_status_is_ok(status);
+       ++i) {
+    status = iree_hal_amd_gpu_control_program_query(gfxip, i, &code[2 + i],
+                                                    &kernels[2 + i]);
+  }
+  IREE_RETURN_IF_ERROR(status);
+  uint64_t byte_length =
+      256;  // Instruction fetch padding after the final entry.
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(code); ++i) {
+    byte_length += iree_align_uint64(code[i].data_length, 256);
+  }
   iree_byte_span_t contents;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_code_allocate(
       context, &out_pool->storage.resident, &out_pool->storage.upload,
       byte_length, 256, host_allocator, &out_pool->code, &out_pool->code_upload,
       &contents));
-  memset(contents.data, 0, byte_length);
-  memcpy(contents.data, fixup_code.data, fixup_code.data_length);
-  memcpy(contents.data + blit_offset, blit_code.data, blit_code.data_length);
   uint64_t address = 0;
   IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
       context->api->memory_query_address(out_pool->code.handle, 0,
@@ -44,11 +51,21 @@ iree_status_t iree_hal_amd_gpu_pm4_program_pool_initialize(
       "query program builtin address"));
   const amdf_queue_format_features_t format_features =
       context->families[native_family_ordinal].format_features;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_launch_initialize(
-      gfxip, format_features, &fixup_kernel, address, &out_pool->fixup));
-  blit_kernel.entry_offset = blit_offset;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_launch_initialize(
-      gfxip, format_features, &blit_kernel, address, &out_pool->blit));
+  memset(contents.data, 0, byte_length);
+  uint64_t offset = 0;
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(code) && iree_status_is_ok(status);
+       ++i) {
+    memcpy(contents.data + offset, code[i].data, code[i].data_length);
+    kernels[i].entry_offset = offset;
+    iree_hal_amd_gpu_pm4_launch_t* launch = i == 0 ? &out_pool->fixup
+                                            : i == 1
+                                                ? &out_pool->blit
+                                                : &out_pool->control[i - 2];
+    status = iree_hal_amd_gpu_pm4_launch_initialize(
+        gfxip, format_features, &kernels[i], address, launch);
+    offset += iree_align_uint64(code[i].data_length, 256);
+  }
+  IREE_RETURN_IF_ERROR(status);
   return out_pool->code_upload ? iree_ok_status()
                                : iree_hal_amd_gpu_code_publish(
                                      context, NULL, 0, native_family_ordinal,
@@ -93,6 +110,20 @@ uint32_t* iree_hal_amd_gpu_pm4_blit_emit(
   words = iree_hal_amd_gpu_pm4_launch_emit(words, launch, size, partial, 0,
                                            &inputs);
   return iree_hal_amd_gpu_pm4_emit_dispatch_direct(words, groups,
+                                                   launch->dispatch_initiator);
+}
+
+uint32_t* iree_hal_amd_gpu_pm4_control_program_emit(
+    uint32_t* words, const iree_hal_amd_gpu_pm4_launch_t* launch,
+    uint64_t argument_address) {
+  const uint32_t one[3] = {1, 1, 1};
+  const uint32_t partial[3] = {0, 0, 0};
+  const iree_hal_amd_gpu_pm4_launch_inputs_t inputs = {
+      .kernarg_pointer = argument_address,
+  };
+  words =
+      iree_hal_amd_gpu_pm4_launch_emit(words, launch, one, partial, 0, &inputs);
+  return iree_hal_amd_gpu_pm4_emit_dispatch_direct(words, one,
                                                    launch->dispatch_initiator);
 }
 

@@ -109,10 +109,18 @@ TEST(ControlTest, RequirementsMatchExactSiteCellsAndErrorModes) {
       .scope_count = scopes.size(),
       .scopes = scopes.data(),
   };
-  iree_hal_buffer_t buffer = {};
-  buffer.memory.contract = &contract;
-  iree_hal_queue_family_t family = {};
-  family.memory.queue_scope_id = 2;
+  iree_hal_buffer_t buffer = {
+      .memory =
+          {
+              .contract = &contract,
+          },
+  };
+  iree_hal_queue_family_t family = {
+      .memory =
+          {
+              .queue_scope_id = 2,
+          },
+  };
   for (uint32_t cell = 0; cell < 4; ++cell) {
     for (uint32_t operation = 0; operation < 7; ++operation) {
       auto command = iree_hal_amd_gpu_control_wait({
@@ -127,25 +135,113 @@ TEST(ControlTest, RequirementsMatchExactSiteCellsAndErrorModes) {
       const uint32_t required = iree_hal_amd_gpu_control_requirement(command);
       EXPECT_EQ(required, 1u << (cell * 8 + operation));
       scopes[2].atomic_operations = required;
-      IREE_EXPECT_OK(iree_hal_amd_gpu_control_validate_target(&family, &buffer,
-                                                              required, 0));
+      IREE_EXPECT_OK(iree_hal_amd_gpu_control_validate_target(
+          &family, IREE_HAL_MEMORY_SITE_QUEUE, &buffer, required, 0,
+          IREE_HAL_ATOMIC_FLAG_NONE));
       scopes[2].atomic_operations = 0;
       scopes[3].atomic_operations = required;
       IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
                             iree_hal_amd_gpu_control_validate_target(
-                                &family, &buffer, required, 0));
+                                &family, IREE_HAL_MEMORY_SITE_QUEUE, &buffer,
+                                required, 0, IREE_HAL_ATOMIC_FLAG_NONE));
       IREE_EXPECT_STATUS_IS(IREE_STATUS_INCOMPATIBLE,
                             iree_hal_amd_gpu_control_validate_target(
-                                &family, &buffer, 0, required));
+                                &family, IREE_HAL_MEMORY_SITE_QUEUE, &buffer, 0,
+                                required, IREE_HAL_ATOMIC_FLAG_NONE));
       IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
                             iree_hal_amd_gpu_control_validate_target(
-                                &family, &buffer, required, required));
+                                &family, IREE_HAL_MEMORY_SITE_QUEUE, &buffer,
+                                required, required, IREE_HAL_ATOMIC_FLAG_NONE));
     }
   }
   EXPECT_EQ(sizeof(iree_hal_amd_gpu_control_t), 24u);
   EXPECT_EQ(iree_hal_amd_gpu_control_requirement(
                 iree_hal_amd_gpu_control_timestamp()),
             0u);
+}
+
+TEST(ControlTest, ZeroComputeCannotUseShaderCapabilities) {
+  std::array<iree_hal_memory_scope_access_t, 4> scopes = {};
+  std::array<uint32_t, 4> zero_compute = {};
+  iree_hal_memory_contract_t contract = {
+      .scope_count = scopes.size(),
+      .scopes = scopes.data(),
+      .zero_compute_atomic_operations = zero_compute.data(),
+  };
+  iree_hal_buffer_t buffer = {
+      .memory =
+          {
+              .contract = &contract,
+          },
+  };
+  iree_hal_queue_family_t family = {
+      .memory =
+          {
+              .queue_scope_id = 2,
+          },
+  };
+  scopes[2].atomic_operations = scopes[3].atomic_operations = UINT32_MAX;
+  for (uint32_t cell = 0; cell < 4; ++cell) {
+    for (uint32_t operation = 0; operation < 7; ++operation) {
+      const uint32_t required = 1u << (cell * 8 + operation);
+      zero_compute[2] = 0;
+      IREE_EXPECT_STATUS_IS(
+          IREE_STATUS_PERMISSION_DENIED,
+          iree_hal_amd_gpu_control_validate_target(
+              &family, IREE_HAL_MEMORY_SITE_QUEUE, &buffer, required, 0,
+              IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE));
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_INCOMPATIBLE,
+                            iree_hal_amd_gpu_control_validate_target(
+                                &family, IREE_HAL_MEMORY_SITE_QUEUE, &buffer, 0,
+                                required, IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE));
+      zero_compute[2] = required;
+      IREE_EXPECT_OK(iree_hal_amd_gpu_control_validate_target(
+          &family, IREE_HAL_MEMORY_SITE_QUEUE, &buffer, required, 0,
+          IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE));
+    }
+  }
+}
+
+TEST(ControlTest, DirectSelectionUsesTheCapturedCpSubset) {
+  std::array<uint32_t, 4> zero_compute_operations = {};
+  iree_hal_memory_contract_t contract = {
+      .zero_compute_atomic_operations = zero_compute_operations.data(),
+  };
+  iree_hal_buffer_t buffer = {
+      .memory =
+          {
+              .contract = &contract,
+          },
+  };
+  iree_hal_queue_family_t family = {
+      .memory =
+          {
+              .queue_scope_id = 2,
+          },
+  };
+  for (uint8_t width : {32, 64}) {
+    auto command = iree_hal_amd_gpu_control_store({.width = width});
+    for (auto flags :
+         {IREE_HAL_ATOMIC_FLAG_NONE, IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE}) {
+      command.flags = flags;
+      zero_compute_operations[2] =
+          iree_hal_amd_gpu_control_requirement(command);
+      EXPECT_FALSE(
+          iree_hal_amd_gpu_control_uses_program(&family, &buffer, command));
+      command.kind = IREE_HAL_AMD_GPU_CONTROL_WAIT;
+      EXPECT_TRUE(
+          iree_hal_amd_gpu_control_uses_program(&family, &buffer, command));
+      command.kind = IREE_HAL_AMD_GPU_CONTROL_STORE;
+    }
+  }
+  // Reservations retain a fixed shader contract even when a currently
+  // attached allocation could also use CP.
+  zero_compute_operations[2] = 0;
+  EXPECT_TRUE(iree_hal_amd_gpu_control_uses_program(
+      &family, &buffer,
+      iree_hal_amd_gpu_control_store({.width = IREE_HAL_ATOMIC_WIDTH_64})));
+  EXPECT_FALSE(iree_hal_amd_gpu_control_uses_program(
+      &family, &buffer, iree_hal_amd_gpu_control_timestamp()));
 }
 
 }  // namespace

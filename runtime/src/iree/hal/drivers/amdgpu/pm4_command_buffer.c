@@ -2547,6 +2547,8 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_prepare_atomic_target(
     iree_hal_atomic_target_error_mode_t target_error_mode,
     iree_hal_amdgpu_pm4_buffer_ref_record_t* out_target,
     iree_hal_amdgpu_atomic_memory_cell_flags_t* out_required_cell) {
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_atomic_memory_validate_flags(atomic_flags));
   memset(out_target, 0, sizeof(*out_target));
   out_target->binding_slot = UINT32_MAX;
   *out_required_cell =

@@ -97,6 +97,10 @@ typedef struct iree_hal_amd_gpu_executable_t {
   amdf_queue_command_type_t command_type;
   // Size of one protocol-specific function, used by cold shared reflection.
   uint32_t function_size;
+  // Native per-wave trap reserve used to admit cooperative residency.
+  uint32_t scalar_register_reservation;
+  // Maximum grid extent represented by the compiler's barrier algorithm.
+  uint32_t maximum_cooperative_workgroup_count;
   // Dense variant-major functions; dispatch selection needs no placement walk.
   void* functions;
   // Inline placements sharing one parsed image and argument layout.
@@ -451,8 +455,10 @@ typedef struct iree_hal_amd_gpu_executable_transition_query_t {
   const amdf_api_t* api;
   // Exact sealed-group queue ID; the following ID is program execution.
   iree_hal_memory_scope_id_t queue_scope_id;
-  // Established host view and exact native queue access, respectively.
-  amdf_memory_site_t sites[2];
+  // Established host, native queue, and shader sites, respectively.
+  amdf_memory_site_t sites[3];
+  // CPU-only operations qualified by the achieved host mapping.
+  iree_hal_atomic_operation_capabilities_t host_atomics;
   // Largest independently maintained granule established by the native pairs.
   iree_device_size_t maintenance_alignment;
 } iree_hal_amd_gpu_executable_transition_query_t;
@@ -462,28 +468,62 @@ static iree_status_t iree_hal_amd_gpu_executable_query_transition(
     iree_hal_memory_scope_id_t consumer,
     iree_hal_memory_pair_info_t* out_info) {
   iree_hal_amd_gpu_executable_transition_query_t* query = user_data;
-  // The native API qualifies queue cache operations, not shader instructions.
-  if (producer == query->queue_scope_id + 1 ||
-      consumer == query->queue_scope_id + 1) {
-    return iree_ok_status();
-  }
   if ((producer == 1 || consumer == 1) && !query->sites[0].value.host.mapping) {
     return iree_ok_status();
   }
+  const uint32_t producer_site = producer == 1                       ? 0
+                                 : producer == query->queue_scope_id ? 1
+                                                                     : 2;
+  const uint32_t consumer_site = consumer == 1                       ? 0
+                                 : consumer == query->queue_scope_id ? 1
+                                                                     : 2;
+  amdf_memory_pair_atomics_t atomics = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_ATOMICS,
+      .structure_size = sizeof(atomics),
+  };
   amdf_memory_pair_info_t native = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
       .structure_size = sizeof(native),
+      .next = &atomics,
   };
-  const amdf_status_t status = query->api->memory_query_pair_info(
-      &query->sites[producer == 1 ? 0 : 1],
-      &query->sites[consumer == 1 ? 0 : 1], &native);
-  if (status == amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
+  amdf_status_t native_status = query->api->memory_query_pair_info(
+      &query->sites[producer_site], &query->sites[consumer_site], &native);
+  if (native_status == amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(
-      IREE_HAL_AMD_STATUS_FROM_AMDF(status, "memory_query_pair_info"));
+      IREE_HAL_AMD_STATUS_FROM_AMDF(native_status, "memory_query_pair_info"));
+  // Global queue controls use shader recipes, while cache maintenance remains
+  // a queue operation. Qualify the atomic issuer independently of that
+  // executor.
+  if (producer_site == 1 || consumer_site == 1) {
+    atomics.producer = atomics.consumer =
+        (amdf_memory_atomic_capabilities_t){0};
+    amdf_memory_pair_info_t shader = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+        .structure_size = sizeof(shader),
+        .next = &atomics,
+    };
+    native_status = query->api->memory_query_pair_info(
+        &query->sites[producer == 1 ? 0 : 2],
+        &query->sites[consumer == 1 ? 0 : 2], &shader);
+    if (native_status != amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
+      IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
+          native_status, "memory_query_pair_info(program)"));
+    }
+    native.atomic_reach = shader.atomic_reach;
+  }
   IREE_RETURN_IF_ERROR(
       iree_hal_amd_fabric_memory_translate_pair(&native, out_info));
+  if (!producer_site && !consumer_site) {
+    out_info->producer_atomics = out_info->consumer_atomics =
+        query->host_atomics;
+  } else {
+    out_info->producer_atomics =
+        iree_hal_amd_fabric_memory_translate_program_atomics(&atomics.producer);
+    out_info->consumer_atomics =
+        iree_hal_amd_fabric_memory_translate_program_atomics(&atomics.consumer);
+  }
   query->maintenance_alignment =
       iree_max(query->maintenance_alignment,
                iree_max(out_info->release.range_granularity,
@@ -493,7 +533,8 @@ static iree_status_t iree_hal_amd_gpu_executable_query_transition(
 
 static iree_status_t iree_hal_amd_gpu_executable_initialize_contracts(
     iree_hal_amd_gpu_executable_t* executable,
-    const iree_hal_amd_gpu_executable_options_t* options) {
+    const iree_hal_amd_gpu_executable_options_t* options,
+    const amdf_memory_atomic_capabilities_t* native_atomics) {
   const iree_hal_queue_family_t* family = executable->base.queue_family;
   const uint16_t types[] = {
       IREE_HAL_BUFFER_INTERFACE_HOST,
@@ -529,9 +570,26 @@ static iree_status_t iree_hal_amd_gpu_executable_initialize_contracts(
                               options->native_family_ordinal,
                       },
               },
+              {
+                  .type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
+                  .structure_size = sizeof(amdf_memory_site_t),
+                  .kind = AMDF_MEMORY_SITE_KIND_PROGRAM,
+                  .value.program =
+                      {
+                          .memory = executable->memories[0].handle,
+                          .access_ordinal = 0,
+                      },
+              },
           },
+      .host_atomics = iree_hal_atomic_operation_capabilities_for_host(
+          iree_any_bit_set(executable->memories[0].host_features,
+                           AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS)
+              ? IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL
+              : 0),
       .maintenance_alignment = 1,
   };
+  const iree_hal_atomic_operation_capabilities_t program_atomics =
+      iree_hal_amd_fabric_memory_translate_program_atomics(native_atomics);
   uint32_t access_classes = 0;
   for (iree_host_size_t i = 0; i < executable->image.symbol_count; ++i) {
     access_classes |= 1u << iree_hal_amd_gpu_executable_global_access(
@@ -591,6 +649,8 @@ static iree_status_t iree_hal_amd_gpu_executable_initialize_contracts(
     if (host_access) {
       contract->scopes[1].interfaces = 1u << IREE_HAL_BUFFER_INTERFACE_HOST;
       contract->scopes[1].bindings[IREE_HAL_BUFFER_INTERFACE_HOST] = 0;
+      iree_hal_memory_scope_access_set_atomic_operations(&contract->scopes[1],
+                                                         query.host_atomics);
     }
     iree_hal_memory_scope_access_t* queue =
         &contract->scopes[family->memory.queue_scope_id];
@@ -598,6 +658,15 @@ static iree_status_t iree_hal_amd_gpu_executable_initialize_contracts(
     queue->interfaces = 1u << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS;
     queue->bindings[IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS] = 1;
     contract->scopes[family->memory.queue_scope_id + 1] = *queue;
+    for (uint32_t kind = IREE_HAL_MEMORY_SITE_QUEUE;
+         kind <= IREE_HAL_MEMORY_SITE_PROGRAM; ++kind) {
+      iree_hal_memory_scope_access_set_atomic_operations(
+          &contract->scopes[family->memory.queue_scope_id +
+                            (kind - IREE_HAL_MEMORY_SITE_QUEUE)],
+          iree_hal_memory_site_filter_atomic_operations(
+              (iree_hal_memory_site_t){kind, family}, program_atomics));
+    }
+    iree_hal_memory_contract_finalize_atomic_operations(contract);
     status = iree_hal_memory_contract_initialize_transitions(
         contract, iree_hal_amd_gpu_executable_query_transition, &query);
   }
@@ -663,9 +732,14 @@ static iree_status_t iree_hal_amd_gpu_executable_load_image(
           variant->memory->handle, 0, AMDF_MEMORY_ADDRESS_GPU,
           &variant->bindings[1].device_address),
       "memory_query_address(code)"));
+  amdf_memory_program_atomics_t program_atomics = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PROGRAM_ATOMICS,
+      .structure_size = sizeof(program_atomics),
+  };
   amdf_memory_access_info_t access_info = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
       .structure_size = sizeof(access_info),
+      .next = !variant_ordinal ? &program_atomics : NULL,
   };
   IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
       executable->context->api->memory_query_access_info(
@@ -813,6 +887,10 @@ static iree_status_t iree_hal_amd_gpu_executable_load_image(
     status =
         iree_hal_amd_gpu_aql_code_publish(options->aql_code, variant->memory);
   }
+  if (iree_status_is_ok(status) && !variant_ordinal) {
+    status = iree_hal_amd_gpu_executable_initialize_contracts(
+        executable, options, &program_atomics.operations);
+  }
   return status;
 }
 
@@ -903,8 +981,6 @@ static iree_status_t iree_hal_amd_gpu_executable_prepare(
   }
   if (iree_status_is_ok(status)) {
     executable->memories[0].exports.classes = classes;
-    status =
-        iree_hal_amd_gpu_executable_initialize_contracts(executable, options);
   }
   return status;
 }
@@ -937,7 +1013,7 @@ iree_status_t iree_hal_amd_gpu_executable_create(
   const uint32_t variant_count =
       tsan_enabled && options->tsan ? options->tsan->provisioned_count : 1;
   iree_host_size_t exports_offset = 0, variants_offset = 0, memories_offset = 0,
-                   addresses_offset = 0, scope_ordinals_offset = 0,
+                   addresses_offset = 0, scope_facts_offset = 0,
                    tsan_offset = 0;
   iree_host_size_t function_count = 0, total_packet_count = 0;
   iree_host_size_t packet_count = 0, packets_offset = 0, program_offset = 0;
@@ -961,8 +1037,9 @@ iree_status_t iree_hal_amd_gpu_executable_create(
                           &variants_offset),
         IREE_STRUCT_FIELD(variant_count, iree_hal_amd_fabric_memory_t,
                           &memories_offset),
-        IREE_STRUCT_FIELD(family->memory.queue_scope_id + 2, uint32_t,
-                          &scope_ordinals_offset),
+        IREE_STRUCT_FIELD(family->memory.queue_scope_id + 2,
+                          iree_hal_amd_fabric_memory_scope_facts_t,
+                          &scope_facts_offset),
         IREE_STRUCT_FIELD(tsan_enabled ? 1 : 0,
                           iree_hal_amd_gpu_executable_tsan_t, &tsan_offset),
         IREE_STRUCT_FIELD(tsan_enabled ? 256 : 0, uint64_t, &addresses_offset),
@@ -998,6 +1075,29 @@ iree_status_t iree_hal_amd_gpu_executable_create(
     executable->variant_count = variant_count;
     executable->command_type = command_type;
     executable->function_size = function_size;
+    const iree_hal_amd_gpu_grid_sync_strategy_t grid_sync_strategy =
+        iree_hal_amd_gpu_grid_sync_select_strategy(options->target->version);
+    if (grid_sync_strategy != IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_NONE) {
+      executable->maximum_cooperative_workgroup_count =
+          grid_sync_strategy == IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_MEMORY
+              ? UINT16_MAX
+              : UINT32_MAX;
+    }
+    const amdf_queue_format_features_t format_features =
+        context->families[options->native_family_ordinal].format_features;
+    executable->scalar_register_reservation =
+        command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4
+            ? (format_features &
+                       AMDF_GPU_PM4_FORMAT_FEATURE_COMPUTE_TRAP_PRESENT
+                   ? 16u
+                   : 0u)
+            : (format_features &
+                       AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_16
+                   ? 16u
+               : format_features &
+                       AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_0
+                   ? 0u
+                   : UINT32_MAX);
     executable->functions = (void*)((uint8_t*)executable + functions_offset);
     executable->variants = (void*)((uint8_t*)executable + variants_offset);
     executable->memories = (void*)((uint8_t*)executable + memories_offset);
@@ -1018,13 +1118,14 @@ iree_status_t iree_hal_amd_gpu_executable_create(
     for (uint32_t v = 0; v < variant_count; ++v) {
       iree_hal_amd_gpu_executable_variant_t* variant = &executable->variants[v];
       variant->memory = &executable->memories[v];
-      // Every admitted scope uses this image's sole native access at ordinal
-      // zero. The executable allocation initializes the shared table to zero.
+      // Every admitted scope uses native access zero. Queue atomics use shader
+      // recipes, so the CP subset remains zero in this initialized table.
       variant->binding_facts = (iree_hal_amd_fabric_memory_binding_facts_t){
           .memory = variant->memory,
-          .scope_access_ordinals =
-              (const uint32_t*)((const uint8_t*)executable +
-                                scope_ordinals_offset),
+          .scope_facts =
+              (const iree_hal_amd_fabric_memory_scope_facts_t*)((const uint8_t*)
+                                                                    executable +
+                                                                scope_facts_offset),
       };
       variant->functions = (uint8_t*)executable->functions +
                            (iree_host_size_t)v *
@@ -1144,7 +1245,7 @@ const uint64_t* iree_hal_amd_gpu_executable_queue_image_addresses(
 
 iree_status_t iree_hal_amd_gpu_executable_query_dispatch_concurrency(
     iree_hal_executable_t* base_executable,
-    iree_hal_executable_function_t token, uint32_t scalar_register_reservation,
+    iree_hal_executable_function_t token,
     iree_hal_queue_dispatch_concurrency_params_t params,
     iree_hal_queue_dispatch_concurrency_t* out_concurrency) {
   iree_hal_amd_gpu_executable_t* executable = (void*)base_executable;
@@ -1154,7 +1255,53 @@ iree_status_t iree_hal_amd_gpu_executable_query_dispatch_concurrency(
       &executable->context->target_info,
       &executable->image.kernels[token.value],
       &executable->image.metadata.kernels[token.value],
-      scalar_register_reservation, params, out_concurrency);
+      executable->scalar_register_reservation, params, out_concurrency);
+}
+
+iree_status_t iree_hal_amd_gpu_executable_validate_cooperative_dispatch(
+    iree_hal_executable_t* base, iree_hal_executable_function_t token,
+    const iree_hal_amd_gpu_dispatch_geometry_t* geometry,
+    iree_hal_dispatch_flags_t flags) {
+  if (iree_hal_dispatch_uses_indirect_parameters(flags)) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "cooperative indirect grids require device-time residency admission");
+  }
+  if (!geometry->workgroup_count[0] || !geometry->workgroup_count[1] ||
+      !geometry->workgroup_count[2]) {
+    return iree_ok_status();
+  }
+  const iree_hal_amd_gpu_executable_t* executable = (void*)base;
+  uint64_t count = 1;
+  for (uint32_t i = 0; i < 3; ++i) {
+    if (!iree_checked_mul_u64(count, geometry->workgroup_count[i], &count) ||
+        count > executable->maximum_cooperative_workgroup_count) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "cooperative grid exceeds the device-library barrier counter");
+    }
+  }
+  const iree_hal_queue_dispatch_concurrency_params_t params = {
+      .workgroup_size = {geometry->workgroup_size[0],
+                         geometry->workgroup_size[1],
+                         geometry->workgroup_size[2]},
+      .dynamic_workgroup_local_memory =
+          geometry->group_segment_byte_length -
+          executable->image.metadata.kernels[token.value]
+              .group_segment_fixed_size};
+  iree_hal_queue_dispatch_concurrency_t concurrency;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_dispatch_query_concurrency(
+      &executable->context->target_info,
+      &executable->image.kernels[token.value],
+      &executable->image.metadata.kernels[token.value],
+      executable->scalar_register_reservation, params, &concurrency));
+  if (count >
+      iree_hal_queue_dispatch_concurrency_total_workgroup_count(concurrency)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "cooperative grid cannot be simultaneously resident");
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amd_gpu_executable_profile_metadata(

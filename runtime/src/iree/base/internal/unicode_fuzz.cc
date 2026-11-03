@@ -200,13 +200,14 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     iree_host_size_t out_length = 0;
     iree_status_t status =
         iree_unicode_compose(input, compose_buffer, size + 1, &out_length);
+    iree_status_code_t status_code = iree_status_consume_code(status);
 
     // Status must be OK or RESOURCE_EXHAUSTED (for very long combining seqs).
     // Any other status indicates a bug in the compose function.
-    FUZZ_ASSERT(iree_status_is_ok(status) ||
-                iree_status_code(status) == IREE_STATUS_RESOURCE_EXHAUSTED);
+    FUZZ_ASSERT(status_code == IREE_STATUS_OK ||
+                status_code == IREE_STATUS_RESOURCE_EXHAUSTED);
 
-    if (iree_status_is_ok(status)) {
+    if (status_code == IREE_STATUS_OK) {
       // Invariant: output length must not exceed input length.
       // Composition can only shrink (combining base + mark -> precomposed).
       FUZZ_ASSERT(out_length <= input.size);
@@ -215,8 +216,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
       iree_string_view_t output =
           iree_make_string_view(compose_buffer, out_length);
       FUZZ_ASSERT(iree_unicode_utf8_validate(output));
-    } else {
-      iree_status_ignore(status);
     }
     delete[] compose_buffer;
   }

@@ -128,7 +128,31 @@ class PreparedContractBuffer {
 
 TEST(XdnaDeviceTest, PublishesMemoryProgressBackend) {
   QueueHarness harness;
+  harness.native.pci_address = {
+      .available = 1,
+      .domain = 3,
+      .bus = 0x42,
+      .device = 5,
+      .function = 1,
+  };
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+
+  const auto* identity =
+      iree_hal_device_spec_identity(iree_hal_device_spec(harness.device));
+  ASSERT_NE(identity, nullptr);
+  EXPECT_EQ(identity->vendor_id, 0x1022u);
+  EXPECT_EQ(identity->device_id, 0x17f0u);
+  EXPECT_EQ(identity->revision_id, 0x11u);
+  ASSERT_EQ(identity->physical_device_count, 1u);
+  const auto& physical = identity->physical_devices[0].identity;
+  EXPECT_EQ(physical.flags,
+            IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_PCI_ADDRESS |
+                IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_NUMA_NODE);
+  EXPECT_EQ(physical.numa.node_id, harness.context->host_numa_node);
+  EXPECT_EQ(physical.pci.domain, harness.native.pci_address.domain);
+  EXPECT_EQ(physical.pci.bus, harness.native.pci_address.bus);
+  EXPECT_EQ(physical.pci.device, harness.native.pci_address.device);
+  EXPECT_EQ(physical.pci.function, harness.native.pci_address.function);
 
   const iree_hal_memory_backend_t* base =
       iree_hal_device_memory_backend(harness.device);

@@ -41,6 +41,12 @@ iree_status_t iree_hal_amd_gpu_aql_dispatch_prepare(
     iree_host_size_t binding_count, iree_hal_dispatch_flags_t flags,
     iree_hal_amd_gpu_dispatch_geometry_t* out_dispatch);
 
+// One ordered workitem initializes hardware GWS from the private grid record.
+// The following ordered user dispatch joins its completion before consuming
+// resource zero. Memory-barrier targets emit no initializer.
+iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_grid_sync_packet(
+    uint64_t kernel_object, uint64_t grid_sync);
+
 // Encodes admitted geometry and the placed function as a native packet.
 // header contains resolved ordering/fence bits, without type/setup, joined
 // with the function's minimum requirements. Indirect

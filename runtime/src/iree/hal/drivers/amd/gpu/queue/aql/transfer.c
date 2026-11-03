@@ -8,10 +8,34 @@
 
 #include "iree/hal/drivers/amd/gpu/queue/buffer.h"
 
+uint64_t iree_hal_amd_gpu_aql_transfer_argument_length(
+    const iree_hal_amd_gpu_transfer_t* transfer, uint64_t capacity) {
+  const uint64_t arguments = IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_PACKETS *
+                             sizeof(iree_hal_amd_gpu_blit_arguments_t);
+  const uint64_t length = arguments + transfer->staging_capacity;
+  if (length > capacity) {
+    return length;
+  }
+  if (!transfer->host_completion_required) {
+    if (!transfer->staging_capacity ||
+        transfer->operations[transfer->cursor.index].length <=
+            transfer->staging_capacity) {
+      return length;
+    }
+    return iree_min(length, iree_max(arguments + 8, capacity / 2));
+  }
+  const uint64_t count = iree_min(transfer->count - transfer->cursor.index,
+                                  IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_PACKETS);
+  const uint64_t window = iree_max(
+      arguments + 8,
+      iree_min(capacity / 2,
+               arguments + IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_DOWNLOAD_LENGTH));
+  return iree_min(arguments + count * transfer->staging_capacity, window);
+}
+
 iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_transfer_packet(
     uint64_t kernel, uint64_t arguments, uint64_t length, uint32_t header) {
-  const uint32_t groups =
-      length > 256 * 1024 ? 256 : (uint32_t)((length + 1023) / 1024);
+  const uint32_t groups = iree_hal_amd_gpu_blit_workgroup_count(length);
   const iree_hal_amd_gpu_aql_dispatch_t dispatch = {
       .header = IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH | (1u << 16) | header,
       .workgroup_size = {64, 1, 1},
@@ -38,6 +62,10 @@ iree_status_t iree_hal_amd_gpu_aql_transfer_prepare_chunk(
          iree_status_is_ok(status)) {
     const iree_hal_amd_gpu_transfer_operation_t* operation =
         &transfer->operations[out_chunk->next.index];
+    if (out_chunk->download.length &&
+        operation->type != IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD) {
+      break;
+    }
     const bool copy = operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
     const bool fill = operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
     const bool download =
@@ -73,11 +101,14 @@ iree_status_t iree_hal_amd_gpu_aql_transfer_prepare_chunk(
             upload_address + staging_offset + staging_length;
         if (download) {
           arguments.target = address;
-          out_chunk->download = (iree_hal_amd_gpu_download_t){
-              .source = bytes,
-              .target = (uint8_t*)operation->target.host + offset,
-              .length = arguments.length,
-          };
+          if (!out_chunk->download.length) {
+            out_chunk->download = (iree_hal_amd_gpu_download_t){
+                .source = bytes,
+                .operation = operation,
+                .offset = offset,
+            };
+          }
+          out_chunk->download.length += arguments.length;
         } else {
           arguments.source = address;
           memcpy(bytes, (const uint8_t*)operation->source.host + offset,
@@ -95,9 +126,6 @@ iree_status_t iree_hal_amd_gpu_aql_transfer_prepare_chunk(
       if (out_chunk->next.offset == operation->length) {
         ++out_chunk->next.index;
         out_chunk->next.offset = 0;
-      }
-      if (download) {
-        break;
       }
     }
   }

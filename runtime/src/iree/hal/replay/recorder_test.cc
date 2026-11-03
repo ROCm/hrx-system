@@ -1402,20 +1402,23 @@ TEST(ReplayRecorderTest, RecordsAndReplaysCommandBufferAtomicOperations) {
   const iree_hal_atomic_wait_params_t wait_params = {
       .value = UINT64_C(0x1020304050607080),
       .mask = UINT64_C(0xFFEEDDCCBBAA9988),
-      .flags = IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE |
+               IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
       .width = IREE_HAL_ATOMIC_WIDTH_64,
       .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_NOT_EQUAL,
       .target_error_mode = IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE,
   };
   const iree_hal_atomic_store_params_t store_params = {
       .value = UINT64_C(0xAABBCCDD),
-      .flags = IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE |
+               IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
       .width = IREE_HAL_ATOMIC_WIDTH_32,
       .target_error_mode = IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE,
   };
   const iree_hal_atomic_rmw_params_t rmw_params = {
       .operand = UINT64_C(0x11223344),
-      .flags = IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE |
+               IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
       .width = IREE_HAL_ATOMIC_WIDTH_32,
       .operation = IREE_HAL_ATOMIC_RMW_OPERATION_XOR,
       .target_error_mode = IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE,
@@ -1472,7 +1475,7 @@ TEST(ReplayRecorderTest, RecordsAndReplaysCommandBufferAtomicOperations) {
   EXPECT_EQ(IREE_HAL_EXECUTION_STAGE_ATOMIC, wait_payload.target_stage_mask);
   EXPECT_EQ(wait_params.value, wait_payload.params.value);
   EXPECT_EQ(wait_params.mask, wait_payload.params.mask);
-  EXPECT_EQ(IREE_HAL_ATOMIC_FLAGS_KNOWN, wait_payload.params.flags);
+  EXPECT_EQ(wait_params.flags, wait_payload.params.flags);
   EXPECT_EQ(wait_params.width, wait_payload.params.width);
   EXPECT_EQ(wait_params.condition, wait_payload.params.condition);
   EXPECT_EQ(wait_params.target_error_mode,
@@ -1497,7 +1500,7 @@ TEST(ReplayRecorderTest, RecordsAndReplaysCommandBufferAtomicOperations) {
   EXPECT_EQ(IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
             store_payload.target_stage_mask);
   EXPECT_EQ(store_params.value, store_payload.params.value);
-  EXPECT_EQ(IREE_HAL_ATOMIC_FLAGS_KNOWN, store_payload.params.flags);
+  EXPECT_EQ(store_params.flags, store_payload.params.flags);
   EXPECT_EQ(store_params.width, store_payload.params.width);
   EXPECT_EQ(store_params.target_error_mode,
             store_payload.params.target_error_mode);
@@ -1522,7 +1525,7 @@ TEST(ReplayRecorderTest, RecordsAndReplaysCommandBufferAtomicOperations) {
   EXPECT_EQ(IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS,
             rmw_payload.target_stage_mask);
   EXPECT_EQ(rmw_params.operand, rmw_payload.params.operand);
-  EXPECT_EQ(IREE_HAL_ATOMIC_FLAGS_KNOWN, rmw_payload.params.flags);
+  EXPECT_EQ(rmw_params.flags, rmw_payload.params.flags);
   EXPECT_EQ(rmw_params.width, rmw_payload.params.width);
   EXPECT_EQ(rmw_params.operation, rmw_payload.params.operation);
   EXPECT_EQ(rmw_params.target_error_mode, rmw_payload.params.target_error_mode);
@@ -1609,20 +1612,23 @@ TEST(ReplayRecorderTest, RecordsAndReplaysVersion2ExactQueueAtomicOperations) {
   const iree_hal_atomic_wait_params_t wait_params = {
       .value = UINT64_C(0x1020304050607080),
       .mask = UINT64_C(0xFFEEDDCCBBAA9988),
-      .flags = IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE |
+               IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
       .width = IREE_HAL_ATOMIC_WIDTH_64,
       .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL,
       .target_error_mode = IREE_HAL_ATOMIC_TARGET_ERROR_MODE_DEFAULT,
   };
   const iree_hal_atomic_store_params_t store_params = {
       .value = UINT64_C(0xAABBCCDD),
-      .flags = IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE |
+               IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
       .width = IREE_HAL_ATOMIC_WIDTH_32,
       .target_error_mode = IREE_HAL_ATOMIC_TARGET_ERROR_MODE_DEFAULT,
   };
   const iree_hal_atomic_rmw_params_t rmw_params = {
       .operand = UINT64_C(0x1122334455667788),
-      .flags = IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE |
+               IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
       .width = IREE_HAL_ATOMIC_WIDTH_64,
       .operation = IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
       .target_error_mode = IREE_HAL_ATOMIC_TARGET_ERROR_MODE_DEFAULT,
@@ -1681,7 +1687,7 @@ TEST(ReplayRecorderTest, RecordsAndReplaysVersion2ExactQueueAtomicOperations) {
   EXPECT_EQ(1u, wait_payload.signal_semaphore_count);
   EXPECT_EQ(wait_params.value, wait_payload.params.value);
   EXPECT_EQ(wait_params.mask, wait_payload.params.mask);
-  EXPECT_EQ(IREE_HAL_ATOMIC_FLAGS_KNOWN, wait_payload.params.flags);
+  EXPECT_EQ(wait_params.flags, wait_payload.params.flags);
   EXPECT_EQ(wait_params.width, wait_payload.params.width);
   EXPECT_EQ(wait_params.condition, wait_payload.params.condition);
   EXPECT_EQ(wait_params.target_error_mode,
@@ -1717,7 +1723,7 @@ TEST(ReplayRecorderTest, RecordsAndReplaysVersion2ExactQueueAtomicOperations) {
   EXPECT_EQ(1u, store_payload.wait_semaphore_count);
   EXPECT_EQ(1u, store_payload.signal_semaphore_count);
   EXPECT_EQ(store_params.value, store_payload.params.value);
-  EXPECT_EQ(IREE_HAL_ATOMIC_FLAGS_KNOWN, store_payload.params.flags);
+  EXPECT_EQ(store_params.flags, store_payload.params.flags);
   EXPECT_EQ(store_params.width, store_payload.params.width);
   EXPECT_EQ(store_params.target_error_mode,
             store_payload.params.target_error_mode);
@@ -1751,7 +1757,7 @@ TEST(ReplayRecorderTest, RecordsAndReplaysVersion2ExactQueueAtomicOperations) {
   EXPECT_EQ(1u, rmw_payload.wait_semaphore_count);
   EXPECT_EQ(1u, rmw_payload.signal_semaphore_count);
   EXPECT_EQ(rmw_params.operand, rmw_payload.params.operand);
-  EXPECT_EQ(IREE_HAL_ATOMIC_FLAGS_KNOWN, rmw_payload.params.flags);
+  EXPECT_EQ(rmw_params.flags, rmw_payload.params.flags);
   EXPECT_EQ(rmw_params.width, rmw_payload.params.width);
   EXPECT_EQ(rmw_params.operation, rmw_payload.params.operation);
   EXPECT_EQ(rmw_params.target_error_mode, rmw_payload.params.target_error_mode);

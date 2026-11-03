@@ -1507,21 +1507,21 @@ TEST(ReplayDumpTest, EmitsAtomicOperations) {
   EXPECT_THAT(text_output, HasSubstr("payload=command_buffer_atomic_wait"));
   EXPECT_THAT(text_output,
               HasSubstr("value=0x0000000000000011 mask=0x00000000000000ff "
-                        "flags=0x00000007 width=64 condition=not_equal(1)"));
+                        "flags=0x0000000f width=64 condition=not_equal(1)"));
   EXPECT_THAT(text_output, HasSubstr("target_error_mode=1"));
   EXPECT_THAT(text_output, HasSubstr("payload=command_buffer_atomic_store"));
   EXPECT_THAT(text_output,
-              HasSubstr("value=0x0000000000000022 flags=0x00000007 width=32"));
+              HasSubstr("value=0x0000000000000022 flags=0x0000000f width=32"));
   EXPECT_THAT(text_output,
               HasSubstr("target_ref={buffer_id=0 offset=16 length=4 slot=3}"));
   EXPECT_THAT(text_output, HasSubstr("payload=command_buffer_atomic_rmw"));
   EXPECT_THAT(text_output,
-              HasSubstr("operand=0x0000000000000033 flags=0x00000007 width=64 "
+              HasSubstr("operand=0x0000000000000033 flags=0x0000000f width=64 "
                         "operation=xor(4)"));
   EXPECT_THAT(text_output, HasSubstr("payload=queue_atomic_wait"));
   EXPECT_THAT(text_output,
               HasSubstr("value=0x0000000000000044 mask=0x00000000000000ff "
-                        "flags=0x00000007 width=32 "
+                        "flags=0x0000000f width=32 "
                         "condition=unsigned_greater_equal(2)"));
   EXPECT_THAT(text_output,
               HasSubstr("wait_semaphores=[{semaphore_id=41 value=5}]"));
@@ -1529,10 +1529,10 @@ TEST(ReplayDumpTest, EmitsAtomicOperations) {
               HasSubstr("signal_semaphores=[{semaphore_id=51 value=6}]"));
   EXPECT_THAT(text_output, HasSubstr("payload=queue_atomic_store"));
   EXPECT_THAT(text_output,
-              HasSubstr("value=0x0000000000000055 flags=0x00000007 width=64"));
+              HasSubstr("value=0x0000000000000055 flags=0x0000000f width=64"));
   EXPECT_THAT(text_output, HasSubstr("payload=queue_atomic_rmw"));
   EXPECT_THAT(text_output,
-              HasSubstr("operand=0x0000000000000066 flags=0x00000007 width=64 "
+              HasSubstr("operand=0x0000000000000066 flags=0x0000000f width=64 "
                         "operation=subtract(1)"));
   EXPECT_THAT(text_output,
               HasSubstr("wait_semaphores=[{semaphore_id=43 value=9}]"));
@@ -1547,8 +1547,9 @@ TEST(ReplayDumpTest, EmitsAtomicOperations) {
                                     &json_options, &json_output));
   EXPECT_THAT(json_output,
               HasSubstr("\"payload_type\":\"command_buffer_atomic_wait\""));
-  EXPECT_THAT(json_output,
-              HasSubstr("\"value\":17,\"mask\":255,\"flags\":7,\"width\":64,"));
+  EXPECT_THAT(
+      json_output,
+      HasSubstr("\"value\":17,\"mask\":255,\"flags\":15,\"width\":64,"));
   EXPECT_THAT(json_output,
               HasSubstr("\"condition\":1,\"condition_name\":\"not_equal\","
                         "\"target_error_mode\":1"));
@@ -1561,7 +1562,7 @@ TEST(ReplayDumpTest, EmitsAtomicOperations) {
   EXPECT_THAT(json_output,
               HasSubstr("\"payload_type\":\"command_buffer_atomic_rmw\""));
   EXPECT_THAT(json_output,
-              HasSubstr("\"operand\":51,\"flags\":7,\"width\":64,"
+              HasSubstr("\"operand\":51,\"flags\":15,\"width\":64,"
                         "\"operation\":4,\"operation_name\":\"xor\""));
   EXPECT_THAT(json_output, HasSubstr("\"payload_type\":\"queue_atomic_wait\""));
   EXPECT_THAT(json_output, HasSubstr("\"wait_semaphore_count\":1,"
@@ -1576,13 +1577,13 @@ TEST(ReplayDumpTest, EmitsAtomicOperations) {
                         "\"value\":6}]"));
   EXPECT_THAT(json_output,
               HasSubstr("\"payload_type\":\"queue_atomic_store\""));
-  EXPECT_THAT(json_output, HasSubstr("\"value\":85,\"flags\":7,\"width\":64"));
+  EXPECT_THAT(json_output, HasSubstr("\"value\":85,\"flags\":15,\"width\":64"));
   EXPECT_THAT(json_output,
               HasSubstr("\"target_ref\":{\"buffer_id\":11,\"offset\":8,"
                         "\"length\":8,\"buffer_slot\":0}"));
   EXPECT_THAT(json_output, HasSubstr("\"payload_type\":\"queue_atomic_rmw\""));
   EXPECT_THAT(json_output,
-              HasSubstr("\"operand\":102,\"flags\":7,\"width\":64,"
+              HasSubstr("\"operand\":102,\"flags\":15,\"width\":64,"
                         "\"operation\":1,\"operation_name\":\"subtract\""));
   EXPECT_THAT(json_output, HasSubstr("\"wait_semaphores_range\""));
   EXPECT_THAT(json_output, HasSubstr("\"signal_semaphores_range\""));

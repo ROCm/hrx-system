@@ -40,7 +40,7 @@ extern "C" int LLVMFuzzerInitialize(int* argc, char*** argv) {
       iree_allocator_system(), &g_decoder);
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
-    iree_status_ignore(status);
+    iree_status_free(status);
     return 1;
   }
   return 0;

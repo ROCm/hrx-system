@@ -8,6 +8,19 @@
 
 #include "iree/hal/drivers/amd/status.h"
 
+iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_control_program_packet(
+    uint64_t kernel, uint64_t arguments, uint32_t header, uint64_t completion) {
+  const iree_hal_amd_gpu_aql_dispatch_t dispatch = {
+      .header = header | IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH | (1u << 16),
+      .workgroup_size = {1, 1, 1},
+      .grid_size = {1, 1, 1},
+      .kernel_object = kernel,
+      .kernarg_address = arguments,
+      .completion_signal = completion,
+  };
+  return iree_hal_amd_gpu_aql_packet_dispatch(&dispatch);
+}
+
 // Cold placement input. Each descriptor names one aligned instruction range
 // within the same allocation; no parser or runtime compiler is involved.
 typedef struct iree_hal_amd_gpu_aql_builtin_t {
@@ -44,7 +57,18 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
       {.argument_length =
            sizeof(iree_hal_amd_gpu_aql_materialize_profile_arguments_t),
        .kernel_object = &out_pool->materialize_profile},
+      {.argument_length = sizeof(iree_hal_amd_gpu_control_program_arguments_t),
+       .kernel_object = &out_pool->control[0]},
+      {.argument_length = sizeof(iree_hal_amd_gpu_control_program_arguments_t),
+       .kernel_object = &out_pool->control[1]},
+      {.argument_length = sizeof(iree_hal_amd_gpu_control_program_arguments_t),
+       .kernel_object = &out_pool->control[2]},
+      {.argument_length = sizeof(iree_hal_amd_gpu_control_program_arguments_t),
+       .kernel_object = &out_pool->control[3]},
+      {.argument_length = sizeof(iree_hal_amd_gpu_grid_sync_t),
+       .kernel_object = &out_pool->grid_sync},
   };
+  uint32_t builtin_count = IREE_ARRAYSIZE(builtins) - 1;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_blit_program_query(
       gfxip, &builtins[0].code, &builtins[0].kernel));
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_fixup_program_query(
@@ -55,11 +79,25 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
       gfxip, &builtins[3].code, &builtins[3].kernel));
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_materialize_program_query(
       gfxip, true, &builtins[4].code, &builtins[4].kernel));
+  iree_status_t status = iree_ok_status();
+  for (uint32_t i = 0;
+       i < IREE_HAL_AMD_GPU_CONTROL_PROGRAM_COUNT && iree_status_is_ok(status);
+       ++i) {
+    status = iree_hal_amd_gpu_control_program_query(
+        gfxip, i, &builtins[5 + i].code, &builtins[5 + i].kernel);
+  }
+  IREE_RETURN_IF_ERROR(status);
+  if (iree_hal_amd_gpu_grid_sync_select_strategy(gfxip) ==
+      IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_GWS) {
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_grid_sync_program_query(
+        gfxip, &builtins[builtin_count].code, &builtins[builtin_count].kernel));
+    ++builtin_count;
+  }
   const uint64_t descriptor_length = 64;
   const uint64_t code_begin =
-      iree_align_uint64(IREE_ARRAYSIZE(builtins) * descriptor_length, 256);
+      iree_align_uint64(builtin_count * descriptor_length, 256);
   uint64_t byte_length = code_begin;
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(builtins); ++i) {
+  for (iree_host_size_t i = 0; i < builtin_count; ++i) {
     byte_length += iree_align_uint64(builtins[i].code.data_length, 256);
   }
   byte_length += 256;  // Instruction fetch padding after the final kernel.
@@ -75,7 +113,7 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
       "query AQL builtin address"));
   memset(contents.data, 0, byte_length);
   uint64_t code_offset = code_begin;
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(builtins); ++i) {
+  for (iree_host_size_t i = 0; i < builtin_count; ++i) {
     const iree_hal_amd_gpu_aql_builtin_t* builtin = &builtins[i];
     const uint64_t descriptor_offset = i * descriptor_length;
     uint8_t* descriptor = contents.data + descriptor_offset;
@@ -116,11 +154,25 @@ void iree_hal_amd_gpu_aql_program_pool_deinitialize(
   iree_hal_amd_gpu_program_pool_deinitialize(&pool->storage);
 }
 
-uint32_t iree_hal_amd_gpu_aql_program_prefix_count(
+iree_hal_amd_gpu_aql_program_flags_t iree_hal_amd_gpu_aql_program_prepare(
     const iree_hal_amd_gpu_program_t* program,
-    const iree_hal_amd_gpu_program_instance_t* instance, bool first) {
-  return 1 + (first && !instance->initialized) +
-         (first && program->fixup_count);
+    const iree_hal_amd_gpu_program_instance_t* instance, uint32_t value_count,
+    bool first) {
+  if (!first) {
+    return 0;
+  }
+  return IREE_HAL_AMD_GPU_AQL_PROGRAM_FIRST |
+         (!instance->initialized ? IREE_HAL_AMD_GPU_AQL_PROGRAM_INITIALIZE
+                                 : 0) |
+         (program->fixup_count && (value_count > 1 || !instance->last_epoch)
+              ? IREE_HAL_AMD_GPU_AQL_PROGRAM_FIXUP
+              : 0);
+}
+
+uint32_t iree_hal_amd_gpu_aql_program_prefix_count(
+    iree_hal_amd_gpu_aql_program_flags_t flags) {
+  return 1 + ((flags & IREE_HAL_AMD_GPU_AQL_PROGRAM_INITIALIZE) != 0) +
+         ((flags & IREE_HAL_AMD_GPU_AQL_PROGRAM_FIXUP) != 0);
 }
 
 amdf_status_t iree_hal_amd_gpu_aql_program_emit_host(
@@ -198,7 +250,7 @@ amdf_status_t iree_hal_amd_gpu_aql_program_emit(
       prefix[count++] = iree_hal_amd_gpu_aql_program_dispatch(
           pool->blit, argument_address, 256);
     }
-    if (program->fixup_count) {
+    if (flags & IREE_HAL_AMD_GPU_AQL_PROGRAM_FIXUP) {
       arguments->fixup = (iree_hal_amd_gpu_fixup_arguments_t){
           .entries = source.fixups,
           .values =

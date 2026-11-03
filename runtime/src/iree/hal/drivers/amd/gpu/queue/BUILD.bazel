@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/amdgpu:binary.bzl", "iree_amdgpu_binary_variants_embed_data")
 load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:defs.bzl", "loom_kernel_binary", "loom_target_profile")
@@ -83,6 +84,18 @@ iree_runtime_cc_library(
         ":buffer",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "transfer_test",
+    srcs = ["transfer_test.cc"],
+    deps = [
+        ":transfer",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -812,6 +825,65 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/drivers/amd/gpu:completion",
         "//runtime/src/iree/hal/drivers/amd/gpu:failure",
         "//runtime/src/iree/hal/drivers/amd/gpu:publication",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_amdgpu_binary_variants_embed_data(
+    name = "grid_sync_programs",
+    testonly = True,
+    srcs = ["grid_sync.c"],
+    identifier = "iree_hal_amd_gpu_grid_sync_programs",
+    tags = ["manual"],
+    target = "amdgcn-amd-amdhsa",
+    target_selectors_flag = "//runtime/src/iree/hal/drivers/amd/gpu:targets",
+)
+
+[
+    loom_kernel_binary(
+        name = "control_program_" + target,
+        testonly = True,
+        srcs = ["control_program.loom"],
+        out = "control_program_" + target + ".hsaco",
+        target = ":fixup_program_profile_" + target,
+        target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+    )
+    for target in _PROGRAM_TARGETS
+]
+
+iree_c_embed_data(
+    name = "control_programs",
+    testonly = True,
+    srcs = [":control_program_" + target for target in _PROGRAM_TARGETS],
+    c_file_output = "control_programs.c",
+    h_file_output = "control_programs.h",
+    identifier = "iree_hal_amd_gpu_control_programs",
+    target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+)
+
+iree_runtime_cc_library(
+    name = "control_program",
+    srcs = ["control_program.c"],
+    hdrs = ["control_program.h"],
+    deps = [
+        ":control",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image",
+        "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "control_program_test",
+    srcs = ["control_program_test.cc"],
+    target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+    deps = [
+        ":control_program",
+        ":control_programs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image:hsaco",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

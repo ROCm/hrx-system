@@ -263,11 +263,23 @@ iree_hal_amdgpu_atomic_memory_required_cell(
   }
 }
 
+iree_status_t iree_hal_amdgpu_atomic_memory_validate_flags(
+    iree_hal_atomic_flags_t flags) {
+  if (flags & IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "legacy AMDGPU does not qualify zero-compute "
+                            "atomic targets");
+  }
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_amdgpu_atomic_memory_validate_target(
     iree_hal_amdgpu_atomic_memory_cell_flags_t available_cells,
     const void* target_pointer, iree_hal_atomic_width_t width,
     iree_hal_atomic_flags_t atomic_flags,
     iree_hal_atomic_target_error_mode_t target_error_mode) {
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_atomic_memory_validate_flags(atomic_flags));
   const iree_device_size_t byte_count = iree_hal_atomic_width_byte_count(width);
   if (IREE_UNLIKELY(byte_count == 0)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

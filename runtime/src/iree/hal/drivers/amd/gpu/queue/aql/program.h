@@ -12,6 +12,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/aql/materialize.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/ring.h"
 #include "iree/hal/drivers/amd/gpu/queue/blit.h"
+#include "iree/hal/drivers/amd/gpu/queue/control_program.h"
 #include "iree/hal/drivers/amd/gpu/queue/program.h"
 #include "iree/hal/drivers/amd/gpu/queue/user_queue.h"
 
@@ -38,6 +39,10 @@ typedef struct iree_hal_amd_gpu_aql_program_pool_t {
   uint64_t materialize_profile;
   // Native descriptor for execution-time grid/hidden-count publication.
   uint64_t indirect;
+  // Scalar atomic descriptors indexed by instruction scope and integer width.
+  uint64_t control[IREE_HAL_AMD_GPU_CONTROL_PROGRAM_COUNT];
+  // Native one-workitem GWS initializer, zero for memory-barrier targets.
+  uint64_t grid_sync;
 } iree_hal_amd_gpu_aql_program_pool_t;
 
 // Cold construction before queue creation. A failure leaves a deinitializable
@@ -48,6 +53,11 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
     iree_hal_amd_gpu_aql_program_pool_t* out_pool);
 void iree_hal_amd_gpu_aql_program_pool_deinitialize(
     iree_hal_amd_gpu_aql_program_pool_t* pool);
+
+// One-workitem atomic dispatch. The caller owns ordering, argument publication,
+// and completion exactly as for an application dispatch.
+iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_control_program_packet(
+    uint64_t kernel, uint64_t arguments, uint32_t header, uint64_t completion);
 
 // Initial invocation upload. Instrumented recordings extend materialize to
 // materialize_profile_arguments_t; the dense uint64_t value table follows
@@ -71,14 +81,24 @@ enum iree_hal_amd_gpu_aql_program_flag_bits_e {
   IREE_HAL_AMD_GPU_AQL_PROGRAM_PROFILE = 1u << 2,
   // GPU-patched private command bytes are consumed by the command processor.
   IREE_HAL_AMD_GPU_AQL_PROGRAM_CONTROL = 1u << 3,
+  // This invocation must replace resident operands before materialization.
+  IREE_HAL_AMD_GPU_AQL_PROGRAM_FIXUP = 1u << 4,
 };
 typedef uint32_t iree_hal_amd_gpu_aql_program_flags_t;
 
-// Counts host-owned prelude packets; block packets and the terminal barrier
-// are separate. The unpublished instance remains reserved through emission.
-uint32_t iree_hal_amd_gpu_aql_program_prefix_count(
+// Captures preparation before publication changes the reserved instance's
+// writer coordinate. A value_count of one contains only the instance base:
+// those relocations remain valid after that instance's first invocation.
+// Additional inputs require replacement on every invocation.
+iree_hal_amd_gpu_aql_program_flags_t iree_hal_amd_gpu_aql_program_prepare(
     const iree_hal_amd_gpu_program_t* program,
-    const iree_hal_amd_gpu_program_instance_t* instance, bool first);
+    const iree_hal_amd_gpu_program_instance_t* instance, uint32_t value_count,
+    bool first);
+
+// Counts host-owned prelude packets; block packets and the terminal barrier
+// are separate. Emission consumes the same captured preparation flags.
+uint32_t iree_hal_amd_gpu_aql_program_prefix_count(
+    iree_hal_amd_gpu_aql_program_flags_t flags);
 
 // Publishes a bounded immutable packet sequence from invocation-private upload
 // storage. Dense inputs and fixups are already resolved. Completion operands

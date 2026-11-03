@@ -63,8 +63,9 @@ TEST_F(LaunchTest, CompleteDirectBinding) {
   auto* words = storage.data() + 1;
   auto* end = iree_hal_amd_gpu_pm4_launch_emit(words, &launch, workgroup_size,
                                                partial_size, 513, &inputs);
-  end = iree_hal_amd_gpu_pm4_emit_dispatch_direct(end, groups,
-                                                  launch.dispatch_initiator);
+  end = iree_hal_amd_gpu_pm4_emit_dispatch_direct(
+      end, groups,
+      iree_hal_amd_gpu_pm4_launch_dispatch_initiator(&launch, partial_size));
   const std::vector<uint32_t> expected = {
       0xc0027602, 0x20c,   0x34567802, 0x12,  0xc0027602, 0x212,
       0xe0af0000, 0x10084, 0xc0017602, 0x228, 0x20,       0xc0017602,
@@ -93,7 +94,8 @@ TEST_F(LaunchTest, PartialWave64GeometryAndIndirectControl) {
   auto* end = iree_hal_amd_gpu_pm4_launch_emit(
       words.data(), &launch, workgroup_size, partial_size, 65536, &inputs);
   end = iree_hal_amd_gpu_pm4_emit_dispatch_indirect(
-      end, UINT64_C(0x567812340004), launch.dispatch_initiator | 2u);
+      end, UINT64_C(0x567812340004),
+      iree_hal_amd_gpu_pm4_launch_dispatch_initiator(&launch, partial_size));
   const std::vector<uint32_t> expected = {
       0xc0027602, 0x20c,    0x34567802, 0x12,       0xc0027602, 0x212,
       0xe0af0000, 0x400084, 0xc0017602, 0x228,      0x20,       0xc0017602,
@@ -127,6 +129,20 @@ TEST_F(LaunchTest, TargetRowsAndWaveModes) {
                   target.major == 12 && target.minor == 5 ? 0x2e23u : 0x2e28u);
         EXPECT_EQ(launch.dispatch_initiator,
                   wavefront_size == 32 ? 0x8005u : 5u);
+        for (const std::array<uint32_t, 3>& partial_size : {
+                 std::array<uint32_t, 3>{0, 0, 0},
+                 {17, 4, 2},
+                 {32, 3, 2},
+                 {32, 4, 1},
+                 {17, 3, 1},
+             }) {
+          const uint32_t expected = partial_size[0]
+                                        ? (wavefront_size == 32 ? 0x8007u : 7u)
+                                        : (wavefront_size == 32 ? 0x8005u : 5u);
+          EXPECT_EQ(iree_hal_amd_gpu_pm4_launch_dispatch_initiator(
+                        &launch, partial_size.data()),
+                    expected);
+        }
       }
     }
   }

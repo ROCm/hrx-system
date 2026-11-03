@@ -6,6 +6,93 @@
 
 #include "iree/hal/drivers/amd/gpu/dispatch.h"
 
+iree_hal_amd_gpu_grid_sync_strategy_t
+iree_hal_amd_gpu_grid_sync_select_strategy(
+    iree_hal_amd_gpu_gfxip_version_t gfxip) {
+  if ((gfxip.major == 9 && gfxip.minor == 4 && gfxip.stepping == 2) ||
+      (gfxip.major == 9 && gfxip.minor == 5 && gfxip.stepping == 0) ||
+      gfxip.major == 11 || gfxip.major == 12) {
+    return IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_MEMORY;
+  }
+  return gfxip.major == 9 || gfxip.major == 10
+             ? IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_GWS
+             : IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_NONE;
+}
+
+// Relocation-free grid_sync.c instructions and complete descriptor facts are
+// checked against configured source compilation. GFX9.4 has no private-segment
+// buffer SGPRs; earlier GFX9 and GFX10 receive kernargs in s[4:5].
+static const uint32_t iree_hal_amd_gpu_grid_sync_gfx9[] = {
+    0xc0020002u, 0x00000028u, 0xbefc0080u, 0xbf8cc07fu, 0x8100c100u,
+    0x7e000200u, 0xd9330000u, 0x00000000u, 0xbf8c0000u, 0xbf810000u};
+static const uint32_t iree_hal_amd_gpu_grid_sync_gfx94[] = {
+    0xc0020000u, 0x00000028u, 0xbefc0080u, 0xbf8cc07fu, 0x8100c100u,
+    0x7e000200u, 0xd9330000u, 0x00000000u, 0xbf8c0000u, 0xbf810000u};
+static const uint32_t iree_hal_amd_gpu_grid_sync_gfx10[] = {
+    0xf4000002u, 0xfa000028u, 0xbefc0380u, 0xbf8cc07fu, 0x8100c100u,
+    0x7e000200u, 0xd8660000u, 0x00000000u, 0xbf8c0000u, 0xbf810000u};
+
+iree_status_t iree_hal_amd_gpu_grid_sync_program_query(
+    iree_hal_amd_gpu_gfxip_version_t gfxip, iree_const_byte_span_t* out_code,
+    iree_hal_amd_gpu_image_kernel_t* out_kernel) {
+  if (gfxip.major == 9 && gfxip.minor < 4) {
+    *out_code =
+        iree_make_const_byte_span(iree_hal_amd_gpu_grid_sync_gfx9,
+                                  sizeof(iree_hal_amd_gpu_grid_sync_gfx9));
+    *out_kernel =
+        (iree_hal_amd_gpu_image_kernel_t){.compute_pgm_rsrc1 = 0xaf0040u,
+                                          .compute_pgm_rsrc2 = 0x8cu,
+                                          .code_properties = 0x9u};
+  } else if (gfxip.major == 9 && (gfxip.minor == 4 || gfxip.minor == 5)) {
+    *out_code =
+        iree_make_const_byte_span(iree_hal_amd_gpu_grid_sync_gfx94,
+                                  sizeof(iree_hal_amd_gpu_grid_sync_gfx94));
+    *out_kernel =
+        (iree_hal_amd_gpu_image_kernel_t){.compute_pgm_rsrc1 = 0xaf0000u,
+                                          .compute_pgm_rsrc2 = 0x84u,
+                                          .code_properties = 0x8u};
+  } else if (gfxip.major == 10 && (gfxip.minor == 1 || gfxip.minor == 3)) {
+    *out_code =
+        iree_make_const_byte_span(iree_hal_amd_gpu_grid_sync_gfx10,
+                                  sizeof(iree_hal_amd_gpu_grid_sync_gfx10));
+    *out_kernel =
+        (iree_hal_amd_gpu_image_kernel_t){.compute_pgm_rsrc1 = 0xe0af0000u,
+                                          .compute_pgm_rsrc2 = 0x8cu,
+                                          .code_properties = 0x409u};
+  } else {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "GWS initialization is unavailable for gfx%u.%u.%u",
+                            gfxip.major, gfxip.minor, gfxip.stepping);
+  }
+  return iree_ok_status();
+}
+
+void iree_hal_amd_gpu_dispatch_emplace_grid_sync(
+    const iree_hal_amd_gpu_kernarg_layout_t* layout,
+    const iree_hal_amd_gpu_dispatch_geometry_t* dispatch,
+    uint64_t grid_sync_address, void* arguments,
+    iree_hal_amd_gpu_grid_sync_t* grid_sync) {
+  uint64_t workgroup_count = 1;
+  uint64_t workitem_count = 1;
+  for (uint32_t i = 0; i < 3; ++i) {
+    workgroup_count *= dispatch->workgroup_count[i];
+    const uint64_t count = dispatch->workgroup_count[i];
+    const uint64_t size = dispatch->workgroup_size[i];
+    workitem_count *= count * size - (count && dispatch->partial_size[i]
+                                          ? size - dispatch->partial_size[i]
+                                          : 0);
+  }
+  *grid_sync = (iree_hal_amd_gpu_grid_sync_t){
+      .grid_count = workgroup_count ? 1u : 0u,
+      .total_workitem_count = workitem_count,
+      .workgroup_count = (uint32_t)workgroup_count,
+  };
+  if (layout->requirements & IREE_HAL_AMD_GPU_KERNARG_REQUIREMENT_GRID_SYNC) {
+    memcpy((uint8_t*)arguments + layout->grid_sync_offset, &grid_sync_address,
+           sizeof(grid_sync_address));
+  }
+}
+
 // Resource accounting uses the kernel descriptor's encoded allocation, not
 // optional compiler register-use annotations. GFX9's unified VGPR/AGPR count
 // and RDNA's distinct encoding/allocation granules are therefore preserved.
@@ -237,8 +324,7 @@ iree_status_t iree_hal_amd_gpu_dispatch_prepare(
     }
   } else if (native_arguments) {
     if (binding_count ||
-        constants.data_length < function->kernarg->native_byte_length ||
-        constants.data_length > function->kernarg->byte_length) {
+        constants.data_length < function->kernarg->native_byte_length) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "native argument extent does not match the "
                               "function ABI");

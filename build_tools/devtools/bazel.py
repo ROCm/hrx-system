@@ -1942,6 +1942,52 @@ def query_compiling_targets_for_sources(
     return sorted(owners)
 
 
+def query_compiling_targets(
+    bazel: str,
+    *,
+    target_patterns: tuple[str, ...],
+    cwd: Path,
+    env: dict[str, str] | None,
+) -> list[str]:
+    """Returns every concrete C/C++ rule under the target patterns.
+
+    Unlike passing package `:all` patterns as build roots, the explicit labels
+    returned by this query retain rules tagged `manual`. The configured build
+    remains responsible for target compatibility.
+    """
+    if not target_patterns:
+        raise ValueError("at least one Bazel target pattern is required")
+
+    universe_expression = " + ".join(target_patterns)
+    completed = run_captured(
+        [
+            bazel,
+            "query",
+            "--noshow_progress",
+            "--order_output=no",
+            "--output=label",
+            f'kind("cc_.* rule", {universe_expression})',
+        ],
+        cwd=cwd,
+        env=env,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        raise BazelSourceOwnerQueryError(
+            "Bazel C/C++ universe query failed"
+            + (f":\n{detail[-8192:]}" if detail else "")
+        )
+
+    targets = set()
+    for line in completed.stdout.splitlines():
+        if not line.startswith("//"):
+            raise BazelSourceOwnerQueryError(
+                f"malformed Bazel C/C++ universe result: {line!r}"
+            )
+        targets.add(line)
+    return sorted(targets)
+
+
 def query_compiling_targets_depending_on(
     bazel: str,
     *,
@@ -1953,8 +1999,7 @@ def query_compiling_targets_depending_on(
     env: dict[str, str] | None,
 ) -> list[str]:
     """Returns configured C/C++ rules affected by dependencies or packages."""
-    seed_patterns = sorted([*dependency_labels, *package_patterns])
-    if not seed_patterns:
+    if not dependency_labels and not package_patterns:
         return []
     if not target_patterns:
         raise ValueError("at least one Bazel target pattern is required")
@@ -1964,31 +2009,26 @@ def query_compiling_targets_depending_on(
         if not re.fullmatch(r"//[A-Za-z0-9_./+-]+:\*", pattern):
             raise ValueError(f"unsupported main-workspace package pattern: {pattern!r}")
 
-    seeds = " + ".join(seed_patterns)
+    # Only configure the C/C++ roots and their dependencies. Resolving package
+    # wildcards as target patterns would also configure unrelated rules (such
+    # as release wheels) which may require a different build configuration.
+    seed_pattern = "|".join(
+        [
+            *(re.escape(label) for label in sorted(dependency_labels)),
+            *(
+                re.escape(pattern.removesuffix("*")) + ".*"
+                for pattern in sorted(package_patterns)
+            ),
+        ]
+    )
     with tempfile.TemporaryDirectory(
         prefix="iree-bazel-compiling-dependents-"
     ) as temp_dir:
-        universe_expression = " + ".join(target_patterns)
-        completed = run_captured(
-            [
-                bazel,
-                "query",
-                "--noshow_progress",
-                "--order_output=no",
-                "--output=label",
-                f'kind("cc_.* rule", {universe_expression})',
-            ],
+        universe_targets = query_compiling_targets(
+            bazel,
+            target_patterns=target_patterns,
             cwd=cwd,
             env=env,
-        )
-        if completed.returncode != 0:
-            detail = (completed.stderr or completed.stdout).strip()
-            raise BazelSourceOwnerQueryError(
-                "Bazel C/C++ universe query failed"
-                + (f":\n{detail[-8192:]}" if detail else "")
-            )
-        universe_targets = sorted(
-            line for line in completed.stdout.splitlines() if line.startswith("//")
         )
         if not universe_targets:
             return []
@@ -1997,7 +2037,8 @@ def query_compiling_targets_depending_on(
             "let universe = set(\n  "
             + "\n  ".join(universe_targets)
             + "\n) in\n"
-            + f"let seeds = {seeds} in\n"
+            + "let dependencies = deps($universe) in\n"
+            + f'let seeds = filter("^({seed_pattern})$", $dependencies) in\n'
             + 'kind("cc_.* rule", rdeps($universe, $seeds))\n'
         )
         query_path = Path(temp_dir) / "dependents.query"

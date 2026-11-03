@@ -248,23 +248,27 @@ static iree_status_t iree_hal_replay_executor_virtual_buffer_create(
   iree_host_size_t family_payload_length = 0;
   iree_host_size_t payload_length = 0;
   iree_host_size_t sources_length = 0;
-  if (IREE_UNLIKELY(payload.reserved0 || payload.host_access > UINT16_MAX ||
-                    !payload.source_pool_count ||
-                    payload.source_pool_count > IREE_HOST_SIZE_MAX ||
-                    !iree_host_size_checked_mul(
-                        (iree_host_size_t)payload.source_pool_count,
-                        sizeof(iree_hal_replay_object_id_t), &sources_length) ||
-                    payload.family_count > IREE_HOST_SIZE_MAX ||
-                    !iree_host_size_checked_mul(
-                        (iree_host_size_t)payload.family_count,
-                        sizeof(iree_hal_replay_pool_family_access_payload_t),
-                        &family_payload_length) ||
-                    !iree_host_size_checked_add(sizeof(payload),
-                                                family_payload_length,
-                                                &payload_length) ||
-                    !iree_host_size_checked_add(payload_length, sources_length,
-                                                &payload_length) ||
-                    payload_length != record->payload.data_length)) {
+  if (IREE_UNLIKELY(
+          (payload.flags &
+           ~IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS) ||
+          (payload.flags &&
+           executor->file_version_minor <
+               IREE_HAL_REPLAY_VIRTUAL_BUFFER_FLAGS_VERSION_MINOR) ||
+          payload.host_access > UINT16_MAX || !payload.source_pool_count ||
+          payload.source_pool_count > IREE_HOST_SIZE_MAX ||
+          !iree_host_size_checked_mul(
+              (iree_host_size_t)payload.source_pool_count,
+              sizeof(iree_hal_replay_object_id_t), &sources_length) ||
+          payload.family_count > IREE_HOST_SIZE_MAX ||
+          !iree_host_size_checked_mul(
+              (iree_host_size_t)payload.family_count,
+              sizeof(iree_hal_replay_pool_family_access_payload_t),
+              &family_payload_length) ||
+          !iree_host_size_checked_add(sizeof(payload), family_payload_length,
+                                      &payload_length) ||
+          !iree_host_size_checked_add(payload_length, sources_length,
+                                      &payload_length) ||
+          payload_length != record->payload.data_length)) {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
                             "replay reservation payload is invalid");
   }
@@ -319,6 +323,7 @@ static iree_status_t iree_hal_replay_executor_virtual_buffer_create(
       .byte_length = payload.byte_length,
       .min_alignment = payload.min_alignment,
       .mapping_granularity = payload.mapping_granularity,
+      .flags = payload.flags,
   };
   iree_hal_buffer_t* buffer = NULL;
   if (iree_status_is_ok(status)) {

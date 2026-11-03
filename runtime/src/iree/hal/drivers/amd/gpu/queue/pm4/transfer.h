@@ -7,6 +7,7 @@
 #ifndef IREE_HAL_DRIVERS_AMD_GPU_QUEUE_PM4_TRANSFER_H_
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_PM4_TRANSFER_H_
 
+#include "iree/hal/drivers/amd/gpu/queue/pm4/launch.h"
 #include "iree/hal/drivers/amd/gpu/queue/transfer.h"
 
 #ifdef __cplusplus
@@ -14,16 +15,12 @@ extern "C" {
 #endif  // __cplusplus
 
 enum {
-  // Conservative per-packet policy, independent of host retirement granularity.
-  IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_PACKET_LENGTH = 32736,
-  // Reusable bulk staging; small transfers keep the initial argument storage.
-  IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_STAGING_LENGTH = 1024 * 1024,
-  // Enough packets to consume a complete bulk window, including its short tail.
-  IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS =
-      ((IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_STAGING_LENGTH +
-        IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_PACKET_LENGTH - 1) /
-       IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_PACKET_LENGTH) *
-      7,
+  // Short download retirements bound host-copy interference.
+  IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_DOWNLOAD_LENGTH = 1024 * 1024,
+  // Upload preparation overlaps native reads with two bounded regions.
+  IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_UPLOAD_LENGTH = 16 * 1024 * 1024,
+  // Bounded command preparation, independent of payload or staging byte size.
+  IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS = 32 * 7,
 };
 
 // Admitted native DMA span, independent of direct or recorded ownership.
@@ -62,8 +59,8 @@ iree_hal_amd_gpu_pm4_transfer_emit_packet(
     const iree_hal_amd_gpu_pm4_transfer_span_t* span, uint64_t offset,
     iree_byte_span_t staging, uint64_t staging_address, uint32_t* words);
 
-// One bounded candidate publication. Consecutive packets for one download
-// share a contiguous retirement copy; completing that operation ends the batch.
+// One bounded candidate publication. Consecutive downloads share contiguous
+// staging and one retirement action; the next different operation ends the run.
 // No owner changes until the enclosing queue commits this candidate and its
 // staging prefix.
 typedef struct iree_hal_amd_gpu_pm4_transfer_chunk_t {
@@ -88,6 +85,17 @@ typedef struct iree_hal_amd_gpu_pm4_transfer_chunk_t {
 // Failure means a captured buffer still lacks its queue-ordered native address.
 iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
     const iree_hal_amd_gpu_transfer_t* transfer, uint32_t word_capacity,
+    iree_byte_span_t staging, uint64_t staging_address,
+    iree_hal_amd_gpu_pm4_transfer_chunk_t* out_chunk);
+
+// Emits consecutive COPY operations with the resident blit kernel. Capture
+// has proved that every native slot also admits PROGRAM transfer access.
+// Each launch owns one 32-byte argument record in staging; no payload is
+// copied by the host. Other operation types end the chunk. The caller publishes
+// arguments before execution and retains them through shader completion.
+iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
+    const iree_hal_amd_gpu_transfer_t* transfer,
+    const iree_hal_amd_gpu_pm4_launch_t* launch, uint32_t word_capacity,
     iree_byte_span_t staging, uint64_t staging_address,
     iree_hal_amd_gpu_pm4_transfer_chunk_t* out_chunk);
 

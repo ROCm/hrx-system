@@ -72,6 +72,8 @@ class VulkanSparseBindingTest : public CtsTestBase<> {
     const iree_hal_virtual_buffer_options_t options = {
         .byte_length = length,
         .min_alignment = alignment,
+        .flags = capabilities_.supported_flags &
+                 IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
     };
     iree_hal_buffer_t* reservation = nullptr;
     IREE_RETURN_IF_ERROR(iree_hal_virtual_buffer_create(

@@ -9,6 +9,7 @@
 
 #include "iree/hal/drivers/amd/gpu/code.h"
 #include "iree/hal/drivers/amd/gpu/queue/blit.h"
+#include "iree/hal/drivers/amd/gpu/queue/control_program.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/barrier.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/launch.h"
 #include "iree/hal/drivers/amd/gpu/queue/program.h"
@@ -30,6 +31,8 @@ typedef struct iree_hal_amd_gpu_pm4_program_pool_t {
   iree_hal_amd_gpu_pm4_launch_t fixup;
   // Prepared dynamic-extent copy/fill kernel.
   iree_hal_amd_gpu_pm4_launch_t blit;
+  // Scalar atomic launches indexed by instruction scope and integer width.
+  iree_hal_amd_gpu_pm4_launch_t control[IREE_HAL_AMD_GPU_CONTROL_PROGRAM_COUNT];
   // KERNEL submission enters IB1 and needs an explicit exit continuation.
   bool chain;
 } iree_hal_amd_gpu_pm4_program_pool_t;
@@ -95,6 +98,12 @@ uint32_t* iree_hal_amd_gpu_pm4_fixup_emit(
 // Address fixups target the kernarg SGPR pair at DWORD 24. The caller owns
 // visibility and lifetime, as for any recorded shader dispatch.
 uint32_t* iree_hal_amd_gpu_pm4_blit_emit(
+    uint32_t* words, const iree_hal_amd_gpu_pm4_launch_t* launch,
+    uint64_t argument_address);
+
+// One workitem scalar launch. Its target is a separate argument fixup; the
+// kernarg address is the same DWORD-24 pair used by the other small builtins.
+uint32_t* iree_hal_amd_gpu_pm4_control_program_emit(
     uint32_t* words, const iree_hal_amd_gpu_pm4_launch_t* launch,
     uint64_t argument_address);
 

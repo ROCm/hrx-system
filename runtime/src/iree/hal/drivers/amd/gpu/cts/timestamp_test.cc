@@ -43,6 +43,13 @@ class GpuNativeTimestampTest : public GpuNativeTest,
     const auto* family = iree_hal_queue_family(queues_[0]);
     ASSERT_GT(family->spec->timestamp_frequency_hz, 0u);
     ASSERT_EQ(family->spec->timestamp_valid_bits, 64u);
+    const auto* timing =
+        iree_hal_device_spec_timing(iree_hal_device_spec(device_));
+    ASSERT_TRUE(iree_all_bits_set(
+        timing->flags, IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS));
+    ASSERT_EQ(timing->timestamp_frequency_hz,
+              family->spec->timestamp_frequency_hz);
+    ASSERT_EQ(timing->timestamp_valid_bits, family->spec->timestamp_valid_bits);
     const iree_hal_pool_family_access_t access = {
         .family = family,
         .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,

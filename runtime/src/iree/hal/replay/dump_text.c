@@ -239,17 +239,18 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
       memcpy(&payload, record->payload.data, sizeof(payload));
       iree_host_size_t families_size = 0;
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_virtual_buffer_layout(
-          record, &payload, &families_size));
+          context->file_version_minor, record, &payload, &families_size));
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
           " buffer_id=%" PRIu64 " byte_length=%" PRIu64
           " min_alignment=%" PRIu64 " mapping_granularity=%" PRIu64
-          " family_count=%" PRIu64 " host={access=0x%08" PRIx32
-          " modes=0x%08" PRIx32 " properties=%" PRIu32
+          " flags=0x%08" PRIx32 " family_count=%" PRIu64
+          " host={access=0x%08" PRIx32 " modes=0x%08" PRIx32
+          " properties=%" PRIu32
           "}"
           " family_range=[%" PRIu64 ", +%" PRIhsz "]",
           record->header.related_object_id, payload.byte_length,
-          payload.min_alignment, payload.mapping_granularity,
+          payload.min_alignment, payload.mapping_granularity, payload.flags,
           payload.family_count, payload.host_access, payload.host_mapping_modes,
           payload.host_properties, payload_range->offset + sizeof(payload),
           families_size));

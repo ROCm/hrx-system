@@ -16,7 +16,11 @@
 
 static void Exercise(iree_string_view_t input) {
   const loom_serve_media_image_limits_t limits = {
-      .compressed_bytes = 65536, .width = 128, .height = 128, .pixels = 16384};
+      .compressed_bytes = 65536,
+      .width = 128,
+      .height = 128,
+      .pixels = 16384,
+  };
   loom_serve_media_image_input_t image;
   iree_status_t status = loom_serve_media_image_input_initialize(
       loom_serve_media_image_source_from_data_url(input), &limits,

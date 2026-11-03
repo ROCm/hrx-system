@@ -19,7 +19,7 @@ void GpuNativeTransferTest::RunConcurrentTransfers(size_t lane_count,
   using iree::hal::cts::Ref;
   // Exceeds the bounded staging window in both native protocols, with an odd
   // tail to exercise partial publications and unaligned host/device ranges.
-  constexpr size_t kTransferLength = 3 * 1024 * 1024 + 37;
+  constexpr size_t kTransferLength = 17 * 1024 * 1024 + 37;
   std::vector<Ref<iree_hal_buffer_t>> buffers(lane_count);
   std::vector<Ref<iree_hal_semaphore_t>> timelines(lane_count);
   for (size_t lane = 0; lane < lane_count; ++lane) {

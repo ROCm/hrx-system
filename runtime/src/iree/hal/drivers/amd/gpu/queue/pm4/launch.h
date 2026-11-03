@@ -117,6 +117,15 @@ static inline uint16_t iree_hal_amd_gpu_pm4_launch_user_data_word_offset(
   return index == UINT8_MAX ? UINT16_MAX : (uint16_t)(24 + index);
 }
 
+// Preserves the prepared wave mode and enables PARTIAL_TG_EN (bit 1) when the
+// launch has a partial final group. Prepared partial geometry supplies all
+// three final dimensions, including full sizes on divisible axes, or all zeros.
+static inline uint32_t iree_hal_amd_gpu_pm4_launch_dispatch_initiator(
+    const iree_hal_amd_gpu_pm4_launch_t* launch,
+    const uint32_t partial_size[3]) {
+  return launch->dispatch_initiator | (partial_size[0] ? UINT32_C(1) << 1 : 0);
+}
+
 // Emits complete launch binding into caller-owned capacity and returns the next
 // DWORD. Emits 22 DWORDs when user_data_count is zero, otherwise
 // 24 + user_data_count. This hot transform is infallible: the caller has

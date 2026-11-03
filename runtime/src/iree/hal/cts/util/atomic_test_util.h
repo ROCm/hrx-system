@@ -23,7 +23,8 @@ struct AtomicTestRequirements {
   iree_hal_buffer_usage_t buffer_usage = IREE_HAL_BUFFER_USAGE_NONE;
   // Width of each atomic operation.
   iree_hal_atomic_width_t width = IREE_HAL_ATOMIC_WIDTH_32;
-  // Ordering and coherence domain requested by the test.
+  // Ordering, coherence domain, and execution requirements requested by the
+  // test.
   iree_hal_atomic_flags_t atomic_flags = IREE_HAL_ATOMIC_FLAG_NONE;
 };
 

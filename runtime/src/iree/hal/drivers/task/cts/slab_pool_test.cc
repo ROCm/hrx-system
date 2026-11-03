@@ -270,6 +270,18 @@ TEST_P(TaskSlabPoolTest, QualifiesRequiredAtomicCapabilities) {
         iree_hal_buffer_query_atomic_operations(buffer, site), required));
     EXPECT_TRUE(iree_hal_atomic_operation_capabilities_support(
         iree_hal_buffer_query_atomic_operations(view, site), required));
+    iree_hal_memory_scope_t peer;
+    IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
+        group_, {IREE_HAL_MEMORY_SITE_QUEUE, families_[0].family}, &peer));
+    const auto table = iree_hal_buffer_transition_table(view);
+    iree_hal_memory_transition_pair_t pair;
+    IREE_ASSERT_OK(iree_hal_memory_transition_prepare_pair(
+        table, peer, site, IREE_HAL_MEMORY_TRANSITION_ACQUIRE, &pair));
+    const auto info = iree_hal_memory_transition_query_info(table, pair);
+    EXPECT_TRUE(iree_hal_atomic_operation_capabilities_support(
+        info.producer_atomics, required));
+    EXPECT_TRUE(iree_hal_atomic_operation_capabilities_support(
+        info.consumer_atomics, required));
   }
   iree_hal_memory_scope_t host;
   IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
@@ -991,11 +1003,11 @@ TEST_P(TaskSlabPoolTest, RecordedAtomicsSurviveReplacementFromAnotherPool) {
 
   Ref<iree_hal_pool_t> replacement_source;
   IREE_ASSERT_OK(CreateMappingSource(replacement_source.out()));
-  EXPECT_TRUE(iree_hal_virtual_buffer_query_pool_compatibility(
-      target, replacement_source));
-  std::array<Ref<iree_hal_buffer_t>, 2> backings;
   const iree_hal_memory_scope_t all = {
       iree_hal_device_group_memory_domain(group_), IREE_HAL_MEMORY_SCOPE_ANY};
+  EXPECT_TRUE(iree_hal_virtual_buffer_query_pool_compatibility(
+      target, all, replacement_source));
+  std::array<Ref<iree_hal_buffer_t>, 2> backings;
   for (size_t i = 0; i < backings.size(); ++i) {
     IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
         replacement_source, iree_hal_make_pool_reservation_request(unit, unit),
@@ -1063,7 +1075,12 @@ TEST_P(TaskSlabPoolTest, CapturedViewsKeepAddressesAliveThroughRemoval) {
   VirtualBufferLifetime lifetime;
   const iree_allocator_t allocator = {&lifetime, ObserveVirtualBufferLifetime};
   Ref<iree_hal_buffer_t> arena;
-  const iree_hal_virtual_buffer_options_t options = {2 * kUnit, kUnit, kUnit};
+  const iree_hal_virtual_buffer_options_t options = {
+      .byte_length = 2 * kUnit,
+      .min_alignment = kUnit,
+      .mapping_granularity = kUnit,
+      .flags = IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
+  };
   IREE_ASSERT_OK(iree_hal_virtual_buffer_create(
       group_, Scope(), {1, &source_pool}, &options, allocator, arena.out()));
   lifetime.buffer_allocation = arena.get();

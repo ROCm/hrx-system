@@ -124,6 +124,56 @@ class BazelTest(unittest.TestCase):
                 env=None,
             )
 
+    def test_compiling_target_query_includes_manual_rules(self):
+        output = (
+            "//runtime/src/iree/hal:device_spec_fuzz\n"
+            "//runtime/src/iree/base:base\n"
+            "//runtime/src/iree/hal/drivers/amd/xdna/cts:native_replay_stress\n"
+        )
+        with mock.patch.object(
+            bazel_dev,
+            "run_captured",
+            return_value=subprocess.CompletedProcess([], 0, stdout=output, stderr=""),
+        ) as query:
+            targets = bazel_dev.query_compiling_targets(
+                "bazel",
+                target_patterns=("//runtime/src/...", "//loom/src/..."),
+                cwd=Path("/repo"),
+                env=None,
+            )
+
+        self.assertEqual(
+            targets,
+            [
+                "//runtime/src/iree/base:base",
+                "//runtime/src/iree/hal/drivers/amd/xdna/cts:native_replay_stress",
+                "//runtime/src/iree/hal:device_spec_fuzz",
+            ],
+        )
+        command = query.call_args.args[0]
+        self.assertIn('kind("cc_.* rule", //runtime/src/... + //loom/src/...)', command)
+        self.assertFalse(any("manual" in argument for argument in command))
+
+    def test_compiling_target_query_rejects_failure(self):
+        with (
+            mock.patch.object(
+                bazel_dev,
+                "run_captured",
+                return_value=subprocess.CompletedProcess(
+                    [], 7, stdout="", stderr="broken universe\n"
+                ),
+            ),
+            self.assertRaisesRegex(
+                bazel_dev.BazelSourceOwnerQueryError, "broken universe"
+            ),
+        ):
+            bazel_dev.query_compiling_targets(
+                "bazel",
+                target_patterns=("//runtime/src/...",),
+                cwd=Path("/repo"),
+                env=None,
+            )
+
     def test_compiling_dependent_query_uses_configured_reverse_dependencies(self):
         captured_query = ""
 
@@ -152,8 +202,8 @@ class BazelTest(unittest.TestCase):
         with mock.patch.object(bazel_dev, "run_captured", side_effect=run_query):
             targets = bazel_dev.query_compiling_targets_depending_on(
                 "bazel",
-                dependency_labels={"//producer:event.h"},
-                package_patterns={"//producer/tests:*"},
+                dependency_labels={"//producer:event+.h"},
+                package_patterns={"//producer/tests.v2:*"},
                 target_patterns=("//runtime/...", "//libhrx/..."),
                 configuration_args=("--config=presubmit",),
                 cwd=Path("/repo"),
@@ -165,10 +215,19 @@ class BazelTest(unittest.TestCase):
             "let universe = set(\n  //consumer:library\n  //consumer:test\n) in",
             captured_query,
         )
-        self.assertIn(
-            "let seeds = //producer/tests:* + //producer:event.h in",
-            captured_query,
-        )
+        self.assertIn("let dependencies = deps($universe) in", captured_query)
+        self.assertIn('kind("cc_.* rule", rdeps($universe, $seeds))', captured_query)
+        pattern = captured_query.split('filter("', 1)[1].split('", $dependencies)', 1)[
+            0
+        ]
+        self.assertIsNotNone(re.fullmatch(pattern, "//producer:event+.h"))
+        self.assertIsNone(re.fullmatch(pattern, "//producer:event+.h.extra"))
+        self.assertIsNone(re.fullmatch(pattern, "//producer:eventxh"))
+        self.assertIsNotNone(re.fullmatch(pattern, "//producer/tests.v2:library"))
+        self.assertIsNotNone(re.fullmatch(pattern, "//producer/tests.v2:input.cc"))
+        self.assertIsNone(re.fullmatch(pattern, "//producer/testsXv2:library"))
+        self.assertIsNone(re.fullmatch(pattern, "//producer/tests.v2/nested:library"))
+        self.assertNotIn("//producer/tests.v2:*", captured_query)
 
     def test_compiling_dependent_query_rejects_query_failure(self):
         with (

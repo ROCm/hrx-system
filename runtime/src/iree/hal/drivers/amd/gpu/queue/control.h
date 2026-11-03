@@ -20,15 +20,15 @@ typedef enum iree_hal_amd_gpu_control_kind_e {
   IREE_HAL_AMD_GPU_CONTROL_RMW,
 } iree_hal_amd_gpu_control_kind_t;
 
-// Scalar command-processor memory operation. PM4 emits this into its ring or
-// resident program; AQL carries the same native bytes in a format-1 packet.
-// This is a direct-call capture, not a recorded host operation stream.
+// Scalar memory operation, emitted using a qualified CP or shader recipe.
+// Direct calls capture this value until publication; recordings encode native
+// packets and arguments without retaining a host operation stream.
 typedef struct iree_hal_amd_gpu_control_t {
   // Wait reference, store value, or RMW operand.
   uint64_t value;
   // Wait comparison mask; unused by other kinds.
   uint64_t mask;
-  // Requested atomic ordering and coherence domain.
+  // Requested atomic ordering, coherence domain, and execution requirements.
   iree_hal_atomic_flags_t flags;
   // Timestamp, wait, store, or RMW.
   uint8_t kind;
@@ -86,13 +86,21 @@ static inline iree_hal_amd_gpu_control_t iree_hal_amd_gpu_control_rmw(
 uint32_t iree_hal_amd_gpu_control_requirement(
     iree_hal_amd_gpu_control_t command);
 
-// Checks prepared queue-site guarantees without requiring committed backing.
-// required and incompatible use the packed scope-row representation; the
-// latter classifies only failures not also required with the default mode.
+// Checks prepared execution-site guarantees without requiring committed
+// backing. required and incompatible use the packed scope-row representation;
+// the latter classifies only failures not also required with the default mode.
 // Native binding admission has already established family membership.
+// ZERO_COMPUTE selects the captured native queue subset instead of the site.
 iree_status_t iree_hal_amd_gpu_control_validate_target(
+    const iree_hal_queue_family_t* family, iree_hal_memory_site_kind_t site,
+    const iree_hal_buffer_t* buffer, uint32_t required, uint32_t incompatible,
+    iree_hal_atomic_flags_t flags);
+
+// Selects the shader recipe from the immutable zero-compute subset. No native
+// binding or committed backing is needed; virtual ranges retain zero here.
+bool iree_hal_amd_gpu_control_uses_program(
     const iree_hal_queue_family_t* family, const iree_hal_buffer_t* buffer,
-    uint32_t required, uint32_t incompatible);
+    iree_hal_amd_gpu_control_t command);
 
 // Resolves after allocation dependencies and checks the actual target address.
 iree_status_t iree_hal_amd_gpu_control_resolve(

@@ -8,7 +8,7 @@
 #define IREE_HAL_DRIVERS_AMD_FABRIC_VIRTUAL_BUFFER_H_
 
 #include "amdf/amdf.h"
-#include "iree/hal/drivers/amd/fabric/memory.h"
+#include "iree/hal/drivers/amd/fabric/mapping_index.h"
 #include "iree/hal/memory_backend.h"
 #include "iree/hal/virtual_buffer.h"
 
@@ -33,15 +33,6 @@ iree_status_t iree_hal_amd_fabric_virtual_buffer_create(
     iree_hal_pool_scope_t scope, iree_hal_virtual_buffer_sources_t sources,
     const iree_hal_virtual_buffer_options_t* options,
     iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer);
-
-// One installed range and its original prepared source facts. Both are borrowed
-// under the caller's physical backing lifetime, including through subranges.
-typedef struct iree_hal_amd_fabric_virtual_mapping_t {
-  // Native source coordinates and exact target range.
-  amdf_memory_mapping_update_t native;
-  // Provider-owned source metadata, live through the source's final alias.
-  const iree_hal_amd_fabric_mapping_source_t* source;
-} iree_hal_amd_fabric_virtual_mapping_t;
 
 // Resolves the mapped prefix of a nonempty range in a native AMDF view.
 // The returned source offset is native-memory-relative; length stops at the

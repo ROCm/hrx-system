@@ -178,7 +178,10 @@ iree_status_t iree_hal_amd_gpu_semaphore_acquire_wait(
     if (current_value >= minimum_value) {
       out_wait->state = IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_COMPLETED;
     } else if (semaphore->submitted.value >= minimum_value) {
-      if (semaphore->submitted.signal->block->domain == domain) {
+      // A later producer may depend on this consumer. Only the exact requested
+      // point can replace the public timeline with a native dependency.
+      if (semaphore->submitted.value == minimum_value &&
+          semaphore->submitted.signal->block->domain == domain) {
         out_wait->state = IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE;
         out_wait->signal = semaphore->submitted.signal;
         iree_hal_amd_gpu_signal_retain(out_wait->signal);
@@ -317,13 +320,24 @@ static iree_status_t iree_hal_amd_gpu_semaphore_wait(
       iree_hal_amd_gpu_semaphore_cast(base_semaphore);
   const iree_hal_amd_gpu_semaphore_wait_context_t* context =
       semaphore->wait_context;
-  if (context && iree_any_bit_set(flags, IREE_ASYNC_WAIT_FLAG_ACTIVE) &&
+  if (context &&
+      iree_any_bit_set(
+          flags, IREE_ASYNC_WAIT_FLAG_ACTIVE | IREE_ASYNC_WAIT_FLAG_YIELD) &&
       !iree_timeout_is_immediate(timeout) &&
       iree_hal_amd_gpu_semaphore_query(&semaphore->async) < value) {
     iree_convert_timeout_to_absolute(&timeout);
     iree_hal_amd_gpu_signal_t* signal =
         iree_hal_amd_gpu_semaphore_acquire_host_wait_signal(semaphore, value);
     if (signal) {
+      iree_time_t observe_deadline = timeout.nanos;
+      if (!iree_any_bit_set(flags, IREE_ASYNC_WAIT_FLAG_ACTIVE)) {
+        // Observe short GPU work before paying for an event wakeup. Longer
+        // work returns to the ordinary host notification after this budget.
+        observe_deadline =
+            iree_timeout_min(timeout, iree_make_timeout_ns(16000)).nanos;
+        // This wait has spent its bounded observation budget here.
+        flags &= ~IREE_ASYNC_WAIT_FLAG_YIELD;
+      }
       while (iree_hal_amd_gpu_semaphore_query(&semaphore->async) < value) {
         if ((uint64_t)iree_atomic_load(
                 (const iree_atomic_int64_t*)signal->host_value,
@@ -331,8 +345,8 @@ static iree_status_t iree_hal_amd_gpu_semaphore_wait(
           context->try_retire(context->user_data);
           break;
         }
-        if (timeout.nanos != IREE_TIME_INFINITE_FUTURE &&
-            iree_time_now() >= timeout.nanos) {
+        if (observe_deadline != IREE_TIME_INFINITE_FUTURE &&
+            iree_time_now() >= observe_deadline) {
           break;
         }
         iree_processor_yield();

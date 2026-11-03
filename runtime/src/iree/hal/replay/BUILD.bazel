@@ -382,8 +382,16 @@ if(TARGET iree::hal::drivers::task::registration)
 
 iree_runtime_cc_test(
     name = "recorder_pool_test",
-    srcs = ["recorder_pool_test.cc"],
+    srcs = [
+        "execute_pool.h",
+        "execute_state.h",
+        "recorder_pool.h",
+        "recorder_pool_test.cc",
+    ],
     deps = [
+        ":execute",
+        ":file_reader",
+        ":format",
         ":recorder",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",

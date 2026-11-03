@@ -41,8 +41,9 @@ typedef struct iree_hal_amd_gpu_pm4_queue_t iree_hal_amd_gpu_pm4_queue_t;
 // One cache line of host retirement data per native publication. A capture
 // can publish several pieces without overwriting a still-live piece's credit.
 typedef struct iree_hal_amd_gpu_pm4_retirement_t {
-  // Owned capture reference, distinct from any unpublished suffix.
-  iree_alignas(64) iree_hal_amd_gpu_pm4_submission_t* submission;
+  // Owned aligned capture pointer with bit zero marking terminal publication.
+  // The tag reuses alignment bits so the entire action remains one cache line.
+  iree_alignas(64) uintptr_t tagged_submission;
   // Reclaimable command prefix: USER release end or KERNEL chunk end.
   uint64_t consumed_words;
   // Exclusive argument/staging prefix reusable after this host action.
@@ -51,11 +52,23 @@ typedef struct iree_hal_amd_gpu_pm4_retirement_t {
   iree_hal_amd_gpu_download_t download;
   // Replaced scratch generations dominated by this FIFO completion.
   iree_hal_amd_gpu_pm4_scratch_storage_t* scratch;
-  // This publication completes the entire captured operation.
-  bool terminal;
 } iree_hal_amd_gpu_pm4_retirement_t;
+static_assert(iree_alignof(iree_hal_amd_gpu_pm4_submission_t) >= 2,
+              "submission alignment reserves the terminal pointer bit");
 static_assert(sizeof(iree_hal_amd_gpu_pm4_retirement_t) == 64,
               "retirement records occupy one cache line");
+
+static inline iree_hal_amd_gpu_pm4_submission_t*
+iree_hal_amd_gpu_pm4_retirement_submission(
+    const iree_hal_amd_gpu_pm4_retirement_t* action) {
+  return (iree_hal_amd_gpu_pm4_submission_t*)(action->tagged_submission &
+                                              ~(uintptr_t)1);
+}
+
+static inline bool iree_hal_amd_gpu_pm4_retirement_is_terminal(
+    const iree_hal_amd_gpu_pm4_retirement_t* action) {
+  return (action->tagged_submission & 1) != 0;
+}
 
 // A ready single-piece dispatch borrows its capture from the reserved native
 // retirement slot. Deferred or larger captures retain independent pool storage.

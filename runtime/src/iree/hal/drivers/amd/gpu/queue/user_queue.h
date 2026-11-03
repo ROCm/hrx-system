@@ -40,6 +40,16 @@ typedef struct iree_hal_amd_gpu_user_queue_t {
   iree_hal_host_cache_fence_t host_publish_fence;
 } iree_hal_amd_gpu_user_queue_t;
 
+// Translates an already-admitted family priority. Native compute families
+// expose only -1, 0, and 1 when the corresponding native level is supported.
+static inline amdf_queue_priority_t iree_hal_amd_gpu_user_queue_native_priority(
+    iree_hal_queue_priority_t priority) {
+  return priority < IREE_HAL_QUEUE_PRIORITY_NORMAL ? AMDF_QUEUE_PRIORITY_LOW
+         : priority > IREE_HAL_QUEUE_PRIORITY_NORMAL
+             ? AMDF_QUEUE_PRIORITY_HIGH
+             : AMDF_QUEUE_PRIORITY_NORMAL;
+}
+
 // Acquires the selected native USER queue and its host producer view. The
 // caller has admitted the native family, format, SINGLE producer mode, host
 // capability, ring capacity and scratch requirements in create_info. This is

@@ -66,21 +66,22 @@ static uint32_t iree_hal_amd_gpu_pm4_barrier_execution(
     return IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE |
            IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
   }
-  // MEC writes, copies, and atomics use confirmed forms. Only asynchronous
-  // shader and CP-DMA work needs an additional join at this boundary.
-  return (stages & IREE_HAL_EXECUTION_STAGE_DISPATCH)
+  // Scalar atomics may execute on shaders. Confirmed MEC operations need no
+  // independent join, but the public stage covers both implementations.
+  return (stages &
+          (IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_ATOMIC))
              ? IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE
              : 0;
 }
 
 void iree_hal_amd_gpu_pm4_barrier_control(
-    const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
+    const iree_hal_amd_gpu_pm4_barrier_profile_t* profile, bool program,
     iree_hal_atomic_flags_t flags, iree_hal_execution_stage_t source_stage,
     iree_hal_amd_gpu_pm4_barrier_t* before,
     iree_hal_amd_gpu_pm4_barrier_t* after) {
   before->execution |= iree_hal_amd_gpu_pm4_barrier_execution(source_stage);
   const bool system = (flags & IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE) ||
-                      profile->command_processor_bypasses_l2;
+                      (!program && profile->command_processor_bypasses_l2);
   if (flags & IREE_HAL_ATOMIC_FLAG_RELEASE) {
     before->cache_control |= system ? profile->release : profile->shader;
   }
@@ -131,7 +132,9 @@ iree_hal_amd_gpu_pm4_barrier_t iree_hal_amd_gpu_pm4_barrier_prepare(
     const iree_hal_access_scope_t shader =
         IREE_HAL_ACCESS_SCOPE_CONSTANT_READ |
         IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
-        IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE | transfer;
+        IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+        IREE_HAL_ACCESS_SCOPE_ATOMIC_READ | IREE_HAL_ACCESS_SCOPE_ATOMIC_WRITE |
+        transfer;
     const iree_hal_access_scope_t command_processor =
         IREE_HAL_ACCESS_SCOPE_INDIRECT_COMMAND_READ |
         IREE_HAL_ACCESS_SCOPE_ATOMIC_READ | IREE_HAL_ACCESS_SCOPE_ATOMIC_WRITE |

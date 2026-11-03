@@ -75,6 +75,8 @@ typedef struct iree_hal_amd_gpu_pm4_dispatch_storage_t {
   uint32_t alignment;
   // Packet byte offset within the allocation; unused without a packet ABI.
   uint32_t packet_offset;
+  // Grid-state byte offset; used only for a cooperative dispatch.
+  uint32_t grid_sync_offset;
 } iree_hal_amd_gpu_pm4_dispatch_storage_t;
 
 // Queries bounded argument storage for an admitted function/argument mode.
@@ -144,7 +146,7 @@ void iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
     const iree_hal_amd_gpu_pm4_function_t* function,
     const iree_hal_amd_gpu_pm4_dispatch_t* dispatch,
     iree_const_byte_span_t constants, const uint64_t* binding_addresses,
-    iree_hal_dispatch_flags_t flags, void* target);
+    iree_hal_dispatch_flags_t flags, uint64_t argument_address, void* target);
 
 // Initializes the immutable packet fields. Device preparation fills indirect
 // grid counts; publication binds the invocation's actual kernarg address. The

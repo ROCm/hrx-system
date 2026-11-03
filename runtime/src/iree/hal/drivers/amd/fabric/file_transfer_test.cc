@@ -349,8 +349,8 @@ class FileTransferTest : public ::testing::TestWithParam<
   iree_hal_buffer_t* buffer_ = nullptr;
   // Optional physical-source contract, borrowed by the buffer until teardown.
   iree_hal_memory_contract_t* contract_ = nullptr;
-  // Dense host/queue/program scope mapping to the sole native device access.
-  std::array<uint32_t, 4> access_ordinals_ = {};
+  // Dense host/queue/program facts for the sole native device access.
+  std::array<iree_hal_amd_fabric_memory_scope_facts_t, 4> scope_facts_ = {};
   // Shared production operation under test.
   iree_hal_amd_fabric_file_transfer_t transfer_ = {};
   // Borrowed registration surviving every accepted independent request.
@@ -401,14 +401,14 @@ TEST_P(FileTransferTest, NativeAdmissionUsesAchievedBackingCapabilities) {
       .host_binding_index = 0,
       .types = &type,
   };
-  IREE_ASSERT_OK(iree_hal_memory_contract_create(
-      &storage_, access_ordinals_.size(), &layout, iree_allocator_system(),
-      &contract_));
+  IREE_ASSERT_OK(
+      iree_hal_memory_contract_create(&storage_, scope_facts_.size(), &layout,
+                                      iree_allocator_system(), &contract_));
   contract_->scopes[2].usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
   buffer_->memory.contract = contract_;
   buffer_->memory.backing = &storage_.backing;
   buffer_->memory.offset = 8 + 16;
-  storage_.binding_facts = {&storage_.memory, access_ordinals_.data()};
+  storage_.binding_facts = {&storage_.memory, scope_facts_.data()};
   storage_.memory.host_access =
       AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
   storage_.api.memory_query_pair_info =

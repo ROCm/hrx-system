@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
 package(
@@ -34,6 +35,7 @@ iree_runtime_cc_test(
         ":fabric",
         "//libamdf:headers",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -51,6 +53,35 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amd:status",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "memory_spec",
+    srcs = ["memory_spec.c"],
+    hdrs = ["memory_spec.h"],
+    deps = [
+        ":memory",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd:status",
+        "//runtime/src/iree/hal/utils:device_spec_builder",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "memory_spec_test",
+    srcs = ["memory_spec_test.cc"],
+    deps = [
+        ":memory_spec",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:device_spec_builder",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -223,6 +254,60 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "mapping_index",
+    srcs = ["mapping_index.c"],
+    hdrs = ["mapping_index.h"],
+    deps = [
+        ":memory",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "mapping_index_test",
+    srcs = ["mapping_index_test.cc"],
+    deps = [
+        ":mapping_index",
+        ":memory",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_benchmark(
+    name = "mapping_index_benchmark",
+    srcs = ["mapping_index_benchmark.cc"],
+    deps = [
+        ":mapping_index",
+        ":memory",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "memory_transition_plan",
+    srcs = ["memory_transition_plan.c"],
+    hdrs = ["memory_transition_plan.h"],
+    deps = [
+        ":memory",
+        ":memory_transition",
+        ":slab_provider",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd:status",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "memory_backend",
     srcs = [
         "memory_backend.c",
@@ -234,8 +319,9 @@ iree_runtime_cc_library(
     ],
     deps = [
         ":asan_support",
+        ":mapping_index",
         ":memory",
-        ":memory_transition",
+        ":memory_transition_plan",
         ":slab_provider",
         "//libamdf:headers",
         "//runtime/src/iree/async",
@@ -251,6 +337,8 @@ iree_runtime_cc_library(
 iree_runtime_cc_test(
     name = "memory_backend_test",
     srcs = [
+        "memory_backend_atomic_test.cc",
+        "memory_backend_mapping_test.cc",
         "memory_backend_test.cc",
         "virtual_buffer_test.cc",
     ],

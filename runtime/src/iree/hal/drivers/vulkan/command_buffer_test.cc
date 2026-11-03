@@ -516,6 +516,34 @@ TEST_F(VulkanCommandBufferTest, FinalAtomicTargetAlignmentFollowsMode) {
           IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE));
 }
 
+TEST_F(VulkanCommandBufferTest, RejectsZeroComputeBeforeRecordingAnyShader) {
+  for (iree_hal_atomic_width_t width :
+       {IREE_HAL_ATOMIC_WIDTH_32, IREE_HAL_ATOMIC_WIDTH_64}) {
+    CommandBufferPtr command_buffer = CreateCommandBuffer(
+        /*binding_capacity=*/1, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT);
+    ASSERT_NE(command_buffer, nullptr);
+    IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer.get()));
+    const auto target = iree_hal_make_indirect_buffer_ref(0, 0, width / 8);
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_UNIMPLEMENTED,
+        iree_hal_command_buffer_atomic_wait(
+            command_buffer.get(), 0, 0, target,
+            {.flags = IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE, .width = width}));
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_UNIMPLEMENTED,
+        iree_hal_command_buffer_atomic_store(
+            command_buffer.get(), 0, 0, target,
+            {.flags = IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE, .width = width}));
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_UNIMPLEMENTED,
+        iree_hal_command_buffer_atomic_rmw(
+            command_buffer.get(), 0, 0, target,
+            {.flags = IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE, .width = width}));
+    EXPECT_TRUE(iree_hal_vulkan_command_buffer_is_empty(command_buffer.get()));
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer.get()));
+  }
+}
+
 TEST_F(VulkanCommandBufferTest, ReplaysDebugGroupsAsDebugUtilsLabels) {
   CommandBufferPtr command_buffer = CreateCommandBuffer();
   ASSERT_NE(command_buffer, nullptr);

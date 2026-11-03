@@ -96,6 +96,11 @@ typedef struct iree_hal_pool_family_access_t {
   struct {
     // Queue commands, including atomic commands recorded in command buffers.
     iree_hal_atomic_operation_capabilities_t queue;
+    // Queue operations that must execute without occupying compute resources.
+    // Implies the corresponding queue requirements; shader fallback is not
+    // permitted. Does not promise hardware queue residency under
+    // oversubscription.
+    iree_hal_atomic_operation_capabilities_t queue_zero_compute;
     // Operations issued by executable programs on this family.
     iree_hal_atomic_operation_capabilities_t program;
   } atomics;
@@ -148,7 +153,7 @@ iree_hal_pool_query_host_access(const iree_hal_pool_t* pool);
 // ANY returns the intersection over admitted sites. Foreign, invalid, excluded,
 // and unqualified sites return zero. Queries perform no native discovery.
 // These operations alone do not establish mutual atomicity with another site;
-// that requires the corresponding memory-pair atomic reach and ordering.
+// that requires the corresponding memory-pair operation masks and ordering.
 // A missing guarantee does not replace backend target validation: a native
 // target may support more than its general-purpose import pool can promise.
 IREE_API_EXPORT iree_hal_atomic_operation_capabilities_t
@@ -160,6 +165,20 @@ iree_hal_pool_query_atomic_operations(const iree_hal_pool_t* pool,
 IREE_API_EXPORT iree_hal_atomic_operation_capabilities_t
 iree_hal_buffer_query_atomic_operations(const iree_hal_buffer_t* buffer,
                                         iree_hal_memory_scope_t scope);
+
+// Returns the subset of atomic operations implemented without occupying
+// dispatch resources at this site. Such operations may still occupy their
+// command queue; callers must order producers on independently progressing
+// queues. HOST and PROGRAM sites return zero. Scope handling and query cost
+// match query_atomic_operations; backing-specific upgrades are not inferred.
+IREE_API_EXPORT iree_hal_atomic_operation_capabilities_t
+iree_hal_pool_query_zero_compute_atomic_operations(
+    const iree_hal_pool_t* pool, iree_hal_memory_scope_t scope);
+
+// Returns the owning pool's zero-compute guarantee, inherited by subranges.
+IREE_API_EXPORT iree_hal_atomic_operation_capabilities_t
+iree_hal_buffer_query_zero_compute_atomic_operations(
+    const iree_hal_buffer_t* buffer, iree_hal_memory_scope_t scope);
 
 typedef uint32_t iree_hal_pool_mapping_flags_t;
 enum iree_hal_pool_mapping_flag_bits_e {
@@ -274,6 +293,9 @@ typedef struct iree_hal_memory_contract_t {
   } mapping_source;
   // Immutable site facts in this allocation, indexed by memory scope ID.
   iree_hal_memory_scope_access_t* scopes;
+  // Packed zero-compute subsets in this allocation, indexed by scope ID.
+  // Each word has the same width/scope layout as scopes[].atomic_operations.
+  uint32_t* zero_compute_atomic_operations;
   // Owned cold pair descriptions, never followed by a hot transition query.
   iree_hal_memory_transition_details_t* transition_details;
   // Directional visibility cells at a fixed offset from the contract. The low
@@ -294,7 +316,16 @@ IREE_API_EXPORT void iree_hal_memory_contract_retain(
 IREE_API_EXPORT void iree_hal_memory_contract_release(
     iree_hal_memory_contract_t* contract);
 
-// Captures the wildcard intersection and achieved public host operations.
+// Captures a qualified queue site's zero-compute subset during construction.
+// HOST, PROGRAM, and excluded sites retain zero. The producer supplies trusted
+// backing and executor facts, then finalizes after populating all site facts.
+IREE_API_EXPORT void
+iree_hal_memory_contract_set_zero_compute_atomic_operations(
+    iree_hal_memory_contract_t* contract, iree_hal_memory_scope_id_t scope_id,
+    iree_hal_atomic_operation_capabilities_t operations);
+
+// Captures wildcard intersections and achieved public host operations. Each
+// zero-compute subset is restricted to the site's admitted atomic operations.
 // Called once after populating site facts and before publishing the contract.
 IREE_API_EXPORT void iree_hal_memory_contract_finalize_atomic_operations(
     iree_hal_memory_contract_t* contract);
@@ -524,8 +555,9 @@ enum iree_hal_memory_pair_flag_bits_e {
   IREE_HAL_MEMORY_PAIR_FIXED_COST_KNOWN = 1u << 2,
 };
 
-// Mutual atomic reach for naturally aligned words, independent of supported
-// operations at either site or the queue's zero-compute atomic capabilities.
+// Atomic coherence domain for naturally aligned words. Reach alone does not
+// qualify operations; the exact pair's operation masks establish mutual
+// atomicity independently of the queue's zero-compute execution capabilities.
 typedef enum iree_hal_atomic_reach_scope_e {
   IREE_HAL_ATOMIC_REACH_NONE = 0,
   IREE_HAL_ATOMIC_REACH_DEVICE = 1,
@@ -540,13 +572,23 @@ typedef struct iree_hal_memory_pair_info_t {
   iree_hal_memory_transition_recipe_info_t release;
   // Exact consumer action, including global operations without resources.
   iree_hal_memory_transition_recipe_info_t acquire;
-  // Mutually atomic reach of the pair, separate from operation capabilities.
+  // Atomic coherence domain of the pair, separate from operation capabilities.
   struct {
     // Reach for 32-bit naturally aligned words.
     iree_hal_atomic_reach_scope_t scope_32;
     // Reach for 64-bit naturally aligned words.
     iree_hal_atomic_reach_scope_t scope_64;
   } atomic_reach;
+  // Producer operations mutually atomic with every consumer operation in the
+  // matching width/scope cell of consumer_atomics. Both cells must be nonzero
+  // to establish a guarantee. The relation is exact and nontransitive: a
+  // guarantee for A/B and B/C says nothing about A/C. Payload visibility still
+  // requires the release/acquire actions and explicit execution dependencies.
+  iree_hal_atomic_operation_capabilities_t producer_atomics;
+  // Consumer operations mutually atomic with every producer operation in the
+  // matching width/scope cell of producer_atomics. Zero means no guarantee;
+  // neither one-site capabilities nor a wider atomic_reach supplies one.
+  iree_hal_atomic_operation_capabilities_t consumer_atomics;
   // Native estimate; meaningful only with FIXED_COST_KNOWN, including zero.
   uint64_t estimated_fixed_cost_nanoseconds;
 } iree_hal_memory_pair_info_t;
@@ -638,10 +680,12 @@ typedef iree_status_t(IREE_API_PTR* iree_hal_memory_pair_query_fn_t)(
     void* user_data, iree_hal_memory_scope_id_t producer,
     iree_hal_memory_scope_id_t consumer, iree_hal_memory_pair_info_t* out_info);
 
-// Captures qualification once, after the producer has filled scopes and host
-// access and before any pool/buffer publication. Deduplicates cold pair facts
-// and precomputes wildcard joins over only applicable writers/readers. Failure
-// leaves the original unsupported table intact; the caller releases the
+// Captures qualification once, after the producer has filled scopes, per-site
+// atomic operations, and host access and before any pool/buffer publication.
+// Restricts pair operation masks to each site's admitted operations and access.
+// Deduplicates cold pair facts and precomputes wildcard joins over only
+// applicable writers/readers. Failure leaves the original unsupported table
+// intact; the caller releases the
 // unpublished contract through its ordinary construction cleanup.
 IREE_API_EXPORT iree_status_t iree_hal_memory_contract_initialize_transitions(
     iree_hal_memory_contract_t* contract, iree_hal_memory_pair_query_fn_t query,

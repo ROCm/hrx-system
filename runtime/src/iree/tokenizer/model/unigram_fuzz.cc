@@ -299,8 +299,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     iree_host_size_t final_count = 0;
     status = iree_tokenizer_model_state_finalize(state, output, &final_count);
     iree_status_ignore(status);
-  } else {
-    iree_status_ignore(status);
   }
 
   //===--------------------------------------------------------------------===//
@@ -352,8 +350,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         break;
       }
     }
-  } else {
-    iree_status_ignore(status);
   }
 
   //===--------------------------------------------------------------------===//

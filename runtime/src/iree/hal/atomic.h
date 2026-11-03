@@ -43,12 +43,12 @@ typedef enum iree_hal_atomic_rmw_operation_e {
   IREE_HAL_ATOMIC_RMW_OPERATION_XOR = 4,
 } iree_hal_atomic_rmw_operation_e;
 
-// Ordering and visibility semantics requested for an atomic operation.
+// Ordering, visibility, and execution requirements for an atomic operation.
 //
 // These flags specify minimum semantics. Implementations may provide stronger
-// ordering or visibility when that is inherent in their memory model. All
-// known flags are accepted for every operation so callers may conservatively
-// reuse a common ordering mask. Operation-inapplicable flags have no effect.
+// ordering or visibility when that is inherent in their memory model. Callers
+// may reuse a common ordering mask; operation-inapplicable ordering flags have
+// no effect. Execution requirements must be satisfied or the operation fails.
 typedef uint32_t iree_hal_atomic_flags_t;
 typedef enum iree_hal_atomic_flag_bits_e {
   IREE_HAL_ATOMIC_FLAG_NONE = 0u,
@@ -61,12 +61,18 @@ typedef enum iree_hal_atomic_flag_bits_e {
   // Extends the atomic access and requested ordering beyond the default
   // device coherence domain to the system coherence domain.
   IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE = 1u << 2,
+  // Executes without occupying compute resources. Requires support from both
+  // the queue family and the target buffer's zero-compute atomic capabilities;
+  // shader fallback is not permitted. A wait can still occupy its command
+  // queue, and this flag does not promise residency under oversubscription.
+  IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE = 1u << 3,
 } iree_hal_atomic_flag_bits_e;
 
-#define IREE_HAL_ATOMIC_FLAGS_KNOWN                         \
-  ((iree_hal_atomic_flags_t)(IREE_HAL_ATOMIC_FLAG_ACQUIRE | \
-                             IREE_HAL_ATOMIC_FLAG_RELEASE | \
-                             IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE))
+#define IREE_HAL_ATOMIC_FLAGS_KNOWN                              \
+  ((iree_hal_atomic_flags_t)(IREE_HAL_ATOMIC_FLAG_ACQUIRE |      \
+                             IREE_HAL_ATOMIC_FLAG_RELEASE |      \
+                             IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE | \
+                             IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE))
 
 // Controls only the status classification of target validation failures.
 // Alignment requirements, capability checks, successful execution, and all
@@ -97,7 +103,7 @@ typedef struct iree_hal_atomic_wait_params_t {
   uint64_t value;
   // Mask applied to each value loaded from memory before comparison.
   uint64_t mask;
-  // Ordering and visibility flags. RELEASE has no effect on waits.
+  // Ordering, visibility, and execution flags. RELEASE has no effect on waits.
   iree_hal_atomic_flags_t flags;
   // Width of the memory location and comparison values.
   iree_hal_atomic_width_t width;
@@ -120,7 +126,7 @@ static_assert(offsetof(iree_hal_atomic_wait_params_t, target_error_mode) == 22,
 typedef struct iree_hal_atomic_store_params_t {
   // Unsigned value stored to memory.
   uint64_t value;
-  // Ordering and visibility flags. ACQUIRE has no effect on stores.
+  // Ordering, visibility, and execution flags. ACQUIRE has no effect on stores.
   iree_hal_atomic_flags_t flags;
   // Width of the memory location and stored value.
   iree_hal_atomic_width_t width;
@@ -141,7 +147,7 @@ static_assert(offsetof(iree_hal_atomic_store_params_t, target_error_mode) == 13,
 typedef struct iree_hal_atomic_rmw_params_t {
   // Unsigned right-hand operand applied to the memory value.
   uint64_t operand;
-  // Ordering and visibility flags.
+  // Ordering, visibility, and execution flags.
   iree_hal_atomic_flags_t flags;
   // Width of the memory location and operand.
   iree_hal_atomic_width_t width;

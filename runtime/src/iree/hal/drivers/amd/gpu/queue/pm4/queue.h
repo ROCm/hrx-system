@@ -17,6 +17,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/file_staging.h"
 #include "iree/hal/drivers/amd/gpu/queue/memory_mapping.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/barrier.h"
+#include "iree/hal/drivers/amd/gpu/queue/pm4/program.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/scratch.h"
 
 #ifdef __cplusplus
@@ -51,6 +52,8 @@ typedef struct iree_hal_amd_gpu_pm4_queue_options_t {
   const iree_hal_amd_fabric_memory_options_t* scratch_memory;
   // Native private-storage geometry, captured before accepting dispatches.
   iree_hal_amd_gpu_pm4_scratch_profile_t scratch_profile;
+  // Device-owned builtin launches shared with recorded command buffers.
+  const iree_hal_amd_gpu_pm4_program_pool_t* programs;
   // Borrowed device publisher, independent of native allocation and retirement.
   iree_hal_amd_gpu_publication_t* publication;
   // Borrowed device-shared allocation executor, independent of publication.

@@ -23,9 +23,15 @@ extern "C" {
 // source pool contracts admitted by each virtual buffer.
 #define IREE_HAL_REPLAY_FILE_VERSION_MAJOR 17u
 
-// Minor version of the IREE HAL replay file format. Version 9 adds recorded
-// command-buffer timestamp writes with direct or binding-table destinations.
-#define IREE_HAL_REPLAY_FILE_VERSION_MINOR 9u
+// Minor version of the IREE HAL replay file format. Pool scopes preserve
+// zero-compute atomic requirements in their previously reserved family word.
+#define IREE_HAL_REPLAY_FILE_VERSION_MINOR 11u
+
+// Minor version that first assigns the zero-compute atomic family word.
+#define IREE_HAL_REPLAY_ZERO_COMPUTE_ATOMICS_VERSION_MINOR 11u
+
+// Minor version that first assigns virtual-buffer construction flag bytes.
+#define IREE_HAL_REPLAY_VIRTUAL_BUFFER_FLAGS_VERSION_MINOR 10u
 
 // Minor version that first assigns atomic target-error mode payload bytes.
 #define IREE_HAL_REPLAY_ATOMIC_TARGET_ERROR_MODE_VERSION_MINOR 3u
@@ -373,8 +379,8 @@ typedef struct iree_hal_replay_virtual_buffer_create_payload_t {
   uint32_t host_mapping_modes;
   // Required host properties.
   uint32_t host_properties;
-  // Reserved for future construction policy; must be zero.
-  uint32_t reserved0;
+  // Required virtual-buffer address constraints; zero before minor version 9.
+  uint32_t flags;
   // Required host device scope 32 operations.
   uint32_t host_atomic_device_scope_32;
   // Required host device scope 64 operations.
@@ -411,8 +417,9 @@ typedef struct iree_hal_replay_pool_family_access_payload_t {
   uint64_t interfaces;
   // Hard family access requirements.
   uint32_t requirements;
-  // Reserved for future family requirements; must be zero.
-  uint32_t reserved0;
+  // Required zero-compute queue operations in four byte-sized cells, from
+  // low to high: device 32, device 64, system 32, system 64.
+  uint32_t queue_zero_compute_atomic_operations;
   // Required 32-bit atomic operations in the device coherence domain.
   uint32_t queue_atomic_device_scope_32;
   // Required 64-bit atomic operations in the device coherence domain.

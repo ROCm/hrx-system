@@ -42,6 +42,7 @@ from build_tools.devtools import bazel_test_selection, project_presubmit
 from build_tools.devtools.bazel import (
     BazelSourceOwnerQueryError,
     clang_tidy_configuration_args,
+    query_compiling_targets,
     query_compiling_targets_depending_on,
     query_compiling_targets_for_sources,
 )
@@ -1825,6 +1826,7 @@ def clang_tidy_bazel_command(
     targets: list[str],
     keep_going: bool = False,
     *,
+    target_pattern_file: Path,
     build_events_path: Path | None = None,
     emit_fixes: bool = False,
     local_outputs: bool = False,
@@ -1866,11 +1868,19 @@ def clang_tidy_bazel_command(
     configured_jobs = configured_clang_tidy_jobs()
     if configured_jobs is not None:
         command += ["--jobs", str(configured_jobs)]
-    command += [
-        "--",
-        *targets,
-    ]
+    command.append(f"--target_pattern_file={target_pattern_file}")
     return command
+
+
+@contextlib.contextmanager
+def clang_tidy_target_pattern_file(targets: list[str]):
+    """Yields a Bazel target-pattern file containing clang-tidy roots."""
+    with tempfile.TemporaryDirectory(prefix="iree-clang-tidy-targets-") as temp_dir:
+        target_pattern_file = Path(temp_dir) / "targets.txt"
+        target_pattern_file.write_text(
+            "".join(f"{target}\n" for target in targets), encoding="utf-8"
+        )
+        yield target_pattern_file
 
 
 def bazel_file_uri_to_path(uri: str) -> Path:
@@ -2387,6 +2397,7 @@ def run_clang_tidy_cmake(
 def run_clang_tidy_bazel_fix(
     *,
     analysis_targets: list[str],
+    target_pattern_file: Path,
     profile: str,
     verbose: bool,
     local_outputs: bool,
@@ -2410,6 +2421,7 @@ def run_clang_tidy_bazel_fix(
             clang_tidy_bazel_command(
                 analysis_targets,
                 keep_going=True,
+                target_pattern_file=target_pattern_file,
                 build_events_path=build_events_path,
                 emit_fixes=True,
                 local_outputs=local_outputs,
@@ -2447,6 +2459,7 @@ def run_clang_tidy_bazel_fix(
             clang_tidy_bazel_command(
                 analysis_targets,
                 keep_going=profile == "ci",
+                target_pattern_file=target_pattern_file,
                 local_outputs=local_outputs,
                 selected_files=selected_files,
             ),
@@ -2520,14 +2533,23 @@ def run_clang_tidy(
     full_scope = clang_tidy_uses_full_scope(inputs)
     selected_files = None if full_scope or package_targets else candidate_files
     if full_scope:
-        analysis_targets = unique_paths(
-            [
-                target
-                for target in (
-                    bazel_package_target_for_path(path) for path in candidate_files
-                )
-                if target is not None
-            ]
+        query_start = time.monotonic()
+        print("[run] Resolve full clang-tidy C/C++ target set")
+        sys.stdout.flush()
+        try:
+            analysis_targets = query_compiling_targets(
+                "bazel",
+                target_patterns=CLANG_TIDY_OWNER_TARGET_PATTERNS,
+                cwd=REPO_ROOT,
+                env=None,
+            )
+        except (BazelSourceOwnerQueryError, ValueError) as exc:
+            print(f"[fail] clang-tidy: {exc}")
+            return False
+        print(
+            "[ok] Resolve full clang-tidy C/C++ target set "
+            f"({format_duration(time.monotonic() - query_start)}, "
+            f"{len(analysis_targets)} target(s))"
         )
     else:
         translation_unit_labels = {
@@ -2608,31 +2630,34 @@ def run_clang_tidy(
         )
     if analysis_targets:
         local_outputs = True
-        if fix:
-            ok = (
-                run_clang_tidy_bazel_fix(
-                    analysis_targets=analysis_targets,
-                    profile=profile,
-                    verbose=verbose,
-                    local_outputs=local_outputs,
-                    selected_files=selected_files,
-                )
-                and ok
-            )
-        else:
-            ok = (
-                run_command(
-                    clang_tidy_bazel_command(
-                        analysis_targets,
-                        keep_going=profile == "ci",
+        with clang_tidy_target_pattern_file(analysis_targets) as target_pattern_file:
+            if fix:
+                ok = (
+                    run_clang_tidy_bazel_fix(
+                        analysis_targets=analysis_targets,
+                        target_pattern_file=target_pattern_file,
+                        profile=profile,
+                        verbose=verbose,
                         local_outputs=local_outputs,
                         selected_files=selected_files,
-                    ),
-                    "clang-tidy Bazel actions",
-                    verbose,
+                    )
+                    and ok
                 )
-                and ok
-            )
+            else:
+                ok = (
+                    run_command(
+                        clang_tidy_bazel_command(
+                            analysis_targets,
+                            keep_going=profile == "ci",
+                            target_pattern_file=target_pattern_file,
+                            local_outputs=local_outputs,
+                            selected_files=selected_files,
+                        ),
+                        "clang-tidy Bazel actions",
+                        verbose,
+                    )
+                    and ok
+                )
     elif candidate_files:
         ok = skip_step("clang-tidy", "no compiling Bazel targets for inputs") and ok
     return ok

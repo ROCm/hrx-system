@@ -57,7 +57,7 @@ on:
   # GitHub accepts at most ten workflow_dispatch inputs, which this list fills,
   # so four of the fourteen above are dropped. The job name already falls back
   # to a literal when `name` is absent, and the env block below falls back for
-  # release_type, artifact_set, and the gfx1201 wait expectation. A dispatch
+  # release_type, artifact_set, and the stream-wait expectation. A dispatch
   # cannot reach the other release channels and artifact sets
   # `ci_core_linux.yml` can pass.
   workflow_dispatch:
@@ -141,7 +141,7 @@ jobs:
       HRX_PACKAGE: "false"
       HRX_PACKAGE_SMOKE: "false"
       HRX_TEST_GPU: "true"
-      HRX_TEST_EXPECT_STREAM_VALUE_WAITS: ${{ (inputs.expect_stream_value_waits || inputs.amdgpu_targets == 'gfx1201') && '1' || '0' }}
+      HRX_TEST_EXPECT_STREAM_VALUE_WAITS: ${{ inputs.expect_stream_value_waits && '1' || '0' }}
       HRX_CTS_DEVICE: ${{ inputs.device || 'gpu:0' }}
       HRX_CTEST_REGEX: ${{ inputs.ctest_regex }}
       HRX_CTEST_EXCLUDE_REGEX: ${{ inputs.ctest_exclude_regex }}

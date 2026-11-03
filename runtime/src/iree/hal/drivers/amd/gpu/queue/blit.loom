@@ -5,8 +5,10 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // Fixed-size launch, dynamic byte extent. Each lane owns sixteen consecutive
-// bytes; iterations stride over the whole grid. The last partial vector uses
-// byte operations and never reads or writes outside the admitted range.
+// bytes; iterations stride over the whole grid. Full copies use vector memory
+// operations so each wave writes dense spans instead of separate strided words.
+// The last partial vector uses byte operations and never reads or writes outside
+// the admitted range.
 kernel.def export("blit") @blit() {
   %one = index.constant 1 : index
   %groups = index.constant 256 : index
@@ -35,14 +37,8 @@ kernel.def export("blit") @blit() {
       %destination = buffer.view %target[%offset] : buffer -> view<4xi32, align(1)>
       scf.if %copy {
         %input = buffer.view %source[%offset] : buffer -> view<4xi32, align(1)>
-        %word0 = view.load %input[0] : view<4xi32, align(1)> -> i32
-        %word1 = view.load %input[1] : view<4xi32, align(1)> -> i32
-        %word2 = view.load %input[2] : view<4xi32, align(1)> -> i32
-        %word3 = view.load %input[3] : view<4xi32, align(1)> -> i32
-        view.store %word0, %destination[0] : i32, view<4xi32, align(1)>
-        view.store %word1, %destination[1] : i32, view<4xi32, align(1)>
-        view.store %word2, %destination[2] : i32, view<4xi32, align(1)>
-        view.store %word3, %destination[3] : i32, view<4xi32, align(1)>
+        %words = vector.load %input[0] : view<4xi32, align(1)> -> vector<4xi32>
+        vector.store %words, %destination[0] : vector<4xi32>, view<4xi32, align(1)>
       } else {
         view.store %pattern, %destination[0] : i32, view<4xi32, align(1)>
         view.store %pattern, %destination[1] : i32, view<4xi32, align(1)>

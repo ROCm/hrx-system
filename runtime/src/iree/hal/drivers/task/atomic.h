@@ -18,6 +18,11 @@ extern "C" {
 // Returns true when |width| is backed by lock-free machine atomics.
 bool iree_hal_task_atomic_width_is_lock_free(iree_hal_atomic_width_t width);
 
+// Validates a public operation's execution requirements. CPU atomics execute
+// on workers and cannot satisfy ZERO_COMPUTE; accepted widths are lock-free.
+iree_status_t iree_hal_task_atomic_validate(iree_hal_atomic_width_t width,
+                                            iree_hal_atomic_flags_t flags);
+
 // Builds queue operation and wait-predicate capabilities for lock-free CPU
 // atomic widths.
 iree_hal_atomic_capabilities_t iree_hal_task_atomic_capabilities(

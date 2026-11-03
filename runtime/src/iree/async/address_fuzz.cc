@@ -46,9 +46,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
       // Successful parse must format without error.
       char buffer[IREE_ASYNC_ADDRESS_MAX_FORMAT_LENGTH];
       iree_string_view_t formatted = iree_string_view_empty();
-      iree_status_t format_status = iree_async_address_format(
-          &address, sizeof(buffer), buffer, &formatted);
-      FUZZ_ASSERT(iree_status_is_ok(format_status));
+      IREE_CHECK_OK(iree_async_address_format(&address, sizeof(buffer), buffer,
+                                              &formatted));
       FUZZ_ASSERT(formatted.size > 0);
     } else {
       iree_status_ignore(status);
@@ -61,9 +60,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (iree_status_is_ok(status)) {
       char buffer[IREE_ASYNC_ADDRESS_MAX_FORMAT_LENGTH];
       iree_string_view_t formatted = iree_string_view_empty();
-      iree_status_t format_status = iree_async_address_format(
-          &address, sizeof(buffer), buffer, &formatted);
-      FUZZ_ASSERT(iree_status_is_ok(format_status));
+      IREE_CHECK_OK(iree_async_address_format(&address, sizeof(buffer), buffer,
+                                              &formatted));
       FUZZ_ASSERT(formatted.size > 0);
     } else {
       iree_status_ignore(status);
@@ -76,9 +74,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (iree_status_is_ok(status)) {
       char buffer[IREE_ASYNC_ADDRESS_MAX_FORMAT_LENGTH];
       iree_string_view_t formatted = iree_string_view_empty();
-      iree_status_t format_status = iree_async_address_format(
-          &address, sizeof(buffer), buffer, &formatted);
-      FUZZ_ASSERT(iree_status_is_ok(format_status));
+      IREE_CHECK_OK(iree_async_address_format(&address, sizeof(buffer), buffer,
+                                              &formatted));
       FUZZ_ASSERT(formatted.size > 0);
     } else {
       iree_status_ignore(status);
@@ -93,23 +90,19 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (iree_status_is_ok(status)) {
       char buffer[IREE_ASYNC_ADDRESS_MAX_FORMAT_LENGTH];
       iree_string_view_t formatted = iree_string_view_empty();
-      iree_status_t format_status = iree_async_address_format(
-          &address, sizeof(buffer), buffer, &formatted);
-      FUZZ_ASSERT(iree_status_is_ok(format_status));
+      IREE_CHECK_OK(iree_async_address_format(&address, sizeof(buffer), buffer,
+                                              &formatted));
       FUZZ_ASSERT(formatted.size > 0);
 
       // Second round-trip: from_string(formatted) must also succeed and
       // produce the same formatted output (canonical form is stable).
       iree_async_address_t address2;
-      iree_status_t status2 =
-          iree_async_address_from_string(formatted, &address2);
-      FUZZ_ASSERT(iree_status_is_ok(status2));
+      IREE_CHECK_OK(iree_async_address_from_string(formatted, &address2));
 
       char buffer2[IREE_ASYNC_ADDRESS_MAX_FORMAT_LENGTH];
       iree_string_view_t formatted2 = iree_string_view_empty();
-      iree_status_t format_status2 = iree_async_address_format(
-          &address2, sizeof(buffer2), buffer2, &formatted2);
-      FUZZ_ASSERT(iree_status_is_ok(format_status2));
+      IREE_CHECK_OK(iree_async_address_format(&address2, sizeof(buffer2),
+                                              buffer2, &formatted2));
       FUZZ_ASSERT(iree_string_view_equal(formatted, formatted2));
     } else {
       iree_status_ignore(status);

@@ -143,7 +143,8 @@ class DeviceFailureTest : public ::testing::Test {
       stopped_ = queues_.size();
       for (auto& queue : queues_) {
         iree_hal_amd_gpu_pm4_submission_release(
-            queue.issued[0].action.submission);
+            iree_hal_amd_gpu_pm4_retirement_submission(
+                &queue.issued[0].action));
       }
     }
     EXPECT_EQ(released_.load(), 6u);
@@ -188,7 +189,9 @@ class DeviceFailureTest : public ::testing::Test {
       for (auto ref : refs) {
         iree_hal_buffer_release(ref.buffer);
       }
-      issued_[i][0].action = {.submission = capture, .terminal = true};
+      issued_[i][0].action = {
+          .tagged_submission = reinterpret_cast<uintptr_t>(capture) | 1,
+      };
       iree_atomic_store(&queues_[i].producer.count, 1,
                         iree_memory_order_release);
       // A prior native observation has failed. No GPU completion word exists;

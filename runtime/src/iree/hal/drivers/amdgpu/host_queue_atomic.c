@@ -370,6 +370,8 @@ iree_status_t iree_hal_amdgpu_host_queue_defer_atomic(
     const iree_hal_semaphore_list_t* signal_semaphore_list,
     const iree_hal_amdgpu_host_queue_atomic_operation_t* operation,
     iree_hal_amdgpu_pending_op_t** out_op) {
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_atomic_memory_validate_flags(
+      iree_hal_amdgpu_host_queue_atomic_flags(operation)));
   uint16_t max_resources = 0;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_count_reclaim_resources(
       signal_semaphore_list->count,

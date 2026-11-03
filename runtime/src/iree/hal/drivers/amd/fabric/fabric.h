@@ -10,6 +10,7 @@
 #include "amdf/amdf.h"
 #include "iree/base/api.h"
 #include "iree/base/threading/mutex.h"
+#include "iree/hal/device_spec.h"
 #include "iree/hal/drivers/amd/fabric/allocation_queue.h"
 
 #ifdef __cplusplus
@@ -66,6 +67,15 @@ void iree_hal_amd_fabric_retain(iree_hal_amd_fabric_t* fabric);
 // teardown failure is diagnosed and preserves remaining ownership. NULL is
 // ignored. This performs no implicit device wait.
 void iree_hal_amd_fabric_release(iree_hal_amd_fabric_t* fabric);
+
+// Copies cached native attachment facts into the HAL physical identity before
+// device-spec publication. |display_name| remains borrowed. Optional PCI
+// address availability is preserved; failure leaves |out_identity| unchanged.
+// This does not activate execution or enter the native driver.
+iree_status_t iree_hal_amd_fabric_query_physical_device_identity(
+    const amdf_api_t* api, amdf_endpoint_t* endpoint,
+    iree_string_view_t display_name,
+    iree_hal_physical_device_identity_t* out_identity);
 
 // Acquires native allocation progress for a physical endpoint and host node.
 // Logical contexts of the same endpoint share a queue at the same placement;

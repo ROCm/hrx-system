@@ -121,6 +121,11 @@ iree_hal_amdgpu_atomic_memory_cell_flags_t
 iree_hal_amdgpu_atomic_memory_select_import_cells(
     const iree_hal_amdgpu_atomic_memory_import_selection_t* selection);
 
+// Validates execution flags before accepting direct or recorded atomics.
+// This backend does not capture buffer-qualified zero-compute guarantees.
+iree_status_t iree_hal_amdgpu_atomic_memory_validate_flags(
+    iree_hal_atomic_flags_t flags);
+
 // Returns the one memory cell required by |width| and |atomic_flags|.
 // Invalid widths return no cell.
 iree_hal_amdgpu_atomic_memory_cell_flags_t

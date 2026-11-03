@@ -313,7 +313,9 @@ static iree_status_t iree_hal_vulkan_slab_pool_query_owner(
                 (iree_hal_memory_site_t){IREE_HAL_MEMORY_SITE_PROGRAM,
                                          access->family},
                 atomic_operations),
-            access->atomics.program)) {
+            access->atomics.program) ||
+        !iree_hal_atomic_operation_capabilities_is_empty(
+            access->atomics.queue_zero_compute)) {
       // HOST_COHERENT alone does not establish automatic device visibility.
       // This native owner does not enable device_coherent_memory, so neither
       // full host/device coherence nor an uncached device route is available.

@@ -238,6 +238,10 @@ iree_hal_vulkan_atomic_params_t iree_hal_vulkan_atomic_params_from_rmw(
 iree_status_t iree_hal_vulkan_atomic_validate(
     const iree_hal_vulkan_atomic_pipelines_t* pipelines,
     iree_hal_vulkan_atomic_params_t params) {
+  if (params.flags & IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "Vulkan built-in atomics require a compute shader");
+  }
   if (iree_any_bit_set(params.flags, IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE)) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,

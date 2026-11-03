@@ -25,6 +25,12 @@ extern "C" {
 // layouts, and those layouts vary by target. These writers do not select cache
 // policy, infer a barrier from an address, or select a queue transport.
 
+enum {
+  // Power-of-two MEC DMA chunk within the 26-bit byte-count field. Direct
+  // transfers and resident programs share this limit; staging is independent.
+  IREE_HAL_AMD_GPU_PM4_DMA_MAX_PACKET_LENGTH = 32 * 1024 * 1024,
+};
+
 // Emits 2 + value_count DWORDs to consecutive compute shader registers. Values
 // are copied now. The nonempty interval is in the admitted SH register bank,
 // whose base is 0x2c00. Uses ordinary SET_SH_REG without an indexed mode.

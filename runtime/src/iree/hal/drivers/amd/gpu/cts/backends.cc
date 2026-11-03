@@ -6,7 +6,7 @@
 
 #include "iree/hal/cts/util/registry.h"
 #include "iree/hal/drivers/amd/driver.h"
-#include "iree/hal/drivers/amd/gpu/target/identity.h"
+#include "iree/hal/drivers/amd/gpu/target/selection.h"
 
 namespace iree::hal::cts {
 
@@ -84,26 +84,13 @@ static iree_status_t SelectGpuExecutableTarget(
     iree_string_view_t artifact_target_key,
     iree_hal_physical_device_affinity_t physical_device_affinity,
     iree_hal_executable_target_selection_result_t* out_result) {
-  IREE_RETURN_IF_ERROR(SelectExactExecutableTarget(
-      device_spec, artifact_target_family, iree_string_view_empty(),
-      physical_device_affinity, out_result));
-  if (out_result->outcome !=
-      IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED) {
-    return iree_ok_status();
-  }
-  iree_hal_amd_gpu_target_identity_t artifact_identity;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_target_identity_parse_artifact_key(
-      artifact_target_key, &artifact_identity));
-  iree_hal_amd_gpu_target_identity_t device_identity;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_target_identity_parse_artifact_key(
-      out_result->target->target_key, &device_identity));
-  if (iree_hal_amd_gpu_target_identity_check_compatible(&artifact_identity,
-                                                        &device_identity) !=
-      IREE_HAL_AMD_GPU_TARGET_COMPATIBILITY_COMPATIBLE) {
+  if (!iree_string_view_equal(artifact_target_family, IREE_SV("amdgpu"))) {
     *out_result = {IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH,
                    nullptr, IREE_HOST_SIZE_MAX};
+    return iree_ok_status();
   }
-  return iree_ok_status();
+  return iree_hal_amd_gpu_device_spec_select_executable_target(
+      device_spec, artifact_target_key, physical_device_affinity, out_result);
 }
 
 static bool registered_ = []() {
@@ -120,6 +107,7 @@ static bool registered_ = []() {
                                          create_params, out_driver, out_device);
                 },
             .executable_target_selector = SelectGpuExecutableTarget,
+            .default_atomic_target_error_code = IREE_STATUS_INVALID_ARGUMENT,
         },
         {"async_queue", "file_io", "indirect"},
     });

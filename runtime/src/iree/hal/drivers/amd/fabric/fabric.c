@@ -19,6 +19,39 @@ struct iree_hal_amd_fabric_allocation_entry_t {
   iree_hal_amd_fabric_allocation_queue_t* queue;
 };
 
+iree_status_t iree_hal_amd_fabric_query_physical_device_identity(
+    const amdf_api_t* api, amdf_endpoint_t* endpoint,
+    iree_string_view_t display_name,
+    iree_hal_physical_device_identity_t* out_identity) {
+  amdf_endpoint_pci_address_t address = {
+      .type = AMDF_STRUCTURE_TYPE_ENDPOINT_PCI_ADDRESS,
+      .structure_size = sizeof(address),
+  };
+  amdf_endpoint_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
+      .structure_size = sizeof(info),
+      .next = &address,
+  };
+  IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
+      api->endpoint_query_info(endpoint, &info), "endpoint_query_info"));
+  *out_identity = (iree_hal_physical_device_identity_t){
+      .display_name = display_name,
+      .vendor_id = info.pci.vendor_id,
+      .device_id = info.pci.device_id,
+      .revision_id = info.pci.revision_id,
+  };
+  if (address.available) {
+    out_identity->pci = (iree_hal_pci_address_t){
+        .domain = address.domain,
+        .bus = address.bus,
+        .device = address.device,
+        .function = address.function,
+    };
+    out_identity->flags |= IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_PCI_ADDRESS;
+  }
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_amd_fabric_acquire_allocation_queue(
     iree_hal_amd_fabric_t* fabric, const amdf_endpoint_id_t* endpoint_id,
     uint32_t node_id, iree_hal_amd_fabric_allocation_queue_t** out_queue) {

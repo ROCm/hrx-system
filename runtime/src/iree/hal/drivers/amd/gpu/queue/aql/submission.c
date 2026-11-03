@@ -243,8 +243,8 @@ iree_status_t iree_hal_amd_gpu_aql_submission_control(
     const bool incompatible = command.target_error_mode ==
                               IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE;
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_control_validate_target(
-        family, target, incompatible ? 0 : required,
-        incompatible ? required : 0));
+        family, IREE_HAL_MEMORY_SITE_QUEUE, target, incompatible ? 0 : required,
+        incompatible ? required : 0, command.flags));
   }
   iree_hal_amd_gpu_aql_submission_t* submission = NULL;
   void* payload = NULL;
@@ -290,8 +290,12 @@ iree_status_t iree_hal_amd_gpu_aql_submission_transfer(
   iree_atomic_ref_count_init(&submission->transfer.ref_count);
   iree_status_t status = iree_hal_amd_gpu_transfer_initialize(
       family, IREE_HAL_MEMORY_SITE_PROGRAM,
-      IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_STAGING_LENGTH, count, operations,
-      layout, payload, &submission->transfer.capture);
+      (iree_hal_amd_gpu_transfer_staging_limits_t){
+          .upload_capacity = IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_UPLOAD_LENGTH,
+          .download_capacity =
+              IREE_HAL_AMD_GPU_AQL_TRANSFER_MAX_DOWNLOAD_LENGTH,
+      },
+      count, operations, layout, payload, &submission->transfer.capture);
   if (iree_status_is_ok(status)) {
     *out_submission = submission;
   } else {

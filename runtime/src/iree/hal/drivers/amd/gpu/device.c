@@ -12,7 +12,10 @@
 #include "iree/async/notification.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/threading/notification.h"
+#include "iree/hal/drivers/amd/fabric/fabric.h"
+#include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/fabric/memory_backend.h"
+#include "iree/hal/drivers/amd/fabric/memory_spec.h"
 #include "iree/hal/drivers/amd/gpu/code.h"
 #include "iree/hal/drivers/amd/gpu/device_failure.h"
 #include "iree/hal/drivers/amd/gpu/executable.h"
@@ -34,6 +37,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/program.h"
 #include "iree/hal/drivers/amd/gpu/queue/sdma/queue.h"
 #include "iree/hal/drivers/amd/gpu/queue/semaphore.h"
+#include "iree/hal/drivers/amd/gpu/target/selection.h"
 #include "iree/hal/drivers/amd/status.h"
 #include "iree/hal/utils/device_spec_builder.h"
 #include "iree/hal/utils/file_registry.h"
@@ -97,6 +101,14 @@ typedef struct iree_hal_amd_gpu_device_t {
   iree_hal_queue_t** queues;
   // Cold dynamic ownership and device-lifetime causal coordinates.
   iree_hal_amd_gpu_queue_membership_t membership;
+  // KFD admits one cooperative native queue per process/device. Logical
+  // cooperative streams share this device-owned realization.
+  struct {
+    // Cold acquisition lock; ordinary submission never touches it.
+    iree_slim_mutex_t mutex;
+    // Owned dynamic queue, borrowing this device like all other queues.
+    iree_hal_queue_t* queue;
+  } cooperative;
   // Immutable common construction policies captured after placement resolves.
   iree_hal_amd_gpu_pm4_queue_options_t queue_options;
   // Native signal capacity outlives individual producer queues and their
@@ -275,15 +287,51 @@ iree_status_t iree_hal_amd_gpu_device_query_support(const amdf_api_t* api,
   return status;
 }
 
+static iree_hal_amd_fabric_memory_spec_params_t
+iree_hal_amd_gpu_device_memory_spec_params(
+    const iree_hal_amd_gpu_device_t* device, uint32_t native_family_ordinal) {
+  return (iree_hal_amd_fabric_memory_spec_params_t){
+      .api = device->context->api,
+      .access =
+          {
+              .device = device->context->device,
+              .requirements =
+                  {
+                      .access =
+                          AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+                      .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+                      .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU,
+                  },
+          },
+      .queue_family_ordinal = native_family_ordinal,
+      .local_scope_count = device->context->memory_scope_count,
+      .local_scopes = device->context->memory_scopes,
+      .system_scope = device->context->fabric->system_scope,
+      .supported_usage =
+          IREE_HAL_BUFFER_USAGE_DISPATCH | IREE_HAL_BUFFER_USAGE_TRANSFER,
+  };
+}
+
 static iree_status_t iree_hal_amd_gpu_device_build_spec(
     iree_hal_amd_gpu_device_t* device, iree_string_view_t display_name,
     uint32_t family_ordinal, uint32_t queue_count,
     const iree_hal_amd_fabric_asan_options_t* asan_options) {
   iree_hal_physical_device_spec_t physical = {
-      .identity = {.display_name = display_name, .vendor_id = 0x1002},
       .partition_count = 1,
       .physical_device_affinity = 1,
   };
+  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_query_physical_device_identity(
+      device->context->api, device->context->endpoint, display_name,
+      &physical.identity));
+  const uint64_t unique_id = device->context->target_info.unique_id;
+  if (unique_id) {
+    // The HAL UUID stores the native identifier most-significant byte first,
+    // followed by eight zero bytes, independently of host byte order.
+    for (uint32_t i = 0; i < sizeof(unique_id); ++i) {
+      physical.identity.uuid.bytes[i] = (uint8_t)(unique_id >> (56 - i * 8));
+    }
+    physical.identity.flags |= IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_UUID;
+  }
   if (device->context->host_numa_node != UINT32_MAX) {
     physical.identity.numa.node_id = device->context->host_numa_node;
     physical.identity.flags |= IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_NUMA_NODE;
@@ -294,7 +342,9 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
       .driver_id = IREE_SV("amd"),
       .backend_id = IREE_SV("libamdf"),
       .vendor_name = IREE_SV("AMD"),
-      .vendor_id = 0x1002,
+      .vendor_id = physical.identity.vendor_id,
+      .device_id = physical.identity.device_id,
+      .revision_id = physical.identity.revision_id,
       .physical_device_count = 1,
       .physical_devices = &physical,
   };
@@ -308,26 +358,70 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
           status, "device_query_queue_clock_info"));
     }
   }
-  const iree_hal_queue_priority_t priority = IREE_HAL_QUEUE_PRIORITY_NORMAL;
+  // Runtime-owned scalar shaders implement the complete semantic family. Each
+  // pool intersects this execution support with its exact backing guarantees.
+  const iree_hal_atomic_operation_capabilities_t atomic_operations = {
+      .device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+      .device_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+      .system_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+      .system_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+  };
+  const uint32_t wait_conditions_32 = IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL;
+  const uint32_t wait_conditions_64 = IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL;
+  const amdf_queue_family_info_t* native_family =
+      &device->context->families[family_ordinal];
+  // Family support describes packet encodings. Each pool separately qualifies
+  // these operations against its exact backing and requested access scopes.
   const amdf_atomic_capabilities_t* native_atomics =
-      &device->context->families[family_ordinal].atomic_capabilities;
-  const iree_hal_atomic_operation_capabilities_t atomic_operations =
+      &native_family->atomic_capabilities;
+  const iree_hal_atomic_operation_capabilities_t zero_compute_operations =
       iree_hal_amd_fabric_memory_translate_atomics(
           native_atomics->operations_without_dispatch_32,
           native_atomics->operations_without_dispatch_64,
-          (amdf_atomic_reach_t){AMDF_ATOMIC_SCOPE_SYSTEM,
-                                AMDF_ATOMIC_SCOPE_SYSTEM});
-  // Both APIs assign one bit per predicate in the same order. Unknown native
-  // bits remain excluded from the HAL execution contract.
-  const uint32_t wait_conditions_32 = native_atomics->wait_conditions_32 &
-                                      IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL;
-  const uint32_t wait_conditions_64 = native_atomics->wait_conditions_64 &
-                                      IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL;
-  const amdf_queue_family_info_t* native_family =
-      &device->context->families[family_ordinal];
+          (amdf_atomic_reach_t){.scope_32 = AMDF_ATOMIC_SCOPE_SYSTEM,
+                                .scope_64 = AMDF_ATOMIC_SCOPE_SYSTEM});
+  static_assert(
+      (uint32_t)AMDF_ATOMIC_WAIT_CONDITION_EQUAL ==
+              (uint32_t)IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_EQUAL &&
+          (uint32_t)AMDF_ATOMIC_WAIT_CONDITION_NOT_EQUAL ==
+              (uint32_t)IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_NOT_EQUAL &&
+          (uint32_t)AMDF_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL ==
+              (uint32_t)
+                  IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_UNSIGNED_GREATER_EQUAL,
+      "native and HAL wait predicate bits must match");
+  const uint32_t native_wait_conditions_32 =
+      (zero_compute_operations.device_scope_32 &
+       IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT)
+          ? native_atomics->wait_conditions_32 &
+                IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL
+          : 0;
+  const uint32_t native_wait_conditions_64 =
+      (zero_compute_operations.device_scope_64 &
+       IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT)
+          ? native_atomics->wait_conditions_64 &
+                IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL
+          : 0;
+  const bool user_publication =
+      (iree_hal_amd_gpu_device_compute_publication_modes(native_family) &
+       AMDF_QUEUE_PUBLICATION_MODE_USER) != 0;
+  // KERNEL creation has no priority selector. USER creation supplies the
+  // independently qualified family priority levels.
+  const amdf_queue_priority_capabilities_t priority_capabilities =
+      user_publication ? native_family->priority_capabilities
+                       : AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL;
+  iree_hal_queue_priority_t priorities[3];
+  iree_host_size_t priority_count = 0;
+  if (priority_capabilities & AMDF_QUEUE_PRIORITY_CAPABILITY_LOW) {
+    priorities[priority_count++] = -1;
+  }
+  if (priority_capabilities & AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL) {
+    priorities[priority_count++] = IREE_HAL_QUEUE_PRIORITY_NORMAL;
+  }
+  if (priority_capabilities & AMDF_QUEUE_PRIORITY_CAPABILITY_HIGH) {
+    priorities[priority_count++] = 1;
+  }
   iree_hal_queue_placement_capabilities_t placements = 0;
-  if (iree_hal_amd_gpu_device_compute_publication_modes(native_family) &
-      AMDF_QUEUE_PUBLICATION_MODE_USER) {
+  if (user_publication) {
     if (native_family->placement_capabilities &
         AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL) {
       placements |= IREE_HAL_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL;
@@ -337,6 +431,16 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
       placements |= IREE_HAL_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL;
     }
   }
+  // Native endpoint queues currently select the complete compute resource.
+  // One indivisible resource describes that contract without inventing native
+  // per-CU mask positions from a logical compute-unit count.
+  const iree_hal_queue_execution_resource_group_spec_t resource_group = {
+      .minimum_selected_resource_count = 1};
+  const iree_hal_queue_execution_resource_spec_t execution_resource = {
+      .group_ordinal = 0,
+      .first_execution_unit_ordinal = 0,
+      .execution_unit_count =
+          device->context->target_info.compute.compute_unit_count};
   iree_hal_queue_family_spec_t family = {
       .name = device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
                   ? IREE_SV("aql")
@@ -347,27 +451,45 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
                ? IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_COMMAND_TIMESTAMPS |
                      IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_INDIRECT_COMMAND_TIMESTAMPS
                : 0),
+      .supported_queue_features =
+          user_publication &&
+                  (native_family->user_queue_capabilities &
+                   AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH) &&
+                  iree_hal_amd_gpu_grid_sync_select_strategy(
+                      device->target.version) !=
+                      IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_NONE
+              ? IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH
+              : 0,
       .provisioned_queue_count = queue_count,
+      .execution_unit_count = execution_resource.execution_unit_count,
+      .execution_resource_group_count = 1,
+      .execution_resource_groups = &resource_group,
+      .execution_resource_count = 1,
+      .execution_resources = &execution_resource,
       .placement_capabilities = placements,
       // COPY_DATA captures the 64-bit CP clock; the native query supplies its
       // platform-specific rate. Zero rate leaves timestamp capture unavailable.
       .timestamp_valid_bits = clock.frequency_hz ? 64 : 0,
       .timestamp_frequency_hz = clock.frequency_hz,
-      .priority_count = 1,
-      .priorities = &priority,
+      .priority_count = priority_count,
+      .priorities = priorities,
       .physical_device_affinity = 1,
-      .role_flags =
-          IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
-          IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
-          (iree_hal_atomic_operation_capabilities_is_empty(atomic_operations)
-               ? 0
-               : IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC),
+      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
+                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
+                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_HOST_CALL |
+                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC,
       .atomic_capabilities =
           {.operations = atomic_operations,
            .wait_conditions = {.device_scope_32 = wait_conditions_32,
                                .device_scope_64 = wait_conditions_64,
                                .system_scope_32 = wait_conditions_32,
                                .system_scope_64 = wait_conditions_64}},
+      .zero_compute_atomic_capabilities =
+          {.operations = zero_compute_operations,
+           .wait_conditions = {.device_scope_32 = native_wait_conditions_32,
+                               .device_scope_64 = native_wait_conditions_64,
+                               .system_scope_32 = native_wait_conditions_32,
+                               .system_scope_64 = native_wait_conditions_64}},
   };
   static_assert(
       (uint32_t)AMDF_QUEUE_PLACEMENT_COUNT ==
@@ -387,35 +509,70 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
       .family_count = 1,
       .families = &family,
   };
+  const iree_hal_device_timing_spec_t timing = {
+      .timestamp_valid_bits = family.timestamp_valid_bits,
+      .timestamp_frequency_hz = family.timestamp_frequency_hz,
+      .flags = clock.frequency_hz
+                   ? IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS
+                   : IREE_HAL_DEVICE_TIMING_SPEC_FLAG_NONE,
+  };
+  const amdf_gpu_endpoint_info_t* native = &device->context->target_info;
+  iree_hal_amd_gpu_wavefront_size_support_t wavefront = {0};
+  iree_hal_amd_gpu_target_identity_lookup_wavefront_size_support(
+      &device->target, &wavefront);
+  const bool wave32 = iree_any_bit_set(wavefront.explicit_supported_sizes,
+                                       IREE_HAL_AMD_GPU_WAVEFRONT_SIZE_FLAG_32);
+  const bool wave64 = iree_any_bit_set(wavefront.explicit_supported_sizes,
+                                       IREE_HAL_AMD_GPU_WAVEFRONT_SIZE_FLAG_64);
   const iree_hal_device_dispatch_spec_t dispatch = {
       .launch = {.maximum_workgroup_invocations = 1024,
                  .maximum_workgroup_size = {1024, 1024, 1024},
                  .maximum_workgroup_count = {UINT32_MAX, UINT32_MAX,
                                              UINT32_MAX}},
-  };
-  char target_key[128];
-  iree_host_size_t target_key_length = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_target_identity_format_artifact_key(
-      &device->target, sizeof(target_key), target_key, &target_key_length));
-  const iree_hal_executable_target_t target = {
-      .family = IREE_SV("amdgpu"),
-      .target_key = iree_make_string_view(target_key, target_key_length),
-      .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
-      .physical_device_affinity = 1,
+      .subgroup =
+          {
+              .default_size = native->compute.wavefront_size,
+              .minimum_size = wave32 ? 32 : native->compute.wavefront_size,
+              .maximum_size = wave64 ? 64 : native->compute.wavefront_size,
+              .supported_size_mask = wave32 ? UINT64_C(1) << 32 : 0,
+          },
+      .execution =
+          {
+              .unit_count = native->compute.compute_unit_count,
+              .group_count = native->topology.xcc_count *
+                             native->topology.shader_engine_count_per_xcc,
+              .maximum_resident_invocation_count =
+                  native->compute.maximum_wave_count_per_compute_unit *
+                  native->compute.wavefront_size,
+              .maximum_resident_subgroup_count =
+                  native->compute.maximum_wave_count_per_compute_unit,
+              .maximum_local_memory_size =
+                  native->compute.local_data_share_byte_length,
+              .maximum_workgroup_local_memory_size =
+                  native->compute.local_data_share_byte_length,
+          },
   };
   iree_hal_device_spec_builder_t builder;
   iree_hal_device_spec_builder_initialize(device->host_allocator, &builder);
   iree_status_t status =
       iree_hal_device_spec_builder_set_identity(&builder, &identity);
   if (iree_status_is_ok(status)) {
+    const iree_hal_amd_fabric_memory_spec_params_t memory =
+        iree_hal_amd_gpu_device_memory_spec_params(device, family_ordinal);
+    status = iree_hal_amd_fabric_memory_spec_populate(&memory, &builder);
+  }
+  if (iree_status_is_ok(status)) {
     status = iree_hal_device_spec_builder_set_queues(&builder, &queues);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_spec_builder_set_timing(&builder, &timing);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_device_spec_builder_set_dispatch(&builder, &dispatch);
   }
   if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_device_spec_builder_add_executable_target(&builder, &target);
+    status = iree_hal_amd_gpu_device_spec_builder_add_executable_targets(
+        &builder, &device->target, 1);
   }
   if (iree_status_is_ok(status) && asan_options) {
     const iree_hal_device_sanitizer_spec_t sanitizer = {
@@ -529,6 +686,7 @@ static void iree_hal_amd_gpu_device_initialize_memory(
       .supported_usage =
           IREE_HAL_BUFFER_USAGE_DISPATCH | IREE_HAL_BUFFER_USAGE_TRANSFER,
       .minimum_access = device->memory.capabilities.minimum_access,
+      .program_atomics = true,
       .binding_count = IREE_ARRAYSIZE(bindings),
       .bindings = bindings,
   };
@@ -686,6 +844,7 @@ static bool iree_hal_amd_gpu_device_release_children(
   iree_async_proactor_pool_entry_release(device->proactor_entry);
   iree_hal_device_spec_release(device->spec);
   iree_hal_amd_gpu_device_failure_deinitialize(&device->failure);
+  iree_slim_mutex_deinitialize(&device->cooperative.mutex);
   return true;
 }
 
@@ -713,6 +872,19 @@ static bool iree_hal_amd_gpu_device_poll_shutdown(
 
 static void iree_hal_amd_gpu_device_destroy(iree_hal_device_t* base) {
   iree_hal_amd_gpu_device_t* device = (void*)base;
+  if (device->cooperative.queue) {
+    if (iree_atomic_ref_count_load(
+            &device->cooperative.queue->resource.ref_count) != 1) {
+      iree_hal_amd_gpu_context_report(
+          device->context, amdf_make_api_status(AMDF_STATUS_CODE_BUSY),
+          "GPU device released with cooperative queue users; preserving "
+          "ownership");
+      return;
+    }
+    iree_hal_queue_t* queue = device->cooperative.queue;
+    device->cooperative.queue = NULL;
+    iree_hal_queue_release(queue);
+  }
   if (!iree_hal_amd_gpu_queue_membership_is_empty(&device->membership)) {
     iree_hal_amd_gpu_context_report(
         device->context, amdf_make_api_status(AMDF_STATUS_CODE_BUSY),
@@ -1038,6 +1210,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
                                &device->resource);
   device->host_allocator = host_allocator;
   device->context = context;
+  iree_slim_mutex_initialize(&device->cooperative.mutex);
   device->command_type = context->families[family_ordinal].command_type;
   device->queue_lifecycle = aql ? &iree_hal_amd_gpu_aql_queue_lifecycle
                                 : &iree_hal_amd_gpu_pm4_queue_lifecycle;
@@ -1205,6 +1378,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
                                      : 64 * 1024,
       .memory = &device->memory.control,
       .scratch_memory = &device->scratch.memory,
+      .programs = aql ? NULL : &device->programs.pm4,
       .scratch_profile = device->scratch.profile,
       .publication = &device->publication,
       .allocations = &device->memory.allocations,
@@ -1355,6 +1529,17 @@ static void iree_hal_amd_gpu_device_replace_channel_provider(
 
 static iree_status_t iree_hal_amd_gpu_device_trim(iree_hal_device_t* base) {
   iree_hal_amd_gpu_device_t* device = (void*)base;
+  iree_slim_mutex_lock(&device->cooperative.mutex);
+  iree_hal_queue_t* queue = device->cooperative.queue;
+  if (queue && iree_atomic_ref_count_load(&queue->resource.ref_count) == 1 &&
+      device->queue_lifecycle->is_idle(queue)) {
+    device->cooperative.queue = NULL;
+  } else {
+    queue = NULL;
+  }
+  iree_slim_mutex_unlock(&device->cooperative.mutex);
+  // Callback-table handoffs join worker borrowers outside the cache lock.
+  iree_hal_queue_release(queue);
   IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
       iree_hal_amd_gpu_queue_membership_trim(&device->membership),
       "GPU queue scratch trim"));
@@ -1474,6 +1659,33 @@ static iree_status_t iree_hal_amd_gpu_device_acquire_queue(
     iree_hal_device_t* base, const iree_hal_queue_family_t* family,
     const iree_hal_queue_params_t* params, iree_hal_queue_t** out_queue) {
   iree_hal_amd_gpu_device_t* device = (void*)base;
+  if (params->features & IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH) {
+    if (params->priority != IREE_HAL_QUEUE_PRIORITY_NORMAL ||
+        params->execution_resources.count) {
+      return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                              "cooperative queues require normal priority and "
+                              "all execution resources");
+    }
+    iree_slim_mutex_lock(&device->cooperative.mutex);
+    iree_hal_queue_t* queue = device->cooperative.queue;
+    iree_status_t status = iree_ok_status();
+    if (queue && params->placement != IREE_HAL_QUEUE_PLACEMENT_DEFAULT &&
+        params->placement != iree_hal_queue_placement(queue)) {
+      status = iree_make_status(
+          IREE_STATUS_UNAVAILABLE,
+          "the shared cooperative queue has a different placement");
+    } else if (!queue) {
+      status = iree_hal_amd_gpu_queue_membership_acquire(
+          &device->membership, params, &device->cooperative.queue);
+      queue = device->cooperative.queue;
+    }
+    if (iree_status_is_ok(status)) {
+      iree_hal_queue_retain(queue);
+      *out_queue = queue;
+    }
+    iree_slim_mutex_unlock(&device->cooperative.mutex);
+    return status;
+  }
   return iree_hal_amd_gpu_queue_membership_acquire(&device->membership, params,
                                                    out_queue);
 }
@@ -1483,9 +1695,11 @@ static iree_status_t iree_hal_amd_gpu_device_sample_observation(
     iree_hal_device_observation_t* out_observation) {
   iree_hal_amd_gpu_device_t* device = (void*)base;
   if (iree_any_bit_set(flags, IREE_HAL_DEVICE_OBSERVATION_FLAG_MEMORY)) {
-    IREE_RETURN_IF_ERROR(
-        iree_hal_device_observation_populate_memory_total_from_spec(
-            device->spec, out_observation));
+    const iree_hal_amd_fabric_memory_spec_params_t memory =
+        iree_hal_amd_gpu_device_memory_spec_params(
+            device, device->memory.family.queue_family_ordinal);
+    IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_memory_spec_sample_observation(
+        &memory, out_observation));
   }
   if (iree_any_bit_set(flags, IREE_HAL_DEVICE_OBSERVATION_FLAG_SANITIZER) &&
       device->memory.asan) {

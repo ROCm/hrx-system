@@ -10,6 +10,7 @@
 
 #include "iree/base/internal/atomics.h"
 #include "iree/testing/gtest.h"
+#include "iree/testing/status_matchers.h"
 
 namespace {
 
@@ -56,6 +57,19 @@ TEST(TaskAtomicTest, CapabilitiesFollowLockFreeWidths) {
 
   EXPECT_FALSE(iree_hal_task_atomic_width_is_lock_free(
       static_cast<iree_hal_atomic_width_t>(16)));
+}
+
+TEST(TaskAtomicTest, RejectsZeroComputeBeforeWorkerExecution) {
+  for (auto width : {IREE_HAL_ATOMIC_WIDTH_32, IREE_HAL_ATOMIC_WIDTH_64}) {
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
+                          iree_hal_task_atomic_validate(
+                              width, IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE));
+    if (iree_hal_task_atomic_width_is_lock_free(width)) {
+      IREE_EXPECT_OK(iree_hal_task_atomic_validate(
+          width, IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE |
+                     IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE));
+    }
+  }
 }
 
 template <typename AtomicType, typename ValueType>

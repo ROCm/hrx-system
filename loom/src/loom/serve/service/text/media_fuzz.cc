@@ -17,10 +17,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   }
   const auto allocator = iree_allocator_system();
   std::array<loom_serve_text_chat_image_t, 4> images = {};
-  loom_serve_text_chat_t chat = {.host_allocator = allocator};
-  chat.images.values = images.data();
-  chat.images.capacity = images.size();
-  chat.images.count = data[0] % (images.size() + 1);
+  loom_serve_text_chat_t chat = {
+      .host_allocator = allocator,
+      .images =
+          {
+              .count = data[0] % (images.size() + 1),
+              .capacity = images.size(),
+              .values = images.data(),
+          },
+  };
   for (auto& image : images) {
     image.kind = LOOM_SERVE_TEXT_CHAT_CONTENT_VIDEO;
   }

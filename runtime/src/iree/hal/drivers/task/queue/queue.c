@@ -4431,17 +4431,6 @@ static iree_status_t iree_hal_task_queue_dispatch(
       signal_semaphore_list, barriers);
 }
 
-static iree_status_t iree_hal_task_queue_check_atomic_width(
-    iree_hal_atomic_width_t width) {
-  if (IREE_UNLIKELY(!iree_hal_task_atomic_width_is_lock_free(width))) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "task queues do not support lock-based "
-                            "%u-bit atomic operations",
-                            width);
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t iree_hal_task_queue_atomic_wait(
     iree_hal_queue_t* base_queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -4450,7 +4439,8 @@ static iree_status_t iree_hal_task_queue_atomic_wait(
     iree_hal_atomic_wait_params_t params,
     const iree_hal_queue_barriers_t* barriers) {
   IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_task_queue_vtable);
-  IREE_RETURN_IF_ERROR(iree_hal_task_queue_check_atomic_width(params.width));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_task_atomic_validate(params.width, params.flags));
   return iree_hal_task_queue_submit_atomic_wait(
       (iree_hal_task_queue_t*)base_queue, target_buffer, target_offset, params,
       wait_semaphore_list, signal_semaphore_list, barriers);
@@ -4464,7 +4454,8 @@ static iree_status_t iree_hal_task_queue_atomic_store(
     iree_hal_atomic_store_params_t params,
     const iree_hal_queue_barriers_t* barriers) {
   IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_task_queue_vtable);
-  IREE_RETURN_IF_ERROR(iree_hal_task_queue_check_atomic_width(params.width));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_task_atomic_validate(params.width, params.flags));
   return iree_hal_task_queue_submit_atomic_store(
       (iree_hal_task_queue_t*)base_queue, target_buffer, target_offset, params,
       wait_semaphore_list, signal_semaphore_list, barriers);
@@ -4478,7 +4469,8 @@ static iree_status_t iree_hal_task_queue_atomic_rmw(
     iree_hal_atomic_rmw_params_t params,
     const iree_hal_queue_barriers_t* barriers) {
   IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_task_queue_vtable);
-  IREE_RETURN_IF_ERROR(iree_hal_task_queue_check_atomic_width(params.width));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_task_atomic_validate(params.width, params.flags));
   return iree_hal_task_queue_submit_atomic_rmw(
       (iree_hal_task_queue_t*)base_queue, target_buffer, target_offset, params,
       wait_semaphore_list, signal_semaphore_list, barriers);
