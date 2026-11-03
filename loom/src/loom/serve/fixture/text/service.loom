@@ -310,7 +310,9 @@ func.def public @sequence_request_defaults_v1(%options: buffer) -> (buffer) {
   func.return %result_0 : buffer
 }
 
-func.def public @sequence_request_options_v1(%defaults: buffer, %request: buffer, %nonce: i64) -> (buffer) {
-  %result_0 = func.call @request_options(%defaults, %request, %nonce) : (buffer, buffer, i64) -> (buffer)
+func.decl @prepare_sequence_request(%defaults: buffer, %request: buffer, %nonce: i64, %tokens: buffer) -> (buffer)
+
+func.def public @sequence_prepare_request_v1(%defaults: buffer, %request: buffer, %nonce: i64, %tokens: buffer) -> (buffer) {
+  %result_0 = func.call @prepare_sequence_request(%defaults, %request, %nonce, %tokens) : (buffer, buffer, i64, buffer) -> (buffer)
   func.return %result_0 : buffer
 }

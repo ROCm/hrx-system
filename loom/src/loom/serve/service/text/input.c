@@ -20,7 +20,7 @@ static iree_vm_buffer_t* loom_serve_text_input_history(
 void loom_serve_text_input_deinitialize(loom_serve_text_input_t* input,
                                         iree_allocator_t host_allocator) {
   iree_allocator_free(host_allocator, input->media_spans);
-  iree_allocator_free(host_allocator, input->tokens);
+  iree_vm_buffer_release(input->token_storage);
   iree_vm_buffer_release(input->history);
   memset(input, 0, sizeof(*input));
 }
@@ -28,7 +28,7 @@ void loom_serve_text_input_deinitialize(loom_serve_text_input_t* input,
 bool loom_serve_text_input_is_current(const loom_serve_text_input_t* input,
                                       const loom_serve_text_chat_t* chat,
                                       loom_serve_text_input_prefix_t prefix) {
-  return input->tokens &&
+  return input->token_storage &&
          input->history == loom_serve_text_input_history(chat, prefix);
 }
 
@@ -43,7 +43,7 @@ iree_status_t loom_serve_text_input_prepare(
         IREE_STATUS_INVALID_ARGUMENT,
         "request history does not extend the named checkpoint");
   }
-  if (input->tokens && input->history == history) {
+  if (input->token_storage && input->history == history) {
     return iree_ok_status();
   }
   const iree_host_size_t retained_count = retained ? prefix.position : 0;
@@ -72,21 +72,24 @@ iree_status_t loom_serve_text_input_prepare(
         context_capacity, retained_count + count, chat->max_tokens,
         retained_count + count + chat->max_tokens - 1);
   }
-  int32_t* tokens = NULL;
-  iree_status_t status = iree_allocator_malloc_array(
-      host_allocator, iree_max(count, 1), sizeof(*tokens), (void**)&tokens);
+  iree_vm_buffer_t* tokens = NULL;
+  iree_status_t status = iree_vm_buffer_clone(
+      IREE_VM_BUFFER_ACCESS_FLAG_READ,
+      iree_make_const_byte_span(scratch, count * sizeof(*scratch)),
+      iree_alignof(int32_t), host_allocator, &tokens);
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(host_allocator, media_spans);
     return status;
   }
-  memcpy(tokens, scratch, count * sizeof(*tokens));
   iree_vm_buffer_retain(history);
   loom_serve_text_input_deinitialize(input, host_allocator);
-  *input = (loom_serve_text_input_t){.tokens = tokens,
-                                     .count = count,
-                                     .media_spans = media_spans,
-                                     .media_span_count = media_span_count,
-                                     .history = history,
-                                     .retained_count = retained_count};
+  *input =
+      (loom_serve_text_input_t){.token_storage = tokens,
+                                .tokens = iree_vm_buffer_const_data(tokens),
+                                .count = count,
+                                .media_spans = media_spans,
+                                .media_span_count = media_span_count,
+                                .history = history,
+                                .retained_count = retained_count};
   return iree_ok_status();
 }

@@ -128,8 +128,8 @@ TEST_F(SourceSequenceServiceTest, HttpRejectsMalformedInputBeforeMutation) {
   const auto first = Encode("[0,1]");
   const auto handle = Handle(first);
   ASSERT_EQ(handle.size(), 32u) << first;
-  for (const char* tokens :
-       {"[]", "[-1]", "[2147483648]", "[1.5]", "[true]", "[\"1\"]"}) {
+  for (const char* tokens : {"[]", "[-1]", "[4]", "[2147483647]",
+                             "[2147483648]", "[1.5]", "[true]", "[\"1\"]"}) {
     SCOPED_TRACE(tokens);
     EXPECT_NE(Encode(tokens, 2, handle).find("400 Bad Request"),
               std::string::npos);
@@ -156,6 +156,95 @@ TEST_F(SourceSequenceServiceTest, HttpRejectsMalformedInputBeforeMutation) {
   const auto resumed = Encode("[2]", 2, handle);
   ASSERT_NE(resumed.find("200 OK"), std::string::npos) << resumed;
   CheckChunk(resumed, {0, 1, 2}, 2);
+}
+
+TEST_F(SourceSequenceServiceTest,
+       VocabularyRejectionPreservesConcurrentWorkAndRetainedHistory) {
+  const auto options = ServiceOptions();
+  loom_serve_text_service_t* value = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_service_allocate(model_, &options, nullptr,
+                                                  host_allocator_, &value));
+  auto destroy = [](loom_serve_text_service_t* service) {
+    loom_serve_text_service_free(service, IREE_STATUS_OK);
+  };
+  std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
+      value, destroy);
+  const auto interface = loom_serve_text_service_interface(value);
+  Observe(interface);
+  const auto idle = [&] {
+    return !interface.is_pending(interface.self) &&
+           !interface.is_active(interface.self) &&
+           !interface.snapshot(interface.self).queued_requests;
+  };
+  loom_serve_http_connection_t* connection = nullptr;
+  const int first =
+      Send(R"({"position":0,"token_ids":[0,1]})", "", "/v1/sequences");
+  ASSERT_NO_FATAL_FAILURE(Accept(first, interface, &connection));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, idle));
+  const auto initial = Read(first);
+  const auto handle = Handle(initial);
+  ASSERT_EQ(handle.size(), 32u) << initial;
+  CheckChunk(initial, {0, 1}, 0);
+  const int pin = Send("", "X-Loom-Session: " + handle + "\r\n",
+                       "/v1/checkpoints/before-rejection");
+  ASSERT_NO_FATAL_FAILURE(Accept(pin, interface, &connection));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, idle));
+  ASSERT_NE(Read(pin).find("201 Created"), std::string::npos);
+  const auto before = *interface.telemetry.counters;
+
+  // All four requests are queued together. The bad append's valid prefix
+  // exceeds an epoch, so validating only the first chunk would corrupt its
+  // retained frontier before finding the final bad token.
+  const std::string requests[] = {
+      "{\"session\":\"" + handle + R"(","position":2,"token_ids":[0,1,2,0,4]})",
+      R"({"position":0,"token_ids":[3,0,1]})",
+      R"({"position":0,"token_ids":[2147483647]})",
+      R"({"position":0,"token_ids":[2,1,3]})",
+  };
+  int clients[IREE_ARRAYSIZE(requests)];
+  for (size_t i = 0; i < IREE_ARRAYSIZE(requests); ++i) {
+    clients[i] = Send(requests[i], "", "/v1/sequences");
+    ASSERT_NO_FATAL_FAILURE(Accept(clients[i], interface, &connection));
+  }
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, idle));
+  for (size_t i : {0u, 2u}) {
+    const auto response = Read(clients[i]);
+    EXPECT_EQ(response.find("HTTP/1.1 400 Bad Request"), 0u) << response;
+    EXPECT_NE(
+        response.find("sequence token ID is outside the fixture vocabulary"),
+        std::string::npos)
+        << response;
+    EXPECT_NE(response.find("\"code\":\"INVALID_ARGUMENT\""), std::string::npos)
+        << response;
+    EXPECT_EQ(response.find("event: attached"), std::string::npos) << response;
+    EXPECT_EQ(response.find("event: chunk"), std::string::npos) << response;
+  }
+  CheckChunk(Read(clients[1]), {3, 0, 1}, 0);
+  CheckChunk(Read(clients[3]), {2, 1, 3}, 0);
+  EXPECT_EQ(interface.telemetry.counters->rejected, before.rejected + 2);
+  EXPECT_EQ(interface.telemetry.counters->completed, before.completed + 2);
+  EXPECT_EQ(interface.telemetry.counters->failed, before.failed);
+  EXPECT_STREQ(interface.snapshot(interface.self).phase, "idle");
+  EXPECT_EQ(loom_serve_text_model_pool_usage(model_).pending, 0u);
+
+  const int resumed =
+      Send("{\"session\":\"" + handle + R"(","position":2,"token_ids":[3]})",
+           "", "/v1/sequences");
+  ASSERT_NO_FATAL_FAILURE(Accept(resumed, interface, &connection));
+  const int fork =
+      Send(R"({"position":2,"token_ids":[3]})",
+           "X-Loom-Checkpoint: before-rejection\r\n", "/v1/sequences");
+  ASSERT_NO_FATAL_FAILURE(Accept(fork, interface, &connection));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, idle));
+  const auto resumed_response = Read(resumed);
+  const auto fork_response = Read(fork);
+  EXPECT_EQ(Handle(resumed_response), handle);
+  EXPECT_NE(Handle(fork_response), handle);
+  CheckChunk(resumed_response, {0, 1, 3}, 2);
+  CheckChunk(fork_response, {0, 1, 3}, 2);
+  EXPECT_EQ(interface.telemetry.counters->completed, before.completed + 4);
+  EXPECT_EQ(interface.telemetry.counters->failed, before.failed);
+  interface.set_observer(interface.self, {});
 }
 
 TEST_F(SourceSequenceServiceTest, NativeChatRejectionPreservesOwnedInput) {
@@ -385,7 +474,7 @@ TEST_F(RegisteredSequenceServiceTest,
   const std::string declaration =
       "{\"name\":\"fixture-text\",\"pool\":\"pool0\",\"base_directory\":\"" +
       std::filesystem::absolute(directory_).string() +
-      R"(","definition":{"kind":"sequence","prepare":"prepare.loom","control":"control.loom","sources":["advance.loom","storage.loom"],"weights":")" +
+      R"(","definition":{"kind":"sequence","prepare":"prepare.loom","control":"control.loom","sources":["advance.loom","sequence.loom","storage.loom"],"weights":")" +
       weights_ +
       R"(","rows":4,"context_capacity":96,"pool_capacity":256,"prefill_capacity":32,"checkpoint_capacity":4,"session_cache_capacity":1}})";
   auto response = Read(Send(declaration, "", "/v1/models/register"));

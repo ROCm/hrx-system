@@ -466,10 +466,22 @@ result bytes explicitly, without asking the server to sample or feed them back.
 
 Preparation retains the text model's nine-result ABI. The terminal-token marker
 may be null. Control exports `epoch`, `encode_epoch`, `publish_epoch`,
-`encode_state`, `resize_state`, `bind_request`, `request_defaults`, `request_options`, and
+`encode_state`, `resize_state`, `bind_request`, `request_defaults`, `prepare_request`, and
 `capture_epoch`. Isolated `step`, tokenizer/chat roots, and drafting are not
 required. Every submitted span has selection/proposal flags zero, and completed
 progress contains no native output-token selection.
+
+`prepare_request(defaults, request, nonce, tokens)` validates one complete
+sequence request before row reservation or response streaming. `tokens` is a
+read-only, reference-counted buffer of parsed little-endian nonnegative i32 IDs;
+its byte length is four times the token count. The source checks vocabulary and
+other model-specific input constraints here and returns its options buffer.
+An input error rejects only this request with its diagnostic; retained histories
+and other requests remain available. Validation covers the complete append,
+including tokens beyond the first scheduled epoch. This call receives no row
+state and must leave retained execution state unchanged. Source may retain the
+token buffer in its returned options. Generative text's `request_options`
+retains its three-argument contract; its source produces tokens in `prepare_input`.
 
 Text and sequence plans are compact arrays of nine little-endian u32 fields
 per span. The first epoch's records occupy `[0, first_count)`; optional

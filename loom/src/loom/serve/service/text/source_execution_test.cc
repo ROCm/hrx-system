@@ -82,8 +82,8 @@ TEST_F(SourceTextServiceTest, IndependentParameterPreparationJoinsAllDomains) {
     const auto package =
         iree::testing::MakeTempFilePath("text_parameter_domains");
     ASSERT_TRUE(std::filesystem::create_directory(package));
-    for (const char* file : {"advance.loom", "storage.loom", "control.loom",
-                             "model.json", "tokenizer.json"}) {
+    for (const char* file : {"advance.loom", "storage.loom", "sequence.loom",
+                             "control.loom", "model.json", "tokenizer.json"}) {
       ASSERT_TRUE(std::filesystem::copy_file(directory_ + "/" + file,
                                              package + "/" + file));
     }
@@ -181,8 +181,9 @@ TEST_F(SourceTextServiceTest, FailedControlCompileRetiresNativePreparation) {
 TEST_F(SourceTextServiceTest, FailedLinkRetiresAcceptedInitialization) {
   const auto package = iree::testing::MakeTempFilePath("failed_text_link");
   ASSERT_TRUE(std::filesystem::create_directory(package));
-  for (const char* file : {"prepare.loom", "advance.loom", "storage.loom",
-                           "model.json", "weights.loom", "tokenizer.json"}) {
+  for (const char* file :
+       {"prepare.loom", "advance.loom", "storage.loom", "sequence.loom",
+        "model.json", "weights.loom", "tokenizer.json"}) {
     ASSERT_TRUE(std::filesystem::copy_file(directory_ + "/" + file,
                                            package + "/" + file));
   }

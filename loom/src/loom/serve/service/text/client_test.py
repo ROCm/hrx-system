@@ -331,6 +331,7 @@ class ClientTest(unittest.TestCase):
                         "advance.loom",
                         "control.loom",
                         "prepare.loom",
+                        "sequence.loom",
                         "storage.loom",
                         "model.json",
                         "tokenizer.json",

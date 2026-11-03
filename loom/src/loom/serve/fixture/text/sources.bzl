@@ -11,6 +11,7 @@ SOURCE_FILES = [
     "control.loom",
     "model.json",
     "prepare.loom",
+    "sequence.loom",
     "storage.loom",
     "tokenizer.json",
     "weights.loom",
