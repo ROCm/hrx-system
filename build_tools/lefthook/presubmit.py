@@ -42,6 +42,7 @@ from build_tools.devtools import bazel_test_selection, project_presubmit
 from build_tools.devtools.bazel import (
     BazelSourceOwnerQueryError,
     clang_tidy_configuration_args,
+    query_compiling_targets_depending_on,
     query_compiling_targets_for_sources,
 )
 from build_tools.devtools.source_lock import (
@@ -136,8 +137,9 @@ CLANG_TIDY_PATH_PREFIXES = SEMGREP_PATH_PREFIXES + ("loom/binding/c/",)
 CLANG_TIDY_REPO_ENV = "--repo_env=IREE_CLANG_TIDY_LLVM=auto"
 CLANG_TIDY_SELECTED_FILES_FLAG = "--aspects_parameters=selected_files"
 CLANG_TIDY_OWNER_TARGET_PATTERNS = (
-    "//runtime/...",
-    "//loom/...",
+    "//runtime/src/...",
+    "//loom/src/...",
+    "//loom/binding/c/...",
     "//libamdf/...",
     "//libhrx/...",
 )
@@ -1084,6 +1086,8 @@ def is_clang_tidy_infra_file(path: str) -> bool:
 
 def is_bazel_graph_file(path: str) -> bool:
     file_path = Path(path)
+    if bazel_test_selection.is_package_build_file(path):
+        return not (REPO_ROOT / path).is_file()
     return (
         path in CLANG_TIDY_FULL_SCOPE_EXACT_PATHS
         or file_path.name in BUILDIFIER_NAMES
@@ -1122,6 +1126,18 @@ def clang_tidy_bazel_inputs(inputs: PresubmitInputs) -> tuple[list[str], list[st
         [path for path in inputs.changed_paths if is_clang_tidy_infra_file(path)]
     )
     return candidate_files, infra_files
+
+
+def clang_tidy_package_targets(inputs: PresubmitInputs) -> list[str]:
+    """Returns local Bazel packages whose BUILD definitions changed."""
+    return unique_paths(
+        [
+            target
+            for path in inputs.changed_paths
+            if bazel_test_selection.is_package_build_file(path)
+            and (target := bazel_package_target_for_path(path)) is not None
+        ]
+    )
 
 
 def cmake_clang_tidy_analysis_paths(inputs: PresubmitInputs) -> list[str]:
@@ -1247,7 +1263,7 @@ def clang_format_jobs() -> int:
 def bazel_package_target_for_path(path: str) -> str | None:
     current = (REPO_ROOT / path).parent
     while current != current.parent:
-        if (current / "BUILD.bazel").is_file():
+        if (current / "BUILD.bazel").is_file() or (current / "BUILD").is_file():
             relative = current.relative_to(REPO_ROOT).as_posix()
             return f"//{relative}:all" if relative else "//:all"
         if current == REPO_ROOT:
@@ -2459,7 +2475,8 @@ def run_clang_tidy(
         return skip_step("clang-tidy", "unknown build-system lane")
 
     candidate_files, infra_files = clang_tidy_bazel_inputs(inputs)
-    if not candidate_files and not infra_files:
+    package_targets = clang_tidy_package_targets(inputs)
+    if not candidate_files and not infra_files and not package_targets:
         return skip_step("clang-tidy", "no C/C++ runtime inputs")
 
     if not clang_tidy_llvm_available():
@@ -2501,7 +2518,7 @@ def run_clang_tidy(
         )
 
     full_scope = clang_tidy_uses_full_scope(inputs)
-    selected_files = None if full_scope else candidate_files
+    selected_files = None if full_scope or package_targets else candidate_files
     if full_scope:
         analysis_targets = unique_paths(
             [
@@ -2512,10 +2529,6 @@ def run_clang_tidy(
                 if target is not None
             ]
         )
-    elif any(
-        Path(path).suffix in CLANG_TIDY_HEADER_EXTENSIONS for path in candidate_files
-    ):
-        analysis_targets = list(CLANG_TIDY_OWNER_TARGET_PATTERNS)
     else:
         translation_unit_labels = {
             label
@@ -2526,39 +2539,71 @@ def run_clang_tidy(
             )
             if label is not None
         }
+        header_labels = {
+            label
+            for label in (
+                bazel_test_selection.source_label(REPO_ROOT, path)
+                for path in candidate_files
+                if Path(path).suffix in CLANG_TIDY_HEADER_EXTENSIONS
+            )
+            if label is not None
+        }
         owner_query_start = time.monotonic()
+        source_owner_targets = []
         if translation_unit_labels:
             print("[run] Resolve clang-tidy compiling targets")
             sys.stdout.flush()
-        try:
-            analysis_targets = query_compiling_targets_for_sources(
-                "bazel",
-                source_labels=translation_unit_labels,
-                target_patterns=CLANG_TIDY_OWNER_TARGET_PATTERNS,
-                cwd=REPO_ROOT,
-                env=None,
-            )
-        except (BazelSourceOwnerQueryError, ValueError) as exc:
-            print(f"[fail] clang-tidy: {exc}")
-            return False
-        if translation_unit_labels:
+            try:
+                source_owner_targets = query_compiling_targets_for_sources(
+                    "bazel",
+                    source_labels=translation_unit_labels,
+                    target_patterns=CLANG_TIDY_OWNER_TARGET_PATTERNS,
+                    cwd=REPO_ROOT,
+                    env=None,
+                )
+            except (BazelSourceOwnerQueryError, ValueError) as exc:
+                print(f"[fail] clang-tidy: {exc}")
+                return False
             print(
                 "[ok] Resolve clang-tidy compiling targets "
                 f"({format_duration(time.monotonic() - owner_query_start)}, "
-                f"{len(analysis_targets)} target(s))"
+                f"{len(source_owner_targets)} target(s))"
+            )
+        dependency_targets = []
+        package_patterns = {
+            target.removesuffix(":all") + ":*" for target in package_targets
+        }
+        if header_labels or package_patterns:
+            dependency_query_start = time.monotonic()
+            print("[run] Resolve clang-tidy affected compile graph")
+            sys.stdout.flush()
+            try:
+                dependency_targets = query_compiling_targets_depending_on(
+                    "bazel",
+                    dependency_labels=header_labels,
+                    package_patterns=package_patterns,
+                    target_patterns=CLANG_TIDY_OWNER_TARGET_PATTERNS,
+                    configuration_args=(
+                        *clang_tidy_configuration_args(
+                            list(CLANG_TIDY_OWNER_TARGET_PATTERNS)
+                        ),
+                        *project_presubmit.bazel_config_args(),
+                    ),
+                    cwd=REPO_ROOT,
+                    env=None,
+                )
+            except (BazelSourceOwnerQueryError, ValueError) as exc:
+                print(f"[fail] clang-tidy: {exc}")
+                return False
+            print(
+                "[ok] Resolve clang-tidy affected compile graph "
+                f"({format_duration(time.monotonic() - dependency_query_start)}, "
+                f"{len(dependency_targets)} target(s))"
             )
         analysis_targets = unique_paths(
             [
-                *analysis_targets,
-                *[
-                    target
-                    for target in (
-                        bazel_package_target_for_path(path)
-                        for path in candidate_files
-                        if Path(path).suffix in CLANG_TIDY_HEADER_EXTENSIONS
-                    )
-                    if target is not None
-                ],
+                *source_owner_targets,
+                *dependency_targets,
             ]
         )
     if analysis_targets:

@@ -22,10 +22,12 @@ their manual policy tests. The resulting labels go to a target-pattern file,
 with compatibility and execution-resource policy applied by Bazel. Query
 failures fail presubmit; an empty selection runs no tests.
 
-Changes to BUILD files, Starlark rules, module definitions, and Bazel
-configuration conservatively select the full suites because they change the
-graph itself. CMake validation and source hygiene retain their project-owned
-selection and entry points.
+Changes to package BUILD files seed every rule in that package, then use the
+same configured reverse-dependency query to select affected tests. Removed
+package boundaries, Starlark rules, module definitions, and root Bazel
+configuration conservatively select the full suites because their ownership is
+not bounded to one package. CMake validation and source hygiene retain their
+project-owned selection and entry points.
 
 ## Commit Contract
 
