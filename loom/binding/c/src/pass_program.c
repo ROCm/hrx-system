@@ -110,6 +110,27 @@ static loomc_status_t loomc_pass_program_validate_options(
   return loomc_pass_program_validate_string_view(options->identifier);
 }
 
+static bool loomc_target_pipeline_options_has_diagnostic_flags(
+    const loomc_target_pipeline_options_t* options) {
+  return options->structure_size >=
+         offsetof(loomc_target_pipeline_options_t,
+                  source_to_low_diagnostic_flags) +
+             sizeof(options->source_to_low_diagnostic_flags);
+}
+
+static loom_target_low_legality_diagnostic_flags_t
+loomc_target_pipeline_diagnostic_flags(
+    loomc_source_to_low_diagnostic_flags_t public_flags) {
+  loom_target_low_legality_diagnostic_flags_t flags = 0;
+  if ((public_flags & LOOMC_SOURCE_TO_LOW_DIAGNOSTIC_MEMORY_ACCESS) != 0) {
+    flags |= LOOM_TARGET_LOW_LEGALITY_DIAGNOSTIC_MEMORY_ACCESS;
+  }
+  if ((public_flags & LOOMC_SOURCE_TO_LOW_DIAGNOSTIC_OPERAND_FORM) != 0) {
+    flags |= LOOM_TARGET_LOW_LEGALITY_DIAGNOSTIC_OPERAND_FORM;
+  }
+  return flags;
+}
+
 static loomc_status_t loomc_pass_program_validate_target_pipeline_options(
     const loomc_target_pipeline_options_t* options) {
   if (options == NULL) {
@@ -122,7 +143,8 @@ static loomc_status_t loomc_pass_program_validate_target_pipeline_options(
         "target pipeline options have an unknown structure type");
   }
   if (options->structure_size != 0 &&
-      options->structure_size < sizeof(*options)) {
+      options->structure_size < offsetof(loomc_target_pipeline_options_t,
+                                         source_to_low_diagnostic_flags)) {
     return loomc_make_status(
         LOOMC_STATUS_INVALID_ARGUMENT,
         "target pipeline options structure_size is too small");
@@ -135,6 +157,7 @@ static loomc_status_t loomc_pass_program_validate_target_pipeline_options(
   switch (options->kind) {
     case LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW:
     case LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW:
+    case LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW_ARTIFACTS:
       break;
     default:
       return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
@@ -147,6 +170,13 @@ static loomc_status_t loomc_pass_program_validate_target_pipeline_options(
     default:
       return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                                "target control-flow lowering mode is invalid");
+  }
+  if (loomc_target_pipeline_options_has_diagnostic_flags(options) &&
+      (options->source_to_low_diagnostic_flags &
+       ~LOOMC_SOURCE_TO_LOW_DIAGNOSTIC_ALL) != 0) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "source-to-low diagnostic flags contain unknown bits");
   }
   return loomc_ok_status();
 }
@@ -303,6 +333,11 @@ loomc_pass_program_target_pipeline_options(
   }
   return (loom_target_pipeline_options_t){
       .source_to_low_max_errors = options->source_to_low_max_errors,
+      .source_to_low_legality_diagnostic_flags =
+          loomc_target_pipeline_options_has_diagnostic_flags(options)
+              ? loomc_target_pipeline_diagnostic_flags(
+                    options->source_to_low_diagnostic_flags)
+              : 0,
       .control_flow_lowering = loomc_pass_program_target_control_flow_lowering(
           options->control_flow_lowering),
       .sanitizer = option_chain ? option_chain->sanitizer
@@ -688,6 +723,10 @@ loomc_status_t loomc_pass_program_create_from_target_pipeline(
   if (options != NULL &&
       options->kind == LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW) {
     build_pipeline = loom_target_pipeline_build_to_source_low;
+    trace_stage = LOOMC_PASS_PROGRAM_TRACE_STAGE_SOURCE_LOW;
+  } else if (options != NULL &&
+             options->kind == LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW_ARTIFACTS) {
+    build_pipeline = loom_target_pipeline_build_to_source_low_artifacts;
     trace_stage = LOOMC_PASS_PROGRAM_TRACE_STAGE_SOURCE_LOW;
   }
   loomc_pass_program_t* pass_program = NULL;

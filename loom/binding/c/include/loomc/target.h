@@ -235,7 +235,28 @@ typedef enum loomc_target_pipeline_kind_e {
   /// Lower source/kernel IR to target-low IR before target ABI/resource
   /// materialization and packetization preparation.
   LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW = 1,
+
+  /// Lower source/kernel IR to target-low IR prepared for human-facing
+  /// target-low assembly printing. This stops at the source-low boundary while
+  /// allowing targets to remove generated-only presentation artifacts.
+  LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW_ARTIFACTS = 2,
 } loomc_target_pipeline_kind_t;
+
+/// Optional source-to-low diagnostic flag bits.
+typedef enum loomc_source_to_low_diagnostic_flag_bits_e {
+  /// Emit target source-memory decision remarks, including access,
+  /// cache-policy, and prefetch selection when supported by the target.
+  LOOMC_SOURCE_TO_LOW_DIAGNOSTIC_MEMORY_ACCESS = 1u << 0,
+
+  /// Emit target operand-form selection remarks when supported by the target.
+  LOOMC_SOURCE_TO_LOW_DIAGNOSTIC_OPERAND_FORM = 1u << 1,
+
+  /// All source-to-low diagnostic flags known to this header.
+  LOOMC_SOURCE_TO_LOW_DIAGNOSTIC_ALL =
+      LOOMC_SOURCE_TO_LOW_DIAGNOSTIC_MEMORY_ACCESS |
+      LOOMC_SOURCE_TO_LOW_DIAGNOSTIC_OPERAND_FORM,
+} loomc_source_to_low_diagnostic_flag_bits_t;
+typedef uint32_t loomc_source_to_low_diagnostic_flags_t;
 
 /// Control-flow shape selected for source-to-low lowering.
 typedef enum loomc_target_control_flow_lowering_e {
@@ -277,6 +298,14 @@ typedef struct loomc_target_pipeline_options_t {
 
   /// Maximum source-to-low diagnostics. Zero uses source-to-low's default.
   uint32_t source_to_low_max_errors;
+
+  /// Reserved padding preserving the original descriptor ABI boundary.
+  uint32_t reserved;
+
+  /// Optional source-to-low diagnostic remarks to emit while selecting
+  /// target-low operations. Requires `structure_size` to include this field;
+  /// absent fields default to no optional diagnostics.
+  loomc_source_to_low_diagnostic_flags_t source_to_low_diagnostic_flags;
 } loomc_target_pipeline_options_t;
 
 /// Creates a prepared target lowering pass program.
