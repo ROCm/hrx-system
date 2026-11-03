@@ -1,0 +1,38 @@
+func.decl import("weights") @input(%source: i32, %key: buffer, %key_offset: i64, %key_length: i64, %offset: i64, %length: i64, %alignment: i64) -> (i64)
+
+// Canonical "raw" has 32 bytes. The source key selects three independent
+// malformed declarations without changing the runtime's reflected layout.
+func.def public @prepare_weight(%key: buffer) -> (i64) {
+  %source = scalar.constant 0 : i32
+  %raw = buffer.constant utf8("raw") : buffer
+  %c0 = scalar.constant 0 : i64
+  %c3 = scalar.constant 3 : i64
+  %c8 = scalar.constant 8 : i64
+  %c16 = scalar.constant 16 : i64
+  %c32 = scalar.constant 32 : i64
+  %origin = index.constant 0 : offset
+  %letter = buffer.load.i8.u %key[%origin]
+  %s = scalar.constant 115 : i32
+  %m = scalar.constant 109 : i32
+  %gap = scalar.cmpi eq, %letter, %s : i32
+  %short_return = scalar.cmpi eq, %letter, %m : i32
+  %length = scf.if %gap -> (i64) {
+    %first = func.call @input(%source, %raw, %c0, %c3, %c0, %c8, %c8) : (i32, buffer, i64, i64, i64, i64, i64) -> (i64)
+    %second = func.call @input(%source, %raw, %c0, %c3, %c8, %c16, %c16) : (i32, buffer, i64, i64, i64, i64, i64) -> (i64)
+    scf.yield %c32 : i64
+  } else {
+    %input_length = scf.if %short_return -> (i64) {
+      scf.yield %c32 : i64
+    } else {
+      scf.yield %c16 : i64
+    }
+    %input = func.call @input(%source, %raw, %c0, %c3, %c0, %input_length, %c16) : (i32, buffer, i64, i64, i64, i64, i64) -> (i64)
+    %result = scf.if %short_return -> (i64) {
+      scf.yield %c16 : i64
+    } else {
+      scf.yield %c32 : i64
+    }
+    scf.yield %result : i64
+  }
+  func.return %length : i64
+}

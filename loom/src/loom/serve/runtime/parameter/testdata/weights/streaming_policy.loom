@@ -28,7 +28,12 @@ func.def public @prepare_weight(%key: buffer) -> (i64) {
     %bytes = scalar.constant 2097184 : i64
     scf.yield %bytes : i64
   } else {
-    scf.yield %c0 : i64
+    // Direct ranges and staged transforms share the same mapped windows.
+    %source = scalar.constant 0 : i32
+    %length = scalar.constant 32 : i64
+    %alignment = scalar.constant 4 : i64
+    %offset = func.call @input(%source, %key, %c0, %key_length, %c0, %length, %alignment) : (i32, buffer, i64, i64, i64, i64, i64) -> (i64)
+    scf.yield %length : i64
   }
   func.return %bytes : i64
 }

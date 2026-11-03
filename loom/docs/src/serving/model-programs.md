@@ -147,11 +147,26 @@ without inferring filenames.
 Weight policies can combine checkpoint ranges with values computed during
 preparation. The import
 `weights.input(source, key, key_offset, key_length, offset, length, alignment)`
-captures a checkpoint range; `weights.input_buffer(data, alignment)` captures an immutable
-copy of a nonempty readable VM buffer. Both return the aligned offset in the
-packing command's input staging buffer. Computed bytes survive policy teardown
-and are reused if device parameters are reactivated; they do not create a file
+captures a checkpoint range; `weights.input_buffer(data, alignment)` captures an
+immutable copy of a nonempty readable VM buffer. Both append bytes to the
+current tensor's input recipe and return their aligned offset within it.
+Computed bytes survive policy teardown and are reused if device parameters
+are reactivated; they do not create a file
 or another checkpoint visible through `weights.count` or `weights.parameter`.
+
+A policy that declares inputs without a preparation command loads those bytes
+directly into the final tensor. Its ranges must cover the complete tensor
+contiguously, with no alignment gaps, and the policy returns the tensor's
+reflected byte length. This supports checkpoint slices, concatenated ranges
+from multiple sources, and computed host data without a staging buffer or a
+copy kernel. A policy declaring neither inputs nor a command returns zero and
+loads the canonical key from source zero.
+
+When the policy declares a preparation command, input offsets address its
+staging buffer, and alignment gaps are allowed. The command receives the final
+tensor followed by staging, and the policy returns the tensor's reflected byte
+length. Without captured inputs, a command transforms the canonical source-zero
+bytes in place. Only commands with captured inputs contribute to staging capacity.
 
 Both `weights.parameter(source, key, key_offset, key_length)` and `weights.input`
 resolve the named byte range of `key` during the call. A policy can build names

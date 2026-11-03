@@ -138,6 +138,49 @@ TEST_P(WindowedWeightsTest, CapturedSourcesWaitForEveryDestinationSlab) {
   }
 }
 
+TEST_P(WindowedWeightsTest, DirectSourcesAndHostSnapshotsNeedNoStaging) {
+  ASSERT_NO_FATAL_FAILURE(WriteWindowedCheckpoint(path_.path()));
+  ASSERT_NO_FATAL_FAILURE(
+      WriteWindowedCheckpoint(adapter_path_.path(), 100000));
+  IREE_ASSERT_OK(Compile(0, "windowed"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_OK(CreateSourceRoots(0, 1, &root,
+                                   {{path_.path()}, {adapter_path_.path()}},
+                                   "direct_policy.loom"));
+  EXPECT_EQ(loom_serve_weights_activation_workspace(plans_[0]).allocation_size,
+            0u);
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residencies_[0]));
+  ASSERT_NO_FATAL_FAILURE(VerifyWindowedStorage(true));
+  loom_serve_residency_release(residencies_[0]);
+  const auto activity = loom_serve_weights_activity(plans_[0]);
+  EXPECT_EQ(activity.read_bytes, 2097248u);
+  EXPECT_EQ(activity.prepared_bytes, 0u);
+  EXPECT_EQ(activity.groups, GetParam() ? 4u : 3u);
+  if (GetParam()) {
+    ASSERT_NO_FATAL_FAILURE(Reload());
+    ASSERT_NO_FATAL_FAILURE(VerifyWindowedStorage(true));
+    EXPECT_EQ(loom_serve_weights_activity(plans_[0]).read_bytes,
+              activity.read_bytes * 2);
+  }
+}
+
+TEST_P(WindowedWeightsTest, IncompleteDirectRecipesRejectBeforeSubmission) {
+  size_t index = 0;
+  for (const char* command :
+       {"direct_gap", "direct_short", "direct_incomplete"}) {
+    SCOPED_TRACE(command);
+    IREE_ASSERT_OK(Compile(index, command));
+    const auto root = Root(index, 0);
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        CreateRoots(0, 1, &root, {path_.path()}, "direct_invalid_policy.loom"));
+    EXPECT_EQ(loom_serve_weights_activity(plans_[plan_count_ - 1]).read_bytes,
+              0u);
+    ++index;
+  }
+}
+
 TEST_P(WindowedWeightsTest, CapturedInputSubmissionReturnsWithTheWorkerHeld) {
   ASSERT_NO_FATAL_FAILURE(WriteWindowedCheckpoint(path_.path()));
   ASSERT_NO_FATAL_FAILURE(
@@ -199,6 +242,8 @@ class RejectedReadWeightsTest : public WindowedWeightsTest {
 TEST_P(RejectedReadWeightsTest,
        FailedReadRetiresTheAcceptedProducerWithoutReplay) {
   ASSERT_NO_FATAL_FAILURE(WriteWindowedCheckpoint(path_.path()));
+  ASSERT_NO_FATAL_FAILURE(
+      WriteWindowedCheckpoint(adapter_path_.path(), 100000));
   IREE_ASSERT_OK(Compile(0, "windowed"));
   const auto root = Root(0, 0);
   IREE_ASSERT_OK(loom_serve_weights_allocate(
@@ -207,7 +252,9 @@ TEST_P(RejectedReadWeightsTest,
       loom_serve_pool_weight_geometry(storage_owner_), nullptr,
       loom_serve_pool_workspace(storage_owner_), 0, 1, &root, host_allocator_,
       &plans_[0]));
-  IREE_ASSERT_OK(Prepare(plans_[0], {path_.path()}));
+  IREE_ASSERT_OK(PrepareSources(plans_[0],
+                                {{path_.path()}, {adapter_path_.path()}},
+                                "direct_policy.loom"));
   {
     WorkerGate gate(
         loom_serve_host_executor(loom_serve_device_host(device_owner_)));

@@ -144,8 +144,8 @@ void loom_serve_weight_inputs_module_begin(iree_vm_module_t* base) {
   loom_serve_weight_inputs_module_t* module =
       (loom_serve_weight_inputs_module_t*)base;
   module->active = true;
-  module->recipe =
-      (loom_serve_weight_input_recipe_t){.first = module->inputs->count};
+  module->recipe = (loom_serve_weight_input_recipe_t){
+      .first = module->inputs->count, .alignment = 1};
 }
 
 loom_serve_weight_input_recipe_t loom_serve_weight_inputs_module_take(
@@ -153,9 +153,23 @@ loom_serve_weight_input_recipe_t loom_serve_weight_inputs_module_take(
   loom_serve_weight_inputs_module_t* module =
       (loom_serve_weight_inputs_module_t*)base;
   module->active = false;
-  module->inputs->staging_length =
-      iree_max(module->inputs->staging_length, module->recipe.byte_length);
   return module->recipe;
+}
+
+iree_status_t loom_serve_weight_inputs_reserve_staging(
+    loom_serve_weight_inputs_t* inputs,
+    loom_serve_weight_input_recipe_t recipe) {
+  const iree_device_size_t length =
+      iree_max(inputs->staging_length, recipe.byte_length);
+  const iree_device_size_t alignment =
+      iree_max(inputs->staging_alignment, recipe.alignment);
+  if (length > INT64_MAX - (alignment - 1)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "weight input staging extent is not addressable");
+  }
+  inputs->staging_length = length;
+  inputs->staging_alignment = alignment;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_serve_weight_inputs_lookup(
@@ -208,10 +222,9 @@ static iree_status_t loom_serve_weight_inputs_reserve(
       iree_device_align(module->recipe.byte_length, alignment);
   // Leave every captured extent addressable after final lane alignment as well.
   const uint64_t maximum_alignment =
-      iree_max(inputs->staging_alignment, (uint64_t)alignment);
+      iree_max(module->recipe.alignment, (uint64_t)alignment);
   if (length > INT64_MAX - target ||
       target + length > INT64_MAX - (maximum_alignment - 1) ||
-      inputs->staging_length > INT64_MAX - (maximum_alignment - 1) ||
       inputs->count == UINT32_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "weight input staging extent is not addressable");
@@ -240,7 +253,8 @@ static void loom_serve_weight_inputs_append(
   };
   ++module->recipe.count;
   module->recipe.byte_length = target + length;
-  inputs->staging_alignment = iree_max(inputs->staging_alignment, alignment);
+  module->recipe.payload_length += length;
+  module->recipe.alignment = iree_max(module->recipe.alignment, alignment);
 }
 
 static iree_status_t loom_serve_weight_inputs_capture(

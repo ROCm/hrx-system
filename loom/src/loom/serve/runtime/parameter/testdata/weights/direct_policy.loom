@@ -1,0 +1,53 @@
+func.decl import("weights") @input(%source: i32, %key: buffer, %key_offset: i64, %key_length: i64, %offset: i64, %length: i64, %alignment: i64) -> (i64)
+
+func.decl import("weights") @input_buffer(%data: buffer, %alignment: i64) -> (i64)
+
+func.def public @prepare_weight(%key: buffer) -> (i64) {
+  %origin = index.constant 0 : offset
+  %letter = buffer.load.i8.u %key[%origin]
+  %w = scalar.constant 119 : i32
+  %b = scalar.constant 98 : i32
+  %wide = scalar.cmpi eq, %letter, %w : i32
+  %generated = scalar.cmpi eq, %letter, %b : i32
+  %c0 = scalar.constant 0 : i64
+  %key_extent = buffer.length %key
+  %key_length = index.cast %key_extent : offset to i64
+  %bytes = scf.if %wide -> (i64) {
+    %first_source = scalar.constant 0 : i32
+    %second_source = scalar.constant 1 : i32
+    %half = scalar.constant 1048592 : i64
+    %alignment = scalar.constant 16 : i64
+    %first = func.call @input(%first_source, %key, %c0, %key_length, %c0, %half, %alignment) : (i32, buffer, i64, i64, i64, i64, i64) -> (i64)
+    %second = func.call @input(%second_source, %key, %c0, %key_length, %half, %half, %alignment) : (i32, buffer, i64, i64, i64, i64, i64) -> (i64)
+    %bytes = scalar.constant 2097184 : i64
+    scf.yield %bytes : i64
+  } else {
+    %bytes = scf.if %generated -> (i64) {
+      %length = index.constant 32 : offset
+      %data = buffer.alloca<private> align(4) %length : buffer
+      %values = buffer.view %data[%origin] : buffer -> view<8xi32>
+      %c0_index = index.constant 0 : index
+      %c1_index = index.constant 1 : index
+      %c8_index = index.constant 8 : index
+      %base = scalar.constant 20 : i32
+      scf.for %i = [%c0_index to %c8_index step %c1_index] {
+        %element = index.cast %i : index to i32
+        %value = scalar.addi %base, %element : i32
+        view.store %value, %values[%i] : i32, view<8xi32>
+      }
+      %alignment = scalar.constant 4 : i64
+      %offset = func.call @input_buffer(%data, %alignment) : (buffer, i64) -> (i64)
+      // The snapshot survives mutation and teardown of the policy VM.
+      %cleared = scalar.constant 0 : i32
+      scf.for %i = [%c0_index to %c8_index step %c1_index] {
+        view.store %cleared, %values[%i] : i32, view<8xi32>
+      }
+      %bytes = scalar.constant 32 : i64
+      scf.yield %bytes : i64
+    } else {
+      scf.yield %c0 : i64
+    }
+    scf.yield %bytes : i64
+  }
+  func.return %bytes : i64
+}

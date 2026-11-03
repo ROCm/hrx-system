@@ -1624,6 +1624,8 @@ loom_cc_test(
     ],
     data = [
         "//loom/src/loom/serve/runtime/parameter/testdata/weights:boundaries.loom",
+        "//loom/src/loom/serve/runtime/parameter/testdata/weights:direct_invalid_policy.loom",
+        "//loom/src/loom/serve/runtime/parameter/testdata/weights:direct_policy.loom",
         "//loom/src/loom/serve/runtime/parameter/testdata/weights:packing.loom",
         "//loom/src/loom/serve/runtime/parameter/testdata/weights:packing_policy.loom",
         "//loom/src/loom/serve/runtime/parameter/testdata/weights:policy.loom",

@@ -228,6 +228,10 @@ TEST_F(WeightInputsTest, SeparateDomainsCaptureAlignedRangesAndRetainMetadata) {
   const auto recipe = loom_serve_weight_inputs_module_take(module_);
   ASSERT_EQ(recipe.count, 2u);
   EXPECT_EQ(recipe.byte_length, 24u);
+  EXPECT_EQ(recipe.payload_length, 12u);
+  EXPECT_EQ(recipe.alignment, 16u);
+  EXPECT_EQ(loom_serve_weight_inputs_staging_length(inputs_), 0u);
+  IREE_ASSERT_OK(loom_serve_weight_inputs_reserve_staging(inputs_, recipe));
   EXPECT_EQ(loom_serve_weight_inputs_staging_length(inputs_), 32u);
   EXPECT_EQ(loom_serve_weight_inputs_staging_alignment(inputs_), 16u);
   const auto* first = loom_serve_weight_inputs_at(inputs_, recipe.first);
@@ -248,7 +252,24 @@ TEST_F(WeightInputsTest, SeparateDomainsCaptureAlignedRangesAndRetainMetadata) {
   EXPECT_EQ(next.first, recipe.first + recipe.count);
   EXPECT_EQ(next.count, 1u);
   EXPECT_EQ(next.byte_length, 2u);
+  IREE_ASSERT_OK(loom_serve_weight_inputs_reserve_staging(inputs_, next));
   EXPECT_EQ(loom_serve_weight_inputs_staging_length(inputs_), 32u);
+}
+
+TEST_F(WeightInputsTest, DirectRecipesDoNotEnlargeCommandStaging) {
+  loom_serve_weight_inputs_module_begin(module_);
+  IREE_ASSERT_OK(Invoke(0, 0, 16, 4096));
+  const auto direct = loom_serve_weight_inputs_module_take(module_);
+  EXPECT_EQ(direct.byte_length, 16u);
+  EXPECT_EQ(direct.payload_length, 16u);
+  EXPECT_EQ(direct.alignment, 4096u);
+  EXPECT_EQ(loom_serve_weight_inputs_staging_length(inputs_), 0u);
+  loom_serve_weight_inputs_module_begin(module_);
+  IREE_ASSERT_OK(Invoke(1, 0, 2, 2));
+  const auto staged = loom_serve_weight_inputs_module_take(module_);
+  IREE_ASSERT_OK(loom_serve_weight_inputs_reserve_staging(inputs_, staged));
+  EXPECT_EQ(loom_serve_weight_inputs_staging_length(inputs_), 2u);
+  EXPECT_EQ(loom_serve_weight_inputs_staging_alignment(inputs_), 2u);
 }
 
 TEST_F(WeightInputsTest, InvalidSourceKeysRangesAndAlignmentsRejectAtCapture) {
@@ -403,6 +424,8 @@ TEST_F(WeightInputsTest, BufferSnapshotsSurviveMutationAndSourceVmTeardown) {
   const auto recipe = loom_serve_weight_inputs_module_take(module_);
   ASSERT_EQ(recipe.count, 3u);
   EXPECT_EQ(recipe.byte_length, 36u);
+  EXPECT_EQ(recipe.payload_length, 12u);
+  IREE_ASSERT_OK(loom_serve_weight_inputs_reserve_staging(inputs_, recipe));
   EXPECT_EQ(loom_serve_weight_inputs_staging_length(inputs_), 64u);
   EXPECT_EQ(loom_serve_weight_inputs_source_count(inputs_), 3u);
   loom_serve_program_free(program_);
