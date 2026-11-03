@@ -192,21 +192,19 @@ func.def target(@workgroup_mixed_alias_target) @workgroup_mixed_alias_atomics(%v
          %48 = OpPhi %int %44 %33 %49 %46
          %50 = OpBitcast %float %48
          %51 = OpFOrdLessThan %bool %50 %add
-         %52 = OpSelect %float %51 %50 %add
+         %52 = OpSelect %int %51 %48 %43
          %53 = OpFOrdEqual %bool %50 %add
          %54 = OpBitwiseOr %int %48 %43
-         %55 = OpBitcast %float %54
-         %56 = OpSelect %float %53 %55 %52
-         %57 = OpIsNan %bool %50
-         %58 = OpIsNan %bool %add
-         %59 = OpLogicalOr %bool %57 %58
-         %60 = OpSelect %float %57 %50 %add
-         %61 = OpSelect %float %59 %60 %56
-         %62 = OpBitcast %int %61
-         %49 = OpAtomicCompareExchange %int %22 %uint_2 %uint_264 %uint_0 %62 %48
-         %63 = OpIEqual %bool %49 %48
+         %55 = OpSelect %int %53 %54 %52
+         %56 = OpIsNan %bool %50
+         %57 = OpIsNan %bool %add
+         %58 = OpLogicalOr %bool %56 %57
+         %59 = OpSelect %int %56 %48 %43
+         %60 = OpSelect %int %58 %59 %55
+         %49 = OpAtomicCompareExchange %int %22 %uint_2 %uint_264 %uint_0 %60 %48
+         %61 = OpIEqual %bool %49 %48
                OpLoopMerge %47 %46 None
-               OpBranchConditional %63 %47 %46
+               OpBranchConditional %61 %47 %46
          %46 = OpLabel
                OpBranch %45
          %47 = OpLabel
@@ -406,105 +404,97 @@ func.def target(@f32_fallback_target) @f32_atomic_fallbacks(%value: f32, %buffer
          %64 = OpPhi %int %60 %50 %65 %62
          %66 = OpBitcast %float %64
          %67 = OpFOrdLessThan %bool %66 %value
-         %68 = OpSelect %float %67 %66 %value
+         %68 = OpSelect %int %67 %64 %59
          %69 = OpFOrdEqual %bool %66 %value
          %70 = OpBitwiseOr %int %64 %59
-         %71 = OpBitcast %float %70
-         %72 = OpSelect %float %69 %71 %68
-         %73 = OpIsNan %bool %66
-         %74 = OpIsNan %bool %value
-         %75 = OpLogicalOr %bool %73 %74
-         %76 = OpSelect %float %73 %66 %value
-         %77 = OpSelect %float %75 %76 %72
-         %78 = OpBitcast %int %77
-         %65 = OpAtomicCompareExchange %int %24 %uint_2 %uint_68 %uint_0 %78 %64
-         %79 = OpIEqual %bool %65 %64
+         %71 = OpSelect %int %69 %70 %68
+         %72 = OpIsNan %bool %66
+         %73 = OpIsNan %bool %value
+         %74 = OpLogicalOr %bool %72 %73
+         %75 = OpSelect %int %72 %64 %59
+         %76 = OpSelect %int %74 %75 %71
+         %65 = OpAtomicCompareExchange %int %24 %uint_2 %uint_68 %uint_0 %76 %64
+         %77 = OpIEqual %bool %65 %64
                OpLoopMerge %63 %62 None
-               OpBranchConditional %79 %63 %62
+               OpBranchConditional %77 %63 %62
          %62 = OpLabel
                OpBranch %61
          %63 = OpLabel
     %minimum = OpBitcast %float %65
-         %82 = OpBitcast %int %value
-         %83 = OpAtomicLoad %int %24 %uint_2 %uint_0
-               OpBranch %84
+         %80 = OpBitcast %int %value
+         %81 = OpAtomicLoad %int %24 %uint_2 %uint_0
+               OpBranch %82
+         %82 = OpLabel
+         %85 = OpPhi %int %81 %63 %86 %83
+         %87 = OpBitcast %float %85
+         %88 = OpFOrdGreaterThan %bool %87 %value
+         %89 = OpSelect %int %88 %85 %80
+         %90 = OpFOrdEqual %bool %87 %value
+         %91 = OpBitwiseAnd %int %85 %80
+         %92 = OpSelect %int %90 %91 %89
+         %93 = OpIsNan %bool %87
+         %94 = OpIsNan %bool %value
+         %95 = OpLogicalOr %bool %93 %94
+         %96 = OpSelect %int %93 %85 %80
+         %97 = OpSelect %int %95 %96 %92
+         %86 = OpAtomicCompareExchange %int %24 %uint_2 %uint_72 %uint_0 %97 %85
+         %98 = OpIEqual %bool %86 %85
+               OpLoopMerge %84 %83 None
+               OpBranchConditional %98 %84 %83
+         %83 = OpLabel
+               OpBranch %82
          %84 = OpLabel
-         %87 = OpPhi %int %83 %63 %88 %85
-         %89 = OpBitcast %float %87
-         %90 = OpFOrdGreaterThan %bool %89 %value
-         %91 = OpSelect %float %90 %89 %value
-         %92 = OpFOrdEqual %bool %89 %value
-         %93 = OpBitwiseAnd %int %87 %82
-         %94 = OpBitcast %float %93
-         %95 = OpSelect %float %92 %94 %91
-         %96 = OpIsNan %bool %89
-         %97 = OpIsNan %bool %value
-         %98 = OpLogicalOr %bool %96 %97
-         %99 = OpSelect %float %96 %89 %value
-        %100 = OpSelect %float %98 %99 %95
-        %101 = OpBitcast %int %100
-         %88 = OpAtomicCompareExchange %int %24 %uint_2 %uint_72 %uint_0 %101 %87
-        %102 = OpIEqual %bool %88 %87
-               OpLoopMerge %86 %85 None
-               OpBranchConditional %102 %86 %85
-         %85 = OpLabel
-               OpBranch %84
-         %86 = OpLabel
-    %maximum = OpBitcast %float %88
-        %104 = OpBitcast %int %value
-        %105 = OpAtomicLoad %int %24 %uint_2 %uint_0
-               OpBranch %106
-        %106 = OpLabel
-        %109 = OpPhi %int %105 %86 %110 %107
-        %111 = OpBitcast %float %109
-        %112 = OpFOrdLessThan %bool %111 %value
-        %113 = OpSelect %float %112 %111 %value
-        %114 = OpFOrdEqual %bool %111 %value
-        %115 = OpBitwiseOr %int %109 %104
-        %116 = OpBitcast %float %115
-        %117 = OpSelect %float %114 %116 %113
-        %118 = OpIsNan %bool %111
-        %119 = OpIsNan %bool %value
-        %120 = OpSelect %float %118 %value %117
-        %121 = OpSelect %float %119 %111 %120
-        %122 = OpBitcast %int %121
-        %110 = OpAtomicCompareExchange %int %24 %uint_2 %uint_0 %uint_0 %122 %109
-        %123 = OpIEqual %bool %110 %109
-               OpLoopMerge %108 %107 None
-               OpBranchConditional %123 %108 %107
-        %107 = OpLabel
-               OpBranch %106
-        %108 = OpLabel
-     %minnum = OpBitcast %float %110
-        %125 = OpBitcast %int %value
-        %126 = OpAtomicLoad %int %24 %uint_2 %uint_0
-               OpBranch %127
-        %127 = OpLabel
-        %130 = OpPhi %int %126 %108 %131 %128
-        %132 = OpBitcast %float %130
-        %133 = OpFOrdGreaterThan %bool %132 %value
-        %134 = OpSelect %float %133 %132 %value
-        %135 = OpFOrdEqual %bool %132 %value
-        %136 = OpBitwiseAnd %int %130 %125
-        %137 = OpBitcast %float %136
-        %138 = OpSelect %float %135 %137 %134
-        %139 = OpIsNan %bool %132
-        %140 = OpIsNan %bool %value
-        %141 = OpSelect %float %139 %value %138
-        %142 = OpSelect %float %140 %132 %141
-        %143 = OpBitcast %int %142
-        %131 = OpAtomicCompareExchange %int %24 %uint_2 %uint_66 %uint_0 %143 %130
-        %144 = OpIEqual %bool %131 %130
-               OpLoopMerge %129 %128 None
-               OpBranchConditional %144 %129 %128
-        %128 = OpLabel
-               OpBranch %127
-        %129 = OpLabel
-     %maxnum = OpBitcast %float %131
-        %146 = OpBitcast %int %value
-        %147 = OpBitcast %int %exchange
-        %148 = OpAtomicCompareExchange %int %24 %uint_2 %uint_72 %uint_66 %146 %147
-      %prior = OpBitcast %float %148
+    %maximum = OpBitcast %float %86
+        %100 = OpBitcast %int %value
+        %101 = OpAtomicLoad %int %24 %uint_2 %uint_0
+               OpBranch %102
+        %102 = OpLabel
+        %105 = OpPhi %int %101 %84 %106 %103
+        %107 = OpBitcast %float %105
+        %108 = OpFOrdLessThan %bool %107 %value
+        %109 = OpSelect %int %108 %105 %100
+        %110 = OpFOrdEqual %bool %107 %value
+        %111 = OpBitwiseOr %int %105 %100
+        %112 = OpSelect %int %110 %111 %109
+        %113 = OpIsNan %bool %107
+        %114 = OpIsNan %bool %value
+        %115 = OpSelect %int %113 %100 %112
+        %116 = OpSelect %int %114 %105 %115
+        %106 = OpAtomicCompareExchange %int %24 %uint_2 %uint_0 %uint_0 %116 %105
+        %117 = OpIEqual %bool %106 %105
+               OpLoopMerge %104 %103 None
+               OpBranchConditional %117 %104 %103
+        %103 = OpLabel
+               OpBranch %102
+        %104 = OpLabel
+     %minnum = OpBitcast %float %106
+        %119 = OpBitcast %int %value
+        %120 = OpAtomicLoad %int %24 %uint_2 %uint_0
+               OpBranch %121
+        %121 = OpLabel
+        %124 = OpPhi %int %120 %104 %125 %122
+        %126 = OpBitcast %float %124
+        %127 = OpFOrdGreaterThan %bool %126 %value
+        %128 = OpSelect %int %127 %124 %119
+        %129 = OpFOrdEqual %bool %126 %value
+        %130 = OpBitwiseAnd %int %124 %119
+        %131 = OpSelect %int %129 %130 %128
+        %132 = OpIsNan %bool %126
+        %133 = OpIsNan %bool %value
+        %134 = OpSelect %int %132 %119 %131
+        %135 = OpSelect %int %133 %124 %134
+        %125 = OpAtomicCompareExchange %int %24 %uint_2 %uint_66 %uint_0 %135 %124
+        %136 = OpIEqual %bool %125 %124
+               OpLoopMerge %123 %122 None
+               OpBranchConditional %136 %123 %122
+        %122 = OpLabel
+               OpBranch %121
+        %123 = OpLabel
+     %maxnum = OpBitcast %float %125
+        %138 = OpBitcast %int %value
+        %139 = OpBitcast %int %exchange
+        %140 = OpAtomicCompareExchange %int %24 %uint_2 %uint_72 %uint_66 %138 %139
+      %prior = OpBitcast %float %140
                OpReturn
                OpFunctionEnd
 
@@ -789,104 +779,96 @@ func.def target(@f64_fallback_target) @f64_atomic_fallbacks(%buffer: buffer) {
          %49 = OpPhi %long %45 %33 %50 %47
          %51 = OpBitcast %double %49
          %52 = OpFOrdLessThan %bool %51 %value
-         %53 = OpSelect %double %52 %51 %value
+         %53 = OpSelect %long %52 %49 %44
          %54 = OpFOrdEqual %bool %51 %value
          %55 = OpBitwiseOr %long %49 %44
-         %56 = OpBitcast %double %55
-         %57 = OpSelect %double %54 %56 %53
-         %58 = OpIsNan %bool %51
-         %59 = OpIsNan %bool %value
-         %60 = OpLogicalOr %bool %58 %59
-         %61 = OpSelect %double %58 %51 %value
-         %62 = OpSelect %double %60 %61 %57
-         %63 = OpBitcast %long %62
-         %50 = OpAtomicCompareExchange %long %20 %uint_2 %uint_68 %uint_0 %63 %49
-         %64 = OpIEqual %bool %50 %49
+         %56 = OpSelect %long %54 %55 %53
+         %57 = OpIsNan %bool %51
+         %58 = OpIsNan %bool %value
+         %59 = OpLogicalOr %bool %57 %58
+         %60 = OpSelect %long %57 %49 %44
+         %61 = OpSelect %long %59 %60 %56
+         %50 = OpAtomicCompareExchange %long %20 %uint_2 %uint_68 %uint_0 %61 %49
+         %62 = OpIEqual %bool %50 %49
                OpLoopMerge %48 %47 None
-               OpBranchConditional %64 %48 %47
+               OpBranchConditional %62 %48 %47
          %47 = OpLabel
                OpBranch %46
          %48 = OpLabel
-         %66 = OpBitcast %long %value
-         %67 = OpAtomicLoad %long %20 %uint_2 %uint_0
-               OpBranch %68
+         %64 = OpBitcast %long %value
+         %65 = OpAtomicLoad %long %20 %uint_2 %uint_0
+               OpBranch %66
+         %66 = OpLabel
+         %69 = OpPhi %long %65 %48 %70 %67
+         %71 = OpBitcast %double %69
+         %72 = OpFOrdGreaterThan %bool %71 %value
+         %73 = OpSelect %long %72 %69 %64
+         %74 = OpFOrdEqual %bool %71 %value
+         %75 = OpBitwiseAnd %long %69 %64
+         %76 = OpSelect %long %74 %75 %73
+         %77 = OpIsNan %bool %71
+         %78 = OpIsNan %bool %value
+         %79 = OpLogicalOr %bool %77 %78
+         %80 = OpSelect %long %77 %69 %64
+         %81 = OpSelect %long %79 %80 %76
+         %70 = OpAtomicCompareExchange %long %20 %uint_2 %uint_72 %uint_0 %81 %69
+         %82 = OpIEqual %bool %70 %69
+               OpLoopMerge %68 %67 None
+               OpBranchConditional %82 %68 %67
+         %67 = OpLabel
+               OpBranch %66
          %68 = OpLabel
-         %71 = OpPhi %long %67 %48 %72 %69
-         %73 = OpBitcast %double %71
-         %74 = OpFOrdGreaterThan %bool %73 %value
-         %75 = OpSelect %double %74 %73 %value
-         %76 = OpFOrdEqual %bool %73 %value
-         %77 = OpBitwiseAnd %long %71 %66
-         %78 = OpBitcast %double %77
-         %79 = OpSelect %double %76 %78 %75
-         %80 = OpIsNan %bool %73
-         %81 = OpIsNan %bool %value
-         %82 = OpLogicalOr %bool %80 %81
-         %83 = OpSelect %double %80 %73 %value
-         %84 = OpSelect %double %82 %83 %79
-         %85 = OpBitcast %long %84
-         %72 = OpAtomicCompareExchange %long %20 %uint_2 %uint_72 %uint_0 %85 %71
-         %86 = OpIEqual %bool %72 %71
-               OpLoopMerge %70 %69 None
-               OpBranchConditional %86 %70 %69
-         %69 = OpLabel
-               OpBranch %68
-         %70 = OpLabel
-    %maximum = OpBitcast %double %72
-         %88 = OpBitcast %long %value
-         %89 = OpAtomicLoad %long %20 %uint_2 %uint_0
-               OpBranch %90
-         %90 = OpLabel
-         %93 = OpPhi %long %89 %70 %94 %91
-         %95 = OpBitcast %double %93
-         %96 = OpFOrdLessThan %bool %95 %value
-         %97 = OpSelect %double %96 %95 %value
-         %98 = OpFOrdEqual %bool %95 %value
-         %99 = OpBitwiseOr %long %93 %88
-        %100 = OpBitcast %double %99
-        %101 = OpSelect %double %98 %100 %97
-        %102 = OpIsNan %bool %95
-        %103 = OpIsNan %bool %value
-        %104 = OpSelect %double %102 %value %101
-        %105 = OpSelect %double %103 %95 %104
-        %106 = OpBitcast %long %105
-         %94 = OpAtomicCompareExchange %long %20 %uint_2 %uint_0 %uint_0 %106 %93
-        %107 = OpIEqual %bool %94 %93
-               OpLoopMerge %92 %91 None
-               OpBranchConditional %107 %92 %91
-         %91 = OpLabel
-               OpBranch %90
-         %92 = OpLabel
-     %minnum = OpBitcast %double %94
-        %109 = OpBitcast %long %value
-        %110 = OpAtomicLoad %long %20 %uint_2 %uint_0
-               OpBranch %111
-        %111 = OpLabel
-        %114 = OpPhi %long %110 %92 %115 %112
-        %116 = OpBitcast %double %114
-        %117 = OpFOrdGreaterThan %bool %116 %value
-        %118 = OpSelect %double %117 %116 %value
-        %119 = OpFOrdEqual %bool %116 %value
-        %120 = OpBitwiseAnd %long %114 %109
-        %121 = OpBitcast %double %120
-        %122 = OpSelect %double %119 %121 %118
-        %123 = OpIsNan %bool %116
-        %124 = OpIsNan %bool %value
-        %125 = OpSelect %double %123 %value %122
-        %126 = OpSelect %double %124 %116 %125
-        %127 = OpBitcast %long %126
-        %115 = OpAtomicCompareExchange %long %20 %uint_2 %uint_66 %uint_0 %127 %114
-        %128 = OpIEqual %bool %115 %114
-               OpLoopMerge %113 %112 None
-               OpBranchConditional %128 %113 %112
-        %112 = OpLabel
-               OpBranch %111
-        %113 = OpLabel
-     %maxnum = OpBitcast %double %115
-        %130 = OpBitcast %long %value
-        %131 = OpBitcast %long %exchange
-        %132 = OpAtomicCompareExchange %long %20 %uint_2 %uint_72 %uint_66 %130 %131
-      %prior = OpBitcast %double %132
+    %maximum = OpBitcast %double %70
+         %84 = OpBitcast %long %value
+         %85 = OpAtomicLoad %long %20 %uint_2 %uint_0
+               OpBranch %86
+         %86 = OpLabel
+         %89 = OpPhi %long %85 %68 %90 %87
+         %91 = OpBitcast %double %89
+         %92 = OpFOrdLessThan %bool %91 %value
+         %93 = OpSelect %long %92 %89 %84
+         %94 = OpFOrdEqual %bool %91 %value
+         %95 = OpBitwiseOr %long %89 %84
+         %96 = OpSelect %long %94 %95 %93
+         %97 = OpIsNan %bool %91
+         %98 = OpIsNan %bool %value
+         %99 = OpSelect %long %97 %84 %96
+        %100 = OpSelect %long %98 %89 %99
+         %90 = OpAtomicCompareExchange %long %20 %uint_2 %uint_0 %uint_0 %100 %89
+        %101 = OpIEqual %bool %90 %89
+               OpLoopMerge %88 %87 None
+               OpBranchConditional %101 %88 %87
+         %87 = OpLabel
+               OpBranch %86
+         %88 = OpLabel
+     %minnum = OpBitcast %double %90
+        %103 = OpBitcast %long %value
+        %104 = OpAtomicLoad %long %20 %uint_2 %uint_0
+               OpBranch %105
+        %105 = OpLabel
+        %108 = OpPhi %long %104 %88 %109 %106
+        %110 = OpBitcast %double %108
+        %111 = OpFOrdGreaterThan %bool %110 %value
+        %112 = OpSelect %long %111 %108 %103
+        %113 = OpFOrdEqual %bool %110 %value
+        %114 = OpBitwiseAnd %long %108 %103
+        %115 = OpSelect %long %113 %114 %112
+        %116 = OpIsNan %bool %110
+        %117 = OpIsNan %bool %value
+        %118 = OpSelect %long %116 %103 %115
+        %119 = OpSelect %long %117 %108 %118
+        %109 = OpAtomicCompareExchange %long %20 %uint_2 %uint_66 %uint_0 %119 %108
+        %120 = OpIEqual %bool %109 %108
+               OpLoopMerge %107 %106 None
+               OpBranchConditional %120 %107 %106
+        %106 = OpLabel
+               OpBranch %105
+        %107 = OpLabel
+     %maxnum = OpBitcast %double %109
+        %122 = OpBitcast %long %value
+        %123 = OpBitcast %long %exchange
+        %124 = OpAtomicCompareExchange %long %20 %uint_2 %uint_72 %uint_66 %122 %123
+      %prior = OpBitcast %double %124
                OpReturn
                OpFunctionEnd
 
@@ -965,29 +947,27 @@ func.def target(@workgroup_float_target) @workgroup_float_fallback(%value: f32) 
          %33 = OpPhi %int %29 %11 %34 %31
          %35 = OpBitcast %float %33
          %37 = OpFOrdLessThan %bool %35 %loaded
-         %38 = OpSelect %float %37 %35 %loaded
+         %38 = OpSelect %int %37 %33 %28
          %39 = OpFOrdEqual %bool %35 %loaded
          %40 = OpBitwiseOr %int %33 %28
-         %41 = OpBitcast %float %40
-         %42 = OpSelect %float %39 %41 %38
-         %43 = OpIsNan %bool %35
-         %44 = OpIsNan %bool %loaded
-         %45 = OpLogicalOr %bool %43 %44
-         %46 = OpSelect %float %43 %35 %loaded
-         %47 = OpSelect %float %45 %46 %42
-         %48 = OpBitcast %int %47
-         %34 = OpAtomicCompareExchange %int %22 %uint_2 %uint_258 %uint_0 %48 %33
-         %49 = OpIEqual %bool %34 %33
+         %41 = OpSelect %int %39 %40 %38
+         %42 = OpIsNan %bool %35
+         %43 = OpIsNan %bool %loaded
+         %44 = OpLogicalOr %bool %42 %43
+         %45 = OpSelect %int %42 %33 %28
+         %46 = OpSelect %int %44 %45 %41
+         %34 = OpAtomicCompareExchange %int %22 %uint_2 %uint_258 %uint_0 %46 %33
+         %47 = OpIEqual %bool %34 %33
                OpLoopMerge %32 %31 None
-               OpBranchConditional %49 %32 %31
+               OpBranchConditional %47 %32 %31
          %31 = OpLabel
                OpBranch %30
          %32 = OpLabel
         %old = OpBitcast %float %34
-         %52 = OpBitcast %int %value
-         %53 = OpBitcast %int %old
-         %54 = OpAtomicCompareExchange %int %22 %uint_2 %uint_260 %uint_0 %52 %53
-      %prior = OpBitcast %float %54
+         %50 = OpBitcast %int %value
+         %51 = OpBitcast %int %old
+         %52 = OpAtomicCompareExchange %int %22 %uint_2 %uint_260 %uint_0 %50 %51
+      %prior = OpBitcast %float %52
                OpReturn
                OpFunctionEnd
 

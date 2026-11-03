@@ -330,10 +330,10 @@ iree_status_t loom_spirv_emit_atomic_float_compare_exchange_packet(
 }
 
 static iree_status_t loom_spirv_emit_float_atomic_minmax(
-    loom_spirv_emit_state_t* state, uint8_t operation, uint32_t float_type_id,
-    uint32_t integer_type_id, uint32_t current_float_id,
-    uint32_t current_integer_id, uint32_t value_float_id,
-    uint32_t value_integer_id, uint32_t* out_result_id) {
+    loom_spirv_emit_state_t* state, uint8_t operation, uint32_t integer_type_id,
+    uint32_t current_float_id, uint32_t current_integer_id,
+    uint32_t value_float_id, uint32_t value_integer_id,
+    uint32_t* out_result_id) {
   const bool is_minimum =
       operation == LOOM_SPIRV_ATOMIC_FLOAT_OPERATION_MINIMUM ||
       operation == LOOM_SPIRV_ATOMIC_FLOAT_OPERATION_MINNUM;
@@ -353,9 +353,12 @@ static iree_status_t loom_spirv_emit_float_atomic_minmax(
                  : LOOM_SPIRV_OP_F_ORD_GREATER_THAN,
       bool_type_id, current_float_id, value_float_id, &ordered_comparison_id));
   uint32_t numeric_result_id = 0;
+  // Comparisons consume floating values, but every selected payload remains
+  // in the integer domain through the CAS. Floating OpSelect can discard
+  // signed zeros and NaN payloads under Vulkan's default execution modes.
   IREE_RETURN_IF_ERROR(loom_spirv_emit_select(
-      state, float_type_id, ordered_comparison_id, current_float_id,
-      value_float_id, &numeric_result_id));
+      state, integer_type_id, ordered_comparison_id, current_integer_id,
+      value_integer_id, &numeric_result_id));
 
   uint32_t equal_id = 0;
   IREE_RETURN_IF_ERROR(loom_spirv_module_emit_binary_result(
@@ -366,14 +369,10 @@ static iree_status_t loom_spirv_emit_float_atomic_minmax(
       state->builder,
       is_minimum ? LOOM_SPIRV_OP_BITWISE_OR : LOOM_SPIRV_OP_BITWISE_AND,
       integer_type_id, current_integer_id, value_integer_id, &tied_integer_id));
-  uint32_t tied_float_id = 0;
-  IREE_RETURN_IF_ERROR(loom_spirv_module_emit_unary_result(
-      state->builder, LOOM_SPIRV_OP_BITCAST, float_type_id, tied_integer_id,
-      &tied_float_id));
   uint32_t ordered_result_id = 0;
-  IREE_RETURN_IF_ERROR(loom_spirv_emit_select(state, float_type_id, equal_id,
-                                              tied_float_id, numeric_result_id,
-                                              &ordered_result_id));
+  IREE_RETURN_IF_ERROR(
+      loom_spirv_emit_select(state, integer_type_id, equal_id, tied_integer_id,
+                             numeric_result_id, &ordered_result_id));
 
   uint32_t current_nan_id = 0;
   IREE_RETURN_IF_ERROR(loom_spirv_module_emit_unary_result(
@@ -390,19 +389,19 @@ static iree_status_t loom_spirv_emit_float_atomic_minmax(
         value_nan_id, &any_nan_id));
     uint32_t nan_result_id = 0;
     IREE_RETURN_IF_ERROR(loom_spirv_emit_select(
-        state, float_type_id, current_nan_id, current_float_id, value_float_id,
-        &nan_result_id));
-    return loom_spirv_emit_select(state, float_type_id, any_nan_id,
+        state, integer_type_id, current_nan_id, current_integer_id,
+        value_integer_id, &nan_result_id));
+    return loom_spirv_emit_select(state, integer_type_id, any_nan_id,
                                   nan_result_id, ordered_result_id,
                                   out_result_id);
   }
 
   uint32_t current_filtered_id = 0;
   IREE_RETURN_IF_ERROR(loom_spirv_emit_select(
-      state, float_type_id, current_nan_id, value_float_id, ordered_result_id,
-      &current_filtered_id));
-  return loom_spirv_emit_select(state, float_type_id, value_nan_id,
-                                current_float_id, current_filtered_id,
+      state, integer_type_id, current_nan_id, value_integer_id,
+      ordered_result_id, &current_filtered_id));
+  return loom_spirv_emit_select(state, integer_type_id, value_nan_id,
+                                current_integer_id, current_filtered_id,
                                 out_result_id);
 }
 
@@ -465,24 +464,24 @@ iree_status_t loom_spirv_emit_atomic_float_cas_packet(
       state->builder, LOOM_SPIRV_OP_BITCAST, value.type_id, expected_id,
       &expected_float_id));
 
-  uint32_t replacement_float_id = 0;
+  uint32_t replacement_integer_id = 0;
   const loom_spirv_packet_payload_t* payload =
       loom_spirv_packet_row_payload(row);
   if (payload->atomic.float_operation ==
       LOOM_SPIRV_ATOMIC_FLOAT_OPERATION_ADD) {
+    uint32_t replacement_float_id = 0;
     IREE_RETURN_IF_ERROR(loom_spirv_module_emit_binary_result(
         state->builder, LOOM_SPIRV_OP_F_ADD, value.type_id, expected_float_id,
         value.id, &replacement_float_id));
+    IREE_RETURN_IF_ERROR(loom_spirv_module_emit_unary_result(
+        state->builder, LOOM_SPIRV_OP_BITCAST, integer_type_id,
+        replacement_float_id, &replacement_integer_id));
   } else {
     IREE_RETURN_IF_ERROR(loom_spirv_emit_float_atomic_minmax(
-        state, payload->atomic.float_operation, value.type_id, integer_type_id,
+        state, payload->atomic.float_operation, integer_type_id,
         expected_float_id, expected_id, value.id, value_integer_id,
-        &replacement_float_id));
+        &replacement_integer_id));
   }
-  uint32_t replacement_integer_id = 0;
-  IREE_RETURN_IF_ERROR(loom_spirv_module_emit_unary_result(
-      state->builder, LOOM_SPIRV_OP_BITCAST, integer_type_id,
-      replacement_float_id, &replacement_integer_id));
 
   const uint32_t compare_exchange_operands[] = {
       integer_type_id,

@@ -89,3 +89,244 @@ check.scenario @vector_selection_values {
   }
   check.return
 }
+
+// Floating selection is transport, including for signed zeros, subnormals,
+// infinities, and NaN payloads. Load the encodings at runtime and observe each
+// selected bit through an integer result; arithmetic never participates.
+func.def @selection_condition(%trial: index) -> (i1) {
+  %c0 = index.constant 0 : index
+  %condition = index.cmp eq, %trial, %c0 : index
+  func.return %condition : i1
+}
+
+func.def @select_f16_bits(%condition: i1, %a_buffer: buffer, %b_buffer: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %a_view = buffer.view %a_buffer[%origin] : buffer -> view<3xf16>
+  %b_view = buffer.view %b_buffer[%origin] : buffer -> view<3xf16>
+  %a = vector.load %a_view[0] : view<3xf16> -> vector<3xf16>
+  %b = vector.load %b_view[0] : view<3xf16> -> vector<3xf16>
+  %a0 = vector.extract %a[0] : vector<3xf16> -> f16
+  %b0 = vector.extract %b[0] : vector<3xf16> -> f16
+  %scalar = scf.select %condition, %a0, %b0 : f16
+  %whole = scf.select %condition, %a, %b : vector<3xf16>
+  %true = scalar.constant true : i1
+  %inverse = scalar.xori %condition, %true : i1
+  %mask = vector.from_elements %condition, %inverse, %condition : vector<3xi1>
+  %lanes = vector.select %mask, %a, %b : vector<3xf16>
+  %scalar_bits = scalar.bitcast %scalar : f16 to i16
+  %whole_bits = vector.bitcast %whole : vector<3xf16> to vector<3xi16>
+  %lane_bits = vector.bitcast %lanes : vector<3xf16> to vector<3xi16>
+  %results = buffer.view %output[%origin] : buffer -> view<7xi16>
+  view.store %scalar_bits, %results[0] : i16, view<7xi16>
+  vector.store %whole_bits, %results[1] : vector<3xi16>, view<7xi16>
+  vector.store %lane_bits, %results[4] : vector<3xi16>, view<7xi16>
+  func.return
+}
+
+check.scenario @select_f16_payloads {
+  // Zeros and subnormals of both signs. Both conditions are exercised.
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %condition = check.generate<@selection_condition>(%trial) : (index) -> (i1)
+    %a = check.generate.iota offset(0) step(1) : tensor<3xi16>
+    %b = check.generate.iota offset(-32768) step(1) : tensor<3xi16>
+    %output = check.generate.fill value(41) : tensor<7xi16>
+    check.compare<@select_f16_bits>(%condition, %a, %b, %output) : (i1, tensor<3xi16>, tensor<3xi16>, tensor<7xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<7xi16>
+    }
+  }
+  // Infinities and signaling NaN payloads. Both conditions are exercised.
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %condition = check.generate<@selection_condition>(%trial) : (index) -> (i1)
+    %a = check.generate.iota offset(31744) step(1) : tensor<3xi16>
+    %b = check.generate.iota offset(-1024) step(1) : tensor<3xi16>
+    %output = check.generate.fill value(41) : tensor<7xi16>
+    check.compare<@select_f16_bits>(%condition, %a, %b, %output) : (i1, tensor<3xi16>, tensor<3xi16>, tensor<7xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<7xi16>
+    }
+  }
+  // Quiet NaN payloads. Both conditions are exercised.
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %condition = check.generate<@selection_condition>(%trial) : (index) -> (i1)
+    %a = check.generate.iota offset(32256) step(1) : tensor<3xi16>
+    %b = check.generate.iota offset(-512) step(1) : tensor<3xi16>
+    %output = check.generate.fill value(41) : tensor<7xi16>
+    check.compare<@select_f16_bits>(%condition, %a, %b, %output) : (i1, tensor<3xi16>, tensor<3xi16>, tensor<7xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<7xi16>
+    }
+  }
+  check.return
+}
+
+func.def @select_bf16_bits(%condition: i1, %a_buffer: buffer, %b_buffer: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %a_view = buffer.view %a_buffer[%origin] : buffer -> view<3xbf16>
+  %b_view = buffer.view %b_buffer[%origin] : buffer -> view<3xbf16>
+  %a = vector.load %a_view[0] : view<3xbf16> -> vector<3xbf16>
+  %b = vector.load %b_view[0] : view<3xbf16> -> vector<3xbf16>
+  %a0 = vector.extract %a[0] : vector<3xbf16> -> bf16
+  %b0 = vector.extract %b[0] : vector<3xbf16> -> bf16
+  %scalar = scf.select %condition, %a0, %b0 : bf16
+  %whole = scf.select %condition, %a, %b : vector<3xbf16>
+  %true = scalar.constant true : i1
+  %inverse = scalar.xori %condition, %true : i1
+  %mask = vector.from_elements %condition, %inverse, %condition : vector<3xi1>
+  %lanes = vector.select %mask, %a, %b : vector<3xbf16>
+  %scalar_bits = scalar.bitcast %scalar : bf16 to i16
+  %whole_bits = vector.bitcast %whole : vector<3xbf16> to vector<3xi16>
+  %lane_bits = vector.bitcast %lanes : vector<3xbf16> to vector<3xi16>
+  %results = buffer.view %output[%origin] : buffer -> view<7xi16>
+  view.store %scalar_bits, %results[0] : i16, view<7xi16>
+  vector.store %whole_bits, %results[1] : vector<3xi16>, view<7xi16>
+  vector.store %lane_bits, %results[4] : vector<3xi16>, view<7xi16>
+  func.return
+}
+
+check.scenario @select_bf16_payloads {
+  // Zeros and subnormals of both signs. Both conditions are exercised.
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %condition = check.generate<@selection_condition>(%trial) : (index) -> (i1)
+    %a = check.generate.iota offset(0) step(1) : tensor<3xi16>
+    %b = check.generate.iota offset(-32768) step(1) : tensor<3xi16>
+    %output = check.generate.fill value(41) : tensor<7xi16>
+    check.compare<@select_bf16_bits>(%condition, %a, %b, %output) : (i1, tensor<3xi16>, tensor<3xi16>, tensor<7xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<7xi16>
+    }
+  }
+  // Infinities and signaling NaN payloads. Both conditions are exercised.
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %condition = check.generate<@selection_condition>(%trial) : (index) -> (i1)
+    %a = check.generate.iota offset(32640) step(1) : tensor<3xi16>
+    %b = check.generate.iota offset(-128) step(1) : tensor<3xi16>
+    %output = check.generate.fill value(41) : tensor<7xi16>
+    check.compare<@select_bf16_bits>(%condition, %a, %b, %output) : (i1, tensor<3xi16>, tensor<3xi16>, tensor<7xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<7xi16>
+    }
+  }
+  // Quiet NaN payloads. Both conditions are exercised.
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %condition = check.generate<@selection_condition>(%trial) : (index) -> (i1)
+    %a = check.generate.iota offset(32704) step(1) : tensor<3xi16>
+    %b = check.generate.iota offset(-64) step(1) : tensor<3xi16>
+    %output = check.generate.fill value(41) : tensor<7xi16>
+    check.compare<@select_bf16_bits>(%condition, %a, %b, %output) : (i1, tensor<3xi16>, tensor<3xi16>, tensor<7xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<7xi16>
+    }
+  }
+  check.return
+}
+
+func.def @select_f32_bits(%condition: i1, %a_buffer: buffer, %b_buffer: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %a_view = buffer.view %a_buffer[%origin] : buffer -> view<3xf32>
+  %b_view = buffer.view %b_buffer[%origin] : buffer -> view<3xf32>
+  %a = vector.load %a_view[0] : view<3xf32> -> vector<3xf32>
+  %b = vector.load %b_view[0] : view<3xf32> -> vector<3xf32>
+  %a0 = vector.extract %a[0] : vector<3xf32> -> f32
+  %b0 = vector.extract %b[0] : vector<3xf32> -> f32
+  %scalar = scf.select %condition, %a0, %b0 : f32
+  %whole = scf.select %condition, %a, %b : vector<3xf32>
+  %true = scalar.constant true : i1
+  %inverse = scalar.xori %condition, %true : i1
+  %mask = vector.from_elements %condition, %inverse, %condition : vector<3xi1>
+  %lanes = vector.select %mask, %a, %b : vector<3xf32>
+  %scalar_bits = scalar.bitcast %scalar : f32 to i32
+  %whole_bits = vector.bitcast %whole : vector<3xf32> to vector<3xi32>
+  %lane_bits = vector.bitcast %lanes : vector<3xf32> to vector<3xi32>
+  %results = buffer.view %output[%origin] : buffer -> view<7xi32>
+  view.store %scalar_bits, %results[0] : i32, view<7xi32>
+  vector.store %whole_bits, %results[1] : vector<3xi32>, view<7xi32>
+  vector.store %lane_bits, %results[4] : vector<3xi32>, view<7xi32>
+  func.return
+}
+
+check.scenario @select_f32_payloads {
+  // Zeros and subnormals of both signs. Both conditions are exercised.
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %condition = check.generate<@selection_condition>(%trial) : (index) -> (i1)
+    %a = check.generate.iota offset(0) step(1) : tensor<3xi32>
+    %b = check.generate.iota offset(-2147483648) step(1) : tensor<3xi32>
+    %output = check.generate.fill value(41) : tensor<7xi32>
+    check.compare<@select_f32_bits>(%condition, %a, %b, %output) : (i1, tensor<3xi32>, tensor<3xi32>, tensor<7xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<7xi32>
+    }
+  }
+  // Infinities and signaling NaN payloads. Both conditions are exercised.
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %condition = check.generate<@selection_condition>(%trial) : (index) -> (i1)
+    %a = check.generate.iota offset(2139095040) step(1) : tensor<3xi32>
+    %b = check.generate.iota offset(-8388608) step(1) : tensor<3xi32>
+    %output = check.generate.fill value(41) : tensor<7xi32>
+    check.compare<@select_f32_bits>(%condition, %a, %b, %output) : (i1, tensor<3xi32>, tensor<3xi32>, tensor<7xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<7xi32>
+    }
+  }
+  // Quiet NaN payloads. Both conditions are exercised.
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %condition = check.generate<@selection_condition>(%trial) : (index) -> (i1)
+    %a = check.generate.iota offset(2143289344) step(1) : tensor<3xi32>
+    %b = check.generate.iota offset(-4194304) step(1) : tensor<3xi32>
+    %output = check.generate.fill value(41) : tensor<7xi32>
+    check.compare<@select_f32_bits>(%condition, %a, %b, %output) : (i1, tensor<3xi32>, tensor<3xi32>, tensor<7xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<7xi32>
+    }
+  }
+  check.return
+}
+
+func.def @select_f64_bits(%condition: i1, %a_buffer: buffer, %b_buffer: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %a_view = buffer.view %a_buffer[%origin] : buffer -> view<3xf64>
+  %b_view = buffer.view %b_buffer[%origin] : buffer -> view<3xf64>
+  %a = vector.load %a_view[0] : view<3xf64> -> vector<3xf64>
+  %b = vector.load %b_view[0] : view<3xf64> -> vector<3xf64>
+  %a0 = vector.extract %a[0] : vector<3xf64> -> f64
+  %b0 = vector.extract %b[0] : vector<3xf64> -> f64
+  %scalar = scf.select %condition, %a0, %b0 : f64
+  %whole = scf.select %condition, %a, %b : vector<3xf64>
+  %true = scalar.constant true : i1
+  %inverse = scalar.xori %condition, %true : i1
+  %mask = vector.from_elements %condition, %inverse, %condition : vector<3xi1>
+  %lanes = vector.select %mask, %a, %b : vector<3xf64>
+  %scalar_bits = scalar.bitcast %scalar : f64 to i64
+  %whole_bits = vector.bitcast %whole : vector<3xf64> to vector<3xi64>
+  %lane_bits = vector.bitcast %lanes : vector<3xf64> to vector<3xi64>
+  %results = buffer.view %output[%origin] : buffer -> view<7xi64>
+  view.store %scalar_bits, %results[0] : i64, view<7xi64>
+  vector.store %whole_bits, %results[1] : vector<3xi64>, view<7xi64>
+  vector.store %lane_bits, %results[4] : vector<3xi64>, view<7xi64>
+  func.return
+}
+
+check.scenario @select_f64_payloads {
+  // Zeros and subnormals of both signs. Both conditions are exercised.
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %condition = check.generate<@selection_condition>(%trial) : (index) -> (i1)
+    %a = check.generate.iota offset(0) step(1) : tensor<3xi64>
+    %b = check.generate.iota offset(-9223372036854775808) step(1) : tensor<3xi64>
+    %output = check.generate.fill value(41) : tensor<7xi64>
+    check.compare<@select_f64_bits>(%condition, %a, %b, %output) : (i1, tensor<3xi64>, tensor<3xi64>, tensor<7xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<7xi64>
+    }
+  }
+  // Infinities and signaling NaN payloads. Both conditions are exercised.
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %condition = check.generate<@selection_condition>(%trial) : (index) -> (i1)
+    %a = check.generate.iota offset(9218868437227405312) step(1) : tensor<3xi64>
+    %b = check.generate.iota offset(-4503599627370496) step(1) : tensor<3xi64>
+    %output = check.generate.fill value(41) : tensor<7xi64>
+    check.compare<@select_f64_bits>(%condition, %a, %b, %output) : (i1, tensor<3xi64>, tensor<3xi64>, tensor<7xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<7xi64>
+    }
+  }
+  // Quiet NaN payloads. Both conditions are exercised.
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %condition = check.generate<@selection_condition>(%trial) : (index) -> (i1)
+    %a = check.generate.iota offset(9221120237041090560) step(1) : tensor<3xi64>
+    %b = check.generate.iota offset(-2251799813685248) step(1) : tensor<3xi64>
+    %output = check.generate.fill value(41) : tensor<7xi64>
+    check.compare<@select_f64_bits>(%condition, %a, %b, %output) : (i1, tensor<3xi64>, tensor<3xi64>, tensor<7xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<7xi64>
+    }
+  }
+  check.return
+}
