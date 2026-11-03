@@ -381,6 +381,27 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "move_emission_test",
+    srcs = ["move_emission_test.cc"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/arch/amdgpu:" + LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna4.gfx125x.core"],
+    ]),
+    deps = [
+        ":assembly",
+        ":encoding",
+        "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/codegen/low/schedule",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "delay_layout_test",
     srcs = ["delay_layout_test.cc"],
     deps = [
