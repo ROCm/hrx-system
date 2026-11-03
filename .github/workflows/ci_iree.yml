@@ -449,9 +449,9 @@ jobs:
             host_toolchain: clang-cl
             platform_coverage: true
             runner: azure-windows-scale-rocm
-          - name: MSVC / Fastbuild
+          - name: MSVC / Fastbuild / Repository Build
             kind: repository
-            command: iree-bazel-repository-integration
+            command: iree-bazel-repository-build
             host_toolchain: msvc
             runner: azure-windows-scale-rocm
           - name: Clang CL / Fastbuild / Repository Build
@@ -466,11 +466,6 @@ jobs:
             command: iree-bazel-repository-shared-tools
             host_toolchain: clang-cl
             platform_coverage: true
-            runner: azure-windows-scale-rocm
-          - name: MSVC / Fastbuild / Shared Tools
-            kind: repository
-            command: iree-bazel-repository-shared-tools
-            host_toolchain: msvc
             runner: azure-windows-scale-rocm
           - name: Clang CL / Fastbuild / AMD gfx1151 NPU5
             kind: amd_client
