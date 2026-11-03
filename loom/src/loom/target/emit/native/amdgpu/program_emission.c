@@ -181,16 +181,23 @@ static iree_status_t loom_amdgpu_program_emission_build_internal(
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate(table_arena, text_length, (void**)&text));
   iree_host_size_t cursor = 0;
-  memcpy(text + cursor, entry_envelope->text.data,
-         entry_envelope->text.data_length);
+  if (entry_envelope->text.data_length != 0) {
+    memcpy(text + cursor, entry_envelope->text.data,
+           entry_envelope->text.data_length);
+  }
   cursor += entry_envelope->text.data_length;
   const iree_host_size_t entry_byte_offset = cursor;
-  memcpy(text + cursor, entry_stream.text.data, entry_stream.text.data_length);
+  if (entry_stream.text.data_length != 0) {
+    memcpy(text + cursor, entry_stream.text.data,
+           entry_stream.text.data_length);
+  }
   cursor += entry_stream.text.data_length;
   for (iree_host_size_t i = 0; i < compilation->helper_count; ++i) {
     IREE_ASSERT_EQ(cursor, helper_byte_offsets[i]);
-    memcpy(text + cursor, helper_streams[i].text.data,
-           helper_streams[i].text.data_length);
+    if (helper_streams[i].text.data_length != 0) {
+      memcpy(text + cursor, helper_streams[i].text.data,
+             helper_streams[i].text.data_length);
+    }
     cursor += helper_streams[i].text.data_length;
   }
   IREE_ASSERT_EQ(cursor, text_length);
