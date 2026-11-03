@@ -72,6 +72,10 @@ typedef struct iree_hal_streaming_fat_binary_extract_t {
 // Cheap sniff: returns true iff |data| starts with a magic that the
 // streaming-layer fat-binary unpacker knows how to crack open.
 // Raw ELF also counts as "supported" (trivially passthrough).
+// A zero |data.data_length| means the caller cannot bound the ABI input and
+// requires |data.data| to reference a complete encoded container. The sniffer
+// rejects unrecognized inputs from their four-byte format discriminator before
+// reading any longer format-specific signature or header.
 bool iree_hal_streaming_fat_binary_is_supported(iree_const_byte_span_t data);
 
 // Clones an in-memory module container into one self-contained allocation.

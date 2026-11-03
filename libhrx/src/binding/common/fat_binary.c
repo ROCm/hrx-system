@@ -36,6 +36,11 @@
 #define HRX_OFFLOAD_BUNDLE_MAGIC "__CLANG_OFFLOAD_BUNDLE__"
 #define HRX_OFFLOAD_BUNDLE_MAGIC_SIZE 24
 
+// Every supported container begins with a four-byte format discriminator.
+// Pointer-only HIP ABI inputs have no length, so format-specific sniffers must
+// reject discriminator mismatches before reading longer headers or signatures.
+#define HRX_FAT_FORMAT_DISCRIMINATOR_SIZE 4
+
 // CCOB (Compressed Clang Offload Bundle).
 #define HRX_CCOB_MAGIC "CCOB"
 #define HRX_CCOB_MAGIC_SIZE 4
@@ -266,11 +271,16 @@ static bool hrx_fat_is_elf(iree_const_byte_span_t data) {
 
 static bool hrx_fat_is_uncompressed_bundle(iree_const_byte_span_t data) {
   if (!data.data ||
+      !hrx_fat_length_at_least(data, HRX_FAT_FORMAT_DISCRIMINATOR_SIZE) ||
+      memcmp(data.data, HRX_OFFLOAD_BUNDLE_MAGIC,
+             HRX_FAT_FORMAT_DISCRIMINATOR_SIZE) != 0 ||
       !hrx_fat_length_at_least(data, HRX_OFFLOAD_BUNDLE_MAGIC_SIZE)) {
     return false;
   }
-  return memcmp(data.data, HRX_OFFLOAD_BUNDLE_MAGIC,
-                HRX_OFFLOAD_BUNDLE_MAGIC_SIZE) == 0;
+  return memcmp(data.data + HRX_FAT_FORMAT_DISCRIMINATOR_SIZE,
+                &HRX_OFFLOAD_BUNDLE_MAGIC[HRX_FAT_FORMAT_DISCRIMINATOR_SIZE],
+                HRX_OFFLOAD_BUNDLE_MAGIC_SIZE -
+                    HRX_FAT_FORMAT_DISCRIMINATOR_SIZE) == 0;
 }
 
 static bool hrx_fat_is_ccob(iree_const_byte_span_t data) {
