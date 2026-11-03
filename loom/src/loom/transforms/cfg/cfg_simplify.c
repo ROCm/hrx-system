@@ -411,8 +411,10 @@ static bool loom_cfg_simplify_can_skip_block_prefix(
 }
 
 static iree_status_t loom_cfg_simplify_thread_fact_known_branches(
-    loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
+    loom_cfg_simplify_state_t* state,
+    const loom_value_fact_cfg_region_t* structure,
     const loom_cfg_condition_relation_table_t* table, bool* out_changed) {
+  const loom_cfg_graph_t* graph = &structure->graph;
   if (graph->malformed) {
     return iree_ok_status();
   }
@@ -431,6 +433,11 @@ static iree_status_t loom_cfg_simplify_thread_fact_known_branches(
         !loom_cfg_simplify_can_skip_block_prefix(state, block, terminator)) {
       continue;
     }
+    const loom_value_fact_uniform_scope_t decision_scope = iree_min(
+        loom_value_facts_uniform_scope(loom_value_fact_table_lookup(
+            state->fact_table, loom_cfg_cond_br_condition(terminator))),
+        loom_value_facts_uniform_scope(loom_value_fact_control_execution(
+            structure->control, block_index)));
 
     const loom_cfg_edge_index_span_t predecessor_edges =
         loom_cfg_graph_predecessor_edges(graph, block_index);
@@ -448,6 +455,23 @@ static iree_status_t loom_cfg_simplify_thread_fact_known_branches(
       if (!loom_cfg_graph_block_is_reachable(graph, predecessor_index) ||
           predecessor_index == block_index) {
         continue;
+      }
+      // A partial predecessor must rejoin before a more uniform decision.
+      // Bypassing it splits one collective control owner into overlapping
+      // paths and loses the participation proof needed by its successors.
+      if (decision_scope != LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE) {
+        loom_value_fact_uniform_scope_t edge_scope =
+            loom_value_facts_uniform_scope(loom_value_fact_control_execution(
+                structure->control, predecessor_index));
+        if (predecessor_edge->selector_value_id != LOOM_VALUE_ID_INVALID) {
+          edge_scope = iree_min(
+              edge_scope,
+              loom_value_facts_uniform_scope(loom_value_fact_table_lookup(
+                  state->fact_table, predecessor_edge->selector_value_id)));
+        }
+        if (edge_scope < decision_scope) {
+          continue;
+        }
       }
       loom_block_t* predecessor =
           (loom_block_t*)graph->blocks[predecessor_index].block;
@@ -1768,7 +1792,7 @@ static iree_status_t loom_cfg_simplify_process_cfg_region(
       &state->value_domain, &state->value_identities,
       /*anchor_provider=*/NULL, state->analysis_arena, &path_fact_table));
   IREE_RETURN_IF_ERROR(loom_cfg_simplify_thread_fact_known_branches(
-      state, graph, &path_fact_table, out_changed));
+      state, structure, &path_fact_table, out_changed));
   if (*out_changed) {
     return iree_ok_status();
   }
