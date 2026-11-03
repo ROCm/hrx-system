@@ -310,7 +310,9 @@ jobs:
       HRX_PACKAGE: "false"
       HRX_PACKAGE_SMOKE: "false"
       HRX_TEST_GPU: "true"
-      HRX_TEST_EXPECT_STREAM_VALUE_WAITS: "1"
+      # libhrx selects legacy-amdgpu, whose backing contracts do not qualify
+      # waits that guarantee zero compute occupancy.
+      HRX_TEST_EXPECT_STREAM_VALUE_WAITS: "0"
       HRX_CTS_DEVICE: gpu:0
       HRX_CTEST_REGEX: ""
       HRX_CTEST_EXCLUDE_REGEX: ""
