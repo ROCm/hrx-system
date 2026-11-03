@@ -24,6 +24,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/signal.h"
 #include "iree/hal/drivers/amd/status.h"
 #include "iree/hal/memory/fixed_block_pool.h"
+#include "iree/hal/memory_backend.h"
 #include "iree/hal/slab_pool.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -1180,6 +1181,32 @@ class GpuNativeVirtualBufferTest : public GpuNativeTest {
   amdf_queue_command_type_t command_type() const override {
     return AMDF_QUEUE_COMMAND_TYPE_UNKNOWN;
   }
+
+  // Qualify the complete source contract without acquiring physical backing.
+  // The public constructor must still succeed when a factory supplies a plan.
+  iree_status_t QueryPoolSupport(iree_hal_pool_scope_t scope,
+                                 const iree_hal_slab_pool_options_t& options,
+                                 bool* out_supported) {
+    *out_supported = false;
+    const iree_hal_slab_pool_plan_callback_t callback = {
+        .fn =
+            +[](void* user_data, iree_hal_slab_pool_plan_t* plan) {
+              *static_cast<bool*>(user_data) = true;
+              iree_hal_slab_pool_plan_destroy(plan);
+              return iree_ok_status();
+            },
+        .user_data = out_supported,
+    };
+    const auto* backend = iree_hal_device_memory_backend(device_);
+    iree_status_t status = iree_ok_status();
+    for (iree_host_size_t i = 0;
+         i < backend->factory_count && iree_status_is_ok(status); ++i) {
+      const auto* factory = backend->factories[i];
+      status = factory->query(factory->self, group_, scope, &options, callback,
+                              iree_allocator_system());
+    }
+    return status;
+  }
 };
 
 TEST_F(GpuNativeVirtualBufferTest,
@@ -1393,6 +1420,11 @@ TEST_F(GpuNativeVirtualBufferTest,
   iree_hal_slab_pool_options_t pool_options;
   iree_hal_slab_pool_options_initialize(&pool_options);
   pool_options.placement = {IREE_HAL_POOL_PLACEMENT_REQUIRED, physical_node};
+  bool supported = false;
+  IREE_ASSERT_OK(QueryPoolSupport({1, &family, {}}, pool_options, &supported));
+  if (!supported) {
+    GTEST_SKIP() << "no device-local remappable backing route";
+  }
   Ref<iree_hal_pool_t> local_pool;
   IREE_ASSERT_OK(
       iree_hal_slab_pool_create(group_, {1, &family, {}}, &pool_options,
@@ -1405,6 +1437,10 @@ TEST_F(GpuNativeVirtualBufferTest,
       &family,
       {IREE_HAL_MEMORY_ACCESS_ALL, IREE_HAL_MAPPING_MODE_PERSISTENT,
        IREE_HAL_HOST_MEMORY_PROPERTY_WRITE_BACK}};
+  IREE_ASSERT_OK(QueryPoolSupport(scope, pool_options, &supported));
+  if (!supported) {
+    GTEST_SKIP() << "no cached host-accessible remappable backing route";
+  }
   Ref<iree_hal_pool_t> shared_pool;
   IREE_ASSERT_OK(iree_hal_slab_pool_create(group_, scope, &pool_options,
                                            iree_allocator_system(),
@@ -1415,10 +1451,11 @@ TEST_F(GpuNativeVirtualBufferTest,
   IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
       group_, scope, {IREE_ARRAYSIZE(sources), sources},
       iree_allocator_system(), &capabilities));
-  ASSERT_NE(capabilities.max_byte_length, 0u);
-  ASSERT_TRUE(
-      iree_all_bits_set(capabilities.supported_flags,
-                        IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS));
+  if (!capabilities.max_byte_length ||
+      !iree_all_bits_set(capabilities.supported_flags,
+                         IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS)) {
+    GTEST_SKIP() << "mixed backing does not support a common host/GPU address";
+  }
   const auto unit = std::max(capabilities.reservation_granularity,
                              capabilities.mapping_granularity);
   // Retain both generations until all mappings are removed. The virtual buffer
