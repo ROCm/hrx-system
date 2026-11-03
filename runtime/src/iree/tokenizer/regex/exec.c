@@ -660,7 +660,9 @@ void iree_tokenizer_regex_stride_free(iree_tokenizer_regex_stride_t* stride,
 void iree_tokenizer_regex_exec_initialize(
     iree_tokenizer_regex_exec_state_t* state,
     const iree_tokenizer_regex_dfa_t* dfa) {
-  IREE_TRACE_ZONE_BEGIN(z0);
+  // This scalar reset runs at every match boundary. Its callers own the useful
+  // operation-level zones; tracing each reset produces O(segment count) events
+  // that obscure the tokenizer work they are meant to explain.
   state->dfa_state = dfa->header->start_state;
   state->match_start = 0;
   state->last_accept = 0;
@@ -679,7 +681,6 @@ void iree_tokenizer_regex_exec_initialize(
   // Rewind buffer starts empty.
   state->rewind_buffer_length = 0;
   state->rewind_buffer_start = 0;
-  IREE_TRACE_ZONE_END(z0);
 }
 
 //===----------------------------------------------------------------------===//
