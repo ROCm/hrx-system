@@ -782,7 +782,7 @@ typedef struct loom_aie2p_array_plan_check_consumer_t {
 } loom_aie2p_array_plan_check_consumer_t;
 
 static iree_status_t loom_aie2p_array_plan_check_consume(
-    void* user_data, const loom_check_compile_source_low_view_t* view) {
+    void* user_data, const loom_check_emit_native_module_t* native_module) {
   const loom_aie2p_array_plan_check_consumer_t* consumer =
       (const loom_aie2p_array_plan_check_consumer_t*)user_data;
   const loom_check_emit_provider_request_t* request = consumer->request;
@@ -791,8 +791,8 @@ static iree_status_t loom_aie2p_array_plan_check_consume(
   const bool low_only = consumer->low_only;
   const loom_aie2p_array_plan_check_context_t context = {
       .request = request,
-      .module = view->module,
-      .source_resolver = view->source_resolver,
+      .module = native_module->module,
+      .source_resolver = native_module->source_resolver,
   };
 
   loom_check_diagnostic_emitter_capture_t diagnostic_capture = {
@@ -883,9 +883,13 @@ static iree_status_t loom_aie2p_array_plan_check_execute(
       .low_only = low_only,
   };
   bool compiled = false;
-  return loom_check_compile_source_low(request, &compile_options,
-                                       loom_aie2p_array_plan_check_consume,
-                                       (void*)&consumer, &compiled);
+  IREE_RETURN_IF_ERROR(
+      loom_check_compile_source_low(request, &compile_options, &compiled));
+  if (!compiled) {
+    return iree_ok_status();
+  }
+  return loom_check_compile_with_native_module(
+      request, loom_aie2p_array_plan_check_consume, (void*)&consumer);
 }
 
 static iree_status_t loom_aie2p_array_plan_check_append_names(

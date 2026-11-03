@@ -69,19 +69,9 @@ static iree_status_t loom_amdgpu_bank_service_check_append_row(
       bank_service->unknown_reason.data);
 }
 
-typedef struct loom_amdgpu_bank_service_check_consumer_t {
-  // Provider invocation receiving comparable output.
-  const loom_check_emit_provider_request_t* request;
-  // Compile report populated before the consumer runs.
-  const loom_target_compile_report_t* report;
-} loom_amdgpu_bank_service_check_consumer_t;
-
-static iree_status_t loom_amdgpu_bank_service_check_consume(
-    void* user_data, const loom_check_compile_source_low_view_t* view) {
-  (void)view;
-  const loom_amdgpu_bank_service_check_consumer_t* consumer =
-      (const loom_amdgpu_bank_service_check_consumer_t*)user_data;
-  const loom_target_compile_report_t* report = consumer->report;
+static iree_status_t loom_amdgpu_bank_service_check_write_output(
+    const loom_check_emit_provider_request_t* request,
+    const loom_target_compile_report_t* report) {
   for (const loom_target_compile_report_vec_t* vec =
            report->source_low_memory_rows.head;
        vec != NULL; vec = vec->next) {
@@ -93,7 +83,7 @@ static iree_status_t loom_amdgpu_bank_service_check_consume(
         continue;
       }
       IREE_RETURN_IF_ERROR(loom_amdgpu_bank_service_check_append_row(
-          &rows[i], &consumer->request->result->actual_output));
+          &rows[i], &request->result->actual_output));
     }
   }
   return iree_ok_status();
@@ -119,14 +109,12 @@ static iree_status_t loom_amdgpu_bank_service_check_emit_provider_execute(
       .pipeline_kind = LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW,
       .report = &report,
   };
-  const loom_amdgpu_bank_service_check_consumer_t consumer = {
-      .request = request,
-      .report = &report,
-  };
   bool compiled = false;
-  iree_status_t status = loom_check_compile_source_low(
-      request, &compile_options, loom_amdgpu_bank_service_check_consume,
-      (void*)&consumer, &compiled);
+  iree_status_t status =
+      loom_check_compile_source_low(request, &compile_options, &compiled);
+  if (iree_status_is_ok(status) && compiled) {
+    status = loom_amdgpu_bank_service_check_write_output(request, &report);
+  }
   loom_target_compile_report_deinitialize(&report);
   return status;
 }

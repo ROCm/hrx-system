@@ -100,24 +100,10 @@ typedef struct loom_check_compile_source_low_options_t {
   loom_target_compile_report_t* report;
 } loom_check_compile_source_low_options_t;
 
-// Borrowed public and exact-version views of one compiled source module.
-typedef struct loom_check_compile_source_low_view_t {
-  // Public module retained by the compile helper during the callback.
-  const loomc_module_t* public_module;
-  // Context-target-verified native module owned by |public_module|.
-  const loom_module_t* module;
-  // Exact source snapshots for native diagnostics during the callback.
-  loom_source_resolver_t source_resolver;
-} loom_check_compile_source_low_view_t;
-
 // Consumes one verified mutable native projection of an admitted public
 // module. The projection remains valid only for the callback invocation.
 typedef iree_status_t (*loom_check_compile_native_module_consumer_fn_t)(
     void* user_data, const loom_check_emit_native_module_t* native_module);
-
-// Consumes one successfully compiled source-Low module before it is released.
-typedef iree_status_t (*loom_check_compile_source_low_consumer_fn_t)(
-    void* user_data, const loom_check_compile_source_low_view_t* view);
 
 // Releases all public compiler state prepared by |session|.
 void loom_check_compile_session_deinitialize(
@@ -191,15 +177,11 @@ iree_status_t loom_check_compile_select_artifact(
     const loomc_result_t* result, loomc_artifact_kind_t kind,
     iree_string_view_t format, const loomc_artifact_t** out_artifact);
 
-// Lowers the request's admitted public module through LoomC, then invokes an
-// optional exact-version native consumer. User diagnostics suppress the
-// callback, leave |out_compiled| false, and return OK for normal annotation
-// matching.
+// Lowers the request's admitted public module through LoomC. User diagnostics
+// leave |out_compiled| false and return OK for normal annotation matching.
 iree_status_t loom_check_compile_source_low(
     const loom_check_emit_provider_request_t* request,
-    const loom_check_compile_source_low_options_t* options,
-    loom_check_compile_source_low_consumer_fn_t consumer, void* user_data,
-    bool* out_compiled);
+    const loom_check_compile_source_low_options_t* options, bool* out_compiled);
 
 // Admits and compiles one source case through LoomC's final artifact producer.
 // Success requires a nonempty artifact or exactly

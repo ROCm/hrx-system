@@ -369,7 +369,6 @@ iree_status_t loom_check_compile_with_native_module(
 iree_status_t loom_check_compile_source_low(
     const loom_check_emit_provider_request_t* request,
     const loom_check_compile_source_low_options_t* options,
-    loom_check_compile_source_low_consumer_fn_t consumer, void* user_data,
     bool* out_compiled) {
   *out_compiled = false;
   loom_check_compile_session_t* session = request->environment->compile_session;
@@ -424,31 +423,6 @@ iree_status_t loom_check_compile_source_low(
     status = loom_check_compile_append_result(request->diagnostic_collector,
                                               result, out_compiled);
   }
-  loomc_result_release(result);
-  result = NULL;
-
-  loomc_module_interop_view_t native_view = {0};
-  bool projected = false;
-  if (iree_status_is_ok(status) && *out_compiled && consumer != NULL) {
-    status = loom_check_compile_project_module(
-        module, request->diagnostic_collector, request->host_allocator,
-        &native_view, &projected);
-  }
-  if (iree_status_is_ok(status) && projected) {
-    request->diagnostic_collector->module = native_view.module;
-    const loom_check_compile_source_low_view_t view = {
-        .public_module = module,
-        .module = native_view.module,
-        .source_resolver =
-            {
-                .fn = loom_source_table_resolve,
-                .user_data = (void*)native_view.source_table,
-            },
-    };
-    status = consumer(user_data, &view);
-    request->diagnostic_collector->module = NULL;
-  }
-
   loomc_result_release(result);
   loomc_pass_program_release(pass_program);
   return status;
