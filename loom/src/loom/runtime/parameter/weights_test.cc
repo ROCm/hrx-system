@@ -1877,7 +1877,7 @@ class RejectedPreparationWeightsTest : public ArenaWeightsTest {
     }
   }
 
-  // Rejects preparation dispatch after real mapping submission, before reads.
+  // Rejects preparation dispatch after real mapping and producer acceptance.
   iree_hal_queue_t rejected_dispatch_ = {};
   // The queue is released only if device setup reached its initialization.
   bool initialized_ = false;
@@ -1897,17 +1897,16 @@ TEST_P(RejectedPreparationWeightsTest,
       &plans_[0]));
   IREE_ASSERT_OK(Prepare(plans_[0], {path_.path()}));
   const auto original = iree_hal_buffer_virtual_view(buffers_[0][0]);
-  IREE_ASSERT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
-                        loom_runtime_weights_activate(plans_[0]));
+  IREE_ASSERT_OK(loom_runtime_weights_activate(plans_[0]));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                         loom_runtime_weights_await(plans_[0]));
-  EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).activations, 0u);
-  EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).read_bytes, 0u);
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).activations, 1u);
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).read_bytes, 96u);
   EXPECT_EQ(loom_runtime_weights_statistics(plans_[0]).committed_bytes,
             geometry.minimum_size);
 
-  // Submission failure did not publish an active plan, but accepted backing
-  // still needs ordinary asynchronous deactivation before its lease is free.
+  // The accepted producer failed asynchronously. Its backing still needs
+  // ordinary asynchronous deactivation before the arena lease is free.
   iree_hal_buffer_release(buffers_[0][0]);
   buffers_[0][0] = nullptr;
   IREE_ASSERT_OK(loom_runtime_weights_await_retirement(plans_[0]));
