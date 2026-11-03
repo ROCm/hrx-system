@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <string>
 #include <thread>
@@ -48,6 +49,18 @@ using HipGetDeviceCountFn = hipError_t (*)(int* device_count);
 using HipGetDevicePropertiesR0600Fn =
     hipError_t (*)(hipDeviceProp_t* properties, int device);
 using HipDeviceSynchronizeFn = hipError_t (*)(void);
+using HipFuncGetAttributesFn = hipError_t (*)(hipFuncAttributes*, const void*);
+using HipFuncGetAttributeFn = hipError_t (*)(int*, hipFuncAttribute_t,
+                                             hipFunction_t);
+using HipFuncSetAttributeFn = hipError_t (*)(hipFunction_t, hipFuncAttribute_t,
+                                             int);
+using HipFuncSetCacheConfigFn = hipError_t (*)(hipFunction_t, hipFuncCache_t);
+using HipOccupancyMaxPotentialBlockSizeFn = hipError_t (*)(int*, int*,
+                                                           const void*, size_t,
+                                                           int);
+using HipRegisterVarFn = void (*)(void**, void*, char*, char*, int, size_t, int,
+                                  int);
+
 using HipGetLastErrorFn = hipError_t (*)(void);
 using HipPeekAtLastErrorFn = hipError_t (*)(void);
 using HipMallocFn = hipError_t (*)(hipDeviceptr_t* pointer, size_t size);
@@ -215,6 +228,19 @@ struct HipApi {
                         "hipGetDevicePropertiesR0600");
     HRX_RESOLVE_HIP_API(device_synchronize, HipDeviceSynchronizeFn,
                         "hipDeviceSynchronize");
+    HRX_RESOLVE_HIP_API(function_get_attributes, HipFuncGetAttributesFn,
+                        "hipFuncGetAttributes");
+    HRX_RESOLVE_HIP_API(function_get_attribute, HipFuncGetAttributeFn,
+                        "hipFuncGetAttribute");
+    HRX_RESOLVE_HIP_API(function_set_attribute, HipFuncSetAttributeFn,
+                        "hipFuncSetAttribute");
+    HRX_RESOLVE_HIP_API(function_set_cache_config, HipFuncSetCacheConfigFn,
+                        "hipFuncSetCacheConfig");
+    HRX_RESOLVE_HIP_API(occupancy_max_potential_block_size,
+                        HipOccupancyMaxPotentialBlockSizeFn,
+                        "hipOccupancyMaxPotentialBlockSize");
+    HRX_RESOLVE_HIP_API(register_variable, HipRegisterVarFn,
+                        "__hipRegisterVar");
     HRX_RESOLVE_HIP_API(get_last_error, HipGetLastErrorFn, "hipGetLastError");
     HRX_RESOLVE_HIP_API(peek_at_last_error, HipPeekAtLastErrorFn,
                         "hipPeekAtLastError");
@@ -316,23 +342,26 @@ struct HipApi {
                         "__hipRegisterManagedVar");
 #undef HRX_RESOLVE_HIP_API
     return init && deinit && get_device && set_device && get_device_count &&
-           get_device_properties && device_synchronize && get_last_error &&
-           peek_at_last_error && malloc && free && memcpy && stream_create &&
-           stream_destroy && stream_synchronize && event_create &&
-           event_destroy && stream_begin_capture && stream_end_capture &&
-           graph_get_nodes && graph_destroy && graph_instantiate &&
-           graph_exec_destroy && graph_launch && graph_kernel_node_get_params &&
-           graph_kernel_node_set_params && graph_exec_kernel_node_set_params &&
-           module_load && module_load_data_ex && module_load_fat_binary &&
-           module_unload && module_get_function && module_get_global &&
-           module_get_tex_ref && module_get_function_count &&
-           module_launch_kernel && ext_module_launch_kernel &&
-           library_load_data && library_load_from_file && library_unload &&
-           library_get_kernel && library_get_kernel_count &&
-           library_enumerate_kernels && library_get_global &&
-           kernel_get_function && kernel_get_library && kernel_get_name &&
-           kernel_get_param_info && kernel_get_attribute && link_create &&
-           link_add_data && link_destroy && get_symbol_address &&
+           get_device_properties && device_synchronize &&
+           function_get_attributes && function_get_attribute &&
+           function_set_attribute && function_set_cache_config &&
+           occupancy_max_potential_block_size && register_variable &&
+           get_last_error && peek_at_last_error && malloc && free && memcpy &&
+           stream_create && stream_destroy && stream_synchronize &&
+           event_create && event_destroy && stream_begin_capture &&
+           stream_end_capture && graph_get_nodes && graph_destroy &&
+           graph_instantiate && graph_exec_destroy && graph_launch &&
+           graph_kernel_node_get_params && graph_kernel_node_set_params &&
+           graph_exec_kernel_node_set_params && module_load &&
+           module_load_data_ex && module_load_fat_binary && module_unload &&
+           module_get_function && module_get_global && module_get_tex_ref &&
+           module_get_function_count && module_launch_kernel &&
+           ext_module_launch_kernel && library_load_data &&
+           library_load_from_file && library_unload && library_get_kernel &&
+           library_get_kernel_count && library_enumerate_kernels &&
+           library_get_global && kernel_get_function && kernel_get_library &&
+           kernel_get_name && kernel_get_param_info && kernel_get_attribute &&
+           link_create && link_add_data && link_destroy && get_symbol_address &&
            get_symbol_size && memcpy_to_symbol && memcpy_to_symbol_async &&
            memcpy_from_symbol && memcpy_from_symbol_async &&
            get_func_by_symbol && register_fat_binary && unregister_fat_binary &&
@@ -346,6 +375,13 @@ struct HipApi {
   HipGetDeviceCountFn get_device_count = nullptr;
   HipGetDevicePropertiesR0600Fn get_device_properties = nullptr;
   HipDeviceSynchronizeFn device_synchronize = nullptr;
+  HipFuncGetAttributesFn function_get_attributes = nullptr;
+  HipFuncGetAttributeFn function_get_attribute = nullptr;
+  HipFuncSetAttributeFn function_set_attribute = nullptr;
+  HipFuncSetCacheConfigFn function_set_cache_config = nullptr;
+  HipOccupancyMaxPotentialBlockSizeFn occupancy_max_potential_block_size =
+      nullptr;
+  HipRegisterVarFn register_variable = nullptr;
   HipGetLastErrorFn get_last_error = nullptr;
   HipPeekAtLastErrorFn peek_at_last_error = nullptr;
   HipMallocFn malloc = nullptr;
@@ -510,6 +546,79 @@ std::vector<uint8_t> MakeBundle(
 }
 
 void ManagedIncrementHostStub() {}
+void AttributeHostStub() {}
+
+TEST_F(HipModuleLibraryExecutionTest,
+       RegisteredAttributesSupportOccupancyWithConstantGlobals) {
+  void** registration = api_.register_fat_binary(hip_image_.file->data);
+  ASSERT_NE(nullptr, registration);
+  constexpr char kKernelName[] = "hrx_load_attribute_constant";
+  const void* host_function = reinterpret_cast<const void*>(&AttributeHostStub);
+  api_.register_function(registration, host_function,
+                         const_cast<char*>(kKernelName), kKernelName, 0,
+                         nullptr, nullptr, nullptr, nullptr, nullptr);
+  std::array<uint32_t, 32> constant_shadow = {};
+  char constant_name[] = "hrx_attribute_constants";
+  api_.register_variable(registration, constant_shadow.data(), constant_name,
+                         constant_name, /*ext=*/0, sizeof(constant_shadow),
+                         /*constant=*/1, /*global=*/0);
+  std::array<unsigned char, 129> unused_shadow = {};
+  char unused_name[] = "hrx_attribute_unused_constants";
+  api_.register_variable(registration, unused_shadow.data(), unused_name,
+                         unused_name, /*ext=*/0, sizeof(unused_shadow),
+                         /*constant=*/1, /*global=*/0);
+
+  hipFuncAttributes attributes = {};
+  ASSERT_EQ(hipSuccess,
+            api_.function_get_attributes(&attributes, host_function));
+  EXPECT_EQ(SIZE_MAX, attributes.constSizeBytes);
+  EXPECT_GT(attributes.maxThreadsPerBlock, 0);
+  EXPECT_GT(attributes.numRegs, 0);
+  int minimum_grid_size = 0;
+  int block_size = 0;
+  ASSERT_EQ(hipSuccess, api_.occupancy_max_potential_block_size(
+                            &minimum_grid_size, &block_size, host_function,
+                            /*dynamic_shared_memory_size=*/0,
+                            attributes.maxThreadsPerBlock));
+  EXPECT_GT(minimum_grid_size, 0);
+  ASSERT_GT(block_size, 0);
+  EXPECT_LE(block_size, attributes.maxThreadsPerBlock);
+
+  hipFunction_t function = nullptr;
+  ASSERT_EQ(hipSuccess, api_.get_func_by_symbol(&function, host_function));
+  hipDeviceptr_t output = nullptr;
+  ASSERT_EQ(hipSuccess, api_.malloc(&output, sizeof(uint32_t)));
+  uint32_t index = 1;
+  void* arguments[] = {&output, &index};
+  ASSERT_EQ(hipSuccess,
+            api_.module_launch_kernel(function, 1, 1, 1, block_size, 1, 1, 0,
+                                      nullptr, arguments, nullptr));
+  ASSERT_EQ(hipSuccess, api_.device_synchronize());
+  uint32_t observed = 0;
+  ASSERT_EQ(hipSuccess, api_.memcpy(&observed, output, sizeof(observed),
+                                    hipMemcpyDeviceToHost));
+  EXPECT_EQ(29u, observed);
+  EXPECT_EQ(hipSuccess, api_.free(output));
+  api_.unregister_fat_binary(registration);
+  EXPECT_EQ(hipErrorInvalidDeviceFunction,
+            api_.function_get_attributes(&attributes, host_function));
+}
+
+TEST_F(HipModuleLibraryExecutionTest,
+       InvalidAggregateQueriesPreserveTheEntireOutput) {
+  EXPECT_EQ(hipErrorInvalidValue,
+            api_.function_get_attributes(nullptr, nullptr));
+  const void* invalid_functions[] = {nullptr, reinterpret_cast<void*>(0x1234)};
+  for (const void* function : invalid_functions) {
+    hipFuncAttributes attributes;
+    std::memset(&attributes, 0xA5, sizeof(attributes));
+    unsigned char expected[sizeof(attributes)];
+    std::memcpy(expected, &attributes, sizeof(attributes));
+    EXPECT_EQ(hipErrorInvalidDeviceFunction,
+              api_.function_get_attributes(&attributes, function));
+    EXPECT_EQ(0, std::memcmp(expected, &attributes, sizeof(attributes)));
+  }
+}
 
 TEST_F(HipModuleLibraryExecutionTest,
        ModuleAndLazyLibraryMetadataUseNativeArgumentLayout) {
@@ -611,11 +720,11 @@ TEST_F(HipModuleLibraryExecutionTest,
     EXPECT_EQ(expected_sizes[i], size);
   }
 
-  int constant_bytes = -1;
-  EXPECT_EQ(
-      hipErrorNotSupported,
-      api_.kernel_get_attribute(&constant_bytes, hipFuncAttributeConstSizeBytes,
-                                kernel, device_));
+  int constant_bytes = 123;
+  EXPECT_EQ(hipSuccess, api_.kernel_get_attribute(
+                            &constant_bytes, hipFuncAttributeConstSizeBytes,
+                            kernel, device_));
+  EXPECT_EQ(-1, constant_bytes);
 
   void* library_global = nullptr;
   size_t library_global_size = 0;
@@ -626,6 +735,59 @@ TEST_F(HipModuleLibraryExecutionTest,
 
   hipFunction_t function = nullptr;
   ASSERT_EQ(hipSuccess, api_.kernel_get_function(&function, kernel));
+  hipFuncAttributes attributes = {};
+  ASSERT_EQ(hipSuccess, api_.function_get_attributes(&attributes, function));
+  const struct {
+    // Attribute queried through both public single-value APIs.
+    hipFuncAttribute_t attribute;
+    // Value reported by the public aggregate query.
+    int expected;
+  } attribute_cases[] = {
+      {hipFuncAttributeMaxThreadsPerBlock, attributes.maxThreadsPerBlock},
+      {hipFuncAttributeSharedSizeBytes,
+       static_cast<int>(attributes.sharedSizeBytes)},
+      {hipFuncAttributeConstSizeBytes, -1},
+      {hipFuncAttributeLocalSizeBytes,
+       static_cast<int>(attributes.localSizeBytes)},
+      {hipFuncAttributeNumRegs, attributes.numRegs},
+      {hipFuncAttributePtxVersion, attributes.ptxVersion},
+      {hipFuncAttributeBinaryVersion, attributes.binaryVersion},
+      {hipFuncAttributeCacheModeCA, attributes.cacheModeCA},
+      {hipFuncAttributeMaxDynamicSharedSizeBytes,
+       attributes.maxDynamicSharedSizeBytes},
+      {hipFuncAttributePreferredSharedMemoryCarveout,
+       attributes.preferredShmemCarveout},
+  };
+  EXPECT_EQ(SIZE_MAX, attributes.constSizeBytes);
+  EXPECT_GT(attributes.maxThreadsPerBlock, 0);
+  EXPECT_GT(attributes.numRegs, 0);
+  EXPECT_EQ(properties_.major * 10 + properties_.minor,
+            attributes.binaryVersion);
+  for (const auto& test_case : attribute_cases) {
+    SCOPED_TRACE(test_case.attribute);
+    int function_value = 123;
+    ASSERT_EQ(hipSuccess, api_.function_get_attribute(
+                              &function_value, test_case.attribute, function));
+    EXPECT_EQ(test_case.expected, function_value);
+    int library_value = 123;
+    ASSERT_EQ(hipSuccess,
+              api_.kernel_get_attribute(&library_value, test_case.attribute,
+                                        kernel, device_));
+    EXPECT_EQ(function_value, library_value);
+  }
+  const int original_dynamic_size = attributes.maxDynamicSharedSizeBytes;
+  ASSERT_EQ(hipSuccess,
+            api_.function_set_attribute(
+                function, hipFuncAttributeMaxDynamicSharedSizeBytes, 0));
+  ASSERT_EQ(hipSuccess,
+            api_.function_set_cache_config(function, hipFuncCachePreferShared));
+  ASSERT_EQ(hipSuccess, api_.function_get_attributes(&attributes, function));
+  EXPECT_EQ(0, attributes.maxDynamicSharedSizeBytes);
+  EXPECT_EQ(100, attributes.preferredShmemCarveout);
+  EXPECT_EQ(SIZE_MAX, attributes.constSizeBytes);
+  ASSERT_EQ(hipSuccess, api_.function_set_attribute(
+                            function, hipFuncAttributeMaxDynamicSharedSizeBytes,
+                            original_dynamic_size));
   hipDeviceptr_t input = nullptr;
   hipDeviceptr_t output = nullptr;
   ASSERT_EQ(hipSuccess, api_.malloc(&input, sizeof(uint32_t)));
@@ -650,6 +812,15 @@ TEST_F(HipModuleLibraryExecutionTest,
   EXPECT_EQ(hipSuccess, api_.free(input));
   EXPECT_EQ(hipSuccess, api_.library_unload(library));
 
+  hipFuncAttributes unchanged_attributes;
+  std::memset(&unchanged_attributes, 0xA5, sizeof(unchanged_attributes));
+  unsigned char expected_attributes[sizeof(unchanged_attributes)];
+  std::memcpy(expected_attributes, &unchanged_attributes,
+              sizeof(unchanged_attributes));
+  EXPECT_EQ(hipErrorInvalidDeviceFunction,
+            api_.function_get_attributes(&unchanged_attributes, function));
+  EXPECT_EQ(0, std::memcmp(expected_attributes, &unchanged_attributes,
+                           sizeof(unchanged_attributes)));
   const char* stale_name = nullptr;
   EXPECT_EQ(hipErrorInvalidHandle, api_.kernel_get_name(&stale_name, kernel));
   EXPECT_EQ(hipErrorInvalidDeviceFunction,
@@ -1164,6 +1335,13 @@ TEST_F(HipModuleLibraryExecutionTest,
     ASSERT_EQ(hipSuccess, api_.get_func_by_symbol(
                               &function, reinterpret_cast<const void*>(
                                              &ManagedIncrementHostStub)));
+    hipFuncAttributes attributes = {};
+    ASSERT_EQ(hipSuccess, api_.function_get_attributes(
+                              &attributes, reinterpret_cast<const void*>(
+                                               &ManagedIncrementHostStub)));
+    EXPECT_EQ(SIZE_MAX, attributes.constSizeBytes);
+    EXPECT_GT(attributes.maxThreadsPerBlock, 0);
+    EXPECT_GT(attributes.numRegs, 0);
     hipDeviceptr_t observed = nullptr;
     ASSERT_EQ(hipSuccess, api_.malloc(&observed, sizeof(uint32_t)));
     uint32_t increment = 7;

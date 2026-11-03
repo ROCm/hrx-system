@@ -180,6 +180,24 @@ hrx_cc_library(
 )
 
 hrx_cc_library(
+    name = "function_attributes",
+    srcs = ["function_attributes.c"],
+    hdrs = [
+        "api.h",
+        "function_attributes.h",
+    ],
+    includes = [
+        "../..",
+        "../../../include",
+        "../../libhrx",
+    ],
+    deps = [
+        "//libhrx/src/binding/common",
+        "//runtime/src/iree/base",
+    ],
+)
+
+hrx_cc_library(
     name = "function_handle",
     srcs = ["function_handle.c"],
     hdrs = ["function_handle.h"],
@@ -366,6 +384,7 @@ hrx_cc_shared_library(
         ":execution_context",
         ":execution_resource",
         ":execution_resource_descriptor",
+        ":function_attributes",
         ":function_handle",
         ":handle_registry",
         ":launch_params",
@@ -428,6 +447,7 @@ hrx_cc_shared_library(
         ":execution_context",
         ":execution_resource",
         ":execution_resource_descriptor",
+        ":function_attributes",
         ":function_handle",
         ":handle_registry",
         ":launch_params",
@@ -514,6 +534,18 @@ hrx_cc_test(
     deps = [
         ":handle_registry",
         "//build_tools/bazel:pthreads",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "function_attributes_test",
+    srcs = ["function_attributes_test.cc"],
+    deps = [
+        ":function_attributes",
+        "//libhrx/src/binding/common",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

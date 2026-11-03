@@ -33,6 +33,7 @@
 #include "binding/hip/execution_context.h"
 #include "binding/hip/execution_resource.h"
 #include "binding/hip/execution_resource_descriptor.h"
+#include "binding/hip/function_attributes.h"
 #include "binding/hip/function_handle.h"
 #include "binding/hip/handle_registry.h"
 #include "binding/hip/launch_params.h"
@@ -15251,75 +15252,6 @@ static hipError_t iree_hip_resolve_function_for_metadata(
   return result == hipSuccess ? hipSuccess : invalid_result;
 }
 
-static hipError_t iree_hip_function_device(
-    const iree_hal_streaming_symbol_t* symbol,
-    iree_hal_streaming_device_t** out_device) {
-  *out_device = NULL;
-  if (!symbol || !symbol->module || !symbol->module->context ||
-      !symbol->module->context->device_entry) {
-    return hipErrorInvalidDevice;
-  }
-  *out_device = symbol->module->context->device_entry;
-  return hipSuccess;
-}
-
-static hipError_t iree_hip_function_binary_version(
-    const iree_hal_streaming_symbol_t* symbol, int* out_version) {
-  iree_hal_streaming_device_t* device = NULL;
-  hipError_t result = iree_hip_function_device(symbol, &device);
-  if (result != hipSuccess) {
-    return result;
-  }
-  const uint32_t major = device->compute_capability_major;
-  const uint32_t minor = device->compute_capability_minor;
-  const uint64_t version = (uint64_t)major * 10 + minor;
-  if (version > INT_MAX) {
-    return hipErrorInvalidValue;
-  }
-  *out_version = (int)version;
-  return hipSuccess;
-}
-
-static hipError_t iree_hip_function_attribute(
-    const iree_hal_streaming_symbol_t* symbol, hipFuncAttribute_t attribute,
-    int* out_value) {
-  const iree_hal_streaming_function_attributes_t* attributes =
-      &symbol->function_attributes;
-  switch (attribute) {
-    case hipFuncAttributeMaxThreadsPerBlock:
-      *out_value = (int)attributes->maximum_threads_per_block;
-      return hipSuccess;
-    case hipFuncAttributeSharedSizeBytes:
-      *out_value = (int)attributes->fixed_shared_memory_size;
-      return hipSuccess;
-    case hipFuncAttributeConstSizeBytes:
-      return hipErrorNotSupported;
-    case hipFuncAttributeLocalSizeBytes:
-      *out_value = (int)attributes->fixed_local_memory_size;
-      return hipSuccess;
-    case hipFuncAttributeNumRegs:
-      *out_value = (int)attributes->register_count;
-      return hipSuccess;
-    case hipFuncAttributePtxVersion:
-    case hipFuncAttributeBinaryVersion:
-      return iree_hip_function_binary_version(symbol, out_value);
-    case hipFuncAttributeCacheModeCA:
-      *out_value = 0;
-      return hipSuccess;
-    case hipFuncAttributeMaxDynamicSharedSizeBytes:
-      *out_value = (int)
-          iree_hal_streaming_function_attributes_dynamic_shared_memory_size(
-              attributes);
-      return hipSuccess;
-    case hipFuncAttributePreferredSharedMemoryCarveout:
-      *out_value = iree_atomic_load(&symbol->preferred_shared_memory_carveout,
-                                    iree_memory_order_relaxed);
-      return hipSuccess;
-    default:
-      return hipErrorInvalidValue;
-  }
-}
-
 // Queries a single attribute of a kernel function.
 //
 // Parameters:
@@ -15332,13 +15264,14 @@ static hipError_t iree_hip_function_attribute(
 //  - hipErrorInvalidValue: pi is NULL or hfunc is NULL.
 //  - hipErrorInvalidHandle: Invalid function handle.
 //  - hipErrorInvalidDeviceFunction: Not a valid kernel function.
+//  - hipErrorNotSupported: Required function resource facts are unavailable.
 //
 // Synchronization: This operation is synchronous and immediate.
 //
 // Available attributes:
 // - hipFuncAttributeMaxThreadsPerBlock: Max threads per block.
 // - hipFuncAttributeSharedSizeBytes: Static shared memory usage.
-// - hipFuncAttributeConstSizeBytes: Constant memory usage.
+// - hipFuncAttributeConstSizeBytes: -1, matching AMD HIP's unavailable usage.
 // - hipFuncAttributeLocalSizeBytes: Local memory per thread.
 // - hipFuncAttributeNumRegs: Register usage per thread.
 // - hipFuncAttributePtxVersion: PTX version (CUDA compatibility).
@@ -15373,7 +15306,7 @@ HIPAPI hipError_t hipFuncGetAttribute(int* pi, hipFuncAttribute_t attrib,
   if (result != hipSuccess) {
     HIP_RETURN_ERROR(result);
   }
-  result = iree_hip_function_attribute(symbol, attrib, pi);
+  result = iree_hip_function_get_attribute(symbol, attrib, pi);
   iree_hal_streaming_module_release(module);
   HIP_RETURN_ERROR(result);
 }
@@ -15388,12 +15321,13 @@ HIPAPI hipError_t hipFuncGetAttribute(int* pi, hipFuncAttribute_t attrib,
 //  - hipSuccess: Attributes queried successfully.
 //  - hipErrorInvalidValue: attr is NULL.
 //  - hipErrorInvalidDeviceFunction: Not a valid kernel function.
+//  - hipErrorNotSupported: Required function resource facts are unavailable.
 //
 // Synchronization: This operation is synchronous and immediate.
 //
 // Attribute structure fields:
 // - sharedSizeBytes: Static shared memory in bytes.
-// - constSizeBytes: Constant memory in bytes.
+// - constSizeBytes: SIZE_MAX, matching AMD HIP's unavailable constant usage.
 // - localSizeBytes: Local memory per thread in bytes.
 // - maxThreadsPerBlock: Maximum threads per block.
 // - numRegs: Registers per thread.
@@ -15430,11 +15364,9 @@ HIPAPI hipError_t hipFuncGetAttributes(hipFuncAttributes* attr,
   if (result != hipSuccess) {
     HIP_RETURN_ERROR(result);
   }
-  // The aggregate API cannot represent an unknown field separately. Leave the
-  // caller's structure untouched rather than returning a plausible but false
-  // constant-memory size.
+  result = iree_hip_function_get_attributes(symbol, attr);
   iree_hal_streaming_module_release(module);
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  HIP_RETURN_ERROR(result);
 }
 
 // Sets a specific attribute of a kernel function.

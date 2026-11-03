@@ -3,6 +3,21 @@
 
 extern "C" __attribute__((device, managed)) unsigned int hrx_managed_value = 19;
 
+// Constant allocations are image storage, independent of the per-kernel
+// resource attributes used to calculate occupancy.
+extern "C" __attribute__((constant, used, visibility("default"))) unsigned int
+    hrx_attribute_constants[32] = {17, 29};
+extern "C" __attribute__((constant, used, visibility("default"))) unsigned char
+    hrx_attribute_unused_constants[129] = {};
+
+extern "C" __attribute__((global)) void hrx_load_attribute_constant(
+    unsigned int* output, unsigned int index) {
+  if (__builtin_amdgcn_workgroup_id_x() == 0 &&
+      __builtin_amdgcn_workitem_id_x() == 0) {
+    output[0] = hrx_attribute_constants[index & 31];
+  }
+}
+
 // HIP device compilation marks this kernel as requiring uniform workgroups.
 // The extended launch API must reject a partial final workgroup before it can
 // write |output|.
