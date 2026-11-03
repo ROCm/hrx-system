@@ -416,7 +416,7 @@ static void iree_hal_amd_gpu_aql_submission_retire_transfer(
   const iree_status_code_t failure = (iree_status_code_t)iree_atomic_load(
       &submission->failure_code, iree_memory_order_relaxed);
   iree_hal_amd_gpu_aql_submission_destroy(submission);
-  // The file owner may release the device and capture pool from its callback.
+  // The observer may release the device and capture pool from its callback.
   // End every submission and pool access before returning those borrows.
   if (callback.fn) {
     callback.fn(callback.user_data, iree_status_from_code(failure),

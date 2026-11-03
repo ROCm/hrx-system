@@ -400,6 +400,63 @@ TEST_P(GpuNativeTransferTest,
   EXPECT_EQ(target, source);
 }
 
+TEST_P(GpuNativeTransferTest, DeferredHostCallForwardsOutputsToNestedTransfer) {
+  std::vector<uint8_t> source(kLength), snapshot(kLength), output(kLength);
+  for (size_t i = 0; i < source.size(); ++i) {
+    source[i] = static_cast<uint8_t>((i * 31) ^ (i >> 8));
+  }
+  uint64_t uploaded = 1, downloaded = 2, completed = 3, returned = 4;
+  IREE_ASSERT_OK(iree_hal_queue_upload(
+      queues_[0], {}, {1, &timeline_, &uploaded}, source.data(), buffers_[0], 0,
+      source.size(), Barriers()));
+  IREE_ASSERT_OK(iree_hal_queue_download(
+      queues_[1], {1, &timeline_, &uploaded}, {1, &timeline_, &downloaded},
+      buffers_[0], 0, snapshot.data(), snapshot.size(), Barriers()));
+  struct Callback {
+    // Downloaded input, kept live through the dependent final download.
+    std::vector<uint8_t>* snapshot;
+    // Known input used to verify download visibility before modification.
+    const std::vector<uint8_t>* expected;
+    // Nested transfer destination, retained by the enclosing test.
+    iree_hal_buffer_t* target;
+    // Original public output timeline, passed through without substitution.
+    iree_hal_semaphore_t* completion;
+    // Explicit queried transition or conservative defaults for nested work.
+    const iree_hal_queue_barriers_t* barriers;
+  } callback = {&snapshot, &source, buffers_[1], timeline_, Barriers()};
+  const auto call = iree_hal_make_host_call(
+      +[](void* user_data, const uint64_t arguments[4],
+          iree_hal_host_call_context_t* context) {
+        auto* callback = static_cast<Callback*>(user_data);
+        EXPECT_EQ(*callback->snapshot, *callback->expected);
+        EXPECT_EQ(context->signal_semaphore_list.count, 1u);
+        EXPECT_EQ(context->signal_semaphore_list.semaphores[0],
+                  callback->completion);
+        EXPECT_EQ(context->signal_semaphore_list.payload_values[0], 3u);
+        for (auto& value : *callback->snapshot) {
+          value ^= 0xA5;
+        }
+        IREE_RETURN_IF_ERROR(iree_hal_queue_upload(
+            context->queue, {}, context->signal_semaphore_list,
+            callback->snapshot->data(), callback->target, 0,
+            callback->snapshot->size(), callback->barriers));
+        return iree_status_from_code(IREE_STATUS_DEFERRED);
+      },
+      &callback);
+  const uint64_t arguments[4] = {0};
+  IREE_ASSERT_OK(iree_hal_queue_host_call(
+      queues_[0], {1, &timeline_, &downloaded}, {1, &timeline_, &completed},
+      call, arguments, IREE_HAL_HOST_CALL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_download(
+      queues_[1], {1, &timeline_, &completed}, {1, &timeline_, &returned},
+      buffers_[1], 0, output.data(), output.size(), Barriers()));
+  Wait(returned);
+  for (auto& value : source) {
+    value ^= 0xA5;
+  }
+  EXPECT_EQ(output, source);
+}
+
 TEST_P(GpuNativeTransferTest,
        ConcurrentTransfersResumeAfterStagingCapacityReturns) {
   // One batch proves capacity-return progress without a later submission.

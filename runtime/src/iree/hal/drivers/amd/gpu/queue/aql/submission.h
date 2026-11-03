@@ -127,7 +127,7 @@ typedef struct iree_hal_amd_gpu_aql_submission_t {
       iree_atomic_ref_count_t ref_count;
       // Captured addresses/bytes and publisher-owned unpublished suffix.
       iree_hal_amd_gpu_transfer_t capture;
-      // Optional file owner, notified early on failure and finally at
+      // Optional native observer, notified early on failure and finally at
       // retirement.
       iree_hal_amd_gpu_retirement_callback_t callback;
       // Last retired native piece, written only by the completion owner.
@@ -194,12 +194,12 @@ iree_status_t iree_hal_amd_gpu_aql_submission_transfer(
 void iree_hal_amd_gpu_aql_submission_reject(
     iree_hal_amd_gpu_aql_submission_t* submission, iree_status_code_t code);
 
-// Records the first execution failure and notifies its optional file owner.
+// Records the first execution failure and notifies its optional observer.
 // Borrows status. Notification does not end captured native or host uses.
 void iree_hal_amd_gpu_aql_submission_fail(
     iree_hal_amd_gpu_aql_submission_t* submission, iree_status_t status);
 
-// Preserves each retired file piece's epoch before releasing its reference.
+// Preserves each retired transfer piece's epoch before releasing its reference.
 void iree_hal_amd_gpu_aql_submission_set_frontier(
     iree_hal_amd_gpu_aql_submission_t* submission,
     const iree_async_single_frontier_t* frontier);

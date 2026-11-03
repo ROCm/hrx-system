@@ -2005,26 +2005,24 @@ static iree_status_t iree_hal_amd_gpu_pm4_check_acceptance(
   return iree_hal_amd_gpu_pm4_check_failure(queue);
 }
 
-static iree_status_t iree_hal_amd_gpu_pm4_host_barrier(
+static iree_status_t iree_hal_amd_gpu_pm4_host_call_enter(
     iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals,
+    iree_hal_amd_gpu_retirement_callback_t callback,
     const iree_hal_queue_barriers_t* barriers,
-    iree_hal_profile_queue_event_type_t type, iree_host_size_t operation_count,
     iree_host_size_t public_signal_count) {
   iree_hal_amd_gpu_pm4_queue_t* queue = (void*)base;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_check_acceptance(queue));
-  const bool profiled =
-      queue->profile && type != IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_NONE;
+  const bool profiled = queue->profile != NULL;
   iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_create(
-      &queue->captures, profiled, waits, signals, NULL, NULL,
-      (iree_hal_amd_gpu_pm4_dispatch_t){0}, (iree_hal_buffer_ref_t){0},
-      iree_const_byte_span_empty(), iree_hal_buffer_ref_list_empty(),
-      &queue->options.barriers, barriers, 0, &submission));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_create_transfer(
+      &queue->captures, profiled, base->queue_family, waits,
+      iree_hal_semaphore_list_empty(), 0, NULL, &queue->options.barriers,
+      barriers, callback, &submission));
   if (profiled) {
     iree_hal_amd_gpu_profile_operation_initialize(
-        queue->profile, queue->options.queue_ordinal, type, waits.count,
-        public_signal_count, operation_count,
+        queue->profile, queue->options.queue_ordinal,
+        IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_HOST_CALL, waits.count,
+        public_signal_count, 1,
         iree_hal_amd_gpu_pm4_submission_profile(submission));
   }
   iree_hal_amd_gpu_pm4_submit(queue, submission);
@@ -2036,9 +2034,22 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_barrier(
     iree_hal_semaphore_list_t signals,
     const iree_hal_queue_barriers_t* barriers,
     iree_hal_queue_barrier_flags_t flags) {
-  return iree_hal_amd_gpu_pm4_host_barrier(
-      base, waits, signals, barriers, IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_BARRIER,
-      0, signals.count);
+  iree_hal_amd_gpu_pm4_queue_t* queue = (void*)base;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_check_acceptance(queue));
+  iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_create(
+      &queue->captures, queue->profile != NULL, waits, signals, NULL, NULL,
+      (iree_hal_amd_gpu_pm4_dispatch_t){0}, (iree_hal_buffer_ref_t){0},
+      iree_const_byte_span_empty(), iree_hal_buffer_ref_list_empty(),
+      &queue->options.barriers, barriers, 0, &submission));
+  if (queue->profile) {
+    iree_hal_amd_gpu_profile_operation_initialize(
+        queue->profile, queue->options.queue_ordinal,
+        IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_BARRIER, waits.count, signals.count,
+        0, iree_hal_amd_gpu_pm4_submission_profile(submission));
+  }
+  iree_hal_amd_gpu_pm4_submit(queue, submission);
+  return iree_ok_status();
 }
 
 // Captures only when publication must outlive this call. The bounded local
@@ -2468,7 +2479,7 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_create(
       .captures = &queue->captures,
       .begin = iree_hal_amd_gpu_pm4_host_begin,
       .end = iree_hal_amd_gpu_pm4_host_end,
-      .barrier = iree_hal_amd_gpu_pm4_host_barrier};
+      .enter = iree_hal_amd_gpu_pm4_host_call_enter};
   queue->file_executor = (iree_hal_amd_gpu_file_executor_t){
       .queue = &queue->base,
       .context = context,
@@ -2815,7 +2826,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_transfer(
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_create_transfer(
       &queue->captures, queue->profile != NULL, base->queue_family, waits,
       signals, count, operations, &queue->options.barriers, barriers,
-      &submission));
+      (iree_hal_amd_gpu_retirement_callback_t){0}, &submission));
   if (queue->profile) {
     iree_hal_amd_gpu_pm4_submission_profile_transfer(
         submission, queue->profile, queue->options.queue_ordinal);
