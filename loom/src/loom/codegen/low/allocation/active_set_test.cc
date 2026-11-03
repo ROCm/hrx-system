@@ -84,7 +84,7 @@ TEST(LowAllocationActiveSetTest, ExpiresAndRemovesIndexedUnits) {
       &active_set, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &expired_conflict,
       /*ignored_value_ids=*/nullptr,
-      /*ignored_value_count=*/0));
+      /*ignored_value_count=*/0, /*shared_content=*/nullptr));
   loom_low_allocation_active_set_expire(
       &active_set, assignments, IREE_ARRAYSIZE(assignments), /*start_point=*/6);
   ASSERT_EQ(active_set.count, 1u);
@@ -93,7 +93,7 @@ TEST(LowAllocationActiveSetTest, ExpiresAndRemovesIndexedUnits) {
       &active_set, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &expired_conflict,
       /*ignored_value_ids=*/nullptr,
-      /*ignored_value_count=*/0));
+      /*ignored_value_count=*/0, /*shared_content=*/nullptr));
 
   const loom_low_allocation_assignment_t live_conflict =
       Assignment(/*value_id=*/4, /*start_point=*/6, /*end_point=*/9,
@@ -102,7 +102,7 @@ TEST(LowAllocationActiveSetTest, ExpiresAndRemovesIndexedUnits) {
       &active_set, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &live_conflict,
       /*ignored_value_ids=*/nullptr,
-      /*ignored_value_count=*/0));
+      /*ignored_value_count=*/0, /*shared_content=*/nullptr));
   loom_low_allocation_active_set_remove(&active_set, assignments,
                                         IREE_ARRAYSIZE(assignments),
                                         /*assignment_index=*/0);
@@ -110,7 +110,7 @@ TEST(LowAllocationActiveSetTest, ExpiresAndRemovesIndexedUnits) {
       &active_set, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &live_conflict,
       /*ignored_value_ids=*/nullptr,
-      /*ignored_value_count=*/0));
+      /*ignored_value_count=*/0, /*shared_content=*/nullptr));
   EXPECT_EQ(active_set.count, 0u);
   loom_low_allocation_active_set_expire(&active_set, assignments,
                                         IREE_ARRAYSIZE(assignments),
@@ -242,7 +242,8 @@ TEST(LowAllocationActiveSetTest, ReusesStorageBeforeRemovedLifetimeExpires) {
     EXPECT_TRUE(loom_low_allocation_active_set_conflicts(
         &active_set, &descriptor_set, &unit_liveness, assignments,
         IREE_ARRAYSIZE(assignments), &candidate,
-        /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0));
+        /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0,
+        /*shared_content=*/nullptr));
     loom_low_allocation_active_set_expire(&active_set, assignments,
                                           IREE_ARRAYSIZE(assignments),
                                           /*start_point=*/6);
@@ -250,7 +251,8 @@ TEST(LowAllocationActiveSetTest, ReusesStorageBeforeRemovedLifetimeExpires) {
     EXPECT_FALSE(loom_low_allocation_active_set_conflicts(
         &active_set, &descriptor_set, &unit_liveness, assignments,
         IREE_ARRAYSIZE(assignments), &assignments[2],
-        /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0));
+        /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0,
+        /*shared_content=*/nullptr));
     loom_low_allocation_active_set_insert(
         &active_set, &descriptor_set, assignments, IREE_ARRAYSIZE(assignments),
         /*assignment_index=*/2);
@@ -314,13 +316,15 @@ TEST(LowAllocationActiveSetTest, ConsumesSparseHistoryAcrossTheSweep) {
     EXPECT_TRUE(loom_low_allocation_active_set_conflicts(
         &active_set, &descriptor_set, &unit_liveness, assignments,
         IREE_ARRAYSIZE(assignments), &candidate,
-        /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0));
+        /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0,
+        /*shared_content=*/nullptr));
     EXPECT_EQ(active_set.live_range_sweep.segment_starts_by_assignment_index[0],
               32u);
     EXPECT_TRUE(loom_low_allocation_active_set_conflicts(
         &active_set, &descriptor_set, &unit_liveness, assignments,
         IREE_ARRAYSIZE(assignments), &candidate,
-        /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0));
+        /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0,
+        /*shared_content=*/nullptr));
     EXPECT_EQ(active_set.live_range_sweep.segment_starts_by_assignment_index[0],
               32u);
 
@@ -334,7 +338,8 @@ TEST(LowAllocationActiveSetTest, ConsumesSparseHistoryAcrossTheSweep) {
     EXPECT_TRUE(loom_low_allocation_active_set_conflicts(
         &active_set, &descriptor_set, &unit_liveness, assignments,
         IREE_ARRAYSIZE(assignments), &candidate,
-        /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0));
+        /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0,
+        /*shared_content=*/nullptr));
     EXPECT_EQ(active_set.live_range_sweep.segment_starts_by_assignment_index[0],
               63u);
 
@@ -348,7 +353,8 @@ TEST(LowAllocationActiveSetTest, ConsumesSparseHistoryAcrossTheSweep) {
     EXPECT_FALSE(loom_low_allocation_active_set_conflicts(
         &active_set, &descriptor_set, &unit_liveness, assignments,
         IREE_ARRAYSIZE(assignments), &candidate,
-        /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0));
+        /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0,
+        /*shared_content=*/nullptr));
     EXPECT_EQ(active_set.live_range_sweep.segment_starts_by_assignment_index[0],
               64u);
     EXPECT_EQ(assignments[0].liveness_segments.start, 0u);
@@ -437,7 +443,7 @@ TEST(LowAllocationActiveSetTest, ProjectsSparseScalarConflictsAcrossAliases) {
   EXPECT_TRUE(loom_low_allocation_active_set_conflicts(
       &active_set, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &candidate, /*ignored_value_ids=*/nullptr,
-      /*ignored_value_count=*/0));
+      /*ignored_value_count=*/0, /*shared_content=*/nullptr));
 
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&block_pool);

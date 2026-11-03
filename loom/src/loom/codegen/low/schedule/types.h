@@ -26,6 +26,7 @@
 #include "loom/codegen/low/loop_execution.h"
 #include "loom/codegen/low/memory_access.h"
 #include "loom/codegen/low/placement.h"
+#include "loom/codegen/low/register_requirements.h"
 #include "loom/codegen/low/schedule/dependencies.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/emitter.h"
@@ -823,6 +824,9 @@ typedef struct loom_low_schedule_table_t {
   const loom_value_id_t* value_ids;
   // Number of entries in |value_ids|.
   loom_value_ordinal_t value_count;
+  // Borrowed structural register requirements indexed by local value ordinal.
+  // NULL when the function snapshot has no structural requirements.
+  const loom_low_register_requirement_t* register_requirements;
   // Defining schedule node indexed by local value ordinal, or NONE for block
   // arguments and external definitions. Present only with
   // RETAIN_VALUE_PRODUCER_NODES.

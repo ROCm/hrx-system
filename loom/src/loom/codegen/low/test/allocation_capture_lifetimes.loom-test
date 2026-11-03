@@ -1,0 +1,173 @@
+// Rebuilding a scalar projection must not retain its required wide
+// reload through all later consumers and fragment the physical bank.
+// RUN: emit low-allocation-query @captured_reload_32x2 strategy=source spill-free spill-count values=%loaded0,%loaded6,%parts
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @captured_reload_32x2(%input: reg<test.pressure.alias32 x2>) -> (reg<test.i32 x14>, reg<test.pressure.alias32 x7>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 8} : low.storage<stack>
+  low.spill %input, %storage : reg<test.pressure.alias32 x2>, low.storage<stack>
+  %loaded0 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x2>
+  %value0 = copy %loaded0 : reg<test.pressure.alias32 x2> -> reg<test.i32 x2>
+  %part0 = slice %loaded0[0] : reg<test.pressure.alias32 x2> -> reg<test.pressure.alias32>
+  %loaded1 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x2>
+  %value1 = copy %loaded1 : reg<test.pressure.alias32 x2> -> reg<test.i32 x2>
+  %part1 = slice %loaded1[0] : reg<test.pressure.alias32 x2> -> reg<test.pressure.alias32>
+  %loaded2 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x2>
+  %value2 = copy %loaded2 : reg<test.pressure.alias32 x2> -> reg<test.i32 x2>
+  %part2 = slice %loaded2[0] : reg<test.pressure.alias32 x2> -> reg<test.pressure.alias32>
+  %loaded3 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x2>
+  %value3 = copy %loaded3 : reg<test.pressure.alias32 x2> -> reg<test.i32 x2>
+  %part3 = slice %loaded3[0] : reg<test.pressure.alias32 x2> -> reg<test.pressure.alias32>
+  %loaded4 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x2>
+  %value4 = copy %loaded4 : reg<test.pressure.alias32 x2> -> reg<test.i32 x2>
+  %part4 = slice %loaded4[0] : reg<test.pressure.alias32 x2> -> reg<test.pressure.alias32>
+  %loaded5 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x2>
+  %value5 = copy %loaded5 : reg<test.pressure.alias32 x2> -> reg<test.i32 x2>
+  %part5 = slice %loaded5[0] : reg<test.pressure.alias32 x2> -> reg<test.pressure.alias32>
+  %loaded6 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x2>
+  %value6 = copy %loaded6 : reg<test.pressure.alias32 x2> -> reg<test.i32 x2>
+  %part6 = slice %loaded6[0] : reg<test.pressure.alias32 x2> -> reg<test.pressure.alias32>
+  %payload = concat(%value0, %value1, %value2, %value3, %value4, %value5, %value6) : (reg<test.i32 x2>, reg<test.i32 x2>, reg<test.i32 x2>, reg<test.i32 x2>, reg<test.i32 x2>, reg<test.i32 x2>, reg<test.i32 x2>) -> reg<test.i32 x14>
+  %parts = concat(%part0, %part1, %part2, %part3, %part4, %part5, %part6) : (reg<test.pressure.alias32>, reg<test.pressure.alias32>, reg<test.pressure.alias32>, reg<test.pressure.alias32>, reg<test.pressure.alias32>, reg<test.pressure.alias32>, reg<test.pressure.alias32>) -> reg<test.pressure.alias32 x7>
+  return %payload, %parts
+}
+
+// ----
+spills: 0
+materialized traffic: stores=0 reloads=0
+value %loaded0: test.pressure.alias32 -> physical_register[0:2]
+value %loaded6: test.pressure.alias32 -> physical_register[6:2]
+value %parts: test.pressure.alias32 -> physical_register[0:7]
+
+// ====
+
+// Rebuilding a scalar projection must not retain its required wide
+// reload through all later consumers and fragment the physical bank.
+// RUN: emit low-allocation-query @captured_reload_32x4 strategy=resource-stall spill-free spill-count values=%loaded0,%loaded6,%parts
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @captured_reload_32x4(%input: reg<test.pressure.alias32 x4>) -> (reg<test.i32 x28>, reg<test.pressure.alias32 x7>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 16} : low.storage<stack>
+  low.spill %input, %storage : reg<test.pressure.alias32 x4>, low.storage<stack>
+  %loaded0 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x4>
+  %value0 = copy %loaded0 : reg<test.pressure.alias32 x4> -> reg<test.i32 x4>
+  %part0 = slice %loaded0[0] : reg<test.pressure.alias32 x4> -> reg<test.pressure.alias32>
+  %loaded1 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x4>
+  %value1 = copy %loaded1 : reg<test.pressure.alias32 x4> -> reg<test.i32 x4>
+  %part1 = slice %loaded1[0] : reg<test.pressure.alias32 x4> -> reg<test.pressure.alias32>
+  %loaded2 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x4>
+  %value2 = copy %loaded2 : reg<test.pressure.alias32 x4> -> reg<test.i32 x4>
+  %part2 = slice %loaded2[0] : reg<test.pressure.alias32 x4> -> reg<test.pressure.alias32>
+  %loaded3 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x4>
+  %value3 = copy %loaded3 : reg<test.pressure.alias32 x4> -> reg<test.i32 x4>
+  %part3 = slice %loaded3[0] : reg<test.pressure.alias32 x4> -> reg<test.pressure.alias32>
+  %loaded4 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x4>
+  %value4 = copy %loaded4 : reg<test.pressure.alias32 x4> -> reg<test.i32 x4>
+  %part4 = slice %loaded4[0] : reg<test.pressure.alias32 x4> -> reg<test.pressure.alias32>
+  %loaded5 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x4>
+  %value5 = copy %loaded5 : reg<test.pressure.alias32 x4> -> reg<test.i32 x4>
+  %part5 = slice %loaded5[0] : reg<test.pressure.alias32 x4> -> reg<test.pressure.alias32>
+  %loaded6 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias32 x4>
+  %value6 = copy %loaded6 : reg<test.pressure.alias32 x4> -> reg<test.i32 x4>
+  %part6 = slice %loaded6[0] : reg<test.pressure.alias32 x4> -> reg<test.pressure.alias32>
+  %payload = concat(%value0, %value1, %value2, %value3, %value4, %value5, %value6) : (reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x28>
+  %parts = concat(%part0, %part1, %part2, %part3, %part4, %part5, %part6) : (reg<test.pressure.alias32>, reg<test.pressure.alias32>, reg<test.pressure.alias32>, reg<test.pressure.alias32>, reg<test.pressure.alias32>, reg<test.pressure.alias32>, reg<test.pressure.alias32>) -> reg<test.pressure.alias32 x7>
+  return %payload, %parts
+}
+
+// ----
+spills: 0
+materialized traffic: stores=2 reloads=2
+value %loaded0: test.pressure.alias32 -> physical_register[0:4]
+value %loaded6: test.pressure.alias32 -> physical_register[4:4]
+value %parts: test.pressure.alias32 -> physical_register[0:7]
+
+// ====
+
+// Rebuilding a scalar projection must not retain its required wide
+// reload through all later consumers and fragment the physical bank.
+// RUN: emit low-allocation-query @captured_reload_64x2 strategy=source spill-free spill-count values=%loaded0,%loaded6,%parts
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @captured_reload_64x2(%input: reg<test.pressure.alias64 x2>) -> (reg<test.i64 x14>, reg<test.pressure.alias64 x7>) asm {
+  %storage = storage {byte_alignment = 8, byte_length = 16} : low.storage<stack>
+  low.spill %input, %storage : reg<test.pressure.alias64 x2>, low.storage<stack>
+  %loaded0 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias64 x2>
+  %value0 = copy %loaded0 : reg<test.pressure.alias64 x2> -> reg<test.i64 x2>
+  %part0 = slice %loaded0[0] : reg<test.pressure.alias64 x2> -> reg<test.pressure.alias64>
+  %loaded1 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias64 x2>
+  %value1 = copy %loaded1 : reg<test.pressure.alias64 x2> -> reg<test.i64 x2>
+  %part1 = slice %loaded1[0] : reg<test.pressure.alias64 x2> -> reg<test.pressure.alias64>
+  %loaded2 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias64 x2>
+  %value2 = copy %loaded2 : reg<test.pressure.alias64 x2> -> reg<test.i64 x2>
+  %part2 = slice %loaded2[0] : reg<test.pressure.alias64 x2> -> reg<test.pressure.alias64>
+  %loaded3 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias64 x2>
+  %value3 = copy %loaded3 : reg<test.pressure.alias64 x2> -> reg<test.i64 x2>
+  %part3 = slice %loaded3[0] : reg<test.pressure.alias64 x2> -> reg<test.pressure.alias64>
+  %loaded4 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias64 x2>
+  %value4 = copy %loaded4 : reg<test.pressure.alias64 x2> -> reg<test.i64 x2>
+  %part4 = slice %loaded4[0] : reg<test.pressure.alias64 x2> -> reg<test.pressure.alias64>
+  %loaded5 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias64 x2>
+  %value5 = copy %loaded5 : reg<test.pressure.alias64 x2> -> reg<test.i64 x2>
+  %part5 = slice %loaded5[0] : reg<test.pressure.alias64 x2> -> reg<test.pressure.alias64>
+  %loaded6 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias64 x2>
+  %value6 = copy %loaded6 : reg<test.pressure.alias64 x2> -> reg<test.i64 x2>
+  %part6 = slice %loaded6[0] : reg<test.pressure.alias64 x2> -> reg<test.pressure.alias64>
+  %payload = concat(%value0, %value1, %value2, %value3, %value4, %value5, %value6) : (reg<test.i64 x2>, reg<test.i64 x2>, reg<test.i64 x2>, reg<test.i64 x2>, reg<test.i64 x2>, reg<test.i64 x2>, reg<test.i64 x2>) -> reg<test.i64 x14>
+  %parts = concat(%part0, %part1, %part2, %part3, %part4, %part5, %part6) : (reg<test.pressure.alias64>, reg<test.pressure.alias64>, reg<test.pressure.alias64>, reg<test.pressure.alias64>, reg<test.pressure.alias64>, reg<test.pressure.alias64>, reg<test.pressure.alias64>) -> reg<test.pressure.alias64 x7>
+  return %payload, %parts
+}
+
+// ----
+spills: 0
+materialized traffic: stores=0 reloads=0
+value %loaded0: test.pressure.alias64 -> physical_register[0:2]
+value %loaded6: test.pressure.alias64 -> physical_register[6:2]
+value %parts: test.pressure.alias64 -> physical_register[0:7]
+
+// ====
+
+// Rebuilding a scalar projection must not retain its required wide
+// reload through all later consumers and fragment the physical bank.
+// RUN: emit low-allocation-query @captured_reload_64x4 strategy=resource-stall spill-free spill-count values=%loaded0,%loaded6,%parts
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @captured_reload_64x4(%input: reg<test.pressure.alias64 x4>) -> (reg<test.i64 x28>, reg<test.pressure.alias64 x7>) asm {
+  %storage = storage {byte_alignment = 8, byte_length = 32} : low.storage<stack>
+  low.spill %input, %storage : reg<test.pressure.alias64 x4>, low.storage<stack>
+  %loaded0 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias64 x4>
+  %value0 = copy %loaded0 : reg<test.pressure.alias64 x4> -> reg<test.i64 x4>
+  %part0 = slice %loaded0[0] : reg<test.pressure.alias64 x4> -> reg<test.pressure.alias64>
+  %loaded1 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias64 x4>
+  %value1 = copy %loaded1 : reg<test.pressure.alias64 x4> -> reg<test.i64 x4>
+  %part1 = slice %loaded1[0] : reg<test.pressure.alias64 x4> -> reg<test.pressure.alias64>
+  %loaded2 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias64 x4>
+  %value2 = copy %loaded2 : reg<test.pressure.alias64 x4> -> reg<test.i64 x4>
+  %part2 = slice %loaded2[0] : reg<test.pressure.alias64 x4> -> reg<test.pressure.alias64>
+  %loaded3 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias64 x4>
+  %value3 = copy %loaded3 : reg<test.pressure.alias64 x4> -> reg<test.i64 x4>
+  %part3 = slice %loaded3[0] : reg<test.pressure.alias64 x4> -> reg<test.pressure.alias64>
+  %loaded4 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias64 x4>
+  %value4 = copy %loaded4 : reg<test.pressure.alias64 x4> -> reg<test.i64 x4>
+  %part4 = slice %loaded4[0] : reg<test.pressure.alias64 x4> -> reg<test.pressure.alias64>
+  %loaded5 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias64 x4>
+  %value5 = copy %loaded5 : reg<test.pressure.alias64 x4> -> reg<test.i64 x4>
+  %part5 = slice %loaded5[0] : reg<test.pressure.alias64 x4> -> reg<test.pressure.alias64>
+  %loaded6 = low.reload %storage : low.storage<stack> -> reg<test.pressure.alias64 x4>
+  %value6 = copy %loaded6 : reg<test.pressure.alias64 x4> -> reg<test.i64 x4>
+  %part6 = slice %loaded6[0] : reg<test.pressure.alias64 x4> -> reg<test.pressure.alias64>
+  %payload = concat(%value0, %value1, %value2, %value3, %value4, %value5, %value6) : (reg<test.i64 x4>, reg<test.i64 x4>, reg<test.i64 x4>, reg<test.i64 x4>, reg<test.i64 x4>, reg<test.i64 x4>, reg<test.i64 x4>) -> reg<test.i64 x28>
+  %parts = concat(%part0, %part1, %part2, %part3, %part4, %part5, %part6) : (reg<test.pressure.alias64>, reg<test.pressure.alias64>, reg<test.pressure.alias64>, reg<test.pressure.alias64>, reg<test.pressure.alias64>, reg<test.pressure.alias64>, reg<test.pressure.alias64>) -> reg<test.pressure.alias64 x7>
+  return %payload, %parts
+}
+
+// ----
+spills: 0
+materialized traffic: stores=2 reloads=2
+value %loaded0: test.pressure.alias64 -> physical_register[0:4]
+value %loaded6: test.pressure.alias64 -> physical_register[4:4]
+value %parts: test.pressure.alias64 -> physical_register[0:7]

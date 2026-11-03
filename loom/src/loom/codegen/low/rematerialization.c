@@ -12,6 +12,7 @@
 #include "loom/codegen/low/allocation/storage.h"
 #include "loom/codegen/low/descriptor_traits.h"
 #include "loom/codegen/low/diagnostics.h"
+#include "loom/codegen/low/register_requirements.h"
 #include "loom/codegen/low/representation_binding.h"
 #include "loom/codegen/low/schedule/types.h"
 #include "loom/codegen/low/storage_relation.h"
@@ -189,6 +190,8 @@ typedef struct loom_low_rematerialization_facts_t {
   const loom_value_id_t* value_ids;
   // Number of entries in the borrowed local value domain.
   iree_host_size_t value_count;
+  // Borrowed structural register requirements in the original value domain.
+  const loom_low_register_requirement_t* register_requirements;
   // Allocation's retained definition order, or NULL when repairing a schedule
   // that has not reached allocation.
   const loom_liveness_analysis_t* liveness;
@@ -585,9 +588,12 @@ static iree_status_t loom_low_rematerialization_plan_recipe(
       // a lifetime proof beyond the captured value's direct consuming uses.
       eligible = loom_low_capture_source_is_stable(module, input);
       has_required_external_input |=
-          required_register_values != NULL &&
-          input < required_register_values->bit_count &&
-          iree_bitmap_test(*required_register_values, input);
+          loom_low_register_requirements_get(facts->register_requirements,
+                                             ordinal) !=
+              LOOM_LOW_REGISTER_REQUIREMENT_NONE ||
+          (required_register_values != NULL &&
+           input < required_register_values->bit_count &&
+           iree_bitmap_test(*required_register_values, input));
     }
   }
   if (iree_status_is_ok(status) && eligible && has_consumption) {
@@ -1105,6 +1111,7 @@ iree_status_t loom_low_schedule_rematerialize_failure(
       .module = module,
       .value_ids = schedule->value_ids,
       .value_count = schedule->value_count,
+      .register_requirements = schedule->register_requirements,
       .cfg_graph = &schedule->cfg_graph,
       .region = schedule->blocks[0].block->parent_region,
   };
@@ -1463,6 +1470,7 @@ iree_status_t loom_low_allocation_rematerialize_failure(
       .module = module,
       .value_ids = table->liveness.value_ids,
       .value_count = table->liveness.value_count,
+      .register_requirements = table->register_requirements,
       .liveness = &table->liveness,
       .cfg_graph = &table->cfg_graph,
       .region = table->liveness.region,
@@ -1551,6 +1559,7 @@ static iree_status_t loom_low_allocation_rematerialize_spill_plans_impl(
       .module = module,
       .value_ids = liveness->value_ids,
       .value_count = liveness->value_count,
+      .register_requirements = table->register_requirements,
       .liveness = liveness,
       .cfg_graph = &table->cfg_graph,
       .region = liveness->region,

@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/allocation/assignment.h"
+#include "loom/codegen/low/allocation/content_identity.h"
 #include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/unit_liveness.h"
 #include "loom/codegen/low/descriptors.h"
@@ -159,7 +160,8 @@ bool loom_low_allocation_active_unit_index_conflicts(
     const loom_low_allocation_assignment_t* assignments,
     iree_host_size_t assignment_count,
     const loom_low_allocation_assignment_t* candidate,
-    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count);
+    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count,
+    const loom_low_allocation_content_identity_t* shared_content);
 
 // Appends indexed active assignments that conflict with |candidate| to
 // |assignment_indices|. Duplicate range hits for the same assignment are

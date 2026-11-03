@@ -269,7 +269,8 @@ bool loom_low_allocation_live_range_assignments_conflict(
     const uint32_t* unit_start_points, const uint32_t* unit_end_points,
     iree_host_size_t unit_point_count,
     const loom_low_allocation_assignment_t* lhs,
-    const loom_low_allocation_assignment_t* rhs) {
+    const loom_low_allocation_assignment_t* rhs,
+    const loom_low_allocation_content_identity_t* shared_content) {
   IREE_ASSERT_ARGUMENT(descriptor_set);
   IREE_ASSERT_ARGUMENT(lhs);
   IREE_ASSERT_ARGUMENT(rhs);
@@ -288,6 +289,10 @@ bool loom_low_allocation_live_range_assignments_conflict(
   const bool has_expanded_execution_definition = iree_any_bit_set(
       lhs->flags | rhs->flags,
       LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_EXPANDED_EXECUTION_DEFINITION);
+  const bool can_share_contents =
+      shared_content != NULL && shared_content->origins != NULL &&
+      lhs->unit_point_start != UINT32_MAX &&
+      rhs->unit_point_start != UINT32_MAX && !has_expanded_execution_definition;
   const bool lhs_is_explicit =
       loom_low_allocation_storage_assignment_uses_explicit_physical_register(
           descriptor_set, lhs);
@@ -353,7 +358,13 @@ bool loom_low_allocation_live_range_assignments_conflict(
         const uint32_t overlap_start_point =
             iree_max(lhs_unit_start_point, rhs_unit_start_point);
         if (overlap_start_point < lhs_unit_end_point &&
-            overlap_start_point < rhs_unit_end_point) {
+            overlap_start_point < rhs_unit_end_point &&
+            !(can_share_contents &&
+              loom_low_allocation_storage_assignment_subranges_correspond(
+                  descriptor_set, lhs, lhs_unit, rhs, rhs_unit, 1) &&
+              loom_low_allocation_content_identity_units_share(
+                  shared_content, lhs->unit_point_start + lhs_unit,
+                  rhs->unit_point_start + rhs_unit))) {
           return true;
         }
       }
@@ -408,7 +419,11 @@ bool loom_low_allocation_live_range_assignments_conflict(
           loom_low_allocation_live_range_assignment_unit_end_point(
               unit_end_points, unit_point_count, rhs, rhs_unit_offset);
       if (overlap_start_point >= lhs_unit_end_point ||
-          overlap_start_point >= rhs_unit_end_point) {
+          overlap_start_point >= rhs_unit_end_point ||
+          (can_share_contents &&
+           loom_low_allocation_content_identity_units_share(
+               shared_content, lhs->unit_point_start + lhs_unit_offset,
+               rhs->unit_point_start + rhs_unit_offset))) {
         continue;
       }
       return true;
@@ -433,7 +448,11 @@ bool loom_low_allocation_live_range_assignments_conflict(
     const uint32_t overlap_start_point =
         iree_max(lhs_unit_start_point, rhs_unit_start_point);
     if (overlap_start_point >= lhs_unit_end_point ||
-        overlap_start_point >= rhs_unit_end_point) {
+        overlap_start_point >= rhs_unit_end_point ||
+        (can_share_contents &&
+         loom_low_allocation_content_identity_units_share(
+             shared_content, lhs->unit_point_start + lhs_unit_offset,
+             rhs->unit_point_start + rhs_unit_offset))) {
       continue;
     }
     return true;
@@ -448,7 +467,8 @@ bool loom_low_allocation_live_range_sweep_assignments_conflict(
     const uint32_t* unit_start_points, const uint32_t* unit_end_points,
     iree_host_size_t unit_point_count,
     const loom_low_allocation_assignment_t* existing,
-    const loom_low_allocation_assignment_t* candidate) {
+    const loom_low_allocation_assignment_t* candidate,
+    const loom_low_allocation_content_identity_t* shared_content) {
   IREE_ASSERT_ARGUMENT(inout_existing_segment_start);
   IREE_ASSERT_ARGUMENT(existing);
   IREE_ASSERT_ARGUMENT(storage_segments);
@@ -459,7 +479,7 @@ bool loom_low_allocation_live_range_sweep_assignments_conflict(
           LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_EXPANDED_EXECUTION_DEFINITION)) {
     return loom_low_allocation_live_range_assignments_conflict(
         descriptor_set, storage_segments, unit_start_points, unit_end_points,
-        unit_point_count, existing, candidate);
+        unit_point_count, existing, candidate, shared_content);
   }
   const uint32_t range_start = existing->liveness_segments.start;
   const uint32_t range_end = range_start + existing->liveness_segments.count;
@@ -476,7 +496,7 @@ bool loom_low_allocation_live_range_sweep_assignments_conflict(
   if (*inout_existing_segment_start == range_start) {
     return loom_low_allocation_live_range_assignments_conflict(
         descriptor_set, storage_segments, unit_start_points, unit_end_points,
-        unit_point_count, existing, candidate);
+        unit_point_count, existing, candidate, shared_content);
   }
 
   loom_low_allocation_assignment_t remaining = *existing;
@@ -486,5 +506,5 @@ bool loom_low_allocation_live_range_sweep_assignments_conflict(
   };
   return loom_low_allocation_live_range_assignments_conflict(
       descriptor_set, storage_segments, unit_start_points, unit_end_points,
-      unit_point_count, &remaining, candidate);
+      unit_point_count, &remaining, candidate, shared_content);
 }

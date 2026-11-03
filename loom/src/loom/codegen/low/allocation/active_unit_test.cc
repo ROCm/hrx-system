@@ -98,7 +98,7 @@ TEST(LowAllocationActiveUnitTest, FindsAndRemovesIndexedConflicts) {
       &index, &live_range_sweep, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &assignments[1],
       /*ignored_value_ids=*/nullptr,
-      /*ignored_value_count=*/0));
+      /*ignored_value_count=*/0, /*shared_content=*/nullptr));
   uint32_t conflict_indices[2] = {};
   uint16_t conflict_count = 0;
   IREE_ASSERT_OK(loom_low_allocation_active_unit_index_collect_conflicts(
@@ -114,7 +114,7 @@ TEST(LowAllocationActiveUnitTest, FindsAndRemovesIndexedConflicts) {
   EXPECT_FALSE(loom_low_allocation_active_unit_index_conflicts(
       &index, &live_range_sweep, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &assignments[1], ignored_value_ids,
-      IREE_ARRAYSIZE(ignored_value_ids)));
+      IREE_ARRAYSIZE(ignored_value_ids), /*shared_content=*/nullptr));
   conflict_count = 0;
   IREE_ASSERT_OK(loom_low_allocation_active_unit_index_collect_conflicts(
       &index, &live_range_sweep, &descriptor_set, &unit_liveness, assignments,
@@ -130,7 +130,7 @@ TEST(LowAllocationActiveUnitTest, FindsAndRemovesIndexedConflicts) {
       &index, &live_range_sweep, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &assignments[1],
       /*ignored_value_ids=*/nullptr,
-      /*ignored_value_count=*/0));
+      /*ignored_value_count=*/0, /*shared_content=*/nullptr));
 
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&block_pool);
@@ -495,12 +495,12 @@ TEST(LowAllocationActiveUnitTest, RefinesIndexedConflictByUnitStart) {
       &index, &live_range_sweep, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &assignments[1],
       /*ignored_value_ids=*/nullptr,
-      /*ignored_value_count=*/0));
+      /*ignored_value_count=*/0, /*shared_content=*/nullptr));
   EXPECT_TRUE(loom_low_allocation_active_unit_index_conflicts(
       &index, &live_range_sweep, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &assignments[2],
       /*ignored_value_ids=*/nullptr,
-      /*ignored_value_count=*/0));
+      /*ignored_value_count=*/0, /*shared_content=*/nullptr));
 
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&block_pool);
@@ -648,12 +648,12 @@ TEST(LowAllocationActiveUnitTest, IndexesExplicitRegisterAtomicUnits) {
       &index, &live_range_sweep, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &assignments[1],
       /*ignored_value_ids=*/nullptr,
-      /*ignored_value_count=*/0));
+      /*ignored_value_count=*/0, /*shared_content=*/nullptr));
   EXPECT_FALSE(loom_low_allocation_active_unit_index_conflicts(
       &index, &live_range_sweep, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &assignments[2],
       /*ignored_value_ids=*/nullptr,
-      /*ignored_value_count=*/0));
+      /*ignored_value_count=*/0, /*shared_content=*/nullptr));
   loom_low_allocation_active_unit_index_remove_assignment(
       &index, assignments, IREE_ARRAYSIZE(assignments),
       /*assignment_index=*/0);
@@ -661,7 +661,7 @@ TEST(LowAllocationActiveUnitTest, IndexesExplicitRegisterAtomicUnits) {
       &index, &live_range_sweep, &descriptor_set, &unit_liveness, assignments,
       IREE_ARRAYSIZE(assignments), &assignments[1],
       /*ignored_value_ids=*/nullptr,
-      /*ignored_value_count=*/0));
+      /*ignored_value_count=*/0, /*shared_content=*/nullptr));
 
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&block_pool);
@@ -728,7 +728,7 @@ class LowAllocationActiveOccupancyTest : public ::testing::Test {
       placed.location_base = base;
       EXPECT_TRUE(loom_low_allocation_active_unit_index_conflicts(
           &index_, &sweep, descriptors_, liveness_, assignments_,
-          assignment_count_, &placed, nullptr, 0))
+          assignment_count_, &placed, nullptr, 0, /*shared_content=*/nullptr))
           << "projected base=" << base;
     }
   }

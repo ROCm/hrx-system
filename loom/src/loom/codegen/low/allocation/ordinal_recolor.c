@@ -219,7 +219,8 @@ static bool loom_low_allocation_ordinal_recolor_candidate_conflicts(
   if (loom_low_allocation_search_assignment_conflicts(
           state->search, candidate, state->value_ids, ignored_value_count,
           state->value_ids, ignored_value_count,
-          LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN)) {
+          LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN,
+          /*shared_content=*/NULL)) {
     return true;
   }
   const loom_low_allocation_assignment_map_t* assignment_map =
@@ -239,7 +240,8 @@ static bool loom_low_allocation_ordinal_recolor_candidate_conflicts(
             state->search->unit_liveness->storage_segments.entries,
             state->search->unit_liveness->start_points,
             state->search->unit_liveness->end_points,
-            state->search->unit_liveness->point_count, candidate, existing)) {
+            state->search->unit_liveness->point_count, candidate, existing,
+            /*shared_content=*/NULL)) {
       return true;
     }
   }
@@ -414,7 +416,7 @@ static bool loom_low_allocation_ordinal_recolor_try_impl(
               state->search->unit_liveness->start_points,
               state->search->unit_liveness->end_points,
               state->search->unit_liveness->point_count, &requested,
-              blocking_assignment)) {
+              blocking_assignment, /*shared_content=*/NULL)) {
         continue;
       }
       const loom_value_ordinal_t blocking_ordinal =

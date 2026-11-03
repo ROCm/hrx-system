@@ -413,7 +413,8 @@ static iree_status_t loom_low_allocation_loop_edge_relocation_group_supported(
             context->unit_liveness->storage_segments.entries,
             context->unit_liveness->start_points,
             context->unit_liveness->end_points,
-            context->unit_liveness->point_count, &proposed, source)) {
+            context->unit_liveness->point_count, &proposed, source,
+            /*shared_content=*/NULL)) {
       return iree_ok_status();
     }
     member_index = state->groups.next_members[member_index];
@@ -805,7 +806,8 @@ static bool loom_low_allocation_loop_edge_relocation_assignment_conflicts(
             context->unit_liveness->storage_segments.entries,
             context->unit_liveness->start_points,
             context->unit_liveness->end_points,
-            context->unit_liveness->point_count, &member, assignment)) {
+            context->unit_liveness->point_count, &member, assignment,
+            /*shared_content=*/NULL)) {
       return true;
     }
     member_index = state->groups.next_members[member_index];
@@ -1040,7 +1042,8 @@ static bool loom_low_allocation_loop_edge_query_set_conflicts(
             context->unit_liveness->start_points,
             context->unit_liveness->end_points,
             context->unit_liveness->point_count, candidate,
-            &context->assignments[existing_assignment_index])) {
+            &context->assignments[existing_assignment_index],
+            /*shared_content=*/NULL)) {
       return true;
     }
   }

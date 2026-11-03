@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/codegen/low/allocation/concat_affinity.h"
+#include "loom/codegen/low/allocation/content_identity.h"
 #include "loom/codegen/low/allocation/copy_decision.h"
 #include "loom/codegen/low/allocation/destructive_reuse.h"
 #include "loom/codegen/low/allocation/edge_copy.h"
@@ -55,7 +56,7 @@ typedef struct loom_low_allocation_build_state_t {
   // Mutable per-allocation-unit live end points.
   loom_low_allocation_unit_liveness_t unit_liveness;
   // Structural content identity shared by all assignment attempts.
-  loom_low_allocation_storage_identity_t storage_identity;
+  loom_low_allocation_content_identity_t content_identity;
   // Completed interval assignment, spill plan, and remark rows.
   loom_low_allocation_interval_assignment_result_t interval_assignment;
   // Mutable low.copy decision plan being built.
@@ -177,7 +178,7 @@ static iree_status_t loom_low_allocation_try_alternative_assignment(
   if (iree_status_is_ok(status)) {
     status = loom_low_allocation_storage_lease_state_initialize(
         &state->options->storage_leases, state->module, state->function_op,
-        value_domain, &state->liveness, &state->storage_identity,
+        value_domain, &state->liveness, &state->content_identity,
         &state->unit_liveness, &scratch_arena, decision_arena,
         &scratch_storage_leases);
   }
@@ -776,10 +777,14 @@ static iree_status_t loom_low_allocate_function_impl(
         state.target.descriptor_set, &state.placement, &state.liveness,
         &state.unit_liveness, &decision_arena, &state.concat_affinity);
   }
-  if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
-    status = loom_low_allocation_storage_identity_initialize(
-        &options->storage_leases, &state.placement, &state.unit_liveness,
-        &decision_arena, &state.storage_identity);
+  if (iree_status_is_ok(status) && state.target_constraints.error_count == 0 &&
+      (options->storage_leases.record_count != 0 ||
+       iree_any_bit_set(state.placement.storage.flags,
+                        LOOM_LOW_PLACEMENT_STORAGE_FLAG_CONCAT))) {
+    status = loom_low_allocation_content_identity_initialize(
+        &state.placement, &state.unit_liveness, &decision_arena,
+        &state.content_identity);
+    state.unit_liveness.content_identity = &state.content_identity;
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     loom_low_allocation_unit_liveness_propagate_storage_relations(
@@ -814,7 +819,7 @@ static iree_status_t loom_low_allocate_function_impl(
     status = loom_low_allocation_storage_lease_state_initialize(
         &options->storage_leases, model->context.module,
         model->context.function_op, value_domain, &state.liveness,
-        &state.storage_identity, &state.unit_liveness, arena, &decision_arena,
+        &state.content_identity, &state.unit_liveness, arena, &decision_arena,
         &state.storage_leases);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
@@ -1026,6 +1031,7 @@ static iree_status_t loom_low_allocate_function_impl(
         .storage_transport = options->storage_transport,
         .storage_layout = model->context.requirements.storage_layout,
         .liveness = state.liveness,
+        .register_requirements = model->register_requirements,
         .storage_segments = state.unit_liveness.storage_segments.entries,
         .placement = state.placement,
         .fixed_values = state.target_constraints.fixed_values,

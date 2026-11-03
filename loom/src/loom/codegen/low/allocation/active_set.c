@@ -18,14 +18,15 @@ static bool loom_low_allocation_active_set_scan_conflicts(
     const loom_low_allocation_assignment_t* assignments,
     iree_host_size_t assignment_count,
     const loom_low_allocation_assignment_t* candidate,
-    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count) {
+    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count,
+    const loom_low_allocation_content_identity_t* shared_content) {
   for (iree_host_size_t i = 0; i < active_set->count; ++i) {
     const uint32_t assignment_index = active_set->assignment_indices[i];
     IREE_ASSERT_LT(assignment_index, assignment_count);
     if (loom_low_allocation_active_assignment_conflicts(
             &active_set->live_range_sweep, descriptor_set, unit_liveness,
             assignments, assignment_count, assignment_index, candidate,
-            ignored_value_ids, ignored_value_count)) {
+            ignored_value_ids, ignored_value_count, shared_content)) {
       return true;
     }
   }
@@ -76,7 +77,8 @@ bool loom_low_allocation_active_assignment_conflicts(
     const loom_low_allocation_assignment_t* assignments,
     iree_host_size_t assignment_count, uint32_t existing_assignment_index,
     const loom_low_allocation_assignment_t* candidate,
-    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count) {
+    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count,
+    const loom_low_allocation_content_identity_t* shared_content) {
   IREE_ASSERT_ARGUMENT(live_range_sweep);
   IREE_ASSERT_ARGUMENT(descriptor_set);
   IREE_ASSERT_ARGUMENT(unit_liveness);
@@ -98,7 +100,7 @@ bool loom_low_allocation_active_assignment_conflicts(
     return loom_low_allocation_live_range_assignments_conflict(
         descriptor_set, unit_liveness->storage_segments.entries,
         unit_liveness->start_points, unit_liveness->end_points,
-        unit_liveness->point_count, existing, candidate);
+        unit_liveness->point_count, existing, candidate, shared_content);
   }
   return loom_low_allocation_live_range_sweep_assignments_conflict(
       live_range_sweep->point,
@@ -106,7 +108,7 @@ bool loom_low_allocation_active_assignment_conflicts(
            ->segment_starts_by_assignment_index[existing_assignment_index],
       descriptor_set, unit_liveness->storage_segments.entries,
       unit_liveness->start_points, unit_liveness->end_points,
-      unit_liveness->point_count, existing, candidate);
+      unit_liveness->point_count, existing, candidate, shared_content);
 }
 
 bool loom_low_allocation_active_set_conflicts(
@@ -116,7 +118,8 @@ bool loom_low_allocation_active_set_conflicts(
     const loom_low_allocation_assignment_t* assignments,
     iree_host_size_t assignment_count,
     const loom_low_allocation_assignment_t* candidate,
-    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count) {
+    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count,
+    const loom_low_allocation_content_identity_t* shared_content) {
   IREE_ASSERT_ARGUMENT(active_set);
   IREE_ASSERT_ARGUMENT(descriptor_set);
   IREE_ASSERT_ARGUMENT(assignments);
@@ -125,11 +128,11 @@ bool loom_low_allocation_active_set_conflicts(
     return loom_low_allocation_active_unit_index_conflicts(
         &active_set->units, &active_set->live_range_sweep, descriptor_set,
         unit_liveness, assignments, assignment_count, candidate,
-        ignored_value_ids, ignored_value_count);
+        ignored_value_ids, ignored_value_count, shared_content);
   }
   return loom_low_allocation_active_set_scan_conflicts(
       active_set, descriptor_set, unit_liveness, assignments, assignment_count,
-      candidate, ignored_value_ids, ignored_value_count);
+      candidate, ignored_value_ids, ignored_value_count, shared_content);
 }
 
 uint64_t loom_low_allocation_active_set_conflicting_locations(
@@ -163,7 +166,8 @@ uint64_t loom_low_allocation_active_set_conflicting_locations(
       if (loom_low_allocation_active_assignment_conflicts(
               &active_set->live_range_sweep, descriptor_set, unit_liveness,
               assignments, assignment_count, assignment_index, &candidate,
-              /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0)) {
+              /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0,
+              /*shared_content=*/NULL)) {
         conflicts |= bit;
       }
     }

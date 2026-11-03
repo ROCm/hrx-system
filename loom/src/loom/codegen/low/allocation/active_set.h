@@ -13,6 +13,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/allocation/active_unit.h"
 #include "loom/codegen/low/allocation/assignment.h"
+#include "loom/codegen/low/allocation/content_identity.h"
 #include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/unit_liveness.h"
 #include "loom/codegen/low/descriptors.h"
@@ -74,7 +75,8 @@ bool loom_low_allocation_active_assignment_conflicts(
     const loom_low_allocation_assignment_t* assignments,
     iree_host_size_t assignment_count, uint32_t existing_assignment_index,
     const loom_low_allocation_assignment_t* candidate,
-    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count);
+    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count,
+    const loom_low_allocation_content_identity_t* shared_content);
 
 // Returns true when |candidate| conflicts with an active assignment.
 bool loom_low_allocation_active_set_conflicts(
@@ -84,7 +86,8 @@ bool loom_low_allocation_active_set_conflicts(
     const loom_low_allocation_assignment_t* assignments,
     iree_host_size_t assignment_count,
     const loom_low_allocation_assignment_t* candidate,
-    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count);
+    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count,
+    const loom_low_allocation_content_identity_t* shared_content);
 
 // Returns a conflict bit for each of the first 64 linear locations of a
 // single-unit |candidate_template|. The template's location is ignored; its

@@ -7,6 +7,7 @@
 #include "loom/codegen/low/allocation/live_range.h"
 
 #include "iree/testing/gtest.h"
+#include "loom/codegen/low/allocation/content_identity.h"
 
 namespace loom {
 namespace {
@@ -248,11 +249,12 @@ TEST(LowAllocationLiveRangeTest, ChecksAssignmentConflicts) {
   EXPECT_TRUE(loom_low_allocation_live_range_assignments_conflict(
       &descriptor_set, /*storage_segments=*/nullptr,
       /*unit_start_points=*/nullptr, unit_end_points,
-      IREE_ARRAYSIZE(unit_end_points), &lhs, &rhs));
+      IREE_ARRAYSIZE(unit_end_points), &lhs, &rhs, /*shared_content=*/nullptr));
   EXPECT_FALSE(loom_low_allocation_live_range_assignments_conflict(
       &descriptor_set, /*storage_segments=*/nullptr,
       /*unit_start_points=*/nullptr, unit_end_points,
-      IREE_ARRAYSIZE(unit_end_points), &lhs, &disjoint_location));
+      IREE_ARRAYSIZE(unit_end_points), &lhs, &disjoint_location,
+      /*shared_content=*/nullptr));
 }
 
 TEST(LowAllocationLiveRangeTest, RefinesAssignmentConflictsByUnitStart) {
@@ -284,11 +286,11 @@ TEST(LowAllocationLiveRangeTest, RefinesAssignmentConflictsByUnitStart) {
   EXPECT_FALSE(loom_low_allocation_live_range_assignments_conflict(
       &descriptor_set, /*storage_segments=*/nullptr, unit_start_points,
       unit_end_points, IREE_ARRAYSIZE(unit_end_points), &reservation,
-      &ends_at_second_unit_start));
+      &ends_at_second_unit_start, /*shared_content=*/nullptr));
   EXPECT_TRUE(loom_low_allocation_live_range_assignments_conflict(
       &descriptor_set, /*storage_segments=*/nullptr, unit_start_points,
       unit_end_points, IREE_ARRAYSIZE(unit_end_points), &reservation,
-      &overlaps_second_unit_start));
+      &overlaps_second_unit_start, /*shared_content=*/nullptr));
 }
 
 TEST(LowAllocationLiveRangeTest, AssignmentConflictsRejectDisjointLifetime) {
@@ -312,7 +314,8 @@ TEST(LowAllocationLiveRangeTest, AssignmentConflictsRejectDisjointLifetime) {
   EXPECT_FALSE(loom_low_allocation_live_range_assignments_conflict(
       &descriptor_set, /*storage_segments=*/nullptr,
       /*unit_start_points=*/nullptr,
-      /*unit_end_points=*/nullptr, /*unit_point_count=*/0, &lhs, &rhs));
+      /*unit_end_points=*/nullptr, /*unit_point_count=*/0, &lhs, &rhs,
+      /*shared_content=*/nullptr));
 }
 
 TEST(LowAllocationLiveRangeTest, PreservesSparseGapsAgainstContiguousStorage) {
@@ -368,12 +371,12 @@ TEST(LowAllocationLiveRangeTest, PreservesSparseGapsAgainstContiguousStorage) {
       EXPECT_EQ(loom_low_allocation_live_range_assignments_conflict(
                     &descriptor_set, segments, /*unit_start_points=*/nullptr,
                     unit_end_points, IREE_ARRAYSIZE(unit_end_points), &sparse,
-                    &contiguous),
+                    &contiguous, /*shared_content=*/nullptr),
                 expected_conflict);
       EXPECT_EQ(loom_low_allocation_live_range_assignments_conflict(
                     &descriptor_set, segments, /*unit_start_points=*/nullptr,
                     unit_end_points, IREE_ARRAYSIZE(unit_end_points),
-                    &contiguous, &sparse),
+                    &contiguous, &sparse, /*shared_content=*/nullptr),
                 expected_conflict);
     };
     check_contiguous(4, 20, false);
@@ -435,22 +438,25 @@ TEST(LowAllocationLiveRangeTest,
 
     EXPECT_FALSE(loom_low_allocation_live_range_assignments_conflict(
         &descriptor_set, segments, unit_start_points, unit_end_points,
-        IREE_ARRAYSIZE(unit_end_points), &retained, &expanded_definition));
+        IREE_ARRAYSIZE(unit_end_points), &retained, &expanded_definition,
+        /*shared_content=*/nullptr));
 
     expanded_definition.flags =
         LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_EXPANDED_EXECUTION_DEFINITION;
     EXPECT_TRUE(loom_low_allocation_live_range_assignments_conflict(
         &descriptor_set, segments, unit_start_points, unit_end_points,
-        IREE_ARRAYSIZE(unit_end_points), &retained, &expanded_definition));
+        IREE_ARRAYSIZE(unit_end_points), &retained, &expanded_definition,
+        /*shared_content=*/nullptr));
     EXPECT_TRUE(loom_low_allocation_live_range_assignments_conflict(
         &descriptor_set, segments, unit_start_points, unit_end_points,
-        IREE_ARRAYSIZE(unit_end_points), &expanded_definition, &retained));
+        IREE_ARRAYSIZE(unit_end_points), &expanded_definition, &retained,
+        /*shared_content=*/nullptr));
 
     uint32_t sweep_segment = retained.liveness_segments.start;
     EXPECT_TRUE(loom_low_allocation_live_range_sweep_assignments_conflict(
         /*sweep_point=*/10, &sweep_segment, &descriptor_set, segments,
         unit_start_points, unit_end_points, IREE_ARRAYSIZE(unit_end_points),
-        &retained, &expanded_definition));
+        &retained, &expanded_definition, /*shared_content=*/nullptr));
   }
 }
 
@@ -481,11 +487,11 @@ TEST(LowAllocationLiveRangeTest,
   EXPECT_FALSE(loom_low_allocation_live_range_assignments_conflict(
       &descriptor_set, /*storage_segments=*/nullptr, unit_start_points,
       unit_end_points, IREE_ARRAYSIZE(unit_end_points), &expanded_definition,
-      &ends_at_definition));
+      &ends_at_definition, /*shared_content=*/nullptr));
   EXPECT_FALSE(loom_low_allocation_live_range_assignments_conflict(
       &descriptor_set, /*storage_segments=*/nullptr, unit_start_points,
       unit_end_points, IREE_ARRAYSIZE(unit_end_points), &expanded_definition,
-      &starts_after_definition));
+      &starts_after_definition, /*shared_content=*/nullptr));
 }
 
 TEST(LowAllocationLiveRangeTest,
@@ -512,12 +518,12 @@ TEST(LowAllocationLiveRangeTest,
   EXPECT_FALSE(loom_low_allocation_live_range_assignments_conflict(
       &descriptor_set, /*storage_segments=*/nullptr, unit_start_points,
       unit_end_points, IREE_ARRAYSIZE(unit_end_points), &expanded_definition,
-      &retained));
+      &retained, /*shared_content=*/nullptr));
   unit_end_points[2] = 20;
   EXPECT_TRUE(loom_low_allocation_live_range_assignments_conflict(
       &descriptor_set, /*storage_segments=*/nullptr, unit_start_points,
       unit_end_points, IREE_ARRAYSIZE(unit_end_points), &expanded_definition,
-      &retained));
+      &retained, /*shared_content=*/nullptr));
 }
 
 TEST(LowAllocationLiveRangeTest, AssignmentConflictsUsePhysicalStorageOverlap) {
@@ -561,7 +567,91 @@ TEST(LowAllocationLiveRangeTest, AssignmentConflictsUsePhysicalStorageOverlap) {
   EXPECT_TRUE(loom_low_allocation_live_range_assignments_conflict(
       &descriptor_set, /*storage_segments=*/nullptr,
       /*unit_start_points=*/nullptr, unit_end_points,
-      IREE_ARRAYSIZE(unit_end_points), &lhs, &rhs));
+      IREE_ARRAYSIZE(unit_end_points), &lhs, &rhs, /*shared_content=*/nullptr));
+}
+
+TEST(LowAllocationLiveRangeTest, SharesOnlyReadOnlyOverlappingUnits) {
+  const loom_low_reg_class_t reg_class = RegClass(1);
+  const loom_low_descriptor_set_t descriptors = {
+      .reg_classes = &reg_class,
+      .reg_class_count = 1,
+  };
+  auto source = Assignment(1, 0, 0, 10, 0, 2, 2, 0);
+  auto aggregate = Assignment(2, 0, 2, 12, 0, 2, 2, 2);
+  aggregate.flags = LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS;
+  const uint32_t starts[] = {0, 0, 2, 6};
+  uint32_t ends[] = {10, 10, 12, 12};
+  const uint32_t origins[] = {0, 1, 0, 3};
+  uint64_t written = 0;
+  const loom_low_allocation_content_identity_t contents = {
+      .origins = origins,
+      .written_origins = {.bit_count = 4, .words = &written},
+  };
+  auto conflicts = [&]() {
+    return loom_low_allocation_live_range_assignments_conflict(
+        &descriptors, nullptr, starts, ends, IREE_ARRAYSIZE(ends), &source,
+        &aggregate, &contents);
+  };
+  // The equal first units may share, but the second aggregate unit still
+  // overwrites a different live source unit.
+  EXPECT_TRUE(conflicts());
+  ends[1] = 6;
+  EXPECT_FALSE(conflicts());
+  // A destructive user of the shared contents needs an independent copy.
+  written = 1;
+  EXPECT_TRUE(conflicts());
+  written = 0;
+  // Expanded definitions retain their full physical-write obligation.
+  aggregate.flags |=
+      LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_EXPANDED_EXECUTION_DEFINITION;
+  EXPECT_TRUE(conflicts());
+}
+
+TEST(LowAllocationLiveRangeTest, ContentSharingRequiresExactPhysicalViews) {
+  loom_low_reg_class_t classes[] = {RegClass(0), RegClass(0)};
+  for (auto& reg_class : classes) {
+    reg_class.flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
+                      LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS;
+    reg_class.allocatable_count = 1;
+    reg_class.candidate_lookup.register_count = 1;
+  }
+  classes[1].physical_register_candidate_start = 1;
+  classes[1].candidate_lookup.ordinal_start = 1;
+  classes[1].candidate_lookup.register_base = 1;
+  const uint16_t units[] = {0, 1, 0};
+  const loom_low_physical_register_t registers[] = {
+      {.atomic_unit_start = 0, .atomic_unit_count = 2},
+      {.atomic_unit_start = 2, .atomic_unit_count = 1},
+  };
+  const uint16_t candidates[] = {0, 1};
+  const uint16_t ordinals[] = {0, 0};
+  const loom_low_descriptor_set_t descriptors = {
+      .reg_classes = classes,
+      .reg_class_count = IREE_ARRAYSIZE(classes),
+      .physical_registers = registers,
+      .physical_register_count = IREE_ARRAYSIZE(registers),
+      .physical_register_candidate_ids = candidates,
+      .physical_register_allocation_ordinals = ordinals,
+      .physical_register_candidate_count = IREE_ARRAYSIZE(candidates),
+      .physical_register_candidate_ordinals = ordinals,
+      .physical_register_candidate_ordinal_count = IREE_ARRAYSIZE(ordinals),
+      .physical_register_atomic_units = units,
+      .physical_register_atomic_unit_count = IREE_ARRAYSIZE(units),
+  };
+  const auto source = Assignment(1, 0, 0, 10, 0, 1, 1, 0);
+  auto candidate = Assignment(2, 0, 2, 10, 0, 1, 1, 1);
+  const uint32_t ends[] = {10, 10};
+  const uint32_t origins[] = {0, 0};
+  const loom_low_allocation_content_identity_t contents = {.origins = origins};
+  auto conflicts = [&]() {
+    return loom_low_allocation_live_range_assignments_conflict(
+        &descriptors, nullptr, nullptr, ends, IREE_ARRAYSIZE(ends), &source,
+        &candidate, &contents);
+  };
+  EXPECT_FALSE(conflicts());
+  candidate.descriptor_reg_class_id = 1;
+  candidate.location_base = 1;
+  EXPECT_TRUE(conflicts());
 }
 
 }  // namespace

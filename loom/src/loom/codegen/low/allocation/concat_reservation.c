@@ -379,7 +379,8 @@ static iree_status_t loom_low_allocation_concat_reservation_sources_fit(
             /*ignored_value_count=*/0,
             /*ignored_storage_lease_value_ids=*/NULL,
             /*ignored_storage_lease_value_count=*/0,
-            LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FOR_PRESSURE)) {
+            LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FOR_PRESSURE,
+            context->unit_liveness->content_identity)) {
       return iree_ok_status();
     }
   }
@@ -451,7 +452,8 @@ loom_low_allocation_concat_reservation_default_source_assembles_result(
       /*ignored_value_count=*/0,
       /*ignored_storage_lease_value_ids=*/NULL,
       /*ignored_storage_lease_value_count=*/0,
-      LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FOR_PRESSURE);
+      LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FOR_PRESSURE,
+      context->unit_liveness->content_identity);
   return iree_ok_status();
 }
 
@@ -800,7 +802,8 @@ loom_low_allocation_concat_reservation_find_location_for_source(
             context, &reservation, sources->ignored_value_ids,
             sources->ignored_value_count, sources->ignored_value_ids,
             sources->ignored_value_count,
-            LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FOR_PRESSURE) ||
+            LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FOR_PRESSURE,
+            context->unit_liveness->content_identity) ||
         (source_can_alias_result &&
          loom_low_allocation_search_location_conflicts(
              context, source_interval, source_capacity.descriptor_reg_class_id,
@@ -810,7 +813,8 @@ loom_low_allocation_concat_reservation_find_location_for_source(
              /*ignored_value_count=*/0,
              /*ignored_storage_lease_value_ids=*/NULL,
              /*ignored_storage_lease_value_count=*/0,
-             LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FOR_PRESSURE))) {
+             LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FOR_PRESSURE,
+             context->unit_liveness->content_identity))) {
       continue;
     }
     if (must_verify_sibling_sources) {

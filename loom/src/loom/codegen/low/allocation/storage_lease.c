@@ -12,7 +12,6 @@
 #include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/storage.h"
 #include "loom/codegen/low/allocation/unit_liveness.h"
-#include "loom/codegen/low/placement.h"
 
 static iree_status_t loom_low_allocation_validate_storage_lease_table(
     const loom_low_storage_lease_table_t* lease_table,
@@ -57,83 +56,6 @@ static bool loom_low_allocation_value_ordinal_for_liveness_value(
   }
   *out_value_ordinal = value_ordinal;
   return true;
-}
-
-static bool loom_low_allocation_storage_relation_preserves_identity(
-    const loom_low_placement_relation_t* relation) {
-  return relation->cause >= LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT &&
-         relation->cause <= LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT &&
-         loom_low_placement_relation_can_alias(relation) &&
-         !iree_any_bit_set(relation->flags,
-                           LOOM_LOW_PLACEMENT_RELATION_FLAG_WRITES_STORAGE |
-                               LOOM_LOW_PLACEMENT_RELATION_FLAG_CAPTURED_PART);
-}
-
-iree_status_t loom_low_allocation_storage_identity_initialize(
-    const loom_low_storage_lease_table_t* lease_table,
-    const loom_low_placement_table_t* placement,
-    const loom_low_allocation_unit_liveness_t* unit_liveness,
-    iree_arena_allocator_t* arena,
-    loom_low_allocation_storage_identity_t* out_identity) {
-  IREE_ASSERT_ARGUMENT(lease_table);
-  IREE_ASSERT_ARGUMENT(placement);
-  IREE_ASSERT_ARGUMENT(unit_liveness);
-  IREE_ASSERT_ARGUMENT(arena);
-  IREE_ASSERT_ARGUMENT(out_identity);
-  *out_identity = (loom_low_allocation_storage_identity_t){0};
-  if (lease_table->record_count == 0 ||
-      !iree_any_bit_set(placement->storage.flags,
-                        LOOM_LOW_PLACEMENT_STORAGE_FLAG_OPTIONAL_ALIASES |
-                            LOOM_LOW_PLACEMENT_STORAGE_FLAG_IDENTITY_ALIASES) ||
-      placement->storage_value_order_count == 0 ||
-      unit_liveness->point_count == 0) {
-    return iree_ok_status();
-  }
-  IREE_ASSERT_EQ(placement->storage_value_order_count, placement->value_count);
-  uint32_t* origins = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, unit_liveness->point_count, sizeof(*origins), (void**)&origins));
-  for (iree_host_size_t i = 0; i < unit_liveness->point_count; ++i) {
-    origins[i] = i;
-  }
-  // The retained order visits users before sources, so reverse traversal
-  // assigns each user from an already canonical source root.
-  for (loom_value_ordinal_t cursor = placement->storage_value_order_count;
-       cursor > 0; --cursor) {
-    const loom_value_ordinal_t result_ordinal =
-        placement->storage_value_order[cursor - 1];
-    const uint32_t result_start =
-        unit_liveness->values[result_ordinal].unit_point_start;
-    if (result_start == UINT32_MAX) {
-      continue;
-    }
-    const loom_low_placement_relation_range_t range =
-        placement->ranges_by_result_ordinal[result_ordinal];
-    for (uint32_t i = 0; i < range.count; ++i) {
-      const loom_low_placement_relation_t* relation =
-          &placement->relations[range.start + i];
-      if (!loom_low_allocation_storage_relation_preserves_identity(relation)) {
-        continue;
-      }
-      const uint32_t source_start =
-          unit_liveness->values[relation->source_ordinal].unit_point_start;
-      if (source_start == UINT32_MAX) {
-        continue;
-      }
-      IREE_ASSERT_LE((uint64_t)source_start + relation->source_unit_offset +
-                         relation->unit_count,
-                     unit_liveness->point_count);
-      IREE_ASSERT_LE((uint64_t)result_start + relation->result_unit_offset +
-                         relation->unit_count,
-                     unit_liveness->point_count);
-      for (uint32_t unit = 0; unit < relation->unit_count; ++unit) {
-        origins[result_start + relation->result_unit_offset + unit] =
-            origins[source_start + relation->source_unit_offset + unit];
-      }
-    }
-  }
-  out_identity->origins = origins;
-  return iree_ok_status();
 }
 
 static iree_status_t loom_low_allocation_storage_lease_value_id(
@@ -856,7 +778,7 @@ iree_status_t loom_low_allocation_storage_lease_state_initialize(
     const loom_module_t* module, const loom_op_t* function_op,
     const loom_local_value_domain_t* value_domain,
     const loom_liveness_analysis_t* liveness,
-    const loom_low_allocation_storage_identity_t* storage_identity,
+    const loom_low_allocation_content_identity_t* content_identity,
     const loom_low_allocation_unit_liveness_t* unit_liveness,
     iree_arena_allocator_t* result_arena,
     iree_arena_allocator_t* decision_arena,
@@ -865,7 +787,7 @@ iree_status_t loom_low_allocation_storage_lease_state_initialize(
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(function_op);
   IREE_ASSERT_ARGUMENT(liveness);
-  IREE_ASSERT_ARGUMENT(storage_identity);
+  IREE_ASSERT_ARGUMENT(content_identity);
   IREE_ASSERT_ARGUMENT(result_arena);
   IREE_ASSERT_ARGUMENT(out_state);
   *out_state = (loom_low_allocation_storage_lease_state_t){0};
@@ -878,7 +800,7 @@ iree_status_t loom_low_allocation_storage_lease_state_initialize(
   if (lease_table->record_count == 0) {
     return iree_ok_status();
   }
-  out_state->identity_origins = storage_identity->origins;
+  out_state->identity_origins = content_identity->origins;
   const loom_low_schedule_table_t* schedule = lease_table->schedule;
   IREE_ASSERT(schedule != NULL);
   IREE_ASSERT(schedule->value_count == 0 ||

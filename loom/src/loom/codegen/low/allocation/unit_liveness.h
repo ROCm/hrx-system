@@ -22,6 +22,9 @@
 extern "C" {
 #endif
 
+typedef struct loom_low_allocation_content_identity_t
+    loom_low_allocation_content_identity_t;
+
 typedef struct loom_low_allocation_write_interference_t
     loom_low_allocation_write_interference_t;
 
@@ -66,6 +69,9 @@ typedef struct loom_low_allocation_unit_liveness_t {
   uint32_t* start_points;
   // Result-arena-owned mutable per-assignment-unit live end points.
   uint32_t* end_points;
+  // Borrowed decision-lifetime content proof for aggregate placement and
+  // leases. NULL when neither consumer needs structural content identity.
+  const loom_low_allocation_content_identity_t* content_identity;
   // Number of initialized records in |start_points| and |end_points|, at most
   // UINT32_MAX. Every nonempty value range ends at or before this count, so no
   // record index aliases the UINT32_MAX sentinel.
