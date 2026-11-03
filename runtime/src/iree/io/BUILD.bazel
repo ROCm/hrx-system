@@ -69,6 +69,7 @@ iree_runtime_cc_library(
         ":file_handle",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/base/threading",
     ],
 )

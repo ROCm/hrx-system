@@ -6,6 +6,7 @@
 
 #include "iree/io/parameter_index.h"
 
+#include <algorithm>
 #include <array>
 #include <string>
 #include <thread>
@@ -166,10 +167,15 @@ struct FailingAllocator {
   // Successful allocation commands remaining before the next command fails.
   // SIZE_MAX disables failure injection.
   size_t remaining = SIZE_MAX;
+  // Counts underlying allocation requests, including growth and failures.
+  size_t allocation_count = 0;
 
   static iree_status_t Control(void* self, iree_allocator_command_t command,
                                const void* parameters, void** inout_pointer) {
     auto* allocator = static_cast<FailingAllocator*>(self);
+    if (command != IREE_ALLOCATOR_COMMAND_FREE) {
+      ++allocator->allocation_count;
+    }
     if (command != IREE_ALLOCATOR_COMMAND_FREE &&
         allocator->remaining != SIZE_MAX) {
       if (!allocator->remaining) {
@@ -182,6 +188,63 @@ struct FailingAllocator {
     return delegate.ctl(delegate.self, command, parameters, inout_pointer);
   }
 };
+
+TEST(ParameterIndexStorageTest, SmallEntriesAmortizeBackingAllocations) {
+  FailingAllocator allocator;
+  iree_io_parameter_index_t* index = nullptr;
+  IREE_ASSERT_OK(iree_io_parameter_index_create(
+      {&allocator, FailingAllocator::Control}, &index));
+  const size_t entry_count = 4096;
+  auto status = iree_ok_status();
+  for (size_t i = 0; i < entry_count && iree_status_is_ok(status); ++i) {
+    std::string key = Key(i);
+    status = AddEntry(index, iree_make_string_view(key.data(), key.size()), i);
+  }
+  EXPECT_EQ(iree_io_parameter_index_count(index), entry_count);
+  // Include index, dense-array and hash-table growth in the allocation budget.
+  // Stable entry pointers do not require a separate heap object for each key.
+  EXPECT_LT(allocator.allocation_count, entry_count / 8);
+  iree_io_parameter_index_release(index);
+  IREE_ASSERT_OK(status);
+}
+
+TEST(ParameterIndexStorageTest, OversizedMetadataFailurePreservesEntries) {
+  FailingAllocator allocator;
+  iree_io_parameter_index_t* index = nullptr;
+  IREE_ASSERT_OK(iree_io_parameter_index_create(
+      {&allocator, FailingAllocator::Control}, &index));
+  IREE_ASSERT_OK(AddEntry(index, IREE_SV("anchor"), 17));
+  const iree_io_parameter_index_entry_t* anchor = nullptr;
+  IREE_ASSERT_OK(
+      iree_io_parameter_index_lookup(index, IREE_SV("anchor"), &anchor));
+  std::vector<uint8_t> metadata(64 * 1024, 0xAB);
+  iree_io_parameter_index_entry_t source = {
+      .key = IREE_SV("large"),
+      .metadata = iree_make_const_byte_span(metadata.data(), metadata.size()),
+      .length = 23,
+      .type = IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_SPLAT,
+      .storage = {.splat = {.pattern_length = 1, .pattern = {0xCD}}},
+  };
+  allocator.remaining = 0;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        iree_io_parameter_index_add(index, &source));
+  EXPECT_EQ(iree_io_parameter_index_count(index), 1);
+  allocator.remaining = SIZE_MAX;
+  IREE_ASSERT_OK(iree_io_parameter_index_add(index, &source));
+  std::fill(metadata.begin(), metadata.end(), 0xEE);
+  const iree_io_parameter_index_entry_t* entry = nullptr;
+  IREE_ASSERT_OK(iree_io_parameter_index_get(index, 0, &entry));
+  EXPECT_EQ(entry, anchor);
+  EXPECT_EQ(entry->length, 17);
+  IREE_ASSERT_OK(
+      iree_io_parameter_index_lookup(index, IREE_SV("large"), &entry));
+  EXPECT_EQ(entry->length, 23);
+  ASSERT_EQ(entry->metadata.data_length, metadata.size());
+  for (size_t i = 0; i < metadata.size(); ++i) {
+    EXPECT_EQ(entry->metadata.data[i], 0xAB);
+  }
+  iree_io_parameter_index_release(index);
+}
 
 TEST(ParameterIndexFailureTest, FailedGrowthPreservesPublishedEntries) {
   for (bool reserve : {false, true}) {

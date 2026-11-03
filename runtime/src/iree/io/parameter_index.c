@@ -6,6 +6,7 @@
 
 #include "iree/io/parameter_index.h"
 
+#include "iree/base/internal/arena.h"
 #include "iree/base/internal/atomics.h"
 #include "iree/base/threading/mutex.h"
 
@@ -21,6 +22,10 @@ struct iree_io_parameter_index_t {
   iree_atomic_ref_count_t ref_count;
   // Allocator owning the index, entries, and lookup table.
   iree_allocator_t host_allocator;
+  // Lazily allocated small blocks for immutable entries and their copied bytes.
+  iree_arena_block_pool_t entry_block_pool;
+  // Stable entry storage, released together after all retained files retire.
+  iree_arena_allocator_t entry_arena;
 
   // Guards mutation of the entries list and lookup table.
   // NOTE: this does not guard the entries themselves as we assume they are
@@ -76,6 +81,9 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_index_create(
       iree_allocator_malloc(host_allocator, sizeof(*index), (void**)&index));
   iree_atomic_ref_count_init(&index->ref_count);
   index->host_allocator = host_allocator;
+  iree_arena_block_pool_initialize(4096, host_allocator,
+                                   &index->entry_block_pool);
+  iree_arena_initialize(&index->entry_block_pool, &index->entry_arena);
 
   iree_slim_mutex_initialize(&index->mutex);
 
@@ -106,8 +114,9 @@ static void iree_io_parameter_index_destroy(iree_io_parameter_index_t* index) {
         iree_io_file_handle_release(entry->storage.file.handle);
         break;
     }
-    iree_allocator_free(host_allocator, entry);
   }
+  iree_arena_deinitialize(&index->entry_arena);
+  iree_arena_block_pool_deinitialize(&index->entry_block_pool);
   if (index->entries) {
     iree_allocator_free(host_allocator, index->entries);
   }
@@ -216,9 +225,9 @@ iree_io_parameter_index_add(iree_io_parameter_index_t* index,
   iree_status_t status =
       iree_io_parameter_index_reserve_unsafe(index, index->entry_count + 1);
 
-  // Clone the entry memory. We allocate it as a single slab and stash the
-  // pointers for easier access by callers. Entries themselves are never
-  // reallocated so the pointers are safe to embed.
+  // Entries, keys, and metadata share the index lifetime. Arena growth never
+  // moves published entries, so callers may retain their pointers while more
+  // entries are appended. Oversized metadata receives dedicated arena storage.
   iree_io_parameter_index_entry_t* cloned_entry = NULL;
   if (iree_status_is_ok(status)) {
     // Calculate trailing size with overflow checking. Entry sizes come from
@@ -230,8 +239,8 @@ iree_io_parameter_index_add(iree_io_parameter_index_t* index,
                                 "parameter entry size overflow");
     } else {
       status = iree_allocator_malloc_with_trailing(
-          index->host_allocator, sizeof(*cloned_entry), trailing_size,
-          (void**)&cloned_entry);
+          iree_arena_allocator(&index->entry_arena), sizeof(*cloned_entry),
+          trailing_size, (void**)&cloned_entry);
     }
   }
   if (iree_status_is_ok(status)) {
