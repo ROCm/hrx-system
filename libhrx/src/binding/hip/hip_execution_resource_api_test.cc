@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <algorithm>
 #include <condition_variable>
 #include <cstring>
 #include <memory>
@@ -708,27 +709,31 @@ TEST_F(HipExecutionResourceApiTest, SplitsStructuredResourcesThroughPublicAbi) {
   ASSERT_EQ(hipSuccess, api_.device_get_resource(device_, &full_resource,
                                                  hipDevResourceTypeSm));
   ASSERT_GT(full_resource.sm.minSmPartitionSize, 0u);
-  ASSERT_GE(full_resource.sm.smCount, 3u * full_resource.sm.minSmPartitionSize);
+  const unsigned int available_partition_count =
+      full_resource.sm.smCount / full_resource.sm.minSmPartitionSize;
+  ASSERT_GT(available_partition_count, 0u);
+  const unsigned int group_count = std::min(available_partition_count, 2u);
 
   hipDevSmResourceGroupParams group_parameters[2] = {};
-  group_parameters[0].smCount = 2u * full_resource.sm.minSmPartitionSize;
+  group_parameters[0].smCount = (available_partition_count >= 3 ? 2u : 1u) *
+                                full_resource.sm.minSmPartitionSize;
   group_parameters[1].smCount = full_resource.sm.minSmPartitionSize;
   hipDevResource partitions[2];
   hipDevResource remainder;
   ASSERT_EQ(hipSuccess,
-            api_.split_sm(partitions, /*group_count=*/2, &full_resource,
-                          &remainder, /*flags=*/0, group_parameters));
+            api_.split_sm(partitions, group_count, &full_resource, &remainder,
+                          /*flags=*/0, group_parameters));
 
-  EXPECT_EQ(partitions[0].sm.smCount, group_parameters[0].smCount);
-  EXPECT_EQ(partitions[1].sm.smCount, group_parameters[1].smCount);
-  for (const auto& parameter : group_parameters) {
+  uint64_t returned_sm_count = 0;
+  for (unsigned int i = 0; i < group_count; ++i) {
+    const auto& parameter = group_parameters[i];
+    EXPECT_EQ(partitions[i].sm.smCount, parameter.smCount);
     EXPECT_EQ(parameter.coscheduledSmCount,
               full_resource.sm.smCoscheduledAlignment);
     EXPECT_EQ(parameter.preferredCoscheduledSmCount,
               parameter.coscheduledSmCount);
+    returned_sm_count += partitions[i].sm.smCount;
   }
-  uint64_t returned_sm_count =
-      partitions[0].sm.smCount + partitions[1].sm.smCount;
   if (remainder.type == hipDevResourceTypeSm) {
     returned_sm_count += remainder.sm.smCount;
   } else {
@@ -774,6 +779,28 @@ TEST_F(HipExecutionResourceApiTest, RejectsUnsupportedSplitWithoutPublishing) {
       /*flags=*/4, full_resource.sm.minSmPartitionSize, hipErrorInvalidValue);
   expect_failure_without_publication(/*flags=*/0, full_resource.sm.smCount + 1,
                                      hipErrorInvalidValue);
+
+  if (full_resource.sm.minSmPartitionSize > 1) {
+    hipDevSmResourceGroupParams parameters = {
+        .smCount = full_resource.sm.minSmPartitionSize - 1,
+    };
+    const auto expected_parameters = parameters;
+    hipDevResource partition;
+    std::memset(&partition, 0xA5, sizeof(partition));
+    const auto expected_partition = partition;
+    hipDevResource remainder;
+    std::memset(&remainder, 0x5A, sizeof(remainder));
+    const auto expected_remainder = remainder;
+    EXPECT_EQ(hipErrorInvalidResourceConfiguration,
+              api_.split_sm(&partition, 1, &full_resource, &remainder,
+                            /*flags=*/0, &parameters));
+    EXPECT_EQ(
+        0, std::memcmp(&parameters, &expected_parameters, sizeof(parameters)));
+    EXPECT_EQ(0,
+              std::memcmp(&partition, &expected_partition, sizeof(partition)));
+    EXPECT_EQ(0,
+              std::memcmp(&remainder, &expected_remainder, sizeof(remainder)));
+  }
 }
 
 TEST_F(HipExecutionResourceApiTest,
