@@ -109,17 +109,19 @@ static iree_status_t loom_serve_stage_table_record(
   loom_cmd_program_barrier_wave_iterator_initialize(program, &iterator);
   loom_cmd_program_barrier_wave_t wave;
   loom_cmd_program_command_range_t range = {0};
+  uint32_t work_count = 0;
   iree_status_t status = iree_ok_status();
   while (iree_status_is_ok(status) &&
          loom_cmd_program_barrier_wave_iterator_next(&iterator, &wave)) {
-    if (range.command_count &&
-        (uint64_t)range.command_count + wave.commands.command_count >
-            options->command_quantum) {
+    if (work_count && wave.work_count &&
+        (uint64_t)work_count + wave.work_count > options->command_quantum) {
       status = loom_serve_stage_table_append(table, options, stage, &range);
       range.first_command = wave.commands.first_command;
       range.command_count = 0;
+      work_count = 0;
     }
     range.command_count += wave.commands.command_count;
+    work_count += wave.work_count;
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_stage_table_append(table, options, stage, &range);

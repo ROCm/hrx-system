@@ -84,8 +84,9 @@ static iree_status_t loom_print_attr_with_field(
   return iree_ok_status();
 }
 
-static iree_status_t loom_print_instance_flag_list(
-    loom_print_context_t* ctx, const loom_op_vtable_t* vtable, uint8_t flags) {
+iree_status_t loom_print_instance_flag_list(loom_print_context_t* ctx,
+                                            const loom_op_vtable_t* vtable,
+                                            uint8_t flags) {
   const loom_instance_flags_descriptor_t* descriptor = vtable->instance_flags;
   bool first = true;
   for (uint8_t i = 0; i < descriptor->bit_count; ++i) {

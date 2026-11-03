@@ -108,12 +108,19 @@ static iree_string_view_t ReorderedEnumValueToken(
   return iree_string_view_empty();
 }
 
+static bool ReorderedResolveEnumToken(const loom_low_repr_environment_state_t*,
+                                      const loom_low_repr_descriptor_set_t*,
+                                      uint16_t, iree_string_view_t, int64_t*) {
+  return false;
+}
+
 static const loom_low_repr_environment_vtable_t kReorderedEnvironmentVtable = {
     .lookup_descriptor_set = ReorderedLookupDescriptorSet,
     .resolve_descriptor = ReorderedResolveDescriptor,
     .descriptor_key = ReorderedDescriptorKey,
     .resolve_packet_attributes = ReorderedResolvePacketAttributes,
     .enum_value_token = ReorderedEnumValueToken,
+    .resolve_enum_token = ReorderedResolveEnumToken,
 };
 
 static const loom_low_repr_environment_t kReorderedEnvironment = {

@@ -15,6 +15,9 @@ from loom.ir import ScalarTypeKind
 from loom.target.low_descriptors import (
     AsmForm,
     AsmImmediate,
+    AsmImmediateFormat,
+    AsmOperandSegment,
+    AsmOperandSegmentDelimiter,
     AsmResultValueType,
     Constraint,
     ConstraintKind,
@@ -27,6 +30,7 @@ from loom.target.low_descriptors import (
     EffectFlag,
     EffectKind,
     EnumDomain,
+    EnumDomainKind,
     EnumValue,
     EventSeparation,
     Hazard,
@@ -551,6 +555,77 @@ _CONVERGENT_EFFECT = Effect(
 _TIED_RESULT_CONSTRAINTS = (
     Constraint(ConstraintKind.TIED, 0, 1),
     Constraint(ConstraintKind.DESTRUCTIVE, 0, 1),
+)
+
+TEST_LOW_CONST_FLAGS_DESCRIPTOR = Descriptor(
+    key="test.const.flags",
+    mnemonic="test.const.flags",
+    semantic_tag="constant",
+    operands=(Operand("result", OperandRole.RESULT, _I32_ALT),),
+    op_kind=DescriptorOpKind.CONST,
+    immediates=(
+        Immediate("value", ImmediateKind.ENUM, enum_domain="test.permissions"),
+    ),
+    asm_forms=(AsmForm(results=("result",), immediates=(AsmImmediate("value"),)),),
+    schedule_class=_SCHEDULE_CONST,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    instruction_classes=(InstructionClass.OTHER,),
+)
+
+TEST_LOW_COLLECT_FLAGS_DESCRIPTOR = Descriptor(
+    key="test.collect.flags",
+    mnemonic="test.collect.flags",
+    semantic_tag="test.collect",
+    operands=(
+        Operand("result", OperandRole.RESULT, _I32_ALT),
+        Operand("values", OperandRole.OPERAND, _I32_ALT, flags=(OperandFlag.VARIADIC,)),
+    ),
+    immediates=(
+        Immediate("flags", ImmediateKind.ENUM, enum_domain="test.permissions"),
+        Immediate("access", ImmediateKind.ENUM, enum_domain="test.permissions"),
+        Immediate("predicate", ImmediateKind.ENUM, enum_domain=_INTEGER_PREDICATE_ENUM),
+        Immediate(
+            "offset",
+            ImmediateKind.SIGNED,
+            bit_width=32,
+            flags=(ImmediateFlag.DEFAULT_VALUE,),
+        ),
+        Immediate("literal", ImmediateKind.SIGNED, bit_width=32),
+    ),
+    asm_forms=(
+        AsmForm(
+            results=("result",),
+            operands=("values",),
+            immediates=(
+                AsmImmediate("flags", format=AsmImmediateFormat.FLAGS),
+                AsmImmediate("access", format=AsmImmediateFormat.KEYWORD),
+                AsmImmediate("predicate", format=AsmImmediateFormat.KEYWORD),
+                AsmImmediate("offset", format=AsmImmediateFormat.KEYWORD),
+                AsmImmediate("literal"),
+            ),
+        ),
+    ),
+    schedule_class=_SCHEDULE_CONST,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    instruction_classes=(InstructionClass.OTHER,),
+)
+
+TEST_LOW_COLLECT_SEGMENTED_DESCRIPTOR = replace(
+    TEST_LOW_COLLECT_FLAGS_DESCRIPTOR,
+    key="test.collect.segmented",
+    mnemonic="test.collect.segmented",
+    asm_forms=(
+        AsmForm(
+            results=("result",),
+            operand_segments=(
+                AsmOperandSegment(AsmOperandSegmentDelimiter.ANGLE, ("values",)),
+            ),
+            immediates=(
+                AsmImmediate("flags", format=AsmImmediateFormat.FLAGS),
+                AsmImmediate("literal"),
+            ),
+        ),
+    ),
 )
 
 TEST_LOW_CONST_I32_DESCRIPTOR = Descriptor(
@@ -2817,6 +2892,11 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
     ),
     enum_domains=(
         EnumDomain(
+            "test.permissions",
+            (EnumValue("read", 1), EnumValue("write", 4), EnumValue("execute", 16)),
+            kind=EnumDomainKind.BITSET,
+        ),
+        EnumDomain(
             _INTEGER_PREDICATE_ENUM,
             tuple(
                 EnumValue(predicate, ordinal)
@@ -2825,6 +2905,9 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         ),
     ),
     descriptors=(
+        TEST_LOW_CONST_FLAGS_DESCRIPTOR,
+        TEST_LOW_COLLECT_FLAGS_DESCRIPTOR,
+        TEST_LOW_COLLECT_SEGMENTED_DESCRIPTOR,
         TEST_LOW_CONST_I32_DESCRIPTOR,
         TEST_LOW_CONST_ZERO_I32_DESCRIPTOR,
         TEST_LOW_CONST_PACKED_NARROW_DESCRIPTOR,

@@ -109,6 +109,52 @@ command.def public @decode_transition() launch(%control: buffer, %token_ids: buf
   command.return
 }
 
+// Two phases publish distinct payload words beside four passive clock samples.
+kernel.def @publish_phase() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%phase: index, %control: view<3xi32>, %payload: view<2xi32>) {
+  %value = view.load %control[%phase] : view<3xi32> -> i32
+  view.store %value, %payload[%phase] : i32, view<2xi32>
+  kernel.return
+}
+
+command.def @captured_phase(%phase: index) launch(%control: buffer, %bank: buffer, %private: buffer) {
+  %control_unique, %bank_unique = buffer.assume.noalias %control, %bank : buffer, buffer
+  %c0 = index.constant 0 : offset
+  %c8 = index.constant 8 : offset
+  %c16 = index.constant 16 : offset
+  %c32 = index.constant 32 : offset
+  %begin_offset = index.scale %phase, %c16 : index, offset -> offset
+  %end_offset = index.add %begin_offset, %c8 : offset
+  %begin = buffer.view %bank_unique[%begin_offset] : buffer -> view<1xi64>
+  %end = buffer.view %bank_unique[%end_offset] : buffer -> view<1xi64>
+  %payload = buffer.view %bank_unique[%c32] : buffer -> view<2xi32>
+  %input = buffer.view %control_unique[%c0] : buffer -> view<3xi32>
+  command.timestamp %begin : view<1xi64>
+  kernel.launch @publish_phase(%phase, %input, %payload) : (index, view<3xi32>, view<2xi32>)
+  command.timestamp %end : view<1xi64>
+  command.return
+}
+
+command.def public @captured_first() launch(%control: buffer, %bank: buffer, %private: buffer) {
+  %c0 = index.constant 0 : index
+  command.launch @captured_phase[%c0](%control, %bank, %private) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.def public @captured_second() launch(%control: buffer, %bank: buffer, %private: buffer) {
+  %c1 = index.constant 1 : index
+  command.launch @captured_phase[%c1](%control, %bank, %private) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+// Work after feedback submission cannot modify the published bank.
+command.def public @private_catchup() launch(%control: buffer, %bank: buffer, %private: buffer) {
+  kernel.launch @continuation_heartbeat(%private) : (buffer)
+  command.return
+}
+
 // The schedule alternates disabled and live grids. State contains the advance,
 // consumer, and heartbeat counts followed by a canary.
 kernel.def @continuation_advance() {

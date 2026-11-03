@@ -400,11 +400,13 @@ static iree_status_t loom_low_verify_asm_immediates(
     const loom_low_descriptor_t* descriptor, uint32_t descriptor_index) {
   const loom_low_descriptor_layout_t* descriptor_layout =
       loom_low_descriptor_layout(descriptor_set, descriptor);
-  if (layout->explicit_immediate_count > descriptor_layout->immediate_count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "low asm form for descriptor %" PRIu32
-                            " has more explicit immediates than fields",
-                            descriptor_index);
+  if (layout->explicit_immediate_count > descriptor_layout->immediate_count ||
+      layout->prefix_immediate_count > layout->explicit_immediate_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low asm form for descriptor %" PRIu32
+        " has inconsistent prefix/explicit immediate counts",
+        descriptor_index);
   }
   bool has_named_immediates = false;
   bool required_explicit_immediates = false;
@@ -427,7 +429,29 @@ static iree_status_t loom_low_verify_asm_immediates(
                                     asm_immediate->immediate_index];
     const bool has_default = iree_any_bit_set(
         immediate->flags, LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE);
-    if (i < layout->explicit_immediate_count) {
+    if (i < layout->prefix_immediate_count) {
+      if (asm_immediate->format == LOOM_LOW_ASM_IMMEDIATE_FORMAT_FLAGS) {
+        if (i != 0 || immediate->kind != LOOM_LOW_IMMEDIATE_KIND_ENUM ||
+            descriptor_set->enum_domains[immediate->enum_domain_id].kind !=
+                LOOM_LOW_ENUM_DOMAIN_KIND_BITSET ||
+            immediate->default_value != 0 ||
+            asm_immediate->name_string_ref != LOOM_STRING_REF_NONE) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "low asm flags require a leading bitset with "
+                                  "zero omission value");
+        }
+      } else if (asm_immediate->format !=
+                     LOOM_LOW_ASM_IMMEDIATE_FORMAT_KEYWORD ||
+                 asm_immediate->name_string_ref == LOOM_STRING_REF_NONE) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "low asm prefix requires a named keyword clause");
+      }
+    } else if (asm_immediate->format !=
+               LOOM_LOW_ASM_IMMEDIATE_FORMAT_TRAILING) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "low asm trailing field has prefix syntax");
+    } else if (i < layout->explicit_immediate_count) {
       required_explicit_immediates |= !has_default;
       has_named_immediates |=
           asm_immediate->name_string_ref != LOOM_STRING_REF_NONE || has_default;
@@ -963,8 +987,9 @@ static iree_status_t loom_low_verify_asm_form(
         " descriptor operands but the form contains %" PRIu32,
         asm_form_index, segmented_operand_count, schema_operand_count);
   }
-  if (has_variadic_segment !=
-      loom_low_descriptor_has_variadic_operands(descriptor)) {
+  if (layout->operand_segment_count != 0 &&
+      has_variadic_segment !=
+          loom_low_descriptor_has_variadic_operands(descriptor)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low asm form %" PRIu32
                             " variadic segment disagrees with descriptor",
@@ -2900,16 +2925,8 @@ static iree_status_t loom_low_verify_immediate(
       IREE_RETURN_IF_ERROR(loom_low_verify_span(
           domain->value_start, domain->value_count,
           descriptor_set->enum_value_count, "enum_values"));
-      bool found = false;
-      for (uint16_t i = 0; i < domain->value_count; ++i) {
-        const loom_low_enum_value_t* value =
-            &descriptor_set->enum_values[domain->value_start + i];
-        if (value->value == immediate->default_value) {
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
+      if (!loom_low_enum_domain_contains_value(descriptor_set, domain,
+                                               immediate->default_value)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "low enum immediate %" PRIu32
                                 " default value %" PRId64
@@ -2958,11 +2975,23 @@ static iree_status_t loom_low_verify_enum_domain(
                             "low enum domain %" PRIu32 " has no values",
                             enum_domain_index);
   }
+  if (domain->kind != LOOM_LOW_ENUM_DOMAIN_KIND_ENUM &&
+      domain->kind != LOOM_LOW_ENUM_DOMAIN_KIND_BITSET) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low enum domain %" PRIu32 " has unknown kind",
+                            enum_domain_index);
+  }
   iree_string_view_t previous_token = iree_string_view_empty();
   for (uint16_t i = 0; i < domain->value_count; ++i) {
     const uint32_t value_index = domain->value_start + i;
     const loom_low_enum_value_t* value =
         &descriptor_set->enum_values[value_index];
+    if (domain->kind == LOOM_LOW_ENUM_DOMAIN_KIND_BITSET &&
+        (value->value <= 0 ||
+         ((uint64_t)value->value & ((uint64_t)value->value - 1)) != 0)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "low bitset token must name one positive bit");
+    }
     iree_string_view_t token = iree_string_view_empty();
     IREE_RETURN_IF_ERROR(loom_low_descriptor_set_string_impl(
         descriptor_set, value->token_string_ref, /*allow_none=*/false, &token));

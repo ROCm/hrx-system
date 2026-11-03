@@ -104,6 +104,23 @@ loom_cc_test(
     ],
 )
 
+loom_cc_test(
+    name = "hal_command_buffer_test",
+    srcs = ["hal_command_buffer_test.cc"],
+    deps = [
+        ":hal_command_buffer",
+        ":program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/cts/util:test_main",
+        "//runtime/src/iree/hal/drivers/task/cts:backends",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
 loom_cc_library(
     name = "provider",
     srcs = ["provider.c"],

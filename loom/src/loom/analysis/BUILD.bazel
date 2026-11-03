@@ -116,11 +116,13 @@ loom_cc_library(
     hdrs = ["storage_access.h"],
     deps = [
         ":movement",
+        ":template_provider_catalog",
         ":value_relation",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/global",
         "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/template",
         "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

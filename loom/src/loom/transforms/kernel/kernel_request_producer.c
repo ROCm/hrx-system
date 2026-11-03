@@ -17,14 +17,158 @@
 #include "loom/link/template_candidate_loader.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/target/facts.h"
+#include "loom/ops/template/ops.h"
 #include "loom/ops/type_registry.h"
 #include "loom/transforms/symbol/template_decision_model.h"
+#include "loom/util/adaptive_sort.h"
 #include "loom/util/fact_table.h"
+
+typedef struct loom_kernel_request_access_entry_t {
+  // Accepted implementation trace; shape refinements do not change effects.
+  loom_kernel_class_trace_id_t trace_id;
+  // Source-independent facts, or NULL until this trace is queried.
+  const loom_storage_access_summary_t* summary;
+} loom_kernel_request_access_entry_t;
+
+typedef struct loom_kernel_request_access_cache_t {
+  // Publication scratch retaining compact summaries and their sorted index.
+  iree_arena_allocator_t* arena;
+  // Pool for one temporary reached-source graph at a time.
+  iree_arena_block_pool_t* block_pool;
+  // Lazily constructed unique trace index.
+  loom_kernel_request_access_entry_t* entries;
+  // Number of unique trace entries.
+  iree_host_size_t count;
+} loom_kernel_request_access_cache_t;
 
 struct loom_kernel_request_source_t {
   // Callback-live boundary classifier over the materialized source module.
   loom_kernel_class_classifier_t classifier;
+  // Existing source provider catalog, borrowed by canonical effect analysis.
+  loom_template_provider_catalog_t providers;
+  // Callback-live demand cache; its graphs never survive an individual query.
+  loom_kernel_request_access_cache_t* storage_access;
 };
+
+static bool loom_kernel_request_access_entry_less(
+    const loom_kernel_request_access_entry_t* lhs,
+    const loom_kernel_request_access_entry_t* rhs) {
+  return lhs->trace_id < rhs->trace_id;
+}
+LOOM_DEFINE_ADAPTIVE_SORT(loom_kernel_request_sort_access_entries,
+                          loom_kernel_request_access_entry_t,
+                          loom_kernel_request_access_entry_less)
+
+static bool loom_kernel_request_binding_less(
+    const loom_storage_access_binding_t* lhs,
+    const loom_storage_access_binding_t* rhs) {
+  return (uintptr_t)lhs->operation < (uintptr_t)rhs->operation;
+}
+LOOM_DEFINE_ADAPTIVE_SORT(loom_kernel_request_sort_bindings,
+                          loom_storage_access_binding_t,
+                          loom_kernel_request_binding_less)
+
+iree_status_t loom_kernel_request_require_storage_access(
+    const loom_kernel_request_t* request,
+    const loom_storage_access_summary_t** out_summary) {
+  *out_summary = NULL;
+  loom_kernel_request_access_cache_t* cache = request->source->storage_access;
+  const loom_kernel_class_collection_t* collection = request->collection;
+  if (!cache->entries) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        cache->arena, collection->class_count, sizeof(*cache->entries),
+        (void**)&cache->entries));
+    for (uint32_t i = 0; i < collection->class_count; ++i) {
+      cache->entries[i] = (loom_kernel_request_access_entry_t){
+          .trace_id = collection->classes[i].trace_id};
+    }
+    loom_kernel_request_sort_access_entries(cache->entries,
+                                            collection->class_count);
+    for (uint32_t i = 0; i < collection->class_count; ++i) {
+      if (cache->count == 0 || cache->entries[cache->count - 1].trace_id !=
+                                   cache->entries[i].trace_id) {
+        cache->entries[cache->count++] = cache->entries[i];
+      }
+    }
+  }
+  const loom_kernel_class_trace_id_t trace_id =
+      collection->classes[request->class_ordinal].trace_id;
+  iree_host_size_t begin = 0, end = cache->count;
+  while (begin < end) {
+    const iree_host_size_t middle = begin + (end - begin) / 2;
+    if (cache->entries[middle].trace_id < trace_id) {
+      begin = middle + 1;
+    } else {
+      end = middle;
+    }
+  }
+  loom_kernel_request_access_entry_t* entry = &cache->entries[begin];
+  if (entry->summary) {
+    *out_summary = entry->summary;
+    return iree_ok_status();
+  }
+
+  const loom_kernel_class_classifier_t* classifier =
+      &request->source->classifier;
+  loom_module_t* module = (loom_module_t*)classifier->module;
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(cache->block_pool, &arena);
+  loom_storage_access_scope_t scope;
+  loom_storage_access_scope_initialize(module, &arena, &scope);
+  scope.providers = &request->source->providers;
+  loom_storage_access_binding_t* bindings = NULL;
+  iree_status_t status =
+      iree_arena_allocate_array(&arena, collection->accepted_decision_count,
+                                sizeof(*bindings), (void**)&bindings);
+  for (loom_kernel_class_trace_id_t current = trace_id;
+       iree_status_is_ok(status) &&
+       current != LOOM_KERNEL_CLASS_TRACE_ID_INVALID;
+       current = collection->traces[current].parent_trace_id) {
+    const loom_kernel_class_trace_t* trace = &collection->traces[current];
+    const loom_kernel_class_decision_t* decision =
+        &classifier->decisions[trace->decision_ordinal];
+    const loom_template_provider_summary_t* provider =
+        loom_template_decision_model_provider(decision->model,
+                                              trace->action_ordinal);
+    if (provider->module != module || !loom_func_like_isa(provider->function) ||
+        loom_func_like_is_kernel(provider->function) ||
+        loom_func_like_repr_contract(provider->function) !=
+            LOOM_STRING_ID_INVALID ||
+        !loom_func_like_body(provider->function)) {
+      continue;
+    }
+    const loom_op_t* operation = decision->demand->apply_op;
+    const loom_value_slice_t arguments =
+        loom_template_apply_operands(operation);
+    bindings[scope.binding_count++] = (loom_storage_access_binding_t){
+        .operation = operation,
+        .function = provider->function,
+        .argument_offset =
+            (uint16_t)(arguments.values - loom_op_const_operands(operation)),
+        .argument_count = arguments.count,
+    };
+  }
+  loom_local_value_domain_t domain = {0};
+  if (iree_status_is_ok(status)) {
+    loom_kernel_request_sort_bindings(bindings, scope.binding_count);
+    scope.bindings = bindings;
+    const loom_func_like_t kernel = loom_func_like_cast(
+        module,
+        module->symbols.entries[classifier->kernel_symbol_id].defining_op);
+    status = loom_local_value_domain_acquire_for_region_tree(
+        module, loom_func_like_body(kernel), &arena, &domain);
+    if (iree_status_is_ok(status)) {
+      status = loom_storage_access_require_summary(
+          &scope, kernel, &domain, cache->arena, &entry->summary);
+    }
+    loom_local_value_domain_release(&domain);
+  }
+  iree_arena_deinitialize(&arena);
+  if (iree_status_is_ok(status)) {
+    *out_summary = entry->summary;
+  }
+  return status;
+}
 
 struct loom_kernel_request_producer_t {
   // Immutable provider-backed source universe.
@@ -166,17 +310,17 @@ static iree_status_t loom_kernel_request_source_prepare(
   }
   loom_symbol_fact_table_t symbol_facts = {0};
   loom_symbol_fact_table_initialize(&symbol_facts, scratch_arena);
-  loom_template_provider_catalog_t providers = {0};
-  loom_template_provider_catalog_initialize(&providers, scratch_arena);
+  loom_template_provider_catalog_t* providers = &out_source->providers;
+  loom_template_provider_catalog_initialize(providers, scratch_arena);
   if (iree_status_is_ok(status)) {
     status = loom_template_provider_catalog_build(
-        &providers, materialization.product.module, &symbol_facts,
+        providers, materialization.product.module, &symbol_facts,
         external_candidates.providers, external_candidates.count);
   }
   loom_template_decision_model_catalog_t decision_models = {0};
   if (iree_status_is_ok(status)) {
     status = loom_template_decision_model_catalog_build(
-        materialization.product.module, &symbol_facts, &references, &providers,
+        materialization.product.module, &symbol_facts, &references, providers,
         scratch_arena, &decision_models);
   }
 
@@ -257,6 +401,11 @@ iree_status_t loom_kernel_request_producer_publish(
       producer, environment, source_symbol_ordinal, scratch_arena, &source,
       &materialization);
   loom_kernel_class_collection_t collection = {0};
+  loom_kernel_request_access_cache_t storage_access = {
+      .arena = scratch_arena,
+      .block_pool = environment->block_pool,
+  };
+  source.storage_access = &storage_access;
   if (iree_status_is_ok(status)) {
     status = loom_kernel_class_classifier_collect(
         &source.classifier, site_module, sites, site_count, collection_options,

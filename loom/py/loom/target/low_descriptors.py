@@ -543,10 +543,25 @@ class EncodingFieldValue:
     value: int
 
 
+class AsmImmediateFormat(CEnum):
+    TRAILING = "LOOM_LOW_ASM_IMMEDIATE_FORMAT_TRAILING"
+    KEYWORD = "LOOM_LOW_ASM_IMMEDIATE_FORMAT_KEYWORD"
+    FLAGS = "LOOM_LOW_ASM_IMMEDIATE_FORMAT_FLAGS"
+
+
 @dataclass(frozen=True, slots=True)
 class AsmImmediate:
+    """Immediate spelling: trailing value/dictionary, keyword(value), or <flags>.
+
+    Prefix fields precede SSA operands. FLAGS, when present, is first and uses
+    one enum mask whose omission materializes zero; KEYWORD fields follow in
+    declaration order. Remaining TRAILING fields retain positional or
+    named-dictionary spelling.
+    """
+
     field_name: str
     name: str | None = None
+    format: AsmImmediateFormat = AsmImmediateFormat.TRAILING
 
 
 @dataclass(frozen=True, slots=True)
@@ -610,10 +625,16 @@ class EnumValue:
     value: int
 
 
+class EnumDomainKind(CEnum):
+    ENUM = "LOOM_LOW_ENUM_DOMAIN_KIND_ENUM"
+    BITSET = "LOOM_LOW_ENUM_DOMAIN_KIND_BITSET"
+
+
 @dataclass(frozen=True, slots=True)
 class EnumDomain:
     name: str
     values: tuple[EnumValue, ...]
+    kind: EnumDomainKind = EnumDomainKind.ENUM
 
 
 @dataclass(frozen=True, slots=True)

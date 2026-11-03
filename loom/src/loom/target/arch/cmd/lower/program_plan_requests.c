@@ -78,7 +78,9 @@ typedef struct loom_cmd_program_kernel_request_bridge_t {
 
   // Number of writable entries in |requirement_by_class|.
   iree_host_size_t class_capacity;
-
+  // Optional destination for summaries needed by this kernel's multi-wave
+  // roots.
+  loom_cmd_program_kernel_accesses_t* accesses;
 } loom_cmd_program_kernel_request_bridge_t;
 
 static iree_status_t loom_cmd_program_kernel_request_publish(
@@ -91,6 +93,24 @@ static iree_status_t loom_cmd_program_kernel_request_publish(
   IREE_ASSERT_LT(source_request->class_ordinal, bridge->class_capacity);
   bridge->requirement_by_class[source_request->class_ordinal] =
       requirement_index;
+
+  if (bridge->accesses) {
+    const loom_storage_access_summary_t* source_summary = NULL;
+    IREE_RETURN_IF_ERROR(loom_kernel_request_require_storage_access(
+        source_request, &source_summary));
+    const iree_host_size_t argument_bytes =
+        source_summary->argument_count * sizeof(*source_summary->arguments);
+    loom_storage_access_summary_t* summary = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate(bridge->accesses->arena,
+                                             sizeof(*summary) + argument_bytes,
+                                             (void**)&summary));
+    *summary = *source_summary;
+    loom_storage_access_argument_t* arguments =
+        (loom_storage_access_argument_t*)(summary + 1);
+    memcpy(arguments, source_summary->arguments, argument_bytes);
+    summary->arguments = arguments;
+    bridge->accesses->by_requirement[requirement_index] = summary;
+  }
 
   const loom_cmd_program_kernel_request_t request = {
       .entry_requirement_index = requirement_index,
@@ -105,6 +125,7 @@ iree_status_t loom_cmd_program_plan_publish_kernel_requests(
     const loom_value_fact_table_t* source_facts,
     const loom_cmd_program_kernel_source_t* kernel_source,
     loom_cmd_program_kernel_site_root_t* roots, iree_host_size_t root_count,
+    loom_cmd_program_kernel_accesses_t* accesses,
     iree_arena_allocator_t* scratch_arena) {
   IREE_ASSERT_ARGUMENT(plan);
   IREE_ASSERT_ARGUMENT(plan_module);
@@ -124,6 +145,13 @@ iree_status_t loom_cmd_program_plan_publish_kernel_requests(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       scratch_arena, symbol_count, sizeof(*site_counts), (void**)&site_counts));
   memset(site_counts, 0, symbol_count * sizeof(*site_counts));
+  uint8_t* access_demand = NULL;
+  if (accesses->by_requirement) {
+    const iree_host_size_t bytes = (symbol_count + 7) / 8;
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate(scratch_arena, bytes, (void**)&access_demand));
+    memset(access_demand, 0, bytes);
+  }
 
   iree_host_size_t source_site_count = 0;
   for (iree_host_size_t root_ordinal = 0; root_ordinal < root_count;
@@ -148,6 +176,10 @@ iree_status_t loom_cmd_program_plan_publish_kernel_requests(
       }
       ++site_counts[command->callee.symbol_id];
       ++source_site_count;
+      if (access_demand && root->schedule->wave_count > 1) {
+        access_demand[command->callee.symbol_id / 8] |=
+            1u << (command->callee.symbol_id % 8);
+      }
     }
   }
   if (source_site_count == 0) {
@@ -227,6 +259,10 @@ iree_status_t loom_cmd_program_plan_publish_kernel_requests(
         .sink = kernel_source->sink,
         .requirement_by_class = requirement_by_class,
         .class_capacity = site_count,
+        .accesses = access_demand && (access_demand[symbol_id / 8] &
+                                      (1u << (symbol_id % 8)))
+                        ? accesses
+                        : NULL,
     };
     loom_kernel_class_collection_t collection = {0};
     IREE_RETURN_IF_ERROR(loom_kernel_request_producer_publish(
@@ -256,6 +292,7 @@ iree_status_t loom_cmd_program_plan_publish_generated_kernel_requests(
     const loom_cmd_launch_count_realization_t* realization,
     loom_cmd_program_kernel_request_sink_t sink,
     loom_cmd_program_kernel_site_root_t* roots, iree_host_size_t root_count,
+    loom_cmd_program_kernel_accesses_t* accesses,
     iree_arena_allocator_t* scratch_arena) {
   IREE_ASSERT_ARGUMENT(plan);
   IREE_ASSERT_ARGUMENT(plan_module);
@@ -310,6 +347,28 @@ iree_status_t loom_cmd_program_plan_publish_generated_kernel_requests(
         IREE_RETURN_IF_ERROR(sink.publish(sink.user_data, &request));
       }
       root->requirement_indices[command_ordinal] = requirement_index;
+      if (accesses->by_requirement && root->schedule->wave_count > 1 &&
+          !accesses->by_requirement[requirement_index]) {
+        const iree_arena_checkpoint_t checkpoint =
+            iree_arena_checkpoint_save(scratch_arena);
+        loom_module_t* module = generated->product.module;
+        const loom_func_like_t kernel = loom_func_like_cast(
+            module, module->symbols.entries[generated->product.kernel.symbol_id]
+                        .defining_op);
+        loom_storage_access_scope_t scope;
+        loom_storage_access_scope_initialize(module, scratch_arena, &scope);
+        loom_local_value_domain_t domain = {0};
+        iree_status_t status = loom_local_value_domain_acquire_for_region_tree(
+            module, loom_func_like_body(kernel), scratch_arena, &domain);
+        if (iree_status_is_ok(status)) {
+          status = loom_storage_access_require_summary(
+              &scope, kernel, &domain, accesses->arena,
+              &accesses->by_requirement[requirement_index]);
+        }
+        loom_local_value_domain_release(&domain);
+        iree_arena_checkpoint_restore(&checkpoint);
+        IREE_RETURN_IF_ERROR(status);
+      }
     }
   }
   return iree_ok_status();

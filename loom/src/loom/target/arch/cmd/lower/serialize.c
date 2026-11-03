@@ -54,6 +54,8 @@ typedef enum loom_cmd_serialize_value_kind_e {
   LOOM_CMD_SERIALIZE_VALUE_KIND_INDEX = 12,
   // Exact logical byte-offset argument.
   LOOM_CMD_SERIALIZE_VALUE_KIND_OFFSET = 13,
+  // Immutable global or ranged dependency in the semantic table.
+  LOOM_CMD_SERIALIZE_VALUE_KIND_MEMORY_DEPENDENCY = 14,
 } loom_cmd_serialize_value_kind_t;
 
 typedef struct loom_cmd_serialize_value_t {
@@ -76,6 +78,15 @@ typedef struct loom_cmd_serialize_buffer_ref_table_t {
   // Number of allocated rows.
   iree_host_size_t capacity;
 } loom_cmd_serialize_buffer_ref_table_t;
+
+typedef struct loom_cmd_serialize_memory_dependency_table_t {
+  // Arena-owned immutable global and ranged dependencies.
+  loom_cmd_program_memory_dependency_t* values;
+  // Number of populated rows.
+  iree_host_size_t count;
+  // Number of allocated rows.
+  iree_host_size_t capacity;
+} loom_cmd_serialize_memory_dependency_table_t;
 
 typedef struct loom_cmd_serialize_byte_table_t {
   // Arena-owned bytes.
@@ -125,6 +136,9 @@ typedef struct loom_cmd_serialize_build_t {
   uint32_t launch_binding_count;
   // Buffer ranges used by fills, copies, and indirect launch counts.
   loom_cmd_serialize_buffer_ref_table_t buffer_refs;
+  // Dependencies referenced by explicit barriers; contiguous sets may share
+  // rows.
+  loom_cmd_serialize_memory_dependency_table_t memory_dependencies;
   // Executable-entry logical argument schemas.
   loom_cmd_serialize_entry_schema_table_t entry_schemas;
   // Flattened logical argument kinds referenced by entry schemas.
@@ -249,6 +263,80 @@ static iree_status_t loom_cmd_serialize_append_command(
   IREE_RETURN_IF_ERROR(loom_cmd_serialize_reserve_commands(build, 1));
   build->commands.values[build->commands.count++] = command;
   return iree_ok_status();
+}
+
+static iree_status_t loom_cmd_serialize_reserve_memory_dependencies(
+    loom_cmd_serialize_build_t* build, iree_host_size_t count) {
+  if (count > UINT32_MAX - build->memory_dependencies.count) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "command memory dependencies exceed the table limit");
+  }
+  const iree_host_size_t required = build->memory_dependencies.count + count;
+  if (required <= build->memory_dependencies.capacity) {
+    return iree_ok_status();
+  }
+  return iree_arena_grow_array(build->arena, build->memory_dependencies.count,
+                               required,
+                               sizeof(*build->memory_dependencies.values),
+                               &build->memory_dependencies.capacity,
+                               (void**)&build->memory_dependencies.values);
+}
+
+static iree_status_t loom_cmd_serialize_memory_dependency(
+    loom_cmd_serialize_build_t* build, const loom_op_t* op,
+    loom_cmd_program_memory_dependency_t dependency) {
+  IREE_RETURN_IF_ERROR(
+      loom_cmd_serialize_reserve_memory_dependencies(build, 1));
+  loom_cmd_serialize_value_t* result =
+      loom_cmd_serialize_result(build, loom_low_op_results(op).values[0]);
+  result->kind = LOOM_CMD_SERIALIZE_VALUE_KIND_MEMORY_DEPENDENCY;
+  result->payload.index = (uint32_t)build->memory_dependencies.count;
+  build->memory_dependencies.values[build->memory_dependencies.count++] =
+      dependency;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_cmd_serialize_barrier(
+    loom_cmd_serialize_build_t* build, const loom_op_t* op) {
+  const loom_value_slice_t operands = loom_low_op_operands(op);
+  const loom_named_attr_slice_t attrs = loom_low_op_attrs(op);
+  loom_cmd_program_command_t command = {
+      .kind = LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER,
+      .payload.barrier =
+          {
+              .source_stages =
+                  (uint32_t)loom_cmd_core_barrier_source(attrs).i64,
+              .target_stages =
+                  (uint32_t)loom_cmd_core_barrier_target(attrs).i64,
+              .flags = (uint32_t)loom_cmd_core_barrier_flags(attrs).i64,
+              .dependency_count = operands.count,
+          },
+  };
+  if (operands.count) {
+    const uint32_t first =
+        loom_cmd_serialize_operand(build, operands.values[0])->payload.index;
+    bool contiguous = true;
+    for (uint16_t i = 0; i < operands.count; ++i) {
+      contiguous &= loom_cmd_serialize_operand(build, operands.values[i])
+                        ->payload.index == first + i;
+    }
+    command.payload.barrier.first_dependency = first;
+    if (!contiguous) {
+      IREE_RETURN_IF_ERROR(loom_cmd_serialize_reserve_memory_dependencies(
+          build, operands.count));
+      command.payload.barrier.first_dependency =
+          (uint32_t)build->memory_dependencies.count;
+      for (uint16_t i = 0; i < operands.count; ++i) {
+        const uint32_t index =
+            loom_cmd_serialize_operand(build, operands.values[i])
+                ->payload.index;
+        build->memory_dependencies.values[build->memory_dependencies.count++] =
+            build->memory_dependencies.values[index];
+      }
+    }
+  }
+  return loom_cmd_serialize_append_command(build, command);
 }
 
 static iree_status_t loom_cmd_serialize_import_resource(
@@ -777,6 +865,38 @@ static iree_status_t loom_cmd_serialize_packet(
         LOOM_CMD_SERIALIZE_VALUE_KIND_BINDING);
   }
   if (loom_cmd_serialize_packet_is(build, packet,
+                                   CMD_CORE_DESCRIPTOR_REF_MEMORY_GLOBAL)) {
+    const loom_named_attr_slice_t attrs = loom_low_op_attrs(op);
+    return loom_cmd_serialize_memory_dependency(
+        build, op,
+        (loom_cmd_program_memory_dependency_t){
+            .source_scope =
+                (uint32_t)loom_cmd_core_memory_global_source(attrs).i64,
+            .target_scope =
+                (uint32_t)loom_cmd_core_memory_global_target(attrs).i64,
+            .buffer_ref = LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_GLOBAL,
+        });
+  }
+  if (loom_cmd_serialize_packet_is(build, packet,
+                                   CMD_CORE_DESCRIPTOR_REF_MEMORY_BUFFER)) {
+    const loom_named_attr_slice_t attrs = loom_low_op_attrs(op);
+    return loom_cmd_serialize_memory_dependency(
+        build, op,
+        (loom_cmd_program_memory_dependency_t){
+            .source_scope =
+                (uint32_t)loom_cmd_core_memory_buffer_source(attrs).i64,
+            .target_scope =
+                (uint32_t)loom_cmd_core_memory_buffer_target(attrs).i64,
+            .buffer_ref = loom_cmd_serialize_operand(
+                              build, loom_low_op_operands(op).values[0])
+                              ->payload.index,
+        });
+  }
+  if (loom_cmd_serialize_packet_is(build, packet,
+                                   CMD_CORE_DESCRIPTOR_REF_BARRIER)) {
+    return loom_cmd_serialize_barrier(build, op);
+  }
+  if (loom_cmd_serialize_packet_is(build, packet,
                                    CMD_CORE_DESCRIPTOR_REF_TIMESTAMP)) {
     return loom_cmd_serialize_timestamp(
         build, op, LOOM_CMD_PROGRAM_COMMAND_KIND_TIMESTAMP);
@@ -911,6 +1031,12 @@ static void loom_cmd_serialize_write_header(
   iree_unaligned_store_le_u32(
       data.data + LOOM_CMD_PROGRAM_HEADER_BUFFER_REF_COUNT_OFFSET,
       (uint32_t)build->buffer_refs.count);
+  iree_unaligned_store_le_u32(
+      data.data + LOOM_CMD_PROGRAM_HEADER_MEMORY_DEPENDENCY_COUNT_OFFSET,
+      (uint32_t)build->memory_dependencies.count);
+  iree_unaligned_store_le_u32(
+      data.data + LOOM_CMD_PROGRAM_HEADER_MEMORY_DEPENDENCY_TABLE_OFFSET,
+      layout->memory_dependency_offset);
   iree_unaligned_store_le_u32(
       data.data + LOOM_CMD_PROGRAM_HEADER_ARGUMENT_DATA_LENGTH_OFFSET,
       (uint32_t)build->argument_data.count);
@@ -1076,6 +1202,13 @@ static void loom_cmd_serialize_write_commands(
         command.argument_schema_index);
     uint32_t operands[5] = {0};
     switch ((uint32_t)loom_cmd_program_command_kind_base(command.kind)) {
+      case LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER:
+        operands[0] = command.payload.barrier.source_stages;
+        operands[1] = command.payload.barrier.target_stages;
+        operands[2] = command.payload.barrier.flags;
+        operands[3] = command.payload.barrier.first_dependency;
+        operands[4] = command.payload.barrier.dependency_count;
+        break;
       case LOOM_CMD_PROGRAM_COMMAND_KIND_TIMESTAMP:
         operands[0] = command.payload.timestamp.target_buffer_ref;
         break;
@@ -1175,6 +1308,21 @@ static void loom_cmd_serialize_write_program(
   loom_cmd_serialize_write_header(build, layout, data);
   loom_cmd_serialize_write_launch_bindings(build, layout, data);
   loom_cmd_serialize_write_buffer_refs(build, layout, data);
+  for (uint32_t i = 0; i < build->memory_dependencies.count; ++i) {
+    uint8_t* record = data.data + layout->memory_dependency_offset +
+                      i * LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_SIZE;
+    const loom_cmd_program_memory_dependency_t dependency =
+        build->memory_dependencies.values[i];
+    iree_unaligned_store_le_u32(
+        record + LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_SOURCE_SCOPE_OFFSET,
+        dependency.source_scope);
+    iree_unaligned_store_le_u32(
+        record + LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_TARGET_SCOPE_OFFSET,
+        dependency.target_scope);
+    iree_unaligned_store_le_u32(
+        record + LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_BUFFER_REF_OFFSET,
+        dependency.buffer_ref);
+  }
   loom_cmd_serialize_write_entry_schemas(build, layout, data);
   loom_cmd_serialize_write_commands(build, layout, data);
   loom_cmd_serialize_write_parameters(build, layout, data);
@@ -1277,6 +1425,7 @@ iree_status_t loom_cmd_program_plan_serialize_root(
   if (iree_status_is_ok(status)) {
     status = loom_cmd_program_format_calculate_layout(
         build.launch_binding_count, (uint32_t)build.buffer_refs.count,
+        (uint32_t)build.memory_dependencies.count,
         (uint32_t)build.entry_schemas.count,
         (uint32_t)build.entry_schema_kinds.count,
         (uint32_t)build.argument_data.count, (uint32_t)build.commands.count,

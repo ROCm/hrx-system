@@ -17,6 +17,8 @@ typedef struct loom_cmd_program_plan_check_options_t {
   loomc_string_view_t* root_names;
   // Number of entries in |root_names|.
   iree_host_size_t root_count;
+  // Exercise source-backed request publication instead of opaque entry binding.
+  bool publish_kernels;
 } loom_cmd_program_plan_check_options_t;
 
 static bool loom_cmd_program_plan_check_emit_provider_matches(
@@ -87,7 +89,9 @@ static iree_status_t loom_cmd_program_plan_check_parse_options(
   IREE_RETURN_IF_ERROR(loom_cmd_program_plan_check_parse_roots(
       roots_text, request->case_arena, out_options));
 
-  if (!iree_string_view_is_empty(option_text)) {
+  if (iree_string_view_equal(option_text, IREE_SV("publish-kernels"))) {
+    out_options->publish_kernels = true;
+  } else if (!iree_string_view_is_empty(option_text)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unexpected command program emit option '%.*s'",
                             (int)option_text.size, option_text.data);
@@ -127,6 +131,13 @@ static loomc_status_t loom_cmd_program_plan_check_append_listing_segment(
       iree_make_string_view((const char*)segment.data, segment.data_length)));
 }
 
+static loomc_status_t loom_cmd_program_plan_check_release_request(
+    void* user_data, loomc_request_t* request) {
+  (void)user_data;
+  loomc_request_release(request);
+  return loomc_ok_status();
+}
+
 static iree_status_t loom_cmd_program_plan_check_emit_provider_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request) {
@@ -142,6 +153,10 @@ static iree_status_t loom_cmd_program_plan_check_emit_provider_execute(
       .root_symbols = options.root_names,
       .root_symbol_count = options.root_count,
       .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_TARGET_LISTING,
+      .request_sink = {.publish =
+                           options.publish_kernels
+                               ? loom_cmd_program_plan_check_release_request
+                               : NULL},
   };
   loomc_product_t* product = NULL;
   loomc_result_t* result = NULL;

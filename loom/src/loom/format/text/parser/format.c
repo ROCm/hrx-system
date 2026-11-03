@@ -360,7 +360,7 @@ static iree_status_t loom_parse_format_optional_group(
 
 // Parses an instance flag list: flag1|flag2.
 // Matches declared spellings, including aggregate aliases, to their values.
-static iree_status_t loom_parse_format_instance_flag_list(
+iree_status_t loom_parse_format_instance_flag_list(
     loom_parser_t* parser, const loom_op_vtable_t* vtable, uint8_t* out_flags) {
   uint8_t flags = 0;
   const loom_instance_flags_descriptor_t* descriptor = vtable->instance_flags;

@@ -32,7 +32,8 @@ typedef struct loom_serve_stage_record_options_t {
   uint16_t binding_count;
   // Owner of private storage between command submissions.
   loom_serve_stage_workspace_t workspace;
-  // Soft command target for invocation-owned parts; zero records whole roots.
+  // Soft dispatch/fill/copy target for invocation-owned parts; zero records
+  // whole roots. Dependencies and passive clocks do not consume this budget.
   uint32_t command_quantum;
 } loom_serve_stage_record_options_t;
 

@@ -95,6 +95,20 @@ iree_const_byte_span_t loom_cmd_program_command_argument_data(
       schema.argument_byte_length);
 }
 
+loom_cmd_program_memory_dependency_t loom_cmd_program_memory_dependency_at(
+    const loom_cmd_program_t* program, uint32_t index) {
+  const uint8_t* record = program->memory_dependencies.data +
+                          index * LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_SIZE;
+  return (loom_cmd_program_memory_dependency_t){
+      .source_scope = iree_unaligned_load_le_u32(
+          record + LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_SOURCE_SCOPE_OFFSET),
+      .target_scope = iree_unaligned_load_le_u32(
+          record + LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_TARGET_SCOPE_OFFSET),
+      .buffer_ref = iree_unaligned_load_le_u32(
+          record + LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_BUFFER_REF_OFFSET),
+  };
+}
+
 loom_cmd_program_command_t loom_cmd_program_command_at(
     const loom_cmd_program_t* program, uint32_t index) {
   IREE_ASSERT_ARGUMENT(program);
@@ -122,6 +136,13 @@ loom_cmd_program_command_t loom_cmd_program_command_at(
           record + LOOM_CMD_PROGRAM_COMMAND_ARGUMENT_SCHEMA_INDEX_OFFSET),
   };
   switch ((uint32_t)loom_cmd_program_command_kind_base(kind)) {
+    case LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER:
+      command.payload.barrier.source_stages = operand_0;
+      command.payload.barrier.target_stages = operand_1;
+      command.payload.barrier.flags = operand_2;
+      command.payload.barrier.first_dependency = operand_3;
+      command.payload.barrier.dependency_count = operand_4;
+      break;
     case LOOM_CMD_PROGRAM_COMMAND_KIND_TIMESTAMP:
       command.payload.timestamp.target_buffer_ref = operand_0;
       break;
@@ -172,6 +193,33 @@ void loom_cmd_program_barrier_wave_iterator_initialize(
   };
 }
 
+static bool loom_cmd_program_command_begins_wave(
+    const loom_cmd_program_command_t* command) {
+  if (loom_cmd_program_command_kind_has_implicit_execution_barrier(
+          command->kind)) {
+    return true;
+  }
+  return command->kind == LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER &&
+         (command->payload.barrier.source_stages &
+          LOOM_CMD_PROGRAM_STAGE_WORK) == LOOM_CMD_PROGRAM_STAGE_WORK &&
+         (command->payload.barrier.target_stages &
+          LOOM_CMD_PROGRAM_STAGE_WORK) == LOOM_CMD_PROGRAM_STAGE_WORK;
+}
+
+static bool loom_cmd_program_command_is_work(
+    loom_cmd_program_command_kind_t kind) {
+  switch (loom_cmd_program_command_kind_base(kind)) {
+    case LOOM_CMD_PROGRAM_COMMAND_KIND_FILL:
+    case LOOM_CMD_PROGRAM_COMMAND_KIND_COPY:
+    case LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_DIRECT:
+    case LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_STATIC:
+    case LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_DYNAMIC:
+      return true;
+    default:
+      return false;
+  }
+}
+
 bool loom_cmd_program_barrier_wave_iterator_next(
     loom_cmd_program_barrier_wave_iterator_t* iterator,
     loom_cmd_program_barrier_wave_t* out_wave) {
@@ -186,16 +234,18 @@ bool loom_cmd_program_barrier_wave_iterator_next(
   const uint32_t first_command = iterator->next_command;
   loom_cmd_program_command_t command =
       loom_cmd_program_command_at(program, first_command);
-  if (loom_cmd_program_command_kind_begins_barrier_wave(command.kind)) {
+  if (loom_cmd_program_command_begins_wave(&command)) {
     ++iterator->barrier_wave_ordinal;
   }
+  uint32_t work_count = loom_cmd_program_command_is_work(command.kind);
 
   uint32_t next_command = first_command + 1;
   while (next_command < program->commands.count) {
     command = loom_cmd_program_command_at(program, next_command);
-    if (loom_cmd_program_command_kind_begins_barrier_wave(command.kind)) {
+    if (loom_cmd_program_command_begins_wave(&command)) {
       break;
     }
+    work_count += loom_cmd_program_command_is_work(command.kind);
     ++next_command;
   }
   *out_wave = (loom_cmd_program_barrier_wave_t){
@@ -205,6 +255,7 @@ bool loom_cmd_program_barrier_wave_iterator_next(
               .first_command = first_command,
               .command_count = next_command - first_command,
           },
+      .work_count = work_count,
   };
   iterator->next_command = next_command;
   return true;
@@ -531,7 +582,7 @@ static iree_status_t loom_cmd_program_validate_dispatch(
 }
 
 static iree_status_t loom_cmd_program_validate_commands(
-    const loom_cmd_program_t* program) {
+    loom_cmd_program_t* program) {
   uint32_t expected_argument_offset = 0;
   for (uint32_t i = 0; i < program->commands.count; ++i) {
     const uint8_t* record =
@@ -545,11 +596,34 @@ static iree_status_t loom_cmd_program_validate_commands(
     const loom_cmd_program_command_kind_t base_kind =
         loom_cmd_program_command_kind_base(command.kind);
     if (loom_cmd_program_command_kind_has_barrier(command.kind) &&
-        base_kind == LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER_EXECUTION) {
+        (base_kind == LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER_EXECUTION ||
+         base_kind == LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "command kind %u is unsupported", command.kind);
     }
     switch ((uint32_t)base_kind) {
+      case LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER:
+        if (command.argument_offset != 0 ||
+            command.argument_schema_index != 0 ||
+            ((command.payload.barrier.source_stages |
+              command.payload.barrier.target_stages) &
+             ~LOOM_CMD_PROGRAM_STAGE_ALL) != 0 ||
+            (command.payload.barrier.flags &
+             ~LOOM_CMD_PROGRAM_BARRIER_FLAG_ALL) != 0 ||
+            command.payload.barrier.first_dependency >
+                program->memory_dependencies.count ||
+            command.payload.barrier.dependency_count >
+                program->memory_dependencies.count -
+                    command.payload.barrier.first_dependency) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "command dependency %" PRIu32
+                                  " has an invalid stage, flag, or range",
+                                  i);
+        }
+        program->maximum_barrier_dependency_count =
+            iree_max(program->maximum_barrier_dependency_count,
+                     command.payload.barrier.dependency_count);
+        break;
       case LOOM_CMD_PROGRAM_COMMAND_KIND_TIMESTAMP: {
         if (command.argument_offset != 0 ||
             command.argument_schema_index != 0 ||
@@ -972,6 +1046,12 @@ iree_status_t loom_cmd_program_parse(iree_const_byte_span_t data,
               .count = iree_unaligned_load_le_u32(
                   data.data + LOOM_CMD_PROGRAM_HEADER_BUFFER_REF_COUNT_OFFSET),
           },
+      .memory_dependencies =
+          {
+              .count = iree_unaligned_load_le_u32(
+                  data.data +
+                  LOOM_CMD_PROGRAM_HEADER_MEMORY_DEPENDENCY_COUNT_OFFSET),
+          },
       .entry_schemas =
           {
               .count = iree_unaligned_load_le_u32(
@@ -1008,10 +1088,10 @@ iree_status_t loom_cmd_program_parse(iree_const_byte_span_t data,
   loom_cmd_program_format_layout_t layout = {0};
   IREE_RETURN_IF_ERROR(loom_cmd_program_format_calculate_layout(
       program.launch_bindings.count, program.buffer_refs.count,
-      program.entry_schemas.count, program.entry_schema_kinds.count,
-      argument_data_length, program.commands.count,
-      program.parameter_roots.count, program.parameters.count,
-      parameter_key_length, &layout));
+      program.memory_dependencies.count, program.entry_schemas.count,
+      program.entry_schema_kinds.count, argument_data_length,
+      program.commands.count, program.parameter_roots.count,
+      program.parameters.count, parameter_key_length, &layout));
   if (layout.total_length != total_length ||
       layout.launch_binding_offset !=
           iree_unaligned_load_le_u32(
@@ -1023,6 +1103,10 @@ iree_status_t loom_cmd_program_parse(iree_const_byte_span_t data,
       layout.entry_schema_offset !=
           iree_unaligned_load_le_u32(
               data.data + LOOM_CMD_PROGRAM_HEADER_ENTRY_SCHEMA_TABLE_OFFSET) ||
+      layout.memory_dependency_offset !=
+          iree_unaligned_load_le_u32(
+              data.data +
+              LOOM_CMD_PROGRAM_HEADER_MEMORY_DEPENDENCY_TABLE_OFFSET) ||
       layout.entry_schema_kind_offset !=
           iree_unaligned_load_le_u32(
               data.data +
@@ -1048,6 +1132,8 @@ iree_status_t loom_cmd_program_parse(iree_const_byte_span_t data,
   }
   program.launch_bindings.data = data.data + layout.launch_binding_offset;
   program.buffer_refs.data = data.data + layout.buffer_ref_offset;
+  program.memory_dependencies.data =
+      data.data + layout.memory_dependency_offset;
   program.entry_schemas.data = data.data + layout.entry_schema_offset;
   program.entry_schema_kinds.data = data.data + layout.entry_schema_kind_offset;
   program.argument_data = iree_make_const_byte_span(
@@ -1061,6 +1147,19 @@ iree_status_t loom_cmd_program_parse(iree_const_byte_span_t data,
   IREE_RETURN_IF_ERROR(loom_cmd_program_validate_launch_bindings(&program));
   IREE_RETURN_IF_ERROR(loom_cmd_program_validate_transient(&program));
   IREE_RETURN_IF_ERROR(loom_cmd_program_validate_buffer_refs(&program));
+  for (uint32_t i = 0; i < program.memory_dependencies.count; ++i) {
+    const loom_cmd_program_memory_dependency_t dependency =
+        loom_cmd_program_memory_dependency_at(&program, i);
+    if (((dependency.source_scope | dependency.target_scope) &
+         ~LOOM_CMD_PROGRAM_ACCESS_ALL) != 0 ||
+        (dependency.buffer_ref != LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_GLOBAL &&
+         dependency.buffer_ref >= program.buffer_refs.count)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "command memory dependency %" PRIu32
+                              " has an invalid scope or buffer reference",
+                              i);
+    }
+  }
   IREE_RETURN_IF_ERROR(loom_cmd_program_validate_entry_schemas(&program));
   IREE_RETURN_IF_ERROR(loom_cmd_program_validate_commands(&program));
   IREE_RETURN_IF_ERROR(loom_cmd_program_validate_launch_counts(&program));

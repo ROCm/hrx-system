@@ -39,9 +39,10 @@ uint32_t loom_low_bind_immediate_presence(
 }
 
 static bool loom_low_resolve_immediate_enum(
+    const loom_module_t* module,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, iree_string_view_t name,
-    iree_string_view_t token, int64_t* out_value) {
+    const loom_attribute_t* attribute, int64_t* out_value) {
   const loom_low_descriptor_layout_t* layout =
       loom_low_descriptor_layout(descriptor_set, descriptor);
   for (uint16_t i = 0; i < layout->immediate_count; ++i) {
@@ -55,13 +56,32 @@ static bool loom_low_resolve_immediate_enum(
     }
     const loom_low_enum_domain_t* domain =
         &descriptor_set->enum_domains[immediate->enum_domain_id];
-    for (uint16_t j = 0; j < domain->value_count; ++j) {
-      const loom_low_enum_value_t* value =
-          &descriptor_set->enum_values[domain->value_start + j];
-      if (iree_string_view_equal(
-              token, loom_low_descriptor_set_string(descriptor_set,
-                                                    value->token_string_ref))) {
-        *out_value = value->value;
+    if (attribute->kind == LOOM_ATTR_STRING) {
+      return loom_low_enum_domain_resolve_token(
+          descriptor_set, domain,
+          loom_string_table_get(&module->strings, attribute->string_id),
+          out_value);
+    }
+    if (domain->kind == LOOM_LOW_ENUM_DOMAIN_KIND_BITSET) {
+      // Empty arrays have no element kind at the generic text boundary.
+      if (attribute->kind == LOOM_ATTR_I64_ARRAY && attribute->count == 0) {
+        *out_value = 0;
+        return true;
+      }
+      if (attribute->kind == LOOM_ATTR_STRING_ARRAY) {
+        int64_t bits = 0;
+        for (uint16_t j = 0; j < attribute->count; ++j) {
+          int64_t bit = 0;
+          if (!loom_low_enum_domain_resolve_token(
+                  descriptor_set, domain,
+                  loom_string_table_get(&module->strings,
+                                        attribute->string_ids[j]),
+                  &bit)) {
+            return false;
+          }
+          bits |= bit;
+        }
+        *out_value = bits;
         return true;
       }
     }
@@ -81,15 +101,17 @@ iree_status_t loom_low_resolve_immediate_enums(
   loom_named_attr_t* resolved_entries = NULL;
   for (uint16_t i = 0; i < attrs->count; ++i) {
     const loom_named_attr_t* entry = &attrs->dict_entries[i];
-    if (entry->value.kind != LOOM_ATTR_STRING) {
+    if (entry->value.kind != LOOM_ATTR_STRING &&
+        entry->value.kind != LOOM_ATTR_STRING_ARRAY &&
+        !(entry->value.kind == LOOM_ATTR_I64_ARRAY &&
+          entry->value.count == 0)) {
       continue;
     }
     int64_t value = 0;
     if (!loom_low_resolve_immediate_enum(
-            descriptor_set, descriptor,
+            module, descriptor_set, descriptor,
             loom_string_table_get(&module->strings, entry->name_id),
-            loom_string_table_get(&module->strings, entry->value.string_id),
-            &value)) {
+            &entry->value, &value)) {
       continue;
     }
     if (resolved_entries == NULL) {

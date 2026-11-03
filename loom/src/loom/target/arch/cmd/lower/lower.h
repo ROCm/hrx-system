@@ -61,6 +61,36 @@ typedef struct loom_cmd_lower_dispatch_t {
   uint32_t operand_value_count;
 } loom_cmd_lower_dispatch_t;
 
+// One shared memory dependency; execution order is owned by the wave schedule.
+typedef struct loom_cmd_memory_dependency_t {
+  // Producer access bits from loom_cmd_program_access_bits_e.
+  uint32_t source;
+  // Consumer access bits from loom_cmd_program_access_bits_e.
+  uint32_t target;
+  // Physical range ordinal, or UINT32_MAX for an unbounded memory dependency.
+  uint32_t range_index;
+} loom_cmd_memory_dependency_t;
+
+typedef struct loom_cmd_wave_dependencies_t {
+  // First index in the plan's dependency_indices table.
+  uint32_t offset;
+  // Number of memory dependencies before this wave; zero is execution-only.
+  uint32_t count;
+} loom_cmd_wave_dependencies_t;
+
+typedef struct loom_cmd_dependency_plan_t {
+  // Physical overlap envelopes indexed by bounded dependencies.
+  const loom_cmd_buffer_binding_t* ranges;
+  // Shared dependency descriptors, independent of source IR lifetime.
+  const loom_cmd_memory_dependency_t* dependencies;
+  // Number of unique dependency descriptors.
+  uint32_t dependency_count;
+  // Descriptor ordinals grouped by consuming wave.
+  const uint32_t* dependency_indices;
+  // One slice per scheduled wave, or NULL when every edge is execution-only.
+  const loom_cmd_wave_dependencies_t* waves;
+} loom_cmd_dependency_plan_t;
+
 // Compiler-owned facts consumed by closed command-program conversion.
 //
 // Rows are already resolved by source specialization, binding placement,
@@ -85,6 +115,8 @@ typedef struct loom_cmd_lower_plan_t {
   const loom_cmd_dispatch_count_t* dispatch_counts;
   // Executable placements in schedule order; unused for timestamps.
   const loom_cmd_lower_dispatch_t* dispatches;
+  // Planned memory visibility before each execution wave.
+  loom_cmd_dependency_plan_t dependencies;
 } loom_cmd_lower_plan_t;
 
 // Replaces one specialized command.def with a targetless,

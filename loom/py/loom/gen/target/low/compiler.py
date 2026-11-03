@@ -39,6 +39,7 @@ from loom.target.low_descriptors import (
     LOW_DESCRIPTOR_ENCODING_ID_NONE,
     LOW_DESCRIPTOR_SET_ORDINAL_NONE,
     AsmForm,
+    AsmImmediateFormat,
     Constraint,
     ConstraintKind,
     Descriptor,
@@ -47,6 +48,8 @@ from loom.target.low_descriptors import (
     Effect,
     EffectKind,
     EncodingFieldValue,
+    EnumDomain,
+    EnumDomainKind,
     EnumValue,
     Hazard,
     Immediate,
@@ -730,6 +733,7 @@ def _compile_asm_form(
     asm_form: AsmForm,
     form_ordinal: int,
     *,
+    bitset_domains: frozenset[str],
     label_scope: str | None = None,
 ) -> CompiledAsmForm:
     mnemonic = validation.asm_form_mnemonic(descriptor, asm_form)
@@ -821,8 +825,6 @@ def _compile_asm_form(
 
     variadic_operand_fields = {operand.field_name for operand in descriptor.operands if OperandFlag.VARIADIC in operand.flags}
     if variadic_operand_fields:
-        if not asm_form.operand_segments:
-            raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' must place its variadic operand in a delimited operand segment")
         referenced_variadic_fields = variadic_operand_fields.intersection(asm_operand_fields)
         if referenced_variadic_fields != variadic_operand_fields:
             missing_fields = ", ".join(sorted(variadic_operand_fields - referenced_variadic_fields))
@@ -854,36 +856,51 @@ def _compile_asm_form(
         result_types[result_index] = CompiledAsmOperandType(operand_index, tied or (isinstance(previous, CompiledAsmOperandType) and previous.tied))
 
     immediate_order = []
+    prefix_immediate_count = 0
     seen_immediate_names: set[str] = set()
-    for immediate in asm_form.immediates:
+    for position, immediate in enumerate(asm_form.immediates):
         immediate_index = immediate_indices.get(immediate.field_name)
         if immediate_index is None:
             raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' immediate references unknown immediate field '{immediate.field_name}'")
+        if immediate.format != AsmImmediateFormat.TRAILING:
+            if position != prefix_immediate_count:
+                raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' prefix immediates must precede trailing immediates")
+            prefix_immediate_count += 1
+        if immediate.format == AsmImmediateFormat.FLAGS:
+            field = descriptor.immediates[immediate_index]
+            if position != 0 or immediate.name is not None or field.kind != ImmediateKind.ENUM or field.enum_domain not in bitset_domains or field.default_value != 0:
+                raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' flags must be the first immediate, unnamed, and a bitset with zero omission value")
+        spelling = immediate.name
+        if immediate.format == AsmImmediateFormat.KEYWORD and spelling is None:
+            spelling = immediate.field_name
         name_label = None
-        if immediate.name is not None:
-            if immediate.name == "":
+        if spelling is not None:
+            if spelling == "":
                 raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' immediate '{immediate.field_name}' has an empty name")
-            if len(immediate.name.encode()) > 255:
-                raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' immediate name '{immediate.name}' exceeds 255 bytes")
-            if immediate.name in seen_immediate_names:
-                raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' uses immediate name '{immediate.name}' more than once")
-            seen_immediate_names.add(immediate.name)
+            if len(spelling.encode()) > 255:
+                raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' immediate name '{spelling}' exceeds 255 bytes")
+            if spelling in seen_immediate_names:
+                raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' uses immediate name '{spelling}' more than once")
+            seen_immediate_names.add(spelling)
             name_label = string_pool.intern(
                 scoped_label("asm_immediate", immediate.field_name),
-                immediate.name,
+                spelling,
             )
         immediate_order.append(
             CompiledAsmImmediate(
                 immediate_index=immediate_index,
                 name_label=name_label,
-                name=immediate.name,
+                name=spelling,
+                format=immediate.format,
             )
         )
 
     # Retain the parser/printer's complete order so implicit field lookup needs
     # no descriptor scan or explicit-prefix membership search at runtime.
     explicit_immediate_count = len(immediate_order)
-    has_named_immediates = any(immediate.name is not None or ImmediateFlag.DEFAULT_VALUE in descriptor.immediates[immediate.immediate_index].flags for immediate in immediate_order)
+    has_named_immediates = any(
+        immediate.name is not None or ImmediateFlag.DEFAULT_VALUE in descriptor.immediates[immediate.immediate_index].flags for immediate in immediate_order[prefix_immediate_count:]
+    )
     explicit_immediate_indices = {immediate.immediate_index for immediate in immediate_order}
     immediate_order.extend(CompiledAsmImmediate(immediate_index=index, name_label=None, name=None) for index in range(len(descriptor.immediates)) if index not in explicit_immediate_indices)
 
@@ -914,9 +931,11 @@ def _compile_asm_form(
         tied_results=tuple(tied_results),
         immediates=tuple(immediate_order),
         explicit_immediate_count=explicit_immediate_count,
+        prefix_immediate_count=prefix_immediate_count,
         has_named_immediates=has_named_immediates,
         requires_named_immediates=any(
-            ImmediateFlag.DEFAULT_VALUE not in descriptor.immediates[immediate.immediate_index].flags for immediate in immediate_order[0 if has_named_immediates else explicit_immediate_count :]
+            ImmediateFlag.DEFAULT_VALUE not in descriptor.immediates[immediate.immediate_index].flags
+            for immediate in immediate_order[prefix_immediate_count if has_named_immediates else explicit_immediate_count :]
         ),
         native_owns_immediate_syntax=any(
             value.kind in (NativeAsmValueKind.IMMEDIATE_I64, NativeAsmValueKind.IMMEDIATE_UNSIGNED_HEX, NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT) for value in native_assembly_values
@@ -1090,6 +1109,7 @@ def _compile_asm_forms(
     string_pool: CStringPool,
     descriptors: Sequence[Descriptor],
     *,
+    bitset_domains: frozenset[str],
     allow_ambiguous_mnemonics: bool = False,
     label_scope: str | None = None,
 ) -> list[CompiledAsmForm]:
@@ -1103,6 +1123,7 @@ def _compile_asm_forms(
                 descriptor_ordinal,
                 asm_form,
                 form_ordinal,
+                bitset_domains=bitset_domains,
                 label_scope=label_scope,
             )
             previous_descriptor_key = seen_mnemonics.get(compiled_form.mnemonic)
@@ -1116,6 +1137,7 @@ def _compile_asm_forms(
 def compile_asm_forms_for_descriptors(
     string_pool: CStringPool,
     descriptors: Sequence[Descriptor],
+    enum_domains: Sequence[EnumDomain],
     *,
     allow_ambiguous_mnemonics: bool = False,
     label_scope: str | None = None,
@@ -1123,6 +1145,7 @@ def compile_asm_forms_for_descriptors(
     return _compile_asm_forms(
         string_pool,
         descriptors,
+        bitset_domains=frozenset(domain.name for domain in enum_domains if domain.kind == EnumDomainKind.BITSET),
         allow_ambiguous_mnemonics=allow_ambiguous_mnemonics,
         label_scope=label_scope,
     )
@@ -1495,6 +1518,7 @@ def compile_descriptor_set(
     asm_forms = compile_asm_forms_for_descriptors(
         string_pool,
         selected_descriptors,
+        spec.enum_domains,
         allow_ambiguous_mnemonics=allow_ambiguous_asm_mnemonics,
     )
     validation.validate_u16_table_count(len(asm_forms), f"descriptor set '{spec.key}' asm form")
