@@ -142,6 +142,42 @@ TEST_F(SourceTextServiceTest, IndependentParameterPreparationJoinsAllDomains) {
   }
 }
 
+TEST_F(SourceTextServiceTest, FailedControlCompileRetiresNativePreparation) {
+  auto* pool = loom_serve_pool_memory(storage_owner_);
+  if (pool) {
+    IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+  }
+  const auto before = loom_serve_pool_statistics(storage_owner_);
+  const auto control =
+      iree::testing::MakeTempFilePath("invalid_text_control", ".loom");
+  {
+    std::ofstream output(control);
+    output << "invalid control program\n";
+    ASSERT_TRUE(output.good());
+  }
+  auto options = ModelOptions();
+  options.sources.control = iree_make_cstring_view(control.c_str());
+  loom_serve_text_model_t* failed = nullptr;
+  IREE_EXPECT_NOT_OK(loom_serve_text_model_allocate(
+      device_, storage_owner_, &options, host_allocator_, &failed));
+  EXPECT_EQ(failed, nullptr);
+  if (pool) {
+    IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+  }
+  const auto after = loom_serve_pool_statistics(storage_owner_);
+  EXPECT_EQ(after.retained.reserved_bytes, before.retained.reserved_bytes);
+  EXPECT_EQ(after.retained.committed_bytes, before.retained.committed_bytes);
+
+  // The failed load retires its producers without closing the shared compiler
+  // host or interfering with another model's execution domain.
+  auto* row = loom_serve_text_model_row(model_, 0);
+  const int32_t token = Oracle::Id('a');
+  IREE_ASSERT_OK(loom_serve_text_row_prefill(row, 1, &token));
+  Oracle reference;
+  reference.Consume("a");
+  EXPECT_EQ(loom_serve_text_row_token(row), reference.Predict());
+}
+
 TEST_F(SourceTextServiceTest, FailedLinkRetiresAcceptedInitialization) {
   const auto package = iree::testing::MakeTempFilePath("failed_text_link");
   ASSERT_TRUE(std::filesystem::create_directory(package));
