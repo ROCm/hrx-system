@@ -1,4 +1,4 @@
-// RUN: with-checks emit low-allocation @nested_if_allocates fixed=%then:target_id:9:1 fixed=%else:target_id:10:1 diagnostics=placement-decisions
+// RUN: emit low-allocation @nested_if_allocates diagnostics=placement-decisions
 
 wasm.target<simd128> @target
 
@@ -9,29 +9,38 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @nested_if_al
     low.scf.yield %then : reg<wasm.v128>
   } else {
     %else = i32x4.sub %fallback, %rhs
-    // REMARK@+1: BACKEND/043 {source_value_name="else", result_value_name="result", decision="rejected"}
+    // REMARK@+1: BACKEND/043 {source_value_name="else", result_value_name="result", decision="accepted"}
     low.scf.yield %else : reg<wasm.v128>
   }
   return %result
 }
 
 // ----
-CHECK: spills: 0
-CHECK: copies: coalesced=0 materialized=0
+low-allocation @nested_if_allocates
+target: target
+descriptor_set: wasm.core.simd128
+mode: virtual
+assignments: 7
+remarks: 0
+spills: 0
+copies: coalesced=0 materialized=0
+classes:
+  wasm.i32: assignments=1 units=1 target_ids=1 physical=0 spill_slots=0 unassigned=0
+  wasm.v128: assignments=6 units=6 target_ids=3 physical=0 spill_slots=0 unassigned=0
 
 // ====
 
-// RUN: with-checks emit low-allocation @nested_for_allocates fixed=%iv:target_id:20:1 fixed=%acc:target_id:21:1 fixed=%copy:target_id:22:1 fixed=%next:target_id:23:1 diagnostics=placement-decisions
+// RUN: emit low-allocation @nested_for_allocates diagnostics=placement-decisions
 
 wasm.target<simd128> @target
 
 low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @nested_for_allocates(%lo: reg<wasm.i32>, %hi: reg<wasm.i32>, %step: reg<wasm.i32>, %seed: reg<wasm.v128>, %rhs: reg<wasm.v128>) -> (reg<wasm.v128>) asm {
-  // REMARK@+1: BACKEND/043 {source_value_name="seed", result_value_name="acc", decision="rejected"}
+  // REMARK@+1: BACKEND/043 {source_value_name="seed", result_value_name="acc", decision="accepted"}
   %result = low.scf.for signed [%lo to %hi step %step] iter_args(%seed: reg<wasm.v128>) -> (reg<wasm.v128>) do(%iv: reg<wasm.i32>, %acc: reg<wasm.v128>) {
-    // REMARK@+1: BACKEND/043 {source_value_name="acc", result_value_name="copy", decision="rejected"}
+    // REMARK@+1: BACKEND/043 {source_value_name="acc", result_value_name="copy", decision="accepted"}
     %copy = copy %acc : reg<wasm.v128> -> reg<wasm.v128>
     %next = i32x4.add %copy, %rhs
-    // REMARK@+2: BACKEND/043 {source_value_name="next", result_value_name="acc", decision="rejected"}
+    // REMARK@+2: BACKEND/043 {source_value_name="next", result_value_name="acc", decision="accepted"}
     // REMARK@+1: BACKEND/043 {source_value_name="next", result_value_name="result", decision="accepted"}
     low.scf.yield %next : reg<wasm.v128>
   }
@@ -39,5 +48,14 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @nested_for_a
 }
 
 // ----
-CHECK: spills: 0
-CHECK: copies: coalesced=0 materialized=1
+low-allocation @nested_for_allocates
+target: target
+descriptor_set: wasm.core.simd128
+mode: virtual
+assignments: 10
+remarks: 0
+spills: 0
+copies: coalesced=1 materialized=0
+classes:
+  wasm.i32: assignments=4 units=4 target_ids=3 physical=0 spill_slots=0 unassigned=0
+  wasm.v128: assignments=6 units=6 target_ids=2 physical=0 spill_slots=0 unassigned=0
