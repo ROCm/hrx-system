@@ -1174,7 +1174,16 @@ INSTANTIATE_TEST_SUITE_P(
              (info.param.second ? "Indirect" : "Direct");
     });
 
-TEST_F(GpuNativeTest, BatchedMappingsReplaceProtectAndReleaseNativeBacking) {
+class GpuNativeVirtualBufferTest : public GpuNativeTest {
+ protected:
+  // Exercise the production protocol selected for each physical target.
+  amdf_queue_command_type_t command_type() const override {
+    return AMDF_QUEUE_COMMAND_TYPE_UNKNOWN;
+  }
+};
+
+TEST_F(GpuNativeVirtualBufferTest,
+       BatchedMappingsReplaceProtectAndReleaseNativeBacking) {
   using iree::hal::cts::Ref;
   Create();
   if (HasFatalFailure()) {
@@ -1354,6 +1363,160 @@ TEST_F(GpuNativeTest, BatchedMappingsReplaceProtectAndReleaseNativeBacking) {
   iree_hal_pool_stats_t statistics;
   iree_hal_pool_query_stats(pool, &statistics);
   EXPECT_EQ(statistics.reservation_count, 0u);
+}
+
+TEST_F(GpuNativeVirtualBufferTest,
+       MixedBackingPreservesCommonHostAndGpuAddresses) {
+  using iree::hal::cts::Ref;
+  Create();
+  if (HasFatalFailure() || IsSkipped()) {
+    return;
+  }
+  uint32_t physical_node = IREE_HAL_TOPOLOGY_NODE_ORDINAL_INVALID;
+  const auto* topology = iree_hal_device_group_topology(group_);
+  for (iree_host_size_t i = 0; i < iree_hal_topology_node_count(topology);
+       ++i) {
+    const auto* node = iree_hal_topology_node_at(topology, i);
+    if (node->kind == IREE_HAL_TOPOLOGY_NODE_KIND_PHYSICAL_DEVICE &&
+        node->device_ordinal ==
+            iree_hal_device_topology_info(device_)->topology_index) {
+      physical_node = node->ordinal;
+      break;
+    }
+  }
+  ASSERT_NE(physical_node, IREE_HAL_TOPOLOGY_NODE_ORDINAL_INVALID);
+  iree_hal_pool_family_access_t family = {
+      .family = iree_hal_queue_family(queues_[0]),
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE,
+  };
+  iree_hal_slab_pool_options_t pool_options;
+  iree_hal_slab_pool_options_initialize(&pool_options);
+  pool_options.placement = {IREE_HAL_POOL_PLACEMENT_REQUIRED, physical_node};
+  Ref<iree_hal_pool_t> local_pool;
+  IREE_ASSERT_OK(
+      iree_hal_slab_pool_create(group_, {1, &family, {}}, &pool_options,
+                                iree_allocator_system(), local_pool.out()));
+  pool_options.placement = {};
+  // The CPU-accessible half requires cached host backing. Public visibility
+  // alone can select a device-local allocation with a fixed CPU aperture.
+  const iree_hal_pool_scope_t scope = {
+      1,
+      &family,
+      {IREE_HAL_MEMORY_ACCESS_ALL, IREE_HAL_MAPPING_MODE_PERSISTENT,
+       IREE_HAL_HOST_MEMORY_PROPERTY_WRITE_BACK}};
+  Ref<iree_hal_pool_t> shared_pool;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(group_, scope, &pool_options,
+                                           iree_allocator_system(),
+                                           shared_pool.out()));
+  family.interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS;
+  iree_hal_pool_t* sources[] = {local_pool, shared_pool};
+  iree_hal_virtual_buffer_capabilities_t capabilities;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
+      group_, scope, {IREE_ARRAYSIZE(sources), sources},
+      iree_allocator_system(), &capabilities));
+  ASSERT_NE(capabilities.max_byte_length, 0u);
+  ASSERT_TRUE(
+      iree_all_bits_set(capabilities.supported_flags,
+                        IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS));
+  const auto unit = std::max(capabilities.reservation_granularity,
+                             capabilities.mapping_granularity);
+  // Retain both generations until all mappings are removed. The virtual buffer
+  // owns addresses, while the caller owns the physical backing and its
+  // lifetime.
+  std::array<std::array<Ref<iree_hal_buffer_t>, 2>, 2> backings;
+  const iree_hal_virtual_buffer_options_t options = {
+      .byte_length = 2 * unit,
+      .mapping_granularity = unit,
+      .flags = IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
+  };
+  Ref<iree_hal_buffer_t> target;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_create(
+      group_, scope, {IREE_ARRAYSIZE(sources), sources}, &options,
+      iree_allocator_system(), target.out()));
+  iree_hal_memory_scope_t host, program;
+  IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
+      group_, {IREE_HAL_MEMORY_SITE_HOST, nullptr}, &host));
+  IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
+      group_, {IREE_HAL_MEMORY_SITE_PROGRAM, family.family}, &program));
+  const iree_hal_memory_scope_t all = {
+      iree_hal_device_group_memory_domain(group_), IREE_HAL_MEMORY_SCOPE_ANY};
+  EXPECT_TRUE(iree_hal_virtual_buffer_query_pool_compatibility(target, program,
+                                                               local_pool));
+  EXPECT_FALSE(iree_hal_virtual_buffer_query_pool_compatibility(target, host,
+                                                                local_pool));
+  EXPECT_TRUE(iree_hal_virtual_buffer_query_pool_compatibility(target, all,
+                                                               shared_pool));
+  const iree_hal_buffer_native_binding_slot_t slot = {
+      .index = target.get()
+                   ->memory.contract->scopes[program.id]
+                   .bindings[IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS],
+      .type = IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+  };
+  const auto address =
+      iree_hal_buffer_native_binding(target, slot).device_address;
+  Ref<iree_hal_semaphore_t> completion;
+  CreateSemaphore(completion.out());
+  iree_hal_semaphore_t* timeline = completion;
+  for (size_t epoch = 0; epoch < backings.size(); ++epoch) {
+    for (size_t i = 0; i < backings[epoch].size(); ++i) {
+      IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+          sources[i], iree_hal_make_pool_reservation_request(unit, unit),
+          iree_infinite_timeout(), backings[epoch][i].out()));
+    }
+    std::array<iree_hal_memory_mapping_t, 2> mappings = {{
+        {
+            .target = target,
+            .scope = program,
+            .target_range = {0, unit},
+            .source = backings[epoch][0],
+            .access = IREE_HAL_MEMORY_ACCESS_ALL,
+        },
+        {
+            .target = target,
+            .scope = all,
+            .target_range = {unit, unit},
+            .source = backings[epoch][1],
+            .access = IREE_HAL_MEMORY_ACCESS_ALL,
+        },
+    }};
+    auto invalid = mappings[0];
+    invalid.scope = host;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_PERMISSION_DENIED,
+        iree_hal_queue_map(queues_[0], {}, {}, 1, &invalid, 0));
+    uint64_t mapped = epoch * 3 + 1, copied = mapped + 1, returned = mapped + 2;
+    IREE_ASSERT_OK(iree_hal_queue_map(queues_[0], {}, {1, &timeline, &mapped},
+                                      mappings.size(), mappings.data(), 0));
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(
+        timeline, mapped, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+    iree_byte_span_t host_view;
+    IREE_ASSERT_OK(
+        iree_hal_buffer_native_host_span(target, unit, 512, &host_view));
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(host_view.data), address + unit);
+    EXPECT_EQ(iree_hal_buffer_native_binding(target, slot).device_address,
+              address);
+    auto* words = reinterpret_cast<uint32_t*>(host_view.data);
+    for (uint32_t i = 0; i < 128; ++i) {
+      words[i] = i < 64 ? 0x1000u * (epoch + 1) + i : 0;
+    }
+    IREE_ASSERT_OK(iree_hal_buffer_flush_host_range(target, unit, 512));
+    IREE_ASSERT_OK(iree_hal_queue_copy(queues_[0], {1, &timeline, &mapped},
+                                       {1, &timeline, &copied}, target, unit,
+                                       target, 0, 256, nullptr, 0));
+    IREE_ASSERT_OK(iree_hal_queue_copy(queues_[1], {1, &timeline, &copied},
+                                       {1, &timeline, &returned}, target, 0,
+                                       target, unit + 256, 256, nullptr, 0));
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(timeline, returned,
+                                           iree_infinite_timeout(),
+                                           IREE_ASYNC_WAIT_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_buffer_invalidate_host_range(target, unit, 512));
+    for (uint32_t i = 0; i < 64; ++i) {
+      EXPECT_EQ(words[i], 0x1000u * (epoch + 1) + i);
+      EXPECT_EQ(words[64 + i], words[i]);
+    }
+  }
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_detach(target, all));
 }
 
 }  // namespace
