@@ -30,6 +30,12 @@ typedef struct iree_hal_tlsf_pool_options_t {
   // Alignment requires the same support from the backing pool.
   iree_hal_memory_tlsf_options_t tlsf_options;
 
+  // Largest request served from shared TLSF slabs. Larger requests use
+  // dedicated backing even when they fit within tlsf_options.range_length.
+  // Zero uses tlsf_options.range_length. Finite pools require zero because
+  // they have no backing pool from which to acquire dedicated ranges.
+  iree_device_size_t max_suballocation_size;
+
   // ASAN policy used to shape hidden backing ranges for reservations.
   iree_hal_asan_pool_options_t asan;
 
