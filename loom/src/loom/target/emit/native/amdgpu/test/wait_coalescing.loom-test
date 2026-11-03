@@ -53,41 +53,12 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @alu_separates_slice_waits(%ad
 
 // ====
 
-// A slice that materializes a physical move is a hardware consumer, not a
-// zero-work boundary. Completion of the second load stays after that move.
-// RUN: emit amdgpu-assembly @materialized_slice_separates_waits strategy=source fixed=%left:physical_register:20:1 fixed=%right:physical_register:21:1
+// A fallthrough edge preserves pending reads until the successor's first
+// hardware consumer, allowing the two reads to share one completion wait.
+// RUN: emit amdgpu-assembly @block_entry_coalesces_reads strategy=source
 amdgpu.target<gfx1151> @target
 
-low.func.def target<amdgpu.rdna3_5.core>(@target) @materialized_slice_separates_waits(%address: reg<amdgpu.vgpr>) asm {
-  %first = ds_read_b128 %address
-  %second = ds_read_b128 %address {offset = 16}
-  %left = slice %first[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %right = slice %second[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %sum = v_add_u32 %left, %right
-  ds_write_b32 %address, %sum {offset = 32}
-  return
-}
-
-// ----
-  ds_read_b128 v[4:7], v0 offset:0
-  ds_read_b128 v[8:11], v0 offset:16
-  s_waitcnt vmcnt(63) lgkmcnt(1)
-  v_mov_b32 v20, v4
-  s_waitcnt vmcnt(63) lgkmcnt(0)
-  v_mov_b32 v21, v8
-  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
-  v_add_u32 v1, v20, v21
-  ds_write_b32 v0, v1 offset:32
-  s_endpgm
-
-// ====
-
-// Even a fallthrough edge separates insertion points: its successor has its
-// own entry frontier, so a successor wait cannot join the predecessor's group.
-// RUN: emit amdgpu-assembly @block_entry_separates_waits strategy=source fixed=%left:physical_register:20:1
-amdgpu.target<gfx1151> @target
-
-low.func.def target<amdgpu.rdna3_5.core>(@target) @block_entry_separates_waits(%address: reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core>(@target) @block_entry_coalesces_reads(%address: reg<amdgpu.vgpr>) asm {
   %first = ds_read_b128 %address
   %second = ds_read_b128 %address {offset = 16}
   %values = concat(%first, %second) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
@@ -103,11 +74,9 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @block_entry_separates_waits(%
 // ----
   ds_read_b128 v[4:7], v0 offset:0
   ds_read_b128 v[8:11], v0 offset:16
-  s_waitcnt vmcnt(63) lgkmcnt(1)
-  v_mov_b32 v20, v4
 .Lbb1:
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  v_add_u32 v1, v20, v8
+  v_add_u32 v1, v4, v8
   ds_write_b32 v0, v1 offset:32
   s_endpgm
 
@@ -115,10 +84,10 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @block_entry_separates_waits(%
 
 // Authored waits keep their own insertion points and spelling. This loose
 // bound cannot retire the remaining load or be folded into a planned wait.
-// RUN: emit amdgpu-assembly @authored_wait_separates_groups strategy=source fixed=%left:physical_register:20:1
+// RUN: emit amdgpu-assembly @authored_wait_preserves_boundary strategy=source
 amdgpu.target<gfx1151> @target
 
-low.func.def target<amdgpu.rdna3_5.core>(@target) @authored_wait_separates_groups(%address: reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core>(@target) @authored_wait_preserves_boundary(%address: reg<amdgpu.vgpr>) asm {
   %first = ds_read_b128 %address
   %second = ds_read_b128 %address {offset = 16}
   %values = concat(%first, %second) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
@@ -133,12 +102,9 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @authored_wait_separates_group
 // ----
   ds_read_b128 v[4:7], v0 offset:0
   ds_read_b128 v[8:11], v0 offset:16
-  s_waitcnt vmcnt(63) lgkmcnt(1)
-  v_mov_b32 v20, v4
   s_waitcnt vmcnt(63) lgkmcnt(2)
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  s_delay_alu instid0(VALU_DEP_1)
-  v_add_u32 v1, v20, v8
+  v_add_u32 v1, v4, v8
   ds_write_b32 v0, v1 offset:32
   s_endpgm
 
@@ -170,65 +136,12 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @mixed_counter_slices(%address
 
 // ====
 
-// Address-state overlays are emitted before a packet's waits. A materialized
-// first slice creates an earlier completion group; the second load's wait stays
-// after its overlay.
-// RUN: emit amdgpu-assembly @address_state_separates_waits strategy=source fixed=%high_address:physical_register:268:1 fixed=%left:physical_register:20:1
-amdgpu.target<gfx1250> @target
-
-low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @address_state_separates_waits(%address: reg<amdgpu.vgpr>, %high_address: reg<amdgpu.vgpr>) asm {
-  %first = ds_read_b128 %address
-  %second = ds_read_b128 %address {offset = 16}
-  %values = concat(%first, %second) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
-  %left = slice %values[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  ds_write_b128 %high_address, %second {offset = 32}
-  ds_write_b32 %address, %left {offset = 48}
-  return
-}
-
-// ----
-  ds_read_b128 v[8:11], v0 offset:0
-  ds_read_b128 v[12:15], v0 offset:16
-  s_wait_dscnt dscnt(1)
-  v_mov_b32 v20, v8
-  s_set_vgpr_msb 1
-  s_wait_dscnt dscnt(0)
-  ds_write_b128 v12, v[12:15] offset:32
-  s_set_vgpr_msb 256
-  ds_write_b32 v0, v20 offset:48
-  s_endpgm
-
-// ====
-
-// Fixed slices transfer pending storage ownership just like free coalescing.
+// Slices transfer pending storage ownership through free coalescing.
 // The partial write still waits for the preserved bits from the global load.
-// RUN: emit amdgpu-assembly @fixed_slice_continuation strategy=source fixed=%loaded:physical_register:4:2 fixed=%sliced:physical_register:4:1 fixed=%continued:physical_register:4:1
+// RUN: emit amdgpu-assembly @slice_continuation strategy=source
 amdgpu.target<gfx1151> @target
 
-low.func.def target<amdgpu.rdna3_5.core>(@target) @fixed_slice_continuation(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %loaded = global_load_b64_saddr %address, %input
-  %sliced = slice %loaded[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %continued = ds_load_u16_d16_hi %sliced, %address
-  %result = v_add_u32 %continued, %rhs
-  return %result
-}
-
-// ----
-  global_load_b64 v[4:5], v0, s[0:1] offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(63)
-  ds_load_u16_d16_hi v4, v0 offset:0
-  s_waitcnt vmcnt(63) lgkmcnt(0)
-  v_add_u32 v0, v4, v1
-  s_endpgm
-
-// ====
-
-// Fixing only the result also binds its tied input. The optional slice must
-// materialize a preserving move when the original load occupies other storage.
-// RUN: emit amdgpu-assembly @fixed_partial_result strategy=source fixed=%continued:physical_register:4:1
-amdgpu.target<gfx1151> @target
-
-low.func.def target<amdgpu.rdna3_5.core>(@target) @fixed_partial_result(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core>(@target) @slice_continuation(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %loaded = global_load_b64_saddr %address, %input
   %sliced = slice %loaded[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %continued = ds_load_u16_d16_hi %sliced, %address
@@ -239,20 +152,19 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @fixed_partial_result(%address
 // ----
   global_load_b64 v[2:3], v0, s[0:1] offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_mov_b32 v4, v2
-  ds_load_u16_d16_hi v4, v0 offset:0
+  ds_load_u16_d16_hi v2, v0 offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  v_add_u32 v0, v4, v1
+  v_add_u32 v0, v2, v1
   s_endpgm
 
 // ====
 
 // The low register can stay live while a tied continuation updates the high
 // register. Lease handoff follows that subrange, not whole-source deadness.
-// RUN: emit amdgpu-assembly @fixed_slice_live_sibling strategy=source fixed=%loaded:physical_register:4:2 fixed=%continued:physical_register:5:1
+// RUN: emit amdgpu-assembly @slice_live_sibling strategy=source
 amdgpu.target<gfx1151> @target
 
-low.func.def target<amdgpu.rdna3_5.core>(@target) @fixed_slice_live_sibling(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core>(@target) @slice_live_sibling(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %loaded = global_load_b64_saddr %address, %input
   %sliced = slice %loaded[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %continued = ds_load_u16_d16_hi %sliced, %address
@@ -262,21 +174,21 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @fixed_slice_live_sibling(%add
 }
 
 // ----
-  global_load_b64 v[4:5], v0, s[0:1] offset:0
+  global_load_b64 v[2:3], v0, s[0:1] offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  ds_load_u16_d16_hi v5, v0 offset:0
+  ds_load_u16_d16_hi v3, v0 offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  v_add_u32 v0, v5, v4
+  v_add_u32 v0, v3, v2
   s_endpgm
 
 // ====
 
-// A different fixed subrange requires a real move, not an alias exemption.
-// Reusing the dead low register first retires the pending wide load.
-// RUN: emit amdgpu-assembly @fixed_shifted_slice strategy=source fixed=%loaded:physical_register:4:2 fixed=%continued:physical_register:4:1
+// A tied continuation can update one subrange after retiring the pending wide
+// load without disturbing the other subrange.
+// RUN: emit amdgpu-assembly @shifted_slice strategy=source
 amdgpu.target<gfx1151> @target
 
-low.func.def target<amdgpu.rdna3_5.core>(@target) @fixed_shifted_slice(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core>(@target) @shifted_slice(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %loaded = global_load_b64_saddr %address, %input
   %sliced = slice %loaded[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %continued = ds_load_u16_d16_hi %sliced, %address
@@ -285,38 +197,21 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @fixed_shifted_slice(%address:
 }
 
 // ----
-  global_load_b64 v[4:5], v0, s[0:1] offset:0
+  global_load_b64 v[2:3], v0, s[0:1] offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_mov_b32 v4, v5
-  ds_load_u16_d16_hi v4, v0 offset:0
+  ds_load_u16_d16_hi v3, v0 offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  v_add_u32 v0, v4, v1
+  v_add_u32 v0, v3, v1
   s_endpgm
 
 // ====
 
-// Retiring the load cannot authorize clobbering a still-live sibling register.
-// RUN: emit amdgpu-assembly @fixed_slice_live_conflict strategy=source fixed=%loaded:physical_register:4:2 fixed=%continued:physical_register:4:1
+// Each concat input transfers its pending subrange into a wider identity. The
+// aggregate neither materializes moves nor retires either load early.
+// RUN: emit amdgpu-assembly @pending_concat strategy=source
 amdgpu.target<gfx1151> @target
 
-low.func.def target<amdgpu.rdna3_5.core>(@target) @fixed_slice_live_conflict(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
-  // ERROR@+1: BACKEND/050 {value_name="loaded", location_kind="physical_register", location_base="4", location_count="2"}
-  %loaded = global_load_b64_saddr %address, %input
-  %sliced = slice %loaded[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %continued = ds_load_u16_d16_hi %sliced, %address
-  %sibling = slice %loaded[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %result = v_add_u32 %continued, %sibling
-  return %result
-}
-
-// ====
-
-// Each concat input transfers its own pending subrange into a wider identity.
-// The fixed aggregate neither materializes moves nor retires either load early.
-// RUN: emit amdgpu-assembly @fixed_pending_concat strategy=source fixed=%assumed:physical_register:4:4
-amdgpu.target<gfx1151> @target
-
-low.func.def target<amdgpu.rdna3_5.core>(@target) @fixed_pending_concat(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3_5.core>(@target) @pending_concat(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>) asm {
   %first = global_load_b64_saddr %address, %input
   %second = global_load_b64_saddr %address, %input {offset = 8}
   %packed = concat(%first, %second) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>

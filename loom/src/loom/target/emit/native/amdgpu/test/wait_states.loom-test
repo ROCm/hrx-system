@@ -105,22 +105,6 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) @gfx11_wmma_depend
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @gfx11_structural_moves_preserve_last_valu_dependency strategy=source fixed=%lane0:physical_register:24:1 fixed=%lane1:physical_register:25:1 fixed=%lane2:physical_register:26:1 fixed=%lane3:physical_register:27:1 fixed=%lane4:physical_register:28:1 fixed=%lane5:physical_register:29:1 fixed=%lane6:physical_register:30:1 fixed=%lane7:physical_register:31:1 fixed=%lhs:physical_register:0:8
-
-amdgpu.target<gfx11-generic> @gfx11_target
-
-low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) @gfx11_structural_moves_preserve_last_valu_dependency(%lane0: reg<amdgpu.vgpr>, %lane1: reg<amdgpu.vgpr>, %lane2: reg<amdgpu.vgpr>, %lane3: reg<amdgpu.vgpr>, %lane4: reg<amdgpu.vgpr>, %lane5: reg<amdgpu.vgpr>, %lane6: reg<amdgpu.vgpr>, %lane7: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm {
-  %lhs = concat(%lane0, %lane1, %lane2, %lane3, %lane4, %lane5, %lane6, %lane7) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
-  %result = v_wmma_f32_16x16x16_f16 %lhs, %rhs, %acc
-  return %result
-}
-
-// ----
-amdgpu.wait_state_plan states=1 progress=3 hazards=1
-state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n1/o1 producer=n0 consumer=n1 required=4 observed=1 residual=3 delay_alu=0x0001
-
-// ====
-
 // RUN: emit amdgpu-wait-state-plan @gfx11_valu_dependency_delay_alu strategy=source
 
 amdgpu.target<gfx1100> @gfx11_target
@@ -383,17 +367,19 @@ low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_vmem_store_b128_p
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @gfx942_cross_block_store_data_reuse strategy=source fixed=%payload:physical_register:0:4 fixed=%replacement:physical_register:4:1 fixed=%value:physical_register:0:1
+// A store retains its payload across an edge. Keeping the replacement input
+// live makes ordinary allocation reuse the payload storage for the new value.
+// RUN: emit amdgpu-wait-state-plan @gfx942_cross_block_store_data_reuse strategy=source
 
 amdgpu.target<gfx942> @gfx942_target
 
-low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_cross_block_store_data_reuse(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %payload: reg<amdgpu.vgpr x4>, %replacement: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_cross_block_store_data_reuse(%resource: reg<amdgpu.sgpr x4>, %soffset: reg<amdgpu.sgpr>, %payload: reg<amdgpu.vgpr x4>, %replacement: reg<amdgpu.vgpr>, %vaddr: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.vgpr>) asm {
   buffer_store_dwordx4 %payload, %resource, %vaddr, %soffset
   low.br ^reuse
 ^reuse:
-  %value = v_mov_b32_copy %replacement
+  %value = v_add_u32 %replacement, %replacement
   %lane = v_readfirstlane_b32 %value
-  return %lane
+  return %lane, %replacement
 }
 
 // ----
@@ -537,7 +523,7 @@ state[0] reason=matrix_result_use action=amdgpu.s_nop at=b0:n1/o1 producer=n0 co
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @gfx942_smfmac_result_to_smfmac_srcc_overlap_wait_state fixed=%acc16:physical_register:0:16 fixed=%overlap_acc:physical_register:4:4
+// RUN: emit amdgpu-wait-state-plan @gfx942_smfmac_result_to_smfmac_srcc_overlap_wait_state
 
 amdgpu.target<gfx942> @gfx942_target
 
@@ -551,22 +537,6 @@ low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_smfmac_result_to_
 // ----
 amdgpu.wait_state_plan states=1 progress=3 hazards=1
 state[0] reason=matrix_result_use action=amdgpu.s_nop at=b0:n2/o2 producer=n0 consumer=n2 required=9 observed=0 residual=9 matrix=mfma_gfx940/matrix_srcc_overlap/pass8
-
-// ====
-
-// RUN: emit amdgpu-wait-state-plan @gfx942_mfma_result_to_valu_waw_wait_state fixed=%acc:physical_register:0:4 fixed=%overwrite:physical_register:2:1
-
-amdgpu.target<gfx942> @gfx942_target
-
-low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @gfx942_mfma_result_to_valu_waw_wait_state(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %acc: reg<amdgpu.vgpr x4>, %x: reg<amdgpu.vgpr>, %y: reg<amdgpu.vgpr>) asm {
-  %first = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %acc
-  %overwrite = v_add_u32 %x, %y
-  return
-}
-
-// ----
-amdgpu.wait_state_plan states=1 progress=3 hazards=1
-state[0] reason=matrix_result_use action=amdgpu.s_nop at=b0:n1/o1 producer=n0 consumer=n1 required=7 observed=0 residual=7 matrix=mfma_gfx940/write/pass4
 
 // ====
 
@@ -719,7 +689,7 @@ amdgpu.wait_state_plan states=0 progress=3 hazards=0
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @gfx950_sdwa_dst_sel_waw_wait_state strategy=source fixed=%packed:physical_register:0:1 fixed=%overwrite:physical_register:0:1
+// RUN: emit amdgpu-wait-state-plan @gfx950_sdwa_dst_sel_waw_wait_state strategy=source
 
 amdgpu.target<gfx950> @gfx950_target
 

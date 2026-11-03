@@ -1,6 +1,6 @@
 // The compact and e64 encodings share one destructive two-register contract.
 // Named controls remain independent in Low and use LLVM's canonical spelling.
-// RUN: emit amdgpu-assembly @permlane_swap_forms strategy=source waits=none fixed=%lhs:physical_register:11:1 fixed=%rhs:physical_register:13:1
+// RUN: emit amdgpu-assembly @permlane_swap_forms strategy=source waits=none
 
 amdgpu.target<gfx950> @target
 
@@ -19,22 +19,22 @@ low.func.def target<amdgpu.cdna4.core>(@target) @permlane_swap_forms(%lhs: reg<a
 }
 
 // ----
-  v_permlane16_swap_b32 v11, v13
-  v_permlane16_swap_b32_e64 v11, v13
-  v_permlane16_swap_b32_e64 v11, v13 bound_ctrl:1
-  v_permlane16_swap_b32_e64 v11, v13 fi:1
-  v_permlane16_swap_b32_e64 v11, v13 bound_ctrl:1 fi:1
-  v_permlane32_swap_b32 v11, v13
-  v_permlane32_swap_b32_e64 v11, v13
-  v_permlane32_swap_b32_e64 v11, v13 bound_ctrl:1
-  v_permlane32_swap_b32_e64 v11, v13 fi:1
-  v_permlane32_swap_b32_e64 v11, v13 bound_ctrl:1 fi:1
+  v_permlane16_swap_b32 v0, v1
+  v_permlane16_swap_b32_e64 v0, v1
+  v_permlane16_swap_b32_e64 v0, v1 bound_ctrl:1
+  v_permlane16_swap_b32_e64 v0, v1 fi:1
+  v_permlane16_swap_b32_e64 v0, v1 bound_ctrl:1 fi:1
+  v_permlane32_swap_b32 v0, v1
+  v_permlane32_swap_b32_e64 v0, v1
+  v_permlane32_swap_b32_e64 v0, v1 bound_ctrl:1
+  v_permlane32_swap_b32_e64 v0, v1 fi:1
+  v_permlane32_swap_b32_e64 v0, v1 bound_ctrl:1 fi:1
   s_endpgm
 
 // ====
 
 // Native words distinguish both opcodes and every OP_SEL control combination.
-// RUN: emit amdgpu-native-words @permlane_swap_words strategy=source waits=none fixed=%lhs:physical_register:11:1 fixed=%rhs:physical_register:13:1
+// RUN: emit amdgpu-native-words @permlane_swap_words strategy=source waits=none
 
 amdgpu.target<gfx950> @target
 
@@ -53,24 +53,24 @@ low.func.def target<amdgpu.cdna4.core>(@target) @permlane_swap_words(%lhs: reg<a
 }
 
 // ----
-0x7E16B30D
-0xD199000B
-0x0000010D
-0xD199100B
-0x0000010D
-0xD199080B
-0x0000010D
-0xD199180B
-0x0000010D
-0x7E16B50D
-0xD19A000B
-0x0000010D
-0xD19A100B
-0x0000010D
-0xD19A080B
-0x0000010D
-0xD19A180B
-0x0000010D
+0x7E00B301
+0xD1990000
+0x00000101
+0xD1991000
+0x00000101
+0xD1990800
+0x00000101
+0xD1991800
+0x00000101
+0x7E00B501
+0xD19A0000
+0x00000101
+0xD19A1000
+0x00000101
+0xD19A0800
+0x00000101
+0xD19A1800
+0x00000101
 0xBF810000
 
 // ====

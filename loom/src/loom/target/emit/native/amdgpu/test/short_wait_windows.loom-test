@@ -213,7 +213,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @subword_forwarding_fallthrough(
 
 // ====
 
-// RUN: emit amdgpu-assembly @joined_alu_windows strategy=source fixed=%left_value:physical_register:0:1 fixed=%right_value:physical_register:0:1 fixed=%carried:physical_register:0:1
+// RUN: emit amdgpu-assembly @joined_alu_windows strategy=source
 
 amdgpu.target<gfx90a> @target
 
@@ -248,7 +248,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @joined_alu_windows(%input: reg<
 
 // ====
 
-// RUN: emit amdgpu-assembly @loop_carried_alu_window strategy=source fixed=%input:physical_register:0:1 fixed=%carried:physical_register:0:1 fixed=%next:physical_register:0:1
+// RUN: emit amdgpu-assembly @loop_carried_alu_window strategy=source
 
 amdgpu.target<gfx90a> @target
 

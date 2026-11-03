@@ -477,7 +477,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @coupled_loop_carried_completion
 // Completed register history cannot hide a later outstanding write. Reusing
 // its physical result in a successor still needs completion without an SSA
 // consumer, even after the producing block's linear lease interval has ended.
-// RUN: emit amdgpu-assembly @retired_history_before_pending_write strategy=source fixed=%pending:physical_register:4:1 fixed=%replacement:physical_register:4:1
+// RUN: emit amdgpu-assembly @retired_history_before_pending_write strategy=source
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @retired_history_before_pending_write(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.vgpr>, %increment: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -497,10 +497,10 @@ low.func.def target<amdgpu.rdna3.core>(@target) @retired_history_before_pending_
   s_waitcnt vmcnt(63) lgkmcnt(0)
   ds_bpermute_b32 v3, v0, v3 offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  ds_bpermute_b32 v4, v0, v3 offset:0
+  ds_bpermute_b32 v0, v0, v3 offset:0
 .Lbb1:
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  v_add_u32 v4, v1, v2
+  v_add_u32 v0, v1, v2
   s_endpgm
 
 // ====

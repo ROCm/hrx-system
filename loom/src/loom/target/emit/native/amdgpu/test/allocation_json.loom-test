@@ -83,69 +83,6 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @spill_materialization_rea
 
 // ====
 
-// RUN: with-checks emit amdgpu-allocation-json @gfx11_allocation_json_fixed_value_demand strategy=source amdgpu.vgpr=3 fixed=%fixed:physical_register:1:1
-amdgpu.target<gfx1100> @gfx11_target
-
-low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_fixed_value_demand(%seed0: reg<amdgpu.vgpr>, %seed1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %fixed = v_add_u32 %seed0, %seed1
-  %guard = v_add_u32 %seed0, %seed0
-  %lo = v_mov_b32 11
-  %hi = v_mov_b32 13
-  %wide = concat(%lo, %hi) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %wide0 = slice %wide[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %out = v_add_u32 %wide0, %fixed
-  return %out
-}
-
-// ----
-// Unused aggregate units do not force a copy of the fixed value.
-CHECK: *"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,*
-
-// ====
-
-// RUN: with-checks emit amdgpu-allocation-json @gfx11_allocation_json_non_entry_fixed_value_demand strategy=source amdgpu.vgpr=3 fixed=%fixed:physical_register:1:1
-amdgpu.target<gfx1100> @gfx11_target
-
-low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_non_entry_fixed_value_demand(%seed0: reg<amdgpu.vgpr>, %seed1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  low.br ^body
-^body:
-  %fixed = v_add_u32 %seed0, %seed1
-  %guard = v_add_u32 %seed0, %seed0
-  %lo = v_mov_b32 11
-  %hi = v_mov_b32 13
-  %wide = concat(%lo, %hi) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %wide0 = slice %wide[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %out = v_add_u32 %wide0, %fixed
-  return %out
-}
-
-// ----
-// Unused aggregate units do not force a copy of the fixed value.
-CHECK: *"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,*
-
-// ====
-
-// RUN: with-checks emit amdgpu-allocation-json @gfx11_allocation_json_block_arg_fixed_value_demand strategy=source amdgpu.vgpr=3 fixed=%fixed:physical_register:1:1
-amdgpu.target<gfx1100> @gfx11_target
-
-low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_block_arg_fixed_value_demand(%seed0: reg<amdgpu.vgpr>, %seed1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  low.br ^body(%seed1: reg<amdgpu.vgpr>)
-^body(%fixed: reg<amdgpu.vgpr>):
-  %guard = v_add_u32 %seed0, %seed0
-  %lo = v_mov_b32 11
-  %hi = v_mov_b32 13
-  %wide = concat(%lo, %hi) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %wide0 = slice %wide[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %out = v_add_u32 %wide0, %fixed
-  return %out
-}
-
-// ----
-// Unused aggregate units do not force a copy of the fixed value.
-CHECK: *"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,*
-
-// ====
-
 // RUN: emit amdgpu-allocation-json @gfx11_allocation_json_lds_wait strategy=source
 amdgpu.target<gfx1100> @gfx11_target
 

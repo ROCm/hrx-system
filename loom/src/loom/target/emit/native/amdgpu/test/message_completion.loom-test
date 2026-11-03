@@ -59,23 +59,24 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @partial_message_wait(%mask: r
 // ====
 
 // An unconsumed message result still owns its destination until completion.
-// Register allocation may reuse it only after the result storage lease retires.
-// RUN: emit amdgpu-assembly @message_destination_reuse strategy=source fixed=%clock:physical_register:4:1 fixed=%replacement:physical_register:4:1
+// Keeping the input live makes ordinary allocation reuse that destination for
+// the replacement in the successor block.
+// RUN: emit amdgpu-assembly @message_destination_reuse strategy=source
 amdgpu.target<gfx1151> @target
 
-low.func.def target<amdgpu.rdna3_5.core>(@target) @message_destination_reuse(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core>(@target) @message_destination_reuse(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
   %clock = s_sendmsg_rtn_b32 {message = 131}
   low.br ^clobber
 ^clobber:
   %replacement = s_add_u32 %input, %input
-  return %replacement
+  return %replacement, %input
 }
 
 // ----
-  s_sendmsg_rtn_b32 s4, message(131)
+  s_sendmsg_rtn_b32 s1, message(131)
 .Lbb1:
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  s_add_u32 s4, s0, s0
+  s_add_u32 s1, s0, s0
   s_endpgm
 
 // ====

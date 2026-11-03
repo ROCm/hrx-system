@@ -1,4 +1,4 @@
-// RUN: emit amdgpu-assembly @concat_reservation_preserves_residency strategy=source fixed=%pressure:physical_register:0:47 fixed=%address:physical_register:47:1 fixed=%output:physical_register:0:2
+// RUN: emit amdgpu-assembly @concat_reservation_preserves_residency strategy=source
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 

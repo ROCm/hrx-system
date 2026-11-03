@@ -1,5 +1,5 @@
 // One native VOPD producer needs one hint across separate uses of its results.
-// RUN: emit amdgpu-assembly @split_vopd_results strategy=source fixed=%a:physical_register:0:1 fixed=%b:physical_register:1:1 fixed=%c:physical_register:2:1 fixed=%d:physical_register:3:1 fixed=%x:physical_register:4:1 fixed=%y:physical_register:5:1
+// RUN: emit amdgpu-assembly @split_vopd_results strategy=source
 
 amdgpu.target<gfx1100> @target
 
@@ -12,16 +12,16 @@ low.func.def target<amdgpu.rdna3.core>(@target) @split_vopd_results(%a: reg<amdg
 }
 
 // ----
-  v_dual_add_f32 v4, v1, v0 :: v_dual_mul_f32 v5, v2, v3
+  v_dual_add_f32 v0, v0, v1 :: v_dual_mul_f32 v3, v3, v2
   s_delay_alu instid0(VALU_DEP_1)
-  v_readfirstlane_b32 s0, v4
-  v_add_f32 v0, v5, v5
+  v_readfirstlane_b32 s0, v0
+  v_add_f32 v0, v3, v3
   s_endpgm
 
 // ====
 
 // Completing a VALU producer leaves the older independent VALU producer outstanding.
-// RUN: emit amdgpu-assembly @independent_valu_producer strategy=source fixed=%a:physical_register:0:1 fixed=%b:physical_register:1:1 fixed=%c:physical_register:2:1 fixed=%d:physical_register:3:1 fixed=%x:physical_register:4:1 fixed=%y:physical_register:5:1
+// RUN: emit amdgpu-assembly @independent_valu_producer strategy=source
 
 amdgpu.target<gfx1100> @target
 
@@ -37,19 +37,19 @@ low.func.def target<amdgpu.rdna3.core>(@target) @independent_valu_producer(%a: r
 
 // ----
   v_readfirstlane_b32 s0, v0
-  v_dual_add_f32 v4, v1, v0 :: v_dual_mul_f32 v5, v2, v3
+  v_dual_add_f32 v0, v0, v1 :: v_dual_mul_f32 v3, v3, v2
   s_delay_alu instid0(VALU_DEP_1)
-  v_readfirstlane_b32 s1, v4
+  v_readfirstlane_b32 s1, v0
   s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_3)
   s_add_u32 s0, s0, s1
-  v_add_f32 v0, v5, v5
+  v_add_f32 v0, v3, v3
   s_endpgm
 
 // ====
 
 // Both encoded selectors complete their producers, including unconsumed results.
 // Intervening VALU issues advance the retained completion identities.
-// RUN: emit amdgpu-assembly @two_vopd_producers strategy=source fixed=%a:physical_register:0:1 fixed=%b:physical_register:1:1 fixed=%c:physical_register:2:1 fixed=%d:physical_register:3:1 fixed=%x:physical_register:4:1 fixed=%y:physical_register:5:1 fixed=%u:physical_register:6:1 fixed=%v:physical_register:7:1
+// RUN: emit amdgpu-assembly @two_vopd_producers strategy=source
 
 amdgpu.target<gfx1100> @target
 
@@ -65,19 +65,19 @@ low.func.def target<amdgpu.rdna3.core>(@target) @two_vopd_producers(%a: reg<amdg
 }
 
 // ----
-  v_dual_add_f32 v4, v1, v0 :: v_dual_mul_f32 v5, v2, v3
-  v_dual_add_f32 v6, v1, v0 :: v_dual_mul_f32 v7, v2, v3
+  v_dual_add_f32 v4, v0, v1 :: v_dual_mul_f32 v5, v3, v2
+  v_dual_add_f32 v0, v0, v1 :: v_dual_mul_f32 v3, v3, v2
   s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
-  v_add_f32 v0, v4, v6
+  v_add_f32 v0, v4, v0
   s_delay_alu instid0(VALU_DEP_1)
   v_readfirstlane_b32 s0, v0
-  v_add_f32 v0, v5, v7
+  v_add_f32 v0, v5, v3
   s_endpgm
 
 // ====
 
 // A new memory-separated epoch must not reuse earlier completion bits.
-// RUN: emit amdgpu-assembly @new_producer_epoch strategy=source fixed=%a:physical_register:0:1 fixed=%b:physical_register:1:1 fixed=%c:physical_register:2:1 fixed=%d:physical_register:3:1 fixed=%x:physical_register:4:1 fixed=%y:physical_register:5:1 fixed=%u:physical_register:6:1 fixed=%v:physical_register:7:1
+// RUN: emit amdgpu-assembly @new_producer_epoch strategy=source
 
 amdgpu.target<gfx1100> @target
 
@@ -94,11 +94,11 @@ low.func.def target<amdgpu.rdna3.core>(@target) @new_producer_epoch(%a: reg<amdg
 }
 
 // ----
-  v_dual_add_f32 v4, v1, v0 :: v_dual_mul_f32 v5, v2, v3
+  v_dual_add_f32 v4, v0, v1 :: v_dual_mul_f32 v5, v3, v2
   s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_2) | instid1(VALU_DEP_1)
   v_readfirstlane_b32 s0, v4
   ds_write_b32 v0, v5 offset:0
-  v_dual_add_f32 v6, v1, v0 :: v_dual_mul_f32 v7, v2, v3
-  v_readfirstlane_b32 s1, v6
-  v_add_f32 v0, v7, v7
+  v_dual_add_f32 v0, v0, v1 :: v_dual_mul_f32 v3, v3, v2
+  v_readfirstlane_b32 s1, v0
+  v_add_f32 v0, v3, v3
   s_endpgm

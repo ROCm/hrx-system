@@ -42,14 +42,19 @@ low.func.def target<amdgpu.cdna3.core>(@target) @dot_read_other(%lhs: reg<amdgpu
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @dot_write_other strategy=source fixed=%acc:physical_register:0:1 fixed=%dot:physical_register:0:1 fixed=%value:physical_register:0:1
+
+// A generic write cannot reuse a pending dot destination before its write
+// window closes. Keeping the multiplicands live makes ordinary allocation
+// place the replacement in the dead accumulator storage.
+// RUN: emit amdgpu-assembly @dot_result_reuse strategy=source
 amdgpu.target<gfx950> @target
 
-low.func.def target<amdgpu.cdna4.core>(@target) @dot_write_other(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>, %other_acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.cdna4.core>(@target) @dot_result_reuse(%acc: reg<amdgpu.vgpr>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %dot = v_dot2_f32_f16 %lhs, %rhs, %acc
   %value = v_mov_b32 42
-  return %value
+  return %value, %lhs, %rhs
 }
+
 // ----
   v_dot2_f32_f16 v0, v1, v2, v0
   s_nop 2
@@ -57,7 +62,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) @dot_write_other(%lhs: reg<amdgp
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @matching_native_dot_overwrite strategy=source fixed=%first:physical_register:0:1 fixed=%second:physical_register:0:1
+// RUN: emit amdgpu-assembly @matching_native_dot_overwrite strategy=source
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @matching_native_dot_overwrite(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc0: reg<amdgpu.vgpr>, %acc1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -169,7 +174,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @fallthrough_dot_read(%lhs: reg<
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @join_preserves_opcode_identity strategy=source fixed=%left:physical_register:0:1 fixed=%right:physical_register:0:1 fixed=%incoming:physical_register:0:1 fixed=%result:physical_register:0:1
+// RUN: emit amdgpu-assembly @join_preserves_opcode_identity strategy=source
 amdgpu.target<gfx90a> @target
 
 low.func.def target<amdgpu.cdna2.core>(@target) @join_preserves_opcode_identity(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %initial: reg<amdgpu.vgpr>, %choice: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -201,7 +206,7 @@ low.func.def target<amdgpu.cdna2.core>(@target) @join_preserves_opcode_identity(
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @loop_dot_operand_read strategy=source fixed=%initial:physical_register:0:1 fixed=%carried:physical_register:0:1 fixed=%next:physical_register:0:1
+// RUN: emit amdgpu-assembly @loop_dot_operand_read strategy=source
 amdgpu.target<gfx942> @target
 
 low.func.def target<amdgpu.cdna3.core>(@target) @loop_dot_operand_read(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %initial: reg<amdgpu.vgpr>, %choice: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
@@ -226,20 +231,4 @@ low.func.def target<amdgpu.cdna3.core>(@target) @loop_dot_operand_read(%lhs: reg
 .Lbb2:
   s_branch .Lbb1
 .Lbb3:
-  s_endpgm
-
-// ====
-// RUN: emit amdgpu-assembly @sequential_copies_credit_dot_progress strategy=source fixed=%acc:physical_register:0:1 fixed=%dot:physical_register:0:1 fixed=%prefix:physical_register:4:1 fixed=%tuple:physical_register:8:2
-amdgpu.target<gfx90a> @target
-
-low.func.def target<amdgpu.cdna2.core>(@target) @sequential_copies_credit_dot_progress(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>, %prefix: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
-  %dot = v_dot2_f32_f16 %lhs, %rhs, %acc
-  %tuple = concat(%prefix, %dot) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  return %tuple
-}
-// ----
-  v_dot2_f32_f16 v0, v1, v2, v0
-  s_nop 1
-  v_mov_b32 v8, v4
-  v_mov_b32 v9, v0
   s_endpgm

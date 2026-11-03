@@ -344,7 +344,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @flat_workgroup_publication(%a
 // ====
 
 // VMEM write ordering cannot cover a flat result that may return through LDS.
-// RUN: emit amdgpu-assembly @flat_result_reuse strategy=source fixed=%old:physical_register:8:1 fixed=%replacement:physical_register:8:1
+// RUN: emit amdgpu-assembly @flat_result_reuse strategy=source
 
 amdgpu.target<gfx1151> @target
 
@@ -355,16 +355,16 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @flat_result_reuse(%address: r
 }
 
 // ----
-  flat_load_dword v8, v[0:1] offset:0
+  flat_load_dword v0, v[0:1] offset:0
   s_waitcnt vmcnt(0) lgkmcnt(0)
-  global_load_b32 v8, v2, s[0:1] offset:0
+  global_load_b32 v0, v2, s[0:1] offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_endpgm
 
 // ====
 
 // An incoming flat write may use LDS and race an older VMEM result in the same VGPR.
-// RUN: emit amdgpu-assembly @global_result_reused_by_flat strategy=source fixed=%old:physical_register:8:1 fixed=%replacement:physical_register:8:1
+// RUN: emit amdgpu-assembly @global_result_reused_by_flat strategy=source
 
 amdgpu.target<gfx1151> @target
 
@@ -375,16 +375,16 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @global_result_reused_by_flat(
 }
 
 // ----
-  global_load_b32 v8, v0, s[0:1] offset:0
+  global_load_b32 v0, v0, s[0:1] offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  flat_load_dword v8, v[2:3] offset:0
+  flat_load_dword v0, v[2:3] offset:0
   s_waitcnt vmcnt(0) lgkmcnt(0)
   s_endpgm
 
 // ====
 
 // Both result leases survive the edge even when the SSA result is unused.
-// RUN: emit amdgpu-assembly @flat_result_reuse_across_edge strategy=source fixed=%old:physical_register:8:1 fixed=%replacement:physical_register:8:1
+// RUN: emit amdgpu-assembly @flat_result_reuse_across_edge strategy=source
 
 amdgpu.target<gfx1151> @target
 
@@ -397,10 +397,10 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @flat_result_reuse_across_edge
 }
 
 // ----
-  flat_load_dword v8, v[0:1] offset:0
+  flat_load_dword v0, v[0:1] offset:0
 .Lbb1:
   s_waitcnt vmcnt(0) lgkmcnt(0)
-  v_mov_b32 v8, 7
+  v_mov_b32 v0, 7
   s_endpgm
 
 // ====
@@ -487,7 +487,7 @@ low.func.def target<amdgpu.cdna3.core>(@target) @flat_full_drain_restores_lds_or
 // ====
 
 // Carried flat results retain both counter positions across a copy-free backedge.
-// RUN: emit amdgpu-assembly @cyclic_flat_gfx1151 strategy=source fixed=%seed0:physical_register:4:1 fixed=%seed1:physical_register:5:1 fixed=%carried0:physical_register:4:1 fixed=%carried1:physical_register:5:1 fixed=%third:physical_register:4:1 fixed=%fourth:physical_register:5:1 fixed=%first:physical_register:6:1 fixed=%second:physical_register:7:1
+// RUN: emit amdgpu-assembly @cyclic_flat_gfx1151 strategy=source
 
 amdgpu.target<gfx1151> @target
 
@@ -514,33 +514,33 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @cyclic_flat_gfx1151(%address:
 
 // ----
 .Lbb1:
-  flat_load_dword v6, v[2:3] offset:0
-  flat_load_dword v7, v[2:3] offset:4
+  flat_load_dword v3, v[4:5] offset:0
+  flat_load_dword v6, v[4:5] offset:4
   s_waitcnt vmcnt(3) lgkmcnt(3)
-  v_add_u32 v0, v0, v4
-  flat_load_dword v4, v[2:3] offset:8
+  v_add_u32 v2, v2, v0
+  flat_load_dword v0, v[4:5] offset:8
   s_waitcnt vmcnt(3) lgkmcnt(3)
-  v_add_u32 v0, v0, v5
-  flat_load_dword v5, v[2:3] offset:12
+  v_add_u32 v2, v2, v1
+  flat_load_dword v1, v[4:5] offset:12
   s_waitcnt vmcnt(3) lgkmcnt(3)
-  v_add_u32 v0, v0, v6
+  v_add_u32 v2, v2, v3
   s_waitcnt vmcnt(2) lgkmcnt(2)
   s_delay_alu instid0(VALU_DEP_1)
-  v_add_u32 v0, v0, v7
+  v_add_u32 v2, v2, v6
   s_cbranch_scc0 .Lbb3
 .Lbb2:
   s_branch .Lbb1
 .Lbb3:
   s_waitcnt vmcnt(0) lgkmcnt(0)
-  v_add_u32 v1, v4, v5
-  s_delay_alu instid0(VALU_DEP_1)
   v_add_u32 v0, v0, v1
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v0, v2, v0
   s_endpgm
 
 // ====
 
 // Early completion must not create a false partial bound for a seeded loop epoch.
-// RUN: emit amdgpu-assembly @cyclic_flat_gfx942 strategy=source fixed=%seed0:physical_register:4:1 fixed=%seed1:physical_register:5:1 fixed=%carried0:physical_register:4:1 fixed=%carried1:physical_register:5:1 fixed=%third:physical_register:4:1 fixed=%fourth:physical_register:5:1 fixed=%first:physical_register:6:1 fixed=%second:physical_register:7:1
+// RUN: emit amdgpu-assembly @cyclic_flat_gfx942 strategy=source
 
 amdgpu.target<gfx942> @target
 
@@ -566,20 +566,20 @@ low.func.def target<amdgpu.cdna3.core>(@target) @cyclic_flat_gfx942(%address: re
 
 // ----
 .Lbb1:
-  flat_load_dword v6, v[2:3] offset:0
-  flat_load_dword v7, v[2:3] offset:4
+  flat_load_dword v3, v[4:5] offset:0
+  flat_load_dword v6, v[4:5] offset:4
   s_waitcnt vmcnt(0) lgkmcnt(0)
-  v_add_u32 v0, v0, v4
-  flat_load_dword v4, v[2:3] offset:8
-  v_add_u32 v0, v0, v5
-  flat_load_dword v5, v[2:3] offset:12
-  v_add_u32 v0, v0, v6
-  v_add_u32 v0, v0, v7
+  v_add_u32 v2, v2, v0
+  flat_load_dword v0, v[4:5] offset:8
+  v_add_u32 v2, v2, v1
+  flat_load_dword v1, v[4:5] offset:12
+  v_add_u32 v2, v2, v3
+  v_add_u32 v2, v2, v6
   s_cbranch_scc0 .Lbb3
 .Lbb2:
   s_branch .Lbb1
 .Lbb3:
   s_waitcnt vmcnt(0) lgkmcnt(0)
-  v_add_u32 v1, v4, v5
   v_add_u32 v0, v0, v1
+  v_add_u32 v0, v2, v0
   s_endpgm
