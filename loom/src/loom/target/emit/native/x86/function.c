@@ -659,8 +659,8 @@ static iree_status_t loom_x86_function_call(
     IREE_ASSERT_TRUE(selected);
     loom_x86_function_append_transport(function, &store);
   }
-  IREE_RETURN_IF_ERROR(
-      loom_x86_function_moves(&frame->allocation, moves->arguments, builder));
+  IREE_RETURN_IF_ERROR(loom_x86_function_moves(
+      &frame->allocation, moves->arguments.moves, builder));
   // All register sources have been consumed. RAX and XMM8 are caller-clobbered
   // and are not argument destinations, so stack copies can use them here.
   for (uint16_t i = 0; i < packet->node->operand_count; ++i) {
@@ -759,8 +759,8 @@ static iree_status_t loom_x86_function_call(
     loom_x86_function_append_local_storage_transport(
         frame, result, LOOM_X86_STORAGE_TRANSFER_STORE, scratch, builder);
   }
-  IREE_RETURN_IF_ERROR(
-      loom_x86_function_moves(&frame->allocation, moves->results, builder));
+  IREE_RETURN_IF_ERROR(loom_x86_function_moves(&frame->allocation,
+                                               moves->results.moves, builder));
   for (uint16_t i = 0; i < packet->node->result_count; ++i) {
     if (callee_abi->call_contract.results[i].location_kind !=
         LOOM_LOW_ALLOCATION_LOCATION_UNASSIGNED) {
@@ -812,8 +812,8 @@ static iree_status_t loom_x86_function_return(
         LOOM_X86_RETAINED_RESULT_POINTER_REGISTER, builder);
   }
   if (moves) {
-    IREE_RETURN_IF_ERROR(
-        loom_x86_function_moves(&frame->allocation, moves->results, builder));
+    IREE_RETURN_IF_ERROR(loom_x86_function_moves(
+        &frame->allocation, moves->results.moves, builder));
   }
   for (uint16_t i = 0; i < packet->node->operand_count; ++i) {
     if (abi->call_contract.results[i].location_kind !=

@@ -6,6 +6,8 @@
 
 #include "loom/target/arch/amdgpu/planning/wait_plan.h"
 
+#include <algorithm>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -19,6 +21,9 @@
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/planning/storage_lease.h"
+#include "loom/target/arch/amdgpu/planning/structural_packet.h"
+#include "loom/target/arch/amdgpu/planning/wait_packets.h"
+#include "loom/target/arch/amdgpu/planning/wait_states.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/util/cfg_graph_test_util.h"
 
@@ -90,6 +95,27 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
         loom_builder_intern_string(&builder_, IREE_SV("transfers"), &name));
     IREE_ASSERT_OK(loom_builder_intern_string(
         &builder_, IREE_SV("amdgpu.rdna4.gfx125x.core"), &descriptor_set));
+    loom_string_id_t helper_name = LOOM_STRING_ID_INVALID;
+    IREE_ASSERT_OK(
+        loom_builder_intern_string(&builder_, IREE_SV("helper"), &helper_name));
+    uint16_t helper_symbol = LOOM_SYMBOL_ID_INVALID;
+    IREE_ASSERT_OK(
+        loom_module_add_symbol(module_, helper_name, &helper_symbol));
+    loom_op_t* helper = nullptr;
+    IREE_ASSERT_OK(loom_low_func_def_build(
+        &builder_, LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_INLINE_POLICY, 0, 0, 0, 0,
+        LOOM_INLINE_POLICY_NOINLINE, 0, 0, descriptor_set, {}, 0, {}, {},
+        LOOM_STRING_ID_INVALID, {}, {0, helper_symbol}, nullptr, 0, nullptr, 0,
+        nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &helper));
+    call_target_ = loom_low_func_def_callee(helper);
+    loom_builder_t helper_builder;
+    loom_builder_initialize(
+        module_, &module_->arena,
+        loom_region_entry_block(loom_low_func_def_body(helper)),
+        &helper_builder);
+    loom_op_t* helper_return = nullptr;
+    IREE_ASSERT_OK(loom_low_return_build(
+        &helper_builder, nullptr, 0, LOOM_LOCATION_UNKNOWN, &helper_return));
     uint16_t symbol = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name, &symbol));
     loom_type_t argument_types[4];
@@ -139,6 +165,14 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
     allocation_.assignments = assignments_;
     allocation_.assignment_count = 4;
     allocation_.assignment_indices_by_value_ordinal = assignment_indices_;
+    physical_extents_.assign(descriptors_->reg_class_count, 0);
+    for (const loom_low_allocation_assignment_t& assignment : assignments_) {
+      physical_extents_[assignment.descriptor_reg_class_id] =
+          std::max(physical_extents_[assignment.descriptor_reg_class_id],
+                   assignment.location_base + assignment.location_count);
+    }
+    allocation_.physical_extents.ends_by_reg_class = physical_extents_.data();
+    allocation_.physical_extents.count = physical_extents_.size();
   }
 
   void TearDown() override {
@@ -161,6 +195,80 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
   void Delay() {
     AppendImmediate(LOOM_AMDGPU_DESCRIPTOR_REF_S_DELAY_ALU, IREE_SV("delay"),
                     0);
+  }
+
+  static loom_low_move_location_t Physical(uint16_t register_class,
+                                           uint32_t location) {
+    return loom_low_move_location_t{
+        .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+        .descriptor_reg_class_id = register_class,
+        .location = location,
+    };
+  }
+
+  static loom_low_move_t Move(uint16_t register_class, uint32_t destination,
+                              uint32_t source) {
+    return loom_low_move_t{
+        .destination = Physical(register_class, destination),
+        .source = Physical(register_class, source),
+    };
+  }
+
+  void Call(std::initializer_list<loom_low_move_t> arguments = {},
+            std::initializer_list<loom_low_move_t> results = {}) {
+    const uint32_t node_index = static_cast<uint32_t>(nodes_.size());
+    loom_op_t* call = nullptr;
+    IREE_ASSERT_OK(loom_low_func_call_build(&builder_, 0, 0, 0, call_target_,
+                                            nullptr, 0, nullptr, 0, nullptr, 0,
+                                            LOOM_LOCATION_UNKNOWN, &call));
+    loom_low_schedule_node_t node = {
+        .op = call,
+        .traits = call->traits,
+        .kind = LOOM_LOW_SCHEDULE_NODE_STRUCTURAL,
+    };
+    node.scheduled_ordinal = node_index;
+    nodes_.push_back(node);
+    const iree_host_size_t argument_start = moves_.size();
+    moves_.insert(moves_.end(), arguments);
+    const iree_host_size_t result_start = moves_.size();
+    moves_.insert(moves_.end(), results);
+    call_moves_.push_back({
+        .source_ordinal = node_index,
+        .argument_count = static_cast<uint16_t>(arguments.size()),
+        .result_count = static_cast<uint16_t>(results.size()),
+        .arguments =
+            {
+                .moves =
+                    {
+                        .start = argument_start,
+                        .count = arguments.size(),
+                    },
+            },
+        .results =
+            {
+                .moves =
+                    {
+                        .start = result_start,
+                        .count = results.size(),
+                    },
+            },
+    });
+    for (const loom_low_move_t& move : moves_) {
+      for (const loom_low_move_location_t* location :
+           {&move.source, &move.destination}) {
+        if (location->location_kind !=
+            LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
+          continue;
+        }
+        physical_extents_[location->descriptor_reg_class_id] =
+            std::max(physical_extents_[location->descriptor_reg_class_id],
+                     location->location + 1);
+      }
+    }
+    allocation_.call_moves = call_moves_.data();
+    allocation_.call_move_count = call_moves_.size();
+    allocation_.moves = moves_.data();
+    allocation_.move_count = moves_.size();
   }
 
   void AppendImmediate(loom_amdgpu_descriptor_ref_t descriptor_ref,
@@ -319,6 +427,22 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
     IREE_ASSERT_OK(BuildPlan());
   }
 
+  void BuildWaitStates() {
+    Build();
+    loom_amdgpu_wait_packet_plan_t wait_packets = {};
+    IREE_ASSERT_OK(
+        loom_amdgpu_wait_packet_plan_build(&plan_, &arena_, &wait_packets));
+    const loom_amdgpu_address_state_plan_t address_state = {
+        .schedule = &schedule_,
+        .allocation = &allocation_,
+    };
+    IREE_ASSERT_OK(loom_amdgpu_wait_state_plan_build(
+        &schedule_, &allocation_, facts_.properties.processor, &address_state,
+        &plan_, &wait_packets, /*vopd_plan=*/nullptr,
+        /*matrix_coexecution=*/nullptr, /*matrix_results=*/nullptr, &arena_,
+        &transient_arena_, &wait_state_plan_));
+  }
+
   void RecordColdStorage() {
     iree_arena_block_pool_statistics_t statistics = {};
     iree_arena_block_pool_query_statistics(&pool_, &statistics);
@@ -459,6 +583,14 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
   std::vector<loom_low_schedule_memory_completion_edge_t> memory_completions_;
   // Descriptor counter hazards.
   std::vector<loom_low_schedule_hazard_use_t> hazards_;
+  // ABI transports for retained direct-call boundary fixtures.
+  std::vector<loom_low_allocation_call_moves_t> call_moves_;
+  // Sequential physical transport rows owned by retained calls.
+  std::vector<loom_low_move_t> moves_;
+  // Maximum assigned or moved location by descriptor register class.
+  std::vector<uint32_t> physical_extents_;
+  // Distinct zero-argument leaf helper reached by direct-call fixtures.
+  loom_symbol_ref_t call_target_ = loom_symbol_ref_null();
   // Immutable input assembled before the planner call.
   loom_low_schedule_table_t schedule_ = {};
   // Nonoverlapping physical SGPR tuples backing the function arguments.
@@ -471,6 +603,8 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
   loom_low_allocation_table_t allocation_ = {};
   // Actual production planner result inspected by each test.
   loom_amdgpu_wait_plan_t plan_ = {};
+  // Fixed-delay plan produced after counter waits are materialized.
+  loom_amdgpu_wait_state_plan_t wait_state_plan_ = {};
 };
 
 TEST_F(AmdgpuWaitPlanTest, IndependentTransfersKeepTheHardwareIssueBound) {
@@ -510,6 +644,82 @@ TEST_F(AmdgpuWaitPlanTest, DependencyCompletionAlsoSatisfiesTheIssueBound) {
   Build();
   ASSERT_EQ(plan_.action_count, 1u);
   ExpectAction(0, 1, 0, LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_EFFECT);
+}
+
+TEST_F(AmdgpuWaitPlanTest, DirectCallDrainsOutstandingCounterWork) {
+  Tensor();
+  Call();
+  Build();
+  const loom_amdgpu_structural_packet_info_t structural =
+      loom_amdgpu_structural_packet_analyze(
+          &schedule_, &allocation_, /*node_index=*/1,
+          LOOM_AMDGPU_STRUCTURAL_PACKET_ANALYSIS_FLAG_REQUIRE_ALLOCATION);
+  EXPECT_TRUE(iree_any_bit_set(structural.flags,
+                               LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CALL));
+  EXPECT_EQ(structural.instruction_count, 6u);
+  EXPECT_EQ(structural.scalar_alu_instruction_count, 6u);
+  EXPECT_EQ(loom_amdgpu_structural_packet_call_boundary_offset(&structural),
+            0u);
+  EXPECT_EQ(loom_amdgpu_structural_packet_call_arguments(&structural), nullptr);
+  EXPECT_EQ(loom_amdgpu_structural_packet_call_results(&structural), nullptr);
+  ASSERT_EQ(plan_.action_count, 1u);
+  ExpectAction(0, 1, 0, LOOM_AMDGPU_WAIT_PLAN_REASON_CALLABLE_BOUNDARY);
+}
+
+TEST_F(AmdgpuWaitPlanTest, DirectCallQuiescesArgumentMovesBeforeControl) {
+  Call({Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1, 0)},
+       {Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 3, 2)});
+  BuildWaitStates();
+
+  const loom_amdgpu_structural_packet_info_t structural =
+      loom_amdgpu_structural_packet_analyze(
+          &schedule_, &allocation_, /*node_index=*/0,
+          LOOM_AMDGPU_STRUCTURAL_PACKET_ANALYSIS_FLAG_REQUIRE_ALLOCATION);
+  EXPECT_EQ(loom_amdgpu_structural_packet_call_boundary_offset(&structural),
+            1u);
+  ASSERT_NE(loom_amdgpu_structural_packet_call_arguments(&structural), nullptr);
+  EXPECT_EQ(
+      loom_amdgpu_structural_packet_call_arguments(&structural)->moves.count,
+      1u);
+  ASSERT_NE(loom_amdgpu_structural_packet_call_results(&structural), nullptr);
+  EXPECT_EQ(
+      loom_amdgpu_structural_packet_call_results(&structural)->moves.count, 1u);
+
+  ASSERT_EQ(wait_state_plan_.state_count, 1u);
+  const loom_amdgpu_wait_state_t& state = wait_state_plan_.states[0];
+  EXPECT_EQ(state.reason, LOOM_AMDGPU_WAIT_STATE_REASON_CALLABLE_BOUNDARY);
+  EXPECT_EQ(state.action, LOOM_AMDGPU_WAIT_STATE_ACTION_S_NOP);
+  EXPECT_EQ(state.node_index, 0u);
+  EXPECT_EQ(state.instruction_offset, 1u);
+  EXPECT_EQ(state.required_cycle_count, 4u);
+  EXPECT_EQ(state.observed_cycle_count, 1u);
+  EXPECT_EQ(state.cycle_count, 3u);
+}
+
+TEST_F(AmdgpuWaitPlanTest, ReturnMovesPrecedeControlTransfer) {
+  FinalizeSchedule();
+  moves_.push_back(Move(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1, 0));
+  const loom_low_allocation_exit_moves_t exit_moves = {
+      .source_ordinal = static_cast<uint32_t>(nodes_.size() - 1),
+      .result_count = 1,
+      .results = {.moves = {.start = 0, .count = 1}},
+  };
+  allocation_.exit_moves = &exit_moves;
+  allocation_.exit_move_count = 1;
+  allocation_.moves = moves_.data();
+  allocation_.move_count = moves_.size();
+
+  const loom_amdgpu_structural_packet_info_t structural =
+      loom_amdgpu_structural_packet_analyze(
+          &schedule_, &allocation_, exit_moves.source_ordinal,
+          LOOM_AMDGPU_STRUCTURAL_PACKET_ANALYSIS_FLAG_REQUIRE_ALLOCATION);
+  EXPECT_EQ(structural.instruction_count, 2u);
+  EXPECT_EQ(structural.scalar_alu_instruction_count, 1u);
+  ASSERT_EQ(loom_amdgpu_structural_packet_move_segment_count(&structural), 1u);
+  const loom_amdgpu_structural_move_segment_t segment =
+      loom_amdgpu_structural_packet_move_segment_at(&structural, 0);
+  EXPECT_EQ(segment.group, &exit_moves.results);
+  EXPECT_EQ(segment.instruction_offset, 0u);
 }
 
 TEST_F(AmdgpuWaitPlanTest, RefinedCrossBlockMemoryOmitsDisjointWait) {

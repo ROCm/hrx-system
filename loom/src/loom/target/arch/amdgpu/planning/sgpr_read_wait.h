@@ -22,6 +22,8 @@ enum {
   LOOM_AMDGPU_SGPR_READ_WAIT_VECTOR = 2,
   // A native interlock or dependency wait completes selected destinations.
   LOOM_AMDGPU_SGPR_READ_WAIT_DRAIN = 3,
+  // An opaque call completes every pending scalar destination class.
+  LOOM_AMDGPU_SGPR_READ_WAIT_BOUNDARY = 4,
 };
 
 enum {

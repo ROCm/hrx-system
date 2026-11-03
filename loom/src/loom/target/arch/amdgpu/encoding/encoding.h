@@ -285,6 +285,22 @@ typedef struct loom_amdgpu_encoding_table_t {
   uint16_t descriptor_set_ordinal;
   // SOP1 opcode used for target-inserted s_mov_b32 register/literal moves.
   uint16_t s_mov_b32_opcode;
+  // SOP1 opcode used for target-inserted s_mov_b64 control-state moves.
+  uint16_t s_mov_b64_opcode;
+  // SOP1 opcode used to read the current program counter.
+  uint16_t s_getpc_b64_opcode;
+  // SOP1 opcode used to call through an SGPR pair.
+  uint16_t s_swappc_b64_opcode;
+  // SOP1 opcode used to return through an SGPR pair.
+  uint16_t s_setpc_b64_opcode;
+  // SOP2 opcode used to add the low half of a PC-relative displacement.
+  uint16_t s_add_u32_opcode;
+  // SOP2 opcode used to add the high half plus the low-half carry.
+  uint16_t s_addc_u32_opcode;
+  // Scalar-source selector naming EXEC_LO as a 64-bit EXEC pair.
+  uint16_t scalar_source_exec_lo;
+  // Scalar-destination selector naming EXEC_LO as a 64-bit EXEC pair.
+  uint16_t scalar_destination_exec_lo;
   // VOP1 opcode used for target-inserted v_mov_b32 register/immediate moves.
   uint16_t v_mov_b32_opcode;
   // VOP1 opcode used for full-unit physical VGPR exchanges.
@@ -457,6 +473,43 @@ iree_status_t loom_amdgpu_encoding_pack_s_mov_b32_sgpr(
 iree_status_t loom_amdgpu_encoding_pack_s_mov_b32_u32(
     const loom_amdgpu_encoding_table_t* table, uint16_t sdst, uint32_t imm32,
     loom_amdgpu_encoding_packet_t* out_packet);
+
+// Packs a 64-bit EXEC-to-SGPR move.
+iree_status_t loom_amdgpu_encoding_pack_s_mov_b64_from_exec(
+    const loom_amdgpu_encoding_table_t* table, uint16_t sdst,
+    loom_amdgpu_encoding_packet_t* out_packet);
+
+// Packs a 64-bit SGPR-to-EXEC move.
+iree_status_t loom_amdgpu_encoding_pack_s_mov_b64_to_exec(
+    const loom_amdgpu_encoding_table_t* table, uint16_t ssrc0,
+    loom_amdgpu_encoding_packet_t* out_packet);
+
+// Packs an s_getpc_b64 packet writing one aligned SGPR pair.
+iree_status_t loom_amdgpu_encoding_pack_s_getpc_b64(
+    const loom_amdgpu_encoding_table_t* table, uint16_t sdst,
+    loom_amdgpu_encoding_packet_t* out_packet);
+
+// Packs an s_swappc_b64 direct-call packet.
+iree_status_t loom_amdgpu_encoding_pack_s_swappc_b64(
+    const loom_amdgpu_encoding_table_t* table, uint16_t sdst, uint16_t ssrc0,
+    loom_amdgpu_encoding_packet_t* out_packet);
+
+// Packs an s_setpc_b64 direct-return packet.
+iree_status_t loom_amdgpu_encoding_pack_s_setpc_b64(
+    const loom_amdgpu_encoding_table_t* table, uint16_t ssrc0,
+    loom_amdgpu_encoding_packet_t* out_packet);
+
+// Packs an s_add_u32 with a mandatory 32-bit literal source. The literal form
+// is retained even when |imm32| is inline-encodable so callers may patch it
+// after final text layout.
+iree_status_t loom_amdgpu_encoding_pack_s_add_u32_literal(
+    const loom_amdgpu_encoding_table_t* table, uint16_t sdst, uint16_t ssrc0,
+    uint32_t imm32, loom_amdgpu_encoding_packet_t* out_packet);
+
+// Packs an s_addc_u32 with a mandatory 32-bit literal source.
+iree_status_t loom_amdgpu_encoding_pack_s_addc_u32_literal(
+    const loom_amdgpu_encoding_table_t* table, uint16_t sdst, uint16_t ssrc0,
+    uint32_t imm32, loom_amdgpu_encoding_packet_t* out_packet);
 
 // Packs a 32-bit VGPR-to-VGPR v_mov_b32 packet using the target table's VOP1
 // layout.

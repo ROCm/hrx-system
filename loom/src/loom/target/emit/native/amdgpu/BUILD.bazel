@@ -85,6 +85,7 @@ loom_cc_library(
         ":branch_layout",
         ":delay_layout",
         ":encoding",
+        ":function_text",
         ":register_class",
         ":storage_layout",
         "//loom/src/loom/codegen/low:allocation",
@@ -94,6 +95,7 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/target/arch/amdgpu/abi:call_abi",
         "//loom/src/loom/target/arch/amdgpu/encoding",
         "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
@@ -253,12 +255,22 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "function_text",
+    hdrs = ["function_text.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "encoding",
     srcs = ["encoding.c"],
     hdrs = ["encoding.h"],
     deps = [
         ":branch_layout",
         ":delay_layout",
+        ":function_text",
         ":register_class",
         ":storage_layout",
         ":text_fixup",
@@ -269,8 +281,10 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/target/arch/amdgpu/abi:call_abi",
         "//loom/src/loom/target/arch/amdgpu/encoding",
         "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
+        "//loom/src/loom/target/arch/amdgpu/planning:structural_packet",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

@@ -104,6 +104,13 @@ void loom_amdgpu_short_wait_record(loom_amdgpu_short_wait_t* state,
 void loom_amdgpu_short_wait_advance(loom_amdgpu_short_wait_t* state,
                                     uint64_t cycles);
 
+// Retires every active short dependency at an opaque native boundary. The
+// returned local match covers producers in the current block; incoming CFG
+// obligations are retained for resolution at the same packet boundary.
+loom_amdgpu_short_wait_match_t loom_amdgpu_short_wait_drain(
+    loom_amdgpu_short_wait_t* state, const loom_low_packet_view_t* packet,
+    uint32_t instruction_offset);
+
 // Completes store payload reads without advancing independent ALU windows.
 void loom_amdgpu_short_wait_drain_stores(loom_amdgpu_short_wait_t* state);
 

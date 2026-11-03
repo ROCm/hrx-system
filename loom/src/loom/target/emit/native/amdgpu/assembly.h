@@ -14,6 +14,7 @@
 #include "iree/base/string_builder.h"
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/schedule/types.h"
+#include "loom/target/emit/native/amdgpu/function_text.h"
 #include "loom/target/emit/native/amdgpu/storage_layout.h"
 
 #ifdef __cplusplus
@@ -28,6 +29,8 @@ typedef struct loom_amdgpu_assembly_fragment_options_t {
   const loom_amdgpu_storage_layout_t* storage_layout;
   // Exact native placement decisions shared with binary encoding.
   const struct loom_amdgpu_instruction_layout_t* instruction_layout;
+  // Native action selected for source-level low.return packets.
+  loom_amdgpu_function_return_mode_t return_mode;
 } loom_amdgpu_assembly_fragment_options_t;
 
 // Emits an AMDGPU assembly fragment for one scheduled and allocated AMDGPU

@@ -38,6 +38,8 @@ typedef struct loom_amdgpu_sgpr_read_wait_block_t {
   iree_host_size_t event_start;
   // Number of retained native events in this block.
   iree_host_size_t event_count;
+  // An opaque boundary kills every incoming VALU-read pair before block exit.
+  bool quiescent_boundary;
   // The generated row now contains resolved outgoing state.
   bool resolved;
 } loom_amdgpu_sgpr_read_wait_block_t;
@@ -122,7 +124,8 @@ iree_status_t loom_amdgpu_sgpr_read_wait_collect(
     loom_amdgpu_sgpr_read_wait_t* state, uint16_t block_index,
     const loom_amdgpu_sgpr_read_wait_event_t* event) {
   if ((event->reads[0] | event->reads[1] | event->writes[0] | event->writes[1] |
-       event->drain_fields) == 0) {
+       event->drain_fields) == 0 &&
+      event->kind != LOOM_AMDGPU_SGPR_READ_WAIT_BOUNDARY) {
     return iree_ok_status();
   }
   const iree_host_size_t offset =
@@ -145,7 +148,10 @@ iree_status_t loom_amdgpu_sgpr_read_wait_collect(
   }
   ++block->event_count;
   ++state->event_count;
-  if (event->kind == LOOM_AMDGPU_SGPR_READ_WAIT_VECTOR) {
+  if (event->kind == LOOM_AMDGPU_SGPR_READ_WAIT_BOUNDARY) {
+    block->tracked[0] = block->tracked[1] = 0;
+    block->quiescent_boundary = true;
+  } else if (event->kind == LOOM_AMDGPU_SGPR_READ_WAIT_VECTOR) {
     for (unsigned word = 0; word < 2; ++word) {
       block->tracked[word] |=
           loom_amdgpu_sgpr_read_wait_pairs(event->reads[word]);
@@ -213,33 +219,69 @@ iree_status_t loom_amdgpu_sgpr_read_wait_collect_packet(
   };
   if (packet->descriptor == NULL) {
     iree_status_t status = iree_ok_status();
-    for (iree_host_size_t i = 0;
-         i < structural->moves.count && iree_status_is_ok(status); ++i) {
-      const loom_low_move_t* move =
-          &allocation->moves[structural->moves.start + i];
+    const bool is_call = iree_any_bit_set(
+        structural->flags, LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CALL);
+    const uint64_t call_boundary =
+        is_call ? loom_amdgpu_structural_packet_call_boundary_offset(structural)
+                : 0;
+    IREE_ASSERT_LE(call_boundary, UINT32_MAX);
+    bool boundary_recorded = false;
+    const uint32_t segment_count =
+        loom_amdgpu_structural_packet_move_segment_count(structural);
+    for (uint32_t segment_index = 0;
+         segment_index < segment_count && iree_status_is_ok(status);
+         ++segment_index) {
+      const loom_amdgpu_structural_move_segment_t segment =
+          loom_amdgpu_structural_packet_move_segment_at(structural,
+                                                        segment_index);
+      if (is_call && !boundary_recorded &&
+          segment.instruction_offset > call_boundary) {
+        event = (loom_amdgpu_sgpr_read_wait_event_t){
+            .packet_index = packet->packet_index,
+            .instruction_offset = (uint32_t)call_boundary,
+            .kind = LOOM_AMDGPU_SGPR_READ_WAIT_BOUNDARY,
+        };
+        status = loom_amdgpu_sgpr_read_wait_collect(
+            state, (uint16_t)packet->node->block_index, &event);
+        boundary_recorded = true;
+      }
+      const loom_low_move_range_t moves = segment.group->moves;
+      for (iree_host_size_t i = 0; i < moves.count && iree_status_is_ok(status);
+           ++i) {
+        const loom_low_move_t* move = &allocation->moves[moves.start + i];
+        event = (loom_amdgpu_sgpr_read_wait_event_t){
+            .packet_index = packet->packet_index,
+            .instruction_offset = (uint32_t)(segment.instruction_offset + i),
+            .kind = move->destination.descriptor_reg_class_id ==
+                                LOOM_AMDGPU_REG_CLASS_ID_VGPR ||
+                            move->source.descriptor_reg_class_id ==
+                                LOOM_AMDGPU_REG_CLASS_ID_VGPR
+                        ? LOOM_AMDGPU_SGPR_READ_WAIT_VECTOR
+                        : LOOM_AMDGPU_SGPR_READ_WAIT_SCALAR,
+        };
+        if (move->source.location_kind ==
+            LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
+          loom_amdgpu_sgpr_read_wait_set_range(
+              event.reads, move->source.descriptor_reg_class_id,
+              move->source.location, 1, false);
+        }
+        if (move->destination.location_kind ==
+            LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
+          loom_amdgpu_sgpr_read_wait_set_range(
+              event.writes, move->destination.descriptor_reg_class_id,
+              move->destination.location, 1,
+              event.kind == LOOM_AMDGPU_SGPR_READ_WAIT_SCALAR);
+        }
+        status = loom_amdgpu_sgpr_read_wait_collect(
+            state, (uint16_t)packet->node->block_index, &event);
+      }
+    }
+    if (is_call && !boundary_recorded && iree_status_is_ok(status)) {
       event = (loom_amdgpu_sgpr_read_wait_event_t){
           .packet_index = packet->packet_index,
-          .instruction_offset = (uint32_t)i,
-          .kind = move->destination.descriptor_reg_class_id ==
-                              LOOM_AMDGPU_REG_CLASS_ID_VGPR ||
-                          move->source.descriptor_reg_class_id ==
-                              LOOM_AMDGPU_REG_CLASS_ID_VGPR
-                      ? LOOM_AMDGPU_SGPR_READ_WAIT_VECTOR
-                      : LOOM_AMDGPU_SGPR_READ_WAIT_SCALAR,
+          .instruction_offset = (uint32_t)call_boundary,
+          .kind = LOOM_AMDGPU_SGPR_READ_WAIT_BOUNDARY,
       };
-      if (move->source.location_kind ==
-          LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
-        loom_amdgpu_sgpr_read_wait_set_range(
-            event.reads, move->source.descriptor_reg_class_id,
-            move->source.location, 1, false);
-      }
-      if (move->destination.location_kind ==
-          LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
-        loom_amdgpu_sgpr_read_wait_set_range(
-            event.writes, move->destination.descriptor_reg_class_id,
-            move->destination.location, 1,
-            event.kind == LOOM_AMDGPU_SGPR_READ_WAIT_SCALAR);
-      }
       status = loom_amdgpu_sgpr_read_wait_collect(
           state, (uint16_t)packet->node->block_index, &event);
     }
@@ -301,9 +343,11 @@ static iree_status_t loom_amdgpu_sgpr_read_wait_transfer_pairs(
   *out_changed = false;
   for (unsigned word = 0; word < 2; ++word) {
     const uint64_t incoming =
-        source->tracked[word] | source->incoming_tracked[word];
+        source->tracked[word] |
+        (source->quiescent_boundary ? 0 : source->incoming_tracked[word]);
     const uint64_t added = incoming & ~target->incoming_tracked[word];
-    *out_changed |= (added & ~target->tracked[word]) != 0;
+    *out_changed |=
+        !target->quiescent_boundary && (added & ~target->tracked[word]) != 0;
     target->incoming_tracked[word] |= incoming;
   }
   return iree_ok_status();
@@ -331,16 +375,25 @@ static void loom_amdgpu_sgpr_read_wait_summarize(
   for (iree_host_size_t index = 0; index < block->event_count; ++index) {
     const loom_amdgpu_sgpr_read_wait_event_t* event =
         loom_amdgpu_sgpr_read_wait_event(state, block->event_start + index);
-    if (event->kind == LOOM_AMDGPU_SGPR_READ_WAIT_DRAIN) {
-      loom_amdgpu_sgpr_read_wait_drain(&block->generated, event->drain_fields);
+    if (event->kind == LOOM_AMDGPU_SGPR_READ_WAIT_DRAIN ||
+        event->kind == LOOM_AMDGPU_SGPR_READ_WAIT_BOUNDARY) {
+      const uint8_t fields = event->kind == LOOM_AMDGPU_SGPR_READ_WAIT_BOUNDARY
+                                 ? LOOM_AMDGPU_SGPR_READ_WAIT_SA_SDST |
+                                       LOOM_AMDGPU_SGPR_READ_WAIT_VA_SDST |
+                                       LOOM_AMDGPU_SGPR_READ_WAIT_VA_VCC
+                                 : event->drain_fields;
+      loom_amdgpu_sgpr_read_wait_drain(&block->generated, fields);
       loom_amdgpu_sgpr_read_wait_destinations_t survivors = {
           .scalar = {UINT64_MAX, UINT64_MAX},
           .vector = {UINT64_MAX, UINT64_MAX},
       };
-      loom_amdgpu_sgpr_read_wait_drain(&survivors, event->drain_fields);
+      loom_amdgpu_sgpr_read_wait_drain(&survivors, fields);
       for (unsigned word = 0; word < 2; ++word) {
         block->killed.scalar[word] |= ~survivors.scalar[word];
         block->killed.vector[word] |= ~survivors.vector[word];
+      }
+      if (event->kind == LOOM_AMDGPU_SGPR_READ_WAIT_BOUNDARY) {
+        tracked[0] = tracked[1] = 0;
       }
       continue;
     }
@@ -440,18 +493,20 @@ static iree_status_t loom_amdgpu_sgpr_read_wait_resolve_block(
       loom_amdgpu_sgpr_read_wait_drain(&pending, event->drain_fields);
       continue;
     }
+    const bool is_boundary = event->kind == LOOM_AMDGPU_SGPR_READ_WAIT_BOUNDARY;
     uint8_t fields = 0;
     uint32_t producer_node = LOOM_LOW_SCHEDULE_NODE_NONE;
     for (unsigned word = 0; word < 2; ++word) {
-      const uint64_t scalar_match = event->reads[word] & pending.scalar[word];
+      const uint64_t reads = is_boundary ? UINT64_MAX : event->reads[word];
+      const uint64_t scalar_match = reads & pending.scalar[word];
       if (scalar_match) {
         fields |= LOOM_AMDGPU_SGPR_READ_WAIT_SA_SDST;
         producer_node =
             origins[0][word * 64 +
                        iree_math_count_trailing_zeros_u64(scalar_match)];
       }
-      if (event->kind == LOOM_AMDGPU_SGPR_READ_WAIT_VECTOR) {
-        const uint64_t matched = event->reads[word] & pending.vector[word];
+      if (event->kind == LOOM_AMDGPU_SGPR_READ_WAIT_VECTOR || is_boundary) {
+        const uint64_t matched = reads & pending.vector[word];
         const uint64_t vcc = word == 1 ? LOOM_AMDGPU_SGPR_READ_WAIT_VCC : 0;
         if (matched & vcc) {
           fields |= LOOM_AMDGPU_SGPR_READ_WAIT_VA_VCC;
@@ -496,6 +551,10 @@ static iree_status_t loom_amdgpu_sgpr_read_wait_resolve_block(
       };
       status = emit(user_data, &wait_state);
       loom_amdgpu_sgpr_read_wait_drain(&pending, fields);
+    }
+    if (is_boundary) {
+      tracked[0] = tracked[1] = 0;
+      continue;
     }
     for (unsigned word = 0; word < 2; ++word) {
       if (event->kind == LOOM_AMDGPU_SGPR_READ_WAIT_VECTOR) {

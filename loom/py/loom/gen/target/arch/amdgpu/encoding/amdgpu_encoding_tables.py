@@ -284,6 +284,14 @@ class _EncodingContract:
     inline_f32_sources: tuple[_InlineF32Source, ...]
     vector_source_vgprs: tuple[int, int]
     s_mov_b32_opcode: int
+    s_mov_b64_opcode: int
+    s_getpc_b64_opcode: int
+    s_swappc_b64_opcode: int
+    s_setpc_b64_opcode: int
+    s_add_u32_opcode: int
+    s_addc_u32_opcode: int
+    scalar_source_exec_lo: int
+    scalar_destination_exec_lo: int
     v_mov_b32_opcode: int
     v_swap_b32_opcode: int
 
@@ -682,6 +690,44 @@ def _compile_encoding_contract(
             encoding_name="ENC_SOP1",
             condition_name=None,
         ),
+        s_mov_b64_opcode=_instruction_opcode(
+            spec.instructions,
+            instruction_name="S_MOV_B64",
+            encoding_name="ENC_SOP1",
+            condition_name=None,
+        ),
+        s_getpc_b64_opcode=_instruction_opcode(
+            spec.instructions,
+            instruction_name="S_GETPC_B64",
+            encoding_name="ENC_SOP1",
+            condition_name=None,
+        ),
+        s_swappc_b64_opcode=_instruction_opcode(
+            spec.instructions,
+            instruction_name="S_SWAPPC_B64",
+            encoding_name="ENC_SOP1",
+            condition_name=None,
+        ),
+        s_setpc_b64_opcode=_instruction_opcode(
+            spec.instructions,
+            instruction_name="S_SETPC_B64",
+            encoding_name="ENC_SOP1",
+            condition_name=None,
+        ),
+        s_add_u32_opcode=_instruction_opcode(
+            spec.instructions,
+            instruction_name="S_ADD_U32",
+            encoding_name="ENC_SOP2",
+            condition_name=None,
+        ),
+        s_addc_u32_opcode=_instruction_opcode(
+            spec.instructions,
+            instruction_name="S_ADDC_U32",
+            encoding_name="ENC_SOP2",
+            condition_name=None,
+        ),
+        scalar_source_exec_lo=spec.operand_predefined_value("OPR_SSRC", "EXEC_LO"),
+        scalar_destination_exec_lo=spec.operand_predefined_value("OPR_SDST_EXEC", "EXEC_LO"),
         v_mov_b32_opcode=_instruction_opcode(
             spec.instructions,
             instruction_name="V_MOV_B32",
@@ -748,19 +794,23 @@ def _instruction_opcode(
     encoding_name: str,
     condition_name: str | None,
 ) -> int:
-    for instruction in instructions:
-        if instruction.name != instruction_name:
-            continue
-        opcodes = {encoding.opcode for encoding in instruction.encodings if encoding.encoding_name == encoding_name and (condition_name is None or encoding.condition_name == condition_name)}
-        if len(opcodes) == 1:
-            return next(iter(opcodes))
-        if opcodes:
-            raise ValueError(f"AMDGPU instruction '{instruction_name}' has ambiguous {encoding_name}/{condition_name or '*'} opcodes")
-        for encoding in instruction.encodings:
-            if encoding.encoding_name == encoding_name:
-                raise ValueError(f"AMDGPU instruction '{instruction_name}' has no {encoding_name}/{condition_name or '*'} encoding")
-        raise ValueError(f"AMDGPU instruction '{instruction_name}' has no {encoding_name} encoding")
-    raise ValueError(f"AMDGPU instruction '{instruction_name}' is missing")
+    matches = tuple(instruction for instruction in instructions if instruction.name == instruction_name)
+    if not matches:
+        matches = tuple(instruction for instruction in instructions if instruction_name in instruction.aliases)
+    if not matches:
+        raise ValueError(f"AMDGPU instruction '{instruction_name}' is missing")
+    if len(matches) != 1:
+        raise ValueError(f"AMDGPU instruction '{instruction_name}' is ambiguous")
+    instruction = matches[0]
+    opcodes = {encoding.opcode for encoding in instruction.encodings if encoding.encoding_name == encoding_name and (condition_name is None or encoding.condition_name == condition_name)}
+    if len(opcodes) == 1:
+        return next(iter(opcodes))
+    if opcodes:
+        raise ValueError(f"AMDGPU instruction '{instruction_name}' has ambiguous {encoding_name}/{condition_name or '*'} opcodes")
+    for encoding in instruction.encodings:
+        if encoding.encoding_name == encoding_name:
+            raise ValueError(f"AMDGPU instruction '{instruction_name}' has no {encoding_name}/{condition_name or '*'} encoding")
+    raise ValueError(f"AMDGPU instruction '{instruction_name}' has no {encoding_name} encoding")
 
 
 def _derive_inline_integer_range(spec: AmdgpuIsaFactSource) -> tuple[int, int]:
@@ -882,6 +932,8 @@ def _emit_source(
     instructions: tuple[AmdgpuIsaInstruction, ...],
     operand_types: tuple[AmdgpuIsaOperandType, ...],
     source_literal: int,
+    scalar_source_exec_lo: int,
+    scalar_destination_exec_lo: int,
     scalar_inline_u32_zero: int,
     scalar_inline_u32_count: int,
     inline_f32_sources: tuple[_InlineF32Source, ...],
@@ -925,6 +977,42 @@ def _emit_source(
         instructions,
         instruction_name="S_MOV_B32",
         encoding_name="ENC_SOP1",
+        condition_name=None,
+    )
+    s_mov_b64_opcode = _instruction_opcode(
+        instructions,
+        instruction_name="S_MOV_B64",
+        encoding_name="ENC_SOP1",
+        condition_name=None,
+    )
+    s_getpc_b64_opcode = _instruction_opcode(
+        instructions,
+        instruction_name="S_GETPC_B64",
+        encoding_name="ENC_SOP1",
+        condition_name=None,
+    )
+    s_swappc_b64_opcode = _instruction_opcode(
+        instructions,
+        instruction_name="S_SWAPPC_B64",
+        encoding_name="ENC_SOP1",
+        condition_name=None,
+    )
+    s_setpc_b64_opcode = _instruction_opcode(
+        instructions,
+        instruction_name="S_SETPC_B64",
+        encoding_name="ENC_SOP1",
+        condition_name=None,
+    )
+    s_add_u32_opcode = _instruction_opcode(
+        instructions,
+        instruction_name="S_ADD_U32",
+        encoding_name="ENC_SOP2",
+        condition_name=None,
+    )
+    s_addc_u32_opcode = _instruction_opcode(
+        instructions,
+        instruction_name="S_ADDC_U32",
+        encoding_name="ENC_SOP2",
         condition_name=None,
     )
     lines = [
@@ -1051,6 +1139,14 @@ def _emit_source(
                 f"    .descriptor_set_ordinal = UINT16_C({amdgpu_descriptor_set_ordinal(table_view.descriptor_set_key)}),",
                 f'    .descriptor_set_key = IREE_SVL("{table_view.descriptor_set_key}"),',
                 f"    .s_mov_b32_opcode = {s_mov_b32_opcode},",
+                f"    .s_mov_b64_opcode = {s_mov_b64_opcode},",
+                f"    .s_getpc_b64_opcode = {s_getpc_b64_opcode},",
+                f"    .s_swappc_b64_opcode = {s_swappc_b64_opcode},",
+                f"    .s_setpc_b64_opcode = {s_setpc_b64_opcode},",
+                f"    .s_add_u32_opcode = {s_add_u32_opcode},",
+                f"    .s_addc_u32_opcode = {s_addc_u32_opcode},",
+                f"    .scalar_source_exec_lo = {scalar_source_exec_lo},",
+                f"    .scalar_destination_exec_lo = {scalar_destination_exec_lo},",
                 f"    .v_mov_b32_opcode = {v_mov_b32_opcode},",
                 f"    .v_swap_b32_opcode = {v_swap_b32_opcode},",
                 f"    .v_nop_opcode = {v_nop_opcode},",
@@ -1144,6 +1240,8 @@ def generate_amdgpu_encoding_table_source(
         instructions=spec.instructions,
         operand_types=spec.operand_types,
         source_literal=storage_contract.source_literal,
+        scalar_source_exec_lo=storage_contract.scalar_source_exec_lo,
+        scalar_destination_exec_lo=storage_contract.scalar_destination_exec_lo,
         scalar_inline_u32_zero=scalar_inline_u32_zero,
         scalar_inline_u32_count=scalar_inline_u32_count,
         inline_f32_sources=storage_contract.inline_f32_sources,

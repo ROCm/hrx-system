@@ -96,6 +96,7 @@ loom_cc_test(
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
         "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
         "//loom/src/loom/target/arch/amdgpu/encoding",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
@@ -187,6 +188,7 @@ loom_cc_library(
     name = "structural_packet",
     srcs = ["structural_packet.c"],
     hdrs = ["structural_packet.h"],
+    visibility = _AMDGPU_NATIVE_PLANNING_VISIBILITY,
     deps = [
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low:packet",
@@ -194,6 +196,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/arch/amdgpu/abi:call_abi",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//runtime/src/iree/base",
     ],
@@ -286,6 +289,22 @@ loom_cc_test(
     deps = [
         ":wait_states",
         "//loom/src/loom/codegen/low/schedule",
+        "//loom/src/loom/util:cfg_graph_test_util",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "short_wait_test",
+    srcs = ["short_wait_test.cc"],
+    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_GFX125X),
+    deps = [
+        ":wait_states",
+        "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/codegen/low/schedule",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
         "//loom/src/loom/util:cfg_graph_test_util",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
@@ -486,7 +505,10 @@ loom_cc_test(
     target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_GFX125X),
     deps = [
         ":storage_lease",
+        ":structural_packet",
+        ":wait_packets",
         ":wait_plan",
+        ":wait_states",
         "//loom/src/loom/codegen/low:builder",
         "//loom/src/loom/codegen/low:immediates",
         "//loom/src/loom/codegen/low:storage_lease",

@@ -50,6 +50,12 @@ Event Drain(uint8_t fields = 7) {
   };
 }
 
+Event Boundary() {
+  return Event{
+      .kind = LOOM_AMDGPU_SGPR_READ_WAIT_BOUNDARY,
+  };
+}
+
 class AmdgpuSgprReadWaitTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -137,7 +143,10 @@ class AmdgpuSgprReadWaitTest : public ::testing::Test {
       unsigned vector = (state >> 16) & 15;
       for (size_t index = 0; index < program[block].size(); ++index) {
         const Event& event = program[block][index];
-        const unsigned fields = drains[block][index] | event.drain_fields;
+        const bool is_boundary =
+            event.kind == LOOM_AMDGPU_SGPR_READ_WAIT_BOUNDARY;
+        const unsigned fields =
+            drains[block][index] | event.drain_fields | (is_boundary ? 7 : 0);
         if (fields & 1) {
           scalar = 0;
         }
@@ -146,6 +155,10 @@ class AmdgpuSgprReadWaitTest : public ::testing::Test {
         }
         if (fields & 4) {
           vector &= 3;
+        }
+        if (is_boundary) {
+          tracked = 0;
+          continue;
         }
         const unsigned reads =
             (event.reads[0] & 3) | (((event.reads[1] >> 42) & 3) << 2);
@@ -229,6 +242,23 @@ TEST_F(AmdgpuSgprReadWaitTest, DrainPreservesHistoryAndSelectsOnlyItsField) {
   EXPECT_EQ(waits_[1].immediate, 0xfffe);
 }
 
+TEST_F(AmdgpuSgprReadWaitTest, BoundaryDrainsLocalWritesAndStartsFreshHistory) {
+  Plan({{Vector({0}), Scalar({}, {0}), Boundary(), Scalar({}, {0}),
+         Scalar({0})}},
+       {{}});
+  ASSERT_EQ(waits_.size(), 1u);
+  EXPECT_EQ(waits_[0].scheduled_ordinal, 2u);
+  EXPECT_EQ(waits_[0].immediate, 0xfffe);
+}
+
+TEST_F(AmdgpuSgprReadWaitTest, BoundaryDrainsIncomingWritesAtTheCall) {
+  Plan({{Vector({0}), Scalar({}, {0})}, {Boundary(), Scalar({0})}}, {{1}, {}});
+  ASSERT_EQ(waits_.size(), 1u);
+  EXPECT_EQ(waits_[0].block_index, 1u);
+  EXPECT_EQ(waits_[0].scheduled_ordinal, 0u);
+  EXPECT_EQ(waits_[0].immediate, 0xfffe);
+}
+
 TEST_F(AmdgpuSgprReadWaitTest, DifferentWritersRetainBothDependencies) {
   Plan({{Vector({0}), Scalar({}, {0}), Vector({}, {0}), Vector({0})}}, {{}});
   ASSERT_EQ(waits_.size(), 1u);
@@ -268,7 +298,7 @@ TEST_F(AmdgpuSgprReadWaitTest, GeneratedPlansProtectEveryConcretePath) {
       }
       for (unsigned count = 1 + random() % 6; count != 0; --count) {
         Event event = {};
-        event.kind = 1 + random() % 3;
+        event.kind = 1 + random() % 4;
         if (event.kind == LOOM_AMDGPU_SGPR_READ_WAIT_DRAIN) {
           event.drain_fields = 1 + random() % 7;
         } else {

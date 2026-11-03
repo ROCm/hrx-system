@@ -92,8 +92,10 @@ typedef enum loom_amdgpu_wait_state_reason_e {
   LOOM_AMDGPU_WAIT_STATE_REASON_XNACK_REPLAY_CLAUSE = 18,
   // An ALU reads a rewritten scalar pair previously consumed by VALU.
   LOOM_AMDGPU_WAIT_STATE_REASON_SGPR_READ_DEPENDENCY = 19,
+  // A direct helper call retires caller-owned fixed physical dependencies.
+  LOOM_AMDGPU_WAIT_STATE_REASON_CALLABLE_BOUNDARY = 20,
   // Number of wait-state reasons, including UNKNOWN.
-  LOOM_AMDGPU_WAIT_STATE_REASON_COUNT_ = 20,
+  LOOM_AMDGPU_WAIT_STATE_REASON_COUNT_ = 21,
 } loom_amdgpu_wait_state_reason_t;
 
 typedef enum loom_amdgpu_wait_state_action_e {

@@ -72,6 +72,13 @@ enum {
   LOOM_AMDGPU_WAIT_STATE_PROGRESS_CLASS_DEPCTR_DESTINATION = 4,
 };
 
+typedef enum loom_amdgpu_wait_state_resolved_stream_e {
+  LOOM_AMDGPU_WAIT_STATE_RESOLVED_STREAM_SHORT = 0,
+  LOOM_AMDGPU_WAIT_STATE_RESOLVED_STREAM_MASK = 1,
+  LOOM_AMDGPU_WAIT_STATE_RESOLVED_STREAM_SGPR = 2,
+  LOOM_AMDGPU_WAIT_STATE_RESOLVED_STREAM_COUNT = 3,
+} loom_amdgpu_wait_state_resolved_stream_t;
+
 typedef enum loom_amdgpu_wait_state_reason_flag_bits_e {
   LOOM_AMDGPU_WAIT_STATE_REASON_FLAG_VALU_TO_MATRIX_USE =
       1u << LOOM_AMDGPU_WAIT_STATE_REASON_VALU_TO_MATRIX_USE,
@@ -215,8 +222,10 @@ typedef struct loom_amdgpu_wait_state_builder_t {
   loom_amdgpu_delay_alu_info_t scc_delay_alu;
   // Ordinary pre-packet waits discovered by the final-packet traversal.
   loom_amdgpu_wait_state_stream_t ordinary_states;
-  // Residual waits discovered after physical-hazard CFG propagation.
-  loom_amdgpu_wait_state_stream_t resolved_states;
+  // Independently ordered residual streams discovered after physical-hazard
+  // CFG propagation.
+  loom_amdgpu_wait_state_stream_t
+      resolved_states[LOOM_AMDGPU_WAIT_STATE_RESOLVED_STREAM_COUNT];
   // Final contiguous output wait-state rows.
   loom_amdgpu_wait_state_t* states;
   // Number of populated output wait-state rows.
@@ -269,6 +278,8 @@ static const iree_string_view_t kAmdgpuWaitStateReasonNames[] = {
         IREE_SVL("matrix_coexecution_matrix_use"),
     [LOOM_AMDGPU_WAIT_STATE_REASON_MATRIX_COEXECUTION_VALU_USE] =
         IREE_SVL("matrix_coexecution_valu_use"),
+    [LOOM_AMDGPU_WAIT_STATE_REASON_CALLABLE_BOUNDARY] =
+        IREE_SVL("callable_boundary"),
 };
 
 static const iree_string_view_t kAmdgpuWaitStateActionNames[] = {
@@ -593,6 +604,49 @@ loom_amdgpu_wait_state_delay_alu_accumulator_action(
              : LOOM_AMDGPU_WAIT_STATE_ACTION_S_NOP;
 }
 
+static void loom_amdgpu_wait_state_merge_boundary_match(
+    uint32_t producer_node, uint16_t required_cycle_count,
+    uint16_t observed_cycle_count, uint16_t cycle_count,
+    loom_amdgpu_wait_state_match_t* match) {
+  if (cycle_count <= match->cycle_count) {
+    return;
+  }
+  *match = (loom_amdgpu_wait_state_match_t){
+      .reason = LOOM_AMDGPU_WAIT_STATE_REASON_CALLABLE_BOUNDARY,
+      .producer_node = producer_node,
+      .required_cycle_count = required_cycle_count,
+      .observed_cycle_count = observed_cycle_count,
+      .cycle_count = cycle_count,
+  };
+}
+
+static void loom_amdgpu_wait_state_delay_alu_match_boundary(
+    const loom_amdgpu_wait_state_builder_t* builder,
+    loom_amdgpu_wait_state_match_t* match) {
+  if (!builder->has_delay_alu) {
+    return;
+  }
+  loom_amdgpu_delay_alu_accumulator_t accumulator = {0};
+  loom_amdgpu_delay_alu_accumulate_info(&builder->delay_alu,
+                                        builder->current_position,
+                                        &builder->scc_delay_alu, &accumulator);
+  for (iree_host_size_t i = 0; i < builder->vgpr_count; ++i) {
+    loom_amdgpu_delay_alu_accumulate_info(
+        &builder->delay_alu, builder->current_position,
+        &builder->vgprs[i].delay_alu, &accumulator);
+  }
+  for (iree_host_size_t i = 0; i < builder->sgprs.count; ++i) {
+    loom_amdgpu_delay_alu_accumulate_info(
+        &builder->delay_alu, builder->current_position,
+        &builder->sgprs.states[i].delay_alu, &accumulator);
+  }
+  const loom_amdgpu_delay_alu_match_t delay =
+      loom_amdgpu_delay_alu_select(&accumulator);
+  loom_amdgpu_wait_state_merge_boundary_match(
+      delay.producer_node, delay.required_cycle_count,
+      delay.observed_cycle_count, delay.cycle_count, match);
+}
+
 static void loom_amdgpu_wait_state_delay_alu_clear_all(
     loom_amdgpu_wait_state_builder_t* builder) {
   if (!loom_amdgpu_delay_alu_reset(&builder->delay_alu)) {
@@ -678,30 +732,39 @@ loom_amdgpu_wait_state_delay_alu_match_packet(
     loom_amdgpu_wait_state_delay_alu_accumulate_operands(builder, packet,
                                                          &accumulator);
   } else {
-    for (iree_host_size_t i = 0; i < info->structural.moves.count; ++i) {
-      const loom_low_move_t* move =
-          &builder->allocation->moves[info->structural.moves.start + i];
-      const uint32_t access_count = loom_low_move_access_count(move);
-      for (uint32_t j = 0; j < access_count; ++j) {
-        loom_amdgpu_delay_alu_info_t* source =
-            loom_amdgpu_wait_state_delay_alu_move_slot(
-                builder, loom_low_move_read(move, j));
-        if (source != NULL) {
-          loom_amdgpu_delay_alu_accumulate_info(&builder->delay_alu,
-                                                builder->current_position,
-                                                source, &accumulator);
-          *source = (loom_amdgpu_delay_alu_info_t){0};
+    const uint32_t segment_count =
+        loom_amdgpu_structural_packet_move_segment_count(&info->structural);
+    for (uint32_t segment_index = 0; segment_index < segment_count;
+         ++segment_index) {
+      const loom_amdgpu_structural_move_segment_t segment =
+          loom_amdgpu_structural_packet_move_segment_at(&info->structural,
+                                                        segment_index);
+      const loom_low_move_range_t moves = segment.group->moves;
+      for (iree_host_size_t i = 0; i < moves.count; ++i) {
+        const loom_low_move_t* move =
+            &builder->allocation->moves[moves.start + i];
+        const uint32_t access_count = loom_low_move_access_count(move);
+        for (uint32_t j = 0; j < access_count; ++j) {
+          loom_amdgpu_delay_alu_info_t* source =
+              loom_amdgpu_wait_state_delay_alu_move_slot(
+                  builder, loom_low_move_read(move, j));
+          if (source != NULL) {
+            loom_amdgpu_delay_alu_accumulate_info(&builder->delay_alu,
+                                                  builder->current_position,
+                                                  source, &accumulator);
+            *source = (loom_amdgpu_delay_alu_info_t){0};
+          }
         }
-      }
-      // Only actual reads consume pre-group producers. An overwritten cycle
-      // temporary is not an input when read later in this native move order.
-      // apply_moves records the new producers after the group's input wait.
-      for (uint32_t j = 0; j < access_count; ++j) {
-        loom_amdgpu_delay_alu_info_t* destination =
-            loom_amdgpu_wait_state_delay_alu_move_slot(
-                builder, loom_low_move_write(move, j));
-        if (destination != NULL) {
-          *destination = (loom_amdgpu_delay_alu_info_t){0};
+        // Only actual reads consume pre-group producers. An overwritten cycle
+        // temporary is not an input when read later in this native move order.
+        // apply_moves records the new producers after the group's input wait.
+        for (uint32_t j = 0; j < access_count; ++j) {
+          loom_amdgpu_delay_alu_info_t* destination =
+              loom_amdgpu_wait_state_delay_alu_move_slot(
+                  builder, loom_low_move_write(move, j));
+          if (destination != NULL) {
+            *destination = (loom_amdgpu_delay_alu_info_t){0};
+          }
         }
       }
     }
@@ -894,19 +957,24 @@ static iree_status_t loom_amdgpu_wait_state_stream_append(
   return iree_ok_status();
 }
 
+typedef struct loom_amdgpu_wait_state_resolved_context_t {
+  loom_amdgpu_wait_state_builder_t* builder;
+  loom_amdgpu_wait_state_stream_t* stream;
+} loom_amdgpu_wait_state_resolved_context_t;
+
 static iree_status_t loom_amdgpu_wait_state_append_resolved(
     void* user_data, const loom_amdgpu_wait_state_t* wait_state) {
-  loom_amdgpu_wait_state_builder_t* builder =
-      (loom_amdgpu_wait_state_builder_t*)user_data;
+  loom_amdgpu_wait_state_resolved_context_t* context =
+      (loom_amdgpu_wait_state_resolved_context_t*)user_data;
   return loom_amdgpu_wait_state_stream_append(
-      &builder->resolved_states, builder->transient_arena, *wait_state);
+      context->stream, context->builder->transient_arena, *wait_state);
 }
 
 static iree_status_t loom_amdgpu_wait_state_append(
     loom_amdgpu_wait_state_builder_t* builder,
     const loom_low_packet_view_t* insertion_packet,
     const loom_low_packet_view_t* consumer_packet,
-    const loom_amdgpu_wait_state_match_t* match,
+    const loom_amdgpu_wait_state_match_t* match, uint32_t instruction_offset,
     loom_amdgpu_wait_state_action_t action) {
   if (match->cycle_count == 0) {
     return iree_ok_status();
@@ -917,6 +985,7 @@ static iree_status_t loom_amdgpu_wait_state_append(
       .block_index = insertion_packet->node->block_index,
       .node_index = insertion_packet->node_index,
       .scheduled_ordinal = insertion_packet->node->scheduled_ordinal,
+      .instruction_offset = instruction_offset,
       .producer_node = match->producer_node,
       .consumer_node = consumer_packet->node_index,
       .required_cycle_count = match->required_cycle_count,
@@ -1214,33 +1283,43 @@ static void loom_amdgpu_wait_state_match_structural_operands(
       LOOM_AMDGPU_WAIT_STATE_REASON_FLAG_TRANS_RESULT_USE |
       LOOM_AMDGPU_WAIT_STATE_REASON_FLAG_DST_SEL_FORWARDING_USE |
       LOOM_AMDGPU_WAIT_STATE_REASON_FLAG_VALU_SGPR_READ;
-  if (info->moves.count != 0) {
-    for (iree_host_size_t i = 0; i < info->moves.count; ++i) {
-      const loom_low_move_t* move =
-          &builder->allocation->moves[info->moves.start + i];
-      if (move->destination.descriptor_reg_class_id !=
-              LOOM_AMDGPU_REG_CLASS_ID_VGPR &&
-          move->destination.descriptor_reg_class_id !=
-              loom_amdgpu_agpr_reg_class_id(builder->descriptor_set)) {
-        continue;
-      }
-      for (uint32_t j = 0; j < loom_low_move_access_count(move); ++j) {
-        const loom_low_move_location_t* read = loom_low_move_read(move, j);
-        const loom_low_move_location_t* write = loom_low_move_write(move, j);
-        if (read->location_kind ==
-            LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
+  const uint32_t segment_count =
+      loom_amdgpu_structural_packet_move_segment_count(info);
+  if (segment_count != 0) {
+    for (uint32_t segment_index = 0; segment_index < segment_count;
+         ++segment_index) {
+      const loom_amdgpu_structural_move_segment_t segment =
+          loom_amdgpu_structural_packet_move_segment_at(info, segment_index);
+      const loom_low_move_range_t moves = segment.group->moves;
+      for (iree_host_size_t i = 0; i < moves.count; ++i) {
+        const loom_low_move_t* move =
+            &builder->allocation->moves[moves.start + i];
+        if (move->destination.descriptor_reg_class_id !=
+                LOOM_AMDGPU_REG_CLASS_ID_VGPR &&
+            move->destination.descriptor_reg_class_id !=
+                loom_amdgpu_agpr_reg_class_id(builder->descriptor_set)) {
+          continue;
+        }
+        const uint32_t instruction_offset =
+            (uint32_t)(segment.instruction_offset + i);
+        for (uint32_t j = 0; j < loom_low_move_access_count(move); ++j) {
+          const loom_low_move_location_t* read = loom_low_move_read(move, j);
+          const loom_low_move_location_t* write = loom_low_move_write(move, j);
+          if (read->location_kind ==
+              LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
+            const loom_amdgpu_short_wait_match_t candidate =
+                loom_amdgpu_short_wait_query(
+                    builder->short_wait, read->descriptor_reg_class_id,
+                    read->location, 1, instruction_offset, read_reasons);
+            loom_amdgpu_wait_state_merge_short_match(&candidate, match);
+          }
           const loom_amdgpu_short_wait_match_t candidate =
               loom_amdgpu_short_wait_query(
-                  builder->short_wait, read->descriptor_reg_class_id,
-                  read->location, 1, (uint32_t)i, read_reasons);
+                  builder->short_wait, write->descriptor_reg_class_id,
+                  write->location, 1, instruction_offset,
+                  LOOM_AMDGPU_WAIT_STATE_REASON_FLAG_DST_SEL_FORWARDING_USE);
           loom_amdgpu_wait_state_merge_short_match(&candidate, match);
         }
-        const loom_amdgpu_short_wait_match_t candidate =
-            loom_amdgpu_short_wait_query(
-                builder->short_wait, write->descriptor_reg_class_id,
-                write->location, 1, (uint32_t)i,
-                LOOM_AMDGPU_WAIT_STATE_REASON_FLAG_DST_SEL_FORWARDING_USE);
-        loom_amdgpu_wait_state_merge_short_match(&candidate, match);
       }
     }
     return;
@@ -1344,7 +1423,8 @@ static iree_status_t loom_amdgpu_wait_state_apply_matrix_coexecution(
     loom_amdgpu_wait_state_builder_t* builder,
     const loom_low_packet_view_t* insertion_packet,
     const loom_low_packet_view_t* consumer_packet,
-    const loom_amdgpu_matrix_coexecution_match_t* coexecution_match) {
+    const loom_amdgpu_matrix_coexecution_match_t* coexecution_match,
+    uint32_t instruction_offset) {
   if (coexecution_match->residual_issue_count == 0) {
     return iree_ok_status();
   }
@@ -1358,9 +1438,205 @@ static iree_status_t loom_amdgpu_wait_state_apply_matrix_coexecution(
       .observed_cycle_count = coexecution_match->observed_issue_count,
       .cycle_count = coexecution_match->residual_issue_count,
   };
-  return loom_amdgpu_wait_state_append(builder, insertion_packet,
-                                       consumer_packet, &match,
-                                       LOOM_AMDGPU_WAIT_STATE_ACTION_V_NOP);
+  return loom_amdgpu_wait_state_append(
+      builder, insertion_packet, consumer_packet, &match, instruction_offset,
+      LOOM_AMDGPU_WAIT_STATE_ACTION_V_NOP);
+}
+
+static loom_amdgpu_structural_packet_info_t
+loom_amdgpu_wait_state_move_phase_info(
+    const loom_amdgpu_wait_state_builder_t* builder,
+    const loom_low_move_group_t* group) {
+  IREE_ASSERT(group != NULL);
+  IREE_ASSERT_NE(group->moves.count, 0);
+  loom_amdgpu_structural_packet_info_t info = {
+      .flags = LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MOVEMENT |
+               LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MATERIALIZES,
+      .instruction_count = group->moves.count,
+      .leading_moves = group,
+  };
+  for (iree_host_size_t i = 0; i < group->moves.count; ++i) {
+    const loom_low_move_t* move =
+        &builder->allocation->moves[group->moves.start + i];
+    if (move->destination.descriptor_reg_class_id ==
+        LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
+      info.flags |= LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_USES_VECTOR_ALU;
+    }
+  }
+  return info;
+}
+
+static iree_status_t loom_amdgpu_wait_state_apply_move_phase(
+    loom_amdgpu_wait_state_builder_t* builder,
+    const loom_low_packet_view_t* packet, const loom_low_move_group_t* group,
+    uint32_t instruction_offset, bool processor_has_valu_sgpr_read_hazard) {
+  const loom_amdgpu_structural_packet_info_t structural =
+      loom_amdgpu_wait_state_move_phase_info(builder, group);
+
+  uint16_t vector_issue_count = 0;
+  if (builder->matrix_coexecution != NULL) {
+    loom_amdgpu_matrix_coexecution_match_t coexecution_match = {0};
+    loom_amdgpu_matrix_coexecution_inspect_packet(
+        builder->matrix_coexecution, packet, &structural, &coexecution_match,
+        &vector_issue_count);
+    IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_apply_matrix_coexecution(
+        builder, packet, packet, &coexecution_match, instruction_offset));
+  }
+
+  loom_amdgpu_short_wait_match_t short_match = {0};
+  if (builder->short_wait != NULL) {
+    short_match = loom_amdgpu_short_wait_begin_packet(builder->short_wait,
+                                                      packet, &structural, 0);
+  }
+  loom_amdgpu_wait_state_match_t match = {0};
+  loom_amdgpu_wait_state_match_structural_operands(builder, packet, &structural,
+                                                   &match);
+  if (builder->matrix_results != NULL) {
+    const loom_amdgpu_matrix_result_match_t matrix_match =
+        loom_amdgpu_matrix_result_wait_inspect(builder->matrix_results, packet,
+                                               /*source=*/NULL, &structural,
+                                               /*memory_consumer=*/false);
+    if (matrix_match.remaining > match.cycle_count) {
+      match = (loom_amdgpu_wait_state_match_t){
+          .reason = LOOM_AMDGPU_WAIT_STATE_REASON_MATRIX_RESULT_USE,
+          .producer_node = matrix_match.source->node_index,
+          .required_cycle_count = matrix_match.required,
+          .observed_cycle_count =
+              (uint16_t)(matrix_match.required - matrix_match.remaining),
+          .cycle_count = matrix_match.remaining,
+          .matrix_wait_profile = builder->matrix_wait_profile,
+          .matrix_result_use = matrix_match.use,
+          .matrix_pass_count = matrix_match.source->instruction.pass_count,
+      };
+    }
+  }
+  loom_amdgpu_wait_state_merge_short_match(&short_match, &match);
+  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_append(
+      builder, packet, packet, &match, instruction_offset,
+      LOOM_AMDGPU_WAIT_STATE_ACTION_S_NOP));
+
+  loom_amdgpu_wait_state_packet_info_t phase_info = {
+      .structural = structural,
+  };
+  loom_amdgpu_wait_state_match_t delay_match = {0};
+  const loom_amdgpu_wait_state_action_t delay_action =
+      loom_amdgpu_wait_state_delay_alu_match_packet(builder, packet,
+                                                    &phase_info, &delay_match);
+  if (delay_action != LOOM_AMDGPU_WAIT_STATE_ACTION_UNKNOWN) {
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_wait_state_append(builder, packet, packet, &delay_match,
+                                      instruction_offset, delay_action));
+  }
+
+  loom_amdgpu_wait_state_apply_moves(builder, packet, group->moves,
+                                     processor_has_valu_sgpr_read_hazard);
+  if (builder->matrix_coexecution != NULL) {
+    loom_amdgpu_matrix_coexecution_commit_packet(builder->matrix_coexecution,
+                                                 packet, vector_issue_count);
+  }
+  if (builder->short_wait != NULL) {
+    loom_amdgpu_short_wait_commit(builder->short_wait, packet);
+  }
+  if (builder->matrix_results != NULL) {
+    loom_amdgpu_matrix_result_wait_advance(builder->matrix_results,
+                                           group->moves.count);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_wait_state_apply_call_packet(
+    loom_amdgpu_wait_state_builder_t* builder,
+    const loom_low_packet_view_t* packet,
+    const loom_amdgpu_wait_state_packet_info_t* info,
+    bool processor_has_valu_sgpr_read_hazard) {
+  IREE_ASSERT(iree_any_bit_set(info->structural.flags,
+                               LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CALL));
+  const uint64_t boundary_offset =
+      loom_amdgpu_structural_packet_call_boundary_offset(&info->structural);
+  IREE_ASSERT_LE(boundary_offset, UINT32_MAX);
+  const uint32_t boundary = (uint32_t)boundary_offset;
+
+  const loom_low_move_group_t* arguments =
+      loom_amdgpu_structural_packet_call_arguments(&info->structural);
+  if (arguments != NULL) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_apply_move_phase(
+        builder, packet, arguments, 0, processor_has_valu_sgpr_read_hazard));
+  }
+  if (builder->replay_clause != NULL) {
+    loom_amdgpu_replay_clause_break(builder->replay_clause);
+  }
+
+  if (builder->matrix_coexecution != NULL) {
+    const loom_amdgpu_matrix_coexecution_match_t coexecution_match =
+        loom_amdgpu_matrix_coexecution_drain(builder->matrix_coexecution);
+    if (coexecution_match.residual_issue_count != 0) {
+      const loom_amdgpu_wait_state_match_t match = {
+          .reason = LOOM_AMDGPU_WAIT_STATE_REASON_CALLABLE_BOUNDARY,
+          .producer_node = coexecution_match.producer_node,
+          .required_cycle_count = coexecution_match.required_issue_count,
+          .observed_cycle_count = coexecution_match.observed_issue_count,
+          .cycle_count = coexecution_match.residual_issue_count,
+      };
+      IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_append(
+          builder, packet, packet, &match, boundary,
+          LOOM_AMDGPU_WAIT_STATE_ACTION_V_NOP));
+    }
+  }
+
+  loom_amdgpu_wait_state_match_t boundary_match = {0};
+  if (builder->short_wait != NULL) {
+    const loom_amdgpu_short_wait_match_t short_match =
+        loom_amdgpu_short_wait_drain(builder->short_wait, packet, boundary);
+    loom_amdgpu_wait_state_merge_boundary_match(
+        short_match.producer_node, short_match.required_cycles,
+        short_match.observed_cycles, short_match.cycles, &boundary_match);
+  }
+  if (builder->matrix_results != NULL) {
+    const loom_amdgpu_matrix_result_match_t matrix_match =
+        loom_amdgpu_matrix_result_wait_drain(builder->matrix_results);
+    if (matrix_match.source != NULL) {
+      loom_amdgpu_wait_state_merge_boundary_match(
+          matrix_match.source->node_index, matrix_match.required,
+          (uint16_t)(matrix_match.required - matrix_match.remaining),
+          matrix_match.remaining, &boundary_match);
+    }
+  }
+  loom_amdgpu_wait_state_delay_alu_match_boundary(builder, &boundary_match);
+  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_append(
+      builder, packet, packet, &boundary_match, boundary,
+      LOOM_AMDGPU_WAIT_STATE_ACTION_S_NOP));
+  if (builder->has_delay_alu) {
+    loom_amdgpu_wait_state_delay_alu_clear_all(builder);
+  }
+
+  const loom_low_move_group_t* results =
+      loom_amdgpu_structural_packet_call_results(&info->structural);
+  const uint64_t result_count = results != NULL ? results->moves.count : 0;
+  const uint64_t control_count =
+      info->instruction_count - boundary_offset - result_count;
+  if (builder->short_wait != NULL) {
+    loom_amdgpu_short_wait_advance(builder->short_wait, control_count);
+  }
+  if (builder->matrix_results != NULL) {
+    loom_amdgpu_matrix_result_wait_advance(builder->matrix_results,
+                                           control_count);
+  }
+  loom_amdgpu_delay_alu_advance(&builder->delay_alu,
+                                LOOM_AMDGPU_DELAY_ALU_TYPE_SALU, control_count);
+  builder->current_position += control_count;
+
+  if (results != NULL) {
+    IREE_ASSERT_LE(boundary_offset + control_count, UINT32_MAX);
+    IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_apply_move_phase(
+        builder, packet, results, (uint32_t)(boundary_offset + control_count),
+        processor_has_valu_sgpr_read_hazard));
+  }
+
+  IREE_ASSERT_LE(info->instruction_count, UINT32_MAX);
+  builder->packet_instruction_counts[packet->packet_index] =
+      (uint32_t)info->instruction_count;
+  ++builder->progress_event_count;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_wait_state_apply_packet(
@@ -1382,6 +1658,13 @@ static iree_status_t loom_amdgpu_wait_state_apply_packet(
   const bool processor_has_valu_sgpr_read_hazard =
       loom_amdgpu_wait_state_has_scheduling(
           builder, LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES);
+  if (iree_any_bit_set(info.structural.flags,
+                       LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CALL)) {
+    return loom_amdgpu_wait_state_apply_call_packet(
+        builder, packet, &info, processor_has_valu_sgpr_read_hazard);
+  }
+  const uint32_t structural_move_segment_count =
+      loom_amdgpu_structural_packet_move_segment_count(&info.structural);
   uint16_t vector_issue_count = 0;
   if (builder->matrix_coexecution != NULL) {
     loom_amdgpu_matrix_coexecution_match_t coexecution_match = {0};
@@ -1390,7 +1673,7 @@ static iree_status_t loom_amdgpu_wait_state_apply_packet(
         packet->descriptor == NULL ? &info.structural : NULL,
         &coexecution_match, &vector_issue_count);
     IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_apply_matrix_coexecution(
-        builder, packet, packet, &coexecution_match));
+        builder, packet, packet, &coexecution_match, 0));
   }
 
   loom_amdgpu_short_wait_match_t short_match = {0};
@@ -1424,7 +1707,7 @@ static iree_status_t loom_amdgpu_wait_state_apply_packet(
   }
   loom_amdgpu_wait_state_merge_short_match(&short_match, &match);
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_append(
-      builder, packet, packet, &match, LOOM_AMDGPU_WAIT_STATE_ACTION_S_NOP));
+      builder, packet, packet, &match, 0, LOOM_AMDGPU_WAIT_STATE_ACTION_S_NOP));
 
   if (iree_any_bit_set(info.flags,
                        LOOM_AMDGPU_WAIT_STATE_PACKET_FLAG_USES_VECTOR_MEMORY)) {
@@ -1434,7 +1717,7 @@ static iree_status_t loom_amdgpu_wait_state_apply_packet(
   } else if ((iree_any_bit_set(info.flags,
                                LOOM_AMDGPU_WAIT_STATE_PACKET_FLAG_DESCRIPTOR) &&
               info.delay_alu_type != LOOM_AMDGPU_DELAY_ALU_TYPE_OTHER) ||
-             info.structural.moves.count != 0 ||
+             structural_move_segment_count != 0 ||
              iree_any_bit_set(info.structural.flags,
                               LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_READS_SCC)) {
     loom_amdgpu_wait_state_match_t delay_alu_match = {0};
@@ -1443,7 +1726,7 @@ static iree_status_t loom_amdgpu_wait_state_apply_packet(
                                                       &delay_alu_match);
     if (delay_alu_action != LOOM_AMDGPU_WAIT_STATE_ACTION_UNKNOWN) {
       IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_append(
-          builder, packet, packet, &delay_alu_match, delay_alu_action));
+          builder, packet, packet, &delay_alu_match, 0, delay_alu_action));
     }
   }
 
@@ -1458,20 +1741,26 @@ static iree_status_t loom_amdgpu_wait_state_apply_packet(
           .required_cycle_count = 1,
           .cycle_count = 1,
       };
-      IREE_RETURN_IF_ERROR(
-          loom_amdgpu_wait_state_append(builder, packet, packet, &replay_match,
-                                        LOOM_AMDGPU_WAIT_STATE_ACTION_S_NOP));
+      IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_append(
+          builder, packet, packet, &replay_match, 0,
+          LOOM_AMDGPU_WAIT_STATE_ACTION_S_NOP));
     }
   }
 
-  if (info.structural.moves.count == 0) {
+  if (structural_move_segment_count == 0) {
     loom_amdgpu_wait_state_record_results(builder, packet, &info);
   } else {
-    loom_amdgpu_wait_state_apply_moves(builder, packet, info.structural.moves,
-                                       processor_has_valu_sgpr_read_hazard);
+    for (uint32_t segment_index = 0;
+         segment_index < structural_move_segment_count; ++segment_index) {
+      const loom_amdgpu_structural_move_segment_t segment =
+          loom_amdgpu_structural_packet_move_segment_at(&info.structural,
+                                                        segment_index);
+      loom_amdgpu_wait_state_apply_moves(builder, packet, segment.group->moves,
+                                         processor_has_valu_sgpr_read_hazard);
+    }
   }
 
-  if (info.structural.moves.count == 0) {
+  if (structural_move_segment_count == 0) {
     if (info.delay_alu_type != LOOM_AMDGPU_DELAY_ALU_TYPE_OTHER &&
         info.delay_alu_latency_cycles != 0) {
       loom_amdgpu_wait_state_delay_alu_record_results(
@@ -1490,7 +1779,8 @@ static iree_status_t loom_amdgpu_wait_state_apply_packet(
                                   LOOM_AMDGPU_DELAY_ALU_TYPE_SALU,
                                   info.structural.scalar_alu_instruction_count);
     builder->current_position +=
-        info.instruction_count - info.structural.moves.count;
+        info.instruction_count -
+        loom_amdgpu_structural_packet_move_count(&info.structural);
   }
   if (info.instruction_count > UINT32_MAX) {
     return iree_make_status(
@@ -1564,7 +1854,7 @@ static iree_status_t loom_amdgpu_wait_state_apply_vopd_pair(
       coexecution_consumer = second_packet;
     }
     IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_apply_matrix_coexecution(
-        builder, first_packet, coexecution_consumer, &coexecution_match));
+        builder, first_packet, coexecution_consumer, &coexecution_match, 0));
   }
 
   loom_amdgpu_wait_state_match_t match = {0};
@@ -1578,7 +1868,7 @@ static iree_status_t loom_amdgpu_wait_state_apply_vopd_pair(
     match_consumer = second_packet;
   }
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_append(
-      builder, first_packet, match_consumer, &match,
+      builder, first_packet, match_consumer, &match, 0,
       LOOM_AMDGPU_WAIT_STATE_ACTION_S_NOP));
 
   loom_amdgpu_delay_alu_accumulator_t accumulator = {0};
@@ -1597,7 +1887,7 @@ static iree_status_t loom_amdgpu_wait_state_apply_vopd_pair(
                                                           &delay_match);
   if (delay_action != LOOM_AMDGPU_WAIT_STATE_ACTION_UNKNOWN) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_append(
-        builder, first_packet, delay_consumer, &delay_match, delay_action));
+        builder, first_packet, delay_consumer, &delay_match, 0, delay_action));
   }
 
   loom_amdgpu_wait_state_record_results(builder, first_packet, &first_info);
@@ -1639,23 +1929,40 @@ static const loom_amdgpu_wait_state_t* loom_amdgpu_wait_state_stream_at(
   return &segment->states[segment_offset];
 }
 
-// Returns true when |ordinary| precedes |resolved| in the final wait table.
-// Ordinary waits retain the original first position when both streams target
-// the same packet.
-static bool loom_amdgpu_wait_state_ordinary_precedes(
-    const loom_amdgpu_wait_state_t* ordinary,
-    const loom_amdgpu_wait_state_t* resolved) {
-  return ordinary->block_index < resolved->block_index ||
-         (ordinary->block_index == resolved->block_index &&
-          ordinary->scheduled_ordinal <= resolved->scheduled_ordinal);
+// Returns true when |lhs| strictly precedes |rhs|. Stream priority retains the
+// first action at equal positions.
+static bool loom_amdgpu_wait_state_precedes(
+    const loom_amdgpu_wait_state_t* lhs, const loom_amdgpu_wait_state_t* rhs) {
+  if (lhs->block_index != rhs->block_index) {
+    return lhs->block_index < rhs->block_index;
+  }
+  if (lhs->scheduled_ordinal != rhs->scheduled_ordinal) {
+    return lhs->scheduled_ordinal < rhs->scheduled_ordinal;
+  }
+  return lhs->instruction_offset < rhs->instruction_offset;
 }
 
 static iree_status_t loom_amdgpu_wait_state_finalize(
     loom_amdgpu_wait_state_builder_t* builder) {
-  const iree_host_size_t ordinary_count = builder->ordinary_states.state_count;
-  const iree_host_size_t resolved_count = builder->resolved_states.state_count;
-  IREE_ASSERT(ordinary_count <= IREE_HOST_SIZE_MAX - resolved_count);
-  builder->state_count = ordinary_count + resolved_count;
+  const loom_amdgpu_wait_state_stream_t* candidate_streams[] = {
+      &builder->ordinary_states,
+      &builder->resolved_states[LOOM_AMDGPU_WAIT_STATE_RESOLVED_STREAM_SHORT],
+      &builder->resolved_states[LOOM_AMDGPU_WAIT_STATE_RESOLVED_STREAM_MASK],
+      &builder->resolved_states[LOOM_AMDGPU_WAIT_STATE_RESOLVED_STREAM_SGPR],
+  };
+  const loom_amdgpu_wait_state_stream_t*
+      streams[IREE_ARRAYSIZE(candidate_streams)] = {0};
+  iree_host_size_t stream_count = 0;
+  builder->state_count = 0;
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(candidate_streams); ++i) {
+    const loom_amdgpu_wait_state_stream_t* stream = candidate_streams[i];
+    IREE_ASSERT_LE(stream->state_count,
+                   IREE_HOST_SIZE_MAX - builder->state_count);
+    builder->state_count += stream->state_count;
+    if (stream->state_count != 0) {
+      streams[stream_count++] = stream;
+    }
+  }
   if (builder->state_count == 0) {
     return iree_ok_status();
   }
@@ -1663,36 +1970,54 @@ static iree_status_t loom_amdgpu_wait_state_finalize(
       builder->arena, builder->state_count, sizeof(*builder->states),
       (void**)&builder->states));
 
-  iree_host_size_t ordinary_index = 0;
-  iree_host_size_t resolved_index = 0;
-  iree_host_size_t output_index = 0;
-  while (output_index < builder->state_count) {
+  if (stream_count == 1) {
+    for (iree_host_size_t i = 0; i < builder->state_count; ++i) {
+      builder->states[i] = *loom_amdgpu_wait_state_stream_at(streams[0], i);
+    }
+    return iree_ok_status();
+  }
+
+  if (stream_count == 2) {
+    iree_host_size_t left_index = 0;
+    iree_host_size_t right_index = 0;
+    for (iree_host_size_t output_index = 0; output_index < builder->state_count;
+         ++output_index) {
+      const bool take_left =
+          right_index == streams[1]->state_count ||
+          (left_index != streams[0]->state_count &&
+           !loom_amdgpu_wait_state_precedes(
+               loom_amdgpu_wait_state_stream_at(streams[1], right_index),
+               loom_amdgpu_wait_state_stream_at(streams[0], left_index)));
+      const iree_host_size_t stream_index = take_left ? 0 : 1;
+      iree_host_size_t* cursor = take_left ? &left_index : &right_index;
+      builder->states[output_index] =
+          *loom_amdgpu_wait_state_stream_at(streams[stream_index], (*cursor)++);
+    }
+    return iree_ok_status();
+  }
+
+  iree_host_size_t cursors[IREE_ARRAYSIZE(streams)] = {0};
+  for (iree_host_size_t output_index = 0; output_index < builder->state_count;
+       ++output_index) {
     const loom_amdgpu_wait_state_t* next = NULL;
-    if (resolved_index == resolved_count) {
-      next = loom_amdgpu_wait_state_stream_at(&builder->ordinary_states,
-                                              ordinary_index++);
-    } else if (ordinary_index == ordinary_count) {
-      next = loom_amdgpu_wait_state_stream_at(&builder->resolved_states,
-                                              resolved_index++);
-    } else {
-      const loom_amdgpu_wait_state_t* ordinary =
-          loom_amdgpu_wait_state_stream_at(&builder->ordinary_states,
-                                           ordinary_index);
-      const loom_amdgpu_wait_state_t* resolved =
-          loom_amdgpu_wait_state_stream_at(&builder->resolved_states,
-                                           resolved_index);
-      if (loom_amdgpu_wait_state_ordinary_precedes(ordinary, resolved)) {
-        next = ordinary;
-        ++ordinary_index;
-      } else {
-        next = resolved;
-        ++resolved_index;
+    iree_host_size_t next_stream = IREE_HOST_SIZE_MAX;
+    for (iree_host_size_t stream_index = 0; stream_index < stream_count;
+         ++stream_index) {
+      if (cursors[stream_index] == streams[stream_index]->state_count) {
+        continue;
+      }
+      const loom_amdgpu_wait_state_t* candidate =
+          loom_amdgpu_wait_state_stream_at(streams[stream_index],
+                                           cursors[stream_index]);
+      if (next == NULL || loom_amdgpu_wait_state_precedes(candidate, next)) {
+        next = candidate;
+        next_stream = stream_index;
       }
     }
-    builder->states[output_index++] = *next;
+    IREE_ASSERT(next != NULL);
+    builder->states[output_index] = *next;
+    ++cursors[next_stream];
   }
-  IREE_ASSERT_EQ(ordinary_index, ordinary_count);
-  IREE_ASSERT_EQ(resolved_index, resolved_count);
   return iree_ok_status();
 }
 
@@ -1840,13 +2165,14 @@ static iree_status_t loom_amdgpu_wait_state_plan_build_with_scratch(
       memset(builder->sgprs.states, 0,
              builder->sgprs.count * sizeof(*builder->sgprs.states));
     }
+    if (builder->has_delay_alu) {
+      loom_amdgpu_wait_state_delay_alu_clear_all(builder);
+    }
     if (builder->short_wait != NULL) {
       loom_amdgpu_short_wait_begin_block(builder->short_wait,
                                          (uint16_t)block_index);
     }
     builder->current_position = 0;
-    builder->delay_alu.valu_count = 0;
-    builder->delay_alu.trans_count = 0;
     if (builder->matrix_coexecution != NULL) {
       loom_amdgpu_matrix_coexecution_begin_block(builder->matrix_coexecution,
                                                  (uint16_t)block_index);
@@ -1945,16 +2271,34 @@ static iree_status_t loom_amdgpu_wait_state_plan_build_with_scratch(
     }
   }
   if (builder->short_wait != NULL) {
+    loom_amdgpu_wait_state_resolved_context_t context = {
+        .builder = builder,
+        .stream = &builder->resolved_states
+                       [LOOM_AMDGPU_WAIT_STATE_RESOLVED_STREAM_SHORT],
+    };
     IREE_RETURN_IF_ERROR(loom_amdgpu_short_wait_resolve(
-        builder->short_wait, loom_amdgpu_wait_state_append_resolved, builder));
+        builder->short_wait, loom_amdgpu_wait_state_append_resolved, &context));
   }
   if (builder->mask_writes != NULL) {
+    loom_amdgpu_wait_state_resolved_context_t context = {
+        .builder = builder,
+        .stream =
+            &builder
+                 ->resolved_states[LOOM_AMDGPU_WAIT_STATE_RESOLVED_STREAM_MASK],
+    };
     IREE_RETURN_IF_ERROR(loom_amdgpu_mask_write_wait_resolve(
-        builder->mask_writes, loom_amdgpu_wait_state_append_resolved, builder));
+        builder->mask_writes, loom_amdgpu_wait_state_append_resolved,
+        &context));
   }
   if (builder->sgpr_reads != NULL) {
+    loom_amdgpu_wait_state_resolved_context_t context = {
+        .builder = builder,
+        .stream =
+            &builder
+                 ->resolved_states[LOOM_AMDGPU_WAIT_STATE_RESOLVED_STREAM_SGPR],
+    };
     IREE_RETURN_IF_ERROR(loom_amdgpu_sgpr_read_wait_resolve(
-        builder->sgpr_reads, loom_amdgpu_wait_state_append_resolved, builder));
+        builder->sgpr_reads, loom_amdgpu_wait_state_append_resolved, &context));
   }
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_finalize(builder));
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_build_progress(builder));
@@ -2015,10 +2359,13 @@ iree_status_t loom_amdgpu_wait_state_plan_build(
       sizeof(loom_amdgpu_wait_state_segment_t),
       iree_alignof(loom_amdgpu_wait_state_segment_t),
       &builder.ordinary_states.segments);
-  loom_segmented_storage_initialize(
-      sizeof(loom_amdgpu_wait_state_segment_t),
-      iree_alignof(loom_amdgpu_wait_state_segment_t),
-      &builder.resolved_states.segments);
+  for (iree_host_size_t i = 0; i < LOOM_AMDGPU_WAIT_STATE_RESOLVED_STREAM_COUNT;
+       ++i) {
+    loom_segmented_storage_initialize(
+        sizeof(loom_amdgpu_wait_state_segment_t),
+        iree_alignof(loom_amdgpu_wait_state_segment_t),
+        &builder.resolved_states[i].segments);
+  }
   iree_status_t status =
       loom_amdgpu_wait_state_plan_build_with_scratch(&builder);
   if (iree_status_is_ok(status)) {

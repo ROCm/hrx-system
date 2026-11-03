@@ -78,6 +78,9 @@ typedef struct loom_amdgpu_matrix_result_block_t {
   loom_amdgpu_matrix_result_frontier_t* outgoing;
   // Guaranteed native issue progress, saturated at UINT8_MAX.
   uint8_t minimum_instruction_count;
+  // Whether the block contains an opaque boundary that retires all incoming
+  // result windows before its retained suffix.
+  bool quiescent_boundary;
 } loom_amdgpu_matrix_result_block_t;
 
 struct loom_amdgpu_matrix_result_wait_t {
@@ -447,11 +450,18 @@ void loom_amdgpu_matrix_result_wait_begin_static_block(
 void loom_amdgpu_matrix_result_wait_collect(
     loom_amdgpu_matrix_result_wait_t* state,
     const loom_low_packet_view_t* packet, bool matrix_source,
-    uint8_t minimum_instruction_count) {
+    uint8_t minimum_instruction_count, bool quiescent_boundary) {
   state->position += minimum_instruction_count;
   if (!matrix_source) {
+    if (quiescent_boundary) {
+      if (state->blocks != NULL) {
+        state->blocks[state->block_index].quiescent_boundary = true;
+      }
+      loom_amdgpu_matrix_result_reset(state);
+    }
     return;
   }
+  IREE_ASSERT(!quiescent_boundary);
   const loom_low_descriptor_set_t* descriptor_set =
       state->schedule->target.descriptor_set;
   const loom_amdgpu_descriptor_traits_t traits =
@@ -564,6 +574,9 @@ static iree_status_t loom_amdgpu_matrix_result_transfer(void* user_data,
   loom_amdgpu_matrix_result_block_t* target = &state->blocks[target_block];
   loom_amdgpu_matrix_result_index_frontier(state, &target->outgoing);
   *out_changed = false;
+  if (target->quiescent_boundary) {
+    return iree_ok_status();
+  }
   for (const loom_amdgpu_matrix_result_frontier_t* row =
            state->blocks[source_block].outgoing;
        row != NULL; row = row->next) {
@@ -747,26 +760,37 @@ loom_amdgpu_matrix_result_match_t loom_amdgpu_matrix_result_wait_inspect(
     const loom_amdgpu_structural_packet_info_t* structural,
     bool memory_consumer) {
   loom_amdgpu_matrix_result_match_t match = {0};
-  if (structural->moves.count != 0) {
-    for (iree_host_size_t i = 0; i < structural->moves.count; ++i) {
-      const loom_low_move_t* move =
-          &state->allocation->moves[structural->moves.start + i];
-      for (uint32_t j = 0; j < loom_low_move_access_count(move); ++j) {
-        const loom_low_move_location_t* read = loom_low_move_read(move, j);
-        const loom_low_move_location_t* write = loom_low_move_write(move, j);
-        if (read->location_kind ==
-            LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
-          loom_amdgpu_matrix_result_wait_match(
-              state, read->descriptor_reg_class_id, read->location, 1, i,
-              LOOM_AMDGPU_MATRIX_WAIT_RESULT_USE_VALU_READ,
-              (loom_amdgpu_matrix_instruction_t){0}, &match);
-        }
-        if (write->location_kind ==
-            LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
-          loom_amdgpu_matrix_result_wait_match(
-              state, write->descriptor_reg_class_id, write->location, 1, i,
-              LOOM_AMDGPU_MATRIX_WAIT_RESULT_USE_WRITE,
-              (loom_amdgpu_matrix_instruction_t){0}, &match);
+  const uint32_t segment_count =
+      loom_amdgpu_structural_packet_move_segment_count(structural);
+  if (segment_count != 0) {
+    for (uint32_t segment_index = 0; segment_index < segment_count;
+         ++segment_index) {
+      const loom_amdgpu_structural_move_segment_t segment =
+          loom_amdgpu_structural_packet_move_segment_at(structural,
+                                                        segment_index);
+      const loom_low_move_range_t moves = segment.group->moves;
+      for (iree_host_size_t i = 0; i < moves.count; ++i) {
+        const loom_low_move_t* move =
+            &state->allocation->moves[moves.start + i];
+        const uint64_t instruction_offset = segment.instruction_offset + i;
+        for (uint32_t j = 0; j < loom_low_move_access_count(move); ++j) {
+          const loom_low_move_location_t* read = loom_low_move_read(move, j);
+          const loom_low_move_location_t* write = loom_low_move_write(move, j);
+          if (read->location_kind ==
+              LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
+            loom_amdgpu_matrix_result_wait_match(
+                state, read->descriptor_reg_class_id, read->location, 1,
+                instruction_offset,
+                LOOM_AMDGPU_MATRIX_WAIT_RESULT_USE_VALU_READ,
+                (loom_amdgpu_matrix_instruction_t){0}, &match);
+          }
+          if (write->location_kind ==
+              LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
+            loom_amdgpu_matrix_result_wait_match(
+                state, write->descriptor_reg_class_id, write->location, 1,
+                instruction_offset, LOOM_AMDGPU_MATRIX_WAIT_RESULT_USE_WRITE,
+                (loom_amdgpu_matrix_instruction_t){0}, &match);
+          }
         }
       }
     }
@@ -808,6 +832,62 @@ loom_amdgpu_matrix_result_match_t loom_amdgpu_matrix_result_wait_inspect(
 void loom_amdgpu_matrix_result_wait_advance(
     loom_amdgpu_matrix_result_wait_t* state, uint64_t instruction_count) {
   state->position += instruction_count;
+}
+
+static uint16_t loom_amdgpu_matrix_result_release_requirement(
+    const loom_amdgpu_matrix_result_source_t* source, unsigned channel,
+    loom_amdgpu_matrix_wait_result_use_t* out_use) {
+  if (channel < LOOM_AMDGPU_MATRIX_RESULT_FORWARDING_START) {
+    *out_use = (loom_amdgpu_matrix_wait_result_use_t)(channel + 1);
+    return source->ordinary[channel];
+  }
+  if (channel < LOOM_AMDGPU_MATRIX_RESULT_FLOOR_START) {
+    *out_use = LOOM_AMDGPU_MATRIX_WAIT_RESULT_USE_MATRIX_SRCC_OVERLAP;
+    const unsigned pipeline =
+        (channel - LOOM_AMDGPU_MATRIX_RESULT_FORWARDING_START) / 2;
+    return source->accumulator[pipeline];
+  }
+  if (channel < LOOM_AMDGPU_MATRIX_RESULT_ACCUMULATOR_READ) {
+    *out_use = LOOM_AMDGPU_MATRIX_WAIT_RESULT_USE_MATRIX_SRCC_EXACT;
+    return (uint16_t)((channel - LOOM_AMDGPU_MATRIX_RESULT_FLOOR_START + 1) *
+                      2);
+  }
+  *out_use = LOOM_AMDGPU_MATRIX_WAIT_RESULT_USE_ACCUMULATOR_WRITE;
+  return source->accumulator_read;
+}
+
+loom_amdgpu_matrix_result_match_t loom_amdgpu_matrix_result_wait_drain(
+    loom_amdgpu_matrix_result_wait_t* state) {
+  loom_amdgpu_matrix_result_match_t match = {0};
+  for (uint32_t i = 0; i < state->active_count; ++i) {
+    const loom_amdgpu_matrix_result_active_t* active =
+        &state->active[state->active_indices[i]];
+    for (unsigned channel = 0;
+         channel < LOOM_AMDGPU_MATRIX_RESULT_RELEASE_COUNT; ++channel) {
+      const loom_amdgpu_matrix_result_release_t release =
+          active->releases[channel];
+      if (release.position <= state->position ||
+          release.position - state->position <= match.remaining) {
+        continue;
+      }
+      const loom_amdgpu_matrix_result_source_t* source =
+          &state->sources[release.source];
+      loom_amdgpu_matrix_wait_result_use_t use =
+          LOOM_AMDGPU_MATRIX_WAIT_RESULT_USE_UNKNOWN;
+      const uint16_t required =
+          loom_amdgpu_matrix_result_release_requirement(source, channel, &use);
+      const uint16_t remaining = (uint16_t)(release.position - state->position);
+      IREE_ASSERT_GE(required, remaining);
+      match = (loom_amdgpu_matrix_result_match_t){
+          .source = source,
+          .use = use,
+          .required = required,
+          .remaining = remaining,
+      };
+    }
+  }
+  loom_amdgpu_matrix_result_reset(state);
+  return match;
 }
 
 void loom_amdgpu_matrix_result_wait_commit(

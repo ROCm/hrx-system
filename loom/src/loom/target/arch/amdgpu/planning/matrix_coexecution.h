@@ -103,6 +103,11 @@ void loom_amdgpu_matrix_coexecution_inspect_packet(
 void loom_amdgpu_matrix_coexecution_advance(
     loom_amdgpu_matrix_coexecution_t* coexecution, uint16_t issue_count);
 
+// Returns the strongest live release window and starts a fresh physical
+// epoch. Opaque callees therefore inherit no caller-owned matrix retention.
+loom_amdgpu_matrix_coexecution_match_t loom_amdgpu_matrix_coexecution_drain(
+    loom_amdgpu_matrix_coexecution_t* coexecution);
+
 // Commits one non-VOPD packet after all insertions before it have been applied.
 void loom_amdgpu_matrix_coexecution_commit_packet(
     loom_amdgpu_matrix_coexecution_t* coexecution,
