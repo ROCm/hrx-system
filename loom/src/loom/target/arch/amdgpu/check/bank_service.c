@@ -116,16 +116,17 @@ static iree_status_t loom_amdgpu_bank_service_check_emit_provider_execute(
       LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS;
 
   const loom_check_compile_source_low_options_t compile_options = {
-      .pipeline = LOOM_CHECK_COMPILE_SOURCE_LOW_PIPELINE_DEFAULT,
+      .pipeline_kind = LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW,
       .report = &report,
   };
   const loom_amdgpu_bank_service_check_consumer_t consumer = {
       .request = request,
       .report = &report,
   };
+  bool compiled = false;
   iree_status_t status = loom_check_compile_source_low(
       request, &compile_options, loom_amdgpu_bank_service_check_consume,
-      (void*)&consumer);
+      (void*)&consumer, &compiled);
   loom_target_compile_report_deinitialize(&report);
   return status;
 }

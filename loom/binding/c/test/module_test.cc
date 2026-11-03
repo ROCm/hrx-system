@@ -990,6 +990,8 @@ TEST(ModuleTest, QueriesFunctionsAndKernelSidecars) {
   EXPECT_EQ(entry->function_ordinal, 1u);
   EXPECT_EQ(entry->kind, LOOMC_MODULE_FUNCTION_KIND_KERNEL);
   EXPECT_TRUE(entry->flags & LOOMC_MODULE_FUNCTION_FLAG_HAS_EXPORT_INFO);
+  EXPECT_TRUE(entry->flags & LOOMC_MODULE_FUNCTION_FLAG_KERNEL_ENTRY);
+  EXPECT_TRUE(loomc_module_function_is_kernel_entry(*entry));
 
   export_info = {};
   ASSERT_TRUE(loomc_module_function_try_get_export_info(module.get(), entry,

@@ -64,6 +64,18 @@ static void loomc_module_text_print_options(
   }
 }
 
+static bool loomc_module_op_matches_dialect(const loom_op_vtable_t* vtable,
+                                            loomc_string_view_t dialect) {
+  if (vtable == NULL || dialect.size == 0) {
+    return false;
+  }
+  const iree_string_view_t op_name = loom_op_vtable_name(vtable);
+  const iree_string_view_t dialect_name = iree_string_view_from_loomc(dialect);
+  return op_name.size > dialect_name.size &&
+         op_name.data[dialect_name.size] == '.' &&
+         iree_string_view_starts_with(op_name, dialect_name);
+}
+
 static loomc_status_t loomc_module_print_internal_text_to_source(
     const loomc_context_t* context, const loom_module_t* internal_module,
     const loomc_module_resolved_serialize_options_t* options,
@@ -94,10 +106,8 @@ static loomc_status_t loomc_module_print_internal_text_to_source(
     for (const loom_op_t* op = block ? block->first_op : NULL;
          op != NULL && iree_status_is_ok(print_status); op = op->next_op) {
       const loom_op_vtable_t* vtable = loom_op_vtable(internal_module, op);
-      if (vtable == NULL ||
-          !iree_string_view_equal(
-              loom_op_vtable_namespace(vtable),
-              iree_string_view_from_loomc(options->top_level_dialect))) {
+      if (!loomc_module_op_matches_dialect(vtable,
+                                           options->top_level_dialect)) {
         continue;
       }
       if (has_output) {

@@ -177,6 +177,11 @@ typedef enum loomc_module_function_flag_bits_e {
 
   /// `loomc_module_function_try_get_export_info` can return export metadata.
   LOOMC_MODULE_FUNCTION_FLAG_HAS_EXPORT_INFO = 1u << 1,
+
+  /// Function participates in the kernel-entry interface. Importers may attach
+  /// this interface to a generic function operation instead of using a
+  /// source-level kernel operation.
+  LOOMC_MODULE_FUNCTION_FLAG_KERNEL_ENTRY = 1u << 2,
 } loomc_module_function_flag_bits_t;
 
 /// Bitmask of `loomc_module_function_flag_bits_t` values.
@@ -204,6 +209,16 @@ typedef struct loomc_module_function_t {
   /// Present metadata flags.
   loomc_module_function_flags_t flags;
 } loomc_module_function_t;
+
+/// Returns true when a function is a dispatchable kernel entry.
+///
+/// This includes kernel operation kinds and generic function operations that
+/// implement the kernel-entry interface.
+static inline bool loomc_module_function_is_kernel_entry(
+    loomc_module_function_t function) {
+  return loomc_module_function_kind_is_kernel(function.kind) ||
+         (function.flags & LOOMC_MODULE_FUNCTION_FLAG_KERNEL_ENTRY) != 0;
+}
 
 /// Export metadata flag bits.
 typedef enum loomc_module_function_export_flag_bits_e {
@@ -383,11 +398,11 @@ typedef struct loomc_module_serialize_options_t {
   bool print_locations;
 
   /// Optional top-level operation dialect to select during current-IR text
-  /// printing. Empty prints the complete module. A nonempty namespace prints
-  /// each matching top-level operation unchanged and in module order, without
-  /// file headers or operations from other dialects. Referenced encodings are
-  /// printed inline because their module-level aliases are not part of the
-  /// selected dialect.
+  /// printing. Empty prints the complete module. A nonempty dialect name
+  /// prints each top-level operation whose full name begins with that dotted
+  /// component, unchanged and in module order, without file headers or
+  /// operations from other dialects. Referenced encodings are printed inline
+  /// because their module-level aliases are not part of the selected dialect.
   ///
   /// Filtered text is an inspection view and may reference symbols declared by
   /// omitted operations. Serialization APIs reject this option because they

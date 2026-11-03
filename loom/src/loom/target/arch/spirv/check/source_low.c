@@ -312,8 +312,7 @@ static iree_status_t loom_spirv_loom_check_lower_provider_execute(
       loom_spirv_loom_check_select_profile(request, &parsed, &target_profile);
   const loom_check_source_low_request_t source_request = {
       .output = LOOM_CHECK_EMIT_SOURCE_LOW_OUTPUT_LOW,
-      .control_flow_lowering =
-          (loom_target_control_flow_lowering_t)parsed.control_flow_lowering,
+      .control_flow_lowering = parsed.control_flow_lowering,
       .function_name = parsed.function_name,
   };
   if (iree_status_is_ok(status) &&

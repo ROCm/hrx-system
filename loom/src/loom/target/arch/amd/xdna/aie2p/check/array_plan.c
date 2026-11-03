@@ -874,17 +874,18 @@ static iree_status_t loom_aie2p_array_plan_check_execute(
   IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_check_parse_options(
       request->target_options, &function_symbol_name, &low_only));
   const loom_check_compile_source_low_options_t compile_options = {
-      .pipeline = LOOM_CHECK_COMPILE_SOURCE_LOW_PIPELINE_DEFAULT,
-      .control_flow_lowering = LOOM_TARGET_CONTROL_FLOW_LOWERING_CFG,
+      .pipeline_kind = LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW,
+      .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
   };
   const loom_aie2p_array_plan_check_consumer_t consumer = {
       .request = request,
       .function_symbol_name = function_symbol_name,
       .low_only = low_only,
   };
+  bool compiled = false;
   return loom_check_compile_source_low(request, &compile_options,
                                        loom_aie2p_array_plan_check_consume,
-                                       (void*)&consumer);
+                                       (void*)&consumer, &compiled);
 }
 
 static iree_status_t loom_aie2p_array_plan_check_append_names(

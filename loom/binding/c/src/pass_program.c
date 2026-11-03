@@ -19,7 +19,6 @@
 #include "loom/pass/tooling.h"
 #include "loom/target/pipeline.h"
 #include "loom/target/predicate.h"
-#include "loomc/interop.h"
 #include "loomc/iree.h"
 #include "loomc/target.h"
 #include "module.h"
@@ -452,52 +451,6 @@ loomc_status_t loomc_pass_program_create_from_internal_target_pipeline(
       LOOMC_PASS_PROGRAM_TRACE_STAGE_PREPARED_LOW,
       IREE_SV("__loomc_target_pipeline"), pipeline_options, allocator, result,
       out_pass_program);
-}
-
-loomc_status_t loomc_pass_program_create_from_native_source_low_pipeline(
-    loomc_context_t* context, loom_target_pipeline_build_fn_t build_pipeline,
-    loomc_string_view_t identifier,
-    const loom_target_pipeline_options_t* options, loomc_allocator_t allocator,
-    loomc_pass_program_t** out_pass_program, loomc_result_t** out_result) {
-  if (out_pass_program == NULL || out_result == NULL) {
-    return loomc_make_status(
-        LOOMC_STATUS_INVALID_ARGUMENT,
-        "out_pass_program and out_result must not be NULL");
-  }
-  *out_pass_program = NULL;
-  *out_result = NULL;
-  if (context == NULL || build_pipeline == NULL) {
-    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
-                             "context and build_pipeline must not be NULL");
-  }
-  if (loomc_context_target_environment(context) == NULL) {
-    return loomc_make_status(LOOMC_STATUS_FAILED_PRECONDITION,
-                             "context has no target environment");
-  }
-
-  loomc_result_t* result = NULL;
-  LOOMC_RETURN_IF_ERROR(loomc_result_create(
-      LOOMC_STATUS_OK, loomc_context_source_retention(context), allocator,
-      &result));
-  const iree_string_view_t pipeline_identifier =
-      loomc_string_view_is_empty(identifier)
-          ? IREE_SV("__loomc_native_source_low_pipeline")
-          : iree_string_view_from_loomc(identifier);
-  const loom_target_pipeline_options_t pipeline_options =
-      options ? *options : (loom_target_pipeline_options_t){0};
-  loomc_pass_program_t* pass_program = NULL;
-  loomc_status_t status = loomc_pass_program_create_target_pipeline_into_result(
-      context, build_pipeline, LOOMC_PASS_PROGRAM_TRACE_STAGE_SOURCE_LOW,
-      pipeline_identifier, &pipeline_options, allocator, result, &pass_program);
-  if (loomc_status_is_ok(status)) {
-    *out_pass_program = pass_program;
-    *out_result = result;
-    pass_program = NULL;
-    result = NULL;
-  }
-  loomc_pass_program_release(pass_program);
-  loomc_result_release(result);
-  return status;
 }
 
 loomc_status_t loomc_pass_program_create_empty(
