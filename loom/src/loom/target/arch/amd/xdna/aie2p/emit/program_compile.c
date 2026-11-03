@@ -311,7 +311,7 @@ static iree_status_t loom_aie2p_program_compose_report(
 
 static iree_status_t loom_aie2p_program_compile_impl(
     loom_aie2p_program_compiler_t* compiler, loom_op_t* entry_function_op,
-    loom_aie2p_program_helper_list_t direct_helpers,
+    bool may_return, loom_aie2p_program_helper_list_t direct_helpers,
     const loom_aie2p_leaf_compile_options_t* entry_options,
     iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
     bool* out_compiled, loom_aie2p_leaf_contribution_t* out_contribution) {
@@ -440,28 +440,30 @@ static iree_status_t loom_aie2p_program_compile_impl(
     contributions[i + 1] = helper->contribution;
   }
 
-  loom_low_allocation_reserved_range_t* entry_reservations = NULL;
-  const iree_host_size_t entry_reservation_count =
-      entry_options->allocation_reserved_range_count + 1;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      scratch_arena, entry_reservation_count, sizeof(*entry_reservations),
-      (void**)&entry_reservations));
-  if (entry_options->allocation_reserved_range_count != 0) {
-    memcpy(entry_reservations, entry_options->allocation_reserved_ranges,
-           entry_options->allocation_reserved_range_count *
-               sizeof(*entry_reservations));
-  }
-  entry_reservations[entry_reservation_count - 1] = link_reservation;
   loom_aie2p_leaf_compile_options_t resolved_entry_options = *entry_options;
   resolved_entry_options.call_contracts = (loom_low_call_contract_provider_t){
       .validate = loom_aie2p_program_call_contract_validate,
       .query = loom_aie2p_program_call_contract_query,
       .user_data = compiler,
   };
-  resolved_entry_options.allocation_reserved_ranges = entry_reservations;
-  resolved_entry_options.allocation_reserved_range_count =
-      entry_reservation_count;
-  resolved_entry_options.preserve_link_register = true;
+  if (may_return) {
+    loom_low_allocation_reserved_range_t* entry_reservations = NULL;
+    const iree_host_size_t entry_reservation_count =
+        entry_options->allocation_reserved_range_count + 1;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        scratch_arena, entry_reservation_count, sizeof(*entry_reservations),
+        (void**)&entry_reservations));
+    if (entry_options->allocation_reserved_range_count != 0) {
+      memcpy(entry_reservations, entry_options->allocation_reserved_ranges,
+             entry_options->allocation_reserved_range_count *
+                 sizeof(*entry_reservations));
+    }
+    entry_reservations[entry_reservation_count - 1] = link_reservation;
+    resolved_entry_options.allocation_reserved_ranges = entry_reservations;
+    resolved_entry_options.allocation_reserved_range_count =
+        entry_reservation_count;
+  }
+  resolved_entry_options.preserve_link_register = may_return;
   resolved_entry_options.link_shadow_register = link_shadow_register;
   bool entry_compiled = false;
   IREE_RETURN_IF_ERROR(loom_aie2p_leaf_compile(
@@ -493,7 +495,7 @@ static iree_status_t loom_aie2p_program_compile_impl(
 
 iree_status_t loom_aie2p_program_compile(
     loom_aie2p_program_compiler_t* compiler, loom_op_t* entry_function_op,
-    loom_aie2p_program_helper_list_t direct_helpers,
+    bool may_return, loom_aie2p_program_helper_list_t direct_helpers,
     const loom_aie2p_leaf_compile_options_t* entry_options, bool* out_compiled,
     loom_aie2p_leaf_contribution_t* out_contribution) {
   IREE_ASSERT_ARGUMENT(compiler);
@@ -518,8 +520,8 @@ iree_status_t loom_aie2p_program_compile(
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(arena->block_pool, &scratch_arena);
   const iree_status_t status = loom_aie2p_program_compile_impl(
-      compiler, entry_function_op, direct_helpers, entry_options, arena,
-      &scratch_arena, out_compiled, out_contribution);
+      compiler, entry_function_op, may_return, direct_helpers, entry_options,
+      arena, &scratch_arena, out_compiled, out_contribution);
   iree_arena_deinitialize(&scratch_arena);
   return status;
 }

@@ -36,7 +36,10 @@ loom_check_test_suite(
 
 loom_check_test_suite(
     name = "program_test",
-    srcs = ["program_report.loom-test"],
+    srcs = [
+        "program_link_lifetime.loom-test",
+        "program_report.loom-test",
+    ],
     target_compatible_with = _XDNA_IMAGE_COMPATIBLE_WITH,
 )
 
