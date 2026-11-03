@@ -2352,9 +2352,8 @@ static void iree_hal_streaming_dropped_graph_list_deinitialize(
   }
 }
 
-// Signals from actually accepted graph blocks. A failed launch must resolve
-// every one before releasing executable-owned command/callback state because
-// no rejected block will signal the reserved final stream timeline value.
+// Signals from actually accepted graph blocks. Failure recovery waits on this
+// prefix because rejected blocks cannot signal the reserved final stream value.
 #define IREE_HAL_STREAMING_ACCEPTED_SIGNAL_INLINE_CAPACITY 16
 
 typedef struct iree_hal_streaming_accepted_signal_t {
@@ -2427,9 +2426,10 @@ static void iree_hal_streaming_accepted_signal_list_deinitialize(
   }
 }
 
-// Waits every accepted block to a successful signal or permanent semaphore
-// failure. Infinite waits cannot time out; semaphore failures are terminal and
-// still permit executable-owned resources to be released.
+// Resolves accepted-block outcomes after a later block is rejected. A failed
+// semaphore does not prove retirement: submitted command buffers and callback
+// captures retain their own state, and the caller preserves any failed queue
+// lease until queue teardown.
 static iree_status_t iree_hal_streaming_accepted_signal_list_drain(
     iree_hal_streaming_accepted_signal_list_t* list) {
   iree_status_t status = iree_ok_status();
