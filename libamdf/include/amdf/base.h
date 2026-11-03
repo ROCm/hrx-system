@@ -70,59 +70,11 @@ extern "C" {
 /// Version number identifying a compatible public API layout and contract.
 typedef uint32_t amdf_abi_version_t;
 
-/// The original libamdf ABI version.
-#define AMDF_ABI_VERSION_1 ((amdf_abi_version_t)1)
-
-/// Memory visibility qualification and explicit registered-page cacheability.
-#define AMDF_ABI_VERSION_2 ((amdf_abi_version_t)2)
-
-/// Exact prospective CREATE payload geometry in construction capabilities.
-#define AMDF_ABI_VERSION_3 ((amdf_abi_version_t)3)
-
-/// Final queue destruction consumes handles on native cleanup failure.
-#define AMDF_ABI_VERSION_4 ((amdf_abi_version_t)4)
-
-/// Activated kernel queue information includes native notification types.
-#define AMDF_ABI_VERSION_5 ((amdf_abi_version_t)5)
-
-/// Stable reservations, ordinary backing sources and queue-ordered mappings.
-#define AMDF_ABI_VERSION_6 ((amdf_abi_version_t)6)
-
-/// Checked mapping removal independent of reservation destruction.
-#define AMDF_ABI_VERSION_7 ((amdf_abi_version_t)7)
-
-/// Stable host reservations and explicitly remappable CPU backing.
-#define AMDF_ABI_VERSION_8 ((amdf_abi_version_t)8)
-
-/// Live reservation capabilities include whole-backing source requirements.
-#define AMDF_ABI_VERSION_9 ((amdf_abi_version_t)9)
-
-/// Explicit placement of host-owned backing with qualified device accesses.
-#define AMDF_ABI_VERSION_10 ((amdf_abi_version_t)10)
-
-/// Native file-buffer views, optional memory routes, and I/O visibility sites.
-#define AMDF_ABI_VERSION_11 ((amdf_abi_version_t)11)
-
-/// Memory cleanup disposition independent of construction status.
-#define AMDF_ABI_VERSION_12 ((amdf_abi_version_t)12)
-
-/// Required queue command-storage placement and mapped publication ordering.
-#define AMDF_ABI_VERSION_13 ((amdf_abi_version_t)13)
-
-/// Adds native host queue publication and per-placement requirements.
-#define AMDF_ABI_VERSION_14 ((amdf_abi_version_t)14)
-
-/// Independent host memory guarantees and prospective mapping properties.
-#define AMDF_ABI_VERSION_15 ((amdf_abi_version_t)15)
-
-/// Physical storage capacity and explicitly sampled native memory headroom.
-#define AMDF_ABI_VERSION_16 ((amdf_abi_version_t)16)
-
-/// Opt-in common process and device virtual-address reservations.
-#define AMDF_ABI_VERSION_17 ((amdf_abi_version_t)17)
+/// Constructs an ABI version number for API negotiation.
+#define AMDF_ABI_VERSION(N) ((amdf_abi_version_t)(N))
 
 /// Latest ABI version implemented by these headers.
-#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION_17
+#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION(17)
 
 /// The unmangled symbol used to acquire the immutable API table.
 #define AMDF_QUERY_API_SYMBOL "amdf_query_api"
