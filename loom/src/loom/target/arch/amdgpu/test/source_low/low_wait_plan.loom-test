@@ -147,32 +147,6 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scratch_store_load_memory_effec
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @global_load_saddr_source_reuse_assembly amdgpu.sgpr=4
-
-amdgpu.target<gfx1100> @target
-
-low.func.def target<amdgpu.rdna3.core>(@target) @global_load_saddr_source_reuse_assembly(%addr: reg<amdgpu.vgpr>, %load_base: reg<amdgpu.sgpr x2>, %keep: reg<amdgpu.sgpr x2>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
-  %loaded = global_load_b32_saddr %addr, %load_base
-  %mask = v_cmp_lt_i32 %lhs, %rhs
-  %saved_exec, %active = s_and_saveexec_b64 %mask
-  %keep_lo = slice %keep[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %keep_hi = slice %keep[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %kept = s_add_u32 %keep_lo, %keep_hi
-  %used = v_add_u32 %loaded, %addr
-  return
-}
-
-// ----
-  global_load_b32 v3, v2, s[0:1] offset:0
-  v_cmp_lt_i32 s[0:1], v0, v1
-  s_delay_alu instid0(VALU_DEP_1)
-  s_and_saveexec_b64 s[0:1], s[0:1]
-  s_add_u32 s0, s2, s3
-  s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_add_u32 v0, v3, v2
-  s_endpgm
-
-// ====
 // RUN: emit amdgpu-assembly @gfx1170_vcc_dependency_delay
 
 amdgpu.target<gfx1170> @target
@@ -190,52 +164,6 @@ low.func.def target<amdgpu.rdna4m.core>(@target) @gfx1170_vcc_dependency_delay(%
   v_cmp_lt_i32 s[0:1], v0, v1
   s_delay_alu instid0(VALU_DEP_1)
   s_and_saveexec_b64 s[0:1], s[0:1]
-  s_endpgm
-
-// ====
-// RUN: emit amdgpu-assembly @global_load_saddr_source_reuse_across_branch_assembly amdgpu.sgpr=4
-
-amdgpu.target<gfx1100> @target
-
-low.func.def target<amdgpu.rdna3.core>(@target) @global_load_saddr_source_reuse_across_branch_assembly(%addr: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
-  %base_lo = slice %base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %base_hi = slice %base[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %zero = s_mov_b32 0
-  %lo, %lo_carry = s_add_co_u32 %base_lo, %offset
-  %hi, %hi_carry = s_addc_u32 %base_hi, %zero, %lo_carry
-  %load_base = concat(%lo, %hi) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %loaded = global_load_b32_saddr %addr, %load_base
-  %branch_mask = v_cmp_lt_i32 %lhs, %rhs
-  %saved_exec, %active = s_and_saveexec_b64 %branch_mask
-  low.cond_br %active, ^then, ^exit : reg<amdgpu.scc>
-^then:
-  %saved_lo = slice %saved_exec[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %saved_hi = slice %saved_exec[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %saved_use = s_add_u32 %saved_lo, %saved_lo
-  %mask = v_cmp_eq_i32 %lhs, %rhs
-  %saved_use2 = s_add_u32 %saved_hi, %saved_hi
-  %used = v_add_u32 %loaded, %addr
-  low.br ^exit
-^exit:
-  return
-}
-
-// ----
-  s_add_u32 s0, s0, s2
-  s_mov_b32 s2, 0
-  s_addc_u32 s1, s1, s2
-  global_load_b32 v3, v2, s[0:1] offset:0
-  v_cmp_lt_i32 s[0:1], v0, v1
-  s_delay_alu instid0(VALU_DEP_1)
-  s_and_saveexec_b64 s[0:1], s[0:1]
-  s_cbranch_scc0 .Lbb2
-.Lbb1:
-  v_cmp_eq_i32 s[2:3], v0, v1
-  s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_add_u32 v0, v3, v2
-  s_add_u32 s0, s0, s0
-  s_add_u32 s0, s1, s1
-.Lbb2:
   s_endpgm
 
 // ====

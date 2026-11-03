@@ -45,11 +45,6 @@ typedef struct loom_amdgpu_loom_check_emit_options_t {
   loom_low_allocation_diagnostic_flags_t allocation_diagnostic_flags;
   // Parsed loom_amdgpu_loom_check_option_flag_bits_e bits.
   loom_amdgpu_loom_check_option_flags_t option_flags;
-  // Low allocation budget overrides parsed from target options.
-  loom_low_allocation_budget_t
-      allocation_budgets[LOOM_CHECK_LOW_EMIT_MAX_ALLOCATION_BUDGETS];
-  // Number of entries in |allocation_budgets|.
-  iree_host_size_t allocation_budget_count;
 } loom_amdgpu_loom_check_emit_options_t;
 
 typedef struct loom_amdgpu_loom_check_spill_lowering_context_t {
@@ -131,10 +126,9 @@ static iree_status_t loom_amdgpu_loom_check_parse_option(
   if (matched) {
     return iree_ok_status();
   }
-  return loom_check_low_emit_parse_allocation_budget(
-      token, IREE_SV("AMDGPU assembly"), options->allocation_budgets,
-      IREE_ARRAYSIZE(options->allocation_budgets),
-      &options->allocation_budget_count);
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "unknown AMDGPU assembly option '%.*s'",
+                          (int)token.size, token.data);
 }
 
 static iree_status_t loom_amdgpu_loom_check_parse_emit_options(
@@ -465,8 +459,6 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
           LOOM_LOW_ALLOCATION_FLAG_RETAIN_STORAGE_RELEASE_ACTION_INDEX,
       .schedule_diagnostic_flags = options.schedule_diagnostic_flags,
       .allocation_diagnostic_flags = options.allocation_diagnostic_flags,
-      .allocation_budgets = options.allocation_budgets,
-      .allocation_budget_count = options.allocation_budget_count,
       .residency_query = loom_amdgpu_occupancy_residency_view,
       .schedule_pair_affinities = schedule_pair_affinities,
       .schedule_structural_state_reads = schedule_state_reads,

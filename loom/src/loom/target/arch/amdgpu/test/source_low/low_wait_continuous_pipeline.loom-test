@@ -156,35 +156,3 @@ low.func.def target<amdgpu.rdna3.core>(@target) @continuous_lds_gfx1100(%address
   s_delay_alu instid0(VALU_DEP_1)
   v_add_u32 v0, v2, v0
   s_endpgm
-
-// ====
-// RUN: emit amdgpu-assembly @partial_completion_keeps_both_bases_reusable amdgpu.sgpr=4
-
-amdgpu.target<gfx1151> @target
-
-low.func.def target<amdgpu.rdna3_5.core>(@target) @partial_completion_keeps_both_bases_reusable(%older_base: reg<amdgpu.sgpr x2>, %younger_base: reg<amdgpu.sgpr x2>, %address: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
-  %older = global_load_b32_saddr %address, %older_base
-  %younger = global_load_b32_saddr %address, %younger_base
-  %used = v_add_u32 %older, %address
-  low.br ^next
-^next:
-  %replacement0 = s_mov_b32 1
-  %replacement1 = s_mov_b32 2
-  %replacement2 = s_mov_b32 3
-  %replacement3 = s_mov_b32 4
-  return %replacement0, %replacement1, %replacement2, %replacement3
-}
-
-// The partial wait completes only the consumed result. Both captured scalar
-// bases can be reused without completing the younger load.
-// ----
-  global_load_b32 v1, v0, s[0:1] offset:0
-  global_load_b32 v1, v0, s[2:3] offset:0
-  s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_add_u32 v0, v1, v0
-.Lbb1:
-  s_mov_b32 s0, 1
-  s_mov_b32 s1, 2
-  s_mov_b32 s2, 3
-  s_mov_b32 s3, 4
-  s_endpgm
