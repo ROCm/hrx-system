@@ -579,14 +579,17 @@ loom_amdgpu_short_wait_match_t loom_amdgpu_short_wait_begin_packet(
            traits, LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ALU |
                        LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX_MEMORY_CONSUMER) ||
        structural->vector_alu_instruction_count != 0);
-  if (structural->move_segment_count != 0) {
-    for (uint32_t segment_index = 0;
-         segment_index < structural->move_segment_count; ++segment_index) {
-      const loom_amdgpu_structural_move_segment_t* segment =
-          &structural->move_segments[segment_index];
-      const loom_low_move_range_t moves = segment->group->moves;
+  const uint32_t segment_count =
+      loom_amdgpu_structural_packet_move_segment_count(structural);
+  if (segment_count != 0) {
+    for (uint32_t segment_index = 0; segment_index < segment_count;
+         ++segment_index) {
+      const loom_amdgpu_structural_move_segment_t segment =
+          loom_amdgpu_structural_packet_move_segment_at(structural,
+                                                        segment_index);
+      const loom_low_move_range_t moves = segment.group->moves;
       for (iree_host_size_t i = 0; i < moves.count; ++i) {
-        const uint64_t instruction_offset = segment->instruction_offset + i;
+        const uint64_t instruction_offset = segment.instruction_offset + i;
         if (instruction_offset >= 3) {
           break;
         }

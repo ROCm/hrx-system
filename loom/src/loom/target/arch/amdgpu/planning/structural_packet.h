@@ -56,35 +56,59 @@ typedef struct loom_amdgpu_structural_move_segment_t {
 typedef struct loom_amdgpu_structural_packet_info_t {
   // Classification flags for the structural packet.
   loom_amdgpu_structural_packet_flags_t flags;
-  // Number of ordered entries in |move_segments|.
-  uint32_t move_segment_count;
   // Scheduled native instructions represented by the structural packet,
   // excluding target insertion overlays.
   uint64_t instruction_count;
-  // Ordered physical-move groups within the structural packet. Existing
-  // structural transfers use one leading segment; retained calls use argument
-  // and result segments separated by their native control sequence.
-  loom_amdgpu_structural_move_segment_t
-      move_segments[LOOM_AMDGPU_STRUCTURAL_PACKET_MOVE_SEGMENT_CAPACITY];
-  // Native vector-ALU instructions outside of |move_segments|.
+  // Optional physical moves at native instruction offset zero. Existing
+  // structural transfers, call arguments, and return results use this group.
+  const loom_low_move_group_t* leading_moves;
+  // Optional physical moves after the packet's native control instructions.
+  // Retained call results are the only trailing moves.
+  const loom_low_move_group_t* trailing_moves;
+  // Native vector-ALU instructions outside of the move groups.
   uint64_t vector_alu_instruction_count;
-  // Native scalar-ALU instructions outside of |move_segments|.
+  // Native scalar-ALU instructions outside of the move groups.
   uint64_t scalar_alu_instruction_count;
 } loom_amdgpu_structural_packet_info_t;
 
 #if UINTPTR_MAX == UINT64_MAX
-static_assert(sizeof(loom_amdgpu_structural_packet_info_t) == 64,
+static_assert(sizeof(loom_amdgpu_structural_packet_info_t) == 48,
               "structural packet analysis must remain a compact stack value");
 #endif  // UINTPTR_MAX == UINT64_MAX
+
+// Returns the number of ordered physical-move segments.
+static inline uint32_t loom_amdgpu_structural_packet_move_segment_count(
+    const loom_amdgpu_structural_packet_info_t* info) {
+  return (info->leading_moves != NULL ? 1u : 0u) +
+         (info->trailing_moves != NULL ? 1u : 0u);
+}
+
+// Returns an ordered physical-move segment by index.
+static inline loom_amdgpu_structural_move_segment_t
+loom_amdgpu_structural_packet_move_segment_at(
+    const loom_amdgpu_structural_packet_info_t* info, uint32_t segment_index) {
+  IREE_ASSERT_LT(segment_index,
+                 loom_amdgpu_structural_packet_move_segment_count(info));
+  if (info->leading_moves != NULL && segment_index == 0) {
+    return (loom_amdgpu_structural_move_segment_t){
+        .group = info->leading_moves,
+        .instruction_offset = 0,
+    };
+  }
+  const loom_low_move_group_t* group = info->trailing_moves;
+  IREE_ASSERT(group != NULL);
+  IREE_ASSERT_GE(info->instruction_count, group->moves.count);
+  return (loom_amdgpu_structural_move_segment_t){
+      .group = group,
+      .instruction_offset = info->instruction_count - group->moves.count,
+  };
+}
 
 // Returns the total number of final sequential move instructions.
 static inline uint64_t loom_amdgpu_structural_packet_move_count(
     const loom_amdgpu_structural_packet_info_t* info) {
-  uint64_t count = 0;
-  for (uint32_t i = 0; i < info->move_segment_count; ++i) {
-    count += info->move_segments[i].group->moves.count;
-  }
-  return count;
+  return (info->leading_moves != NULL ? info->leading_moves->moves.count : 0) +
+         (info->trailing_moves != NULL ? info->trailing_moves->moves.count : 0);
 }
 
 // Returns native issue progress guaranteed along every outgoing path.

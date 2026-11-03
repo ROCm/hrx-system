@@ -715,9 +715,11 @@ TEST_F(AmdgpuWaitPlanTest, ReturnMovesPrecedeControlTransfer) {
           LOOM_AMDGPU_STRUCTURAL_PACKET_ANALYSIS_FLAG_REQUIRE_ALLOCATION);
   EXPECT_EQ(structural.instruction_count, 2u);
   EXPECT_EQ(structural.scalar_alu_instruction_count, 1u);
-  ASSERT_EQ(structural.move_segment_count, 1u);
-  EXPECT_EQ(structural.move_segments[0].group, &exit_moves.results);
-  EXPECT_EQ(structural.move_segments[0].instruction_offset, 0u);
+  ASSERT_EQ(loom_amdgpu_structural_packet_move_segment_count(&structural), 1u);
+  const loom_amdgpu_structural_move_segment_t segment =
+      loom_amdgpu_structural_packet_move_segment_at(&structural, 0);
+  EXPECT_EQ(segment.group, &exit_moves.results);
+  EXPECT_EQ(segment.instruction_offset, 0u);
 }
 
 TEST_F(AmdgpuWaitPlanTest, RefinedCrossBlockMemoryOmitsDisjointWait) {

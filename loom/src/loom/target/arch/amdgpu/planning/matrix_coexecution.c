@@ -773,11 +773,16 @@ static void loom_amdgpu_matrix_coexecution_inspect_packet_impl(
         coexecution, packet, retain_consumers, inout_match);
   }
   uint16_t move_issue_count = 0;
-  for (uint32_t segment_index = 0;
-       segment_index < structural_info->move_segment_count; ++segment_index) {
+  const uint32_t segment_count =
+      loom_amdgpu_structural_packet_move_segment_count(structural_info);
+  for (uint32_t segment_index = 0; segment_index < segment_count;
+       ++segment_index) {
+    const loom_amdgpu_structural_move_segment_t segment =
+        loom_amdgpu_structural_packet_move_segment_at(structural_info,
+                                                      segment_index);
     move_issue_count = loom_amdgpu_matrix_coexecution_query_moves(
-        coexecution, structural_info->move_segments[segment_index].group->moves,
-        move_issue_count, retain_consumers, inout_match);
+        coexecution, segment.group->moves, move_issue_count, retain_consumers,
+        inout_match);
   }
   *out_vector_issue_count = loom_amdgpu_matrix_coexecution_saturate_issue_count(
       coexecution,

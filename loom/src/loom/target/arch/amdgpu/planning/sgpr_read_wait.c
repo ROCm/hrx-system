@@ -226,14 +226,16 @@ iree_status_t loom_amdgpu_sgpr_read_wait_collect_packet(
                 : 0;
     IREE_ASSERT_LE(call_boundary, UINT32_MAX);
     bool boundary_recorded = false;
+    const uint32_t segment_count =
+        loom_amdgpu_structural_packet_move_segment_count(structural);
     for (uint32_t segment_index = 0;
-         segment_index < structural->move_segment_count &&
-         iree_status_is_ok(status);
+         segment_index < segment_count && iree_status_is_ok(status);
          ++segment_index) {
-      const loom_amdgpu_structural_move_segment_t* segment =
-          &structural->move_segments[segment_index];
+      const loom_amdgpu_structural_move_segment_t segment =
+          loom_amdgpu_structural_packet_move_segment_at(structural,
+                                                        segment_index);
       if (is_call && !boundary_recorded &&
-          segment->instruction_offset > call_boundary) {
+          segment.instruction_offset > call_boundary) {
         event = (loom_amdgpu_sgpr_read_wait_event_t){
             .packet_index = packet->packet_index,
             .instruction_offset = (uint32_t)call_boundary,
@@ -243,13 +245,13 @@ iree_status_t loom_amdgpu_sgpr_read_wait_collect_packet(
             state, (uint16_t)packet->node->block_index, &event);
         boundary_recorded = true;
       }
-      const loom_low_move_range_t moves = segment->group->moves;
+      const loom_low_move_range_t moves = segment.group->moves;
       for (iree_host_size_t i = 0; i < moves.count && iree_status_is_ok(status);
            ++i) {
         const loom_low_move_t* move = &allocation->moves[moves.start + i];
         event = (loom_amdgpu_sgpr_read_wait_event_t){
             .packet_index = packet->packet_index,
-            .instruction_offset = (uint32_t)(segment->instruction_offset + i),
+            .instruction_offset = (uint32_t)(segment.instruction_offset + i),
             .kind = move->destination.descriptor_reg_class_id ==
                                 LOOM_AMDGPU_REG_CLASS_ID_VGPR ||
                             move->source.descriptor_reg_class_id ==
