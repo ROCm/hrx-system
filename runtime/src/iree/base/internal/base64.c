@@ -140,8 +140,6 @@ iree_status_t iree_base64_decode(iree_string_view_t encoded,
     return iree_ok_status();
   }
 
-  IREE_ASSERT_ARGUMENT(out_buffer.data);
-
   // Strip trailing padding to simplify processing. We handle 0-2 padding
   // characters at the end.
   iree_host_size_t input_length = encoded.size;
@@ -193,6 +191,7 @@ iree_status_t iree_base64_decode(iree_string_view_t encoded,
                             " bytes but only %" PRIhsz " available",
                             decoded_length, out_buffer.data_length);
   }
+  IREE_ASSERT_ARGUMENT(!decoded_length || out_buffer.data);
 
   // Decode full 4-character groups (each produces 3 bytes).
   iree_host_size_t output_position = 0;

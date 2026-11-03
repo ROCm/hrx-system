@@ -19,14 +19,6 @@
     if (!(condition)) __builtin_trap(); \
   } while (0)
 
-#define IREE_VM_FUZZ_CHECK_OK(expression) \
-  do {                                    \
-    iree_status_t status = (expression);  \
-    if (!iree_status_is_ok(status)) {     \
-      __builtin_trap();                   \
-    }                                     \
-  } while (0)
-
 namespace {
 
 constexpr iree_host_size_t kInvocationStorageSize = 16 * 1024;
@@ -62,14 +54,14 @@ iree_vm_variant_span_t MakeVariantSpan(
 iree_vm_function_t LookupFunction(iree_vm_process_t* process,
                                   iree_string_view_t name) {
   iree_vm_function_t function = iree_vm_function_null();
-  IREE_VM_FUZZ_CHECK_OK(iree_vm_process_lookup_function(
+  IREE_CHECK_OK(iree_vm_process_lookup_function(
       process, IREE_SV("invocation.test"), name, &function));
   return function;
 }
 
 int32_t ReadI32(iree_vm_variant_t variant) {
   int32_t value = 0;
-  IREE_VM_FUZZ_CHECK_OK(iree_vm_i32_from_variant(variant, &value));
+  IREE_CHECK_OK(iree_vm_i32_from_variant(variant, &value));
   return value;
 }
 
@@ -87,7 +79,7 @@ void InvokeAddLike(iree_vm_invocation_t* invocation,
   };
   std::array<iree_vm_variant_t, 1> results = {iree_vm_variant_empty()};
   iree_vm_execution_outcome_t outcome = IREE_VM_EXECUTION_OUTCOME_SUSPENDED;
-  IREE_VM_FUZZ_CHECK_OK(
+  IREE_CHECK_OK(
       iree_vm_invocation_start(invocation, function, MakeVariantSpan(arguments),
                                MakeVariantSpan(results), {}, &outcome));
   IREE_VM_FUZZ_CHECK(outcome == IREE_VM_EXECUTION_OUTCOME_COMPLETED);
@@ -107,18 +99,18 @@ void InvokeYieldingI32(iree_vm_invocation_t* invocation,
   };
   std::array<iree_vm_variant_t, 1> second_results = first_results;
   iree_vm_execution_outcome_t outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
-  IREE_VM_FUZZ_CHECK_OK(
+  IREE_CHECK_OK(
       iree_vm_invocation_start(invocation, function, MakeVariantSpan(arguments),
                                MakeVariantSpan(first_results), {}, &outcome));
   IREE_VM_FUZZ_CHECK(outcome == IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
   IREE_VM_FUZZ_CHECK(iree_vm_variant_is_empty(arguments[0]));
-  IREE_VM_FUZZ_CHECK_OK(iree_vm_invocation_resume(
+  IREE_CHECK_OK(iree_vm_invocation_resume(
       invocation, MakeVariantSpan(first_results), &outcome));
   IREE_VM_FUZZ_CHECK(outcome == IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
   iree_vm_variant_span_t terminal_results =
       change_result_storage ? MakeVariantSpan(second_results)
                             : MakeVariantSpan(first_results);
-  IREE_VM_FUZZ_CHECK_OK(
+  IREE_CHECK_OK(
       iree_vm_invocation_resume(invocation, terminal_results, &outcome));
   IREE_VM_FUZZ_CHECK(outcome == IREE_VM_EXECUTION_OUTCOME_COMPLETED);
   IREE_VM_FUZZ_CHECK(static_cast<uint32_t>(ReadI32(terminal_results.data[0])) ==
@@ -134,15 +126,15 @@ void InvokeFunctionRoundTrip(iree_vm_invocation_t* invocation,
       iree_vm_variant_empty(),
   };
   iree_vm_execution_outcome_t outcome = IREE_VM_EXECUTION_OUTCOME_SUSPENDED;
-  IREE_VM_FUZZ_CHECK_OK(iree_vm_invocation_start(
+  IREE_CHECK_OK(iree_vm_invocation_start(
       invocation, return_function, iree_vm_variant_span_empty(),
       MakeVariantSpan(function_results), {}, &outcome));
   iree_vm_function_ref_t function_ref = iree_vm_function_ref_null();
-  IREE_VM_FUZZ_CHECK_OK(
+  IREE_CHECK_OK(
       iree_vm_function_ref_from_variant(function_results[0], &function_ref));
   iree_vm_function_t rebound_function = iree_vm_function_null();
-  IREE_VM_FUZZ_CHECK_OK(iree_vm_function_from_function_ref(
-      process, function_ref, &rebound_function));
+  IREE_CHECK_OK(iree_vm_function_from_function_ref(process, function_ref,
+                                                   &rebound_function));
 
   std::array<iree_vm_variant_t, 3> arguments = {
       function_results[0],
@@ -150,7 +142,7 @@ void InvokeFunctionRoundTrip(iree_vm_invocation_t* invocation,
       iree_vm_variant_from_i32(static_cast<int32_t>(rhs)),
   };
   std::array<iree_vm_variant_t, 1> results = {iree_vm_variant_empty()};
-  IREE_VM_FUZZ_CHECK_OK(iree_vm_invocation_start(
+  IREE_CHECK_OK(iree_vm_invocation_start(
       invocation, call_function, MakeVariantSpan(arguments),
       MakeVariantSpan(results), {}, &outcome));
   IREE_VM_FUZZ_CHECK(static_cast<uint32_t>(ReadI32(results[0])) == lhs + rhs);
@@ -169,12 +161,12 @@ void InvokeRefRoundTrip(iree_vm_invocation_t* invocation,
   };
   std::array<iree_vm_variant_t, 1> results = {iree_vm_variant_empty()};
   iree_vm_execution_outcome_t outcome = IREE_VM_EXECUTION_OUTCOME_SUSPENDED;
-  IREE_VM_FUZZ_CHECK_OK(
+  IREE_CHECK_OK(
       iree_vm_invocation_start(invocation, function, MakeVariantSpan(arguments),
                                MakeVariantSpan(results), {}, &outcome));
   if (may_yield) {
     IREE_VM_FUZZ_CHECK(outcome == IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
-    IREE_VM_FUZZ_CHECK_OK(iree_vm_invocation_resume(
+    IREE_CHECK_OK(iree_vm_invocation_resume(
         invocation, MakeVariantSpan(results), &outcome));
   }
   IREE_VM_FUZZ_CHECK(outcome == IREE_VM_EXECUTION_OUTCOME_COMPLETED);
@@ -200,7 +192,7 @@ void InvokeCancelledRef(iree_vm_invocation_t* invocation,
   };
   const iree_vm_variant_t original_result = results[0];
   iree_vm_execution_outcome_t outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
-  IREE_VM_FUZZ_CHECK_OK(
+  IREE_CHECK_OK(
       iree_vm_invocation_start(invocation, function, MakeVariantSpan(arguments),
                                MakeVariantSpan(results), {}, &outcome));
   IREE_VM_FUZZ_CHECK(outcome == IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
@@ -222,20 +214,19 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   InputCursor input(data, size);
   iree_vm_invocation_test_counters_t counters = {};
   iree_vm_invocation_test_module_t module = {};
-  IREE_VM_FUZZ_CHECK_OK(
-      iree_vm_invocation_test_module_initialize(&counters, &module));
+  IREE_CHECK_OK(iree_vm_invocation_test_module_initialize(&counters, &module));
   iree_vm_program_t* program = nullptr;
-  IREE_VM_FUZZ_CHECK_OK(
+  IREE_CHECK_OK(
       iree_vm_program_create({&module.base, iree_vm_module_span_empty()},
                              iree_allocator_system(), &program));
   alignas(iree_max_align_t) std::array<uint8_t, kInvocationStorageSize>
       invocation_storage = {};
   iree_vm_invocation_t* invocation = nullptr;
-  IREE_VM_FUZZ_CHECK_OK(iree_vm_invocation_initialize(
+  IREE_CHECK_OK(iree_vm_invocation_initialize(
       iree_make_byte_span(invocation_storage.data(), invocation_storage.size()),
       &invocation));
   iree_vm_process_create_outcome_t process_outcome = {};
-  IREE_VM_FUZZ_CHECK_OK(iree_vm_process_create_start(
+  IREE_CHECK_OK(iree_vm_process_create_start(
       program, invocation, iree_vm_variant_span_empty(), {},
       iree_allocator_system(), &process_outcome));
   IREE_VM_FUZZ_CHECK(process_outcome.execution_outcome ==

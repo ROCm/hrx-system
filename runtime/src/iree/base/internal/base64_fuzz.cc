@@ -71,13 +71,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     }
 
     iree_host_size_t decode_length = 0;
-    iree_status_t decode_status = iree_base64_decode(
-        encoded, iree_make_byte_span(decode_buffer, decoded_size),
-        &decode_length);
     // Roundtrip must always succeed.
-    if (!iree_status_is_ok(decode_status)) {
-      __builtin_trap();
-    }
+    IREE_CHECK_OK(iree_base64_decode(
+        encoded, iree_make_byte_span(decode_buffer, decoded_size),
+        &decode_length));
     // Decoded data must match original input.
     if (decode_length != size) {
       __builtin_trap();
