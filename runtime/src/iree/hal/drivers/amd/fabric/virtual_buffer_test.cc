@@ -803,6 +803,198 @@ TEST_F(MemoryBackendTest, NativeMappingFailureReachesQueueCompletion) {
   iree_hal_semaphore_release(done);
 }
 
+// Exercises the real HAL capture/resolution/backend path. Only the native page
+// table implementation is replaced; metadata, source admission, and publication
+// are the production implementation.
+class MappingPublicationTest : public MemoryBackendTest {
+ protected:
+  void SetUp() override {
+    MemoryBackendTest::SetUp();
+    if (HasFatalFailure()) {
+      return;
+    }
+    native_.mapping_enabled = true;
+    native_.alias_projections = true;
+    for (size_t i = 0; i < families_.size(); ++i) {
+      binding_descriptions_[i] = {IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+                                  AMDF_MEMORY_ADDRESS_GPU};
+      native_.address_kinds[i] = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU;
+      native_families_[i].host_usage = 0;
+    }
+    IREE_ASSERT_OK(
+        CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool_,
+                   UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE));
+    IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+        pool_, iree_hal_make_pool_reservation_request(32768, 4096),
+        iree_infinite_timeout(), &backing_));
+    std::array<iree_hal_pool_family_access_t, 2> families = {};
+    for (size_t i = 0; i < families.size(); ++i) {
+      families[i].family = families_[i];
+      families[i].usage = IREE_HAL_BUFFER_USAGE_STORAGE;
+    }
+    const iree_hal_virtual_buffer_options_t options = {.byte_length = 16384};
+    IREE_ASSERT_OK(iree_hal_virtual_buffer_create(
+        group_, {families.size(), families.data(), {}}, {1, &pool_}, &options,
+        allocator_, &target_));
+    scope_ = ResolveScope(IREE_HAL_MEMORY_SITE_PROGRAM, families_[0]);
+  }
+
+  void TearDown() override {
+    iree_hal_buffer_release(target_);
+    iree_hal_buffer_release(backing_);
+    iree_hal_pool_release(pool_);
+    MemoryBackendTest::TearDown();
+  }
+
+  iree_hal_memory_mapping_t Mapping(uint64_t position, uint64_t length,
+                                    uint64_t source_offset = 0) {
+    return {
+        .target = target_,
+        .scope = scope_,
+        .target_range = {position, length},
+        .source = backing_,
+        .source_offset = source_offset,
+        .access = IREE_HAL_MEMORY_ACCESS_ALL,
+        .operation = IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE,
+    };
+  }
+
+  iree_status_t Update(const std::vector<iree_hal_memory_mapping_t>& mappings,
+                       bool fail_metadata = false) {
+    iree_hal_host_call_t call;
+    IREE_RETURN_IF_ERROR(iree_hal_memory_mapping_prepare(
+        iree_hal_device_queue(cpu_device_, 0, 0), mappings.size(),
+        mappings.data(), 0, allocator_, &call));
+    // Admission is complete: rejection now targets the native adapter's index,
+    // not the HAL's captured transaction or a task-system allocation.
+    native_.fail_metadata_allocation.store(fail_metadata);
+    const uint64_t args[4] = {};
+    iree_status_t status = call.fn(call.user_data, args, nullptr);
+    iree_hal_resource_release(call.resource);
+    return status;
+  }
+
+  // Pool admitted for both native consumers.
+  iree_hal_pool_t* pool_ = nullptr;
+  // Physical source kept live until all native aliases have been destroyed.
+  iree_hal_buffer_t* backing_ = nullptr;
+  // Virtual buffer owning the published index.
+  iree_hal_buffer_t* target_ = nullptr;
+  // First native consumer's exact program scope.
+  iree_hal_memory_scope_t scope_ = {};
+};
+
+TEST_F(MappingPublicationTest, AllocationFailurePrecedesNativeMutation) {
+  IREE_ASSERT_OK(Update({Mapping(0, 16384)}));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        Update({Mapping(4096, 4096, 8192)}, true));
+  EXPECT_EQ(native_.update_count, 1);
+  EXPECT_FALSE(native_.fail_metadata_allocation.load());
+  iree_hal_amd_fabric_virtual_mapping_t mapping;
+  IREE_ASSERT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
+      iree_hal_buffer_virtual_view(target_), scope_.id, 0, 16384, &mapping));
+  EXPECT_EQ(mapping.native.source_byte_offset, 0u);
+  EXPECT_EQ(mapping.native.byte_length, 16384u);
+  IREE_ASSERT_OK(Update({Mapping(4096, 4096, 8192)}));
+  IREE_ASSERT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
+      iree_hal_buffer_virtual_view(target_), scope_.id, 4096, 4096, &mapping));
+  EXPECT_EQ(mapping.native.source_byte_offset, 8192u);
+}
+
+TEST_F(MappingPublicationTest, PartialNativeFailurePoisonsEveryAlias) {
+  IREE_ASSERT_OK(Update({Mapping(0, 16384)}));
+  native_.api.memory_reservation_update =
+      +[](amdf_memory_reservation_t* handle, uint32_t ordinal, uint32_t count,
+          const amdf_memory_mapping_update_t* updates) -> amdf_status_t {
+    EXPECT_EQ(count, 2u);
+    // Model a native implementation that accepted one change before failing.
+    FakeNative::ReservationUpdate(handle, ordinal, 1, updates);
+    return amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DATA_LOSS,
+      Update({Mapping(0, 4096, 16384), Mapping(8192, 4096, 24576)}));
+  ASSERT_EQ(native_.last_updates.size(), 1u);
+  for (const auto* family : families_) {
+    const auto scope = ResolveScope(IREE_HAL_MEMORY_SITE_PROGRAM, family);
+    for (uint64_t position : {0u, 4096u, 8192u, 12288u}) {
+      iree_hal_amd_fabric_virtual_mapping_t mapping;
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
+                            iree_hal_amd_fabric_virtual_buffer_query_source(
+                                iree_hal_buffer_virtual_view(target_), scope.id,
+                                position, 1, &mapping));
+      EXPECT_EQ(mapping.native.memory, nullptr);
+    }
+  }
+  // Checked removal clears metadata but preserves the first native failure.
+  native_.detach_failure =
+      amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        iree_hal_virtual_buffer_detach(target_, scope_));
+  native_.detach_failure = AMDF_STATUS_OK;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_detach(target_, scope_));
+  iree_hal_amd_fabric_virtual_mapping_t mapping;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DATA_LOSS,
+      iree_hal_amd_fabric_virtual_buffer_query_source(
+          iree_hal_buffer_virtual_view(target_), scope_.id, 0, 1, &mapping));
+}
+
+TEST_F(MappingPublicationTest, NativeCallDoesNotBlockQueries) {
+  IREE_ASSERT_OK(Update({Mapping(0, 16384)}));
+  std::promise<void> entered;
+  std::promise<void> resume;
+  auto resumed = resume.get_future();
+  native_.before_update = [&] {
+    entered.set_value();
+    resumed.wait();
+  };
+  auto update = std::async(
+      std::launch::async, [&] { return Update({Mapping(4096, 4096, 16384)}); });
+  entered.get_future().wait();
+  iree_hal_amd_fabric_virtual_mapping_t mapping;
+  IREE_EXPECT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
+      iree_hal_buffer_virtual_view(target_), scope_.id, 0, 16384, &mapping));
+  EXPECT_EQ(mapping.native.byte_length, 16384u);
+  EXPECT_EQ(mapping.native.source_byte_offset, 0u);
+  resume.set_value();
+  IREE_ASSERT_OK(update.get());
+  native_.before_update = {};
+  IREE_ASSERT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
+      iree_hal_buffer_virtual_view(target_), scope_.id, 4096, 16384, &mapping));
+  EXPECT_EQ(mapping.native.byte_length, 4096u);
+  EXPECT_EQ(mapping.native.source_byte_offset, 16384u);
+}
+
+TEST_F(MappingPublicationTest, ConcurrentQueriesObserveCompleteBatches) {
+  IREE_ASSERT_OK(Update({Mapping(0, 16384)}));
+  std::array<std::vector<iree_hal_memory_mapping_t>, 2> versions;
+  for (size_t version = 0; version < versions.size(); ++version) {
+    for (uint64_t position = 0; position < 16384; position += 4096) {
+      versions[version].push_back(
+          Mapping(position, 4096, version * 16384 + position));
+    }
+  }
+  std::atomic<bool> done{false};
+  auto writer = std::async(std::launch::async, [&] {
+    for (size_t iteration = 0; iteration < 1000; ++iteration) {
+      IREE_EXPECT_OK(Update(versions[iteration % 2]));
+    }
+    done.store(true, std::memory_order_release);
+  });
+  do {
+    iree_hal_amd_fabric_virtual_mapping_t mapping;
+    IREE_EXPECT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
+        iree_hal_buffer_virtual_view(target_), scope_.id, 0, 16384, &mapping));
+    // Intermediate publication would expose a shorter prefix where old and new
+    // source coordinates meet. A complete batch always coalesces all four runs.
+    EXPECT_EQ(mapping.native.byte_length, 16384u);
+    EXPECT_TRUE(mapping.native.source_byte_offset == 0 ||
+                mapping.native.source_byte_offset == 16384);
+  } while (!done.load(std::memory_order_acquire));
+  writer.get();
+}
+
 class ConcurrentMemoryBackendTest : public MemoryBackendTest {
  protected:
   void SetUp() override {
