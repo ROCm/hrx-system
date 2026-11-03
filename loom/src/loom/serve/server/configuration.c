@@ -479,6 +479,10 @@ static iree_status_t loom_serve_model_configuration_definition_parse(
                                                      fields};
   IREE_RETURN_IF_ERROR(iree_json_enumerate_object_typed(
       value, loom_serve_model_configuration_field_visit, &context));
+  const bool authored_context_capacity =
+      fields[DEFINITION_CONTEXT_CAPACITY].value.data != NULL;
+  const bool authored_pool_capacity =
+      fields[DEFINITION_POOL_CAPACITY].value.data != NULL;
   const bool card = model->sources.card || model->sources.reference.path.size;
   if (model->sources.card) {
     const loom_model_selection_t* selection =
@@ -614,9 +618,21 @@ static iree_status_t loom_serve_model_configuration_definition_parse(
       &fields[DEFINITION_OPTIONS], host_allocator, &model->options));
   if (model->kind == LOOM_SERVE_MODEL_KIND_TEXT ||
       model->kind == LOOM_SERVE_MODEL_KIND_SEQUENCE) {
-    return loom_serve_model_configuration_text(
+    IREE_RETURN_IF_ERROR(loom_serve_model_configuration_text(
         fields, model->kind == LOOM_SERVE_MODEL_KIND_SEQUENCE, &model->sources,
-        &model->text, host_allocator);
+        &model->text, host_allocator));
+    if (authored_context_capacity && !authored_pool_capacity &&
+        !model->sources.reference.path.size &&
+        model->text.context_capacity > model->text.pool_capacity) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "context_capacity %zu exceeds implicit pool_capacity %zu; set "
+          "pool_capacity explicitly (at least %zu to admit one full-length "
+          "context)",
+          model->text.context_capacity, model->text.pool_capacity,
+          model->text.context_capacity);
+    }
+    return iree_ok_status();
   }
   if (model->kind == LOOM_SERVE_MODEL_KIND_IMAGE ||
       model->kind == LOOM_SERVE_MODEL_KIND_EMBEDDING ||

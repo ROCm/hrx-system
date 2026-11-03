@@ -338,6 +338,11 @@ Native capacity fields are:
 Context, pool and prefill capacities are positive. Packed token capacity may
 exceed an individual context limit: one epoch can combine many short sessions.
 It must fit an anchor plus every draft proposal.
+When a deployment raises `context_capacity` above the inherited pool and omits
+`pool_capacity`, registration rejects the deployment instead of exposing a
+window that no request can reach. Setting both fields is an explicit capacity
+choice; a deliberately smaller pool is accepted and admission rejects requests
+whose retained KV state cannot fit it.
 Two-epoch continuation requires nonzero draft depth. A source can impose tighter
 shape limits or reject unsupported drafting modes. Endpoint capacities are
 nonnegative and their combined native index space must fit signed 32-bit indices.

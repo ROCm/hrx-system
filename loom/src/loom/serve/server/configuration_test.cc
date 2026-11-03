@@ -687,6 +687,20 @@ TEST_F(ConfigurationTest,
   EXPECT_EQ(String(model_.options), R"({"draft_weights":"draft.gguf"})");
 }
 
+TEST_F(ConfigurationTest, ContextOverrideRequiresAnExplicitUndersizedPool) {
+  iree::Status status(Parse(Text(R"(,"context_capacity":131072)")));
+  EXPECT_EQ(status.code(), iree::StatusCode::kInvalidArgument);
+  EXPECT_NE(status.ToString().find(
+                "context_capacity 131072 exceeds implicit pool_capacity 65536"),
+            std::string::npos)
+      << status.ToString();
+
+  IREE_ASSERT_OK(
+      Parse(Text(R"(,"context_capacity":131072,"pool_capacity":32768)")));
+  EXPECT_EQ(model_.text.context_capacity, 131072u);
+  EXPECT_EQ(model_.text.pool_capacity, 32768u);
+}
+
 TEST_F(ConfigurationTest, CacheOmissionAndExplicitZeroRemainDistinct) {
   IREE_ASSERT_OK(Parse(Text(R"(,"cache_target_bytes":0)")));
   EXPECT_EQ(model_.text.cache_target_bytes, 0u);
