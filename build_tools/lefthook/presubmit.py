@@ -42,6 +42,7 @@ from build_tools.devtools import bazel_test_selection, project_presubmit
 from build_tools.devtools.bazel import (
     BazelSourceOwnerQueryError,
     clang_tidy_configuration_args,
+    query_compiling_targets,
     query_compiling_targets_depending_on,
     query_compiling_targets_for_sources,
 )
@@ -2532,14 +2533,23 @@ def run_clang_tidy(
     full_scope = clang_tidy_uses_full_scope(inputs)
     selected_files = None if full_scope or package_targets else candidate_files
     if full_scope:
-        analysis_targets = unique_paths(
-            [
-                target
-                for target in (
-                    bazel_package_target_for_path(path) for path in candidate_files
-                )
-                if target is not None
-            ]
+        query_start = time.monotonic()
+        print("[run] Resolve full clang-tidy C/C++ target set")
+        sys.stdout.flush()
+        try:
+            analysis_targets = query_compiling_targets(
+                "bazel",
+                target_patterns=CLANG_TIDY_OWNER_TARGET_PATTERNS,
+                cwd=REPO_ROOT,
+                env=None,
+            )
+        except (BazelSourceOwnerQueryError, ValueError) as exc:
+            print(f"[fail] clang-tidy: {exc}")
+            return False
+        print(
+            "[ok] Resolve full clang-tidy C/C++ target set "
+            f"({format_duration(time.monotonic() - query_start)}, "
+            f"{len(analysis_targets)} target(s))"
         )
     else:
         translation_unit_labels = {

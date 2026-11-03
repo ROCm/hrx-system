@@ -124,6 +124,56 @@ class BazelTest(unittest.TestCase):
                 env=None,
             )
 
+    def test_compiling_target_query_includes_manual_rules(self):
+        output = (
+            "//runtime/src/iree/hal:device_spec_fuzz\n"
+            "//runtime/src/iree/base:base\n"
+            "//runtime/src/iree/hal/drivers/amd/xdna/cts:native_replay_stress\n"
+        )
+        with mock.patch.object(
+            bazel_dev,
+            "run_captured",
+            return_value=subprocess.CompletedProcess([], 0, stdout=output, stderr=""),
+        ) as query:
+            targets = bazel_dev.query_compiling_targets(
+                "bazel",
+                target_patterns=("//runtime/src/...", "//loom/src/..."),
+                cwd=Path("/repo"),
+                env=None,
+            )
+
+        self.assertEqual(
+            targets,
+            [
+                "//runtime/src/iree/base:base",
+                "//runtime/src/iree/hal/drivers/amd/xdna/cts:native_replay_stress",
+                "//runtime/src/iree/hal:device_spec_fuzz",
+            ],
+        )
+        command = query.call_args.args[0]
+        self.assertIn('kind("cc_.* rule", //runtime/src/... + //loom/src/...)', command)
+        self.assertFalse(any("manual" in argument for argument in command))
+
+    def test_compiling_target_query_rejects_failure(self):
+        with (
+            mock.patch.object(
+                bazel_dev,
+                "run_captured",
+                return_value=subprocess.CompletedProcess(
+                    [], 7, stdout="", stderr="broken universe\n"
+                ),
+            ),
+            self.assertRaisesRegex(
+                bazel_dev.BazelSourceOwnerQueryError, "broken universe"
+            ),
+        ):
+            bazel_dev.query_compiling_targets(
+                "bazel",
+                target_patterns=("//runtime/src/...",),
+                cwd=Path("/repo"),
+                env=None,
+            )
+
     def test_compiling_dependent_query_uses_configured_reverse_dependencies(self):
         captured_query = ""
 

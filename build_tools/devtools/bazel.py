@@ -1942,6 +1942,52 @@ def query_compiling_targets_for_sources(
     return sorted(owners)
 
 
+def query_compiling_targets(
+    bazel: str,
+    *,
+    target_patterns: tuple[str, ...],
+    cwd: Path,
+    env: dict[str, str] | None,
+) -> list[str]:
+    """Returns every concrete C/C++ rule under the target patterns.
+
+    Unlike passing package `:all` patterns as build roots, the explicit labels
+    returned by this query retain rules tagged `manual`. The configured build
+    remains responsible for target compatibility.
+    """
+    if not target_patterns:
+        raise ValueError("at least one Bazel target pattern is required")
+
+    universe_expression = " + ".join(target_patterns)
+    completed = run_captured(
+        [
+            bazel,
+            "query",
+            "--noshow_progress",
+            "--order_output=no",
+            "--output=label",
+            f'kind("cc_.* rule", {universe_expression})',
+        ],
+        cwd=cwd,
+        env=env,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        raise BazelSourceOwnerQueryError(
+            "Bazel C/C++ universe query failed"
+            + (f":\n{detail[-8192:]}" if detail else "")
+        )
+
+    targets = set()
+    for line in completed.stdout.splitlines():
+        if not line.startswith("//"):
+            raise BazelSourceOwnerQueryError(
+                f"malformed Bazel C/C++ universe result: {line!r}"
+            )
+        targets.add(line)
+    return sorted(targets)
+
+
 def query_compiling_targets_depending_on(
     bazel: str,
     *,
@@ -1968,27 +2014,11 @@ def query_compiling_targets_depending_on(
     with tempfile.TemporaryDirectory(
         prefix="iree-bazel-compiling-dependents-"
     ) as temp_dir:
-        universe_expression = " + ".join(target_patterns)
-        completed = run_captured(
-            [
-                bazel,
-                "query",
-                "--noshow_progress",
-                "--order_output=no",
-                "--output=label",
-                f'kind("cc_.* rule", {universe_expression})',
-            ],
+        universe_targets = query_compiling_targets(
+            bazel,
+            target_patterns=target_patterns,
             cwd=cwd,
             env=env,
-        )
-        if completed.returncode != 0:
-            detail = (completed.stderr or completed.stdout).strip()
-            raise BazelSourceOwnerQueryError(
-                "Bazel C/C++ universe query failed"
-                + (f":\n{detail[-8192:]}" if detail else "")
-            )
-        universe_targets = sorted(
-            line for line in completed.stdout.splitlines() if line.startswith("//")
         )
         if not universe_targets:
             return []

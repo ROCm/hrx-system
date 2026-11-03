@@ -1677,16 +1677,28 @@ class PresubmitTest(unittest.TestCase):
         run_command.assert_not_called()
         self.assertIn("query failed", output.getvalue())
 
-    def test_clang_tidy_all_scope_uses_packages_without_file_filter(self):
+    def test_clang_tidy_all_scope_enumerates_concrete_targets_without_file_filter(
+        self,
+    ):
         paths = [
             "runtime/src/iree/base/status.c",
             "runtime/src/iree/hal/drivers/amd/gpu/cts/driver_test.cc",
+        ]
+        explicit_targets = [
+            "//runtime/src/iree/base:base",
+            "//runtime/src/iree/hal:device_spec_fuzz",
+            "//runtime/src/iree/hal/drivers/amd/xdna/cts:native_replay_stress",
         ]
         with (
             mock.patch.object(presubmit.sys, "platform", "linux"),
             mock.patch.object(
                 presubmit, "clang_tidy_llvm_available", return_value=True
             ),
+            mock.patch.object(
+                presubmit,
+                "query_compiling_targets",
+                return_value=explicit_targets,
+            ) as target_query,
             mock.patch.object(
                 presubmit,
                 "clang_tidy_target_pattern_file",
@@ -1705,19 +1717,50 @@ class PresubmitTest(unittest.TestCase):
                 )
             )
 
-        target_file.assert_called_once_with(
-            [
-                "//runtime/src/iree/base:all",
-                "//runtime/src/iree/hal/drivers/amd/gpu/cts:all",
-            ]
+        target_query.assert_called_once_with(
+            "bazel",
+            target_patterns=presubmit.CLANG_TIDY_OWNER_TARGET_PATTERNS,
+            cwd=presubmit.REPO_ROOT,
+            env=None,
         )
+        target_file.assert_called_once_with(explicit_targets)
         command = run_command.call_args.args[0]
+        self.assertFalse(any(argument.endswith(":all") for argument in command))
         self.assertFalse(
             any(
                 argument.startswith(presubmit.CLANG_TIDY_SELECTED_FILES_FLAG + "=")
                 for argument in command
             )
         )
+
+    def test_clang_tidy_all_scope_fails_when_target_enumeration_fails(self):
+        output = io.StringIO()
+        path = "runtime/src/iree/base/status.c"
+        with (
+            contextlib.redirect_stdout(output),
+            mock.patch.object(presubmit.sys, "platform", "linux"),
+            mock.patch.object(
+                presubmit, "clang_tidy_llvm_available", return_value=True
+            ),
+            mock.patch.object(
+                presubmit,
+                "query_compiling_targets",
+                side_effect=presubmit.BazelSourceOwnerQueryError(
+                    "broken C/C++ universe"
+                ),
+            ),
+            mock.patch.object(presubmit, "run_command") as run_command,
+        ):
+            ok = presubmit.run_clang_tidy(
+                input_scope([path], mode="all", tracked_paths=[path]),
+                profile="ci",
+                lane="bazel",
+                verbose=False,
+            )
+
+        self.assertFalse(ok)
+        run_command.assert_not_called()
+        self.assertIn("broken C/C++ universe", output.getvalue())
 
     def test_clang_tidy_base_implementation_scope_stays_bounded(self):
         inputs = input_scope(
@@ -1918,6 +1961,11 @@ class PresubmitTest(unittest.TestCase):
             ),
             mock.patch.object(
                 presubmit,
+                "query_compiling_targets",
+                return_value=["//runtime/src/iree/base:base"],
+            ),
+            mock.patch.object(
+                presubmit,
                 "clang_tidy_target_pattern_file",
                 side_effect=fixed_clang_tidy_target_pattern_file,
             ) as target_file,
@@ -1935,7 +1983,7 @@ class PresubmitTest(unittest.TestCase):
         self.assertTrue(ok)
         plugin_test_command = run_command.call_args_list[0].args[0]
         self.assertIn("//build_tools/clang_tidy/test:plugin_tests", plugin_test_command)
-        target_file.assert_called_once_with(["//runtime/src/iree/base:all"])
+        target_file.assert_called_once_with(["//runtime/src/iree/base:base"])
 
     def test_clang_tidy_infra_runs_plugin_tests(self):
         with (
