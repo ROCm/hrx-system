@@ -43,8 +43,27 @@ def source_label(repo_root: Path, path: str) -> str | None:
         directory = directory.parent
 
 
-def changes_build_graph(path: str) -> bool:
-    """Build definitions/configuration require conservative full-suite selection."""
+def is_package_build_file(path: str) -> bool:
+    """Returns whether path is a nested package-local BUILD definition."""
+    source_path = PurePosixPath(path)
+    return len(source_path.parts) > 1 and source_path.name in ("BUILD", "BUILD.bazel")
+
+
+def package_label_prefix(repo_root: Path, path: str) -> str | None:
+    """Returns the label prefix owned by an existing package BUILD file."""
+    if not is_package_build_file(path):
+        return None
+    build_path = repo_root / path
+    if not build_path.is_file():
+        return None
+    package = PurePosixPath(path).parent.as_posix()
+    return f"//{package}:"
+
+
+def requires_full_suite(path: str) -> bool:
+    """Returns whether a build edit has no package-local dependency boundary."""
+    if is_package_build_file(path):
+        return False
     name = PurePosixPath(path).name
     return (
         name
@@ -71,11 +90,20 @@ def node_label(node: str) -> str:
     return node[:separator]
 
 
-def affected_query(test_targets: set[str], source_labels: set[str]) -> str:
+def affected_query(
+    test_targets: set[str],
+    source_labels: set[str],
+    package_label_prefixes: set[str],
+) -> str:
     # Filter the analyzed closure instead of resolving changed paths as target
     # patterns: deleted, untracked, or configuration-excluded files may have no
     # node. Query strings preserve backslashes rather than decoding JSON escapes.
-    source_pattern = "|".join(re.escape(label) for label in sorted(source_labels))
+    source_pattern = "|".join(
+        [
+            *(re.escape(label) for label in sorted(source_labels)),
+            *(re.escape(prefix) + ".*" for prefix in sorted(package_label_prefixes)),
+        ]
+    )
     source_pattern = source_pattern.replace('"', r"\x22")
     return (
         "let tests = set(\n  " + "\n  ".join(sorted(test_targets)) + ") in\n"
@@ -171,14 +199,20 @@ class TestSuite:
         return test_targets
 
     def query_affected_targets(
-        self, repo_root: Path, source_labels: set[str], *, verbose: bool = False
+        self,
+        repo_root: Path,
+        source_labels: set[str],
+        package_label_prefixes: set[str],
+        *,
+        verbose: bool = False,
     ) -> list[str]:
         with tempfile.TemporaryDirectory(prefix="iree-bazel-affected-") as temp_dir:
             temp_path = Path(temp_dir)
             test_targets = self.discover_targets(repo_root, temp_path, verbose=verbose)
             query_path = temp_path / "test_dependencies.query"
             query_path.write_text(
-                affected_query(test_targets, source_labels), encoding="utf-8"
+                affected_query(test_targets, source_labels, package_label_prefixes),
+                encoding="utf-8",
             )
             affected_targets_path = temp_path / "affected_targets.txt"
             if not project_presubmit.run_command(
@@ -223,16 +257,32 @@ class TestSuite:
     def selected_targets(
         self, repo_root: Path, paths: list[str], *, verbose: bool = False
     ) -> list[str] | None:
-        if any(changes_build_graph(path) for path in paths):
+        if any(requires_full_suite(path) for path in paths):
             return None
+        package_build_paths = [path for path in paths if is_package_build_file(path)]
+        package_prefixes = [
+            package_label_prefix(repo_root, path) for path in package_build_paths
+        ]
+        if any(prefix is None for prefix in package_prefixes):
+            # A removed package boundary can rehome every file below it.
+            return None
+        package_label_prefixes = {
+            prefix for prefix in package_prefixes if prefix is not None
+        }
         source_labels = {
             label
             for path in paths
+            if not is_package_build_file(path)
             if (label := source_label(repo_root, path)) is not None
         }
-        if not source_labels:
+        if not source_labels and not package_label_prefixes:
             return []
-        return self.query_affected_targets(repo_root, source_labels, verbose=verbose)
+        return self.query_affected_targets(
+            repo_root,
+            source_labels,
+            package_label_prefixes,
+            verbose=verbose,
+        )
 
     def run(
         self, repo_root: Path, *, paths: list[str] | None = None, verbose: bool = False

@@ -1942,6 +1942,108 @@ def query_compiling_targets_for_sources(
     return sorted(owners)
 
 
+def query_compiling_targets_depending_on(
+    bazel: str,
+    *,
+    dependency_labels: set[str],
+    package_patterns: set[str],
+    target_patterns: tuple[str, ...],
+    configuration_args: tuple[str, ...],
+    cwd: Path,
+    env: dict[str, str] | None,
+) -> list[str]:
+    """Returns configured C/C++ rules affected by dependencies or packages."""
+    seed_patterns = sorted([*dependency_labels, *package_patterns])
+    if not seed_patterns:
+        return []
+    if not target_patterns:
+        raise ValueError("at least one Bazel target pattern is required")
+    for label in dependency_labels:
+        _source_label_pattern(label)
+    for pattern in package_patterns:
+        if not re.fullmatch(r"//[A-Za-z0-9_./+-]+:\*", pattern):
+            raise ValueError(f"unsupported main-workspace package pattern: {pattern!r}")
+
+    seeds = " + ".join(seed_patterns)
+    with tempfile.TemporaryDirectory(
+        prefix="iree-bazel-compiling-dependents-"
+    ) as temp_dir:
+        universe_expression = " + ".join(target_patterns)
+        completed = run_captured(
+            [
+                bazel,
+                "query",
+                "--noshow_progress",
+                "--order_output=no",
+                "--output=label",
+                f'kind("cc_.* rule", {universe_expression})',
+            ],
+            cwd=cwd,
+            env=env,
+        )
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout).strip()
+            raise BazelSourceOwnerQueryError(
+                "Bazel C/C++ universe query failed"
+                + (f":\n{detail[-8192:]}" if detail else "")
+            )
+        universe_targets = sorted(
+            line for line in completed.stdout.splitlines() if line.startswith("//")
+        )
+        if not universe_targets:
+            return []
+
+        query = (
+            "let universe = set(\n  "
+            + "\n  ".join(universe_targets)
+            + "\n) in\n"
+            + f"let seeds = {seeds} in\n"
+            + 'kind("cc_.* rule", rdeps($universe, $seeds))\n'
+        )
+        query_path = Path(temp_dir) / "dependents.query"
+        query_path.write_text(query, encoding="utf-8")
+        completed = run_captured(
+            [
+                bazel,
+                "cquery",
+                *configuration_args,
+                # Keep aspect edges distinct so their dependencies cannot make
+                # unrelated sibling rules appear to depend on the seed.
+                "--experimental_explicit_aspects",
+                "--noshow_progress",
+                "--output=label",
+                f"--query_file={query_path}",
+            ],
+            cwd=cwd,
+            env=env,
+        )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        raise BazelSourceOwnerQueryError(
+            "Bazel compiling-dependent query failed"
+            + (f":\n{detail[-8192:]}" if detail else "")
+        )
+
+    targets = set()
+    for line in completed.stdout.splitlines():
+        # Explicit aspect nodes are printed alongside rule nodes despite the
+        # kind() filter. Their owning rule is already present in the result.
+        if " of //" in line:
+            continue
+        separator = line.rfind(" (")
+        if separator < 0 or not line.endswith(")"):
+            raise BazelSourceOwnerQueryError(
+                f"malformed Bazel compiling-dependent result: {line!r}"
+            )
+        label = line[:separator]
+        if not label.startswith("//"):
+            raise BazelSourceOwnerQueryError(
+                f"unexpected Bazel compiling-dependent result: {line!r}"
+            )
+        targets.add(label)
+    return sorted(targets)
+
+
 def nearest_package_dir(path: Path) -> Path | None:
     current = path
     while current != REPO_ROOT and current != current.parent:

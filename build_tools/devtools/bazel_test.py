@@ -124,6 +124,75 @@ class BazelTest(unittest.TestCase):
                 env=None,
             )
 
+    def test_compiling_dependent_query_uses_configured_reverse_dependencies(self):
+        captured_query = ""
+
+        def run_query(command, **_kwargs):
+            nonlocal captured_query
+            if command[1] == "query":
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout="//consumer:library\n//consumer:test\n",
+                    stderr="",
+                )
+            query_path = Path(
+                next(arg for arg in command if arg.startswith("--query_file=")).split(
+                    "=", 1
+                )[1]
+            )
+            captured_query = query_path.read_text(encoding="utf-8")
+            output = (
+                "//consumer:library (target)\n"
+                "//consumer:test (target)\n"
+                "//build_tools:aspect%check of //consumer:test (target)\n"
+            )
+            return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+        with mock.patch.object(bazel_dev, "run_captured", side_effect=run_query):
+            targets = bazel_dev.query_compiling_targets_depending_on(
+                "bazel",
+                dependency_labels={"//producer:event.h"},
+                package_patterns={"//producer/tests:*"},
+                target_patterns=("//runtime/...", "//libhrx/..."),
+                configuration_args=("--config=presubmit",),
+                cwd=Path("/repo"),
+                env=None,
+            )
+
+        self.assertEqual(targets, ["//consumer:library", "//consumer:test"])
+        self.assertIn(
+            "let universe = set(\n  //consumer:library\n  //consumer:test\n) in",
+            captured_query,
+        )
+        self.assertIn(
+            "let seeds = //producer/tests:* + //producer:event.h in",
+            captured_query,
+        )
+
+    def test_compiling_dependent_query_rejects_query_failure(self):
+        with (
+            mock.patch.object(
+                bazel_dev,
+                "run_captured",
+                return_value=subprocess.CompletedProcess(
+                    [], 7, stdout="", stderr="broken configured graph\n"
+                ),
+            ),
+            self.assertRaisesRegex(
+                bazel_dev.BazelSourceOwnerQueryError, "broken configured graph"
+            ),
+        ):
+            bazel_dev.query_compiling_targets_depending_on(
+                "bazel",
+                dependency_labels={"//producer:event.h"},
+                package_patterns=set(),
+                target_patterns=("//libhrx/...",),
+                configuration_args=("--config=presubmit",),
+                cwd=Path("/repo"),
+                env=None,
+            )
+
     def test_try_dependency_finds_generated_header_before_build(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

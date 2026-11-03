@@ -1716,13 +1716,14 @@ class PresubmitTest(unittest.TestCase):
             ["runtime/src/iree/base/status.c", "runtime/src/iree/base/table.inl"],
         )
 
-    def test_clang_tidy_header_selects_configured_compile_graph(self):
+    def test_clang_tidy_header_selects_owning_package(self):
         header_path = "runtime/src/iree/base/status.h"
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             header = root / header_path
             header.parent.mkdir(parents=True)
             header.write_text("", encoding="utf-8")
+            header.with_name("BUILD.bazel").write_text("", encoding="utf-8")
             with (
                 mock.patch.object(presubmit, "REPO_ROOT", root),
                 mock.patch.object(presubmit.sys, "platform", "linux"),
@@ -1732,6 +1733,11 @@ class PresubmitTest(unittest.TestCase):
                 mock.patch.object(
                     presubmit, "query_compiling_targets_for_sources"
                 ) as owner_query,
+                mock.patch.object(
+                    presubmit,
+                    "query_compiling_targets_depending_on",
+                    return_value=["//runtime/src/iree/base:consumer"],
+                ) as dependency_query,
                 mock.patch.object(
                     presubmit, "run_command", return_value=True
                 ) as run_command,
@@ -1745,14 +1751,88 @@ class PresubmitTest(unittest.TestCase):
 
         self.assertTrue(ok)
         owner_query.assert_not_called()
+        dependency_query.assert_called_once()
         command = run_command.call_args.args[0]
         self.assertEqual(
             command[command.index("--") + 1 :],
-            list(presubmit.CLANG_TIDY_OWNER_TARGET_PATTERNS),
+            ["//runtime/src/iree/base:consumer"],
         )
         self.assertIn(
             f'{presubmit.CLANG_TIDY_SELECTED_FILES_FLAG}=["{header_path}"]',
             command,
+        )
+
+    def test_clang_tidy_package_build_scope_stays_with_changed_packages(self):
+        paths = [
+            "libhrx/cts/tests/hip/BUILD.bazel",
+            "libhrx/src/binding/common/event.h",
+            "libhrx/src/binding/hip/api.c",
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for path in paths:
+                file_path = root / path
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                file_path.write_text("", encoding="utf-8")
+            (root / "libhrx/src/binding/common/BUILD.bazel").write_text(
+                "", encoding="utf-8"
+            )
+            (root / "libhrx/src/binding/hip/BUILD.bazel").write_text(
+                "", encoding="utf-8"
+            )
+            inputs = input_scope(
+                paths,
+                mode="base",
+                tracked_paths=[*paths, "loom/src/loom/unrelated.cc"],
+            )
+            with (
+                mock.patch.object(presubmit, "REPO_ROOT", root),
+                mock.patch.object(presubmit.sys, "platform", "linux"),
+                mock.patch.object(
+                    presubmit, "clang_tidy_llvm_available", return_value=True
+                ),
+                mock.patch.object(
+                    presubmit,
+                    "query_compiling_targets_for_sources",
+                    return_value=["//libhrx/src/binding/hip:api"],
+                ) as owner_query,
+                mock.patch.object(
+                    presubmit,
+                    "query_compiling_targets_depending_on",
+                    return_value=[
+                        "//libhrx/cts/tests/hip:event_record_flags_test",
+                        "//libhrx/src/binding/common:common",
+                    ],
+                ) as dependency_query,
+                mock.patch.object(
+                    presubmit, "run_command", return_value=True
+                ) as run_command,
+            ):
+                ok = presubmit.run_clang_tidy(
+                    inputs,
+                    profile="ci",
+                    lane="bazel",
+                    verbose=False,
+                )
+
+        self.assertTrue(ok)
+        owner_query.assert_called_once()
+        dependency_query.assert_called_once()
+        command = run_command.call_args.args[0]
+        self.assertEqual(
+            command[command.index("--") + 1 :],
+            [
+                "//libhrx/src/binding/hip:api",
+                "//libhrx/cts/tests/hip:event_record_flags_test",
+                "//libhrx/src/binding/common:common",
+            ],
+        )
+        self.assertNotIn("//loom/...", command)
+        self.assertFalse(
+            any(
+                argument.startswith(presubmit.CLANG_TIDY_SELECTED_FILES_FLAG + "=")
+                for argument in command
+            )
         )
 
     def test_clang_tidy_base_infra_scope_escalates_and_runs_plugin_tests(self):

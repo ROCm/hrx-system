@@ -77,13 +77,34 @@ class BazelTestSelectionTest(unittest.TestCase):
                     ["//consumer:test"],
                 )
             query.assert_called_once_with(
-                root, {"//:producer/input.c", "//:tool.py"}, verbose=False
+                root,
+                {"//:producer/input.c", "//:tool.py"},
+                set(),
+                verbose=False,
             )
 
-    def test_build_graph_edits_select_full_suite(self):
+    def test_package_build_edits_seed_affected_query(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = root / "producer/library"
+            package.mkdir(parents=True)
+            (package / "BUILD.bazel").touch()
+            with mock.patch.object(
+                selection.TestSuite,
+                "query_affected_targets",
+                return_value=["//consumer:test"],
+            ) as query:
+                self.assertEqual(
+                    self.suite.selected_targets(root, ["producer/library/BUILD.bazel"]),
+                    ["//consumer:test"],
+                )
+            query.assert_called_once_with(
+                root, set(), {"//producer/library:"}, verbose=False
+            )
+
+    def test_unbounded_build_graph_edits_select_full_suite(self):
         for path in (
             "BUILD.bazel",
-            "a/BUILD",
             "a/rules.bzl",
             "a/dep.BUILD",
             "MODULE.bazel.lock",
@@ -96,12 +117,19 @@ class BazelTestSelectionTest(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 self.assertIsNone(self.suite.selected_targets(Path.cwd(), [path]))
-        self.assertFalse(selection.changes_build_graph("build_tools/helper.py"))
-        self.assertFalse(selection.changes_build_graph("build_tools/rules.cmake"))
+        self.assertFalse(selection.requires_full_suite("a/BUILD"))
+        self.assertFalse(selection.requires_full_suite("a/BUILD.bazel"))
+        self.assertFalse(selection.requires_full_suite("build_tools/helper.py"))
+        self.assertFalse(selection.requires_full_suite("build_tools/rules.cmake"))
+
+    def test_removed_package_build_selects_full_suite(self):
+        self.assertIsNone(
+            self.suite.selected_targets(Path.cwd(), ["removed/BUILD.bazel"])
+        )
 
     def test_query_matches_literal_labels_in_the_configured_closure(self):
         labels = {"//producer:input+[x].txt", "//:both'\".c"}
-        query = selection.affected_query({"//consumer:test"}, labels)
+        query = selection.affected_query({"//consumer:test"}, labels, set())
         self.assertIn("let dependencies = deps($tests)", query)
         self.assertIn("$tests intersect rdeps($dependencies", query)
         pattern = query.split('filter("', 1)[1].split('", $dependencies)', 1)[0]
@@ -110,6 +138,15 @@ class BazelTestSelectionTest(unittest.TestCase):
             self.assertIsNotNone(re.fullmatch(pattern, label))
             self.assertIsNone(re.fullmatch(pattern, label + ".extra"))
         self.assertIsNone(re.fullmatch(pattern, "//producer:inputtxXtxt"))
+
+    def test_query_matches_every_label_in_changed_packages(self):
+        query = selection.affected_query(
+            {"//consumer:test"}, set(), {"//producer/library:"}
+        )
+        pattern = query.split('filter("', 1)[1].split('", $dependencies)', 1)[0]
+        self.assertIsNotNone(re.fullmatch(pattern, "//producer/library:library"))
+        self.assertIsNotNone(re.fullmatch(pattern, "//producer/library:input.c"))
+        self.assertIsNone(re.fullmatch(pattern, "//producer/library/nested:library"))
 
     def test_node_label_preserves_parentheses_in_target_names(self):
         self.assertEqual(
