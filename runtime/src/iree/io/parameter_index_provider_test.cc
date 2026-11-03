@@ -239,6 +239,8 @@ class SubmissionTrace {
     std::vector<Timepoint> waits;
     // Borrowed completion timepoints captured by the real queue.
     std::vector<Timepoint> signals;
+    // Borrowed file kept alive by accepted I/O until its producer gate opens.
+    iree_hal_file_t* file;
   };
 
   explicit SubmissionTrace(iree_hal_queue_t* target) : target_(target) {
@@ -270,8 +272,9 @@ class SubmissionTrace {
     iree_hal_queue_release(Cast(queue)->target_);
   }
   void Record(Kind kind, iree_hal_semaphore_list_t waits,
-              iree_hal_semaphore_list_t signals) {
-    Submission submission = {kind, {}, {}};
+              iree_hal_semaphore_list_t signals,
+              iree_hal_file_t* file = nullptr) {
+    Submission submission = {kind, {}, {}, file};
     for (iree_host_size_t i = 0; i < waits.count; ++i) {
       submission.waits.emplace_back(waits.semaphores[i],
                                     waits.payload_values[i]);
@@ -311,7 +314,7 @@ class SubmissionTrace {
       iree_device_size_t length, const iree_hal_queue_barriers_t* barriers,
       iree_hal_read_flags_t flags) {
     auto* self = Cast(queue);
-    self->Record(Kind::kRead, waits, signals);
+    self->Record(Kind::kRead, waits, signals, file);
     return iree_hal_queue_read(self->target_, waits, signals, file, offset,
                                buffer, buffer_offset, length, barriers, flags);
   }
@@ -322,7 +325,7 @@ class SubmissionTrace {
       iree_device_size_t length, const iree_hal_queue_barriers_t* barriers,
       iree_hal_write_flags_t flags) {
     auto* self = Cast(queue);
-    self->Record(Kind::kWrite, waits, signals);
+    self->Record(Kind::kWrite, waits, signals, file);
     return iree_hal_queue_write(self->target_, waits, signals, buffer,
                                 buffer_offset, file, offset, length, barriers,
                                 flags);
@@ -1560,7 +1563,7 @@ TEST_F(ParameterIndexProviderTest,
   }
 }
 
-TEST_F(ParameterIndexProviderTest, IndependentGroupsDoNotShareDependencyLanes) {
+TEST_F(ParameterIndexProviderTest, IndependentGroupsReuseFilesThroughTrim) {
   for (bool scatter : {false, true}) {
     SCOPED_TRACE(scatter);
     std::array<uint8_t, 8> bytes = {1, 2, 3, 4, 5, 6, 7, 8};
@@ -1570,6 +1573,13 @@ TEST_F(ParameterIndexProviderTest, IndependentGroupsDoNotShareDependencyLanes) {
         iree_make_byte_span(bytes.data(), bytes.size()),
         iree_io_file_handle_release_callback_null(), iree_allocator_system(),
         file.out()));
+    std::array<uint8_t, 4> other_bytes = {13, 14, 15, 16};
+    Ref<iree_io_file_handle_t, iree_io_file_handle_release> other_file;
+    IREE_ASSERT_OK(iree_io_file_handle_wrap_host_allocation(
+        IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE,
+        iree_make_byte_span(other_bytes.data(), other_bytes.size()),
+        iree_io_file_handle_release_callback_null(), iree_allocator_system(),
+        other_file.out()));
     Ref<iree_io_parameter_index_t, iree_io_parameter_index_release> index;
     IREE_ASSERT_OK(
         iree_io_parameter_index_create(iree_allocator_system(), index.out()));
@@ -1577,12 +1587,14 @@ TEST_F(ParameterIndexProviderTest, IndependentGroupsDoNotShareDependencyLanes) {
         AddFileEntry(index.get(), IREE_SV("first"), 0, 4, file.get()));
     IREE_ASSERT_OK(
         AddFileEntry(index.get(), IREE_SV("second"), 4, 4, file.get()));
+    IREE_ASSERT_OK(
+        AddFileEntry(index.get(), IREE_SV("third"), 0, 4, other_file.get()));
     Ref<iree_io_parameter_provider_t, iree_io_parameter_provider_release>
         provider;
     IREE_ASSERT_OK(iree_io_parameter_index_provider_create(
         IREE_SV("model"), index.get(), /*max_concurrent_operations=*/1,
         iree_allocator_system(), provider.out()));
-    std::array<Ref<iree_hal_buffer_t, iree_hal_buffer_release>, 2> buffers;
+    std::array<Ref<iree_hal_buffer_t, iree_hal_buffer_release>, 3> buffers;
     for (size_t i = 0; i < buffers.size(); ++i) {
       buffers[i].reset(AllocateTransferBuffer(transfer_pool(), 4));
       const uint8_t pattern[] = {9, 10, 11, 12};
@@ -1590,7 +1602,7 @@ TEST_F(ParameterIndexProviderTest, IndependentGroupsDoNotShareDependencyLanes) {
                        iree_make_const_byte_span(pattern, sizeof(pattern)));
     }
     Ref<iree_hal_semaphore_t, iree_hal_semaphore_release> gate;
-    std::array<Ref<iree_hal_semaphore_t, iree_hal_semaphore_release>, 2> done;
+    std::array<Ref<iree_hal_semaphore_t, iree_hal_semaphore_release>, 3> done;
     IREE_ASSERT_OK(iree_hal_semaphore_create(
         device(), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
         IREE_HAL_SEMAPHORE_FLAG_DEFAULT, gate.out()));
@@ -1601,35 +1613,64 @@ TEST_F(ParameterIndexProviderTest, IndependentGroupsDoNotShareDependencyLanes) {
     }
     uint64_t value = 1;
     auto* gate_ptr = gate.get();
-    iree_hal_semaphore_t* done_ptrs[] = {done[0].get(), done[1].get()};
-    const ParameterRequest requests[] = {{IREE_SV("first"), {0, 0, 4}},
-                                         {IREE_SV("second"), {0, 0, 4}}};
-    iree_io_parameter_gather_t gathers[2] = {};
-    iree_io_parameter_scatter_t scatters[2] = {};
-    for (size_t i = 0; i < 2; ++i) {
+    iree_hal_semaphore_t* done_ptrs[] = {done[0].get(), done[1].get(),
+                                         done[2].get()};
+    ParameterRequest requests[] = {{IREE_SV("first"), {0, 0, 4}},
+                                   {IREE_SV("second"), {0, 0, 4}},
+                                   {IREE_SV("third"), {0, 0, 4}}};
+    struct Enumeration {
+      // Borrowed provider notified before resolving each group.
+      iree_io_parameter_provider_t* provider;
+      // Single parameter for this independently synchronized group.
+      ParameterRequest* request;
+    } enumerations[3];
+    iree_io_parameter_gather_t gathers[3] = {};
+    iree_io_parameter_scatter_t scatters[3] = {};
+    for (size_t i = 0; i < 3; ++i) {
       const iree_hal_semaphore_list_t waits =
           i ? iree_hal_semaphore_list_empty()
             : iree_hal_semaphore_list_t{1, &gate_ptr, &value};
       const iree_hal_semaphore_list_t signals = {1, &done_ptrs[i], &value};
+      enumerations[i] = {provider.get(), &requests[i]};
       const iree_io_parameter_enumerator_t enumerator = {
-          EnumerateParameterRequest,
-          const_cast<ParameterRequest*>(&requests[i])};
+          +[](void* user_data, iree_host_size_t ordinal,
+              iree_string_view_t* key,
+              iree_io_parameter_span_t* span) -> iree_status_t {
+            auto* state = static_cast<Enumeration*>(user_data);
+            IREE_RETURN_IF_ERROR(iree_io_parameter_provider_notify(
+                state->provider, IREE_IO_PARAMETER_PROVIDER_SIGNAL_LOW_MEMORY));
+            return EnumerateParameterRequest(state->request, ordinal, key,
+                                             span);
+          },
+          &enumerations[i]};
       gathers[i] = {IREE_SV("model"), buffers[i].get(), 1, enumerator, waits,
                     signals};
       scatters[i] = {IREE_SV("model"), buffers[i].get(), 1, enumerator, waits,
                      signals};
     }
+    SubmissionTrace trace(queue());
     if (scatter) {
       IREE_EXPECT_OK(iree_io_parameter_provider_scatter_batch(
-          provider.get(), device(), queue(), 2, scatters));
+          provider.get(), device(), trace.queue(), 3, scatters));
     } else {
       IREE_EXPECT_OK(iree_io_parameter_provider_gather_batch(
-          provider.get(), device(), queue(), 2, gathers));
+          provider.get(), device(), trace.queue(), 3, gathers));
+    }
+    // The first native read/write still owns its file, so address reuse cannot
+    // hide a re-import. Trimming between groups preserves the current binding
+    // while a change of raw file must select a different imported object.
+    const auto& submissions = trace.submissions();
+    EXPECT_EQ(submissions.size(), 3);
+    if (submissions.size() == 3) {
+      EXPECT_EQ(submissions[0].file, submissions[1].file);
+      EXPECT_NE(submissions[0].file, submissions[2].file);
     }
     // The later group completes while the earlier group's prerequisite is
     // still closed. No submission-order or shared-lane edge may prevent it.
     IREE_EXPECT_OK(iree_hal_semaphore_wait(
         done[1].get(), 1, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+    IREE_EXPECT_OK(iree_hal_semaphore_wait(
+        done[2].get(), 1, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
     uint64_t held_value = 0;
     IREE_EXPECT_OK(iree_hal_semaphore_query(done[0].get(), &held_value));
     EXPECT_EQ(held_value, 0);
@@ -1643,6 +1684,20 @@ TEST_F(ParameterIndexProviderTest, IndependentGroupsDoNotShareDependencyLanes) {
       ExpectBufferBytesEqual(buffers[1].get(),
                              iree_make_const_byte_span(bytes.data() + 4, 4));
     }
+    const uint8_t third_expected[] = {9, 10, 11, 12};
+    if (scatter) {
+      EXPECT_EQ(0, std::memcmp(other_bytes.data(), third_expected, 4));
+    } else {
+      ExpectBufferBytesEqual(
+          buffers[2].get(),
+          iree_make_const_byte_span(other_bytes.data(), other_bytes.size()));
+    }
+    // Drop every cache/index owner before releasing the outstanding native
+    // transfer. Its accepted capture alone protects the first backing file.
+    provider.reset();
+    index.reset();
+    file.reset();
+    other_file.reset();
     IREE_EXPECT_OK(iree_hal_semaphore_signal(gate.get(), 1, nullptr));
     IREE_EXPECT_OK(iree_hal_semaphore_wait(
         done[0].get(), 1, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));

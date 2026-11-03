@@ -127,6 +127,17 @@ static iree_hal_queue_family_affinity_t iree_io_parameter_queue_family_affinity(
       iree_hal_queue_family_ordinal(iree_hal_queue_family(queue)));
 }
 
+// An operation fixes its provider, device, family, access, and import flags.
+// Keep its current file imported across parameter spans and independently
+// synchronized groups. The retained file survives concurrent cache trimming;
+// each submitted transfer captures its own reference before the operation ends.
+typedef struct iree_io_parameter_file_binding_t {
+  // Raw identity borrowed from the provider's retained, insert-only index.
+  iree_io_file_handle_t* handle;
+  // Current imported file, retained until replacement or operation completion.
+  iree_hal_file_t* file;
+} iree_io_parameter_file_binding_t;
+
 // Resolves a parameter with |key| for use on the given |device|.
 // Returns the entry containing the parameter metadata and a retained
 // HAL file that stores it (must be released by the caller).
@@ -134,7 +145,8 @@ static iree_hal_queue_family_affinity_t iree_io_parameter_queue_family_affinity(
 // file will be NULL.
 static iree_status_t iree_io_parameter_index_provider_resolve(
     iree_io_parameter_index_provider_t* provider, iree_hal_device_t* device,
-    iree_hal_queue_t* queue, iree_string_view_t scope, iree_string_view_t key,
+    iree_hal_queue_t* queue, iree_io_parameter_file_binding_t* binding,
+    iree_string_view_t scope, iree_string_view_t key,
     iree_hal_memory_access_t access,
     const iree_io_parameter_index_entry_t** out_entry,
     iree_hal_file_t** out_file) {
@@ -157,12 +169,19 @@ static iree_status_t iree_io_parameter_index_provider_resolve(
     // import the exact parameter range through their caller-provided pool;
     // attaching the entire backing allocation here would duplicate that route
     // and give the cache a different memory contract from the emitted buffer.
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_file_cache_lookup(
-                provider->file_cache, device, /*storage_pool=*/NULL,
-                iree_io_parameter_queue_family_affinity(queue), access,
-                entry->storage.file.handle, IREE_HAL_EXTERNAL_FILE_FLAG_NONE,
-                &file));
+    if (binding->handle != entry->storage.file.handle) {
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, iree_hal_file_cache_lookup(
+                  provider->file_cache, device, /*storage_pool=*/NULL,
+                  iree_io_parameter_queue_family_affinity(queue), access,
+                  entry->storage.file.handle, IREE_HAL_EXTERNAL_FILE_FLAG_NONE,
+                  &file));
+      iree_hal_file_release(binding->file);
+      binding->handle = entry->storage.file.handle;
+      binding->file = file;
+    }
+    file = binding->file;
+    iree_hal_file_retain(file);
   }
 
   *out_entry = entry;
@@ -349,9 +368,9 @@ static iree_status_t iree_io_parameter_op_batch_begin(
 // caller if set.
 static iree_status_t iree_io_parameter_index_provider_resolve_entry(
     iree_io_parameter_index_provider_t* provider, iree_hal_device_t* device,
-    iree_hal_queue_t* queue, iree_string_view_t scope,
-    iree_io_parameter_enumerator_t enumerator, iree_host_size_t i,
-    iree_hal_memory_access_t access,
+    iree_hal_queue_t* queue, iree_io_parameter_file_binding_t* binding,
+    iree_string_view_t scope, iree_io_parameter_enumerator_t enumerator,
+    iree_host_size_t i, iree_hal_memory_access_t access,
     const iree_io_parameter_index_entry_t** IREE_RESTRICT out_entry,
     iree_io_parameter_span_t* IREE_RESTRICT out_span,
     iree_hal_file_t** IREE_RESTRICT out_file) {
@@ -371,7 +390,7 @@ static iree_status_t iree_io_parameter_index_provider_resolve_entry(
   const iree_io_parameter_index_entry_t* entry = NULL;
   iree_hal_file_t* file = NULL;  // retained, NULL if splat
   IREE_RETURN_IF_ERROR(iree_io_parameter_index_provider_resolve(
-      provider, device, queue, scope, key, access, &entry, &file));
+      provider, device, queue, binding, scope, key, access, &entry, &file));
 
   // Validate the parameter range is in-bounds.
   iree_status_t status = iree_io_validate_parameter_range(
@@ -773,6 +792,7 @@ static iree_status_t iree_io_parameter_index_provider_load(
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, count);
 
   // Initialize the batch state.
+  iree_io_parameter_file_binding_t binding = {0};
   iree_io_parameter_op_batch_t batch;
   iree_status_t status = iree_io_parameter_op_batch_begin(
       provider, device, queue, wait_semaphore_list, signal_semaphore_list,
@@ -789,7 +809,7 @@ static iree_status_t iree_io_parameter_index_provider_load(
     iree_io_parameter_span_t span;
     iree_hal_file_t* source_file = NULL;  // retained, NULL if splat
     status = iree_io_parameter_index_provider_resolve_entry(
-        provider, device, queue, source_scope, enumerator, i,
+        provider, device, queue, &binding, source_scope, enumerator, i,
         IREE_HAL_MEMORY_ACCESS_READ, &source_entry, &span, &source_file);
     if (iree_status_is_ok(status)) {
       IREE_TRACE_ZONE_APPEND_TEXT(z_entry, source_entry->key.data,
@@ -946,14 +966,15 @@ static iree_status_t iree_io_parameter_index_provider_load(
 
   // Flush any outstanding batch operations and end the batch.
   status = iree_io_parameter_op_batch_end(&batch, NULL, status);
+  iree_hal_file_release(binding.file);
 
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
-static iree_status_t iree_io_parameter_index_provider_gather(
+static iree_status_t iree_io_parameter_index_provider_gather_group(
     iree_io_parameter_provider_t* base_provider, iree_hal_device_t* device,
-    iree_hal_queue_t* queue,
+    iree_hal_queue_t* queue, iree_io_parameter_file_binding_t* binding,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_string_view_t source_scope, iree_hal_buffer_t* target_buffer,
@@ -981,7 +1002,7 @@ static iree_status_t iree_io_parameter_index_provider_gather(
     iree_io_parameter_span_t span;
     iree_hal_file_t* source_file = NULL;  // retained, NULL if splat
     status = iree_io_parameter_index_provider_resolve_entry(
-        provider, device, queue, source_scope, enumerator, i,
+        provider, device, queue, binding, source_scope, enumerator, i,
         IREE_HAL_MEMORY_ACCESS_READ, &source_entry, &span, &source_file);
     if (iree_status_is_ok(status)) {
       IREE_TRACE_ZONE_APPEND_TEXT(z_entry, source_entry->key.data,
@@ -1075,12 +1096,13 @@ static iree_status_t iree_io_parameter_index_provider_gather_batch(
 
   // Each group owns its timelines: unrelated incoming waits must not become
   // prerequisites of another group through a shared scheduling lane.
+  iree_io_parameter_file_binding_t binding = {0};
   iree_host_size_t submitted_count = 0;
   for (; submitted_count < gather_count && iree_status_is_ok(status);
        ++submitted_count) {
     const iree_io_parameter_gather_t* group = &gathers[submitted_count];
-    status = iree_io_parameter_index_provider_gather(
-        provider, device, queue, group->wait_semaphore_list,
+    status = iree_io_parameter_index_provider_gather_group(
+        provider, device, queue, &binding, group->wait_semaphore_list,
         group->signal_semaphore_list, group->source_scope, group->target_buffer,
         group->count, group->enumerator);
   }
@@ -1092,13 +1114,33 @@ static iree_status_t iree_io_parameter_index_provider_gather_batch(
                                    iree_status_clone(status));
     }
   }
+  iree_hal_file_release(binding.file);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
-static iree_status_t iree_io_parameter_index_provider_scatter(
-    iree_io_parameter_provider_t* base_provider, iree_hal_device_t* device,
+static iree_status_t iree_io_parameter_index_provider_gather(
+    iree_io_parameter_provider_t* provider, iree_hal_device_t* device,
     iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_string_view_t source_scope, iree_hal_buffer_t* target_buffer,
+    iree_host_size_t count, iree_io_parameter_enumerator_t enumerator) {
+  const iree_io_parameter_gather_t gather = {
+      .source_scope = source_scope,
+      .target_buffer = target_buffer,
+      .count = count,
+      .enumerator = enumerator,
+      .wait_semaphore_list = wait_semaphore_list,
+      .signal_semaphore_list = signal_semaphore_list,
+  };
+  return iree_io_parameter_index_provider_gather_batch(provider, device, queue,
+                                                       1, &gather);
+}
+
+static iree_status_t iree_io_parameter_index_provider_scatter_group(
+    iree_io_parameter_provider_t* base_provider, iree_hal_device_t* device,
+    iree_hal_queue_t* queue, iree_io_parameter_file_binding_t* binding,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* source_buffer, iree_string_view_t target_scope,
@@ -1126,7 +1168,7 @@ static iree_status_t iree_io_parameter_index_provider_scatter(
     iree_io_parameter_span_t span;
     iree_hal_file_t* target_file = NULL;  // retained, NULL if splat
     status = iree_io_parameter_index_provider_resolve_entry(
-        provider, device, queue, target_scope, enumerator, i,
+        provider, device, queue, binding, target_scope, enumerator, i,
         IREE_HAL_MEMORY_ACCESS_WRITE, &target_entry, &span, &target_file);
     if (iree_status_is_ok(status)) {
       IREE_TRACE_ZONE_APPEND_TEXT(z_entry, target_entry->key.data,
@@ -1200,12 +1242,13 @@ static iree_status_t iree_io_parameter_index_provider_scatter_batch(
 
   // Each group owns its timelines: unrelated incoming waits must not become
   // prerequisites of another group through a shared scheduling lane.
+  iree_io_parameter_file_binding_t binding = {0};
   iree_host_size_t submitted_count = 0;
   for (; submitted_count < scatter_count && iree_status_is_ok(status);
        ++submitted_count) {
     const iree_io_parameter_scatter_t* group = &scatters[submitted_count];
-    status = iree_io_parameter_index_provider_scatter(
-        provider, device, queue, group->wait_semaphore_list,
+    status = iree_io_parameter_index_provider_scatter_group(
+        provider, device, queue, &binding, group->wait_semaphore_list,
         group->signal_semaphore_list, group->source_buffer, group->target_scope,
         group->count, group->enumerator);
   }
@@ -1217,8 +1260,28 @@ static iree_status_t iree_io_parameter_index_provider_scatter_batch(
                                    iree_status_clone(status));
     }
   }
+  iree_hal_file_release(binding.file);
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+static iree_status_t iree_io_parameter_index_provider_scatter(
+    iree_io_parameter_provider_t* provider, iree_hal_device_t* device,
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* source_buffer, iree_string_view_t target_scope,
+    iree_host_size_t count, iree_io_parameter_enumerator_t enumerator) {
+  const iree_io_parameter_scatter_t scatter = {
+      .source_buffer = source_buffer,
+      .target_scope = target_scope,
+      .count = count,
+      .enumerator = enumerator,
+      .wait_semaphore_list = wait_semaphore_list,
+      .signal_semaphore_list = signal_semaphore_list,
+  };
+  return iree_io_parameter_index_provider_scatter_batch(provider, device, queue,
+                                                        1, &scatter);
 }
 
 static const iree_io_parameter_provider_vtable_t
