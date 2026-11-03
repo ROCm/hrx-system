@@ -468,7 +468,6 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
   };
   IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(
       request, native_module, options.function_symbol_name, &frame_options,
-      /*allocation_fixed_specs=*/NULL, /*allocation_fixed_spec_count=*/0,
       &spill_free_options, &frame, &frame_accepted));
   if (request->diagnostic_collector != NULL &&
       loom_check_diagnostic_collector_has_error(

@@ -1463,14 +1463,6 @@ TEST_F(ExecuteTest, UnknownEmitTargetListsProviderTargets) {
   loom_check_result_deinitialize(&result);
 }
 
-TEST_F(ExecuteTest, ScheduleOptionsRejectNativePressureOverrides) {
-  ExpectFirstFailsWithDetail("// RUN: emit low-schedule-json @f test.i32=10\n",
-                             "unknown low-schedule-json option 'test.i32'");
-  ExpectFirstFailsWithDetail(
-      "// RUN: emit low-schedule-json @f cliff=test.i32:8:4:3\n",
-      "unknown low-schedule-json option 'cliff'");
-}
-
 TEST_F(ExecuteTest, XfailDoesNotHideRequiresHarnessFailure) {
   loom_check_result_t result;
   IREE_ASSERT_OK(

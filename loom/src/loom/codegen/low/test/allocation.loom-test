@@ -587,16 +587,6 @@ low.func.def target<test.low.core>(@test_target) @low_allocation_symbol_anchor(%
 }
 // ====
 
-// RUN: emit low-allocation-query @unknown_fixed_value_selector fixed=%missing:target_id:0:1
-
-test.target<low_core> @test_target
-
-// ERROR@+1: BACKEND/037 {function_name="unknown_fixed_value_selector", value_name="missing"}
-low.func.def target<test.low.core>(@test_target) @unknown_fixed_value_selector(%value: reg<test.i32>) -> (reg<test.i32>) asm {
-  return %value
-}
-// ====
-
 // RUN: emit low-allocation-query @unspillable_interval_exceeds_budget_reports_failure failure
 
 test.target<low_core> @test_target
