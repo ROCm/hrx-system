@@ -1790,12 +1790,6 @@ static iree_status_t loom_amdgpu_encode_call_packet(
   }
 
   loom_amdgpu_encoding_packet_t encoded_packet;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_s_mov_b64_from_exec(
-      state->inputs.encoding_table, LOOM_AMDGPU_CALL_ABI_SAVED_EXEC_BASE,
-      &encoded_packet));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_append_call_control_packet(
-      state, &encoded_packet, instruction_offset++, /*out_packet_end=*/NULL));
-
   IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_s_getpc_b64(
       state->inputs.encoding_table, LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE,
       &encoded_packet));
@@ -1829,12 +1823,6 @@ static iree_status_t loom_amdgpu_encode_call_packet(
   IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_s_swappc_b64(
       state->inputs.encoding_table, LOOM_AMDGPU_CALL_ABI_RETURN_ADDRESS_BASE,
       LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE, &encoded_packet));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_append_call_control_packet(
-      state, &encoded_packet, instruction_offset++, /*out_packet_end=*/NULL));
-
-  IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_s_mov_b64_to_exec(
-      state->inputs.encoding_table, LOOM_AMDGPU_CALL_ABI_SAVED_EXEC_BASE,
-      &encoded_packet));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_call_control_packet(
       state, &encoded_packet, instruction_offset++, /*out_packet_end=*/NULL));
 

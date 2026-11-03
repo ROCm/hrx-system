@@ -3184,13 +3184,7 @@ static iree_status_t loom_amdgpu_append_call_packet(
   IREE_ASSERT_EQ(emit_state->traversal.current_vgpr_msb_mode, 0);
 
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      context->builder, "s_mov_b64 s[%" PRIu32 ":%" PRIu32 "], exec",
-      (uint32_t)LOOM_AMDGPU_CALL_ABI_SAVED_EXEC_BASE,
-      (uint32_t)LOOM_AMDGPU_CALL_ABI_SAVED_EXEC_BASE + 1u));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_append_wait_states_after_instruction(
-      emit_state, context, ++instruction_offset));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      context->builder, "\n  s_getpc_b64 s[%" PRIu32 ":%" PRIu32 "]",
+      context->builder, "s_getpc_b64 s[%" PRIu32 ":%" PRIu32 "]",
       (uint32_t)LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE,
       (uint32_t)LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE + 1u));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_wait_states_after_instruction(
@@ -3222,12 +3216,6 @@ static iree_status_t loom_amdgpu_append_call_packet(
       (uint32_t)LOOM_AMDGPU_CALL_ABI_RETURN_ADDRESS_BASE + 1u,
       (uint32_t)LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE,
       (uint32_t)LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE + 1u));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_append_wait_states_after_instruction(
-      emit_state, context, ++instruction_offset));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      context->builder, "\n  s_mov_b64 exec, s[%" PRIu32 ":%" PRIu32 "]",
-      (uint32_t)LOOM_AMDGPU_CALL_ABI_SAVED_EXEC_BASE,
-      (uint32_t)LOOM_AMDGPU_CALL_ABI_SAVED_EXEC_BASE + 1u));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_wait_states_after_instruction(
       emit_state, context, ++instruction_offset));
 

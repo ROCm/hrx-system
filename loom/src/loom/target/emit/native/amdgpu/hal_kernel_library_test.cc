@@ -838,11 +838,11 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsPrivateLeafCallInKernelProgram) {
   std::string listing;
   IREE_ASSERT_OK(
       CloneByteSequenceToString(library.target_listing_data, &listing));
-  EXPECT_NE(listing.find("s_add_u32 s34, s34, @leaf@rel32_lo"),
+  EXPECT_NE(listing.find("s_add_u32 s32, s32, @leaf@rel32_lo"),
             std::string::npos);
-  EXPECT_NE(listing.find("s_addc_u32 s35, s35, @leaf@rel32_hi"),
+  EXPECT_NE(listing.find("s_addc_u32 s33, s33, @leaf@rel32_hi"),
             std::string::npos);
-  EXPECT_NE(listing.find("s_swappc_b64 s[30:31], s[34:35]"), std::string::npos);
+  EXPECT_NE(listing.find("s_swappc_b64 s[30:31], s[32:33]"), std::string::npos);
   EXPECT_NE(listing.find(".type leaf,@function\nleaf:\n"), std::string::npos);
   EXPECT_NE(listing.find("s_setpc_b64 s[30:31]"), std::string::npos);
 
@@ -859,12 +859,12 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsPrivateLeafCallInKernelProgram) {
   ASSERT_GE(entry.value, text.address);
   const size_t entry_file_offset =
       (size_t)(text.offset + (entry.value - text.address));
-  ASSERT_EQ(entry.size, 40u);
+  ASSERT_EQ(entry.size, 32u);
   ASSERT_LE(entry_file_offset + entry.size, hsaco.size());
-  // S_GETPC_B64 captures entry byte 8. The private leaf starts at byte 36,
-  // so the paired literal adds must receive the exact 28-byte displacement.
-  EXPECT_EQ(LoadLeU32(hsaco, entry_file_offset + 12u), 28u);
-  EXPECT_EQ(LoadLeU32(hsaco, entry_file_offset + 20u), 0u);
+  // S_GETPC_B64 captures entry byte 4. The private leaf starts at byte 28,
+  // so the paired literal adds receive the exact 24-byte displacement.
+  EXPECT_EQ(LoadLeU32(hsaco, entry_file_offset + 8u), 24u);
+  EXPECT_EQ(LoadLeU32(hsaco, entry_file_offset + 16u), 0u);
 
   loom_amdgpu_hal_kernel_library_deinitialize(&library,
                                               iree_allocator_system());

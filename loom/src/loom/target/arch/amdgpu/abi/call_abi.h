@@ -17,6 +17,9 @@
 extern "C" {
 #endif
 
+// A callable helper returns with the exact EXEC mask it received. Structured
+// AMDGPU control lowering restores the incoming mask at every function exit;
+// authored target assembly follows the same callee-preserved ABI contract.
 enum {
   // SGPR4-SGPR29 carry scalar arguments and results. The remaining low SGPRs
   // are available to the helper body or reserved for call control below.
@@ -27,17 +30,15 @@ enum {
   LOOM_AMDGPU_CALL_ABI_VGPR_COUNT = 32,
   // SGPR30:31 hold the return address written by S_SWAPPC_B64.
   LOOM_AMDGPU_CALL_ABI_RETURN_ADDRESS_BASE = 30,
-  // SGPR32:33 preserve the caller's EXEC mask across the call.
-  LOOM_AMDGPU_CALL_ABI_SAVED_EXEC_BASE = 32,
-  // SGPR34:35 hold the resolved callee PC at a direct call.
-  LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE = 34,
+  // SGPR32:33 hold the resolved callee PC at a direct call.
+  LOOM_AMDGPU_CALL_ABI_CALL_TARGET_BASE = 32,
   // Contiguous SGPR range unavailable to ordinary allocation in every
   // function participating in a direct-call program.
   LOOM_AMDGPU_CALL_ABI_RESERVED_SGPR_BASE = 30,
-  LOOM_AMDGPU_CALL_ABI_RESERVED_SGPR_COUNT = 6,
+  LOOM_AMDGPU_CALL_ABI_RESERVED_SGPR_COUNT = 4,
   // Native scalar instructions in one direct call around the opaque callee:
-  // save EXEC, form the callee PC, transfer control, and restore EXEC.
-  LOOM_AMDGPU_CALL_ABI_CALL_CONTROL_INSTRUCTION_COUNT = 6,
+  // form the callee PC and transfer control. EXEC is callee-preserved.
+  LOOM_AMDGPU_CALL_ABI_CALL_CONTROL_INSTRUCTION_COUNT = 4,
 };
 
 // Register-bank demand for one side of a direct-call boundary.

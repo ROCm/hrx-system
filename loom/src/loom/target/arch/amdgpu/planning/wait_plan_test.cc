@@ -656,8 +656,8 @@ TEST_F(AmdgpuWaitPlanTest, DirectCallDrainsOutstandingCounterWork) {
           LOOM_AMDGPU_STRUCTURAL_PACKET_ANALYSIS_FLAG_REQUIRE_ALLOCATION);
   EXPECT_TRUE(iree_any_bit_set(structural.flags,
                                LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_CALL));
-  EXPECT_EQ(structural.instruction_count, 6u);
-  EXPECT_EQ(structural.scalar_alu_instruction_count, 6u);
+  EXPECT_EQ(structural.instruction_count, 4u);
+  EXPECT_EQ(structural.scalar_alu_instruction_count, 4u);
   EXPECT_EQ(loom_amdgpu_structural_packet_call_boundary_offset(&structural),
             0u);
   EXPECT_EQ(loom_amdgpu_structural_packet_call_arguments(&structural), nullptr);

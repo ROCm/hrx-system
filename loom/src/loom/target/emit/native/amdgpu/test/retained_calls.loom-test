@@ -29,12 +29,10 @@ loom_kernel:
   s_nop 2
   v_mov_b32 v0, v2
   s_nop 2
-  s_mov_b64 s[32:33], exec
-  s_getpc_b64 s[34:35]
-  s_add_u32 s34, s34, @increment@rel32_lo
-  s_addc_u32 s35, s35, @increment@rel32_hi
-  s_swappc_b64 s[30:31], s[34:35]
-  s_mov_b64 exec, s[32:33]
+  s_getpc_b64 s[32:33]
+  s_add_u32 s32, s32, @increment@rel32_lo
+  s_addc_u32 s33, s33, @increment@rel32_hi
+  s_swappc_b64 s[30:31], s[32:33]
   v_add_u32 v0, v2, v0
   s_endpgm
 
@@ -71,7 +69,7 @@ increment:
   .amdhsa_system_sgpr_workgroup_info 0
   .amdhsa_system_vgpr_workitem_id 0
   .amdhsa_next_free_vgpr 3
-  .amdhsa_next_free_sgpr 36
+  .amdhsa_next_free_sgpr 34
   .amdhsa_reserve_vcc 0
   .amdhsa_float_round_mode_32 0
   .amdhsa_float_round_mode_16_64 0
@@ -107,7 +105,7 @@ increment:
       .private_segment_fixed_size: 0
       .kernarg_segment_align: 8
       .wavefront_size: 32
-      .sgpr_count: 36
+      .sgpr_count: 34
       .vgpr_count: 3
       .max_flat_workgroup_size: 64
       .reqd_workgroup_size:
