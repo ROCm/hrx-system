@@ -513,8 +513,10 @@ TEST_F(CpuStreamingContextTest, DirectRecordsOnAnUntimedDeviceGoUntimed) {
       context_, IREE_HAL_STREAMING_EVENT_FLAG_NONE, iree_allocator_system(),
       &stop));
 
-  IREE_ASSERT_OK(iree_hal_streaming_event_record(start, stream));
-  IREE_ASSERT_OK(iree_hal_streaming_event_record(stop, stream));
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(
+      start, stream, /*capture_external_record=*/false));
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(
+      stop, stream, /*capture_external_record=*/false));
   IREE_ASSERT_OK(iree_hal_streaming_event_synchronize(stop));
 
   EXPECT_EQ(nullptr, context_->timestamp_pool.slabs)
@@ -632,7 +634,8 @@ TEST_F(CpuStreamingContextTest, ContextWaitOrdersCurrentAndLaterStreams) {
   IREE_ASSERT_OK(iree_hal_streaming_event_create(
       context_, IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
       iree_allocator_system(), &event));
-  IREE_ASSERT_OK(iree_hal_streaming_event_record(event, source_stream));
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(
+      event, source_stream, /*capture_external_record=*/false));
   IREE_ASSERT_OK(iree_hal_streaming_context_wait_event(context_, event));
 
   IREE_ASSERT_OK(CreateNonBlockingStream(context_, &later_stream));
@@ -689,7 +692,8 @@ TEST_F(CpuStreamingContextTest, CrossContextWaitOrdersCurrentAndLaterStreams) {
   IREE_ASSERT_OK(iree_hal_streaming_event_create(
       context_, IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
       iree_allocator_system(), &event));
-  IREE_ASSERT_OK(iree_hal_streaming_event_record(event, source_stream));
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(
+      event, source_stream, /*capture_external_record=*/false));
   IREE_ASSERT_OK(iree_hal_streaming_context_wait_event(target_context, event));
 
   IREE_ASSERT_OK(CreateNonBlockingStream(target_context, &later_stream));

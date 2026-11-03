@@ -124,6 +124,16 @@ void iree_hal_streaming_event_release(iree_hal_streaming_event_t* event) {
   }
 }
 
+void iree_hal_streaming_event_clear_capture(iree_hal_streaming_event_t* event) {
+  iree_slim_mutex_lock(&event->mutex);
+  iree_hal_streaming_graph_t* graph = event->capture_graph;
+  event->capture_graph = NULL;
+  event->capture_id = 0;
+  event->capture_dependency_count = 0;
+  iree_slim_mutex_unlock(&event->mutex);
+  iree_hal_streaming_graph_release(graph);
+}
+
 void iree_hal_streaming_event_acquire_recorded_point(
     iree_hal_streaming_event_t* event,
     iree_hal_streaming_recorded_point_t* out_point) {
@@ -474,18 +484,19 @@ iree_status_t iree_hal_streaming_event_enqueue_record(
 }
 
 iree_status_t iree_hal_streaming_event_record(
-    iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream) {
+    iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream,
+    bool capture_external_record) {
   IREE_ASSERT_ARGUMENT(event);
   IREE_ASSERT_ARGUMENT(stream);
   IREE_TRACE_ZONE_BEGIN(z0);
 
   bool was_capturing = false;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_capture_try_record_event(stream, event,
-                                                      &was_capturing));
+      z0, iree_hal_streaming_capture_try_record_event(
+              stream, event, capture_external_record, &was_capturing));
   if (was_capturing) {
-    // A captured record produces no submission, so it leaves the recorded
-    // point alone and atomically replaces only the captured session frontier.
+    // Neither captured form submits work here. Both atomically replace the
+    // captured session frontier.
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }

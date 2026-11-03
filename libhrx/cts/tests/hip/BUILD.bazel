@@ -99,6 +99,18 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
+    name = "hip_event_record_flags_test",
+    srcs = ["event_record_flags_test.cpp"],
+    data = [_HIP_RUNTIME],
+    env = _HIP_RUNTIME_ENV,
+    resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
+    sanitizer_suppressions = hsa_suppressions,
+    tags = AMD_GPU_CTS_TAGS,
+    target_compatible_with = _HIP_GPU_CTS_COMPATIBILITY,
+    deps = ["//libhrx/src/binding/hip:hip_dso_test_util"] + _HIP_TEST_DEPS,
+)
+
+hrx_cc_test(
     name = "hip_event_timing_test",
     srcs = [
         "event_timing_test.cpp",

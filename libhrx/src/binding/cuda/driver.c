@@ -1145,9 +1145,9 @@ CUDAAPI CUresult cuEventCreate(CUevent* phEvent, unsigned int Flags) {
 
 CUDAAPI CUresult cuEventRecord(CUevent hEvent, CUstream hStream) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_status_t status =
-      iree_hal_streaming_event_record((iree_hal_streaming_event_t*)hEvent,
-                                      (iree_hal_streaming_stream_t*)hStream);
+  iree_status_t status = iree_hal_streaming_event_record(
+      (iree_hal_streaming_event_t*)hEvent,
+      (iree_hal_streaming_stream_t*)hStream, /*capture_external_record=*/false);
   CUresult result = iree_event_record_status_to_cu_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
@@ -1175,6 +1175,9 @@ CUDAAPI CUresult cuEventSynchronize(CUevent hEvent) {
 
 CUDAAPI CUresult cuEventDestroy(CUevent hEvent) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  if (hEvent) {
+    iree_hal_streaming_event_clear_capture((iree_hal_streaming_event_t*)hEvent);
+  }
   iree_hal_streaming_event_release((iree_hal_streaming_event_t*)hEvent);
   IREE_TRACE_ZONE_END(z0);
   return CUDA_SUCCESS;

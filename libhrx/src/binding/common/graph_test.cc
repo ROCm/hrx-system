@@ -1111,7 +1111,8 @@ TEST(GraphTest, CapturedEventWaitUsesAtomicSessionFrontierSnapshot) {
   IREE_ASSERT_OK(iree_hal_streaming_event_create(
       state.context(), IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
       allocator.AsAllocator(), &event));
-  IREE_ASSERT_OK(iree_hal_streaming_event_record(event, state.origin()));
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(
+      event, state.origin(), /*capture_external_record=*/false));
   allocator.block_next_allocation.store(true, std::memory_order_release);
 
   std::atomic<bool> wait_completed = false;
@@ -1148,8 +1149,8 @@ TEST(GraphTest, CapturedEventWaitUsesAtomicSessionFrontierSnapshot) {
   std::atomic<bool> record_completed = false;
   std::atomic<iree_status_code_t> record_status_code = IREE_STATUS_UNKNOWN;
   std::thread record_thread([&] {
-    iree_status_t status =
-        iree_hal_streaming_event_record(event, state.waiter());
+    iree_status_t status = iree_hal_streaming_event_record(
+        event, state.waiter(), /*capture_external_record=*/false);
     record_status_code.store(iree_status_code(status),
                              std::memory_order_release);
     iree_status_ignore(status);
@@ -1193,7 +1194,8 @@ TEST(GraphTest, StaleCapturedEventCannotAffectReusedGraphSession) {
   IREE_ASSERT_OK(iree_hal_streaming_event_create(
       state.context(), IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
       iree_allocator_system(), &event));
-  IREE_ASSERT_OK(iree_hal_streaming_event_record(event, state.origin()));
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(
+      event, state.origin(), /*capture_external_record=*/false));
   unsigned long long stale_capture_id = 0;
   iree_hal_streaming_graph_t* event_graph =
       iree_hal_streaming_event_acquire_capture_graph(event, &stale_capture_id);

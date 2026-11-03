@@ -863,15 +863,6 @@ HIPAPI hipError_t hipDrvMemcpy2DUnaligned(const hip_Memcpy2D* pCopy) {
   HIP_RETURN_ERROR(result == hipErrorNotFound ? hipErrorInvalidValue : result);
 }
 
-HIPAPI hipError_t hipEventRecordWithFlags(hipEvent_t event, hipStream_t stream,
-                                          unsigned int flags) {
-  HIP_API_BEGIN();
-  (void)event;
-  (void)stream;
-  (void)flags;
-  HIP_RETURN_ERROR(hipErrorNotSupported);
-}
-
 HIPAPI hipError_t hipExternalMemoryGetMappedBuffer(
     void** devPtr, hipExternalMemory_t extMem,
     const hipExternalMemoryBufferDesc* bufferDesc) {

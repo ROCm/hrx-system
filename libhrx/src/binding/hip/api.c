@@ -14131,6 +14131,7 @@ HIPAPI hipError_t hipEventDestroy(hipEvent_t event) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidResourceHandle);
   }
+  iree_hal_streaming_event_clear_capture((iree_hal_streaming_event_t*)event);
   iree_hal_streaming_event_release((iree_hal_streaming_event_t*)event);
   IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(hipSuccess);
@@ -14186,15 +14187,18 @@ HIPAPI hipError_t hipEventDestroy(hipEvent_t event) {
 //
 // Note: Use hipEventElapsedTime() to measure the interval between two records;
 // records made on different streams of one device share a clock.
-HIPAPI hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
-  HIP_API_BEGIN();
+static hipError_t iree_hip_event_record(hipEvent_t event, hipStream_t stream,
+                                        unsigned int flags) {
+  if (flags != hipEventRecordDefault && flags != hipEventRecordExternal) {
+    return hipErrorInvalidValue;
+  }
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_streaming_event_t* event_object = NULL;
   hipError_t event_result = iree_hip_event_lookup_retain(event, &event_object);
   if (event_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(event_result);
+    return event_result;
   }
 
   iree_hip_resolved_stream_t resolved_stream = {0};
@@ -14203,23 +14207,35 @@ HIPAPI hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
   if (init_result != hipSuccess) {
     iree_hal_streaming_event_release(event_object);
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
+    return init_result;
   }
 
   if (event_object->context != resolved_stream.context) {
     iree_hip_resolved_stream_release(&resolved_stream);
     iree_hal_streaming_event_release(event_object);
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidHandle);
+    return hipErrorInvalidHandle;
   }
 
-  iree_status_t status =
-      iree_hal_streaming_event_record(event_object, resolved_stream.stream);
+  iree_status_t status = iree_hal_streaming_event_record(
+      event_object, resolved_stream.stream, flags == hipEventRecordExternal);
   iree_hip_resolved_stream_release(&resolved_stream);
   iree_hal_streaming_event_release(event_object);
   hipError_t result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
-  HIP_RETURN_ERROR(result);
+  return result;
+}
+
+HIPAPI hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
+  HIP_API_BEGIN();
+  HIP_RETURN_ERROR(iree_hip_event_record(event, stream, hipEventRecordDefault));
+}
+
+// Records a stream point, or an explicit replayable node for external capture.
+HIPAPI hipError_t hipEventRecordWithFlags(hipEvent_t event, hipStream_t stream,
+                                          unsigned int flags) {
+  HIP_API_BEGIN();
+  HIP_RETURN_ERROR(iree_hip_event_record(event, stream, flags));
 }
 
 // Waits for an event to complete.
@@ -15770,8 +15786,8 @@ static hipError_t iree_hip_launch_event_record(
   if (!event) {
     return hipSuccess;
   }
-  return iree_status_to_hip_result(
-      iree_hal_streaming_event_record(event, stream));
+  return iree_status_to_hip_result(iree_hal_streaming_event_record(
+      event, stream, /*capture_external_record=*/false));
 }
 
 static hipError_t iree_hip_validate_launch_arguments_before_events(

@@ -187,6 +187,12 @@ iree_status_t iree_hal_streaming_event_create(
 void iree_hal_streaming_event_retain(iree_hal_streaming_event_t* event);
 void iree_hal_streaming_event_release(iree_hal_streaming_event_t* event);
 
+// Clears captured metadata when a binding retires the public event handle.
+// Graph nodes can retain the event for replay, so the handle must first drop
+// its reference back to the capture graph to avoid an ownership cycle.
+// Releases the captured graph outside the event mutex.
+void iree_hal_streaming_event_clear_capture(iree_hal_streaming_event_t* event);
+
 // Queries event status without waiting.
 iree_status_t iree_hal_streaming_event_query(iree_hal_streaming_event_t* event,
                                              int* status);
@@ -304,14 +310,18 @@ IREE_MUST_USE_RESULT iree_status_t iree_hal_streaming_event_enqueue_record(
 // there. |stream| must then belong to |event|'s context, or the record is
 // refused with IREE_STATUS_INCOMPATIBLE.
 //
-// A capturing stream is the exception on both counts. Such a record names the
-// stream's dependency frontier and no queue point, so nothing is flushed or
-// enqueued and it is accepted from any context. A binding may be stricter:
-// hipEventRecord holds a capturing stream to the context rule too, refusing
-// the pair before it reaches here.
+// A default captured record names the stream's dependency frontier and no
+// queue point, so nothing is flushed or enqueued and it is accepted from any
+// context. A binding may be stricter: hipEventRecord holds a capturing stream
+// to the context rule too, refusing the pair before it reaches here.
+// When |capture_external_record| is true, capture also adds an event-record
+// node that publishes a submitted event point on each graph launch. Such a
+// node requires the event's context to match the graph's. Outside capture,
+// both modes record the ordinary stream point.
 // Synchronization: stream flush (flushes a stream that is not capturing).
 iree_status_t iree_hal_streaming_event_record(
-    iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream);
+    iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream,
+    bool capture_external_record);
 
 // Waits until the event's last submitted record is signaled.
 iree_status_t iree_hal_streaming_event_synchronize(
