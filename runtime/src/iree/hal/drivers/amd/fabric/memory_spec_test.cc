@@ -106,8 +106,9 @@ class MemorySpecTest : public ::testing::Test {
       for (uint32_t i = 0; i < scope->info.memory_profile_count; ++i) {
         scope->profiles[i] = {
             .ordinal = i,
-            .memory_class = scope == &local_ ? AMDF_MEMORY_CLASS_LOCAL
-                                             : AMDF_MEMORY_CLASS_SYSTEM,
+            .memory_class = static_cast<amdf_memory_class_t>(
+                scope == &local_ ? AMDF_MEMORY_CLASS_LOCAL
+                                 : AMDF_MEMORY_CLASS_SYSTEM),
             .roles = AMDF_MEMORY_PROFILE_ROLE_CREATE |
                      AMDF_MEMORY_PROFILE_ROLE_HOST_MAP,
             .supported_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE |
