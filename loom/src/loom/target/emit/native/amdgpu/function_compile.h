@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/frame.h"
+#include "loom/target/arch/amdgpu/abi/call_abi.h"
 #include "loom/target/emit/native/amdgpu/function_plan.h"
 #include "loom/target/reporting/report.h"
 
@@ -47,6 +48,10 @@ typedef struct loom_amdgpu_function_compile_options_t {
   iree_host_size_t allocation_exit_location_count;
   // Callee convention facts consumed before allocation.
   loom_low_call_contract_provider_t call_contracts;
+  // Callee machine-state contracts consumed during packet planning.
+  loom_amdgpu_call_state_provider_t call_states;
+  // Whether this function participates as a callable helper.
+  bool callable;
   // Whole-function target-owned location ranges unavailable to allocation.
   const loom_low_allocation_reserved_range_t* allocation_reserved_ranges;
   // Number of entries in |allocation_reserved_ranges|.

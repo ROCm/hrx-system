@@ -568,6 +568,8 @@ static void loom_amdgpu_wait_classification_finish_nodes(
     }
     completion_node->producer_counter_mask |=
         frontier_node->read_counter_mask | frontier_node->write_counter_mask;
+    classification->produced_counter_mask |=
+        (loom_amdgpu_wait_counter_mask_t)completion_node->producer_counter_mask;
     completion_node->write_counter_mask = frontier_node->write_counter_mask;
     completion_node->reset_counter_mask =
         node_state->explicit_wait_counter_mask |

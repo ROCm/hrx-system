@@ -379,3 +379,21 @@ loom_low_call_contract_provider_t loom_amdgpu_program_call_table_provider(
       .user_data = table,
   };
 }
+
+static const loom_amdgpu_call_state_t*
+loom_amdgpu_program_call_table_query_state(void* user_data,
+                                           loom_symbol_ref_t callee) {
+  const loom_amdgpu_program_call_table_t* table = user_data;
+  IREE_ASSERT_EQ(callee.module_id, 0u);
+  IREE_ASSERT_LT(callee.symbol_id, table->symbol_count);
+  IREE_ASSERT(table->callables_by_symbol[callee.symbol_id] != NULL);
+  return &table->callables_by_symbol[callee.symbol_id]->call_state;
+}
+
+loom_amdgpu_call_state_provider_t loom_amdgpu_program_call_table_state_provider(
+    loom_amdgpu_program_call_table_t* table) {
+  return (loom_amdgpu_call_state_provider_t){
+      .query = loom_amdgpu_program_call_table_query_state,
+      .user_data = table,
+  };
+}

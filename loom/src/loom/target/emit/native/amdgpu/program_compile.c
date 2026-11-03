@@ -388,6 +388,7 @@ static iree_status_t loom_amdgpu_program_compile_retained(
         .allocation_exit_location_count = callable->call_contract.result_count,
         .allocation_reserved_ranges = &call_control_reservation,
         .allocation_reserved_range_count = 1,
+        .callable = true,
         .emitter = options->entry.emitter,
     };
     bool helper_compiled = false;
@@ -397,6 +398,8 @@ static iree_status_t loom_amdgpu_program_compile_retained(
     if (!helper_compiled) {
       return iree_ok_status();
     }
+    callable->call_state.counter_mask =
+        callable->compilation.plan.packet_plan.wait_plan.produced_counter_mask;
     IREE_RETURN_IF_ERROR(loom_amdgpu_program_callable_prepare_clobbers(
         descriptor_set, arena, scratch_arena, callable));
     loom_amdgpu_program_call_table_publish(&call_table, callable);
@@ -432,6 +435,8 @@ static iree_status_t loom_amdgpu_program_compile_retained(
       module, &options->entry, scratch_arena, &entry_options));
   entry_options.call_contracts =
       loom_amdgpu_program_call_table_provider(&call_table);
+  entry_options.call_states =
+      loom_amdgpu_program_call_table_state_provider(&call_table);
   entry_options.allocation_reserved_ranges = entry_reservations;
   entry_options.allocation_reserved_range_count = entry_reservation_count;
   bool entry_compiled = false;

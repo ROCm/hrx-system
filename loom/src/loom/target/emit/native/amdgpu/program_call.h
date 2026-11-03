@@ -48,6 +48,8 @@ typedef struct loom_amdgpu_program_callable_t {
   iree_host_size_t clobber_count;
   // Immutable call contract borrowing carriers and clobbers above.
   loom_low_call_contract_t call_contract;
+  // Independently planned machine state established at call boundaries.
+  loom_amdgpu_call_state_t call_state;
   // Native function compilation paired with this exact contract.
   loom_amdgpu_function_compilation_t compilation;
 } loom_amdgpu_program_callable_t;
@@ -95,6 +97,10 @@ void loom_amdgpu_program_call_table_publish(
 
 // Returns an allocation provider borrowing the published table.
 loom_low_call_contract_provider_t loom_amdgpu_program_call_table_provider(
+    loom_amdgpu_program_call_table_t* table);
+
+// Returns a machine-state provider borrowing the published table.
+loom_amdgpu_call_state_provider_t loom_amdgpu_program_call_table_state_provider(
     loom_amdgpu_program_call_table_t* table);
 
 #ifdef __cplusplus

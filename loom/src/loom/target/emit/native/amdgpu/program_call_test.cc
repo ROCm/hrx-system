@@ -11,6 +11,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/arch/amdgpu/planning/wait_counters.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/registers.h"
 
@@ -191,6 +192,8 @@ TEST_F(AmdgpuProgramCallTest, PublishesCarrierAndClobberContracts) {
   IREE_ASSERT_OK(loom_amdgpu_program_call_table_initialize(
       &descriptor_set_, module_->symbols.count, &arena_, &scratch_arena_,
       &table));
+  callable.call_state.counter_mask = LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD |
+                                     LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS;
   loom_amdgpu_program_call_table_publish(&table, &callable);
   const loom_low_call_contract_provider_t provider =
       loom_amdgpu_program_call_table_provider(&table);
@@ -206,6 +209,10 @@ TEST_F(AmdgpuProgramCallTest, PublishesCarrierAndClobberContracts) {
   EXPECT_EQ(common.values[2].register_class, LOOM_AMDGPU_REG_CLASS_ID_SGPR);
   EXPECT_EQ(common.values[2].location, LOOM_AMDGPU_CALL_ABI_RESERVED_SGPR_BASE);
   EXPECT_EQ(common.values[2].count, LOOM_AMDGPU_CALL_ABI_RESERVED_SGPR_COUNT);
+  const loom_amdgpu_call_state_provider_t state_provider =
+      loom_amdgpu_program_call_table_state_provider(&table);
+  EXPECT_EQ(state_provider.query(state_provider.user_data, function_ref_),
+            &callable.call_state);
 }
 
 TEST_F(AmdgpuProgramCallTest, EmptySignatureHasNoCarrierPointers) {

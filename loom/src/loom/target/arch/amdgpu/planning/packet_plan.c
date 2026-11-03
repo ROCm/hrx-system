@@ -13,6 +13,7 @@
 iree_status_t loom_amdgpu_packet_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
+    const loom_amdgpu_packet_plan_options_t* options,
     iree_arena_allocator_t* arena,
     loom_amdgpu_vopd_rejection_table_t* out_vopd_rejections,
     loom_amdgpu_packet_plan_t* out_plan) {
@@ -49,9 +50,15 @@ iree_status_t loom_amdgpu_packet_plan_build(
   if (iree_status_is_ok(status)) {
     const iree_arena_checkpoint_t wait_plan_checkpoint =
         iree_arena_checkpoint_save(&transient_arena);
+    const loom_amdgpu_wait_plan_options_t wait_options = {
+        .call_states = options != NULL ? options->call_states
+                                       : (loom_amdgpu_call_state_provider_t){0},
+        .callable = options != NULL && options->callable,
+    };
     status = loom_amdgpu_wait_plan_build(
-        schedule, allocation, &out_plan->address_state, &matrix_arena,
-        &matrix_results, arena, &transient_arena, &out_plan->wait_plan);
+        schedule, allocation, &wait_options, &out_plan->address_state,
+        &matrix_arena, &matrix_results, arena, &transient_arena,
+        &out_plan->wait_plan);
     iree_arena_checkpoint_restore(&wait_plan_checkpoint);
   }
   if (iree_status_is_ok(status)) {

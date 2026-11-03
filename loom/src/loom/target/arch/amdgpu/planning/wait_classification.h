@@ -124,6 +124,8 @@ typedef struct loom_amdgpu_wait_classification_t {
   iree_host_size_t matrix_result_node_count;
   // Union of native descriptor traits established by node classification.
   loom_amdgpu_descriptor_traits_t descriptor_traits;
+  // Union of logical counters produced anywhere in the function.
+  loom_amdgpu_wait_counter_mask_t produced_counter_mask;
   // Native DOT identities present in this function, retained for fixed waits.
   uint8_t dot_identity_mask;
 } loom_amdgpu_wait_classification_t;

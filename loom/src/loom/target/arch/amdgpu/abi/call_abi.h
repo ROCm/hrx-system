@@ -49,6 +49,26 @@ typedef struct loom_amdgpu_call_abi_requirements_t {
   uint16_t vgpr_count;
 } loom_amdgpu_call_abi_requirements_t;
 
+// Machine state contract for one independently planned callable helper.
+//
+// The caller establishes the named state before transferring control, and the
+// helper restores it before returning. State absent from this summary passes
+// through the call unchanged.
+typedef struct loom_amdgpu_call_state_t {
+  // Logical wait-counter bits the helper may issue. Each named counter is
+  // empty on helper entry and return.
+  uint8_t counter_mask;
+} loom_amdgpu_call_state_t;
+
+// Symbol-indexed call-state summaries available while planning one caller.
+typedef struct loom_amdgpu_call_state_provider_t {
+  // Returns the immutable state contract for |callee|.
+  const loom_amdgpu_call_state_t* (*query)(void* user_data,
+                                           loom_symbol_ref_t callee);
+  // Opaque value passed to |query|.
+  void* user_data;
+} loom_amdgpu_call_state_provider_t;
+
 // Adds the physical direct-call carrier required by one target-low type.
 // Returns false unless the type is an SGPR or VGPR range from |descriptor_set|
 // and the accumulated unit count remains representable.
