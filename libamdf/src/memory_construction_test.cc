@@ -577,12 +577,15 @@ TEST_F(MemoryConstructionTest, ReservationPairUsesAliasInsteadOfOwnerProtocol) {
   }
   EXPECT_EQ(device.create_call_count, 0u);
   EXPECT_EQ(device.import_call_count, 0u);
-  const auto original = pair;
   const auto expect_rejection = [&](amdf_status_code_t code) {
+    // Successful queries may replace the output between rejected requests.
+    // Snapshot its current bytes, including padding, before each rejection.
+    uint8_t original[sizeof(pair)];
+    std::memcpy(original, &pair, sizeof(pair));
     EXPECT_EQ(amdf_status_code(amdf_memory_scope_query_pair_info(
                   &instance_.system_memory_scope, &query, &pair)),
               code);
-    EXPECT_EQ(std::memcmp(&pair, &original, sizeof(pair)), 0);
+    EXPECT_EQ(std::memcmp(&pair, original, sizeof(pair)), 0);
     EXPECT_EQ(device.create_call_count, 0u);
     EXPECT_EQ(device.import_call_count, 0u);
   };
