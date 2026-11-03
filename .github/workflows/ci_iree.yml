@@ -822,7 +822,7 @@ jobs:
           retention-days: 7
 
   cmake_linux:
-    name: CMake / Linux x86-64 / GCC / RelWithDebInfo / Repository Build
+    name: CMake / Linux x86-64 / Clang / RelWithDebInfo / Repository Build
     concurrency:
       group: iree-cmake-linux-repository-build-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true
@@ -846,9 +846,9 @@ jobs:
         run: |
           output_dir="${GITHUB_WORKSPACE}/build/iree-cmake"
           {
-            echo "AR=ar"
-            echo "CC=gcc"
-            echo "CXX=g++"
+            echo "AR=${output_dir}/rocm-root/lib/llvm/bin/llvm-ar"
+            echo "CC=${output_dir}/rocm-root/lib/llvm/bin/clang"
+            echo "CXX=${output_dir}/rocm-root/lib/llvm/bin/clang++"
             echo "HRX_ARTIFACT_SET=core"
             echo "HRX_DOWNLOAD_CACHE_DIR=${output_dir}/downloads"
             echo "HRX_OUTPUT_DIR=${output_dir}"
@@ -872,7 +872,7 @@ jobs:
           cmake --version
           ctest --version
           ninja --version
-          bash .github/scripts/check_host_toolchain.sh
+          bash .github/scripts/check_host_toolchain.sh --expect-rocm
           bash .github/scripts/check_rocm_device_toolchain.sh
           test -d "${HRX_ROCM_ROOT}/include"
 

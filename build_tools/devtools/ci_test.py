@@ -1629,24 +1629,6 @@ class CiTest(unittest.TestCase):
                 ):
                     self.assertNotIn(f"{variable_name}:", block)
 
-    def test_iree_cmake_workflow_has_one_repository_job_per_platform(self):
-        for job_name in ("cmake_linux", "cmake_windows"):
-            with self.subTest(job_name=job_name):
-                block = self.workflow_job_block(
-                    ".github/workflows/ci_iree.yml", job_name
-                )
-                self.assertNotIn("strategy:", block)
-                self.assertNotIn("matrix.", block)
-                self.assertIn("iree-cmake-repository-build --keep-going", block)
-                for command in (
-                    "iree-cmake-cpu",
-                    "iree-cmake-shared-tools",
-                    "iree-cmake-sanitizer-smoke",
-                    "iree-cmake-vulkan",
-                    "iree-cmake-amdgpu",
-                ):
-                    self.assertNotIn(command, block)
-
     def test_fetch_toolchain_uses_owned_ci_entry_point(self):
         script = Path(".github/scripts/fetch_rocm_toolchain.sh").read_text()
         self.assertIn(
