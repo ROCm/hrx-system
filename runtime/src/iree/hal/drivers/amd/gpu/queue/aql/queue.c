@@ -192,6 +192,38 @@ static iree_status_t iree_hal_amd_gpu_aql_admit_waits(
   }
   return status;
 }
+
+// A failed unpublished operation still owns its causal join. Consume each
+// resolved edge once, retaining only the remaining suffix across wakeups.
+static iree_status_t iree_hal_amd_gpu_aql_admit_failed(
+    iree_hal_amd_gpu_aql_queue_t* queue,
+    iree_hal_amd_gpu_aql_submission_t* submission,
+    iree_host_size_t* out_wait_index,
+    iree_hal_amd_gpu_aql_wait_kind_t* out_kind) {
+  *out_kind = IREE_HAL_AMD_GPU_AQL_WAIT_READY;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_check_failure(queue));
+  while (submission->wait_count) {
+    iree_hal_amd_gpu_aql_wait_t* wait = submission->waits;
+    uint64_t value = 0;
+    iree_status_t status = iree_hal_semaphore_query(wait->semaphore, &value);
+    if (iree_status_is_ok(status) && value < wait->value) {
+      *out_wait_index = 0;
+      *out_kind = IREE_HAL_AMD_GPU_AQL_WAIT_COMPLETION;
+      return iree_ok_status();
+    }
+    if (!iree_status_is_ok(status)) {
+      iree_hal_amd_gpu_aql_submission_reject(submission,
+                                             iree_status_code(status));
+      iree_status_free(status);
+    }
+    iree_hal_semaphore_release(wait->semaphore);
+    ++submission->waits;
+    --submission->wait_count;
+  }
+  return iree_status_from_code((iree_status_code_t)iree_atomic_load(
+      &submission->failure_code, iree_memory_order_relaxed));
+}
+
 static void iree_hal_amd_gpu_aql_pending_release(
     iree_hal_amd_gpu_aql_pending_t* pending) {
   if (pending->allocation_size) {
@@ -249,8 +281,24 @@ static void iree_hal_amd_gpu_aql_pending_resume(void* user_data,
   iree_hal_amd_gpu_aql_pending_t* pending = user_data;
   iree_hal_amd_gpu_aql_queue_t* queue = pending->queue;
   iree_hal_amd_gpu_aql_submission_t* submission = pending->submission;
+  bool dependency_failed = false;
+  if (!iree_status_is_ok(status) && pending->semaphore) {
+    uint64_t value = 0;
+    iree_status_t dependency_status =
+        iree_hal_semaphore_query(pending->semaphore, &value);
+    dependency_failed = !iree_status_is_ok(dependency_status);
+    status = iree_status_join(status, dependency_status);
+  }
   iree_hal_semaphore_release(pending->semaphore);
   iree_hal_amd_gpu_aql_pending_release(pending);
+  if (dependency_failed) {
+    iree_hal_amd_gpu_context_report_status(
+        queue->context, queue->base.queue_family->device, status);
+    iree_hal_amd_gpu_aql_submission_reject(submission,
+                                           iree_status_code(status));
+    iree_status_free(status);
+    status = iree_ok_status();
+  }
   if (iree_status_is_ok(status)) {
     iree_hal_amd_gpu_aql_enqueue(queue, submission);
   } else {
@@ -262,7 +310,6 @@ static void iree_hal_amd_gpu_aql_pending_resume(void* user_data,
 static void iree_hal_amd_gpu_aql_pending_begin(
     iree_hal_amd_gpu_aql_pending_t* pending) {
   iree_hal_amd_gpu_aql_queue_t* queue = pending->queue;
-  iree_hal_amd_gpu_aql_submission_t* submission = pending->submission;
   iree_hal_semaphore_t* source = pending->semaphore;
   pending->semaphore = NULL;
   iree_status_t status = iree_hal_amd_gpu_aql_check_failure(queue);
@@ -286,10 +333,11 @@ static void iree_hal_amd_gpu_aql_pending_begin(
       return;
     }
   }
-  iree_hal_semaphore_release(pending->semaphore);
-  iree_hal_amd_gpu_aql_pending_release(pending);
-  iree_hal_amd_gpu_aql_abandon(queue, submission, status);
-  iree_hal_amd_gpu_aql_pending_end(queue);
+  if (!pending->semaphore) {
+    pending->semaphore = source;
+    iree_hal_semaphore_retain(source);
+  }
+  iree_hal_amd_gpu_aql_pending_resume(pending, status);
 }
 
 static iree_status_t iree_hal_amd_gpu_aql_pending_allocate(
@@ -1253,17 +1301,34 @@ static void iree_hal_amd_gpu_aql_process_submission(
       submission->native_wait_count == UINT32_MAX) {
     iree_host_size_t wait_index = 0;
     iree_hal_amd_gpu_aql_wait_kind_t kind;
-    status = iree_hal_amd_gpu_aql_admit_waits(
-        queue, submission->wait_count, submission->waits,
-        !(submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER &&
-          submission->transfer.capture.host_wait_required) &&
-            !(submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_ALLOCATION &&
-              (!queue->frontier.tracker ||
-               iree_hal_amd_gpu_allocation_requires_host_wait(
-                   submission->allocation.operation))) &&
-            submission->wait_count <=
-                (iree_min(queue->producer.ring.capacity / 2, 64u) - 4) * 5,
-        &submission->native_wait_count, &wait_index, &kind);
+    const bool dependency_failed =
+        iree_atomic_load(&submission->failure_code,
+                         iree_memory_order_relaxed) != IREE_STATUS_OK;
+    if (!dependency_failed) {
+      status = iree_hal_amd_gpu_aql_admit_waits(
+          queue, submission->wait_count, submission->waits,
+          !(submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER &&
+            submission->transfer.capture.host_wait_required) &&
+              !(submission->entry.kind ==
+                    IREE_HAL_AMD_GPU_AQL_ENTRY_ALLOCATION &&
+                (!queue->frontier.tracker ||
+                 iree_hal_amd_gpu_allocation_requires_host_wait(
+                     submission->allocation.operation))) &&
+              submission->wait_count <=
+                  (iree_min(queue->producer.ring.capacity / 2, 64u) - 4) * 5,
+          &submission->native_wait_count, &wait_index, &kind);
+    }
+    if (IREE_UNLIKELY(dependency_failed || !iree_status_is_ok(status))) {
+      if (!iree_status_is_ok(status)) {
+        iree_hal_amd_gpu_context_report_status(
+            queue->context, queue->base.queue_family->device, status);
+        iree_hal_amd_gpu_aql_submission_reject(submission,
+                                               iree_status_code(status));
+        iree_status_free(status);
+      }
+      status = iree_hal_amd_gpu_aql_admit_failed(queue, submission, &wait_index,
+                                                 &kind);
+    }
     if (iree_status_is_ok(status) && kind != IREE_HAL_AMD_GPU_AQL_WAIT_READY) {
       iree_hal_amd_gpu_profile_operation_defer(
           iree_hal_amd_gpu_aql_submission_profile(submission));
@@ -1814,6 +1879,7 @@ static iree_status_t iree_hal_amd_gpu_aql_submit_dispatch(
   const bool publishing =
       small && iree_hal_amd_gpu_publisher_try_acquire(&queue->publisher);
   iree_status_t status = iree_ok_status();
+  iree_status_t dependency_failure = iree_ok_status();
   bool finished = false;
   iree_hal_amd_gpu_aql_submission_t* submission = NULL;
   if (publishing) {
@@ -1830,13 +1896,8 @@ static iree_status_t iree_hal_amd_gpu_aql_submit_dispatch(
     status = iree_hal_amd_gpu_aql_admit_waits(
         queue, waits.count, admitted, true, &native_count, &wait_index, &kind);
     if (!iree_status_is_ok(status)) {
-      iree_hal_amd_gpu_profile_operation_record(queue->profile, profile, false,
-                                                0);
-      iree_hal_amd_gpu_context_report_status(
-          queue->context, queue->base.queue_family->device, status);
-      iree_hal_semaphore_list_fail(signals, status);
+      dependency_failure = status;
       status = iree_ok_status();
-      finished = true;
     } else if (kind == IREE_HAL_AMD_GPU_AQL_WAIT_READY) {
       finished = iree_hal_amd_gpu_aql_publish(
                      queue, request, waits.count, admitted, native_count,
@@ -1854,6 +1915,15 @@ static iree_status_t iree_hal_amd_gpu_aql_submit_dispatch(
         &queue->captures, profile, request, waits, signals, before, after,
         &submission);
     if (iree_status_is_ok(status)) {
+      if (!iree_status_is_ok(dependency_failure)) {
+        iree_hal_amd_gpu_context_report_status(queue->context,
+                                               queue->base.queue_family->device,
+                                               dependency_failure);
+        iree_hal_amd_gpu_aql_submission_reject(
+            submission, iree_status_code(dependency_failure));
+        iree_status_free(dependency_failure);
+        dependency_failure = iree_ok_status();
+      }
       submission->has_host_owner = true;
       iree_atomic_fetch_add(&queue->pending.host_owners, 1,
                             iree_memory_order_relaxed);
@@ -1871,7 +1941,7 @@ static iree_status_t iree_hal_amd_gpu_aql_submit_dispatch(
     }
     iree_hal_amd_gpu_aql_wake_terminal(queue);
   }
-  return status;
+  return iree_status_join(status, dependency_failure);
 }
 
 static iree_status_t iree_hal_amd_gpu_aql_host_barrier(

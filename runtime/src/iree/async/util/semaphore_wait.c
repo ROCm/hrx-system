@@ -133,6 +133,12 @@ struct iree_async_semaphore_wait_tracker_t {
   // For ANY waits, the first satisfied index or -1 while unsatisfied.
   iree_atomic_int32_t remaining_or_satisfied;
 
+  // Consumer policy; JOIN applies only to ALL dependency waits.
+  iree_async_semaphore_wait_flags_t flags;
+
+  // First dependency failure retained until a JOIN wait resolves or cancels.
+  iree_atomic_intptr_t dependency_status;
+
   // Owned terminal status published before the completion becomes enqueueable.
   iree_status_t completion_status;
 
@@ -276,7 +282,8 @@ static void iree_async_semaphore_wait_tracker_timepoint_callback(
       (iree_async_semaphore_wait_timepoint_t*)base_timepoint;
   iree_async_semaphore_wait_tracker_t* tracker = timepoint->tracker;
 
-  if (!iree_status_is_ok(status)) {
+  if (!iree_status_is_ok(status) &&
+      !iree_any_bit_set(tracker->flags, IREE_ASYNC_SEMAPHORE_WAIT_FLAG_JOIN)) {
     iree_async_semaphore_wait_tracker_publish_completion(tracker, status);
   } else if (tracker->operation->mode == IREE_ASYNC_WAIT_MODE_ANY) {
     int32_t expected = -1;
@@ -288,12 +295,25 @@ static void iree_async_semaphore_wait_tracker_timepoint_callback(
                                                            iree_ok_status());
     }
   } else {
+    if (!iree_status_is_ok(status)) {
+      intptr_t expected = (intptr_t)iree_ok_status();
+      if (!iree_atomic_compare_exchange_strong(
+              &tracker->dependency_status, &expected, (intptr_t)status,
+              iree_memory_order_acq_rel, iree_memory_order_acquire)) {
+        iree_status_free(status);
+      }
+    }
     int32_t remaining = iree_atomic_fetch_sub(&tracker->remaining_or_satisfied,
                                               1, iree_memory_order_acq_rel) -
                         1;
     if (remaining == 0) {
-      iree_async_semaphore_wait_tracker_publish_completion(tracker,
-                                                           iree_ok_status());
+      status =
+          iree_any_bit_set(tracker->flags, IREE_ASYNC_SEMAPHORE_WAIT_FLAG_JOIN)
+              ? (iree_status_t)iree_atomic_exchange(&tracker->dependency_status,
+                                                    (intptr_t)iree_ok_status(),
+                                                    iree_memory_order_acq_rel)
+              : iree_ok_status();
+      iree_async_semaphore_wait_tracker_publish_completion(tracker, status);
     }
   }
 
@@ -319,7 +339,7 @@ iree_status_t iree_async_semaphore_wait_tracker_allocate(
     iree_async_semaphore_wait_context_t* context,
     iree_async_semaphore_wait_operation_t* operation,
     iree_async_semaphore_wait_enqueue_callback_t enqueue_callback,
-    iree_allocator_t allocator,
+    iree_async_semaphore_wait_flags_t flags, iree_allocator_t allocator,
     iree_async_semaphore_wait_tracker_t** out_tracker) {
   *out_tracker = NULL;
   if (IREE_UNLIKELY(!enqueue_callback.fn)) {
@@ -339,6 +359,7 @@ iree_status_t iree_async_semaphore_wait_tracker_allocate(
   tracker->allocator = allocator;
   tracker->enqueue_callback = enqueue_callback;
   tracker->count = operation->count;
+  tracker->flags = flags;
   tracker->completion_status = iree_ok_status();
   tracker->continuation_head = operation->base.linked_next;
   operation->base.linked_next = NULL;
@@ -501,6 +522,10 @@ void iree_async_semaphore_wait_tracker_finalize(
     iree_async_semaphore_wait_completion_t* out_completion) {
   iree_async_semaphore_wait_operation_t* operation = tracker->operation;
   iree_status_t status = tracker->completion_status;
+  // Cancellation or registration failure may end a JOIN before its final
+  // dependency callback transfers the retained producer failure.
+  iree_status_free((iree_status_t)iree_atomic_load(&tracker->dependency_status,
+                                                   iree_memory_order_relaxed));
   if (operation->mode == IREE_ASYNC_WAIT_MODE_ANY &&
       iree_status_is_ok(status)) {
     int32_t satisfied = iree_atomic_load(&tracker->remaining_or_satisfied,

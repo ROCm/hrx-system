@@ -41,10 +41,12 @@ typedef struct iree_hal_amd_gpu_host_wait_t {
   void* user_data;
 } iree_hal_amd_gpu_host_wait_t;
 
-// Prepares a nonempty, already captured ALL wait. The tracker retains the
-// semaphores; arrays, sidecar, and context remain live through the terminal
-// callback. No callback runs until register. This split lets an owner link the
-// prepared wait into its cancellation set before registration can complete.
+// Prepares a nonempty, already captured ALL dependency join. Producer failure
+// does not cancel sibling dependencies; all must resolve before continuation.
+// Explicit cancellation terminates the join without waiting for producers.
+// The tracker retains the semaphores; arrays, sidecar, and context remain live
+// through the terminal callback. No callback runs until register. The owner
+// can link the prepared wait into its cancellation set before registration.
 //
 // Failure returns before acceptance, retains nothing, and invokes no callback.
 // Success requires exactly one register, even if cancellation arrives first.
