@@ -17,6 +17,29 @@
 namespace loom {
 namespace {
 
+TEST(Aie2pLeafObjectTest, QueriesOverlappingAtomicRegisterViews) {
+  loom_aie2p_leaf_realization_t realization = {};
+  const loom_aie2p_physical_register_id_t r26 =
+      loom_aie2p_machine_find_physical_register(IREE_SV("r26"));
+  ASSERT_NE(r26, LOOM_AIE2P_PHYSICAL_REGISTER_ID_INVALID);
+  const loom_aie2p_atomic_unit_id_t unit =
+      loom_aie2p_machine_physical_register_atomic_unit(r26, 0);
+  ASSERT_NE(unit, LOOM_AIE2P_ATOMIC_UNIT_ID_INVALID);
+  realization.register_writes.words[unit / 64u] |= UINT64_C(1) << (unit % 64u);
+
+  const auto may_write = [&realization](iree_string_view_t name) {
+    const loom_aie2p_physical_register_id_t physical_register =
+        loom_aie2p_machine_find_physical_register(name);
+    EXPECT_NE(physical_register, LOOM_AIE2P_PHYSICAL_REGISTER_ID_INVALID);
+    return loom_aie2p_leaf_may_write_register(&realization, physical_register);
+  };
+  EXPECT_TRUE(may_write(IREE_SV("r26")));
+  EXPECT_FALSE(may_write(IREE_SV("r27")));
+  EXPECT_TRUE(may_write(IREE_SV("l13")));
+  EXPECT_FALSE(may_write(IREE_SV("l12")));
+  EXPECT_FALSE(may_write(IREE_SV("x0")));
+}
+
 TEST(Aie2pLeafObjectTest, EmitsPreparedProgramRepeatedlyWithoutMutation) {
   const loom_aie2p_instruction_id_t movxm =
       loom_aie2p_encoding_find_instruction(IREE_SV("MOVXM"));

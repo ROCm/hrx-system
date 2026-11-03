@@ -46,7 +46,6 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amd/xdna/aie2p/array:resident",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/emit:leaf_compile",
-        "//loom/src/loom/target/arch/amd/xdna/aie2p/machine",
         "//loom/src/loom/target/reporting:report",
         "//loom/src/loom/tools/loom-check:execute",
         "//loom/src/loom/tools/loom-check:provider",

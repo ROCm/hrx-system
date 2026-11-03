@@ -15,7 +15,6 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/leaf_compile.h"
-#include "loom/target/arch/amd/xdna/aie2p/machine/machine.h"
 #include "loom/target/reporting/report.h"
 #include "loom/tools/loom-check/diagnostics.h"
 #include "loom/tools/loom-check/low_emit.h"
@@ -143,10 +142,6 @@ static iree_status_t loom_aie2p_leaf_check_execute(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "aie2p-leaf requires a Low function symbol");
   }
-  loom_check_low_emit_fixed_value_spec_list_t fixed_specs;
-  IREE_RETURN_IF_ERROR(loom_check_low_emit_fixed_value_spec_list_initialize(
-      remaining, request->case_arena, &fixed_specs));
-  iree_string_view_t registers = iree_string_view_empty();
   iree_string_view_t selected_value_names = iree_string_view_empty();
   loom_low_allocation_diagnostic_flags_t allocation_diagnostic_flags = 0;
   bool has_allocation_diagnostics_option = false;
@@ -158,12 +153,7 @@ static iree_status_t loom_aie2p_leaf_check_execute(
                            &remaining);
     iree_string_view_t name, value;
     iree_string_view_split(token, '=', &name, &value);
-    if (iree_string_view_equal(name, IREE_SV("fixed"))) {
-      IREE_RETURN_IF_ERROR(loom_check_low_emit_parse_fixed_value_spec(
-          value, IREE_SV("aie2p-leaf"), &fixed_specs));
-    } else if (iree_string_view_equal(name, IREE_SV("registers"))) {
-      registers = value;
-    } else if (iree_string_view_equal(name, IREE_SV("uses"))) {
+    if (iree_string_view_equal(name, IREE_SV("uses"))) {
       if (!iree_string_view_is_empty(selected_value_names)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "duplicate aie2p-leaf option 'uses'");
@@ -239,14 +229,6 @@ static iree_status_t loom_aie2p_leaf_check_execute(
       .allocation_diagnostic_flags = allocation_diagnostic_flags,
       .diagnostic_emitter = emitter,
   };
-  bool resolved = false;
-  IREE_RETURN_IF_ERROR(loom_check_low_emit_resolve_fixed_value_specs(
-      native_module->module, function, fixed_specs.specs, fixed_specs.count,
-      emitter, &options.allocation_fixed_values,
-      &options.allocation_fixed_value_count, &resolved, request->case_arena));
-  if (!resolved) {
-    return iree_ok_status();
-  }
   loom_target_compile_report_t report;
   loom_target_compile_report_initialize(&report, iree_allocator_system());
   options.compile_report =
@@ -299,24 +281,6 @@ static iree_status_t loom_aie2p_leaf_check_execute(
   IREE_RETURN_IF_ERROR(loom_aie2p_leaf_check_append_value_uses(
       native_module->module, function, selected_value_names,
       &request->result->actual_output));
-  while (!iree_string_view_is_empty(registers)) {
-    iree_string_view_t name;
-    iree_string_view_split(registers, ',', &name, &registers);
-    const loom_aie2p_physical_register_id_t physical_register =
-        loom_aie2p_machine_find_physical_register(name);
-    if (physical_register == LOOM_AIE2P_PHYSICAL_REGISTER_ID_INVALID) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "unknown AIE2P physical register '%.*s'",
-                              (int)name.size, name.data);
-    }
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        &request->result->actual_output, "%.*s: %s\n", (int)name.size,
-        name.data,
-        loom_aie2p_leaf_may_write_register(&contribution.realization,
-                                           physical_register)
-            ? "written"
-            : "preserved"));
-  }
   return iree_ok_status();
 }
 
