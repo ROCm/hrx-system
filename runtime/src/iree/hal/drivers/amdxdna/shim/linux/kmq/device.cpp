@@ -527,11 +527,39 @@ int pdev::expand_dev_heap() {
   return 0;
 }
 
+int dev_heap_host_ptr(void* heap_base, uint64_t heap_addr,
+                      size_t heap_committed, uint64_t xdna_addr, size_t size,
+                      void** out) {
+  *out = nullptr;
+  if (heap_base == nullptr || size == 0) {
+    return ENODEV;
+  }
+  if (heap_addr == AMDXDNA_INVALID_ADDR || xdna_addr < heap_addr) {
+    return EINVAL;
+  }
+  const uint64_t offset = xdna_addr - heap_addr;
+  if (offset > heap_committed ||
+      size > heap_committed - static_cast<size_t>(offset)) {
+    return EINVAL;
+  }
+  *out = static_cast<char*>(heap_base) + offset;
+  return 0;
+}
+
+int pdev::host_ptr_for_dev_bo(uint64_t xdna_addr, size_t size,
+                              void** out) const {
+  if (m_dev_heap_bo == nullptr) {
+    *out = nullptr;
+    return ENODEV;
+  }
+  return dev_heap_host_ptr(m_heap_base, m_dev_heap_bo->get_paddr(),
+                           m_heap_committed, xdna_addr, size, out);
+}
+
 int device::alloc_bo(uint32_t ctx_id, size_t size, shim_amdxdna_bo_flags flags,
                      std::unique_ptr<bo>* out_bo) {
   const uint32_t kind = static_cast<uint32_t>(flags.boflags) << 24;
-  const bool dev_bo =
-      kind == AMDXDNA_BO_FLAGS_CACHEABLE && !m_pdev->is_aie4();
+  const bool dev_bo = kind == AMDXDNA_BO_FLAGS_CACHEABLE && !m_pdev->is_aie4();
   const std::lock_guard<std::mutex> lock(m_pdev->m_lock);
   // A single DEV BO larger than one 64 MiB chunk cannot fit the initial
   // committed heap. Grow by one chunk and retry until it lands or the 512

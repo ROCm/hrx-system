@@ -67,12 +67,25 @@ struct pdev {
   // Add one 64 MiB DEV_HEAP chunk. Caller holds m_lock. Returns 0, or ENOSPC
   // when the committed heap is already at the 512 MiB driver maximum.
   int expand_dev_heap();
+  // Host address of a DEV BO inside the mapped heap. With PASID off, the
+  // driver reports map_offset and vaddr as AMDXDNA_INVALID_ADDR and the CPU
+  // reaches the BO through the heap mapping at
+  // heap_base + (xdna_addr - first_heap_xdna_addr). Caller holds m_lock when
+  // the heap can grow concurrently.
+  int host_ptr_for_dev_bo(uint64_t xdna_addr, size_t size, void** out) const;
   int open_device(const std::filesystem::path& device_path);
   // Returns 0 on success or the failing errno for recoverable ioctl failures.
   int try_ioctl(unsigned long cmd, void* arg) const;
   int try_mmap(void* addr, size_t len, int prot, int flags, off_t offset,
                void** out_ptr) const;
 };
+
+// Resolves a DEV BO's device address into its slice of the mapped DEV heap.
+// Kept independent of pdev so PASID-off address translation and bounds checks
+// can be tested without opening an accelerator device.
+int dev_heap_host_ptr(void* heap_base, uint64_t heap_addr,
+                      size_t heap_committed, uint64_t xdna_addr, size_t size,
+                      void** out);
 
 struct device {
   enum class access_mode : uint8_t { exclusive = 0, shared = 1 };

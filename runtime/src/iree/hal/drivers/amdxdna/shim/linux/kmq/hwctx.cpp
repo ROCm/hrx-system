@@ -90,7 +90,8 @@ hw_ctx::hw_ctx(device& device, const std::vector<uint8_t>& pdi,
     m_init_errno = alloc_bo(ci.m_pdi.size(), f, &pdi_bo);
     if (m_init_errno) return;
     char* pdi_vaddr = reinterpret_cast<char*>(pdi_bo->map());
-    if (!pdi_vaddr) {
+    if (pdi_vaddr == nullptr ||
+        reinterpret_cast<uintptr_t>(pdi_vaddr) == AMDXDNA_INVALID_ADDR) {
       m_init_errno = EINVAL;
       return;
     }

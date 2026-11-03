@@ -7,6 +7,7 @@
 #include <errno.h>
 
 #include "iree/hal/drivers/amdxdna/native_linux_kmq_internal.h"
+#include "iree/hal/drivers/amdxdna/shim/linux/kmq/device.h"
 #include "iree/hal/drivers/amdxdna/shim/linux/kmq/kernel.h"
 #include "iree/testing/gtest.h"
 
@@ -28,6 +29,34 @@ TEST(NativeLinuxKmqTest, BoAllocationOtherErrorsPreserveStatus) {
             IREE_STATUS_RESOURCE_EXHAUSTED);
   EXPECT_EQ(iree_hal_amdxdna_native_linux_bo_allocation_status_code(EINVAL),
             IREE_STATUS_INVALID_ARGUMENT);
+}
+
+TEST(NativeLinuxKmqTest, PasidOffDevBoMapsIntoHeapSlice) {
+  char heap[256] = {};
+  void* host_ptr = nullptr;
+  EXPECT_EQ(shim_xdna::dev_heap_host_ptr(
+                heap, /*heap_addr=*/0x1000, sizeof(heap),
+                /*xdna_addr=*/0x1040, /*size=*/32, &host_ptr),
+            0);
+  EXPECT_EQ(host_ptr, heap + 0x40);
+}
+
+TEST(NativeLinuxKmqTest, PasidOffDevBoRejectsInvalidHeapSlices) {
+  char heap[256] = {};
+  void* host_ptr = heap;
+  EXPECT_EQ(shim_xdna::dev_heap_host_ptr(
+                heap, AMDXDNA_INVALID_ADDR, sizeof(heap),
+                /*xdna_addr=*/0x1040, /*size=*/32, &host_ptr),
+            EINVAL);
+  EXPECT_EQ(host_ptr, nullptr);
+  EXPECT_EQ(shim_xdna::dev_heap_host_ptr(
+                heap, /*heap_addr=*/0x1000, sizeof(heap),
+                /*xdna_addr=*/0x0FFF, /*size=*/32, &host_ptr),
+            EINVAL);
+  EXPECT_EQ(shim_xdna::dev_heap_host_ptr(
+                heap, /*heap_addr=*/0x1000, sizeof(heap),
+                /*xdna_addr=*/0x10F0, /*size=*/32, &host_ptr),
+            EINVAL);
 }
 
 TEST(NativeLinuxKmqTest, FullElfPacketPayloadMatchesFirmwareAbi) {

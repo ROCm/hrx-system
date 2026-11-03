@@ -324,8 +324,19 @@ int bo::mmap_bo(size_t align) {
   if (!m_drm_bo) return EINVAL;
 
   if (m_drm_bo->m_map_offset == AMDXDNA_INVALID_ADDR) {
-    m_aligned = reinterpret_cast<void*>(m_drm_bo->m_vaddr);
-    return 0;
+    // PASID mode publishes the heap slice as vaddr. Without PASID the driver
+    // sets both map_offset and vaddr to AMDXDNA_INVALID_ADDR; the bytes live
+    // in the already-mapped DEV heap (amdxdna_gem_heap_alloc).
+    if (m_drm_bo->m_vaddr != 0 && m_drm_bo->m_vaddr != AMDXDNA_INVALID_ADDR) {
+      m_aligned = reinterpret_cast<void*>(m_drm_bo->m_vaddr);
+      return 0;
+    }
+    if (m_type == AMDXDNA_BO_DEV &&
+        m_drm_bo->m_xdna_addr != AMDXDNA_INVALID_ADDR) {
+      return m_pdev.host_ptr_for_dev_bo(m_drm_bo->m_xdna_addr, m_aligned_size,
+                                        &m_aligned);
+    }
+    return ENODEV;
   }
 
   int locked = 0;
