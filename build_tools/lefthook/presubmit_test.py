@@ -25,6 +25,7 @@ from libamdf.build_tools.bazel import configure as libamdf_configure
 from runtime.build_tools.bazel import configure as runtime_configure
 
 PRESUBMIT_PATH = Path(__file__).with_name("presubmit.py")
+CLANG_TIDY_TARGET_PATTERN_FILE = Path(".tmp/clang-tidy-targets.txt")
 PRESUBMIT_SPEC = importlib.util.spec_from_file_location("presubmit", PRESUBMIT_PATH)
 if PRESUBMIT_SPEC is None or PRESUBMIT_SPEC.loader is None:
     raise RuntimeError(f"unable to load {PRESUBMIT_PATH}")
@@ -46,6 +47,11 @@ def input_scope(
         changed_paths=changed_paths if changed_paths is not None else paths,
         tracked_paths=tracked_paths,
     )
+
+
+def fixed_clang_tidy_target_pattern_file(targets: list[str]):
+    del targets
+    return contextlib.nullcontext(CLANG_TIDY_TARGET_PATTERN_FILE)
 
 
 class PresubmitTest(unittest.TestCase):
@@ -462,7 +468,10 @@ class PresubmitTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "positive integer"):
                     presubmit.clang_tidy_jobs()
                 with self.assertRaisesRegex(ValueError, "positive integer"):
-                    presubmit.clang_tidy_bazel_command(["//runtime/src/iree/base:all"])
+                    presubmit.clang_tidy_bazel_command(
+                        ["//runtime/src/iree/base:all"],
+                        target_pattern_file=CLANG_TIDY_TARGET_PATTERN_FILE,
+                    )
 
     def test_clang_format_default_jobs_are_capped_on_large_machines(self):
         with (
@@ -760,18 +769,39 @@ class PresubmitTest(unittest.TestCase):
         )
 
     def test_clang_tidy_bazel_command_uses_aspect_output_group(self):
-        command = presubmit.clang_tidy_bazel_command(["//runtime/src/iree/base:all"])
+        command = presubmit.clang_tidy_bazel_command(
+            ["//runtime/src/iree/base:all"],
+            target_pattern_file=CLANG_TIDY_TARGET_PATTERN_FILE,
+        )
 
         self.assertEqual(command[0:2], ["bazel", "build"])
         self.assertNotIn("--keep_going", command)
         self.assertIn(presubmit.CLANG_TIDY_REPO_ENV, command)
         self.assertIn(f"--aspects={presubmit.CLANG_TIDY_ASPECT}", command)
         self.assertIn(f"--output_groups={presubmit.CLANG_TIDY_OUTPUT_GROUP}", command)
-        self.assertEqual(command[-1], "//runtime/src/iree/base:all")
+        self.assertEqual(
+            command[-1],
+            f"--target_pattern_file={CLANG_TIDY_TARGET_PATTERN_FILE}",
+        )
+        self.assertNotIn("//runtime/src/iree/base:all", command)
+
+    def test_clang_tidy_target_pattern_file_materializes_and_cleans_up(self):
+        targets = [
+            "//runtime/src/iree/base:base",
+            "//loom/src/loom:loom",
+        ]
+        with presubmit.clang_tidy_target_pattern_file(targets) as target_file:
+            self.assertEqual(
+                target_file.read_text(encoding="utf-8"),
+                "//runtime/src/iree/base:base\n//loom/src/loom:loom\n",
+            )
+            retained_path = target_file
+        self.assertFalse(retained_path.exists())
 
     def test_clang_tidy_selection_does_not_change_target_configuration(self):
         command = presubmit.clang_tidy_bazel_command(
             ["//runtime/src/iree/base:all"],
+            target_pattern_file=CLANG_TIDY_TARGET_PATTERN_FILE,
             selected_files=["runtime/src/iree/base/status.c"],
             emit_fixes=True,
         )
@@ -869,7 +899,9 @@ class PresubmitTest(unittest.TestCase):
             "//loom/src/loom/target/emit/wasm:all",
             "//loom/src/loom/target/arch/vm:all",
         ]
-        command = presubmit.clang_tidy_bazel_command(targets)
+        command = presubmit.clang_tidy_bazel_command(
+            targets, target_pattern_file=CLANG_TIDY_TARGET_PATTERN_FILE
+        )
 
         architecture_flag = next(
             arg for arg in command if arg.startswith("--//loom/config/arch:enable=")
@@ -881,7 +913,10 @@ class PresubmitTest(unittest.TestCase):
         self.assertIn(
             "--//loom/config/execute:enable=iree_hal,iree_vm,wasm_host", command
         )
-        self.assertEqual(command[command.index("--") + 1 :], targets)
+        self.assertIn(
+            f"--target_pattern_file={CLANG_TIDY_TARGET_PATTERN_FILE}", command
+        )
+        self.assertFalse(set(targets).intersection(command))
 
     def test_clang_tidy_bazel_command_uses_selected_execution_policy(self):
         with mock.patch.dict(
@@ -894,7 +929,8 @@ class PresubmitTest(unittest.TestCase):
             clear=True,
         ):
             command = presubmit.clang_tidy_bazel_command(
-                ["//runtime/src/iree/base:all"]
+                ["//runtime/src/iree/base:all"],
+                target_pattern_file=CLANG_TIDY_TARGET_PATTERN_FILE,
             )
 
         self.assertIn("--config=remote-execution", command)
@@ -912,14 +948,18 @@ class PresubmitTest(unittest.TestCase):
             clear=True,
         ):
             command = presubmit.clang_tidy_bazel_command(
-                ["//runtime/src/iree/base:all"]
+                ["//runtime/src/iree/base:all"],
+                target_pattern_file=CLANG_TIDY_TARGET_PATTERN_FILE,
             )
 
         jobs_index = command.index("--jobs")
         self.assertEqual(command[jobs_index + 1], "7")
         self.assertGreater(jobs_index, command.index("--config=remote-execution"))
         self.assertGreater(jobs_index, command.index("--config=local-tests"))
-        self.assertLess(jobs_index, command.index("--"))
+        self.assertLess(
+            jobs_index,
+            command.index(f"--target_pattern_file={CLANG_TIDY_TARGET_PATTERN_FILE}"),
+        )
 
     def test_clang_tidy_bazel_command_inherits_execution_concurrency(self):
         for cpu_count in (None, 1, 32, 192):
@@ -937,7 +977,8 @@ class PresubmitTest(unittest.TestCase):
                     ),
                 ):
                     command = presubmit.clang_tidy_bazel_command(
-                        ["//runtime/src/iree/base:all"]
+                        ["//runtime/src/iree/base:all"],
+                        target_pattern_file=CLANG_TIDY_TARGET_PATTERN_FILE,
                     )
                 self.assertNotIn("--jobs", command)
                 self.assertFalse(any(arg.startswith("--jobs=") for arg in command))
@@ -946,6 +987,7 @@ class PresubmitTest(unittest.TestCase):
         command = presubmit.clang_tidy_bazel_command(
             ["//runtime/src/iree/base:all"],
             keep_going=True,
+            target_pattern_file=CLANG_TIDY_TARGET_PATTERN_FILE,
         )
 
         self.assertEqual(command[0:3], ["bazel", "build", "--keep_going"])
@@ -953,6 +995,7 @@ class PresubmitTest(unittest.TestCase):
     def test_clang_tidy_bazel_command_can_export_fixes(self):
         command = presubmit.clang_tidy_bazel_command(
             ["//runtime/src/iree/base:all"],
+            target_pattern_file=CLANG_TIDY_TARGET_PATTERN_FILE,
             build_events_path=Path(".tmp/fixes/build_events.json"),
             emit_fixes=True,
         )
@@ -970,6 +1013,7 @@ class PresubmitTest(unittest.TestCase):
     def test_clang_tidy_bazel_command_can_use_local_output_groups(self):
         command = presubmit.clang_tidy_bazel_command(
             ["//runtime/src/iree/base:all"],
+            target_pattern_file=CLANG_TIDY_TARGET_PATTERN_FILE,
             emit_fixes=True,
             local_outputs=True,
         )
@@ -1406,6 +1450,11 @@ class PresubmitTest(unittest.TestCase):
                 return_value=["//consumer/package:smoke_test"],
             ) as owner_query,
             mock.patch.object(
+                presubmit,
+                "clang_tidy_target_pattern_file",
+                side_effect=fixed_clang_tidy_target_pattern_file,
+            ) as target_file,
+            mock.patch.object(
                 presubmit, "run_command", return_value=True
             ) as run_command,
         ):
@@ -1441,7 +1490,8 @@ class PresubmitTest(unittest.TestCase):
             '["build_tools/bazel/test/cc_benchmark_smoke_test_fixture.c"]',
             command,
         )
-        self.assertIn("//consumer/package:smoke_test", command)
+        target_file.assert_called_once_with(["//consumer/package:smoke_test"])
+        self.assertNotIn("//consumer/package:smoke_test", command)
         self.assertNotIn("//build_tools/bazel/test:all", command)
 
     def test_clang_tidy_enables_every_driver_for_resolved_runtime_owner(self):
@@ -1481,9 +1531,9 @@ class PresubmitTest(unittest.TestCase):
             + ",".join(libamdf_configure.FAMILIES),
             command,
         )
-        self.assertEqual(
-            command[-1],
-            "//runtime/src/iree/hal/drivers/amd/gpu/cts:driver_test",
+        self.assertTrue(command[-1].startswith("--target_pattern_file="))
+        self.assertNotIn(
+            "//runtime/src/iree/hal/drivers/amd/gpu/cts:driver_test", command
         )
 
     def test_libamdf_clang_tidy_routes_and_enables_optional_package(self):
@@ -1531,11 +1581,13 @@ class PresubmitTest(unittest.TestCase):
 
         command = run_command.call_args.args[0]
         self.assertIn("--//libamdf/config:enabled=true", command)
-        self.assertEqual(command[-1], "//libamdf/src:allocator")
+        self.assertTrue(command[-1].startswith("--target_pattern_file="))
+        self.assertNotIn("//libamdf/src:allocator", command)
 
     def test_clang_tidy_runtime_fix_enables_complete_driver_configuration(self):
         command = presubmit.clang_tidy_bazel_command(
             ["//runtime/src/iree/base:all"],
+            target_pattern_file=CLANG_TIDY_TARGET_PATTERN_FILE,
             emit_fixes=True,
             local_outputs=True,
         )
@@ -1569,6 +1621,11 @@ class PresubmitTest(unittest.TestCase):
                 return_value=["//consumer/package:smoke_test"],
             ),
             mock.patch.object(
+                presubmit,
+                "clang_tidy_target_pattern_file",
+                side_effect=fixed_clang_tidy_target_pattern_file,
+            ) as target_file,
+            mock.patch.object(
                 presubmit, "run_command", return_value=True
             ) as run_command,
         ):
@@ -1587,7 +1644,7 @@ class PresubmitTest(unittest.TestCase):
         self.assertIn(
             f"--output_groups={presubmit.CLANG_TIDY_LOCAL_OUTPUT_GROUP}", command
         )
-        self.assertIn("//consumer/package:smoke_test", command)
+        target_file.assert_called_once_with(["//consumer/package:smoke_test"])
 
     def test_clang_tidy_fails_when_compiling_owner_query_fails(self):
         output = io.StringIO()
@@ -1631,6 +1688,11 @@ class PresubmitTest(unittest.TestCase):
                 presubmit, "clang_tidy_llvm_available", return_value=True
             ),
             mock.patch.object(
+                presubmit,
+                "clang_tidy_target_pattern_file",
+                side_effect=fixed_clang_tidy_target_pattern_file,
+            ) as target_file,
+            mock.patch.object(
                 presubmit, "run_command", return_value=True
             ) as run_command,
         ):
@@ -1643,14 +1705,13 @@ class PresubmitTest(unittest.TestCase):
                 )
             )
 
-        command = run_command.call_args.args[0]
-        self.assertEqual(
-            command[command.index("--") + 1 :],
+        target_file.assert_called_once_with(
             [
                 "//runtime/src/iree/base:all",
                 "//runtime/src/iree/hal/drivers/amd/gpu/cts:all",
-            ],
+            ]
         )
+        command = run_command.call_args.args[0]
         self.assertFalse(
             any(
                 argument.startswith(presubmit.CLANG_TIDY_SELECTED_FILES_FLAG + "=")
@@ -1739,6 +1800,11 @@ class PresubmitTest(unittest.TestCase):
                     return_value=["//runtime/src/iree/base:consumer"],
                 ) as dependency_query,
                 mock.patch.object(
+                    presubmit,
+                    "clang_tidy_target_pattern_file",
+                    side_effect=fixed_clang_tidy_target_pattern_file,
+                ) as target_file,
+                mock.patch.object(
                     presubmit, "run_command", return_value=True
                 ) as run_command,
             ):
@@ -1752,11 +1818,8 @@ class PresubmitTest(unittest.TestCase):
         self.assertTrue(ok)
         owner_query.assert_not_called()
         dependency_query.assert_called_once()
+        target_file.assert_called_once_with(["//runtime/src/iree/base:consumer"])
         command = run_command.call_args.args[0]
-        self.assertEqual(
-            command[command.index("--") + 1 :],
-            ["//runtime/src/iree/base:consumer"],
-        )
         self.assertIn(
             f'{presubmit.CLANG_TIDY_SELECTED_FILES_FLAG}=["{header_path}"]',
             command,
@@ -1805,6 +1868,11 @@ class PresubmitTest(unittest.TestCase):
                     ],
                 ) as dependency_query,
                 mock.patch.object(
+                    presubmit,
+                    "clang_tidy_target_pattern_file",
+                    side_effect=fixed_clang_tidy_target_pattern_file,
+                ) as target_file,
+                mock.patch.object(
                     presubmit, "run_command", return_value=True
                 ) as run_command,
             ):
@@ -1818,15 +1886,14 @@ class PresubmitTest(unittest.TestCase):
         self.assertTrue(ok)
         owner_query.assert_called_once()
         dependency_query.assert_called_once()
-        command = run_command.call_args.args[0]
-        self.assertEqual(
-            command[command.index("--") + 1 :],
+        target_file.assert_called_once_with(
             [
                 "//libhrx/src/binding/hip:api",
                 "//libhrx/cts/tests/hip:event_record_flags_test",
                 "//libhrx/src/binding/common:common",
-            ],
+            ]
         )
+        command = run_command.call_args.args[0]
         self.assertNotIn("//loom/...", command)
         self.assertFalse(
             any(
@@ -1850,6 +1917,11 @@ class PresubmitTest(unittest.TestCase):
                 presubmit, "clang_tidy_llvm_available", return_value=True
             ),
             mock.patch.object(
+                presubmit,
+                "clang_tidy_target_pattern_file",
+                side_effect=fixed_clang_tidy_target_pattern_file,
+            ) as target_file,
+            mock.patch.object(
                 presubmit, "run_command", return_value=True
             ) as run_command,
         ):
@@ -1863,8 +1935,7 @@ class PresubmitTest(unittest.TestCase):
         self.assertTrue(ok)
         plugin_test_command = run_command.call_args_list[0].args[0]
         self.assertIn("//build_tools/clang_tidy/test:plugin_tests", plugin_test_command)
-        clang_tidy_command = run_command.call_args_list[-1].args[0]
-        self.assertIn("//runtime/src/iree/base:all", clang_tidy_command)
+        target_file.assert_called_once_with(["//runtime/src/iree/base:all"])
 
     def test_clang_tidy_infra_runs_plugin_tests(self):
         with (
