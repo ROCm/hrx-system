@@ -46,7 +46,6 @@ _EXPECTED_FLOAT_PREDICATES = (
         "OpFOrdNotEqual",
         "LOOM_SPIRV_OP_F_ORD_NOT_EQUAL",
     ),
-    ("ord", "ordered", "OpOrdered", "LOOM_SPIRV_OP_ORDERED"),
     ("ueq", "f_unord_equal", "OpFUnordEqual", "LOOM_SPIRV_OP_F_UNORD_EQUAL"),
     (
         "ugt",
@@ -78,11 +77,10 @@ _EXPECTED_FLOAT_PREDICATES = (
         "OpFUnordNotEqual",
         "LOOM_SPIRV_OP_F_UNORD_NOT_EQUAL",
     ),
-    ("uno", "unordered", "OpUnordered", "LOOM_SPIRV_OP_UNORDERED"),
 )
 
 
-def test_float_predicates_match_the_complete_spirv_core_family() -> None:
+def test_native_float_predicates_match_the_shader_legal_core_family() -> None:
     assert (
         tuple(
             (
@@ -137,6 +135,28 @@ def test_scalar_float_comparison_contract_covers_every_type_and_predicate() -> N
             for guard in rule.guards
             if guard.kind == GuardKind.DESCRIPTOR_AVAILABLE
         )
+        if predicate_guard.enum_keyword in ("ord", "uno"):
+            predicate = predicate_guard.enum_keyword
+            comparison = "f_ord_equal" if predicate == "ord" else "f_unord_not_equal"
+            combination = "logical_and" if predicate == "ord" else "logical_or"
+            lhs, rhs, combine = rule.emit
+            for operand, step in (("lhs", lhs), ("rhs", rhs)):
+                assert step.descriptor.key == f"spirv.op_{comparison}.{key[0]}"
+                assert step.operands == {
+                    "lhs": ValueRef.operand(operand),
+                    "rhs": ValueRef.operand(operand),
+                }
+                assert step.results == {
+                    "dst": ValueRef.temporary(operand + "_classified")
+                }
+            assert bool(availability_guards) == bool(lhs.descriptor.feature_mask_words)
+            assert combine.descriptor.key == f"spirv.op_{combination}.bool"
+            assert combine.operands == {
+                "lhs": ValueRef.temporary("lhs_classified"),
+                "rhs": ValueRef.temporary("rhs_classified"),
+            }
+            assert combine.results == {"dst": ValueRef.result("result")}
+            continue
         assert bool(availability_guards) == bool(rule.descriptor.feature_mask_words)
         assert len(rule.emit) == 1
         assert rule.emit[0].descriptor is rule.descriptor
@@ -153,6 +173,17 @@ def test_scalar_float_comparison_contract_covers_every_type_and_predicate() -> N
         for scalar in FLOAT_COMPARE_TYPES
         for predicate in FLOAT_COMPARE_PREDICATES
     }
+    expected.update(
+        {
+            (scalar.source_type, predicate): f"spirv.op_{combination}.bool"
+            for scalar in FLOAT_COMPARE_TYPES
+            for predicate, combination in (
+                ("ord", "logical_and"),
+                ("uno", "logical_or"),
+            )
+        }
+    )
+    assert len(actual) == 3 * 14
     assert actual.keys() == expected.keys()
     for key, descriptor_key in expected.items():
         assert actual[key].descriptor.key == descriptor_key

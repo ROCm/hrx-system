@@ -1,8 +1,6 @@
-// RUN: emit source-low output=low control-flow=structured-low
+// RUN: emit source-low target=spirv:vulkan1.3+bda+extended-types output=low control-flow=structured-low
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 26}
-
-func.def target(@target) @scalar_float_comparisons(%lhs: f32, %rhs: f32, %half_lhs: f16, %half_rhs: f16, %double_lhs: f64, %double_rhs: f64) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1) {
+func.def @scalar_float_comparisons(%lhs: f32, %rhs: f32, %half_lhs: f16, %half_rhs: f16, %double_lhs: f64, %double_rhs: f64) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1) {
   %oeq = scalar.cmpf oeq, %lhs, %rhs : f32
   %ogt = scalar.cmpf ogt, %lhs, %rhs : f32
   %oge = scalar.cmpf oge, %lhs, %rhs : f32
@@ -23,22 +21,28 @@ func.def target(@target) @scalar_float_comparisons(%lhs: f32, %rhs: f32, %half_l
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_float_comparisons(%lhs: reg<spirv.id : f32>, %rhs: reg<spirv.id : f32>, %half_lhs: reg<spirv.id : f16>, %half_rhs: reg<spirv.id : f16>, %double_lhs: reg<spirv.id : f64>, %double_rhs: reg<spirv.id : f64>) -> (reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_float_comparisons(%lhs: reg<spirv.id : f32>, %rhs: reg<spirv.id : f32>, %half_lhs: reg<spirv.id : f16>, %half_rhs: reg<spirv.id : f16>, %double_lhs: reg<spirv.id : f64>, %double_rhs: reg<spirv.id : f64>) -> (reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>) asm {
   %oeq = OpFOrdEqual.f32 %lhs, %rhs
   %ogt = OpFOrdGreaterThan.f32 %lhs, %rhs
   %oge = OpFOrdGreaterThanEqual.f32 %lhs, %rhs
   %olt = OpFOrdLessThan.f32 %lhs, %rhs
   %ole = OpFOrdLessThanEqual.f32 %lhs, %rhs
   %one = OpFOrdNotEqual.f32 %lhs, %rhs
-  %ord = OpOrdered.f32 %lhs, %rhs
+  %66 = OpFOrdEqual.f32 %lhs, %lhs : reg<spirv.id>
+  %67 = OpFOrdEqual.f32 %rhs, %rhs : reg<spirv.id>
+  %ord = OpLogicalAnd.bool %66, %67
   %ueq = OpFUnordEqual.f32 %lhs, %rhs
   %ugt = OpFUnordGreaterThan.f32 %lhs, %rhs
   %uge = OpFUnordGreaterThanEqual.f32 %lhs, %rhs
   %ult = OpFUnordLessThan.f32 %lhs, %rhs
   %ule = OpFUnordLessThanEqual.f32 %lhs, %rhs
   %une = OpFUnordNotEqual.f32 %lhs, %rhs
-  %uno = OpUnordered.f32 %lhs, %rhs
+  %75 = OpFUnordNotEqual.f32 %lhs, %lhs : reg<spirv.id>
+  %76 = OpFUnordNotEqual.f32 %rhs, %rhs : reg<spirv.id>
+  %uno = OpLogicalOr.bool %75, %76
   %half_oeq = OpFOrdEqual.f16 %half_lhs, %half_rhs
-  %double_uno = OpUnordered.f64 %double_lhs, %double_rhs
+  %79 = OpFUnordNotEqual.f64 %double_lhs, %double_lhs : reg<spirv.id>
+  %80 = OpFUnordNotEqual.f64 %double_rhs, %double_rhs : reg<spirv.id>
+  %double_uno = OpLogicalOr.bool %79, %80
   return %oeq, %ogt, %oge, %olt, %ole, %one, %ord, %ueq, %ugt, %uge, %ult, %ule, %une, %uno, %half_oeq, %double_uno
 }

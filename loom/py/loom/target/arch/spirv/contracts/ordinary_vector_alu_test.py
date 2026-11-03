@@ -370,10 +370,50 @@ def test_comparison_rules_cover_types_lanes_predicates_and_views() -> None:
                     f"{_suffix(scalar.suffix, lane_count)}"
                 )
 
+    expected.update(
+        {
+            (
+                vector.vector_cmpf.name,
+                scalar.source_type,
+                lane_count,
+                predicate,
+            ): f"spirv.op_{combination}.{_suffix('bool', lane_count)}"
+            for scalar in FLOAT_COMPARE_TYPES
+            for lane_count in _LANE_COUNTS
+            for predicate, combination in (
+                ("ord", "logical_and"),
+                ("uno", "logical_or"),
+            )
+        }
+    )
     assert actual.keys() == expected.keys()
     for key, descriptor_key in expected.items():
         rule = actual[key]
         assert rule.descriptor.key == descriptor_key
+        if key[-1] in ("ord", "uno"):
+            comparison = "f_ord_equal" if key[-1] == "ord" else "f_unord_not_equal"
+            lhs, rhs, combine = rule.emit
+            for operand, step in (("lhs", lhs), ("rhs", rhs)):
+                assert (
+                    step.descriptor.key
+                    == f"spirv.op_{comparison}.{_suffix(key[1], key[2])}"
+                )
+                assert step.operands == {
+                    "lhs": ValueRef.operand(operand),
+                    "rhs": ValueRef.operand(operand),
+                }
+                assert step.results == {
+                    "dst": ValueRef.temporary(operand + "_classified")
+                }
+            assert combine.operands == {
+                "lhs": ValueRef.temporary("lhs_classified"),
+                "rhs": ValueRef.temporary("rhs_classified"),
+            }
+            assert combine.results == {"dst": ValueRef.result("result")}
+            assert _available_descriptor_keys(
+                rule
+            ) == _expected_available_descriptor_keys(lhs.descriptor, combine.descriptor)
+            continue
         if key not in unsigned_keys:
             assert len(rule.emit) == 1
             assert rule.emit[0].descriptor is rule.descriptor
@@ -418,7 +458,7 @@ def test_float_comparison_descriptors_cover_native_shapes_and_type_features() ->
         for lane_count in (2, 3, 4)
         for predicate in FLOAT_COMPARE_PREDICATES
     }
-    assert len(actual) == len(expected) == 126
+    assert len(actual) == len(expected) == 108
     assert actual.keys() == expected.keys()
     for key, (scalar, predicate, lane_count) in expected.items():
         instruction = actual[key]

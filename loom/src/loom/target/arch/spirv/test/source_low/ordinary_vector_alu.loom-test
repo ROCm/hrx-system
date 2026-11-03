@@ -1,8 +1,6 @@
-// RUN: emit source-low output=low control-flow=structured-low
+// RUN: emit source-low target=spirv:vulkan1.3+bda+extended-types output=low control-flow=structured-low
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 1086626759166}
-
-func.def target(@target) @integer_alu(%lhs0: i16, %lhs1: i16, %lhs2: i16, %rhs0: i16, %rhs1: i16, %rhs2: i16, %count: index) -> (i16) {
+func.def @integer_alu(%lhs0: i16, %lhs1: i16, %lhs2: i16, %rhs0: i16, %rhs1: i16, %rhs2: i16, %count: index) -> (i16) {
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
   %lhs = vector.from_elements %lhs0, %lhs1, %lhs2 : vector<3xi16>
@@ -21,7 +19,7 @@ func.def target(@target) @integer_alu(%lhs0: i16, %lhs1: i16, %lhs2: i16, %rhs0:
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @integer_alu(%lhs0: reg<spirv.id : i16>, %lhs1: reg<spirv.id : i16>, %lhs2: reg<spirv.id : i16>, %rhs0: reg<spirv.id : i16>, %rhs1: reg<spirv.id : i16>, %rhs2: reg<spirv.id : i16>, %count: reg<spirv.id : index>) -> (reg<spirv.id : i16>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @integer_alu(%lhs0: reg<spirv.id : i16>, %lhs1: reg<spirv.id : i16>, %lhs2: reg<spirv.id : i16>, %rhs0: reg<spirv.id : i16>, %rhs1: reg<spirv.id : i16>, %rhs2: reg<spirv.id : i16>, %count: reg<spirv.id : index>) -> (reg<spirv.id : i16>) asm {
   %begin = OpConstant.i32 0 : reg<spirv.id : index>
   %step = OpConstant.i32 1 : reg<spirv.id : index>
   %lhs = OpCompositeConstruct.v3i16 %lhs0, %lhs1, %lhs2
@@ -201,7 +199,7 @@ low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffe
 
 spirv.target<vulkan1_3> @target {contract_feature_bits = 2}
 
-func.def target(@target) @float_comparison(%lhs0: f32, %lhs1: f32, %rhs0: f32, %rhs1: f32, %count: index) -> (f32) {
+func.def @float_comparison(%lhs0: f32, %lhs1: f32, %rhs0: f32, %rhs1: f32, %count: index) -> (f32) {
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
   %lhs = vector.from_elements %lhs0, %lhs1 : vector<2xf32>
@@ -220,7 +218,7 @@ func.def target(@target) @float_comparison(%lhs0: f32, %lhs1: f32, %rhs0: f32, %
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @float_comparison(%lhs0: reg<spirv.id : f32>, %lhs1: reg<spirv.id : f32>, %rhs0: reg<spirv.id : f32>, %rhs1: reg<spirv.id : f32>, %count: reg<spirv.id : index>) -> (reg<spirv.id : f32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @float_comparison(%lhs0: reg<spirv.id : f32>, %lhs1: reg<spirv.id : f32>, %rhs0: reg<spirv.id : f32>, %rhs1: reg<spirv.id : f32>, %count: reg<spirv.id : index>) -> (reg<spirv.id : f32>) asm {
   %begin = OpConstant.i32 0 : reg<spirv.id : index>
   %step = OpConstant.i32 1 : reg<spirv.id : index>
   %lhs = OpCompositeConstruct.v2f32 %lhs0, %lhs1
@@ -228,7 +226,9 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @float_
   %result = low.scf.for signed [%begin to %count step %step] iter_args(%lhs: reg<spirv.id : vector<2xf32>>) -> (reg<spirv.id : vector<2xf32>>) do(%iteration: reg<spirv.id : index>, %state: reg<spirv.id : vector<2xf32>>) {
     %ordered_equal = OpFOrdEqual.v2f32 %state, %rhs
     %unordered_not_equal = OpFUnordNotEqual.v2f32 %state, %rhs
-    %unordered = OpUnordered.v2f32 %state, %rhs
+    %35 = OpFUnordNotEqual.v2f32 %state, %state : reg<spirv.id>
+    %36 = OpFUnordNotEqual.v2f32 %rhs, %rhs : reg<spirv.id>
+    %unordered = OpLogicalOr.v2bool %35, %36
     %not_equal_or_unordered = OpLogicalOr.v2bool %unordered_not_equal, %unordered
     %condition = OpLogicalNotEqual.v2bool %ordered_equal, %not_equal_or_unordered
     %selected = OpSelect.v2f32 %condition, %state, %rhs
