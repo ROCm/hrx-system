@@ -12,6 +12,7 @@
 #include "binding/hip/api.h"
 #include "binding/hip/binding_internal.h"
 #include "binding/hip/error_state.h"
+#include "binding/hip/function_attributes.h"
 #include "binding/hip/function_handle.h"
 #include "common/context.h"
 #include "common/device.h"
@@ -419,15 +420,6 @@ static hipError_t iree_hip_library_validate_options(
         return hipErrorInvalidValue;
     }
   }
-  return hipSuccess;
-}
-
-static hipError_t iree_hip_library_u32_attribute(uint32_t attribute,
-                                                 int* out_value) {
-  if (attribute > INT_MAX) {
-    return hipErrorInvalidValue;
-  }
-  *out_value = (int)attribute;
   return hipSuccess;
 }
 
@@ -909,63 +901,8 @@ HIPAPI hipError_t hipKernelGetAttribute(int* value,
     HIP_RETURN_ERROR(result);
   }
 
-  switch ((hipFuncAttribute_t)attribute) {
-    case hipFuncAttributeMaxThreadsPerBlock:
-      result = iree_hip_library_u32_attribute(
-          symbol->function_attributes.maximum_threads_per_block, value);
-      break;
-    case hipFuncAttributeSharedSizeBytes:
-      result = iree_hip_library_u32_attribute(
-          symbol->function_attributes.fixed_shared_memory_size, value);
-      break;
-    case hipFuncAttributeConstSizeBytes:
-      result = hipErrorNotSupported;
-      break;
-    case hipFuncAttributeLocalSizeBytes:
-      result = iree_hip_library_u32_attribute(
-          symbol->function_attributes.fixed_local_memory_size, value);
-      break;
-    case hipFuncAttributeNumRegs:
-      result = iree_hip_library_u32_attribute(
-          symbol->function_attributes.register_count, value);
-      break;
-    case hipFuncAttributePtxVersion:
-    case hipFuncAttributeBinaryVersion: {
-      int major = 0;
-      int minor = 0;
-      result = hipDeviceGetAttribute(
-          &major, hipDeviceAttributeComputeCapabilityMajor, device);
-      if (result == hipSuccess) {
-        result = hipDeviceGetAttribute(
-            &minor, hipDeviceAttributeComputeCapabilityMinor, device);
-      }
-      if (result == hipSuccess &&
-          (major < 0 || minor < 0 || major > (INT_MAX - minor) / 10)) {
-        result = hipErrorInvalidValue;
-      }
-      if (result == hipSuccess) {
-        *value = major * 10 + minor;
-      }
-      break;
-    }
-    case hipFuncAttributeCacheModeCA:
-      *value = 0;
-      break;
-    case hipFuncAttributePreferredSharedMemoryCarveout:
-      *value = iree_atomic_load(&symbol->preferred_shared_memory_carveout,
-                                iree_memory_order_relaxed);
-      break;
-    case hipFuncAttributeMaxDynamicSharedSizeBytes:
-      result = iree_hip_library_u32_attribute(
-          iree_hal_streaming_function_attributes_dynamic_shared_memory_size(
-              &symbol->function_attributes),
-          value);
-      break;
-    default:
-      result = hipErrorInvalidValue;
-      break;
-  }
-
+  result = iree_hip_function_get_attribute(
+      symbol, (hipFuncAttribute_t)attribute, value);
   iree_hip_library_release(library);
   HIP_RETURN_ERROR(result);
 }

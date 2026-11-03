@@ -649,15 +649,25 @@ typedef enum hipSharedMemConfig {
 } hipSharedMemConfig;
 
 typedef struct hipFuncAttributes {
+  // AMD compatibility architecture version: major * 10 + minor.
   int binaryVersion;
+  // CUDA cache-all compilation mode; always zero on AMD.
   int cacheModeCA;
+  // Constant-memory usage, or SIZE_MAX when unavailable on AMDHSA.
   size_t constSizeBytes;
+  // Fixed private storage required per invocation, in bytes.
   size_t localSizeBytes;
+  // Current dynamic shared-memory limit per block, in bytes.
   int maxDynamicSharedSizeBytes;
+  // Maximum supported invocation count per block.
   int maxThreadsPerBlock;
+  // Number of 32-bit vector registers required per invocation.
   int numRegs;
+  // Preferred shared-memory percentage, or -1 for the device default.
   int preferredShmemCarveout;
+  // AMD compatibility architecture version: major * 10 + minor.
   int ptxVersion;
+  // Fixed shared storage required per block, in bytes.
   size_t sharedSizeBytes;
 } hipFuncAttributes;
 
