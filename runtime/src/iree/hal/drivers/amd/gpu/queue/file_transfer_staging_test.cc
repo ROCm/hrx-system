@@ -456,6 +456,8 @@ TEST_P(FileTransferStagingTest, HealthyCopyPublishesBytesBeforeCompletion) {
   EXPECT_EQ(file_failures_, 0u);
   EXPECT_EQ(queue_.boundaries, 2u);
   if (GetParam()) {
+    // Close the caller's exclusive handle before reopening the completed file.
+    file_.reset();
     iree_io_file_contents_t* contents = nullptr;
     IREE_ASSERT_OK(iree_io_file_contents_read(file_path_.path_view(),
                                               allocator_, &contents));
