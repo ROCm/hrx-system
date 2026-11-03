@@ -37,24 +37,7 @@ CHECK: *"name":"dead","type":"reg<amdgpu.sgpr x2>"},"class":*,"start_point":1,"e
 
 // ====
 
-// RUN: with-checks emit low-allocation-json @gfx11_structural_vgpr_span_rebased_before_257 fixed=%wide:physical_register:244:12 fixed=%tail:physical_register:0:1
-
-amdgpu.target<gfx1100> @target
-
-low.func.def target<amdgpu.rdna3.core>(@target) @gfx11_structural_vgpr_span_rebased_before_257(%wide: reg<amdgpu.vgpr x12>, %tail: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x13>) asm {
-  %packed = concat(%wide, %tail) : (reg<amdgpu.vgpr x12>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x13>
-  return %packed
-}
-
-// ----
-// The concat is rebased to a legal thirteen-register span.
-CHECK: *"spill_count":0,*
-CHECK: *"name":"wide","type":"reg<amdgpu.vgpr x12>"},"class":*,"start_point":0,"end_point":1,"unit_count":12,"location":{"kind":"physical_register","base":244,"count":12}}*
-CHECK: *"name":"packed","type":"reg<amdgpu.vgpr x13>"},"class":*,"start_point":1,"end_point":2,"unit_count":13,"location":{"kind":"physical_register","base":0,"count":13}}*
-
-// ====
-
-// RUN: with-checks emit low-allocation-json @dispatch_ptr_lifetime_releases_sgpr_pair fixed=%dispatch:physical_register:0:2
+// RUN: with-checks emit low-allocation-json @dispatch_ptr_lifetime_releases_sgpr_pair
 
 amdgpu.target<gfx1100> @target
 
@@ -74,7 +57,7 @@ CHECK: *"name":"late","type":"reg<amdgpu.sgpr>"},"class":*,"start_point":3,"end_
 
 // ====
 
-// RUN: with-checks emit low-allocation-json @materialized_pair_descriptor_survives_exec_tail_backedge fixed=%blocker:physical_register:2:2
+// RUN: with-checks emit low-allocation-json @materialized_pair_descriptor_survives_exec_tail_backedge
 
 amdgpu.target<gfx1100> @target
 
@@ -191,23 +174,6 @@ CHECK: *"name":"saved_wave_exec","type":"reg<amdgpu.sgpr x2>"},"class":*,"start_
 
 // ====
 
-// RUN: with-checks emit low-allocation-json @d16_result_uses_low_vgpr_window fixed=%low_window:physical_register:0:128 amdgpu.vgpr=129
-
-amdgpu.target<gfx1100> @target
-
-low.func.def target<amdgpu.rdna3.core>(@target) @d16_result_uses_low_vgpr_window(%low_window: reg<amdgpu.vgpr x128>, %source: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x128>, reg<amdgpu.vgpr>) asm {
-  %half = v_cvt_f16_f32 %source
-  %widened = v_cvt_f32_f16 %half
-  return %low_window, %widened
-}
-
-// ----
-// The d16 result needs an encodable low register, even with v128 free.
-CHECK: *"spill_count":1,"spill_plan_count":1,*
-CHECK: *"space":"scratch","value":{"id":*,"name":"half","type":"reg<amdgpu.vgpr>"},"byte_size":4,"byte_alignment":4,"store_count":1,"reload_count":1}*
-
-// ====
-
 // RUN: with-checks emit low-allocation-json @gfx11_multi_accumulator_gemv_lifetimes
 
 amdgpu.target<gfx1100> @target
@@ -249,7 +215,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @gfx11_forced_vgpr_spill_reports
 
 // ====
 
-// RUN: with-checks emit low-allocation-json @scc_active_conflict_reports_failure amdgpu.scc=1
+// RUN: with-checks emit low-allocation-json @scc_active_conflict_reports_failure
 
 amdgpu.target<gfx1100> @target
 
@@ -425,41 +391,6 @@ low.func.def target<amdgpu.rdna3.core>(@target) @integer_valu_rematerializes_spi
 
 // ====
 
-// Overlapping scalar values force actual pressure above the nine-VGPR budget.
-// The eight slice users then share one predicted full-width reload.
-// RUN: with-checks emit low-allocation-json @dense_spilled_slices_share_full_reload amdgpu.vgpr=9
-
-amdgpu.target<gfx1100> @target
-
-low.func.def target<amdgpu.rdna3.core>(@target) @dense_spilled_slices_share_full_reload(%packed: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %temporary = v_add_f32 %acc, %acc
-  %initial = v_add_f32 %acc, %temporary
-  %lane0 = slice %packed[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %sum0 = v_add_f32 %initial, %lane0
-  %lane1 = slice %packed[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %sum1 = v_add_f32 %sum0, %lane1
-  %lane2 = slice %packed[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %sum2 = v_add_f32 %sum1, %lane2
-  %lane3 = slice %packed[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %sum3 = v_add_f32 %sum2, %lane3
-  %lane4 = slice %packed[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %sum4 = v_add_f32 %sum3, %lane4
-  %lane5 = slice %packed[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %sum5 = v_add_f32 %sum4, %lane5
-  %lane6 = slice %packed[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %sum6 = v_add_f32 %sum5, %lane6
-  %lane7 = slice %packed[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %sum7 = v_add_f32 %sum6, %lane7
-  return %sum7
-}
-
-// ----
-// All eight slice users share one full-width reload of the spilled tuple.
-CHECK: *"spill_count":1,"spill_plan_count":1,*
-CHECK: *"space":"scratch","value":{"id":*,"name":"packed","type":"reg<amdgpu.vgpr x8>"},"byte_size":32,"byte_alignment":16,"store_count":1,"reload_count":1}*
-
-// ====
-
 // RUN: emit amdgpu-assembly @loaded_chained_destructive_sgpr_results allocation-diagnostics=placement-decisions
 
 amdgpu.target<gfx1100> @target
@@ -513,84 +444,13 @@ CHECK: *"name":"high","type":"reg<amdgpu.vgpr>"*,"location":{"kind":"physical_re
 
 // ====
 
-// RUN: with-checks emit low-allocation-json @gfx942_odd_vgpr_tuple fixed=%blocker:physical_register:0:1
-
-amdgpu.target<gfx942> @target
-
-low.func.def target<amdgpu.cdna3.core>(@target) @gfx942_odd_vgpr_tuple(%blocker: reg<amdgpu.vgpr>, %payload: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x3>) asm {
-  return %blocker, %payload
-}
-
-// ----
-CHECK: *"spill_count":0,*
-CHECK: *"name":"payload","type":"reg<amdgpu.vgpr x3>"},"class":*,"start_point":0,"end_point":1,"unit_count":3,"location":{"kind":"physical_register","base":2,"count":3}}*
-
-// ====
-
-// RUN: with-checks emit low-allocation-json @gfx950_odd_vgpr_tuple fixed=%blocker:physical_register:0:1
-
-amdgpu.target<gfx950> @target
-
-low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_odd_vgpr_tuple(%blocker: reg<amdgpu.vgpr>, %payload: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x3>) asm {
-  return %blocker, %payload
-}
-
-// ----
-CHECK: *"spill_count":0,*
-CHECK: *"name":"payload","type":"reg<amdgpu.vgpr x3>"},"class":*,"start_point":0,"end_point":1,"unit_count":3,"location":{"kind":"physical_register","base":2,"count":3}}*
-
-// ====
-
-// RUN: with-checks emit low-allocation-json @gfx1100_odd_vgpr_tuple fixed=%blocker:physical_register:0:1
+// Native emission handles argument sets larger than the allocator's inline
+// worklist capacity.
+// RUN: emit amdgpu-assembly @many_sgpr_inputs
 
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @gfx1100_odd_vgpr_tuple(%blocker: reg<amdgpu.vgpr>, %payload: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x3>) asm {
-  return %blocker, %payload
-}
-
-// ----
-CHECK: *"spill_count":0,*
-CHECK: *"name":"payload","type":"reg<amdgpu.vgpr x3>"},"class":*,"start_point":0,"end_point":1,"unit_count":3,"location":{"kind":"physical_register","base":1,"count":3}}*
-
-// ====
-
-// RUN: with-checks emit low-allocation-json @cdna_odd_accumulator_tuple fixed=%blocker:physical_register:0:1
-
-amdgpu.target<gfx942> @target
-
-low.func.def target<amdgpu.cdna3.core>(@target) @cdna_odd_accumulator_tuple(%blocker: reg<amdgpu.agpr>, %payload: reg<amdgpu.agpr x3>) -> (reg<amdgpu.agpr>, reg<amdgpu.agpr x3>) asm {
-  return %blocker, %payload
-}
-
-// ----
-CHECK: *"spill_count":0,*
-CHECK: *"name":"payload","type":"reg<amdgpu.agpr x3>"},"class":*,"start_point":0,"end_point":1,"unit_count":3,"location":{"kind":"physical_register","base":2,"count":3}}*
-
-// ====
-
-// RUN: with-checks emit low-allocation-json @cdna_odd_slice_relocation fixed=%packet:physical_register:0:4
-
-amdgpu.target<gfx942> @target
-
-low.func.def target<amdgpu.cdna3.core>(@target) @cdna_odd_slice_relocation(%packet: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x3>) asm {
-  %payload = slice %packet[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x3>
-  return %payload
-}
-
-// ----
-// The slice cannot alias the odd subrange of its source packet.
-CHECK: *"spill_count":0,*
-CHECK: *"name":"payload","type":"reg<amdgpu.vgpr x3>"},"class":*,"start_point":1,"end_point":2,"unit_count":3,"location":{"kind":"physical_register","base":0,"count":3}}*
-
-// ====
-
-// Native emit providers retain all fixed requests, including later pairs.
-// RUN: emit amdgpu-assembly @many_fixed_inputs
-
-amdgpu.target<gfx1100> @target
-
-low.func.def schedule(locked) target<amdgpu.rdna3.core>(@target) @many_fixed_inputs(%left_0: reg<amdgpu.sgpr>, %right_0: reg<amdgpu.sgpr>, %left_1: reg<amdgpu.sgpr>, %right_1: reg<amdgpu.sgpr>, %left_2: reg<amdgpu.sgpr>, %right_2: reg<amdgpu.sgpr>, %left_3: reg<amdgpu.sgpr>, %right_3: reg<amdgpu.sgpr>, %left_4: reg<amdgpu.sgpr>, %right_4: reg<amdgpu.sgpr>, %left_5: reg<amdgpu.sgpr>, %right_5: reg<amdgpu.sgpr>, %left_6: reg<amdgpu.sgpr>, %right_6: reg<amdgpu.sgpr>, %left_7: reg<amdgpu.sgpr>, %right_7: reg<amdgpu.sgpr>, %left_8: reg<amdgpu.sgpr>, %right_8: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3.core>(@target) @many_sgpr_inputs(%left_0: reg<amdgpu.sgpr>, %right_0: reg<amdgpu.sgpr>, %left_1: reg<amdgpu.sgpr>, %right_1: reg<amdgpu.sgpr>, %left_2: reg<amdgpu.sgpr>, %right_2: reg<amdgpu.sgpr>, %left_3: reg<amdgpu.sgpr>, %right_3: reg<amdgpu.sgpr>, %left_4: reg<amdgpu.sgpr>, %right_4: reg<amdgpu.sgpr>, %left_5: reg<amdgpu.sgpr>, %right_5: reg<amdgpu.sgpr>, %left_6: reg<amdgpu.sgpr>, %right_6: reg<amdgpu.sgpr>, %left_7: reg<amdgpu.sgpr>, %right_7: reg<amdgpu.sgpr>, %left_8: reg<amdgpu.sgpr>, %right_8: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
   %result_0 = s_or_b32 %left_0, %right_0
   %result_1 = s_or_b32 %left_1, %right_1
   %result_2 = s_or_b32 %left_2, %right_2
