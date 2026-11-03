@@ -19,6 +19,7 @@
 #include "loom/target/emit/spirv/function_control.h"
 #include "loom/target/emit/spirv/module_abi.h"
 #include "loom/target/emit/spirv/module_instructions.h"
+#include "loom/target/emit/spirv/module_selection.h"
 #include "loom/target/emit/spirv/module_storage.h"
 #include "loom/target/emit/spirv/module_types.h"
 #include "loom/target/emit/spirv/module_values.h"
@@ -650,12 +651,10 @@ static iree_status_t loom_spirv_emit_select_packet(
   IREE_RETURN_IF_ERROR(loom_spirv_emit_prepare_packet_result(
       state, packet, result_type_id, loom_spirv_packet_row_result_type(row),
       &result_id));
-  const uint32_t instruction_operands[] = {
-      result_type_id, result_id, operands[0].id, operands[1].id, operands[2].id,
-  };
-  IREE_RETURN_IF_ERROR(loom_spirv_binary_write_instruction(
-      loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_FUNCTION),
-      row->opcode, instruction_operands, IREE_ARRAYSIZE(instruction_operands)));
+  IREE_RETURN_IF_ERROR(loom_spirv_module_emit_selection(
+      state->type_context, loom_spirv_packet_row_result_type(row),
+      result_type_id, result_id, operands[0].id, operands[1].id,
+      operands[2].id));
   return loom_spirv_emit_define_packet_result(
       state, packet, result_id, result_type_id,
       loom_spirv_packet_row_result_type(row));

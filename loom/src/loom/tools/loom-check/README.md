@@ -229,6 +229,9 @@ Binary output uses `emit vm-dis target=vm:core` or
 accept `@function` for an explicit entry. The selected entry remains a compiler
 root even when private; specialization does not change source visibility or
 add an export. Its reachable helpers may be inlined and removed normally.
+For authored Low modules, `emit spirv-dis target=spirv:vulkan1.3+bda` binds the
+profile and emits directly; `input=source-low` additionally runs source
+preparation and lowering.
 
 SPIR-V lowering fixtures use `emit spirv-low` to compare Low IR without binary
 emission or external SPIR-V tools. They can refine a selected `target=` profile

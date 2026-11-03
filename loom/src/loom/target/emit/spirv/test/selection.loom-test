@@ -1,0 +1,191 @@
+// RUN: emit spirv-dis @floating_selection target=spirv:vulkan1.3+bda+extended-types validate
+// REQUIRES: spirv-dis, spirv-val
+
+// Exact carrier expansion and lane wiring; executable payload semantics live
+// in the shared numeric/vector/selection corpus.
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @floating_selection() asm {
+  %true = OpConstantTrue.bool
+  %false = OpConstantFalse.bool
+  %pair_mask = OpCompositeConstruct.v2bool %true, %false
+  %triple_mask = OpCompositeConstruct.v3bool %true, %false, %true
+
+  // F32 preserves the scalar or vector shape through u32 bitcasts.
+  %one_f32 = OpConstant.f32 1065353216
+  %two_f32 = OpConstant.f32 1073741824
+  %scalar_f32 = OpSelect.f32 %true, %one_f32, %two_f32
+  %left_f32 = OpCompositeConstruct.v2f32 %one_f32, %two_f32
+  %right_f32 = OpCompositeConstruct.v2f32 %two_f32, %one_f32
+  %vector_f32 = OpSelect.v2f32 %pair_mask, %left_f32, %right_f32
+
+  // Both 16-bit formats pair each scalar into one u32 carrier. An odd vector
+  // length checks that packing never couples the conditions of adjacent lanes.
+  %one_bf16 = OpConstant.bf16 16256
+  %two_bf16 = OpConstant.bf16 16384
+  %scalar_bf16 = OpSelect.bf16 %false, %one_bf16, %two_bf16
+  %one_f16 = OpConstant.f16 15360
+  %two_f16 = OpConstant.f16 16384
+  %left_f16 = OpCompositeConstruct.v3f16 %one_f16, %two_f16, %one_f16
+  %right_f16 = OpCompositeConstruct.v3f16 %two_f16, %one_f16, %two_f16
+  %vector_f16 = OpSelect.v3f16 %triple_mask, %left_f16, %right_f16
+
+  // Each F64 component uses two u32 words with the same condition.
+  %one_f64 = OpConstant.f64 4607182418800017408
+  %two_f64 = OpConstant.f64 4611686018427387904
+  %scalar_f64 = OpSelect.f64 %true, %one_f64, %two_f64
+  %left_f64 = OpCompositeConstruct.v2f64 %one_f64, %two_f64
+  %right_f64 = OpCompositeConstruct.v2f64 %two_f64, %one_f64
+  %vector_f64 = OpSelect.v2f64 %pair_mask, %left_f64, %right_f64
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability Float16
+               OpCapability Float64
+               OpCapability Int8
+               OpCapability Int16
+               OpCapability StorageBuffer8BitAccess
+               OpCapability StorageBuffer16BitAccess
+               OpCapability BFloat16TypeKHR
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpExtension "SPV_KHR_8bit_storage"
+               OpExtension "SPV_KHR_16bit_storage"
+               OpExtension "SPV_KHR_bfloat16"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %floating_selection "floating_selection"
+               OpExecutionMode %floating_selection LocalSize 1 1 1
+               OpName %floating_selection "floating_selection"
+               OpName %true "true"
+               OpName %false "false"
+               OpName %pair_mask "pair_mask"
+               OpName %triple_mask "triple_mask"
+               OpName %one_f32 "one_f32"
+               OpName %two_f32 "two_f32"
+               OpName %scalar_f32 "scalar_f32"
+               OpName %left_f32 "left_f32"
+               OpName %right_f32 "right_f32"
+               OpName %vector_f32 "vector_f32"
+               OpName %one_bf16 "one_bf16"
+               OpName %two_bf16 "two_bf16"
+               OpName %scalar_bf16 "scalar_bf16"
+               OpName %one_f16 "one_f16"
+               OpName %two_f16 "two_f16"
+               OpName %left_f16 "left_f16"
+               OpName %right_f16 "right_f16"
+               OpName %vector_f16 "vector_f16"
+               OpName %one_f64 "one_f64"
+               OpName %two_f64 "two_f64"
+               OpName %scalar_f64 "scalar_f64"
+               OpName %left_f64 "left_f64"
+               OpName %right_f64 "right_f64"
+               OpName %vector_f64 "vector_f64"
+       %void = OpTypeVoid
+          %3 = OpTypeFunction %void
+       %bool = OpTypeBool
+       %true = OpConstantTrue %bool
+      %false = OpConstantFalse %bool
+     %v2bool = OpTypeVector %bool 2
+     %v3bool = OpTypeVector %bool 3
+      %float = OpTypeFloat 32
+    %one_f32 = OpConstant %float 1
+    %two_f32 = OpConstant %float 2
+       %uint = OpTypeInt 32 0
+    %v2float = OpTypeVector %float 2
+     %v2uint = OpTypeVector %uint 2
+   %bfloat16 = OpTypeFloat 16 BFloat16KHR
+   %one_bf16 = OpConstant %bfloat16 0x1p+0
+   %two_bf16 = OpConstant %bfloat16 0x1p+1
+ %v2bfloat16 = OpTypeVector %bfloat16 2
+       %half = OpTypeFloat 16
+    %one_f16 = OpConstant %half 0x1p+0
+    %two_f16 = OpConstant %half 0x1p+1
+     %v3half = OpTypeVector %half 3
+     %v2half = OpTypeVector %half 2
+     %double = OpTypeFloat 64
+    %one_f64 = OpConstant %double 1
+    %two_f64 = OpConstant %double 2
+   %v2double = OpTypeVector %double 2
+%floating_selection = OpFunction %void None %3
+          %4 = OpLabel
+  %pair_mask = OpCompositeConstruct %v2bool %true %false
+%triple_mask = OpCompositeConstruct %v3bool %true %false %true
+         %17 = OpBitcast %uint %one_f32
+         %18 = OpBitcast %uint %two_f32
+         %19 = OpSelect %uint %true %17 %18
+ %scalar_f32 = OpBitcast %float %19
+   %left_f32 = OpCompositeConstruct %v2float %one_f32 %two_f32
+  %right_f32 = OpCompositeConstruct %v2float %two_f32 %one_f32
+         %25 = OpBitcast %v2uint %left_f32
+         %26 = OpBitcast %v2uint %right_f32
+         %27 = OpSelect %v2uint %pair_mask %25 %26
+ %vector_f32 = OpBitcast %v2float %27
+         %33 = OpCompositeConstruct %v2bfloat16 %one_bf16 %one_bf16
+         %34 = OpCompositeConstruct %v2bfloat16 %two_bf16 %two_bf16
+         %35 = OpBitcast %uint %33
+         %36 = OpBitcast %uint %34
+         %37 = OpSelect %uint %false %35 %36
+         %38 = OpBitcast %v2bfloat16 %37
+%scalar_bf16 = OpCompositeExtract %bfloat16 %38 0
+   %left_f16 = OpCompositeConstruct %v3half %one_f16 %two_f16 %one_f16
+  %right_f16 = OpCompositeConstruct %v3half %two_f16 %one_f16 %two_f16
+         %46 = OpCompositeExtract %bool %triple_mask 0
+         %47 = OpCompositeExtract %half %left_f16 0
+         %48 = OpCompositeExtract %half %right_f16 0
+         %51 = OpCompositeConstruct %v2half %47 %47
+         %52 = OpCompositeConstruct %v2half %48 %48
+         %53 = OpBitcast %uint %51
+         %54 = OpBitcast %uint %52
+         %55 = OpSelect %uint %46 %53 %54
+         %56 = OpBitcast %v2half %55
+         %49 = OpCompositeExtract %half %56 0
+         %57 = OpCompositeExtract %bool %triple_mask 1
+         %58 = OpCompositeExtract %half %left_f16 1
+         %59 = OpCompositeExtract %half %right_f16 1
+         %61 = OpCompositeConstruct %v2half %58 %58
+         %62 = OpCompositeConstruct %v2half %59 %59
+         %63 = OpBitcast %uint %61
+         %64 = OpBitcast %uint %62
+         %65 = OpSelect %uint %57 %63 %64
+         %66 = OpBitcast %v2half %65
+         %60 = OpCompositeExtract %half %66 0
+         %67 = OpCompositeExtract %bool %triple_mask 2
+         %68 = OpCompositeExtract %half %left_f16 2
+         %69 = OpCompositeExtract %half %right_f16 2
+         %71 = OpCompositeConstruct %v2half %68 %68
+         %72 = OpCompositeConstruct %v2half %69 %69
+         %73 = OpBitcast %uint %71
+         %74 = OpBitcast %uint %72
+         %75 = OpSelect %uint %67 %73 %74
+         %76 = OpBitcast %v2half %75
+         %70 = OpCompositeExtract %half %76 0
+ %vector_f16 = OpCompositeConstruct %v3half %49 %60 %70
+         %81 = OpCompositeConstruct %v2bool %true %true
+         %82 = OpBitcast %v2uint %one_f64
+         %83 = OpBitcast %v2uint %two_f64
+         %84 = OpSelect %v2uint %81 %82 %83
+ %scalar_f64 = OpBitcast %double %84
+   %left_f64 = OpCompositeConstruct %v2double %one_f64 %two_f64
+  %right_f64 = OpCompositeConstruct %v2double %two_f64 %one_f64
+         %89 = OpCompositeExtract %bool %pair_mask 0
+         %90 = OpCompositeExtract %double %left_f64 0
+         %91 = OpCompositeExtract %double %right_f64 0
+         %93 = OpCompositeConstruct %v2bool %89 %89
+         %94 = OpBitcast %v2uint %90
+         %95 = OpBitcast %v2uint %91
+         %96 = OpSelect %v2uint %93 %94 %95
+         %92 = OpBitcast %double %96
+         %97 = OpCompositeExtract %bool %pair_mask 1
+         %98 = OpCompositeExtract %double %left_f64 1
+         %99 = OpCompositeExtract %double %right_f64 1
+        %101 = OpCompositeConstruct %v2bool %97 %97
+        %102 = OpBitcast %v2uint %98
+        %103 = OpBitcast %v2uint %99
+        %104 = OpSelect %v2uint %101 %102 %103
+        %100 = OpBitcast %double %104
+ %vector_f64 = OpCompositeConstruct %v2double %92 %100
+               OpReturn
+               OpFunctionEnd

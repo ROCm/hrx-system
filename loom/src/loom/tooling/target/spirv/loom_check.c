@@ -20,9 +20,9 @@ typedef struct loom_spirv_loom_check_emit_request_t {
   bool validate;
   // Source-to-low control-flow shape when lowering source IR.
   loomc_target_control_flow_lowering_t control_flow_lowering;
-  // Optional source function selected for target specialization.
+  // Optional function selected for target specialization.
   iree_string_view_t function_name;
-  // Complete family:selector target spelling when the TARGET flag is present.
+  // Complete family:selector profile for source or Low input.
   iree_string_view_t target_specification;
 } loom_spirv_loom_check_emit_request_t;
 
@@ -141,11 +141,10 @@ static iree_status_t loom_spirv_loom_check_parse_emit_request(
   }
   if (!out_request->lower_source_to_low &&
       iree_any_bit_set(parse_options,
-                       LOOM_SPIRV_LOOM_CHECK_PARSE_OPTION_CONTROL_FLOW |
-                           LOOM_SPIRV_LOOM_CHECK_PARSE_OPTION_TARGET)) {
+                       LOOM_SPIRV_LOOM_CHECK_PARSE_OPTION_CONTROL_FLOW)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "spirv-dis target and control-flow options require input=source-low");
+        "spirv-dis control-flow option requires input=source-low");
   }
   return iree_ok_status();
 }
