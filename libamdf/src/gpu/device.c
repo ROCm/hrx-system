@@ -15,6 +15,7 @@
 #include "libamdf/src/gpu/memory_reservation.h"
 #include "libamdf/src/gpu/umd/device.h"
 #include "libamdf/src/gpu/umd/instance.h"
+#include "libamdf/src/gpu/umd/native.h"
 #include "libamdf/src/instance.h"
 #include "libamdf/src/platform/instance.h"
 #include "libamdf/src/structure.h"
@@ -24,6 +25,8 @@ typedef struct amdf_gpu_device_t {
   amdf_device_t base;
   // Exact native execution and address-domain state.
   amdf_gpu_umd_device_t* umd;
+  // Immutable operations selected from the endpoint before native creation.
+  const amdf_gpu_umd_api_t* umd_api;
   // Immutable identity, reset state, and achieved features from the provider.
   amdf_gpu_device_info_t info;
 } amdf_gpu_device_t;
@@ -34,7 +37,7 @@ _Static_assert(offsetof(amdf_gpu_device_t, base) == 0,
 static amdf_status_t amdf_gpu_device_destroy_native(
     amdf_device_t* base_device) {
   amdf_gpu_device_t* device = (amdf_gpu_device_t*)base_device;
-  const amdf_status_t status = amdf_gpu_umd_device_destroy(device->umd);
+  const amdf_status_t status = device->umd_api->device_destroy(device->umd);
   if (amdf_status_is_ok(status)) {
     device->umd = NULL;
   }
@@ -88,13 +91,20 @@ amdf_status_t AMDF_CALL amdf_gpu_device_create(
   }
   status = amdf_device_initialize(&device->base, &amdf_gpu_device_vtable,
                                   endpoint, AMDF_ENGINE_KIND_GPU);
+  device->umd_api =
+      amdf_gpu_umd_api_for_endpoint(amdf_endpoint_get_platform(endpoint));
   amdf_gpu_umd_device_result_t result = {0};
   if (amdf_status_is_ok(status)) {
     amdf_platform_instance_lock_native(instance->platform);
-    status = amdf_gpu_umd_instance_prepare(&instance->gpu, native_lifetime,
-                                           host_allocator);
+    if (instance->gpu_api == NULL) {
+      instance->gpu_api = device->umd_api;
+    }
+    amdf_assert(instance->gpu_api == device->umd_api &&
+                "one instance must use one GPU implementation");
+    status = device->umd_api->instance_prepare(&instance->gpu, native_lifetime,
+                                               host_allocator);
     if (amdf_status_is_ok(status)) {
-      status = amdf_gpu_umd_device_create(
+      status = device->umd_api->device_create(
           instance->gpu, amdf_endpoint_get_platform(endpoint), host_allocator,
           native_lifetime, &device->umd, &result);
     }
@@ -141,6 +151,11 @@ amdf_status_t AMDF_CALL amdf_gpu_device_query_info(
 
 amdf_gpu_umd_device_t* amdf_gpu_device_get_umd(amdf_device_t* device) {
   return ((amdf_gpu_device_t*)device)->umd;
+}
+
+const amdf_gpu_umd_api_t* amdf_gpu_device_get_umd_api(
+    const amdf_device_t* device) {
+  return ((const amdf_gpu_device_t*)device)->umd_api;
 }
 
 const amdf_gpu_device_info_t* amdf_gpu_device_get_info(

@@ -7,7 +7,7 @@
 #ifndef AMDF_SRC_GPU_UMD_DXG_LINUX_KERNEL_QUEUE_H_
 #define AMDF_SRC_GPU_UMD_DXG_LINUX_KERNEL_QUEUE_H_
 
-#include "libamdf/src/gpu/umd/kernel_queue.h"
+#include "libamdf/src/gpu/umd/dxg/linux/api.h"
 #include "libamdf/src/platform/linux/dxg/kmt.h"
 
 #ifdef __cplusplus

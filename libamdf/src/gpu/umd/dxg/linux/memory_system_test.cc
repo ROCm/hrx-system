@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <errno.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <array>
@@ -15,9 +16,9 @@
 
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
-#include "libamdf/src/gpu/umd/device.h"
 #include "libamdf/src/gpu/umd/dxg/adapter.h"
 #include "libamdf/src/gpu/umd/dxg/endpoint_properties.h"
+#include "libamdf/src/gpu/umd/dxg/linux/api.h"
 #include "libamdf/src/gpu/umd/dxg/linux/device.h"
 #include "libamdf/src/gpu/umd/memory.h"
 #include "libamdf/src/gpu/umd/memory_reservation.h"
@@ -103,6 +104,10 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
                                                         &endpoint_count);
               }),
               AMDF_STATUS_OK);
+    if (endpoint_count == 0 && access("/dev/dxg", F_OK) < 0 &&
+        errno == ENOENT) {
+      GTEST_SKIP() << "/dev/dxg is unavailable on this runner";
+    }
     ASSERT_GT(endpoint_count, 0u);
     std::vector<amdf_endpoint_summary_t> summaries(endpoint_count);
     ASSERT_EQ(InvokeSilently([&] {
@@ -119,13 +124,17 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
                                                    &endpoint_, &endpoint_info);
               }),
               AMDF_STATUS_OK);
+    if (endpoint_info.native_identity.type ==
+        AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_LINUX_DEVICE) {
+      GTEST_SKIP() << "/dev/dxg is unavailable on this runner";
+    }
     ASSERT_EQ(endpoint_info.engine_kind, AMDF_ENGINE_KIND_GPU);
 
     amdf_platform_instance_lock_native(instance_);
     const amdf_status_t device_status = InvokeSilently([&] {
-      return amdf_gpu_umd_device_create(nullptr, endpoint_, host_allocator,
-                                        AMDF_NATIVE_LIFETIME_INSTANCE, &device_,
-                                        &device_result_);
+      return amdf_gpu_linux_dxg_device_create(
+          nullptr, endpoint_, host_allocator, AMDF_NATIVE_LIFETIME_INSTANCE,
+          &device_, &device_result_);
     });
     amdf_platform_instance_unlock_native(instance_);
     ASSERT_EQ(device_status, AMDF_STATUS_OK);
@@ -147,18 +156,18 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
     }
     if (reservation_ != nullptr) {
       const amdf_status_t status = InvokeSilently([&] {
-        return amdf_gpu_umd_memory_reservation_destroy(reservation_);
+        return amdf_gpu_linux_dxg_memory_reservation_destroy(reservation_);
       });
       EXPECT_EQ(status, AMDF_STATUS_OK);
       reservation_ = nullptr;
     }
     if (mapping_ != nullptr) {
-      amdf_gpu_umd_host_mapping_destroy(mapping_);
+      amdf_gpu_linux_dxg_host_mapping_destroy(mapping_);
       mapping_ = nullptr;
     }
     if (memory_ != nullptr) {
-      const amdf_status_t status =
-          InvokeSilently([&] { return amdf_gpu_umd_memory_destroy(memory_); });
+      const amdf_status_t status = InvokeSilently(
+          [&] { return amdf_gpu_linux_dxg_memory_destroy(memory_); });
       EXPECT_EQ(status, AMDF_STATUS_OK);
       if (amdf_status_is_ok(status)) {
         memory_ = nullptr;
@@ -171,8 +180,8 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
       registered_pointer_ = nullptr;
     }
     if (device_ != nullptr && memory_ == nullptr) {
-      const amdf_status_t status =
-          InvokeSilently([&] { return amdf_gpu_umd_device_destroy(device_); });
+      const amdf_status_t status = InvokeSilently(
+          [&] { return amdf_gpu_linux_dxg_device_destroy(device_); });
       EXPECT_EQ(status, AMDF_STATUS_OK);
       if (amdf_status_is_ok(status)) {
         device_ = nullptr;
@@ -198,9 +207,9 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
 
   amdf_memory_native_profile_t QueryProfile(uint32_t ordinal) {
     amdf_memory_native_profile_t profile = {};
-    EXPECT_EQ(
-        amdf_gpu_umd_device_query_memory_profile(device_, ordinal, &profile),
-        AMDF_STATUS_OK);
+    EXPECT_EQ(amdf_gpu_linux_dxg_device_query_memory_profile(device_, ordinal,
+                                                             &profile),
+              AMDF_STATUS_OK);
     return profile;
   }
 
@@ -218,9 +227,9 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
         .registered_host_pointer = registered_host_pointer,
     };
     ASSERT_EQ(InvokeSilently([&] {
-                return amdf_gpu_umd_memory_prepare(device_, 0, nullptr,
-                                                   &profile, &create_info,
-                                                   &memory_, out_result);
+                return amdf_gpu_linux_dxg_memory_prepare(device_, 0, nullptr,
+                                                         &profile, &create_info,
+                                                         &memory_, out_result);
               }),
               AMDF_STATUS_OK);
     ASSERT_NE(memory_, nullptr);
@@ -239,9 +248,9 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
         .flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
     };
     ASSERT_EQ(InvokeSilently([&] {
-                return amdf_gpu_umd_memory_map(memory_, &profile.host_mapping,
-                                               &map_info, &mapping_,
-                                               out_result);
+                return amdf_gpu_linux_dxg_memory_map(
+                    memory_, &profile.host_mapping, &map_info, &mapping_,
+                    out_result);
               }),
               AMDF_STATUS_OK);
     ASSERT_NE(mapping_, nullptr);
@@ -251,7 +260,7 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
 
   void FlushMemory() {
     ASSERT_EQ(InvokeSilently([&] {
-                return amdf_gpu_umd_host_mapping_cache_control(
+                return amdf_gpu_linux_dxg_host_mapping_cache_control(
                     mapping_, AMDF_HOST_CACHE_OPERATION_FLUSH, 0, kByteLength);
               }),
               AMDF_STATUS_OK);
@@ -259,7 +268,7 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
 
   void InvalidateMemory() {
     ASSERT_EQ(InvokeSilently([&] {
-                return amdf_gpu_umd_host_mapping_cache_control(
+                return amdf_gpu_linux_dxg_host_mapping_cache_control(
                     mapping_, AMDF_HOST_CACHE_OPERATION_INVALIDATE, 0,
                     kByteLength);
               }),
@@ -369,12 +378,12 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
 
   void ReleaseMemory() {
     if (mapping_ != nullptr) {
-      amdf_gpu_umd_host_mapping_destroy(mapping_);
+      amdf_gpu_linux_dxg_host_mapping_destroy(mapping_);
       mapping_ = nullptr;
     }
-    ASSERT_EQ(
-        InvokeSilently([&] { return amdf_gpu_umd_memory_destroy(memory_); }),
-        AMDF_STATUS_OK);
+    ASSERT_EQ(InvokeSilently(
+                  [&] { return amdf_gpu_linux_dxg_memory_destroy(memory_); }),
+              AMDF_STATUS_OK);
     memory_ = nullptr;
   }
 
@@ -382,10 +391,11 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
     ASSERT_NE(reservation_, nullptr);
     amdf_gpu_umd_memory_reservation_t* reservation = reservation_;
     reservation_ = nullptr;
-    ASSERT_EQ(InvokeSilently([&] {
-                return amdf_gpu_umd_memory_reservation_destroy(reservation);
-              }),
-              AMDF_STATUS_OK);
+    ASSERT_EQ(
+        InvokeSilently([&] {
+          return amdf_gpu_linux_dxg_memory_reservation_destroy(reservation);
+        }),
+        AMDF_STATUS_OK);
   }
 
   amdf_platform_instance_t* instance_ = nullptr;
@@ -485,8 +495,8 @@ TEST_F(LinuxDxgMemorySystemTest, OwnsSparseVirtualMemory) {
   const amdf_memory_native_profile_t profile = QueryProfile(0);
   ASSERT_NE(profile.supported_flags & AMDF_MEMORY_FLAG_MAPPING_SOURCE, 0u);
   amdf_memory_reservation_capabilities_t capabilities = {};
-  ASSERT_EQ(amdf_gpu_umd_query_memory_reservation_capabilities(device_, 0,
-                                                               &capabilities),
+  ASSERT_EQ(amdf_gpu_linux_dxg_query_memory_reservation_capabilities(
+                device_, 0, &capabilities),
             AMDF_STATUS_OK);
   ASSERT_GT(capabilities.mapping_granularity, 0u);
   ASSERT_LE(3 * capabilities.mapping_granularity, kByteLength);
@@ -499,7 +509,7 @@ TEST_F(LinuxDxgMemorySystemTest, OwnsSparseVirtualMemory) {
 
   amdf_gpu_umd_device_t* devices[] = {device_};
   ASSERT_EQ(InvokeSilently([&] {
-              return amdf_gpu_umd_memory_reservation_create(
+              return amdf_gpu_linux_dxg_memory_reservation_create(
                   amdf_allocator_system(), 1, devices, kByteLength,
                   capabilities.reservation_granularity, 0, &reservation_);
             }),
@@ -509,7 +519,7 @@ TEST_F(LinuxDxgMemorySystemTest, OwnsSparseVirtualMemory) {
   uint32_t mapping_access_ordinal = UINT32_MAX;
   uint64_t mapping_granularity = 0;
   amdf_memory_access_t required_access = 0;
-  amdf_gpu_umd_memory_reservation_query_access(
+  amdf_gpu_linux_dxg_memory_reservation_query_access(
       reservation_, 0, &address, &mapping_access_ordinal, &mapping_granularity,
       &required_access);
   ASSERT_NE(address, 0u);
@@ -534,7 +544,7 @@ TEST_F(LinuxDxgMemorySystemTest, OwnsSparseVirtualMemory) {
   };
   bool mutation_started = false;
   ASSERT_EQ(InvokeSilently([&] {
-              return amdf_gpu_umd_memory_reservation_update(
+              return amdf_gpu_linux_dxg_memory_reservation_update(
                   reservation_, 0, 2, initial, &mutation_started);
             }),
             AMDF_STATUS_OK);
@@ -549,7 +559,7 @@ TEST_F(LinuxDxgMemorySystemTest, OwnsSparseVirtualMemory) {
   };
   mutation_started = false;
   ASSERT_EQ(InvokeSilently([&] {
-              return amdf_gpu_umd_memory_reservation_update(
+              return amdf_gpu_linux_dxg_memory_reservation_update(
                   reservation_, 0, 1, &replacement, &mutation_started);
             }),
             AMDF_STATUS_OK);
@@ -561,7 +571,7 @@ TEST_F(LinuxDxgMemorySystemTest, OwnsSparseVirtualMemory) {
   };
   mutation_started = false;
   ASSERT_EQ(InvokeSilently([&] {
-              return amdf_gpu_umd_memory_reservation_update(
+              return amdf_gpu_linux_dxg_memory_reservation_update(
                   reservation_, 0, 1, &clear, &mutation_started);
             }),
             AMDF_STATUS_OK);

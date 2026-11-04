@@ -54,17 +54,6 @@ class LibamdfConfigureTest(unittest.TestCase):
         self.assertIn("build --//libamdf/config:enabled=true\n", config)
         self.assertIn("build --//libamdf/config:families=cdna,xdna\n", config)
 
-    def test_linux_gpu_provider_preserves_portable_and_native_selection(self):
-        for argument in (
-            "-DAMDF_LINUX_GPU_PROVIDER=dxg",
-            "--//libamdf/config/provider:linux_gpu=dxg",
-        ):
-            with self.subTest(argument=argument):
-                config = self.generate([argument])
-                self.assertIn(
-                    "build --//libamdf/config/provider:linux_gpu=dxg\n", config
-                )
-
     def test_explicit_disable_conflicts_with_native_amd_hal(self):
         with self.assertRaisesRegex(SystemExit, "conflicts with"):
             self.generate(["-DIREE_HAL_DRIVER_AMD=ON", "-DAMDF_BUILD=OFF"])
@@ -74,12 +63,6 @@ class LibamdfConfigureTest(unittest.TestCase):
             ["--//libamdf/config:families=banana"],
             ["-DAMDF_FAMILY_CDNA=OFF", "--//libamdf/config:families=rdna"],
             ["-DAMDF_BUILD=ON", "--//libamdf/config:enabled=true"],
-            ["-DAMDF_LINUX_GPU_PROVIDER=banana"],
-            ["--//libamdf/config/provider:linux_gpu=banana"],
-            [
-                "-DAMDF_LINUX_GPU_PROVIDER=dxg",
-                "--//libamdf/config/provider:linux_gpu=dxg",
-            ],
         ):
             with self.subTest(arguments=arguments), self.assertRaises(SystemExit):
                 self.generate(arguments)

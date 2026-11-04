@@ -163,6 +163,7 @@ class DxgEndpointTest : public ::testing::Test {
   void SetUp() override {
     fake_dxg = &native_;
     instance_.host_allocator = amdf_allocator_system();
+    instance_.kind = AMDF_LINUX_PLATFORM_KIND_DXG;
     instance_.connection.descriptor = 17;
     instance_.kmt.connection = &instance_.connection;
     instance_.kmt.host_allocator = &instance_.host_allocator;

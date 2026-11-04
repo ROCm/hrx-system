@@ -134,10 +134,32 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "api",
+    srcs = ["api.c"],
+    hdrs = ["api.h"],
+    target_compatible_with = ["@platforms//os:windows"],
+    visibility = ["//libamdf/src/gpu/umd:__pkg__"],
+    deps = [
+        ":clock",
+        ":device",
+        ":endpoint_profile",
+        ":kernel_queue",
+        ":memory",
+        ":memory_reservation",
+        "//libamdf/src/gpu/umd:api",
+        "//libamdf/src/gpu/umd/dxg:api",
+        "//libamdf/src/gpu/umd/dxg:event",
+        "//libamdf/src/gpu/umd/dxg:instance",
+        "//libamdf/src/gpu/umd/dxg:user_queue",
+    ],
+)
+
+amdf_cc_library(
     name = "wddm",
     target_compatible_with = ["@platforms//os:windows"],
     visibility = ["//libamdf/src/gpu/umd:__pkg__"],
     deps = [
+        ":api",
         ":clock",
         ":device",
         ":endpoint_profile",

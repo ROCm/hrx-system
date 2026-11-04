@@ -7,19 +7,7 @@
 #ifndef AMDF_SRC_PLATFORM_LINUX_ENDPOINT_H_
 #define AMDF_SRC_PLATFORM_LINUX_ENDPOINT_H_
 
-#include "libamdf/src/platform/endpoint.h"
-#include "libamdf/src/platform/linux/instance.h"
-
-struct amdf_platform_endpoint_t {
-  // Instance borrowed for fresh device-file identity validation.
-  amdf_platform_instance_t* instance;
-  // Immutable identity and PCI properties established on open.
-  amdf_endpoint_info_t info;
-  // OS attachment node with online CPUs at open, or UINT32_MAX when unknown.
-  uint32_t host_numa_node;
-  // Physical PCI attachment address captured without opening an execution file.
-  amdf_endpoint_pci_address_t pci_address;
-};
+#include "libamdf/src/platform/linux/endpoint_state.h"
 
 #ifdef __cplusplus
 extern "C" {

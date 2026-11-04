@@ -7,6 +7,7 @@
 #ifndef AMDF_SRC_GPU_UMD_DXG_LINUX_MEMORY_H_
 #define AMDF_SRC_GPU_UMD_DXG_LINUX_MEMORY_H_
 
+#include "libamdf/src/gpu/umd/dxg/linux/api.h"
 #include "libamdf/src/gpu/umd/dxg/memory.h"
 
 #ifdef __cplusplus

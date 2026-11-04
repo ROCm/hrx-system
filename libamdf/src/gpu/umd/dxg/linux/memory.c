@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 
+#include "libamdf/src/gpu/umd/dxg/linux/api.h"
 #include "libamdf/src/gpu/umd/dxg/linux/device.h"
 #include "libamdf/src/gpu/umd/dxg/memory.h"
 #include "libamdf/src/platform/linux/dxg/kmt.h"
@@ -183,14 +184,14 @@ amdf_gpu_dxg_memory_device_t amdf_gpu_linux_dxg_memory_device(
   };
 }
 
-amdf_status_t amdf_gpu_umd_device_query_memory_profile(
+amdf_status_t amdf_gpu_linux_dxg_device_query_memory_profile(
     amdf_gpu_umd_device_t* device, uint32_t memory_profile_ordinal,
     amdf_memory_native_profile_t* out_profile) {
   return amdf_gpu_dxg_query_memory_profile(&device->memory_capabilities,
                                            memory_profile_ordinal, out_profile);
 }
 
-amdf_status_t amdf_gpu_umd_memory_prepare_import(
+amdf_status_t amdf_gpu_linux_dxg_memory_prepare_import(
     amdf_gpu_umd_device_t* device, const amdf_memory_native_profile_t* profile,
     const amdf_memory_native_import_info_t* import_info,
     const amdf_external_memory_t* external_memory,
@@ -203,14 +204,14 @@ amdf_status_t amdf_gpu_umd_memory_prepare_import(
       (amdf_gpu_dxg_memory_t**)memory_state, out_result);
 }
 
-amdf_status_t amdf_gpu_umd_memory_export(
+amdf_status_t amdf_gpu_linux_dxg_memory_export(
     amdf_gpu_umd_memory_t* memory, const amdf_memory_export_info_t* export_info,
     amdf_external_memory_t* out_value) {
   return amdf_gpu_dxg_memory_export((amdf_gpu_dxg_memory_t*)memory, export_info,
                                     out_value);
 }
 
-amdf_status_t amdf_gpu_umd_memory_prepare(
+amdf_status_t amdf_gpu_linux_dxg_memory_prepare(
     amdf_gpu_umd_device_t* device, uint32_t peer_count,
     amdf_gpu_umd_device_t* const* peer_devices,
     const amdf_memory_native_profile_t* profile,
@@ -227,27 +228,27 @@ amdf_status_t amdf_gpu_umd_memory_prepare(
                                      out_result);
 }
 
-uintptr_t amdf_gpu_umd_memory_host_mapping_source(
+uintptr_t amdf_gpu_linux_dxg_memory_host_mapping_source(
     amdf_gpu_umd_memory_t* memory) {
   return amdf_gpu_dxg_memory_host_mapping_source(
       (amdf_gpu_dxg_memory_t*)memory);
 }
 
-amdf_status_t amdf_gpu_umd_memory_destroy(amdf_gpu_umd_memory_t* memory) {
+amdf_status_t amdf_gpu_linux_dxg_memory_destroy(amdf_gpu_umd_memory_t* memory) {
   return amdf_gpu_dxg_memory_destroy((amdf_gpu_dxg_memory_t*)memory);
 }
 
-uint64_t amdf_gpu_umd_memory_remaining_backing_byte_length(
+uint64_t amdf_gpu_linux_dxg_memory_remaining_backing_byte_length(
     const amdf_gpu_umd_memory_t* memory) {
   return amdf_gpu_dxg_memory_remaining_backing_byte_length(
       (const amdf_gpu_dxg_memory_t*)memory);
 }
 
-void amdf_gpu_umd_memory_abandon(amdf_gpu_umd_memory_t* memory) {
+void amdf_gpu_linux_dxg_memory_abandon(amdf_gpu_umd_memory_t* memory) {
   amdf_gpu_dxg_memory_abandon((amdf_gpu_dxg_memory_t*)memory);
 }
 
-amdf_status_t amdf_gpu_umd_memory_map(
+amdf_status_t amdf_gpu_linux_dxg_memory_map(
     amdf_gpu_umd_memory_t* memory,
     const amdf_host_mapping_capabilities_t* capabilities,
     const amdf_memory_map_info_t* map_info,
@@ -258,7 +259,7 @@ amdf_status_t amdf_gpu_umd_memory_map(
                                  out_result);
 }
 
-amdf_status_t amdf_gpu_umd_host_mapping_cache_control(
+amdf_status_t amdf_gpu_linux_dxg_host_mapping_cache_control(
     amdf_gpu_umd_host_mapping_t* mapping, amdf_host_cache_operation_t operation,
     uint64_t memory_byte_offset, uint64_t byte_length) {
   return amdf_gpu_dxg_memory_cache_control((amdf_gpu_dxg_memory_t*)mapping,
@@ -266,6 +267,7 @@ amdf_status_t amdf_gpu_umd_host_mapping_cache_control(
                                            byte_length);
 }
 
-void amdf_gpu_umd_host_mapping_destroy(amdf_gpu_umd_host_mapping_t* mapping) {
+void amdf_gpu_linux_dxg_host_mapping_destroy(
+    amdf_gpu_umd_host_mapping_t* mapping) {
   (void)mapping;
 }

@@ -26,10 +26,8 @@ FAMILY_DEFINES = {
     "AMDF_FAMILY_XDNA": "xdna",
 }
 FAMILIES = tuple(FAMILY_DEFINES.values())
-LINUX_GPU_PROVIDERS = ("kfd", "dxg")
 NATIVE_ENABLED_FLAG = "--//libamdf/config:enabled"
 NATIVE_FAMILIES_FLAG = "--//libamdf/config:families"
-NATIVE_LINUX_GPU_PROVIDER_FLAG = "--//libamdf/config/provider:linux_gpu"
 
 _NAME = "libamdf"
 
@@ -41,10 +39,6 @@ class State:
     # Selected implementation families.
     families: set[str] = field(default_factory=lambda: set(FAMILIES))
     family_source: str | None = None  # Portable or native family spelling.
-    # Statically selected Linux GPU platform and UMD pair.
-    linux_gpu_provider: str = "kfd"
-    # Portable or native spelling that selected linux_gpu_provider.
-    linux_gpu_provider_source: str | None = None
     # Other owners that require the library in this request.
     requirements: set[str] = field(default_factory=set)
 
@@ -71,25 +65,10 @@ def _set_enabled(state: State, enabled: bool, source: str) -> None:
     state.enabled_source = source
 
 
-def _set_linux_gpu_provider(state: State, provider: str, source: str) -> None:
-    if state.linux_gpu_provider_source not in (None, source):
-        raise SystemExit(
-            "Do not mix portable -DAMDF_LINUX_GPU_PROVIDER with the native "
-            f"{NATIVE_LINUX_GPU_PROVIDER_FLAG}=... Bazel option."
-        )
-    if provider not in LINUX_GPU_PROVIDERS:
-        raise SystemExit("Unknown libamdf Linux GPU provider: " + provider)
-    state.linux_gpu_provider = provider
-    state.linux_gpu_provider_source = source
-
-
 def _apply_define(request: ConfigRequest, name: str, value: str) -> None:
     state = configuration(request)
     if name == "AMDF_BUILD":
         _set_enabled(state, parse_bool(name, value), "portable")
-        return
-    if name == "AMDF_LINUX_GPU_PROVIDER":
-        _set_linux_gpu_provider(state, value, "portable")
         return
     family = FAMILY_DEFINES[name]
     if state.family_source == "native":
@@ -108,9 +87,6 @@ def _apply_native_option(request: ConfigRequest, name: str, value: str) -> None:
     state = configuration(request)
     if name == NATIVE_ENABLED_FLAG:
         _set_enabled(state, parse_bool(name, value), "native")
-        return
-    if name == NATIVE_LINUX_GPU_PROVIDER_FLAG:
-        _set_linux_gpu_provider(state, value, "native")
         return
     if state.family_source == "portable":
         raise SystemExit(
@@ -152,10 +128,6 @@ def _sections(request: ConfigRequest) -> tuple[BazelrcSection, ...]:
                     "build", NATIVE_ENABLED_FLAG + "=" + str(state.enabled).lower()
                 ),
                 bazelrc_line("build", NATIVE_FAMILIES_FLAG + "=" + families),
-                bazelrc_line(
-                    "build",
-                    NATIVE_LINUX_GPU_PROVIDER_FLAG + "=" + state.linux_gpu_provider,
-                ),
             ),
         ),
     )
@@ -166,13 +138,11 @@ CONTRIBUTOR = Contributor(
     initialize=_initialize,
     defines={
         "AMDF_BUILD": _apply_define,
-        "AMDF_LINUX_GPU_PROVIDER": _apply_define,
         **{name: _apply_define for name in FAMILY_DEFINES},
     },
     native_options={
         NATIVE_ENABLED_FLAG: _apply_native_option,
         NATIVE_FAMILIES_FLAG: _apply_native_option,
-        NATIVE_LINUX_GPU_PROVIDER_FLAG: _apply_native_option,
     },
     finalize=_finalize,
     validate=_validate,

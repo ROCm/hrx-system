@@ -17,6 +17,7 @@
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/atomics.h"
 #include "libamdf/src/gpu/umd/dxg/adapter.h"
+#include "libamdf/src/gpu/umd/dxg/linux/api.h"
 #include "libamdf/src/gpu/umd/dxg/linux/device.h"
 #include "libamdf/src/platform/linux/file.h"
 #include "libamdf/src/platform/native_event.h"
@@ -101,7 +102,7 @@ static amdf_status_t amdf_gpu_linux_dxg_kernel_queue_register_wait(
   return status;
 }
 
-amdf_status_t amdf_gpu_umd_kernel_queue_create(
+amdf_status_t amdf_gpu_linux_dxg_kernel_queue_create(
     amdf_gpu_umd_device_t* device, amdf_queue_command_type_t command_type,
     amdf_gpu_umd_kernel_queue_t** out_queue) {
   amdf_dxg_provider_gpu_queue_command_type_t native_command_type;
@@ -172,11 +173,11 @@ amdf_status_t amdf_gpu_umd_kernel_queue_create(
   return status;
 }
 
-amdf_status_t amdf_gpu_umd_kernel_queue_submit(
+amdf_status_t amdf_gpu_linux_dxg_kernel_queue_submit(
     amdf_gpu_umd_kernel_queue_t* queue, uint64_t command_buffer_address,
     uint64_t command_buffer_byte_length, uint64_t submission) {
   const amdf_status_t terminal_status =
-      amdf_gpu_umd_kernel_queue_query_terminal_status(queue);
+      amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(queue);
   if (!amdf_status_is_ok(terminal_status)) {
     return terminal_status;
   }
@@ -209,13 +210,13 @@ amdf_status_t amdf_gpu_umd_kernel_queue_submit(
   return status;
 }
 
-uint64_t amdf_gpu_umd_kernel_queue_query_progress(
+uint64_t amdf_gpu_linux_dxg_kernel_queue_query_progress(
     const amdf_gpu_umd_kernel_queue_t* queue) {
   return amdf_gpu_linux_dxg_device_status_query_fence_progress(
       &queue->device->status, queue->progress_fence_pointer);
 }
 
-amdf_status_t amdf_gpu_umd_kernel_queue_query_terminal_status(
+amdf_status_t amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(
     const amdf_gpu_umd_kernel_queue_t* queue) {
   const amdf_status_t failure =
       amdf_atomic_uint64_load_acquire(&queue->failure);
@@ -224,7 +225,7 @@ amdf_status_t amdf_gpu_umd_kernel_queue_query_terminal_status(
              : failure;
 }
 
-uint32_t amdf_gpu_umd_kernel_queue_mapping_capacity(
+uint32_t amdf_gpu_linux_dxg_kernel_queue_mapping_capacity(
     const amdf_gpu_umd_kernel_queue_t* queue) {
   // WDDM can block the caller beyond 128 queued updates. Counting the entire
   // unretired prefix is conservative and needs no second operation ledger.
@@ -235,7 +236,8 @@ amdf_status_t amdf_gpu_linux_dxg_kernel_queue_update_memory(
     amdf_gpu_umd_kernel_queue_t* queue, uint32_t operation_count,
     D3DDDI_UPDATEGPUVIRTUALADDRESS_OPERATION* operations, uint64_t submission,
     bool* mutation_started, bool* accepted) {
-  amdf_status_t status = amdf_gpu_umd_kernel_queue_query_terminal_status(queue);
+  amdf_status_t status =
+      amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(queue);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -278,22 +280,24 @@ amdf_status_t amdf_gpu_linux_dxg_kernel_queue_update_memory(
   return status;
 }
 
-amdf_native_event_types_t amdf_gpu_umd_kernel_queue_query_notification_types(
+amdf_native_event_types_t
+amdf_gpu_linux_dxg_kernel_queue_query_notification_types(
     const amdf_gpu_umd_kernel_queue_t* queue) {
   (void)queue;
   return AMDF_NATIVE_EVENT_TYPE_BIT_EVENTFD;
 }
 
-amdf_status_t amdf_gpu_umd_kernel_queue_request_notification(
+amdf_status_t amdf_gpu_linux_dxg_kernel_queue_request_notification(
     amdf_gpu_umd_kernel_queue_t* queue, uint64_t native_submission,
     const amdf_native_event_t* event) {
   if (native_submission == 0) {
     return amdf_platform_native_event_signal(event);
   }
   // Sampling progress detects the reset sentinel before the completion check.
-  const uint64_t progress = amdf_gpu_umd_kernel_queue_query_progress(queue);
+  const uint64_t progress =
+      amdf_gpu_linux_dxg_kernel_queue_query_progress(queue);
   const amdf_status_t terminal_status =
-      amdf_gpu_umd_kernel_queue_query_terminal_status(queue);
+      amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(queue);
   if (!amdf_status_is_ok(terminal_status)) {
     return terminal_status;
   }
@@ -304,17 +308,19 @@ amdf_status_t amdf_gpu_umd_kernel_queue_request_notification(
       queue, native_submission, (int)event->payload.file_descriptor);
 }
 
-amdf_status_t amdf_gpu_umd_kernel_queue_wait(
+amdf_status_t amdf_gpu_linux_dxg_kernel_queue_wait(
     amdf_gpu_umd_kernel_queue_t* queue, uint64_t native_submission,
     const amdf_wait_deadline_t* deadline) {
-  amdf_status_t status = amdf_gpu_umd_kernel_queue_query_terminal_status(queue);
+  amdf_status_t status =
+      amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(queue);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
 
   amdf_wait_budget_t remaining;
-  while (amdf_gpu_umd_kernel_queue_query_progress(queue) < native_submission) {
-    status = amdf_gpu_umd_kernel_queue_query_terminal_status(queue);
+  while (amdf_gpu_linux_dxg_kernel_queue_query_progress(queue) <
+         native_submission) {
+    status = amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(queue);
     if (!amdf_status_is_ok(status)) {
       return status;
     }
@@ -331,8 +337,9 @@ amdf_status_t amdf_gpu_umd_kernel_queue_wait(
   // A finite waiter never blocks behind an infinite native wait. Contention
   // consumes the same original deadline.
   for (;;) {
-    const uint64_t progress = amdf_gpu_umd_kernel_queue_query_progress(queue);
-    status = amdf_gpu_umd_kernel_queue_query_terminal_status(queue);
+    const uint64_t progress =
+        amdf_gpu_linux_dxg_kernel_queue_query_progress(queue);
+    status = amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(queue);
     if (!amdf_status_is_ok(status) || progress >= native_submission) {
       return status;
     }
@@ -354,8 +361,9 @@ amdf_status_t amdf_gpu_umd_kernel_queue_wait(
   }
 
   while (amdf_status_is_ok(status) &&
-         amdf_gpu_umd_kernel_queue_query_progress(queue) < native_submission) {
-    status = amdf_gpu_umd_kernel_queue_query_terminal_status(queue);
+         amdf_gpu_linux_dxg_kernel_queue_query_progress(queue) <
+             native_submission) {
+    status = amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(queue);
     if (!amdf_status_is_ok(status)) {
       break;
     }
@@ -428,12 +436,12 @@ amdf_status_t amdf_gpu_umd_kernel_queue_wait(
   }
   amdf_gpu_linux_dxg_kernel_queue_unlock(queue);
   if (amdf_status_is_ok(status)) {
-    status = amdf_gpu_umd_kernel_queue_query_terminal_status(queue);
+    status = amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(queue);
   }
   return status;
 }
 
-amdf_status_t amdf_gpu_umd_kernel_queue_destroy(
+amdf_status_t amdf_gpu_linux_dxg_kernel_queue_destroy(
     amdf_gpu_umd_kernel_queue_t* queue) {
   amdf_status_t status = queue->inactivation_status;
   if (queue->native != NULL) {
@@ -453,17 +461,18 @@ amdf_status_t amdf_gpu_umd_kernel_queue_destroy(
   return status;
 }
 
-amdf_status_t amdf_gpu_umd_kernel_queue_inactivate(
+amdf_status_t amdf_gpu_linux_dxg_kernel_queue_inactivate(
     amdf_gpu_umd_kernel_queue_t* queue) {
   if (queue->native == NULL) {
     return queue->inactivation_status;
   }
   // Native removal consumes the fence mapping. Preserve only independently
   // checked progress and never manufacture completion of aborted work.
-  queue->inactivated_progress = amdf_gpu_umd_kernel_queue_query_progress(queue);
+  queue->inactivated_progress =
+      amdf_gpu_linux_dxg_kernel_queue_query_progress(queue);
   queue->progress_fence_pointer = &queue->inactivated_progress;
   const amdf_status_t failure =
-      amdf_gpu_umd_kernel_queue_query_terminal_status(queue);
+      amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(queue);
   uint64_t expected = AMDF_STATUS_OK;
   amdf_atomic_uint64_compare_exchange_acq_rel(
       &queue->failure, &expected,

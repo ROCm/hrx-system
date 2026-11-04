@@ -574,10 +574,30 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "api",
+    srcs = ["api.c"],
+    hdrs = ["api.h"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    visibility = ["//libamdf/src/gpu/umd:__pkg__"],
+    deps = [
+        ":clock",
+        ":device",
+        ":endpoint_profile",
+        ":event",
+        ":instance",
+        ":kernel_queue",
+        ":memory",
+        ":user_queue",
+        "//libamdf/src/gpu/umd:api",
+    ],
+)
+
+amdf_cc_library(
     name = "kfd",
     target_compatible_with = KFD_COMPATIBILITY,
     visibility = ["//libamdf/src/gpu/umd:__pkg__"],
     deps = [
+        ":api",
         ":buffer",
         ":clock",
         ":device",

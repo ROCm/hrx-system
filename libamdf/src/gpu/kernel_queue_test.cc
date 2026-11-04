@@ -759,6 +759,25 @@ uint64_t amdf_gpu_device_query_reset_epoch(const amdf_device_t* device) {
 amdf_gpu_umd_device_t* amdf_gpu_device_get_umd(amdf_device_t* device) {
   return &reinterpret_cast<Device*>(device)->native;
 }
+const amdf_gpu_umd_api_t* amdf_gpu_device_get_umd_api(const amdf_device_t*) {
+  static const amdf_gpu_umd_api_t api = {
+      .kernel_queue_create = amdf_gpu_umd_kernel_queue_create,
+      .kernel_queue_mapping_capacity =
+          amdf_gpu_umd_kernel_queue_mapping_capacity,
+      .kernel_queue_query_notification_types =
+          amdf_gpu_umd_kernel_queue_query_notification_types,
+      .kernel_queue_request_notification =
+          amdf_gpu_umd_kernel_queue_request_notification,
+      .kernel_queue_submit = amdf_gpu_umd_kernel_queue_submit,
+      .kernel_queue_query_progress = amdf_gpu_umd_kernel_queue_query_progress,
+      .kernel_queue_query_terminal_status =
+          amdf_gpu_umd_kernel_queue_query_terminal_status,
+      .kernel_queue_wait = amdf_gpu_umd_kernel_queue_wait,
+      .kernel_queue_destroy = amdf_gpu_umd_kernel_queue_destroy,
+      .kernel_queue_inactivate = amdf_gpu_umd_kernel_queue_inactivate,
+  };
+  return &api;
+}
 amdf_status_t amdf_gpu_umd_kernel_queue_create(
     amdf_gpu_umd_device_t* device, amdf_queue_command_type_t,
     amdf_gpu_umd_kernel_queue_t** out_queue) {

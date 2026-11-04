@@ -21,6 +21,8 @@ typedef struct amdf_gpu_host_mapping_t {
   amdf_host_mapping_t base;
   // Exact native host mapping state.
   amdf_gpu_umd_host_mapping_t* umd;
+  // Immutable operations copied from the mapped GPU memory owner.
+  const amdf_gpu_umd_api_t* umd_api;
 } amdf_gpu_host_mapping_t;
 
 _Static_assert(offsetof(amdf_gpu_host_mapping_t, base) == 0,
@@ -32,18 +34,25 @@ static amdf_gpu_umd_memory_t* amdf_gpu_memory_native(amdf_memory_t* memory,
       .native;
 }
 
+static const amdf_gpu_umd_api_t* amdf_gpu_memory_api(
+    const amdf_memory_t* memory, uint32_t access_ordinal) {
+  return amdf_gpu_device_get_umd_api(memory->accesses[access_ordinal].device);
+}
+
 static amdf_status_t amdf_gpu_memory_export(
     amdf_memory_t* memory, uint32_t access_ordinal,
     const amdf_memory_export_info_t* export_info,
     amdf_external_memory_t* out_value) {
-  return amdf_gpu_umd_memory_export(
-      amdf_gpu_memory_native(memory, access_ordinal), export_info, out_value);
+  return amdf_gpu_memory_api(memory, access_ordinal)
+      ->memory_export(amdf_gpu_memory_native(memory, access_ordinal),
+                      export_info, out_value);
 }
 
 static uintptr_t amdf_gpu_memory_host_mapping_source(amdf_memory_t* memory,
                                                      uint32_t access_ordinal) {
-  return amdf_gpu_umd_memory_host_mapping_source(
-      amdf_gpu_memory_native(memory, access_ordinal));
+  return amdf_gpu_memory_api(memory, access_ordinal)
+      ->memory_host_mapping_source(
+          amdf_gpu_memory_native(memory, access_ordinal));
 }
 
 static amdf_status_t amdf_gpu_memory_describe_site(
@@ -77,7 +86,7 @@ static amdf_status_t amdf_gpu_host_mapping_cache_control(
     amdf_host_mapping_t* base_mapping, amdf_host_cache_operation_t operation,
     uint64_t byte_offset, uint64_t byte_length) {
   amdf_gpu_host_mapping_t* mapping = (amdf_gpu_host_mapping_t*)base_mapping;
-  return amdf_gpu_umd_host_mapping_cache_control(
+  return mapping->umd_api->host_mapping_cache_control(
       mapping->umd, operation,
       base_mapping->info.memory_byte_offset + byte_offset, byte_length);
 }
@@ -85,7 +94,7 @@ static amdf_status_t amdf_gpu_host_mapping_cache_control(
 static void amdf_gpu_host_mapping_destroy_native(
     amdf_host_mapping_t* base_mapping) {
   amdf_gpu_host_mapping_t* mapping = (amdf_gpu_host_mapping_t*)base_mapping;
-  amdf_gpu_umd_host_mapping_destroy(mapping->umd);
+  mapping->umd_api->host_mapping_destroy(mapping->umd);
 }
 
 static const amdf_host_mapping_vtable_t amdf_gpu_host_mapping_vtable = {
@@ -107,11 +116,12 @@ static amdf_status_t amdf_gpu_memory_map(
   }
   amdf_host_mapping_initialize(&mapping->base, &amdf_gpu_host_mapping_vtable,
                                memory);
+  mapping->umd_api = amdf_gpu_memory_api(memory, access_ordinal);
 
   amdf_gpu_umd_host_mapping_result_t result = {0};
-  status =
-      amdf_gpu_umd_memory_map(amdf_gpu_memory_native(memory, access_ordinal),
-                              capabilities, map_info, &mapping->umd, &result);
+  status = mapping->umd_api->memory_map(
+      amdf_gpu_memory_native(memory, access_ordinal), capabilities, map_info,
+      &mapping->umd, &result);
   if (amdf_status_is_ok(status)) {
     amdf_assert((result.flags & map_info->flags) == map_info->flags &&
                 (result.flags & ~capabilities->supported_access) == 0 &&
@@ -142,7 +152,8 @@ static amdf_status_t amdf_gpu_memory_map(
 static amdf_status_t amdf_gpu_memory_destroy_native(amdf_memory_t* memory,
                                                     uint32_t access_ordinal) {
   const amdf_status_t status =
-      amdf_gpu_umd_memory_destroy(memory->accesses[access_ordinal].native);
+      amdf_gpu_memory_api(memory, access_ordinal)
+          ->memory_destroy(memory->accesses[access_ordinal].native);
   if (amdf_status_is_ok(status)) {
     memory->accesses[access_ordinal].native = NULL;
   }
@@ -151,14 +162,16 @@ static amdf_status_t amdf_gpu_memory_destroy_native(amdf_memory_t* memory,
 
 static void amdf_gpu_memory_abandon_native(amdf_memory_t* memory,
                                            uint32_t access_ordinal) {
-  amdf_gpu_umd_memory_abandon(memory->accesses[access_ordinal].native);
+  amdf_gpu_memory_api(memory, access_ordinal)
+      ->memory_abandon(memory->accesses[access_ordinal].native);
   memory->accesses[access_ordinal].native = NULL;
 }
 
 static uint64_t amdf_gpu_memory_remaining_backing_byte_length(
     const amdf_memory_t* memory, uint32_t access_ordinal) {
-  return amdf_gpu_umd_memory_remaining_backing_byte_length(
-      memory->accesses[access_ordinal].native);
+  return amdf_gpu_memory_api(memory, access_ordinal)
+      ->memory_remaining_backing_byte_length(
+          memory->accesses[access_ordinal].native);
 }
 
 static const amdf_memory_vtable_t amdf_gpu_memory_vtable = {
@@ -175,7 +188,7 @@ static const amdf_memory_vtable_t amdf_gpu_memory_vtable = {
 amdf_status_t amdf_gpu_device_query_memory_profile(
     amdf_device_t* device, uint32_t memory_profile_ordinal,
     amdf_memory_native_profile_t* out_profile) {
-  return amdf_gpu_umd_device_query_memory_profile(
+  return amdf_gpu_device_get_umd_api(device)->device_query_memory_profile(
       amdf_gpu_device_get_umd(device), memory_profile_ordinal, out_profile);
 }
 
@@ -242,9 +255,11 @@ amdf_status_t amdf_gpu_memory_prepare(
   memory->accesses[access_ordinal].vtable = &amdf_gpu_memory_vtable;
   amdf_gpu_umd_memory_t* native = NULL;
   amdf_gpu_umd_memory_result_t result = {0};
-  const amdf_status_t status = amdf_gpu_umd_memory_prepare(
-      amdf_gpu_device_get_umd(memory->accesses[access_ordinal].device),
-      peer_count, peer_devices, profile, create_info, &native, &result);
+  const amdf_status_t status =
+      amdf_gpu_memory_api(memory, access_ordinal)
+          ->memory_prepare(
+              amdf_gpu_device_get_umd(memory->accesses[access_ordinal].device),
+              peer_count, peer_devices, profile, create_info, &native, &result);
   amdf_free(memory->host_allocator, peer_devices);
   memory->accesses[access_ordinal].native = native;
   if (amdf_status_is_ok(status)) {
@@ -270,9 +285,11 @@ amdf_status_t amdf_gpu_memory_prepare_import(
   memory->accesses[access_ordinal].vtable = &amdf_gpu_memory_vtable;
   amdf_gpu_umd_memory_t* native = NULL;
   amdf_gpu_umd_memory_result_t result = {0};
-  const amdf_status_t status = amdf_gpu_umd_memory_prepare_import(
-      amdf_gpu_device_get_umd(memory->accesses[access_ordinal].device), profile,
-      import_info, external_memory, &native, &result);
+  const amdf_status_t status =
+      amdf_gpu_memory_api(memory, access_ordinal)
+          ->memory_prepare_import(
+              amdf_gpu_device_get_umd(memory->accesses[access_ordinal].device),
+              profile, import_info, external_memory, &native, &result);
   memory->accesses[access_ordinal].native = native;
   if (amdf_status_is_ok(status)) {
     amdf_gpu_memory_set_info(memory, access_ordinal,

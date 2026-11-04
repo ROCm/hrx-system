@@ -63,7 +63,7 @@ static inline amdf_status_t amdf_linux_dxg_kmt_make_status(NTSTATUS status) {
 NTSTATUS amdf_linux_dxg_kmt_query_adapter_info(
     const amdf_linux_dxg_kmt_t* kmt, D3DKMT_QUERYADAPTERINFO* arguments);
 
-// Issues a bridge-supplied KMT request through the typed Linux boundary.
+// Issues a provider-supplied KMT request through the typed Linux boundary.
 // String-bearing QueryAdapterInfo payloads receive their required conversion;
 // every fixed-layout operation is forwarded unchanged.
 uint32_t amdf_linux_dxg_kmt_invoke(void* context, uint64_t request,

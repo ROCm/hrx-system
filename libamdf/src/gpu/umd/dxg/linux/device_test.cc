@@ -14,6 +14,7 @@
 
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
+#include "libamdf/src/gpu/umd/dxg/linux/api.h"
 #include "libamdf/src/gpu/umd/dxg/wsl/api.h"
 
 namespace {
@@ -265,7 +266,7 @@ TEST_F(LinuxDxgDeviceTest, OwnsCompleteLogicalAndPagingDevice) {
   amdf_gpu_umd_device_t* device = nullptr;
   amdf_gpu_umd_device_result_t result = {};
 
-  ASSERT_EQ(amdf_gpu_umd_device_create(
+  ASSERT_EQ(amdf_gpu_linux_dxg_device_create(
                 nullptr, &endpoint_, instance_.host_allocator,
                 AMDF_NATIVE_LIFETIME_INSTANCE, &device, &result),
             AMDF_STATUS_OK);
@@ -293,7 +294,7 @@ TEST_F(LinuxDxgDeviceTest, OwnsCompleteLogicalAndPagingDevice) {
                 Operation::kCreateDevice, Operation::kOpenBridgeAdapter,
                 Operation::kCreatePagingQueue}));
 
-  ASSERT_EQ(amdf_gpu_umd_device_destroy(device), AMDF_STATUS_OK);
+  ASSERT_EQ(amdf_gpu_linux_dxg_device_destroy(device), AMDF_STATUS_OK);
   EXPECT_EQ(state_.operations,
             (std::vector<Operation>{
                 Operation::kQueryMemoryCapabilities,
@@ -315,7 +316,7 @@ TEST_P(LinuxDxgDeviceConstructionFailureTest,
   std::memset(&result, 0xA5, sizeof(result));
   const amdf_gpu_umd_device_result_t original_result = result;
 
-  EXPECT_FALSE(amdf_status_is_ok(amdf_gpu_umd_device_create(
+  EXPECT_FALSE(amdf_status_is_ok(amdf_gpu_linux_dxg_device_create(
       nullptr, &endpoint_, instance_.host_allocator,
       AMDF_NATIVE_LIFETIME_PROCESS, &device, &result)));
   EXPECT_EQ(device, reinterpret_cast<amdf_gpu_umd_device_t*>(uintptr_t{1}));
@@ -357,13 +358,13 @@ INSTANTIATE_TEST_SUITE_P(
 TEST_F(LinuxDxgDeviceTest, ConsumedPagingFailureRequiresOnlyHostOwnerRetry) {
   amdf_gpu_umd_device_t* device = nullptr;
   amdf_gpu_umd_device_result_t result = {};
-  ASSERT_EQ(amdf_gpu_umd_device_create(
+  ASSERT_EQ(amdf_gpu_linux_dxg_device_create(
                 nullptr, &endpoint_, instance_.host_allocator,
                 AMDF_NATIVE_LIFETIME_PROCESS, &device, &result),
             AMDF_STATUS_OK);
   state_.paging_destroy_failures_remaining = 1;
 
-  EXPECT_EQ(amdf_gpu_umd_device_destroy(device),
+  EXPECT_EQ(amdf_gpu_linux_dxg_device_destroy(device),
             amdf_linux_dxg_kmt_make_status(kNativeFailure));
   const size_t operation_count = state_.operations.size();
   EXPECT_EQ(state_.live_allocation_count, 1u);
@@ -373,7 +374,7 @@ TEST_F(LinuxDxgDeviceTest, ConsumedPagingFailureRequiresOnlyHostOwnerRetry) {
             Operation::kCloseBridgeAdapter);
   EXPECT_EQ(state_.operations[operation_count - 1], Operation::kDestroyDevice);
 
-  EXPECT_EQ(amdf_gpu_umd_device_destroy(device), AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_gpu_linux_dxg_device_destroy(device), AMDF_STATUS_OK);
   EXPECT_EQ(state_.operations.size(), operation_count);
 }
 

@@ -13,6 +13,7 @@
 #include "libamdf/src/platform/instance.h"
 
 struct amdf_gpu_umd_instance_t;
+struct amdf_gpu_umd_api_t;
 
 struct amdf_instance_t {
   // Immutable lifetime policy for native resources created by this instance.
@@ -25,6 +26,9 @@ struct amdf_instance_t {
   // The platform native-state lock protects preparation; provider teardown
   // releases it after all endpoints close. NULL means no separate state.
   struct amdf_gpu_umd_instance_t* gpu;
+  // Immutable GPU implementation selected by the platform endpoint that first
+  // prepares GPU state. NULL until an explicit GPU device is created.
+  const struct amdf_gpu_umd_api_t* gpu_api;
   // Fixed borrowed system-storage descriptor, not a memory-resource registry.
   amdf_memory_scope_t system_memory_scope;
   // Number of open children borrowing this instance.

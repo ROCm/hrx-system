@@ -14,7 +14,7 @@
 #include "libamdf/src/structure.h"
 
 #if defined(AMDF_HAVE_GPU)
-#include "libamdf/src/gpu/umd/instance.h"
+#include "libamdf/src/gpu/umd/api.h"
 #endif  // AMDF_HAVE_GPU
 
 amdf_status_t AMDF_CALL
@@ -81,9 +81,10 @@ amdf_status_t AMDF_CALL amdf_instance_destroy(amdf_instance_t* instance) {
   amdf_status_t status = AMDF_STATUS_OK;
 #if defined(AMDF_HAVE_GPU)
   if (instance->gpu != NULL) {
-    status = amdf_gpu_umd_instance_destroy(instance->gpu);
+    status = instance->gpu_api->instance_destroy(instance->gpu);
     if (amdf_status_is_ok(status)) {
       instance->gpu = NULL;
+      instance->gpu_api = NULL;
     }
   }
 #endif  // AMDF_HAVE_GPU

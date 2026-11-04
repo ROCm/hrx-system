@@ -4,8 +4,6 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "libamdf/src/gpu/umd/endpoint_profile.h"
-
 #include <sys/ioctl.h>
 
 #include <cstdint>
@@ -14,6 +12,7 @@
 
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
+#include "libamdf/src/gpu/umd/dxg/linux/api.h"
 #include "libamdf/src/gpu/umd/dxg/wsl/api.h"
 #include "libamdf/src/platform/linux/dxg/endpoint.h"
 
@@ -158,7 +157,7 @@ TEST_F(LinuxDxgEndpointProfileTest,
        PublishesProfileAfterRetiringTemporaryProbeState) {
   amdf_gpu_endpoint_profile_t* profile = nullptr;
 
-  ASSERT_EQ(amdf_gpu_umd_create_endpoint_profile(
+  ASSERT_EQ(amdf_gpu_linux_dxg_create_endpoint_profile(
                 &endpoint_, instance_.host_allocator, &profile),
             AMDF_STATUS_OK);
 
@@ -185,7 +184,7 @@ TEST_F(LinuxDxgEndpointProfileTest,
   auto* profile = reinterpret_cast<amdf_gpu_endpoint_profile_t*>(uintptr_t{1});
   const auto* expected_profile = profile;
 
-  EXPECT_EQ(amdf_gpu_umd_create_endpoint_profile(
+  EXPECT_EQ(amdf_gpu_linux_dxg_create_endpoint_profile(
                 &endpoint_, instance_.host_allocator, &profile),
             amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
 
@@ -201,7 +200,7 @@ TEST_F(LinuxDxgEndpointProfileTest,
   state_.provider_properties.is_discrete = 0;
   amdf_gpu_endpoint_profile_t* profile = nullptr;
 
-  ASSERT_EQ(amdf_gpu_umd_create_endpoint_profile(
+  ASSERT_EQ(amdf_gpu_linux_dxg_create_endpoint_profile(
                 &endpoint_, instance_.host_allocator, &profile),
             AMDF_STATUS_OK);
 
@@ -223,7 +222,7 @@ TEST_F(LinuxDxgEndpointProfileTest,
   auto* profile = reinterpret_cast<amdf_gpu_endpoint_profile_t*>(uintptr_t{1});
   const auto* expected_profile = profile;
 
-  EXPECT_EQ(amdf_gpu_umd_create_endpoint_profile(
+  EXPECT_EQ(amdf_gpu_linux_dxg_create_endpoint_profile(
                 &endpoint_, instance_.host_allocator, &profile),
             amdf_make_status(AMDF_STATUS_DOMAIN_NTSTATUS, kNativeFailure));
 
@@ -240,7 +239,7 @@ TEST_F(LinuxDxgEndpointProfileTest,
   amdf_memory_scope_observation_t observation = {};
 
   ASSERT_EQ(
-      amdf_gpu_umd_sample_memory_scope(
+      amdf_gpu_linux_dxg_sample_memory_scope(
           &endpoint_, AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES, &observation),
       AMDF_STATUS_OK);
 
@@ -255,7 +254,7 @@ TEST_F(LinuxDxgEndpointProfileTest,
        SystemObservationCapsHostHeadroomWithResidencyBudget) {
   amdf_memory_scope_observation_t observation = {};
 
-  ASSERT_EQ(amdf_gpu_umd_sample_memory_scope(
+  ASSERT_EQ(amdf_gpu_linux_dxg_sample_memory_scope(
                 &endpoint_,
                 AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED |
                     AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES,
@@ -279,7 +278,7 @@ TEST_F(LinuxDxgEndpointProfileTest, FailedObservationPreservesCallerOutput) {
   const auto expected_observation = observation;
 
   EXPECT_EQ(
-      amdf_gpu_umd_sample_memory_scope(
+      amdf_gpu_linux_dxg_sample_memory_scope(
           &endpoint_, AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES, &observation),
       amdf_make_status(AMDF_STATUS_DOMAIN_NTSTATUS, kNativeFailure));
 

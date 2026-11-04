@@ -25,26 +25,12 @@ _AMDF_CONFIG_CMAKE_OPTIONS = {
             all_of(Equal("CMAKE_SYSTEM_NAME", "Linux"), Equal("IREE_ARCH", "x86_64")),
         ),
     ),
-    "//libamdf/config/provider:linux_dxg": all_of(
-        Equal("CMAKE_SYSTEM_NAME", "Linux"),
-        Equal("IREE_ARCH", "x86_64"),
-        Equal("AMDF_LINUX_GPU_PROVIDER", "dxg"),
-    ),
-    "//libamdf/config/provider:linux_kfd": all_of(
-        Equal("CMAKE_SYSTEM_NAME", "Linux"),
-        Equal("IREE_ARCH", "x86_64"),
-        Equal("AMDF_LINUX_GPU_PROVIDER", "kfd"),
-    ),
     "//libamdf/config/provider:dxg": any_of(
         all_of(
             Equal("CMAKE_SYSTEM_NAME", "Windows"),
             any_of("AMDF_FAMILY_RDNA", "AMDF_FAMILY_CDNA"),
         ),
-        all_of(
-            Equal("CMAKE_SYSTEM_NAME", "Linux"),
-            Equal("IREE_ARCH", "x86_64"),
-            Equal("AMDF_LINUX_GPU_PROVIDER", "dxg"),
-        ),
+        all_of(Equal("CMAKE_SYSTEM_NAME", "Linux"), Equal("IREE_ARCH", "x86_64")),
     ),
     "//libamdf/config/provider:wddm": all_of(
         any_of("AMDF_FAMILY_RDNA", "AMDF_FAMILY_CDNA"),
@@ -54,11 +40,7 @@ _AMDF_CONFIG_CMAKE_OPTIONS = {
         "AMDF_FAMILY_XDNA",
         any_of(
             Equal("CMAKE_SYSTEM_NAME", "Windows"),
-            all_of(
-                Equal("CMAKE_SYSTEM_NAME", "Linux"),
-                Equal("IREE_ARCH", "x86_64"),
-                Equal("AMDF_LINUX_GPU_PROVIDER", "kfd"),
-            ),
+            all_of(Equal("CMAKE_SYSTEM_NAME", "Linux"), Equal("IREE_ARCH", "x86_64")),
         ),
     ),
 }

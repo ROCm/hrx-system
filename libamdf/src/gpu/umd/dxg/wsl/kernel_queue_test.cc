@@ -361,8 +361,9 @@ TEST_F(WslDxgKernelQueueTest, UnsupportedProfileDoesNotStartConstruction) {
   adapter_.pm4_queue_profile.is_supported = false;
   amdf_dxg_provider_gpu_kernel_queue_t* queue =
       reinterpret_cast<amdf_dxg_provider_gpu_kernel_queue_t*>(0x1234);
-  amdf_dxg_provider_gpu_kernel_queue_info_t info = {.command_buffer_alignment =
-                                                        0xA5A5};
+  amdf_dxg_provider_gpu_kernel_queue_info_t info = {
+      .command_buffer_alignment = 0xA5A5,
+  };
   uint32_t native_status = 0xFFFFFFFFu;
   EXPECT_EQ(CreateQueue(AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_PM4, &queue,
                         &info, &native_status),

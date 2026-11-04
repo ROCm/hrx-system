@@ -4,8 +4,6 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "libamdf/src/gpu/umd/memory_reservation.h"
-
 #include <sys/ioctl.h>
 
 #include <cstdint>
@@ -13,6 +11,7 @@
 
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
+#include "libamdf/src/gpu/umd/dxg/linux/api.h"
 #include "libamdf/src/gpu/umd/dxg/linux/device.h"
 #include "libamdf/src/gpu/umd/dxg/linux/kernel_queue.h"
 #include "libamdf/src/gpu/umd/dxg/linux/memory.h"
@@ -250,7 +249,7 @@ class LinuxDxgMemoryReservationTest : public ::testing::Test {
       uint64_t minimum_alignment = 0, uint64_t common_address = 0) {
     amdf_gpu_umd_device_t* devices[] = {&device_};
     amdf_gpu_umd_memory_reservation_t* reservation = nullptr;
-    EXPECT_EQ(amdf_gpu_umd_memory_reservation_create(
+    EXPECT_EQ(amdf_gpu_linux_dxg_memory_reservation_create(
                   allocator_, 1, devices, 65536, minimum_alignment,
                   common_address, &reservation),
               AMDF_STATUS_OK);
@@ -268,8 +267,8 @@ class LinuxDxgMemoryReservationTest : public ::testing::Test {
 TEST_F(LinuxDxgMemoryReservationTest,
        PublishesCapabilitiesAndMappingDomainIdentity) {
   amdf_memory_reservation_capabilities_t capabilities = {};
-  ASSERT_EQ(amdf_gpu_umd_query_memory_reservation_capabilities(&device_, 0,
-                                                               &capabilities),
+  ASSERT_EQ(amdf_gpu_linux_dxg_query_memory_reservation_capabilities(
+                &device_, 0, &capabilities),
             AMDF_STATUS_OK);
   EXPECT_EQ(capabilities.supported_access, AMDF_MEMORY_ACCESS_READ |
                                                AMDF_MEMORY_ACCESS_WRITE |
@@ -280,9 +279,11 @@ TEST_F(LinuxDxgMemoryReservationTest,
   EXPECT_EQ(capabilities.maximum_address, (UINT64_C(1) << 48) - 1);
 
   amdf_gpu_umd_device_t alias = device_;
-  EXPECT_TRUE(amdf_gpu_umd_devices_share_mapping_domain(&device_, &alias));
+  EXPECT_TRUE(
+      amdf_gpu_linux_dxg_devices_share_mapping_domain(&device_, &alias));
   alias.physical_adapter_index = 4;
-  EXPECT_FALSE(amdf_gpu_umd_devices_share_mapping_domain(&device_, &alias));
+  EXPECT_FALSE(
+      amdf_gpu_linux_dxg_devices_share_mapping_domain(&device_, &alias));
 }
 
 TEST_F(LinuxDxgMemoryReservationTest,
@@ -299,7 +300,7 @@ TEST_F(LinuxDxgMemoryReservationTest,
   uint32_t mapping_access_ordinal = UINT32_MAX;
   uint64_t mapping_granularity = 0;
   amdf_memory_access_t required_access = 0;
-  amdf_gpu_umd_memory_reservation_query_access(
+  amdf_gpu_linux_dxg_memory_reservation_query_access(
       reservation, 0, &address, &mapping_access_ordinal, &mapping_granularity,
       &required_access);
   EXPECT_EQ(address, 0x600000u);
@@ -307,7 +308,7 @@ TEST_F(LinuxDxgMemoryReservationTest,
   EXPECT_EQ(mapping_granularity, 4096u);
   EXPECT_EQ(required_access, AMDF_MEMORY_ACCESS_READ);
 
-  ASSERT_EQ(amdf_gpu_umd_memory_reservation_destroy(reservation),
+  ASSERT_EQ(amdf_gpu_linux_dxg_memory_reservation_destroy(reservation),
             AMDF_STATUS_OK);
   EXPECT_EQ(state_.operations,
             (std::vector<Operation>{
@@ -356,10 +357,10 @@ TEST_F(LinuxDxgMemoryReservationTest,
   amdf_gpu_umd_memory_reservation_t* reservation = CreateReservation();
   ASSERT_NE(reservation, nullptr);
   amdf_gpu_umd_kernel_queue_t* queue = nullptr;
-  ASSERT_EQ(amdf_gpu_umd_kernel_queue_create(
+  ASSERT_EQ(amdf_gpu_linux_dxg_kernel_queue_create(
                 &device_, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, &queue),
             AMDF_STATUS_OK);
-  ASSERT_EQ(amdf_gpu_umd_kernel_queue_mapping_capacity(queue), 128u);
+  ASSERT_EQ(amdf_gpu_linux_dxg_kernel_queue_mapping_capacity(queue), 128u);
 
   const amdf_gpu_umd_mapping_update_t update = {
       .target_byte_offset = 8192,
@@ -368,7 +369,7 @@ TEST_F(LinuxDxgMemoryReservationTest,
   bool mutation_started = false;
   bool accepted = false;
   ASSERT_EQ(
-      amdf_gpu_umd_memory_reservation_update_on_queue(
+      amdf_gpu_linux_dxg_memory_reservation_update_on_queue(
           reservation, queue, 0, 1, &update, 19, &mutation_started, &accepted),
       AMDF_STATUS_OK);
   EXPECT_TRUE(mutation_started);
@@ -384,9 +385,9 @@ TEST_F(LinuxDxgMemoryReservationTest,
             (std::vector<Operation>{Operation::kReserve, Operation::kUpdate,
                                     Operation::kOrder}));
 
-  ASSERT_EQ(amdf_gpu_umd_kernel_queue_destroy(queue), AMDF_STATUS_OK);
+  ASSERT_EQ(amdf_gpu_linux_dxg_kernel_queue_destroy(queue), AMDF_STATUS_OK);
   EXPECT_EQ(state_.queue_destroy_count, 1u);
-  ASSERT_EQ(amdf_gpu_umd_memory_reservation_destroy(reservation),
+  ASSERT_EQ(amdf_gpu_linux_dxg_memory_reservation_destroy(reservation),
             AMDF_STATUS_OK);
   EXPECT_EQ(state_.operations,
             (std::vector<Operation>{
@@ -409,11 +410,11 @@ TEST_F(LinuxDxgMemoryReservationTest, PreservesAnExactCommonAddress) {
   uint32_t mapping_access_ordinal = 0;
   uint64_t mapping_granularity = 0;
   amdf_memory_access_t required_access = 0;
-  amdf_gpu_umd_memory_reservation_query_access(
+  amdf_gpu_linux_dxg_memory_reservation_query_access(
       reservation, 0, &address, &mapping_access_ordinal, &mapping_granularity,
       &required_access);
   EXPECT_EQ(address, common_address);
-  EXPECT_EQ(amdf_gpu_umd_memory_reservation_destroy(reservation),
+  EXPECT_EQ(amdf_gpu_linux_dxg_memory_reservation_destroy(reservation),
             AMDF_STATUS_OK);
   ASSERT_EQ(state_.frees.size(), 1u);
   EXPECT_EQ(state_.frees[0].address, common_address);
@@ -425,8 +426,8 @@ TEST_F(LinuxDxgMemoryReservationTest,
   state_.reserve_status = kStatusNoMemory;
   amdf_gpu_umd_device_t* devices[] = {&device_};
   auto* sentinel = reinterpret_cast<amdf_gpu_umd_memory_reservation_t*>(1);
-  EXPECT_EQ(amdf_gpu_umd_memory_reservation_create(allocator_, 1, devices,
-                                                   65536, 0, 0, &sentinel),
+  EXPECT_EQ(amdf_gpu_linux_dxg_memory_reservation_create(
+                allocator_, 1, devices, 65536, 0, 0, &sentinel),
             amdf_linux_dxg_kmt_make_status(kStatusNoMemory));
   EXPECT_EQ(sentinel, reinterpret_cast<void*>(1));
   EXPECT_EQ(state_.operations, (std::vector<Operation>{Operation::kReserve}));

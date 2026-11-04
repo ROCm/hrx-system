@@ -7,7 +7,7 @@
 #ifndef AMDF_SRC_GPU_UMD_DXG_LINUX_DEVICE_H_
 #define AMDF_SRC_GPU_UMD_DXG_LINUX_DEVICE_H_
 
-#include "libamdf/src/gpu/umd/device.h"
+#include "libamdf/src/gpu/umd/dxg/linux/api.h"
 #include "libamdf/src/gpu/umd/dxg/linux/device_status.h"
 #include "libamdf/src/gpu/umd/dxg/linux/logical_device.h"
 #include "libamdf/src/gpu/umd/dxg/linux/memory_profile.h"

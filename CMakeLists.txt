@@ -224,7 +224,7 @@ if(IREE_VULKAN_AVAILABLE)
   iree_configure_vulkan_headers()
 endif()
 if(AMDF_BUILD AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
-   IREE_ARCH STREQUAL "x86_64" AND AMDF_LINUX_GPU_PROVIDER STREQUAL "dxg" AND
+   IREE_ARCH STREQUAL "x86_64" AND
    (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
   iree_configure_amdf_dxg_headers()
 endif()

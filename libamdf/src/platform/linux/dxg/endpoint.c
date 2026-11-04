@@ -156,7 +156,7 @@ static void amdf_linux_dxg_copy_endpoint_summary(
   memcpy(out_summary->name, info->name, sizeof(out_summary->name));
 }
 
-amdf_status_t amdf_platform_endpoint_enumerate(
+amdf_status_t amdf_linux_dxg_endpoint_enumerate(
     amdf_platform_instance_t* instance, uint32_t capacity,
     amdf_endpoint_summary_t* summaries, uint32_t* out_count) {
   if ((size_t)capacity > SIZE_MAX / sizeof(*summaries)) {
@@ -270,7 +270,7 @@ static amdf_status_t amdf_linux_dxg_close_endpoint_adapter(
   return status;
 }
 
-amdf_status_t amdf_platform_endpoint_open(
+amdf_status_t amdf_linux_dxg_endpoint_open(
     amdf_platform_instance_t* instance, const amdf_endpoint_id_t* id,
     amdf_platform_endpoint_t** out_endpoint, amdf_endpoint_info_t* out_info) {
   amdf_platform_endpoint_t* endpoint = NULL;
@@ -281,6 +281,7 @@ amdf_status_t amdf_platform_endpoint_open(
     return status;
   }
   endpoint->instance = instance;
+  endpoint->host_numa_node = UINT32_MAX;
   endpoint->pci_address.type = AMDF_STRUCTURE_TYPE_ENDPOINT_PCI_ADDRESS;
   endpoint->pci_address.structure_size = sizeof(endpoint->pci_address);
 
@@ -332,29 +333,8 @@ amdf_status_t amdf_platform_endpoint_open(
   return status;
 }
 
-uint32_t amdf_platform_endpoint_host_numa_node(
-    const amdf_platform_endpoint_t* endpoint) {
-  (void)endpoint;
-  return UINT32_MAX;
-}
-
-const amdf_endpoint_pci_address_t* amdf_platform_endpoint_pci_address(
-    const amdf_platform_endpoint_t* endpoint) {
-  return &endpoint->pci_address;
-}
-
-amdf_queue_publication_modes_t
-amdf_platform_endpoint_query_queue_publication_modes(
-    const amdf_platform_endpoint_t* endpoint,
-    amdf_queue_command_type_t command_type) {
-  (void)endpoint;
-  return command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4 ||
-                 command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA
-             ? AMDF_QUEUE_PUBLICATION_MODE_KERNEL
-             : 0;
-}
-
-amdf_status_t amdf_platform_endpoint_close(amdf_platform_endpoint_t* endpoint) {
+amdf_status_t amdf_linux_dxg_endpoint_close(
+    amdf_platform_endpoint_t* endpoint) {
   const amdf_status_t status = amdf_linux_dxg_close_endpoint_adapter(endpoint);
   if (amdf_status_is_ok(status)) {
     amdf_free(endpoint->instance->host_allocator, endpoint);

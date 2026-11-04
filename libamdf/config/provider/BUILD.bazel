@@ -9,28 +9,8 @@
 # bazel-to-cmake: skip
 
 load("@bazel_skylib//lib:selects.bzl", "selects")
-load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
 
 package(default_visibility = ["//visibility:public"])
-
-string_flag(
-    name = "linux_gpu",
-    build_setting_default = "kfd",
-    values = [
-        "dxg",
-        "kfd",
-    ],
-)
-
-config_setting(
-    name = "linux_gpu_dxg",
-    flag_values = {":linux_gpu": "dxg"},
-)
-
-config_setting(
-    name = "linux_gpu_kfd",
-    flag_values = {":linux_gpu": "kfd"},
-)
 
 config_setting(
     name = "windows",
@@ -54,25 +34,9 @@ config_setting(
 )
 
 selects.config_setting_group(
-    name = "linux_dxg",
-    match_all = [
-        ":linux_gpu_dxg",
-        ":linux_x86_64",
-    ],
-)
-
-selects.config_setting_group(
-    name = "linux_kfd",
-    match_all = [
-        ":linux_gpu_kfd",
-        ":linux_x86_64",
-    ],
-)
-
-selects.config_setting_group(
     name = "dxg",
     match_any = [
-        ":linux_dxg",
+        ":linux_x86_64",
         ":wddm",
     ],
 )
@@ -80,7 +44,7 @@ selects.config_setting_group(
 selects.config_setting_group(
     name = "linux_xdna",
     match_all = [
-        ":linux_kfd",
+        ":linux_x86_64",
         "//libamdf/config/family:xdna",
     ],
 )

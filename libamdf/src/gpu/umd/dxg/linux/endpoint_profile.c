@@ -4,12 +4,11 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "libamdf/src/gpu/umd/endpoint_profile.h"
-
 #include <stddef.h>
 
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/dxg/endpoint_properties.h"
+#include "libamdf/src/gpu/umd/dxg/linux/api.h"
 #include "libamdf/src/gpu/umd/dxg/linux/logical_device.h"
 #include "libamdf/src/gpu/umd/dxg/wsl/api.h"
 #include "libamdf/src/host_memory.h"
@@ -34,7 +33,7 @@ static amdf_status_t amdf_gpu_linux_dxg_query_local_capacity(
   return status;
 }
 
-amdf_status_t amdf_gpu_umd_create_endpoint_profile(
+amdf_status_t amdf_gpu_linux_dxg_create_endpoint_profile(
     amdf_platform_endpoint_t* endpoint, amdf_allocator_t host_allocator,
     amdf_gpu_endpoint_profile_t** out_profile) {
   amdf_gpu_linux_dxg_logical_device_t logical_device = {0};
@@ -79,7 +78,7 @@ amdf_status_t amdf_gpu_umd_create_endpoint_profile(
   return status;
 }
 
-amdf_status_t amdf_gpu_umd_sample_memory_scope(
+amdf_status_t amdf_gpu_linux_dxg_sample_memory_scope(
     const amdf_platform_endpoint_t* endpoint, amdf_memory_scope_flags_t flags,
     amdf_memory_scope_observation_t* out_observation) {
   D3DKMT_QUERYVIDEOMEMORYINFO query = {

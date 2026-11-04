@@ -7,6 +7,7 @@
 #include "libamdf/src/gpu/umd/dxg/linux/device.h"
 
 #include "libamdf/src/allocator.h"
+#include "libamdf/src/gpu/umd/dxg/linux/api.h"
 #include "libamdf/src/gpu/umd/dxg/wsl/api.h"
 
 static amdf_status_t amdf_gpu_linux_dxg_device_release_native(
@@ -21,7 +22,7 @@ static amdf_status_t amdf_gpu_linux_dxg_device_release_native(
   return status;
 }
 
-amdf_status_t amdf_gpu_umd_device_create(
+amdf_status_t amdf_gpu_linux_dxg_device_create(
     amdf_gpu_umd_instance_t* instance, amdf_platform_endpoint_t* endpoint,
     amdf_allocator_t host_allocator, amdf_native_lifetime_t native_lifetime,
     amdf_gpu_umd_device_t** out_device,
@@ -97,7 +98,7 @@ amdf_status_t amdf_gpu_umd_device_create(
   return status;
 }
 
-amdf_status_t amdf_gpu_umd_device_destroy(amdf_gpu_umd_device_t* device) {
+amdf_status_t amdf_gpu_linux_dxg_device_destroy(amdf_gpu_umd_device_t* device) {
   const amdf_status_t status = amdf_gpu_linux_dxg_device_release_native(device);
   if (amdf_status_is_ok(status)) {
     const amdf_allocator_t host_allocator = device->host_allocator;

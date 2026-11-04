@@ -14,6 +14,13 @@ package(
 )
 
 amdf_cc_library(
+    name = "api",
+    hdrs = ["api.h"],
+    visibility = ["//libamdf/src/gpu/umd:__subpackages__"],
+    deps = ["//libamdf/src/gpu/umd:api"],
+)
+
+amdf_cc_library(
     name = "private_records",
     srcs = ["private_records.c"],
     hdrs = ["private_records.h"],
@@ -69,21 +76,21 @@ amdf_cc_library(
     name = "event",
     srcs = ["event.c"],
     visibility = ["//libamdf/src/gpu/umd:__subpackages__"],
-    deps = ["//libamdf/src/gpu/umd:event"],
+    deps = [":api"],
 )
 
 amdf_cc_library(
     name = "instance",
     srcs = ["instance.c"],
     visibility = ["//libamdf/src/gpu/umd:__subpackages__"],
-    deps = ["//libamdf/src/gpu/umd:instance"],
+    deps = [":api"],
 )
 
 amdf_cc_library(
     name = "user_queue",
     srcs = ["user_queue.c"],
     visibility = ["//libamdf/src/gpu/umd:__subpackages__"],
-    deps = ["//libamdf/src/gpu/umd:user_queue"],
+    deps = [":api"],
 )
 
 amdf_cc_test(

@@ -55,7 +55,7 @@ amdf_cc_library(
         "//libamdf/config/provider:gpu": [
             "//libamdf/src/gpu",
             "//libamdf/src/gpu:extension",
-            "//libamdf/src/gpu/umd:instance",
+            "//libamdf/src/gpu/umd:api",
         ],
         "//conditions:default": [],
     }) + select({

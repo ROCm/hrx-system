@@ -877,6 +877,25 @@ amdf_gpu_umd_device_t* amdf_gpu_device_get_umd(amdf_device_t* device) {
   return &reinterpret_cast<TestGpuDevice*>(device)->umd;
 }
 
+const amdf_gpu_umd_api_t* amdf_gpu_device_get_umd_api(const amdf_device_t*) {
+  static const amdf_gpu_umd_api_t api = {
+      .user_queue_create = amdf_gpu_umd_user_queue_create,
+      .user_queue_map = amdf_gpu_umd_user_queue_map,
+      .user_queue_mapping_destroy = amdf_gpu_umd_user_queue_mapping_destroy,
+      .user_queue_mapping_flush = amdf_gpu_umd_user_queue_mapping_flush,
+      .user_queue_query_status = amdf_gpu_umd_user_queue_query_status,
+      .user_queue_query_scratch = amdf_gpu_umd_user_queue_query_scratch,
+      .user_queue_resume_scratch = amdf_gpu_umd_user_queue_resume_scratch,
+      .user_queue_trim_scratch = amdf_gpu_umd_user_queue_trim_scratch,
+      .user_queue_set_dispatch_timestamps =
+          amdf_gpu_umd_user_queue_set_dispatch_timestamps,
+      .user_queue_wait_consumed = amdf_gpu_umd_user_queue_wait_consumed,
+      .user_queue_destroy = amdf_gpu_umd_user_queue_destroy,
+      .user_queue_inactivate = amdf_gpu_umd_user_queue_inactivate,
+  };
+  return &api;
+}
+
 const amdf_gpu_device_info_t* amdf_gpu_device_get_info(
     const amdf_device_t* device) {
   return &reinterpret_cast<const TestGpuDevice*>(device)->info;

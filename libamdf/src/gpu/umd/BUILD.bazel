@@ -123,6 +123,55 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "api",
+    hdrs = [
+        "api.h",
+        "api_operations.inc",
+    ],
+    visibility = [
+        "//libamdf/src/gpu:__subpackages__",
+        "//libamdf/src/provider:__pkg__",
+    ],
+    deps = [
+        ":clock",
+        ":device",
+        ":endpoint_profile",
+        ":event",
+        ":instance",
+        ":kernel_queue",
+        ":memory",
+        ":memory_reservation",
+        ":user_queue",
+    ],
+)
+
+amdf_cc_library(
+    name = "native",
+    srcs = select({
+        "@platforms//os:linux": ["native_linux.c"],
+        "@platforms//os:windows": ["native_windows.c"],
+        "//conditions:default": [],
+    }),
+    hdrs = ["native.h"],
+    target_compatible_with = ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//libamdf/src/gpu:__subpackages__"],
+    deps = [":api"] + select({
+        "@platforms//os:linux": [
+            "//libamdf/src/gpu/umd/dxg/linux:api",
+            "//libamdf/src/gpu/umd/dxg/linux:api_contract",
+            "//libamdf/src/gpu/umd/kfd:api",
+            "//libamdf/src/platform/linux:endpoint_state",
+        ],
+        "@platforms//os:windows": ["//libamdf/src/gpu/umd/wddm:api"],
+        "//conditions:default": [],
+    }),
+)
+
+amdf_cc_library(
     name = "umd",
     target_compatible_with = ["@platforms//cpu:x86_64"] + select({
         "@platforms//os:linux": [],
@@ -131,16 +180,20 @@ amdf_cc_library(
     }),
     visibility = ["//libamdf/src/gpu:__pkg__"],
     deps = [
+        ":api",
         ":device",
         ":endpoint_profile",
         ":event",
         ":instance",
         ":kernel_queue",
         ":memory",
+        ":native",
         ":user_queue",
     ] + select({
-        "//libamdf/config/provider:linux_dxg": ["//libamdf/src/gpu/umd/dxg/linux:linux_dxg"],
-        "//libamdf/config/provider:linux_kfd": ["//libamdf/src/gpu/umd/kfd"],
+        "@platforms//os:linux": [
+            "//libamdf/src/gpu/umd/dxg/linux:linux_dxg",
+            "//libamdf/src/gpu/umd/kfd",
+        ],
         "@platforms//os:windows": ["//libamdf/src/gpu/umd/wddm"],
         "//conditions:default": [],
     }),

@@ -4,13 +4,13 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "libamdf/src/gpu/umd/memory_reservation.h"
+#include "libamdf/src/gpu/umd/dxg/memory_reservation.h"
 
 #include "libamdf/src/allocator.h"
+#include "libamdf/src/gpu/umd/dxg/linux/api.h"
 #include "libamdf/src/gpu/umd/dxg/linux/device.h"
 #include "libamdf/src/gpu/umd/dxg/linux/kernel_queue.h"
 #include "libamdf/src/gpu/umd/dxg/linux/memory.h"
-#include "libamdf/src/gpu/umd/dxg/memory_reservation.h"
 
 static amdf_gpu_dxg_memory_reservation_device_t
 amdf_gpu_linux_dxg_reservation_device(amdf_gpu_umd_device_t* device) {
@@ -44,8 +44,8 @@ amdf_gpu_linux_dxg_describe_reservation_device(const void* context,
   return amdf_gpu_linux_dxg_reservation_device(devices[ordinal]);
 }
 
-bool amdf_gpu_umd_devices_share_mapping_domain(const amdf_gpu_umd_device_t* a,
-                                               const amdf_gpu_umd_device_t* b) {
+bool amdf_gpu_linux_dxg_devices_share_mapping_domain(
+    const amdf_gpu_umd_device_t* a, const amdf_gpu_umd_device_t* b) {
   const amdf_gpu_dxg_memory_reservation_device_t a_description =
       amdf_gpu_linux_dxg_reservation_device((amdf_gpu_umd_device_t*)a);
   const amdf_gpu_dxg_memory_reservation_device_t b_description =
@@ -54,7 +54,7 @@ bool amdf_gpu_umd_devices_share_mapping_domain(const amdf_gpu_umd_device_t* a,
                                                    &b_description);
 }
 
-amdf_status_t amdf_gpu_umd_query_memory_reservation_capabilities(
+amdf_status_t amdf_gpu_linux_dxg_query_memory_reservation_capabilities(
     amdf_gpu_umd_device_t* device, uint32_t address_domain_ordinal,
     amdf_memory_reservation_capabilities_t* out_capabilities) {
   const amdf_gpu_dxg_memory_reservation_device_t description =
@@ -63,7 +63,7 @@ amdf_status_t amdf_gpu_umd_query_memory_reservation_capabilities(
       &description, address_domain_ordinal, out_capabilities);
 }
 
-amdf_status_t amdf_gpu_umd_memory_reservation_create(
+amdf_status_t amdf_gpu_linux_dxg_memory_reservation_create(
     amdf_allocator_t host_allocator, uint32_t device_count,
     amdf_gpu_umd_device_t* const* devices, uint64_t byte_length,
     uint64_t minimum_alignment, uint64_t common_address,
@@ -75,7 +75,7 @@ amdf_status_t amdf_gpu_umd_memory_reservation_create(
       (amdf_gpu_dxg_memory_reservation_t**)out_reservation);
 }
 
-void amdf_gpu_umd_memory_reservation_query_access(
+void amdf_gpu_linux_dxg_memory_reservation_query_access(
     const amdf_gpu_umd_memory_reservation_t* reservation,
     uint32_t access_ordinal, uint64_t* out_address,
     uint32_t* out_mapping_access_ordinal, uint64_t* out_mapping_granularity,
@@ -86,7 +86,7 @@ void amdf_gpu_umd_memory_reservation_query_access(
       out_required_access);
 }
 
-amdf_status_t amdf_gpu_umd_memory_reservation_update(
+amdf_status_t amdf_gpu_linux_dxg_memory_reservation_update(
     amdf_gpu_umd_memory_reservation_t* reservation, uint32_t access_ordinal,
     uint32_t update_count, const amdf_gpu_umd_mapping_update_t* updates,
     bool* mutation_started) {
@@ -118,7 +118,7 @@ static void amdf_gpu_linux_dxg_write_mapping_operation(
   }
 }
 
-amdf_status_t amdf_gpu_umd_memory_reservation_update_on_queue(
+amdf_status_t amdf_gpu_linux_dxg_memory_reservation_update_on_queue(
     amdf_gpu_umd_memory_reservation_t* reservation,
     amdf_gpu_umd_kernel_queue_t* queue, uint32_t access_ordinal,
     uint32_t update_count, const amdf_gpu_umd_mapping_update_t* updates,
@@ -154,13 +154,13 @@ amdf_status_t amdf_gpu_umd_memory_reservation_update_on_queue(
   return status;
 }
 
-amdf_status_t amdf_gpu_umd_memory_reservation_detach(
+amdf_status_t amdf_gpu_linux_dxg_memory_reservation_detach(
     amdf_gpu_umd_memory_reservation_t* reservation, uint32_t access_ordinal) {
   return amdf_gpu_dxg_memory_reservation_detach(
       (amdf_gpu_dxg_memory_reservation_t*)reservation, access_ordinal);
 }
 
-amdf_status_t amdf_gpu_umd_memory_reservation_destroy(
+amdf_status_t amdf_gpu_linux_dxg_memory_reservation_destroy(
     amdf_gpu_umd_memory_reservation_t* reservation) {
   return amdf_gpu_dxg_memory_reservation_destroy(
       (amdf_gpu_dxg_memory_reservation_t*)reservation);

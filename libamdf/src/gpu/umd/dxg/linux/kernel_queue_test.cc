@@ -15,6 +15,7 @@
 
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
+#include "libamdf/src/gpu/umd/dxg/linux/api.h"
 #include "libamdf/src/gpu/umd/dxg/linux/device.h"
 #include "libamdf/src/wait.h"
 
@@ -242,8 +243,9 @@ class LinuxDxgKernelQueueTest
     device_.logical_device.provider_adapter.native =
         reinterpret_cast<amdf_dxg_provider_gpu_adapter_t*>(&state_);
     amdf_gpu_linux_dxg_device_status_initialize(&device_.status);
-    ASSERT_EQ(amdf_gpu_umd_kernel_queue_create(&device_, GetParam(), &queue_),
-              AMDF_STATUS_OK);
+    ASSERT_EQ(
+        amdf_gpu_linux_dxg_kernel_queue_create(&device_, GetParam(), &queue_),
+        AMDF_STATUS_OK);
   }
 
   void TearDown() override {
@@ -251,7 +253,8 @@ class LinuxDxgKernelQueueTest
       state_.progress = state_.submitted_values.back();
     }
     if (queue_ != nullptr) {
-      EXPECT_EQ(amdf_gpu_umd_kernel_queue_destroy(queue_), AMDF_STATUS_OK);
+      EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_destroy(queue_),
+                AMDF_STATUS_OK);
     }
     EXPECT_EQ(state_.live_allocation_count, 0u);
     if (notification_event_ >= 0) {
@@ -262,7 +265,8 @@ class LinuxDxgKernelQueueTest
   }
 
   amdf_status_t Submit(uint64_t submission) {
-    return amdf_gpu_umd_kernel_queue_submit(queue_, 0x20000, 64, submission);
+    return amdf_gpu_linux_dxg_kernel_queue_submit(queue_, 0x20000, 64,
+                                                  submission);
   }
 
   void CreateNotificationEvent() {
@@ -279,8 +283,8 @@ class LinuxDxgKernelQueueTest
   }
 
   amdf_status_t Notify(uint64_t submission) {
-    return amdf_gpu_umd_kernel_queue_request_notification(queue_, submission,
-                                                          &event_);
+    return amdf_gpu_linux_dxg_kernel_queue_request_notification(
+        queue_, submission, &event_);
   }
 
   // Caller-owned event kept alive through native queue teardown.
@@ -302,11 +306,11 @@ class LinuxDxgKernelQueueTest
 };
 
 TEST_P(LinuxDxgKernelQueueTest, CreatesColdQueueWithCompleteCapabilities) {
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_notification_types(queue_),
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_notification_types(queue_),
             AMDF_NATIVE_EVENT_TYPE_BIT_EVENTFD);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_mapping_capacity(queue_), 128u);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_progress(queue_), 0u);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_terminal_status(queue_),
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_mapping_capacity(queue_), 128u);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_progress(queue_), 0u);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(queue_),
             AMDF_STATUS_OK);
   EXPECT_EQ(state_.allocation_count, 1u);
 }
@@ -314,11 +318,13 @@ TEST_P(LinuxDxgKernelQueueTest, CreatesColdQueueWithCompleteCapabilities) {
 TEST_P(LinuxDxgKernelQueueTest, SoftwareQueueOmitsMappingPublication) {
   state_.has_hardware_queue = false;
   amdf_gpu_umd_kernel_queue_t* software_queue = nullptr;
-  ASSERT_EQ(
-      amdf_gpu_umd_kernel_queue_create(&device_, GetParam(), &software_queue),
-      AMDF_STATUS_OK);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_mapping_capacity(software_queue), 0u);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_destroy(software_queue), AMDF_STATUS_OK);
+  ASSERT_EQ(amdf_gpu_linux_dxg_kernel_queue_create(&device_, GetParam(),
+                                                   &software_queue),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_mapping_capacity(software_queue),
+            0u);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_destroy(software_queue),
+            AMDF_STATUS_OK);
 }
 
 TEST_P(LinuxDxgKernelQueueTest,
@@ -361,7 +367,7 @@ TEST_P(LinuxDxgKernelQueueTest, RejectedMappingLeavesPointRetryable) {
   EXPECT_TRUE(mutation_started);
   EXPECT_FALSE(accepted);
   EXPECT_EQ(state_.ordering_point, 0u);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_terminal_status(queue_),
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(queue_),
             AMDF_STATUS_OK);
   EXPECT_EQ(state_.diagnostic_count, 1u);
 }
@@ -381,18 +387,22 @@ TEST_P(LinuxDxgKernelQueueTest,
   EXPECT_TRUE(accepted);
   EXPECT_EQ(state_.mapping_predecessor, 18u);
   EXPECT_EQ(state_.ordering_point, 19u);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_terminal_status(queue_), failure);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(queue_),
+            failure);
   EXPECT_EQ(Submit(20), failure);
 }
 
 TEST_P(LinuxDxgKernelQueueTest, ValidatesCommandsBeforeNativePublication) {
   const auto invalid = amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   const auto out_of_range = amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_submit(queue_, 0, 64, 1), invalid);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_submit(queue_, 0x20001, 64, 1), invalid);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_submit(queue_, 0x20000, 0, 1), invalid);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_submit(queue_, 0x20000, 62, 1), invalid);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_submit(queue_, 0x20000, 4100, 1),
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_submit(queue_, 0, 64, 1), invalid);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_submit(queue_, 0x20001, 64, 1),
+            invalid);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_submit(queue_, 0x20000, 0, 1),
+            invalid);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_submit(queue_, 0x20000, 62, 1),
+            invalid);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_submit(queue_, 0x20000, 4100, 1),
             out_of_range);
   EXPECT_TRUE(state_.submitted_values.empty());
 }
@@ -416,7 +426,7 @@ TEST_P(LinuxDxgKernelQueueTest, CheckedPointsSignalWithoutNativeRegistration) {
   EXPECT_EQ(Notify(1), AMDF_STATUS_OK);
   ASSERT_NO_FATAL_FAILURE(ExpectNotification());
   state_.progress = UINT64_MAX;
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_progress(queue_), 0u);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_progress(queue_), 0u);
   EXPECT_EQ(Notify(0), AMDF_STATUS_OK);
   ASSERT_NO_FATAL_FAILURE(ExpectNotification());
   EXPECT_EQ(state_.wait_count, 0u);
@@ -427,7 +437,7 @@ TEST_P(LinuxDxgKernelQueueTest, RecoverableRejectionLeavesPointRetryable) {
   const amdf_status_t rejected = amdf_make_status(
       AMDF_STATUS_DOMAIN_NTSTATUS, static_cast<uint32_t>(kStatusNoMemory));
   EXPECT_EQ(Submit(1), rejected);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_terminal_status(queue_),
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(queue_),
             AMDF_STATUS_OK);
   EXPECT_EQ(state_.diagnostic_count, 1u);
   state_.submit_status = kStatusSuccess;
@@ -437,19 +447,22 @@ TEST_P(LinuxDxgKernelQueueTest, RecoverableRejectionLeavesPointRetryable) {
 
 TEST_P(LinuxDxgKernelQueueTest, FatalRejectionStopsSiblingQueues) {
   amdf_gpu_umd_kernel_queue_t* sibling = nullptr;
-  ASSERT_EQ(amdf_gpu_umd_kernel_queue_create(&device_, GetParam(), &sibling),
-            AMDF_STATUS_OK);
+  ASSERT_EQ(
+      amdf_gpu_linux_dxg_kernel_queue_create(&device_, GetParam(), &sibling),
+      AMDF_STATUS_OK);
   state_.submit_status = kStatusDeviceRemoved;
   const amdf_status_t lost = amdf_make_status(
       AMDF_STATUS_DOMAIN_NTSTATUS, static_cast<uint32_t>(kStatusDeviceRemoved));
   EXPECT_EQ(Submit(1), lost);
   state_.submit_status = kStatusSuccess;
   EXPECT_EQ(Submit(1), lost);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_submit(sibling, 0x20000, 64, 1), lost);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_submit(sibling, 0x20000, 64, 1),
+            lost);
   EXPECT_EQ(state_.submitted_values.size(), 1u);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_terminal_status(sibling), lost);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(sibling),
+            lost);
   EXPECT_EQ(state_.diagnostic_count, 0u);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_destroy(sibling), AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_destroy(sibling), AMDF_STATUS_OK);
 }
 
 TEST_P(LinuxDxgKernelQueueTest,
@@ -458,13 +471,15 @@ TEST_P(LinuxDxgKernelQueueTest,
   const amdf_status_t failure = amdf_make_status(
       AMDF_STATUS_DOMAIN_NTSTATUS, static_cast<uint32_t>(kStatusNoMemory));
   EXPECT_EQ(Submit(1), AMDF_STATUS_OK);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_terminal_status(queue_), failure);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_progress(queue_), 0u);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(queue_),
+            failure);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_progress(queue_), 0u);
   EXPECT_EQ(Submit(2), failure);
   EXPECT_EQ(state_.submitted_values, (std::vector<uint64_t>{1}));
   state_.progress = 1;
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_progress(queue_), 1u);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_terminal_status(queue_), failure);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_progress(queue_), 1u);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(queue_),
+            failure);
 }
 
 TEST_P(LinuxDxgKernelQueueTest, WaitUsesPrecreatedEventAndRetiresPoint) {
@@ -472,9 +487,9 @@ TEST_P(LinuxDxgKernelQueueTest, WaitUsesPrecreatedEventAndRetiresPoint) {
   amdf_wait_deadline_t deadline;
   ASSERT_EQ(amdf_wait_deadline_initialize(AMDF_TIMEOUT_INFINITE, 0, &deadline),
             AMDF_STATUS_OK);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_wait(queue_, 1, &deadline),
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_wait(queue_, 1, &deadline),
             AMDF_STATUS_OK);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_progress(queue_), 1u);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_progress(queue_), 1u);
   EXPECT_EQ(state_.wait_count, 1u);
   EXPECT_EQ(state_.allocation_count, 1u);
 }
@@ -487,11 +502,12 @@ TEST_P(LinuxDxgKernelQueueTest, RecoverableWaitErrorNeverReplaysCommand) {
             AMDF_STATUS_OK);
   const amdf_status_t failure = amdf_make_status(
       AMDF_STATUS_DOMAIN_NTSTATUS, static_cast<uint32_t>(kStatusNoMemory));
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_wait(queue_, 1, &deadline), failure);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_terminal_status(queue_),
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_wait(queue_, 1, &deadline),
+            failure);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(queue_),
             AMDF_STATUS_OK);
   state_.wait_status = kStatusSuccess;
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_wait(queue_, 1, &deadline),
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_wait(queue_, 1, &deadline),
             AMDF_STATUS_OK);
   EXPECT_EQ(state_.submitted_values.size(), 1u);
   EXPECT_EQ(state_.wait_count, 2u);
@@ -507,19 +523,20 @@ TEST_P(LinuxDxgKernelQueueTest,
             AMDF_STATUS_OK);
   const amdf_status_t lost = amdf_make_status(
       AMDF_STATUS_DOMAIN_NTSTATUS, static_cast<uint32_t>(kStatusDeviceRemoved));
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_wait(queue_, 1, &deadline), lost);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_progress(queue_), 1u);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_terminal_status(queue_), lost);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_wait(queue_, 1, &deadline), lost);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_progress(queue_), 1u);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(queue_),
+            lost);
 }
 
 TEST_P(LinuxDxgKernelQueueTest, TimeoutPreservesAcceptedWorkAndQueueHealth) {
   ASSERT_EQ(Submit(1), AMDF_STATUS_OK);
   amdf_wait_deadline_t deadline;
   ASSERT_EQ(amdf_wait_deadline_initialize(0, 0, &deadline), AMDF_STATUS_OK);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_wait(queue_, 1, &deadline),
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_wait(queue_, 1, &deadline),
             amdf_make_api_status(AMDF_STATUS_CODE_DEADLINE_EXCEEDED));
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_progress(queue_), 0u);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_terminal_status(queue_),
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_progress(queue_), 0u);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(queue_),
             AMDF_STATUS_OK);
   EXPECT_EQ(state_.wait_count, 0u);
 }
@@ -535,13 +552,15 @@ TEST_P(LinuxDxgKernelQueueTest, TimedWaitReusesRegistrationAndDrainsStaleWake) {
   amdf_wait_deadline_t deadline;
   ASSERT_EQ(amdf_wait_deadline_initialize(timeout, 0, &deadline),
             AMDF_STATUS_OK);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_wait(queue_, 2, &deadline), timed_out);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_wait(queue_, 2, &deadline),
+            timed_out);
   ASSERT_GE(state_.deferred_wait_event, 0);
   EXPECT_EQ(state_.wait_count, 1u);
 
   ASSERT_EQ(amdf_wait_deadline_initialize(timeout, 0, &deadline),
             AMDF_STATUS_OK);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_wait(queue_, 2, &deadline), timed_out);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_wait(queue_, 2, &deadline),
+            timed_out);
   EXPECT_EQ(state_.wait_count, 1u);
 
   state_.wait_status = kStatusNoMemory;
@@ -549,14 +568,15 @@ TEST_P(LinuxDxgKernelQueueTest, TimedWaitReusesRegistrationAndDrainsStaleWake) {
             AMDF_STATUS_OK);
   const amdf_status_t rejected = amdf_make_status(
       AMDF_STATUS_DOMAIN_NTSTATUS, static_cast<uint32_t>(kStatusNoMemory));
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_wait(queue_, 1, &deadline), rejected);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_wait(queue_, 1, &deadline),
+            rejected);
   EXPECT_EQ(state_.wait_count, 2u);
 
   state_.wait_status = kStatusSuccess;
   state_.signal_wait = true;
   ASSERT_EQ(amdf_wait_deadline_initialize(timeout, 0, &deadline),
             AMDF_STATUS_OK);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_wait(queue_, 1, &deadline),
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_wait(queue_, 1, &deadline),
             AMDF_STATUS_OK);
   EXPECT_EQ(state_.wait_count, 3u);
 
@@ -564,7 +584,7 @@ TEST_P(LinuxDxgKernelQueueTest, TimedWaitReusesRegistrationAndDrainsStaleWake) {
   ASSERT_EQ(eventfd_write(state_.deferred_wait_event, 1), 0);
   ASSERT_EQ(amdf_wait_deadline_initialize(AMDF_TIMEOUT_INFINITE, 0, &deadline),
             AMDF_STATUS_OK);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_wait(queue_, 3, &deadline),
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_wait(queue_, 3, &deadline),
             AMDF_STATUS_OK);
   EXPECT_EQ(state_.progress, 3u);
   EXPECT_EQ(state_.wait_count, 4u);
@@ -573,13 +593,14 @@ TEST_P(LinuxDxgKernelQueueTest, TimedWaitReusesRegistrationAndDrainsStaleWake) {
 TEST_P(LinuxDxgKernelQueueTest, ResetFenceNeverCompletesAcceptedWork) {
   ASSERT_EQ(Submit(1), AMDF_STATUS_OK);
   state_.progress = UINT64_MAX;
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_progress(queue_), 0u);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_progress(queue_), 0u);
   const amdf_status_t lost = amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_terminal_status(queue_), lost);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(queue_),
+            lost);
   amdf_wait_deadline_t deadline;
   ASSERT_EQ(amdf_wait_deadline_initialize(AMDF_TIMEOUT_INFINITE, 0, &deadline),
             AMDF_STATUS_OK);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_wait(queue_, 1, &deadline), lost);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_wait(queue_, 1, &deadline), lost);
   EXPECT_EQ(Submit(2), lost);
   EXPECT_EQ(state_.submitted_values.size(), 1u);
   EXPECT_EQ(state_.wait_count, 0u);
@@ -592,9 +613,10 @@ TEST_P(LinuxDxgKernelQueueTest, ResetDuringWaitNeverCompletesAcceptedWork) {
   ASSERT_EQ(amdf_wait_deadline_initialize(AMDF_TIMEOUT_INFINITE, 0, &deadline),
             AMDF_STATUS_OK);
   const amdf_status_t lost = amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_wait(queue_, 1, &deadline), lost);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_progress(queue_), 0u);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_terminal_status(queue_), lost);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_wait(queue_, 1, &deadline), lost);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_progress(queue_), 0u);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(queue_),
+            lost);
   EXPECT_EQ(state_.wait_count, 1u);
 }
 
@@ -602,14 +624,14 @@ TEST_P(LinuxDxgKernelQueueTest,
        InactivationStopsNativeWorkAndPreservesCheckedProgress) {
   ASSERT_EQ(Submit(1), AMDF_STATUS_OK);
   state_.progress = 1;
-  ASSERT_EQ(amdf_gpu_umd_kernel_queue_inactivate(queue_), AMDF_STATUS_OK);
+  ASSERT_EQ(amdf_gpu_linux_dxg_kernel_queue_inactivate(queue_), AMDF_STATUS_OK);
   EXPECT_EQ(state_.destroy_count, 1u);
   state_.progress = UINT64_MAX;
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_progress(queue_), 1u);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_terminal_status(queue_),
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_progress(queue_), 1u);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(queue_),
             amdf_make_api_status(AMDF_STATUS_CODE_FAILED_PRECONDITION));
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_inactivate(queue_), AMDF_STATUS_OK);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_destroy(queue_), AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_inactivate(queue_), AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_destroy(queue_), AMDF_STATUS_OK);
   queue_ = nullptr;
   EXPECT_EQ(state_.destroy_count, 1u);
 }
@@ -617,26 +639,27 @@ TEST_P(LinuxDxgKernelQueueTest,
 TEST_P(LinuxDxgKernelQueueTest, InactivationPreservesDeviceFailure) {
   amdf_gpu_linux_dxg_device_status_record_reset(&device_.status);
   const amdf_status_t lost = amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
-  ASSERT_EQ(amdf_gpu_umd_kernel_queue_inactivate(queue_), AMDF_STATUS_OK);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_terminal_status(queue_), lost);
+  ASSERT_EQ(amdf_gpu_linux_dxg_kernel_queue_inactivate(queue_), AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_terminal_status(queue_),
+            lost);
 }
 
 TEST_P(LinuxDxgKernelQueueTest, FailedInactivationNeverRetriesRemoval) {
   state_.destroy_status = kStatusUnsuccessful;
   const amdf_status_t failure = amdf_make_status(
       AMDF_STATUS_DOMAIN_NTSTATUS, static_cast<uint32_t>(kStatusUnsuccessful));
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_inactivate(queue_), failure);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_inactivate(queue_), failure);
   EXPECT_EQ(state_.destroy_count, 1u);
   state_.destroy_status = kStatusSuccess;
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_inactivate(queue_), failure);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_destroy(queue_), failure);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_inactivate(queue_), failure);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_destroy(queue_), failure);
   queue_ = nullptr;
   EXPECT_EQ(state_.destroy_count, 1u);
 }
 
 TEST_P(LinuxDxgKernelQueueTest, UnsupportedCommandTypePreservesOutput) {
   auto* sentinel = reinterpret_cast<amdf_gpu_umd_kernel_queue_t*>(uintptr_t{1});
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_create(
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_create(
                 &device_, AMDF_QUEUE_COMMAND_TYPE_XDNA, &sentinel),
             amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
   EXPECT_EQ(sentinel,
@@ -649,8 +672,9 @@ TEST_P(LinuxDxgKernelQueueTest,
   auto* sentinel = reinterpret_cast<amdf_gpu_umd_kernel_queue_t*>(uintptr_t{1});
   const amdf_status_t failure = amdf_make_status(
       AMDF_STATUS_DOMAIN_NTSTATUS, static_cast<uint32_t>(kStatusNoMemory));
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_create(&device_, GetParam(), &sentinel),
-            failure);
+  EXPECT_EQ(
+      amdf_gpu_linux_dxg_kernel_queue_create(&device_, GetParam(), &sentinel),
+      failure);
   EXPECT_EQ(sentinel,
             reinterpret_cast<amdf_gpu_umd_kernel_queue_t*>(uintptr_t{1}));
   EXPECT_EQ(state_.live_allocation_count, 1u);

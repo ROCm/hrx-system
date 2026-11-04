@@ -4,8 +4,6 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "libamdf/src/gpu/umd/memory.h"
-
 #include <sys/ioctl.h>
 
 #include <algorithm>
@@ -14,6 +12,7 @@
 
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
+#include "libamdf/src/gpu/umd/dxg/linux/api.h"
 #include "libamdf/src/gpu/umd/dxg/linux/device.h"
 
 namespace {
@@ -296,9 +295,9 @@ class LinuxDxgMemoryTest : public ::testing::Test {
 
   amdf_memory_native_profile_t Profile(uint32_t ordinal) {
     amdf_memory_native_profile_t profile = {};
-    EXPECT_EQ(
-        amdf_gpu_umd_device_query_memory_profile(&device_, ordinal, &profile),
-        AMDF_STATUS_OK);
+    EXPECT_EQ(amdf_gpu_linux_dxg_device_query_memory_profile(&device_, ordinal,
+                                                             &profile),
+              AMDF_STATUS_OK);
     return profile;
   }
 
@@ -306,8 +305,8 @@ class LinuxDxgMemoryTest : public ::testing::Test {
                         amdf_gpu_umd_memory_t** out_memory) {
     const amdf_memory_native_profile_t profile = Profile(profile_ordinal);
     amdf_gpu_umd_memory_result_t result = {};
-    return amdf_gpu_umd_memory_prepare(&device_, 0, nullptr, &profile,
-                                       &create_info_, out_memory, &result);
+    return amdf_gpu_linux_dxg_memory_prepare(
+        &device_, 0, nullptr, &profile, &create_info_, out_memory, &result);
   }
 
   FakeMemoryState state_;
@@ -335,7 +334,7 @@ TEST_F(LinuxDxgMemoryTest, OwnsLocalMemoryThroughPublishedKmtOperations) {
                                    Operation::kQueryDeviceState,
                                }));
 
-  ASSERT_EQ(amdf_gpu_umd_memory_destroy(memory), AMDF_STATUS_OK);
+  ASSERT_EQ(amdf_gpu_linux_dxg_memory_destroy(memory), AMDF_STATUS_OK);
   EXPECT_EQ(state_.operations[state_.operations.size() - 2],
             Operation::kDestroyAllocation);
   EXPECT_EQ(state_.operations.back(), Operation::kFreeAddress);
@@ -349,8 +348,8 @@ TEST_F(LinuxDxgMemoryTest, OwnsSystemStorageAndPublishesHostWrites) {
   const amdf_memory_native_profile_t profile = Profile(0);
   amdf_gpu_umd_memory_t* memory = nullptr;
   amdf_gpu_umd_memory_result_t result = {};
-  ASSERT_EQ(amdf_gpu_umd_memory_prepare(&device_, 0, nullptr, &profile,
-                                        &create_info_, &memory, &result),
+  ASSERT_EQ(amdf_gpu_linux_dxg_memory_prepare(&device_, 0, nullptr, &profile,
+                                              &create_info_, &memory, &result),
             AMDF_STATUS_OK);
   ASSERT_NE(state_.host_pointer, nullptr);
 
@@ -360,16 +359,16 @@ TEST_F(LinuxDxgMemoryTest, OwnsSystemStorageAndPublishesHostWrites) {
       .byte_offset = 64,
       .byte_length = 128,
   };
-  ASSERT_EQ(amdf_gpu_umd_memory_map(memory, &profile.host_mapping, &map_info,
-                                    &mapping, &mapping_result),
+  ASSERT_EQ(amdf_gpu_linux_dxg_memory_map(memory, &profile.host_mapping,
+                                          &map_info, &mapping, &mapping_result),
             AMDF_STATUS_OK);
   EXPECT_EQ(mapping_result.pointer,
             static_cast<uint8_t*>(state_.host_pointer) + 64);
-  ASSERT_EQ(amdf_gpu_umd_host_mapping_cache_control(
+  ASSERT_EQ(amdf_gpu_linux_dxg_host_mapping_cache_control(
                 mapping, AMDF_HOST_CACHE_OPERATION_FLUSH, 64, 128),
             AMDF_STATUS_OK);
   EXPECT_EQ(state_.invalidations, (std::vector<Invalidation>{{0x20, 64, 128}}));
-  EXPECT_EQ(amdf_gpu_umd_memory_destroy(memory), AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_gpu_linux_dxg_memory_destroy(memory), AMDF_STATUS_OK);
 }
 
 TEST_F(LinuxDxgMemoryTest, RegistersBorrowedHostStorageWithoutOwningIt) {
@@ -385,7 +384,7 @@ TEST_F(LinuxDxgMemoryTest, RegistersBorrowedHostStorageWithoutOwningIt) {
   amdf_gpu_umd_memory_t* memory = nullptr;
   ASSERT_EQ(Prepare(2, &memory), AMDF_STATUS_OK);
   EXPECT_EQ(state_.host_pointer, registered_storage);
-  EXPECT_EQ(amdf_gpu_umd_memory_destroy(memory), AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_gpu_linux_dxg_memory_destroy(memory), AMDF_STATUS_OK);
   registered_storage[0] = 1;
   EXPECT_EQ(registered_storage[0], 1u);
 }
@@ -401,7 +400,7 @@ TEST_P(LinuxDxgMemoryPreparationFailureTest,
   EXPECT_EQ(Prepare(1, &memory),
             amdf_linux_dxg_kmt_make_status(kStatusNoMemory));
   ASSERT_NE(memory, nullptr);
-  EXPECT_EQ(amdf_gpu_umd_memory_destroy(memory), AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_gpu_linux_dxg_memory_destroy(memory), AMDF_STATUS_OK);
 
   std::vector<Operation> expected = {
       Operation::kQueryLayout,
@@ -447,9 +446,9 @@ TEST_F(LinuxDxgMemoryTest, DestroyFailureConsumesAllocationBeforeRetry) {
   amdf_gpu_umd_memory_t* memory = nullptr;
   ASSERT_EQ(Prepare(1, &memory), AMDF_STATUS_OK);
   state_.destroy_failures_remaining = 1;
-  EXPECT_EQ(amdf_gpu_umd_memory_destroy(memory),
+  EXPECT_EQ(amdf_gpu_linux_dxg_memory_destroy(memory),
             amdf_linux_dxg_kmt_make_status(kStatusNoMemory));
-  EXPECT_EQ(amdf_gpu_umd_memory_destroy(memory), AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_gpu_linux_dxg_memory_destroy(memory), AMDF_STATUS_OK);
   EXPECT_EQ(std::count(state_.operations.begin(), state_.operations.end(),
                        Operation::kDestroyAllocation),
             1);
@@ -462,9 +461,9 @@ TEST_F(LinuxDxgMemoryTest, FreeFailureRetainsAddressForOneExactRetry) {
   amdf_gpu_umd_memory_t* memory = nullptr;
   ASSERT_EQ(Prepare(1, &memory), AMDF_STATUS_OK);
   state_.free_failures_remaining = 1;
-  EXPECT_EQ(amdf_gpu_umd_memory_destroy(memory),
+  EXPECT_EQ(amdf_gpu_linux_dxg_memory_destroy(memory),
             amdf_linux_dxg_kmt_make_status(kStatusNoMemory));
-  EXPECT_EQ(amdf_gpu_umd_memory_destroy(memory), AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_gpu_linux_dxg_memory_destroy(memory), AMDF_STATUS_OK);
   EXPECT_EQ(std::count(state_.operations.begin(), state_.operations.end(),
                        Operation::kDestroyAllocation),
             1);
@@ -479,7 +478,7 @@ TEST_F(LinuxDxgMemoryTest, ResetFenceCannotPublishPagingCompletion) {
   EXPECT_EQ(Prepare(1, &memory),
             amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST));
   ASSERT_NE(memory, nullptr);
-  EXPECT_EQ(amdf_gpu_umd_memory_destroy(memory), AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_gpu_linux_dxg_memory_destroy(memory), AMDF_STATUS_OK);
   EXPECT_EQ(std::count(state_.operations.begin(), state_.operations.end(),
                        Operation::kWait),
             0);
@@ -494,7 +493,7 @@ TEST_F(LinuxDxgMemoryTest, StoppedDeviceCannotPublishRetiredPaging) {
   EXPECT_EQ(Prepare(1, &memory),
             amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST));
   ASSERT_NE(memory, nullptr);
-  EXPECT_EQ(amdf_gpu_umd_memory_destroy(memory), AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_gpu_linux_dxg_memory_destroy(memory), AMDF_STATUS_OK);
 }
 
 TEST_F(LinuxDxgMemoryTest, CachePublicationReturnsExactNativeFailure) {
@@ -505,15 +504,15 @@ TEST_F(LinuxDxgMemoryTest, CachePublicationReturnsExactNativeFailure) {
   const amdf_memory_native_profile_t profile = Profile(0);
   amdf_gpu_umd_memory_t* memory = nullptr;
   amdf_gpu_umd_memory_result_t result = {};
-  ASSERT_EQ(amdf_gpu_umd_memory_prepare(&device_, 0, nullptr, &profile,
-                                        &create_info_, &memory, &result),
+  ASSERT_EQ(amdf_gpu_linux_dxg_memory_prepare(&device_, 0, nullptr, &profile,
+                                              &create_info_, &memory, &result),
             AMDF_STATUS_OK);
   state_.invalidate_failures_remaining = 1;
-  EXPECT_EQ(amdf_gpu_umd_host_mapping_cache_control(
+  EXPECT_EQ(amdf_gpu_linux_dxg_host_mapping_cache_control(
                 reinterpret_cast<amdf_gpu_umd_host_mapping_t*>(memory),
                 AMDF_HOST_CACHE_OPERATION_FLUSH, 0, 64),
             amdf_linux_dxg_kmt_make_status(kStatusNoMemory));
-  EXPECT_EQ(amdf_gpu_umd_memory_destroy(memory), AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_gpu_linux_dxg_memory_destroy(memory), AMDF_STATUS_OK);
 }
 
 }  // namespace

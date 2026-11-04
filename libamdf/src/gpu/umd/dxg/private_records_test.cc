@@ -380,8 +380,7 @@ TEST(PrivateRecordsTest, InitializesHardwareAndSoftwareSubmissionsExactly) {
 }
 
 TEST(PrivateRecordsTest, DerivesComputeAndHardwareSdmaQueueProfiles) {
-  amdf_dxg_private_adapter_info_t info = {};
-  info.pm4_scheduler_id = 6;
+  amdf_dxg_private_adapter_info_t info = {.pm4_scheduler_id = 6};
   info.scheduler_ids[0] = 4;
   info.scheduler_ids[1] = 5;
   info.scheduler_ids[2] = 6;
@@ -403,8 +402,7 @@ TEST(PrivateRecordsTest, DerivesComputeAndHardwareSdmaQueueProfiles) {
 }
 
 TEST(PrivateRecordsTest, AllowsSoftwareSdmaOnlyWithoutPersistentUserQueues) {
-  amdf_dxg_private_adapter_info_t info = {};
-  info.pm4_scheduler_id = 5;
+  amdf_dxg_private_adapter_info_t info = {.pm4_scheduler_id = 5};
   info.scheduler_ids[0] = 5;
   info.scheduler_ids[1] = 4;
   info.hardware_scheduling_node_mask = 1u << 0;
@@ -426,8 +424,7 @@ TEST(PrivateRecordsTest, AllowsSoftwareSdmaOnlyWithoutPersistentUserQueues) {
 }
 
 TEST(PrivateRecordsTest, DoesNotSubstituteAnUnrelatedComputeScheduler) {
-  amdf_dxg_private_adapter_info_t info = {};
-  info.pm4_scheduler_id = 5;
+  amdf_dxg_private_adapter_info_t info = {.pm4_scheduler_id = 5};
   info.scheduler_ids[0] = 0;
   info.hardware_scheduling_node_mask = 1;
   amdf_dxg_private_queue_profile_t pm4_profile = {};

@@ -14,6 +14,20 @@ package(
 )
 
 amdf_cc_library(
+    name = "api_contract",
+    hdrs = ["api.h"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    visibility = ["//libamdf/src/gpu/umd:__pkg__"],
+    deps = [
+        "//libamdf/src/gpu/umd:api",
+        "//libamdf/src/gpu/umd/dxg:api",
+    ],
+)
+
+amdf_cc_library(
     name = "clock",
     srcs = ["clock.c"],
     target_compatible_with = [
@@ -21,6 +35,7 @@ amdf_cc_library(
         "@platforms//os:linux",
     ],
     deps = [
+        ":api_contract",
         ":device_state",
         "//libamdf/src/gpu/umd:clock",
         "//libamdf/src/gpu/umd/dxg:clock",
@@ -95,6 +110,7 @@ amdf_cc_library(
         "@platforms//os:linux",
     ],
     deps = [
+        ":api_contract",
         ":device_status",
         ":logical_device",
         ":memory_profile",
@@ -112,6 +128,7 @@ amdf_cc_library(
         "@platforms//os:linux",
     ],
     deps = [
+        ":api_contract",
         ":device_state",
         ":device_status",
         "//libamdf/src/gpu/umd:memory",
@@ -128,6 +145,7 @@ amdf_cc_library(
         "@platforms//os:linux",
     ],
     deps = [
+        ":api_contract",
         ":device_state",
         ":kernel_queue",
         ":memory",
@@ -147,6 +165,7 @@ amdf_cc_library(
         "@platforms//os:linux",
     ],
     deps = [
+        ":api_contract",
         ":device_state",
         ":device_status",
         "//libamdf/src:allocator",
@@ -170,6 +189,7 @@ amdf_cc_library(
         "@platforms//os:linux",
     ],
     deps = [
+        ":api_contract",
         ":device_state",
         "//libamdf/src:allocator",
         "//libamdf/src/gpu/umd/dxg/wsl:provider",
@@ -185,6 +205,7 @@ amdf_cc_library(
     ],
     visibility = ["//libamdf/src/gpu/umd:__pkg__"],
     deps = [
+        ":api_contract",
         ":logical_device",
         "//libamdf/src:allocator",
         "//libamdf/src:host_memory",
@@ -198,6 +219,29 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "api",
+    srcs = ["api.c"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    visibility = ["//libamdf/src/gpu/umd:__pkg__"],
+    deps = [
+        ":api_contract",
+        ":clock",
+        ":device",
+        ":endpoint_profile",
+        ":kernel_queue",
+        ":memory",
+        ":memory_reservation",
+        "//libamdf/src/gpu/umd:api",
+        "//libamdf/src/gpu/umd/dxg:event",
+        "//libamdf/src/gpu/umd/dxg:instance",
+        "//libamdf/src/gpu/umd/dxg:user_queue",
+    ],
+)
+
+amdf_cc_library(
     name = "linux_dxg",
     target_compatible_with = [
         "@platforms//cpu:x86_64",
@@ -205,6 +249,7 @@ amdf_cc_library(
     ],
     visibility = ["//libamdf/src/gpu/umd:__pkg__"],
     deps = [
+        ":api",
         ":clock",
         ":device",
         ":endpoint_profile",
@@ -244,6 +289,7 @@ amdf_cc_test(
         "@platforms//os:linux",
     ],
     deps = [
+        ":api_contract",
         ":device",
         ":device_state",
         "//libamdf/src:allocator",
@@ -278,6 +324,7 @@ amdf_cc_test(
         "@platforms//os:linux",
     ],
     deps = [
+        ":api_contract",
         ":device_state",
         ":memory",
         "//libamdf/src:allocator",
@@ -296,6 +343,7 @@ amdf_cc_test(
         "@platforms//os:linux",
     ],
     deps = [
+        ":api_contract",
         ":device_state",
         ":kernel_queue",
         "//libamdf/src:allocator",
@@ -315,6 +363,7 @@ amdf_cc_test(
         "@platforms//os:linux",
     ],
     deps = [
+        ":api_contract",
         ":device_state",
         ":kernel_queue",
         ":memory",
@@ -334,6 +383,7 @@ amdf_cc_test(
         "@platforms//os:linux",
     ],
     deps = [
+        ":api_contract",
         ":device",
         ":device_state",
         ":memory",
@@ -346,6 +396,7 @@ amdf_cc_test(
         "//libamdf/src/gpu/umd/dxg:endpoint_properties",
         "//libamdf/src/platform",
         "//libamdf/src/platform:host_memory",
+        "//libamdf/src/platform/linux:endpoint",
         "//libamdf/src/platform/linux/dxg:endpoint",
         "//third_party:google_test",
         "//third_party:google_test_main",
@@ -365,6 +416,7 @@ amdf_cc_test(
         "@platforms//os:linux",
     ],
     deps = [
+        ":api_contract",
         ":endpoint_profile",
         "//libamdf/src:allocator",
         "//libamdf/src/gpu/umd:endpoint_profile",
