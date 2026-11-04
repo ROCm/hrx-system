@@ -64,14 +64,29 @@ loom_cc_library(
     visibility = ["//loom/src/loom/target/emit/native/aie2p:__pkg__"],
     deps = [
         "//loom/binding/c:loomc",
+        "//loom/src/loom/tools/loom-check:execute",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/schemas:xdna_executable",
+    ],
+)
+
+loom_cc_library(
+    name = "hardware_loops",
+    testonly = True,
+    srcs = ["hardware_loops.c"],
+    hdrs = ["hardware_loops.h"],
+    target_compatible_with = _XDNA_ARTIFACT_COMPATIBLE_WITH,
+    visibility = ["//loom/src/loom/tools/loom-check:__pkg__"],
+    deps = [
+        "//loom/binding/c:loomc",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:encoding",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/emit:bundle_encoding",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/encoding",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/machine",
         "//loom/src/loom/tools/loom-check:execute",
+        "//loom/src/loom/tools/loom-check:provider",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/schemas:xdna_executable",
     ],
 )
 

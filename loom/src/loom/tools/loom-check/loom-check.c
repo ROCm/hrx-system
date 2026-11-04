@@ -74,6 +74,9 @@
 #endif  // LOOM_CHECK_HAVE_ARCH_SPIRV
 #if LOOM_CHECK_HAVE_ARTIFACT_AIE2P_ELF
 #include "loom/target/emit/native/aie2p/check_provider.h"
+#if LOOM_CHECK_HAVE_TEST_PROVIDER
+#include "loom/target/arch/amd/xdna/aie2p/check/hardware_loops.h"
+#endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 #endif  // LOOM_CHECK_HAVE_ARTIFACT_AIE2P_ELF
 #if LOOM_CHECK_HAVE_ARTIFACT_AMDGPU_ELF
 #include "loom/target/emit/native/amdgpu/loom_check_provider.h"
@@ -118,6 +121,9 @@ static const loom_check_provider_t* const kLoomCheckProviders[] = {
 #endif  // LOOM_CHECK_HAVE_ARCH_SPIRV
 #if LOOM_CHECK_HAVE_ARTIFACT_AIE2P_ELF
     &loom_aie2p_artifact_check_provider,
+#if LOOM_CHECK_HAVE_TEST_PROVIDER
+    &loom_aie2p_hardware_loops_check_provider,
+#endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 #endif  // LOOM_CHECK_HAVE_ARTIFACT_AIE2P_ELF
 #if LOOM_CHECK_HAVE_ARTIFACT_AMDGPU_ELF
     &loom_amdgpu_native_check_provider,

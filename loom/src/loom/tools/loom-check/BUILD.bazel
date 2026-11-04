@@ -72,6 +72,13 @@ _ARTIFACT_AIE2P_ELF_CHECK_DEPS = iree_select({
     "//conditions:default": [],
 })
 
+_ARTIFACT_AIE2P_ELF_CHECK_TEST_DEPS = iree_select({
+    "//loom/config/emit:aie2p_elf": [
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/check:hardware_loops",
+    ],
+    "//conditions:default": [],
+})
+
 _ARTIFACT_AMDGPU_ELF_CHECK_COPTS = iree_select({
     "//loom/config/emit:amdgpu_elf": [
         "-DLOOM_CHECK_HAVE_ARTIFACT_AMDGPU_ELF=1",
@@ -179,6 +186,7 @@ _LOOM_CHECK_TEST_PROVIDER_DEPS = (
     _LOOM_CHECK_PROVIDER_DEPS +
     _ARCH_AIE2P_CHECK_TEST_DEPS +
     _ARCH_AMDGPU_CHECK_TEST_DEPS +
+    _ARTIFACT_AIE2P_ELF_CHECK_TEST_DEPS +
     _ARTIFACT_AMDGPU_ELF_CHECK_TEST_DEPS +
     _ARTIFACT_X86_ELF_CHECK_TEST_DEPS
 )
