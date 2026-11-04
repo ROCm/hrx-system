@@ -931,6 +931,41 @@ static iree_status_t loom_target_compile_report_format_entry_rows(
   return iree_ok_status();
 }
 
+static iree_status_t loom_target_compile_report_format_call_edge_rows(
+    const loom_target_compile_report_t* report,
+    iree_string_builder_t* builder) {
+  iree_host_size_t row_index = 0;
+  for (const loom_target_compile_report_vec_t* vec =
+           report->call_edge_rows.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_call_edge_t* rows =
+        (const loom_target_compile_report_call_edge_t*)
+            loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
+      const loom_target_compile_report_call_edge_t* row = &rows[i];
+      const iree_string_view_t caller =
+          loom_target_compile_report_text_non_empty(row->function_name);
+      const iree_string_view_t callee =
+          loom_target_compile_report_text_non_empty(row->callee_name);
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          "COMPILE-REPORT: call_edge[%" PRIhsz
+          "] caller=%.*s callee=%.*s callsites=%" PRIu64,
+          row_index, (int)caller.size, caller.data, (int)callee.size,
+          callee.data, row->callsite_count));
+      if (iree_all_bits_set(
+              row->flags, LOOM_TARGET_COMPILE_REPORT_CALL_EDGE_DYNAMIC_COUNT)) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, " dynamic_calls=%" PRIu64 "\n", row->dynamic_call_count));
+      } else {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+            builder, " dynamic_calls=unavailable\n"));
+      }
+    }
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_target_compile_report_format_text(
     const loom_target_compile_report_t* report,
     const loom_target_compile_report_format_options_t* options,
@@ -962,6 +997,11 @@ iree_status_t loom_target_compile_report_format_text(
         loom_target_compile_report_format_entry_rows(report, builder));
   }
   if (options->mode == LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS) {
+    if (iree_any_bit_set(report->detail_flags,
+                         LOOM_TARGET_COMPILE_REPORT_DETAIL_CALL_EDGES)) {
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_format_call_edge_rows(report, builder));
+    }
     if (iree_any_bit_set(
             report->detail_flags,
             LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS)) {

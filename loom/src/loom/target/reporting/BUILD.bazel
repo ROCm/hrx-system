@@ -48,8 +48,10 @@ loom_cc_library(
 loom_cc_library(
     name = "report",
     srcs = [
+        "call_edges.c",
         "config_bindings.c",
         "config_bindings.h",
+        "instruction_mix.c",
         "loop_pipeline.c",
         "memory_interval.c",
         "memory_interval.h",
@@ -233,6 +235,7 @@ loom_cc_test(
         "memory_summary_test.cc",
         "memory_summary_test_util.h",
         "pipeline_plan_test.cc",
+        "report_test.cc",
         "selection_summary_test.cc",
     ],
     deps = [

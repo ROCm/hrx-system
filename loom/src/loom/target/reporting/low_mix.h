@@ -48,17 +48,6 @@ void loom_target_compile_report_accumulate_low_node_static_mix(
     const loom_low_descriptor_set_t* descriptor_set, uint32_t node_index,
     loom_target_compile_report_static_instruction_mix_t* mix);
 
-// Accumulates |source| into |target|.
-void loom_target_compile_report_accumulate_static_mix(
-    loom_target_compile_report_static_instruction_mix_t* target,
-    const loom_target_compile_report_static_instruction_mix_t* source);
-
-// Accumulates |source| scaled by |scale|, returning false on overflow.
-bool loom_target_compile_report_accumulate_scaled_static_mix(
-    loom_target_compile_report_static_instruction_mix_t* target,
-    const loom_target_compile_report_static_instruction_mix_t* source,
-    uint64_t scale);
-
 // Returns the exact execution multiplier for |node| when one is known.
 bool loom_target_compile_report_low_node_execution_multiplier(
     const loom_module_t* module,

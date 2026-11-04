@@ -95,12 +95,14 @@ enum {
   LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS = 1u << 25,
   // Final target body, entry, and coissued instruction counts were recorded.
   LOOM_TARGET_COMPILE_REPORT_DETAIL_EMISSION_BREAKDOWN = 1u << 26,
+  // Final per-entry residency constraints are retained in both report modes.
+  LOOM_TARGET_COMPILE_REPORT_DETAIL_RESIDENCY_CONSTRAINTS = 1u << 27,
   // Aggregate pipeline realization facts were recorded.
   LOOM_TARGET_COMPILE_REPORT_DETAIL_PIPELINE_PLAN = 1u << 28,
   // Per-worker and per-channel pipeline realization rows were recorded.
   LOOM_TARGET_COMPILE_REPORT_DETAIL_PIPELINE_PLAN_ROWS = 1u << 29,
-  // Final per-entry residency constraints are retained in both report modes.
-  LOOM_TARGET_COMPILE_REPORT_DETAIL_RESIDENCY_CONSTRAINTS = 1u << 27,
+  // Direct function-call edges and their invocation counts were recorded.
+  LOOM_TARGET_COMPILE_REPORT_DETAIL_CALL_EDGES = 1u << 30,
 };
 
 typedef enum loom_target_compile_report_move_cause_e {
@@ -637,6 +639,39 @@ typedef struct loom_target_compile_report_subgroup_access_summary_t {
   // Exact dynamic packet executions containing overlapping lane requests.
   uint64_t dynamic_overlapping_packet_count;
 } loom_target_compile_report_subgroup_access_summary_t;
+
+typedef uint32_t loom_target_compile_report_call_edge_flags_t;
+enum {
+  // No optional direct-call facts are available.
+  LOOM_TARGET_COMPILE_REPORT_CALL_EDGE_NONE = 0u,
+  // |dynamic_call_count| is exact for one invocation of the caller.
+  LOOM_TARGET_COMPILE_REPORT_CALL_EDGE_DYNAMIC_COUNT = 1u << 0,
+};
+
+// One direct function-call edge retained from a compiled Low function.
+typedef struct loom_target_compile_report_call_edge_t {
+  // Index links owned by the containing report.
+  struct {
+    // Ordered children indexed by comparison direction.
+    struct loom_target_compile_report_call_edge_t* children[2];
+    // AVL subtree height including this row.
+    uint8_t height;
+  } index;
+  // Optional facts populated for this edge.
+  loom_target_compile_report_call_edge_flags_t flags;
+  // Function containing the direct call sites.
+  iree_string_view_t function_name;
+  // Module-local identity of |function_name|.
+  loom_symbol_ref_t function;
+  // Direct callee symbol name.
+  iree_string_view_t callee_name;
+  // Module-local direct callee identity used during program composition.
+  loom_symbol_ref_t callee;
+  // Number of distinct static call sites represented by this edge.
+  uint64_t callsite_count;
+  // Exact dynamic calls made by one invocation of |function_name|.
+  uint64_t dynamic_call_count;
+} loom_target_compile_report_call_edge_t;
 
 // One emitted artifact entry summary in a compile report.
 typedef struct loom_target_compile_report_entry_t {
@@ -1915,6 +1950,8 @@ typedef struct loom_target_compile_report_t {
   loom_target_compile_report_detail_flags_t requested_detail_flags;
   // Optional detail flags indicating which numeric summaries are populated.
   loom_target_compile_report_detail_flags_t detail_flags;
+  // Number of reports whose summary evidence has been merged into this report.
+  uint64_t merged_evidence_count;
   // Target artifact function symbol when exactly one entry is described.
   iree_string_view_t function_name;
   // Execution or codegen backend name that produced the candidate, if any.
@@ -2057,6 +2094,10 @@ typedef struct loom_target_compile_report_t {
   loom_target_compile_report_row_list_t pipeline_plans;
   // Owned emitted artifact entry summary rows.
   loom_target_compile_report_row_list_t entry_rows;
+  // Owned direct function-call edge summaries.
+  loom_target_compile_report_row_list_t call_edge_rows;
+  // Borrowed root of the index in |call_edge_rows|.
+  loom_target_compile_report_call_edge_t* call_edge_root;
   // Owned final residency constraints, keyed by emitted entry function.
   loom_target_compile_report_row_list_t residency_constraint_rows;
   // Owned register-class pressure summaries used by target resources.
@@ -2219,6 +2260,17 @@ void loom_target_compile_report_record_static_instruction_mix(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_static_instruction_mix_t* mix);
 
+// Accumulates |source| into |target|.
+void loom_target_compile_report_accumulate_static_mix(
+    loom_target_compile_report_static_instruction_mix_t* target,
+    const loom_target_compile_report_static_instruction_mix_t* source);
+
+// Accumulates |source| scaled by |scale|, returning false on overflow.
+bool loom_target_compile_report_accumulate_scaled_static_mix(
+    loom_target_compile_report_static_instruction_mix_t* target,
+    const loom_target_compile_report_static_instruction_mix_t* source,
+    uint64_t scale);
+
 // Records per-workitem instruction-mix counters weighted by exact static loop
 // trip counts.
 void loom_target_compile_report_record_dynamic_instruction_mix(
@@ -2266,6 +2318,41 @@ void loom_target_compile_report_record_workload(
 iree_status_t loom_target_compile_report_merge_evidence(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_t* source_report);
+
+typedef struct loom_target_compile_report_function_merge_options_t {
+  // Number of dynamic helper invocations made by one entry invocation.
+  uint64_t invocation_count;
+  // True when |invocation_count| is exact. An unknown count makes the complete
+  // program's dynamic instruction mix unavailable.
+  bool has_exact_invocation_count;
+} loom_target_compile_report_function_merge_options_t;
+
+// Merges one independently compiled helper function into its owning program.
+//
+// |report| must already contain the owning entry function's evidence. Complete
+// static, dynamic, and Low-planning summaries remain available only when both
+// the entry and helper reports provide them.
+//
+// Function-local scheduling, allocation, lowering, wait, instruction-mix, and
+// detail evidence is accumulated once. Dynamic instruction mix is scaled by
+// |options->invocation_count|. Program identity, workload, final code layout,
+// memory layout, target resources, occupancy, and entry-envelope emission stay
+// owned by the target program producer and are not modified.
+iree_status_t loom_target_compile_report_merge_function_evidence(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_t* function_report,
+    const loom_target_compile_report_function_merge_options_t* options);
+
+// Records or accumulates one direct function-call edge.
+iree_status_t loom_target_compile_report_record_call_edge(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_call_edge_t* edge);
+
+// Finds one retained direct-call edge by caller and callee identity.
+const loom_target_compile_report_call_edge_t*
+loom_target_compile_report_find_call_edge(
+    const loom_target_compile_report_t* report, loom_symbol_ref_t function,
+    loom_symbol_ref_t callee);
 
 // Records one emitted artifact entry and merges its summary and detail evidence
 // into |report|. String views remain borrowed from |entry_report|'s original
