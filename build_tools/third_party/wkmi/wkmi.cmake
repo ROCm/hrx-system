@@ -12,7 +12,16 @@ function(iree_configure_amdf_wkmi)
   endif()
 
   iree_populate_locked_file(amdf_wkmi_header _wkmi_header)
-  iree_populate_locked_file(amdf_wkmi_library _wkmi_library)
+  if(WIN32)
+    iree_populate_locked_file(amdf_wkmi_library _wkmi_library)
+  elseif(
+    CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+    CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$"
+  )
+    iree_populate_locked_file(amdf_wkmi_linux_library _wkmi_library)
+  else()
+    message(FATAL_ERROR "WKMI is available only for x86-64 Windows and Linux")
+  endif()
   cmake_path(GET _wkmi_header PARENT_PATH _wkmi_file_dir)
 
   add_library(iree_amdf_wkmi STATIC IMPORTED GLOBAL)

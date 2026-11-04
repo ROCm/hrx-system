@@ -212,6 +212,13 @@ http_file(
     url = "https://therock-dvc.s3.amazonaws.com/rocm-systems/files/md5/ad/32f8a14a6bb2da2b28650137c6b331",
 )
 
+http_file(
+    name = "amdf_wkmi_linux_library",
+    downloaded_file_path = "libwkmi.a",
+    sha256 = "54165dac4e7cd143e79f2fae4e70353c950d7d8c66faeb9d07d8bcfb5bf72543",
+    url = "https://therock-dvc.s3.amazonaws.com/rocm-systems/files/md5/c6/4d27f8df4ae4c0825b8bc305040815",
+)
+
 http_archive(
     name = "directx_headers",
     build_file = "//build_tools/third_party/rocdxg_thunk_proxy:directx_headers.BUILD.bazel",

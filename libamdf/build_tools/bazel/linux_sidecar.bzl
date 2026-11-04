@@ -25,6 +25,7 @@ _SIDECAR_LINKOPTS = [
     "-fuse-ld=lld",
     "-pthread",
     "-Wl,--exclude-libs,ALL",
+    "-Wl,--gc-sections",
     "-Wl,--no-gnu-unique",
 ]
 

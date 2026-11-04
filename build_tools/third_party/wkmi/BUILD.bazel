@@ -22,7 +22,7 @@ copy_file(
 )
 
 cc_import(
-    name = "archive",
+    name = "windows_archive",
     static_library = "@amdf_wkmi_library//file:wkmi.lib",
     target_compatible_with = [
         "@platforms//cpu:x86_64",
@@ -30,14 +30,28 @@ cc_import(
     ],
 )
 
+cc_import(
+    name = "linux_archive",
+    static_library = "@amdf_wkmi_linux_library//file:libwkmi.a",
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+)
+
 cc_library(
     name = "wkmi",
     hdrs = [":header"],
     includes = ["include"],
-    target_compatible_with = [
-        "@platforms//cpu:x86_64",
-        "@platforms//os:windows",
-    ],
+    target_compatible_with = ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     visibility = ["//third_party:__pkg__"],
-    deps = [":archive"],
+    deps = select({
+        "@platforms//os:linux": [":linux_archive"],
+        "@platforms//os:windows": [":windows_archive"],
+        "//conditions:default": [],
+    }),
 )

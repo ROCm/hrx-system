@@ -102,6 +102,24 @@ amdf_cc_test(
 )
 
 amdf_cc_test(
+    name = "wkmi_payload_test",
+    srcs = ["wkmi_payload_test.cc"],
+    copts = ["-Wno-unknown-pragmas"],
+    linkopts = ["-Wl,--gc-sections"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        ":native_transport",
+        "//third_party:amdf_rocdxg_headers",
+        "//third_party:amdf_wkmi",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
     name = "library_test",
     srcs = ["library_test.cc"],
     data = [":amdf_rocdxg_bridge"],
