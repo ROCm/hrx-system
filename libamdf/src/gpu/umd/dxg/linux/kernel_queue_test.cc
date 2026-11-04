@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "libamdf/src/gpu/umd/kernel_queue.h"
+#include "libamdf/src/gpu/umd/dxg/linux/kernel_queue.h"
 
 #include <sys/eventfd.h>
 #include <sys/ioctl.h>
@@ -61,6 +61,18 @@ struct FakeQueueState {
   bool signal_wait = true;
   // Eventfd retained by a successful asynchronous registration.
   int deferred_wait_event = -1;
+  // Whether queue construction publishes a native hardware queue.
+  bool has_hardware_queue = true;
+  // Native mapping publication outcome.
+  NTSTATUS mapping_status = kStatusSuccess;
+  // Native dependency publication outcome after mapping acceptance.
+  NTSTATUS ordering_status = kStatusSuccess;
+  // Predecessor observed by native mapping publication.
+  uint64_t mapping_predecessor = 0;
+  // Queue wait point, absent when mapping publication was rejected.
+  uint64_t ordering_point = 0;
+  // Exact descriptor forwarded by the last mapping publication.
+  D3DDDI_UPDATEGPUVIRTUALADDRESS_OPERATION mapping_operation = {};
 };
 
 FakeQueueState* current_state = nullptr;
@@ -105,7 +117,7 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeCreateQueue(
   out_info->progress_fence_pointer = &state->progress;
   out_info->progress_fence_device_address = 0x10000;
   out_info->context_handle = 0x30;
-  out_info->queue_handle = 0x40;
+  out_info->queue_handle = state->has_hardware_queue ? 0x40 : 0;
   *out_native_status = 0;
   *out_queue = reinterpret_cast<amdf_dxg_bridge_gpu_kernel_queue_t*>(state);
   return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
@@ -182,6 +194,27 @@ extern "C" uint32_t __wrap_amdf_linux_dxg_connection_invoke(void* context,
         EXPECT_EQ(eventfd_write(event_descriptor, 1), 0);
       }
       return 0;
+    }
+    case 0x39: {
+      const auto* update =
+          static_cast<D3DKMT_UPDATEGPUVIRTUALADDRESS*>(arguments);
+      EXPECT_EQ(update->hDevice, 0x10u);
+      EXPECT_EQ(update->hContext, 0x30u);
+      EXPECT_EQ(update->hFenceObject, 0x20u);
+      EXPECT_EQ(update->Flags.Value, 0u);
+      EXPECT_EQ(update->NumOperations, 1u);
+      current_state->mapping_predecessor = update->FenceValue;
+      current_state->mapping_operation = update->Operations[0];
+      return static_cast<uint32_t>(current_state->mapping_status);
+    }
+    case 0x36: {
+      const auto* wait =
+          static_cast<D3DKMT_SUBMITWAITFORSYNCOBJECTSTOHWQUEUE*>(arguments);
+      EXPECT_EQ(wait->hHwQueue, 0x40u);
+      EXPECT_EQ(wait->ObjectCount, 1u);
+      EXPECT_EQ(wait->ObjectHandleArray[0], 0x20u);
+      current_state->ordering_point = wait->FenceValueArray[0];
+      return static_cast<uint32_t>(current_state->ordering_status);
     }
     default:
       ADD_FAILURE() << "unexpected DXG operation " << _IOC_NR(request);
@@ -272,11 +305,85 @@ class LinuxDxgKernelQueueTest
 TEST_P(LinuxDxgKernelQueueTest, CreatesColdQueueWithCompleteCapabilities) {
   EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_notification_types(queue_),
             AMDF_NATIVE_EVENT_TYPE_BIT_EVENTFD);
-  EXPECT_EQ(amdf_gpu_umd_kernel_queue_mapping_capacity(queue_), 0u);
+  EXPECT_EQ(amdf_gpu_umd_kernel_queue_mapping_capacity(queue_), 128u);
   EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_progress(queue_), 0u);
   EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_terminal_status(queue_),
             AMDF_STATUS_OK);
   EXPECT_EQ(state_.allocation_count, 1u);
+}
+
+TEST_P(LinuxDxgKernelQueueTest, SoftwareQueueOmitsMappingPublication) {
+  state_.has_hardware_queue = false;
+  amdf_gpu_umd_kernel_queue_t* software_queue = nullptr;
+  ASSERT_EQ(
+      amdf_gpu_umd_kernel_queue_create(&device_, GetParam(), &software_queue),
+      AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_gpu_umd_kernel_queue_mapping_capacity(software_queue), 0u);
+  EXPECT_EQ(amdf_gpu_umd_kernel_queue_destroy(software_queue), AMDF_STATUS_OK);
+}
+
+TEST_P(LinuxDxgKernelQueueTest,
+       QueueMappingPublishesPredecessorThenHardwareDependency) {
+  D3DDDI_UPDATEGPUVIRTUALADDRESS_OPERATION operation = {
+      .OperationType = D3DDDI_UPDATEGPUVIRTUALADDRESS_UNMAP,
+      .Unmap =
+          {
+              .BaseAddress = 0x40000,
+              .SizeInBytes = 4096,
+              .Protection = {.NoAccess = 1},
+          },
+  };
+  bool mutation_started = false;
+  bool accepted = false;
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_update_memory(
+                queue_, 1, &operation, 19, &mutation_started, &accepted),
+            AMDF_STATUS_OK);
+  EXPECT_TRUE(mutation_started);
+  EXPECT_TRUE(accepted);
+  EXPECT_EQ(state_.mapping_predecessor, 18u);
+  EXPECT_EQ(state_.ordering_point, 19u);
+  EXPECT_EQ(state_.mapping_operation.OperationType,
+            D3DDDI_UPDATEGPUVIRTUALADDRESS_UNMAP);
+  EXPECT_EQ(state_.mapping_operation.Unmap.BaseAddress, 0x40000u);
+  EXPECT_EQ(state_.mapping_operation.Unmap.SizeInBytes, 4096u);
+  EXPECT_EQ(state_.mapping_operation.Unmap.Protection.NoAccess, 1u);
+}
+
+TEST_P(LinuxDxgKernelQueueTest, RejectedMappingLeavesPointRetryable) {
+  state_.mapping_status = kStatusNoMemory;
+  D3DDDI_UPDATEGPUVIRTUALADDRESS_OPERATION operation = {};
+  bool mutation_started = false;
+  bool accepted = false;
+  const amdf_status_t failure = amdf_make_status(
+      AMDF_STATUS_DOMAIN_NTSTATUS, static_cast<uint32_t>(kStatusNoMemory));
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_update_memory(
+                queue_, 1, &operation, 19, &mutation_started, &accepted),
+            failure);
+  EXPECT_TRUE(mutation_started);
+  EXPECT_FALSE(accepted);
+  EXPECT_EQ(state_.ordering_point, 0u);
+  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_terminal_status(queue_),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(state_.diagnostic_count, 1u);
+}
+
+TEST_P(LinuxDxgKernelQueueTest,
+       FailedOrderingPreservesAcceptanceAndStopsQueue) {
+  state_.ordering_status = kStatusNoMemory;
+  D3DDDI_UPDATEGPUVIRTUALADDRESS_OPERATION operation = {};
+  bool mutation_started = false;
+  bool accepted = false;
+  const amdf_status_t failure = amdf_make_status(
+      AMDF_STATUS_DOMAIN_NTSTATUS, static_cast<uint32_t>(kStatusNoMemory));
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_update_memory(
+                queue_, 1, &operation, 19, &mutation_started, &accepted),
+            failure);
+  EXPECT_TRUE(mutation_started);
+  EXPECT_TRUE(accepted);
+  EXPECT_EQ(state_.mapping_predecessor, 18u);
+  EXPECT_EQ(state_.ordering_point, 19u);
+  EXPECT_EQ(amdf_gpu_umd_kernel_queue_query_terminal_status(queue_), failure);
+  EXPECT_EQ(Submit(20), failure);
 }
 
 TEST_P(LinuxDxgKernelQueueTest, ValidatesCommandsBeforeNativePublication) {

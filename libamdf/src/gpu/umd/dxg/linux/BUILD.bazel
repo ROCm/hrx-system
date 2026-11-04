@@ -116,7 +116,9 @@ amdf_cc_library(
     ],
     deps = [
         ":device_state",
+        ":kernel_queue",
         ":memory",
+        "//libamdf/src:allocator",
         "//libamdf/src/gpu/umd:memory_reservation",
         "//libamdf/src/gpu/umd/dxg:memory_reservation",
     ],
@@ -125,6 +127,7 @@ amdf_cc_library(
 amdf_cc_library(
     name = "kernel_queue",
     srcs = ["kernel_queue.c"],
+    hdrs = ["kernel_queue.h"],
     linkopts = ["-pthread"],
     target_compatible_with = [
         "@platforms//cpu:x86_64",
@@ -142,6 +145,7 @@ amdf_cc_library(
         "//libamdf/src/platform:wait",
         "//libamdf/src/platform/linux:file",
         "//libamdf/src/platform/linux:native_event",
+        "//libamdf/src/platform/linux/dxg:kmt",
     ],
 )
 
@@ -279,6 +283,7 @@ amdf_cc_test(
     ],
     deps = [
         ":device_state",
+        ":kernel_queue",
         ":memory",
         ":memory_reservation",
         "//libamdf/src:allocator",

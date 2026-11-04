@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "libamdf/src/gpu/umd/kernel_queue.h"
+#include "libamdf/src/gpu/umd/dxg/linux/kernel_queue.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -227,9 +227,56 @@ amdf_status_t amdf_gpu_umd_kernel_queue_query_terminal_status(
 
 uint32_t amdf_gpu_umd_kernel_queue_mapping_capacity(
     const amdf_gpu_umd_kernel_queue_t* queue) {
-  (void)queue;
-  // Queue-ordered mapping is enabled with its publication implementation.
-  return 0;
+  // WDDM can block the caller beyond 128 queued updates. Counting the entire
+  // unretired prefix is conservative and needs no second operation ledger.
+  return queue->hardware_queue != 0 ? 128 : 0;
+}
+
+amdf_status_t amdf_gpu_linux_dxg_kernel_queue_update_memory(
+    amdf_gpu_umd_kernel_queue_t* queue, uint32_t operation_count,
+    D3DDDI_UPDATEGPUVIRTUALADDRESS_OPERATION* operations, uint64_t submission,
+    bool* mutation_started, bool* accepted) {
+  amdf_status_t status = amdf_gpu_umd_kernel_queue_query_terminal_status(queue);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  D3DKMT_UPDATEGPUVIRTUALADDRESS update = {
+      .hDevice = queue->device->logical_device.native,
+      .hContext = queue->context,
+      .hFenceObject = queue->progress_fence,
+      .NumOperations = operation_count,
+      .Operations = operations,
+      .FenceValue = submission - 1,
+  };
+  *mutation_started = true;
+  status = amdf_linux_dxg_kmt_make_status(
+      amdf_linux_dxg_kmt_update_gpu_virtual_address(
+          queue->device->logical_device.kmt, &update));
+  if (!amdf_status_is_ok(status)) {
+    return amdf_gpu_linux_dxg_device_status_observe_error(
+        &queue->device->status, queue->device->logical_device.kmt,
+        queue->device->logical_device.native, status);
+  }
+
+  *accepted = true;
+  D3DKMT_SUBMITWAITFORSYNCOBJECTSTOHWQUEUE wait = {
+      .hHwQueue = queue->hardware_queue,
+      .ObjectCount = 1,
+      .ObjectHandleArray = &queue->progress_fence,
+      .FenceValueArray = &submission,
+  };
+  status =
+      amdf_linux_dxg_kmt_make_status(amdf_linux_dxg_kmt_wait_on_hardware_queue(
+          queue->device->logical_device.kmt, &wait));
+  if (!amdf_status_is_ok(status)) {
+    status = amdf_gpu_linux_dxg_device_status_observe_error(
+        &queue->device->status, queue->device->logical_device.kmt,
+        queue->device->logical_device.native, status);
+    // The mapping owns its accepted point even though later commands cannot
+    // safely follow it. Never turn acceptance into a retryable rejection.
+    amdf_atomic_uint64_store_release(&queue->failure, status);
+  }
+  return status;
 }
 
 amdf_native_event_types_t amdf_gpu_umd_kernel_queue_query_notification_types(

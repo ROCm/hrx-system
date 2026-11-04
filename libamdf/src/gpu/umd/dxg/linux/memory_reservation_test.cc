@@ -14,6 +14,7 @@
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/dxg/linux/device.h"
+#include "libamdf/src/gpu/umd/dxg/linux/kernel_queue.h"
 #include "libamdf/src/gpu/umd/dxg/linux/memory.h"
 
 namespace {
@@ -27,6 +28,8 @@ enum class Operation {
   kWait,
   kQueryDeviceState,
   kFree,
+  kUpdate,
+  kOrder,
 };
 
 struct ReserveRecord {
@@ -56,6 +59,11 @@ struct FakeReservationState {
   uint64_t automatic_address = 0x410000;
   uint64_t next_paging_fence = 7;
   volatile uint64_t paging_progress = 0;
+  volatile uint64_t queue_progress = 0;
+  uint64_t mapping_predecessor = 0;
+  uint64_t ordering_point = 0;
+  uint32_t queue_destroy_count = 0;
+  D3DDDI_UPDATEGPUVIRTUALADDRESS_OPERATION mapping_operation = {};
   std::vector<Operation> operations;
   std::vector<ReserveRecord> reserves;
   std::vector<MapRecord> maps;
@@ -65,6 +73,37 @@ struct FakeReservationState {
 
 FakeReservationState* current_state = nullptr;
 amdf_linux_dxg_connection_t* current_connection = nullptr;
+
+amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeCreateQueue(
+    amdf_dxg_bridge_gpu_adapter_t* adapter,
+    const amdf_dxg_bridge_gpu_kernel_queue_create_info_t* create_info,
+    amdf_dxg_bridge_gpu_kernel_queue_t** out_queue,
+    amdf_dxg_bridge_gpu_kernel_queue_info_t* out_info,
+    uint32_t* out_native_status) {
+  auto* state = reinterpret_cast<FakeReservationState*>(adapter);
+  EXPECT_EQ(create_info->device_handle, 0x10u);
+  EXPECT_EQ(create_info->command_type,
+            AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4);
+  *out_info = {};
+  out_info->structure_size = sizeof(*out_info);
+  out_info->command_buffer_alignment = 4;
+  out_info->maximum_command_buffer_byte_length = 4096;
+  out_info->progress_fence_handle = 0x60;
+  out_info->progress_fence_pointer = &state->queue_progress;
+  out_info->progress_fence_device_address = 0x10000;
+  out_info->context_handle = 0x70;
+  out_info->queue_handle = 0x80;
+  *out_queue = reinterpret_cast<amdf_dxg_bridge_gpu_kernel_queue_t*>(state);
+  *out_native_status = 0;
+  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+}
+
+amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeDestroyQueue(
+    amdf_dxg_bridge_gpu_kernel_queue_t* queue, uint32_t* out_native_status) {
+  ++reinterpret_cast<FakeReservationState*>(queue)->queue_destroy_count;
+  *out_native_status = 0;
+  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+}
 
 extern "C" uint32_t __wrap_amdf_linux_dxg_connection_invoke(void* context,
                                                             uint64_t request,
@@ -135,6 +174,28 @@ extern "C" uint32_t __wrap_amdf_linux_dxg_connection_invoke(void* context,
       current_state->paging_progress = target;
       return 0;
     }
+    case 0x39: {
+      current_state->operations.push_back(Operation::kUpdate);
+      const auto* update =
+          static_cast<D3DKMT_UPDATEGPUVIRTUALADDRESS*>(arguments);
+      EXPECT_EQ(update->hDevice, 0x10u);
+      EXPECT_EQ(update->hContext, 0x70u);
+      EXPECT_EQ(update->hFenceObject, 0x60u);
+      EXPECT_EQ(update->NumOperations, 1u);
+      current_state->mapping_predecessor = update->FenceValue;
+      current_state->mapping_operation = update->Operations[0];
+      return 0;
+    }
+    case 0x36: {
+      current_state->operations.push_back(Operation::kOrder);
+      const auto* wait =
+          static_cast<D3DKMT_SUBMITWAITFORSYNCOBJECTSTOHWQUEUE*>(arguments);
+      EXPECT_EQ(wait->hHwQueue, 0x80u);
+      EXPECT_EQ(wait->ObjectCount, 1u);
+      EXPECT_EQ(wait->ObjectHandleArray[0], 0x60u);
+      current_state->ordering_point = wait->FenceValueArray[0];
+      return 0;
+    }
     default:
       ADD_FAILURE() << "unexpected DXG operation " << _IOC_NR(request);
       return static_cast<uint32_t>(kStatusNoMemory);
@@ -150,6 +211,8 @@ class LinuxDxgMemoryReservationTest : public ::testing::Test {
     connection_.descriptor = 1;
     kmt_.connection = &connection_;
     kmt_.host_allocator = &allocator_;
+    bridge_.gpu_kernel_queue_create = FakeCreateQueue;
+    bridge_.gpu_kernel_queue_destroy = FakeDestroyQueue;
     device_ = {
         .host_allocator = allocator_,
         .adapter = 0x08,
@@ -174,6 +237,9 @@ class LinuxDxgMemoryReservationTest : public ::testing::Test {
                 .progress_fence = &state_.paging_progress,
             },
     };
+    device_.logical_device.bridge_adapter.api = &bridge_;
+    device_.logical_device.bridge_adapter.native =
+        reinterpret_cast<amdf_dxg_bridge_gpu_adapter_t*>(&state_);
   }
 
   void TearDown() override {
@@ -196,6 +262,7 @@ class LinuxDxgMemoryReservationTest : public ::testing::Test {
   amdf_allocator_t allocator_ = {};
   amdf_linux_dxg_connection_t connection_ = {};
   amdf_linux_dxg_kmt_t kmt_ = {};
+  amdf_dxg_bridge_api_t bridge_ = {};
   amdf_gpu_umd_device_t device_ = {};
 };
 
@@ -241,15 +308,6 @@ TEST_F(LinuxDxgMemoryReservationTest,
   EXPECT_EQ(mapping_granularity, 4096u);
   EXPECT_EQ(required_access, AMDF_MEMORY_ACCESS_READ);
 
-  bool mutation_started = true;
-  bool accepted = true;
-  EXPECT_EQ(amdf_gpu_umd_memory_reservation_update_on_queue(
-                reservation, reinterpret_cast<amdf_gpu_umd_kernel_queue_t*>(1),
-                0, 0, nullptr, 19, &mutation_started, &accepted),
-            amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
-  EXPECT_TRUE(mutation_started);
-  EXPECT_TRUE(accepted);
-
   ASSERT_EQ(amdf_gpu_umd_memory_reservation_destroy(reservation),
             AMDF_STATUS_OK);
   EXPECT_EQ(state_.operations,
@@ -292,6 +350,50 @@ TEST_F(LinuxDxgMemoryReservationTest,
   EXPECT_EQ(state_.maps[0].write, 0u);
   EXPECT_EQ(state_.maps[0].execute, 1u);
   EXPECT_EQ(state_.maps[0].no_access, 0u);
+}
+
+TEST_F(LinuxDxgMemoryReservationTest,
+       PublishesQueuedUnmapBeforeTheFollowingCommandPoint) {
+  amdf_gpu_umd_memory_reservation_t* reservation = CreateReservation();
+  ASSERT_NE(reservation, nullptr);
+  amdf_gpu_umd_kernel_queue_t* queue = nullptr;
+  ASSERT_EQ(amdf_gpu_umd_kernel_queue_create(
+                &device_, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, &queue),
+            AMDF_STATUS_OK);
+  ASSERT_EQ(amdf_gpu_umd_kernel_queue_mapping_capacity(queue), 128u);
+
+  const amdf_gpu_umd_mapping_update_t update = {
+      .target_byte_offset = 8192,
+      .byte_length = 4096,
+  };
+  bool mutation_started = false;
+  bool accepted = false;
+  ASSERT_EQ(
+      amdf_gpu_umd_memory_reservation_update_on_queue(
+          reservation, queue, 0, 1, &update, 19, &mutation_started, &accepted),
+      AMDF_STATUS_OK);
+  EXPECT_TRUE(mutation_started);
+  EXPECT_TRUE(accepted);
+  EXPECT_EQ(state_.mapping_predecessor, 18u);
+  EXPECT_EQ(state_.ordering_point, 19u);
+  EXPECT_EQ(state_.mapping_operation.OperationType,
+            D3DDDI_UPDATEGPUVIRTUALADDRESS_UNMAP);
+  EXPECT_EQ(state_.mapping_operation.Unmap.BaseAddress, 0x412000u);
+  EXPECT_EQ(state_.mapping_operation.Unmap.SizeInBytes, 4096u);
+  EXPECT_EQ(state_.mapping_operation.Unmap.Protection.NoAccess, 1u);
+  EXPECT_EQ(state_.operations,
+            (std::vector<Operation>{Operation::kReserve, Operation::kUpdate,
+                                    Operation::kOrder}));
+
+  ASSERT_EQ(amdf_gpu_umd_kernel_queue_destroy(queue), AMDF_STATUS_OK);
+  EXPECT_EQ(state_.queue_destroy_count, 1u);
+  ASSERT_EQ(amdf_gpu_umd_memory_reservation_destroy(reservation),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(state_.operations,
+            (std::vector<Operation>{
+                Operation::kReserve, Operation::kUpdate, Operation::kOrder,
+                Operation::kMap, Operation::kWait, Operation::kQueryDeviceState,
+                Operation::kFree}));
 }
 
 TEST_F(LinuxDxgMemoryReservationTest, PreservesAnExactCommonAddress) {
