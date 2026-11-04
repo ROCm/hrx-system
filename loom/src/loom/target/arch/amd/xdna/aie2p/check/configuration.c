@@ -104,8 +104,9 @@ static iree_status_t loom_aie2p_configuration_check_run(loom_pass_t* pass,
     status = loom_aie2p_program_compiler_allocate(
         module, pass->arena, &configuration_report, &compiler);
     if (iree_status_is_ok(status)) {
-      status =
-          loom_aie2p_configuration_plan_materialize(plan, compiler, &accepted);
+      loom_aie2p_configuration_worker_set_t worker_set = {0};
+      status = loom_aie2p_configuration_plan_materialize(
+          plan, compiler, &worker_set, &accepted);
     }
   }
 

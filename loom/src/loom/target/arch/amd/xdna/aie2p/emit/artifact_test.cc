@@ -115,6 +115,43 @@ low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @for
 }
 )";
 
+constexpr char kSharedConfigurationWorkerSource[] = R"(
+aie2p.target<configuration> @configuration_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
+aie2p.target<core> @core_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+low.func.def public retain target<amd.xdna.aie2p.configuration>(@configuration_target) abi(array_program) @first() asm {
+  %columns = constant 1 : reg<aie2p.config.scalar : i64>
+  entry %columns, @initialize, @invoke
+  return
+}
+
+low.func.def public retain target<amd.xdna.aie2p.configuration>(@configuration_target) abi(array_program) @second() asm {
+  %columns = constant 1 : reg<aie2p.config.scalar : i64>
+  entry %columns, @initialize, @invoke
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration_target) @initialize() asm {
+  %column = constant 0 : reg<aie2p.config.scalar : i64>
+  %row = constant 2 : reg<aie2p.config.scalar : i64>
+  program.load %column, %row, @worker
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration_target) @invoke() asm {
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @worker() asm {
+  %one = mova.i32 1
+  %two = mova.i32 2
+  %four = mova.i32 4
+  %eight = mova.i32 8
+  %sixteen = mova.i32 16
+  return
+}
+)";
+
 constexpr char kCoreRootSource[] = R"(
 aie2p.target<core> @core_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
 low.func.def retain target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @core_root() asm {
@@ -371,6 +408,52 @@ TEST_F(XdnaArtifactTest, CompilesSharedResidentProgramOnceForMultipleTiles) {
   uint32_t entry_ordinal = UINT32_MAX;
   IREE_ASSERT_OK(iree_hal_amd_xdna_image_find_entry(
       image_, IREE_SV("shared_resident"), &entry_ordinal));
+}
+
+TEST_F(XdnaArtifactTest, CompilesSharedConfigurationWorkerOnce) {
+  ModulePtr module;
+  IREE_ASSERT_OK(
+      ParseModule(IREE_SV(kSharedConfigurationWorkerSource), &module));
+
+  const loom_aie2p_xdna_artifact_request_t request = {
+      .module = module.get(),
+      .function_versions = nullptr,
+      .low_descriptor_registry = &low_registry_.registry,
+      .compile_report = &compile_report_,
+      .diagnostic_emitter = {},
+      .scratch_arena = &scratch_arena_,
+      .allocator = iree_allocator_system(),
+  };
+  bool emitted = false;
+  IREE_ASSERT_OK(
+      loom_aie2p_xdna_compile_artifact(&request, &emitted, &contents_));
+  ASSERT_TRUE(emitted);
+  ASSERT_NE(contents_, nullptr);
+  EXPECT_EQ(compile_report_.entry_rows.count, 1u);
+  EXPECT_EQ(compile_report_.pipeline_plans.count, 2u);
+  iree_host_size_t plan_count = 0;
+  for (const auto* block = compile_report_.pipeline_plans.head; block;
+       block = block->next) {
+    const auto* plans =
+        static_cast<const loom_target_compile_report_pipeline_plan_t*>(
+            loom_target_compile_report_vec_const_rows(block));
+    for (iree_host_size_t i = 0; i < block->count; ++i, ++plan_count) {
+      EXPECT_EQ(plans[i].summary.program_count, 1u);
+      EXPECT_EQ(plans[i].summary.worker_count, 1u);
+    }
+  }
+  EXPECT_EQ(plan_count, 2u);
+
+  iree_hal_amd_xdna_aie2p_target_t image_target;
+  IREE_ASSERT_OK(iree_hal_amd_xdna_aie2p_npu2_target_initialize(
+      IREE_SV("amd.xdna.strix_halo.17f0_11"), 1, &image_target));
+  IREE_ASSERT_OK(iree_hal_amd_xdna_image_allocate(
+      contents_, &image_target, iree_allocator_system(), &image_));
+  uint32_t entry_ordinal = UINT32_MAX;
+  IREE_ASSERT_OK(iree_hal_amd_xdna_image_find_entry(image_, IREE_SV("first"),
+                                                    &entry_ordinal));
+  IREE_ASSERT_OK(iree_hal_amd_xdna_image_find_entry(image_, IREE_SV("second"),
+                                                    &entry_ordinal));
 }
 
 TEST_F(XdnaArtifactTest, RejectsNonArtifactEntryRootWithDiagnostic) {
