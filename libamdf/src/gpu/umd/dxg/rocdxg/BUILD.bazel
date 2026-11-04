@@ -39,6 +39,7 @@ amdf_linux_sidecar_library(
         "gfxip_compatibility.cc",
     ],
     exports_file = "exports.map",
+    visibility = ["//libamdf/src/gpu/umd/dxg/linux:__pkg__"],
     deps = [
         ":native_transport",
         "//libamdf/src/gpu/umd/dxg:bridge_allocator",
