@@ -17,9 +17,12 @@ from urllib.parse import urlsplit
 
 from loom_serve_testing.http_harness import control, running_server, wait_status
 
-# The fixture owns a native page of parameters and an 8 KiB state reservation.
-# Limits express one or two complete models, without coarse-slab tail padding.
-MODEL_BYTES = 12 * 1024
+# This service-policy fixture uses native-sized backing so its 4 KiB parameter
+# page and 8 KiB state cohort have exact physical costs. Storage tests cover
+# packing those mappings into larger shared parents independently.
+ONE_MODEL_LIMIT_BYTES = 12 * 1024
+MEDIA_AND_TEXT_LIMIT_BYTES = 20 * 1024
+TWO_MODEL_LIMIT_BYTES = 24 * 1024
 
 
 def completion(address, model, messages, session=None, *, checkpoint=None):
@@ -127,7 +130,7 @@ def check_media(address, memory_bytes):
         }
     ]
     status, response = completion(address, "alpha", messages)
-    expected_status = 503 if memory_bytes == MODEL_BYTES else 200
+    expected_status = 503 if memory_bytes == ONE_MODEL_LIMIT_BYTES else 200
     assert status == expected_status, response
     if status == 200:
         # batch_units=1 requires two independently retained producer roots.
@@ -188,7 +191,7 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
         f"--device={device}",
         "--pool_backing=elastic",
         "--weight_slab_bytes=4096",
-        "--state_slab_bytes=8192",
+        "--state_slab_bytes=4096",
         f"--memory_bytes={memory_bytes}",
         f"--workers={workers}",
         f"--flagfile={configuration}",
@@ -253,32 +256,12 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
         }
         print(json.dumps(result), flush=True)
         assert memory_after["peak_bytes"] <= memory_bytes, result
-        expected = 503 if retention != "none" and memory_bytes == MODEL_BYTES else 200
-        assert second_status == expected, second
+        assert second_status == 200, second
+        assert output(second) == oracle("abxa"), second
         beta = next(item["loom"] for item in after["data"] if item["id"] == "beta")
         admission = beta["parameters"]["primary"]["admission"]
         assert not admission["waiting"] and admission["age_seconds"] == 0, beta
         assert beta["parameters"]["primary"]["pins"] == 0, beta
-        if expected == 503:
-            assert admission["count"] >= 1, beta
-            # Complete-unit admission rejects before loading parameters that
-            # would leave no room for the request's state.
-            parameters = beta["parameters"]["primary"]
-            assert not parameters["active"], beta
-            assert parameters["activations"] == 0, beta
-            assert parameters["committed_bytes"] == parameters["pending_bytes"] == 0, (
-                beta
-            )
-        if expected == 503 and retention == "checkpoint":
-            alpha = next(
-                item["loom"] for item in after["data"] if item["id"] == "alpha"
-            )
-            alpha_before = next(
-                item["loom"] for item in before["data"] if item["id"] == "alpha"
-            )
-            # Evicting these weights cannot admit the peer while the checkpoint
-            # retains state. Keep them for the checkpoint's next invocation.
-            assert alpha["parameters"] == alpha_before["parameters"], alpha
         assert admission["duration_seconds"] >= 0, beta
         connection = http.client.HTTPConnection(address.hostname, address.port)
         try:
@@ -299,8 +282,6 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
         assert (
             f"loom_serve_model_parameter_admission_waiting{{{identity}}} 0\n"
         ) in metrics, metrics
-        if expected == 200:
-            assert output(second) == oracle("abxa"), second
         history = [
             *messages,
             {"role": "assistant", "content": output(first)},
@@ -321,13 +302,17 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
                 200,
                 headers={"X-Loom-Model": "alpha"},
             )
-            # Pinned weights plus the peer's complete requirement already
-            # exceed the small cap. Evicting history cannot make it fit, so
-            # admission preserves those histories instead of discarding them
-            # to partially activate an impossible peer.
-            assert {session["name"] for session in sessions["data"]} == {
-                f"conversation-{index}" for index in range(4)
-            }, sessions
+            # Parameter pins survive pressure. At the one-model limit, the
+            # peer is admitted by reclaiming unpinned histories; the roomy
+            # case retains both histories and parameter residency.
+            expected_sessions = (
+                set()
+                if memory_bytes == ONE_MODEL_LIMIT_BYTES
+                else {f"conversation-{index}" for index in range(4)}
+            )
+            assert {session["name"] for session in sessions["data"]} == (
+                expected_sessions
+            ), sessions
             for _ in range(2):
                 unpinned = control(
                     address,
@@ -347,8 +332,8 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
             assert second_status == 200, second
             assert output(second) == oracle("abxa"), second
         if retention == "checkpoint":
-            # A pin must survive failed peer pressure even after all automatic
-            # owners release their references. Deletion then unblocks the peer.
+            # Explicitly retained history remains resumable after peer pressure
+            # even once its automatic session owner has released it.
             resumed_status, resumed = completion(
                 address, "alpha", history, checkpoint="kept"
             )
@@ -372,7 +357,7 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
             assert resumed_status == 200, resumed
             assert output(resumed) == oracle("abxa" + output(first) + "#b"), resumed
             assert cached_tokens(resumed) == (
-                0 if memory_bytes == MODEL_BYTES else 5
+                0 if memory_bytes == ONE_MODEL_LIMIT_BYTES else 5
             ), resumed
         # Removal owns pinned state as well as the service. A peer submitted
         # immediately after accepted unregister must complete without waiting
@@ -407,8 +392,8 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
         status, response = completion(address, "beta", messages, "replacement")
         assert status == 200, response
         assert output(response) == oracle("abxa"), response
-        # Joined removal returns backing to the shared cache. Explicit trim
-        # returns that idle physical storage while keeping the server usable.
+        # Joined removal returns model backing before explicit pool trim deals
+        # with the independent execution workspace.
         control(
             address,
             "POST",
@@ -419,17 +404,25 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
         )
         while True:
             final = control(address, "GET", "/v1/status", 200)
-            memory = final["server"]["resources"]["pools"][0]["memory"]["retained"]
+            pool = final["server"]["resources"]["pools"][0]
+            memory = pool["memory"]["retained"]
             if (
                 not final["data"]
-                and memory["committed_bytes"] == memory["cached_bytes"]
+                and not memory["pending_bytes"]
                 and not memory["releasing_bytes"]
             ):
                 break
             assert all(not model["loom"].get("error") for model in final["data"]), final
         assert memory["pending_bytes"] == 0, memory
-        # Model removal leaves the shared workspace's reusable address ranges.
-        # Physical trim must preserve those addresses while returning backing.
+        # Model removal returns its mappings while the idle workspace keeps one
+        # reusable physical mapping. Explicit trim returns both cached parent
+        # capacity and that idle mapping without discarding virtual addresses.
+        workspace = pool["memory"]["workspace"]
+        assert (
+            memory["committed_bytes"] - memory["cached_bytes"]
+            == workspace["committed_bytes"]
+            == workspace["free_bytes"]
+        ), pool["memory"]
         workspace_virtual_bytes = memory["reserved_bytes"]
         assert workspace_virtual_bytes > 0, memory
         control(
@@ -483,14 +476,14 @@ def run_from_command_line(cases):
 # state policy. The manual pressure_stress_test target retains the complete
 # Cartesian product for explicit stress qualification.
 _CASES = (
-    # Retain both state slabs while swapping weights; media also fits as
-    # sequential phases without requiring their combined declared footprint.
-    (1, 20 * 1024, "none"),
-    (1, MODEL_BYTES, "checkpoint"),
-    (1, 2 * MODEL_BYTES, "parameters"),
-    (4, MODEL_BYTES, "none"),
-    (4, 2 * MODEL_BYTES, "checkpoint"),
-    (4, MODEL_BYTES, "parameters"),
+    # Media and text fit as sequential phases without requiring their combined
+    # declared footprint. Tight cases force reclamation within one model's cap.
+    (1, MEDIA_AND_TEXT_LIMIT_BYTES, "none"),
+    (1, ONE_MODEL_LIMIT_BYTES, "checkpoint"),
+    (1, TWO_MODEL_LIMIT_BYTES, "parameters"),
+    (4, ONE_MODEL_LIMIT_BYTES, "none"),
+    (4, TWO_MODEL_LIMIT_BYTES, "checkpoint"),
+    (4, ONE_MODEL_LIMIT_BYTES, "parameters"),
 )
 
 

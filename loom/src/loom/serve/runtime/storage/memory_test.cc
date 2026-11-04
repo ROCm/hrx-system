@@ -140,6 +140,7 @@ TEST_F(MemoryTest, WeightTailReusesStateClassAcrossTwoCompleteSwaps) {
   const auto bulk = loom_serve_pool_weight_geometry(storage_owner);
   const auto state = loom_serve_pool_state_geometry(storage_owner);
   const uint64_t bytes = 2 * bulk.mapping_size + state.mapping_size;
+  const uint64_t physical_bytes = 2 * bulk.mapping_size + state.backing_size;
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(pool, bulk, bytes, 256,
                                                     &statistics[0], &first));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
@@ -148,9 +149,9 @@ TEST_F(MemoryTest, WeightTailReusesStateClassAcrossTwoCompleteSwaps) {
       pool, bulk, 2 * bulk.mapping_size, 256, &statistics[2], &third));
   auto* const identity = loom_serve_virtual_buffer_handle(first);
   const auto missing = loom_serve_virtual_buffer_missing_demand(first);
-  EXPECT_EQ(missing.cached_bytes[0], 2 * bulk.mapping_size);
-  EXPECT_EQ(missing.cached_bytes[1], state.mapping_size);
-  EXPECT_EQ(missing.uncached_bytes, 0u);
+  EXPECT_EQ(missing.weight_bytes, 2 * bulk.mapping_size);
+  EXPECT_EQ(missing.packed_bytes, state.mapping_size);
+  EXPECT_EQ(missing.dedicated_bytes, 0u);
   IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(first, 0, bytes));
   native.FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC, true);
   for (uint32_t cycle = 0; cycle < 2; ++cycle) {
@@ -172,11 +173,12 @@ TEST_F(MemoryTest, WeightTailReusesStateClassAcrossTwoCompleteSwaps) {
     IREE_ASSERT_OK(loom_serve_virtual_buffer_trim(third));
     IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(first, 0, bytes));
     EXPECT_EQ(loom_serve_virtual_buffer_handle(first), identity);
-    EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes, bytes);
+    EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes,
+              physical_bytes);
     const auto backed = loom_serve_virtual_buffer_missing_demand(first);
-    EXPECT_EQ(backed.cached_bytes[0], 0u);
-    EXPECT_EQ(backed.cached_bytes[1], 0u);
-    EXPECT_EQ(backed.uncached_bytes, 0u);
+    EXPECT_EQ(backed.weight_bytes, 0u);
+    EXPECT_EQ(backed.packed_bytes, 0u);
+    EXPECT_EQ(backed.dedicated_bytes, 0u);
   }
   // The failure remains armed through both warm cycles and is consumed only
   // after explicitly disposing the reusable native slabs.
@@ -474,7 +476,13 @@ TEST_F(DedicatedNativeWorkerMemoryTest,
   const auto bulk = loom_serve_pool_weight_geometry(storage_owner);
   const auto state = loom_serve_pool_state_geometry(storage_owner);
   const uint64_t failed_bytes = 2 * state.mapping_size;
-  const uint64_t cohort_bytes = 6 * state.mapping_size;
+  ASSERT_LT(failed_bytes, state.backing_size);
+  const uint64_t cohort_bytes = state.backing_size - failed_bytes;
+  const uint64_t physical_bytes = bulk.mapping_size + state.backing_size;
+  // The failed request and admitted cohort together occupy one complete state
+  // parent. Until the failure joins, retrying it would require a second parent;
+  // afterward, the same retry exactly fills the surviving parent.
+  ASSERT_NO_FATAL_FAILURE(UseBacking(false, physical_bytes, nullptr));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
       pool, state, failed_bytes, 256, &statistics[0], &first));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
@@ -540,7 +548,7 @@ TEST_F(DedicatedNativeWorkerMemoryTest,
   }
   IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes,
-            bulk.mapping_size + cohort_bytes);
+            physical_bytes);
   RoundTrip(loom_serve_virtual_buffer_handle(second), 0, 0x12345678);
   RoundTrip(loom_serve_virtual_buffer_handle(third), state.mapping_size,
             0x87654321);
@@ -550,7 +558,7 @@ TEST_F(DedicatedNativeWorkerMemoryTest,
   CheckRetained(loom_serve_virtual_buffer_handle(third), state.mapping_size,
                 0x87654321);
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes,
-            3 * kSlabSize);
+            physical_bytes);
 }
 
 TEST_F(DedicatedNativeWorkerMemoryTest,
@@ -589,7 +597,7 @@ TEST_F(DedicatedNativeWorkerMemoryTest,
   loom_serve_memory_operation_free(operation);
   IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes,
-            state.mapping_size);
+            state.backing_size);
   loom_serve_memory_admission_t admission;
   IREE_ASSERT_OK(loom_serve_memory_pool_prepare(
       pool, loom_serve_virtual_buffer_missing_demand(third), &admission));
@@ -602,17 +610,22 @@ TEST_F(DedicatedNativeWorkerMemoryTest,
             0x55667788);
 }
 
-TEST_F(MemoryTest, MixedSlabsAndShortTailsShareExactNativeBudget) {
+TEST_F(MemoryTest, WeightTailAndStateMappingsShareOnePhysicalParent) {
   const auto bulk = loom_serve_pool_weight_geometry(storage_owner);
   const auto state = loom_serve_pool_state_geometry(storage_owner);
   const uint64_t tail_bytes = state.mapping_size;
   const uint64_t first_bytes = bulk.mapping_size + tail_bytes;
-  const uint64_t committed_bytes = first_bytes + state.mapping_size;
-  ASSERT_NO_FATAL_FAILURE(UseDeferredBacking(committed_bytes));
+  const uint64_t second_parent_bytes = state.backing_size - tail_bytes;
+  const uint64_t initial_logical_bytes = first_bytes + state.mapping_size;
+  const uint64_t physical_bytes = bulk.mapping_size + state.backing_size;
+  ASSERT_LT(state.mapping_size, state.backing_size);
+  ASSERT_NO_FATAL_FAILURE(
+      UseDeferredBacking(physical_bytes, nullptr, /*distinct_classes=*/true));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
       pool, bulk, first_bytes - 1, 256, &statistics[0], &first));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
-      pool, state, 2 * state.mapping_size, 256, &statistics[1], &second));
+      pool, state, second_parent_bytes + state.mapping_size, 256,
+      &statistics[1], &second));
   EXPECT_EQ(statistics[0].reserved_bytes, first_bytes);
   EXPECT_EQ(loom_serve_virtual_buffer_slab_count(first), 2u);
 
@@ -625,8 +638,8 @@ TEST_F(MemoryTest, MixedSlabsAndShortTailsShareExactNativeBudget) {
   loom_serve_memory_footprint_t footprint;
   IREE_ASSERT_OK(loom_serve_memory_ranges_footprint(IREE_ARRAYSIZE(ranges),
                                                     ranges, &footprint));
-  EXPECT_EQ(footprint.total_bytes, committed_bytes);
-  EXPECT_EQ(footprint.missing_bytes, committed_bytes);
+  EXPECT_EQ(footprint.total_bytes, initial_logical_bytes);
+  EXPECT_EQ(footprint.missing_bytes, initial_logical_bytes);
   deferred_backing->defer = true;
   loom_serve_memory_admission_t commit_admission;
   loom_serve_memory_operation_t* operation = nullptr;
@@ -638,67 +651,107 @@ TEST_F(MemoryTest, MixedSlabsAndShortTailsShareExactNativeBudget) {
   EXPECT_EQ(statistics[0].pending_bytes, first_bytes);
   EXPECT_EQ(statistics[1].pending_bytes, state.mapping_size);
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool).pending_bytes,
-            committed_bytes);
+            initial_logical_bytes);
   IREE_ASSERT_OK(loom_serve_memory_ranges_footprint(IREE_ARRAYSIZE(ranges),
                                                     ranges, &footprint));
-  EXPECT_EQ(footprint.total_bytes, committed_bytes);
+  EXPECT_EQ(footprint.total_bytes, initial_logical_bytes);
   EXPECT_EQ(footprint.missing_bytes, 0u);
   deferred_backing->ResumeAcquisitions();
   loom_serve_memory_operation_await(operation);
   IREE_ASSERT_OK(loom_serve_memory_operation_query_status(operation));
   loom_serve_memory_operation_free(operation);
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes,
-            committed_bytes);
+            physical_bytes);
   EXPECT_EQ(statistics[0].committed_bytes, first_bytes);
   EXPECT_EQ(statistics[1].committed_bytes, state.mapping_size);
   RoundTrip(loom_serve_virtual_buffer_handle(first), bulk.mapping_size,
             0x12345678);
   RoundTrip(loom_serve_virtual_buffer_handle(second), 0, 0x87654321);
 
-  const loom_serve_memory_range_t extra = {second, state.mapping_size, 4};
-  IREE_ASSERT_OK(loom_serve_memory_pool_commit_async(
-      pool, 1, &extra, nullptr, 0, &commit_admission, &operation));
-  EXPECT_EQ(commit_admission, LOOM_SERVE_MEMORY_ADMISSION_CAPACITY);
-  EXPECT_EQ(operation, nullptr);
-
-  // Return a full bulk slab and a state slab in one batch, retaining the tail.
-  // Native return, not the logical trim, makes their capacity available again.
-  deferred_backing->DeferReturns();
-  loom_serve_virtual_buffer_begin_trim(first);
-  Keep(first, bulk.mapping_size, tail_bytes);
-  loom_serve_virtual_buffer_begin_trim(second);
-  loom_serve_virtual_buffer_t* buffers[] = {first, second};
-  IREE_ASSERT_OK(loom_serve_memory_pool_trim_async(
-      pool, IREE_ARRAYSIZE(buffers), buffers, nullptr, 0, &operation));
-  loom_serve_memory_operation_await(operation);
-  IREE_ASSERT_OK(loom_serve_memory_operation_query_status(operation));
-  loom_serve_memory_operation_free(operation);
-  EXPECT_EQ(statistics[0].committed_bytes, tail_bytes);
-  EXPECT_EQ(statistics[1].committed_bytes, 0u);
-  loom_serve_memory_pool_trim(pool, 0);
-  const auto retiring = loom_serve_memory_pool_statistics(pool);
-  EXPECT_EQ(retiring.committed_bytes, committed_bytes);
-  EXPECT_EQ(retiring.releasing_bytes, bulk.mapping_size + state.mapping_size);
-  EXPECT_EQ(deferred_backing->PendingReturnCount(), 2u);
-  IREE_ASSERT_OK(loom_serve_memory_pool_commit_async(
-      pool, 1, &extra, nullptr, 0, &commit_admission, &operation));
-  EXPECT_EQ(operation, nullptr);
+  // Fill the shared parent without acquiring another native extent. The tail
+  // and a distinct virtual reservation consume the same physical capacity.
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(
+      second, state.mapping_size, second_parent_bytes - state.mapping_size));
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes,
+            physical_bytes);
+  RoundTrip(loom_serve_virtual_buffer_handle(second),
+            second_parent_bytes - state.mapping_size, 0xABCDEF01);
   CheckRetained(loom_serve_virtual_buffer_handle(first), bulk.mapping_size,
                 0x12345678);
-  // Retirement can finish before a caller handles the denied commitment. Its
-  // original result must still request another admission turn: a fresh pending
-  // query no longer distinguishes progress from permanent capacity exhaustion.
-  deferred_backing->CompleteReturns();
-  IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
-  EXPECT_FALSE(loom_serve_memory_pool_is_pending(pool));
-  EXPECT_EQ(commit_admission, LOOM_SERVE_MEMORY_ADMISSION_DEFERRED);
+
+  // The next mapping needs a second physical parent and crosses the exact
+  // pool budget even though the virtual reservation already exists.
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_serve_virtual_buffer_commit(second, second_parent_bytes, 4));
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes,
-            tail_bytes);
-  bool admitted = false;
-  IREE_ASSERT_OK(loom_serve_memory_pool_try_commit(pool, 1, &extra, &admitted));
-  ASSERT_TRUE(admitted);
-  RoundTrip(loom_serve_virtual_buffer_handle(second), state.mapping_size,
-            0xABCDEF01);
+            physical_bytes);
+}
+
+TEST_F(MemoryTest, IdleWeightExtentBecomesPackedStateParent) {
+  ASSERT_NO_FATAL_FAILURE(UseBacking(false, kSlabSize, nullptr,
+                                     /*distinct_classes=*/false));
+  const auto bulk = loom_serve_pool_weight_geometry(storage_owner);
+  const auto state = loom_serve_pool_state_geometry(storage_owner);
+  ASSERT_LT(state.mapping_size, bulk.mapping_size);
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+      pool, bulk, bulk.mapping_size, 256, &statistics[0], &first));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+      pool, state, state.mapping_size, 256, &statistics[1], &second));
+
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(first, 0, bulk.mapping_size));
+  RoundTrip(loom_serve_virtual_buffer_handle(first), 0, 0x12345678);
+  loom_serve_virtual_buffer_begin_trim(first);
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_trim(first));
+  const auto cached = loom_serve_memory_pool_statistics(pool);
+  EXPECT_EQ(cached.committed_bytes, bulk.mapping_size);
+  EXPECT_EQ(cached.cached_bytes, bulk.mapping_size);
+
+  // Reclassifying the idle outer extent as a packed state parent consumes no
+  // native budget and must remain admissible at the one-parent limit.
+  IREE_ASSERT_OK(
+      loom_serve_virtual_buffer_commit(second, 0, state.mapping_size));
+  const auto reused = loom_serve_memory_pool_statistics(pool);
+  EXPECT_EQ(reused.committed_bytes, bulk.mapping_size);
+  EXPECT_EQ(reused.cached_bytes, bulk.mapping_size - state.mapping_size);
+  RoundTrip(loom_serve_virtual_buffer_handle(second), 0, 0x87654321);
+
+  loom_serve_virtual_buffer_begin_trim(second);
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_trim(second));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(first, 0, bulk.mapping_size));
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes,
+            bulk.mapping_size);
+  RoundTrip(loom_serve_virtual_buffer_handle(first), 0, 0xABCDEF01);
+}
+
+TEST_F(MemoryTest, WeightTailsShareBackingAtNativeMappingGranularity) {
+  const auto bulk = loom_serve_pool_weight_geometry(storage_owner);
+  const auto state = loom_serve_pool_state_geometry(storage_owner);
+  ASSERT_LT(state.mapping_size, bulk.mapping_size);
+  ASSERT_GE(state.backing_size, 2 * state.mapping_size);
+  ASSERT_NO_FATAL_FAILURE(UseBacking(false, state.backing_size, nullptr,
+                                     /*distinct_classes=*/true));
+  const uint64_t length = bulk.mapping_size + state.mapping_size - 1;
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(pool, bulk, length, 256,
+                                                    &statistics[0], &first));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(pool, bulk, length, 256,
+                                                    &statistics[1], &second));
+
+  iree_hal_virtual_buffer_info_t info;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_query_info(
+      loom_serve_virtual_buffer_handle(first), &info));
+  EXPECT_EQ(info.mapping_granularity, bulk.granularity);
+  EXPECT_LT(info.mapping_granularity, bulk.mapping_size);
+
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(first, bulk.mapping_size, 4));
+  IREE_ASSERT_OK(
+      loom_serve_virtual_buffer_commit(second, bulk.mapping_size, 4));
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes,
+            state.backing_size);
+  RoundTrip(loom_serve_virtual_buffer_handle(first), bulk.mapping_size,
+            0x12345678);
+  RoundTrip(loom_serve_virtual_buffer_handle(second), bulk.mapping_size,
+            0x87654321);
 }
 
 TEST_F(MemoryTest, PendingReleaseRetainsBudgetAndLeavesKeptSlabsUsable) {
@@ -1071,7 +1124,7 @@ TEST_F(MemoryTest, FailedReclamationRetainsSharedFailureAndRemainingOwnership) {
   RoundTrip(loom_serve_virtual_buffer_handle(second), 0, 0x87654321);
   loom_serve_memory_admission_t admission;
   IREE_ASSERT_OK(loom_serve_memory_pool_prepare(
-      pool, {.cached_bytes = {4 * kSlabSize}}, &admission));
+      pool, {.weight_bytes = 4 * kSlabSize}, &admission));
   EXPECT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_CAPACITY);
   IREE_EXPECT_OK(loom_serve_memory_pool_query_status(pool));
 
@@ -1085,10 +1138,9 @@ TEST_F(MemoryTest, FailedReclamationRetainsSharedFailureAndRemainingOwnership) {
                return iree_make_status(IREE_STATUS_UNAVAILABLE,
                                        "reclamation failed after release");
              }});
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_UNAVAILABLE,
-      loom_serve_memory_pool_prepare(pool, {.cached_bytes = {2 * kSlabSize}},
-                                     &admission));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                        loom_serve_memory_pool_prepare(
+                            pool, {.weight_bytes = 2 * kSlabSize}, &admission));
   EXPECT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_CAPACITY);
   EXPECT_EQ(statistics[0].committed_bytes, 0u);
   EXPECT_EQ(statistics[1].committed_bytes, kSlabSize);
@@ -1341,7 +1393,7 @@ TEST_F(DedicatedNativeWorkerMemoryTest,
     EXPECT_EQ(pending.releasing_bytes, 0u);
     loom_serve_memory_admission_t admission;
     IREE_ASSERT_OK(loom_serve_memory_pool_prepare(
-        pool, {.cached_bytes = {2 * kSlabSize}}, &admission));
+        pool, {.weight_bytes = 2 * kSlabSize}, &admission));
     EXPECT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE);
     const loom_serve_memory_range_t second_range = {second, 0, 2 * kSlabSize};
     IREE_EXPECT_OK(loom_serve_memory_pool_commit_async(

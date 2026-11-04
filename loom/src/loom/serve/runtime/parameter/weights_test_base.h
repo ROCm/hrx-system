@@ -493,10 +493,11 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     loom_serve_memory_geometry_t geometry;
     IREE_ASSERT_OK(loom_serve_memory_pool_query_geometry(
         &capabilities, deferred_backing_, kSlabBytes, &geometry));
-    const loom_serve_memory_geometry_t geometries[] = {geometry, geometry};
+    loom_serve_memory_geometry_t state_geometry = geometry;
+    state_geometry.mapping_size = state_geometry.minimum_size;
     IREE_ASSERT_OK(loom_serve_memory_pool_allocate(
-        group, scope, deferred_backing_, transfer_, geometries, memory_limit,
-        host_allocator_, &owned_pool_));
+        group, scope, deferred_backing_, transfer_, geometry, state_geometry,
+        memory_limit, host_allocator_, &owned_pool_));
     pool_ = owned_pool_;
     IREE_ASSERT_OK(loom_serve_residency_cache_allocate(
         pool_, nullptr, host_allocator_, &owned_cache_));

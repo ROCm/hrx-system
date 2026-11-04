@@ -513,13 +513,16 @@ def check_pool_trim(client, backing, workers):
                 assert not cold["parameters"]["primary"]["active"], cold
                 assert cold["parameters"]["primary"]["committed_bytes"] == 0, cold
                 assert memory_pinned["reserved_bytes"] == memory_cold["reserved_bytes"]
-                assert memory_cold["cached_bytes"] == 0, memory_cold
-                assert (
-                    memory_pinned["committed_bytes"]
-                    - memory_pinned["cached_bytes"]
-                    - memory_cold["committed_bytes"]
-                    == released
-                ), (memory_pinned, memory_cold)
+                # A retained continuation keeps its shared state parent alive.
+                # The unused portion remains immediately reusable even though
+                # no complete parent can be returned to native storage.
+                pinned_live = (
+                    memory_pinned["committed_bytes"] - memory_pinned["cached_bytes"]
+                )
+                cold_live = memory_cold["committed_bytes"] - memory_cold["cached_bytes"]
+                assert memory_cold["cached_bytes"] > 0, memory_cold
+                assert cold_live > 0, memory_cold
+                assert pinned_live - cold_live == released, (memory_pinned, memory_cold)
                 assert (
                     memory_cold["released_bytes"] - memory_pinned["released_bytes"]
                     == released

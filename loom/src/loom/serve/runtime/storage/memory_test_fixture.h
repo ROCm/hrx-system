@@ -333,11 +333,14 @@ class MemoryTest : public ::testing::Test {
       status = loom_serve_memory_pool_query_geometry(
           &capabilities, backing, distinct_classes ? kSlabSize / 4 : kSlabSize,
           &geometries[1]);
+      if (iree_status_is_ok(status)) {
+        geometries[1].mapping_size = geometries[1].minimum_size;
+      }
     }
     if (iree_status_is_ok(status)) {
-      status = loom_serve_memory_pool_allocate(hal_group, scope, backing, queue,
-                                               geometries, limit_bytes,
-                                               host_allocator, &owned_pool);
+      status = loom_serve_memory_pool_allocate(
+          hal_group, scope, backing, queue, geometries[0], geometries[1],
+          limit_bytes, host_allocator, &owned_pool);
     }
     iree_hal_pool_release(backing);
     IREE_ASSERT_OK(status);

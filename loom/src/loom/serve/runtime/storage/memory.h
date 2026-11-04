@@ -38,17 +38,15 @@ typedef struct loom_serve_memory_geometry_t {
   iree_device_size_t minimum_size;
 } loom_serve_memory_geometry_t;
 
-// The device configures bulk and sparse storage geometries. Equal physical
-// classes share one cache; a short tail can match either class or bypass both.
-enum { LOOM_SERVE_MEMORY_CLASS_COUNT = 2 };
-
 // Additional physical ownership within one pool, not a reservation of credit.
-// Folds distinct roots/groups without enumerating their physical slots.
+// Folds distinct roots/groups without enumerating their physical mappings.
 typedef struct loom_serve_memory_demand_t {
-  // Required bytes in each immutable physical size/alignment class.
-  uint64_t cached_bytes[LOOM_SERVE_MEMORY_CLASS_COUNT];
-  // Exact unmatched extents requiring native acquisition.
-  uint64_t uncached_bytes;
+  // Fixed-size mappings packed into shared physical state backing.
+  uint64_t packed_bytes;
+  // Exact reusable weight extents routed through the weight cache.
+  uint64_t weight_bytes;
+  // Exact extents bypassing both reusable size classes.
+  uint64_t dedicated_bytes;
 } loom_serve_memory_demand_t;
 
 void loom_serve_memory_demand_add(loom_serve_memory_demand_t* demand,
@@ -116,10 +114,9 @@ typedef struct loom_serve_memory_statistics_t {
 iree_status_t loom_serve_memory_pool_allocate(
     iree_hal_device_group_t* group, iree_hal_pool_scope_t scope,
     iree_hal_pool_t* storage_pool, iree_hal_queue_t* queue,
-    const loom_serve_memory_geometry_t
-        geometries[LOOM_SERVE_MEMORY_CLASS_COUNT],
-    uint64_t limit_bytes, iree_allocator_t host_allocator,
-    loom_serve_memory_pool_t** out_pool);
+    loom_serve_memory_geometry_t weight_geometry,
+    loom_serve_memory_geometry_t state_geometry, uint64_t limit_bytes,
+    iree_allocator_t host_allocator, loom_serve_memory_pool_t** out_pool);
 
 void loom_serve_memory_pool_free(loom_serve_memory_pool_t* pool);
 

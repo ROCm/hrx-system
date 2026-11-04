@@ -400,7 +400,6 @@ TEST_F(GrowingTextServiceTest, GrowthKeepsLiveHistoriesHandlesAndCheckpoints) {
   IREE_ASSERT_OK(loom_serve_text_row_try_pin(original, &checkpoint));
   ASSERT_NE(checkpoint, nullptr);
   const auto activity = loom_serve_text_model_weight_activity(model_);
-  const auto initial = loom_serve_text_model_memory_statistics(model_);
   for (size_t capacity : {17u, 129u}) {
     const auto previous_count = loom_serve_text_model_row_count(model_);
     const auto previous = loom_serve_text_model_memory_statistics(model_);
@@ -432,7 +431,7 @@ TEST_F(GrowingTextServiceTest, GrowthKeepsLiveHistoriesHandlesAndCheckpoints) {
     EXPECT_EQ(loom_serve_text_model_row_count(model_), capacity);
     EXPECT_EQ(loom_serve_text_model_row(model_, 0), original);
     EXPECT_EQ(loom_serve_text_model_memory_statistics(model_).committed_bytes,
-              initial.committed_bytes);
+              previous.committed_bytes);
     std::vector<int32_t> tokens(capacity);
     std::vector<loom_serve_text_span_t> spans(capacity);
     for (size_t i = 0; i < capacity; ++i) {

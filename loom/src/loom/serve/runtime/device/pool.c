@@ -114,13 +114,15 @@ static iree_status_t loom_serve_pool_initialize_elastic(
     status = loom_serve_memory_pool_query_geometry(&capabilities, source_pool,
                                                    options->state_slab_size,
                                                    &pool->state_geometry);
+    if (iree_status_is_ok(status)) {
+      pool->state_geometry.mapping_size = pool->state_geometry.minimum_size;
+    }
   }
   if (iree_status_is_ok(status)) {
-    const loom_serve_memory_geometry_t geometries[] = {pool->weight_geometry,
-                                                       pool->state_geometry};
     status = loom_serve_memory_pool_allocate(
-        group, scope, source_pool, allocation_queue, geometries,
-        options->memory_limit, pool->host_allocator, &pool->memory);
+        group, scope, source_pool, allocation_queue, pool->weight_geometry,
+        pool->state_geometry, options->memory_limit, pool->host_allocator,
+        &pool->memory);
   }
   iree_hal_pool_release(source_pool);
   IREE_RETURN_IF_ERROR(status);

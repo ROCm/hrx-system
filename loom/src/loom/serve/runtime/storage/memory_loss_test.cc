@@ -236,9 +236,8 @@ class MemoryLossTest : public ::testing::Test {
         group, scope, {1, &source_}, iree_allocator_system(), &capabilities));
     IREE_ASSERT_OK(loom_serve_memory_pool_query_geometry(
         &capabilities, source_, kSlabSize, &geometry_));
-    const loom_serve_memory_geometry_t geometries[] = {geometry_, geometry_};
     IREE_ASSERT_OK(loom_serve_memory_pool_allocate(
-        group, scope, source_, queue, geometries, 3 * kSlabSize,
+        group, scope, source_, queue, geometry_, geometry_, 3 * kSlabSize,
         iree_allocator_system(), &pool_));
     for (auto& buffer : buffers_) {
       IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
@@ -304,8 +303,8 @@ class MemoryLossTest : public ::testing::Test {
 
   iree_status_t Prepare(uint64_t count,
                         loom_serve_memory_admission_t* out_admission) {
-    return loom_serve_memory_pool_prepare(pool_, {{count * kSlabSize, 0}, 0},
-                                          out_admission);
+    return loom_serve_memory_pool_prepare(
+        pool_, {.packed_bytes = count * kSlabSize}, out_admission);
   }
 
   void ExpectLoss(iree_status_t status) {
