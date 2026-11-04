@@ -8,12 +8,15 @@
 
 #include "libamdf/src/gpu/umd/dxg/bridge_allocator.h"
 #include "libamdf/src/gpu/umd/dxg/bridge_api.h"
+#include "libamdf/src/gpu/umd/dxg/rocdxg/native_transport.h"
 #include "shared/include/dxcore_loader.h"
 #include "shared/include/thunk_proxy/thunk_proxy.h"
 
 struct amdf_dxg_bridge_gpu_adapter_t {
   // Parent-instance allocator copied for all bridge-controlled storage.
   amdf_allocator_t host_allocator = {};
+  // Borrowed native transport installed only during synchronous bridge calls.
+  amdf_dxg_bridge_native_transport_t native_transport = {};
   // Private topology context owned by this adapter.
   thunk_proxy::ChainContext* chain = nullptr;
   // Private physical-device context owned by this adapter.
@@ -74,6 +77,8 @@ amdf_dxg_bridge_result_t GpuAdapterOpenImpl(
     amdf_allocator_t host_allocator,
     amdf_dxg_bridge_gpu_adapter_t** out_adapter,
     amdf_dxg_bridge_gpu_properties_t* out_properties) {
+  amdf::rocdxg_bridge::NativeTransportScope transport_scope(
+      open_info.native_transport);
   if (!wsl::thunk::dxcore::DxcoreLoader::Instance().Initialize()) {
     return AMDF_DXG_BRIDGE_RESULT_INTERNAL;
   }
@@ -84,6 +89,7 @@ amdf_dxg_bridge_result_t GpuAdapterOpenImpl(
     return AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED;
   }
   adapter->host_allocator = host_allocator;
+  adapter->native_transport = open_info.native_transport;
 
   const LUID luid = {
       static_cast<ULONG>(open_info.adapter_luid),
@@ -124,8 +130,12 @@ GpuAdapterOpen(const amdf_dxg_bridge_gpu_adapter_open_info_t* open_info,
                amdf_dxg_bridge_gpu_adapter_t** out_adapter,
                amdf_dxg_bridge_gpu_properties_t* out_properties,
                uint32_t* out_native_status) noexcept {
-  if (open_info == nullptr || open_info->structure_size < sizeof(*open_info) ||
+  if (open_info == nullptr ||
+      open_info->structure_size <
+          AMDF_DXG_BRIDGE_GPU_ADAPTER_OPEN_INFO_VERSION_13_SIZE ||
       open_info->adapter_handle == 0 || open_info->device_handle == 0 ||
+      open_info->native_transport.context == nullptr ||
+      open_info->native_transport.invoke == nullptr ||
       host_allocator == nullptr || host_allocator->allocate == nullptr ||
       host_allocator->free == nullptr || out_adapter == nullptr ||
       out_properties == nullptr || out_native_status == nullptr) {
@@ -149,6 +159,8 @@ GpuAdapterClose(amdf_dxg_bridge_gpu_adapter_t* adapter,
     return AMDF_DXG_BRIDGE_RESULT_INVALID_ARGUMENT;
   }
   *out_native_status = 0;
+  amdf::rocdxg_bridge::NativeTransportScope transport_scope(
+      adapter->native_transport);
   const amdf_allocator_t host_allocator = adapter->host_allocator;
   amdf::dxg_bridge::DestroyHostObject(host_allocator, adapter);
   return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
@@ -218,7 +230,7 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuClockSample(
 
 const amdf_dxg_bridge_api_t kBridgeApi = {
     sizeof(amdf_dxg_bridge_api_t),
-    AMDF_DXG_BRIDGE_ABI_VERSION_12,
+    AMDF_DXG_BRIDGE_ABI_VERSION_13,
     GpuAdapterOpen,
     GpuAdapterClose,
     GpuAllocationQueryLayout,
@@ -240,8 +252,8 @@ extern "C" __attribute__((visibility("default"))) amdf_dxg_bridge_result_t
   if (out_api == nullptr) {
     return AMDF_DXG_BRIDGE_RESULT_INVALID_ARGUMENT;
   }
-  if (minimum_version > AMDF_DXG_BRIDGE_ABI_VERSION_12 ||
-      maximum_version < AMDF_DXG_BRIDGE_ABI_VERSION_12) {
+  if (minimum_version > AMDF_DXG_BRIDGE_ABI_VERSION_13 ||
+      maximum_version < AMDF_DXG_BRIDGE_ABI_VERSION_13) {
     return AMDF_DXG_BRIDGE_RESULT_VERSION_MISMATCH;
   }
   *out_api = &kBridgeApi;

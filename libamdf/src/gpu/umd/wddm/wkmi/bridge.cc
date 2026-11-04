@@ -102,7 +102,9 @@ GpuAdapterOpen(const amdf_dxg_bridge_gpu_adapter_open_info_t* open_info,
                amdf_dxg_bridge_gpu_adapter_t** out_adapter,
                amdf_dxg_bridge_gpu_properties_t* out_properties,
                uint32_t* out_native_status) noexcept {
-  if (open_info == nullptr || open_info->structure_size < sizeof(*open_info) ||
+  if (open_info == nullptr ||
+      open_info->structure_size <
+          AMDF_DXG_BRIDGE_GPU_ADAPTER_OPEN_INFO_VERSION_12_SIZE ||
       open_info->adapter_handle == 0 || host_allocator == nullptr ||
       host_allocator->allocate == nullptr || host_allocator->free == nullptr ||
       out_adapter == nullptr || out_properties == nullptr ||

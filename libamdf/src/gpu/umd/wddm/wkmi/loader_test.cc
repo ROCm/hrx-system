@@ -100,16 +100,21 @@ TEST_F(WkmiLoaderTest, RejectsIncompatibleBridgeAbi) {
       reinterpret_cast<const amdf_dxg_bridge_api_t*>(uintptr_t{1});
   const amdf_dxg_bridge_api_t* api = sentinel;
   for (uint32_t version = AMDF_DXG_BRIDGE_ABI_VERSION_1;
-       version < AMDF_DXG_BRIDGE_ABI_VERSION_LATEST; ++version) {
+       version < AMDF_DXG_BRIDGE_ABI_VERSION_12; ++version) {
     SCOPED_TRACE(version);
     set_version(version);
     EXPECT_EQ(amdf_gpu_wddm_wkmi_loader_query_api(&loader, &api),
               amdf_make_api_status(AMDF_STATUS_CODE_VERSION_MISMATCH));
     EXPECT_EQ(api, sentinel);
   }
-  set_version(AMDF_DXG_BRIDGE_ABI_VERSION_LATEST);
-  EXPECT_EQ(amdf_gpu_wddm_wkmi_loader_query_api(&loader, &api), AMDF_STATUS_OK);
-  EXPECT_NE(api, sentinel);
+  for (uint32_t version = AMDF_DXG_BRIDGE_ABI_VERSION_12;
+       version <= AMDF_DXG_BRIDGE_ABI_VERSION_LATEST; ++version) {
+    SCOPED_TRACE(version);
+    set_version(version);
+    EXPECT_EQ(amdf_gpu_wddm_wkmi_loader_query_api(&loader, &api),
+              AMDF_STATUS_OK);
+    EXPECT_NE(api, sentinel);
+  }
   EXPECT_EQ(amdf_gpu_wddm_wkmi_loader_deinitialize(&loader), AMDF_STATUS_OK);
 }
 

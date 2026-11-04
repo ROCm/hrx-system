@@ -7,6 +7,7 @@
 #ifndef AMDF_SRC_GPU_UMD_DXG_BRIDGE_API_H_
 #define AMDF_SRC_GPU_UMD_DXG_BRIDGE_API_H_
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "amdf/amdf.h"
@@ -58,8 +59,11 @@ extern "C" {
 // Adapter opening consumes the complete native adapter identity.
 #define AMDF_DXG_BRIDGE_ABI_VERSION_12 12u
 
+// Adapter opening can borrow an explicit native transport.
+#define AMDF_DXG_BRIDGE_ABI_VERSION_13 13u
+
 // Most recent private bridge ABI version described by this header.
-#define AMDF_DXG_BRIDGE_ABI_VERSION_LATEST AMDF_DXG_BRIDGE_ABI_VERSION_12
+#define AMDF_DXG_BRIDGE_ABI_VERSION_LATEST AMDF_DXG_BRIDGE_ABI_VERSION_13
 
 // Result of one bridge operation.
 typedef uint32_t amdf_dxg_bridge_result_t;
@@ -89,6 +93,30 @@ enum amdf_dxg_bridge_result_e {
 // Opaque parsed adapter state retained entirely inside the bridge.
 typedef struct amdf_dxg_bridge_gpu_adapter_t amdf_dxg_bridge_gpu_adapter_t;
 
+// Synchronously issues one native operation through its explicit owner.
+// |request| carries the complete Linux ioctl request on a direct DXG provider.
+typedef uint32_t(AMDF_DXG_BRIDGE_CALL* amdf_dxg_bridge_native_invoke_fn_t)(
+    void* context, uint64_t request, void* arguments);
+
+// Borrowed transport installed only while one bridge call executes.
+typedef struct amdf_dxg_bridge_native_transport_t {
+  // Owner-defined context forwarded unchanged to |invoke|.
+  void* context;
+  // Synchronous native operation callback, or NULL on native Windows.
+  amdf_dxg_bridge_native_invoke_fn_t invoke;
+} amdf_dxg_bridge_native_transport_t;
+
+#ifdef __cplusplus
+static_assert(sizeof(amdf_dxg_bridge_native_transport_t) == 16,
+              "DXG native transport ABI must remain stable");
+#else
+_Static_assert(sizeof(amdf_dxg_bridge_native_transport_t) == 16,
+               "DXG native transport ABI must remain stable");
+#endif
+
+#define AMDF_DXG_BRIDGE_GPU_ADAPTER_OPEN_INFO_VERSION_12_SIZE 24u
+#define AMDF_DXG_BRIDGE_GPU_ADAPTER_OPEN_INFO_VERSION_13_SIZE 40u
+
 // Native identity used to open one physical GPU adapter.
 typedef struct amdf_dxg_bridge_gpu_adapter_open_info_t {
   // Must be at least the size of this structure.
@@ -101,13 +129,25 @@ typedef struct amdf_dxg_bridge_gpu_adapter_open_info_t {
   uint32_t physical_adapter_index;
   // Exact DXGI adapter LUID, low word first.
   uint64_t adapter_luid;
+  // Optional explicit native transport introduced in bridge ABI version 13.
+  amdf_dxg_bridge_native_transport_t native_transport;
 } amdf_dxg_bridge_gpu_adapter_open_info_t;
 
 #ifdef __cplusplus
-static_assert(sizeof(amdf_dxg_bridge_gpu_adapter_open_info_t) == 24,
+static_assert(offsetof(amdf_dxg_bridge_gpu_adapter_open_info_t,
+                       native_transport) ==
+                  AMDF_DXG_BRIDGE_GPU_ADAPTER_OPEN_INFO_VERSION_12_SIZE,
+              "DXG adapter open prefix must remain stable");
+static_assert(sizeof(amdf_dxg_bridge_gpu_adapter_open_info_t) ==
+                  AMDF_DXG_BRIDGE_GPU_ADAPTER_OPEN_INFO_VERSION_13_SIZE,
               "DXG adapter open ABI must remain stable");
 #else
-_Static_assert(sizeof(amdf_dxg_bridge_gpu_adapter_open_info_t) == 24,
+_Static_assert(offsetof(amdf_dxg_bridge_gpu_adapter_open_info_t,
+                        native_transport) ==
+                   AMDF_DXG_BRIDGE_GPU_ADAPTER_OPEN_INFO_VERSION_12_SIZE,
+               "DXG adapter open prefix must remain stable");
+_Static_assert(sizeof(amdf_dxg_bridge_gpu_adapter_open_info_t) ==
+                   AMDF_DXG_BRIDGE_GPU_ADAPTER_OPEN_INFO_VERSION_13_SIZE,
                "DXG adapter open ABI must remain stable");
 #endif
 

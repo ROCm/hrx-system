@@ -25,8 +25,7 @@ bool ModuleIsMapped(const char* path) {
   return true;
 }
 
-bool ExerciseSidecar(const char* path, bool dxcore_is_available,
-                     std::string* out_error) {
+bool ExerciseSidecar(const char* path, std::string* out_error) {
   void* module = dlopen(path, RTLD_NOW | RTLD_LOCAL);
   if (module == nullptr) {
     *out_error = dlerror();
@@ -60,20 +59,21 @@ bool ExerciseSidecar(const char* path, bool dxcore_is_available,
     dlclose(module);
     return false;
   }
-  if (!dxcore_is_available) {
-    const amdf_dxg_bridge_gpu_adapter_open_info_t open_info = {
-        sizeof(amdf_dxg_bridge_gpu_adapter_open_info_t), 1, 1, 0, 0};
-    const amdf_allocator_t host_allocator = amdf_allocator_system();
-    amdf_dxg_bridge_gpu_adapter_t* adapter = nullptr;
-    amdf_dxg_bridge_gpu_properties_t properties = {};
-    uint32_t native_status = 0;
-    if (api->gpu_adapter_open(&open_info, &host_allocator, &adapter,
-                              &properties, &native_status) !=
-        AMDF_DXG_BRIDGE_RESULT_INTERNAL) {
-      *out_error = "missing DXCore did not fail silently through the bridge";
-      dlclose(module);
-      return false;
-    }
+  const amdf_dxg_bridge_gpu_adapter_open_info_t open_info = {
+      .structure_size = sizeof(amdf_dxg_bridge_gpu_adapter_open_info_t),
+      .adapter_handle = 1,
+      .device_handle = 1,
+  };
+  const amdf_allocator_t host_allocator = amdf_allocator_system();
+  amdf_dxg_bridge_gpu_adapter_t* adapter = nullptr;
+  amdf_dxg_bridge_gpu_properties_t properties = {};
+  uint32_t native_status = 0;
+  if (api->gpu_adapter_open(&open_info, &host_allocator, &adapter, &properties,
+                            &native_status) !=
+      AMDF_DXG_BRIDGE_RESULT_INVALID_ARGUMENT) {
+    *out_error = "adapter open accepted a missing native transport";
+    dlclose(module);
+    return false;
   }
   if (dlclose(module) != 0) {
     *out_error = dlerror();
@@ -86,18 +86,11 @@ TEST(RocdxgLibraryTest, QueryIsSilentAndEveryMappingIsReleased) {
   const char* sidecar_path = std::getenv("AMDF_ROCDXG_BRIDGE_TEST_PATH");
   ASSERT_NE(sidecar_path, nullptr);
 
-  const bool dxcore_was_mapped = ModuleIsMapped("libdxcore.so");
-  void* dxcore_probe = dlopen("libdxcore.so", RTLD_NOW | RTLD_LOCAL);
-  const bool dxcore_is_available = dxcore_probe != nullptr;
-  if (dxcore_probe != nullptr) {
-    ASSERT_EQ(dlclose(dxcore_probe), 0);
-  }
   for (int cycle = 0; cycle < 16; ++cycle) {
     std::string error;
     ::testing::internal::CaptureStdout();
     ::testing::internal::CaptureStderr();
-    const bool succeeded =
-        ExerciseSidecar(sidecar_path, dxcore_is_available, &error);
+    const bool succeeded = ExerciseSidecar(sidecar_path, &error);
     const std::string stderr_output = ::testing::internal::GetCapturedStderr();
     const std::string stdout_output = ::testing::internal::GetCapturedStdout();
 
@@ -105,9 +98,6 @@ TEST(RocdxgLibraryTest, QueryIsSilentAndEveryMappingIsReleased) {
     EXPECT_TRUE(stdout_output.empty()) << stdout_output;
     EXPECT_TRUE(stderr_output.empty()) << stderr_output;
     EXPECT_FALSE(ModuleIsMapped(sidecar_path));
-    if (!dxcore_was_mapped) {
-      EXPECT_FALSE(ModuleIsMapped("libdxcore.so"));
-    }
   }
 }
 

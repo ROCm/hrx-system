@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <dlfcn.h>
+#include <errno.h>
 
 #include <cstdlib>
 #include <cstring>
@@ -14,14 +15,10 @@
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/dxg/bridge_api.h"
-#include "shared/include/d3dkmt_types.h"
+#include "libamdf/src/platform/linux/dxg/connection.h"
+#include "libamdf/src/platform/linux/dxg/kmt.h"
 
 namespace {
-
-using EnumAdaptersFn = NTSTATUS (*)(const D3DKMT_ENUMADAPTERS2* arguments);
-using CreateDeviceFn = NTSTATUS (*)(D3DKMT_CREATEDEVICE* arguments);
-using DestroyDeviceFn = NTSTATUS (*)(const D3DKMT_DESTROYDEVICE* arguments);
-using CloseAdapterFn = NTSTATUS (*)(const D3DKMT_CLOSEADAPTER* arguments);
 
 enum class AdapterProbeResult {
   kSuccess,
@@ -47,15 +44,15 @@ bool ModuleIsMapped(const char* path) {
   return true;
 }
 
-bool CloseAdapters(const std::vector<D3DKMT_ADAPTERINFO>& adapters,
-                   CloseAdapterFn close_adapter) {
+bool CloseAdapters(const amdf_linux_dxg_kmt_t* kmt,
+                   const std::vector<D3DKMT_ADAPTERINFO>& adapters) {
   bool succeeded = true;
   for (const D3DKMT_ADAPTERINFO& adapter_info : adapters) {
     if (adapter_info.hAdapter == 0) {
       continue;
     }
-    const D3DKMT_CLOSEADAPTER close = {.hAdapter = adapter_info.hAdapter};
-    if (close_adapter(&close) != 0) {
+    D3DKMT_CLOSEADAPTER close = {.hAdapter = adapter_info.hAdapter};
+    if (amdf_linux_dxg_kmt_close_adapter(kmt, &close) != 0) {
       succeeded = false;
     }
   }
@@ -78,7 +75,7 @@ AdapterProbeResult ExerciseAdapter(
     return AdapterProbeResult::kFailure;
   }
   const amdf_dxg_bridge_api_t* bridge = nullptr;
-  if (query_api(AMDF_DXG_BRIDGE_ABI_VERSION_LATEST,
+  if (query_api(AMDF_DXG_BRIDGE_ABI_VERSION_13,
                 AMDF_DXG_BRIDGE_ABI_VERSION_LATEST,
                 &bridge) != AMDF_DXG_BRIDGE_RESULT_SUCCESS ||
       bridge == nullptr) {
@@ -87,65 +84,71 @@ AdapterProbeResult ExerciseAdapter(
     return AdapterProbeResult::kFailure;
   }
 
-  void* dxcore = dlopen("libdxcore.so", RTLD_NOW | RTLD_LOCAL);
-  if (dxcore == nullptr) {
+  amdf_linux_dxg_connection_t connection = {.descriptor = -1};
+  const amdf_status_t connection_status =
+      amdf_linux_dxg_connection_initialize(&connection);
+  if (!amdf_status_is_ok(connection_status)) {
+    const bool unavailable =
+        amdf_status_domain(connection_status) == AMDF_STATUS_DOMAIN_ERRNO &&
+        (amdf_status_code(connection_status) == ENOENT ||
+         amdf_status_code(connection_status) == ENODEV);
+    if (!unavailable) {
+      *out_error = "opening /dev/dxg failed";
+    }
     dlclose(sidecar);
-    return AdapterProbeResult::kUnavailable;
+    return unavailable ? AdapterProbeResult::kUnavailable
+                       : AdapterProbeResult::kFailure;
   }
-  const auto enum_adapters =
-      LoadProcedure<EnumAdaptersFn>(dxcore, "D3DKMTEnumAdapters2");
-  const auto create_device =
-      LoadProcedure<CreateDeviceFn>(dxcore, "D3DKMTCreateDevice");
-  const auto destroy_device =
-      LoadProcedure<DestroyDeviceFn>(dxcore, "D3DKMTDestroyDevice");
-  const auto close_adapter =
-      LoadProcedure<CloseAdapterFn>(dxcore, "D3DKMTCloseAdapter");
-  if (enum_adapters == nullptr || create_device == nullptr ||
-      destroy_device == nullptr || close_adapter == nullptr) {
-    *out_error = "libdxcore lacks required adapter procedures";
-    dlclose(dxcore);
-    dlclose(sidecar);
-    return AdapterProbeResult::kFailure;
-  }
+  const amdf_allocator_t host_allocator = amdf_allocator_system();
+  amdf_linux_dxg_kmt_t kmt = {
+      .connection = &connection,
+      .host_allocator = &host_allocator,
+  };
 
   D3DKMT_ENUMADAPTERS2 enumeration = {};
-  NTSTATUS native_status = enum_adapters(&enumeration);
+  NTSTATUS native_status =
+      amdf_linux_dxg_kmt_enumerate_adapters(&kmt, &enumeration);
   if (native_status != 0 || enumeration.NumAdapters == 0) {
     *out_error = "adapter count query failed";
-    dlclose(dxcore);
+    amdf_linux_dxg_connection_deinitialize(&connection);
     dlclose(sidecar);
     return AdapterProbeResult::kFailure;
   }
   std::vector<D3DKMT_ADAPTERINFO> adapters(enumeration.NumAdapters);
   enumeration.pAdapters = adapters.data();
-  native_status = enum_adapters(&enumeration);
+  native_status = amdf_linux_dxg_kmt_enumerate_adapters(&kmt, &enumeration);
   if (native_status != 0 || enumeration.NumAdapters > adapters.size()) {
     *out_error = "adapter enumeration failed";
-    CloseAdapters(adapters, close_adapter);
-    dlclose(dxcore);
+    CloseAdapters(&kmt, adapters);
+    amdf_linux_dxg_connection_deinitialize(&connection);
     dlclose(sidecar);
     return AdapterProbeResult::kFailure;
   }
   adapters.resize(enumeration.NumAdapters);
 
-  const amdf_allocator_t host_allocator = amdf_allocator_system();
   bool found_adapter = false;
   bool cleanup_succeeded = true;
   for (const D3DKMT_ADAPTERINFO& adapter_info : adapters) {
     D3DKMT_CREATEDEVICE create = {.hAdapter = adapter_info.hAdapter};
-    if (create_device(&create) != 0 || create.hDevice == 0) {
+    if (amdf_linux_dxg_kmt_create_device(&kmt, &create) != 0 ||
+        create.hDevice == 0) {
       continue;
     }
 
     const amdf_dxg_bridge_gpu_adapter_open_info_t open_info = {
-        sizeof(amdf_dxg_bridge_gpu_adapter_open_info_t),
-        adapter_info.hAdapter,
-        create.hDevice,
-        0,
-        (static_cast<uint64_t>(
-             static_cast<uint32_t>(adapter_info.AdapterLuid.HighPart))
-         << 32) |
-            adapter_info.AdapterLuid.LowPart,
+        .structure_size = sizeof(amdf_dxg_bridge_gpu_adapter_open_info_t),
+        .adapter_handle = adapter_info.hAdapter,
+        .device_handle = create.hDevice,
+        .physical_adapter_index = 0,
+        .adapter_luid = (static_cast<uint64_t>(static_cast<uint32_t>(
+                             adapter_info.AdapterLuid.HighPart))
+                         << 32) |
+                        adapter_info.AdapterLuid.LowPart,
+        .native_transport =
+            {
+                .context = &kmt,
+                .invoke = amdf_linux_dxg_kmt_invoke,
+            },
     };
     amdf_dxg_bridge_gpu_adapter_t* adapter = nullptr;
     amdf_dxg_bridge_gpu_properties_t properties = {};
@@ -164,8 +167,8 @@ AdapterProbeResult ExerciseAdapter(
       *out_error = "bridge adapter open failed";
     }
 
-    const D3DKMT_DESTROYDEVICE destroy = {.hDevice = create.hDevice};
-    if (destroy_device(&destroy) != 0) {
+    D3DKMT_DESTROYDEVICE destroy = {.hDevice = create.hDevice};
+    if (amdf_linux_dxg_kmt_destroy_device(&kmt, &destroy) != 0) {
       cleanup_succeeded = false;
     }
     if (found_adapter || !out_error->empty()) {
@@ -173,13 +176,11 @@ AdapterProbeResult ExerciseAdapter(
     }
   }
 
-  if (!CloseAdapters(adapters, close_adapter)) {
+  if (!CloseAdapters(&kmt, adapters) ||
+      !amdf_status_is_ok(amdf_linux_dxg_connection_deinitialize(&connection)) ||
+      dlclose(sidecar) != 0) {
     cleanup_succeeded = false;
   }
-  if (dlclose(sidecar) != 0 || dlclose(dxcore) != 0) {
-    cleanup_succeeded = false;
-  }
-
   if (!out_error->empty() || !cleanup_succeeded) {
     if (out_error->empty()) {
       *out_error = "native teardown failed";
@@ -193,10 +194,9 @@ AdapterProbeResult ExerciseAdapter(
   return AdapterProbeResult::kSuccess;
 }
 
-TEST(RocdxgAdapterSystemTest, QueriesRealAdapterAndReleasesNativeState) {
+TEST(RocdxgAdapterSystemTest, QueriesRealAdapterThroughExplicitDxgConnection) {
   const char* sidecar_path = std::getenv("AMDF_ROCDXG_BRIDGE_TEST_PATH");
   ASSERT_NE(sidecar_path, nullptr);
-  const bool dxcore_was_mapped = ModuleIsMapped("libdxcore.so");
 
   amdf_dxg_bridge_gpu_properties_t properties = {};
   std::string error;
@@ -208,15 +208,12 @@ TEST(RocdxgAdapterSystemTest, QueriesRealAdapterAndReleasesNativeState) {
   const std::string stdout_output = ::testing::internal::GetCapturedStdout();
 
   if (result == AdapterProbeResult::kUnavailable) {
-    GTEST_SKIP() << "libdxcore is unavailable on this runner";
+    GTEST_SKIP() << "/dev/dxg is unavailable on this runner";
   }
   EXPECT_EQ(result, AdapterProbeResult::kSuccess) << error;
   EXPECT_TRUE(stdout_output.empty()) << stdout_output;
   EXPECT_TRUE(stderr_output.empty()) << stderr_output;
   EXPECT_FALSE(ModuleIsMapped(sidecar_path));
-  if (!dxcore_was_mapped) {
-    EXPECT_FALSE(ModuleIsMapped("libdxcore.so"));
-  }
   EXPECT_GT(properties.gfx_ip_major, 0);
   EXPECT_GT(properties.wavefront_size, 0u);
   EXPECT_GT(properties.compute_unit_count, 0u);

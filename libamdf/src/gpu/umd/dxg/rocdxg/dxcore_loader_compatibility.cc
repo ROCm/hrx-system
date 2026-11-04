@@ -4,10 +4,38 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <cstring>
-#include <exception>
+#include <sys/ioctl.h>
 
+#include "libamdf/src/gpu/umd/dxg/rocdxg/native_transport.h"
 #include "shared/include/dxcore_loader.h"
+
+namespace {
+
+thread_local const amdf_dxg_bridge_native_transport_t* active_transport =
+    nullptr;
+
+NTSTATUS InvokeQueryAdapterInfo(void* arguments) {
+  if (active_transport == nullptr) {
+    return static_cast<NTSTATUS>(0xC0000184u);  // STATUS_INVALID_DEVICE_STATE
+  }
+  return static_cast<NTSTATUS>(active_transport->invoke(
+      active_transport->context, _IOWR('G', 0x09, D3DKMT_QUERYADAPTERINFO),
+      arguments));
+}
+
+}  // namespace
+
+namespace amdf::rocdxg_bridge {
+
+NativeTransportScope::NativeTransportScope(
+    const amdf_dxg_bridge_native_transport_t& transport) noexcept
+    : previous_(active_transport) {
+  active_transport = &transport;
+}
+
+NativeTransportScope::~NativeTransportScope() { active_transport = previous_; }
+
+}  // namespace amdf::rocdxg_bridge
 
 namespace wsl::thunk::dxcore {
 namespace {
@@ -16,14 +44,6 @@ using LoaderDeleter = void (*)(DxcoreLoader* loader);
 
 DxcoreLoader* active_loader = nullptr;
 LoaderDeleter active_loader_deleter = nullptr;
-
-template <typename Procedure>
-bool LoadProcedure(void* module, const char* name, Procedure* out_procedure) {
-  static_assert(sizeof(Procedure) == sizeof(void*));
-  void* symbol = dlsym(module, name);
-  std::memcpy(out_procedure, &symbol, sizeof(symbol));
-  return symbol != nullptr;
-}
 
 struct DxcoreLoaderCleanup {
   ~DxcoreLoaderCleanup() {
@@ -46,7 +66,7 @@ DxcoreLoader::DxcoreLoader()
       pfn_D3DKMTCreateDevice(nullptr),
       pfn_D3DKMTDestroyDevice(nullptr),
       pfn_D3DKMTEnumAdapters2(nullptr),
-      pfn_D3DKMTQueryAdapterInfo(nullptr),
+      pfn_D3DKMTQueryAdapterInfo(InvokeQueryAdapterInfo),
       pfn_D3DKMTCreateContextVirtual(nullptr),
       pfn_D3DKMTDestroyContext(nullptr),
       pfn_D3DKMTSubmitCommand(nullptr),
@@ -72,7 +92,7 @@ DxcoreLoader::DxcoreLoader()
       pfn_D3DKMTSubmitCommandToHwQueue(nullptr),
       pfn_D3DKMTEnumProcesses(nullptr),
       pfn_D3DKMTQueryVideoMemoryInfo(nullptr),
-      dxcore_handle_(nullptr),
+      dxcore_handle_(this),
       init_flag_() {
   active_loader = this;
   active_loader_deleter = [](DxcoreLoader* loader) { delete loader; };
@@ -84,78 +104,10 @@ DxcoreLoader::~DxcoreLoader() {
   active_loader_deleter = nullptr;
 }
 
-bool DxcoreLoader::Initialize() {
-  std::call_once(init_flag_, [this]() {
-    dxcore_handle_ = dlopen("libdxcore.so", RTLD_NOW | RTLD_LOCAL);
-    if (dxcore_handle_ != nullptr && !LoadDxcoreApis()) {
-      if (dlclose(dxcore_handle_) != 0) {
-        std::terminate();
-      }
-      dxcore_handle_ = nullptr;
-    }
-  });
-  return IsLoaded();
-}
+bool DxcoreLoader::Initialize() { return IsLoaded(); }
 
-void DxcoreLoader::Shutdown() {
-  if (dxcore_handle_ != nullptr) {
-    if (dlclose(dxcore_handle_) != 0) {
-      std::terminate();
-    }
-    dxcore_handle_ = nullptr;
-  }
-}
+void DxcoreLoader::Shutdown() { dxcore_handle_ = nullptr; }
 
-bool DxcoreLoader::LoadDxcoreApis() {
-  if (dxcore_handle_ == nullptr) {
-    return false;
-  }
-
-#define AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(name)           \
-  if (!LoadProcedure(dxcore_handle_, #name, &pfn_##name)) { \
-    return false;                                           \
-  }
-
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTCreateAllocation2)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTDestroyAllocation2)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTMapGpuVirtualAddress)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTReserveGpuVirtualAddress)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTFreeGpuVirtualAddress)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTCreateDevice)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTDestroyDevice)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTEnumAdapters2)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTQueryAdapterInfo)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTCreateContextVirtual)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTDestroyContext)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTSubmitCommand)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTCreateSynchronizationObject2)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTDestroySynchronizationObject)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTQueryStatistics)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTEscape)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTLock2)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTUnlock2)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTCreatePagingQueue)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTDestroyPagingQueue)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTWaitForSynchronizationObjectFromGpu)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTSignalSynchronizationObjectFromGpu)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTWaitForSynchronizationObjectFromCpu)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTQueryClockCalibration)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTMakeResident)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTEvict)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTShareObjects)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTQueryResourceInfoFromNtHandle)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTOpenResourceFromNtHandle)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTCreateHwQueue)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTDestroyHwQueue)
-  AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE(D3DKMTSubmitCommandToHwQueue)
-
-#undef AMDF_LOAD_REQUIRED_DXCORE_PROCEDURE
-
-  LoadProcedure(dxcore_handle_, "D3DKMTEnumProcesses",
-                &pfn_D3DKMTEnumProcesses);
-  LoadProcedure(dxcore_handle_, "D3DKMTQueryVideoMemoryInfo",
-                &pfn_D3DKMTQueryVideoMemoryInfo);
-  return true;
-}
+bool DxcoreLoader::LoadDxcoreApis() { return true; }
 
 }  // namespace wsl::thunk::dxcore
