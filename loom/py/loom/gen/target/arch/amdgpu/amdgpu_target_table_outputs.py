@@ -36,6 +36,7 @@ def generate_amdgpu_target_table_outputs(
     *,
     descriptor_source_path: Path,
     encoding_source_path: Path,
+    primary_strings: CStringBank | None = None,
     shared_strings: CStringBank | None = None,
 ) -> None:
     """Emits the descriptor and encoding sources for one storage family."""
@@ -44,6 +45,7 @@ def generate_amdgpu_target_table_outputs(
         family,
         descriptor_sets_by_generator_target,
         source_public_header=_DESCRIPTOR_SOURCE_HEADER,
+        primary_strings=primary_strings,
         shared_strings=shared_strings,
     )
     encoding_source = generate_amdgpu_encoding_table_source(

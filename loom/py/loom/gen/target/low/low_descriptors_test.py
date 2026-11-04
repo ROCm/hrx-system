@@ -18,6 +18,7 @@ from loom.gen.target.low import compiler, views
 from loom.gen.target.low.low_descriptors import (
     DescriptorAllowlist,
     compile_descriptor_set_family,
+    descriptor_set_family_string_values,
     generate_descriptor_set,
     generate_descriptor_set_family,
 )
@@ -2237,6 +2238,31 @@ def test_descriptor_set_view_pools_schedule_model_variants() -> None:
     ).source
     assert "kTestLowScheduleViewCoreScheduleModels[]" in standalone_source
     assert ".schedule_models = kTestLowScheduleViewCoreScheduleModels," in standalone_source
+
+
+def test_descriptor_set_family_compiles_complete_view_string_vocabulary() -> None:
+    view_key = "test.low.compiled_view.core"
+    view = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        key=view_key,
+        function_name="loom_test_low_compiled_view_core_descriptor_set",
+        c_table_prefix="TestLowCompiledViewCore",
+        c_enum_prefix="TEST_LOW_COMPILED_VIEW_CORE",
+    )
+
+    compiled, (compiled_view,) = compile_descriptor_set_family(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        (view,),
+    )
+
+    assert compiled_view.spec is view
+    assert view_key in compiled.string_pool.value_to_label
+    assert set(compiled.string_pool.value_to_label).issubset(
+        descriptor_set_family_string_values(
+            TEST_LOW_CORE_DESCRIPTOR_SET,
+            (view,),
+        )
+    )
 
 
 def test_descriptor_set_family_pools_schedule_names_with_same_physical_row() -> None:

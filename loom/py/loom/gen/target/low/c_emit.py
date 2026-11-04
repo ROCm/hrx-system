@@ -27,6 +27,7 @@ from loom.gen.target.low.compiled import (
     DescriptorSetView,
     append_interned_sequence,
 )
+from loom.gen.target.low.views import descriptor_set_view_metadata_string_label
 from loom.target.low_descriptors import (
     LOW_DESCRIPTOR_SET_ORDINAL_NONE,
     Descriptor,
@@ -206,38 +207,6 @@ def _emit_array(
     row_lines: Sequence[list[str]],
 ) -> None:
     c_arrays.append_struct_array(lines, c_type, f"k{table_prefix}{name}", row_lines)
-
-
-def _metadata_string_label(storage_spec: DescriptorSet, view_spec: DescriptorSet, field_name: str) -> str:
-    if view_spec.key == storage_spec.key and view_spec.target_key == storage_spec.target_key and view_spec.feature_key == storage_spec.feature_key:
-        return field_name
-    return f"{field_name}_{c_spelling.c_identifier(view_spec.key)}"
-
-
-def _intern_descriptor_set_view_strings(
-    compiled: CompiledDescriptorSet,
-    view: DescriptorSetView,
-) -> None:
-    pool = compiled.string_pool
-    storage_spec = compiled.spec
-    view_spec = view.spec
-    pool.intern(_metadata_string_label(storage_spec, view_spec, "set_key"), view_spec.key)
-    if view_spec.target_key is not None:
-        pool.intern(
-            _metadata_string_label(storage_spec, view_spec, "target_key"),
-            view_spec.target_key,
-        )
-    if view_spec.feature_key is not None:
-        pool.intern(
-            _metadata_string_label(storage_spec, view_spec, "feature_key"),
-            view_spec.feature_key,
-        )
-    for resource in view.schedule_model.resources:
-        pool.intern(f"resource_{resource.name}", resource.name)
-    for schedule_class in view.schedule_model.schedule_classes:
-        pool.intern(f"schedule_{schedule_class.name}", schedule_class.name)
-    for timing_event in view.schedule_model.timing_events:
-        pool.intern(f"timing_event_{timing_event.name}", timing_event.name)
 
 
 def _descriptor_row_lines(
@@ -608,13 +577,12 @@ def emit_source_for_views(
     compiled: CompiledDescriptorSet,
     *,
     views: Sequence[DescriptorSetView],
+    primary_strings: CStringBank | None = None,
     shared_strings: CStringBank | None = None,
 ) -> str:
     spec = compiled.spec
     pool = compiled.string_pool
     asm_table_storage = compiled.asm_table_storage
-    for view in views:
-        _intern_descriptor_set_view_strings(compiled, view)
     lines = [
         "// Copyright 2026 The IREE Authors",
         "//",
@@ -635,9 +603,19 @@ def emit_source_for_views(
         lines.append(f"const loom_low_descriptor_set_t* {view.spec.function_name}(void);")
     if len(views) > 1:
         lines.append("")
-    string_layout = layout_c_string_pool(pool, shared_strings)
-    if string_layout.shared is not None:
-        lines.extend([f'#include "{string_layout.shared.header}"', ""])
+    string_layout = layout_c_string_pool(
+        pool,
+        shared_strings,
+        primary=primary_strings,
+    )
+    external_headers = tuple(dict.fromkeys(bank.header for bank in (string_layout.primary, string_layout.shared) if bank is not None))
+    if external_headers:
+        lines.extend(
+            [
+                *(f'#include "{header}"' for header in external_headers),
+                "",
+            ]
+        )
     _emit_string_pool(compiled, lines, string_layout)
 
     view_array_emitter = c_arrays.StaticArrayEmitter(lines)
@@ -1413,9 +1391,9 @@ def emit_source_for_views(
                 else []
             ),
             f"    .descriptor_set_ordinal = {c_spelling.u16_literal(view_spec.descriptor_set_ordinal if view_spec.descriptor_set_ordinal is not None else LOW_DESCRIPTOR_SET_ORDINAL_NONE)},",
-            f"    .key_string_ref = {pool.ref(_metadata_string_label(spec, view_spec, 'set_key'))},",
-            f"    .target_key_string_ref = {c_spelling.optional_string_expr(pool, _metadata_string_label(spec, view_spec, 'target_key') if view_spec.target_key is not None else None)},",
-            f"    .feature_key_string_ref = {c_spelling.optional_string_expr(pool, _metadata_string_label(spec, view_spec, 'feature_key') if view_spec.feature_key is not None else None)},",
+            f"    .key_string_ref = {pool.ref(descriptor_set_view_metadata_string_label(spec, view_spec, 'set_key'))},",
+            f"    .target_key_string_ref = {c_spelling.optional_string_expr(pool, descriptor_set_view_metadata_string_label(spec, view_spec, 'target_key') if view_spec.target_key is not None else None)},",
+            f"    .feature_key_string_ref = {c_spelling.optional_string_expr(pool, descriptor_set_view_metadata_string_label(spec, view_spec, 'feature_key') if view_spec.feature_key is not None else None)},",
             f"    .descriptors = {descriptor_table_symbol},",
             f"    .descriptor_layouts = {descriptor_layout_table_symbol},",
             f"    .descriptor_layout_count = {len(descriptor_layout_rows)},",
@@ -1589,9 +1567,15 @@ def emit_source_for_views(
     return "\n".join(lines) + "\n"
 
 
-def emit_source(compiled: CompiledDescriptorSet, shared_strings: CStringBank | None = None) -> str:
+def emit_source(
+    compiled: CompiledDescriptorSet,
+    shared_strings: CStringBank | None = None,
+    *,
+    primary_strings: CStringBank | None = None,
+) -> str:
     return emit_source_for_views(
         compiled,
+        primary_strings=primary_strings,
         shared_strings=shared_strings,
         views=[
             DescriptorSetView(

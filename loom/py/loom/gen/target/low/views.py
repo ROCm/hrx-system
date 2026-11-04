@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import replace
 
-from loom.gen.target.low import compiler, validation
+from loom.gen.target.low import c_spelling, compiler, validation
 from loom.gen.target.low.compiled import (
     CompiledAsmForm,
     CompiledDescriptorSet,
@@ -30,6 +30,61 @@ from loom.target.low_descriptors import (
     ScheduleModel,
     descriptor_stable_id,
 )
+
+
+def descriptor_set_view_metadata_string_label(
+    storage_spec: DescriptorSet,
+    view_spec: DescriptorSet,
+    field_name: str,
+) -> str:
+    """Returns the storage-family label for one view metadata string."""
+
+    if view_spec.key == storage_spec.key and view_spec.target_key == storage_spec.target_key and view_spec.feature_key == storage_spec.feature_key:
+        return field_name
+    return f"{field_name}_{c_spelling.c_identifier(view_spec.key)}"
+
+
+def _intern_descriptor_set_view_strings(
+    compiled: CompiledDescriptorSet,
+    view: DescriptorSetView,
+) -> None:
+    """Completes the family string vocabulary while compiling each view."""
+
+    pool = compiled.string_pool
+    storage_spec = compiled.spec
+    view_spec = view.spec
+    pool.intern(
+        descriptor_set_view_metadata_string_label(
+            storage_spec,
+            view_spec,
+            "set_key",
+        ),
+        view_spec.key,
+    )
+    if view_spec.target_key is not None:
+        pool.intern(
+            descriptor_set_view_metadata_string_label(
+                storage_spec,
+                view_spec,
+                "target_key",
+            ),
+            view_spec.target_key,
+        )
+    if view_spec.feature_key is not None:
+        pool.intern(
+            descriptor_set_view_metadata_string_label(
+                storage_spec,
+                view_spec,
+                "feature_key",
+            ),
+            view_spec.feature_key,
+        )
+    for resource in view.schedule_model.resources:
+        pool.intern(f"resource_{resource.name}", resource.name)
+    for schedule_class in view.schedule_model.schedule_classes:
+        pool.intern(f"schedule_{schedule_class.name}", schedule_class.name)
+    for timing_event in view.schedule_model.timing_events:
+        pool.intern(f"timing_event_{timing_event.name}", timing_event.name)
 
 
 def _named_schedule_model_view_spec(
@@ -683,7 +738,7 @@ def _descriptor_set_view_for_spec(
                     )
                 )
 
-    return DescriptorSetView(
+    view = DescriptorSetView(
         spec=view_spec,
         reg_classes=_view_register_classes(
             compiled,
@@ -715,6 +770,8 @@ def _descriptor_set_view_for_spec(
         uses_storage_operand_form_tables=uses_storage_operand_form_tables,
         uses_storage_schedule_alternative_tables=(schedule_alternative_rows == compiled.schedule_alternative_rows[: len(schedule_alternative_rows)]),
     )
+    _intern_descriptor_set_view_strings(compiled, view)
+    return view
 
 
 def descriptor_set_view_for_spec(

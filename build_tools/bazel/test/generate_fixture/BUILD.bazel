@@ -1,0 +1,23 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:generate.bzl", "iree_generated_sources")
+
+package(default_visibility = ["//visibility:public"])
+
+iree_generated_sources(
+    name = "producer",
+    outs = [
+        "producer.c",
+        "producer.h",
+    ],
+    output_args = {
+        "producer.c": "--source",
+        "producer.h": "--header={path}",
+    },
+    tags = ["manual"],
+    tool = "//build_tools/bazel/test:generate_rule_fixture_tool",
+)
