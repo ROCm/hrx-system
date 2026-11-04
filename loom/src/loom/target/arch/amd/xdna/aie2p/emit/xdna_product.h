@@ -25,6 +25,8 @@ extern "C" {
 typedef struct loom_aie2p_xdna_tile_t {
   // Physical compute tile executing the program.
   loom_xdna_tile_coordinate_t coordinate;
+  // Diagnostic symbol name for this physical program instance.
+  iree_string_view_t program_name;
   // Detached contribution from which symbols and sizes are retained.
   const loom_aie2p_leaf_contribution_t* contribution;
   // Fully placed and fixed-up native sections.

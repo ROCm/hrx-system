@@ -30,10 +30,10 @@ typedef struct loom_aie2p_array_resident_helper_t {
   loom_low_loop_execution_map_t* loop_execution;
 } loom_aie2p_array_resident_helper_t;
 
-// One materialized resident worker program.
-typedef struct loom_aie2p_array_resident_worker_t {
-  // Index of the logical and physically planned worker.
-  uint32_t worker_index;
+// One materialized resident worker program shared by compatible instances.
+typedef struct loom_aie2p_array_resident_program_t {
+  // First logical worker instance represented by this program.
+  uint32_t representative_worker_index;
   // Module-local symbol naming the materialized worker function.
   loom_symbol_ref_t entry;
   // Private retained core Low function implementing the resident loop.
@@ -48,17 +48,19 @@ typedef struct loom_aie2p_array_resident_worker_t {
   const loom_aie2p_array_resident_helper_t* direct_helpers;
   // Number of records in |direct_helpers|.
   iree_host_size_t direct_helper_count;
-} loom_aie2p_array_resident_worker_t;
-
-// Materialized resident core programs for one physical array plan.
-typedef struct loom_aie2p_array_resident_program_t {
-  // Arena-owned worker programs in logical worker order.
-  const loom_aie2p_array_resident_worker_t* workers;
-  // Number of entries in workers.
-  iree_host_size_t worker_count;
 } loom_aie2p_array_resident_program_t;
 
-// Materializes every planned worker as an independently compilable Low CFG.
+// Materialized resident core program set for one physical array plan.
+typedef struct loom_aie2p_array_resident_program_set_t {
+  // Arena-owned programs in first-instance order.
+  const loom_aie2p_array_resident_program_t* programs;
+  // Number of entries in programs.
+  iree_host_size_t program_count;
+  // Arena-owned diagnostic names indexed by physical worker instance.
+  const iree_string_view_t* instance_names;
+} loom_aie2p_array_resident_program_set_t;
+
+// Materializes every unique planned worker program as a compilable Low CFG.
 //
 // |source_module| owns the selected array and core leaf IR retained by |plans|.
 // |resident_module| receives the retained read-only data definitions and all
@@ -84,7 +86,7 @@ iree_status_t loom_aie2p_array_materialize_resident_programs(
     const loom_module_t* source_module, loom_module_t* resident_module,
     const loom_aie2p_array_plan_t* plans, iree_host_size_t plan_count,
     iree_arena_allocator_t* arena,
-    loom_aie2p_array_resident_program_t* out_programs);
+    loom_aie2p_array_resident_program_set_t* out_program_sets);
 
 #ifdef __cplusplus
 }  // extern "C"

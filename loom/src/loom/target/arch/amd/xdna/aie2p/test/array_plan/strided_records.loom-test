@@ -95,8 +95,8 @@ control-wait record=5 tile=(0,0) direction=stream-to-memory dma-channel=0 column
 control-relocation index=0 record=0 word=1 binding=0 addend=1664 alignment=4
 control-relocation index=1 record=2 word=1 binding=1 addend=0 alignment=4
 
-resident-program workers=1
-resident worker=0 entry=@retained_x_record_array$worker$0 tile=(0,2) code-bytes=140 resources=0 fixups=1
+resident-programs count=1 instances=1
+resident-program index=0 representative-worker=0 instances=1 entry=@retained_x_record_array$worker$0 tile=(0,2) code-bytes=140 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core> @retained_x_record_array$worker$0() asm {
   %acquire_delta = mov.short -1
@@ -225,8 +225,8 @@ control-wait record=5 tile=(0,0) direction=stream-to-memory dma-channel=0 column
 control-relocation index=0 record=0 word=1 binding=0 addend=256 alignment=4
 control-relocation index=1 record=2 word=1 binding=1 addend=0 alignment=4
 
-resident-program workers=1
-resident worker=0 entry=@retained_x_stream_array$worker$0 tile=(0,2) code-bytes=140 resources=0 fixups=1
+resident-programs count=1 instances=1
+resident-program index=0 representative-worker=0 instances=1 entry=@retained_x_stream_array$worker$0 tile=(0,2) code-bytes=140 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core> @retained_x_stream_array$worker$0() asm {
   %acquire_delta = mov.short -1
@@ -360,8 +360,8 @@ control-wait record=5 tile=(0,0) direction=stream-to-memory dma-channel=0 column
 control-relocation index=0 record=0 word=1 binding=0 addend=256 alignment=4
 control-relocation index=1 record=2 word=1 binding=1 addend=128 alignment=4
 
-resident-program workers=1
-resident worker=0 entry=@padded_record_output_array$worker$0 tile=(0,2) code-bytes=140 resources=0 fixups=1
+resident-programs count=1 instances=1
+resident-program index=0 representative-worker=0 instances=1 entry=@padded_record_output_array$worker$0 tile=(0,2) code-bytes=140 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core> @padded_record_output_array$worker$0() asm {
   %acquire_delta = mov.short -1

@@ -22,6 +22,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/array/binding.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/channel_resources.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/local_memory.h"
+#include "loom/target/arch/amd/xdna/aie2p/array/resident_plan.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/route.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/topology.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/array_descriptors.h"
@@ -138,6 +139,7 @@ typedef struct loom_aie2p_array_plan_builder_t {
   iree_host_size_t entity_capacity;
 
   loom_aie2p_array_worker_plan_t* worker_plans;
+  loom_aie2p_array_resident_program_plan_t* resident_programs;
   loom_aie2p_array_worker_storage_plan_t* worker_storage;
   loom_aie2p_array_read_only_data_plan_t* read_only_data;
   loom_aie2p_array_worker_port_plan_t* worker_ports;
@@ -2300,6 +2302,10 @@ static iree_status_t loom_aie2p_array_allocate_physical_plan(
       builder->arena, builder->plan->worker_plan_count,
       sizeof(*builder->worker_plans), (void**)&builder->worker_plans));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_array(
+      builder->arena, builder->plan->worker_plan_count,
+      sizeof(*builder->resident_programs),
+      (void**)&builder->resident_programs));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_array(
       builder->arena, builder->plan->worker_storage_count,
       sizeof(*builder->worker_storage), (void**)&builder->worker_storage));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_array(
@@ -2346,6 +2352,7 @@ static iree_status_t loom_aie2p_array_allocate_physical_plan(
   }
 
   builder->plan->worker_plans = builder->worker_plans;
+  builder->plan->resident_programs = builder->resident_programs;
   builder->plan->worker_storage = builder->worker_storage;
   builder->plan->read_only_data = builder->read_only_data;
   builder->plan->worker_ports = builder->worker_ports;
@@ -2473,6 +2480,8 @@ iree_status_t loom_aie2p_array_plan_build(
   if (builder.valid) {
     loom_aie2p_array_finalize_worker_port_states(&builder);
     loom_aie2p_array_finalize_physical_counts(&builder);
+    plan.resident_program_count = loom_aie2p_array_resident_plan_build(
+        &plan, builder.worker_plans, builder.resident_programs);
     *out_plan = plan;
     *out_valid = true;
   }

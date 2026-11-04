@@ -41,6 +41,8 @@ loom_cc_library(
         "binding.c",
         "channel_resources.c",
         "plan.c",
+        "resident_plan.c",
+        "resident_plan.h",
         "route.c",
         "topology.c",
         "topology.h",

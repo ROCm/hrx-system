@@ -57,8 +57,8 @@ control-write record=2 address=0x0001d204 value=0x80000000
 control-wait record=3 tile=(0,0) direction=stream-to-memory dma-channel=0 columns=1 rows=1
 control-relocation index=0 record=0 word=1 binding=0 addend=0 alignment=4
 
-resident-program workers=1
-resident worker=0 entry=@cross_bank_records$worker$0 tile=(0,2) code-bytes=62 resources=0 fixups=1
+resident-programs count=1 instances=1
+resident-program index=0 representative-worker=0 instances=1 entry=@cross_bank_records$worker$0 tile=(0,2) code-bytes=62 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core> @cross_bank_records$worker$0() asm {
   %acquire_delta = mov.short -1
@@ -139,8 +139,8 @@ control-write record=2 address=0x0001d204 value=0x80000000
 control-wait record=3 tile=(0,0) direction=stream-to-memory dma-channel=0 columns=1 rows=1
 control-relocation index=0 record=0 word=1 binding=0 addend=0 alignment=4
 
-resident-program workers=1
-resident worker=0 entry=@full_local_ring$worker$0 tile=(0,2) code-bytes=62 resources=0 fixups=1
+resident-programs count=1 instances=1
+resident-program index=0 representative-worker=0 instances=1 entry=@full_local_ring$worker$0 tile=(0,2) code-bytes=62 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core> @full_local_ring$worker$0() asm {
   %acquire_delta = mov.short -1
@@ -253,8 +253,8 @@ control-wait record=7 tile=(0,0) direction=stream-to-memory dma-channel=1 column
 control-relocation index=0 record=0 word=1 binding=0 addend=0 alignment=4
 control-relocation index=1 record=3 word=1 binding=1 addend=0 alignment=4
 
-resident-program workers=1
-resident worker=0 entry=@occupied_bank_prefixes$worker$0 tile=(0,2) code-bytes=126 resources=0 fixups=2
+resident-programs count=1 instances=1
+resident-program index=0 representative-worker=0 instances=1 entry=@occupied_bank_prefixes$worker$0 tile=(0,2) code-bytes=126 resources=0 fixups=2
 
 low.func.def retain target<amd.xdna.aie2p.core> @occupied_bank_prefixes$worker$0() asm {
   %allocation = storage {byte_alignment = 32768, byte_length = 20000} : low.storage<workgroup>

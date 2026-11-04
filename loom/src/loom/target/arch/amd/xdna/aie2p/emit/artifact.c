@@ -425,26 +425,26 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
     const loom_aie2p_xdna_artifact_request_t* request,
     loom_aie2p_program_compiler_t* compiler,
     const loom_aie2p_array_plan_t* plan,
-    const loom_aie2p_array_resident_program_t* resident_program,
+    const loom_aie2p_array_resident_program_set_t* resident_program_set,
     loom_aie2p_xdna_tile_t** out_tiles, bool* out_compiled) {
   *out_compiled = false;
   *out_tiles = NULL;
   loom_aie2p_xdna_tile_t* tiles = NULL;
   loom_aie2p_leaf_contribution_t* contributions = NULL;
   loom_aie2p_linked_tile_t* linked_tiles = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(request->scratch_arena, plan->worker_count,
+                                sizeof(*tiles), (void**)&tiles));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      request->scratch_arena, resident_program->worker_count, sizeof(*tiles),
-      (void**)&tiles));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      request->scratch_arena, resident_program->worker_count,
+      request->scratch_arena, resident_program_set->program_count,
       sizeof(*contributions), (void**)&contributions));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      request->scratch_arena, resident_program->worker_count,
-      sizeof(*linked_tiles), (void**)&linked_tiles));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(request->scratch_arena, plan->worker_count,
+                                sizeof(*linked_tiles), (void**)&linked_tiles));
 
-  for (iree_host_size_t i = 0; i < resident_program->worker_count; ++i) {
-    const loom_aie2p_array_resident_worker_t* resident =
-        &resident_program->workers[i];
+  for (iree_host_size_t i = 0; i < resident_program_set->program_count; ++i) {
+    const loom_aie2p_array_resident_program_t* resident =
+        &resident_program_set->programs[i];
     loom_aie2p_leaf_contribution_t* contribution = &contributions[i];
     loom_target_compile_report_t worker_report;
     loom_target_compile_report_t* worker_report_ptr = NULL;
@@ -506,6 +506,15 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
           IREE_STATUS_FAILED_PRECONDITION,
           "materialized AIE2P resident worker retains resource imports");
     }
+  }
+
+  for (iree_host_size_t worker_index = 0; worker_index < plan->worker_count;
+       ++worker_index) {
+    const uint32_t resident_program_index =
+        plan->worker_plans[worker_index].resident_program_index;
+    IREE_ASSERT_LT(resident_program_index, resident_program_set->program_count);
+    loom_aie2p_leaf_contribution_t* contribution =
+        &contributions[resident_program_index];
     loom_aie2p_tile_storage_placement_t
         storage_placements[LOOM_STORAGE_SPACE_COUNT_];
     loom_aie2p_tile_read_only_data_placement_t* read_only_data_placements =
@@ -519,14 +528,16 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
     }
     loom_aie2p_tile_link_layout_t link_layout = {0};
     IREE_RETURN_IF_ERROR(loom_aie2p_xdna_plan_tile_link(
-        plan, resident->worker_index, &contribution->realization,
+        plan, (uint32_t)worker_index, &contribution->realization,
         storage_placements, read_only_data_placements, &link_layout));
-    IREE_RETURN_IF_ERROR(loom_aie2p_tile_link(
-        contribution, &link_layout, request->scratch_arena, &linked_tiles[i]));
-    tiles[i] = (loom_aie2p_xdna_tile_t){
-        .coordinate = plan->worker_plans[resident->worker_index].coordinate,
+    IREE_RETURN_IF_ERROR(loom_aie2p_tile_link(contribution, &link_layout,
+                                              request->scratch_arena,
+                                              &linked_tiles[worker_index]));
+    tiles[worker_index] = (loom_aie2p_xdna_tile_t){
+        .coordinate = plan->worker_plans[worker_index].coordinate,
+        .program_name = resident_program_set->instance_names[worker_index],
         .contribution = contribution,
-        .linked_tile = &linked_tiles[i],
+        .linked_tile = &linked_tiles[worker_index],
     };
   }
   *out_tiles = tiles;
@@ -621,13 +632,13 @@ static iree_status_t loom_aie2p_xdna_compile_resident_entries(
     iree_host_size_t entry_count, loom_aie2p_xdna_entry_t* product_entries,
     bool* out_compiled) {
   *out_compiled = false;
-  loom_aie2p_array_resident_program_t* resident_programs = NULL;
+  loom_aie2p_array_resident_program_set_t* resident_program_sets = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      request->scratch_arena, entry_count, sizeof(*resident_programs),
-      (void**)&resident_programs));
+      request->scratch_arena, entry_count, sizeof(*resident_program_sets),
+      (void**)&resident_program_sets));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_materialize_resident_programs(
       request->module, resident_module, array_plans, entry_count,
-      request->scratch_arena, resident_programs));
+      request->scratch_arena, resident_program_sets));
   loom_aie2p_program_compiler_t* compiler = NULL;
   IREE_RETURN_IF_ERROR(loom_aie2p_program_compiler_allocate(
       resident_module, request->scratch_arena, request->compile_report,
@@ -636,18 +647,18 @@ static iree_status_t loom_aie2p_xdna_compile_resident_entries(
     if (array_plans[i].function_op == NULL) {
       continue;
     }
-    const loom_aie2p_array_resident_program_t* resident_program =
-        &resident_programs[i];
+    const loom_aie2p_array_resident_program_set_t* resident_program_set =
+        &resident_program_sets[i];
     loom_aie2p_xdna_tile_t* tiles = NULL;
     bool tiles_compiled = false;
     IREE_RETURN_IF_ERROR(loom_aie2p_xdna_compile_resident_tiles(
-        request, compiler, &array_plans[i], resident_program, &tiles,
+        request, compiler, &array_plans[i], resident_program_set, &tiles,
         &tiles_compiled));
     if (!tiles_compiled) {
       return iree_ok_status();
     }
     product_entries[i].tiles = tiles;
-    product_entries[i].tile_count = resident_program->worker_count;
+    product_entries[i].tile_count = array_plans[i].worker_count;
   }
   *out_compiled = true;
   return iree_ok_status();

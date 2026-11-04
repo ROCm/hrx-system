@@ -91,8 +91,8 @@ control-wait record=5 tile=(0,0) direction=stream-to-memory dma-channel=0 column
 control-relocation index=0 record=0 word=1 binding=0 addend=64 alignment=4
 control-relocation index=1 record=2 word=1 binding=1 addend=0 alignment=4
 
-resident-program workers=1
-resident worker=0 entry=@temporal_fold_array$worker$0 tile=(0,2) code-bytes=316 resources=0 fixups=5
+resident-programs count=1 instances=1
+resident-program index=0 representative-worker=0 instances=1 entry=@temporal_fold_array$worker$0 tile=(0,2) code-bytes=316 resources=0 fixups=5
 
 low.func.def retain target<amd.xdna.aie2p.core> @temporal_fold_array$worker$0() asm {
   %acquire_delta = mov.short -1
@@ -195,8 +195,8 @@ low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @tou
 
 // ----
 CHECK: worker index=0 * fold-output=1+1 * resources=1 *
-CHECK: resident-program workers=1
-CHECK: resident worker=0 entry=@fold_output_without_import$worker$0 *
+CHECK: resident-programs count=1 instances=1
+CHECK: resident-program index=0 representative-worker=0 instances=1 entry=@fold_output_without_import$worker$0 *
 CHECK: low.func.def retain target<amd.xdna.aie2p.core> @fold_output_without_import$worker$0() asm {
 CHECK: * = mov.local-address *
 CHECK: * = mov.local-address *

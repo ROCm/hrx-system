@@ -54,7 +54,7 @@ CHECK: slot channel=0 index=1 owner=(0,2) offset=0x04000 bytes=16384 sender=exte
 CHECK: slot channel=1 index=0 owner=(0,2) offset=0x08000 bytes=4096 sender=0x78000 receiver=external
 CHECK: slot channel=1 index=1 owner=(0,2) offset=0x0d000 bytes=4096 sender=0x7d000 receiver=external
 CHECK: binding-patch ordinal=1 * span=12288 transfer=12288 repeat=1 completion-route=0
-CHECK: resident worker=0 * resources=0 *
+CHECK: resident-program index=0 representative-worker=0 instances=1 * resources=0 *
 CHECK: * = mov.local-address 507904
 CHECK: * = vadd.f32x64 *
 CHECK-NOT: * = resource*
@@ -124,7 +124,7 @@ CHECK: slot channel=0 index=1 owner=(0,2) offset=0x04000 bytes=16384 sender=0x74
 CHECK: slot channel=1 index=0 owner=(0,2) offset=0x08000 bytes=4096 sender=external receiver=0x78000
 CHECK: slot channel=1 index=1 owner=(0,2) offset=0x09000 bytes=4096 sender=external receiver=0x79000
 CHECK: binding-patch ordinal=1 * span=131072 transfer=131072 repeat=1 completion-route=0
-CHECK: resident worker=0 * resources=0 *
+CHECK: resident-program index=0 representative-worker=0 instances=1 * resources=0 *
 CHECK: * = mov.local-address 507904
 CHECK: * = vadd.f32x64 *
 CHECK-NOT: * = resource*
@@ -198,7 +198,7 @@ CHECK: %allocation = storage {byte_alignment = 64, byte_length = 64} : low.stora
 CHECK: %scratch = storage_address %allocation : low.storage<workgroup> -> reg<aie2p.ep>
 CHECK: %stored_value = lda %scratch, 0
 CHECK: st %stored_value, %scalar, 0
-CHECK: resident worker=0 * resources=0 *
+CHECK: resident-program index=0 representative-worker=0 instances=1 * resources=0 *
 
 // ====
 // RUN: with-checks emit aie2p-array-plan @mixed_repeated_fold
@@ -270,4 +270,4 @@ CHECK: %allocation = storage {byte_alignment = 64, byte_length = 64} : low.stora
 CHECK: %scratch = storage_address %allocation : low.storage<workgroup> -> reg<aie2p.ep>
 CHECK: %stored_value = lda %scratch, 0
 CHECK: st %stored_value, %scalar, 0
-CHECK: resident worker=0 * resources=0 *
+CHECK: resident-program index=0 representative-worker=0 instances=1 * resources=0 *

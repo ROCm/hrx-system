@@ -6,6 +6,10 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/emit/artifact.h"
 
+#include <algorithm>
+#include <cstring>
+#include <vector>
+
 #include "iree/hal/drivers/amd/xdna/image/aie2p/npu2.h"
 #include "iree/hal/drivers/amd/xdna/image/image.h"
 #include "iree/testing/gtest.h"
@@ -25,6 +29,12 @@ namespace {
 
 using ::loom::testing::DiagnosticEmissionCapture;
 using ::loom::testing::ModulePtr;
+
+bool ContainsCString(iree_const_byte_span_t bytes, const char* value) {
+  const size_t value_length = std::strlen(value) + 1u;
+  return std::search(bytes.data, bytes.data + bytes.data_length, value,
+                     value + value_length) != bytes.data + bytes.data_length;
+}
 
 constexpr char kResidentNeighborSource[] = R"(
 aie2p.target<array> @array_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
@@ -57,6 +67,50 @@ low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @pro
 
 low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume_i16() asm {
   %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  return
+}
+)";
+
+constexpr char kSharedResidentSource[] = R"(
+aie2p.target<array> @array_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
+aie2p.target<core> @core_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+low.func.def retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) abi_layout({binding_count = 4}) @shared_resident() asm {
+  %channel_capacity = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %records_per_activation = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %worker_count = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %first_lane = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %second_lane = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %column = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %first_row = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %second_row = constant.u32 3 : reg<aie2p.array.scalar : index>
+  %group = group %worker_count
+  %first = worker %group, %first_lane, @forward
+  %second = worker %group, %second_lane, @forward
+  %first_input = binding 0, "read"
+  %second_input = binding 1, "read"
+  %first_output = binding 2, "write"
+  %second_output = binding 3, "write"
+  %first_input_sender = sender %first_input, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %first_input_receiver = receiver %first, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %first_input_channel = channel %first_input_sender, %first_input_receiver, %channel_capacity, %records_per_activation : reg<aie2p.array.channel : tile<1xi32>>
+  %second_input_sender = sender %second_input, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %second_input_receiver = receiver %second, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %second_input_channel = channel %second_input_sender, %second_input_receiver, %channel_capacity, %records_per_activation : reg<aie2p.array.channel : tile<1xi32>>
+  %first_output_sender = sender %first, 1 : reg<aie2p.array.sender : tile<1xi32>>
+  %first_output_receiver = receiver %first_output, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %first_output_channel = channel %first_output_sender, %first_output_receiver, %channel_capacity, %records_per_activation : reg<aie2p.array.channel : tile<1xi32>>
+  %second_output_sender = sender %second, 1 : reg<aie2p.array.sender : tile<1xi32>>
+  %second_output_receiver = receiver %second_output, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %second_output_channel = channel %second_output_sender, %second_output_receiver, %channel_capacity, %records_per_activation : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %first, %column, %first_row
+  constrain.location %second, %column, %second_row
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @forward() asm {
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   return
 }
 )";
@@ -278,6 +332,45 @@ TEST_F(XdnaArtifactTest, EmitsPrivateRetainedControlFreeResidentProduct) {
   EXPECT_EQ(establishing.next_invocation, 1u);
   EXPECT_EQ(continuing.byte_length, 16u);
   EXPECT_EQ(continuing.next_invocation, 1u);
+}
+
+TEST_F(XdnaArtifactTest, CompilesSharedResidentProgramOnceForMultipleTiles) {
+  ModulePtr module;
+  IREE_ASSERT_OK(ParseModule(IREE_SV(kSharedResidentSource), &module));
+
+  const loom_aie2p_xdna_artifact_request_t request = {
+      .module = module.get(),
+      .function_versions = nullptr,
+      .low_descriptor_registry = &low_registry_.registry,
+      .compile_report = &compile_report_,
+      .diagnostic_emitter = {},
+      .scratch_arena = &scratch_arena_,
+      .allocator = iree_allocator_system(),
+  };
+  bool emitted = false;
+  IREE_ASSERT_OK(
+      loom_aie2p_xdna_compile_artifact(&request, &emitted, &contents_));
+  ASSERT_TRUE(emitted);
+  ASSERT_NE(contents_, nullptr);
+  EXPECT_EQ(compile_report_.entry_rows.count, 1u);
+  std::vector<uint8_t> artifact_storage(
+      (iree_host_size_t)iree_byte_sequence_length(contents_));
+  IREE_ASSERT_OK(iree_byte_sequence_read(
+      contents_, 0,
+      iree_make_byte_span(artifact_storage.data(), artifact_storage.size())));
+  const iree_const_byte_span_t artifact_bytes = iree_make_const_byte_span(
+      artifact_storage.data(), artifact_storage.size());
+  EXPECT_TRUE(ContainsCString(artifact_bytes, "shared_resident$worker$0"));
+  EXPECT_TRUE(ContainsCString(artifact_bytes, "shared_resident$worker$1"));
+
+  iree_hal_amd_xdna_aie2p_target_t image_target;
+  IREE_ASSERT_OK(iree_hal_amd_xdna_aie2p_npu2_target_initialize(
+      IREE_SV("amd.xdna.strix_halo.17f0_11"), 1, &image_target));
+  IREE_ASSERT_OK(iree_hal_amd_xdna_image_allocate(
+      contents_, &image_target, iree_allocator_system(), &image_));
+  uint32_t entry_ordinal = UINT32_MAX;
+  IREE_ASSERT_OK(iree_hal_amd_xdna_image_find_entry(
+      image_, IREE_SV("shared_resident"), &entry_ordinal));
 }
 
 TEST_F(XdnaArtifactTest, RejectsNonArtifactEntryRootWithDiagnostic) {

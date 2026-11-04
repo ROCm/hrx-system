@@ -371,6 +371,7 @@ class SyntheticXdnaProduct {
             .coordinate = {(uint16_t)(j / compute->row_count),
                            (uint16_t)(compute->first_row +
                                       j % compute->row_count)},
+            .program_name = entry_symbol_.name,
             .contribution = &contribution_,
             .linked_tile = &linked_tile_,
         };
@@ -508,6 +509,7 @@ TEST_F(XdnaProductTest, LoadsInitializedTileSectionsBeforeActivation) {
 
   const loom_aie2p_xdna_tile_t tile = {
       .coordinate = kCoordinate,
+      .program_name = entry_symbol.name,
       .contribution = &contribution,
       .linked_tile = &linked_tile,
   };
@@ -771,6 +773,7 @@ TEST_F(XdnaProductTest, RejectsExactSectionHeaderOverflow) {
   contribution.realization.entry_symbol_index = 0;
   const loom_aie2p_xdna_tile_t tile = {
       .coordinate = {0, 2},
+      .program_name = entry_symbol.name,
       .contribution = &contribution,
       .linked_tile = &linked_tile,
   };

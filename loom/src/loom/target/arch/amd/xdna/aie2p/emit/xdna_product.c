@@ -110,8 +110,9 @@ static iree_status_t loom_aie2p_xdna_encode_symbol_tables(
     IREE_ASSERT_LT(code_section_index, UINT16_MAX);
     IREE_ASSERT_LE(entry->size, UINT32_MAX);
     const uint32_t name_offset = (uint32_t)string_offset;
-    memcpy(strings.data + string_offset, entry->name.data, entry->name.size);
-    string_offset += entry->name.size + 1u;
+    memcpy(strings.data + string_offset, tile->program_name.data,
+           tile->program_name.size);
+    string_offset += tile->program_name.size + 1u;
     uint8_t* record =
         symbols.data + (i + 1u) * LOOM_AIE2P_XDNA_ELF32_SYMBOL_SIZE;
     loom_aie2p_xdna_store_u32(record + 0, name_offset);
@@ -763,12 +764,7 @@ iree_status_t loom_aie2p_xdna_product_finalize(
       IREE_ASSERT_LE(inline_byte_length, UINT32_MAX);
       tile_layout->loadable_section_count = (uint32_t)loadable_section_count;
       tile_layout->inline_byte_length = (uint32_t)inline_byte_length;
-      const loom_aie2p_leaf_contribution_t* contribution = tile->contribution;
-      const loom_native_object_symbol_t* entry_symbol =
-          &contribution->object
-               .symbols[contribution->realization.entry_symbol_index];
-      IREE_ASSERT_LE(entry_symbol->size, UINT32_MAX);
-      symbol_string_byte_length += entry_symbol->name.size + 1u;
+      symbol_string_byte_length += tile->program_name.size + 1u;
       if (symbol_string_byte_length > UINT32_MAX) {
         loom_aie2p_xdna_set_issue(
             LOOM_AIE2P_XDNA_PRODUCT_ISSUE_SYMBOL_STRING_BYTE_LENGTH,

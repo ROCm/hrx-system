@@ -943,8 +943,11 @@ iree_status_t loom_aie2p_configuration_plan_materialize(
     if (plan->error_count) {
       return iree_ok_status();
     }
+    const loom_native_object_symbol_t* entry_symbol =
+        &worker->object.symbols[worker->realization.entry_symbol_index];
     tiles[i] = (loom_aie2p_xdna_tile_t){
         .coordinate = load->coordinate,
+        .program_name = entry_symbol->name,
         .contribution = worker,
     };
     const iree_host_size_t memory_index =
