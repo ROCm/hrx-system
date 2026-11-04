@@ -121,6 +121,12 @@ alias(
 )
 
 alias(
+    name = "amdf_dxg_headers",
+    actual = "@libdxg_headers//:headers",
+    visibility = [":libamdf_users"],
+)
+
+alias(
     name = "linux_udmabuf_uapi",
     actual = "//build_tools/third_party/linux_uapi:linux_udmabuf_uapi",
     tags = ["manual"],
