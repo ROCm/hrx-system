@@ -6,6 +6,7 @@
     "control": "control.loom",
     "sources": [
       "advance.loom",
+      "sequence.loom",
       "storage.loom"
     ],
     "weights": "weights.safetensors",

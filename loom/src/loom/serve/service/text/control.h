@@ -57,8 +57,8 @@ typedef struct loom_serve_text_control_t {
   iree_vm_function_t bind_request;
   // Source-owned ranges for independent known-input activation capture.
   iree_vm_function_t capture_epoch;
-  // Source-owned per-request options for a known-input model.
-  iree_vm_function_t request_options;
+  // Source-owned input validation and per-request known-input options.
+  iree_vm_function_t prepare_request;
   // Owned known-input defaults; generative defaults belong to chat_policy.
   iree_vm_buffer_t* defaults;
   // Chat policy borrowing this program and owning its source-returned defaults.
@@ -90,11 +90,12 @@ void loom_serve_text_control_unlink(loom_serve_text_control_t* control);
 // this call. Both cleanup operations accept partial initialization.
 void loom_serve_text_control_deinitialize(loom_serve_text_control_t* control);
 
-// Resolves source-owned known-input request policy on an exclusive VM loan.
-// Source may retain the cloned body; a returned options buffer is owned.
-iree_status_t loom_serve_text_control_request_options(
+// Validates known tokens and resolves request policy on an exclusive VM loan.
+// Source may retain the cloned body and immutable tokens; returned options are
+// owned. This call has no retained-row mutation authority.
+iree_status_t loom_serve_text_control_prepare_request(
     loom_serve_text_control_t* control, const loom_serve_text_source_t* source,
-    iree_string_view_t body, uint64_t request_id,
+    iree_string_view_t body, uint64_t request_id, iree_vm_buffer_t* tokens,
     iree_allocator_t host_allocator, iree_vm_buffer_t** out_options);
 
 // Evaluates the checked model source against a validated native cohort, then

@@ -1,0 +1,9 @@
+// Raw sequence definitions use an unprefixed role. Versioned cards export
+// sequence_prepare_request_v1 and can compose with other service contracts.
+
+func.decl @prepare_sequence_request(%defaults: buffer, %request: buffer, %nonce: i64, %tokens: buffer) -> (buffer)
+
+func.def public @prepare_request(%defaults: buffer, %request: buffer, %nonce: i64, %tokens: buffer) -> (buffer) {
+  %options = func.call @prepare_sequence_request(%defaults, %request, %nonce, %tokens) : (buffer, buffer, i64, buffer) -> (buffer)
+  func.return %options : buffer
+}

@@ -30,8 +30,10 @@ typedef struct loom_serve_text_input_prefix_t {
 // Compact host input owned independently of device rows or reservations.
 // A parked input retains host history identity, not native cache ownership.
 typedef struct loom_serve_text_input_t {
-  // Owned token IDs, null until successfully prepared, including empty input.
-  int32_t* tokens;
+  // Owned immutable token storage, null until successfully prepared.
+  iree_vm_buffer_t* token_storage;
+  // Borrowed aligned IDs in token_storage, valid until its final release.
+  const int32_t* tokens;
   // Number of token IDs in tokens.
   iree_host_size_t count;
   // Owned checked media spans in source token order.

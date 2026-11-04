@@ -211,17 +211,18 @@ iree_status_t loom_serve_text_control_initialize(
   iree_vm_function_t defaults = {0};
   const iree_vm_signature_type_t capture_arguments[] = {buffer, i32, i32,
                                                         buffer};
-  const iree_vm_signature_type_t options_arguments[] = {buffer, buffer, i64};
+  const iree_vm_signature_type_t options_arguments[] = {buffer, buffer, i64,
+                                                        buffer};
   const loom_serve_program_binding_t encoding_bindings[] = {
       {IREE_SVL("capture_epoch"),
        {capture_arguments, IREE_ARRAYSIZE(capture_arguments)},
        {&buffer, 1},
        &control->capture_epoch},
       {IREE_SVL("request_defaults"), {&buffer, 1}, {&buffer, 1}, &defaults},
-      {IREE_SVL("request_options"),
+      {IREE_SVL("prepare_request"),
        {options_arguments, IREE_ARRAYSIZE(options_arguments)},
        {&buffer, 1},
-       &control->request_options},
+       &control->prepare_request},
   };
   IREE_RETURN_IF_ERROR(loom_serve_program_bind_service(
       control->program, IREE_ARRAYSIZE(encoding_bindings), encoding_bindings));
@@ -261,9 +262,9 @@ void loom_serve_text_control_deinitialize(loom_serve_text_control_t* control) {
   memset(control, 0, sizeof(*control));
 }
 
-iree_status_t loom_serve_text_control_request_options(
+iree_status_t loom_serve_text_control_prepare_request(
     loom_serve_text_control_t* control, const loom_serve_text_source_t* source,
-    iree_string_view_t body, uint64_t request_id,
+    iree_string_view_t body, uint64_t request_id, iree_vm_buffer_t* tokens,
     iree_allocator_t host_allocator, iree_vm_buffer_t** out_options) {
   *out_options = NULL;
   iree_vm_buffer_t* input = NULL;
@@ -275,10 +276,11 @@ iree_status_t loom_serve_text_control_request_options(
       iree_vm_buffer_variant_from_ptr_borrowed(&source->vm_types,
                                                control->defaults),
       iree_vm_buffer_variant_from_ptr_move(&source->vm_types, &input),
-      iree_vm_variant_from_i64((int64_t)request_id)};
+      iree_vm_variant_from_i64((int64_t)request_id),
+      iree_vm_buffer_variant_from_ptr_borrowed(&source->vm_types, tokens)};
   iree_vm_variant_t result = {0};
   iree_status_t status = iree_vm_invoke(
-      loom_serve_program_invocation(control->program), control->request_options,
+      loom_serve_program_invocation(control->program), control->prepare_request,
       iree_vm_variant_span_from_array(arguments),
       iree_vm_variant_span_from_ptr(&result, 1));
   if (iree_status_is_ok(status)) {

@@ -894,12 +894,13 @@ loom_serve_text_mode_t loom_serve_text_model_mode(
   return model->source.mode;
 }
 
-iree_status_t loom_serve_text_model_request_options(
+iree_status_t loom_serve_text_model_prepare_request(
     loom_serve_text_model_t* model, iree_string_view_t body,
-    uint64_t request_id, iree_vm_buffer_t** out_options) {
-  return loom_serve_text_control_request_options(
-      &model->control, &model->source, body, request_id, model->host_allocator,
-      out_options);
+    uint64_t request_id, iree_vm_buffer_t* tokens,
+    iree_vm_buffer_t** out_options) {
+  return loom_serve_text_control_prepare_request(
+      &model->control, &model->source, body, request_id, tokens,
+      model->host_allocator, out_options);
 }
 
 const loom_serve_text_chat_policy_t* loom_serve_text_model_chat_policy(

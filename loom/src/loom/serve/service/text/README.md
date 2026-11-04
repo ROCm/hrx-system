@@ -273,6 +273,16 @@ have owned backing, so source may return or retain them without borrowing HTTP
 storage. The receipt serial supplies a distinct nonce when source needs an
 implicit seed. Native code does not decode the packet or implement sampling.
 
+Known-input sequences use `prepare_request(defaults, request, nonce, tokens)`
+instead of the chat-only `request_options` role. Its immutable parsed token
+buffer covers the complete append, independent of scheduled epoch sizes.
+Source validates vocabulary and other input constraints before reservation,
+retained-state mutation, or response streaming. Rejection uses the existing
+request-local diagnostic path and preserves other requests and retained
+frontiers. The token buffer replaces the compact prepared-input allocation;
+source can retain it without borrowing scratch storage. Epoch execution errors
+remain terminal because shared encoding and submission are not transactions.
+
 After row admission, `bind_request(control_state, row, options)` binds that
 policy to the source-owned row table. `encode_epoch` receives the epoch plans,
 known input IDs, optional projected-row records, and packet capacities, then

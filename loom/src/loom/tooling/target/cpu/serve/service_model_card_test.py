@@ -175,6 +175,13 @@ def check_sequence(client, model):
         body = {"model": model, "position": position, "token_ids": tokens}
         if handle:
             body["session"] = handle
+        rejected = client.request(
+            "/v1/sequences", {**body, "token_ids": [0, 1, 2, 0, 4]}, status=400
+        )
+        assert rejected["error"]["code"] == "INVALID_ARGUMENT", rejected
+        assert "outside the fixture vocabulary" in rejected["error"]["message"], (
+            rejected
+        )
         connection = http.client.HTTPConnection(client.address)
         try:
             connection.request(

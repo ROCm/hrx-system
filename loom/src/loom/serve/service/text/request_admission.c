@@ -274,7 +274,7 @@ static bool loom_serve_text_begin_preparation_at(
       loom_serve_text_pending_queue_prefix(&service->pending, session);
   const bool current =
       session->mode == LOOM_SERVE_TEXT_MODE_ENCODE
-          ? pending->input.tokens &&
+          ? pending->input.token_storage &&
                 ((!pending->sequence.append && !pending->checkpoint) ||
                  (prefix.completion &&
                   prefix.position == pending->sequence.position))
@@ -768,7 +768,7 @@ bool loom_serve_text_media_lookahead(loom_serve_text_service_t* service) {
       }
       continue;
     }
-    if ((!request->input.tokens || request->media) &&
+    if ((!request->input.token_storage || request->media) &&
         loom_serve_text_begin_preparation_at(service, i)) {
       return true;
     }
