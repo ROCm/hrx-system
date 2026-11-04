@@ -341,10 +341,10 @@ static iree_status_t loom_aie2p_array_resident_clone_helpers(
          ++worker_index) {
       const loom_aie2p_array_leaf_t* worker_leaf =
           plan->workers[worker_index].leaf;
-      const loom_symbol_ref_array_t direct_callees =
+      const loom_low_direct_callee_requirement_list_t direct_callees =
           worker_leaf->requirements.direct_callees;
       for (iree_host_size_t i = 0; i < direct_callees.count; ++i) {
-        const loom_symbol_ref_t helper_ref = direct_callees.values[i];
+        const loom_symbol_ref_t helper_ref = direct_callees.values[i].symbol;
         if (helper_ref.module_id != 0 || helper_ref.symbol_id >= symbol_count) {
           return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                   "AIE2P resident native helper has an "
@@ -2111,7 +2111,7 @@ static iree_status_t loom_aie2p_array_resident_materialize_worker(
         (void**)&direct_helpers));
     for (iree_host_size_t i = 0; i < direct_helper_count; ++i) {
       const loom_symbol_ref_t source_ref =
-          leaf->requirements.direct_callees.values[i];
+          leaf->requirements.direct_callees.values[i].symbol;
       IREE_ASSERT_EQ(source_ref.module_id, 0u);
       IREE_ASSERT_LT(source_ref.symbol_id,
                      builder->source_module->symbols.count);

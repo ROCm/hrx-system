@@ -403,6 +403,8 @@ TEST_F(LowFunctionRequirementsTest, RetainsUniqueDirectCalleesInCallOrder) {
   BuildFunction(first_ref);
   BuildFunction(second_ref);
   loom_builder_t builder = BodyBuilder(entry);
+  loom_op_t* first_second_call = nullptr;
+  loom_op_t* first_first_call = nullptr;
   for (loom_symbol_ref_t callee : {second_ref, first_ref, second_ref}) {
     loom_op_t* call = nullptr;
     IREE_ASSERT_OK(loom_low_func_call_build(
@@ -411,15 +413,24 @@ TEST_F(LowFunctionRequirementsTest, RetainsUniqueDirectCalleesInCallOrder) {
         /*operands_count=*/0, /*result_types=*/nullptr, /*result_count=*/0,
         /*tied_results=*/nullptr, /*tied_result_count=*/0,
         LOOM_LOCATION_UNKNOWN, &call));
+    if (callee.symbol_id == second_ref.symbol_id && !first_second_call) {
+      first_second_call = call;
+    } else if (callee.symbol_id == first_ref.symbol_id) {
+      first_first_call = call;
+    }
   }
   BuildReturn(&builder);
 
   const auto requirements = Analyze(entry);
   ASSERT_EQ(requirements.direct_callees.count, 2u);
-  EXPECT_EQ(requirements.direct_callees.values[0].symbol_id,
+  EXPECT_EQ(requirements.direct_callees.values[0].symbol.symbol_id,
             second_ref.symbol_id);
-  EXPECT_EQ(requirements.direct_callees.values[1].symbol_id,
+  EXPECT_EQ(requirements.direct_callees.values[0].first_call_op,
+            first_second_call);
+  EXPECT_EQ(requirements.direct_callees.values[1].symbol.symbol_id,
             first_ref.symbol_id);
+  EXPECT_EQ(requirements.direct_callees.values[1].first_call_op,
+            first_first_call);
 }
 
 TEST_F(LowFunctionRequirementsTest, RetainsManyUniqueDirectCalleesInCallOrder) {
@@ -460,9 +471,9 @@ TEST_F(LowFunctionRequirementsTest, RetainsManyUniqueDirectCalleesInCallOrder) {
   };
   ASSERT_EQ(requirements.direct_callees.count, IREE_ARRAYSIZE(expected_order));
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(expected_order); ++i) {
-    EXPECT_EQ(requirements.direct_callees.values[i].module_id,
+    EXPECT_EQ(requirements.direct_callees.values[i].symbol.module_id,
               expected_order[i].module_id);
-    EXPECT_EQ(requirements.direct_callees.values[i].symbol_id,
+    EXPECT_EQ(requirements.direct_callees.values[i].symbol.symbol_id,
               expected_order[i].symbol_id);
   }
 }

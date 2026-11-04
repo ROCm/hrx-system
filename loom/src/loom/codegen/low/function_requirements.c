@@ -22,7 +22,7 @@ typedef struct loom_low_read_only_data_builder_t {
 } loom_low_read_only_data_builder_t;
 
 typedef struct loom_low_direct_callee_builder_t {
-  loom_symbol_ref_t* values;
+  loom_low_direct_callee_requirement_t* values;
   iree_host_size_t count;
   iree_host_size_t capacity;
   uint16_t* ordinal_slots;
@@ -209,7 +209,7 @@ static uint32_t loom_low_direct_callee_lookup(
     const loom_low_direct_callee_builder_t* builder, loom_symbol_ref_t callee) {
   if (builder->slot_capacity == 0) {
     for (uint32_t ordinal = 0; ordinal < (uint32_t)builder->count; ++ordinal) {
-      if (loom_low_symbol_ref_equal(builder->values[ordinal], callee)) {
+      if (loom_low_symbol_ref_equal(builder->values[ordinal].symbol, callee)) {
         return ordinal;
       }
     }
@@ -221,7 +221,7 @@ static uint32_t loom_low_direct_callee_lookup(
   while (builder->ordinal_slots[slot_index] != 0) {
     const uint32_t ordinal = builder->ordinal_slots[slot_index] - 1;
     IREE_ASSERT_LT(ordinal, builder->count);
-    if (loom_low_symbol_ref_equal(builder->values[ordinal], callee)) {
+    if (loom_low_symbol_ref_equal(builder->values[ordinal].symbol, callee)) {
       return ordinal;
     }
     slot_index = (slot_index + 1) & slot_mask;
@@ -233,7 +233,7 @@ static void loom_low_direct_callee_insert_slot(
     loom_low_direct_callee_builder_t* builder, uint16_t ordinal) {
   const iree_host_size_t slot_mask = builder->slot_capacity - 1;
   iree_host_size_t slot_index = loom_low_symbol_ref_hash(
-      builder->values[ordinal], builder->slot_capacity);
+      builder->values[ordinal].symbol, builder->slot_capacity);
   while (builder->ordinal_slots[slot_index] != 0) {
     slot_index = (slot_index + 1) & slot_mask;
   }
@@ -241,8 +241,8 @@ static void loom_low_direct_callee_insert_slot(
 }
 
 static iree_status_t loom_low_function_requirements_append_direct_callee(
-    loom_symbol_ref_t callee, iree_arena_allocator_t* arena,
-    iree_arena_allocator_t* scratch_arena,
+    loom_symbol_ref_t callee, const loom_op_t* first_call_op,
+    iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
     loom_low_direct_callee_builder_t* builder) {
   if (loom_low_direct_callee_lookup(builder, callee) != UINT32_MAX) {
     return iree_ok_status();
@@ -286,7 +286,10 @@ static iree_status_t loom_low_function_requirements_append_direct_callee(
     }
   }
   const uint16_t ordinal = (uint16_t)candidate.count++;
-  candidate.values[ordinal] = callee;
+  candidate.values[ordinal] = (loom_low_direct_callee_requirement_t){
+      .symbol = callee,
+      .first_call_op = first_call_op,
+  };
   if (candidate.slot_capacity != 0) {
     loom_low_direct_callee_insert_slot(&candidate, ordinal);
   }
@@ -353,7 +356,7 @@ static iree_status_t loom_low_function_requirements_build_impl(
         case LOOM_OP_LOW_FUNC_CALL: {
           IREE_RETURN_IF_ERROR(
               loom_low_function_requirements_append_direct_callee(
-                  loom_low_func_call_callee(op), arena, scratch_arena,
+                  loom_low_func_call_callee(op), op, arena, scratch_arena,
                   &direct_callee_builder));
           break;
         }
@@ -368,10 +371,11 @@ static iree_status_t loom_low_function_requirements_build_impl(
   }
   out_requirements->resources = resources;
   out_requirements->read_only_data = read_only_data_builder.records;
-  out_requirements->direct_callees = (loom_symbol_ref_array_t){
-      .values = direct_callee_builder.values,
-      .count = direct_callee_builder.count,
-  };
+  out_requirements->direct_callees =
+      (loom_low_direct_callee_requirement_list_t){
+          .values = direct_callee_builder.values,
+          .count = direct_callee_builder.count,
+      };
   out_requirements->read_only_data_ordinal_slots =
       read_only_data_builder.ordinal_slots;
   out_requirements->read_only_data_ordinal_slot_count =

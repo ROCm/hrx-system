@@ -242,7 +242,7 @@ static iree_status_t loom_aie2p_configuration_compile_worker(
     }
     for (iree_host_size_t i = 0; i < requirements.direct_callees.count; ++i) {
       const loom_symbol_ref_t helper_ref =
-          requirements.direct_callees.values[i];
+          requirements.direct_callees.values[i].symbol;
       if (helper_ref.module_id != 0 ||
           helper_ref.symbol_id >= request->module->symbols.count) {
         return iree_make_status(
