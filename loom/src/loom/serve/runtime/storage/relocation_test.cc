@@ -7,6 +7,7 @@
 #include "loom/serve/runtime/storage/relocation.h"
 
 #include <array>
+#include <memory>
 #include <vector>
 
 #include "iree/testing/gtest.h"
@@ -46,7 +47,7 @@ class RelocationTest : public ::testing::Test {
         group, {IREE_SV("pool"), 1}, &pool_options, &storage_owner));
     device = loom_serve_device_group_at(group, 0);
     pool = loom_serve_pool_memory(storage_owner);
-    IREE_ASSERT_OK(native.Observe(storage_owner));
+    IREE_ASSERT_OK(native.Observe(device, storage_owner));
     IREE_ASSERT_OK(
         loom_serve_device_create_execution(device, storage_owner, &execution));
   }
@@ -88,7 +89,8 @@ class RelocationTest : public ::testing::Test {
 TEST_F(RelocationTest, RepeatedPlanesCrossBatchAndAddressBoundaries) {
   // The first destination straddles a physical slab boundary, and later
   // planes cross 4 GiB. More than 64 copies exercise queue-batch retirement.
-  const loom_serve_block_region_t region = {2 * 1024 * 1024 - 256, 3,
+  constexpr uint32_t kPlaneCount = 3;
+  const loom_serve_block_region_t region = {2 * 1024 * 1024 - 256, kPlaneCount,
                                             (uint64_t{1} << 32) + 512, 4096};
   constexpr uint32_t kLiveBlocks = 35;
   constexpr uint32_t kBlockCount = kLiveBlocks * 2;
@@ -101,29 +103,42 @@ TEST_F(RelocationTest, RepeatedPlanesCrossBatchAndAddressBoundaries) {
   iree_hal_buffer_retain(view);
   IREE_ASSERT_OK(
       loom_serve_retirement_track(&retirement, &view, iree_allocator_system()));
+  std::array<loom_serve_memory_range_t, kPlaneCount> commitments;
+  std::array<iree_hal_transfer_operation_t, kPlaneCount * kLiveBlocks> fills;
+  std::array<uint32_t, kPlaneCount * kLiveBlocks> fill_values;
+  size_t initialization_count = 0;
   uint64_t completion = 0;
   for (uint32_t plane = 0; plane < region.count; ++plane) {
+    commitments[plane] = {
+        buffer,
+        region.origin + plane * region.stride +
+            kLiveBlocks * region.block_bytes,
+        kLiveBlocks * region.block_bytes,
+    };
     for (uint32_t block = kLiveBlocks; block < kBlockCount; ++block) {
       const uint64_t offset =
           region.origin + plane * region.stride + block * region.block_bytes;
-      IREE_ASSERT_OK(
-          loom_serve_virtual_buffer_commit(buffer, offset, region.block_bytes));
-      const uint32_t value = plane * 1000 + block;
-      const iree_hal_transfer_operation_t fill = {
+      const size_t initialization_index = initialization_count++;
+      fill_values[initialization_index] = plane * 1000 + block;
+      fills[initialization_index] = {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
           .fill =
               {
                   .target_buffer = view,
                   .target_offset = offset,
                   .length = region.block_bytes,
-                  .pattern = &value,
-                  .pattern_length = sizeof(value),
+                  .pattern = &fill_values[initialization_index],
+                  .pattern_length = sizeof(fill_values[initialization_index]),
               },
       };
-      IREE_ASSERT_OK(
-          loom_serve_execution_transfer(execution, 1, &fill, &completion));
     }
   }
+  bool admitted = false;
+  IREE_ASSERT_OK(loom_serve_memory_pool_try_commit(
+      pool, commitments.size(), commitments.data(), &admitted));
+  ASSERT_TRUE(admitted);
+  IREE_ASSERT_OK(loom_serve_execution_transfer(execution, initialization_count,
+                                               fills.data(), &completion));
   IREE_ASSERT_OK(loom_serve_execution_drain(execution));
   std::array<uint32_t, kBlockCount> destinations;
   for (uint32_t block = 0; block < kBlockCount; ++block) {
@@ -131,11 +146,31 @@ TEST_F(RelocationTest, RepeatedPlanesCrossBatchAndAddressBoundaries) {
         block < kLiveBlocks ? UINT32_MAX : block - kLiveBlocks;
   }
   uint64_t copied_bytes = 0;
-  std::array<loom_serve_memory_range_t, 3> ranges;
+  std::array<loom_serve_memory_range_t, kPlaneCount> ranges;
   for (uint32_t plane = 0; plane < region.count; ++plane) {
     ranges[plane] = {buffer, region.origin + plane * region.stride,
                      kLiveBlocks * region.block_bytes};
   }
+  // The initial slices share a larger physical parent. Occupy its remaining
+  // capacity so the destination commitment below must cross the native
+  // allocation boundary exercised by the hold.
+  const auto before_filler = loom_serve_memory_pool_statistics(pool);
+  ASSERT_GT(before_filler.cached_bytes, 0u);
+  loom_serve_memory_statistics_t filler_statistics = {0};
+  loom_serve_virtual_buffer_t* filler = nullptr;
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+      pool, loom_serve_pool_state_geometry(storage_owner),
+      before_filler.cached_bytes, 256, &filler_statistics, &filler));
+  const auto free_filler = [](loom_serve_virtual_buffer_t* buffer) {
+    IREE_EXPECT_OK(loom_serve_virtual_buffer_free(buffer));
+  };
+  std::unique_ptr<loom_serve_virtual_buffer_t, decltype(free_filler)>
+      filler_owner(filler, free_filler);
+  IREE_ASSERT_OK(
+      loom_serve_virtual_buffer_commit(filler, 0, before_filler.cached_bytes));
+  const auto after_filler = loom_serve_memory_pool_statistics(pool);
+  EXPECT_EQ(after_filler.committed_bytes, before_filler.committed_bytes);
+  EXPECT_EQ(after_filler.cached_bytes, 0u);
   iree_hal_semaphore_t* ready = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
       loom_serve_device_handle(device), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
@@ -166,9 +201,9 @@ TEST_F(RelocationTest, RepeatedPlanesCrossBatchAndAddressBoundaries) {
   EXPECT_EQ(loom_serve_virtual_buffer_handle(buffer), handle);
   loom_serve_virtual_buffer_begin_trim(buffer);
   for (uint32_t plane = 0; plane < region.count; ++plane) {
-    loom_serve_virtual_buffer_keep(buffer,
-                                   region.origin + plane * region.stride,
-                                   kLiveBlocks * region.block_bytes);
+    IREE_ASSERT_OK(loom_serve_virtual_buffer_keep(
+        buffer, region.origin + plane * region.stride,
+        kLiveBlocks * region.block_bytes, nullptr));
   }
   IREE_ASSERT_OK(loom_serve_virtual_buffer_trim(buffer));
   std::vector<uint32_t> observed(kLiveBlocks * region.block_bytes /

@@ -101,6 +101,25 @@ TEST_F(TokenizationTest, DefaultsSpecialFlagsAndIndependentStates) {
   EXPECT_EQ(Output(), R"({"content":""})");
 }
 
+TEST_F(TokenizationTest, MillionTokenRoundTripPreservesEveryPosition) {
+  const size_t count = 1024 * 1024 + 3;
+  std::string text;
+  std::string ids;
+  text.reserve(count);
+  ids.reserve(2 * count);
+  for (size_t i = 0; i < count; ++i) {
+    text += i % 3 ? 'a' : 'b';
+    if (i) {
+      ids += ',';
+    }
+    ids += i % 3 ? '0' : '1';
+  }
+  IREE_ASSERT_OK(Encode("{\"content\":\"" + text + "\",\"add_special\":true}"));
+  EXPECT_EQ(Output(), "{\"tokens\":[4," + ids + ",5]}");
+  IREE_ASSERT_OK(Decode("{\"tokens\":[" + ids + "]}"));
+  EXPECT_EQ(Output(), "{\"content\":\"" + text + "\"}");
+}
+
 TEST_F(TokenizationTest, UnicodeEscapesAndSparseVocabulary) {
   IREE_ASSERT_OK(
       Encode(R"({"model":"m","content":"\u00e9\n\"\\\ud83e\udd8a"})"));
@@ -201,7 +220,7 @@ TEST_F(TokenizationTest, NormalizedTailsMatchTheCompleteTokenizer) {
   }
 }
 
-TEST_F(TokenizationTest, ComposedExpansionRespectsExactPublicLimit) {
+TEST_F(TokenizationTest, ComposedExpansionDrainsAllFinalTokens) {
   const std::string configuration =
       R"({"normalizer":{"type":"Sequence","normalizers":[
         {"type":"Replace","pattern":{"String":"a"},"content":")" +
@@ -215,56 +234,171 @@ TEST_F(TokenizationTest, ComposedExpansionRespectsExactPublicLimit) {
       host_allocator_, &expanding));
   iree_tokenizer_free(tokenizer_);
   tokenizer_ = expanding;
-  const size_t input_limit = LOOM_SERVE_HTTP_TOKENIZATION_MAX_TOKENS / 1024;
-  for (size_t input_length : {size_t{8}, input_limit, input_limit + 1}) {
+  for (size_t input_length : {8, 256, 1025}) {
     SCOPED_TRACE(input_length);
     const std::string request =
         "{\"content\":\"" + std::string(input_length, 'a') + "\"}";
-    if (input_length > input_limit) {
-      IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE, Encode(request));
-      EXPECT_TRUE(Output().empty());
-    } else {
-      IREE_ASSERT_OK(Encode(request));
-      std::string expected = "{\"tokens\":[";
-      for (size_t i = 0; i < input_length * 1024; ++i) {
-        expected += i ? ",0" : "0";
-      }
-      expected += "]}";
-      EXPECT_EQ(Output(), expected);
+    IREE_ASSERT_OK(Encode(request));
+    std::string expected = "{\"tokens\":[";
+    for (size_t i = 0; i < input_length * 1024; ++i) {
+      expected += i ? ",0" : "0";
     }
+    expected += "]}";
+    EXPECT_EQ(Output(), expected);
   }
 }
 
-TEST_F(TokenizationTest, ExactTokenBoundIncludesFinalSpecialTokens) {
-  const size_t limit = LOOM_SERVE_HTTP_TOKENIZATION_MAX_TOKENS;
-  IREE_ASSERT_OK(Encode("{\"content\":\"" + std::string(limit, 'a') + "\"}"));
-  EXPECT_EQ(Output().size(), 2 * limit + 12);
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_OUT_OF_RANGE,
-      Encode("{\"content\":\"" + std::string(limit + 1, 'a') + "\"}"));
-  IREE_ASSERT_OK(Encode("{\"content\":\"" + std::string(limit - 2, 'a') +
-                        "\",\"add_special\":true}"));
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        Encode("{\"content\":\"" + std::string(limit - 1, 'a') +
-                               "\",\"add_special\":true}"));
-  IREE_ASSERT_OK(Decode(TokenRequest(limit, "0")));
-  EXPECT_EQ(Output(), "{\"content\":\"" + std::string(limit, 'a') + "\"}");
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        Decode(TokenRequest(limit + 1, "0")));
+TEST_F(TokenizationTest, FinalSpecialTokensCrossOutputChunks) {
+  for (size_t count : {1022, 1023, 1024, 1025}) {
+    SCOPED_TRACE(count);
+    IREE_ASSERT_OK(Encode("{\"content\":\"" + std::string(count, 'a') +
+                          "\",\"add_special\":true}"));
+    std::string expected = "{\"tokens\":[4";
+    for (size_t i = 0; i < count; ++i) {
+      expected += ",0";
+    }
+    EXPECT_EQ(Output(), expected + ",5]}");
+  }
 }
 
-TEST_F(TokenizationTest, DecodedTextBoundRejectsBeforeReturningAPrefix) {
-  const size_t limit = LOOM_SERVE_HTTP_TOKENIZATION_MAX_TEXT_BYTES;
+TEST_F(TokenizationTest, DecodedTextGrowsPastOneMiB) {
+  const size_t count = 65537;
+  std::string expected = "{\"content\":\"";
+  for (size_t i = 0; i < count; ++i) {
+    expected += "abcdefghijklmnop";
+  }
+  IREE_ASSERT_OK(Decode(TokenRequest(count, "12")));
+  EXPECT_EQ(Output(), expected + "\"}");
+}
+
+TEST_F(TokenizationTest, IndivisibleTokenGrowsReusableDecodeScratch) {
+  const std::string text(8193, 'a');
+  const std::string configuration =
+      "{\"model\":{\"type\":\"BPE\",\"vocab\":{\"" + text +
+      "\":0,\"b\":1},\"merges\":[]},\"decoder\":{\"type\":\"ByteFallback\"}}";
+  iree_tokenizer_t* tokenizer = nullptr;
+  IREE_ASSERT_OK(iree_tokenizer_from_huggingface_json(
+      iree_make_string_view(configuration.data(), configuration.size()),
+      host_allocator_, &tokenizer));
+  iree_tokenizer_free(tokenizer_);
+  tokenizer_ = tokenizer;
+  IREE_ASSERT_OK(Decode(R"({"tokens":[0,1,0]})"));
+  EXPECT_EQ(Output(), "{\"content\":\"" + text + "b" + text + "\"}");
+}
+
+TEST_F(TokenizationTest, QueuedStatefulOutputDrainsThroughFinalization) {
+  const std::string a(64, 'a');
+  const std::string b(64, 'b');
+  const std::string configuration =
+      "{\"model\":{\"type\":\"BPE\",\"vocab\":{\"" + a + "\":0,\"" + b +
+      R"(":1},"merges":[]},"decoder":{"type":"CTC","pad_token":"<pad>",
+          "word_delimiter_token":"|","cleanup":false}})";
+  iree_tokenizer_t* tokenizer = nullptr;
+  IREE_ASSERT_OK(iree_tokenizer_from_huggingface_json(
+      iree_make_string_view(configuration.data(), configuration.size()),
+      host_allocator_, &tokenizer));
+  iree_tokenizer_free(tokenizer_);
+  tokenizer_ = tokenizer;
+  // The final lookup batch is larger than one output chunk. Accepted IDs
+  // still own queued strings when the utility begins decoder finalization.
+  std::string ids;
+  std::string expected;
+  for (size_t i = 0; i < 128; ++i) {
+    if (i) {
+      ids += ',';
+    }
+    ids += i % 2 ? '1' : '0';
+    expected += i % 2 ? b : a;
+  }
+  IREE_ASSERT_OK(Decode("{\"tokens\":[" + ids + "]}"));
+  EXPECT_EQ(Output(), "{\"content\":\"" + expected + "\"}");
+}
+
+TEST_F(TokenizationTest, OutputFailureIsNotSuccessfulTruncation) {
+  char storage[32];
+  iree_string_builder_t bounded;
+  iree_string_builder_initialize_with_storage(storage, sizeof(storage),
+                                              &bounded);
   IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_OUT_OF_RANGE,
-      Encode("{\"content\":\"" + std::string(limit + 1, 'a') + "\"}"));
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_OUT_OF_RANGE,
-      Encode("{\"content\":\"" + std::string(limit + 2, 'a') + "\"}"));
-  IREE_ASSERT_OK(Decode(TokenRequest(limit / 16, "12")));
-  EXPECT_EQ(Output().size(), limit + 14);
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        Decode(TokenRequest(limit / 16 + 1, "12")));
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_serve_http_tokenize(tokenizer_,
+                               IREE_SV(R"({"content":"aaaaaaaaaaaaaaaaaaaa"})"),
+                               &bounded, host_allocator_));
+  iree_string_builder_reset(&bounded);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_serve_http_detokenize(
+                            tokenizer_, IREE_SV(R"({"tokens":[12,12,12]})"),
+                            &bounded, host_allocator_));
+  iree_string_builder_deinitialize(&bounded);
+  IREE_ASSERT_OK(Encode(R"({"content":"ab"})"));
+  EXPECT_EQ(Output(), R"({"tokens":[0,1]})");
+}
+
+TEST_F(TokenizationTest, AllocationFailuresRetireRequestScratch) {
+  struct AllocationState {
+    // Allocation request denied by this invocation.
+    size_t fail_at = 0;
+    // Number of allocation requests observed.
+    size_t attempts = 0;
+    // Allocations still owned by the utility invocation.
+    size_t live = 0;
+    // Total bytes requested from this invocation's scratch allocator.
+    size_t requested_bytes = 0;
+  };
+  auto allocate = [](void* self, iree_allocator_command_t command,
+                     const void* params, void** pointer) -> iree_status_t {
+    auto& state = *static_cast<AllocationState*>(self);
+    const bool had_storage = *pointer != nullptr;
+    if (command != IREE_ALLOCATOR_COMMAND_FREE) {
+      state.requested_bytes +=
+          static_cast<const iree_allocator_alloc_params_t*>(params)
+              ->byte_length;
+      if (state.attempts++ == state.fail_at) {
+        return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+      }
+    }
+    auto allocator = iree_allocator_system();
+    iree_status_t status =
+        allocator.ctl(allocator.self, command, params, pointer);
+    if (iree_status_is_ok(status)) {
+      if (command == IREE_ALLOCATOR_COMMAND_FREE) {
+        state.live -= had_storage;
+      } else if (!had_storage) {
+        ++state.live;
+      }
+    }
+    return status;
+  };
+  for (bool encode : {true, false}) {
+    for (size_t fail_at = 0;; ++fail_at) {
+      SCOPED_TRACE(encode);
+      SCOPED_TRACE(fail_at);
+      AllocationState state{.fail_at = fail_at};
+      const iree_allocator_t allocator{&state, allocate};
+      iree_string_builder_reset(&output_);
+      iree_status_t status =
+          encode ? loom_serve_http_tokenize(tokenizer_,
+                                            IREE_SV(R"({"content":"ab"})"),
+                                            &output_, allocator)
+                 : loom_serve_http_detokenize(tokenizer_,
+                                              IREE_SV(R"({"tokens":[0,1]})"),
+                                              &output_, allocator);
+      EXPECT_EQ(state.live, 0u);
+      if (iree_status_is_ok(status)) {
+        EXPECT_EQ(state.attempts, fail_at);
+        EXPECT_EQ(Output(),
+                  encode ? R"({"tokens":[0,1]})" : R"({"content":"ab"})");
+        RecordProperty(encode ? "encode_scratch_requested_bytes"
+                              : "decode_scratch_requested_bytes",
+                       static_cast<int>(state.requested_bytes));
+        RecordProperty(encode ? "encode_scratch_allocations"
+                              : "decode_scratch_allocations",
+                       static_cast<int>(state.attempts));
+        break;
+      }
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+    }
+  }
 }
 
 }  // namespace

@@ -14,13 +14,6 @@
 extern "C" {
 #endif
 
-// Per-request utility limits, independent of inference context capacity. The
-// transport separately bounds JSON body bytes and concurrent connection claims.
-enum {
-  LOOM_SERVE_HTTP_TOKENIZATION_MAX_TEXT_BYTES = 1024 * 1024,
-  LOOM_SERVE_HTTP_TOKENIZATION_MAX_TOKENS = 256 * 1024,
-};
-
 // CPU-only raw tokenizer protocol. The caller has already routed the required
 // model selector. Requests accept content/string, add_special=false,
 // parse_special=true and with_pieces=false; exact raw pieces are not exposed by
@@ -29,9 +22,11 @@ enum {
 // Both borrow the immutable tokenizer and JSON only for the call, use
 // independent encode/decode state, and append a JSON response to output on
 // success. Partial output on failure is discarded by the caller.
-// INVALID_ARGUMENT denotes bad input; OUT_OF_RANGE denotes the explicit
-// token/text bounds. Other failures retain their allocation or tokenizer
-// diagnostic. No device/model call occurs.
+// Transport admission owns request-body and connection limits. These utilities
+// impose no separate token or decoded-text quota, and drain complete output
+// through reusable scratch. INVALID_ARGUMENT denotes bad input. Allocation,
+// representation, output-sink, and tokenizer failures retain their diagnostics.
+// No device/model call occurs.
 iree_status_t loom_serve_http_tokenize(const iree_tokenizer_t* tokenizer,
                                        iree_string_view_t body,
                                        iree_string_builder_t* output,

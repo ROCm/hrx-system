@@ -372,13 +372,14 @@ independently of its consumer devices:
 
 | Field | What it counts |
 | --- | --- |
-| `storage` | Ordinary native buffers, including fixed parameters and state. With fixed backing, this also includes workspace backing. |
-| `retained` | Shared elastic backing for parameters, mutable state, and workspace. It is `null` with fixed backing; an elastic `limit_bytes:null` means unbounded by serving policy. |
+| `storage` | Persistent allocator backing within `retained` when elastic. With fixed backing, the complete native total, including parameters, state, and workspace. |
+| `retained` | Shared elastic backing for parameters, permanent buffers, sparse mutable state, and workspace. It is `null` with fixed backing; elastic `limit_bytes` reports the selected physical capacity or a tighter explicit budget. |
 | `workspace` | The workspace portion of `storage` (fixed) or `retained` (elastic), including reusable idle ranges. This is a breakdown, not an additional allocation. |
 
-`storage.committed_bytes` plus non-null `retained.committed_bytes` describes
-managed backing. Adding `workspace.committed_bytes` again double-counts it.
-`storage.reserved_bytes` counts backing charged to live native reservations;
+`retained.committed_bytes` describes total managed elastic backing. With fixed
+backing, `storage.committed_bytes` is the total instead. Adding allocator
+breakdowns to either total double-counts those bytes.
+`storage.reserved_bytes` counts backing charged to live allocator reservations;
 `storage.abandoned_bytes` is the subset of committed backing whose native return
 failed, not reusable capacity. Native release can lag logical buffer retirement.
 

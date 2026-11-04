@@ -121,7 +121,7 @@ TEST_F(SourceTextServiceTest, NativeWorkspaceReplacementPreservesAdmission) {
                                workspace.committed_bytes +
                                workspace.pending_bytes;
     const uint64_t slab_size =
-        loom_serve_pool_weight_geometry(storage_owner_).slab_size;
+        loom_serve_pool_weight_geometry(storage_owner_).mapping_size;
     // A partial physical slab cannot back the peer. Leave room for the
     // original command inside the complete slabs available to both claims.
     return (available / slab_size) * slab_size - 4096;

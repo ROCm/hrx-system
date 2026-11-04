@@ -24,8 +24,6 @@ TEST(TextCachePolicy, DefaultTargetUsesConfiguredBudgetNotAvailableMemory) {
 struct CacheStorage {
   // Counts requested from the source, including the final retained candidate.
   std::vector<iree_host_size_t> evaluations;
-  // Native page geometry available after baseline preparation.
-  iree_host_size_t pages = 1024;
   // Initial resident state plus COW headroom when checkpoints are present.
   uint64_t residents = 4;
   // Source layout bucket, intentionally not a linear cost function.
@@ -42,15 +40,13 @@ struct CacheStorage {
     }
     const uint64_t slots =
         count ? 2 * storage->residents + count : storage->residents;
-    *out_cost = {iree_align_uint64(slots, storage->alignment) * 100,
-                 storage->pages};
+    *out_cost = {iree_align_uint64(slots, storage->alignment) * 100};
     return iree_ok_status();
   }
 };
 
-TEST(TextCachePolicy, ExactCountsIgnoreSoftTargetAndPageCount) {
+TEST(TextCachePolicy, ExactCountsIgnoreSoftTarget) {
   CacheStorage storage;
-  storage.pages = 1;
   const loom_serve_text_cache_options_t options = {1, 19, 5};
   loom_serve_text_cache_selection_t selection;
   IREE_ASSERT_OK(loom_serve_text_cache_select(
@@ -121,18 +117,18 @@ TEST(TextCachePolicy, NonlinearSourceBucketsAreEvaluatedExactly) {
   EXPECT_EQ(storage.evaluations.back(), 8u);
 }
 
-TEST(TextCachePolicy, PageDirectoryPolicyDoesNotCountResidentSessions) {
+TEST(TextCachePolicy, AutomaticDirectoryIsBoundedByBytesNotPhysicalPages) {
   CacheStorage storage;
-  storage.pages = 3;
-  storage.residents = 100;
+  storage.residents = 0;
   const loom_serve_text_cache_options_t options = {
-      UINT64_MAX, LOOM_SERVE_TEXT_CACHE_AUTOMATIC, 0};
+      600, LOOM_SERVE_TEXT_CACHE_AUTOMATIC, 0};
   loom_serve_text_cache_selection_t selection;
   IREE_ASSERT_OK(loom_serve_text_cache_select(
       &options, 0, CacheStorage::Evaluate, &storage, &selection));
-  EXPECT_EQ(selection.session_capacity, 3u);
-  EXPECT_EQ(selection.checkpoint_capacity, 4u);
-  EXPECT_EQ(storage.evaluations.back(), 4u);
+  EXPECT_EQ(selection.session_capacity, 5u);
+  EXPECT_EQ(selection.checkpoint_capacity, 6u);
+  EXPECT_EQ(selection.additional_bytes, 600u);
+  EXPECT_EQ(storage.evaluations.back(), 6u);
 }
 
 TEST(TextCachePolicy, SourceFailureIsNotAReasonToSilentlyDisableCaching) {

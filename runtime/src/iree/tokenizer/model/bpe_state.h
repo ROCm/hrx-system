@@ -226,7 +226,7 @@ typedef struct iree_tokenizer_bpe_state_t {
 
   // Reusable overflow storage owned by workspace_allocator; NULL before growth.
   void* symbol_storage;
-  // Allocated overflow bytes, bounded by IREE_TOKENIZER_BPE_SCRATCH_MAX_SIZE.
+  // Allocated overflow bytes, retained across segments and resets.
   iree_host_size_t symbol_storage_size;
   // Active symbols, borrowing the backtrack slab or symbol_storage.
   iree_tokenizer_bpe_symbol_t* symbols;

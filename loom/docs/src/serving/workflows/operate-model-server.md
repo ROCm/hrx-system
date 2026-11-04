@@ -284,9 +284,8 @@ Process limits and model capacities constrain different resources:
 | Model `pending_requests` | Modality request credit; text/image count waiting requests, finite services include the active cohort. |
 | Text `rows` | Concurrently advancing execution rows. |
 | Text `context_capacity` | Logical token ceiling of one context. |
-| Text `pool_capacity` | Shared logical KV capacity, independent of maximum context times row count. |
 | Text `variant_capacity` | Native choices, including the original, pending JITs and failed attempts. |
-| Pool `memory_bytes` / shortcut `--memory_bytes` | Shared elastic physical backing for parameters, state, invocation I/O, and workspace. Ordinary native buffers are outside this allowance. |
+| Pool `memory_bytes` / shortcut `--memory_bytes` | Shared elastic physical backing for parameters, permanent buffers, sparse state, invocation I/O, and workspace. |
 
 Holding capacity stays below connection capacity so held inference cannot
 consume every control connection. Live log streams and waiting variant-management
@@ -295,6 +294,16 @@ returns 429. Incomplete requests and
 active response streams still consume transport credit; these bounds are not
 a promise that arbitrary slow clients leave connections free.
 
+Text cache addressability follows pool backing. Fixed backing reserves one
+model context shared across its rows. Elastic backing sizes its sparse address
+range from the selected pool's physical capacity, any tighter `memory_bytes`
+budget, and the model's declared cache bytes per page. Increasing addressability
+does not commit the corresponding cache or allocate its whole page directory.
+Physical admission uses the same ceiling across all models in the pool, whether
+it comes from the selected source or a tighter `memory_bytes` budget. Total
+addressability is not a promise that every model can fill it simultaneously.
+A backend reporting no physical capacity requires an explicit pool budget.
+
 Text admission reserves a request's completion high-water. Short contexts grow
 by blocks rather than eagerly reserving each row's maximum physical slab.
 When an oldest request cannot fit, `admission_overtakes` permits a bounded number
@@ -302,18 +311,21 @@ of smaller fitting requests to pass; its default is the execution-row count.
 Zero selects FIFO. This bounds successful overtakes, not elapsed waiting time:
 a slow active reader can retain its reservation.
 
-Elastic parameters, mutable state, invocation input/output, and command scratch
-share the deployment's selected pool. Admission uses the model's prepared working-set peak
-and outstanding work, rather than probing free HAL memory. Command scratch can
-be reused after its ordered release; an escaping output remains charged until
+Elastic parameters, permanent model buffers, sparse mutable state, invocation
+input/output, and command scratch share the deployment's selected pool.
+Admission uses the model's prepared working-set peak and outstanding work,
+rather than probing free HAL memory. Command scratch can be reused after its
+ordered release; an escaping output remains charged until
 both its producer and final consumer retire, even if its model is removed.
-Ordinary native buffers are reported separately and remain outside the elastic
-allowance. Host snapshots, other host allocations, and driver overhead also
-need headroom when sizing the pool; `memory_bytes` is not a whole-device cap.
+Permanent buffers remain charged while alive, including overlapping old and
+new allocations during resize. Host snapshots, other host allocations, and
+driver overhead need headroom when sizing the pool; `memory_bytes` is not a
+whole-device cap.
 
-Elastic pressure first reclaims idle workspace, then idle unpinned weights and
-eligible idle text history across models sharing the same pool. Accepted
-work, prepared continuations, and explicit checkpoint references remain protected.
+Elastic pressure first reclaims idle allocator backing, then idle unpinned
+weights and eligible idle text history across models sharing the same pool.
+Accepted work, prepared continuations, and explicit checkpoint references remain
+protected.
 An evicted session can replay its full input history; a session name is not
 durable storage.
 Pool pressure does not automatically serialize conversations to disk. If all

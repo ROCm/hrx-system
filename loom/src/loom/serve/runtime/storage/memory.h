@@ -25,38 +25,40 @@ typedef struct loom_serve_memory_arena_t loom_serve_memory_arena_t;
 typedef struct loom_serve_virtual_buffer_t loom_serve_virtual_buffer_t;
 typedef struct loom_serve_memory_operation_t loom_serve_memory_operation_t;
 
-// Physical replacement geometry qualified against one mapping source and its
-// virtual targets. Logical tensor/block sizes remain independent of it.
+// Virtual replacement and physical backing geometry qualified against one
+// mapping source and its targets. Logical tensor/block sizes are independent.
 typedef struct loom_serve_memory_geometry_t {
-  // Maximum independently allocated and replaced extent in bytes.
-  iree_device_size_t slab_size;
+  // Maximum independently allocated and replaced virtual extent in bytes.
+  iree_device_size_t mapping_size;
+  // Physical parent extent from which mapping sources are allocated.
+  iree_device_size_t backing_size;
   // Common source/target alignment for physical extents and virtual addresses.
   iree_device_size_t granularity;
   // Minimum native extent, including source/target alignment.
   iree_device_size_t minimum_size;
 } loom_serve_memory_geometry_t;
 
-// The device configures bulk and sparse storage geometries. Equal physical
-// classes share one cache; a short tail can match either class or bypass both.
-enum { LOOM_SERVE_MEMORY_CLASS_COUNT = 2 };
-
 // Additional physical ownership within one pool, not a reservation of credit.
-// Folds distinct roots/groups without enumerating their physical slots.
+// Folds distinct roots/groups without enumerating their physical mappings.
 typedef struct loom_serve_memory_demand_t {
-  // Required bytes in each immutable physical size/alignment class.
-  uint64_t cached_bytes[LOOM_SERVE_MEMORY_CLASS_COUNT];
-  // Exact unmatched extents requiring native acquisition.
-  uint64_t uncached_bytes;
+  // Fixed-size mappings packed into shared physical state backing.
+  uint64_t packed_bytes;
+  // Exact reusable weight extents routed through the weight cache.
+  uint64_t weight_bytes;
+  // Exact extents bypassing both reusable size classes.
+  uint64_t dedicated_bytes;
 } loom_serve_memory_demand_t;
 
 void loom_serve_memory_demand_add(loom_serve_memory_demand_t* demand,
                                   loom_serve_memory_demand_t additional);
 
-// Qualifies explicit power-of-two slab bytes, or the source recommendation
-// when zero, against the native source and all targets in its scope.
+// Qualifies an explicit physical backing extent, or the source recommendation
+// when zero, against the native source and all targets in its scope. Mapping
+// and backing sizes are initially equal; pool policy may divide backing into
+// smaller independently replaced mappings.
 iree_status_t loom_serve_memory_pool_query_geometry(
     const iree_hal_virtual_buffer_capabilities_t* capabilities,
-    iree_hal_pool_t* storage_pool, iree_device_size_t slab_size,
+    iree_hal_pool_t* storage_pool, iree_device_size_t backing_size,
     loom_serve_memory_geometry_t* out_geometry);
 
 // Additive usage across distinct reservations or banks on one serialized owner.
@@ -106,16 +108,17 @@ typedef struct loom_serve_memory_statistics_t {
 // The sealed group and selected transfer queue outlive this pool. Geometries
 // have been qualified by query_geometry for this source and scope. limit_bytes
 // bounds physical commitment, including pending native release and permanent
-// backing loss. This is the exclusive source-pool owner for the budget's entire
-// lifetime. Zero imposes no serving budget. Each reservation borrows this pool
-// and is destroyed before the pool.
+// backing loss. storage_pool is an exclusive native slab source without its own
+// idle backing cache, and this owner controls it for the budget's entire
+// lifetime. Zero selects the source's physical capacity; an explicit budget can
+// tighten that ceiling. Unknown physical capacity requires a finite budget.
+// Each reservation borrows this pool and is destroyed before the pool.
 iree_status_t loom_serve_memory_pool_allocate(
     iree_hal_device_group_t* group, iree_hal_pool_scope_t scope,
     iree_hal_pool_t* storage_pool, iree_hal_queue_t* queue,
-    const loom_serve_memory_geometry_t
-        geometries[LOOM_SERVE_MEMORY_CLASS_COUNT],
-    uint64_t limit_bytes, iree_allocator_t host_allocator,
-    loom_serve_memory_pool_t** out_pool);
+    loom_serve_memory_geometry_t weight_geometry,
+    loom_serve_memory_geometry_t state_geometry, uint64_t limit_bytes,
+    iree_allocator_t host_allocator, loom_serve_memory_pool_t** out_pool);
 
 void loom_serve_memory_pool_free(loom_serve_memory_pool_t* pool);
 
@@ -129,8 +132,10 @@ loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
 void loom_serve_memory_pool_trim(loom_serve_memory_pool_t* pool,
                                  uint64_t target_bytes);
 
-// Immutable physical commitment ceiling in bytes; UINT64_MAX is unbounded.
-// This is the configured budget, not currently available backing.
+// Immutable finite commitment ceiling from the selected physical source and
+// any tighter configured budget. This also bounds resident addressability;
+// it is not free memory, never subtracts live demand, and is not an allocation
+// guarantee.
 uint64_t loom_serve_memory_pool_limit(const loom_serve_memory_pool_t* pool);
 
 // Owner-maintained bytes attached or promised to live virtual reservations.
@@ -270,8 +275,8 @@ iree_status_t loom_serve_virtual_buffer_grow_async(
     iree_hal_semaphore_t* readiness, uint64_t value,
     loom_serve_memory_operation_t** out_operation);
 
-// Independent physical replacement size in this root.
-iree_device_size_t loom_serve_virtual_buffer_slab_size(
+// Independently replaceable virtual extent in this root.
+iree_device_size_t loom_serve_virtual_buffer_mapping_size(
     const loom_serve_virtual_buffer_t* buffer);
 // Number of independently mapped physical slots spanning this root.
 iree_host_size_t loom_serve_virtual_buffer_slab_count(
@@ -314,10 +319,11 @@ typedef struct loom_serve_memory_footprint_t {
 
 // Physical footprint of the caller-validated range union. Overlapping views
 // count each slot once. Runs on the pool's serialized owner without querying
-// native availability, committing storage, or changing trim/admission state.
-// Saturates if the sum exceeds uint64_t.
-loom_serve_memory_footprint_t loom_serve_memory_ranges_footprint(
-    iree_host_size_t range_count, const loom_serve_memory_range_t* ranges);
+// native availability, committing storage, or retaining transient union marks.
+// Sparse query metadata may allocate. Sums saturate at uint64_t.
+iree_status_t loom_serve_memory_ranges_footprint(
+    iree_host_size_t range_count, const loom_serve_memory_range_t* ranges,
+    loom_serve_memory_footprint_t* out_footprint);
 
 // Admits and commits the union of missing slabs across all ranges. Overlapping
 // ranges and views sharing a slab are counted once. False is ordinary capacity
@@ -423,12 +429,13 @@ void loom_serve_memory_operation_free(loom_serve_memory_operation_t* operation);
 // several logical ranges stays backed if any range needs it. The caller owns
 // readiness/retirement: these functions never wait for device work themselves.
 void loom_serve_virtual_buffer_begin_trim(loom_serve_virtual_buffer_t* buffer);
-// Returns the physical extent newly added to the keep set, including unbacked
-// slabs. Summing these values gives the backing required by the union of kept
-// ranges, with shared slabs counted once and the final slab's actual size.
-uint64_t loom_serve_virtual_buffer_keep(loom_serve_virtual_buffer_t* buffer,
-                                        iree_device_size_t offset,
-                                        iree_device_size_t length);
+// Adds a range to the keep set. Optional out_added_bytes receives the physical
+// extent newly added, including unbacked slabs. Summing these values gives the
+// backing required by the union of kept ranges, with shared slabs counted once
+// and the final slab's actual size. Sparse trim markers may allocate metadata.
+iree_status_t loom_serve_virtual_buffer_keep(
+    loom_serve_virtual_buffer_t* buffer, iree_device_size_t offset,
+    iree_device_size_t length, uint64_t* out_added_bytes);
 iree_status_t loom_serve_virtual_buffer_trim(
     loom_serve_virtual_buffer_t* buffer);
 

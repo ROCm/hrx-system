@@ -174,7 +174,7 @@ TEST_F(RegisteredReconfigurationHttpTextTest,
         R"("kind":"text","prepare":"prepare.loom","control":"control.loombc",)"
         R"("sources":["advance.loom","storage.loom"],"tokenizer":"tokenizer.json","weights":")" +
         std::filesystem::absolute(weights_).string() +
-        R"(","rows":4,"context_capacity":96,"pool_capacity":256,"prefill_capacity":32}})";
+        R"(","rows":4,"context_capacity":96,"prefill_capacity":32}})";
     int client = -1;
     IREE_ASSERT_OK(http_.Send(
         package.Request("/v1/models/register", declaration), &client));

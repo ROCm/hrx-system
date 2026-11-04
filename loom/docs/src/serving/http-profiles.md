@@ -827,8 +827,10 @@ borrow through actual task completion. An unknown model or absent tokenizer
 returns 404. Unknown, duplicate, wrongly typed or invalid-token fields return 400.
 A tokenizer execution failure returns 500 for that request.
 
-Each utility has a 262144-token and 1 MiB decoded-text bound, independent of the
-model context and transport body limits. Exceeding a bound returns 413 rather
-than a truncated success. `with_pieces:false` is accepted; true rejects because
-this decoder contract does not expose raw token bytes. `prompt`,
+Both utilities accept complete long-context inputs without a separate token or
+decoded-text quota. The server's configurable `--request_body_bytes` transport
+limit applies to their JSON requests; exceeding it returns 413. Allocation or
+tokenizer failures never return a truncated success. `with_pieces:false` is
+accepted; true rejects because this decoder contract does not expose raw token
+bytes. `prompt`,
 `add_special_tokens` and chat-tokenization fields are not aliases for this profile.

@@ -159,13 +159,12 @@ static iree_status_t loom_serve_text_request_check_run(
   loom_serve_compilation_report_t compilation = {0};
   if ((!!FLAG_control[0] == !!FLAG_model[0]) ||
       (FLAG_preset[0] && !FLAG_model[0]) || !FLAG_tokenizer[0] ||
-      !FLAG_request[0] || FLAG_capacity <= 0 || FLAG_capacity > 262144 ||
-      FLAG_response_chunk_size < 0) {
+      !FLAG_request[0] || FLAG_capacity <= 0 || FLAG_response_chunk_size < 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "exactly one of --control or --model, --tokenizer, and --request "
         "are required; --preset requires --model; "
-        "capacity is [1, 262144]");
+        "capacity must be positive");
   }
   const loom_serve_sources_t requested_sources = {
       .base_directory = IREE_SV("."),
@@ -193,11 +192,7 @@ static iree_status_t loom_serve_text_request_check_run(
         1, 128, host_allocator, &chat);
     chat_initialized = iree_status_is_ok(status);
   }
-  int32_t* tokens = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc_array(host_allocator, FLAG_capacity,
-                                         sizeof(*tokens), (void**)&tokens);
-  }
+  iree_vm_buffer_t* tokens = NULL;
   iree_host_size_t token_count = 0;
   loom_serve_text_media_span_t* media_spans = NULL;
   iree_host_size_t media_span_count = 0;
@@ -205,7 +200,7 @@ static iree_status_t loom_serve_text_request_check_run(
     status = loom_serve_text_chat_prepare_input(
         &chat, 0, LOOM_SERVE_TEXT_CHAT_INPUT_RENDERED,
         LOOM_SERVE_TEXT_CHAT_BOUNDARY_FRESH, FLAG_capacity, 0, host_allocator,
-        tokens, &token_count, &media_spans, &media_span_count);
+        &tokens, &token_count, &media_spans, &media_span_count);
   }
   iree_io_file_contents_t* response = NULL;
   if (iree_status_is_ok(status) && FLAG_response[0]) {
@@ -255,15 +250,16 @@ static iree_status_t loom_serve_text_request_check_run(
   iree_arena_block_pool_deinitialize(&block_pool);
   if (iree_status_is_ok(status)) {
     status = loom_serve_text_request_check_report(
-        &chat, token_count, tokens, media_span_count, media_spans,
-        response ? &completion : NULL, iree_string_builder_view(&tool_calls));
+        &chat, token_count, iree_vm_buffer_const_data(tokens), media_span_count,
+        media_spans, response ? &completion : NULL,
+        iree_string_builder_view(&tool_calls));
   }
   loom_serve_text_chat_completion_deinitialize(&completion);
   loom_serve_text_chat_scratch_deinitialize(&scratch);
   loom_serve_text_tool_calls_deinitialize(&calls);
   iree_string_builder_deinitialize(&tool_calls);
   iree_io_file_contents_free(response);
-  iree_allocator_free(host_allocator, tokens);
+  iree_vm_buffer_release(tokens);
   iree_allocator_free(host_allocator, media_spans);
   if (chat_initialized) {
     loom_serve_text_chat_deinitialize(&chat);

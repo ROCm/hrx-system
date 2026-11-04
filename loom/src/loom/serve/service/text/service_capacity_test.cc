@@ -5,6 +5,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "loom/serve/service/text/service_test_fixture.h"
+#include "loom/serve/service/text/session.h"
+#include "loom/serve/testing/native_allocator.h"
 
 namespace {
 
@@ -12,6 +14,31 @@ using loom_serve::testing::text::Oracle;
 using loom_serve::testing::text::RegisteredSourceTextServiceTest;
 using loom_serve::testing::text::SourceTextServiceTest;
 using loom_serve::testing::text::StalledClient;
+
+TEST_F(SourceTextServiceTest, IdleSessionOwnsOnlyOutputStorage) {
+  for (const auto mode :
+       {LOOM_SERVE_TEXT_MODE_ENCODE, LOOM_SERVE_TEXT_MODE_GENERATE}) {
+    SCOPED_TRACE(mode);
+    loom_serve::testing::NativeAllocator allocator;
+    loom_serve_text_session_t session = {};
+    auto status = loom_serve_text_session_initialize(
+        mode, loom_serve_text_model_tokenizer(model_), allocator.allocator(),
+        &session);
+    const auto metrics = allocator.allocation_metrics();
+    const std::string prefix =
+        mode == LOOM_SERVE_TEXT_MODE_ENCODE ? "encode_" : "generate_";
+    RecordProperty(prefix + "allocations", metrics.request_count);
+    RecordProperty(prefix + "requested_bytes",
+                   std::to_string(metrics.requested_bytes));
+    RecordProperty(prefix + "largest_request_bytes",
+                   std::to_string(metrics.largest_request_bytes));
+    EXPECT_EQ(session.request.input.storage, nullptr);
+    EXPECT_EQ(metrics.request_count,
+              mode == LOOM_SERVE_TEXT_MODE_ENCODE ? 0u : 2u);
+    loom_serve_text_session_deinitialize(&session);
+    IREE_ASSERT_OK(status);
+  }
+}
 
 class TextServiceCapacityTest : public SourceTextServiceTest {
  protected:

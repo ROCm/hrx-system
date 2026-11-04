@@ -74,33 +74,33 @@ class TokenizerBufferTest : public ::testing::Test {
     iree_tokenizer_free(tokenizer_);
   }
 
-  void Encode(const std::string& input, const std::vector<int32_t>& expected) {
+  void Encode(const std::string& input, const std::vector<int32_t>& expected,
+              size_t input_chunk_size = 13, size_t output_capacity = 1) {
     std::vector<int32_t> actual;
+    std::vector<int32_t> tokens(output_capacity);
     size_t position = 0;
     while (position < input.size()) {
       size_t consumed = 0, written = 0;
-      int32_t token;
       IREE_ASSERT_OK(iree_tokenizer_encode_state_feed(
           state_,
-          iree_make_string_view(input.data() + position,
-                                std::min(size_t{13}, input.size() - position)),
-          iree_tokenizer_make_token_output(&token, nullptr, nullptr, 1),
+          iree_make_string_view(
+              input.data() + position,
+              std::min(input_chunk_size, input.size() - position)),
+          iree_tokenizer_make_token_output(tokens.data(), nullptr, nullptr,
+                                           tokens.size()),
           &consumed, &written));
       ASSERT_GT(consumed + written, 0u);
       position += consumed;
-      if (written) {
-        actual.push_back(token);
-      }
+      actual.insert(actual.end(), tokens.begin(), tokens.begin() + written);
     }
     do {
       size_t written = 0;
-      int32_t token;
       IREE_ASSERT_OK(iree_tokenizer_encode_state_finalize(
-          state_, iree_tokenizer_make_token_output(&token, nullptr, nullptr, 1),
+          state_,
+          iree_tokenizer_make_token_output(tokens.data(), nullptr, nullptr,
+                                           tokens.size()),
           &written));
-      if (written) {
-        actual.push_back(token);
-      }
+      actual.insert(actual.end(), tokens.begin(), tokens.begin() + written);
       ASSERT_TRUE(written || !iree_tokenizer_encode_state_has_pending(state_));
     } while (iree_tokenizer_encode_state_has_pending(state_));
     EXPECT_EQ(actual, expected);
@@ -160,20 +160,20 @@ TEST_F(TokenizerBufferTest, GrowthFailurePreservesAcceptedInput) {
   Encode(input.substr(consumed), expected);
 }
 
-TEST_F(TokenizerBufferTest, UnresolvedInputHasAnExplicitCeiling) {
-  std::string input(IREE_TOKENIZER_TRANSFORM_BUFFER_OVERFLOW_MAX_SIZE / 2 + 1,
-                    'a');
-  int32_t token;
-  size_t consumed = 0, written = 0;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_RESOURCE_EXHAUSTED,
-      iree_tokenizer_encode_state_feed(
-          state_, iree_make_string_view(input.data(), input.size()),
-          iree_tokenizer_make_token_output(&token, nullptr, nullptr, 1),
-          &consumed, &written));
-  EXPECT_EQ(written, 0u);
-  EXPECT_EQ(consumed, IREE_TOKENIZER_TRANSFORM_BUFFER_OVERFLOW_MAX_SIZE / 2);
-  EXPECT_TRUE(iree_tokenizer_encode_state_has_pending(state_));
+TEST_F(TokenizerBufferTest,
+       MillionByteSegmentPreservesBoundariesAndWarmStorage) {
+  const size_t count = 1024 * 1024 + 3;
+  const std::string input = "ab " + std::string(count, 'b') + " a ab";
+  std::vector<int32_t> expected = {3};
+  expected.insert(expected.end(), count, 1);
+  expected.insert(expected.end(), {0, 3});
+  Encode(input, expected, 65536, 1024);
+  const size_t allocations = allocations_;
+  ASSERT_GT(allocations, 0u);
+  IREE_ASSERT_OK(iree_tokenizer_encode_state_reset(state_, 0));
+  fail_allocations_ = true;
+  Encode(input, expected, 65536, 1024);
+  EXPECT_EQ(allocations_, allocations);
 }
 
 }  // namespace

@@ -597,10 +597,10 @@ function updatePool(source, time, recordHistory) {
       ? Number(fields.get(`${topic}.${name}`).value)
       : NaN;
   const elastic = source.backing === "elastic";
-  const nativeBytes = value("storage", "committed_bytes");
+  const storageBytes = value("storage", "committed_bytes");
   const elasticBytes = elastic ? value("elastic", "committed_bytes") : 0;
-  // Distinct backing owners add; workspace is a child, never added again.
-  const committed = nativeBytes + elasticBytes;
+  // Allocator breakdowns are included in the physical owner's total.
+  const committed = elastic ? elasticBytes : storageBytes;
   pool.committed.textContent = bytes(committed);
   if (recordHistory) {
     pool.ring.push(time, committed);
@@ -609,7 +609,7 @@ function updatePool(source, time, recordHistory) {
   pool.peak.textContent = `peak ${bytes(pool.ring.peak)}`;
   const limit = elastic ? value("elastic", "budget_limit") : 0;
   pool.budget.textContent = elastic
-    ? `${bytes(elasticBytes)} elastic · ${limit > 0 ? `${bytes(limit)} budget` : "unbounded"} · ${bytes(nativeBytes)} native outside budget`
+    ? `${bytes(elasticBytes)} elastic · ${bytes(limit)} budget · ${bytes(storageBytes)} persistent allocator (included)`
     : "Native storage · no pool budget";
   pool.reservations.textContent = elastic
     ? `${bytes(value("elastic", "reserved_bytes"))} virtual reserved · ${bytes(value("elastic", "cached_bytes"))} reusable`

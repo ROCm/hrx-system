@@ -6,12 +6,14 @@
 
 #include "loom/serve/service/text/state.h"
 
+#include <memory>
 #include <vector>
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/environment.h"
 #include "loom/serve/runtime/execution/execution.h"
+#include "loom/serve/testing/device.h"
 #include "loom/serve/testing/service_application.h"
 
 namespace {
@@ -273,6 +275,11 @@ TEST_P(TextStateTest, OptionalRootsRetainOriginsMapsAndCheckpointCarry) {
   // The pinned endpoint's carry follows the resident bank. Repeated capacity
   // growth moves that small bank while retaining recurrent/KV identities.
   for (size_t capacity : {5u, 9u}) {
+    // A caller may retain the old bank through native resize completion.
+    // Both generations then remain real competing physical allocations.
+    iree_hal_buffer_retain(state.carry);
+    std::unique_ptr<iree_hal_buffer_t, decltype(&iree_hal_buffer_release)>
+        previous_carry(state.carry, iree_hal_buffer_release);
     ASSERT_NO_FATAL_FAILURE(MakeStorage(capacity));
     loom_serve_text_storage_t storage;
     IREE_ASSERT_OK(loom_serve_text_storage_initialize(
@@ -281,6 +288,11 @@ TEST_P(TextStateTest, OptionalRootsRetainOriginsMapsAndCheckpointCarry) {
     loom_serve_text_storage_deinitialize(&storage);
     IREE_ASSERT_OK(status);
     IREE_ASSERT_OK(loom_serve_execution_drain(execution));
+    if (state.memory.pool && previous_carry) {
+      EXPECT_GE(loom_serve_memory_pool_live_bytes(state.memory.pool),
+                iree_hal_buffer_byte_length(previous_carry.get()) +
+                    iree_hal_buffer_byte_length(state.carry));
+    }
     loom_serve_text_state_complete_resize(&state);
     EXPECT_EQ(state.rows[0], row);
     ASSERT_NO_FATAL_FAILURE(CheckMaps());
@@ -375,6 +387,28 @@ TEST_P(TextStateTest, CarryFollowsSourceStride) {
                               (GetParam() & 4) ? 0 : 64);
   iree_unaligned_store_le_u64(bytes[0].data + offset + 16, 0);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Allocate());
+}
+
+TEST_P(TextStateTest, PermanentRootsConsumeTheSharedPhysicalBudget) {
+  auto* memory = loom_serve_pool_memory(storage_owner);
+  if (!memory) {
+    GTEST_SKIP() << "Fixed backing has no shared physical admission ledger";
+  }
+  IREE_ASSERT_OK(loom_serve_test_pool_trim_and_drain(storage_owner, 0));
+  const uint64_t before = loom_serve_memory_pool_live_bytes(memory);
+  ASSERT_EQ(before, 0u);
+  uint64_t permanent_bytes = 0;
+  for (size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT; ++i) {
+    // The target and optional draft cache contain demand-backed page planes.
+    // All other source roots are allocated in full before first execution.
+    if (i != 1 && i != 9) {
+      permanent_bytes += iree_unaligned_load_le_u64(bytes[0].data + i * 24);
+    }
+  }
+  IREE_ASSERT_OK(Allocate());
+  IREE_ASSERT_OK(loom_serve_execution_drain(execution));
+  EXPECT_GE(loom_serve_memory_pool_live_bytes(memory),
+            before + permanent_bytes);
 }
 
 TEST_P(TextStateTest, CarryRequiresPackedEpochs) {

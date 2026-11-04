@@ -241,6 +241,14 @@ IREE_API_EXPORT iree_status_t iree_hal_virtual_buffer_initialize_contract(
   for (iree_host_size_t i = 0; i < sources.pool_count && supported; ++i) {
     const iree_hal_memory_contract_t* source =
         sources.pools[i]->memory_contract;
+    // Preserve an enforced physical domain only when every admitted source
+    // shares it. VA reservation alone supplies no physical placement guarantee.
+    if (i == 0) {
+      contract->placement = source->placement;
+    } else if (contract->placement.mode != source->placement.mode ||
+               contract->placement.node != source->placement.node) {
+      contract->placement = (iree_hal_pool_placement_t){0};
+    }
     supported = iree_hal_virtual_buffer_source_matches_schema(
         contract, source_type, source_native_type_mask, source);
     if (!supported) {
@@ -367,6 +375,11 @@ static bool iree_hal_virtual_buffer_source_is_compatible(
     const iree_hal_virtual_buffer_t* target, uint32_t scope_id,
     const iree_hal_memory_contract_t* source) {
   const iree_hal_memory_contract_t* contract = target->buffer.memory.contract;
+  if (contract->placement.mode == IREE_HAL_POOL_PLACEMENT_REQUIRED &&
+      (source->placement.mode != IREE_HAL_POOL_PLACEMENT_REQUIRED ||
+       source->placement.node != contract->placement.node)) {
+    return false;
+  }
   if (!iree_hal_virtual_buffer_source_matches_schema(
           contract, target->source_type, target->source_native_type_mask,
           source)) {

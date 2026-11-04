@@ -17,6 +17,7 @@
 #include "iree/vm/sync.h"
 #include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/execution/execution.h"
+#include "loom/serve/runtime/execution/workspace.h"
 #include "loom/serve/runtime/host/host.h"
 #include "loom/serve/runtime/parameter/weights.h"
 #include "loom/serve/runtime/program/jit.h"
@@ -170,6 +171,7 @@ static iree_status_t loom_serve_text_load_prepare(
   IREE_RETURN_IF_ERROR(loom_serve_text_source_initialize(
       model->jit, options, model->host_allocator, &model->source,
       &model->state.storage));
+  model->state.cache.capacity = model->source.pool_capacity;
   model->state.checkpoints.capacity =
       (uint32_t)model->source.cache.checkpoint_capacity;
   const iree_host_size_t stage_count =
@@ -393,26 +395,32 @@ iree_status_t loom_serve_text_load_allocate(
       options->cache.prefix_capacity == LOOM_SERVE_TEXT_CACHE_AUTOMATIC
           ? 0
           : options->cache.prefix_capacity;
+  const bool pooled = options->pool_capacity || options->cache_limit_bytes;
+  const bool automatic_cache =
+      options->cache.target_bytes &&
+      (options->cache.session_capacity == LOOM_SERVE_TEXT_CACHE_AUTOMATIC ||
+       options->cache.prefix_capacity == LOOM_SERVE_TEXT_CACHE_AUTOMATIC);
   if (session_capacity >= INT32_MAX || prefix_capacity > INT32_MAX ||
       options->checkpoint_capacity > INT32_MAX ||
       (uint64_t)options->checkpoint_capacity + prefix_capacity +
               (session_capacity ? session_capacity + 1 : 0) >
           INT32_MAX ||
-      ((session_capacity || prefix_capacity) && !options->pool_capacity)) {
+      ((session_capacity || prefix_capacity || automatic_cache) && !pooled)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "cache endpoints require pooled storage and a "
                             "combined capacity fitting i32");
   }
   if (options->prefill_capacity < 1 || options->prefill_capacity > INT32_MAX ||
-      options->context_capacity < 1 || options->context_capacity > 262144 ||
+      options->context_capacity < 1 || options->context_capacity > INT32_MAX ||
       options->epoch_count > INT32_MAX ||
       options->epoch_count > SIZE_MAX / (2 * sizeof(int64_t)) ||
       options->draft_depth > 7 ||
       (options->draft_depth && !options->epoch_count) ||
       (uint64_t)options->pool_capacity > INT64_MAX ||
       options->checkpoint_capacity > INT32_MAX ||
-      (options->checkpoint_capacity && !options->pool_capacity) ||
-      (options->pool_capacity && !options->epoch_count)) {
+      (options->checkpoint_capacity && !pooled) ||
+      (options->pool_capacity && options->cache_limit_bytes) ||
+      (pooled && !options->epoch_count)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "invalid model capacities; pooled KV and drafting "
                             "require epoch shapes, "
@@ -671,6 +679,20 @@ static void loom_serve_text_load_notify(void* user_data) {
   iree_notification_post((iree_notification_t*)user_data, IREE_ALL_WAITERS);
 }
 
+typedef struct loom_serve_text_load_wait_t {
+  // Borrowed cold load, exclusively advanced by this outer owner.
+  loom_serve_text_load_t* load;
+  // Owned load result, joined with allocation progress before returning.
+  iree_status_t status;
+} loom_serve_text_load_wait_t;
+
+static bool loom_serve_text_load_wait_complete(void* user_data) {
+  loom_serve_text_load_wait_t* wait = user_data;
+  bool complete = false;
+  wait->status = loom_serve_text_load_advance(wait->load, 0, &complete);
+  return complete || !iree_status_is_ok(wait->status);
+}
+
 iree_status_t loom_serve_text_model_allocate(
     loom_serve_device_t* device, loom_serve_pool_t* pool,
     const loom_serve_text_options_t* options, iree_allocator_t host_allocator,
@@ -682,16 +704,12 @@ iree_status_t loom_serve_text_model_allocate(
   iree_status_t status = loom_serve_text_load_allocate(
       device, pool, options, loom_serve_text_load_notify, &notification,
       host_allocator, &load);
-  bool complete = false;
-  while (iree_status_is_ok(status) && !complete) {
-    const uint32_t ticket = iree_notification_prepare_wait(&notification);
-    status = loom_serve_text_load_advance(load, 0, &complete);
-    if (complete) {
-      iree_notification_cancel_wait(&notification);
-    } else {
-      iree_notification_commit_wait(&notification, ticket, IREE_DURATION_ZERO,
-                                    IREE_TIME_INFINITE_FUTURE);
-    }
+  if (iree_status_is_ok(status)) {
+    loom_serve_text_load_wait_t wait = {.load = load};
+    status = loom_serve_workspace_await(
+        loom_serve_pool_workspace(pool), &notification,
+        loom_serve_text_load_wait_complete, &wait);
+    status = iree_status_join(status, wait.status);
   }
   if (load) {
     loom_serve_text_model_t* model = loom_serve_text_load_take_model(load);
@@ -930,11 +948,14 @@ loom_serve_text_cache_selection_t loom_serve_text_model_cache_selection(
 
 loom_serve_text_pool_usage_t loom_serve_text_model_pool_usage(
     const loom_serve_text_model_t* model) {
+  const uint32_t live_blocks =
+      model->state.cache.pool.capacity - model->state.cache.pool.available;
   loom_serve_text_pool_usage_t usage = {
       .block_size = model->state.storage.block_size,
       .capacity = model->state.cache.capacity,
-      .available = (iree_host_size_t)model->state.cache.pool.available *
-                   model->state.storage.block_size,
+      .available =
+          model->state.cache.capacity -
+          (iree_host_size_t)live_blocks * model->state.storage.block_size,
   };
   for (iree_host_size_t i = 0; usage.capacity && i < model->row_count; ++i) {
     const loom_serve_text_state_row_t* row = model->state.rows[i];
@@ -1310,7 +1331,6 @@ iree_status_t loom_serve_text_model_submit_epoch(
     }
   }
 
-  uint32_t required_blocks = 0;
   for (iree_host_size_t i = 0; i < span_count; ++i) {
     const loom_serve_text_state_row_t* row =
         model->rows[spans[i].row_index]->state;
@@ -1319,16 +1339,6 @@ iree_status_t loom_serve_text_model_submit_epoch(
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "epoch exceeds request completion reservation");
     }
-  }
-  for (iree_host_size_t i = 0; model->state.cache.capacity && i < span_count;
-       ++i) {
-    const loom_serve_text_row_t* row = model->rows[spans[i].row_index];
-    required_blocks += loom_serve_text_state_row_growth(row->state, extents[i]);
-  }
-  if (required_blocks > model->state.cache.pool.available) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "epoch needs %u KV blocks; %u are available",
-                            required_blocks, model->state.cache.pool.available);
   }
   loom_serve_text_media_epoch_t media = {0};
   if (has_media_input) {

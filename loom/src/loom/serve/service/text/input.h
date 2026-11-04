@@ -61,11 +61,10 @@ bool loom_serve_text_input_is_current(const loom_serve_text_input_t* input,
 // history reuse tokens; eviction prepares full replay instead of using stale
 // suffix tokens. Required prefixes reject mismatching canonical histories or
 // ordered media semantics.
-// Scratch holds context_capacity IDs and is borrowed only during this call.
 // Input remains unchanged on failure; new storage uses host_allocator.
 iree_status_t loom_serve_text_input_prepare(
     const loom_serve_text_chat_t* chat, loom_serve_text_input_prefix_t prefix,
-    bool require_prefix, iree_host_size_t context_capacity, int32_t* scratch,
+    bool require_prefix, iree_host_size_t context_capacity,
     loom_serve_text_input_t* input, iree_allocator_t host_allocator);
 
 #ifdef __cplusplus

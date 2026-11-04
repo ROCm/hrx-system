@@ -27,6 +27,8 @@ struct DeferredBackingPool : iree_hal_pool_t {
   iree_hal_pool_t* backing = nullptr;
   // Whether subsequent acquisitions wait for the test's explicit completion.
   bool defer = false;
+  // Whether the dependency exposes its optional physical-capacity fact.
+  bool report_physical_capacity = true;
   // Active parent calls, including asynchronous callbacks before submit
   // returns.
   std::atomic<size_t> depth{0};
@@ -133,9 +135,11 @@ struct DeferredBackingPool : iree_hal_pool_t {
         .query_capabilities =
             [](const iree_hal_pool_t* base,
                iree_hal_pool_capabilities_t* capabilities) {
-              iree_hal_pool_query_capabilities(
-                  static_cast<const DeferredBackingPool*>(base)->backing,
-                  capabilities);
+              const auto* self = static_cast<const DeferredBackingPool*>(base);
+              iree_hal_pool_query_capabilities(self->backing, capabilities);
+              if (!self->report_physical_capacity) {
+                capabilities->physical_capacity = 0;
+              }
             },
         .query_stats =
             [](const iree_hal_pool_t* base, iree_hal_pool_stats_t* stats) {

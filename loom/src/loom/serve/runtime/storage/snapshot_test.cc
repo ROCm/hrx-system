@@ -596,7 +596,13 @@ TEST_P(AsyncSnapshotTest, OneWorkerSubmitsAndReleasesBeforeNativeRetirement) {
   IREE_ASSERT_OK(
       loom_serve_execution_barrier(execution, {1, &transfer.gate, &held}));
   if (restore) {
-    // Restore targets different physical ranges, not the original input.
+    // Restore targets separately admitted physical ranges, not the original
+    // input. A small mapping granularity must not make this test depend on
+    // incidental backing for adjacent virtual addresses.
+    for (auto* reservation : reservations) {
+      IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(
+          reservation, kHighOffset + 32768, 32768));
+    }
     for (auto& range : transfer.ranges) {
       range.buffer_index = 1 - range.buffer_index;
       range.offset += 32768;

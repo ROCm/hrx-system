@@ -43,9 +43,9 @@ extern "C" {
 //   - Optional flags: byte_fallback, fuse_unk, ignore_merges
 //   - Optional affixes: continuing_subword_prefix, end_of_word_suffix
 //
-// This function performs two-pass parsing:
-//   1. Parse vocab into builder, build temporary vocab for merge lookup
-//   2. Parse merges using temp vocab for ID resolution, rebuild with merges
+// The vocabulary is parsed once, then its text index resolves merges before
+// the final vocabulary is built. Unescaped spellings borrow the JSON source;
+// escaped spellings share reusable scratch rather than a token-length quota.
 //
 // Parses a BPE model from |model_json| (the "model" section, not full file),
 // using |added_tokens| for special token marking. The |extra_flags| are ORed

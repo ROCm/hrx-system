@@ -34,7 +34,7 @@ bool loom_serve_text_input_is_current(const loom_serve_text_input_t* input,
 
 iree_status_t loom_serve_text_input_prepare(
     const loom_serve_text_chat_t* chat, loom_serve_text_input_prefix_t prefix,
-    bool require_prefix, iree_host_size_t context_capacity, int32_t* scratch,
+    bool require_prefix, iree_host_size_t context_capacity,
     loom_serve_text_input_t* input, iree_allocator_t host_allocator) {
   iree_vm_buffer_t* history = loom_serve_text_input_history(chat, prefix);
   const bool retained = history != NULL;
@@ -48,10 +48,8 @@ iree_status_t loom_serve_text_input_prepare(
   }
   const iree_host_size_t retained_count = retained ? prefix.position : 0;
   const iree_host_size_t prefix_count = retained ? 1 : 0;
-  if (retained) {
-    scratch[0] = prefix.token;
-  }
   iree_host_size_t count = 0;
+  iree_vm_buffer_t* tokens = NULL;
   loom_serve_text_media_span_t* media_spans = NULL;
   iree_host_size_t media_span_count = 0;
   const iree_host_size_t prompt_offset =
@@ -59,10 +57,11 @@ iree_status_t loom_serve_text_input_prepare(
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_prepare_input(
       chat, prompt_offset, LOOM_SERVE_TEXT_CHAT_INPUT_RENDERED,
       retained ? prefix.boundary : LOOM_SERVE_TEXT_CHAT_BOUNDARY_FRESH,
-      context_capacity - prefix_count, prefix_count, host_allocator,
-      scratch + prefix_count, &count, &media_spans, &media_span_count));
+      context_capacity - prefix_count, prefix_count, host_allocator, &tokens,
+      &count, &media_spans, &media_span_count));
   count += prefix_count;
   if (count + chat->max_tokens - 1 > context_capacity - retained_count) {
+    iree_vm_buffer_release(tokens);
     iree_allocator_free(host_allocator, media_spans);
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
@@ -72,14 +71,8 @@ iree_status_t loom_serve_text_input_prepare(
         context_capacity, retained_count + count, chat->max_tokens,
         retained_count + count + chat->max_tokens - 1);
   }
-  iree_vm_buffer_t* tokens = NULL;
-  iree_status_t status = iree_vm_buffer_clone(
-      IREE_VM_BUFFER_ACCESS_FLAG_READ,
-      iree_make_const_byte_span(scratch, count * sizeof(*scratch)),
-      iree_alignof(int32_t), host_allocator, &tokens);
-  if (!iree_status_is_ok(status)) {
-    iree_allocator_free(host_allocator, media_spans);
-    return status;
+  if (retained) {
+    ((int32_t*)iree_vm_buffer_data(tokens))[0] = prefix.token;
   }
   iree_vm_buffer_retain(history);
   loom_serve_text_input_deinitialize(input, host_allocator);

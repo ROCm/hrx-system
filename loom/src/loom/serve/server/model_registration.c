@@ -1006,6 +1006,11 @@ static iree_status_t loom_serve_text_registration_create(
     loom_serve_registration_t* out_registration) {
   const loom_serve_model_registration_options_t* options = self;
   const loom_serve_text_configuration_t* text = &configuration->text;
+  loom_serve_pool_t* pool = loom_serve_device_group_pool_at(
+      options->device_group, configuration->pool_index);
+  loom_serve_memory_pool_t* memory_pool = loom_serve_pool_memory(pool);
+  const uint64_t cache_limit_bytes =
+      memory_pool ? loom_serve_memory_pool_limit(memory_pool) : 0;
   const iree_host_size_t shape_count =
       loom_serve_text_default_shapes(text->prefill_capacity, NULL);
   iree_host_size_t total = 0, shapes_offset = 0;
@@ -1020,15 +1025,12 @@ static iree_status_t loom_serve_text_registration_create(
   registration->options = options;
   registration->device = loom_serve_device_group_at(
       options->device_group, configuration->device_index);
-  loom_serve_pool_t* pool = loom_serve_device_group_pool_at(
-      options->device_group, configuration->pool_index);
   registration->configuration = configuration;
   registration->observer = observer;
   registration->stream = stream;
   registration->shapes =
       (loom_serve_packing_shape_t*)((uint8_t*)registration + shapes_offset);
   loom_serve_text_default_shapes(text->prefill_capacity, registration->shapes);
-  loom_serve_memory_pool_t* memory_pool = loom_serve_pool_memory(pool);
   const loom_serve_text_options_t model_options = {
       .mode = configuration->kind == LOOM_SERVE_MODEL_KIND_SEQUENCE
                   ? LOOM_SERVE_TEXT_MODE_ENCODE
@@ -1036,7 +1038,8 @@ static iree_status_t loom_serve_text_registration_create(
       .sources = configuration->sources,
       .prefill_capacity = text->prefill_capacity,
       .context_capacity = text->context_capacity,
-      .pool_capacity = text->pool_capacity,
+      .pool_capacity = memory_pool ? 0 : text->context_capacity,
+      .cache_limit_bytes = cache_limit_bytes,
       .epoch_count = shape_count,
       .epoch_shapes = registration->shapes,
       .draft_depth = text->draft_depth,

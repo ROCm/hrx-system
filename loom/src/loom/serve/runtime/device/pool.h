@@ -61,8 +61,9 @@ typedef struct loom_serve_pool_options_t {
   iree_device_size_t weight_slab_size;
   // Preferred sparse-state slab extent, in bytes.
   iree_device_size_t state_slab_size;
-  // Elastic physical-backing allowance in bytes; zero leaves it unbounded.
-  // Ordinary native storage is accounted separately and remains outside it.
+  // Elastic physical-backing allowance in bytes; zero uses source capacity.
+  // An explicit allowance can tighten that capacity, not increase it.
+  // Parameters, permanent buffers, sparse state, and workspace share it.
   uint64_t memory_limit;
   // Fixed workspace sanitizer policy, qualified by the HAL child allocator.
   iree_hal_asan_pool_options_t asan;
@@ -82,7 +83,7 @@ iree_status_t loom_serve_pool_allocate(iree_hal_device_group_t* group,
                                        loom_serve_pool_t** out_pool);
 
 // True while registered models, parameter banks, retained output, or elastic
-// reservations still borrow the owner. The pool's own idle workspace ranges
+// reservations still borrow the owner. The pool's own idle allocator ranges
 // are excluded. NULL is unused. Called on the serialized owner.
 bool loom_serve_pool_is_in_use(const loom_serve_pool_t* pool);
 
@@ -91,15 +92,15 @@ bool loom_serve_pool_is_in_use(const loom_serve_pool_t* pool);
 // execution, and result consumers retire before the caller destroys the pool.
 iree_status_t loom_serve_pool_free(loom_serve_pool_t* pool);
 
-// Serving-managed backing across every consumer of this owner. Storage and
-// retained have separate native sources; workspace is a breakdown of storage
-// for fixed backing or retained for elastic backing, not additional physical
-// consumption. Virtual statistics are zero for fixed backing. Native statistics
-// are independent atomic observations, not a coherent snapshot. Commitments
-// exclude host snapshots, loader storage, and driver overhead; HAL providers
-// may also hide physical allocation padding.
+// Serving-managed backing across every consumer of this owner. With elastic
+// backing, retained is the total and storage/workspace are disjoint allocator
+// breakdowns, not additional physical consumption. With fixed backing, storage
+// is the total and workspace is its subset. Virtual statistics are zero for
+// fixed backing. Native statistics are independent atomic observations, not a
+// coherent snapshot. Commitments exclude host snapshots, loader storage, and
+// driver overhead; HAL providers may also hide physical allocation padding.
 typedef struct loom_serve_pool_statistics_t {
-  // Ordinary native buffers, including fixed parameters, state, and workspace.
+  // Persistent allocator backing when elastic; all native backing when fixed.
   iree_hal_pool_stats_t storage;
   // All virtual reservations and backing, including weights, state, workspace.
   loom_serve_memory_statistics_t retained;

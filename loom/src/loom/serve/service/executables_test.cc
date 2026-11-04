@@ -928,7 +928,7 @@ class ArenaExecutablesTest : public ExecutablesTest {
     iree_hal_buffer_release(workspace_);
     workspace_ = nullptr;
     IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
-        loom_serve_pool_storage(storage_owner_),
+        WeightConsumerPool(),
         iree_hal_make_pool_reservation_request(payload.size(), 8),
         iree_infinite_timeout(), &workspace_));
     auto* residency = loom_serve_executables_residency(executables_);

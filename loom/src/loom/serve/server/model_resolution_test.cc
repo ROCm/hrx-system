@@ -31,7 +31,7 @@ constexpr char kCard[] = R"json({
   }}}},
   "presets": {"check": {"service": "chat", "variant": "tiny",
     "programs": "source", "execution": {"rows": 3, "context_capacity": 96,
-    "pool_capacity": 256, "prefill_capacity": 32, "max_tokens": 4}}}
+    "prefill_capacity": 32, "max_tokens": 4}}}
 })json";
 
 constexpr char kDeployment[] = R"json({
@@ -197,6 +197,27 @@ TEST_F(ModelResolutionTest, DeploymentMaximumCapsCardInitialRows) {
   EXPECT_EQ(resolved.text.max_sessions, 1u);
   EXPECT_EQ(resolved.text.rows, 1u);
   EXPECT_EQ(resolved.text.prefill_capacity, 32u);
+  loom_serve_model_configuration_deinitialize(&resolved);
+}
+
+TEST_F(ModelResolutionTest, ContextOverrideHasNoCardLocalPoolQuota) {
+  const std::string deployment = R"json({
+    "name": "fixture-text",
+    "model": {"path": "cards/model.json", "preset": "check"},
+    "definition": {"kind": "text", "context_capacity": 512}
+  })json";
+  Initialize(kCard, deployment);
+  loom_serve_model_resolution_t* resolution = nullptr;
+  IREE_ASSERT_OK(loom_serve_model_resolution_start(
+      Sink(), &configuration_, Observer(), allocator_, &resolution));
+  Execute();
+  loom_serve_model_configuration_t resolved = {};
+  iree_status_t status = iree_ok_status();
+  ASSERT_TRUE(
+      loom_serve_model_resolution_take(&resolution, &status, &resolved));
+  IREE_ASSERT_OK(status);
+  EXPECT_EQ(resolution, nullptr);
+  EXPECT_EQ(resolved.text.context_capacity, 512u);
   loom_serve_model_configuration_deinitialize(&resolved);
 }
 

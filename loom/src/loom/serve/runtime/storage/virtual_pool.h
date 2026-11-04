@@ -31,9 +31,17 @@ iree_status_t loom_serve_virtual_pool_allocate(
     loom_serve_memory_geometry_t geometry, iree_allocator_t host_allocator,
     loom_serve_virtual_pool_t** out_pool);
 
-// Borrowed HAL interface for TLSF or another logical allocator.
+// Borrowed default HAL source for TLSF or another logical allocator.
 iree_hal_pool_t* loom_serve_virtual_pool_handle(
     loom_serve_virtual_pool_t* pool);
+
+// Creates an independently accounted HAL source on this physical owner. The
+// returned interface is borrowed until pool destruction; logical allocators
+// retain it. Sources share cold progress, physical admission, and
+// notifications, but retain independent range reuse and trim policy. Call on
+// the exclusive outer owner before publishing sources to concurrent clients.
+iree_status_t loom_serve_virtual_pool_create_source(
+    loom_serve_virtual_pool_t* pool, iree_hal_pool_t** out_source);
 
 // Rounds logical bytes to this source's physical slab granularity. Saturates
 // at UINT64_MAX when the rounded extent is not representable; no allocation
@@ -41,10 +49,17 @@ iree_hal_pool_t* loom_serve_virtual_pool_handle(
 uint64_t loom_serve_virtual_pool_round_size(
     const loom_serve_virtual_pool_t* pool, uint64_t byte_length);
 
-// Copies this source's owner-maintained usage without collecting native work
-// or querying logical allocators. A subset of the physical owner's totals.
+// Copies aggregate usage across this owner's sources without collecting native
+// work or querying logical allocators. A subset of the physical owner's totals.
 loom_serve_memory_usage_t loom_serve_virtual_pool_memory_usage(
     const loom_serve_virtual_pool_t* pool);
+
+// Copies one source's physical usage on the serialized owner. source is an
+// interface returned by handle or create_source, not a child logical allocator.
+// Disjoint source accounting keeps permanent backing separate from workspace
+// whose realized bytes already fulfill protected execution credit.
+loom_serve_memory_usage_t loom_serve_virtual_pool_source_memory_usage(
+    const iree_hal_pool_t* source);
 
 // Installs the owner's nonblocking wake. Detachment joins callback access.
 // A blocking outer caller may instead use wait below. Neither callback may
@@ -57,7 +72,7 @@ void loom_serve_virtual_pool_set_observer(loom_serve_virtual_pool_t* pool,
 // failure propagates here and preserves the range until outer teardown.
 iree_status_t loom_serve_virtual_pool_advance(loom_serve_virtual_pool_t* pool);
 
-// Requests and advances all idle backing returns on the serialized physical
+// Requests and advances all sources' idle backing returns on the physical
 // owner, without scheduling that already-running owner. No cold acquisition or
 // recursive admission is attempted. Pending history and native detaches finish
 // through the same observer and subsequent owner calls.

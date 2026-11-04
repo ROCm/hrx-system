@@ -24,7 +24,7 @@ struct loom_serve_text_stream_block_t {
   loom_serve_text_stream_span_range_t* ranges;
   // Number of complete spans in this block.
   iree_host_size_t count;
-  // Allocated span capacity; the source response byte limit bounds growth.
+  // Allocated span capacity, reused across publications.
   iree_host_size_t capacity;
   // Final output, including an empty successful or failed completion.
   bool complete;
@@ -108,11 +108,9 @@ static iree_status_t loom_serve_text_stream_append(
   loom_serve_text_stream_t* stream = self;
   loom_serve_text_stream_block_t* block = &stream->staging;
   if (block->count == block->capacity) {
-    const iree_host_size_t capacity = block->capacity ? block->capacity * 2 : 4;
-    IREE_RETURN_IF_ERROR(iree_allocator_realloc(
-        stream->host_allocator, capacity * sizeof(*block->ranges),
+    IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
+        stream->host_allocator, 4, sizeof(*block->ranges), &block->capacity,
         (void**)&block->ranges));
-    block->capacity = capacity;
   }
   const loom_serve_text_stream_span_range_t range = {
       .kind = output->kind,

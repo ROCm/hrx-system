@@ -13,6 +13,17 @@
 
 namespace {
 
+TEST(MemoryInfo, PhysicalCapacity) {
+  const uint64_t capacity = iree_memory_query_physical_capacity();
+#if defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_ANDROID) || \
+    defined(IREE_PLATFORM_APPLE) || defined(IREE_PLATFORM_WINDOWS)
+  EXPECT_GT(capacity, 0u);
+  EXPECT_EQ(capacity % iree_memory_query_info().normal_page_size, 0u);
+#else
+  EXPECT_EQ(capacity, 0u);
+#endif
+}
+
 TEST(SecureMemory, WipeZerosMemory) {
   uint8_t buffer[256];
   memset(buffer, 0xFF, sizeof(buffer));

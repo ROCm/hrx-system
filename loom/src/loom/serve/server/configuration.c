@@ -233,7 +233,6 @@ typedef enum loom_serve_model_definition_field_e {
   DEFINITION_ROWS,
   DEFINITION_MAX_SESSIONS,
   DEFINITION_CONTEXT_CAPACITY,
-  DEFINITION_POOL_CAPACITY,
   DEFINITION_PREFILL_CAPACITY,
   DEFINITION_CHECKPOINT_CAPACITY,
   DEFINITION_PENDING_REQUESTS,
@@ -267,7 +266,6 @@ static iree_status_t loom_serve_model_configuration_text(
   *text = (loom_serve_text_configuration_t){
       .rows = 4,
       .context_capacity = 16384,
-      .pool_capacity = 65536,
       .prefill_capacity = 512,
       .session_cache_capacity = encodes ? 0 : LOOM_SERVE_TEXT_CACHE_AUTOMATIC,
       .prefix_cache_capacity = encodes ? 0 : LOOM_SERVE_TEXT_CACHE_AUTOMATIC,
@@ -293,16 +291,12 @@ static iree_status_t loom_serve_model_configuration_text(
   IREE_RETURN_IF_ERROR(loom_serve_model_configuration_size(
       &fields[DEFINITION_ADMISSION_OVERTAKES], 0, INT32_MAX,
       &text->admission_overtakes));
-  IREE_RETURN_IF_ERROR(
-      loom_serve_model_configuration_size(&fields[DEFINITION_CONTEXT_CAPACITY],
-                                          1, 262144, &text->context_capacity));
   IREE_RETURN_IF_ERROR(loom_serve_model_configuration_size(
-      &fields[DEFINITION_POOL_CAPACITY], 1,
-      iree_min((uint64_t)IREE_HOST_SIZE_MAX, (uint64_t)INT64_MAX),
-      &text->pool_capacity));
-  IREE_RETURN_IF_ERROR(
-      loom_serve_model_configuration_size(&fields[DEFINITION_PREFILL_CAPACITY],
-                                          1, 262144, &text->prefill_capacity));
+      &fields[DEFINITION_CONTEXT_CAPACITY], 1, INT32_MAX,
+      &text->context_capacity));
+  IREE_RETURN_IF_ERROR(loom_serve_model_configuration_size(
+      &fields[DEFINITION_PREFILL_CAPACITY], 1, INT32_MAX,
+      &text->prefill_capacity));
   IREE_RETURN_IF_ERROR(loom_serve_model_configuration_size(
       &fields[DEFINITION_CHECKPOINT_CAPACITY], 0, INT32_MAX,
       &text->checkpoint_capacity));
@@ -331,7 +325,7 @@ static iree_status_t loom_serve_model_configuration_text(
                             "combined endpoint capacity exceeds INT32_MAX");
   }
   IREE_RETURN_IF_ERROR(loom_serve_model_configuration_size(
-      &fields[DEFINITION_MAX_TOKENS], 1, 16384, &text->max_tokens));
+      &fields[DEFINITION_MAX_TOKENS], 1, INT32_MAX, &text->max_tokens));
   IREE_RETURN_IF_ERROR(loom_serve_model_configuration_size(
       &fields[DEFINITION_DRAFT_DEPTH], 0, 7, &text->draft_depth));
   IREE_RETURN_IF_ERROR(loom_serve_model_configuration_size(
@@ -410,9 +404,6 @@ static iree_status_t loom_serve_model_configuration_definition_parse(
       [DEFINITION_CONTEXT_CAPACITY] = {"context_capacity",
                                        IREE_JSON_VALUE_TYPE_NUMBER,
                                        .kinds = retained_kinds},
-      [DEFINITION_POOL_CAPACITY] = {"pool_capacity",
-                                    IREE_JSON_VALUE_TYPE_NUMBER,
-                                    .kinds = retained_kinds},
       [DEFINITION_PREFILL_CAPACITY] = {"prefill_capacity",
                                        IREE_JSON_VALUE_TYPE_NUMBER,
                                        .kinds = retained_kinds},
@@ -614,9 +605,10 @@ static iree_status_t loom_serve_model_configuration_definition_parse(
       &fields[DEFINITION_OPTIONS], host_allocator, &model->options));
   if (model->kind == LOOM_SERVE_MODEL_KIND_TEXT ||
       model->kind == LOOM_SERVE_MODEL_KIND_SEQUENCE) {
-    return loom_serve_model_configuration_text(
+    IREE_RETURN_IF_ERROR(loom_serve_model_configuration_text(
         fields, model->kind == LOOM_SERVE_MODEL_KIND_SEQUENCE, &model->sources,
-        &model->text, host_allocator);
+        &model->text, host_allocator));
+    return iree_ok_status();
   }
   if (model->kind == LOOM_SERVE_MODEL_KIND_IMAGE ||
       model->kind == LOOM_SERVE_MODEL_KIND_EMBEDDING ||

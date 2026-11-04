@@ -38,17 +38,20 @@ with an explicit truncation flag; truncation never merges owner identities.
 The resource sampler uses the same transport-independent typed sink as services;
 JSON framing is a separate projection, not the source's numeric interface.
 
-`storage` is the explicit pool's native retained-buffer backing. `elastic`, when
-present, is a distinct physical backing owner with its own budget. `workspace`
-is a child view backed by `storage` in fixed mode or by `elastic` otherwise.
+`elastic`, when present, is the explicit pool's complete physical backing and
+budget. `storage` and `workspace` are its persistent and command allocator
+breakdowns. With fixed backing, `storage` is the native total and `workspace`
+is its child view.
 Pool identity is its independent inventory index; models and consumer devices
-link to that owner rather than duplicating its totals. The browser plots the sum
-of native and elastic commitment once per pool and annotates workspace as
-included, never added. The elastic allowance applies to elastic commitment;
-ordinary native buffers are shown separately outside that allowance.
-Zero budget means unbounded, not exhausted. Virtual reserved bytes are address
-extent, not committed RAM. Pending, releasing, abandoned, reusable, and atomic
-workspace samples do not form a disjoint partition. The UI does not infer a
+link to that owner rather than duplicating its totals. The browser plots managed
+commitment once per pool, selecting the elastic total when present or the fixed
+storage total otherwise. Allocator breakdowns are included, never
+added. The elastic allowance includes permanent model buffers as well as
+parameters, sparse state, and command allocations.
+The elastic budget is the physical source capacity or a tighter explicit limit.
+Virtual reserved bytes are address extent, not committed RAM. Pending, releasing,
+abandoned, reusable, and atomic workspace samples do not form a disjoint
+partition. The UI does not infer a
 weights/KV/other split, physical addresses, or shared hardware capacity from
 these aggregate observations. Device request activity is explicitly distinct
 from hardware utilization and native queue depth.

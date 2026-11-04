@@ -123,6 +123,34 @@ TEST_F(SourceChatPolicyTest,
   EXPECT_EQ(policy->reasoning.default_effort, 0);
 }
 
+TEST_F(SourceChatPolicyTest, OutputBudgetsUseSignedTokenCoordinates) {
+  const auto* policy = loom_serve_test_text_policy_chat(policy_owner_);
+  for (const char* field : {"max_tokens", "max_completion_tokens"}) {
+    SCOPED_TRACE(field);
+    const std::string prefix =
+        R"({"model":"fixture-text","messages":[{"role":"user","content":"a"}],")" +
+        std::string(field) + "\":";
+    for (uint32_t capacity : {16385u, 1048576u, uint32_t{INT32_MAX}}) {
+      const std::string body = prefix + std::to_string(capacity) + "}";
+      loom_serve_text_chat_t chat = {};
+      IREE_ASSERT_OK(loom_serve_text_chat_initialize(
+          policy, policy->name, iree_make_cstring_view(body.c_str()), 1, 32,
+          host_allocator_, &chat));
+      EXPECT_EQ(chat.max_tokens, capacity);
+      loom_serve_text_chat_deinitialize(&chat);
+    }
+    for (const char* value : {"0", "-1", "2147483648", "4294967296", "1.5"}) {
+      const std::string body = prefix + value + "}";
+      loom_serve_text_chat_t chat = {};
+      IREE_EXPECT_STATUS_IS(
+          IREE_STATUS_INVALID_ARGUMENT,
+          loom_serve_text_chat_initialize(policy, policy->name,
+                                          iree_make_cstring_view(body.c_str()),
+                                          1, 32, host_allocator_, &chat));
+    }
+  }
+}
+
 TEST_F(SourceChatPolicyTest, StreamingBatchesReuseScratchWithoutHeapChurn) {
   const auto* policy = loom_serve_test_text_policy_chat(policy_owner_);
   const std::string body = Request(Message("user", "a"), 32);
@@ -277,7 +305,7 @@ TEST_F(SourceChatPolicyTest, CompletionFormattingReusesCapacityAcrossRows) {
 }
 
 TEST_F(SourceChatPolicyTest,
-       PreparedInputSurvivesScratchReuseAndHistoryEviction) {
+       PreparedInputOwnsExactTokensAcrossHistoryEviction) {
   const auto* policy = loom_serve_test_text_policy_chat(policy_owner_);
   const std::string first_body = Request(Message("user", "a"), 4);
   const std::string next_body =
@@ -306,27 +334,26 @@ TEST_F(SourceChatPolicyTest,
       .boundary = LOOM_SERVE_TEXT_CHAT_BOUNDARY_OPEN,
   };
   loom_serve_text_input_t input = {};
-  int32_t scratch[96];
-  IREE_ASSERT_OK(loom_serve_text_input_prepare(&next, prefix, true,
-                                               IREE_ARRAYSIZE(scratch), scratch,
-                                               &input, host_allocator_));
+  constexpr iree_host_size_t kContextCapacity = 1024 * 1024;
+  iree::vm::testing::CountingAllocator allocator;
+  IREE_ASSERT_OK(loom_serve_text_input_prepare(
+      &next, prefix, true, kContextCapacity, &input, allocator.allocator()));
   EXPECT_EQ(input.retained_count, 1u);
   EXPECT_EQ(std::vector<int32_t>(input.tokens, input.tokens + input.count),
             (std::vector<int32_t>{1, 3, 2}));
+  EXPECT_EQ(iree_vm_buffer_length(input.token_storage), 3 * sizeof(int32_t));
   const int32_t* prepared = input.tokens;
-  std::fill(std::begin(scratch), std::end(scratch), -7);
-  IREE_ASSERT_OK(loom_serve_text_input_prepare(&next, prefix, true,
-                                               IREE_ARRAYSIZE(scratch), scratch,
-                                               &input, host_allocator_));
+  const auto allocation_count = allocator.allocation_count();
+  IREE_ASSERT_OK(loom_serve_text_input_prepare(
+      &next, prefix, true, kContextCapacity, &input, allocator.allocator()));
   EXPECT_EQ(input.tokens, prepared);
-  EXPECT_TRUE(std::all_of(std::begin(scratch), std::end(scratch),
-                          [](int32_t value) { return value == -7; }));
+  EXPECT_EQ(allocator.allocation_count(), allocation_count);
   // The same full prompt exceeds this smaller context with or without reuse.
   // Diagnostics count retained input too, not merely the newly encoded suffix.
   for (const auto limited_prefix : {prefix, loom_serve_text_input_prefix_t{}}) {
     loom_serve_text_input_t limited = {};
-    auto failure = loom_serve_text_input_prepare(
-        &next, limited_prefix, false, 6, scratch, &limited, host_allocator_);
+    auto failure = loom_serve_text_input_prepare(&next, limited_prefix, false,
+                                                 6, &limited, host_allocator_);
     EXPECT_EQ(iree_status_code(failure), IREE_STATUS_OUT_OF_RANGE);
     const auto message = iree_status_message(failure);
     EXPECT_EQ(std::string(message.data, message.size),
@@ -340,28 +367,28 @@ TEST_F(SourceChatPolicyTest,
   }
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_text_input_prepare(&next, {}, true, IREE_ARRAYSIZE(scratch),
-                                    scratch, &input, host_allocator_));
+      loom_serve_text_input_prepare(&next, {}, true, kContextCapacity, &input,
+                                    allocator.allocator()));
   EXPECT_EQ(input.tokens, prepared);
   completion.reusable = false;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_serve_text_input_prepare(
-                            &next, prefix, true, IREE_ARRAYSIZE(scratch),
-                            scratch, &input, host_allocator_));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_serve_text_input_prepare(&next, prefix, true, kContextCapacity,
+                                    &input, allocator.allocator()));
   EXPECT_FALSE(loom_serve_text_input_is_current(&input, &next, prefix));
   completion.reusable = true;
   loom_serve_text_chat_completion_deinitialize(&completion);
   // Eviction releases native history independently. The prepared input's host
   // identity remains valid, but its suffix cannot be replayed as a fresh row.
   EXPECT_NE(input.history, nullptr);
-  IREE_ASSERT_OK(loom_serve_text_input_prepare(&next, {}, false,
-                                               IREE_ARRAYSIZE(scratch), scratch,
-                                               &input, host_allocator_));
+  IREE_ASSERT_OK(loom_serve_text_input_prepare(
+      &next, {}, false, kContextCapacity, &input, allocator.allocator()));
   EXPECT_EQ(input.retained_count, 0u);
   EXPECT_EQ(input.history, nullptr);
   EXPECT_EQ(std::vector<int32_t>(input.tokens, input.tokens + input.count),
             (std::vector<int32_t>{0, 1, 3, 2}));
-  loom_serve_text_input_deinitialize(&input, host_allocator_);
+  EXPECT_EQ(iree_vm_buffer_length(input.token_storage), 4 * sizeof(int32_t));
+  loom_serve_text_input_deinitialize(&input, allocator.allocator());
   loom_serve_text_chat_deinitialize(&next);
   loom_serve_text_chat_deinitialize(&first);
   loom_serve_text_tool_calls_deinitialize(&tools);
@@ -391,10 +418,9 @@ TEST_F(SourceChatPolicyTest, OrderedImagesReachSourceDefinedInputSpans) {
   EXPECT_TRUE(iree_string_view_equal(iree_string_builder_view(&chat.prompt),
                                      IREE_SV("axbx")));
   loom_serve_text_input_t input = {};
-  int32_t scratch[96];
-  IREE_ASSERT_OK(loom_serve_text_input_prepare(&chat, {}, false,
-                                               IREE_ARRAYSIZE(scratch), scratch,
-                                               &input, host_allocator_));
+  iree::vm::testing::CountingAllocator allocator;
+  IREE_ASSERT_OK(loom_serve_text_input_prepare(&chat, {}, false, 96, &input,
+                                               allocator.allocator()));
   EXPECT_EQ(std::vector<int32_t>(input.tokens, input.tokens + input.count),
             (std::vector<int32_t>{0, 2, 1, 2}));
   ASSERT_EQ(input.media_span_count, 2u);
@@ -404,7 +430,25 @@ TEST_F(SourceChatPolicyTest, OrderedImagesReachSourceDefinedInputSpans) {
   EXPECT_EQ(input.media_spans[1].projection_index, 1u);
   EXPECT_EQ(input.media_spans[1].input_offset, 3u);
   EXPECT_EQ(input.media_spans[1].input_count, 1u);
-  loom_serve_text_input_deinitialize(&input, host_allocator_);
+  EXPECT_EQ(iree_vm_buffer_length(input.token_storage), 4 * sizeof(int32_t));
+  const auto allocation_count = allocator.allocation_count();
+  loom_serve_text_input_deinitialize(&input, allocator.allocator());
+  // Exercise failures after source output and parsed media have been produced,
+  // including failure to allocate the final independently owned token buffer.
+  for (iree_host_size_t ordinal = 1; ordinal <= allocation_count; ++ordinal) {
+    SCOPED_TRACE(ordinal);
+    iree::vm::testing::CountingAllocator failing(ordinal);
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        loom_serve_text_input_prepare(&chat, {}, false, 96, &input,
+                                      failing.allocator()));
+    EXPECT_EQ(input.token_storage, nullptr);
+    EXPECT_EQ(input.tokens, nullptr);
+    EXPECT_EQ(input.count, 0u);
+    EXPECT_EQ(input.media_spans, nullptr);
+    EXPECT_EQ(input.media_span_count, 0u);
+    loom_serve_text_input_deinitialize(&input, failing.allocator());
+  }
   loom_serve_text_chat_deinitialize(&chat);
 }
 
@@ -456,10 +500,8 @@ TEST_F(SourceChatPolicyTest, TimestampedFramesReachSourceAsOneOrderedPart) {
   EXPECT_LE(pixels[2], 5u);
   loom_serve_media_image_input_deinitialize(&decoded);
   loom_serve_text_input_t input = {};
-  int32_t scratch[16];
-  IREE_ASSERT_OK(loom_serve_text_input_prepare(&chat, {}, false,
-                                               IREE_ARRAYSIZE(scratch), scratch,
-                                               &input, host_allocator_));
+  IREE_ASSERT_OK(loom_serve_text_input_prepare(&chat, {}, false, 16, &input,
+                                               host_allocator_));
   ASSERT_EQ(input.media_span_count, 2u);
   EXPECT_EQ(input.media_spans[1].projection_index, 1u);
   EXPECT_EQ(input.media_spans[1].input_offset, 1u);
@@ -668,26 +710,21 @@ TEST_F(SourceChatPolicyTest, RetainedHistoryRequiresExactOrderedMedia) {
       .boundary = LOOM_SERVE_TEXT_CHAT_BOUNDARY_OPEN,
   };
   loom_serve_text_input_t input = {};
-  int32_t scratch[96];
-  IREE_ASSERT_OK(loom_serve_text_input_prepare(&matching, prefix, true,
-                                               IREE_ARRAYSIZE(scratch), scratch,
+  IREE_ASSERT_OK(loom_serve_text_input_prepare(&matching, prefix, true, 96,
                                                &input, host_allocator_));
   EXPECT_EQ(input.retained_count, 1u);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_text_input_prepare(&different_image, prefix, true,
-                                    IREE_ARRAYSIZE(scratch), scratch, &input,
+      loom_serve_text_input_prepare(&different_image, prefix, true, 96, &input,
                                     host_allocator_));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_text_input_prepare(&different_detail, prefix, true,
-                                    IREE_ARRAYSIZE(scratch), scratch, &input,
+      loom_serve_text_input_prepare(&different_detail, prefix, true, 96, &input,
                                     host_allocator_));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_text_input_prepare(&different_placement, prefix, true,
-                                    IREE_ARRAYSIZE(scratch), scratch, &input,
-                                    host_allocator_));
+      loom_serve_text_input_prepare(&different_placement, prefix, true, 96,
+                                    &input, host_allocator_));
 
   loom_serve_text_input_deinitialize(&input, host_allocator_);
   loom_serve_text_chat_completion_deinitialize(&retained);

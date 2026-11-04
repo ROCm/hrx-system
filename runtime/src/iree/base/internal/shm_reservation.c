@@ -100,6 +100,31 @@ static iree_status_t iree_shm_reservation_prepare_unit(
   return iree_ok_status();
 }
 
+// Installed views already have replacement-unit boundaries. Empty ranges stay
+// as whole placeholders instead of acquiring one native descriptor per unit.
+static iree_status_t iree_shm_reservation_unmap_range(
+    const iree_shm_reservation_api_t* api, uint8_t* address,
+    iree_host_size_t byte_length) {
+  iree_status_t status = iree_ok_status();
+  iree_host_size_t offset = 0;
+  while (offset < byte_length && iree_status_is_ok(status)) {
+    MEMORY_BASIC_INFORMATION region = {0};
+    uint8_t* current = address + offset;
+    if (!VirtualQuery(current, &region, sizeof(region))) {
+      status = iree_shm_reservation_native_error("VirtualQuery");
+    } else {
+      if (region.State == MEM_COMMIT &&
+          !api->unmap(GetCurrentProcess(), current, MEM_PRESERVE_PLACEHOLDER)) {
+        status = iree_shm_reservation_native_error("UnmapViewOfFile2");
+      }
+      offset += iree_min(
+          byte_length - offset,
+          region.RegionSize - (current - (uint8_t*)region.BaseAddress));
+    }
+  }
+  return status;
+}
+
 #endif  // IREE_PLATFORM_WINDOWS
 
 bool iree_shm_reservation_is_supported(void) {
@@ -224,6 +249,11 @@ iree_status_t iree_shm_reservation_update(
   for (iree_host_size_t i = 0; i < update_count && iree_status_is_ok(status);
        ++i) {
     const iree_shm_mapping_update_t* update = &updates[i];
+    if (!update->source) {
+      status = iree_shm_reservation_unmap_range(
+          &api, reservation->base + update->target_offset, update->byte_length);
+      continue;
+    }
     for (iree_host_size_t offset = 0;
          offset < update->byte_length && iree_status_is_ok(status);
          offset +=
@@ -232,7 +262,7 @@ iree_status_t iree_shm_reservation_update(
       const iree_host_size_t unit_length =
           iree_min(reservation->granularity, update->byte_length - offset);
       status = iree_shm_reservation_prepare_unit(&api, address, unit_length);
-      if (iree_status_is_ok(status) && update->source &&
+      if (iree_status_is_ok(status) &&
           !api.map((HANDLE)(uintptr_t)update->source->handle.value,
                    GetCurrentProcess(), address, update->source_offset + offset,
                    unit_length, MEM_REPLACE_PLACEHOLDER,

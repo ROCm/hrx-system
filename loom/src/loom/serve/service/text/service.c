@@ -401,7 +401,7 @@ static iree_status_t loom_serve_text_prepare_ready(
   }
   if (session->request.phase == LOOM_SERVE_TEXT_REQUEST_PREFILL) {
     *out_ready = (loom_serve_ready_span_t){
-        session->request.input_count - session->request.input_offset, 1};
+        session->request.input.count - session->request.input.offset, 1};
   } else {
     // A final single output cannot amortize drafting. Near the context limit,
     // ordinary decode avoids writing speculative KV beyond allocated capacity.
@@ -455,16 +455,17 @@ static iree_status_t loom_serve_text_submit_epoch(
     const loom_serve_text_session_t* session = service->sessions[row];
     const bool prefill =
         session->request.phase == LOOM_SERVE_TEXT_REQUEST_PREFILL;
+    const int32_t* tokens =
+        iree_vm_buffer_const_data(session->request.input.storage);
     rows[i] = (loom_serve_text_epoch_row_t){
-        .input_tokens = prefill
-                            ? session->tokens + session->request.input_origin +
-                                  session->request.input_offset
-                            : NULL,
-        .input_count = prefill ? session->request.input_count -
-                                     session->request.input_offset
+        .input_tokens = prefill ? tokens + session->request.input.origin +
+                                      session->request.input.offset
+                                : NULL,
+        .input_count = prefill ? session->request.input.count -
+                                     session->request.input.offset
                                : 0,
         .input_offset =
-            session->request.input_origin + session->request.input_offset,
+            session->request.input.origin + session->request.input.offset,
         .media = prefill ? loom_serve_text_media_request_input(
                                session->request.media)
                          : NULL,
@@ -520,11 +521,11 @@ static void loom_serve_text_publish_epoch(loom_serve_text_service_t* service) {
         service->sessions[service->epoch.spans[i].row_index];
     const bool prefill = service->epoch.prefill[i];
     if (prefill) {
-      session->request.input_offset += service->epoch.results[i].known_count;
+      session->request.input.offset += service->epoch.results[i].known_count;
       loom_serve_text_media_request_consume(
           session->request.media,
-          session->request.input_origin + session->request.input_offset);
-      if (session->request.input_offset == session->request.input_count) {
+          session->request.input.origin + session->request.input.offset);
+      if (session->request.input.offset == session->request.input.count) {
         if (session->mode == LOOM_SERVE_TEXT_MODE_GENERATE) {
           session->request.phase = LOOM_SERVE_TEXT_REQUEST_DECODE;
         }
@@ -553,7 +554,7 @@ static iree_status_t loom_serve_text_process_output(void* user_data) {
         service->sessions[service->epoch.spans[i].row_index];
     if (session->mode == LOOM_SERVE_TEXT_MODE_ENCODE) {
       const bool final =
-          session->request.input_offset == session->request.input_count;
+          session->request.input.offset == session->request.input.count;
       const loom_serve_text_consumer_t consumer = session->request.consumer;
       status = consumer.vtable->append_sequence(
           consumer.self, iree_make_cstring_view(session->lifetime.name),
@@ -628,10 +629,10 @@ static iree_status_t loom_serve_text_capture_prefix(
     loom_serve_text_session_t* session =
         service->sessions[service->epoch.spans[i].row_index];
     const iree_host_size_t count =
-        session->request.input_origin + session->request.input_offset;
+        session->request.input.origin + session->request.input.offset;
     if (!service->epoch.prefill[i] ||
         session->request.phase != LOOM_SERVE_TEXT_REQUEST_PREFILL ||
-        session->request.retained_count != session->request.input_origin ||
+        session->request.retained_count != session->request.input.origin ||
         count < service->pool.geometry.block_size ||
         !session->request.consumer.vtable->is_open(
             session->request.consumer.self)) {
@@ -644,15 +645,15 @@ static iree_status_t loom_serve_text_capture_prefix(
                  loom_serve_text_model_prefill_capacity(service->model)) *
         service->scheduling.continuation_epochs;
     const iree_host_size_t input_count =
-        session->request.input_origin + session->request.input_count;
+        session->request.input.origin + session->request.input.count;
     const iree_host_size_t extension_start =
         input_count - iree_min(input_count, window);
     bool evicted = false;
     loom_serve_execution_frontier_t frontier;
     status = loom_serve_text_prefix_cache_submit(
         &service->prefixes, &session->request.chat, session->row, count,
-        session->tokens, extension_start, service->pending.prepared.prefix,
-        &evicted, &frontier);
+        iree_vm_buffer_const_data(session->request.input.storage),
+        extension_start, service->pending.prepared.prefix, &evicted, &frontier);
     service->pool.trim.pending |= evicted;
     if (iree_status_is_ok(status) && frontier.semaphores[0]) {
       service->completion.frontier = frontier;
@@ -744,8 +745,7 @@ static iree_status_t loom_serve_text_service_initialize(
       status = loom_serve_text_session_initialize(
           service->scheduling.model_mode,
           loom_serve_text_model_tokenizer(service->model),
-          service->scheduling.context_capacity, service->host_allocator,
-          service->sessions[i]);
+          service->host_allocator, service->sessions[i]);
       service->sessions[i]->row = loom_serve_text_model_row(service->model, i);
     }
   }
@@ -1461,9 +1461,7 @@ loom_serve_service_t loom_serve_text_service_interface(
                                  encodes ? activation_modalities : modalities},
            .context_length = service->scheduling.context_capacity,
            .max_output_tokens =
-               encodes ? 0
-                       : iree_min(service->scheduling.context_capacity,
-                                  LOOM_SERVE_TEXT_CHAT_MAX_OUTPUT_TOKENS),
+               encodes ? 0 : service->scheduling.context_capacity,
            .input_token_count = !encodes,
            .reasoning = encodes
                             ? (loom_serve_reasoning_t){0}

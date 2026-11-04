@@ -206,7 +206,7 @@ class SourceTextServiceTest : public ::testing::Test {
            weights_ + "\",\"tokenizer\":\"" +
            std::filesystem::absolute(tokenizer_).string() +
            "\",\"rows\":4,\"context_capacity\":96,"
-           "\"pool_capacity\":256,\"prefill_capacity\":32,"
+           "\"prefill_capacity\":32,"
            "\"checkpoint_capacity\":2,\"draft_depth\":0" +
            definition_fields + "}}";
   }

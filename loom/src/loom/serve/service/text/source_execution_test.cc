@@ -12,7 +12,34 @@
 namespace {
 
 using loom_serve::testing::text::Oracle;
+using loom_serve::testing::text::RegisteredSourceTextServiceTest;
 using loom_serve::testing::text::SourceTextServiceTest;
+
+TEST_F(RegisteredSourceTextServiceTest,
+       LongContextPublishesCapacityAndAdmitsCompleteRequests) {
+  ASSERT_NO_FATAL_FAILURE(StartManaged());
+  auto declaration = Declaration("fixture-text", directory_);
+  const std::string field = R"("context_capacity":96)";
+  const auto offset = declaration.find(field);
+  ASSERT_NE(offset, std::string::npos);
+  declaration.replace(offset, field.size(), R"("context_capacity":1048576)");
+  const auto registered = Read(Send(declaration, "", "/v1/models/register"));
+  ASSERT_EQ(registered.find("HTTP/1.1 202"), 0u) << registered;
+  const auto status =
+      WaitModelState("fixture-text", R"("registration":"ready")");
+  EXPECT_NE(status.find(R"("context_length":1048576)"), std::string::npos);
+  EXPECT_NE(status.find(R"("max_output_tokens":1048576)"), std::string::npos);
+
+  // The request parser accepts the output count; complete-input admission
+  // rejects it because the prompt also occupies the deployment's context.
+  const auto rejected = Read(Send(Request(Message("user", "abxa"), 1048576)));
+  EXPECT_NE(
+      rejected.find("request exceeds the available context size of 1048576"),
+      std::string::npos)
+      << rejected;
+  const auto response = Read(Send(Request(Message("user", "abxa"), 4)));
+  EXPECT_EQ(Content(response), Oracle::Complete("abxa", 4));
+}
 
 TEST_F(SourceTextServiceTest, PreparationActivatesWeightsOnlyWithDemand) {
   for (const auto flags : {0u, uint32_t{LOOM_SERVE_TEXT_LOAD_FLAG_DEMAND}}) {
@@ -400,7 +427,6 @@ TEST_F(GrowingTextServiceTest, GrowthKeepsLiveHistoriesHandlesAndCheckpoints) {
   IREE_ASSERT_OK(loom_serve_text_row_try_pin(original, &checkpoint));
   ASSERT_NE(checkpoint, nullptr);
   const auto activity = loom_serve_text_model_weight_activity(model_);
-  const auto initial = loom_serve_text_model_memory_statistics(model_);
   for (size_t capacity : {17u, 129u}) {
     const auto previous_count = loom_serve_text_model_row_count(model_);
     const auto previous = loom_serve_text_model_memory_statistics(model_);
@@ -432,7 +458,7 @@ TEST_F(GrowingTextServiceTest, GrowthKeepsLiveHistoriesHandlesAndCheckpoints) {
     EXPECT_EQ(loom_serve_text_model_row_count(model_), capacity);
     EXPECT_EQ(loom_serve_text_model_row(model_, 0), original);
     EXPECT_EQ(loom_serve_text_model_memory_statistics(model_).committed_bytes,
-              initial.committed_bytes);
+              previous.committed_bytes);
     std::vector<int32_t> tokens(capacity);
     std::vector<loom_serve_text_span_t> spans(capacity);
     for (size_t i = 0; i < capacity; ++i) {
@@ -665,6 +691,49 @@ TEST_F(SourceTextServiceTest, RejectsPoolOutsideSourceIntegerRepresentation) {
       loom_serve_text_model_allocate(device_, storage_owner_, &options,
                                      host_allocator_, &rejected));
   EXPECT_EQ(rejected, nullptr);
+}
+
+TEST_F(SourceTextServiceTest, PoolByteLimitDerivesLogicalAddressability) {
+  IREE_ASSERT_OK(loom_serve_text_model_free(model_));
+  model_ = nullptr;
+  auto options = ModelOptions();
+  options.pool_capacity = 0;
+  options.cache_limit_bytes = 65536;
+  IREE_ASSERT_OK(loom_serve_text_model_allocate(
+      device_, storage_owner_, &options, host_allocator_, &model_));
+  const auto usage = loom_serve_text_model_pool_usage(model_);
+  EXPECT_EQ(usage.block_size, 4u);
+  EXPECT_EQ(usage.capacity, 16384u);
+  EXPECT_EQ(usage.available, usage.capacity);
+}
+
+TEST_F(SourceTextServiceTest, PoolByteLimitMustFitOneContext) {
+  auto options = ModelOptions();
+  options.pool_capacity = 0;
+  options.cache_limit_bytes = 383;
+  loom_serve_text_model_t* rejected = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_serve_text_model_allocate(device_, storage_owner_, &options,
+                                     host_allocator_, &rejected));
+  EXPECT_EQ(rejected, nullptr);
+}
+
+TEST_F(SourceTextServiceTest, AutomaticEndpointsRequirePooledStorage) {
+  auto options = ModelOptions();
+  options.pool_capacity = 0;
+  options.checkpoint_capacity = 0;
+  options.cache = {
+      .target_bytes = 1024,
+      .session_capacity = LOOM_SERVE_TEXT_CACHE_AUTOMATIC,
+  };
+  loom_serve_text_load_t* rejected = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_serve_text_load_allocate(device_, storage_owner_, &options, nullptr,
+                                    nullptr, host_allocator_, &rejected));
+  EXPECT_EQ(rejected, nullptr);
+  loom_serve_text_load_free(rejected);
 }
 
 TEST_F(SourceTextServiceTest, WideSourceEpochsRetainExactHttpHistory) {

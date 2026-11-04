@@ -92,6 +92,9 @@ typedef struct iree_hal_tlsf_pool_t {
   // Minimum backing byte length requested for newly grown slabs.
   iree_device_size_t backing_slab_length;
 
+  // Largest request served from shared slabs instead of dedicated backing.
+  iree_device_size_t max_suballocation_size;
+
   // Maximum user-visible reservation length, or zero for an unbounded source.
   iree_device_size_t max_reservation_size;
 
@@ -837,6 +840,11 @@ static void iree_hal_tlsf_pool_return_allocation(
 iree_status_t iree_hal_tlsf_pool_query_backing_request(
     iree_hal_pool_t* backing_pool, const iree_hal_tlsf_pool_options_t* options,
     iree_hal_pool_reservation_request_t* out_request) {
+  if (options->max_suballocation_size > options->tlsf_options.range_length) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "max_suballocation_size must not exceed range_length");
+  }
   IREE_RETURN_IF_ERROR(
       iree_hal_pool_validate_asan_options(backing_pool, &options->asan));
   iree_hal_pool_capabilities_t capabilities;
@@ -859,6 +867,12 @@ static iree_status_t iree_hal_tlsf_pool_create_impl(
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "range_length must be > 0");
+  }
+  if (options.max_suballocation_size > options.tlsf_options.range_length) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "max_suballocation_size must not exceed range_length");
   }
   if (backing_pool) {
     if (options.tlsf_options.initial_frontier) {
@@ -958,6 +972,9 @@ static iree_status_t iree_hal_tlsf_pool_create_impl(
   pool->reservation_layout =
       iree_hal_tlsf_pool_reservation_layout(tlsf_options.frontier_capacity);
   pool->backing_slab_length = backing_slab_length;
+  pool->max_suballocation_size = options.max_suballocation_size
+                                     ? options.max_suballocation_size
+                                     : tlsf_options.range_length;
   pool->max_reservation_size = max_reservation_size;
   pool->asan_options = options.asan;
   pool->base.asan_enabled =
@@ -1028,10 +1045,11 @@ IREE_API_EXPORT iree_status_t iree_hal_tlsf_pool_create_from_buffer(
     iree_allocator_t host_allocator, iree_hal_pool_t** out_pool) {
   *out_pool = NULL;
   if (options->tlsf_options.range_length != 0 ||
-      options->tlsf_options.initial_frontier) {
+      options->tlsf_options.initial_frontier ||
+      options->max_suballocation_size != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "finite TLSF geometry and history come from its buffer");
+        "finite TLSF geometry, history, and capacity come from its buffer");
   }
   iree_hal_tlsf_pool_options_t resolved = *options;
   iree_device_size_t alignment = resolved.tlsf_options.alignment;
@@ -1197,7 +1215,7 @@ static bool iree_hal_tlsf_pool_request_is_dedicated(
     const iree_hal_tlsf_pool_t* pool,
     const iree_hal_pool_reservation_request_t* request) {
   return pool->backing_pool &&
-         (request->allocation_size > pool->slab_options.range_length ||
+         (request->allocation_size > pool->max_suballocation_size ||
           request->min_alignment > pool->slab_options.alignment);
 }
 

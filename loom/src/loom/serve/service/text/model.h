@@ -115,12 +115,18 @@ typedef struct loom_serve_text_options_t {
   iree_host_size_t prefill_capacity;
   // Logical attention-position ceiling per row, not a pooled reservation.
   iree_host_size_t context_capacity;
-  // Shared cache slot capacity, divisible by the source-declared page
-  // size. Nonzero selects paged packed execution; zero uses dense addressing.
-  // This is independent of the logical context ceiling and requires epochs.
-  // The count fits signed i64 for source bootstrap; source geometry must fit
-  // UINT32_MAX physical pages before native page IDs are allocated.
+  // Resolved cache addressability in token positions. The server derives this
+  // from backing policy; direct internal callers may select dense addressing
+  // with zero or supply a source-valid explicit test geometry. Nonzero requires
+  // epochs and must be divisible by the source-declared page size. The count
+  // fits signed i64 for source bootstrap; source geometry must fit UINT32_MAX
+  // physical pages before native page IDs are allocated.
   iree_host_size_t pool_capacity;
+  // Resident cache addressability from the shared elastic pool's physical
+  // capacity and optional budget, not currently free memory. Source page
+  // geometry converts this byte bound to token positions without committing
+  // backing. Nonzero is mutually exclusive with pool_capacity.
+  uint64_t cache_limit_bytes;
   // Number of host packed token/span shape buckets; zero selects isolated
   // execution. Source may map several buckets to the same command.
   iree_host_size_t epoch_count;

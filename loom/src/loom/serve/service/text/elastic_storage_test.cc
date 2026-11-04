@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/serve/service/text/model_instance.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/serve/testing/native_allocator.h"
 #include "loom/serve/testing/service_application.h"
@@ -11,6 +12,7 @@
 namespace {
 
 using loom_serve::testing::text::Oracle;
+using loom_serve::testing::text::OwnerTurn;
 using loom_serve::testing::text::SourceTextServiceTest;
 
 class ElasticTextServiceTest : public SourceTextServiceTest {
@@ -21,6 +23,16 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
     auto* pool = loom_serve_pool_memory(storage_owner_);
     loom_serve_memory_pool_trim(pool, 0);
     IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+  }
+
+  void TearDown() override {
+    SourceTextServiceTest::TearDown();
+    // Pool ownership returns to the outer fixture only after the router joins.
+    loom_serve_memory_operation_await(filler_operation_);
+    IREE_EXPECT_OK(loom_serve_memory_operation_query_status(filler_operation_));
+    loom_serve_memory_operation_free(filler_operation_);
+    IREE_EXPECT_OK(loom_serve_virtual_buffer_free(filler_));
+    iree_hal_semaphore_release(filler_ready_);
   }
 
   void WaitFrontier(const loom_serve_execution_frontier_t& frontier) {
@@ -46,6 +58,8 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
   void CheckPrefixBackingRetirement(bool trim_first) {
     const iree_device_size_t slab_size =
         loom_serve_test_application_options_default().slab_size;
+    const iree_device_size_t native_size =
+        loom_serve_pool_state_geometry(storage_owner_).minimum_size;
     auto options = ModelOptions();
     options.context_capacity = slab_size / 8;
     options.pool_capacity = 4 * options.context_capacity;
@@ -57,9 +71,9 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
     };
     const std::unique_ptr<loom_serve_text_model_t, decltype(release_model)>
         owner(source, release_model);
-    // Private state occupies its own slab after the four-byte-per-token KV
-    // plane. Fill exactly one KV slab;
-    // a new COW tail must acquire native backing, not reuse an existing page.
+    // Fill exactly one four-byte-per-token KV slab. A new COW tail must acquire
+    // another full KV slab; recurrent state occupies one native extent instead
+    // of being rounded to the KV replacement size.
     const size_t extents[] = {4, options.context_capacity,
                               slab_size / 4 - 4 - options.context_capacity};
     for (size_t i = 0; i < IREE_ARRAYSIZE(extents); ++i) {
@@ -77,7 +91,28 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
     IREE_ASSERT_OK(
         loom_serve_text_row_prefill(warm, IREE_ARRAYSIZE(tokens), tokens));
     ASSERT_EQ(loom_serve_text_model_memory_statistics(source).committed_bytes,
-              2 * slab_size);
+              slab_size + native_size);
+    // Occupy the shared parent's remaining slices without growing physical
+    // commitment. The COW page below must then acquire a new native parent.
+    auto* memory_pool = loom_serve_pool_memory(storage_owner_);
+    const auto before_filler = loom_serve_memory_pool_statistics(memory_pool);
+    ASSERT_GT(before_filler.cached_bytes, 0u);
+    ASSERT_EQ(before_filler.cached_bytes % native_size, 0u);
+    loom_serve_memory_statistics_t filler_statistics = {0};
+    loom_serve_virtual_buffer_t* filler = nullptr;
+    IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+        memory_pool, loom_serve_pool_state_geometry(storage_owner_),
+        before_filler.cached_bytes, 256, &filler_statistics, &filler));
+    const auto free_filler = [](loom_serve_virtual_buffer_t* buffer) {
+      IREE_EXPECT_OK(loom_serve_virtual_buffer_free(buffer));
+    };
+    std::unique_ptr<loom_serve_virtual_buffer_t, decltype(free_filler)>
+        filler_owner(filler, free_filler);
+    IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(
+        filler, 0, before_filler.cached_bytes));
+    const auto after_filler = loom_serve_memory_pool_statistics(memory_pool);
+    EXPECT_EQ(after_filler.committed_bytes, before_filler.committed_bytes);
+    EXPECT_EQ(after_filler.cached_bytes, 0u);
     loom_serve_text_checkpoint_t* checkpoint = nullptr;
     loom_serve_execution_frontier_t frontier;
     {
@@ -87,7 +122,7 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
       gate.WaitEntered();
       ASSERT_NE(checkpoint, nullptr);
       EXPECT_EQ(loom_serve_text_model_memory_statistics(source).pending_bytes,
-                slab_size);
+                native_size);
       const int32_t token = 1;
       IREE_ASSERT_OK(loom_serve_text_row_prefill(warm, 1, &token));
       Oracle peer;
@@ -95,6 +130,7 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
       EXPECT_EQ(loom_serve_text_row_token(warm), peer.Predict());
     }
     ASSERT_NO_FATAL_FAILURE(WaitFrontier(frontier));
+    filler_owner.reset();
     if (trim_first) {
       loom_serve_text_trim_result_t result;
       IREE_ASSERT_OK(loom_serve_text_model_trim(source, &result));
@@ -157,18 +193,60 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
     ASSERT_NO_FATAL_FAILURE(
         WaitModelState("fixture-text", R"("phase":"idle")"));
     ASSERT_FALSE(HasPendingBacking(Read(Send("", "", "/v1/status", "GET"))));
+    // Keep the cold request on the native allocation path even when warm
+    // models leave reusable slices in a shared physical parent.
+    auto* memory_pool = loom_serve_pool_memory(storage_owner_);
+    IREE_ASSERT_OK(iree_hal_semaphore_create(
+        loom_serve_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+        0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &filler_ready_));
+    loom_serve_memory_statistics_t before_filler = {};
+    // The fixture has one worker: owner turns exclude router pool accesses,
+    // while native readiness is awaited only by the outer test thread.
+    ASSERT_EQ(WorkerCount(), 1u);
+    ASSERT_NO_FATAL_FAILURE(
+        OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
+          before_filler = loom_serve_memory_pool_statistics(memory_pool);
+          ASSERT_GT(before_filler.cached_bytes, 0u);
+          IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+              memory_pool, loom_serve_pool_state_geometry(storage_owner_),
+              before_filler.cached_bytes, 256, &filler_statistics_, &filler_));
+          const loom_serve_memory_range_t range = {filler_, 0,
+                                                   before_filler.cached_bytes};
+          loom_serve_memory_admission_t admission;
+          IREE_ASSERT_OK(loom_serve_memory_pool_commit_async(
+              memory_pool, 1, &range, filler_ready_, 1, &admission,
+              &filler_operation_));
+          ASSERT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE);
+        }));
+    if (HasFatalFailure()) {
+      return;
+    }
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(
+        filler_ready_, 1, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+    ASSERT_NO_FATAL_FAILURE(
+        OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
+          ASSERT_TRUE(
+              loom_serve_memory_operation_is_complete(filler_operation_));
+          IREE_ASSERT_OK(
+              loom_serve_memory_operation_query_status(filler_operation_));
+          const auto after_filler =
+              loom_serve_memory_pool_statistics(memory_pool);
+          EXPECT_EQ(after_filler.committed_bytes,
+                    before_filler.committed_bytes);
+          EXPECT_EQ(after_filler.cached_bytes, 0u);
+        }));
+    if (HasFatalFailure()) {
+      return;
+    }
     int cold = -1;
     {
       // The application has one task worker. Only the HAL's existing native
       // cold executor is held; the normal router and warm model must progress.
       loom_serve::testing::ScopedNativeHold gate(device_);
       cold = Send(cold_request);
-      while (!http_.failed() && !HasFatalFailure()) {
-        if (HasPendingBacking(Read(Send("", "", "/v1/status", "GET")))) {
-          break;
-        }
-      }
+      gate.WaitEntered();
       ASSERT_FALSE(http_.failed());
+      ASSERT_TRUE(HasPendingBacking(Read(Send("", "", "/v1/status", "GET"))));
       if (cancel) {
         // A disconnected peer does not release native mapping borrowers.
         ASSERT_EQ(close(cold), 0);
@@ -192,6 +270,15 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
     }
     EXPECT_FALSE(HasPendingBacking(Read(Send("", "", "/v1/status", "GET"))));
   }
+
+  // Spare shared backing held through router shutdown in cold-admission cases.
+  loom_serve_virtual_buffer_t* filler_ = nullptr;
+  // Accounting outlives the filler's asynchronous commitment and destruction.
+  loom_serve_memory_statistics_t filler_statistics_ = {};
+  // Accepted commitment retained until the serialized router owner has joined.
+  loom_serve_memory_operation_t* filler_operation_ = nullptr;
+  // Native readiness waited by the outer test without publishing pool state.
+  iree_hal_semaphore_t* filler_ready_ = nullptr;
 };
 
 class RegisteredElasticTextServiceTest : public ElasticTextServiceTest {
@@ -204,6 +291,76 @@ TEST_F(ElasticTextServiceTest,
   CheckPrefixBackingRetirement(/*trim_first=*/false);
 }
 
+TEST_F(ElasticTextServiceTest,
+       AutomaticAddressabilityDoesNotScaleLiveBackingOrDirectories) {
+  struct Observation {
+    // Address space retained independently of physical backing.
+    uint64_t reserved_bytes;
+    // Live mapped backing before the model retires.
+    uint64_t mapped_bytes;
+    // Materialized page identities, not the maximum page namespace.
+    uint32_t directory_capacity;
+    // Cold compaction scratch remains absent before compaction is requested.
+    uint32_t compaction_capacity;
+  };
+  const auto observe = [&](iree_host_size_t capacity,
+                           Observation* observation) {
+    IREE_ASSERT_OK(loom_serve_test_pool_trim_and_drain(storage_owner_, 0));
+    auto* memory_pool = loom_serve_pool_memory(storage_owner_);
+    auto options = ModelOptions();
+    options.pool_capacity = 0;
+    // The source fixture declares four payload bytes per logical token. The
+    // real preparation path, not this caller, converts the byte boundary.
+    options.cache_limit_bytes = uint64_t{capacity} * sizeof(int32_t);
+    loom_serve_text_model_t* source = nullptr;
+    IREE_ASSERT_OK(loom_serve_text_model_allocate(
+        device_, storage_owner_, &options, host_allocator_, &source));
+    const auto release_model = [](loom_serve_text_model_t* model) {
+      IREE_EXPECT_OK(loom_serve_text_model_free(model));
+    };
+    std::unique_ptr<loom_serve_text_model_t, decltype(release_model)> owner(
+        source, release_model);
+    EXPECT_EQ(loom_serve_text_model_pool_usage(source).available, capacity);
+    bool admitted = false;
+    IREE_ASSERT_OK(loom_serve_text_row_try_reserve(
+        loom_serve_text_model_row(source, 0), LOOM_SERVE_TEXT_RESERVE_FRESH,
+        nullptr, 4, &admitted));
+    ASSERT_TRUE(admitted);
+    const int32_t tokens[] = {0, 1, 2};
+    auto* row = loom_serve_text_model_row(source, 0);
+    IREE_ASSERT_OK(
+        loom_serve_text_row_prefill(row, IREE_ARRAYSIZE(tokens), tokens));
+    Oracle reference;
+    reference.Consume("abx");
+    EXPECT_EQ(loom_serve_text_row_token(row), reference.Predict());
+    const auto after = loom_serve_text_model_memory_statistics(source);
+    EXPECT_EQ(loom_serve_text_model_pool_usage(source).available, capacity - 4);
+    IREE_ASSERT_OK(loom_serve_memory_pool_await(memory_pool));
+    *observation = {
+        .reserved_bytes = after.reserved_bytes,
+        .mapped_bytes = after.committed_bytes,
+        .directory_capacity = source->state.cache.pool.capacity,
+        .compaction_capacity = source->state.cache.destination_capacity,
+    };
+    owner.reset();
+    IREE_ASSERT_OK(loom_serve_test_pool_trim_and_drain(storage_owner_, 0));
+  };
+
+  Observation small, maximum;
+  ASSERT_NO_FATAL_FAILURE(observe(256, &small));
+  ASSERT_NO_FATAL_FAILURE(observe(128 * 1024 * 1024, &maximum));
+  const auto geometry = loom_serve_pool_state_geometry(storage_owner_);
+  EXPECT_GT(maximum.reserved_bytes, small.reserved_bytes);
+  // The tiny source can co-locate cache and private bytes in one mapping at
+  // the smaller stride. Separating them at the maximum may add a mapping, but
+  // both live footprints still fit the same physical parent.
+  EXPECT_EQ(iree_device_align(maximum.mapped_bytes, geometry.backing_size),
+            iree_device_align(small.mapped_bytes, geometry.backing_size));
+  EXPECT_EQ(maximum.directory_capacity, small.directory_capacity);
+  EXPECT_EQ(maximum.compaction_capacity, 0u);
+  EXPECT_EQ(small.compaction_capacity, 0u);
+}
+
 TEST_F(ElasticTextServiceTest, PrefixNativeBackingRetiresBeforeTrim) {
   CheckPrefixBackingRetirement(/*trim_first=*/true);
 }
@@ -211,6 +368,8 @@ TEST_F(ElasticTextServiceTest, PrefixNativeBackingRetiresBeforeTrim) {
 TEST_F(ElasticTextServiceTest, TrimPreservesSparseCacheWithoutPhysicalSavings) {
   const uint64_t slab_size =
       loom_serve_test_application_options_default().slab_size;
+  const uint64_t mapping_size =
+      loom_serve_pool_state_geometry(storage_owner_).mapping_size;
   // Packing within one slab and replacing one live slab with another both
   // leave the same footprint. Neither justifies moving a shared cache page.
   for (uint64_t hole_extent : {UINT64_C(32), slab_size / 4}) {
@@ -261,7 +420,7 @@ TEST_F(ElasticTextServiceTest, TrimPreservesSparseCacheWithoutPhysicalSavings) {
     EXPECT_EQ(trim.copied_bytes, 0u);
     EXPECT_EQ(trim.released_bytes, hole_extent == 32 ? 0 : slab_size);
     EXPECT_EQ(loom_serve_text_model_memory_statistics(sparse).committed_bytes,
-              2 * slab_size);
+              2 * mapping_size);
     IREE_ASSERT_OK(
         loom_serve_text_row_try_restore(hole, checkpoint, &admitted));
     ASSERT_TRUE(admitted);
@@ -443,13 +602,16 @@ TEST_F(RegisteredElasticTextServiceTest,
 }
 
 TEST_F(ElasticTextServiceTest,
-       CompactionYieldsNativeReleasesAndPreservesSharedCheckpoint) {
+       CompactionReusesPackedParentAndPreservesSharedCheckpoint) {
   const iree_device_size_t slab_size =
       loom_serve_test_application_options_default().slab_size;
+  const iree_device_size_t mapping_size =
+      loom_serve_pool_state_geometry(storage_owner_).mapping_size;
   auto options = ModelOptions();
-  // Eight full reservations touch four KV slabs. Retain one low page and
-  // one upper page: dead backing retires first, then compaction must reduce
-  // the two live KV slabs to one. No long prompt is executed.
+  // Eight full reservations touch four KV slabs. Retain one low page and one
+  // upper page: dead bulk backing retires while both short live tails remain
+  // packed in the shared parent. Compaction returns one mapping for reuse
+  // without acquiring or releasing another physical parent.
   options.context_capacity = slab_size / 8;
   options.pool_capacity = slab_size;
   options.row_count = 8;
@@ -488,7 +650,7 @@ TEST_F(ElasticTextServiceTest,
   IREE_ASSERT_OK(loom_serve_text_row_try_pin(row, &checkpoint));
   ASSERT_NE(checkpoint, nullptr);
   const auto before = loom_serve_text_model_memory_statistics(sparse);
-  ASSERT_EQ(before.committed_bytes, 5 * slab_size);
+  ASSERT_EQ(before.committed_bytes, 4 * slab_size + 2 * mapping_size);
 
   auto* warm = loom_serve_text_model_row(model_, 0);
   IREE_ASSERT_OK(
@@ -517,13 +679,15 @@ TEST_F(ElasticTextServiceTest,
     const auto physical = loom_serve_memory_pool_statistics(
         loom_serve_pool_memory(storage_owner_));
     const auto returned = loom_serve_text_model_memory_statistics(sparse);
-    EXPECT_EQ(returned.committed_bytes, before.committed_bytes - 2 * slab_size);
+    EXPECT_EQ(returned.committed_bytes, 4 * mapping_size);
     EXPECT_EQ(returned.releasing_bytes, 0u);
     EXPECT_GE(physical.releasing_bytes, slab_size);
     ASSERT_NO_FATAL_FAILURE(advance_warm());
   }
   IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
-  bool complete = true;
+  const uint64_t physical_after_bulk_trim =
+      loom_serve_memory_pool_statistics(pool).committed_bytes;
+  bool complete = false;
   IREE_ASSERT_OK(loom_serve_text_model_complete_trim(sparse, &result, &complete,
                                                      &frontier));
   ASSERT_FALSE(complete);
@@ -535,26 +699,15 @@ TEST_F(ElasticTextServiceTest,
   ASSERT_FALSE(complete);
   ASSERT_NO_FATAL_FAILURE(wait_frontier());
   IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
-  {
-    loom_serve::testing::ScopedNativeHold gate(device_,
-                                               IREE_ALLOCATOR_COMMAND_FREE);
-    loom_serve_memory_pool_trim(pool, 0);
-    gate.WaitEntered();
-    const auto physical = loom_serve_memory_pool_statistics(
-        loom_serve_pool_memory(storage_owner_));
-    const auto returned = loom_serve_text_model_memory_statistics(sparse);
-    EXPECT_EQ(returned.committed_bytes, 2 * slab_size);
-    EXPECT_EQ(returned.releasing_bytes, 0u);
-    EXPECT_GE(physical.releasing_bytes, slab_size);
-    ASSERT_NO_FATAL_FAILURE(advance_warm());
-  }
-  IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
   IREE_ASSERT_OK(loom_serve_text_model_complete_trim(sparse, &result, &complete,
                                                      &frontier));
   ASSERT_TRUE(complete);
-  EXPECT_EQ(result.released_bytes, 3 * slab_size);
-  EXPECT_EQ(loom_serve_text_model_memory_statistics(sparse).committed_bytes,
-            2 * slab_size);
+  const auto after = loom_serve_text_model_memory_statistics(sparse);
+  EXPECT_EQ(result.released_bytes,
+            before.committed_bytes - after.committed_bytes);
+  EXPECT_EQ(after.committed_bytes, 3 * mapping_size);
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes,
+            physical_after_bulk_trim);
 
   // The compacted page is still shared. Appending detaches its partial tail;
   // restoring the immutable endpoint must retain the original prediction.
@@ -684,10 +837,7 @@ TEST_F(ElasticTextServiceTest, RetirementOwnsAcceptedCheckpointCapture) {
   // Physical capacity returns at the outer pool join, not model retirement.
   IREE_ASSERT_OK(loom_serve_test_pool_trim_and_drain(storage_owner_, 0));
   const auto memory = loom_serve_pool_statistics(storage_owner_);
-  EXPECT_EQ(memory.retained.reserved_bytes,
-            loom_serve_workspace_memory_usage(
-                loom_serve_pool_workspace(storage_owner_))
-                .reserved_bytes);
+  EXPECT_FALSE(loom_serve_pool_is_in_use(storage_owner_));
   EXPECT_EQ(memory.retained.pending_bytes, 0u);
   EXPECT_EQ(memory.retained.committed_bytes, 0u);
   EXPECT_EQ(memory.retained.releasing_bytes, 0u);

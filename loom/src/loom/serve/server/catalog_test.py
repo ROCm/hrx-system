@@ -141,7 +141,8 @@ def check_parameter_residency(client, backing, workers):
                 assert parameters["committed_bytes"] == 0, cold
                 assert before["parameters"]["primary"]["committed_bytes"] > 0, before
                 assert parameters["reserved_bytes"] > 0, cold
-                assert memory_before["limit_bytes"] is None, memory_before
+                assert 0 < memory_before["limit_bytes"] < 2**64 - 1, memory_before
+                assert memory_cold["limit_bytes"] == memory_before["limit_bytes"]
                 assert memory_cold["reserved_bytes"] == memory_before["reserved_bytes"]
                 released = before["parameters"]["primary"]["committed_bytes"]
                 assert (
@@ -513,13 +514,16 @@ def check_pool_trim(client, backing, workers):
                 assert not cold["parameters"]["primary"]["active"], cold
                 assert cold["parameters"]["primary"]["committed_bytes"] == 0, cold
                 assert memory_pinned["reserved_bytes"] == memory_cold["reserved_bytes"]
-                assert memory_cold["cached_bytes"] == 0, memory_cold
-                assert (
-                    memory_pinned["committed_bytes"]
-                    - memory_pinned["cached_bytes"]
-                    - memory_cold["committed_bytes"]
-                    == released
-                ), (memory_pinned, memory_cold)
+                # A retained continuation keeps its shared state parent alive.
+                # The unused portion remains immediately reusable even though
+                # no complete parent can be returned to native storage.
+                pinned_live = (
+                    memory_pinned["committed_bytes"] - memory_pinned["cached_bytes"]
+                )
+                cold_live = memory_cold["committed_bytes"] - memory_cold["cached_bytes"]
+                assert memory_cold["cached_bytes"] > 0, memory_cold
+                assert cold_live > 0, memory_cold
+                assert pinned_live - cold_live == released, (memory_pinned, memory_cold)
                 assert (
                     memory_cold["released_bytes"] - memory_pinned["released_bytes"]
                     == released
@@ -740,9 +744,15 @@ def check_empty_server(server_command, directory, driver, backing):
                 memory["retained"]["reserved_bytes"] if backing == "elastic" else 0
             )
             assert (reserved_bytes > 0) == (backing == "elastic"), memory
+            limit_bytes = 0
+            if backing == "elastic":
+                limit_bytes = memory["retained"]["limit_bytes"]
+                assert 0 < limit_bytes < 2**64 - 1, memory
+                if memory_limit:
+                    assert limit_bytes == memory_limit, memory
             assert memory["retained"] == (
                 {
-                    "limit_bytes": memory_limit or None,
+                    "limit_bytes": limit_bytes,
                     "reserved_bytes": reserved_bytes,
                     "committed_bytes": 0,
                     "abandoned_bytes": 0,
@@ -1452,12 +1462,13 @@ def check_dynamic_catalog(
         for pool in retired_status["resources"]["pools"]:
             retained = pool["memory"]["retained"]
             if retained is not None:
-                # Removing every model preserves shared workspace addresses
-                # and reusable backing, not any model-owned physical storage.
+                # Removing every model preserves reusable allocator addresses
+                # and backing, not any model-owned physical storage.
                 assert retained["reserved_bytes"] > 0, retained
                 assert retained["committed_bytes"] == (
                     retained["cached_bytes"]
                     + pool["memory"]["workspace"]["committed_bytes"]
+                    + pool["memory"]["storage"]["committed_bytes"]
                 ), pool["memory"]
                 assert retained["pending_bytes"] == retained["releasing_bytes"] == 0, (
                     retained

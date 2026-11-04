@@ -21,14 +21,12 @@ static iree_status_t iree_tokenizer_bpe_symbols_reserve(
       2 * sizeof(iree_tokenizer_bpe_heap_entry_t);
   iree_host_size_t inline_size = model->backtrack_stack_capacity *
                                  sizeof(iree_tokenizer_bpe_backtrack_entry_t);
-  iree_host_size_t workspace_limit = iree_max(
-      inline_size, (iree_host_size_t)IREE_TOKENIZER_BPE_SCRATCH_MAX_SIZE);
-  iree_host_size_t limit = workspace_limit / bytes_per_symbol;
+  // Symbols retain compact byte offsets and linked-list indices. Bound both
+  // those coordinates and the complete allocation before computing its size.
+  iree_host_size_t limit = iree_min(UINT32_MAX, SIZE_MAX / bytes_per_symbol);
   if (input_size > (limit - sizeof(model->end_of_word_suffix)) / multiplier) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "BPE segment exceeds %" PRIhsz
-                            "-byte symbol workspace limit",
-                            workspace_limit);
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "BPE segment exceeds symbol addressability");
   }
   iree_host_size_t capacity =
       input_size * multiplier + sizeof(model->end_of_word_suffix);
@@ -37,9 +35,11 @@ static iree_status_t iree_tokenizer_bpe_symbols_reserve(
       (uint8_t*)iree_tokenizer_bpe_state_backtrack_stack(state, model);
   if (required > inline_size) {
     if (required > state->symbol_storage_size) {
-      iree_host_size_t allocation =
-          iree_min(iree_host_size_next_power_of_two(required),
-                   (iree_host_size_t)IREE_TOKENIZER_BPE_SCRATCH_MAX_SIZE);
+      // Geometric growth is an allocation policy, not an input-size bound.
+      iree_host_size_t allocation = required;
+      if (required <= SIZE_MAX / 2 + 1) {
+        allocation = iree_host_size_next_power_of_two(required);
+      }
       IREE_RETURN_IF_ERROR(iree_allocator_realloc(
           state->workspace_allocator, allocation, &state->symbol_storage));
       state->symbol_storage_size = allocation;

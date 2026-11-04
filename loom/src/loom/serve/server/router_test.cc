@@ -634,11 +634,6 @@ TEST_P(HttpRouterTest, UtilityRejectionsAndResetPeersPreserveTheOwner) {
   EXPECT_EQ(Read(Send("POST", "/detokenize", R"({"model":"a","tokens":[2]})"))
                 .find("HTTP/1.1 400"),
             0u);
-  EXPECT_EQ(Read(Send("POST", "/tokenize",
-                      "{\"model\":\"a\",\"content\":\"" +
-                          std::string(256 * 1024 + 1, 'a') + "\"}"))
-                .find("HTTP/1.1 413"),
-            0u);
   for (int i = 0; i < 8; ++i) {
     const int client = Send("POST", "/tokenize",
                             "{\"model\":\"a\",\"content\":\"" +
@@ -654,6 +649,27 @@ TEST_P(HttpRouterTest, UtilityRejectionsAndResetPeersPreserveTheOwner) {
   EXPECT_NE(
       Read(Send("POST", "/v1/test", R"({"model":"b"})")).find("b:/v1/test:"),
       std::string::npos);
+}
+
+TEST_P(HttpRouterTest, RawUtilitiesCarryLongContextRequests) {
+  const size_t count = 1024 * 1024 + 1;
+  const std::string text(count, 'a');
+  std::string ids = "0";
+  for (size_t i = 1; i < count; ++i) {
+    ids += ",0";
+  }
+  const auto encoded = Read(Send(
+      "POST", "/tokenize", "{\"model\":\"a\",\"content\":\"" + text + "\"}"));
+  ASSERT_EQ(encoded.find("HTTP/1.1 200"), 0u);
+  const size_t encoded_body = encoded.find("\r\n\r\n");
+  ASSERT_NE(encoded_body, std::string::npos);
+  EXPECT_EQ(encoded.substr(encoded_body + 4), "{\"tokens\":[" + ids + "]}");
+  const auto decoded = Read(Send("POST", "/detokenize",
+                                 "{\"model\":\"a\",\"tokens\":[" + ids + "]}"));
+  ASSERT_EQ(decoded.find("HTTP/1.1 200"), 0u);
+  const size_t decoded_body = decoded.find("\r\n\r\n");
+  ASSERT_NE(decoded_body, std::string::npos);
+  EXPECT_EQ(decoded.substr(decoded_body + 4), "{\"content\":\"" + text + "\"}");
 }
 
 TEST_P(HttpRouterTest, DiscoveryAndIndependentBorrowedRequests) {

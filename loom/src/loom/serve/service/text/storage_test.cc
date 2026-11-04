@@ -102,6 +102,7 @@ TEST_F(TextStorageTest, LogicalOrderAndCarrySurviveBootstrapPayloadRelease) {
                                                     host_allocator, &storage));
   EXPECT_EQ(storage.blocks_per_row, 5u);
   EXPECT_EQ(storage.block_size, 4u);
+  EXPECT_EQ(storage.page_bytes, 320u);
   EXPECT_EQ(storage.region_count, 2u);
   EXPECT_EQ(storage.recurrent.origin, 8u);
   EXPECT_EQ(storage.recurrent.stride, 64u);

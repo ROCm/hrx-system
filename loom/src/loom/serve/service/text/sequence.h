@@ -46,7 +46,7 @@ void loom_serve_text_sequence_deinitialize(
 iree_status_t loom_serve_text_sequence_prepare(
     loom_serve_text_sequence_t* sequence, loom_serve_text_model_t* model,
     iree_string_view_t body, uint64_t request_id,
-    loom_serve_text_input_prefix_t prefix, bool checkpoint, int32_t* scratch,
+    loom_serve_text_input_prefix_t prefix, bool checkpoint,
     iree_allocator_t host_allocator, loom_serve_text_input_t* out_input);
 
 // Appends one completed epoch's opaque bytes and exact consumed IDs to the

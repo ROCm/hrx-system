@@ -1367,6 +1367,7 @@ static void iree_hal_passthrough_pool_query_capabilities(
   out_capabilities->queue_family_affinity =
       pool->slab_properties.queue_family_affinity;
   out_capabilities->atomic_operations = pool->slab_properties.atomic_operations;
+  out_capabilities->physical_capacity = pool->slab_properties.physical_capacity;
   out_capabilities->min_allocation_size = 0;
   out_capabilities->max_allocation_size =
       pool->slab_properties.max_allocation_size;

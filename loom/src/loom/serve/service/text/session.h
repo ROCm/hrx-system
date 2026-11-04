@@ -8,6 +8,7 @@
 #define LOOM_SERVE_SERVICE_TEXT_SESSION_H_
 
 #include "iree/tokenizer/tokenizer.h"
+#include "iree/vm/buffer.h"
 #include "loom/serve/service/inspection.h"
 #include "loom/serve/service/text/chat.h"
 #include "loom/serve/service/text/consumer.h"
@@ -71,8 +72,6 @@ typedef struct loom_serve_text_session_t {
   iree_byte_span_t decoder_storage;
   // Active decoder within decoder_storage, or null between requests.
   iree_tokenizer_decode_state_t* decoder;
-  // Fixed host token storage sized to the compiled context.
-  int32_t* tokens;
   // Accumulated decoded response, preserving the original model text.
   iree_string_builder_t response;
   // Active request and its input/output receipt. A null consumer means idle.
@@ -87,13 +86,18 @@ typedef struct loom_serve_text_session_t {
     loom_serve_text_media_request_t* media;
     // Next completed-stage action or terminal output drain.
     loom_serve_text_request_phase_t phase;
-    // Host input tokens prepared for this turn.
-    iree_host_size_t input_count;
-    // Token-array origin after exact-prefix reuse. Full replay IDs preceding
-    // this offset remain available for later consumed-frontier identity.
-    iree_host_size_t input_origin;
-    // Input tokens already consumed by prefill.
-    iree_host_size_t input_offset;
+    // Prepared input retained through epoch, output, and prefix-cache borrows.
+    struct {
+      // Owned immutable native IDs, moved from preparation at admission.
+      iree_vm_buffer_t* storage;
+      // Number of appended input tokens after any exact-prefix reuse.
+      iree_host_size_t count;
+      // Token-array origin after exact-prefix reuse. Earlier replay IDs remain
+      // available for later consumed-frontier identity.
+      iree_host_size_t origin;
+      // Appended input tokens already consumed by prefill.
+      iree_host_size_t offset;
+    } input;
     // Retained device tokens preceding this request's appended input.
     iree_host_size_t retained_count;
     // Selected output tokens, including EOS.
@@ -147,14 +151,15 @@ bool loom_serve_text_session_has_history(
 loom_serve_http_request_snapshot_t loom_serve_text_session_request_snapshot(
     const loom_serve_text_session_t* session);
 
-// Allocates reusable host tokens and, for generation, decoder/response storage.
-// The tokenizer outlives initialization; encoding needs no tokenizer. Device
-// storage is not acquired. The owner binds row before publishing the session.
-// The caller deinitializes the result on success or failure, even if unbound.
+// Allocates reusable decoder/response storage only for generation. Input
+// storage arrives with an admitted request and is independent of model context
+// limits. The tokenizer outlives initialization; encoding needs no tokenizer.
+// Device storage is not acquired. The owner binds row before publishing the
+// session. The caller deinitializes the result on success or failure, even if
+// unbound.
 iree_status_t loom_serve_text_session_initialize(
     loom_serve_text_mode_t mode, const iree_tokenizer_t* tokenizer,
-    iree_host_size_t context_capacity, iree_allocator_t host_allocator,
-    loom_serve_text_session_t* out_session);
+    iree_allocator_t host_allocator, loom_serve_text_session_t* out_session);
 
 // Releases host storage only. The caller has retired CPU borrowers and released
 // every consumer receipt; native row/reservation ownership remains with the

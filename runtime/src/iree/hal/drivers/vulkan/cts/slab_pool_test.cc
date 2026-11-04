@@ -259,6 +259,7 @@ TEST_P(VulkanSlabPoolTest, CapturesExactFamiliesWithoutAllocatingBacking) {
   Ref<iree_hal_buffer_t> buffer;
   iree_hal_pool_capabilities_t capabilities;
   iree_hal_pool_query_capabilities(source, &capabilities);
+  EXPECT_GT(capabilities.physical_capacity, 0u);
   const iree_device_size_t min_alignment =
       iree_min((iree_device_size_t)256, capabilities.max_allocation_alignment);
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(

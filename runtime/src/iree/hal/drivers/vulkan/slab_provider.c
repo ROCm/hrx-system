@@ -142,6 +142,7 @@ iree_status_t iree_hal_vulkan_slab_provider_create(
   provider->memory_type_index = options.memory_type_index;
   provider->import_memory_type_bits = options.import_memory_type_bits;
   provider->properties.memory_type = options.memory_type;
+  provider->properties.physical_capacity = options.physical_capacity;
   provider->properties.supported_usage = options.supported_usage;
   provider->properties.queue_family_affinity =
       options.queue_family_affinity_mask;
@@ -298,6 +299,7 @@ static iree_status_t iree_hal_vulkan_slab_provider_import_slab(
     out_import->storage_offset = storage_offset;
     iree_hal_vulkan_slab_provider_populate_properties(
         provider, iree_hal_buffer_memory_type(buffer), &out_import->properties);
+    out_import->properties.physical_capacity = 0;
     out_import->properties.supported_usage =
         iree_hal_buffer_allowed_usage(buffer);
     out_import->slab.maintenance_range = storage->maintenance_range;

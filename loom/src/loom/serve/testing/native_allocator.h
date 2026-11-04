@@ -13,6 +13,7 @@
 #include <thread>
 #include <vector>
 
+#include "loom/serve/runtime/execution/execution.h"
 #include "loom/serve/testing/device.h"
 
 namespace loom_serve::testing {
@@ -22,6 +23,15 @@ namespace loom_serve::testing {
 // No HAL queue, pool, mapping, or completion callback is replaced.
 class NativeAllocator {
  public:
+  struct AllocationMetrics {
+    // Successful allocation or reallocation requests since the last reset.
+    size_t request_count;
+    // Sum of requested allocation lengths, including complete realloc extents.
+    uint64_t requested_bytes;
+    // Largest individual allocation or reallocation request.
+    iree_host_size_t largest_request_bytes;
+  };
+
   explicit NativeAllocator(iree_allocator_t allocator = iree_allocator_system())
       : allocator_(allocator) {}
   ~NativeAllocator() { AwaitReleased(); }
@@ -33,17 +43,29 @@ class NativeAllocator {
     condition_.wait(
         lock, [&] { return live_allocations_ == 0 && active_calls_ == 0; });
   }
-  iree_status_t Observe(loom_serve_pool_t* pool) {
+  iree_status_t Observe(loom_serve_device_t* device, loom_serve_pool_t* pool) {
     {
       std::lock_guard<std::mutex> lock(mutex_);
       observing_ = true;
     }
+    loom_serve_execution_t* execution = nullptr;
     iree_hal_buffer_t* probe = nullptr;
-    iree_status_t status = iree_hal_pool_allocate_buffer(
-        loom_serve_pool_storage(pool),
-        iree_hal_make_pool_reservation_request(4096, 0),
-        iree_infinite_timeout(), &probe);
+    iree_status_t status =
+        loom_serve_device_create_execution(device, pool, &execution);
+    if (iree_status_is_ok(status)) {
+      const auto request = iree_hal_make_pool_reservation_request(4096, 0);
+      status = loom_serve_execution_alloca_from_pool(
+          execution, loom_serve_pool_storage(pool), 1, &request, &probe);
+    }
+    if (iree_status_is_ok(status)) {
+      uint64_t value = 0;
+      status = loom_serve_execution_dealloca(execution, probe, &value);
+    }
     iree_hal_buffer_release(probe);
+    if (execution) {
+      status = iree_status_join(status, loom_serve_execution_drain(execution));
+    }
+    loom_serve_execution_release(execution);
     if (iree_status_is_ok(status)) {
       status = loom_serve_test_pool_trim_and_drain(pool, 0);
     }
@@ -81,6 +103,14 @@ class NativeAllocator {
     failure_.command = command;
     failure_.native_only = native_only;
   }
+  void ResetAllocationMetrics() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    allocation_metrics_ = {};
+  }
+  AllocationMetrics allocation_metrics() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return allocation_metrics_;
+  }
   void Release() {
     std::unique_lock<std::mutex> lock(mutex_);
     armed_ = false;
@@ -109,6 +139,11 @@ class NativeAllocator {
                                iree_allocator_command_t command,
                                const void* params, void** inout_pointer) {
     auto* self = static_cast<NativeAllocator*>(user_data);
+    const iree_host_size_t requested_bytes =
+        command == IREE_ALLOCATOR_COMMAND_FREE
+            ? 0
+            : static_cast<const iree_allocator_alloc_params_t*>(params)
+                  ->byte_length;
     const bool had_pointer = (command == IREE_ALLOCATOR_COMMAND_REALLOC ||
                               command == IREE_ALLOCATOR_COMMAND_FREE) &&
                              *inout_pointer != nullptr;
@@ -150,6 +185,12 @@ class NativeAllocator {
     {
       std::lock_guard<std::mutex> lock(self->mutex_);
       if (iree_status_is_ok(status)) {
+        if (command != IREE_ALLOCATOR_COMMAND_FREE) {
+          ++self->allocation_metrics_.request_count;
+          self->allocation_metrics_.requested_bytes += requested_bytes;
+          self->allocation_metrics_.largest_request_bytes = std::max(
+              self->allocation_metrics_.largest_request_bytes, requested_bytes);
+        }
         if (command == IREE_ALLOCATOR_COMMAND_FREE) {
           self->live_allocations_ -= had_pointer ? 1 : 0;
         } else if (command != IREE_ALLOCATOR_COMMAND_REALLOC || !had_pointer) {
@@ -171,6 +212,8 @@ class NativeAllocator {
   size_t live_allocations_ = 0;
   // Allocator calls still using this fixture, including the final FREE.
   size_t active_calls_ = 0;
+  // Resettable allocation-request traffic used by bounded metadata tests.
+  AllocationMetrics allocation_metrics_ = {};
   // Caller capture allocations remain available while native work is held.
   std::thread::id caller_ = std::this_thread::get_id();
   // Worker observed through a real cold source allocation after device

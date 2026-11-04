@@ -150,12 +150,15 @@ struct loom_serve_text_state_t {
   struct {
     // Addressable pooled token capacity; zero selects dense comparison.
     iree_host_size_t capacity;
-    // Free-ID metadata; ownership returns only after model work retires.
+    // Demand-grown free-ID metadata; ownership returns only after model work
+    // retires. Capacity is a live high-water mark, not addressability.
     loom_serve_block_pool_t pool;
     // Row-major host maps retained through queued uploads.
     uint32_t* maps;
     // Cold compaction plan indexed by original physical ID.
     uint32_t* destinations;
+    // Allocated entries in destinations; grown only by cold maintenance.
+    uint32_t destination_capacity;
     // Reusable target/draft map uploads, at most two per participating row.
     iree_hal_transfer_operation_t* uploads;
   } cache;

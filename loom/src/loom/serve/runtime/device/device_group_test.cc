@@ -135,8 +135,9 @@ TEST_F(DeviceGroupTest, IndependentSlabSizesPreserveShortTails) {
       group_, {IREE_SV("pool"), 1}, &pool_options, &storage_owner));
   const auto weights = loom_serve_pool_weight_geometry(storage_owner);
   const auto state = loom_serve_pool_state_geometry(storage_owner);
-  EXPECT_EQ(weights.slab_size, slab_size);
-  EXPECT_EQ(state.slab_size, kSlabBytes);
+  EXPECT_EQ(weights.mapping_size, slab_size);
+  EXPECT_EQ(state.mapping_size, state.minimum_size);
+  EXPECT_EQ(state.backing_size, kSlabBytes);
   EXPECT_EQ(weights.granularity, state.granularity);
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
       loom_serve_pool_memory(storage_owner), weights, slab_size + 1, 256,
@@ -147,10 +148,8 @@ TEST_F(DeviceGroupTest, IndependentSlabSizesPreserveShortTails) {
   EXPECT_EQ(loom_serve_virtual_buffer_slab_count(reservations_[0]), 2u);
   const auto demand =
       loom_serve_virtual_buffer_missing_demand(reservations_[0]);
-  uint64_t missing_bytes = demand.uncached_bytes;
-  for (uint64_t bytes : demand.cached_bytes) {
-    missing_bytes += bytes;
-  }
+  const uint64_t missing_bytes =
+      demand.packed_bytes + demand.weight_bytes + demand.dedicated_bytes;
   EXPECT_EQ(missing_bytes, slab_size + weights.minimum_size);
   EXPECT_EQ(statistics_[0].reserved_bytes, slab_size + weights.minimum_size);
   EXPECT_EQ(statistics_[1].reserved_bytes, state.minimum_size);
@@ -321,7 +320,11 @@ TEST_F(DeviceGroupTest, SeparateBudgetsAndWholeGroupLifetime) {
       loom_serve_pool_memory(pools[0]),
       loom_serve_pool_state_geometry(pools[0]), 2 * kSlabBytes, 256,
       &statistics_[0], &reservations_[0]));
-  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(reservations_[0], 0, 4));
+  // Fill the first physical state parent before testing the independent pool's
+  // limit. Smaller mappings within that parent consume no additional native
+  // capacity.
+  IREE_ASSERT_OK(
+      loom_serve_virtual_buffer_commit(reservations_[0], 0, kSlabBytes));
   IREE_ASSERT_OK(
       loom_serve_virtual_buffer_commit(reservations_[1], 0, 2 * kSlabBytes));
   IREE_EXPECT_STATUS_IS(

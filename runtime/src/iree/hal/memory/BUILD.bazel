@@ -227,6 +227,7 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:memory",
         "//runtime/src/iree/hal",
     ],
 )
@@ -237,6 +238,7 @@ iree_runtime_cc_test(
     deps = [
         ":heap_pool",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:memory",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -327,6 +329,7 @@ iree_runtime_cc_test(
         ":cpu_slab_provider",
         ":slab_provider",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:memory",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

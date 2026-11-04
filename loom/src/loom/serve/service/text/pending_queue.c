@@ -170,7 +170,7 @@ iree_status_t loom_serve_text_pending_queue_prepare(
     status = loom_serve_text_pending_request_prepare(
         pending, queue->model,
         loom_serve_text_pending_queue_prefix(queue, session), geometry,
-        session->tokens, queue->host_allocator);
+        queue->host_allocator);
   }
   pending->prepare_duration += iree_time_now() - start;
   IREE_RETURN_AND_END_ZONE(z0, status);
@@ -196,8 +196,6 @@ iree_status_t loom_serve_text_pending_queue_admit(
   const iree_host_size_t queue_rank = queue->admission.cursor;
   loom_serve_text_admission_acquired(&queue->admission);
   const iree_host_size_t overtakes = queue->admission.overtakes;
-  memcpy(session->tokens, pending->input.tokens,
-         pending->input.count * sizeof(*session->tokens));
   const iree_duration_t prepare_duration = pending->prepare_duration;
   loom_serve_text_session_cache_entry_t* cached = queue->prepared.cached;
   loom_serve_text_pending_continuation_deinitialize(&pending->continuation);
@@ -207,6 +205,8 @@ iree_status_t loom_serve_text_pending_queue_admit(
     memset(&cached->lifetime, 0, sizeof(cached->lifetime));
     loom_serve_text_session_cache_release(cache, cached, queue->telemetry);
   }
+  session->request.input.storage = pending->input.token_storage;
+  pending->input.token_storage = NULL;
   loom_serve_text_input_deinitialize(&pending->input, queue->host_allocator);
   loom_serve_text_pending_queue_remove(queue, queue->admission.cursor);
   if (!request.name.size ||
@@ -236,8 +236,8 @@ iree_status_t loom_serve_text_pending_queue_admit(
   session->request.sequence = request.sequence;
   session->request.media = request.media;
   session->request.phase = LOOM_SERVE_TEXT_REQUEST_PREFILL;
-  session->request.input_count = input_count;
-  session->request.input_origin = input_origin;
+  session->request.input.count = input_count;
+  session->request.input.origin = input_origin;
   session->request.retained_count = retained_count;
   session->request.start_time = iree_time_now();
   session->request.queue_duration =

@@ -717,8 +717,8 @@ iree_status_t loom_serve_text_admit_pending(loom_serve_text_service_t* service,
           iree_make_status(
               IREE_STATUS_RESOURCE_EXHAUSTED,
               "retained state leaves insufficient completion capacity; "
-              "release a checkpoint, lower max_tokens, or increase "
-              "pool_capacity or memory_bytes"));
+              "release a checkpoint, lower max_tokens, or use elastic backing "
+              "with a larger memory budget"));
       continue;
     }
     status = loom_serve_text_admit_request(service, flags);

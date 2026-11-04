@@ -17,9 +17,20 @@ from urllib.parse import urlsplit
 
 from loom_serve_testing.http_harness import control, running_server, wait_status
 
-# The fixture owns a native page of parameters and an 8 KiB state reservation.
-# Limits express one or two complete models, without coarse-slab tail padding.
-MODEL_BYTES = 12 * 1024
+# This service-policy fixture uses native-sized backing so its 4 KiB parameter
+# page and 8 KiB state cohort have exact physical costs. A peer needs 12 KiB;
+# retaining only parameters needs 16 KiB, retaining state needs 20 KiB, and
+# retaining both complete models needs 24 KiB, in addition to permanent roots.
+# Each model's five fixed roots occupy 2560 bytes at 256-byte alignment; both
+# models pack into two shared 4 KiB slabs. These bytes compete with all retained
+# state, rather than bypassing the budget. Larger-parent packing is covered by
+# storage tests independently.
+PERMANENT_STORAGE_BYTES = 8 * 1024
+ONE_MODEL_LIMIT_BYTES = PERMANENT_STORAGE_BYTES + 12 * 1024
+PARAMETER_AND_PEER_LIMIT_BYTES = PERMANENT_STORAGE_BYTES + 16 * 1024
+MEDIA_AND_TEXT_LIMIT_BYTES = PERMANENT_STORAGE_BYTES + 20 * 1024
+CHECKPOINT_AND_PEER_LIMIT_BYTES = PERMANENT_STORAGE_BYTES + 20 * 1024
+TWO_MODEL_LIMIT_BYTES = PERMANENT_STORAGE_BYTES + 24 * 1024
 
 
 def completion(address, model, messages, session=None, *, checkpoint=None):
@@ -127,7 +138,7 @@ def check_media(address, memory_bytes):
         }
     ]
     status, response = completion(address, "alpha", messages)
-    expected_status = 503 if memory_bytes == MODEL_BYTES else 200
+    expected_status = 503 if memory_bytes == ONE_MODEL_LIMIT_BYTES else 200
     assert status == expected_status, response
     if status == 200:
         # batch_units=1 requires two independently retained producer roots.
@@ -135,12 +146,17 @@ def check_media(address, memory_bytes):
         feature = struct.unpack("<I", struct.pack("<f", 511.0))[0]
         assert output(response) == oracle([0, feature, feature, 1]), response
     else:
-        assert "image producer or language continuation" in response, response
+        assert "retained state leaves insufficient completion capacity" in response, (
+            response
+        )
         state = control(address, "GET", "/v1/status", 200)
         alpha = next(item["loom"] for item in state["data"] if item["id"] == "alpha")
         for component in ("primary", "image"):
             parameters = alpha["parameters"][component]
-            assert not parameters.get("active", False), parameters
+            # A prepared parameter-free component is vacuously resident, but
+            # denied work must not activate or allocate any parameter payload.
+            assert parameters.get("committed_bytes", 0) == 0, parameters
+            assert parameters.get("pending_bytes", 0) == 0, parameters
             assert parameters.get("activations", 0) == 0, parameters
     print(json.dumps({"media_limit": memory_bytes, "media_status": status}), flush=True)
 
@@ -162,7 +178,6 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
                 "tokenizer": str(source / "tokenizer.json"),
                 "rows": 2,
                 "context_capacity": 128,
-                "pool_capacity": 128,
                 "prefill_capacity": 32,
                 "checkpoint_capacity": 2,
                 "session_cache_capacity": 2,
@@ -188,7 +203,7 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
         f"--device={device}",
         "--pool_backing=elastic",
         "--weight_slab_bytes=4096",
-        "--state_slab_bytes=8192",
+        "--state_slab_bytes=4096",
         f"--memory_bytes={memory_bytes}",
         f"--workers={workers}",
         f"--flagfile={configuration}",
@@ -199,12 +214,15 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
         assert endpoint is not None, (directory / "server.log").read_text()
         address = urlsplit("http://" + endpoint)
         while True:
-            models = control(address, "GET", "/v1/status", 200)["data"]
+            state = control(address, "GET", "/v1/status", 200)
+            models = state["data"]
             assert all(not model["loom"].get("error") for model in models), models
             if len(models) == 2 and all(
                 model["loom"]["status"]["phase"] == "idle" for model in models
             ):
                 break
+        memory = state["server"]["resources"]["pools"][0]["memory"]
+        assert memory["storage"]["committed_bytes"] == PERMANENT_STORAGE_BYTES, memory
         messages = [{"role": "user", "content": "abxa"}]
         if retention == "none":
             check_media(address, memory_bytes)
@@ -253,32 +271,12 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
         }
         print(json.dumps(result), flush=True)
         assert memory_after["peak_bytes"] <= memory_bytes, result
-        expected = 503 if retention != "none" and memory_bytes == MODEL_BYTES else 200
-        assert second_status == expected, second
+        assert second_status == 200, second
+        assert output(second) == oracle("abxa"), second
         beta = next(item["loom"] for item in after["data"] if item["id"] == "beta")
         admission = beta["parameters"]["primary"]["admission"]
         assert not admission["waiting"] and admission["age_seconds"] == 0, beta
         assert beta["parameters"]["primary"]["pins"] == 0, beta
-        if expected == 503:
-            assert admission["count"] >= 1, beta
-            # Complete-unit admission rejects before loading parameters that
-            # would leave no room for the request's state.
-            parameters = beta["parameters"]["primary"]
-            assert not parameters["active"], beta
-            assert parameters["activations"] == 0, beta
-            assert parameters["committed_bytes"] == parameters["pending_bytes"] == 0, (
-                beta
-            )
-        if expected == 503 and retention == "checkpoint":
-            alpha = next(
-                item["loom"] for item in after["data"] if item["id"] == "alpha"
-            )
-            alpha_before = next(
-                item["loom"] for item in before["data"] if item["id"] == "alpha"
-            )
-            # Evicting these weights cannot admit the peer while the checkpoint
-            # retains state. Keep them for the checkpoint's next invocation.
-            assert alpha["parameters"] == alpha_before["parameters"], alpha
         assert admission["duration_seconds"] >= 0, beta
         connection = http.client.HTTPConnection(address.hostname, address.port)
         try:
@@ -299,8 +297,6 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
         assert (
             f"loom_serve_model_parameter_admission_waiting{{{identity}}} 0\n"
         ) in metrics, metrics
-        if expected == 200:
-            assert output(second) == oracle("abxa"), second
         history = [
             *messages,
             {"role": "assistant", "content": output(first)},
@@ -321,13 +317,17 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
                 200,
                 headers={"X-Loom-Model": "alpha"},
             )
-            # Pinned weights plus the peer's complete requirement already
-            # exceed the small cap. Evicting history cannot make it fit, so
-            # admission preserves those histories instead of discarding them
-            # to partially activate an impossible peer.
-            assert {session["name"] for session in sessions["data"]} == {
-                f"conversation-{index}" for index in range(4)
-            }, sessions
+            # Parameter pins survive pressure. At the exact pin-and-peer
+            # limit, admission reclaims unpinned histories; the roomy case
+            # retains both histories and parameter residency.
+            expected_sessions = (
+                set()
+                if memory_bytes == PARAMETER_AND_PEER_LIMIT_BYTES
+                else {f"conversation-{index}" for index in range(4)}
+            )
+            assert {session["name"] for session in sessions["data"]} == (
+                expected_sessions
+            ), sessions
             for _ in range(2):
                 unpinned = control(
                     address,
@@ -347,8 +347,8 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
             assert second_status == 200, second
             assert output(second) == oracle("abxa"), second
         if retention == "checkpoint":
-            # A pin must survive failed peer pressure even after all automatic
-            # owners release their references. Deletion then unblocks the peer.
+            # Explicitly retained history remains resumable after peer pressure
+            # even once its automatic session owner has released it.
             resumed_status, resumed = completion(
                 address, "alpha", history, checkpoint="kept"
             )
@@ -371,9 +371,11 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
             )
             assert resumed_status == 200, resumed
             assert output(resumed) == oracle("abxa" + output(first) + "#b"), resumed
-            assert cached_tokens(resumed) == (
-                0 if memory_bytes == MODEL_BYTES else 5
-            ), resumed
+            histories_reclaimed = memory_bytes == ONE_MODEL_LIMIT_BYTES or (
+                retention == "parameters"
+                and memory_bytes == PARAMETER_AND_PEER_LIMIT_BYTES
+            )
+            assert cached_tokens(resumed) == (0 if histories_reclaimed else 5), resumed
         # Removal owns pinned state as well as the service. A peer submitted
         # immediately after accepted unregister must complete without waiting
         # for a client-side polling loop to observe final model destruction.
@@ -407,8 +409,8 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
         status, response = completion(address, "beta", messages, "replacement")
         assert status == 200, response
         assert output(response) == oracle("abxa"), response
-        # Joined removal returns backing to the shared cache. Explicit trim
-        # returns that idle physical storage while keeping the server usable.
+        # Joined removal returns model ownership before explicit pool trim
+        # releases reusable permanent-storage and workspace backing.
         control(
             address,
             "POST",
@@ -419,19 +421,29 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
         )
         while True:
             final = control(address, "GET", "/v1/status", 200)
-            memory = final["server"]["resources"]["pools"][0]["memory"]["retained"]
+            pool = final["server"]["resources"]["pools"][0]
+            memory = pool["memory"]["retained"]
             if (
                 not final["data"]
-                and memory["committed_bytes"] == memory["cached_bytes"]
+                and not memory["pending_bytes"]
                 and not memory["releasing_bytes"]
             ):
                 break
             assert all(not model["loom"].get("error") for model in final["data"]), final
         assert memory["pending_bytes"] == 0, memory
-        # Model removal leaves the shared workspace's reusable address ranges.
-        # Physical trim must preserve those addresses while returning backing.
-        workspace_virtual_bytes = memory["reserved_bytes"]
-        assert workspace_virtual_bytes > 0, memory
+        # Model removal can leave reusable allocator mappings. These remain
+        # part of the physical total until explicit trim, without any model
+        # retaining a permanent root or workspace reservation.
+        storage = pool["memory"]["storage"]
+        workspace = pool["memory"]["workspace"]
+        assert storage["reserved_bytes"] == 0, storage
+        assert (
+            memory["committed_bytes"] - memory["cached_bytes"]
+            == storage["committed_bytes"] + workspace["committed_bytes"]
+        ), pool["memory"]
+        assert workspace["committed_bytes"] == workspace["free_bytes"], workspace
+        allocator_virtual_bytes = memory["reserved_bytes"]
+        assert allocator_virtual_bytes > 0, memory
         control(
             address,
             "POST",
@@ -443,7 +455,7 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
         while memory["committed_bytes"]:
             final = control(address, "GET", "/v1/status", 200)
             memory = final["server"]["resources"]["pools"][0]["memory"]["retained"]
-        assert memory["reserved_bytes"] == workspace_virtual_bytes, memory
+        assert memory["reserved_bytes"] == allocator_virtual_bytes, memory
         assert memory["committed_bytes"] == 0, memory
         assert memory["peak_bytes"] <= memory_bytes, memory
         assert control(address, "GET", "/readyz", 200) == {"status": "ready"}
@@ -480,17 +492,16 @@ def run_from_command_line(cases):
 
 
 # Pairwise coverage across worker count, physical memory limit, and retained
-# state policy. The manual pressure_stress_test target retains the complete
-# Cartesian product for explicit stress qualification.
+# state policy.
 _CASES = (
-    # Retain both state slabs while swapping weights; media also fits as
-    # sequential phases without requiring their combined declared footprint.
-    (1, 20 * 1024, "none"),
-    (1, MODEL_BYTES, "checkpoint"),
-    (1, 2 * MODEL_BYTES, "parameters"),
-    (4, MODEL_BYTES, "none"),
-    (4, 2 * MODEL_BYTES, "checkpoint"),
-    (4, MODEL_BYTES, "parameters"),
+    # Media and text fit as sequential phases without requiring their combined
+    # declared footprint. Tight cases force reclamation within one model's cap.
+    (1, MEDIA_AND_TEXT_LIMIT_BYTES, "none"),
+    (1, CHECKPOINT_AND_PEER_LIMIT_BYTES, "checkpoint"),
+    (1, TWO_MODEL_LIMIT_BYTES, "parameters"),
+    (4, ONE_MODEL_LIMIT_BYTES, "none"),
+    (4, TWO_MODEL_LIMIT_BYTES, "checkpoint"),
+    (4, PARAMETER_AND_PEER_LIMIT_BYTES, "parameters"),
 )
 
 

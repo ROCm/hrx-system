@@ -46,8 +46,6 @@ typedef struct loom_serve_text_cache_selection_t {
 typedef struct loom_serve_text_cache_cost_t {
   // Exact declared state extents plus native checkpoint directory storage.
   uint64_t storage_bytes;
-  // Physical KV page count used to size the automatic detached directory.
-  iree_host_size_t page_count;
 } loom_serve_text_cache_cost_t;
 
 // Evaluates the source's exact storage for a candidate endpoint count. Success
@@ -58,12 +56,12 @@ typedef iree_status_t (*loom_serve_text_cache_evaluate_fn_t)(
     loom_serve_text_cache_cost_t* out_cost);
 
 // Cold policy for validated explicit counts. Automatic sizing gives up to two
-// shared prefixes priority, then searches detached counts up to one endpoint
-// per KV page. This is a cache-directory policy, never a resident-session cap.
-// Every selected count has been evaluated against the soft target; geometric
-// search is a heuristic, not a promise of optimality for arbitrary source size
-// functions. The final evaluation is the selected source declaration, ready for
-// native compilation. Evaluation errors propagate without disabling caches.
+// shared prefixes priority, then searches detached counts across the complete
+// signed endpoint space. Every selected count has been evaluated against the
+// soft target; geometric search is a heuristic, not a promise of optimality for
+// arbitrary source size functions. The final evaluation is the selected source
+// declaration, ready for native compilation. Evaluation errors propagate
+// without disabling caches.
 iree_status_t loom_serve_text_cache_select(
     const loom_serve_text_cache_options_t* options,
     iree_host_size_t explicit_capacity,

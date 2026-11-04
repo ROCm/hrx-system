@@ -158,6 +158,15 @@ iree_status_t loom_serve_workspace_wait(loom_serve_workspace_t* workspace,
                                         iree_hal_semaphore_t* semaphore,
                                         uint64_t value);
 
+// Joins an outer owner's completion condition while progressing accepted cold
+// allocations and returns. Both the condition's producer and allocator progress
+// wake notification. The caller excludes other physical-owner operations; task
+// schedulers instead advance the shared owner without blocking.
+iree_status_t loom_serve_workspace_await(loom_serve_workspace_t* workspace,
+                                         iree_notification_t* notification,
+                                         iree_condition_fn_t condition,
+                                         void* user_data);
+
 // Joins final consumer ownership while advancing cold backing even after a
 // failed readiness timeline. Only an exclusive outer physical owner may wait;
 // shared task workers instead keep advancing until retirement is idle.

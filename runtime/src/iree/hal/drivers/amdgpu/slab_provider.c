@@ -371,6 +371,11 @@ iree_hal_amdgpu_slab_provider_query_memory_pool_properties(
   IREE_ASSERT_ARGUMENT(out_properties);
   memset(out_properties, 0, sizeof(*out_properties));
 
+  size_t physical_capacity = 0;
+  IREE_RETURN_IF_ERROR(iree_hsa_amd_memory_pool_get_info(
+      IREE_LIBHSA(libhsa), memory_pool, HSA_AMD_MEMORY_POOL_INFO_SIZE,
+      &physical_capacity));
+
   size_t allocation_granule = 0;
   IREE_RETURN_IF_ERROR(
       iree_hsa_amd_memory_pool_get_info(
@@ -449,6 +454,7 @@ iree_hal_amdgpu_slab_provider_query_memory_pool_properties(
   }
 
   out_properties->allocation_granule = (iree_device_size_t)allocation_granule;
+  out_properties->physical_capacity = physical_capacity;
   out_properties->allocation_alignment =
       (iree_device_size_t)allocation_alignment;
   out_properties->memory_type = memory_type;
@@ -652,6 +658,7 @@ iree_status_t iree_hal_amdgpu_slab_provider_create(
   }
   if (iree_status_is_ok(status)) {
     provider->properties.memory_type = options.exposed.memory_type;
+    provider->properties.physical_capacity = properties.physical_capacity;
     provider->properties.supported_usage = options.exposed.supported_usage;
     provider->properties.queue_family_affinity =
         IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY;

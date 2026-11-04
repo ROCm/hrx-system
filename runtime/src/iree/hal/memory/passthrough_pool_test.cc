@@ -1735,6 +1735,9 @@ TEST_F(PassthroughPoolTest, BufferMemoryAccess) {
 TEST_F(PassthroughPoolTest, Capabilities) {
   iree_hal_pool_capabilities_t capabilities;
   iree_hal_pool_query_capabilities(pool_, &capabilities);
+  iree_hal_slab_provider_properties_t properties;
+  iree_hal_slab_provider_query_properties(slab_provider_, &properties);
+  EXPECT_EQ(capabilities.physical_capacity, properties.physical_capacity);
   EXPECT_TRUE(iree_all_bits_set(capabilities.memory_type,
                                 IREE_HAL_MEMORY_TYPE_HOST_LOCAL));
   EXPECT_TRUE(iree_all_bits_set(capabilities.supported_usage,

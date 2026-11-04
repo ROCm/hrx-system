@@ -65,7 +65,8 @@ class MemoryTestEnvironment : public ::testing::Environment {
     iree_hal_driver_release(driver);
     loom_serve_host_release(host);
     IREE_ASSERT_OK(status);
-    IREE_ASSERT_OK(native.Observe(loom_serve_device_group_pool_at(group, 0)));
+    IREE_ASSERT_OK(native.Observe(loom_serve_device_group_at(group, 0),
+                                  loom_serve_device_group_pool_at(group, 0)));
   }
 
   void TearDown() override {
@@ -254,10 +255,13 @@ class MemoryTest : public ::testing::Test {
       iree_status_ignore(loom_serve_memory_pool_await(pool));
       const auto statistics = loom_serve_memory_pool_statistics(pool);
       EXPECT_EQ(statistics.committed_bytes, 0u);
-      const auto workspace_usage = loom_serve_workspace_memory_usage(
-          loom_serve_pool_workspace(storage_owner));
-      EXPECT_EQ(statistics.reserved_bytes,
-                owned_pool ? 0u : workspace_usage.reserved_bytes);
+      if (owned_pool) {
+        EXPECT_EQ(statistics.reserved_bytes, 0u);
+      } else {
+        // Shared allocators retain empty addresses across cases, but every
+        // model-owned reservation must have returned before pool teardown.
+        EXPECT_FALSE(loom_serve_pool_is_in_use(storage_owner));
+      }
     }
     loom_serve_memory_pool_free(owned_pool);
     iree_hal_pool_release(deferred_backing);
@@ -321,23 +325,26 @@ class MemoryTest : public ::testing::Test {
     for (auto& family : families) {
       family.interfaces = 0;
     }
-    iree_hal_virtual_buffer_capabilities_t capabilities;
     auto status = iree_hal_virtual_buffer_query_capabilities(
-        hal_group, scope, {1, &backing}, host_allocator, &capabilities);
+        hal_group, scope, {1, &backing}, host_allocator,
+        &reservation_capabilities);
     loom_serve_memory_geometry_t geometries[2] = {};
     if (iree_status_is_ok(status)) {
-      status = loom_serve_memory_pool_query_geometry(&capabilities, backing,
-                                                     kSlabSize, &geometries[0]);
+      status = loom_serve_memory_pool_query_geometry(
+          &reservation_capabilities, backing, kSlabSize, &geometries[0]);
     }
     if (iree_status_is_ok(status)) {
       status = loom_serve_memory_pool_query_geometry(
-          &capabilities, backing, distinct_classes ? kSlabSize / 4 : kSlabSize,
-          &geometries[1]);
+          &reservation_capabilities, backing,
+          distinct_classes ? kSlabSize / 4 : kSlabSize, &geometries[1]);
+      if (iree_status_is_ok(status)) {
+        geometries[1].mapping_size = geometries[1].minimum_size;
+      }
     }
     if (iree_status_is_ok(status)) {
-      status = loom_serve_memory_pool_allocate(hal_group, scope, backing, queue,
-                                               geometries, limit_bytes,
-                                               host_allocator, &owned_pool);
+      status = loom_serve_memory_pool_allocate(
+          hal_group, scope, backing, queue, geometries[0], geometries[1],
+          limit_bytes, host_allocator, &owned_pool);
     }
     iree_hal_pool_release(backing);
     IREE_ASSERT_OK(status);
@@ -384,6 +391,14 @@ class MemoryTest : public ::testing::Test {
     for (const auto word : observed) {
       EXPECT_EQ(word, value);
     }
+  }
+
+  uint64_t Keep(loom_serve_virtual_buffer_t* buffer, uint64_t offset,
+                uint64_t length) {
+    uint64_t added_bytes = 0;
+    IREE_EXPECT_OK(
+        loom_serve_virtual_buffer_keep(buffer, offset, length, &added_bytes));
+    return added_bytes;
   }
 
   void CreateVirtualPool(bool with_workspace = false) {
@@ -500,9 +515,11 @@ class MemoryTest : public ::testing::Test {
   loom_serve_execution_t* execution = nullptr;
   // One physical budget shared by the independent reservations.
   loom_serve_memory_pool_t* pool = nullptr;
+  // Native address geometry qualified against the private pool's real source.
+  iree_hal_virtual_buffer_capabilities_t reservation_capabilities = {};
   // Independent accounting groups competing for the same physical budget.
   std::array<loom_serve_memory_statistics_t, 3> statistics = {};
-  // First model-like reservation, sparsely backed beyond four GiB.
+  // First model-like reservation with independently owned sparse backing.
   loom_serve_virtual_buffer_t* first = nullptr;
   // Independent reservation competing for the same physical budget.
   loom_serve_virtual_buffer_t* second = nullptr;

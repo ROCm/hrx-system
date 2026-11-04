@@ -5,8 +5,11 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "iree/base/internal/base64.h"
+#include "iree/vm/test_allocator.h"
+#include "loom/serve/service/text/sequence.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/serve/service/text/stream.h"
+#include "loom/serve/testing/native_allocator.h"
 
 namespace {
 
@@ -74,6 +77,107 @@ class SourceSequenceServiceTest : public SourceTextServiceTest {
     EXPECT_NE(response.find(expected), std::string::npos) << response;
   }
 };
+
+class SourceSequencePreparationTest : public SourceSequenceServiceTest {
+ protected:
+  loom_serve_text_options_t ModelOptions() const override {
+    auto options = SourceSequenceServiceTest::ModelOptions();
+    options.context_capacity = 1048576;
+    options.pool_capacity = options.context_capacity;
+    return options;
+  }
+};
+
+TEST_F(SourceSequencePreparationTest, OwnsActualInputAcrossCapacityRetries) {
+  for (const size_t count : {1u, 64u, 65u, 4096u}) {
+    SCOPED_TRACE(count);
+    std::string body = R"({"position":0,"token_ids":[)";
+    std::vector<int32_t> expected(count);
+    for (size_t i = 0; i < count; ++i) {
+      expected[i] = i % 4;
+      if (i) {
+        body += ',';
+      }
+      body += char('0' + expected[i]);
+    }
+    body += "]}";
+    const auto request = iree_make_string_view(body.data(), body.size());
+    loom_serve_text_sequence_t sequence = {};
+    IREE_ASSERT_OK(loom_serve_text_sequence_parse(request, &sequence));
+    loom_serve::testing::NativeAllocator allocator;
+    loom_serve_text_input_t input = {};
+    auto status =
+        loom_serve_text_sequence_prepare(&sequence, model_, request, 1, {},
+                                         false, allocator.allocator(), &input);
+    const auto metrics = allocator.allocation_metrics();
+    const std::string prefix = std::to_string(count) + "_tokens_";
+    RecordProperty(prefix + "allocations", metrics.request_count);
+    RecordProperty(prefix + "requested_bytes",
+                   std::to_string(metrics.requested_bytes));
+    RecordProperty(prefix + "largest_request_bytes",
+                   std::to_string(metrics.largest_request_bytes));
+    if (iree_status_is_ok(status)) {
+      EXPECT_EQ(input.count, count);
+      EXPECT_EQ(iree_vm_buffer_length(input.token_storage),
+                count * sizeof(int32_t));
+      if (input.count == count) {
+        EXPECT_TRUE(std::equal(expected.begin(), expected.end(), input.tokens));
+      }
+      auto* owned = input.token_storage;
+      status = loom_serve_text_sequence_prepare(&sequence, model_, request, 1,
+                                                {}, false,
+                                                allocator.allocator(), &input);
+      EXPECT_EQ(input.token_storage, owned);
+      EXPECT_EQ(allocator.allocation_metrics().request_count,
+                metrics.request_count);
+    }
+    loom_serve_text_input_deinitialize(&input, allocator.allocator());
+    loom_serve_text_sequence_deinitialize(&sequence);
+    IREE_ASSERT_OK(status);
+  }
+}
+
+TEST_F(SourceSequenceServiceTest, PreparationFailureLeavesInputUnpublished) {
+  std::string body = R"({"position":0,"token_ids":[)";
+  for (size_t i = 0; i < 65; ++i) {
+    if (i) {
+      body += ',';
+    }
+    body += char('0' + i % 4);
+  }
+  body += "]}";
+  const auto request = iree_make_string_view(body.data(), body.size());
+  size_t allocations = 0;
+  for (size_t ordinal = 0; ordinal <= allocations; ++ordinal) {
+    SCOPED_TRACE(ordinal);
+    iree::vm::testing::CountingAllocator failures(ordinal);
+    // Tracks live ownership independently of reallocation attempts and joins
+    // all released storage before the injected allocator leaves scope.
+    loom_serve::testing::NativeAllocator allocator(failures.allocator());
+    loom_serve_text_sequence_t sequence = {};
+    IREE_ASSERT_OK(loom_serve_text_sequence_parse(request, &sequence));
+    loom_serve_text_input_t input = {};
+    auto status =
+        loom_serve_text_sequence_prepare(&sequence, model_, request, 1, {},
+                                         false, allocator.allocator(), &input);
+    if (!ordinal) {
+      allocations = failures.allocation_count();
+      EXPECT_EQ(input.count, 65u);
+    } else {
+      EXPECT_EQ(input.token_storage, nullptr);
+      EXPECT_EQ(input.tokens, nullptr);
+      EXPECT_EQ(input.count, 0u);
+      EXPECT_EQ(sequence.options, nullptr);
+    }
+    loom_serve_text_input_deinitialize(&input, allocator.allocator());
+    loom_serve_text_sequence_deinitialize(&sequence);
+    if (!ordinal) {
+      IREE_ASSERT_OK(status);
+    } else {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+    }
+  }
+}
 
 TEST_F(SourceSequenceServiceTest, HttpAppendsCacheRestoreAndCheckpointFork) {
   ASSERT_NO_FATAL_FAILURE(Start());
@@ -476,7 +580,7 @@ TEST_F(RegisteredSequenceServiceTest,
       std::filesystem::absolute(directory_).string() +
       R"(","definition":{"kind":"sequence","prepare":"prepare.loom","control":"control.loom","sources":["advance.loom","sequence.loom","storage.loom"],"weights":")" +
       weights_ +
-      R"(","rows":4,"context_capacity":96,"pool_capacity":256,"prefill_capacity":32,"checkpoint_capacity":4,"session_cache_capacity":1}})";
+      R"(","rows":4,"context_capacity":96,"prefill_capacity":32,"checkpoint_capacity":4,"session_cache_capacity":1}})";
   auto response = Read(Send(declaration, "", "/v1/models/register"));
   ASSERT_EQ(response.find("HTTP/1.1 202"), 0u) << response;
   const auto first = Encode("[0,1,2]");

@@ -168,6 +168,48 @@ static StatusOr<std::vector<iree_tokenizer_token_id_t>> EncodeStreaming(
 }
 
 //===----------------------------------------------------------------------===//
+// UTF-8 Input Credit
+//===----------------------------------------------------------------------===//
+
+TEST(TokenizerBufferCreditTest, CompleteUnicodeDoesNotWaitForAnotherChunk) {
+  iree_tokenizer_t* tokenizer = nullptr;
+  IREE_ASSERT_OK(iree_tokenizer_from_huggingface_json(
+      IREE_SV(R"({"normalizer":{"type":"Lowercase"},
+        "model":{"type":"BPE","vocab":{"a":0,"β":1,"中":2,"🦊":3},
+                 "merges":[]}})"),
+      iree_allocator_system(), &tokenizer));
+  ScopedTokenizer owner(tokenizer);
+  int32_t token_id = 0;
+  for (const char* character : {"β", "中", "🦊"}) {
+    ++token_id;
+    std::string text = "a";
+    std::vector<int32_t> expected = {0};
+    for (size_t i = 0; i < 17; ++i) {
+      text += character;
+      expected.push_back(token_id);
+    }
+    text += "a";
+    expected.push_back(0);
+    for (size_t buffer_size : {8, 16, 32}) {
+      for (size_t chunk_size : {1, 2, 3, 128}) {
+        for (size_t output_capacity : {1, 32}) {
+          SCOPED_TRACE(character);
+          SCOPED_TRACE(buffer_size);
+          SCOPED_TRACE(chunk_size);
+          SCOPED_TRACE(output_capacity);
+          IREE_ASSERT_OK_AND_ASSIGN(
+              auto actual,
+              EncodeStreaming(tokenizer,
+                              iree_make_string_view(text.data(), text.size()),
+                              buffer_size, chunk_size, output_capacity));
+          EXPECT_EQ(actual, expected);
+        }
+      }
+    }
+  }
+}
+
+//===----------------------------------------------------------------------===//
 // BPE ByteLevel Tests
 //===----------------------------------------------------------------------===//
 

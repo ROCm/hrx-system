@@ -44,15 +44,14 @@ class WeightDeviceEnvironment : public ::testing::Environment {
 
     // Observe the native allocation worker once. Pool policy and memory budgets
     // vary per case, but neither changes the physical device or its workers.
-    loom_serve_pool_t* pool = nullptr;
-    IREE_ASSERT_OK(AllocateWeightPool(device(), false, 0, 0, &pool));
-    status = allocator_.Observe(pool);
-    IREE_ASSERT_OK(iree_status_join(status, loom_serve_pool_free(pool)));
+    IREE_ASSERT_OK(AllocateWeightPool(device(), false, 0, 0, &consumer_pool_));
+    IREE_ASSERT_OK(allocator_.Observe(device(), consumer_pool_));
   }
 
   void TearDown() override {
     // Every fixture retires its own pools first. Final release must join native
     // cleanup before the allocator wrapper can leave scope.
+    IREE_CHECK_OK(loom_serve_pool_free(consumer_pool_));
     IREE_CHECK_OK(loom_serve_device_group_free(group_));
     group_ = nullptr;
     allocator_.AwaitReleased();
@@ -62,11 +61,17 @@ class WeightDeviceEnvironment : public ::testing::Environment {
     return loom_serve_device_group_at(group_, 0);
   }
 
+  iree_hal_pool_t* consumer_pool() {
+    return loom_serve_pool_storage(consumer_pool_);
+  }
+
  private:
   // Native allocator dependency outliving every device-owned allocation.
   NativeAllocator allocator_;
   // One physical device and host retained through the complete test process.
   loom_serve_device_group_t* group_ = nullptr;
+  // Caller-owned bindings outlive parameter residency and have separate policy.
+  loom_serve_pool_t* consumer_pool_ = nullptr;
 };
 
 auto* const weight_device_environment = static_cast<WeightDeviceEnvironment*>(
@@ -76,6 +81,10 @@ auto* const weight_device_environment = static_cast<WeightDeviceEnvironment*>(
 
 loom_serve_device_t* WeightDevice() {
   return weight_device_environment->device();
+}
+
+iree_hal_pool_t* WeightConsumerPool() {
+  return weight_device_environment->consumer_pool();
 }
 
 iree_status_t AllocateWeightPool(loom_serve_device_t* device, bool elastic,
@@ -1485,7 +1494,8 @@ TEST_P(WeightsTest, MutableGrowthReclaimsIdleParametersWithoutDiscardingState) {
   IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
   EXPECT_EQ(observed, value);
   loom_serve_virtual_buffer_begin_trim(state_);
-  loom_serve_virtual_buffer_keep(state_, 0, sizeof(value));
+  IREE_ASSERT_OK(
+      loom_serve_virtual_buffer_keep(state_, 0, sizeof(value), nullptr));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_trim(state_));
   ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes,
@@ -1579,7 +1589,7 @@ TEST_P(SmallRootWeightsTest, SmallRootCommitsOnlyItsNativeExtent) {
     const auto memory = loom_serve_weights_statistics(plans_[0]);
     EXPECT_EQ(memory.reserved_bytes, geometry.minimum_size);
     EXPECT_EQ(memory.committed_bytes, geometry.minimum_size);
-    EXPECT_LT(memory.committed_bytes, geometry.slab_size);
+    EXPECT_LT(memory.committed_bytes, geometry.mapping_size);
     IREE_ASSERT_OK(loom_serve_residency_cache_trim(ResidencyCache(), 0));
     DrainNativeReturns();
     EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes, 0u);
@@ -1730,7 +1740,7 @@ TEST_P(ArenaWeightsTest, SelectedPreparedBanksShareOneParameterBinding) {
   EXPECT_EQ(bank_offsets[1], kPrefixBytes + geometry.minimum_size);
   std::array<uint64_t, 8> request_offsets;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
-      loom_serve_pool_storage(storage_owner_),
+      WeightConsumerPool(),
       iree_hal_make_pool_reservation_request(sizeof(request_offsets), 0),
       iree_infinite_timeout(), &workspace_));
 

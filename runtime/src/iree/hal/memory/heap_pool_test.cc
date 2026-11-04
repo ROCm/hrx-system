@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "iree/base/internal/memory.h"
 #include "iree/hal/api.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -26,6 +27,10 @@ TEST(HeapPoolTest, AllocatesMappedHostStorageWithoutProgressOwner) {
                                            iree_allocator_system(), &pool));
 
   EXPECT_EQ(iree_hal_pool_notification(pool), nullptr);
+  iree_hal_pool_capabilities_t capabilities;
+  iree_hal_pool_query_capabilities(pool, &capabilities);
+  EXPECT_EQ(capabilities.physical_capacity,
+            iree_memory_query_physical_capacity());
   const iree_hal_pool_host_access_t actual_host_access =
       iree_hal_pool_query_host_access(pool);
   EXPECT_EQ(actual_host_access.access, host_access.access);

@@ -323,21 +323,39 @@ Native capacity fields are:
 | --- | --- | --- |
 | `max_sessions` | omitted | Positive ceiling on resident session owners. Preparation and outstanding output retain their owners; extra requests wait in `pending_requests`. Omission leaves concurrency memory-limited. |
 | `rows` | `4` | Initial resident capacity hint, capped by `max_sessions` when set. The directory grows as requests arrive, independently of epoch token/span capacity and up to the configured maximum. |
-| `context_capacity` | `16384` | Per-row logical context limit in token positions, at most 262144. |
-| `pool_capacity` | `65536` | Shared logical cache token positions, in whole source-defined pages. |
+| `context_capacity` | `16384` | Per-row logical context limit in token positions, fitting a positive signed 32-bit count. The source validates the model's supported context window. |
 | `prefill_capacity` | `512` | Largest automatically specialized packed token shape; not a prompt-length limit. |
 | `checkpoint_capacity` | `0` | Explicit pinned endpoint slots, independent of execution rows. |
 | `session_cache_capacity` | automatic | Evictable idle histories beyond resident rows. An explicit count is exact; zero disables this cache. Nonzero counts also reserve one admission-exchange endpoint. |
 | `prefix_cache_capacity` | automatic | Evictable exact intermediate-prefix endpoints. An explicit count is exact; zero disables capture. |
 | `cache_target_bytes` | automatic | Soft sizing target for additional initial cache storage. Omission uses 2 GiB, reduced to 1/16 of a configured shared physical-memory budget. Zero disables automatic counts without changing explicit counts. |
 | `admission_overtakes` | `rows` | Successful fitting admissions allowed to pass a blocked oldest request; zero selects FIFO. |
-| `max_tokens` | `512` | Default request output limit, from 1 through 16384. |
+| `max_tokens` | `512` | Default request output limit, fitting a positive signed 32-bit count. Prompt and output together must fit the configured context. |
 | `draft_depth` | `0` | Proposed tokens after each anchor, from 0 through 7; requires matching source support. |
 | `continuation_epochs` | `1` | Device-fed epochs per scheduling turn, either 1 or 2. |
 
-Context, pool and prefill capacities are positive. Packed token capacity may
-exceed an individual context limit: one epoch can combine many short sessions.
-It must fit an anchor plus every draft proposal.
+Context and prefill capacities fit positive signed 32-bit counts. Packed token capacity may exceed
+an individual context limit: one epoch can combine many short sessions. It must
+fit an anchor plus every draft proposal.
+
+Cache addressability is serving policy, not a model field. Fixed backing
+reserves one `context_capacity` shared across the model's resident rows.
+Elastic backing derives each model's addressable page count from the selected
+backing pool's physical capacity and the source-declared bytes per cache page.
+An explicit `memory_bytes` budget can tighten that bound. There is no fixed
+per-model token quota: a model can address the pages that could fill the shared
+pool, without committing them or allocating a page directory for the entire
+range. If the backend cannot report physical capacity, registration requires
+an explicit pool budget instead of inventing a default.
+
+This bound uses total capacity, not a snapshot of currently free memory. The
+pool's `memory_bytes` policy separately bounds physical backing shared by every
+model, parameter bank, state allocation, and workspace using that pool. Source
+preparation validates its page geometry and native address arithmetic; native
+page IDs can address at most `UINT32_MAX` pages. Physical admission, not the
+logical address range, decides whether competing live demand fits. Offloaded
+histories release resident page IDs and do not consume that address space.
+
 Two-epoch continuation requires nonzero draft depth. A source can impose tighter
 shape limits or reject unsupported drafting modes. Endpoint capacities are
 nonnegative and their combined native index space must fit signed 32-bit indices.
@@ -346,8 +364,8 @@ A minimal text deployment automatically retains useful shared prefixes and
 displaced named conversations. During preparation, the server evaluates the
 model's declared storage sizes, gives up to two automatic prefix endpoints
 priority, and fits detached histories into the remaining sizing target. The
-automatic detached directory is at most one endpoint per physical KV page;
-explicit counts can exceed that policy. Counts are independent of `rows` and
+automatic detached directory follows the byte target, not the number of
+resident KV pages. Counts are independent of `rows` and
 `max_sessions`: evicting a saved history does not limit active concurrency.
 The selected declaration alone proceeds to device JIT and parameter loading.
 
@@ -430,7 +448,7 @@ stateful stage inside a larger inference pipeline without making it imitate a
 chat model.
 
 Sequence definitions share text's `rows`, `max_sessions`, `context_capacity`,
-`pool_capacity`, `prefill_capacity`, `checkpoint_capacity`, `session_cache_capacity`, and
+`prefill_capacity`, `checkpoint_capacity`, `session_cache_capacity`, and
 `admission_overtakes` fields and defaults. Admission reserves only the supplied
 known positions, rounded to cache blocks; it does not reserve generated tokens.
 Execution uses packed epochs and the same row/cache/checkpoint ownership.

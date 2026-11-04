@@ -53,6 +53,7 @@ loom_cc_library(
         "//loom/src/loom/serve/runtime/storage:virtual_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/memory:tlsf_pool",
     ],
 )
 

@@ -6,6 +6,8 @@
 
 #include "iree/tokenizer/format/huggingface/model_json.h"
 
+#include <string>
+
 #include "iree/base/api.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -89,6 +91,118 @@ TEST_F(ModelJsonTest, MinimalBPEModel) {
             1);
   EXPECT_EQ(iree_tokenizer_vocab_lookup(vocab_, iree_make_cstring_view("c")),
             2);
+}
+
+TEST_F(ModelJsonTest, LongSpellingsSurviveScratchReuseAcrossModelFormats) {
+  const std::string left_json = std::string(4096, 'a') + R"(\u00e9)";
+  const std::string right_json = std::string(8193, 'b') + R"(\n)";
+  const std::string left = std::string(4096, 'a') + "\xC3\xA9";
+  const std::string right = std::string(8193, 'b') + "\n";
+  const std::string joined = left + right;
+  const std::string vocabulary = "\"vocab\":{\"" + left_json + "\":0,\"" +
+                                 right_json + "\":1,\"" + left_json +
+                                 right_json + "\":2}";
+  const std::string unknown = ",\"unk_token\":\"" + left_json + "\"";
+  for (const std::string& json :
+       {"{\"type\":\"BPE\"," + vocabulary + unknown + ",\"merges\":[\"" +
+            left_json + " " + right_json + "\"]}",
+        "{\"type\":\"BPE\"," + vocabulary + unknown + ",\"merges\":[[\"" +
+            left_json + "\",\"" + right_json + "\"]]}",
+        "{\"type\":\"WordPiece\"," + vocabulary + unknown + "}",
+        "{\"type\":\"Unigram\",\"unk_id\":0,\"vocab\":[[\"" + left_json +
+            "\",-2],[\"" + right_json + "\",-3],[\"" + left_json + right_json +
+            "\",-1]]}"}) {
+    IREE_ASSERT_OK(iree_tokenizer_huggingface_parse_model(
+        iree_make_string_view(json.data(), json.size()), &added_tokens_,
+        IREE_TOKENIZER_HUGGINGFACE_PRE_TOKENIZER_FLAG_NONE, allocator_, &model_,
+        &vocab_));
+    EXPECT_EQ(iree_tokenizer_vocab_lookup(
+                  vocab_, iree_make_string_view(left.data(), left.size())),
+              0);
+    EXPECT_EQ(iree_tokenizer_vocab_lookup(
+                  vocab_, iree_make_string_view(right.data(), right.size())),
+              1);
+    EXPECT_EQ(iree_tokenizer_vocab_lookup(
+                  vocab_, iree_make_string_view(joined.data(), joined.size())),
+              2);
+    EXPECT_EQ(iree_tokenizer_vocab_special_ids(vocab_).unk, 0);
+    if (json.find("merges") != std::string::npos) {
+      ASSERT_EQ(iree_tokenizer_vocab_merge_count(vocab_), 1u);
+      const auto merge = iree_tokenizer_vocab_merge(vocab_, 0);
+      EXPECT_EQ(merge.left_id, 0u);
+      EXPECT_EQ(merge.right_id, 1u);
+    } else {
+      EXPECT_EQ(iree_tokenizer_vocab_merge_count(vocab_), 0u);
+    }
+    iree_tokenizer_model_free(model_);
+    model_ = nullptr;
+    iree_tokenizer_vocab_free(vocab_);
+    vocab_ = nullptr;
+  }
+}
+
+TEST_F(ModelJsonTest,
+       SpellingGrowthPropagatesAllocationFailuresAndCancellation) {
+  struct AllocationState {
+    // Index of the allocation request to fail.
+    size_t fail_at = 0;
+    // Number of allocation requests observed.
+    size_t attempts = 0;
+    // Number of allocations that still need retirement.
+    size_t live = 0;
+    // External failure returned at the selected allocation request.
+    iree_status_code_t failure = IREE_STATUS_RESOURCE_EXHAUSTED;
+  };
+  auto allocate = [](void* self, iree_allocator_command_t command,
+                     const void* params,
+                     void** inout_pointer) -> iree_status_t {
+    auto& state = *static_cast<AllocationState*>(self);
+    const bool had_storage = *inout_pointer != nullptr;
+    if (command != IREE_ALLOCATOR_COMMAND_FREE &&
+        state.attempts++ == state.fail_at) {
+      return iree_status_from_code(state.failure);
+    }
+    auto allocator = iree_allocator_system();
+    iree_status_t status =
+        allocator.ctl(allocator.self, command, params, inout_pointer);
+    if (iree_status_is_ok(status)) {
+      if (command == IREE_ALLOCATOR_COMMAND_FREE) {
+        state.live -= had_storage;
+      } else if (!had_storage) {
+        ++state.live;
+      }
+    }
+    return status;
+  };
+  const std::string spelling = std::string(4096, 'a') + R"(\u00e9)";
+  for (const std::string& json :
+       {"{\"type\":\"BPE\",\"vocab\":{\"" + spelling + "\":0,\"b\":1,\"" +
+            spelling + "b\":2},\"merges\":[[\"" + spelling + "\",\"b\"]]}",
+        "{\"type\":\"WordPiece\",\"vocab\":{\"" + spelling +
+            "\":0},\"unk_token\":\"" + spelling + "\"}",
+        "{\"type\":\"Unigram\",\"vocab\":[[\"" + spelling + "\",-1]]}"}) {
+    for (iree_status_code_t failure :
+         {IREE_STATUS_RESOURCE_EXHAUSTED, IREE_STATUS_CANCELLED}) {
+      for (size_t fail_at = 0;; ++fail_at) {
+        SCOPED_TRACE(fail_at);
+        AllocationState state{.fail_at = fail_at, .failure = failure};
+        iree_status_t status = iree_tokenizer_huggingface_parse_model(
+            iree_make_string_view(json.data(), json.size()), &added_tokens_,
+            IREE_TOKENIZER_HUGGINGFACE_PRE_TOKENIZER_FLAG_NONE,
+            iree_allocator_t{&state, allocate}, &model_, &vocab_);
+        iree_tokenizer_model_free(model_);
+        model_ = nullptr;
+        iree_tokenizer_vocab_free(vocab_);
+        vocab_ = nullptr;
+        EXPECT_EQ(state.live, 0u);
+        if (iree_status_is_ok(status)) {
+          EXPECT_EQ(state.attempts, fail_at);
+          break;
+        }
+        IREE_EXPECT_STATUS_IS(failure, status);
+      }
+    }
+  }
 }
 
 TEST_F(ModelJsonTest, BPEModelWithMergesStringFormat) {

@@ -735,7 +735,7 @@ iree_status_t loom_serve_weights_prepare(
 static iree_device_size_t loom_serve_weight_read_window_size(
     const loom_serve_virtual_buffer_t* reservation) {
   const iree_device_size_t slab_size =
-      loom_serve_virtual_buffer_slab_size(reservation);
+      loom_serve_virtual_buffer_mapping_size(reservation);
   return iree_min(slab_size, 64 * 1024 * 1024);
 }
 
@@ -893,7 +893,7 @@ static iree_status_t loom_serve_weight_stream_plan(
             loom_serve_virtual_buffer_handle(reservation));
         const iree_host_size_t count = (length - 1) / window_size + 1;
         const iree_host_size_t windows_per_slab =
-            loom_serve_virtual_buffer_slab_size(reservation) / window_size;
+            loom_serve_virtual_buffer_mapping_size(reservation) / window_size;
         for (iree_host_size_t j = 0; j < count; ++j) {
           loom_serve_weight_group_t* group =
               &plan->groups[storage_groups[i] + j];

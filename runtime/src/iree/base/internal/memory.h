@@ -55,6 +55,12 @@ typedef struct iree_memory_info_t {
 // allocations made via the allocator.
 iree_memory_info_t iree_memory_query_info(void);
 
+// Returns the system's physical RAM capacity in bytes, or zero when unknown.
+// This is neither currently free memory nor an allocation guarantee: process
+// limits and other users may leave less available. Callers should capture this
+// during allocator initialization instead of querying on each allocation.
+uint64_t iree_memory_query_physical_capacity(void);
+
 // Enter a W^X region where pages will be changed RW->RX or RX->RW and write
 // protection should be suspended. Only effects the calling thread and must be
 // paired with iree_memory_jit_context_end.

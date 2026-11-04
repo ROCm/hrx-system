@@ -44,6 +44,8 @@ typedef struct loom_serve_text_storage_t {
   iree_const_byte_span_t bytes[LOOM_SERVE_TEXT_STORAGE_RESULT_COUNT];
   // Positions in one page, declared by the model source.
   iree_host_size_t block_size;
+  // Useful bytes contributed by one physical page across every cache plane.
+  uint64_t page_bytes;
   // Byte origin of row-major page maps in each device origin table.
   iree_device_size_t map_origin;
   // Maximum logical blocks per row, independent of physical capacity.
