@@ -6,6 +6,7 @@
 #include "loom/serve/runtime/parameter/residency.h"
 
 #include "iree/base/threading/mutex.h"
+#include "loom/serve/runtime/storage/virtual_pool.h"
 
 typedef struct loom_serve_residency_entry_t loom_serve_residency_entry_t;
 
@@ -16,6 +17,9 @@ struct loom_serve_residency_cache_t {
   loom_serve_memory_pool_t* pool;
   // Borrowed logical workspace sharing pool, or NULL without shared backing.
   loom_serve_workspace_t* workspace;
+  // Borrowed permanent virtual source, distinct from reclaimable model history.
+  // NULL when permanent allocations do not share this physical budget.
+  iree_hal_pool_t* permanent_source;
   // Serializes final output-credit returns with owner observation/detachment.
   iree_slim_mutex_t output_mutex;
   // Accepted output bounds, including independent downstream queue captures.
@@ -542,7 +546,8 @@ static uint64_t loom_serve_residency_cache_projected_bytes(
     loom_serve_residency_cache_t* cache) {
   const loom_serve_memory_statistics_t memory =
       loom_serve_memory_pool_statistics(cache->pool);
-  return memory.committed_bytes - memory.releasing_bytes - memory.cached_bytes;
+  return memory.committed_bytes + memory.pending_bytes -
+         memory.releasing_bytes - memory.cached_bytes;
 }
 
 iree_status_t loom_serve_residency_cache_trim_idle(
@@ -603,24 +608,27 @@ static iree_status_t loom_serve_residency_reclaim(void* user_data,
     }
   }
   uint64_t remaining = loom_serve_residency_cache_projected_bytes(cache);
-  uint64_t pinned_bytes = 0;
+  uint64_t pinned_bytes = cache->permanent_source
+                              ? loom_serve_virtual_pool_source_protected_bytes(
+                                    cache->permanent_source)
+                              : 0;
   for (loom_serve_residency_group_t* entry = cache->groups.oldest;
        entry && remaining > target_bytes; entry = entry->next) {
     const loom_serve_memory_usage_t memory =
         loom_serve_residency_group_statistics(entry);
-    const uint64_t committed_bytes =
-        memory.committed_bytes - memory.releasing_bytes;
+    const uint64_t live_bytes =
+        memory.committed_bytes + memory.pending_bytes - memory.releasing_bytes;
     if (loom_serve_residency_group_is_pinned(entry) || !entry->active) {
-      pinned_bytes += committed_bytes;
+      pinned_bytes += live_bytes;
     } else {
-      remaining -= committed_bytes;
+      remaining -= live_bytes;
     }
   }
   if (remaining <= target_bytes) {
     return loom_serve_residency_cache_trim(cache, target_bytes);
   }
-  // Pinned parameters and terminal partial loads cannot be evicted. No idle
-  // history can help while that protected backing alone exceeds the target.
+  // Permanent roots, pinned parameters, and terminal partial loads cannot be
+  // evicted. No idle history can help while that backing exceeds the target.
   if (pinned_bytes > target_bytes) {
     return iree_ok_status();
   }
@@ -662,7 +670,8 @@ static uint64_t loom_serve_residency_activation_workspace(
 
 iree_status_t loom_serve_residency_cache_allocate(
     loom_serve_memory_pool_t* pool, loom_serve_workspace_t* workspace,
-    iree_allocator_t host_allocator, loom_serve_residency_cache_t** out_cache) {
+    iree_hal_pool_t* permanent_source, iree_allocator_t host_allocator,
+    loom_serve_residency_cache_t** out_cache) {
   *out_cache = NULL;
   loom_serve_residency_cache_t* cache = NULL;
   IREE_RETURN_IF_ERROR(
@@ -670,6 +679,7 @@ iree_status_t loom_serve_residency_cache_allocate(
   cache->host_allocator = host_allocator;
   cache->pool = pool;
   cache->workspace = workspace;
+  cache->permanent_source = permanent_source;
   iree_slim_mutex_initialize(&cache->output_mutex);
   if (pool) {
     loom_serve_memory_pool_set_reclaimer(
@@ -974,6 +984,17 @@ static bool loom_serve_residency_admit_working_set(
     return true;
   }
   uint64_t remaining = loom_serve_memory_pool_limit(cache->pool);
+  loom_serve_memory_usage_t permanent = {0};
+  if (cache->permanent_source) {
+    permanent =
+        loom_serve_virtual_pool_source_memory_usage(cache->permanent_source);
+    const uint64_t protected_bytes =
+        loom_serve_virtual_pool_source_protected_bytes(cache->permanent_source);
+    if (protected_bytes > remaining) {
+      return false;
+    }
+    remaining -= protected_bytes;
+  }
   uint64_t parameter_bytes = 0;
   for (const loom_serve_residency_group_t* group = cache->groups.oldest; group;
        group = group->next) {
@@ -1000,7 +1021,8 @@ static bool loom_serve_residency_admit_working_set(
                        : (loom_serve_memory_usage_t){0};
   const uint64_t mutable_bytes =
       loom_serve_memory_pool_live_bytes(cache->pool) - parameter_bytes -
-      workspace.committed_bytes - workspace.pending_bytes;
+      workspace.committed_bytes - workspace.pending_bytes -
+      permanent.committed_bytes - permanent.pending_bytes;
   const uint64_t workspace_capacity = remaining;
   iree_slim_mutex_lock(&cache->output_mutex);
   const uint64_t output_bytes = cache->output_bytes;

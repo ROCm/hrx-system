@@ -237,6 +237,7 @@ TEST_F(VirtualPoolTest, IndependentSourcesShareAdmissionButNotWorkspaceCredit) {
   EXPECT_EQ(
       loom_serve_virtual_pool_source_memory_usage(storage).committed_bytes,
       kSlabSize);
+  EXPECT_EQ(loom_serve_virtual_pool_source_protected_bytes(storage), kSlabSize);
   EXPECT_EQ(
       loom_serve_workspace_memory_usage(virtual_workspace).committed_bytes, 0u);
 
@@ -278,6 +279,7 @@ TEST_F(VirtualPoolTest, IndependentSourcesShareAdmissionButNotWorkspaceCredit) {
   ASSERT_NO_FATAL_FAILURE(AwaitVirtualPool());
   EXPECT_EQ(
       loom_serve_virtual_pool_source_memory_usage(storage).committed_bytes, 0u);
+  EXPECT_EQ(loom_serve_virtual_pool_source_protected_bytes(storage), 0u);
   EXPECT_EQ(loom_serve_memory_pool_live_bytes(pool), 0u);
 }
 
@@ -310,11 +312,22 @@ TEST_F(VirtualPoolTest, VirtualBackingBatchDenialPreservesWarmPrefix) {
   };
   iree_hal_pool_reservation_t reservations[2] = {};
   iree_hal_pool_acquire_info_t infos[2] = {};
+  deferred_backing->defer = true;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
       source, 1, requests, nullptr, reservations, infos, callback,
       IREE_HAL_POOL_RESERVE_FLAG_NONE));
+  IREE_ASSERT_OK(loom_serve_virtual_pool_advance(virtual_pool));
+  deferred_backing->WaitForAcquisition();
+  EXPECT_EQ(completion.count, 0u);
+  EXPECT_EQ(loom_serve_virtual_pool_source_memory_usage(source).pending_bytes,
+            2 * kSlabSize);
+  EXPECT_EQ(loom_serve_virtual_pool_source_protected_bytes(source),
+            2 * kSlabSize);
+  deferred_backing->ResumeAcquisitions();
   ASSERT_NO_FATAL_FAILURE(AwaitVirtualPool());
   IREE_ASSERT_OK(completion.status);
+  EXPECT_EQ(loom_serve_virtual_pool_source_protected_bytes(source),
+            2 * kSlabSize);
   const auto original = reservations[0];
   iree_hal_pool_reservation_view_t view;
   ASSERT_TRUE(
@@ -322,6 +335,7 @@ TEST_F(VirtualPoolTest, VirtualBackingBatchDenialPreservesWarmPrefix) {
   ASSERT_NO_FATAL_FAILURE(RoundTrip(view.buffer, 0, 0x12345678));
   iree_hal_pool_release_reservations(source, 1, reservations,
                                      infos[0].reuse_frontier);
+  EXPECT_EQ(loom_serve_virtual_pool_source_protected_bytes(source), 0u);
 
   // The warm first range must roll back when the complete four-slab request
   // cannot fit the three-slab budget. Caller output slots stay untouched.
@@ -330,6 +344,15 @@ TEST_F(VirtualPoolTest, VirtualBackingBatchDenialPreservesWarmPrefix) {
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
       source, 2, requests, nullptr, reservations, infos, callback,
       IREE_HAL_POOL_RESERVE_FLAG_NONE));
+  // The warm prefix is protected before publication even though no logical
+  // reservation or new physical commitment describes that ownership yet.
+  iree_hal_pool_stats_t unpublished;
+  iree_hal_pool_query_stats(source, &unpublished);
+  EXPECT_EQ(unpublished.bytes_reserved, 0u);
+  EXPECT_EQ(loom_serve_virtual_pool_source_memory_usage(source).pending_bytes,
+            0u);
+  EXPECT_EQ(loom_serve_virtual_pool_source_protected_bytes(source),
+            2 * kSlabSize);
   ASSERT_NO_FATAL_FAILURE(AwaitVirtualPool());
   IREE_ASSERT_OK(completion.status);
   EXPECT_EQ(completion.result, IREE_HAL_POOL_ACQUIRE_OVER_BUDGET);
@@ -337,6 +360,7 @@ TEST_F(VirtualPoolTest, VirtualBackingBatchDenialPreservesWarmPrefix) {
   EXPECT_EQ(reservations[1].block_handle, 29u);
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes,
             2 * kSlabSize);
+  EXPECT_EQ(loom_serve_virtual_pool_source_protected_bytes(source), 0u);
 
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
       source, 1, requests, nullptr, reservations, infos, callback,
@@ -345,6 +369,8 @@ TEST_F(VirtualPoolTest, VirtualBackingBatchDenialPreservesWarmPrefix) {
   EXPECT_EQ(completion.count, 3u);
   IREE_ASSERT_OK(completion.status);
   EXPECT_EQ(reservations[0].block_handle, original.block_handle);
+  EXPECT_EQ(loom_serve_virtual_pool_source_protected_bytes(source),
+            2 * kSlabSize);
   ASSERT_TRUE(
       iree_hal_pool_query_reservation_views(source, 1, reservations, &view));
   ASSERT_NO_FATAL_FAILURE(CheckRetained(view.buffer, 0, 0x12345678));
@@ -356,6 +382,7 @@ TEST_F(VirtualPoolTest, VirtualBackingBatchDenialPreservesWarmPrefix) {
   iree_hal_pool_stats_t statistics;
   iree_hal_pool_query_stats(source, &statistics);
   EXPECT_EQ(statistics.reservation_count, 0u);
+  EXPECT_EQ(loom_serve_virtual_pool_source_protected_bytes(source), 0u);
 }
 
 TEST_F(VirtualPoolTest, VirtualBackingWaitsForIncompatibleNativeReturn) {
@@ -480,6 +507,9 @@ TEST_F(VirtualPoolTest,
             2 * kSlabSize);
   EXPECT_EQ(loom_serve_virtual_pool_source_memory_usage(source).committed_bytes,
             kSlabSize);
+  EXPECT_EQ(loom_serve_virtual_pool_source_protected_bytes(source), kSlabSize);
+  EXPECT_EQ(loom_serve_virtual_pool_source_protected_bytes(failing_source),
+            kSlabSize);
   ASSERT_NO_FATAL_FAILURE(CheckRetained(buffer, 0, 0x12345678));
 }
 
@@ -542,10 +572,12 @@ TEST_F(VirtualPoolTest, VirtualBackingTrimWaitsForActualHistoryCompletion) {
   // Dominance licenses ordered logical reuse, not physical detach.
   iree_hal_pool_release_reservations(source, 1, &reservation,
                                      info.reuse_frontier);
+  EXPECT_EQ(loom_serve_virtual_pool_source_protected_bytes(source), 0u);
   iree_hal_pool_trim(source, IREE_HAL_POOL_TRIM_FLAG_ALL, 0);
   IREE_ASSERT_OK(loom_serve_virtual_pool_advance(virtual_pool));
   EXPECT_TRUE(loom_serve_virtual_pool_is_pending(virtual_pool));
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes, kSlabSize);
+  EXPECT_EQ(loom_serve_virtual_pool_source_protected_bytes(source), kSlabSize);
   ASSERT_NO_FATAL_FAILURE(CheckRetained(view.buffer, 0, 0x23571113));
 
   std::atomic<size_t> wakes{0};
@@ -573,6 +605,7 @@ TEST_F(VirtualPoolTest, VirtualBackingTrimWaitsForActualHistoryCompletion) {
   iree_hal_pool_stats_t detached;
   iree_hal_pool_query_stats(source, &detached);
   EXPECT_EQ(detached.bytes_committed, 0u);
+  EXPECT_EQ(loom_serve_virtual_pool_source_protected_bytes(source), 0u);
   // The common cache still owns the physical slab, available to any role.
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool).cached_bytes, kSlabSize);
 

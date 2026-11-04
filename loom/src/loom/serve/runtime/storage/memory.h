@@ -175,9 +175,10 @@ bool loom_serve_memory_pool_is_pending(loom_serve_memory_pool_t* pool);
 iree_status_t loom_serve_memory_pool_await(loom_serve_memory_pool_t* pool);
 
 // Cold pressure policy, independent of logical storage geometry. The callback
-// may trim eligible reservations toward target_bytes of total commitment; it
-// returns a status only for an actual platform/IO failure. An unreachable
-// target is not an error. It must not commit memory or recurse into admission.
+// may trim eligible reservations toward target_bytes of committed plus pending
+// backing; it returns a status only for an actual platform/IO failure. An
+// unreachable target is not an error. It must not commit memory or recurse into
+// admission.
 typedef struct loom_serve_memory_reclaimer_t {
   // Borrowed policy owner, alive until the callback is removed.
   void* user_data;

@@ -61,6 +61,7 @@ loom_cc_library(
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/execution:workspace",
         "//loom/src/loom/serve/runtime/storage:memory",
+        "//loom/src/loom/serve/runtime/storage:virtual_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",

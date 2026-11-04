@@ -24,12 +24,16 @@ typedef struct loom_serve_residency_cache_t loom_serve_residency_cache_t;
 typedef struct loom_serve_residency_group_t loom_serve_residency_group_t;
 typedef struct loom_serve_residency_t loom_serve_residency_t;
 
-// Borrows pool and its optional shared workspace. NULL pool supports
-// fixed-backed consumers but cannot reclaim their storage. Installs the pool's
-// sole pressure policy; idle workspace backing is reclaimed before model data.
+// Borrows pool, its optional shared workspace, and permanent virtual source.
+// The permanent source's protected backing cannot be evicted as model history.
+// NULL permanent_source means no such backing competes in this budget. NULL
+// pool supports fixed-backed consumers but cannot reclaim their storage.
+// Installs the pool's sole pressure policy; idle workspace backing is reclaimed
+// before model data.
 iree_status_t loom_serve_residency_cache_allocate(
     loom_serve_memory_pool_t* pool, loom_serve_workspace_t* workspace,
-    iree_allocator_t host_allocator, loom_serve_residency_cache_t** out_cache);
+    iree_hal_pool_t* permanent_source, iree_allocator_t host_allocator,
+    loom_serve_residency_cache_t** out_cache);
 
 // All residencies, groups, and downstream output views must have retired.
 // Removes pressure policy.
@@ -57,10 +61,11 @@ bool loom_serve_residency_cache_is_pending(loom_serve_residency_cache_t* cache);
 iree_status_t loom_serve_residency_cache_query_status(
     loom_serve_residency_cache_t* cache);
 
-// Best-effort trim toward total pool commitment of target_bytes. Pinned
-// parameters and model-owned mutable state survive. The pool statistics report
-// completed and releasing extents; only real platform failures return a failing
-// status. Native release does not block the owner or grant capacity early.
+// Best-effort trim toward target_bytes of committed plus pending pool backing.
+// Pinned parameters and model-owned mutable state survive. Pool statistics
+// report completed and releasing extents; only real platform failures return a
+// failing status. Native release does not block the owner or grant capacity
+// early.
 iree_status_t loom_serve_residency_cache_trim(
     loom_serve_residency_cache_t* cache, uint64_t target_bytes);
 

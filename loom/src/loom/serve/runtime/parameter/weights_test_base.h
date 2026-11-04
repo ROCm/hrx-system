@@ -502,7 +502,7 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
         memory_limit, host_allocator_, &owned_pool_));
     pool_ = owned_pool_;
     IREE_ASSERT_OK(loom_serve_residency_cache_allocate(
-        pool_, nullptr, host_allocator_, &owned_cache_));
+        pool_, nullptr, nullptr, host_allocator_, &owned_cache_));
   }
 
   loom_serve_residency_cache_t* ResidencyCache() {

@@ -271,9 +271,15 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
         }
         print(json.dumps(result), flush=True)
         assert memory_after["peak_bytes"] <= memory_bytes, result
-        assert second_status == 200, second
-        assert output(second) == oracle("abxa"), second
+        impossible_peer = retention == "parameters" and (
+            memory_bytes == ONE_MODEL_LIMIT_BYTES
+        )
+        assert second_status == (503 if impossible_peer else 200), second
+        if not impossible_peer:
+            assert output(second) == oracle("abxa"), second
         beta = next(item["loom"] for item in after["data"] if item["id"] == "beta")
+        if impossible_peer:
+            assert beta["parameters"]["primary"].get("activations", 0) == 0, beta
         admission = beta["parameters"]["primary"]["admission"]
         assert not admission["waiting"] and admission["age_seconds"] == 0, beta
         assert beta["parameters"]["primary"]["pins"] == 0, beta
@@ -318,8 +324,9 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
                 headers={"X-Loom-Model": "alpha"},
             )
             # Parameter pins survive pressure. At the exact pin-and-peer
-            # limit, admission reclaims unpinned histories; the roomy case
-            # retains both histories and parameter residency.
+            # limit, admission reclaims unpinned histories. A smaller budget
+            # cannot fit the peer even after eviction, so those histories must
+            # survive the denial just as they survive in the roomy case.
             expected_sessions = (
                 set()
                 if memory_bytes == PARAMETER_AND_PEER_LIMIT_BYTES
@@ -502,6 +509,7 @@ _CASES = (
     (4, ONE_MODEL_LIMIT_BYTES, "none"),
     (4, TWO_MODEL_LIMIT_BYTES, "checkpoint"),
     (4, PARAMETER_AND_PEER_LIMIT_BYTES, "parameters"),
+    (4, ONE_MODEL_LIMIT_BYTES, "parameters"),
 )
 
 
