@@ -1217,6 +1217,52 @@ static bool loom_low_allocation_assignment_overlaps_failure_storage(
   return false;
 }
 
+static bool loom_low_allocation_assignment_blocks_failure_component(
+    const loom_low_allocation_table_t* table,
+    const loom_low_allocation_assignment_t* assignment) {
+  if (assignment->location_kind !=
+      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
+    return false;
+  }
+  const loom_low_descriptor_set_t* descriptors = table->target.descriptor_set;
+  const loom_low_allocation_failure_t* failure = &table->failure;
+  for (uint32_t i = 0; i < failure->component_requirement_count; ++i) {
+    loom_low_allocation_assignment_t candidate =
+        failure->component_requirements[i];
+    if (assignment->end_point <= candidate.start_point ||
+        candidate.end_point <= assignment->start_point) {
+      continue;
+    }
+    const uint32_t candidate_count =
+        loom_low_allocation_storage_explicit_location_candidate_count(
+            descriptors, candidate.descriptor_reg_class_id,
+            candidate.unit_count);
+    for (uint32_t j = 0; j < candidate_count; ++j) {
+      if (!loom_low_allocation_storage_explicit_location_candidate(
+              descriptors, candidate.descriptor_reg_class_id,
+              candidate.unit_count, j, &candidate.location_base,
+              /*out_first_candidate_ordinal=*/NULL,
+              /*out_pressure_extent=*/NULL, /*out_packing_rank=*/NULL)) {
+        continue;
+      }
+      if (loom_low_allocation_live_range_assignments_conflict(
+              descriptors, table->storage_segments, table->unit_start_points,
+              table->unit_end_points, table->unit_point_count, assignment,
+              &candidate, /*shared_content=*/NULL)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+typedef enum loom_low_rematerialization_tier_e {
+  LOOM_LOW_REMATERIALIZATION_TIER_CROSS_BLOCK_PRESSURE = 0,
+  LOOM_LOW_REMATERIALIZATION_TIER_DIRECT_BLOCKER,
+  LOOM_LOW_REMATERIALIZATION_TIER_BLOCKER_CLASS,
+  LOOM_LOW_REMATERIALIZATION_TIER_COUNT,
+} loom_low_rematerialization_tier_t;
+
 typedef struct loom_low_rematerialization_candidate_t {
   // Original value ID, stable across rewrites of other candidates.
   loom_value_id_t value_id;
@@ -1225,9 +1271,9 @@ typedef struct loom_low_rematerialization_candidate_t {
   uint32_t definition_point;
   // Retained CFG DFS preorder; strict dominators have smaller preorders.
   uint16_t block_preorder;
-  // Cross-block demand repairs precede the local failure frontier so a
-  // sufficient cross-block batch does not clone additional local values.
-  bool is_cross_block_pressure;
+  // Overflow and direct blockers precede values that only free room to move
+  // a non-replayable blocker. Allocation is retried after each successful tier.
+  uint8_t tier;
   // Failure-frontier recipes with inputs follow input-free repairs and a new
   // allocation attempt. Predicted spill repairs keep one consumer-first batch.
   bool defers_for_input_free_repair;
@@ -1236,8 +1282,8 @@ typedef struct loom_low_rematerialization_candidate_t {
 static bool loom_low_rematerialization_candidate_less(
     const loom_low_rematerialization_candidate_t* lhs,
     const loom_low_rematerialization_candidate_t* rhs) {
-  if (lhs->is_cross_block_pressure != rhs->is_cross_block_pressure) {
-    return lhs->is_cross_block_pressure;
+  if (lhs->tier != rhs->tier) {
+    return lhs->tier < rhs->tier;
   }
   if (lhs->defers_for_input_free_repair != rhs->defers_for_input_free_repair) {
     return !lhs->defers_for_input_free_repair;
@@ -1257,10 +1303,10 @@ static iree_status_t loom_low_rematerialization_plan_failure_batch(
     const loom_low_rematerialization_facts_t* facts,
     iree_arena_allocator_t* arena,
     loom_low_rematerialization_candidate_t** out_candidates,
-    iree_host_size_t* out_count, iree_host_size_t* out_cross_block_count) {
+    iree_host_size_t* out_tier_counts) {
   *out_candidates = NULL;
-  *out_count = 0;
-  *out_cross_block_count = 0;
+  memset(out_tier_counts, 0,
+         LOOM_LOW_REMATERIALIZATION_TIER_COUNT * sizeof(*out_tier_counts));
   const loom_liveness_analysis_t* liveness = &table->liveness;
   const loom_low_descriptor_set_t* descriptors = table->target.descriptor_set;
   const loom_value_ordinal_t* storage_origins =
@@ -1271,6 +1317,13 @@ static iree_status_t loom_low_rematerialization_plan_failure_batch(
       storage_origins != NULL && failure_ordinal != LOOM_VALUE_ORDINAL_INVALID
           ? storage_origins[failure_ordinal]
           : failure_ordinal;
+  const loom_low_placement_value_component_t failure_component =
+      loom_low_placement_hard_register_ordinal_component(&table->placement,
+                                                         failure_ordinal);
+  enum {
+    PRESSURE_CLASS_OVERFLOW = 1u << 0,
+    PRESSURE_CLASS_BLOCKER = 1u << 1,
+  };
   uint8_t* pressure_classes = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, descriptors->reg_class_count, sizeof(*pressure_classes),
@@ -1292,7 +1345,30 @@ static iree_status_t loom_low_rematerialization_plan_failure_batch(
     if (iree_any_bit_set(reg_class->flags,
                          LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE) &&
         capacity != 0 && summary->peak_live_units > capacity) {
-      pressure_classes[class_id] = 1;
+      pressure_classes[class_id] |= PRESSURE_CLASS_OVERFLOW;
+    }
+  }
+  // Retain the physical frontier once. A non-replayable blocker can move only
+  // if another value releases space in its class; those indirect candidates
+  // remain a separate tier after direct repairs have been exhausted.
+  bool* frontier_assignments = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, table->assignment_count, sizeof(*frontier_assignments),
+      (void**)&frontier_assignments));
+  for (iree_host_size_t i = 0; i < table->assignment_count; ++i) {
+    const loom_low_allocation_assignment_t* assignment = &table->assignments[i];
+    frontier_assignments[i] =
+        loom_low_allocation_assignment_blocks_failure_component(table,
+                                                                assignment) ||
+        (loom_low_allocation_assignment_is_live_at_point(
+             table, assignment, table->failure.start_point) &&
+         (assignment->descriptor_reg_class_id ==
+              table->failure.descriptor_reg_class_id ||
+          loom_low_allocation_assignment_overlaps_failure_storage(table,
+                                                                  assignment)));
+    if (frontier_assignments[i]) {
+      pressure_classes[assignment->descriptor_reg_class_id] |=
+          PRESSURE_CLASS_BLOCKER;
     }
   }
   loom_low_rematerialization_candidate_t* candidates = NULL;
@@ -1316,20 +1392,27 @@ static iree_status_t loom_low_rematerialization_plan_failure_batch(
     const bool in_failure_frontier =
         (storage_origins != NULL ? storage_origins[ordinal] : ordinal) ==
             failure_origin ||
+        (failure_component.count != 0 &&
+         table->placement
+                 .hard_register_ordinal_components_by_value_ordinal[ordinal] ==
+             failure_component.index) ||
         (assignment_index != UINT32_MAX &&
-         loom_low_allocation_assignment_is_live_at_point(
-             table, &table->assignments[assignment_index],
-             table->failure.start_point) &&
-         (interval->value_class.register_class_id ==
-              table->failure.descriptor_reg_class_id ||
-          loom_low_allocation_assignment_overlaps_failure_storage(
-              table, &table->assignments[assignment_index])));
+         frontier_assignments[assignment_index]);
     // Intervals retain cross-block demand. The failed allocation independently
     // identifies live pressure that can be repaired in the same stable batch.
     const bool is_cross_block_pressure =
         interval->block_count >= 2 &&
-        pressure_classes[interval->value_class.register_class_id];
-    if (!in_failure_frontier && !is_cross_block_pressure) {
+        (pressure_classes[interval->value_class.register_class_id] &
+         PRESSURE_CLASS_OVERFLOW);
+    const bool frees_blocker_class =
+        assignment_index != UINT32_MAX &&
+        (pressure_classes[interval->value_class.register_class_id] &
+         PRESSURE_CLASS_BLOCKER) &&
+        loom_low_allocation_assignment_is_live_at_point(
+            table, &table->assignments[assignment_index],
+            table->failure.start_point);
+    if (!in_failure_frontier && !is_cross_block_pressure &&
+        !frees_blocker_class) {
       continue;
     }
     if (!iree_any_bit_set(facts->value_flags[ordinal],
@@ -1351,18 +1434,22 @@ static iree_status_t loom_low_rematerialization_plan_failure_batch(
                                                  sizeof(*candidates), &capacity,
                                                  (void**)&candidates));
     }
+    const loom_low_rematerialization_tier_t tier =
+        is_cross_block_pressure
+            ? LOOM_LOW_REMATERIALIZATION_TIER_CROSS_BLOCK_PRESSURE
+        : in_failure_frontier ? LOOM_LOW_REMATERIALIZATION_TIER_DIRECT_BLOCKER
+                              : LOOM_LOW_REMATERIALIZATION_TIER_BLOCKER_CLASS;
     candidates[count++] = (loom_low_rematerialization_candidate_t){
         .value_id = interval->value_id,
         .definition_point = interval->definition_point,
         .block_preorder = block != NULL ? block->preorder : 0,
-        .is_cross_block_pressure = is_cross_block_pressure,
+        .tier = tier,
         .defers_for_input_free_repair = defining_op->operand_count != 0,
     };
-    *out_cross_block_count += is_cross_block_pressure;
+    ++out_tier_counts[tier];
   }
   loom_low_rematerialization_candidate_sort(candidates, count);
   *out_candidates = candidates;
-  *out_count = count;
   return iree_ok_status();
 }
 
@@ -1478,22 +1565,21 @@ iree_status_t loom_low_allocation_rematerialize_failure(
   IREE_RETURN_IF_ERROR(loom_low_rematerialization_facts_initialize(
       &facts, &table->target, arena));
   loom_low_rematerialization_candidate_t* candidates = NULL;
-  iree_host_size_t candidate_count = 0;
-  iree_host_size_t cross_block_count = 0;
+  iree_host_size_t tier_counts[LOOM_LOW_REMATERIALIZATION_TIER_COUNT] = {0};
   iree_status_t status = loom_low_rematerialization_plan_failure_batch(
-      module, table, &facts, arena, &candidates, &candidate_count,
-      &cross_block_count);
-  if (iree_status_is_ok(status)) {
+      module, table, &facts, arena, &candidates, tier_counts);
+  iree_host_size_t start = 0;
+  for (uint32_t tier = 0;
+       tier < LOOM_LOW_REMATERIALIZATION_TIER_COUNT &&
+       iree_status_is_ok(status) && out_result->repaired_value_count == 0;
+       ++tier) {
+    if (tier_counts[tier] == 0) {
+      continue;
+    }
     status = loom_low_rematerialization_apply_batch(
-        module, candidates, cross_block_count, schedule,
+        module, candidates + start, tier_counts[tier], schedule,
         /*spill_allocation=*/NULL, state, arena, &facts, out_result);
-  }
-  if (iree_status_is_ok(status) && out_result->repaired_value_count == 0 &&
-      candidate_count != cross_block_count) {
-    status = loom_low_rematerialization_apply_batch(
-        module, candidates + cross_block_count,
-        candidate_count - cross_block_count, schedule,
-        /*spill_allocation=*/NULL, state, arena, &facts, out_result);
+    start += tier_counts[tier];
   }
   loom_low_rematerialization_facts_release(&facts);
   if (iree_status_is_ok(status)) {

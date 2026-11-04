@@ -93,9 +93,13 @@ iree_status_t loom_low_schedule_rematerialize_failure(
 // Repairs pressure from unspillable classes and register-required spill
 // traffic. Selects cross-block demand in over-budget unspillable classes first,
 // then the complete physical failure frontier if that demand cannot be
-// repaired. Each set tries input-free repairs before captured-input recipes,
-// retrying allocation after a successful input-free tier. Each tier is
-// consumer-first. Private placements retain the completed schedule until the
+// repaired. Coupled register requirements include blockers of peers that have
+// not yet received assignments, using their retained storage lifetimes. Each
+// set tries input-free repairs before captured-input recipes. If neither set
+// repairs the failure, values live in the blockers' classes can release room
+// for moving non-replayable blockers. Each successful tier retries allocation,
+// including after input-free repairs. Consumers are repaired before producers
+// within each tier. Private placements retain the completed schedule until the
 // first clone invalidates it. Subsequent clones capture fresh operand uses
 // without consulting the allocation or schedule snapshot. One optional
 // diagnostic summarizes the complete batch. |schedule| is the completed order

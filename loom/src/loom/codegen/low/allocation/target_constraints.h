@@ -198,6 +198,13 @@ typedef struct loom_low_allocation_failure_t {
   uint32_t conflict_location_base;
   // Conflicting assignment location width, or zero when unavailable.
   uint32_t conflict_location_count;
+  // Storage requirements of the failed hard register-ordinal component.
+  // Allocation retains refined unit and sparse lifetimes before releasing
+  // its working indexes. Location bases remain unset; repair considers each
+  // class's physical candidates. NULL when the failed value is uncoupled.
+  const loom_low_allocation_assignment_t* component_requirements;
+  // Number of records in |component_requirements|, including tied aliases.
+  uint32_t component_requirement_count;
 } loom_low_allocation_failure_t;
 
 // Returns true when |failure| describes a terminal hard-allocation failure.

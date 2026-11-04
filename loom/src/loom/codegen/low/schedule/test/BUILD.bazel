@@ -16,6 +16,7 @@ package(
 loom_check_test_suite(
     name = "test",
     srcs = [
+        "completion_headroom.loom-test",
         "hazards.loom-test",
         "memory_access_flags.loom-test",
         "memory_frontier.loom-test",
@@ -31,14 +32,6 @@ loom_check_test_suite(
         "state_updates.loom-test",
         "storage_lifetime.loom-test",
     ],
-)
-
-loom_check_test(
-    name = "packed_streams",
-    src = "packed_streams.loom-test",
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/arch:aie2p",
-    ]),
 )
 
 loom_check_test(

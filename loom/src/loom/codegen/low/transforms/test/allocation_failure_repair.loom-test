@@ -121,3 +121,247 @@ low.func.def target<test.low.core>(@test_target) @loop_fragmentation(%pointer: r
 ^exit(%result0: reg<test.i32 x8>, %result1: reg<test.i32 x8>, %result2: reg<test.i32 x8>):
   return %result0, %result1, %result2
 }
+
+// ====
+
+// The first result has free registers, but each matching partner register is
+// occupied. Repair the partner blockers before assigning the tuple.
+// RUN: with-low-asm pass low-materialize-allocation{spill-storage-spaces=none}
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @peer_repair() -> (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %seed0 = test.const.i32 7
+  %first = copy %seed0 : reg<test.i32> -> reg<test.coindexed.partner>
+  %seed1 = test.const.i32 9
+  %second = copy %seed1 : reg<test.i32> -> reg<test.coindexed.partner>
+  %primary, %partner = test.coindexed.results
+  %primary_value = copy %primary : reg<test.packed.narrow> -> reg<test.i32>
+  %partner_value = copy %partner : reg<test.coindexed.partner> -> reg<test.i32>
+  %first_value = copy %first : reg<test.coindexed.partner> -> reg<test.i32>
+  %second_value = copy %second : reg<test.coindexed.partner> -> reg<test.i32>
+  return %primary_value, %partner_value, %first_value, %second_value
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @peer_repair() -> (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %seed0 = test.const.i32 7
+  %seed1 = test.const.i32 9
+  %primary, %partner = test.coindexed.results
+  %primary_value = copy %primary : reg<test.packed.narrow> -> reg<test.i32>
+  %partner_value = copy %partner : reg<test.coindexed.partner> -> reg<test.i32>
+  %first_remat = copy %seed0 : reg<test.i32> -> reg<test.coindexed.partner>
+  %first_value = copy %first_remat : reg<test.coindexed.partner> -> reg<test.i32>
+  %second_remat = copy %seed1 : reg<test.i32> -> reg<test.coindexed.partner>
+  %second_value = copy %second_remat : reg<test.coindexed.partner> -> reg<test.i32>
+  return %primary_value, %partner_value, %first_value, %second_value
+}
+
+// ====
+
+// A broad class is below its own capacity while occupying the only available
+// tuple partner. Its constants belong to the coupled failure frontier.
+// RUN: with-low-asm pass low-materialize-allocation{spill-storage-spaces=none}
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @broad_peer_repair(%fixed: reg<test.fixed.r0>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %first = test.const.explicit32 7
+  %second = test.const.explicit32 9
+  %primary, %partner = test.coindexed.results
+  %primary_value = copy %primary : reg<test.packed.narrow> -> reg<test.i32>
+  %partner_value = copy %partner : reg<test.coindexed.partner> -> reg<test.i32>
+  %fixed_value = copy %fixed : reg<test.fixed.r0> -> reg<test.i32>
+  %first_value = copy %first : reg<test.explicit32> -> reg<test.i32>
+  %second_value = copy %second : reg<test.explicit32> -> reg<test.i32>
+  return %primary_value, %partner_value, %fixed_value, %first_value, %second_value
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @broad_peer_repair(%fixed: reg<test.fixed.r0>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %primary, %partner = test.coindexed.results
+  %primary_value = copy %primary : reg<test.packed.narrow> -> reg<test.i32>
+  %partner_value = copy %partner : reg<test.coindexed.partner> -> reg<test.i32>
+  %fixed_value = copy %fixed : reg<test.fixed.r0> -> reg<test.i32>
+  %first_remat = test.const.explicit32 7
+  %first_value = copy %first_remat : reg<test.explicit32> -> reg<test.i32>
+  %second_remat = test.const.explicit32 9
+  %second_value = copy %second_remat : reg<test.explicit32> -> reg<test.i32>
+  return %primary_value, %partner_value, %fixed_value, %first_value, %second_value
+}
+
+// ====
+
+// The partner is defined after the first member. Its projected storage
+// lifetime must participate in repair before it receives an assignment.
+// RUN: with-low-asm pass low-materialize-allocation{spill-storage-spaces=none}
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @later_peer_repair(%source: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %seed0 = test.const.i32 7
+  %first = copy %seed0 : reg<test.i32> -> reg<test.coindexed.partner>
+  %seed1 = test.const.i32 9
+  %second = copy %seed1 : reg<test.i32> -> reg<test.coindexed.partner>
+  %primary = test.packing.create %source
+  %partner = copy %source : reg<test.i32> -> reg<test.coindexed.partner>
+  test.coindexed.operands %primary, %partner
+  %primary_value = copy %primary : reg<test.packed.narrow> -> reg<test.i32>
+  %first_value = copy %first : reg<test.coindexed.partner> -> reg<test.i32>
+  %second_value = copy %second : reg<test.coindexed.partner> -> reg<test.i32>
+  return %primary_value, %first_value, %second_value
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @later_peer_repair(%source: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %seed0 = test.const.i32 7
+  %seed1 = test.const.i32 9
+  %primary = test.packing.create %source
+  %partner = copy %source : reg<test.i32> -> reg<test.coindexed.partner>
+  test.coindexed.operands %primary, %partner
+  %primary_value = copy %primary : reg<test.packed.narrow> -> reg<test.i32>
+  %first_remat = copy %seed0 : reg<test.i32> -> reg<test.coindexed.partner>
+  %first_value = copy %first_remat : reg<test.coindexed.partner> -> reg<test.i32>
+  %second_remat = copy %seed1 : reg<test.i32> -> reg<test.coindexed.partner>
+  %second_value = copy %second_remat : reg<test.coindexed.partner> -> reg<test.i32>
+  return %primary_value, %first_value, %second_value
+}
+
+// ====
+
+// Only the long value overlaps the later partner. The short value dies
+// between the first member and its partner, so its copy stays unchanged.
+// RUN: with-low-asm pass low-materialize-allocation{spill-storage-spaces=none}
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @peer_lifetimes(%guard: reg<test.packed.narrow>, %source: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %seed0 = test.const.i32 7
+  %short = copy %seed0 : reg<test.i32> -> reg<test.coindexed.partner>
+  %seed1 = test.const.i32 9
+  %long = copy %seed1 : reg<test.i32> -> reg<test.coindexed.partner>
+  %primary = test.packing.create %source
+  %short_value = copy %short : reg<test.coindexed.partner> -> reg<test.i32>
+  %partner = copy %source : reg<test.i32> -> reg<test.coindexed.partner>
+  test.coindexed.operands %primary, %partner
+  %primary_value = copy %primary : reg<test.packed.narrow> -> reg<test.i32>
+  %guard_value = copy %guard : reg<test.packed.narrow> -> reg<test.i32>
+  %long_value = copy %long : reg<test.coindexed.partner> -> reg<test.i32>
+  return %primary_value, %guard_value, %short_value, %long_value
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @peer_lifetimes(%guard: reg<test.packed.narrow>, %source: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %seed0 = test.const.i32 7
+  %short = copy %seed0 : reg<test.i32> -> reg<test.coindexed.partner>
+  %seed1 = test.const.i32 9
+  %primary = test.packing.create %source
+  %short_value = copy %short : reg<test.coindexed.partner> -> reg<test.i32>
+  %partner = copy %source : reg<test.i32> -> reg<test.coindexed.partner>
+  test.coindexed.operands %primary, %partner
+  %primary_value = copy %primary : reg<test.packed.narrow> -> reg<test.i32>
+  %guard_value = copy %guard : reg<test.packed.narrow> -> reg<test.i32>
+  %long_remat = copy %seed1 : reg<test.i32> -> reg<test.coindexed.partner>
+  %long_value = copy %long_remat : reg<test.coindexed.partner> -> reg<test.i32>
+  return %primary_value, %guard_value, %short_value, %long_value
+}
+
+// ====
+
+// Neither narrow-register blocker can replay. Recreate constants elsewhere
+// in their broader class so reallocation can move both stream results.
+// RUN: with-low-asm pass low-materialize-allocation{spill-storage-spaces=none}
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @narrow_domain_repair(%state: reg<test.recolor32>, %input: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.recolor32>) asm {
+  %first = test.const.explicit32 1
+  %second = test.const.explicit32 2
+  %blocked0, %state1 = test.stream.step.i32 %state, %input
+  %blocked1, %state2 = test.stream.step.i32 %state1, %input
+  %needed = test.packing.create %input
+  %needed_other = test.packing.create %input
+  %needed_other_value = copy %needed_other : reg<test.packed.narrow> -> reg<test.i32>
+  %needed_value = copy %needed : reg<test.packed.narrow> -> reg<test.i32>
+  %blocked0_value = copy %blocked0 : reg<test.explicit32> -> reg<test.i32>
+  %blocked1_value = copy %blocked1 : reg<test.explicit32> -> reg<test.i32>
+  %first_value = copy %first : reg<test.explicit32> -> reg<test.i32>
+  %second_value = copy %second : reg<test.explicit32> -> reg<test.i32>
+  return %needed_other_value, %needed_value, %blocked0_value, %blocked1_value, %first_value, %second_value, %state2
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @narrow_domain_repair(%state: reg<test.recolor32>, %input: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.recolor32>) asm {
+  %blocked0, %state1 = test.stream.step.i32 %state, %input
+  %blocked1, %state2 = test.stream.step.i32 %state1, %input
+  %needed = test.packing.create %input
+  %needed_other = test.packing.create %input
+  %needed_other_value = copy %needed_other : reg<test.packed.narrow> -> reg<test.i32>
+  %needed_value = copy %needed : reg<test.packed.narrow> -> reg<test.i32>
+  %blocked0_value = copy %blocked0 : reg<test.explicit32> -> reg<test.i32>
+  %blocked1_value = copy %blocked1 : reg<test.explicit32> -> reg<test.i32>
+  %first_remat = test.const.explicit32 1
+  %first_value = copy %first_remat : reg<test.explicit32> -> reg<test.i32>
+  %second_remat = test.const.explicit32 2
+  %second_value = copy %second_remat : reg<test.explicit32> -> reg<test.i32>
+  return %needed_other_value, %needed_value, %blocked0_value, %blocked1_value, %first_value, %second_value, %state2
+}
+
+// ====
+
+// The broad constant is live only on the other CFG arm. Its linear bounds
+// span the failed tuple, but sparse storage facts exclude it from repair.
+// RUN: with-low-asm pass low-materialize-allocation{spill-storage-spaces=none}
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @disjoint_peer(%condition: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %unrelated = test.const.explicit32 17
+  low.cond_br %condition, ^blocked, ^other : reg<test.i32>
+^blocked:
+  %seed0 = test.const.i32 7
+  %first = copy %seed0 : reg<test.i32> -> reg<test.coindexed.partner>
+  %seed1 = test.const.i32 9
+  %second = copy %seed1 : reg<test.i32> -> reg<test.coindexed.partner>
+  %primary, %partner = test.coindexed.results
+  %primary_value = copy %primary : reg<test.packed.narrow> -> reg<test.i32>
+  %partner_value = copy %partner : reg<test.coindexed.partner> -> reg<test.i32>
+  %first_value = copy %first : reg<test.coindexed.partner> -> reg<test.i32>
+  %second_value = copy %second : reg<test.coindexed.partner> -> reg<test.i32>
+  return %primary_value, %partner_value, %first_value, %second_value
+^other:
+  %other_value = copy %unrelated : reg<test.explicit32> -> reg<test.i32>
+  return %other_value, %other_value, %other_value, %other_value
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @disjoint_peer(%condition: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %unrelated = test.const.explicit32 17
+  low.cond_br %condition, ^blocked, ^other : reg<test.i32>
+^blocked:
+  %seed0 = test.const.i32 7
+  %seed1 = test.const.i32 9
+  %primary, %partner = test.coindexed.results
+  %primary_value = copy %primary : reg<test.packed.narrow> -> reg<test.i32>
+  %partner_value = copy %partner : reg<test.coindexed.partner> -> reg<test.i32>
+  %first_remat = copy %seed0 : reg<test.i32> -> reg<test.coindexed.partner>
+  %first_value = copy %first_remat : reg<test.coindexed.partner> -> reg<test.i32>
+  %second_remat = copy %seed1 : reg<test.i32> -> reg<test.coindexed.partner>
+  %second_value = copy %second_remat : reg<test.coindexed.partner> -> reg<test.i32>
+  return %primary_value, %partner_value, %first_value, %second_value
+^other:
+  %other_value = copy %unrelated : reg<test.explicit32> -> reg<test.i32>
+  return %other_value, %other_value, %other_value, %other_value
+}

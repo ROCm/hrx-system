@@ -310,6 +310,117 @@ TEST_F(CandidatePolicyTest, HardCapacityPrecedesReadinessAndAggregateRelief) {
   }
 }
 
+TEST_F(CandidatePolicyTest, CompletionHeadroomPrecedesReadinessWithinCapacity) {
+  auto completion = MakeConstrainedCandidate(3, 1);
+  auto independent = MakeCandidate(0, 0);
+  independent.flags =
+      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_CONSUMES_COMPLETION_HEADROOM;
+  for (const auto mode :
+       {LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT,
+        LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF,
+        LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION}) {
+    SCOPED_TRACE(mode);
+    ExpectPreferred(mode, completion, independent);
+
+    // Preserving a completion cannot authorize exceeding another hard bank.
+    completion.flags |=
+        LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY;
+    ExpectPreferred(mode, independent, completion);
+    completion.flags &=
+        ~LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY;
+  }
+}
+
+TEST_F(CandidatePolicyTest, CompletionHeadroomCannotPullBlockedSetupForward) {
+  auto setup = MakeCandidate(0, 0);
+  setup.projected_live_units = 3;
+  setup.produced_live_units = 1;
+  setup.produced_live_value_count = 1;
+  setup.flags = LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_STORAGE_SETUP;
+  auto work = MakeCandidate(2, 1);
+  work.projected_live_units = 4;
+  work.produced_live_units = 1;
+  work.produced_live_value_count = 1;
+  work.flags = LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_CONSUMES_COMPLETION_HEADROOM;
+  for (const auto mode :
+       {LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT,
+        LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF,
+        LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION}) {
+    SCOPED_TRACE(mode);
+    ExpectPreferred(mode, work, setup);
+
+    // Once the setup advances its consumer, the headroom preference applies.
+    auto actionable = setup;
+    actionable.flags |= LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_DESCRIPTOR;
+    ExpectPreferred(mode, actionable, work);
+  }
+}
+
+TEST_F(CandidatePolicyTest, CompletionHeadroomKeepsCrossBankPressureOrdering) {
+  auto work = MakeCandidate(0, 0);
+  work.projected_live_units = 52;
+  work.killed_live_units = 1;
+  work.produced_live_units = 2;
+  work.killed_live_value_count = 1;
+  work.produced_live_value_count = 2;
+  work.pressure_cliff_penalty = 1;
+  work.flags = LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_CONSUMES_COMPLETION_HEADROOM;
+  auto preserving = work;
+  preserving.source_ordinal = 1;
+  preserving.flags = 0;
+  preserving.pressure_cliff_penalty = 2;
+  for (const auto mode :
+       {LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT,
+        LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF,
+        LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION}) {
+    SCOPED_TRACE(mode);
+    // Equal aggregate growth can incur different physical-bank costs.
+    // Headroom alone cannot promote an otherwise ordinary instruction over
+    // the lower-cost alternative.
+    ExpectPreferred(mode, work, preserving);
+
+    auto equal_pressure = preserving;
+    equal_pressure.pressure_cliff_penalty = work.pressure_cliff_penalty;
+    ExpectPreferred(mode, work, equal_pressure);
+
+    auto free_work = work;
+    free_work.pressure_cliff_penalty = 0;
+    auto free_preserving = preserving;
+    free_preserving.pressure_cliff_penalty = 0;
+    ExpectPreferred(mode, free_preserving, free_work);
+  }
+}
+
+TEST_F(CandidatePolicyTest,
+       DeferredLeafCannotForceLargerPhysicalPressureCliff) {
+  auto setup = MakeCandidate(0, 0);
+  setup.projected_live_units = 52;
+  setup.produced_live_units = 1;
+  setup.produced_live_value_count = 1;
+  setup.pressure_cliff_penalty = 2;
+  setup.flags = LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_REMATERIALIZABLE_LEAF;
+  auto work = MakeCandidate(0, 1);
+  work.projected_live_units = 52;
+  work.killed_live_units = 1;
+  work.produced_live_units = 2;
+  work.killed_live_value_count = 1;
+  work.produced_live_value_count = 2;
+  work.pressure_cliff_penalty = 3;
+  work.flags = LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_CONSUMES_COMPLETION_HEADROOM;
+  for (const auto mode :
+       {LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF,
+        LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION}) {
+    SCOPED_TRACE(mode);
+    ExpectPreferred(mode, setup, work);
+
+    // Equal aggregate liveness does not identify which physical bank grows.
+    // When the physical cost ties, keep the blocked leaf's lifetime closed.
+    auto equally_costly_setup = setup;
+    equally_costly_setup.pressure_cliff_penalty = work.pressure_cliff_penalty;
+    ExpectPreferred(mode, work, equally_costly_setup);
+  }
+}
+
 TEST_F(CandidatePolicyTest, PressureReliefSchedulesReadyPeer) {
   auto storage_handoff = MakeConstrainedCandidate(3, 0);
   storage_handoff.flags |= LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_STORAGE;
