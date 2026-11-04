@@ -507,12 +507,8 @@ set(IREE_DEP_LIBDXG_HEADERS_URLS
 set(IREE_DEP_LIBDXG_HEADERS_SHA256 "f7223bd894c58ed72d36fe606ea45655f5a80e5062e6defc47f09ecfa87d89a5")
 set(IREE_DEP_LIBDXG_HEADERS_STRIP_PREFIX "libdxg-5c28ebb4ead460c23ec5e87decb7d1af7285bb59")
 set(IREE_DEP_LIBDXG_HEADERS_BUILD_FILE "//build_tools/third_party/dxg_headers:libdxg_headers.BUILD.bazel")
-set(IREE_DEP_LIBDXG_HEADERS_PATCHES
-  "//build_tools/third_party/dxg_headers:portable_libdxg_headers.patch"
-)
-set(IREE_DEP_LIBDXG_HEADERS_PATCH_ARGS
-  "-p1"
-)
+set(IREE_DEP_LIBDXG_HEADERS_PATCHES "")
+set(IREE_DEP_LIBDXG_HEADERS_PATCH_ARGS "")
 
 set(IREE_DEP_SPIRV_HEADERS_KIND "http_archive")
 set(IREE_DEP_SPIRV_HEADERS_OWNER "shared")

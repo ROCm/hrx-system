@@ -7,12 +7,15 @@
 #ifndef AMDF_SRC_PLATFORM_LINUX_DXG_KMT_TYPES_H_
 #define AMDF_SRC_PLATFORM_LINUX_DXG_KMT_TYPES_H_
 
+// Treat the pinned public ABI declarations as a system-header boundary. This
+// keeps their MSVC pragmas and deliberately narrow enum bitfields from
+// acquiring libamdf's first-party warning policy without modifying the source.
+#if defined(__GNUC__)
+#pragma GCC system_header
+#endif
+
 // Microsoft's public WSL headers use MSVC warning pragmas around portable C
 // types. The definitions themselves are shared by the Linux /dev/dxg ABI.
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunknown-pragmas"
-#endif
 #include <basetsd.h>
 #if !defined(__cplusplus)
 #undef C_ASSERT
@@ -21,8 +24,5 @@
 #define D3DKMDT_SPECIAL_MULTIPLATFORM_TOOL
 #include <dxg/d3dkmthk.h>
 #undef D3DKMDT_SPECIAL_MULTIPLATFORM_TOOL
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
 
 #endif  // AMDF_SRC_PLATFORM_LINUX_DXG_KMT_TYPES_H_
