@@ -921,10 +921,13 @@ iree_status_t loom_serve_text_chat_prepare_input(
     loom_serve_text_chat_input_format_t format,
     loom_serve_text_chat_boundary_t boundary, iree_host_size_t capacity,
     iree_host_size_t input_shift, iree_allocator_t host_allocator,
-    int32_t* out_tokens, iree_host_size_t* out_count,
+    iree_vm_buffer_t** out_tokens, iree_host_size_t* out_count,
     loom_serve_text_media_span_t** out_media_spans,
     iree_host_size_t* out_media_span_count) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  if (out_tokens) {
+    *out_tokens = NULL;
+  }
   *out_count = 0;
   *out_media_spans = NULL;
   *out_media_span_count = 0;
@@ -977,14 +980,14 @@ iree_status_t loom_serve_text_chat_prepare_input(
   }
   if (iree_status_is_ok(status) &&
       (!output || !media_spans || count < 0 || (uint64_t)count > capacity ||
-       (uint64_t)count > SIZE_MAX / sizeof(*out_tokens))) {
+       (uint64_t)count > SIZE_MAX / sizeof(int32_t) - input_shift)) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "source input returned invalid token storage");
   }
   iree_const_byte_span_t bytes = iree_const_byte_span_empty();
   if (iree_status_is_ok(status)) {
     status =
-        iree_vm_buffer_map_read(output, 0, count * sizeof(*out_tokens), &bytes);
+        iree_vm_buffer_map_read(output, 0, count * sizeof(int32_t), &bytes);
   }
   iree_const_byte_span_t span_bytes = iree_const_byte_span_empty();
   if (iree_status_is_ok(status)) {
@@ -999,15 +1002,27 @@ iree_status_t loom_serve_text_chat_prepare_input(
         (iree_host_size_t)count, input_shift, host_allocator, &parsed_spans,
         &parsed_span_count);
   }
+  iree_vm_buffer_t* tokens = NULL;
+  if (iree_status_is_ok(status) && out_tokens) {
+    status = iree_vm_buffer_create(
+        ((iree_host_size_t)count + input_shift) * sizeof(int32_t),
+        iree_alignof(int32_t), host_allocator, &tokens);
+  }
   if (iree_status_is_ok(status)) {
-    if (out_tokens) {
+    if (tokens) {
+      int32_t* token_values = iree_vm_buffer_data(tokens);
       for (iree_host_size_t i = 0; i < (iree_host_size_t)count; ++i) {
-        out_tokens[i] = (int32_t)iree_unaligned_load_le_u32(bytes.data + i * 4);
+        token_values[input_shift + i] =
+            (int32_t)iree_unaligned_load_le_u32(bytes.data + i * 4);
       }
+      *out_tokens = tokens;
     }
     *out_count = (iree_host_size_t)count;
     *out_media_spans = parsed_spans;
     *out_media_span_count = parsed_span_count;
+  } else {
+    iree_vm_buffer_release(tokens);
+    iree_allocator_free(host_allocator, parsed_spans);
   }
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));

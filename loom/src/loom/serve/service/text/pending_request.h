@@ -58,7 +58,7 @@ typedef struct loom_serve_text_pending_request_t {
 iree_status_t loom_serve_text_pending_request_prepare(
     loom_serve_text_pending_request_t* request, loom_serve_text_model_t* model,
     loom_serve_text_input_prefix_t prefix,
-    const loom_serve_text_pool_usage_t* geometry, int32_t* scratch,
+    const loom_serve_text_pool_usage_t* geometry,
     iree_allocator_t host_allocator);
 
 // Terminal request ownership, after CPU borrows retire and projector jobs have

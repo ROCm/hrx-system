@@ -170,7 +170,7 @@ iree_status_t loom_serve_text_pending_queue_prepare(
     status = loom_serve_text_pending_request_prepare(
         pending, queue->model,
         loom_serve_text_pending_queue_prefix(queue, session), geometry,
-        session->tokens, queue->host_allocator);
+        queue->host_allocator);
   }
   pending->prepare_duration += iree_time_now() - start;
   IREE_RETURN_AND_END_ZONE(z0, status);

@@ -11,15 +11,14 @@
 iree_status_t loom_serve_text_pending_request_prepare(
     loom_serve_text_pending_request_t* request, loom_serve_text_model_t* model,
     loom_serve_text_input_prefix_t prefix,
-    const loom_serve_text_pool_usage_t* geometry, int32_t* scratch,
+    const loom_serve_text_pool_usage_t* geometry,
     iree_allocator_t host_allocator) {
   const iree_host_size_t capacity =
       loom_serve_text_model_context_capacity(model);
   if (loom_serve_text_model_mode(model) == LOOM_SERVE_TEXT_MODE_ENCODE) {
     IREE_RETURN_IF_ERROR(loom_serve_text_sequence_prepare(
         &request->sequence, model, request->body, request->receipt.serial,
-        prefix, request->checkpoint != NULL, scratch, host_allocator,
-        &request->input));
+        prefix, request->checkpoint != NULL, host_allocator, &request->input));
     const iree_host_size_t extent =
         request->input.retained_count + request->input.count;
     const iree_host_size_t reservation =
@@ -33,7 +32,7 @@ iree_status_t loom_serve_text_pending_request_prepare(
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_serve_text_input_prepare(
-      &request->chat, prefix, request->checkpoint != NULL, capacity, scratch,
+      &request->chat, prefix, request->checkpoint != NULL, capacity,
       &request->input, host_allocator));
   const iree_host_size_t reservation = loom_serve_text_request_reservation(
       capacity, request->input.retained_count + request->input.count,

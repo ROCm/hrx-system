@@ -109,12 +109,12 @@ void loom_serve_text_sequence_deinitialize(
 }
 
 typedef struct loom_serve_text_sequence_tokens_t {
-  // Available caller-owned token slots.
+  // Remaining model context available to the append.
   iree_host_size_t capacity;
   // Number of validated IDs written so far.
   iree_host_size_t count;
-  // Borrowed context-sized host scratch.
-  int32_t* tokens;
+  // Native token bytes growing with actual input.
+  iree_string_builder_t storage;
 } loom_serve_text_sequence_tokens_t;
 
 static iree_status_t loom_serve_text_sequence_token(void* user_data,
@@ -136,14 +136,19 @@ static iree_status_t loom_serve_text_sequence_token(void* user_data,
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "sequence exceeds remaining context capacity");
   }
-  tokens->tokens[tokens->count++] = (int32_t)token;
+  char* output = NULL;
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_inline(
+      &tokens->storage, sizeof(int32_t), &output));
+  const int32_t token_id = (int32_t)token;
+  memcpy(output, &token_id, sizeof(token_id));
+  ++tokens->count;
   return iree_ok_status();
 }
 
 iree_status_t loom_serve_text_sequence_prepare(
     loom_serve_text_sequence_t* sequence, loom_serve_text_model_t* model,
     iree_string_view_t body, uint64_t request_id,
-    loom_serve_text_input_prefix_t prefix, bool checkpoint, int32_t* scratch,
+    loom_serve_text_input_prefix_t prefix, bool checkpoint,
     iree_allocator_t host_allocator, loom_serve_text_input_t* out_input) {
   const bool retained = sequence->append || checkpoint;
   if (retained && !prefix.completion) {
@@ -162,31 +167,37 @@ iree_status_t loom_serve_text_sequence_prepare(
   }
   const iree_host_size_t capacity =
       loom_serve_text_model_context_capacity(model);
-  loom_serve_text_sequence_tokens_t tokens = {.capacity = capacity - position,
-                                              .tokens = scratch};
-  IREE_RETURN_IF_ERROR(iree_json_enumerate_array_typed(
-      sequence->token_ids, loom_serve_text_sequence_token, &tokens));
-  if (!tokens.count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "token_ids must not be empty");
+  loom_serve_text_sequence_tokens_t tokens = {.capacity = capacity - position};
+  iree_string_builder_initialize(host_allocator, &tokens.storage);
+  iree_status_t status = iree_json_enumerate_array_typed(
+      sequence->token_ids, loom_serve_text_sequence_token, &tokens);
+  if (iree_status_is_ok(status) && !tokens.count) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "token_ids must not be empty");
   }
   iree_vm_buffer_t* owned = NULL;
-  IREE_RETURN_IF_ERROR(iree_vm_buffer_clone(
-      IREE_VM_BUFFER_ACCESS_FLAG_READ,
-      iree_make_const_byte_span(scratch, tokens.count * sizeof(*scratch)),
-      iree_alignof(int32_t), host_allocator, &owned));
-  iree_status_t status = loom_serve_text_model_prepare_request(
-      model, body, request_id, owned, &sequence->options);
-  if (!iree_status_is_ok(status)) {
-    iree_vm_buffer_release(owned);
-    return status;
+  if (iree_status_is_ok(status)) {
+    const iree_string_view_t bytes = iree_string_builder_view(&tokens.storage);
+    status =
+        iree_vm_buffer_clone(IREE_VM_BUFFER_ACCESS_FLAG_READ,
+                             iree_make_const_byte_span(bytes.data, bytes.size),
+                             iree_alignof(int32_t), host_allocator, &owned);
   }
-  *out_input =
-      (loom_serve_text_input_t){.token_storage = owned,
-                                .tokens = iree_vm_buffer_const_data(owned),
-                                .count = tokens.count,
-                                .retained_count = position};
-  return iree_ok_status();
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_text_model_prepare_request(model, body, request_id,
+                                                   owned, &sequence->options);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_input =
+        (loom_serve_text_input_t){.token_storage = owned,
+                                  .tokens = iree_vm_buffer_const_data(owned),
+                                  .count = tokens.count,
+                                  .retained_count = position};
+  } else {
+    iree_vm_buffer_release(owned);
+  }
+  iree_string_builder_deinitialize(&tokens.storage);
+  return status;
 }
 
 iree_status_t loom_serve_text_sequence_chunk(
