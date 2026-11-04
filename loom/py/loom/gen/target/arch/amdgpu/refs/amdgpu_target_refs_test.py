@@ -307,7 +307,7 @@ def test_target_ref_tables_use_prebuilt_descriptor_sets() -> None:
     assert len(tables) == 1
     assert tables[0].descriptor_set_key == descriptor_set_info.key
     assert tables[0].descriptor_set_ordinal == amdgpu_descriptor_set_ordinal(descriptor_set_info.key)
-    assert len(tables[0].cache_scope_immediate_slots) == len(descriptor_set.descriptors)
+    assert len(tables[0].immediate_slots) == len(descriptor_set.descriptors)
 
 
 def test_target_ref_tables_reject_descriptor_ordinals_wider_than_storage() -> None:
@@ -364,7 +364,7 @@ def test_target_ref_source_shares_exact_tables() -> None:
         amdgpu_target_refs._descriptor_ref_table_name,
         amdgpu_target_refs._descriptor_set_trait_table_name,
         amdgpu_target_refs._descriptor_set_memory_property_table_name,
-        amdgpu_target_refs._descriptor_set_immediate_slot_table_name,
+        amdgpu_target_refs._descriptor_set_immediate_slot_ref_table_name,
         amdgpu_target_refs._reg_class_trait_table_name,
     )
     for table_name_function in table_name_functions:
@@ -380,6 +380,9 @@ def test_target_ref_source_shares_exact_tables() -> None:
     first_ordinal_table_name = amdgpu_target_refs._descriptor_set_table_name(first_info.key)
     assert f"static const uint16_t {first_ordinal_table_name}[] = {{" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_ORDINAL_NONE" in source
+    first_immediate_slot_ref_table_name = amdgpu_target_refs._descriptor_set_immediate_slot_ref_table_name(first_info.key)
+    assert f"static const uint8_t {first_immediate_slot_ref_table_name}[] = {{" in source
+    assert "const loom_amdgpu_descriptor_immediate_slots_t kLoomAmdgpuDescriptorImmediateSlotValues[] = {" in source
 
 
 def test_accumulator_class_ids_follow_each_descriptor_set() -> None:
