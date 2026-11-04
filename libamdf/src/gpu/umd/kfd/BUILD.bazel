@@ -405,8 +405,7 @@ amdf_cc_library(
     target_compatible_with = KFD_COMPATIBILITY,
     deps = [
         ":topology",
-        "//libamdf/src:device",
-        "//libamdf/src:endpoint",
+        "//libamdf/src:device_state",
         "//libamdf/src:memory_profile",
         "//libamdf/src/gpu/umd:memory",
         "//libamdf/src/platform/linux:dma_buf",

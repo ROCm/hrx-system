@@ -62,8 +62,7 @@ amdf_cc_library(
     hdrs = ["memory_profile.h"],
     visibility = ["//libamdf/src/gpu/umd:__subpackages__"],
     deps = [
-        "//libamdf/src:device",
-        "//libamdf/src:endpoint",
+        "//libamdf/src:device_state",
         "//libamdf/src:memory_profile",
         "//libamdf/src/gpu/umd:memory",
     ],

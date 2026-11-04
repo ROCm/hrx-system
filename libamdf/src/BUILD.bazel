@@ -124,6 +124,16 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "device_state",
+    hdrs = ["device_state.h"],
+    visibility = ["//libamdf/src:__subpackages__"],
+    deps = [
+        ":child_tracker",
+        ":memory_profile",
+    ],
+)
+
+amdf_cc_library(
     name = "device",
     srcs = ["device.c"],
     hdrs = ["device.h"],
@@ -131,6 +141,7 @@ amdf_cc_library(
     deps = [
         ":allocator",
         ":child_tracker",
+        ":device_state",
         ":endpoint",
         ":instance",
         ":memory_profile",

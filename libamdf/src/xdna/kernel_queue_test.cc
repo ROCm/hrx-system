@@ -138,6 +138,7 @@ class XdnaKernelQueueTest : public ::testing::Test {
   void SetUp() override {
     device.base.engine_kind = AMDF_ENGINE_KIND_XDNA;
     device.base.host_allocator = amdf_allocator_system();
+    device.base.endpoint_id.words[0] = 1;
     amdf_child_tracker_initialize(&device.base.children);
     device.info.reset_epoch = 1;
     device.info.instruction.maximum_byte_length = UINT32_MAX & ~uint64_t{3};
@@ -977,6 +978,12 @@ amdf_status_t amdf_endpoint_register_device(amdf_endpoint_t*) {
   return AMDF_STATUS_OK;
 }
 void amdf_endpoint_unregister_device(amdf_endpoint_t*) {}
+
+const amdf_endpoint_info_t* amdf_endpoint_get_cached_info(
+    const amdf_endpoint_t*) {
+  static const amdf_endpoint_info_t info = {};
+  return &info;
+}
 
 amdf_instance_t* amdf_endpoint_get_instance(const amdf_endpoint_t*) {
   return reinterpret_cast<amdf_instance_t*>(uintptr_t{1});

@@ -39,7 +39,6 @@ void ConfigureProgram(FakeDevice& device) {
   device.profile.visibility.describe_program =
       [](amdf_memory_access_t access, const amdf_device_t* base,
          amdf_memory_atomic_capabilities_t operations) {
-        const auto* device = reinterpret_cast<const FakeDevice*>(base);
         return amdf_memory_site_description_t{
             .capabilities = ((access & AMDF_MEMORY_ACCESS_READ) != 0
                                  ? AMDF_MEMORY_SITE_CAPABILITY_READ
@@ -70,8 +69,8 @@ void ConfigureProgram(FakeDevice& device) {
                                     : 0u,
                 },
             .atomic_operations = operations,
-            .device_atomic_domain = {{device->backing_id.words[0],
-                                      device->backing_id.words[1]}},
+            .device_atomic_domain = {{base->endpoint_id.words[0],
+                                      base->endpoint_id.words[1]}},
         };
       };
   device.profile.guaranteed_device_access = 0;

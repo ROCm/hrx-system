@@ -132,6 +132,7 @@ class GpuUserQueueTest : public ::testing::Test {
                                uint64_t reset_epoch, FakeNativeState* state) {
     device->base.host_allocator = amdf_allocator_system();
     device->base.endpoint = reinterpret_cast<amdf_endpoint_t*>(uintptr_t{1});
+    device->base.endpoint_id.words[0] = id;
     device->base.engine_kind = AMDF_ENGINE_KIND_GPU;
     amdf_child_tracker_initialize(&device->base.children);
     device->umd.state = state;
@@ -850,6 +851,12 @@ amdf_status_t AMDF_CALL amdf_endpoint_query_queue_family_info(
   }
   *out_info = current_family;
   return AMDF_STATUS_OK;
+}
+
+const amdf_endpoint_info_t* amdf_endpoint_get_cached_info(
+    const amdf_endpoint_t*) {
+  static const amdf_endpoint_info_t info = {};
+  return &info;
 }
 
 amdf_status_t amdf_endpoint_register_device(amdf_endpoint_t*) {

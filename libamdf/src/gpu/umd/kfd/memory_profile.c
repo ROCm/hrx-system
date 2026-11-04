@@ -7,16 +7,15 @@
 #include "libamdf/src/gpu/umd/kfd/memory_profile.h"
 
 #include "amdf/gpu.h"
-#include "libamdf/src/device.h"
-#include "libamdf/src/endpoint.h"
+#include "libamdf/src/device_state.h"
 #include "libamdf/src/gpu/umd/memory.h"
 #include "libamdf/src/platform/linux/dma_buf.h"
 
 static amdf_memory_site_description_t amdf_gpu_kfd_describe_program_site(
     amdf_memory_access_t access, const amdf_device_t* device,
     amdf_memory_atomic_capabilities_t operations) {
-  return amdf_gpu_umd_memory_describe_program_site(
-      access, &amdf_endpoint_get_cached_info(device->endpoint)->id, operations);
+  return amdf_gpu_umd_memory_describe_program_site(access, &device->endpoint_id,
+                                                   operations);
 }
 
 static amdf_memory_atomic_capabilities_t amdf_gpu_kfd_query_program_atomics(
