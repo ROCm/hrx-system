@@ -4,22 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef AMDF_SRC_GPU_UMD_DXG_ROCDXG_PRIVATE_RECORDS_H_
-#define AMDF_SRC_GPU_UMD_DXG_ROCDXG_PRIVATE_RECORDS_H_
+#ifndef AMDF_SRC_GPU_UMD_DXG_PRIVATE_RECORDS_H_
+#define AMDF_SRC_GPU_UMD_DXG_PRIVATE_RECORDS_H_
 
-#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
-
-// First version of the allocation-free DXG private-record ABI.
-#define AMDF_DXG_PRIVATE_RECORD_ABI_VERSION_1 1u
-
-// Most recent private-record ABI described by this header.
-#define AMDF_DXG_PRIVATE_RECORD_ABI_VERSION_LATEST \
-  AMDF_DXG_PRIVATE_RECORD_ABI_VERSION_1
 
 // Maximum number of physical adapters represented by one private chain.
 #define AMDF_DXG_PRIVATE_MAX_PHYSICAL_ADAPTER_COUNT 4u
@@ -27,8 +19,11 @@ extern "C" {
 // Number of scheduler identifiers published by one extended adapter record.
 #define AMDF_DXG_PRIVATE_SCHEDULER_ID_COUNT 32u
 
-// Caller-owned transient storage required by an indexed adapter query.
-#define AMDF_DXG_PRIVATE_QUERY_SCRATCH_BYTE_LENGTH 0xF160u
+// Caller-owned transient storage required by a linked-adapter query.
+#define AMDF_DXG_PRIVATE_LINKED_QUERY_SCRATCH_BYTE_LENGTH 0xF160u
+
+// Caller-owned transient storage required by a single-adapter query.
+#define AMDF_DXG_PRIVATE_SINGLE_QUERY_SCRATCH_BYTE_LENGTH 0x3A00u
 
 // Fixed private record sizes accepted by the WDDM compute interface.
 #define AMDF_DXG_PRIVATE_ALLOCATION_DRIVER_RECORD_BYTE_LENGTH 0x40u
@@ -42,31 +37,13 @@ typedef uint32_t amdf_dxg_private_result_t;
 enum amdf_dxg_private_result_e {
   // The operation completed successfully.
   AMDF_DXG_PRIVATE_RESULT_SUCCESS = 0,
-  // The selected physical adapter is outside the supported device table.
+  // The selected adapter or its decoded hardware identity is unsupported.
   AMDF_DXG_PRIVATE_RESULT_UNSUPPORTED = 1,
-  // A required argument or structure field is invalid.
-  AMDF_DXG_PRIVATE_RESULT_INVALID_ARGUMENT = 2,
-  // Caller-owned scratch storage cannot hold the complete native response.
-  AMDF_DXG_PRIVATE_RESULT_BUFFER_TOO_SMALL = 3,
   // The synchronous native query returned a nonzero status.
-  AMDF_DXG_PRIVATE_RESULT_NATIVE_FAILURE = 4,
+  AMDF_DXG_PRIVATE_RESULT_NATIVE_FAILURE = 2,
   // The native response violates the private record contract.
-  AMDF_DXG_PRIVATE_RESULT_MALFORMED_RECORD = 5,
+  AMDF_DXG_PRIVATE_RESULT_MALFORMED_RECORD = 3,
 };
-
-// One caller-owned PCI-device-to-GFXIP mapping.
-typedef struct amdf_dxg_private_gfxip_entry_t {
-  // PCI device identifier encoded by the base adapter record.
-  uint16_t device_id;
-  // Reserved for compatible growth and must be zero.
-  uint16_t reserved;
-  // GFXIP major version.
-  int32_t major;
-  // GFXIP minor version.
-  int32_t minor;
-  // GFXIP stepping version.
-  int32_t stepping;
-} amdf_dxg_private_gfxip_entry_t;
 
 // Synchronously fills one zero-initialized UMD private query buffer.
 //
@@ -77,48 +54,32 @@ typedef uint32_t (*amdf_dxg_private_query_fn_t)(void* context,
                                                 void* buffer,
                                                 uint32_t buffer_byte_length);
 
-// Inputs for one indexed private adapter query.
+// Caller-owned transport and scratch for one private adapter query.
 typedef struct amdf_dxg_private_adapter_query_t {
-  // Must be at least the size of this structure.
-  uint32_t structure_size;
   // Live D3DKMT adapter handle.
   uint32_t adapter_handle;
   // Physical adapter selected from the private chain.
   uint32_t physical_adapter_index;
-  // Number of entries in |gfxip_entries|.
-  uint32_t gfxip_entry_count;
-  // Borrowed device table searched by exact PCI device identifier.
-  const amdf_dxg_private_gfxip_entry_t* gfxip_entries;
   // Owner-defined context forwarded unchanged to |query|.
   void* query_context;
   // Synchronous UMD private query callback.
   amdf_dxg_private_query_fn_t query;
   // Caller-owned transient query storage.
   void* scratch;
-  // Available bytes beginning at |scratch|.
-  uint64_t scratch_byte_length;
 } amdf_dxg_private_adapter_query_t;
 
 // Immutable facts decoded for one physical adapter.
 typedef struct amdf_dxg_private_adapter_info_t {
-  // Number of physical adapters represented by the native chain.
-  uint32_t physical_adapter_count;
-  // PCI vendor identifier for the selected physical adapter.
-  uint32_t vendor_id;
-  // PCI device identifier for the selected physical adapter.
-  uint32_t device_id;
   // ASIC revision identifier.
   uint32_t asic_revision;
-  // GFXIP major version supplied by the caller-owned device table.
+  // GFXIP major version decoded from the extended adapter record.
   int32_t gfx_ip_major;
-  // GFXIP minor version supplied by the caller-owned device table.
+  // GFXIP minor version decoded from the extended adapter record.
   int32_t gfx_ip_minor;
-  // GFXIP stepping supplied by the caller-owned device table.
+  // GFXIP stepping decoded from the extended adapter record.
   int32_t gfx_ip_stepping;
   // Nonzero for a discrete adapter and zero for an integrated adapter.
   uint32_t is_discrete;
-  // Nonzero when the base record advertises the WDDM 2 interface.
-  uint32_t supports_wddm2;
   // Number of lanes in one hardware wavefront.
   uint32_t wavefront_size;
   // Total active compute units represented by the record.
@@ -131,6 +92,8 @@ typedef struct amdf_dxg_private_adapter_info_t {
   uint64_t local_data_share_byte_length;
   // Total number of active shader engines.
   uint32_t shader_engine_count;
+  // Number of active XCCs represented by the physical adapter.
+  uint32_t xcc_count;
   // Nonzero when firmware-managed graphics state is available.
   uint32_t supports_firmware_state_shadowing;
   // Nonzero when the CPU-facing route provides native platform atomics.
@@ -145,12 +108,25 @@ typedef struct amdf_dxg_private_adapter_info_t {
   uint64_t hardware_scheduling_node_mask;
 } amdf_dxg_private_adapter_info_t;
 
-// Queries and decodes one indexed physical adapter without retaining state.
+// Queries and decodes one physical adapter from a linked-adapter chain.
 //
+// |query->scratch| must provide
+// AMDF_DXG_PRIVATE_LINKED_QUERY_SCRATCH_BYTE_LENGTH writable bytes.
 // |out_info| is written only on success. |out_native_status| receives zero for
 // every locally resolved result and the exact callback status on native
 // failure.
-amdf_dxg_private_result_t amdf_dxg_private_query_adapter(
+amdf_dxg_private_result_t amdf_dxg_private_query_linked_adapter(
+    const amdf_dxg_private_adapter_query_t* query,
+    amdf_dxg_private_adapter_info_t* out_info, uint32_t* out_native_status);
+
+// Queries and decodes the single physical adapter represented by a native
+// Windows adapter handle without retaining state.
+//
+// physical_adapter_index must be zero. |query->scratch| must provide
+// AMDF_DXG_PRIVATE_SINGLE_QUERY_SCRATCH_BYTE_LENGTH writable bytes.
+// |out_info| is written only on success. |out_native_status| follows the same
+// contract as amdf_dxg_private_query_linked_adapter.
+amdf_dxg_private_result_t amdf_dxg_private_query_single_adapter(
     const amdf_dxg_private_adapter_query_t* query,
     amdf_dxg_private_adapter_info_t* out_info, uint32_t* out_native_status);
 
@@ -234,4 +210,4 @@ void amdf_dxg_private_initialize_submission_record(
 }  // extern "C"
 #endif  // __cplusplus
 
-#endif  // AMDF_SRC_GPU_UMD_DXG_ROCDXG_PRIVATE_RECORDS_H_
+#endif  // AMDF_SRC_GPU_UMD_DXG_PRIVATE_RECORDS_H_

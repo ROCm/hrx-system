@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "libamdf/src/gpu/umd/dxg/rocdxg/private_records.h"
+#include "libamdf/src/gpu/umd/dxg/private_records.h"
 
 #include <array>
 #include <cstddef>
@@ -60,6 +60,10 @@ void Store32(void* data, size_t offset, uint32_t value) {
   std::memcpy(static_cast<uint8_t*>(data) + offset, &value, sizeof(value));
 }
 
+void Store64(void* data, size_t offset, uint64_t value) {
+  std::memcpy(static_cast<uint8_t*>(data) + offset, &value, sizeof(value));
+}
+
 Record<AMDF_DXG_PRIVATE_ALLOCATION_RECORD_BYTE_LENGTH>
 MakeCommonAllocationRecord(uint64_t byte_length) {
   Record<AMDF_DXG_PRIVATE_ALLOCATION_RECORD_BYTE_LENGTH> expected = {};
@@ -75,11 +79,11 @@ MakeCommonAllocationRecord(uint64_t byte_length) {
 }
 
 TEST(PrivateRecordsTest, AbiLayoutsAreFixed) {
-  static_assert(sizeof(amdf_dxg_private_gfxip_entry_t) == 16);
-  static_assert(sizeof(amdf_dxg_private_adapter_query_t) == 56);
-  static_assert(sizeof(amdf_dxg_private_adapter_info_t) == 128);
+  static_assert(sizeof(amdf_dxg_private_adapter_query_t) == 32);
+  static_assert(sizeof(amdf_dxg_private_adapter_info_t) == 120);
   static_assert(sizeof(amdf_dxg_private_allocation_info_t) == 32);
-  EXPECT_EQ(AMDF_DXG_PRIVATE_QUERY_SCRATCH_BYTE_LENGTH, 0xF160u);
+  EXPECT_EQ(AMDF_DXG_PRIVATE_LINKED_QUERY_SCRATCH_BYTE_LENGTH, 0xF160u);
+  EXPECT_EQ(AMDF_DXG_PRIVATE_SINGLE_QUERY_SCRATCH_BYTE_LENGTH, 0x3A00u);
   EXPECT_EQ(AMDF_DXG_PRIVATE_ALLOCATION_DRIVER_RECORD_BYTE_LENGTH, 0x40u);
   EXPECT_EQ(AMDF_DXG_PRIVATE_ALLOCATION_RECORD_BYTE_LENGTH, 0x218u);
   EXPECT_EQ(AMDF_DXG_PRIVATE_CONTEXT_RECORD_BYTE_LENGTH, 0x1A8u);
@@ -236,6 +240,12 @@ struct FakePrivateQuery {
   uint32_t call_count = 0;
   uint32_t failure_call = UINT32_MAX;
   uint32_t failure_status = 0;
+  uint32_t physical_adapter_count = 2;
+  uint32_t family = 0x96;
+  uint32_t asic_revision = 0x10;
+  uint32_t encoded_gfxip = 0x000B0500;
+  uint16_t vendor_id = 0x1002;
+  bool supports_wddm2 = true;
   bool corrupt_checksum = false;
   bool valid_compute_unit_mask = true;
   bool include_last_compute_unit_mask = false;
@@ -254,6 +264,42 @@ uint32_t HeaderChecksum(const uint8_t* header) {
   return checksum;
 }
 
+void FillBaseRecord(uint8_t* record, uint32_t family) {
+  Store16(record, 0x2C, 0x150E);
+  Store32(record, 0x30, family);
+  record[0x1F4] = 0x80;
+}
+
+void FillBaseRecord(uint8_t* record, const FakePrivateQuery& fake) {
+  FillBaseRecord(record, fake.family);
+  record[0x1F4] = fake.supports_wddm2 ? 0x80 : 0;
+}
+
+void FillExtendedRecord(uint8_t* record, const FakePrivateQuery& fake) {
+  record[0x208] = 0x20;
+  record[0xC46] = fake.valid_compute_unit_mask ? 0x21 : 0x20;
+  Store32(record, 0xA08, fake.asic_revision);
+  Store32(record, 0xAF4, fake.encoded_gfxip);
+  Store32(record, 0xC5C, 32);
+  Store32(record, 0xC60, 2);
+  Store64(record, 0xC64, UINT64_C(2) << 32);
+  Store32(record, 0xC68, 2);
+  Store32(record, 0xC6C, 3);
+  Store64(record, 0xA38, 0x12345000);
+  Store16(record, 0xD04, 0x000F);
+  Store16(record, 0xD06, 0x0003);
+  if (fake.include_last_compute_unit_mask) {
+    Store16(record, 0xD08, 1);
+  }
+  std::memset(record + 0x89C, 0xFF, AMDF_DXG_PRIVATE_SCHEDULER_ID_COUNT);
+  record[0x89C] = 0;
+  record[0x89D] = 4;
+  record[0x89E] = 5;
+  record[0x89F] = 7;
+  record[0x2E03] = 1;
+  Store64(record, 0x35C4, (UINT64_C(1) << 1) | (UINT64_C(1) << 2));
+}
+
 uint32_t FakeQuery(void* context, uint32_t adapter_handle, void* buffer,
                    uint32_t buffer_byte_length) {
   auto* fake = static_cast<FakePrivateQuery*>(context);
@@ -267,61 +313,40 @@ uint32_t FakeQuery(void* context, uint32_t adapter_handle, void* buffer,
   EXPECT_EQ(adapter_handle, 0x42u);
 
   auto* bytes = static_cast<uint8_t*>(buffer);
-  Store32(bytes, 0x08, 2);
-  Store16(bytes, 0x0C, 0x1002);
-  Store16(bytes, 0x0E, 0x1002);
+  if (buffer_byte_length == 0x960) {
+    Store32(bytes, 0x2C, 0);
+    return 0;
+  }
+  if (buffer_byte_length == 0x260) {
+    FillBaseRecord(bytes, *fake);
+    return 0;
+  }
+  if (buffer_byte_length == 0x3A00) {
+    FillExtendedRecord(bytes, *fake);
+    return 0;
+  }
+
+  Store32(bytes, 0x08, fake->physical_adapter_count);
+  Store16(bytes, 0x0C, fake->vendor_id);
+  Store16(bytes, 0x0E, fake->vendor_id);
   Store32(bytes, 0x2C, 0);
   Store32(bytes, 0x30, 1);
-
-  if (call == 2) {
-    auto* first = bytes + 0x960;
-    auto* second = first + 0x260;
-    uint16_t first_device = 0x7448;
-    uint16_t second_device = 0x150E;
-    uint32_t second_revision = 0x96;
-    std::memcpy(first + 0x2C, &first_device, sizeof(first_device));
-    std::memcpy(second + 0x2C, &second_device, sizeof(second_device));
-    std::memcpy(second + 0x30, &second_revision, sizeof(second_revision));
-    second[0x1F4] = 0x80;
-  } else if (call == 3) {
-    auto* second = bytes + 0x960 + 0x3A00;
-    second[0xC46] = fake->valid_compute_unit_mask ? 0x21 : 0x20;
-    uint32_t wavefront_size = 32;
-    uint32_t shader_engine_count = 2;
-    uint64_t shader_array_count = UINT64_C(2) << 32;
-    uint32_t compute_units_per_shader_array = 3;
-    uint64_t invisible_heap_byte_length = 0x12345000;
-    uint16_t compute_unit_masks[] = {0x000F, 0x0003};
-    std::memcpy(second + 0xC5C, &wavefront_size, sizeof(wavefront_size));
-    std::memcpy(second + 0xC60, &shader_engine_count,
-                sizeof(shader_engine_count));
-    std::memcpy(second + 0xC64, &shader_array_count,
-                sizeof(shader_array_count));
-    std::memcpy(second + 0xC6C, &compute_units_per_shader_array,
-                sizeof(compute_units_per_shader_array));
-    std::memcpy(second + 0xA38, &invisible_heap_byte_length,
-                sizeof(invisible_heap_byte_length));
-    std::memcpy(second + 0xD04, compute_unit_masks, sizeof(compute_unit_masks));
-    if (fake->include_last_compute_unit_mask) {
-      uint16_t last_compute_unit_mask = 1;
-      std::memcpy(second + 0xD1A, &last_compute_unit_mask,
-                  sizeof(last_compute_unit_mask));
-    }
-    std::memset(second + 0x89C, 0xFF, AMDF_DXG_PRIVATE_SCHEDULER_ID_COUNT);
-    second[0x89C] = 0;
-    second[0x89D] = 4;
-    second[0x89E] = 5;
-    second[0x89F] = 7;
-    second[0x2E03] = 1;
-    uint64_t hws_mask = (UINT64_C(1) << 1) | (UINT64_C(1) << 2);
-    std::memcpy(second + 0x35C4, &hws_mask, sizeof(hws_mask));
+  if (buffer_byte_length >= 0xBC0) {
+    FillBaseRecord(bytes + 0x960, 0x91);
+  }
+  if (buffer_byte_length >= 0xE20) {
+    FillBaseRecord(bytes + 0x960 + 0x260, *fake);
+  }
+  if (buffer_byte_length >= 0x7D60) {
+    FillExtendedRecord(bytes + 0x960, *fake);
+    FillExtendedRecord(bytes + 0x960 + 0x3A00, *fake);
   }
 
   uint32_t checksum = HeaderChecksum(bytes);
-  if (fake->corrupt_checksum && call == 0) {
+  if (fake->corrupt_checksum) {
     ++checksum;
   }
-  std::memcpy(bytes + 0x8AC, &checksum, sizeof(checksum));
+  Store32(bytes, 0x8AC, checksum);
   return 0;
 }
 
@@ -329,32 +354,16 @@ struct AdapterQueryFixture {
   AdapterQueryFixture() {
     scratch.fill(0);
     query = {
-        .structure_size = sizeof(query),
         .adapter_handle = 0x42,
         .physical_adapter_index = 1,
-        .gfxip_entry_count = static_cast<uint32_t>(gfxip_entries.size()),
-        .gfxip_entries = gfxip_entries.data(),
         .query_context = &fake,
         .query = FakeQuery,
         .scratch = scratch.data(),
-        .scratch_byte_length = scratch.size(),
     };
   }
 
   FakePrivateQuery fake;
-  std::array<amdf_dxg_private_gfxip_entry_t, 2> gfxip_entries = {{
-      {.device_id = 0x7448,
-       .reserved = 0,
-       .major = 11,
-       .minor = 0,
-       .stepping = 0},
-      {.device_id = 0x150E,
-       .reserved = 0,
-       .major = 11,
-       .minor = 5,
-       .stepping = 0},
-  }};
-  Record<AMDF_DXG_PRIVATE_QUERY_SCRATCH_BYTE_LENGTH> scratch;
+  Record<AMDF_DXG_PRIVATE_LINKED_QUERY_SCRATCH_BYTE_LENGTH> scratch;
   amdf_dxg_private_adapter_query_t query;
 };
 
@@ -362,28 +371,25 @@ TEST(PrivateRecordsTest, QueriesSelectedPhysicalAdapterExactly) {
   AdapterQueryFixture fixture;
   amdf_dxg_private_adapter_info_t info = {};
   uint32_t native_status = UINT32_MAX;
-  ASSERT_EQ(
-      amdf_dxg_private_query_adapter(&fixture.query, &info, &native_status),
-      AMDF_DXG_PRIVATE_RESULT_SUCCESS);
+  ASSERT_EQ(amdf_dxg_private_query_linked_adapter(&fixture.query, &info,
+                                                  &native_status),
+            AMDF_DXG_PRIVATE_RESULT_SUCCESS);
   EXPECT_EQ(native_status, 0u);
-  EXPECT_EQ(fixture.fake.call_count, 4u);
+  EXPECT_EQ(fixture.fake.call_count, 3u);
   EXPECT_EQ(fixture.fake.byte_lengths,
-            (std::array<uint32_t, 4>{0xBC0, 0xD60, 0xE20, 0x7D60}));
-  EXPECT_EQ(info.physical_adapter_count, 2u);
-  EXPECT_EQ(info.vendor_id, 0x1002u);
-  EXPECT_EQ(info.device_id, 0x150Eu);
-  EXPECT_EQ(info.asic_revision, 0x96u);
+            (std::array<uint32_t, 4>{0xBC0, 0xE20, 0x7D60, 0}));
+  EXPECT_EQ(info.asic_revision, 0x10u);
   EXPECT_EQ(info.gfx_ip_major, 11);
   EXPECT_EQ(info.gfx_ip_minor, 5);
   EXPECT_EQ(info.gfx_ip_stepping, 0);
   EXPECT_EQ(info.is_discrete, 0u);
-  EXPECT_EQ(info.supports_wddm2, 1u);
   EXPECT_EQ(info.wavefront_size, 32u);
   EXPECT_EQ(info.compute_unit_count, 12u);
   EXPECT_EQ(info.maximum_wave_count_per_compute_unit, 32u);
   EXPECT_EQ(info.maximum_scratch_wave_count_per_compute_unit, 128u);
   EXPECT_EQ(info.local_data_share_byte_length, 64u * 1024);
   EXPECT_EQ(info.shader_engine_count, 2u);
+  EXPECT_EQ(info.xcc_count, 1u);
   EXPECT_EQ(info.supports_firmware_state_shadowing, 1u);
   EXPECT_EQ(info.supports_platform_atomics, 1u);
   EXPECT_EQ(info.user_queue_byte_length, 0u);
@@ -396,28 +402,59 @@ TEST(PrivateRecordsTest, QueriesSelectedPhysicalAdapterExactly) {
             (UINT64_C(1) << 1) | (UINT64_C(1) << 2));
 }
 
+TEST(PrivateRecordsTest, ReusesInitialBaseRecordForFirstPhysicalAdapter) {
+  AdapterQueryFixture fixture;
+  fixture.query.physical_adapter_index = 0;
+  fixture.fake.encoded_gfxip = 0x000B0000;
+  amdf_dxg_private_adapter_info_t info = {};
+  uint32_t native_status = UINT32_MAX;
+  ASSERT_EQ(amdf_dxg_private_query_linked_adapter(&fixture.query, &info,
+                                                  &native_status),
+            AMDF_DXG_PRIVATE_RESULT_SUCCESS);
+  EXPECT_EQ(fixture.fake.call_count, 2u);
+  EXPECT_EQ(fixture.fake.byte_lengths,
+            (std::array<uint32_t, 4>{0xBC0, 0x7D60, 0, 0}));
+}
+
+TEST(PrivateRecordsTest, QueriesSingleAdapterRecordsExactly) {
+  AdapterQueryFixture fixture;
+  fixture.query.physical_adapter_index = 0;
+  amdf_dxg_private_adapter_info_t info = {};
+  uint32_t native_status = UINT32_MAX;
+  ASSERT_EQ(amdf_dxg_private_query_single_adapter(&fixture.query, &info,
+                                                  &native_status),
+            AMDF_DXG_PRIVATE_RESULT_SUCCESS);
+  EXPECT_EQ(native_status, 0u);
+  EXPECT_EQ(fixture.fake.call_count, 3u);
+  EXPECT_EQ(fixture.fake.byte_lengths,
+            (std::array<uint32_t, 4>{0x960, 0x260, 0x3A00, 0}));
+  EXPECT_EQ(info.gfx_ip_major, 11);
+  EXPECT_EQ(info.gfx_ip_minor, 5);
+  EXPECT_EQ(info.asic_revision, 0x10u);
+}
+
 TEST(PrivateRecordsTest, DecodesEveryComputeUnitLayout) {
   struct TestCase {
-    int32_t gfx_ip_major;
+    uint32_t encoded_gfxip;
     uint32_t expected_compute_unit_count;
     uint32_t expected_wave_count;
     uint32_t expected_scratch_wave_count;
   };
   const TestCase test_cases[] = {
-      {9, 12, 40, 64},
-      {10, 12, 32, 128},
-      {11, 14, 32, 128},
-      {12, 14, 32, 256},
+      {0x00090000, 12, 40, 64},
+      {0x000A0300, 14, 32, 128},
+      {0x000B0500, 14, 32, 128},
+      {0x000C0000, 14, 32, 256},
   };
   for (const TestCase& test_case : test_cases) {
     AdapterQueryFixture fixture;
-    fixture.gfxip_entries[1].major = test_case.gfx_ip_major;
+    fixture.fake.encoded_gfxip = test_case.encoded_gfxip;
     fixture.fake.include_last_compute_unit_mask = true;
     amdf_dxg_private_adapter_info_t info = {};
     uint32_t native_status = UINT32_MAX;
-    ASSERT_EQ(
-        amdf_dxg_private_query_adapter(&fixture.query, &info, &native_status),
-        AMDF_DXG_PRIVATE_RESULT_SUCCESS);
+    ASSERT_EQ(amdf_dxg_private_query_linked_adapter(&fixture.query, &info,
+                                                    &native_status),
+              AMDF_DXG_PRIVATE_RESULT_SUCCESS);
     EXPECT_EQ(native_status, 0u);
     EXPECT_EQ(info.compute_unit_count, test_case.expected_compute_unit_count);
     EXPECT_EQ(info.maximum_wave_count_per_compute_unit,
@@ -427,32 +464,124 @@ TEST(PrivateRecordsTest, DecodesEveryComputeUnitLayout) {
   }
 }
 
+TEST(PrivateRecordsTest, ExpandsGfx94TopologyAcrossEightXccs) {
+  AdapterQueryFixture fixture;
+  fixture.fake.encoded_gfxip = 0x00090400;
+  amdf_dxg_private_adapter_info_t info = {};
+  uint32_t native_status = UINT32_MAX;
+  ASSERT_EQ(amdf_dxg_private_query_linked_adapter(&fixture.query, &info,
+                                                  &native_status),
+            AMDF_DXG_PRIVATE_RESULT_SUCCESS);
+  EXPECT_EQ(info.compute_unit_count, 96u);
+  EXPECT_EQ(info.shader_engine_count, 16u);
+  EXPECT_EQ(info.xcc_count, 8u);
+}
+
+TEST(PrivateRecordsTest, DecodesFallbackGfxipFamiliesAtRangeBoundaries) {
+  struct TestCase {
+    uint32_t family;
+    uint32_t revision;
+    int32_t major;
+    int32_t minor;
+    int32_t stepping;
+  };
+  const TestCase test_cases[] = {
+      {0x8F, 9, 10, 1, 0},   {0x8F, 10, 10, 1, 1},  {0x8F, 20, 10, 1, 2},
+      {0x8F, 40, 10, 3, 0},  {0x8F, 50, 10, 3, 1},  {0x8F, 60, 10, 3, 2},
+      {0x8F, 70, 10, 3, 3},  {0x8F, 192, 10, 3, 0}, {0x8F, 200, 10, 3, 1},
+      {0x90, 1, 10, 3, 1},   {0x92, 254, 10, 3, 1}, {0x95, 31, 10, 3, 1},
+      {0x95, 32, 10, 3, 6},  {0x97, 1, 10, 3, 2},   {0x91, 15, 11, 0, 0},
+      {0x91, 16, 11, 0, 2},  {0x91, 32, 11, 0, 1},  {0x94, 1, 11, 0, 1},
+      {0x96, 25, 11, 5, 0},  {0x96, 64, 11, 5, 0},  {0x96, 80, 11, 5, 0},
+      {0x96, 192, 11, 5, 1}, {0x98, 31, 12, 0, 0},  {0x98, 32, 12, 0, 1},
+      {0x98, 64, 12, 0, 0},  {0x98, 80, 12, 0, 1},
+  };
+  for (const TestCase& test_case : test_cases) {
+    AdapterQueryFixture fixture;
+    fixture.fake.family = test_case.family;
+    fixture.fake.asic_revision = test_case.revision;
+    fixture.fake.encoded_gfxip = 0;
+    amdf_dxg_private_adapter_info_t info = {};
+    uint32_t native_status = UINT32_MAX;
+    ASSERT_EQ(amdf_dxg_private_query_linked_adapter(&fixture.query, &info,
+                                                    &native_status),
+              AMDF_DXG_PRIVATE_RESULT_SUCCESS)
+        << "family=" << test_case.family << " revision=" << test_case.revision;
+    EXPECT_EQ(info.gfx_ip_major, test_case.major);
+    EXPECT_EQ(info.gfx_ip_minor, test_case.minor);
+    EXPECT_EQ(info.gfx_ip_stepping, test_case.stepping);
+  }
+}
+
+TEST(PrivateRecordsTest, NormalizesPackedGfxipQuirks) {
+  struct TestCase {
+    uint32_t encoded_gfxip;
+    int32_t major;
+    int32_t minor;
+    int32_t stepping;
+  };
+  const TestCase test_cases[] = {
+      {0x000B0503, 11, 5, 2},
+      {0x000D0001, 13, 1, 0},
+  };
+  for (const TestCase& test_case : test_cases) {
+    AdapterQueryFixture fixture;
+    fixture.fake.encoded_gfxip = test_case.encoded_gfxip;
+    amdf_dxg_private_adapter_info_t info = {};
+    uint32_t native_status = UINT32_MAX;
+    ASSERT_EQ(amdf_dxg_private_query_linked_adapter(&fixture.query, &info,
+                                                    &native_status),
+              AMDF_DXG_PRIVATE_RESULT_SUCCESS);
+    EXPECT_EQ(info.gfx_ip_major, test_case.major);
+    EXPECT_EQ(info.gfx_ip_minor, test_case.minor);
+    EXPECT_EQ(info.gfx_ip_stepping, test_case.stepping);
+  }
+}
+
+TEST(PrivateRecordsTest, RejectsUnsupportedAdapterIdentitiesWithoutPublishing) {
+  struct TestCase {
+    uint32_t family;
+    uint32_t encoded_gfxip;
+    uint16_t vendor_id;
+    bool supports_wddm2;
+  };
+  const TestCase test_cases[] = {
+      {0xDEAD, 0, 0x1002, true},
+      {0x96, 0x000E0000, 0x1002, true},
+      {0x96, 0x000B0500, 0x1234, true},
+      {0x96, 0x000B0500, 0x1002, false},
+  };
+  for (const TestCase& test_case : test_cases) {
+    AdapterQueryFixture fixture;
+    fixture.fake.family = test_case.family;
+    fixture.fake.encoded_gfxip = test_case.encoded_gfxip;
+    fixture.fake.vendor_id = test_case.vendor_id;
+    fixture.fake.supports_wddm2 = test_case.supports_wddm2;
+    amdf_dxg_private_adapter_info_t info;
+    std::memset(&info, 0xA5, sizeof(info));
+    const amdf_dxg_private_adapter_info_t original = info;
+    uint32_t native_status = UINT32_MAX;
+    EXPECT_EQ(amdf_dxg_private_query_linked_adapter(&fixture.query, &info,
+                                                    &native_status),
+              AMDF_DXG_PRIVATE_RESULT_UNSUPPORTED);
+    EXPECT_EQ(native_status, 0u);
+    EXPECT_EQ(std::memcmp(&info, &original, sizeof(info)), 0);
+  }
+}
+
 TEST(PrivateRecordsTest, PreservesNativeFailureAndOutput) {
   AdapterQueryFixture fixture;
-  fixture.fake.failure_call = 2;
+  fixture.fake.failure_call = 1;
   fixture.fake.failure_status = 0xC0000001u;
   amdf_dxg_private_adapter_info_t info;
   std::memset(&info, 0xA5, sizeof(info));
   const amdf_dxg_private_adapter_info_t original = info;
   uint32_t native_status = 0;
-  EXPECT_EQ(
-      amdf_dxg_private_query_adapter(&fixture.query, &info, &native_status),
-      AMDF_DXG_PRIVATE_RESULT_NATIVE_FAILURE);
+  EXPECT_EQ(amdf_dxg_private_query_linked_adapter(&fixture.query, &info,
+                                                  &native_status),
+            AMDF_DXG_PRIVATE_RESULT_NATIVE_FAILURE);
   EXPECT_EQ(native_status, 0xC0000001u);
   EXPECT_EQ(std::memcmp(&info, &original, sizeof(info)), 0);
-}
-
-TEST(PrivateRecordsTest, ReportsRequiredScratchWithoutQuerying) {
-  AdapterQueryFixture fixture;
-  fixture.query.scratch_byte_length =
-      AMDF_DXG_PRIVATE_QUERY_SCRATCH_BYTE_LENGTH - 1;
-  amdf_dxg_private_adapter_info_t info = {};
-  uint32_t native_status = UINT32_MAX;
-  EXPECT_EQ(
-      amdf_dxg_private_query_adapter(&fixture.query, &info, &native_status),
-      AMDF_DXG_PRIVATE_RESULT_BUFFER_TOO_SMALL);
-  EXPECT_EQ(native_status, 0u);
-  EXPECT_EQ(fixture.fake.call_count, 0u);
 }
 
 TEST(PrivateRecordsTest, RejectsBadChecksumWithoutPublishing) {
@@ -462,9 +591,9 @@ TEST(PrivateRecordsTest, RejectsBadChecksumWithoutPublishing) {
   std::memset(&info, 0xA5, sizeof(info));
   const amdf_dxg_private_adapter_info_t original = info;
   uint32_t native_status = UINT32_MAX;
-  EXPECT_EQ(
-      amdf_dxg_private_query_adapter(&fixture.query, &info, &native_status),
-      AMDF_DXG_PRIVATE_RESULT_MALFORMED_RECORD);
+  EXPECT_EQ(amdf_dxg_private_query_linked_adapter(&fixture.query, &info,
+                                                  &native_status),
+            AMDF_DXG_PRIVATE_RESULT_MALFORMED_RECORD);
   EXPECT_EQ(native_status, 0u);
   EXPECT_EQ(std::memcmp(&info, &original, sizeof(info)), 0);
 }
@@ -476,25 +605,36 @@ TEST(PrivateRecordsTest, RejectsInvalidComputeUnitMaskWithoutPublishing) {
   std::memset(&info, 0xA5, sizeof(info));
   const amdf_dxg_private_adapter_info_t original = info;
   uint32_t native_status = UINT32_MAX;
-  EXPECT_EQ(
-      amdf_dxg_private_query_adapter(&fixture.query, &info, &native_status),
-      AMDF_DXG_PRIVATE_RESULT_MALFORMED_RECORD);
+  EXPECT_EQ(amdf_dxg_private_query_linked_adapter(&fixture.query, &info,
+                                                  &native_status),
+            AMDF_DXG_PRIVATE_RESULT_MALFORMED_RECORD);
   EXPECT_EQ(native_status, 0u);
   EXPECT_EQ(std::memcmp(&info, &original, sizeof(info)), 0);
 }
 
 TEST(PrivateRecordsTest, RejectsUnsupportedPhysicalAdapterWithoutPublishing) {
   AdapterQueryFixture fixture;
-  fixture.query.gfxip_entry_count = 1;
+  fixture.query.physical_adapter_index = 2;
   amdf_dxg_private_adapter_info_t info;
   std::memset(&info, 0xA5, sizeof(info));
   const amdf_dxg_private_adapter_info_t original = info;
   uint32_t native_status = UINT32_MAX;
-  EXPECT_EQ(
-      amdf_dxg_private_query_adapter(&fixture.query, &info, &native_status),
-      AMDF_DXG_PRIVATE_RESULT_UNSUPPORTED);
+  EXPECT_EQ(amdf_dxg_private_query_linked_adapter(&fixture.query, &info,
+                                                  &native_status),
+            AMDF_DXG_PRIVATE_RESULT_UNSUPPORTED);
   EXPECT_EQ(native_status, 0u);
   EXPECT_EQ(std::memcmp(&info, &original, sizeof(info)), 0);
+}
+
+TEST(PrivateRecordsTest, RejectsIndexedSingleAdapterWithoutQuerying) {
+  AdapterQueryFixture fixture;
+  amdf_dxg_private_adapter_info_t info = {};
+  uint32_t native_status = UINT32_MAX;
+  EXPECT_EQ(amdf_dxg_private_query_single_adapter(&fixture.query, &info,
+                                                  &native_status),
+            AMDF_DXG_PRIVATE_RESULT_UNSUPPORTED);
+  EXPECT_EQ(native_status, 0u);
+  EXPECT_EQ(fixture.fake.call_count, 0u);
 }
 
 }  // namespace

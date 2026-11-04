@@ -14,8 +14,8 @@
 #include <limits>
 
 #include "libamdf/src/gpu/umd/dxg/bridge_allocator.h"
+#include "libamdf/src/gpu/umd/dxg/private_records.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/adapter_state.h"
-#include "libamdf/src/gpu/umd/dxg/rocdxg/private_records.h"
 #include "shared/include/d3dkmt_types.h"
 
 namespace amdf::rocdxg_bridge {

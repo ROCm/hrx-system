@@ -10,7 +10,7 @@
 #include <atomic>
 
 #include "libamdf/src/gpu/umd/dxg/bridge_api.h"
-#include "libamdf/src/gpu/umd/dxg/rocdxg/private_records.h"
+#include "libamdf/src/gpu/umd/dxg/private_records.h"
 
 // Immutable native scheduler facts for one kernel-queue command family.
 struct amdf_rocdxg_kernel_queue_profile_t {

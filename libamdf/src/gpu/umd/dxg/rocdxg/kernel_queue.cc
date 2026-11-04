@@ -14,8 +14,8 @@
 #include <new>
 
 #include "libamdf/src/gpu/umd/dxg/bridge_allocator.h"
+#include "libamdf/src/gpu/umd/dxg/private_records.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/adapter_state.h"
-#include "libamdf/src/gpu/umd/dxg/rocdxg/private_records.h"
 #include "shared/include/d3dkmt_types.h"
 
 struct amdf_dxg_bridge_gpu_kernel_queue_t {

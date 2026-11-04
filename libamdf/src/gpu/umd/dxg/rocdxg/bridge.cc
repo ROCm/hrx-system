@@ -8,24 +8,15 @@
 
 #include "libamdf/src/gpu/umd/dxg/bridge_allocator.h"
 #include "libamdf/src/gpu/umd/dxg/bridge_api.h"
+#include "libamdf/src/gpu/umd/dxg/private_records.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/adapter_state.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/allocation.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/api.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/clock.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/kernel_queue.h"
-#include "libamdf/src/gpu/umd/dxg/rocdxg/private_records.h"
 #include "shared/include/d3dkmt_types.h"
 
 namespace {
-
-constexpr amdf_dxg_private_gfxip_entry_t kGfxipTable[] = {
-    {0x7448, 0, 11, 0, 0}, {0x744C, 0, 11, 0, 0}, {0x745E, 0, 11, 0, 0},
-    {0x7449, 0, 11, 0, 0}, {0x744A, 0, 11, 0, 0}, {0x744B, 0, 11, 0, 0},
-    {0x7470, 0, 11, 0, 1}, {0x747E, 0, 11, 0, 1}, {0x7590, 0, 12, 0, 0},
-    {0x7550, 0, 12, 0, 1}, {0x7551, 0, 12, 0, 1}, {0x150E, 0, 11, 5, 0},
-    {0x1586, 0, 11, 5, 1}, {0x1114, 0, 11, 5, 2}, {0x1900, 0, 11, 0, 3},
-    {0x1902, 0, 11, 5, 3},
-};
 
 uint32_t QueryPrivateAdapter(void* context, uint32_t adapter_handle,
                              void* buffer, uint32_t buffer_byte_length) {
@@ -74,9 +65,7 @@ void PopulateGpuProperties(const amdf_dxg_bridge_gpu_adapter_t& adapter,
       .maximum_scratch_wave_count_per_compute_unit =
           info.maximum_scratch_wave_count_per_compute_unit,
       .local_data_share_byte_length = info.local_data_share_byte_length,
-      // The released ROCDXG matrix contains single-XCC consumer GPUs, and the
-      // published proxy surface exposes no distinct XCC topology.
-      .xcc_count = 1,
+      .xcc_count = info.xcc_count,
       .shader_engine_count = info.shader_engine_count,
       .supports_pm4_kernel_queue = adapter.pm4_queue_profile.is_supported,
       .supports_sdma_kernel_queue = adapter.sdma_queue_profile.is_supported,
@@ -104,31 +93,23 @@ amdf_dxg_bridge_result_t GpuAdapterOpenImpl(
   adapter->native_transport = open_info.native_transport;
 
   amdf::dxg_bridge::HostBuffer query_scratch;
-  if (!query_scratch.Allocate(host_allocator,
-                              AMDF_DXG_PRIVATE_QUERY_SCRATCH_BYTE_LENGTH)) {
+  if (!query_scratch.Allocate(
+          host_allocator, AMDF_DXG_PRIVATE_LINKED_QUERY_SCRATCH_BYTE_LENGTH)) {
     return AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED;
   }
   const amdf_dxg_private_adapter_query_t query = {
-      .structure_size = sizeof(amdf_dxg_private_adapter_query_t),
       .adapter_handle = open_info.adapter_handle,
       .physical_adapter_index = open_info.physical_adapter_index,
-      .gfxip_entry_count =
-          static_cast<uint32_t>(sizeof(kGfxipTable) / sizeof(kGfxipTable[0])),
-      .gfxip_entries = kGfxipTable,
       .query_context = &adapter->native_transport,
       .query = QueryPrivateAdapter,
       .scratch = query_scratch.data(),
-      .scratch_byte_length = query_scratch.byte_length(),
   };
   amdf_dxg_private_adapter_info_t private_info;
   const amdf_dxg_private_result_t private_result =
-      amdf_dxg_private_query_adapter(&query, &private_info, out_native_status);
+      amdf_dxg_private_query_linked_adapter(&query, &private_info,
+                                            out_native_status);
   if (private_result != AMDF_DXG_PRIVATE_RESULT_SUCCESS) {
     return MapPrivateResult(private_result, out_native_status);
-  }
-  if ((private_info.vendor_id != 0x1002 && private_info.vendor_id != 0x1022) ||
-      !private_info.supports_wddm2) {
-    return AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED;
   }
   adapter->private_info = private_info;
 

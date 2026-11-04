@@ -13,30 +13,6 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-amdf_cc_library(
-    name = "private_records",
-    srcs = ["private_records.c"],
-    hdrs = ["private_records.h"],
-    target_compatible_with = [
-        "@platforms//cpu:x86_64",
-        "@platforms//os:linux",
-    ],
-)
-
-amdf_cc_test(
-    name = "private_records_test",
-    srcs = ["private_records_test.cc"],
-    target_compatible_with = [
-        "@platforms//cpu:x86_64",
-        "@platforms//os:linux",
-    ],
-    deps = [
-        ":private_records",
-        "//third_party:google_test",
-        "//third_party:google_test_main",
-    ],
-)
-
 amdf_cc_test(
     name = "allocation_test",
     srcs = [
@@ -52,10 +28,10 @@ amdf_cc_test(
         "@platforms//os:linux",
     ],
     deps = [
-        ":private_records",
         "//libamdf/src:allocator",
         "//libamdf/src/gpu/umd/dxg:bridge_allocator",
         "//libamdf/src/gpu/umd/dxg:bridge_api",
+        "//libamdf/src/gpu/umd/dxg:private_records",
         "//third_party:amdf_rocdxg_headers",
         "//third_party:google_test",
         "//third_party:google_test_main",
@@ -83,9 +59,9 @@ amdf_cc_library(
     ],
     visibility = ["//libamdf/src/gpu/umd/dxg/linux:__pkg__"],
     deps = [
-        ":private_records",
         "//libamdf/src/gpu/umd/dxg:bridge_allocator",
         "//libamdf/src/gpu/umd/dxg:bridge_api",
+        "//libamdf/src/gpu/umd/dxg:private_records",
         "//third_party:amdf_rocdxg_headers",
     ],
 )
@@ -106,8 +82,8 @@ amdf_cc_test(
         "@platforms//os:linux",
     ],
     deps = [
-        ":private_records",
         "//libamdf/src/gpu/umd/dxg:bridge_api",
+        "//libamdf/src/gpu/umd/dxg:private_records",
         "//third_party:amdf_rocdxg_headers",
         "//third_party:google_test",
         "//third_party:google_test_main",
@@ -129,10 +105,10 @@ amdf_cc_test(
         "@platforms//os:linux",
     ],
     deps = [
-        ":private_records",
         "//libamdf/src:allocator",
         "//libamdf/src/gpu/umd/dxg:bridge_allocator",
         "//libamdf/src/gpu/umd/dxg:bridge_api",
+        "//libamdf/src/gpu/umd/dxg:private_records",
         "//third_party:amdf_rocdxg_headers",
         "//third_party:google_test",
         "//third_party:google_test_main",
