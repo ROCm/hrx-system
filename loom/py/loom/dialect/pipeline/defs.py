@@ -268,7 +268,9 @@ pipeline_compose = Op(
     doc=(
         "Compose a child pipeline into the enclosing invocation. Each composition "
         "constructs fresh child storage and independently progressing strands; "
-        "it neither submits another invocation nor waits for child completion. "
+        "it never submits another invocation. Inside pipeline.serial the child "
+        "completes before the schedule advances; outside it, composition does "
+        "not wait for child completion. "
         "Specialization and run operands substitute the child's complete typed "
         "signature. Child target and materialization requirements remain binding."
     ),
@@ -315,6 +317,46 @@ pipeline_compose = Op(
     examples=[
         "pipeline.compose @column[%column](%input, %output) : [index](channel<tile<16xi32>>, channel<tile<16xi32>>)",
     ],
+)
+
+pipeline_serial = Op(
+    "pipeline.serial",
+    group=pipeline_ops,
+    doc=(
+        "Order complete child pipelines within one resident invocation. Each "
+        "composition in the region completes its strands and asynchronous "
+        "memory operations before the schedule advances. Structured control "
+        "repeats or selects child lifetimes; nested serial regions complete "
+        "before their enclosing schedule advances. Completed writes are visible "
+        "to subsequent children. Outer storage and published channel records "
+        "survive the boundary; completion neither empties outer channels nor "
+        "orders unrelated concurrent strands. Child completion cannot retain "
+        "uncompleted transfers or owned read/write capabilities. Strands belong "
+        "to composed child definitions, where they progress concurrently."
+    ),
+    regions=[
+        RegionDef(
+            "body",
+            doc="Resident child compositions and their structured schedule.",
+            terminator="pipeline.yield",
+        ),
+    ],
+    traits=[
+        UNKNOWN_EFFECTS,
+        *_PIPELINE_GRAPH_TRAITS,
+        NoAncestor("pipeline.strand"),
+        ImplicitTerminator("pipeline.yield"),
+    ],
+    format=[Region("body")],
+    examples=["pipeline.serial {\n}"],
+)
+
+pipeline_yield = Op(
+    "pipeline.yield",
+    group=pipeline_ops,
+    doc="Complete a resident serial schedule. Implicit at the end of its region.",
+    traits=[TERMINATOR, HasParent("pipeline.serial")],
+    examples=["pipeline.yield"],
 )
 
 pipeline_strand = Op(
@@ -368,6 +410,7 @@ pipeline_strand = Op(
     traits=[
         UNKNOWN_EFFECTS,
         *_PIPELINE_GRAPH_TRAITS,
+        NoAncestor("pipeline.serial"),
         ImplicitTerminator("pipeline.end"),
     ],
     verify="loom_pipeline_strand_verify",
@@ -416,4 +459,6 @@ ALL_PIPELINE_OPS: tuple[Op, ...] = (
     pipeline_compose,
     pipeline_memory,
     pipeline_decl,
+    pipeline_serial,
+    pipeline_yield,
 )

@@ -7,6 +7,7 @@
 #ifndef LOOM_TRANSFORMS_PIPELINE_REALIZATION_H_
 #define LOOM_TRANSFORMS_PIPELINE_REALIZATION_H_
 
+#include "loom/analysis/pipeline_invocations.h"
 #include "loom/analysis/pipeline_workers.h"
 #include "loom/pass/types.h"
 #include "loom/rewrite/rewriter.h"
@@ -44,11 +45,13 @@ typedef struct loom_pipeline_realization_t {
   const loom_value_fact_table_t* facts;
   // Construction-owned resources, independent of physical storage addresses.
   loom_pipeline_resources_t resources;
-  // Bound worker occurrences, in strand order.
+  // Complete static inventory, including bound children and retained control.
+  loom_pipeline_invocations_t invocations;
+  // Bound worker instances, in complete invocations.workers order.
   loom_pipeline_worker_t* workers;
   // Compilation owner receiving workers and their generated helper versions.
   loom_function_version_owner_t* version_owner;
-  // Exact execution contexts retained at worker cloning, in strand order.
+  // Exact execution contexts retained at cloning, in the same worker order.
   loom_target_function_version_t** worker_versions;
   // Fresh context ordinal reserved for a changed entry execution contract.
   loom_target_context_ordinal_t entry_target_context;

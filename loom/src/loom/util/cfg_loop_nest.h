@@ -110,6 +110,17 @@ bool loom_cfg_loop_nest_calculate_block_execution_counts(
     const loom_cfg_loop_nest_t* nest, const uint64_t* trip_counts,
     uint64_t* out_block_counts);
 
+// Retains an upper bound for each block even when another path has an unknown
+// count. UINT64_MAX denotes an unknown or overflowing trip/block bound.
+// Conditional paths receive their enclosing loop multiplier; unreachable
+// blocks receive zero. Unsupported cycles remain unbounded without discarding
+// bounds outside them. Takes O(B+L) time without additional storage.
+// Returns whether every output is exact, provided finite trip_bounds are exact.
+// Outputs are always initialized, including when the return value is false.
+bool loom_cfg_loop_nest_calculate_block_execution_bounds(
+    const loom_cfg_loop_nest_t* nest, const uint64_t* trip_bounds,
+    uint64_t* out_block_bounds);
+
 // Orders each reachable block once, visiting a loop body before its
 // continuation. Requires the single-path, header-tested structure admitted by
 // calculate_block_execution_counts. The output has

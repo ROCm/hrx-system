@@ -1,5 +1,34 @@
 // RUN: verify
 
+func.def @without_invocation() {
+  // ERROR@+1: STRUCTURE/029 "pipeline.def"
+  pipeline.serial {
+  }
+  func.return
+}
+
+// ====
+
+pipeline.def @schedule_inside_worker() run() {
+  pipeline.strand workers([0], [1], [1]) {
+    // ERROR@+1: STRUCTURE/029 "pipeline.strand"
+    pipeline.serial {
+    }
+  }
+}
+
+// ====
+
+pipeline.def @ungrouped_worker() run() {
+  pipeline.serial {
+    // ERROR@+1: STRUCTURE/029 "pipeline.serial"
+    pipeline.strand workers([0], [1], [1]) {
+    }
+  }
+}
+
+// ====
+
 pipeline.def<kernel> @select_memory(%column: index) run() {
   %memory = pipeline.memory<workgroup>[%column, 3] : pool
 }

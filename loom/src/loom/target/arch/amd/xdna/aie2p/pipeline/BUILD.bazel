@@ -87,6 +87,30 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "join",
+    srcs = ["join.c"],
+    hdrs = ["join.h"],
+    deps = [
+        "//loom/src/loom/target/arch/amd/xdna/array:facts",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "join_test",
+    srcs = ["join_test.cc"],
+    deps = [
+        ":join",
+        "//loom/src/loom/target/arch/amd/xdna/array:facts",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "native",
     srcs = [
         "channels.c",
@@ -94,6 +118,8 @@ loom_cc_library(
         "distribution.c",
         "dma.c",
         "native.c",
+        "phases.c",
+        "programs.c",
         "switch.c",
         "transport.c",
     ],
@@ -103,7 +129,9 @@ loom_cc_library(
     ],
     deps = [
         ":dma_plan",
+        ":join",
         ":worker",
+        "//loom/src/loom/analysis:pipeline_execution",
         "//loom/src/loom/analysis:source_storage_packing",
         "//loom/src/loom/analysis:storage_geometry",
         "//loom/src/loom/codegen/low:builder",
@@ -119,6 +147,7 @@ loom_cc_library(
         "//loom/src/loom/ops/pipeline",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/view",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:facts_builder",
         "//loom/src/loom/target:function_version",
@@ -132,6 +161,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amd/xdna/array:facts",
         "//loom/src/loom/target/arch/amd/xdna/array:registers",
         "//loom/src/loom/transforms/pipeline:channel_materialization",
+        "//loom/src/loom/transforms/pipeline:control",
         "//loom/src/loom/transforms/pipeline:realization",
         "//loom/src/loom/transforms/view:offset_expression",
         "//loom/src/loom/util:fact_table",

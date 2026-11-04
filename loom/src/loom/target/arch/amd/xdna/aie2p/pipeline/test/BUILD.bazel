@@ -6,12 +6,23 @@
 
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:defs.bzl", "loom_execution_profile", "loom_test", "loom_test_module")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
 load("//loom/target/amd/xdna:execution_profiles.bzl", "XDNA_HARDWARE_PROFILE")
 
 package(
     default_visibility = ["//visibility:private"],
     features = ["layering_check"],
     licenses = ["notice"],
+)
+
+loom_check_test_suite(
+    name = "lowering_test",
+    srcs = [
+        "child_distribution.loom-test",
+        "child_join.loom-test",
+        "external_metadata.loom-test",
+    ],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/arch:aie2p"]),
 )
 
 _XDNA_ONE_COLUMN_PROFILE = loom_execution_profile(
@@ -50,6 +61,8 @@ _XDNA_THREE_COLUMN_PROFILE = loom_execution_profile(
 loom_test(
     name = "one_column_test",
     srcs = [
+        "child_cursors.loom",
+        "concurrent_distribution.loom",
         "finite_ingress.loom",
         "ordered_prefix.loom",
         "ordered_replay.loom",
@@ -67,6 +80,7 @@ loom_test(
     name = "two_column_test",
     srcs = [
         "channel_fanout.loom",
+        "joined_phases.loom",
         "retained_handoff.loom",
     ],
     benchmark_smoke = False,

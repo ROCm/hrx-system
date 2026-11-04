@@ -54,7 +54,7 @@
           "stdout": {
             "contains": {
               "unordered": [
-                "WARNING: __pipeline_worker_0 scalar.mulf: up to 163 Low operations per source operation via exact_binary32",
+                "scalar.mulf: up to 163 Low operations per source operation via exact_binary32",
                 "entries: none"
               ]
             }

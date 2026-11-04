@@ -135,10 +135,12 @@ static bool loom_aie2p_native_distribution_destinations_equal(
 }
 
 static bool loom_aie2p_native_distribution_program_equal(
-    const loom_pipeline_transport_t* transport,
+    const loom_pipeline_transport_t* a_transport,
     const loom_pipeline_transport_batch_t* a,
+    const loom_pipeline_transport_t* b_transport,
     const loom_pipeline_transport_batch_t* b) {
-  if (a->record_count != b->record_count || a->copy_count != b->copy_count) {
+  if (a->record_count != b->record_count || a->copy_count != b->copy_count ||
+      a->replays != b->replays) {
     return false;
   }
   for (iree_host_size_t i = 0; i < a->copy_count; ++i) {
@@ -148,14 +150,17 @@ static bool loom_aie2p_native_distribution_program_equal(
         a->copies[i].executions != b->copies[i].executions) {
       return false;
     }
+    if (a->replays) {
+      continue;
+    }
     uint16_t a_scope = a->copies[i].scope;
     uint16_t b_scope = b->copies[i].scope;
     while (a_scope != a->records->admission_scope &&
            b_scope != b->records->admission_scope) {
       const loom_pipeline_transport_loop_t* a_loop =
-          &transport->copy_loops[a_scope];
+          &a_transport->copy_loops[a_scope];
       const loom_pipeline_transport_loop_t* b_loop =
-          &transport->copy_loops[b_scope];
+          &b_transport->copy_loops[b_scope];
       if (a_loop->begin - a->copies != b_loop->begin - b->copies ||
           a_loop->end - a->copies != b_loop->end - b->copies ||
           a_loop->iterations != b_loop->iterations) {
@@ -170,6 +175,27 @@ static bool loom_aie2p_native_distribution_program_equal(
     }
   }
   return true;
+}
+
+// Uniform replay already has a compact order contract; only nonuniform copy
+// programs need their retained loop interpreter. Both yield the same visits
+// to packet selection without recovering or expanding source control flow.
+static const loom_pipeline_transport_copy_t*
+loom_aie2p_native_distribution_next_copy(
+    const loom_pipeline_transport_batch_t* batch,
+    loom_pipeline_transport_copy_cursor_t* cursor, uint64_t* remaining) {
+  if (!batch->replays) {
+    return loom_pipeline_transport_copy_cursor_next(cursor);
+  }
+  if (!*remaining) {
+    return NULL;
+  }
+  const loom_pipeline_transport_copy_t* copy = cursor->next++;
+  if (cursor->next == cursor->end) {
+    --*remaining;
+    cursor->next = batch->copies;
+  }
+  return copy;
 }
 
 // Selects a complete retained source lifetime with independent receiver counts.
@@ -227,7 +253,7 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
   iree_arena_allocator_t* arena = context->pass->arena;
   loom_aie2p_native_distribution_t* packet_path = path ? path : distribution;
   uint32_t* totals;
-  const iree_host_size_t channel_count = realization->resources.channel_count;
+  const iree_host_size_t channel_count = realization->invocations.channel_count;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, channel_count, sizeof(*totals), (void**)&totals));
   if (!path) {
@@ -241,10 +267,8 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
   memset(totals, 0, channel_count * sizeof(*totals));
   for (iree_host_size_t i = 0; i < batch->copy_count; ++i) {
     const loom_pipeline_transport_copy_t* copy = &batch->copies[i];
-    const loom_pipeline_resource_channel_t* binding =
-        loom_pipeline_resources_lookup_channel(
-            &realization->resources, copy->destination->channel->value_id);
-    const iree_host_size_t index = binding - realization->resources.channels;
+    const iree_host_size_t index = loom_pipeline_invocations_channel_index(
+        &realization->invocations, copy->destination->channel);
     if (!totals[index]) {
       if (path && ordinals[index] == UINT32_MAX) {
         return loom_aie2p_native_reject(
@@ -282,7 +306,7 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
     }
     const uint32_t ordinal = ordinals[i];
     const loom_aie2p_native_channel_t* receiver_channel = &context->channels[i];
-    if (transport->batch_count > 1 &&
+    if ((path || transport->batch_count > 1) &&
         totals[i] % receiver_channel->source->capacity) {
       return loom_aie2p_native_reject(
           context, first->admission->op,
@@ -325,16 +349,20 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, available, sizeof(*ranges), (void**)&ranges));
   uint16_t range_count = 0;
-  loom_pipeline_transport_copy_cursor_t cursor;
-  IREE_RETURN_IF_ERROR(loom_pipeline_transport_copy_cursor_initialize(
-      transport, batch, arena, &cursor));
+  loom_pipeline_transport_copy_cursor_t cursor = {
+      .next = batch->copies, .end = batch->copies + batch->copy_count};
+  uint64_t remaining = batch->replays;
+  if (!batch->replays) {
+    IREE_RETURN_IF_ERROR(loom_pipeline_transport_copy_cursor_initialize(
+        transport, batch, arena, &cursor));
+  }
   const loom_pipeline_transport_copy_t* copy =
-      loom_pipeline_transport_copy_cursor_next(&cursor);
+      loom_aie2p_native_distribution_next_copy(batch, &cursor, &remaining);
   while (copy) {
     loom_aie2p_native_distribution_packet_t visit = {.destinations = copy,
                                                      .destination_count = 1};
     const loom_pipeline_transport_copy_t* next =
-        loom_pipeline_transport_copy_cursor_next(&cursor);
+        loom_aie2p_native_distribution_next_copy(batch, &cursor, &remaining);
     while (next && next == copy + visit.destination_count &&
            next->source == copy->source && next->scope == copy->scope) {
       bool repeated = false;
@@ -345,7 +373,8 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
         break;
       }
       ++visit.destination_count;
-      next = loom_pipeline_transport_copy_cursor_next(&cursor);
+      next =
+          loom_aie2p_native_distribution_next_copy(batch, &cursor, &remaining);
     }
     uint8_t packet = 0;
     for (; packet < packet_path->packet_count; ++packet) {
@@ -386,12 +415,10 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
     for (iree_host_size_t j = 0; j < packet->destination_count; ++j) {
       const loom_pipeline_transport_destination_t* destination =
           packet->destinations[j].destination;
-      const loom_pipeline_resource_channel_t* binding =
-          loom_pipeline_resources_lookup_channel(
-              &realization->resources, destination->channel->value_id);
+      const iree_host_size_t index = loom_pipeline_invocations_channel_index(
+          &realization->invocations, destination->channel);
       const loom_aie2p_native_distribution_endpoint_t* receiver =
-          &distribution
-               ->receivers[ordinals[binding - realization->resources.channels]];
+          &distribution->receivers[ordinals[index]];
       const iree_host_size_t route_first = context->routing.route_count;
       if (!loom_aie2p_array_route_workers(
               &context->routing, (*next_source)++, packet_path->source_route,
@@ -478,37 +505,40 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
   *out_valid = false;
   const loom_pipeline_worker_t* source = &realization->workers[worker_index];
   loom_aie2p_native_worker_t* worker = &context->workers[worker_index];
-  loom_aie2p_native_distribution_t** tail = &worker->distributions;
+  const loom_pipeline_invocation_t* invocation =
+      realization->invocations.workers[worker_index].invocation;
+  const bool child = invocation->ordinal != 0;
+  loom_aie2p_native_worker_t* owner =
+      &context
+           ->workers[context->distribution_execution
+                         .workers[context->distribution_engines[worker_index]]];
+  loom_aie2p_native_distribution_t** tail = &owner->distributions;
+  while (*tail) {
+    tail = &(*tail)->next;
+  }
   loom_aie2p_native_distribution_phase_t** phase_tail =
       &worker->distribution_phases;
   loom_aie2p_native_distribution_phase_t* previous_phase = NULL;
   // A cursor's retained total exceeds one batch's contribution precisely when
   // this worker uses that endpoint in more than one phase. Independent
   // distributions retain their autonomous paths.
-  bool packet_program = false;
-  for (iree_host_size_t i = 0; i < source->transport.batch_count; ++i) {
-    packet_program |= source->transport.batches[i].replays == 0;
-  }
-  bool ordered = packet_program && source->transport.batch_count > 1;
+  const bool packet_program = owner->distribution_packets;
+  bool ordered = child || (packet_program && source->transport.batch_count > 1);
   for (iree_host_size_t i = 0; i < source->transport.batch_count; ++i) {
     const loom_pipeline_transport_batch_t* batch =
         &source->transport.batches[i];
     const loom_pipeline_transport_cohort_t* cohort = batch->records;
-    const loom_pipeline_resource_channel_t* source_binding =
-        loom_pipeline_resources_lookup_channel(
-            &realization->resources, cohort->admission->channel->value_id);
-    ordered |=
-        context->channels[source_binding - realization->resources.channels]
-            .cursor.reader.maximum_admissions >
-        cohort->admissions * batch->record_count;
+    const loom_aie2p_native_channel_t* source_channel =
+        loom_aie2p_native_channel(context, realization,
+                                  cohort->admission->channel);
+    ordered |= source_channel->cursor.reader.maximum_admissions >
+               cohort->admissions * batch->record_count;
     for (iree_host_size_t j = 0;
          !packet_program && j < cohort->destination_count; ++j) {
-      const loom_pipeline_resource_channel_t* binding =
-          loom_pipeline_resources_lookup_channel(
-              &realization->resources,
-              cohort->destinations[j].channel->value_id);
-      ordered |= context->channels[binding - realization->resources.channels]
-                     .cursor.writer.maximum_admissions >
+      const loom_aie2p_native_channel_t* destination =
+          loom_aie2p_native_channel(context, realization,
+                                    cohort->destinations[j].channel);
+      ordered |= destination->cursor.writer.maximum_admissions >
                  cohort->transfers * batch->record_count;
     }
   }
@@ -516,22 +546,21 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
     const loom_pipeline_transport_batch_t* batch =
         &source->transport.batches[i];
     const loom_pipeline_transport_cohort_t* cohort = batch->records;
-    const loom_pipeline_resource_channel_t* source_binding =
-        loom_pipeline_resources_lookup_channel(
-            &realization->resources, cohort->admission->channel->value_id);
     const loom_aie2p_native_channel_t* source_channel =
-        &context->channels[source_binding - realization->resources.channels];
+        loom_aie2p_native_channel(context, realization,
+                                  cohort->admission->channel);
     const uint32_t repetitions =
         (uint32_t)(cohort->transfers * batch->record_count);
     loom_aie2p_native_distribution_t* path =
-        ordered ? worker->distributions : NULL;
+        ordered ? owner->distributions : NULL;
     if (ordered) {
       const uint32_t producer = source_channel->cursor.writer.worker;
       if (!cohort->release || cohort->admissions != 1 ||
           producer == UINT32_MAX ||
-          (path && producer != path->sender.channel->cursor.writer.worker) ||
-          context->workers[producer].execution !=
-              LOOM_AIE2P_NATIVE_EXECUTION_CONFIGURATION) {
+          (!child &&
+           ((path && producer != path->sender.channel->cursor.writer.worker) ||
+            context->workers[producer].execution !=
+                LOOM_AIE2P_NATIVE_EXECUTION_CONFIGURATION))) {
         return loom_aie2p_native_reject(
             context, cohort->admission->op,
             IREE_SV("successive retained batches with one controller-owned "
@@ -540,7 +569,8 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
       const loom_pipeline_transport_cohort_t* first =
           source->transport.batches[0].records;
       if ((!packet_program &&
-           cohort->destination_count != first->destination_count) ||
+           (cohort->destination_count != first->destination_count ||
+            (path && cohort->destination_count != path->receiver_count))) ||
           (path &&
            source_channel->pool_index != path->sender.channel->pool_index)) {
         return loom_aie2p_native_reject(
@@ -550,7 +580,11 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
       }
       for (iree_host_size_t j = 0;
            !packet_program && j < cohort->destination_count; ++j) {
-        if (cohort->destinations[j].channel != first->destinations[j].channel) {
+        if (cohort->destinations[j].channel != first->destinations[j].channel ||
+            (path &&
+             loom_aie2p_native_channel(context, realization,
+                                       cohort->destinations[j].channel) !=
+                 path->receivers[j].channel)) {
           return loom_aie2p_native_reject(
               context, cohort->destinations[j].copy,
               IREE_SV("the same ordered destinations in every shared "
@@ -562,11 +596,12 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
     // phase can reuse one only after its prior endpoints have retired.
     loom_aie2p_native_distribution_t* distribution = NULL;
     for (loom_aie2p_native_distribution_t* candidate =
-             ordered ? worker->distributions : NULL;
+             ordered ? owner->distributions : NULL;
          candidate; candidate = candidate->next) {
       if (candidate->sender.channel == source_channel &&
           (packet_program ? loom_aie2p_native_distribution_program_equal(
-                                &source->transport, candidate->source, batch)
+                                candidate->transport, candidate->source,
+                                &source->transport, batch)
                           : candidate->repetitions == repetitions)) {
         distribution = candidate;
         break;
@@ -578,6 +613,7 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
       *distribution = (loom_aie2p_native_distribution_t){
           .path = path ? path : distribution,
           .source = batch,
+          .transport = &source->transport,
           .receiver_count = packet_program ? 0 : cohort->destination_count,
           .repetitions = packet_program ? 0 : repetitions,
       };
@@ -610,13 +646,10 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
         for (iree_host_size_t j = 0; j < cohort->destination_count; ++j) {
           const loom_pipeline_transport_destination_t* destination =
               &cohort->destinations[j];
-          const loom_pipeline_resource_channel_t* destination_binding =
-              loom_pipeline_resources_lookup_channel(
-                  &realization->resources, destination->channel->value_id);
           const loom_aie2p_native_channel_t* destination_channel =
-              &context->channels[destination_binding -
-                                 realization->resources.channels];
-          if (ordered && repetitions % destination_binding->capacity) {
+              loom_aie2p_native_channel(context, realization,
+                                        destination->channel);
+          if (ordered && repetitions % destination_channel->source->capacity) {
             return loom_aie2p_native_reject(
                 context, destination->copy,
                 IREE_SV("complete destination-ring turns at a shared multicast "
@@ -709,12 +742,86 @@ iree_status_t loom_aie2p_native_bind_distribution_phases(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization, bool* out_valid) {
   *out_valid = false;
-  const iree_host_size_t count = realization->resources.strand_count;
+  const iree_host_size_t count = realization->invocations.worker_count;
+  const iree_host_size_t controller_count =
+      realization->invocations.count * context->execution.engine_count;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(context->pass->arena, controller_count,
+                                sizeof(*context->distribution_controllers),
+                                (void**)&context->distribution_controllers));
+  for (iree_host_size_t i = 0; i < controller_count; ++i) {
+    context->distribution_controllers[i] = IREE_HOST_SIZE_MAX;
+  }
   const loom_aie2p_native_distribution_phase_t** next;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(context->pass->arena, count,
                                                  sizeof(*next), (void**)&next));
   for (iree_host_size_t i = 0; i < count; ++i) {
     next[i] = context->workers[i].distribution_phases;
+    const loom_pipeline_invocation_t* invocation =
+        realization->invocations.workers[i].invocation;
+    if (!invocation->ordinal || !next[i]) {
+      continue;
+    }
+    const loom_aie2p_native_distribution_phase_t* phase = next[i];
+    if (phase->next) {
+      return loom_aie2p_native_reject(
+          context, phase->source->records->admission->op,
+          IREE_SV("one complete retained distribution lifetime per child"));
+    }
+    const loom_aie2p_native_distribution_t* distribution = phase->distribution;
+    for (iree_host_size_t j = 0; j <= distribution->receiver_count; ++j) {
+      const bool sender = j == 0;
+      const loom_aie2p_native_distribution_endpoint_t* endpoint =
+          sender ? &distribution->sender : &distribution->receivers[j - 1];
+      const uint32_t cursor = sender ? endpoint->channel->cursor.writer.worker
+                                     : endpoint->channel->cursor.reader.worker;
+      const iree_host_size_t engine = cursor == UINT32_MAX
+                                          ? IREE_HOST_SIZE_MAX
+                                          : context->core_engines[cursor];
+      iree_host_size_t controller =
+          engine == IREE_HOST_SIZE_MAX
+              ? IREE_HOST_SIZE_MAX
+              : context->execution.workers[invocation->ordinal *
+                                               context->execution.engine_count +
+                                           engine];
+      if (controller == IREE_HOST_SIZE_MAX && engine != IREE_HOST_SIZE_MAX &&
+          invocation->schedule) {
+        controller =
+            context->execution.workers[invocation->parent->ordinal *
+                                           context->execution.engine_count +
+                                       engine];
+        if (controller != IREE_HOST_SIZE_MAX &&
+            realization->invocations.workers[controller].invocation !=
+                invocation->parent) {
+          controller = IREE_HOST_SIZE_MAX;
+        }
+      }
+      if (controller == IREE_HOST_SIZE_MAX ||
+          (realization->invocations.workers[controller].invocation !=
+               invocation &&
+           realization->invocations.workers[controller].invocation !=
+               invocation->parent)) {
+        return loom_aie2p_native_reject(
+            context, phase->source->records->admission->op,
+            IREE_SV("a producer and each receiver controlled by the complete "
+                    "child or its concurrent parent invocation"));
+      }
+      context->distribution_controllers[invocation->ordinal *
+                                            context->execution.engine_count +
+                                        engine] = controller;
+      loom_aie2p_native_distribution_command_t* command;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(
+          context->pass->arena, sizeof(*command), (void**)&command));
+      loom_aie2p_native_worker_t* worker = &context->workers[controller];
+      *command = (loom_aie2p_native_distribution_command_t){
+          .next = worker->distribution_commands,
+          .invocation = invocation,
+          .endpoint = endpoint,
+          .direction = sender ? LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM
+                              : LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY};
+      worker->distribution_commands = command;
+    }
+    next[i] = NULL;
   }
   for (iree_host_size_t i = 0; i < count; ++i) {
     loom_aie2p_native_worker_t* worker = &context->workers[i];

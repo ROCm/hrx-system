@@ -1,0 +1,50 @@
+// RUN: emit source-low @metadata target=amd.xdna.aie2p:amd.xdna.strix.17f0_10 output=low
+
+// A caller's byte length cannot be replaced by the private cursor frame's
+// extent, even when this worker needs no channel cursors.
+// ERROR@+1: XDNA/051 {requirement="external buffer arguments used only through DMA endpoints"}
+pipeline.def<kernel> public @metadata() run(%input: buffer) {
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 4 : offset
+  %storage = buffer.alloca<workgroup> pool(%memory) align(4) %bytes : buffer
+  %length = buffer.length %input
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %value = index.cast %length : offset to i32
+    %local = buffer.view %storage[%origin] : buffer -> view<1xi32>
+    view.store %value, %local[0] : i32, view<1xi32>
+  }
+}
+
+// ====
+
+// RUN: emit source-low @metadata_with_cursors target=amd.xdna.aie2p:amd.xdna.strix.17f0_10 output=low
+
+// Two caller roots survive beside cursor state. Their original argument
+// positions remain distinct from the generated frame argument.
+// ERROR@+1: XDNA/051 {requirement="external buffer arguments used only through DMA endpoints"}
+pipeline.def<kernel> public @metadata_with_cursors() run(%first: buffer, %second: buffer) {
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 8 : offset
+  %capacity = index.constant 2 : index
+  %storage = buffer.alloca<workgroup> pool(%memory) align(4) %bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x1xi32>
+  %channel = channel.bind<fifo> %slots, %capacity : view<2x1xi32>, index -> channel<tile<1xi32>>
+  %first_length = buffer.length %first
+  %second_length = buffer.length %second
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %begin = index.constant 0 : index
+    %end = index.constant 3 : index
+    %step = index.constant 1 : index
+    %combined = index.add %first_length, %second_length : offset
+    %value = index.cast %combined : offset to i32
+    scf.for %record = [%begin to %end step %step] {
+      %write, %destination = channel.reserve %channel : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+      view.store %value, %destination[0] : i32, view<1xi32>
+      channel.publish %write : write<tile<1xi32>>
+      %read, %source = channel.acquire %channel : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+      channel.release %read : read<tile<1xi32>>
+    }
+  }
+}

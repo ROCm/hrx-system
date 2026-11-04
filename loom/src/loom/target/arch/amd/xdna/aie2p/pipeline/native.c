@@ -84,15 +84,16 @@ static iree_status_t loom_aie2p_native_inventory(
 static iree_status_t loom_aie2p_native_select_channels(
     loom_aie2p_native_context_t* context, loom_module_t* module,
     const loom_pipeline_realization_t* realization, bool* out_valid) {
-  const loom_pipeline_resources_t* resources = &realization->resources;
+  const loom_pipeline_invocations_t* invocations = &realization->invocations;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      context->pass->arena, resources->channel_count,
+      context->pass->arena, invocations->channel_count,
       sizeof(*context->channels), (void**)&context->channels));
-  for (iree_host_size_t i = 0; i < resources->channel_count; ++i) {
-    const loom_pipeline_resource_channel_t* source = &resources->channels[i];
+  for (iree_host_size_t i = 0; i < invocations->channel_count; ++i) {
+    const loom_pipeline_invocation_channel_t* occurrence =
+        &invocations->channels[i];
+    const loom_pipeline_resource_channel_t* source = occurrence->source;
     const loom_pipeline_resource_allocation_t* allocation =
-        loom_pipeline_resources_lookup_allocation(
-            resources, source->storage.root_value_id);
+        occurrence->allocation;
     if (!allocation) {
       return loom_aie2p_native_reject(
           context, source->binding,
@@ -106,8 +107,8 @@ static iree_status_t loom_aie2p_native_select_channels(
     loom_storage_geometry_span_t record;
     int64_t offset = 0;
     uint64_t stride_bits = 0, record_bits = 0, extent = 0;
-    if (!loom_storage_geometry_query(&realization->facts->context, module,
-                                     storage_type, &geometry) ||
+    if (!loom_storage_geometry_query(&occurrence->invocation->facts->context,
+                                     module, storage_type, &geometry) ||
         geometry.rank == 0 ||
         !loom_storage_geometry_measure(&geometry, 1, &record) ||
         !loom_value_facts_as_exact_i64(source->storage.base_byte_offset,
@@ -158,17 +159,17 @@ static iree_status_t loom_aie2p_native_select_channel_accesses(
   *out_valid = false;
   iree_arena_allocator_t* arena = context->pass->arena;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, realization->resources.channel_count,
+      arena, realization->invocations.channel_count,
       sizeof(*worker->channels.indices), (void**)&worker->channels.indices));
-  memset(
-      worker->channels.indices, 0xff,
-      realization->resources.channel_count * sizeof(*worker->channels.indices));
+  memset(worker->channels.indices, 0xff,
+         realization->invocations.channel_count *
+             sizeof(*worker->channels.indices));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, source->binding_count, sizeof(*worker->channels.accesses),
       (void**)&worker->channels.accesses));
   for (iree_host_size_t i = 0; i < source->binding_count; ++i) {
-    const iree_host_size_t index =
-        source->bindings[i].channel - realization->resources.channels;
+    const iree_host_size_t index = loom_pipeline_invocations_channel_index(
+        &realization->invocations, &source->bindings[i].channel->identity);
     if (worker->channels.indices[index] != UINT32_MAX) {
       continue;
     }
@@ -176,12 +177,37 @@ static iree_status_t loom_aie2p_native_select_channel_accesses(
     loom_aie2p_native_channel_access_t* access =
         &worker->channels.accesses[worker->channels.count++];
     const loom_aie2p_native_channel_t* channel = &context->channels[index];
-    access->channel = channel;
+    *access = (loom_aie2p_native_channel_access_t){.channel = channel};
     if (context->pool_tiles[channel->pool_index]->facts->kind ==
         LOOM_XDNA_TILE_KIND_MEMORY) {
-      return loom_aie2p_native_reject(
-          context, source->source->declaration,
-          IREE_SV("DMA-owned SRAM storage with compute-memory handoffs"));
+      const loom_pipeline_invocation_t* invocation =
+          realization->invocations.workers[worker - context->workers]
+              .invocation;
+      const uint32_t reader = channel->cursor.reader.worker;
+      const iree_host_size_t engine =
+          reader == UINT32_MAX ? IREE_HOST_SIZE_MAX
+                               : context->distribution_engines[reader];
+      const iree_host_size_t distributor =
+          engine == IREE_HOST_SIZE_MAX
+              ? IREE_HOST_SIZE_MAX
+              : context->distribution_execution
+                    .workers[invocation->ordinal *
+                                 context->distribution_execution.engine_count +
+                             engine];
+      if (!channel->replay.record_count || channel->replay.credits != 1 ||
+          distributor == IREE_HOST_SIZE_MAX ||
+          (realization->invocations.workers[distributor].invocation !=
+               invocation &&
+           (realization->invocations.workers[distributor].invocation->parent !=
+                invocation ||
+            !realization->invocations.workers[distributor]
+                 .invocation->schedule))) {
+        return loom_aie2p_native_reject(
+            context, source->source->declaration,
+            IREE_SV("a finite SRAM batch whose producer owns the complete "
+                    "distribution lifetime"));
+      }
+      continue;
     }
     const loom_xdna_tile_coordinate_t owner =
         context->pool_tiles[channel->pool_index]->coordinate;
@@ -201,13 +227,32 @@ static iree_status_t loom_aie2p_native_select_channel_accesses(
     access->locks.ready =
         access->window->lock_selector_base + channel->ready_lock;
   }
+  for (iree_host_size_t i = 0; i < source->channels.action_count; ++i) {
+    const loom_channel_plan_action_t* action = &source->channels.actions[i];
+    const iree_host_size_t index = loom_pipeline_invocations_channel_index(
+        &realization->invocations, action->channel);
+    const loom_aie2p_native_channel_access_t* access =
+        &worker->channels.accesses[worker->channels.indices[index]];
+    if (access->window) {
+      continue;
+    }
+    if ((!loom_channel_reserve_isa(action->op) &&
+         !loom_channel_publish_isa(action->op)) ||
+        source->completion.actions[i].maximum_admissions >
+            access->channel->replay.record_count) {
+      return loom_aie2p_native_reject(
+          context, action->op,
+          IREE_SV("one complete SRAM publication without slot reuse inside "
+                  "its producer invocation"));
+    }
+  }
   *out_valid = true;
   return iree_ok_status();
 }
 
 static iree_status_t loom_aie2p_native_select_buffer_accesses(
     loom_aie2p_native_context_t* context,
-    const loom_pipeline_realization_t* realization,
+    const loom_pipeline_invocation_t* invocation,
     const loom_pipeline_worker_t* source, loom_aie2p_native_worker_t* worker,
     bool* out_valid) {
   *out_valid = false;
@@ -240,8 +285,7 @@ static iree_status_t loom_aie2p_native_select_buffer_accesses(
       continue;
     }
     const loom_pipeline_resource_allocation_t* allocation =
-        loom_pipeline_resources_lookup_allocation(&realization->resources,
-                                                  root);
+        loom_pipeline_invocation_lookup_allocation(invocation, root);
     if (!allocation || allocation->byte_length == 0 ||
         allocation->byte_offset > UINT32_MAX ||
         allocation->byte_length > UINT32_MAX) {
@@ -280,11 +324,8 @@ static iree_status_t loom_aie2p_native_claim_transport_cursor(
     uint32_t batch_index, const loom_channel_identity_t* identity,
     const loom_op_t* op, bool reader, uint64_t admissions, bool* out_valid) {
   *out_valid = false;
-  const loom_pipeline_resource_channel_t* bound =
-      loom_pipeline_resources_lookup_channel(&realization->resources,
-                                             identity->value_id);
   loom_aie2p_native_channel_t* channel =
-      &context->channels[bound - realization->resources.channels];
+      loom_aie2p_native_channel(context, realization, identity);
   loom_aie2p_native_cursor_t* cursor =
       reader ? &channel->cursor.reader : &channel->cursor.writer;
   if (!admissions || admissions > UINT32_MAX) {
@@ -293,12 +334,29 @@ static iree_status_t loom_aie2p_native_claim_transport_cursor(
         IREE_SV(
             "a positive channel-copy count representable by native cursors"));
   }
-  if (cursor->worker != UINT32_MAX &&
-      (cursor->worker != worker_index ||
-       cursor->transport_batch == batch_index)) {
+  if (cursor->worker == worker_index &&
+      cursor->transport_batch == batch_index) {
     return loom_aie2p_native_reject(
         context, op,
         IREE_SV("one ordered transport stream per FIFO read or write cursor"));
+  }
+  if (cursor->worker != UINT32_MAX && cursor->worker != worker_index) {
+    if (realization->workers[cursor->worker].transport.cohort_count) {
+      if (context->distribution_sharing_count ==
+          context->distribution_sharing_capacity) {
+        IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+            context->pass->arena, context->distribution_sharing_count,
+            context->distribution_sharing_count + 1,
+            sizeof(*context->distribution_sharing),
+            &context->distribution_sharing_capacity,
+            (void**)&context->distribution_sharing));
+      }
+      context->distribution_sharing[context->distribution_sharing_count++] =
+          (loom_pipeline_execution_sharing_t){.first_worker = cursor->worker,
+                                              .second_worker = worker_index};
+    }
+    cursor->shared = true;
+    cursor->maximum_admissions = 0;
   }
   if (admissions > UINT32_MAX - cursor->maximum_admissions) {
     return loom_aie2p_native_reject(
@@ -308,8 +366,8 @@ static iree_status_t loom_aie2p_native_claim_transport_cursor(
   cursor->worker = worker_index;
   cursor->transport_batch = batch_index;
   cursor->maximum_admissions += (uint32_t)admissions;
-  cursor->advances =
-      channel->source->capacity > 1 && cursor->maximum_admissions > 1;
+  cursor->advances = channel->source->capacity > 1 &&
+                     (cursor->shared || cursor->maximum_admissions > 1);
   *out_valid = true;
   return iree_ok_status();
 }
@@ -326,9 +384,11 @@ static bool loom_aie2p_native_can_configure(
   // can have concurrent partial publications and need atomic credit updates.
   const uint32_t worker_index = (uint32_t)(worker - realization->workers);
   for (iree_host_size_t i = 0; i < worker->binding_count; ++i) {
-    const loom_aie2p_native_channel_t* channel =
-        &context->channels[worker->bindings[i].channel -
-                           realization->resources.channels];
+    const loom_aie2p_native_channel_t* channel = loom_aie2p_native_channel(
+        context, realization, &worker->bindings[i].channel->identity);
+    if (channel->cursor.reader.shared || channel->cursor.writer.shared) {
+      return false;
+    }
     if (channel->source->capacity > 1 &&
         (channel->cursor.reader.maximum_admissions > 1 ||
          channel->cursor.writer.maximum_admissions > 1) &&
@@ -393,10 +453,10 @@ static iree_status_t loom_aie2p_native_configure_channels(
   loom_aie2p_native_configuration_action_t* actions;
   uint32_t* records;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      context->pass->arena, realization->resources.channel_count,
+      context->pass->arena, realization->invocations.channel_count,
       sizeof(*positions), (void**)&positions));
   memset(positions, 0,
-         realization->resources.channel_count * sizeof(*positions));
+         realization->invocations.channel_count * sizeof(*positions));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       context->pass->arena, source->channels.action_count, sizeof(*actions),
       (void**)&actions));
@@ -411,11 +471,9 @@ static iree_status_t loom_aie2p_native_configure_channels(
     const loom_channel_plan_action_t* source_action = step->source.channel;
     const iree_host_size_t action_index =
         source_action - source->channels.actions;
-    const loom_pipeline_resource_channel_t* binding =
-        loom_pipeline_resources_lookup_channel(
-            &realization->resources, source_action->channel->value_id);
     const iree_host_size_t channel_index =
-        binding - realization->resources.channels;
+        loom_pipeline_invocations_channel_index(&realization->invocations,
+                                                source_action->channel);
     const loom_aie2p_native_channel_t* channel =
         &context->channels[channel_index];
     loom_aie2p_native_configuration_cursor_t* position =
@@ -500,16 +558,14 @@ static bool loom_aie2p_native_can_repeat(
       request->dest.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
     return false;
   }
-  const loom_pipeline_resource_channel_t* binding =
-      loom_pipeline_resources_lookup_channel(
-          &realization->resources, steps[0].source.channel->channel->value_id);
-  const loom_aie2p_native_channel_t* channel =
-      &context->channels[binding - realization->resources.channels];
+  const loom_aie2p_native_channel_t* channel = loom_aie2p_native_channel(
+      context, realization, steps[0].source.channel->channel);
   // Consumer completion observes every DMA publication, and therefore the last
   // external read and local write, before the invocation can retire storage.
   // Egress must instead observe global-write completion before releasing its
   // source slot: a subsequent reservation can observe the external output.
   if (channel->cursor.reader.worker == UINT32_MAX ||
+      channel->cursor.reader.shared || channel->cursor.writer.shared ||
       channel->cursor.reader.maximum_admissions != transport->repetitions ||
       !realization->workers[channel->cursor.reader.worker]
            .block_execution_counts) {
@@ -562,7 +618,7 @@ static bool loom_aie2p_native_can_repeat(
   }
   if (begin < 0 || begin > UINT32_MAX || stride < 0 || stride > UINT32_MAX ||
       transport->repetitions > UINT32_MAX ||
-      binding->capacity > (UINT64_C(1) << local_dma->iteration_bits) ||
+      channel->source->capacity > (UINT64_C(1) << local_dma->iteration_bits) ||
       (channel->byte_stride % local_dma->transfer_length_granularity) ||
       (stride % shim_dma->transfer_length_granularity) ||
       channel->byte_stride / local_dma->transfer_length_granularity >
@@ -585,11 +641,6 @@ static iree_status_t loom_aie2p_native_select(
     const loom_pipeline_realization_t* realization, bool* out_valid) {
   loom_aie2p_native_context_t* context = user_data;
   *out_valid = false;
-  if (realization->resources.composition_count) {
-    return loom_aie2p_native_reject(
-        context, realization->resources.compositions[0],
-        IREE_SV("child execution boundaries to be realized separately"));
-  }
   IREE_RETURN_IF_ERROR(loom_aie2p_native_select_channels(
       context, module, realization, out_valid));
   if (!*out_valid) {
@@ -612,7 +663,7 @@ static iree_status_t loom_aie2p_native_select(
     context->bindings[i] = (loom_aie2p_native_binding_t){
         .root = arguments[i], .byte_length = 1, .byte_alignment = 4};
   }
-  const iree_host_size_t worker_count = realization->resources.strand_count;
+  const iree_host_size_t worker_count = realization->invocations.worker_count;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       context->pass->arena, worker_count, sizeof(*context->workers),
       (void**)&context->workers));
@@ -634,7 +685,8 @@ static iree_status_t loom_aie2p_native_select(
           context, source->source->declaration,
           IREE_SV("a compute-tile execution location"));
     }
-    context->workers[i] = (loom_aie2p_native_worker_t){.tile = tile};
+    context->workers[i] = (loom_aie2p_native_worker_t){
+        .tile = tile, .cursor_state_argument = LOOM_VALUE_ID_INVALID};
     if (source->transport.cohort_count) {
       uint32_t copy_index = 0;
       for (iree_host_size_t j = 0; j < source->transport.batch_count; ++j) {
@@ -644,11 +696,8 @@ static iree_status_t loom_aie2p_native_select(
         if (!first->release) {
           continue;
         }
-        const loom_pipeline_resource_channel_t* bound =
-            loom_pipeline_resources_lookup_channel(
-                &realization->resources, first->admission->channel->value_id);
-        loom_aie2p_native_channel_t* channel =
-            &context->channels[bound - realization->resources.channels];
+        loom_aie2p_native_channel_t* channel = loom_aie2p_native_channel(
+            context, realization, first->admission->channel);
         const loom_aie2p_native_tile_t* owner =
             context->pool_tiles[channel->pool_index];
         // One admitted batch has a single finite DMA lifetime. Its first
@@ -660,7 +709,8 @@ static iree_status_t loom_aie2p_native_select(
         if ((channel->replay.record_count &&
              (channel->replay.record_count != batch->record_count ||
               channel->replay.credits != credits)) ||
-            batch->record_count != bound->capacity || !channel->record_dense ||
+            batch->record_count != channel->source->capacity ||
+            !channel->record_dense ||
             channel->byte_stride != channel->record_byte_length ||
             batch->replays > UINT32_MAX ||
             credits > (uint64_t)owner->facts->lock_value_maximum) {
@@ -730,25 +780,26 @@ static iree_status_t loom_aie2p_native_select(
                 "FIFO acquire/reserve/wait/publish/release channel actions"));
       }
       if (loom_channel_acquire_isa(op) || loom_channel_reserve_isa(op)) {
-        const loom_pipeline_resource_channel_t* bound =
-            loom_pipeline_resources_lookup_channel(&realization->resources,
-                                                   action->channel->value_id);
         loom_aie2p_native_channel_t* channel =
-            &context->channels[bound - realization->resources.channels];
+            loom_aie2p_native_channel(context, realization, action->channel);
         loom_aie2p_native_cursor_t* cursor = loom_channel_acquire_isa(op)
                                                  ? &channel->cursor.reader
                                                  : &channel->cursor.writer;
-        if (cursor->worker != UINT32_MAX && cursor->worker != i) {
-          return loom_aie2p_native_reject(
-              context, op,
-              IREE_SV("one strand owning each FIFO's read or write cursor"));
-        }
+        const bool shared = cursor->shared || (cursor->worker != UINT32_MAX &&
+                                               cursor->worker != i);
+        const uint32_t maximum_admissions =
+            cursor->worker == i
+                ? iree_max(cursor->maximum_admissions,
+                           source->completion.actions[j].maximum_admissions)
+                : source->completion.actions[j].maximum_admissions;
         *cursor = (loom_aie2p_native_cursor_t){
             .worker = (uint32_t)i,
-            .maximum_admissions =
-                source->completion.actions[j].maximum_admissions,
-            .advances = channel->source->capacity > 1 &&
-                        source->completion.actions[j].maximum_admissions > 1};
+            .maximum_admissions = maximum_admissions,
+            .shared = shared,
+            .advances =
+                channel->source->capacity > 1 &&
+                (maximum_admissions > 1 || shared ||
+                 realization->invocations.workers[i].invocation->ordinal != 0)};
       }
     }
     for (iree_host_size_t j = 0; j < source->channels.action_count; ++j) {
@@ -765,9 +816,15 @@ static iree_status_t loom_aie2p_native_select(
   // one strand preserves concurrency between independently authored strands.
   // Every other strand retains its own execution engine.
   bool configuration_used = false;
+  iree_host_size_t* core_engines = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(context->pass->arena, worker_count,
+                                sizeof(*core_engines), (void**)&core_engines));
+  context->core_engines = core_engines;
   for (iree_host_size_t i = 0; i < worker_count; ++i) {
     loom_pipeline_worker_t* source = &realization->workers[i];
     loom_aie2p_native_worker_t* worker = &context->workers[i];
+    core_engines[i] = IREE_HOST_SIZE_MAX;
     if (source->transport.cohort_count) {
       worker->execution = LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION;
       continue;
@@ -796,20 +853,97 @@ static iree_status_t loom_aie2p_native_select(
       worker->execution = LOOM_AIE2P_NATIVE_EXECUTION_DMA;
       continue;
     }
+    core_engines[i] = worker->tile - context->tiles;
+  }
+  loom_pipeline_execution_conflict_t conflict;
+  IREE_RETURN_IF_ERROR(loom_pipeline_execution_build(
+      &realization->invocations, core_engines,
+      context->family->column_count * context->family->row_count,
+      context->pass->arena, &context->execution, &conflict));
+  if (conflict.second_worker != IREE_HOST_SIZE_MAX) {
+    return loom_aie2p_native_reject(
+        context,
+        realization->workers[conflict.second_worker].source->declaration,
+        IREE_SV("an independently assigned compute tile for each "
+                "instruction-executing strand"));
+  }
+  iree_host_size_t* distribution_engines = NULL;
+  IREE_RETURN_IF_ERROR(loom_pipeline_execution_coalesce(
+      worker_count, context->distribution_sharing,
+      context->distribution_sharing_count, context->pass->arena,
+      &distribution_engines));
+  iree_host_size_t distribution_engine_count = 0;
+  for (iree_host_size_t i = 0; i < worker_count; ++i) {
+    if (context->workers[i].execution !=
+        LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION) {
+      distribution_engines[i] = IREE_HOST_SIZE_MAX;
+    } else if (distribution_engines[i] == i) {
+      distribution_engines[i] = distribution_engine_count++;
+    } else {
+      // Coalescing retains the lowest ordinal, already assigned above.
+      distribution_engines[i] = distribution_engines[distribution_engines[i]];
+    }
+  }
+  context->distribution_engines = distribution_engines;
+  IREE_RETURN_IF_ERROR(loom_pipeline_execution_build(
+      &realization->invocations, distribution_engines,
+      distribution_engine_count, context->pass->arena,
+      &context->distribution_execution, &conflict));
+  if (conflict.second_worker != IREE_HOST_SIZE_MAX) {
+    return loom_aie2p_native_reject(
+        context,
+        realization->workers[conflict.second_worker].source->declaration,
+        IREE_SV("nonoverlapping child lifetimes for shared distribution "
+                "endpoints"));
+  }
+  // A shared cursor follows its admitted engine across child calls. Equal
+  // placement alone is insufficient: the execution plan above proves that
+  // these workers cannot require progress concurrently. Instruction and
+  // distribution engines remain independent even at equal coordinates.
+  for (iree_host_size_t i = 0; i < worker_count; ++i) {
+    const loom_pipeline_worker_t* source = &realization->workers[i];
+    const iree_host_size_t* engines =
+        context->workers[i].execution ==
+                LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION
+            ? distribution_engines
+            : core_engines;
+    for (iree_host_size_t j = 0; j < source->channels.action_count; ++j) {
+      const loom_channel_plan_action_t* action = &source->channels.actions[j];
+      const bool reader = loom_channel_acquire_isa(action->op);
+      if (!reader && !loom_channel_reserve_isa(action->op)) {
+        continue;
+      }
+      const loom_aie2p_native_channel_t* channel =
+          loom_aie2p_native_channel(context, realization, action->channel);
+      const loom_aie2p_native_cursor_t* cursor =
+          reader ? &channel->cursor.reader : &channel->cursor.writer;
+      if (cursor->shared && (engines[i] == IREE_HOST_SIZE_MAX ||
+                             engines[cursor->worker] != engines[i])) {
+        return loom_aie2p_native_reject(
+            context, action->op,
+            IREE_SV("one admitted execution engine for a shared FIFO cursor"));
+      }
+    }
+  }
+  for (iree_host_size_t i = 0; i < worker_count; ++i) {
+    const loom_pipeline_worker_t* source = &realization->workers[i];
+    loom_aie2p_native_worker_t* worker = &context->workers[i];
+    if (worker->execution != LOOM_AIE2P_NATIVE_EXECUTION_CORE) {
+      continue;
+    }
     loom_aie2p_native_tile_t* tile = worker->tile;
-    if (tile->has_worker) {
-      return loom_aie2p_native_reject(
-          context, source->source->declaration,
-          IREE_SV("an independently assigned compute tile for each "
-                  "instruction-executing strand"));
+    loom_aie2p_native_worker_t* representative =
+        &context->workers[context->execution.workers[core_engines[i]]];
+    if (!tile->has_worker) {
+      if (tile->next_lock == tile->facts->lock_count) {
+        return loom_aie2p_native_reject(
+            context, source->source->declaration,
+            IREE_SV("one semaphore for worker completion"));
+      }
+      tile->has_worker = true;
+      representative->completion_lock = tile->next_lock++;
     }
-    if (tile->next_lock == tile->facts->lock_count) {
-      return loom_aie2p_native_reject(
-          context, source->source->declaration,
-          IREE_SV("one semaphore for worker completion"));
-    }
-    tile->has_worker = true;
-    worker->completion_lock = tile->next_lock++;
+    worker->completion_lock = representative->completion_lock;
     const loom_xdna_address_window_t* self_window = loom_xdna_array_load_window(
         context->family, tile->coordinate, tile->coordinate);
     worker->completion_selector =
@@ -821,19 +955,25 @@ static iree_status_t loom_aie2p_native_select(
       return iree_ok_status();
     }
     IREE_RETURN_IF_ERROR(loom_aie2p_native_select_buffer_accesses(
-        context, realization, source, worker, &valid));
+        context, realization->invocations.workers[i].invocation, source, worker,
+        &valid));
     if (!valid) {
       return iree_ok_status();
     }
   }
-  for (iree_host_size_t i = 0; i < realization->resources.channel_count; ++i) {
+  for (iree_host_size_t i = 0; i < realization->invocations.channel_count;
+       ++i) {
     const loom_aie2p_native_channel_t* channel = &context->channels[i];
     if (channel->replay.record_count &&
         (channel->cursor.writer.worker == UINT32_MAX ||
          (context->workers[channel->cursor.writer.worker].execution !=
               LOOM_AIE2P_NATIVE_EXECUTION_DMA &&
           context->workers[channel->cursor.writer.worker].execution !=
-              LOOM_AIE2P_NATIVE_EXECUTION_CONFIGURATION))) {
+              LOOM_AIE2P_NATIVE_EXECUTION_CONFIGURATION &&
+          !(context->workers[channel->cursor.writer.worker].execution ==
+                LOOM_AIE2P_NATIVE_EXECUTION_CORE &&
+            context->pool_tiles[channel->pool_index]->facts->kind ==
+                LOOM_XDNA_TILE_KIND_MEMORY)))) {
       return loom_aie2p_native_reject(
           context, realization->function.op,
           IREE_SV("a DMA-owned ingress for retained FIFO replay"));
@@ -841,6 +981,22 @@ static iree_status_t loom_aie2p_native_select(
   }
   IREE_RETURN_IF_ERROR(
       loom_aie2p_native_select_transfers(context, realization, out_valid));
+  if (!*out_valid) {
+    return iree_ok_status();
+  }
+  for (iree_host_size_t i = realization->resources.strand_count;
+       i < worker_count; ++i) {
+    if (context->workers[i].execution != LOOM_AIE2P_NATIVE_EXECUTION_CORE &&
+        !(context->workers[i].execution ==
+              LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION &&
+          context->workers[i].distribution_phases)) {
+      *out_valid = false;
+      return loom_aie2p_native_reject(
+          context, realization->workers[i].source->declaration,
+          IREE_SV("resident child transport start and retirement"));
+    }
+  }
+  IREE_RETURN_IF_ERROR(loom_aie2p_native_select_joins(context, out_valid));
   if (!*out_valid) {
     return iree_ok_status();
   }

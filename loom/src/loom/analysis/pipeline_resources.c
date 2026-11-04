@@ -109,8 +109,8 @@ static iree_status_t loom_pipeline_resources_select_memory(
 
 iree_status_t loom_pipeline_resources_build(
     loom_module_t* module, loom_func_like_t pipeline,
-    const loom_value_fact_table_t* facts,
-    const loom_pipeline_resource_pool_t* pools, iree_host_size_t pool_count,
+    loom_value_fact_table_t* facts, const loom_pipeline_resource_pool_t* pools,
+    iree_host_size_t pool_count,
     const loom_pipeline_resource_memory_t* memories,
     iree_host_size_t memory_count,
     const loom_pipeline_resource_pool_binding_t* bindings,
@@ -137,8 +137,12 @@ iree_status_t loom_pipeline_resources_build(
   iree_host_size_t channel_capacity = 0;
   loom_pipeline_resource_strand_t* strands = NULL;
   iree_host_size_t strand_capacity = 0;
+  loom_op_t** empty_strands = NULL;
+  iree_host_size_t empty_strand_capacity = 0;
   loom_op_t** compositions = NULL;
   iree_host_size_t composition_capacity = 0;
+  const loom_pipeline_schedule_t** schedules = NULL;
+  iree_host_size_t schedule_capacity = 0;
   loom_pipeline_resource_pool_binding_t* pool_bindings = NULL;
   iree_host_size_t pool_binding_capacity = 0;
   if (binding_count) {
@@ -175,6 +179,13 @@ iree_status_t loom_pipeline_resources_build(
       const loom_region_t* strand_body = loom_pipeline_strand_body(op);
       loom_op_t* call = loom_region_const_entry_block(strand_body)->first_op;
       if (strand_body->block_count == 1 && loom_pipeline_end_isa(call)) {
+        if (resources.empty_strand_count == empty_strand_capacity) {
+          IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+              arena, resources.empty_strand_count,
+              resources.empty_strand_count + 1, sizeof(*empty_strands),
+              &empty_strand_capacity, (void**)&empty_strands));
+        }
+        empty_strands[resources.empty_strand_count++] = op;
         continue;
       }
       if (strand_body->block_count != 1 || !loom_func_call_isa(call) ||
@@ -203,6 +214,22 @@ iree_status_t loom_pipeline_resources_build(
             (void**)&compositions));
       }
       compositions[resources.composition_count++] = op;
+      continue;
+    }
+    if (loom_pipeline_serial_isa(op)) {
+      loom_pipeline_schedule_t* schedule = NULL;
+      bool valid = false;
+      IREE_RETURN_IF_ERROR(loom_pipeline_schedule_build(
+          module, op, facts, diagnostic_emitter, arena, &schedule, &valid));
+      if (!valid) {
+        return iree_ok_status();
+      }
+      if (resources.schedule_count == schedule_capacity) {
+        IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+            arena, resources.schedule_count, resources.schedule_count + 1,
+            sizeof(*schedules), &schedule_capacity, (void**)&schedules));
+      }
+      schedules[resources.schedule_count++] = schedule;
       continue;
     }
     if (op->region_count) {
@@ -316,7 +343,9 @@ iree_status_t loom_pipeline_resources_build(
   }
   resources.channels = channels;
   resources.strands = strands;
+  resources.empty_strands = empty_strands;
   resources.compositions = compositions;
+  resources.schedules = schedules;
   if (resources.pool_binding_count > 1) {
     qsort(pool_bindings, resources.pool_binding_count, sizeof(*pool_bindings),
           loom_pipeline_resources_compare_pool);

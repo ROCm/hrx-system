@@ -1,0 +1,259 @@
+// RUN: pass test.realize-pipeline,symbol-dce,cfg-simplify
+
+// Projection preserves the runtime backedge and original capture ordinals after
+// worker materialization removes the unused parameter before the live one.
+func.decl @record(%value: index)
+
+func.def @worker(%unused: index, %value: index) {
+  func.call @record(%value) : (index)
+  func.return
+}
+
+pipeline.def @phase() run(%value: index, %unused: index) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @worker(%unused, %value) : (index, index)
+  }
+}
+
+pipeline.def public @root() run(%limit: index) {
+  %initial = index.constant 0 : index
+  %step = index.constant 1 : index
+  pipeline.serial {
+    cfg.br ^condition(%initial: index)
+  ^condition(%iteration: index):
+    %more = index.cmp ult, %iteration, %limit : index
+    cfg.cond_br %more, ^body, ^exit
+  ^body:
+    pipeline.compose @phase(%iteration, %limit) : (index, index)
+    %next = index.add %iteration, %step : index
+    cfg.br ^condition(%next: index)
+  ^exit:
+  }
+}
+
+// ----
+func.decl @record(%value: index)
+
+func.def @__pipeline_worker_0(%value: index) {
+  func.call @record(%value) : (index)
+  func.return
+}
+
+func.decl @__test_phase_join(%13: index)
+
+func.decl @__test_phase_enter(%14: index)
+
+func.def inline @__pipeline_engine_0(%15: index) {
+  func.call @__pipeline_worker_0(%15) : (index)
+  func.return
+}
+
+func.def public inline @__pipeline_engine_1(%19: index) {
+  %initial = index.constant 0 : index
+  %step = index.constant 1 : index
+  cfg.br ^_bb1(%initial: index)
+^_bb1(%iteration: index):
+  %more = index.cmp ult, %iteration, %19 : index
+  cfg.cond_br %more, ^_bb2, ^_bb3
+^_bb2:
+  %26 = index.constant 0 : index
+  func.call @__test_phase_enter(%26) : (index)
+  func.call @__pipeline_engine_0(%iteration) : (index)
+  %27 = index.constant 0 : index
+  func.call @__test_phase_join(%27) : (index)
+  %next = index.add %iteration, %step : index
+  cfg.br ^_bb1(%next: index)
+^_bb3:
+  func.return
+}
+
+// ====
+
+// Both engines join every outer phase. Engine 0 also joins the nested serial
+// scope, even though only engine 1 has work inside that scope.
+func.decl @record(%value: index)
+
+func.def @worker(%value: index) {
+  func.call @record(%value) : (index)
+  func.return
+}
+
+pipeline.def @first() run(%value: index) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @worker(%value) : (index)
+  }
+}
+
+pipeline.def @second() run(%value: index) {
+  pipeline.strand workers([1], [1], [1]) {
+    func.call @worker(%value) : (index)
+  }
+}
+
+pipeline.def public @root() run(%value: index) {
+  pipeline.serial {
+    pipeline.compose @first(%value) : (index)
+    pipeline.serial {
+      pipeline.compose @second(%value) : (index)
+    }
+    pipeline.compose @second(%value) : (index)
+  }
+}
+
+// ----
+func.decl @record(%value: index)
+
+func.def @__pipeline_worker_0(%value: index) {
+  func.call @record(%value) : (index)
+  func.return
+}
+
+func.def @__pipeline_worker_1(%value: index) {
+  func.call @record(%value) : (index)
+  func.return
+}
+
+func.def @__pipeline_worker_2(%value: index) {
+  func.call @record(%value) : (index)
+  func.return
+}
+
+func.decl @__test_phase_join(%8: index)
+
+func.decl @__test_phase_enter(%9: index)
+
+func.def inline @__pipeline_engine_0(%10: index) {
+  func.call @__pipeline_worker_2(%10) : (index)
+  func.return
+}
+
+func.def inline @__pipeline_engine_1(%12: index) {
+  func.call @__pipeline_worker_1(%12) : (index)
+  func.return
+}
+
+func.def inline @__pipeline_engine_2(%14: index) {
+  func.call @__pipeline_worker_0(%14) : (index)
+  func.return
+}
+
+func.def public inline @__pipeline_engine_3(%16: index) {
+  %22 = index.constant 0 : index
+  func.call @__test_phase_enter(%22) : (index)
+  func.call @__pipeline_engine_2(%16) : (index)
+  %23 = index.constant 0 : index
+  func.call @__test_phase_join(%23) : (index)
+  %20 = index.constant 0 : index
+  func.call @__test_phase_enter(%20) : (index)
+  %21 = index.constant 0 : index
+  func.call @__test_phase_join(%21) : (index)
+  %18 = index.constant 0 : index
+  func.call @__test_phase_enter(%18) : (index)
+  %19 = index.constant 0 : index
+  func.call @__test_phase_join(%19) : (index)
+  func.return
+}
+
+func.def public inline @__pipeline_engine_4(%24: index) {
+  %32 = index.constant 1 : index
+  func.call @__test_phase_enter(%32) : (index)
+  %33 = index.constant 1 : index
+  func.call @__test_phase_join(%33) : (index)
+  %30 = index.constant 1 : index
+  func.call @__test_phase_enter(%30) : (index)
+  %28 = index.constant 1 : index
+  func.call @__test_phase_enter(%28) : (index)
+  func.call @__pipeline_engine_0(%24) : (index)
+  %29 = index.constant 1 : index
+  func.call @__test_phase_join(%29) : (index)
+  %31 = index.constant 1 : index
+  func.call @__test_phase_join(%31) : (index)
+  %26 = index.constant 1 : index
+  func.call @__test_phase_enter(%26) : (index)
+  func.call @__pipeline_engine_1(%24) : (index)
+  %27 = index.constant 1 : index
+  func.call @__test_phase_join(%27) : (index)
+  func.return
+}
+
+// ====
+// RUN: pass test.realize-pipeline,inline-callables,symbol-dce,cfg-simplify
+
+// Each branch executes one complete phase. Empty strands require no engine,
+// and required helper inlining preserves the branch and its enclosing joins.
+func.def inline @observe(%value: index) {
+  test.use %value : index
+  func.return
+}
+
+pipeline.def @left() run(%value: index) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @observe(%value) : (index)
+  }
+  pipeline.strand workers([1], [1], [1]) {
+  }
+}
+
+pipeline.def @right() run(%value: index) {
+  pipeline.strand workers([1], [1], [1]) {
+    func.call @observe(%value) : (index)
+  }
+}
+
+pipeline.def public @choose() run(%condition: i1, %value: index) {
+  pipeline.strand workers([0], [1], [1]) {
+  }
+  pipeline.serial {
+    cfg.cond_br %condition, ^left, ^right
+  ^left:
+    pipeline.compose @left(%value) : (index)
+    cfg.br ^exit
+  ^right:
+    pipeline.compose @right(%value) : (index)
+    cfg.br ^exit
+  ^exit:
+  }
+}
+
+// ----
+func.decl @__test_phase_join(%7: index)
+
+func.decl @__test_phase_enter(%8: index)
+
+func.def public inline @__pipeline_engine_2(%13: i1, %14: index) {
+  cfg.cond_br %13, ^_bb1, ^_bb2
+^_bb1:
+  %19 = index.constant 0 : index
+  func.call @__test_phase_enter(%19) : (index)
+  test.use %14 : index
+  %20 = index.constant 0 : index
+  func.call @__test_phase_join(%20) : (index)
+  cfg.br ^_bb3
+^_bb2:
+  %17 = index.constant 0 : index
+  func.call @__test_phase_enter(%17) : (index)
+  %18 = index.constant 0 : index
+  func.call @__test_phase_join(%18) : (index)
+  cfg.br ^_bb3
+^_bb3:
+  func.return
+}
+
+func.def public inline @__pipeline_engine_3(%21: i1, %22: index) {
+  cfg.cond_br %21, ^_bb1, ^_bb2
+^_bb1:
+  %27 = index.constant 1 : index
+  func.call @__test_phase_enter(%27) : (index)
+  %28 = index.constant 1 : index
+  func.call @__test_phase_join(%28) : (index)
+  cfg.br ^_bb3
+^_bb2:
+  %25 = index.constant 1 : index
+  func.call @__test_phase_enter(%25) : (index)
+  test.use %22 : index
+  %26 = index.constant 1 : index
+  func.call @__test_phase_join(%26) : (index)
+  cfg.br ^_bb3
+^_bb3:
+  func.return
+}

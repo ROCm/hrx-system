@@ -1,0 +1,121 @@
+// Repeated phases carry one value through three cores. Both inner scopes use
+// the same two-core join, while the outer join includes the output core. Every
+// update contributes to the next recorded value and to the next loop visit.
+aie2p.target<array> @device
+
+pipeline.def @initialize() run(%storage: buffer) {
+  %origin = index.constant 0 : offset
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %value = scalar.constant 1 : i32
+    %local = buffer.view %storage[%origin] : buffer -> view<1xi32>
+    view.store %value, %local[0] : i32, view<1xi32>
+  }
+}
+
+pipeline.def @add() run(%storage: buffer, %amount: index) {
+  %origin = index.constant 0 : offset
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %local = buffer.view %storage[%origin] : buffer -> view<1xi32>
+    %value = view.load %local[0] : view<1xi32> -> i32
+    %increment = index.cast %amount : index to i32
+    %result = scalar.addi %value, %increment : i32
+    view.store %result, %local[0] : i32, view<1xi32>
+  }
+}
+
+pipeline.def @double() run(%storage: buffer) {
+  %origin = index.constant 0 : offset
+  pipeline.strand workers([1, 2], [1, 1], [1, 1]) {
+    %shared = buffer.view %storage[%origin] : buffer -> view<1xi32>
+    %value = view.load %shared[0] : view<1xi32> -> i32
+    %result = scalar.addi %value, %value : i32
+    view.store %result, %shared[0] : i32, view<1xi32>
+  }
+}
+
+pipeline.def @record() run(%storage: buffer, %outgoing: channel<tile<1xi32>>, %output: buffer, %phase: index) {
+  %origin = index.constant 0 : offset
+  %stride = index.constant 4 : offset
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %shared = buffer.view %storage[%origin] : buffer -> view<1xi32>
+    %value = view.load %shared[0] : view<1xi32> -> i32
+    %increment = scalar.constant 17 : i32
+    %result = scalar.addi %value, %increment : i32
+    view.store %result, %shared[0] : i32, view<1xi32>
+    %write, %destination = channel.reserve %outgoing : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+    view.store %result, %destination[0] : i32, view<1xi32>
+    channel.publish %write : write<tile<1xi32>>
+    %read, %payload = channel.acquire %outgoing : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+    %offset = index.scale %phase, %stride : index, offset -> offset
+    %external = buffer.view %output[%offset] : buffer -> view<1xi32>
+    %copy = kernel.async.copy %payload to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<1xi32> to view<1xi32> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<1xi32>>
+  }
+}
+
+pipeline.def<kernel> public retain target(@device) @joined_phases() run(%output_argument: buffer) {
+  %output = buffer.assume.alignment %output_argument {minimum_alignment = 4} : buffer
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %output_memory = pipeline.memory<workgroup>[0, 3] : pool
+  %bytes = index.constant 4 : offset
+  %origin = index.constant 0 : offset
+  %storage = buffer.alloca<workgroup> pool(%memory) align(4) %bytes : buffer
+  %output_storage = buffer.alloca<workgroup> pool(%output_memory) align(4) %bytes : buffer
+  %slots = buffer.view %output_storage[%origin] : buffer -> view<1x1xi32>
+  %begin = index.constant 0 : index
+  %count = index.constant 7 : index
+  %step = index.constant 1 : index
+  %fixed_increment = index.constant 5 : index
+  %outgoing = channel.bind<fifo> %slots, %step : view<1x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.serial {
+    pipeline.compose @initialize(%storage) : (buffer)
+    scf.for %phase = [%begin to %count step %step] {
+      %amount = index.add %phase, %step : index
+      pipeline.serial {
+        pipeline.compose @add(%storage, %amount) : (buffer, index)
+        pipeline.compose @double(%storage) : (buffer)
+      }
+      pipeline.serial {
+        pipeline.compose @add(%storage, %fixed_increment) : (buffer, index)
+        pipeline.compose @double(%storage) : (buffer)
+      }
+      pipeline.compose @record(%storage, %outgoing, %output, %phase) : (buffer, channel<tile<1xi32>>, buffer, index)
+    }
+  }
+}
+
+// The scalar recurrence observes every ordered update. Output padding remains
+// untouched; the complete backing allocation participates in the comparison.
+func.def @reference(%output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %count = index.constant 7 : index
+  %step = index.constant 1 : index
+  %initial = scalar.constant 1 : i32
+  %recurrence_scale = scalar.constant 4 : i32
+  %recurrence_bias = scalar.constant 31 : i32
+  %values = buffer.view %output[%origin] : buffer -> view<7xi32>
+  %final = scf.for %phase = [%begin to %count step %step](%value = %initial : i32) -> (i32) {
+    %iteration = index.cast %phase : index to i32
+    %scaled = scalar.muli %value, %recurrence_scale : i32
+    %phase_term = scalar.muli %iteration, %recurrence_scale : i32
+    %base = scalar.addi %scaled, %phase_term : i32
+    %next = scalar.addi %base, %recurrence_bias : i32
+    view.store %next, %values[%phase] : i32, view<7xi32>
+    scf.yield %next : i32
+  }
+  func.return
+}
+
+check.scenario public @repeated_nested_joins {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(-9999) : tensor<39xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<39xi32> -> tensor<7xi32>
+    check.compare<@joined_phases, @reference>(%output) : (tensor<7xi32>) -> () {
+      check.expect.equal actual(%storage) expected(%storage) : tensor<39xi32>
+    }
+  }
+  check.return
+}

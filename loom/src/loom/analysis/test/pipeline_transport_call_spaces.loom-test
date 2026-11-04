@@ -1,0 +1,438 @@
+// RUN: emit pipeline-transport @test
+
+// A retained Low helper invalidates only workgroup storage. Its address is
+// absent from source reference operands, so the cached callable space bound
+// must survive the ordinary helper boundary.
+test.target<low_core> @target
+
+low.func.def noinline target<test.low.core>(@target) @touch(%address: reg<test.ptr>, %value: reg<test.i32 x4>) asm {
+  test.store.workgroup.v4i32 %address, %value
+  return
+}
+
+func.def @update_input() {
+  %address = scalar.constant 4096 : i64
+  %seed = scalar.constant 7 : i32
+  %value = vector.splat %seed : vector<4xi32>
+  low.invoke @touch(%address, %value) : (i64, vector<4xi32>)
+  func.return
+}
+
+func.def @ingress(%input: buffer, %destination: channel<tile<16xi32>>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  %stride = index.constant 64 : index
+  cfg.br ^header(%begin: index)
+^header(%record: index):
+  %more = index.cmp ult, %record, %end : index
+  cfg.cond_br %more, ^copy, ^done
+^copy:
+  %byte_index = index.mul %record, %stride : index
+  %offset = index.cast %byte_index : index to offset
+  %source = buffer.view %input[%offset] : buffer -> view<16xi32>
+  %write, %payload = channel.reserve %destination : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+  %copy = kernel.async.copy %source to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.publish %write : write<tile<16xi32>>
+  %next = index.add %record, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+func.def @consume(%source: channel<tile<16xi32>>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  cfg.br ^header(%begin: index)
+^header(%record: index):
+  %more = index.cmp ult, %record, %end : index
+  cfg.cond_br %more, ^consume, ^done
+^consume:
+  %read, %payload = channel.acquire %source : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+  func.call @update_input() : ()
+  channel.release %read : read<tile<16xi32>>
+  %next = index.add %record, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def<kernel> public @test() run(%input_argument: buffer, %storage_argument: buffer) {
+  %input_unique, %storage_unique = buffer.assume.noalias %input_argument, %storage_argument : buffer, buffer
+  %input = buffer.assume.memory_space<global> %input_unique : buffer
+  %storage = buffer.assume.memory_space<workgroup> %storage_unique : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 1 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x16xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @ingress(%input, %records) : (buffer, channel<tile<16xi32>>)
+  }
+  pipeline.strand workers([1], [1], [1]) {
+    func.call @consume(%records) : (channel<tile<16xi32>>)
+  }
+}
+
+
+// ----
+worker 0: transport=borrowed-movement execution_counts=exact batches=0 streams=1
+  repetitions=4 sources_stable=yes
+worker 1: transport=unproven execution_counts=exact batches=0 streams=0
+
+// ====
+// RUN: emit pipeline-transport @test
+
+// A retained Low helper invalidates only global storage. Its address is
+// absent from source reference operands, so the cached callable space bound
+// must survive the ordinary helper boundary.
+test.target<low_core> @target
+
+low.func.def noinline target<test.low.core>(@target) @touch(%address: reg<test.ptr>, %value: reg<test.i32 x4>) asm {
+  test.store.global.v4i32 %address, %value
+  return
+}
+
+func.def @update_input() {
+  %address = scalar.constant 4096 : i64
+  %seed = scalar.constant 7 : i32
+  %value = vector.splat %seed : vector<4xi32>
+  low.invoke @touch(%address, %value) : (i64, vector<4xi32>)
+  func.return
+}
+
+func.def @ingress(%input: buffer, %destination: channel<tile<16xi32>>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  %stride = index.constant 64 : index
+  cfg.br ^header(%begin: index)
+^header(%record: index):
+  %more = index.cmp ult, %record, %end : index
+  cfg.cond_br %more, ^copy, ^done
+^copy:
+  %byte_index = index.mul %record, %stride : index
+  %offset = index.cast %byte_index : index to offset
+  %source = buffer.view %input[%offset] : buffer -> view<16xi32>
+  %write, %payload = channel.reserve %destination : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+  %copy = kernel.async.copy %source to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.publish %write : write<tile<16xi32>>
+  %next = index.add %record, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+func.def @consume(%source: channel<tile<16xi32>>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  cfg.br ^header(%begin: index)
+^header(%record: index):
+  %more = index.cmp ult, %record, %end : index
+  cfg.cond_br %more, ^consume, ^done
+^consume:
+  %read, %payload = channel.acquire %source : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+  func.call @update_input() : ()
+  channel.release %read : read<tile<16xi32>>
+  %next = index.add %record, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def<kernel> public @test() run(%input_argument: buffer, %storage_argument: buffer) {
+  %input_unique, %storage_unique = buffer.assume.noalias %input_argument, %storage_argument : buffer, buffer
+  %input = buffer.assume.memory_space<global> %input_unique : buffer
+  %storage = buffer.assume.memory_space<workgroup> %storage_unique : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 1 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x16xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @ingress(%input, %records) : (buffer, channel<tile<16xi32>>)
+  }
+  pipeline.strand workers([1], [1], [1]) {
+    func.call @consume(%records) : (channel<tile<16xi32>>)
+  }
+}
+
+
+// ----
+worker 0: transport=borrowed-movement execution_counts=exact batches=0 streams=1
+  repetitions=4 sources_stable=no
+worker 1: transport=unproven execution_counts=exact batches=0 streams=0
+
+// ====
+// RUN: emit pipeline-transport @test
+
+// A retained Low helper invalidates only private storage. Its address is
+// absent from source reference operands, so the cached callable space bound
+// must survive the ordinary helper boundary.
+test.target<low_core> @target
+
+low.func.def noinline target<test.low.core>(@target) @touch(%address: reg<test.ptr>, %value: reg<test.i32 x4>) asm {
+  test.store.private.v4i32 %address, %value
+  return
+}
+
+func.def @update_input() {
+  %address = scalar.constant 4096 : i64
+  %seed = scalar.constant 7 : i32
+  %value = vector.splat %seed : vector<4xi32>
+  low.invoke @touch(%address, %value) : (i64, vector<4xi32>)
+  func.return
+}
+
+func.def @ingress(%input: buffer, %destination: channel<tile<16xi32>>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  %stride = index.constant 64 : index
+  cfg.br ^header(%begin: index)
+^header(%record: index):
+  %more = index.cmp ult, %record, %end : index
+  cfg.cond_br %more, ^copy, ^done
+^copy:
+  %byte_index = index.mul %record, %stride : index
+  %offset = index.cast %byte_index : index to offset
+  %source = buffer.view %input[%offset] : buffer -> view<16xi32>
+  %write, %payload = channel.reserve %destination : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+  %copy = kernel.async.copy %source to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.publish %write : write<tile<16xi32>>
+  %next = index.add %record, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+func.def @consume(%source: channel<tile<16xi32>>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  cfg.br ^header(%begin: index)
+^header(%record: index):
+  %more = index.cmp ult, %record, %end : index
+  cfg.cond_br %more, ^consume, ^done
+^consume:
+  %read, %payload = channel.acquire %source : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+  func.call @update_input() : ()
+  channel.release %read : read<tile<16xi32>>
+  %next = index.add %record, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def<kernel> public @test() run(%input_argument: buffer, %storage_argument: buffer) {
+  %input_unique, %storage_unique = buffer.assume.noalias %input_argument, %storage_argument : buffer, buffer
+  %input = buffer.assume.memory_space<global> %input_unique : buffer
+  %storage = buffer.assume.memory_space<workgroup> %storage_unique : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 1 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x16xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @ingress(%input, %records) : (buffer, channel<tile<16xi32>>)
+  }
+  pipeline.strand workers([1], [1], [1]) {
+    func.call @consume(%records) : (channel<tile<16xi32>>)
+  }
+}
+
+
+// ----
+worker 0: transport=borrowed-movement execution_counts=exact batches=0 streams=1
+  repetitions=4 sources_stable=yes
+worker 1: transport=unproven execution_counts=exact batches=0 streams=0
+
+// ====
+// RUN: emit pipeline-transport @test
+
+// A Low helper reads memory and changes architectural state. Those effects
+// stay observable without becoming possible writes to the ingress source.
+test.target<low_core> @target
+
+low.func.def noinline target<test.low.core>(@target) @touch(%address: reg<test.ptr>, %value: reg<test.i32 x4>) asm {
+  %loaded = test.load.v4i32 %address
+  test.state.assign.i32.immediate 3
+  return
+}
+
+func.def @update_input() {
+  %address = scalar.constant 4096 : i64
+  %seed = scalar.constant 7 : i32
+  %value = vector.splat %seed : vector<4xi32>
+  low.invoke @touch(%address, %value) : (i64, vector<4xi32>)
+  func.return
+}
+
+func.def @ingress(%input: buffer, %destination: channel<tile<16xi32>>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  %stride = index.constant 64 : index
+  cfg.br ^header(%begin: index)
+^header(%record: index):
+  %more = index.cmp ult, %record, %end : index
+  cfg.cond_br %more, ^copy, ^done
+^copy:
+  %byte_index = index.mul %record, %stride : index
+  %offset = index.cast %byte_index : index to offset
+  %source = buffer.view %input[%offset] : buffer -> view<16xi32>
+  %write, %payload = channel.reserve %destination : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+  %copy = kernel.async.copy %source to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.publish %write : write<tile<16xi32>>
+  %next = index.add %record, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+func.def @consume(%source: channel<tile<16xi32>>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  cfg.br ^header(%begin: index)
+^header(%record: index):
+  %more = index.cmp ult, %record, %end : index
+  cfg.cond_br %more, ^consume, ^done
+^consume:
+  %read, %payload = channel.acquire %source : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+  func.call @update_input() : ()
+  channel.release %read : read<tile<16xi32>>
+  %next = index.add %record, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def<kernel> public @test() run(%input_argument: buffer, %storage_argument: buffer) {
+  %input_unique, %storage_unique = buffer.assume.noalias %input_argument, %storage_argument : buffer, buffer
+  %input = buffer.assume.memory_space<global> %input_unique : buffer
+  %storage = buffer.assume.memory_space<workgroup> %storage_unique : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 1 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x16xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @ingress(%input, %records) : (buffer, channel<tile<16xi32>>)
+  }
+  pipeline.strand workers([1], [1], [1]) {
+    func.call @consume(%records) : (channel<tile<16xi32>>)
+  }
+}
+
+
+// ----
+worker 0: transport=borrowed-movement execution_counts=exact batches=0 streams=1
+  repetitions=4 sources_stable=yes
+worker 1: transport=unproven execution_counts=exact batches=0 streams=0
+
+// ====
+// RUN: emit pipeline-transport @test
+
+// A finite recursive helper path discovers its global write after the
+// recursive edge. A read-only summary already exists when the global write
+// reaches it, so the fixed point must grow the retained invalidation mask.
+test.target<low_core> @target
+
+low.func.def noinline target<test.low.core>(@target) @touch(%address: reg<test.ptr>, %value: reg<test.i32 x4>) asm {
+  test.store.global.v4i32 %address, %value
+  return
+}
+
+low.func.def noinline target<test.low.core>(@target) @observe(%address: reg<test.ptr>) asm {
+  %value = test.load.v4i32 %address
+  return
+}
+
+func.def @recurse(%repeat: i1) {
+  scf.if %repeat {
+    func.call @update_input() : ()
+  }
+  %address = scalar.constant 4096 : i64
+  %seed = scalar.constant 7 : i32
+  %value = vector.splat %seed : vector<4xi32>
+  low.invoke @touch(%address, %value) : (i64, vector<4xi32>)
+  func.return
+}
+
+func.def @update_input() {
+  %address = scalar.constant 4096 : i64
+  low.invoke @observe(%address) : (i64)
+  %again = scalar.constant 0 : i1
+  func.call @recurse(%again) : (i1)
+  func.return
+}
+
+func.def @ingress(%input: buffer, %destination: channel<tile<16xi32>>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  %stride = index.constant 64 : index
+  cfg.br ^header(%begin: index)
+^header(%record: index):
+  %more = index.cmp ult, %record, %end : index
+  cfg.cond_br %more, ^copy, ^done
+^copy:
+  %byte_index = index.mul %record, %stride : index
+  %offset = index.cast %byte_index : index to offset
+  %source = buffer.view %input[%offset] : buffer -> view<16xi32>
+  %write, %payload = channel.reserve %destination : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+  %copy = kernel.async.copy %source to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.publish %write : write<tile<16xi32>>
+  %next = index.add %record, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+func.def @consume(%source: channel<tile<16xi32>>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  cfg.br ^header(%begin: index)
+^header(%record: index):
+  %more = index.cmp ult, %record, %end : index
+  cfg.cond_br %more, ^consume, ^done
+^consume:
+  %read, %payload = channel.acquire %source : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+  func.call @update_input() : ()
+  channel.release %read : read<tile<16xi32>>
+  %next = index.add %record, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def<kernel> public @test() run(%input_argument: buffer, %storage_argument: buffer) {
+  %input_unique, %storage_unique = buffer.assume.noalias %input_argument, %storage_argument : buffer, buffer
+  %input = buffer.assume.memory_space<global> %input_unique : buffer
+  %storage = buffer.assume.memory_space<workgroup> %storage_unique : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 1 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x16xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @ingress(%input, %records) : (buffer, channel<tile<16xi32>>)
+  }
+  pipeline.strand workers([1], [1], [1]) {
+    func.call @consume(%records) : (channel<tile<16xi32>>)
+  }
+}
+
+// ----
+worker 0: transport=borrowed-movement execution_counts=exact batches=0 streams=1
+  repetitions=4 sources_stable=no
+worker 1: transport=unproven execution_counts=exact batches=0 streams=0

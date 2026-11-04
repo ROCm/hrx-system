@@ -84,8 +84,10 @@ typedef struct loom_symbol_reference_occurrence_t {
   loom_symbol_reference_occurrence_id_t next_incoming_occurrence_id;
   // Attribute index on user_op when the occurrence came from an op attribute.
   uint8_t attr_index;
-  // Classified source of the occurrence.
-  uint8_t kind;
+  // Classified source of the occurrence. Shares one byte with its join fact.
+  uint8_t kind : 7;
+  // This composition completes before its enclosing resident schedule advances.
+  uint8_t joins_composition : 1;
   // Compile-time graph role declared by the owning attribute schema.
   loom_symbol_reference_role_t role;
   // Root region slot on the source symbol plus one, or zero for its contract.

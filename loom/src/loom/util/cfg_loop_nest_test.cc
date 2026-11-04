@@ -293,5 +293,76 @@ TEST_F(CfgLoopNestTest, UnreachableBranchesDoNotInvalidateCounts) {
   EXPECT_EQ(counts, (std::vector<uint64_t>{1, 1, 0, 0}));
 }
 
+TEST_F(CfgLoopNestTest, IndependentLoopBoundsSurviveUnknownTrips) {
+  // A finite producer precedes a conditional and an unrelated runtime loop.
+  CfgGraph fixture({{1}, {2, 3}, {1}, {4, 5}, {5}, {6, 7}, {5}, {}});
+  const auto nest = Build(fixture);
+  std::vector<uint64_t> trips(nest.loop_count, UINT64_MAX);
+  trips[loom_cfg_loop_nest_innermost(&nest, 1)] = 16;
+  std::vector<uint64_t> bounds(8);
+  EXPECT_FALSE(loom_cfg_loop_nest_calculate_block_execution_bounds(
+      &nest, trips.data(), bounds.data()));
+  EXPECT_EQ(bounds, (std::vector<uint64_t>{1, 17, 16, 1, 1, UINT64_MAX,
+                                           UINT64_MAX, 1}));
+}
+
+TEST_F(CfgLoopNestTest, ConditionalLoopBodiesHaveBoundsButNotExactCounts) {
+  CfgGraph fixture({{1}, {2, 6}, {3, 4}, {5}, {5}, {1}, {}});
+  const auto nest = Build(fixture);
+  const uint64_t trips = 4;
+  std::vector<uint64_t> bounds(7);
+  EXPECT_FALSE(loom_cfg_loop_nest_calculate_block_execution_bounds(
+      &nest, &trips, bounds.data()));
+  EXPECT_EQ(bounds, (std::vector<uint64_t>{1, 5, 4, 4, 4, 4, 1}));
+}
+
+TEST_F(CfgLoopNestTest, NestedBoundsSaturateAndPreserveZeroTrips) {
+  CfgGraph fixture({{4}, {4}, {5, 1}, {}, {2, 6}, {2}, {3}, {7}});
+  const auto nest = Build(fixture);
+  const auto outer = loom_cfg_loop_nest_innermost(&nest, 4);
+  const auto inner = loom_cfg_loop_nest_innermost(&nest, 2);
+  std::vector<uint64_t> trips(nest.loop_count);
+  std::vector<uint64_t> bounds(8);
+  trips[outer] = 4;
+  trips[inner] = UINT64_MAX;
+  EXPECT_FALSE(loom_cfg_loop_nest_calculate_block_execution_bounds(
+      &nest, trips.data(), bounds.data()));
+  EXPECT_EQ(bounds,
+            (std::vector<uint64_t>{1, 4, UINT64_MAX, 1, 5, UINT64_MAX, 1, 0}));
+  trips[inner] = UINT64_MAX / 2;
+  EXPECT_FALSE(loom_cfg_loop_nest_calculate_block_execution_bounds(
+      &nest, trips.data(), bounds.data()));
+  EXPECT_EQ(bounds,
+            (std::vector<uint64_t>{1, 4, UINT64_MAX, 1, 5, UINT64_MAX, 1, 0}));
+  trips[outer] = 0;
+  trips[inner] = UINT64_MAX;
+  EXPECT_FALSE(loom_cfg_loop_nest_calculate_block_execution_bounds(
+      &nest, trips.data(), bounds.data()));
+  EXPECT_EQ(bounds, (std::vector<uint64_t>{1, 0, 0, 1, 1, 0, 1, 0}));
+}
+
+TEST_F(CfgLoopNestTest, UnsupportedSiblingDoesNotEraseFinitePrefix) {
+  // The second loop has an additional non-header exit.
+  CfgGraph fixture({{1}, {2, 3}, {1}, {4, 6}, {3, 6}, {}, {}});
+  const auto nest = Build(fixture);
+  std::vector<uint64_t> trips(nest.loop_count, 16);
+  std::vector<uint64_t> bounds(7);
+  EXPECT_FALSE(loom_cfg_loop_nest_calculate_block_execution_bounds(
+      &nest, trips.data(), bounds.data()));
+  EXPECT_EQ(bounds,
+            (std::vector<uint64_t>{1, 17, 16, UINT64_MAX, UINT64_MAX, 0, 1}));
+}
+
+TEST_F(CfgLoopNestTest, IrreducibleCyclesKeepOnlyAcyclicBounds) {
+  CfgGraph fixture({{1}, {2, 3}, {3, 4}, {2, 4}, {}});
+  const auto nest = Build(fixture);
+  ASSERT_FALSE(nest.reducible);
+  std::vector<uint64_t> trips(nest.loop_count, 1);
+  std::vector<uint64_t> bounds(5);
+  EXPECT_FALSE(loom_cfg_loop_nest_calculate_block_execution_bounds(
+      &nest, trips.data(), bounds.data()));
+  EXPECT_EQ(bounds, (std::vector<uint64_t>{1, 1, UINT64_MAX, UINT64_MAX, 1}));
+}
+
 }  // namespace
 }  // namespace loom

@@ -121,7 +121,7 @@ static iree_status_t loom_aie2p_native_dma_submit_helper(
     if (external_dynamic) {
       const loom_named_attr_t address_attr = {
           .name_id = code->integer_name,
-          .value = loom_attr_i64(transfer->base_load_address)};
+          .value = loom_attr_i64(transfer->relocation->load_address)};
       loom_value_id_t base, low, high;
       IREE_RETURN_IF_ERROR(loom_aie2p_worker_op(
           code, &builder,
@@ -178,16 +178,21 @@ static iree_status_t loom_aie2p_native_dma_submit_helper(
           ? LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_TASK_QUEUE_START_BD_ID
           : LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_TASK_QUEUE_START_BD_ID;
   loom_value_id_t local_task, shim_task;
+  uint32_t local_bits = loom_xdna_register_field_encode(
+      local_queue, task->local_descriptor->sequence.descriptor);
+  if (path->completion_tokens == 2) {
+    local_bits |= loom_xdna_register_field_encode(
+        path->local->memory_layout->directions[path->ingress ? 1 : 0].token, 1);
+  }
   IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
-      code, &builder,
-      loom_xdna_register_field_encode(
-          local_queue, task->local_descriptor->sequence.descriptor),
-      &local_task));
+      code, &builder, (int32_t)local_bits, &local_task));
   uint32_t shim_bits = loom_xdna_register_field_encode(
       shim_queue, task->shim_descriptor->sequence.descriptor);
-  if (!path->ingress) {
+  if (path->completion_tokens) {
     shim_bits |= loom_xdna_register_field_encode(
-        LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_TASK_QUEUE_ENABLE_TOKEN_ISSUE,
+        path->ingress
+            ? LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_TASK_QUEUE_ENABLE_TOKEN_ISSUE
+            : LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_S2MM_TASK_QUEUE_ENABLE_TOKEN_ISSUE,
         1);
   }
   IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
@@ -217,15 +222,17 @@ static iree_status_t loom_aie2p_native_dma_wait_helper(
   loom_op_t* function;
   IREE_RETURN_IF_ERROR(loom_aie2p_worker_helper(
       code, NULL, 0, NULL, 0, &builder, &task->wait, &function));
-  if (task->path->ingress) {
+  if (!task->path->completion_tokens) {
     IREE_RETURN_IF_ERROR(loom_aie2p_worker_lock(
         code, &builder, AIE2P_CORE_DESCRIPTOR_REF_LOCK_ACQUIRE_IMMEDIATE,
         task->local_descriptor->completion->selector, -1));
   } else {
-    loom_value_id_t completed;
-    IREE_RETURN_IF_ERROR(loom_aie2p_worker_op(
-        code, &builder, AIE2P_CORE_DESCRIPTOR_REF_STREAM_READ_I32, NULL, 0,
-        loom_named_attr_slice_empty(), &code->scalar_type, &completed));
+    for (uint8_t i = 0; i < task->path->completion_tokens; ++i) {
+      loom_value_id_t completed;
+      IREE_RETURN_IF_ERROR(loom_aie2p_worker_op(
+          code, &builder, AIE2P_CORE_DESCRIPTOR_REF_STREAM_READ_I32, NULL, 0,
+          loom_named_attr_slice_empty(), &code->scalar_type, &completed));
+    }
   }
   return loom_aie2p_worker_return(&builder, NULL, 0);
 }
@@ -252,11 +259,15 @@ iree_status_t loom_aie2p_native_emit_transfers(
     for (loom_aie2p_native_transfer_t* transfer = task->first_transfer;
          transfer; transfer = transfer->task_next) {
       if (task->shim_descriptor->address_dynamic) {
-        loom_value_id_t offset;
-        IREE_RETURN_IF_ERROR(loom_view_materialize_offset_expression(
-            builder, &transfer->external_view->begin_byte_offset,
-            LOOM_VALUE_ID_INVALID, transfer->external_view->view_value_id,
-            &offset));
+        loom_value_id_t offset = transfer->external_view->begin_value_id;
+        // Keep the authored address-domain arithmetic and its guarantees when
+        // the view analysis retained a complete offset value.
+        if (offset == LOOM_VALUE_ID_INVALID) {
+          IREE_RETURN_IF_ERROR(loom_view_materialize_offset_expression(
+              builder, &transfer->external_view->begin_byte_offset,
+              LOOM_VALUE_ID_INVALID, transfer->external_view->view_value_id,
+              &offset));
+        }
         loom_builder_set_before(builder, transfer->source->request.op);
         loom_op_t *integer, *narrowed;
         IREE_RETURN_IF_ERROR(loom_index_cast_build(

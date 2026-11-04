@@ -17,7 +17,9 @@ from loom.dialect.pipeline.defs import (
     pipeline_finish,
     pipeline_memory,
     pipeline_ops,
+    pipeline_serial,
     pipeline_strand,
+    pipeline_yield,
 )
 
 __all__ = [
@@ -30,6 +32,8 @@ __all__ = [
     "pipeline_strand",
     "pipeline_end",
     "pipeline_finish",
+    "pipeline_serial",
+    "pipeline_yield",
     "ALL_PIPELINE_OPS",
     "ALL_PIPELINE_TYPES",
 ]

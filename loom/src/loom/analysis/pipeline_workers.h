@@ -9,6 +9,7 @@
 
 #include "loom/analysis/channel_completion.h"
 #include "loom/analysis/kernel_synchronization_legality.h"
+#include "loom/analysis/pipeline_arguments.h"
 #include "loom/analysis/pipeline_resources.h"
 #include "loom/util/cfg_graph.h"
 #include "loom/util/fact_cfg.h"
@@ -16,17 +17,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// Actual channel correspondence at a construction or worker boundary. Storage
-// and protocol identities remain owned by the construction that created them.
-typedef struct loom_pipeline_channel_binding_t {
-  // Value in the receiving source scope.
-  loom_value_id_t value_id;
-  // Construction occurrence owning the channel and its allocation placements.
-  const loom_pipeline_resources_t* resources;
-  // Binding in resources, independent of its storage address or source symbol.
-  const loom_pipeline_resource_channel_t* channel;
-} loom_pipeline_channel_binding_t;
 
 // Specialized authored worker geometry. This is a domain of execution units,
 // not a count of records and not a request to repeat the strand body per
@@ -219,7 +209,7 @@ typedef struct loom_pipeline_worker_t {
   const loom_pipeline_worker_axis_t* axes;
   // Number of worker axes.
   iree_host_size_t rank;
-  // Arena-owned formal channel bindings, in formal argument order.
+  // Arena-owned channel bindings, indexed by ascending formal value ID.
   const loom_pipeline_channel_binding_t* bindings;
   // Number of channel formals in bindings.
   iree_host_size_t binding_count;
@@ -257,10 +247,19 @@ typedef struct loom_pipeline_worker_t {
 // their originating construction instead of being reconstructed from addresses
 // or payload types. callables supplies visible channel-aware helper summaries
 // when such calls survive source inlining; ordinary calls need no summary.
+// is_root identifies the complete resident invocation. A child cannot prove
+// source stability from its own workers: concurrent outer workers can mutate
+// captured storage even when all of the child's channels are local.
 //
 // Each worker receives its own facts and communication plan, even when several
 // strands call the same function. Target selection consumes these results and
 // never rewalks source to recover captures, placement, or protocol membership.
+// functions optionally supplies an independent callable instance per strand;
+// NULL analyzes the original definitions. Instances preserve the source call
+// signature. The realization owner creates them before this analysis, so all
+// facts and selected sites already name the bodies that will be consumed.
+// workers has resources->strand_count entries, supplied by the enclosing
+// inventory owner so worker ordinals span the complete resident invocation.
 // No source mutation occurs. All plans and their domains live in arena, while
 // the module ordinal scratch is available on return. Rejected authored input
 // emits a diagnostic and leaves out_valid false; status carries allocation or
@@ -269,10 +268,11 @@ iree_status_t loom_pipeline_workers_build(
     loom_module_t* module, const loom_pipeline_resources_t* resources,
     const loom_value_fact_table_t* construction_facts,
     const loom_pipeline_channel_binding_t* incoming,
-    iree_host_size_t incoming_count,
+    iree_host_size_t incoming_count, bool is_root,
+    const loom_func_like_t* functions,
     const loom_channel_plan_callable_t* const* callables,
     iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
-    loom_pipeline_worker_t** out_workers, bool* out_valid);
+    loom_pipeline_worker_t* workers, bool* out_valid);
 
 #ifdef __cplusplus
 }  // extern "C"

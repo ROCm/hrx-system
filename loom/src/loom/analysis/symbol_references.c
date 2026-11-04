@@ -14,6 +14,7 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/pipeline/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/template/ops.h"
 #include "loom/util/adaptive_sort.h"
@@ -95,6 +96,8 @@ typedef struct loom_symbol_reference_source_scope_t {
 
   // True when an enclosing structured condition or CFG edge can supply facts.
   bool has_path_condition;
+  // Child compositions complete at their position in this resident schedule.
+  bool serial_schedule;
   // Independent region ordinal plus one, or zero for the owning function.
   loom_symbol_reference_execution_scope_id_t execution_scope;
 } loom_symbol_reference_source_scope_t;
@@ -223,6 +226,9 @@ static iree_status_t loom_symbol_reference_builder_append_occurrence(
       .target_symbol_id = target_symbol_id,
       .target_interfaces = target_interfaces,
       .kind = kind,
+      .joins_composition = source_scope.serial_schedule &&
+                           kind == LOOM_SYMBOL_REFERENCE_OCCURRENCE_CALL &&
+                           loom_pipeline_compose_isa(user_op),
       .role = role,
       .source_root_region_index_plus_one =
           source_scope.root_region_index_plus_one,
@@ -632,12 +638,14 @@ static iree_status_t loom_symbol_reference_visit_region(
         loom_symbol_reference_source_scope_t child_source_scope =
             nested_source_scope;
         child_source_scope.has_path_condition |= loom_scf_if_isa(op);
+        child_source_scope.serial_schedule |= loom_pipeline_serial_isa(op);
         if (op_symbol_id != LOOM_SYMBOL_ID_INVALID) {
           child_source_scope.root_region_index_plus_one = (uint8_t)(i + 1);
         }
         const loom_region_descriptor_t* descriptor =
             loom_op_vtable_region_descriptor(vtable, i);
         if (descriptor && descriptor->execution_target_attr_index_plus_one) {
+          child_source_scope.serial_schedule = false;
           const loom_attribute_t attr = loom_op_const_attrs(
               op)[descriptor->execution_target_attr_index_plus_one - 1];
           if (!loom_attr_is_absent(attr) ||

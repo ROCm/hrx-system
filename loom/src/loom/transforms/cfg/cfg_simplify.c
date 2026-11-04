@@ -84,8 +84,6 @@ typedef struct loom_cfg_simplify_region_stack_t {
 } loom_cfg_simplify_region_stack_t;
 
 typedef struct loom_cfg_simplify_state_t {
-  // Active pass instance for statistics and scratch allocation.
-  loom_pass_t* pass;
   // Typed statistics storage for the current pass invocation.
   loom_cfg_simplify_statistics_t* statistics;
   // Module being rewritten.
@@ -142,7 +140,7 @@ static iree_status_t loom_cfg_simplify_push_child_regions(
   for (uint8_t region_index = 0; region_index < op->region_count;
        ++region_index) {
     IREE_RETURN_IF_ERROR(loom_cfg_simplify_region_stack_push(
-        state->pass->arena, &state->region_stack, regions[region_index]));
+        state->rewriter->arena, &state->region_stack, regions[region_index]));
   }
   return iree_ok_status();
 }
@@ -1829,7 +1827,7 @@ static iree_status_t loom_cfg_simplify_process_function_once(
 
   state->region_stack.count = 0;
   IREE_RETURN_IF_ERROR(loom_cfg_simplify_region_stack_push(
-      state->pass->arena, &state->region_stack, body));
+      state->rewriter->arena, &state->region_stack, body));
   while (true) {
     loom_region_t* region =
         loom_cfg_simplify_region_stack_pop(&state->region_stack);
@@ -1877,34 +1875,35 @@ static iree_status_t loom_cfg_simplify_process_function_once(
   return iree_ok_status();
 }
 
-iree_status_t loom_cfg_simplify_run(loom_pass_t* pass, loom_module_t* module,
-                                    loom_func_like_t function) {
+static iree_status_t loom_cfg_simplify_function_with_statistics(
+    loom_module_t* module, loom_func_like_t function,
+    const loom_target_facts_t* target_facts, iree_arena_allocator_t* arena,
+    loom_pass_value_fact_owner_t* value_facts,
+    loom_cfg_simplify_statistics_t* statistics, bool* out_changed) {
+  *out_changed = false;
   loom_region_t* body = loom_func_like_body(function);
   if (!body) {
     return iree_ok_status();
   }
 
   loom_rewriter_t rewriter = {0};
-  loom_rewriter_initialize(&rewriter, module, pass->arena);
+  loom_rewriter_initialize(&rewriter, module, arena);
   IREE_RETURN_IF_ERROR(loom_rewriter_enable_worklist(&rewriter));
 
   iree_arena_allocator_t analysis_arena = {0};
-  iree_arena_initialize(pass->arena->block_pool, &analysis_arena);
+  iree_arena_initialize(arena->block_pool, &analysis_arena);
 
   loom_cfg_simplify_state_t state = {
-      .pass = pass,
-      .statistics = loom_cfg_simplify_statistics(pass),
+      .statistics = statistics,
       .module = module,
       .rewriter = &rewriter,
       .analysis_arena = &analysis_arena,
   };
 
-  iree_status_t status = loom_cfg_simplify_region_stack_initialize(
-      pass->arena, &state.region_stack);
+  iree_status_t status =
+      loom_cfg_simplify_region_stack_initialize(arena, &state.region_stack);
   loom_pass_value_fact_scope_t fact_scope =
-      loom_pass_value_fact_scope_function_for_target(
-          function,
-          loom_target_function_version_target_facts(pass->function_version));
+      loom_pass_value_fact_scope_function_for_target(function, target_facts);
   loom_value_fact_range_t fact_range = {0};
   if (iree_status_is_ok(status)) {
     status = loom_cfg_simplify_prepare_regions(module, function,
@@ -1912,8 +1911,8 @@ iree_status_t loom_cfg_simplify_run(loom_pass_t* pass, loom_module_t* module,
   }
   loom_value_fact_table_t* fact_table = NULL;
   if (iree_status_is_ok(status)) {
-    status = loom_pass_value_facts_acquire_range(pass, module, fact_scope,
-                                                 fact_range, &fact_table);
+    status = loom_pass_value_fact_owner_acquire_range(
+        value_facts, module, fact_scope, fact_range, &fact_table);
   }
   loom_rewriter_attach_value_facts(&rewriter, fact_table);
   bool changed = true;
@@ -1974,14 +1973,36 @@ iree_status_t loom_cfg_simplify_run(loom_pass_t* pass, loom_module_t* module,
     }
   }
 
-  if (iree_status_is_ok(status) && any_changed) {
-    loom_pass_mark_changed(pass);
-  }
+  *out_changed = any_changed;
   loom_rewriter_deinitialize(&rewriter);
   if (any_changed || !iree_status_is_ok(status)) {
-    loom_pass_value_fact_owner_invalidate(pass->value_facts);
+    loom_pass_value_fact_owner_invalidate(value_facts);
   }
   loom_local_value_domain_release(&state.value_domain);
   iree_arena_deinitialize(&analysis_arena);
   return status;
+}
+
+iree_status_t loom_cfg_simplify_function(
+    loom_module_t* module, loom_func_like_t function,
+    const loom_target_facts_t* target_facts, iree_arena_allocator_t* arena,
+    loom_pass_value_fact_owner_t* value_facts, bool* out_changed) {
+  loom_cfg_simplify_statistics_t statistics = {0};
+  return loom_cfg_simplify_function_with_statistics(
+      module, function, target_facts, arena, value_facts, &statistics,
+      out_changed);
+}
+
+iree_status_t loom_cfg_simplify_run(loom_pass_t* pass, loom_module_t* module,
+                                    loom_func_like_t function) {
+  bool changed = false;
+  IREE_RETURN_IF_ERROR(loom_cfg_simplify_function_with_statistics(
+      module, function,
+      loom_target_function_version_target_facts(pass->function_version),
+      pass->arena, pass->value_facts, loom_cfg_simplify_statistics(pass),
+      &changed));
+  if (changed) {
+    loom_pass_mark_changed(pass);
+  }
+  return iree_ok_status();
 }

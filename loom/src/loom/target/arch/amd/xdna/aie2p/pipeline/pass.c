@@ -47,10 +47,13 @@ const loom_pass_info_t* loom_aie2p_pipeline_lower_pass_info(void) {
 iree_status_t loom_aie2p_pipeline_lower_run(loom_pass_t* pass,
                                             loom_module_t* module,
                                             loom_func_like_t function) {
-  if (!loom_pipeline_def_isa(function.op)) {
+  if (!loom_pipeline_def_isa(function.op) ||
+      !loom_pipeline_def_has_scope(function.op) ||
+      loom_pipeline_def_scope(function.op) != LOOM_PIPELINE_SCOPE_KERNEL) {
     return iree_ok_status();
   }
-
+  // Construction helpers borrow their caller's pools and protocols. The
+  // artifact owner binds and realizes them as children of its one invocation.
   return loom_aie2p_pipeline_realize(pass, module, function);
 }
 

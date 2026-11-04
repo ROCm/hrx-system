@@ -43,6 +43,8 @@ typedef struct PipelineRunCounts {
   int first_target_inlining_ordinal = 0;
   // Lexical pass-run ordinal of preparatory source call inlining.
   int preparatory_target_inlining_ordinal = 0;
+  // Required source inlining after execution realization adds new helpers.
+  int execution_target_inlining_ordinal = 0;
   // Lexical pass-run ordinal of deferred source call completion.
   int resumed_target_inlining_ordinal = 0;
   // Lexical pass-run ordinal of the last target-required call inlining.
@@ -230,8 +232,13 @@ iree_status_t InspectPipelineRun(void* user_data, loom_op_t* op,
           count_context->current_run_ordinal;
     }
     if (iree_string_view_equal(stage, IREE_SV("prepare"))) {
-      counts->preparatory_target_inlining_ordinal =
-          count_context->current_run_ordinal;
+      if (counts->preparatory_target_inlining_ordinal == 0) {
+        counts->preparatory_target_inlining_ordinal =
+            count_context->current_run_ordinal;
+      } else {
+        counts->execution_target_inlining_ordinal =
+            count_context->current_run_ordinal;
+      }
     } else if (iree_string_view_equal(stage, IREE_SV("resume"))) {
       counts->resumed_target_inlining_ordinal =
           count_context->current_run_ordinal;
@@ -458,6 +465,10 @@ TEST_F(TargetPipelineTest, ZeroChecksStillMaterializesAuthoredAssertions) {
             counts.first_scf_to_cfg_ordinal);
   EXPECT_EQ(counts.first_target_inlining_ordinal,
             counts.preparatory_target_inlining_ordinal);
+  EXPECT_LT(counts.worker_outlining_ordinals[1],
+            counts.execution_target_inlining_ordinal);
+  EXPECT_LT(counts.execution_target_inlining_ordinal,
+            counts.boundary_refinement_ordinal);
   EXPECT_LT(counts.preparatory_target_inlining_ordinal,
             counts.first_scf_to_cfg_ordinal);
   EXPECT_LT(counts.first_scf_to_cfg_ordinal,

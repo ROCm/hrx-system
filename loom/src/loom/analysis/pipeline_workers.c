@@ -16,7 +16,6 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/pipeline/ops.h"
-#include "loom/ops/special_values.h"
 #include "loom/ops/type_registry.h"
 #include "loom/util/fact_cfg.h"
 #include "loom/util/fact_extensions.h"
@@ -49,26 +48,6 @@ static bool loom_pipeline_worker_coordinate(
   }
   *out_value = (uint64_t)value;
   return true;
-}
-
-static const loom_pipeline_channel_binding_t*
-loom_pipeline_worker_lookup_incoming(
-    const loom_pipeline_channel_binding_t* incoming,
-    iree_host_size_t incoming_count, loom_value_id_t value_id) {
-  iree_host_size_t begin = 0, end = incoming_count;
-  while (begin < end) {
-    const iree_host_size_t middle = begin + (end - begin) / 2;
-    const loom_pipeline_channel_binding_t* binding = &incoming[middle];
-    if (binding->value_id == value_id) {
-      return binding;
-    }
-    if (binding->value_id < value_id) {
-      begin = middle + 1;
-    } else {
-      end = middle;
-    }
-  }
-  return NULL;
 }
 
 typedef struct loom_pipeline_transport_block_t {
@@ -629,25 +608,28 @@ static iree_status_t loom_pipeline_worker_transport(
 static iree_status_t loom_pipeline_worker_execution_counts(
     loom_module_t* module, iree_arena_allocator_t* arena,
     const loom_value_fact_cfg_region_t* structure,
-    loom_pipeline_worker_t* worker) {
+    loom_pipeline_worker_t* worker, const uint64_t** out_execution_bounds) {
   uint64_t* trip_counts = NULL;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(arena, structure->loops.loop_count,
                                 sizeof(*trip_counts), (void**)&trip_counts));
+  bool exact = true;
   for (iree_host_size_t i = 0; i < structure->loops.loop_count; ++i) {
     const loom_loop_recurrence_facts_t recurrence =
         loom_value_fact_induction_facts(&worker->facts, module,
                                         &structure->inductions[i]);
-    if (recurrence.trip_count_kind != LOOM_LOOP_TRIP_COUNT_EXACT) {
-      return iree_ok_status();
-    }
-    trip_counts[i] = recurrence.trip_count;
+    exact &= recurrence.trip_count_kind == LOOM_LOOP_TRIP_COUNT_EXACT;
+    trip_counts[i] = recurrence.trip_count_kind == LOOM_LOOP_TRIP_COUNT_UNKNOWN
+                         ? UINT64_MAX
+                         : recurrence.trip_count;
   }
   uint64_t* counts;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, structure->graph.block_count, sizeof(*counts), (void**)&counts));
-  if (loom_cfg_loop_nest_calculate_block_execution_counts(
-          &structure->loops, trip_counts, counts)) {
+  exact &= loom_cfg_loop_nest_calculate_block_execution_bounds(
+      &structure->loops, trip_counts, counts);
+  *out_execution_bounds = counts;
+  if (exact) {
     worker->block_execution_counts = counts;
     worker->loop_trip_counts = trip_counts;
   }
@@ -693,27 +675,12 @@ static iree_status_t loom_pipeline_worker_build(
   }
   worker->axes = axes;
   worker->rank = origins.count;
-  const loom_symbol_ref_t callee = loom_func_call_callee(worker->source->call);
-  worker->function = loom_func_like_cast(
-      module, module->symbols.entries[callee.symbol_id].defining_op);
   loom_region_t* body = loom_func_like_body(worker->function);
   if (!body) {
     return loom_pipeline_workers_reject(worker->source->call,
                                         IREE_SV("a visible strand body"),
                                         diagnostic_emitter);
   }
-  const loom_value_slice_t actuals =
-      loom_func_call_operands(worker->source->call);
-  uint16_t formal_count = 0;
-  const loom_value_id_t* formals =
-      loom_func_like_arg_ids(worker->function, &formal_count);
-  loom_pipeline_channel_binding_t* bindings = NULL;
-  loom_channel_plan_binding_t* channel_bindings = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, formal_count, sizeof(*bindings), (void**)&bindings));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, formal_count,
-                                                 sizeof(*channel_bindings),
-                                                 (void**)&channel_bindings));
   IREE_RETURN_IF_ERROR(
       loom_value_fact_table_initialize(&worker->facts, arena, 0));
   worker->facts.context.resolve_type_domain =
@@ -723,75 +690,27 @@ static iree_status_t loom_pipeline_worker_build(
   worker->facts.context.target_facts = loom_value_fact_table_block_target_facts(
       construction_facts,
       loom_region_const_entry_block(loom_pipeline_strand_body(declaration)));
-  // Worker inference may refine argument domains, while the construction's
-  // captured inputs remain immutable for the retained worker analysis.
-  loom_value_fact_table_t* inputs = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate(arena, sizeof(*inputs), (void**)&inputs));
-  IREE_RETURN_IF_ERROR(loom_value_fact_table_initialize(inputs, arena, 0));
-  inputs->context.resolve_type_domain =
-      construction_facts->context.resolve_type_domain;
-  const loom_op_t** literal_captures = NULL;
-  for (uint16_t i = 0; i < formal_count; ++i) {
-    const loom_type_t type = loom_module_value_type(module, formals[i]);
-    loom_value_facts_t facts;
-    IREE_RETURN_IF_ERROR(loom_value_fact_table_clone_fact_for_type(
-        inputs, construction_facts, module, type,
-        loom_value_fact_table_lookup(construction_facts, actuals.values[i]),
-        &facts));
-    IREE_RETURN_IF_ERROR(
-        loom_value_fact_table_define(inputs, formals[i], facts));
-    if (!loom_value_facts_can_materialize_constant(facts, type) &&
-        !loom_type_may_reference_values(type)) {
-      const loom_value_t* actual = loom_module_value(module, actuals.values[i]);
-      const loom_op_t* literal =
-          loom_value_is_block_arg(actual) ? NULL : loom_value_def_op(actual);
-      if (literal &&
-          iree_all_bits_set(literal->traits, LOOM_TRAIT_CONSTANT_LIKE) &&
-          !loom_type_may_reference_values(
-              loom_module_value_type(module, actuals.values[i]))) {
-        if (!literal_captures) {
-          IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-              arena, formal_count, sizeof(*literal_captures),
-              (void**)&literal_captures));
-          memset(literal_captures, 0, formal_count * sizeof(*literal_captures));
-        }
-        literal_captures[i] = literal;
-      }
-    }
-    if (!loom_channel_type_isa(type)) {
-      continue;
-    }
-    loom_pipeline_channel_binding_t binding = {
-        .value_id = formals[i],
-        .resources = resources,
-        .channel = loom_pipeline_resources_lookup_channel(resources,
-                                                          actuals.values[i]),
-    };
-    if (!binding.channel) {
-      const loom_pipeline_channel_binding_t* parent =
-          loom_pipeline_worker_lookup_incoming(incoming, incoming_count,
-                                               actuals.values[i]);
-      if (parent) {
-        binding.resources = parent->resources;
-        binding.channel = parent->channel;
-      }
-    }
-    if (!binding.channel) {
-      return loom_pipeline_workers_reject(
-          worker->source->call,
-          IREE_SV("an incoming channel construction binding"),
-          diagnostic_emitter);
-    }
-    bindings[worker->binding_count] = binding;
-    channel_bindings[worker->binding_count++] = (loom_channel_plan_binding_t){
-        .value_id = formals[i], .channel = &binding.channel->identity};
+  loom_pipeline_arguments_t arguments;
+  bool arguments_valid = false;
+  IREE_RETURN_IF_ERROR(loom_pipeline_arguments_bind(
+      module, worker->source->call, worker->function, resources,
+      construction_facts, incoming, incoming_count, &worker->facts,
+      diagnostic_emitter, arena, &arguments, &arguments_valid));
+  if (!arguments_valid) {
+    return iree_ok_status();
   }
-  worker->bindings = bindings;
-  worker->literal_captures = literal_captures;
-  IREE_RETURN_IF_ERROR(loom_value_fact_table_seed_values(
-      &worker->facts,
-      (loom_value_fact_table_view_t){inputs, formals, formal_count}, module));
+  worker->literal_captures = arguments.literal_captures;
+  worker->bindings = arguments.channels;
+  worker->binding_count = arguments.channel_count;
+  loom_channel_plan_binding_t* channel_bindings = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, worker->binding_count,
+                                                 sizeof(*channel_bindings),
+                                                 (void**)&channel_bindings));
+  for (iree_host_size_t i = 0; i < worker->binding_count; ++i) {
+    channel_bindings[i] = (loom_channel_plan_binding_t){
+        .value_id = worker->bindings[i].value_id,
+        .channel = &worker->bindings[i].channel->identity};
+  }
   IREE_RETURN_IF_ERROR(
       loom_value_fact_table_compute(&worker->facts, module, worker->function));
   const loom_value_fact_cfg_region_t* structure = NULL;
@@ -801,6 +720,7 @@ static iree_status_t loom_pipeline_worker_build(
   IREE_RETURN_IF_ERROR(loom_local_value_domain_acquire_for_region(
       module, body, arena, &worker->value_domain));
   loom_channel_plan_rejection_t rejection;
+  const uint64_t* execution_bounds = NULL;
   iree_status_t status = loom_channel_plan_build(
       &worker->value_domain, channel_bindings, worker->binding_count, callables,
       arena, &worker->channels, &rejection);
@@ -808,7 +728,7 @@ static iree_status_t loom_pipeline_worker_build(
       rejection.kind == LOOM_CHANNEL_PLAN_REJECTION_NONE) {
     if (worker->channels.action_count) {
       status = loom_pipeline_worker_execution_counts(module, arena, structure,
-                                                     worker);
+                                                     worker, &execution_bounds);
     }
   }
   if (iree_status_is_ok(status) &&
@@ -830,9 +750,9 @@ static iree_status_t loom_pipeline_worker_build(
         worker->asynchronous.streams
             ? &worker->asynchronous.movement.view_regions
             : NULL;
-    status = loom_channel_completion_analyze(
-        &worker->channels, worker->graph, view_regions,
-        worker->block_execution_counts, arena, &worker->completion);
+    status = loom_channel_completion_analyze(&worker->channels, worker->graph,
+                                             view_regions, execution_bounds,
+                                             arena, &worker->completion);
   }
   if (iree_status_is_ok(status) &&
       rejection.kind == LOOM_CHANNEL_PLAN_REJECTION_NONE &&
@@ -925,7 +845,8 @@ static iree_status_t loom_pipeline_workers_prove_transport_sources(
     iree_host_size_t incoming_count, iree_arena_allocator_t* arena,
     loom_storage_access_scope_t* storage_access,
     loom_pipeline_worker_t* workers) {
-  if (incoming_count || resources->composition_count) {
+  if (incoming_count || resources->composition_count ||
+      resources->schedule_count) {
     return iree_ok_status();
   }
   bool repeated_transport = false;
@@ -939,6 +860,7 @@ static iree_status_t loom_pipeline_workers_prove_transport_sources(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, resources->strand_count, sizeof(*accesses), (void**)&accesses));
   iree_host_size_t modifying_capacity = 0;
+  loom_memory_space_mask_t unbounded_write_spaces = 0;
   for (iree_host_size_t i = 0; i < resources->strand_count; ++i) {
     loom_pipeline_worker_t* worker = &workers[i];
     loom_movement_analysis_t* movement = &worker->asynchronous.movement;
@@ -957,15 +879,10 @@ static iree_status_t loom_pipeline_workers_prove_transport_sources(
         storage_access, worker->function, &worker->value_domain, &accesses[i]);
     loom_local_value_domain_release(&worker->value_domain);
     IREE_RETURN_IF_ERROR(status);
+    unbounded_write_spaces |= accesses[i]->unbounded_write_spaces;
     for (const loom_storage_access_use_t* use = accesses[i]->uses; use;
          use = use->next_in_function) {
       ++modifying_capacity;
-    }
-    if (accesses[i]->has_unknown_memory_access) {
-      for (const loom_storage_reference_t* reference = accesses[i]->references;
-           reference; reference = reference->next) {
-        ++modifying_capacity;
-      }
     }
   }
   loom_pipeline_storage_reference_t* modifying = NULL;
@@ -986,24 +903,13 @@ static iree_status_t loom_pipeline_workers_prove_transport_sources(
         modifying[modifying_count++] = reference;
       }
     }
-    if (!access->has_unknown_memory_access) {
-      continue;
-    }
-    for (const loom_storage_reference_t* reference = access->references;
-         reference; reference = reference->next) {
-      const loom_pipeline_storage_reference_t storage_reference =
-          loom_pipeline_storage_reference_from_facts(&worker->facts,
-                                                     reference->value_id);
-      if (loom_pipeline_storage_reference_may_modify(LOOM_STORAGE_ACCESS_ESCAPE,
-                                                     &storage_reference)) {
-        modifying[modifying_count++] = storage_reference;
-      }
-    }
   }
   // Closed channel membership and admitted local async streams account for
   // their own accesses and completion. A source is safe to read ahead only
-  // when every other write or unbounded reference use is disjoint by storage
-  // space or by the construction's retained noalias partition.
+  // when every other write or reference escape is disjoint by storage space
+  // or by the construction's retained noalias partition. Unbounded effects
+  // can also reach storage absent from the call operands. Their retained
+  // memory-space bounds exclude disjoint storage without implying purity.
   for (iree_host_size_t i = 0; i < resources->strand_count; ++i) {
     loom_pipeline_worker_t* worker = &workers[i];
     if (!worker->transport.induction) {
@@ -1026,6 +932,15 @@ static iree_status_t loom_pipeline_workers_prove_transport_sources(
           stable = false;
           continue;
         }
+        if (source->memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_CONSTANT) {
+          for (uint32_t space = 0;
+               stable && space < LOOM_VALUE_FACT_MEMORY_SPACE_COUNT_; ++space) {
+            if (unbounded_write_spaces & (1u << space)) {
+              stable = loom_view_memory_spaces_are_disjoint(
+                  source->memory_space, (loom_value_fact_memory_space_t)space);
+            }
+          }
+        }
         for (iree_host_size_t l = 0; stable && l < modifying_count; ++l) {
           stable = !loom_pipeline_storage_references_may_alias(source,
                                                                &modifying[l]);
@@ -1042,19 +957,25 @@ iree_status_t loom_pipeline_workers_build(
     loom_module_t* module, const loom_pipeline_resources_t* resources,
     const loom_value_fact_table_t* construction_facts,
     const loom_pipeline_channel_binding_t* incoming,
-    iree_host_size_t incoming_count,
+    iree_host_size_t incoming_count, bool is_root,
+    const loom_func_like_t* functions,
     const loom_channel_plan_callable_t* const* callables,
     iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
-    loom_pipeline_worker_t** out_workers, bool* out_valid) {
-  *out_workers = NULL;
+    loom_pipeline_worker_t* workers, bool* out_valid) {
   *out_valid = false;
-  loom_pipeline_worker_t* workers = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, resources->strand_count, sizeof(*workers), (void**)&workers));
   loom_storage_access_scope_t storage_access;
   loom_storage_access_scope_initialize(module, arena, &storage_access);
   for (iree_host_size_t i = 0; i < resources->strand_count; ++i) {
-    workers[i] = (loom_pipeline_worker_t){.source = &resources->strands[i]};
+    const loom_pipeline_resource_strand_t* strand = &resources->strands[i];
+    const loom_symbol_ref_t callee = loom_func_call_callee(strand->call);
+    workers[i] = (loom_pipeline_worker_t){
+        .source = strand,
+        .function =
+            functions
+                ? functions[i]
+                : loom_func_like_cast(
+                      module,
+                      module->symbols.entries[callee.symbol_id].defining_op)};
     bool valid = false;
     IREE_RETURN_IF_ERROR(loom_pipeline_worker_build(
         module, resources, construction_facts, incoming, incoming_count,
@@ -1064,9 +985,10 @@ iree_status_t loom_pipeline_workers_build(
       return iree_ok_status();
     }
   }
-  IREE_RETURN_IF_ERROR(loom_pipeline_workers_prove_transport_sources(
-      module, resources, incoming_count, arena, &storage_access, workers));
-  *out_workers = workers;
+  if (is_root) {
+    IREE_RETURN_IF_ERROR(loom_pipeline_workers_prove_transport_sources(
+        module, resources, incoming_count, arena, &storage_access, workers));
+  }
   *out_valid = true;
   return iree_ok_status();
 }

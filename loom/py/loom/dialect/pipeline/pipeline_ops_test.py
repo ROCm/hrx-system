@@ -55,6 +55,22 @@ def test_generic_pipeline_roundtrip() -> None:
     _roundtrip("pipeline.def @generic(%batch: index) run(%input: buffer) {\n}\n")
 
 
+def test_serial_composition_roundtrip() -> None:
+    _roundtrip(
+        """pipeline.decl @stage() run(%state: buffer)
+
+pipeline.def @ordered() run(%state: buffer) {
+  pipeline.serial {
+    pipeline.compose @stage(%state) : (buffer)
+    pipeline.serial {
+      pipeline.compose @stage(%state) : (buffer)
+    }
+  }
+}
+"""
+    )
+
+
 @pytest.mark.parametrize("scope", ["", "<kernel>"])
 def test_pipeline_declaration_roundtrip(scope: str) -> None:
     _roundtrip(f"pipeline.decl{scope} @stage(%width: index) run(%input: channel<tile<[%width]xi32>>)\n")

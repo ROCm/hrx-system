@@ -1,0 +1,239 @@
+// RUN: pass inline-callables,canonicalize
+
+// The same child composes concurrently outside the schedule and completes at
+// each call inside it. Neither repeated calls nor loop iterations lose their
+// child boundary; runtime control stays in the resident schedule.
+func.decl @write_state(%state: buffer, %iteration: index)
+
+pipeline.def @child() run(%state: buffer, %iteration: index) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @write_state(%state, %iteration) : (buffer, index)
+  }
+}
+
+pipeline.def public @ordered() run(%state: buffer, %count: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  pipeline.compose @child(%state, %begin) : (buffer, index)
+  pipeline.serial {
+    scf.for %iteration = [%begin to %count step %step] {
+      pipeline.compose @child(%state, %iteration) : (buffer, index)
+      pipeline.serial {
+        pipeline.compose @child(%state, %iteration) : (buffer, index)
+      }
+    }
+  }
+  pipeline.compose @child(%state, %count) : (buffer, index)
+}
+
+// ----
+func.decl @write_state(%state: buffer, %iteration: index)
+
+pipeline.def @child() run(%state: buffer, %iteration: index) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @write_state(%state, %iteration) : (buffer, index)
+  }
+}
+
+pipeline.def public @ordered() run(%state: buffer, %count: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @write_state(%state, %begin) : (buffer, index)
+  }
+  pipeline.serial {
+    scf.for %iteration = [%begin to %count step %step] {
+      pipeline.compose @child(%state, %iteration) : (buffer, index)
+      pipeline.serial {
+        pipeline.compose @child(%state, %iteration) : (buffer, index)
+      }
+    }
+  }
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @write_state(%state, %count) : (buffer, index)
+  }
+}
+
+// ====
+// RUN: pass scf-to-cfg,inline-callables,cfg-simplify
+
+// Converting runtime control to CFG preserves the phase boundary on every
+// iteration and exit. The loop is not replicated into static child instances.
+func.decl @write_state(%state: buffer, %iteration: index)
+
+pipeline.def @child() run(%state: buffer, %iteration: index) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @write_state(%state, %iteration) : (buffer, index)
+  }
+}
+
+pipeline.def public @repeat() run(%state: buffer, %count: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  pipeline.serial {
+    scf.for %iteration = [%begin to %count step %step] {
+      pipeline.compose @child(%state, %iteration) : (buffer, index)
+    }
+  }
+}
+
+// ----
+func.decl @write_state(%state: buffer, %iteration: index)
+
+pipeline.def @child() run(%state: buffer, %iteration: index) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @write_state(%state, %iteration) : (buffer, index)
+  }
+}
+
+pipeline.def public @repeat() run(%state: buffer, %count: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  pipeline.serial {
+    cfg.br ^_bb1(%begin: index)
+  ^_bb1(%9: index):
+    %11 = index.cmp slt, %9, %count : index
+    cfg.cond_br %11, ^_bb2, ^_bb3
+  ^_bb2:
+    %iteration = index.assume %9 [range(%9, 0, 9223372036854775806), lt(%9, %count)] : index
+    pipeline.compose @child(%state, %iteration) : (buffer, index)
+    %12 = index.add %iteration, %step : index
+    cfg.br ^_bb1(%12: index)
+  ^_bb3:
+  }
+}
+
+// ====
+// RUN: pass inline-callables,canonicalize,inline-callables,canonicalize
+
+// A construction helper is instantiated in both ordering contexts. Its child
+// must survive until the helper's placement is known; ordinary helper inlining
+// cannot flatten a serial phase into independent strands.
+func.decl @write_state(%state: buffer)
+
+pipeline.def @child() run(%state: buffer) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @write_state(%state) : (buffer)
+  }
+}
+
+func.def inline @construct(%state: buffer) {
+  pipeline.compose @child(%state) : (buffer)
+  func.return
+}
+
+pipeline.def public @contexts() run(%state: buffer) {
+  func.call @construct(%state) : (buffer)
+  pipeline.serial {
+    func.call @construct(%state) : (buffer)
+  }
+}
+
+// ----
+func.decl @write_state(%state: buffer)
+
+pipeline.def @child() run(%state: buffer) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @write_state(%state) : (buffer)
+  }
+}
+
+pipeline.def public @contexts() run(%state: buffer) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @write_state(%state) : (buffer)
+  }
+  pipeline.serial {
+    pipeline.compose @child(%state) : (buffer)
+  }
+}
+
+// ====
+// RUN: pass inline-callables,canonicalize,inline-callables,canonicalize
+
+// A serial child can itself contain concurrent compositions. Its internal
+// siblings flatten together while the parent retains their complete phase.
+func.decl @write_state(%state: buffer)
+
+pipeline.def @leaf() run(%state: buffer) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @write_state(%state) : (buffer)
+  }
+}
+
+pipeline.def @pair() run(%left: buffer, %right: buffer) {
+  pipeline.compose @leaf(%left) : (buffer)
+  pipeline.compose @leaf(%right) : (buffer)
+}
+
+pipeline.def public @phases() run(%left: buffer, %right: buffer) {
+  pipeline.serial {
+    pipeline.compose @pair(%left, %right) : (buffer, buffer)
+    pipeline.compose @pair(%right, %left) : (buffer, buffer)
+  }
+}
+
+// ----
+func.decl @write_state(%state: buffer)
+
+pipeline.def @pair() run(%left: buffer, %right: buffer) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @write_state(%left) : (buffer)
+  }
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @write_state(%right) : (buffer)
+  }
+}
+
+pipeline.def public @phases() run(%left: buffer, %right: buffer) {
+  pipeline.serial {
+    pipeline.compose @pair(%left, %right) : (buffer, buffer)
+    pipeline.compose @pair(%right, %left) : (buffer, buffer)
+  }
+}
+
+// ====
+// RUN: pass select-templates{rewrite=inline},inline-callables,canonicalize
+
+// Template expansion supplies the same deferred construction context as an
+// ordinary helper; applicability is independent of its eventual phase.
+func.decl @write_state(%state: buffer)
+
+pipeline.def @child() run(%state: buffer) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @write_state(%state) : (buffer)
+  }
+}
+
+template.decl @construct(%state: buffer)
+
+template.def<@construct> @construct_impl(%state: buffer) {
+  pipeline.compose @child(%state) : (buffer)
+  template.return
+}
+
+pipeline.def public @phases() run(%state: buffer) {
+  template.apply<@construct>(%state) : (buffer)
+  pipeline.serial {
+    template.apply<@construct>(%state) : (buffer)
+  }
+}
+
+// ----
+func.decl @write_state(%state: buffer)
+
+pipeline.def @child() run(%state: buffer) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @write_state(%state) : (buffer)
+  }
+}
+
+template.decl @construct(%state: buffer)
+
+pipeline.def public @phases() run(%state: buffer) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @write_state(%state) : (buffer)
+  }
+  pipeline.serial {
+    pipeline.compose @child(%state) : (buffer)
+  }
+}

@@ -2136,6 +2136,23 @@ TEST_LOW_STORE_V4I32_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.SIDE_EFFECTING,),
 )
 
+# Distinct storage spaces exercise the same write contract independently of a
+# physical target's address width, instruction spelling, or register classes.
+TEST_LOW_SCOPED_STORE_V4I32_DESCRIPTORS = tuple(
+    replace(
+        TEST_LOW_STORE_V4I32_DESCRIPTOR,
+        key=f"test.store.{name}.v4i32",
+        mnemonic=f"test.store.{name}.v4i32",
+        semantic_tag=f"memory.store.{name}.v128",
+        effects=(replace(_STORE_EFFECT, memory_space=space),),
+    )
+    for name, space in (
+        ("global", MemorySpace.GLOBAL),
+        ("workgroup", MemorySpace.WORKGROUP),
+        ("private", MemorySpace.STACK),
+    )
+)
+
 TEST_LOW_LEASED_CONSUME_I32_DESCRIPTOR = Descriptor(
     key="test.leased.consume.i32",
     mnemonic="test.leased.consume.i32",
@@ -3025,6 +3042,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_SCHEDULE_ALTERNATIVE_B_I32_DESCRIPTOR,
         TEST_LOW_CONST_ISSUED_I32_DESCRIPTOR,
         TEST_LOW_PACKING_EARLY_EXPAND_DESCRIPTOR,
+        *TEST_LOW_SCOPED_STORE_V4I32_DESCRIPTORS,
     ),
 )
 

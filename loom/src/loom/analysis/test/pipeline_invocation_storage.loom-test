@@ -1,0 +1,49 @@
+// RUN: emit pipeline-invocations @test
+
+// Both calls allocate a fresh local root and protocol from the same pool.
+// Their imported storage retains the root placement through a second child.
+// Equal source IDs in the two local constructions must not alias placements.
+pipeline.def @leaf() run(%local: channel<tile<1xi32>>, %shared: channel<tile<1xi32>>) {
+}
+
+pipeline.def @phase() run(%memory: pool, %shared_storage: view<1x1xi32>) {
+  %bytes = index.constant 64 : offset
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 1 : index
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x1xi32>
+  %local = channel.bind<fifo> %slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %shared = channel.bind<fifo> %shared_storage, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.compose @leaf(%local, %shared) : (channel<tile<1xi32>>, channel<tile<1xi32>>)
+}
+
+pipeline.def public @test() run(%memory: pool) {
+  %bytes = index.constant 64 : offset
+  %origin = index.constant 0 : offset
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x1xi32>
+  pipeline.serial {
+    pipeline.compose @phase(%memory, %slots) : (pool, view<1x1xi32>)
+    pipeline.compose @phase(%memory, %slots) : (pool, view<1x1xi32>)
+  }
+}
+
+// ----
+inventory invocations=5 workers=0 channels=4
+  protocol 0 = 1:%local pool=0 offset=64 bytes=64
+  protocol 1 = 1:%shared pool=0 offset=0 bytes=64
+  protocol 2 = 3:%local pool=0 offset=128 bytes=64
+  protocol 3 = 3:%shared pool=0 offset=0 bytes=64
+invocation 0 @test strands=0 channels=0
+  joined block=0 step=0
+invocation 1 @phase strands=0 channels=2
+  concurrent 0
+invocation 2 @leaf strands=0 channels=0
+  channel %local = 1:%local capacity=1 inventory=0
+  channel %shared = 1:%shared capacity=1 inventory=1
+  joined block=0 step=1
+invocation 3 @phase strands=0 channels=2
+  concurrent 0
+invocation 4 @leaf strands=0 channels=0
+  channel %local = 3:%local capacity=1 inventory=2
+  channel %shared = 3:%shared capacity=1 inventory=3

@@ -713,6 +713,12 @@ static iree_status_t loom_target_pipeline_build_execution_cleanup(
     loom_builder_t* builder, void* user_data) {
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_run(builder, IREE_SV("symbol-dce")));
+  // Execution realization introduces ordinary helper boundaries after the
+  // initial source inlining pass. Consume required source calls before private
+  // storage promotion and target resource legalization make those boundaries
+  // physical. Callable exits retain the same staged completion contract.
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_inline_callables(builder, IREE_SV("prepare")));
   // Realized channel endpoints introduce ordinary source expressions and CFG
   // forwarding edges after initial normalization. Normalize them under their
   // worker target contexts before target legalization selects native packets.

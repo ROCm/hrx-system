@@ -1,0 +1,301 @@
+// RUN: emit pipeline-transport @test
+
+// The two outer schedules are concurrent. Calls within each schedule have
+// complete child lifetimes, even when they reference the same definition.
+pipeline.decl @stage() run(%state: buffer, %iteration: index)
+
+pipeline.def<kernel> public @test() run(%state: buffer, %first: index, %second: index) {
+  pipeline.serial {
+    pipeline.compose @stage(%state, %first) : (buffer, index)
+    pipeline.compose @stage(%state, %second) : (buffer, index)
+  }
+  pipeline.serial {
+    pipeline.compose @stage(%state, %second) : (buffer, index)
+  }
+}
+
+// ----
+concurrent serial scopes=2
+schedule: blocks=1 loops=0 single_child_choice=no
+  block 0: successors=
+    compose @stage arguments=%state,%first
+    compose @stage arguments=%state,%second
+    yield
+schedule: blocks=1 loops=0 single_child_choice=yes
+  block 0: successors=
+    compose @stage arguments=%state,%second
+    yield
+
+// ====
+
+// Runtime recurrence and nested completion remain in the canonical CFG. The
+// layer argument is passed at each visit instead of specializing child code.
+pipeline.decl @normalize() run(%state: buffer, %layer: index)
+
+pipeline.decl @project() run(%state: buffer, %layer: index)
+
+pipeline.def<kernel> public @test() run(%state: buffer, %count: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  pipeline.serial {
+    cfg.br ^header(%begin: index)
+  ^header(%layer: index):
+    %more = index.cmp ult, %layer, %count : index
+    cfg.cond_br %more, ^body, ^done
+  ^body:
+    pipeline.compose @normalize(%state, %layer) : (buffer, index)
+    pipeline.serial {
+      pipeline.compose @project(%state, %layer) : (buffer, index)
+    }
+    %next = index.add %layer, %step : index
+    cfg.br ^header(%next: index)
+  ^done:
+  }
+}
+
+// ----
+concurrent serial scopes=1
+schedule: blocks=4 loops=1 single_child_choice=no
+  block 0: successors=1
+    branch
+  block 1: successors=2,3
+    dataflow
+    branch
+  block 2: successors=1
+    compose @normalize arguments=%state,%layer
+    serial
+      schedule: blocks=1 loops=0 single_child_choice=yes
+        block 0: successors=
+          compose @project arguments=%state,%layer
+          yield
+    dataflow
+    branch
+  block 3: successors=
+    yield
+
+// ====
+
+// Conditional child construction keeps its resource births with the selected
+// block. Each child call borrows the FIFO created in the selected scope.
+pipeline.decl @fill() run(%channel: channel<tile<16xi32>>)
+
+pipeline.decl @drain() run(%channel: channel<tile<16xi32>>)
+
+pipeline.def<kernel> public @test() run(%enabled: i1) {
+  pipeline.serial {
+    cfg.cond_br %enabled, ^active, ^done
+  ^active:
+    %memory = pipeline.memory<workgroup>[0] : pool
+    %bytes = index.constant 64 : offset
+    %origin = index.constant 0 : offset
+    %capacity = index.constant 1 : index
+    %storage = buffer.alloca<workgroup> pool(%memory) align(64) %bytes : buffer
+    %slots = buffer.view %storage[%origin] : buffer -> view<1x16xi32>
+    %channel = channel.bind<fifo> %slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+    pipeline.compose @fill(%channel) : (channel<tile<16xi32>>)
+    pipeline.compose @drain(%channel) : (channel<tile<16xi32>>)
+    cfg.br ^done
+  ^done:
+  }
+}
+
+// ----
+concurrent serial scopes=1
+schedule: blocks=3 loops=0 single_child_choice=no
+  block 0: successors=1,2
+    branch
+  block 1: successors=2
+    memory
+    dataflow
+    dataflow
+    dataflow
+    allocation
+    dataflow
+    channel
+    compose @fill arguments=%channel
+    compose @drain arguments=%channel
+    branch
+  block 2: successors=
+    yield
+
+// ====
+
+// Memory effects require a child execution placement, rather than an implicit
+// processor that executes source construction on behalf of every worker.
+func.decl @update(%state: buffer)
+
+pipeline.def<kernel> public @test() run(%state: buffer) {
+  pipeline.serial {
+    // ERROR@+1: LOWERING/066 {requirement="an execution placement for construction effects"}
+    func.call @update(%state) : (buffer)
+  }
+}
+
+// ====
+
+// Both paths select at most one child. The empty path and a diamond with
+// distinct children preserve their choice across start and retirement.
+pipeline.decl @first() run(%value: index)
+
+pipeline.decl @second() run(%value: index)
+
+pipeline.def<kernel> public @test() run(%enabled: i1, %value: index) {
+  pipeline.serial {
+    cfg.cond_br %enabled, ^active, ^done
+  ^active:
+    pipeline.compose @first(%value) : (index)
+    cfg.br ^done
+  ^done:
+  }
+  pipeline.serial {
+    cfg.cond_br %enabled, ^left, ^right
+  ^left:
+    pipeline.compose @first(%value) : (index)
+    cfg.br ^done
+  ^right:
+    %increment = index.constant 1 : index
+    %next = index.add %value, %increment : index
+    pipeline.compose @second(%next) : (index)
+    cfg.br ^done
+  ^done:
+  }
+}
+
+// ----
+concurrent serial scopes=2
+schedule: blocks=3 loops=0 single_child_choice=yes
+  block 0: successors=1,2
+    branch
+  block 1: successors=2
+    compose @first arguments=%value
+    branch
+  block 2: successors=
+    yield
+schedule: blocks=4 loops=0 single_child_choice=yes
+  block 0: successors=1,2
+    branch
+  block 1: successors=3
+    compose @first arguments=%value
+    branch
+  block 2: successors=3
+    dataflow
+    dataflow
+    compose @second arguments=%next
+    branch
+  block 3: successors=
+    yield
+
+// ====
+
+// The longest path crosses an intermediate completion even though the other
+// branch reaches only the final child.
+pipeline.decl @stage() run(%value: index)
+
+pipeline.def<kernel> public @test() run(%enabled: i1, %value: index) {
+  pipeline.serial {
+    cfg.cond_br %enabled, ^active, ^done
+  ^active:
+    pipeline.compose @stage(%value) : (index)
+    cfg.br ^done
+  ^done:
+    pipeline.compose @stage(%value) : (index)
+  }
+}
+
+// ----
+concurrent serial scopes=1
+schedule: blocks=3 loops=0 single_child_choice=no
+  block 0: successors=1,2
+    branch
+  block 1: successors=2
+    compose @stage arguments=%value
+    branch
+  block 2: successors=
+    compose @stage arguments=%value
+    yield
+
+// ====
+
+// A single static child site in a loop can run more than once. Its completions
+// cannot all be moved after the parent's work.
+pipeline.decl @stage() run(%value: index)
+
+pipeline.def<kernel> public @test() run(%count: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  pipeline.serial {
+    cfg.br ^header(%begin: index)
+  ^header(%iteration: index):
+    %more = index.cmp ult, %iteration, %count : index
+    cfg.cond_br %more, ^body, ^done
+  ^body:
+    pipeline.compose @stage(%iteration) : (index)
+    %next = index.add %iteration, %step : index
+    cfg.br ^header(%next: index)
+  ^done:
+  }
+}
+
+// ----
+concurrent serial scopes=1
+schedule: blocks=4 loops=1 single_child_choice=no
+  block 0: successors=1
+    branch
+  block 1: successors=2,3
+    dataflow
+    branch
+  block 2: successors=1
+    compose @stage arguments=%iteration
+    dataflow
+    branch
+  block 3: successors=
+    yield
+
+// ====
+
+// A nested scope owns its own completion, even when it contains one child.
+pipeline.decl @stage() run(%value: index)
+
+pipeline.def<kernel> public @test() run(%value: index) {
+  pipeline.serial {
+    pipeline.serial {
+      pipeline.compose @stage(%value) : (index)
+    }
+  }
+}
+
+// ----
+concurrent serial scopes=1
+schedule: blocks=1 loops=0 single_child_choice=no
+  block 0: successors=
+    serial
+      schedule: blocks=1 loops=0 single_child_choice=yes
+        block 0: successors=
+          compose @stage arguments=%value
+          yield
+    yield
+
+// ====
+
+// A child-local resource must retain one identity across the child's lifetime;
+// separate start and retirement projections cannot construct it twice.
+pipeline.decl @stage() run(%state: buffer)
+
+pipeline.def<kernel> public @test() run() {
+  pipeline.serial {
+    %memory = pipeline.memory<workgroup>[0] : pool
+    %bytes = index.constant 64 : offset
+    %storage = buffer.alloca<workgroup> pool(%memory) align(64) %bytes : buffer
+    pipeline.compose @stage(%storage) : (buffer)
+  }
+}
+
+// ----
+concurrent serial scopes=1
+schedule: blocks=1 loops=0 single_child_choice=no
+  block 0: successors=
+    memory
+    dataflow
+    allocation
+    compose @stage arguments=%storage
+    yield

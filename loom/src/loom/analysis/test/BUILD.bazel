@@ -19,8 +19,16 @@ loom_check_test_suite(
 loom_check_test_suite(
     name = "pipeline_transport_test",
     srcs = [
+        "pipeline_admissions.loom-test",
+        "pipeline_invocation_stability.loom-test",
+        "pipeline_invocation_storage.loom-test",
+        "pipeline_invocation_workers.loom-test",
+        "pipeline_invocations.loom-test",
+        "pipeline_schedule.loom-test",
         "pipeline_transport.loom-test",
+        "pipeline_transport_call_spaces.loom-test",
         "pipeline_transport_control.loom-test",
         "pipeline_transport_replay.loom-test",
+        "pipeline_transport_stability.loom-test",
     ],
 )

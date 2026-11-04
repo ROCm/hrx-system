@@ -166,6 +166,6 @@ low.func.def inline target<amd.xdna.aie2p.core>(@core_target) @copy_and_advance(
 }
 
 // ----
-.text.__pipeline_worker_1: hardware_loops=2
+.text.__aie2p_worker_helper_8: hardware_loops=2
   loop 0: iterations=8 count_start_coissued=true end_setup_next=true start_aligned=true start_after_setup=true end_aligned=true end_on_bundle=true end_group_full_width=true setup_distance_valid=true trailing_nop_bundles=0 body_control=0
   loop 1: iterations=8 count_start_coissued=true end_setup_next=true start_aligned=true start_after_setup=true end_aligned=true end_on_bundle=true end_group_full_width=true setup_distance_valid=true trailing_nop_bundles=0 body_control=0

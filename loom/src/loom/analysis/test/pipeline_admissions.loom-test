@@ -1,0 +1,120 @@
+// RUN: emit pipeline-transport @test admissions
+
+// A variable consumer does not erase an independent finite publication bound.
+func.def @worker(%output: channel<tile<1xi32>>, %input: channel<tile<1xi32>>, %choose: i1, %runtime: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %batch_size = index.constant 16 : index
+  %limit = index.add %runtime, %c0 : index
+  cfg.br ^fill_header(%c0: index)
+^fill_header(%record: index):
+  %fill = index.cmp ult, %record, %batch_size : index
+  cfg.cond_br %fill, ^fill, ^choose
+^fill:
+  %write, %destination = channel.reserve %output : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  channel.publish %write : write<tile<1xi32>>
+  %next_record = index.add %record, %c1 : index
+  cfg.br ^fill_header(%next_record: index)
+^choose:
+  cfg.cond_br %choose, ^optional, ^consume_entry
+^optional:
+  %optional, %optional_payload = channel.acquire %input : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+  channel.release %optional : read<tile<1xi32>>
+  cfg.br ^consume_entry
+^consume_entry:
+  cfg.br ^consume_header(%c0: index)
+^consume_header(%position: index):
+  %consume = index.cmp ult, %position, %limit : index
+  cfg.cond_br %consume, ^consume, ^done
+^consume:
+  %read, %payload = channel.acquire %input : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+  channel.release %read : read<tile<1xi32>>
+  %next_position = index.add %position, %c1 : index
+  cfg.br ^consume_header(%next_position: index)
+^done:
+  func.return
+}
+
+pipeline.def public @test() run(%storage_argument: buffer, %choose: i1, %limit: index) {
+  %storage = buffer.assume.memory_space<workgroup> %storage_argument : buffer
+  %c0 = index.constant 0 : offset
+  %second = index.constant 64 : offset
+  %capacity = index.constant 16 : index
+  %output_slots = buffer.view %storage[%c0] : buffer -> view<16x1xi32>
+  %input_slots = buffer.view %storage[%second] : buffer -> view<16x1xi32>
+  %output = channel.bind<fifo> %output_slots, %capacity : view<16x1xi32>, index -> channel<tile<1xi32>>
+  %input = channel.bind<fifo> %input_slots, %capacity : view<16x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @worker(%output, %input, %choose, %limit) : (channel<tile<1xi32>>, channel<tile<1xi32>>, i1, index)
+  }
+}
+
+// ----
+worker 0: transport=unproven execution_counts=unknown batches=0 streams=0
+  channel.reserve %output: maximum_admissions=16
+  channel.publish %output: maximum_admissions=16
+  channel.acquire %input: maximum_admissions=4294967295
+  channel.release %input: maximum_admissions=4294967295
+  channel.acquire %input: maximum_admissions=4294967295
+  channel.release %input: maximum_admissions=4294967295
+
+// ====
+// RUN: emit pipeline-transport @test admissions
+
+// A bounded consumer retains a five-admission upper bound without qualifying exact DMA execution.
+func.def @worker(%output: channel<tile<1xi32>>, %input: channel<tile<1xi32>>, %choose: i1, %runtime: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %batch_size = index.constant 16 : index
+  %limit = index.assume %runtime [range(%runtime, 0, 4)] : index
+  cfg.br ^fill_header(%c0: index)
+^fill_header(%record: index):
+  %fill = index.cmp ult, %record, %batch_size : index
+  cfg.cond_br %fill, ^fill, ^choose
+^fill:
+  %write, %destination = channel.reserve %output : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  channel.publish %write : write<tile<1xi32>>
+  %next_record = index.add %record, %c1 : index
+  cfg.br ^fill_header(%next_record: index)
+^choose:
+  cfg.cond_br %choose, ^optional, ^consume_entry
+^optional:
+  %optional, %optional_payload = channel.acquire %input : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+  channel.release %optional : read<tile<1xi32>>
+  cfg.br ^consume_entry
+^consume_entry:
+  cfg.br ^consume_header(%c0: index)
+^consume_header(%position: index):
+  %consume = index.cmp ult, %position, %limit : index
+  cfg.cond_br %consume, ^consume, ^done
+^consume:
+  %read, %payload = channel.acquire %input : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+  channel.release %read : read<tile<1xi32>>
+  %next_position = index.add %position, %c1 : index
+  cfg.br ^consume_header(%next_position: index)
+^done:
+  func.return
+}
+
+pipeline.def public @test() run(%storage_argument: buffer, %choose: i1, %limit: index) {
+  %storage = buffer.assume.memory_space<workgroup> %storage_argument : buffer
+  %c0 = index.constant 0 : offset
+  %second = index.constant 64 : offset
+  %capacity = index.constant 16 : index
+  %output_slots = buffer.view %storage[%c0] : buffer -> view<16x1xi32>
+  %input_slots = buffer.view %storage[%second] : buffer -> view<16x1xi32>
+  %output = channel.bind<fifo> %output_slots, %capacity : view<16x1xi32>, index -> channel<tile<1xi32>>
+  %input = channel.bind<fifo> %input_slots, %capacity : view<16x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @worker(%output, %input, %choose, %limit) : (channel<tile<1xi32>>, channel<tile<1xi32>>, i1, index)
+  }
+}
+
+// ----
+worker 0: transport=unproven execution_counts=unknown batches=0 streams=0
+  channel.reserve %output: maximum_admissions=16
+  channel.publish %output: maximum_admissions=16
+  channel.acquire %input: maximum_admissions=5
+  channel.release %input: maximum_admissions=5
+  channel.acquire %input: maximum_admissions=5
+  channel.release %input: maximum_admissions=5

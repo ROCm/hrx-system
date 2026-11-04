@@ -84,10 +84,14 @@ typedef struct loom_aie2p_native_memory_layout_t {
   struct {
     // Channel reset control.
     loom_xdna_register_field_id_t reset;
+    // Packet identity receiving task completion tokens.
+    loom_xdna_register_field_id_t controller;
     // Task head descriptor ordinal.
     loom_xdna_register_field_id_t start;
     // Task execution count minus one.
     loom_xdna_register_field_id_t repeat;
+    // Request a completion token after the entire queued task retires.
+    loom_xdna_register_field_id_t token;
     // Completion-poll fields: queue size, running, and four stall flags.
     loom_xdna_register_field_id_t status[6];
   } directions[2];

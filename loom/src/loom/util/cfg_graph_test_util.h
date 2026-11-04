@@ -15,7 +15,7 @@
 
 namespace loom::testing {
 
-// Adjacency, DFS and entry-reachability fixture for graph-only analysis APIs.
+// Adjacency, DFS, SCC and entry-reachability fixture for graph-only analyses.
 // Authored IR and extraction contracts are exercised by loom-check fixtures.
 class CfgGraph {
  public:
@@ -24,6 +24,7 @@ class CfgGraph {
     std::vector<std::vector<uint32_t>> incoming(blocks_.size());
     for (size_t i = 0; i < blocks_.size(); ++i) {
       auto& block = blocks_[i];
+      block.component = UINT16_MAX;
       block.preorder = UINT16_MAX;
       block.parent = UINT16_MAX;
       block.successor_start = successor_indices_.size();
@@ -78,6 +79,39 @@ class CfgGraph {
         }
       }
       std::reverse(reverse_postorder_.begin(), reverse_postorder_.end());
+    }
+    // The reverse-graph traversal completes the same SCC contract as the
+    // production graph builder, independently of its Tarjan implementation.
+    uint16_t component_count = 0;
+    for (uint16_t root : reverse_postorder_) {
+      if (blocks_[root].component != UINT16_MAX) {
+        continue;
+      }
+      std::vector<uint16_t> members{root};
+      blocks_[root].component = component_count;
+      for (size_t i = 0; i < members.size(); ++i) {
+        for (uint32_t edge : incoming[members[i]]) {
+          uint16_t predecessor = edges_[edge].source_block_index;
+          if (blocks_[predecessor].reachable &&
+              blocks_[predecessor].component == UINT16_MAX) {
+            blocks_[predecessor].component = component_count;
+            members.push_back(predecessor);
+          }
+        }
+      }
+      const bool cyclic =
+          members.size() > 1 ||
+          std::find(successors[root].begin(), successors[root].end(), root) !=
+              successors[root].end();
+      for (uint16_t member : members) {
+        blocks_[member].component_is_cyclic = cyclic;
+      }
+      ++component_count;
+    }
+    for (auto& block : blocks_) {
+      if (block.reachable) {
+        block.component = component_count - block.component - 1;
+      }
     }
     graph_.blocks = blocks_.data();
     graph_.block_count = blocks_.size();
