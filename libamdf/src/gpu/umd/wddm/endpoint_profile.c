@@ -13,6 +13,7 @@
 #include "libamdf/src/gpu/umd/wddm/wkmi/endpoint_properties.h"
 #include "libamdf/src/host_memory.h"
 #include "libamdf/src/platform/windows/endpoint.h"
+#include "libamdf/src/platform/windows/endpoint_properties.h"
 
 amdf_status_t amdf_gpu_umd_create_endpoint_profile(
     amdf_platform_endpoint_t* platform_endpoint,
@@ -26,10 +27,19 @@ amdf_status_t amdf_gpu_umd_create_endpoint_profile(
   amdf_status_t status =
       amdf_gpu_wddm_wkmi_loader_initialize(host_allocator, &loader);
   if (amdf_status_is_ok(status)) {
+    LUID adapter_luid;
+    uint32_t physical_adapter_index = 0;
+    amdf_windows_endpoint_id_decode(&platform_endpoint->id, &adapter_luid,
+                                    &physical_adapter_index);
+    const amdf_dxg_bridge_gpu_adapter_open_info_t open_info = {
+        .structure_size = sizeof(open_info),
+        .adapter_handle = (uint32_t)platform_endpoint->adapter,
+        .physical_adapter_index = physical_adapter_index,
+        .adapter_luid = ((uint64_t)(uint32_t)adapter_luid.HighPart << 32) |
+                        adapter_luid.LowPart,
+    };
     status = amdf_gpu_wddm_wkmi_adapter_initialize(
-        &loader, platform_endpoint->adapter,
-        platform_endpoint->physical_adapter_index, host_allocator, &adapter,
-        &provider_properties);
+        &loader, &open_info, host_allocator, &adapter, &provider_properties);
     if (status == amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
       status = AMDF_STATUS_OK;
     }

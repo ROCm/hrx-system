@@ -97,25 +97,26 @@ amdf_dxg_bridge_result_t GpuAdapterOpenImpl(
 }
 
 amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL
-GpuAdapterOpen(uint32_t adapter_handle, uint32_t physical_adapter_index,
+GpuAdapterOpen(const amdf_dxg_bridge_gpu_adapter_open_info_t* open_info,
                const amdf_allocator_t* host_allocator,
                amdf_dxg_bridge_gpu_adapter_t** out_adapter,
                amdf_dxg_bridge_gpu_properties_t* out_properties,
                uint32_t* out_native_status) noexcept {
-  if (adapter_handle == 0 || host_allocator == nullptr ||
+  if (open_info == nullptr || open_info->structure_size < sizeof(*open_info) ||
+      open_info->adapter_handle == 0 || host_allocator == nullptr ||
       host_allocator->allocate == nullptr || host_allocator->free == nullptr ||
       out_adapter == nullptr || out_properties == nullptr ||
       out_native_status == nullptr) {
     return AMDF_DXG_BRIDGE_RESULT_INVALID_ARGUMENT;
   }
   *out_native_status = 0;
-  if (physical_adapter_index != 0) {
+  if (open_info->physical_adapter_index != 0) {
     return AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED;
   }
 
   try {
-    return GpuAdapterOpenImpl(adapter_handle, *host_allocator, out_adapter,
-                              out_properties, out_native_status);
+    return GpuAdapterOpenImpl(open_info->adapter_handle, *host_allocator,
+                              out_adapter, out_properties, out_native_status);
   } catch (const std::bad_alloc&) {
     return AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED;
   } catch (...) {
@@ -178,7 +179,7 @@ GpuClockSample(amdf_dxg_bridge_gpu_adapter_t* adapter, uint32_t adapter_handle,
 
 const amdf_dxg_bridge_api_t kBridgeApi = {
     sizeof(amdf_dxg_bridge_api_t),
-    AMDF_DXG_BRIDGE_ABI_VERSION_11,
+    AMDF_DXG_BRIDGE_ABI_VERSION_12,
     GpuAdapterOpen,
     GpuAdapterClose,
     amdf::wkmi_bridge::GpuAllocationQueryLayout,
@@ -198,8 +199,8 @@ amdf_dxg_bridge_query_api(uint32_t minimum_version, uint32_t maximum_version,
   if (out_api == nullptr) {
     return AMDF_DXG_BRIDGE_RESULT_INVALID_ARGUMENT;
   }
-  if (minimum_version > AMDF_DXG_BRIDGE_ABI_VERSION_11 ||
-      maximum_version < AMDF_DXG_BRIDGE_ABI_VERSION_11) {
+  if (minimum_version > AMDF_DXG_BRIDGE_ABI_VERSION_12 ||
+      maximum_version < AMDF_DXG_BRIDGE_ABI_VERSION_12) {
     return AMDF_DXG_BRIDGE_RESULT_VERSION_MISMATCH;
   }
   *out_api = &kBridgeApi;

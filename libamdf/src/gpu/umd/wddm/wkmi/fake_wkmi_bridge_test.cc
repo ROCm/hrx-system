@@ -31,15 +31,17 @@ struct FakeBridgeState {
 FakeBridgeState state;
 
 amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL
-GpuAdapterOpen(uint32_t adapter_handle, uint32_t physical_adapter_index,
+GpuAdapterOpen(const amdf_dxg_bridge_gpu_adapter_open_info_t* open_info,
                const amdf_allocator_t* host_allocator,
                amdf_dxg_bridge_gpu_adapter_t** out_adapter,
                amdf_dxg_bridge_gpu_properties_t* out_properties,
                uint32_t* out_native_status) {
-  if (adapter_handle == 0 || physical_adapter_index != 0 ||
-      host_allocator == nullptr || host_allocator->allocate == nullptr ||
-      host_allocator->free == nullptr || out_adapter == nullptr ||
-      out_properties == nullptr || out_native_status == nullptr) {
+  if (open_info == nullptr || open_info->structure_size < sizeof(*open_info) ||
+      open_info->adapter_handle == 0 ||
+      open_info->physical_adapter_index != 0 || host_allocator == nullptr ||
+      host_allocator->allocate == nullptr || host_allocator->free == nullptr ||
+      out_adapter == nullptr || out_properties == nullptr ||
+      out_native_status == nullptr) {
     return AMDF_DXG_BRIDGE_RESULT_INVALID_ARGUMENT;
   }
   amdf_dxg_bridge_gpu_properties_t properties = {};
@@ -125,7 +127,7 @@ GpuClockSample(amdf_dxg_bridge_gpu_adapter_t*, uint32_t, uint32_t,
 
 amdf_dxg_bridge_api_t api = {
     sizeof(amdf_dxg_bridge_api_t),
-    AMDF_DXG_BRIDGE_ABI_VERSION_11,
+    AMDF_DXG_BRIDGE_ABI_VERSION_12,
     GpuAdapterOpen,
     GpuAdapterClose,
     GpuAllocationQueryLayout,

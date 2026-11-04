@@ -148,6 +148,7 @@ amdf_cc_library(
         "//libamdf/src/gpu/umd/wddm/wkmi:adapter",
         "//libamdf/src/gpu/umd/wddm/wkmi:endpoint_properties",
         "//libamdf/src/platform/windows:endpoint",
+        "//libamdf/src/platform/windows:endpoint_properties",
     ],
 )
 

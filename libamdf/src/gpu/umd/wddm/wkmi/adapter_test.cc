@@ -40,9 +40,16 @@ TEST(WkmiAdapterTest, FailedInitializationLeavesOutputsUnchanged) {
   amdf_dxg_bridge_gpu_properties_t properties = {};
   properties.gfx_ip_major = 99;
   const amdf_dxg_bridge_gpu_properties_t sentinel_properties = properties;
+  const amdf_dxg_bridge_gpu_adapter_open_info_t open_info = {
+      sizeof(amdf_dxg_bridge_gpu_adapter_open_info_t),
+      0x08,
+      0x09,
+      0,
+      0x0123456789ABCDEF,
+  };
 
   EXPECT_EQ(amdf_status_code(amdf_gpu_wddm_wkmi_adapter_initialize(
-                &loader, 0x08, 0, host_allocator, &adapter, &properties)),
+                &loader, &open_info, host_allocator, &adapter, &properties)),
             AMDF_STATUS_CODE_VERSION_MISMATCH);
   EXPECT_EQ(adapter.api, sentinel_adapter.api);
   EXPECT_EQ(adapter.native, sentinel_adapter.native);
@@ -53,7 +60,7 @@ TEST(WkmiAdapterTest, FailedInitializationLeavesOutputsUnchanged) {
   adapter = {};
   properties = {};
   ASSERT_EQ(amdf_gpu_wddm_wkmi_adapter_initialize(
-                &loader, 0x08, 0, host_allocator, &adapter, &properties),
+                &loader, &open_info, host_allocator, &adapter, &properties),
             AMDF_STATUS_OK);
   EXPECT_NE(adapter.api, nullptr);
   EXPECT_NE(adapter.native, nullptr);

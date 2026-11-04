@@ -55,8 +55,11 @@ extern "C" {
 // GPU properties include the native platform AtomicOps route guarantee.
 #define AMDF_DXG_BRIDGE_ABI_VERSION_11 11u
 
+// Adapter opening consumes the complete native adapter identity.
+#define AMDF_DXG_BRIDGE_ABI_VERSION_12 12u
+
 // Most recent private bridge ABI version described by this header.
-#define AMDF_DXG_BRIDGE_ABI_VERSION_LATEST AMDF_DXG_BRIDGE_ABI_VERSION_11
+#define AMDF_DXG_BRIDGE_ABI_VERSION_LATEST AMDF_DXG_BRIDGE_ABI_VERSION_12
 
 // Result of one bridge operation.
 typedef uint32_t amdf_dxg_bridge_result_t;
@@ -85,6 +88,28 @@ enum amdf_dxg_bridge_result_e {
 
 // Opaque parsed adapter state retained entirely inside the bridge.
 typedef struct amdf_dxg_bridge_gpu_adapter_t amdf_dxg_bridge_gpu_adapter_t;
+
+// Native identity used to open one physical GPU adapter.
+typedef struct amdf_dxg_bridge_gpu_adapter_open_info_t {
+  // Must be at least the size of this structure.
+  uint32_t structure_size;
+  // Live native adapter handle.
+  uint32_t adapter_handle;
+  // Live logical device handle, or zero when the provider does not require it.
+  uint32_t device_handle;
+  // Physical adapter represented by the native handles.
+  uint32_t physical_adapter_index;
+  // Exact DXGI adapter LUID, low word first.
+  uint64_t adapter_luid;
+} amdf_dxg_bridge_gpu_adapter_open_info_t;
+
+#ifdef __cplusplus
+static_assert(sizeof(amdf_dxg_bridge_gpu_adapter_open_info_t) == 24,
+              "DXG adapter open ABI must remain stable");
+#else
+_Static_assert(sizeof(amdf_dxg_bridge_gpu_adapter_open_info_t) == 24,
+               "DXG adapter open ABI must remain stable");
+#endif
 
 // Complete engine clock tuple returned by KMT calibration.
 typedef struct amdf_dxg_bridge_gpu_clock_sample_t {
@@ -271,8 +296,8 @@ typedef struct amdf_dxg_bridge_api_t {
 
   // Parses and retains one physical GPU adapter.
   //
-  // |adapter_handle| is a live D3DKMT adapter handle and
-  // |physical_adapter_index| selects one physical adapter represented by it.
+  // |open_info| carries the native adapter identity required by the selected
+  // private provider.
   // |host_allocator| is copied into the adapter and must remain callable until
   // adapter close succeeds.
   // Success publishes the adapter and properties. Every other result leaves
@@ -280,7 +305,7 @@ typedef struct amdf_dxg_bridge_api_t {
   // |out_native_status| receives the NTSTATUS only for
   // AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE and is zero otherwise.
   amdf_dxg_bridge_result_t(AMDF_DXG_BRIDGE_CALL* gpu_adapter_open)(
-      uint32_t adapter_handle, uint32_t physical_adapter_index,
+      const amdf_dxg_bridge_gpu_adapter_open_info_t* open_info,
       const amdf_allocator_t* host_allocator,
       amdf_dxg_bridge_gpu_adapter_t** out_adapter,
       amdf_dxg_bridge_gpu_properties_t* out_properties,

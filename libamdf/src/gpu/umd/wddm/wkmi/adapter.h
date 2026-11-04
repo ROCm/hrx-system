@@ -30,9 +30,9 @@ typedef struct amdf_gpu_wddm_wkmi_adapter_t {
 // Parses one physical GPU adapter through |loader|. Failure leaves both output
 // structures unchanged and creates no native adapter ownership.
 amdf_status_t amdf_gpu_wddm_wkmi_adapter_initialize(
-    const amdf_gpu_wddm_wkmi_loader_t* loader, D3DKMT_HANDLE adapter,
-    uint32_t physical_adapter_index, amdf_allocator_t host_allocator,
-    amdf_gpu_wddm_wkmi_adapter_t* out_adapter,
+    const amdf_gpu_wddm_wkmi_loader_t* loader,
+    const amdf_dxg_bridge_gpu_adapter_open_info_t* open_info,
+    amdf_allocator_t host_allocator, amdf_gpu_wddm_wkmi_adapter_t* out_adapter,
     amdf_dxg_bridge_gpu_properties_t* out_properties);
 
 // Releases parsed state after every dependent bridge object is gone.

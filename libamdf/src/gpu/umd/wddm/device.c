@@ -98,9 +98,14 @@ amdf_status_t amdf_gpu_umd_device_create(
   status = amdf_gpu_wddm_wkmi_loader_initialize(host_allocator,
                                                 &device->wkmi_loader);
   if (amdf_status_is_ok(status)) {
+    const amdf_dxg_bridge_gpu_adapter_open_info_t open_info = {
+        .structure_size = sizeof(open_info),
+        .adapter_handle = (uint32_t)endpoint->adapter,
+        .physical_adapter_index = endpoint->physical_adapter_index,
+        .adapter_luid = device->adapter_luid,
+    };
     status = amdf_gpu_wddm_wkmi_adapter_initialize(
-        &device->wkmi_loader, endpoint->adapter,
-        endpoint->physical_adapter_index, host_allocator, &device->wkmi_adapter,
+        &device->wkmi_loader, &open_info, host_allocator, &device->wkmi_adapter,
         &device->properties);
   }
   if (amdf_status_is_ok(status)) {
