@@ -409,7 +409,7 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_emit_plan(
     const iree_hal_amd_fabric_memory_storage_t* storage,
     iree_hal_pool_placement_t placement,
     const iree_hal_amd_fabric_slab_pool_query_t* query,
-    const amdf_memory_profile_t* profile,
+    const amdf_memory_profile_t* profile, uint64_t physical_capacity,
     const iree_hal_amd_fabric_import_route_t* imports,
     const amdf_memory_access_capabilities_t* profile_capabilities) {
   iree_hal_memory_type_t memory_type = storage->memory_type;
@@ -711,6 +711,7 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_emit_plan(
               .atomic_accesses = atomic_accesses,
               .exports = query->options->owned.exports,
           },
+      .physical_capacity = physical_capacity,
       .import_count = query->options->imports.class_count,
       .imports = import_routes,
       .binding_count = binding_count,
@@ -1165,14 +1166,14 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query_storage(
   if (supported && iree_status_is_ok(status)) {
     if (query->options->owned.mode == IREE_HAL_SLAB_POOL_IMPORT_ONLY) {
       status = iree_hal_amd_fabric_slab_pool_emit_plan(
-          owner, storage, placement, query, NULL, imports,
+          owner, storage, placement, query, NULL, 0, imports,
           profile_capabilities);
     } else {
       for (uint32_t p = 0; p < profile_count && iree_status_is_ok(status);
            ++p) {
         status = iree_hal_amd_fabric_slab_pool_emit_plan(
-            owner, storage, placement, query, &profiles[p], imports,
-            profile_capabilities);
+            owner, storage, placement, query, &profiles[p],
+            scope_info.capacity_byte_length, imports, profile_capabilities);
       }
     }
   }

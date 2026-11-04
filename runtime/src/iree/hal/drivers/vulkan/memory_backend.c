@@ -518,6 +518,10 @@ static iree_status_t iree_hal_vulkan_slab_pool_query_owner(
         .syms = backend->syms,
         .logical_device = backend->logical_device,
         .memory_type_index = i,
+        .physical_capacity =
+            options->owned.mode == IREE_HAL_SLAB_POOL_IMPORT_ONLY
+                ? 0
+                : memory->memoryHeaps[memory->memoryTypes[i].heapIndex].size,
         .import_memory_type_bits = import_memory_type_bits,
         .memory_type = memory_type,
         .supported_usage = native_usage | mapping_usage,

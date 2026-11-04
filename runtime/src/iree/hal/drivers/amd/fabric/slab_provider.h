@@ -52,6 +52,8 @@ typedef struct iree_hal_amd_fabric_slab_provider_options_t {
   uint32_t trace_ordinal;
   // Qualified construction policy; the provider copies the access array.
   iree_hal_amd_fabric_memory_options_t memory;
+  // Physical capacity of the selected native scope in bytes; zero if unknown.
+  uint64_t physical_capacity;
   // Optional distinct import access set, with memory.access_count entries.
   // ASAN-owned alias preparation must not constrain external registrations.
   const amdf_memory_device_access_t* import_accesses;

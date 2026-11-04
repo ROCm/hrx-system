@@ -69,6 +69,8 @@ struct FakeNative {
     amdf_status_t profile_status = AMDF_STATUS_OK;
     // Cached prerequisites for the allocation, import, and placement profiles.
     std::array<amdf_status_t, 3> profile_availability = {};
+    // Physical domain size independent of its allocation profile limits.
+    uint64_t physical_capacity = 0;
   };
 
   FakeNative() {
@@ -142,6 +144,7 @@ struct FakeNative {
                          ? AMDF_MEMORY_SCOPE_KIND_LOCAL
                          : AMDF_MEMORY_SCOPE_KIND_SYSTEM;
     out_info->memory_profile_count = self->ProfileCount(storage);
+    out_info->capacity_byte_length = storage->physical_capacity;
     return AMDF_STATUS_OK;
   }
 

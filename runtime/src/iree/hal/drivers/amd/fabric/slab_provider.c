@@ -295,6 +295,7 @@ iree_status_t iree_hal_amd_fabric_slab_provider_create(
       .memory_type = options->memory_type,
       .supported_usage = options->supported_usage,
       .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+      .physical_capacity = owned ? options->physical_capacity : 0,
       .max_allocation_size =
           owned
               ? options->memory.profile.allocation.maximum_byte_length /
@@ -713,6 +714,7 @@ static iree_status_t iree_hal_amd_fabric_slab_provider_import_slab(
       out_import->slab.physical_backing_id = storage->physical_backing_id;
     }
     out_import->properties = provider->properties;
+    out_import->properties.physical_capacity = 0;
     out_import->properties.allocation_alignment = handle->memory.info.alignment;
     out_import->properties.max_allocation_alignment =
         handle->memory.info.alignment;

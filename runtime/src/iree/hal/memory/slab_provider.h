@@ -38,6 +38,11 @@ typedef struct iree_hal_slab_provider_properties_t {
   // containing logical device.
   iree_hal_queue_family_affinity_t queue_family_affinity;
 
+  // Physical capacity in bytes of the domain supplying owned slabs, or zero
+  // when unknown. Shared by all users of that domain; not free memory, a pool
+  // budget, or an allocation guarantee. External attachments report zero.
+  uint64_t physical_capacity;
+
   // Largest individual owned slab extent, or zero when no limit is known.
   // Imported storage is governed by its separately admitted external class.
   iree_device_size_t max_allocation_size;

@@ -6,11 +6,29 @@
 
 #include "iree/hal/memory/slab_provider.h"
 
+#include "iree/base/internal/memory.h"
 #include "iree/hal/memory/cpu_slab_provider.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
 namespace {
+
+TEST(SlabProviderTest, HostSourcesReportPhysicalCapacityWithoutAcquisition) {
+  const uint64_t physical_capacity = iree_memory_query_physical_capacity();
+  for (bool shared : {false, true}) {
+    SCOPED_TRACE(shared);
+    iree_hal_slab_provider_t* provider = nullptr;
+    IREE_ASSERT_OK(shared ? iree_hal_shared_slab_provider_create(
+                                iree_allocator_system(), &provider)
+                          : iree_hal_cpu_slab_provider_create(
+                                0, iree_allocator_system(), &provider));
+    iree_hal_slab_provider_properties_t properties;
+    iree_hal_slab_provider_query_properties(provider, &properties);
+    EXPECT_EQ(properties.physical_capacity, physical_capacity);
+    EXPECT_EQ(properties.max_allocation_size, 0u);
+    iree_hal_slab_provider_release(provider);
+  }
+}
 
 static iree_hal_asan_pool_options_t ShadowOptions() {
   iree_hal_asan_pool_options_t options = {
@@ -113,6 +131,7 @@ TEST(SlabProviderTest, CPUImportPreservesSourceFactsWithoutInventingGeometry) {
     IREE_ASSERT_OK(
         iree_hal_slab_provider_import_slab(provider, &storage, &imported));
     EXPECT_EQ(imported.slab.base_ptr, bytes + 64);
+    EXPECT_EQ(imported.properties.physical_capacity, 0u);
     EXPECT_EQ(imported.slab.native_allocation.byte_length, 0u);
     EXPECT_EQ(imported.slab.native_allocation.byte_offset, 0u);
     EXPECT_EQ(imported.slab.native_allocation.granularity, 0u);

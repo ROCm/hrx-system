@@ -131,6 +131,9 @@ TEST_P(AmdgpuSlabPoolTest, CapturesExactFamiliesWithoutPayload) {
   iree_hal_pool_query_stats(source, &stats);
   EXPECT_EQ(stats.reserve_count, 0u);
   EXPECT_EQ(stats.bytes_committed, 0u);
+  iree_hal_pool_capabilities_t capabilities;
+  iree_hal_pool_query_capabilities(source, &capabilities);
+  EXPECT_GT(capabilities.physical_capacity, 0u);
   EXPECT_EQ(iree_hal_pool_query_host_access(source).access,
             IREE_HAL_MEMORY_ACCESS_NONE);
   for (size_t i = 0; i < queues_.size(); ++i) {

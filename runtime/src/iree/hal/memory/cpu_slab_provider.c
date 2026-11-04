@@ -6,6 +6,7 @@
 
 #include "iree/hal/memory/cpu_slab_provider.h"
 
+#include "iree/base/internal/memory.h"
 #include "iree/hal/memory/tracing.h"
 
 #if defined(IREE_PLATFORM_LINUX)
@@ -17,6 +18,9 @@ typedef struct iree_hal_cpu_slab_provider_t {
   iree_hal_slab_provider_t base;
   // Process-owned system backing, without a native NUMA placement guarantee.
   iree_hal_memory_trace_t trace;
+
+  // System physical capacity captured during provider construction.
+  uint64_t physical_capacity;
 
   // Minimum absolute byte alignment of every slab allocation.
   iree_host_size_t allocation_alignment;
@@ -44,6 +48,7 @@ iree_status_t iree_hal_cpu_slab_provider_create(
                                              (void**)&provider));
   iree_hal_slab_provider_initialize(&iree_hal_cpu_slab_provider_vtable,
                                     host_allocator, &provider->base);
+  provider->physical_capacity = iree_memory_query_physical_capacity();
   provider->allocation_alignment =
       iree_max(min_alignment, IREE_HAL_HEAP_BUFFER_ALIGNMENT);
   iree_status_t status = iree_hal_memory_trace_initialize(
@@ -278,6 +283,7 @@ static void iree_hal_cpu_slab_provider_query_properties(
   const iree_hal_cpu_slab_provider_t* provider =
       (const iree_hal_cpu_slab_provider_t*)base_provider;
   out_properties->memory_type = IREE_HAL_CPU_SLAB_PROVIDER_MEMORY_TYPE;
+  out_properties->physical_capacity = provider->physical_capacity;
   out_properties->allocation_alignment = provider->allocation_alignment;
   out_properties->max_allocation_alignment =
       iree_min(IREE_HOST_SIZE_MAX, IREE_DEVICE_SIZE_MAX) / 2 + 1;

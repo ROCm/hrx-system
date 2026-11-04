@@ -37,6 +37,9 @@ typedef struct iree_hal_vulkan_slab_provider_options_t {
   // Vulkan memory type index used for whole-slab allocations.
   uint32_t memory_type_index;
 
+  // Physical capacity of the selected Vulkan heap in bytes; zero if unknown.
+  uint64_t physical_capacity;
+
   // Prequalified Vulkan memory types usable for external host attachments.
   // Zero when the provider does not admit host-pointer imports.
   uint32_t import_memory_type_bits;

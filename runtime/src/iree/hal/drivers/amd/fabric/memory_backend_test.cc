@@ -12,6 +12,22 @@
 
 namespace iree::hal::amd::fabric {
 
+TEST_F(MemoryBackendTest, PhysicalCapacityIsCapturedWithoutBacking) {
+  for (uint64_t capacity : {UINT64_C(0), UINT64_C(1) << 40}) {
+    SCOPED_TRACE(capacity);
+    native_.system_scope.physical_capacity = capacity;
+    iree_hal_pool_t* pool = nullptr;
+    IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool));
+    const int query_count = native_.scope_query_count;
+    iree_hal_pool_capabilities_t capabilities;
+    iree_hal_pool_query_capabilities(pool, &capabilities);
+    EXPECT_EQ(capabilities.physical_capacity, capacity);
+    EXPECT_EQ(native_.scope_query_count, query_count);
+    EXPECT_EQ(native_.create_count, 0);
+    iree_hal_pool_release(pool);
+  }
+}
+
 TEST_F(MemoryBackendTest, ProgramVisibilityUsesTheNativeMemoryIssuer) {
   // Shader and DMA programs need visibility even when neither has atomics and
   // queue commands cannot fall back to shader execution.
@@ -1189,6 +1205,7 @@ TEST_F(MemoryBackendTest, RequiredPlacementSelectsBackingOwner) {
   // the same canonical consumer bindings and choose the requested native owner.
   for (uint32_t i = 0; i < devices_.size(); ++i) {
     SCOPED_TRACE(i);
+    native_.local_scopes[i].physical_capacity = (UINT64_C(16) << 30) << i;
     pool_options_.placement = {IREE_HAL_POOL_PLACEMENT_REQUIRED,
                                PhysicalNode(i)};
     iree_hal_pool_t* pool = nullptr;
@@ -1197,6 +1214,8 @@ TEST_F(MemoryBackendTest, RequiredPlacementSelectsBackingOwner) {
     iree_hal_pool_query_capabilities(pool, &capabilities);
     EXPECT_EQ(capabilities.placement.mode, IREE_HAL_POOL_PLACEMENT_REQUIRED);
     EXPECT_EQ(capabilities.placement.node, PhysicalNode(i));
+    EXPECT_EQ(capabilities.physical_capacity,
+              native_.local_scopes[i].physical_capacity);
     EXPECT_TRUE(iree_all_bits_set(capabilities.memory_type,
                                   IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL));
     EXPECT_FALSE(iree_all_bits_set(capabilities.memory_type,

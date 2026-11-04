@@ -22,7 +22,15 @@
 
 #if defined(IREE_PLATFORM_APPLE)
 
+#include <sys/sysctl.h>
 #include <unistd.h>
+
+uint64_t iree_memory_query_physical_capacity(void) {
+  uint64_t capacity = 0;
+  size_t length = sizeof(capacity);
+  return sysctlbyname("hw.memsize", &capacity, &length, NULL, 0) == 0 ? capacity
+                                                                      : 0;
+}
 
 iree_memory_info_t iree_memory_query_info(void) {
   const int page_size = sysconf(_SC_PAGESIZE);
@@ -37,6 +45,16 @@ iree_memory_info_t iree_memory_query_info(void) {
 #elif defined(IREE_PLATFORM_ANDROID) || defined(IREE_PLATFORM_LINUX)
 
 #include <unistd.h>
+
+uint64_t iree_memory_query_physical_capacity(void) {
+  const long page_count = sysconf(_SC_PHYS_PAGES);
+  const long page_size = sysconf(_SC_PAGESIZE);
+  if (page_count <= 0 || page_size <= 0 ||
+      (uint64_t)page_count > UINT64_MAX / (uint64_t)page_size) {
+    return 0;
+  }
+  return (uint64_t)page_count * (uint64_t)page_size;
+}
 
 iree_memory_info_t iree_memory_query_info(void) {
   const int page_size = sysconf(_SC_PAGESIZE);
@@ -56,6 +74,11 @@ iree_memory_info_t iree_memory_query_info(void) {
 }
 
 #elif defined(IREE_PLATFORM_WINDOWS)
+
+uint64_t iree_memory_query_physical_capacity(void) {
+  MEMORYSTATUSEX memory = {.dwLength = sizeof(memory)};
+  return GlobalMemoryStatusEx(&memory) ? memory.ullTotalPhys : 0;
+}
 
 iree_memory_info_t iree_memory_query_info(void) {
   // When running in non-desktop mode the application can define the
@@ -87,6 +110,8 @@ iree_memory_info_t iree_memory_query_info(void) {
 #if !defined(IREE_MEMORY_PAGE_SIZE_LARGE)
 #define IREE_MEMORY_PAGE_SIZE_LARGE 4096
 #endif  // !IREE_MEMORY_PAGE_SIZE_LARGE
+
+uint64_t iree_memory_query_physical_capacity(void) { return 0; }
 
 iree_memory_info_t iree_memory_query_info(void) {
   return (iree_memory_info_t){

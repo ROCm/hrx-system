@@ -281,6 +281,11 @@ typedef struct iree_hal_pool_capabilities_t {
   // from this pool. Queue-family capabilities are required independently.
   iree_hal_atomic_operation_capabilities_t atomic_operations;
 
+  // Physical capacity in bytes of the domain supplying owned backing, or zero
+  // when unknown. This capacity is shared with other pools and users, not
+  // reserved for this pool. It is neither free memory nor an allocation limit.
+  uint64_t physical_capacity;
+
   // Minimum user-visible allocation size in bytes. Suballocating pools may
   // round internally and report 0 or 1 when they have no practical lower bound.
   iree_device_size_t min_allocation_size;

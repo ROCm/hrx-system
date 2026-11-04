@@ -7,6 +7,7 @@
 #include "iree/hal/memory/heap_pool.h"
 
 #include "iree/base/internal/math.h"
+#include "iree/base/internal/memory.h"
 #include "iree/hal/memory_scope.h"
 
 enum { IREE_HAL_HEAP_POOL_INLINE_TRANSACTION_CAPACITY = 8 };
@@ -473,6 +474,7 @@ IREE_API_EXPORT iree_status_t iree_hal_heap_pool_create(
       .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       .atomic_operations = iree_hal_atomic_operation_capabilities_for_host(
           IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL),
+      .physical_capacity = iree_memory_query_physical_capacity(),
       .min_allocation_size = 1,
       .max_allocation_size = IREE_HOST_SIZE_MAX,
       .max_allocation_alignment =

@@ -26,6 +26,9 @@ typedef struct iree_hal_amdgpu_asan_state_t iree_hal_amdgpu_asan_state_t;
 
 // HSA memory-pool properties needed to configure slab-backed HAL pools.
 typedef struct iree_hal_amdgpu_slab_provider_memory_pool_properties_t {
+  // Physical capacity of the selected native pool in bytes.
+  uint64_t physical_capacity;
+
   // Smallest allocation-size multiple accepted by hsa_amd_memory_pool_allocate.
   iree_device_size_t allocation_granule;
 

@@ -115,6 +115,7 @@ TEST_F(SlabProviderTest, CapturesAccessBeforeNativeAcquisition) {
     iree_hal_amdgpu_slab_provider_memory_pool_properties_t properties;
     IREE_ASSERT_OK(iree_hal_amdgpu_slab_provider_query_memory_pool_properties(
         &libhsa_, memory_pool, &properties));
+    EXPECT_GT(properties.physical_capacity, 0u);
     iree_hal_amdgpu_access_agent_list_t agents;
     IREE_ASSERT_OK(iree_hal_amdgpu_access_agent_list_resolve_memory_agents(
         &topology_, family_affinity, &agents));
@@ -140,6 +141,9 @@ TEST_F(SlabProviderTest, CapturesAccessBeforeNativeAcquisition) {
         test_device.hal_device(), /*import_allocator=*/nullptr, &libhsa_,
         options, 0, &physical_device->materialized_buffer_pool,
         IREE_SV("captured-access"), host_allocator_, &provider));
+    iree_hal_slab_provider_properties_t captured;
+    iree_hal_slab_provider_query_properties(provider, &captured);
+    EXPECT_EQ(captured.physical_capacity, properties.physical_capacity);
     // Construction inputs can be reused before the first payload acquisition.
     memset(&agents, 0, sizeof(agents));
     memset(&options, 0, sizeof(options));
