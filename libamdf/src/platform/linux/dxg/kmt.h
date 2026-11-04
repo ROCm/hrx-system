@@ -39,6 +39,13 @@ typedef struct amdf_linux_dxg_kmt_t {
   const amdf_allocator_t* host_allocator;
 } amdf_linux_dxg_kmt_t;
 
+// Converts one completed Linux DXG operation into the portable status domain.
+static inline amdf_status_t amdf_linux_dxg_kmt_make_status(NTSTATUS status) {
+  return status == 0
+             ? AMDF_STATUS_OK
+             : amdf_make_status(AMDF_STATUS_DOMAIN_NTSTATUS, (uint32_t)status);
+}
+
 // Issues the complete fixed-layout KMT operation family consumed by libamdf.
 // Argument storage is borrowed only for the synchronous ioctl invocation.
 #define AMDF_LINUX_DXG_KMT_OPERATION(name, type, operation)  \

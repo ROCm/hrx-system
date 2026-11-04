@@ -14,10 +14,6 @@
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/platform/dxg/endpoint_identity.h"
 
-static amdf_status_t amdf_linux_dxg_make_status(NTSTATUS status) {
-  return amdf_make_status(AMDF_STATUS_DOMAIN_NTSTATUS, (uint32_t)status);
-}
-
 static uint64_t amdf_linux_dxg_luid_encode(LUID luid) {
   return ((uint64_t)(uint32_t)luid.HighPart << 32) | luid.LowPart;
 }
@@ -38,7 +34,7 @@ static amdf_status_t amdf_linux_dxg_query_adapter_info(
       .pPrivateDriverData = data,
       .PrivateDriverDataSize = data_size,
   };
-  return amdf_linux_dxg_make_status(
+  return amdf_linux_dxg_kmt_make_status(
       amdf_linux_dxg_kmt_query_adapter_info(kmt, &query));
 }
 
@@ -142,7 +138,7 @@ static amdf_status_t amdf_linux_dxg_close_adapters(
     D3DKMT_CLOSEADAPTER close_adapter = {
         .hAdapter = adapters[i].hAdapter,
     };
-    const amdf_status_t close_status = amdf_linux_dxg_make_status(
+    const amdf_status_t close_status = amdf_linux_dxg_kmt_make_status(
         amdf_linux_dxg_kmt_close_adapter(kmt, &close_adapter));
     if (amdf_status_is_ok(status)) {
       status = close_status;
@@ -177,7 +173,7 @@ amdf_status_t amdf_platform_endpoint_enumerate(
   }
 
   D3DKMT_ENUMADAPTERS2 enumeration = {0};
-  amdf_status_t status = amdf_linux_dxg_make_status(
+  amdf_status_t status = amdf_linux_dxg_kmt_make_status(
       amdf_linux_dxg_kmt_enumerate_adapters(&instance->kmt, &enumeration));
   const uint32_t adapter_capacity = enumeration.NumAdapters;
   D3DKMT_ADAPTERINFO* adapters = NULL;
@@ -188,7 +184,7 @@ amdf_status_t amdf_platform_endpoint_enumerate(
   }
   if (amdf_status_is_ok(status) && adapter_capacity != 0) {
     enumeration.pAdapters = adapters;
-    status = amdf_linux_dxg_make_status(
+    status = amdf_linux_dxg_kmt_make_status(
         amdf_linux_dxg_kmt_enumerate_adapters(&instance->kmt, &enumeration));
     if (amdf_status_is_ok(status) &&
         enumeration.NumAdapters > adapter_capacity) {
@@ -266,7 +262,7 @@ static amdf_status_t amdf_linux_dxg_close_endpoint_adapter(
       .hAdapter = endpoint->adapter,
   };
   const amdf_status_t status =
-      amdf_linux_dxg_make_status(amdf_linux_dxg_kmt_close_adapter(
+      amdf_linux_dxg_kmt_make_status(amdf_linux_dxg_kmt_close_adapter(
           &endpoint->instance->kmt, &close_adapter));
   if (amdf_status_is_ok(status)) {
     endpoint->adapter = 0;
@@ -295,7 +291,7 @@ amdf_status_t amdf_platform_endpoint_open(
   D3DKMT_OPENADAPTERFROMLUID open_adapter = {
       .AdapterLuid = adapter_luid,
   };
-  status = amdf_linux_dxg_make_status(
+  status = amdf_linux_dxg_kmt_make_status(
       amdf_linux_dxg_kmt_open_adapter_from_luid(&instance->kmt, &open_adapter));
   endpoint->adapter = open_adapter.hAdapter;
   if (amdf_status_is_ok(status) && endpoint->adapter == 0) {

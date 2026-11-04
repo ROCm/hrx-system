@@ -15,12 +15,6 @@
 #include "libamdf/src/host_memory.h"
 #include "libamdf/src/platform/linux/dxg/endpoint.h"
 
-static amdf_status_t amdf_gpu_linux_dxg_make_status(NTSTATUS native_status) {
-  return native_status == 0 ? AMDF_STATUS_OK
-                            : amdf_make_status(AMDF_STATUS_DOMAIN_NTSTATUS,
-                                               (uint32_t)native_status);
-}
-
 static amdf_status_t amdf_gpu_linux_dxg_query_local_capacity(
     const amdf_platform_endpoint_t* endpoint, uint64_t* out_capacity) {
   D3DKMT_SEGMENTGROUPSIZEINFO sizes = {
@@ -32,7 +26,7 @@ static amdf_status_t amdf_gpu_linux_dxg_query_local_capacity(
       .pPrivateDriverData = &sizes,
       .PrivateDriverDataSize = sizeof(sizes),
   };
-  const amdf_status_t status = amdf_gpu_linux_dxg_make_status(
+  const amdf_status_t status = amdf_linux_dxg_kmt_make_status(
       amdf_linux_dxg_kmt_query_adapter_info(&endpoint->instance->kmt, &query));
   if (amdf_status_is_ok(status)) {
     *out_capacity = sizes.LocalMemory;
@@ -109,7 +103,7 @@ amdf_status_t amdf_gpu_umd_sample_memory_scope(
       .PhysicalAdapterIndex = endpoint->physical_adapter_index,
   };
   amdf_status_t status =
-      amdf_gpu_linux_dxg_make_status(amdf_linux_dxg_kmt_query_video_memory_info(
+      amdf_linux_dxg_kmt_make_status(amdf_linux_dxg_kmt_query_video_memory_info(
           &endpoint->instance->kmt, &query));
   amdf_memory_scope_observation_t observation = {0};
   if (amdf_status_is_ok(status)) {

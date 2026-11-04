@@ -44,10 +44,7 @@ amdf_status_t amdf_gpu_linux_dxg_logical_device_initialize(
   };
   const NTSTATUS create_status =
       amdf_linux_dxg_kmt_create_device(device.kmt, &create);
-  amdf_status_t status = create_status == 0
-                             ? AMDF_STATUS_OK
-                             : amdf_make_status(AMDF_STATUS_DOMAIN_NTSTATUS,
-                                                (uint32_t)create_status);
+  amdf_status_t status = amdf_linux_dxg_kmt_make_status(create_status);
   if (amdf_status_is_ok(status)) {
     device.native = create.hDevice;
     if (device.native == 0) {
