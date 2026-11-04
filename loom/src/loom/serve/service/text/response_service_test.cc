@@ -106,6 +106,8 @@ class TextResponseServiceTest : public SourceTextServiceTest,
   loom_serve_text_chat_scratch_t completion_scratch_ = {};
   // Fails only growth of the session's already-initialized response builder.
   iree::vm::testing::CountingAllocator response_allocator_{1};
+  // Tracks prepared input ownership through terminal output failure.
+  iree::vm::testing::CountingAllocator input_allocator_;
 };
 
 TEST_P(TextResponseServiceTest, NativeOutputPreservesEveryDecodedByte) {
@@ -172,11 +174,9 @@ TEST_P(TextResponseServiceTest, HttpOutputPreservesEveryDecodedByte) {
 TEST_P(TextResponseServiceTest, GrowthFailureCannotPublishPartialSuccess) {
   const auto* tokenizer = loom_serve_text_model_tokenizer(model_);
   IREE_ASSERT_OK(loom_serve_text_session_initialize(
-      LOOM_SERVE_TEXT_MODE_GENERATE, tokenizer, 96, host_allocator_,
-      &session_));
+      LOOM_SERVE_TEXT_MODE_GENERATE, tokenizer, host_allocator_, &session_));
   session_.row = loom_serve_text_model_row(model_, 0);
   session_.lifetime.serial = 1;
-  session_.request.input_count = 1;
   iree_string_builder_initialize(host_allocator_, &scratch_);
   loom_serve_text_tool_calls_initialize(host_allocator_, &calls_);
   loom_serve_text_chat_scratch_initialize(host_allocator_,
@@ -194,6 +194,17 @@ TEST_P(TextResponseServiceTest, GrowthFailureCannotPublishPartialSuccess) {
       loom_serve_text_model_chat_policy(model_), IREE_SV("fixture-text"),
       iree_string_builder_view(&loom_serve_text_stream_request(stream_)->body),
       1, 9, host_allocator_, &session_.request.chat));
+  loom_serve_text_input_t input = {};
+  IREE_ASSERT_OK(loom_serve_text_input_prepare(
+      &session_.request.chat, {}, false,
+      loom_serve_text_model_context_capacity(model_), &input,
+      input_allocator_.allocator()));
+  session_.request.input.storage = input.token_storage;
+  session_.request.input.count = input.count;
+  input.token_storage = nullptr;
+  loom_serve_text_input_deinitialize(&input, input_allocator_.allocator());
+  EXPECT_EQ(input_allocator_.free_count() + 1,
+            input_allocator_.allocation_count());
   IREE_ASSERT_OK(loom_serve_text_session_begin(&session_, tokenizer,
                                                IREE_SV("fixture-text")));
   // Only the output storage allocator fails. The source policy and consumer
@@ -212,6 +223,8 @@ TEST_P(TextResponseServiceTest, GrowthFailureCannotPublishPartialSuccess) {
   const auto consumer = session_.request.consumer;
   IREE_ASSERT_OK(consumer.vtable->publish(consumer.self, &ready, &progress));
   loom_serve_text_session_release_request(&session_);
+  EXPECT_EQ(session_.request.input.storage, nullptr);
+  EXPECT_EQ(input_allocator_.free_count(), input_allocator_.allocation_count());
   consumer.vtable->end(consumer.self, true, IREE_STATUS_OK);
   const auto* block = loom_serve_text_stream_peek(stream_);
   ASSERT_NE(block, nullptr);

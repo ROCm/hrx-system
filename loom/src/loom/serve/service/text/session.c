@@ -62,22 +62,16 @@ bool loom_serve_text_session_has_history(
 
 iree_status_t loom_serve_text_session_initialize(
     loom_serve_text_mode_t mode, const iree_tokenizer_t* tokenizer,
-    iree_host_size_t context_capacity, iree_allocator_t host_allocator,
-    loom_serve_text_session_t* out_session) {
+    iree_allocator_t host_allocator, loom_serve_text_session_t* out_session) {
   *out_session = (loom_serve_text_session_t){
       .host_allocator = host_allocator,
       .mode = mode,
   };
   iree_string_builder_initialize(host_allocator, &out_session->response);
-  iree_host_size_t decoder_size = 0;
   if (mode == LOOM_SERVE_TEXT_MODE_GENERATE) {
+    iree_host_size_t decoder_size = 0;
     IREE_RETURN_IF_ERROR(
         iree_tokenizer_decode_state_calculate_size(tokenizer, &decoder_size));
-  }
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      host_allocator, context_capacity, sizeof(*out_session->tokens),
-      (void**)&out_session->tokens));
-  if (mode == LOOM_SERVE_TEXT_MODE_GENERATE) {
     IREE_RETURN_IF_ERROR(
         iree_allocator_malloc(host_allocator, decoder_size,
                               (void**)&out_session->decoder_storage.data));
@@ -95,13 +89,13 @@ void loom_serve_text_session_release_request(
   loom_serve_text_sequence_deinitialize(&session->request.sequence);
   iree_tokenizer_decode_state_deinitialize(session->decoder);
   session->decoder = NULL;
+  iree_vm_buffer_release(session->request.input.storage);
   memset(&session->request, 0, sizeof(session->request));
 }
 
 void loom_serve_text_session_deinitialize(loom_serve_text_session_t* session) {
   loom_serve_text_session_release_request(session);
   iree_allocator_free(session->host_allocator, session->decoder_storage.data);
-  iree_allocator_free(session->host_allocator, session->tokens);
   iree_string_builder_deinitialize(&session->response);
   loom_serve_text_chat_completion_deinitialize(&session->completion);
   memset(session, 0, sizeof(*session));
@@ -126,7 +120,7 @@ static loom_serve_text_chat_response_t loom_serve_text_response_metadata(
       .created_unix_seconds = session->request.created_unix_seconds,
       .flags = session->request.chat.flags,
       .usage = {.input_tokens = session->request.retained_count +
-                                session->request.input_count,
+                                session->request.input.count,
                 .cached_tokens = session->request.retained_count,
                 .output_tokens = session->request.output_count}};
 }

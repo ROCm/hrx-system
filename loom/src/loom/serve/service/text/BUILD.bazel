@@ -299,6 +299,7 @@ loom_cc_library(
         "//loom/src/loom/serve/runtime/device",
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/testing:device",
+        "//loom/src/loom/serve/testing:native_allocator",
         "//loom/src/loom/serve/testing:service_application",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/vm",
@@ -865,6 +866,7 @@ loom_cc_library(
         "//loom/src/loom/serve/telemetry:record",
         "//runtime/src/iree/base",
         "//runtime/src/iree/tokenizer",
+        "//runtime/src/iree/vm",
     ],
 )
 

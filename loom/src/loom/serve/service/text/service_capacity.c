@@ -43,8 +43,7 @@ static iree_status_t loom_serve_text_service_capacity_run(void* user_data) {
       status = loom_serve_text_session_initialize(
           service->scheduling.model_mode,
           loom_serve_text_model_tokenizer(service->model),
-          service->scheduling.context_capacity, service->host_allocator,
-          growth->sessions[i]);
+          service->host_allocator, growth->sessions[i]);
     }
   }
   IREE_RETURN_AND_END_ZONE(z0, status);
