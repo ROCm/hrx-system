@@ -14,7 +14,7 @@
 
 namespace {
 
-// Only the native queue is a dependency. Captures, buffers, semaphores,
+// Only native operations are substituted. Captures, buffers, semaphores,
 // frontier tracking, publication ownership, and failed retirement are real.
 class Pm4LifecycleTest : public ::testing::Test {
  protected:
@@ -281,9 +281,72 @@ class Pm4LifecycleTest : public ::testing::Test {
     EXPECT_FALSE(poll());
     iree_hal_semaphore_release(producer);
   }
+  enum class Rejection { kShader, kGrowth };
+
+  void RejectGrowth(iree_hal_amd_gpu_pm4_submission_t* follower) {
+    uint32_t native_allocations = 0;
+    amdf_api_t api = {
+        .instance_destroy = [](amdf_instance_t*) { return AMDF_STATUS_OK; },
+        .memory_create =
+            [](amdf_memory_scope_t* scope, const amdf_memory_create_info_t*,
+               amdf_memory_t**, amdf_memory_release_info_t*) {
+              ++*reinterpret_cast<uint32_t*>(scope);
+              return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
+            },
+    };
+    iree_hal_amd_fabric_t* fabric = nullptr;
+    IREE_ASSERT_OK(iree_allocator_malloc(iree_allocator_system(),
+                                         sizeof(*fabric),
+                                         reinterpret_cast<void**>(&fabric)));
+    iree_atomic_ref_count_init(&fabric->ref_count);
+    iree_slim_mutex_initialize(&fabric->allocation_mutex);
+    fabric->host_allocator = iree_allocator_system();
+    fabric->api = &api;
+    context_.fabric = fabric;
+    context_.api = &api;
+    IREE_ASSERT_OK(
+        iree_hal_amd_gpu_context_prepare_memory(&context_, UINT32_MAX));
+    iree_hal_amd_fabric_memory_options_t memory = {
+        .scope = reinterpret_cast<amdf_memory_scope_t*>(&native_allocations),
+    };
+    memory.profile.allocation.minimum_alignment = 8;
+    memory.profile.allocation.byte_length_granularity = 8;
+    memory.profile.allocation.maximum_byte_length = UINT32_MAX;
+    iree_hal_amd_gpu_argument_storage_t arguments = {};
+    queue_.producer.arguments = &arguments;
+    queue_.growth.context = &context_;
+    queue_.growth.memory = &memory;
+    queue_.growth.captures = &queue_.captures;
+    queue_.growth.publisher = &queue_.publisher;
+    queue_.growth.publication = &publication_;
+    ASSERT_TRUE(iree_hal_amd_gpu_publisher_try_acquire(&queue_.publisher));
+    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_growth_begin(
+        &queue_.growth, IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_ARGUMENTS, follower,
+        4096));
+    iree_hal_amd_gpu_publisher_handoff(&queue_.publisher, nullptr);
+    iree_hal_amd_gpu_context_join_memory(&context_);
+    EXPECT_EQ(native_allocations, 1u);
+
+    // Growth has completed, but neither input has. Rejecting its cohort must
+    // retain the captured dependency join without requesting more storage.
+    deny_allocations_ = true;
+    const auto publish =
+        iree_hal_amd_gpu_pm4_queue_publication_source(&queue_.base);
+    EXPECT_FALSE(publish.publish(publish.user_data));
+    EXPECT_EQ(iree_atomic_load(&queue_.growth.pending_count,
+                               iree_memory_order_acquire),
+              0);
+    iree_hal_amd_gpu_context_deinitialize_memory(&context_);
+    iree_hal_amd_fabric_release(fabric);
+    queue_.producer.arguments = nullptr;
+    queue_.growth.memory = nullptr;
+    context_.fabric = nullptr;
+    context_.api = nullptr;
+  }
   void CheckRejectedFollower(bool admitted, bool already_waiting,
                              bool deny_allocations = false,
-                             bool prepared = false) {
+                             bool prepared = false,
+                             Rejection rejection = Rejection::kShader) {
     Capture();
     iree_atomic_store(&queue_.native_failure, 0, iree_memory_order_relaxed);
     iree_hal_queue_family_t family = {};
@@ -354,15 +417,19 @@ class Pm4LifecycleTest : public ::testing::Test {
       }
       deny_allocations_ = true;
     }
-    if (!already_waiting) {
+    if (!already_waiting && rejection == Rejection::kShader) {
       iree_atomic_store(&feedback.failure_code, IREE_STATUS_ABORTED,
                         iree_memory_order_release);
     }
     const auto publish =
         iree_hal_amd_gpu_pm4_queue_publication_source(&queue_.base);
-    iree_hal_amd_gpu_publication_enqueue(&publication_, 0, &queue_.publisher,
-                                         &follower->entry.publication);
-    EXPECT_FALSE(publish.publish(publish.user_data));
+    if (rejection == Rejection::kGrowth) {
+      RejectGrowth(follower);
+    } else {
+      iree_hal_amd_gpu_publication_enqueue(&publication_, 0, &queue_.publisher,
+                                           &follower->entry.publication);
+      EXPECT_FALSE(publish.publish(publish.user_data));
+    }
     if (already_waiting) {
       iree_atomic_store(&feedback.failure_code, IREE_STATUS_ABORTED,
                         iree_memory_order_release);
@@ -378,7 +445,7 @@ class Pm4LifecycleTest : public ::testing::Test {
                                iree_memory_order_acquire),
               0);
 
-    // Retiring the copy may fail the stream, but the follower still joins its
+    // Retiring the copy resolves its value, but the follower still joins its
     // other input before publishing its own private completion.
     std::array<iree_hal_amd_gpu_pm4_retirement_record_t, 4> records = {};
     queue_.retirement.records = records.data();
@@ -391,7 +458,12 @@ class Pm4LifecycleTest : public ::testing::Test {
     native_access_ended_ = true;
     EXPECT_TRUE(retire.fn(retire.user_data, AMDF_STATUS_OK, &wait));
     EXPECT_EQ(destroyed_, 6u);
-    ExpectFailed();
+    if (rejection == Rejection::kShader) {
+      ExpectFailed();
+    } else {
+      IREE_EXPECT_OK(iree_hal_semaphore_query(semaphore_, &value));
+      EXPECT_EQ(value, 1u);
+    }
     IREE_EXPECT_OK(iree_hal_semaphore_query(completion, &value));
     EXPECT_EQ(value, 0u);
     if (admitted) {
@@ -404,8 +476,13 @@ class Pm4LifecycleTest : public ::testing::Test {
     }
     iree_hal_semaphore_fail(peer, iree_status_from_code(IREE_STATUS_DATA_LOSS));
     EXPECT_FALSE(publish.publish(publish.user_data));
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
+    const iree_status_code_t expected = rejection == Rejection::kShader
+                                            ? IREE_STATUS_ABORTED
+                                            : IREE_STATUS_RESOURCE_EXHAUSTED;
+    IREE_EXPECT_STATUS_IS(expected,
                           iree_hal_semaphore_query(completion, &value));
+    IREE_EXPECT_STATUS_IS(expected,
+                          iree_hal_semaphore_query(semaphore_, &value));
     EXPECT_EQ(iree_atomic_load(&queue_.pending.host_owners,
                                iree_memory_order_acquire),
               0);
@@ -579,6 +656,12 @@ TEST_F(Pm4LifecycleTest, ShaderFailureJoinsEveryAcceptedPiece) {
 
 TEST_F(Pm4LifecycleTest, ShaderFailureJoinsUnpublishedSuffix) {
   CheckShaderFailure(/*partial=*/true, /*abandon_suffix=*/false);
+}
+
+TEST_F(Pm4LifecycleTest, GrowthFailureJoinsAcceptedPredecessors) {
+  CheckRejectedFollower(/*admitted=*/true, /*already_waiting=*/false,
+                        /*deny_allocations=*/false, /*prepared=*/false,
+                        Rejection::kGrowth);
 }
 
 TEST_F(Pm4LifecycleTest, ShaderFailureJoinsUnadmittedFollowers) {
