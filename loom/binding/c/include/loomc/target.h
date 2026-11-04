@@ -256,6 +256,8 @@ typedef enum loomc_source_to_low_diagnostic_flag_bits_e {
       LOOMC_SOURCE_TO_LOW_DIAGNOSTIC_MEMORY_ACCESS |
       LOOMC_SOURCE_TO_LOW_DIAGNOSTIC_OPERAND_FORM,
 } loomc_source_to_low_diagnostic_flag_bits_t;
+
+/// Bitmask of `loomc_source_to_low_diagnostic_flag_bits_t` values.
 typedef uint32_t loomc_source_to_low_diagnostic_flags_t;
 
 /// Control-flow shape selected for source-to-low lowering.
