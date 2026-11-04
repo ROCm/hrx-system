@@ -494,23 +494,30 @@ TEST_F(GpuEndpointTest, ReturnsQualifiedCachedProfile) {
       gpu_api_->endpoint_query_info(endpoint_, &second_info)));
   EXPECT_EQ(std::memcmp(&info, &second_info, sizeof(info)), 0);
 
-  // Consumers compiled against the original record still receive its complete
-  // prefix. A partial new field is never written beyond their declared extent.
-  for (uint32_t size : {uint32_t(offsetof(amdf_gpu_endpoint_info_t, unique_id)),
+  // Earlier consumers receive their complete prefix. An incomplete appended
+  // field, and all bytes beyond the caller's extent, remain untouched.
+  const uint32_t identity_offset =
+      offsetof(amdf_gpu_endpoint_info_t, unique_id);
+  const uint32_t resources_offset =
+      offsetof(amdf_gpu_endpoint_info_t, execution_resources);
+  for (uint32_t size : {identity_offset, resources_offset - 1, resources_offset,
                         uint32_t(sizeof(info) - 1)}) {
-    amdf_gpu_endpoint_info_t prefix = {
-        .type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO,
-        .structure_size = size,
-        .unique_id = UINT64_C(0xa5a5a5a5a5a5a5a5),
-    };
+    amdf_gpu_endpoint_info_t prefix;
+    std::memset(&prefix, 0xa5, sizeof(prefix));
+    prefix.type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO;
+    prefix.structure_size = size;
+    prefix.next = nullptr;
     ASSERT_EQ(gpu_api_->endpoint_query_info(endpoint_, &prefix),
               AMDF_STATUS_OK);
     EXPECT_EQ(prefix.structure_size, size);
-    EXPECT_EQ(prefix.unique_id, UINT64_C(0xa5a5a5a5a5a5a5a5));
     prefix.structure_size = info.structure_size;
-    EXPECT_EQ(std::memcmp(&prefix, &info,
-                          offsetof(amdf_gpu_endpoint_info_t, unique_id)),
-              0);
+    const uint32_t copied_size =
+        size >= resources_offset ? resources_offset : identity_offset;
+    EXPECT_EQ(std::memcmp(&prefix, &info, copied_size), 0);
+    const auto* bytes = reinterpret_cast<const uint8_t*>(&prefix);
+    for (size_t i = copied_size; i < sizeof(prefix); ++i) {
+      EXPECT_EQ(bytes[i], 0xa5) << "size=" << size << " offset=" << i;
+    }
   }
 }
 

@@ -159,19 +159,19 @@ amdf_cts_gpu_kernel_set(
     targets = AMDF_CTS_GPU_KERNEL_TARGETS,
 )
 
-# Native interrupt fragments are selected with the physical compiler profile.
+# Native instruction fragments follow the physical compiler profile.
 # A restricted compiler needs only its own representation vocabulary.
-_SHADER_EVENT_SOURCE_BY_CAPABILITY = {
-    "descriptor_set_cdna2_core": "//libamdf/cts/gpu/kernels/shader_event:cdna2.loom",
-    "descriptor_set_cdna3_core": "//libamdf/cts/gpu/kernels/shader_event:cdna3.loom",
-    "descriptor_set_cdna4_core": "//libamdf/cts/gpu/kernels/shader_event:cdna4.loom",
-    "descriptor_set_rdna3_5_core": "//libamdf/cts/gpu/kernels/shader_event:rdna35.loom",
-    "descriptor_set_rdna3_core": "//libamdf/cts/gpu/kernels/shader_event:rdna3.loom",
-    "descriptor_set_rdna4_core": "//libamdf/cts/gpu/kernels/shader_event:rdna4.loom",
-    "descriptor_set_rdna4_gfx1250_a0_core": "//libamdf/cts/gpu/kernels/shader_event:gfx1250_a0.loom",
-    "descriptor_set_rdna4_gfx1251_core": "//libamdf/cts/gpu/kernels/shader_event:gfx1251.loom",
-    "descriptor_set_rdna4_gfx125x_core": "//libamdf/cts/gpu/kernels/shader_event:gfx1250.loom",
-    "descriptor_set_rdna4m_core": "//libamdf/cts/gpu/kernels/shader_event:rdna4m.loom",
+_NATIVE_SOURCE_BY_CAPABILITY = {
+    "descriptor_set_cdna2_core": "cdna2.loom",
+    "descriptor_set_cdna3_core": "cdna3.loom",
+    "descriptor_set_cdna4_core": "cdna4.loom",
+    "descriptor_set_rdna3_5_core": "rdna35.loom",
+    "descriptor_set_rdna3_core": "rdna3.loom",
+    "descriptor_set_rdna4_core": "rdna4.loom",
+    "descriptor_set_rdna4_gfx1250_a0_core": "gfx1250_a0.loom",
+    "descriptor_set_rdna4_gfx1251_core": "gfx1251.loom",
+    "descriptor_set_rdna4_gfx125x_core": "gfx1250.loom",
+    "descriptor_set_rdna4m_core": "rdna4m.loom",
 }
 
 amdf_cts_gpu_kernel_set(
@@ -180,7 +180,25 @@ amdf_cts_gpu_kernel_set(
     entry_point = "shader_event",
     namespace = "kernels::shader_event",
     target_srcs = {
-        target: _SHADER_EVENT_SOURCE_BY_CAPABILITY[LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET[target]]
+        target: "//libamdf/cts/gpu/kernels/shader_event:" + _NATIVE_SOURCE_BY_CAPABILITY[LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET[target]]
+        for target in AMDF_CTS_GPU_KERNEL_TARGETS
+    },
+    targets = AMDF_CTS_GPU_KERNEL_TARGETS,
+)
+
+amdf_cc_library(
+    name = "execution_resources",
+    testonly = True,
+    hdrs = ["execution_resources.h"],
+)
+
+amdf_cts_gpu_kernel_set(
+    name = "execution_resources_kernels",
+    srcs = ["//libamdf/cts/gpu/kernels/execution_resources:kernel.loom"],
+    entry_point = "execution_resources",
+    namespace = "kernels::execution_resources",
+    target_srcs = {
+        target: "//libamdf/cts/gpu/kernels/execution_resources:" + _NATIVE_SOURCE_BY_CAPABILITY[LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET[target]]
         for target in AMDF_CTS_GPU_KERNEL_TARGETS
     },
     targets = AMDF_CTS_GPU_KERNEL_TARGETS,
@@ -602,6 +620,8 @@ amdf_cc_test(
         ":device_sdma_staged",
         ":device_sdma_transfer_kernels",
         ":device_sdma_upload_kernels",
+        ":execution_resources",
+        ":execution_resources_kernels",
         ":file_staged",
         ":file_staged_read_kernels",
         ":file_staged_reader_kernels",

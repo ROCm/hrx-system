@@ -56,6 +56,22 @@ TEST(KfdUserQueueNativeTest, FailedCooperativeAdmissionReleasesSerialization) {
   amdf_gpu_kfd_memory_lock_deinitialize(&memory_lock);
 }
 
+TEST(KfdUserQueueNativeTest, FailedResourceSelectionReleasesSerialization) {
+  amdf_gpu_kfd_memory_lock_t memory_lock;
+  ASSERT_EQ(amdf_gpu_kfd_memory_lock_initialize(&memory_lock), 0);
+  amdf_gpu_umd_device_t device = {
+      .descriptor = -1,
+      .memory_lock = &memory_lock,
+  };
+  const uint32_t mask = 3;
+  const auto* native_api = amdf_gpu_kfd_user_queue_default_native_api();
+  EXPECT_EQ(native_api->queue_set_compute_unit_mask(native_api->user_data,
+                                                    &device, 47, 32, &mask),
+            amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EBADF));
+  EXPECT_FALSE(memory_lock.occupied);
+  amdf_gpu_kfd_memory_lock_deinitialize(&memory_lock);
+}
+
 TEST(KfdUserQueueNativeTest,
      FailedCreateReleasesSerializationAndPreservesOutput) {
   amdf_gpu_kfd_memory_lock_t memory_lock;

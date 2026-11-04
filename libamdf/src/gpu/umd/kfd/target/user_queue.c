@@ -112,6 +112,12 @@ void amdf_gpu_kfd_target_user_queue_plans_initialize(
        page_size <= 4096 && local_publication != 0);
   for (uint32_t i = 0; i < plans.count; ++i) {
     amdf_gpu_queue_family_properties_t* family = &plans.values[i].family;
+    if (topology->properties.execution_resources.compute_units_per_resource !=
+            0 &&
+        (family->roles & AMDF_QUEUE_ROLE_COMPUTE) != 0) {
+      family->user_queue_capabilities |=
+          AMDF_USER_QUEUE_CAPABILITY_EXECUTION_RESOURCE_SELECTION;
+    }
     // KFD exposes cooperative admission only when its scheduler/firmware
     // prerequisites are met. The qualified GC9-11 queue writers carry that
     // scheduling contract; later MES writers require independent qualification.

@@ -80,6 +80,63 @@ The returned queue and mapping information carry the actual capacity. A larger
 ring permits more commands to be prepared before publication, while command
 consumption and final payload use retain their separate reuse boundaries.
 
+### Compute resource selection
+
+A compute queue may confine every dispatch to an immutable subset of its GPU.
+This supports independent execution streams with different compute budgets while
+sharing the same device address space. The selection establishes where work can
+run; it does not reserve exclusive ownership or isolate memory. Other queues may
+select overlapping resources.
+
+The endpoint's cached `execution_resources` geometry defines logical resource
+ordinals. Zero geometry exposes no subdivision. Otherwise, divide
+`compute.compute_unit_count` by `compute_units_per_resource` to obtain their
+count. Resource `r` belongs to constraint group `r % group_count`;
+each selected set satisfies `minimum_selected_resources_per_group` in every
+group. Native mapping accounts for disabled hardware units, so these ordinals
+are not physical shader IDs.
+
+A family advertises `AMDF_USER_QUEUE_CAPABILITY_EXECUTION_RESOURCE_SELECTION`
+when its USER constructor can enforce a proper subset. Pass the sorted, unique
+ordinals through the existing queue-construction extension chain:
+
+```c
+const amdf_gpu_queue_execution_resource_selection_t selection = {
+    .type = AMDF_STRUCTURE_TYPE_GPU_QUEUE_EXECUTION_RESOURCE_SELECTION,
+    .structure_size = sizeof(selection),
+    .resource_count = resource_count,
+    .resource_ordinals = resource_ordinals,
+};
+const amdf_gpu_user_queue_create_info_t create_info = {
+    .type = AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO,
+    .structure_size = sizeof(create_info),
+    .next = &selection,
+    .queue_family_ordinal = family.ordinal,
+    .producer_mode = AMDF_QUEUE_PRODUCER_MODE_SINGLE,
+    .required_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
+};
+amdf_status_t status = gpu->user_queue_create(device, &create_info, &queue);
+```
+
+The constructor borrows the list only until it returns. Successful creation
+establishes exactly that selection for the queue's lifetime; failure leaves the
+output unchanged. An absent extension, empty list, or explicit complete list
+selects the whole device. Whole-device queues work without the subset capability.
+Cooperative queues select the whole device.
+
+For example, an endpoint with one group and a one-resource minimum admits
+`{0}` and `{1}` as disjoint queues. An eight-group endpoint with that minimum
+admits `{0, 1, 2, 3, 4, 5, 6, 7}` and `{8, 9, 10, 11, 12, 13, 14, 15}`.
+Each group still has a selected resource, including every command processor on
+a multi-XCC GPU.
+
+Linux KFD applies the logical compute-unit mask once while the native queue is
+empty. RDNA resources cover the required paired units; CDNA and native GC12.1
+use their reported single units. Full-device creation skips mask application.
+Dispatch encoding and publication gain no library call or mask processing.
+Windows KERNEL queues retain whole-device execution and report no USER subset
+capability.
+
 ### Device-produced SDMA
 
 An SDMA family with `AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER` can establish

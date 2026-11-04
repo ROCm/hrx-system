@@ -85,6 +85,23 @@ static amdf_status_t amdf_gpu_kfd_user_queue_enable_cooperative(
   return result == 0 ? AMDF_STATUS_OK : amdf_linux_error(error);
 }
 
+static amdf_status_t amdf_gpu_kfd_user_queue_set_compute_unit_mask(
+    void* user_data, amdf_gpu_umd_device_t* device, uint32_t queue_identifier,
+    uint32_t bit_count, const uint32_t* mask) {
+  (void)user_data;
+  struct kfd_ioctl_set_cu_mask_args arguments = {
+      .queue_id = queue_identifier,
+      .num_cu_mask = bit_count,
+      .cu_mask_ptr = (uintptr_t)mask,
+  };
+  amdf_gpu_kfd_device_lock_memory(device, AMDF_GPU_KFD_MEMORY_PRIORITY_ACQUIRE);
+  const int result =
+      ioctl(device->descriptor, AMDKFD_IOC_SET_CU_MASK, &arguments);
+  const int error = errno;
+  amdf_gpu_kfd_device_unlock_memory(device);
+  return result == 0 ? AMDF_STATUS_OK : amdf_linux_error(error);
+}
+
 static amdf_status_t amdf_gpu_kfd_user_queue_update_native(
     void* user_data, amdf_gpu_umd_device_t* device,
     const struct kfd_ioctl_update_queue_args* arguments) {
@@ -169,6 +186,8 @@ static const amdf_gpu_kfd_user_queue_native_api_t
         .buffer_abandon = amdf_gpu_kfd_user_queue_buffer_abandon,
         .queue_create = amdf_gpu_kfd_user_queue_create_native,
         .queue_enable_cooperative = amdf_gpu_kfd_user_queue_enable_cooperative,
+        .queue_set_compute_unit_mask =
+            amdf_gpu_kfd_user_queue_set_compute_unit_mask,
         .queue_update = amdf_gpu_kfd_user_queue_update_native,
         .queue_destroy = amdf_gpu_kfd_user_queue_destroy_native,
         .doorbell_map = amdf_gpu_kfd_user_queue_doorbell_map,

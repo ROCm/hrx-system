@@ -1,0 +1,35 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Physical execution identity excludes transient wave and SIMD slots.
+template.decl @execution_resource_id() -> (i32)
+
+low.func.def target<amdgpu.rdna4.gfx1250_a0.core> @execution_resource_gfx1250_a0() -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %hardware = s_getreg_b32 {hwreg = 63511}
+  %domain = s_sendmsg_rtn_b32 {message = 135}
+  s_wait_kmcnt {kmcnt = 0}
+  return %hardware, %domain
+}
+
+amdgpu.target<gfx1250-a0> @resource_gfx1250_a0_target
+template.def<@execution_resource_id> target(@resource_gfx1250_a0_target) @resource_gfx1250_a0() -> (i32) {
+  %hardware, %domain = low.invoke @execution_resource_gfx1250_a0() : () -> (i32, i32)
+  %mask = scalar.constant 80896 : i32
+  %unit = scalar.andi %hardware, %mask : i32
+  %domain_mask = scalar.constant 983055 : i32
+  %selected_domain = scalar.andi %domain, %domain_mask : i32
+  %shift = scalar.constant 18 : i32
+  %se_mask = scalar.constant 15 : i32
+  %se = scalar.andi %selected_domain, %se_mask : i32
+  %positioned_se = scalar.shli %se, %shift : i32
+  %xcc_mask = scalar.constant 983040 : i32
+  %xcc = scalar.andi %selected_domain, %xcc_mask : i32
+  %xcc_shift = scalar.constant 8 : i32
+  %positioned_xcc = scalar.shli %xcc, %xcc_shift : i32
+  %low_id = scalar.ori %unit, %positioned_se : i32
+  %id = scalar.ori %low_id, %positioned_xcc : i32
+  template.return %id : i32
+}

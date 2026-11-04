@@ -1,0 +1,46 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Physical execution identity excludes transient wave and SIMD slots.
+template.decl @execution_resource_id() -> (i32)
+
+low.func.def target<amdgpu.rdna3.core> @execution_resource_rdna3() -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %hardware = s_getreg_b32 {hwreg = 63511}
+  %domain = s_mov_b32 0
+  return %hardware, %domain
+}
+
+amdgpu.target<gfx1100> @resource_gfx1100_target
+template.def<@execution_resource_id> target(@resource_gfx1100_target) @resource_gfx1100() -> (i32) {
+  %hardware, %domain = low.invoke @execution_resource_rdna3() : () -> (i32, i32)
+  %mask = scalar.constant 1915904 : i32
+  %id = scalar.andi %hardware, %mask : i32
+  template.return %id : i32
+}
+
+amdgpu.target<gfx1101> @resource_gfx1101_target
+template.def<@execution_resource_id> target(@resource_gfx1101_target) @resource_gfx1101() -> (i32) {
+  %hardware, %domain = low.invoke @execution_resource_rdna3() : () -> (i32, i32)
+  %mask = scalar.constant 1915904 : i32
+  %id = scalar.andi %hardware, %mask : i32
+  template.return %id : i32
+}
+
+amdgpu.target<gfx1102> @resource_gfx1102_target
+template.def<@execution_resource_id> target(@resource_gfx1102_target) @resource_gfx1102() -> (i32) {
+  %hardware, %domain = low.invoke @execution_resource_rdna3() : () -> (i32, i32)
+  %mask = scalar.constant 1915904 : i32
+  %id = scalar.andi %hardware, %mask : i32
+  template.return %id : i32
+}
+
+amdgpu.target<gfx1103> @resource_gfx1103_target
+template.def<@execution_resource_id> target(@resource_gfx1103_target) @resource_gfx1103() -> (i32) {
+  %hardware, %domain = low.invoke @execution_resource_rdna3() : () -> (i32, i32)
+  %mask = scalar.constant 1915904 : i32
+  %id = scalar.andi %hardware, %mask : i32
+  template.return %id : i32
+}

@@ -60,6 +60,10 @@ typedef struct amdf_gpu_umd_user_queue_create_info_t {
   uint64_t ring_byte_length;
   // Optional queue-device scratch range.
   amdf_gpu_umd_queue_scratch_t scratch;
+  // Canonical proper-subset size, or zero for whole-device execution.
+  uint32_t resource_count;
+  // Validated sorted unique ordinals borrowed only during construction.
+  const uint32_t* resource_ordinals;
 } amdf_gpu_umd_user_queue_create_info_t;
 
 // Immutable facts published after native queue construction succeeds.

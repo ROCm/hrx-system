@@ -91,6 +91,7 @@ amdf_cc_test(
     target_compatible_with = KFD_COMPATIBILITY,
     deps = [
         ":user_queue",
+        "//libamdf/src/gpu/umd/kfd:topology",
         "//third_party:google_test",
         "//third_party:google_test_main",
     ],

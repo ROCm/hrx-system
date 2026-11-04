@@ -163,6 +163,10 @@ enum amdf_user_queue_capability_bits_e {
   /// supplies the kernel's synchronization state and residency validation.
   /// Requested during construction; never enabled by mapping an ordinary queue.
   AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH = UINT64_C(1) << 2,
+  /// Queue construction accepts an exact execution-resource selection using
+  /// the engine's advertised geometry. Selection confines kernels; it neither
+  /// reserves resources exclusively nor isolates shared caches or bandwidth.
+  AMDF_USER_QUEUE_CAPABILITY_EXECUTION_RESOURCE_SELECTION = UINT64_C(1) << 3,
 };
 
 /// Optional kernel-mediated queue operations.

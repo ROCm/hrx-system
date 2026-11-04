@@ -44,9 +44,12 @@ static amdf_status_t AMDF_CALL amdf_gpu_endpoint_query_info(
 
   const uint32_t structure_size = out_info->structure_size;
   void* const next = out_info->next;
-  const size_t copy_size = structure_size >= sizeof(*out_info)
-                               ? sizeof(*out_info)
-                               : offsetof(amdf_gpu_endpoint_info_t, unique_id);
+  const size_t copy_size =
+      structure_size >= sizeof(*out_info) ? sizeof(*out_info)
+      : structure_size >=
+              offsetof(amdf_gpu_endpoint_info_t, execution_resources)
+          ? offsetof(amdf_gpu_endpoint_info_t, execution_resources)
+          : offsetof(amdf_gpu_endpoint_info_t, unique_id);
   memcpy(out_info, amdf_gpu_endpoint_profile_get_info(profile), copy_size);
   out_info->structure_size = structure_size;
   out_info->next = next;

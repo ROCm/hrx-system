@@ -529,6 +529,29 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
     }
   }
 
+  if (amdf_status_is_ok(status) && create_info->resource_count != 0) {
+    // The public boundary validates the set against this geometry and
+    // canonicalizes full-device selections to zero. The native mask is
+    // constructor scratch, never retained or consulted during publication.
+    uint32_t mask[1024 / 32] = {0};
+    const uint32_t units_per_resource =
+        device->topology.properties.execution_resources
+            .compute_units_per_resource;
+    for (uint32_t i = 0; i < create_info->resource_count; ++i) {
+      const uint32_t first_unit =
+          create_info->resource_ordinals[i] * units_per_resource;
+      for (uint32_t j = 0; j < units_per_resource; ++j) {
+        const uint32_t unit = first_unit + j;
+        mask[unit / 32] |= UINT32_C(1) << (unit % 32);
+      }
+    }
+    const uint32_t bit_count =
+        (device->topology.properties.compute.compute_unit_count + 31u) & ~31u;
+    status = queue->native_api->queue_set_compute_unit_mask(
+        queue->native_api->user_data, device, queue->queue_identifier,
+        bit_count, mask);
+  }
+
   size_t doorbell_byte_offset = 0;
   if (amdf_status_is_ok(status) && cooperative) {
     status = queue->native_api->queue_enable_cooperative(
@@ -577,6 +600,8 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
             },
         .capabilities =
             AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
+            (queue->plan.family.user_queue_capabilities &
+             AMDF_USER_QUEUE_CAPABILITY_EXECUTION_RESOURCE_SELECTION) |
             (cooperative ? AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH
                          : 0) |
             (queue->device_doorbell.native != NULL

@@ -110,6 +110,59 @@ extern "C" int __wrap_ioctl(int descriptor, unsigned long request, ...) {
 
 namespace {
 
+TEST(KfdExecutionResourceTest, QualifiedNativeMappingGeometry) {
+  struct Case {
+    // Compiler-visible architecture, distinct from GC discovery.
+    uint32_t gfx_ip[3];
+    // Exact native IP identity when reported by sysfs.
+    amdf_gpu_kfd_ip_version_t gc_ip;
+    // Total active native compute units after harvesting.
+    uint32_t compute_unit_count;
+    // Number of command-processor groups.
+    uint32_t xcc_count;
+    // Expected selectable unit size, or zero for an unsupported geometry.
+    uint32_t units_per_resource;
+  };
+  const Case cases[] = {
+      {{9, 0, 10}, {9, 0, 10, true}, 104, 1, 1},
+      {{9, 4, 0}, {9, 4, 3, true}, 304, 8, 1},
+      {{9, 4, 1}, {9, 4, 3, true}, 76, 2, 1},
+      {{9, 4, 2}, {9, 4, 3, true}, 304, 8, 1},
+      {{9, 5, 0}, {9, 5, 0, true}, 256, 8, 1},
+      {{11, 0, 0}, {11, 0, 0, true}, 96, 1, 2},
+      {{11, 5, 1}, {11, 5, 1, true}, 40, 1, 2},
+      {{11, 7, 0}, {11, 7, 0, true}, 32, 1, 2},
+      {{12, 0, 0}, {12, 0, 0, true}, 56, 1, 2},
+      {{12, 0, 1}, {12, 0, 1, true}, 64, 1, 2},
+      {{12, 5, 0}, {12, 1, 0, true}, 256, 8, 1},
+      {{12, 5, 1}, {12, 1, 0, true}, 256, 8, 1},
+      {{12, 5, 0}, {12, 5, 0, true}, 256, 8, 0},
+      {{12, 5, 0}, {}, 256, 8, 0},
+      {{13, 0, 0}, {13, 0, 0, true}, 64, 1, 0},
+      {{11, 0, 0}, {11, 0, 0, true}, 95, 1, 0},
+      {{9, 4, 2}, {9, 4, 3, true}, 303, 8, 0},
+      {{9, 4, 2}, {9, 4, 3, true}, 1024, 8, 1},
+      {{9, 4, 2}, {9, 4, 3, true}, 2048, 8, 0},
+  };
+  for (const auto& test : cases) {
+    SCOPED_TRACE(test.gfx_ip[0]);
+    SCOPED_TRACE(test.gfx_ip[1]);
+    SCOPED_TRACE(test.gfx_ip[2]);
+    amdf_gpu_kfd_topology_t topology = {};
+    topology.properties.gfx_ip = {test.gfx_ip[0], test.gfx_ip[1],
+                                  test.gfx_ip[2]};
+    topology.gc_ip = test.gc_ip;
+    topology.properties.compute.compute_unit_count = test.compute_unit_count;
+    topology.properties.topology.xcc_count = test.xcc_count;
+    const auto geometry = amdf_gpu_kfd_topology_execution_resources(&topology);
+    EXPECT_EQ(geometry.compute_units_per_resource, test.units_per_resource);
+    EXPECT_EQ(geometry.group_count,
+              test.units_per_resource ? test.xcc_count : 0);
+    EXPECT_EQ(geometry.minimum_selected_resources_per_group,
+              test.units_per_resource ? 1u : 0u);
+  }
+}
+
 // The filesystem is the native dependency. The production query reads it
 // through the instance's sysfs root. Profile construction additionally queries
 // cached render metadata; neither path acquires a KFD VM or execution storage.
@@ -423,7 +476,8 @@ TEST_F(KfdTopologyTest,
               AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
     EXPECT_EQ(profile->queue_families[0].user_queue_capabilities,
               AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
-                  AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER);
+                  AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER |
+                  AMDF_USER_QUEUE_CAPABILITY_EXECUTION_RESOURCE_SELECTION);
     EXPECT_EQ(profile->queue_families[1].command_type,
               AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA);
     const bool restricted = version == "6.16.13\n" || version == "6.16.13";

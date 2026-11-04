@@ -546,6 +546,7 @@ amdf_cc_test(
     deps = [
         ":aql",
         ":device_state",
+        ":topology",
         ":user_queue",
         ":user_queue_native",
         "//libamdf/src:allocator",
