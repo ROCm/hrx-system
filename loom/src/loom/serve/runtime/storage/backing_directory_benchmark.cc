@@ -56,7 +56,7 @@ BENCHMARK(BM_MarkResidentSlots)->Arg(16)->Arg(256)->Arg(4096);
 static void BM_DeniedSparseGrowth(benchmark::State& state) {
   loom_serve_backing_directory_t directory;
   loom_serve_backing_directory_initialize(iree_allocator_system(), &directory);
-  const auto live_indexes = Populate(state.range(0), &directory);
+  auto live_indexes = Populate(state.range(0), &directory);
   const iree_host_size_t missing_count = state.range(1);
   const iree_host_size_t missing_origin = state.range(0) * 17 + 1;
   for (auto _ : state) {
