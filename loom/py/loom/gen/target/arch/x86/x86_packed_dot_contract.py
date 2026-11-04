@@ -24,7 +24,6 @@ def _ensure_runtime_py_on_path() -> None:
 _ensure_runtime_py_on_path()
 
 from loom.gen import bootstrap as _bootstrap  # noqa: E402
-from loom.gen.support.c import c_string_literal as _c_string_literal  # noqa: E402
 from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import (  # noqa: E402
     GeneratedFileMaintenanceMode,
@@ -51,7 +50,6 @@ from loom.target.arch.x86.target_info import (  # noqa: E402
     sorted_descriptor_set_infos,
     x86_descriptor_set_view_infos_by_storage_generator_target,
 )
-from loom.target.low_descriptors import descriptor_stable_id  # noqa: E402
 
 DESCRIPTION = "x86 packed-dot contract header"
 REGENERATE_COMMAND = "python3 loom/py/loom/gen/run.py x86_packed_dot_contract --in-place"
@@ -60,10 +58,6 @@ _CHECKED_IN_HEADER_PATH = "loom/src/loom/target/arch/x86/packed_dot_contract_dat
 
 def _join_source(lines: Sequence[str]) -> str:
     return "\n".join(lines)
-
-
-def _hex_u64_literal(value: int) -> str:
-    return f"UINT64_C(0x{value:x})"
 
 
 def _low_descriptor_ordinal_tables() -> tuple[tuple[int | None, ...] | None, ...]:
@@ -148,26 +142,21 @@ def _emit_source() -> str:
         descriptor_lines.extend(
             [
                 "    {",
-                f'        .name = IREE_SVL("{_c_string_literal(descriptor.key)}"),',
-                f"        .stable_id = {_hex_u64_literal(descriptor_stable_id(descriptor.key))},",
-                f'        .llvm_intrinsic_name = IREE_SVL("{_c_string_literal(descriptor.llvm_intrinsic_name)}"),',
-                f"        .llvm_source_abi = {descriptor.llvm_source_abi},",
-                f'        .instruction_mnemonic = IREE_SVL("{_c_string_literal(descriptor.mnemonic)}"),',
-                f"        .family = {descriptor.family},",
                 f"        .required_feature_bits = UINT64_C(0x{descriptor.required_feature_bits:x}),",
-                f"        .flags = UINT32_C(0x{descriptor.flags:x}),",
+                f"        .native_contraction_facts = {native_facts_reference},",
                 "        .shape = {",
                 f"            .vector_bit_width = {descriptor.vector_bit_width},",
                 f"            .input_lane_count = {native_shape.block_count * native_shape.k},",
                 f"            .result_lane_count = {native_shape.block_count},",
                 f"            .reduction_group_size = {native_shape.k},",
                 "        },",
+                f"        .flags = UINT32_C(0x{descriptor.flags:x}),",
+                f"        .low_descriptor_ref = UINT16_C({descriptor_ref}),",
+                f"        .family = {descriptor.family},",
                 f"        .lhs_numeric_type = {descriptor.lhs_numeric_type},",
                 f"        .rhs_numeric_type = {descriptor.rhs_numeric_type},",
                 f"        .accumulator_numeric_type = {descriptor.accumulator_numeric_type},",
                 f"        .result_numeric_type = {descriptor.result_numeric_type},",
-                f"        .native_contraction_facts = {native_facts_reference},",
-                f"        .low_descriptor_ref = UINT16_C({descriptor_ref}),",
                 "    },",
             ]
         )

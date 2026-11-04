@@ -17,6 +17,7 @@ namespace {
 
 constexpr uint8_t kTestDialectId = 7;
 constexpr uint8_t kLegalOpIndex = 3;
+constexpr uint8_t kRelatedOpIndex = 1;
 
 const loom_target_contract_descriptor_rule_t kDescriptorRules[] = {{0}};
 const loom_target_contract_fragment_t kContractFragment = {
@@ -37,6 +38,10 @@ const loom_target_contract_dialect_table_t kDialects[] = {
     {IREE_ARRAYSIZE(kOpEntries), kOpEntries},
     {0, nullptr},
 };
+const loom_op_kind_t kSourceGraphOpKinds[] = {
+    LOOM_OP_KIND(kTestDialectId, kRelatedOpIndex),
+    LOOM_OP_KIND(kTestDialectId, kLegalOpIndex),
+};
 const loom_target_contract_index_t kIndex = {
     kTestDialectId,
     IREE_ARRAYSIZE(kDialects),
@@ -45,9 +50,11 @@ const loom_target_contract_index_t kIndex = {
     kCases,
     IREE_ARRAYSIZE(kBindings),
     0,
+    IREE_ARRAYSIZE(kSourceGraphOpKinds),
     kBindings,
     nullptr,
     nullptr,
+    kSourceGraphOpKinds,
 };
 
 TEST(TargetContractQueryEnvironmentTest, MissingAllocatorReturnsNull) {
@@ -153,6 +160,17 @@ TEST(TargetContractIndexTest, LookupKindIgnoresUncoveredOps) {
   EXPECT_TRUE(loom_target_contract_op_entry_is_empty(
       loom_target_contract_index_lookup_kind(
           &kIndex, LOOM_OP_KIND(kTestDialectId, kLegalOpIndex + 1))));
+}
+
+TEST(TargetContractIndexTest, FindsSourceGraphOperationKinds) {
+  EXPECT_TRUE(loom_target_contract_index_has_source_graph_op_kind(
+      &kIndex, LOOM_OP_KIND(kTestDialectId, kRelatedOpIndex)));
+  EXPECT_TRUE(loom_target_contract_index_has_source_graph_op_kind(
+      &kIndex, LOOM_OP_KIND(kTestDialectId, kLegalOpIndex)));
+  EXPECT_FALSE(loom_target_contract_index_has_source_graph_op_kind(
+      &kIndex, LOOM_OP_KIND(kTestDialectId, kLegalOpIndex + 1)));
+  EXPECT_FALSE(loom_target_contract_index_has_source_graph_op_kind(
+      &kIndex, LOOM_OP_KIND(kTestDialectId + 1, kRelatedOpIndex)));
 }
 
 TEST(TargetContractVectorLaneProjectionTest, ProjectsIndependentLaneCounts) {

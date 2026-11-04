@@ -439,15 +439,10 @@ typedef struct loom_target_contract_fragment_t {
   uint16_t descriptor_rule_count;
   // Number of descriptor-matrix rows.
   uint16_t descriptor_matrix_count;
-  // Number of distinct op kinds participating in query-visible source graphs.
-  uint16_t source_graph_op_kind_count;
   // Descriptor-rule row pool.
   const loom_target_contract_descriptor_rule_t* descriptor_rules;
   // Descriptor-matrix row pool.
   const loom_target_contract_descriptor_matrix_rule_t* descriptor_matrices;
-  // Sorted union of root and related-node kinds from every emitted graph rule
-  // that participates in target queries. Immutable across source mutations.
-  const loom_op_kind_t* source_graph_op_kinds;
 } loom_target_contract_fragment_t;
 
 // Returns true when |fragment| participates in read-only target contract
@@ -458,16 +453,11 @@ static inline bool loom_target_contract_fragment_queries_target(
          0;
 }
 
-// Returns whether |op_kind| can participate as a root or related node in any
-// query-visible source graph. A false result proves that a point contract query
-// does not need source graph ownership analysis.
-bool loom_target_contract_fragment_has_source_graph_op(
-    const loom_target_contract_fragment_t* fragment, loom_op_kind_t op_kind);
-
 typedef struct loom_target_contract_binding_t {
-  // Generated fragment rodata linked into the active target package.
+  // Generated fragment rodata, or NULL for an inactive family binding slot.
   const loom_target_contract_fragment_t* fragment;
-  // Policy rule-set ordinal corresponding to |fragment|'s descriptor-rule rows.
+  // Policy rule-set ordinal corresponding to |fragment|'s descriptor-rule
+  // rows, or UINT16_MAX for an inactive family binding slot.
   uint16_t rule_set_index;
   // Primary-descriptor feature class shared by every lowering rule, or zero.
   uint8_t required_primary_feature_class;
@@ -480,20 +470,26 @@ typedef struct loom_target_contract_index_t {
   uint8_t dialect_count;
   // Dense dialect slots indexed by dialect id minus dialect_base_id.
   const loom_target_contract_dialect_table_t* dialects;
-  // Number of composed case rows.
-  uint16_t case_count;
+  // Exclusive upper bound for composed case row indices, or zero when empty.
+  uint16_t case_index_bound;
   // Composed case rows referenced by dense op entries.
   const loom_target_contract_case_t* cases;
-  // Number of active fragment bindings.
+  // Number of family-stable fragment binding slots addressable by cases.
   uint8_t binding_count;
   // Number of operation kinds that may root a multi-operation source graph.
   uint16_t source_graph_root_op_kind_count;
-  // Active fragment bindings referenced by composed case rows.
+  // Number of root or related operation kinds in query-visible source graphs.
+  uint16_t source_graph_op_kind_count;
+  // Family-stable fragment bindings. Composed cases reference active slots;
+  // unreferenced slots may be inactive in this target profile.
   const loom_target_contract_binding_t* bindings;
   // Relocation-free candidate-selection rows, buckets, and ordinal sequences.
   const uint32_t* selection_data;
   // Sorted operation kinds that may root a multi-operation source graph.
   const loom_op_kind_t* source_graph_root_op_kinds;
+  // Sorted union of root and related-node kinds from every query-visible source
+  // graph in the composed index.
+  const loom_op_kind_t* source_graph_op_kinds;
 } loom_target_contract_index_t;
 
 // Looks up the compact case span for an op kind in a composed index.
@@ -517,22 +513,37 @@ loom_target_contract_index_lookup_kind(
   return dialect_table->op_entries[op_index];
 }
 
-// Returns true when |op_kind| may root a multi-operation source graph. The
-// generated set is exact and sorted; related-node kinds remain in rule rows.
-static inline bool loom_target_contract_index_has_source_graph_root_op_kind(
-    const loom_target_contract_index_t* index, loom_op_kind_t op_kind) {
+static inline bool loom_target_contract_op_kind_set_contains(
+    uint16_t count, const loom_op_kind_t* values, loom_op_kind_t op_kind) {
   uint16_t lower_bound = 0;
-  uint16_t upper_bound = index->source_graph_root_op_kind_count;
+  uint16_t upper_bound = count;
   while (lower_bound < upper_bound) {
     const uint16_t middle = lower_bound + (upper_bound - lower_bound) / 2;
-    if (index->source_graph_root_op_kinds[middle] < op_kind) {
+    if (values[middle] < op_kind) {
       lower_bound = middle + 1;
     } else {
       upper_bound = middle;
     }
   }
-  return lower_bound < index->source_graph_root_op_kind_count &&
-         index->source_graph_root_op_kinds[lower_bound] == op_kind;
+  return lower_bound < count && values[lower_bound] == op_kind;
+}
+
+// Returns true when |op_kind| may root a multi-operation source graph. The
+// generated set is exact and sorted; related-node kinds remain in rule rows.
+static inline bool loom_target_contract_index_has_source_graph_root_op_kind(
+    const loom_target_contract_index_t* index, loom_op_kind_t op_kind) {
+  return loom_target_contract_op_kind_set_contains(
+      index->source_graph_root_op_kind_count, index->source_graph_root_op_kinds,
+      op_kind);
+}
+
+// Returns whether |op_kind| can participate as a root or related node in any
+// query-visible source graph. A false result proves that a point contract query
+// does not need source graph ownership analysis.
+static inline bool loom_target_contract_index_has_source_graph_op_kind(
+    const loom_target_contract_index_t* index, loom_op_kind_t op_kind) {
+  return loom_target_contract_op_kind_set_contains(
+      index->source_graph_op_kind_count, index->source_graph_op_kinds, op_kind);
 }
 
 // Returns an empty target contract query result.

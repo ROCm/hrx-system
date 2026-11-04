@@ -118,19 +118,9 @@ static bool loom_low_lower_source_query_case_has_related_nodes(
 static bool loom_low_lower_source_query_op_participates_in_graphs(
     const loom_low_lower_contract_query_options_t* options,
     loom_op_kind_t op_kind) {
-  if (options->contract_index == NULL) {
-    return false;
-  }
-  for (uint8_t i = 0; i < options->contract_index->binding_count; ++i) {
-    const loom_target_contract_binding_t* binding =
-        &options->contract_index->bindings[i];
-    if (binding->rule_set_index < options->rule_sets.count &&
-        loom_target_contract_fragment_has_source_graph_op(binding->fragment,
-                                                          op_kind)) {
-      return true;
-    }
-  }
-  return false;
+  return options->contract_index != NULL &&
+         loom_target_contract_index_has_source_graph_op_kind(
+             options->contract_index, op_kind);
 }
 
 static bool loom_low_lower_source_query_op_has_related_rule(

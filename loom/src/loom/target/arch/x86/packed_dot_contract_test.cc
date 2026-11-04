@@ -7,6 +7,7 @@
 #include "loom/target/arch/x86/packed_dot_contract.h"
 
 #include <string>
+#include <unordered_set>
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -22,12 +23,18 @@ std::string ToString(iree_string_view_t value) {
 }
 
 const loom_x86_packed_dot_descriptor_t* FindDescriptor(const char* name) {
-  iree_string_view_t expected_name = iree_make_cstring_view(name);
+  const uint64_t expected_stable_id =
+      loom_low_descriptor_stable_id_from_key(iree_make_cstring_view(name));
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_x86_packed_dot_core_descriptor_set();
   const iree_host_size_t count = loom_x86_packed_dot_descriptor_count();
   for (iree_host_size_t i = 0; i < count; ++i) {
     const loom_x86_packed_dot_descriptor_t* descriptor =
         loom_x86_packed_dot_descriptor_at(i);
-    if (iree_string_view_equal(descriptor->name, expected_name)) {
+    const loom_low_descriptor_t* low_descriptor =
+        loom_x86_packed_dot_low_descriptor(descriptor_set, descriptor);
+    if (low_descriptor != nullptr &&
+        low_descriptor->stable_id == expected_stable_id) {
       return descriptor;
     }
   }
@@ -67,24 +74,22 @@ loom_x86_packed_dot_match_request_t MatchRequest(
   return request;
 }
 
-TEST(PackedDotContractTest, DescriptorNamesAreUnique) {
+TEST(PackedDotContractTest, EverySemanticDescriptorProjectsUniquely) {
   const iree_host_size_t count = loom_x86_packed_dot_descriptor_count();
   ASSERT_GT(count, 0u);
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_x86_packed_dot_core_descriptor_set();
+  std::unordered_set<uint64_t> stable_ids;
   for (iree_host_size_t i = 0; i < count; ++i) {
-    const loom_x86_packed_dot_descriptor_t* lhs =
+    const loom_x86_packed_dot_descriptor_t* descriptor =
         loom_x86_packed_dot_descriptor_at(i);
-    ASSERT_NE(lhs, nullptr);
-    EXPECT_FALSE(iree_string_view_is_empty(lhs->name));
-    EXPECT_FALSE(iree_string_view_is_empty(lhs->llvm_intrinsic_name));
-    EXPECT_FALSE(iree_string_view_is_empty(lhs->instruction_mnemonic));
-    for (iree_host_size_t j = i + 1; j < count; ++j) {
-      const loom_x86_packed_dot_descriptor_t* rhs =
-          loom_x86_packed_dot_descriptor_at(j);
-      ASSERT_NE(rhs, nullptr);
-      EXPECT_FALSE(iree_string_view_equal(lhs->name, rhs->name))
-          << ToString(lhs->name);
-    }
+    ASSERT_NE(descriptor, nullptr);
+    const loom_low_descriptor_t* low_descriptor =
+        loom_x86_packed_dot_low_descriptor(descriptor_set, descriptor);
+    ASSERT_NE(low_descriptor, nullptr);
+    EXPECT_TRUE(stable_ids.insert(low_descriptor->stable_id).second);
   }
+  EXPECT_EQ(stable_ids.size(), count);
   EXPECT_EQ(loom_x86_packed_dot_descriptor_at(count), nullptr);
 }
 
@@ -97,13 +102,15 @@ TEST(PackedDotContractTest, ResolvesGeneratedLowDescriptorReferences) {
       loom_x86_packed_dot_low_descriptor(
           loom_x86_packed_dot_core_descriptor_set(), semantic_descriptor);
   ASSERT_NE(packed_dot_descriptor, nullptr);
-  EXPECT_EQ(packed_dot_descriptor->stable_id, semantic_descriptor->stable_id);
+  const uint64_t expected_stable_id = loom_low_descriptor_stable_id_from_key(
+      IREE_SV("x86.avx512_bf16.vdpbf16ps.ymm"));
+  EXPECT_EQ(packed_dot_descriptor->stable_id, expected_stable_id);
 
   const loom_low_descriptor_t* composite_descriptor =
       loom_x86_packed_dot_low_descriptor(
           loom_x86_avx512_features_core_descriptor_set(), semantic_descriptor);
   ASSERT_NE(composite_descriptor, nullptr);
-  EXPECT_EQ(composite_descriptor->stable_id, semantic_descriptor->stable_id);
+  EXPECT_EQ(composite_descriptor->stable_id, expected_stable_id);
 
   EXPECT_EQ(loom_x86_packed_dot_low_descriptor(
                 loom_x86_avx512_core_descriptor_set(), semantic_descriptor),
@@ -115,7 +122,9 @@ TEST(PackedDotContractTest, ResolvesGeneratedLowDescriptorReferences) {
       loom_x86_packed_dot_low_descriptor(
           loom_x86_avx_vnni_core_descriptor_set(), semantic_descriptor);
   ASSERT_NE(avx_vnni_descriptor, nullptr);
-  EXPECT_EQ(avx_vnni_descriptor->stable_id, semantic_descriptor->stable_id);
+  EXPECT_EQ(avx_vnni_descriptor->stable_id,
+            loom_low_descriptor_stable_id_from_key(
+                IREE_SV("x86.avx_vnni.vpdpbusd.ymm")));
 }
 
 TEST(PackedDotContractTest, NamesExposeStableDisplayStrings) {
@@ -135,11 +144,6 @@ TEST(PackedDotContractTest, Avx512VnniByteDescriptor) {
       FindDescriptor("x86.avx512_vnni.vpdpbusd.zmm");
   ASSERT_NE(descriptor, nullptr);
   EXPECT_EQ(descriptor->family, LOOM_X86_PACKED_DOT_FAMILY_AVX512_VNNI);
-  EXPECT_EQ(ToString(descriptor->llvm_intrinsic_name),
-            "llvm.x86.avx512.vpdpbusd.512");
-  EXPECT_EQ(descriptor->llvm_source_abi,
-            LOOM_X86_PACKED_DOT_LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR);
-  EXPECT_EQ(ToString(descriptor->instruction_mnemonic), "vpdpbusd");
   EXPECT_EQ(descriptor->required_feature_bits, LOOM_X86_FEATURE_AVX512_VNNI);
   EXPECT_EQ(descriptor->shape.vector_bit_width, 512);
   EXPECT_EQ(descriptor->shape.input_lane_count, 64);
@@ -155,10 +159,6 @@ TEST(PackedDotContractTest, AvxVnniInt8SignedSignedDescriptor) {
       FindDescriptor("x86.avx_vnni_int8.vpdpbssd.ymm");
   ASSERT_NE(descriptor, nullptr);
   EXPECT_EQ(descriptor->family, LOOM_X86_PACKED_DOT_FAMILY_AVX_VNNI_INT8);
-  EXPECT_EQ(ToString(descriptor->llvm_intrinsic_name),
-            "llvm.x86.avx2.vpdpbssd.256");
-  EXPECT_EQ(descriptor->llvm_source_abi,
-            LOOM_X86_PACKED_DOT_LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR);
   EXPECT_EQ(descriptor->shape.vector_bit_width, 256);
   EXPECT_EQ(descriptor->lhs_numeric_type, LOOM_X86_PACKED_DOT_NUMERIC_I8);
   EXPECT_EQ(descriptor->rhs_numeric_type, LOOM_X86_PACKED_DOT_NUMERIC_I8);
@@ -169,10 +169,6 @@ TEST(PackedDotContractTest, Avx10Fp16Descriptor) {
       FindDescriptor("x86.avx10_2.vdpphps.zmm");
   ASSERT_NE(descriptor, nullptr);
   EXPECT_EQ(descriptor->family, LOOM_X86_PACKED_DOT_FAMILY_AVX10_2);
-  EXPECT_EQ(ToString(descriptor->llvm_intrinsic_name),
-            "llvm.x86.avx10.vdpphps.512");
-  EXPECT_EQ(descriptor->llvm_source_abi,
-            LOOM_X86_PACKED_DOT_LLVM_SOURCE_ABI_PAYLOAD);
   EXPECT_EQ(descriptor->shape.reduction_group_size, 2);
   EXPECT_EQ(descriptor->lhs_numeric_type, LOOM_X86_PACKED_DOT_NUMERIC_F16);
   EXPECT_EQ(descriptor->accumulator_numeric_type,
@@ -186,9 +182,6 @@ TEST(PackedDotContractTest, Avx512Bf16Descriptor) {
   EXPECT_EQ(descriptor->family, LOOM_X86_PACKED_DOT_FAMILY_AVX512_BF16);
   EXPECT_EQ(descriptor->required_feature_bits,
             LOOM_X86_FEATURE_AVX512_BF16 | LOOM_X86_FEATURE_AVX512_VL);
-  EXPECT_EQ(descriptor->llvm_source_abi,
-            LOOM_X86_PACKED_DOT_LLVM_SOURCE_ABI_PAYLOAD);
-  EXPECT_EQ(ToString(descriptor->instruction_mnemonic), "vdpbf16ps");
   EXPECT_EQ(descriptor->lhs_numeric_type, LOOM_X86_PACKED_DOT_NUMERIC_BF16);
   EXPECT_EQ(descriptor->result_numeric_type, LOOM_X86_PACKED_DOT_NUMERIC_F32);
 }

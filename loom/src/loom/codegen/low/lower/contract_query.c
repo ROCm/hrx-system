@@ -871,7 +871,7 @@ iree_status_t loom_low_lower_query_target_contract_with_selection(
   }
 
   if (options->contract_index == NULL ||
-      options->contract_index->case_count == 0) {
+      options->contract_index->case_index_bound == 0) {
     return iree_ok_status();
   }
 
