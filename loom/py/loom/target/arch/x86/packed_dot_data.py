@@ -65,17 +65,10 @@ _NUMERIC_TYPE_BIT_COUNTS = {
     NUMERIC_F32: 32,
 }
 
-LLVM_SOURCE_ABI_PAYLOAD = "LOOM_X86_PACKED_DOT_LLVM_SOURCE_ABI_PAYLOAD"
-LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR = (
-    "LOOM_X86_PACKED_DOT_LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR"
-)
-
 
 @dataclass(frozen=True, slots=True)
 class PackedDotDescriptor:
     key: str
-    llvm_intrinsic_name: str
-    llvm_source_abi: str
     mnemonic: str
     family: str
     required_feature_bits: int
@@ -89,8 +82,6 @@ class PackedDotDescriptor:
 
 def pd(
     key: str,
-    llvm_intrinsic_name: str,
-    llvm_source_abi: str,
     mnemonic: str,
     family: str,
     required_feature_bits: int,
@@ -103,8 +94,6 @@ def pd(
 ) -> PackedDotDescriptor:
     return PackedDotDescriptor(
         key=key,
-        llvm_intrinsic_name=llvm_intrinsic_name,
-        llvm_source_abi=llvm_source_abi,
         mnemonic=mnemonic,
         family=family,
         required_feature_bits=required_feature_bits,
@@ -211,8 +200,6 @@ def packed_dot_native_contraction_facts(
 X86_PACKED_DOT_DESCRIPTORS = (
     pd(
         "x86.avx512_vnni.vpdpbusd.xmm",
-        "llvm.x86.avx512.vpdpbusd.128",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbusd",
         FAMILY_AVX512_VNNI,
         FEATURE_AVX512_VNNI | FEATURE_AVX512_VL,
@@ -225,8 +212,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx512_vnni.vpdpbusd.ymm",
-        "llvm.x86.avx512.vpdpbusd.256",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbusd",
         FAMILY_AVX512_VNNI,
         FEATURE_AVX512_VNNI | FEATURE_AVX512_VL,
@@ -239,8 +224,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx512_vnni.vpdpbusd.zmm",
-        "llvm.x86.avx512.vpdpbusd.512",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbusd",
         FAMILY_AVX512_VNNI,
         FEATURE_AVX512_VNNI,
@@ -253,8 +236,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx512_vnni.vpdpbusds.xmm",
-        "llvm.x86.avx512.vpdpbusds.128",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbusds",
         FAMILY_AVX512_VNNI,
         FEATURE_AVX512_VNNI | FEATURE_AVX512_VL,
@@ -267,8 +248,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx512_vnni.vpdpbusds.ymm",
-        "llvm.x86.avx512.vpdpbusds.256",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbusds",
         FAMILY_AVX512_VNNI,
         FEATURE_AVX512_VNNI | FEATURE_AVX512_VL,
@@ -281,8 +260,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx512_vnni.vpdpbusds.zmm",
-        "llvm.x86.avx512.vpdpbusds.512",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbusds",
         FAMILY_AVX512_VNNI,
         FEATURE_AVX512_VNNI,
@@ -295,8 +272,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx512_vnni.vpdpwssd.xmm",
-        "llvm.x86.avx512.vpdpwssd.128",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpwssd",
         FAMILY_AVX512_VNNI,
         FEATURE_AVX512_VNNI | FEATURE_AVX512_VL,
@@ -309,8 +284,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx512_vnni.vpdpwssd.ymm",
-        "llvm.x86.avx512.vpdpwssd.256",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpwssd",
         FAMILY_AVX512_VNNI,
         FEATURE_AVX512_VNNI | FEATURE_AVX512_VL,
@@ -323,8 +296,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx512_vnni.vpdpwssd.zmm",
-        "llvm.x86.avx512.vpdpwssd.512",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpwssd",
         FAMILY_AVX512_VNNI,
         FEATURE_AVX512_VNNI,
@@ -337,8 +308,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx512_vnni.vpdpwssds.xmm",
-        "llvm.x86.avx512.vpdpwssds.128",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpwssds",
         FAMILY_AVX512_VNNI,
         FEATURE_AVX512_VNNI | FEATURE_AVX512_VL,
@@ -351,8 +320,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx512_vnni.vpdpwssds.ymm",
-        "llvm.x86.avx512.vpdpwssds.256",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpwssds",
         FAMILY_AVX512_VNNI,
         FEATURE_AVX512_VNNI | FEATURE_AVX512_VL,
@@ -365,8 +332,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx512_vnni.vpdpwssds.zmm",
-        "llvm.x86.avx512.vpdpwssds.512",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpwssds",
         FAMILY_AVX512_VNNI,
         FEATURE_AVX512_VNNI,
@@ -379,8 +344,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni.vpdpbusd.xmm",
-        "llvm.x86.avx512.vpdpbusd.128",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbusd",
         FAMILY_AVX_VNNI,
         FEATURE_AVX_VNNI,
@@ -393,8 +356,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni.vpdpbusd.ymm",
-        "llvm.x86.avx512.vpdpbusd.256",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbusd",
         FAMILY_AVX_VNNI,
         FEATURE_AVX_VNNI,
@@ -407,8 +368,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni.vpdpbusds.xmm",
-        "llvm.x86.avx512.vpdpbusds.128",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbusds",
         FAMILY_AVX_VNNI,
         FEATURE_AVX_VNNI,
@@ -421,8 +380,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni.vpdpbusds.ymm",
-        "llvm.x86.avx512.vpdpbusds.256",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbusds",
         FAMILY_AVX_VNNI,
         FEATURE_AVX_VNNI,
@@ -435,8 +392,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni.vpdpwssd.xmm",
-        "llvm.x86.avx512.vpdpwssd.128",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpwssd",
         FAMILY_AVX_VNNI,
         FEATURE_AVX_VNNI,
@@ -449,8 +404,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni.vpdpwssd.ymm",
-        "llvm.x86.avx512.vpdpwssd.256",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpwssd",
         FAMILY_AVX_VNNI,
         FEATURE_AVX_VNNI,
@@ -463,8 +416,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni.vpdpwssds.xmm",
-        "llvm.x86.avx512.vpdpwssds.128",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpwssds",
         FAMILY_AVX_VNNI,
         FEATURE_AVX_VNNI,
@@ -477,8 +428,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni.vpdpwssds.ymm",
-        "llvm.x86.avx512.vpdpwssds.256",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpwssds",
         FAMILY_AVX_VNNI,
         FEATURE_AVX_VNNI,
@@ -491,8 +440,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni_int8.vpdpbssd.xmm",
-        "llvm.x86.avx2.vpdpbssd.128",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbssd",
         FAMILY_AVX_VNNI_INT8,
         FEATURE_AVX_VNNI_INT8,
@@ -505,8 +452,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni_int8.vpdpbssd.ymm",
-        "llvm.x86.avx2.vpdpbssd.256",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbssd",
         FAMILY_AVX_VNNI_INT8,
         FEATURE_AVX_VNNI_INT8,
@@ -519,8 +464,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni_int8.vpdpbssds.xmm",
-        "llvm.x86.avx2.vpdpbssds.128",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbssds",
         FAMILY_AVX_VNNI_INT8,
         FEATURE_AVX_VNNI_INT8,
@@ -533,8 +476,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni_int8.vpdpbssds.ymm",
-        "llvm.x86.avx2.vpdpbssds.256",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbssds",
         FAMILY_AVX_VNNI_INT8,
         FEATURE_AVX_VNNI_INT8,
@@ -547,8 +488,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni_int8.vpdpbsud.xmm",
-        "llvm.x86.avx2.vpdpbsud.128",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbsud",
         FAMILY_AVX_VNNI_INT8,
         FEATURE_AVX_VNNI_INT8,
@@ -561,8 +500,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni_int8.vpdpbsud.ymm",
-        "llvm.x86.avx2.vpdpbsud.256",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbsud",
         FAMILY_AVX_VNNI_INT8,
         FEATURE_AVX_VNNI_INT8,
@@ -575,8 +512,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni_int8.vpdpbsuds.xmm",
-        "llvm.x86.avx2.vpdpbsuds.128",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbsuds",
         FAMILY_AVX_VNNI_INT8,
         FEATURE_AVX_VNNI_INT8,
@@ -589,8 +524,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni_int8.vpdpbsuds.ymm",
-        "llvm.x86.avx2.vpdpbsuds.256",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbsuds",
         FAMILY_AVX_VNNI_INT8,
         FEATURE_AVX_VNNI_INT8,
@@ -603,8 +536,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni_int8.vpdpbuud.xmm",
-        "llvm.x86.avx2.vpdpbuud.128",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbuud",
         FAMILY_AVX_VNNI_INT8,
         FEATURE_AVX_VNNI_INT8,
@@ -617,8 +548,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni_int8.vpdpbuud.ymm",
-        "llvm.x86.avx2.vpdpbuud.256",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbuud",
         FAMILY_AVX_VNNI_INT8,
         FEATURE_AVX_VNNI_INT8,
@@ -631,8 +560,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni_int8.vpdpbuuds.xmm",
-        "llvm.x86.avx2.vpdpbuuds.128",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbuuds",
         FAMILY_AVX_VNNI_INT8,
         FEATURE_AVX_VNNI_INT8,
@@ -645,8 +572,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni_int8.vpdpbuuds.ymm",
-        "llvm.x86.avx2.vpdpbuuds.256",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbuuds",
         FAMILY_AVX_VNNI_INT8,
         FEATURE_AVX_VNNI_INT8,
@@ -659,8 +584,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni_int16.vpdpwsud.xmm",
-        "llvm.x86.avx2.vpdpwsud.128",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpwsud",
         FAMILY_AVX_VNNI_INT16,
         FEATURE_AVX_VNNI_INT16,
@@ -673,8 +596,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni_int16.vpdpwsud.ymm",
-        "llvm.x86.avx2.vpdpwsud.256",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpwsud",
         FAMILY_AVX_VNNI_INT16,
         FEATURE_AVX_VNNI_INT16,
@@ -687,8 +608,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni_int16.vpdpwusd.xmm",
-        "llvm.x86.avx2.vpdpwusd.128",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpwusd",
         FAMILY_AVX_VNNI_INT16,
         FEATURE_AVX_VNNI_INT16,
@@ -701,8 +620,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni_int16.vpdpwusd.ymm",
-        "llvm.x86.avx2.vpdpwusd.256",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpwusd",
         FAMILY_AVX_VNNI_INT16,
         FEATURE_AVX_VNNI_INT16,
@@ -715,8 +632,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni_int16.vpdpwuud.xmm",
-        "llvm.x86.avx2.vpdpwuud.128",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpwuud",
         FAMILY_AVX_VNNI_INT16,
         FEATURE_AVX_VNNI_INT16,
@@ -729,8 +644,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx_vnni_int16.vpdpwuud.ymm",
-        "llvm.x86.avx2.vpdpwuud.256",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpwuud",
         FAMILY_AVX_VNNI_INT16,
         FEATURE_AVX_VNNI_INT16,
@@ -743,8 +656,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx10_2.vpdpbssd.zmm",
-        "llvm.x86.avx10.vpdpbssd.512",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbssd",
         FAMILY_AVX10_2,
         FEATURE_AVX10_2,
@@ -757,8 +668,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx10_2.vpdpbsud.zmm",
-        "llvm.x86.avx10.vpdpbsud.512",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbsud",
         FAMILY_AVX10_2,
         FEATURE_AVX10_2,
@@ -771,8 +680,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx10_2.vpdpbuud.zmm",
-        "llvm.x86.avx10.vpdpbuud.512",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbuud",
         FAMILY_AVX10_2,
         FEATURE_AVX10_2,
@@ -785,8 +692,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx10_2.vpdpbssds.zmm",
-        "llvm.x86.avx10.vpdpbssds.512",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbssds",
         FAMILY_AVX10_2,
         FEATURE_AVX10_2,
@@ -799,8 +704,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx10_2.vpdpbsuds.zmm",
-        "llvm.x86.avx10.vpdpbsuds.512",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbsuds",
         FAMILY_AVX10_2,
         FEATURE_AVX10_2,
@@ -813,8 +716,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx10_2.vpdpbuuds.zmm",
-        "llvm.x86.avx10.vpdpbuuds.512",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpbuuds",
         FAMILY_AVX10_2,
         FEATURE_AVX10_2,
@@ -827,8 +728,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx10_2.vpdpwsud.zmm",
-        "llvm.x86.avx10.vpdpwsud.512",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpwsud",
         FAMILY_AVX10_2,
         FEATURE_AVX10_2,
@@ -841,8 +740,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx10_2.vpdpwusd.zmm",
-        "llvm.x86.avx10.vpdpwusd.512",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpwusd",
         FAMILY_AVX10_2,
         FEATURE_AVX10_2,
@@ -855,8 +752,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx10_2.vpdpwuud.zmm",
-        "llvm.x86.avx10.vpdpwuud.512",
-        LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
         "vpdpwuud",
         FAMILY_AVX10_2,
         FEATURE_AVX10_2,
@@ -869,8 +764,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx10_2.vdpphps.xmm",
-        "llvm.x86.avx10.vdpphps.128",
-        LLVM_SOURCE_ABI_PAYLOAD,
         "vdpphps",
         FAMILY_AVX10_2,
         FEATURE_AVX10_2,
@@ -883,8 +776,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx10_2.vdpphps.ymm",
-        "llvm.x86.avx10.vdpphps.256",
-        LLVM_SOURCE_ABI_PAYLOAD,
         "vdpphps",
         FAMILY_AVX10_2,
         FEATURE_AVX10_2,
@@ -897,8 +788,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx10_2.vdpphps.zmm",
-        "llvm.x86.avx10.vdpphps.512",
-        LLVM_SOURCE_ABI_PAYLOAD,
         "vdpphps",
         FAMILY_AVX10_2,
         FEATURE_AVX10_2,
@@ -911,8 +800,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx512_bf16.vdpbf16ps.xmm",
-        "llvm.x86.avx512bf16.dpbf16ps.128",
-        LLVM_SOURCE_ABI_PAYLOAD,
         "vdpbf16ps",
         FAMILY_AVX512_BF16,
         FEATURE_AVX512_BF16 | FEATURE_AVX512_VL,
@@ -925,8 +812,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx512_bf16.vdpbf16ps.ymm",
-        "llvm.x86.avx512bf16.dpbf16ps.256",
-        LLVM_SOURCE_ABI_PAYLOAD,
         "vdpbf16ps",
         FAMILY_AVX512_BF16,
         FEATURE_AVX512_BF16 | FEATURE_AVX512_VL,
@@ -939,8 +824,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
     ),
     pd(
         "x86.avx512_bf16.vdpbf16ps.zmm",
-        "llvm.x86.avx512bf16.dpbf16ps.512",
-        LLVM_SOURCE_ABI_PAYLOAD,
         "vdpbf16ps",
         FAMILY_AVX512_BF16,
         FEATURE_AVX512_BF16,

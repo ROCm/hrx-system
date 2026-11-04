@@ -27,7 +27,8 @@ extern "C" {
 // Bitset of x86 features relevant to packed-dot contract availability.
 typedef loom_x86_feature_bits_t loom_x86_packed_dot_feature_bits_t;
 
-typedef enum loom_x86_packed_dot_family_e {
+typedef uint8_t loom_x86_packed_dot_family_t;
+enum loom_x86_packed_dot_family_e {
   // Unknown or uninitialized packed-dot family.
   LOOM_X86_PACKED_DOT_FAMILY_UNKNOWN = 0,
   // x86 AVX-512 VNNI instruction family.
@@ -42,9 +43,12 @@ typedef enum loom_x86_packed_dot_family_e {
   LOOM_X86_PACKED_DOT_FAMILY_AVX10_2,
   // x86 AVX-512 BF16 dot-product instruction family.
   LOOM_X86_PACKED_DOT_FAMILY_AVX512_BF16,
-} loom_x86_packed_dot_family_t;
+};
+static_assert(LOOM_X86_PACKED_DOT_FAMILY_AVX512_BF16 <= UINT8_MAX,
+              "x86 packed-dot families must fit in one byte");
 
-typedef enum loom_x86_packed_dot_numeric_type_e {
+typedef uint8_t loom_x86_packed_dot_numeric_type_t;
+enum loom_x86_packed_dot_numeric_type_e {
   // Unknown or uninitialized numeric payload.
   LOOM_X86_PACKED_DOT_NUMERIC_UNKNOWN = 0,
   // Signed i8 payload lanes.
@@ -63,16 +67,9 @@ typedef enum loom_x86_packed_dot_numeric_type_e {
   LOOM_X86_PACKED_DOT_NUMERIC_I32,
   // IEEE f32 accumulator/result lanes.
   LOOM_X86_PACKED_DOT_NUMERIC_F32,
-} loom_x86_packed_dot_numeric_type_t;
-
-typedef enum loom_x86_packed_dot_llvm_source_abi_e {
-  // Unknown or uninitialized LLVM intrinsic source operand ABI.
-  LOOM_X86_PACKED_DOT_LLVM_SOURCE_ABI_UNKNOWN = 0,
-  // LLVM intrinsic source operands use the logical payload vector type.
-  LOOM_X86_PACKED_DOT_LLVM_SOURCE_ABI_PAYLOAD,
-  // LLVM intrinsic source operands use the accumulator register vector type.
-  LOOM_X86_PACKED_DOT_LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR,
-} loom_x86_packed_dot_llvm_source_abi_t;
+};
+static_assert(LOOM_X86_PACKED_DOT_NUMERIC_F32 <= UINT8_MAX,
+              "x86 packed-dot numeric types must fit in one byte");
 
 // Bitset of semantic flags required by a packed-dot descriptor.
 typedef uint32_t loom_x86_packed_dot_contract_flags_t;
@@ -95,24 +92,18 @@ typedef struct loom_x86_packed_dot_shape_t {
 } loom_x86_packed_dot_shape_t;
 
 typedef struct loom_x86_packed_dot_descriptor_t {
-  // Stable Loom descriptor name used by tests, diagnostics, and target logs.
-  iree_string_view_t name;
-  // Durable low descriptor identity for target-set membership checks.
-  uint64_t stable_id;
-  // LLVM intrinsic name when Loom lowers through an intrinsic call.
-  iree_string_view_t llvm_intrinsic_name;
-  // Source operand ABI required by the LLVM intrinsic declaration and call.
-  loom_x86_packed_dot_llvm_source_abi_t llvm_source_abi;
-  // Assembly mnemonic expected after LLVM instruction selection.
-  iree_string_view_t instruction_mnemonic;
-  // x86 instruction family used by this descriptor.
-  loom_x86_packed_dot_family_t family;
   // Target feature bits required before this descriptor is legal.
   loom_x86_packed_dot_feature_bits_t required_feature_bits;
-  // Optional semantic flags carried by this descriptor.
-  loom_x86_packed_dot_contract_flags_t flags;
+  // Generated native contraction placement selected with this descriptor.
+  const loom_native_contraction_facts_t* native_contraction_facts;
   // Register lane shape consumed and produced by one vector instruction.
   loom_x86_packed_dot_shape_t shape;
+  // Optional semantic flags carried by this descriptor.
+  loom_x86_packed_dot_contract_flags_t flags;
+  // Stable generated reference used for direct low-descriptor projection.
+  loom_x86_packed_dot_descriptor_ref_t low_descriptor_ref;
+  // x86 instruction family used by this descriptor.
+  loom_x86_packed_dot_family_t family;
   // Left-hand source payload numeric interpretation.
   loom_x86_packed_dot_numeric_type_t lhs_numeric_type;
   // Right-hand source payload numeric interpretation.
@@ -121,11 +112,14 @@ typedef struct loom_x86_packed_dot_descriptor_t {
   loom_x86_packed_dot_numeric_type_t accumulator_numeric_type;
   // Result lane numeric type.
   loom_x86_packed_dot_numeric_type_t result_numeric_type;
-  // Generated native contraction placement selected with this descriptor.
-  const loom_native_contraction_facts_t* native_contraction_facts;
-  // Stable generated reference used for direct low-descriptor projection.
-  loom_x86_packed_dot_descriptor_ref_t low_descriptor_ref;
 } loom_x86_packed_dot_descriptor_t;
+#if UINTPTR_MAX == UINT64_MAX
+static_assert(sizeof(loom_x86_packed_dot_descriptor_t) == 40,
+              "x86 packed-dot descriptors must remain compact");
+#else
+static_assert(sizeof(loom_x86_packed_dot_descriptor_t) == 32,
+              "x86 packed-dot descriptors must remain compact");
+#endif  // UINTPTR_MAX == UINT64_MAX
 
 // Bitset of structural reasons that prevented a packed-dot contract match.
 typedef uint32_t loom_x86_packed_dot_rejection_bits_t;
