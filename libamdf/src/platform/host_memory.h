@@ -58,10 +58,12 @@ amdf_status_t amdf_platform_host_backing_populate(
 amdf_status_t amdf_platform_host_backing_destroy(
     amdf_platform_host_backing_t* backing, uint64_t byte_length);
 
-// Allocates write-back system virtual memory. The validated length is a
-// multiple of the platform host allocation granularity; no accelerator is
+// Allocates write-back system virtual memory. Zero minimum alignment selects
+// the platform policy; a stronger validated power-of-two alignment applies to
+// the returned base without retaining inaccessible padding. No accelerator is
 // involved.
 amdf_status_t amdf_platform_host_memory_allocate(uint64_t byte_length,
+                                                 uint64_t minimum_alignment,
                                                  void** out_pointer);
 
 // Releases exactly one successful host allocation. Failure retains that range.

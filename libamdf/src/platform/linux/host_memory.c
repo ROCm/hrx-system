@@ -171,13 +171,44 @@ amdf_status_t amdf_platform_host_backing_destroy(
 }
 
 amdf_status_t amdf_platform_host_memory_allocate(uint64_t byte_length,
+                                                 uint64_t minimum_alignment,
                                                  void** out_pointer) {
-  void* pointer = mmap(NULL, (size_t)byte_length, PROT_READ | PROT_WRITE,
+  const long page_size = sysconf(_SC_PAGESIZE);
+  if (page_size <= 0) {
+    return amdf_linux_error(EINVAL);
+  }
+  const uint64_t alignment = minimum_alignment > (uint64_t)page_size
+                                 ? minimum_alignment
+                                 : (uint64_t)page_size;
+  const size_t reservation_byte_length =
+      (size_t)(byte_length + alignment - (uint64_t)page_size);
+  void* pointer = mmap(NULL, reservation_byte_length, PROT_READ | PROT_WRITE,
                        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (pointer == MAP_FAILED) {
     return amdf_linux_error(errno);
   }
-  *out_pointer = pointer;
+  const uintptr_t base = (uintptr_t)pointer;
+  const uintptr_t aligned = (base + alignment - 1) & ~(alignment - 1);
+  const size_t prefix_byte_length = (size_t)(aligned - base);
+  const size_t suffix_byte_length =
+      reservation_byte_length - prefix_byte_length - (size_t)byte_length;
+  if (prefix_byte_length != 0 && munmap(pointer, prefix_byte_length) != 0) {
+    amdf_status_t status = amdf_linux_error(errno);
+    if (munmap(pointer, reservation_byte_length) != 0) {
+      status = amdf_linux_error(errno);
+    }
+    return status;
+  }
+  if (suffix_byte_length != 0 &&
+      munmap((void*)(aligned + byte_length), suffix_byte_length) != 0) {
+    amdf_status_t status = amdf_linux_error(errno);
+    if (munmap((void*)aligned, reservation_byte_length - prefix_byte_length) !=
+        0) {
+      status = amdf_linux_error(errno);
+    }
+    return status;
+  }
+  *out_pointer = (void*)aligned;
   return AMDF_STATUS_OK;
 }
 
