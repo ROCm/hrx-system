@@ -201,14 +201,6 @@ def _generate_source(
         descriptor_matrices_value = descriptor_matrices_name
     else:
         descriptor_matrices_value = "NULL"
-    source_graph_op_kinds_name = f"k{c_table_prefix}SourceGraphOpKinds"
-    if table.source_graph_op_kinds:
-        lines.append(f"static const loom_op_kind_t {source_graph_op_kinds_name}[] = {{")
-        lines.extend(f"    {op_kind}," for op_kind in table.source_graph_op_kinds)
-        lines.extend(["};", ""])
-        source_graph_op_kinds_value = source_graph_op_kinds_name
-    else:
-        source_graph_op_kinds_value = "NULL"
     flag_names = []
     if table.target_contract_query:
         flag_names.append("LOOM_TARGET_CONTRACT_FRAGMENT_FLAG_TARGET_QUERY")
@@ -220,10 +212,8 @@ def _generate_source(
             f"    .flags = {flags_value},",
             f"    .descriptor_rule_count = {len(table.descriptor_rules)},",
             f"    .descriptor_matrix_count = {len(table.descriptor_matrices)},",
-            f"    .source_graph_op_kind_count = {len(table.source_graph_op_kinds)},",
             f"    .descriptor_rules = {descriptor_rules_value},",
             f"    .descriptor_matrices = {descriptor_matrices_value},",
-            f"    .source_graph_op_kinds = {source_graph_op_kinds_value},",
             "};",
             "",
         ]

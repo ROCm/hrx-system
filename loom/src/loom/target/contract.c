@@ -11,25 +11,6 @@
 
 #include "loom/ir/scalar_type.h"
 
-bool loom_target_contract_fragment_has_source_graph_op(
-    const loom_target_contract_fragment_t* fragment, loom_op_kind_t op_kind) {
-  uint16_t begin = 0;
-  uint16_t end = fragment->source_graph_op_kind_count;
-  while (begin < end) {
-    const uint16_t middle = begin + (end - begin) / 2;
-    const loom_op_kind_t candidate = fragment->source_graph_op_kinds[middle];
-    if (candidate == op_kind) {
-      return true;
-    }
-    if (candidate < op_kind) {
-      begin = middle + 1;
-    } else {
-      end = middle;
-    }
-  }
-  return false;
-}
-
 bool loom_target_vector_packet_policy_requires_packets(
     const loom_target_vector_packet_policy_t* policy, loom_type_t vector_type) {
   if (policy == NULL || !loom_type_is_vector(vector_type) ||

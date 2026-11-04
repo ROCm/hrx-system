@@ -1019,7 +1019,9 @@ TEST(LowContractQueryTest,
       cases,
       IREE_ARRAYSIZE(bindings),
       0,
+      0,
       bindings,
+      nullptr,
       nullptr,
       nullptr,
   };
@@ -1150,8 +1152,10 @@ TEST(LowContractQueryTest, IndexedMissReplaysCompleteOrderForBestRejection) {
       cases,
       1,
       0,
+      0,
       &binding,
       selection_data,
+      nullptr,
       nullptr,
   };
   const loom_low_lower_contract_query_options_t options = {
@@ -1326,8 +1330,10 @@ TEST_F(LowContractQuerySourceMemoryTest,
       cases,
       1,
       0,
+      0,
       &binding,
       selection_data,
+      nullptr,
       nullptr,
   };
   const loom_low_lower_contract_query_options_t options = {

@@ -124,6 +124,11 @@ def generate_contract_index(
             required_feature_class = required_primary_descriptor_feature_class(lower_rules)
         bindings.append(f"{{&{fragment_symbol}, {rule_set_index}, {required_feature_class}}}")
     source_graph_root_op_kinds = tuple(sorted({op_kind for _, _, lower_rules in fragments if lower_rules is not None for op_kind in lower_rules.source_graph_root_op_kinds}))
+    source_graph_op_kinds = tuple(sorted({op_kind for _, compiled, _ in fragments for op_kind in compiled.source_graph_op_kinds}))
+    if len(source_graph_root_op_kinds) > 0xFFFF:
+        raise ValueError("contract index source-graph root count exceeds uint16_t")
+    if len(source_graph_op_kinds) > 0xFFFF:
+        raise ValueError("contract index source-graph op count exceeds uint16_t")
 
     def array(c_type: str, suffix: str, rows: Sequence[str]) -> str:
         if not rows:
@@ -140,6 +145,11 @@ def generate_contract_index(
         "loom_op_kind_t",
         "SourceGraphRootOpKinds",
         [f"UINT16_C(0x{op_kind:04X})" for op_kind in source_graph_root_op_kinds],
+    )
+    source_graph_op_kind_table = array(
+        "loom_op_kind_t",
+        "SourceGraphOpKinds",
+        [f"UINT16_C(0x{op_kind:04X})" for op_kind in source_graph_op_kinds],
     )
     cases = array(
         "loom_target_contract_case_t",
@@ -176,8 +186,8 @@ def generate_contract_index(
             "",
             f"static const loom_target_contract_index_t {prefix}Index = {{",
             f"    {index.dialect_base_id}, {len(index.dialects)}, {dialect_table},",
-            f"    {len(index.cases)}, {cases}, {len(bindings)}, {len(source_graph_root_op_kinds)},",
-            f"    {binding_table}, {selection_data}, {source_graph_root_op_kind_table},",
+            f"    {len(index.cases)}, {cases}, {len(bindings)}, {len(source_graph_root_op_kinds)}, {len(source_graph_op_kinds)},",
+            f"    {binding_table}, {selection_data}, {source_graph_root_op_kind_table}, {source_graph_op_kind_table},",
             "};",
             "",
             f"#define {name} {{&{prefix}Index, {{{len(rules)}, {rule_sets}}}}}",
