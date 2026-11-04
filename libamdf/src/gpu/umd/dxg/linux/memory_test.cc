@@ -57,8 +57,8 @@ struct Invalidation {
 
 struct FakeMemoryState {
   FailureStage failure_stage = FailureStage::kNone;
-  amdf_dxg_bridge_gpu_allocation_domain_t allocation_domain =
-      AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL;
+  amdf_dxg_provider_gpu_allocation_domain_t allocation_domain =
+      AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_LOCAL;
   D3DKMT_DEVICEEXECUTION_STATE execution_state = D3DKMT_DEVICEEXECUTION_ACTIVE;
   uint32_t destroy_failures_remaining = 0;
   uint32_t free_failures_remaining = 0;
@@ -191,33 +191,33 @@ extern "C" uint32_t __wrap_amdf_linux_dxg_connection_invoke(void* context,
   }
 }
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL
-FakeQueryAllocationLayout(amdf_dxg_bridge_gpu_adapter_t* adapter,
-                          uint64_t byte_length, uint32_t* out_allocation_count,
-                          uint64_t* out_maximum_allocation_byte_length) {
+amdf_dxg_provider_result_t FakeQueryAllocationLayout(
+    amdf_dxg_provider_gpu_adapter_t* adapter, uint64_t byte_length,
+    uint32_t* out_allocation_count,
+    uint64_t* out_maximum_allocation_byte_length) {
   EXPECT_EQ(adapter,
-            reinterpret_cast<amdf_dxg_bridge_gpu_adapter_t*>(current_state));
+            reinterpret_cast<amdf_dxg_provider_gpu_adapter_t*>(current_state));
   current_state->operations.push_back(Operation::kQueryLayout);
   EXPECT_EQ(byte_length, 65536u);
   *out_allocation_count = 1;
   *out_maximum_allocation_byte_length = 65536;
-  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+  return AMDF_DXG_PROVIDER_RESULT_SUCCESS;
 }
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeCreateAllocation(
-    amdf_dxg_bridge_gpu_adapter_t* adapter,
-    const amdf_dxg_bridge_gpu_allocation_create_info_t* create_info,
+amdf_dxg_provider_result_t FakeCreateAllocation(
+    amdf_dxg_provider_gpu_adapter_t* adapter,
+    const amdf_dxg_provider_gpu_allocation_create_info_t* create_info,
     uint32_t allocation_handle_capacity, uint32_t* out_allocation_handles,
     uint32_t* out_resource_handle, uint32_t* out_allocation_count,
     uint32_t* out_native_status) {
   EXPECT_EQ(adapter,
-            reinterpret_cast<amdf_dxg_bridge_gpu_adapter_t*>(current_state));
+            reinterpret_cast<amdf_dxg_provider_gpu_adapter_t*>(current_state));
   current_state->operations.push_back(Operation::kCreateAllocation);
   EXPECT_EQ(create_info->device_handle, 0x10u);
   EXPECT_EQ(create_info->domain, current_state->allocation_domain);
   EXPECT_EQ(create_info->byte_length, 65536u);
   if (current_state->allocation_domain ==
-      AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL) {
+      AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_LOCAL) {
     EXPECT_EQ(create_info->placement_device_address, 0x100000u);
     EXPECT_EQ(create_info->host_pointer, nullptr);
   } else {
@@ -227,14 +227,14 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeCreateAllocation(
   }
   if (current_state->failure_stage == FailureStage::kCreateAllocation) {
     *out_native_status = static_cast<uint32_t>(kStatusNoMemory);
-    return AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE;
+    return AMDF_DXG_PROVIDER_RESULT_NATIVE_FAILURE;
   }
   EXPECT_EQ(allocation_handle_capacity, 1u);
   out_allocation_handles[0] = 0x20;
   *out_resource_handle = 0;
   *out_allocation_count = 1;
   *out_native_status = 0;
-  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+  return AMDF_DXG_PROVIDER_RESULT_SUCCESS;
 }
 
 class LinuxDxgMemoryTest : public ::testing::Test {
@@ -246,8 +246,8 @@ class LinuxDxgMemoryTest : public ::testing::Test {
     connection_.descriptor = 1;
     kmt_.connection = &connection_;
     kmt_.host_allocator = &allocator_;
-    bridge_api_.gpu_allocation_query_layout = FakeQueryAllocationLayout;
-    bridge_api_.gpu_allocation_create = FakeCreateAllocation;
+    provider_api_.gpu_allocation_query_layout = FakeQueryAllocationLayout;
+    provider_api_.gpu_allocation_create = FakeCreateAllocation;
     device_.host_allocator = allocator_;
     device_.adapter = 0x08;
     device_.adapter_luid = UINT64_C(0x1122334455667788);
@@ -270,9 +270,9 @@ class LinuxDxgMemoryTest : public ::testing::Test {
     };
     device_.logical_device.kmt = &kmt_;
     device_.logical_device.native = 0x10;
-    device_.logical_device.bridge_adapter = {
-        .api = &bridge_api_,
-        .native = reinterpret_cast<amdf_dxg_bridge_gpu_adapter_t*>(&state_),
+    device_.logical_device.provider_adapter = {
+        .api = &provider_api_,
+        .native = reinterpret_cast<amdf_dxg_provider_gpu_adapter_t*>(&state_),
     };
     device_.paging_queue = {
         .kmt = &kmt_,
@@ -314,7 +314,7 @@ class LinuxDxgMemoryTest : public ::testing::Test {
   amdf_allocator_t allocator_ = {};
   amdf_linux_dxg_connection_t connection_ = {};
   amdf_linux_dxg_kmt_t kmt_ = {};
-  amdf_dxg_bridge_api_t bridge_api_ = {};
+  amdf_dxg_provider_api_t provider_api_ = {};
   amdf_gpu_umd_device_t device_ = {};
   amdf_memory_native_create_info_t create_info_ = {};
 };
@@ -342,7 +342,7 @@ TEST_F(LinuxDxgMemoryTest, OwnsLocalMemoryThroughPublishedKmtOperations) {
 }
 
 TEST_F(LinuxDxgMemoryTest, OwnsSystemStorageAndPublishesHostWrites) {
-  state_.allocation_domain = AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
+  state_.allocation_domain = AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_SYSTEM;
   state_.synchronous_destroy = true;
   create_info_.required_flags =
       AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_DEVICE_ADDRESS;
@@ -375,7 +375,7 @@ TEST_F(LinuxDxgMemoryTest, OwnsSystemStorageAndPublishesHostWrites) {
 TEST_F(LinuxDxgMemoryTest, RegistersBorrowedHostStorageWithoutOwningIt) {
   alignas(4096) static uint8_t registered_storage[65536];
   state_.allocation_domain =
-      AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_REGISTERED_HOST;
+      AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_REGISTERED_HOST;
   state_.synchronous_destroy = true;
   create_info_.required_flags =
       AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_DEVICE_ADDRESS;
@@ -498,7 +498,7 @@ TEST_F(LinuxDxgMemoryTest, StoppedDeviceCannotPublishRetiredPaging) {
 }
 
 TEST_F(LinuxDxgMemoryTest, CachePublicationReturnsExactNativeFailure) {
-  state_.allocation_domain = AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
+  state_.allocation_domain = AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_SYSTEM;
   state_.synchronous_destroy = true;
   create_info_.required_flags =
       AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_DEVICE_ADDRESS;

@@ -11,18 +11,18 @@
 
 #include "gtest/gtest.h"
 
-struct amdf_dxg_bridge_gpu_adapter_t {};
+struct amdf_dxg_provider_gpu_adapter_t {};
 
 namespace {
 
 struct FakeState {
-  amdf_dxg_bridge_result_t result = AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+  amdf_dxg_provider_result_t result = AMDF_DXG_PROVIDER_RESULT_SUCCESS;
   uint32_t native_status = 0;
   uint32_t adapter_handle = 0;
   uint32_t physical_adapter_index = 0;
-  amdf_dxg_bridge_gpu_queue_command_type_t command_type =
-      AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4;
-  amdf_dxg_bridge_gpu_clock_sample_t sample = {
+  amdf_dxg_provider_gpu_queue_command_type_t command_type =
+      AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_PM4;
+  amdf_dxg_provider_gpu_clock_sample_t sample = {
       .frequency_hz = 27'000'000,
       .timestamp = 31,
       .host_timestamp = 37,
@@ -32,27 +32,25 @@ struct FakeState {
 };
 
 FakeState state;
-amdf_dxg_bridge_gpu_adapter_t native_adapter;
+amdf_dxg_provider_gpu_adapter_t native_adapter;
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL
-GpuClockSample(amdf_dxg_bridge_gpu_adapter_t*, uint32_t adapter_handle,
-               uint32_t physical_adapter_index,
-               amdf_dxg_bridge_gpu_queue_command_type_t command_type,
-               amdf_dxg_bridge_gpu_clock_sample_t* out_sample,
-               uint32_t* out_native_status) {
+amdf_dxg_provider_result_t GpuClockSample(
+    amdf_dxg_provider_gpu_adapter_t*, uint32_t adapter_handle,
+    uint32_t physical_adapter_index,
+    amdf_dxg_provider_gpu_queue_command_type_t command_type,
+    amdf_dxg_provider_gpu_clock_sample_t* out_sample,
+    uint32_t* out_native_status) {
   state.adapter_handle = adapter_handle;
   state.physical_adapter_index = physical_adapter_index;
   state.command_type = command_type;
-  if (state.result == AMDF_DXG_BRIDGE_RESULT_SUCCESS) {
+  if (state.result == AMDF_DXG_PROVIDER_RESULT_SUCCESS) {
     *out_sample = state.sample;
   }
   *out_native_status = state.native_status;
   return state.result;
 }
 
-const amdf_dxg_bridge_api_t api = {
-    .structure_size = sizeof(api),
-    .abi_version = AMDF_DXG_BRIDGE_ABI_VERSION_LATEST,
+const amdf_dxg_provider_api_t api = {
     .gpu_clock_sample = GpuClockSample,
 };
 
@@ -76,7 +74,7 @@ TEST_F(DxgClockTest, ReportsQueueClockRate) {
             AMDF_STATUS_OK);
   EXPECT_EQ(state.adapter_handle, 17u);
   EXPECT_EQ(state.physical_adapter_index, 3u);
-  EXPECT_EQ(state.command_type, AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4);
+  EXPECT_EQ(state.command_type, AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_PM4);
   EXPECT_EQ(info.frequency_hz, state.sample.frequency_hz);
 
   ASSERT_EQ(amdf_gpu_dxg_query_queue_clock_info(
@@ -84,7 +82,7 @@ TEST_F(DxgClockTest, ReportsQueueClockRate) {
             AMDF_STATUS_OK);
   EXPECT_EQ(state.adapter_handle, 19u);
   EXPECT_EQ(state.physical_adapter_index, 5u);
-  EXPECT_EQ(state.command_type, AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA);
+  EXPECT_EQ(state.command_type, AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_SDMA);
 }
 
 TEST_F(DxgClockTest, CorrelatesDeviceAndHostClocks) {
@@ -101,7 +99,7 @@ TEST_F(DxgClockTest, CorrelatesDeviceAndHostClocks) {
 }
 
 TEST_F(DxgClockTest, FailurePreservesOutput) {
-  state.result = AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE;
+  state.result = AMDF_DXG_PROVIDER_RESULT_NATIVE_FAILURE;
   state.native_status = 0xC0000001u;
   amdf_observation_clock_sample_t sample = {
       .clock = {.frequency_hz = 47},

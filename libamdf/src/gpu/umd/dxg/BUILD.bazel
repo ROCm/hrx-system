@@ -37,7 +37,7 @@ amdf_cc_library(
     srcs = ["adapter.c"],
     hdrs = ["adapter.h"],
     visibility = ["//libamdf/src/gpu/umd:__subpackages__"],
-    deps = [":bridge_api"],
+    deps = [":provider_api"],
 )
 
 amdf_cc_library(
@@ -97,16 +97,16 @@ amdf_cc_test(
 )
 
 amdf_cc_library(
-    name = "bridge_api",
-    hdrs = ["bridge_api.h"],
+    name = "provider_api",
+    hdrs = ["provider_api.h"],
     visibility = ["//libamdf/src/gpu/umd:__subpackages__"],
 )
 
 amdf_cc_library(
-    name = "bridge_allocator",
-    hdrs = ["bridge_allocator.h"],
+    name = "provider_allocator",
+    hdrs = ["provider_allocator.h"],
     visibility = ["//libamdf/src/gpu/umd:__subpackages__"],
-    deps = [":bridge_api"],
+    deps = [":provider_api"],
 )
 
 amdf_cc_library(
@@ -115,7 +115,7 @@ amdf_cc_library(
     hdrs = ["endpoint_properties.h"],
     visibility = ["//libamdf/src/gpu/umd:__subpackages__"],
     deps = [
-        ":bridge_api",
+        ":provider_api",
         "//libamdf/src/gpu:endpoint_profile",
     ],
 )
@@ -208,8 +208,8 @@ amdf_cc_test(
 )
 
 amdf_cc_test(
-    name = "thunk_proxy_headers_test",
-    srcs = ["thunk_proxy_headers_test.cc"],
+    name = "dxg_headers_test",
+    srcs = ["dxg_headers_test.cc"],
     copts = ["-Wno-unknown-pragmas"],
     target_compatible_with = [
         "@platforms//cpu:x86_64",

@@ -14,7 +14,7 @@
 
 namespace {
 
-amdf_dxg_bridge_gpu_properties_t MakeProperties() {
+amdf_dxg_provider_gpu_properties_t MakeProperties() {
   return {
       .gfx_ip_major = 12,
       .gfx_ip_minor = 5,
@@ -33,7 +33,8 @@ amdf_dxg_bridge_gpu_properties_t MakeProperties() {
 }
 
 TEST(DxgEndpointPropertiesTest, NormalizesMultiXccTopology) {
-  const amdf_dxg_bridge_gpu_properties_t provider_properties = MakeProperties();
+  const amdf_dxg_provider_gpu_properties_t provider_properties =
+      MakeProperties();
   amdf_gpu_endpoint_properties_t properties = {};
 
   ASSERT_TRUE(amdf_gpu_dxg_endpoint_properties_translate(&provider_properties,
@@ -71,7 +72,7 @@ TEST(DxgEndpointPropertiesTest, NormalizesMultiXccTopology) {
 }
 
 TEST(DxgEndpointPropertiesTest, NormalizesMissingScratchSlots) {
-  amdf_dxg_bridge_gpu_properties_t provider_properties = MakeProperties();
+  amdf_dxg_provider_gpu_properties_t provider_properties = MakeProperties();
   provider_properties.maximum_scratch_wave_count_per_compute_unit = 0;
   amdf_gpu_endpoint_properties_t properties = {};
 
@@ -205,11 +206,11 @@ TEST(DxgEndpointPropertiesTest, UnknownFamiliesDoNotInferRectangularLayout) {
 }
 
 TEST(DxgEndpointPropertiesTest, RejectsUnrepresentableProperties) {
-  const amdf_dxg_bridge_gpu_properties_t valid = MakeProperties();
+  const amdf_dxg_provider_gpu_properties_t valid = MakeProperties();
   amdf_gpu_endpoint_properties_t properties;
   std::memset(&properties, 0xA5, sizeof(properties));
   const amdf_gpu_endpoint_properties_t original = properties;
-  amdf_dxg_bridge_gpu_properties_t provider_properties = valid;
+  amdf_dxg_provider_gpu_properties_t provider_properties = valid;
   provider_properties.gfx_ip_major = -1;
   EXPECT_FALSE(amdf_gpu_dxg_endpoint_properties_translate(&provider_properties,
                                                           &properties));

@@ -23,10 +23,10 @@
 #include "libamdf/src/platform/wait.h"
 
 struct amdf_gpu_umd_kernel_queue_t {
-  // Device and private bridge adapter borrowed for the queue lifetime.
+  // Device and private provider adapter borrowed for the queue lifetime.
   amdf_gpu_umd_device_t* device;
-  // Private native queue state owned by the loaded ROCDXG bridge.
-  amdf_dxg_bridge_gpu_kernel_queue_t* native;
+  // Private native queue state owned by the WSL DXG provider.
+  amdf_dxg_provider_gpu_kernel_queue_t* native;
   // Required command-buffer base and length alignment in bytes.
   uint32_t command_buffer_alignment;
   // Maximum byte length accepted by one native submission.
@@ -37,7 +37,7 @@ struct amdf_gpu_umd_kernel_queue_t {
   const volatile uint64_t* progress_fence_pointer;
   // GPU-visible progress address retained for queue interoperability.
   uint64_t progress_fence_device_address;
-  // Native execution context borrowed from the bridge queue.
+  // Native execution context borrowed from the provider queue.
   D3DKMT_HANDLE context;
   // Native hardware queue borrowed for ordering mapping completion.
   D3DKMT_HANDLE hardware_queue;
@@ -104,13 +104,13 @@ static amdf_status_t amdf_gpu_linux_dxg_kernel_queue_register_wait(
 amdf_status_t amdf_gpu_umd_kernel_queue_create(
     amdf_gpu_umd_device_t* device, amdf_queue_command_type_t command_type,
     amdf_gpu_umd_kernel_queue_t** out_queue) {
-  amdf_dxg_bridge_gpu_queue_command_type_t native_command_type;
+  amdf_dxg_provider_gpu_queue_command_type_t native_command_type;
   switch (command_type) {
     case AMDF_QUEUE_COMMAND_TYPE_GPU_PM4:
-      native_command_type = AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4;
+      native_command_type = AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_PM4;
       break;
     case AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA:
-      native_command_type = AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA;
+      native_command_type = AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_SDMA;
       break;
     default:
       return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
@@ -137,15 +137,14 @@ amdf_status_t amdf_gpu_umd_kernel_queue_create(
     status = amdf_linux_error(errno);
   }
 
-  amdf_dxg_bridge_gpu_kernel_queue_info_t queue_info = {0};
-  const amdf_dxg_bridge_gpu_kernel_queue_create_info_t create_info = {
-      .structure_size = sizeof(create_info),
+  amdf_dxg_provider_gpu_kernel_queue_info_t queue_info = {0};
+  const amdf_dxg_provider_gpu_kernel_queue_create_info_t create_info = {
       .device_handle = device->logical_device.native,
       .command_type = native_command_type,
   };
   if (amdf_status_is_ok(status)) {
     status = amdf_gpu_dxg_adapter_create_kernel_queue(
-        &device->logical_device.bridge_adapter, &create_info, &queue->native,
+        &device->logical_device.provider_adapter, &create_info, &queue->native,
         &queue_info);
   }
   if (amdf_status_is_ok(status)) {
@@ -193,7 +192,7 @@ amdf_status_t amdf_gpu_umd_kernel_queue_submit(
   __atomic_thread_fence(__ATOMIC_RELEASE);
   bool accepted = false;
   amdf_status_t status = amdf_gpu_dxg_adapter_submit_kernel_queue(
-      &queue->device->logical_device.bridge_adapter, queue->native,
+      &queue->device->logical_device.provider_adapter, queue->native,
       command_buffer_address, command_buffer_byte_length, submission,
       &accepted);
   if (!amdf_status_is_ok(status)) {
@@ -439,7 +438,7 @@ amdf_status_t amdf_gpu_umd_kernel_queue_destroy(
   amdf_status_t status = queue->inactivation_status;
   if (queue->native != NULL) {
     status = amdf_gpu_dxg_adapter_destroy_kernel_queue(
-        &queue->device->logical_device.bridge_adapter, queue->native);
+        &queue->device->logical_device.provider_adapter, queue->native);
     queue->native = NULL;
   }
   const amdf_status_t close_status = amdf_linux_file_close(&queue->wait_event);
@@ -472,9 +471,9 @@ amdf_status_t amdf_gpu_umd_kernel_queue_inactivate(
           ? amdf_make_api_status(AMDF_STATUS_CODE_FAILED_PRECONDITION)
           : failure);
   queue->inactivation_status = amdf_gpu_dxg_adapter_destroy_kernel_queue(
-      &queue->device->logical_device.bridge_adapter, queue->native);
-  // The bridge consumes its owner on every result. Never retry removal through
-  // a native handle whose storage may already have been reused.
+      &queue->device->logical_device.provider_adapter, queue->native);
+  // The provider consumes its owner on every result. Never retry removal
+  // through a native handle whose storage may already have been reused.
   queue->native = NULL;
   return queue->inactivation_status;
 }

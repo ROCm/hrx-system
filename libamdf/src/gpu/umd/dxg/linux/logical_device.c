@@ -8,11 +8,11 @@
 
 static void amdf_gpu_linux_dxg_logical_device_consume(
     amdf_gpu_linux_dxg_logical_device_t* device) {
-  if (device->bridge_adapter.native != NULL) {
+  if (device->provider_adapter.native != NULL) {
     const amdf_status_t status =
-        amdf_gpu_dxg_adapter_deinitialize(&device->bridge_adapter);
-    // The ABI 13 bridge adapter owns only provider-local host objects. Its
-    // close operation has no native failure path and must consume that state.
+        amdf_gpu_dxg_adapter_deinitialize(&device->provider_adapter);
+    // The provider adapter owns only provider-local host objects. Its close
+    // operation has no native failure path and must consume that state.
     if (!amdf_status_is_ok(status)) {
       amdf_abort();
     }
@@ -32,10 +32,10 @@ static void amdf_gpu_linux_dxg_logical_device_consume(
 }
 
 amdf_status_t amdf_gpu_linux_dxg_logical_device_initialize(
-    const amdf_dxg_bridge_api_t* bridge_api, amdf_platform_endpoint_t* endpoint,
-    amdf_allocator_t host_allocator,
+    const amdf_dxg_provider_api_t* provider_api,
+    amdf_platform_endpoint_t* endpoint, amdf_allocator_t host_allocator,
     amdf_gpu_linux_dxg_logical_device_t* out_device,
-    amdf_dxg_bridge_gpu_properties_t* out_properties) {
+    amdf_dxg_provider_gpu_properties_t* out_properties) {
   amdf_gpu_linux_dxg_logical_device_t device = {
       .kmt = &endpoint->instance->kmt,
   };
@@ -52,10 +52,9 @@ amdf_status_t amdf_gpu_linux_dxg_logical_device_initialize(
     }
   }
 
-  amdf_dxg_bridge_gpu_properties_t properties = {0};
+  amdf_dxg_provider_gpu_properties_t properties = {0};
   if (amdf_status_is_ok(status)) {
-    const amdf_dxg_bridge_gpu_adapter_open_info_t open_info = {
-        .structure_size = sizeof(open_info),
+    const amdf_dxg_provider_gpu_adapter_open_info_t open_info = {
         .adapter_handle = endpoint->adapter,
         .device_handle = device.native,
         .physical_adapter_index = endpoint->physical_adapter_index,
@@ -67,9 +66,9 @@ amdf_status_t amdf_gpu_linux_dxg_logical_device_initialize(
                 .invoke = amdf_linux_dxg_kmt_invoke,
             },
     };
-    status =
-        amdf_gpu_dxg_adapter_initialize(bridge_api, &open_info, host_allocator,
-                                        &device.bridge_adapter, &properties);
+    status = amdf_gpu_dxg_adapter_initialize(
+        provider_api, &open_info, host_allocator, &device.provider_adapter,
+        &properties);
   }
   if (amdf_status_is_ok(status)) {
     *out_properties = properties;

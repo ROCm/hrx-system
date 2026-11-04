@@ -53,26 +53,26 @@ struct FakeState {
   std::vector<ReleaseRequest> releases;
 };
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL
-FakeQueryAllocationLayout(amdf_dxg_bridge_gpu_adapter_t* adapter,
-                          uint64_t byte_length, uint32_t* out_allocation_count,
-                          uint64_t* out_maximum_allocation_byte_length) {
+amdf_dxg_provider_result_t FakeQueryAllocationLayout(
+    amdf_dxg_provider_gpu_adapter_t* adapter, uint64_t byte_length,
+    uint32_t* out_allocation_count,
+    uint64_t* out_maximum_allocation_byte_length) {
   EXPECT_NE(adapter, nullptr);
   EXPECT_EQ(byte_length, 65536u);
   *out_allocation_count = 2;
   *out_maximum_allocation_byte_length = 32768;
-  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+  return AMDF_DXG_PROVIDER_RESULT_SUCCESS;
 }
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeCreateAllocations(
-    amdf_dxg_bridge_gpu_adapter_t* adapter,
-    const amdf_dxg_bridge_gpu_allocation_create_info_t* create_info,
+amdf_dxg_provider_result_t FakeCreateAllocations(
+    amdf_dxg_provider_gpu_adapter_t* adapter,
+    const amdf_dxg_provider_gpu_allocation_create_info_t* create_info,
     uint32_t allocation_handle_capacity, uint32_t* out_allocation_handles,
     uint32_t* out_resource_handle, uint32_t* out_allocation_count,
     uint32_t* out_native_status) {
   EXPECT_NE(adapter, nullptr);
   EXPECT_EQ(create_info->device_handle, 0x10u);
-  EXPECT_EQ(create_info->domain, AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL);
+  EXPECT_EQ(create_info->domain, AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_LOCAL);
   EXPECT_EQ(create_info->byte_length, 65536u);
   EXPECT_EQ(create_info->placement_device_address, 0x100000u);
   EXPECT_EQ(create_info->host_pointer, nullptr);
@@ -82,7 +82,7 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeCreateAllocations(
   *out_resource_handle = 0;
   *out_allocation_count = 2;
   *out_native_status = 0;
-  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+  return AMDF_DXG_PROVIDER_RESULT_SUCCESS;
 }
 
 amdf_status_t FakeReserveAddress(void* context, uint32_t adapter_handle,
@@ -199,11 +199,11 @@ amdf_gpu_dxg_memory_reservation_device_t DescribeDevice(const void* context,
 class DxgMemoryReservationTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    bridge_api_.gpu_allocation_query_layout = FakeQueryAllocationLayout;
-    bridge_api_.gpu_allocation_create = FakeCreateAllocations;
-    bridge_adapter_ = {
-        .api = &bridge_api_,
-        .native = reinterpret_cast<amdf_dxg_bridge_gpu_adapter_t*>(&state_),
+    provider_api_.gpu_allocation_query_layout = FakeQueryAllocationLayout;
+    provider_api_.gpu_allocation_create = FakeCreateAllocations;
+    provider_adapter_ = {
+        .api = &provider_api_,
+        .native = reinterpret_cast<amdf_dxg_provider_gpu_adapter_t*>(&state_),
     };
     native_api_ = {
         .reserve_address = FakeReserveAddress,
@@ -218,7 +218,7 @@ class DxgMemoryReservationTest : public ::testing::Test {
         .host_allocator = amdf_allocator_system(),
         .native_api = &native_api_,
         .native_context = &state_,
-        .bridge_adapter = &bridge_adapter_,
+        .provider_adapter = &provider_adapter_,
         .adapter_handle = 0x08,
         .adapter_luid = UINT64_C(0x1122334455667788),
         .device_handle = 0x10,
@@ -297,8 +297,8 @@ class DxgMemoryReservationTest : public ::testing::Test {
 
   FakeState state_;
   volatile uint64_t paging_progress_ = 0;
-  amdf_dxg_bridge_api_t bridge_api_ = {};
-  amdf_gpu_dxg_adapter_t bridge_adapter_ = {};
+  amdf_dxg_provider_api_t provider_api_ = {};
+  amdf_gpu_dxg_adapter_t provider_adapter_ = {};
   amdf_gpu_dxg_memory_native_api_t native_api_ = {};
   amdf_gpu_dxg_memory_device_t device_ = {};
   amdf_gpu_dxg_memory_capabilities_t memory_capabilities_ = {};

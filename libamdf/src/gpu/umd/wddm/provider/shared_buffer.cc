@@ -25,13 +25,13 @@
 
 #include <limits>
 
-#include "libamdf/src/gpu/umd/dxg/bridge_allocator.h"
 #include "libamdf/src/gpu/umd/dxg/private_records.h"
+#include "libamdf/src/gpu/umd/dxg/provider_allocator.h"
 #include "libamdf/src/gpu/umd/wddm/provider/adapter_state.h"
 
 namespace amdf::wddm_provider {
 
-using amdf::dxg_bridge::HostBuffer;
+using amdf::dxg_provider::HostBuffer;
 namespace {
 
 amdf_status_t HresultStatus(HRESULT result) {
@@ -107,8 +107,8 @@ void* RegionPointer(void* storage, size_t offset, size_t byte_length) {
 }
 
 amdf_status_t PrepareBuffer(
-    amdf_dxg_bridge_gpu_adapter_t* adapter,
-    const amdf_dxg_bridge_gpu_buffer_import_info_t& import_info,
+    amdf_dxg_provider_gpu_adapter_t* adapter,
+    const amdf_dxg_provider_gpu_buffer_import_info_t& import_info,
     uint32_t* resource_handle, uint32_t* allocation_handle,
     uint64_t* out_native_byte_length, uint64_t* out_buffer_byte_length) {
   uint64_t buffer_byte_length = 0;
@@ -200,9 +200,9 @@ amdf_status_t PrepareBuffer(
 
 }  // namespace
 
-amdf_status_t AMDF_DXG_BRIDGE_CALL GpuBufferPrepareImport(
-    amdf_dxg_bridge_gpu_adapter_t* adapter,
-    const amdf_dxg_bridge_gpu_buffer_import_info_t* import_info,
+amdf_status_t GpuBufferPrepareImport(
+    amdf_dxg_provider_gpu_adapter_t* adapter,
+    const amdf_dxg_provider_gpu_buffer_import_info_t* import_info,
     uint32_t* resource_handle, uint32_t* allocation_handle,
     uint64_t* out_native_byte_length,
     uint64_t* out_buffer_byte_length) noexcept {

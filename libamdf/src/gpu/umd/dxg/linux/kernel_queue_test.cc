@@ -34,19 +34,19 @@ struct FakeQueueState {
   NTSTATUS signal_status = kStatusSuccess;
   // Native CPU wait registration result selected by the test.
   NTSTATUS wait_status = kStatusSuccess;
-  // Native teardown result returned by the bridge dependency.
+  // Native teardown result returned by the provider dependency.
   NTSTATUS destroy_status = kStatusSuccess;
   // Device execution state returned by cold-path diagnosis.
   D3DKMT_DEVICEEXECUTION_STATE execution_state = D3DKMT_DEVICEEXECUTION_ACTIVE;
-  // Number of final bridge release calls.
+  // Number of final provider release calls.
   uint32_t destroy_count = 0;
   // Host queue metadata still owned by the production provider.
   uint32_t live_allocation_count = 0;
   // Total provider allocations, including allocations freed before return.
   uint32_t allocation_count = 0;
   // Command family selected by the parameterized fixture.
-  amdf_dxg_bridge_gpu_queue_command_type_t command_type =
-      AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4;
+  amdf_dxg_provider_gpu_queue_command_type_t command_type =
+      AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_PM4;
   // Progress published concurrently with a failed wait registration.
   uint64_t progress_on_wait_error = 0;
   // Explicit progress published by a successful native wait.
@@ -100,17 +100,16 @@ void AMDF_CALL Free(void* user_data, void* allocation) {
   allocator.free(allocator.user_data, allocation);
 }
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeCreateQueue(
-    amdf_dxg_bridge_gpu_adapter_t* adapter,
-    const amdf_dxg_bridge_gpu_kernel_queue_create_info_t* create_info,
-    amdf_dxg_bridge_gpu_kernel_queue_t** out_queue,
-    amdf_dxg_bridge_gpu_kernel_queue_info_t* out_info,
+amdf_dxg_provider_result_t FakeCreateQueue(
+    amdf_dxg_provider_gpu_adapter_t* adapter,
+    const amdf_dxg_provider_gpu_kernel_queue_create_info_t* create_info,
+    amdf_dxg_provider_gpu_kernel_queue_t** out_queue,
+    amdf_dxg_provider_gpu_kernel_queue_info_t* out_info,
     uint32_t* out_native_status) {
   auto* state = reinterpret_cast<FakeQueueState*>(adapter);
   EXPECT_EQ(create_info->device_handle, 0x10u);
   EXPECT_EQ(create_info->command_type, state->command_type);
   *out_info = {};
-  out_info->structure_size = sizeof(*out_info);
   out_info->command_buffer_alignment = 4;
   out_info->maximum_command_buffer_byte_length = 4096;
   out_info->progress_fence_handle = 0x20;
@@ -119,12 +118,12 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeCreateQueue(
   out_info->context_handle = 0x30;
   out_info->queue_handle = state->has_hardware_queue ? 0x40 : 0;
   *out_native_status = 0;
-  *out_queue = reinterpret_cast<amdf_dxg_bridge_gpu_kernel_queue_t*>(state);
-  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+  *out_queue = reinterpret_cast<amdf_dxg_provider_gpu_kernel_queue_t*>(state);
+  return AMDF_DXG_PROVIDER_RESULT_SUCCESS;
 }
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeSubmitQueue(
-    amdf_dxg_bridge_gpu_kernel_queue_t* queue, uint64_t command_address,
+amdf_dxg_provider_result_t FakeSubmitQueue(
+    amdf_dxg_provider_gpu_kernel_queue_t* queue, uint64_t command_address,
     uint64_t command_byte_length, uint64_t progress_value,
     uint32_t* out_accepted, uint32_t* out_native_status) {
   auto* state = reinterpret_cast<FakeQueueState*>(queue);
@@ -135,27 +134,27 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeSubmitQueue(
   const NTSTATUS status =
       *out_accepted ? state->signal_status : state->submit_status;
   *out_native_status = static_cast<uint32_t>(status);
-  return status == kStatusSuccess ? AMDF_DXG_BRIDGE_RESULT_SUCCESS
-                                  : AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE;
+  return status == kStatusSuccess ? AMDF_DXG_PROVIDER_RESULT_SUCCESS
+                                  : AMDF_DXG_PROVIDER_RESULT_NATIVE_FAILURE;
 }
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeFailCreateQueue(
-    amdf_dxg_bridge_gpu_adapter_t*,
-    const amdf_dxg_bridge_gpu_kernel_queue_create_info_t*,
-    amdf_dxg_bridge_gpu_kernel_queue_t**,
-    amdf_dxg_bridge_gpu_kernel_queue_info_t*, uint32_t* out_native_status) {
+amdf_dxg_provider_result_t FakeFailCreateQueue(
+    amdf_dxg_provider_gpu_adapter_t*,
+    const amdf_dxg_provider_gpu_kernel_queue_create_info_t*,
+    amdf_dxg_provider_gpu_kernel_queue_t**,
+    amdf_dxg_provider_gpu_kernel_queue_info_t*, uint32_t* out_native_status) {
   *out_native_status = static_cast<uint32_t>(kStatusNoMemory);
-  return AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE;
+  return AMDF_DXG_PROVIDER_RESULT_NATIVE_FAILURE;
 }
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeDestroyQueue(
-    amdf_dxg_bridge_gpu_kernel_queue_t* queue, uint32_t* out_native_status) {
+amdf_dxg_provider_result_t FakeDestroyQueue(
+    amdf_dxg_provider_gpu_kernel_queue_t* queue, uint32_t* out_native_status) {
   auto* state = reinterpret_cast<FakeQueueState*>(queue);
   ++state->destroy_count;
   *out_native_status = static_cast<uint32_t>(state->destroy_status);
   return state->destroy_status == kStatusSuccess
-             ? AMDF_DXG_BRIDGE_RESULT_SUCCESS
-             : AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE;
+             ? AMDF_DXG_PROVIDER_RESULT_SUCCESS
+             : AMDF_DXG_PROVIDER_RESULT_NATIVE_FAILURE;
 }
 
 extern "C" uint32_t __wrap_amdf_linux_dxg_connection_invoke(void* context,
@@ -229,19 +228,19 @@ class LinuxDxgKernelQueueTest
     current_state = &state_;
     current_connection = &connection_;
     state_.command_type = GetParam() == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4
-                              ? AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4
-                              : AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA;
-    bridge_.gpu_kernel_queue_create = FakeCreateQueue;
-    bridge_.gpu_kernel_queue_submit = FakeSubmitQueue;
-    bridge_.gpu_kernel_queue_destroy = FakeDestroyQueue;
+                              ? AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_PM4
+                              : AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_SDMA;
+    provider_.gpu_kernel_queue_create = FakeCreateQueue;
+    provider_.gpu_kernel_queue_submit = FakeSubmitQueue;
+    provider_.gpu_kernel_queue_destroy = FakeDestroyQueue;
     connection_.descriptor = 1;
     kmt_.connection = &connection_;
     device_.host_allocator = {&state_, Allocate, nullptr, Free};
     device_.logical_device.kmt = &kmt_;
     device_.logical_device.native = 0x10;
-    device_.logical_device.bridge_adapter.api = &bridge_;
-    device_.logical_device.bridge_adapter.native =
-        reinterpret_cast<amdf_dxg_bridge_gpu_adapter_t*>(&state_);
+    device_.logical_device.provider_adapter.api = &provider_;
+    device_.logical_device.provider_adapter.native =
+        reinterpret_cast<amdf_dxg_provider_gpu_adapter_t*>(&state_);
     amdf_gpu_linux_dxg_device_status_initialize(&device_.status);
     ASSERT_EQ(amdf_gpu_umd_kernel_queue_create(&device_, GetParam(), &queue_),
               AMDF_STATUS_OK);
@@ -290,8 +289,8 @@ class LinuxDxgKernelQueueTest
   int notification_event_ = -1;
   // Native dependency responses, with no hardware access.
   FakeQueueState state_;
-  // Existing bridge function table seam, not a replacement queue.
-  amdf_dxg_bridge_api_t bridge_ = {};
+  // Existing provider function table seam, not a replacement queue.
+  amdf_dxg_provider_api_t provider_ = {};
   // Instance-owned transport borrowed by the production queue.
   amdf_linux_dxg_connection_t connection_ = {};
   // Typed Linux KMT boundary used by notification and diagnosis.
@@ -646,7 +645,7 @@ TEST_P(LinuxDxgKernelQueueTest, UnsupportedCommandTypePreservesOutput) {
 
 TEST_P(LinuxDxgKernelQueueTest,
        NativeCreationFailureReleasesColdStateAndPreservesOutput) {
-  bridge_.gpu_kernel_queue_create = FakeFailCreateQueue;
+  provider_.gpu_kernel_queue_create = FakeFailCreateQueue;
   auto* sentinel = reinterpret_cast<amdf_gpu_umd_kernel_queue_t*>(uintptr_t{1});
   const amdf_status_t failure = amdf_make_status(
       AMDF_STATUS_DOMAIN_NTSTATUS, static_cast<uint32_t>(kStatusNoMemory));

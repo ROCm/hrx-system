@@ -14,7 +14,7 @@
 
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
-#include "libamdf/src/gpu/umd/dxg/rocdxg/api.h"
+#include "libamdf/src/gpu/umd/dxg/wsl/api.h"
 
 namespace {
 
@@ -51,7 +51,7 @@ struct FakeState {
   uint32_t live_allocation_count = 0;
   // Monotonic paging progress returned with the native queue.
   volatile uint64_t paging_progress = 0;
-  // Ordered native and bridge operations.
+  // Ordered native and provider operations.
   std::vector<Operation> operations;
 };
 
@@ -170,10 +170,10 @@ extern "C" uint32_t __wrap_amdf_linux_dxg_connection_invoke(void* context,
   }
 }
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeAdapterOpen(
-    const amdf_dxg_bridge_gpu_adapter_open_info_t* open_info,
-    const amdf_allocator_t*, amdf_dxg_bridge_gpu_adapter_t** out_adapter,
-    amdf_dxg_bridge_gpu_properties_t* out_properties,
+amdf_dxg_provider_result_t FakeAdapterOpen(
+    const amdf_dxg_provider_gpu_adapter_open_info_t* open_info,
+    const amdf_allocator_t*, amdf_dxg_provider_gpu_adapter_t** out_adapter,
+    amdf_dxg_provider_gpu_properties_t* out_properties,
     uint32_t* out_native_status) {
   current_state->operations.push_back(Operation::kOpenBridgeAdapter);
   EXPECT_EQ(open_info->adapter_handle, current_endpoint->adapter);
@@ -187,38 +187,37 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeAdapterOpen(
   *out_native_status = 0;
   if (current_state->failure_stage == FailureStage::kOpenBridgeAdapter) {
     *out_native_status = static_cast<uint32_t>(kNativeFailure);
-    return AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE;
+    return AMDF_DXG_PROVIDER_RESULT_NATIVE_FAILURE;
   }
-  *out_adapter = reinterpret_cast<amdf_dxg_bridge_gpu_adapter_t*>(uintptr_t{1});
+  *out_adapter =
+      reinterpret_cast<amdf_dxg_provider_gpu_adapter_t*>(uintptr_t{1});
   *out_properties = {
       .gfx_ip_major = 11,
       .gfx_ip_minor = 5,
       .is_discrete = 0,
       .platform_atomic_support = 1,
   };
-  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+  return AMDF_DXG_PROVIDER_RESULT_SUCCESS;
 }
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeAdapterClose(
-    amdf_dxg_bridge_gpu_adapter_t* adapter, uint32_t* out_native_status) {
+amdf_dxg_provider_result_t FakeAdapterClose(
+    amdf_dxg_provider_gpu_adapter_t* adapter, uint32_t* out_native_status) {
   current_state->operations.push_back(Operation::kCloseBridgeAdapter);
   EXPECT_EQ(adapter,
-            reinterpret_cast<amdf_dxg_bridge_gpu_adapter_t*>(uintptr_t{1}));
+            reinterpret_cast<amdf_dxg_provider_gpu_adapter_t*>(uintptr_t{1}));
   *out_native_status = 0;
-  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+  return AMDF_DXG_PROVIDER_RESULT_SUCCESS;
 }
 
-const amdf_dxg_bridge_api_t kBridgeApi = {
-    .structure_size = sizeof(amdf_dxg_bridge_api_t),
-    .abi_version = AMDF_DXG_BRIDGE_ABI_VERSION_13,
+const amdf_dxg_provider_api_t kProviderApi = {
     .gpu_adapter_open = FakeAdapterOpen,
     .gpu_adapter_close = FakeAdapterClose,
 };
 
-extern "C" const amdf_dxg_bridge_api_t* __wrap_amdf_gpu_dxg_rocdxg_default_api(
+extern "C" const amdf_dxg_provider_api_t* __wrap_amdf_gpu_dxg_wsl_default_api(
     void) {
   current_state->operations.push_back(Operation::kGetBridgeApi);
-  return &kBridgeApi;
+  return &kProviderApi;
 }
 
 class LinuxDxgDeviceTest : public ::testing::Test {

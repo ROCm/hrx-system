@@ -7,7 +7,7 @@
 #include "libamdf/src/gpu/umd/dxg/linux/device.h"
 
 #include "libamdf/src/allocator.h"
-#include "libamdf/src/gpu/umd/dxg/rocdxg/api.h"
+#include "libamdf/src/gpu/umd/dxg/wsl/api.h"
 
 static amdf_status_t amdf_gpu_linux_dxg_device_release_native(
     amdf_gpu_umd_device_t* device) {
@@ -53,7 +53,7 @@ amdf_status_t amdf_gpu_umd_device_create(
 
   if (amdf_status_is_ok(status)) {
     status = amdf_gpu_linux_dxg_logical_device_initialize(
-        amdf_gpu_dxg_rocdxg_default_api(), endpoint, host_allocator,
+        amdf_gpu_dxg_wsl_default_api(), endpoint, host_allocator,
         &device->logical_device, &device->properties);
   }
   if (amdf_status_is_ok(status)) {

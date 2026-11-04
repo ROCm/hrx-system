@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "libamdf/src/gpu/umd/dxg/rocdxg/clock.h"
+#include "libamdf/src/gpu/umd/dxg/wsl/clock.h"
 
 #include <sys/ioctl.h>
 #include <time.h>
@@ -12,7 +12,7 @@
 #include <cstdint>
 
 #include "gtest/gtest.h"
-#include "libamdf/src/gpu/umd/dxg/rocdxg/adapter_state.h"
+#include "libamdf/src/gpu/umd/dxg/wsl/adapter_state.h"
 #include "shared/include/d3dkmt_types.h"
 
 namespace {
@@ -21,7 +21,7 @@ constexpr NTSTATUS kNativeFailure = static_cast<NTSTATUS>(0xC0000001u);
 uint32_t host_query_count = 0;
 int32_t host_failure_ordinal = -1;
 
-class RocdxgClockTest : public ::testing::Test {
+class WslDxgClockTest : public ::testing::Test {
  protected:
   void SetUp() override {
     host_query_count = 0;
@@ -41,7 +41,7 @@ class RocdxgClockTest : public ::testing::Test {
   }
 
   static uint32_t Invoke(void* context, uint64_t request, void* arguments) {
-    return static_cast<RocdxgClockTest*>(context)->Invoke(request, arguments);
+    return static_cast<WslDxgClockTest*>(context)->Invoke(request, arguments);
   }
 
   uint32_t Invoke(uint64_t request, void* arguments) {
@@ -61,33 +61,33 @@ class RocdxgClockTest : public ::testing::Test {
     return static_cast<uint32_t>(native_status_);
   }
 
-  amdf_dxg_bridge_result_t Sample(
-      amdf_dxg_bridge_gpu_queue_command_type_t command_type,
-      amdf_dxg_bridge_gpu_clock_sample_t* out_sample,
+  amdf_dxg_provider_result_t Sample(
+      amdf_dxg_provider_gpu_queue_command_type_t command_type,
+      amdf_dxg_provider_gpu_clock_sample_t* out_sample,
       uint32_t* out_native_status) {
     expected_node_ordinal_ =
-        command_type == AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4 ? 3 : 7;
-    return amdf::rocdxg_bridge::GpuClockSample(&adapter_, 0x42, 2, command_type,
-                                               out_sample, out_native_status);
+        command_type == AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_PM4 ? 3 : 7;
+    return amdf::wsl_provider::GpuClockSample(&adapter_, 0x42, 2, command_type,
+                                              out_sample, out_native_status);
   }
 
-  amdf_dxg_bridge_gpu_adapter_t adapter_ = {};
+  amdf_dxg_provider_gpu_adapter_t adapter_ = {};
   uint32_t expected_node_ordinal_ = 0;
   NTSTATUS native_status_ = STATUS_SUCCESS;
   uint64_t frequency_hz_ = 27'000'000;
   bool context_clock_ = false;
 };
 
-TEST_F(RocdxgClockTest, SamplesExactQueueEngineClocks) {
+TEST_F(WslDxgClockTest, SamplesExactQueueEngineClocks) {
   for (const auto command_type : {
-           AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4,
-           AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA,
+           AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_PM4,
+           AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_SDMA,
        }) {
     host_query_count = 0;
-    amdf_dxg_bridge_gpu_clock_sample_t sample = {};
+    amdf_dxg_provider_gpu_clock_sample_t sample = {};
     uint32_t native_status = 99;
     EXPECT_EQ(Sample(command_type, &sample, &native_status),
-              AMDF_DXG_BRIDGE_RESULT_SUCCESS);
+              AMDF_DXG_PROVIDER_RESULT_SUCCESS);
     EXPECT_EQ(native_status, 0u);
     EXPECT_EQ(sample.frequency_hz, frequency_hz_);
     EXPECT_EQ(sample.timestamp, 123u);
@@ -95,16 +95,16 @@ TEST_F(RocdxgClockTest, SamplesExactQueueEngineClocks) {
   }
 }
 
-TEST_F(RocdxgClockTest, PreservesOutputWhenHostClockFails) {
+TEST_F(WslDxgClockTest, PreservesOutputWhenHostClockFails) {
   for (const int32_t failure_ordinal : {0, 1}) {
     SCOPED_TRACE(failure_ordinal);
     host_query_count = 0;
     host_failure_ordinal = failure_ordinal;
-    amdf_dxg_bridge_gpu_clock_sample_t sample = {11, 13, 17};
+    amdf_dxg_provider_gpu_clock_sample_t sample = {11, 13, 17};
     uint32_t native_status = 99;
-    EXPECT_EQ(Sample(AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4, &sample,
+    EXPECT_EQ(Sample(AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_PM4, &sample,
                      &native_status),
-              AMDF_DXG_BRIDGE_RESULT_INTERNAL);
+              AMDF_DXG_PROVIDER_RESULT_INTERNAL);
     EXPECT_EQ(native_status, 0u);
     EXPECT_EQ(sample.frequency_hz, 11u);
     EXPECT_EQ(sample.timestamp, 13u);
@@ -112,39 +112,39 @@ TEST_F(RocdxgClockTest, PreservesOutputWhenHostClockFails) {
   }
 }
 
-TEST_F(RocdxgClockTest, PreservesUnsupportedAndNativeFailureResults) {
-  amdf_dxg_bridge_gpu_clock_sample_t sample = {11, 13, 17};
+TEST_F(WslDxgClockTest, PreservesUnsupportedAndNativeFailureResults) {
+  amdf_dxg_provider_gpu_clock_sample_t sample = {11, 13, 17};
   uint32_t native_status = 99;
 
   context_clock_ = true;
-  EXPECT_EQ(Sample(AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4, &sample,
+  EXPECT_EQ(Sample(AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_PM4, &sample,
                    &native_status),
-            AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED);
+            AMDF_DXG_PROVIDER_RESULT_UNSUPPORTED);
   EXPECT_EQ(native_status, 0u);
   EXPECT_EQ(sample.frequency_hz, 11u);
 
   context_clock_ = false;
   frequency_hz_ = 0;
-  EXPECT_EQ(Sample(AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA, &sample,
+  EXPECT_EQ(Sample(AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_SDMA, &sample,
                    &native_status),
-            AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED);
+            AMDF_DXG_PROVIDER_RESULT_UNSUPPORTED);
   EXPECT_EQ(sample.frequency_hz, 11u);
 
   native_status_ = kNativeFailure;
-  EXPECT_EQ(Sample(AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4, &sample,
+  EXPECT_EQ(Sample(AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_PM4, &sample,
                    &native_status),
-            AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE);
+            AMDF_DXG_PROVIDER_RESULT_NATIVE_FAILURE);
   EXPECT_EQ(native_status, static_cast<uint32_t>(kNativeFailure));
   EXPECT_EQ(sample.frequency_hz, 11u);
 }
 
-TEST_F(RocdxgClockTest, RejectsUnavailableCommandFamilies) {
+TEST_F(WslDxgClockTest, RejectsUnavailableCommandFamilies) {
   adapter_.sdma_queue_profile.is_supported = false;
-  amdf_dxg_bridge_gpu_clock_sample_t sample = {11, 13, 17};
+  amdf_dxg_provider_gpu_clock_sample_t sample = {11, 13, 17};
   uint32_t native_status = 99;
-  EXPECT_EQ(Sample(AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA, &sample,
+  EXPECT_EQ(Sample(AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_SDMA, &sample,
                    &native_status),
-            AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED);
+            AMDF_DXG_PROVIDER_RESULT_UNSUPPORTED);
   EXPECT_EQ(native_status, 0u);
   EXPECT_EQ(sample.frequency_hz, 11u);
 }

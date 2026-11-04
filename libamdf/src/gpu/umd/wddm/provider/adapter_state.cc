@@ -8,35 +8,35 @@
 
 #include <cassert>
 
-amdf_dxg_bridge_gpu_adapter_t::~amdf_dxg_bridge_gpu_adapter_t() {
+amdf_dxg_provider_gpu_adapter_t::~amdf_dxg_provider_gpu_adapter_t() {
   assert(live_queue_count.load(std::memory_order_relaxed) == 0);
 }
 
 namespace amdf::wddm_provider {
 
 const amdf_dxg_private_queue_profile_t* SelectGpuKernelQueueProfile(
-    const amdf_dxg_bridge_gpu_adapter_t* adapter,
-    amdf_dxg_bridge_gpu_queue_command_type_t command_type) noexcept {
+    const amdf_dxg_provider_gpu_adapter_t* adapter,
+    amdf_dxg_provider_gpu_queue_command_type_t command_type) noexcept {
   switch (command_type) {
-    case AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4:
+    case AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_PM4:
       return &adapter->pm4_queue_profile;
-    case AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA:
+    case AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_SDMA:
       return &adapter->sdma_queue_profile;
     default:
       return nullptr;
   }
 }
 
-amdf_dxg_bridge_result_t PrepareGpuAdapterClose(
-    amdf_dxg_bridge_gpu_adapter_t* adapter,
+amdf_dxg_provider_result_t PrepareGpuAdapterClose(
+    amdf_dxg_provider_gpu_adapter_t* adapter,
     uint32_t* out_native_status) noexcept {
   if (adapter == nullptr || out_native_status == nullptr) {
-    return AMDF_DXG_BRIDGE_RESULT_INVALID_ARGUMENT;
+    return AMDF_DXG_PROVIDER_RESULT_INVALID_ARGUMENT;
   }
   *out_native_status = 0;
   return adapter->live_queue_count.load(std::memory_order_acquire) == 0
-             ? AMDF_DXG_BRIDGE_RESULT_SUCCESS
-             : AMDF_DXG_BRIDGE_RESULT_BUSY;
+             ? AMDF_DXG_PROVIDER_RESULT_SUCCESS
+             : AMDF_DXG_PROVIDER_RESULT_BUSY;
 }
 
 }  // namespace amdf::wddm_provider

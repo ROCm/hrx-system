@@ -14,7 +14,7 @@
 
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
-#include "libamdf/src/gpu/umd/dxg/rocdxg/api.h"
+#include "libamdf/src/gpu/umd/dxg/wsl/api.h"
 #include "libamdf/src/platform/linux/dxg/endpoint.h"
 
 namespace {
@@ -33,8 +33,9 @@ enum class Operation {
 };
 
 struct FakeState {
-  // Bridge result returned while opening private adapter state.
-  amdf_dxg_bridge_result_t bridge_open_result = AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+  // Provider result returned while opening private adapter state.
+  amdf_dxg_provider_result_t provider_open_result =
+      AMDF_DXG_PROVIDER_RESULT_SUCCESS;
   // Native result returned by the local-memory capacity query.
   uint32_t segment_query_result = 0;
   // Native result returned by the process residency-budget query.
@@ -53,7 +54,7 @@ struct FakeState {
       .available_byte_length = UINT64_C(7) << 30,
   };
   // Private provider properties returned for the selected adapter.
-  amdf_dxg_bridge_gpu_properties_t provider_properties = {
+  amdf_dxg_provider_gpu_properties_t provider_properties = {
       .gfx_ip_major = 11,
       .gfx_ip_minor = 5,
       .gfx_ip_stepping = 0,
@@ -69,7 +70,7 @@ struct FakeState {
       .is_discrete = 1,
       .platform_atomic_support = 1,
   };
-  // Ordered loader, bridge, and native operations.
+  // Ordered loader, provider, and native operations.
   std::vector<Operation> operations;
 };
 
@@ -78,10 +79,10 @@ amdf_platform_endpoint_t* current_endpoint = nullptr;
 amdf_linux_dxg_connection_t* current_connection = nullptr;
 amdf_linux_dxg_kmt_t* current_kmt = nullptr;
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeAdapterOpen(
-    const amdf_dxg_bridge_gpu_adapter_open_info_t* open_info,
-    const amdf_allocator_t*, amdf_dxg_bridge_gpu_adapter_t** out_adapter,
-    amdf_dxg_bridge_gpu_properties_t* out_properties,
+amdf_dxg_provider_result_t FakeAdapterOpen(
+    const amdf_dxg_provider_gpu_adapter_open_info_t* open_info,
+    const amdf_allocator_t*, amdf_dxg_provider_gpu_adapter_t** out_adapter,
+    amdf_dxg_provider_gpu_properties_t* out_properties,
     uint32_t* out_native_status) {
   current_state->operations.push_back(Operation::kOpenBridgeAdapter);
   EXPECT_EQ(open_info->adapter_handle, current_endpoint->adapter);
@@ -93,26 +94,25 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeAdapterOpen(
   EXPECT_EQ(open_info->native_transport.context, current_kmt);
   EXPECT_EQ(open_info->native_transport.invoke, amdf_linux_dxg_kmt_invoke);
   *out_native_status = 0;
-  if (current_state->bridge_open_result != AMDF_DXG_BRIDGE_RESULT_SUCCESS) {
-    return current_state->bridge_open_result;
+  if (current_state->provider_open_result != AMDF_DXG_PROVIDER_RESULT_SUCCESS) {
+    return current_state->provider_open_result;
   }
-  *out_adapter = reinterpret_cast<amdf_dxg_bridge_gpu_adapter_t*>(uintptr_t{1});
+  *out_adapter =
+      reinterpret_cast<amdf_dxg_provider_gpu_adapter_t*>(uintptr_t{1});
   *out_properties = current_state->provider_properties;
-  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+  return AMDF_DXG_PROVIDER_RESULT_SUCCESS;
 }
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeAdapterClose(
-    amdf_dxg_bridge_gpu_adapter_t* adapter, uint32_t* out_native_status) {
+amdf_dxg_provider_result_t FakeAdapterClose(
+    amdf_dxg_provider_gpu_adapter_t* adapter, uint32_t* out_native_status) {
   current_state->operations.push_back(Operation::kCloseBridgeAdapter);
   EXPECT_EQ(adapter,
-            reinterpret_cast<amdf_dxg_bridge_gpu_adapter_t*>(uintptr_t{1}));
+            reinterpret_cast<amdf_dxg_provider_gpu_adapter_t*>(uintptr_t{1}));
   *out_native_status = 0;
-  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+  return AMDF_DXG_PROVIDER_RESULT_SUCCESS;
 }
 
-const amdf_dxg_bridge_api_t kBridgeApi = {
-    .structure_size = sizeof(amdf_dxg_bridge_api_t),
-    .abi_version = AMDF_DXG_BRIDGE_ABI_VERSION_13,
+const amdf_dxg_provider_api_t kProviderApi = {
     .gpu_adapter_open = FakeAdapterOpen,
     .gpu_adapter_close = FakeAdapterClose,
 };
@@ -181,7 +181,7 @@ TEST_F(LinuxDxgEndpointProfileTest,
 
 TEST_F(LinuxDxgEndpointProfileTest,
        RejectedAdapterRetiresDeviceAndPreservesOutput) {
-  state_.bridge_open_result = AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED;
+  state_.provider_open_result = AMDF_DXG_PROVIDER_RESULT_UNSUPPORTED;
   auto* profile = reinterpret_cast<amdf_gpu_endpoint_profile_t*>(uintptr_t{1});
   const auto* expected_profile = profile;
 
@@ -291,10 +291,10 @@ TEST_F(LinuxDxgEndpointProfileTest, FailedObservationPreservesCallerOutput) {
 
 }  // namespace
 
-extern "C" const amdf_dxg_bridge_api_t* __wrap_amdf_gpu_dxg_rocdxg_default_api(
+extern "C" const amdf_dxg_provider_api_t* __wrap_amdf_gpu_dxg_wsl_default_api(
     void) {
   current_state->operations.push_back(Operation::kGetBridgeApi);
-  return &kBridgeApi;
+  return &kProviderApi;
 }
 
 extern "C" amdf_status_t __wrap_amdf_host_memory_sample_observation(

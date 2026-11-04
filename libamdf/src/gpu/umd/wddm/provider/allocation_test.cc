@@ -124,7 +124,7 @@ uint64_t Load64(const void* pointer) {
   return value;
 }
 
-void InitializeAdapter(amdf_dxg_bridge_gpu_adapter_t* adapter,
+void InitializeAdapter(amdf_dxg_provider_gpu_adapter_t* adapter,
                        TestAllocatorState* allocator_state,
                        const FakeNativeState& native_state) {
   adapter->host_allocator = MakeTestAllocator(allocator_state);
@@ -148,12 +148,11 @@ bool Check(bool condition, const char* expression, int line) {
 #define AMDF_EXPECT(expression) \
   passed &= Check(static_cast<bool>(expression), #expression, __LINE__)
 
-amdf_dxg_bridge_gpu_allocation_create_info_t MakeSystemCreateInfo(
+amdf_dxg_provider_gpu_allocation_create_info_t MakeSystemCreateInfo(
     void* host_pointer, uint64_t byte_length) {
-  amdf_dxg_bridge_gpu_allocation_create_info_t create_info = {};
-  create_info.structure_size = sizeof(create_info);
+  amdf_dxg_provider_gpu_allocation_create_info_t create_info = {};
   create_info.device_handle = kDeviceHandle;
-  create_info.domain = AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
+  create_info.domain = AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_SYSTEM;
   create_info.byte_length = byte_length;
   create_info.host_pointer = host_pointer;
   return create_info;
@@ -259,10 +258,10 @@ bool MalformedNativeSuccessPublishesResourceToCaller() {
   native_state.malformed_create_count = 1;
   g_fake_native_state = &native_state;
   {
-    amdf_dxg_bridge_gpu_adapter_t adapter;
+    amdf_dxg_provider_gpu_adapter_t adapter;
     InitializeAdapter(&adapter, &allocator_state, native_state);
     alignas(4096) std::array<uint8_t, 4096> host_storage = {};
-    const amdf_dxg_bridge_gpu_allocation_create_info_t create_info =
+    const amdf_dxg_provider_gpu_allocation_create_info_t create_info =
         MakeSystemCreateInfo(host_storage.data(), host_storage.size());
     uint32_t allocation_handle = 0xA0;
     uint32_t resource_handle = 0xA1;
@@ -272,7 +271,7 @@ bool MalformedNativeSuccessPublishesResourceToCaller() {
     AMDF_EXPECT(amdf::wddm_provider::GpuAllocationCreate(
                     &adapter, &create_info, 1, &allocation_handle,
                     &resource_handle, &allocation_count,
-                    &native_status) == AMDF_DXG_BRIDGE_RESULT_SUCCESS);
+                    &native_status) == AMDF_DXG_PROVIDER_RESULT_SUCCESS);
     AMDF_EXPECT(allocation_handle == 0);
     AMDF_EXPECT(resource_handle == kResourceHandle);
     AMDF_EXPECT(allocation_count == 1);
@@ -283,7 +282,7 @@ bool MalformedNativeSuccessPublishesResourceToCaller() {
     native_status = 0xB0;
     AMDF_EXPECT(
         amdf::wddm_provider::PrepareGpuAdapterClose(&adapter, &native_status) ==
-        AMDF_DXG_BRIDGE_RESULT_SUCCESS);
+        AMDF_DXG_PROVIDER_RESULT_SUCCESS);
     AMDF_EXPECT(native_status == 0);
     AMDF_EXPECT(native_state.destroy_attempt_count == 0);
   }
@@ -300,10 +299,10 @@ bool SuccessfulCreatePublishesNativeHandles() {
   TestAllocatorState allocator_state;
   g_fake_native_state = &native_state;
   {
-    amdf_dxg_bridge_gpu_adapter_t adapter;
+    amdf_dxg_provider_gpu_adapter_t adapter;
     InitializeAdapter(&adapter, &allocator_state, native_state);
     alignas(4096) std::array<uint8_t, 4096> host_storage = {};
-    const amdf_dxg_bridge_gpu_allocation_create_info_t create_info =
+    const amdf_dxg_provider_gpu_allocation_create_info_t create_info =
         MakeSystemCreateInfo(host_storage.data(), host_storage.size());
     uint32_t allocation_handle = 0xA0;
     uint32_t resource_handle = 0xA1;
@@ -313,7 +312,7 @@ bool SuccessfulCreatePublishesNativeHandles() {
     AMDF_EXPECT(amdf::wddm_provider::GpuAllocationCreate(
                     &adapter, &create_info, 1, &allocation_handle,
                     &resource_handle, &allocation_count,
-                    &native_status) == AMDF_DXG_BRIDGE_RESULT_SUCCESS);
+                    &native_status) == AMDF_DXG_PROVIDER_RESULT_SUCCESS);
     AMDF_EXPECT(allocation_handle == kAllocationHandle);
     AMDF_EXPECT(resource_handle == kResourceHandle);
     AMDF_EXPECT(allocation_count == 1);
@@ -322,7 +321,7 @@ bool SuccessfulCreatePublishesNativeHandles() {
 
     AMDF_EXPECT(
         amdf::wddm_provider::PrepareGpuAdapterClose(&adapter, &native_status) ==
-        AMDF_DXG_BRIDGE_RESULT_SUCCESS);
+        AMDF_DXG_PROVIDER_RESULT_SUCCESS);
     AMDF_EXPECT(native_state.destroy_attempt_count == 0);
   }
   AMDF_EXPECT(native_state.dependency_failure_count == 0);
@@ -347,14 +346,14 @@ bool AllocationFlagsPreserveIndependentPolicies() {
       AMDF_DXG_PRIVATE_NATIVE_QUEUE_AQL;
   g_fake_native_state = &native_state;
   {
-    amdf_dxg_bridge_gpu_adapter_t adapter;
+    amdf_dxg_provider_gpu_adapter_t adapter;
     InitializeAdapter(&adapter, &allocator_state, native_state);
     alignas(4096) std::array<uint8_t, 4096> host_storage = {};
-    amdf_dxg_bridge_gpu_allocation_create_info_t create_info =
+    amdf_dxg_provider_gpu_allocation_create_info_t create_info =
         MakeSystemCreateInfo(host_storage.data(), host_storage.size());
-    create_info.flags = AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_FINE_GRAIN |
-                        AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_QUEUE_STORAGE |
-                        AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_DEVICE_UNCACHED;
+    create_info.flags = AMDF_DXG_PROVIDER_GPU_ALLOCATION_FLAG_FINE_GRAIN |
+                        AMDF_DXG_PROVIDER_GPU_ALLOCATION_FLAG_QUEUE_STORAGE |
+                        AMDF_DXG_PROVIDER_GPU_ALLOCATION_FLAG_DEVICE_UNCACHED;
     uint32_t allocation_handle = 0;
     uint32_t resource_handle = 0;
     uint32_t allocation_count = 0;
@@ -363,7 +362,7 @@ bool AllocationFlagsPreserveIndependentPolicies() {
     AMDF_EXPECT(amdf::wddm_provider::GpuAllocationCreate(
                     &adapter, &create_info, 1, &allocation_handle,
                     &resource_handle, &allocation_count,
-                    &native_status) == AMDF_DXG_BRIDGE_RESULT_SUCCESS);
+                    &native_status) == AMDF_DXG_PROVIDER_RESULT_SUCCESS);
     AMDF_EXPECT(native_state.dependency_failure_count == 0);
     AMDF_EXPECT(native_state.allocation_info_count == 1);
   }
@@ -379,10 +378,10 @@ bool NativeCreateFailureLeavesOutputsUnchanged() {
   native_state.create_status = kStatusNoMemory;
   g_fake_native_state = &native_state;
   {
-    amdf_dxg_bridge_gpu_adapter_t adapter;
+    amdf_dxg_provider_gpu_adapter_t adapter;
     InitializeAdapter(&adapter, &allocator_state, native_state);
     alignas(4096) std::array<uint8_t, 4096> host_storage = {};
-    const amdf_dxg_bridge_gpu_allocation_create_info_t create_info =
+    const amdf_dxg_provider_gpu_allocation_create_info_t create_info =
         MakeSystemCreateInfo(host_storage.data(), host_storage.size());
     uint32_t allocation_handle = 0xA0;
     uint32_t resource_handle = 0xA1;
@@ -392,7 +391,7 @@ bool NativeCreateFailureLeavesOutputsUnchanged() {
     AMDF_EXPECT(amdf::wddm_provider::GpuAllocationCreate(
                     &adapter, &create_info, 1, &allocation_handle,
                     &resource_handle, &allocation_count,
-                    &native_status) == AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE);
+                    &native_status) == AMDF_DXG_PROVIDER_RESULT_NATIVE_FAILURE);
     AMDF_EXPECT(allocation_handle == 0xA0);
     AMDF_EXPECT(resource_handle == 0xA1);
     AMDF_EXPECT(allocation_count == 0xA2);
@@ -412,18 +411,18 @@ bool InsufficientCapacityReportsCountWithoutAllocating() {
   TestAllocatorState allocator_state;
   g_fake_native_state = &native_state;
   {
-    amdf_dxg_bridge_gpu_adapter_t adapter;
+    amdf_dxg_provider_gpu_adapter_t adapter;
     InitializeAdapter(&adapter, &allocator_state, native_state);
     alignas(4096) std::array<uint8_t, 4096> host_storage = {};
-    const amdf_dxg_bridge_gpu_allocation_create_info_t create_info =
+    const amdf_dxg_provider_gpu_allocation_create_info_t create_info =
         MakeSystemCreateInfo(host_storage.data(), host_storage.size());
     uint32_t resource_handle = 0xA1;
     uint32_t allocation_count = 0;
     uint32_t native_status = 0xA3;
     AMDF_EXPECT(amdf::wddm_provider::GpuAllocationCreate(
                     &adapter, &create_info, 0, nullptr, &resource_handle,
-                    &allocation_count,
-                    &native_status) == AMDF_DXG_BRIDGE_RESULT_BUFFER_TOO_SMALL);
+                    &allocation_count, &native_status) ==
+                AMDF_DXG_PROVIDER_RESULT_BUFFER_TOO_SMALL);
     AMDF_EXPECT(resource_handle == 0xA1);
     AMDF_EXPECT(allocation_count == 1);
     AMDF_EXPECT(native_status == 0);
@@ -436,21 +435,21 @@ bool InsufficientCapacityReportsCountWithoutAllocating() {
 
 bool QueryLayoutPublishesOnlyOnSuccess() {
   bool passed = true;
-  amdf_dxg_bridge_gpu_adapter_t adapter;
+  amdf_dxg_provider_gpu_adapter_t adapter;
   uint32_t allocation_count = 0xA0;
   uint64_t maximum_allocation_byte_length = 0xA1;
 
   AMDF_EXPECT(
       amdf::wddm_provider::GpuAllocationQueryLayout(
           &adapter, 1, &allocation_count, &maximum_allocation_byte_length) ==
-      AMDF_DXG_BRIDGE_RESULT_INVALID_ARGUMENT);
+      AMDF_DXG_PROVIDER_RESULT_INVALID_ARGUMENT);
   AMDF_EXPECT(allocation_count == 0xA0);
   AMDF_EXPECT(maximum_allocation_byte_length == 0xA1);
 
   AMDF_EXPECT(
       amdf::wddm_provider::GpuAllocationQueryLayout(
           &adapter, 4096, &allocation_count, &maximum_allocation_byte_length) ==
-      AMDF_DXG_BRIDGE_RESULT_SUCCESS);
+      AMDF_DXG_PROVIDER_RESULT_SUCCESS);
   AMDF_EXPECT(allocation_count == 1);
   AMDF_EXPECT(maximum_allocation_byte_length ==
               UINT64_C(2) * 1024 * 1024 * 1024);
@@ -484,23 +483,22 @@ bool NativeChunksPreserveExactPayloadExtent() {
     TestAllocatorState allocator_state;
     native_state.expected_allocations = test_case.allocations;
     g_fake_native_state = &native_state;
-    amdf_dxg_bridge_gpu_adapter_t adapter;
+    amdf_dxg_provider_gpu_adapter_t adapter;
     InitializeAdapter(&adapter, &allocator_state, native_state);
     uint32_t allocation_count = 0;
     uint64_t maximum_allocation_byte_length = 0;
     AMDF_EXPECT(amdf::wddm_provider::GpuAllocationQueryLayout(
                     &adapter, test_case.byte_length, &allocation_count,
                     &maximum_allocation_byte_length) ==
-                AMDF_DXG_BRIDGE_RESULT_SUCCESS);
+                AMDF_DXG_PROVIDER_RESULT_SUCCESS);
     AMDF_EXPECT(allocation_count == test_case.allocations.size());
     AMDF_EXPECT(maximum_allocation_byte_length == kChunkSize);
     AMDF_EXPECT(allocator_state.allocation_count == 0);
     AMDF_EXPECT(native_state.create_attempt_count == 0);
 
-    amdf_dxg_bridge_gpu_allocation_create_info_t create_info = {};
-    create_info.structure_size = sizeof(create_info);
+    amdf_dxg_provider_gpu_allocation_create_info_t create_info = {};
     create_info.device_handle = kDeviceHandle;
-    create_info.domain = AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL;
+    create_info.domain = AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_LOCAL;
     create_info.byte_length = test_case.byte_length;
     create_info.placement_device_address = kAddress;
     std::array<uint32_t, 3> handles = {};
@@ -510,7 +508,7 @@ bool NativeChunksPreserveExactPayloadExtent() {
                     &adapter, &create_info,
                     static_cast<uint32_t>(handles.size()), handles.data(),
                     &resource_handle, &allocation_count,
-                    &native_status) == AMDF_DXG_BRIDGE_RESULT_SUCCESS);
+                    &native_status) == AMDF_DXG_PROVIDER_RESULT_SUCCESS);
     AMDF_EXPECT(allocation_count == test_case.allocations.size());
     AMDF_EXPECT(native_state.allocation_info_count ==
                 test_case.allocations.size());
@@ -535,10 +533,10 @@ bool MetadataAllocationFailureLeavesOwnershipOutputsUnchanged() {
   allocator_state.failure_ordinal = 0;
   g_fake_native_state = &native_state;
   {
-    amdf_dxg_bridge_gpu_adapter_t adapter;
+    amdf_dxg_provider_gpu_adapter_t adapter;
     InitializeAdapter(&adapter, &allocator_state, native_state);
     alignas(4096) std::array<uint8_t, 4096> host_storage = {};
-    const amdf_dxg_bridge_gpu_allocation_create_info_t create_info =
+    const amdf_dxg_provider_gpu_allocation_create_info_t create_info =
         MakeSystemCreateInfo(host_storage.data(), host_storage.size());
     uint32_t allocation_handle = 0xA0;
     uint32_t resource_handle = 0xA1;
@@ -548,7 +546,7 @@ bool MetadataAllocationFailureLeavesOwnershipOutputsUnchanged() {
     AMDF_EXPECT(amdf::wddm_provider::GpuAllocationCreate(
                     &adapter, &create_info, 1, &allocation_handle,
                     &resource_handle, &allocation_count, &native_status) ==
-                AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED);
+                AMDF_DXG_PROVIDER_RESULT_RESOURCE_EXHAUSTED);
     AMDF_EXPECT(allocation_handle == 0xA0);
     AMDF_EXPECT(resource_handle == 0xA1);
     AMDF_EXPECT(allocation_count == 0xA2);

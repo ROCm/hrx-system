@@ -11,7 +11,7 @@
 
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
-#include "libamdf/src/gpu/umd/dxg/rocdxg/api.h"
+#include "libamdf/src/gpu/umd/dxg/wsl/api.h"
 #include "libamdf/src/platform/linux/dxg/connection.h"
 #include "libamdf/src/platform/linux/dxg/kmt.h"
 
@@ -39,8 +39,9 @@ bool CloseAdapters(const amdf_linux_dxg_kmt_t* kmt,
 }
 
 AdapterProbeResult ExerciseAdapter(
-    amdf_dxg_bridge_gpu_properties_t* out_properties, std::string* out_error) {
-  const amdf_dxg_bridge_api_t* bridge = amdf_gpu_dxg_rocdxg_default_api();
+    amdf_dxg_provider_gpu_properties_t* out_properties,
+    std::string* out_error) {
+  const amdf_dxg_provider_api_t* provider = amdf_gpu_dxg_wsl_default_api();
   amdf_linux_dxg_connection_t connection = {.descriptor = -1};
   const amdf_status_t connection_status =
       amdf_linux_dxg_connection_initialize(&connection);
@@ -89,8 +90,7 @@ AdapterProbeResult ExerciseAdapter(
       continue;
     }
 
-    const amdf_dxg_bridge_gpu_adapter_open_info_t open_info = {
-        .structure_size = sizeof(amdf_dxg_bridge_gpu_adapter_open_info_t),
+    const amdf_dxg_provider_gpu_adapter_open_info_t open_info = {
         .adapter_handle = adapter_info.hAdapter,
         .device_handle = create.hDevice,
         .physical_adapter_index = 0,
@@ -104,21 +104,21 @@ AdapterProbeResult ExerciseAdapter(
                 .invoke = amdf_linux_dxg_kmt_invoke,
             },
     };
-    amdf_dxg_bridge_gpu_adapter_t* adapter = nullptr;
-    amdf_dxg_bridge_gpu_properties_t properties = {};
-    uint32_t bridge_native_status = 0;
-    const amdf_dxg_bridge_result_t open_result =
-        bridge->gpu_adapter_open(&open_info, &host_allocator, &adapter,
-                                 &properties, &bridge_native_status);
-    if (open_result == AMDF_DXG_BRIDGE_RESULT_SUCCESS) {
+    amdf_dxg_provider_gpu_adapter_t* adapter = nullptr;
+    amdf_dxg_provider_gpu_properties_t properties = {};
+    uint32_t provider_native_status = 0;
+    const amdf_dxg_provider_result_t open_result =
+        provider->gpu_adapter_open(&open_info, &host_allocator, &adapter,
+                                   &properties, &provider_native_status);
+    if (open_result == AMDF_DXG_PROVIDER_RESULT_SUCCESS) {
       found_adapter = true;
       *out_properties = properties;
-      if (bridge->gpu_adapter_close(adapter, &bridge_native_status) !=
-          AMDF_DXG_BRIDGE_RESULT_SUCCESS) {
+      if (provider->gpu_adapter_close(adapter, &provider_native_status) !=
+          AMDF_DXG_PROVIDER_RESULT_SUCCESS) {
         cleanup_succeeded = false;
       }
-    } else if (open_result != AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED) {
-      *out_error = "bridge adapter open failed";
+    } else if (open_result != AMDF_DXG_PROVIDER_RESULT_UNSUPPORTED) {
+      *out_error = "provider adapter open failed";
     }
 
     D3DKMT_DESTROYDEVICE destroy = {.hDevice = create.hDevice};
@@ -147,8 +147,8 @@ AdapterProbeResult ExerciseAdapter(
   return AdapterProbeResult::kSuccess;
 }
 
-TEST(RocdxgAdapterSystemTest, QueriesRealAdapterThroughExplicitDxgConnection) {
-  amdf_dxg_bridge_gpu_properties_t properties = {};
+TEST(WslDxgAdapterSystemTest, QueriesRealAdapterThroughExplicitDxgConnection) {
+  amdf_dxg_provider_gpu_properties_t properties = {};
   std::string error;
   ::testing::internal::CaptureStdout();
   ::testing::internal::CaptureStderr();

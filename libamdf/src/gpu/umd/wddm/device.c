@@ -17,9 +17,9 @@
 
 static amdf_status_t amdf_gpu_wddm_device_release_native(
     amdf_gpu_umd_device_t* device) {
-  if (device->bridge_adapter.native != NULL) {
+  if (device->provider_adapter.native != NULL) {
     const amdf_status_t status =
-        amdf_gpu_dxg_adapter_deinitialize(&device->bridge_adapter);
+        amdf_gpu_dxg_adapter_deinitialize(&device->provider_adapter);
     if (!amdf_status_is_ok(status)) {
       return status;
     }
@@ -88,15 +88,14 @@ amdf_status_t amdf_gpu_umd_device_create(
   device->physical_adapter_index = endpoint->physical_adapter_index;
   device->memory_capabilities = memory_capabilities;
 
-  const amdf_dxg_bridge_gpu_adapter_open_info_t open_info = {
-      .structure_size = sizeof(open_info),
+  const amdf_dxg_provider_gpu_adapter_open_info_t open_info = {
       .adapter_handle = (uint32_t)endpoint->adapter,
       .physical_adapter_index = endpoint->physical_adapter_index,
       .adapter_luid = device->adapter_luid,
   };
   status = amdf_gpu_dxg_adapter_initialize(
       amdf_gpu_wddm_default_api(), &open_info, host_allocator,
-      &device->bridge_adapter, &device->properties);
+      &device->provider_adapter, &device->properties);
   if (amdf_status_is_ok(status)) {
     device->memory_capabilities.program_gfx_major =
         (uint32_t)device->properties.gfx_ip_major;

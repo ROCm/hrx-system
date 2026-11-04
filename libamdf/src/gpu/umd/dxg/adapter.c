@@ -8,26 +8,24 @@
 
 #include <stddef.h>
 
-static amdf_status_t amdf_gpu_dxg_make_status(amdf_dxg_bridge_result_t result,
+static amdf_status_t amdf_gpu_dxg_make_status(amdf_dxg_provider_result_t result,
                                               uint32_t native_status) {
   switch (result) {
-    case AMDF_DXG_BRIDGE_RESULT_SUCCESS:
+    case AMDF_DXG_PROVIDER_RESULT_SUCCESS:
       return AMDF_STATUS_OK;
-    case AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED:
+    case AMDF_DXG_PROVIDER_RESULT_UNSUPPORTED:
       return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
-    case AMDF_DXG_BRIDGE_RESULT_INVALID_ARGUMENT:
+    case AMDF_DXG_PROVIDER_RESULT_INVALID_ARGUMENT:
       return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
-    case AMDF_DXG_BRIDGE_RESULT_VERSION_MISMATCH:
-      return amdf_make_api_status(AMDF_STATUS_CODE_VERSION_MISMATCH);
-    case AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE:
+    case AMDF_DXG_PROVIDER_RESULT_NATIVE_FAILURE:
       return amdf_make_status(AMDF_STATUS_DOMAIN_NTSTATUS, native_status);
-    case AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED:
+    case AMDF_DXG_PROVIDER_RESULT_RESOURCE_EXHAUSTED:
       return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
-    case AMDF_DXG_BRIDGE_RESULT_BUFFER_TOO_SMALL:
+    case AMDF_DXG_PROVIDER_RESULT_BUFFER_TOO_SMALL:
       return amdf_make_api_status(AMDF_STATUS_CODE_BUFFER_TOO_SMALL);
-    case AMDF_DXG_BRIDGE_RESULT_OUT_OF_RANGE:
+    case AMDF_DXG_PROVIDER_RESULT_OUT_OF_RANGE:
       return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
-    case AMDF_DXG_BRIDGE_RESULT_BUSY:
+    case AMDF_DXG_PROVIDER_RESULT_BUSY:
       return amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
     default:
       return amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
@@ -35,14 +33,14 @@ static amdf_status_t amdf_gpu_dxg_make_status(amdf_dxg_bridge_result_t result,
 }
 
 amdf_status_t amdf_gpu_dxg_adapter_initialize(
-    const amdf_dxg_bridge_api_t* api,
-    const amdf_dxg_bridge_gpu_adapter_open_info_t* open_info,
+    const amdf_dxg_provider_api_t* api,
+    const amdf_dxg_provider_gpu_adapter_open_info_t* open_info,
     amdf_allocator_t host_allocator, amdf_gpu_dxg_adapter_t* out_adapter,
-    amdf_dxg_bridge_gpu_properties_t* out_properties) {
-  amdf_dxg_bridge_gpu_adapter_t* native = NULL;
-  amdf_dxg_bridge_gpu_properties_t properties = {0};
+    amdf_dxg_provider_gpu_properties_t* out_properties) {
+  amdf_dxg_provider_gpu_adapter_t* native = NULL;
+  amdf_dxg_provider_gpu_properties_t properties = {0};
   uint32_t native_status = 0;
-  const amdf_dxg_bridge_result_t result = api->gpu_adapter_open(
+  const amdf_dxg_provider_result_t result = api->gpu_adapter_open(
       open_info, &host_allocator, &native, &properties, &native_status);
   amdf_status_t status = amdf_gpu_dxg_make_status(result, native_status);
   if (!amdf_status_is_ok(status)) {
@@ -63,7 +61,7 @@ amdf_status_t amdf_gpu_dxg_adapter_initialize(
 amdf_status_t amdf_gpu_dxg_adapter_deinitialize(
     amdf_gpu_dxg_adapter_t* adapter) {
   uint32_t native_status = 0;
-  const amdf_dxg_bridge_result_t result =
+  const amdf_dxg_provider_result_t result =
       adapter->api->gpu_adapter_close(adapter->native, &native_status);
   const amdf_status_t status = amdf_gpu_dxg_make_status(result, native_status);
   if (amdf_status_is_ok(status)) {
@@ -75,10 +73,10 @@ amdf_status_t amdf_gpu_dxg_adapter_deinitialize(
 amdf_status_t amdf_gpu_dxg_adapter_query_clock_sample(
     const amdf_gpu_dxg_adapter_t* adapter, uint32_t adapter_handle,
     uint32_t physical_adapter_index,
-    amdf_dxg_bridge_gpu_queue_command_type_t command_type,
-    amdf_dxg_bridge_gpu_clock_sample_t* out_sample) {
+    amdf_dxg_provider_gpu_queue_command_type_t command_type,
+    amdf_dxg_provider_gpu_clock_sample_t* out_sample) {
   uint32_t native_status = 0;
-  const amdf_dxg_bridge_result_t result = adapter->api->gpu_clock_sample(
+  const amdf_dxg_provider_result_t result = adapter->api->gpu_clock_sample(
       adapter->native, adapter_handle, physical_adapter_index, command_type,
       out_sample, &native_status);
   return amdf_gpu_dxg_make_status(result, native_status);
@@ -88,7 +86,7 @@ amdf_status_t amdf_gpu_dxg_adapter_query_allocation_layout(
     const amdf_gpu_dxg_adapter_t* adapter, uint64_t byte_length,
     uint32_t* out_allocation_count,
     uint64_t* out_maximum_allocation_byte_length) {
-  const amdf_dxg_bridge_result_t result =
+  const amdf_dxg_provider_result_t result =
       adapter->api->gpu_allocation_query_layout(
           adapter->native, byte_length, out_allocation_count,
           out_maximum_allocation_byte_length);
@@ -97,11 +95,11 @@ amdf_status_t amdf_gpu_dxg_adapter_query_allocation_layout(
 
 amdf_status_t amdf_gpu_dxg_adapter_create_allocations(
     const amdf_gpu_dxg_adapter_t* adapter,
-    const amdf_dxg_bridge_gpu_allocation_create_info_t* create_info,
+    const amdf_dxg_provider_gpu_allocation_create_info_t* create_info,
     uint32_t allocation_handle_capacity, uint32_t* out_allocation_handles,
     uint32_t* out_resource, uint32_t* out_allocation_count) {
   uint32_t native_status = 0;
-  const amdf_dxg_bridge_result_t result = adapter->api->gpu_allocation_create(
+  const amdf_dxg_provider_result_t result = adapter->api->gpu_allocation_create(
       adapter->native, create_info, allocation_handle_capacity,
       out_allocation_handles, out_resource, out_allocation_count,
       &native_status);
@@ -110,7 +108,7 @@ amdf_status_t amdf_gpu_dxg_adapter_create_allocations(
 
 amdf_status_t amdf_gpu_dxg_adapter_prepare_buffer_import(
     const amdf_gpu_dxg_adapter_t* adapter,
-    const amdf_dxg_bridge_gpu_buffer_import_info_t* import_info,
+    const amdf_dxg_provider_gpu_buffer_import_info_t* import_info,
     uint32_t* resource_handle, uint32_t* allocation_handle,
     uint64_t* out_native_byte_length, uint64_t* out_buffer_byte_length) {
   return adapter->api->gpu_buffer_prepare_import(
@@ -120,34 +118,36 @@ amdf_status_t amdf_gpu_dxg_adapter_prepare_buffer_import(
 
 amdf_status_t amdf_gpu_dxg_adapter_create_kernel_queue(
     const amdf_gpu_dxg_adapter_t* adapter,
-    const amdf_dxg_bridge_gpu_kernel_queue_create_info_t* create_info,
-    amdf_dxg_bridge_gpu_kernel_queue_t** out_queue,
-    amdf_dxg_bridge_gpu_kernel_queue_info_t* out_info) {
+    const amdf_dxg_provider_gpu_kernel_queue_create_info_t* create_info,
+    amdf_dxg_provider_gpu_kernel_queue_t** out_queue,
+    amdf_dxg_provider_gpu_kernel_queue_info_t* out_info) {
   uint32_t native_status = 0;
-  const amdf_dxg_bridge_result_t result = adapter->api->gpu_kernel_queue_create(
-      adapter->native, create_info, out_queue, out_info, &native_status);
+  const amdf_dxg_provider_result_t result =
+      adapter->api->gpu_kernel_queue_create(
+          adapter->native, create_info, out_queue, out_info, &native_status);
   return amdf_gpu_dxg_make_status(result, native_status);
 }
 
 amdf_status_t amdf_gpu_dxg_adapter_submit_kernel_queue(
     const amdf_gpu_dxg_adapter_t* adapter,
-    amdf_dxg_bridge_gpu_kernel_queue_t* queue, uint64_t command_buffer_address,
-    uint64_t command_buffer_byte_length, uint64_t progress_value,
-    bool* out_accepted) {
+    amdf_dxg_provider_gpu_kernel_queue_t* queue,
+    uint64_t command_buffer_address, uint64_t command_buffer_byte_length,
+    uint64_t progress_value, bool* out_accepted) {
   uint32_t native_status = 0;
   uint32_t accepted = 0;
-  const amdf_dxg_bridge_result_t result = adapter->api->gpu_kernel_queue_submit(
-      queue, command_buffer_address, command_buffer_byte_length, progress_value,
-      &accepted, &native_status);
+  const amdf_dxg_provider_result_t result =
+      adapter->api->gpu_kernel_queue_submit(
+          queue, command_buffer_address, command_buffer_byte_length,
+          progress_value, &accepted, &native_status);
   *out_accepted = accepted != 0;
   return amdf_gpu_dxg_make_status(result, native_status);
 }
 
 amdf_status_t amdf_gpu_dxg_adapter_destroy_kernel_queue(
     const amdf_gpu_dxg_adapter_t* adapter,
-    amdf_dxg_bridge_gpu_kernel_queue_t* queue) {
+    amdf_dxg_provider_gpu_kernel_queue_t* queue) {
   uint32_t native_status = 0;
-  const amdf_dxg_bridge_result_t result =
+  const amdf_dxg_provider_result_t result =
       adapter->api->gpu_kernel_queue_destroy(queue, &native_status);
   return amdf_gpu_dxg_make_status(result, native_status);
 }

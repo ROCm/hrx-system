@@ -174,7 +174,7 @@ amdf_gpu_dxg_memory_device_t amdf_gpu_wddm_memory_device(
       .host_allocator = device->host_allocator,
       .native_api = &amdf_gpu_wddm_memory_native_api,
       .native_context = device,
-      .bridge_adapter = &device->bridge_adapter,
+      .provider_adapter = &device->provider_adapter,
       .adapter_handle = device->adapter,
       .adapter_luid = device->adapter_luid,
       .device_handle = device->device,

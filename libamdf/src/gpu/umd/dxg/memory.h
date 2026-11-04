@@ -88,7 +88,7 @@ typedef struct amdf_gpu_dxg_memory_device_t {
   // Live provider device forwarded to every contextual native operation.
   void* native_context;
   // Private allocation provider borrowed through memory destruction.
-  const amdf_gpu_dxg_adapter_t* bridge_adapter;
+  const amdf_gpu_dxg_adapter_t* provider_adapter;
   // Query adapter owning GPU virtual-address reservations.
   uint32_t adapter_handle;
   // DXGI adapter identity used for typed external-buffer admission.

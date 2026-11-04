@@ -74,18 +74,17 @@ struct FakeReservationState {
 FakeReservationState* current_state = nullptr;
 amdf_linux_dxg_connection_t* current_connection = nullptr;
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeCreateQueue(
-    amdf_dxg_bridge_gpu_adapter_t* adapter,
-    const amdf_dxg_bridge_gpu_kernel_queue_create_info_t* create_info,
-    amdf_dxg_bridge_gpu_kernel_queue_t** out_queue,
-    amdf_dxg_bridge_gpu_kernel_queue_info_t* out_info,
+amdf_dxg_provider_result_t FakeCreateQueue(
+    amdf_dxg_provider_gpu_adapter_t* adapter,
+    const amdf_dxg_provider_gpu_kernel_queue_create_info_t* create_info,
+    amdf_dxg_provider_gpu_kernel_queue_t** out_queue,
+    amdf_dxg_provider_gpu_kernel_queue_info_t* out_info,
     uint32_t* out_native_status) {
   auto* state = reinterpret_cast<FakeReservationState*>(adapter);
   EXPECT_EQ(create_info->device_handle, 0x10u);
   EXPECT_EQ(create_info->command_type,
-            AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4);
+            AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_PM4);
   *out_info = {};
-  out_info->structure_size = sizeof(*out_info);
   out_info->command_buffer_alignment = 4;
   out_info->maximum_command_buffer_byte_length = 4096;
   out_info->progress_fence_handle = 0x60;
@@ -93,16 +92,16 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeCreateQueue(
   out_info->progress_fence_device_address = 0x10000;
   out_info->context_handle = 0x70;
   out_info->queue_handle = 0x80;
-  *out_queue = reinterpret_cast<amdf_dxg_bridge_gpu_kernel_queue_t*>(state);
+  *out_queue = reinterpret_cast<amdf_dxg_provider_gpu_kernel_queue_t*>(state);
   *out_native_status = 0;
-  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+  return AMDF_DXG_PROVIDER_RESULT_SUCCESS;
 }
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeDestroyQueue(
-    amdf_dxg_bridge_gpu_kernel_queue_t* queue, uint32_t* out_native_status) {
+amdf_dxg_provider_result_t FakeDestroyQueue(
+    amdf_dxg_provider_gpu_kernel_queue_t* queue, uint32_t* out_native_status) {
   ++reinterpret_cast<FakeReservationState*>(queue)->queue_destroy_count;
   *out_native_status = 0;
-  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+  return AMDF_DXG_PROVIDER_RESULT_SUCCESS;
 }
 
 extern "C" uint32_t __wrap_amdf_linux_dxg_connection_invoke(void* context,
@@ -211,8 +210,8 @@ class LinuxDxgMemoryReservationTest : public ::testing::Test {
     connection_.descriptor = 1;
     kmt_.connection = &connection_;
     kmt_.host_allocator = &allocator_;
-    bridge_.gpu_kernel_queue_create = FakeCreateQueue;
-    bridge_.gpu_kernel_queue_destroy = FakeDestroyQueue;
+    provider_.gpu_kernel_queue_create = FakeCreateQueue;
+    provider_.gpu_kernel_queue_destroy = FakeDestroyQueue;
     device_ = {
         .host_allocator = allocator_,
         .adapter = 0x08,
@@ -237,9 +236,9 @@ class LinuxDxgMemoryReservationTest : public ::testing::Test {
                 .progress_fence = &state_.paging_progress,
             },
     };
-    device_.logical_device.bridge_adapter.api = &bridge_;
-    device_.logical_device.bridge_adapter.native =
-        reinterpret_cast<amdf_dxg_bridge_gpu_adapter_t*>(&state_);
+    device_.logical_device.provider_adapter.api = &provider_;
+    device_.logical_device.provider_adapter.native =
+        reinterpret_cast<amdf_dxg_provider_gpu_adapter_t*>(&state_);
   }
 
   void TearDown() override {
@@ -262,7 +261,7 @@ class LinuxDxgMemoryReservationTest : public ::testing::Test {
   amdf_allocator_t allocator_ = {};
   amdf_linux_dxg_connection_t connection_ = {};
   amdf_linux_dxg_kmt_t kmt_ = {};
-  amdf_dxg_bridge_api_t bridge_ = {};
+  amdf_dxg_provider_api_t provider_ = {};
   amdf_gpu_umd_device_t device_ = {};
 };
 

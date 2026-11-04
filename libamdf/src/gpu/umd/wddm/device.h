@@ -28,9 +28,9 @@ struct amdf_gpu_umd_device_t {
   // Exact GPU MMU facts available to immutable memory-profile queries.
   amdf_gpu_dxg_memory_capabilities_t memory_capabilities;
   // Immutable native target identity and queue-service facts.
-  amdf_dxg_bridge_gpu_properties_t properties;
-  // Parsed private bridge adapter shared by allocations and queues.
-  amdf_gpu_dxg_adapter_t bridge_adapter;
+  amdf_dxg_provider_gpu_properties_t properties;
+  // Parsed private provider adapter shared by allocations and queues.
+  amdf_gpu_dxg_adapter_t provider_adapter;
   // Logical KMT device owning paging and future execution state.
   D3DKMT_HANDLE device;
   // Confirmed execution failure shared by every queue on this device.

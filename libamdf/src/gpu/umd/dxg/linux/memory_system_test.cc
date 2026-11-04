@@ -140,7 +140,7 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
     if (queue_ != nullptr) {
       const amdf_status_t status = InvokeSilently([&] {
         return amdf_gpu_dxg_adapter_destroy_kernel_queue(
-            &device_->logical_device.bridge_adapter, queue_);
+            &device_->logical_device.provider_adapter, queue_);
       });
       EXPECT_EQ(status, AMDF_STATUS_OK);
       queue_ = nullptr;
@@ -266,17 +266,16 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
               AMDF_STATUS_OK);
   }
 
-  amdf_dxg_bridge_gpu_kernel_queue_info_t CreateKernelQueue(
-      amdf_dxg_bridge_gpu_queue_command_type_t command_type) {
-    const amdf_dxg_bridge_gpu_kernel_queue_create_info_t create_info = {
-        .structure_size = sizeof(create_info),
+  amdf_dxg_provider_gpu_kernel_queue_info_t CreateKernelQueue(
+      amdf_dxg_provider_gpu_queue_command_type_t command_type) {
+    const amdf_dxg_provider_gpu_kernel_queue_create_info_t create_info = {
         .device_handle = device_->logical_device.native,
         .command_type = command_type,
     };
-    amdf_dxg_bridge_gpu_kernel_queue_info_t info = {};
+    amdf_dxg_provider_gpu_kernel_queue_info_t info = {};
     EXPECT_EQ(InvokeSilently([&] {
                 return amdf_gpu_dxg_adapter_create_kernel_queue(
-                    &device_->logical_device.bridge_adapter, &create_info,
+                    &device_->logical_device.provider_adapter, &create_info,
                     &queue_, &info);
               }),
               AMDF_STATUS_OK);
@@ -286,7 +285,7 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
 
   template <typename CommandFactory>
   void ExecuteCopyThroughPrivateKernelQueue(
-      amdf_dxg_bridge_gpu_queue_command_type_t command_type,
+      amdf_dxg_provider_gpu_queue_command_type_t command_type,
       CommandFactory make_commands) {
     const amdf_memory_native_profile_t profile = QueryProfile(0);
     ASSERT_EQ(profile.memory_class, AMDF_MEMORY_CLASS_SYSTEM);
@@ -317,14 +316,14 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
     std::memcpy(words, commands.data(), commands.size() * sizeof(uint32_t));
     ASSERT_NO_FATAL_FAILURE(FlushMemory());
 
-    const amdf_dxg_bridge_gpu_kernel_queue_info_t queue_info =
+    const amdf_dxg_provider_gpu_kernel_queue_info_t queue_info =
         CreateKernelQueue(command_type);
     ASSERT_NE(queue_, nullptr);
     constexpr uint64_t kProgressValue = 1;
     bool accepted = false;
     ASSERT_EQ(InvokeSilently([&] {
                 return amdf_gpu_dxg_adapter_submit_kernel_queue(
-                    &device_->logical_device.bridge_adapter, queue_,
+                    &device_->logical_device.provider_adapter, queue_,
                     memory_result.device_address,
                     commands.size() * sizeof(uint32_t), kProgressValue,
                     &accepted);
@@ -339,7 +338,7 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
     ASSERT_NO_FATAL_FAILURE(ReleaseMemory());
   }
 
-  void WaitForQueue(const amdf_dxg_bridge_gpu_kernel_queue_info_t& info,
+  void WaitForQueue(const amdf_dxg_provider_gpu_kernel_queue_info_t& info,
                     uint64_t progress_value) {
     ASSERT_NE(info.progress_fence_pointer, nullptr);
     D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMCPU wait = {
@@ -359,11 +358,11 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
 
   void ReleaseQueue() {
     ASSERT_NE(queue_, nullptr);
-    amdf_dxg_bridge_gpu_kernel_queue_t* queue = queue_;
+    amdf_dxg_provider_gpu_kernel_queue_t* queue = queue_;
     queue_ = nullptr;
     ASSERT_EQ(InvokeSilently([&] {
                 return amdf_gpu_dxg_adapter_destroy_kernel_queue(
-                    &device_->logical_device.bridge_adapter, queue);
+                    &device_->logical_device.provider_adapter, queue);
               }),
               AMDF_STATUS_OK);
   }
@@ -394,7 +393,7 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
   amdf_gpu_umd_device_t* device_ = nullptr;
   amdf_gpu_umd_device_result_t device_result_ = {};
   amdf_gpu_umd_memory_t* memory_ = nullptr;
-  amdf_dxg_bridge_gpu_kernel_queue_t* queue_ = nullptr;
+  amdf_dxg_provider_gpu_kernel_queue_t* queue_ = nullptr;
   amdf_gpu_umd_memory_reservation_t* reservation_ = nullptr;
   amdf_gpu_umd_host_mapping_t* mapping_ = nullptr;
   void* registered_pointer_ = nullptr;
@@ -457,7 +456,7 @@ TEST_F(LinuxDxgMemorySystemTest, RegistersBorrowedHostMemory) {
 TEST_F(LinuxDxgMemorySystemTest, ExecutesPm4ThroughPrivateKernelQueue) {
   ASSERT_NE(device_->properties.supports_pm4_kernel_queue, 0u);
   ASSERT_NO_FATAL_FAILURE(ExecuteCopyThroughPrivateKernelQueue(
-      AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4, MakePm4CopyData32));
+      AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_PM4, MakePm4CopyData32));
 }
 
 TEST_F(LinuxDxgMemorySystemTest, ExecutesSdmaThroughPrivateKernelQueue) {
@@ -476,7 +475,7 @@ TEST_F(LinuxDxgMemorySystemTest, ExecutesSdmaThroughPrivateKernelQueue) {
   ASSERT_NE(family, properties.queue_families + properties.queue_family_count);
   const amdf_queue_format_features_t format_features = family->format_features;
   ASSERT_NO_FATAL_FAILURE(ExecuteCopyThroughPrivateKernelQueue(
-      AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA,
+      AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_SDMA,
       [format_features](uint64_t source_address, uint64_t target_address) {
         return MakeSdmaCopy32(format_features, source_address, target_address);
       }));

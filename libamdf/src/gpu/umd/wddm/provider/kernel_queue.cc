@@ -25,13 +25,13 @@
 #include <d3dkmthk.h>
 #include <ntstatus.h>
 
-#include "libamdf/src/gpu/umd/dxg/bridge_allocator.h"
 #include "libamdf/src/gpu/umd/dxg/private_records.h"
+#include "libamdf/src/gpu/umd/dxg/provider_allocator.h"
 #include "libamdf/src/gpu/umd/wddm/provider/adapter_state.h"
 
-struct amdf_dxg_bridge_gpu_kernel_queue_t {
+struct amdf_dxg_provider_gpu_kernel_queue_t {
   // Parsed adapter state borrowed for the lifetime of the queue.
-  amdf_dxg_bridge_gpu_adapter_t* adapter = nullptr;
+  amdf_dxg_provider_gpu_adapter_t* adapter = nullptr;
   // Native execution context owning all accepted commands.
   D3DKMT_HANDLE context = 0;
   // Hardware queue, or zero for a software-scheduled context.
@@ -42,21 +42,21 @@ struct amdf_dxg_bridge_gpu_kernel_queue_t {
 
 namespace amdf::wddm_provider {
 
-using amdf::dxg_bridge::DestroyHostObject;
-using amdf::dxg_bridge::HostObject;
+using amdf::dxg_provider::DestroyHostObject;
+using amdf::dxg_provider::HostObject;
 namespace {
 
 constexpr uint32_t kCommandBufferAlignment = 4;
 constexpr uint64_t kMaximumCommandBufferByteLength =
     std::numeric_limits<uint32_t>::max() & ~uint64_t{3};
 
-amdf_dxg_bridge_result_t MakeNativeFailure(NTSTATUS status,
-                                           uint32_t* out_native_status) {
+amdf_dxg_provider_result_t MakeNativeFailure(NTSTATUS status,
+                                             uint32_t* out_native_status) {
   *out_native_status = static_cast<uint32_t>(status);
-  return AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE;
+  return AMDF_DXG_PROVIDER_RESULT_NATIVE_FAILURE;
 }
 
-NTSTATUS DestroyNativeQueue(amdf_dxg_bridge_gpu_kernel_queue_t* queue) {
+NTSTATUS DestroyNativeQueue(amdf_dxg_provider_gpu_kernel_queue_t* queue) {
   NTSTATUS first_status = STATUS_SUCCESS;
   if (queue->handle != 0) {
     D3DKMT_DESTROYHWQUEUE destroy_queue = {};
@@ -88,21 +88,22 @@ NTSTATUS DestroyNativeQueue(amdf_dxg_bridge_gpu_kernel_queue_t* queue) {
   return first_status;
 }
 
-amdf_dxg_bridge_result_t CreateNativeQueue(
-    amdf_dxg_bridge_gpu_adapter_t* adapter, uint32_t device_handle,
-    amdf_dxg_bridge_gpu_queue_command_type_t command_type,
-    amdf_dxg_bridge_gpu_kernel_queue_t** out_queue,
-    amdf_dxg_bridge_gpu_kernel_queue_info_t* out_info,
+amdf_dxg_provider_result_t CreateNativeQueue(
+    amdf_dxg_provider_gpu_adapter_t* adapter, uint32_t device_handle,
+    amdf_dxg_provider_gpu_queue_command_type_t command_type,
+    amdf_dxg_provider_gpu_kernel_queue_t** out_queue,
+    amdf_dxg_provider_gpu_kernel_queue_info_t* out_info,
     uint32_t* out_native_status) {
   const amdf_dxg_private_queue_profile_t* profile =
       SelectGpuKernelQueueProfile(adapter, command_type);
   if (profile == nullptr || !profile->is_supported) {
-    return AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED;
+    return AMDF_DXG_PROVIDER_RESULT_UNSUPPORTED;
   }
 
-  HostObject<amdf_dxg_bridge_gpu_kernel_queue_t> queue(adapter->host_allocator);
+  HostObject<amdf_dxg_provider_gpu_kernel_queue_t> queue(
+      adapter->host_allocator);
   if (!queue.Allocate()) {
-    return AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED;
+    return AMDF_DXG_PROVIDER_RESULT_RESOURCE_EXHAUSTED;
   }
   queue->adapter = adapter;
 
@@ -179,8 +180,7 @@ amdf_dxg_bridge_result_t CreateNativeQueue(
     return MakeNativeFailure(native_status, out_native_status);
   }
 
-  amdf_dxg_bridge_gpu_kernel_queue_info_t info = {};
-  info.structure_size = sizeof(info);
+  amdf_dxg_provider_gpu_kernel_queue_info_t info = {};
   info.command_buffer_alignment = kCommandBufferAlignment;
   info.maximum_command_buffer_byte_length = kMaximumCommandBufferByteLength;
   info.progress_fence_handle = profile->uses_hardware_scheduling
@@ -200,27 +200,26 @@ amdf_dxg_bridge_result_t CreateNativeQueue(
   adapter->live_queue_count.fetch_add(1, std::memory_order_release);
   *out_info = info;
   *out_queue = queue.release();
-  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+  return AMDF_DXG_PROVIDER_RESULT_SUCCESS;
 }
 
 }  // namespace
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuKernelQueueCreate(
-    amdf_dxg_bridge_gpu_adapter_t* adapter,
-    const amdf_dxg_bridge_gpu_kernel_queue_create_info_t* create_info,
-    amdf_dxg_bridge_gpu_kernel_queue_t** out_queue,
-    amdf_dxg_bridge_gpu_kernel_queue_info_t* out_info,
+amdf_dxg_provider_result_t GpuKernelQueueCreate(
+    amdf_dxg_provider_gpu_adapter_t* adapter,
+    const amdf_dxg_provider_gpu_kernel_queue_create_info_t* create_info,
+    amdf_dxg_provider_gpu_kernel_queue_t** out_queue,
+    amdf_dxg_provider_gpu_kernel_queue_info_t* out_info,
     uint32_t* out_native_status) noexcept {
   if (adapter == nullptr || create_info == nullptr ||
-      create_info->structure_size < sizeof(*create_info) ||
       create_info->device_handle == 0 ||
       (create_info->command_type !=
-           AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4 &&
+           AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_PM4 &&
        create_info->command_type !=
-           AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA) ||
-      create_info->reserved != 0 || out_queue == nullptr ||
-      out_info == nullptr || out_native_status == nullptr) {
-    return AMDF_DXG_BRIDGE_RESULT_INVALID_ARGUMENT;
+           AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_SDMA) ||
+      out_queue == nullptr || out_info == nullptr ||
+      out_native_status == nullptr) {
+    return AMDF_DXG_PROVIDER_RESULT_INVALID_ARGUMENT;
   }
   *out_native_status = 0;
   return CreateNativeQueue(adapter, create_info->device_handle,
@@ -228,10 +227,11 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuKernelQueueCreate(
                            out_native_status);
 }
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuKernelQueueSubmit(
-    amdf_dxg_bridge_gpu_kernel_queue_t* queue, uint64_t command_buffer_address,
-    uint64_t command_buffer_byte_length, uint64_t progress_value,
-    uint32_t* out_accepted, uint32_t* out_native_status) noexcept {
+amdf_dxg_provider_result_t GpuKernelQueueSubmit(
+    amdf_dxg_provider_gpu_kernel_queue_t* queue,
+    uint64_t command_buffer_address, uint64_t command_buffer_byte_length,
+    uint64_t progress_value, uint32_t* out_accepted,
+    uint32_t* out_native_status) noexcept {
   if (queue == nullptr || queue->context == 0 || out_accepted == nullptr ||
       out_native_status == nullptr || command_buffer_address == 0 ||
       (command_buffer_address & (kCommandBufferAlignment - 1)) != 0 ||
@@ -239,7 +239,7 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuKernelQueueSubmit(
       (command_buffer_byte_length & (kCommandBufferAlignment - 1)) != 0 ||
       command_buffer_byte_length > kMaximumCommandBufferByteLength ||
       progress_value == 0) {
-    return AMDF_DXG_BRIDGE_RESULT_INVALID_ARGUMENT;
+    return AMDF_DXG_PROVIDER_RESULT_INVALID_ARGUMENT;
   }
   *out_accepted = 0;
   *out_native_status = 0;
@@ -271,7 +271,7 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuKernelQueueSubmit(
     signal.MonitoredFenceValueArray = &progress_value;
     native_status = D3DKMTSignalSynchronizationObjectFromGpu(&signal);
     return native_status == STATUS_SUCCESS
-               ? AMDF_DXG_BRIDGE_RESULT_SUCCESS
+               ? AMDF_DXG_PROVIDER_RESULT_SUCCESS
                : MakeNativeFailure(native_status, out_native_status);
   }
 
@@ -286,15 +286,15 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuKernelQueueSubmit(
   const NTSTATUS native_status = D3DKMTSubmitCommandToHwQueue(&submit);
   *out_accepted = native_status == STATUS_SUCCESS;
   return native_status == STATUS_SUCCESS
-             ? AMDF_DXG_BRIDGE_RESULT_SUCCESS
+             ? AMDF_DXG_PROVIDER_RESULT_SUCCESS
              : MakeNativeFailure(native_status, out_native_status);
 }
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL
-GpuKernelQueueDestroy(amdf_dxg_bridge_gpu_kernel_queue_t* queue,
-                      uint32_t* out_native_status) noexcept {
+amdf_dxg_provider_result_t GpuKernelQueueDestroy(
+    amdf_dxg_provider_gpu_kernel_queue_t* queue,
+    uint32_t* out_native_status) noexcept {
   if (queue == nullptr || out_native_status == nullptr) {
-    return AMDF_DXG_BRIDGE_RESULT_INVALID_ARGUMENT;
+    return AMDF_DXG_PROVIDER_RESULT_INVALID_ARGUMENT;
   }
   *out_native_status = 0;
   const NTSTATUS native_status = DestroyNativeQueue(queue);
@@ -304,7 +304,7 @@ GpuKernelQueueDestroy(amdf_dxg_bridge_gpu_kernel_queue_t* queue,
   const amdf_allocator_t host_allocator = queue->adapter->host_allocator;
   DestroyHostObject(host_allocator, queue);
   return native_status == STATUS_SUCCESS
-             ? AMDF_DXG_BRIDGE_RESULT_SUCCESS
+             ? AMDF_DXG_PROVIDER_RESULT_SUCCESS
              : MakeNativeFailure(native_status, out_native_status);
 }
 

@@ -13,11 +13,11 @@
 #include <new>
 #include <type_traits>
 
-#include "libamdf/src/gpu/umd/dxg/bridge_api.h"
+#include "libamdf/src/gpu/umd/dxg/provider_api.h"
 
-namespace amdf::dxg_bridge {
+namespace amdf::dxg_provider {
 
-// Allocates and zeroes bridge-controlled storage through the parent instance.
+// Allocates and zeroes provider-controlled storage through the parent instance.
 inline void* AllocateHostBytes(amdf_allocator_t allocator, size_t byte_length,
                                size_t minimum_alignment) noexcept {
   const size_t alignment = minimum_alignment < amdf_max_align_t
@@ -36,14 +36,15 @@ inline void* AllocateHostBytes(amdf_allocator_t allocator, size_t byte_length,
   return pointer;
 }
 
-// Frees bridge-controlled storage through the allocator that created it.
+// Frees provider-controlled storage through the allocator that created it.
 inline void FreeHostBytes(amdf_allocator_t allocator, void* pointer) noexcept {
   if (pointer != nullptr) {
     allocator.free(allocator.user_data, pointer);
   }
 }
 
-// Owns one zeroed bridge scratch buffer through the parent instance allocator.
+// Owns one zeroed provider scratch buffer through the parent instance
+// allocator.
 class HostBuffer {
  public:
   HostBuffer() = default;
@@ -87,7 +88,7 @@ class HostBuffer {
   size_t byte_length_ = 0;
 };
 
-// Owns one placement-constructed bridge object through a supplied allocator.
+// Owns one placement-constructed provider object through a supplied allocator.
 template <typename T>
 class HostObject {
  public:
@@ -142,6 +143,6 @@ void DestroyHostObject(amdf_allocator_t allocator, T* object) noexcept {
   FreeHostBytes(allocator, object);
 }
 
-}  // namespace amdf::dxg_bridge
+}  // namespace amdf::dxg_provider
 
 #endif  // AMDF_SRC_GPU_UMD_DXG_BRIDGE_ALLOCATOR_H_

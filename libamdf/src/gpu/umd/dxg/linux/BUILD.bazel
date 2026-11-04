@@ -172,7 +172,7 @@ amdf_cc_library(
     deps = [
         ":device_state",
         "//libamdf/src:allocator",
-        "//libamdf/src/gpu/umd/dxg/rocdxg:bridge",
+        "//libamdf/src/gpu/umd/dxg/wsl:provider",
     ],
 )
 
@@ -191,7 +191,7 @@ amdf_cc_library(
         "//libamdf/src/gpu:endpoint_profile",
         "//libamdf/src/gpu/umd:endpoint_profile",
         "//libamdf/src/gpu/umd/dxg:endpoint_properties",
-        "//libamdf/src/gpu/umd/dxg/rocdxg:bridge",
+        "//libamdf/src/gpu/umd/dxg/wsl:provider",
         "//libamdf/src/platform/linux/dxg:endpoint",
         "//libamdf/src/platform/linux/dxg:kmt",
     ],
@@ -236,7 +236,7 @@ amdf_cc_test(
     name = "device_test",
     srcs = ["device_test.cc"],
     linkopts = [
-        "-Wl,--wrap=amdf_gpu_dxg_rocdxg_default_api",
+        "-Wl,--wrap=amdf_gpu_dxg_wsl_default_api",
         "-Wl,--wrap=amdf_linux_dxg_connection_invoke",
     ],
     target_compatible_with = [
@@ -247,7 +247,7 @@ amdf_cc_test(
         ":device",
         ":device_state",
         "//libamdf/src:allocator",
-        "//libamdf/src/gpu/umd/dxg/rocdxg:bridge",
+        "//libamdf/src/gpu/umd/dxg/wsl:provider",
         "//third_party:google_test",
         "//third_party:google_test_main",
     ],
@@ -356,7 +356,7 @@ amdf_cc_test(
     name = "endpoint_profile_test",
     srcs = ["endpoint_profile_test.cc"],
     linkopts = [
-        "-Wl,--wrap=amdf_gpu_dxg_rocdxg_default_api",
+        "-Wl,--wrap=amdf_gpu_dxg_wsl_default_api",
         "-Wl,--wrap=amdf_host_memory_sample_observation",
         "-Wl,--wrap=amdf_linux_dxg_connection_invoke",
     ],
@@ -368,7 +368,7 @@ amdf_cc_test(
         ":endpoint_profile",
         "//libamdf/src:allocator",
         "//libamdf/src/gpu/umd:endpoint_profile",
-        "//libamdf/src/gpu/umd/dxg/rocdxg:bridge",
+        "//libamdf/src/gpu/umd/dxg/wsl:provider",
         "//libamdf/src/platform/linux/dxg:endpoint",
         "//third_party:google_test",
         "//third_party:google_test_main",

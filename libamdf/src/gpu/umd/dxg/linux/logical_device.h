@@ -21,16 +21,16 @@ typedef struct amdf_gpu_linux_dxg_logical_device_t {
   // Native logical device handle owned by this object.
   D3DKMT_HANDLE native;
   // Private provider state borrowing |native| and the KMT transport.
-  amdf_gpu_dxg_adapter_t bridge_adapter;
+  amdf_gpu_dxg_adapter_t provider_adapter;
 } amdf_gpu_linux_dxg_logical_device_t;
 
 // Creates one logical device and parses its private AMD adapter state. Failure
 // consumes all partial native state and preserves both outputs.
 amdf_status_t amdf_gpu_linux_dxg_logical_device_initialize(
-    const amdf_dxg_bridge_api_t* bridge_api, amdf_platform_endpoint_t* endpoint,
-    amdf_allocator_t host_allocator,
+    const amdf_dxg_provider_api_t* provider_api,
+    amdf_platform_endpoint_t* endpoint, amdf_allocator_t host_allocator,
     amdf_gpu_linux_dxg_logical_device_t* out_device,
-    amdf_dxg_bridge_gpu_properties_t* out_properties);
+    amdf_dxg_provider_gpu_properties_t* out_properties);
 
 // Consumes a valid logical device after every dependent native object is gone.
 void amdf_gpu_linux_dxg_logical_device_deinitialize(

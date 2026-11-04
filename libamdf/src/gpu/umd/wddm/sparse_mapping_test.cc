@@ -174,9 +174,10 @@ class WddmSparseMappingBackend final : public SparseMappingBackend {
 
     backing_.reserve(backing_count);
     backing_addresses.reserve(backing_count);
-    const auto slab_domain = device_->properties.is_discrete
-                                 ? AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL
-                                 : AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
+    const auto slab_domain =
+        device_->properties.is_discrete
+            ? AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_LOCAL
+            : AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_SYSTEM;
     for (uint32_t i = 0; i < backing_count; ++i) {
       backing_.push_back(
           Allocate(kSparseSlabByteLength, slab_domain,
@@ -188,7 +189,7 @@ class WddmSparseMappingBackend final : public SparseMappingBackend {
     const uint64_t stride =
         (payload_byte_length + page_size - 1) & ~(page_size - 1);
     transport_ = Allocate(3 * stride + 2 * page_size,
-                          AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM,
+                          AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_SYSTEM,
                           AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
                               AMDF_MEMORY_ACCESS_EXECUTE);
     auto* host = static_cast<uint8_t*>(transport_.host_pointer);
@@ -338,13 +339,14 @@ class WddmSparseMappingBackend final : public SparseMappingBackend {
   }
 
   NativeAllocation Allocate(uint64_t byte_length,
-                            amdf_dxg_bridge_gpu_allocation_domain_t domain,
+                            amdf_dxg_provider_gpu_allocation_domain_t domain,
                             amdf_memory_access_t access) {
     NativeAllocation allocation;
     allocation.byte_length =
         (byte_length + AMDF_GPU_DXG_RESERVATION_GRANULARITY - 1) &
         ~(AMDF_GPU_DXG_RESERVATION_GRANULARITY - 1);
-    const bool system = domain == AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
+    const bool system =
+        domain == AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_SYSTEM;
     amdf_memory_native_profile_t profile = {};
     RequireStatus(amdf_gpu_umd_device_query_memory_profile(
                       device_, system ? 0 : 1, &profile),

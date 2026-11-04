@@ -6,14 +6,14 @@
 
 #include <sys/ioctl.h>
 
-#include "libamdf/src/gpu/umd/dxg/bridge_allocator.h"
-#include "libamdf/src/gpu/umd/dxg/bridge_api.h"
 #include "libamdf/src/gpu/umd/dxg/private_records.h"
-#include "libamdf/src/gpu/umd/dxg/rocdxg/adapter_state.h"
-#include "libamdf/src/gpu/umd/dxg/rocdxg/allocation.h"
-#include "libamdf/src/gpu/umd/dxg/rocdxg/api.h"
-#include "libamdf/src/gpu/umd/dxg/rocdxg/clock.h"
-#include "libamdf/src/gpu/umd/dxg/rocdxg/kernel_queue.h"
+#include "libamdf/src/gpu/umd/dxg/provider_allocator.h"
+#include "libamdf/src/gpu/umd/dxg/provider_api.h"
+#include "libamdf/src/gpu/umd/dxg/wsl/adapter_state.h"
+#include "libamdf/src/gpu/umd/dxg/wsl/allocation.h"
+#include "libamdf/src/gpu/umd/dxg/wsl/api.h"
+#include "libamdf/src/gpu/umd/dxg/wsl/clock.h"
+#include "libamdf/src/gpu/umd/dxg/wsl/kernel_queue.h"
 #include "shared/include/d3dkmt_types.h"
 
 namespace {
@@ -21,7 +21,7 @@ namespace {
 uint32_t QueryPrivateAdapter(void* context, uint32_t adapter_handle,
                              void* buffer, uint32_t buffer_byte_length) {
   const auto* transport =
-      static_cast<const amdf_dxg_bridge_native_transport_t*>(context);
+      static_cast<const amdf_dxg_provider_native_transport_t*>(context);
   D3DKMT_QUERYADAPTERINFO query = {
       .hAdapter = static_cast<D3DKMT_HANDLE>(adapter_handle),
       .Type = KMTQAITYPE_UMDRIVERPRIVATE,
@@ -32,28 +32,28 @@ uint32_t QueryPrivateAdapter(void* context, uint32_t adapter_handle,
                            _IOWR('G', 0x09, D3DKMT_QUERYADAPTERINFO), &query);
 }
 
-amdf_dxg_bridge_result_t MapPrivateResult(amdf_dxg_private_result_t result,
-                                          uint32_t* inout_native_status) {
+amdf_dxg_provider_result_t MapPrivateResult(amdf_dxg_private_result_t result,
+                                            uint32_t* inout_native_status) {
   switch (result) {
     case AMDF_DXG_PRIVATE_RESULT_SUCCESS:
-      return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+      return AMDF_DXG_PROVIDER_RESULT_SUCCESS;
     case AMDF_DXG_PRIVATE_RESULT_UNSUPPORTED:
-      return AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED;
+      return AMDF_DXG_PROVIDER_RESULT_UNSUPPORTED;
     case AMDF_DXG_PRIVATE_RESULT_NATIVE_FAILURE:
       if (*inout_native_status == static_cast<uint32_t>(STATUS_NO_MEMORY)) {
         *inout_native_status = 0;
-        return AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED;
+        return AMDF_DXG_PROVIDER_RESULT_RESOURCE_EXHAUSTED;
       }
-      return AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE;
+      return AMDF_DXG_PROVIDER_RESULT_NATIVE_FAILURE;
     default:
-      return AMDF_DXG_BRIDGE_RESULT_INTERNAL;
+      return AMDF_DXG_PROVIDER_RESULT_INTERNAL;
   }
 }
 
-void PopulateGpuProperties(const amdf_dxg_bridge_gpu_adapter_t& adapter,
-                           amdf_dxg_bridge_gpu_properties_t* out_properties) {
+void PopulateGpuProperties(const amdf_dxg_provider_gpu_adapter_t& adapter,
+                           amdf_dxg_provider_gpu_properties_t* out_properties) {
   const amdf_dxg_private_adapter_info_t& info = adapter.private_info;
-  const amdf_dxg_bridge_gpu_properties_t properties = {
+  const amdf_dxg_provider_gpu_properties_t properties = {
       .gfx_ip_major = info.gfx_ip_major,
       .gfx_ip_minor = info.gfx_ip_minor,
       .gfx_ip_stepping = info.gfx_ip_stepping,
@@ -78,24 +78,24 @@ void PopulateGpuProperties(const amdf_dxg_bridge_gpu_adapter_t& adapter,
   *out_properties = properties;
 }
 
-amdf_dxg_bridge_result_t GpuAdapterOpenImpl(
-    const amdf_dxg_bridge_gpu_adapter_open_info_t& open_info,
+amdf_dxg_provider_result_t GpuAdapterOpenImpl(
+    const amdf_dxg_provider_gpu_adapter_open_info_t& open_info,
     amdf_allocator_t host_allocator,
-    amdf_dxg_bridge_gpu_adapter_t** out_adapter,
-    amdf_dxg_bridge_gpu_properties_t* out_properties,
+    amdf_dxg_provider_gpu_adapter_t** out_adapter,
+    amdf_dxg_provider_gpu_properties_t* out_properties,
     uint32_t* out_native_status) {
-  amdf::dxg_bridge::HostObject<amdf_dxg_bridge_gpu_adapter_t> adapter(
+  amdf::dxg_provider::HostObject<amdf_dxg_provider_gpu_adapter_t> adapter(
       host_allocator);
   if (!adapter.Allocate()) {
-    return AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED;
+    return AMDF_DXG_PROVIDER_RESULT_RESOURCE_EXHAUSTED;
   }
   adapter->host_allocator = host_allocator;
   adapter->native_transport = open_info.native_transport;
 
-  amdf::dxg_bridge::HostBuffer query_scratch;
+  amdf::dxg_provider::HostBuffer query_scratch;
   if (!query_scratch.Allocate(
           host_allocator, AMDF_DXG_PRIVATE_LINKED_QUERY_SCRATCH_BYTE_LENGTH)) {
-    return AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED;
+    return AMDF_DXG_PROVIDER_RESULT_RESOURCE_EXHAUSTED;
   }
   const amdf_dxg_private_adapter_query_t query = {
       .adapter_handle = open_info.adapter_handle,
@@ -118,67 +118,63 @@ amdf_dxg_bridge_result_t GpuAdapterOpenImpl(
                                              &adapter->sdma_queue_profile);
   PopulateGpuProperties(*adapter.get(), out_properties);
   *out_adapter = adapter.release();
-  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+  return AMDF_DXG_PROVIDER_RESULT_SUCCESS;
 }
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL
-GpuAdapterOpen(const amdf_dxg_bridge_gpu_adapter_open_info_t* open_info,
-               const amdf_allocator_t* host_allocator,
-               amdf_dxg_bridge_gpu_adapter_t** out_adapter,
-               amdf_dxg_bridge_gpu_properties_t* out_properties,
-               uint32_t* out_native_status) noexcept {
-  if (open_info == nullptr ||
-      open_info->structure_size <
-          AMDF_DXG_BRIDGE_GPU_ADAPTER_OPEN_INFO_VERSION_13_SIZE ||
-      open_info->adapter_handle == 0 || open_info->device_handle == 0 ||
+amdf_dxg_provider_result_t GpuAdapterOpen(
+    const amdf_dxg_provider_gpu_adapter_open_info_t* open_info,
+    const amdf_allocator_t* host_allocator,
+    amdf_dxg_provider_gpu_adapter_t** out_adapter,
+    amdf_dxg_provider_gpu_properties_t* out_properties,
+    uint32_t* out_native_status) noexcept {
+  if (open_info == nullptr || open_info->adapter_handle == 0 ||
+      open_info->device_handle == 0 ||
       open_info->native_transport.context == nullptr ||
       open_info->native_transport.invoke == nullptr ||
       host_allocator == nullptr || host_allocator->allocate == nullptr ||
       host_allocator->free == nullptr || out_adapter == nullptr ||
       out_properties == nullptr || out_native_status == nullptr) {
-    return AMDF_DXG_BRIDGE_RESULT_INVALID_ARGUMENT;
+    return AMDF_DXG_PROVIDER_RESULT_INVALID_ARGUMENT;
   }
   *out_native_status = 0;
   return GpuAdapterOpenImpl(*open_info, *host_allocator, out_adapter,
                             out_properties, out_native_status);
 }
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL
-GpuAdapterClose(amdf_dxg_bridge_gpu_adapter_t* adapter,
-                uint32_t* out_native_status) noexcept {
-  const amdf_dxg_bridge_result_t result =
-      amdf::rocdxg_bridge::PrepareGpuAdapterClose(adapter, out_native_status);
-  if (result != AMDF_DXG_BRIDGE_RESULT_SUCCESS) {
+amdf_dxg_provider_result_t GpuAdapterClose(
+    amdf_dxg_provider_gpu_adapter_t* adapter,
+    uint32_t* out_native_status) noexcept {
+  const amdf_dxg_provider_result_t result =
+      amdf::wsl_provider::PrepareGpuAdapterClose(adapter, out_native_status);
+  if (result != AMDF_DXG_PROVIDER_RESULT_SUCCESS) {
     return result;
   }
   const amdf_allocator_t host_allocator = adapter->host_allocator;
-  amdf::dxg_bridge::DestroyHostObject(host_allocator, adapter);
-  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+  amdf::dxg_provider::DestroyHostObject(host_allocator, adapter);
+  return AMDF_DXG_PROVIDER_RESULT_SUCCESS;
 }
 
-amdf_status_t AMDF_DXG_BRIDGE_CALL
-GpuBufferPrepareImport(amdf_dxg_bridge_gpu_adapter_t*,
-                       const amdf_dxg_bridge_gpu_buffer_import_info_t*,
-                       uint32_t*, uint32_t*, uint64_t*, uint64_t*) noexcept {
+amdf_status_t GpuBufferPrepareImport(
+    amdf_dxg_provider_gpu_adapter_t*,
+    const amdf_dxg_provider_gpu_buffer_import_info_t*, uint32_t*, uint32_t*,
+    uint64_t*, uint64_t*) noexcept {
   return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
 }
 
-const amdf_dxg_bridge_api_t kBridgeApi = {
-    sizeof(amdf_dxg_bridge_api_t),
-    AMDF_DXG_BRIDGE_ABI_VERSION_13,
+const amdf_dxg_provider_api_t kProviderApi = {
     GpuAdapterOpen,
     GpuAdapterClose,
-    amdf::rocdxg_bridge::GpuAllocationQueryLayout,
-    amdf::rocdxg_bridge::GpuAllocationCreate,
-    amdf::rocdxg_bridge::GpuKernelQueueCreate,
-    amdf::rocdxg_bridge::GpuKernelQueueSubmit,
-    amdf::rocdxg_bridge::GpuKernelQueueDestroy,
+    amdf::wsl_provider::GpuAllocationQueryLayout,
+    amdf::wsl_provider::GpuAllocationCreate,
+    amdf::wsl_provider::GpuKernelQueueCreate,
+    amdf::wsl_provider::GpuKernelQueueSubmit,
+    amdf::wsl_provider::GpuKernelQueueDestroy,
     GpuBufferPrepareImport,
-    amdf::rocdxg_bridge::GpuClockSample,
+    amdf::wsl_provider::GpuClockSample,
 };
 
 }  // namespace
 
-extern "C" const amdf_dxg_bridge_api_t* amdf_gpu_dxg_rocdxg_default_api(void) {
-  return &kBridgeApi;
+extern "C" const amdf_dxg_provider_api_t* amdf_gpu_dxg_wsl_default_api(void) {
+  return &kProviderApi;
 }

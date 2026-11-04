@@ -55,10 +55,10 @@ struct FakeMemoryState {
   uint64_t reserved_byte_length = 0;
   void* host_pointer = nullptr;
   void* expected_host_pointer = nullptr;
-  amdf_dxg_bridge_gpu_allocation_domain_t allocation_domain =
-      AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL;
-  // Exact private allocation-policy bits expected at the bridge boundary.
-  amdf_dxg_bridge_gpu_allocation_flags_t allocation_flags = 0;
+  amdf_dxg_provider_gpu_allocation_domain_t allocation_domain =
+      AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_LOCAL;
+  // Exact private allocation-policy bits expected at the provider boundary.
+  amdf_dxg_provider_gpu_allocation_flags_t allocation_flags = 0;
   std::vector<Operation> operations;
   std::vector<uint64_t> wait_targets;
   std::vector<Invalidation> invalidations;
@@ -68,21 +68,21 @@ struct FakeMemoryState {
 
 thread_local FakeMemoryState* current_state = nullptr;
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL
-FakeQueryAllocationLayout(amdf_dxg_bridge_gpu_adapter_t* adapter,
-                          uint64_t byte_length, uint32_t* out_allocation_count,
-                          uint64_t* out_maximum_allocation_byte_length) {
+amdf_dxg_provider_result_t FakeQueryAllocationLayout(
+    amdf_dxg_provider_gpu_adapter_t* adapter, uint64_t byte_length,
+    uint32_t* out_allocation_count,
+    uint64_t* out_maximum_allocation_byte_length) {
   auto* state = reinterpret_cast<FakeMemoryState*>(adapter);
   state->operations.push_back(Operation::kQueryLayout);
   EXPECT_EQ(byte_length, state->expected_byte_length);
   *out_allocation_count = state->allocation_count;
   *out_maximum_allocation_byte_length = state->maximum_allocation_byte_length;
-  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+  return AMDF_DXG_PROVIDER_RESULT_SUCCESS;
 }
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeCreateAllocations(
-    amdf_dxg_bridge_gpu_adapter_t* adapter,
-    const amdf_dxg_bridge_gpu_allocation_create_info_t* create_info,
+amdf_dxg_provider_result_t FakeCreateAllocations(
+    amdf_dxg_provider_gpu_adapter_t* adapter,
+    const amdf_dxg_provider_gpu_allocation_create_info_t* create_info,
     uint32_t allocation_handle_capacity, uint32_t* out_allocation_handles,
     uint32_t* out_resource, uint32_t* out_allocation_count,
     uint32_t* out_native_status) {
@@ -92,7 +92,8 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeCreateAllocations(
   EXPECT_EQ(create_info->domain, state->allocation_domain);
   EXPECT_EQ(create_info->flags, state->allocation_flags);
   EXPECT_EQ(create_info->byte_length, state->expected_byte_length);
-  if (state->allocation_domain == AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL) {
+  if (state->allocation_domain ==
+      AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_LOCAL) {
     EXPECT_EQ(create_info->placement_device_address, 0x200000u);
     EXPECT_EQ(create_info->host_pointer, nullptr);
   } else {
@@ -110,12 +111,12 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeCreateAllocations(
   *out_resource = 0;
   *out_allocation_count = state->allocation_count;
   *out_native_status = 0;
-  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+  return AMDF_DXG_PROVIDER_RESULT_SUCCESS;
 }
 
-amdf_status_t AMDF_DXG_BRIDGE_CALL FakePrepareBufferImport(
-    amdf_dxg_bridge_gpu_adapter_t* adapter,
-    const amdf_dxg_bridge_gpu_buffer_import_info_t* import_info,
+amdf_status_t FakePrepareBufferImport(
+    amdf_dxg_provider_gpu_adapter_t* adapter,
+    const amdf_dxg_provider_gpu_buffer_import_info_t* import_info,
     uint32_t* resource_handle, uint32_t* allocation_handle,
     uint64_t* out_native_byte_length, uint64_t* out_buffer_byte_length) {
   auto* state = reinterpret_cast<FakeMemoryState*>(adapter);
@@ -261,11 +262,12 @@ class DxgMemoryTest : public ::testing::Test {
  protected:
   void SetUp() override {
     current_state = &state_;
-    bridge_.gpu_allocation_query_layout = FakeQueryAllocationLayout;
-    bridge_.gpu_allocation_create = FakeCreateAllocations;
-    bridge_.gpu_buffer_prepare_import = FakePrepareBufferImport;
-    adapter_.api = &bridge_;
-    adapter_.native = reinterpret_cast<amdf_dxg_bridge_gpu_adapter_t*>(&state_);
+    provider_.gpu_allocation_query_layout = FakeQueryAllocationLayout;
+    provider_.gpu_allocation_create = FakeCreateAllocations;
+    provider_.gpu_buffer_prepare_import = FakePrepareBufferImport;
+    adapter_.api = &provider_;
+    adapter_.native =
+        reinterpret_cast<amdf_dxg_provider_gpu_adapter_t*>(&state_);
     native_api_ = {
         .reserve_address = FakeReserveAddress,
         .map_allocation = FakeMapAllocation,
@@ -281,7 +283,7 @@ class DxgMemoryTest : public ::testing::Test {
         .host_allocator = amdf_allocator_system(),
         .native_api = &native_api_,
         .native_context = &state_,
-        .bridge_adapter = &adapter_,
+        .provider_adapter = &adapter_,
         .adapter_handle = 0x08,
         .adapter_luid = 0x12345678,
         .device_handle = 0x10,
@@ -329,7 +331,7 @@ class DxgMemoryTest : public ::testing::Test {
 
   FakeMemoryState state_;
   volatile uint64_t paging_progress_ = 0;
-  amdf_dxg_bridge_api_t bridge_ = {};
+  amdf_dxg_provider_api_t provider_ = {};
   amdf_gpu_dxg_adapter_t adapter_ = {};
   amdf_gpu_dxg_memory_native_api_t native_api_ = {};
   amdf_gpu_dxg_memory_device_t device_ = {};
@@ -367,7 +369,7 @@ TEST_F(DxgMemoryTest, OwnsMultiChunkLocalMemoryInLifecycleOrder) {
 TEST_F(DxgMemoryTest, AlignsSystemStorageAndPublishesEachNativeSpan) {
   state_.allocation_count = 2;
   state_.maximum_allocation_byte_length = 32768;
-  state_.allocation_domain = AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
+  state_.allocation_domain = AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_SYSTEM;
   create_info_.required_flags =
       AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_DEVICE_ADDRESS;
   create_info_.minimum_alignment = UINT64_C(2) << 20;
@@ -410,7 +412,7 @@ TEST_F(DxgMemoryTest, RegistersExactSubpageRangesOverSharedBacking) {
   constexpr std::array<uint64_t, 2> kHostByteOffsets = {3, 19};
   constexpr uint64_t kNativeByteLength = AMDF_GPU_DXG_PAGE_SIZE * 5;
   state_.allocation_domain =
-      AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_REGISTERED_HOST;
+      AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_REGISTERED_HOST;
   state_.expected_byte_length = kNativeByteLength;
   state_.maximum_allocation_byte_length = kNativeByteLength;
   state_.expected_host_pointer = caller_pages.data();
@@ -468,21 +470,21 @@ TEST_F(DxgMemoryTest, RegistersExactSubpageRangesOverSharedBacking) {
 }
 
 TEST_F(DxgMemoryTest, PreservesIndependentNativeAllocationPolicies) {
-  state_.allocation_domain = AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
+  state_.allocation_domain = AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_SYSTEM;
   const amdf_memory_native_profile_t profile = Profile(0);
   struct TestCase {
     // One independent public policy requested by the allocation.
     amdf_memory_flags_t memory_flag;
-    // Corresponding private bridge policy.
-    amdf_dxg_bridge_gpu_allocation_flags_t allocation_flag;
+    // Corresponding private provider policy.
+    amdf_dxg_provider_gpu_allocation_flags_t allocation_flag;
   };
   const TestCase test_cases[] = {
       {AMDF_MEMORY_FLAG_HOST_COHERENT,
-       AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_FINE_GRAIN},
+       AMDF_DXG_PROVIDER_GPU_ALLOCATION_FLAG_FINE_GRAIN},
       {AMDF_MEMORY_FLAG_DEVICE_UNCACHED,
-       AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_DEVICE_UNCACHED},
+       AMDF_DXG_PROVIDER_GPU_ALLOCATION_FLAG_DEVICE_UNCACHED},
       {AMDF_MEMORY_FLAG_QUEUE_STORAGE,
-       AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_QUEUE_STORAGE},
+       AMDF_DXG_PROVIDER_GPU_ALLOCATION_FLAG_QUEUE_STORAGE},
   };
   for (const TestCase& test_case : test_cases) {
     create_info_.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE |

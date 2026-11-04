@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "libamdf/src/gpu/umd/dxg/rocdxg/allocation.h"
+#include "libamdf/src/gpu/umd/dxg/wsl/allocation.h"
 
 #include <sys/ioctl.h>
 
@@ -16,7 +16,7 @@
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/dxg/private_records.h"
-#include "libamdf/src/gpu/umd/dxg/rocdxg/adapter_state.h"
+#include "libamdf/src/gpu/umd/dxg/wsl/adapter_state.h"
 #include "shared/include/d3dkmt_types.h"
 
 namespace {
@@ -31,7 +31,7 @@ struct ExpectedAllocation {
   const void* host_pointer;
 };
 
-class RocdxgAllocationTest : public ::testing::Test {
+class WslDxgAllocationTest : public ::testing::Test {
  protected:
   void SetUp() override {
     adapter_.host_allocator = amdf_allocator_system();
@@ -45,7 +45,7 @@ class RocdxgAllocationTest : public ::testing::Test {
   }
 
   static uint32_t Invoke(void* context, uint64_t request, void* arguments) {
-    return static_cast<RocdxgAllocationTest*>(context)->Invoke(request,
+    return static_cast<WslDxgAllocationTest*>(context)->Invoke(request,
                                                                arguments);
   }
 
@@ -102,22 +102,22 @@ class RocdxgAllocationTest : public ::testing::Test {
     return static_cast<uint32_t>(native_status_);
   }
 
-  amdf_dxg_bridge_result_t Create(
-      const amdf_dxg_bridge_gpu_allocation_create_info_t& create_info,
+  amdf_dxg_provider_result_t Create(
+      const amdf_dxg_provider_gpu_allocation_create_info_t& create_info,
       uint32_t capacity, uint32_t* handles, uint32_t* out_resource_handle,
       uint32_t* out_allocation_count, uint32_t* out_native_status) {
-    return amdf::rocdxg_bridge::GpuAllocationCreate(
+    return amdf::wsl_provider::GpuAllocationCreate(
         &adapter_, &create_info, capacity, handles, out_resource_handle,
         out_allocation_count, out_native_status);
   }
 
-  amdf_dxg_bridge_gpu_adapter_t adapter_;
+  amdf_dxg_provider_gpu_adapter_t adapter_;
   std::vector<ExpectedAllocation> expected_allocations_;
   NTSTATUS native_status_ = STATUS_SUCCESS;
   uint32_t invoke_count_ = 0;
 };
 
-TEST_F(RocdxgAllocationTest, EncodesSystemPoliciesAndPublishesNativeHandles) {
+TEST_F(WslDxgAllocationTest, EncodesSystemPoliciesAndPublishesNativeHandles) {
   alignas(4096) std::array<uint8_t, 4096> host_storage = {};
   expected_allocations_ = {{
       host_storage.size(),
@@ -126,13 +126,12 @@ TEST_F(RocdxgAllocationTest, EncodesSystemPoliciesAndPublishesNativeHandles) {
           AMDF_DXG_PRIVATE_ALLOCATION_FLAG_DEVICE_UNCACHED,
       host_storage.data(),
   }};
-  const amdf_dxg_bridge_gpu_allocation_create_info_t create_info = {
-      .structure_size = sizeof(create_info),
+  const amdf_dxg_provider_gpu_allocation_create_info_t create_info = {
       .device_handle = 0x42,
-      .domain = AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM,
-      .flags = AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_FINE_GRAIN |
-               AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_QUEUE_STORAGE |
-               AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_DEVICE_UNCACHED,
+      .domain = AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_SYSTEM,
+      .flags = AMDF_DXG_PROVIDER_GPU_ALLOCATION_FLAG_FINE_GRAIN |
+               AMDF_DXG_PROVIDER_GPU_ALLOCATION_FLAG_QUEUE_STORAGE |
+               AMDF_DXG_PROVIDER_GPU_ALLOCATION_FLAG_DEVICE_UNCACHED,
       .byte_length = host_storage.size(),
       .placement_device_address = 0,
       .host_pointer = host_storage.data(),
@@ -144,7 +143,7 @@ TEST_F(RocdxgAllocationTest, EncodesSystemPoliciesAndPublishesNativeHandles) {
   uint32_t native_status = 99;
   EXPECT_EQ(Create(create_info, 1, handles, &resource_handle, &allocation_count,
                    &native_status),
-            AMDF_DXG_BRIDGE_RESULT_SUCCESS);
+            AMDF_DXG_PROVIDER_RESULT_SUCCESS);
   EXPECT_EQ(handles[0], 0x200u);
   EXPECT_EQ(resource_handle, 0x100u);
   EXPECT_EQ(allocation_count, 1u);
@@ -152,16 +151,15 @@ TEST_F(RocdxgAllocationTest, EncodesSystemPoliciesAndPublishesNativeHandles) {
   EXPECT_EQ(invoke_count_, 1u);
 }
 
-TEST_F(RocdxgAllocationTest, SplitsLargeLocalAllocationsIntoFixedRecords) {
+TEST_F(WslDxgAllocationTest, SplitsLargeLocalAllocationsIntoFixedRecords) {
   expected_allocations_ = {
       {kMaximumAllocationByteLength, AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_LOCAL,
        0, nullptr},
       {4096, AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_LOCAL, 0, nullptr},
   };
-  const amdf_dxg_bridge_gpu_allocation_create_info_t create_info = {
-      .structure_size = sizeof(create_info),
+  const amdf_dxg_provider_gpu_allocation_create_info_t create_info = {
       .device_handle = 0x42,
-      .domain = AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL,
+      .domain = AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_LOCAL,
       .flags = 0,
       .byte_length = kMaximumAllocationByteLength + 4096,
       .placement_device_address = 0x1000,
@@ -174,17 +172,16 @@ TEST_F(RocdxgAllocationTest, SplitsLargeLocalAllocationsIntoFixedRecords) {
   uint32_t native_status = 99;
   EXPECT_EQ(Create(create_info, 2, handles, &resource_handle, &allocation_count,
                    &native_status),
-            AMDF_DXG_BRIDGE_RESULT_SUCCESS);
+            AMDF_DXG_PROVIDER_RESULT_SUCCESS);
   EXPECT_EQ(handles[0], 0x200u);
   EXPECT_EQ(handles[1], 0x201u);
   EXPECT_EQ(allocation_count, 2u);
 }
 
-TEST_F(RocdxgAllocationTest, PreservesOutputsBeforeAndAfterNativeInvocation) {
-  const amdf_dxg_bridge_gpu_allocation_create_info_t create_info = {
-      .structure_size = sizeof(create_info),
+TEST_F(WslDxgAllocationTest, PreservesOutputsBeforeAndAfterNativeInvocation) {
+  const amdf_dxg_provider_gpu_allocation_create_info_t create_info = {
       .device_handle = 0x42,
-      .domain = AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL,
+      .domain = AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_LOCAL,
       .flags = 0,
       .byte_length = kMaximumAllocationByteLength + 4096,
       .placement_device_address = 0x1000,
@@ -197,7 +194,7 @@ TEST_F(RocdxgAllocationTest, PreservesOutputsBeforeAndAfterNativeInvocation) {
 
   EXPECT_EQ(Create(create_info, 1, handles, &resource_handle, &allocation_count,
                    &native_status),
-            AMDF_DXG_BRIDGE_RESULT_BUFFER_TOO_SMALL);
+            AMDF_DXG_PROVIDER_RESULT_BUFFER_TOO_SMALL);
   EXPECT_EQ(handles[0], 0xA0u);
   EXPECT_EQ(resource_handle, 0xB0u);
   EXPECT_EQ(allocation_count, 2u);
@@ -213,7 +210,7 @@ TEST_F(RocdxgAllocationTest, PreservesOutputsBeforeAndAfterNativeInvocation) {
   allocation_count = 0xB1;
   EXPECT_EQ(Create(create_info, 2, handles, &resource_handle, &allocation_count,
                    &native_status),
-            AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE);
+            AMDF_DXG_PROVIDER_RESULT_NATIVE_FAILURE);
   EXPECT_EQ(handles[0], 0xA0u);
   EXPECT_EQ(handles[1], 0xA1u);
   EXPECT_EQ(resource_handle, 0xB0u);

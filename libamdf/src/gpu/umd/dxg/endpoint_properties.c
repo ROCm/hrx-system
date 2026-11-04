@@ -9,7 +9,7 @@
 #include <stddef.h>
 
 bool amdf_gpu_dxg_endpoint_properties_translate(
-    const amdf_dxg_bridge_gpu_properties_t* provider_properties,
+    const amdf_dxg_provider_gpu_properties_t* provider_properties,
     amdf_gpu_endpoint_properties_t* out_properties) {
   const uint32_t xcc_count = provider_properties->xcc_count;
   const uint32_t shader_engine_count = provider_properties->shader_engine_count;
@@ -33,7 +33,7 @@ bool amdf_gpu_dxg_endpoint_properties_translate(
               .minor = (uint32_t)provider_properties->gfx_ip_minor,
               .stepping = (uint32_t)provider_properties->gfx_ip_stepping,
           },
-      // The bridge carries the complete HSAKMT capability word. The low four
+      // The provider carries the complete HSAKMT capability word. The low four
       // bits are the ASIC revision used for compiler-target selection.
       .asic_revision = provider_properties->asic_revision & 0xFu,
       .compute =

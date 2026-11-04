@@ -10,7 +10,7 @@
 #include <stdbool.h>
 
 #include "libamdf/src/gpu/endpoint_profile.h"
-#include "libamdf/src/gpu/umd/dxg/bridge_api.h"
+#include "libamdf/src/gpu/umd/dxg/provider_api.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,7 +18,7 @@ extern "C" {
 
 // Translates one private DXG result into provider-neutral endpoint properties.
 bool amdf_gpu_dxg_endpoint_properties_translate(
-    const amdf_dxg_bridge_gpu_properties_t* provider_properties,
+    const amdf_dxg_provider_gpu_properties_t* provider_properties,
     amdf_gpu_endpoint_properties_t* out_properties);
 
 #ifdef __cplusplus

@@ -23,13 +23,12 @@ amdf_status_t amdf_gpu_umd_create_endpoint_profile(
   amdf_gpu_dxg_adapter_t adapter = {0};
   bool profile_available = false;
   amdf_gpu_endpoint_profile_t profile = {0};
-  amdf_dxg_bridge_gpu_properties_t provider_properties = {0};
+  amdf_dxg_provider_gpu_properties_t provider_properties = {0};
   LUID adapter_luid;
   uint32_t physical_adapter_index = 0;
   amdf_windows_endpoint_id_decode(&platform_endpoint->id, &adapter_luid,
                                   &physical_adapter_index);
-  const amdf_dxg_bridge_gpu_adapter_open_info_t open_info = {
-      .structure_size = sizeof(open_info),
+  const amdf_dxg_provider_gpu_adapter_open_info_t open_info = {
       .adapter_handle = (uint32_t)platform_endpoint->adapter,
       .physical_adapter_index = physical_adapter_index,
       .adapter_luid = ((uint64_t)(uint32_t)adapter_luid.HighPart << 32) |

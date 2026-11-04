@@ -21,9 +21,9 @@ typedef struct amdf_gpu_dxg_memory_plan_t {
   // Offset of a registered logical range within its page-covered backing.
   uint64_t host_byte_offset;
   // Private physical allocation domain.
-  amdf_dxg_bridge_gpu_allocation_domain_t allocation_domain;
+  amdf_dxg_provider_gpu_allocation_domain_t allocation_domain;
   // Private physical allocation behavior.
-  amdf_dxg_bridge_gpu_allocation_flags_t allocation_flags;
+  amdf_dxg_provider_gpu_allocation_flags_t allocation_flags;
   // Complete achieved public memory properties.
   amdf_memory_flags_t achieved_flags;
 } amdf_gpu_dxg_memory_plan_t;
@@ -87,14 +87,15 @@ static void amdf_gpu_dxg_memory_plan(
     plan.host_byte_offset = (uintptr_t)create_info->registered_host_pointer &
                             (AMDF_GPU_DXG_PAGE_SIZE - 1);
     plan.allocation_domain =
-        AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_REGISTERED_HOST;
+        AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_REGISTERED_HOST;
     if (plan.alignment < AMDF_GPU_DXG_PAGE_SIZE) {
       plan.alignment = AMDF_GPU_DXG_PAGE_SIZE;
     }
   } else {
-    plan.allocation_domain = profile->memory_class == AMDF_MEMORY_CLASS_LOCAL
-                                 ? AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL
-                                 : AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
+    plan.allocation_domain =
+        profile->memory_class == AMDF_MEMORY_CLASS_LOCAL
+            ? AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_LOCAL
+            : AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_SYSTEM;
     if (plan.alignment < AMDF_GPU_DXG_RESERVATION_GRANULARITY) {
       plan.alignment = AMDF_GPU_DXG_RESERVATION_GRANULARITY;
     }
@@ -104,14 +105,15 @@ static void amdf_gpu_dxg_memory_plan(
   plan.byte_length =
       (create_info->byte_length + padding) & ~(AMDF_GPU_DXG_PAGE_SIZE - 1);
   if ((create_info->required_flags & AMDF_MEMORY_FLAG_HOST_COHERENT) != 0) {
-    plan.allocation_flags |= AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_FINE_GRAIN;
+    plan.allocation_flags |= AMDF_DXG_PROVIDER_GPU_ALLOCATION_FLAG_FINE_GRAIN;
   }
   if ((create_info->required_flags & AMDF_MEMORY_FLAG_DEVICE_UNCACHED) != 0) {
     plan.allocation_flags |=
-        AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_DEVICE_UNCACHED;
+        AMDF_DXG_PROVIDER_GPU_ALLOCATION_FLAG_DEVICE_UNCACHED;
   }
   if ((create_info->required_flags & AMDF_MEMORY_FLAG_QUEUE_STORAGE) != 0) {
-    plan.allocation_flags |= AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_QUEUE_STORAGE;
+    plan.allocation_flags |=
+        AMDF_DXG_PROVIDER_GPU_ALLOCATION_FLAG_QUEUE_STORAGE;
   }
   *out_plan = plan;
 }
@@ -197,30 +199,30 @@ static amdf_status_t amdf_gpu_dxg_memory_create_allocations(
     const amdf_gpu_dxg_memory_plan_t* plan, amdf_gpu_dxg_memory_t* memory) {
   void* native_host_pointer = memory->host_pointer;
   if (plan->allocation_domain ==
-      AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_REGISTERED_HOST) {
+      AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_REGISTERED_HOST) {
     native_host_pointer =
         (uint8_t*)native_host_pointer - memory->host_byte_offset;
   }
-  const amdf_dxg_bridge_gpu_allocation_create_info_t create_info = {
-      .structure_size = sizeof(create_info),
+  const amdf_dxg_provider_gpu_allocation_create_info_t create_info = {
       .device_handle = memory->device.device_handle,
       .domain = plan->allocation_domain,
       .flags = plan->allocation_flags,
       .byte_length = plan->byte_length,
       .placement_device_address =
-          plan->allocation_domain == AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL
+          plan->allocation_domain ==
+                  AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_LOCAL
               ? memory->device_address
               : 0,
-      .host_pointer =
-          plan->allocation_domain == AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL
-              ? NULL
-              : native_host_pointer,
+      .host_pointer = plan->allocation_domain ==
+                              AMDF_DXG_PROVIDER_GPU_ALLOCATION_DOMAIN_LOCAL
+                          ? NULL
+                          : native_host_pointer,
   };
   uint32_t created_allocation_count = 0;
   const amdf_status_t status = amdf_gpu_dxg_adapter_create_allocations(
-      memory->device.bridge_adapter, &create_info, memory->allocation_capacity,
-      memory->allocation_handles, &memory->resource_handle,
-      &created_allocation_count);
+      memory->device.provider_adapter, &create_info,
+      memory->allocation_capacity, memory->allocation_handles,
+      &memory->resource_handle, &created_allocation_count);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -421,7 +423,7 @@ amdf_status_t amdf_gpu_dxg_memory_prepare(
   uint32_t allocation_count = 0;
   uint64_t maximum_native_allocation_byte_length = 0;
   amdf_status_t status = amdf_gpu_dxg_adapter_query_allocation_layout(
-      device->bridge_adapter, plan.byte_length, &allocation_count,
+      device->provider_adapter, plan.byte_length, &allocation_count,
       &maximum_native_allocation_byte_length);
   if (!amdf_status_is_ok(status)) {
     return status;
@@ -526,14 +528,14 @@ amdf_status_t amdf_gpu_dxg_memory_prepare_import(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  const amdf_dxg_bridge_gpu_buffer_import_info_t native_import = {
+  const amdf_dxg_provider_gpu_buffer_import_info_t native_import = {
       .device_handle = device->device_handle,
       .adapter_luid = device->adapter_luid,
       .shared_handle = (void*)memory->external_reference,
   };
   uint64_t buffer_byte_length = 0;
   status = amdf_gpu_dxg_adapter_prepare_buffer_import(
-      device->bridge_adapter, &native_import, &memory->resource_handle,
+      device->provider_adapter, &native_import, &memory->resource_handle,
       &memory->allocation_handles[0], &memory->byte_length,
       &buffer_byte_length);
   memory->allocation_count = memory->allocation_handles[0] != 0 ? 1 : 0;
