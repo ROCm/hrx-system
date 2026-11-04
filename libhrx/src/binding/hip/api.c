@@ -13137,20 +13137,23 @@ HIPAPI hipError_t hipStreamQuery(hipStream_t stream) {
     HIP_RETURN_ERROR(hipErrorStreamCaptureUnsupported);
   }
 
-  int is_complete = 0;
+  iree_hal_streaming_completion_state_t completion_state =
+      IREE_HAL_STREAMING_COMPLETION_STATE_PENDING;
   iree_status_t status = iree_ok_status();
   if (!stream || stream == hipStreamLegacy) {
-    status =
-        iree_hal_streaming_context_query(resolved_stream.context, &is_complete);
+    status = iree_hal_streaming_context_query(resolved_stream.context,
+                                              &completion_state);
   } else {
-    status =
-        iree_hal_streaming_stream_query(resolved_stream.stream, &is_complete);
+    status = iree_hal_streaming_stream_query(resolved_stream.stream,
+                                             &completion_state);
   }
   iree_hip_resolved_stream_release(&resolved_stream);
-  // is_complete == 0 means complete, is_complete == 1 means not complete.
-  hipError_t result = iree_status_is_ok(status)
-                          ? (is_complete == 0 ? hipSuccess : hipErrorNotReady)
-                          : iree_status_to_hip_result(status);
+  hipError_t result =
+      iree_status_is_ok(status)
+          ? (completion_state == IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE
+                 ? hipSuccess
+                 : hipErrorNotReady)
+          : iree_status_to_hip_result(status);
   HIP_RETURN_ERROR(result);
 }
 
@@ -14459,14 +14462,17 @@ HIPAPI hipError_t hipEventQuery(hipEvent_t event) {
     HIP_RETURN_ERROR(hipErrorCapturedEvent);
   }
 
-  int is_complete = 0;
+  iree_hal_streaming_completion_state_t completion_state =
+      IREE_HAL_STREAMING_COMPLETION_STATE_PENDING;
   iree_status_t status =
-      iree_hal_streaming_event_query(streaming_event, &is_complete);
+      iree_hal_streaming_event_query(streaming_event, &completion_state);
   iree_hal_streaming_event_release(streaming_event);
-  // is_complete == 0 means complete, is_complete == 1 means not complete.
-  hipError_t result = iree_status_is_ok(status)
-                          ? (is_complete == 0 ? hipSuccess : hipErrorNotReady)
-                          : iree_status_to_hip_result(status);
+  hipError_t result =
+      iree_status_is_ok(status)
+          ? (completion_state == IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE
+                 ? hipSuccess
+                 : hipErrorNotReady)
+          : iree_status_to_hip_result(status);
   HIP_RETURN_ERROR(result);
 }
 

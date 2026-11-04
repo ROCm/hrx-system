@@ -1161,12 +1161,15 @@ CUDAAPI CUresult cuEventRecord(CUevent hEvent, CUstream hStream) {
 }
 
 CUDAAPI CUresult cuEventQuery(CUevent hEvent) {
-  int is_complete = 0;
+  iree_hal_streaming_completion_state_t completion_state =
+      IREE_HAL_STREAMING_COMPLETION_STATE_PENDING;
   iree_status_t status = iree_hal_streaming_event_query(
-      (iree_hal_streaming_event_t*)hEvent, &is_complete);
+      (iree_hal_streaming_event_t*)hEvent, &completion_state);
   CUresult result =
       iree_status_is_ok(status)
-          ? (is_complete == 1 ? CUDA_SUCCESS : CUDA_ERROR_NOT_READY)
+          ? (completion_state == IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE
+                 ? CUDA_SUCCESS
+                 : CUDA_ERROR_NOT_READY)
           : iree_status_to_cu_result(status);
   return result;
 }
@@ -2913,12 +2916,15 @@ CUDAAPI CUresult cuStreamQuery(CUstream hStream) {
     hStream = (CUstream)context->default_stream;
   }
 
-  int is_complete = 0;
+  iree_hal_streaming_completion_state_t completion_state =
+      IREE_HAL_STREAMING_COMPLETION_STATE_PENDING;
   iree_status_t status = iree_hal_streaming_stream_query(
-      (iree_hal_streaming_stream_t*)hStream, &is_complete);
+      (iree_hal_streaming_stream_t*)hStream, &completion_state);
   CUresult result =
       iree_status_is_ok(status)
-          ? (is_complete == 1 ? CUDA_SUCCESS : CUDA_ERROR_NOT_READY)
+          ? (completion_state == IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE
+                 ? CUDA_SUCCESS
+                 : CUDA_ERROR_NOT_READY)
           : iree_status_to_cu_result(status);
   return result;
 }

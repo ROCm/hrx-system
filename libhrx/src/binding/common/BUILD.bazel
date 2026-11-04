@@ -116,6 +116,7 @@ hrx_cc_library(
         "tls.c",
     ],
     hdrs = [
+        "completion.h",
         "context.h",
         "device.h",
         "direct_transfer.h",

@@ -488,9 +488,10 @@ iree_status_t iree_hal_streaming_stream_flush(
 }
 
 iree_status_t iree_hal_streaming_stream_query(
-    iree_hal_streaming_stream_t* stream, int* status) {
+    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_completion_state_t* out_completion_state) {
   IREE_ASSERT_ARGUMENT(stream);
-  IREE_ASSERT_ARGUMENT(status);
+  IREE_ASSERT_ARGUMENT(out_completion_state);
 
   IREE_RETURN_IF_ERROR(iree_hal_streaming_stream_flush(stream));
 
@@ -501,10 +502,10 @@ iree_status_t iree_hal_streaming_stream_query(
   iree_slim_mutex_lock(&stream->mutex);
   const uint64_t pending_value = stream->pending_value;
   if (current_value >= pending_value) {
-    *status = 0;  // Complete
+    *out_completion_state = IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE;
     stream->completed_value = iree_max(stream->completed_value, current_value);
   } else {
-    *status = 1;  // Not complete
+    *out_completion_state = IREE_HAL_STREAMING_COMPLETION_STATE_PENDING;
   }
   iree_slim_mutex_unlock(&stream->mutex);
 

@@ -418,10 +418,11 @@ static iree_status_t iree_hal_streaming_recorded_point_query(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_streaming_event_query(iree_hal_streaming_event_t* event,
-                                             int* status) {
+iree_status_t iree_hal_streaming_event_query(
+    iree_hal_streaming_event_t* event,
+    iree_hal_streaming_completion_state_t* out_completion_state) {
   IREE_ASSERT_ARGUMENT(event);
-  IREE_ASSERT_ARGUMENT(status);
+  IREE_ASSERT_ARGUMENT(out_completion_state);
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_streaming_recorded_point_t recorded_point;
@@ -432,8 +433,8 @@ iree_status_t iree_hal_streaming_event_query(iree_hal_streaming_event_t* event,
   iree_hal_streaming_event_release_recorded_point(&recorded_point);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, query_status);
 
-  // 0=complete, 1=not complete.
-  *status = reached ? 0 : 1;
+  *out_completion_state = reached ? IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE
+                                  : IREE_HAL_STREAMING_COMPLETION_STATE_PENDING;
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
