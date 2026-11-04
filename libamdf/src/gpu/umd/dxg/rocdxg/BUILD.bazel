@@ -16,6 +16,30 @@ package(
 )
 
 amdf_cc_library(
+    name = "private_records",
+    srcs = ["private_records.c"],
+    hdrs = ["private_records.h"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+)
+
+amdf_cc_test(
+    name = "private_records_test",
+    srcs = ["private_records_test.cc"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        ":private_records",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_library(
     name = "native_transport",
     srcs = ["dxcore_loader_compatibility.cc"],
     hdrs = ["native_transport.h"],
