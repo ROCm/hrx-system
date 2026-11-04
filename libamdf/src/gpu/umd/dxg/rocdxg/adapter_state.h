@@ -10,7 +10,7 @@
 #include <atomic>
 
 #include "libamdf/src/gpu/umd/dxg/bridge_api.h"
-#include "shared/include/thunk_proxy/thunk_proxy.h"
+#include "libamdf/src/gpu/umd/dxg/rocdxg/private_records.h"
 
 // Immutable native scheduler facts for one kernel-queue command family.
 struct amdf_rocdxg_kernel_queue_profile_t {
@@ -30,12 +30,8 @@ struct amdf_dxg_bridge_gpu_adapter_t {
   amdf_allocator_t host_allocator = {};
   // Borrowed native transport installed only during synchronous bridge calls.
   amdf_dxg_bridge_native_transport_t native_transport = {};
-  // Private topology context owned by this adapter.
-  thunk_proxy::ChainContext* chain = nullptr;
-  // Private physical-device context owned by this adapter.
-  thunk_proxy::DeviceContext* device = nullptr;
-  // Whether context payloads enable firmware-managed graphics state.
-  bool state_shadowing_by_cpfw = false;
+  // Immutable facts decoded from the selected physical adapter.
+  amdf_dxg_private_adapter_info_t private_info = {};
   // Qualified immutable-stream compute scheduler.
   amdf_rocdxg_kernel_queue_profile_t pm4_queue_profile = {};
   // Qualified immutable-stream SDMA scheduler.

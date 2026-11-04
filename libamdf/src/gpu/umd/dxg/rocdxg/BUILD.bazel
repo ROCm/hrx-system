@@ -39,18 +39,28 @@ amdf_cc_test(
     ],
 )
 
-amdf_cc_library(
-    name = "native_transport",
-    srcs = ["dxcore_loader_compatibility.cc"],
-    hdrs = ["native_transport.h"],
+amdf_cc_test(
+    name = "allocation_test",
+    srcs = [
+        "adapter_state.cc",
+        "adapter_state.h",
+        "allocation.cc",
+        "allocation.h",
+        "allocation_test.cc",
+    ],
     copts = ["-Wno-unknown-pragmas"],
     target_compatible_with = [
         "@platforms//cpu:x86_64",
         "@platforms//os:linux",
     ],
     deps = [
+        ":private_records",
+        "//libamdf/src:allocator",
+        "//libamdf/src/gpu/umd/dxg:bridge_allocator",
         "//libamdf/src/gpu/umd/dxg:bridge_api",
         "//third_party:amdf_rocdxg_headers",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
     ],
 )
 
@@ -64,20 +74,16 @@ amdf_linux_sidecar_library(
         "bridge.cc",
         "clock.cc",
         "clock.h",
-        "gfxip_compatibility.cc",
         "kernel_queue.cc",
         "kernel_queue.h",
-        "native_allocation_flags.h",
     ],
     exports_file = "exports.map",
     visibility = ["//libamdf/src/gpu/umd/dxg/linux:__pkg__"],
     deps = [
-        ":native_transport",
+        ":private_records",
         "//libamdf/src/gpu/umd/dxg:bridge_allocator",
         "//libamdf/src/gpu/umd/dxg:bridge_api",
         "//third_party:amdf_rocdxg_headers",
-        "//third_party:amdf_rocdxg_thunk_proxy",
-        "//third_party:amdf_wkmi",
     ],
 )
 
@@ -130,59 +136,6 @@ amdf_cc_test(
 )
 
 amdf_cc_test(
-    name = "native_allocation_flags_test",
-    srcs = [
-        "native_allocation_flags.h",
-        "native_allocation_flags_test.cc",
-    ],
-    copts = ["-Wno-unknown-pragmas"],
-    target_compatible_with = [
-        "@platforms//cpu:x86_64",
-        "@platforms//os:linux",
-    ],
-    deps = [
-        "//libamdf/src/gpu/umd/dxg:bridge_api",
-        "//third_party:amdf_rocdxg_headers",
-        "//third_party:google_test",
-        "//third_party:google_test_main",
-    ],
-)
-
-amdf_cc_test(
-    name = "native_transport_test",
-    srcs = ["native_transport_test.cc"],
-    copts = ["-Wno-unknown-pragmas"],
-    target_compatible_with = [
-        "@platforms//cpu:x86_64",
-        "@platforms//os:linux",
-    ],
-    deps = [
-        ":native_transport",
-        "//third_party:amdf_rocdxg_headers",
-        "//third_party:google_test",
-        "//third_party:google_test_main",
-    ],
-)
-
-amdf_cc_test(
-    name = "wkmi_payload_test",
-    srcs = ["wkmi_payload_test.cc"],
-    copts = ["-Wno-unknown-pragmas"],
-    linkopts = ["-Wl,--gc-sections"],
-    target_compatible_with = [
-        "@platforms//cpu:x86_64",
-        "@platforms//os:linux",
-    ],
-    deps = [
-        ":native_transport",
-        "//third_party:amdf_rocdxg_headers",
-        "//third_party:amdf_wkmi",
-        "//third_party:google_test",
-        "//third_party:google_test_main",
-    ],
-)
-
-amdf_cc_test(
     name = "clock_test",
     srcs = [
         "adapter_state.cc",
@@ -190,7 +143,6 @@ amdf_cc_test(
         "clock.cc",
         "clock.h",
         "clock_test.cc",
-        "gfxip_compatibility.cc",
     ],
     copts = ["-Wno-unknown-pragmas"],
     linkopts = ["-Wl,--wrap=clock_gettime"],
@@ -199,11 +151,9 @@ amdf_cc_test(
         "@platforms//os:linux",
     ],
     deps = [
-        ":native_transport",
+        ":private_records",
         "//libamdf/src/gpu/umd/dxg:bridge_api",
         "//third_party:amdf_rocdxg_headers",
-        "//third_party:amdf_rocdxg_thunk_proxy",
-        "//third_party:amdf_wkmi",
         "//third_party:google_test",
         "//third_party:google_test_main",
     ],
@@ -214,7 +164,6 @@ amdf_cc_test(
     srcs = [
         "adapter_state.cc",
         "adapter_state.h",
-        "gfxip_compatibility.cc",
         "kernel_queue.cc",
         "kernel_queue.h",
         "kernel_queue_test.cc",
@@ -229,13 +178,11 @@ amdf_cc_test(
         "@platforms//os:linux",
     ],
     deps = [
-        ":native_transport",
+        ":private_records",
         "//libamdf/src:allocator",
         "//libamdf/src/gpu/umd/dxg:bridge_allocator",
         "//libamdf/src/gpu/umd/dxg:bridge_api",
         "//third_party:amdf_rocdxg_headers",
-        "//third_party:amdf_rocdxg_thunk_proxy",
-        "//third_party:amdf_wkmi",
         "//third_party:google_test",
         "//third_party:google_test_main",
     ],

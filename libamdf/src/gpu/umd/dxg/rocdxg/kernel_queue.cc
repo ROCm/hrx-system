@@ -10,14 +10,13 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <limits>
 #include <new>
 
 #include "libamdf/src/gpu/umd/dxg/bridge_allocator.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/adapter_state.h"
+#include "libamdf/src/gpu/umd/dxg/rocdxg/private_records.h"
 #include "shared/include/d3dkmt_types.h"
-#include "wkmi.h"
 
 struct amdf_dxg_bridge_gpu_kernel_queue_t {
   // Parsed adapter state borrowed through queue destruction.
@@ -28,7 +27,7 @@ struct amdf_dxg_bridge_gpu_kernel_queue_t {
   D3DKMT_HANDLE handle = 0;
   // Separately owned monitored fence for software scheduling.
   D3DKMT_HANDLE progress_fence = 0;
-  // Fixed WKMI record reused by externally serialized submissions.
+  // Fixed private record reused by externally serialized submissions.
   amdf::dxg_bridge::HostBuffer submission_private_data;
 };
 
@@ -101,18 +100,19 @@ NTSTATUS DestroyNativeQueue(amdf_dxg_bridge_gpu_kernel_queue_t* queue) {
   return first_status;
 }
 
-bool TryMakeQueueProfile(const thunk_proxy::DeviceContext& device,
-                         uint32_t scheduler_id, bool require_hws,
+bool TryMakeQueueProfile(const amdf_dxg_private_adapter_info_t& info,
+                         uint8_t scheduler_id, bool require_hws,
                          amdf_rocdxg_kernel_queue_profile_t* out_profile) {
-  if (scheduler_id > static_cast<uint32_t>(std::numeric_limits<int>::max())) {
+  uint32_t node_ordinal = 0;
+  while (node_ordinal < AMDF_DXG_PRIVATE_SCHEDULER_ID_COUNT &&
+         info.scheduler_ids[node_ordinal] != scheduler_id) {
+    ++node_ordinal;
+  }
+  if (node_ordinal == AMDF_DXG_PRIVATE_SCHEDULER_ID_COUNT) {
     return false;
   }
-  const int scheduler = static_cast<int>(scheduler_id);
-  const int node_ordinal = device.EngineOrdinal(scheduler);
-  if (node_ordinal < 0) {
-    return false;
-  }
-  const bool uses_hardware_scheduling = device.IsHwsEnabled(scheduler);
+  const bool uses_hardware_scheduling =
+      ((info.hardware_scheduling_node_mask >> node_ordinal) & 1u) != 0;
   if (require_hws && !uses_hardware_scheduling) {
     return false;
   }
@@ -137,15 +137,6 @@ amdf_dxg_bridge_result_t CreateNativeQueue(
     return AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED;
   }
 
-  const int context_private_size = Wkmi::GetContextPrivDataSize();
-  const int queue_private_size = Wkmi::GetHwQueuePrivDataSize();
-  const int submission_private_size = Wkmi::GetSubmitPrivDataSize();
-  if (context_private_size <= 0 ||
-      (profile->uses_hardware_scheduling && queue_private_size <= 0) ||
-      submission_private_size <= 0) {
-    return AMDF_DXG_BRIDGE_RESULT_VERSION_MISMATCH;
-  }
-
   HostObject<amdf_dxg_bridge_gpu_kernel_queue_t> queue(adapter->host_allocator);
   if (!queue.Allocate()) {
     return AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED;
@@ -153,20 +144,21 @@ amdf_dxg_bridge_result_t CreateNativeQueue(
   HostBuffer context_private;
   HostBuffer queue_private;
   if (!context_private.Allocate(adapter->host_allocator,
-                                static_cast<size_t>(context_private_size)) ||
+                                AMDF_DXG_PRIVATE_CONTEXT_RECORD_BYTE_LENGTH) ||
       (profile->uses_hardware_scheduling &&
-       !queue_private.Allocate(adapter->host_allocator,
-                               static_cast<size_t>(queue_private_size))) ||
+       !queue_private.Allocate(
+           adapter->host_allocator,
+           AMDF_DXG_PRIVATE_HARDWARE_QUEUE_RECORD_BYTE_LENGTH)) ||
       !queue->submission_private_data.Allocate(
           adapter->host_allocator,
-          static_cast<size_t>(submission_private_size))) {
+          AMDF_DXG_PRIVATE_SUBMISSION_RECORD_BYTE_LENGTH)) {
     return AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED;
   }
   queue->adapter = adapter;
 
-  Wkmi::FillinContextPrivData(context_private.data(),
-                              adapter->state_shadowing_by_cpfw,
-                              profile->scheduler_id, 0, false);
+  amdf_dxg_private_initialize_context_record(
+      adapter->private_info.supports_firmware_state_shadowing,
+      profile->scheduler_id, 0, context_private.data());
   D3DKMT_CREATECONTEXTVIRTUAL create_context = {
       .hDevice = static_cast<D3DKMT_HANDLE>(create_info.device_handle),
       .NodeOrdinal = profile->node_ordinal,
@@ -189,12 +181,11 @@ amdf_dxg_bridge_result_t CreateNativeQueue(
   D3DKMT_CREATEHWQUEUE create_queue = {};
   D3DKMT_CREATESYNCHRONIZATIONOBJECT2 create_fence = {};
   if (native_status == STATUS_SUCCESS && profile->uses_hardware_scheduling) {
-    // This queue publishes complete immutable PM4 or SDMA command buffers.
-    // WKMI's SDMA kind instead describes a persistent user-mode ring with a
-    // doorbell; the operating-system queue representation remains PM4.
-    Wkmi::FillinHwQueuePrivData(queue_private.data(),
-                                adapter->state_shadowing_by_cpfw, Wkmi::kNormal,
-                                Wkmi::kHwQueuePm4);
+    // This queue publishes complete immutable PM4 or SDMA command buffers;
+    // both use the operating-system PM4 hardware-queue representation.
+    amdf_dxg_private_initialize_hardware_queue_record(
+        adapter->private_info.supports_firmware_state_shadowing,
+        AMDF_DXG_PRIVATE_QUEUE_PRIORITY_NORMAL, 0, queue_private.data());
     create_queue.hHwContext = queue->context;
     create_queue.Flags.DisableGpuTimeout = 0;
     create_queue.pPrivateDriverData = queue_private.data();
@@ -264,25 +255,34 @@ amdf_dxg_bridge_result_t CreateNativeQueue(
 
 void InitializeGpuKernelQueueProfiles(
     amdf_dxg_bridge_gpu_adapter_t* adapter) noexcept {
-  const thunk_proxy::DeviceContext& device = *adapter->device;
-  adapter->state_shadowing_by_cpfw = device.SupportStateShadowingByCpFw();
-
-  TryMakeQueueProfile(device, device.ComputeEngine(), true,
+  const amdf_dxg_private_adapter_info_t& info = adapter->private_info;
+  uint8_t compute_scheduler = 0;
+  for (uint32_t i = 0; i < AMDF_DXG_PRIVATE_SCHEDULER_ID_COUNT; ++i) {
+    if (info.scheduler_ids[i] == 5) {
+      compute_scheduler = 5;
+      break;
+    }
+  }
+  TryMakeQueueProfile(info, compute_scheduler, true,
                       &adapter->pm4_queue_profile);
 
-  for (uint32_t i = 0; i < device.NumSdmaEngines(); ++i) {
-    if (TryMakeQueueProfile(device, device.SdmaEngine(i), true,
+  for (uint32_t i = 0; i < AMDF_DXG_PRIVATE_SCHEDULER_ID_COUNT; ++i) {
+    const uint8_t scheduler_id = info.scheduler_ids[i];
+    if ((scheduler_id == 4 || scheduler_id == 7) &&
+        TryMakeQueueProfile(info, scheduler_id, true,
                             &adapter->sdma_queue_profile)) {
       return;
     }
   }
   // A nonzero user-queue size means the driver selected persistent user-mode
   // SDMA rings, which this immutable command-stream API does not represent.
-  if (device.UserQueueSize() != 0) {
+  if (info.user_queue_byte_length != 0) {
     return;
   }
-  for (uint32_t i = 0; i < device.NumSdmaEngines(); ++i) {
-    if (TryMakeQueueProfile(device, device.SdmaEngine(i), false,
+  for (uint32_t i = 0; i < AMDF_DXG_PRIVATE_SCHEDULER_ID_COUNT; ++i) {
+    const uint8_t scheduler_id = info.scheduler_ids[i];
+    if ((scheduler_id == 4 || scheduler_id == 7) &&
+        TryMakeQueueProfile(info, scheduler_id, false,
                             &adapter->sdma_queue_profile)) {
       return;
     }
@@ -332,11 +332,10 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuKernelQueueSubmit(
   }
   *out_accepted = 0;
   *out_native_status = 0;
-  std::memset(queue->submission_private_data.data(), 0,
-              queue->submission_private_data.byte_length());
-  Wkmi::FillinSubmitPrivData(queue->submission_private_data.data(),
-                             queue->handle, command_buffer_address,
-                             command_buffer_byte_length, queue->handle != 0);
+  amdf_dxg_private_initialize_submission_record(
+      queue->handle, command_buffer_address,
+      static_cast<uint32_t>(command_buffer_byte_length), queue->handle != 0,
+      queue->submission_private_data.data());
 
   if (queue->handle == 0) {
     D3DKMT_SUBMITCOMMAND submit = {

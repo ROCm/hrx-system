@@ -10,8 +10,6 @@
 
 amdf_dxg_bridge_gpu_adapter_t::~amdf_dxg_bridge_gpu_adapter_t() {
   assert(live_queue_count.load(std::memory_order_relaxed) == 0);
-  delete device;
-  delete chain;
 }
 
 namespace amdf::rocdxg_bridge {
