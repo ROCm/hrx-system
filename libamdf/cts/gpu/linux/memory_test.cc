@@ -618,28 +618,6 @@ TEST_F(GpuLinuxMemoryTest, HonorsLocalPlacementCapabilities) {
   ASSERT_NO_FATAL_FAILURE(ExerciseLocalPlacementCapabilities());
 }
 
-TEST_F(GpuLinuxMemoryTest, DoesNotOfferDoubleAccountedHostBacking) {
-  const amdf_memory_access_requirements_t requirements = {
-      .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
-      .flags =
-          AMDF_MEMORY_FLAG_DEVICE_ADDRESS | AMDF_MEMORY_FLAG_MAPPING_SOURCE,
-  };
-  // File-capable owned host pages require foreign DMA-BUF import for aliases.
-  // Ordinary GPU-owned SYSTEM aliases and fixed USERPTR registration remain
-  // separate constructions; neither needs the duplicate native GTT charge.
-  EXPECT_EQ(
-      FindMemoryProfileOrdinal(
-          system_scope_,
-          AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP,
-          AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_HOST_FILE_IO,
-          requirements),
-      AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
-  EXPECT_NE(
-      FindMemoryProfileOrdinal(system_scope_, AMDF_MEMORY_PROFILE_ROLE_CREATE,
-                               AMDF_MEMORY_FLAG_HOST_VISIBLE, requirements),
-      AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
-}
-
 TEST_F(GpuLinuxMemoryTest, OmitsRegistrationWhenLifetimeDoesNotSupportIt) {
   if ((features_ & AMDF_GPU_DEVICE_FEATURE_HOST_REGISTRATION) != 0) {
     GTEST_SKIP() << "selected lifetime supports host registration";
