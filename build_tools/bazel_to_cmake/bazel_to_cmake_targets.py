@@ -57,9 +57,6 @@ class TargetConverter:
                 ],
                 "//third_party:catch2": ["iree::third_party::catch2"],
                 "//third_party:cxx_parser": ["iree::third_party::cxx_parser"],
-                "//third_party:amdf_rocdxg_headers": [
-                    "$<BUILD_LOCAL_INTERFACE:iree::third_party::amdf_rocdxg_headers>"
-                ],
                 "//third_party:amdf_dxg_headers": [
                     "$<BUILD_LOCAL_INTERFACE:iree::third_party::amdf_dxg_headers>"
                 ],

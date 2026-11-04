@@ -1,0 +1,13 @@
+diff --git a/include/dxg/d3dkmdt.h b/include/dxg/d3dkmdt.h
+index f15cc70..4488bb0 100644
+--- a/include/dxg/d3dkmdt.h
++++ b/include/dxg/d3dkmdt.h
+@@ -600,7 +600,7 @@ typedef struct _D3DKMDT_VIDEO_SIGNAL_INFO
+         struct
+         {
+             // Scan line ordering (e.g. progressive, interlaced).
+-            D3DDDI_VIDEO_SIGNAL_SCANLINE_ORDERING ScanLineOrdering : 3;
++            UINT ScanLineOrdering : 3;
+
+             // Vertical refresh frequency divider
+             UINT VSyncFreqDivider               : 6;

@@ -14,7 +14,7 @@
 #include "libamdf/src/gpu/umd/dxg/wsl/api.h"
 #include "libamdf/src/gpu/umd/dxg/wsl/clock.h"
 #include "libamdf/src/gpu/umd/dxg/wsl/kernel_queue.h"
-#include "shared/include/d3dkmt_types.h"
+#include "libamdf/src/platform/linux/dxg/kmt_types.h"
 
 namespace {
 

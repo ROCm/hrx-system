@@ -22,7 +22,6 @@ amdf_cc_test(
         "allocation.h",
         "allocation_test.cc",
     ],
-    copts = ["-Wno-unknown-pragmas"],
     target_compatible_with = [
         "@platforms//cpu:x86_64",
         "@platforms//os:linux",
@@ -32,7 +31,7 @@ amdf_cc_test(
         "//libamdf/src/gpu/umd/dxg:private_records",
         "//libamdf/src/gpu/umd/dxg:provider_allocator",
         "//libamdf/src/gpu/umd/dxg:provider_api",
-        "//third_party:amdf_rocdxg_headers",
+        "//libamdf/src/platform/linux/dxg:kmt_types",
         "//third_party:google_test",
         "//third_party:google_test_main",
     ],
@@ -52,7 +51,6 @@ amdf_cc_library(
         "provider.cc",
     ],
     hdrs = ["api.h"],
-    copts = ["-Wno-unknown-pragmas"],
     target_compatible_with = [
         "@platforms//cpu:x86_64",
         "@platforms//os:linux",
@@ -62,7 +60,7 @@ amdf_cc_library(
         "//libamdf/src/gpu/umd/dxg:private_records",
         "//libamdf/src/gpu/umd/dxg:provider_allocator",
         "//libamdf/src/gpu/umd/dxg:provider_api",
-        "//third_party:amdf_rocdxg_headers",
+        "//libamdf/src/platform/linux/dxg:kmt_types",
     ],
 )
 
@@ -75,7 +73,6 @@ amdf_cc_test(
         "clock.h",
         "clock_test.cc",
     ],
-    copts = ["-Wno-unknown-pragmas"],
     linkopts = ["-Wl,--wrap=clock_gettime"],
     target_compatible_with = [
         "@platforms//cpu:x86_64",
@@ -84,7 +81,7 @@ amdf_cc_test(
     deps = [
         "//libamdf/src/gpu/umd/dxg:private_records",
         "//libamdf/src/gpu/umd/dxg:provider_api",
-        "//third_party:amdf_rocdxg_headers",
+        "//libamdf/src/platform/linux/dxg:kmt_types",
         "//third_party:google_test",
         "//third_party:google_test_main",
     ],
@@ -99,7 +96,6 @@ amdf_cc_test(
         "kernel_queue.h",
         "kernel_queue_test.cc",
     ],
-    copts = ["-Wno-unknown-pragmas"],
     target_compatible_with = [
         "@platforms//cpu:x86_64",
         "@platforms//os:linux",
@@ -109,7 +105,7 @@ amdf_cc_test(
         "//libamdf/src/gpu/umd/dxg:private_records",
         "//libamdf/src/gpu/umd/dxg:provider_allocator",
         "//libamdf/src/gpu/umd/dxg:provider_api",
-        "//third_party:amdf_rocdxg_headers",
+        "//libamdf/src/platform/linux/dxg:kmt_types",
         "//third_party:google_test",
         "//third_party:google_test_main",
     ],
@@ -118,7 +114,6 @@ amdf_cc_test(
 amdf_cc_test(
     name = "adapter_system_test",
     srcs = ["adapter_system_test.cc"],
-    copts = ["-Wno-unknown-pragmas"],
     target_compatible_with = [
         "@platforms//cpu:x86_64",
         "@platforms//os:linux",

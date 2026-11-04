@@ -103,12 +103,6 @@ alias(
 )
 
 alias(
-    name = "amdf_rocdxg_headers",
-    actual = "@rocdxg_headers//:headers",
-    visibility = [":libamdf_users"],
-)
-
-alias(
     name = "amdf_dxg_headers",
     actual = "@libdxg_headers//:headers",
     visibility = [":libamdf_users"],

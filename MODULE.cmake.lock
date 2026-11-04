@@ -38,7 +38,6 @@ set(IREE_DEPENDENCY_IDS
   "linux_xdna_header"
   "directx_headers"
   "libdxg_headers"
-  "rocdxg_headers"
   "spirv_headers"
   "spirv_tools"
   "vulkan_headers"
@@ -508,26 +507,10 @@ set(IREE_DEP_LIBDXG_HEADERS_URLS
 set(IREE_DEP_LIBDXG_HEADERS_SHA256 "f7223bd894c58ed72d36fe606ea45655f5a80e5062e6defc47f09ecfa87d89a5")
 set(IREE_DEP_LIBDXG_HEADERS_STRIP_PREFIX "libdxg-5c28ebb4ead460c23ec5e87decb7d1af7285bb59")
 set(IREE_DEP_LIBDXG_HEADERS_BUILD_FILE "//build_tools/third_party/dxg_headers:libdxg_headers.BUILD.bazel")
-set(IREE_DEP_LIBDXG_HEADERS_PATCHES "")
-set(IREE_DEP_LIBDXG_HEADERS_PATCH_ARGS "")
-
-set(IREE_DEP_ROCDXG_HEADERS_KIND "http_archive")
-set(IREE_DEP_ROCDXG_HEADERS_OWNER "shared")
-set(IREE_DEP_ROCDXG_HEADERS_MODULE_NAME "rocdxg_headers")
-set(IREE_DEP_ROCDXG_HEADERS_REPO_NAME "rocdxg_headers")
-set(IREE_DEP_ROCDXG_HEADERS_VERSION "")
-set(IREE_DEP_ROCDXG_HEADERS_DEV_DEPENDENCY "FALSE")
-set(IREE_DEP_ROCDXG_HEADERS_SOURCE_URL "")
-set(IREE_DEP_ROCDXG_HEADERS_URLS
-  "https://github.com/ROCm/librocdxg/archive/refs/tags/v1.2.2.tar.gz"
+set(IREE_DEP_LIBDXG_HEADERS_PATCHES
+  "//build_tools/third_party/dxg_headers:portable_libdxg_headers.patch"
 )
-set(IREE_DEP_ROCDXG_HEADERS_SHA256 "12f1eb13948ea80ebbaf4d0380184291782a1c481e3d7296dfe7ff3e80f3d71b")
-set(IREE_DEP_ROCDXG_HEADERS_STRIP_PREFIX "librocdxg-1.2.2")
-set(IREE_DEP_ROCDXG_HEADERS_BUILD_FILE "//build_tools/third_party/dxg_headers:rocdxg_headers.BUILD.bazel")
-set(IREE_DEP_ROCDXG_HEADERS_PATCHES
-  "//build_tools/third_party/dxg_headers:portable_headers.patch"
-)
-set(IREE_DEP_ROCDXG_HEADERS_PATCH_ARGS
+set(IREE_DEP_LIBDXG_HEADERS_PATCH_ARGS
   "-p1"
 )
 

@@ -7,25 +7,10 @@
 #ifndef AMDF_SRC_PLATFORM_LINUX_DXG_KMT_H_
 #define AMDF_SRC_PLATFORM_LINUX_DXG_KMT_H_
 
-#include <assert.h>
 #include <sys/ioctl.h>
 
-// Microsoft's WSL headers use MSVC warning pragmas around portable C types.
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunknown-pragmas"
-#endif
-#include <basetsd.h>
-#if !defined(__cplusplus)
-#undef C_ASSERT
-#define C_ASSERT(expression) _Static_assert((expression), #expression)
-#endif
-#include <dxg/d3dkmthk.h>
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
-
 #include "libamdf/src/platform/linux/dxg/connection.h"
+#include "libamdf/src/platform/linux/dxg/kmt_types.h"
 
 #ifdef __cplusplus
 extern "C" {

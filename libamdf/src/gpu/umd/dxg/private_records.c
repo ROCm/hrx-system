@@ -6,8 +6,9 @@
 
 // This implementation was independently derived from publicly downloadable
 // ROCm artifacts and open source, then qualified against real /dev/dxg driver
-// responses. No private header or documentation is needed to reproduce it. The
-// key inputs were:
+// responses. No private header or documentation is needed to reproduce it.
+// These references record provenance only; librocdxg is not fetched, included,
+// linked, loaded, or packaged. The key inputs were:
 //
 // - librocdxg v1.2.2's shipped thunk-proxy archive and public headers:
 //   https://github.com/ROCm/librocdxg/tree/v1.2.2/shared

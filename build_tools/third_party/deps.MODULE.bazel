@@ -206,22 +206,16 @@ http_archive(
     url = "https://github.com/microsoft/DirectX-Headers/archive/6064ae312901a77e8700e84a2341470d050fcbca.tar.gz",
 )
 
+# GCC rejects libdxg's three-bit enum field because the enum also carries a
+# full-width sentinel. Preserve the published bit layout with its UINT form.
 http_archive(
     name = "libdxg_headers",
     build_file = "//build_tools/third_party/dxg_headers:libdxg_headers.BUILD.bazel",
+    patch_args = ["-p1"],
+    patches = ["//build_tools/third_party/dxg_headers:portable_libdxg_headers.patch"],
     sha256 = "f7223bd894c58ed72d36fe606ea45655f5a80e5062e6defc47f09ecfa87d89a5",
     strip_prefix = "libdxg-5c28ebb4ead460c23ec5e87decb7d1af7285bb59",
     url = "https://github.com/microsoft/libdxg/archive/5c28ebb4ead460c23ec5e87decb7d1af7285bb59.tar.gz",
-)
-
-http_archive(
-    name = "rocdxg_headers",
-    build_file = "//build_tools/third_party/dxg_headers:rocdxg_headers.BUILD.bazel",
-    patch_args = ["-p1"],
-    patches = ["//build_tools/third_party/dxg_headers:portable_headers.patch"],
-    sha256 = "12f1eb13948ea80ebbaf4d0380184291782a1c481e3d7296dfe7ff3e80f3d71b",
-    strip_prefix = "librocdxg-1.2.2",
-    url = "https://github.com/ROCm/librocdxg/archive/refs/tags/v1.2.2.tar.gz",
 )
 
 http_archive(

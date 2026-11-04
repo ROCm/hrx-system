@@ -17,7 +17,7 @@
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/dxg/private_records.h"
 #include "libamdf/src/gpu/umd/dxg/wsl/adapter_state.h"
-#include "shared/include/d3dkmt_types.h"
+#include "libamdf/src/platform/linux/dxg/kmt_types.h"
 
 namespace {
 

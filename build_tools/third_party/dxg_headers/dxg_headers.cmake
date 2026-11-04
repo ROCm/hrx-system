@@ -8,7 +8,7 @@ include(iree_third_party_helpers)
 
 # Declares the pinned public headers used by the Linux DXG transport.
 function(iree_configure_amdf_dxg_headers)
-  if(TARGET iree::third_party::amdf_rocdxg_headers)
+  if(TARGET iree::third_party::amdf_dxg_headers)
     return()
   endif()
   if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR
@@ -17,7 +17,7 @@ function(iree_configure_amdf_dxg_headers)
       "Linux DXG headers are available only for x86-64 Linux")
   endif()
 
-  foreach(_DEPENDENCY directx_headers libdxg_headers rocdxg_headers)
+  foreach(_DEPENDENCY directx_headers libdxg_headers)
     iree_dependency_require_pinned_source_allowed("${_DEPENDENCY}")
     iree_populate_locked_fetch_content(${_DEPENDENCY}
       _${_DEPENDENCY}_SOURCE_DIR)
@@ -36,14 +36,5 @@ function(iree_configure_amdf_dxg_headers)
     iree::third_party::amdf_directx_wsl_stubs)
   add_library(iree::third_party::amdf_dxg_headers ALIAS
     iree_amdf_dxg_headers)
-
-  add_library(iree_amdf_rocdxg_headers INTERFACE)
-  target_include_directories(iree_amdf_rocdxg_headers SYSTEM INTERFACE
-    "$<BUILD_INTERFACE:${_rocdxg_headers_SOURCE_DIR}>")
-  target_link_libraries(iree_amdf_rocdxg_headers INTERFACE
-    iree::third_party::amdf_directx_wsl_stubs
-    iree::third_party::amdf_dxg_headers)
-  add_library(iree::third_party::amdf_rocdxg_headers ALIAS
-    iree_amdf_rocdxg_headers)
 
 endfunction()

@@ -7,7 +7,6 @@
 exports_files([
     "directx_headers.BUILD.bazel",
     "libdxg_headers.BUILD.bazel",
-    "portable_headers.patch",
+    "portable_libdxg_headers.patch",
     "dxg_headers.cmake",
-    "rocdxg_headers.BUILD.bazel",
 ])

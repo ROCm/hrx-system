@@ -16,7 +16,7 @@
 struct amdf_dxg_provider_gpu_adapter_t {
   // Parent-instance allocator copied for all provider-controlled storage.
   amdf_allocator_t host_allocator = {};
-  // Borrowed native transport installed only during synchronous provider calls.
+  // Borrowed native transport retained through adapter close.
   amdf_dxg_provider_native_transport_t native_transport = {};
   // Immutable facts decoded from the selected physical adapter.
   amdf_dxg_private_adapter_info_t private_info = {};
