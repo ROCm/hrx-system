@@ -12,9 +12,9 @@
 #include "loom/serve/media/audio_decoder.h"
 #include "loom/serve/media/audio_resampler.h"
 #include "loom/serve/media/audio_source.h"
-#include "loom/serve/runtime/parameter/telemetry.h"
 #include "loom/serve/service/kind.h"
 #include "loom/serve/service/recognition/transcription.h"
+#include "loom/serve/telemetry/weights.h"
 #include "loom/util/json.h"
 
 typedef struct loom_serve_recognition_job_t {

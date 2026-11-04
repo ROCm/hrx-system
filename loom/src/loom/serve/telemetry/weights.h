@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef LOOM_SERVE_RUNTIME_PARAMETER_TELEMETRY_H_
-#define LOOM_SERVE_RUNTIME_PARAMETER_TELEMETRY_H_
+#ifndef LOOM_SERVE_TELEMETRY_WEIGHTS_H_
+#define LOOM_SERVE_TELEMETRY_WEIGHTS_H_
 
 #include "loom/serve/runtime/parameter/weights.h"
 #include "loom/serve/telemetry/stream.h"
@@ -23,4 +23,4 @@ void loom_serve_telemetry_record_weights(
 #ifdef __cplusplus
 }  // extern "C"
 #endif
-#endif  // LOOM_SERVE_RUNTIME_PARAMETER_TELEMETRY_H_
+#endif  // LOOM_SERVE_TELEMETRY_WEIGHTS_H_

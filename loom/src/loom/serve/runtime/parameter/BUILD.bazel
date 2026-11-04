@@ -240,28 +240,3 @@ loom_cc_test(
         "//runtime/src/iree/vm",
     ],
 )
-
-loom_cc_library(
-    name = "telemetry",
-    srcs = ["telemetry.c"],
-    hdrs = ["telemetry.h"],
-    deps = [
-        ":weights",
-        "//loom/src/loom/serve/telemetry:record",
-        "//loom/src/loom/serve/telemetry:stream",
-        "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_test(
-    name = "telemetry_test",
-    srcs = ["telemetry_test.cc"],
-    deps = [
-        ":telemetry",
-        "//loom/src/loom/serve/telemetry:record",
-        "//loom/src/loom/serve/telemetry:stream",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)

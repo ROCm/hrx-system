@@ -16,12 +16,12 @@
 #include "loom/serve/runtime/host/clock.h"
 #include "loom/serve/runtime/host/timer.h"
 #include "loom/serve/runtime/host/wake.h"
-#include "loom/serve/runtime/parameter/telemetry.h"
 #include "loom/serve/service/execution_reconfiguration.h"
 #include "loom/serve/service/image/output.h"
 #include "loom/serve/service/image/telemetry.h"
 #include "loom/serve/service/kind.h"
 #include "loom/serve/telemetry/tracing.h"
+#include "loom/serve/telemetry/weights.h"
 #include "loom/util/json.h"
 
 typedef struct loom_serve_image_job_t {

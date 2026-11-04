@@ -9,7 +9,7 @@
 #include <inttypes.h>
 #include <string.h>
 
-#include "loom/serve/runtime/parameter/telemetry.h"
+#include "loom/serve/telemetry/weights.h"
 
 iree_status_t loom_serve_text_heartbeat_sample(
     loom_serve_text_heartbeat_t* heartbeat,

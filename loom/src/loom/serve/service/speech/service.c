@@ -11,13 +11,13 @@
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/threading/mutex.h"
 #include "loom/serve/runtime/host/timer.h"
-#include "loom/serve/runtime/parameter/telemetry.h"
 #include "loom/serve/service/kind.h"
 #include "loom/serve/service/speech/http.h"
 #include "loom/serve/service/speech/stream.h"
 #include "loom/serve/service/speech/voice_http.h"
 #include "loom/serve/telemetry/latency.h"
 #include "loom/serve/telemetry/tracing.h"
+#include "loom/serve/telemetry/weights.h"
 
 typedef enum loom_serve_speech_voice_phase_e {
   SPEECH_VOICE_EMPTY = 0,
