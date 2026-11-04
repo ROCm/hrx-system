@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <algorithm>
+#include <string>
 #include <utility>
 
 #include "loom/serve/runtime/parameter/residency.h"
@@ -24,9 +25,14 @@ TEST_F(MemoryTest, ResidentCapacityUsesPhysicalBackingAndOptionalBudget) {
 
   // Reserving sparse addresses and committing one slab do not change the
   // addressability bound or turn current free memory into a model quota.
+  const auto geometry = loom_serve_pool_state_geometry(storage_owner);
+  const uint64_t reservation_length =
+      std::min(iree_device_align(kHighOffset, geometry.granularity),
+               reservation_capabilities.max_byte_length);
+  ASSERT_GT(reservation_length, kSlabSize);
+  RecordProperty("reservation_bytes", std::to_string(reservation_length));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
-      pool, loom_serve_pool_state_geometry(storage_owner), kHighOffset, 256,
-      &statistics[0], &first));
+      pool, geometry, reservation_length, 256, &statistics[0], &first));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(first, 0, kSlabSize));
   EXPECT_EQ(loom_serve_memory_pool_capacity(pool), capacity);
   IREE_ASSERT_OK(loom_serve_virtual_buffer_free(std::exchange(first, nullptr)));
@@ -285,6 +291,12 @@ TEST_F(MemoryTest, ReservationGrowthPreservesSparseBackingWithoutCopying) {
 
 TEST_F(MemoryTest, LogicalExtentDoesNotAllocateDenseHostMetadata) {
   const auto geometry = loom_serve_pool_state_geometry(storage_owner);
+  const uint64_t sparse_length =
+      std::min(iree_device_align(kHighOffset + geometry.mapping_size,
+                                 geometry.granularity),
+               reservation_capabilities.max_byte_length);
+  ASSERT_GT(sparse_length, geometry.mapping_size);
+  RecordProperty("reservation_bytes", std::to_string(sparse_length));
   const auto measure_reservation = [&](uint64_t length) {
     loom_serve_virtual_buffer_t* buffer = nullptr;
     loom_serve_memory_statistics_t buffer_statistics = {};
@@ -299,7 +311,7 @@ TEST_F(MemoryTest, LogicalExtentDoesNotAllocateDenseHostMetadata) {
   // Retire any one-time virtual reservation setup before comparing requests.
   (void)measure_reservation(geometry.mapping_size);
   const auto compact = measure_reservation(geometry.mapping_size);
-  const auto sparse = measure_reservation(kHighOffset + geometry.mapping_size);
+  const auto sparse = measure_reservation(sparse_length);
   EXPECT_EQ(sparse.request_count, compact.request_count);
   EXPECT_EQ(sparse.requested_bytes, compact.requested_bytes);
   EXPECT_EQ(sparse.largest_request_bytes, compact.largest_request_bytes);
@@ -896,7 +908,7 @@ TEST_F(DeviceMemoryTest, SparseGrowthTrimRegrowthAndSharedAdmission) {
       iree_hal_queue_family(loom_serve_device_dispatch_queue(device));
   const auto* transfer =
       iree_hal_queue_family(loom_serve_device_transfer_queue(device));
-  const iree_hal_pool_family_access_t families[] = {
+  iree_hal_pool_family_access_t families[] = {
       {
           .family = dispatch,
           .usage = IREE_HAL_BUFFER_USAGE_STORAGE |
@@ -909,19 +921,37 @@ TEST_F(DeviceMemoryTest, SparseGrowthTrimRegrowthAndSharedAdmission) {
       .family_count = dispatch == transfer ? 1u : 2u,
       .families = families,
   };
-  iree_hal_pool_t* source = loom_serve_pool_storage(storage_owner);
+  // Ordinary storage need not support sparse aliases. Qualify the address
+  // interval against a mapping source with the production pool's access scope.
+  for (auto& family : families) {
+    family.interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE;
+  }
+  iree_hal_slab_pool_options_t source_options;
+  iree_hal_slab_pool_options_initialize(&source_options);
+  iree_hal_pool_t* source = nullptr;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(loom_serve_device_group(device),
+                                           scope, &source_options,
+                                           iree_allocator_system(), &source));
+  for (auto& family : families) {
+    family.interfaces = 0;
+  }
   iree_hal_virtual_buffer_capabilities_t capabilities;
-  IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
+  auto status = iree_hal_virtual_buffer_query_capabilities(
       loom_serve_device_group(device), scope, {1, &source},
-      iree_allocator_system(), &capabilities));
-  if (capabilities.max_byte_length < kHighOffset + kSlabSize) {
+      iree_allocator_system(), &capabilities);
+  iree_hal_pool_release(source);
+  IREE_ASSERT_OK(status);
+  ASSERT_GT(capabilities.max_byte_length, 0u);
+  const uint64_t reservation_length = iree_device_align(
+      kHighOffset + kSlabSize, capabilities.reservation_granularity);
+  if (capabilities.max_byte_length < reservation_length) {
     GTEST_SKIP() << "Native address interval limit is "
                  << capabilities.max_byte_length
                  << " bytes; this case requires offsets above four GiB";
   }
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
-      pool, loom_serve_pool_weight_geometry(storage_owner),
-      kHighOffset + kSlabSize, 256, &statistics[0], &first));
+      pool, loom_serve_pool_weight_geometry(storage_owner), reservation_length,
+      256, &statistics[0], &first));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
       pool, loom_serve_pool_weight_geometry(storage_owner), 2 * kSlabSize, 256,
       &statistics[1], &second));

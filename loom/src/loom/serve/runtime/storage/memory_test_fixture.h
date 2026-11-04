@@ -321,18 +321,18 @@ class MemoryTest : public ::testing::Test {
     for (auto& family : families) {
       family.interfaces = 0;
     }
-    iree_hal_virtual_buffer_capabilities_t capabilities;
     auto status = iree_hal_virtual_buffer_query_capabilities(
-        hal_group, scope, {1, &backing}, host_allocator, &capabilities);
+        hal_group, scope, {1, &backing}, host_allocator,
+        &reservation_capabilities);
     loom_serve_memory_geometry_t geometries[2] = {};
     if (iree_status_is_ok(status)) {
-      status = loom_serve_memory_pool_query_geometry(&capabilities, backing,
-                                                     kSlabSize, &geometries[0]);
+      status = loom_serve_memory_pool_query_geometry(
+          &reservation_capabilities, backing, kSlabSize, &geometries[0]);
     }
     if (iree_status_is_ok(status)) {
       status = loom_serve_memory_pool_query_geometry(
-          &capabilities, backing, distinct_classes ? kSlabSize / 4 : kSlabSize,
-          &geometries[1]);
+          &reservation_capabilities, backing,
+          distinct_classes ? kSlabSize / 4 : kSlabSize, &geometries[1]);
       if (iree_status_is_ok(status)) {
         geometries[1].mapping_size = geometries[1].minimum_size;
       }
@@ -511,9 +511,11 @@ class MemoryTest : public ::testing::Test {
   loom_serve_execution_t* execution = nullptr;
   // One physical budget shared by the independent reservations.
   loom_serve_memory_pool_t* pool = nullptr;
+  // Native address geometry qualified against the private pool's real source.
+  iree_hal_virtual_buffer_capabilities_t reservation_capabilities = {};
   // Independent accounting groups competing for the same physical budget.
   std::array<loom_serve_memory_statistics_t, 3> statistics = {};
-  // First model-like reservation, sparsely backed beyond four GiB.
+  // First model-like reservation with independently owned sparse backing.
   loom_serve_virtual_buffer_t* first = nullptr;
   // Independent reservation competing for the same physical budget.
   loom_serve_virtual_buffer_t* second = nullptr;
