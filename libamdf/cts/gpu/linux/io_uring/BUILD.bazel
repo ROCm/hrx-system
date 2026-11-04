@@ -75,7 +75,6 @@ _FILE_IO_DEPS = [
     "//libamdf/cts/gpu/kernels:file_gather",
     "//libamdf/cts/gpu/kernels:file_latency",
     "//third_party:google_test",
-    "//third_party:linux_amdgpu_uapi",
 ]
 
 amdf_cc_library(

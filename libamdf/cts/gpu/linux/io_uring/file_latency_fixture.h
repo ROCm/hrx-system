@@ -4,14 +4,9 @@
 #ifndef LIBAMDF_CTS_GPU_LINUX_IO_URING_FILE_LATENCY_FIXTURE_H_
 #define LIBAMDF_CTS_GPU_LINUX_IO_URING_FILE_LATENCY_FIXTURE_H_
 
-#include <drm/amdgpu_drm.h>
-#include <fcntl.h>
 #include <immintrin.h>
 #include <sched.h>
-#include <sys/ioctl.h>
-#include <sys/stat.h>
 #include <sys/syscall.h>
-#include <sys/sysmacros.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -178,42 +173,19 @@ struct Sample {
 class GpuFileLatencyTest : public GpuFileIoFixture,
                            public ::testing::WithParamInterface<FileMode> {
  protected:
-  void TearDown() override {
-    ASSERT_NO_FATAL_FAILURE(GpuFileIoFixture::TearDown());
-    if (clock_file_ >= 0) {
-      ASSERT_EQ(close(clock_file_), 0);
-      clock_file_ = -1;
+  void QueryReferenceClock() {
+    ASSERT_GE(gpu_api_->extension_version, AMDF_GPU_EXTENSION_VERSION_2);
+    amdf_observation_clock_info_t clock = {};
+    const amdf_status_t status = gpu_api_->device_query_queue_clock_info(
+        device_, family_.ordinal, &clock);
+    if (status == amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
+      GTEST_SKIP() << "native queue-clock metadata unavailable";
     }
-  }
-
-  void OpenClock() {
-    amdf_endpoint_info_t endpoint_info = {
-        .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
-        .structure_size = sizeof(endpoint_info),
-    };
-    ASSERT_EQ(api_->endpoint_query_info(endpoint_, &endpoint_info),
-              AMDF_STATUS_OK);
-    ASSERT_EQ(endpoint_info.native_identity.type,
-              AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_LINUX_DEVICE);
-    const auto& identity = endpoint_info.native_identity.value.linux_device;
-    const std::string path =
-        "/dev/dri/renderD" + std::to_string(identity.minor);
-    clock_file_ = open(path.c_str(), O_RDONLY | O_CLOEXEC);
-    ASSERT_GE(clock_file_, 0) << std::strerror(errno);
-    struct stat info = {};
-    ASSERT_EQ(fstat(clock_file_, &info), 0);
-    ASSERT_EQ(major(info.st_rdev), identity.major);
-    ASSERT_EQ(minor(info.st_rdev), identity.minor);
-    drm_amdgpu_info_device device_info = {};
-    drm_amdgpu_info query = {};
-    query.return_pointer = reinterpret_cast<uintptr_t>(&device_info);
-    query.return_size = sizeof(device_info);
-    query.query = AMDGPU_INFO_DEV_INFO;
-    ASSERT_EQ(ioctl(clock_file_, DRM_IOCTL_AMDGPU_INFO, &query), 0);
-    frequency_khz_ = device_info.gpu_counter_freq;
-    ASSERT_GT(frequency_khz_, 0u);
-    RecordProperty("io_reference_clock_khz", frequency_khz_);
-    RecordProperty("io_clock_source", "shader_get_realtime");
+    ASSERT_EQ(status, AMDF_STATUS_OK);
+    ASSERT_GT(clock.frequency_hz, 0u);
+    frequency_hz_ = clock.frequency_hz;
+    RecordProperty("io_reference_clock_hz", std::to_string(frequency_hz_));
+    RecordProperty("io_clock_source", "device_query_queue_clock_info");
   }
 
   void PollerCpu(std::optional<uint64_t>* microseconds) {
@@ -461,7 +433,7 @@ class GpuFileLatencyTest : public GpuFileIoFixture,
            << ",\"depth\":" << profile.depth << ",\"phases\":" << profile.phases
            << ",\"rounds\":" << arguments.round_count
            << ",\"gap_us\":" << profile.gap_microseconds
-           << ",\"clock_khz\":" << frequency_khz_
+           << ",\"clock_hz\":" << frequency_hz_
            << ",\"idle_ms\":" << ring_->parameters.sq_thread_idle
            << ",\"poller_idle_ms\":" << poller_idle_milliseconds
            << ",\"setup_flags\":" << ring_->parameters.flags
@@ -557,7 +529,10 @@ class GpuFileLatencyTest : public GpuFileIoFixture,
   void Run(const Profile& profile, InputFault fault = InputFault::kNone) {
     const auto* kernel = latency_products::kKernels.Find(gpu_endpoint_info_);
     ASSERT_NE(kernel, nullptr);
-    ASSERT_NO_FATAL_FAILURE(OpenClock());
+    ASSERT_NO_FATAL_FAILURE(QueryReferenceClock());
+    if (IsSkipped()) {
+      return;
+    }
     uint32_t repetitions = 1;
     uint32_t idle_milliseconds = 1;
     ASSERT_NO_FATAL_FAILURE(
@@ -697,8 +672,8 @@ class GpuFileLatencyTest : public GpuFileIoFixture,
             .seed = Hash(0x81234567u + epoch),
             .payload_stride = stride,
             .phase_count = profile.phases,
-            .gap_ticks = uint32_t(uint64_t{frequency_khz_} *
-                                  profile.gap_microseconds / 1000),
+            .gap_ticks =
+                uint32_t(frequency_hz_ * profile.gap_microseconds / 1'000'000),
             .file_index = fault == InputFault::kAbsentFile ? 1u : 0u,
         };
         std::memset(arguments->host.pointer, 0, arguments->host.byte_length);
@@ -734,10 +709,8 @@ class GpuFileLatencyTest : public GpuFileIoFixture,
   }
 
  protected:
-  // Read-only DRM descriptor matched to the active endpoint's device identity.
-  int clock_file_ = -1;
-  // Nominal reference-counter frequency from AMDGPU_INFO_DEV_INFO, in kHz.
-  uint32_t frequency_khz_ = 0;
+  // Nominal reference-counter frequency for the selected PM4 family, in Hz.
+  uint64_t frequency_hz_ = 0;
   // Requested delay between host service passes; zero selects busy polling.
   uint32_t service_microseconds_ = 50;
   // SQPOLL thread ID, or -1 for ordinary submission or an unobserved owner.
@@ -779,7 +752,7 @@ struct DemandProfile {
 class GpuFileDemandTest : public GpuFileLatencyTest {
  protected:
   uint32_t Ticks(uint32_t microseconds) const {
-    return uint64_t{frequency_khz_} * microseconds / 1000;
+    return uint32_t(frequency_hz_ * microseconds / 1'000'000);
   }
 
   void CheckDemand(const DemandProfile& profile,
@@ -1023,7 +996,7 @@ class GpuFileDemandTest : public GpuFileLatencyTest {
            << ",\"interval_us\":" << profile.interval_microseconds
            << ",\"hold_us\":" << profile.hold_microseconds
            << ",\"phases\":" << profile.phases
-           << ",\"clock_khz\":" << frequency_khz_
+           << ",\"clock_hz\":" << frequency_hz_
            << ",\"service_us\":" << service_microseconds_
            << ",\"idle_ms\":" << ring_->parameters.sq_thread_idle
            << ",\"setup_flags\":" << ring_->parameters.flags
@@ -1075,7 +1048,10 @@ class GpuFileDemandTest : public GpuFileLatencyTest {
     ASSERT_LE(profile.credits, demand::kMaximumCredits);
     const auto* kernel = demand_products::kKernels.Find(gpu_endpoint_info_);
     ASSERT_NE(kernel, nullptr);
-    ASSERT_NO_FATAL_FAILURE(OpenClock());
+    ASSERT_NO_FATAL_FAILURE(QueryReferenceClock());
+    if (IsSkipped()) {
+      return;
+    }
     uint32_t repetitions = 1;
     ASSERT_NO_FATAL_FAILURE(
         EnvironmentCount("AMDF_IO_REPETITIONS", 31, &repetitions));
