@@ -324,21 +324,26 @@ class DispatchConcurrencyTest : public ::testing::Test {
   void SetTarget(uint32_t major, uint32_t minor, uint32_t stepping) {
     target_.gfx_ip = {major, minor, stepping};
     target_.compute.compute_unit_count = 16;
-    target_.compute.maximum_wave_count_per_compute_unit = 32;
-    target_.compute.local_data_share_byte_length =
-        (major == 9 && minor == 5) || (major == 12 && minor == 5) ? 160u * 1024u
-                                                                  : 64u * 1024u;
+    const bool gfx125 = major == 12 && minor == 5;
+    target_.compute.maximum_wave_count_per_compute_unit = gfx125 ? 64 : 32;
+    target_.compute.local_data_share_byte_length = gfx125 ? 320u * 1024u
+                                                   : major == 9 && minor == 5
+                                                       ? 160u * 1024u
+                                                       : 64u * 1024u;
     kernel_.code_properties = major >= 10 ? 1u << 10 : 0;
   }
 
-  iree_status_t Query(uint32_t workitems, uint32_t local_bytes = 0) {
+  iree_status_t Query(uint32_t workitems, uint32_t local_bytes = 0,
+                      uint32_t selected_compute_units = 0) {
     const iree_hal_queue_dispatch_concurrency_params_t params = {
         .workgroup_size = {workitems, 1, 1},
         .dynamic_workgroup_local_memory = local_bytes,
     };
     return iree_hal_amd_gpu_dispatch_query_concurrency(
-        &target_, &kernel_, &metadata_, scalar_reservation_, params,
-        &concurrency_);
+        &target_,
+        selected_compute_units ? selected_compute_units
+                               : target_.compute.compute_unit_count,
+        &kernel_, &metadata_, scalar_reservation_, params, &concurrency_);
   }
 
   // Immutable native facts supplied by the endpoint provider.
@@ -389,8 +394,8 @@ TEST_F(DispatchConcurrencyTest, EncodedVectorAllocationsAcrossArchitectures) {
       {11, 7, 0, 12, 64, 16, 9},
       {12, 0, 0, 12, 64, 16, 12},
       {12, 0, 1, 12, 64, 16, 12},
-      {12, 5, 0, 6, 128, 8, 12},  // 1536 / round(112, 24) = 12.
-      {12, 5, 1, 6, 128, 8, 12},
+      {12, 5, 0, 6, 128, 16, 12},  // 1536 / round(112, 24) = 12.
+      {12, 5, 1, 6, 128, 16, 12},
   };
   for (const auto& test : cases) {
     SCOPED_TRACE(::testing::Message()
@@ -401,7 +406,30 @@ TEST_F(DispatchConcurrencyTest, EncodedVectorAllocationsAcrossArchitectures) {
     EXPECT_EQ(concurrency_.scheduling_domain_count, test.domains);
     EXPECT_EQ(concurrency_.maximum_concurrent_workgroup_count_per_domain,
               test.groups);
+    IREE_ASSERT_OK(Query(test.workitems, 0, 4));
+    EXPECT_EQ(concurrency_.scheduling_domain_count, 4u);
+    EXPECT_EQ(concurrency_.maximum_concurrent_workgroup_count_per_domain,
+              test.groups);
   }
+}
+
+TEST_F(DispatchConcurrencyTest, SelectedUnitsPreserveNativeSchedulingDomains) {
+  SetTarget(11, 0, 0);
+  IREE_ASSERT_OK(Query(64, 0, 2));
+  EXPECT_EQ(concurrency_.scheduling_domain_count, 2u);
+  EXPECT_EQ(concurrency_.maximum_concurrent_workgroup_count_per_domain, 16u);
+  kernel_.compute_pgm_rsrc1 = 1u << 29;
+  IREE_ASSERT_OK(Query(64, 0, 2));
+  EXPECT_EQ(concurrency_.scheduling_domain_count, 1u);
+  EXPECT_EQ(concurrency_.maximum_concurrent_workgroup_count_per_domain, 32u);
+
+  SetTarget(12, 5, 0);
+  kernel_.compute_pgm_rsrc1 = 0;
+  IREE_ASSERT_OK(Query(32, 0, 1));
+  EXPECT_EQ(concurrency_.scheduling_domain_count, 1u);
+  EXPECT_EQ(concurrency_.maximum_concurrent_workgroup_count_per_domain, 64u);
+  IREE_ASSERT_OK(Query(32, 320 * 1024, 1));
+  EXPECT_EQ(concurrency_.maximum_concurrent_workgroup_count_per_domain, 1u);
 }
 
 TEST_F(DispatchConcurrencyTest, Wave64AndWgpKeepRegisterAndDomainUnits) {

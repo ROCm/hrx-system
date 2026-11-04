@@ -176,8 +176,8 @@ static iree_status_t iree_hal_amd_gpu_dispatch_residency(
     const bool large_register_file =
         major == 12 || (major == 11 && ((minor == 0 && stepping <= 1) ||
                                         (minor == 5 && stepping == 1)));
-    residency.compute_units_per_domain = (wgp || gfx125) ? 2 : 1;
-    residency.simds_per_compute_unit = 2;
+    residency.compute_units_per_domain = wgp ? 2 : 1;
+    residency.simds_per_compute_unit = gfx125 ? 4 : 2;
     residency.vector_register_count =
         (large_register_file ? 1536u : 1024u) / (wave32 ? 1u : 2u);
     residency.vector_encoding_granule = gfx125 ? 16 : (wave32 ? 8 : 4);
@@ -204,7 +204,7 @@ static iree_status_t iree_hal_amd_gpu_dispatch_residency(
 }
 
 iree_status_t iree_hal_amd_gpu_dispatch_query_concurrency(
-    const amdf_gpu_endpoint_info_t* target,
+    const amdf_gpu_endpoint_info_t* target, uint32_t compute_unit_count,
     const iree_hal_amd_gpu_image_kernel_t* kernel,
     const iree_hal_amd_gpu_metadata_kernel_t* metadata,
     uint32_t scalar_register_reservation,
@@ -292,8 +292,7 @@ iree_status_t iree_hal_amd_gpu_dispatch_query_concurrency(
         "native trap SGPR reservation is unavailable and changes residency");
   }
   *out_concurrency = (iree_hal_queue_dispatch_concurrency_t){
-      .scheduling_domain_count =
-          target->compute.compute_unit_count / domain_units,
+      .scheduling_domain_count = compute_unit_count / domain_units,
       .maximum_concurrent_workgroup_count_per_domain = groups,
   };
   return iree_ok_status();

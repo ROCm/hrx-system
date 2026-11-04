@@ -2400,9 +2400,15 @@ static iree_status_t iree_hal_amd_gpu_pm4_prepare_native(
         queue->options.retirement_capacity, queue->options.memory,
         queue->host_allocator, &queue->kernel, &queue->producer.ring));
   } else {
+    const amdf_gpu_queue_execution_resource_selection_t selection = {
+        .type = AMDF_STRUCTURE_TYPE_GPU_QUEUE_EXECUTION_RESOURCE_SELECTION,
+        .structure_size = sizeof(selection),
+        .resource_count = (uint32_t)queue->base.execution_resources.count,
+        .resource_ordinals = queue->base.execution_resources.ordinals};
     const amdf_gpu_user_queue_create_info_t native = {
         .type = AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO,
         .structure_size = sizeof(native),
+        .next = selection.resource_count ? &selection : NULL,
         .queue_family_ordinal = queue->options.family_ordinal,
         .priority =
             iree_hal_amd_gpu_user_queue_native_priority(queue->base.priority),
@@ -2770,7 +2776,8 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_query_dispatch_concurrency(
     iree_hal_queue_dispatch_concurrency_flags_t flags,
     iree_hal_queue_dispatch_concurrency_t* out_concurrency) {
   return iree_hal_amd_gpu_executable_query_dispatch_concurrency(
-      executable, function, params, out_concurrency);
+      executable, function, queue->execution_resources.count, params,
+      out_concurrency);
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_queue_control(

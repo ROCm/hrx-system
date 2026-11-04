@@ -91,17 +91,18 @@ void iree_hal_amd_gpu_dispatch_emplace_grid_sync(
     uint64_t grid_sync_address, void* arguments,
     iree_hal_amd_gpu_grid_sync_t* grid_sync);
 
-// Computes architectural residency for a full-endpoint queue using the loaded
-// descriptor and native device limits. Public HAL admission has established
-// nonzero dimensions; function-specific geometry is checked here. Metadata and
-// native facts are borrowed and immutable. No allocation, native call, queue
-// load, or dynamically backed scratch state participates. Failure leaves the
-// output unchanged; valid configurations that cannot reside return zero groups.
-// scalar_register_reservation is the native per-wave trap allocation (0 or 16),
-// or UINT32_MAX when unavailable. An unknown reserve only prevents an answer
-// when it changes the final residency; the descriptor cannot supply this fact.
+// Computes architectural residency for the queue's selected native compute
+// units using the loaded descriptor and device limits. Public HAL admission has
+// established nonzero dimensions; function-specific geometry is checked here.
+// Metadata and native facts are borrowed and immutable. No allocation, native
+// call, queue load, or dynamically backed scratch state participates. Failure
+// leaves the output unchanged; valid configurations that cannot reside return
+// zero groups. scalar_register_reservation is the native per-wave trap
+// allocation (0 or 16), or UINT32_MAX when unavailable. An unknown reserve only
+// prevents an answer when it changes the final residency; the descriptor cannot
+// supply this fact.
 iree_status_t iree_hal_amd_gpu_dispatch_query_concurrency(
-    const amdf_gpu_endpoint_info_t* target,
+    const amdf_gpu_endpoint_info_t* target, uint32_t compute_unit_count,
     const iree_hal_amd_gpu_image_kernel_t* kernel,
     const iree_hal_amd_gpu_metadata_kernel_t* metadata,
     uint32_t scalar_register_reservation,
