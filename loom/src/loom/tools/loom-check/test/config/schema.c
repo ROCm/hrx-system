@@ -20,7 +20,7 @@ static bool loom_check_test_config_schema_matches(
 static iree_status_t loom_check_test_config_schema_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module) {
+    const loom_check_test_native_module_t* native_module) {
   (void)provider;
   if (!iree_string_view_is_empty(request->target_options)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

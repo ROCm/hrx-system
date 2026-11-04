@@ -9,7 +9,7 @@
 #include "loom/target/arch/amdgpu/planning/occupancy.h"
 #include "loom/target/arch/amdgpu/planning/storage_lease.h"
 #include "loom/tools/loom-check/diagnostics.h"
-#include "loom/tools/loom-check/low_emit.h"
+#include "loom/tools/loom-check/test/low/native_emit.h"
 
 typedef struct loom_amdgpu_occupancy_check_emit_options_t {
   // Module-local target-low function symbol selected by the RUN line.
@@ -121,7 +121,7 @@ static iree_status_t loom_amdgpu_occupancy_check_parse_emit_options(
 static iree_status_t loom_amdgpu_occupancy_check_emit_provider_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module) {
+    const loom_check_test_native_module_t* native_module) {
   (void)provider;
   loom_amdgpu_occupancy_check_emit_options_t options;
   IREE_RETURN_IF_ERROR(
@@ -180,10 +180,15 @@ static iree_status_t loom_amdgpu_occupancy_check_emit_provider_append_names(
       builder, "amdgpu-occupancy-json, amdgpu-occupancy");
 }
 
-const loom_check_emit_provider_t
+const loom_check_test_native_emit_provider_t
     loom_amdgpu_occupancy_loom_check_emit_provider = {
-        .name = IREE_SVL("amdgpu-occupancy"),
-        .match = loom_amdgpu_occupancy_check_emit_provider_matches,
+        .base =
+            {
+                .name = IREE_SVL("amdgpu-occupancy"),
+                .match = loom_amdgpu_occupancy_check_emit_provider_matches,
+                .execute = loom_check_test_native_emit_provider_execute,
+                .append_names =
+                    loom_amdgpu_occupancy_check_emit_provider_append_names,
+            },
         .execute_native = loom_amdgpu_occupancy_check_emit_provider_execute,
-        .append_names = loom_amdgpu_occupancy_check_emit_provider_append_names,
 };

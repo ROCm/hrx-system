@@ -28,12 +28,15 @@ loom_cc_library(
 
 loom_cc_library(
     name = "occupancy",
+    testonly = True,
     srcs = ["occupancy.c"],
     hdrs = ["occupancy.h"],
     deps = [
         "//loom/src/loom/target/arch/amdgpu/planning:occupancy",
         "//loom/src/loom/target/arch/amdgpu/planning:storage_lease",
         "//loom/src/loom/tools/loom-check:execute",
+        "//loom/src/loom/tools/loom-check/test:native_provider",
+        "//loom/src/loom/tools/loom-check/test/low:native_emit",
         "//runtime/src/iree/base",
     ],
 )
@@ -45,6 +48,18 @@ loom_cc_library(
     visibility = ["//loom/src/loom/tools/loom-check:__pkg__"],
     deps = [
         ":bank_service",
+        "//loom/src/loom/tools/loom-check:provider",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "test_provider",
+    testonly = True,
+    srcs = ["test_provider.c"],
+    hdrs = ["test_provider.h"],
+    visibility = ["//loom/src/loom/tools/loom-check:__pkg__"],
+    deps = [
         ":occupancy",
         "//loom/src/loom/tools/loom-check:provider",
         "//runtime/src/iree/base",

@@ -185,6 +185,7 @@ loom_cc_library(
 
 loom_cc_library(
     name = "loom_check",
+    testonly = True,
     srcs = ["loom_check.c"],
     hdrs = ["loom_check.h"],
     deps = [
@@ -194,6 +195,8 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/tools/loom-check:execute",
+        "//loom/src/loom/tools/loom-check/test:native_provider",
+        "//loom/src/loom/tools/loom-check/test/low:native_emit",
         "//runtime/src/iree/base",
         "//runtime/src/iree/io:stream",
     ],
@@ -201,6 +204,7 @@ loom_cc_library(
 
 loom_cc_library(
     name = "check_provider",
+    testonly = True,
     srcs = ["loom_check_provider.c"],
     hdrs = ["loom_check_provider.h"],
     visibility = ["//loom/src/loom/tools/loom-check:__pkg__"],

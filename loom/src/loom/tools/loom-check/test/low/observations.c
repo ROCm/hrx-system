@@ -23,7 +23,7 @@
 #include "loom/target/reporting/format.h"
 #include "loom/target/reporting/low.h"
 #include "loom/tools/loom-check/diagnostics.h"
-#include "loom/tools/loom-check/low_emit.h"
+#include "loom/tools/loom-check/test/low/native_emit.h"
 #include "loom/tools/loom-check/test/low/providers.h"
 
 typedef enum loom_check_test_low_observation_e {
@@ -365,7 +365,7 @@ static iree_status_t loom_check_test_low_observation_parse(
 
 static iree_status_t loom_check_test_low_observe_schedule(
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module,
+    const loom_check_test_native_module_t* native_module,
     const loom_check_test_low_observation_options_t* options,
     iree_diagnostic_emitter_t emitter) {
   loom_op_t* low_function = NULL;
@@ -454,7 +454,7 @@ static void loom_check_test_low_allocation_summary_record_assignment(
 
 static iree_status_t loom_check_test_low_build_allocation(
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module,
+    const loom_check_test_native_module_t* native_module,
     const loom_check_test_low_observation_options_t* options,
     iree_diagnostic_emitter_t emitter, bool* out_built,
     loom_low_allocation_table_t* out_table) {
@@ -498,7 +498,7 @@ static iree_status_t loom_check_test_low_build_allocation(
 
 static iree_status_t loom_check_test_low_observe_allocation_json(
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module,
+    const loom_check_test_native_module_t* native_module,
     const loom_check_test_low_observation_options_t* options,
     iree_diagnostic_emitter_t emitter) {
   loom_low_allocation_table_t table = {0};
@@ -514,7 +514,7 @@ static iree_status_t loom_check_test_low_observe_allocation_json(
 
 static iree_status_t loom_check_test_low_observe_allocation_summary(
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module,
+    const loom_check_test_native_module_t* native_module,
     const loom_check_test_low_observation_options_t* options,
     iree_diagnostic_emitter_t emitter) {
   loom_low_allocation_table_t table = {0};
@@ -600,7 +600,7 @@ static iree_status_t loom_check_test_low_observe_allocation_summary(
 
 static iree_status_t loom_check_test_low_observe_packet(
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module,
+    const loom_check_test_native_module_t* native_module,
     const loom_check_test_low_observation_options_t* options,
     iree_diagnostic_emitter_t emitter) {
   loom_op_t* low_function = NULL;
@@ -640,7 +640,7 @@ static iree_status_t loom_check_test_low_observe_packet(
 
 static iree_status_t loom_check_test_low_observe_compile_report(
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module,
+    const loom_check_test_native_module_t* native_module,
     const loom_check_test_low_observation_options_t* options,
     iree_diagnostic_emitter_t emitter) {
   loom_op_t* low_function = NULL;
@@ -685,7 +685,7 @@ static iree_status_t loom_check_test_low_observe_compile_report(
 static iree_status_t loom_check_test_low_observation_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module) {
+    const loom_check_test_native_module_t* native_module) {
   (void)provider;
   loom_check_test_low_observation_options_t options;
   IREE_RETURN_IF_ERROR(

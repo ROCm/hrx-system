@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/tools/loom-check/low_emit.h"
+#include "loom/tools/loom-check/test/low/native_emit.h"
 
 #include "loom/analysis/symbol_facts.h"
 #include "loom/codegen/low/function.h"
@@ -265,7 +265,7 @@ iree_status_t loom_check_low_emit_materialize_operand_ties(
 
 iree_status_t loom_check_low_emit_packetize_function(
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module,
+    const loom_check_test_native_module_t* native_module,
     iree_string_view_t function_symbol_name,
     const loom_low_emission_frame_options_t* options,
     const loom_low_emission_frame_spill_free_options_t* spill_free_options,

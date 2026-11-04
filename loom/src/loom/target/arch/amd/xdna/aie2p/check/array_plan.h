@@ -9,13 +9,13 @@
 #ifndef LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_CHECK_ARRAY_PLAN_H_
 #define LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_CHECK_ARRAY_PLAN_H_
 
-#include "loom/tools/loom-check/execute.h"
+#include "loom/tools/loom-check/test/native_provider.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-extern const loom_check_emit_provider_t
+extern const loom_check_test_native_emit_provider_t
     loom_aie2p_array_plan_check_emit_provider;
 
 #ifdef __cplusplus

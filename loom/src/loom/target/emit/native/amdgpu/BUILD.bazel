@@ -107,14 +107,25 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "kernel_check",
+    srcs = ["kernel_check.c"],
+    hdrs = ["kernel_check.h"],
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/tools/loom-check:execute",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "loom_check",
+    testonly = True,
     srcs = ["loom_check.c"],
     hdrs = ["loom_check.h"],
     deps = [
         ":assembly",
         ":encoding",
         ":spill_lowering",
-        "//loom/binding/c:loomc",
         "//loom/src/loom/codegen/low:allocation_json",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:frame",
@@ -129,6 +140,8 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu/planning:vopd_plan",
         "//loom/src/loom/target/arch/amdgpu/planning:wait_states_format",
         "//loom/src/loom/tools/loom-check:execute",
+        "//loom/src/loom/tools/loom-check/test:native_provider",
+        "//loom/src/loom/tools/loom-check/test/low:native_emit",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
     ],
@@ -138,6 +151,19 @@ loom_cc_library(
     name = "check_provider",
     srcs = ["loom_check_provider.c"],
     hdrs = ["loom_check_provider.h"],
+    visibility = ["//loom/src/loom/tools/loom-check:__pkg__"],
+    deps = [
+        ":kernel_check",
+        "//loom/src/loom/tools/loom-check:provider",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "check_test_provider",
+    testonly = True,
+    srcs = ["loom_check_test_provider.c"],
+    hdrs = ["loom_check_test_provider.h"],
     visibility = ["//loom/src/loom/tools/loom-check:__pkg__"],
     deps = [
         ":loom_check",

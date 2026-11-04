@@ -13,7 +13,7 @@
 #include "loom/target/emit/native/x86/abi.h"
 #include "loom/target/emit/native/x86/function.h"
 #include "loom/tools/loom-check/diagnostics.h"
-#include "loom/tools/loom-check/low_emit.h"
+#include "loom/tools/loom-check/test/low/native_emit.h"
 
 static bool loom_x86_loom_check_emit_provider_matches(
     const loom_check_emit_provider_t* provider,
@@ -121,7 +121,7 @@ static iree_status_t loom_x86_loom_check_prepare_abis(
 static iree_status_t loom_x86_loom_check_emit_provider_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module) {
+    const loom_check_test_native_module_t* native_module) {
   (void)provider;
   iree_string_view_t function_symbol_name =
       iree_string_view_trim(request->target_options);
@@ -227,9 +227,14 @@ static iree_status_t loom_x86_loom_check_emit_provider_append_names(
   return iree_string_builder_append_cstring(builder, "x86-native-bytes");
 }
 
-const loom_check_emit_provider_t loom_x86_native_loom_check_emit_provider = {
-    .name = IREE_SVL("x86-native"),
-    .match = loom_x86_loom_check_emit_provider_matches,
-    .execute_native = loom_x86_loom_check_emit_provider_execute,
-    .append_names = loom_x86_loom_check_emit_provider_append_names,
+const loom_check_test_native_emit_provider_t
+    loom_x86_native_loom_check_emit_provider = {
+        .base =
+            {
+                .name = IREE_SVL("x86-native"),
+                .match = loom_x86_loom_check_emit_provider_matches,
+                .execute = loom_check_test_native_emit_provider_execute,
+                .append_names = loom_x86_loom_check_emit_provider_append_names,
+            },
+        .execute_native = loom_x86_loom_check_emit_provider_execute,
 };

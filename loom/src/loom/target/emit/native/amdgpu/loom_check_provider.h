@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// loom-check provider for AMDGPU artifact and native-fragment inspection.
+// loom-check provider for public AMDGPU compiler artifacts.
 
 #ifndef LOOM_TARGET_EMIT_NATIVE_AMDGPU_CHECK_PROVIDER_H_
 #define LOOM_TARGET_EMIT_NATIVE_AMDGPU_CHECK_PROVIDER_H_
@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-// AMDGPU artifact and native-fragment inspection handlers.
+// AMDGPU public compiler artifact inspection handlers.
 extern const loom_check_provider_t loom_amdgpu_native_check_provider;
 
 #ifdef __cplusplus

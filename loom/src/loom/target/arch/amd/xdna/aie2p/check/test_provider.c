@@ -39,8 +39,8 @@ static iree_status_t loom_aie2p_check_test_execute(
   diagnostic.origin.start_line = 1;
   IREE_RETURN_IF_ERROR(loom_check_diagnostic_collector_sink(
       request->diagnostic_collector, &diagnostic));
-  return loom_aie2p_array_plan_check_emit_provider.execute(
-      &loom_aie2p_array_plan_check_emit_provider, request);
+  return loom_aie2p_array_plan_check_emit_provider.base.execute(
+      &loom_aie2p_array_plan_check_emit_provider.base, request);
 }
 
 static iree_status_t loom_aie2p_check_test_append_names(

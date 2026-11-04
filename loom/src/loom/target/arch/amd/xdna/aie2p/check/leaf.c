@@ -17,7 +17,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/emit/leaf_compile.h"
 #include "loom/target/reporting/report.h"
 #include "loom/tools/loom-check/diagnostics.h"
-#include "loom/tools/loom-check/low_emit.h"
+#include "loom/tools/loom-check/test/low/native_emit.h"
 
 typedef enum loom_aie2p_leaf_check_report_e {
   LOOM_AIE2P_LEAF_CHECK_REPORT_NONE = 0,
@@ -133,7 +133,7 @@ static iree_status_t loom_aie2p_leaf_check_append_value_uses(
 static iree_status_t loom_aie2p_leaf_check_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module) {
+    const loom_check_test_native_module_t* native_module) {
   (void)provider;
   iree_string_view_t remaining = iree_string_view_trim(request->target_options);
   iree_string_view_t symbol;
@@ -291,9 +291,14 @@ static iree_status_t loom_aie2p_leaf_check_append_names(
   return iree_string_builder_append_cstring(builder, "aie2p-leaf\n");
 }
 
-const loom_check_emit_provider_t loom_aie2p_leaf_check_emit_provider = {
-    .name = IREE_SVL("aie2p-leaf"),
-    .match = loom_aie2p_leaf_check_matches,
-    .execute_native = loom_aie2p_leaf_check_execute,
-    .append_names = loom_aie2p_leaf_check_append_names,
+const loom_check_test_native_emit_provider_t
+    loom_aie2p_leaf_check_emit_provider = {
+        .base =
+            {
+                .name = IREE_SVL("aie2p-leaf"),
+                .match = loom_aie2p_leaf_check_matches,
+                .execute = loom_check_test_native_emit_provider_execute,
+                .append_names = loom_aie2p_leaf_check_append_names,
+            },
+        .execute_native = loom_aie2p_leaf_check_execute,
 };

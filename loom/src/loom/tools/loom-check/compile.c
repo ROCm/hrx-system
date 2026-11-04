@@ -315,57 +315,6 @@ iree_status_t loom_check_compile_select_source_function(
   return iree_ok_status();
 }
 
-iree_status_t loom_check_compile_project_module(
-    loomc_module_t* module, loom_check_diagnostic_collector_t* collector,
-    iree_allocator_t allocator, loomc_module_interop_view_t* out_view,
-    bool* out_succeeded) {
-  loomc_result_t* result = NULL;
-  iree_status_t status = iree_status_from_loomc(loomc_module_get_interop_view(
-      module, loomc_allocator_from_iree(allocator), out_view, &result));
-  if (iree_status_is_ok(status)) {
-    status = loom_check_compile_append_result(collector, result, out_succeeded);
-  }
-  loomc_result_release(result);
-  return status;
-}
-
-iree_status_t loom_check_compile_with_native_module(
-    const loom_check_emit_provider_request_t* request,
-    loom_check_compile_native_module_consumer_fn_t consumer, void* user_data) {
-  loomc_module_interop_view_t verified_view = {0};
-  bool projected = false;
-  iree_status_t status = loom_check_compile_project_module(
-      request->public_module, request->diagnostic_collector,
-      request->host_allocator, &verified_view, &projected);
-  if (!iree_status_is_ok(status) || !projected) {
-    return status;
-  }
-
-  const loomc_module_mutable_interop_view_t mutable_view =
-      loomc_module_get_mutable_interop_view(request->public_module);
-  const loom_check_emit_native_module_t native_module = {
-      .module = mutable_view.module,
-      .source_resolver =
-          {
-              .fn = loom_source_table_resolve,
-              .user_data = (void*)mutable_view.source_table,
-          },
-  };
-  request->diagnostic_collector->module = native_module.module;
-  status = consumer(user_data, &native_module);
-  request->diagnostic_collector->module = NULL;
-
-  if (iree_status_is_ok(status) && !loom_check_diagnostic_collector_has_error(
-                                       request->diagnostic_collector)) {
-    verified_view = (loomc_module_interop_view_t){0};
-    projected = false;
-    status = loom_check_compile_project_module(
-        request->public_module, request->diagnostic_collector,
-        request->host_allocator, &verified_view, &projected);
-  }
-  return status;
-}
-
 iree_status_t loom_check_compile_source_low(
     const loom_check_emit_provider_request_t* request,
     const loom_check_compile_source_low_options_t* options,

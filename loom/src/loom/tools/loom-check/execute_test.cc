@@ -154,50 +154,12 @@ const loom_check_emit_provider_t kTestEmitProvider = {
     .match = TestEmitProviderMatches,
     .check_requirements = nullptr,
     .execute = TestEmitProviderExecute,
-    .execute_native = nullptr,
     .append_names = TestEmitProviderAppendNames,
-};
-
-bool TestNativeEmitProviderMatches(const loom_check_emit_provider_t* provider,
-                                   iree_string_view_t target_name) {
-  (void)provider;
-  return iree_string_view_equal(target_name, IREE_SV("fake-native-emit"));
-}
-
-iree_status_t TestNativeEmitProviderExecute(
-    const loom_check_emit_provider_t* provider,
-    const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module) {
-  (void)provider;
-  if (native_module->module == nullptr) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "native provider received no module");
-  }
-  return iree_string_builder_append_cstring(&request->result->actual_output,
-                                            "fake native emit\n");
-}
-
-iree_status_t TestNativeEmitProviderAppendNames(
-    const loom_check_emit_provider_t* provider,
-    iree_string_builder_t* builder) {
-  (void)provider;
-  return iree_string_builder_append_cstring(builder, "fake-native-emit");
-}
-
-const loom_check_emit_provider_t kTestNativeEmitProvider = {
-    .name = IREE_SVL("native test"),
-    .flags = 0,
-    .match = TestNativeEmitProviderMatches,
-    .check_requirements = nullptr,
-    .execute = nullptr,
-    .execute_native = TestNativeEmitProviderExecute,
-    .append_names = TestNativeEmitProviderAppendNames,
 };
 
 const loom_check_emit_provider_t* const kTestEmitProviders[] = {
     &loom_check_source_low_emit_provider,
     &kTestEmitProvider,
-    &kTestNativeEmitProvider,
 };
 
 const loom_input_format_t kTestForeignInputFormat = {
@@ -1357,7 +1319,7 @@ TEST_F(ExecuteTest, EmitProviderCanOwnTarget) {
   loom_check_result_deinitialize(&result);
 }
 
-TEST_F(ExecuteTest, NativeEmitProviderUsesOnePublicAdmission) {
+TEST_F(ExecuteTest, EmitProviderUsesOnePublicAdmission) {
   TestForeignImportState import_state;
   const loom_check_compile_provider_t compile_provider = {
       .import = TestForeignInputImport,
@@ -1372,9 +1334,9 @@ TEST_F(ExecuteTest, NativeEmitProviderUsesOnePublicAdmission) {
   loom_check_result_t result;
   IREE_ASSERT_OK(
       ExecuteFirstWithEnvironment("// INPUT: test-foreign\n"
-                                  "// RUN: emit fake-native-emit\n"
+                                  "// RUN: emit fake-emit\n"
                                   "// ----\n"
-                                  "fake native emit\n",
+                                  "fake emit\n",
                                   &provider_environment_, &result));
   EXPECT_EQ(import_state.import_count, 1u);
   EXPECT_EQ(result.raw_outcome, LOOM_CHECK_PASS) << DetailString(result);

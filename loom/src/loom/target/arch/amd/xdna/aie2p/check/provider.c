@@ -10,8 +10,8 @@
 #include "loom/target/arch/amd/xdna/aie2p/check/leaf.h"
 
 static const loom_check_emit_provider_t* const kAie2pCheckEmitProviders[] = {
-    &loom_aie2p_array_plan_check_emit_provider,
-    &loom_aie2p_leaf_check_emit_provider,
+    &loom_aie2p_array_plan_check_emit_provider.base,
+    &loom_aie2p_leaf_check_emit_provider.base,
 };
 
 const loom_check_provider_t loom_aie2p_arch_check_provider = {

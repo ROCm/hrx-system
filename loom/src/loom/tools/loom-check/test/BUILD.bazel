@@ -18,6 +18,9 @@ loom_cc_library(
     srcs = ["native_provider.c"],
     hdrs = ["native_provider.h"],
     deps = [
+        "//loom/binding/c:interop",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/error:source",
         "//loom/src/loom/tools/loom-check:execute",
         "//runtime/src/iree/base",
     ],

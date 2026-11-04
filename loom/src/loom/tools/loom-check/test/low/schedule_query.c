@@ -12,7 +12,7 @@
 #include "loom/codegen/low/schedule/run.h"
 #include "loom/codegen/low/storage_transport.h"
 #include "loom/tools/loom-check/diagnostics.h"
-#include "loom/tools/loom-check/low_emit.h"
+#include "loom/tools/loom-check/test/low/native_emit.h"
 #include "loom/tools/loom-check/test/low/providers.h"
 
 enum loom_check_test_low_schedule_option_flag_bits_e {
@@ -928,7 +928,7 @@ static iree_status_t loom_check_test_low_schedule_append_transport(
 
 static iree_status_t loom_check_test_low_schedule_build(
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module,
+    const loom_check_test_native_module_t* native_module,
     const loom_check_test_low_schedule_options_t* options,
     loom_low_schedule_table_t* out_schedule,
     loom_liveness_analysis_t* out_scheduled_liveness, bool* out_accepted) {
@@ -1003,7 +1003,7 @@ static iree_status_t loom_check_test_low_schedule_build(
 static iree_status_t loom_check_test_low_schedule_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module) {
+    const loom_check_test_native_module_t* native_module) {
   (void)provider;
   loom_check_test_low_schedule_options_t options;
   IREE_RETURN_IF_ERROR(

@@ -100,11 +100,6 @@ typedef struct loom_check_compile_source_low_options_t {
   loom_target_compile_report_t* report;
 } loom_check_compile_source_low_options_t;
 
-// Consumes one verified mutable native projection of an admitted public
-// module. The projection remains valid only for the callback invocation.
-typedef iree_status_t (*loom_check_compile_native_module_consumer_fn_t)(
-    void* user_data, const loom_check_emit_native_module_t* native_module);
-
 // Releases all public compiler state prepared by |session|.
 void loom_check_compile_session_deinitialize(
     loom_check_compile_session_t* session);
@@ -136,21 +131,6 @@ iree_status_t loom_check_compile_select_source_function(
     const loomc_module_t* module, iree_string_view_t function_name,
     loom_check_diagnostic_collector_t* collector,
     iree_string_view_t* out_function_name);
-
-// Borrows verified IR for native inspection. The view remains valid until the
-// public module is mutated or released. Rejection diagnostics are copied into
-// |collector| and reported through |out_succeeded|.
-iree_status_t loom_check_compile_project_module(
-    loomc_module_t* module, loom_check_diagnostic_collector_t* collector,
-    iree_allocator_t allocator, loomc_module_interop_view_t* out_view,
-    bool* out_succeeded);
-
-// Projects, invokes, and re-verifies the admitted public module in |request|.
-// Public verification diagnostics suppress the callback and return OK for
-// normal loom-check annotation matching.
-iree_status_t loom_check_compile_with_native_module(
-    const loom_check_emit_provider_request_t* request,
-    loom_check_compile_native_module_consumer_fn_t consumer, void* user_data);
 
 // Compiles the request's admitted public module to target artifacts. Public
 // diagnostics are appended to |request->diagnostic_collector|. On success,

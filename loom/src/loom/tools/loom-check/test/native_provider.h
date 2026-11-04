@@ -15,11 +15,19 @@
 extern "C" {
 #endif
 
+// Mutable exact-version module projection supplied only to checker tests.
+typedef struct loom_check_test_native_module_t {
+  // Mutable module owned by the emit request's public module.
+  loom_module_t* module;
+  // Resolver for source-backed operation locations in |module|.
+  loom_source_resolver_t source_resolver;
+} loom_check_test_native_module_t;
+
 // Native implementation invoked with one verified mutable module projection.
 typedef iree_status_t (*loom_check_test_native_emit_provider_execute_fn_t)(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module);
+    const loom_check_test_native_module_t* native_module);
 
 // Test-only provider pairing ordinary emit dispatch with native inspection.
 // |base| must remain the first member so registries can borrow it directly.

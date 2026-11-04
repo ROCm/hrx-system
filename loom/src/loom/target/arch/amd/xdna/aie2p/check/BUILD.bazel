@@ -18,6 +18,7 @@ _XDNA_ARTIFACT_COMPATIBLE_WITH = loom_config_compatible_with([
 
 loom_cc_library(
     name = "provider",
+    testonly = True,
     srcs = [
         "array_plan.c",
         "leaf.c",
@@ -49,6 +50,8 @@ loom_cc_library(
         "//loom/src/loom/target/reporting:report",
         "//loom/src/loom/tools/loom-check:execute",
         "//loom/src/loom/tools/loom-check:provider",
+        "//loom/src/loom/tools/loom-check/test:native_provider",
+        "//loom/src/loom/tools/loom-check/test/low:native_emit",
         "//runtime/src/iree/base",
     ],
 )

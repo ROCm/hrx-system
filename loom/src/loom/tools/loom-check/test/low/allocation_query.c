@@ -12,7 +12,7 @@
 #include "loom/codegen/low/text_asm.h"
 #include "loom/format/text/printer.h"
 #include "loom/tools/loom-check/diagnostics.h"
-#include "loom/tools/loom-check/low_emit.h"
+#include "loom/tools/loom-check/test/low/native_emit.h"
 #include "loom/tools/loom-check/test/low/providers.h"
 
 enum loom_check_test_low_allocation_option_flag_bits_e {
@@ -610,7 +610,7 @@ static iree_status_t loom_check_test_low_allocation_append_edge_moves(
 static iree_status_t loom_check_test_low_allocation_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module) {
+    const loom_check_test_native_module_t* native_module) {
   (void)provider;
   loom_check_test_low_allocation_options_t options;
   IREE_RETURN_IF_ERROR(

@@ -82,7 +82,7 @@ loom_check_test_analysis_observation_symbol_actual_kind(
 
 static iree_status_t loom_check_test_analysis_observation_find_function(
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module,
+    const loom_check_test_native_module_t* native_module,
     iree_string_view_t symbol_name, loom_func_like_t* out_function) {
   *out_function = (loom_func_like_t){0};
   loom_module_t* module = native_module->module;
@@ -209,7 +209,7 @@ static iree_status_t loom_check_test_analysis_observe_storage_interference(
 static iree_status_t loom_check_test_analysis_observation_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module) {
+    const loom_check_test_native_module_t* native_module) {
   (void)provider;
   loom_check_test_analysis_observation_t observation =
       LOOM_CHECK_TEST_ANALYSIS_OBSERVATION_LIVENESS;

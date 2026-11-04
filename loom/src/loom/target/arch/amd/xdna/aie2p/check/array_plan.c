@@ -25,7 +25,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/emit/leaf_compile.h"
 #include "loom/tools/loom-check/compile.h"
 #include "loom/tools/loom-check/diagnostics.h"
-#include "loom/tools/loom-check/low_emit.h"
+#include "loom/tools/loom-check/test/low/native_emit.h"
 
 typedef struct loom_aie2p_array_plan_check_context_t {
   // Provider invocation receiving diagnostics and comparable output.
@@ -772,23 +772,15 @@ static iree_status_t loom_aie2p_array_plan_check_resident_program(
   return status;
 }
 
-typedef struct loom_aie2p_array_plan_check_consumer_t {
-  // Provider invocation receiving diagnostics and comparable output.
-  const loom_check_emit_provider_request_t* request;
-  // Array function selected by the RUN line.
-  iree_string_view_t function_symbol_name;
-  // Whether to print only the materialized resident Low functions.
-  bool low_only;
-} loom_aie2p_array_plan_check_consumer_t;
-
 static iree_status_t loom_aie2p_array_plan_check_consume(
-    void* user_data, const loom_check_emit_native_module_t* native_module) {
-  const loom_aie2p_array_plan_check_consumer_t* consumer =
-      (const loom_aie2p_array_plan_check_consumer_t*)user_data;
-  const loom_check_emit_provider_request_t* request = consumer->request;
-  const iree_string_view_t function_symbol_name =
-      consumer->function_symbol_name;
-  const bool low_only = consumer->low_only;
+    const loom_check_emit_provider_t* provider,
+    const loom_check_emit_provider_request_t* request,
+    const loom_check_test_native_module_t* native_module) {
+  (void)provider;
+  iree_string_view_t function_symbol_name = iree_string_view_empty();
+  bool low_only = false;
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_check_parse_options(
+      request->target_options, &function_symbol_name, &low_only));
   const loom_aie2p_array_plan_check_context_t context = {
       .request = request,
       .module = native_module->module,
@@ -877,19 +869,13 @@ static iree_status_t loom_aie2p_array_plan_check_execute(
       .pipeline_kind = LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW,
       .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
   };
-  const loom_aie2p_array_plan_check_consumer_t consumer = {
-      .request = request,
-      .function_symbol_name = function_symbol_name,
-      .low_only = low_only,
-  };
   bool compiled = false;
   IREE_RETURN_IF_ERROR(
       loom_check_compile_source_low(request, &compile_options, &compiled));
   if (!compiled) {
     return iree_ok_status();
   }
-  return loom_check_compile_with_native_module(
-      request, loom_aie2p_array_plan_check_consume, (void*)&consumer);
+  return loom_check_test_native_emit_provider_execute(provider, request);
 }
 
 static iree_status_t loom_aie2p_array_plan_check_append_names(
@@ -899,9 +885,14 @@ static iree_status_t loom_aie2p_array_plan_check_append_names(
   return iree_string_builder_append_cstring(builder, "aie2p-array-plan");
 }
 
-const loom_check_emit_provider_t loom_aie2p_array_plan_check_emit_provider = {
-    .name = IREE_SVL("aie2p-array-plan"),
-    .match = loom_aie2p_array_plan_check_matches,
-    .execute = loom_aie2p_array_plan_check_execute,
-    .append_names = loom_aie2p_array_plan_check_append_names,
+const loom_check_test_native_emit_provider_t
+    loom_aie2p_array_plan_check_emit_provider = {
+        .base =
+            {
+                .name = IREE_SVL("aie2p-array-plan"),
+                .match = loom_aie2p_array_plan_check_matches,
+                .execute = loom_aie2p_array_plan_check_execute,
+                .append_names = loom_aie2p_array_plan_check_append_names,
+            },
+        .execute_native = loom_aie2p_array_plan_check_consume,
 };
