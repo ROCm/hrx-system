@@ -24,6 +24,22 @@
 extern "C" {
 #endif
 
+// One unresolved direct call within a code-object text fragment.
+//
+// The producer owns exact instruction-local offsets. Final HSACO layout binds
+// |target_function_ordinal| to one module-local function and patches both
+// literal words.
+typedef struct loom_amdgpu_hsaco_call_fixup_t {
+  // Direct index into the code object's module-local function array.
+  iree_host_size_t target_function_ordinal;
+  // Fragment-local byte offset of the PC captured by s_getpc_b64.
+  uint64_t base_pc_byte_offset;
+  // Fragment-local byte offset of the s_add_u32 literal word.
+  uint64_t low_literal_byte_offset;
+  // Fragment-local byte offset of the s_addc_u32 literal word.
+  uint64_t high_literal_byte_offset;
+} loom_amdgpu_hsaco_call_fixup_t;
+
 // One kernel entry emitted into an AMDGPU HSA code object.
 typedef struct loom_amdgpu_hsaco_kernel_t {
   // Kernel metadata row shared by the AMDGPU note and kernel descriptor.
@@ -36,7 +52,30 @@ typedef struct loom_amdgpu_hsaco_kernel_t {
   const loom_amdgpu_hsaco_text_fixup_t* text_fixups;
   // Number of entries in |text_fixups|.
   iree_host_size_t text_fixup_count;
+  // Direct calls resolved after final code-object text layout.
+  const loom_amdgpu_hsaco_call_fixup_t* call_fixups;
+  // Number of entries in |call_fixups|.
+  iree_host_size_t call_fixup_count;
 } loom_amdgpu_hsaco_kernel_t;
+
+// One module-local function emitted into an AMDGPU HSA code object.
+//
+// Functions are executable text and ordinary local ELF symbols. They are not
+// loader-visible kernels and therefore have no descriptor or metadata row.
+typedef struct loom_amdgpu_hsaco_function_t {
+  // Function symbol emitted only into the ordinary symbol table.
+  iree_string_view_t name;
+  // Encoded native instructions for the function symbol.
+  iree_const_byte_span_t text;
+  // Text literal patches resolved after final code-object layout is known.
+  const loom_amdgpu_hsaco_text_fixup_t* text_fixups;
+  // Number of entries in |text_fixups|.
+  iree_host_size_t text_fixup_count;
+  // Direct calls resolved after final code-object text layout.
+  const loom_amdgpu_hsaco_call_fixup_t* call_fixups;
+  // Number of entries in |call_fixups|.
+  iree_host_size_t call_fixup_count;
+} loom_amdgpu_hsaco_function_t;
 
 // Bitfield controlling AMDGPU HSACO data-symbol placement and access.
 typedef uint32_t loom_amdgpu_hsaco_data_symbol_flags_t;
@@ -78,6 +117,10 @@ typedef struct loom_amdgpu_hsaco_input_t {
   const loom_amdgpu_hsaco_kernel_t* kernels;
   // Number of entries in |kernels|.
   iree_host_size_t kernel_count;
+  // Module-local functions emitted once into this code object.
+  const loom_amdgpu_hsaco_function_t* functions;
+  // Number of entries in |functions|.
+  iree_host_size_t function_count;
   // Data symbols emitted into this code object.
   const loom_amdgpu_hsaco_data_symbol_t* data_symbols;
   // Number of entries in |data_symbols|.
