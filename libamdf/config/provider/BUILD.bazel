@@ -4,9 +4,33 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+# Provider settings have no CMake target surface. Their portable conditions
+# are mapped by libamdf's Bazel-to-CMake project configuration.
+# bazel-to-cmake: skip
+
 load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
 
 package(default_visibility = ["//visibility:public"])
+
+string_flag(
+    name = "linux_gpu",
+    build_setting_default = "kfd",
+    values = [
+        "dxg",
+        "kfd",
+    ],
+)
+
+config_setting(
+    name = "linux_gpu_dxg",
+    flag_values = {":linux_gpu": "dxg"},
+)
+
+config_setting(
+    name = "linux_gpu_kfd",
+    flag_values = {":linux_gpu": "kfd"},
+)
 
 config_setting(
     name = "windows",
@@ -26,6 +50,46 @@ config_setting(
     constraint_values = [
         "@platforms//os:linux",
         "@platforms//cpu:x86_64",
+    ],
+)
+
+selects.config_setting_group(
+    name = "linux_dxg",
+    match_all = [
+        ":linux_gpu_dxg",
+        ":linux_x86_64",
+    ],
+)
+
+selects.config_setting_group(
+    name = "linux_kfd",
+    match_all = [
+        ":linux_gpu_kfd",
+        ":linux_x86_64",
+    ],
+)
+
+selects.config_setting_group(
+    name = "linux_xdna",
+    match_all = [
+        ":linux_kfd",
+        "//libamdf/config/family:xdna",
+    ],
+)
+
+selects.config_setting_group(
+    name = "windows_xdna",
+    match_all = [
+        ":windows",
+        "//libamdf/config/family:xdna",
+    ],
+)
+
+selects.config_setting_group(
+    name = "xdna",
+    match_any = [
+        ":linux_xdna",
+        ":windows_xdna",
     ],
 )
 

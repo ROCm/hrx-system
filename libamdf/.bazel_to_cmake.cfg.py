@@ -25,9 +25,30 @@ _AMDF_CONFIG_CMAKE_OPTIONS = {
             all_of(Equal("CMAKE_SYSTEM_NAME", "Linux"), Equal("IREE_ARCH", "x86_64")),
         ),
     ),
+    "//libamdf/config/provider:linux_dxg": all_of(
+        Equal("CMAKE_SYSTEM_NAME", "Linux"),
+        Equal("IREE_ARCH", "x86_64"),
+        Equal("AMDF_LINUX_GPU_PROVIDER", "dxg"),
+    ),
+    "//libamdf/config/provider:linux_kfd": all_of(
+        Equal("CMAKE_SYSTEM_NAME", "Linux"),
+        Equal("IREE_ARCH", "x86_64"),
+        Equal("AMDF_LINUX_GPU_PROVIDER", "kfd"),
+    ),
     "//libamdf/config/provider:wddm": all_of(
         any_of("AMDF_FAMILY_RDNA", "AMDF_FAMILY_CDNA"),
         Equal("CMAKE_SYSTEM_NAME", "Windows"),
+    ),
+    "//libamdf/config/provider:xdna": all_of(
+        "AMDF_FAMILY_XDNA",
+        any_of(
+            Equal("CMAKE_SYSTEM_NAME", "Windows"),
+            all_of(
+                Equal("CMAKE_SYSTEM_NAME", "Linux"),
+                Equal("IREE_ARCH", "x86_64"),
+                Equal("AMDF_LINUX_GPU_PROVIDER", "kfd"),
+            ),
+        ),
     ),
 }
 
@@ -40,6 +61,7 @@ class AmdfBuildFileFunctions(
             **super()._declarative_load_bindings(),
             "select": self.select,
             "amdf_cc_library": self.amdf_cc_library,
+            "amdf_linux_sidecar_library": self.amdf_linux_sidecar_library,
             "apply_amdf_target_policy": self.apply_amdf_target_policy,
             "loom_library": self.loom_library,
             "loom_kernel_binary": self.loom_kernel_binary,
@@ -131,6 +153,42 @@ class AmdfBuildFileFunctions(
         ]
         self.amdf_cc_binary(
             _cmake_rule="amdf_windows_sidecar_library", _native_linking=True, **kwargs
+        )
+
+    def amdf_linux_sidecar_library(
+        self,
+        exports_file,
+        cxxopts=None,
+        linkopts=None,
+        **kwargs,
+    ):
+        kwargs = dict(kwargs)
+        kwargs["target_compatible_with"] = (
+            kwargs.get("target_compatible_with") or []
+        ) + [
+            "@platforms//cpu:x86_64",
+            "@platforms//os:linux",
+        ]
+        self.amdf_cc_binary(
+            _cmake_rule="amdf_linux_sidecar_library",
+            _native_linking=True,
+            cxxopts=[
+                "-fexceptions",
+                "-frtti",
+                "-pthread",
+                "-Wno-unknown-pragmas",
+            ]
+            + (cxxopts or []),
+            linkopts=[
+                "-fuse-ld=lld",
+                "-pthread",
+                "-Wl,--exclude-libs,ALL",
+                "-Wl,--gc-sections",
+                "-Wl,--no-gnu-unique",
+            ]
+            + (linkopts or [])
+            + ["-Wl,--version-script=$(location %s)" % exports_file],
+            **kwargs,
         )
 
     def iree_dynamic_library_bundle(self, **kwargs):
@@ -276,6 +334,9 @@ PROJECT_CONFIG = bazel_to_cmake_config.ProjectConfig(
         "//libamdf:headers": ["amdf::headers"],
         "//libamdf/src/gpu/umd/wddm/wkmi:runtime": [
             "libamdf::src::gpu::umd::wddm::wkmi::amdf_wkmi_bridge",
+        ],
+        "//libamdf/src/gpu/umd/dxg/rocdxg:runtime": [
+            "libamdf::src::gpu::umd::dxg::rocdxg::amdf_rocdxg_bridge",
         ],
     },
     convert_unmatched_target=convert_unmatched_target,

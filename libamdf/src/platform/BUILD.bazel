@@ -134,7 +134,8 @@ amdf_cc_library(
     }),
     visibility = ["//libamdf/src:__pkg__"],
     deps = select({
-        "@platforms//os:linux": ["//libamdf/src/platform/linux:instance"],
+        "//libamdf/config/provider:linux_dxg": ["//libamdf/src/platform/linux/dxg:instance"],
+        "//libamdf/config/provider:linux_kfd": ["//libamdf/src/platform/linux:instance"],
         "@platforms//os:windows": ["//libamdf/src/platform/windows:instance"],
         "//conditions:default": [],
     }),

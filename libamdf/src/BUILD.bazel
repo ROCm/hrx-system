@@ -388,7 +388,8 @@ amdf_cc_library(
         ":structure",
         ":user_queue",
     ] + select({
-        "@platforms//os:linux": ["//libamdf/src/platform/linux"],
+        "//libamdf/config/provider:linux_dxg": ["//libamdf/src/platform/linux/dxg:linux_dxg"],
+        "//libamdf/config/provider:linux_kfd": ["//libamdf/src/platform/linux"],
         "@platforms//os:windows": ["//libamdf/src/platform/windows"],
         "//conditions:default": [],
     }),

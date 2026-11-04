@@ -139,7 +139,8 @@ amdf_cc_library(
         ":memory",
         ":user_queue",
     ] + select({
-        "@platforms//os:linux": ["//libamdf/src/gpu/umd/kfd"],
+        "//libamdf/config/provider:linux_dxg": ["//libamdf/src/gpu/umd/dxg/linux:linux_dxg"],
+        "//libamdf/config/provider:linux_kfd": ["//libamdf/src/gpu/umd/kfd"],
         "@platforms//os:windows": ["//libamdf/src/gpu/umd/wddm"],
         "//conditions:default": [],
     }),

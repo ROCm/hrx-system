@@ -15,6 +15,15 @@ option(AMDF_FAMILY_RDNA "Admit RDNA implementation packages." ON)
 option(AMDF_FAMILY_CDNA "Admit CDNA implementation packages." ON)
 option(AMDF_FAMILY_XDNA "Admit XDNA implementation packages." ON)
 
+set(AMDF_LINUX_GPU_PROVIDER "kfd" CACHE STRING
+  "Select the Linux GPU native provider (kfd or dxg).")
+set_property(CACHE AMDF_LINUX_GPU_PROVIDER PROPERTY STRINGS kfd dxg)
+if(NOT AMDF_LINUX_GPU_PROVIDER STREQUAL "kfd" AND
+   NOT AMDF_LINUX_GPU_PROVIDER STREQUAL "dxg")
+  message(FATAL_ERROR
+    "AMDF_LINUX_GPU_PROVIDER must be either 'kfd' or 'dxg'.")
+endif()
+
 set(AMDF_VERSION "0.1.0")
 
 # The installed shared library and its public table negotiate the same ABI.

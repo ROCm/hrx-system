@@ -83,6 +83,19 @@ amdf_cc_library(
     ],
 )
 
+amdf_cc_library(
+    name = "linux_dxg",
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    visibility = ["//libamdf/src:__pkg__"],
+    deps = [
+        ":endpoint",
+        ":instance",
+    ],
+)
+
 amdf_cc_test(
     name = "connection_test",
     srcs = ["connection_test.cc"],

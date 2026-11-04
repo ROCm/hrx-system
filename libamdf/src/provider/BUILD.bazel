@@ -24,7 +24,7 @@ amdf_cc_library(
         "//libamdf/config/provider:gpu": ["AMDF_HAVE_GPU=1"],
         "//conditions:default": [],
     }) + select({
-        "//libamdf/config/family:xdna": ["AMDF_HAVE_XDNA=1"],
+        "//libamdf/config/provider:xdna": ["AMDF_HAVE_XDNA=1"],
         "//conditions:default": [],
     }),
     target_compatible_with = select({
@@ -59,7 +59,7 @@ amdf_cc_library(
         ],
         "//conditions:default": [],
     }) + select({
-        "//libamdf/config/family:xdna": [
+        "//libamdf/config/provider:xdna": [
             "//libamdf/src/xdna",
             "//libamdf/src/xdna:device_profile",
             "//libamdf/src/xdna:extension",
