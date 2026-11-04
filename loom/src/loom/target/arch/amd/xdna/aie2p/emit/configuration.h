@@ -18,6 +18,14 @@ extern "C" {
 // Arena-owned physical configuration plan awaiting resident materialization.
 typedef struct loom_aie2p_configuration_plan_t loom_aie2p_configuration_plan_t;
 
+// Artifact-scoped native workers shared by every configuration plan.
+// Zero-initialize once before materializing the artifact's plans. The request
+// arena owns the lazily allocated symbol index and its contributions.
+typedef struct loom_aie2p_configuration_worker_set_t {
+  // Compiled complete workers indexed by module-local source symbol ID.
+  loom_aie2p_leaf_contribution_t** contributions_by_symbol;
+} loom_aie2p_configuration_worker_set_t;
+
 // Builds a physical configuration plan and its source-known product entry.
 //
 // The entry names straight-line initialization and invocation functions. Their
@@ -95,10 +103,10 @@ typedef struct loom_aie2p_configuration_plan_t loom_aie2p_configuration_plan_t;
 // no configuration call instruction. The entry and its referenced phases keep
 // closed signatures, and physical emission rejects unexpanded calls. Phase and
 // measurement contracts apply to the complete expanded functions.
-// Worker functions retain their complete authored control flow. Each distinct
-// worker is named once in the plan and is later compiled once and linked at
-// each placement with that tile's data reservations and core-visible address
-// apertures.
+// Worker functions retain their complete authored control flow. The artifact
+// compiles each distinct worker symbol once across all configuration plans and
+// links it at each placement with that tile's data reservations and
+// core-visible address apertures.
 //
 // Building evaluates all configuration functions and retains every fact needed
 // for product admission, but does not compile or link resident workers. All
@@ -120,11 +128,13 @@ iree_status_t loom_aie2p_configuration_plan_build(
 // Product-wide source-known limits must be admitted before this call. On
 // success the product entry produced with |plan| owns a complete tile array.
 // Authored native code or storage overflow leaves |out_materialized| false.
-// |compiler| owns the native helpers shared by all plans in the request module.
-// Status reports infrastructure failures.
+// |compiler| owns the native helpers shared by all plans in the request module;
+// |worker_set| owns their complete entry programs across those plans. Status
+// reports infrastructure failures.
 iree_status_t loom_aie2p_configuration_plan_materialize(
     loom_aie2p_configuration_plan_t* plan,
-    loom_aie2p_program_compiler_t* compiler, bool* out_materialized);
+    loom_aie2p_program_compiler_t* compiler,
+    loom_aie2p_configuration_worker_set_t* worker_set, bool* out_materialized);
 
 #ifdef __cplusplus
 }  // extern "C"

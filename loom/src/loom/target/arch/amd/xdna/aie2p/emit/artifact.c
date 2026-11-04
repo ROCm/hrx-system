@@ -856,13 +856,15 @@ iree_status_t loom_aie2p_xdna_compile_artifact(
   IREE_RETURN_IF_ERROR(loom_aie2p_program_compiler_allocate(
       request->module, request->scratch_arena, request->compile_report,
       &compiler));
+  loom_aie2p_configuration_worker_set_t configuration_workers = {0};
   for (iree_host_size_t i = 0; i < entry_count; ++i) {
     if (configuration_plans[i] == NULL) {
       continue;
     }
     bool materialized = false;
     IREE_RETURN_IF_ERROR(loom_aie2p_configuration_plan_materialize(
-        configuration_plans[i], compiler, &materialized));
+        configuration_plans[i], compiler, &configuration_workers,
+        &materialized));
     if (!materialized) {
       return iree_ok_status();
     }

@@ -84,8 +84,8 @@ struct loom_aie2p_configuration_plan_t {
   loom_aie2p_configuration_load_t* loads;
   // Fixed resident storage reservations indexed by physical tile.
   loom_aie2p_configuration_memory_t* memories;
-  // Compiled complete workers indexed by source symbol ID.
-  loom_aie2p_leaf_contribution_t** workers;
+  // Workers already counted in this plan's optional pipeline report.
+  bool* reported_workers_by_symbol;
   // Optional physical inventory collected at reservation and link boundaries.
   loom_aie2p_configuration_report_t* report;
   // Number of authored-input diagnostics; no product is published on failure.
@@ -211,10 +211,12 @@ static iree_status_t loom_aie2p_configuration_plan_load(
 
 static iree_status_t loom_aie2p_configuration_compile_worker(
     loom_aie2p_configuration_plan_t* emitter,
-    loom_aie2p_program_compiler_t* compiler, loom_symbol_ref_t symbol,
+    loom_aie2p_program_compiler_t* compiler,
+    loom_aie2p_configuration_worker_set_t* worker_set, loom_symbol_ref_t symbol,
     loom_aie2p_leaf_contribution_t** out_worker) {
   const loom_aie2p_xdna_artifact_request_t* request = emitter->request;
-  loom_aie2p_leaf_contribution_t* worker = emitter->workers[symbol.symbol_id];
+  loom_aie2p_leaf_contribution_t* worker =
+      worker_set->contributions_by_symbol[symbol.symbol_id];
   if (!worker) {
     const iree_string_view_t name = loom_string_table_get(
         &request->module->strings,
@@ -321,11 +323,13 @@ static iree_status_t loom_aie2p_configuration_compile_worker(
       ++emitter->error_count;
       return iree_ok_status();
     }
-    emitter->workers[symbol.symbol_id] = worker;
-    if (emitter->report) {
-      loom_aie2p_configuration_report_program(
-          emitter->report, (uint32_t)worker->realization.code.byte_length);
-    }
+    worker_set->contributions_by_symbol[symbol.symbol_id] = worker;
+  }
+  if (emitter->report &&
+      !emitter->reported_workers_by_symbol[symbol.symbol_id]) {
+    loom_aie2p_configuration_report_program(
+        emitter->report, (uint32_t)worker->realization.code.byte_length);
+    emitter->reported_workers_by_symbol[symbol.symbol_id] = true;
   }
   *out_worker = worker;
   return iree_ok_status();
@@ -924,16 +928,30 @@ iree_status_t loom_aie2p_configuration_plan_build(
 
 iree_status_t loom_aie2p_configuration_plan_materialize(
     loom_aie2p_configuration_plan_t* plan,
-    loom_aie2p_program_compiler_t* compiler, bool* out_materialized) {
+    loom_aie2p_program_compiler_t* compiler,
+    loom_aie2p_configuration_worker_set_t* worker_set, bool* out_materialized) {
   *out_materialized = false;
   const loom_aie2p_xdna_artifact_request_t* request = plan->request;
   loom_aie2p_xdna_tile_t* tiles = NULL;
   if (plan->entry->tile_count != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        request->scratch_arena, request->module->symbols.count,
-        sizeof(*plan->workers), (void**)&plan->workers));
-    memset(plan->workers, 0,
-           request->module->symbols.count * sizeof(*plan->workers));
+    if (worker_set->contributions_by_symbol == NULL) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          request->scratch_arena, request->module->symbols.count,
+          sizeof(*worker_set->contributions_by_symbol),
+          (void**)&worker_set->contributions_by_symbol));
+      memset(worker_set->contributions_by_symbol, 0,
+             request->module->symbols.count *
+                 sizeof(*worker_set->contributions_by_symbol));
+    }
+    if (plan->report != NULL) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          request->scratch_arena, request->module->symbols.count,
+          sizeof(*plan->reported_workers_by_symbol),
+          (void**)&plan->reported_workers_by_symbol));
+      memset(plan->reported_workers_by_symbol, 0,
+             request->module->symbols.count *
+                 sizeof(*plan->reported_workers_by_symbol));
+    }
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         request->scratch_arena, plan->entry->tile_count, sizeof(*tiles),
         (void**)&tiles));
@@ -942,7 +960,7 @@ iree_status_t loom_aie2p_configuration_plan_materialize(
     const loom_aie2p_configuration_load_t* load = &plan->loads[i];
     loom_aie2p_leaf_contribution_t* worker = NULL;
     IREE_RETURN_IF_ERROR(loom_aie2p_configuration_compile_worker(
-        plan, compiler, load->symbol, &worker));
+        plan, compiler, worker_set, load->symbol, &worker));
     if (plan->error_count) {
       return iree_ok_status();
     }
