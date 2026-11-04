@@ -14,7 +14,7 @@
 
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
-#include "libamdf/src/gpu/umd/dxg/rocdxg/loader.h"
+#include "libamdf/src/gpu/umd/dxg/rocdxg/api.h"
 #include "libamdf/src/platform/linux/dxg/endpoint.h"
 
 namespace {
@@ -22,13 +22,11 @@ namespace {
 constexpr uint32_t kNativeFailure = 0xC0000001u;
 
 enum class Operation {
-  kLoadBridge,
-  kQueryBridgeApi,
+  kGetBridgeApi,
   kCreateDevice,
   kOpenBridgeAdapter,
   kCloseBridgeAdapter,
   kDestroyDevice,
-  kUnloadBridge,
   kSegmentQuery,
   kResidencyQuery,
   kHostMemorySample,
@@ -176,10 +174,9 @@ TEST_F(LinuxDxgEndpointProfileTest,
   amdf_free(instance_.host_allocator, profile);
   EXPECT_EQ(state_.operations,
             (std::vector<Operation>{
-                Operation::kLoadBridge, Operation::kQueryBridgeApi,
-                Operation::kCreateDevice, Operation::kOpenBridgeAdapter,
-                Operation::kCloseBridgeAdapter, Operation::kDestroyDevice,
-                Operation::kUnloadBridge, Operation::kSegmentQuery}));
+                Operation::kGetBridgeApi, Operation::kCreateDevice,
+                Operation::kOpenBridgeAdapter, Operation::kCloseBridgeAdapter,
+                Operation::kDestroyDevice, Operation::kSegmentQuery}));
 }
 
 TEST_F(LinuxDxgEndpointProfileTest,
@@ -195,9 +192,8 @@ TEST_F(LinuxDxgEndpointProfileTest,
   EXPECT_EQ(profile, expected_profile);
   EXPECT_EQ(state_.operations,
             (std::vector<Operation>{
-                Operation::kLoadBridge, Operation::kQueryBridgeApi,
-                Operation::kCreateDevice, Operation::kOpenBridgeAdapter,
-                Operation::kDestroyDevice, Operation::kUnloadBridge}));
+                Operation::kGetBridgeApi, Operation::kCreateDevice,
+                Operation::kOpenBridgeAdapter, Operation::kDestroyDevice}));
 }
 
 TEST_F(LinuxDxgEndpointProfileTest,
@@ -216,10 +212,9 @@ TEST_F(LinuxDxgEndpointProfileTest,
   amdf_free(instance_.host_allocator, profile);
   EXPECT_EQ(state_.operations,
             (std::vector<Operation>{
-                Operation::kLoadBridge, Operation::kQueryBridgeApi,
-                Operation::kCreateDevice, Operation::kOpenBridgeAdapter,
-                Operation::kCloseBridgeAdapter, Operation::kDestroyDevice,
-                Operation::kUnloadBridge}));
+                Operation::kGetBridgeApi, Operation::kCreateDevice,
+                Operation::kOpenBridgeAdapter, Operation::kCloseBridgeAdapter,
+                Operation::kDestroyDevice}));
 }
 
 TEST_F(LinuxDxgEndpointProfileTest,
@@ -235,10 +230,9 @@ TEST_F(LinuxDxgEndpointProfileTest,
   EXPECT_EQ(profile, expected_profile);
   EXPECT_EQ(state_.operations,
             (std::vector<Operation>{
-                Operation::kLoadBridge, Operation::kQueryBridgeApi,
-                Operation::kCreateDevice, Operation::kOpenBridgeAdapter,
-                Operation::kCloseBridgeAdapter, Operation::kDestroyDevice,
-                Operation::kUnloadBridge, Operation::kSegmentQuery}));
+                Operation::kGetBridgeApi, Operation::kCreateDevice,
+                Operation::kOpenBridgeAdapter, Operation::kCloseBridgeAdapter,
+                Operation::kDestroyDevice, Operation::kSegmentQuery}));
 }
 
 TEST_F(LinuxDxgEndpointProfileTest,
@@ -297,27 +291,10 @@ TEST_F(LinuxDxgEndpointProfileTest, FailedObservationPreservesCallerOutput) {
 
 }  // namespace
 
-extern "C" amdf_status_t __wrap_amdf_gpu_dxg_rocdxg_loader_initialize(
-    amdf_allocator_t, amdf_gpu_dxg_rocdxg_loader_t* out_loader) {
-  current_state->operations.push_back(Operation::kLoadBridge);
-  *out_loader = {.module = reinterpret_cast<void*>(uintptr_t{1})};
-  return AMDF_STATUS_OK;
-}
-
-extern "C" amdf_status_t __wrap_amdf_gpu_dxg_rocdxg_loader_query_api(
-    const amdf_gpu_dxg_rocdxg_loader_t* loader,
-    const amdf_dxg_bridge_api_t** out_api) {
-  current_state->operations.push_back(Operation::kQueryBridgeApi);
-  EXPECT_EQ(loader->module, reinterpret_cast<void*>(uintptr_t{1}));
-  *out_api = &kBridgeApi;
-  return AMDF_STATUS_OK;
-}
-
-extern "C" void __wrap_amdf_gpu_dxg_rocdxg_loader_deinitialize(
-    amdf_gpu_dxg_rocdxg_loader_t* loader) {
-  current_state->operations.push_back(Operation::kUnloadBridge);
-  EXPECT_EQ(loader->module, reinterpret_cast<void*>(uintptr_t{1}));
-  *loader = {};
+extern "C" const amdf_dxg_bridge_api_t* __wrap_amdf_gpu_dxg_rocdxg_default_api(
+    void) {
+  current_state->operations.push_back(Operation::kGetBridgeApi);
+  return &kBridgeApi;
 }
 
 extern "C" amdf_status_t __wrap_amdf_host_memory_sample_observation(

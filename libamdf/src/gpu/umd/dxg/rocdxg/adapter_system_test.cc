@@ -4,17 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <dlfcn.h>
 #include <errno.h>
 
-#include <cstdlib>
-#include <cstring>
 #include <string>
 #include <vector>
 
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
-#include "libamdf/src/gpu/umd/dxg/bridge_api.h"
+#include "libamdf/src/gpu/umd/dxg/rocdxg/api.h"
 #include "libamdf/src/platform/linux/dxg/connection.h"
 #include "libamdf/src/platform/linux/dxg/kmt.h"
 
@@ -25,24 +22,6 @@ enum class AdapterProbeResult {
   kUnavailable,
   kFailure,
 };
-
-template <typename Procedure>
-Procedure LoadProcedure(void* module, const char* name) {
-  static_assert(sizeof(Procedure) == sizeof(void*));
-  void* symbol = dlsym(module, name);
-  Procedure procedure = nullptr;
-  std::memcpy(&procedure, &symbol, sizeof(symbol));
-  return procedure;
-}
-
-bool ModuleIsMapped(const char* path) {
-  void* module = dlopen(path, RTLD_NOW | RTLD_NOLOAD);
-  if (module == nullptr) {
-    return false;
-  }
-  dlclose(module);
-  return true;
-}
 
 bool CloseAdapters(const amdf_linux_dxg_kmt_t* kmt,
                    const std::vector<D3DKMT_ADAPTERINFO>& adapters) {
@@ -60,30 +39,8 @@ bool CloseAdapters(const amdf_linux_dxg_kmt_t* kmt,
 }
 
 AdapterProbeResult ExerciseAdapter(
-    const char* sidecar_path, amdf_dxg_bridge_gpu_properties_t* out_properties,
-    std::string* out_error) {
-  void* sidecar = dlopen(sidecar_path, RTLD_NOW | RTLD_LOCAL);
-  if (sidecar == nullptr) {
-    *out_error = dlerror();
-    return AdapterProbeResult::kFailure;
-  }
-  const auto query_api = LoadProcedure<amdf_dxg_bridge_query_api_fn_t>(
-      sidecar, "amdf_dxg_bridge_query_api");
-  if (query_api == nullptr) {
-    *out_error = "sidecar query symbol is absent";
-    dlclose(sidecar);
-    return AdapterProbeResult::kFailure;
-  }
-  const amdf_dxg_bridge_api_t* bridge = nullptr;
-  if (query_api(AMDF_DXG_BRIDGE_ABI_VERSION_13,
-                AMDF_DXG_BRIDGE_ABI_VERSION_LATEST,
-                &bridge) != AMDF_DXG_BRIDGE_RESULT_SUCCESS ||
-      bridge == nullptr) {
-    *out_error = "sidecar API negotiation failed";
-    dlclose(sidecar);
-    return AdapterProbeResult::kFailure;
-  }
-
+    amdf_dxg_bridge_gpu_properties_t* out_properties, std::string* out_error) {
+  const amdf_dxg_bridge_api_t* bridge = amdf_gpu_dxg_rocdxg_default_api();
   amdf_linux_dxg_connection_t connection = {.descriptor = -1};
   const amdf_status_t connection_status =
       amdf_linux_dxg_connection_initialize(&connection);
@@ -95,7 +52,6 @@ AdapterProbeResult ExerciseAdapter(
     if (!unavailable) {
       *out_error = "opening /dev/dxg failed";
     }
-    dlclose(sidecar);
     return unavailable ? AdapterProbeResult::kUnavailable
                        : AdapterProbeResult::kFailure;
   }
@@ -111,7 +67,6 @@ AdapterProbeResult ExerciseAdapter(
   if (native_status != 0 || enumeration.NumAdapters == 0) {
     *out_error = "adapter count query failed";
     amdf_linux_dxg_connection_deinitialize(&connection);
-    dlclose(sidecar);
     return AdapterProbeResult::kFailure;
   }
   std::vector<D3DKMT_ADAPTERINFO> adapters(enumeration.NumAdapters);
@@ -121,7 +76,6 @@ AdapterProbeResult ExerciseAdapter(
     *out_error = "adapter enumeration failed";
     CloseAdapters(&kmt, adapters);
     amdf_linux_dxg_connection_deinitialize(&connection);
-    dlclose(sidecar);
     return AdapterProbeResult::kFailure;
   }
   adapters.resize(enumeration.NumAdapters);
@@ -177,8 +131,7 @@ AdapterProbeResult ExerciseAdapter(
   }
 
   if (!CloseAdapters(&kmt, adapters) ||
-      !amdf_status_is_ok(amdf_linux_dxg_connection_deinitialize(&connection)) ||
-      dlclose(sidecar) != 0) {
+      !amdf_status_is_ok(amdf_linux_dxg_connection_deinitialize(&connection))) {
     cleanup_succeeded = false;
   }
   if (!out_error->empty() || !cleanup_succeeded) {
@@ -195,15 +148,11 @@ AdapterProbeResult ExerciseAdapter(
 }
 
 TEST(RocdxgAdapterSystemTest, QueriesRealAdapterThroughExplicitDxgConnection) {
-  const char* sidecar_path = std::getenv("AMDF_ROCDXG_BRIDGE_TEST_PATH");
-  ASSERT_NE(sidecar_path, nullptr);
-
   amdf_dxg_bridge_gpu_properties_t properties = {};
   std::string error;
   ::testing::internal::CaptureStdout();
   ::testing::internal::CaptureStderr();
-  const AdapterProbeResult result =
-      ExerciseAdapter(sidecar_path, &properties, &error);
+  const AdapterProbeResult result = ExerciseAdapter(&properties, &error);
   const std::string stderr_output = ::testing::internal::GetCapturedStderr();
   const std::string stdout_output = ::testing::internal::GetCapturedStdout();
 
@@ -213,7 +162,6 @@ TEST(RocdxgAdapterSystemTest, QueriesRealAdapterThroughExplicitDxgConnection) {
   EXPECT_EQ(result, AdapterProbeResult::kSuccess) << error;
   EXPECT_TRUE(stdout_output.empty()) << stdout_output;
   EXPECT_TRUE(stderr_output.empty()) << stderr_output;
-  EXPECT_FALSE(ModuleIsMapped(sidecar_path));
   EXPECT_GT(properties.gfx_ip_major, 0);
   EXPECT_GT(properties.wavefront_size, 0u);
   EXPECT_GT(properties.compute_unit_count, 0u);

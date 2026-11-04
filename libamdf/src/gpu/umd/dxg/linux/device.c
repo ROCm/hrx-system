@@ -7,6 +7,7 @@
 #include "libamdf/src/gpu/umd/dxg/linux/device.h"
 
 #include "libamdf/src/allocator.h"
+#include "libamdf/src/gpu/umd/dxg/rocdxg/api.h"
 
 static amdf_status_t amdf_gpu_linux_dxg_device_release_native(
     amdf_gpu_umd_device_t* device) {
@@ -16,9 +17,6 @@ static amdf_status_t amdf_gpu_linux_dxg_device_release_native(
   }
   if (device->logical_device.native != 0) {
     amdf_gpu_linux_dxg_logical_device_deinitialize(&device->logical_device);
-  }
-  if (device->bridge_loader.module != NULL) {
-    amdf_gpu_dxg_rocdxg_loader_deinitialize(&device->bridge_loader);
   }
   return status;
 }
@@ -53,17 +51,10 @@ amdf_status_t amdf_gpu_umd_device_create(
   device->physical_adapter_index = endpoint->physical_adapter_index;
   device->memory_capabilities = memory_capabilities;
 
-  status = amdf_gpu_dxg_rocdxg_loader_initialize(host_allocator,
-                                                 &device->bridge_loader);
-  const amdf_dxg_bridge_api_t* bridge_api = NULL;
-  if (amdf_status_is_ok(status)) {
-    status = amdf_gpu_dxg_rocdxg_loader_query_api(&device->bridge_loader,
-                                                  &bridge_api);
-  }
   if (amdf_status_is_ok(status)) {
     status = amdf_gpu_linux_dxg_logical_device_initialize(
-        bridge_api, endpoint, host_allocator, &device->logical_device,
-        &device->properties);
+        amdf_gpu_dxg_rocdxg_default_api(), endpoint, host_allocator,
+        &device->logical_device, &device->properties);
   }
   if (amdf_status_is_ok(status)) {
     device->memory_capabilities.program_gfx_major =

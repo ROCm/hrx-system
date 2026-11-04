@@ -307,14 +307,8 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuKernelQueueCreate(
     return AMDF_DXG_BRIDGE_RESULT_INVALID_ARGUMENT;
   }
   *out_native_status = 0;
-  try {
-    return CreateNativeQueue(adapter, *create_info, out_queue, out_info,
-                             out_native_status);
-  } catch (const std::bad_alloc&) {
-    return AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED;
-  } catch (...) {
-    return AMDF_DXG_BRIDGE_RESULT_INTERNAL;
-  }
+  return CreateNativeQueue(adapter, *create_info, out_queue, out_info,
+                           out_native_status);
 }
 
 amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuKernelQueueSubmit(

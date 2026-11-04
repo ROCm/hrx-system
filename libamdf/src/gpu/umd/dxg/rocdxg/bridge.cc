@@ -6,12 +6,11 @@
 
 #include <sys/ioctl.h>
 
-#include <new>
-
 #include "libamdf/src/gpu/umd/dxg/bridge_allocator.h"
 #include "libamdf/src/gpu/umd/dxg/bridge_api.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/adapter_state.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/allocation.h"
+#include "libamdf/src/gpu/umd/dxg/rocdxg/api.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/clock.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/kernel_queue.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/private_records.h"
@@ -157,14 +156,8 @@ GpuAdapterOpen(const amdf_dxg_bridge_gpu_adapter_open_info_t* open_info,
     return AMDF_DXG_BRIDGE_RESULT_INVALID_ARGUMENT;
   }
   *out_native_status = 0;
-  try {
-    return GpuAdapterOpenImpl(*open_info, *host_allocator, out_adapter,
-                              out_properties, out_native_status);
-  } catch (const std::bad_alloc&) {
-    return AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED;
-  } catch (...) {
-    return AMDF_DXG_BRIDGE_RESULT_INTERNAL;
-  }
+  return GpuAdapterOpenImpl(*open_info, *host_allocator, out_adapter,
+                            out_properties, out_native_status);
 }
 
 amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL
@@ -203,18 +196,6 @@ const amdf_dxg_bridge_api_t kBridgeApi = {
 
 }  // namespace
 
-extern "C" __attribute__((visibility("default"))) amdf_dxg_bridge_result_t
-    AMDF_DXG_BRIDGE_CALL
-    amdf_dxg_bridge_query_api(uint32_t minimum_version,
-                              uint32_t maximum_version,
-                              const amdf_dxg_bridge_api_t** out_api) {
-  if (out_api == nullptr) {
-    return AMDF_DXG_BRIDGE_RESULT_INVALID_ARGUMENT;
-  }
-  if (minimum_version > AMDF_DXG_BRIDGE_ABI_VERSION_13 ||
-      maximum_version < AMDF_DXG_BRIDGE_ABI_VERSION_13) {
-    return AMDF_DXG_BRIDGE_RESULT_VERSION_MISMATCH;
-  }
-  *out_api = &kBridgeApi;
-  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+extern "C" const amdf_dxg_bridge_api_t* amdf_gpu_dxg_rocdxg_default_api(void) {
+  return &kBridgeApi;
 }

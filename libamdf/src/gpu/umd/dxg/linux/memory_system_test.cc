@@ -4,13 +4,11 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <dlfcn.h>
 #include <errno.h>
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -85,15 +83,6 @@ bool IsDxgUnavailable(amdf_status_t status) {
   return amdf_status_domain(status) == AMDF_STATUS_DOMAIN_ERRNO &&
          (amdf_status_code(status) == ENOENT ||
           amdf_status_code(status) == ENODEV);
-}
-
-bool ModuleIsMapped(const char* path) {
-  void* module = dlopen(path, RTLD_NOW | RTLD_NOLOAD);
-  if (module == nullptr) {
-    return false;
-  }
-  dlclose(module);
-  return true;
 }
 
 class LinuxDxgMemorySystemTest : public ::testing::Test {
@@ -204,10 +193,6 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
       if (amdf_status_is_ok(status)) {
         instance_ = nullptr;
       }
-    }
-    const char* sidecar_path = std::getenv("AMDF_DXG_BRIDGE_PATH");
-    if (sidecar_path != nullptr && device_ == nullptr) {
-      EXPECT_FALSE(ModuleIsMapped(sidecar_path));
     }
   }
 

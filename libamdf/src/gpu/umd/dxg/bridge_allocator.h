@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstring>
 #include <new>
+#include <type_traits>
 
 #include "libamdf/src/gpu/umd/dxg/bridge_api.h"
 
@@ -96,17 +97,13 @@ class HostObject {
 
   ~HostObject() { Reset(); }
 
-  bool Allocate() {
+  bool Allocate() noexcept {
+    static_assert(std::is_nothrow_default_constructible_v<T>);
     void* storage = AllocateHostBytes(allocator_, sizeof(T), amdf_alignof(T));
     if (storage == nullptr) {
       return false;
     }
-    try {
-      object_ = ::new (storage) T();
-    } catch (...) {
-      FreeHostBytes(allocator_, storage);
-      throw;
-    }
+    object_ = ::new (storage) T();
     return true;
   }
 

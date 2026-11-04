@@ -11,7 +11,7 @@
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/dxg/endpoint_properties.h"
 #include "libamdf/src/gpu/umd/dxg/linux/logical_device.h"
-#include "libamdf/src/gpu/umd/dxg/rocdxg/loader.h"
+#include "libamdf/src/gpu/umd/dxg/rocdxg/api.h"
 #include "libamdf/src/host_memory.h"
 #include "libamdf/src/platform/linux/dxg/endpoint.h"
 
@@ -37,22 +37,13 @@ static amdf_status_t amdf_gpu_linux_dxg_query_local_capacity(
 amdf_status_t amdf_gpu_umd_create_endpoint_profile(
     amdf_platform_endpoint_t* endpoint, amdf_allocator_t host_allocator,
     amdf_gpu_endpoint_profile_t** out_profile) {
-  amdf_gpu_dxg_rocdxg_loader_t loader = {0};
   amdf_gpu_linux_dxg_logical_device_t logical_device = {0};
   amdf_dxg_bridge_gpu_properties_t provider_properties = {0};
   amdf_gpu_endpoint_profile_t profile = {0};
 
-  amdf_status_t status =
-      amdf_gpu_dxg_rocdxg_loader_initialize(host_allocator, &loader);
-  const amdf_dxg_bridge_api_t* bridge_api = NULL;
-  if (amdf_status_is_ok(status)) {
-    status = amdf_gpu_dxg_rocdxg_loader_query_api(&loader, &bridge_api);
-  }
-  if (amdf_status_is_ok(status)) {
-    status = amdf_gpu_linux_dxg_logical_device_initialize(
-        bridge_api, endpoint, host_allocator, &logical_device,
-        &provider_properties);
-  }
+  amdf_status_t status = amdf_gpu_linux_dxg_logical_device_initialize(
+      amdf_gpu_dxg_rocdxg_default_api(), endpoint, host_allocator,
+      &logical_device, &provider_properties);
   if (amdf_status_is_ok(status)) {
     amdf_gpu_endpoint_properties_t properties = {0};
     if (!amdf_gpu_dxg_endpoint_properties_translate(&provider_properties,
@@ -65,10 +56,6 @@ amdf_status_t amdf_gpu_umd_create_endpoint_profile(
   if (logical_device.native != 0) {
     amdf_gpu_linux_dxg_logical_device_deinitialize(&logical_device);
   }
-  if (loader.module != NULL) {
-    amdf_gpu_dxg_rocdxg_loader_deinitialize(&loader);
-  }
-
   if (amdf_status_is_ok(status)) {
     profile.memory.flags = AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES;
     if (provider_properties.is_discrete != 0) {

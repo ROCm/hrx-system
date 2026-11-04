@@ -1,6 +1,0 @@
-AMDF_DXG_BRIDGE_1 {
-  global:
-    amdf_dxg_bridge_query_api;
-  local:
-    *;
-};

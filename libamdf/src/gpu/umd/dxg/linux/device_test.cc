@@ -14,6 +14,7 @@
 
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
+#include "libamdf/src/gpu/umd/dxg/rocdxg/api.h"
 
 namespace {
 
@@ -22,23 +23,19 @@ constexpr NTSTATUS kNativeFailure = static_cast<NTSTATUS>(0xC0000001u);
 enum class Operation {
   kQueryMemoryCapabilities,
   kQueryStoreCapabilities,
-  kLoadBridge,
-  kQueryBridge,
+  kGetBridgeApi,
   kCreateDevice,
   kOpenBridgeAdapter,
   kCreatePagingQueue,
   kDestroyPagingQueue,
   kCloseBridgeAdapter,
   kDestroyDevice,
-  kUnloadBridge,
 };
 
 enum class FailureStage {
   kNone,
   kMemoryCapabilities,
   kStoreCapabilities,
-  kLoadBridge,
-  kQueryBridge,
   kCreateDevice,
   kOpenBridgeAdapter,
   kCreatePagingQueue,
@@ -218,33 +215,10 @@ const amdf_dxg_bridge_api_t kBridgeApi = {
     .gpu_adapter_close = FakeAdapterClose,
 };
 
-extern "C" amdf_status_t __wrap_amdf_gpu_dxg_rocdxg_loader_initialize(
-    amdf_allocator_t, amdf_gpu_dxg_rocdxg_loader_t* out_loader) {
-  current_state->operations.push_back(Operation::kLoadBridge);
-  if (current_state->failure_stage == FailureStage::kLoadBridge) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
-  }
-  out_loader->module = reinterpret_cast<void*>(uintptr_t{1});
-  return AMDF_STATUS_OK;
-}
-
-extern "C" amdf_status_t __wrap_amdf_gpu_dxg_rocdxg_loader_query_api(
-    const amdf_gpu_dxg_rocdxg_loader_t* loader,
-    const amdf_dxg_bridge_api_t** out_api) {
-  current_state->operations.push_back(Operation::kQueryBridge);
-  EXPECT_EQ(loader->module, reinterpret_cast<void*>(uintptr_t{1}));
-  if (current_state->failure_stage == FailureStage::kQueryBridge) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_VERSION_MISMATCH);
-  }
-  *out_api = &kBridgeApi;
-  return AMDF_STATUS_OK;
-}
-
-extern "C" void __wrap_amdf_gpu_dxg_rocdxg_loader_deinitialize(
-    amdf_gpu_dxg_rocdxg_loader_t* loader) {
-  current_state->operations.push_back(Operation::kUnloadBridge);
-  EXPECT_EQ(loader->module, reinterpret_cast<void*>(uintptr_t{1}));
-  *loader = {};
+extern "C" const amdf_dxg_bridge_api_t* __wrap_amdf_gpu_dxg_rocdxg_default_api(
+    void) {
+  current_state->operations.push_back(Operation::kGetBridgeApi);
+  return &kBridgeApi;
 }
 
 class LinuxDxgDeviceTest : public ::testing::Test {
@@ -316,19 +290,18 @@ TEST_F(LinuxDxgDeviceTest, OwnsCompleteLogicalAndPagingDevice) {
   EXPECT_EQ(state_.operations,
             (std::vector<Operation>{
                 Operation::kQueryMemoryCapabilities,
-                Operation::kQueryStoreCapabilities, Operation::kLoadBridge,
-                Operation::kQueryBridge, Operation::kCreateDevice,
-                Operation::kOpenBridgeAdapter, Operation::kCreatePagingQueue}));
+                Operation::kQueryStoreCapabilities, Operation::kGetBridgeApi,
+                Operation::kCreateDevice, Operation::kOpenBridgeAdapter,
+                Operation::kCreatePagingQueue}));
 
   ASSERT_EQ(amdf_gpu_umd_device_destroy(device), AMDF_STATUS_OK);
   EXPECT_EQ(state_.operations,
             (std::vector<Operation>{
                 Operation::kQueryMemoryCapabilities,
-                Operation::kQueryStoreCapabilities, Operation::kLoadBridge,
-                Operation::kQueryBridge, Operation::kCreateDevice,
-                Operation::kOpenBridgeAdapter, Operation::kCreatePagingQueue,
-                Operation::kDestroyPagingQueue, Operation::kCloseBridgeAdapter,
-                Operation::kDestroyDevice, Operation::kUnloadBridge}));
+                Operation::kQueryStoreCapabilities, Operation::kGetBridgeApi,
+                Operation::kCreateDevice, Operation::kOpenBridgeAdapter,
+                Operation::kCreatePagingQueue, Operation::kDestroyPagingQueue,
+                Operation::kCloseBridgeAdapter, Operation::kDestroyDevice}));
 }
 
 class LinuxDxgDeviceConstructionFailureTest
@@ -354,12 +327,7 @@ TEST_P(LinuxDxgDeviceConstructionFailureTest,
     expected.push_back(Operation::kQueryStoreCapabilities);
   }
   if (GetParam() > FailureStage::kStoreCapabilities) {
-    expected.push_back(Operation::kLoadBridge);
-  }
-  if (GetParam() > FailureStage::kLoadBridge) {
-    expected.push_back(Operation::kQueryBridge);
-  }
-  if (GetParam() > FailureStage::kQueryBridge) {
+    expected.push_back(Operation::kGetBridgeApi);
     expected.push_back(Operation::kCreateDevice);
   }
   if (GetParam() > FailureStage::kCreateDevice) {
@@ -377,9 +345,6 @@ TEST_P(LinuxDxgDeviceConstructionFailureTest,
   if (GetParam() > FailureStage::kCreateDevice) {
     expected.push_back(Operation::kDestroyDevice);
   }
-  if (GetParam() > FailureStage::kLoadBridge) {
-    expected.push_back(Operation::kUnloadBridge);
-  }
   EXPECT_EQ(state_.operations, expected);
 }
 
@@ -387,7 +352,6 @@ INSTANTIATE_TEST_SUITE_P(
     NativeStage, LinuxDxgDeviceConstructionFailureTest,
     ::testing::Values(
         FailureStage::kMemoryCapabilities, FailureStage::kStoreCapabilities,
-        FailureStage::kLoadBridge, FailureStage::kQueryBridge,
         FailureStage::kCreateDevice, FailureStage::kOpenBridgeAdapter,
         FailureStage::kCreatePagingQueue, FailureStage::kMalformedPagingQueue));
 
@@ -404,12 +368,11 @@ TEST_F(LinuxDxgDeviceTest, ConsumedPagingFailureRequiresOnlyHostOwnerRetry) {
             amdf_linux_dxg_kmt_make_status(kNativeFailure));
   const size_t operation_count = state_.operations.size();
   EXPECT_EQ(state_.live_allocation_count, 1u);
-  EXPECT_EQ(state_.operations[operation_count - 4],
-            Operation::kDestroyPagingQueue);
   EXPECT_EQ(state_.operations[operation_count - 3],
+            Operation::kDestroyPagingQueue);
+  EXPECT_EQ(state_.operations[operation_count - 2],
             Operation::kCloseBridgeAdapter);
-  EXPECT_EQ(state_.operations[operation_count - 2], Operation::kDestroyDevice);
-  EXPECT_EQ(state_.operations[operation_count - 1], Operation::kUnloadBridge);
+  EXPECT_EQ(state_.operations[operation_count - 1], Operation::kDestroyDevice);
 
   EXPECT_EQ(amdf_gpu_umd_device_destroy(device), AMDF_STATUS_OK);
   EXPECT_EQ(state_.operations.size(), operation_count);
