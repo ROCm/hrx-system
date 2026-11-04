@@ -9,6 +9,7 @@
 #include <inttypes.h>
 
 #include "iree/base/internal/math.h"
+#include "loom/target/arch/amd/xdna/aie2p/encoding/encoding.h"
 
 // One physical register and its slices in the atomic-unit and subregister
 // tables.
@@ -161,8 +162,6 @@ typedef struct loom_aie2p_tie_list_t {
 
 // One concrete physical instruction form.
 typedef struct loom_aie2p_machine_form_t {
-  // Byte offset of the stable instruction name.
-  uint16_t name_offset;
   // Byte offset of the native assembly template.
   uint16_t assembly_offset;
   // Deduplicated explicit operand-list ID.
@@ -195,7 +194,7 @@ static_assert(sizeof(loom_aie2p_immediate_t) == 12,
               "AIE2P immediate domains must remain compact");
 static_assert(sizeof(loom_aie2p_machine_operand_t) == 4,
               "AIE2P machine operands must remain compact");
-static_assert(sizeof(loom_aie2p_machine_form_t) == 12,
+static_assert(sizeof(loom_aie2p_machine_form_t) == 10,
               "AIE2P machine forms must remain compact");
 static_assert(
     sizeof(kLoomAie2pMachineStrings) + sizeof(kLoomAie2pAtomicUnitNameOffsets) +
@@ -362,15 +361,8 @@ loom_aie2p_immediate_id_t loom_aie2p_machine_find_immediate(
 
 loom_aie2p_machine_form_id_t loom_aie2p_machine_find_form(
     iree_string_view_t name) {
-  for (iree_host_size_t i = 1; i < IREE_ARRAYSIZE(kLoomAie2pMachineForms);
-       ++i) {
-    if (iree_string_view_equal(
-            name,
-            loom_aie2p_machine_string(kLoomAie2pMachineForms[i].name_offset))) {
-      return (loom_aie2p_machine_form_id_t)i;
-    }
-  }
-  return LOOM_AIE2P_MACHINE_FORM_ID_INVALID;
+  return (loom_aie2p_machine_form_id_t)loom_aie2p_encoding_find_instruction(
+      name);
 }
 
 bool loom_aie2p_machine_query_physical_register(
@@ -648,10 +640,16 @@ iree_status_t loom_aie2p_machine_decode_immediate(
 
 bool loom_aie2p_machine_query_form(loom_aie2p_machine_form_id_t form_id,
                                    loom_aie2p_machine_form_info_t* out_info) {
-  const loom_aie2p_machine_form_t* form = loom_aie2p_machine_form(form_id);
-  if (!form || !out_info) {
+  if (!out_info) {
     return false;
   }
+  const iree_string_view_t name = loom_aie2p_encoding_instruction_name(
+      (loom_aie2p_instruction_id_t)form_id);
+  if (iree_string_view_is_empty(name)) {
+    return false;
+  }
+  // Generated table validation keeps machine-form and encoding IDs aligned.
+  const loom_aie2p_machine_form_t* form = &kLoomAie2pMachineForms[form_id];
   const loom_aie2p_operand_list_t* operands =
       &kLoomAie2pOperandLists[form->operand_list_id];
   const loom_aie2p_register_list_t* implicit_defs =
@@ -660,7 +658,7 @@ bool loom_aie2p_machine_query_form(loom_aie2p_machine_form_id_t form_id,
       &kLoomAie2pRegisterLists[form->implicit_use_list_id];
   const loom_aie2p_tie_list_t* ties = &kLoomAie2pTieLists[form->tie_list_id];
   *out_info = (loom_aie2p_machine_form_info_t){
-      .name = loom_aie2p_machine_string(form->name_offset),
+      .name = name,
       .assembly = loom_aie2p_machine_string(form->assembly_offset),
       .property_flags = form->property_flags,
       .control_flow_kind =

@@ -26,6 +26,7 @@ loom_cc_library(
     textual_hdrs = [":machine_tables.inl"],
     visibility = ["//visibility:public"],
     deps = [
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/encoding",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
     ],

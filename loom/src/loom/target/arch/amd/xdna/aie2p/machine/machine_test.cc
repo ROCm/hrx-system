@@ -217,6 +217,7 @@ TEST(MachineTest, MachineFormsAlignWithEncodingForms) {
     ASSERT_TRUE(loom_aie2p_encoding_query_instruction_info(
         (loom_aie2p_instruction_id_t)i, &encoding_info));
     EXPECT_TRUE(iree_string_view_equal(machine_info.name, encoding_info.name));
+    EXPECT_EQ(loom_aie2p_machine_find_form(encoding_info.name), i);
   }
   EXPECT_EQ(loom_aie2p_machine_find_form(IREE_SV("MOV_OR")),
             LOOM_AIE2P_MACHINE_FORM_ID_INVALID);
