@@ -7,6 +7,7 @@
 #include <dlfcn.h>
 #include <errno.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdlib>
@@ -18,6 +19,7 @@
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/device.h"
 #include "libamdf/src/gpu/umd/dxg/adapter.h"
+#include "libamdf/src/gpu/umd/dxg/endpoint_properties.h"
 #include "libamdf/src/gpu/umd/dxg/linux/device.h"
 #include "libamdf/src/gpu/umd/memory.h"
 #include "libamdf/src/gpu/umd/memory_reservation.h"
@@ -28,8 +30,8 @@
 namespace {
 
 constexpr uint64_t kByteLength = 64 * 1024;
-constexpr uint64_t kPm4SourceByteOffset = 4096;
-constexpr uint64_t kPm4ResultByteOffset = 8192;
+constexpr uint64_t kSourceByteOffset = 4096;
+constexpr uint64_t kTargetByteOffset = 8192;
 
 std::array<uint32_t, 6> MakePm4CopyData32(uint64_t source_address,
                                           uint64_t target_address) {
@@ -40,6 +42,26 @@ std::array<uint32_t, 6> MakePm4CopyData32(uint64_t source_address,
   return {
       kCopyDataHeader,
       kTcL2Source | kTcL2Target | kWaitForWriteConfirmation,
+      static_cast<uint32_t>(source_address),
+      static_cast<uint32_t>(source_address >> 32),
+      static_cast<uint32_t>(target_address),
+      static_cast<uint32_t>(target_address >> 32),
+  };
+}
+
+std::array<uint32_t, 7> MakeSdmaCopy32(
+    amdf_queue_format_features_t format_features, uint64_t source_address,
+    uint64_t target_address) {
+  constexpr uint32_t kSdmaCopyLinearOpcode = 1;
+  constexpr uint32_t kSystemScope = 3;
+  const bool has_scope_fields =
+      (format_features & AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE) != 0;
+  const uint32_t scope_fields =
+      has_scope_fields ? (kSystemScope << 18) | (kSystemScope << 26) : 0;
+  return {
+      kSdmaCopyLinearOpcode | (has_scope_fields ? 1u << 28 : 0),
+      sizeof(uint32_t) - 1,
+      scope_fields,
       static_cast<uint32_t>(source_address),
       static_cast<uint32_t>(source_address >> 32),
       static_cast<uint32_t>(target_address),
@@ -259,12 +281,12 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
               AMDF_STATUS_OK);
   }
 
-  amdf_dxg_bridge_gpu_kernel_queue_info_t CreatePm4Queue() {
-    EXPECT_NE(device_->properties.supports_pm4_kernel_queue, 0u);
+  amdf_dxg_bridge_gpu_kernel_queue_info_t CreateKernelQueue(
+      amdf_dxg_bridge_gpu_queue_command_type_t command_type) {
     const amdf_dxg_bridge_gpu_kernel_queue_create_info_t create_info = {
         .structure_size = sizeof(create_info),
         .device_handle = device_->logical_device.native,
-        .command_type = AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4,
+        .command_type = command_type,
     };
     amdf_dxg_bridge_gpu_kernel_queue_info_t info = {};
     EXPECT_EQ(InvokeSilently([&] {
@@ -275,6 +297,61 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
               AMDF_STATUS_OK);
     EXPECT_NE(queue_, nullptr);
     return info;
+  }
+
+  template <typename CommandFactory>
+  void ExecuteCopyThroughPrivateKernelQueue(
+      amdf_dxg_bridge_gpu_queue_command_type_t command_type,
+      CommandFactory make_commands) {
+    const amdf_memory_native_profile_t profile = QueryProfile(0);
+    ASSERT_EQ(profile.memory_class, AMDF_MEMORY_CLASS_SYSTEM);
+    ASSERT_NE(profile.supported_flags & AMDF_MEMORY_FLAG_QUEUE_STORAGE, 0u);
+
+    amdf_gpu_umd_memory_result_t memory_result = {};
+    ASSERT_NO_FATAL_FAILURE(PrepareMemory(
+        profile,
+        AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+            AMDF_MEMORY_FLAG_QUEUE_STORAGE,
+        nullptr, &memory_result,
+        AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
+            AMDF_MEMORY_ACCESS_EXECUTE));
+    amdf_gpu_umd_host_mapping_result_t mapping_result = {};
+    ASSERT_NO_FATAL_FAILURE(MapMemory(profile, &mapping_result));
+
+    auto* words = static_cast<uint32_t*>(mapping_result.pointer);
+    auto* source = reinterpret_cast<uint32_t*>(
+        static_cast<uint8_t*>(mapping_result.pointer) + kSourceByteOffset);
+    auto* target = reinterpret_cast<uint32_t*>(
+        static_cast<uint8_t*>(mapping_result.pointer) + kTargetByteOffset);
+    constexpr uint32_t kExpected = 0x13579BDFu;
+    *source = kExpected;
+    *target = ~kExpected;
+    const auto commands =
+        make_commands(memory_result.device_address + kSourceByteOffset,
+                      memory_result.device_address + kTargetByteOffset);
+    std::memcpy(words, commands.data(), commands.size() * sizeof(uint32_t));
+    ASSERT_NO_FATAL_FAILURE(FlushMemory());
+
+    const amdf_dxg_bridge_gpu_kernel_queue_info_t queue_info =
+        CreateKernelQueue(command_type);
+    ASSERT_NE(queue_, nullptr);
+    constexpr uint64_t kProgressValue = 1;
+    bool accepted = false;
+    ASSERT_EQ(InvokeSilently([&] {
+                return amdf_gpu_dxg_adapter_submit_kernel_queue(
+                    &device_->logical_device.bridge_adapter, queue_,
+                    memory_result.device_address,
+                    commands.size() * sizeof(uint32_t), kProgressValue,
+                    &accepted);
+              }),
+              AMDF_STATUS_OK);
+    ASSERT_TRUE(accepted);
+    ASSERT_NO_FATAL_FAILURE(WaitForQueue(queue_info, kProgressValue));
+    ASSERT_NO_FATAL_FAILURE(InvalidateMemory());
+    EXPECT_EQ(*target, kExpected);
+
+    ASSERT_NO_FATAL_FAILURE(ReleaseQueue());
+    ASSERT_NO_FATAL_FAILURE(ReleaseMemory());
   }
 
   void WaitForQueue(const amdf_dxg_bridge_gpu_kernel_queue_info_t& info,
@@ -393,54 +470,31 @@ TEST_F(LinuxDxgMemorySystemTest, RegistersBorrowedHostMemory) {
 }
 
 TEST_F(LinuxDxgMemorySystemTest, ExecutesPm4ThroughPrivateKernelQueue) {
-  const amdf_memory_native_profile_t profile = QueryProfile(0);
-  ASSERT_EQ(profile.memory_class, AMDF_MEMORY_CLASS_SYSTEM);
-  ASSERT_NE(profile.supported_flags & AMDF_MEMORY_FLAG_QUEUE_STORAGE, 0u);
+  ASSERT_NE(device_->properties.supports_pm4_kernel_queue, 0u);
+  ASSERT_NO_FATAL_FAILURE(ExecuteCopyThroughPrivateKernelQueue(
+      AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4, MakePm4CopyData32));
+}
 
-  amdf_gpu_umd_memory_result_t memory_result = {};
-  ASSERT_NO_FATAL_FAILURE(PrepareMemory(
-      profile,
-      AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
-          AMDF_MEMORY_FLAG_QUEUE_STORAGE,
-      nullptr, &memory_result,
-      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
-          AMDF_MEMORY_ACCESS_EXECUTE));
-  amdf_gpu_umd_host_mapping_result_t mapping_result = {};
-  ASSERT_NO_FATAL_FAILURE(MapMemory(profile, &mapping_result));
-
-  auto* words = static_cast<uint32_t*>(mapping_result.pointer);
-  auto* source = reinterpret_cast<uint32_t*>(
-      static_cast<uint8_t*>(mapping_result.pointer) + kPm4SourceByteOffset);
-  auto* result = reinterpret_cast<uint32_t*>(
-      static_cast<uint8_t*>(mapping_result.pointer) + kPm4ResultByteOffset);
-  constexpr uint32_t kExpected = 0x13579BDFu;
-  *source = kExpected;
-  *result = ~kExpected;
-  const auto commands =
-      MakePm4CopyData32(memory_result.device_address + kPm4SourceByteOffset,
-                        memory_result.device_address + kPm4ResultByteOffset);
-  std::memcpy(words, commands.data(), commands.size() * sizeof(uint32_t));
-  ASSERT_NO_FATAL_FAILURE(FlushMemory());
-
-  const amdf_dxg_bridge_gpu_kernel_queue_info_t queue_info = CreatePm4Queue();
-  ASSERT_NE(queue_, nullptr);
-  constexpr uint64_t kProgressValue = 1;
-  bool accepted = false;
-  ASSERT_EQ(InvokeSilently([&] {
-              return amdf_gpu_dxg_adapter_submit_kernel_queue(
-                  &device_->logical_device.bridge_adapter, queue_,
-                  memory_result.device_address,
-                  commands.size() * sizeof(uint32_t), kProgressValue,
-                  &accepted);
-            }),
-            AMDF_STATUS_OK);
-  ASSERT_TRUE(accepted);
-  ASSERT_NO_FATAL_FAILURE(WaitForQueue(queue_info, kProgressValue));
-  ASSERT_NO_FATAL_FAILURE(InvalidateMemory());
-  EXPECT_EQ(*result, kExpected);
-
-  ASSERT_NO_FATAL_FAILURE(ReleaseQueue());
-  ASSERT_NO_FATAL_FAILURE(ReleaseMemory());
+TEST_F(LinuxDxgMemorySystemTest, ExecutesSdmaThroughPrivateKernelQueue) {
+  if (device_->properties.supports_sdma_kernel_queue == 0) {
+    GTEST_SKIP() << "the DXG adapter exposes no immutable SDMA queue";
+  }
+  amdf_gpu_endpoint_properties_t properties = {};
+  ASSERT_TRUE(amdf_gpu_dxg_endpoint_properties_translate(&device_->properties,
+                                                         &properties));
+  const auto* const family = std::find_if(
+      properties.queue_families,
+      properties.queue_families + properties.queue_family_count,
+      [](const amdf_gpu_queue_family_properties_t& candidate) {
+        return candidate.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA;
+      });
+  ASSERT_NE(family, properties.queue_families + properties.queue_family_count);
+  const amdf_queue_format_features_t format_features = family->format_features;
+  ASSERT_NO_FATAL_FAILURE(ExecuteCopyThroughPrivateKernelQueue(
+      AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA,
+      [format_features](uint64_t source_address, uint64_t target_address) {
+        return MakeSdmaCopy32(format_features, source_address, target_address);
+      }));
 }
 
 TEST_F(LinuxDxgMemorySystemTest, OwnsSparseVirtualMemory) {

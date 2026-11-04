@@ -237,6 +237,7 @@ amdf_cc_test(
         "//libamdf/src/gpu/umd:memory",
         "//libamdf/src/gpu/umd:memory_reservation",
         "//libamdf/src/gpu/umd/dxg:adapter",
+        "//libamdf/src/gpu/umd/dxg:endpoint_properties",
         "//libamdf/src/platform",
         "//libamdf/src/platform:host_memory",
         "//libamdf/src/platform/linux/dxg:endpoint",
