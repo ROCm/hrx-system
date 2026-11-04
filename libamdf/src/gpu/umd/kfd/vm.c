@@ -227,15 +227,20 @@ amdf_status_t amdf_gpu_kfd_vm_acquire(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  union drm_amdgpu_wait_cs wait = {
-      .in = {.handle = submission.out.handle,
-             .timeout = UINT64_MAX,
-             .ip_type = AMDGPU_HW_IP_DMA,
-             .ctx_id = bootstrap->context_identifier,
-             .ring = ring},
-  };
-  status = native_api->ioctl(native_api->user_data, render_descriptor,
-                             DRM_IOCTL_AMDGPU_WAIT_CS, &wait);
+  union drm_amdgpu_wait_cs wait;
+  do {
+    // A signal interrupts the fence wait without cancelling the submitted IB.
+    // Restore the input union before resuming that same completion boundary.
+    wait = (union drm_amdgpu_wait_cs){
+        .in = {.handle = submission.out.handle,
+               .timeout = UINT64_MAX,
+               .ip_type = AMDGPU_HW_IP_DMA,
+               .ctx_id = bootstrap->context_identifier,
+               .ring = ring},
+    };
+    status = native_api->ioctl(native_api->user_data, render_descriptor,
+                               DRM_IOCTL_AMDGPU_WAIT_CS, &wait);
+  } while (status == amdf_linux_error(EINTR));
   if (!amdf_status_is_ok(status)) {
     return status;
   }

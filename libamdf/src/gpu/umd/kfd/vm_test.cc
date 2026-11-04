@@ -201,6 +201,11 @@ class NativeVm {
         EXPECT_EQ(wait->in.ip_instance, 0u);
         EXPECT_EQ(wait->in.ctx_id, 7u);
         EXPECT_EQ(wait->in.ring, self.expected_ring);
+        if (self.wait_interruptions) {
+          --self.wait_interruptions;
+          std::memset(wait, 0xA5, sizeof(*wait));
+          return amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EINTR);
+        }
         wait->out.status = self.wait_busy ? 1 : 0;
         self.completed = !self.wait_busy;
         break;
@@ -289,6 +294,8 @@ class NativeVm {
   uint32_t expected_ring = 0;
   // Whether the native wait reports incomplete execution.
   bool wait_busy = false;
+  // Remaining signals that interrupt the same submitted fence wait.
+  uint32_t wait_interruptions = 0;
   // Native context ownership.
   bool context_owned = false;
   // Native GEM handle ownership.
@@ -328,6 +335,43 @@ TEST(KfdVmTest, CompletesCommandAndAcquiresBeforeReleasingBootstrap) {
   EXPECT_EQ(native.operations, expected);
   EXPECT_EQ(native.Release(), AMDF_STATUS_OK);
   EXPECT_EQ(native.operations, expected);
+}
+
+TEST(KfdVmTest, ResumesInterruptedCompletionWithoutResubmitting) {
+  NativeVm native;
+  native.wait_interruptions = 2;
+  ASSERT_EQ(native.Acquire(), AMDF_STATUS_OK);
+  EXPECT_TRUE(native.acquired);
+  EXPECT_TRUE(native.completed);
+  ASSERT_EQ(native.Release(), AMDF_STATUS_OK);
+  const std::vector<Operation> expected = {
+      Operation::kQuery,        Operation::kCreateContext,
+      Operation::kCreateBuffer, Operation::kQueryMapping,
+      Operation::kMap,          Operation::kMapGpu,
+      Operation::kSubmit,       Operation::kWait,
+      Operation::kWait,         Operation::kWait,
+      Operation::kAcquire,      Operation::kCloseBuffer,
+      Operation::kUnmap,        Operation::kFreeContext};
+  EXPECT_EQ(native.operations, expected);
+}
+
+TEST(KfdVmTest, InterruptedCompletionStillPropagatesTerminalFailure) {
+  for (bool busy : {false, true}) {
+    NativeVm native;
+    native.wait_interruptions = 2;
+    native.wait_busy = busy;
+    native.failure_call = busy ? 0 : 10;
+    EXPECT_EQ(native.Acquire(),
+              amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, busy ? ETIME : EIO));
+    EXPECT_FALSE(native.acquired);
+    EXPECT_FALSE(native.completed);
+    ASSERT_EQ(native.operations.size(), 10u);
+    EXPECT_EQ(native.operations.back(), Operation::kWait);
+    ASSERT_EQ(native.Release(), AMDF_STATUS_OK);
+    EXPECT_FALSE(native.buffer_owned);
+    EXPECT_FALSE(native.mapping_owned);
+    EXPECT_FALSE(native.context_owned);
+  }
 }
 
 TEST(KfdVmTest, AdmitsSharedNopFormatsAndSelectsAnAvailableRing) {
