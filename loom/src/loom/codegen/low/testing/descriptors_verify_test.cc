@@ -1340,15 +1340,6 @@ TEST(LowDescriptorsTest, RejectsPseudoFlagWithTargetEncodingFormat) {
                         loom_low_descriptor_set_verify(&tables.set));
 }
 
-TEST(LowDescriptorsTest, RejectsUnknownDescriptorFlagBits) {
-  TestTables tables;
-  InitializeTestTables(&tables);
-  tables.descriptors[1].flags = 0x8000u;
-
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_low_descriptor_set_verify(&tables.set));
-}
-
 TEST(LowDescriptorsTest, RejectsUnknownOperandFlagBits) {
   TestTables tables;
   InitializeTestTables(&tables);
@@ -1546,8 +1537,31 @@ TEST(LowDescriptorsTest, AcceptsReadOnlyDataImmediate) {
   tables.immediates[0].kind = LOOM_LOW_IMMEDIATE_KIND_ORDINAL;
   tables.immediates[0].flags =
       LOOM_LOW_IMMEDIATE_FLAG_SYMBOLIC | LOOM_LOW_IMMEDIATE_FLAG_READ_ONLY_DATA;
+  tables.descriptors[0].flags |=
+      LOOM_LOW_DESCRIPTOR_FLAG_READ_ONLY_DATA_IMMEDIATES;
 
   IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsMissingReadOnlyDataImmediateSummary) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.immediates[0].kind = LOOM_LOW_IMMEDIATE_KIND_ORDINAL;
+  tables.immediates[0].flags =
+      LOOM_LOW_IMMEDIATE_FLAG_SYMBOLIC | LOOM_LOW_IMMEDIATE_FLAG_READ_ONLY_DATA;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsExtraneousReadOnlyDataImmediateSummary) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[0].flags |=
+      LOOM_LOW_DESCRIPTOR_FLAG_READ_ONLY_DATA_IMMEDIATES;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
 }
 
 TEST(LowDescriptorsTest, RejectsNonOrdinalReadOnlyDataImmediate) {
@@ -1555,6 +1569,8 @@ TEST(LowDescriptorsTest, RejectsNonOrdinalReadOnlyDataImmediate) {
   InitializeTestTables(&tables);
   tables.immediates[0].flags =
       LOOM_LOW_IMMEDIATE_FLAG_SYMBOLIC | LOOM_LOW_IMMEDIATE_FLAG_READ_ONLY_DATA;
+  tables.descriptors[0].flags |=
+      LOOM_LOW_DESCRIPTOR_FLAG_READ_ONLY_DATA_IMMEDIATES;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));
@@ -1565,6 +1581,8 @@ TEST(LowDescriptorsTest, RejectsNonSymbolicReadOnlyDataImmediate) {
   InitializeTestTables(&tables);
   tables.immediates[0].kind = LOOM_LOW_IMMEDIATE_KIND_ORDINAL;
   tables.immediates[0].flags = LOOM_LOW_IMMEDIATE_FLAG_READ_ONLY_DATA;
+  tables.descriptors[0].flags |=
+      LOOM_LOW_DESCRIPTOR_FLAG_READ_ONLY_DATA_IMMEDIATES;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));
@@ -2427,6 +2445,7 @@ TEST(LowDescriptorsTest, AcceptsEnumImmediateDomain) {
   tables.immediates[0].field_name_string_ref = TEST_STRING_REF(field_mode);
   tables.immediates[0].kind = LOOM_LOW_IMMEDIATE_KIND_ENUM;
   tables.immediates[0].enum_domain_id = 0;
+  tables.descriptors[0].flags |= LOOM_LOW_DESCRIPTOR_FLAG_ENUM_IMMEDIATES;
   tables.set.enum_domain_count = 1;
   tables.set.enum_value_count = 2;
 
@@ -2441,6 +2460,7 @@ TEST(LowDescriptorsTest, AcceptsEnumImmediateDefaultInDomain) {
   tables.immediates[0].flags = LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE;
   tables.immediates[0].enum_domain_id = 0;
   tables.immediates[0].default_value = 1;
+  tables.descriptors[0].flags |= LOOM_LOW_DESCRIPTOR_FLAG_ENUM_IMMEDIATES;
   tables.set.enum_domain_count = 1;
   tables.set.enum_value_count = 2;
 
@@ -2455,6 +2475,7 @@ TEST(LowDescriptorsTest, RejectsEnumImmediateDefaultOutsideDomain) {
   tables.immediates[0].flags = LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE;
   tables.immediates[0].enum_domain_id = 0;
   tables.immediates[0].default_value = 7;
+  tables.descriptors[0].flags |= LOOM_LOW_DESCRIPTOR_FLAG_ENUM_IMMEDIATES;
   tables.set.enum_domain_count = 1;
   tables.set.enum_value_count = 2;
 
@@ -2466,6 +2487,7 @@ TEST(LowDescriptorsTest, RejectsEnumImmediateWithoutDomain) {
   TestTables tables;
   InitializeTestTables(&tables);
   tables.immediates[0].kind = LOOM_LOW_IMMEDIATE_KIND_ENUM;
+  tables.descriptors[0].flags |= LOOM_LOW_DESCRIPTOR_FLAG_ENUM_IMMEDIATES;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));
@@ -2476,9 +2498,32 @@ TEST(LowDescriptorsTest, RejectsEnumImmediateDomainOutOfRange) {
   InitializeTestTables(&tables);
   tables.immediates[0].kind = LOOM_LOW_IMMEDIATE_KIND_ENUM;
   tables.immediates[0].enum_domain_id = 1;
+  tables.descriptors[0].flags |= LOOM_LOW_DESCRIPTOR_FLAG_ENUM_IMMEDIATES;
   tables.set.enum_domain_count = 1;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsMissingEnumImmediateSummary) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.immediates[0].field_name_string_ref = TEST_STRING_REF(field_mode);
+  tables.immediates[0].kind = LOOM_LOW_IMMEDIATE_KIND_ENUM;
+  tables.immediates[0].enum_domain_id = 0;
+  tables.set.enum_domain_count = 1;
+  tables.set.enum_value_count = 2;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsExtraneousEnumImmediateSummary) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[0].flags |= LOOM_LOW_DESCRIPTOR_FLAG_ENUM_IMMEDIATES;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));
 }
 

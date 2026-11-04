@@ -6,7 +6,7 @@
 
 #include "loom/codegen/low/packet.h"
 
-#include "iree/base/internal/math.h"
+#include "loom/codegen/low/immediates.h"
 #include "loom/ops/low/ops.h"
 
 bool loom_low_packet_try_op_attrs(const loom_op_t* op,
@@ -61,13 +61,9 @@ loom_named_attr_slice_t loom_low_packet_attrs(
 loom_attribute_t loom_low_packet_immediate_attr(
     const loom_low_packet_view_t* packet,
     const loom_low_immediate_t* immediate) {
-  const uint32_t presence = packet->node->immediate_presence;
-  const uint32_t field = immediate->attribute_mask;
-  return (presence & field)
-             ? loom_low_packet_attrs(packet)
-                   .entries[iree_math_count_ones_u32(presence & (field - 1))]
-                   .value
-             : loom_attr_absent();
+  return loom_low_bound_immediate_attr(loom_low_packet_attrs(packet),
+                                       packet->node->immediate_presence,
+                                       immediate);
 }
 
 uint32_t loom_low_packet_block_index(const loom_low_schedule_table_t* schedule,

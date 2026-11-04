@@ -16,6 +16,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/abi_layout.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/configuration_descriptors.h"
+#include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/configuration_report.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/configuration_storage.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_compile.h"
@@ -228,8 +229,9 @@ static iree_status_t loom_aie2p_configuration_compile_worker(
                                                  symbol.symbol_id);
     loom_low_function_requirements_t requirements = {0};
     IREE_RETURN_IF_ERROR(loom_low_function_requirements_build(
-        request->module, loom_low_func_def_body(function),
-        request->scratch_arena, &requirements));
+        request->module, loom_aie2p_core_descriptor_set(),
+        loom_low_func_def_body(function), request->scratch_arena,
+        &requirements));
     loom_aie2p_program_helper_t* direct_helpers = NULL;
     if (requirements.direct_callees.count != 0) {
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -257,7 +259,8 @@ static iree_status_t loom_aie2p_configuration_compile_worker(
       }
       loom_low_function_requirements_t helper_requirements = {0};
       IREE_RETURN_IF_ERROR(loom_low_function_requirements_build(
-          request->module, loom_low_func_def_body(helper_symbol->defining_op),
+          request->module, loom_aie2p_core_descriptor_set(),
+          loom_low_func_def_body(helper_symbol->defining_op),
           request->scratch_arena, &helper_requirements));
       if (helper_requirements.direct_callees.count != 0) {
         return iree_make_status(

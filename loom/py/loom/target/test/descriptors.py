@@ -413,6 +413,22 @@ _I32_VALUE_IMMEDIATE = Immediate(
     unsigned_max=(2**31) - 1,
 )
 
+_READ_ONLY_DATA_IMMEDIATE = Immediate(
+    "data",
+    ImmediateKind.ORDINAL,
+    flags=(ImmediateFlag.SYMBOLIC, ImmediateFlag.READ_ONLY_DATA),
+    bit_width=32,
+    unsigned_max=(2**32) - 1,
+)
+
+_UNRELATED_SYMBOL_IMMEDIATE = Immediate(
+    "z_other",
+    ImmediateKind.ORDINAL,
+    flags=(ImmediateFlag.SYMBOLIC,),
+    bit_width=32,
+    unsigned_max=(2**32) - 1,
+)
+
 _LANE_I32X4_IMMEDIATE = Immediate(
     "lane",
     ImmediateKind.UNSIGNED,
@@ -562,6 +578,31 @@ TEST_LOW_CONST_I32_DESCRIPTOR = Descriptor(
     immediates=(_I32_VALUE_IMMEDIATE,),
     constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
     asm_forms=_asm(results=("dst",), immediates=("i32_value",)),
+    schedule_class=_SCHEDULE_CONST,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    instruction_classes=(InstructionClass.OTHER,),
+)
+
+TEST_LOW_REQUIREMENTS_RODATA_OP_I32_DESCRIPTOR = Descriptor(
+    key="test.requirements.rodata.op.i32",
+    mnemonic="test.requirements.rodata.op.i32",
+    semantic_tag="test.requirements.rodata.op.i32",
+    operands=(_i32_result(),),
+    immediates=(_UNRELATED_SYMBOL_IMMEDIATE, _READ_ONLY_DATA_IMMEDIATE),
+    asm_forms=_asm(results=("dst",), immediates=("z_other", "data")),
+    schedule_class=_SCHEDULE_CONST,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    instruction_classes=(InstructionClass.OTHER,),
+)
+
+TEST_LOW_REQUIREMENTS_RODATA_CONST_I32_DESCRIPTOR = Descriptor(
+    key="test.requirements.rodata.const.i32",
+    mnemonic="test.requirements.rodata.const.i32",
+    semantic_tag="test.requirements.rodata.const.i32",
+    operands=(_i32_result(),),
+    op_kind=DescriptorOpKind.CONST,
+    immediates=(_UNRELATED_SYMBOL_IMMEDIATE, _READ_ONLY_DATA_IMMEDIATE),
+    asm_forms=_asm(results=("dst",), immediates=("z_other", "data")),
     schedule_class=_SCHEDULE_CONST,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
     instruction_classes=(InstructionClass.OTHER,),
@@ -2826,6 +2867,8 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
     ),
     descriptors=(
         TEST_LOW_CONST_I32_DESCRIPTOR,
+        TEST_LOW_REQUIREMENTS_RODATA_OP_I32_DESCRIPTOR,
+        TEST_LOW_REQUIREMENTS_RODATA_CONST_I32_DESCRIPTOR,
         TEST_LOW_CONST_ZERO_I32_DESCRIPTOR,
         TEST_LOW_CONST_PACKED_NARROW_DESCRIPTOR,
         TEST_LOW_CONST_EXPLICIT32_DESCRIPTOR,

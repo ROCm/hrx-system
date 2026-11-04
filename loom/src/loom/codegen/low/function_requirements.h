@@ -9,6 +9,7 @@
 #ifndef LOOM_CODEGEN_LOW_FUNCTION_REQUIREMENTS_H_
 #define LOOM_CODEGEN_LOW_FUNCTION_REQUIREMENTS_H_
 
+#include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/storage_layout.h"
 
 #ifdef __cplusplus
@@ -55,10 +56,11 @@ typedef struct loom_low_function_requirements_t {
   iree_host_size_t read_only_data_count;
   // Direct Low callees in first-call order, with duplicate calls collapsed.
   loom_symbol_ref_array_t direct_callees;
-  // Read-only data ordinal by module-local symbol ID, or UINT32_MAX.
-  const uint32_t* read_only_data_ordinal_by_symbol;
-  // Number of entries in read_only_data_ordinal_by_symbol.
-  iree_host_size_t symbol_count;
+  // Open-addressed read-only data ordinals plus one; zero marks an empty slot.
+  // Kept NULL for at most four records, which use a bounded linear lookup.
+  const uint16_t* read_only_data_ordinal_slots;
+  // Power-of-two number of entries in read_only_data_ordinal_slots.
+  iree_host_size_t read_only_data_ordinal_slot_count;
   // Number of operations in the immediate function body.
   iree_host_size_t node_count;
   // Number of Low returns that transfer control back to a caller.
@@ -73,11 +75,12 @@ uint32_t loom_low_function_requirements_read_only_data_ordinal(
     const loom_low_function_requirements_t* requirements,
     loom_symbol_ref_t symbol);
 
-// Inventories one verified Low function body without resolving a target or
-// acquiring the module's value-ordinal scratch map. The function's immediate
-// region owns its ABI imports and storage; nested regions are not entry scopes.
+// Inventories one verified Low function body using its resolved representation
+// contract. The function's immediate region owns its ABI imports and storage;
+// nested regions are not entry scopes.
 iree_status_t loom_low_function_requirements_build(
-    const loom_module_t* module, const loom_region_t* body,
+    const loom_module_t* module,
+    const loom_low_descriptor_set_t* descriptor_set, const loom_region_t* body,
     iree_arena_allocator_t* arena,
     loom_low_function_requirements_t* out_requirements);
 

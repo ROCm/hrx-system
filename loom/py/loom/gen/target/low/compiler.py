@@ -447,6 +447,10 @@ def derive_descriptor_projections(
         raise ValueError(f"descriptor '{descriptor.key}' authors the derived enum-immediates flag")
     if any(immediate.kind is ImmediateKind.ENUM for immediate in descriptor.immediates):
         derived_flags.append(DescriptorFlag.ENUM_IMMEDIATES)
+    if DescriptorFlag.READ_ONLY_DATA_IMMEDIATES in descriptor.flags:
+        raise ValueError(f"descriptor '{descriptor.key}' authors the derived read-only-data-immediates flag")
+    if any(ImmediateFlag.READ_ONLY_DATA in immediate.flags for immediate in descriptor.immediates):
+        derived_flags.append(DescriptorFlag.READ_ONLY_DATA_IMMEDIATES)
     if has_early_clobber_constraint and not has_early_clobber_flag:
         derived_flags.append(DescriptorFlag.EARLY_CLOBBER)
     if DescriptorFlag.LATE_READ in descriptor.flags:

@@ -82,7 +82,8 @@ iree_status_t loom_low_function_context_initialize(
       &out_context->storage_origins);
   if (iree_status_is_ok(status)) {
     status = loom_low_function_requirements_build(
-        module, out_context->body, arena, &out_context->requirements);
+        module, out_context->target.descriptor_set, out_context->body, arena,
+        &out_context->requirements);
   }
   if (!iree_status_is_ok(status)) {
     loom_low_function_context_deinitialize(out_context);
