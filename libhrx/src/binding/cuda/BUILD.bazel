@@ -5,9 +5,15 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
-load("//libhrx/build_tools/bazel:cc.bzl", "hrx_cc_shared_library")
+load(
+    "//libhrx/build_tools/bazel:cc.bzl",
+    "hrx_cc_shared_library",
+    "hrx_cc_test",
+)
 
 package(default_visibility = ["//visibility:public"])
+
+_LINUX_COMPATIBILITY = ["@platforms//os:linux"]
 
 hrx_cc_shared_library(
     name = "cuda",
@@ -27,6 +33,28 @@ hrx_cc_shared_library(
         "//libhrx/src/libhrx:hrx_static",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+    ],
+)
+
+hrx_cc_test(
+    name = "driver_query_test",
+    srcs = [
+        "driver.h",
+        "driver_query_test.cc",
+    ],
+    data = [":cuda"],
+    env = {
+        "HRX_TEST_LIBCUDA": "$(location :cuda)",
+    },
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        "//build_tools/bazel:dl",
+        "//libhrx/src/binding/common",
+        "//libhrx/src/libhrx:hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

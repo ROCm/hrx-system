@@ -618,16 +618,23 @@ TEST_F(CpuStreamingContextTest, ContextRecordWaitsForEveryCurrentStream) {
       iree_allocator_system(), &event));
   IREE_ASSERT_OK(iree_hal_streaming_context_record_event(context_, event));
 
-  int event_status = 0;
-  IREE_ASSERT_OK(iree_hal_streaming_event_query(event, &event_status));
-  EXPECT_EQ(1, event_status);
+  iree_hal_streaming_completion_state_t event_completion_state =
+      IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE;
+  IREE_ASSERT_OK(
+      iree_hal_streaming_event_query(event, &event_completion_state));
+  EXPECT_EQ(IREE_HAL_STREAMING_COMPLETION_STATE_PENDING,
+            event_completion_state);
   IREE_ASSERT_OK(SignalGate(first_gate, gate_value));
-  IREE_ASSERT_OK(iree_hal_streaming_event_query(event, &event_status));
-  EXPECT_EQ(1, event_status);
+  IREE_ASSERT_OK(
+      iree_hal_streaming_event_query(event, &event_completion_state));
+  EXPECT_EQ(IREE_HAL_STREAMING_COMPLETION_STATE_PENDING,
+            event_completion_state);
   IREE_ASSERT_OK(SignalGate(second_gate, gate_value));
   IREE_ASSERT_OK(iree_hal_streaming_context_synchronize(context_));
-  IREE_ASSERT_OK(iree_hal_streaming_event_query(event, &event_status));
-  EXPECT_EQ(0, event_status);
+  IREE_ASSERT_OK(
+      iree_hal_streaming_event_query(event, &event_completion_state));
+  EXPECT_EQ(IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE,
+            event_completion_state);
 
   // Repeat with the opposite release order. The two rounds prove that the
   // fan-in waits for each stream rather than accidentally naming only one.
@@ -638,8 +645,10 @@ TEST_F(CpuStreamingContextTest, ContextRecordWaitsForEveryCurrentStream) {
       iree_hal_streaming_stream_wait_semaphores(second_stream, second_wait));
   IREE_ASSERT_OK(iree_hal_streaming_context_record_event(context_, event));
   IREE_ASSERT_OK(SignalGate(second_gate, gate_value));
-  IREE_ASSERT_OK(iree_hal_streaming_event_query(event, &event_status));
-  EXPECT_EQ(1, event_status);
+  IREE_ASSERT_OK(
+      iree_hal_streaming_event_query(event, &event_completion_state));
+  EXPECT_EQ(IREE_HAL_STREAMING_COMPLETION_STATE_PENDING,
+            event_completion_state);
   IREE_ASSERT_OK(SignalGate(first_gate, gate_value));
   IREE_ASSERT_OK(iree_hal_streaming_event_synchronize(event));
 }
@@ -683,13 +692,18 @@ TEST_F(CpuStreamingContextTest, ContextWaitOrdersCurrentAndLaterStreams) {
   ASSERT_NE(later_stream->queue, source_stream->queue);
   ASSERT_NE(later_stream->queue, current_stream->queue);
 
-  int current_status = 0;
+  iree_hal_streaming_completion_state_t current_completion_state =
+      IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE;
+  IREE_ASSERT_OK(iree_hal_streaming_stream_query(current_stream,
+                                                 &current_completion_state));
+  EXPECT_EQ(IREE_HAL_STREAMING_COMPLETION_STATE_PENDING,
+            current_completion_state);
+  iree_hal_streaming_completion_state_t later_completion_state =
+      IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE;
   IREE_ASSERT_OK(
-      iree_hal_streaming_stream_query(current_stream, &current_status));
-  EXPECT_EQ(1, current_status);
-  int later_status = 0;
-  IREE_ASSERT_OK(iree_hal_streaming_stream_query(later_stream, &later_status));
-  EXPECT_EQ(1, later_status);
+      iree_hal_streaming_stream_query(later_stream, &later_completion_state));
+  EXPECT_EQ(IREE_HAL_STREAMING_COMPLETION_STATE_PENDING,
+            later_completion_state);
 
   IREE_ASSERT_OK(SignalGate(gate, gate_value));
   IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(current_stream));
@@ -738,13 +752,18 @@ TEST_F(CpuStreamingContextTest, CrossContextWaitOrdersCurrentAndLaterStreams) {
   IREE_ASSERT_OK(iree_hal_streaming_context_wait_event(target_context, event));
 
   IREE_ASSERT_OK(CreateNonBlockingStream(target_context, &later_stream));
-  int current_status = 0;
+  iree_hal_streaming_completion_state_t current_completion_state =
+      IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE;
+  IREE_ASSERT_OK(iree_hal_streaming_stream_query(current_stream,
+                                                 &current_completion_state));
+  EXPECT_EQ(IREE_HAL_STREAMING_COMPLETION_STATE_PENDING,
+            current_completion_state);
+  iree_hal_streaming_completion_state_t later_completion_state =
+      IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE;
   IREE_ASSERT_OK(
-      iree_hal_streaming_stream_query(current_stream, &current_status));
-  EXPECT_EQ(1, current_status);
-  int later_status = 0;
-  IREE_ASSERT_OK(iree_hal_streaming_stream_query(later_stream, &later_status));
-  EXPECT_EQ(1, later_status);
+      iree_hal_streaming_stream_query(later_stream, &later_completion_state));
+  EXPECT_EQ(IREE_HAL_STREAMING_COMPLETION_STATE_PENDING,
+            later_completion_state);
 
   IREE_ASSERT_OK(SignalGate(gate, gate_value));
   IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(current_stream));
@@ -960,9 +979,12 @@ TEST_F(CpuStreamingContextTest, AGraphLaunchOnAnUntimedDeviceGoesUntimed) {
   EXPECT_EQ(nullptr, context_->timestamp_pool.slabs)
       << "a launch on a device advertising no domain acquired tick slots";
   for (iree_host_size_t i = 0; i < kEventCount; ++i) {
-    int event_status = -1;
-    IREE_ASSERT_OK(iree_hal_streaming_event_query(events[i], &event_status));
-    EXPECT_EQ(0, event_status) << "event " << i;
+    iree_hal_streaming_completion_state_t completion_state =
+        IREE_HAL_STREAMING_COMPLETION_STATE_PENDING;
+    IREE_ASSERT_OK(
+        iree_hal_streaming_event_query(events[i], &completion_state));
+    EXPECT_EQ(IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE, completion_state)
+        << "event " << i;
   }
 
   for (iree_host_size_t i = kEventCount; i > 0; --i) {

@@ -7,6 +7,7 @@
 #ifndef LIBHRX_SRC_BINDING_COMMON_EVENT_H_
 #define LIBHRX_SRC_BINDING_COMMON_EVENT_H_
 
+#include "common/completion.h"
 #include "iree/base/api.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/api.h"
@@ -197,9 +198,12 @@ void iree_hal_streaming_event_release(iree_hal_streaming_event_t* event);
 // Releases the captured graph outside the event mutex.
 void iree_hal_streaming_event_clear_capture(iree_hal_streaming_event_t* event);
 
-// Queries event status without waiting.
-iree_status_t iree_hal_streaming_event_query(iree_hal_streaming_event_t* event,
-                                             int* status);
+// Queries whether the event's last submitted record has completed without
+// waiting. An event with no submitted record is complete. On failure
+// |out_completion_state| is unchanged.
+iree_status_t iree_hal_streaming_event_query(
+    iree_hal_streaming_event_t* event,
+    iree_hal_streaming_completion_state_t* out_completion_state);
 
 // Takes a reference to the point |event| was last recorded at, or a zeroed
 // point when no record has been submitted. Callers release the point with

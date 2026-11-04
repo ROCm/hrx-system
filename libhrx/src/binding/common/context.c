@@ -1495,10 +1495,13 @@ iree_status_t iree_hal_streaming_context_wait_blocking_streams(
 }
 
 iree_status_t iree_hal_streaming_context_query(
-    iree_hal_streaming_context_t* context, int* status) {
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_completion_state_t* out_completion_state) {
   IREE_ASSERT_ARGUMENT(context);
-  IREE_ASSERT_ARGUMENT(status);
-  *status = 0;
+  IREE_ASSERT_ARGUMENT(out_completion_state);
+
+  iree_hal_streaming_completion_state_t completion_state =
+      IREE_HAL_STREAMING_COMPLETION_STATE_COMPLETE;
 
   iree_hal_streaming_stream_t** streams_copy = NULL;
   iree_host_size_t count = 0;
@@ -1511,16 +1514,22 @@ iree_status_t iree_hal_streaming_context_query(
                          IREE_HAL_STREAMING_STREAM_FLAG_NON_BLOCKING)) {
       continue;
     }
-    int stream_status = 0;
-    query_status =
-        iree_hal_streaming_stream_query(streams_copy[i], &stream_status);
-    if (iree_status_is_ok(query_status) && stream_status != 0) {
-      *status = 1;
+    iree_hal_streaming_completion_state_t stream_completion_state =
+        IREE_HAL_STREAMING_COMPLETION_STATE_PENDING;
+    query_status = iree_hal_streaming_stream_query(streams_copy[i],
+                                                   &stream_completion_state);
+    if (iree_status_is_ok(query_status) &&
+        stream_completion_state ==
+            IREE_HAL_STREAMING_COMPLETION_STATE_PENDING) {
+      completion_state = IREE_HAL_STREAMING_COMPLETION_STATE_PENDING;
       break;
     }
   }
   iree_hal_streaming_context_release_stream_snapshot(context, streams_copy,
                                                      count);
+  if (iree_status_is_ok(query_status)) {
+    *out_completion_state = completion_state;
+  }
   return query_status;
 }
 

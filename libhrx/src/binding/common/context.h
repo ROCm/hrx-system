@@ -9,6 +9,7 @@
 
 #include "buffer_table.h"
 #include "common/capture_admission.h"
+#include "common/completion.h"
 #include "common/event.h"
 #include "common/event_timestamp_pool.h"
 #include "common/registry.h"
@@ -438,9 +439,11 @@ iree_status_t iree_hal_streaming_context_wait_blocking_streams(
     iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream);
 
 // Queries whether any stream participating in legacy default-stream ordering
-// still has queued work. Non-blocking streams are excluded.
+// still has queued work. Non-blocking streams are excluded. On failure
+// |out_completion_state| is unchanged.
 iree_status_t iree_hal_streaming_context_query(
-    iree_hal_streaming_context_t* context, int* status);
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_completion_state_t* out_completion_state);
 
 // Wait for all already-submitted work on all streams to complete.
 // Unlike context_synchronize, this does NOT flush in-progress recordings.

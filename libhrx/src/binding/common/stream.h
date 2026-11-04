@@ -7,6 +7,7 @@
 #ifndef IREE_EXPERIMENTAL_STREAMING_STREAM_H_
 #define IREE_EXPERIMENTAL_STREAMING_STREAM_H_
 
+#include "common/completion.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/api.h"
 
@@ -205,9 +206,13 @@ iree_status_t iree_hal_streaming_stream_begin_locked(
 iree_status_t iree_hal_streaming_stream_flush(
     iree_hal_streaming_stream_t* stream);
 
+// Queries whether every operation accepted by |stream| has completed, flushing
+// pending commands for submission without waiting for them. On failure
+// |out_completion_state| is unchanged.
 // Synchronization: none (queries stream status, non-blocking).
 iree_status_t iree_hal_streaming_stream_query(
-    iree_hal_streaming_stream_t* stream, int* status);
+    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_completion_state_t* out_completion_state);
 
 // Synchronization: stream (blocks until stream idle).
 iree_status_t iree_hal_streaming_stream_synchronize(
