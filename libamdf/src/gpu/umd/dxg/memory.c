@@ -18,6 +18,8 @@ typedef struct amdf_gpu_dxg_memory_plan_t {
   uint64_t byte_length;
   // Guaranteed base alignment across every exposed address space.
   uint64_t alignment;
+  // Offset of a registered logical range within its page-covered backing.
+  uint64_t host_byte_offset;
   // Private physical allocation domain.
   amdf_dxg_bridge_gpu_allocation_domain_t allocation_domain;
   // Private physical allocation behavior.
@@ -54,6 +56,8 @@ struct amdf_gpu_dxg_memory_t {
   amdf_platform_host_backing_t host_backing;
   // Host-visible allocation base, borrowed or owned according to storage kind.
   void* host_pointer;
+  // Offset of the registered host pointer within native page-covered backing.
+  uint64_t host_byte_offset;
   // Aggregate physical allocation length in bytes.
   uint64_t byte_length;
   // First usable byte of the GPU virtual-address reservation.
@@ -80,6 +84,8 @@ static void amdf_gpu_dxg_memory_plan(
   plan.achieved_flags = profile->guaranteed_flags | create_info->required_flags;
   plan.alignment = create_info->minimum_alignment;
   if ((profile->roles & AMDF_MEMORY_PROFILE_ROLE_REGISTER) != 0) {
+    plan.host_byte_offset = (uintptr_t)create_info->registered_host_pointer &
+                            (AMDF_GPU_DXG_PAGE_SIZE - 1);
     plan.allocation_domain =
         AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_REGISTERED_HOST;
     if (plan.alignment < AMDF_GPU_DXG_PAGE_SIZE) {
@@ -94,8 +100,9 @@ static void amdf_gpu_dxg_memory_plan(
     }
   }
 
-  plan.byte_length = (create_info->byte_length + AMDF_GPU_DXG_PAGE_SIZE - 1) &
-                     ~(AMDF_GPU_DXG_PAGE_SIZE - 1);
+  const uint64_t padding = plan.host_byte_offset + AMDF_GPU_DXG_PAGE_SIZE - 1;
+  plan.byte_length =
+      (create_info->byte_length + padding) & ~(AMDF_GPU_DXG_PAGE_SIZE - 1);
   if ((create_info->required_flags & AMDF_MEMORY_FLAG_HOST_COHERENT) != 0) {
     plan.allocation_flags |= AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_FINE_GRAIN;
   }
@@ -188,6 +195,12 @@ static amdf_status_t amdf_gpu_dxg_memory_reserve_device_address(
 
 static amdf_status_t amdf_gpu_dxg_memory_create_allocations(
     const amdf_gpu_dxg_memory_plan_t* plan, amdf_gpu_dxg_memory_t* memory) {
+  void* native_host_pointer = memory->host_pointer;
+  if (plan->allocation_domain ==
+      AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_REGISTERED_HOST) {
+    native_host_pointer =
+        (uint8_t*)native_host_pointer - memory->host_byte_offset;
+  }
   const amdf_dxg_bridge_gpu_allocation_create_info_t create_info = {
       .structure_size = sizeof(create_info),
       .device_handle = memory->device.device_handle,
@@ -201,7 +214,7 @@ static amdf_status_t amdf_gpu_dxg_memory_create_allocations(
       .host_pointer =
           plan->allocation_domain == AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL
               ? NULL
-              : memory->host_pointer,
+              : native_host_pointer,
   };
   uint32_t created_allocation_count = 0;
   const amdf_status_t status = amdf_gpu_dxg_adapter_create_allocations(
@@ -426,12 +439,15 @@ amdf_status_t amdf_gpu_dxg_memory_prepare(
   *memory_state = memory;
   memory->maximum_native_allocation_byte_length =
       maximum_native_allocation_byte_length;
+  memory->host_byte_offset = plan.host_byte_offset;
   memory->byte_length = plan.byte_length;
   memory->flags = plan.achieved_flags;
   memory->device_access = create_info->device_access;
   amdf_gpu_dxg_memory_capture_host_description(profile, memory);
 
-  if ((profile->roles & AMDF_MEMORY_PROFILE_ROLE_REGISTER) != 0) {
+  const bool registered =
+      (profile->roles & AMDF_MEMORY_PROFILE_ROLE_REGISTER) != 0;
+  if (registered) {
     memory->host_pointer = create_info->registered_host_pointer;
   } else if (profile->memory_class == AMDF_MEMORY_CLASS_SYSTEM) {
     status = amdf_gpu_dxg_memory_allocate_host_storage(&plan, memory);
@@ -452,17 +468,22 @@ amdf_status_t amdf_gpu_dxg_memory_prepare(
   }
 
   if (amdf_status_is_ok(status)) {
+    const uint64_t alignment =
+        registered && plan.host_byte_offset != 0
+            ? plan.host_byte_offset & (UINT64_C(0) - plan.host_byte_offset)
+            : plan.alignment;
     amdf_gpu_umd_memory_result_t result = {
         .flags = plan.achieved_flags,
-        .byte_length = plan.byte_length,
-        .alignment = plan.alignment,
+        .source_byte_offset = registered ? plan.host_byte_offset : 0,
+        .byte_length = registered ? create_info->byte_length : plan.byte_length,
+        .alignment = alignment,
         .native_allocation_byte_length = plan.byte_length,
         .native_allocation_granularity = AMDF_GPU_DXG_PAGE_SIZE,
-        .device_address = memory->device_address,
+        .device_address = memory->device_address + plan.host_byte_offset,
     };
-    if ((profile->roles & AMDF_MEMORY_PROFILE_ROLE_REGISTER) != 0) {
+    if (registered) {
       result.physical_backing_id.words[0] =
-          (uint64_t)(uintptr_t)memory->host_pointer;
+          (uint64_t)((uintptr_t)memory->host_pointer - plan.host_byte_offset);
       result.physical_backing_id.words[1] = memory->byte_length;
     } else {
       result.physical_backing_id.words[0] =
@@ -644,7 +665,8 @@ amdf_status_t amdf_gpu_dxg_memory_cache_control(
     return status;
   }
 
-  uint64_t allocation_byte_offset = memory_byte_offset;
+  uint64_t allocation_byte_offset =
+      memory->host_byte_offset + memory_byte_offset;
   uint64_t remaining_byte_length = byte_length;
   while (remaining_byte_length != 0) {
     const amdf_gpu_dxg_memory_span_t span =

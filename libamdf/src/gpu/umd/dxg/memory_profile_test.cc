@@ -82,6 +82,21 @@ TEST(DxgMemoryProfileTest, ReportsExactAllocationFlagSupport) {
                                          AMDF_MEMORY_FLAG_MAPPING_SOURCE);
 }
 
+TEST(DxgMemoryProfileTest, ReportsSubpageRegistrationGeometry) {
+  const amdf_gpu_dxg_memory_capabilities_t capabilities = {
+      .virtual_address_bit_count = 48,
+  };
+  amdf_memory_native_profile_t profile = {};
+
+  ASSERT_EQ(amdf_gpu_dxg_query_memory_profile(&capabilities, 2, &profile),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(profile.registration.byte_length_granularity, 1u);
+  EXPECT_EQ(profile.registration.registered_host_pointer_alignment, 1u);
+  EXPECT_EQ(profile.registration.minimum_alignment, 1u);
+  EXPECT_EQ(profile.registration.native_byte_length_granularity,
+            AMDF_GPU_DXG_PAGE_SIZE);
+}
+
 TEST(DxgMemoryProfileTest, ExternalResourceProfileRequiresHostSupport) {
   amdf_gpu_dxg_memory_capabilities_t capabilities = {
       .virtual_address_bit_count = 48,

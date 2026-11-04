@@ -6,6 +6,7 @@
 
 #include "libamdf/src/gpu/umd/dxg/memory.h"
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -44,6 +45,7 @@ struct Invalidation {
 struct FakeMemoryState {
   uint32_t allocation_count = 1;
   uint64_t maximum_allocation_byte_length = 65536;
+  uint64_t expected_byte_length = 65536;
   uint64_t next_paging_fence = 1;
   uint32_t failing_map_ordinal = UINT32_MAX;
   amdf_status_t destroy_status = AMDF_STATUS_OK;
@@ -52,6 +54,7 @@ struct FakeMemoryState {
   uint32_t destroy_count = 0;
   uint64_t reserved_byte_length = 0;
   void* host_pointer = nullptr;
+  void* expected_host_pointer = nullptr;
   amdf_dxg_bridge_gpu_allocation_domain_t allocation_domain =
       AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL;
   // Exact private allocation-policy bits expected at the bridge boundary.
@@ -71,7 +74,7 @@ FakeQueryAllocationLayout(amdf_dxg_bridge_gpu_adapter_t* adapter,
                           uint64_t* out_maximum_allocation_byte_length) {
   auto* state = reinterpret_cast<FakeMemoryState*>(adapter);
   state->operations.push_back(Operation::kQueryLayout);
-  EXPECT_EQ(byte_length, 65536u);
+  EXPECT_EQ(byte_length, state->expected_byte_length);
   *out_allocation_count = state->allocation_count;
   *out_maximum_allocation_byte_length = state->maximum_allocation_byte_length;
   return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
@@ -88,13 +91,16 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeCreateAllocations(
   EXPECT_EQ(create_info->device_handle, 0x10u);
   EXPECT_EQ(create_info->domain, state->allocation_domain);
   EXPECT_EQ(create_info->flags, state->allocation_flags);
-  EXPECT_EQ(create_info->byte_length, 65536u);
+  EXPECT_EQ(create_info->byte_length, state->expected_byte_length);
   if (state->allocation_domain == AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL) {
     EXPECT_EQ(create_info->placement_device_address, 0x200000u);
     EXPECT_EQ(create_info->host_pointer, nullptr);
   } else {
     EXPECT_EQ(create_info->placement_device_address, 0u);
     EXPECT_NE(create_info->host_pointer, nullptr);
+    if (state->expected_host_pointer != nullptr) {
+      EXPECT_EQ(create_info->host_pointer, state->expected_host_pointer);
+    }
     state->host_pointer = create_info->host_pointer;
   }
   EXPECT_EQ(allocation_handle_capacity, state->allocation_count);
@@ -394,6 +400,71 @@ TEST_F(DxgMemoryTest, AlignsSystemStorageAndPublishesEachNativeSpan) {
   EXPECT_EQ(state_.invalidations,
             (std::vector<Invalidation>{{0x20, 32760, 8}, {0x21, 0, 8}}));
   EXPECT_EQ(amdf_gpu_dxg_memory_destroy(memory), AMDF_STATUS_OK);
+}
+
+TEST_F(DxgMemoryTest, RegistersExactSubpageRangesOverSharedBacking) {
+  alignas(AMDF_GPU_DXG_PAGE_SIZE)
+      std::array<uint8_t, AMDF_GPU_DXG_PAGE_SIZE * 6>
+          caller_pages = {};
+  constexpr uint64_t kLogicalByteLength = AMDF_GPU_DXG_PAGE_SIZE * 4 + 17;
+  constexpr std::array<uint64_t, 2> kHostByteOffsets = {3, 19};
+  constexpr uint64_t kNativeByteLength = AMDF_GPU_DXG_PAGE_SIZE * 5;
+  state_.allocation_domain =
+      AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_REGISTERED_HOST;
+  state_.expected_byte_length = kNativeByteLength;
+  state_.maximum_allocation_byte_length = kNativeByteLength;
+  state_.expected_host_pointer = caller_pages.data();
+  create_info_.required_flags =
+      AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_DEVICE_ADDRESS;
+  create_info_.byte_length = kLogicalByteLength;
+  create_info_.minimum_alignment = 1;
+  const amdf_memory_native_profile_t profile = Profile(2);
+  amdf_physical_memory_id_t first_backing_id = {};
+
+  for (uint64_t host_byte_offset : kHostByteOffsets) {
+    create_info_.registered_host_pointer =
+        caller_pages.data() + host_byte_offset;
+    amdf_gpu_dxg_memory_t* memory = nullptr;
+    amdf_gpu_umd_memory_result_t result = {};
+    ASSERT_EQ(amdf_gpu_dxg_memory_prepare(&device_, &profile, &create_info_,
+                                          &memory, &result),
+              AMDF_STATUS_OK);
+    ASSERT_NE(memory, nullptr);
+    EXPECT_EQ(result.source_byte_offset, host_byte_offset);
+    EXPECT_EQ(result.byte_length, kLogicalByteLength);
+    EXPECT_EQ(result.alignment, 1u);
+    EXPECT_EQ(result.native_allocation_byte_length, kNativeByteLength);
+    EXPECT_EQ(result.device_address, 0x200000u + host_byte_offset);
+    EXPECT_EQ(result.physical_backing_id.words[0],
+              reinterpret_cast<uintptr_t>(caller_pages.data()));
+    EXPECT_EQ(result.physical_backing_id.words[1], kNativeByteLength);
+    if (first_backing_id.words[0] == 0) {
+      first_backing_id = result.physical_backing_id;
+    } else {
+      EXPECT_TRUE(amdf_physical_memory_id_is_equal(
+          &first_backing_id, &result.physical_backing_id));
+    }
+
+    amdf_gpu_dxg_memory_t* mapping = nullptr;
+    amdf_gpu_umd_host_mapping_result_t mapping_result = {};
+    const amdf_memory_map_info_t map_info = {
+        .byte_length = kLogicalByteLength,
+    };
+    ASSERT_EQ(amdf_gpu_dxg_memory_map(memory, &profile.host_mapping, &map_info,
+                                      &mapping, &mapping_result),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(mapping_result.pointer, create_info_.registered_host_pointer);
+
+    state_.invalidations.clear();
+    ASSERT_EQ(
+        amdf_gpu_dxg_memory_cache_control(
+            mapping, AMDF_HOST_CACHE_OPERATION_FLUSH, 0, kLogicalByteLength),
+        AMDF_STATUS_OK);
+    EXPECT_EQ(state_.invalidations,
+              (std::vector<Invalidation>{
+                  {0x20, host_byte_offset, kLogicalByteLength}}));
+    EXPECT_EQ(amdf_gpu_dxg_memory_destroy(memory), AMDF_STATUS_OK);
+  }
 }
 
 TEST_F(DxgMemoryTest, PreservesIndependentNativeAllocationPolicies) {
