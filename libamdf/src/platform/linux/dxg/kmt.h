@@ -16,6 +16,10 @@
 #pragma clang diagnostic ignored "-Wunknown-pragmas"
 #endif
 #include <basetsd.h>
+#if !defined(__cplusplus)
+#undef C_ASSERT
+#define C_ASSERT(expression) _Static_assert((expression), #expression)
+#endif
 #include <dxg/d3dkmthk.h>
 #if defined(__clang__)
 #pragma clang diagnostic pop

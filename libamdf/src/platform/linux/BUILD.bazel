@@ -29,7 +29,10 @@ amdf_cc_library(
     name = "host_export",
     srcs = ["host_export.c"],
     target_compatible_with = ["@platforms//os:linux"],
-    visibility = ["//libamdf/src/platform:__pkg__"],
+    visibility = [
+        "//libamdf/src/platform:__pkg__",
+        "//libamdf/src/platform/linux:__subpackages__",
+    ],
     deps = [
         ":dma_buf",
         ":file",
