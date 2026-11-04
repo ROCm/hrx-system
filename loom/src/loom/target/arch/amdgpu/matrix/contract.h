@@ -10,7 +10,7 @@
 // from a higher-level tile.contract after shapes, encodings, layouts, and value
 // facts are refined enough to make the choice structural. The descriptors are
 // intentionally data-only: lowering code can query exact shape/type/feature
-// requirements without hard-coding AMDGPU intrinsic names throughout generic
+// requirements without hard-coding target-native details throughout generic
 // tile/vector passes.
 
 #ifndef LOOM_TARGET_ARCH_AMDGPU_MATRIX_CONTRACT_H_
@@ -75,6 +75,10 @@ iree_host_size_t loom_amdgpu_matrix_contract_descriptor_count(void);
 // range.
 const loom_amdgpu_matrix_contract_descriptor_t*
 loom_amdgpu_matrix_contract_descriptor_at(iree_host_size_t index);
+
+// Returns the stable diagnostic name for a built-in descriptor.
+iree_string_view_t loom_amdgpu_matrix_contract_descriptor_name(
+    const loom_amdgpu_matrix_contract_descriptor_t* descriptor);
 
 // Returns an exact result representation by ID, or NULL for NONE or an ID
 // outside the generated catalog.

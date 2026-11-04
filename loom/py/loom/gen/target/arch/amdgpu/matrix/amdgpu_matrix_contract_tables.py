@@ -31,6 +31,11 @@ from loom.gen.support.native_layout import (  # noqa: E402
     NativeContractionFactTable,
     NativeTransitionFactTable,
 )
+from loom.gen.support.string_pool import (  # noqa: E402
+    CStringPool,
+    emit_c_string_pool,
+    layout_c_string_pool,
+)
 from loom.target.arch.amdgpu.descriptor_overlay import (  # noqa: E402
     AmdgpuDescriptorOverlay,
 )
@@ -314,10 +319,6 @@ def _c_selector_bitset(
 
 def _contract_semantic_tag(contract: AmdgpuMatrixContract) -> str:
     return contract.semantic_tag or f"matrix.{contract.name}"
-
-
-def _contract_intrinsic_name(contract: AmdgpuMatrixContract) -> str:
-    return contract.intrinsic_name or f"llvm.amdgcn.{contract.name}"
 
 
 def _matrix_descriptor_catalog(
@@ -870,6 +871,7 @@ def _contract_initializer(
     contract: AmdgpuMatrixContract,
     realization: MatrixContractRealizationChoices,
     *,
+    name_string_ref: str,
     keys_by_semantic_tag: Mapping[str, tuple[str, ...]],
     descriptor_shapes_by_key: Mapping[str, tuple[_MatrixDescriptorShape, ...]],
     descriptor_immediates_by_key: Mapping[str, tuple[Immediate, ...]],
@@ -934,14 +936,13 @@ def _contract_initializer(
     return "\n".join(
         [
             "{",
-            f'    .name = IREE_SVL("{contract.name}"),',
+            f"    .name_string_ref = {name_string_ref},",
             f"    .low_descriptor_ref = {low_descriptor_ref},",
             "    .realization = {",
             f"        .operand_exchanged_contract_ordinal = {alternative_contract_value},",
             f"        .canonical_result_representation_id = UINT8_C({realization.canonical_result_representation_id}),",
             f"        .operand_exchanged_result_representation_id = UINT8_C({realization.operand_exchanged_result_representation_id}),",
             "    },",
-            f'    .llvm_intrinsic_name = IREE_SVL("{_contract_intrinsic_name(contract)}"),',
             f"    .family = {family},",
             f"    .required_feature_bits = {_c_bitset(contract.features, _FEATURE_C_NAMES, field_name='feature', contract=contract)},",
             f"    .wave_size_bits = {wave_size},",
@@ -1040,6 +1041,7 @@ def _emit_header() -> str:
         "extern const loom_amdgpu_matrix_contract_descriptor_t",
         "    kLoomAmdgpuMatrixContractDescriptors[];",
         "extern const iree_host_size_t kLoomAmdgpuMatrixContractDescriptorCount;",
+        "extern const loom_string_pool_t kLoomAmdgpuMatrixContractStringPool;",
         f"#define LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_COUNT {result_representation_count}",
         "extern const loom_amdgpu_matrix_result_representation_t",
         "    kLoomAmdgpuMatrixResultRepresentations[",
@@ -1436,6 +1438,9 @@ def _emit_source(*, public_header: str) -> str:
     _validate_matrix_profile_descriptor_sets(global_descriptor_keys=descriptor_keys)
     coordinate_plans, role_plan_indices = _fragment_coordinate_plan_catalog()
     fragment_role_rows, role_indices = _fragment_role_catalog(role_plan_indices)
+    contract_name_pool = CStringPool("LOOM_AMDGPU_MATRIX_CONTRACT")
+    contract_name_labels = tuple(contract_name_pool.intern(f"contract_{index}", contract.name) for index, contract in enumerate(AMDGPU_MATRIX_CONTRACTS))
+    contract_name_layout = layout_c_string_pool(contract_name_pool)
     native_contractions = NativeContractionFactTable("kLoomAmdgpuNativeContractionFacts")
     fragment_layout_lines: list[str] = []
     for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS:
@@ -1452,6 +1457,14 @@ def _emit_source(*, public_header: str) -> str:
         f'#include "{public_header}"',
         "",
         *_matrix_feature_profile_table_lines(),
+        *emit_c_string_pool(
+            contract_name_pool,
+            "kLoomAmdgpuMatrixContractStringData",
+            layout=contract_name_layout,
+        ),
+        "const loom_string_pool_t kLoomAmdgpuMatrixContractStringPool =",
+        f"    {contract_name_layout.initializer('kLoomAmdgpuMatrixContractStringData')};",
+        "",
         *_fragment_coordinate_plan_table_lines(coordinate_plans),
         *_fragment_role_table_lines(fragment_role_rows),
         *native_contractions.definition_lines(),
@@ -1472,13 +1485,15 @@ def _emit_source(*, public_header: str) -> str:
         _contract_initializer(
             contract,
             realization,
+            name_string_ref=contract_name_pool.ref(name_label),
             keys_by_semantic_tag=keys_by_semantic_tag,
             descriptor_shapes_by_key=descriptor_shapes_by_key,
             descriptor_immediates_by_key=descriptor_immediates_by_key,
         )
-        for contract, realization in zip(
+        for contract, realization, name_label in zip(
             AMDGPU_MATRIX_CONTRACTS,
             realization_catalog.contract_choices,
+            contract_name_labels,
             strict=True,
         )
     )
@@ -1491,7 +1506,7 @@ def _emit_source(*, public_header: str) -> str:
             "",
             "static_assert(sizeof(loom_amdgpu_matrix_contract_realization_choices_t) == 4,",
             '              "matrix contract realization row must remain compact");',
-            "static_assert(sizeof(loom_amdgpu_matrix_contract_descriptor_t) <= 120,",
+            "static_assert(sizeof(loom_amdgpu_matrix_contract_descriptor_t) <= 88,",
             '              "matrix contract descriptor rows must remain compact");',
             "static_assert(LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_COUNT <= UINT8_MAX + 1u,",
             '              "matrix fragment layout kinds must fit uint8");',

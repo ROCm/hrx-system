@@ -220,8 +220,9 @@ TEST(AmdgpuFragmentMemoryPacketTest,
        i < loom_amdgpu_matrix_contract_descriptor_count(); ++i) {
     const loom_amdgpu_matrix_contract_descriptor_t* candidate =
         loom_amdgpu_matrix_contract_descriptor_at(i);
-    if (iree_string_view_equal(candidate->name,
-                               IREE_SV("mfma.f32.16x16x16.bf16.1k"))) {
+    if (iree_string_view_equal(
+            loom_amdgpu_matrix_contract_descriptor_name(candidate),
+            IREE_SV("mfma.f32.16x16x16.bf16.1k"))) {
       contract = candidate;
       break;
     }

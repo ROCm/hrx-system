@@ -68,7 +68,6 @@ class AmdgpuMatrixContract:
     scale_kind: str
     block_count: int = 1
     wave_size: str = "any"
-    intrinsic_name: str | None = None
     semantic_tag: str | None = None
     fragment_layout: str | None = None
     source_requirements: tuple[str, ...] = ()
@@ -290,7 +289,6 @@ def _gfx12_wmma_wave64_contracts() -> tuple[AmdgpuMatrixContract, ...]:
             result=payload(*result_payload),
             scale_kind="none",
             wave_size="64",
-            intrinsic_name=f"llvm.amdgcn.{name.removesuffix('.gfx12')}",
             semantic_tag=f"matrix.{name.removesuffix('.gfx12')}",
             fragment_layout=fragment_layout,
         )
@@ -404,7 +402,6 @@ def _gfx12_swmmac_wave64_contracts() -> tuple[AmdgpuMatrixContract, ...]:
             result=payload(*result_payload),
             scale_kind="none",
             wave_size="64",
-            intrinsic_name=f"llvm.amdgcn.{name}",
             semantic_tag=f"matrix.{name}",
             fragment_layout=fragment_layout,
         )
@@ -2028,7 +2025,6 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         scale_kind="none",
         wave_size="32",
         semantic_tag="matrix.wmma.f32.16x16x16.bf16",
-        intrinsic_name="llvm.amdgcn.wmma.f32.16x16x16.bf16",
         fragment_layout="rdna4_wmma_f32_16x16x16_bf16",
     ),
     AmdgpuMatrixContract(
@@ -2044,7 +2040,6 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         scale_kind="none",
         wave_size="32",
         semantic_tag="matrix.wmma.f16.16x16x16.f16",
-        intrinsic_name="llvm.amdgcn.wmma.f16.16x16x16.f16",
         fragment_layout="rdna4_wmma_f16_16x16x16_f16",
     ),
     AmdgpuMatrixContract(
@@ -2060,7 +2055,6 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         scale_kind="none",
         wave_size="32",
         semantic_tag="matrix.wmma.bf16.16x16x16.bf16",
-        intrinsic_name="llvm.amdgcn.wmma.bf16.16x16x16.bf16",
         fragment_layout="rdna4_wmma_bf16_16x16x16_bf16",
     ),
     AmdgpuMatrixContract(
@@ -2076,7 +2070,6 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         scale_kind="none",
         wave_size="32",
         semantic_tag="matrix.wmma.f32.16x16x16.f16",
-        intrinsic_name="llvm.amdgcn.wmma.f32.16x16x16.f16",
         fragment_layout="rdna4_wmma_f32_16x16x16_f16",
     ),
     AmdgpuMatrixContract(
@@ -2092,7 +2085,6 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         scale_kind="none",
         wave_size="32",
         semantic_tag="matrix.wmma.i32.16x16x16.iu8",
-        intrinsic_name="llvm.amdgcn.wmma.i32.16x16x16.iu8",
         fragment_layout="rdna4_wmma_i32_16x16x16_iu8",
     ),
     AmdgpuMatrixContract(
@@ -2108,7 +2100,6 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         scale_kind="none",
         wave_size="32",
         semantic_tag="matrix.wmma.i32.16x16x16.iu4",
-        intrinsic_name="llvm.amdgcn.wmma.i32.16x16x16.iu4",
         fragment_layout="rdna4_wmma_i32_16x16x16_iu4",
     ),
     AmdgpuMatrixContract(
@@ -2138,7 +2129,6 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         scale_kind="none",
         wave_size="64",
         semantic_tag="matrix.wmma.f32.16x16x16.bf16",
-        intrinsic_name="llvm.amdgcn.wmma.f32.16x16x16.bf16",
         fragment_layout="rdna3_wmmar3_f32_16x16x16_bf16_w64",
     ),
     AmdgpuMatrixContract(
@@ -2168,7 +2158,6 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         scale_kind="none",
         wave_size="64",
         semantic_tag="matrix.wmma.f16.16x16x16.f16",
-        intrinsic_name="llvm.amdgcn.wmma.f16.16x16x16.f16",
         fragment_layout="rdna3_wmmar3_f16_16x16x16_f16_w64",
     ),
     AmdgpuMatrixContract(
@@ -2198,7 +2187,6 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         scale_kind="none",
         wave_size="64",
         semantic_tag="matrix.wmma.bf16.16x16x16.bf16",
-        intrinsic_name="llvm.amdgcn.wmma.bf16.16x16x16.bf16",
         fragment_layout="rdna3_wmmar3_bf16_16x16x16_bf16_w64",
     ),
     AmdgpuMatrixContract(
@@ -2284,7 +2272,6 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         scale_kind="none",
         wave_size="64",
         semantic_tag="matrix.wmma.f32.16x16x16.f16",
-        intrinsic_name="llvm.amdgcn.wmma.f32.16x16x16.f16",
         fragment_layout="rdna3_wmmar3_f32_16x16x16_f16_w64",
     ),
     AmdgpuMatrixContract(
@@ -2314,7 +2301,6 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         scale_kind="none",
         wave_size="64",
         semantic_tag="matrix.wmma.i32.16x16x16.iu8",
-        intrinsic_name="llvm.amdgcn.wmma.i32.16x16x16.iu8",
         fragment_layout="rdna3_wmmar3_i32_16x16x16_iu8_w64",
     ),
     AmdgpuMatrixContract(
@@ -2344,7 +2330,6 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         scale_kind="none",
         wave_size="64",
         semantic_tag="matrix.wmma.i32.16x16x16.iu4",
-        intrinsic_name="llvm.amdgcn.wmma.i32.16x16x16.iu4",
         fragment_layout="rdna3_wmmar3_i32_16x16x16_iu4_w64",
     ),
     AmdgpuMatrixContract(

@@ -242,6 +242,12 @@ loom_amdgpu_matrix_contract_descriptor_at(iree_host_size_t index) {
   return &kLoomAmdgpuMatrixContractDescriptors[index];
 }
 
+iree_string_view_t loom_amdgpu_matrix_contract_descriptor_name(
+    const loom_amdgpu_matrix_contract_descriptor_t* descriptor) {
+  return loom_string_pool_get(&kLoomAmdgpuMatrixContractStringPool,
+                              descriptor->name_string_ref);
+}
+
 const loom_amdgpu_matrix_result_representation_t*
 loom_amdgpu_matrix_result_representation_at(
     loom_amdgpu_matrix_result_representation_id_t representation_id) {

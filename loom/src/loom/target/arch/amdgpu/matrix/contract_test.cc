@@ -19,6 +19,11 @@ std::string ToString(iree_string_view_t value) {
   return std::string(value.data, value.size);
 }
 
+iree_string_view_t DescriptorName(
+    const loom_amdgpu_matrix_contract_descriptor_t* descriptor) {
+  return loom_amdgpu_matrix_contract_descriptor_name(descriptor);
+}
+
 const loom_amdgpu_matrix_contract_descriptor_t* FindDescriptor(
     const char* name) {
   iree_string_view_t expected_name = iree_make_cstring_view(name);
@@ -26,7 +31,7 @@ const loom_amdgpu_matrix_contract_descriptor_t* FindDescriptor(
   for (iree_host_size_t i = 0; i < count; ++i) {
     const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
         loom_amdgpu_matrix_contract_descriptor_at(i);
-    if (iree_string_view_equal(descriptor->name, expected_name)) {
+    if (iree_string_view_equal(DescriptorName(descriptor), expected_name)) {
       return descriptor;
     }
   }
@@ -39,7 +44,7 @@ iree_host_size_t FindDescriptorOrdinal(const char* name) {
   for (iree_host_size_t i = 0; i < count; ++i) {
     const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
         loom_amdgpu_matrix_contract_descriptor_at(i);
-    if (iree_string_view_equal(descriptor->name, expected_name)) {
+    if (iree_string_view_equal(DescriptorName(descriptor), expected_name)) {
       return i;
     }
   }
@@ -91,14 +96,14 @@ TEST(MatrixContractTest, DescriptorNamesAreUnique) {
     const loom_amdgpu_matrix_contract_descriptor_t* lhs =
         loom_amdgpu_matrix_contract_descriptor_at(i);
     ASSERT_NE(lhs, nullptr);
-    EXPECT_FALSE(iree_string_view_is_empty(lhs->name));
-    EXPECT_FALSE(iree_string_view_is_empty(lhs->llvm_intrinsic_name));
+    const iree_string_view_t lhs_name = DescriptorName(lhs);
+    EXPECT_FALSE(iree_string_view_is_empty(lhs_name));
     for (iree_host_size_t j = i + 1; j < count; ++j) {
       const loom_amdgpu_matrix_contract_descriptor_t* rhs =
           loom_amdgpu_matrix_contract_descriptor_at(j);
       ASSERT_NE(rhs, nullptr);
-      EXPECT_FALSE(iree_string_view_equal(lhs->name, rhs->name))
-          << ToString(lhs->name);
+      EXPECT_FALSE(iree_string_view_equal(lhs_name, DescriptorName(rhs)))
+          << ToString(lhs_name);
     }
   }
   EXPECT_EQ(loom_amdgpu_matrix_contract_descriptor_at(count), nullptr);
@@ -229,7 +234,7 @@ TEST(MatrixContractTest, MatcherDistinguishesBlockedMfmaShape) {
   const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
       loom_amdgpu_matrix_contract_select(&request, nullptr, &diagnostic);
   ASSERT_NE(descriptor, nullptr);
-  EXPECT_EQ(ToString(descriptor->name), "mfma.f32.4x4x2.bf16");
+  EXPECT_EQ(ToString(DescriptorName(descriptor)), "mfma.f32.4x4x2.bf16");
   EXPECT_EQ(descriptor->tile_shape.block_count, 16);
   EXPECT_EQ(diagnostic.rejection_bits,
             LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_NONE);
@@ -319,7 +324,7 @@ TEST(MatrixContractTest, MatcherSelectsDefinedGfx1250SparseBf16Semantics) {
   const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
       loom_amdgpu_matrix_contract_select(&request, nullptr, &diagnostic);
   ASSERT_NE(descriptor, nullptr);
-  EXPECT_EQ(ToString(descriptor->name), "swmmac.f32.16x16x64.bf16");
+  EXPECT_EQ(ToString(DescriptorName(descriptor)), "swmmac.f32.16x16x64.bf16");
   EXPECT_EQ(descriptor->low_descriptor_ref,
             LOOM_AMDGPU_DESCRIPTOR_REF_V_SWMMAC_F32_16X16X64_BF16);
   EXPECT_EQ(diagnostic.rejection_bits,
