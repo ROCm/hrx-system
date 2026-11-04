@@ -140,7 +140,7 @@ class SingleOpContract {
         .dialect_base_id = OpKind >> 8,
         .dialect_count = 1,
         .dialects = &dialect_,
-        .case_count = case_count,
+        .case_index_bound = case_count,
         .cases = cases,
         .binding_count = binding_count,
         .source_graph_root_op_kind_count = source_graph_root_op_kind_count,

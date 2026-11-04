@@ -28,7 +28,11 @@ from loom.gen.support.string_pool import CStringBank  # noqa: E402
 from loom.gen.target.contracts.contract_fragments import (  # noqa: E402
     generate_contract_fragment_from_lower_rules,
 )
-from loom.gen.target.contracts.contract_index import generate_contract_index  # noqa: E402
+from loom.gen.target.contracts.contract_index import (  # noqa: E402
+    ContractCasePool,
+    generate_contract_case_pool,
+    generate_contract_index,
+)
 from loom.gen.target.contracts.lower_rules import (  # noqa: E402
     diagnostic_descriptor_names,
     generate_lower_rule_set_from_compiled,
@@ -165,15 +169,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             (lower_rule_source, generated_lower_rules.source),
         ):
             write_text_file(path, contents)
-    index_sources = []
+    index_specs = []
     initializer_names = set()
-    selection_blob_symbols = {}
+    family_binding_indices = {}
     for specification in args.contract_index:
         name, separator, keys = specification.partition(":")
         if not separator or not keys or name in initializer_names:
             parser.error(f"invalid or duplicate contract index: {specification}")
         initializer_names.add(name)
         fragments = []
+        binding_indices = []
         for key in keys.split(","):
             registration = resolve_contract_fragment(key)
             if registration.key not in compiled_fragments:
@@ -192,9 +197,27 @@ def main(argv: Sequence[str] | None = None) -> int:
                     None,
                 )
             fragments.append(compiled_fragments[registration.key])
-        index_sources.append(generate_contract_index(name, fragments, selection_blob_symbols))
+            if registration.key not in family_binding_indices:
+                family_binding_indices[registration.key] = len(family_binding_indices)
+            binding_indices.append(family_binding_indices[registration.key])
+        index_specs.append((name, fragments, binding_indices))
     if args.index_output:
-        write_text_file(args.index_output, "\n".join(index_sources))
+        case_pool = ContractCasePool("kLoomTargetContractFamilyCases")
+        selection_blob_symbols = {}
+        index_sources = [
+            generate_contract_index(
+                name,
+                fragments,
+                binding_indices,
+                case_pool,
+                selection_blob_symbols,
+            )
+            for name, fragments, binding_indices in index_specs
+        ]
+        write_text_file(
+            args.index_output,
+            "\n".join((generate_contract_case_pool(case_pool), *index_sources)),
+        )
     return 0
 
 

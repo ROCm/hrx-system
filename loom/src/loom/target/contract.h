@@ -454,9 +454,10 @@ static inline bool loom_target_contract_fragment_queries_target(
 }
 
 typedef struct loom_target_contract_binding_t {
-  // Generated fragment rodata linked into the active target package.
+  // Generated fragment rodata, or NULL for an inactive family binding slot.
   const loom_target_contract_fragment_t* fragment;
-  // Policy rule-set ordinal corresponding to |fragment|'s descriptor-rule rows.
+  // Policy rule-set ordinal corresponding to |fragment|'s descriptor-rule
+  // rows, or UINT16_MAX for an inactive family binding slot.
   uint16_t rule_set_index;
   // Primary-descriptor feature class shared by every lowering rule, or zero.
   uint8_t required_primary_feature_class;
@@ -469,17 +470,18 @@ typedef struct loom_target_contract_index_t {
   uint8_t dialect_count;
   // Dense dialect slots indexed by dialect id minus dialect_base_id.
   const loom_target_contract_dialect_table_t* dialects;
-  // Number of composed case rows.
-  uint16_t case_count;
+  // Exclusive upper bound for composed case row indices, or zero when empty.
+  uint16_t case_index_bound;
   // Composed case rows referenced by dense op entries.
   const loom_target_contract_case_t* cases;
-  // Number of active fragment bindings.
+  // Number of family-stable fragment binding slots addressable by cases.
   uint8_t binding_count;
   // Number of operation kinds that may root a multi-operation source graph.
   uint16_t source_graph_root_op_kind_count;
   // Number of root or related operation kinds in query-visible source graphs.
   uint16_t source_graph_op_kind_count;
-  // Active fragment bindings referenced by composed case rows.
+  // Family-stable fragment bindings. Composed cases reference active slots;
+  // unreferenced slots may be inactive in this target profile.
   const loom_target_contract_binding_t* bindings;
   // Relocation-free candidate-selection rows, buckets, and ordinal sequences.
   const uint32_t* selection_data;
