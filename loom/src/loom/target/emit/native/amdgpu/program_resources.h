@@ -50,6 +50,21 @@ iree_status_t loom_amdgpu_program_resource_builder_initialize(
     iree_host_size_t direct_resource_unit_count, iree_arena_allocator_t* arena,
     loom_amdgpu_program_resource_builder_t* out_builder);
 
+// Includes one independently compiled function's register demand without
+// assigning its function-local storage. Artifact planners use this for shared
+// leaf helpers whose mutually exclusive private frames begin at the same
+// offset in every entry that reaches them.
+void loom_amdgpu_program_resource_builder_require_function(
+    const loom_low_emission_frame_t* frame,
+    const loom_amdgpu_function_plan_t* function_plan,
+    loom_amdgpu_program_resource_builder_t* builder);
+
+// Reserves the maximum invocation-private leaf frame below a caller's local
+// storage. Repeated calls retain the maximum rather than summing mutually
+// exclusive helper frames.
+void loom_amdgpu_program_resource_builder_require_private_frame(
+    uint64_t byte_size, loom_amdgpu_program_resource_builder_t* builder);
+
 // Appends one independently compiled function. The returned storage layout
 // preserves the function's lookup index and places its reservations after all
 // previously appended functions.

@@ -13,10 +13,16 @@ func.def public target(@vm) @caller(%a: i64, %b: i64) -> (i64, i64) {
   func.return %a, %result : i64, i64
 }
 
+func.def public target(@vm) @caller_again(%a: i64) -> (i64) {
+  %result = func.call @identity(%a) : (i64) -> (i64)
+  func.return %result : i64
+}
+
 // ----
 vm.module core(0.0) {
   section strings alignment(8) {
     string @string0 = "caller"
+    string @string1 = "caller_again"
   }
 
   section signatures alignment(8) {
@@ -31,6 +37,7 @@ vm.module core(0.0) {
 
   section exports alignment(8) {
     export @export0 name(@string0) : @callable1 = @function1
+    export @export1 name(@string1) : @callable0 = @function2
   }
 
   section functions alignment(8) {
@@ -49,6 +56,12 @@ vm.module core(0.0) {
       control.call @function0 {direct_ref_move_mask = 0x0000}
       %v1 = value.copy %v0
       %v0 = value.copy %v2
+      control.return
+    }
+    func @function2 : @callable0 flags([has_call]) frame(local_bytes = 0, value_registers = 1, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      control.call @function0 {direct_ref_move_mask = 0x0000}
       control.return
     }
   }

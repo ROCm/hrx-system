@@ -1,17 +1,19 @@
 // Copyright 2026 The IREE Authors
 //
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
+// See https://llvm.org/LICENSE for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "loom/target/emit/native/amdgpu/program_emission.h"
 
 #include <string.h>
 
-#include "iree/base/alignment.h"
 #include "loom/ir/module.h"
 #include "loom/target/emit/native/amdgpu/encoding.h"
+#include "loom/target/emit/native/amdgpu/function_report.h"
 #include "loom/target/emit/native/amdgpu/kernel_assembly.h"
+#include "loom/target/emit/native/amdgpu/kernel_entry.h"
+#include "loom/target/reporting/low.h"
 
 static iree_string_view_t loom_amdgpu_program_emission_symbol_name(
     const loom_module_t* module, loom_symbol_ref_t symbol_ref) {
@@ -40,88 +42,217 @@ static iree_status_t loom_amdgpu_program_emission_encode_function(
       out_stream, arena);
 }
 
-static iree_status_t loom_amdgpu_program_emission_copy_text_fixups(
-    const loom_amdgpu_hsaco_text_fixup_t* source, iree_host_size_t source_count,
-    uint64_t function_byte_offset, loom_amdgpu_hsaco_text_fixup_t* target,
-    iree_host_size_t* inout_target_count) {
-  for (iree_host_size_t i = 0; i < source_count; ++i) {
-    loom_amdgpu_hsaco_text_fixup_t fixup = source[i];
-    if (!iree_checked_add_u64(fixup.literal_byte_offset, function_byte_offset,
-                              &fixup.literal_byte_offset) ||
-        !iree_checked_add_u64(fixup.base_pc_byte_offset, function_byte_offset,
-                              &fixup.base_pc_byte_offset)) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "AMDGPU retained-program text fixup offset overflowed");
-    }
-    target[(*inout_target_count)++] = fixup;
+iree_status_t loom_amdgpu_program_artifact_emission_build(
+    const loom_amdgpu_program_artifact_t* artifact,
+    loom_amdgpu_program_artifact_emission_t* out_emission,
+    iree_arena_allocator_t* table_arena) {
+  *out_emission = (loom_amdgpu_program_artifact_emission_t){
+      .artifact = artifact,
+  };
+  if (artifact->helper_count == 0) {
+    return iree_ok_status();
   }
+
+  loom_amdgpu_hsaco_function_t* functions = NULL;
+  loom_amdgpu_encoded_instruction_stream_t* helper_streams = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(table_arena, artifact->helper_count,
+                                sizeof(*functions), (void**)&functions));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      table_arena, artifact->helper_count, sizeof(*helper_streams),
+      (void**)&helper_streams));
+  memset(functions, 0, artifact->helper_count * sizeof(*functions));
+  memset(helper_streams, 0, artifact->helper_count * sizeof(*helper_streams));
+
+  uint64_t instruction_count = 0;
+  uint64_t code_byte_count = 0;
+  uint64_t coissued_instruction_count = 0;
+  for (iree_host_size_t i = 0; i < artifact->helper_count; ++i) {
+    loom_amdgpu_program_callable_t* callable = &artifact->helpers[i];
+    IREE_ASSERT_EQ(callable->helper_ordinal, i);
+    const loom_amdgpu_encode_instruction_stream_flags_t flags =
+        callable->report != NULL
+            ? LOOM_AMDGPU_ENCODE_INSTRUCTION_STREAM_FLAG_CAPTURE_NATIVE_INSERTIONS
+            : LOOM_AMDGPU_ENCODE_INSTRUCTION_STREAM_FLAG_NONE;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_program_emission_encode_function(
+        &callable->compilation, LOOM_AMDGPU_FUNCTION_RETURN_MODE_CALLER, flags,
+        &helper_streams[i], table_arena));
+    IREE_ASSERT_EQ(helper_streams[i].internal_call_fixup_count, 0);
+    functions[i] = (loom_amdgpu_hsaco_function_t){
+        .name = loom_amdgpu_program_emission_symbol_name(artifact->module,
+                                                         callable->function),
+        .text = helper_streams[i].text,
+        .text_fixups = helper_streams[i].text_fixups,
+        .text_fixup_count = helper_streams[i].text_fixup_count,
+    };
+    if (callable->report != NULL) {
+      if (!iree_checked_add_u64(instruction_count,
+                                helper_streams[i].instruction_count,
+                                &instruction_count) ||
+          !iree_checked_add_u64(code_byte_count,
+                                helper_streams[i].text.data_length,
+                                &code_byte_count) ||
+          !iree_checked_add_u64(
+              coissued_instruction_count,
+              callable->compilation.plan.packet_plan.vopd_plan.pair_count,
+              &coissued_instruction_count)) {
+        return iree_make_status(
+            IREE_STATUS_RESOURCE_EXHAUSTED,
+            "AMDGPU artifact helper emission summary overflowed");
+      }
+      loom_target_compile_report_record_low_planning(
+          callable->report, &callable->compilation.planning_statistics);
+      loom_target_compile_report_low_dynamic_context_t dynamic_context = {0};
+      iree_status_t status =
+          loom_target_compile_report_low_dynamic_context_initialize(
+              &callable->compilation.frame, &dynamic_context);
+      if (iree_status_is_ok(status)) {
+        status =
+            loom_target_compile_report_record_low_emission_frame_with_dynamic_context(
+                callable->report, &callable->compilation.frame,
+                &dynamic_context);
+      }
+      if (iree_status_is_ok(status)) {
+        status = loom_amdgpu_function_report_record_plan(
+            callable->report, &callable->compilation.plan.packet_plan);
+      }
+      if (iree_status_is_ok(status)) {
+        status = loom_amdgpu_function_report_record_emission(
+            callable->report, &callable->compilation.frame, &dynamic_context,
+            &callable->compilation.plan, &helper_streams[i]);
+      }
+      loom_target_compile_report_low_dynamic_context_deinitialize(
+          &dynamic_context);
+      IREE_RETURN_IF_ERROR(status);
+    }
+  }
+
+  out_emission->functions = functions;
+  out_emission->helper_streams = helper_streams;
+  out_emission->function_count = artifact->helper_count;
+  out_emission->instruction_count = instruction_count;
+  out_emission->code_byte_count = code_byte_count;
+  out_emission->coissued_instruction_count = coissued_instruction_count;
   return iree_ok_status();
 }
 
-static void loom_amdgpu_program_emission_patch_internal_calls(
-    const loom_amdgpu_program_compilation_t* compilation,
+static iree_status_t loom_amdgpu_program_emission_build_call_fixups(
+    const loom_amdgpu_program_artifact_root_t* root,
     const loom_amdgpu_encoded_instruction_stream_t* entry_stream,
-    iree_host_size_t entry_byte_offset,
-    const iree_host_size_t* helper_byte_offsets, uint8_t* text,
-    iree_host_size_t text_length) {
-  const loom_amdgpu_program_call_table_t* call_table = &compilation->call_table;
+    uint64_t entry_byte_offset, iree_arena_allocator_t* arena,
+    const loom_amdgpu_hsaco_call_fixup_t** out_call_fixups) {
+  *out_call_fixups = NULL;
+  if (entry_stream->internal_call_fixup_count == 0) {
+    return iree_ok_status();
+  }
+  loom_amdgpu_hsaco_call_fixup_t* call_fixups = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(arena, entry_stream->internal_call_fixup_count,
+                                sizeof(*call_fixups), (void**)&call_fixups));
   for (iree_host_size_t i = 0; i < entry_stream->internal_call_fixup_count;
        ++i) {
-    const loom_amdgpu_internal_call_fixup_t* fixup =
+    const loom_amdgpu_internal_call_fixup_t* source =
         &entry_stream->internal_call_fixups[i];
-    IREE_ASSERT(loom_symbol_ref_is_valid(fixup->callee));
-    IREE_ASSERT_EQ(fixup->callee.module_id, 0);
-    IREE_ASSERT_LT(fixup->callee.symbol_id, call_table->symbol_count);
+    IREE_ASSERT(loom_symbol_ref_is_valid(source->callee));
+    IREE_ASSERT_EQ(source->callee.module_id, 0u);
+    IREE_ASSERT_LT(source->callee.symbol_id, root->call_table->symbol_count);
     const loom_amdgpu_program_callable_t* callable =
-        call_table->callables_by_symbol[fixup->callee.symbol_id];
+        root->call_table->callables_by_symbol[source->callee.symbol_id];
     IREE_ASSERT_NE(callable, NULL);
-    IREE_ASSERT_LT(callable->helper_ordinal, compilation->helper_count);
-
-    uint64_t base_pc_byte_offset = 0;
-    uint64_t low_literal_byte_offset = 0;
-    uint64_t high_literal_byte_offset = 0;
-    const bool has_base_pc_byte_offset = iree_checked_add_u64(
-        entry_byte_offset, fixup->base_pc_byte_offset, &base_pc_byte_offset);
-    const bool has_low_literal_byte_offset =
-        iree_checked_add_u64(entry_byte_offset, fixup->low_literal_byte_offset,
-                             &low_literal_byte_offset);
-    const bool has_high_literal_byte_offset =
-        iree_checked_add_u64(entry_byte_offset, fixup->high_literal_byte_offset,
-                             &high_literal_byte_offset);
-    IREE_ASSERT(has_base_pc_byte_offset);
-    IREE_ASSERT(has_low_literal_byte_offset);
-    IREE_ASSERT(has_high_literal_byte_offset);
-    (void)has_base_pc_byte_offset;
-    (void)has_low_literal_byte_offset;
-    (void)has_high_literal_byte_offset;
-    const uint64_t target_byte_offset =
-        helper_byte_offsets[callable->helper_ordinal];
-    IREE_ASSERT_GE(target_byte_offset, base_pc_byte_offset);
-    const uint64_t displacement = target_byte_offset - base_pc_byte_offset;
-    IREE_ASSERT_GE(text_length, sizeof(uint32_t));
-    IREE_ASSERT_LE(low_literal_byte_offset, text_length - sizeof(uint32_t));
-    IREE_ASSERT_LE(high_literal_byte_offset, text_length - sizeof(uint32_t));
-    iree_unaligned_store_le_u32(text + low_literal_byte_offset,
-                                (uint32_t)displacement);
-    iree_unaligned_store_le_u32(text + high_literal_byte_offset,
-                                (uint32_t)(displacement >> 32));
+    loom_amdgpu_hsaco_call_fixup_t* target = &call_fixups[i];
+    target->target_function_ordinal = callable->helper_ordinal;
+    if (!iree_checked_add_u64(entry_byte_offset, source->base_pc_byte_offset,
+                              &target->base_pc_byte_offset) ||
+        !iree_checked_add_u64(entry_byte_offset,
+                              source->low_literal_byte_offset,
+                              &target->low_literal_byte_offset) ||
+        !iree_checked_add_u64(entry_byte_offset,
+                              source->high_literal_byte_offset,
+                              &target->high_literal_byte_offset)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "AMDGPU retained-program call fixup offset overflowed");
+    }
   }
+  *out_call_fixups = call_fixups;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_program_emission_append_listing(
+    const loom_amdgpu_program_compilation_t* compilation,
+    const loom_amdgpu_program_artifact_emission_t* artifact_emission,
+    const loom_amdgpu_kernel_plan_t* entry_plan,
+    const loom_amdgpu_encoded_instruction_stream_t* entry_stream,
+    bool include_artifact_functions, iree_string_builder_t* target_listing,
+    iree_arena_allocator_t* scratch_arena) {
+  if (target_listing == NULL) {
+    return iree_ok_status();
+  }
+  const iree_host_size_t helper_count =
+      include_artifact_functions ? artifact_emission->function_count : 0;
+  iree_host_size_t function_count = 0;
+  if (!iree_host_size_checked_add(helper_count, 1, &function_count)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "AMDGPU assembly function count overflowed");
+  }
+  loom_amdgpu_kernel_program_assembly_function_t* functions = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      scratch_arena, function_count, sizeof(*functions), (void**)&functions));
+  functions[0] = (loom_amdgpu_kernel_program_assembly_function_t){
+      .schedule = &compilation->entry.frame.schedule,
+      .allocation = &compilation->entry.frame.allocation,
+      .fragment_options =
+          {
+              .packet_plan = &entry_plan->function.packet_plan,
+              .storage_layout = &entry_plan->function.storage_layout,
+              .instruction_layout = &entry_stream->layout,
+              .return_mode = LOOM_AMDGPU_FUNCTION_RETURN_MODE_END_PROGRAM,
+          },
+  };
+  const loom_amdgpu_program_artifact_t* artifact = artifact_emission->artifact;
+  for (iree_host_size_t i = 0; i < helper_count; ++i) {
+    const loom_amdgpu_program_callable_t* callable = &artifact->helpers[i];
+    functions[i + 1] = (loom_amdgpu_kernel_program_assembly_function_t){
+        .symbol = artifact_emission->functions[i].name,
+        .schedule = &callable->compilation.frame.schedule,
+        .allocation = &callable->compilation.frame.allocation,
+        .fragment_options =
+            {
+                .packet_plan = &callable->compilation.plan.packet_plan,
+                .storage_layout = &callable->compilation.plan.storage_layout,
+                .instruction_layout =
+                    &artifact_emission->helper_streams[i].layout,
+                .return_mode = LOOM_AMDGPU_FUNCTION_RETURN_MODE_CALLER,
+            },
+    };
+  }
+  if (iree_string_builder_size(target_listing) != 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(target_listing, "\n\n"));
+  }
+  return loom_amdgpu_emit_kernel_program_assembly(
+      &entry_plan->record, functions, function_count, target_listing,
+      scratch_arena);
 }
 
 static iree_status_t loom_amdgpu_program_emission_build_internal(
     const loom_amdgpu_program_compilation_t* compilation,
+    const loom_amdgpu_program_artifact_emission_t* artifact_emission,
     const loom_amdgpu_kernel_plan_t* entry_plan,
     loom_amdgpu_kernel_emission_flags_t flags,
+    bool include_artifact_functions_in_listing,
     iree_string_builder_t* target_listing,
     loom_amdgpu_kernel_emission_result_t* out_result,
     iree_arena_allocator_t* table_arena,
     iree_arena_allocator_t* scratch_arena) {
   IREE_ASSERT(compilation->has_retained_calls);
-  IREE_ASSERT_GT(compilation->helper_count, 0);
+  const loom_amdgpu_program_artifact_root_t* root = compilation->artifact_root;
+  IREE_ASSERT_NE(root, NULL);
+  IREE_ASSERT_GT(root->helper_count, 0);
+  IREE_ASSERT_NE(root->call_table, NULL);
+  IREE_ASSERT_EQ(artifact_emission->artifact->module,
+                 compilation->entry.frame.module);
   const loom_amdgpu_kernel_record_t* record = &entry_plan->record;
-  const loom_amdgpu_kernel_entry_envelope_t* entry_envelope =
-      record->entry_envelope;
 
   const loom_amdgpu_encode_instruction_stream_flags_t entry_flags =
       iree_any_bit_set(
@@ -133,139 +264,22 @@ static iree_status_t loom_amdgpu_program_emission_build_internal(
       &compilation->entry, LOOM_AMDGPU_FUNCTION_RETURN_MODE_END_PROGRAM,
       entry_flags, &entry_stream, table_arena));
 
-  loom_amdgpu_encoded_instruction_stream_t* helper_streams = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      scratch_arena, compilation->helper_count, sizeof(*helper_streams),
-      (void**)&helper_streams));
-  memset(helper_streams, 0,
-         compilation->helper_count * sizeof(*helper_streams));
-  iree_host_size_t* helper_byte_offsets = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      scratch_arena, compilation->helper_count, sizeof(*helper_byte_offsets),
-      (void**)&helper_byte_offsets));
+  const loom_amdgpu_kernel_entry_envelope_t* entry_envelope =
+      record->entry_envelope;
+  iree_const_byte_span_t kernel_text = iree_const_byte_span_empty();
+  const loom_amdgpu_hsaco_text_fixup_t* kernel_text_fixups = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_entry_prepend_text(
+      entry_envelope, entry_stream.text, entry_stream.text_fixups,
+      entry_stream.text_fixup_count, &kernel_text, &kernel_text_fixups,
+      table_arena));
+  const loom_amdgpu_hsaco_call_fixup_t* call_fixups = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_program_emission_build_call_fixups(
+      root, &entry_stream, entry_envelope->text.data_length, table_arena,
+      &call_fixups));
 
-  iree_host_size_t text_length = 0;
-  if (!iree_host_size_checked_add(entry_envelope->text.data_length,
-                                  entry_stream.text.data_length,
-                                  &text_length)) {
-    return iree_make_status(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        "AMDGPU retained-program entry text length overflowed");
-  }
-  iree_host_size_t text_fixup_count = entry_stream.text_fixup_count;
-  uint64_t body_instruction_count = entry_stream.instruction_count;
-  for (iree_host_size_t i = 0; i < compilation->helper_count; ++i) {
-    const loom_amdgpu_program_callable_t* callable = &compilation->helpers[i];
-    IREE_ASSERT_EQ(callable->helper_ordinal, i);
-    IREE_RETURN_IF_ERROR(loom_amdgpu_program_emission_encode_function(
-        &callable->compilation, LOOM_AMDGPU_FUNCTION_RETURN_MODE_CALLER,
-        LOOM_AMDGPU_ENCODE_INSTRUCTION_STREAM_FLAG_NONE, &helper_streams[i],
-        scratch_arena));
-    IREE_ASSERT_EQ(helper_streams[i].internal_call_fixup_count, 0);
-    helper_byte_offsets[i] = text_length;
-    if (!iree_host_size_checked_add(
-            text_length, helper_streams[i].text.data_length, &text_length) ||
-        !iree_host_size_checked_add(text_fixup_count,
-                                    helper_streams[i].text_fixup_count,
-                                    &text_fixup_count) ||
-        !iree_checked_add_u64(body_instruction_count,
-                              helper_streams[i].instruction_count,
-                              &body_instruction_count)) {
-      return iree_make_status(
-          IREE_STATUS_RESOURCE_EXHAUSTED,
-          "AMDGPU retained-program text accounting overflowed");
-    }
-  }
-
-  uint8_t* text = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate(table_arena, text_length, (void**)&text));
-  iree_host_size_t cursor = 0;
-  if (entry_envelope->text.data_length != 0) {
-    memcpy(text + cursor, entry_envelope->text.data,
-           entry_envelope->text.data_length);
-  }
-  cursor += entry_envelope->text.data_length;
-  const iree_host_size_t entry_byte_offset = cursor;
-  if (entry_stream.text.data_length != 0) {
-    memcpy(text + cursor, entry_stream.text.data,
-           entry_stream.text.data_length);
-  }
-  cursor += entry_stream.text.data_length;
-  for (iree_host_size_t i = 0; i < compilation->helper_count; ++i) {
-    IREE_ASSERT_EQ(cursor, helper_byte_offsets[i]);
-    if (helper_streams[i].text.data_length != 0) {
-      memcpy(text + cursor, helper_streams[i].text.data,
-             helper_streams[i].text.data_length);
-    }
-    cursor += helper_streams[i].text.data_length;
-  }
-  IREE_ASSERT_EQ(cursor, text_length);
-
-  loom_amdgpu_hsaco_text_fixup_t* text_fixups = NULL;
-  if (text_fixup_count != 0) {
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(table_arena, text_fixup_count,
-                                  sizeof(*text_fixups), (void**)&text_fixups));
-  }
-  iree_host_size_t copied_text_fixup_count = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_program_emission_copy_text_fixups(
-      entry_stream.text_fixups, entry_stream.text_fixup_count,
-      entry_byte_offset, text_fixups, &copied_text_fixup_count));
-  for (iree_host_size_t i = 0; i < compilation->helper_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_program_emission_copy_text_fixups(
-        helper_streams[i].text_fixups, helper_streams[i].text_fixup_count,
-        helper_byte_offsets[i], text_fixups, &copied_text_fixup_count));
-  }
-  IREE_ASSERT_EQ(copied_text_fixup_count, text_fixup_count);
-  loom_amdgpu_program_emission_patch_internal_calls(
-      compilation, &entry_stream, entry_byte_offset, helper_byte_offsets, text,
-      text_length);
-
-  if (target_listing != NULL) {
-    iree_host_size_t function_count = 0;
-    const bool has_function_count = iree_host_size_checked_add(
-        compilation->helper_count, 1, &function_count);
-    IREE_ASSERT(has_function_count);
-    (void)has_function_count;
-    loom_amdgpu_kernel_program_assembly_function_t* functions = NULL;
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        scratch_arena, function_count, sizeof(*functions), (void**)&functions));
-    functions[0] = (loom_amdgpu_kernel_program_assembly_function_t){
-        .schedule = &compilation->entry.frame.schedule,
-        .allocation = &compilation->entry.frame.allocation,
-        .fragment_options =
-            {
-                .packet_plan = &entry_plan->function.packet_plan,
-                .storage_layout = &entry_plan->function.storage_layout,
-                .instruction_layout = &entry_stream.layout,
-                .return_mode = LOOM_AMDGPU_FUNCTION_RETURN_MODE_END_PROGRAM,
-            },
-    };
-    const loom_module_t* module = compilation->entry.frame.module;
-    for (iree_host_size_t i = 0; i < compilation->helper_count; ++i) {
-      const loom_amdgpu_program_callable_t* callable = &compilation->helpers[i];
-      functions[i + 1] = (loom_amdgpu_kernel_program_assembly_function_t){
-          .symbol = loom_amdgpu_program_emission_symbol_name(
-              module, callable->function),
-          .schedule = &callable->compilation.frame.schedule,
-          .allocation = &callable->compilation.frame.allocation,
-          .fragment_options =
-              {
-                  .packet_plan = &callable->compilation.plan.packet_plan,
-                  .storage_layout = &callable->compilation.plan.storage_layout,
-                  .instruction_layout = &helper_streams[i].layout,
-                  .return_mode = LOOM_AMDGPU_FUNCTION_RETURN_MODE_CALLER,
-              },
-      };
-    }
-    if (iree_string_builder_size(target_listing) != 0) {
-      IREE_RETURN_IF_ERROR(
-          iree_string_builder_append_cstring(target_listing, "\n\n"));
-    }
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_kernel_program_assembly(
-        record, functions, function_count, target_listing, scratch_arena));
-  }
+  IREE_RETURN_IF_ERROR(loom_amdgpu_program_emission_append_listing(
+      compilation, artifact_emission, entry_plan, &entry_stream,
+      include_artifact_functions_in_listing, target_listing, scratch_arena));
 
   *out_result = (loom_amdgpu_kernel_emission_result_t){
       .kernel =
@@ -277,22 +291,26 @@ static iree_status_t loom_amdgpu_program_emission_build_internal(
                       .minimum_user_sgpr_count = record->user_sgpr_count,
                       .accum_offset = record->accum_offset,
                   },
-              .text = iree_make_const_byte_span(text, text_length),
-              .text_fixups = text_fixups,
-              .text_fixup_count = text_fixup_count,
+              .text = kernel_text,
+              .text_fixups = kernel_text_fixups,
+              .text_fixup_count = entry_stream.text_fixup_count,
+              .call_fixups = call_fixups,
+              .call_fixup_count = entry_stream.internal_call_fixup_count,
           },
-      .body_instruction_count = body_instruction_count,
+      .body = entry_stream,
       .entry_instruction_count = entry_envelope->instruction_count,
-      .native_insertions = entry_stream.native_insertions,
-      .native_insertion_count = entry_stream.native_insertion_count,
+      .coissued_instruction_count =
+          entry_plan->function.packet_plan.vopd_plan.pair_count,
   };
   return iree_ok_status();
 }
 
 iree_status_t loom_amdgpu_program_emission_build(
     const loom_amdgpu_program_compilation_t* compilation,
+    const loom_amdgpu_program_artifact_emission_t* artifact_emission,
     const loom_amdgpu_kernel_plan_t* entry_plan,
     loom_amdgpu_kernel_emission_flags_t flags,
+    bool include_artifact_functions_in_listing,
     iree_string_builder_t* target_listing,
     loom_amdgpu_kernel_emission_result_t* out_result,
     iree_arena_allocator_t* table_arena) {
@@ -300,8 +318,9 @@ iree_status_t loom_amdgpu_program_emission_build(
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(table_arena->block_pool, &scratch_arena);
   const iree_status_t status = loom_amdgpu_program_emission_build_internal(
-      compilation, entry_plan, flags, target_listing, out_result, table_arena,
-      &scratch_arena);
+      compilation, artifact_emission, entry_plan, flags,
+      include_artifact_functions_in_listing, target_listing, out_result,
+      table_arena, &scratch_arena);
   iree_arena_deinitialize(&scratch_arena);
   return status;
 }

@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// AMDGPU compile-report adaptation for completed native kernel emission.
+// AMDGPU compile-report adaptation for a completed kernel entry.
 
 #ifndef LOOM_TARGET_EMIT_NATIVE_AMDGPU_KERNEL_REPORT_H_
 #define LOOM_TARGET_EMIT_NATIVE_AMDGPU_KERNEL_REPORT_H_
@@ -20,16 +20,7 @@
 extern "C" {
 #endif
 
-// Records counter and native destination waits in one ordered report view.
-// The immutable plans keep their own ownership and are not copied or mutated.
-iree_status_t loom_amdgpu_kernel_report_record_plan(
-    loom_target_compile_report_t* report,
-    const loom_amdgpu_packet_plan_t* packet_plan);
-
-// Records target-native emission facts against their originating Low frame.
-//
-// This adapter owns the cross-layer reporting join. Native emission produces
-// |result| without inspecting report policy or running Low analyses.
+// Records function-body, entry-envelope, and kernel-resource emission facts.
 iree_status_t loom_amdgpu_kernel_report_record_emission(
     loom_target_compile_report_t* report,
     const loom_low_emission_frame_t* frame,

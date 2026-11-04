@@ -207,6 +207,24 @@ bool HasEntry(const loom_target_compile_report_t& report,
   return false;
 }
 
+const loom_target_compile_report_entry_t* FindEntry(
+    const loom_target_compile_report_t& report, const char* function_name) {
+  const iree_string_view_t expected_name =
+      iree_make_cstring_view(function_name);
+  for (const loom_target_compile_report_vec_t* vec = report.entry_rows.head;
+       vec != nullptr; vec = vec->next) {
+    const loom_target_compile_report_entry_t* rows =
+        static_cast<const loom_target_compile_report_entry_t*>(
+            loom_target_compile_report_vec_const_rows(vec));
+    for (iree_host_size_t i = 0; i < vec->count; ++i) {
+      if (iree_string_view_equal(rows[i].function_name, expected_name)) {
+        return &rows[i];
+      }
+    }
+  }
+  return nullptr;
+}
+
 uint32_t LoadLeU32(const uint8_t* bytes, size_t offset) {
   return (uint32_t)bytes[offset] | ((uint32_t)bytes[offset + 1] << 8) |
          ((uint32_t)bytes[offset + 2] << 16) |
@@ -309,10 +327,10 @@ const Section& FindSection(const std::vector<Section>& sections,
   return sections[0];
 }
 
-struct DynamicSymbol {
+struct ElfSymbol {
   // Symbol table ordinal.
   size_t index;
-  // Dynamic symbol name.
+  // Symbol name.
   std::string name;
   // ELF symbol info byte.
   uint8_t info;
@@ -324,21 +342,18 @@ struct DynamicSymbol {
   uint64_t size;
 };
 
-DynamicSymbol FindDynamicSymbol(const std::string& bytes,
-                                const Section& dynamic_symbol_table,
-                                const Section& dynamic_string_table,
-                                const char* name) {
-  const std::string dynamic_strings = bytes.substr(
-      (size_t)dynamic_string_table.offset, (size_t)dynamic_string_table.size);
+ElfSymbol FindSymbol(const std::string& bytes, const Section& symbol_table,
+                     const Section& string_table, const char* name) {
+  const std::string strings =
+      bytes.substr((size_t)string_table.offset, (size_t)string_table.size);
   const size_t symbol_count =
-      (size_t)(dynamic_symbol_table.size / dynamic_symbol_table.entry_size);
+      (size_t)(symbol_table.size / symbol_table.entry_size);
   for (size_t i = 0; i < symbol_count; ++i) {
-    const size_t offset = (size_t)dynamic_symbol_table.offset +
-                          i * dynamic_symbol_table.entry_size;
-    DynamicSymbol symbol = {
+    const size_t offset =
+        (size_t)symbol_table.offset + i * symbol_table.entry_size;
+    ElfSymbol symbol = {
         .index = i,
-        .name =
-            ReadNullTerminatedString(dynamic_strings, LoadLeU32(bytes, offset)),
+        .name = ReadNullTerminatedString(strings, LoadLeU32(bytes, offset)),
         .info = (uint8_t)bytes[offset + 4],
         .section_index = LoadLeU16(bytes, offset + 6),
         .value = LoadLeU64(bytes, offset + 8),
@@ -348,8 +363,25 @@ DynamicSymbol FindDynamicSymbol(const std::string& bytes,
       return symbol;
     }
   }
-  ADD_FAILURE() << "dynamic symbol not found: " << name;
+  ADD_FAILURE() << "symbol not found: " << name;
   return {};
+}
+
+size_t CountSymbolsNamed(const std::string& bytes, const Section& symbol_table,
+                         const Section& string_table, const char* name) {
+  const std::string strings =
+      bytes.substr((size_t)string_table.offset, (size_t)string_table.size);
+  const size_t symbol_count =
+      (size_t)(symbol_table.size / symbol_table.entry_size);
+  size_t match_count = 0;
+  for (size_t i = 0; i < symbol_count; ++i) {
+    const size_t offset =
+        (size_t)symbol_table.offset + i * symbol_table.entry_size;
+    if (ReadNullTerminatedString(strings, LoadLeU32(bytes, offset)) == name) {
+      ++match_count;
+    }
+  }
+  return match_count;
 }
 
 std::string DiagnosticSummary(const DiagnosticCapture& capture) {
@@ -458,14 +490,45 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
         ParseSource(iree_make_cstring_view(kSource), out_module));
   }
 
-  void ParseGfx11KernelWithLeafCall(loom_module_t** out_module) {
+  void ParseGfx11KernelsWithSharedLeafCall(loom_module_t** out_module) {
     static const char kSource[] =
+        "global.rodata.def @shared_data = "
+        "align(16) bytes(\"000102030405060708090a0b0c0d0e0f\")\n"
         "amdgpu.target<gfx1100> @gfx_target\n"
         "low.func.def target<amdgpu.rdna3.core>(@gfx_target) @leaf() {\n"
+        "  %pc = low.op<amdgpu.s_getpc_b64>() : () -> "
+        "reg<amdgpu.sgpr x2>\n"
+        "  %pc_lo = low.slice %pc[0] : reg<amdgpu.sgpr x2> -> "
+        "reg<amdgpu.sgpr>\n"
+        "  %pc_hi = low.slice %pc[1] : reg<amdgpu.sgpr x2> -> "
+        "reg<amdgpu.sgpr>\n"
+        "  %data_lo, %carry = "
+        "low.op<amdgpu.s_add_u32.rhs_symbol_rel32_lo>(%pc_lo) "
+        "{symbol = @shared_data, byte_offset = 8} : "
+        "(reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>, reg<amdgpu.scc>\n"
+        "  %data_hi, %carry_out = "
+        "low.op<amdgpu.s_addc_u32.rhs_symbol_rel32_hi>(%pc_hi, %carry) "
+        "{symbol = @shared_data, byte_offset = 8} : "
+        "(reg<amdgpu.sgpr>, reg<amdgpu.scc>) -> "
+        "reg<amdgpu.sgpr>, reg<amdgpu.scc>\n"
+        "  %storage = low.storage.reserve {byte_alignment = 16, "
+        "byte_length = 16} : "
+        "low.storage<private>\n"
+        "  low.return\n"
+        "}\n"
+        "low.func.def target<amdgpu.rdna3.core>(@gfx_target) @unused() {\n"
+        "  %storage = low.storage.reserve {byte_alignment = 64, "
+        "byte_length = 64} : "
+        "low.storage<private>\n"
         "  low.return\n"
         "}\n"
         "low.kernel.def target<amdgpu.rdna3.core>(@gfx_target) "
-        "workgroup_size(64, 1, 1) @loom_kernel() {\n"
+        "workgroup_size(64, 1, 1) @loom_kernel_a() {\n"
+        "  low.func.call @leaf() : ()\n"
+        "  low.return\n"
+        "}\n"
+        "low.kernel.def target<amdgpu.rdna3.core>(@gfx_target) "
+        "workgroup_size(64, 1, 1) @loom_kernel_b() {\n"
         "  low.func.call @leaf() : ()\n"
         "  low.return\n"
         "}\n";
@@ -818,14 +881,17 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsGfx942Kernel) {
   EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
 }
 
-TEST_F(AmdgpuHalKernelLibraryTest, EmitsPrivateLeafCallInKernelProgram) {
+TEST_F(AmdgpuHalKernelLibraryTest, SharesLeafFunctionAcrossKernelEntries) {
   loom_module_t* module = nullptr;
-  ASSERT_NO_FATAL_FAILURE(ParseGfx11KernelWithLeafCall(&module));
+  ASSERT_NO_FATAL_FAILURE(ParseGfx11KernelsWithSharedLeafCall(&module));
 
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_options_t options = {
       .diagnostic_sink = capture.sink(),
       .max_errors = 20,
+      .report = &report,
       .capture_target_listing = true,
   };
   bool emitted = false;
@@ -843,8 +909,20 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsPrivateLeafCallInKernelProgram) {
   EXPECT_NE(listing.find("s_addc_u32 s33, s33, @leaf@rel32_hi"),
             std::string::npos);
   EXPECT_NE(listing.find("s_swappc_b64 s[30:31], s[32:33]"), std::string::npos);
-  EXPECT_NE(listing.find(".type leaf,@function\nleaf:\n"), std::string::npos);
+  const size_t leaf_definition = listing.find(".type leaf,@function\nleaf:\n");
+  ASSERT_NE(leaf_definition, std::string::npos);
+  EXPECT_EQ(listing.find(".type leaf,@function\nleaf:\n", leaf_definition + 1),
+            std::string::npos);
   EXPECT_NE(listing.find("s_setpc_b64 s[30:31]"), std::string::npos);
+  const size_t first_private_size =
+      listing.find(".amdhsa_private_segment_fixed_size 16");
+  ASSERT_NE(first_private_size, std::string::npos);
+  const size_t second_private_size = listing.find(
+      ".amdhsa_private_segment_fixed_size 16", first_private_size + 1);
+  ASSERT_NE(second_private_size, std::string::npos);
+  EXPECT_EQ(listing.find(".amdhsa_private_segment_fixed_size 16",
+                         second_private_size + 1),
+            std::string::npos);
 
   ASSERT_NE(library.hsaco_data, nullptr);
   std::string hsaco;
@@ -852,22 +930,76 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsPrivateLeafCallInKernelProgram) {
   const std::vector<Section> sections = ReadSections(hsaco);
   const Section& dynamic_symbol_table = FindSection(sections, ".dynsym");
   const Section& dynamic_string_table = FindSection(sections, ".dynstr");
+  const Section& symbol_table = FindSection(sections, ".symtab");
+  const Section& string_table = FindSection(sections, ".strtab");
   const Section& text = FindSection(sections, ".text");
-  const DynamicSymbol entry = FindDynamicSymbol(
-      hsaco, dynamic_symbol_table, dynamic_string_table, "loom_kernel");
-  ASSERT_EQ(entry.section_index, text.index);
-  ASSERT_GE(entry.value, text.address);
-  const size_t entry_file_offset =
-      (size_t)(text.offset + (entry.value - text.address));
-  ASSERT_EQ(entry.size, 32u);
-  ASSERT_LE(entry_file_offset + entry.size, hsaco.size());
-  // S_GETPC_B64 captures entry byte 4. The private leaf starts at byte 28,
-  // so the paired literal adds receive the exact 24-byte displacement.
-  EXPECT_EQ(LoadLeU32(hsaco, entry_file_offset + 8u), 24u);
-  EXPECT_EQ(LoadLeU32(hsaco, entry_file_offset + 16u), 0u);
+  EXPECT_EQ(CountSymbolsNamed(hsaco, dynamic_symbol_table, dynamic_string_table,
+                              "leaf"),
+            0u);
+  ASSERT_EQ(CountSymbolsNamed(hsaco, symbol_table, string_table, "leaf"), 1u);
+  EXPECT_EQ(CountSymbolsNamed(hsaco, symbol_table, string_table, "unused"), 0u);
+  const ElfSymbol helper =
+      FindSymbol(hsaco, symbol_table, string_table, "leaf");
+  EXPECT_EQ(helper.info, 2u);  // STB_LOCAL | STT_FUNC.
+  EXPECT_EQ(helper.section_index, text.index);
+  EXPECT_EQ(helper.size, 24u);
+
+  const Section& rodata = FindSection(sections, ".rodata");
+  const ElfSymbol shared_data = FindSymbol(hsaco, dynamic_symbol_table,
+                                           dynamic_string_table, "shared_data");
+  EXPECT_EQ(shared_data.info, 0x11u);  // STB_GLOBAL | STT_OBJECT.
+  EXPECT_EQ(shared_data.section_index, rodata.index);
+  EXPECT_EQ(shared_data.size, 16u);
+  const uint64_t data_displacement =
+      shared_data.value + 8u - (helper.value + 4u);
+  const size_t helper_file_offset =
+      (size_t)(text.offset + (helper.value - text.address));
+  ASSERT_LE(helper_file_offset + helper.size, hsaco.size());
+  EXPECT_EQ(LoadLeU32(hsaco, helper_file_offset + 8u),
+            (uint32_t)data_displacement);
+  EXPECT_EQ(LoadLeU32(hsaco, helper_file_offset + 16u),
+            (uint32_t)(data_displacement >> 32));
+
+  for (const char* entry_name : {"loom_kernel_a", "loom_kernel_b"}) {
+    const ElfSymbol entry = FindSymbol(hsaco, dynamic_symbol_table,
+                                       dynamic_string_table, entry_name);
+    ASSERT_EQ(entry.section_index, text.index);
+    ASSERT_GE(entry.value, text.address);
+    ASSERT_EQ(entry.size, 28u);
+    const size_t entry_file_offset =
+        (size_t)(text.offset + (entry.value - text.address));
+    ASSERT_LE(entry_file_offset + entry.size, hsaco.size());
+    // S_GETPC_B64 captures entry byte 4. Both call sites resolve to the one
+    // artifact-local helper symbol laid out after the kernel entries.
+    ASSERT_GE(helper.value, entry.value + 4u);
+    const uint64_t displacement = helper.value - (entry.value + 4u);
+    EXPECT_EQ(LoadLeU32(hsaco, entry_file_offset + 8u), (uint32_t)displacement);
+    EXPECT_EQ(LoadLeU32(hsaco, entry_file_offset + 16u),
+              (uint32_t)(displacement >> 32));
+  }
+
+  ASSERT_EQ(report.entry_rows.count, 2u);
+  const loom_target_compile_report_entry_t* entry_a =
+      FindEntry(report, "loom_kernel_a");
+  const loom_target_compile_report_entry_t* entry_b =
+      FindEntry(report, "loom_kernel_b");
+  ASSERT_NE(entry_a, nullptr);
+  ASSERT_NE(entry_b, nullptr);
+  EXPECT_EQ(entry_a->emitted_code_byte_count, 52u);
+  EXPECT_EQ(entry_b->emitted_code_byte_count, 52u);
+  EXPECT_EQ(entry_a->schedule_node_count, entry_b->schedule_node_count);
+  EXPECT_GT(entry_a->schedule_node_count, 1u);
+  EXPECT_GT(entry_a->static_instruction_mix.scalar_alu_count, 0u);
+  EXPECT_GT(entry_b->static_instruction_mix.scalar_alu_count, 0u);
+  EXPECT_EQ(report.emitted_code_byte_count, 80u);
+  EXPECT_EQ(report.emitted_code_storage_byte_count, text.size);
+  EXPECT_LT(
+      report.emitted_instruction_count,
+      entry_a->emitted_instruction_count + entry_b->emitted_instruction_count);
 
   loom_amdgpu_hal_kernel_library_deinitialize(&library,
                                               iree_allocator_system());
+  loom_target_compile_report_deinitialize(&report);
   loom_module_free(module);
 }
 
@@ -1143,8 +1275,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsGfx1250HardwareEntryEnvelope) {
   const Section& dynamic_symbol_table = FindSection(sections, ".dynsym");
   const Section& dynamic_string_table = FindSection(sections, ".dynstr");
   const Section& text = FindSection(sections, ".text");
-  const DynamicSymbol entry = FindDynamicSymbol(
-      hsaco, dynamic_symbol_table, dynamic_string_table, "loom_kernel");
+  const ElfSymbol entry = FindSymbol(hsaco, dynamic_symbol_table,
+                                     dynamic_string_table, "loom_kernel");
   static const uint8_t kExpectedEntryText[] = {
       0x00, 0x40, 0x17, 0xee, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
       0x00, 0x00, 0x00, 0x00, 0x00, 0x7e, 0x41, 0x06, 0x80, 0xb9,
@@ -1753,12 +1885,12 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsAllCompatibleKernels) {
   const std::vector<Section> sections = ReadSections(hsaco);
   const Section& dynamic_symbol_table = FindSection(sections, ".dynsym");
   const Section& dynamic_string_table = FindSection(sections, ".dynstr");
-  EXPECT_GT(FindDynamicSymbol(hsaco, dynamic_symbol_table, dynamic_string_table,
-                              "first_kernel")
+  EXPECT_GT(FindSymbol(hsaco, dynamic_symbol_table, dynamic_string_table,
+                       "first_kernel")
                 .size,
             0u);
-  EXPECT_GT(FindDynamicSymbol(hsaco, dynamic_symbol_table, dynamic_string_table,
-                              "second_kernel")
+  EXPECT_GT(FindSymbol(hsaco, dynamic_symbol_table, dynamic_string_table,
+                       "second_kernel")
                 .size,
             0u);
   EXPECT_EQ(report.entry_rows.count, 2u);
@@ -2016,10 +2148,9 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   const Section& text = FindSection(sections, ".text");
   const std::string feedback_name =
       StringViewToString(LOOM_AMDGPU_RUNTIME_GLOBAL_FEEDBACK_CONFIG_NAME);
-  const DynamicSymbol site =
-      FindDynamicSymbol(hsaco, dynsym, dynstr, kSiteSymbolName);
-  const DynamicSymbol feedback =
-      FindDynamicSymbol(hsaco, dynsym, dynstr, feedback_name.c_str());
+  const ElfSymbol site = FindSymbol(hsaco, dynsym, dynstr, kSiteSymbolName);
+  const ElfSymbol feedback =
+      FindSymbol(hsaco, dynsym, dynstr, feedback_name.c_str());
 
   EXPECT_EQ(site.info, 0x11u);
   EXPECT_EQ(site.section_index, rodata.index);
@@ -2143,10 +2274,9 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   const Section& text = FindSection(sections, ".text");
   const std::string feedback_name =
       StringViewToString(LOOM_AMDGPU_RUNTIME_GLOBAL_FEEDBACK_CONFIG_NAME);
-  const DynamicSymbol site =
-      FindDynamicSymbol(hsaco, dynsym, dynstr, kSiteSymbolName);
-  const DynamicSymbol feedback =
-      FindDynamicSymbol(hsaco, dynsym, dynstr, feedback_name.c_str());
+  const ElfSymbol site = FindSymbol(hsaco, dynsym, dynstr, kSiteSymbolName);
+  const ElfSymbol feedback =
+      FindSymbol(hsaco, dynsym, dynstr, feedback_name.c_str());
 
   EXPECT_EQ(site.info, 0x11u);
   EXPECT_EQ(site.section_index, rodata.index);
@@ -2204,16 +2334,14 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsSourceLoweredSanitizerSiteTableRodata) {
   const Section& dynstr = FindSection(sections, ".dynstr");
   const Section& rodata = FindSection(sections, ".rodata");
   const Section& data = FindSection(sections, ".data");
-  const DynamicSymbol site =
-      FindDynamicSymbol(hsaco, dynsym, dynstr, kSiteSymbolName);
+  const ElfSymbol site = FindSymbol(hsaco, dynsym, dynstr, kSiteSymbolName);
   const std::string asan_name =
       StringViewToString(LOOM_AMDGPU_RUNTIME_GLOBAL_ASAN_CONFIG_NAME);
   const std::string feedback_name =
       StringViewToString(LOOM_AMDGPU_RUNTIME_GLOBAL_FEEDBACK_CONFIG_NAME);
-  const DynamicSymbol asan =
-      FindDynamicSymbol(hsaco, dynsym, dynstr, asan_name.c_str());
-  const DynamicSymbol feedback =
-      FindDynamicSymbol(hsaco, dynsym, dynstr, feedback_name.c_str());
+  const ElfSymbol asan = FindSymbol(hsaco, dynsym, dynstr, asan_name.c_str());
+  const ElfSymbol feedback =
+      FindSymbol(hsaco, dynsym, dynstr, feedback_name.c_str());
 
   EXPECT_EQ(site.info, 0x11u);
   EXPECT_EQ(site.section_index, rodata.index);

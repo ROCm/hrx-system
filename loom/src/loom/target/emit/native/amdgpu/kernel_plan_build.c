@@ -18,8 +18,8 @@
 #include "loom/target/arch/amdgpu/planning/occupancy.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/emit/native/amdgpu/function_plan_build.h"
+#include "loom/target/emit/native/amdgpu/function_report.h"
 #include "loom/target/emit/native/amdgpu/kernel_record_build.h"
-#include "loom/target/emit/native/amdgpu/kernel_report.h"
 
 IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static iree_status_t
 loom_amdgpu_kernel_plan_emit_private_segment_limit(
@@ -305,7 +305,7 @@ iree_status_t loom_amdgpu_kernel_plan_build_from_function(
     return iree_ok_status();
   }
 
-  IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_report_record_plan(
+  IREE_RETURN_IF_ERROR(loom_amdgpu_function_report_record_plan(
       options->report, &function_plan->packet_plan));
   *out_accepted = true;
   return iree_ok_status();

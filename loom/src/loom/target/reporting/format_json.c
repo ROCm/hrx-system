@@ -1493,6 +1493,51 @@ static iree_status_t loom_target_compile_report_format_entries_json(
   return loom_json_object_end(&object);
 }
 
+static iree_status_t loom_target_compile_report_format_call_edges_json(
+    const loom_target_compile_report_t* report, loom_output_stream_t* stream) {
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("count"), report->call_edge_rows.count));
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&object, IREE_SV("rows")));
+  loom_json_array_writer_t array;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &array));
+  iree_host_size_t row_index = 0;
+  for (const loom_target_compile_report_vec_t* vec =
+           report->call_edge_rows.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_call_edge_t* rows =
+        (const loom_target_compile_report_call_edge_t*)
+            loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
+      const loom_target_compile_report_call_edge_t* row = &rows[i];
+      IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&array));
+      loom_json_object_writer_t row_object;
+      IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &row_object));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+          &row_object, IREE_SV("index"), row_index));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+          &row_object, IREE_SV("caller"), row->function_name));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+          &row_object, IREE_SV("callee"), row->callee_name));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+          &row_object, IREE_SV("callsite_count"), row->callsite_count));
+      if (iree_all_bits_set(
+              row->flags, LOOM_TARGET_COMPILE_REPORT_CALL_EDGE_DYNAMIC_COUNT)) {
+        IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+            &row_object, IREE_SV("dynamic_call_count"),
+            row->dynamic_call_count));
+      } else {
+        IREE_RETURN_IF_ERROR(loom_json_object_write_null_field(
+            &row_object, IREE_SV("dynamic_call_count")));
+      }
+      IREE_RETURN_IF_ERROR(loom_json_object_end(&row_object));
+    }
+  }
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&array));
+  return loom_json_object_end(&object);
+}
+
 static iree_status_t loom_target_compile_report_write_diagnostic_segment(
     void* user_data, iree_const_byte_span_t segment) {
   return loom_output_stream_write(
@@ -1641,6 +1686,14 @@ iree_status_t loom_target_compile_report_format_json(
       loom_json_object_begin_field(&object, IREE_SV("entries")));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_format_entries_json(
       report, options->mode, stream));
+  if (options->mode == LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS &&
+      iree_any_bit_set(report->detail_flags,
+                       LOOM_TARGET_COMPILE_REPORT_DETAIL_CALL_EDGES)) {
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(&object, IREE_SV("call_edges")));
+    IREE_RETURN_IF_ERROR(
+        loom_target_compile_report_format_call_edges_json(report, stream));
+  }
   if (iree_any_bit_set(report->detail_flags,
                        LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING)) {
     IREE_RETURN_IF_ERROR(

@@ -443,6 +443,97 @@ TEST(AmdgpuHsacoTest, WritesGfx1100CodeObjectEnvelope) {
   EXPECT_NE(note_contents.find("loom_kernel.kd"), std::string::npos);
 }
 
+TEST(AmdgpuHsacoTest, WritesSharedModuleLocalFunctions) {
+  uint8_t kernel_text[2][16] = {};
+  const uint8_t function_text[] = {0x00, 0x00, 0x80, 0xbe};
+  const loom_amdgpu_hsaco_call_fixup_t call_fixups[] = {
+      {
+          .target_function_ordinal = 0,
+          .base_pc_byte_offset = 0,
+          .low_literal_byte_offset = 4,
+          .high_literal_byte_offset = 8,
+      },
+      {
+          .target_function_ordinal = 0,
+          .base_pc_byte_offset = 0,
+          .low_literal_byte_offset = 4,
+          .high_literal_byte_offset = 8,
+      },
+  };
+  const loom_amdgpu_hsaco_kernel_t kernels[] = {
+      {
+          .metadata = MinimalKernel(IREE_SV("encode"), IREE_SV("encode.kd")),
+          .text =
+              iree_make_const_byte_span(kernel_text[0], sizeof(kernel_text[0])),
+          .call_fixups = &call_fixups[0],
+          .call_fixup_count = 1,
+      },
+      {
+          .metadata = MinimalKernel(IREE_SV("combine"), IREE_SV("combine.kd")),
+          .text =
+              iree_make_const_byte_span(kernel_text[1], sizeof(kernel_text[1])),
+          .call_fixups = &call_fixups[1],
+          .call_fixup_count = 1,
+      },
+  };
+  const loom_amdgpu_hsaco_function_t function = {
+      .name = IREE_SV("mix"),
+      .text = iree_make_const_byte_span(function_text, sizeof(function_text)),
+  };
+  const loom_amdgpu_hsaco_input_t file = {
+      .target_identity = TargetIdentity("gfx1100"),
+      .kernels = kernels,
+      .kernel_count = IREE_ARRAYSIZE(kernels),
+      .functions = &function,
+      .function_count = 1,
+  };
+
+  StreamPtr stream = CreateStream();
+  TestArena arena;
+  IREE_ASSERT_OK(WriteHsaco(&file, stream.get(), arena.arena()));
+  const std::string bytes = StreamBytes(stream.get());
+  const std::vector<Section> sections = ReadSections(bytes);
+  const Section& dynsym = FindSection(sections, ".dynsym");
+  const Section& dynstr = FindSection(sections, ".dynstr");
+  const Section& text = FindSection(sections, ".text");
+  const Section& symtab = FindSection(sections, ".symtab");
+  const Section& strtab = FindSection(sections, ".strtab");
+
+  EXPECT_EQ(dynsym.size, 5u * 24u);
+  EXPECT_EQ(symtab.size, 6u * 24u);
+  EXPECT_EQ(symtab.info, 2u);
+  const std::string dynstr_contents =
+      bytes.substr((size_t)dynstr.offset, (size_t)dynstr.size);
+  const std::string strtab_contents =
+      bytes.substr((size_t)strtab.offset, (size_t)strtab.size);
+  EXPECT_EQ(dynstr_contents.find("mix"), std::string::npos);
+  EXPECT_NE(strtab_contents.find("mix"), std::string::npos);
+
+  constexpr uint64_t kFirstKernelOffset = 0;
+  constexpr uint64_t kSecondKernelOffset = 256;
+  constexpr uint64_t kFunctionOffset = 272;
+  EXPECT_EQ(text.size, kFunctionOffset + sizeof(function_text));
+  EXPECT_EQ(LoadLeU32(bytes, (size_t)(text.offset + kFirstKernelOffset + 4)),
+            kFunctionOffset - kFirstKernelOffset);
+  EXPECT_EQ(LoadLeU32(bytes, (size_t)(text.offset + kSecondKernelOffset + 4)),
+            kFunctionOffset - kSecondKernelOffset);
+  EXPECT_EQ(LoadLeU32(bytes, (size_t)(text.offset + kFirstKernelOffset + 8)),
+            0u);
+  EXPECT_EQ(LoadLeU32(bytes, (size_t)(text.offset + kSecondKernelOffset + 8)),
+            0u);
+
+  const size_t function_symbol = (size_t)symtab.offset + 24u;
+  EXPECT_EQ(ReadNullTerminatedString(strtab_contents,
+                                     LoadLeU32(bytes, function_symbol)),
+            "mix");
+  EXPECT_EQ((uint8_t)bytes[function_symbol + 4], 0x02u);
+  EXPECT_EQ((uint8_t)bytes[function_symbol + 5], 0u);
+  EXPECT_EQ(LoadLeU16(bytes, function_symbol + 6), text.index);
+  EXPECT_EQ(LoadLeU64(bytes, function_symbol + 8),
+            text.address + kFunctionOffset);
+  EXPECT_EQ(LoadLeU64(bytes, function_symbol + 16), sizeof(function_text));
+}
+
 TEST(AmdgpuHsacoTest, WritesWritableRuntimeDataSymbols) {
   const uint8_t s_endpgm[] = {0x00, 0x00, 0x81, 0xbf};
   const loom_amdgpu_hsaco_kernel_t kernel = {

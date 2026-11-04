@@ -261,6 +261,34 @@ loom_cc_library(
         "//loom/src/loom/target:registers",
         "//loom/src/loom/target/arch/amdgpu:error_defs",
         "//loom/src/loom/target/arch/amdgpu/abi:call_abi",
+        "//loom/src/loom/target/reporting:report",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "program_artifact",
+    srcs = ["program_artifact.c"],
+    hdrs = ["program_artifact.h"],
+    deps = [
+        ":function_compile",
+        ":program_call",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/analysis:symbol_references",
+        "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:parameter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target/arch/amdgpu:artifact_key",
+        "//loom/src/loom/target/arch/amdgpu:error_defs",
+        "//loom/src/loom/target/arch/amdgpu:facts",
+        "//loom/src/loom/target/arch/amdgpu:target_identity",
+        "//loom/src/loom/target/reporting:report",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -272,25 +300,24 @@ loom_cc_library(
     hdrs = ["program_compile.h"],
     deps = [
         ":function_compile",
-        ":program_call",
+        ":program_artifact",
         ":program_resources",
-        "//loom/src/loom/analysis:symbol_facts",
-        "//loom/src/loom/analysis:symbol_references",
-        "//loom/src/loom/codegen/low:diagnostics",
-        "//loom/src/loom/codegen/low:target_binding",
-        "//loom/src/loom/error:emitter",
-        "//loom/src/loom/error:parameter",
         "//loom/src/loom/ir",
-        "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/low",
-        "//loom/src/loom/target:function_version",
-        "//loom/src/loom/target:registers",
-        "//loom/src/loom/target/arch/amdgpu:artifact_key",
-        "//loom/src/loom/target/arch/amdgpu:error_defs",
-        "//loom/src/loom/target/arch/amdgpu:facts",
-        "//loom/src/loom/target/arch/amdgpu:target_identity",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "program_report",
+    srcs = ["program_report.c"],
+    hdrs = ["program_report.h"],
+    deps = [
+        ":program_artifact",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/reporting:report",
+        "//runtime/src/iree/base",
     ],
 )
 
@@ -588,9 +615,9 @@ loom_cc_library(
     hdrs = ["kernel_plan_build.h"],
     deps = [
         ":function_plan_build",
+        ":function_report",
         ":kernel_plan",
         ":kernel_record_build",
-        ":kernel_report",
         ":program_resources",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:frame",
@@ -715,11 +742,15 @@ loom_cc_library(
     hdrs = ["program_emission.h"],
     deps = [
         ":encoding",
+        ":function_report",
         ":kernel_assembly",
         ":kernel_emission",
+        ":kernel_entry",
         ":kernel_plan",
+        ":program_artifact",
         ":program_compile",
         "//loom/src/loom/ir",
+        "//loom/src/loom/target/reporting:low",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/base/internal:arena",
@@ -727,12 +758,12 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "kernel_report",
-    srcs = ["kernel_report.c"],
-    hdrs = ["kernel_report.h"],
+    name = "function_report",
+    srcs = ["function_report.c"],
+    hdrs = ["function_report.h"],
     deps = [
-        ":kernel_emission",
-        ":kernel_plan",
+        ":encoding",
+        ":function_plan",
         "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/ir",
         "//loom/src/loom/target/arch/amdgpu/planning:wait_counters",
@@ -744,15 +775,30 @@ loom_cc_library(
 )
 
 loom_cc_test(
-    name = "kernel_report_test",
-    srcs = ["kernel_report_test.cc"],
+    name = "function_report_test",
+    srcs = ["function_report_test.cc"],
     deps = [
-        ":kernel_report",
+        ":function_report",
         "//loom/src/loom/target/arch/amdgpu/planning:wait_counters",
         "//loom/src/loom/target/reporting:report",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "kernel_report",
+    srcs = ["kernel_report.c"],
+    hdrs = ["kernel_report.h"],
+    deps = [
+        ":function_report",
+        ":kernel_emission",
+        ":kernel_plan",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/target/reporting:low",
+        "//loom/src/loom/target/reporting:report",
+        "//runtime/src/iree/base",
     ],
 )
 
@@ -845,8 +891,10 @@ loom_cc_library(
         ":kernel_emission",
         ":kernel_plan_build",
         ":kernel_report",
+        ":program_artifact",
         ":program_compile",
         ":program_emission",
+        ":program_report",
         ":runtime_globals",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/analysis:symbol_references",

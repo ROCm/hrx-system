@@ -40,6 +40,8 @@ void loom_target_compile_report_deinitialize(
       &report->pipeline_plans, allocator);
   loom_target_compile_report_row_list_deinitialize(allocator,
                                                    &report->entry_rows);
+  loom_target_compile_report_row_list_deinitialize(allocator,
+                                                   &report->call_edge_rows);
   loom_target_compile_report_row_list_deinitialize(
       allocator, &report->residency_constraint_rows);
   loom_target_compile_report_row_list_deinitialize(allocator,
@@ -124,7 +126,8 @@ static bool loom_target_compile_report_has_rows(
          report->wait_action_rows.count != 0 ||
          report->target_insertion_rows.count != 0 ||
          report->config_binding_rows.count != 0 ||
-         report->entry_rows.count != 0 || report->source_low_rows.count != 0 ||
+         report->entry_rows.count != 0 || report->call_edge_rows.count != 0 ||
+         report->source_low_rows.count != 0 ||
          report->source_low_target_rows.count != 0 ||
          report->source_low_transform_rows.count != 0 ||
          report->source_boundary_projection_rows.count != 0 ||
@@ -148,6 +151,7 @@ void loom_target_compile_report_initialize_if_empty(
   if (report->detail_flags != LOOM_TARGET_COMPILE_REPORT_DETAIL_NONE ||
       report->requested_detail_flags !=
           LOOM_TARGET_COMPILE_REPORT_DETAIL_NONE ||
+      report->merged_evidence_count != 0 ||
       report->retained_storage.data != NULL ||
       loom_target_compile_report_has_rows(report)) {
     return;
@@ -561,59 +565,6 @@ void loom_target_compile_report_record_workload(
   }
 }
 
-static void loom_target_compile_report_accumulate_instruction_mix(
-    loom_target_compile_report_static_instruction_mix_t* target,
-    const loom_target_compile_report_static_instruction_mix_t* source) {
-  target->descriptor_count += source->descriptor_count;
-  target->unknown_count += source->unknown_count;
-  target->scalar_alu_count += source->scalar_alu_count;
-  target->vector_alu_count += source->vector_alu_count;
-  target->matrix_count += source->matrix_count;
-  target->mfma_count += source->mfma_count;
-  target->smfmac_count += source->smfmac_count;
-  target->wmma_count += source->wmma_count;
-  target->swmmac_count += source->swmmac_count;
-  target->dot_count += source->dot_count;
-  target->global_memory_count += source->global_memory_count;
-  target->global_load_count += source->global_load_count;
-  target->global_store_count += source->global_store_count;
-  target->buffer_load_count += source->buffer_load_count;
-  target->buffer_store_count += source->buffer_store_count;
-  target->flat_memory_count += source->flat_memory_count;
-  target->local_memory_count += source->local_memory_count;
-  target->scalar_memory_count += source->scalar_memory_count;
-  target->private_memory_count += source->private_memory_count;
-  target->generic_memory_count += source->generic_memory_count;
-  target->memory_read_unknown_width_count +=
-      source->memory_read_unknown_width_count;
-  target->memory_write_unknown_width_count +=
-      source->memory_write_unknown_width_count;
-  target->memory_read_byte_count += source->memory_read_byte_count;
-  target->memory_write_byte_count += source->memory_write_byte_count;
-  target->global_load_byte_count += source->global_load_byte_count;
-  target->global_store_byte_count += source->global_store_byte_count;
-  target->buffer_load_byte_count += source->buffer_load_byte_count;
-  target->buffer_store_byte_count += source->buffer_store_byte_count;
-  target->flat_read_byte_count += source->flat_read_byte_count;
-  target->flat_write_byte_count += source->flat_write_byte_count;
-  target->local_read_byte_count += source->local_read_byte_count;
-  target->local_write_byte_count += source->local_write_byte_count;
-  target->scalar_read_byte_count += source->scalar_read_byte_count;
-  target->scalar_write_byte_count += source->scalar_write_byte_count;
-  target->private_read_byte_count += source->private_read_byte_count;
-  target->private_write_byte_count += source->private_write_byte_count;
-  target->unclassified_read_byte_count += source->unclassified_read_byte_count;
-  target->unclassified_write_byte_count +=
-      source->unclassified_write_byte_count;
-  target->atomic_count += source->atomic_count;
-  target->branch_count += source->branch_count;
-  target->execution_barrier_count += source->execution_barrier_count;
-  target->control_count += source->control_count;
-  target->conversion_count += source->conversion_count;
-  target->cache_count += source->cache_count;
-  target->register_move_count += source->register_move_count;
-}
-
 static void loom_target_compile_report_accumulate_move_causes(
     loom_target_compile_report_move_cause_counts_t* target,
     const loom_target_compile_report_move_cause_counts_t* source) {
@@ -781,7 +732,8 @@ static void loom_target_compile_report_merge_target_resources(
 static void loom_target_compile_report_merge_evidence_summary(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_t* entry_report) {
-  const bool first_entry = report->entry_rows.count == 0;
+  const bool first_entry = report->merged_evidence_count == 0;
+  ++report->merged_evidence_count;
   const bool report_had_emission_breakdown =
       iree_any_bit_set(report->detail_flags,
                        LOOM_TARGET_COMPILE_REPORT_DETAIL_EMISSION_BREAKDOWN);
@@ -813,6 +765,24 @@ static void loom_target_compile_report_merge_evidence_summary(
   report->target_legalization_maximum_created_op_count =
       iree_max(report->target_legalization_maximum_created_op_count,
                entry_report->target_legalization_maximum_created_op_count);
+  report->target_legalization_legal_op_count +=
+      entry_report->target_legalization_legal_op_count;
+  report->target_legalization_rewritten_op_count +=
+      entry_report->target_legalization_rewritten_op_count;
+  report->target_legalization_scalarized_op_count +=
+      entry_report->target_legalization_scalarized_op_count;
+  report->target_legalization_target_rewritten_op_count +=
+      entry_report->target_legalization_target_rewritten_op_count;
+  report->target_legalization_reference_rewritten_op_count +=
+      entry_report->target_legalization_reference_rewritten_op_count;
+  report->target_legalization_deferred_op_count +=
+      entry_report->target_legalization_deferred_op_count;
+  report->target_legalization_invalid_ir_op_count +=
+      entry_report->target_legalization_invalid_ir_op_count;
+  report->target_legalization_unsupported_op_count +=
+      entry_report->target_legalization_unsupported_op_count;
+  report->target_legalization_unhandled_op_count +=
+      entry_report->target_legalization_unhandled_op_count;
   report->math_legalization_maximum_created_op_count =
       iree_max(report->math_legalization_maximum_created_op_count,
                entry_report->math_legalization_maximum_created_op_count);
@@ -991,10 +961,10 @@ static void loom_target_compile_report_merge_evidence_summary(
   loom_target_compile_report_accumulate_target_insertion_summary(
       &report->target_insertion_summary,
       &entry_report->target_insertion_summary);
-  loom_target_compile_report_accumulate_instruction_mix(
+  loom_target_compile_report_accumulate_static_mix(
       &report->static_instruction_mix, &entry_report->static_instruction_mix);
   if (report_had_dynamic_instruction_mix && entry_has_dynamic_instruction_mix) {
-    loom_target_compile_report_accumulate_instruction_mix(
+    loom_target_compile_report_accumulate_static_mix(
         &report->dynamic_instruction_mix,
         &entry_report->dynamic_instruction_mix);
   } else {
@@ -1304,14 +1274,31 @@ loom_target_compile_report_record_source_low_selection_summary_row(
   return iree_ok_status();
 }
 
-iree_status_t loom_target_compile_report_merge_evidence(
+static iree_status_t loom_target_compile_report_append_evidence_rows(
     loom_target_compile_report_t* report,
-    const loom_target_compile_report_t* entry_report) {
-  loom_target_compile_report_merge_evidence_summary(report, entry_report);
+    const loom_target_compile_report_t* entry_report,
+    bool include_program_context) {
+  for (const loom_target_compile_report_vec_t* vec =
+           entry_report->call_edge_rows.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_call_edge_t* rows =
+        (const loom_target_compile_report_call_edge_t*)
+            loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i) {
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_record_call_edge(report, &rows[i]));
+    }
+  }
+  if (include_program_context) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_row_list_append_all(
+        &report->residency_constraint_rows,
+        &entry_report->residency_constraint_rows,
+        sizeof(loom_target_compile_report_residency_constraint_row_t),
+        report->allocator));
+  }
   IREE_RETURN_IF_ERROR(loom_target_compile_report_row_list_append_all(
-      &report->residency_constraint_rows,
-      &entry_report->residency_constraint_rows,
-      sizeof(loom_target_compile_report_residency_constraint_row_t),
+      &report->pressure_summaries, &entry_report->pressure_summaries,
+      sizeof(loom_target_compile_report_pressure_summary_t),
       report->allocator));
   if (iree_any_bit_set(entry_report->detail_flags,
                        LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ROWS)) {
@@ -1391,7 +1378,8 @@ iree_status_t loom_target_compile_report_merge_evidence(
         sizeof(loom_target_compile_report_target_insertion_row_t),
         report->allocator));
   }
-  if (iree_any_bit_set(entry_report->detail_flags,
+  if (include_program_context &&
+      iree_any_bit_set(entry_report->detail_flags,
                        LOOM_TARGET_COMPILE_REPORT_DETAIL_CONFIG_BINDING_ROWS)) {
     IREE_RETURN_IF_ERROR(loom_target_compile_report_config_bindings_append_all(
         &report->config_binding_rows, &entry_report->config_binding_rows,
@@ -1454,6 +1442,16 @@ iree_status_t loom_target_compile_report_merge_evidence(
   }
   if (iree_any_bit_set(
           entry_report->detail_flags,
+          LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_LEGALIZATION_ROWS)) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_row_list_append_all(
+        &report->target_legalization_rows,
+        &entry_report->target_legalization_rows,
+        sizeof(loom_target_compile_report_legalization_row_t),
+        report->allocator));
+  }
+  if (include_program_context &&
+      iree_any_bit_set(
+          entry_report->detail_flags,
           LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_CAPABILITY_ROWS)) {
     IREE_RETURN_IF_ERROR(loom_target_compile_report_row_list_append_all(
         &report->target_capability_rows, &entry_report->target_capability_rows,
@@ -1461,6 +1459,194 @@ iree_status_t loom_target_compile_report_merge_evidence(
         report->allocator));
   }
   return iree_ok_status();
+}
+
+iree_status_t loom_target_compile_report_merge_function_evidence(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_t* function_report,
+    const loom_target_compile_report_function_merge_options_t* options) {
+  const bool report_had_static_mix = iree_any_bit_set(
+      report->detail_flags,
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_STATIC_INSTRUCTION_MIX);
+  const bool function_has_static_mix = iree_any_bit_set(
+      function_report->detail_flags,
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_STATIC_INSTRUCTION_MIX);
+  const bool report_had_dynamic_mix = iree_any_bit_set(
+      report->detail_flags,
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_DYNAMIC_INSTRUCTION_MIX);
+  const bool function_has_dynamic_mix = iree_any_bit_set(
+      function_report->detail_flags,
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_DYNAMIC_INSTRUCTION_MIX);
+  const bool report_had_low_planning = iree_any_bit_set(
+      report->detail_flags, LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING);
+  const bool function_has_low_planning =
+      iree_any_bit_set(function_report->detail_flags,
+                       LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING);
+  const loom_target_compile_report_detail_flags_t target_owned_flags =
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_ARTIFACT_SIZE |
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_EMISSION |
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_MEMORY |
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_ENTRIES |
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_RESOURCES |
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_WORKLOAD |
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_EMISSION_BREAKDOWN |
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_RESIDENCY_CONSTRAINTS |
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_PIPELINE_PLAN |
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_PIPELINE_PLAN_ROWS |
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_CONFIG_BINDING_ROWS |
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_CAPABILITY_ROWS;
+  report->detail_flags |= function_report->detail_flags & ~target_owned_flags;
+
+  report->schedule_node_count += function_report->schedule_node_count;
+  report->scheduled_node_count += function_report->scheduled_node_count;
+  report->schedule_dependency_count +=
+      function_report->schedule_dependency_count;
+  report->schedule_scope_count += function_report->schedule_scope_count;
+  report->schedule_resource_use_count +=
+      function_report->schedule_resource_use_count;
+  report->schedule_hazard_gap_count +=
+      function_report->schedule_hazard_gap_count;
+  report->schedule_model_summary_count +=
+      function_report->schedule_model_summary_count;
+  report->register_pressure_summary_count +=
+      function_report->register_pressure_summary_count;
+  report->register_pressure_peak_live_units =
+      iree_max(report->register_pressure_peak_live_units,
+               function_report->register_pressure_peak_live_units);
+  report->allocation_assignment_count +=
+      function_report->allocation_assignment_count;
+  report->allocation_spill_count += function_report->allocation_spill_count;
+  report->allocation_spill_plan_count +=
+      function_report->allocation_spill_plan_count;
+  report->allocation_coalesced_copy_count +=
+      function_report->allocation_coalesced_copy_count;
+  report->allocation_materialized_copy_count +=
+      function_report->allocation_materialized_copy_count;
+  report->allocation_materialized_spill_storage_count +=
+      function_report->allocation_materialized_spill_storage_count;
+  report->allocation_materialized_spill_storage_bytes +=
+      function_report->allocation_materialized_spill_storage_bytes;
+  report->allocation_materialized_spill_store_count +=
+      function_report->allocation_materialized_spill_store_count;
+  report->allocation_materialized_spill_store_bytes +=
+      function_report->allocation_materialized_spill_store_bytes;
+  report->allocation_materialized_reload_count +=
+      function_report->allocation_materialized_reload_count;
+  report->allocation_materialized_reload_bytes +=
+      function_report->allocation_materialized_reload_bytes;
+  report->allocation_storage_lease_count +=
+      function_report->allocation_storage_lease_count;
+  report->allocation_storage_lease_instance_count +=
+      function_report->allocation_storage_lease_instance_count;
+  report->allocation_storage_release_action_count +=
+      function_report->allocation_storage_release_action_count;
+
+  report->source_low_unkeyed_maximum_emitted_op_count =
+      iree_max(report->source_low_unkeyed_maximum_emitted_op_count,
+               function_report->source_low_unkeyed_maximum_emitted_op_count);
+  report->source_low_selected_op_count +=
+      function_report->source_low_selected_op_count;
+  report->source_low_emitted_op_count +=
+      function_report->source_low_emitted_op_count;
+  loom_target_compile_report_accumulate_source_low_memory_summaries(
+      &report->source_low_memory_summary,
+      &function_report->source_low_memory_summary);
+  loom_target_compile_report_accumulate_bank_service_summaries(
+      &report->bank_service_summary, &function_report->bank_service_summary);
+  loom_target_compile_report_accumulate_subgroup_access_summaries(
+      &report->subgroup_access_summary,
+      &function_report->subgroup_access_summary);
+
+  report->target_legalization_maximum_created_op_count =
+      iree_max(report->target_legalization_maximum_created_op_count,
+               function_report->target_legalization_maximum_created_op_count);
+  report->target_legalization_legal_op_count +=
+      function_report->target_legalization_legal_op_count;
+  report->target_legalization_rewritten_op_count +=
+      function_report->target_legalization_rewritten_op_count;
+  report->target_legalization_scalarized_op_count +=
+      function_report->target_legalization_scalarized_op_count;
+  report->target_legalization_target_rewritten_op_count +=
+      function_report->target_legalization_target_rewritten_op_count;
+  report->target_legalization_reference_rewritten_op_count +=
+      function_report->target_legalization_reference_rewritten_op_count;
+  report->target_legalization_deferred_op_count +=
+      function_report->target_legalization_deferred_op_count;
+  report->target_legalization_invalid_ir_op_count +=
+      function_report->target_legalization_invalid_ir_op_count;
+  report->target_legalization_unsupported_op_count +=
+      function_report->target_legalization_unsupported_op_count;
+  report->target_legalization_unhandled_op_count +=
+      function_report->target_legalization_unhandled_op_count;
+  report->math_legalization_maximum_created_op_count =
+      iree_max(report->math_legalization_maximum_created_op_count,
+               function_report->math_legalization_maximum_created_op_count);
+  report->math_legalization_rewritten_op_count +=
+      function_report->math_legalization_rewritten_op_count;
+  report->math_legalization_native_alternative_op_count +=
+      function_report->math_legalization_native_alternative_op_count;
+  report->math_legalization_rejected_op_count +=
+      function_report->math_legalization_rejected_op_count;
+  report->math_legalization_missing_policy_op_count +=
+      function_report->math_legalization_missing_policy_op_count;
+  report->math_legalization_missing_recipe_op_count +=
+      function_report->math_legalization_missing_recipe_op_count;
+
+  loom_target_compile_report_accumulate_wait_plan(&report->wait_plan,
+                                                  &function_report->wait_plan);
+  loom_target_compile_report_accumulate_target_insertion_summary(
+      &report->target_insertion_summary,
+      &function_report->target_insertion_summary);
+  loom_target_compile_report_accumulate_move_causes(
+      report->move_causes, function_report->move_causes);
+
+  if (report_had_static_mix && function_has_static_mix) {
+    loom_target_compile_report_accumulate_static_mix(
+        &report->static_instruction_mix,
+        &function_report->static_instruction_mix);
+  } else {
+    report->detail_flags &=
+        ~LOOM_TARGET_COMPILE_REPORT_DETAIL_STATIC_INSTRUCTION_MIX;
+    report->static_instruction_mix =
+        (loom_target_compile_report_static_instruction_mix_t){0};
+  }
+
+  loom_target_compile_report_static_instruction_mix_t dynamic_mix =
+      report->dynamic_instruction_mix;
+  const bool dynamic_mix_complete =
+      report_had_dynamic_mix && options->has_exact_invocation_count &&
+      (options->invocation_count == 0 ||
+       (function_has_dynamic_mix &&
+        loom_target_compile_report_accumulate_scaled_static_mix(
+            &dynamic_mix, &function_report->dynamic_instruction_mix,
+            options->invocation_count)));
+  if (dynamic_mix_complete) {
+    report->dynamic_instruction_mix = dynamic_mix;
+  } else {
+    report->detail_flags &=
+        ~LOOM_TARGET_COMPILE_REPORT_DETAIL_DYNAMIC_INSTRUCTION_MIX;
+    report->dynamic_instruction_mix =
+        (loom_target_compile_report_static_instruction_mix_t){0};
+  }
+
+  if (report_had_low_planning && function_has_low_planning) {
+    loom_low_planning_statistics_accumulate(&report->low_planning,
+                                            &function_report->low_planning);
+  } else {
+    report->detail_flags &= ~LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING;
+    report->low_planning = (loom_low_planning_statistics_t){0};
+  }
+
+  return loom_target_compile_report_append_evidence_rows(
+      report, function_report, /*include_program_context=*/false);
+}
+
+iree_status_t loom_target_compile_report_merge_evidence(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_t* entry_report) {
+  loom_target_compile_report_merge_evidence_summary(report, entry_report);
+  return loom_target_compile_report_append_evidence_rows(
+      report, entry_report, /*include_program_context=*/true);
 }
 
 iree_status_t loom_target_compile_report_record_entry_report(

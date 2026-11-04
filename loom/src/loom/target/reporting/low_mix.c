@@ -280,124 +280,6 @@ void loom_target_compile_report_accumulate_low_node_static_mix(
 #undef LOOM_ACCUMULATE_INSTRUCTION_CLASS_
 }
 
-void loom_target_compile_report_accumulate_static_mix(
-    loom_target_compile_report_static_instruction_mix_t* target,
-    const loom_target_compile_report_static_instruction_mix_t* source) {
-  target->descriptor_count += source->descriptor_count;
-  target->unknown_count += source->unknown_count;
-  target->scalar_alu_count += source->scalar_alu_count;
-  target->vector_alu_count += source->vector_alu_count;
-  target->matrix_count += source->matrix_count;
-  target->mfma_count += source->mfma_count;
-  target->smfmac_count += source->smfmac_count;
-  target->wmma_count += source->wmma_count;
-  target->swmmac_count += source->swmmac_count;
-  target->dot_count += source->dot_count;
-  target->global_memory_count += source->global_memory_count;
-  target->global_load_count += source->global_load_count;
-  target->global_store_count += source->global_store_count;
-  target->buffer_load_count += source->buffer_load_count;
-  target->buffer_store_count += source->buffer_store_count;
-  target->flat_memory_count += source->flat_memory_count;
-  target->local_memory_count += source->local_memory_count;
-  target->scalar_memory_count += source->scalar_memory_count;
-  target->private_memory_count += source->private_memory_count;
-  target->generic_memory_count += source->generic_memory_count;
-  target->memory_read_unknown_width_count +=
-      source->memory_read_unknown_width_count;
-  target->memory_write_unknown_width_count +=
-      source->memory_write_unknown_width_count;
-  target->memory_read_byte_count += source->memory_read_byte_count;
-  target->memory_write_byte_count += source->memory_write_byte_count;
-  target->global_load_byte_count += source->global_load_byte_count;
-  target->global_store_byte_count += source->global_store_byte_count;
-  target->buffer_load_byte_count += source->buffer_load_byte_count;
-  target->buffer_store_byte_count += source->buffer_store_byte_count;
-  target->flat_read_byte_count += source->flat_read_byte_count;
-  target->flat_write_byte_count += source->flat_write_byte_count;
-  target->local_read_byte_count += source->local_read_byte_count;
-  target->local_write_byte_count += source->local_write_byte_count;
-  target->scalar_read_byte_count += source->scalar_read_byte_count;
-  target->scalar_write_byte_count += source->scalar_write_byte_count;
-  target->private_read_byte_count += source->private_read_byte_count;
-  target->private_write_byte_count += source->private_write_byte_count;
-  target->unclassified_read_byte_count += source->unclassified_read_byte_count;
-  target->unclassified_write_byte_count +=
-      source->unclassified_write_byte_count;
-  target->atomic_count += source->atomic_count;
-  target->branch_count += source->branch_count;
-  target->execution_barrier_count += source->execution_barrier_count;
-  target->control_count += source->control_count;
-  target->conversion_count += source->conversion_count;
-  target->cache_count += source->cache_count;
-  target->register_move_count += source->register_move_count;
-}
-
-bool loom_target_compile_report_accumulate_scaled_static_mix(
-    loom_target_compile_report_static_instruction_mix_t* target,
-    const loom_target_compile_report_static_instruction_mix_t* source,
-    uint64_t scale) {
-#define LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(field)             \
-  do {                                                                        \
-    uint64_t scaled_value = 0;                                                \
-    if (!iree_checked_mul_u64(source->field, scale, &scaled_value) ||         \
-        !iree_checked_add_u64(target->field, scaled_value, &target->field)) { \
-      return false;                                                           \
-    }                                                                         \
-  } while (0)
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(descriptor_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(unknown_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(scalar_alu_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(vector_alu_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(matrix_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(mfma_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(smfmac_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(wmma_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(swmmac_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(dot_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(global_memory_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(global_load_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(global_store_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(buffer_load_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(buffer_store_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(flat_memory_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(local_memory_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(scalar_memory_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(private_memory_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(generic_memory_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(
-      memory_read_unknown_width_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(
-      memory_write_unknown_width_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(memory_read_byte_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(memory_write_byte_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(global_load_byte_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(global_store_byte_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(buffer_load_byte_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(buffer_store_byte_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(flat_read_byte_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(flat_write_byte_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(local_read_byte_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(local_write_byte_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(scalar_read_byte_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(scalar_write_byte_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(private_read_byte_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(private_write_byte_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(
-      unclassified_read_byte_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(
-      unclassified_write_byte_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(atomic_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(branch_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(execution_barrier_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(control_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(conversion_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(cache_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(register_move_count);
-#undef LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD
-  return true;
-}
-
 static bool loom_target_compile_report_low_exact_trip_count(
     const loom_value_fact_table_t* fact_table, loom_loop_like_t loop,
     uint64_t* out_trip_count) {
@@ -918,27 +800,47 @@ iree_status_t loom_target_compile_report_record_low_dynamic_mix(
     loom_target_compile_report_t* report,
     const loom_low_emission_frame_t* frame,
     const loom_target_compile_report_low_dynamic_context_t* dynamic_context) {
-  if (dynamic_context == NULL || !dynamic_context->exact) {
-    return iree_ok_status();
-  }
   loom_target_compile_report_static_instruction_mix_t mix = {0};
-  bool exact = true;
-  for (iree_host_size_t i = 0; exact && i < frame->schedule.node_count; ++i) {
+  bool mix_exact = dynamic_context != NULL && dynamic_context->initialized &&
+                   dynamic_context->exact;
+  for (iree_host_size_t i = 0; i < frame->schedule.node_count; ++i) {
     const loom_low_schedule_node_t* node = &frame->schedule.nodes[i];
     uint64_t multiplier = 1;
-    exact = loom_target_compile_report_low_node_execution_multiplier(
-        frame->module, dynamic_context, node, &multiplier);
-    if (!exact) {
-      break;
+    const bool node_exact =
+        dynamic_context != NULL && dynamic_context->initialized &&
+        loom_target_compile_report_low_node_execution_multiplier(
+            frame->module, dynamic_context, node, &multiplier);
+    if (node->op != NULL && loom_low_func_call_isa(node->op)) {
+      const loom_symbol_ref_t callee = loom_low_func_call_callee(node->op);
+      const loom_target_compile_report_call_edge_t edge = {
+          .flags = node_exact
+                       ? LOOM_TARGET_COMPILE_REPORT_CALL_EDGE_DYNAMIC_COUNT
+                       : LOOM_TARGET_COMPILE_REPORT_CALL_EDGE_NONE,
+          .function_name = report->function_name,
+          .function = loom_low_function_callee(frame->function_op),
+          .callee_name = loom_low_diagnostic_symbol_name(frame->module, callee),
+          .callee = callee,
+          .callsite_count = 1,
+          .dynamic_call_count = node_exact ? multiplier : 0,
+      };
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_record_call_edge(report, &edge));
+    }
+    if (!mix_exact) {
+      continue;
+    }
+    mix_exact = node_exact;
+    if (!mix_exact) {
+      continue;
     }
     loom_target_compile_report_static_instruction_mix_t node_mix = {0};
     loom_target_compile_report_accumulate_low_node_static_mix(
         &frame->schedule, &frame->allocation,
         frame->schedule.target.descriptor_set, (uint32_t)i, &node_mix);
-    exact = loom_target_compile_report_accumulate_scaled_static_mix(
+    mix_exact = loom_target_compile_report_accumulate_scaled_static_mix(
         &mix, &node_mix, multiplier);
   }
-  if (exact) {
+  if (mix_exact) {
     loom_target_compile_report_record_dynamic_instruction_mix(report, &mix);
   }
   return iree_ok_status();

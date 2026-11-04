@@ -630,7 +630,8 @@ static iree_status_t loom_aie2p_xdna_compile_resident_entries(
       request->scratch_arena, resident_programs));
   loom_aie2p_program_compiler_t* compiler = NULL;
   IREE_RETURN_IF_ERROR(loom_aie2p_program_compiler_allocate(
-      resident_module, request->scratch_arena, &compiler));
+      resident_module, request->scratch_arena, request->compile_report,
+      &compiler));
   for (iree_host_size_t i = 0; i < entry_count; ++i) {
     if (array_plans[i].function_op == NULL) {
       continue;
@@ -841,7 +842,8 @@ iree_status_t loom_aie2p_xdna_compile_artifact(
 
   loom_aie2p_program_compiler_t* compiler = NULL;
   IREE_RETURN_IF_ERROR(loom_aie2p_program_compiler_allocate(
-      request->module, request->scratch_arena, &compiler));
+      request->module, request->scratch_arena, request->compile_report,
+      &compiler));
   for (iree_host_size_t i = 0; i < entry_count; ++i) {
     if (configuration_plans[i] == NULL) {
       continue;

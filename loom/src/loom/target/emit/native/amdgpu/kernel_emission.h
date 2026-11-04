@@ -33,14 +33,12 @@ enum loom_amdgpu_kernel_emission_flag_bits_e {
 typedef struct loom_amdgpu_kernel_emission_result_t {
   // Kernel row consumed by final HSACO construction.
   loom_amdgpu_hsaco_kernel_t kernel;
-  // Number of instructions emitted for the scheduled Low body.
-  uint64_t body_instruction_count;
+  // Encoded function body before the kernel entry envelope is prepended.
+  loom_amdgpu_encoded_instruction_stream_t body;
   // Number of instructions prepended by the native entry envelope.
   uint64_t entry_instruction_count;
-  // Arena-owned native insertions retained when requested by |flags|.
-  const loom_amdgpu_native_insertion_t* native_insertions;
-  // Number of entries in |native_insertions|.
-  iree_host_size_t native_insertion_count;
+  // Number of VOPD packets physically emitted in |body|.
+  uint64_t coissued_instruction_count;
 } loom_amdgpu_kernel_emission_result_t;
 
 // Emits one final HSACO kernel row and optional assembly listing.

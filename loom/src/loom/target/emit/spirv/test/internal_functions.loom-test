@@ -371,6 +371,11 @@ func.def public target(@target) @call_workitem_helper(%exit_early: i1) -> (index
   func.return %lane : index
 }
 
+func.def public target(@target) @call_workitem_helper_again(%exit_early: i1) -> (index) {
+  %lane = func.call @workitem_helper(%exit_early) : (i1) -> (index)
+  func.return %lane : index
+}
+
 // ----
                OpCapability Shader
                OpCapability VulkanMemoryModel
@@ -380,7 +385,9 @@ func.def public target(@target) @call_workitem_helper(%exit_early: i1) -> (index
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpMemoryModel PhysicalStorageBuffer64 Vulkan
                OpEntryPoint GLCompute %call_workitem_helper "call_workitem_helper" %local_invocation_id
+               OpEntryPoint GLCompute %call_workitem_helper_again "call_workitem_helper_again" %local_invocation_id
                OpExecutionMode %call_workitem_helper LocalSize 1 1 1
+               OpExecutionMode %call_workitem_helper_again LocalSize 1 1 1
                OpName %workitem_helper "workitem_helper"
                OpName %exit_early "exit_early"
                OpName %local_invocation_id "local_invocation_id"
@@ -388,6 +395,9 @@ func.def public target(@target) @call_workitem_helper(%exit_early: i1) -> (index
                OpName %call_workitem_helper "call_workitem_helper"
                OpName %exit_early_0 "exit_early"
                OpName %lane_0 "lane"
+               OpName %call_workitem_helper_again "call_workitem_helper_again"
+               OpName %exit_early_1 "exit_early"
+               OpName %lane_1 "lane"
                OpDecorate %local_invocation_id BuiltIn LocalInvocationId
                OpMemberDecorate %_struct_19 0 Offset 0
                OpDecorate %_struct_19 Block
@@ -395,6 +405,10 @@ func.def public target(@target) @call_workitem_helper(%exit_early: i1) -> (index
                OpDecorate %18 Binding 0
                OpDecorate %22 DescriptorSet 0
                OpDecorate %22 Binding 1
+               OpDecorate %32 DescriptorSet 0
+               OpDecorate %32 Binding 0
+               OpDecorate %33 DescriptorSet 0
+               OpDecorate %33 Binding 1
        %bool = OpTypeBool
         %int = OpTypeInt 32 1
           %4 = OpTypeFunction %int %bool
@@ -410,6 +424,8 @@ func.def public target(@target) @call_workitem_helper(%exit_early: i1) -> (index
          %22 = OpVariable %_ptr_StorageBuffer__struct_19 StorageBuffer
        %void = OpTypeVoid
          %24 = OpTypeFunction %void
+         %32 = OpVariable %_ptr_StorageBuffer__struct_19 StorageBuffer
+         %33 = OpVariable %_ptr_StorageBuffer__struct_19 StorageBuffer
 %workitem_helper = OpFunction %int Inline %4
  %exit_early = OpFunctionParameter %bool
           %6 = OpLabel
@@ -431,5 +447,15 @@ func.def public target(@target) @call_workitem_helper(%exit_early: i1) -> (index
      %lane_0 = OpFunctionCall %int %workitem_helper %exit_early_0
          %30 = OpAccessChain %_ptr_StorageBuffer_int %22 %int_0
                OpStore %30 %lane_0 Aligned 4
+               OpReturn
+               OpFunctionEnd
+%call_workitem_helper_again = OpFunction %void None %24
+         %34 = OpLabel
+         %35 = OpAccessChain %_ptr_StorageBuffer_int %32 %int_0
+         %36 = OpLoad %int %35 Aligned 4
+%exit_early_1 = OpINotEqual %bool %36 %int_0
+     %lane_1 = OpFunctionCall %int %workitem_helper %exit_early_1
+         %39 = OpAccessChain %_ptr_StorageBuffer_int %33 %int_0
+               OpStore %39 %lane_1 Aligned 4
                OpReturn
                OpFunctionEnd

@@ -670,6 +670,20 @@ func.def public @call_pair(%x: i64, %y: i64) -> (i64) {
   func.return %result : i64
 }
 
+// A second public root reaches the same private helper. The native object owns
+// one @draw_arguments symbol and both roots relocate their calls to it.
+func.def public @call_pair_again(%x: i64, %y: i64) -> (i64) {
+  %length = index.constant 16 : offset
+  %c0 = index.constant 0 : offset
+  %local = buffer.alloca<private> align(64) %length : buffer
+  %values = buffer.view %local[%c0] : buffer -> view<2xi64>
+  view.store %x, %values[0] : i64, view<2xi64>
+  view.store %y, %values[1] : i64, view<2xi64>
+  %c7 = scalar.constant 7 : i64
+  %result = func.call @draw_arguments(%local, %x, %y, %x, %y, %x, %y, %c7) : (buffer, i64, i64, i64, i64, i64, i64, i64) -> (i64)
+  func.return %result : i64
+}
+
 // Private helpers use independent result registers followed by caller-owned
 // overflow storage. The forwarding call proves that each frame retains its own
 // result block while a nested callee uses the same internal convention.

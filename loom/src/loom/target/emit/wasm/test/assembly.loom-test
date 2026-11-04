@@ -15,11 +15,16 @@ low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @entry
   return %quad
 }
 
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @entry_again(%value: reg<wasm.v128>) -> (reg<wasm.v128>) asm {
+  %doubled = low.func.call @double(%value) : (reg<wasm.v128>) -> (reg<wasm.v128>)
+  return %doubled
+}
+
 // ----
 Disassembly of section CODE:
 
 <CODE>:
-        # 2 functions in section.
+        # 3 functions in section.
 
 <double>:
 
@@ -36,6 +41,15 @@ Disassembly of section CODE:
   local.get  0
   call  0
   local.set  0
+  local.get  0
+  call  0
+  local.set  0
+  local.get  0
+  return
+  end
+
+<entry_again>:
+
   local.get  0
   call  0
   local.set  0
