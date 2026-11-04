@@ -45,6 +45,41 @@ amdf_linux_sidecar_library(
     ],
 )
 
+amdf_cc_library(
+    name = "loader",
+    srcs = ["loader.c"],
+    hdrs = ["loader.h"],
+    linkopts = ["-ldl"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        "//libamdf/src:allocator",
+        "//libamdf/src/gpu/umd/dxg:bridge_api",
+    ],
+)
+
+amdf_cc_test(
+    name = "loader_test",
+    srcs = ["loader_test.cc"],
+    data = [":amdf_rocdxg_bridge"],
+    env = {
+        "AMDF_DXG_BRIDGE_PATH": "$(location :amdf_rocdxg_bridge)",
+    },
+    linkopts = ["-ldl"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        ":loader",
+        "//libamdf/src:allocator",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
 amdf_cc_test(
     name = "native_transport_test",
     srcs = ["native_transport_test.cc"],
