@@ -9,19 +9,7 @@
 
 #include "libamdf/src/gpu/umd/dxg/bridge_api.h"
 
-namespace Wkmi {
-struct DeviceInfo;
-}
-
 namespace amdf::wkmi_bridge {
-
-// Selects a native scheduler accepting immutable command streams. HWS is
-// preferred; driver-owned SWS SDMA contexts use a separate monitored fence.
-// Native persistent rings require a different publication representation.
-bool SelectGpuKernelQueueScheduler(
-    Wkmi::DeviceInfo& device_info,
-    amdf_dxg_bridge_gpu_queue_command_type_t command_type,
-    uint32_t* out_scheduler);
 
 // Creates one native GPU execution context and its completion resources.
 amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuKernelQueueCreate(

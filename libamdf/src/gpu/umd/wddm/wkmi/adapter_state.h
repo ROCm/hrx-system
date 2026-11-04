@@ -7,46 +7,35 @@
 #ifndef AMDF_SRC_GPU_UMD_WDDM_WKMI_ADAPTER_STATE_H_
 #define AMDF_SRC_GPU_UMD_WDDM_WKMI_ADAPTER_STATE_H_
 
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif  // WIN32_LEAN_AND_MEAN
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif  // NOMINMAX
-#ifndef WIN32_NO_STATUS
-#define WIN32_NO_STATUS
-#define AMDF_DXG_BRIDGE_UNDEFINE_WIN32_NO_STATUS
-#endif  // WIN32_NO_STATUS
-#include <windows.h>
-#include <winternl.h>
-#ifdef AMDF_DXG_BRIDGE_UNDEFINE_WIN32_NO_STATUS
-#undef WIN32_NO_STATUS
-#undef AMDF_DXG_BRIDGE_UNDEFINE_WIN32_NO_STATUS
-#endif  // AMDF_DXG_BRIDGE_UNDEFINE_WIN32_NO_STATUS
-
-#include <d3dkmthk.h>
-#include <ntstatus.h>
+#include <atomic>
 
 #include "libamdf/src/gpu/umd/dxg/bridge_api.h"
-#include "wkmi.h"
+#include "libamdf/src/gpu/umd/dxg/private_records.h"
 
 // Parsed adapter state shared by live bridge objects.
 struct amdf_dxg_bridge_gpu_adapter_t {
   // Parent-instance allocator copied for all bridge-controlled storage.
   amdf_allocator_t host_allocator = {};
-  // Private normalized adapter properties owned by WKMI.
-  Wkmi::DeviceInfo device_info = {};
-  // Protects live-child accounting.
-  SRWLOCK state_lock = SRWLOCK_INIT;
+  // Immutable facts decoded from the native private adapter records.
+  amdf_dxg_private_adapter_info_t private_info = {};
+  // Qualified immutable-stream compute scheduler.
+  amdf_dxg_private_queue_profile_t pm4_queue_profile = {};
+  // Qualified immutable-stream SDMA scheduler.
+  amdf_dxg_private_queue_profile_t sdma_queue_profile = {};
   // Number of live queues borrowing this adapter.
-  uint32_t live_queue_count = 0;
+  std::atomic<uint32_t> live_queue_count = 0;
 
   ~amdf_dxg_bridge_gpu_adapter_t();
 };
 
 namespace amdf::wkmi_bridge {
 
-// Verifies that no live child borrows `adapter`.
+// Selects the immutable scheduler profile for one command family.
+const amdf_dxg_private_queue_profile_t* SelectGpuKernelQueueProfile(
+    const amdf_dxg_bridge_gpu_adapter_t* adapter,
+    amdf_dxg_bridge_gpu_queue_command_type_t command_type) noexcept;
+
+// Verifies that no live queue borrows `adapter`.
 amdf_dxg_bridge_result_t PrepareGpuAdapterClose(
     amdf_dxg_bridge_gpu_adapter_t* adapter,
     uint32_t* out_native_status) noexcept;

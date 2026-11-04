@@ -7,6 +7,7 @@
 #include "libamdf/src/gpu/umd/wddm/wkmi/allocation.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <limits>
 
@@ -25,8 +26,8 @@
 #include <ntstatus.h>
 
 #include "libamdf/src/gpu/umd/dxg/bridge_allocator.h"
+#include "libamdf/src/gpu/umd/dxg/private_records.h"
 #include "libamdf/src/gpu/umd/wddm/wkmi/adapter_state.h"
-#include "wkmi.h"
 
 namespace amdf::wkmi_bridge {
 
@@ -51,30 +52,31 @@ amdf_dxg_bridge_result_t QueryAllocationCount(uint64_t byte_length,
   return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
 }
 
-Wkmi::AllocDomain ToWkmiAllocationDomain(
+amdf_dxg_private_allocation_domain_t ToPrivateAllocationDomain(
     amdf_dxg_bridge_gpu_allocation_domain_t domain) {
   switch (domain) {
     case AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL:
-      return Wkmi::kLocal;
+      return AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_LOCAL;
     case AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_REGISTERED_HOST:
-      return Wkmi::kUserMemory;
+      return AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_REGISTERED_HOST;
     default:
-      return Wkmi::kSystem;
+      return AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_SYSTEM;
   }
 }
 
-uint32_t ToWkmiAllocationFlags(amdf_dxg_bridge_gpu_allocation_flags_t flags) {
-  uint32_t wkmi_flags = 0;
+amdf_dxg_private_allocation_flags_t ToPrivateAllocationFlags(
+    amdf_dxg_bridge_gpu_allocation_flags_t flags) {
+  amdf_dxg_private_allocation_flags_t private_flags = 0;
   if ((flags & AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_FINE_GRAIN) != 0) {
-    wkmi_flags |= Wkmi::kFineGrain;
+    private_flags |= AMDF_DXG_PRIVATE_ALLOCATION_FLAG_FINE_GRAIN;
   }
   if ((flags & AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_DEVICE_UNCACHED) != 0) {
-    wkmi_flags |= Wkmi::kKernarg;
+    private_flags |= AMDF_DXG_PRIVATE_ALLOCATION_FLAG_DEVICE_UNCACHED;
   }
   if ((flags & AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_QUEUE_STORAGE) != 0) {
-    wkmi_flags |= Wkmi::kQueueObject;
+    private_flags |= AMDF_DXG_PRIVATE_ALLOCATION_FLAG_QUEUE_STORAGE;
   }
-  return wkmi_flags;
+  return private_flags;
 }
 
 amdf_dxg_bridge_result_t GpuAllocationCreateImpl(
@@ -94,38 +96,30 @@ amdf_dxg_bridge_result_t GpuAllocationCreateImpl(
     return AMDF_DXG_BRIDGE_RESULT_BUFFER_TOO_SMALL;
   }
 
-  int driver_private_size = 0;
-  int allocation_private_size = 0;
-  Wkmi::GetAllocPrivDataSize(&driver_private_size, &allocation_private_size);
-  if (driver_private_size <= 0 || allocation_private_size <= 0) {
-    return AMDF_DXG_BRIDGE_RESULT_VERSION_MISMATCH;
-  }
-  if (static_cast<uint64_t>(allocation_private_size) >
-      std::numeric_limits<size_t>::max() / allocation_count) {
-    return AMDF_DXG_BRIDGE_RESULT_OUT_OF_RANGE;
-  }
-
   const size_t allocation_private_byte_length =
-      static_cast<size_t>(allocation_private_size) * allocation_count;
-  const size_t allocation_info_byte_length =
+      static_cast<size_t>(allocation_count) *
+      AMDF_DXG_PRIVATE_ALLOCATION_RECORD_BYTE_LENGTH;
+  constexpr size_t kAllocationInfoAlignment =
+      amdf_alignof(D3DDDI_ALLOCATIONINFO2);
+  const size_t allocation_info_offset =
+      (allocation_private_byte_length + kAllocationInfoAlignment - 1) &
+      ~(kAllocationInfoAlignment - 1);
+  const size_t allocation_state_byte_length =
+      allocation_info_offset +
       static_cast<size_t>(allocation_count) * sizeof(D3DDDI_ALLOCATIONINFO2);
-  HostBuffer driver_private;
-  HostBuffer allocation_private;
-  HostBuffer allocation_infos;
-  if (!driver_private.Allocate(adapter->host_allocator,
-                               static_cast<size_t>(driver_private_size)) ||
-      !allocation_private.Allocate(adapter->host_allocator,
-                                   allocation_private_byte_length) ||
-      !allocation_infos.Allocate(adapter->host_allocator,
-                                 allocation_info_byte_length,
-                                 amdf_alignof(D3DDDI_ALLOCATIONINFO2))) {
+  HostBuffer allocation_state;
+  if (!allocation_state.Allocate(adapter->host_allocator,
+                                 allocation_state_byte_length,
+                                 kAllocationInfoAlignment)) {
     return AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED;
   }
   auto* allocation_private_bytes =
-      static_cast<uint8_t*>(allocation_private.data());
-  auto* allocation_info_records =
-      static_cast<D3DDDI_ALLOCATIONINFO2*>(allocation_infos.data());
-  Wkmi::FillinAllocPrivDrvData(driver_private.data(), allocation_private_size);
+      static_cast<uint8_t*>(allocation_state.data());
+  auto* allocation_info_records = reinterpret_cast<D3DDDI_ALLOCATIONINFO2*>(
+      allocation_private_bytes + allocation_info_offset);
+  std::array<uint8_t, AMDF_DXG_PRIVATE_ALLOCATION_DRIVER_RECORD_BYTE_LENGTH>
+      driver_private;
+  amdf_dxg_private_initialize_allocation_driver_record(driver_private.data());
 
   uint64_t remaining_byte_length = create_info.byte_length;
   uint64_t byte_offset = 0;
@@ -133,16 +127,14 @@ amdf_dxg_bridge_result_t GpuAllocationCreateImpl(
     const uint64_t chunk_byte_length =
         std::min(remaining_byte_length, kMaximumNativeAllocationByteLength);
     void* private_data = allocation_private_bytes +
-                         static_cast<size_t>(allocation_private_size) * i;
-    const uint64_t placement_device_address =
-        create_info.domain == AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL
-            ? create_info.placement_device_address + byte_offset
-            : 0;
-    Wkmi::SetAllocationInfo(private_data, chunk_byte_length,
-                            ToWkmiAllocationDomain(create_info.domain),
-                            placement_device_address,
-                            ToWkmiAllocationFlags(create_info.flags),
-                            Wkmi::KCOMPUTE0, adapter->device_info);
+                         AMDF_DXG_PRIVATE_ALLOCATION_RECORD_BYTE_LENGTH * i;
+    const amdf_dxg_private_allocation_info_t private_info = {
+        .byte_length = chunk_byte_length,
+        .domain = ToPrivateAllocationDomain(create_info.domain),
+        .flags = ToPrivateAllocationFlags(create_info.flags),
+    };
+    amdf_dxg_private_initialize_wddm_allocation_record(
+        &private_info, &adapter->private_info, private_data);
 
     D3DDDI_ALLOCATIONINFO2& allocation_info = allocation_info_records[i];
     if (create_info.host_pointer != nullptr) {
@@ -150,7 +142,8 @@ amdf_dxg_bridge_result_t GpuAllocationCreateImpl(
           static_cast<uint8_t*>(create_info.host_pointer) + byte_offset;
     }
     allocation_info.pPrivateDriverData = private_data;
-    allocation_info.PrivateDriverDataSize = allocation_private_size;
+    allocation_info.PrivateDriverDataSize =
+        AMDF_DXG_PRIVATE_ALLOCATION_RECORD_BYTE_LENGTH;
     allocation_info.VidPnSourceId = D3DDDI_ID_UNINITIALIZED;
     remaining_byte_length -= chunk_byte_length;
     byte_offset += chunk_byte_length;
@@ -159,7 +152,8 @@ amdf_dxg_bridge_result_t GpuAllocationCreateImpl(
   D3DKMT_CREATEALLOCATION create = {};
   create.hDevice = static_cast<D3DKMT_HANDLE>(create_info.device_handle);
   create.pPrivateDriverData = driver_private.data();
-  create.PrivateDriverDataSize = driver_private_size;
+  create.PrivateDriverDataSize =
+      AMDF_DXG_PRIVATE_ALLOCATION_DRIVER_RECORD_BYTE_LENGTH;
   create.NumAllocations = allocation_count;
   create.pAllocationInfo2 = allocation_info_records;
   const NTSTATUS native_status = D3DKMTCreateAllocation2(&create);
@@ -235,16 +229,9 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuAllocationCreate(
     return AMDF_DXG_BRIDGE_RESULT_INVALID_ARGUMENT;
   }
 
-  try {
-    return GpuAllocationCreateImpl(adapter, *create_info,
-                                   allocation_handle_capacity,
-                                   out_allocation_handles, out_resource_handle,
-                                   out_allocation_count, out_native_status);
-  } catch (const std::bad_alloc&) {
-    return AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED;
-  } catch (...) {
-    return AMDF_DXG_BRIDGE_RESULT_INTERNAL;
-  }
+  return GpuAllocationCreateImpl(
+      adapter, *create_info, allocation_handle_capacity, out_allocation_handles,
+      out_resource_handle, out_allocation_count, out_native_status);
 }
 
 }  // namespace amdf::wkmi_bridge

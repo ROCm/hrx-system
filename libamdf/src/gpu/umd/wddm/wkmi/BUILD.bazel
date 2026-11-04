@@ -30,11 +30,15 @@ amdf_windows_sidecar_library(
         "shared_buffer.cc",
         "shared_buffer.h",
     ],
-    linkopts = ["gdi32.lib"],
+    linkopts = [
+        "d3d12.lib",
+        "dxgi.lib",
+        "gdi32.lib",
+    ],
     deps = [
         "//libamdf/src/gpu/umd/dxg:bridge_allocator",
         "//libamdf/src/gpu/umd/dxg:bridge_api",
-        "//third_party:amdf_wkmi",
+        "//libamdf/src/gpu/umd/dxg:private_records",
     ],
 )
 
@@ -68,7 +72,7 @@ amdf_windows_sidecar_test(
         "iree-run-requirement=libamdf.resource.amd_gpu",
         "runtime-resource=amd-gpu",
     ],
-    deps = ["//third_party:amdf_wkmi"],
+    deps = ["//libamdf/src/gpu/umd/dxg:private_records"],
 )
 
 amdf_windows_sidecar_test(
@@ -83,7 +87,7 @@ amdf_windows_sidecar_test(
     deps = [
         "//libamdf/src/gpu/umd/dxg:bridge_allocator",
         "//libamdf/src/gpu/umd/dxg:bridge_api",
-        "//third_party:amdf_wkmi",
+        "//libamdf/src/gpu/umd/dxg:private_records",
     ],
 )
 
@@ -99,7 +103,7 @@ amdf_windows_sidecar_test(
     deps = [
         "//libamdf/src/gpu/umd/dxg:bridge_allocator",
         "//libamdf/src/gpu/umd/dxg:bridge_api",
-        "//third_party:amdf_wkmi",
+        "//libamdf/src/gpu/umd/dxg:private_records",
     ],
 )
 

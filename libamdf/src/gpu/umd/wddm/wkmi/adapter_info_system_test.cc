@@ -4,9 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Exercises the binary SDK's adapter query against the installed driver. Raw
-// native queue support is distinct from the services exposed by libamdf. This
-// test opens adapters only; it creates no devices, contexts, or queues.
+// Exercises the shared private-record decoder against the installed driver.
+// The test opens adapters only; it creates no devices, contexts, or queues.
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -18,14 +17,13 @@
 #include <d3dkmthk.h>
 #include <ntstatus.h>
 
+#include <array>
 #include <cinttypes>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
-#include <memory>
 #include <vector>
 
-#include "wkmi.h"
+#include "libamdf/src/gpu/umd/dxg/private_records.h"
 
 namespace {
 
@@ -38,10 +36,25 @@ bool CheckStatus(const char* operation, NTSTATUS status) {
   return false;
 }
 
-void PrintScheduler(const char* role, int scheduler, Wkmi::DeviceInfo& info) {
-  std::printf("  %s: scheduler=%d engine_ordinal=%d hws_enabled=%u\n", role,
-              scheduler, Wkmi::EngineOrdinal(scheduler, &info),
-              static_cast<unsigned>(Wkmi::GetHwsEnabled(scheduler, &info)));
+uint32_t QueryPrivateAdapter(void*, uint32_t adapter_handle, void* buffer,
+                             uint32_t buffer_byte_length) {
+  D3DKMT_QUERYADAPTERINFO query = {};
+  query.hAdapter = static_cast<D3DKMT_HANDLE>(adapter_handle);
+  query.Type = KMTQAITYPE_UMDRIVERPRIVATE;
+  query.pPrivateDriverData = buffer;
+  query.PrivateDriverDataSize = buffer_byte_length;
+  return static_cast<uint32_t>(D3DKMTQueryAdapterInfo(&query));
+}
+
+void PrintQueueProfile(const char* role,
+                       const amdf_dxg_private_queue_profile_t& profile) {
+  if (!profile.is_supported) {
+    std::printf("  %s: unsupported\n", role);
+    return;
+  }
+  std::printf("  %s: scheduler=%" PRIu32 " node=%" PRIu32 " hws=%" PRIu32 "\n",
+              role, profile.scheduler_id, profile.node_ordinal,
+              profile.uses_hardware_scheduling);
 }
 
 bool QueryAdapter(const D3DKMT_ADAPTERINFO& adapter,
@@ -60,8 +73,6 @@ bool QueryAdapter(const D3DKMT_ADAPTERINFO& adapter,
     return true;
   }
 
-  // WKMI's query accepts a logical adapter handle and describes its primary
-  // physical adapter, matching physical index zero in the public KMT query.
   D3DKMT_QUERY_DEVICE_IDS device_ids = {};
   query.Type = KMTQAITYPE_PHYSICALADAPTERDEVICEIDS;
   query.pPrivateDriverData = &device_ids;
@@ -70,53 +81,65 @@ bool QueryAdapter(const D3DKMT_ADAPTERINFO& adapter,
                    D3DKMTQueryAdapterInfo(&query))) {
     return false;
   }
-  if (device_ids.DeviceIds.VendorID != 0x1002) {
+  if (device_ids.DeviceIds.VendorID != 0x1002 &&
+      device_ids.DeviceIds.VendorID != 0x1022) {
     return true;
   }
 
-  std::printf("Adapter LUID=%08" PRIx32 ":%08" PRIx32
-              " physical_index=0 PCI=%04" PRIx32 ":%04" PRIx32 "\n",
-              static_cast<uint32_t>(adapter.AdapterLuid.HighPart),
-              static_cast<uint32_t>(adapter.AdapterLuid.LowPart),
-              static_cast<uint32_t>(device_ids.DeviceIds.VendorID),
-              static_cast<uint32_t>(device_ids.DeviceIds.DeviceID));
-  Wkmi::DeviceInfo info = {};
-  const NTSTATUS status = Wkmi::ParseAdapterInfo(adapter.hAdapter, &info);
-  // The SDK allocates this opaque block even on some rejected queries.
-  // Releasing it in the same CRT preserves the binary dependency's ownership.
-  std::unique_ptr<void, decltype(&std::free)> adapter_info_owner(
-      info.adapter_info, &std::free);
-  if (status == STATUS_OBJECT_NAME_NOT_FOUND ||
-      status == STATUS_REVISION_MISMATCH || status == STATUS_NOT_SUPPORTED) {
-    std::printf("  SDK adapter query unsupported: NTSTATUS=0x%08" PRIx32 "\n",
-                static_cast<uint32_t>(status));
+  std::array<uint8_t, AMDF_DXG_PRIVATE_SINGLE_QUERY_SCRATCH_BYTE_LENGTH>
+      scratch;
+  const amdf_dxg_private_adapter_query_t private_query = {
+      .adapter_handle = adapter.hAdapter,
+      .physical_adapter_index = 0,
+      .query_context = nullptr,
+      .query = QueryPrivateAdapter,
+      .scratch = scratch.data(),
+  };
+  amdf_dxg_private_adapter_info_t info = {};
+  uint32_t native_status = 0;
+  const amdf_dxg_private_result_t result =
+      amdf_dxg_private_query_single_adapter(&private_query, &info,
+                                            &native_status);
+  if (result == AMDF_DXG_PRIVATE_RESULT_UNSUPPORTED) {
+    std::printf("Adapter LUID=%08" PRIx32 ":%08" PRIx32 " PCI=%04" PRIx32
+                ":%04" PRIx32 " private query unsupported\n",
+                static_cast<uint32_t>(adapter.AdapterLuid.HighPart),
+                static_cast<uint32_t>(adapter.AdapterLuid.LowPart),
+                static_cast<uint32_t>(device_ids.DeviceIds.VendorID),
+                static_cast<uint32_t>(device_ids.DeviceIds.DeviceID));
     return true;
   }
-  if (!CheckStatus("Wkmi::ParseAdapterInfo", status)) {
+  if (result == AMDF_DXG_PRIVATE_RESULT_NATIVE_FAILURE) {
+    std::fprintf(stderr,
+                 "Private adapter query failed: NTSTATUS=0x%08" PRIx32 "\n",
+                 native_status);
+    return false;
+  }
+  if (result != AMDF_DXG_PRIVATE_RESULT_SUCCESS) {
+    std::fprintf(stderr, "Private adapter response was malformed\n");
     return false;
   }
 
   char target[32];
-  std::snprintf(target, sizeof(target), "gfx%d%d%x", info.major, info.minor,
-                static_cast<unsigned>(info.stepping));
-  std::printf("  name=%.*s target=%s kmd_version=%" PRIu32
-              " sdma_fw_version=%" PRIu32 "\n",
-              static_cast<int>(sizeof(info.product_name)), info.product_name,
-              target, info.kmd_version, info.sdma_fw_version);
-  std::printf("  os_hws_enable_flags=0x%08" PRIx32
-              " engine_ordinal_mask=0x%016" PRIx64 "\n",
-              info.hwsInfo.osHwsEnableFlags, info.hwsInfo.engineOrdinalMask);
-  std::printf("  native_aql_queue=%u native_sdma_queue=%u cp_queues=%" PRIu32
-              " sdma_schedulers=%zu\n",
-              static_cast<unsigned>(info.hwsInfo.hwsMask.aql_queue),
-              static_cast<unsigned>(info.hwsInfo.hwsMask.sdma_queue),
-              info.num_cp_queues, info.sdma_schedid.size());
-  PrintScheduler("pm4", static_cast<int>(info.pm4_compute_schedid), info);
-  PrintScheduler("compute", static_cast<int>(info.compute_schedid), info);
-  for (int scheduler : info.sdma_schedid) {
-    PrintScheduler("sdma", scheduler, info);
-  }
-  if (!required_target || std::strcmp(required_target, target) == 0) {
+  std::snprintf(target, sizeof(target), "gfx%d%d%x", info.gfx_ip_major,
+                info.gfx_ip_minor, static_cast<unsigned>(info.gfx_ip_stepping));
+  std::printf("Adapter LUID=%08" PRIx32 ":%08" PRIx32 " PCI=%04" PRIx32
+              ":%04" PRIx32 " target=%s\n",
+              static_cast<uint32_t>(adapter.AdapterLuid.HighPart),
+              static_cast<uint32_t>(adapter.AdapterLuid.LowPart),
+              static_cast<uint32_t>(device_ids.DeviceIds.VendorID),
+              static_cast<uint32_t>(device_ids.DeviceIds.DeviceID), target);
+  std::printf("  cu=%" PRIu32 " se=%" PRIu32 " xcc=%" PRIu32 " wave=%" PRIu32
+              " native_queues=0x%02" PRIx8 "\n",
+              info.compute_unit_count, info.shader_engine_count, info.xcc_count,
+              info.wavefront_size, info.native_queue_flags);
+  amdf_dxg_private_queue_profile_t pm4_profile = {};
+  amdf_dxg_private_queue_profile_t sdma_profile = {};
+  amdf_dxg_private_initialize_queue_profiles(&info, &pm4_profile,
+                                             &sdma_profile);
+  PrintQueueProfile("pm4", pm4_profile);
+  PrintQueueProfile("sdma", sdma_profile);
+  if (required_target == nullptr || std::strcmp(required_target, target) == 0) {
     ++matched_count;
   }
   return true;
@@ -136,9 +159,6 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  // gdi32 is already imported for QueryAdapterInfo and CloseAdapter. Resolve
-  // the newer enumeration entry point just as the provider does; some SDK
-  // import libraries omit it even when the operating system exports it.
   HMODULE gdi_module = GetModuleHandleW(L"gdi32.dll");
   auto enumerate_adapters =
       gdi_module ? reinterpret_cast<PFND3DKMT_ENUMADAPTERS3>(
@@ -169,8 +189,7 @@ int main(int argc, char** argv) {
   for (uint32_t i = 0; success && i < enumeration.NumAdapters; ++i) {
     success = QueryAdapter(adapters[i], required_target, matched_count);
   }
-  // Close every published handle, including partial enumeration on failure.
-  for (const auto& adapter : adapters) {
+  for (const D3DKMT_ADAPTERINFO& adapter : adapters) {
     if (adapter.hAdapter == 0) {
       continue;
     }
@@ -180,12 +199,12 @@ int main(int argc, char** argv) {
       success = false;
     }
   }
-  if (required_target && matched_count == 0) {
+  if (required_target != nullptr && matched_count == 0) {
     std::fprintf(stderr, "No successfully queried adapter matched %s\n",
                  required_target);
     success = false;
   } else if (success && matched_count == 0) {
-    std::printf("SKIP: no AMD GPU supports the native SDK query\n");
+    std::printf("SKIP: no AMD GPU supports the private adapter query\n");
   }
   std::printf("Queried matching adapters: %" PRIu32 "\n", matched_count);
   return success ? 0 : 1;

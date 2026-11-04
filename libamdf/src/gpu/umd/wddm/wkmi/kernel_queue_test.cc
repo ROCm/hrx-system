@@ -8,11 +8,25 @@
 
 #include <malloc.h>
 
-#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif  // WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif  // NOMINMAX
+#define WIN32_NO_STATUS
+#include <windows.h>
+#include <winternl.h>
+#undef WIN32_NO_STATUS
+
+#include <d3dkmthk.h>
+#include <ntstatus.h>
+
+#include "libamdf/src/gpu/umd/dxg/private_records.h"
 #include "libamdf/src/gpu/umd/wddm/wkmi/adapter_state.h"
 
 namespace {
@@ -22,19 +36,16 @@ constexpr D3DKMT_HANDLE kContext = 0x20;
 constexpr D3DKMT_HANDLE kQueue = 0x30;
 constexpr D3DKMT_HANDLE kFence = 0x40;
 
-struct FakeScheduler {
-  // Native node ordinal, or negative when this engine is absent.
-  int engine_ordinal;
-  // Whether Windows hardware scheduling is enabled for this engine.
-  bool hardware_scheduling;
-};
-
 struct FakeNativeState {
-  // Native engines indexed by scheduler ID; only compute 0 exists by default.
-  std::array<FakeScheduler, 4> schedulers = {
-      FakeScheduler{0, true}, {-1, false}, {-1, false}, {-1, false}};
-  // Scheduler selected for context creation.
-  uint32_t expected_scheduler = 0;
+  // Scheduler profile installed in the adapter for the selected command family.
+  amdf_dxg_private_queue_profile_t profile = {
+      .scheduler_id = 5,
+      .node_ordinal = 0,
+      .is_supported = 1,
+      .uses_hardware_scheduling = 1,
+  };
+  // Whether private records enable firmware state shadowing.
+  uint32_t supports_firmware_state_shadowing = 0;
   // Native result selected for context construction.
   NTSTATUS create_context_status = STATUS_SUCCESS;
   // Native result selected for queue construction.
@@ -57,6 +68,10 @@ struct FakeNativeState {
   uint64_t progress = 0;
   // Number of native context creation calls.
   uint32_t context_create_count = 0;
+  // Number of native hardware queue creation calls.
+  uint32_t queue_create_count = 0;
+  // Number of native monitored fence creation calls.
+  uint32_t fence_create_count = 0;
   // Number of native queue destruction calls.
   uint32_t queue_destroy_count = 0;
   // Number of native context destruction calls.
@@ -73,6 +88,8 @@ struct FakeNativeState {
   size_t allocation_count = 0;
   // Number of host allocations still owned by the bridge.
   size_t live_allocation_count = 0;
+  // Number of requests violating the public allocator alignment contract.
+  size_t invalid_alignment_count = 0;
   // Number of contract violations observed by native dependencies.
   uint32_t dependency_failure_count = 0;
 };
@@ -85,11 +102,38 @@ void ExpectDependency(bool condition) {
   }
 }
 
+uint32_t Load32(const void* pointer) {
+  uint32_t value = 0;
+  std::memcpy(&value, pointer, sizeof(value));
+  return value;
+}
+
+uint64_t Load64(const void* pointer) {
+  uint64_t value = 0;
+  std::memcpy(&value, pointer, sizeof(value));
+  return value;
+}
+
+void ExpectSubmissionRecord(const void* record, uint32_t byte_length) {
+  ExpectDependency(byte_length ==
+                   AMDF_DXG_PRIVATE_SUBMISSION_RECORD_BYTE_LENGTH);
+  const auto* bytes = static_cast<const uint8_t*>(record);
+  ExpectDependency(Load64(bytes + 0x00) == UINT64_C(0x100000006));
+  ExpectDependency(Load64(bytes + 0x08) == (UINT64_C(1) << 38));
+  ExpectDependency(Load32(bytes + 0x10) == 64);
+  ExpectDependency(bytes[0x14] == 4 && bytes[0x1C] == 1);
+  ExpectDependency(Load64(bytes + 0x20) == 0x2000);
+}
+
 void* AMDF_CALL Allocate(void* user_data, uint64_t byte_length,
                          uint64_t minimum_alignment) {
   auto* state = static_cast<FakeNativeState*>(user_data);
   if (state->allocation_count++ == state->failure_ordinal) {
     return nullptr;
+  }
+  if (minimum_alignment < amdf_max_align_t ||
+      (minimum_alignment & (minimum_alignment - 1)) != 0) {
+    ++state->invalid_alignment_count;
   }
   void* pointer = _aligned_malloc(static_cast<size_t>(byte_length),
                                   static_cast<size_t>(minimum_alignment));
@@ -108,11 +152,22 @@ void AMDF_CALL Free(void* user_data, void* allocation) {
   _aligned_free(allocation);
 }
 
-amdf_dxg_bridge_gpu_kernel_queue_create_info_t MakeCreateInfo() {
+void InitializeAdapter(amdf_dxg_bridge_gpu_adapter_t* adapter,
+                       FakeNativeState* state) {
+  adapter->host_allocator = {state, Allocate, nullptr, Free};
+  adapter->private_info.supports_firmware_state_shadowing =
+      state->supports_firmware_state_shadowing;
+  adapter->pm4_queue_profile = state->profile;
+  adapter->sdma_queue_profile = state->profile;
+}
+
+amdf_dxg_bridge_gpu_kernel_queue_create_info_t MakeCreateInfo(
+    amdf_dxg_bridge_gpu_queue_command_type_t command_type =
+        AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4) {
   amdf_dxg_bridge_gpu_kernel_queue_create_info_t info = {};
   info.structure_size = sizeof(info);
   info.device_handle = kDevice;
-  info.command_type = AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4;
+  info.command_type = command_type;
   return info;
 }
 
@@ -133,16 +188,19 @@ extern "C" NTSTATUS APIENTRY
 D3DKMTCreateContextVirtual(D3DKMT_CREATECONTEXTVIRTUAL* create) {
   ++current_state->context_create_count;
   ExpectDependency(create->hDevice == kDevice);
-  ExpectDependency(
-      create->NodeOrdinal ==
-      static_cast<uint32_t>(
-          current_state->schedulers[current_state->expected_scheduler]
-              .engine_ordinal));
+  ExpectDependency(create->NodeOrdinal == current_state->profile.node_ordinal);
   ExpectDependency(create->Flags.HwQueueSupported ==
-                   current_state->schedulers[current_state->expected_scheduler]
-                       .hardware_scheduling);
+                   current_state->profile.uses_hardware_scheduling);
   ExpectDependency(create->pPrivateDriverData != nullptr);
-  ExpectDependency(create->PrivateDriverDataSize == 16);
+  ExpectDependency(create->PrivateDriverDataSize ==
+                   AMDF_DXG_PRIVATE_CONTEXT_RECORD_BYTE_LENGTH);
+  const auto* record = static_cast<const uint8_t*>(create->pPrivateDriverData);
+  ExpectDependency(Load64(record + 0x00) == UINT64_C(0x0010010000000040));
+  ExpectDependency(Load32(record + 0x38) ==
+                   (current_state->profile.scheduler_id |
+                    (current_state->supports_firmware_state_shadowing << 21)));
+  ExpectDependency(Load32(record + 0x40) == 0x168);
+  ExpectDependency(Load64(record + 0x150) == 0);
   if (current_state->create_context_status == STATUS_SUCCESS) {
     create->hContext = kContext;
   }
@@ -150,10 +208,19 @@ D3DKMTCreateContextVirtual(D3DKMT_CREATECONTEXTVIRTUAL* create) {
 }
 
 extern "C" NTSTATUS APIENTRY D3DKMTCreateHwQueue(D3DKMT_CREATEHWQUEUE* create) {
+  ++current_state->queue_create_count;
   ExpectDependency(create->hHwContext == kContext);
   ExpectDependency(create->Flags.DisableGpuTimeout == 0);
   ExpectDependency(create->pPrivateDriverData != nullptr);
-  ExpectDependency(create->PrivateDriverDataSize == 32);
+  ExpectDependency(create->PrivateDriverDataSize ==
+                   AMDF_DXG_PRIVATE_HARDWARE_QUEUE_RECORD_BYTE_LENGTH);
+  const auto* record = static_cast<const uint8_t*>(create->pPrivateDriverData);
+  ExpectDependency(Load32(record + 0x00) ==
+                   AMDF_DXG_PRIVATE_HARDWARE_QUEUE_RECORD_BYTE_LENGTH);
+  ExpectDependency(
+      Load32(record + 0x10) ==
+      ((1u << 12) | (current_state->supports_firmware_state_shadowing << 17)));
+  ExpectDependency(Load32(record + 0x30) == 0);
   if (current_state->create_queue_status == STATUS_SUCCESS) {
     create->hHwQueue = kQueue;
     create->hHwQueueProgressFence = current_state->fence;
@@ -179,6 +246,7 @@ D3DKMTDestroyContext(const D3DKMT_DESTROYCONTEXT* destroy) {
 
 extern "C" NTSTATUS APIENTRY D3DKMTCreateSynchronizationObject2(
     D3DKMT_CREATESYNCHRONIZATIONOBJECT2* create) {
+  ++current_state->fence_create_count;
   ExpectDependency(create->hDevice == kDevice);
   ExpectDependency(create->Info.Type == D3DDDI_MONITORED_FENCE);
   ExpectDependency(create->Info.MonitoredFence.InitialFenceValue == 0);
@@ -206,7 +274,8 @@ D3DKMTSubmitCommand(const D3DKMT_SUBMITCOMMAND* submit) {
   ExpectDependency(submit->BroadcastContextCount == 1);
   ExpectDependency(submit->BroadcastContext[0] == kContext);
   ExpectDependency(submit->pPrivateDriverData != nullptr);
-  ExpectDependency(submit->PrivateDriverDataSize == 48);
+  ExpectSubmissionRecord(submit->pPrivateDriverData,
+                         submit->PrivateDriverDataSize);
   return current_state->submit_status;
 }
 
@@ -231,213 +300,108 @@ D3DKMTSubmitCommandToHwQueue(const D3DKMT_SUBMITCOMMANDTOHWQUEUE* submit) {
   ExpectDependency(submit->CommandBuffer == 0x2000);
   ExpectDependency(submit->CommandLength == 64);
   ExpectDependency(submit->pPrivateDriverData != nullptr);
-  ExpectDependency(submit->PrivateDriverDataSize == 48);
+  ExpectSubmissionRecord(submit->pPrivateDriverData,
+                         submit->PrivateDriverDataSize);
   if (current_state->submit_status == STATUS_SUCCESS) {
     current_state->progress = submit->HwQueueProgressFenceId;
   }
   return current_state->submit_status;
 }
 
-namespace Wkmi {
-
-int EngineOrdinal(int scheduler, DeviceInfo*) {
-  if (scheduler < 0 ||
-      static_cast<size_t>(scheduler) >= current_state->schedulers.size()) {
-    return -1;
-  }
-  return current_state->schedulers[scheduler].engine_ordinal;
-}
-bool GetHwsEnabled(int scheduler, DeviceInfo*) {
-  return scheduler >= 0 &&
-         static_cast<size_t>(scheduler) < current_state->schedulers.size() &&
-         current_state->schedulers[scheduler].hardware_scheduling;
-}
-int GetContextPrivDataSize() { return 16; }
-int GetHwQueuePrivDataSize() { return 32; }
-int GetSubmitPrivDataSize() { return 48; }
-
-void FillinContextPrivData(void* private_data, bool, uint32_t scheduler,
-                           uint64_t debugger_data, bool rocr_client) {
-  ExpectDependency(private_data != nullptr);
-  ExpectDependency(scheduler == current_state->expected_scheduler);
-  ExpectDependency(debugger_data == 0 && !rocr_client);
-}
-
-void FillinHwQueuePrivData(void* private_data, bool, SchedLevel,
-                           HwQueueKind kind, uint64_t queue_address,
-                           uint64_t queue_size, uint64_t write_pointer,
-                           uint64_t read_pointer, D3DKMT_HANDLE descriptor,
-                           uint32_t** doorbell, D3DKMT_HANDLE cwsr_memory) {
-  ExpectDependency(private_data != nullptr);
-  ExpectDependency(kind == kHwQueuePm4 && queue_address == 0 &&
-                   queue_size == 0 && write_pointer == 0 && read_pointer == 0 &&
-                   descriptor == 0 && doorbell == nullptr && cwsr_memory == 0);
-}
-
-void FillinSubmitPrivData(void* private_data, D3DKMT_HANDLE queue,
-                          uint64_t address, uint64_t byte_length,
-                          bool hardware_queue) {
-  const bool expected_hardware =
-      current_state->schedulers[current_state->expected_scheduler]
-          .hardware_scheduling;
-  ExpectDependency(private_data != nullptr &&
-                   queue == (expected_hardware ? kQueue : 0u) &&
-                   address == 0x2000 && byte_length == 64 &&
-                   hardware_queue == expected_hardware);
-}
-
-}  // namespace Wkmi
-
 namespace {
 
-bool NativeSchedulerSelectionPreservesCommandRepresentation() {
+bool UnsupportedProfileHasNoOwnershipEffects() {
   bool passed = true;
   FakeNativeState state;
-  current_state = &state;
-  Wkmi::DeviceInfo device_info = {};
-  device_info.compute_schedid = 1;
-  device_info.pm4_compute_schedid = 0;
-  device_info.sdma_schedid = {-1, 2, 3};
-  state.schedulers = {FakeScheduler{4, true}, {5, true}, {6, false}, {7, true}};
-  uint32_t scheduler = UINT32_MAX;
-  AMDF_EXPECT(amdf::wkmi_bridge::SelectGpuKernelQueueScheduler(
-      device_info, AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4, &scheduler));
-  AMDF_EXPECT(scheduler == 0);
-  AMDF_EXPECT(amdf::wkmi_bridge::SelectGpuKernelQueueScheduler(
-      device_info, AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA, &scheduler));
-  AMDF_EXPECT(scheduler == 3);
-
-  // A valid AQL engine cannot substitute for an unavailable PM4 engine.
-  for (const auto unavailable : {FakeScheduler{-1, true}, {4, false}}) {
-    state.schedulers[0] = unavailable;
-    scheduler = UINT32_MAX;
-    AMDF_EXPECT(!amdf::wkmi_bridge::SelectGpuKernelQueueScheduler(
-        device_info, AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4, &scheduler));
-    AMDF_EXPECT(scheduler == UINT32_MAX);
-  }
-  // SWS accepts immutable streams only when the driver owns queue storage.
-  device_info.hwsInfo.hwsMask.sdma_queue = 1;
-  state.schedulers[3].engine_ordinal = -1;
-  device_info.user_queue_size = 4096;
-  scheduler = UINT32_MAX;
-  AMDF_EXPECT(!amdf::wkmi_bridge::SelectGpuKernelQueueScheduler(
-      device_info, AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA, &scheduler));
-  AMDF_EXPECT(scheduler == UINT32_MAX);
-  device_info.user_queue_size = 0;
-  AMDF_EXPECT(amdf::wkmi_bridge::SelectGpuKernelQueueScheduler(
-      device_info, AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA, &scheduler));
-  AMDF_EXPECT(scheduler == 2);
-  current_state = nullptr;
-  return passed;
-}
-
-bool ContextUsesPm4SchedulerWhenAqlSchedulerDiffers() {
-  bool passed = true;
-  FakeNativeState state;
-  state.schedulers = {
-      FakeScheduler{4, true}, {5, true}, {-1, false}, {-1, false}};
+  state.profile.is_supported = 0;
   current_state = &state;
   amdf_dxg_bridge_gpu_adapter_t adapter;
-  adapter.host_allocator = {&state, Allocate, nullptr, Free};
-  adapter.device_info.compute_schedid = 1;
-  adapter.device_info.pm4_compute_schedid = 0;
+  InitializeAdapter(&adapter, &state);
   const auto create = MakeCreateInfo();
-  amdf_dxg_bridge_gpu_kernel_queue_t* queue = nullptr;
-  amdf_dxg_bridge_gpu_kernel_queue_info_t info = {};
-  uint32_t native_status = 0;
+  auto* queue = reinterpret_cast<amdf_dxg_bridge_gpu_kernel_queue_t*>(1);
+  amdf_dxg_bridge_gpu_kernel_queue_info_t info;
+  std::memset(&info, 0xA5, sizeof(info));
+  const auto original_info = info;
+  uint32_t native_status = 0xA5;
   AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueCreate(&adapter, &create, &queue,
                                                       &info, &native_status) ==
-              AMDF_DXG_BRIDGE_RESULT_SUCCESS);
-  if (queue != nullptr) {
-    uint32_t accepted = 0;
-    AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueSubmit(
-                    queue, 0x2000, 64, 7, &accepted, &native_status) ==
-                AMDF_DXG_BRIDGE_RESULT_SUCCESS);
-    AMDF_EXPECT(accepted == 1);
-    AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueDestroy(
-                    queue, &native_status) == AMDF_DXG_BRIDGE_RESULT_SUCCESS);
-  }
-  AMDF_EXPECT(state.context_create_count == 1);
-  AMDF_EXPECT(state.submit_count == 1);
-  AMDF_EXPECT(state.live_allocation_count == 0);
-  AMDF_EXPECT(state.dependency_failure_count == 0);
+              AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED);
+  AMDF_EXPECT(reinterpret_cast<uintptr_t>(queue) == 1);
+  AMDF_EXPECT(std::memcmp(&info, &original_info, sizeof(info)) == 0);
+  AMDF_EXPECT(native_status == 0);
+  AMDF_EXPECT(state.allocation_count == 0);
+  AMDF_EXPECT(state.context_create_count == 0);
+  AMDF_EXPECT(adapter.live_queue_count.load() == 0);
   current_state = nullptr;
   return passed;
 }
 
-bool AllocationFailureLeavesNoNativeOwnership() {
+bool HostAllocationFailureLeavesNoNativeOwnership() {
   bool passed = true;
-  for (size_t ordinal = 0; ordinal < 4; ++ordinal) {
-    FakeNativeState state;
-    state.failure_ordinal = ordinal;
-    current_state = &state;
-    amdf_dxg_bridge_gpu_adapter_t adapter;
-    adapter.host_allocator = {&state, Allocate, nullptr, Free};
-    const auto create = MakeCreateInfo();
-    auto* queue = reinterpret_cast<amdf_dxg_bridge_gpu_kernel_queue_t*>(1);
-    amdf_dxg_bridge_gpu_kernel_queue_info_t info;
-    std::memset(&info, 0xA5, sizeof(info));
-    const auto original = info;
-    uint32_t native_status = 1;
-    AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueCreate(
-                    &adapter, &create, &queue, &info, &native_status) ==
-                AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED);
-    AMDF_EXPECT(reinterpret_cast<uintptr_t>(queue) == 1);
-    AMDF_EXPECT(std::memcmp(&info, &original, sizeof(info)) == 0);
-    AMDF_EXPECT(native_status == 0);
-    AMDF_EXPECT(state.live_allocation_count == 0);
-    AMDF_EXPECT(state.context_create_count == 0);
-    AMDF_EXPECT(adapter.live_queue_count == 0);
-  }
+  FakeNativeState state;
+  state.failure_ordinal = 0;
+  current_state = &state;
+  amdf_dxg_bridge_gpu_adapter_t adapter;
+  InitializeAdapter(&adapter, &state);
+  const auto create = MakeCreateInfo();
+  auto* queue = reinterpret_cast<amdf_dxg_bridge_gpu_kernel_queue_t*>(1);
+  amdf_dxg_bridge_gpu_kernel_queue_info_t info;
+  std::memset(&info, 0xA5, sizeof(info));
+  const auto original_info = info;
+  uint32_t native_status = 1;
+  AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueCreate(&adapter, &create, &queue,
+                                                      &info, &native_status) ==
+              AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED);
+  AMDF_EXPECT(reinterpret_cast<uintptr_t>(queue) == 1);
+  AMDF_EXPECT(std::memcmp(&info, &original_info, sizeof(info)) == 0);
+  AMDF_EXPECT(native_status == 0);
+  AMDF_EXPECT(state.allocation_count == 1);
+  AMDF_EXPECT(state.live_allocation_count == 0);
+  AMDF_EXPECT(state.context_create_count == 0);
+  AMDF_EXPECT(adapter.live_queue_count.load() == 0);
   current_state = nullptr;
   return passed;
 }
 
-bool NativeFailureLeavesNoAdapterCleanupObligation() {
+bool NativeFailureRollsBackEveryPublishedHandle() {
   bool passed = true;
   struct FailureCase {
-    // Context creation result.
     NTSTATUS create_context;
-    // Queue creation result.
     NTSTATUS create_queue;
-    // Queue destruction result.
+    D3DKMT_HANDLE progress_fence;
     NTSTATUS destroy_queue;
-    // Context destruction result.
     NTSTATUS destroy_context;
-    // Error reported by construction after rollback.
     NTSTATUS expected_status;
-    // Expected queue destruction calls.
     uint32_t queue_destroy_count;
-    // Expected context destruction calls.
     uint32_t context_destroy_count;
   };
   const FailureCase cases[] = {
-      {STATUS_NO_MEMORY, STATUS_SUCCESS, STATUS_SUCCESS, STATUS_SUCCESS,
+      {STATUS_NO_MEMORY, STATUS_SUCCESS, kFence, STATUS_SUCCESS, STATUS_SUCCESS,
        STATUS_NO_MEMORY, 0, 0},
-      {STATUS_SUCCESS, STATUS_NO_MEMORY, STATUS_SUCCESS, STATUS_SUCCESS,
+      {STATUS_SUCCESS, STATUS_NO_MEMORY, kFence, STATUS_SUCCESS, STATUS_SUCCESS,
        STATUS_NO_MEMORY, 0, 1},
-      {STATUS_SUCCESS, STATUS_SUCCESS, STATUS_SUCCESS, STATUS_SUCCESS,
+      {STATUS_SUCCESS, STATUS_SUCCESS, 0, STATUS_SUCCESS, STATUS_SUCCESS,
        STATUS_INVALID_HANDLE, 1, 1},
-      {STATUS_SUCCESS, STATUS_SUCCESS, STATUS_DEVICE_BUSY, STATUS_SUCCESS,
-       STATUS_DEVICE_BUSY, 1, 0},
-      {STATUS_SUCCESS, STATUS_SUCCESS, STATUS_SUCCESS, STATUS_DEVICE_BUSY,
+      {STATUS_SUCCESS, STATUS_SUCCESS, 0, STATUS_DEVICE_BUSY, STATUS_SUCCESS,
+       STATUS_DEVICE_BUSY, 1, 1},
+      {STATUS_SUCCESS, STATUS_SUCCESS, 0, STATUS_SUCCESS, STATUS_DEVICE_BUSY,
        STATUS_DEVICE_BUSY, 1, 1},
   };
-  for (const auto& failure : cases) {
+  for (const FailureCase& failure : cases) {
     FakeNativeState state;
     state.create_context_status = failure.create_context;
     state.create_queue_status = failure.create_queue;
+    state.fence = failure.progress_fence;
     state.destroy_queue_status = failure.destroy_queue;
     state.destroy_context_status = failure.destroy_context;
-    state.fence = 0;
     current_state = &state;
     amdf_dxg_bridge_gpu_adapter_t adapter;
-    adapter.host_allocator = {&state, Allocate, nullptr, Free};
+    InitializeAdapter(&adapter, &state);
     const auto create = MakeCreateInfo();
     auto* queue = reinterpret_cast<amdf_dxg_bridge_gpu_kernel_queue_t*>(1);
     amdf_dxg_bridge_gpu_kernel_queue_info_t info;
     std::memset(&info, 0xA5, sizeof(info));
-    const auto original = info;
+    const auto original_info = info;
     uint32_t native_status = 0;
     AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueCreate(
                     &adapter, &create, &queue, &info, &native_status) ==
@@ -445,12 +409,9 @@ bool NativeFailureLeavesNoAdapterCleanupObligation() {
     AMDF_EXPECT(native_status ==
                 static_cast<uint32_t>(failure.expected_status));
     AMDF_EXPECT(reinterpret_cast<uintptr_t>(queue) == 1);
-    AMDF_EXPECT(std::memcmp(&info, &original, sizeof(info)) == 0);
+    AMDF_EXPECT(std::memcmp(&info, &original_info, sizeof(info)) == 0);
     AMDF_EXPECT(state.live_allocation_count == 0);
-    AMDF_EXPECT(adapter.live_queue_count == 0);
-    AMDF_EXPECT(
-        amdf::wkmi_bridge::PrepareGpuAdapterClose(&adapter, &native_status) ==
-        AMDF_DXG_BRIDGE_RESULT_SUCCESS);
+    AMDF_EXPECT(adapter.live_queue_count.load() == 0);
     AMDF_EXPECT(state.queue_destroy_count == failure.queue_destroy_count);
     AMDF_EXPECT(state.context_destroy_count == failure.context_destroy_count);
     AMDF_EXPECT(state.submit_count == 0);
@@ -460,13 +421,14 @@ bool NativeFailureLeavesNoAdapterCleanupObligation() {
   return passed;
 }
 
-bool FinalReleaseConsumesPublishedQueueOnEveryNativeResult() {
+bool HardwareQueueUsesSharedRecordsAndConsumesEveryResult() {
   bool passed = true;
   for (uint32_t failure_stage = 0; failure_stage < 3; ++failure_stage) {
     FakeNativeState state;
+    state.supports_firmware_state_shadowing = 1;
     current_state = &state;
     amdf_dxg_bridge_gpu_adapter_t adapter;
-    adapter.host_allocator = {&state, Allocate, nullptr, Free};
+    InitializeAdapter(&adapter, &state);
     const auto create = MakeCreateInfo();
     amdf_dxg_bridge_gpu_kernel_queue_t* queue = nullptr;
     amdf_dxg_bridge_gpu_kernel_queue_info_t info = {};
@@ -477,10 +439,14 @@ bool FinalReleaseConsumesPublishedQueueOnEveryNativeResult() {
     if (queue == nullptr) {
       return false;
     }
+    AMDF_EXPECT(info.context_handle == kContext);
+    AMDF_EXPECT(info.queue_handle == kQueue);
     AMDF_EXPECT(info.progress_fence_handle == kFence);
     AMDF_EXPECT(info.progress_fence_pointer == &state.progress);
-    AMDF_EXPECT(state.live_allocation_count == 2);
-    AMDF_EXPECT(adapter.live_queue_count == 1);
+    AMDF_EXPECT(info.progress_fence_device_address == 0x1000);
+    AMDF_EXPECT(state.allocation_count == 1);
+    AMDF_EXPECT(state.live_allocation_count == 1);
+    AMDF_EXPECT(adapter.live_queue_count.load() == 1);
     AMDF_EXPECT(amdf::wkmi_bridge::PrepareGpuAdapterClose(
                     &adapter, &native_status) == AMDF_DXG_BRIDGE_RESULT_BUSY);
     uint32_t accepted = 0;
@@ -491,8 +457,7 @@ bool FinalReleaseConsumesPublishedQueueOnEveryNativeResult() {
     AMDF_EXPECT(*info.progress_fence_pointer == 7);
     if (failure_stage == 1) {
       state.destroy_queue_status = STATUS_DEVICE_BUSY;
-    }
-    if (failure_stage == 2) {
+    } else if (failure_stage == 2) {
       state.destroy_context_status = STATUS_DEVICE_BUSY;
     }
     AMDF_EXPECT(
@@ -503,12 +468,10 @@ bool FinalReleaseConsumesPublishedQueueOnEveryNativeResult() {
                 static_cast<uint32_t>(failure_stage == 0 ? STATUS_SUCCESS
                                                          : STATUS_DEVICE_BUSY));
     AMDF_EXPECT(state.live_allocation_count == 0);
-    AMDF_EXPECT(adapter.live_queue_count == 0);
+    AMDF_EXPECT(adapter.live_queue_count.load() == 0);
+    AMDF_EXPECT(state.queue_create_count == 1);
     AMDF_EXPECT(state.queue_destroy_count == 1);
-    AMDF_EXPECT(state.context_destroy_count == (failure_stage == 1 ? 0u : 1u));
-    AMDF_EXPECT(
-        amdf::wkmi_bridge::PrepareGpuAdapterClose(&adapter, &native_status) ==
-        AMDF_DXG_BRIDGE_RESULT_SUCCESS);
+    AMDF_EXPECT(state.context_destroy_count == 1);
     AMDF_EXPECT(state.submit_count == 1);
     AMDF_EXPECT(state.dependency_failure_count == 0);
   }
@@ -520,18 +483,21 @@ bool SoftwareSubmissionSeparatesAcceptanceFromSignal() {
   bool passed = true;
   for (uint32_t failure_stage = 0; failure_stage < 3; ++failure_stage) {
     FakeNativeState state;
-    state.expected_scheduler = 2;
-    state.schedulers[2] = {1, false};
+    state.profile = {
+        .scheduler_id = 7,
+        .node_ordinal = 1,
+        .is_supported = 1,
+        .uses_hardware_scheduling = 0,
+    };
     state.submit_status =
         failure_stage == 1 ? STATUS_NO_MEMORY : STATUS_SUCCESS;
     state.signal_status =
         failure_stage == 2 ? STATUS_NO_MEMORY : STATUS_SUCCESS;
     current_state = &state;
     amdf_dxg_bridge_gpu_adapter_t adapter;
-    adapter.host_allocator = {&state, Allocate, nullptr, Free};
-    adapter.device_info.sdma_schedid = {2};
-    auto create = MakeCreateInfo();
-    create.command_type = AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA;
+    InitializeAdapter(&adapter, &state);
+    const auto create =
+        MakeCreateInfo(AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA);
     amdf_dxg_bridge_gpu_kernel_queue_t* queue = nullptr;
     amdf_dxg_bridge_gpu_kernel_queue_info_t info = {};
     uint32_t native_status = 0;
@@ -544,7 +510,10 @@ bool SoftwareSubmissionSeparatesAcceptanceFromSignal() {
     AMDF_EXPECT(info.queue_handle == 0 && info.context_handle == kContext);
     AMDF_EXPECT(info.progress_fence_handle == kFence);
     AMDF_EXPECT(info.progress_fence_pointer == &state.progress);
-    const auto allocations = state.allocation_count;
+    AMDF_EXPECT(state.queue_create_count == 0);
+    AMDF_EXPECT(state.fence_create_count == 1);
+    AMDF_EXPECT(state.allocation_count == 1);
+    const size_t allocation_count = state.allocation_count;
     uint32_t accepted = UINT32_MAX;
     AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueSubmit(
                     queue, 0x2000, 64, 7, &accepted, &native_status) ==
@@ -557,9 +526,8 @@ bool SoftwareSubmissionSeparatesAcceptanceFromSignal() {
     AMDF_EXPECT(state.submit_count == 1);
     AMDF_EXPECT(state.signal_count == (failure_stage == 1 ? 0u : 1u));
     AMDF_EXPECT(state.progress == (failure_stage == 0 ? 7u : 0u));
-    AMDF_EXPECT(state.allocation_count == allocations);
+    AMDF_EXPECT(state.allocation_count == allocation_count);
     // The dependency supplies final access independently of signal failure.
-    // Production callers must establish this before native queue destruction.
     state.progress = 7;
     AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueDestroy(
                     queue, &native_status) == AMDF_DXG_BRIDGE_RESULT_SUCCESS);
@@ -567,7 +535,7 @@ bool SoftwareSubmissionSeparatesAcceptanceFromSignal() {
     AMDF_EXPECT(state.context_destroy_count == 1);
     AMDF_EXPECT(state.fence_destroy_count == 1);
     AMDF_EXPECT(state.live_allocation_count == 0);
-    AMDF_EXPECT(adapter.live_queue_count == 0);
+    AMDF_EXPECT(adapter.live_queue_count.load() == 0);
     AMDF_EXPECT(state.dependency_failure_count == 0);
   }
   current_state = nullptr;
@@ -576,60 +544,65 @@ bool SoftwareSubmissionSeparatesAcceptanceFromSignal() {
 
 bool SoftwareConstructionAndReleasePreserveOwnership() {
   bool passed = true;
-  for (uint32_t failure_stage = 0; failure_stage < 7; ++failure_stage) {
+  for (uint32_t failure_stage = 0; failure_stage < 5; ++failure_stage) {
     FakeNativeState state;
-    state.expected_scheduler = 2;
-    state.schedulers[2] = {1, false};
-    if (failure_stage < 3) {
-      state.failure_ordinal = failure_stage;
-    } else if (failure_stage == 3) {
+    state.profile = {
+        .scheduler_id = 7,
+        .node_ordinal = 1,
+        .is_supported = 1,
+        .uses_hardware_scheduling = 0,
+    };
+    if (failure_stage == 0) {
       state.create_fence_status = STATUS_NO_MEMORY;
-    } else if (failure_stage == 4) {
+    } else if (failure_stage == 1) {
       state.fence = 0;
     }
     current_state = &state;
     amdf_dxg_bridge_gpu_adapter_t adapter;
-    adapter.host_allocator = {&state, Allocate, nullptr, Free};
-    adapter.device_info.sdma_schedid = {2};
-    auto create = MakeCreateInfo();
-    create.command_type = AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA;
+    InitializeAdapter(&adapter, &state);
+    const auto create =
+        MakeCreateInfo(AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA);
     auto* queue = reinterpret_cast<amdf_dxg_bridge_gpu_kernel_queue_t*>(1);
     amdf_dxg_bridge_gpu_kernel_queue_info_t info;
     std::memset(&info, 0xA5, sizeof(info));
-    const auto original = info;
+    const auto original_info = info;
     uint32_t native_status = 0;
     const auto result = amdf::wkmi_bridge::GpuKernelQueueCreate(
         &adapter, &create, &queue, &info, &native_status);
-    if (failure_stage < 5) {
-      AMDF_EXPECT(result == (failure_stage < 3
-                                 ? AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED
-                                 : AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE));
+    if (failure_stage < 2) {
+      AMDF_EXPECT(result == AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE);
       AMDF_EXPECT(reinterpret_cast<uintptr_t>(queue) == 1);
-      AMDF_EXPECT(std::memcmp(&info, &original, sizeof(info)) == 0);
-      AMDF_EXPECT(state.context_create_count == (failure_stage < 3 ? 0u : 1u));
-      AMDF_EXPECT(state.context_destroy_count == (failure_stage < 3 ? 0u : 1u));
+      AMDF_EXPECT(std::memcmp(&info, &original_info, sizeof(info)) == 0);
+      AMDF_EXPECT(state.context_create_count == 1);
+      AMDF_EXPECT(state.context_destroy_count == 1);
       AMDF_EXPECT(state.fence_destroy_count == 0);
     } else {
       AMDF_EXPECT(result == AMDF_DXG_BRIDGE_RESULT_SUCCESS);
       if (result != AMDF_DXG_BRIDGE_RESULT_SUCCESS) {
         return false;
       }
-      if (failure_stage == 5) {
+      if (failure_stage == 3) {
         state.destroy_context_status = STATUS_DEVICE_BUSY;
-      } else {
+      } else if (failure_stage == 4) {
         state.destroy_fence_status = STATUS_DEVICE_BUSY;
       }
       AMDF_EXPECT(
           amdf::wkmi_bridge::GpuKernelQueueDestroy(queue, &native_status) ==
-          AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE);
-      AMDF_EXPECT(native_status == static_cast<uint32_t>(STATUS_DEVICE_BUSY));
+          (failure_stage == 2 ? AMDF_DXG_BRIDGE_RESULT_SUCCESS
+                              : AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE));
+      AMDF_EXPECT(native_status ==
+                  static_cast<uint32_t>(failure_stage == 2
+                                            ? STATUS_SUCCESS
+                                            : STATUS_DEVICE_BUSY));
       AMDF_EXPECT(state.context_destroy_count == 1);
-      AMDF_EXPECT(state.fence_destroy_count == (failure_stage == 6 ? 1u : 0u));
+      AMDF_EXPECT(state.fence_destroy_count == 1);
     }
+    AMDF_EXPECT(state.queue_create_count == 0);
     AMDF_EXPECT(state.queue_destroy_count == 0);
     AMDF_EXPECT(state.live_allocation_count == 0);
-    AMDF_EXPECT(adapter.live_queue_count == 0);
+    AMDF_EXPECT(adapter.live_queue_count.load() == 0);
     AMDF_EXPECT(state.dependency_failure_count == 0);
+    AMDF_EXPECT(state.invalid_alignment_count == 0);
   }
   current_state = nullptr;
   return passed;
@@ -641,29 +614,25 @@ bool SoftwareConstructionAndReleasePreserveOwnership() {
 
 int main() {
   struct TestCase {
-    // Name printed with the result.
     const char* name;
-    // Case returning whether every expectation passed.
     bool (*run)();
   };
   const TestCase cases[] = {
-      {"NativeSchedulerSelectionPreservesCommandRepresentation",
-       NativeSchedulerSelectionPreservesCommandRepresentation},
-      {"ContextUsesPm4SchedulerWhenAqlSchedulerDiffers",
-       ContextUsesPm4SchedulerWhenAqlSchedulerDiffers},
-      {"AllocationFailureLeavesNoNativeOwnership",
-       AllocationFailureLeavesNoNativeOwnership},
-      {"NativeFailureLeavesNoAdapterCleanupObligation",
-       NativeFailureLeavesNoAdapterCleanupObligation},
-      {"FinalReleaseConsumesPublishedQueueOnEveryNativeResult",
-       FinalReleaseConsumesPublishedQueueOnEveryNativeResult},
+      {"UnsupportedProfileHasNoOwnershipEffects",
+       UnsupportedProfileHasNoOwnershipEffects},
+      {"HostAllocationFailureLeavesNoNativeOwnership",
+       HostAllocationFailureLeavesNoNativeOwnership},
+      {"NativeFailureRollsBackEveryPublishedHandle",
+       NativeFailureRollsBackEveryPublishedHandle},
+      {"HardwareQueueUsesSharedRecordsAndConsumesEveryResult",
+       HardwareQueueUsesSharedRecordsAndConsumesEveryResult},
       {"SoftwareSubmissionSeparatesAcceptanceFromSignal",
        SoftwareSubmissionSeparatesAcceptanceFromSignal},
       {"SoftwareConstructionAndReleasePreserveOwnership",
        SoftwareConstructionAndReleasePreserveOwnership},
   };
   bool passed = true;
-  for (const auto& test : cases) {
+  for (const TestCase& test : cases) {
     std::fprintf(stderr, "[ RUN      ] %s\n", test.name);
     if (test.run()) {
       std::fprintf(stderr, "[       OK ] %s\n", test.name);

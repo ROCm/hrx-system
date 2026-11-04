@@ -11,8 +11,24 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif  // WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif  // NOMINMAX
+#define WIN32_NO_STATUS
+#include <windows.h>
+#include <winternl.h>
+#undef WIN32_NO_STATUS
+
+#include <d3dkmthk.h>
+#include <ntstatus.h>
+
+#include "libamdf/src/gpu/umd/dxg/private_records.h"
 #include "libamdf/src/gpu/umd/wddm/wkmi/adapter_state.h"
 
 namespace {
@@ -69,11 +85,9 @@ struct NativeAllocationRequest {
   // Exact payload bytes passed to the native allocation encoder.
   uint64_t byte_length;
   // Native placement or caller-page registration class.
-  Wkmi::AllocDomain domain;
-  // Requested device address for local memory, zero for system memory.
-  uint64_t address;
+  amdf_dxg_private_allocation_domain_t domain;
   // Native memory-policy bits encoded into the private allocation payload.
-  uint32_t memory_flags = 0;
+  amdf_dxg_private_allocation_flags_t flags = 0;
 };
 
 struct FakeNativeState {
@@ -89,12 +103,33 @@ struct FakeNativeState {
   uint32_t dependency_failure_count = 0;
   // Complete native payload requests expected before allocation creation.
   std::vector<NativeAllocationRequest> expected_allocations = {
-      {4096, Wkmi::kSystem, 0}};
+      {4096, AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_SYSTEM}};
+  // Adapter facts controlling allocation segment and cache policy encoding.
+  amdf_dxg_private_adapter_info_t adapter_info = {.gfx_ip_major = 11};
   // Number of allocation records encoded before the native create call.
   size_t allocation_info_count = 0;
 };
 
 FakeNativeState* g_fake_native_state = nullptr;
+
+uint32_t Load32(const void* pointer) {
+  uint32_t value = 0;
+  std::memcpy(&value, pointer, sizeof(value));
+  return value;
+}
+
+uint64_t Load64(const void* pointer) {
+  uint64_t value = 0;
+  std::memcpy(&value, pointer, sizeof(value));
+  return value;
+}
+
+void InitializeAdapter(amdf_dxg_bridge_gpu_adapter_t* adapter,
+                       TestAllocatorState* allocator_state,
+                       const FakeNativeState& native_state) {
+  adapter->host_allocator = MakeTestAllocator(allocator_state);
+  adapter->private_info = native_state.adapter_info;
+}
 
 void RecordDependencyExpectation(bool condition) {
   if (!condition) {
@@ -132,10 +167,68 @@ D3DKMTCreateAllocation2(D3DKMT_CREATEALLOCATION* create) {
   RecordDependencyExpectation(create->hDevice == kDeviceHandle);
   RecordDependencyExpectation(create->NumAllocations ==
                               g_fake_native_state->expected_allocations.size());
-  RecordDependencyExpectation(create->NumAllocations ==
-                              g_fake_native_state->allocation_info_count);
   RecordDependencyExpectation(create->pPrivateDriverData != nullptr);
+  RecordDependencyExpectation(
+      create->PrivateDriverDataSize ==
+      AMDF_DXG_PRIVATE_ALLOCATION_DRIVER_RECORD_BYTE_LENGTH);
   RecordDependencyExpectation(create->pAllocationInfo2 != nullptr);
+  const auto* driver_record =
+      static_cast<const uint8_t*>(create->pPrivateDriverData);
+  RecordDependencyExpectation(driver_record[0x08] == 0x80);
+  RecordDependencyExpectation(Load32(driver_record + 0x3C) ==
+                              AMDF_DXG_PRIVATE_ALLOCATION_RECORD_BYTE_LENGTH);
+  for (uint32_t i = 0; i < create->NumAllocations; ++i) {
+    const D3DDDI_ALLOCATIONINFO2& allocation = create->pAllocationInfo2[i];
+    RecordDependencyExpectation(allocation.PrivateDriverDataSize ==
+                                AMDF_DXG_PRIVATE_ALLOCATION_RECORD_BYTE_LENGTH);
+    RecordDependencyExpectation(allocation.pPrivateDriverData != nullptr);
+    RecordDependencyExpectation(allocation.VidPnSourceId ==
+                                D3DDDI_ID_UNINITIALIZED);
+    const size_t ordinal = g_fake_native_state->allocation_info_count++;
+    RecordDependencyExpectation(
+        ordinal < g_fake_native_state->expected_allocations.size());
+    if (ordinal >= g_fake_native_state->expected_allocations.size()) {
+      continue;
+    }
+    const NativeAllocationRequest& expected =
+        g_fake_native_state->expected_allocations[ordinal];
+    const auto* record =
+        static_cast<const uint8_t*>(allocation.pPrivateDriverData);
+    RecordDependencyExpectation(Load32(record) == 0x1D8);
+    RecordDependencyExpectation(Load64(record + 0xA8) == expected.byte_length);
+    if (expected.domain == AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_LOCAL) {
+      RecordDependencyExpectation(allocation.pSystemMem == nullptr);
+      const bool has_invisible_heap =
+          g_fake_native_state->adapter_info.invisible_local_heap_byte_length !=
+          0;
+      RecordDependencyExpectation(record[0x50] == (has_invisible_heap ? 7 : 5));
+      RecordDependencyExpectation(record[0x5C] == (has_invisible_heap ? 3 : 2));
+    } else {
+      RecordDependencyExpectation(allocation.pSystemMem != nullptr);
+      const uint32_t expected_segment_flags =
+          expected.domain == AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_SYSTEM
+              ? 0x24002008
+              : 0x04000008;
+      RecordDependencyExpectation(Load32(record + 0x50) ==
+                                  expected_segment_flags);
+      RecordDependencyExpectation(record[0x5C] == 1 && record[0x60] == 4);
+      const bool expects_native_queue =
+          (expected.flags & AMDF_DXG_PRIVATE_ALLOCATION_FLAG_QUEUE_STORAGE) !=
+              0 &&
+          (g_fake_native_state->adapter_info.native_queue_flags &
+           AMDF_DXG_PRIVATE_NATIVE_QUEUE_AQL) != 0;
+      RecordDependencyExpectation(((record[0xA6] & 1) != 0) ==
+                                  expects_native_queue);
+      const bool expects_uncached =
+          (g_fake_native_state->adapter_info.gfx_ip_major < 12 &&
+           (expected.flags & AMDF_DXG_PRIVATE_ALLOCATION_FLAG_FINE_GRAIN) !=
+               0) ||
+          (expected.flags & AMDF_DXG_PRIVATE_ALLOCATION_FLAG_DEVICE_UNCACHED) !=
+              0;
+      RecordDependencyExpectation(Load32(record + 0x1D0) ==
+                                  (expects_uncached ? 4u : 0u));
+    }
+  }
   if (g_fake_native_state->create_status != STATUS_SUCCESS) {
     return g_fake_native_state->create_status;
   }
@@ -157,40 +250,6 @@ D3DKMTDestroyAllocation2(const D3DKMT_DESTROYALLOCATION2*) {
   return kStatusNoMemory;
 }
 
-namespace Wkmi {
-
-void GetAllocPrivDataSize(int* driver_private_data_size,
-                          int* allocation_private_data_size) {
-  *driver_private_data_size = 16;
-  *allocation_private_data_size = 32;
-}
-
-void FillinAllocPrivDrvData(void* driver_private_data,
-                            int allocation_private_data_size) {
-  RecordDependencyExpectation(driver_private_data != nullptr);
-  RecordDependencyExpectation(allocation_private_data_size == 32);
-}
-
-void SetAllocationInfo(void* allocation_private_data, uint64_t byte_length,
-                       AllocDomain domain, uint64_t address,
-                       uint32_t memory_flags, uint32_t engine_flag,
-                       const DeviceInfo&) {
-  RecordDependencyExpectation(allocation_private_data != nullptr);
-  const size_t ordinal = g_fake_native_state->allocation_info_count++;
-  RecordDependencyExpectation(ordinal <
-                              g_fake_native_state->expected_allocations.size());
-  if (ordinal < g_fake_native_state->expected_allocations.size()) {
-    const auto& expected = g_fake_native_state->expected_allocations[ordinal];
-    RecordDependencyExpectation(byte_length == expected.byte_length);
-    RecordDependencyExpectation(domain == expected.domain);
-    RecordDependencyExpectation(address == expected.address);
-    RecordDependencyExpectation(memory_flags == expected.memory_flags);
-  }
-  RecordDependencyExpectation(engine_flag == KCOMPUTE0);
-}
-
-}  // namespace Wkmi
-
 namespace {
 
 bool MalformedNativeSuccessPublishesResourceToCaller() {
@@ -201,7 +260,7 @@ bool MalformedNativeSuccessPublishesResourceToCaller() {
   g_fake_native_state = &native_state;
   {
     amdf_dxg_bridge_gpu_adapter_t adapter;
-    adapter.host_allocator = MakeTestAllocator(&allocator_state);
+    InitializeAdapter(&adapter, &allocator_state, native_state);
     alignas(4096) std::array<uint8_t, 4096> host_storage = {};
     const amdf_dxg_bridge_gpu_allocation_create_info_t create_info =
         MakeSystemCreateInfo(host_storage.data(), host_storage.size());
@@ -242,7 +301,7 @@ bool SuccessfulCreatePublishesNativeHandles() {
   g_fake_native_state = &native_state;
   {
     amdf_dxg_bridge_gpu_adapter_t adapter;
-    adapter.host_allocator = MakeTestAllocator(&allocator_state);
+    InitializeAdapter(&adapter, &allocator_state, native_state);
     alignas(4096) std::array<uint8_t, 4096> host_storage = {};
     const amdf_dxg_bridge_gpu_allocation_create_info_t create_info =
         MakeSystemCreateInfo(host_storage.data(), host_storage.size());
@@ -279,14 +338,17 @@ bool AllocationFlagsPreserveIndependentPolicies() {
   TestAllocatorState allocator_state;
   native_state.expected_allocations = {{
       4096,
-      Wkmi::kSystem,
-      0,
-      Wkmi::kFineGrain | Wkmi::kKernarg | Wkmi::kQueueObject,
+      AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_SYSTEM,
+      AMDF_DXG_PRIVATE_ALLOCATION_FLAG_FINE_GRAIN |
+          AMDF_DXG_PRIVATE_ALLOCATION_FLAG_DEVICE_UNCACHED |
+          AMDF_DXG_PRIVATE_ALLOCATION_FLAG_QUEUE_STORAGE,
   }};
+  native_state.adapter_info.native_queue_flags =
+      AMDF_DXG_PRIVATE_NATIVE_QUEUE_AQL;
   g_fake_native_state = &native_state;
   {
     amdf_dxg_bridge_gpu_adapter_t adapter;
-    adapter.host_allocator = MakeTestAllocator(&allocator_state);
+    InitializeAdapter(&adapter, &allocator_state, native_state);
     alignas(4096) std::array<uint8_t, 4096> host_storage = {};
     amdf_dxg_bridge_gpu_allocation_create_info_t create_info =
         MakeSystemCreateInfo(host_storage.data(), host_storage.size());
@@ -318,7 +380,7 @@ bool NativeCreateFailureLeavesOutputsUnchanged() {
   g_fake_native_state = &native_state;
   {
     amdf_dxg_bridge_gpu_adapter_t adapter;
-    adapter.host_allocator = MakeTestAllocator(&allocator_state);
+    InitializeAdapter(&adapter, &allocator_state, native_state);
     alignas(4096) std::array<uint8_t, 4096> host_storage = {};
     const amdf_dxg_bridge_gpu_allocation_create_info_t create_info =
         MakeSystemCreateInfo(host_storage.data(), host_storage.size());
@@ -351,7 +413,7 @@ bool InsufficientCapacityReportsCountWithoutAllocating() {
   g_fake_native_state = &native_state;
   {
     amdf_dxg_bridge_gpu_adapter_t adapter;
-    adapter.host_allocator = MakeTestAllocator(&allocator_state);
+    InitializeAdapter(&adapter, &allocator_state, native_state);
     alignas(4096) std::array<uint8_t, 4096> host_storage = {};
     const amdf_dxg_bridge_gpu_allocation_create_info_t create_info =
         MakeSystemCreateInfo(host_storage.data(), host_storage.size());
@@ -406,15 +468,16 @@ bool NativeChunksPreserveExactPayloadExtent() {
     std::vector<NativeAllocationRequest> allocations;
   };
   const TestCase cases[] = {
-      {kChunkSize - 4096, {{kChunkSize - 4096, Wkmi::kLocal, kAddress}}},
-      {kChunkSize, {{kChunkSize, Wkmi::kLocal, kAddress}}},
+      {kChunkSize - 4096,
+       {{kChunkSize - 4096, AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_LOCAL}}},
+      {kChunkSize, {{kChunkSize, AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_LOCAL}}},
       {kChunkSize + 4096,
-       {{kChunkSize, Wkmi::kLocal, kAddress},
-        {4096, Wkmi::kLocal, kAddress + kChunkSize}}},
+       {{kChunkSize, AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_LOCAL},
+        {4096, AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_LOCAL}}},
       {2 * kChunkSize + 65536,
-       {{kChunkSize, Wkmi::kLocal, kAddress},
-        {kChunkSize, Wkmi::kLocal, kAddress + kChunkSize},
-        {65536, Wkmi::kLocal, kAddress + 2 * kChunkSize}}},
+       {{kChunkSize, AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_LOCAL},
+        {kChunkSize, AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_LOCAL},
+        {65536, AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_LOCAL}}},
   };
   for (const TestCase& test_case : cases) {
     FakeNativeState native_state;
@@ -422,7 +485,7 @@ bool NativeChunksPreserveExactPayloadExtent() {
     native_state.expected_allocations = test_case.allocations;
     g_fake_native_state = &native_state;
     amdf_dxg_bridge_gpu_adapter_t adapter;
-    adapter.host_allocator = MakeTestAllocator(&allocator_state);
+    InitializeAdapter(&adapter, &allocator_state, native_state);
     uint32_t allocation_count = 0;
     uint64_t maximum_allocation_byte_length = 0;
     AMDF_EXPECT(amdf::wkmi_bridge::GpuAllocationQueryLayout(
@@ -473,7 +536,7 @@ bool MetadataAllocationFailureLeavesOwnershipOutputsUnchanged() {
   g_fake_native_state = &native_state;
   {
     amdf_dxg_bridge_gpu_adapter_t adapter;
-    adapter.host_allocator = MakeTestAllocator(&allocator_state);
+    InitializeAdapter(&adapter, &allocator_state, native_state);
     alignas(4096) std::array<uint8_t, 4096> host_storage = {};
     const amdf_dxg_bridge_gpu_allocation_create_info_t create_info =
         MakeSystemCreateInfo(host_storage.data(), host_storage.size());

@@ -6,11 +6,27 @@
 
 #include "libamdf/src/gpu/umd/wddm/wkmi/shared_buffer.h"
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif  // WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif  // NOMINMAX
+#define WIN32_NO_STATUS
+#include <windows.h>
+#include <winternl.h>
+#undef WIN32_NO_STATUS
+
 #include <d3d12.h>
+#include <d3dkmthk.h>
 #include <dxgi1_4.h>
+#include <ntstatus.h>
 #include <wrl/client.h>
 
+#include <limits>
+
 #include "libamdf/src/gpu/umd/dxg/bridge_allocator.h"
+#include "libamdf/src/gpu/umd/dxg/private_records.h"
 #include "libamdf/src/gpu/umd/wddm/wkmi/adapter_state.h"
 
 namespace amdf::wkmi_bridge {
@@ -24,23 +40,10 @@ amdf_status_t HresultStatus(HRESULT result) {
                                               static_cast<uint32_t>(result));
 }
 
-amdf_status_t QueryBufferWithModules(HMODULE dxgi_module, HMODULE d3d12_module,
-                                     uint64_t adapter_luid,
-                                     HANDLE shared_handle,
-                                     uint64_t* out_byte_length) {
-  using CreateFactory = HRESULT(WINAPI*)(REFIID, void**);
-  const auto create_factory = reinterpret_cast<CreateFactory>(
-      GetProcAddress(dxgi_module, "CreateDXGIFactory1"));
-  if (create_factory == nullptr) {
-    return amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError());
-  }
-  const auto create_device = reinterpret_cast<PFN_D3D12_CREATE_DEVICE>(
-      GetProcAddress(d3d12_module, "D3D12CreateDevice"));
-  if (create_device == nullptr) {
-    return amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError());
-  }
+amdf_status_t QueryBuffer(uint64_t adapter_luid, HANDLE shared_handle,
+                          uint64_t* out_byte_length) {
   Microsoft::WRL::ComPtr<IDXGIFactory4> factory;
-  HRESULT result = create_factory(IID_PPV_ARGS(&factory));
+  HRESULT result = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
   if (FAILED(result)) {
     return HresultStatus(result);
   }
@@ -52,8 +55,8 @@ amdf_status_t QueryBufferWithModules(HMODULE dxgi_module, HMODULE d3d12_module,
     return HresultStatus(result);
   }
   Microsoft::WRL::ComPtr<ID3D12Device> device;
-  result = create_device(adapter.Get(), D3D_FEATURE_LEVEL_11_0,
-                         IID_PPV_ARGS(&device));
+  result = D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0,
+                             IID_PPV_ARGS(&device));
   if (FAILED(result)) {
     return HresultStatus(result);
   }
@@ -81,33 +84,26 @@ amdf_status_t QueryBufferWithModules(HMODULE dxgi_module, HMODULE d3d12_module,
   return AMDF_STATUS_OK;
 }
 
-// Typed admission is cold and owns its temporary API modules and objects.
-// Native execution retains only KMT memory state, never a D3D12 device.
-amdf_status_t QueryBuffer(uint64_t adapter_luid, HANDLE shared_handle,
-                          uint64_t* out_byte_length) {
-  HMODULE dxgi_module =
-      LoadLibraryExW(L"dxgi.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
-  if (dxgi_module == nullptr) {
-    return amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError());
+bool TryAppendRegion(size_t byte_length, size_t* inout_total_byte_length,
+                     size_t* out_offset) {
+  constexpr size_t kAlignment = amdf_max_align_t;
+  const size_t total_byte_length = *inout_total_byte_length;
+  if (total_byte_length >
+      std::numeric_limits<size_t>::max() - (kAlignment - 1)) {
+    return false;
   }
-  HMODULE d3d12_module =
-      LoadLibraryExW(L"d3d12.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
-  uint64_t byte_length = 0;
-  amdf_status_t status =
-      d3d12_module == nullptr
-          ? amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError())
-          : QueryBufferWithModules(dxgi_module, d3d12_module, adapter_luid,
-                                   shared_handle, &byte_length);
-  if (d3d12_module != nullptr && !FreeLibrary(d3d12_module)) {
-    status = amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError());
+  const size_t offset =
+      (total_byte_length + kAlignment - 1) & ~(kAlignment - 1);
+  if (byte_length > std::numeric_limits<size_t>::max() - offset) {
+    return false;
   }
-  if (!FreeLibrary(dxgi_module)) {
-    status = amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError());
-  }
-  if (amdf_status_is_ok(status)) {
-    *out_byte_length = byte_length;
-  }
-  return status;
+  *out_offset = offset;
+  *inout_total_byte_length = offset + byte_length;
+  return true;
+}
+
+void* RegionPointer(void* storage, size_t offset, size_t byte_length) {
+  return byte_length == 0 ? nullptr : static_cast<uint8_t*>(storage) + offset;
 }
 
 amdf_status_t PrepareBuffer(
@@ -132,22 +128,26 @@ amdf_status_t PrepareBuffer(
   if (query.NumAllocations != 1 || query.TotalPrivateDriverDataSize == 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
-  const size_t proxy_byte_length = Wkmi::GetProxyResourceInfoSize();
-  if (proxy_byte_length > SIZE_MAX - query.TotalPrivateDriverDataSize) {
+  constexpr size_t kProxyByteLength =
+      AMDF_DXG_PRIVATE_PROXY_RESOURCE_RECORD_BYTE_LENGTH;
+  if (kProxyByteLength >
+      std::numeric_limits<size_t>::max() - query.TotalPrivateDriverDataSize) {
     return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
   }
-  HostBuffer runtime_data;
-  HostBuffer driver_data;
-  HostBuffer resource_data;
-  if ((query.PrivateRuntimeDataSize != 0 &&
-       !runtime_data.Allocate(adapter->host_allocator,
-                              query.PrivateRuntimeDataSize)) ||
-      !driver_data.Allocate(
-          adapter->host_allocator,
-          query.TotalPrivateDriverDataSize + proxy_byte_length) ||
-      (query.ResourcePrivateDriverDataSize != 0 &&
-       !resource_data.Allocate(adapter->host_allocator,
-                               query.ResourcePrivateDriverDataSize))) {
+  size_t scratch_byte_length = 0;
+  size_t runtime_data_offset = 0;
+  size_t driver_data_offset = 0;
+  size_t resource_data_offset = 0;
+  if (!TryAppendRegion(query.PrivateRuntimeDataSize, &scratch_byte_length,
+                       &runtime_data_offset) ||
+      !TryAppendRegion(query.TotalPrivateDriverDataSize + kProxyByteLength,
+                       &scratch_byte_length, &driver_data_offset) ||
+      !TryAppendRegion(query.ResourcePrivateDriverDataSize,
+                       &scratch_byte_length, &resource_data_offset)) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
+  }
+  HostBuffer scratch;
+  if (!scratch.Allocate(adapter->host_allocator, scratch_byte_length)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
   }
   D3DDDI_OPENALLOCATIONINFO2 allocation = {};
@@ -157,11 +157,16 @@ amdf_status_t PrepareBuffer(
   open.NumAllocations = 1;
   open.pOpenAllocationInfo2 = &allocation;
   open.PrivateRuntimeDataSize = query.PrivateRuntimeDataSize;
-  open.pPrivateRuntimeData = runtime_data.data();
+  open.pPrivateRuntimeData = RegionPointer(scratch.data(), runtime_data_offset,
+                                           query.PrivateRuntimeDataSize);
   open.TotalPrivateDriverDataBufferSize = query.TotalPrivateDriverDataSize;
-  open.pTotalPrivateDriverDataBuffer = driver_data.data();
+  open.pTotalPrivateDriverDataBuffer =
+      RegionPointer(scratch.data(), driver_data_offset,
+                    query.TotalPrivateDriverDataSize + kProxyByteLength);
   open.ResourcePrivateDriverDataSize = query.ResourcePrivateDriverDataSize;
-  open.pResourcePrivateDriverData = resource_data.data();
+  open.pResourcePrivateDriverData =
+      RegionPointer(scratch.data(), resource_data_offset,
+                    query.ResourcePrivateDriverDataSize);
   native_status = D3DKMTOpenResourceFromNtHandle(&open);
   if (native_status != STATUS_SUCCESS) {
     return amdf_make_status(AMDF_STATUS_DOMAIN_NTSTATUS,
@@ -175,19 +180,20 @@ amdf_status_t PrepareBuffer(
       allocation.PrivateDriverDataSize == 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
   }
-  const uint64_t native_byte_length =
-      Wkmi::GetMemoryAllocationSize(allocation.pPrivateDriverData);
-  const Wkmi::SurfaceSwizzleInfo layout =
-      Wkmi::GetSurfaceSwizzleInfo(allocation.pPrivateDriverData);
+  amdf_dxg_private_allocation_metadata_t metadata = {};
+  if (!amdf_dxg_private_decode_allocation_metadata(
+          allocation.pPrivateDriverData, allocation.PrivateDriverDataSize,
+          &metadata)) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
+  }
   // ADDR_SW_LINEAR and ADDR_SW_LINEAR_GENERAL are the addrlib byte layouts.
-  if (!layout.valid ||
-      (layout.swizzle_mode != 0 && layout.swizzle_mode != 32) ||
-      layout.tile_swizzle != 0 || layout.compression_mode != 0 ||
-      native_byte_length < buffer_byte_length ||
-      (native_byte_length & 4095) != 0) {
+  if ((metadata.swizzle_mode != 0 && metadata.swizzle_mode != 32) ||
+      metadata.tile_swizzle != 0 || metadata.compression_mode != 0 ||
+      metadata.byte_length < buffer_byte_length ||
+      (metadata.byte_length & 4095) != 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
-  *out_native_byte_length = native_byte_length;
+  *out_native_byte_length = metadata.byte_length;
   *out_buffer_byte_length = buffer_byte_length;
   return AMDF_STATUS_OK;
 }
@@ -200,15 +206,9 @@ amdf_status_t AMDF_DXG_BRIDGE_CALL GpuBufferPrepareImport(
     uint32_t* resource_handle, uint32_t* allocation_handle,
     uint64_t* out_native_byte_length,
     uint64_t* out_buffer_byte_length) noexcept {
-  try {
-    return PrepareBuffer(adapter, *import_info, resource_handle,
-                         allocation_handle, out_native_byte_length,
-                         out_buffer_byte_length);
-  } catch (const std::bad_alloc&) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
-  } catch (...) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
-  }
+  return PrepareBuffer(adapter, *import_info, resource_handle,
+                       allocation_handle, out_native_byte_length,
+                       out_buffer_byte_length);
 }
 
 }  // namespace amdf::wkmi_bridge
