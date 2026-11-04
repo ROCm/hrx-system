@@ -8,13 +8,14 @@
 
 #include <stddef.h>
 
-extern const uint32_t* const kLoomAmdgpuDescriptorRefOrdinalTables[];
+extern const uint16_t* const kLoomAmdgpuDescriptorRefOrdinalTables[];
 extern const uint16_t* const kLoomAmdgpuDescriptorRefByOrdinalTables[];
 extern const loom_amdgpu_descriptor_traits_t* const
     kLoomAmdgpuDescriptorTraitTables[];
 extern const uint8_t* const kLoomAmdgpuDescriptorMemoryPropertyTables[];
-extern const loom_amdgpu_descriptor_immediate_slots_t* const
-    kLoomAmdgpuDescriptorImmediateSlotTables[];
+extern const loom_amdgpu_descriptor_immediate_slots_t
+    kLoomAmdgpuDescriptorImmediateSlotValues[];
+extern const uint8_t* const kLoomAmdgpuDescriptorImmediateSlotRefTables[];
 extern const loom_amdgpu_reg_class_traits_t* const
     kLoomAmdgpuRegClassTraitTables[];
 extern const uint8_t kLoomAmdgpuAgprRegClassIds[];
@@ -33,7 +34,7 @@ static uint16_t loom_amdgpu_target_ref_descriptor_set_ordinal(
   return descriptor_set_ordinal;
 }
 
-static const uint32_t* loom_amdgpu_descriptor_ref_ordinal_table(
+static const uint16_t* loom_amdgpu_descriptor_ref_ordinal_table(
     const loom_low_descriptor_set_t* descriptor_set) {
   const uint16_t descriptor_set_ordinal =
       loom_amdgpu_target_ref_descriptor_set_ordinal(descriptor_set);
@@ -74,15 +75,14 @@ static const uint8_t* loom_amdgpu_descriptor_memory_property_table(
   return kLoomAmdgpuDescriptorMemoryPropertyTables[descriptor_set_ordinal];
 }
 
-static const loom_amdgpu_descriptor_immediate_slots_t*
-loom_amdgpu_descriptor_immediate_slot_table(
+static const uint8_t* loom_amdgpu_descriptor_immediate_slot_ref_table(
     const loom_low_descriptor_set_t* descriptor_set) {
   const uint16_t descriptor_set_ordinal =
       loom_amdgpu_target_ref_descriptor_set_ordinal(descriptor_set);
   if (descriptor_set_ordinal == LOOM_LOW_DESCRIPTOR_SET_ORDINAL_NONE) {
     return NULL;
   }
-  return kLoomAmdgpuDescriptorImmediateSlotTables[descriptor_set_ordinal];
+  return kLoomAmdgpuDescriptorImmediateSlotRefTables[descriptor_set_ordinal];
 }
 
 static const loom_amdgpu_reg_class_traits_t* loom_amdgpu_reg_class_trait_table(
@@ -101,7 +101,7 @@ uint32_t loom_amdgpu_descriptor_ref_ordinal(
   if (descriptor_ref >= LOOM_AMDGPU_DESCRIPTOR_REF_COUNT) {
     return LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
   }
-  const uint32_t* descriptor_ordinals =
+  const uint16_t* descriptor_ordinals =
       loom_amdgpu_descriptor_ref_ordinal_table(descriptor_set);
   if (descriptor_ordinals == NULL) {
     return LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
@@ -193,9 +193,9 @@ loom_amdgpu_store_data_wait_t loom_amdgpu_descriptor_store_data_wait(
 loom_amdgpu_descriptor_immediate_slots_t loom_amdgpu_descriptor_immediate_slots(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor) {
-  const loom_amdgpu_descriptor_immediate_slots_t* slot_table =
-      loom_amdgpu_descriptor_immediate_slot_table(descriptor_set);
-  if (slot_table == NULL) {
+  const uint8_t* slot_refs =
+      loom_amdgpu_descriptor_immediate_slot_ref_table(descriptor_set);
+  if (slot_refs == NULL) {
     return (loom_amdgpu_descriptor_immediate_slots_t){
         .sdwa_dst_sel = LOOM_AMDGPU_DESCRIPTOR_IMMEDIATE_SLOT_NONE,
         .literal = LOOM_AMDGPU_DESCRIPTOR_IMMEDIATE_SLOT_NONE,
@@ -213,7 +213,8 @@ loom_amdgpu_descriptor_immediate_slots_t loom_amdgpu_descriptor_immediate_slots(
         .cache_scope = LOOM_AMDGPU_DESCRIPTOR_IMMEDIATE_SLOT_NONE,
     };
   }
-  return slot_table[descriptor_ordinal];
+  return kLoomAmdgpuDescriptorImmediateSlotValues
+      [slot_refs[descriptor_ordinal]];
 }
 
 loom_amdgpu_reg_class_traits_t loom_amdgpu_reg_class_traits(
