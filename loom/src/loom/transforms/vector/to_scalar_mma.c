@@ -1188,7 +1188,7 @@ bool loom_vector_to_scalar_result_fragment_layout_is_supported(
   if (layout == NULL) {
     return false;
   }
-  const loom_matrix_fragment_role_layout_t* result = &layout->result;
+  const loom_matrix_fragment_role_layout_t* result = layout->result;
   return layout->tile_shape.block_count > 0 &&
          result->payload_element_count != 0 &&
          result->coordinate_element_stride == 1 &&
@@ -1236,24 +1236,24 @@ static bool loom_vector_to_scalar_mma_distributed_static_is_supported(
     return false;
   }
   if (!loom_vector_to_scalar_mma_physical_payload_matches_role(lhs,
-                                                               &layout->lhs) ||
+                                                               layout->lhs) ||
       !loom_vector_to_scalar_mma_physical_payload_matches_role(rhs,
-                                                               &layout->rhs) ||
+                                                               layout->rhs) ||
       !loom_vector_to_scalar_mma_physical_payload_matches_role(
-          init, &layout->accumulator) ||
+          init, layout->accumulator) ||
       !loom_vector_to_scalar_mma_physical_payload_matches_role(
           &(loom_vector_to_scalar_mma_fragment_t){.fact = init->fact,
                                                   .type = result_type},
-          &layout->result)) {
+          layout->result)) {
     return false;
   }
-  if (!loom_vector_to_scalar_mma_role_layouts_match(&layout->accumulator,
-                                                    &layout->result) ||
+  if (!loom_vector_to_scalar_mma_role_layouts_match(layout->accumulator,
+                                                    layout->result) ||
       !loom_vector_to_scalar_result_fragment_layout_is_supported(layout) ||
       !loom_vector_to_scalar_mma_reduction_role_layout_is_supported(
-          layout, &layout->lhs) ||
+          layout, layout->lhs) ||
       !loom_vector_to_scalar_mma_reduction_role_layout_is_supported(
-          layout, &layout->rhs)) {
+          layout, layout->rhs)) {
     return false;
   }
   *out_k = k;
@@ -1383,7 +1383,7 @@ iree_status_t loom_vector_to_scalar_build_result_fragment_coordinate_terms(
     loom_vector_to_scalar_index_term_t* out_row,
     loom_vector_to_scalar_index_term_t* out_column) {
   const loom_matrix_fragment_role_layout_t* result_layout =
-      &state->matrix_fragment_layout->result;
+      state->matrix_fragment_layout->result;
   loom_vector_to_scalar_index_term_t
       terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT] = {0};
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_forward_coordinate_terms(
@@ -1490,13 +1490,13 @@ static iree_status_t loom_vector_to_scalar_mma_build_distributed_lane(
     loom_vector_to_scalar_index_term_t lhs_payload_element_index = {0};
     IREE_RETURN_IF_ERROR(
         loom_vector_to_scalar_mma_build_reduction_source_element(
-            state, &layout->lhs, block, row, column, (uint16_t)reduction,
+            state, layout->lhs, block, row, column, (uint16_t)reduction,
             &lhs_source_lane, &lhs_payload_element_index));
     loom_vector_to_scalar_index_term_t rhs_source_lane = {0};
     loom_vector_to_scalar_index_term_t rhs_payload_element_index = {0};
     IREE_RETURN_IF_ERROR(
         loom_vector_to_scalar_mma_build_reduction_source_element(
-            state, &layout->rhs, block, row, column, (uint16_t)reduction,
+            state, layout->rhs, block, row, column, (uint16_t)reduction,
             &rhs_source_lane, &rhs_payload_element_index));
 
     loom_value_id_t lhs_lane = LOOM_VALUE_ID_INVALID;
@@ -1524,7 +1524,7 @@ static iree_status_t loom_vector_to_scalar_mma_lower_distributed_static(
     const loom_vector_to_scalar_mma_fragment_t* init, int64_t k,
     loom_value_id_t* out_replacement, bool* out_handled) {
   const loom_matrix_fragment_role_layout_t* result_layout =
-      &state->matrix_fragment_layout->result;
+      state->matrix_fragment_layout->result;
   uint16_t element_count = 0;
   if (!loom_vector_to_scalar_mma_physical_element_count(result_layout,
                                                         &element_count)) {

@@ -10,7 +10,7 @@
 // from a higher-level tile.contract after shapes, encodings, layouts, and value
 // facts are refined enough to make the choice structural. The descriptors are
 // intentionally data-only: lowering code can query exact shape/type/feature
-// requirements without hard-coding AMDGPU intrinsic names throughout generic
+// requirements without hard-coding target-native details throughout generic
 // tile/vector passes.
 
 #ifndef LOOM_TARGET_ARCH_AMDGPU_MATRIX_TYPES_H_
@@ -21,6 +21,7 @@
 #include "loom/analysis/matrix_fragment_layout.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_info_defs.h"
+#include "loom/util/string_pool.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -543,14 +544,13 @@ typedef loom_matrix_fragment_role_layout_t
 typedef loom_matrix_fragment_layout_t loom_amdgpu_matrix_fragment_layout_t;
 
 typedef struct loom_amdgpu_matrix_contract_descriptor_t {
-  // Stable Loom descriptor name used by tests, diagnostics, and target logs.
-  iree_string_view_t name;
+  // Compact reference to the stable descriptor name used by diagnostics and
+  // target logs.
+  loom_string_ref_t name_string_ref;
   // Stable target-low descriptor ref selected by this descriptor, or NONE.
   loom_amdgpu_descriptor_ref_t low_descriptor_ref;
   // Exact physical result realizations derived for this contract.
   loom_amdgpu_matrix_contract_realization_choices_t realization;
-  // LLVM AMDGPU intrinsic name selected by this descriptor for LLVM lowering.
-  iree_string_view_t llvm_intrinsic_name;
   // AMDGPU instruction family used by this descriptor.
   loom_amdgpu_matrix_family_t family;
   // Processor feature bits required before this descriptor is legal.

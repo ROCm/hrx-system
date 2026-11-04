@@ -75,13 +75,13 @@ const loom_matrix_fragment_role_layout_t* loom_matrix_fragment_role_layout(
   }
   switch (role) {
     case LOOM_CONTRACT_OPERAND_ROLE_LHS:
-      return &layout->lhs;
+      return layout->lhs;
     case LOOM_CONTRACT_OPERAND_ROLE_RHS:
-      return &layout->rhs;
+      return layout->rhs;
     case LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR:
-      return &layout->accumulator;
+      return layout->accumulator;
     case LOOM_CONTRACT_OPERAND_ROLE_RESULT:
-      return &layout->result;
+      return layout->result;
     case LOOM_CONTRACT_OPERAND_ROLE_UNKNOWN:
     default:
       return NULL;

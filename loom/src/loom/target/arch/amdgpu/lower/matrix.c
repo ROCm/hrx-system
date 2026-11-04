@@ -504,14 +504,16 @@ iree_status_t loom_amdgpu_descriptor_matrix_query(
       fragment_layout == NULL) {
     return loom_amdgpu_matrix_contract_query_reject_descriptor(
         environment, source_op, LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED,
-        fragment_layout, contract_descriptor->name,
+        fragment_layout,
+        loom_amdgpu_matrix_contract_descriptor_name(contract_descriptor),
         IREE_SV("target_matrix_fragment_layout"), out_result);
   }
   if (contract_descriptor->low_descriptor_ref ==
       LOOM_AMDGPU_MATRIX_LOW_DESCRIPTOR_REF_NONE) {
     return loom_amdgpu_matrix_contract_query_reject_descriptor(
         environment, source_op, LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED,
-        fragment_layout, contract_descriptor->name,
+        fragment_layout,
+        loom_amdgpu_matrix_contract_descriptor_name(contract_descriptor),
         IREE_SV("target_low_descriptor_mapping"), out_result);
   }
   const uint32_t descriptor_ordinal = loom_amdgpu_descriptor_ref_ordinal(
@@ -519,7 +521,8 @@ iree_status_t loom_amdgpu_descriptor_matrix_query(
   if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
     return loom_amdgpu_matrix_contract_query_reject_descriptor(
         environment, source_op, LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED,
-        fragment_layout, contract_descriptor->name,
+        fragment_layout,
+        loom_amdgpu_matrix_contract_descriptor_name(contract_descriptor),
         IREE_SV("descriptor_set_packet"), out_result);
   }
   const loom_low_descriptor_t* descriptor =

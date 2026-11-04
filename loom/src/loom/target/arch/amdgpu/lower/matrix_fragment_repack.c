@@ -550,8 +550,8 @@ loom_amdgpu_fragment_repack_select_result_to_lhs_bf16_bpermute_strategy(
   plan->reason = LOOM_AMDGPU_FRAGMENT_REPACK_REASON_NONE;
   plan->native_contraction_facts = layout->native_contraction_facts;
   plan->native_transition_facts = projection->native_transition_facts;
-  plan->source_register_count = layout->result.register_count;
-  plan->result_register_count = layout->lhs.register_count;
+  plan->source_register_count = layout->result->register_count;
+  plan->result_register_count = layout->lhs->register_count;
   plan->lane_divisor = layout->tile_shape.result_row_count;
   plan->source_lane_group_byte_shift = projection->source_lane_group_byte_shift;
   plan->result_lane_div_byte_shift = projection->result_lane_div_byte_shift;

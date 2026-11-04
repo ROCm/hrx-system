@@ -109,6 +109,7 @@ def _contract_initializer(contract: AmdgpuMatrixContract) -> str:
     return amdgpu_matrix_contract_tables._contract_initializer(
         contract,
         amdgpu_matrix_contract_tables.AMDGPU_MATRIX_FRAGMENT_REALIZATION_CATALOG.contract_choices[contract_ordinal],
+        name_string_ref="UINT32_C(0)",
         keys_by_semantic_tag=catalog.keys_by_semantic_tag,
         descriptor_shapes_by_key=catalog.shapes_by_key,
         descriptor_immediates_by_key=catalog.immediates_by_key,
@@ -311,7 +312,6 @@ def test_generation_rejects_source_indistinguishable_contracts() -> None:
     duplicate_contract = replace(
         contract,
         name="swmmac.unknown.16x16x64.bf16",
-        intrinsic_name="llvm.amdgcn.swmmac.unknown.16x16x64.bf16",
         semantic_tag="matrix.swmmac.unknown.16x16x64.bf16",
     )
 
