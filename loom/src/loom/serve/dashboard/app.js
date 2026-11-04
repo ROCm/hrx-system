@@ -609,7 +609,7 @@ function updatePool(source, time, recordHistory) {
   pool.peak.textContent = `peak ${bytes(pool.ring.peak)}`;
   const limit = elastic ? value("elastic", "budget_limit") : 0;
   pool.budget.textContent = elastic
-    ? `${bytes(elasticBytes)} elastic · ${limit > 0 ? `${bytes(limit)} budget` : "unbounded"} · ${bytes(nativeBytes)} native outside budget`
+    ? `${bytes(elasticBytes)} elastic · ${bytes(limit)} budget · ${bytes(nativeBytes)} native outside budget`
     : "Native storage · no pool budget";
   pool.reservations.textContent = elastic
     ? `${bytes(value("elastic", "reserved_bytes"))} virtual reserved · ${bytes(value("elastic", "cached_bytes"))} reusable`

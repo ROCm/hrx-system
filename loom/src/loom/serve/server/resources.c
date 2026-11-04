@@ -163,7 +163,7 @@ iree_status_t loom_serve_resources_sample(
         memory.retained.reserved_bytes,  memory.retained.committed_bytes,
         memory.retained.cached_bytes,    memory.retained.pending_bytes,
         memory.retained.releasing_bytes, memory.retained.abandoned_bytes,
-        memory.retained.peak_bytes,      limit == UINT64_MAX ? 0 : limit,
+        memory.retained.peak_bytes,      limit,
         memory.retained.released_bytes,
     };
     IREE_RETURN_IF_ERROR(sink.emit(sink.self, &topic, values));
@@ -323,12 +323,8 @@ static iree_status_t loom_serve_resources_write_memory(
     IREE_RETURN_IF_ERROR(
         loom_output_stream_write_cstring(output, "{\"limit_bytes\":"));
     const uint64_t limit = loom_serve_memory_pool_limit(retained);
-    if (limit == UINT64_MAX) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(output, "null"));
-    } else {
-      IREE_RETURN_IF_ERROR(
-          loom_output_stream_write_format(output, "%" PRIu64, limit));
-    }
+    IREE_RETURN_IF_ERROR(
+        loom_output_stream_write_format(output, "%" PRIu64, limit));
     IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
         output,
         ",\"reserved_bytes\":%" PRIu64 ",\"committed_bytes\":%" PRIu64

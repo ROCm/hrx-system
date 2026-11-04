@@ -46,9 +46,10 @@ link to that owner rather than duplicating its totals. The browser plots the sum
 of native and elastic commitment once per pool and annotates workspace as
 included, never added. The elastic allowance applies to elastic commitment;
 ordinary native buffers are shown separately outside that allowance.
-Zero budget means unbounded, not exhausted. Virtual reserved bytes are address
-extent, not committed RAM. Pending, releasing, abandoned, reusable, and atomic
-workspace samples do not form a disjoint partition. The UI does not infer a
+The elastic budget is the physical source capacity or a tighter explicit limit.
+Virtual reserved bytes are address extent, not committed RAM. Pending, releasing,
+abandoned, reusable, and atomic workspace samples do not form a disjoint
+partition. The UI does not infer a
 weights/KV/other split, physical addresses, or shared hardware capacity from
 these aggregate observations. Device request activity is explicitly distinct
 from hardware utilization and native queue depth.

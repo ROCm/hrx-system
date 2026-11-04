@@ -56,16 +56,16 @@ bool loom_serve_resources_is_pending(const loom_serve_resources_t* resources);
 // Writes a JSON object with bound listeners, immutable device identities and
 // serving-managed memory observations. Called on the serialized serving owner;
 // never waits for devices, polls hardware or changes residency. Retained pool
-// accounting is null for fixed backing; an elastic limit is null when
-// unbounded. Storage reports ordinary native backing. Workspace is a subset of
-// storage for fixed backing or retained for elastic backing, not an additional
-// amount. Pool values are independent atomic observations, not a coherent
-// total. Acquisition/release counters accumulate across models and retired pool
-// generations for the pool owner's lifetime.
-// wait_count counts reservations needing a reuse prerequisite, not host waits
-// or elapsed time. These values exclude host snapshots, loader/driver storage,
-// and hidden padding; they cannot be interpreted as device-wide usage or
-// available allocation bytes.
+// accounting is null for fixed backing; elastic accounting has a finite
+// physical ceiling. Storage reports ordinary native backing. Workspace is a
+// subset of storage for fixed backing or retained for elastic backing, not an
+// additional amount. Pool values are independent atomic observations, not a
+// coherent total. Acquisition/release counters accumulate across models and
+// retired pool generations for the pool owner's lifetime. wait_count counts
+// reservations needing a reuse prerequisite, not host waits or elapsed time.
+// These values exclude host snapshots, loader/driver storage, and hidden
+// padding; they cannot be interpreted as device-wide usage or available
+// allocation bytes.
 iree_status_t loom_serve_resources_write_json(
     const loom_serve_resources_t* resources, loom_output_stream_t* output);
 

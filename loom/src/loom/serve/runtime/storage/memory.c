@@ -69,7 +69,7 @@ struct loom_serve_memory_pool_t {
   iree_status_t capacity_status;
   // The capacity source failed and cannot admit another observation.
   bool capacity_failed;
-  // Physical admission ceiling; UINT64_MAX means unbounded.
+  // Finite physical admission ceiling selected when the pool is created.
   uint64_t limit_bytes;
   // Accounting across all buffers, with physical allocations counted once.
   loom_serve_memory_statistics_t statistics;
@@ -494,6 +494,18 @@ iree_status_t loom_serve_memory_pool_allocate(
     loom_serve_memory_geometry_t state_geometry, uint64_t limit_bytes,
     iree_allocator_t host_allocator, loom_serve_memory_pool_t** out_pool) {
   *out_pool = NULL;
+  iree_hal_pool_capabilities_t capabilities;
+  iree_hal_pool_query_capabilities(storage_pool, &capabilities);
+  limit_bytes = limit_bytes ? limit_bytes : UINT64_MAX;
+  if (capabilities.physical_capacity) {
+    limit_bytes = iree_min(limit_bytes, capabilities.physical_capacity);
+  }
+  if (limit_bytes == UINT64_MAX) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "elastic storage requires a backing capacity; the selected pool "
+        "does not report one, so specify its memory_bytes budget");
+  }
   loom_serve_memory_pool_t* pool = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_struct_array(
       host_allocator, sizeof(*pool), scope.family_count,
@@ -510,7 +522,7 @@ iree_status_t loom_serve_memory_pool_allocate(
          scope.family_count * sizeof(*scope.families));
   pool->mapping_scope = (iree_hal_memory_scope_t){
       iree_hal_device_group_memory_domain(group), IREE_HAL_MEMORY_SCOPE_ANY};
-  pool->limit_bytes = limit_bytes ? limit_bytes : UINT64_MAX;
+  pool->limit_bytes = limit_bytes;
   iree_slim_mutex_initialize(&pool->capacity_mutex);
   iree_atomic_slist_initialize(&pool->completed_operations);
   iree_notification_initialize(&pool->capacity_notification);
@@ -715,15 +727,6 @@ void loom_serve_memory_pool_trim(loom_serve_memory_pool_t* pool,
 
 uint64_t loom_serve_memory_pool_limit(const loom_serve_memory_pool_t* pool) {
   return pool->limit_bytes;
-}
-
-uint64_t loom_serve_memory_pool_capacity(const loom_serve_memory_pool_t* pool) {
-  iree_hal_pool_capabilities_t capabilities;
-  iree_hal_pool_query_capabilities(pool->storage_pool, &capabilities);
-  if (capabilities.physical_capacity) {
-    return iree_min(capabilities.physical_capacity, pool->limit_bytes);
-  }
-  return pool->limit_bytes == UINT64_MAX ? 0 : pool->limit_bytes;
 }
 
 uint64_t loom_serve_memory_pool_live_bytes(

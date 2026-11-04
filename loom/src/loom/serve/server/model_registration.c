@@ -1010,13 +1010,7 @@ static iree_status_t loom_serve_text_registration_create(
       options->device_group, configuration->pool_index);
   loom_serve_memory_pool_t* memory_pool = loom_serve_pool_memory(pool);
   const uint64_t cache_limit_bytes =
-      memory_pool ? loom_serve_memory_pool_capacity(memory_pool) : 0;
-  if (memory_pool && !cache_limit_bytes) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "elastic text storage requires a backing capacity; the selected "
-        "pool does not report one, so specify its memory_bytes budget");
-  }
+      memory_pool ? loom_serve_memory_pool_limit(memory_pool) : 0;
   const iree_host_size_t shape_count =
       loom_serve_text_default_shapes(text->prefill_capacity, NULL);
   iree_host_size_t total = 0, shapes_offset = 0;

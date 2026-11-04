@@ -970,7 +970,7 @@ static bool loom_serve_residency_admit_working_set(
     const loom_serve_residency_t* residency, uint64_t additional_state,
     uint64_t private_bytes, bool reclaim_history) {
   loom_serve_residency_cache_t* cache = residency->cache;
-  if (!cache->pool || loom_serve_memory_pool_limit(cache->pool) == UINT64_MAX) {
+  if (!cache->pool) {
     return true;
   }
   uint64_t remaining = loom_serve_memory_pool_limit(cache->pool);
@@ -1154,8 +1154,7 @@ static iree_status_t loom_serve_residency_acquire_parameters(
     active &= residency->entries[i].group->active;
   }
   residency->active = false;
-  if (residency->output_bytes && residency->cache->pool &&
-      loom_serve_memory_pool_limit(residency->cache->pool) != UINT64_MAX) {
+  if (residency->output_bytes && residency->cache->pool) {
     loom_serve_residency_output_t* output = NULL;
     IREE_RETURN_IF_ERROR(iree_allocator_malloc(
         residency->cache->host_allocator, sizeof(*output), (void**)&output));

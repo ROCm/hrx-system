@@ -108,9 +108,11 @@ typedef struct loom_serve_memory_statistics_t {
 // The sealed group and selected transfer queue outlive this pool. Geometries
 // have been qualified by query_geometry for this source and scope. limit_bytes
 // bounds physical commitment, including pending native release and permanent
-// backing loss. This is the exclusive source-pool owner for the budget's entire
-// lifetime. Zero imposes no serving budget. Each reservation borrows this pool
-// and is destroyed before the pool.
+// backing loss. storage_pool is an exclusive native slab source without its own
+// idle backing cache, and this owner controls it for the budget's entire
+// lifetime. Zero selects the source's physical capacity; an explicit budget can
+// tighten that ceiling. Unknown physical capacity requires a finite budget.
+// Each reservation borrows this pool and is destroyed before the pool.
 iree_status_t loom_serve_memory_pool_allocate(
     iree_hal_device_group_t* group, iree_hal_pool_scope_t scope,
     iree_hal_pool_t* storage_pool, iree_hal_queue_t* queue,
@@ -130,14 +132,11 @@ loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
 void loom_serve_memory_pool_trim(loom_serve_memory_pool_t* pool,
                                  uint64_t target_bytes);
 
-// Immutable physical commitment ceiling in bytes; UINT64_MAX is unbounded.
-// This is the configured budget, not currently available backing.
+// Immutable finite commitment ceiling from the selected physical source and
+// any tighter configured budget. This also bounds resident addressability;
+// it is not free memory, never subtracts live demand, and is not an allocation
+// guarantee.
 uint64_t loom_serve_memory_pool_limit(const loom_serve_memory_pool_t* pool);
-
-// Cold resident-addressability bound from the selected physical source and any
-// tighter configured budget. Zero means neither supplies a bound. This is not
-// free memory or an allocation guarantee and never subtracts current demand.
-uint64_t loom_serve_memory_pool_capacity(const loom_serve_memory_pool_t* pool);
 
 // Owner-maintained bytes attached or promised to live virtual reservations.
 // Includes pending commitments and excludes reusable idle backing. This reads

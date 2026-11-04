@@ -299,10 +299,10 @@ model context shared across its rows. Elastic backing sizes its sparse address
 range from the selected pool's physical capacity, any tighter `memory_bytes`
 budget, and the model's declared cache bytes per page. Increasing addressability
 does not commit the corresponding cache or allocate its whole page directory.
-`memory_bytes` remains the physical admission limit shared across all models in
-the pool; total addressability is not a promise that every model can fill it
-simultaneously. A backend reporting no physical capacity requires an explicit
-pool budget.
+Physical admission uses the same ceiling across all models in the pool, whether
+it comes from the selected source or a tighter `memory_bytes` budget. Total
+addressability is not a promise that every model can fill it simultaneously.
+A backend reporting no physical capacity requires an explicit pool budget.
 
 Text admission reserves a request's completion high-water. Short contexts grow
 by blocks rather than eagerly reserving each row's maximum physical slab.

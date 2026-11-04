@@ -17,11 +17,16 @@ using loom_serve::testing::memory::DedicatedNativeWorkerMemoryTest;
 using loom_serve::testing::memory::DeviceMemoryTest;
 using loom_serve::testing::memory::MemoryTest;
 
-TEST_F(MemoryTest, ResidentCapacityUsesPhysicalBackingAndOptionalBudget) {
+TEST_F(MemoryTest, DefaultAdmissionUsesPhysicalBackingAndOptionalBudget) {
   ASSERT_NO_FATAL_FAILURE(UseBacking(false, 0, nullptr));
-  const uint64_t capacity = loom_serve_memory_pool_capacity(pool);
+  const uint64_t capacity = loom_serve_memory_pool_limit(pool);
   ASSERT_GT(capacity, 3 * kSlabSize);
-  EXPECT_EQ(loom_serve_memory_pool_limit(pool), UINT64_MAX);
+  ASSERT_LT(capacity, UINT64_MAX);
+  loom_serve_memory_admission_t admission;
+  IREE_ASSERT_OK(loom_serve_memory_pool_prepare(
+      pool, {.dedicated_bytes = capacity + 1}, &admission));
+  EXPECT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_CAPACITY);
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes, 0u);
 
   // Reserving sparse addresses and committing one slab do not change the
   // addressability bound or turn current free memory into a model quota.
@@ -34,14 +39,81 @@ TEST_F(MemoryTest, ResidentCapacityUsesPhysicalBackingAndOptionalBudget) {
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
       pool, geometry, reservation_length, 256, &statistics[0], &first));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(first, 0, kSlabSize));
-  EXPECT_EQ(loom_serve_memory_pool_capacity(pool), capacity);
+  EXPECT_EQ(loom_serve_memory_pool_limit(pool), capacity);
   IREE_ASSERT_OK(loom_serve_virtual_buffer_free(std::exchange(first, nullptr)));
   IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
 
   ASSERT_NO_FATAL_FAILURE(UseBacking(false, 3 * kSlabSize, nullptr));
-  EXPECT_EQ(loom_serve_memory_pool_capacity(pool), 3 * kSlabSize);
+  EXPECT_EQ(loom_serve_memory_pool_limit(pool), 3 * kSlabSize);
   ASSERT_NO_FATAL_FAILURE(UseBacking(false, capacity + 1, nullptr));
-  EXPECT_EQ(loom_serve_memory_pool_capacity(pool), capacity);
+  EXPECT_EQ(loom_serve_memory_pool_limit(pool), capacity);
+}
+
+TEST_F(MemoryTest, UnknownPhysicalCapacityRequiresExplicitBudget) {
+  auto* queue = loom_serve_device_transfer_queue(device);
+  auto* hal_group = loom_serve_device_group(device);
+  iree_hal_pool_family_access_t family = {
+      .family = iree_hal_queue_family(queue),
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE,
+  };
+  const iree_hal_pool_scope_t scope = {.family_count = 1, .families = &family};
+  iree_hal_pool_t* source = nullptr;
+  const iree_hal_slab_pool_options_t source_options = {};
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(hal_group, scope, &source_options,
+                                           iree_allocator_system(), &source));
+  const std::unique_ptr<iree_hal_pool_t, decltype(&iree_hal_pool_release)>
+      source_owner(source, iree_hal_pool_release);
+  family.interfaces = 0;
+  iree_hal_virtual_buffer_capabilities_t capabilities;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
+      hal_group, scope, {1, &source}, iree_allocator_system(), &capabilities));
+  loom_serve_memory_geometry_t geometry;
+  IREE_ASSERT_OK(loom_serve_memory_pool_query_geometry(&capabilities, source,
+                                                       kSlabSize, &geometry));
+  // Withhold only the optional native capacity fact. Real allocation, mapping,
+  // device transfers, and retirement still use the selected native provider.
+  iree::hal::testing::DeferredBackingPool* supplied = nullptr;
+  IREE_ASSERT_OK(
+      iree::hal::testing::DeferredBackingPool::Create(source, &supplied));
+  const std::unique_ptr<iree_hal_pool_t, decltype(&iree_hal_pool_release)>
+      supplied_owner(supplied, iree_hal_pool_release);
+  supplied->report_physical_capacity = false;
+  iree_hal_pool_capabilities_t supplied_capabilities;
+  iree_hal_pool_query_capabilities(supplied, &supplied_capabilities);
+  ASSERT_EQ(supplied_capabilities.physical_capacity, 0u);
+  loom_serve_memory_pool_t* selected = nullptr;
+  for (uint64_t budget : {uint64_t{0}, UINT64_MAX}) {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_FAILED_PRECONDITION,
+        loom_serve_memory_pool_allocate(hal_group, scope, supplied, queue,
+                                        geometry, geometry, budget,
+                                        iree_allocator_system(), &selected));
+    ASSERT_EQ(selected, nullptr);
+  }
+  IREE_ASSERT_OK(loom_serve_memory_pool_allocate(
+      hal_group, scope, supplied, queue, geometry, geometry, kSlabSize,
+      iree_allocator_system(), &selected));
+  const auto release_pool = [](loom_serve_memory_pool_t* pool) {
+    loom_serve_memory_pool_trim(pool, 0);
+    IREE_EXPECT_OK(loom_serve_memory_pool_await(pool));
+    loom_serve_memory_pool_free(pool);
+  };
+  const std::unique_ptr<loom_serve_memory_pool_t, decltype(release_pool)>
+      selected_owner(selected, release_pool);
+  EXPECT_EQ(loom_serve_memory_pool_limit(selected), kSlabSize);
+  loom_serve_memory_statistics_t statistics = {};
+  loom_serve_virtual_buffer_t* reservation = nullptr;
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+      selected, geometry, kSlabSize, 256, &statistics, &reservation));
+  const auto release_reservation = [](loom_serve_virtual_buffer_t* buffer) {
+    IREE_EXPECT_OK(loom_serve_virtual_buffer_free(buffer));
+  };
+  const std::unique_ptr<loom_serve_virtual_buffer_t,
+                        decltype(release_reservation)>
+      reservation_owner(reservation, release_reservation);
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(reservation, 0, kSlabSize));
+  RoundTrip(loom_serve_virtual_buffer_handle(reservation), 0, 0x12345678);
 }
 
 TEST_F(MemoryTest, GeometryRespectsFiniteBackingCapacity) {

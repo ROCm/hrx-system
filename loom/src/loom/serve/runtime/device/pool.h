@@ -61,7 +61,8 @@ typedef struct loom_serve_pool_options_t {
   iree_device_size_t weight_slab_size;
   // Preferred sparse-state slab extent, in bytes.
   iree_device_size_t state_slab_size;
-  // Elastic physical-backing allowance in bytes; zero leaves it unbounded.
+  // Elastic physical-backing allowance in bytes; zero uses source capacity.
+  // An explicit allowance can tighten that capacity, not increase it.
   // Ordinary native storage is accounted separately and remains outside it.
   uint64_t memory_limit;
   // Fixed workspace sanitizer policy, qualified by the HAL child allocator.

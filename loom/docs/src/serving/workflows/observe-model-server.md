@@ -373,7 +373,7 @@ independently of its consumer devices:
 | Field | What it counts |
 | --- | --- |
 | `storage` | Ordinary native buffers, including fixed parameters and state. With fixed backing, this also includes workspace backing. |
-| `retained` | Shared elastic backing for parameters, mutable state, and workspace. It is `null` with fixed backing; an elastic `limit_bytes:null` means unbounded by serving policy. |
+| `retained` | Shared elastic backing for parameters, mutable state, and workspace. It is `null` with fixed backing; elastic `limit_bytes` reports the selected physical capacity or a tighter explicit budget. |
 | `workspace` | The workspace portion of `storage` (fixed) or `retained` (elastic), including reusable idle ranges. This is a breakdown, not an additional allocation. |
 
 `storage.committed_bytes` plus non-null `retained.committed_bytes` describes

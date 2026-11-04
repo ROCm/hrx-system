@@ -53,7 +53,7 @@ above remain the ordinary entry point on every platform.
 | `--pool_backing=elastic\|fixed` | `elastic` | Shared demand-committed parameter/state/workspace slabs or eagerly backed retained storage. |
 | `--weight_slab_bytes=N` | `1073741824` | Reusable elastic parameter and shared-workspace slab size in bytes (1 GiB); loading uses independent bounded read windows. `0` uses the allocator recommendation. Ignored for fixed backing. |
 | `--state_slab_bytes=N` | `67108864` | Elastic mutable-state commitment/reclamation size in bytes (64 MiB); `0` uses the allocator recommendation. Ignored for fixed backing. |
-| `--memory_bytes=N` | `0` | Shared elastic physical-backing limit; `0` leaves elastic backing unbounded by serving policy. |
+| `--memory_bytes=N` | `0` | Shared elastic physical-backing limit; `0` uses the selected source's physical capacity. An explicit limit can tighten it. |
 
 The backing, slab, memory, and idle flags apply only to the `--device` shortcut.
 With `--devices`, those settings belong to each pool entry; mixing the file with

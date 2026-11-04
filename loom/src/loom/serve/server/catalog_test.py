@@ -141,7 +141,8 @@ def check_parameter_residency(client, backing, workers):
                 assert parameters["committed_bytes"] == 0, cold
                 assert before["parameters"]["primary"]["committed_bytes"] > 0, before
                 assert parameters["reserved_bytes"] > 0, cold
-                assert memory_before["limit_bytes"] is None, memory_before
+                assert 0 < memory_before["limit_bytes"] < 2**64 - 1, memory_before
+                assert memory_cold["limit_bytes"] == memory_before["limit_bytes"]
                 assert memory_cold["reserved_bytes"] == memory_before["reserved_bytes"]
                 released = before["parameters"]["primary"]["committed_bytes"]
                 assert (
@@ -743,9 +744,15 @@ def check_empty_server(server_command, directory, driver, backing):
                 memory["retained"]["reserved_bytes"] if backing == "elastic" else 0
             )
             assert (reserved_bytes > 0) == (backing == "elastic"), memory
+            limit_bytes = 0
+            if backing == "elastic":
+                limit_bytes = memory["retained"]["limit_bytes"]
+                assert 0 < limit_bytes < 2**64 - 1, memory
+                if memory_limit:
+                    assert limit_bytes == memory_limit, memory
             assert memory["retained"] == (
                 {
-                    "limit_bytes": memory_limit or None,
+                    "limit_bytes": limit_bytes,
                     "reserved_bytes": reserved_bytes,
                     "committed_bytes": 0,
                     "abandoned_bytes": 0,
