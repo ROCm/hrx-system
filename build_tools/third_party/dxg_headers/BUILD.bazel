@@ -8,6 +8,6 @@ exports_files([
     "directx_headers.BUILD.bazel",
     "libdxg_headers.BUILD.bazel",
     "portable_headers.patch",
-    "rocdxg_thunk_proxy.cmake",
-    "rocdxg_thunk_proxy.BUILD.bazel",
+    "dxg_headers.cmake",
+    "rocdxg_headers.BUILD.bazel",
 ])

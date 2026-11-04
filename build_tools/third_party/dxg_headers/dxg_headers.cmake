@@ -6,20 +6,18 @@
 
 include(iree_third_party_helpers)
 
-# Declares the pinned Linux DXG protocol headers and private thunk archive.
-# These dependencies expose binary-only interfaces and must remain behind the
-# unloadable libamdf sidecar instead of entering the installed SDK interface.
-function(iree_configure_amdf_rocdxg_thunk_proxy)
-  if(TARGET iree::third_party::amdf_rocdxg_thunk_proxy)
+# Declares the pinned public headers used by the Linux DXG transport.
+function(iree_configure_amdf_dxg_headers)
+  if(TARGET iree::third_party::amdf_rocdxg_headers)
     return()
   endif()
   if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR
      NOT IREE_ARCH STREQUAL "x86_64")
     message(FATAL_ERROR
-      "ROCDXG thunk support is available only for x86-64 Linux")
+      "Linux DXG headers are available only for x86-64 Linux")
   endif()
 
-  foreach(_DEPENDENCY directx_headers libdxg_headers rocdxg_thunk_proxy)
+  foreach(_DEPENDENCY directx_headers libdxg_headers rocdxg_headers)
     iree_dependency_require_pinned_source_allowed("${_DEPENDENCY}")
     iree_populate_locked_fetch_content(${_DEPENDENCY}
       _${_DEPENDENCY}_SOURCE_DIR)
@@ -41,18 +39,11 @@ function(iree_configure_amdf_rocdxg_thunk_proxy)
 
   add_library(iree_amdf_rocdxg_headers INTERFACE)
   target_include_directories(iree_amdf_rocdxg_headers SYSTEM INTERFACE
-    "$<BUILD_INTERFACE:${_rocdxg_thunk_proxy_SOURCE_DIR}>")
+    "$<BUILD_INTERFACE:${_rocdxg_headers_SOURCE_DIR}>")
   target_link_libraries(iree_amdf_rocdxg_headers INTERFACE
     iree::third_party::amdf_directx_wsl_stubs
     iree::third_party::amdf_dxg_headers)
   add_library(iree::third_party::amdf_rocdxg_headers ALIAS
     iree_amdf_rocdxg_headers)
 
-  add_library(iree_amdf_rocdxg_thunk_proxy STATIC IMPORTED GLOBAL)
-  set_target_properties(iree_amdf_rocdxg_thunk_proxy PROPERTIES
-    IMPORTED_LOCATION
-      "${_rocdxg_thunk_proxy_SOURCE_DIR}/shared/src/thunk_proxy/libthunk_proxy.a"
-  )
-  add_library(iree::third_party::amdf_rocdxg_thunk_proxy ALIAS
-    iree_amdf_rocdxg_thunk_proxy)
 endfunction()

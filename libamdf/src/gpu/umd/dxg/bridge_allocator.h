@@ -43,7 +43,7 @@ inline void FreeHostBytes(amdf_allocator_t allocator, void* pointer) noexcept {
   }
 }
 
-// Owns one zeroed bridge scratch buffer without using the sidecar CRT heap.
+// Owns one zeroed bridge scratch buffer through the parent instance allocator.
 class HostBuffer {
  public:
   HostBuffer() = default;

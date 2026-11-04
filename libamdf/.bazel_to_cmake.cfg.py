@@ -306,12 +306,6 @@ PROJECT_CONFIG = bazel_to_cmake_config.ProjectConfig(
         "//libamdf:amdf_shared_artifact": ["amdf::amdf"],
         "//libamdf:amdf_static": ["amdf::amdf_static"],
         "//libamdf:headers": ["amdf::headers"],
-        "//libamdf/src/gpu/umd/wddm/wkmi:runtime": [
-            "libamdf::src::gpu::umd::wddm::wkmi::amdf_wkmi_bridge",
-        ],
-        "//libamdf/src/gpu/umd/dxg/rocdxg:runtime": [
-            "libamdf::src::gpu::umd::dxg::rocdxg::amdf_rocdxg_bridge",
-        ],
     },
     convert_unmatched_target=convert_unmatched_target,
 )

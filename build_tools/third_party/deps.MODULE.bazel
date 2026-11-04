@@ -200,7 +200,7 @@ http_file(
 
 http_archive(
     name = "directx_headers",
-    build_file = "//build_tools/third_party/rocdxg_thunk_proxy:directx_headers.BUILD.bazel",
+    build_file = "//build_tools/third_party/dxg_headers:directx_headers.BUILD.bazel",
     sha256 = "65419b6c8af46d2a8d7db65769cb6bc3c60e02dc0cf9d6f25b437d825778cceb",
     strip_prefix = "DirectX-Headers-6064ae312901a77e8700e84a2341470d050fcbca",
     url = "https://github.com/microsoft/DirectX-Headers/archive/6064ae312901a77e8700e84a2341470d050fcbca.tar.gz",
@@ -208,17 +208,17 @@ http_archive(
 
 http_archive(
     name = "libdxg_headers",
-    build_file = "//build_tools/third_party/rocdxg_thunk_proxy:libdxg_headers.BUILD.bazel",
+    build_file = "//build_tools/third_party/dxg_headers:libdxg_headers.BUILD.bazel",
     sha256 = "f7223bd894c58ed72d36fe606ea45655f5a80e5062e6defc47f09ecfa87d89a5",
     strip_prefix = "libdxg-5c28ebb4ead460c23ec5e87decb7d1af7285bb59",
     url = "https://github.com/microsoft/libdxg/archive/5c28ebb4ead460c23ec5e87decb7d1af7285bb59.tar.gz",
 )
 
 http_archive(
-    name = "rocdxg_thunk_proxy",
-    build_file = "//build_tools/third_party/rocdxg_thunk_proxy:rocdxg_thunk_proxy.BUILD.bazel",
+    name = "rocdxg_headers",
+    build_file = "//build_tools/third_party/dxg_headers:rocdxg_headers.BUILD.bazel",
     patch_args = ["-p1"],
-    patches = ["//build_tools/third_party/rocdxg_thunk_proxy:portable_headers.patch"],
+    patches = ["//build_tools/third_party/dxg_headers:portable_headers.patch"],
     sha256 = "12f1eb13948ea80ebbaf4d0380184291782a1c481e3d7296dfe7ff3e80f3d71b",
     strip_prefix = "librocdxg-1.2.2",
     url = "https://github.com/ROCm/librocdxg/archive/refs/tags/v1.2.2.tar.gz",

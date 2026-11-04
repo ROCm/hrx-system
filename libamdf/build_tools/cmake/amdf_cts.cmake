@@ -4,9 +4,8 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-# Defines one libamdf CTS executable in the public artifact directory. The
-# installed library and its private runtime companions share this layout, so
-# every linkage mode exercises the same sibling-library discovery contract.
+# Defines one libamdf CTS executable in the public artifact directory. Dynamic
+# CTS binaries resolve the exact staged library from this shared layout.
 function(amdf_cts_binary)
   if(NOT IREE_BUILD_TESTS)
     return()

@@ -103,14 +103,8 @@ alias(
 )
 
 alias(
-    name = "amdf_rocdxg_thunk_proxy",
-    actual = "@rocdxg_thunk_proxy//:thunk_proxy",
-    visibility = [":libamdf_users"],
-)
-
-alias(
     name = "amdf_rocdxg_headers",
-    actual = "@rocdxg_thunk_proxy//:headers",
+    actual = "@rocdxg_headers//:headers",
     visibility = [":libamdf_users"],
 )
 

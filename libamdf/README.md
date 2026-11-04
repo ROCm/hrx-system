@@ -230,12 +230,12 @@ The build produces two link modes from one implementation:
   clients that resolve `amdf_query_api` at runtime.
 
 Windows GPU distributions contain the native WDDM provider in `amdf.dll`.
-It adds no companion runtime file and remains private implementation detail.
+It adds no companion runtime file and remains a private implementation detail.
 
 Linux GPU builds select the KFD/DRM provider by default. WSL builds select the
 DXG provider with `-DAMDF_LINUX_GPU_PROVIDER=dxg` or the native Bazel setting
 `--//libamdf/config/provider:linux_gpu=dxg`. The selection binds discovery and
-execution together and installs the private ROCDXG bridge beside `libamdf.so`.
+execution together in `libamdf.so` without a companion runtime file.
 
 `AMDF_BUILD` controls the CMake subtree and defaults to `OFF` unless the XDNA
 HAL driver requires it. The Bazel equivalent is
