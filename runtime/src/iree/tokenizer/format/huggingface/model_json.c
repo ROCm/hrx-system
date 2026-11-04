@@ -18,14 +18,6 @@
 // Internal Constants and Helpers
 //===----------------------------------------------------------------------===//
 
-// Maximum token length for stack-allocated buffers during merge parsing.
-// Empirical analysis of 170+ tokenizer files shows:
-//   - Max token length observed: 512 bytes (256 Ġ chars in EleutherAI models)
-//   - Max merge string: 1025 bytes (512 + space + 512 for pythia/gpt-neox)
-//   - >99.99% of tokens are under 128 bytes
-// Use 2048 to provide headroom for future tokenizers.
-#define IREE_TOKENIZER_MAX_MERGE_TOKEN_LENGTH 2048
-
 // Model type for internal dispatch. Auto-detected from JSON.
 typedef enum iree_tokenizer_model_type_e {
   IREE_TOKENIZER_MODEL_TYPE_UNKNOWN = 0,
@@ -65,13 +57,20 @@ static const iree_string_view_t kUnigramAllowedKeys[] = {
     IREE_SVL("byte_fallback"),  // bool (default true for SentencePiece)
 };
 
-// Unescapes a JSON string into a fixed-size buffer, returning a view of the
-// result. The returned string_view points into buffer and is valid until the
-// next call. Fails if the unescaped result exceeds buffer_capacity.
+// Borrows unescaped source strings directly and reuses scratch for escaped
+// spellings. The result remains valid until the next call using this scratch.
 static iree_status_t iree_tokenizer_model_json_unescape(
-    iree_string_view_t input, char* buffer, iree_host_size_t buffer_capacity,
+    iree_string_view_t input, iree_string_builder_t* scratch,
     iree_string_view_t* out_unescaped) {
   *out_unescaped = iree_string_view_empty();
+  if (iree_string_view_find_char(input, '\\', 0) == IREE_STRING_VIEW_NPOS) {
+    *out_unescaped = input;
+    return iree_ok_status();
+  }
+  char* buffer = NULL;
+  iree_host_size_t buffer_capacity = 0;
+  IREE_RETURN_IF_ERROR(iree_string_builder_reserve_for_append(
+      scratch, input.size, &buffer, &buffer_capacity));
   iree_host_size_t unescaped_length = 0;
   IREE_RETURN_IF_ERROR(iree_json_unescape_string(input, buffer_capacity, buffer,
                                                  &unescaped_length));
@@ -85,8 +84,11 @@ static iree_status_t iree_tokenizer_model_json_unescape(
 
 // Context for vocab object enumeration.
 typedef struct iree_tokenizer_vocab_parse_context_t {
+  // Borrowed destination for vocabulary entries and resolved merges.
   iree_tokenizer_vocab_builder_t* builder;
-  char unescape_buffer[IREE_TOKENIZER_MAX_MERGE_TOKEN_LENGTH];
+  // Borrowed reusable spelling storage owned by the model parser.
+  iree_string_builder_t* scratch;
+  // Callback failure retained because JSON treats CANCELLED as early success.
   iree_status_t status;
 } iree_tokenizer_vocab_parse_context_t;
 
@@ -98,9 +100,8 @@ static iree_status_t iree_tokenizer_vocab_entry_visitor(
 
   // Unescape the key (token text).
   iree_string_view_t token_text = iree_string_view_empty();
-  iree_status_t status = iree_tokenizer_model_json_unescape(
-      key, context->unescape_buffer, sizeof(context->unescape_buffer),
-      &token_text);
+  iree_status_t status =
+      iree_tokenizer_model_json_unescape(key, context->scratch, &token_text);
 
   // Parse the value (token ID).
   int64_t token_id_raw = 0;
@@ -129,64 +130,33 @@ static iree_status_t iree_tokenizer_vocab_entry_visitor(
         IREE_TOKENIZER_TOKEN_ATTR_NONE);
   }
 
-  if (!iree_status_is_ok(status)) {
-    context->status = status;
-    return iree_status_from_code(IREE_STATUS_CANCELLED);
-  }
-  return iree_ok_status();
+  context->status = status;
+  return iree_status_is_ok(context->status)
+             ? iree_ok_status()
+             : iree_status_from_code(IREE_STATUS_CANCELLED);
 }
 
 // Parses vocab object into a vocab builder.
 static iree_status_t iree_tokenizer_parse_vocab_object(
     iree_string_view_t vocab_json, iree_tokenizer_vocab_builder_t* builder,
-    iree_allocator_t allocator) {
-  (void)allocator;  // Unused after removing dynamic buffer.
+    iree_string_builder_t* scratch) {
   iree_tokenizer_vocab_parse_context_t context = {
       .builder = builder,
-      .unescape_buffer = {0},
-      .status = iree_ok_status(),
+      .scratch = scratch,
   };
-
   iree_status_t status = iree_json_enumerate_object(
       vocab_json, iree_tokenizer_vocab_entry_visitor, &context);
-
-  // Check visitor status first (contains detailed error).
-  if (!iree_status_is_ok(context.status)) {
-    if (iree_status_is_ok(status) ||
-        iree_status_code(status) == IREE_STATUS_CANCELLED) {
-      iree_status_ignore(status);
-      return context.status;
-    }
-    // Both have errors - prefer visitor's (more specific).
-    iree_status_ignore(status);
-    return context.status;
-  }
-
-  // Handle CANCELLED from early stop.
-  if (iree_status_code(status) == IREE_STATUS_CANCELLED) {
-    iree_status_ignore(status);
-    return iree_ok_status();
-  }
-
-  return status;
+  return iree_status_join(context.status, status);
 }
-
-// Context for merge array enumeration.
-typedef struct iree_tokenizer_merge_parse_context_t {
-  iree_tokenizer_vocab_builder_t* builder;
-  char unescape_buffer[IREE_TOKENIZER_MAX_MERGE_TOKEN_LENGTH];
-  iree_status_t status;
-} iree_tokenizer_merge_parse_context_t;
 
 // Parses a merge in "left right" string format.
 static iree_status_t iree_tokenizer_parse_merge_string(
-    iree_tokenizer_merge_parse_context_t* context, iree_host_size_t index,
+    iree_tokenizer_vocab_parse_context_t* context, iree_host_size_t index,
     iree_string_view_t merge_str) {
   // Unescape the merge string.
   iree_string_view_t unescaped = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(iree_tokenizer_model_json_unescape(
-      merge_str, context->unescape_buffer, sizeof(context->unescape_buffer),
-      &unescaped));
+      merge_str, context->scratch, &unescaped));
 
   // Find the space separator between left and right tokens.
   iree_host_size_t space_pos = iree_string_view_find_char(unescaped, ' ', 0);
@@ -228,7 +198,7 @@ static iree_status_t iree_tokenizer_parse_merge_string(
 
 // Parses a merge in ["left", "right"] tuple format.
 static iree_status_t iree_tokenizer_parse_merge_tuple(
-    iree_tokenizer_merge_parse_context_t* context, iree_host_size_t index,
+    iree_tokenizer_vocab_parse_context_t* context, iree_host_size_t index,
     iree_string_view_t merge_array) {
   // Get the two elements.
   iree_string_view_t left_json = iree_string_view_empty();
@@ -236,22 +206,10 @@ static iree_status_t iree_tokenizer_parse_merge_tuple(
   IREE_RETURN_IF_ERROR(iree_json_array_get(merge_array, 0, &left_json));
   IREE_RETURN_IF_ERROR(iree_json_array_get(merge_array, 1, &right_json));
 
-  // Unescape left token into context buffer, then copy to local.
+  // Resolve the left spelling before reusing scratch for the right spelling.
   iree_string_view_t left_text = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(iree_tokenizer_model_json_unescape(
-      left_json, context->unescape_buffer, sizeof(context->unescape_buffer),
-      &left_text));
-
-  // Copy left_text since unescape buffer will be reused for right token.
-  char left_copy[IREE_TOKENIZER_MAX_MERGE_TOKEN_LENGTH];
-  memcpy(left_copy, left_text.data, left_text.size);
-  left_text = iree_make_string_view(left_copy, left_text.size);
-
-  // Unescape right token (reuses buffer).
-  iree_string_view_t right_text = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(iree_tokenizer_model_json_unescape(
-      right_json, context->unescape_buffer, sizeof(context->unescape_buffer),
-      &right_text));
+      left_json, context->scratch, &left_text));
 
   // Look up token IDs.
   iree_tokenizer_token_id_t left_id =
@@ -263,6 +221,9 @@ static iree_status_t iree_tokenizer_parse_merge_tuple(
                             index, (int)left_text.size, left_text.data);
   }
 
+  iree_string_view_t right_text = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(iree_tokenizer_model_json_unescape(
+      right_json, context->scratch, &right_text));
   iree_tokenizer_token_id_t right_id =
       iree_tokenizer_vocab_builder_lookup(context->builder, right_text);
   if (right_id == IREE_TOKENIZER_TOKEN_ID_INVALID) {
@@ -281,8 +242,8 @@ static iree_status_t iree_tokenizer_merge_visitor(void* user_data,
                                                   iree_host_size_t index,
                                                   iree_json_value_type_t type,
                                                   iree_string_view_t value) {
-  iree_tokenizer_merge_parse_context_t* context =
-      (iree_tokenizer_merge_parse_context_t*)user_data;
+  iree_tokenizer_vocab_parse_context_t* context =
+      (iree_tokenizer_vocab_parse_context_t*)user_data;
 
   iree_status_t status = iree_ok_status();
   if (type == IREE_JSON_VALUE_TYPE_STRING) {
@@ -296,42 +257,24 @@ static iree_status_t iree_tokenizer_merge_visitor(void* user_data,
                               index);
   }
 
-  if (!iree_status_is_ok(status)) {
-    context->status = status;
-    return iree_status_from_code(IREE_STATUS_CANCELLED);
-  }
-  return iree_ok_status();
+  context->status = status;
+  return iree_status_is_ok(context->status)
+             ? iree_ok_status()
+             : iree_status_from_code(IREE_STATUS_CANCELLED);
 }
 
 // Parses merges array into a vocab builder.
 static iree_status_t iree_tokenizer_parse_merges_array(
-    iree_string_view_t merges_json, iree_tokenizer_vocab_builder_t* builder) {
-  iree_tokenizer_merge_parse_context_t context = {
+    iree_string_view_t merges_json, iree_tokenizer_vocab_builder_t* builder,
+    iree_string_builder_t* scratch) {
+  iree_tokenizer_vocab_parse_context_t context = {
       .builder = builder,
-      .unescape_buffer = {0},
-      .status = iree_ok_status(),
+      .scratch = scratch,
   };
 
   iree_status_t status = iree_json_enumerate_array_typed(
       merges_json, iree_tokenizer_merge_visitor, &context);
-
-  // Check visitor status first.
-  if (!iree_status_is_ok(context.status)) {
-    if (iree_status_is_ok(status) ||
-        iree_status_code(status) == IREE_STATUS_CANCELLED) {
-      iree_status_ignore(status);
-      return context.status;
-    }
-    iree_status_ignore(status);
-    return context.status;
-  }
-
-  if (iree_status_code(status) == IREE_STATUS_CANCELLED) {
-    iree_status_ignore(status);
-    return iree_ok_status();
-  }
-
-  return status;
+  return iree_status_join(context.status, status);
 }
 
 //===----------------------------------------------------------------------===//
@@ -439,6 +382,8 @@ iree_status_t iree_tokenizer_huggingface_parse_bpe_model(
   iree_tokenizer_vocab_builder_t* builder = NULL;
   iree_tokenizer_vocab_t* vocab = NULL;
   iree_tokenizer_model_t* model = NULL;
+  iree_string_builder_t scratch;
+  iree_string_builder_initialize(allocator, &scratch);
 
   // Estimate capacity and create builder.
   iree_host_size_t capacity =
@@ -448,7 +393,7 @@ iree_status_t iree_tokenizer_huggingface_parse_bpe_model(
 
   // Parse the vocabulary once into the builder.
   if (iree_status_is_ok(status)) {
-    status = iree_tokenizer_parse_vocab_object(vocab_json, builder, allocator);
+    status = iree_tokenizer_parse_vocab_object(vocab_json, builder, &scratch);
   }
 
   // Insert added tokens and update attributes before sealing the token set.
@@ -481,24 +426,22 @@ iree_status_t iree_tokenizer_huggingface_parse_bpe_model(
   iree_tokenizer_token_id_t unk_token_id = IREE_TOKENIZER_TOKEN_ID_INVALID;
   if (iree_status_is_ok(status) && unk_token_value.size > 0 &&
       !iree_string_view_equal(unk_token_value, IREE_SV("null"))) {
-    char unk_buffer[64];
-    iree_host_size_t unk_length = 0;
-    status = iree_json_unescape_string(unk_token_value, sizeof(unk_buffer),
-                                       unk_buffer, &unk_length);
+    iree_string_view_t spelling = iree_string_view_empty();
+    status = iree_tokenizer_model_json_unescape(unk_token_value, &scratch,
+                                                &spelling);
     if (iree_status_is_ok(status)) {
-      unk_token_id = iree_tokenizer_vocab_builder_lookup(
-          builder, iree_make_string_view(unk_buffer, unk_length));
+      unk_token_id = iree_tokenizer_vocab_builder_lookup(builder, spelling);
       if (unk_token_id == IREE_TOKENIZER_TOKEN_ID_INVALID) {
         status = iree_make_status(IREE_STATUS_NOT_FOUND,
                                   "unk_token '%.*s' not found in vocabulary",
-                                  (int)unk_length, unk_buffer);
+                                  (int)spelling.size, spelling.data);
       }
     }
   }
 
   // Resolve merge token IDs against the same index transferred at build().
   if (iree_status_is_ok(status)) {
-    status = iree_tokenizer_parse_merges_array(merges_json, builder);
+    status = iree_tokenizer_parse_merges_array(merges_json, builder, &scratch);
   }
 
   // Set unk_token special ID on the builder.
@@ -536,13 +479,10 @@ iree_status_t iree_tokenizer_huggingface_parse_bpe_model(
   // Set end_of_word_suffix if specified (e.g., "</w>" for CLIP).
   if (iree_status_is_ok(status) && eow_value.size > 0 &&
       !iree_string_view_equal(eow_value, IREE_SV("null"))) {
-    char eow_buffer[64];
-    iree_host_size_t eow_length = 0;
-    status = iree_json_unescape_string(eow_value, sizeof(eow_buffer),
-                                       eow_buffer, &eow_length);
+    iree_string_view_t suffix = iree_string_view_empty();
+    status = iree_tokenizer_model_json_unescape(eow_value, &scratch, &suffix);
     if (iree_status_is_ok(status)) {
-      status = iree_tokenizer_bpe_model_set_end_of_word_suffix(
-          model, iree_make_string_view(eow_buffer, eow_length));
+      status = iree_tokenizer_bpe_model_set_end_of_word_suffix(model, suffix);
     }
   }
 
@@ -554,6 +494,7 @@ iree_status_t iree_tokenizer_huggingface_parse_bpe_model(
     iree_tokenizer_vocab_free(vocab);
     iree_tokenizer_vocab_builder_free(builder);
   }
+  iree_string_builder_deinitialize(&scratch);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -593,19 +534,11 @@ iree_status_t iree_tokenizer_huggingface_parse_wordpiece_model(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_json_try_lookup_object_value(model_json, IREE_SV("unk_token"),
                                             &unk_token_raw));
-  char unk_token_buffer[64];
-  iree_host_size_t unk_token_length = 0;
   if (unk_token_raw.size == 0) {
-    // Not present - use default "[UNK]".
-    memcpy(unk_token_buffer, "[UNK]", 5);
-    unk_token_length = 5;
-  } else if (!iree_string_view_equal(unk_token_raw, IREE_SV("null"))) {
-    // String value - unescape it.
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_json_unescape_string(unk_token_raw, sizeof(unk_token_buffer),
-                                      unk_token_buffer, &unk_token_length));
+    unk_token_raw = IREE_SV("[UNK]");
+  } else if (iree_string_view_equal(unk_token_raw, IREE_SV("null"))) {
+    unk_token_raw = iree_string_view_empty();
   }
-  // else: null -> unk_token_length remains 0 (disabled).
 
   char prefix_buffer[16];
   iree_host_size_t prefix_length = 0;
@@ -633,6 +566,8 @@ iree_status_t iree_tokenizer_huggingface_parse_wordpiece_model(
   iree_tokenizer_vocab_builder_t* builder = NULL;
   iree_tokenizer_vocab_t* vocab = NULL;
   iree_tokenizer_model_t* model = NULL;
+  iree_string_builder_t scratch;
+  iree_string_builder_initialize(allocator, &scratch);
 
   // Estimate capacity and create builder.
   iree_host_size_t capacity =
@@ -642,7 +577,7 @@ iree_status_t iree_tokenizer_huggingface_parse_wordpiece_model(
 
   // Parse vocab into builder.
   if (iree_status_is_ok(status)) {
-    status = iree_tokenizer_parse_vocab_object(vocab_json, builder, allocator);
+    status = iree_tokenizer_parse_vocab_object(vocab_json, builder, &scratch);
   }
 
   // Process added_tokens: insert new tokens or update attributes on existing.
@@ -668,14 +603,18 @@ iree_status_t iree_tokenizer_huggingface_parse_wordpiece_model(
   }
 
   iree_tokenizer_token_id_t unk_token_id = IREE_TOKENIZER_TOKEN_ID_INVALID;
-  if (iree_status_is_ok(status) && unk_token_length > 0) {
-    unk_token_id = iree_tokenizer_vocab_builder_lookup(
-        builder, iree_make_string_view(unk_token_buffer, unk_token_length));
-    if (unk_token_id == IREE_TOKENIZER_TOKEN_ID_INVALID) {
-      status = iree_make_status(IREE_STATUS_NOT_FOUND,
-                                "WordPiece unk_token '%.*s' not found in "
-                                "vocabulary",
-                                (int)unk_token_length, unk_token_buffer);
+  if (iree_status_is_ok(status) && unk_token_raw.size > 0) {
+    iree_string_view_t spelling = iree_string_view_empty();
+    status =
+        iree_tokenizer_model_json_unescape(unk_token_raw, &scratch, &spelling);
+    if (iree_status_is_ok(status)) {
+      unk_token_id = iree_tokenizer_vocab_builder_lookup(builder, spelling);
+      if (unk_token_id == IREE_TOKENIZER_TOKEN_ID_INVALID) {
+        status = iree_make_status(IREE_STATUS_NOT_FOUND,
+                                  "WordPiece unk_token '%.*s' not found in "
+                                  "vocabulary",
+                                  (int)spelling.size, spelling.data);
+      }
     }
   }
 
@@ -711,6 +650,7 @@ iree_status_t iree_tokenizer_huggingface_parse_wordpiece_model(
     iree_tokenizer_vocab_builder_free(builder);
   }
 
+  iree_string_builder_deinitialize(&scratch);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -725,9 +665,9 @@ typedef struct iree_tokenizer_unigram_vocab_parse_context_t {
   iree_tokenizer_vocab_builder_t* builder;
   // Smallest original model score, before added tokens extend the vocabulary.
   double minimum_score;
-  // Scratch spelling for the current parsed token.
-  char unescape_buffer[IREE_TOKENIZER_MAX_MERGE_TOKEN_LENGTH];
-  // First parse/build failure retained across enumeration cancellation.
+  // Borrowed reusable spelling storage owned by the model parser.
+  iree_string_builder_t* scratch;
+  // Callback failure retained because JSON treats CANCELLED as early success.
   iree_status_t status;
 } iree_tokenizer_unigram_vocab_parse_context_t;
 
@@ -760,9 +700,8 @@ static iree_status_t iree_tokenizer_unigram_vocab_entry_visitor(
 
   // Unescape the token string.
   iree_string_view_t token_text = iree_string_view_empty();
-  status = iree_tokenizer_model_json_unescape(
-      token_json, context->unescape_buffer, sizeof(context->unescape_buffer),
-      &token_text);
+  status = iree_tokenizer_model_json_unescape(token_json, context->scratch,
+                                              &token_text);
   if (!iree_status_is_ok(status)) {
     context->status = iree_status_annotate_f(
         status, "Unigram vocab entry at index %" PRIhsz " unescape failed",
@@ -795,45 +734,27 @@ static iree_status_t iree_tokenizer_unigram_vocab_entry_visitor(
   }
 
   // Add token with index as ID and parsed score.
-  status = iree_tokenizer_vocab_builder_add_token_with_id(
+  context->status = iree_tokenizer_vocab_builder_add_token_with_id(
       context->builder, (int32_t)index, token_text, score_value,
       IREE_TOKENIZER_TOKEN_ATTR_NONE);
-  if (!iree_status_is_ok(status)) {
-    context->status = status;
-    return iree_status_from_code(IREE_STATUS_CANCELLED);
-  }
-
-  return iree_ok_status();
+  return iree_status_is_ok(context->status)
+             ? iree_ok_status()
+             : iree_status_from_code(IREE_STATUS_CANCELLED);
 }
 
 // Parses Unigram vocab array into a vocab builder.
 static iree_status_t iree_tokenizer_parse_unigram_vocab_array(
     iree_string_view_t vocab_json, iree_tokenizer_vocab_builder_t* builder,
-    double* out_minimum_score) {
+    iree_string_builder_t* scratch, double* out_minimum_score) {
   iree_tokenizer_unigram_vocab_parse_context_t context = {
       .builder = builder,
       .minimum_score = DBL_MAX,
-      .unescape_buffer = {0},
-      .status = iree_ok_status(),
+      .scratch = scratch,
   };
 
   iree_status_t status = iree_json_enumerate_array_typed(
       vocab_json, iree_tokenizer_unigram_vocab_entry_visitor, &context);
-
-  if (!iree_status_is_ok(context.status)) {
-    if (iree_status_is_ok(status) ||
-        iree_status_code(status) == IREE_STATUS_CANCELLED) {
-      iree_status_ignore(status);
-      return context.status;
-    }
-    iree_status_ignore(status);
-    return context.status;
-  }
-
-  if (iree_status_code(status) == IREE_STATUS_CANCELLED) {
-    iree_status_ignore(status);
-    return iree_ok_status();
-  }
+  status = iree_status_join(context.status, status);
 
   if (iree_status_is_ok(status)) {
     *out_minimum_score = context.minimum_score;
@@ -886,6 +807,8 @@ iree_status_t iree_tokenizer_huggingface_parse_unigram_model(
   iree_tokenizer_vocab_builder_t* builder = NULL;
   iree_tokenizer_vocab_t* vocab = NULL;
   iree_tokenizer_model_t* model = NULL;
+  iree_string_builder_t scratch;
+  iree_string_builder_initialize(allocator, &scratch);
 
   // Estimate capacity and create builder.
   iree_host_size_t capacity =
@@ -897,7 +820,7 @@ iree_status_t iree_tokenizer_huggingface_parse_unigram_model(
   // Parse vocab array into builder.
   if (iree_status_is_ok(status)) {
     status = iree_tokenizer_parse_unigram_vocab_array(vocab_json, builder,
-                                                      &minimum_score);
+                                                      &scratch, &minimum_score);
   }
 
   // Process added_tokens.
@@ -956,6 +879,7 @@ iree_status_t iree_tokenizer_huggingface_parse_unigram_model(
     iree_tokenizer_vocab_builder_free(builder);
   }
 
+  iree_string_builder_deinitialize(&scratch);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
