@@ -252,6 +252,7 @@ class LinuxDxgMemoryTest : public ::testing::Test {
     device_.adapter_luid = UINT64_C(0x1122334455667788);
     device_.memory_capabilities = {
         .virtual_address_bit_count = 48,
+        .host_registration_granularity = 1,
         .read_only_memory_supported = 1,
         .no_execute_memory_supported = 1,
         .cache_coherent_memory_supported = 1,

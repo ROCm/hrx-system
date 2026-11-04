@@ -155,6 +155,28 @@ NTSTATUS APIENTRY FakeCloseAdapter(const D3DKMT_CLOSEADAPTER* close) {
   return kSuccess;
 }
 
+NTSTATUS APIENTRY
+FakeQuerySharedResource(D3DKMT_QUERYRESOURCEINFOFROMNTHANDLE*) {
+  ADD_FAILURE() << "resource query is not part of capability discovery";
+  return kFailure;
+}
+
+NTSTATUS APIENTRY FakeOpenSharedResource(D3DKMT_OPENRESOURCEFROMNTHANDLE*) {
+  ADD_FAILURE() << "resource open is not part of capability discovery";
+  return kFailure;
+}
+
+HRESULT WINAPI FakeCreateDxgiFactory(REFIID, void**) {
+  ADD_FAILURE() << "DXGI creation is not part of capability discovery";
+  return E_FAIL;
+}
+
+HRESULT WINAPI FakeCreateD3d12Device(IUnknown*, D3D_FEATURE_LEVEL, REFIID,
+                                     void**) {
+  ADD_FAILURE() << "D3D12 creation is not part of capability discovery";
+  return E_FAIL;
+}
+
 class WindowsGpuDeviceRollbackTest
     : public ::testing::TestWithParam<amdf_native_lifetime_t> {
  protected:
@@ -171,7 +193,11 @@ class WindowsGpuDeviceRollbackTest
     instance_.kmt.get_device_state = FakeGetDeviceState;
     instance_.kmt.create_paging_queue = FakeCreatePagingQueue;
     instance_.kmt.destroy_paging_queue = FakeDestroyPagingQueue;
+    instance_.kmt.query_resource_info_from_handle = FakeQuerySharedResource;
+    instance_.kmt.open_resource_from_handle = FakeOpenSharedResource;
     instance_.kmt.close_adapter = FakeCloseAdapter;
+    instance_.d3d12.create_dxgi_factory_1 = FakeCreateDxgiFactory;
+    instance_.d3d12.create_device = FakeCreateD3d12Device;
 
     ASSERT_EQ(amdf_calloc(instance_.host_allocator, sizeof(*endpoint_),
                           amdf_alignof(amdf_platform_endpoint_t),
@@ -216,6 +242,25 @@ TEST_P(WindowsGpuDeviceRollbackTest, AdapterQueryPreservesAtomicUpdateWidth) {
                                       Operation::kQueryStoreCapabilities}));
   }
   EXPECT_EQ(amdf_test_wddm_provider_query_adapter_open_success_count(), 0u);
+}
+
+TEST_P(WindowsGpuDeviceRollbackTest,
+       AdapterQueryReportsPlatformMemoryCapabilities) {
+  amdf_gpu_dxg_memory_capabilities_t capabilities = {};
+  ASSERT_EQ(amdf_gpu_wddm_query_memory_capabilities(endpoint_, &capabilities),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(capabilities.host_registration_granularity, AMDF_GPU_DXG_PAGE_SIZE);
+  EXPECT_EQ(capabilities.d3d12_resource_supported, 1u);
+
+  instance_.kmt.open_resource_from_handle = nullptr;
+  ASSERT_EQ(amdf_gpu_wddm_query_memory_capabilities(endpoint_, &capabilities),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(capabilities.d3d12_resource_supported, 0u);
+  instance_.kmt.open_resource_from_handle = FakeOpenSharedResource;
+  instance_.d3d12.create_device = nullptr;
+  ASSERT_EQ(amdf_gpu_wddm_query_memory_capabilities(endpoint_, &capabilities),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(capabilities.d3d12_resource_supported, 0u);
 }
 
 TEST_P(WindowsGpuDeviceRollbackTest,

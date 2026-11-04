@@ -36,12 +36,16 @@ amdf_status_t amdf_gpu_wddm_query_memory_capabilities(
 
   amdf_gpu_dxg_memory_capabilities_t capabilities = {
       .virtual_address_bit_count = query.Caps.VirtualAddressBitCount,
+      .host_registration_granularity = AMDF_GPU_DXG_PAGE_SIZE,
       .read_only_memory_supported = query.Caps.Flags.ReadOnlyMemorySupported,
       .no_execute_memory_supported = query.Caps.Flags.NoExecuteMemorySupported,
       .cache_coherent_memory_supported =
           query.Caps.Flags.CacheCoherentMemorySupported,
       .atomic_update_64_supported = scheduling.Support64BitAtomics,
-      .d3d12_resource_supported = 1,
+      .d3d12_resource_supported =
+          amdf_kmt_api_supports_shared_resource_import(
+              &endpoint->instance->kmt) &&
+          amdf_d3d12_api_supports_buffer_import(&endpoint->instance->d3d12),
   };
   const amdf_status_t host_status =
       amdf_platform_host_memory_query_cache_transition(

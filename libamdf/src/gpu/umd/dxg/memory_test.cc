@@ -293,6 +293,7 @@ class DxgMemoryTest : public ::testing::Test {
     };
     capabilities_ = {
         .virtual_address_bit_count = 48,
+        .host_registration_granularity = 1,
         .read_only_memory_supported = 1,
         .no_execute_memory_supported = 1,
         .cache_coherent_memory_supported = 1,

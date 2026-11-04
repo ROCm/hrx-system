@@ -230,11 +230,12 @@ amdf_status_t amdf_gpu_dxg_query_memory_profile(
     profile.device_address.minimum_alignment = AMDF_GPU_DXG_PAGE_SIZE;
     profile.registration = (amdf_memory_construction_capabilities_t){
         .maximum_byte_length = maximum_byte_length,
-        .byte_length_granularity = 1,
-        .registered_host_pointer_alignment = 1,
+        .byte_length_granularity = capabilities->host_registration_granularity,
+        .registered_host_pointer_alignment =
+            capabilities->host_registration_granularity,
         .registered_host_properties = (AMDF_HOST_MEMORY_PROPERTY_READ_CACHED |
                                        AMDF_HOST_MEMORY_PROPERTY_WRITE_BACK),
-        .minimum_alignment = 1,
+        .minimum_alignment = capabilities->host_registration_granularity,
         .maximum_alignment = maximum_alignment,
         .native_byte_length_granularity = AMDF_GPU_DXG_PAGE_SIZE,
     };

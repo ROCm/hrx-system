@@ -228,6 +228,7 @@ class DxgMemoryReservationTest : public ::testing::Test {
     };
     memory_capabilities_ = {
         .virtual_address_bit_count = 48,
+        .host_registration_granularity = 1,
         .read_only_memory_supported = 1,
         .no_execute_memory_supported = 1,
     };

@@ -20,6 +20,9 @@ extern "C" {
 typedef struct amdf_gpu_dxg_memory_capabilities_t {
   // Native GPU virtual-address width in bits.
   uint32_t virtual_address_bit_count;
+  // Required host-pointer, logical-length, and placement granularity for
+  // native host registration.
+  uint64_t host_registration_granularity;
   // Nonzero when GPU mappings can deny device writes.
   uint32_t read_only_memory_supported;
   // Nonzero when GPU mappings can deny instruction fetches.

@@ -42,6 +42,7 @@ amdf_status_t amdf_gpu_linux_dxg_query_memory_capabilities(
   if (amdf_status_is_ok(status)) {
     amdf_gpu_dxg_memory_capabilities_t capabilities = {
         .virtual_address_bit_count = memory.Caps.VirtualAddressBitCount,
+        .host_registration_granularity = 1,
         .read_only_memory_supported = memory.Caps.Flags.ReadOnlyMemorySupported,
         .no_execute_memory_supported =
             memory.Caps.Flags.NoExecuteMemorySupported,
