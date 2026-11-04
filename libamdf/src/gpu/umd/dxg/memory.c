@@ -162,7 +162,7 @@ static amdf_status_t amdf_gpu_dxg_memory_reserve_device_address(
 
   uint64_t reservation_base = 0;
   amdf_status_t status = memory->device.native_api->reserve_address(
-      memory->device.native_context, memory->device.adapter_handle,
+      memory->device.native_context, memory->device.adapter_handle, 0, 0,
       reservation_byte_length, &reservation_base);
   if (!amdf_status_is_ok(status)) {
     return status;
@@ -242,8 +242,8 @@ static amdf_status_t amdf_gpu_dxg_memory_map_device_address(
     status = memory->device.native_api->map_allocation(
         memory->device.native_context, memory->device.paging_queue_handle,
         memory->device_address + mapped_byte_length,
-        memory->allocation_handles[i], chunk_byte_length, memory->device_access,
-        &mapped_address, &paging_fence);
+        memory->allocation_handles[i], 0, chunk_byte_length,
+        memory->device_access, &mapped_address, &paging_fence);
     if (amdf_status_is_ok(status) &&
         mapped_address != memory->device_address + mapped_byte_length) {
       status = amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);

@@ -23,11 +23,13 @@ static bool amdf_gpu_linux_dxg_memory_status_is_success_or_pending(
 }
 
 static amdf_status_t amdf_gpu_linux_dxg_memory_reserve_address(
-    void* context, uint32_t adapter_handle, uint64_t byte_length,
-    uint64_t* out_address) {
+    void* context, uint32_t adapter_handle, uint64_t base_address,
+    uint64_t minimum_address, uint64_t byte_length, uint64_t* out_address) {
   amdf_gpu_umd_device_t* device = context;
   D3DDDI_RESERVEGPUVIRTUALADDRESS reserve = {
       .hAdapter = adapter_handle,
+      .BaseAddress = base_address,
+      .MinimumAddress = minimum_address,
       .Size = byte_length,
   };
   const amdf_status_t status = amdf_linux_dxg_kmt_make_status(
@@ -41,18 +43,20 @@ static amdf_status_t amdf_gpu_linux_dxg_memory_reserve_address(
 
 static amdf_status_t amdf_gpu_linux_dxg_memory_map_allocation(
     void* context, uint32_t paging_queue_handle, uint64_t address,
-    uint32_t allocation_handle, uint64_t byte_length,
-    amdf_memory_access_t access, uint64_t* out_address,
+    uint32_t allocation_handle, uint64_t allocation_byte_offset,
+    uint64_t byte_length, amdf_memory_access_t access, uint64_t* out_address,
     uint64_t* out_paging_fence) {
   amdf_gpu_umd_device_t* device = context;
   D3DDDI_MAPGPUVIRTUALADDRESS map = {
       .hPagingQueue = paging_queue_handle,
       .BaseAddress = address,
       .hAllocation = allocation_handle,
+      .OffsetInPages = allocation_byte_offset / AMDF_GPU_DXG_PAGE_SIZE,
       .SizeInPages = byte_length / AMDF_GPU_DXG_PAGE_SIZE,
   };
   map.Protection.Write = (access & AMDF_MEMORY_ACCESS_WRITE) != 0;
   map.Protection.Execute = (access & AMDF_MEMORY_ACCESS_EXECUTE) != 0;
+  map.Protection.NoAccess = allocation_handle == 0;
   const NTSTATUS native_status = amdf_linux_dxg_kmt_map_gpu_virtual_address(
       device->logical_device.kmt, &map);
   if (!amdf_gpu_linux_dxg_memory_status_is_success_or_pending(native_status)) {

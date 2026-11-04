@@ -81,10 +81,9 @@ amdf_cc_library(
         ":device_state",
         ":kernel_queue",
         ":memory",
-        ":memory_profile",
         "//libamdf/src:allocator",
         "//libamdf/src/gpu/umd:memory_reservation",
-        "//libamdf/src/platform/windows:kmt_api",
+        "//libamdf/src/gpu/umd/dxg:memory_reservation",
     ],
 )
 

@@ -36,10 +36,13 @@ typedef struct amdf_gpu_dxg_memory_release_result_t {
 typedef struct amdf_gpu_dxg_memory_native_api_t {
   // Reserves one unbacked GPU address interval.
   amdf_status_t (*reserve_address)(void* context, uint32_t adapter_handle,
+                                   uint64_t base_address,
+                                   uint64_t minimum_address,
                                    uint64_t byte_length, uint64_t* out_address);
   // Maps one physical allocation at an exact reserved GPU address.
   amdf_status_t (*map_allocation)(void* context, uint32_t paging_queue_handle,
                                   uint64_t address, uint32_t allocation_handle,
+                                  uint64_t allocation_byte_offset,
                                   uint64_t byte_length,
                                   amdf_memory_access_t access,
                                   uint64_t* out_address,

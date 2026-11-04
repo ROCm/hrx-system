@@ -14,11 +14,13 @@
 #include "libamdf/src/gpu/umd/wddm/memory_profile.h"
 
 static amdf_status_t amdf_gpu_wddm_memory_reserve_address(
-    void* context, uint32_t adapter_handle, uint64_t byte_length,
-    uint64_t* out_address) {
+    void* context, uint32_t adapter_handle, uint64_t base_address,
+    uint64_t minimum_address, uint64_t byte_length, uint64_t* out_address) {
   amdf_gpu_umd_device_t* device = context;
   D3DDDI_RESERVEGPUVIRTUALADDRESS reserve = {0};
   reserve.hAdapter = adapter_handle;
+  reserve.BaseAddress = base_address;
+  reserve.MinimumAddress = minimum_address;
   reserve.Size = byte_length;
   const amdf_status_t status =
       amdf_kmt_make_status(device->kmt->reserve_gpu_virtual_address(&reserve));
@@ -30,17 +32,19 @@ static amdf_status_t amdf_gpu_wddm_memory_reserve_address(
 
 static amdf_status_t amdf_gpu_wddm_memory_map_allocation(
     void* context, uint32_t paging_queue_handle, uint64_t address,
-    uint32_t allocation_handle, uint64_t byte_length,
-    amdf_memory_access_t access, uint64_t* out_address,
+    uint32_t allocation_handle, uint64_t allocation_byte_offset,
+    uint64_t byte_length, amdf_memory_access_t access, uint64_t* out_address,
     uint64_t* out_paging_fence) {
   amdf_gpu_umd_device_t* device = context;
   D3DDDI_MAPGPUVIRTUALADDRESS map = {0};
   map.hPagingQueue = paging_queue_handle;
   map.BaseAddress = address;
   map.hAllocation = allocation_handle;
+  map.OffsetInPages = allocation_byte_offset / AMDF_GPU_DXG_PAGE_SIZE;
   map.SizeInPages = byte_length / AMDF_GPU_DXG_PAGE_SIZE;
   map.Protection.Write = (access & AMDF_MEMORY_ACCESS_WRITE) != 0;
   map.Protection.Execute = (access & AMDF_MEMORY_ACCESS_EXECUTE) != 0;
+  map.Protection.NoAccess = allocation_handle == 0;
   const NTSTATUS native_status = device->kmt->map_gpu_virtual_address(&map);
   if (!amdf_kmt_status_is_success_or_pending(native_status)) {
     return amdf_kmt_make_status(native_status);
@@ -164,7 +168,7 @@ static const amdf_gpu_dxg_memory_native_api_t amdf_gpu_wddm_memory_native_api =
             amdf_gpu_wddm_memory_release_external_reference,
 };
 
-static amdf_gpu_dxg_memory_device_t amdf_gpu_wddm_memory_device(
+amdf_gpu_dxg_memory_device_t amdf_gpu_wddm_memory_device(
     amdf_gpu_umd_device_t* device) {
   return (amdf_gpu_dxg_memory_device_t){
       .host_allocator = device->host_allocator,
@@ -184,17 +188,6 @@ uintptr_t amdf_gpu_umd_memory_host_mapping_source(
     amdf_gpu_umd_memory_t* memory) {
   return amdf_gpu_dxg_memory_host_mapping_source(
       (amdf_gpu_dxg_memory_t*)memory);
-}
-
-amdf_gpu_wddm_memory_span_t amdf_gpu_wddm_memory_span(
-    const amdf_gpu_umd_memory_t* memory, uint64_t byte_offset) {
-  const amdf_gpu_dxg_memory_span_t span = amdf_gpu_dxg_memory_span(
-      (const amdf_gpu_dxg_memory_t*)memory, byte_offset);
-  return (amdf_gpu_wddm_memory_span_t){
-      .allocation = span.allocation_handle,
-      .byte_offset = span.byte_offset,
-      .byte_length = span.byte_length,
-  };
 }
 
 amdf_status_t amdf_gpu_umd_device_query_memory_profile(

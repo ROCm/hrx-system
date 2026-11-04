@@ -107,6 +107,32 @@ amdf_cc_test(
     ],
 )
 
+amdf_cc_library(
+    name = "memory_reservation",
+    srcs = ["memory_reservation.c"],
+    hdrs = ["memory_reservation.h"],
+    visibility = ["//libamdf/src/gpu/umd:__subpackages__"],
+    deps = [
+        ":memory",
+        ":memory_profile",
+        "//libamdf/src:allocator",
+        "//libamdf/src/gpu/umd:memory_reservation",
+    ],
+)
+
+amdf_cc_test(
+    name = "memory_reservation_test",
+    srcs = ["memory_reservation_test.cc"],
+    deps = [
+        ":memory",
+        ":memory_profile",
+        ":memory_reservation",
+        "//libamdf/src:allocator",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
 amdf_cc_test(
     name = "endpoint_properties_test",
     srcs = ["endpoint_properties_test.cc"],

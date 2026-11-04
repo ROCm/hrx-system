@@ -122,10 +122,14 @@ amdf_status_t AMDF_DXG_BRIDGE_CALL FakePrepareBufferImport(
 }
 
 amdf_status_t FakeReserveAddress(void* context, uint32_t adapter_handle,
-                                 uint64_t byte_length, uint64_t* out_address) {
+                                 uint64_t base_address,
+                                 uint64_t minimum_address, uint64_t byte_length,
+                                 uint64_t* out_address) {
   auto* state = static_cast<FakeMemoryState*>(context);
   state->operations.push_back(Operation::kReserveAddress);
   EXPECT_EQ(adapter_handle, 0x08u);
+  EXPECT_EQ(base_address, 0u);
+  EXPECT_EQ(minimum_address, 0u);
   state->reserved_byte_length = byte_length;
   *out_address = 0x200000;
   return AMDF_STATUS_OK;
@@ -133,6 +137,7 @@ amdf_status_t FakeReserveAddress(void* context, uint32_t adapter_handle,
 
 amdf_status_t FakeMapAllocation(void* context, uint32_t paging_queue_handle,
                                 uint64_t address, uint32_t allocation_handle,
+                                uint64_t allocation_byte_offset,
                                 uint64_t byte_length,
                                 amdf_memory_access_t access,
                                 uint64_t* out_address,
@@ -141,6 +146,7 @@ amdf_status_t FakeMapAllocation(void* context, uint32_t paging_queue_handle,
   state->operations.push_back(Operation::kMap);
   const uint32_t ordinal = allocation_handle - 0x20;
   EXPECT_EQ(paging_queue_handle, 0x40u);
+  EXPECT_EQ(allocation_byte_offset, 0u);
   EXPECT_EQ(ordinal < state->allocation_count, true);
   EXPECT_EQ(address,
             0x200000u + ordinal * state->maximum_allocation_byte_length);
