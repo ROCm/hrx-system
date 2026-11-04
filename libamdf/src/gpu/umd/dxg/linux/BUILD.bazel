@@ -28,6 +28,27 @@ amdf_cc_library(
     ],
 )
 
+amdf_cc_library(
+    name = "endpoint_profile",
+    srcs = ["endpoint_profile.c"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    visibility = ["//libamdf/src/gpu/umd:__pkg__"],
+    deps = [
+        ":logical_device",
+        "//libamdf/src:allocator",
+        "//libamdf/src:host_memory",
+        "//libamdf/src/gpu:endpoint_profile",
+        "//libamdf/src/gpu/umd:endpoint_profile",
+        "//libamdf/src/gpu/umd/dxg:endpoint_properties",
+        "//libamdf/src/gpu/umd/dxg/rocdxg:loader",
+        "//libamdf/src/platform/linux/dxg:endpoint",
+        "//libamdf/src/platform/linux/dxg:kmt",
+    ],
+)
+
 amdf_cc_test(
     name = "logical_device_test",
     srcs = ["logical_device_test.cc"],
@@ -39,6 +60,31 @@ amdf_cc_test(
     deps = [
         ":logical_device",
         "//libamdf/src:allocator",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "endpoint_profile_test",
+    srcs = ["endpoint_profile_test.cc"],
+    linkopts = [
+        "-Wl,--wrap=amdf_gpu_dxg_rocdxg_loader_deinitialize",
+        "-Wl,--wrap=amdf_gpu_dxg_rocdxg_loader_initialize",
+        "-Wl,--wrap=amdf_gpu_dxg_rocdxg_loader_query_api",
+        "-Wl,--wrap=amdf_host_memory_sample_observation",
+        "-Wl,--wrap=amdf_linux_dxg_connection_invoke",
+    ],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        ":endpoint_profile",
+        "//libamdf/src:allocator",
+        "//libamdf/src/gpu/umd:endpoint_profile",
+        "//libamdf/src/gpu/umd/dxg/rocdxg:loader",
+        "//libamdf/src/platform/linux/dxg:endpoint",
         "//third_party:google_test",
         "//third_party:google_test_main",
     ],
