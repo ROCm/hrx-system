@@ -214,7 +214,7 @@ void iree_hal_amd_gpu_device_options_initialize(
       .queue_family_ordinal = UINT32_MAX,
       .queue_count = 4,
       .host_numa_node = UINT32_MAX,
-      .completion_spin_ns = 100000,
+      .completion_spin_ns = 0,
       .failure_timeout_ms = 30000,
       .queue = {.ring_byte_length = 0,
                 .retirement_capacity = 256,

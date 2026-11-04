@@ -107,14 +107,19 @@ architecture preference. `host_numa_node` selects CPU placement
 for the workers and shared proactor; GPU-local memory node IDs are not CPU
 NUMA node IDs.
 
-`completion_spin_ns` bounds active completion observation after actual progress
-(default 100,000 ns). While actively waiting, the existing retirement worker
-reads coherent USER queue completion words; a change resumes authoritative
-source drains. At expiry it parks on the native event, with no periodic wakeups.
-Setting zero parks immediately. KERNEL queues continue to use native events and
-status queries. This trades a bounded CPU tail after the last completion for
-lower latency between dependent operations; it does not alter process power
-policy, add a thread, or change submission and retirement ordering.
+The retirement worker parks on native events when no completion is ready.
+Active application waits can observe their requested completion directly and
+retire it on the caller. This keeps a worker waiting for a bulk transfer from
+occupying a CPU needed by independent submissions.
+
+`completion_spin_ns` optionally enables bounded worker observation after actual
+progress (default zero). The worker reads coherent USER queue completion words;
+a change resumes authoritative source drains. At expiry it parks on the native
+event, with no periodic wakeups. This option spends additional CPU time on
+completion observation; its effect depends on CPU placement and concurrent work.
+KERNEL queues continue to use native events and status queries. Neither mode
+alters process power policy, adds a thread, or changes submission and retirement
+ordering.
 
 Each materialized device retains the fabric independently. Releasing the
 registry and driver leaves those devices operational. The fabric owns the native
