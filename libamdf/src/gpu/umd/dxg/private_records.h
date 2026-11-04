@@ -25,7 +25,7 @@ extern "C" {
 #define AMDF_DXG_PRIVATE_LINKED_QUERY_SCRATCH_BYTE_LENGTH 0xF160u
 
 // Caller-owned transient storage required by a single-adapter query.
-#define AMDF_DXG_PRIVATE_SINGLE_QUERY_SCRATCH_BYTE_LENGTH 0x3A00u
+#define AMDF_DXG_PRIVATE_SINGLE_QUERY_SCRATCH_BYTE_LENGTH 0x4360u
 
 // Fixed private record sizes accepted by the WDDM compute interface.
 #define AMDF_DXG_PRIVATE_ALLOCATION_DRIVER_RECORD_BYTE_LENGTH 0x40u

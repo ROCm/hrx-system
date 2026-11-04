@@ -11,8 +11,8 @@
 //
 // - librocdxg v1.2.2's shipped thunk-proxy archive and public headers:
 //   https://github.com/ROCm/librocdxg/tree/v1.2.2/shared
-// - WKMI's public interface and matching Linux archive at rocm-systems commit
-//   6b7847ef03b76c004f57b8cf40cdef9621ee6f53:
+// - WKMI's public interface and matching shipped Linux and Windows archives at
+//   rocm-systems commit 6b7847ef03b76c004f57b8cf40cdef9621ee6f53:
 //   https://github.com/ROCm/rocm-systems/tree/6b7847ef03b76c004f57b8cf40cdef9621ee6f53/shared/amdgpu-windows-interop/wkmi
 // - the public ROCr topology implementation and GPU family identifiers:
 //   https://github.com/ROCm/rocm-systems/blob/develop/projects/rocr-runtime/libhsakmt/src/topology.c
@@ -29,7 +29,6 @@ enum {
   AMDF_DXG_PRIVATE_INITIAL_CHAIN_BYTE_LENGTH = 0xBC0,
   AMDF_DXG_PRIVATE_BASE_ADAPTER_BYTE_LENGTH = 0x260,
   AMDF_DXG_PRIVATE_EXTENDED_ADAPTER_BYTE_LENGTH = 0x3A00,
-  AMDF_DXG_PRIVATE_PROXY_ADAPTER_BYTE_LENGTH = 0x960,
   AMDF_DXG_PRIVATE_CHAIN_CHECKSUM_OFFSET = 0x8AC,
 };
 
@@ -512,27 +511,27 @@ amdf_dxg_private_result_t amdf_dxg_private_query_single_adapter(
 
   uint8_t* scratch = (uint8_t*)query->scratch;
   amdf_dxg_private_result_t result = amdf_dxg_private_issue_query(
-      query, AMDF_DXG_PRIVATE_PROXY_ADAPTER_BYTE_LENGTH, out_native_status);
+      query, AMDF_DXG_PRIVATE_INITIAL_CHAIN_BYTE_LENGTH, out_native_status);
   if (result != AMDF_DXG_PRIVATE_RESULT_SUCCESS) {
     return result;
   }
   const uint32_t is_discrete = amdf_dxg_private_load_u32(scratch + 0x2C) == 0;
+  const uint8_t* base_record =
+      scratch + AMDF_DXG_PRIVATE_CHAIN_HEADER_BYTE_LENGTH;
+  const uint32_t family = amdf_dxg_private_load_u32(base_record + 0x30);
+  const uint32_t supports_wddm2 = (base_record[0x1F4] >> 7) & 1u;
 
-  result = amdf_dxg_private_issue_query(
-      query, AMDF_DXG_PRIVATE_BASE_ADAPTER_BYTE_LENGTH, out_native_status);
+  const uint32_t extended_query_byte_length =
+      AMDF_DXG_PRIVATE_CHAIN_HEADER_BYTE_LENGTH +
+      AMDF_DXG_PRIVATE_EXTENDED_ADAPTER_BYTE_LENGTH;
+  result = amdf_dxg_private_issue_query(query, extended_query_byte_length,
+                                        out_native_status);
   if (result != AMDF_DXG_PRIVATE_RESULT_SUCCESS) {
     return result;
   }
-  const uint32_t family = amdf_dxg_private_load_u32(scratch + 0x30);
-  const uint32_t supports_wddm2 = (scratch[0x1F4] >> 7) & 1u;
-
-  result = amdf_dxg_private_issue_query(
-      query, AMDF_DXG_PRIVATE_EXTENDED_ADAPTER_BYTE_LENGTH, out_native_status);
-  if (result != AMDF_DXG_PRIVATE_RESULT_SUCCESS) {
-    return result;
-  }
-  return amdf_dxg_private_decode_adapter(family, supports_wddm2, is_discrete,
-                                         scratch, out_info);
+  return amdf_dxg_private_decode_adapter(
+      family, supports_wddm2, is_discrete,
+      scratch + AMDF_DXG_PRIVATE_CHAIN_HEADER_BYTE_LENGTH, out_info);
 }
 
 void amdf_dxg_private_initialize_allocation_driver_record(void* record) {

@@ -85,7 +85,7 @@ TEST(PrivateRecordsTest, AbiLayoutsAreFixed) {
   static_assert(sizeof(amdf_dxg_private_allocation_info_t) == 16);
   static_assert(sizeof(amdf_dxg_private_allocation_metadata_t) == 32);
   EXPECT_EQ(AMDF_DXG_PRIVATE_LINKED_QUERY_SCRATCH_BYTE_LENGTH, 0xF160u);
-  EXPECT_EQ(AMDF_DXG_PRIVATE_SINGLE_QUERY_SCRATCH_BYTE_LENGTH, 0x3A00u);
+  EXPECT_EQ(AMDF_DXG_PRIVATE_SINGLE_QUERY_SCRATCH_BYTE_LENGTH, 0x4360u);
   EXPECT_EQ(AMDF_DXG_PRIVATE_ALLOCATION_DRIVER_RECORD_BYTE_LENGTH, 0x40u);
   EXPECT_EQ(AMDF_DXG_PRIVATE_ALLOCATION_RECORD_BYTE_LENGTH, 0x218u);
   EXPECT_EQ(AMDF_DXG_PRIVATE_PROXY_RESOURCE_RECORD_BYTE_LENGTH, 0x40u);
@@ -517,19 +517,6 @@ uint32_t FakeQuery(void* context, uint32_t adapter_handle, void* buffer,
   EXPECT_EQ(adapter_handle, 0x42u);
 
   auto* bytes = static_cast<uint8_t*>(buffer);
-  if (buffer_byte_length == 0x960) {
-    Store32(bytes, 0x2C, 0);
-    return 0;
-  }
-  if (buffer_byte_length == 0x260) {
-    FillBaseRecord(bytes, *fake);
-    return 0;
-  }
-  if (buffer_byte_length == 0x3A00) {
-    FillExtendedRecord(bytes, *fake);
-    return 0;
-  }
-
   Store32(bytes, 0x08, fake->physical_adapter_count);
   Store16(bytes, 0x0C, fake->vendor_id);
   Store16(bytes, 0x0E, fake->vendor_id);
@@ -541,8 +528,10 @@ uint32_t FakeQuery(void* context, uint32_t adapter_handle, void* buffer,
   if (buffer_byte_length >= 0xE20) {
     FillBaseRecord(bytes + 0x960 + 0x260, *fake);
   }
-  if (buffer_byte_length >= 0x7D60) {
+  if (buffer_byte_length >= 0x4360) {
     FillExtendedRecord(bytes + 0x960, *fake);
+  }
+  if (buffer_byte_length >= 0x7D60) {
     FillExtendedRecord(bytes + 0x960 + 0x3A00, *fake);
   }
 
@@ -632,12 +621,31 @@ TEST(PrivateRecordsTest, QueriesSingleAdapterRecordsExactly) {
                                                   &native_status),
             AMDF_DXG_PRIVATE_RESULT_SUCCESS);
   EXPECT_EQ(native_status, 0u);
-  EXPECT_EQ(fixture.fake.call_count, 3u);
+  EXPECT_EQ(fixture.fake.call_count, 2u);
   EXPECT_EQ(fixture.fake.byte_lengths,
-            (std::array<uint32_t, 4>{0x960, 0x260, 0x3A00, 0}));
+            (std::array<uint32_t, 4>{0xBC0, 0x4360, 0, 0}));
   EXPECT_EQ(info.gfx_ip_major, 11);
   EXPECT_EQ(info.gfx_ip_minor, 5);
   EXPECT_EQ(info.asic_revision, 0x10u);
+}
+
+TEST(PrivateRecordsTest, PreservesSingleAdapterQueryFailureAndOutput) {
+  AdapterQueryFixture fixture;
+  fixture.query.physical_adapter_index = 0;
+  fixture.fake.failure_call = 1;
+  fixture.fake.failure_status = 0xC0000023u;
+  amdf_dxg_private_adapter_info_t info;
+  std::memset(&info, 0xA5, sizeof(info));
+  const amdf_dxg_private_adapter_info_t original = info;
+  uint32_t native_status = 0;
+  EXPECT_EQ(amdf_dxg_private_query_single_adapter(&fixture.query, &info,
+                                                  &native_status),
+            AMDF_DXG_PRIVATE_RESULT_NATIVE_FAILURE);
+  EXPECT_EQ(native_status, 0xC0000023u);
+  EXPECT_EQ(fixture.fake.call_count, 2u);
+  EXPECT_EQ(fixture.fake.byte_lengths,
+            (std::array<uint32_t, 4>{0xBC0, 0x4360, 0, 0}));
+  EXPECT_EQ(std::memcmp(&info, &original, sizeof(info)), 0);
 }
 
 TEST(PrivateRecordsTest, DecodesDriverSelectedComputeScheduler) {
