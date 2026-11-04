@@ -141,6 +141,14 @@ iree_status_t loom_math_evaluation_build_ordered_equal(
     loom_math_evaluation_t* evaluation, const loom_math_evaluation_value_t* lhs,
     const loom_math_evaluation_value_t* rhs, loom_value_id_t* out_value);
 
+// Replaces either zero encoding with |signed_zero| in the integer bit domain.
+// Other encodings pass through unchanged, including subnormals and NaNs.
+iree_status_t loom_math_evaluation_build_preserved_zero(
+    loom_math_evaluation_t* evaluation,
+    const loom_math_evaluation_value_t* input,
+    const loom_math_evaluation_value_t* signed_zero,
+    loom_math_evaluation_value_t* out_value);
+
 // Classifies positive normal finite lanes using their IEEE bit interval.
 iree_status_t loom_math_evaluation_build_positive_normal_finite_condition(
     loom_math_evaluation_t* evaluation,

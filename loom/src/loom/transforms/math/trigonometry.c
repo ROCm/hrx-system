@@ -28,17 +28,14 @@ iree_status_t loom_math_build_preserved_trigonometric(
   loom_math_value_t zero;
   IREE_RETURN_IF_ERROR(
       loom_math_evaluation_build_constant(evaluation, 0.0, &zero));
-  loom_value_id_t is_zero;
-  IREE_RETURN_IF_ERROR(loom_math_evaluation_build_ordered_equal(
-      evaluation, &result, &zero, &is_zero));
   loom_math_value_t signed_zero = zero;
   if (!is_cosine) {
     IREE_RETURN_IF_ERROR(loom_math_evaluation_build_binary(
         evaluation, LOOM_MATH_EVALUATION_BINARY_COPYSIGNF, &zero,
         &evaluation->input, &signed_zero));
   }
-  return loom_math_evaluation_build_select(evaluation, is_zero, &signed_zero,
-                                           &result, out_value);
+  return loom_math_evaluation_build_preserved_zero(evaluation, &result,
+                                                   &signed_zero, out_value);
 }
 
 static iree_status_t loom_math_trigonometric_select_cardinal(

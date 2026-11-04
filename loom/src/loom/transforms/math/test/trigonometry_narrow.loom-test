@@ -1,0 +1,62 @@
+// RUN: pass target=spirv:vulkan1.3+bda+extended-types legalize-math
+
+// Zero classification retains the source encoding after narrow evaluation.
+func.def @narrow_zero_signs(%half: vector<2xf16>, %bfloat: bf16, %e4m3: f8E4M3, %e5m2: f8E5M2) -> (vector<2xf16>, bf16, f8E4M3, f8E5M2) {
+  %a = vector.cosf<afn|preserve> %half : vector<2xf16>
+  %b = scalar.cosf<afn|preserve> %bfloat : bf16
+  %c = scalar.cosf<afn|preserve> %e4m3 : f8E4M3
+  %d = scalar.sinf<afn|preserve> %e5m2 : f8E5M2
+  func.return %a, %b, %c, %d : vector<2xf16>, bf16, f8E4M3, f8E5M2
+}
+
+// ----
+func.def @narrow_zero_signs(%half: vector<2xf16>, %bfloat: bf16, %e4m3: f8E4M3, %e5m2: f8E5M2) -> (vector<2xf16>, bf16, f8E4M3, f8E5M2) {
+  %52 = vector.cosf<afn> %half : vector<2xf16>
+  %53 = vector.splatf 0.0 : vector<2xf16>
+  %54 = vector.splati 32767 : vector<2xi16>
+  %55 = vector.splati 0 : vector<2xi16>
+  %56 = vector.bitcast %52 : vector<2xf16> to vector<2xi16>
+  %57 = vector.andi %56, %54 : vector<2xi16>
+  %58 = vector.cmpi eq, %57, %55 : vector<2xi16> -> vector<2xi1>
+  %59 = vector.bitcast %53 : vector<2xf16> to vector<2xi16>
+  %60 = vector.select %58, %59, %56 : vector<2xi16>
+  %a = vector.bitcast %60 : vector<2xi16> to vector<2xf16>
+  %49 = scalar.extf %bfloat : bf16 to f32
+  %50 = scalar.cosf<afn> %49 : f32
+  %51 = scalar.fptrunc %50 : f32 to bf16
+  %40 = scalar.constant 0.0 : bf16
+  %41 = scalar.constant 32767 : i16
+  %42 = scalar.constant 0 : i16
+  %43 = scalar.bitcast %51 : bf16 to i16
+  %44 = scalar.andi %43, %41 : i16
+  %45 = scalar.cmpi eq, %44, %42 : i16
+  %46 = scalar.bitcast %40 : bf16 to i16
+  %47 = scf.select %45, %46, %43 : i16
+  %b = scalar.bitcast %47 : i16 to bf16
+  %36 = scalar.extf %e4m3 : f8E4M3 to f32
+  %37 = scalar.cosf<afn> %36 : f32
+  %38 = scalar.fptrunc %37 : f32 to f8E4M3
+  %27 = scalar.constant 0.0 : f8E4M3
+  %28 = scalar.constant 127 : i8
+  %29 = scalar.constant 0 : i8
+  %30 = scalar.bitcast %38 : f8E4M3 to i8
+  %31 = scalar.andi %30, %28 : i8
+  %32 = scalar.cmpi eq, %31, %29 : i8
+  %33 = scalar.bitcast %27 : f8E4M3 to i8
+  %34 = scf.select %32, %33, %30 : i8
+  %c = scalar.bitcast %34 : i8 to f8E4M3
+  %23 = scalar.extf %e5m2 : f8E5M2 to f32
+  %24 = scalar.sinf<afn> %23 : f32
+  %25 = scalar.fptrunc %24 : f32 to f8E5M2
+  %13 = scalar.constant 0.0 : f8E5M2
+  %14 = scalar.copysignf<afn> %13, %e5m2 : f8E5M2
+  %15 = scalar.constant 127 : i8
+  %16 = scalar.constant 0 : i8
+  %17 = scalar.bitcast %25 : f8E5M2 to i8
+  %18 = scalar.andi %17, %15 : i8
+  %19 = scalar.cmpi eq, %18, %16 : i8
+  %20 = scalar.bitcast %14 : f8E5M2 to i8
+  %21 = scf.select %19, %20, %17 : i8
+  %d = scalar.bitcast %21 : i8 to f8E5M2
+  func.return %a, %b, %c, %d : vector<2xf16>, bf16, f8E4M3, f8E5M2
+}
