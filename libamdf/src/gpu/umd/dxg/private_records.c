@@ -354,6 +354,12 @@ static amdf_dxg_private_result_t amdf_dxg_private_decode_adapter(
       !is_discrete || ((extended_record[0x208] >> 5) & 1u);
   info.user_queue_byte_length =
       amdf_dxg_private_load_u32(extended_record + 0x30E8);
+  const uint32_t native_queue_bits = extended_record[0x35C0];
+  info.native_queue_flags =
+      ((native_queue_bits & (1u << 2)) != 0 ? AMDF_DXG_PRIVATE_NATIVE_QUEUE_AQL
+                                            : 0) |
+      ((native_queue_bits & (1u << 5)) != 0 ? AMDF_DXG_PRIVATE_NATIVE_QUEUE_SDMA
+                                            : 0);
   info.invisible_local_heap_byte_length =
       amdf_dxg_private_load_u64(extended_record + 0xA38);
   memcpy(info.scheduler_ids, extended_record + 0x89C,
@@ -475,7 +481,7 @@ void amdf_dxg_private_initialize_allocation_driver_record(void* record) {
                              AMDF_DXG_PRIVATE_ALLOCATION_RECORD_BYTE_LENGTH);
 }
 
-void amdf_dxg_private_initialize_allocation_record(
+static void amdf_dxg_private_initialize_common_allocation_record(
     const amdf_dxg_private_allocation_info_t* info, void* record) {
   uint8_t* bytes = (uint8_t*)record;
   memset(bytes, 0, AMDF_DXG_PRIVATE_ALLOCATION_RECORD_BYTE_LENGTH);
@@ -487,17 +493,24 @@ void amdf_dxg_private_initialize_allocation_record(
   amdf_dxg_private_store_u64(bytes + 0xA8, info->byte_length);
   amdf_dxg_private_store_u32(bytes + 0xF0, 0xC4);
   amdf_dxg_private_store_u32(bytes + 0x104, 0x114);
+}
+
+void amdf_dxg_private_initialize_wsl_allocation_record(
+    const amdf_dxg_private_allocation_info_t* info,
+    const amdf_dxg_private_adapter_info_t* adapter_info, void* record) {
+  amdf_dxg_private_initialize_common_allocation_record(info, record);
+  uint8_t* bytes = (uint8_t*)record;
 
   if (info->domain == AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_LOCAL) {
     bytes[0x50] = 1;
     bytes[0x60] = 1;
     uint32_t segment_count = 1;
-    if (info->invisible_local_heap_byte_length != 0) {
+    if (adapter_info->invisible_local_heap_byte_length != 0) {
       bytes[0x50] |= 2;
       bytes[0x61] = 2;
       segment_count = 2;
     }
-    if (!info->is_discrete) {
+    if (!adapter_info->is_discrete) {
       bytes[0x50] |= 8;
       bytes[0x60 + segment_count] = 4;
       ++segment_count;
@@ -509,11 +522,78 @@ void amdf_dxg_private_initialize_allocation_record(
   amdf_dxg_private_store_u32(bytes + 0x50, 0x04000008);
   bytes[0x5C] = 1;
   bytes[0x60] = 4;
-  if ((info->gfx_ip_major < 12 &&
+  if ((adapter_info->gfx_ip_major < 12 &&
        (info->flags & AMDF_DXG_PRIVATE_ALLOCATION_FLAG_FINE_GRAIN) != 0) ||
       (info->flags & AMDF_DXG_PRIVATE_ALLOCATION_FLAG_DEVICE_UNCACHED) != 0) {
     amdf_dxg_private_store_u32(bytes + 0x1D0, 4);
   }
+}
+
+void amdf_dxg_private_initialize_wddm_allocation_record(
+    const amdf_dxg_private_allocation_info_t* info,
+    const amdf_dxg_private_adapter_info_t* adapter_info, void* record) {
+  amdf_dxg_private_initialize_common_allocation_record(info, record);
+  uint8_t* bytes = (uint8_t*)record;
+
+  if (info->domain == AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_LOCAL) {
+    if (adapter_info->invisible_local_heap_byte_length != 0) {
+      bytes[0x50] = 7;
+      bytes[0x5C] = 3;
+      bytes[0x60] = 2;
+      bytes[0x61] = 1;
+      bytes[0x62] = 3;
+    } else {
+      bytes[0x50] = 5;
+      bytes[0x5C] = 2;
+      bytes[0x60] = 1;
+      bytes[0x61] = 3;
+    }
+    return;
+  }
+
+  amdf_dxg_private_store_u32(bytes + 0x50, 0x04000008);
+  bytes[0x5C] = 1;
+  bytes[0x60] = 4;
+  if ((info->flags & AMDF_DXG_PRIVATE_ALLOCATION_FLAG_QUEUE_STORAGE) != 0 &&
+      (adapter_info->native_queue_flags & AMDF_DXG_PRIVATE_NATIVE_QUEUE_AQL) !=
+          0) {
+    bytes[0xA6] |= 1;
+    bytes[0xC0] |= 0x10;
+  }
+  if ((adapter_info->gfx_ip_major < 12 &&
+       (info->flags & AMDF_DXG_PRIVATE_ALLOCATION_FLAG_FINE_GRAIN) != 0) ||
+      (info->flags & AMDF_DXG_PRIVATE_ALLOCATION_FLAG_DEVICE_UNCACHED) != 0) {
+    amdf_dxg_private_store_u32(bytes + 0x1D0, 4);
+  }
+  if (info->domain == AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_SYSTEM) {
+    amdf_dxg_private_store_u32(
+        bytes + 0x50, amdf_dxg_private_load_u32(bytes + 0x50) | 0x20002000);
+    bytes[0xA7] |= 1;
+  }
+}
+
+bool amdf_dxg_private_decode_allocation_metadata(
+    const void* record, size_t record_byte_length,
+    amdf_dxg_private_allocation_metadata_t* out_metadata) {
+  if (record_byte_length < 0x1D8) {
+    return false;
+  }
+  const uint8_t* bytes = (const uint8_t*)record;
+  if (amdf_dxg_private_load_u32(bytes + 0x40) <= 0xC4 ||
+      amdf_dxg_private_load_u32(bytes + 0x104) <= 3) {
+    return false;
+  }
+  const uint32_t compression_block_sizes = bytes[0x1B8];
+  const amdf_dxg_private_allocation_metadata_t metadata = {
+      .byte_length = amdf_dxg_private_load_u64(bytes + 0xA8),
+      .swizzle_mode = amdf_dxg_private_load_u32(bytes + 0x10C),
+      .tile_swizzle = amdf_dxg_private_load_u32(bytes + 0x140),
+      .compression_mode = amdf_dxg_private_load_u32(bytes + 0x1D4),
+      .maximum_compressed_block_size = (compression_block_sizes >> 4) & 3u,
+      .maximum_uncompressed_block_size = (compression_block_sizes >> 2) & 3u,
+  };
+  *out_metadata = metadata;
+  return true;
 }
 
 void amdf_dxg_private_initialize_context_record(

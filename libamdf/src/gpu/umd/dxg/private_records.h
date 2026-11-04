@@ -7,6 +7,8 @@
 #ifndef AMDF_SRC_GPU_UMD_DXG_PRIVATE_RECORDS_H_
 #define AMDF_SRC_GPU_UMD_DXG_PRIVATE_RECORDS_H_
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -28,6 +30,7 @@ extern "C" {
 // Fixed private record sizes accepted by the WDDM compute interface.
 #define AMDF_DXG_PRIVATE_ALLOCATION_DRIVER_RECORD_BYTE_LENGTH 0x40u
 #define AMDF_DXG_PRIVATE_ALLOCATION_RECORD_BYTE_LENGTH 0x218u
+#define AMDF_DXG_PRIVATE_PROXY_RESOURCE_RECORD_BYTE_LENGTH 0x40u
 #define AMDF_DXG_PRIVATE_CONTEXT_RECORD_BYTE_LENGTH 0x1A8u
 #define AMDF_DXG_PRIVATE_HARDWARE_QUEUE_RECORD_BYTE_LENGTH 0x40u
 #define AMDF_DXG_PRIVATE_SUBMISSION_RECORD_BYTE_LENGTH 0x48u
@@ -100,6 +103,8 @@ typedef struct amdf_dxg_private_adapter_info_t {
   uint32_t supports_platform_atomics;
   // Native persistent user-queue byte length, or zero when absent.
   uint32_t user_queue_byte_length;
+  // AMDF_DXG_PRIVATE_NATIVE_QUEUE_* capabilities published by the driver.
+  uint32_t native_queue_flags;
   // Device-local heap bytes that are not CPU visible.
   uint64_t invisible_local_heap_byte_length;
   // Scheduler identifier for each D3DKMT node ordinal.
@@ -107,6 +112,14 @@ typedef struct amdf_dxg_private_adapter_info_t {
   // Bit i is set when scheduler_ids[i] uses hardware scheduling.
   uint64_t hardware_scheduling_node_mask;
 } amdf_dxg_private_adapter_info_t;
+
+// Native directly published user-queue capabilities.
+enum amdf_dxg_private_native_queue_flag_bits_e {
+  // Native AQL compute queues are accepted by the kernel driver.
+  AMDF_DXG_PRIVATE_NATIVE_QUEUE_AQL = 1u << 0,
+  // Native HSA SDMA queues are accepted by the kernel driver.
+  AMDF_DXG_PRIVATE_NATIVE_QUEUE_SDMA = 1u << 1,
+};
 
 // Queries and decodes one physical adapter from a linked-adapter chain.
 //
@@ -148,33 +161,63 @@ enum amdf_dxg_private_allocation_flag_bits_e {
   AMDF_DXG_PRIVATE_ALLOCATION_FLAG_FINE_GRAIN = 1u << 0,
   // Requests the uncached device mapping used by kernel arguments.
   AMDF_DXG_PRIVATE_ALLOCATION_FLAG_DEVICE_UNCACHED = 1u << 1,
+  // Marks storage directly published as a user-mode queue.
+  AMDF_DXG_PRIVATE_ALLOCATION_FLAG_QUEUE_STORAGE = 1u << 2,
 };
 
 // Inputs for one fixed per-allocation record.
 typedef struct amdf_dxg_private_allocation_info_t {
   // Physical allocation length in bytes.
   uint64_t byte_length;
-  // Device-local heap bytes that are not CPU visible.
-  uint64_t invisible_local_heap_byte_length;
-  // GFXIP major version used by cache-policy encoding.
-  int32_t gfx_ip_major;
   // One AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_* value.
   amdf_dxg_private_allocation_domain_t domain;
   // AMDF_DXG_PRIVATE_ALLOCATION_FLAG_* bits.
   amdf_dxg_private_allocation_flags_t flags;
-  // Nonzero for a discrete adapter and zero for an integrated adapter.
-  uint32_t is_discrete;
 } amdf_dxg_private_allocation_info_t;
 
 // Initializes the fixed driver-level allocation record.
 void amdf_dxg_private_initialize_allocation_driver_record(void* record);
 
-// Initializes one fixed per-allocation record.
+// Initializes one fixed WSL per-allocation record.
 //
-// |info| must contain a defined domain and flags. |record| must provide
-// AMDF_DXG_PRIVATE_ALLOCATION_RECORD_BYTE_LENGTH writable bytes.
-void amdf_dxg_private_initialize_allocation_record(
-    const amdf_dxg_private_allocation_info_t* info, void* record);
+// |info| must contain a defined domain and flags. |adapter_info| is the
+// immutable result of the adapter query used for the allocation. |record|
+// must provide AMDF_DXG_PRIVATE_ALLOCATION_RECORD_BYTE_LENGTH writable bytes.
+void amdf_dxg_private_initialize_wsl_allocation_record(
+    const amdf_dxg_private_allocation_info_t* info,
+    const amdf_dxg_private_adapter_info_t* adapter_info, void* record);
+
+// Initializes one fixed native-Windows per-allocation record.
+//
+// The Windows and WSL UMD protocols share a record envelope but use distinct
+// segment encodings. Inputs follow the WSL initializer contract above.
+void amdf_dxg_private_initialize_wddm_allocation_record(
+    const amdf_dxg_private_allocation_info_t* info,
+    const amdf_dxg_private_adapter_info_t* adapter_info, void* record);
+
+// Allocation metadata returned by an opened native-Windows resource.
+typedef struct amdf_dxg_private_allocation_metadata_t {
+  // Physical allocation length in bytes.
+  uint64_t byte_length;
+  // Addrlib surface swizzle mode.
+  uint32_t swizzle_mode;
+  // Plane-zero pipe-bank XOR value.
+  uint32_t tile_swizzle;
+  // Distributed compression mode, where zero means uncompressed.
+  uint32_t compression_mode;
+  // Driver encoding of the maximum compressed block size.
+  uint32_t maximum_compressed_block_size;
+  // Driver encoding of the maximum uncompressed block size.
+  uint32_t maximum_uncompressed_block_size;
+} amdf_dxg_private_allocation_metadata_t;
+
+// Decodes returned private allocation metadata.
+//
+// Returns false without publishing |out_metadata| when the supplied response
+// is too short or does not carry a complete surface description.
+bool amdf_dxg_private_decode_allocation_metadata(
+    const void* record, size_t record_byte_length,
+    amdf_dxg_private_allocation_metadata_t* out_metadata);
 
 // Initializes one compute context record.
 void amdf_dxg_private_initialize_context_record(

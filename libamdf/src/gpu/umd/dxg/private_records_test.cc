@@ -81,11 +81,13 @@ MakeCommonAllocationRecord(uint64_t byte_length) {
 TEST(PrivateRecordsTest, AbiLayoutsAreFixed) {
   static_assert(sizeof(amdf_dxg_private_adapter_query_t) == 32);
   static_assert(sizeof(amdf_dxg_private_adapter_info_t) == 120);
-  static_assert(sizeof(amdf_dxg_private_allocation_info_t) == 32);
+  static_assert(sizeof(amdf_dxg_private_allocation_info_t) == 16);
+  static_assert(sizeof(amdf_dxg_private_allocation_metadata_t) == 32);
   EXPECT_EQ(AMDF_DXG_PRIVATE_LINKED_QUERY_SCRATCH_BYTE_LENGTH, 0xF160u);
   EXPECT_EQ(AMDF_DXG_PRIVATE_SINGLE_QUERY_SCRATCH_BYTE_LENGTH, 0x3A00u);
   EXPECT_EQ(AMDF_DXG_PRIVATE_ALLOCATION_DRIVER_RECORD_BYTE_LENGTH, 0x40u);
   EXPECT_EQ(AMDF_DXG_PRIVATE_ALLOCATION_RECORD_BYTE_LENGTH, 0x218u);
+  EXPECT_EQ(AMDF_DXG_PRIVATE_PROXY_RESOURCE_RECORD_BYTE_LENGTH, 0x40u);
   EXPECT_EQ(AMDF_DXG_PRIVATE_CONTEXT_RECORD_BYTE_LENGTH, 0x1A8u);
   EXPECT_EQ(AMDF_DXG_PRIVATE_HARDWARE_QUEUE_RECORD_BYTE_LENGTH, 0x40u);
   EXPECT_EQ(AMDF_DXG_PRIVATE_SUBMISSION_RECORD_BYTE_LENGTH, 0x48u);
@@ -102,7 +104,7 @@ TEST(PrivateRecordsTest, InitializesAllocationDriverRecordExactly) {
   record.ExpectGuardsIntact();
 }
 
-TEST(PrivateRecordsTest, InitializesSystemAndRegisteredRecordsExactly) {
+TEST(PrivateRecordsTest, InitializesWslSystemAndRegisteredRecordsExactly) {
   constexpr uint64_t kByteLength = UINT64_C(0x123456789);
   struct TestCase {
     amdf_dxg_private_allocation_domain_t domain;
@@ -123,13 +125,15 @@ TEST(PrivateRecordsTest, InitializesSystemAndRegisteredRecordsExactly) {
     GuardedRecord<AMDF_DXG_PRIVATE_ALLOCATION_RECORD_BYTE_LENGTH> record;
     const amdf_dxg_private_allocation_info_t info = {
         .byte_length = kByteLength,
-        .invisible_local_heap_byte_length = 0,
-        .gfx_ip_major = test_case.gfx_ip_major,
         .domain = test_case.domain,
         .flags = test_case.flags,
+    };
+    const amdf_dxg_private_adapter_info_t adapter_info = {
+        .gfx_ip_major = test_case.gfx_ip_major,
         .is_discrete = 1,
     };
-    amdf_dxg_private_initialize_allocation_record(&info, record.data());
+    amdf_dxg_private_initialize_wsl_allocation_record(&info, &adapter_info,
+                                                      record.data());
 
     auto expected = MakeCommonAllocationRecord(kByteLength);
     Store32(expected, 0x50, 0x04000008);
@@ -143,7 +147,7 @@ TEST(PrivateRecordsTest, InitializesSystemAndRegisteredRecordsExactly) {
   }
 }
 
-TEST(PrivateRecordsTest, InitializesEveryLocalMemorySegmentShapeExactly) {
+TEST(PrivateRecordsTest, InitializesEveryWslLocalMemorySegmentShapeExactly) {
   constexpr uint64_t kByteLength = UINT64_C(0x123456789);
   struct TestCase {
     uint32_t is_discrete;
@@ -162,13 +166,16 @@ TEST(PrivateRecordsTest, InitializesEveryLocalMemorySegmentShapeExactly) {
     GuardedRecord<AMDF_DXG_PRIVATE_ALLOCATION_RECORD_BYTE_LENGTH> record;
     const amdf_dxg_private_allocation_info_t info = {
         .byte_length = kByteLength,
-        .invisible_local_heap_byte_length = test_case.invisible_byte_length,
-        .gfx_ip_major = 11,
         .domain = AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_LOCAL,
         .flags = 0,
-        .is_discrete = test_case.is_discrete,
     };
-    amdf_dxg_private_initialize_allocation_record(&info, record.data());
+    const amdf_dxg_private_adapter_info_t adapter_info = {
+        .gfx_ip_major = 11,
+        .is_discrete = test_case.is_discrete,
+        .invisible_local_heap_byte_length = test_case.invisible_byte_length,
+    };
+    amdf_dxg_private_initialize_wsl_allocation_record(&info, &adapter_info,
+                                                      record.data());
 
     auto expected = MakeCommonAllocationRecord(kByteLength);
     expected[0x50] = test_case.segment_flags;
@@ -177,6 +184,142 @@ TEST(PrivateRecordsTest, InitializesEveryLocalMemorySegmentShapeExactly) {
                 test_case.segment_types.size());
     EXPECT_EQ(record.payload(), expected);
     record.ExpectGuardsIntact();
+  }
+}
+
+TEST(PrivateRecordsTest, InitializesWddmSystemAndRegisteredRecordsExactly) {
+  constexpr uint64_t kByteLength = UINT64_C(0x123456789);
+  struct TestCase {
+    amdf_dxg_private_allocation_domain_t domain;
+    int32_t gfx_ip_major;
+    amdf_dxg_private_allocation_flags_t flags;
+    uint32_t native_queue_flags;
+    uint32_t expected_segment_flags;
+    uint8_t expected_queue_byte;
+    uint8_t expected_cache_policy;
+  };
+  const TestCase test_cases[] = {
+      {AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_SYSTEM, 11,
+       AMDF_DXG_PRIVATE_ALLOCATION_FLAG_FINE_GRAIN, 0, 0x24002008, 0, 4},
+      {AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_REGISTERED_HOST, 12,
+       AMDF_DXG_PRIVATE_ALLOCATION_FLAG_FINE_GRAIN, 0, 0x04000008, 0, 0},
+      {AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_REGISTERED_HOST, 12,
+       AMDF_DXG_PRIVATE_ALLOCATION_FLAG_DEVICE_UNCACHED |
+           AMDF_DXG_PRIVATE_ALLOCATION_FLAG_QUEUE_STORAGE,
+       AMDF_DXG_PRIVATE_NATIVE_QUEUE_AQL, 0x04000008, 1, 4},
+      {AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_REGISTERED_HOST, 12,
+       AMDF_DXG_PRIVATE_ALLOCATION_FLAG_QUEUE_STORAGE, 0, 0x04000008, 0, 0},
+  };
+  for (const TestCase& test_case : test_cases) {
+    GuardedRecord<AMDF_DXG_PRIVATE_ALLOCATION_RECORD_BYTE_LENGTH> record;
+    const amdf_dxg_private_allocation_info_t info = {
+        .byte_length = kByteLength,
+        .domain = test_case.domain,
+        .flags = test_case.flags,
+    };
+    const amdf_dxg_private_adapter_info_t adapter_info = {
+        .gfx_ip_major = test_case.gfx_ip_major,
+        .native_queue_flags = test_case.native_queue_flags,
+    };
+    amdf_dxg_private_initialize_wddm_allocation_record(&info, &adapter_info,
+                                                       record.data());
+
+    auto expected = MakeCommonAllocationRecord(kByteLength);
+    Store32(expected, 0x50, test_case.expected_segment_flags);
+    expected[0x5C] = 1;
+    expected[0x60] = 4;
+    expected[0xA6] = test_case.expected_queue_byte;
+    if (test_case.domain == AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_SYSTEM) {
+      expected[0xA7] = 1;
+    }
+    if (test_case.expected_queue_byte != 0) {
+      expected[0xC0] = 0x10;
+    }
+    expected[0x1D0] = test_case.expected_cache_policy;
+    EXPECT_EQ(record.payload(), expected);
+    record.ExpectGuardsIntact();
+  }
+}
+
+TEST(PrivateRecordsTest, InitializesEveryWddmLocalMemorySegmentShapeExactly) {
+  constexpr uint64_t kByteLength = UINT64_C(0x123456789);
+  struct TestCase {
+    uint64_t invisible_byte_length;
+    uint8_t segment_flags;
+    uint8_t segment_count;
+    std::array<uint8_t, 3> segment_types;
+  };
+  const TestCase test_cases[] = {
+      {0, 5, 2, {1, 3, 0}},
+      {0x100000, 7, 3, {2, 1, 3}},
+  };
+  for (const TestCase& test_case : test_cases) {
+    GuardedRecord<AMDF_DXG_PRIVATE_ALLOCATION_RECORD_BYTE_LENGTH> record;
+    const amdf_dxg_private_allocation_info_t info = {
+        .byte_length = kByteLength,
+        .domain = AMDF_DXG_PRIVATE_ALLOCATION_DOMAIN_LOCAL,
+        .flags = AMDF_DXG_PRIVATE_ALLOCATION_FLAG_QUEUE_STORAGE,
+    };
+    const amdf_dxg_private_adapter_info_t adapter_info = {
+        .gfx_ip_major = 11,
+        .native_queue_flags = AMDF_DXG_PRIVATE_NATIVE_QUEUE_AQL,
+        .invisible_local_heap_byte_length = test_case.invisible_byte_length,
+    };
+    amdf_dxg_private_initialize_wddm_allocation_record(&info, &adapter_info,
+                                                       record.data());
+
+    auto expected = MakeCommonAllocationRecord(kByteLength);
+    expected[0x50] = test_case.segment_flags;
+    expected[0x5C] = test_case.segment_count;
+    std::memcpy(expected.data() + 0x60, test_case.segment_types.data(),
+                test_case.segment_types.size());
+    EXPECT_EQ(record.payload(), expected);
+    record.ExpectGuardsIntact();
+  }
+}
+
+TEST(PrivateRecordsTest, DecodesReturnedAllocationMetadataExactly) {
+  Record<AMDF_DXG_PRIVATE_ALLOCATION_RECORD_BYTE_LENGTH> record = {};
+  Store32(record, 0x40, 0xC5);
+  Store64(record, 0xA8, UINT64_C(0x123456789ABC));
+  Store32(record, 0x104, 4);
+  Store32(record, 0x10C, 32);
+  Store32(record, 0x140, 0x1234);
+  record[0x1B8] = 0x2C;
+  Store32(record, 0x1D4, 7);
+
+  amdf_dxg_private_allocation_metadata_t metadata = {};
+  ASSERT_TRUE(amdf_dxg_private_decode_allocation_metadata(
+      record.data(), record.size(), &metadata));
+  EXPECT_EQ(metadata.byte_length, UINT64_C(0x123456789ABC));
+  EXPECT_EQ(metadata.swizzle_mode, 32u);
+  EXPECT_EQ(metadata.tile_swizzle, 0x1234u);
+  EXPECT_EQ(metadata.compression_mode, 7u);
+  EXPECT_EQ(metadata.maximum_compressed_block_size, 2u);
+  EXPECT_EQ(metadata.maximum_uncompressed_block_size, 3u);
+}
+
+TEST(PrivateRecordsTest, RejectsIncompleteAllocationMetadataWithoutPublishing) {
+  Record<AMDF_DXG_PRIVATE_ALLOCATION_RECORD_BYTE_LENGTH> record = {};
+  struct TestCase {
+    size_t byte_length;
+    uint32_t surface_size;
+    uint32_t layout_version;
+  };
+  const TestCase test_cases[] = {
+      {0x1D7, 0xC5, 4},
+      {record.size(), 0xC4, 4},
+      {record.size(), 0xC5, 3},
+  };
+  for (const TestCase& test_case : test_cases) {
+    Store32(record, 0x40, test_case.surface_size);
+    Store32(record, 0x104, test_case.layout_version);
+    amdf_dxg_private_allocation_metadata_t metadata;
+    std::memset(&metadata, 0xA5, sizeof(metadata));
+    const auto original = metadata;
+    EXPECT_FALSE(amdf_dxg_private_decode_allocation_metadata(
+        record.data(), test_case.byte_length, &metadata));
+    EXPECT_EQ(std::memcmp(&metadata, &original, sizeof(metadata)), 0);
   }
 }
 
@@ -297,6 +440,7 @@ void FillExtendedRecord(uint8_t* record, const FakePrivateQuery& fake) {
   record[0x89E] = 5;
   record[0x89F] = 7;
   record[0x2E03] = 1;
+  record[0x35C0] = (1u << 2) | (1u << 5);
   Store64(record, 0x35C4, (UINT64_C(1) << 1) | (UINT64_C(1) << 2));
 }
 
@@ -393,6 +537,8 @@ TEST(PrivateRecordsTest, QueriesSelectedPhysicalAdapterExactly) {
   EXPECT_EQ(info.supports_firmware_state_shadowing, 1u);
   EXPECT_EQ(info.supports_platform_atomics, 1u);
   EXPECT_EQ(info.user_queue_byte_length, 0u);
+  EXPECT_EQ(info.native_queue_flags, AMDF_DXG_PRIVATE_NATIVE_QUEUE_AQL |
+                                         AMDF_DXG_PRIVATE_NATIVE_QUEUE_SDMA);
   EXPECT_EQ(info.invisible_local_heap_byte_length, 0x12345000u);
   EXPECT_EQ(info.scheduler_ids[0], 0u);
   EXPECT_EQ(info.scheduler_ids[1], 4u);

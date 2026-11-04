@@ -117,15 +117,11 @@ amdf_dxg_bridge_result_t GpuAllocationCreateImpl(
         static_cast<size_t>(i) * AMDF_DXG_PRIVATE_ALLOCATION_RECORD_BYTE_LENGTH;
     const amdf_dxg_private_allocation_info_t private_info = {
         .byte_length = chunk_byte_length,
-        .invisible_local_heap_byte_length =
-            adapter->private_info.invisible_local_heap_byte_length,
-        .gfx_ip_major = adapter->private_info.gfx_ip_major,
         .domain = ToPrivateAllocationDomain(create_info.domain),
         .flags = ToPrivateAllocationFlags(create_info.flags),
-        .is_discrete = adapter->private_info.is_discrete,
     };
-    amdf_dxg_private_initialize_allocation_record(&private_info,
-                                                  private_record);
+    amdf_dxg_private_initialize_wsl_allocation_record(
+        &private_info, &adapter->private_info, private_record);
 
     D3DDDI_ALLOCATIONINFO2& native_info = native_infos[i];
     if (create_info.host_pointer != nullptr) {

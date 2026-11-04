@@ -83,15 +83,11 @@ class RocdxgAllocationTest : public ::testing::Test {
           expected_record;
       const amdf_dxg_private_allocation_info_t private_info = {
           .byte_length = expected.byte_length,
-          .invisible_local_heap_byte_length =
-              adapter_.private_info.invisible_local_heap_byte_length,
-          .gfx_ip_major = adapter_.private_info.gfx_ip_major,
           .domain = expected.domain,
           .flags = expected.flags,
-          .is_discrete = adapter_.private_info.is_discrete,
       };
-      amdf_dxg_private_initialize_allocation_record(&private_info,
-                                                    expected_record.data());
+      amdf_dxg_private_initialize_wsl_allocation_record(
+          &private_info, &adapter_.private_info, expected_record.data());
       EXPECT_EQ(std::memcmp(native_info.pPrivateDriverData,
                             expected_record.data(), expected_record.size()),
                 0);
