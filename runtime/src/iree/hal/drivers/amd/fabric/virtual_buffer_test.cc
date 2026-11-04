@@ -192,6 +192,7 @@ TEST_F(VirtualBufferContractTest, PartialSourceMapsOnlyItsNativeProjection) {
 }
 
 TEST_F(VirtualBufferContractTest, QueueShaderContractCoversEveryReplacement) {
+  native_families_[0].program_site_kind = AMDF_MEMORY_SITE_KIND_PROGRAM;
   native_families_[0].program_atomics = true;
   native_.program_atomics[0] = {
       .system_scope_32 = AMDF_ATOMIC_OPERATION_LOAD |
@@ -236,6 +237,7 @@ TEST_F(VirtualBufferContractTest, QueueShaderContractCoversEveryReplacement) {
 }
 
 TEST_F(VirtualBufferContractTest, PairGuaranteesFollowTheVirtualShaderRecipe) {
+  native_families_[0].program_site_kind = AMDF_MEMORY_SITE_KIND_PROGRAM;
   native_families_[0].program_atomics = true;
   native_.atomics[0] = {AMDF_ATOMIC_OPERATION_STORE, 0};
   const auto transactions = AMDF_ATOMIC_OPERATION_LOAD |

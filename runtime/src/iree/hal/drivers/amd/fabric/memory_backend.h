@@ -38,6 +38,10 @@ typedef struct iree_hal_amd_fabric_memory_family_t {
   // Usages implemented through a private CPU view, independent of public
   // mappings. These require qualified host/device cache transitions.
   iree_hal_buffer_usage_t host_usage;
+  // Native issuer for executable accesses: DEVICE for program-controlled DMA,
+  // PROGRAM for shader loads/stores. Ignored by non-dispatch families. This
+  // selects visibility recipes independently of atomic operation support.
+  amdf_memory_site_kind_t program_site_kind;
   // Queue atomic operations can use the qualified PROGRAM shader recipes.
   bool program_atomics;
   // Number of entries in |bindings|.

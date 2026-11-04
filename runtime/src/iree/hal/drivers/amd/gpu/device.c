@@ -686,6 +686,7 @@ static void iree_hal_amd_gpu_device_initialize_memory(
       .supported_usage =
           IREE_HAL_BUFFER_USAGE_DISPATCH | IREE_HAL_BUFFER_USAGE_TRANSFER,
       .minimum_access = device->memory.capabilities.minimum_access,
+      .program_site_kind = AMDF_MEMORY_SITE_KIND_PROGRAM,
       .program_atomics = true,
       .binding_count = IREE_ARRAYSIZE(bindings),
       .bindings = bindings,

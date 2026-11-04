@@ -1569,7 +1569,8 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
         supported = false;
         break;
       }
-      transition_sites[requested->family->memory.queue_scope_id] =
+      const uint32_t queue_scope_id = requested->family->memory.queue_scope_id;
+      transition_sites[queue_scope_id] =
           (iree_hal_amd_fabric_memory_transition_site_t){
               .kind = IREE_HAL_AMD_FABRIC_MEMORY_SITE_QUEUE,
               .program_atomics = family->program_atomics,
@@ -1581,12 +1582,24 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
                                           .queue_family_ordinal =
                                               family->queue_family_ordinal}},
           };
-      if (family->program_atomics) {
-        transition_sites[requested->family->memory.queue_scope_id + 1] =
+      if (iree_any_bit_set(
+              iree_hal_queue_family_spec(requested->family)->role_flags,
+              IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH)) {
+        // A HAL program may access backing through DMA instead of shader
+        // instructions. Preserve the native issuer without granting that
+        // issuer's queue atomics to the program.
+        const bool shader =
+            family->program_site_kind == AMDF_MEMORY_SITE_KIND_PROGRAM;
+        const amdf_memory_profile_site_t shader_site = {
+            .kind = AMDF_MEMORY_SITE_KIND_PROGRAM,
+            .value.program.access_ordinal = access_ordinal,
+        };
+        transition_sites[queue_scope_id + 1] =
             (iree_hal_amd_fabric_memory_transition_site_t){
-                .kind = IREE_HAL_AMD_FABRIC_MEMORY_SITE_PROGRAM,
-                .native = {.kind = AMDF_MEMORY_SITE_KIND_PROGRAM,
-                           .value.program.access_ordinal = access_ordinal},
+                .kind = shader ? IREE_HAL_AMD_FABRIC_MEMORY_SITE_PROGRAM
+                               : IREE_HAL_AMD_FABRIC_MEMORY_SITE_QUEUE,
+                .native = shader ? shader_site
+                                 : transition_sites[queue_scope_id].native,
             };
       }
     }
