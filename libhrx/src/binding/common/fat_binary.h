@@ -84,8 +84,9 @@ bool iree_hal_streaming_fat_binary_is_supported(iree_const_byte_span_t data);
 // cannot be cloned and return IREE_STATUS_UNIMPLEMENTED.
 //
 // When |data.data_length| is zero the encoded container length is derived from
-// its headers. The caller owns |*out_data| and must free it with
-// |host_allocator|. On failure the outputs are cleared.
+// its headers. Containers without an encoded length, such as CCOB v1, cannot
+// be cloned from a pointer-only input. The caller owns |*out_data| and must
+// free it with |host_allocator|. On failure the outputs are cleared.
 iree_status_t iree_hal_streaming_fat_binary_clone(
     iree_const_byte_span_t data, iree_allocator_t host_allocator,
     void** out_data, iree_host_size_t* out_data_length);
@@ -121,6 +122,10 @@ iree_status_t iree_hal_streaming_fat_binary_visit_elf_global_objects(
 // input contains matches for several candidates, only matches for the earliest
 // compatible candidate are returned. Incompatible feature-specialized images
 // are skipped.
+//
+// A zero |data.data_length| requires a self-sizing container. CCOB v1 inputs
+// must provide their complete encoded length because that format carries only
+// its decompressed size.
 //
 // On error |out_extract| is left empty (safe to reset).
 // On success the caller owns |out_extract| and must call

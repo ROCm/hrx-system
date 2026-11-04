@@ -90,6 +90,15 @@
 #define HRX_CCOB_METHOD_ZLIB 0
 #define HRX_CCOB_METHOD_ZSTD 1
 
+// Canonical packed CCOB header sizes. These are serialized byte layouts, not
+// native C structures: in particular, v1 places its u64 hash at byte 12 and is
+// therefore 20 bytes rather than the 24 bytes a naturally aligned struct would
+// occupy on most 64-bit ABIs.
+#define HRX_CCOB_COMMON_HEADER_SIZE 8
+#define HRX_CCOB_HEADER_V1_SIZE 20
+#define HRX_CCOB_HEADER_V2_SIZE 24
+#define HRX_CCOB_HEADER_V3_SIZE 32
+
 typedef struct hrx_hip_fat_binary_header_t {
   uint32_t magic;
   uint32_t version;
@@ -104,32 +113,6 @@ typedef struct hrx_bundle_entry_t {
   uint64_t size;
   uint64_t triple_size;
 } hrx_bundle_entry_t;
-
-typedef struct hrx_ccob_header_v1_t {
-  uint8_t magic[4];
-  uint16_t version;
-  uint16_t method;
-  uint32_t uncompressed_size;
-  uint64_t hash;
-} hrx_ccob_header_v1_t;
-
-typedef struct hrx_ccob_header_v2_t {
-  uint8_t magic[4];
-  uint16_t version;
-  uint16_t method;
-  uint32_t file_size;
-  uint32_t uncompressed_size;
-  uint64_t hash;
-} hrx_ccob_header_v2_t;
-
-typedef struct hrx_ccob_header_v3_t {
-  uint8_t magic[4];
-  uint16_t version;
-  uint16_t method;
-  uint64_t file_size;
-  uint64_t uncompressed_size;
-  uint64_t hash;
-} hrx_ccob_header_v3_t;
 
 static iree_status_t hrx_fat_parse_ccob(iree_const_byte_span_t data,
                                         uint16_t* out_version,
@@ -377,11 +360,6 @@ static iree_status_t hrx_fat_measure_unwrapped(
                                             &uncompressed_size, &file_size,
                                             &payload_offset));
     if (file_size > 0) {
-      if (IREE_UNLIKELY(file_size > IREE_HOST_SIZE_MAX ||
-                        file_size < payload_offset)) {
-        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "CCOB file size is invalid");
-      }
       *out_data_length = (iree_host_size_t)file_size;
       return iree_ok_status();
     }
@@ -954,60 +932,47 @@ iree_status_t iree_hal_streaming_fat_binary_visit_elf_global_objects(
   return iree_ok_status();
 }
 
-// Parses a CCOB header and returns details needed to decompress. Handles
-// the three on-disk header flavours (v1: size inferred from buffer, v2:
-// 32-bit sizes, v3+: 64-bit sizes). When |data.data_length| is 0 we skip
-// length checks (see hrx_fat_length_at_least) and report the total on-disk
-// file size via |out_file_size| when the header provides one (v2 and v3 do,
-// v1 does not and returns 0).
+// Parses one of the three canonical packed CCOB headers. When
+// |data.data_length| is 0, format-specific length checks are deferred to the
+// encoded file size carried by v2 and v3. Version 1 has no file-size field and
+// therefore requires a bounded source span for extraction.
 static iree_status_t hrx_fat_parse_ccob(iree_const_byte_span_t data,
                                         uint16_t* out_version,
                                         uint16_t* out_method,
                                         uint64_t* out_uncompressed_size,
                                         uint64_t* out_file_size,
                                         iree_host_size_t* out_payload_offset) {
-  if (out_file_size) {
-    *out_file_size = 0;
-  }
-  if (!hrx_fat_length_at_least(data, sizeof(hrx_ccob_header_v1_t))) {
+  *out_file_size = 0;
+  if (!hrx_fat_length_at_least(data, HRX_CCOB_COMMON_HEADER_SIZE)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "CCOB header truncated");
   }
-  uint16_t version;
-  memcpy(&version, data.data + 4, sizeof(version));
+  const uint16_t version = iree_unaligned_load_le_u16(data.data + 4);
   *out_version = version;
+  *out_method = iree_unaligned_load_le_u16(data.data + 6);
   if (version == 1) {
-    hrx_ccob_header_v1_t h;
-    memcpy(&h, data.data, sizeof(h));
-    *out_method = h.method;
-    *out_uncompressed_size = h.uncompressed_size;
-    *out_payload_offset = sizeof(hrx_ccob_header_v1_t);
+    if (!hrx_fat_length_at_least(data, HRX_CCOB_HEADER_V1_SIZE)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "CCOB v1 header truncated");
+    }
+    *out_uncompressed_size = iree_unaligned_load_le_u32(data.data + 8);
+    *out_payload_offset = HRX_CCOB_HEADER_V1_SIZE;
   } else if (version == 2) {
-    if (!hrx_fat_length_at_least(data, sizeof(hrx_ccob_header_v2_t))) {
+    if (!hrx_fat_length_at_least(data, HRX_CCOB_HEADER_V2_SIZE)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "CCOB v2 header truncated");
     }
-    hrx_ccob_header_v2_t h;
-    memcpy(&h, data.data, sizeof(h));
-    *out_method = h.method;
-    *out_uncompressed_size = h.uncompressed_size;
-    *out_payload_offset = sizeof(hrx_ccob_header_v2_t);
-    if (out_file_size) {
-      *out_file_size = h.file_size;
-    }
-  } else if (version >= 3) {
-    if (!hrx_fat_length_at_least(data, sizeof(hrx_ccob_header_v3_t))) {
+    *out_file_size = iree_unaligned_load_le_u32(data.data + 8);
+    *out_uncompressed_size = iree_unaligned_load_le_u32(data.data + 12);
+    *out_payload_offset = HRX_CCOB_HEADER_V2_SIZE;
+  } else if (version == 3) {
+    if (!hrx_fat_length_at_least(data, HRX_CCOB_HEADER_V3_SIZE)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "CCOB v3+ header truncated");
+                              "CCOB v3 header truncated");
     }
-    hrx_ccob_header_v3_t h;
-    memcpy(&h, data.data, sizeof(h));
-    *out_method = h.method;
-    *out_uncompressed_size = h.uncompressed_size;
-    *out_payload_offset = sizeof(hrx_ccob_header_v3_t);
-    if (out_file_size) {
-      *out_file_size = h.file_size;
-    }
+    *out_file_size = iree_unaligned_load_le_u64(data.data + 8);
+    *out_uncompressed_size = iree_unaligned_load_le_u64(data.data + 16);
+    *out_payload_offset = HRX_CCOB_HEADER_V3_SIZE;
   } else {
     return iree_make_status(IREE_STATUS_INCOMPATIBLE,
                             "unsupported CCOB version %u", version);
@@ -1016,6 +981,24 @@ static iree_status_t hrx_fat_parse_ccob(iree_const_byte_span_t data,
       *out_method != HRX_CCOB_METHOD_ZSTD) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unknown CCOB compression method %u", *out_method);
+  }
+  if (*out_uncompressed_size > IREE_HOST_SIZE_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "CCOB uncompressed size exceeds host size");
+  }
+  if (version >= 2) {
+    if (*out_file_size < *out_payload_offset) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "CCOB file size is smaller than its header");
+    }
+    if (*out_file_size > IREE_HOST_SIZE_MAX) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "CCOB file size exceeds host size");
+    }
+    if (data.data_length != 0 && *out_file_size > data.data_length) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "CCOB file size exceeds the input span");
+    }
   }
   return iree_ok_status();
 }
@@ -1477,11 +1460,14 @@ static iree_status_t hrx_fat_extract_from_ccob(
   IREE_RETURN_IF_ERROR(hrx_fat_parse_ccob(ccob, &version, &method,
                                           &uncompressed_size, &file_size,
                                           &payload_offset));
-  // If the caller passed an unbounded span (e.g. __hipRegisterFatBinary
-  // hands us a raw pointer with no ABI length), use the file_size reported
-  // by the CCOB header so we can safely bound the compressed payload.
-  if (ccob.data_length == 0 && file_size > 0) {
+  // V2 and v3 carry their complete encoded extent. Use it for both bounded and
+  // pointer-only inputs so trailing bytes cannot become part of the compressed
+  // frame. V1 relies on its caller-provided source extent.
+  if (file_size > 0) {
     ccob = iree_make_const_byte_span(ccob.data, (iree_host_size_t)file_size);
+  } else if (ccob.data_length == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "CCOB v1 requires a bounded input span");
   }
   if (method == HRX_CCOB_METHOD_ZLIB) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
@@ -1498,10 +1484,6 @@ static iree_status_t hrx_fat_extract_from_ccob(
                           "binding (uncompressed size %" PRIu64 ")",
                           version, uncompressed_size);
 #else
-  if (payload_offset > ccob.data_length) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "CCOB payload offset beyond data end");
-  }
   iree_const_byte_span_t payload = iree_make_const_byte_span(
       ccob.data + payload_offset, ccob.data_length - payload_offset);
 

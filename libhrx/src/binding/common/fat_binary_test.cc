@@ -5,7 +5,11 @@
 
 #include <stdint.h>
 #include <string.h>
+#if defined(IREE_HAVE_ZSTD)
+#include <zstd.h>
+#endif
 
+#include <algorithm>
 #include <string>
 #include <utility>
 #include <vector>
@@ -287,6 +291,77 @@ std::vector<uint8_t> MakeBundle(
   return bundle;
 }
 
+constexpr uint16_t kCcobMethodZlib = 0;
+constexpr uint16_t kCcobMethodZstd = 1;
+
+size_t CcobHeaderSize(uint16_t version) {
+  switch (version) {
+    case 1:
+      return 20;
+    case 2:
+      return 24;
+    case 3:
+      return 32;
+    default:
+      return 0;
+  }
+}
+
+#if defined(IREE_HAVE_ZSTD)
+std::vector<uint8_t> CompressZstd(const std::vector<uint8_t>& data) {
+  std::vector<uint8_t> compressed(ZSTD_compressBound(data.size()));
+  const size_t compressed_size =
+      ZSTD_compress(compressed.data(), compressed.size(), data.data(),
+                    data.size(), /*compressionLevel=*/3);
+  if (ZSTD_isError(compressed_size)) {
+    ADD_FAILURE() << ZSTD_getErrorName(compressed_size);
+    return {};
+  }
+  compressed.resize(compressed_size);
+  return compressed;
+}
+#endif
+
+std::vector<uint8_t> MakeCcob(uint16_t version, uint16_t method,
+                              uint64_t uncompressed_size,
+                              const std::vector<uint8_t>& encoded_payload) {
+  const size_t header_size = CcobHeaderSize(version);
+  if (header_size == 0) {
+    ADD_FAILURE() << "unsupported fixture version " << version;
+    return {};
+  }
+  std::vector<uint8_t> ccob(header_size + encoded_payload.size(), 0);
+  memcpy(ccob.data(), "CCOB", 4);
+  iree_unaligned_store_le_u16(ccob.data() + 4, version);
+  iree_unaligned_store_le_u16(ccob.data() + 6, method);
+  if (version == 1) {
+    iree_unaligned_store_le_u32(ccob.data() + 8,
+                                static_cast<uint32_t>(uncompressed_size));
+    iree_unaligned_store_le_u64(ccob.data() + 12, UINT64_C(0x123456789abcdef0));
+  } else if (version == 2) {
+    iree_unaligned_store_le_u32(ccob.data() + 8,
+                                static_cast<uint32_t>(ccob.size()));
+    iree_unaligned_store_le_u32(ccob.data() + 12,
+                                static_cast<uint32_t>(uncompressed_size));
+    iree_unaligned_store_le_u64(ccob.data() + 16, UINT64_C(0x123456789abcdef0));
+  } else {
+    iree_unaligned_store_le_u64(ccob.data() + 8, ccob.size());
+    iree_unaligned_store_le_u64(ccob.data() + 16, uncompressed_size);
+    iree_unaligned_store_le_u64(ccob.data() + 24, UINT64_C(0x123456789abcdef0));
+  }
+  memcpy(ccob.data() + header_size, encoded_payload.data(),
+         encoded_payload.size());
+  return ccob;
+}
+
+#if defined(IREE_HAVE_ZSTD)
+std::vector<uint8_t> MakeZstdCcob(uint16_t version,
+                                  const std::vector<uint8_t>& payload) {
+  return MakeCcob(version, kCcobMethodZstd, payload.size(),
+                  CompressZstd(payload));
+}
+#endif
+
 std::string TripleString(const iree_hal_streaming_fat_binary_elf_t& match) {
   return std::string(match.triple.data, match.triple.size);
 }
@@ -337,6 +412,199 @@ TEST(FatBinaryTest, IdentifiesEverySupportedContainerSignature) {
         iree_make_const_byte_span(format_case.data, /*data_length=*/0)));
   }
 }
+
+#if defined(IREE_HAVE_ZSTD)
+TEST(FatBinaryTest, ExtractsEveryCanonicalCcobVersion) {
+  const auto elf = MakeMinimalAmdgpuElf(/*machine=*/0x041);
+  const std::vector<uint8_t> bundle =
+      MakeBundle({{"hipv4-amdgcn-amd-amdhsa--gfx1100", elf}});
+  const iree_hal_executable_target_t executable_target = MakeExecutableTarget(
+      IREE_SV("gfx1100"), IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT, 100);
+  const iree_hal_streaming_fat_binary_target_t target = {
+      .executable_target = &executable_target,
+  };
+
+  for (uint16_t version : {1, 2, 3}) {
+    SCOPED_TRACE(version);
+    const std::vector<uint8_t> ccob = MakeZstdCcob(version, bundle);
+    iree_hal_streaming_fat_binary_extract_t extract = {};
+    IREE_ASSERT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
+        iree_make_const_byte_span(ccob.data(), ccob.size()), 1, &target,
+        iree_allocator_system(), &extract));
+    ASSERT_NE(extract.owned_buffer, nullptr);
+    EXPECT_EQ(extract.owned_buffer_size, bundle.size());
+    ASSERT_EQ(extract.match_count, 1);
+    EXPECT_EQ(TripleString(extract.matches[0]),
+              "hipv4-amdgcn-amd-amdhsa--gfx1100");
+    EXPECT_EQ(extract.matches[0].executable_target, &executable_target);
+    EXPECT_STREQ(extract.matches[0].code_object_target_key, "gfx1100");
+    iree_hal_streaming_fat_binary_extract_reset(&extract);
+  }
+}
+
+TEST(FatBinaryTest, ExtractsConcatenatedElvesFromCcob) {
+  const auto elf = MakeMinimalAmdgpuElf(/*machine=*/0x041);
+  std::vector<uint8_t> concatenated = elf;
+  concatenated.insert(concatenated.end(), elf.begin(), elf.end());
+  const std::vector<uint8_t> ccob = MakeZstdCcob(/*version=*/3, concatenated);
+  const iree_hal_executable_target_t executable_target = MakeExecutableTarget(
+      IREE_SV("gfx1100"), IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT, 100);
+  const iree_hal_streaming_fat_binary_target_t target = {
+      .executable_target = &executable_target,
+  };
+  iree_hal_streaming_fat_binary_extract_t extract = {};
+  IREE_ASSERT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
+      iree_make_const_byte_span(ccob.data(), ccob.size()), 1, &target,
+      iree_allocator_system(), &extract));
+  ASSERT_EQ(extract.match_count, 2);
+  EXPECT_EQ(extract.matches[0].data.data, extract.owned_buffer);
+  EXPECT_EQ(extract.matches[1].data.data,
+            static_cast<uint8_t*>(extract.owned_buffer) + elf.size());
+  iree_hal_streaming_fat_binary_extract_reset(&extract);
+}
+
+TEST(FatBinaryTest, MeasuresPointerOnlyCcobVersionsWithEncodedFileSize) {
+  const auto elf = MakeMinimalAmdgpuElf(/*machine=*/0x041);
+  const std::vector<uint8_t> bundle =
+      MakeBundle({{"hipv4-amdgcn-amd-amdhsa--gfx1100", elf}});
+  const iree_hal_executable_target_t executable_target = MakeExecutableTarget(
+      IREE_SV("gfx1100"), IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT, 100);
+  const iree_hal_streaming_fat_binary_target_t target = {
+      .executable_target = &executable_target,
+  };
+
+  for (uint16_t version : {2, 3}) {
+    SCOPED_TRACE(version);
+    const std::vector<uint8_t> ccob = MakeZstdCcob(version, bundle);
+    iree_hal_streaming_fat_binary_extract_t extract = {};
+    IREE_ASSERT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
+        iree_make_const_byte_span(ccob.data(), /*data_length=*/0), 1, &target,
+        iree_allocator_system(), &extract));
+    ASSERT_EQ(extract.match_count, 1);
+    iree_hal_streaming_fat_binary_extract_reset(&extract);
+
+    void* clone = nullptr;
+    iree_host_size_t clone_length = 0;
+    IREE_ASSERT_OK(iree_hal_streaming_fat_binary_clone(
+        iree_make_const_byte_span(ccob.data(), /*data_length=*/0),
+        iree_allocator_system(), &clone, &clone_length));
+    EXPECT_EQ(clone_length, ccob.size());
+    EXPECT_EQ(memcmp(clone, ccob.data(), ccob.size()), 0);
+    iree_allocator_free(iree_allocator_system(), clone);
+  }
+}
+#endif
+
+TEST(FatBinaryTest, RejectsMalformedCcobHeaders) {
+  const auto elf = MakeMinimalAmdgpuElf(/*machine=*/0x041);
+  const iree_hal_executable_target_t executable_target = MakeExecutableTarget(
+      IREE_SV("gfx1100"), IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT, 100);
+  const iree_hal_streaming_fat_binary_target_t target = {
+      .executable_target = &executable_target,
+  };
+  auto extract_status = [&](const std::vector<uint8_t>& ccob,
+                            size_t data_length) {
+    iree_hal_streaming_fat_binary_extract_t extract = {};
+    iree::Status status(iree_hal_streaming_fat_binary_extract_for_targets(
+        iree_make_const_byte_span(ccob.data(), data_length), 1, &target,
+        iree_allocator_system(), &extract));
+    iree_hal_streaming_fat_binary_extract_reset(&extract);
+    return status;
+  };
+
+  for (uint16_t version : {1, 2, 3}) {
+    SCOPED_TRACE(version);
+    std::vector<uint8_t> ccob =
+        MakeCcob(version, kCcobMethodZstd, elf.size(), {0x01});
+    ccob.resize(CcobHeaderSize(version) - 1);
+    EXPECT_THAT(extract_status(ccob, ccob.size()),
+                StatusIs(iree::StatusCode::kInvalidArgument));
+  }
+  for (uint16_t version : {0, 4}) {
+    SCOPED_TRACE(version);
+    std::vector<uint8_t> ccob(8, 0);
+    memcpy(ccob.data(), "CCOB", 4);
+    iree_unaligned_store_le_u16(ccob.data() + 4, version);
+    iree_unaligned_store_le_u16(ccob.data() + 6, kCcobMethodZstd);
+    EXPECT_THAT(extract_status(ccob, ccob.size()),
+                StatusIs(iree::StatusCode::kIncompatible));
+  }
+
+  std::vector<uint8_t> v1 =
+      MakeCcob(/*version=*/1, kCcobMethodZstd, elf.size(), {0x01});
+  EXPECT_THAT(extract_status(v1, /*data_length=*/0),
+              StatusIs(iree::StatusCode::kInvalidArgument));
+
+  std::vector<uint8_t> unknown_method =
+      MakeCcob(/*version=*/3, kCcobMethodZstd, elf.size(), {0x01});
+  iree_unaligned_store_le_u16(unknown_method.data() + 6, 7);
+  EXPECT_THAT(extract_status(unknown_method, unknown_method.size()),
+              StatusIs(iree::StatusCode::kInvalidArgument));
+
+  for (uint16_t version : {2, 3}) {
+    SCOPED_TRACE(version);
+    std::vector<uint8_t> ccob =
+        MakeCcob(version, kCcobMethodZstd, elf.size(), {0x01});
+    if (version == 2) {
+      iree_unaligned_store_le_u32(ccob.data() + 8, CcobHeaderSize(version) - 1);
+    } else {
+      iree_unaligned_store_le_u64(ccob.data() + 8, CcobHeaderSize(version) - 1);
+    }
+    EXPECT_THAT(extract_status(ccob, ccob.size()),
+                StatusIs(iree::StatusCode::kInvalidArgument));
+
+    if (version == 2) {
+      iree_unaligned_store_le_u32(ccob.data() + 8, ccob.size() + 1);
+    } else {
+      iree_unaligned_store_le_u64(ccob.data() + 8, ccob.size() + 1);
+    }
+    EXPECT_THAT(extract_status(ccob, ccob.size()),
+                StatusIs(iree::StatusCode::kInvalidArgument));
+  }
+
+  const std::vector<uint8_t> zlib =
+      MakeCcob(/*version=*/3, kCcobMethodZlib, elf.size(), {0x01});
+  EXPECT_THAT(extract_status(zlib, zlib.size()),
+              StatusIs(iree::StatusCode::kUnimplemented));
+}
+
+#if defined(IREE_HAVE_ZSTD)
+TEST(FatBinaryTest, BoundsAndValidatesCcobPayload) {
+  const auto elf = MakeMinimalAmdgpuElf(/*machine=*/0x041);
+  const iree_hal_executable_target_t executable_target = MakeExecutableTarget(
+      IREE_SV("gfx1100"), IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT, 100);
+  const iree_hal_streaming_fat_binary_target_t target = {
+      .executable_target = &executable_target,
+  };
+  auto extract_status = [&](const std::vector<uint8_t>& ccob) {
+    iree_hal_streaming_fat_binary_extract_t extract = {};
+    iree::Status status(iree_hal_streaming_fat_binary_extract_for_targets(
+        iree_make_const_byte_span(ccob.data(), ccob.size()), 1, &target,
+        iree_allocator_system(), &extract));
+    iree_hal_streaming_fat_binary_extract_reset(&extract);
+    return status;
+  };
+
+  std::vector<uint8_t> with_trailing_bytes = MakeZstdCcob(/*version=*/3, elf);
+  with_trailing_bytes.insert(with_trailing_bytes.end(), 16, 0xA5);
+  EXPECT_TRUE(extract_status(with_trailing_bytes).ok());
+
+  std::vector<uint8_t> corrupt = MakeZstdCcob(/*version=*/3, elf);
+  corrupt[CcobHeaderSize(/*version=*/3)] ^= 0xFF;
+  EXPECT_THAT(extract_status(corrupt), StatusIs(iree::StatusCode::kDataLoss));
+
+  std::vector<uint8_t> wrong_size = MakeZstdCcob(/*version=*/3, elf);
+  iree_unaligned_store_le_u64(wrong_size.data() + 16, elf.size() + 1);
+  EXPECT_THAT(extract_status(wrong_size),
+              StatusIs(iree::StatusCode::kDataLoss));
+
+  const std::vector<uint8_t> invalid_payload = {1, 2, 3, 4};
+  const std::vector<uint8_t> invalid =
+      MakeZstdCcob(/*version=*/3, invalid_payload);
+  EXPECT_THAT(extract_status(invalid),
+              StatusIs(iree::StatusCode::kInvalidArgument));
+}
+#endif
 
 TEST(FatBinaryTest, BoundsLongBundleSignatureAfterFormatDiscriminator) {
   constexpr char kBundleMagic[] = "__CLANG_OFFLOAD_BUNDLE__";
