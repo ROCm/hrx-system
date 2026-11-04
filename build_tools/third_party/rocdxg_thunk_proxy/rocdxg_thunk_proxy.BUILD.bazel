@@ -21,7 +21,7 @@ cc_import(
 )
 
 cc_library(
-    name = "thunk_proxy",
+    name = "headers",
     hdrs = glob(["shared/include/**/*.h"]),
     includes = ["."],
     target_compatible_with = [
@@ -30,8 +30,17 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":archive",
         "@directx_headers//:wsl_stubs",
         "@libdxg_headers//:headers",
     ],
+)
+
+cc_library(
+    name = "thunk_proxy",
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [":archive"],
 )

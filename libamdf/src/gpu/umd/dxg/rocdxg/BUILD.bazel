@@ -1,0 +1,73 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//libamdf/build_tools/bazel:cc_test.bzl", "amdf_cc_test")
+load("//libamdf/build_tools/bazel:linux_sidecar.bzl", "amdf_linux_sidecar_library")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+amdf_linux_sidecar_library(
+    name = "amdf_rocdxg_bridge",
+    srcs = [
+        "bridge.cc",
+        "dxcore_loader_compatibility.cc",
+        "gfxip_compatibility.cc",
+    ],
+    exports_file = "exports.map",
+    linkopts = ["-ldl"],
+    deps = [
+        "//libamdf/src/gpu/umd/dxg:bridge_allocator",
+        "//libamdf/src/gpu/umd/dxg:bridge_api",
+        "//third_party:amdf_rocdxg_headers",
+        "//third_party:amdf_rocdxg_thunk_proxy",
+    ],
+)
+
+amdf_cc_test(
+    name = "library_test",
+    srcs = ["library_test.cc"],
+    data = [":amdf_rocdxg_bridge"],
+    env = {
+        "AMDF_ROCDXG_BRIDGE_TEST_PATH": "$(location :amdf_rocdxg_bridge)",
+    },
+    linkopts = ["-ldl"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        "//libamdf/src:allocator",
+        "//libamdf/src/gpu/umd/dxg:bridge_api",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "adapter_system_test",
+    srcs = ["adapter_system_test.cc"],
+    copts = ["-Wno-unknown-pragmas"],
+    data = [":amdf_rocdxg_bridge"],
+    env = {
+        "AMDF_ROCDXG_BRIDGE_TEST_PATH": "$(location :amdf_rocdxg_bridge)",
+    },
+    linkopts = ["-ldl"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        "//libamdf/src:allocator",
+        "//libamdf/src/gpu/umd/dxg:bridge_api",
+        "//third_party:amdf_rocdxg_headers",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)

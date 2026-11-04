@@ -19,6 +19,13 @@ amdf_cc_library(
     visibility = ["//libamdf/src/gpu/umd:__subpackages__"],
 )
 
+amdf_cc_library(
+    name = "bridge_allocator",
+    hdrs = ["bridge_allocator.h"],
+    visibility = ["//libamdf/src/gpu/umd:__subpackages__"],
+    deps = [":bridge_api"],
+)
+
 amdf_cc_test(
     name = "thunk_proxy_headers_test",
     srcs = ["thunk_proxy_headers_test.cc"],
@@ -28,7 +35,7 @@ amdf_cc_test(
         "@platforms//os:linux",
     ],
     deps = [
-        "//third_party:amdf_rocdxg_thunk_proxy",
+        "//third_party:amdf_rocdxg_headers",
         "//third_party:google_test",
         "//third_party:google_test_main",
     ],

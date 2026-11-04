@@ -37,7 +37,6 @@ amdf_windows_sidecar_library(
         "allocation.cc",
         "allocation.h",
         "bridge.cc",
-        "bridge_allocator.h",
         "dxcore_loader_compatibility.cc",
         "kernel_queue.cc",
         "kernel_queue.h",
@@ -46,6 +45,7 @@ amdf_windows_sidecar_library(
     ],
     linkopts = ["gdi32.lib"],
     deps = [
+        "//libamdf/src/gpu/umd/dxg:bridge_allocator",
         "//libamdf/src/gpu/umd/dxg:bridge_api",
         "//third_party:amdf_wkmi",
     ],
@@ -92,9 +92,9 @@ amdf_windows_sidecar_test(
         "allocation.cc",
         "allocation.h",
         "allocation_test.cc",
-        "bridge_allocator.h",
     ],
     deps = [
+        "//libamdf/src/gpu/umd/dxg:bridge_allocator",
         "//libamdf/src/gpu/umd/dxg:bridge_api",
         "//third_party:amdf_wkmi",
     ],
@@ -105,12 +105,12 @@ amdf_windows_sidecar_test(
     srcs = [
         "adapter_state.cc",
         "adapter_state.h",
-        "bridge_allocator.h",
         "kernel_queue.cc",
         "kernel_queue.h",
         "kernel_queue_test.cc",
     ],
     deps = [
+        "//libamdf/src/gpu/umd/dxg:bridge_allocator",
         "//libamdf/src/gpu/umd/dxg:bridge_api",
         "//third_party:amdf_wkmi",
     ],

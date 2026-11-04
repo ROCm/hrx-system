@@ -24,8 +24,8 @@
 #include <d3dkmthk.h>
 #include <ntstatus.h>
 
+#include "libamdf/src/gpu/umd/dxg/bridge_allocator.h"
 #include "libamdf/src/gpu/umd/wddm/wkmi/adapter_state.h"
-#include "libamdf/src/gpu/umd/wddm/wkmi/bridge_allocator.h"
 #include "wkmi.h"
 
 struct amdf_dxg_bridge_gpu_kernel_queue_t {
@@ -38,10 +38,14 @@ struct amdf_dxg_bridge_gpu_kernel_queue_t {
   // Separately owned monitored fence for SWS; HWS owns its fence implicitly.
   D3DKMT_HANDLE progress_fence = 0;
   // Fixed WKMI record reused by externally serialized submissions.
-  amdf::wkmi_bridge::HostBuffer submission_private_data;
+  amdf::dxg_bridge::HostBuffer submission_private_data;
 };
 
 namespace amdf::wkmi_bridge {
+
+using amdf::dxg_bridge::DestroyHostObject;
+using amdf::dxg_bridge::HostBuffer;
+using amdf::dxg_bridge::HostObject;
 namespace {
 
 constexpr uint32_t kCommandBufferAlignment = 4;

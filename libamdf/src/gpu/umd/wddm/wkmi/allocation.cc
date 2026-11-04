@@ -24,11 +24,13 @@
 #include <d3dkmthk.h>
 #include <ntstatus.h>
 
+#include "libamdf/src/gpu/umd/dxg/bridge_allocator.h"
 #include "libamdf/src/gpu/umd/wddm/wkmi/adapter_state.h"
-#include "libamdf/src/gpu/umd/wddm/wkmi/bridge_allocator.h"
 #include "wkmi.h"
 
 namespace amdf::wkmi_bridge {
+
+using amdf::dxg_bridge::HostBuffer;
 namespace {
 
 constexpr uint64_t kGpuPageSize = 4ull * 1024;

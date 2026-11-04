@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "libamdf/src/gpu/umd/dxg/bridge_allocator.h"
 #include "libamdf/src/gpu/umd/dxg/bridge_api.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -22,7 +23,6 @@
 
 #include "libamdf/src/gpu/umd/wddm/wkmi/adapter_state.h"
 #include "libamdf/src/gpu/umd/wddm/wkmi/allocation.h"
-#include "libamdf/src/gpu/umd/wddm/wkmi/bridge_allocator.h"
 #include "libamdf/src/gpu/umd/wddm/wkmi/kernel_queue.h"
 #include "libamdf/src/gpu/umd/wddm/wkmi/shared_buffer.h"
 #include "wkmi.h"
@@ -76,7 +76,7 @@ amdf_dxg_bridge_result_t GpuAdapterOpenImpl(
     amdf_dxg_bridge_gpu_adapter_t** out_adapter,
     amdf_dxg_bridge_gpu_properties_t* out_properties,
     uint32_t* out_native_status) {
-  amdf::wkmi_bridge::HostObject<amdf_dxg_bridge_gpu_adapter_t> adapter(
+  amdf::dxg_bridge::HostObject<amdf_dxg_bridge_gpu_adapter_t> adapter(
       host_allocator);
   if (!adapter.Allocate()) {
     return AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED;
@@ -133,7 +133,7 @@ GpuAdapterClose(amdf_dxg_bridge_gpu_adapter_t* adapter,
     return result;
   }
   const amdf_allocator_t host_allocator = adapter->host_allocator;
-  amdf::wkmi_bridge::DestroyHostObject(host_allocator, adapter);
+  amdf::dxg_bridge::DestroyHostObject(host_allocator, adapter);
   return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
 }
 

@@ -10,10 +10,12 @@
 #include <dxgi1_4.h>
 #include <wrl/client.h>
 
+#include "libamdf/src/gpu/umd/dxg/bridge_allocator.h"
 #include "libamdf/src/gpu/umd/wddm/wkmi/adapter_state.h"
-#include "libamdf/src/gpu/umd/wddm/wkmi/bridge_allocator.h"
 
 namespace amdf::wkmi_bridge {
+
+using amdf::dxg_bridge::HostBuffer;
 namespace {
 
 amdf_status_t HresultStatus(HRESULT result) {

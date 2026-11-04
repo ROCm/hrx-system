@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef AMDF_SRC_GPU_UMD_WDDM_WKMI_BRIDGE_ALLOCATOR_H_
-#define AMDF_SRC_GPU_UMD_WDDM_WKMI_BRIDGE_ALLOCATOR_H_
+#ifndef AMDF_SRC_GPU_UMD_DXG_BRIDGE_ALLOCATOR_H_
+#define AMDF_SRC_GPU_UMD_DXG_BRIDGE_ALLOCATOR_H_
 
 #include <cstddef>
 #include <cstdint>
@@ -14,7 +14,7 @@
 
 #include "libamdf/src/gpu/umd/dxg/bridge_api.h"
 
-namespace amdf::wkmi_bridge {
+namespace amdf::dxg_bridge {
 
 // Allocates and zeroes bridge-controlled storage through the parent instance.
 inline void* AllocateHostBytes(amdf_allocator_t allocator, size_t byte_length,
@@ -145,6 +145,6 @@ void DestroyHostObject(amdf_allocator_t allocator, T* object) noexcept {
   FreeHostBytes(allocator, object);
 }
 
-}  // namespace amdf::wkmi_bridge
+}  // namespace amdf::dxg_bridge
 
-#endif  // AMDF_SRC_GPU_UMD_WDDM_WKMI_BRIDGE_ALLOCATOR_H_
+#endif  // AMDF_SRC_GPU_UMD_DXG_BRIDGE_ALLOCATOR_H_
