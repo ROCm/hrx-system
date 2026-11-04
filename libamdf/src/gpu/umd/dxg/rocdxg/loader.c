@@ -128,11 +128,12 @@ amdf_status_t amdf_gpu_dxg_rocdxg_loader_query_api(
   return AMDF_STATUS_OK;
 }
 
-amdf_status_t amdf_gpu_dxg_rocdxg_loader_deinitialize(
+void amdf_gpu_dxg_rocdxg_loader_deinitialize(
     amdf_gpu_dxg_rocdxg_loader_t* loader) {
   if (dlclose(loader->module) != 0) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
+    // A loader produced this exact owned handle and all bridge objects are
+    // already gone. ELF exposes no recoverable close failure in this state.
+    amdf_abort();
   }
   *loader = (amdf_gpu_dxg_rocdxg_loader_t){0};
-  return AMDF_STATUS_OK;
 }

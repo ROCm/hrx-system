@@ -57,7 +57,7 @@ TEST_F(RocdxgLoaderTest, LoadsQueriesAndUnloadsBridge) {
   ASSERT_NE(api, nullptr);
   EXPECT_EQ(api->abi_version, AMDF_DXG_BRIDGE_ABI_VERSION_13);
 
-  EXPECT_EQ(amdf_gpu_dxg_rocdxg_loader_deinitialize(&loader), AMDF_STATUS_OK);
+  amdf_gpu_dxg_rocdxg_loader_deinitialize(&loader);
   EXPECT_EQ(loader.module, nullptr);
   EXPECT_FALSE(ModuleIsMapped(bridge_path_.c_str()));
 }
@@ -94,7 +94,7 @@ TEST_F(RocdxgLoaderTest, LoadsBridgeBesideOwningModule) {
   const amdf_dxg_bridge_api_t* api = nullptr;
   ASSERT_EQ(amdf_gpu_dxg_rocdxg_loader_query_api(&loader, &api),
             AMDF_STATUS_OK);
-  EXPECT_EQ(amdf_gpu_dxg_rocdxg_loader_deinitialize(&loader), AMDF_STATUS_OK);
+  amdf_gpu_dxg_rocdxg_loader_deinitialize(&loader);
 }
 
 }  // namespace

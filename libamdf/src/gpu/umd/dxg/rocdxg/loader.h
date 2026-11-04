@@ -30,8 +30,8 @@ amdf_status_t amdf_gpu_dxg_rocdxg_loader_query_api(
     const amdf_gpu_dxg_rocdxg_loader_t* loader,
     const amdf_dxg_bridge_api_t** out_api);
 
-// Unloads the bridge after all calls through its API table have returned.
-amdf_status_t amdf_gpu_dxg_rocdxg_loader_deinitialize(
+// Consumes the loader after all calls through its API table have returned.
+void amdf_gpu_dxg_rocdxg_loader_deinitialize(
     amdf_gpu_dxg_rocdxg_loader_t* loader);
 
 #ifdef __cplusplus
