@@ -770,10 +770,10 @@ def test_validate_c_table_shape_rejects_oversized_source_memory_fields() -> None
 
 def test_validate_c_table_shape_rejects_oversized_emit_count_fields() -> None:
     for field_name, subject, bit_count in (
-        ("operand_ref_count", "operand-ref count", 3),
-        ("result_ref_count", "result-ref count", 2),
+        ("operand_ref_count", "operand-ref count", 4),
+        ("result_ref_count", "result-ref count", 3),
         ("attr_copy_count", "attr-copy count", 5),
-        ("tied_result_count", "tied-result count", 2),
+        ("tied_result_count", "tied-result count", 3),
         ("accumulator_operand_index", "accumulator operand index", 2),
     ):
         field_value = 1 << bit_count
@@ -795,6 +795,44 @@ def test_validate_c_table_shape_rejects_oversized_emit_count_fields() -> None:
             ),
             f"lower-rule set 'test.low.generated_c_shape' emit 0 {subject} exceeds {bit_count}-bit unsigned storage: {field_value}",
         )
+
+
+def test_lower_rules_preserve_wide_operand_and_result_bindings() -> None:
+    for operand_count, result_count in ((2, 1), (8, 4), (15, 7)):
+        descriptor = replace(
+            TEST_LOW_ADD_I32_DESCRIPTOR,
+            key=f"test.wide_bindings.{operand_count}.{result_count}",
+            operands=(
+                *(replace(TEST_LOW_ADD_I32_DESCRIPTOR.operands[0], field_name=f"result{index}") for index in range(result_count)),
+                *(replace(TEST_LOW_ADD_I32_DESCRIPTOR.operands[1], field_name=f"input{index}") for index in range(operand_count)),
+            ),
+        )
+        contract = ContractFragment(
+            name="test.low.wide_bindings",
+            descriptor_set=replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,)),
+            public_header=_TEST_PUBLIC_HEADER,
+            cases=(
+                DescriptorRule(
+                    source_op=scalar_arithmetic.scalar_addi,
+                    descriptor=descriptor,
+                    emit=(
+                        EmitDescriptorOp(
+                            descriptor=descriptor,
+                            operands={f"input{index}": ValueRef.operand("lhs" if index % 2 == 0 else "rhs") for index in range(operand_count)},
+                            results={f"result{index}": ValueRef.result("result") if index == 0 else ValueRef.temporary(f"state{index}") for index in range(result_count)},
+                            result_types={f"result{index}": Scalar("i32") for index in range(result_count)},
+                        ),
+                    ),
+                ),
+            ),
+        )
+        table = compile_lower_rule_set(contract, dialect_ops={"scalar": ALL_SCALAR_OPS})
+        generated = generate_lower_rule_set_from_compiled(contract, compiled=table)
+        emit = table.emits[0]
+        assert emit.operand_ref_count == operand_count
+        assert emit.result_ref_count == result_count
+        assert f".operand_ref_count = {operand_count}," in generated.source
+        assert f".result_ref_count = {result_count}," in generated.source
 
 
 def test_validate_c_table_shape_checks_deferred_resource_storage() -> None:
@@ -1069,6 +1107,28 @@ def test_emit_row_overlays_register_slice_payload() -> None:
 
     assert ".payload.structural.offset = 2" in row
     assert ".payload.structural.unit_count = 1" in row
+
+
+def test_emit_row_preserves_concat_temporary_width() -> None:
+    row = emit_row(
+        LowerEmit(
+            kind=LowerEmitKind.REGISTER_CONCAT,
+            structural_unit_count=8,
+        ),
+    )
+
+    assert ".payload.structural.unit_count = 8" in row
+
+
+def test_validate_c_table_shape_rejects_concat_offset() -> None:
+    table = _compiled_lower_rule_set(
+        emits=(LowerEmit(kind=LowerEmitKind.REGISTER_CONCAT, structural_offset=1),),
+    )
+
+    _expect_value_error(
+        lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
+        "lower-rule set 'test.low.generated_c_shape' emit 0 only register-slice emits can carry a structural offset",
+    )
 
 
 def test_validate_c_table_shape_rejects_span_rule_range_mismatch() -> None:

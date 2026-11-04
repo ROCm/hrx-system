@@ -1224,8 +1224,10 @@ def _validate_c_table_shape(
         if is_structural_emit:
             if row.attr_copy_start != 0 or row.attr_copy_count != 0 or row.tied_result_start != 0 or row.tied_result_count != 0:
                 raise ValueError(f"{row_subject} structural emit cannot carry descriptor table ranges")
-            if row.kind not in (LowerEmitKind.REGISTER_SLICE, LowerEmitKind.REGISTER_SLICE_CLASS) and (row.structural_offset != 0 or row.structural_unit_count != 0):
-                raise ValueError(f"{row_subject} only register-slice emits can carry a structural payload")
+            if row.kind not in (LowerEmitKind.REGISTER_SLICE, LowerEmitKind.REGISTER_SLICE_CLASS) and row.structural_offset != 0:
+                raise ValueError(f"{row_subject} only register-slice emits can carry a structural offset")
+            if row.kind not in (LowerEmitKind.REGISTER_SLICE, LowerEmitKind.REGISTER_SLICE_CLASS, LowerEmitKind.REGISTER_CONCAT) and row.structural_unit_count != 0:
+                raise ValueError(f"{row_subject} only register-slice and register-concat emits can carry a structural unit count")
         elif row.structural_offset != 0 or row.structural_unit_count != 0:
             raise ValueError(f"{row_subject} descriptor emit cannot carry a structural payload")
         _require_u8(row.flags, f"{row_subject} flags")
@@ -1236,7 +1238,7 @@ def _validate_c_table_shape(
         _require_u16(row.operand_ref_start, f"{row_subject} operand-ref start")
         _require_unsigned_bits(
             row.operand_ref_count,
-            3,
+            4,
             f"{row_subject} operand-ref count",
         )
         _require_table_range(
@@ -1269,7 +1271,7 @@ def _validate_c_table_shape(
         )
         _require_unsigned_bits(
             row.result_ref_count,
-            2,
+            3,
             f"{row_subject} result-ref count",
         )
         if row.flags & LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN and row.flags & LOWER_EMIT_FLAG_RESULT_DESCRIPTOR_TYPE:
@@ -1326,7 +1328,7 @@ def _validate_c_table_shape(
         _require_u16(row.tied_result_start, f"{row_subject} tied-result start")
         _require_unsigned_bits(
             row.tied_result_count,
-            2,
+            3,
             f"{row_subject} tied-result count",
         )
         _require_table_range(

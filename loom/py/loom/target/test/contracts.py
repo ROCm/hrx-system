@@ -723,6 +723,11 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
                         ValueRef.operand("elements", element=0),
                         ValueRef.operand("elements", element=1),
                     ),
+                    result=ValueRef.temporary("pair"),
+                    unit_count=2,
+                ),
+                EmitRegisterMove(
+                    source=ValueRef.temporary("pair"),
                     result=ValueRef.result("result"),
                 ),
             ),

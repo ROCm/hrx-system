@@ -1845,6 +1845,7 @@ class _LowerRuleSetCompiler:
                 emit.result_type,
                 temporary_ordinals,
                 temporary_definition_slots,
+                structural_unit_count=emit.unit_count or 0,
             )
             return
         if isinstance(emit, EmitRegisterCopy):

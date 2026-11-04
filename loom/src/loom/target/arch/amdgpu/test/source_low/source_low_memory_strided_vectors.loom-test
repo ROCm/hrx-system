@@ -144,10 +144,9 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %16 = v_mov_b32 0
   %17 = global_load_b128_saddr %16, %input_view
   %18 = global_load_b64_saddr %16, %input_view {offset = 16}
-  %value = concat(%17, %18) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x6>
-  %35 = slice %value[0] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr x2>
-  %34 = slice %value[2] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr x2>
-  ds_write2_b64 %16, %35, %34 {offset1 = 3}
+  %37 = slice %17[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %35 = slice %17[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  ds_write2_b64 %16, %37, %35 {offset1 = 3}
   ds_write_b64 %16, %18 {offset = 48}
   %27 = ds_read2_b64 %16 {offset1 = 3}
   %29 = ds_read_b64 %16 {offset = 48}

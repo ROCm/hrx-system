@@ -52,15 +52,12 @@ typedef struct loom_low_lower_resolved_emit_t {
   // Program-position descriptor resolved during planning.
   loom_low_lower_resolved_descriptor_t descriptor;
   // Source access semantics for this memory packet; zero for address setup.
-  loom_memory_access_flags_t access_flags;
-  // Result carriers resolved from source values, type patterns, descriptors,
-  // and rule-local transfers. Elided recipes have no result payload.
-  uint8_t result_type_mask;
+  uint32_t access_flags : 2;
   // Operand ordinals with retained materializer recipes in the row payload.
-  uint8_t materializer_mask;
+  uint32_t materializer_mask : LOOM_LOW_LOWER_EMIT_MAX_OPERANDS;
   // Fact-derived source references retained in the row payload.
   // Bits address operand refs; set bits have packed value IDs.
-  uint8_t source_value_mask;
+  uint32_t source_value_mask : LOOM_LOW_LOWER_EMIT_MAX_OPERANDS;
   // Byte offset from this row to materializer recipes, attributes, optional
   // read-only attribute IDs, copied operand type IDs, canonical result type
   // IDs, optional lane plan, fact-derived source values, and an optional
@@ -75,10 +72,17 @@ static_assert(sizeof(loom_low_lower_resolved_emit_t) == 2 * sizeof(void*) + 8,
 
 // Aligns the following attributes even on hosts with smaller pointers.
 static inline uint32_t loom_low_lower_rule_materializer_data_size(
-    uint8_t mask) {
+    uint16_t mask) {
   return (uint32_t)iree_host_align(
       iree_math_count_ones_u32(mask) * sizeof(void*),
       iree_alignof(loom_named_attr_t));
+}
+
+// Executable recipes retain every result carrier in ordinal order. Elided
+// recipes have no payload, even when the shared emit describes results.
+static inline uint16_t loom_low_lower_resolved_emit_result_count(
+    const loom_low_lower_resolved_emit_t* resolved) {
+  return resolved->data_offset ? resolved->emit->result_ref_count : 0;
 }
 
 // Returns the packed opaque recipes for prepared operand materializers.
@@ -179,9 +183,7 @@ static inline loom_type_id_t loom_low_lower_resolved_emit_result_type_id(
     const loom_low_lower_resolved_emit_t* resolved, uint16_t result_ordinal) {
   const loom_type_id_t* result_types =
       loom_low_lower_resolved_emit_result_types(resolved);
-  const uint32_t preceding_mask = (UINT32_C(1) << result_ordinal) - 1u;
-  return result_types[iree_math_count_ones_u32(resolved->result_type_mask &
-                                               preceding_mask)];
+  return result_types[result_ordinal];
 }
 
 // Returns the lane recipe of a descriptor lane row.
@@ -191,8 +193,8 @@ loom_low_lower_resolved_emit_lane_plan(
   return (
       const loom_low_lower_lane_plan_t*)(loom_low_lower_resolved_emit_result_types(
                                              resolved) +
-                                         iree_math_count_ones_u32(
-                                             resolved->result_type_mask));
+                                         loom_low_lower_resolved_emit_result_count(
+                                             resolved));
 }
 
 // Returns the canonical packet carrier, distinct from an aggregate binding.
@@ -209,7 +211,7 @@ static inline const loom_value_id_t* loom_low_lower_resolved_emit_source_values(
     const loom_low_lower_resolved_emit_t* resolved) {
   const uint8_t* lane_payload =
       (const uint8_t*)(loom_low_lower_resolved_emit_result_types(resolved) +
-                       iree_math_count_ones_u32(resolved->result_type_mask));
+                       loom_low_lower_resolved_emit_result_count(resolved));
   return (const loom_value_id_t*)(lane_payload +
                                   loom_low_lower_rule_lane_plan_size(
                                       resolved->emit));

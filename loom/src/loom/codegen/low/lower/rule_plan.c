@@ -1057,9 +1057,9 @@ static bool loom_low_lower_rule_value_ref_needs_facts(
 
 typedef struct loom_low_lower_rule_operand_masks_t {
   // Operand ordinals whose source identities require fact projection.
-  uint8_t source_values;
+  uint16_t source_values;
   // Operand ordinals with a source-dependent materializer recipe.
-  uint8_t materializers;
+  uint16_t materializers;
 } loom_low_lower_rule_operand_masks_t;
 
 static loom_low_lower_rule_operand_masks_t loom_low_lower_rule_operand_masks(
@@ -1070,14 +1070,14 @@ static loom_low_lower_rule_operand_masks_t loom_low_lower_rule_operand_masks(
     const loom_low_lower_value_ref_t* ref =
         &rule_set->value_refs[emit->operand_ref_start + i];
     if (loom_low_lower_rule_value_ref_needs_facts(ref)) {
-      masks.source_values |= (uint8_t)(1u << i);
+      masks.source_values |= (uint16_t)(1u << i);
     }
     if (ref->kind ==
             LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET ||
         ref->kind == LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_BYTE_OFFSET ||
         (ref->materializer_index &&
          loom_low_lower_rule_value_materializer(rule_set, ref)->prepare)) {
-      masks.materializers |= (uint8_t)(1u << i);
+      masks.materializers |= (uint16_t)(1u << i);
     }
   }
   return masks;
@@ -1101,11 +1101,6 @@ static bool loom_low_lower_rule_try_register_type_with_unit_count(
   }
   *out_type = loom_low_register_carrier_type_with_unit_count(type, unit_count);
   return true;
-}
-
-static uint8_t loom_low_lower_rule_emit_result_type_mask(
-    const loom_low_lower_emit_t* emit) {
-  return (uint8_t)((1u << emit->result_ref_count) - 1u);
 }
 
 static loom_scalar_type_t loom_low_lower_rule_type_pattern_element(
@@ -1195,9 +1190,10 @@ static iree_status_t loom_low_lower_rule_plan_carriers(
     loom_type_id_t* temporary_types, loom_type_id_t* copy_type_ids,
     loom_type_id_t* result_type_ids, loom_low_lower_lane_plan_t* lanes) {
   const loom_low_lower_emit_t* emit = resolved->emit;
-  const bool explicit_slice =
+  const bool explicit_structural_width =
       (emit->kind == LOOM_LOW_LOWER_EMIT_REGISTER_SLICE ||
-       emit->kind == LOOM_LOW_LOWER_EMIT_REGISTER_SLICE_CLASS) &&
+       emit->kind == LOOM_LOW_LOWER_EMIT_REGISTER_SLICE_CLASS ||
+       emit->kind == LOOM_LOW_LOWER_EMIT_REGISTER_CONCAT) &&
       emit->payload.structural.unit_count != 0;
   const bool explicit_register_class_slice =
       emit->kind == LOOM_LOW_LOWER_EMIT_REGISTER_SLICE_CLASS;
@@ -1216,8 +1212,12 @@ static iree_status_t loom_low_lower_rule_plan_carriers(
     lane_operand_types = (loom_type_id_t*)(lanes + 1);
     lane_result_types = lane_operand_types + emit->operand_ref_count;
   }
-  loom_type_t operand_types[7];
-  const bool needs_all_operands = explicit_slice || lanes != NULL;
+  loom_type_t operand_types[LOOM_LOW_LOWER_EMIT_MAX_OPERANDS];
+  if (explicit_structural_width) {
+    operand_types[0] = loom_low_lower_rule_plan_operand_type(
+        context, rule_set, source, resolved, 0, temporary_types);
+  }
+  const bool needs_all_operands = lanes != NULL;
   if (needs_all_operands || emit->copy_operand_mask) {
     uint16_t copy_index = 0;
     for (uint16_t i = 0; i < emit->operand_ref_count; ++i) {
@@ -1287,12 +1287,8 @@ static iree_status_t loom_low_lower_rule_plan_carriers(
                        operand_types[emit->accumulator_operand_index]),
                    seed_first_lane ? lanes->lane_count : 1);
   }
-  loom_type_t result_types[3];
-  uint16_t remaining_mask = resolved->result_type_mask;
-  while (remaining_mask != 0) {
-    const uint16_t ordinal =
-        (uint16_t)iree_math_count_trailing_zeros_u32(remaining_mask);
-    remaining_mask &= (uint16_t)(remaining_mask - 1u);
+  loom_type_t result_types[LOOM_LOW_LOWER_EMIT_MAX_RESULTS];
+  for (uint16_t ordinal = 0; ordinal < emit->result_ref_count; ++ordinal) {
     loom_type_t result_type = loom_type_none();
     if (explicit_register_class_slice) {
       const loom_type_t source_type = operand_types[0];
@@ -1315,7 +1311,7 @@ static iree_status_t loom_low_lower_rule_plan_carriers(
             context->descriptor_set, emit->result_type.register_class_id,
             result_unit_count, &result_type));
       }
-    } else if (explicit_slice) {
+    } else if (explicit_structural_width) {
       if (!loom_low_lower_rule_try_register_type_with_unit_count(
               operand_types[0], emit->payload.structural.unit_count,
               &result_type)) {
@@ -1374,12 +1370,7 @@ static iree_status_t loom_low_lower_rule_plan_carriers(
   // Packet-width inputs may be broadcast across a wider result. Resolve every
   // aggregate carrier before binding any result so all bindings share the final
   // repetition count, including descriptors with several results.
-  remaining_mask = resolved->result_type_mask;
-  uint16_t result_index = 0;
-  while (remaining_mask != 0) {
-    const uint16_t ordinal =
-        (uint16_t)iree_math_count_trailing_zeros_u32(remaining_mask);
-    remaining_mask &= (uint16_t)(remaining_mask - 1u);
+  for (uint16_t ordinal = 0; ordinal < emit->result_ref_count; ++ordinal) {
     const loom_type_t result_type = result_types[ordinal];
     const uint16_t bind_ref_index =
         loom_low_lower_rule_emit_result_bind_ref_index(emit, ordinal);
@@ -1435,7 +1426,7 @@ static iree_status_t loom_low_lower_rule_plan_carriers(
     loom_type_id_t type_id;
     IREE_RETURN_IF_ERROR(
         loom_module_intern_type_id(context->module, bound_type, &type_id));
-    result_type_ids[result_index++] = type_id;
+    result_type_ids[ordinal] = type_id;
     if (bind_ref->kind == LOOM_LOW_LOWER_VALUE_REF_TEMPORARY) {
       temporary_types[bind_ref->index] = type_id;
     } else {
@@ -1466,7 +1457,7 @@ loom_low_lower_rule_emit_address_materializer(
 
 static uint32_t loom_low_lower_rule_emit_data_size(
     const loom_low_lower_rule_set_t* rule_set,
-    const loom_low_lower_emit_t* emit, uint8_t result_type_mask,
+    const loom_low_lower_emit_t* emit,
     loom_low_lower_rule_operand_masks_t operand_masks) {
   return (uint32_t)iree_host_align(
       loom_low_lower_rule_materializer_data_size(operand_masks.materializers) +
@@ -1474,7 +1465,7 @@ static uint32_t loom_low_lower_rule_emit_data_size(
           loom_low_lower_rule_read_only_attributes_size(emit) +
           iree_math_count_ones_u32(emit->copy_operand_mask) *
               sizeof(loom_type_id_t) +
-          iree_math_count_ones_u32(result_type_mask) * sizeof(loom_type_id_t) +
+          emit->result_ref_count * sizeof(loom_type_id_t) +
           loom_low_lower_rule_lane_plan_size(emit) +
           iree_math_count_ones_u32(operand_masks.source_values) *
               sizeof(loom_value_id_t) +
@@ -1544,11 +1535,11 @@ iree_status_t loom_low_lower_rule_plan_finalize(
         (void**)&temporary_types));
   }
   // Table counts bound a rule to 65535 emits with at most 31 attributes and
-  // three result carriers, seven copied carriers, and seven source references
-  // each, plus seven optional materializer recipe pointers. Read-only
-  // attributes add at most 32 u32 words and lane plans add at most 12 u32
-  // words per row. The allocation and row-relative offsets fit in
-  // u32. Payload alignment permits the next row to carry named attributes.
+  // seven result carriers, fifteen copied carriers, and fifteen source
+  // references each, plus fifteen optional materializer recipe pointers.
+  // Read-only attributes add at most 32 u32 words and lane plans add at most 24
+  // u32 words per row. The allocation and row-relative offsets fit in u32.
+  // Payload alignment permits the next row to carry named attributes.
   const uint32_t rows_size = (uint32_t)iree_host_align(
       rule->emit_count * sizeof(loom_low_lower_resolved_emit_t),
       iree_alignof(loom_named_attr_t));
@@ -1558,8 +1549,7 @@ iree_status_t loom_low_lower_rule_plan_finalize(
         rule_set, (uint16_t)(rule->action.emit_start + i));
     if (!elided) {
       allocation_size += loom_low_lower_rule_emit_data_size(
-          rule_set, emit, loom_low_lower_rule_emit_result_type_mask(emit),
-          loom_low_lower_rule_operand_masks(rule_set, emit));
+          rule_set, emit, loom_low_lower_rule_operand_masks(rule_set, emit));
     }
   }
   loom_low_lower_resolved_emit_t* resolved_emits = NULL;
@@ -1598,14 +1588,12 @@ iree_status_t loom_low_lower_rule_plan_finalize(
     if (elided) {
       continue;
     }
-    resolved->result_type_mask =
-        loom_low_lower_rule_emit_result_type_mask(emit);
     const loom_low_lower_rule_operand_masks_t operand_masks =
         loom_low_lower_rule_operand_masks(rule_set, emit);
     resolved->source_value_mask = operand_masks.source_values;
     resolved->materializer_mask = operand_masks.materializers;
-    const uint32_t data_size = loom_low_lower_rule_emit_data_size(
-        rule_set, emit, resolved->result_type_mask, operand_masks);
+    const uint32_t data_size =
+        loom_low_lower_rule_emit_data_size(rule_set, emit, operand_masks);
     if (data_size != 0) {
       resolved->data_offset = (uint32_t)(data - (uint8_t*)resolved);
     }
@@ -1631,9 +1619,7 @@ iree_status_t loom_low_lower_rule_plan_finalize(
                           loom_low_lower_rule_read_only_attributes_size(emit));
     loom_type_id_t* result_types =
         copy_types + iree_math_count_ones_u32(emit->copy_operand_mask);
-    uint8_t* lane_payload =
-        (uint8_t*)(result_types +
-                   iree_math_count_ones_u32(resolved->result_type_mask));
+    uint8_t* lane_payload = (uint8_t*)(result_types + emit->result_ref_count);
     const uint32_t lane_plan_size = loom_low_lower_rule_lane_plan_size(emit);
     loom_low_lower_lane_plan_t* lanes =
         lane_plan_size ? (loom_low_lower_lane_plan_t*)lane_payload : NULL;

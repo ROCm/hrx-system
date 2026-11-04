@@ -786,7 +786,7 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_per_lane(
 
   const uint32_t lane_count =
       loom_low_lower_resolved_emit_lane_plan(resolved_emit)->lane_count;
-  loom_type_t lane_result_types[3];
+  loom_type_t lane_result_types[LOOM_LOW_LOWER_EMIT_MAX_RESULTS];
   for (uint16_t i = 0; i < emit->result_ref_count; ++i) {
     lane_result_types[i] = loom_type_table_get(
         &context->module->types,

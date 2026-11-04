@@ -54,16 +54,15 @@ low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 0, direct_
   %39 = v_mul_lo_u32 %lane, %38
   %40 = global_load_dwordx4_saddr %39, %source_view {offset = 32} : reg<amdgpu.vgpr x4>
   %41 = global_load_dwordx4_saddr %39, %source_view {offset = 48} : reg<amdgpu.vgpr x4>
-  %multiplier_lanes = concat(%40, %41) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
   %43 = v_mov_b32_copy %accumulator
-  %44 = slice %multiplier_lanes[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x2>
-  %45 = v_pk_fma_f32.broadcast_a_c %multiplicand, %44, %43
-  %46 = slice %multiplier_lanes[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x2>
-  %47 = v_pk_fma_f32.broadcast_a_c %multiplicand, %46, %43
-  %48 = slice %multiplier_lanes[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x2>
-  %49 = v_pk_fma_f32.broadcast_a_c %multiplicand, %48, %43
-  %50 = slice %multiplier_lanes[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x2>
-  %51 = v_pk_fma_f32.broadcast_a_c %multiplicand, %50, %43
+  %61 = slice %40[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %45 = v_pk_fma_f32.broadcast_a_c %multiplicand, %61, %43
+  %60 = slice %40[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %47 = v_pk_fma_f32.broadcast_a_c %multiplicand, %60, %43
+  %59 = slice %41[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %49 = v_pk_fma_f32.broadcast_a_c %multiplicand, %59, %43
+  %58 = slice %41[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %51 = v_pk_fma_f32.broadcast_a_c %multiplicand, %58, %43
   %57 = concat(%45, %47) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
   %54 = v_lshlrev_b32_src0_inline %lane, 5
   global_store_dwordx4_saddr %54, %57, %output_view

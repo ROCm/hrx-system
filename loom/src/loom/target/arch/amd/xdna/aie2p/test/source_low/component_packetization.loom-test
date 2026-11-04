@@ -245,9 +245,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @shaped_c
   %44 = vshuffle %37, %39, %43
   %45 = mova.i32 53
   %46 = vshuffle %37, %39, %45
-  %transposed = concat(%44, %46) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
-  %94 = slice %transposed[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256>
-  vst.128.bf16x8 %94, %output_aligned, 0
+  %96 = slice %44[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  vst.128.bf16x8 %96, %output_aligned, 0
   %52 = mova.i32 16
   %53 = vshift %44, %46, %52
   %54 = slice %53[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
@@ -266,10 +265,10 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @shaped_c
   %69 = mov.static-byte-offset 768
   %70 = mov.address-index %69
   vst.128.bf16x8.index %68, %output_aligned, %70
-  %93 = slice %transposed[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256>
+  %94 = slice %46[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
   %73 = mov.static-byte-offset 1024
   %74 = mov.address-index %73
-  vst.128.bf16x8.index %93, %output_aligned, %74
+  vst.128.bf16x8.index %94, %output_aligned, %74
   %77 = vshift %46, %46, %52
   %78 = slice %77[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
   %79 = mov.static-byte-offset 1280

@@ -275,6 +275,7 @@ class EmitRegisterConcat:
 
     sources: tuple[ValueRef, ...]
     result: ValueRef
+    unit_count: int | None = None
     result_type: ResultTypeBinding | None = None
 
     def __init__(
@@ -282,13 +283,25 @@ class EmitRegisterConcat:
         *,
         sources: Sequence[ValueRef],
         result: ValueRef,
+        unit_count: int | None = None,
         result_type: ResultTypeBinding | None = None,
     ) -> None:
         object.__setattr__(self, "sources", tuple(sources))
         object.__setattr__(self, "result", result)
+        object.__setattr__(self, "unit_count", unit_count)
         object.__setattr__(self, "result_type", result_type)
         if not sources:
             raise ValueError("register concat needs at least one source")
+        if unit_count is not None and (unit_count <= 0 or unit_count > 0xFFFF):
+            raise ValueError("register concat unit count must be in [1, 65535]")
+        if unit_count is not None and result_type is not None:
+            raise ValueError(
+                "register concat cannot specify both unit count and result type"
+            )
+        if unit_count is not None and result.kind is not SourceValueKind.TEMPORARY:
+            raise ValueError(
+                "register concat unit count is only valid for temporary results"
+            )
 
     def validate(
         self,
@@ -313,6 +326,7 @@ class EmitRegisterConcat:
             self.result_type,
             "register concat result",
             defined_temporaries,
+            has_derived_type=self.unit_count is not None,
             source_ops=source_ops,
         )
 
@@ -543,11 +557,6 @@ class EmitDescriptorOp:
                     raise ValueError(
                         f"{source_op.name}: descriptor result type "
                         f"'{descriptor_field}' cannot bind a source-memory value"
-                    )
-                if binding.kind == SourceValueKind.TEMPORARY:
-                    raise ValueError(
-                        f"{source_op.name}: descriptor result type "
-                        f"'{descriptor_field}' cannot bind a temporary"
                     )
                 _validate_value_ref(
                     source_op,

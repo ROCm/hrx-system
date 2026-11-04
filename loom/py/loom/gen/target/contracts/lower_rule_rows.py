@@ -1093,13 +1093,13 @@ def emit_row(row: LowerEmit) -> list[str]:
             row.structural_offset,
             always=True,
         )
-        if row.structural_unit_count:
-            _append_field(
-                fields,
-                "payload.structural.unit_count",
-                row.structural_unit_count,
-                always=True,
-            )
+    if row.structural_unit_count:
+        _append_field(
+            fields,
+            "payload.structural.unit_count",
+            row.structural_unit_count,
+            always=True,
+        )
     return fields
 
 
