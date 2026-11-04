@@ -1969,36 +1969,41 @@ static iree_status_t iree_tokenizer_encode_state_pump(
       // contract). Truncate the view to exclude any incomplete trailing
       // sequence so the normalizer always receives valid boundaries.
       // Also respect normalize_limit from special token matching.
-      iree_host_size_t max_consume =
-          iree_min(iree_min(chunk->size, write_space), normalize_limit);
+      iree_host_size_t input_limit = iree_min(chunk->size, normalize_limit);
+      iree_host_size_t max_consume = iree_min(input_limit, write_space);
       iree_host_size_t incomplete_tail =
           iree_unicode_utf8_incomplete_tail_length(chunk->data, max_consume);
       max_consume -= incomplete_tail;
-      if (max_consume == 0) {
-        // Entire consumable region is an incomplete sequence. No progress
-        // until more input arrives to complete the codepoint.
+      if (max_consume == 0 && input_limit <= write_space) {
+        // The caller has not supplied a complete codepoint. More ring space
+        // cannot help until another input chunk arrives.
         return iree_ok_status();
       }
-      iree_string_view_t safe_chunk =
-          iree_make_string_view(chunk->data, max_consume);
-      iree_mutable_string_view_t norm_output = {
-          .data = (char*)state->transform_buffer.data + physical_write,
-          .size = write_space,
-      };
-      iree_tokenizer_normalizer_flags_t flags =
-          IREE_TOKENIZER_NORMALIZER_FLAG_NONE;
+      // A complete codepoint may instead be clipped by ring credit. Leave it
+      // unconsumed and let the ordinary growth path restore that credit.
+      if (max_consume > 0) {
+        iree_string_view_t safe_chunk =
+            iree_make_string_view(chunk->data, max_consume);
+        iree_mutable_string_view_t norm_output = {
+            .data = (char*)state->transform_buffer.data + physical_write,
+            .size = write_space,
+        };
+        iree_tokenizer_normalizer_flags_t flags =
+            IREE_TOKENIZER_NORMALIZER_FLAG_NONE;
 
-      // Signal to prepend normalizer that position 0 was consumed by a special
-      // token, so prepend_scheme="first" should skip prepending for this text.
-      if (state->first_consumed_by_special_token) {
-        flags |= IREE_TOKENIZER_NORMALIZER_FLAG_FIRST_CONSUMED;
-        // Clear after passing: only the first normalization gets this flag.
-        state->first_consumed_by_special_token = false;
+        // Signal to prepend normalizer that position 0 was consumed by a
+        // special token, so prepend_scheme="first" should skip prepending for
+        // this text.
+        if (state->first_consumed_by_special_token) {
+          flags |= IREE_TOKENIZER_NORMALIZER_FLAG_FIRST_CONSUMED;
+          // Clear after passing: only the first normalization gets this flag.
+          state->first_consumed_by_special_token = false;
+        }
+
+        IREE_RETURN_IF_ERROR(iree_tokenizer_normalizer_state_process(
+            state->normalizer_state, safe_chunk, norm_output, flags,
+            &bytes_consumed, &bytes_written));
       }
-
-      IREE_RETURN_IF_ERROR(iree_tokenizer_normalizer_state_process(
-          state->normalizer_state, safe_chunk, norm_output, flags,
-          &bytes_consumed, &bytes_written));
     } else {
       // Passthrough: copy raw bytes directly to the ring buffer. Partial
       // UTF-8 sequences at the end are fine here - the ring accumulates bytes
