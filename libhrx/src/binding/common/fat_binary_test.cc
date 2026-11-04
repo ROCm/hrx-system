@@ -304,6 +304,58 @@ iree_hal_executable_target_t MakeExecutableTarget(
   };
 }
 
+TEST(FatBinaryTest, IdentifiesEverySupportedContainerSignature) {
+  constexpr uint8_t kElfMagic[] = {0x7f, 'E', 'L', 'F'};
+  constexpr char kBundleMagic[] = "__CLANG_OFFLOAD_BUNDLE__";
+  static_assert(sizeof(kBundleMagic) - 1 == 24, "bundle magic length changed");
+  constexpr char kCcobMagic[] = "CCOB";
+  const HipFatBinaryHeader wrappers[] = {
+      {.magic = 0x48495046u},
+      {.magic = 0xBA55FACEu},
+      {.magic = 0x4b504948u},
+  };
+
+  struct FormatCase {
+    const char* name;
+    const void* data;
+    size_t data_length;
+  };
+  const FormatCase format_cases[] = {
+      {"ELF", kElfMagic, sizeof(kElfMagic)},
+      {"uncompressed bundle", kBundleMagic, sizeof(kBundleMagic) - 1},
+      {"CCOB", kCcobMagic, sizeof(kCcobMagic) - 1},
+      {"HIPF wrapper", &wrappers[0], sizeof(wrappers[0])},
+      {"BA55FACE wrapper", &wrappers[1], sizeof(wrappers[1])},
+      {"HIPK wrapper", &wrappers[2], sizeof(wrappers[2])},
+  };
+
+  for (const FormatCase& format_case : format_cases) {
+    SCOPED_TRACE(format_case.name);
+    EXPECT_TRUE(iree_hal_streaming_fat_binary_is_supported(
+        iree_make_const_byte_span(format_case.data, format_case.data_length)));
+    EXPECT_TRUE(iree_hal_streaming_fat_binary_is_supported(
+        iree_make_const_byte_span(format_case.data, /*data_length=*/0)));
+  }
+}
+
+TEST(FatBinaryTest, BoundsLongBundleSignatureAfterFormatDiscriminator) {
+  constexpr char kBundleMagic[] = "__CLANG_OFFLOAD_BUNDLE__";
+  static_assert(sizeof(kBundleMagic) - 1 == 24, "bundle magic length changed");
+  for (size_t data_length = 1; data_length < sizeof(kBundleMagic) - 1;
+       ++data_length) {
+    SCOPED_TRACE(data_length);
+    EXPECT_FALSE(iree_hal_streaming_fat_binary_is_supported(
+        iree_make_const_byte_span(kBundleMagic, data_length)));
+  }
+
+  uint8_t unsupported_image[16];
+  memset(unsupported_image, 0xFF, sizeof(unsupported_image));
+  EXPECT_FALSE(iree_hal_streaming_fat_binary_is_supported(
+      iree_make_const_byte_span(unsupported_image, sizeof(unsupported_image))));
+  EXPECT_FALSE(iree_hal_streaming_fat_binary_is_supported(
+      iree_make_const_byte_span(unsupported_image, /*data_length=*/0)));
+}
+
 TEST(FatBinaryTest, SelectsExactTargetBeforeGeneric) {
   const auto generic_elf = MakeMinimalGenericAmdgpuElf(/*machine=*/0x054);
   const auto exact_elf = MakeMinimalAmdgpuElf(/*machine=*/0x041);

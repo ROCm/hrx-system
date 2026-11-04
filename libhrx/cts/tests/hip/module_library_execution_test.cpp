@@ -620,6 +620,28 @@ TEST_F(HipModuleLibraryExecutionTest,
   }
 }
 
+TEST_F(HipModuleLibraryExecutionTest, FailedModuleLoadsClearOutputHandles) {
+  iree::testing::TempFilePath missing_image("hip_missing_module", ".hsaco");
+  ASSERT_FALSE(missing_image.Exists());
+  hipModule_t module = reinterpret_cast<hipModule_t>(uintptr_t{1});
+  EXPECT_EQ(hipErrorFileNotFound,
+            api_.module_load(&module, missing_image.path().c_str()));
+  EXPECT_EQ(hipErrorFileNotFound, api_.get_last_error());
+  EXPECT_EQ(nullptr, module);
+  EXPECT_EQ(hipErrorInvalidResourceHandle, api_.module_unload(module));
+
+  std::array<uint8_t, 16> malformed_image;
+  malformed_image.fill(0xFF);
+  module = reinterpret_cast<hipModule_t>(uintptr_t{1});
+  EXPECT_EQ(hipErrorInvalidImage,
+            api_.module_load_data_ex(&module, malformed_image.data(),
+                                     /*option_count=*/0, /*options=*/nullptr,
+                                     /*option_values=*/nullptr));
+  EXPECT_EQ(hipErrorInvalidImage, api_.get_last_error());
+  EXPECT_EQ(nullptr, module);
+  EXPECT_EQ(hipErrorInvalidResourceHandle, api_.module_unload(module));
+}
+
 TEST_F(HipModuleLibraryExecutionTest,
        ModuleAndLazyLibraryMetadataUseNativeArgumentLayout) {
   hipModule_t module = nullptr;
@@ -942,18 +964,6 @@ TEST_F(HipModuleLibraryExecutionTest,
                 /*library_option_values=*/nullptr,
                 /*library_option_count=*/0));
   EXPECT_EQ(hipErrorInvalidValue, api_.get_last_error());
-
-  hipModule_t missing_module = nullptr;
-  EXPECT_EQ(hipErrorFileNotFound,
-            api_.module_load(&missing_module, image_path.path().c_str()));
-  EXPECT_EQ(hipErrorFileNotFound, api_.get_last_error());
-
-  hipModule_t malformed_module = nullptr;
-  EXPECT_EQ(hipErrorInvalidImage,
-            api_.module_load_data_ex(&malformed_module, malformed_image.data(),
-                                     /*option_count=*/0, /*options=*/nullptr,
-                                     /*option_values=*/nullptr));
-  EXPECT_EQ(hipErrorInvalidImage, api_.get_last_error());
 
   int device_count = 0;
   ASSERT_EQ(hipSuccess, api_.get_device_count(&device_count));
