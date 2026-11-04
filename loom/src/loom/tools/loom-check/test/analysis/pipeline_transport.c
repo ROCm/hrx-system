@@ -158,9 +158,14 @@ static iree_status_t loom_check_test_pipeline_transport_append_names(
   return iree_string_builder_append_cstring(builder, "pipeline-transport");
 }
 
-const loom_check_emit_provider_t loom_check_test_pipeline_transport_provider = {
-    .name = IREE_SVL("pipeline-transport"),
-    .match = loom_check_test_pipeline_transport_matches,
-    .execute_native = loom_check_test_pipeline_transport_execute,
-    .append_names = loom_check_test_pipeline_transport_append_names,
+const loom_check_test_native_emit_provider_t
+    loom_check_test_pipeline_transport_provider = {
+        .base =
+            {
+                .name = IREE_SVL("pipeline-transport"),
+                .match = loom_check_test_pipeline_transport_matches,
+                .execute = loom_check_test_native_emit_provider_execute,
+                .append_names = loom_check_test_pipeline_transport_append_names,
+            },
+        .execute_native = loom_check_test_pipeline_transport_execute,
 };

@@ -743,10 +743,15 @@ static iree_status_t loom_check_test_low_allocation_append_names(
   return iree_string_builder_append_cstring(builder, "low-allocation-query");
 }
 
-const loom_check_emit_provider_t loom_check_test_low_allocation_provider = {
-    .name = IREE_SVL("allocation-query"),
-    .flags = LOOM_CHECK_EMIT_PROVIDER_FLAG_COMPARE_ERROR_OUTPUT,
-    .match = loom_check_test_low_allocation_matches,
-    .execute_native = loom_check_test_low_allocation_execute,
-    .append_names = loom_check_test_low_allocation_append_names,
+const loom_check_test_native_emit_provider_t
+    loom_check_test_low_allocation_provider = {
+        .base =
+            {
+                .name = IREE_SVL("allocation-query"),
+                .flags = LOOM_CHECK_EMIT_PROVIDER_FLAG_COMPARE_ERROR_OUTPUT,
+                .match = loom_check_test_low_allocation_matches,
+                .execute = loom_check_test_native_emit_provider_execute,
+                .append_names = loom_check_test_low_allocation_append_names,
+            },
+        .execute_native = loom_check_test_low_allocation_execute,
 };

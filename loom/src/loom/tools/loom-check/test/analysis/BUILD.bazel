@@ -36,6 +36,7 @@ loom_cc_library(
         "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/pipeline",
         "//loom/src/loom/tools/loom-check:execute",
+        "//loom/src/loom/tools/loom-check/test:native_provider",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

@@ -9,21 +9,23 @@
 #ifndef LOOM_TOOLS_LOOM_CHECK_TEST_LOW_PROVIDERS_H_
 #define LOOM_TOOLS_LOOM_CHECK_TEST_LOW_PROVIDERS_H_
 
-#include "loom/tools/loom-check/execute.h"
+#include "loom/tools/loom-check/test/native_provider.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 // Reports focused allocation decisions for authored Low values.
-extern const loom_check_emit_provider_t loom_check_test_low_allocation_provider;
+extern const loom_check_test_native_emit_provider_t
+    loom_check_test_low_allocation_provider;
 
 // Reports focused schedule relationships for authored Low operations.
-extern const loom_check_emit_provider_t loom_check_test_low_schedule_provider;
+extern const loom_check_test_native_emit_provider_t
+    loom_check_test_low_schedule_provider;
 
 // Reports complete scheduling, allocation, packet, and report observations for
 // authored Low compiler tests.
-extern const loom_check_emit_provider_t
+extern const loom_check_test_native_emit_provider_t
     loom_check_test_low_observation_provider;
 
 #ifdef __cplusplus

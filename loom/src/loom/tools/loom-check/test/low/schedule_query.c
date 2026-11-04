@@ -1059,9 +1059,14 @@ static iree_status_t loom_check_test_low_schedule_append_names(
   return iree_string_builder_append_cstring(builder, "low-schedule-query");
 }
 
-const loom_check_emit_provider_t loom_check_test_low_schedule_provider = {
-    .name = IREE_SVL("schedule-query"),
-    .match = loom_check_test_low_schedule_matches,
-    .execute_native = loom_check_test_low_schedule_execute,
-    .append_names = loom_check_test_low_schedule_append_names,
+const loom_check_test_native_emit_provider_t
+    loom_check_test_low_schedule_provider = {
+        .base =
+            {
+                .name = IREE_SVL("schedule-query"),
+                .match = loom_check_test_low_schedule_matches,
+                .execute = loom_check_test_native_emit_provider_execute,
+                .append_names = loom_check_test_low_schedule_append_names,
+            },
+        .execute_native = loom_check_test_low_schedule_execute,
 };

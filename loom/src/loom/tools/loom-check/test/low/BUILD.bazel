@@ -46,6 +46,7 @@ loom_cc_library(
         "//loom/src/loom/target/reporting:format",
         "//loom/src/loom/target/reporting:low",
         "//loom/src/loom/tools/loom-check:execute",
+        "//loom/src/loom/tools/loom-check/test:native_provider",
         "//runtime/src/iree/base",
     ],
 )

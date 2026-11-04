@@ -747,10 +747,15 @@ static iree_status_t loom_check_test_low_observation_append_names(
       "low-compile-report");
 }
 
-const loom_check_emit_provider_t loom_check_test_low_observation_provider = {
-    .name = IREE_SVL("low-observation"),
-    .flags = LOOM_CHECK_EMIT_PROVIDER_FLAG_COMPARE_ERROR_OUTPUT,
-    .match = loom_check_test_low_observation_matches,
-    .execute_native = loom_check_test_low_observation_execute,
-    .append_names = loom_check_test_low_observation_append_names,
+const loom_check_test_native_emit_provider_t
+    loom_check_test_low_observation_provider = {
+        .base =
+            {
+                .name = IREE_SVL("low-observation"),
+                .flags = LOOM_CHECK_EMIT_PROVIDER_FLAG_COMPARE_ERROR_OUTPUT,
+                .match = loom_check_test_low_observation_matches,
+                .execute = loom_check_test_native_emit_provider_execute,
+                .append_names = loom_check_test_low_observation_append_names,
+            },
+        .execute_native = loom_check_test_low_observation_execute,
 };
