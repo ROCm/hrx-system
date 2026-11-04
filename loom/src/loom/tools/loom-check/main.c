@@ -200,9 +200,9 @@ static void loom_check_print_agents_markdown(FILE* stream) {
       "\n"
       "Prefer IR output checks for compiler behavior. Use large JSON emit "
       "goldens\n"
-      "only when the JSON structure is the unit under test. Prefer concise\n"
-      "text emit targets, such as `low-allocation`, when the test only needs\n"
-      "to prove compiler facts.\n");
+      "only when the JSON structure is the unit under test. The internal\n"
+      "test runner provides concise Low observation targets, such as\n"
+      "`low-allocation`, for tests that only need to prove compiler facts.\n");
 }
 
 //===----------------------------------------------------------------------===//
@@ -267,9 +267,7 @@ int loom_check_main(
       "  format <f>  Parse, convert to format <f>, convert back, compare.\n"
       "  emit <t>    Parse, emit analysis or target-structured output <t>,\n"
       "              print, compare.\n"
-      "              Core targets include low-schedule-json, low-allocation,\n"
-      "              low-allocation-json, low-packet-json,\n"
-      "              low-compile-report @function, and source-low.\n"
+      "              Linked providers define the available emit targets.\n"
       "              source-low emits target-lowering\n"
       "              artifacts or pipeline text and accepts\n"
       "              @function target=family:selector for specialization,\n"
@@ -278,17 +276,8 @@ int loom_check_main(
       "              sanitizer=none|access|value|operation|race|all,\n"
       "              sanitizer-reporting=default|trap|report-only, and\n"
       "              diagnostics=none|memory|operand-forms|all.\n"
-      "              low-schedule-json, low-allocation-json, and\n"
-      "              low-packet-json accept output=json|none.\n"
-      "              low-allocation and low-allocation-json accept\n"
-      "              diagnostics=none|predicted-spills|copy-decisions|\n"
-      "              placement-decisions|all.\n"
-      "              low-schedule-json and low-packet-json accept\n"
-      "              strategy=source|pressure|latency-hiding|resource-stall.\n"
-      "              low-schedule-json accepts diagnostics=none|pressure|\n"
-      "              resources|hazards|candidates|model|all.\n"
-      "              low-packet-json accepts diagnostics=none|packets|all.\n"
-      "              Linked providers may add more.\n"
+      "              The internal test runner adds passive analysis and Low\n"
+      "              planning observations for authored compiler tests.\n"
       "File format:\n"
       "  A .<format>-test file contains cases separated by // ====.\n"
       "  .loom-test selects Loom text; --list-input-formats lists importers.\n"

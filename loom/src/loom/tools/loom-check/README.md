@@ -95,6 +95,7 @@ class's exact peak live units and values. These compact outputs use ordinary
 exact goldens.
 
 Schedule queries build the production function model and scheduler directly.
+The internal test runner's
 `emit low-schedule-json ... diagnostics=candidates output=none` compares
 candidate-decision diagnostics through inline annotations. Native residency and
 candidate-policy tests supply resource curves and scores directly to their
@@ -151,10 +152,11 @@ passing and failing checks unchanged. Machine-readable update suggestions also
 omit them: changing an assertion requires an intentional edit.
 
 `compile-report <pipeline>` checks reports from source compilation passes.
-For authored Low assembly, `emit low-compile-report @function` builds the shared
-emission frame and prints its normal report summary, including static and dynamic
-instruction counts. This uses the runner's linked target descriptors and the
-same report collector as native emission.
+For authored Low assembly, the internal test runner's
+`emit low-compile-report @function` builds the shared emission frame and prints
+its normal report summary, including static and dynamic instruction counts.
+This uses the runner's linked target descriptors and the same report collector
+as native emission.
 
 ### Source Target Lowering
 

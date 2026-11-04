@@ -20,6 +20,7 @@ static const loom_check_emit_provider_t* const kLoomCheckTestEmitProviders[] = {
     &loom_check_test_config_materialize_provider,
     &loom_check_test_config_schema_provider,
     &loom_check_test_low_allocation_provider,
+    &loom_check_test_low_observation_provider,
     &loom_check_test_low_schedule_provider,
 };
 

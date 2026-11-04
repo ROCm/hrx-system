@@ -1458,7 +1458,7 @@ TEST_F(ExecuteTest, UnknownEmitTargetListsProviderTargets) {
   EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
   EXPECT_NE(DetailString(result).find("unknown emit target"),
             std::string::npos);
-  EXPECT_NE(DetailString(result).find("low-schedule-json"), std::string::npos);
+  EXPECT_NE(DetailString(result).find("source-low"), std::string::npos);
   EXPECT_NE(DetailString(result).find("fake-emit"), std::string::npos);
   loom_check_result_deinitialize(&result);
 }
@@ -1543,15 +1543,6 @@ TEST_F(ExecuteTest, ChecksCannotPassWhenOutputIsSuppressed) {
       "func.def target(@target) @f() {\n  func.return\n}\n"
       "// ----\nCHECK: this must not silently pass\n",
       "with-checks requires textual output");
-}
-
-TEST_F(ExecuteTest, LowReportRejectsMissingSymbolAndExtraOptions) {
-  ExpectFirstFailsWithDetail("// RUN: emit low-compile-report\n",
-                             "requires one low function symbol name");
-  ExpectFirstFailsWithDetail("// RUN: emit low-compile-report @\n",
-                             "requires one low function symbol name");
-  ExpectFirstFailsWithDetail("// RUN: emit low-compile-report @f extra\n",
-                             "requires one low function symbol name");
 }
 
 TEST_F(ExecuteTest, EmitSourceLowParsesSanitizerOptions) {
