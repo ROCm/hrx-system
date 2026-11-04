@@ -295,9 +295,14 @@ active response streams still consume transport credit; these bounds are not
 a promise that arbitrary slow clients leave connections free.
 
 Text cache addressability follows pool backing. Fixed backing reserves one
-model context shared across its rows. Elastic backing uses Loom's sparse 4M
-token-position ceiling per model, while `memory_bytes` remains the physical
-admission limit shared across all models in the pool.
+model context shared across its rows. Elastic backing sizes its sparse address
+range from the selected pool's physical capacity, any tighter `memory_bytes`
+budget, and the model's declared cache bytes per page. Increasing addressability
+does not commit the corresponding cache or allocate its whole page directory.
+`memory_bytes` remains the physical admission limit shared across all models in
+the pool; total addressability is not a promise that every model can fill it
+simultaneously. A backend reporting no physical capacity requires an explicit
+pool budget.
 
 Text admission reserves a request's completion high-water. Short contexts grow
 by blocks rather than eagerly reserving each row's maximum physical slab.

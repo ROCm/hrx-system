@@ -122,6 +122,11 @@ typedef struct loom_serve_text_options_t {
   // fits signed i64 for source bootstrap; source geometry must fit UINT32_MAX
   // physical pages before native page IDs are allocated.
   iree_host_size_t pool_capacity;
+  // Resident cache addressability from the shared elastic pool's physical
+  // capacity and optional budget, not currently free memory. Source page
+  // geometry converts this byte bound to token positions without committing
+  // backing. Nonzero is mutually exclusive with pool_capacity.
+  uint64_t cache_limit_bytes;
   // Number of host packed token/span shape buckets; zero selects isolated
   // execution. Source may map several buckets to the same command.
   iree_host_size_t epoch_count;

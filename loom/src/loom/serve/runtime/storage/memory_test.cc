@@ -16,6 +16,28 @@ using loom_serve::testing::memory::DedicatedNativeWorkerMemoryTest;
 using loom_serve::testing::memory::DeviceMemoryTest;
 using loom_serve::testing::memory::MemoryTest;
 
+TEST_F(MemoryTest, ResidentCapacityUsesPhysicalBackingAndOptionalBudget) {
+  ASSERT_NO_FATAL_FAILURE(UseBacking(false, 0, nullptr));
+  const uint64_t capacity = loom_serve_memory_pool_capacity(pool);
+  ASSERT_GT(capacity, 3 * kSlabSize);
+  EXPECT_EQ(loom_serve_memory_pool_limit(pool), UINT64_MAX);
+
+  // Reserving sparse addresses and committing one slab do not change the
+  // addressability bound or turn current free memory into a model quota.
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+      pool, loom_serve_pool_state_geometry(storage_owner), kHighOffset, 256,
+      &statistics[0], &first));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(first, 0, kSlabSize));
+  EXPECT_EQ(loom_serve_memory_pool_capacity(pool), capacity);
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_free(std::exchange(first, nullptr)));
+  IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+
+  ASSERT_NO_FATAL_FAILURE(UseBacking(false, 3 * kSlabSize, nullptr));
+  EXPECT_EQ(loom_serve_memory_pool_capacity(pool), 3 * kSlabSize);
+  ASSERT_NO_FATAL_FAILURE(UseBacking(false, capacity + 1, nullptr));
+  EXPECT_EQ(loom_serve_memory_pool_capacity(pool), capacity);
+}
+
 TEST_F(MemoryTest, GeometryRespectsFiniteBackingCapacity) {
   iree_hal_pool_family_access_t family = {
       .family = iree_hal_queue_family(loom_serve_device_transfer_queue(device)),

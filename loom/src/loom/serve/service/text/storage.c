@@ -185,6 +185,13 @@ iree_status_t loom_serve_text_storage_initialize(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "invalid cache region %zu", i);
     }
+    uint64_t region_page_bytes = 0;
+    if (!iree_checked_mul_u64(count, block_bytes, &region_page_bytes) ||
+        !iree_checked_add_u64(out_storage->page_bytes, region_page_bytes,
+                              &out_storage->page_bytes)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "cache page byte size is not representable");
+    }
     const uint64_t length = iree_unaligned_load_le_u64(
         out_storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data +
         allocation * 24);

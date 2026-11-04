@@ -717,6 +717,15 @@ uint64_t loom_serve_memory_pool_limit(const loom_serve_memory_pool_t* pool) {
   return pool->limit_bytes;
 }
 
+uint64_t loom_serve_memory_pool_capacity(const loom_serve_memory_pool_t* pool) {
+  iree_hal_pool_capabilities_t capabilities;
+  iree_hal_pool_query_capabilities(pool->storage_pool, &capabilities);
+  if (capabilities.physical_capacity) {
+    return iree_min(capabilities.physical_capacity, pool->limit_bytes);
+  }
+  return pool->limit_bytes == UINT64_MAX ? 0 : pool->limit_bytes;
+}
+
 uint64_t loom_serve_memory_pool_live_bytes(
     const loom_serve_memory_pool_t* pool) {
   return loom_serve_memory_demand_total(pool->demand);

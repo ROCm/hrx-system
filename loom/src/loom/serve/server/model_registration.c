@@ -796,12 +796,6 @@ static iree_status_t loom_serve_recognition_registration_create(
   return status;
 }
 
-// Logical token positions addressable by each model using elastic backing.
-// Sparse virtual backing and page identities scale with live state, so this
-// ceiling does not reserve physical memory. Sources validate their page
-// geometry and native address arithmetic during preparation.
-enum { LOOM_SERVE_TEXT_ELASTIC_ADDRESS_CAPACITY = 4194304 };
-
 typedef struct loom_serve_text_registration_t {
   // Allocator owning this operation and its stable shape table.
   iree_allocator_t host_allocator;
@@ -1012,6 +1006,17 @@ static iree_status_t loom_serve_text_registration_create(
     loom_serve_registration_t* out_registration) {
   const loom_serve_model_registration_options_t* options = self;
   const loom_serve_text_configuration_t* text = &configuration->text;
+  loom_serve_pool_t* pool = loom_serve_device_group_pool_at(
+      options->device_group, configuration->pool_index);
+  loom_serve_memory_pool_t* memory_pool = loom_serve_pool_memory(pool);
+  const uint64_t cache_limit_bytes =
+      memory_pool ? loom_serve_memory_pool_capacity(memory_pool) : 0;
+  if (memory_pool && !cache_limit_bytes) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "elastic text storage requires a backing capacity; the selected "
+        "pool does not report one, so specify its memory_bytes budget");
+  }
   const iree_host_size_t shape_count =
       loom_serve_text_default_shapes(text->prefill_capacity, NULL);
   iree_host_size_t total = 0, shapes_offset = 0;
@@ -1026,15 +1031,12 @@ static iree_status_t loom_serve_text_registration_create(
   registration->options = options;
   registration->device = loom_serve_device_group_at(
       options->device_group, configuration->device_index);
-  loom_serve_pool_t* pool = loom_serve_device_group_pool_at(
-      options->device_group, configuration->pool_index);
   registration->configuration = configuration;
   registration->observer = observer;
   registration->stream = stream;
   registration->shapes =
       (loom_serve_packing_shape_t*)((uint8_t*)registration + shapes_offset);
   loom_serve_text_default_shapes(text->prefill_capacity, registration->shapes);
-  loom_serve_memory_pool_t* memory_pool = loom_serve_pool_memory(pool);
   const loom_serve_text_options_t model_options = {
       .mode = configuration->kind == LOOM_SERVE_MODEL_KIND_SEQUENCE
                   ? LOOM_SERVE_TEXT_MODE_ENCODE
@@ -1042,8 +1044,8 @@ static iree_status_t loom_serve_text_registration_create(
       .sources = configuration->sources,
       .prefill_capacity = text->prefill_capacity,
       .context_capacity = text->context_capacity,
-      .pool_capacity = memory_pool ? LOOM_SERVE_TEXT_ELASTIC_ADDRESS_CAPACITY
-                                   : text->context_capacity,
+      .pool_capacity = memory_pool ? 0 : text->context_capacity,
+      .cache_limit_bytes = cache_limit_bytes,
       .epoch_count = shape_count,
       .epoch_shapes = registration->shapes,
       .draft_depth = text->draft_depth,

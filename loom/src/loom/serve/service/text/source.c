@@ -178,14 +178,14 @@ typedef struct loom_serve_text_source_sizing_t {
   loom_serve_text_source_t* source;
   // Candidate storage, transferred unchanged to native allocation after sizing.
   loom_serve_text_storage_t* storage;
+  // Resolved source token addressability, initially explicit or zero.
+  iree_host_size_t pool_capacity;
+  // Cache payload bytes per physical page, stable across candidates.
+  uint64_t page_bytes;
 } loom_serve_text_source_sizing_t;
 
-static iree_status_t loom_serve_text_source_evaluate_cache(
-    void* user_data, iree_host_size_t checkpoint_capacity,
-    loom_serve_text_cache_cost_t* out_cost) {
-  loom_serve_text_source_sizing_t* sizing = user_data;
-  loom_serve_text_source_t* source = sizing->source;
-  loom_serve_text_storage_t* storage = sizing->storage;
+static void loom_serve_text_source_reset_candidate(
+    loom_serve_text_source_t* source, loom_serve_text_storage_t* storage) {
   loom_serve_preparation_free(source->preparation);
   source->preparation = NULL;
   iree_vm_buffer_release(source->control_state);
@@ -196,26 +196,92 @@ static iree_status_t loom_serve_text_source_evaluate_cache(
   source->options = NULL;
   loom_serve_text_storage_deinitialize(storage);
   memset(storage, 0, sizeof(*storage));
-  loom_serve_text_options_t options = *sizing->options;
-  options.checkpoint_capacity = checkpoint_capacity;
-  IREE_RETURN_IF_ERROR(
-      loom_serve_text_prepare(sizing->module, source, &options, storage));
-  uint64_t bytes = checkpoint_capacity *
-                   ((uint64_t)storage->blocks_per_row * sizeof(uint32_t) +
-                    sizeof(loom_serve_text_state_checkpoint_t));
+}
+
+static iree_status_t loom_serve_text_storage_declared_bytes(
+    const loom_serve_text_storage_t* storage, uint64_t* out_bytes) {
+  *out_bytes = 0;
   for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
        ++i) {
     const uint64_t length = iree_unaligned_load_le_u64(
         storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data + i * 24);
-    if (length > INT64_MAX || length > UINT64_MAX - bytes) {
+    if (length > INT64_MAX ||
+        !iree_checked_add_u64(*out_bytes, length, out_bytes)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "source storage size exceeds byte accounting");
     }
-    bytes += length;
   }
-  *out_cost = (loom_serve_text_cache_cost_t){
-      .storage_bytes = bytes,
-      .page_count = options.pool_capacity / storage->block_size};
+  return iree_ok_status();
+}
+
+// Resolves source page geometry against the complete shared-pool boundary.
+// The context-sized candidate is only a cold geometry probe; it reserves no
+// native memory and is discarded before the selected preparation survives.
+static iree_status_t loom_serve_text_source_resolve_pool_capacity(
+    loom_serve_text_source_sizing_t* sizing,
+    iree_host_size_t checkpoint_capacity) {
+  loom_serve_text_options_t probe = *sizing->options;
+  probe.checkpoint_capacity = checkpoint_capacity;
+  probe.pool_capacity = probe.context_capacity;
+  IREE_RETURN_IF_ERROR(loom_serve_text_prepare(sizing->module, sizing->source,
+                                               &probe, sizing->storage));
+  const loom_serve_text_storage_t* storage = sizing->storage;
+  const uint64_t probe_page_count = probe.pool_capacity / storage->block_size;
+  const uint64_t limit_bytes = sizing->options->cache_limit_bytes;
+  const uint64_t page_count =
+      iree_min(limit_bytes / storage->page_bytes, (uint64_t)UINT32_MAX);
+  if (page_count < probe_page_count) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "shared pool byte limit cannot address one model context");
+  }
+  uint64_t pool_capacity = 0;
+  if (!iree_checked_mul_u64(page_count, storage->block_size, &pool_capacity) ||
+      pool_capacity > IREE_HOST_SIZE_MAX || pool_capacity > INT64_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "source cache capacity is not representable");
+  }
+  sizing->pool_capacity = (iree_host_size_t)pool_capacity;
+  sizing->page_bytes = storage->page_bytes;
+  loom_serve_text_source_reset_candidate(sizing->source, sizing->storage);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_serve_text_source_evaluate_cache(
+    void* user_data, iree_host_size_t checkpoint_capacity,
+    loom_serve_text_cache_cost_t* out_cost) {
+  loom_serve_text_source_sizing_t* sizing = user_data;
+  loom_serve_text_source_t* source = sizing->source;
+  loom_serve_text_storage_t* storage = sizing->storage;
+  loom_serve_text_source_reset_candidate(source, storage);
+  if (sizing->options->cache_limit_bytes && !sizing->pool_capacity) {
+    IREE_RETURN_IF_ERROR(loom_serve_text_source_resolve_pool_capacity(
+        sizing, checkpoint_capacity));
+  }
+  loom_serve_text_options_t options = *sizing->options;
+  options.checkpoint_capacity = checkpoint_capacity;
+  options.pool_capacity = sizing->pool_capacity;
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_prepare(sizing->module, source, &options, storage));
+  if (sizing->page_bytes && storage->page_bytes != sizing->page_bytes) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "source cache page geometry changes with endpoint capacity");
+  }
+  sizing->page_bytes = storage->page_bytes;
+  uint64_t bytes = 0;
+  IREE_RETURN_IF_ERROR(loom_serve_text_storage_declared_bytes(storage, &bytes));
+  uint64_t checkpoint_bytes = 0;
+  const uint64_t checkpoint_stride =
+      (uint64_t)storage->blocks_per_row * sizeof(uint32_t) +
+      sizeof(loom_serve_text_state_checkpoint_t);
+  if (!iree_checked_mul_u64(checkpoint_capacity, checkpoint_stride,
+                            &checkpoint_bytes) ||
+      !iree_checked_add_u64(bytes, checkpoint_bytes, &bytes)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "checkpoint storage exceeds byte accounting");
+  }
+  *out_cost = (loom_serve_text_cache_cost_t){.storage_bytes = bytes};
   return iree_ok_status();
 }
 
@@ -236,7 +302,10 @@ iree_status_t loom_serve_text_source_initialize(
                                 &out_source->vm_types));
   const iree_string_view_t prepare = IREE_SV("prepare");
   loom_serve_text_source_sizing_t sizing = {
-      .options = options, .source = out_source, .storage = out_storage};
+      .options = options,
+      .source = out_source,
+      .storage = out_storage,
+      .pool_capacity = options->pool_capacity};
   IREE_RETURN_IF_ERROR(loom_serve_program_compile_service_cached(
       jit, out_source->environment, &options->sources, options->sources.prepare,
       1, &prepare, (iree_string_view_list_t){0}, host_allocator,
@@ -246,6 +315,7 @@ iree_status_t loom_serve_text_source_initialize(
       loom_serve_text_source_evaluate_cache, &sizing, &out_source->cache);
   iree_vm_module_release(sizing.module);
   IREE_RETURN_IF_ERROR(status);
+  out_source->pool_capacity = sizing.pool_capacity;
   const loom_model_file_list_t* paths = NULL;
   const uint32_t source_count =
       loom_serve_preparation_local_sources(out_source->preparation, &paths);

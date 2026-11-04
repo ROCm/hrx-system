@@ -170,6 +170,7 @@ static iree_status_t loom_serve_text_load_prepare(
   IREE_RETURN_IF_ERROR(loom_serve_text_source_initialize(
       model->jit, options, model->host_allocator, &model->source,
       &model->state.storage));
+  model->state.cache.capacity = model->source.pool_capacity;
   model->state.checkpoints.capacity =
       (uint32_t)model->source.cache.checkpoint_capacity;
   const iree_host_size_t stage_count =
@@ -393,12 +394,17 @@ iree_status_t loom_serve_text_load_allocate(
       options->cache.prefix_capacity == LOOM_SERVE_TEXT_CACHE_AUTOMATIC
           ? 0
           : options->cache.prefix_capacity;
+  const bool pooled = options->pool_capacity || options->cache_limit_bytes;
+  const bool automatic_cache =
+      options->cache.target_bytes &&
+      (options->cache.session_capacity == LOOM_SERVE_TEXT_CACHE_AUTOMATIC ||
+       options->cache.prefix_capacity == LOOM_SERVE_TEXT_CACHE_AUTOMATIC);
   if (session_capacity >= INT32_MAX || prefix_capacity > INT32_MAX ||
       options->checkpoint_capacity > INT32_MAX ||
       (uint64_t)options->checkpoint_capacity + prefix_capacity +
               (session_capacity ? session_capacity + 1 : 0) >
           INT32_MAX ||
-      ((session_capacity || prefix_capacity) && !options->pool_capacity)) {
+      ((session_capacity || prefix_capacity || automatic_cache) && !pooled)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "cache endpoints require pooled storage and a "
                             "combined capacity fitting i32");
@@ -411,8 +417,9 @@ iree_status_t loom_serve_text_load_allocate(
       (options->draft_depth && !options->epoch_count) ||
       (uint64_t)options->pool_capacity > INT64_MAX ||
       options->checkpoint_capacity > INT32_MAX ||
-      (options->checkpoint_capacity && !options->pool_capacity) ||
-      (options->pool_capacity && !options->epoch_count)) {
+      (options->checkpoint_capacity && !pooled) ||
+      (options->pool_capacity && options->cache_limit_bytes) ||
+      (pooled && !options->epoch_count)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "invalid model capacities; pooled KV and drafting "
                             "require epoch shapes, "

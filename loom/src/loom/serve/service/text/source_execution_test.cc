@@ -693,6 +693,49 @@ TEST_F(SourceTextServiceTest, RejectsPoolOutsideSourceIntegerRepresentation) {
   EXPECT_EQ(rejected, nullptr);
 }
 
+TEST_F(SourceTextServiceTest, PoolByteLimitDerivesLogicalAddressability) {
+  IREE_ASSERT_OK(loom_serve_text_model_free(model_));
+  model_ = nullptr;
+  auto options = ModelOptions();
+  options.pool_capacity = 0;
+  options.cache_limit_bytes = 65536;
+  IREE_ASSERT_OK(loom_serve_text_model_allocate(
+      device_, storage_owner_, &options, host_allocator_, &model_));
+  const auto usage = loom_serve_text_model_pool_usage(model_);
+  EXPECT_EQ(usage.block_size, 4u);
+  EXPECT_EQ(usage.capacity, 16384u);
+  EXPECT_EQ(usage.available, usage.capacity);
+}
+
+TEST_F(SourceTextServiceTest, PoolByteLimitMustFitOneContext) {
+  auto options = ModelOptions();
+  options.pool_capacity = 0;
+  options.cache_limit_bytes = 383;
+  loom_serve_text_model_t* rejected = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_serve_text_model_allocate(device_, storage_owner_, &options,
+                                     host_allocator_, &rejected));
+  EXPECT_EQ(rejected, nullptr);
+}
+
+TEST_F(SourceTextServiceTest, AutomaticEndpointsRequirePooledStorage) {
+  auto options = ModelOptions();
+  options.pool_capacity = 0;
+  options.checkpoint_capacity = 0;
+  options.cache = {
+      .target_bytes = 1024,
+      .session_capacity = LOOM_SERVE_TEXT_CACHE_AUTOMATIC,
+  };
+  loom_serve_text_load_t* rejected = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_serve_text_load_allocate(device_, storage_owner_, &options, nullptr,
+                                    nullptr, host_allocator_, &rejected));
+  EXPECT_EQ(rejected, nullptr);
+  loom_serve_text_load_free(rejected);
+}
+
 TEST_F(SourceTextServiceTest, WideSourceEpochsRetainExactHttpHistory) {
   for (size_t capacity : {513u, 1024u, 4097u}) {
     SCOPED_TRACE(capacity);

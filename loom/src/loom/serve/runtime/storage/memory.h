@@ -134,6 +134,11 @@ void loom_serve_memory_pool_trim(loom_serve_memory_pool_t* pool,
 // This is the configured budget, not currently available backing.
 uint64_t loom_serve_memory_pool_limit(const loom_serve_memory_pool_t* pool);
 
+// Cold resident-addressability bound from the selected physical source and any
+// tighter configured budget. Zero means neither supplies a bound. This is not
+// free memory or an allocation guarantee and never subtracts current demand.
+uint64_t loom_serve_memory_pool_capacity(const loom_serve_memory_pool_t* pool);
+
 // Owner-maintained bytes attached or promised to live virtual reservations.
 // Includes pending commitments and excludes reusable idle backing. This reads
 // the existing range ledger without collecting work or querying native pools.

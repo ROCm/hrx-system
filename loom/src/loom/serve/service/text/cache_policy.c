@@ -37,7 +37,7 @@ iree_status_t loom_serve_text_cache_select(
   iree_host_size_t evaluated_capacity = out_selection->checkpoint_capacity;
   loom_serve_text_cache_cost_t baseline = {0};
   IREE_RETURN_IF_ERROR(evaluate(user_data, evaluated_capacity, &baseline));
-  if (!options->target_bytes || !baseline.page_count) {
+  if (!options->target_bytes) {
     return iree_ok_status();
   }
 
@@ -64,8 +64,7 @@ iree_status_t loom_serve_text_cache_select(
   if (automatic_sessions && iree_status_is_ok(status)) {
     const iree_host_size_t remaining =
         INT32_MAX - out_selection->checkpoint_capacity;
-    const iree_host_size_t maximum =
-        iree_min(baseline.page_count, remaining ? remaining - 1 : 0);
+    const iree_host_size_t maximum = remaining ? remaining - 1 : 0;
     iree_host_size_t lower = 0, upper = maximum, candidate = 1;
     bool refining = false;
     while (lower < upper && iree_status_is_ok(status)) {

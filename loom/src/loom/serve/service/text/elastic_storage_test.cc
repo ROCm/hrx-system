@@ -247,20 +247,28 @@ TEST_F(ElasticTextServiceTest,
 }
 
 TEST_F(ElasticTextServiceTest,
-       LogicalMaximumDoesNotScaleLiveBackingOrDirectories) {
+       AutomaticAddressabilityDoesNotScaleLiveBackingOrDirectories) {
   struct Observation {
+    // Address space retained independently of physical backing.
     uint64_t reserved_bytes;
+    // Live mapped backing before the model retires.
     uint64_t mapped_bytes;
+    // Materialized page identities, not the maximum page namespace.
     uint32_t directory_capacity;
+    // Cold compaction scratch remains absent before compaction is requested.
     uint32_t compaction_capacity;
   };
-  const auto observe = [&](iree_host_size_t capacity) {
-    IREE_EXPECT_OK(loom_serve_test_pool_trim_and_drain(storage_owner_, 0));
+  const auto observe = [&](iree_host_size_t capacity,
+                           Observation* observation) {
+    IREE_ASSERT_OK(loom_serve_test_pool_trim_and_drain(storage_owner_, 0));
     auto* memory_pool = loom_serve_pool_memory(storage_owner_);
     auto options = ModelOptions();
-    options.pool_capacity = capacity;
+    options.pool_capacity = 0;
+    // The source fixture declares four payload bytes per logical token. The
+    // real preparation path, not this caller, converts the byte boundary.
+    options.cache_limit_bytes = uint64_t{capacity} * sizeof(int32_t);
     loom_serve_text_model_t* source = nullptr;
-    IREE_EXPECT_OK(loom_serve_text_model_allocate(
+    IREE_ASSERT_OK(loom_serve_text_model_allocate(
         device_, storage_owner_, &options, host_allocator_, &source));
     const auto release_model = [](loom_serve_text_model_t* model) {
       IREE_EXPECT_OK(loom_serve_text_model_free(model));
@@ -269,26 +277,33 @@ TEST_F(ElasticTextServiceTest,
         source, release_model);
     EXPECT_EQ(loom_serve_text_model_pool_usage(source).available, capacity);
     bool admitted = false;
-    IREE_EXPECT_OK(loom_serve_text_row_try_reserve(
+    IREE_ASSERT_OK(loom_serve_text_row_try_reserve(
         loom_serve_text_model_row(source, 0), LOOM_SERVE_TEXT_RESERVE_FRESH,
         nullptr, 4, &admitted));
-    EXPECT_TRUE(admitted);
+    ASSERT_TRUE(admitted);
+    const int32_t tokens[] = {0, 1, 2};
+    auto* row = loom_serve_text_model_row(source, 0);
+    IREE_ASSERT_OK(
+        loom_serve_text_row_prefill(row, IREE_ARRAYSIZE(tokens), tokens));
+    Oracle reference;
+    reference.Consume("abx");
+    EXPECT_EQ(loom_serve_text_row_token(row), reference.Predict());
     const auto after = loom_serve_text_model_memory_statistics(source);
     EXPECT_EQ(loom_serve_text_model_pool_usage(source).available, capacity - 4);
-    IREE_EXPECT_OK(loom_serve_memory_pool_await(memory_pool));
-    const Observation observation = {
+    IREE_ASSERT_OK(loom_serve_memory_pool_await(memory_pool));
+    *observation = {
         .reserved_bytes = after.reserved_bytes,
         .mapped_bytes = after.committed_bytes,
         .directory_capacity = source->state.cache.pool.capacity,
         .compaction_capacity = source->state.cache.destination_capacity,
     };
     owner.reset();
-    IREE_EXPECT_OK(loom_serve_test_pool_trim_and_drain(storage_owner_, 0));
-    return observation;
+    IREE_ASSERT_OK(loom_serve_test_pool_trim_and_drain(storage_owner_, 0));
   };
 
-  const Observation small = observe(256);
-  const Observation maximum = observe(4 * 1024 * 1024);
+  Observation small, maximum;
+  ASSERT_NO_FATAL_FAILURE(observe(256, &small));
+  ASSERT_NO_FATAL_FAILURE(observe(128 * 1024 * 1024, &maximum));
   const auto geometry = loom_serve_pool_state_geometry(storage_owner_);
   EXPECT_GT(maximum.reserved_bytes, small.reserved_bytes);
   // The tiny source can co-locate cache and private bytes in one mapping at
