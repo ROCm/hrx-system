@@ -10,6 +10,37 @@
 
 namespace {
 
+TEST(DxgMemoryProfileTest, ReportsExactHostMappingFeatures) {
+  const amdf_gpu_dxg_memory_capabilities_t capabilities = {
+      .virtual_address_bit_count = 48,
+  };
+  amdf_memory_native_profile_t profile = {};
+
+  ASSERT_EQ(amdf_gpu_dxg_query_memory_profile(&capabilities, 0, &profile),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(profile.memory_class, AMDF_MEMORY_CLASS_SYSTEM);
+  EXPECT_EQ(profile.roles, AMDF_MEMORY_PROFILE_ROLE_CREATE |
+                               AMDF_MEMORY_PROFILE_ROLE_HOST_MAP);
+  EXPECT_EQ(profile.host_mapping.features,
+            AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS |
+                AMDF_HOST_MAPPING_FEATURE_FILE_IO |
+                AMDF_HOST_MAPPING_FEATURE_BUFFERED_FILE_IO);
+
+  ASSERT_EQ(amdf_gpu_dxg_query_memory_profile(&capabilities, 1, &profile),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(profile.memory_class, AMDF_MEMORY_CLASS_LOCAL);
+  EXPECT_EQ(profile.roles, AMDF_MEMORY_PROFILE_ROLE_CREATE);
+  EXPECT_EQ(profile.host_mapping.features, 0u);
+
+  ASSERT_EQ(amdf_gpu_dxg_query_memory_profile(&capabilities, 2, &profile),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(profile.memory_class, AMDF_MEMORY_CLASS_SYSTEM);
+  EXPECT_EQ(profile.roles, AMDF_MEMORY_PROFILE_ROLE_REGISTER |
+                               AMDF_MEMORY_PROFILE_ROLE_HOST_MAP);
+  EXPECT_EQ(profile.host_mapping.features,
+            AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS);
+}
+
 TEST(DxgMemoryProfileTest, ExternalResourceProfileRequiresHostSupport) {
   amdf_gpu_dxg_memory_capabilities_t capabilities = {
       .virtual_address_bit_count = 48,

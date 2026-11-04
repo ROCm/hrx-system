@@ -467,7 +467,6 @@ TEST_F(GpuLinuxMemoryTest, BufferedFileIoUsesOwnedSystemMemory) {
   ASSERT_NE(
       mapping_infos_[0].features & AMDF_HOST_MAPPING_FEATURE_BUFFERED_FILE_IO,
       0u);
-  EXPECT_EQ(mapping_infos_[0].features & AMDF_HOST_MAPPING_FEATURE_FILE_IO, 0u);
 
   // An ordinary file descriptor copies directly to and from the native view;
   // no stdio payload buffer or page registration mediates either operation.

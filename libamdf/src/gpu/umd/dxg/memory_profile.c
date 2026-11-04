@@ -201,7 +201,8 @@ amdf_status_t amdf_gpu_dxg_query_memory_profile(
         AMDF_GPU_DXG_RESERVATION_GRANULARITY;
     profile.allocation = allocation;
     profile.host_mapping = host_mapping;
-    profile.host_mapping.features |= AMDF_HOST_MAPPING_FEATURE_FILE_IO;
+    profile.host_mapping.features |= AMDF_HOST_MAPPING_FEATURE_FILE_IO |
+                                     AMDF_HOST_MAPPING_FEATURE_BUFFERED_FILE_IO;
   } else if (memory_profile_ordinal == 1) {
     profile.memory_class = AMDF_MEMORY_CLASS_LOCAL;
     profile.roles = AMDF_MEMORY_PROFILE_ROLE_CREATE;
