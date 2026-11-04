@@ -19,16 +19,32 @@ loom_cc_library(
     deps = ["//runtime/src/iree/base"],
 )
 
+loom_cc_library(
+    name = "field",
+    hdrs = ["field.h"],
+    visibility = ["//visibility:public"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+_DOMAIN_SUBTREES = [
+    "//loom/binding/...",
+    "//loom/src/loom/runtime/parameter/...",
+    "//loom/src/loom/runtime/storage/...",
+    "//loom/src/loom/serve/...",
+    "//loom/src/loom/service/...",
+    "//loom/src/loom/target/...",
+]
+
 iree_assert_dependency_boundary(
     name = "sampling_is_runtime_only",
-    forbidden_subtrees = [
-        "//loom/binding/...",
-        "//loom/src/loom/runtime/parameter/...",
-        "//loom/src/loom/runtime/storage/...",
-        "//loom/src/loom/serve/...",
-        "//loom/src/loom/service/...",
-        "//loom/src/loom/target/...",
-    ],
+    forbidden_subtrees = _DOMAIN_SUBTREES,
     message = "Generic telemetry contracts must not depend on domain schemas, serving, services, or compiler implementation",
     target = ":sample",
+)
+
+iree_assert_dependency_boundary(
+    name = "fields_are_runtime_only",
+    forbidden_subtrees = _DOMAIN_SUBTREES,
+    message = "Generic telemetry fields must not depend on domain schemas, serving, services, or compiler implementation",
+    target = ":field",
 )

@@ -58,78 +58,106 @@ void loom_serve_telemetry_diagnostic_capture(
   }
 }
 
-iree_status_t loom_serve_telemetry_counters_format(
+void loom_serve_telemetry_counters_read_fields(
     const loom_serve_telemetry_counters_t* counters,
-    iree_string_builder_t* output) {
-  return iree_string_builder_append_format(
-      output,
-      "{\"requests\":%" PRIu64 ",\"completed\":%" PRIu64
-      ",\"rejected\":%" PRIu64 ",\"cancelled\":%" PRIu64 ",\"failed\":%" PRIu64
-      ",\"input_tokens\":%" PRIu64 ",\"output_tokens\":%" PRIu64
-      ",\"batches\":%" PRIu64 "}",
-      counters->requests, counters->completed, counters->rejected,
-      counters->cancelled, counters->failed, counters->input_tokens,
-      counters->output_tokens, counters->batches);
-}
-
-iree_status_t loom_serve_telemetry_diagnostic_format(
-    const loom_serve_telemetry_diagnostic_t* diagnostic,
-    iree_string_builder_t* output) {
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      output, ",\"status\":%" PRIu64 ",\"message_truncated\":%s,\"message\":",
-      diagnostic->code, diagnostic->truncated ? "true" : "false"));
-  return loom_serve_telemetry_record_quote(
-      output, iree_make_string_view(diagnostic->message, diagnostic->length));
+    loom_runtime_telemetry_field_t
+        fields[LOOM_SERVE_TELEMETRY_COUNTER_FIELD_COUNT]) {
+  static const char* const names[] = {
+      "requests", "completed",    "rejected",      "cancelled",
+      "failed",   "input_tokens", "output_tokens", "batches"};
+  const uint64_t values[] = {counters->requests,      counters->completed,
+                             counters->rejected,      counters->cancelled,
+                             counters->failed,        counters->input_tokens,
+                             counters->output_tokens, counters->batches};
+  static_assert(
+      IREE_ARRAYSIZE(names) == LOOM_SERVE_TELEMETRY_COUNTER_FIELD_COUNT,
+      "one name per counter");
+  static_assert(
+      IREE_ARRAYSIZE(values) == LOOM_SERVE_TELEMETRY_COUNTER_FIELD_COUNT,
+      "one value per counter");
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(values); ++i) {
+    fields[i] = loom_runtime_telemetry_field_uint64(names[i], values[i]);
+  }
 }
 
 static iree_status_t loom_serve_telemetry_record_snapshot(
     const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      output, ",\"queued\":%" PRIu64 ",\"active\":%" PRIu64 ",\"phase\":",
-      record->data.snapshot.queued, record->data.snapshot.active));
-  IREE_RETURN_IF_ERROR(loom_serve_telemetry_record_quote(
-      output, iree_make_cstring_view(record->data.snapshot.phase)));
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(output, ",\"counters\":"));
-  return loom_serve_telemetry_counters_format(&record->data.snapshot.counters,
-                                              output);
+    loom_runtime_telemetry_field_sink_t sink) {
+  loom_runtime_telemetry_field_t
+      counters[LOOM_SERVE_TELEMETRY_COUNTER_FIELD_COUNT];
+  loom_serve_telemetry_counters_read_fields(&record->data.snapshot.counters,
+                                            counters);
+  const loom_runtime_telemetry_field_t fields[] = {
+      loom_runtime_telemetry_field_uint64("queued",
+                                          record->data.snapshot.queued),
+      loom_runtime_telemetry_field_uint64("active",
+                                          record->data.snapshot.active),
+      loom_runtime_telemetry_field_string(
+          "phase", iree_make_cstring_view(record->data.snapshot.phase)),
+      loom_runtime_telemetry_field_object("counters", IREE_ARRAYSIZE(counters),
+                                          counters),
+  };
+  return sink.emit(sink.self, IREE_ARRAYSIZE(fields), fields);
 }
 
 static iree_status_t loom_serve_telemetry_record_request_end(
     const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      output,
-      ",\"outcome\":\"%s\",\"duration_ns\":%" PRIu64
-      ",\"input_tokens\":%" PRIu64,
-      loom_serve_telemetry_outcome_name(
-          (loom_serve_telemetry_outcome_t)record->data.end.outcome),
-      record->data.end.duration_ns, record->data.end.input_tokens));
-  return loom_serve_telemetry_diagnostic_format(&record->data.end.diagnostic,
-                                                output);
+    loom_runtime_telemetry_field_sink_t sink) {
+  const loom_serve_telemetry_diagnostic_t* diagnostic =
+      &record->data.end.diagnostic;
+  const loom_runtime_telemetry_field_t fields[] = {
+      loom_runtime_telemetry_field_string(
+          "outcome",
+          iree_make_cstring_view(loom_serve_telemetry_outcome_name(
+              (loom_serve_telemetry_outcome_t)record->data.end.outcome))),
+      loom_runtime_telemetry_field_uint64("duration_ns",
+                                          record->data.end.duration_ns),
+      loom_runtime_telemetry_field_uint64("input_tokens",
+                                          record->data.end.input_tokens),
+      loom_runtime_telemetry_field_uint64("status", diagnostic->code),
+      loom_runtime_telemetry_field_bool("message_truncated",
+                                        diagnostic->truncated != 0),
+      loom_runtime_telemetry_field_string(
+          "message",
+          iree_make_string_view(diagnostic->message, diagnostic->length)),
+  };
+  return sink.emit(sink.self, IREE_ARRAYSIZE(fields), fields);
 }
 
 static iree_status_t loom_serve_telemetry_record_first_output(
     const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
-  return iree_string_builder_append_format(
-      output, ",\"duration_ns\":%" PRIu64,
-      record->data.first_output.duration_ns);
+    loom_runtime_telemetry_field_sink_t sink) {
+  const loom_runtime_telemetry_field_t fields[] = {
+      loom_runtime_telemetry_field_uint64(
+          "duration_ns", record->data.first_output.duration_ns),
+  };
+  return sink.emit(sink.self, IREE_ARRAYSIZE(fields), fields);
 }
 
 static iree_status_t loom_serve_telemetry_record_batch(
     const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
-  return iree_string_builder_append_format(
-      output, ",\"batch\":%" PRIu64 ",\"requests\":%" PRIu64,
-      record->data.batch.id, record->data.batch.requests);
+    loom_runtime_telemetry_field_sink_t sink) {
+  const loom_runtime_telemetry_field_t fields[] = {
+      loom_runtime_telemetry_field_uint64("batch", record->data.batch.id),
+      loom_runtime_telemetry_field_uint64("requests",
+                                          record->data.batch.requests),
+  };
+  return sink.emit(sink.self, IREE_ARRAYSIZE(fields), fields);
 }
 
 static iree_status_t loom_serve_telemetry_record_error(
     const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
-  return loom_serve_telemetry_diagnostic_format(&record->data.error, output);
+    loom_runtime_telemetry_field_sink_t sink) {
+  const loom_serve_telemetry_diagnostic_t* diagnostic = &record->data.error;
+  const loom_runtime_telemetry_field_t fields[] = {
+      loom_runtime_telemetry_field_uint64("status", diagnostic->code),
+      loom_runtime_telemetry_field_bool("message_truncated",
+                                        diagnostic->truncated != 0),
+      loom_runtime_telemetry_field_string(
+          "message",
+          iree_make_string_view(diagnostic->message, diagnostic->length)),
+  };
+  return sink.emit(sink.self, IREE_ARRAYSIZE(fields), fields);
 }
 
 const loom_serve_telemetry_event_t LOOM_SERVE_TELEMETRY_STREAM_BEGIN = {
@@ -141,13 +169,78 @@ const loom_serve_telemetry_event_t LOOM_SERVE_TELEMETRY_REQUEST_BEGIN = {
 const loom_serve_telemetry_event_t LOOM_SERVE_TELEMETRY_FIRST_OUTPUT = {
     "first_output", loom_serve_telemetry_record_first_output};
 const loom_serve_telemetry_event_t LOOM_SERVE_TELEMETRY_REQUEST_END = {
-    "request_end", loom_serve_telemetry_record_request_end};
+    .name = "request_end",
+    .read_fields = loom_serve_telemetry_record_request_end};
 const loom_serve_telemetry_event_t LOOM_SERVE_TELEMETRY_BATCH_SUBMIT = {
     "batch_submit", loom_serve_telemetry_record_batch};
 const loom_serve_telemetry_event_t LOOM_SERVE_TELEMETRY_BATCH_END = {
     "batch_end", loom_serve_telemetry_record_batch};
 const loom_serve_telemetry_event_t LOOM_SERVE_TELEMETRY_ERROR = {
     "error", loom_serve_telemetry_record_error};
+
+static iree_status_t loom_serve_telemetry_record_write_fields(
+    void* self, iree_host_size_t count,
+    const loom_runtime_telemetry_field_t* fields) {
+  loom_json_object_writer_t* output = self;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+    const loom_runtime_telemetry_field_t* field = &fields[i];
+    const iree_string_view_t name = iree_make_cstring_view(field->name);
+    switch (field->kind) {
+      case LOOM_RUNTIME_TELEMETRY_FIELD_NULL:
+        status = loom_json_object_write_null_field(output, name);
+        break;
+      case LOOM_RUNTIME_TELEMETRY_FIELD_UINT64:
+        status = loom_json_object_write_uint64_field(output, name,
+                                                     field->value.uint64_value);
+        break;
+      case LOOM_RUNTIME_TELEMETRY_FIELD_INT64:
+        status = loom_json_object_write_int64_field(output, name,
+                                                    field->value.int64_value);
+        break;
+      case LOOM_RUNTIME_TELEMETRY_FIELD_BOOL:
+        status = loom_json_object_write_bool_field(output, name,
+                                                   field->value.bool_value);
+        break;
+      case LOOM_RUNTIME_TELEMETRY_FIELD_STRING:
+        status = loom_json_object_write_string_field(output, name,
+                                                     field->value.string_value);
+        break;
+      case LOOM_RUNTIME_TELEMETRY_FIELD_OBJECT: {
+        status = loom_json_object_begin_field(output, name);
+        loom_json_object_writer_t child;
+        if (iree_status_is_ok(status)) {
+          status = loom_json_object_begin(output->stream, &child);
+        }
+        if (iree_status_is_ok(status)) {
+          status = loom_serve_telemetry_record_write_fields(
+              &child, field->value.object_value.count,
+              field->value.object_value.fields);
+        }
+        if (iree_status_is_ok(status)) {
+          status = loom_json_object_end(&child);
+        }
+        break;
+      }
+    }
+  }
+  return status;
+}
+
+iree_status_t loom_serve_telemetry_counters_format(
+    const loom_serve_telemetry_counters_t* counters,
+    iree_string_builder_t* output) {
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(output, &stream);
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(&stream, &object));
+  loom_runtime_telemetry_field_t
+      fields[LOOM_SERVE_TELEMETRY_COUNTER_FIELD_COUNT];
+  loom_serve_telemetry_counters_read_fields(counters, fields);
+  IREE_RETURN_IF_ERROR(loom_serve_telemetry_record_write_fields(
+      &object, IREE_ARRAYSIZE(fields), fields));
+  return loom_json_object_end(&object);
+}
 
 iree_status_t loom_serve_telemetry_record_format(
     uint64_t position, const loom_serve_telemetry_record_t* record,
@@ -160,8 +253,13 @@ iree_status_t loom_serve_telemetry_record_format(
       output,
       ",\"sequence\":%" PRIu64 ",\"time_ns\":%" PRId64 ",\"request\":%" PRIu64,
       position, record->time_ns, record->request));
-  if (record->event->format) {
-    IREE_RETURN_IF_ERROR(record->event->format(record, output));
+  if (record->event->read_fields) {
+    loom_output_stream_t stream;
+    loom_output_stream_for_builder(output, &stream);
+    loom_json_object_writer_t object = {.stream = &stream, .field_count = 4};
+    IREE_RETURN_IF_ERROR(record->event->read_fields(
+        record, (loom_runtime_telemetry_field_sink_t){
+                    &object, loom_serve_telemetry_record_write_fields}));
   }
   return iree_string_builder_append_cstring(output, "}\n");
 }

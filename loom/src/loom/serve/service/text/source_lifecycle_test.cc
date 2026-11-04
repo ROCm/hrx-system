@@ -6,6 +6,7 @@
 
 #include <cerrno>
 
+#include "loom/runtime/telemetry/field.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/serve/telemetry/latency.h"
 #include "loom/serve/testing/worker_gate.h"
@@ -91,6 +92,25 @@ class FailedTextDiagnosticsTest : public SourceTextServiceTest {
                             record.data.end.diagnostic.length),
                 "source boundary failed");
       EXPECT_FALSE(record.data.end.diagnostic.truncated);
+      IREE_ASSERT_OK(record.event->read_fields(
+          &record,
+          {nullptr, [](void*, iree_host_size_t field_count,
+                       const loom_runtime_telemetry_field_t* fields) {
+             EXPECT_EQ(field_count, 6u);
+             if (field_count == 6) {
+               EXPECT_EQ(fields[0].kind, LOOM_RUNTIME_TELEMETRY_FIELD_STRING);
+               EXPECT_TRUE(iree_string_view_equal(fields[0].value.string_value,
+                                                  IREE_SV("failed")));
+               EXPECT_EQ(fields[3].value.uint64_value,
+                         IREE_STATUS_INVALID_ARGUMENT);
+               EXPECT_EQ(fields[4].kind, LOOM_RUNTIME_TELEMETRY_FIELD_BOOL);
+               EXPECT_FALSE(fields[4].value.bool_value);
+               EXPECT_TRUE(
+                   iree_string_view_equal(fields[5].value.string_value,
+                                          IREE_SV("source boundary failed")));
+             }
+             return iree_ok_status();
+           }}));
     }
     EXPECT_EQ(count, expected_count);
   }
@@ -118,6 +138,10 @@ TEST_F(FailedTextDiagnosticsTest, OutputFailureRetainsRequestDiagnostic) {
   }
   // The second request is accepted: translation failure belongs to its request,
   // not the model. Its captured diagnostic survives request storage reuse.
+  loom_serve_text_service_free(service_, IREE_STATUS_OK);
+  service_ = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_model_free(model_));
+  model_ = nullptr;
   ExpectFailedEnds(2);
 }
 

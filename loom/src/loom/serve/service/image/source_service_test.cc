@@ -11,6 +11,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -27,6 +28,7 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
 #include "iree/vm/buffer.h"
+#include "loom/runtime/telemetry/field.h"
 #include "loom/serve/runtime/program/package.h"
 #include "loom/serve/runtime/program/variant_pool.h"
 #include "loom/serve/server/model_registration.h"
@@ -34,6 +36,8 @@
 #include "loom/serve/service/image/model.h"
 #include "loom/serve/service/image/output.h"
 #include "loom/serve/service/image/service.h"
+#include "loom/serve/telemetry/record.h"
+#include "loom/serve/telemetry/stream.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/model.h"
 #include "loom/serve/testing/model_wait.h"
@@ -575,6 +579,52 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     // Two cohorts, not three serial images, each using the same source command.
     EXPECT_EQ(interface.telemetry.counters->batches, GetParam() ? 4u : 2u);
     EXPECT_STREQ(interface.snapshot(interface.self).phase, "idle");
+    std::vector<loom_serve_telemetry_record_t> prepared_records;
+    uint64_t cursor = 0;
+    const auto head =
+        loom_serve_telemetry_stream_head(interface.telemetry.stream);
+    while (cursor < head) {
+      loom_serve_telemetry_record_t record;
+      ASSERT_EQ(loom_serve_telemetry_stream_read(interface.telemetry.stream,
+                                                 &cursor, &record),
+                LOOM_SERVE_TELEMETRY_READ_RECORD);
+      if (std::strcmp(record.event->name, "image_prepared") == 0) {
+        prepared_records.push_back(record);
+      }
+    }
+    service.reset();
+    IREE_ASSERT_OK(loom_serve_image_model_free(model_));
+    model_ = nullptr;
+    ASSERT_EQ(prepared_records.size(), 3u);
+    for (const auto& record : prepared_records) {
+      loom_serve_image_prepared_t expected;
+      std::memcpy(&expected, record.data.words, sizeof(expected));
+      IREE_ASSERT_OK(record.event->read_fields(
+          &record,
+          {&expected, [](void* self, iree_host_size_t count,
+                         const loom_runtime_telemetry_field_t* fields) {
+             const auto& expected =
+                 *static_cast<loom_serve_image_prepared_t*>(self);
+             EXPECT_EQ(count, 3u);
+             if (count == 3) {
+               EXPECT_EQ(fields[0].value.uint64_value, expected.stage);
+               EXPECT_EQ(fields[1].kind, LOOM_RUNTIME_TELEMETRY_FIELD_INT64);
+               EXPECT_EQ(fields[1].value.int64_value, expected.tag);
+               EXPECT_EQ(fields[2].value.uint64_value, expected.input_bytes);
+             }
+             return iree_ok_status();
+           }}));
+      iree_string_builder_t output;
+      iree_string_builder_initialize(host_allocator_, &output);
+      IREE_ASSERT_OK(loom_serve_telemetry_record_format(0, &record, &output));
+      iree_string_view_t tag;
+      IREE_ASSERT_OK(iree_json_lookup_object_value(
+          iree_string_builder_view(&output), IREE_SV("tag"), &tag));
+      int64_t value = 0;
+      IREE_ASSERT_OK(iree_json_parse_int64(tag, &value));
+      EXPECT_EQ(value, expected.tag);
+      iree_string_builder_deinitialize(&output);
+    }
   }
 
   // Allocator for model, transport and expected encoded output.

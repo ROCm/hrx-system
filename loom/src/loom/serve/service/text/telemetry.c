@@ -6,9 +6,9 @@
 
 #include "loom/serve/service/text/telemetry.h"
 
-#include <inttypes.h>
 #include <string.h>
 
+#include "loom/runtime/telemetry/field.h"
 #include "loom/serve/service/text/schedule.h"
 
 iree_status_t loom_serve_text_telemetry_initialize(
@@ -59,74 +59,102 @@ void loom_serve_text_record(loom_serve_telemetry_stream_t* stream,
   loom_serve_telemetry_stream_append(stream, &record);
 }
 
-static iree_status_t loom_serve_text_admission_format(
+static iree_status_t loom_serve_text_admission_fields(
     const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
+    loom_runtime_telemetry_field_sink_t sink) {
   loom_serve_text_admission_record_t value;
   static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
   memcpy(&value, record->data.words, sizeof(value));
-  return iree_string_builder_append_format(
-      output,
-      ",\"session\":%" PRIu64 ",\"row\":%" PRIu64
-      ",\"retained_tokens\":%" PRIu64 ",\"appended_tokens\":%" PRIu64
-      ",\"reservation_tokens\":%" PRIu64 ",\"restored_bytes\":%" PRIu64
-      ",\"max_tokens\":%" PRIu64 ",\"prepare_ns\":%" PRIu64
-      ",\"queue_rank\":%" PRIu64 ",\"overtakes\":%" PRIu64
-      ",\"overtake_budget\":%" PRIu64 ",\"queue_ns\":%" PRIu64
-      ",\"pool_reserved_tokens\":%" PRIu64 ",\"pool_resident_tokens\":%" PRIu64,
-      value.session, value.row, value.retained_tokens, value.appended_tokens,
-      value.reservation_tokens, value.restored_bytes, value.max_tokens,
-      value.prepare_ns, value.queue_rank, value.overtakes,
-      value.overtake_budget, value.queue_ns, value.pool_reserved_tokens,
-      value.pool_resident_tokens);
+  const loom_runtime_telemetry_field_t fields[] = {
+      loom_runtime_telemetry_field_uint64("session", value.session),
+      loom_runtime_telemetry_field_uint64("row", value.row),
+      loom_runtime_telemetry_field_uint64("retained_tokens",
+                                          value.retained_tokens),
+      loom_runtime_telemetry_field_uint64("appended_tokens",
+                                          value.appended_tokens),
+      loom_runtime_telemetry_field_uint64("reservation_tokens",
+                                          value.reservation_tokens),
+      loom_runtime_telemetry_field_uint64("restored_bytes",
+                                          value.restored_bytes),
+      loom_runtime_telemetry_field_uint64("max_tokens", value.max_tokens),
+      loom_runtime_telemetry_field_uint64("prepare_ns", value.prepare_ns),
+      loom_runtime_telemetry_field_uint64("queue_rank", value.queue_rank),
+      loom_runtime_telemetry_field_uint64("overtakes", value.overtakes),
+      loom_runtime_telemetry_field_uint64("overtake_budget",
+                                          value.overtake_budget),
+      loom_runtime_telemetry_field_uint64("queue_ns", value.queue_ns),
+      loom_runtime_telemetry_field_uint64("pool_reserved_tokens",
+                                          value.pool_reserved_tokens),
+      loom_runtime_telemetry_field_uint64("pool_resident_tokens",
+                                          value.pool_resident_tokens),
+  };
+  return sink.emit(sink.self, IREE_ARRAYSIZE(fields), fields);
 }
 
-static iree_status_t loom_serve_text_request_format(
+static iree_status_t loom_serve_text_request_fields(
     const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
+    loom_runtime_telemetry_field_sink_t sink) {
   loom_serve_text_request_record_t value;
   static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
   memcpy(&value, record->data.words, sizeof(value));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      output,
-      ",\"session\":%" PRIu64 ",\"retained_tokens\":%" PRIu64
-      ",\"position\":%" PRIu64 ",\"queue_ns\":%" PRIu64
-      ",\"first_token_ns\":%" PRIu64 ",\"duration_ns\":%" PRIu64
-      ",\"finish_reason\":\"%s\",\"counters\":",
-      value.session, value.retained_tokens, value.position, value.queue_ns,
-      value.first_token_ns, value.duration_ns, value.finish_reason));
-  return loom_serve_telemetry_counters_format(&value.counters, output);
+  loom_runtime_telemetry_field_t
+      counters[LOOM_SERVE_TELEMETRY_COUNTER_FIELD_COUNT];
+  loom_serve_telemetry_counters_read_fields(&value.counters, counters);
+  const loom_runtime_telemetry_field_t fields[] = {
+      loom_runtime_telemetry_field_uint64("session", value.session),
+      loom_runtime_telemetry_field_uint64("retained_tokens",
+                                          value.retained_tokens),
+      loom_runtime_telemetry_field_uint64("position", value.position),
+      loom_runtime_telemetry_field_uint64("queue_ns", value.queue_ns),
+      loom_runtime_telemetry_field_uint64("first_token_ns",
+                                          value.first_token_ns),
+      loom_runtime_telemetry_field_uint64("duration_ns", value.duration_ns),
+      loom_runtime_telemetry_field_string(
+          "finish_reason", iree_make_cstring_view(value.finish_reason)),
+      loom_runtime_telemetry_field_object("counters", IREE_ARRAYSIZE(counters),
+                                          counters),
+  };
+  return sink.emit(sink.self, IREE_ARRAYSIZE(fields), fields);
 }
 
-static iree_status_t loom_serve_text_session_begin_format(
+static iree_status_t loom_serve_text_session_begin_fields(
     const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
+    loom_runtime_telemetry_field_sink_t sink) {
   loom_serve_text_session_record_t value;
   static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
   memcpy(&value, record->data.words, sizeof(value));
-  // Session keys have already passed the ASCII identifier boundary.
-  return iree_string_builder_append_format(
-      output, ",\"session\":%" PRIu64 ",\"row\":%" PRIu64 ",\"name\":\"%s\"",
-      value.session, value.row, value.name);
+  const loom_runtime_telemetry_field_t fields[] = {
+      loom_runtime_telemetry_field_uint64("session", value.session),
+      loom_runtime_telemetry_field_uint64("row", value.row),
+      loom_runtime_telemetry_field_string("name",
+                                          iree_make_cstring_view(value.name)),
+  };
+  return sink.emit(sink.self, IREE_ARRAYSIZE(fields), fields);
 }
 
-static iree_status_t loom_serve_text_session_end_format(
+static iree_status_t loom_serve_text_session_end_fields(
     const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
+    loom_runtime_telemetry_field_sink_t sink) {
   loom_serve_text_session_end_record_t value;
   static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
   memcpy(&value, record->data.words, sizeof(value));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      output,
-      ",\"session\":%" PRIu64 ",\"position\":%" PRIu64
-      ",\"resident_tokens\":%" PRIu64 ",\"counters\":",
-      value.session, value.position, value.resident_tokens));
-  return loom_serve_telemetry_counters_format(&value.counters, output);
+  loom_runtime_telemetry_field_t
+      counters[LOOM_SERVE_TELEMETRY_COUNTER_FIELD_COUNT];
+  loom_serve_telemetry_counters_read_fields(&value.counters, counters);
+  const loom_runtime_telemetry_field_t fields[] = {
+      loom_runtime_telemetry_field_uint64("session", value.session),
+      loom_runtime_telemetry_field_uint64("position", value.position),
+      loom_runtime_telemetry_field_uint64("resident_tokens",
+                                          value.resident_tokens),
+      loom_runtime_telemetry_field_object("counters", IREE_ARRAYSIZE(counters),
+                                          counters),
+  };
+  return sink.emit(sink.self, IREE_ARRAYSIZE(fields), fields);
 }
 
-static iree_status_t loom_serve_text_epoch_format(
+static iree_status_t loom_serve_text_epoch_fields(
     const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
+    loom_runtime_telemetry_field_sink_t sink) {
   loom_serve_text_epoch_record_t value;
   static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
   memcpy(&value, record->data.words, sizeof(value));
@@ -134,124 +162,147 @@ static iree_status_t loom_serve_text_epoch_format(
       value.schedule_mode == LOOM_SERVE_TEXT_SCHEDULE_PACKED    ? "packed"
       : value.schedule_mode == LOOM_SERVE_TEXT_SCHEDULE_MATCHED ? "matched"
                                                                 : "isolated";
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(output, ",\"token_slots\":"));
-  if (value.token_slots) {
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(output, "%" PRIu64,
-                                                           value.token_slots));
-  } else {
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "null"));
-  }
-  return iree_string_builder_append_format(
-      output,
-      ",\"epoch\":%" PRIu64
-      ",\"scheduler\":\"%s\",\"packing\":\"%s\""
-      ",\"spans\":%" PRIu64 ",\"shape\":%" PRIu64 ",\"token_capacity\":%" PRIu64
-      ",\"span_capacity\":%" PRIu64 ",\"prefill_tokens\":%" PRIu64
-      ",\"decode_tokens\":%" PRIu64
-      ",\"selected_tokens_including_eos\":%" PRIu64 ",\"traversals\":%" PRIu64
-      ",\"model_ns\":%" PRIu64 ",\"device_epochs\":%" PRIu64
-      ",\"continued_prefill_tokens\":%" PRIu64
-      ",\"draft\":{\"verifications\":%" PRIu64 ",\"proposed_tokens\":%" PRIu64
-      ",\"accepted_draft_inputs\":%" PRIu64 "}",
-      value.epoch, schedule,
-      value.packing_mode == LOOM_SERVE_TEXT_PACKING_SEPARATE ? "separate"
-                                                             : "mixed",
-      value.spans, value.shape, value.token_capacity, value.span_capacity,
-      value.prefill_tokens, value.decode_tokens, value.output_tokens,
-      value.traversals, value.duration_ns, value.device_epochs,
-      value.continued_prefill_tokens, value.verifications,
-      value.verifications * value.draft_depth, value.accepted_draft_inputs);
+  const loom_runtime_telemetry_field_t draft[] = {
+      loom_runtime_telemetry_field_uint64("verifications", value.verifications),
+      loom_runtime_telemetry_field_uint64(
+          "proposed_tokens", value.verifications * value.draft_depth),
+      loom_runtime_telemetry_field_uint64("accepted_draft_inputs",
+                                          value.accepted_draft_inputs),
+  };
+  const loom_runtime_telemetry_field_t fields[] = {
+      value.token_slots ? loom_runtime_telemetry_field_uint64("token_slots",
+                                                              value.token_slots)
+                        : loom_runtime_telemetry_field_null("token_slots"),
+      loom_runtime_telemetry_field_uint64("epoch", value.epoch),
+      loom_runtime_telemetry_field_string("scheduler",
+                                          iree_make_cstring_view(schedule)),
+      loom_runtime_telemetry_field_string(
+          "packing", iree_make_cstring_view(
+                         value.packing_mode == LOOM_SERVE_TEXT_PACKING_SEPARATE
+                             ? "separate"
+                             : "mixed")),
+      loom_runtime_telemetry_field_uint64("spans", value.spans),
+      loom_runtime_telemetry_field_uint64("shape", value.shape),
+      loom_runtime_telemetry_field_uint64("token_capacity",
+                                          value.token_capacity),
+      loom_runtime_telemetry_field_uint64("span_capacity", value.span_capacity),
+      loom_runtime_telemetry_field_uint64("prefill_tokens",
+                                          value.prefill_tokens),
+      loom_runtime_telemetry_field_uint64("decode_tokens", value.decode_tokens),
+      loom_runtime_telemetry_field_uint64("selected_tokens_including_eos",
+                                          value.output_tokens),
+      loom_runtime_telemetry_field_uint64("traversals", value.traversals),
+      loom_runtime_telemetry_field_uint64("model_ns", value.duration_ns),
+      loom_runtime_telemetry_field_uint64("device_epochs", value.device_epochs),
+      loom_runtime_telemetry_field_uint64("continued_prefill_tokens",
+                                          value.continued_prefill_tokens),
+      loom_runtime_telemetry_field_object("draft", IREE_ARRAYSIZE(draft),
+                                          draft),
+  };
+  return sink.emit(sink.self, IREE_ARRAYSIZE(fields), fields);
 }
 
-static iree_status_t loom_serve_text_span_format(
+static iree_status_t loom_serve_text_span_fields(
     const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
+    loom_runtime_telemetry_field_sink_t sink) {
   loom_serve_text_span_record_t value;
   static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
   memcpy(&value, record->data.words, sizeof(value));
-  return iree_string_builder_append_format(
-      output,
-      ",\"epoch\":%" PRIu64 ",\"session\":%" PRIu64 ",\"row\":%" PRIu64
-      ",\"kind\":\"%s\",\"position\":%" PRIu64 ",\"tokens\":%" PRIu64
-      ",\"select\":%s,\"consumed_tokens\":%" PRIu64
-      ",\"output_tokens\":%" PRIu64 ",\"output_limit\":%" PRIu64
-      ",\"known_tokens\":%" PRIu64 ",\"verification_epochs\":%" PRIu64,
-      value.epoch, value.session, value.row,
-      value.prefill        ? "prefill"
-      : value.output_limit ? "verify"
-                           : "decode",
-      value.position, value.tokens, value.select ? "true" : "false",
-      value.consumed_tokens, value.output_tokens, value.output_limit,
-      value.known_tokens, value.verification_epochs);
+  const loom_runtime_telemetry_field_t fields[] = {
+      loom_runtime_telemetry_field_uint64("epoch", value.epoch),
+      loom_runtime_telemetry_field_uint64("session", value.session),
+      loom_runtime_telemetry_field_uint64("row", value.row),
+      loom_runtime_telemetry_field_string(
+          "kind", iree_make_cstring_view(value.prefill        ? "prefill"
+                                         : value.output_limit ? "verify"
+                                                              : "decode")),
+      loom_runtime_telemetry_field_uint64("position", value.position),
+      loom_runtime_telemetry_field_uint64("tokens", value.tokens),
+      loom_runtime_telemetry_field_bool("select", value.select != 0),
+      loom_runtime_telemetry_field_uint64("consumed_tokens",
+                                          value.consumed_tokens),
+      loom_runtime_telemetry_field_uint64("output_tokens", value.output_tokens),
+      loom_runtime_telemetry_field_uint64("output_limit", value.output_limit),
+      loom_runtime_telemetry_field_uint64("known_tokens", value.known_tokens),
+      loom_runtime_telemetry_field_uint64("verification_epochs",
+                                          value.verification_epochs),
+  };
+  return sink.emit(sink.self, IREE_ARRAYSIZE(fields), fields);
 }
 
-static iree_status_t loom_serve_text_checkpoint_format(
+static iree_status_t loom_serve_text_checkpoint_fields(
     const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
+    loom_runtime_telemetry_field_sink_t sink) {
   loom_serve_text_checkpoint_record_t value;
   static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
   memcpy(&value, record->data.words, sizeof(value));
-  return iree_string_builder_append_format(
-      output,
-      ",\"checkpoint\":\"%s\",\"position\":%" PRIu64
-      ",\"host_snapshot_bytes\":%" PRIu64,
-      value.name, value.position, value.host_bytes);
+  const loom_runtime_telemetry_field_t fields[] = {
+      loom_runtime_telemetry_field_string("checkpoint",
+                                          iree_make_cstring_view(value.name)),
+      loom_runtime_telemetry_field_uint64("position", value.position),
+      loom_runtime_telemetry_field_uint64("host_snapshot_bytes",
+                                          value.host_bytes),
+  };
+  return sink.emit(sink.self, IREE_ARRAYSIZE(fields), fields);
 }
 
-static iree_status_t loom_serve_text_prefix_format(
+static iree_status_t loom_serve_text_prefix_fields(
     const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
+    loom_runtime_telemetry_field_sink_t sink) {
   loom_serve_text_prefix_record_t value;
   static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
   memcpy(&value, record->data.words, sizeof(value));
-  return iree_string_builder_append_format(
-      output,
-      ",\"readiness_ns\":%" PRIu64 ",\"capacity\":%" PRIu64
-      ",\"endpoints\":%" PRIu64,
-      value.readiness_ns, value.capacity, value.endpoints);
+  const loom_runtime_telemetry_field_t fields[] = {
+      loom_runtime_telemetry_field_uint64("readiness_ns", value.readiness_ns),
+      loom_runtime_telemetry_field_uint64("capacity", value.capacity),
+      loom_runtime_telemetry_field_uint64("endpoints", value.endpoints),
+  };
+  return sink.emit(sink.self, IREE_ARRAYSIZE(fields), fields);
 }
 
 const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_PREFIX_CAPTURE = {
-    "prefix_capture", loom_serve_text_prefix_format};
+    "prefix_capture", loom_serve_text_prefix_fields};
 
-static iree_status_t loom_serve_text_trim_format(
+static iree_status_t loom_serve_text_trim_fields(
     const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
+    loom_runtime_telemetry_field_sink_t sink) {
   loom_serve_text_trim_record_t value;
   static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
   memcpy(&value, record->data.words, sizeof(value));
-  return iree_string_builder_append_format(
-      output,
-      ",\"duration_ns\":%" PRIu64 ",\"moved_blocks\":%" PRIu64
-      ",\"copied_bytes\":%" PRIu64 ",\"released_bytes\":%" PRIu64
-      ",\"committed_bytes\":%" PRIu64,
-      value.duration_ns, value.moved_blocks, value.copied_bytes,
-      value.released_bytes, value.committed_bytes);
+  const loom_runtime_telemetry_field_t fields[] = {
+      loom_runtime_telemetry_field_uint64("duration_ns", value.duration_ns),
+      loom_runtime_telemetry_field_uint64("moved_blocks", value.moved_blocks),
+      loom_runtime_telemetry_field_uint64("copied_bytes", value.copied_bytes),
+      loom_runtime_telemetry_field_uint64("released_bytes",
+                                          value.released_bytes),
+      loom_runtime_telemetry_field_uint64("committed_bytes",
+                                          value.committed_bytes),
+  };
+  return sink.emit(sink.self, IREE_ARRAYSIZE(fields), fields);
 }
 
 const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_PREPARED = {
-    "prepared", loom_serve_text_admission_format};
+    "prepared", loom_serve_text_admission_fields};
 const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_ADMIT = {
-    "admit", loom_serve_text_admission_format};
+    "admit", loom_serve_text_admission_fields};
 const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_REQUEST_STATS = {
-    "request_stats", loom_serve_text_request_format};
+    "request_stats", loom_serve_text_request_fields};
 const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_SESSION_BEGIN = {
-    "session_begin", loom_serve_text_session_begin_format};
+    "session_begin", loom_serve_text_session_begin_fields};
 const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_SESSION_END = {
-    "session_end", loom_serve_text_session_end_format};
+    "session_end", loom_serve_text_session_end_fields};
 const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_EPOCH = {
-    "epoch", loom_serve_text_epoch_format};
+    .name = "epoch", .read_fields = loom_serve_text_epoch_fields};
 const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_SPAN = {
-    "span", loom_serve_text_span_format};
+    "span", loom_serve_text_span_fields};
 const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_CHECKPOINT_PIN = {
-    "checkpoint_pin", loom_serve_text_checkpoint_format};
+    "checkpoint_pin", loom_serve_text_checkpoint_fields};
 const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_CHECKPOINT_SUSPEND = {
-    "checkpoint_suspend", loom_serve_text_checkpoint_format};
+    "checkpoint_suspend", loom_serve_text_checkpoint_fields};
 const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_CHECKPOINT_RELEASE = {
-    "checkpoint_release", loom_serve_text_checkpoint_format};
+    "checkpoint_release", loom_serve_text_checkpoint_fields};
 const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_TRIM = {
-    "state_trim", loom_serve_text_trim_format};
+    "state_trim", loom_serve_text_trim_fields};
 
 void loom_serve_text_telemetry_diagnose(loom_serve_text_telemetry_t* telemetry,
                                         uint64_t request,

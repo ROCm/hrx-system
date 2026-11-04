@@ -10,6 +10,7 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/runtime/telemetry/field.h"
 #include "loom/serve/telemetry/stream.h"
 
 namespace {
@@ -61,10 +62,11 @@ TEST(TelemetryRecord, PublicationDoesNotRenderOrBorrowProducerPayload) {
   render_count = 0;
   static const loom_serve_telemetry_event_t event = {
       "epoch", [](const loom_serve_telemetry_record_t* record,
-                  iree_string_builder_t* output) {
+                  loom_runtime_telemetry_field_sink_t sink) {
         ++render_count;
-        return iree_string_builder_append_format(
-            output, ",\"useful_tokens\":%" PRIu64, record->data.words[0]);
+        const auto field = loom_runtime_telemetry_field_uint64(
+            "useful_tokens", record->data.words[0]);
+        return sink.emit(sink.self, 1, &field);
       }};
   loom_serve_telemetry_stream_t* stream = nullptr;
   IREE_ASSERT_OK(loom_serve_telemetry_stream_allocate(

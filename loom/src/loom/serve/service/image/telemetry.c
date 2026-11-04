@@ -6,8 +6,9 @@
 
 #include "loom/serve/service/image/telemetry.h"
 
-#include <inttypes.h>
 #include <string.h>
+
+#include "loom/runtime/telemetry/field.h"
 
 iree_status_t loom_serve_image_sample_totals(
     const loom_serve_image_totals_t* totals,
@@ -38,49 +39,63 @@ iree_status_t loom_serve_image_sample_totals(
   return sink.emit(sink.self, &topic, values);
 }
 
-static iree_status_t loom_serve_image_prepared_format(
+static iree_status_t loom_serve_image_prepared_fields(
     const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
+    loom_runtime_telemetry_field_sink_t sink) {
   loom_serve_image_prepared_t prepared;
   static_assert(sizeof(prepared) <= sizeof(record->data), "record capacity");
   memcpy(&prepared, record->data.words, sizeof(prepared));
-  return iree_string_builder_append_format(
-      output,
-      ",\"stage\":%" PRIu64 ",\"tag\":%" PRId64 ",\"input_bytes\":%" PRIu64,
-      prepared.stage, prepared.tag, prepared.input_bytes);
+  const loom_runtime_telemetry_field_t fields[] = {
+      loom_runtime_telemetry_field_uint64("stage", prepared.stage),
+      loom_runtime_telemetry_field_int64("tag", prepared.tag),
+      loom_runtime_telemetry_field_uint64("input_bytes", prepared.input_bytes),
+  };
+  return sink.emit(sink.self, IREE_ARRAYSIZE(fields), fields);
 }
 
-static iree_status_t loom_serve_image_work_format(
-    const loom_serve_image_work_t* work, iree_string_builder_t* output) {
-  return iree_string_builder_append_format(
-      output,
-      ",\"queue_ns\":%" PRIu64 ",\"prepare_ns\":%" PRIu64
-      ",\"admission_ns\":%" PRIu64 ",\"submit_ns\":%" PRIu64
-      ",\"execution_ns\":%" PRIu64 ",\"png_ns\":%" PRIu64
-      ",\"json_ns\":%" PRIu64 ",\"png_bytes\":%" PRIu64,
-      work->queue_ns, work->prepare_ns, work->admission_ns, work->submit_ns,
-      work->execution_ns, work->png_ns, work->json_ns, work->png_bytes);
+enum { IMAGE_WORK_FIELD_COUNT = 8 };
+
+static void loom_serve_image_work_read_fields(
+    const loom_serve_image_work_t* work,
+    loom_runtime_telemetry_field_t fields[IMAGE_WORK_FIELD_COUNT]) {
+  fields[0] = loom_runtime_telemetry_field_uint64("queue_ns", work->queue_ns);
+  fields[1] =
+      loom_runtime_telemetry_field_uint64("prepare_ns", work->prepare_ns);
+  fields[2] =
+      loom_runtime_telemetry_field_uint64("admission_ns", work->admission_ns);
+  fields[3] = loom_runtime_telemetry_field_uint64("submit_ns", work->submit_ns);
+  fields[4] =
+      loom_runtime_telemetry_field_uint64("execution_ns", work->execution_ns);
+  fields[5] = loom_runtime_telemetry_field_uint64("png_ns", work->png_ns);
+  fields[6] = loom_runtime_telemetry_field_uint64("json_ns", work->json_ns);
+  fields[7] = loom_runtime_telemetry_field_uint64("png_bytes", work->png_bytes);
 }
 
-static iree_status_t loom_serve_image_request_format(
+static iree_status_t loom_serve_image_request_fields(
     const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
-  loom_serve_image_work_t work;
-  static_assert(sizeof(work) <= sizeof(record->data), "record capacity");
-  memcpy(&work, record->data.words, sizeof(work));
-  return loom_serve_image_work_format(&work, output);
+    loom_runtime_telemetry_field_sink_t sink) {
+  loom_serve_image_work_t value;
+  static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
+  memcpy(&value, record->data.words, sizeof(value));
+  loom_runtime_telemetry_field_t fields[IMAGE_WORK_FIELD_COUNT];
+  loom_serve_image_work_read_fields(&value, fields);
+  return sink.emit(sink.self, IREE_ARRAYSIZE(fields), fields);
 }
 
-static iree_status_t loom_serve_image_totals_format(
+static iree_status_t loom_serve_image_totals_fields(
     const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
-  loom_serve_image_totals_t totals;
-  static_assert(sizeof(totals) <= sizeof(record->data), "record capacity");
-  memcpy(&totals, record->data.words, sizeof(totals));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      output, ",\"generated_images\":%" PRIu64 ",\"generated_pixels\":%" PRIu64,
-      totals.generated_images, totals.generated_pixels));
-  return loom_serve_image_work_format(&totals.work, output);
+    loom_runtime_telemetry_field_sink_t sink) {
+  loom_serve_image_totals_t value;
+  static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
+  memcpy(&value, record->data.words, sizeof(value));
+  loom_runtime_telemetry_field_t fields[2 + IMAGE_WORK_FIELD_COUNT] = {
+      loom_runtime_telemetry_field_uint64("generated_images",
+                                          value.generated_images),
+      loom_runtime_telemetry_field_uint64("generated_pixels",
+                                          value.generated_pixels),
+  };
+  loom_serve_image_work_read_fields(&value.work, fields + 2);
+  return sink.emit(sink.self, IREE_ARRAYSIZE(fields), fields);
 }
 
 const loom_serve_telemetry_event_t LOOM_SERVE_IMAGE_STARTED = {"image_started",
@@ -92,11 +107,11 @@ const loom_serve_telemetry_event_t LOOM_SERVE_IMAGE_GENERATED = {
 const loom_serve_telemetry_event_t LOOM_SERVE_IMAGE_SHUTDOWN = {
     "image_shutdown", NULL};
 static const loom_serve_telemetry_event_t image_prepared_event = {
-    "image_prepared", loom_serve_image_prepared_format};
+    .name = "image_prepared", .read_fields = loom_serve_image_prepared_fields};
 static const loom_serve_telemetry_event_t image_request_event = {
-    "image_request_stats", loom_serve_image_request_format};
+    "image_request_stats", loom_serve_image_request_fields};
 static const loom_serve_telemetry_event_t image_totals_event = {
-    "image_work", loom_serve_image_totals_format};
+    "image_work", loom_serve_image_totals_fields};
 
 void loom_serve_image_record_prepared(
     loom_serve_telemetry_stream_t* stream, uint64_t request,

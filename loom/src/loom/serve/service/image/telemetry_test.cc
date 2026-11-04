@@ -6,8 +6,14 @@
 
 #include "loom/serve/service/image/telemetry.h"
 
+#include <array>
+
+#include "iree/base/internal/json.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/runtime/telemetry/field.h"
+#include "loom/serve/telemetry/record.h"
+#include "loom/serve/telemetry/stream.h"
 
 namespace {
 
@@ -31,6 +37,61 @@ TEST(ImageTelemetryTest, SamplesCompletedWorkWithoutAnEventStream) {
                   EXPECT_STREQ(topic->fields[9].unit, "bytes");
                   return iree_ok_status();
                 }}));
+}
+
+TEST(ImageTelemetryTest, PreparedFieldsPreserveSignedTagsAfterRetirement) {
+  loom_serve_telemetry_stream_t* stream = nullptr;
+  IREE_ASSERT_OK(loom_serve_telemetry_stream_allocate(
+      2, iree_allocator_system(), &stream));
+  for (uint64_t request = 1; request <= 2; ++request) {
+    const loom_serve_image_prepared_t prepared = {
+        1, request == 1 ? INT64_MIN : INT64_MAX, 48};
+    loom_serve_image_record_prepared(stream, request, &prepared);
+  }
+  std::array<loom_serve_telemetry_record_t, 2> records;
+  uint64_t cursor = 0;
+  for (auto& record : records) {
+    ASSERT_EQ(loom_serve_telemetry_stream_read(stream, &cursor, &record),
+              LOOM_SERVE_TELEMETRY_READ_RECORD);
+  }
+  loom_serve_telemetry_stream_free(stream);
+  for (const auto& record : records) {
+    int64_t expected_tag = record.request == 1 ? INT64_MIN : INT64_MAX;
+    IREE_ASSERT_OK(record.event->read_fields(
+        &record,
+        {&expected_tag, [](void* self, iree_host_size_t count,
+                           const loom_runtime_telemetry_field_t* fields) {
+           EXPECT_EQ(count, 3u);
+           if (count == 3) {
+             EXPECT_STREQ(fields[0].name, "stage");
+             EXPECT_EQ(fields[0].value.uint64_value, 1u);
+             EXPECT_STREQ(fields[1].name, "tag");
+             EXPECT_EQ(fields[1].kind, LOOM_RUNTIME_TELEMETRY_FIELD_INT64);
+             EXPECT_EQ(fields[1].value.int64_value,
+                       *static_cast<int64_t*>(self));
+             EXPECT_EQ(fields[2].value.uint64_value, 48u);
+           }
+           return iree_ok_status();
+         }}));
+    iree_status_t failure = record.event->read_fields(
+        &record, {nullptr, [](void*, iree_host_size_t,
+                              const loom_runtime_telemetry_field_t*) {
+                    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                            "observer output is full");
+                  }});
+    EXPECT_EQ(iree_status_code(failure), IREE_STATUS_RESOURCE_EXHAUSTED);
+    iree_status_free(failure);
+    iree_string_builder_t output;
+    iree_string_builder_initialize(iree_allocator_system(), &output);
+    IREE_ASSERT_OK(loom_serve_telemetry_record_format(0, &record, &output));
+    iree_string_view_t tag;
+    IREE_ASSERT_OK(iree_json_lookup_object_value(
+        iree_string_builder_view(&output), IREE_SV("tag"), &tag));
+    int64_t value = 0;
+    IREE_ASSERT_OK(iree_json_parse_int64(tag, &value));
+    EXPECT_EQ(value, expected_tag);
+    iree_string_builder_deinitialize(&output);
+  }
 }
 
 }  // namespace

@@ -81,6 +81,7 @@ loom_cc_library(
     hdrs = ["telemetry.h"],
     deps = [
         ":generator",
+        "//loom/src/loom/runtime/telemetry:field",
         "//loom/src/loom/runtime/telemetry:sample",
         "//loom/src/loom/serve/telemetry:record",
         "//loom/src/loom/serve/telemetry:stream",
@@ -130,8 +131,12 @@ loom_cc_test(
     srcs = ["telemetry_test.cc"],
     deps = [
         ":telemetry",
+        "//loom/src/loom/runtime/telemetry:field",
         "//loom/src/loom/runtime/telemetry:sample",
+        "//loom/src/loom/serve/telemetry:record",
+        "//loom/src/loom/serve/telemetry:stream",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -190,6 +195,7 @@ loom_cc_library(
     }),
     visibility = ["//loom/src/loom/serve:implementation"],
     deps = [
+        "//loom/src/loom/runtime/telemetry:field",
         "//loom/src/loom/serve/runtime/device",
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/host",
@@ -205,6 +211,8 @@ loom_cc_library(
         "//loom/src/loom/serve/service/image:output",
         "//loom/src/loom/serve/service/image:request",
         "//loom/src/loom/serve/service/image:service",
+        "//loom/src/loom/serve/telemetry:record",
+        "//loom/src/loom/serve/telemetry:stream",
         "//loom/src/loom/serve/testing:http_harness",
         "//loom/src/loom/serve/testing:model",
         "//loom/src/loom/serve/testing:model_wait",

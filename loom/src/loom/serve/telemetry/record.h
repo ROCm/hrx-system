@@ -8,6 +8,7 @@
 #define LOOM_SERVE_TELEMETRY_RECORD_H_
 
 #include "iree/base/api.h"
+#include "loom/runtime/telemetry/field.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,17 +35,26 @@ typedef struct loom_serve_telemetry_counters_t {
   uint64_t batches;
 } loom_serve_telemetry_counters_t;
 
+// Native field order shared by snapshots and nested service counter objects.
+enum { LOOM_SERVE_TELEMETRY_COUNTER_FIELD_COUNT = 8 };
+
+// Expands trusted owner counters into caller-owned consumer views.
+void loom_serve_telemetry_counters_read_fields(
+    const loom_serve_telemetry_counters_t* counters,
+    loom_runtime_telemetry_field_t
+        fields[LOOM_SERVE_TELEMETRY_COUNTER_FIELD_COUNT]);
+
 typedef struct loom_serve_telemetry_record_t loom_serve_telemetry_record_t;
 
-// Immutable event schema with process lifetime. Renderers run on copied records
-// in consumers, never during publication. They append JSON object members,
-// including their leading commas, and may fail only to allocate output storage.
+// Immutable event schema with process lifetime. Interpretation runs on copied
+// records in consumers, never during publication. It exposes borrowed native
+// fields and propagates only the consumer's output or allocation failure.
 typedef struct loom_serve_telemetry_event_t {
   // Stable event name, independent of deployment/model identifiers.
   const char* name;
-  // Consumer-only formatter; NULL for an event with no payload.
-  iree_status_t (*format)(const loom_serve_telemetry_record_t* record,
-                          iree_string_builder_t* output);
+  // Consumer-only native interpretation of the copied payload.
+  iree_status_t (*read_fields)(const loom_serve_telemetry_record_t* record,
+                               loom_runtime_telemetry_field_sink_t sink);
 } loom_serve_telemetry_event_t;
 
 extern const loom_serve_telemetry_event_t LOOM_SERVE_TELEMETRY_STREAM_BEGIN;
@@ -150,9 +160,6 @@ iree_status_t loom_serve_telemetry_record_format(
     iree_string_builder_t* output);
 iree_status_t loom_serve_telemetry_counters_format(
     const loom_serve_telemetry_counters_t* counters,
-    iree_string_builder_t* output);
-iree_status_t loom_serve_telemetry_diagnostic_format(
-    const loom_serve_telemetry_diagnostic_t* diagnostic,
     iree_string_builder_t* output);
 
 #ifdef __cplusplus
