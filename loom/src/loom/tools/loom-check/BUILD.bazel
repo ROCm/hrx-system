@@ -168,7 +168,6 @@ _LOOM_CHECK_PROVIDER_DEPS = (
 loom_cc_library(
     name = "execute",
     srcs = [
-        "analysis.c",
         "comparison.c",
         "compile.c",
         "compile_diagnostics.c",
@@ -182,7 +181,6 @@ loom_cc_library(
         "verify.c",
     ],
     hdrs = [
-        "analysis.h",
         "comparison.h",
         "compile.h",
         "compile_diagnostics.h",
@@ -197,10 +195,6 @@ loom_cc_library(
         ":update",
         "//loom/binding/c:interop",
         "//loom/binding/c:loomc",
-        "//loom/src/loom/analysis:liveness",
-        "//loom/src/loom/analysis:liveness_json",
-        "//loom/src/loom/analysis:storage_access",
-        "//loom/src/loom/analysis:storage_interference",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low:allocation_json",
@@ -225,8 +219,6 @@ loom_cc_library(
         "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/ops:type_registry",
-        "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/low",
@@ -261,7 +253,6 @@ loom_cc_library(
         "//loom/src/loom/tooling/io:module_format",
         "//loom/src/loom/tooling/io:source_path",
         "//loom/src/loom/util:diff",
-        "//loom/src/loom/util:fact_table",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",

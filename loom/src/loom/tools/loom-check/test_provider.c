@@ -15,6 +15,7 @@
 #include "loom/tools/loom-check/test/low/providers.h"
 
 static const loom_check_emit_provider_t* const kLoomCheckTestEmitProviders[] = {
+    &loom_check_test_analysis_observation_provider,
     &loom_check_test_pipeline_transport_provider,
     &loom_check_test_config_materialize_provider,
     &loom_check_test_config_schema_provider,

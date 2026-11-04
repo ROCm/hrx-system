@@ -44,8 +44,8 @@
 //   // RUN: format <target> Parse -> convert format -> print -> compare.
 //   // RUN: emit <target>   Parse -> emit analysis or target-structured
 //                           output -> compare. Source lowering uses source-low.
-//                           Analysis targets include liveness-json @function,
-//                           low-schedule-json @function [strategy=...]
+//                           Core analysis targets include low-schedule-json
+//                           @function [strategy=...]
 //                           [diagnostics=...],
 //                           low-allocation @function [diagnostics=...],
 //                           low-allocation-json @function for the full
@@ -54,7 +54,9 @@
 //                           placement-decisions, low-packet-json @function,
 //                           and low-compile-report @function (emission-frame
 //                           summary including static/dynamic instruction mix).
-//                           Source-to-low tests use source-low
+//                           Internal test providers also expose passive
+//                           liveness-json and storage-interference
+//                           observations. Source-to-low tests use source-low
 //                           [output=module|low]
 //                           [sanitizer=none|access|value|operation|race|all]
 //                           [sanitizer-reporting=default|trap|report-only]

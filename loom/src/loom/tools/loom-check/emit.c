@@ -19,7 +19,6 @@
 #include "loom/codegen/low/schedule/run.h"
 #include "loom/codegen/low/schedule/types.h"
 #include "loom/codegen/low/text_asm.h"
-#include "loom/error/error_catalog.h"
 #include "loom/error/source.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -29,7 +28,6 @@
 #include "loom/pass/pipeline.h"
 #include "loom/target/low_packet_diagnostics.h"
 #include "loom/target/provider.h"
-#include "loom/tools/loom-check/analysis.h"
 #include "loom/tools/loom-check/comparison.h"
 #include "loom/tools/loom-check/compile.h"
 #include "loom/tools/loom-check/diagnostics.h"
@@ -39,13 +37,11 @@
 #include "loom/util/stream.h"
 
 typedef enum loom_check_emit_format_e {
-  LOOM_CHECK_EMIT_LIVENESS_JSON = 0,
-  LOOM_CHECK_EMIT_LOW_SCHEDULE_JSON,
+  LOOM_CHECK_EMIT_LOW_SCHEDULE_JSON = 0,
   LOOM_CHECK_EMIT_LOW_ALLOCATION_JSON,
   LOOM_CHECK_EMIT_LOW_ALLOCATION_SUMMARY,
   LOOM_CHECK_EMIT_LOW_PACKET_JSON,
   LOOM_CHECK_EMIT_LOW_COMPILE_REPORT,
-  LOOM_CHECK_EMIT_STORAGE_INTERFERENCE,
 } loom_check_emit_format_t;
 
 typedef struct loom_check_emit_low_allocation_summary_row_t {
@@ -64,12 +60,10 @@ typedef struct loom_check_emit_low_allocation_summary_row_t {
 } loom_check_emit_low_allocation_summary_row_t;
 
 static const iree_string_view_t kLoomCheckEmitCoreTargetNames[] = {
-    IREE_SVL("liveness-json"),        IREE_SVL("liveness"),
-    IREE_SVL("low-schedule-json"),    IREE_SVL("low-schedule"),
-    IREE_SVL("low-allocation-json"),  IREE_SVL("low-allocation-summary"),
-    IREE_SVL("low-allocation"),       IREE_SVL("low-packet-json"),
-    IREE_SVL("low-packet"),           IREE_SVL("low-compile-report"),
-    IREE_SVL("storage-interference"),
+    IREE_SVL("low-schedule-json"),   IREE_SVL("low-schedule"),
+    IREE_SVL("low-allocation-json"), IREE_SVL("low-allocation-summary"),
+    IREE_SVL("low-allocation"),      IREE_SVL("low-packet-json"),
+    IREE_SVL("low-packet"),          IREE_SVL("low-compile-report"),
 };
 
 typedef struct loom_check_emit_request_t {
@@ -362,7 +356,7 @@ static iree_status_t loom_check_emit_fail_unknown_target(
 static iree_status_t loom_check_emit_parse_request(
     iree_string_view_t emit_target, loom_check_emit_request_t* out_request) {
   *out_request = (loom_check_emit_request_t){
-      .format = LOOM_CHECK_EMIT_LIVENESS_JSON,
+      .format = LOOM_CHECK_EMIT_LOW_SCHEDULE_JSON,
       .emit_target_name = IREE_SV("emit"),
       .analysis_symbol_name = iree_string_view_empty(),
       .low_allocation_diagnostic_flags = 0,
@@ -383,28 +377,8 @@ static iree_status_t loom_check_emit_parse_request(
     out_request->emit_target_name = target_name;
   }
 
-  if (iree_string_view_equal(target_name, IREE_SV("liveness-json")) ||
-      iree_string_view_equal(target_name, IREE_SV("liveness")) ||
-      iree_string_view_equal(target_name, IREE_SV("storage-interference"))) {
-    if (!iree_string_view_starts_with(target_options, IREE_SV("@"))) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "%.*s requires a function symbol name",
-                              (int)target_name.size, target_name.data);
-    }
-    out_request->analysis_symbol_name =
-        iree_string_view_substr(target_options, 1, IREE_HOST_SIZE_MAX);
-    if (iree_string_view_is_empty(out_request->analysis_symbol_name)) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "function symbol name is required");
-    }
-    out_request->format =
-        iree_string_view_equal(target_name, IREE_SV("storage-interference"))
-            ? LOOM_CHECK_EMIT_STORAGE_INTERFERENCE
-            : LOOM_CHECK_EMIT_LIVENESS_JSON;
-    return iree_ok_status();
-  } else if (iree_string_view_equal(target_name,
-                                    IREE_SV("low-schedule-json")) ||
-             iree_string_view_equal(target_name, IREE_SV("low-schedule"))) {
+  if (iree_string_view_equal(target_name, IREE_SV("low-schedule-json")) ||
+      iree_string_view_equal(target_name, IREE_SV("low-schedule"))) {
     iree_string_view_t symbol_name = iree_string_view_empty();
     iree_string_view_t option_text = iree_string_view_empty();
     iree_string_view_split(target_options, ' ', &symbol_name, &option_text);
@@ -526,95 +500,6 @@ static iree_status_t loom_check_emit_finish_diagnostics_and_compare_output(
     return iree_ok_status();
   }
   return loom_check_compare_output(test_case, allocator, result);
-}
-
-static iree_status_t loom_check_emit_symbol_not_found(
-    loom_check_diagnostic_collector_t* diagnostic_collector,
-    const loom_test_case_t* test_case, iree_string_view_t filename,
-    iree_string_view_t symbol_name) {
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(symbol_name),
-  };
-  return loom_check_diagnostic_collector_emit_case_source(
-      diagnostic_collector, test_case, filename, LOOM_EMITTER_PASS,
-      LOOM_ERR_SYMBOL_002, params, IREE_ARRAYSIZE(params));
-}
-
-static iree_string_view_t loom_check_emit_symbol_actual_kind(
-    const loom_module_t* module, const loom_symbol_t* symbol) {
-  if (symbol->definition) {
-    return loom_symbol_definition_descriptor_name(symbol->definition);
-  }
-  if (symbol->defining_op) {
-    return loom_op_name(module, symbol->defining_op);
-  }
-  return IREE_SV("<unknown>");
-}
-
-static iree_status_t loom_check_emit_symbol_kind_mismatch(
-    const loom_module_t* module, const loom_symbol_t* symbol,
-    iree_string_view_t symbol_name, iree_string_view_t expected_kind,
-    iree_diagnostic_emitter_t emitter) {
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(symbol_name),
-      loom_param_string(loom_check_emit_symbol_actual_kind(module, symbol)),
-      loom_param_string(expected_kind),
-  };
-  const loom_diagnostic_emission_t emission = {
-      .op = symbol->defining_op,
-      .error = LOOM_ERR_SYMBOL_003,
-      .params = params,
-      .param_count = IREE_ARRAYSIZE(params),
-  };
-  return iree_diagnostic_emit(emitter, &emission);
-}
-
-static iree_status_t loom_check_emit_find_func_like(
-    const loom_module_t* module, iree_string_view_t symbol_name,
-    const loom_test_case_t* test_case, iree_string_view_t filename,
-    loom_check_diagnostic_collector_t* diagnostic_collector,
-    iree_diagnostic_emitter_t emitter, loom_func_like_t* out_function) {
-  *out_function = (loom_func_like_t){0};
-  loom_string_id_t name_id = loom_module_lookup_string(module, symbol_name);
-  if (name_id == LOOM_STRING_ID_INVALID) {
-    return loom_check_emit_symbol_not_found(diagnostic_collector, test_case,
-                                            filename, symbol_name);
-  }
-  uint16_t symbol_id = loom_module_find_symbol(module, name_id);
-  if (symbol_id == LOOM_SYMBOL_ID_INVALID) {
-    return loom_check_emit_symbol_not_found(diagnostic_collector, test_case,
-                                            filename, symbol_name);
-  }
-  const loom_symbol_t* symbol = &module->symbols.entries[symbol_id];
-  loom_func_like_t function = loom_func_like_cast(module, symbol->defining_op);
-  if (!loom_func_like_isa(function) || !loom_func_like_body(function)) {
-    return loom_check_emit_symbol_kind_mismatch(
-        module, symbol, symbol_name, IREE_SV("function body"), emitter);
-  }
-  *out_function = function;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_check_emit_write_function_analysis(
-    loom_module_t* module, iree_string_view_t symbol_name,
-    loom_check_emit_format_t format, const loom_test_case_t* test_case,
-    iree_string_view_t filename,
-    loom_check_diagnostic_collector_t* diagnostic_collector,
-    iree_diagnostic_emitter_t emitter, iree_arena_allocator_t* analysis_arena,
-    loom_check_result_t* result) {
-  loom_func_like_t function = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_check_emit_find_func_like(module, symbol_name, test_case, filename,
-                                     diagnostic_collector, emitter, &function));
-  if (!loom_func_like_isa(function)) {
-    return iree_ok_status();
-  }
-  if (format == LOOM_CHECK_EMIT_STORAGE_INTERFERENCE) {
-    return loom_check_emit_storage_interference(
-        module, function, analysis_arena, &result->actual_output);
-  }
-  return loom_check_emit_liveness(module, function, analysis_arena,
-                                  &result->actual_output);
 }
 
 static iree_status_t loom_check_emit_write_low_schedule_json(
@@ -1000,13 +885,7 @@ static iree_status_t loom_check_emit_core_native_module(
   };
   const iree_host_size_t actual_output_size = result->actual_output.size;
   iree_status_t status = iree_ok_status();
-  if (request->format == LOOM_CHECK_EMIT_LIVENESS_JSON ||
-      request->format == LOOM_CHECK_EMIT_STORAGE_INTERFERENCE) {
-    status = loom_check_emit_write_function_analysis(
-        module, request->analysis_symbol_name, request->format,
-        provider_request->test_case, provider_request->filename,
-        diagnostic_collector, emitter, diagnostic_collector->arena, result);
-  } else if (request->format == LOOM_CHECK_EMIT_LOW_SCHEDULE_JSON) {
+  if (request->format == LOOM_CHECK_EMIT_LOW_SCHEDULE_JSON) {
     status = loom_check_emit_write_low_schedule_json(
         native_module->module, request->analysis_symbol_name,
         &provider_request->low_registry->registry, provider_request->test_case,
@@ -1118,7 +997,7 @@ iree_status_t loom_check_execute_emit(
     }
   } else {
     request = (loom_check_emit_request_t){
-        .format = LOOM_CHECK_EMIT_LIVENESS_JSON,
+        .format = LOOM_CHECK_EMIT_LOW_SCHEDULE_JSON,
         .emit_target_name = provider_target_name,
     };
   }

@@ -18,6 +18,11 @@ extern "C" {
 extern const loom_check_emit_provider_t
     loom_check_test_pipeline_transport_provider;
 
+// Prints passive liveness and storage-interference observations for authored
+// IR without changing the program being analyzed.
+extern const loom_check_emit_provider_t
+    loom_check_test_analysis_observation_provider;
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

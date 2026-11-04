@@ -1633,55 +1633,6 @@ TEST_F(ExecuteTest, EmitSourceLowLowersEveryTargetedFunction) {
   loom_check_result_deinitialize(&result);
 }
 
-TEST_F(ExecuteTest, EmitLivenessJsonReportsPressureSummary) {
-  loom_check_result_t result;
-  IREE_ASSERT_OK(
-      ExecuteFirst("// RUN: emit liveness-json @pressure\n"
-                   "test.target<low_core> @test_target\n"
-                   "low.func.def target<test.low.core>(@test_target) "
-                   "@pressure(%a: reg<test.i32>, "
-                   "%b: reg<test.i32>, %c: reg<test.i32>) -> "
-                   "(reg<test.i32>) {\n"
-                   "  %ab = low.copy %a : reg<test.i32> -> reg<test.i32>\n"
-                   "  %bc = low.copy %b : reg<test.i32> -> reg<test.i32>\n"
-                   "  %cc = low.copy %c : reg<test.i32> -> reg<test.i32>\n"
-                   "  low.return %ab : reg<test.i32>\n"
-                   "}\n",
-                   &result));
-  EXPECT_EQ(result.raw_outcome, LOOM_CHECK_FAIL);
-  EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
-  const std::string actual_output = ActualOutputString(result);
-  EXPECT_NE(actual_output.find("\"format\":\"loom.liveness.v0\""),
-            std::string::npos);
-  EXPECT_NE(actual_output.find("\"intervals\""), std::string::npos);
-  EXPECT_NE(actual_output.find("\"pressure_summaries\""), std::string::npos);
-  EXPECT_NE(actual_output.find("\"register_descriptor_set\":"),
-            std::string::npos);
-  EXPECT_NE(actual_output.find("\"register_class_id\":0"), std::string::npos);
-  EXPECT_NE(actual_output.find("\"peak_live_units\":3"), std::string::npos);
-  loom_check_result_deinitialize(&result);
-}
-
-TEST_F(ExecuteTest, EmitLivenessJsonReportsUnknownFunction) {
-  loom_check_result_t result;
-  IREE_ASSERT_OK(
-      ExecuteFirst("// RUN: emit liveness-json @missing\n"
-                   "func.def @present() {\n"
-                   "  func.return\n"
-                   "}\n",
-                   &result));
-  EXPECT_EQ(result.raw_outcome, LOOM_CHECK_FAIL);
-  EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
-  EXPECT_EQ(result.diagnostics.count, 1u);
-  const std::string diagnostic_json = DiagnosticJsonString(result);
-  EXPECT_NE(diagnostic_json.find("\"domain\":\"SYMBOL\""), std::string::npos);
-  EXPECT_NE(diagnostic_json.find("\"error_id\":\"ERR_SYMBOL_002\""),
-            std::string::npos);
-  EXPECT_NE(diagnostic_json.find("\"symbol_name\":\"missing\""),
-            std::string::npos);
-  loom_check_result_deinitialize(&result);
-}
-
 TEST_F(ExecuteTest, FormatModeBytecodeRoundTrips) {
   loom_check_result_t result;
   IREE_ASSERT_OK(
