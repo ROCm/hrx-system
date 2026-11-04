@@ -852,12 +852,42 @@ static bool loom_amdgpu_wait_plan_node_is_volatile_memory(
                           LOOM_MEMORY_ACCESS_FLAG_VOLATILE);
 }
 
+static uint32_t loom_amdgpu_wait_plan_bypassing_read_store_completion_mask(
+    const loom_amdgpu_wait_plan_builder_t* builder, uint32_t producer_node,
+    uint32_t consumer_node, uint32_t counter_mask,
+    loom_amdgpu_wait_memory_space_flags_t producer_write_space_flags,
+    loom_amdgpu_wait_memory_space_flags_t consumer_read_space_flags) {
+  if (producer_write_space_flags == 0 || consumer_read_space_flags == 0 ||
+      !iree_any_bit_set(
+          builder->classification.frontier_nodes[consumer_node].flags,
+          LOOM_AMDGPU_WAIT_FRONTIER_NODE_FLAG_BYPASSING_VMEM_READ)) {
+    return 0;
+  }
+  const loom_amdgpu_wait_frontier_node_t* producer_memory =
+      &builder->classification.frontier_nodes[producer_node];
+  const uint32_t store_counter_mask = counter_mask &
+                                      producer_memory->write_counter_mask &
+                                      LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM;
+  if (store_counter_mask == 0) {
+    return 0;
+  }
+  const loom_amdgpu_wait_memory_space_flags_t generic_space =
+      loom_amdgpu_wait_memory_space_flag(LOOM_LOW_MEMORY_SPACE_GENERIC);
+  const bool spaces_may_alias =
+      iree_any_bit_set(producer_write_space_flags, consumer_read_space_flags) ||
+      iree_any_bit_set(producer_write_space_flags | consumer_read_space_flags,
+                       generic_space);
+  return spaces_may_alias ? store_counter_mask : 0;
+}
+
 // Returns the completion counters still required by an exact memory-effect
 // dependency. Vector memory instructions issued by one wave observe an
-// earlier same-address VMEM access in issue order, so a later VMEM-only access
-// does not need to wait for that access to complete. The schedule dependency
-// still preserves issue order, and register readiness, physical reuse, and
-// program-exit completion retain their independent waits.
+// earlier same-address VMEM access through the ordinary cache path in issue
+// order, so a later VMEM-only access does not need to wait for that access to
+// complete. The schedule dependency still preserves issue order, and register
+// readiness, physical reuse, and program-exit completion retain their
+// independent waits. Cache-bypassing reads retain completion because they
+// deliberately observe a deeper cache level instead of the same-wave path.
 //
 // Both endpoint nodes are required to prove that the accesses are
 // nonvolatile. Incoming conservative CFG state intentionally bypasses this
@@ -865,7 +895,9 @@ static bool loom_amdgpu_wait_plan_node_is_volatile_memory(
 // cannot prove that every reaching producer is nonvolatile.
 static uint32_t loom_amdgpu_wait_plan_required_memory_completion_mask(
     const loom_amdgpu_wait_plan_builder_t* builder, uint32_t producer_node,
-    uint32_t consumer_node, uint32_t counter_mask) {
+    uint32_t consumer_node, uint32_t counter_mask,
+    loom_amdgpu_wait_memory_space_flags_t producer_write_space_flags,
+    loom_amdgpu_wait_memory_space_flags_t consumer_read_space_flags) {
   if ((counter_mask & LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM) == 0) {
     return counter_mask;
   }
@@ -881,7 +913,13 @@ static uint32_t loom_amdgpu_wait_plan_required_memory_completion_mask(
       (consumer_counters & ~LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM) != 0) {
     return counter_mask;
   }
-  return counter_mask & ~LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM;
+  uint32_t required_counter_mask =
+      counter_mask & ~LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM;
+  required_counter_mask |=
+      loom_amdgpu_wait_plan_bypassing_read_store_completion_mask(
+          builder, producer_node, consumer_node, counter_mask,
+          producer_write_space_flags, consumer_read_space_flags);
+  return required_counter_mask;
 }
 
 static uint32_t loom_amdgpu_wait_plan_memory_effect_counter_mask(
@@ -898,17 +936,24 @@ static uint32_t loom_amdgpu_wait_plan_memory_effect_counter_mask(
     return producer_memory->write_counter_mask &
            LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE;
   }
+  const loom_amdgpu_wait_frontier_node_t* consumer_memory =
+      &builder->classification.frontier_nodes[consumer_node];
   uint32_t counter_mask = 0;
+  loom_amdgpu_wait_memory_space_flags_t producer_write_space_flags = 0;
+  loom_amdgpu_wait_memory_space_flags_t consumer_read_space_flags = 0;
   if (iree_any_bit_set(consumer_state->flags,
                        LOOM_AMDGPU_WAIT_NODE_STATE_DEPENDENCY_READ)) {
     counter_mask |= producer_memory->write_counter_mask;
+    producer_write_space_flags = producer_memory->write_space_flags;
+    consumer_read_space_flags = consumer_memory->read_space_flags;
   }
   if (iree_any_bit_set(consumer_state->flags,
                        LOOM_AMDGPU_WAIT_NODE_STATE_DEPENDENCY_WRITE)) {
     counter_mask |= producer_memory->read_counter_mask;
   }
   return loom_amdgpu_wait_plan_required_memory_completion_mask(
-      builder, producer_node, consumer_node, counter_mask);
+      builder, producer_node, consumer_node, counter_mask,
+      producer_write_space_flags, consumer_read_space_flags);
 }
 
 static loom_amdgpu_wait_plan_reason_t
@@ -978,8 +1023,17 @@ static iree_status_t loom_amdgpu_wait_plan_visit_memory_completion_edge(
   } else {
     counter_mask = loom_amdgpu_wait_counter_mask(producer->counter_id);
   }
+  loom_amdgpu_wait_memory_space_flags_t producer_write_space_flags = 0;
+  loom_amdgpu_wait_memory_space_flags_t consumer_read_space_flags = 0;
+  if (producer->kind == LOOM_LOW_EFFECT_KIND_WRITE) {
+    producer_write_space_flags =
+        loom_amdgpu_wait_memory_space_flag(producer->memory_space);
+    consumer_read_space_flags =
+        loom_amdgpu_wait_memory_space_flag(consumer->memory_space);
+  }
   counter_mask = loom_amdgpu_wait_plan_required_memory_completion_mask(
-      builder, producer->node_index, consumer->node_index, counter_mask);
+      builder, producer->node_index, consumer->node_index, counter_mask,
+      producer_write_space_flags, consumer_read_space_flags);
   if (counter_mask == 0) {
     return iree_ok_status();
   }

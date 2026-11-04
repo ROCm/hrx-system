@@ -168,17 +168,17 @@ static bool loom_amdgpu_wait_effect_requires_system_scope_store_drain(
   }
   const loom_amdgpu_descriptor_immediate_slots_t immediate_slots =
       loom_amdgpu_descriptor_immediate_slots(descriptor_set, descriptor);
-  if (immediate_slots.cache_scope ==
+  if (immediate_slots.cache_coherence ==
       LOOM_AMDGPU_DESCRIPTOR_IMMEDIATE_SLOT_NONE) {
     return false;
   }
   const loom_low_descriptor_layout_t* descriptor_layout =
       loom_low_descriptor_layout(descriptor_set, descriptor);
-  IREE_ASSERT_LT(immediate_slots.cache_scope,
+  IREE_ASSERT_LT(immediate_slots.cache_coherence,
                  descriptor_layout->immediate_count);
   const loom_low_immediate_t* immediate =
       &descriptor_set->immediates[descriptor_layout->immediate_start +
-                                  immediate_slots.cache_scope];
+                                  immediate_slots.cache_coherence];
   const loom_low_packet_view_t packet =
       loom_low_packet_at_node(schedule, effect->node_index);
   const loom_attribute_t scope_attr =
@@ -187,6 +187,52 @@ static bool loom_amdgpu_wait_effect_requires_system_scope_store_drain(
                             ? immediate->default_value
                             : scope_attr.i64;
   return scope == LOOM_CACHE_SCOPE_SYSTEM;
+}
+
+// On GFX11 and CDNA2, GLC non-atomic reads miss the first-level cache and
+// reread the next cache level. Retain that final packet fact once so dependency
+// planning never has to rediscover descriptor immediates.
+static bool loom_amdgpu_wait_packet_has_bypassing_vmem_read(
+    const loom_low_schedule_table_t* schedule, uint32_t node_index,
+    loom_amdgpu_vector_memory_cache_policy_encoding_t encoding) {
+  if (encoding !=
+          LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX11_GLC_SLC_DLC &&
+      encoding !=
+          LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_CDNA2_GLC_SLC) {
+    return false;
+  }
+  const loom_low_schedule_node_t* node = &schedule->nodes[node_index];
+  if (node->descriptor == NULL) {
+    return false;
+  }
+  const loom_low_descriptor_set_t* descriptor_set =
+      schedule->target.descriptor_set;
+  const loom_low_descriptor_view_t* descriptor_view =
+      loom_low_descriptor_set_descriptor_view(descriptor_set, node->descriptor);
+  if (iree_any_bit_set(descriptor_view->instruction_class_flags,
+                       LOOM_LOW_INSTRUCTION_CLASS_FLAG_ATOMIC)) {
+    // GLC controls whether atomic packets return their prior value; it is not
+    // a cache-bypass contract.
+    return false;
+  }
+  const loom_amdgpu_descriptor_immediate_slots_t immediate_slots =
+      loom_amdgpu_descriptor_immediate_slots(descriptor_set, node->descriptor);
+  if (immediate_slots.cache_coherence ==
+      LOOM_AMDGPU_DESCRIPTOR_IMMEDIATE_SLOT_NONE) {
+    return false;
+  }
+  const loom_low_descriptor_layout_t* descriptor_layout =
+      loom_low_descriptor_layout(descriptor_set, node->descriptor);
+  IREE_ASSERT_LT(immediate_slots.cache_coherence,
+                 descriptor_layout->immediate_count);
+  const loom_low_immediate_t* immediate =
+      &descriptor_set->immediates[descriptor_layout->immediate_start +
+                                  immediate_slots.cache_coherence];
+  const loom_low_packet_view_t packet =
+      loom_low_packet_at_node(schedule, node_index);
+  const loom_attribute_t attr =
+      loom_low_packet_immediate_attr(&packet, immediate);
+  return (loom_attr_is_absent(attr) ? immediate->default_value : attr.i64) != 0;
 }
 
 static loom_amdgpu_structural_packet_info_t
@@ -420,6 +466,10 @@ static void loom_amdgpu_wait_classification_finish_nodes(
     loom_amdgpu_wait_classification_t* classification) {
   const loom_low_descriptor_set_t* descriptor_set =
       schedule->target.descriptor_set;
+  const loom_amdgpu_descriptor_set_info_t* descriptor_set_info =
+      loom_amdgpu_target_info_descriptor_set_at(
+          descriptor_set->descriptor_set_ordinal);
+  IREE_ASSERT(descriptor_set_info != NULL);
   const bool has_valu_trans_use_depctr =
       loom_amdgpu_processor_properties_have_scheduling(
           processor_properties,
@@ -567,6 +617,14 @@ static void loom_amdgpu_wait_classification_finish_nodes(
     IREE_ASSERT_EQ(frontier_node->read_counter_mask &
                        ~completion_node->hazard_counter_mask,
                    0u);
+    if (iree_any_bit_set(frontier_node->read_counter_mask,
+                         LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM) &&
+        loom_amdgpu_wait_packet_has_bypassing_vmem_read(
+            schedule, (uint32_t)i,
+            descriptor_set_info->vector_memory.cache_policy_encoding)) {
+      frontier_node->flags |=
+          LOOM_AMDGPU_WAIT_FRONTIER_NODE_FLAG_BYPASSING_VMEM_READ;
+    }
     if (iree_any_bit_set(
             flags, LOOM_AMDGPU_WAIT_NODE_STATE_DEFAULT_DEPENDENCY_WRITE)) {
       const uint32_t default_write_counter_mask =

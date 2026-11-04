@@ -201,10 +201,10 @@ low.func.def schedule(locked) target<amdgpu.cdna2.core>(@target) @buffer_address
   buffer_store_byte v2, v0, s[4:7], 0 offen offset:0 slc
   s_waitcnt vmcnt(0) lgkmcnt(15)
   buffer_store_dword v3, off, s[4:7], 0 offset:0 glc slc
+  s_waitcnt vmcnt(0) lgkmcnt(15)
   buffer_load_dword v0, s[4:7], s0 offen offset:0 glc lds
   buffer_load_dword v0, s[4:7], 0 offen offset:0 slc lds
   buffer_load_dword off, s[4:7], 0 offset:0 glc slc lds
-  s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
