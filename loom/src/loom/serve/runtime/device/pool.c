@@ -5,15 +5,22 @@
 
 #include "loom/serve/runtime/device/pool.h"
 
+#include "iree/hal/memory/tlsf_pool.h"
+
 struct loom_serve_pool_t {
   // Allocator owning this pool's metadata.
   iree_allocator_t host_allocator;
-  // Owned ordinary native storage source with the qualified access scope.
-  iree_hal_pool_t* storage;
+  // Persistent buffers and their independently accounted elastic source.
+  struct {
+    // Owned allocator, native when fixed or TLSF when elastic.
+    iree_hal_pool_t* allocator;
+    // Borrowed source within virtual_pool; NULL for fixed native backing.
+    iree_hal_pool_t* source;
+  } storage;
   // Owned shared command backing, independent of model execution timelines.
   loom_serve_workspace_t* workspace;
-  // Owned stable workspace ranges borrowing memory; NULL when fixed.
-  loom_serve_virtual_pool_t* workspace_pool;
+  // Owned stable sources for workspace and persistent ranges; NULL when fixed.
+  loom_serve_virtual_pool_t* virtual_pool;
   // Owned elastic physical budget; NULL when fixed.
   loom_serve_memory_pool_t* memory;
   // Qualified bulk parameter and workspace geometry.
@@ -128,16 +135,25 @@ static iree_status_t loom_serve_pool_initialize_elastic(
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(loom_serve_virtual_pool_allocate(
       pool->memory, pool->weight_geometry, pool->host_allocator,
-      &pool->workspace_pool));
+      &pool->virtual_pool));
+  IREE_RETURN_IF_ERROR(loom_serve_virtual_pool_create_source(
+      pool->virtual_pool, &pool->storage.source));
+  const iree_hal_tlsf_pool_options_t storage_options = {
+      .tlsf_options = {.range_length = pool->weight_geometry.mapping_size,
+                       .alignment = 256},
+      .trace_name = IREE_SVL("loom-serve-storage"),
+  };
+  IREE_RETURN_IF_ERROR(iree_hal_tlsf_pool_create(
+      pool->storage.source, &storage_options, pool->host_allocator,
+      &pool->storage.allocator));
   // Small command allocations pack into a logical slab. Larger requirements
   // use dedicated virtual ranges drawing from the same physical owner.
   const iree_hal_pool_reservation_request_t range = {
       .allocation_size = pool->weight_geometry.mapping_size,
       .min_alignment = 256,
   };
-  return loom_serve_workspace_create_from_virtual(group, pool->workspace_pool,
-                                                  range, pool->host_allocator,
-                                                  &pool->workspace);
+  return loom_serve_workspace_create_from_virtual(
+      group, pool->virtual_pool, range, pool->host_allocator, &pool->workspace);
 }
 
 iree_status_t loom_serve_pool_allocate(iree_hal_device_group_t* group,
@@ -167,15 +183,19 @@ iree_status_t loom_serve_pool_allocate(iree_hal_device_group_t* group,
       .placement = placement,
       .trace_name = IREE_SVL("loom-serve-storage-backing"),
   };
-  iree_status_t status = iree_hal_slab_pool_create(
-      group, scope, &storage_options, host_allocator, &pool->storage);
-  if (iree_status_is_ok(status)) {
+  iree_status_t status = iree_ok_status();
+  if (options->elastic) {
+    status = loom_serve_pool_initialize_elastic(
+        pool, group, scope, allocation_queue, options, placement);
+  } else {
     status =
-        options->elastic
-            ? loom_serve_pool_initialize_elastic(
-                  pool, group, scope, allocation_queue, options, placement)
-            : loom_serve_workspace_create(group, pool->storage, &options->asan,
-                                          host_allocator, &pool->workspace);
+        iree_hal_slab_pool_create(group, scope, &storage_options,
+                                  host_allocator, &pool->storage.allocator);
+    if (iree_status_is_ok(status)) {
+      status = loom_serve_workspace_create(group, pool->storage.allocator,
+                                           &options->asan, host_allocator,
+                                           &pool->workspace);
+    }
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_residency_cache_allocate(
@@ -193,7 +213,9 @@ loom_serve_pool_statistics_t loom_serve_pool_statistics(
     const loom_serve_pool_t* pool) {
   loom_serve_pool_statistics_t statistics = {
       .workspace = loom_serve_workspace_statistics(pool->workspace)};
-  iree_hal_pool_query_stats(pool->storage, &statistics.storage);
+  iree_hal_pool_query_stats(
+      pool->storage.source ? pool->storage.source : pool->storage.allocator,
+      &statistics.storage);
   if (pool->memory) {
     statistics.retained = loom_serve_memory_pool_statistics(pool->memory);
   }
@@ -246,13 +268,20 @@ bool loom_serve_pool_is_in_use(const loom_serve_pool_t* pool) {
   if (!pool->memory) {
     return false;
   }
-  const uint64_t workspace_reserved =
-      pool->workspace_pool
-          ? loom_serve_virtual_pool_memory_usage(pool->workspace_pool)
+  if (pool->storage.allocator) {
+    iree_hal_pool_stats_t storage;
+    iree_hal_pool_query_stats(pool->storage.allocator, &storage);
+    if (storage.reservation_count) {
+      return true;
+    }
+  }
+  const uint64_t allocator_reserved =
+      pool->virtual_pool
+          ? loom_serve_virtual_pool_memory_usage(pool->virtual_pool)
                 .reserved_bytes
           : 0;
   return loom_serve_memory_pool_statistics(pool->memory).reserved_bytes !=
-         workspace_reserved;
+         allocator_reserved;
 }
 
 iree_status_t loom_serve_pool_free(loom_serve_pool_t* pool) {
@@ -267,16 +296,18 @@ iree_status_t loom_serve_pool_free(loom_serve_pool_t* pool) {
   pool->residency_cache = NULL;
   loom_serve_workspace_release(pool->workspace);
   pool->workspace = NULL;
-  IREE_RETURN_IF_ERROR(loom_serve_virtual_pool_free(pool->workspace_pool));
-  pool->workspace_pool = NULL;
+  iree_hal_pool_release(pool->storage.allocator);
+  pool->storage.allocator = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_virtual_pool_free(pool->virtual_pool));
+  pool->virtual_pool = NULL;
+  pool->storage.source = NULL;
   loom_serve_memory_pool_free(pool->memory);
-  iree_hal_pool_release(pool->storage);
   iree_allocator_free(pool->host_allocator, pool);
   return iree_ok_status();
 }
 
 iree_hal_pool_t* loom_serve_pool_storage(const loom_serve_pool_t* pool) {
-  return pool->storage;
+  return pool->storage.allocator;
 }
 
 loom_serve_workspace_t* loom_serve_pool_workspace(

@@ -42,6 +42,9 @@ const char* WeightDeviceUri();
 // Borrows the process-owned device, independent of each case's storage policy.
 loom_serve_device_t* WeightDevice();
 
+// Caller-owned program inputs and outputs, outside parameter residency policy.
+iree_hal_pool_t* WeightConsumerPool();
+
 // Allocates a case-owned pool with the device's dispatch/transfer access and
 // sanitizer policy. The fixture retires all consumers before freeing the pool.
 iree_status_t AllocateWeightPool(loom_serve_device_t* device, bool elastic,
@@ -361,8 +364,10 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
         device_, dispatch_, loom_serve_device_host(device_owner_), &sources,
         nullptr, &compilation_, host_allocator_, &jit_));
     WriteCheckpoint(path_.path(), 0);
+    // Program bindings belong to the caller, independently of the residency
+    // budget for parameter preparation and command workspace under test.
     IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
-        loom_serve_pool_storage(storage_owner_),
+        WeightConsumerPool(),
         iree_hal_make_pool_reservation_request(sizeof(output_), 0),
         iree_infinite_timeout(), &output_buffer_));
   }
@@ -440,10 +445,7 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     IREE_EXPECT_OK(loom_serve_pool_trim(storage_owner_, 0));
     DrainNativeReturns();
     const auto memory = loom_serve_pool_statistics(storage_owner_);
-    EXPECT_EQ(memory.retained.reserved_bytes,
-              loom_serve_workspace_memory_usage(
-                  loom_serve_pool_workspace(storage_owner_))
-                  .reserved_bytes);
+    EXPECT_FALSE(loom_serve_pool_is_in_use(storage_owner_));
     EXPECT_EQ(memory.retained.committed_bytes, 0u);
     EXPECT_EQ(memory.workspace.bytes_committed, 0u);
     IREE_CHECK_OK(loom_serve_pool_free(storage_owner_));

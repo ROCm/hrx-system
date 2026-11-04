@@ -65,7 +65,8 @@ class MemoryTestEnvironment : public ::testing::Environment {
     iree_hal_driver_release(driver);
     loom_serve_host_release(host);
     IREE_ASSERT_OK(status);
-    IREE_ASSERT_OK(native.Observe(loom_serve_device_group_pool_at(group, 0)));
+    IREE_ASSERT_OK(native.Observe(loom_serve_device_group_at(group, 0),
+                                  loom_serve_device_group_pool_at(group, 0)));
   }
 
   void TearDown() override {
@@ -254,10 +255,13 @@ class MemoryTest : public ::testing::Test {
       iree_status_ignore(loom_serve_memory_pool_await(pool));
       const auto statistics = loom_serve_memory_pool_statistics(pool);
       EXPECT_EQ(statistics.committed_bytes, 0u);
-      const auto workspace_usage = loom_serve_workspace_memory_usage(
-          loom_serve_pool_workspace(storage_owner));
-      EXPECT_EQ(statistics.reserved_bytes,
-                owned_pool ? 0u : workspace_usage.reserved_bytes);
+      if (owned_pool) {
+        EXPECT_EQ(statistics.reserved_bytes, 0u);
+      } else {
+        // Shared allocators retain empty addresses across cases, but every
+        // model-owned reservation must have returned before pool teardown.
+        EXPECT_FALSE(loom_serve_pool_is_in_use(storage_owner));
+      }
     }
     loom_serve_memory_pool_free(owned_pool);
     iree_hal_pool_release(deferred_backing);

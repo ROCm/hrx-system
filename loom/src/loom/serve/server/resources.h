@@ -57,9 +57,9 @@ bool loom_serve_resources_is_pending(const loom_serve_resources_t* resources);
 // serving-managed memory observations. Called on the serialized serving owner;
 // never waits for devices, polls hardware or changes residency. Retained pool
 // accounting is null for fixed backing; elastic accounting has a finite
-// physical ceiling. Storage reports ordinary native backing. Workspace is a
-// subset of storage for fixed backing or retained for elastic backing, not an
-// additional amount. Pool values are independent atomic observations, not a
+// physical ceiling. Storage and workspace are breakdowns of retained for
+// elastic backing. With fixed backing, storage is the total and workspace is
+// its subset. Pool values are independent atomic observations, not a
 // coherent total. Acquisition/release counters accumulate across models and
 // retired pool generations for the pool owner's lifetime. wait_count counts
 // reservations needing a reuse prerequisite, not host waits or elapsed time.

@@ -364,11 +364,11 @@ iree_hal_pool_stats_t loom_serve_workspace_statistics(
         &backing);
     total.bytes_reserved += statistics.bytes_reserved;
     total.bytes_free += statistics.bytes_free + backing.bytes_free;
-    total.bytes_committed +=
-        workspace->virtual_pool
-            ? loom_serve_virtual_pool_memory_usage(workspace->virtual_pool)
-                  .committed_bytes
-            : backing.bytes_committed;
+    total.bytes_committed += workspace->virtual_pool
+                                 ? loom_serve_virtual_pool_source_memory_usage(
+                                       workspace->backing_pool)
+                                       .committed_bytes
+                                 : backing.bytes_committed;
     total.bytes_quarantined += statistics.bytes_quarantined;
     total.reservation_count += statistics.reservation_count;
     total.slab_count += backing.slab_count;
@@ -528,9 +528,9 @@ void loom_serve_workspace_set_observer(loom_serve_workspace_t* workspace,
 
 loom_serve_memory_usage_t loom_serve_workspace_memory_usage(
     const loom_serve_workspace_t* workspace) {
-  return workspace->virtual_pool
-             ? loom_serve_virtual_pool_memory_usage(workspace->virtual_pool)
-             : (loom_serve_memory_usage_t){0};
+  return workspace->virtual_pool ? loom_serve_virtual_pool_source_memory_usage(
+                                       workspace->backing_pool)
+                                 : (loom_serve_memory_usage_t){0};
 }
 
 uint64_t loom_serve_workspace_round_size(
@@ -569,13 +569,22 @@ static bool loom_serve_workspace_is_retired(void* user_data) {
   return loom_serve_retirement_is_idle(user_data);
 }
 
+iree_status_t loom_serve_workspace_await(loom_serve_workspace_t* workspace,
+                                         iree_notification_t* notification,
+                                         iree_condition_fn_t condition,
+                                         void* user_data) {
+  if (workspace->virtual_pool) {
+    return loom_serve_virtual_pool_await(workspace->virtual_pool, notification,
+                                         condition, user_data);
+  }
+  iree_notification_await(notification, condition, user_data,
+                          iree_infinite_timeout());
+  return iree_ok_status();
+}
+
 iree_status_t loom_serve_workspace_await_retirement(
     loom_serve_workspace_t* workspace, loom_serve_retirement_t* retirement) {
-  if (!workspace->virtual_pool) {
-    loom_serve_retirement_await(retirement);
-    return iree_ok_status();
-  }
-  return loom_serve_virtual_pool_await(
-      workspace->virtual_pool, &retirement->notification,
-      loom_serve_workspace_is_retired, retirement);
+  return loom_serve_workspace_await(workspace, &retirement->notification,
+                                    loom_serve_workspace_is_retired,
+                                    retirement);
 }

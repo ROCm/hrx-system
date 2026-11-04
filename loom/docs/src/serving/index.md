@@ -68,11 +68,11 @@ numbers, with no spaces, signs, or fractional units. Overflow is rejected.
 Model, connection and body capacities must be positive. Holding credit must
 remain below connection capacity. Heartbeat/idle intervals, slab sizes and memory
 limits are nonnegative. A nonzero memory limit requires elastic backing.
-Elastic backing for parameters, mutable model state, invocation input/output,
-and command workspace shares this limit. Ordinary native buffers use separately
-reported storage and remain outside it, even in an elastic pool. Host snapshots,
-other host allocations, and driver overhead also remain outside it; it is not a
-whole-process or whole-device memory cap.
+Elastic backing for parameters, permanent model buffers, sparse mutable state,
+invocation input/output, and command workspace shares this limit. The reported
+storage and workspace values are breakdowns of that physical total, not
+additional allocations. Host snapshots, other host allocations, and driver
+overhead remain outside it; it is not a whole-process or whole-device memory cap.
 
 `--help` shows serving options; `--help=all` also shows linked runtime options.
 `--agents_md` prints compact integration guidance without initializing devices.

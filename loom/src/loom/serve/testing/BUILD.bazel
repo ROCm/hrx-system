@@ -20,6 +20,7 @@ loom_cc_library(
     deps = [
         ":device",
         "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/execution",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
     ],

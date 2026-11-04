@@ -837,10 +837,7 @@ TEST_F(ElasticTextServiceTest, RetirementOwnsAcceptedCheckpointCapture) {
   // Physical capacity returns at the outer pool join, not model retirement.
   IREE_ASSERT_OK(loom_serve_test_pool_trim_and_drain(storage_owner_, 0));
   const auto memory = loom_serve_pool_statistics(storage_owner_);
-  EXPECT_EQ(memory.retained.reserved_bytes,
-            loom_serve_workspace_memory_usage(
-                loom_serve_pool_workspace(storage_owner_))
-                .reserved_bytes);
+  EXPECT_FALSE(loom_serve_pool_is_in_use(storage_owner_));
   EXPECT_EQ(memory.retained.pending_bytes, 0u);
   EXPECT_EQ(memory.retained.committed_bytes, 0u);
   EXPECT_EQ(memory.retained.releasing_bytes, 0u);

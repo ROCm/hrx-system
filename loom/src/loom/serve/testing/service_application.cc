@@ -146,6 +146,7 @@ iree_status_t loom_serve_test_application_acquire(
       for (iree_host_size_t i = 0;
            i < options->device_count && iree_status_is_ok(status); ++i) {
         status = application.native_allocator->Observe(
+            loom_serve_device_group_at(group, i),
             loom_serve_device_group_pool_at(group, i));
       }
     }

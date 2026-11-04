@@ -121,6 +121,8 @@ typedef struct iree_hal_virtual_buffer_options_t {
 // obligations combine sources serving both sites; a pair without a common
 // source is unsupported. Later backing must preserve every applicable site and
 // pair guarantee, regardless of whether it comes from an originally named pool.
+// When all sources enforce the same physical placement, the reservation and
+// replacement sources preserve that placement as well.
 IREE_API_EXPORT iree_status_t iree_hal_virtual_buffer_create(
     iree_hal_device_group_t* group, iree_hal_pool_scope_t scope,
     iree_hal_virtual_buffer_sources_t sources,

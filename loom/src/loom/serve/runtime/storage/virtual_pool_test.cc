@@ -208,6 +208,79 @@ TEST_F(VirtualPoolTest, QueueDrivenVirtualBackingReusesRetainedSlabs) {
   EXPECT_EQ(reused.reserve_count, baseline.reserve_count + 2);
 }
 
+TEST_F(VirtualPoolTest, IndependentSourcesShareAdmissionButNotWorkspaceCredit) {
+  ASSERT_NO_FATAL_FAILURE(UseDeferredBacking());
+  ASSERT_NO_FATAL_FAILURE(CreateVirtualPool(true));
+  iree_hal_pool_t* storage = nullptr;
+  IREE_ASSERT_OK(loom_serve_virtual_pool_create_source(virtual_pool, &storage));
+  const iree_hal_tlsf_pool_options_t options = {
+      .tlsf_options = {.range_length = kSlabSize, .alignment = 256},
+  };
+  iree_hal_pool_t* allocator = nullptr;
+  IREE_ASSERT_OK(iree_hal_tlsf_pool_create(
+      storage, &options, iree_allocator_system(), &allocator));
+  std::unique_ptr<iree_hal_pool_t, decltype(&iree_hal_pool_release)>
+      allocator_owner(allocator, iree_hal_pool_release);
+  const iree_hal_pool_reservation_request_t small[] = {
+      iree_hal_make_pool_reservation_request(256, 256),
+      iree_hal_make_pool_reservation_request(512, 256),
+  };
+  iree_hal_buffer_t* buffers[2] = {};
+  IREE_ASSERT_OK(loom_serve_execution_alloca_from_pool(
+      execution, allocator, IREE_ARRAYSIZE(small), small, buffers));
+  std::unique_ptr<iree_hal_buffer_t, decltype(&iree_hal_buffer_release)>
+      first_owner(buffers[0], iree_hal_buffer_release),
+      second_owner(buffers[1], iree_hal_buffer_release);
+  ASSERT_NO_FATAL_FAILURE(RoundTrip(buffers[0], 0, 0x13579bdf));
+  ASSERT_NO_FATAL_FAILURE(RoundTrip(buffers[1], 0, 0x2468ace0));
+  EXPECT_EQ(loom_serve_memory_pool_live_bytes(pool), kSlabSize);
+  EXPECT_EQ(
+      loom_serve_virtual_pool_source_memory_usage(storage).committed_bytes,
+      kSlabSize);
+  EXPECT_EQ(
+      loom_serve_workspace_memory_usage(virtual_workspace).committed_bytes, 0u);
+
+  const auto request =
+      iree_hal_make_pool_reservation_request(2 * kSlabSize, 256);
+  IREE_ASSERT_OK(
+      loom_serve_execution_alloca(execution, 1, &request, &workspace));
+  ASSERT_NO_FATAL_FAILURE(RoundTrip(workspace, kSlabSize, 0x31415926));
+  EXPECT_EQ(loom_serve_memory_pool_live_bytes(pool), 3 * kSlabSize);
+  EXPECT_EQ(
+      loom_serve_workspace_memory_usage(virtual_workspace).committed_bytes,
+      2 * kSlabSize);
+  loom_serve_memory_admission_t admission;
+  IREE_ASSERT_OK(loom_serve_memory_pool_prepare(
+      pool, {.weight_bytes = kSlabSize}, &admission));
+  EXPECT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_CAPACITY);
+
+  // A source-local trim never releases another source's live storage.
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(
+      loom_serve_execution_dealloca(execution, workspace, &completion));
+  iree_hal_buffer_release(workspace);
+  workspace = nullptr;
+  IREE_ASSERT_OK(loom_serve_execution_drain(execution));
+  IREE_ASSERT_OK(loom_serve_test_workspace_await_idle(virtual_workspace));
+  ASSERT_NO_FATAL_FAILURE(AwaitVirtualPool());
+  EXPECT_EQ(
+      loom_serve_workspace_memory_usage(virtual_workspace).committed_bytes, 0u);
+  EXPECT_EQ(
+      loom_serve_virtual_pool_source_memory_usage(storage).committed_bytes,
+      kSlabSize);
+  ASSERT_NO_FATAL_FAILURE(CheckRetained(buffers[0], 0, 0x13579bdf));
+  ASSERT_NO_FATAL_FAILURE(CheckRetained(buffers[1], 0, 0x2468ace0));
+
+  first_owner.reset();
+  second_owner.reset();
+  IREE_ASSERT_OK(loom_serve_test_workspace_await_idle(virtual_workspace));
+  IREE_ASSERT_OK(loom_serve_virtual_pool_reclaim(virtual_pool));
+  ASSERT_NO_FATAL_FAILURE(AwaitVirtualPool());
+  EXPECT_EQ(
+      loom_serve_virtual_pool_source_memory_usage(storage).committed_bytes, 0u);
+  EXPECT_EQ(loom_serve_memory_pool_live_bytes(pool), 0u);
+}
+
 TEST_F(VirtualPoolTest, VirtualBackingBatchDenialPreservesWarmPrefix) {
   ASSERT_NO_FATAL_FAILURE(UseDeferredBacking());
   ASSERT_NO_FATAL_FAILURE(CreateVirtualPool());
@@ -352,7 +425,9 @@ TEST_F(VirtualPoolTest,
   mapping_queue.Initialize(loom_serve_device_transfer_queue(device));
   ASSERT_NO_FATAL_FAILURE(UseDeferredBacking(3 * kSlabSize, &mapping_queue));
   ASSERT_NO_FATAL_FAILURE(CreateVirtualPool());
-  mapping_queue.fail_next_map = true;
+  iree_hal_pool_t* failing_source = nullptr;
+  IREE_ASSERT_OK(
+      loom_serve_virtual_pool_create_source(virtual_pool, &failing_source));
   struct Completion {
     // Accepted transaction has delivered its one terminal callback.
     bool complete = false;
@@ -370,18 +445,42 @@ TEST_F(VirtualPoolTest,
       .user_data = &completion,
   };
   const auto request = iree_hal_make_pool_reservation_request(kSlabSize, 256);
+  auto* source = loom_serve_virtual_pool_handle(virtual_pool);
+  iree_hal_pool_reservation_t warm = {};
+  iree_hal_pool_acquire_info_t warm_info = {};
+  IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
+      source, 1, &request, nullptr, &warm, &warm_info, callback,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+  ASSERT_NO_FATAL_FAILURE(AwaitVirtualPool());
+  ASSERT_TRUE(completion.complete);
+  IREE_ASSERT_OK(completion.status);
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_materialize_reservations(
+      source, 1, &request, &warm,
+      IREE_HAL_POOL_MATERIALIZE_FLAG_TRANSFER_RESERVATION_OWNERSHIP, &buffer));
+  std::unique_ptr<iree_hal_buffer_t, decltype(&iree_hal_buffer_release)>
+      buffer_owner(buffer, iree_hal_buffer_release);
+  ASSERT_NO_FATAL_FAILURE(RoundTrip(buffer, 0, 0x12345678));
+
+  completion = {};
+  mapping_queue.fail_next_map = true;
   iree_hal_pool_reservation_t reservation = {.block_handle = 17};
   iree_hal_pool_acquire_info_t info = {};
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
-      loom_serve_virtual_pool_handle(virtual_pool), 1, &request, nullptr,
-      &reservation, &info, callback, IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      failing_source, 1, &request, nullptr, &reservation, &info, callback,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE));
   ASSERT_NO_FATAL_FAILURE(AwaitVirtualPool());
   ASSERT_TRUE(completion.complete);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, completion.status);
   EXPECT_EQ(reservation.block_handle, 17u);
-  // The failed range still owns its physical storage. Checked outer cleanup,
-  // not callback failure, is what permits reuse.
-  EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes, kSlabSize);
+  // Failure in a second source neither publishes its view nor releases the
+  // first source's contents. The failed range also retains its backing until
+  // checked outer cleanup establishes that it can be reused.
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes,
+            2 * kSlabSize);
+  EXPECT_EQ(loom_serve_virtual_pool_source_memory_usage(source).committed_bytes,
+            kSlabSize);
+  ASSERT_NO_FATAL_FAILURE(CheckRetained(buffer, 0, 0x12345678));
 }
 
 TEST_F(VirtualPoolTest, VirtualBackingTrimWaitsForActualHistoryCompletion) {

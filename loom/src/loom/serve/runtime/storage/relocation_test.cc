@@ -47,7 +47,7 @@ class RelocationTest : public ::testing::Test {
         group, {IREE_SV("pool"), 1}, &pool_options, &storage_owner));
     device = loom_serve_device_group_at(group, 0);
     pool = loom_serve_pool_memory(storage_owner);
-    IREE_ASSERT_OK(native.Observe(storage_owner));
+    IREE_ASSERT_OK(native.Observe(device, storage_owner));
     IREE_ASSERT_OK(
         loom_serve_device_create_execution(device, storage_owner, &execution));
   }

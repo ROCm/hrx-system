@@ -17,6 +17,7 @@
 #include "iree/vm/sync.h"
 #include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/execution/execution.h"
+#include "loom/serve/runtime/execution/workspace.h"
 #include "loom/serve/runtime/host/host.h"
 #include "loom/serve/runtime/parameter/weights.h"
 #include "loom/serve/runtime/program/jit.h"
@@ -678,6 +679,20 @@ static void loom_serve_text_load_notify(void* user_data) {
   iree_notification_post((iree_notification_t*)user_data, IREE_ALL_WAITERS);
 }
 
+typedef struct loom_serve_text_load_wait_t {
+  // Borrowed cold load, exclusively advanced by this outer owner.
+  loom_serve_text_load_t* load;
+  // Owned load result, joined with allocation progress before returning.
+  iree_status_t status;
+} loom_serve_text_load_wait_t;
+
+static bool loom_serve_text_load_wait_complete(void* user_data) {
+  loom_serve_text_load_wait_t* wait = user_data;
+  bool complete = false;
+  wait->status = loom_serve_text_load_advance(wait->load, 0, &complete);
+  return complete || !iree_status_is_ok(wait->status);
+}
+
 iree_status_t loom_serve_text_model_allocate(
     loom_serve_device_t* device, loom_serve_pool_t* pool,
     const loom_serve_text_options_t* options, iree_allocator_t host_allocator,
@@ -689,16 +704,12 @@ iree_status_t loom_serve_text_model_allocate(
   iree_status_t status = loom_serve_text_load_allocate(
       device, pool, options, loom_serve_text_load_notify, &notification,
       host_allocator, &load);
-  bool complete = false;
-  while (iree_status_is_ok(status) && !complete) {
-    const uint32_t ticket = iree_notification_prepare_wait(&notification);
-    status = loom_serve_text_load_advance(load, 0, &complete);
-    if (complete) {
-      iree_notification_cancel_wait(&notification);
-    } else {
-      iree_notification_commit_wait(&notification, ticket, IREE_DURATION_ZERO,
-                                    IREE_TIME_INFINITE_FUTURE);
-    }
+  if (iree_status_is_ok(status)) {
+    loom_serve_text_load_wait_t wait = {.load = load};
+    status = loom_serve_workspace_await(
+        loom_serve_pool_workspace(pool), &notification,
+        loom_serve_text_load_wait_complete, &wait);
+    status = iree_status_join(status, wait.status);
   }
   if (load) {
     loom_serve_text_model_t* model = loom_serve_text_load_take_model(load);

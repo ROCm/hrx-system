@@ -6,6 +6,7 @@
 
 #include "iree/base/tooling/flags.h"
 #include "loom/serve/runtime/device/device.h"
+#include "loom/serve/server/resources.h"
 #include "loom/serve/service/text/checkpoint_control.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/serve/service/text/stream.h"
@@ -69,6 +70,14 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
 
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(RegisteredSourceTextServiceTest::SetUp());
+    resources_.device_group = group_;
+    loom_serve_resources_set_observer(
+        &resources_, {[](void* self) {
+                        iree_notification_post(
+                            static_cast<iree_notification_t*>(self),
+                            IREE_ALL_WAITERS);
+                      },
+                      loom_serve_http_server_notification(server_)});
     registration_options_.device_group = group_;
     IREE_ASSERT_OK(loom_serve_registry_allocate(
         0, nullptr, 1,
@@ -104,6 +113,7 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
       reader_.join();
     }
     IREE_EXPECT_OK(read_status_);
+    loom_serve_resources_set_observer(&resources_, {});
     RegisteredSourceTextServiceTest::TearDown();
   }
 
@@ -144,8 +154,9 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
-      auto status = iree_ok_status();
-      if (Model()->phase == LOOM_SERVE_REGISTRATION_READY) {
+      auto status = loom_serve_resources_advance(&resources_);
+      if (iree_status_is_ok(status) &&
+          Model()->phase == LOOM_SERVE_REGISTRATION_READY) {
         auto& service = Model()->service;
         status = service.advance(service.self,
                                  loom_serve_registry_service_flags(Model()),
@@ -380,6 +391,8 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
 
   // Factory borrows the process-wide physical group through model retirement.
   loom_serve_model_registration_options_t registration_options_ = {};
+  // Shared native allocation progress driven by the serialized serving owner.
+  loom_serve_resources_t resources_ = {};
   // Actual managed service, with no duplicate executor or model loop.
   loom_serve_registry_t* registry_ = nullptr;
   // Stable registry slot, reused only after the prior incarnation retires.

@@ -103,6 +103,53 @@ class VirtualBufferContractTest : public ::testing::Test {
   std::array<iree_hal_pool_t, 3> sources_ = {};
 };
 
+TEST_F(VirtualBufferContractTest, PlacementPreservesTheSharedSourceGuarantee) {
+  for (size_t i = 0; i < sources_.size(); ++i) {
+    IREE_ASSERT_OK(CapturePair(i, {}, {}));
+  }
+  const iree_hal_pool_placement_t placements[] = {
+      {},
+      {IREE_HAL_POOL_PLACEMENT_REQUIRED, 1},
+      {IREE_HAL_POOL_PLACEMENT_REQUIRED, 2},
+  };
+  for (const auto first : placements) {
+    for (const auto second : placements) {
+      sources_[0].memory_contract->placement = first;
+      sources_[1].memory_contract->placement = second;
+      iree_hal_memory_contract_t* contract = nullptr;
+      IREE_ASSERT_OK(InitializeContract(&contract));
+      iree_hal_pool_t* declared[] = {&sources_[0], &sources_[1]};
+      iree_hal_virtual_buffer_capabilities_t capabilities = {
+          .max_byte_length = 4096,
+          .max_alignment = 4096,
+      };
+      IREE_ASSERT_OK(iree_hal_virtual_buffer_initialize_contract(
+          {}, {IREE_ARRAYSIZE(declared), declared},
+          IREE_HAL_MEMORY_BACKEND_HOST, 0, contract, &capabilities));
+      ASSERT_EQ(capabilities.max_byte_length, 4096u);
+      const bool enforced = first.mode == IREE_HAL_POOL_PLACEMENT_REQUIRED &&
+                            second.mode == first.mode &&
+                            second.node == first.node;
+      EXPECT_EQ(contract->placement.mode,
+                enforced ? IREE_HAL_POOL_PLACEMENT_REQUIRED
+                         : IREE_HAL_POOL_PLACEMENT_AUTOMATIC);
+      EXPECT_EQ(contract->placement.node, enforced ? first.node : 0u);
+      iree_hal_virtual_buffer_t target = {};
+      InitializeTarget(contract, nullptr, &target);
+      iree_hal_memory_contract_release(contract);
+      for (const auto replacement : placements) {
+        sources_[2].memory_contract->placement = replacement;
+        EXPECT_EQ(iree_hal_virtual_buffer_query_pool_compatibility(
+                      &target.buffer, {this, IREE_HAL_MEMORY_SCOPE_ANY},
+                      &sources_[2]),
+                  !enforced || (replacement.mode == first.mode &&
+                                replacement.node == first.node));
+      }
+      iree_hal_buffer_release(&target.buffer);
+    }
+  }
+}
+
 TEST_F(VirtualBufferContractTest, ReplacementPreservesExactPairOperations) {
   for (auto cell :
        {&iree_hal_atomic_operation_capabilities_t::device_scope_32,

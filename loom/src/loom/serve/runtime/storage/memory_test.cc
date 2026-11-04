@@ -1369,6 +1369,66 @@ TEST_F(DeviceMemoryTest, AdmissionIncludesWorkspaceSlabGranularity) {
   IREE_ASSERT_OK(loom_serve_test_pool_trim_and_drain(storage_owner, 0));
 }
 
+TEST_F(DeviceMemoryTest, PermanentStorageIsNotDiscountedAsWorkspace) {
+  const auto request =
+      iree_hal_make_pool_reservation_request(2 * kSlabSize, 256);
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(loom_serve_execution_alloca_from_pool(
+      execution, loom_serve_pool_storage(storage_owner), 1, &request, &buffer));
+  std::unique_ptr<iree_hal_buffer_t, decltype(&iree_hal_buffer_release)>
+      permanent(buffer, iree_hal_buffer_release);
+  ASSERT_NO_FATAL_FAILURE(RoundTrip(buffer, kSlabSize, 0x12345678));
+  EXPECT_EQ(loom_serve_memory_pool_live_bytes(pool), 2 * kSlabSize);
+  EXPECT_EQ(loom_serve_workspace_memory_usage(
+                loom_serve_pool_workspace(storage_owner))
+                .committed_bytes,
+            0u);
+  // A permanent root alone keeps the physical owner live, even before a model
+  // registers parameter residency. Rejected destruction preserves its data.
+  EXPECT_TRUE(loom_serve_pool_is_in_use(storage_owner));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_serve_pool_free(storage_owner));
+  ASSERT_NO_FATAL_FAILURE(CheckRetained(buffer, kSlabSize, 0x12345678));
+
+  loom_serve_residency_t* residency = nullptr;
+  IREE_ASSERT_OK(loom_serve_residency_allocate(
+      loom_serve_pool_residency_cache(storage_owner), execution, 0, nullptr,
+      iree_allocator_system(), &residency));
+  std::unique_ptr<loom_serve_residency_t, decltype(&loom_serve_residency_free)>
+      claim(residency, loom_serve_residency_free);
+  IREE_ASSERT_OK(
+      loom_serve_residency_prepare_working_set(residency, 2 * kSlabSize, 0));
+  const auto before = loom_serve_execution_frontier(execution);
+  loom_serve_residency_admission_t admission;
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residency, &admission));
+  // Permanent roots do not fulfill the invocation's protected scratch credit.
+  // The two footprints cannot fit in this owner's three-slab budget.
+  EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
+  if (admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
+    loom_serve_residency_release(residency);
+  }
+  const auto after = loom_serve_execution_frontier(execution);
+  EXPECT_EQ(after.values[0], before.values[0]);
+  EXPECT_EQ(after.values[1], before.values[1]);
+  ASSERT_NO_FATAL_FAILURE(CheckRetained(buffer, kSlabSize, 0x12345678));
+
+  permanent.reset();
+  IREE_ASSERT_OK(loom_serve_execution_drain(execution));
+  IREE_ASSERT_OK(loom_serve_test_pool_trim_and_drain(storage_owner, 0));
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residency));
+  IREE_ASSERT_OK(
+      loom_serve_execution_alloca(execution, 1, &request, &workspace));
+  ASSERT_NO_FATAL_FAILURE(RoundTrip(workspace, kSlabSize, 0x87654321));
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(
+      loom_serve_execution_dealloca(execution, workspace, &completion));
+  iree_hal_buffer_release(workspace);
+  workspace = nullptr;
+  IREE_ASSERT_OK(loom_serve_execution_drain(execution));
+  loom_serve_residency_release(residency);
+  IREE_ASSERT_OK(loom_serve_test_pool_trim_and_drain(storage_owner, 0));
+}
+
 TEST_F(DeviceMemoryTest, PoolTrimPreservesLiveWorkspaceAndMutableState) {
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
       pool, loom_serve_pool_weight_geometry(storage_owner), kSlabSize, 256,

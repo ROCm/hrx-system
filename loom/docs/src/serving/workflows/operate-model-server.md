@@ -285,7 +285,7 @@ Process limits and model capacities constrain different resources:
 | Text `rows` | Concurrently advancing execution rows. |
 | Text `context_capacity` | Logical token ceiling of one context. |
 | Text `variant_capacity` | Native choices, including the original, pending JITs and failed attempts. |
-| Pool `memory_bytes` / shortcut `--memory_bytes` | Shared elastic physical backing for parameters, state, invocation I/O, and workspace. Ordinary native buffers are outside this allowance. |
+| Pool `memory_bytes` / shortcut `--memory_bytes` | Shared elastic physical backing for parameters, permanent buffers, sparse state, invocation I/O, and workspace. |
 
 Holding capacity stays below connection capacity so held inference cannot
 consume every control connection. Live log streams and waiting variant-management
@@ -311,18 +311,21 @@ of smaller fitting requests to pass; its default is the execution-row count.
 Zero selects FIFO. This bounds successful overtakes, not elapsed waiting time:
 a slow active reader can retain its reservation.
 
-Elastic parameters, mutable state, invocation input/output, and command scratch
-share the deployment's selected pool. Admission uses the model's prepared working-set peak
-and outstanding work, rather than probing free HAL memory. Command scratch can
-be reused after its ordered release; an escaping output remains charged until
+Elastic parameters, permanent model buffers, sparse mutable state, invocation
+input/output, and command scratch share the deployment's selected pool.
+Admission uses the model's prepared working-set peak and outstanding work,
+rather than probing free HAL memory. Command scratch can be reused after its
+ordered release; an escaping output remains charged until
 both its producer and final consumer retire, even if its model is removed.
-Ordinary native buffers are reported separately and remain outside the elastic
-allowance. Host snapshots, other host allocations, and driver overhead also
-need headroom when sizing the pool; `memory_bytes` is not a whole-device cap.
+Permanent buffers remain charged while alive, including overlapping old and
+new allocations during resize. Host snapshots, other host allocations, and
+driver overhead need headroom when sizing the pool; `memory_bytes` is not a
+whole-device cap.
 
-Elastic pressure first reclaims idle workspace, then idle unpinned weights and
-eligible idle text history across models sharing the same pool. Accepted
-work, prepared continuations, and explicit checkpoint references remain protected.
+Elastic pressure first reclaims idle allocator backing, then idle unpinned
+weights and eligible idle text history across models sharing the same pool.
+Accepted work, prepared continuations, and explicit checkpoint references remain
+protected.
 An evicted session can replay its full input history; a session name is not
 durable storage.
 Pool pressure does not automatically serialize conversations to disk. If all

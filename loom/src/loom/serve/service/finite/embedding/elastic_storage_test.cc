@@ -322,7 +322,7 @@ TEST_F(ElasticEmbeddingServiceTest,
   const auto memory = loom_serve_pool_statistics(storage_owner_).retained;
   const auto workspace = loom_serve_workspace_memory_usage(
       loom_serve_pool_workspace(storage_owner_));
-  EXPECT_EQ(memory.reserved_bytes, workspace.reserved_bytes);
+  EXPECT_FALSE(loom_serve_pool_is_in_use(storage_owner_));
   EXPECT_EQ(memory.committed_bytes,
             memory.cached_bytes + workspace.committed_bytes);
   EXPECT_EQ(retired_counters_.completed, 3u);
@@ -504,7 +504,7 @@ TEST_F(ElasticEmbeddingServiceTest,
   const auto empty = loom_serve_pool_statistics(storage_owner_).retained;
   const auto workspace = loom_serve_workspace_memory_usage(
       loom_serve_pool_workspace(storage_owner_));
-  EXPECT_EQ(empty.reserved_bytes, workspace.reserved_bytes);
+  EXPECT_FALSE(loom_serve_pool_is_in_use(storage_owner_));
   EXPECT_EQ(empty.committed_bytes,
             empty.cached_bytes + workspace.committed_bytes);
 }

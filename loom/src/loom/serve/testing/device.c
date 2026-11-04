@@ -82,16 +82,32 @@ static bool loom_serve_test_capacity_complete(void* user_data) {
   return complete;
 }
 
+static bool loom_serve_test_pool_trim_complete(void* user_data) {
+  return !loom_serve_workspace_is_reclaiming(user_data);
+}
+
 iree_status_t loom_serve_test_pool_trim_and_drain(loom_serve_pool_t* owner,
                                                   uint64_t target_bytes) {
   IREE_RETURN_IF_ERROR(loom_serve_pool_trim(owner, target_bytes));
   loom_serve_memory_pool_t* memory = loom_serve_pool_memory(owner);
+  if (memory) {
+    // Elastic allocators pack live buffers into partially occupied slabs.
+    // Their unused bytes are not pending returns: join the physical owner's
+    // actual trim operations, including history waits that still need progress.
+    loom_serve_workspace_t* workspace = loom_serve_pool_workspace(owner);
+    iree_notification_t notification;
+    iree_notification_initialize(&notification);
+    iree_status_t status = loom_serve_workspace_await(
+        workspace, &notification, loom_serve_test_pool_trim_complete,
+        workspace);
+    iree_notification_deinitialize(&notification);
+    status = iree_status_join(status, loom_serve_memory_pool_await(memory));
+    return iree_status_join(status, loom_serve_workspace_advance(workspace));
+  }
   // A retained admission failure does not prevent already-accepted returns
   // from retiring. Join the native source before returning either diagnosis.
   iree_status_t status =
-      memory ? loom_serve_memory_pool_await(memory) : iree_ok_status();
-  status = iree_status_join(
-      status, loom_serve_workspace_advance(loom_serve_pool_workspace(owner)));
+      loom_serve_workspace_advance(loom_serve_pool_workspace(owner));
   iree_hal_pool_t* pool = loom_serve_pool_storage(owner);
   iree_hal_pool_wait_t* capacity = NULL;
   iree_status_t capacity_status =

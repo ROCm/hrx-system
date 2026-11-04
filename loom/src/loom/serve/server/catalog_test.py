@@ -1462,12 +1462,13 @@ def check_dynamic_catalog(
         for pool in retired_status["resources"]["pools"]:
             retained = pool["memory"]["retained"]
             if retained is not None:
-                # Removing every model preserves shared workspace addresses
-                # and reusable backing, not any model-owned physical storage.
+                # Removing every model preserves reusable allocator addresses
+                # and backing, not any model-owned physical storage.
                 assert retained["reserved_bytes"] > 0, retained
                 assert retained["committed_bytes"] == (
                     retained["cached_bytes"]
                     + pool["memory"]["workspace"]["committed_bytes"]
+                    + pool["memory"]["storage"]["committed_bytes"]
                 ), pool["memory"]
                 assert retained["pending_bytes"] == retained["releasing_bytes"] == 0, (
                     retained

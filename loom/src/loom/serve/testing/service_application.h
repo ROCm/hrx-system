@@ -25,7 +25,8 @@ typedef struct loom_serve_test_application_options_t {
   loom_serve_pool_backing_t backing;
   // Physical slab bytes; zero selects the allocator recommendation.
   iree_device_size_t slab_size;
-  // Maximum committed virtual-pool bytes; zero imposes no serving limit.
+  // Maximum committed virtual-pool bytes; zero selects native physical
+  // capacity.
   uint64_t memory_limit;
 } loom_serve_test_application_options_t;
 

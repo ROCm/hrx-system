@@ -13,6 +13,7 @@
 #include <thread>
 #include <vector>
 
+#include "loom/serve/runtime/execution/execution.h"
 #include "loom/serve/testing/device.h"
 
 namespace loom_serve::testing {
@@ -42,17 +43,29 @@ class NativeAllocator {
     condition_.wait(
         lock, [&] { return live_allocations_ == 0 && active_calls_ == 0; });
   }
-  iree_status_t Observe(loom_serve_pool_t* pool) {
+  iree_status_t Observe(loom_serve_device_t* device, loom_serve_pool_t* pool) {
     {
       std::lock_guard<std::mutex> lock(mutex_);
       observing_ = true;
     }
+    loom_serve_execution_t* execution = nullptr;
     iree_hal_buffer_t* probe = nullptr;
-    iree_status_t status = iree_hal_pool_allocate_buffer(
-        loom_serve_pool_storage(pool),
-        iree_hal_make_pool_reservation_request(4096, 0),
-        iree_infinite_timeout(), &probe);
+    iree_status_t status =
+        loom_serve_device_create_execution(device, pool, &execution);
+    if (iree_status_is_ok(status)) {
+      const auto request = iree_hal_make_pool_reservation_request(4096, 0);
+      status = loom_serve_execution_alloca_from_pool(
+          execution, loom_serve_pool_storage(pool), 1, &request, &probe);
+    }
+    if (iree_status_is_ok(status)) {
+      uint64_t value = 0;
+      status = loom_serve_execution_dealloca(execution, probe, &value);
+    }
     iree_hal_buffer_release(probe);
+    if (execution) {
+      status = iree_status_join(status, loom_serve_execution_drain(execution));
+    }
+    loom_serve_execution_release(execution);
     if (iree_status_is_ok(status)) {
       status = loom_serve_test_pool_trim_and_drain(pool, 0);
     }
