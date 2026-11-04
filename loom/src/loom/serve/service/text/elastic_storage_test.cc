@@ -12,6 +12,7 @@
 namespace {
 
 using loom_serve::testing::text::Oracle;
+using loom_serve::testing::text::OwnerTurn;
 using loom_serve::testing::text::SourceTextServiceTest;
 
 class ElasticTextServiceTest : public SourceTextServiceTest {
@@ -22,6 +23,16 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
     auto* pool = loom_serve_pool_memory(storage_owner_);
     loom_serve_memory_pool_trim(pool, 0);
     IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+  }
+
+  void TearDown() override {
+    SourceTextServiceTest::TearDown();
+    // Pool ownership returns to the outer fixture only after the router joins.
+    loom_serve_memory_operation_await(filler_operation_);
+    IREE_EXPECT_OK(loom_serve_memory_operation_query_status(filler_operation_));
+    loom_serve_memory_operation_free(filler_operation_);
+    IREE_EXPECT_OK(loom_serve_virtual_buffer_free(filler_));
+    iree_hal_semaphore_release(filler_ready_);
   }
 
   void WaitFrontier(const loom_serve_execution_frontier_t& frontier) {
@@ -185,23 +196,48 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
     // Keep the cold request on the native allocation path even when warm
     // models leave reusable slices in a shared physical parent.
     auto* memory_pool = loom_serve_pool_memory(storage_owner_);
-    const auto before_filler = loom_serve_memory_pool_statistics(memory_pool);
-    ASSERT_GT(before_filler.cached_bytes, 0u);
-    loom_serve_memory_statistics_t filler_statistics = {0};
-    loom_serve_virtual_buffer_t* filler = nullptr;
-    IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
-        memory_pool, loom_serve_pool_state_geometry(storage_owner_),
-        before_filler.cached_bytes, 256, &filler_statistics, &filler));
-    const auto free_filler = [](loom_serve_virtual_buffer_t* buffer) {
-      IREE_EXPECT_OK(loom_serve_virtual_buffer_free(buffer));
-    };
-    std::unique_ptr<loom_serve_virtual_buffer_t, decltype(free_filler)>
-        filler_owner(filler, free_filler);
-    IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(
-        filler, 0, before_filler.cached_bytes));
-    const auto after_filler = loom_serve_memory_pool_statistics(memory_pool);
-    EXPECT_EQ(after_filler.committed_bytes, before_filler.committed_bytes);
-    EXPECT_EQ(after_filler.cached_bytes, 0u);
+    IREE_ASSERT_OK(iree_hal_semaphore_create(
+        loom_serve_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+        0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &filler_ready_));
+    loom_serve_memory_statistics_t before_filler = {};
+    // The fixture has one worker: owner turns exclude router pool accesses,
+    // while native readiness is awaited only by the outer test thread.
+    ASSERT_EQ(WorkerCount(), 1u);
+    ASSERT_NO_FATAL_FAILURE(
+        OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
+          before_filler = loom_serve_memory_pool_statistics(memory_pool);
+          ASSERT_GT(before_filler.cached_bytes, 0u);
+          IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+              memory_pool, loom_serve_pool_state_geometry(storage_owner_),
+              before_filler.cached_bytes, 256, &filler_statistics_, &filler_));
+          const loom_serve_memory_range_t range = {filler_, 0,
+                                                   before_filler.cached_bytes};
+          loom_serve_memory_admission_t admission;
+          IREE_ASSERT_OK(loom_serve_memory_pool_commit_async(
+              memory_pool, 1, &range, filler_ready_, 1, &admission,
+              &filler_operation_));
+          ASSERT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE);
+        }));
+    if (HasFatalFailure()) {
+      return;
+    }
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(
+        filler_ready_, 1, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+    ASSERT_NO_FATAL_FAILURE(
+        OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
+          ASSERT_TRUE(
+              loom_serve_memory_operation_is_complete(filler_operation_));
+          IREE_ASSERT_OK(
+              loom_serve_memory_operation_query_status(filler_operation_));
+          const auto after_filler =
+              loom_serve_memory_pool_statistics(memory_pool);
+          EXPECT_EQ(after_filler.committed_bytes,
+                    before_filler.committed_bytes);
+          EXPECT_EQ(after_filler.cached_bytes, 0u);
+        }));
+    if (HasFatalFailure()) {
+      return;
+    }
     int cold = -1;
     {
       // The application has one task worker. Only the HAL's existing native
@@ -234,6 +270,15 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
     }
     EXPECT_FALSE(HasPendingBacking(Read(Send("", "", "/v1/status", "GET"))));
   }
+
+  // Spare shared backing held through router shutdown in cold-admission cases.
+  loom_serve_virtual_buffer_t* filler_ = nullptr;
+  // Accounting outlives the filler's asynchronous commitment and destruction.
+  loom_serve_memory_statistics_t filler_statistics_ = {};
+  // Accepted commitment retained until the serialized router owner has joined.
+  loom_serve_memory_operation_t* filler_operation_ = nullptr;
+  // Native readiness waited by the outer test without publishing pool state.
+  iree_hal_semaphore_t* filler_ready_ = nullptr;
 };
 
 class RegisteredElasticTextServiceTest : public ElasticTextServiceTest {
