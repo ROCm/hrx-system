@@ -4,8 +4,6 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/codegen/low/descriptors.h"
-#include "loom/target/provider.h"
 #include "loom/tools/loom-check/comparison.h"
 #include "loom/tools/loom-check/compile.h"
 #include "loom/tools/loom-check/diagnostics.h"
@@ -88,21 +86,6 @@ static iree_status_t loom_check_emit_finish_diagnostics_and_compare_output(
   return loom_check_compare_output(test_case, allocator, result);
 }
 
-typedef struct loom_check_emit_native_provider_consumer_t {
-  // Provider receiving the projected native module.
-  const loom_check_emit_provider_t* provider;
-  // Common request owning the admitted public module.
-  const loom_check_emit_provider_request_t* request;
-} loom_check_emit_native_provider_consumer_t;
-
-static iree_status_t loom_check_emit_invoke_native_provider(
-    void* user_data, const loom_check_emit_native_module_t* native_module) {
-  const loom_check_emit_native_provider_consumer_t* consumer =
-      (const loom_check_emit_native_provider_consumer_t*)user_data;
-  return consumer->provider->execute_native(consumer->provider,
-                                            consumer->request, native_module);
-}
-
 static iree_status_t loom_check_emit_invoke_provider(
     const loom_check_emit_provider_t* provider,
     loom_check_emit_provider_request_t* request) {
@@ -112,18 +95,7 @@ static iree_status_t loom_check_emit_invoke_provider(
   // Providers own comparable output by default and may explicitly suppress it
   // for diagnostics-only modes.
   request->result->has_actual_output = true;
-  iree_status_t status = iree_ok_status();
-  if (provider->execute != NULL) {
-    status = provider->execute(provider, request);
-  } else {
-    const loom_check_emit_native_provider_consumer_t native_consumer = {
-        .provider = provider,
-        .request = request,
-    };
-    status = loom_check_compile_with_native_module(
-        request, loom_check_emit_invoke_native_provider,
-        (void*)&native_consumer);
-  }
+  iree_status_t status = provider->execute(provider, request);
   iree_arena_deinitialize(&case_arena);
   // Successful emission owns a comparable output even when it is empty.
   // Providers must opt in when they produce complete output after a compiler
@@ -193,16 +165,11 @@ iree_status_t loom_check_execute_emit(
     return status;
   }
 
-  const loom_target_low_descriptor_registry_t low_registry =
-      loom_target_environment_low_descriptor_registry(
-          environment->target_environment);
-  loom_low_descriptor_text_print_context_initialize(
-      &low_registry.registry, &diagnostic_collector.type_print_context);
-  if ((provider->execute == NULL) == (provider->execute_native == NULL)) {
-    status = iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "emit provider '%.*s' must define exactly one execute callback",
-        (int)provider->name.size, provider->name.data);
+  if (provider->execute == NULL) {
+    status =
+        iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                         "emit provider '%.*s' must define an execute callback",
+                         (int)provider->name.size, provider->name.data);
     status = loom_check_emit_finish_status_failure(status, provider_target_name,
                                                    result);
     iree_arena_deinitialize(&diagnostic_arena);
@@ -215,7 +182,6 @@ iree_status_t loom_check_execute_emit(
       .filename = filename,
       .test_case = test_case,
       .environment = environment,
-      .low_registry = &low_registry,
       .diagnostic_collector = &diagnostic_collector,
       .block_pool = block_pool,
       .host_allocator = allocator,

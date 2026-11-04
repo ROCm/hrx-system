@@ -7,7 +7,7 @@
 #ifndef LOOM_TOOLS_LOOM_CHECK_TEST_ANALYSIS_PROVIDERS_H_
 #define LOOM_TOOLS_LOOM_CHECK_TEST_ANALYSIS_PROVIDERS_H_
 
-#include "loom/tools/loom-check/execute.h"
+#include "loom/tools/loom-check/test/native_provider.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -15,12 +15,12 @@ extern "C" {
 
 // Prints shared transport proofs for channels backed by caller buffers.
 // These proofs describe record flow, not physical storage or device admission.
-extern const loom_check_emit_provider_t
+extern const loom_check_test_native_emit_provider_t
     loom_check_test_pipeline_transport_provider;
 
 // Prints passive liveness and storage-interference observations for authored
 // IR without changing the program being analyzed.
-extern const loom_check_emit_provider_t
+extern const loom_check_test_native_emit_provider_t
     loom_check_test_analysis_observation_provider;
 
 #ifdef __cplusplus

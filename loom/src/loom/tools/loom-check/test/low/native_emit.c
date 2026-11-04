@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/tools/loom-check/low_emit.h"
+#include "loom/tools/loom-check/test/low/native_emit.h"
 
 #include "loom/analysis/symbol_facts.h"
 #include "loom/codegen/low/function.h"
@@ -265,14 +265,14 @@ iree_status_t loom_check_low_emit_materialize_operand_ties(
 
 iree_status_t loom_check_low_emit_packetize_function(
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module,
+    const loom_check_test_native_module_t* native_module,
     iree_string_view_t function_symbol_name,
     const loom_low_emission_frame_options_t* options,
     const loom_low_emission_frame_spill_free_options_t* spill_free_options,
     loom_low_emission_frame_t* out_frame, bool* out_accepted) {
   *out_accepted = false;
-  loom_check_diagnostic_emitter_capture_t diagnostic_capture = {
-      .diagnostic_collector = request->diagnostic_collector,
+  loom_check_test_native_diagnostic_emitter_capture_t diagnostic_capture = {
+      .context = native_module->diagnostic_context,
       .module = native_module->module,
       .source_resolver = native_module->source_resolver,
       .emitter = LOOM_EMITTER_PASS,
@@ -280,7 +280,7 @@ iree_status_t loom_check_low_emit_packetize_function(
   iree_diagnostic_emitter_t emitter = {0};
   if (request->diagnostic_collector != NULL) {
     emitter = (iree_diagnostic_emitter_t){
-        .fn = loom_check_diagnostic_emitter_capture_emit,
+        .fn = loom_check_test_native_diagnostic_emitter_capture_emit,
         .user_data = &diagnostic_capture,
     };
   }
@@ -294,7 +294,7 @@ iree_status_t loom_check_low_emit_packetize_function(
   }
 
   loom_low_emission_frame_options_t frame_options = *options;
-  frame_options.descriptor_registry = &request->low_registry->registry;
+  frame_options.descriptor_registry = &native_module->low_registry.registry;
   frame_options.emitter = emitter;
   loom_low_resolved_target_t resolved_target = {0};
   if (frame_options.resolved_target == NULL) {

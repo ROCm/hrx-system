@@ -76,8 +76,6 @@ class InputTest : public ::testing::Test {
     compile_session_.provider = &compile_provider_;
     compile_session_.host_allocator = iree_allocator_system();
     environment_.input_formats = {kInputFormats, IREE_ARRAYSIZE(kInputFormats)};
-    environment_.target_environment = loomc_target_environment_get_interop_view(
-        compile_session_.target_environment);
     environment_.compile_session = &compile_session_;
   }
 

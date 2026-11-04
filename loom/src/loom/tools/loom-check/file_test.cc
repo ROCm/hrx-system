@@ -43,8 +43,6 @@ class FileTest : public ::testing::Test {
             &target_provider_set_, loomc_allocator_system(),
             &compile_session_.target_environment)));
     environment_ = {};
-    environment_.target_environment = loomc_target_environment_get_interop_view(
-        compile_session_.target_environment);
     environment_.compile_session = &compile_session_;
   }
 

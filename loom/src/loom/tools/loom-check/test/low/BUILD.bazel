@@ -13,6 +13,29 @@ package(
 )
 
 loom_cc_library(
+    name = "native_emit",
+    testonly = True,
+    srcs = ["native_emit.c"],
+    hdrs = ["native_emit.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:operand_ties",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low:op_defs",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/tools/loom-check:execute",
+        "//loom/src/loom/tools/loom-check/test:native_provider",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "providers",
     testonly = True,
     srcs = [
@@ -23,6 +46,7 @@ loom_cc_library(
     hdrs = ["providers.h"],
     visibility = ["//loom/src/loom/tools/loom-check:__pkg__"],
     deps = [
+        ":native_emit",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low:allocation_json",
         "//loom/src/loom/codegen/low:allocation_materialization",
@@ -46,6 +70,7 @@ loom_cc_library(
         "//loom/src/loom/target/reporting:format",
         "//loom/src/loom/target/reporting:low",
         "//loom/src/loom/tools/loom-check:execute",
+        "//loom/src/loom/tools/loom-check/test:native_provider",
         "//runtime/src/iree/base",
     ],
 )

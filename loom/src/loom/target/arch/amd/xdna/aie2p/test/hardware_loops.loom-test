@@ -1,4 +1,4 @@
-// RUN: emit aie2p-xdna input=source-low output=hardware-loops
+// RUN: emit aie2p-hardware-loops input=source-low
 
 aie2p.target<array> @array_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
 
@@ -68,7 +68,7 @@ func.def target(@core_target) @hardware_loop_worker(%lhs: buffer, %rhs: buffer, 
 
 // ====
 
-// RUN: emit aie2p-xdna input=source-low output=hardware-loops
+// RUN: emit aie2p-hardware-loops input=source-low
 
 // Each iteration advances to a disjoint 128-byte panel. The final store remains
 // in flight past the body boundary, but the next panel can start without NOP

@@ -20,7 +20,7 @@ static bool loom_check_test_config_schema_matches(
 static iree_status_t loom_check_test_config_schema_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module) {
+    const loom_check_test_native_module_t* native_module) {
   (void)provider;
   if (!iree_string_view_is_empty(request->target_options)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -39,9 +39,14 @@ static iree_status_t loom_check_test_config_schema_append_names(
   return iree_string_builder_append_cstring(builder, "config-schema");
 }
 
-const loom_check_emit_provider_t loom_check_test_config_schema_provider = {
-    .name = IREE_SVL("config-schema"),
-    .match = loom_check_test_config_schema_matches,
-    .execute_native = loom_check_test_config_schema_execute,
-    .append_names = loom_check_test_config_schema_append_names,
+const loom_check_test_native_emit_provider_t
+    loom_check_test_config_schema_provider = {
+        .base =
+            {
+                .name = IREE_SVL("config-schema"),
+                .match = loom_check_test_config_schema_matches,
+                .execute = loom_check_test_native_emit_provider_execute,
+                .append_names = loom_check_test_config_schema_append_names,
+            },
+        .execute_native = loom_check_test_config_schema_execute,
 };

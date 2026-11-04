@@ -82,7 +82,7 @@ loom_check_test_analysis_observation_symbol_actual_kind(
 
 static iree_status_t loom_check_test_analysis_observation_find_function(
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module,
+    const loom_check_test_native_module_t* native_module,
     iree_string_view_t symbol_name, loom_func_like_t* out_function) {
   *out_function = (loom_func_like_t){0};
   loom_module_t* module = native_module->module;
@@ -115,14 +115,14 @@ static iree_status_t loom_check_test_analysis_observation_find_function(
         .params = params,
         .param_count = IREE_ARRAYSIZE(params),
     };
-    loom_check_diagnostic_emitter_capture_t capture = {
-        .diagnostic_collector = request->diagnostic_collector,
+    loom_check_test_native_diagnostic_emitter_capture_t capture = {
+        .context = native_module->diagnostic_context,
         .module = module,
         .source_resolver = native_module->source_resolver,
         .emitter = LOOM_EMITTER_PASS,
     };
     const iree_diagnostic_emitter_t emitter = {
-        .fn = loom_check_diagnostic_emitter_capture_emit,
+        .fn = loom_check_test_native_diagnostic_emitter_capture_emit,
         .user_data = &capture,
     };
     return iree_diagnostic_emit(emitter, &emission);
@@ -209,7 +209,7 @@ static iree_status_t loom_check_test_analysis_observe_storage_interference(
 static iree_status_t loom_check_test_analysis_observation_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module) {
+    const loom_check_test_native_module_t* native_module) {
   (void)provider;
   loom_check_test_analysis_observation_t observation =
       LOOM_CHECK_TEST_ANALYSIS_OBSERVATION_LIVENESS;
@@ -241,10 +241,15 @@ static iree_status_t loom_check_test_analysis_observation_append_names(
       builder, "liveness-json, liveness, storage-interference");
 }
 
-const loom_check_emit_provider_t loom_check_test_analysis_observation_provider =
-    {
-        .name = IREE_SVL("analysis-observation"),
-        .match = loom_check_test_analysis_observation_matches,
+const loom_check_test_native_emit_provider_t
+    loom_check_test_analysis_observation_provider = {
+        .base =
+            {
+                .name = IREE_SVL("analysis-observation"),
+                .match = loom_check_test_analysis_observation_matches,
+                .execute = loom_check_test_native_emit_provider_execute,
+                .append_names =
+                    loom_check_test_analysis_observation_append_names,
+            },
         .execute_native = loom_check_test_analysis_observation_execute,
-        .append_names = loom_check_test_analysis_observation_append_names,
 };

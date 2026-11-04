@@ -45,7 +45,7 @@ static iree_status_t loom_check_test_config_materialize_record_status(
 static iree_status_t loom_check_test_config_materialize_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module) {
+    const loom_check_test_native_module_t* native_module) {
   (void)provider;
   iree_string_view_t key = iree_string_view_empty();
   iree_string_view_t value = iree_string_view_empty();
@@ -104,9 +104,14 @@ static iree_status_t loom_check_test_config_materialize_append_names(
   return iree_string_builder_append_cstring(builder, "config-materialize");
 }
 
-const loom_check_emit_provider_t loom_check_test_config_materialize_provider = {
-    .name = IREE_SVL("config-materialize"),
-    .match = loom_check_test_config_materialize_matches,
-    .execute_native = loom_check_test_config_materialize_execute,
-    .append_names = loom_check_test_config_materialize_append_names,
+const loom_check_test_native_emit_provider_t
+    loom_check_test_config_materialize_provider = {
+        .base =
+            {
+                .name = IREE_SVL("config-materialize"),
+                .match = loom_check_test_config_materialize_matches,
+                .execute = loom_check_test_native_emit_provider_execute,
+                .append_names = loom_check_test_config_materialize_append_names,
+            },
+        .execute_native = loom_check_test_config_materialize_execute,
 };

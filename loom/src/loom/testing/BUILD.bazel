@@ -41,22 +41,9 @@ loom_cc_library(
     hdrs = ["test_diagnostic.h"],
     deps = [
         ":test_file",
-        "//loom/src/loom/error:error_defs",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
-    ],
-)
-
-loom_cc_library(
-    name = "test_diagnostic_native",
-    srcs = ["test_diagnostic_native.c"],
-    hdrs = ["test_diagnostic_native.h"],
-    deps = [
-        ":test_diagnostic",
         "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/error:error_defs",
         "//loom/src/loom/error:renderer",
-        "//loom/src/loom/format/text:printer",
-        "//loom/src/loom/ir",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -119,7 +106,6 @@ loom_cc_test(
     srcs = ["test_diagnostic_test.cc"],
     deps = [
         ":test_diagnostic",
-        ":test_diagnostic_native",
         "//loom/src/loom/error:error_defs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

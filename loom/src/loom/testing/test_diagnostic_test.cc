@@ -11,7 +11,6 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/testing/test_diagnostic_native.h"
 
 namespace {
 
@@ -146,10 +145,10 @@ TEST_F(TestDiagnosticTest, MaterializationPreservesSourceIdentity) {
   emitted.origin.filename =
       iree_make_string_view(filename.data(), filename.size());
   emitted.origin.start_line = 1;
-  loom_test_diagnostic_format_options_t options = {};
   loom_test_diagnostic_t diagnostic = {};
-  IREE_ASSERT_OK(loom_test_diagnostic_materialize(
-      &emitted, &options, &arena_, iree_allocator_system(), &diagnostic));
+  IREE_ASSERT_OK(
+      loom_test_diagnostic_materialize(&emitted, /*type_formatter=*/{}, &arena_,
+                                       iree_allocator_system(), &diagnostic));
   filename.assign(filename.size(), '?');
 
   loom_test_annotation_t annotation = {

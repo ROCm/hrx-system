@@ -9,14 +9,11 @@
 
 #include <stdio.h>
 
-#include "loom/ops/test/registry.h"
 #include "loom/target/arch/cmd/check/provider.h"
-#include "loom/target/provider.h"
 #include "loom/tooling/export/cxx/loom_check.h"
 #include "loom/tooling/input/loomc_configured.h"
 #include "loom/tools/loom-check/compile.h"
 #include "loom/tools/loom-check/provider.h"
-#include "loomc/interop.h"
 #include "loomc/iree.h"
 #include "loomc/target/configured.h"
 #include "loomc/target/configured_target.h"
@@ -25,8 +22,12 @@
 #define LOOM_CHECK_HAVE_TEST_PROVIDER 0
 #endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 #if LOOM_CHECK_HAVE_TEST_PROVIDER
+#include "loom/target/provider.h"
 #include "loom/target/test/provider.h"
 #include "loom/tools/loom-check/test_provider.h"
+#include "loomc/interop.h"
+#else
+#include "loom/testing/target_environment.h"
 #endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 #ifndef LOOM_CHECK_HAVE_ARCH_AIE2P
 #define LOOM_CHECK_HAVE_ARCH_AIE2P 0
@@ -56,23 +57,32 @@
 #define LOOM_CHECK_HAVE_ARTIFACT_X86_ELF 0
 #endif  // LOOM_CHECK_HAVE_ARTIFACT_X86_ELF
 #if LOOM_CHECK_HAVE_ARCH_AIE2P
-#include "loom/target/arch/amd/xdna/aie2p/check/provider.h"
 #if LOOM_CHECK_HAVE_TEST_PROVIDER
 #include "loom/target/arch/amd/xdna/aie2p/check/configuration.h"
+#include "loom/target/arch/amd/xdna/aie2p/check/provider.h"
 #include "loom/target/arch/amd/xdna/aie2p/check/test_provider.h"
 #endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 #endif  // LOOM_CHECK_HAVE_ARCH_AIE2P
 #if LOOM_CHECK_HAVE_ARCH_AMDGPU
 #include "loom/target/arch/amdgpu/check/provider.h"
+#if LOOM_CHECK_HAVE_TEST_PROVIDER
+#include "loom/target/arch/amdgpu/check/test_provider.h"
+#endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 #endif  // LOOM_CHECK_HAVE_ARCH_AMDGPU
 #if LOOM_CHECK_HAVE_ARCH_SPIRV
 #include "loom/target/arch/spirv/check/provider.h"
 #endif  // LOOM_CHECK_HAVE_ARCH_SPIRV
 #if LOOM_CHECK_HAVE_ARTIFACT_AIE2P_ELF
 #include "loom/target/emit/native/aie2p/check_provider.h"
+#if LOOM_CHECK_HAVE_TEST_PROVIDER
+#include "loom/target/arch/amd/xdna/aie2p/check/hardware_loops.h"
+#endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 #endif  // LOOM_CHECK_HAVE_ARTIFACT_AIE2P_ELF
 #if LOOM_CHECK_HAVE_ARTIFACT_AMDGPU_ELF
 #include "loom/target/emit/native/amdgpu/loom_check_provider.h"
+#if LOOM_CHECK_HAVE_TEST_PROVIDER
+#include "loom/target/emit/native/amdgpu/loom_check_test_provider.h"
+#endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 #endif  // LOOM_CHECK_HAVE_ARTIFACT_AMDGPU_ELF
 #if LOOM_CHECK_HAVE_ARTIFACT_SPIRV_BINARY
 #include "loom/tooling/target/spirv/loom_check_provider.h"
@@ -84,7 +94,9 @@
 #include "loom/tooling/target/wasm/loom_check_provider.h"
 #endif  // LOOM_CHECK_HAVE_ARTIFACT_WASM_BINARY
 #if LOOM_CHECK_HAVE_ARTIFACT_X86_ELF
+#if LOOM_CHECK_HAVE_TEST_PROVIDER
 #include "loom/target/emit/native/x86/loom_check_provider.h"
+#endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 #endif  // LOOM_CHECK_HAVE_ARTIFACT_X86_ELF
 static const loom_check_provider_t* const kLoomCheckProviders[] = {
     &loom_cxx_export_check_provider,
@@ -93,22 +105,31 @@ static const loom_check_provider_t* const kLoomCheckProviders[] = {
 #endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
     &loom_cmd_check_provider,
 #if LOOM_CHECK_HAVE_ARCH_AIE2P
-    &loom_aie2p_arch_check_provider,
 #if LOOM_CHECK_HAVE_TEST_PROVIDER
+    &loom_aie2p_arch_check_provider,
     &loom_aie2p_check_test_provider,
 #endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 #endif  // LOOM_CHECK_HAVE_ARCH_AIE2P
 #if LOOM_CHECK_HAVE_ARCH_AMDGPU
     &loom_amdgpu_arch_check_provider,
+#if LOOM_CHECK_HAVE_TEST_PROVIDER
+    &loom_amdgpu_arch_check_test_provider,
+#endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 #endif  // LOOM_CHECK_HAVE_ARCH_AMDGPU
 #if LOOM_CHECK_HAVE_ARCH_SPIRV
     &loom_spirv_arch_check_provider,
 #endif  // LOOM_CHECK_HAVE_ARCH_SPIRV
 #if LOOM_CHECK_HAVE_ARTIFACT_AIE2P_ELF
     &loom_aie2p_artifact_check_provider,
+#if LOOM_CHECK_HAVE_TEST_PROVIDER
+    &loom_aie2p_hardware_loops_check_provider,
+#endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 #endif  // LOOM_CHECK_HAVE_ARTIFACT_AIE2P_ELF
 #if LOOM_CHECK_HAVE_ARTIFACT_AMDGPU_ELF
     &loom_amdgpu_native_check_provider,
+#if LOOM_CHECK_HAVE_TEST_PROVIDER
+    &loom_amdgpu_native_check_test_provider,
+#endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 #endif  // LOOM_CHECK_HAVE_ARTIFACT_AMDGPU_ELF
 #if LOOM_CHECK_HAVE_ARTIFACT_SPIRV_BINARY
     &loom_spirv_emit_check_provider,
@@ -120,34 +141,25 @@ static const loom_check_provider_t* const kLoomCheckProviders[] = {
     &loom_wasm_emit_check_provider,
 #endif  // LOOM_CHECK_HAVE_ARTIFACT_WASM_BINARY
 #if LOOM_CHECK_HAVE_ARTIFACT_X86_ELF
+#if LOOM_CHECK_HAVE_TEST_PROVIDER
     &loom_x86_native_check_provider,
+#endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 #endif  // LOOM_CHECK_HAVE_ARTIFACT_X86_ELF
 };
 
-// Developer tools accept test.* syntax without synthetic compiler behavior.
-// The test binary's full provider registers that dialect along with its passes
-// and descriptors, so it replaces this syntax-only contribution.
-#if !LOOM_CHECK_HAVE_TEST_PROVIDER
-static const loom_target_provider_t kLoomCheckSyntaxProvider = {
-    .register_context = loom_test_dialect_register,
-};
-#endif  // !LOOM_CHECK_HAVE_TEST_PROVIDER
-
-static const loom_target_provider_t* const kLoomCheckTargetExtensions[] = {
 #if LOOM_CHECK_HAVE_TEST_PROVIDER
+static const loom_target_provider_t* const kLoomCheckTargetExtensions[] = {
     &loom_test_target_provider,
 #if LOOM_CHECK_HAVE_ARCH_AIE2P
     &loom_aie2p_configuration_check_target_provider,
 #endif  // LOOM_CHECK_HAVE_ARCH_AIE2P
-#else
-    &kLoomCheckSyntaxProvider,
-#endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 };
 
 static const loom_target_provider_set_t kLoomCheckTargetExtensionSet = {
     .providers = kLoomCheckTargetExtensions,
     .provider_count = IREE_ARRAYSIZE(kLoomCheckTargetExtensions),
 };
+#endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 
 static loomc_status_t loom_check_create_target_environment(
     loomc_allocator_t allocator, loomc_target_environment_t** out_environment) {
@@ -161,8 +173,12 @@ static loomc_status_t loom_check_create_target_environment(
     status = loomc_target_environment_create_configured(allocator, &inputs[1]);
   }
   if (loomc_status_is_ok(status)) {
+#if LOOM_CHECK_HAVE_TEST_PROVIDER
     status = loomc_target_environment_create_from_provider_set(
         &kLoomCheckTargetExtensionSet, allocator, &inputs[2]);
+#else
+    status = loomc_target_environment_create_test_ir(allocator, &inputs[2]);
+#endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
   }
   if (loomc_status_is_ok(status)) {
     status = loomc_target_environment_create(IREE_ARRAYSIZE(inputs), inputs,

@@ -10,7 +10,6 @@
 
 #include "loom/error/renderer.h"
 #include "loom/error/source.h"
-#include "loom/testing/test_diagnostic_native.h"
 #include "loom/util/stream.h"
 
 //===----------------------------------------------------------------------===//
@@ -51,70 +50,28 @@ iree_status_t loom_check_diagnostic_collector_append(
   return iree_ok_status();
 }
 
-static iree_status_t loom_check_format_type(loom_type_t type, void* user_data,
-                                            loom_output_stream_t* stream) {
-  const loom_check_diagnostic_collector_t* collector =
-      (const loom_check_diagnostic_collector_t*)user_data;
-  if (collector->type_print_context.options.low_asm_environment.vtable) {
-    return loom_text_print_type_with_options(
-        type, collector->module, stream,
-        &collector->type_print_context.options);
-  }
-  if (!collector->module) {
-    return loom_type_format_minimal(type, NULL, stream);
-  }
-  return loom_text_print_type(type, collector->module, stream);
-}
-
 iree_status_t loom_check_diagnostic_collector_sink(
     void* user_data, const loom_diagnostic_t* diagnostic) {
   loom_check_diagnostic_collector_t* collector =
       (loom_check_diagnostic_collector_t*)user_data;
 
-  const loom_test_diagnostic_format_options_t format_options = {
-      .module = collector->module,
-      .text_print_options = collector->type_print_context.options,
-  };
+  loom_type_formatter_t type_formatter = collector->type_formatter;
+  if (!type_formatter.fn) {
+    type_formatter = (loom_type_formatter_t){loom_type_format_minimal, NULL};
+  }
   loom_check_collected_diagnostic_t collected_diagnostic;
   IREE_RETURN_IF_ERROR(loom_test_diagnostic_materialize(
-      diagnostic, &format_options, collector->arena, collector->host_allocator,
+      diagnostic, type_formatter, collector->arena, collector->host_allocator,
       &collected_diagnostic));
   IREE_RETURN_IF_ERROR(
       loom_check_diagnostic_collector_append(collector, &collected_diagnostic));
 
-  loom_type_formatter_t type_formatter = {loom_check_format_type, collector};
   loom_check_diagnostic_capture_t diagnostic_capture = {
       .type_formatter = type_formatter,
       .result = collector->result,
   };
   IREE_RETURN_IF_ERROR(
       loom_check_diagnostic_capture_sink(&diagnostic_capture, diagnostic));
-  return iree_ok_status();
-}
-
-//===----------------------------------------------------------------------===//
-// Diagnostic emission materialization
-//===----------------------------------------------------------------------===//
-
-iree_status_t loom_check_diagnostic_emitter_capture_emit(
-    void* user_data, const loom_diagnostic_emission_t* emission) {
-  loom_check_diagnostic_emitter_capture_t* capture = user_data;
-  loom_diagnostic_t diagnostic;
-  loom_diagnostic_related_location_t
-      related_locations[LOOM_DIAGNOSTIC_MAX_RELATED_LOCATIONS];
-  loom_source_resolve_diagnostic(capture->module, capture->source_resolver,
-                                 capture->emitter, emission, related_locations,
-                                 &diagnostic);
-
-  const loom_module_t* diagnostic_module =
-      emission->module ? emission->module : capture->module;
-  const loom_module_t* previous_module = capture->diagnostic_collector->module;
-  capture->diagnostic_collector->module = diagnostic_module;
-  iree_status_t status = loom_check_diagnostic_collector_sink(
-      capture->diagnostic_collector, &diagnostic);
-  capture->diagnostic_collector->module = previous_module;
-  IREE_RETURN_IF_ERROR(status);
-  ++capture->emission_count;
   return iree_ok_status();
 }
 

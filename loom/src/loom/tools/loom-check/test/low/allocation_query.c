@@ -12,7 +12,7 @@
 #include "loom/codegen/low/text_asm.h"
 #include "loom/format/text/printer.h"
 #include "loom/tools/loom-check/diagnostics.h"
-#include "loom/tools/loom-check/low_emit.h"
+#include "loom/tools/loom-check/test/low/native_emit.h"
 #include "loom/tools/loom-check/test/low/providers.h"
 
 enum loom_check_test_low_allocation_option_flag_bits_e {
@@ -610,7 +610,7 @@ static iree_status_t loom_check_test_low_allocation_append_edge_moves(
 static iree_status_t loom_check_test_low_allocation_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module) {
+    const loom_check_test_native_module_t* native_module) {
   (void)provider;
   loom_check_test_low_allocation_options_t options;
   IREE_RETURN_IF_ERROR(
@@ -731,7 +731,8 @@ static iree_status_t loom_check_test_low_allocation_execute(
       .flags = LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_PRESERVE_LOW_ASM,
   };
   loom_low_descriptor_text_asm_environment_initialize(
-      &request->low_registry->registry, &print_options.low_asm_environment);
+      &native_module->low_registry.registry,
+      &print_options.low_asm_environment);
   return loom_text_print_module_to_builder_with_options(native_module->module,
                                                         output, &print_options);
 }
@@ -743,10 +744,15 @@ static iree_status_t loom_check_test_low_allocation_append_names(
   return iree_string_builder_append_cstring(builder, "low-allocation-query");
 }
 
-const loom_check_emit_provider_t loom_check_test_low_allocation_provider = {
-    .name = IREE_SVL("allocation-query"),
-    .flags = LOOM_CHECK_EMIT_PROVIDER_FLAG_COMPARE_ERROR_OUTPUT,
-    .match = loom_check_test_low_allocation_matches,
-    .execute_native = loom_check_test_low_allocation_execute,
-    .append_names = loom_check_test_low_allocation_append_names,
+const loom_check_test_native_emit_provider_t
+    loom_check_test_low_allocation_provider = {
+        .base =
+            {
+                .name = IREE_SVL("allocation-query"),
+                .flags = LOOM_CHECK_EMIT_PROVIDER_FLAG_COMPARE_ERROR_OUTPUT,
+                .match = loom_check_test_low_allocation_matches,
+                .execute = loom_check_test_native_emit_provider_execute,
+                .append_names = loom_check_test_low_allocation_append_names,
+            },
+        .execute_native = loom_check_test_low_allocation_execute,
 };

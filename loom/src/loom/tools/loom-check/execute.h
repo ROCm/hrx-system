@@ -29,7 +29,6 @@
 #include "iree/base/internal/arena.h"
 #include "loom/error/diagnostic.h"
 #include "loom/error/source.h"
-#include "loom/target/low_descriptor_registry.h"
 #include "loom/testing/test_file.h"
 #include "loom/tooling/input/format.h"
 #include "loom/tools/loom-check/report.h"
@@ -41,7 +40,6 @@
 extern "C" {
 #endif
 
-typedef struct loom_target_environment_t loom_target_environment_t;
 typedef struct loom_check_diagnostic_collector_t
     loom_check_diagnostic_collector_t;
 typedef struct loom_check_compile_session_t loom_check_compile_session_t;
@@ -160,8 +158,6 @@ typedef struct loom_check_emit_provider_request_t {
   const loom_check_environment_t* environment;
   // Public module admitted once through LoomC for this emit case.
   loomc_module_t* public_module;
-  // Linked target-low registry visible to this runner.
-  const loom_target_low_descriptor_registry_t* low_registry;
   // Diagnostic collector for provider diagnostics.
   loom_check_diagnostic_collector_t* diagnostic_collector;
   // Provider workspace, released after execute returns. Separate from the
@@ -174,17 +170,6 @@ typedef struct loom_check_emit_provider_request_t {
   // Result receiving provider output.
   loom_check_result_t* result;
 } loom_check_emit_provider_request_t;
-
-// Mutable exact-version projection supplied only to native emit providers.
-// The public module has been verified against its context target before this
-// view is created. Native mutation invalidates that cached verification; common
-// dispatch verifies the module again after the callback succeeds.
-typedef struct loom_check_emit_native_module_t {
-  // Mutable module owned by the emit request's public module.
-  loom_module_t* module;
-  // Resolver for source-backed operation locations in |module|.
-  loom_source_resolver_t source_resolver;
-} loom_check_emit_native_module_t;
 
 // Returns true when |provider| owns emit targets named |target_name|.
 typedef bool (*loom_check_emit_provider_match_fn_t)(
@@ -200,12 +185,6 @@ typedef iree_status_t (*loom_check_emit_provider_check_requirements_fn_t)(
 typedef iree_status_t (*loom_check_emit_provider_execute_fn_t)(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request);
-
-// Emits provider-owned output from a verified mutable native module.
-typedef iree_status_t (*loom_check_emit_provider_execute_native_fn_t)(
-    const loom_check_emit_provider_t* provider,
-    const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module);
 
 // Appends provider-owned emit target names to a diagnostic list.
 typedef iree_status_t (*loom_check_emit_provider_append_names_fn_t)(
@@ -224,8 +203,6 @@ struct loom_check_emit_provider_t {
   loom_check_emit_provider_check_requirements_fn_t check_requirements;
   // Emits provider-owned comparable output.
   loom_check_emit_provider_execute_fn_t execute;
-  // Emits from a verified native module when |execute| is NULL.
-  loom_check_emit_provider_execute_native_fn_t execute_native;
   // Appends supported emit target names to diagnostic help text.
   loom_check_emit_provider_append_names_fn_t append_names;
 };
@@ -280,8 +257,6 @@ typedef struct loom_check_requirement_provider_registry_t {
 struct loom_check_environment_t {
   // Optional source format metadata linked into this runner.
   loom_input_format_list_t input_formats;
-  // Composed target environment used by target-aware check modes.
-  const loom_target_environment_t* target_environment;
   // Lazy public session shared by all check modes.
   loom_check_compile_session_t* compile_session;
   // Optional emit providers linked into this runner.

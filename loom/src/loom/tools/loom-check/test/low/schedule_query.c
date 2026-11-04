@@ -12,7 +12,7 @@
 #include "loom/codegen/low/schedule/run.h"
 #include "loom/codegen/low/storage_transport.h"
 #include "loom/tools/loom-check/diagnostics.h"
-#include "loom/tools/loom-check/low_emit.h"
+#include "loom/tools/loom-check/test/low/native_emit.h"
 #include "loom/tools/loom-check/test/low/providers.h"
 
 enum loom_check_test_low_schedule_option_flag_bits_e {
@@ -928,14 +928,14 @@ static iree_status_t loom_check_test_low_schedule_append_transport(
 
 static iree_status_t loom_check_test_low_schedule_build(
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module,
+    const loom_check_test_native_module_t* native_module,
     const loom_check_test_low_schedule_options_t* options,
     loom_low_schedule_table_t* out_schedule,
     loom_liveness_analysis_t* out_scheduled_liveness, bool* out_accepted) {
   *out_scheduled_liveness = (loom_liveness_analysis_t){0};
   *out_accepted = false;
-  loom_check_diagnostic_emitter_capture_t diagnostic_capture = {
-      .diagnostic_collector = request->diagnostic_collector,
+  loom_check_test_native_diagnostic_emitter_capture_t diagnostic_capture = {
+      .context = native_module->diagnostic_context,
       .module = native_module->module,
       .source_resolver = native_module->source_resolver,
       .emitter = LOOM_EMITTER_PASS,
@@ -943,7 +943,7 @@ static iree_status_t loom_check_test_low_schedule_build(
   iree_diagnostic_emitter_t emitter = {0};
   if (request->diagnostic_collector != NULL) {
     emitter = (iree_diagnostic_emitter_t){
-        .fn = loom_check_diagnostic_emitter_capture_emit,
+        .fn = loom_check_test_native_diagnostic_emitter_capture_emit,
         .user_data = &diagnostic_capture,
     };
   }
@@ -967,9 +967,9 @@ static iree_status_t loom_check_test_low_schedule_build(
   loom_low_function_model_t model = {0};
   iree_status_t status = loom_low_function_model_initialize(
       native_module->module, low_function,
-      /*function_target_facts=*/NULL, &request->low_registry->registry, emitter,
-      LOOM_LOW_FUNCTION_MODEL_FLAG_REQUIRE_SCHEDULE_MODEL, request->case_arena,
-      &model);
+      /*function_target_facts=*/NULL, &native_module->low_registry.registry,
+      emitter, LOOM_LOW_FUNCTION_MODEL_FLAG_REQUIRE_SCHEDULE_MODEL,
+      request->case_arena, &model);
   if (iree_status_is_ok(status) && model.context.error_count == 0) {
     status = loom_low_storage_transport_build(
         &model, options->storage_transport_spaces, request->case_arena,
@@ -1003,7 +1003,7 @@ static iree_status_t loom_check_test_low_schedule_build(
 static iree_status_t loom_check_test_low_schedule_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module) {
+    const loom_check_test_native_module_t* native_module) {
   (void)provider;
   loom_check_test_low_schedule_options_t options;
   IREE_RETURN_IF_ERROR(
@@ -1059,9 +1059,14 @@ static iree_status_t loom_check_test_low_schedule_append_names(
   return iree_string_builder_append_cstring(builder, "low-schedule-query");
 }
 
-const loom_check_emit_provider_t loom_check_test_low_schedule_provider = {
-    .name = IREE_SVL("schedule-query"),
-    .match = loom_check_test_low_schedule_matches,
-    .execute_native = loom_check_test_low_schedule_execute,
-    .append_names = loom_check_test_low_schedule_append_names,
+const loom_check_test_native_emit_provider_t
+    loom_check_test_low_schedule_provider = {
+        .base =
+            {
+                .name = IREE_SVL("schedule-query"),
+                .match = loom_check_test_low_schedule_matches,
+                .execute = loom_check_test_native_emit_provider_execute,
+                .append_names = loom_check_test_low_schedule_append_names,
+            },
+        .execute_native = loom_check_test_low_schedule_execute,
 };

@@ -91,7 +91,7 @@ static iree_status_t loom_check_test_pipeline_transport_print(
 static iree_status_t loom_check_test_pipeline_transport_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module) {
+    const loom_check_test_native_module_t* native_module) {
   (void)provider;
   const iree_string_view_t selection =
       iree_string_view_trim(request->target_options);
@@ -119,14 +119,14 @@ static iree_status_t loom_check_test_pipeline_transport_execute(
   loom_type_registry_configure_fact_context(&facts.context);
   IREE_RETURN_IF_ERROR(loom_value_fact_table_compute(&facts, module, function));
 
-  loom_check_diagnostic_emitter_capture_t diagnostic_capture = {
-      .diagnostic_collector = request->diagnostic_collector,
+  loom_check_test_native_diagnostic_emitter_capture_t diagnostic_capture = {
+      .context = native_module->diagnostic_context,
       .module = module,
       .source_resolver = native_module->source_resolver,
       .emitter = LOOM_EMITTER_PASS,
   };
   const iree_diagnostic_emitter_t emitter = {
-      .fn = loom_check_diagnostic_emitter_capture_emit,
+      .fn = loom_check_test_native_diagnostic_emitter_capture_emit,
       .user_data = &diagnostic_capture,
   };
   loom_pipeline_resources_t resources;
@@ -158,9 +158,14 @@ static iree_status_t loom_check_test_pipeline_transport_append_names(
   return iree_string_builder_append_cstring(builder, "pipeline-transport");
 }
 
-const loom_check_emit_provider_t loom_check_test_pipeline_transport_provider = {
-    .name = IREE_SVL("pipeline-transport"),
-    .match = loom_check_test_pipeline_transport_matches,
-    .execute_native = loom_check_test_pipeline_transport_execute,
-    .append_names = loom_check_test_pipeline_transport_append_names,
+const loom_check_test_native_emit_provider_t
+    loom_check_test_pipeline_transport_provider = {
+        .base =
+            {
+                .name = IREE_SVL("pipeline-transport"),
+                .match = loom_check_test_pipeline_transport_matches,
+                .execute = loom_check_test_native_emit_provider_execute,
+                .append_names = loom_check_test_pipeline_transport_append_names,
+            },
+        .execute_native = loom_check_test_pipeline_transport_execute,
 };

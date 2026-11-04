@@ -9,7 +9,7 @@
 #include "loom/target/emit/native/x86/loom_check.h"
 
 static const loom_check_emit_provider_t* const kLoomX86CheckEmitProviders[] = {
-    &loom_x86_native_loom_check_emit_provider,
+    &loom_x86_native_loom_check_emit_provider.base,
 };
 
 const loom_check_provider_t loom_x86_native_check_provider = {

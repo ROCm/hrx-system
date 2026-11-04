@@ -25,7 +25,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/emit/leaf_compile.h"
 #include "loom/tools/loom-check/compile.h"
 #include "loom/tools/loom-check/diagnostics.h"
-#include "loom/tools/loom-check/low_emit.h"
+#include "loom/tools/loom-check/test/low/native_emit.h"
 
 typedef struct loom_aie2p_array_plan_check_context_t {
   // Provider invocation receiving diagnostics and comparable output.
@@ -34,6 +34,8 @@ typedef struct loom_aie2p_array_plan_check_context_t {
   const loom_module_t* module;
   // Exact source snapshots for diagnostics against |module|.
   loom_source_resolver_t source_resolver;
+  // Target-low descriptors composed by the test runner.
+  const loom_target_low_descriptor_registry_t* low_registry;
 } loom_aie2p_array_plan_check_context_t;
 
 static bool loom_aie2p_array_plan_check_matches(
@@ -113,7 +115,7 @@ static iree_status_t loom_aie2p_array_plan_check_collect_leaves(
     loom_low_resolved_target_t target = {0};
     IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
         module, &symbol_facts, symbol->defining_op,
-        /*function_target_facts=*/NULL, &request->low_registry->registry,
+        /*function_target_facts=*/NULL, &context->low_registry->registry,
         diagnostic_emitter, &target));
     if (target.descriptor_set == NULL) {
       return iree_ok_status();
@@ -694,7 +696,7 @@ static iree_status_t loom_aie2p_array_plan_check_resident_program_in_module(
         .function_target_facts = resident->function_target_facts,
         .memory_accesses = resident->memory_accesses,
         .loop_execution = resident->loop_execution,
-        .descriptor_registry = &request->low_registry->registry,
+        .descriptor_registry = &context->low_registry->registry,
         .diagnostic_emitter = diagnostic_emitter,
     };
     loom_aie2p_leaf_contribution_t contribution = {0};
@@ -730,7 +732,7 @@ static iree_status_t loom_aie2p_array_plan_check_resident_program_in_module(
 
   loom_text_low_asm_environment_t low_asm_environment = {0};
   loom_low_descriptor_text_asm_environment_initialize(
-      &request->low_registry->registry, &low_asm_environment);
+      &context->low_registry->registry, &low_asm_environment);
   const loom_text_print_options_t print_options = {
       .flags = LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_REQUIRE_LOW_ASM,
       .low_asm_environment = low_asm_environment,
@@ -772,37 +774,30 @@ static iree_status_t loom_aie2p_array_plan_check_resident_program(
   return status;
 }
 
-typedef struct loom_aie2p_array_plan_check_consumer_t {
-  // Provider invocation receiving diagnostics and comparable output.
-  const loom_check_emit_provider_request_t* request;
-  // Array function selected by the RUN line.
-  iree_string_view_t function_symbol_name;
-  // Whether to print only the materialized resident Low functions.
-  bool low_only;
-} loom_aie2p_array_plan_check_consumer_t;
-
 static iree_status_t loom_aie2p_array_plan_check_consume(
-    void* user_data, const loom_check_emit_native_module_t* native_module) {
-  const loom_aie2p_array_plan_check_consumer_t* consumer =
-      (const loom_aie2p_array_plan_check_consumer_t*)user_data;
-  const loom_check_emit_provider_request_t* request = consumer->request;
-  const iree_string_view_t function_symbol_name =
-      consumer->function_symbol_name;
-  const bool low_only = consumer->low_only;
+    const loom_check_emit_provider_t* provider,
+    const loom_check_emit_provider_request_t* request,
+    const loom_check_test_native_module_t* native_module) {
+  (void)provider;
+  iree_string_view_t function_symbol_name = iree_string_view_empty();
+  bool low_only = false;
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_check_parse_options(
+      request->target_options, &function_symbol_name, &low_only));
   const loom_aie2p_array_plan_check_context_t context = {
       .request = request,
       .module = native_module->module,
       .source_resolver = native_module->source_resolver,
+      .low_registry = &native_module->low_registry,
   };
 
-  loom_check_diagnostic_emitter_capture_t diagnostic_capture = {
-      .diagnostic_collector = request->diagnostic_collector,
+  loom_check_test_native_diagnostic_emitter_capture_t diagnostic_capture = {
+      .context = native_module->diagnostic_context,
       .module = context.module,
       .source_resolver = context.source_resolver,
       .emitter = LOOM_EMITTER_PASS,
   };
   const iree_diagnostic_emitter_t diagnostic_emitter = {
-      .fn = loom_check_diagnostic_emitter_capture_emit,
+      .fn = loom_check_test_native_diagnostic_emitter_capture_emit,
       .user_data = &diagnostic_capture,
   };
   loom_op_t* array_function = NULL;
@@ -877,19 +872,13 @@ static iree_status_t loom_aie2p_array_plan_check_execute(
       .pipeline_kind = LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW,
       .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
   };
-  const loom_aie2p_array_plan_check_consumer_t consumer = {
-      .request = request,
-      .function_symbol_name = function_symbol_name,
-      .low_only = low_only,
-  };
   bool compiled = false;
-  IREE_RETURN_IF_ERROR(
-      loom_check_compile_source_low(request, &compile_options, &compiled));
+  IREE_RETURN_IF_ERROR(loom_check_compile_source_low(
+      request, &compile_options, &compiled, /*out_result=*/NULL));
   if (!compiled) {
     return iree_ok_status();
   }
-  return loom_check_compile_with_native_module(
-      request, loom_aie2p_array_plan_check_consume, (void*)&consumer);
+  return loom_check_test_native_emit_provider_execute(provider, request);
 }
 
 static iree_status_t loom_aie2p_array_plan_check_append_names(
@@ -899,9 +888,14 @@ static iree_status_t loom_aie2p_array_plan_check_append_names(
   return iree_string_builder_append_cstring(builder, "aie2p-array-plan");
 }
 
-const loom_check_emit_provider_t loom_aie2p_array_plan_check_emit_provider = {
-    .name = IREE_SVL("aie2p-array-plan"),
-    .match = loom_aie2p_array_plan_check_matches,
-    .execute = loom_aie2p_array_plan_check_execute,
-    .append_names = loom_aie2p_array_plan_check_append_names,
+const loom_check_test_native_emit_provider_t
+    loom_aie2p_array_plan_check_emit_provider = {
+        .base =
+            {
+                .name = IREE_SVL("aie2p-array-plan"),
+                .match = loom_aie2p_array_plan_check_matches,
+                .execute = loom_aie2p_array_plan_check_execute,
+                .append_names = loom_aie2p_array_plan_check_append_names,
+            },
+        .execute_native = loom_aie2p_array_plan_check_consume,
 };

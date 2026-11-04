@@ -11,12 +11,10 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
-#include "loom/codegen/low/text_asm.h"
 #include "loom/error/diagnostic.h"
 #include "loom/error/emitter.h"
 #include "loom/error/parameter.h"
 #include "loom/error/source.h"
-#include "loom/ir/module.h"
 #include "loom/testing/test_diagnostic.h"
 #include "loom/testing/test_file.h"
 #include "loom/tools/loom-check/execute.h"
@@ -52,34 +50,13 @@ typedef struct loom_check_diagnostic_collector_t {
   // Main source identity whose lines can match annotations and receive edits.
   iree_string_view_t filename;
 
-  // Current parsed module for full type rendering, or NULL during parse
-  // recovery.
-  const loom_module_t* module;
-
-  // Printer context used to render type-bearing diagnostic parameters.
-  loom_low_descriptor_text_print_context_t type_print_context;
+  // Type formatter selected by the active diagnostic producer. An empty
+  // formatter selects the target-independent minimal spelling.
+  loom_type_formatter_t type_formatter;
 
   // File-level result receiving structured diagnostic JSON captures.
   loom_check_result_t* result;
 } loom_check_diagnostic_collector_t;
-
-// Materializes structured emission requests into collected diagnostics.
-typedef struct loom_check_diagnostic_emitter_capture_t {
-  // Diagnostic collector shared by the executing check case.
-  loom_check_diagnostic_collector_t* diagnostic_collector;
-
-  // Module containing any operation referenced by emitted diagnostics.
-  const loom_module_t* module;
-
-  // Source resolver for source-backed operation locations in this case.
-  loom_source_resolver_t source_resolver;
-
-  // Subsystem identity to store in materialized diagnostics.
-  loom_emitter_t emitter;
-
-  // Number of diagnostics materialized through this capture.
-  iree_host_size_t emission_count;
-} loom_check_diagnostic_emitter_capture_t;
 
 // Returns whether the collector contains an error, ignoring notes and warnings.
 bool loom_check_diagnostic_collector_has_error(
@@ -93,11 +70,6 @@ iree_status_t loom_check_diagnostic_collector_append(
 // Diagnostic sink callback. Renders, stores, and JSON-captures one diagnostic.
 iree_status_t loom_check_diagnostic_collector_sink(
     void* user_data, const loom_diagnostic_t* diagnostic);
-
-// Diagnostic emitter callback. Pass a
-// loom_check_diagnostic_emitter_capture_t* as user_data.
-iree_status_t loom_check_diagnostic_emitter_capture_emit(
-    void* user_data, const loom_diagnostic_emission_t* emission);
 
 // Emits a structured diagnostic anchored to the first source line in
 // |test_case| that contains Loom IR. This is for request-level failures that

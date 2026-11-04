@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/error/diagnostic.h"
 #include "loom/error/error_defs.h"
 #include "loom/testing/test_file.h"
 
@@ -64,6 +65,14 @@ typedef struct loom_test_diagnostic_t {
   // True once this diagnostic has matched one expected annotation.
   bool matched;
 } loom_test_diagnostic_t;
+
+// Copies and renders |diagnostic| into arena-owned |out_diagnostic| storage.
+// Type-bearing parameters use |type_formatter|; callers that do not own a
+// richer source-format context may pass the minimal formatter.
+iree_status_t loom_test_diagnostic_materialize(
+    const loom_diagnostic_t* diagnostic, loom_type_formatter_t type_formatter,
+    iree_arena_allocator_t* arena, iree_allocator_t host_allocator,
+    loom_test_diagnostic_t* out_diagnostic);
 
 // Returns true when |diagnostic| belongs to |filename| and all constraints in
 // |annotation| match. A same-numbered line in another source cannot match.

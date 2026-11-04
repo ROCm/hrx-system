@@ -27,6 +27,7 @@ loom_cc_library(
         "//loom/src/loom/config:text_binding",
         "//loom/src/loom/format/text:printer",
         "//loom/src/loom/tools/loom-check:execute",
+        "//loom/src/loom/tools/loom-check/test:native_provider",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
     ],

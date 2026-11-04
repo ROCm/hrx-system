@@ -9,14 +9,14 @@
 #ifndef LOOM_TARGET_EMIT_NATIVE_X86_LOOM_CHECK_H_
 #define LOOM_TARGET_EMIT_NATIVE_X86_LOOM_CHECK_H_
 
-#include "loom/tools/loom-check/execute.h"
+#include "loom/tools/loom-check/test/native_provider.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 // Emit provider for native instruction bytes from target-low IR.
-extern const loom_check_emit_provider_t
+extern const loom_check_test_native_emit_provider_t
     loom_x86_native_loom_check_emit_provider;
 
 #ifdef __cplusplus

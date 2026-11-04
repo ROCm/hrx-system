@@ -6,16 +6,15 @@
 
 #include "loom/target/emit/native/amdgpu/loom_check_provider.h"
 
-#include "loom/target/emit/native/amdgpu/loom_check.h"
+#include "loom/target/emit/native/amdgpu/kernel_check.h"
 
-static const loom_check_emit_provider_t* const
-    kLoomAmdgpuNativeCheckEmitProviders[] = {
+static const loom_check_emit_provider_t* const kLoomAmdgpuCheckEmitProviders[] =
+    {
         &loom_amdgpu_kernel_loom_check_emit_provider,
-        &loom_amdgpu_native_loom_check_emit_provider,
 };
 
 const loom_check_provider_t loom_amdgpu_native_check_provider = {
     .name = IREE_SVL("amdgpu-native"),
-    .emit_providers = kLoomAmdgpuNativeCheckEmitProviders,
-    .emit_provider_count = IREE_ARRAYSIZE(kLoomAmdgpuNativeCheckEmitProviders),
+    .emit_providers = kLoomAmdgpuCheckEmitProviders,
+    .emit_provider_count = IREE_ARRAYSIZE(kLoomAmdgpuCheckEmitProviders),
 };

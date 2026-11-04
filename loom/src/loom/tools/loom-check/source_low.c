@@ -391,7 +391,7 @@ iree_status_t loom_check_source_low_execute(
   };
   bool compiled = false;
   IREE_RETURN_IF_ERROR(loom_check_compile_source_low(
-      provider_request, &compile_options, &compiled));
+      provider_request, &compile_options, &compiled, /*out_result=*/NULL));
   if (!compiled) {
     return iree_ok_status();
   }

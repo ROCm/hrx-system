@@ -4,15 +4,15 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Shared helpers for target-owned loom-check emit providers over target-low
+// Test-only helpers for target-owned loom-check emit providers over target-low
 // functions.
 
-#ifndef LOOM_TOOLS_LOOM_CHECK_LOW_EMIT_H_
-#define LOOM_TOOLS_LOOM_CHECK_LOW_EMIT_H_
+#ifndef LOOM_TOOLS_LOOM_CHECK_TEST_LOW_NATIVE_EMIT_H_
+#define LOOM_TOOLS_LOOM_CHECK_TEST_LOW_NATIVE_EMIT_H_
 
 #include "iree/base/api.h"
 #include "loom/codegen/low/frame.h"
-#include "loom/tools/loom-check/execute.h"
+#include "loom/tools/loom-check/test/native_provider.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -83,7 +83,7 @@ iree_status_t loom_check_low_emit_materialize_operand_ties(
 // reserved ranges, and fixed values, pass through unchanged.
 iree_status_t loom_check_low_emit_packetize_function(
     const loom_check_emit_provider_request_t* request,
-    const loom_check_emit_native_module_t* native_module,
+    const loom_check_test_native_module_t* native_module,
     iree_string_view_t function_symbol_name,
     const loom_low_emission_frame_options_t* frame_options,
     const loom_low_emission_frame_spill_free_options_t* spill_free_options,
@@ -93,4 +93,4 @@ iree_status_t loom_check_low_emit_packetize_function(
 }  // extern "C"
 #endif
 
-#endif  // LOOM_TOOLS_LOOM_CHECK_LOW_EMIT_H_
+#endif  // LOOM_TOOLS_LOOM_CHECK_TEST_LOW_NATIVE_EMIT_H_
