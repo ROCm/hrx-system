@@ -20,7 +20,6 @@ namespace {
 
 constexpr NTSTATUS kStatusPending = static_cast<NTSTATUS>(0x00000103u);
 constexpr NTSTATUS kStatusNoMemory = static_cast<NTSTATUS>(0xC0000017u);
-constexpr NTSTATUS kStatusInvalidHandle = static_cast<NTSTATUS>(0xC0000008u);
 
 enum class Operation {
   kImport,
@@ -295,6 +294,15 @@ class WindowsGpuMemoryTest : public ::testing::Test {
     device_.memory_capabilities.no_execute_memory_supported = 1;
     device_.memory_capabilities.cache_coherent_memory_supported = 1;
     device_.memory_capabilities.d3d12_resource_supported = 1;
+    device_.memory_capabilities.host_cache_transition = {
+        .kind = AMDF_CACHE_TRANSITION_KIND_RANGE,
+        .executor = AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT,
+        .host_operation = AMDF_HOST_CACHE_OPERATION_FLUSH,
+        .host_instruction = AMDF_HOST_CACHE_INSTRUCTION_X86_CLFLUSH,
+        .host_fence_before = AMDF_HOST_CACHE_FENCE_X86_MFENCE,
+        .host_fence_after = AMDF_HOST_CACHE_FENCE_X86_MFENCE,
+        .range_granularity = 64,
+    };
     device_.provider_adapter.api = &provider_;
     device_.provider_adapter.native =
         reinterpret_cast<amdf_dxg_provider_gpu_adapter_t*>(&state_);
@@ -898,7 +906,7 @@ TEST_F(WindowsGpuMemoryTest,
   const amdf_gpu_umd_memory_result_t original_result = result;
   EXPECT_EQ(amdf_gpu_umd_memory_prepare(&device_, 0, nullptr, &profile_,
                                         &create_info_, &memory, &result),
-            amdf_kmt_make_status(kStatusInvalidHandle));
+            amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL));
   ASSERT_NE(memory, nullptr);
   EXPECT_EQ(std::memcmp(&result, &original_result, sizeof(result)), 0);
   EXPECT_EQ(state_.metadata_free_count, 0u);
@@ -979,7 +987,7 @@ TEST_F(WindowsGpuMemoryTest, MalformedUngroupedAllocationReleasesValidHandles) {
   const amdf_gpu_umd_memory_result_t original_result = result;
   EXPECT_EQ(amdf_gpu_umd_memory_prepare(&device_, 0, nullptr, &profile_,
                                         &create_info_, &memory, &result),
-            amdf_kmt_make_status(kStatusInvalidHandle));
+            amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL));
   ASSERT_NE(memory, nullptr);
   EXPECT_EQ(std::memcmp(&result, &original_result, sizeof(result)), 0);
   EXPECT_EQ(state_.metadata_free_count, 0u);

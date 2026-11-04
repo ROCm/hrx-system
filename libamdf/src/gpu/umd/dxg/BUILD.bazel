@@ -57,6 +57,7 @@ amdf_cc_test(
     name = "clock_test",
     srcs = ["clock_test.cc"],
     linkopts = ["-Wl,--wrap=amdf_platform_observation_query_host_clock"],
+    target_compatible_with = ["@platforms//os:linux"],
     deps = [
         ":clock",
         "//third_party:google_test",
