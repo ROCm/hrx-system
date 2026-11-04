@@ -182,16 +182,15 @@ static inline iree_host_size_t iree_tokenizer_ring_writable_space(
 static iree_status_t iree_tokenizer_ring_grow(
     iree_tokenizer_encode_state_t* state) {
   iree_host_size_t old_capacity = state->capacity_mask + 1;
-  if (old_capacity > IREE_TOKENIZER_TRANSFORM_BUFFER_OVERFLOW_MAX_SIZE / 4) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "unfinished tokenizer segment exceeds transform "
-                            "ring capacity (%" PRIhsz " bytes)",
-                            old_capacity);
+  iree_host_size_t allocation_size = 0;
+  if (!iree_host_size_checked_mul(old_capacity, 4, &allocation_size)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "tokenizer transform ring size overflow");
   }
-  iree_host_size_t new_capacity = old_capacity * 2;
+  iree_host_size_t new_capacity = allocation_size / 2;
   uint8_t* storage = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      state->workspace_allocator, new_capacity * 2, (void**)&storage));
+      state->workspace_allocator, allocation_size, (void**)&storage));
   iree_host_size_t position = state->read_position;
   while (position < state->write_position) {
     iree_host_size_t old_offset = position & state->capacity_mask;
@@ -205,7 +204,7 @@ static iree_status_t iree_tokenizer_ring_grow(
   }
   iree_allocator_free(state->workspace_allocator, state->transform_overflow);
   state->transform_overflow = storage;
-  state->transform_buffer = iree_make_byte_span(storage, new_capacity * 2);
+  state->transform_buffer = iree_make_byte_span(storage, allocation_size);
   state->capacity_mask = new_capacity - 1;
   return iree_ok_status();
 }

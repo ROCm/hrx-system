@@ -23,7 +23,7 @@
 // unfinished segment remains caller-owned: merge-priority dependencies can
 // propagate arbitrarily farther than the longest vocabulary token. Computed
 // tokens are retained when output fills. Common words use fixed state storage;
-// large segments use bounded reusable overflow workspace.
+// large segments use reusable overflow workspace owned by the caller allocator.
 
 #ifndef IREE_TOKENIZER_MODEL_BPE_H_
 #define IREE_TOKENIZER_MODEL_BPE_H_
@@ -32,17 +32,6 @@
 #include "iree/tokenizer/model.h"
 #include "iree/tokenizer/types.h"
 #include "iree/tokenizer/vocab/vocab.h"
-
-// Per-state ceiling for reusable explicit-symbol overflow storage. Ordinary
-// words use caller-provided state storage. Oversized unresolved segments return
-// RESOURCE_EXHAUSTED instead of changing tokenization to fit the workspace.
-// The default accommodates a 1 MiB complete segment, including two
-// byte-fallback symbols per input byte and their merge candidates. Storage
-// grows only on demand; this is not an initial allocation or a per-request
-// reservation.
-#ifndef IREE_TOKENIZER_BPE_SCRATCH_MAX_SIZE
-#define IREE_TOKENIZER_BPE_SCRATCH_MAX_SIZE (128 * 1024 * 1024)
-#endif
 
 #ifdef __cplusplus
 extern "C" {

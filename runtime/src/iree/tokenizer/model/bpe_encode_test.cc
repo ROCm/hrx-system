@@ -108,7 +108,7 @@ TEST(BPEEncodeTest, LaterPriorityChainChangesTheFirstToken) {
   }
 }
 
-TEST(BPEEncodeTest, ExplicitSymbolsRespectScratchCeiling) {
+TEST(BPEEncodeTest, ExplicitSymbolsUseCallerAllocationBudget) {
   testing::ScopedVocabBuilder builder;
   builder.AddToken(0, "a");
   testing::ScopedVocab vocab(builder.Build());
@@ -116,13 +116,27 @@ TEST(BPEEncodeTest, ExplicitSymbolsRespectScratchCeiling) {
   IREE_ASSERT_OK(iree_tokenizer_bpe_model_allocate(
       vocab.get(), 0, iree_allocator_system(), &raw_model));
   testing::ScopedModel model(raw_model);
-  testing::ScopedModelState state(model.get());
-  // One input byte becomes at least one symbol. Reject before allocating the
-  // symbol workspace without constructing a workspace-sized input string.
+  size_t requested_size = 0;
+  auto allocate = [](void* self, iree_allocator_command_t command,
+                     const void* params,
+                     void** inout_pointer) -> iree_status_t {
+    if (command == IREE_ALLOCATOR_COMMAND_FREE) {
+      auto allocator = iree_allocator_system();
+      return allocator.ctl(allocator.self, command, params, inout_pointer);
+    }
+    *static_cast<size_t*>(self) =
+        static_cast<const iree_allocator_alloc_params_t*>(params)->byte_length;
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "request workspace budget exhausted");
+  };
+  testing::ScopedModelState state(model.get(),
+                                  iree_allocator_t{&requested_size, allocate});
+  // A large segment reaches the caller's allocator before consuming input.
+  // Deny the request there without committing its full backing in the test.
+  const size_t large_workspace_size = 128 * 1024 * 1024;
   const size_t bytes_per_symbol = sizeof(iree_tokenizer_bpe_symbol_t) +
                                   2 * sizeof(iree_tokenizer_bpe_heap_entry_t);
-  std::string input(IREE_TOKENIZER_BPE_SCRATCH_MAX_SIZE / bytes_per_symbol + 1,
-                    'a');
+  std::string input(large_workspace_size / bytes_per_symbol + 1, 'a');
   iree_tokenizer_segment_t segment = {0, input.size()};
   size_t consumed = 0, written = 0;
   int32_t token;
@@ -135,6 +149,7 @@ TEST(BPEEncodeTest, ExplicitSymbolsRespectScratchCeiling) {
           &consumed, &written));
   EXPECT_EQ(consumed, 0u);
   EXPECT_EQ(written, 0u);
+  EXPECT_GT(requested_size, large_workspace_size);
 }
 
 TEST(BPEEncodeTest, CharacterAtomsDoNotSplitIntoRawByteTokens) {

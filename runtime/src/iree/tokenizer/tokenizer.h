@@ -27,17 +27,16 @@ extern "C" {
 // The transform buffer uses double-buffer mode, so the logical capacity is half
 // the allocation. A 64KB allocation provides 32KB logical capacity.
 //
-// Maximum transform buffer allocation.
+// Maximum recommended initial transform buffer allocation.
 // Recommended values:
 //   8KB:  Minimal memory, suitable for most English text
 //  16KB:  Good balance for mixed content and cache locality
 //
-// The transform buffer determines the maximum segment size that the segmenter
-// pipeline processes. Larger buffers allow longer segments, but segments that
-// exceed L1 data cache (typically 32KB) cause DFA cache misses during
-// multi-stage pre-tokenization. 16KB (8KB logical capacity after ring buffer
-// halving) keeps the working set cache-friendly for segmenters with multiple
-// children (e.g., DeepSeek V3's 4-stage Sequence pre-tokenizer).
+// Larger buffers accommodate longer segments without overflow growth, but
+// segments that exceed L1 data cache (typically 32KB) cause DFA cache misses
+// during multi-stage pre-tokenization. 16KB (8KB logical capacity after ring
+// buffer halving) keeps the working set cache-friendly for segmenters with
+// multiple children (e.g., DeepSeek V3's 4-stage Sequence pre-tokenizer).
 #ifndef IREE_TOKENIZER_TRANSFORM_BUFFER_MAX_SIZE
 #define IREE_TOKENIZER_TRANSFORM_BUFFER_MAX_SIZE (16 * 1024)
 #endif
@@ -46,12 +45,11 @@ extern "C" {
 // The ring buffer's logical capacity (allocation / 2) must be large enough to
 // hold the entire normalized output of a segment. Normalizers can expand input:
 // the replace normalizer substitutes 1-byte spaces with 3-byte ▁ (U+2581),
-// so worst-case expansion is 3× for space-heavy text. This multiplier is
-// applied to the input text size before computing the buffer allocation.
+// so that normalizer expands space-heavy text by 3x. This sizing heuristic is
+// not a bound on composed normalization. Overflow storage grows when needed.
 //
-// For models without expanding normalizers, the extra allocation is harmless
-// (it's a transient per-encode allocation). Increase this if encountering
-// RESOURCE_EXHAUSTED errors from streaming encode deadlocks.
+// Increasing this factor can reduce growth for expanding normalizers at the
+// cost of larger initial allocations.
 #ifndef IREE_TOKENIZER_TRANSFORM_BUFFER_EXPANSION_FACTOR
 #define IREE_TOKENIZER_TRANSFORM_BUFFER_EXPANSION_FACTOR 3
 #endif
@@ -62,15 +60,6 @@ extern "C" {
 // The encode_state_initialize function accepts any power-of-two allocation
 // >= 8. This constant only affects recommended_size(), not the hard minimum.
 #define IREE_TOKENIZER_TRANSFORM_BUFFER_MIN_SIZE 4096
-
-// Ceiling for owned overflow storage when an unfinished pre-tokenizer segment
-// outgrows the caller's transform ring. Storage grows geometrically, survives
-// reset, and is released by deinitialize. The initial caller buffer is not
-// subject to this ceiling. Exhaustion returns RESOURCE_EXHAUSTED without
-// inventing a segment boundary. Logical capacity is half the allocation.
-#ifndef IREE_TOKENIZER_TRANSFORM_BUFFER_OVERFLOW_MAX_SIZE
-#define IREE_TOKENIZER_TRANSFORM_BUFFER_OVERFLOW_MAX_SIZE (1024 * 1024)
-#endif
 
 // Tokenizer with builder pattern for construction.
 // See README.md for architecture, streaming patterns, and design details.

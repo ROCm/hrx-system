@@ -226,8 +226,8 @@ grows only when unresolved input or model state exceeds inline space:
 | Encode state | Configuration-dependent | Pipeline stages, model frontier, and inline workspace |
 | Unigram workspace | Input-dependent | Live ambiguous paths and fused unknown text; caller allocator |
 | Initial transform buffer | Caller-selected | Recommended size capped at 16 KiB by default |
-| Transform overflow | Up to 1 MiB by default | Half usable ring capacity; retained across resets |
-| BPE symbol overflow | Up to 128 MiB by default | Retained across complete segments and resets; no upfront reservation |
+| Transform overflow | Input-dependent | Half usable ring capacity; retained across resets |
+| BPE symbol overflow | Input-dependent | Retained across complete segments and resets; no upfront reservation |
 | Decode state | Configuration-dependent | Token decoder state, optional text transform, and a retained edge sized from the vocabulary |
 | Tokenizer (shared) | Varies | Vocabulary + merge table + regex DFA |
 
@@ -238,11 +238,12 @@ even-length run begins with `aa`: no fixed lookahead can settle its first token.
 The encoder retains that evidence until the segment ends. Ordinary resolved
 prefixes retire as input arrives, without retokenizing earlier text.
 
-Transform overflow is capped by `IREE_TOKENIZER_TRANSFORM_BUFFER_OVERFLOW_MAX_SIZE`
-and BPE symbol overflow by `IREE_TOKENIZER_BPE_SCRATCH_MAX_SIZE`. Exhaustion
-returns `RESOURCE_EXHAUSTED` without inventing a segment boundary or changing
-the token sequence. A ring growth temporarily retains both old and new storage
-while copying live bytes.
+Transform and BPE symbol overflow grow through the caller's workspace allocator
+without an independent memory quota. An allocator may impose a request budget;
+its failure propagates without inventing a segment boundary or changing the
+token sequence. BPE symbols retain 32-bit positions, and allocation sizes must
+fit the host representation. A ring growth temporarily retains both old and new
+storage while copying live bytes.
 
 ### Composability with Streaming Workflows
 
