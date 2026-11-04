@@ -35,6 +35,7 @@ TEST_F(MemoryBackendTest, RejectsAtomicPromisesAbsentFromNativeBuffers) {
 
 TEST_F(MemoryBackendTest, ZeroComputeRequirementsSelectNativeControlStorage) {
   native_.required_flags = 0;
+  native_families_[0].program_site_kind = AMDF_MEMORY_SITE_KIND_PROGRAM;
   native_families_[0].program_atomics = true;
   native_.access_flags[0] =
       AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE;
@@ -91,6 +92,7 @@ TEST_F(MemoryBackendTest, ZeroComputeRequirementsSelectNativeControlStorage) {
 TEST_F(MemoryBackendTest,
        ShaderOperationsCannotSatisfyZeroComputeRequirements) {
   native_.required_flags = 0;
+  native_families_[0].program_site_kind = AMDF_MEMORY_SITE_KIND_PROGRAM;
   native_families_[0].program_atomics = true;
   native_.access_flags[0] =
       AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE;
@@ -383,6 +385,8 @@ TEST_F(MemoryBackendTest, AtomicWaitAndStoreAcceptOneWayUsage) {
 }
 
 TEST_F(MemoryBackendTest, ShaderOperationsPreserveScopeWidthAndPhysicalRecipe) {
+  native_families_[0].program_site_kind = AMDF_MEMORY_SITE_KIND_PROGRAM;
+  native_families_[1].program_site_kind = AMDF_MEMORY_SITE_KIND_PROGRAM;
   native_.required_flags = 0;
   native_.program_atomics[0] = {
       .device_scope_32 =
@@ -461,6 +465,7 @@ TEST_F(MemoryBackendTest, ShaderOperationsPreserveScopeWidthAndPhysicalRecipe) {
 
 TEST_F(MemoryBackendTest, QueueShadersPreserveOrdinaryBackingAndCpSubset) {
   native_.required_flags = 0;
+  native_families_[0].program_site_kind = AMDF_MEMORY_SITE_KIND_PROGRAM;
   native_families_[0].program_atomics = true;
   native_.program_atomics[0] = {
       .device_scope_32 = AMDF_ATOMIC_OPERATION_LOAD |
@@ -493,6 +498,7 @@ TEST_F(MemoryBackendTest, QueueShadersPreserveOrdinaryBackingAndCpSubset) {
 
 TEST_F(MemoryBackendTest,
        ShaderGuaranteesCoverEveryImportAndAchievedAttachment) {
+  native_families_[0].program_site_kind = AMDF_MEMORY_SITE_KIND_PROGRAM;
   native_.registration_enabled = true;
   native_.access_flags[0] = AMDF_MEMORY_FLAG_HOST_COHERENT;
   native_.program_atomics[0] = {
@@ -579,6 +585,7 @@ TEST_F(MemoryBackendTest,
 }
 
 TEST_F(MemoryBackendTest, OneWayShaderAccessNeedsNoReadWriteSelfPair) {
+  native_families_[0].program_site_kind = AMDF_MEMORY_SITE_KIND_PROGRAM;
   native_.required_flags = 0;
   for (const iree_hal_buffer_usage_t usage :
        {IREE_HAL_BUFFER_USAGE_STORAGE_READ,
@@ -629,6 +636,7 @@ TEST_F(MemoryBackendTest, OneWayShaderAccessNeedsNoReadWriteSelfPair) {
 
 TEST_F(MemoryBackendTest, SystemAtomicRequestsQualifyCoherentAttachment) {
   native_.required_flags = 0;
+  native_families_[0].program_site_kind = AMDF_MEMORY_SITE_KIND_PROGRAM;
   native_families_[0].program_atomics = true;
   native_.access_flags[0] = AMDF_MEMORY_FLAG_HOST_COHERENT;
   native_.program_atomics[0].system_scope_32 = AMDF_ATOMIC_OPERATION_STORE;
@@ -656,6 +664,7 @@ TEST_F(MemoryBackendTest, SystemAtomicRequestsQualifyCoherentAttachment) {
 }
 
 TEST_F(MemoryBackendTest, ExactShaderPairsKeepCpuRmwAndNpuAccessSeparate) {
+  native_families_[0].program_site_kind = AMDF_MEMORY_SITE_KIND_PROGRAM;
   native_families_[0].program_atomics = true;
   native_.host_mapping_features |= AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS;
   const auto transactions = AMDF_ATOMIC_OPERATION_LOAD |
@@ -738,6 +747,7 @@ TEST_F(MemoryBackendTest, ExactShaderPairsKeepCpuRmwAndNpuAccessSeparate) {
 }
 
 TEST_F(MemoryBackendTest, QueuePairsQualifyEverySelectedExecutorAndWidth) {
+  native_families_[0].program_site_kind = AMDF_MEMORY_SITE_KIND_PROGRAM;
   native_families_[0].program_atomics = true;
   native_.atomics[0] = {AMDF_ATOMIC_OPERATION_STORE, 0};
   native_.atomic_reach[0] = {AMDF_ATOMIC_SCOPE_SYSTEM, AMDF_ATOMIC_SCOPE_NONE};
@@ -777,6 +787,7 @@ TEST_F(MemoryBackendTest, QueuePairsQualifyEverySelectedExecutorAndWidth) {
 
 TEST_F(MemoryBackendTest, ExactPairIntersectsRoutesWithoutChangingSiteSupport) {
   native_.registration_enabled = true;
+  native_families_[0].program_site_kind = AMDF_MEMORY_SITE_KIND_PROGRAM;
   native_families_[0].program_atomics = true;
   const auto transactions = AMDF_ATOMIC_OPERATION_LOAD |
                             AMDF_ATOMIC_OPERATION_STORE |

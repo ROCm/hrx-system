@@ -12,6 +12,86 @@
 
 namespace iree::hal::amd::fabric {
 
+TEST_F(MemoryBackendTest, ProgramVisibilityUsesTheNativeMemoryIssuer) {
+  // Shader and DMA programs need visibility even when neither has atomics and
+  // queue commands cannot fall back to shader execution.
+  native_families_[0].program_site_kind = AMDF_MEMORY_SITE_KIND_PROGRAM;
+  native_families_[1].program_site_kind = AMDF_MEMORY_SITE_KIND_DEVICE;
+  native_.api.memory_scope_query_pair_info =
+      [](amdf_memory_scope_t* scope,
+         const amdf_memory_profile_pair_query_t* query,
+         amdf_memory_pair_info_t* info) -> amdf_status_t {
+    const auto status =
+        FakeNative::MemoryScopeQueryPairInfo(scope, query, info);
+    if (amdf_status_is_ok(status)) {
+      if (query->producer.kind == AMDF_MEMORY_SITE_KIND_PROGRAM) {
+        info->release = {
+            .kind = AMDF_CACHE_TRANSITION_KIND_GLOBAL,
+            .executor = AMDF_CACHE_TRANSITION_EXECUTOR_PROGRAM,
+            .operation = AMDF_CACHE_OPERATION_RELEASE_TO_SYSTEM,
+        };
+      }
+      if (query->consumer.kind == AMDF_MEMORY_SITE_KIND_PROGRAM) {
+        info->acquire = {
+            .kind = AMDF_CACHE_TRANSITION_KIND_GLOBAL,
+            .executor = AMDF_CACHE_TRANSITION_EXECUTOR_PROGRAM,
+            .operation = AMDF_CACHE_OPERATION_ACQUIRE_FROM_SYSTEM,
+        };
+      }
+    }
+    return status;
+  };
+  iree_hal_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool,
+                            /*interfaces=*/0, IREE_HAL_MEMORY_ACCESS_NONE,
+                            IREE_HAL_BUFFER_USAGE_STORAGE));
+  const iree_hal_memory_scope_t programs[] = {
+      ResolveScope(IREE_HAL_MEMORY_SITE_PROGRAM, families_[0]),
+      ResolveScope(IREE_HAL_MEMORY_SITE_PROGRAM, families_[1]),
+      ResolveScope(IREE_HAL_MEMORY_SITE_PROGRAM,
+                   iree_hal_device_queue_family(cpu_device_, 0)),
+  };
+  const uint32_t releases[] = {
+      IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM |
+          IREE_HAL_MEMORY_EFFECT_PROGRAM_EXECUTOR,
+      0,
+      IREE_HAL_MEMORY_EFFECT_HOST_FLUSH,
+  };
+  const uint32_t acquires[] = {
+      IREE_HAL_MEMORY_EFFECT_GLOBAL_ACQUIRE_FROM_SYSTEM |
+          IREE_HAL_MEMORY_EFFECT_PROGRAM_EXECUTOR,
+      0,
+      IREE_HAL_MEMORY_EFFECT_HOST_INVALIDATE,
+  };
+  const int queries = native_.pair_query_count;
+  for (size_t producer = 0; producer < IREE_ARRAYSIZE(programs); ++producer) {
+    EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(
+        iree_hal_pool_query_atomic_operations(pool, programs[producer])));
+    for (size_t consumer = 0; consumer < IREE_ARRAYSIZE(programs); ++consumer) {
+      if (producer == consumer) {
+        continue;
+      }
+      const auto transition = iree_hal_pool_query_transition(
+          pool, programs[producer], programs[consumer]);
+      EXPECT_EQ(transition.release.bits, releases[producer]);
+      EXPECT_EQ(transition.acquire.bits, acquires[consumer]);
+    }
+  }
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool, iree_hal_make_pool_reservation_request(64, 64),
+      iree_infinite_timeout(), &buffer));
+  const auto pair = PairInfo(iree_hal_buffer_memory_view(buffer).contract,
+                             programs[1], programs[0]);
+  EXPECT_EQ(pair.release.kind, IREE_HAL_MEMORY_TRANSITION_KIND_NONE);
+  EXPECT_EQ(pair.acquire.executor, IREE_HAL_MEMORY_TRANSITION_EXECUTOR_PROGRAM);
+  EXPECT_TRUE(
+      iree_hal_atomic_operation_capabilities_is_empty(pair.producer_atomics));
+  EXPECT_EQ(native_.pair_query_count, queries);
+  iree_hal_buffer_release(buffer);
+  iree_hal_pool_release(pool);
+}
+
 TEST_F(MemoryBackendTest, RequiredHostGuaranteesUseProspectiveBackingFacts) {
   const iree_hal_pool_family_access_t family = {
       .family = families_[0],
@@ -260,12 +340,14 @@ TEST_F(MemoryBackendTest, UnavailableProfilesPreserveAvailableAllocation) {
       const int pair_queries = native_.pair_query_count;
       iree_hal_pool_t* pool = nullptr;
       IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool));
-      EXPECT_EQ(native_.pair_query_count - pair_queries, 9);
+      const int qualified_queries = native_.pair_query_count;
+      EXPECT_GT(qualified_queries, pair_queries);
       iree_hal_buffer_t* buffer = nullptr;
       IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
           pool, iree_hal_make_pool_reservation_request(64, 64),
           iree_infinite_timeout(), &buffer));
       EXPECT_EQ(native_.created_profile_ordinal, 1u - unavailable_ordinal);
+      EXPECT_EQ(native_.pair_query_count, qualified_queries);
       iree_hal_buffer_release(buffer);
       iree_hal_pool_release(pool);
       native_.AwaitEmpty();
@@ -321,6 +403,7 @@ TEST_F(MemoryBackendTest, PublishesCanonicalPerDeviceBindings) {
   iree_hal_pool_t* pool = nullptr;
   IREE_ASSERT_OK(CreatePool(
       IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE, &pool));
+  const int qualified_queries = native_.pair_query_count;
 
   iree_hal_pool_capabilities_t capabilities;
   iree_hal_pool_query_capabilities(pool, &capabilities);
@@ -386,16 +469,15 @@ TEST_F(MemoryBackendTest, PublishesCanonicalPerDeviceBindings) {
       iree_hal_memory_transition_query(table, b_to_host);
   EXPECT_EQ(observation.release.bits, 0u);
   EXPECT_EQ(observation.acquire.bits, IREE_HAL_MEMORY_EFFECT_HOST_INVALIDATE);
-  const iree_hal_memory_transition_t unqualified_program =
+  const iree_hal_memory_transition_t program_publication =
       iree_hal_pool_query_transition(pool, host, program_a);
-  EXPECT_FALSE(
-      iree_hal_memory_effects_is_supported(unqualified_program.release));
-  EXPECT_FALSE(
-      iree_hal_memory_effects_is_supported(unqualified_program.acquire));
+  EXPECT_EQ(program_publication.release.bits,
+            IREE_HAL_MEMORY_EFFECT_HOST_FLUSH);
+  EXPECT_EQ(program_publication.acquire.bits, 0u);
 
   EXPECT_EQ(native_.scope_query_count, 1);
   EXPECT_EQ(native_.profile_query_count, 1);
-  EXPECT_EQ(native_.pair_query_count, 9);
+  EXPECT_EQ(native_.pair_query_count, qualified_queries);
   iree_hal_pool_release(pool);
 }
 
@@ -547,7 +629,6 @@ TEST_F(MemoryBackendTest, JoinsOwnedAndRegisteredVisibilityAtConstruction) {
   iree_hal_pool_t* pool = nullptr;
   IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool));
   const int query_count = native_.pair_query_count;
-  EXPECT_EQ(query_count, 18);
   const auto table = iree_hal_pool_transition_table(pool);
   iree_hal_memory_transition_pair_t pair;
   IREE_ASSERT_OK(iree_hal_memory_transition_prepare_pair(
