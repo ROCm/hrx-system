@@ -108,6 +108,7 @@ class GuardKind(Enum):
     OPERAND_SEGMENT_EXACT_BITS = "operand_segment_exact_bits"
     I64_ARRAY_COUNT = "i64_array_count"
     I64_ARRAY_ELEMENT_RANGE = "i64_array_element_range"
+    I64_ARRAY_ELEMENT_MULTIPLE = "i64_array_element_multiple"
     I64_ARRAY_ELEMENTS_RANGE = "i64_array_elements_range"
     VALUE_SIGNED_BIT_COUNT = "value_signed_bit_count"
     VALUE_UNSIGNED_BIT_COUNT = "value_unsigned_bit_count"
@@ -550,6 +551,17 @@ class Guard:
             element=element,
             minimum=minimum,
             maximum=maximum,
+        )
+
+    @classmethod
+    def i64_array_element_multiple(
+        cls, field: str, element: int, multiple: int
+    ) -> Self:
+        return cls(
+            kind=GuardKind.I64_ARRAY_ELEMENT_MULTIPLE,
+            field=field,
+            element=element,
+            count=multiple,
         )
 
     @classmethod
@@ -1464,6 +1476,18 @@ def _validate_i64_array_guard(
     if guard.kind == GuardKind.I64_ARRAY_COUNT:
         if guard.count is None:
             raise ValueError(f"{source_op.name}: {subject} needs a count")
+        return
+    if guard.kind == GuardKind.I64_ARRAY_ELEMENT_MULTIPLE:
+        if (
+            guard.element is None
+            or not 0 <= guard.element <= 65535
+            or guard.count is None
+            or not 0 < guard.count <= (1 << 63) - 1
+        ):
+            raise ValueError(
+                f"{source_op.name}: {subject} "
+                "needs a u16 element and positive i64 multiple"
+            )
         return
     if guard.kind == GuardKind.I64_ARRAY_ELEMENT_RANGE:
         if guard.element is None or guard.minimum is None or guard.maximum is None:

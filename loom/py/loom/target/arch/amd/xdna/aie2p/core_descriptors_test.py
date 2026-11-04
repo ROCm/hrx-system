@@ -321,6 +321,32 @@ def test_vector_allocation_move_routes_reuse_typed_descriptors(
         ] == [f"amd.xdna.aie2p.move.{key}"]
 
 
+def test_native_pointer_uses_preserve_fifo_pointer_subsets() -> None:
+    descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
+    classes = {row.name: row for row in descriptor_set.reg_classes}
+    assert set(classes["aie2p.eps"].physical_registers) < set(
+        classes["aie2p.ep"].physical_registers
+    )
+    for descriptor in descriptor_set.descriptors:
+        tied_results = {
+            constraint.lhs_operand_index
+            for constraint in descriptor.constraints
+            if constraint.kind is ConstraintKind.TIED
+        }
+        for ordinal, operand in enumerate(descriptor.operands):
+            if operand.write_event is not None:
+                assert len({row.register_part for row in operand.reg_alts}) == 1
+            alternatives = tuple(row.reg_class for row in operand.reg_alts)
+            if "aie2p.ep" not in alternatives:
+                continue
+            if DescriptorFlag.ALLOCATION_MOVE in descriptor.flags:
+                assert alternatives == ("aie2p.ep",)
+            elif operand.role is OperandRole.OPERAND or ordinal in tied_results:
+                assert alternatives == ("aie2p.ep", "aie2p.eps")
+            else:
+                assert alternatives == ("aie2p.ep",)
+
+
 def test_lock_forms_retain_counting_semaphore_contracts() -> None:
     descriptors = {
         descriptor.key: descriptor
@@ -621,6 +647,35 @@ def test_aggregate_updates_require_coindexed_unencoded_components() -> None:
             descriptor_register_outputs(
                 replace(spec, aggregate_updates=(("mod", outputs),)), form
             )
+
+
+def test_bfp_construction_preserves_each_already_defined_storage_part() -> None:
+    classes = {row.name: row for row in AIE2P_CORE_DESCRIPTOR_SET.reg_classes}
+    parts = {row.name: row for row in AIE2P_CORE_DESCRIPTOR_SET.register_parts}
+    descriptors = {row.key: row for row in AIE2P_CORE_DESCRIPTOR_SET.descriptors}
+    assert classes["aie2p.mexa"].full_register_part_mask == 0x7
+    defined = 0
+    for suffix in (
+        "mantissas.from.vector512",
+        "exponents.low32.from.scalar",
+        "exponents.high32.from.scalar",
+    ):
+        descriptor = descriptors[f"amd.xdna.aie2p.bfp.{suffix}"]
+        result = descriptor.operands[0]
+        assert result.role is OperandRole.RESULT
+        assert result.reg_alts[0].reg_class == "aie2p.mexa"
+        written = parts[result.reg_alts[0].register_part].mask
+        continuations = [
+            operand
+            for operand in descriptor.operands
+            if OperandFlag.STORAGE_CONTINUATION in operand.flags
+        ]
+        assert len(continuations) == bool(defined)
+        if continuations:
+            assert parts[continuations[0].reg_alts[0].register_part].mask == defined
+        assert not written & defined
+        defined |= written
+    assert defined == classes["aie2p.mexa"].full_register_part_mask
 
 
 def test_descriptor_updates_require_unique_known_operands() -> None:

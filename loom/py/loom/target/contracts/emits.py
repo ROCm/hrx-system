@@ -106,13 +106,13 @@ class EmitRegisterSlice:
 
     source: ValueRef
     result: ValueRef
-    unit_offset: int = 0
+    unit_offset: int | AttrProject = 0
     unit_count: int | None = None
     result_type: ResultTypeBinding | None = None
     result_register_class: str | None = None
 
     def __post_init__(self) -> None:
-        if self.unit_offset < 0 or self.unit_offset > 0xFFFF:
+        if isinstance(self.unit_offset, int) and not 0 <= self.unit_offset <= 0xFFFF:
             raise ValueError("register slice unit offset must fit u16")
         if self.unit_count is not None and (
             self.unit_count <= 0 or self.unit_count > 0xFFFF
@@ -148,6 +148,8 @@ class EmitRegisterSlice:
         *,
         source_ops: Mapping[str, Op] | None = None,
     ) -> tuple[str, ...]:
+        if isinstance(self.unit_offset, AttrProject):
+            self.unit_offset.validate_register_offset(source_op, source_ops=source_ops)
         _validate_structural_source(
             source_op,
             self.source,
@@ -277,6 +279,7 @@ class EmitRegisterConcat:
     result: ValueRef
     unit_count: int | None = None
     result_type: ResultTypeBinding | None = None
+    form: DescriptorEmitForm = DescriptorEmitForm.OP
 
     def __init__(
         self,
@@ -285,11 +288,13 @@ class EmitRegisterConcat:
         result: ValueRef,
         unit_count: int | None = None,
         result_type: ResultTypeBinding | None = None,
+        form: DescriptorEmitForm = DescriptorEmitForm.OP,
     ) -> None:
         object.__setattr__(self, "sources", tuple(sources))
         object.__setattr__(self, "result", result)
         object.__setattr__(self, "unit_count", unit_count)
         object.__setattr__(self, "result_type", result_type)
+        object.__setattr__(self, "form", form)
         if not sources:
             raise ValueError("register concat needs at least one source")
         if unit_count is not None and (unit_count <= 0 or unit_count > 0xFFFF):
@@ -298,7 +303,15 @@ class EmitRegisterConcat:
             raise ValueError(
                 "register concat cannot specify both unit count and result type"
             )
-        if unit_count is not None and result.kind is not SourceValueKind.TEMPORARY:
+        if form not in (DescriptorEmitForm.OP, DescriptorEmitForm.PER_LANE_SEQUENCE):
+            raise ValueError("register concat requires an op or per-lane-sequence form")
+        if form is DescriptorEmitForm.PER_LANE_SEQUENCE and unit_count is None:
+            raise ValueError("per-lane-sequence concat requires a native unit count")
+        if (
+            unit_count is not None
+            and result.kind is not SourceValueKind.TEMPORARY
+            and form is not DescriptorEmitForm.PER_LANE_SEQUENCE
+        ):
             raise ValueError(
                 "register concat unit count is only valid for temporary results"
             )
@@ -340,6 +353,14 @@ type ContractEmit = (
 )
 
 
+def is_per_lane_sequence(emit: ContractEmit) -> bool:
+    """Whether an action belongs to the rule's repeated program tail."""
+    return (
+        isinstance(emit, (EmitDescriptorOp, EmitRegisterConcat))
+        and emit.form is DescriptorEmitForm.PER_LANE_SEQUENCE
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class EmitDescriptorOp:
     """Emits one descriptor-backed low op from source fields."""
@@ -372,6 +393,7 @@ class EmitDescriptorOp:
     accumulator_seed: DescriptorAccumulatorSeed = DescriptorAccumulatorSeed.OPERAND
     accumulator_tree: DescriptorAccumulatorTree = DescriptorAccumulatorTree.CHAIN
     skip_first_lane: bool = False
+    skip_last_lane: bool = False
     source_memory: SourceMemoryConstraint | None = None
     source_memory_byte_offset_materializer: (
         SourceMemoryByteOffsetMaterializer | None
@@ -405,6 +427,7 @@ class EmitDescriptorOp:
         defined_temporaries: set[str],
         *,
         source_ops: Mapping[str, Op] | None = None,
+        sequence_carried: Sequence[str] = (),
     ) -> tuple[str, ...]:
         _require_descriptor(descriptor_set, self.descriptor)
         if (
@@ -511,8 +534,11 @@ class EmitDescriptorOp:
             if value_ref.kind == SourceValueKind.TEMPORARY:
                 if (
                     value_ref.field in defined_temporaries
-                    or value_ref.field in produced_temporaries
-                ):
+                    and not (
+                        self.form is DescriptorEmitForm.PER_LANE_SEQUENCE
+                        and value_ref.field in sequence_carried
+                    )
+                ) or value_ref.field in produced_temporaries:
                     raise ValueError(
                         f"{source_op.name}: descriptor result '{descriptor_field}' "
                         f"redefines temporary '{value_ref.field}'"
@@ -622,6 +648,11 @@ class EmitDescriptorOp:
                 f"{source_op.name}: skip-first-lane is only valid for "
                 "accumulate-lanes emits"
             )
+        if self.skip_last_lane and self.form != DescriptorEmitForm.PER_LANE_SEQUENCE:
+            raise ValueError(
+                f"{source_op.name}: skip-last-lane is only valid for "
+                "per-lane-sequence emits"
+            )
         if (
             self.skip_first_lane
             and self.accumulator_seed == DescriptorAccumulatorSeed.FIRST_LANE
@@ -648,9 +679,11 @@ class EmitDescriptorOp:
             DescriptorEmitForm.AUTO,
             DescriptorEmitForm.OP,
             DescriptorEmitForm.CONST,
+            DescriptorEmitForm.PER_LANE_SEQUENCE,
         ):
             raise ValueError(
-                f"{source_op.name}: source memory requires an op or constant emit"
+                f"{source_op.name}: "
+                "source memory requires an op, constant, or per-lane-sequence emit"
             )
         if self.source_memory is not None:
             self.source_memory.validate(source_op)

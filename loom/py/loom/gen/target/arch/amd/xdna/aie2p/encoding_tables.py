@@ -52,6 +52,7 @@ from loom.target.arch.amd.xdna.aie2p.core_encoding_data import (
     SLOT_BIT_COUNTS,
 )
 from loom.target.arch.amd.xdna.aie2p.core_machine_data import (
+    BFP_STORAGE_FIELDS,
     CORE_MACHINE_TABLE,
     DIMENSION_FIELDS,
 )
@@ -393,6 +394,7 @@ def _register_part_unit_masks(compiled) -> list[int]:
     # Vector 128-bit halves share an indivisible 256-bit alias unit. Other
     # parts follow the named physical subregister hierarchy, not unit-ID order.
     paths = {
+        "aie2p.mexa": tuple(path for _, path, _ in BFP_STORAGE_FIELDS),
         "aie2p.elpredicate": (("sub_l_even",), ("sub_l_odd",)),
         "aie2p.vec256": ((), ()),
         "aie2p.eldfiforeg": (("sub_lo_fifo",), ("sub_hi_fifo",)),

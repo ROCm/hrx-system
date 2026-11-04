@@ -1201,8 +1201,9 @@ static iree_status_t loom_low_lower_rule_plan_carriers(
       emit->kind == LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP_PER_LANE;
   const bool accumulates_lanes =
       emit->kind == LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP_ACCUMULATE_LANES;
-  const bool sequences_lanes =
-      emit->kind == LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP_PER_LANE_SEQUENCE;
+  const bool sequences_lanes = loom_low_lower_emit_is_lane_sequence(emit);
+  const bool sequence_concat =
+      emit->kind == LOOM_LOW_LOWER_EMIT_REGISTER_CONCAT_PER_LANE_SEQUENCE;
   const bool first_lane =
       emit->kind == LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP_FIRST_LANE;
   loom_type_id_t* lane_operand_types = NULL;
@@ -1217,7 +1218,7 @@ static iree_status_t loom_low_lower_rule_plan_carriers(
     operand_types[0] = loom_low_lower_rule_plan_operand_type(
         context, rule_set, source, resolved, 0, temporary_types);
   }
-  const bool needs_all_operands = lanes != NULL;
+  const bool needs_all_operands = lanes != NULL && !sequence_concat;
   if (needs_all_operands || emit->copy_operand_mask) {
     uint16_t copy_index = 0;
     for (uint16_t i = 0; i < emit->operand_ref_count; ++i) {
@@ -1379,7 +1380,8 @@ static iree_status_t loom_low_lower_rule_plan_carriers(
     loom_type_t bound_type = result_type;
     if (lanes) {
       const uint32_t packet_units =
-          expands_lanes || sequences_lanes
+          sequence_concat ? emit->payload.structural.unit_count
+          : expands_lanes || sequences_lanes
               ? loom_low_lower_rule_descriptor_result_operand(
                     context->descriptor_set, resolved->descriptor.descriptor,
                     ordinal)
@@ -1665,7 +1667,7 @@ iree_status_t loom_low_lower_rule_plan_finalize(
     if (context->result->error_count != 0) {
       return iree_ok_status();
     }
-    if (emit->kind == LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP_PER_LANE_SEQUENCE) {
+    if (loom_low_lower_emit_is_lane_sequence(emit)) {
       IREE_ASSERT(sequence_lane_count <= 1 || lanes->lane_count == 1 ||
                   sequence_lane_count == lanes->lane_count);
       sequence_lane_count = iree_max(sequence_lane_count, lanes->lane_count);

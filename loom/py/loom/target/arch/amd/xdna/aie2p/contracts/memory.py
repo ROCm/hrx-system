@@ -201,7 +201,7 @@ def _memory_constraint(
     root_kind: SourceMemoryRootKind,
     memory_spaces: tuple[str, ...],
     element_byte_count: int,
-    vector_lane_count: int,
+    vector_lane_count: int | None,
     minimum_alignment: int,
     immediate_offset_minimum: int,
     immediate_offset_maximum: int,
@@ -362,24 +362,41 @@ def _view_carrier_immediate_rule(source_op: Op) -> DescriptorRule:
     )
 
 
-def _view_carrier_register_rule(source_op: Op, *, dynamic: bool) -> DescriptorRule:
-    source_memory = _view_carrier_constraint(
-        static_byte_offset_minimum=_I32_MIN,
-        static_byte_offset_maximum=_I32_MAX,
-        dynamic=dynamic,
-    )
-    byte_offset = ValueRef.temporary("byte_offset")
-    modifier = ValueRef.temporary("modifier")
+def _pointer_address_emits(
+    source_memory: SourceMemoryConstraint,
+    *,
+    static_modifier: Descriptor | None,
+    result: ValueRef,
+    pointer_type: ValueRef,
+) -> tuple[ContractEmit, ...]:
+    """Adds a canonical byte offset to a copy of its local pointer root."""
+
     root = ValueRef.temporary("root")
-    emits: list[ContractEmit] = [
+    return (
         EmitRegisterCopy(
             source=ValueRef.source_memory_root(),
             result=root,
-            result_type=ValueRef.result("result"),
+            result_type=pointer_type,
             source_memory=source_memory,
-        )
-    ]
-    if dynamic:
+        ),
+        *_pointer_offset_emits(
+            source_memory, static_modifier=static_modifier, root=root, result=result
+        ),
+    )
+
+
+def _pointer_offset_emits(
+    source_memory: SourceMemoryConstraint,
+    *,
+    static_modifier: Descriptor | None,
+    root: ValueRef,
+    result: ValueRef,
+) -> tuple[ContractEmit, ...]:
+    """Updates an owned pointer while preserving its physical register domain."""
+
+    modifier = ValueRef.temporary("modifier")
+    emits: list[ContractEmit] = []
+    if static_modifier is None:
         emits.append(
             EmitDescriptorOp(
                 descriptor=_descriptor("amd.xdna.aie2p.move.er.to.em"),
@@ -392,27 +409,14 @@ def _view_carrier_register_rule(source_op: Op, *, dynamic: bool) -> DescriptorRu
             )
         )
     else:
-        emits.extend(
-            (
-                EmitDescriptorOp(
-                    descriptor=_descriptor(
-                        "amd.xdna.aie2p.materialize.static-byte-offset.i32"
-                    ),
-                    results={"dst": byte_offset},
-                    result_types={"dst": _OFFSET},
-                    immediates={
-                        "i": SourceMemoryProject.static_byte_offset(),
-                    },
-                    source_memory=source_memory,
-                    form=DescriptorEmitForm.OP,
-                ),
-                EmitDescriptorOp(
-                    descriptor=_descriptor("amd.xdna.aie2p.move.er.to.em"),
-                    operands={"src": byte_offset},
-                    results={"dst": modifier},
-                    result_types={"dst": DescriptorResultType()},
-                    form=DescriptorEmitForm.OP,
-                ),
+        emits.append(
+            EmitDescriptorOp(
+                descriptor=static_modifier,
+                results={"dst": modifier},
+                result_types={"dst": DescriptorResultType()},
+                immediates={"i": SourceMemoryProject.static_byte_offset()},
+                source_memory=source_memory,
+                form=DescriptorEmitForm.CONST,
             )
         )
     descriptor = _descriptor("amd.xdna.aie2p.address.add.a.register")
@@ -423,16 +427,37 @@ def _view_carrier_register_rule(source_op: Op, *, dynamic: bool) -> DescriptorRu
                 "ptr": root,
                 "mod": modifier,
             },
-            results={"ptr_out": ValueRef.result("result")},
+            results={"ptr_out": result},
+            result_types={"ptr_out": root},
             source_memory=source_memory,
             form=DescriptorEmitForm.OP,
         )
     )
+    return tuple(emits)
+
+
+def _view_carrier_register_rule(
+    source_op: Op, *, static_modifier: Descriptor | None
+) -> DescriptorRule:
+    minimum, maximum = _I32_MIN, _I32_MAX
+    if static_modifier is not None:
+        (immediate,) = static_modifier.immediates
+        minimum, maximum = immediate.signed_min, immediate.unsigned_max
+    source_memory = _view_carrier_constraint(
+        static_byte_offset_minimum=minimum,
+        static_byte_offset_maximum=maximum,
+        dynamic=static_modifier is None,
+    )
     return DescriptorRule(
         source_op=source_op,
-        descriptor=descriptor,
+        descriptor=_descriptor("amd.xdna.aie2p.address.add.a.register"),
         guards=(Guard.value_type("result", _VIEW_TYPE),),
-        emit=tuple(emits),
+        emit=_pointer_address_emits(
+            source_memory,
+            static_modifier=static_modifier,
+            result=ValueRef.result("result"),
+            pointer_type=ValueRef.result("result"),
+        ),
     )
 
 
@@ -443,8 +468,16 @@ def _view_carrier_rules() -> tuple[DescriptorRule, ...]:
         for rule in (
             _view_carrier_zero_rule(source_op),
             _view_carrier_immediate_rule(source_op),
-            _view_carrier_register_rule(source_op, dynamic=False),
-            _view_carrier_register_rule(source_op, dynamic=True),
+            *(
+                _view_carrier_register_rule(
+                    source_op,
+                    static_modifier=_descriptor(
+                        f"amd.xdna.aie2p.constant.modifier.{form}"
+                    ),
+                )
+                for form in ("mova", "movxm")
+            ),
+            _view_carrier_register_rule(source_op, static_modifier=None),
         )
     )
 
@@ -729,7 +762,10 @@ def _chunked_vector_memory_rule(
 ) -> DescriptorRule:
     is_load = operation is SourceMemoryOperation.LOAD
     immediate_memory = address_form is _MemoryAddressForm.IMMEDIATE
-    address_family = "immediate" if immediate_memory else "register"
+    # A pointer copy, modifier, and update amortize over four native accesses.
+    # Two chunks need fewer instructions with independent address indexes.
+    rebase_pointer = not immediate_memory and len(chunk_byte_offsets) > 2
+    address_family = "immediate" if immediate_memory or rebase_pointer else "register"
     descriptor_key = f"{descriptor_prefix}.{address_family}"
     if volatile:
         descriptor_key = f"{descriptor_key}.volatile"
@@ -749,6 +785,21 @@ def _chunked_vector_memory_rule(
     )
 
     emits: list[ContractEmit] = []
+    pointer = ValueRef.source_memory_root()
+    if rebase_pointer:
+        pointer = ValueRef.temporary("chunk_base")
+        emits.extend(
+            _pointer_address_emits(
+                source_memory,
+                static_modifier=(
+                    _descriptor("amd.xdna.aie2p.constant.modifier.movxm")
+                    if address_form is _MemoryAddressForm.MATERIALIZED_STATIC
+                    else None
+                ),
+                result=pointer,
+                pointer_type=ValueRef.operand("view"),
+            )
+        )
     loaded_chunks: list[ValueRef] = []
     for chunk_index, chunk_byte_offset in enumerate(chunk_byte_offsets):
         chunk = ValueRef.temporary(f"chunk_{chunk_index}")
@@ -765,9 +816,7 @@ def _chunked_vector_memory_rule(
             )
 
         memory_operands = (
-            {"ptr": ValueRef.source_memory_root()}
-            if is_load
-            else {"src": chunk, "ptr": ValueRef.source_memory_root()}
+            {"ptr": pointer} if is_load else {"src": chunk, "ptr": pointer}
         )
         memory_results = {"dst": chunk} if is_load else {}
         if immediate_memory:
@@ -776,17 +825,8 @@ def _chunked_vector_memory_rule(
                 if chunk_byte_offset
                 else SourceMemoryProject.static_byte_offset()
             )
-            emits.append(
-                EmitDescriptorOp(
-                    descriptor=memory_descriptor,
-                    operands=memory_operands,
-                    results=memory_results,
-                    result_types=({"dst": DescriptorResultType()} if is_load else None),
-                    immediates={"imm": static_byte_offset},
-                    source_memory=source_memory,
-                    form=DescriptorEmitForm.OP,
-                )
-            )
+        elif rebase_pointer:
+            static_byte_offset = chunk_byte_offset
         else:
             address_emits, address_index = _register_address_emits(
                 source_memory,
@@ -796,16 +836,21 @@ def _chunked_vector_memory_rule(
             )
             emits.extend(address_emits)
             memory_operands["dj"] = address_index
-            emits.append(
-                EmitDescriptorOp(
-                    descriptor=memory_descriptor,
-                    operands=memory_operands,
-                    results=memory_results,
-                    result_types=({"dst": DescriptorResultType()} if is_load else None),
-                    source_memory=source_memory,
-                    form=DescriptorEmitForm.OP,
-                )
+        emits.append(
+            EmitDescriptorOp(
+                descriptor=memory_descriptor,
+                operands=memory_operands,
+                results=memory_results,
+                result_types=({"dst": DescriptorResultType()} if is_load else None),
+                immediates=(
+                    {"imm": static_byte_offset}
+                    if immediate_memory or rebase_pointer
+                    else {}
+                ),
+                source_memory=source_memory,
+                form=DescriptorEmitForm.OP,
             )
+        )
 
     if is_load:
         emits.append(

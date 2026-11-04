@@ -216,7 +216,8 @@ class SourceMemoryConstraint:
     address_layout: SourceMemoryAddressLayout
     memory_spaces: tuple[str, ...]
     element_byte_count: int
-    vector_lane_count: int
+    # Exact logical lane count, or None when the rule guards the source shape.
+    vector_lane_count: int | None
     vector_lane_byte_stride: int
     static_byte_offset_minimum: int
     static_byte_offset_maximum: int
@@ -258,7 +259,7 @@ class SourceMemoryConstraint:
         address_layout: SourceMemoryAddressLayout = SourceMemoryAddressLayout.ANY,
         memory_spaces: Sequence[str],
         element_byte_count: int,
-        vector_lane_count: int,
+        vector_lane_count: int | None,
         vector_lane_byte_stride: int,
         static_byte_offset: int | None = None,
         static_byte_offset_minimum: int | None = None,
@@ -375,7 +376,10 @@ class SourceMemoryConstraint:
             raise ValueError(
                 "source memory element byte count must fit in a positive u32"
             )
-        if not 0 < self.vector_lane_count <= _U32_MAX:
+        if (
+            self.vector_lane_count is not None
+            and not 0 < self.vector_lane_count <= _U32_MAX
+        ):
             raise ValueError(
                 "source memory vector lane count must fit in a positive u32"
             )

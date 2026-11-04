@@ -896,6 +896,66 @@ class AttrProject:
                 f"{source_op.name}: {subject} byte parity must be zero or one"
             )
 
+    def validate_register_offset(
+        self, source_op: Op, *, source_ops: Mapping[str, Op] | None = None
+    ) -> None:
+        """Checks an integer coordinate projected into native register units."""
+        subject = "register offset projection"
+        source_op = self._referenced_op(source_op, source_ops, subject)
+        attr = _require_attr(source_op, self.source_attr, subject)
+        if self.kind in (
+            AttrProjectKind.DIRECT,
+            AttrProjectKind.I64_LITERAL_MINUS_ATTR,
+            AttrProjectKind.I64_LITERAL_MINUS_ATTRS,
+            AttrProjectKind.I64_ATTR_MINUS_LITERAL,
+        ):
+            if attr.attr_type != ATTR_TYPE_I64:
+                raise ValueError(
+                    f"{source_op.name}: {subject} requires an i64 attribute"
+                )
+            if (
+                self.other_source_attr
+                and _require_attr(source_op, self.other_source_attr, subject).attr_type
+                != ATTR_TYPE_I64
+            ):
+                raise ValueError(
+                    f"{source_op.name}: {subject} requires an i64 attribute"
+                )
+            return
+        if self.kind not in (
+            AttrProjectKind.I64_ARRAY_ELEMENT,
+            AttrProjectKind.I64_ARRAY_ELEMENT_PLUS_LITERAL,
+            AttrProjectKind.I64_ARRAY_LITERAL_MINUS_ELEMENT,
+            AttrProjectKind.I64_ARRAY_ELEMENT_QUOTIENT,
+            AttrProjectKind.I64_ARRAY_ELEMENT_REMAINDER,
+            AttrProjectKind.I64_ARRAY_LANE_BYTE_OFFSET,
+        ):
+            raise ValueError(
+                f"{source_op.name}: {subject} requires an integer coordinate"
+            )
+        if attr.attr_type != ATTR_TYPE_I64_ARRAY:
+            raise ValueError(
+                f"{source_op.name}: {subject} requires an i64_array attribute"
+            )
+        if self.element is None or not 0 <= self.element <= 65535:
+            raise ValueError(
+                f"{source_op.name}: {subject} requires a u16 element index"
+            )
+        if (
+            self.kind
+            in (
+                AttrProjectKind.I64_ARRAY_ELEMENT_QUOTIENT,
+                AttrProjectKind.I64_ARRAY_ELEMENT_REMAINDER,
+            )
+            and self.literal_i64 <= 0
+        ):
+            raise ValueError(f"{source_op.name}: {subject} requires a positive divisor")
+        if (
+            self.kind is AttrProjectKind.I64_ARRAY_LANE_BYTE_OFFSET
+            and self.bytes_per_lane is None
+        ):
+            raise ValueError(f"{source_op.name}: {subject} requires bytes per lane")
+
     def _validate_enum_remap(
         self,
         source_op: Op,

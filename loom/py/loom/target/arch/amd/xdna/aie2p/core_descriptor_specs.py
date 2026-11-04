@@ -18,6 +18,10 @@ from loom.target.arch.amd.xdna.aie2p.core_address_descriptors import (
     _address_descriptor_specs,
     _dimension_update,
 )
+from loom.target.arch.amd.xdna.aie2p.core_bfp_descriptors import (
+    BFP_REGISTER_PARTS,
+    BFP_STORAGE_DESCRIPTOR_SPECS,
+)
 from loom.target.arch.amd.xdna.aie2p.core_comparison_descriptors import (
     BF16_COMPARISON_DESCRIPTOR_SPECS,
     INTEGER_COMPARISON_DESCRIPTOR_SPECS,
@@ -99,6 +103,7 @@ _LOCK_EFFECT = Effect(
 _VEC256_LOW128_PART = "aie2p.vec256.low128"
 _VEC256_HIGH128_PART = "aie2p.vec256.high128"
 _REGISTER_PARTS = (
+    *BFP_REGISTER_PARTS,
     *PREDICATE_REGISTER_PARTS,
     RegisterPart(_VEC256_LOW128_PART, "aie2p.vec256", 0x1),
     RegisterPart(_VEC256_HIGH128_PART, "aie2p.vec256", 0x2),
@@ -1510,6 +1515,7 @@ _BASE_DESCRIPTOR_SPECS = (
         "II_VBCST_64",
         rematerializable=True,
     ),
+    *BFP_STORAGE_DESCRIPTOR_SPECS,
     *PREDICATE_DESCRIPTOR_SPECS,
     *BF16_COMPARISON_DESCRIPTOR_SPECS,
     *INTEGER_COMPARISON_DESCRIPTOR_SPECS,
@@ -1888,6 +1894,7 @@ _BASE_DESCRIPTOR_SPECS = (
         "II_MOV_alu_mv_mv_mv_scl_eR_eP",
         (("dst", "eR"), ("src", "eP")),
         asm_mnemonic="mov.address-to-scalar",
+        rematerializable=True,
         flags=(DescriptorFlag.SAFE_TO_SPECULATE,),
     ),
     _DescriptorSpec(
@@ -1897,6 +1904,7 @@ _BASE_DESCRIPTOR_SPECS = (
         "II_MOV_alu_mv_mv_mv_scl_eP_eR",
         (("dst", "eP"), ("src", "eR")),
         asm_mnemonic="mov.scalar-to-address",
+        rematerializable=True,
         flags=(DescriptorFlag.SAFE_TO_SPECULATE,),
     ),
     _DescriptorSpec(

@@ -765,7 +765,7 @@ typedef struct loom_low_lower_source_memory_t {
   loom_low_lower_memory_space_mask_t memory_space_mask;
   // Rule-set source-memory shape row index.
   uint16_t shape_index;
-  // Required static number of vector lanes addressed by the operation.
+  // Exact logical lane count, or zero when source guards select the shape.
   uint16_t vector_lane_count;
   // Minimum alignment of the origin and each row/column start for matrix
   // layouts, or zero if unconstrained.
@@ -922,6 +922,8 @@ typedef enum loom_low_lower_guard_kind_e {
   // Source value facts must prove an exact integer equal to the selected
   // target subgroup size.
   LOOM_LOW_LOWER_GUARD_VALUE_I64_EQUALS_TARGET_SUBGROUP_SIZE = 49,
+  // Source i64_array element must be divisible by the positive i64 payload.
+  LOOM_LOW_LOWER_GUARD_ATTR_I64_ARRAY_ELEMENT_MULTIPLE = 50,
   // Maximum guard kind value plus one.
   LOOM_LOW_LOWER_GUARD_COUNT_,
 } loom_low_lower_guard_kind_t;
@@ -1052,6 +1054,8 @@ enum loom_low_lower_emit_kind_e {
   // Projects consecutive register units, then constrains the projected value
   // to an explicitly selected descriptor register class.
   LOOM_LOW_LOWER_EMIT_REGISTER_SLICE_CLASS = 12,
+  // Collects one fixed-width group from the final per-lane sequence action.
+  LOOM_LOW_LOWER_EMIT_REGISTER_CONCAT_PER_LANE_SEQUENCE = 13,
   // Maximum emit kind plus one.
   LOOM_LOW_LOWER_EMIT_COUNT_,
 };
@@ -1077,6 +1081,9 @@ typedef uint8_t loom_low_lower_emit_flags_t;
 // Starts DESCRIPTOR_OP_ACCUMULATE_LANES at lane 1. The accumulator operand must
 // already contain the folded lane 0 contribution.
 #define LOOM_LOW_LOWER_EMIT_FLAG_ACCUMULATE_SKIP_FIRST_LANE ((uint8_t)1u << 5)
+// Omits a sequence action on its final lane. Results update carried state
+// already defined before the action, such as a between-group memory refill.
+#define LOOM_LOW_LOWER_EMIT_FLAG_SEQUENCE_SKIP_LAST_LANE ((uint8_t)1u << 5)
 // Synthesizes emitted low result types from descriptor result operand rows.
 #define LOOM_LOW_LOWER_EMIT_FLAG_RESULT_DESCRIPTOR_TYPE ((uint8_t)1u << 6)
 // Records the source access summary for an emitted descriptor with memory
@@ -1152,7 +1159,8 @@ typedef struct loom_low_lower_emit_t {
     } descriptor;
     // Structural register operation parameters.
     struct {
-      // Register-unit offset consumed by REGISTER_SLICE.
+      // Literal register-unit offset, or attr-copy start when a slice
+      // projects its offset from a source coordinate.
       uint16_t offset;
       // Explicit result register-unit count for a slice or concatenation.
       // Zero maps the result type through the normal result reference or
@@ -1171,6 +1179,13 @@ typedef struct loom_low_lower_emit_t {
 } loom_low_lower_emit_t;
 static_assert(sizeof(loom_low_lower_emit_t) == 18,
               "loom_low_lower_emit_t must be 18 bytes");
+
+// Whether the emit belongs to a rule's final repeated program tail.
+static inline bool loom_low_lower_emit_is_lane_sequence(
+    const loom_low_lower_emit_t* emit) {
+  return emit->kind == LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP_PER_LANE_SEQUENCE ||
+         emit->kind == LOOM_LOW_LOWER_EMIT_REGISTER_CONCAT_PER_LANE_SEQUENCE;
+}
 
 // Returns the table reference receiving one emitted result. Type selection
 // and SSA materialization share this exact result-to-source correspondence.

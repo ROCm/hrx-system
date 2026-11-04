@@ -50,13 +50,6 @@ static bool loom_test_low_is_vector_4xi32(loom_type_t type) {
          loom_type_dim_static_size_at(type, 0) == 4;
 }
 
-static bool loom_test_low_is_vector_2xi32(loom_type_t type) {
-  return loom_type_is_vector(type) && loom_type_rank(type) == 1 &&
-         loom_type_is_all_static(type) &&
-         loom_type_element_type(type) == LOOM_SCALAR_TYPE_I32 &&
-         loom_type_dim_static_size_at(type, 0) == 2;
-}
-
 static bool loom_test_low_is_vector_4xf32(loom_type_t type) {
   return loom_type_is_vector(type) && loom_type_rank(type) == 1 &&
          loom_type_is_all_static(type) &&
@@ -110,13 +103,15 @@ iree_status_t loom_test_low_lower_map_type(void* user_data,
     return loom_test_low_make_register_type(
         context, TEST_LOW_CORE_REG_CLASS_ID_TEST_F32, 1, out_low_type);
   }
-  if (loom_test_low_is_vector_4xi32(source_type)) {
-    return loom_test_low_make_register_type(
-        context, TEST_LOW_CORE_REG_CLASS_ID_TEST_I32, 4, out_low_type);
-  }
-  if (loom_test_low_is_vector_2xi32(source_type)) {
-    return loom_test_low_make_register_type(
-        context, TEST_LOW_CORE_REG_CLASS_ID_TEST_I32, 2, out_low_type);
+  if (loom_type_is_vector(source_type) && loom_type_rank(source_type) == 1 &&
+      loom_type_is_all_static(source_type) &&
+      loom_type_element_type(source_type) == LOOM_SCALAR_TYPE_I32) {
+    const int64_t lane_count = loom_type_dim_static_size_at(source_type, 0);
+    if (lane_count > 0 && lane_count <= UINT16_MAX) {
+      return loom_test_low_make_register_type(
+          context, TEST_LOW_CORE_REG_CLASS_ID_TEST_I32, (uint32_t)lane_count,
+          out_low_type);
+    }
   }
   if (loom_test_low_is_vector_4xf32(source_type)) {
     return loom_test_low_make_register_type(

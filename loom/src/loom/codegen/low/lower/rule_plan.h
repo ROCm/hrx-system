@@ -118,6 +118,7 @@ static inline uint32_t loom_low_lower_rule_lane_plan_size(
     case LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP_FIRST_LANE:
     case LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP_PER_LANE:
     case LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP_PER_LANE_SEQUENCE:
+    case LOOM_LOW_LOWER_EMIT_REGISTER_CONCAT_PER_LANE_SEQUENCE:
     case LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP_ACCUMULATE_LANES:
       return sizeof(loom_low_lower_lane_plan_t) +
              (emit->operand_ref_count + emit->result_ref_count) *

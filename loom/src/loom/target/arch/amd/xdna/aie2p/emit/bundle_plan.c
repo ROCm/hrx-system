@@ -484,8 +484,7 @@ static void loom_aie2p_bundle_plan_collect_instruction_writes(
     if (operand->write_event_id == LOOM_LOW_TIMING_EVENT_NONE) {
       continue;
     }
-    IREE_ASSERT_EQ(operand->reg_class_alt_count, 1,
-                   "AIE2P write operand register-class alternative");
+    // Native pointer alternatives share the same written register part.
     loom_aie2p_bundle_plan_collect_register_part_writes(
         descriptor_set, instruction->physical_registers[i],
         descriptor_set->reg_class_alts[operand->reg_class_alt_start]
@@ -520,8 +519,7 @@ static void loom_aie2p_bundle_plan_collect_slot_writes(
     if (operand->write_event_id == LOOM_LOW_TIMING_EVENT_NONE) {
       continue;
     }
-    IREE_ASSERT_EQ(operand->reg_class_alt_count, 1,
-                   "AIE2P write operand register-class alternative");
+    // Native pointer alternatives share the same written register part.
     const uint16_t physical_register =
         loom_aie2p_bundle_plan_resolve_instruction_register(
             builder, slot, descriptor, move, i);

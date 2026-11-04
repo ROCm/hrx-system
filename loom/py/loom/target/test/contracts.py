@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from loom.dialect.buffer import ALL_BUFFER_OPS
 from loom.dialect.buffer import defs as buffer
 from loom.dialect.cfg import ALL_CFG_OPS, cfg_cond_br
@@ -25,6 +27,7 @@ from loom.target.contracts import (
     ContractFragment,
     DescriptorEmitForm,
     DescriptorMatrixRule,
+    DescriptorResultType,
     DescriptorRule,
     DirectDescriptorCase,
     DirectTypePatterns,
@@ -63,6 +66,7 @@ from loom.target.test.descriptors import (
     TEST_LOW_CORE_DESCRIPTOR_SET,
     TEST_LOW_DOT4I_S8S8_DESCRIPTOR,
     TEST_LOW_FROM_ELEMENTS_V4I32_DESCRIPTOR,
+    TEST_LOW_IOTA_PAIR_I32_DESCRIPTOR,
     TEST_LOW_LOAD_INDEX_ORDERED_V4I32_DESCRIPTOR,
     TEST_LOW_LOAD_INDEX_V4F32_DESCRIPTOR,
     TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
@@ -291,6 +295,72 @@ def _vector_load_rule(
                 ),
             ),
         ),
+    )
+
+
+def _streaming_vector_load_rule(*, volatile: bool) -> DescriptorRule:
+    descriptor = (
+        TEST_LOW_LOAD_INDEX_ORDERED_V4I32_DESCRIPTOR
+        if volatile
+        else TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR
+    )
+    index = ValueRef.temporary("index")
+    advance = ValueRef.temporary("advance")
+    packet = ValueRef.temporary("packet")
+    return DescriptorRule(
+        source_op=vector.vector_load,
+        descriptor=descriptor,
+        guards=(
+            *(
+                (Guard.instance_flags_has_all("memory_flags", "volatile"),)
+                if volatile
+                else ()
+            ),
+            Guard.value_type(
+                "result", Vector("i32", minimum_lanes=8, maximum_lanes=65535)
+            ),
+            Guard.value_static_dim0_multiple("result", 4),
+        ),
+        emit=(
+            *(
+                EmitDescriptorOp(
+                    descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                    results={"dst": result},
+                    result_types={"dst": _I32},
+                    immediates={"i32_value": value},
+                    form=DescriptorEmitForm.CONST,
+                )
+                for result, value in ((index, 0), (advance, 16))
+            ),
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={"address": ValueRef.operand("view"), "index": index},
+                results={"dst": packet},
+                result_types={"dst": DescriptorResultType()},
+                source_memory=replace(
+                    _source_memory_constraint(
+                        SourceMemoryOperation.LOAD, dynamic=False
+                    ),
+                    vector_lane_count=None,
+                ),
+                form=DescriptorEmitForm.PER_LANE_SEQUENCE,
+            ),
+            EmitDescriptorOp(
+                descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+                operands={"lhs": index, "rhs": advance},
+                results={"dst": index},
+                result_types={"dst": index},
+                form=DescriptorEmitForm.PER_LANE_SEQUENCE,
+                skip_last_lane=True,
+            ),
+            EmitRegisterConcat(
+                sources=(packet,),
+                result=ValueRef.result("result"),
+                unit_count=4,
+                form=DescriptorEmitForm.PER_LANE_SEQUENCE,
+            ),
+        ),
+        sequence_carried=("index",),
     )
 
 
@@ -597,12 +667,87 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
                 ),
             ),
         ),
+        DescriptorRule(
+            source_op=vector.vector_iota,
+            descriptor=TEST_LOW_IOTA_PAIR_I32_DESCRIPTOR,
+            guards=(
+                Guard.value_type("base", _I32),
+                Guard.value_type(
+                    "result", Vector("i32", minimum_lanes=2, maximum_lanes=65535)
+                ),
+                Guard.value_static_dim0_multiple("result", 2),
+            ),
+            emit=(
+                EmitRegisterCopy(
+                    source=ValueRef.operand("base"),
+                    result=ValueRef.temporary("coordinate"),
+                    result_type=ValueRef.operand("base"),
+                ),
+                EmitDescriptorOp(
+                    descriptor=TEST_LOW_IOTA_PAIR_I32_DESCRIPTOR,
+                    operands={
+                        "base": ValueRef.temporary("coordinate"),
+                        "step": ValueRef.operand("step"),
+                    },
+                    results={
+                        "first": ValueRef.temporary("first"),
+                        "second": ValueRef.temporary("second"),
+                    },
+                    result_types={
+                        "first": ValueRef.operand("base"),
+                        "second": ValueRef.operand("base"),
+                    },
+                    form=DescriptorEmitForm.PER_LANE_SEQUENCE,
+                ),
+                EmitDescriptorOp(
+                    descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+                    operands={
+                        "lhs": ValueRef.temporary("second"),
+                        "rhs": ValueRef.operand("step"),
+                    },
+                    results={"dst": ValueRef.temporary("coordinate")},
+                    result_types={"dst": ValueRef.temporary("coordinate")},
+                    form=DescriptorEmitForm.PER_LANE_SEQUENCE,
+                    skip_last_lane=True,
+                ),
+                EmitRegisterConcat(
+                    sources=(ValueRef.temporary("first"), ValueRef.temporary("second")),
+                    result=ValueRef.result("result"),
+                    unit_count=2,
+                    form=DescriptorEmitForm.PER_LANE_SEQUENCE,
+                ),
+            ),
+            sequence_carried=("coordinate",),
+        ),
         _binary_rule(
             vector.vector_muli,
             TEST_LOW_MUL_I32_DESCRIPTOR,
             _V4I32,
             semantic_tag="integer.mul.i32",
         ),
+        DescriptorRule(
+            source_op=vector.vector_slice,
+            guards=(
+                Guard.value_type(
+                    "source", Vector("i32", minimum_lanes=2, maximum_lanes=65535)
+                ),
+                Guard.value_type("result", _V2I32),
+                Guard.i64_array_count("static_offsets", 1),
+                Guard.i64_array_element_range("static_offsets", 0, 0, 65533),
+                Guard.i64_array_element_multiple("static_offsets", 0, 2),
+            ),
+            emit=(
+                EmitRegisterSlice(
+                    source=ValueRef.operand("source"),
+                    result=ValueRef.result("result"),
+                    unit_offset=AttrProject.i64_array_element(
+                        "static_offsets", element=0
+                    ),
+                ),
+            ),
+        ),
+        _streaming_vector_load_rule(volatile=True),
+        _streaming_vector_load_rule(volatile=False),
         _vector_load_rule(
             TEST_LOW_LOAD_ORDERED_V4I32_DESCRIPTOR,
             _V4I32,

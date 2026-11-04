@@ -73,6 +73,31 @@ def test_address_add_forms_write_rematerializable_indices_without_carry() -> Non
             assert not descriptor.immediates
 
 
+def test_pointer_updates_can_recreate_owned_input_chains() -> None:
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in AIE2P_CORE_DESCRIPTOR_SET.descriptors
+    }
+    for lane in ("a", "b", "s"):
+        for addressing in ("register", "immediate"):
+            descriptor = descriptors[f"amd.xdna.aie2p.address.add.{lane}.{addressing}"]
+            assert not descriptor.effects
+            assert all(
+                OperandFlag.IMPLICIT not in operand.flags
+                for operand in descriptor.operands
+            )
+            assert DescriptorFlag.SAFE_TO_SPECULATE in descriptor.flags
+            assert Constraint(ConstraintKind.REMATERIALIZABLE, 0) in (
+                descriptor.constraints
+            )
+            names = tuple(operand.field_name for operand in descriptor.operands)
+            assert {
+                (names[tie.lhs_operand_index], names[tie.rhs_operand_index])
+                for tie in descriptor.constraints
+                if tie.kind is ConstraintKind.TIED
+            } == {("ptr_out", "ptr")}
+
+
 def test_modifier_moves_preserve_pure_move_family_contracts() -> None:
     descriptors = {
         descriptor.key: descriptor
@@ -93,6 +118,29 @@ def test_modifier_moves_preserve_pure_move_family_contracts() -> None:
         assert (DescriptorFlag.ALLOCATION_MOVE in descriptor.flags) is (
             source == destination
         )
+
+
+def test_address_conversions_can_rematerialize_stable_sources() -> None:
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in AIE2P_CORE_DESCRIPTOR_SET.descriptors
+    }
+    for suffix, source, destination in (
+        ("local-address-to-scalar", "ep", "er"),
+        ("scalar-to-local-address", "er", "ep"),
+    ):
+        descriptor = descriptors[f"amd.xdna.aie2p.move.{suffix}"]
+        assert [operand.reg_alts[0].reg_class for operand in descriptor.operands] == [
+            f"aie2p.{destination}",
+            f"aie2p.{source}",
+        ]
+        assert not descriptor.effects
+        assert all(
+            OperandFlag.IMPLICIT not in operand.flags for operand in descriptor.operands
+        )
+        assert DescriptorFlag.SAFE_TO_SPECULATE in descriptor.flags
+        assert Constraint(ConstraintKind.REMATERIALIZABLE, 0) in descriptor.constraints
+        assert DescriptorFlag.ALLOCATION_MOVE not in descriptor.flags
 
 
 def test_lookup_loads_preserve_address_vectors_and_memory_effects() -> None:
@@ -264,6 +312,29 @@ def test_fifo_load_descriptors_preserve_fifo_state_and_recurrence() -> None:
                 frozenset(("ptr", "pos")),
                 frozenset(("fifo_reg", "pos")),
             }
+
+
+def test_buffered_bfp_pop_reads_only_initialized_fifo_storage() -> None:
+    descriptors = {row.key: row for row in AIE2P_CORE_DESCRIPTOR_SET.descriptors}
+    for lane in ("a", "b"):
+        for suffix in ("", ".volatile"):
+            key = f"amd.xdna.aie2p.load.{lane}.bfp16ebs8.fifo.pop"
+            ordinary = descriptors[key + suffix]
+            buffered = descriptors[key + ".buffered64" + suffix]
+            operands = {operand.field_name: operand for operand in buffered.operands}
+            assert operands["fifo_reg"].reg_alts[0].register_part == (
+                "aie2p.eldfiforeg.low512"
+            )
+            assert operands["fifo_reg_out"].reg_alts[0].register_part is None
+            assert buffered.constraints == ordinary.constraints
+            assert buffered.effects == ordinary.effects
+            assert buffered.asm_forms[0].results == ordinary.asm_forms[0].results
+            assert buffered.asm_forms[0].operands == ordinary.asm_forms[0].operands
+            assert buffered.schedule_alternatives == (
+                (f"amd.xdna.aie2p.load.b.bfp16ebs8.fifo.pop.buffered64{suffix}",)
+                if lane == "a"
+                else ()
+            )
 
 
 def test_fifo_seeks_retain_tuple_and_dimension_ownership() -> None:

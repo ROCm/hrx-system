@@ -14,12 +14,12 @@ from dataclasses import dataclass
 
 from loom.target.contracts.emits import (
     ContractEmit,
-    DescriptorEmitForm,
     EmitDescriptorOp,
     EmitRegisterConcat,
     EmitRegisterCopy,
     EmitRegisterMove,
     EmitRegisterSlice,
+    is_per_lane_sequence,
 )
 from loom.target.contracts.kinds import SourceValueKind
 from loom.target.contracts.lower_rule_bindings import (
@@ -111,15 +111,16 @@ def _temporary_definitions(emit: ContractEmit) -> tuple[str, ...]:
     return () if name is None else (name,)
 
 
-def allocate_temporary_slots(emits: Sequence[ContractEmit]) -> TemporarySlotPlan:
+def allocate_temporary_slots(
+    emits: Sequence[ContractEmit], *, sequence_carried: Sequence[str] = ()
+) -> TemporarySlotPlan:
     """Packs nonoverlapping authored temporary lifetimes into shared slots."""
 
     sequence_start = next(
         (
             emit_index
             for emit_index, emit in enumerate(emits)
-            if isinstance(emit, EmitDescriptorOp)
-            and emit.form is DescriptorEmitForm.PER_LANE_SEQUENCE
+            if is_per_lane_sequence(emit)
         ),
         None,
     )
@@ -168,10 +169,14 @@ def allocate_temporary_slots(emits: Sequence[ContractEmit]) -> TemporarySlotPlan
 
     active_intervals: list[tuple[int, int, int]] = []
     free_slots: list[int] = []
-    next_slot = 0
+    carried_slots = {name: index for index, name in enumerate(sequence_carried)}
+    next_slot = len(carried_slots)
     for interval_index, interval in sorted(
         enumerate(intervals), key=lambda item: (item[1].start, item[0])
     ):
+        if interval.name in carried_slots:
+            interval.slot = carried_slots[interval.name]
+            continue
         while active_intervals and active_intervals[0][0] < interval.start:
             _, slot, _ = heapq.heappop(active_intervals)
             heapq.heappush(free_slots, slot)

@@ -1002,3 +1002,49 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @partial_predicate_lifetime(%l
   %result = vsel.32.mask64 %lhs, %prepared, %predicate_remat
   return %result
 }
+
+// ====
+
+// Nine derived addresses cross the block boundary. Their owned pointer copies
+// and pure updates can be recreated at each store from the stable input base.
+// RUN: emit low-allocation-query @derived_addresses strategy=resource-stall spill-free spill-count
+
+aie2p.target<core> @target
+
+low.func.def target<amd.xdna.aie2p.core>(@target) @derived_addresses(%base: reg<aie2p.ep>, %step: reg<aie2p.er>, %payload: reg<aie2p.er>) asm {
+  %modifier = mov.modifier %step
+  %owner0 = copy %base : reg<aie2p.ep> -> reg<aie2p.ep>
+  %address0 = padda %owner0, 64
+  %owner1 = copy %base : reg<aie2p.ep> -> reg<aie2p.ep>
+  %address1 = paddb.modifier %owner1, %modifier
+  %owner2 = copy %base : reg<aie2p.ep> -> reg<aie2p.ep>
+  %address2 = padds %owner2, 64
+  %owner3 = copy %base : reg<aie2p.ep> -> reg<aie2p.ep>
+  %address3 = padda.modifier %owner3, %modifier
+  %owner4 = copy %base : reg<aie2p.ep> -> reg<aie2p.ep>
+  %address4 = paddb %owner4, 64
+  %owner5 = copy %base : reg<aie2p.ep> -> reg<aie2p.ep>
+  %address5 = padds.modifier %owner5, %modifier
+  %owner6 = copy %base : reg<aie2p.ep> -> reg<aie2p.ep>
+  %address6 = padda %owner6, 64
+  %owner7 = copy %base : reg<aie2p.ep> -> reg<aie2p.ep>
+  %address7 = paddb.modifier %owner7, %modifier
+  %owner8 = copy %base : reg<aie2p.ep> -> reg<aie2p.ep>
+  %address8 = padds %owner8, 64
+  low.br ^publish
+^publish:
+  st %payload, %address0, -32
+  st %payload, %address1, -28
+  st %payload, %address2, -24
+  st %payload, %address3, -20
+  st %payload, %address4, -16
+  st %payload, %address5, -12
+  st %payload, %address6, -8
+  st %payload, %address7, -4
+  st %payload, %address8, 0
+  return
+}
+
+// ----
+spills: 0
+materialized traffic: stores=0 reloads=0

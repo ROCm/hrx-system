@@ -246,6 +246,7 @@ def _address_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
                     f"II_{form}",
                     asm_mnemonic=f"padd{lane}{mnemonic_suffix}",
                     flags=(DescriptorFlag.SAFE_TO_SPECULATE,),
+                    rematerializable=True,
                 )
             )
     return tuple(result)

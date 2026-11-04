@@ -48,6 +48,7 @@ class LowerEmitKind(Enum):
     DESCRIPTOR_OP_ACCUMULATE_LANES = "descriptor_op_accumulate_lanes"
     REGISTER_SLICE = "register_slice"
     REGISTER_CONCAT = "register_concat"
+    REGISTER_CONCAT_PER_LANE_SEQUENCE = "register_concat_per_lane_sequence"
     REGISTER_COPY = "register_copy"
     REGISTER_SLICE_CLASS = "register_slice_class"
     REGISTER_MOVE = "register_move"
@@ -141,6 +142,8 @@ LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN = 1 << 2
 LOWER_EMIT_FLAG_ACCUMULATE_SEED_FIRST_LANE = 1 << 3
 LOWER_EMIT_FLAG_ACCUMULATE_TREE_BALANCED = 1 << 4
 LOWER_EMIT_FLAG_ACCUMULATE_SKIP_FIRST_LANE = 1 << 5
+# The boundary skipped by a sequence is its final lane.
+LOWER_EMIT_FLAG_SEQUENCE_SKIP_LAST_LANE = 1 << 5
 LOWER_EMIT_FLAG_RESULT_DESCRIPTOR_TYPE = 1 << 6
 LOWER_EMIT_FLAG_RECORD_SOURCE_MEMORY = 1 << 7
 LOWER_SOURCE_MEMORY_NONE = 0

@@ -771,6 +771,22 @@ TEST_LOW_ADD_I32_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
+# Produces two adjacent coordinates without consuming the following pair.
+TEST_LOW_IOTA_PAIR_I32_DESCRIPTOR = Descriptor(
+    key="test.iota.pair.i32",
+    mnemonic="test.iota.pair.i32",
+    semantic_tag="test.iota.pair.i32",
+    operands=(
+        _i32_result("first"),
+        _i32_result("second"),
+        _i32_operand("base"),
+        _i32_operand("step"),
+    ),
+    asm_forms=_asm(results=("first", "second"), operands=("base", "step")),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
 TEST_LOW_ADD_LOW4_I32_DESCRIPTOR = replace(
     TEST_LOW_ADD_I32_DESCRIPTOR,
     key="test.add.low4.i32",
@@ -2904,6 +2920,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_MASK_SAMPLE_I32_DESCRIPTOR,
         TEST_LOW_ADD_I32_PHYS_RHS_DESCRIPTOR,
         TEST_LOW_CONVERGENT_I32_DESCRIPTOR,
+        TEST_LOW_IOTA_PAIR_I32_DESCRIPTOR,
         TEST_LOW_MUL_I32_DESCRIPTOR,
         TEST_LOW_ADD_MUL_I32_DESCRIPTOR,
         TEST_LOW_MUL_ADD_I32_DESCRIPTOR,
