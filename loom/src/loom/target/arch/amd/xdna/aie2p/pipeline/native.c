@@ -465,8 +465,7 @@ static iree_status_t loom_aie2p_native_configure_channels(
     const iree_host_size_t channel_index =
         loom_pipeline_invocations_channel_index(&realization->invocations,
                                                 source_action->channel);
-    const loom_aie2p_native_channel_t* channel =
-        &context->channels[channel_index];
+    loom_aie2p_native_channel_t* channel = &context->channels[channel_index];
     loom_aie2p_native_configuration_cursor_t* position =
         &positions[channel_index];
     loom_aie2p_native_configuration_action_t* action = &actions[action_index];
@@ -520,6 +519,11 @@ static iree_status_t loom_aie2p_native_configure_channels(
       action->lock = channel->ready_lock;
       action->expected = acquire ? 1 : -1;
       action->value = acquire ? 0 : 1;
+    }
+    if (loom_channel_release_isa(op) && action->value == 1 &&
+        action->lock == channel->free_lock && channel->source->capacity == 1) {
+      ++channel->configuration_returns.count;
+      channel->configuration_returns.last = action;
     }
   }
   worker->configuration_actions = actions;

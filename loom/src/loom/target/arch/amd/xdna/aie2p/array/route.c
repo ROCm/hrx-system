@@ -16,8 +16,9 @@ typedef enum loom_aie2p_array_route_direction_e {
   LOOM_AIE2P_ARRAY_ROUTE_DIRECTION_COUNT = 4,
 } loom_aie2p_array_route_direction_t;
 
-// One physical arrival in a canonical source's prefix tree. Separate roots
-// and separate prefixes never merge even when they traverse the same tile.
+// One physical arrival in a canonical source's prefix tree. Separate sources
+// own distinct lanes except where an explicit granted packet path permits a
+// shared suffix. Each source retains its complete filter path through it.
 typedef struct loom_aie2p_array_route_node_t {
   // Tile reached by this prefix.
   loom_xdna_tile_coordinate_t coordinate;
@@ -25,6 +26,9 @@ typedef struct loom_aie2p_array_route_node_t {
   loom_xdna_stream_port_t incoming_port;
   // Channel ordinal within incoming_port.
   uint8_t incoming_channel;
+  // Granted payload path borrowed by this arrival, or NULL for an exclusive
+  // link. A later packet class cannot reuse it for a different destination.
+  const loom_aie2p_array_route_sharing_t* sharing;
   // Retained next-hop node per direction, or IREE_HOST_SIZE_MAX before use.
   iree_host_size_t children[LOOM_AIE2P_ARRAY_ROUTE_DIRECTION_COUNT];
 } loom_aie2p_array_route_node_t;
@@ -41,8 +45,11 @@ typedef struct loom_aie2p_array_route_step_t {
   const loom_xdna_stream_port_range_t* next_input;
   // Occupied channels on the directed physical link.
   uint32_t* occupied;
-  // Free link channels that can reach the requested final destination.
+  // Admitted link channels that can reach the requested final destination.
   uint32_t feasible;
+  // Borrowable lanes whose carrier suffix reaches the same receiver. Once
+  // streams merge they must follow this suffix, preventing duplicate delivery.
+  uint32_t shared;
   // Prefix-tree child selected by the hop.
   loom_aie2p_array_route_direction_t direction;
 } loom_aie2p_array_route_step_t;
@@ -180,7 +187,8 @@ static loom_aie2p_array_route_direction_t loom_aie2p_array_route_direction(
 static loom_aie2p_array_route_step_t loom_aie2p_array_route_step(
     loom_aie2p_array_route_builder_t* builder,
     loom_xdna_tile_coordinate_t source, loom_xdna_stream_port_t incoming_port,
-    loom_aie2p_array_route_direction_t direction) {
+    loom_aie2p_array_route_direction_t direction,
+    const loom_aie2p_array_route_sharing_t* sharing) {
   static const loom_xdna_stream_port_t outputs[] = {
       LOOM_XDNA_STREAM_PORT_NORTH, LOOM_XDNA_STREAM_PORT_SOUTH,
       LOOM_XDNA_STREAM_PORT_WEST, LOOM_XDNA_STREAM_PORT_EAST};
@@ -189,17 +197,18 @@ static loom_aie2p_array_route_step_t loom_aie2p_array_route_step(
       LOOM_XDNA_STREAM_PORT_EAST, LOOM_XDNA_STREAM_PORT_WEST};
   loom_xdna_tile_coordinate_t destination = source;
   uint32_t* occupied;
+  iree_host_size_t index;
   if (direction <= LOOM_AIE2P_ARRAY_ROUTE_SOUTH) {
     const bool north = direction == LOOM_AIE2P_ARRAY_ROUTE_NORTH;
     destination.row += north ? 1 : -1;
-    const iree_host_size_t index = loom_aie2p_array_vertical_link_index(
+    index = loom_aie2p_array_vertical_link_index(
         builder, source.column, iree_min(source.row, destination.row));
     occupied = north ? &builder->link_channels.northbound[index]
                      : &builder->link_channels.southbound[index];
   } else {
     const bool west = direction == LOOM_AIE2P_ARRAY_ROUTE_WEST;
     destination.column += west ? -1 : 1;
-    const iree_host_size_t index = loom_aie2p_array_horizontal_link_index(
+    index = loom_aie2p_array_horizontal_link_index(
         builder, iree_min(source.column, destination.column), source.row);
     occupied = west ? &builder->link_channels.westbound[index]
                     : &builder->link_channels.eastbound[index];
@@ -209,6 +218,11 @@ static loom_aie2p_array_route_step_t loom_aie2p_array_route_step(
   const loom_xdna_stream_port_range_t* next_input = loom_aie2p_array_port_range(
       builder, destination, LOOM_XDNA_STREAM_DIRECTION_SLAVE,
       inputs[direction]);
+  const iree_host_size_t tile_count =
+      (iree_host_size_t)builder->family->column_count *
+      builder->family->row_count;
+  const uint32_t shared =
+      sharing ? sharing->links[direction * tile_count + index] : 0;
   return (loom_aie2p_array_route_step_t){
       .destination = destination,
       .input = loom_aie2p_array_port_range(
@@ -218,7 +232,8 @@ static loom_aie2p_array_route_step_t loom_aie2p_array_route_step(
       .occupied = occupied,
       .feasible =
           (UINT32_MAX >> (32 - iree_min(output->count, next_input->count))) &
-          ~*occupied,
+          (~*occupied | shared),
+      .shared = shared,
       .direction = direction,
   };
 }
@@ -242,7 +257,8 @@ static bool loom_aie2p_array_plan_route(
     loom_aie2p_array_route_builder_t* builder, uint32_t channel_index,
     iree_host_size_t node_index, loom_xdna_tile_coordinate_t destination,
     loom_xdna_stream_port_t destination_port, uint8_t destination_channel,
-    uint16_t horizontal_row, bool packet) {
+    uint16_t horizontal_row, bool packet,
+    loom_aie2p_array_route_sharing_t* sharing) {
   // Existing multicast prefixes retain their physical arrival and lane. Only
   // the unreserved suffix participates in lane selection.
   while (builder->prefixes.nodes[node_index].coordinate.column !=
@@ -257,6 +273,11 @@ static bool loom_aie2p_array_plan_route(
     if (node->children[direction] == IREE_HOST_SIZE_MAX) {
       break;
     }
+    const loom_aie2p_array_route_node_t* child =
+        &builder->prefixes.nodes[node->children[direction]];
+    if (child->sharing && child->sharing != sharing) {
+      return false;
+    }
     if (packet) {
       // Packet classes share the physical source tree to preserve stream
       // order. Every class retains its complete path so its filters also
@@ -264,8 +285,6 @@ static bool loom_aie2p_array_plan_route(
       static const loom_xdna_stream_port_t outputs[] = {
           LOOM_XDNA_STREAM_PORT_NORTH, LOOM_XDNA_STREAM_PORT_SOUTH,
           LOOM_XDNA_STREAM_PORT_WEST, LOOM_XDNA_STREAM_PORT_EAST};
-      const loom_aie2p_array_route_node_t* child =
-          &builder->prefixes.nodes[node->children[direction]];
       loom_aie2p_array_append_route(
           builder, channel_index, node->coordinate,
           LOOM_AIE2P_ARRAY_SWITCH_KIND_STREAM_SWITCH, node->incoming_port,
@@ -285,7 +304,7 @@ static bool loom_aie2p_array_plan_route(
                                          horizontal_row);
     loom_aie2p_array_route_step_t* step = &builder->steps[step_count++];
     *step = loom_aie2p_array_route_step(builder, coordinate, incoming_port,
-                                        direction);
+                                        direction, sharing);
     coordinate = step->destination;
     incoming_port = step->next_input->port;
   }
@@ -296,6 +315,16 @@ static bool loom_aie2p_array_plan_route(
       destination_port);
   uint32_t feasible = loom_aie2p_array_route_inputs(
       builder, input, output, UINT32_C(1) << destination_channel);
+  uint32_t shared_feasible = feasible;
+  if (sharing) {
+    for (iree_host_size_t i = step_count; i > 0; --i) {
+      loom_aie2p_array_route_step_t* step = &builder->steps[i - 1];
+      step->shared &= shared_feasible;
+      shared_feasible = loom_aie2p_array_route_inputs(
+          builder, step->input, step->output, step->shared);
+      step->feasible &= ~*step->occupied | step->shared;
+    }
+  }
   // Propagate reachability before reserving any link. Memory-tile north/south
   // passthrough, for example, couples the lanes on both sides of that tile.
   for (iree_host_size_t i = step_count; i > 0; --i) {
@@ -307,14 +336,22 @@ static bool loom_aie2p_array_plan_route(
   if (!(feasible & (UINT32_C(1) << prefix->incoming_channel))) {
     return false;
   }
+  bool joined = prefix->sharing != NULL;
+  if (joined &&
+      !(shared_feasible & (UINT32_C(1) << prefix->incoming_channel))) {
+    return false;
+  }
   for (iree_host_size_t i = 0; i < step_count; ++i) {
     loom_aie2p_array_route_node_t* node = &builder->prefixes.nodes[node_index];
     const loom_aie2p_array_route_step_t* step = &builder->steps[i];
     const uint32_t channels =
-        step->feasible &
+        (joined ? step->shared : step->feasible) &
         loom_xdna_array_stream_destination_channels(
             builder->family, step->input, node->incoming_channel, step->output);
-    const uint8_t channel = iree_math_count_trailing_zeros_u32(channels);
+    const uint32_t free_channels = channels & ~*step->occupied;
+    const uint8_t channel = iree_math_count_trailing_zeros_u32(
+        free_channels ? free_channels : channels);
+    const bool borrowed = (*step->occupied & (UINT32_C(1) << channel)) != 0;
     *step->occupied |= UINT32_C(1) << channel;
     loom_aie2p_array_append_route(builder, channel_index, node->coordinate,
                                   LOOM_AIE2P_ARRAY_SWITCH_KIND_STREAM_SWITCH,
@@ -323,6 +360,11 @@ static bool loom_aie2p_array_plan_route(
     node->children[step->direction] = loom_aie2p_array_create_route_node(
         builder, step->destination, step->next_input->port, channel);
     node_index = node->children[step->direction];
+    if (borrowed) {
+      builder->prefixes.nodes[node_index].sharing = sharing;
+      sharing->used = true;
+      joined = true;
+    }
   }
   const loom_aie2p_array_route_node_t* node =
       &builder->prefixes.nodes[node_index];
@@ -352,8 +394,8 @@ bool loom_aie2p_array_route_ingress(
   }
   return loom_aie2p_array_plan_route(
       builder, channel_index, *root, worker_coordinate,
-      LOOM_XDNA_STREAM_PORT_DMA, worker_dma_channel, shim_coordinate.row,
-      false);
+      LOOM_XDNA_STREAM_PORT_DMA, worker_dma_channel, shim_coordinate.row, false,
+      NULL);
 }
 
 static iree_host_size_t loom_aie2p_array_route_worker_source(
@@ -383,7 +425,7 @@ bool loom_aie2p_array_route_egress(
   if (!loom_aie2p_array_plan_route(builder, channel_index, node_index,
                                    shim_coordinate, LOOM_XDNA_STREAM_PORT_SOUTH,
                                    shim_link_channel, shim_coordinate.row,
-                                   false)) {
+                                   false, NULL)) {
     return false;
   }
   loom_aie2p_array_append_route(builder, channel_index, shim_coordinate,
@@ -424,7 +466,71 @@ bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
   }
   return loom_aie2p_array_plan_route(builder, channel_index, *root, destination,
                                      destination_port, destination_channel,
-                                     horizontal_row, packet);
+                                     horizontal_row, packet, NULL);
+}
+
+iree_status_t loom_aie2p_array_route_sharing_initialize(
+    const loom_aie2p_array_route_builder_t* builder, iree_host_size_t first,
+    iree_host_size_t count, loom_xdna_tile_coordinate_t destination,
+    iree_arena_allocator_t* arena,
+    loom_aie2p_array_route_sharing_t* out_sharing) {
+  *out_sharing = (loom_aie2p_array_route_sharing_t){.destination = destination};
+  const iree_host_size_t tile_count =
+      (iree_host_size_t)builder->family->column_count *
+      builder->family->row_count;
+  const iree_host_size_t link_count =
+      tile_count * LOOM_AIE2P_ARRAY_ROUTE_DIRECTION_COUNT;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, link_count,
+                                                 sizeof(*out_sharing->links),
+                                                 (void**)&out_sharing->links));
+  memset(out_sharing->links, 0, link_count * sizeof(*out_sharing->links));
+  for (iree_host_size_t i = first; i < first + count; ++i) {
+    const loom_aie2p_array_route_plan_t* edge = &builder->routes[i];
+    loom_aie2p_array_route_direction_t direction;
+    iree_host_size_t index;
+    switch (edge->destination_port) {
+      case LOOM_XDNA_STREAM_PORT_NORTH:
+        direction = LOOM_AIE2P_ARRAY_ROUTE_NORTH;
+        index = loom_aie2p_array_vertical_link_index(
+            builder, edge->coordinate.column, edge->coordinate.row);
+        break;
+      case LOOM_XDNA_STREAM_PORT_SOUTH:
+        direction = LOOM_AIE2P_ARRAY_ROUTE_SOUTH;
+        index = loom_aie2p_array_vertical_link_index(
+            builder, edge->coordinate.column, edge->coordinate.row - 1);
+        break;
+      case LOOM_XDNA_STREAM_PORT_WEST:
+        direction = LOOM_AIE2P_ARRAY_ROUTE_WEST;
+        index = loom_aie2p_array_horizontal_link_index(
+            builder, edge->coordinate.column - 1, edge->coordinate.row);
+        break;
+      case LOOM_XDNA_STREAM_PORT_EAST:
+        direction = LOOM_AIE2P_ARRAY_ROUTE_EAST;
+        index = loom_aie2p_array_horizontal_link_index(
+            builder, edge->coordinate.column, edge->coordinate.row);
+        break;
+      default:
+        continue;
+    }
+    out_sharing->links[direction * tile_count + index] |=
+        UINT32_C(1) << edge->destination_channel;
+  }
+  return iree_ok_status();
+}
+
+bool loom_aie2p_array_route_control(loom_aie2p_array_route_builder_t* builder,
+                                    uint32_t channel_index,
+                                    uint32_t source_channel_index,
+                                    loom_xdna_tile_coordinate_t source,
+                                    loom_aie2p_array_route_sharing_t* sharing) {
+  iree_host_size_t* root = &builder->prefixes.roots[source_channel_index];
+  if (*root == IREE_HOST_SIZE_MAX) {
+    *root = loom_aie2p_array_create_route_node(builder, source,
+                                               LOOM_XDNA_STREAM_PORT_CORE, 0);
+  }
+  return loom_aie2p_array_plan_route(
+      builder, channel_index, *root, sharing->destination,
+      LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, source.row, true, sharing);
 }
 
 bool loom_aie2p_array_route_workers(

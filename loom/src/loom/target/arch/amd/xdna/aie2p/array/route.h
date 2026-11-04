@@ -17,6 +17,19 @@
 extern "C" {
 #endif
 
+// A unicast path whose producer admits each complete payload only after its
+// receiver has granted storage. Control delivery to that same tile can borrow
+// its links without waiting behind a payload dependent on future computation.
+// The owner frames payloads with IDs disjoint from the sharing control stream.
+typedef struct loom_aie2p_array_route_sharing_t {
+  // Final payload receiver and control destination.
+  loom_xdna_tile_coordinate_t destination;
+  // Borrowable lane masks in north/south/west/east order, indexed by tile.
+  uint32_t* links;
+  // At least one control route actually borrows this payload path.
+  bool used;
+} loom_aie2p_array_route_sharing_t;
+
 // Mutable stream-network allocation state for one physical array plan.
 typedef struct loom_aie2p_array_route_builder_t {
   // Immutable array-family topology and stream-port capacities.
@@ -107,6 +120,24 @@ bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
                                    loom_xdna_tile_coordinate_t destination,
                                    loom_xdna_stream_port_t destination_port,
                                    uint8_t destination_channel, bool packet);
+
+// Retains the directed lanes of the caller's already selected unicast route.
+// The exact edge interval comes from its route construction, not a search.
+// Admission and packet framing remain the caller's responsibility.
+iree_status_t loom_aie2p_array_route_sharing_initialize(
+    const loom_aie2p_array_route_builder_t* builder, iree_host_size_t first,
+    iree_host_size_t count, loom_xdna_tile_coordinate_t destination,
+    iree_arena_allocator_t* arena,
+    loom_aie2p_array_route_sharing_t* out_sharing);
+
+// Routes core control packets to a granted payload's receiver. Free lanes are
+// preferred; occupied lanes may be borrowed only from |sharing|. Distinct
+// payload paths remain exclusive. The capability supplies the destination.
+bool loom_aie2p_array_route_control(loom_aie2p_array_route_builder_t* builder,
+                                    uint32_t channel_index,
+                                    uint32_t source_channel_index,
+                                    loom_xdna_tile_coordinate_t source,
+                                    loom_aie2p_array_route_sharing_t* sharing);
 
 #ifdef __cplusplus
 }  // extern "C"

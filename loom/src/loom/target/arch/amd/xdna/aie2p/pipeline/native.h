@@ -77,6 +77,16 @@ typedef struct loom_aie2p_native_channel_t {
   // Existing compute reader whose nth admission proves this FIFO's nth record
   // has been transported. NULL when no exact one-to-one progress is retained.
   const struct loom_aie2p_native_channel_t* progress;
+  // Exact singleton credit-return sites owned by an existing configuration
+  // reader. The final site retires ownership without granting more work.
+  struct {
+    // Number of complete records reclaimed by the straight-line continuation.
+    uint32_t count;
+    // Last credit return, or NULL when this reader has no such continuation.
+    const struct loom_aie2p_native_configuration_action_t* last;
+  } configuration_returns;
+  // Receiver-granted sender whose payload path actually carries control too.
+  struct loom_aie2p_native_delivery_t* delivery;
 } loom_aie2p_native_channel_t;
 
 // One worker's admitted access to a channel's resident memory and credits.
@@ -358,6 +368,13 @@ typedef struct loom_aie2p_native_distribution_t {
   uint8_t packet_count;
   // Source transmissions in a uniform circuit stream; zero for packet programs.
   uint32_t repetitions;
+  // Exact route-edge interval produced for this uniform source's fanout.
+  struct {
+    // First edge in the route builder's stable append-only table.
+    iree_host_size_t first;
+    // Number of edges, excluding routes owned by other distributions.
+    iree_host_size_t count;
+  } routes;
 } loom_aie2p_native_distribution_t;
 
 // One ordered use of an immutable distribution geometry. The controller's
@@ -608,6 +625,9 @@ typedef struct loom_aie2p_native_context_t {
   // Canonical packet source tree per tile's core and tile-control output.
   // UINT32_MAX marks an unused output; destinations share its physical links.
   uint32_t* control_sources;
+  // Optional receiver-granted payload path per destination tile. Allocated
+  // only when resident task refill needs control routes.
+  struct loom_aie2p_native_delivery_t** deliveries;
   // Complete desired routing state for each traversed switch.
   loom_aie2p_native_switch_t* switches;
   // Typed ordinary helper emitter.

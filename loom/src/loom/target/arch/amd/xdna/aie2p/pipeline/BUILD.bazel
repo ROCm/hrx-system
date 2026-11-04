@@ -122,12 +122,14 @@ loom_cc_library(
         "phases.c",
         "programs.c",
         "refill.c",
+        "sharing.c",
         "switch.c",
         "transport.c",
     ],
     hdrs = [
         "native.h",
         "refill.h",
+        "sharing.h",
         "switch.h",
     ],
     deps = [
@@ -212,6 +214,18 @@ loom_cc_test(
 loom_cc_test(
     name = "refill_test",
     srcs = ["refill_test.cc"],
+    deps = [
+        ":native",
+        "//loom/src/loom/pass:types",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "sharing_test",
+    srcs = ["sharing_test.cc"],
     deps = [
         ":native",
         "//loom/src/loom/pass:types",

@@ -12,6 +12,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/ops/target.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/sharing.h"
 #include "loom/target/arch/amd/xdna/aie2p/records/target_records.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
 #include "loom/target/facts_builder.h"
@@ -802,6 +803,12 @@ static iree_status_t loom_aie2p_native_config_communicate(
         }
         IREE_RETURN_IF_ERROR(loom_aie2p_native_config_set_lock(
             config, tile, action->lock, action->value));
+        if (channel->delivery && action->lock == channel->free_lock &&
+            action->expected < 0 &&
+            action != channel->configuration_returns.last) {
+          IREE_RETURN_IF_ERROR(loom_aie2p_native_config_write(
+              config, channel->delivery->address, channel->delivery->task));
+        }
         break;
       }
     }

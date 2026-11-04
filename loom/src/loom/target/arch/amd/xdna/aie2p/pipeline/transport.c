@@ -9,6 +9,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/call_abi.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/sharing.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/switch.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
 
@@ -112,9 +113,21 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
   if (*canonical == UINT32_MAX) {
     *canonical = index;
   }
-  if (!loom_aie2p_array_route_stream(&context->routing, index, *canonical,
-                                     source, source_port, 0, destination,
-                                     destination_port, 0, true)) {
+  const iree_host_size_t destination_index =
+      destination.column * context->family->row_count + destination.row;
+  loom_aie2p_native_delivery_t* delivery =
+      context->deliveries && source_port == LOOM_XDNA_STREAM_PORT_CORE &&
+              destination_port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL
+          ? context->deliveries[destination_index]
+          : NULL;
+  const bool routed =
+      delivery
+          ? loom_aie2p_array_route_control(&context->routing, index, *canonical,
+                                           source, &delivery->sharing)
+          : loom_aie2p_array_route_stream(&context->routing, index, *canonical,
+                                          source, source_port, 0, destination,
+                                          destination_port, 0, true);
+  if (!routed) {
     return false;
   }
   loom_aie2p_native_route_label(context, first, packet);
@@ -1436,6 +1449,9 @@ iree_status_t loom_aie2p_native_select_transfers(
         context, realization->invocations.worker_count);
   }
   if (iree_status_is_ok(status) && valid) {
+    status = loom_aie2p_native_prepare_sharing(context, realization);
+  }
+  if (iree_status_is_ok(status) && valid) {
     status = loom_aie2p_native_route_refills(context, realization, &next_source,
                                              &valid);
   }
@@ -1447,6 +1463,7 @@ iree_status_t loom_aie2p_native_select_transfers(
     status = loom_aie2p_native_route_collectives(context, &next_source, &valid);
   }
   if (iree_status_is_ok(status) && valid) {
+    loom_aie2p_native_commit_sharing(context);
     status = loom_aie2p_native_switches_build(context, realization->function.op,
                                               out_valid);
   }
