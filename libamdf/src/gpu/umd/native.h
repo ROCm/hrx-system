@@ -9,9 +9,17 @@
 
 #include "libamdf/src/gpu/umd/api.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
+
 // Returns the immutable GPU implementation selected by one platform endpoint.
 // Every descendant object retains or derives this exact table.
 const amdf_gpu_umd_api_t* amdf_gpu_umd_api_for_endpoint(
     const amdf_platform_endpoint_t* endpoint);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif  // __cplusplus
 
 #endif  // AMDF_SRC_GPU_UMD_NATIVE_H_

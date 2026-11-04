@@ -20,6 +20,7 @@
 #include "libamdf/src/gpu/umd/kernel_queue.h"
 #include "libamdf/src/gpu/umd/memory.h"
 #include "libamdf/src/gpu/umd/memory_reservation.h"
+#include "libamdf/src/gpu/umd/wddm/api.h"
 #include "libamdf/src/gpu/umd/wddm/device.h"
 #include "libamdf/src/gpu/umd/wddm/sparse_mapping_queue_test.h"
 #include "libamdf/src/platform/endpoint.h"
@@ -145,8 +146,8 @@ class WddmSparseMappingBackend final : public SparseMappingBackend {
   void Initialize(uint32_t backing_count, uint64_t reservation_byte_length,
                   uint64_t payload_byte_length) override {
     amdf_platform_instance_lock_native(platform_);
-    RequireStatus(amdf_gpu_umd_instance_prepare(&instance_, lifetime_,
-                                                amdf_allocator_system()),
+    RequireStatus(amdf_gpu_wddm_api.instance_prepare(&instance_, lifetime_,
+                                                     amdf_allocator_system()),
                   "prepare native instance");
     amdf_gpu_umd_device_result_t result = {};
     RequireStatus(amdf_gpu_umd_device_create(instance_, endpoint_,
@@ -301,7 +302,7 @@ class WddmSparseMappingBackend final : public SparseMappingBackend {
     ReleaseAllocation(transport_);
     RequireStatus(amdf_gpu_umd_device_destroy(device_),
                   "destroy native device");
-    RequireStatus(amdf_gpu_umd_instance_destroy(instance_),
+    RequireStatus(amdf_gpu_wddm_api.instance_destroy(instance_),
                   "destroy native instance");
     RequireStatus(amdf_platform_endpoint_close(endpoint_), "close endpoint");
     RequireStatus(amdf_platform_instance_destroy(platform_),

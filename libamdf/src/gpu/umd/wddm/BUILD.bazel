@@ -186,6 +186,7 @@ amdf_cc_test(
     tags = ["iree-run-requirement=libamdf.resource.amd_gpu"],
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
+        ":api",
         ":device_state",
         "//libamdf:amdf_static",
         "//libamdf/src:allocator",

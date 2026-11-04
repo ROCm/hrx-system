@@ -9,7 +9,15 @@
 
 #include "libamdf/src/gpu/umd/dxg/api.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
+
 // Complete native WDDM implementation selected on Windows.
 extern const amdf_gpu_umd_api_t amdf_gpu_wddm_api;
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif  // __cplusplus
 
 #endif  // AMDF_SRC_GPU_UMD_WDDM_API_H_

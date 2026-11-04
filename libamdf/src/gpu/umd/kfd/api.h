@@ -9,7 +9,15 @@
 
 #include "libamdf/src/gpu/umd/api.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
+
 // Complete KFD/DRM implementation selected by a native Linux endpoint.
 extern const amdf_gpu_umd_api_t amdf_gpu_kfd_api;
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif  // __cplusplus
 
 #endif  // AMDF_SRC_GPU_UMD_KFD_API_H_
