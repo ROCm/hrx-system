@@ -930,11 +930,14 @@ loom_serve_text_cache_selection_t loom_serve_text_model_cache_selection(
 
 loom_serve_text_pool_usage_t loom_serve_text_model_pool_usage(
     const loom_serve_text_model_t* model) {
+  const uint32_t live_blocks =
+      model->state.cache.pool.capacity - model->state.cache.pool.available;
   loom_serve_text_pool_usage_t usage = {
       .block_size = model->state.storage.block_size,
       .capacity = model->state.cache.capacity,
-      .available = (iree_host_size_t)model->state.cache.pool.available *
-                   model->state.storage.block_size,
+      .available =
+          model->state.cache.capacity -
+          (iree_host_size_t)live_blocks * model->state.storage.block_size,
   };
   for (iree_host_size_t i = 0; usage.capacity && i < model->row_count; ++i) {
     const loom_serve_text_state_row_t* row = model->state.rows[i];
@@ -1310,7 +1313,6 @@ iree_status_t loom_serve_text_model_submit_epoch(
     }
   }
 
-  uint32_t required_blocks = 0;
   for (iree_host_size_t i = 0; i < span_count; ++i) {
     const loom_serve_text_state_row_t* row =
         model->rows[spans[i].row_index]->state;
@@ -1319,16 +1321,6 @@ iree_status_t loom_serve_text_model_submit_epoch(
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "epoch exceeds request completion reservation");
     }
-  }
-  for (iree_host_size_t i = 0; model->state.cache.capacity && i < span_count;
-       ++i) {
-    const loom_serve_text_row_t* row = model->rows[spans[i].row_index];
-    required_blocks += loom_serve_text_state_row_growth(row->state, extents[i]);
-  }
-  if (required_blocks > model->state.cache.pool.available) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "epoch needs %u KV blocks; %u are available",
-                            required_blocks, model->state.cache.pool.available);
   }
   loom_serve_text_media_epoch_t media = {0};
   if (has_media_input) {

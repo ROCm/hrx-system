@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/serve/service/text/model_instance.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/serve/testing/native_allocator.h"
 #include "loom/serve/testing/service_application.h"
@@ -243,6 +244,61 @@ class RegisteredElasticTextServiceTest : public ElasticTextServiceTest {
 TEST_F(ElasticTextServiceTest,
        PrefixNativeBackingRetiresBeforeNextReservation) {
   CheckPrefixBackingRetirement(/*trim_first=*/false);
+}
+
+TEST_F(ElasticTextServiceTest,
+       LogicalMaximumDoesNotScaleLiveBackingOrDirectories) {
+  struct Observation {
+    uint64_t reserved_bytes;
+    uint64_t mapped_bytes;
+    uint32_t directory_capacity;
+    uint32_t compaction_capacity;
+  };
+  const auto observe = [&](iree_host_size_t capacity) {
+    IREE_EXPECT_OK(loom_serve_test_pool_trim_and_drain(storage_owner_, 0));
+    auto* memory_pool = loom_serve_pool_memory(storage_owner_);
+    auto options = ModelOptions();
+    options.pool_capacity = capacity;
+    loom_serve_text_model_t* source = nullptr;
+    IREE_EXPECT_OK(loom_serve_text_model_allocate(
+        device_, storage_owner_, &options, host_allocator_, &source));
+    const auto release_model = [](loom_serve_text_model_t* model) {
+      IREE_EXPECT_OK(loom_serve_text_model_free(model));
+    };
+    std::unique_ptr<loom_serve_text_model_t, decltype(release_model)> owner(
+        source, release_model);
+    EXPECT_EQ(loom_serve_text_model_pool_usage(source).available, capacity);
+    bool admitted = false;
+    IREE_EXPECT_OK(loom_serve_text_row_try_reserve(
+        loom_serve_text_model_row(source, 0), LOOM_SERVE_TEXT_RESERVE_FRESH,
+        nullptr, 4, &admitted));
+    EXPECT_TRUE(admitted);
+    const auto after = loom_serve_text_model_memory_statistics(source);
+    EXPECT_EQ(loom_serve_text_model_pool_usage(source).available, capacity - 4);
+    IREE_EXPECT_OK(loom_serve_memory_pool_await(memory_pool));
+    const Observation observation = {
+        .reserved_bytes = after.reserved_bytes,
+        .mapped_bytes = after.committed_bytes,
+        .directory_capacity = source->state.cache.pool.capacity,
+        .compaction_capacity = source->state.cache.destination_capacity,
+    };
+    owner.reset();
+    IREE_EXPECT_OK(loom_serve_test_pool_trim_and_drain(storage_owner_, 0));
+    return observation;
+  };
+
+  const Observation small = observe(256);
+  const Observation maximum = observe(4 * 1024 * 1024);
+  const auto geometry = loom_serve_pool_state_geometry(storage_owner_);
+  EXPECT_GT(maximum.reserved_bytes, small.reserved_bytes);
+  // The tiny source can co-locate cache and private bytes in one mapping at
+  // the smaller stride. Separating them at the maximum may add a mapping, but
+  // both live footprints still fit the same physical parent.
+  EXPECT_EQ(iree_device_align(maximum.mapped_bytes, geometry.backing_size),
+            iree_device_align(small.mapped_bytes, geometry.backing_size));
+  EXPECT_EQ(maximum.directory_capacity, small.directory_capacity);
+  EXPECT_EQ(maximum.compaction_capacity, 0u);
+  EXPECT_EQ(small.compaction_capacity, 0u);
 }
 
 TEST_F(ElasticTextServiceTest, PrefixNativeBackingRetiresBeforeTrim) {

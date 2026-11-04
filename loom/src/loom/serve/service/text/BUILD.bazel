@@ -389,10 +389,14 @@ loom_cc_library(
 loom_cc_library(
     name = "elastic_storage_tests",
     testonly = True,
-    srcs = ["elastic_storage_test.cc"],
+    srcs = [
+        "elastic_storage_test.cc",
+        "model_instance.h",
+    ],
     target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
     visibility = ["//loom/src/loom/serve:implementation"],
     deps = [
+        ":model",
         ":source_service_fixture",
         "//loom/src/loom/serve/testing:native_allocator",
         "//loom/src/loom/serve/testing:service_application",

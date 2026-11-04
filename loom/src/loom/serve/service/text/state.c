@@ -69,16 +69,11 @@ iree_status_t loom_serve_text_state_allocate(
   }
   if (state->cache.capacity) {
     IREE_RETURN_IF_ERROR(loom_serve_block_pool_initialize(
-        (uint32_t)(state->cache.capacity / state->storage.block_size),
-        state->host_allocator, &state->cache.pool));
+        0, state->host_allocator, &state->cache.pool));
     IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
         state->host_allocator, state->row_count,
         state->storage.blocks_per_row * sizeof(*state->cache.maps),
         (void**)&state->cache.maps));
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-        state->host_allocator, state->cache.pool.capacity,
-        sizeof(*state->cache.destinations),
-        (void**)&state->cache.destinations));
   }
   // Binding roles are the private adapter contract. Sizes, views, initial
   // contents and zero extents are produced by the state's source bootstrap.
@@ -456,6 +451,32 @@ static void loom_serve_text_row_release_tail(loom_serve_text_state_row_t* row) {
   }
 }
 
+// Grows logical page-ID ownership at a serialized admission boundary. The
+// source-defined virtual roots already cover the complete addressable range;
+// this metadata follows live demand and never changes an existing ID.
+static iree_status_t loom_serve_text_cache_ensure_available(
+    loom_serve_text_state_t* state, uint32_t required, bool* out_available) {
+  *out_available = false;
+  loom_serve_block_pool_t* pool = &state->cache.pool;
+  if (required <= pool->available) {
+    *out_available = true;
+    return iree_ok_status();
+  }
+  const uint32_t maximum =
+      (uint32_t)(state->cache.capacity / state->storage.block_size);
+  const uint32_t live = pool->capacity - pool->available;
+  if (required > maximum - live) {
+    return iree_ok_status();
+  }
+  const uint32_t minimum = live + required;
+  uint64_t capacity = pool->capacity ? 2ull * pool->capacity : 16;
+  capacity = iree_max(capacity, (uint64_t)minimum);
+  capacity = iree_min(capacity, (uint64_t)maximum);
+  IREE_RETURN_IF_ERROR(loom_serve_block_pool_grow(pool, (uint32_t)capacity));
+  *out_available = true;
+  return iree_ok_status();
+}
+
 // Marks the exact slab union for either the current sparse layout or the
 // compact prefix, including private state sharing slabs with cache planes.
 static iree_status_t loom_serve_text_keep_range(
@@ -678,6 +699,15 @@ iree_status_t loom_serve_text_state_submit_trim(
 
 static iree_status_t loom_serve_text_submit_compaction(
     loom_serve_text_state_t* state, loom_serve_text_trim_result_t* out_result) {
+  if (state->cache.destination_capacity < state->cache.pool.capacity) {
+    uint32_t* destinations = NULL;
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+        state->host_allocator, state->cache.pool.capacity,
+        sizeof(*destinations), (void**)&destinations));
+    iree_allocator_free(state->host_allocator, state->cache.destinations);
+    state->cache.destinations = destinations;
+    state->cache.destination_capacity = state->cache.pool.capacity;
+  }
   out_result->moved_blocks = loom_serve_block_pool_plan_compaction(
       &state->cache.pool, state->cache.destinations);
   iree_status_t status = iree_ok_status();
@@ -1049,7 +1079,10 @@ iree_status_t loom_serve_text_state_row_try_resume(
   loom_serve_text_state_t* state = row->owner;
   const uint32_t needed = (uint32_t)iree_host_size_ceil_div(
       row->position, state->storage.block_size);
-  if (needed > state->cache.pool.available) {
+  bool available = false;
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_cache_ensure_available(state, needed, &available));
+  if (!available) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_serve_execution_drain(state->execution));
@@ -1273,7 +1306,10 @@ static iree_status_t loom_serve_text_checkpoint_try_resume(
   loom_serve_text_state_t* state = checkpoint->owner;
   const uint32_t needed = (uint32_t)iree_host_size_ceil_div(
       checkpoint->position, state->storage.block_size);
-  if (needed > state->cache.pool.available) {
+  bool available = false;
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_cache_ensure_available(state, needed, &available));
+  if (!available) {
     return iree_ok_status();
   }
   loom_serve_block_pool_acquire(&state->cache.pool, needed, checkpoint->blocks);
@@ -1616,8 +1652,14 @@ iree_status_t loom_serve_text_state_row_prepare_reserve(
       row->recurrent.slot != UINT32_MAX &&
       !loom_serve_block_pool_is_shared(&state->recurrent.pool,
                                        row->recurrent.slot);
-  if (needed > state->cache.pool.available + reusable ||
-      recurrent_needed > state->recurrent.pool.available + recurrent_reusable) {
+  if (recurrent_needed > state->recurrent.pool.available + recurrent_reusable) {
+    return iree_ok_status();
+  }
+  const uint32_t free_needed = needed - iree_min(needed, reusable);
+  bool available = false;
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_cache_ensure_available(state, free_needed, &available));
+  if (!available) {
     return iree_ok_status();
   }
   loom_serve_text_state_reservation_t* reservation = NULL;
@@ -1973,6 +2015,20 @@ iree_status_t loom_serve_text_state_grow(loom_serve_text_state_t* state,
                                          iree_host_size_t span_count,
                                          const loom_serve_text_span_t* spans,
                                          const uint32_t* extents) {
+  uint64_t required = 0;
+  for (iree_host_size_t i = 0; i < span_count; ++i) {
+    required += loom_serve_text_state_row_growth(
+        state->rows[spans[i].row_index], extents[i]);
+  }
+  bool available = false;
+  if (required <= UINT32_MAX) {
+    IREE_RETURN_IF_ERROR(loom_serve_text_cache_ensure_available(
+        state, (uint32_t)required, &available));
+  }
+  if (!available) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "text state exceeds logical page addressability");
+  }
   iree_hal_transfer_operation_t* uploads = state->cache.uploads;
   iree_host_size_t upload_count = 0;
   for (iree_host_size_t i = 0; i < span_count; ++i) {

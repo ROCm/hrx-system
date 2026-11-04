@@ -74,12 +74,13 @@ TEST_F(TextStateReservationTest, PreparationOwnsIdsWithoutSubmittingOrMapping) {
   auto* row = state_.rows[0];
   const auto before = loom_serve_execution_frontier(execution_);
   const auto memory = state_.memory.statistics;
-  const auto pages = state_.cache.pool.available;
+  ASSERT_EQ(state_.cache.pool.capacity, 0u);
   const auto recurrent = state_.recurrent.pool.available;
   IREE_ASSERT_OK(loom_serve_text_state_row_prepare_reserve(
       row, LOOM_SERVE_TEXT_RESERVE_FRESH, nullptr, 16, &reservation_));
   ASSERT_NE(reservation_, nullptr);
-  EXPECT_EQ(state_.cache.pool.available, pages - 4);
+  EXPECT_GE(state_.cache.pool.capacity, 4u);
+  EXPECT_EQ(state_.cache.pool.available, state_.cache.pool.capacity - 4);
   EXPECT_EQ(state_.recurrent.pool.available, recurrent - 1);
   EXPECT_EQ(row->block_count, 0u);
   EXPECT_EQ(row->reserved_extent, 0u);
@@ -94,14 +95,15 @@ TEST_F(TextStateReservationTest, PreparationOwnsIdsWithoutSubmittingOrMapping) {
 
   loom_serve_text_state_reservation_free(reservation_);
   reservation_ = nullptr;
-  EXPECT_EQ(state_.cache.pool.available, pages);
+  EXPECT_EQ(state_.cache.pool.available, state_.cache.pool.capacity);
   EXPECT_EQ(state_.recurrent.pool.available, recurrent);
 
   // Cancellation returns the plan's IDs in acquisition order; an immediate
   // request can use the full pool with no stale continuation ownership.
   ASSERT_NO_FATAL_FAILURE(Reserve(0, 96));
   EXPECT_EQ(row->reserved_extent, 96u);
-  EXPECT_EQ(state_.cache.pool.available, pages - 24);
+  EXPECT_GE(state_.cache.pool.capacity, 24u);
+  EXPECT_EQ(state_.cache.pool.available, state_.cache.pool.capacity - 24);
 }
 
 TEST_F(TextStateReservationTest,
