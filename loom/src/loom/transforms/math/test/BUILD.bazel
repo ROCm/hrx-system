@@ -32,10 +32,19 @@ loom_check_test(
     ]),
 )
 
+loom_check_test(
+    name = "trigonometry_narrow",
+    src = "trigonometry_narrow.loom-test",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/arch:spirv",
+    ]),
+)
+
 test_suite(
     name = "test",
     tests = [
         ":generic_test",
         ":trigonometry",
+        ":trigonometry_narrow",
     ],
 )

@@ -785,6 +785,84 @@ iree_status_t loom_math_evaluation_build_ordered_equal(
       out_value);
 }
 
+iree_status_t loom_math_evaluation_build_preserved_zero(
+    loom_math_evaluation_t* evaluation,
+    const loom_math_evaluation_value_t* input,
+    const loom_math_evaluation_value_t* signed_zero,
+    loom_math_evaluation_value_t* out_value) {
+  const int32_t bit_width =
+      loom_scalar_type_bitwidth(loom_type_element_type(evaluation->value_type));
+  const loom_scalar_type_t integer_element =
+      bit_width == 8    ? LOOM_SCALAR_TYPE_I8
+      : bit_width == 16 ? LOOM_SCALAR_TYPE_I16
+      : bit_width == 32 ? LOOM_SCALAR_TYPE_I32
+                        : LOOM_SCALAR_TYPE_I64;
+  const loom_type_t integer_type = loom_math_evaluation_type_with_element(
+      evaluation->value_type, integer_element);
+  const loom_type_t mask_type = loom_math_evaluation_type_with_element(
+      evaluation->value_type, LOOM_SCALAR_TYPE_I1);
+  loom_builder_t* builder = &evaluation->rewriter->builder;
+  loom_op_t* mask_op = NULL;
+  IREE_RETURN_IF_ERROR(evaluation->lane_ops->constanti(
+      builder, (int64_t)((UINT64_C(1) << (bit_width - 1)) - 1), integer_type,
+      evaluation->location, &mask_op));
+  loom_op_t* zero_op = NULL;
+  IREE_RETURN_IF_ERROR(evaluation->lane_ops->constanti(
+      builder, 0, integer_type, evaluation->location, &zero_op));
+  loom_op_t* bits_op = NULL;
+  loom_op_t* magnitude_op = NULL;
+  loom_op_t* condition_op = NULL;
+  loom_op_t* zero_bits_op = NULL;
+  loom_op_t* selected_op = NULL;
+  loom_op_t* result_op = NULL;
+  if (loom_type_is_scalar(evaluation->value_type)) {
+    IREE_RETURN_IF_ERROR(loom_scalar_bitcast_build(
+        builder, input->accumulator, evaluation->value_type, integer_type,
+        evaluation->location, &bits_op));
+    IREE_RETURN_IF_ERROR(loom_scalar_andi_build(
+        builder, loom_op_results(bits_op)[0], loom_op_results(mask_op)[0],
+        integer_type, evaluation->location, &magnitude_op));
+    IREE_RETURN_IF_ERROR(loom_scalar_cmpi_build(
+        builder, LOOM_SCALAR_CMPI_PREDICATE_EQ,
+        loom_op_results(magnitude_op)[0], loom_op_results(zero_op)[0],
+        evaluation->location, &condition_op));
+    IREE_RETURN_IF_ERROR(loom_scalar_bitcast_build(
+        builder, signed_zero->accumulator, evaluation->value_type, integer_type,
+        evaluation->location, &zero_bits_op));
+    IREE_RETURN_IF_ERROR(loom_scf_select_build(
+        builder, loom_op_results(condition_op)[0],
+        loom_op_results(zero_bits_op)[0], loom_op_results(bits_op)[0],
+        integer_type, evaluation->location, &selected_op));
+    IREE_RETURN_IF_ERROR(loom_scalar_bitcast_build(
+        builder, loom_op_results(selected_op)[0], integer_type,
+        evaluation->value_type, evaluation->location, &result_op));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_vector_bitcast_build(
+        builder, input->accumulator, evaluation->value_type, integer_type,
+        evaluation->location, &bits_op));
+    IREE_RETURN_IF_ERROR(loom_vector_andi_build(
+        builder, loom_op_results(bits_op)[0], loom_op_results(mask_op)[0],
+        integer_type, evaluation->location, &magnitude_op));
+    IREE_RETURN_IF_ERROR(loom_vector_cmpi_build(
+        builder, LOOM_VECTOR_CMPI_PREDICATE_EQ,
+        loom_op_results(magnitude_op)[0], loom_op_results(zero_op)[0],
+        integer_type, mask_type, evaluation->location, &condition_op));
+    IREE_RETURN_IF_ERROR(loom_vector_bitcast_build(
+        builder, signed_zero->accumulator, evaluation->value_type, integer_type,
+        evaluation->location, &zero_bits_op));
+    IREE_RETURN_IF_ERROR(loom_vector_select_build(
+        builder, loom_op_results(condition_op)[0],
+        loom_op_results(zero_bits_op)[0], loom_op_results(bits_op)[0],
+        integer_type, evaluation->location, &selected_op));
+    IREE_RETURN_IF_ERROR(loom_vector_bitcast_build(
+        builder, loom_op_results(selected_op)[0], integer_type,
+        evaluation->value_type, evaluation->location, &result_op));
+  }
+  *out_value =
+      loom_math_evaluation_value_from_id(loom_op_results(result_op)[0]);
+  return iree_ok_status();
+}
+
 iree_status_t loom_math_evaluation_build_positive_normal_finite_condition(
     loom_math_evaluation_t* evaluation,
     const loom_math_evaluation_value_t* input, loom_value_id_t* out_condition) {

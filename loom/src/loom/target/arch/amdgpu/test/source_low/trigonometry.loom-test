@@ -21,18 +21,20 @@ kernel.def @sine_zero_sign() {
 low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @sine_zero_sign() asm {
   %source_view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %destination = resource<hal_binding> {extent = 12, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %21 = v_mov_b32 0
-  %input = global_load_b32_saddr %21, %source_view
-  %23 = v_sin_f32 %input
-  %25 = v_cmp_eq_f32_src1_inline %23 {rhs = "f32_0_0"}
-  %26 = v_bfi_b32_src0_lit %21, %input, 2147483647
-  %sine = v_cndmask_b32 %23, %26, %25
-  %28 = v_cos_f32 %input
-  %29 = v_cmp_eq_f32_src1_inline %28 {rhs = "f32_0_0"}
-  %cosine = v_cndmask_b32_src1_inline %28, %29 {true_value = 0}
-  global_store_b32_saddr %21, %sine, %destination
-  global_store_b32_saddr %21, %23, %destination {offset = 4}
-  global_store_b32_saddr %21, %cosine, %destination {offset = 8}
+  %34 = v_mov_b32 0
+  %input = global_load_b32_saddr %34, %source_view
+  %36 = v_sin_f32 %input
+  %38 = v_bfi_b32_src0_lit %34, %input, 2147483647
+  %40 = v_and_b32_lit %36, 2147483647
+  %41 = v_cmp_eq_i32_src1_inline %40 {rhs = 0}
+  %sine = v_cndmask_b32 %36, %38, %41
+  %43 = v_cos_f32 %input
+  %44 = v_and_b32_lit %43, 2147483647
+  %45 = v_cmp_eq_i32_src1_inline %44 {rhs = 0}
+  %cosine = v_cndmask_b32_src1_inline %43, %45 {true_value = 0}
+  global_store_b32_saddr %34, %sine, %destination
+  global_store_b32_saddr %34, %36, %destination {offset = 4}
+  global_store_b32_saddr %34, %cosine, %destination {offset = 8}
   return
 }
 
@@ -59,38 +61,44 @@ kernel.def @sine_lane_signs() {
 low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @sine_lane_signs() asm {
   %source_view = resource<hal_binding> {extent = 12, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %destination = resource<hal_binding> {extent = 36, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %21 = v_mov_b32 0
-  %input = global_load_b96_saddr %21, %source_view
-  %23 = slice %input[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
-  %24 = v_sin_f32 %23
-  %25 = slice %input[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
-  %26 = v_sin_f32 %25
-  %27 = slice %input[2] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
-  %28 = v_sin_f32 %27
-  %29 = concat(%24, %26, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
-  %35 = v_cmp_eq_f32_src1_inline %24 {rhs = "f32_0_0"}
-  %37 = v_cmp_eq_f32_src1_inline %26 {rhs = "f32_0_0"}
-  %39 = v_cmp_eq_f32_src1_inline %28 {rhs = "f32_0_0"}
-  %43 = v_bfi_b32_src0_lit %21, %23, 2147483647
-  %46 = v_bfi_b32_src0_lit %21, %25, 2147483647
-  %49 = v_bfi_b32_src0_lit %21, %27, 2147483647
-  %54 = v_cndmask_b32 %24, %43, %35
-  %58 = v_cndmask_b32 %26, %46, %37
-  %62 = v_cndmask_b32 %28, %49, %39
-  %sine = concat(%54, %58, %62) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
-  %65 = v_cos_f32 %23
-  %67 = v_cos_f32 %25
-  %69 = v_cos_f32 %27
-  %72 = v_cmp_eq_f32_src1_inline %65 {rhs = "f32_0_0"}
-  %74 = v_cmp_eq_f32_src1_inline %67 {rhs = "f32_0_0"}
-  %76 = v_cmp_eq_f32_src1_inline %69 {rhs = "f32_0_0"}
-  %80 = v_cndmask_b32_src1_inline %65, %72 {true_value = 0}
-  %83 = v_cndmask_b32_src1_inline %67, %74 {true_value = 0}
-  %86 = v_cndmask_b32_src1_inline %69, %76 {true_value = 0}
-  %cosine = concat(%80, %83, %86) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
-  global_store_b96_saddr %21, %sine, %destination
-  global_store_b96_saddr %21, %29, %destination {offset = 12}
-  global_store_b96_saddr %21, %cosine, %destination {offset = 24}
+  %33 = v_mov_b32 0
+  %input = global_load_b96_saddr %33, %source_view
+  %35 = slice %input[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %36 = v_sin_f32 %35
+  %37 = slice %input[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %38 = v_sin_f32 %37
+  %39 = slice %input[2] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %40 = v_sin_f32 %39
+  %41 = concat(%36, %38, %40) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
+  %48 = v_bfi_b32_src0_lit %33, %35, 2147483647
+  %51 = v_bfi_b32_src0_lit %33, %37, 2147483647
+  %54 = v_bfi_b32_src0_lit %33, %39, 2147483647
+  %61 = v_and_b32_lit %36, 2147483647
+  %63 = v_and_b32_lit %38, 2147483647
+  %65 = v_and_b32_lit %40, 2147483647
+  %68 = v_cmp_eq_i32_src1_inline %61 {rhs = 0}
+  %70 = v_cmp_eq_i32_src1_inline %63 {rhs = 0}
+  %72 = v_cmp_eq_i32_src1_inline %65 {rhs = 0}
+  %77 = v_cndmask_b32 %36, %48, %68
+  %81 = v_cndmask_b32 %38, %51, %70
+  %85 = v_cndmask_b32 %40, %54, %72
+  %sine = concat(%77, %81, %85) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
+  %88 = v_cos_f32 %35
+  %90 = v_cos_f32 %37
+  %92 = v_cos_f32 %39
+  %95 = v_and_b32_lit %88, 2147483647
+  %97 = v_and_b32_lit %90, 2147483647
+  %99 = v_and_b32_lit %92, 2147483647
+  %102 = v_cmp_eq_i32_src1_inline %95 {rhs = 0}
+  %104 = v_cmp_eq_i32_src1_inline %97 {rhs = 0}
+  %106 = v_cmp_eq_i32_src1_inline %99 {rhs = 0}
+  %110 = v_cndmask_b32_src1_inline %88, %102 {true_value = 0}
+  %113 = v_cndmask_b32_src1_inline %90, %104 {true_value = 0}
+  %116 = v_cndmask_b32_src1_inline %92, %106 {true_value = 0}
+  %cosine = concat(%110, %113, %116) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
+  global_store_b96_saddr %33, %sine, %destination
+  global_store_b96_saddr %33, %41, %destination {offset = 12}
+  global_store_b96_saddr %33, %cosine, %destination {offset = 24}
   return
 }
 
@@ -114,17 +122,19 @@ kernel.def @uniform_sine() {
 // ----
 low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "input"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @uniform_sine(%input: reg<amdgpu.sgpr>) asm {
   %destination = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %20 = v_sin_f32 %input
-  %21 = v_mov_b32 0
-  %22 = v_cmp_eq_f32_src1_inline %20 {rhs = "f32_0_0"}
-  %23 = v_mov_b32_copy %input
-  %24 = v_bfi_b32_src0_lit %21, %23, 2147483647
-  %sine = v_cndmask_b32 %20, %24, %22
-  %29 = v_sin_f32 %23
-  %40 = v_cmp_eq_f32_src1_inline %29 {rhs = "f32_0_0"}
-  %59 = v_cndmask_b32 %29, %24, %40
-  %sines = concat(%59, %59, %59) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
-  global_store_b32_saddr %21, %sine, %destination
-  global_store_b96_saddr %21, %sines, %destination {offset = 4}
+  %32 = v_sin_f32 %input
+  %33 = v_mov_b32 0
+  %34 = v_mov_b32_copy %input
+  %35 = v_bfi_b32_src0_lit %33, %34, 2147483647
+  %36 = v_and_b32_lit %32, 2147483647
+  %37 = v_cmp_eq_i32_src1_inline %36 {rhs = 0}
+  %sine = v_cndmask_b32 %32, %35, %37
+  %42 = v_sin_f32 %34
+  %67 = v_and_b32_lit %42, 2147483647
+  %74 = v_cmp_eq_i32_src1_inline %67 {rhs = 0}
+  %83 = v_cndmask_b32 %42, %35, %74
+  %sines = concat(%83, %83, %83) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
+  global_store_b32_saddr %33, %sine, %destination
+  global_store_b96_saddr %33, %sines, %destination {offset = 4}
   return
 }

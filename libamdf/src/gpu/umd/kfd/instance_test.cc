@@ -406,6 +406,19 @@ TEST_F(KfdInstanceTest, FailedOpenRetainsOnlyHostStateForRetry) {
   EXPECT_EQ(Prepare(), AMDF_STATUS_OK);
 }
 
+TEST_F(KfdInstanceTest, InterruptedOpenResumesBeforePublishingDescriptor) {
+  native_.failure = Operation::kOpenKfd;
+  native_.failure_errno = EINTR;
+  ASSERT_EQ(Prepare(), AMDF_STATUS_OK);
+  EXPECT_EQ(native_.Count(Operation::kOpenKfd), 2u);
+  EXPECT_EQ(native_.Count(Operation::kVersion), 1u);
+  EXPECT_EQ(native_.Count(Operation::kCreateProcess), 1u);
+  ASSERT_EQ(native_.descriptors.size(), 1u);
+  EXPECT_EQ(amdf_gpu_kfd_instance_descriptor(instance_),
+            *native_.descriptors.begin());
+  EXPECT_TRUE(native_.closed.empty());
+}
+
 TEST_F(KfdInstanceTest, FailedVersionQueryClosesDescriptorBeforeRetry) {
   native_.failure = Operation::kVersion;
   EXPECT_EQ(Prepare(), amdf_linux_error(EIO));

@@ -17,7 +17,12 @@
 // partially acquired descriptor and leaves both outputs unchanged.
 static inline amdf_status_t amdf_gpu_kfd_file_open(
     int* out_descriptor, struct kfd_ioctl_get_version_args* out_version) {
-  int descriptor = open("/dev/kfd", O_RDWR | O_CLOEXEC);
+  // KFD process creation can be interrupted before open publishes a descriptor.
+  // Resume that acquisition without discarding a valid device selection.
+  int descriptor;
+  do {
+    descriptor = open("/dev/kfd", O_RDWR | O_CLOEXEC);
+  } while (descriptor < 0 && errno == EINTR);
   if (descriptor < 0) {
     return amdf_linux_error(errno);
   }
