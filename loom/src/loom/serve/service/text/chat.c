@@ -1271,10 +1271,9 @@ static iree_status_t loom_serve_text_chat_request_render(
   if (limit.data) {
     uint64_t max_tokens = 0;
     IREE_RETURN_IF_ERROR(iree_json_parse_uint64(limit, &max_tokens));
-    if (!max_tokens || max_tokens > LOOM_SERVE_TEXT_CHAT_MAX_OUTPUT_TOKENS) {
+    if (!max_tokens || max_tokens > INT32_MAX) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "output limit must be in [1, %d]",
-                              LOOM_SERVE_TEXT_CHAT_MAX_OUTPUT_TOKENS);
+                              "output limit must be in [1, %d]", INT32_MAX);
     }
     history->chat->max_tokens = (iree_host_size_t)max_tokens;
   }

@@ -123,6 +123,34 @@ TEST_F(SourceChatPolicyTest,
   EXPECT_EQ(policy->reasoning.default_effort, 0);
 }
 
+TEST_F(SourceChatPolicyTest, OutputBudgetsUseSignedTokenCoordinates) {
+  const auto* policy = loom_serve_test_text_policy_chat(policy_owner_);
+  for (const char* field : {"max_tokens", "max_completion_tokens"}) {
+    SCOPED_TRACE(field);
+    const std::string prefix =
+        R"({"model":"fixture-text","messages":[{"role":"user","content":"a"}],")" +
+        std::string(field) + "\":";
+    for (uint32_t capacity : {16385u, 1048576u, uint32_t{INT32_MAX}}) {
+      const std::string body = prefix + std::to_string(capacity) + "}";
+      loom_serve_text_chat_t chat = {};
+      IREE_ASSERT_OK(loom_serve_text_chat_initialize(
+          policy, policy->name, iree_make_cstring_view(body.c_str()), 1, 32,
+          host_allocator_, &chat));
+      EXPECT_EQ(chat.max_tokens, capacity);
+      loom_serve_text_chat_deinitialize(&chat);
+    }
+    for (const char* value : {"0", "-1", "2147483648", "4294967296", "1.5"}) {
+      const std::string body = prefix + value + "}";
+      loom_serve_text_chat_t chat = {};
+      IREE_EXPECT_STATUS_IS(
+          IREE_STATUS_INVALID_ARGUMENT,
+          loom_serve_text_chat_initialize(policy, policy->name,
+                                          iree_make_cstring_view(body.c_str()),
+                                          1, 32, host_allocator_, &chat));
+    }
+  }
+}
+
 TEST_F(SourceChatPolicyTest, StreamingBatchesReuseScratchWithoutHeapChurn) {
   const auto* policy = loom_serve_test_text_policy_chat(policy_owner_);
   const std::string body = Request(Message("user", "a"), 32);

@@ -86,13 +86,9 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   }
   %smaller = scalar.cmpi ult, %maximum, %prefill : i64
   %effective = scf.select %smaller, %maximum, %prefill : i64
-  %tokens_key = buffer.constant utf8("fixture.tokens") : buffer
   %spans_key = buffer.constant utf8("fixture.spans") : buffer
   func.call @config_i64(%stage, %spans_key, %span_capacity) : (i32, buffer, i64)
   func.call @config_i64(%media_stage, %spans_key, %span_capacity) : (i32, buffer, i64)
-  func.call @config_i64(%stage, %tokens_key, %maximum) : (i32, buffer, i64)
-  %media_tokens = scalar.addi %maximum, %maximum : i64
-  func.call @config_i64(%media_stage, %tokens_key, %media_tokens) : (i32, buffer, i64)
   %layout_origin = index.constant 88 : offset
   %layout = buffer.view %state[%layout_origin] : buffer -> view<5xi64>
   view.store %maximum, %layout[0] : i64, view<5xi64>

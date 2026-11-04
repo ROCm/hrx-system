@@ -1,8 +1,6 @@
-config.decl @fixture.context : %value: index where [range(%value, 1, 262144)]
+config.decl @fixture.context : %value: index where [range(%value, 1, 2147483647)]
 
-config.decl @fixture.spans : %value: index where [range(%value, 1, 262144)]
-
-config.decl @fixture.tokens : %value: index where [range(%value, 1, 524288)]
+config.decl @fixture.spans : %value: index where [range(%value, 1, 2147483647)]
 
 config.decl @fixture.media : %value: index where [range(%value, 0, 1)]
 
@@ -21,7 +19,7 @@ func.def @history_offset(%origins: buffer, %row: index, %position: index, %block
   %record_stride = index.constant 40 : offset
   %bounded_row = index.assume %row [range(%row, 0, 2147483646)] : index
   %record_offset = index.scale %bounded_row, %record_stride : index, offset -> offset
-  %bounded_position = index.assume %position [range(%position, 0, 262143)] : index
+  %bounded_position = index.assume %position [range(%position, 0, 2147483646)] : index
   %records = buffer.view %origins[%record_offset] : buffer -> view<5xi64>
   %base64 = view.load %records[2] : view<5xi64> -> i64
   %map64 = view.load %records[4] : view<5xi64> -> i64
@@ -35,12 +33,14 @@ func.def @history_offset(%origins: buffer, %row: index, %position: index, %block
   %page = index.assume %page_value [range(%page_value, 0, %last), lt(%page_value, %blocks)] : index
   %map = buffer.view %origins[%map_origin] : buffer -> view<[%blocks]xi32>
   %physical32 = view.load %map[%page] : view<[%blocks]xi32> -> i32
-  %bounded_physical = scalar.assume %physical32 [range(%physical32, 0, 1048575)] : i32
-  %physical = index.cast %bounded_physical : i32 to index
-  %block_position = index.mul %physical, %c4 : index
+  %physical64 = scalar.extui %physical32 : i32 to i64
+  %bounded_physical = scalar.assume %physical64 [range(%physical64, 0, 4294967294)] : i64
+  %block_bytes = scalar.constant 16 : i64
+  %block_offset64 = scalar.muli %bounded_physical, %block_bytes : i64
+  %block_offset = index.cast %block_offset64 : i64 to offset
   %within_page = index.rem %bounded_position, %c4 : index
-  %slot = index.add %block_position, %within_page : index
-  %bytes = index.scale %slot, %word : index, offset -> offset
+  %within_bytes = index.scale %within_page, %word : index, offset -> offset
+  %bytes = index.add %block_offset, %within_bytes : offset
   %address = index.add %base, %bytes : offset
   func.return %address : offset
 }
@@ -67,17 +67,15 @@ kernel.def target(@target) @consume() {
     %source32 = view.load %packets[%span, 2] : view<[%spans]x9xi32> -> i32
     %row32 = view.load %packets[%span, 3] : view<[%spans]x9xi32> -> i32
     %input32 = view.load %packets[%span, 4] : view<[%spans]x9xi32> -> i32
-    %length_bound = scalar.assume %length32 [range(%length32, 1, 262144)] : i32
-    %position_bound = scalar.assume %position32 [range(%position32, 0, 262143)] : i32
-    %source_bound = scalar.assume %source32 [range(%source32, 0, 524287)] : i32
+    %length_bound = scalar.assume %length32 [range(%length32, 1, 2147483647)] : i32
+    %position_bound = scalar.assume %position32 [range(%position32, 0, 2147483646)] : i32
     %row_bound = scalar.assume %row32 [range(%row32, 0, 2147483646)] : i32
     %row_value = index.cast %row_bound : i32 to index
-    %input_bound = scalar.assume %input32 [range(%input32, 0, 262143)] : i32
+    %input64 = scalar.extui %input32 : i32 to i64
+    %input_bound = scalar.assume %input64 [range(%input64, 0, 4294967293)] : i64
     %length = index.cast %length_bound : i32 to index
     %position = index.cast %position_bound : i32 to index
-    %source = index.cast %source_bound : i32 to index
     %row = index.assume %row_value [range(%row_value, 0, 2147483646)] : index
-    %input = index.cast %input_bound : i32 to index
     %record_stride = index.constant 40 : offset
     %record_offset = index.scale %row, %record_stride : index, offset -> offset
     %records = buffer.view %origins[%record_offset] : buffer -> view<5xi64>
@@ -96,11 +94,10 @@ kernel.def target(@target) @consume() {
     %context = config.get @fixture.context : index
     %c0 = index.constant 0 : index
     %c1 = index.constant 1 : index
-    %c2 = index.constant 2 : index
-    %c3 = index.constant 3 : index
     %c4 = index.constant 4 : index
-    %padded = index.add %context, %c3 : index
-    %blocks = index.div %padded, %c4 : index
+    %last_position = index.sub %context, %c1 : index
+    %last_block = index.div %last_position, %c4 : index
+    %blocks = index.add %last_block, %c1 : index
     %c0_i32 = scalar.constant 0 : i32
     %fresh = index.cmp eq, %position, %c0 : index
     %initial_h, %initial_k = scf.if %fresh -> (i32, i32) {
@@ -116,24 +113,30 @@ kernel.def target(@target) @consume() {
     %checkpoint_bias = view.load %bias[0] : view<1xi32> -> i32
     %bias_delta = config.get @fixture.bias_delta : i32
     %bias_value = scalar.addi %checkpoint_bias, %bias_delta : i32
-    %capacity = config.get @fixture.tokens : index
     %media_mode = config.get @fixture.media : index
     %is_media = index.cmp ne, %media_mode, %c0 : index
+    %token_bytes64 = scalar.constant 4 : i64
+    %record_bytes64 = scalar.constant 32 : i64
+    %stride64 = scf.select %is_media, %record_bytes64, %token_bytes64 : i64
+    %input_bytes64 = scalar.muli %input_bound, %stride64 : i64
+    %input_origin = index.cast %input_bytes64 : i64 to offset
+    %stride = index.cast %stride64 : i64 to offset
     %c5_i32 = scalar.constant 5 : i32
     %c7_i32 = scalar.constant 7 : i32
     %c1_i32 = scalar.constant 1 : i32
+    %c2_i32 = scalar.constant 2 : i32
     %c97 = scalar.constant 97 : i32
     %c101 = scalar.constant 101 : i32
     %final_h, %final_k = scf.for %i = [%c0 to %length step %c1](%h = %initial_h : i32, %k = %initial_k : i32) -> (i32, i32) {
-      %input_position = index.add %input, %i : index
-      %bounded_input = index.assume %input_position [lt(%input_position, %capacity)] : index
+      %input_relative = index.scale %i, %stride : index, offset -> offset
+      %input_offset = index.add %input_origin, %input_relative : offset
       %token = scf.if %is_media -> (i32) {
-        %records = buffer.view %tokens[%origin] : buffer -> view<[%capacity]x8xi32>
-        %stored = view.load %records[%bounded_input, 0] : view<[%capacity]x8xi32> -> i32
-        %feature_length = view.load %records[%bounded_input, 2] : view<[%capacity]x8xi32> -> i32
+        %records = buffer.view %tokens[%input_offset] : buffer -> view<8xi32>
+        %stored = view.load %records[0] : view<8xi32> -> i32
+        %feature_length = view.load %records[2] : view<8xi32> -> i32
         %has_feature = scalar.cmpi ne, %feature_length, %c0_i32 : i32
         %value = scf.if %has_feature -> (i32) {
-          %feature_offset32 = view.load %records[%bounded_input, 1] : view<[%capacity]x8xi32> -> i32
+          %feature_offset32 = view.load %records[1] : view<8xi32> -> i32
           %feature_offset64 = scalar.extui %feature_offset32 : i32 to i64
           %bounded_feature_offset = scalar.assume %feature_offset64 [range(%feature_offset64, 0, 4294967295)] : i64
           %feature_offset = index.cast %bounded_feature_offset : i64 to offset
@@ -141,7 +144,7 @@ kernel.def target(@target) @consume() {
           // an ownership/transport oracle, not a floating-point model.
           %feature = buffer.view %tokens[%feature_offset] : buffer -> view<1xi32>
           %projected = view.load %feature[0] : view<1xi32> -> i32
-          %feature_index = view.load %records[%bounded_input, 3] : view<[%capacity]x8xi32> -> i32
+          %feature_index = view.load %records[3] : view<8xi32> -> i32
           %positioned = scalar.addi %projected, %feature_index : i32
           scf.yield %positioned : i32
         } else {
@@ -149,8 +152,8 @@ kernel.def target(@target) @consume() {
         }
         scf.yield %value : i32
       } else {
-        %ids = buffer.view %tokens[%origin] : buffer -> view<[%capacity]xi32>
-        %stored = view.load %ids[%bounded_input] : view<[%capacity]xi32> -> i32
+        %ids = buffer.view %tokens[%input_offset] : buffer -> view<1xi32>
+        %stored = view.load %ids[0] : view<1xi32> -> i32
         scf.yield %stored : i32
       }
       %scaled_h = scalar.muli %h, %c5_i32 : i32
@@ -158,9 +161,9 @@ kernel.def target(@target) @consume() {
       %with_bias = scalar.addi %with_token, %bias_value : i32
       %next_h = scalar.remui %with_bias, %c97 : i32
       %absolute = index.add %position, %i : index
-      %source_delta = index.mul %i, %c2 : index
-      %absolute_source = index.add %source, %source_delta : index
-      %absolute_source32 = index.cast %absolute_source : index to i32
+      %ordinal32 = index.cast %i : index to i32
+      %source_delta32 = scalar.muli %ordinal32, %c2_i32 : i32
+      %absolute_source32 = scalar.addi %source32, %source_delta32 : i32
       %absolute_position32 = scalar.shrui %absolute_source32, %c1_i32 : i32
       %scaled_k = scalar.muli %k, %c7_i32 : i32
       %with_h = scalar.addi %scaled_k, %next_h : i32
@@ -207,19 +210,18 @@ kernel.def target(@target) @select() {
       %c2_i32 = scalar.constant 2 : i32
       %source_length32 = scalar.muli %length32, %c2_i32 : i32
       %source_end32 = scalar.addi %source32, %source_length32 : i32
-      %end_bound = scalar.assume %end32 [range(%end32, 1, 262144)] : i32
-      %source_end_bound = scalar.assume %source_end32 [range(%source_end32, 1, 524288)] : i32
+      %end_bound = scalar.assume %end32 [range(%end32, 1, 2147483647)] : i32
       %row_bound = scalar.assume %row32 [range(%row32, 0, 2147483646)] : i32
       %row_value = index.cast %row_bound : i32 to index
       %end = index.cast %end_bound : i32 to index
       %row = index.assume %row_value [range(%row_value, 0, 2147483646)] : index
       %c0 = index.constant 0 : index
       %c1 = index.constant 1 : index
-      %c3 = index.constant 3 : index
       %c4 = index.constant 4 : index
       %context = config.get @fixture.context : index
-      %padded = index.add %context, %c3 : index
-      %blocks = index.div %padded, %c4 : index
+      %last_position = index.sub %context, %c1 : index
+      %last_block = index.div %last_position, %c4 : index
+      %blocks = index.add %last_block, %c1 : index
       %sum = scf.for %position = [%c0 to %end step %c1](%previous = %c0_i32 : i32) -> (i32) {
         %offset = func.call @history_offset(%origins, %row, %position, %blocks) : (buffer, index, index, index) -> (offset)
         %cache = buffer.view %arena[%offset] : buffer -> view<1xi32>
@@ -233,7 +235,7 @@ kernel.def target(@target) @select() {
       %c3_i32 = scalar.constant 3 : i32
       %c11_i32 = scalar.constant 11 : i32
       %token = scalar.remui %total, %c3_i32 : i32
-      %source_phase = scalar.shrui %source_end_bound, %c1_i32 : i32
+      %source_phase = scalar.shrui %source_end32, %c1_i32 : i32
       %phase = scalar.remui %source_phase, %c11_i32 : i32
       %terminal = scalar.cmpi eq, %phase, %c0_i32 : i32
       %eos = view.load %header[1] : view<4xi32> -> i32

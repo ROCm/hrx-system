@@ -12,7 +12,34 @@
 namespace {
 
 using loom_serve::testing::text::Oracle;
+using loom_serve::testing::text::RegisteredSourceTextServiceTest;
 using loom_serve::testing::text::SourceTextServiceTest;
+
+TEST_F(RegisteredSourceTextServiceTest,
+       LongContextPublishesCapacityAndAdmitsCompleteRequests) {
+  ASSERT_NO_FATAL_FAILURE(StartManaged());
+  auto declaration = Declaration("fixture-text", directory_);
+  const std::string field = R"("context_capacity":96)";
+  const auto offset = declaration.find(field);
+  ASSERT_NE(offset, std::string::npos);
+  declaration.replace(offset, field.size(), R"("context_capacity":1048576)");
+  const auto registered = Read(Send(declaration, "", "/v1/models/register"));
+  ASSERT_EQ(registered.find("HTTP/1.1 202"), 0u) << registered;
+  const auto status =
+      WaitModelState("fixture-text", R"("registration":"ready")");
+  EXPECT_NE(status.find(R"("context_length":1048576)"), std::string::npos);
+  EXPECT_NE(status.find(R"("max_output_tokens":1048576)"), std::string::npos);
+
+  // The request parser accepts the output count; complete-input admission
+  // rejects it because the prompt also occupies the deployment's context.
+  const auto rejected = Read(Send(Request(Message("user", "abxa"), 1048576)));
+  EXPECT_NE(
+      rejected.find("request exceeds the available context size of 1048576"),
+      std::string::npos)
+      << rejected;
+  const auto response = Read(Send(Request(Message("user", "abxa"), 4)));
+  EXPECT_EQ(Content(response), Oracle::Complete("abxa", 4));
+}
 
 TEST_F(SourceTextServiceTest, PreparationActivatesWeightsOnlyWithDemand) {
   for (const auto flags : {0u, uint32_t{LOOM_SERVE_TEXT_LOAD_FLAG_DEMAND}}) {

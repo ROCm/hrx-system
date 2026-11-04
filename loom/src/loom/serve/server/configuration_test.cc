@@ -724,6 +724,55 @@ TEST_F(ConfigurationTest, CacheOmissionAndExplicitZeroRemainDistinct) {
                      R"(,"weights":"model.irpa","cache_target_bytes":0)")));
 }
 
+TEST_F(ConfigurationTest, TokenCapacitiesUseSignedCoordinates) {
+  for (const char* kind : {"text", "sequence"}) {
+    const std::string inputs =
+        std::string(R"(,"weights":"model.irpa")") +
+        (std::string(kind) == "text" ? R"(,"tokenizer":"tokenizer.json")" : "");
+    for (const char* field :
+         {"context_capacity", "prefill_capacity", "max_tokens"}) {
+      if (std::string(kind) == "sequence" &&
+          std::string(field) == "max_tokens") {
+        continue;
+      }
+      SCOPED_TRACE(kind);
+      SCOPED_TRACE(field);
+      const std::string prefix = inputs + ",\"" + field + "\":";
+      for (uint32_t capacity :
+           {16385u, 262145u, 1048576u, uint32_t{INT32_MAX}}) {
+        SCOPED_TRACE(capacity);
+        IREE_ASSERT_OK(
+            Parse(Document(kind, prefix + std::to_string(capacity))));
+        const auto actual = std::string(field) == "context_capacity"
+                                ? model_.text.context_capacity
+                            : std::string(field) == "prefill_capacity"
+                                ? model_.text.prefill_capacity
+                                : model_.text.max_tokens;
+        EXPECT_EQ(actual, capacity);
+      }
+      for (const char* value : {"0", "-1", "2147483648", "4294967296", "1.5"}) {
+        SCOPED_TRACE(value);
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                              Parse(Document(kind, prefix + value)));
+      }
+    }
+  }
+}
+
+TEST_F(ConfigurationTest, CardTokenCapacitiesUseTheDeploymentContract) {
+  for (uint32_t capacity : {1048576u, uint32_t{INT32_MAX}}) {
+    auto json = Card("text");
+    const std::string count = std::to_string(capacity);
+    json.insert(json.find("\"pending_requests\""),
+                "\"context_capacity\":" + count + ",\"prefill_capacity\":" +
+                    count + ",\"max_tokens\":" + count + ",");
+    IREE_ASSERT_OK(Load(json));
+    EXPECT_EQ(model_.text.context_capacity, capacity);
+    EXPECT_EQ(model_.text.prefill_capacity, capacity);
+    EXPECT_EQ(model_.text.max_tokens, capacity);
+  }
+}
+
 TEST_F(ConfigurationTest, SessionMaximumBoundsInitialCapacityNotEpochShape) {
   for (const char* kind : {"text", "sequence"}) {
     const std::string inputs =
@@ -870,7 +919,7 @@ TEST_F(ConfigurationTest, RejectsInvalidAndWrongModalityFields) {
         R"(,"draft_depth":8)",
         R"(,"continuation_epochs":2)",
         R"(,"prefill_capacity":2,"draft_depth":3)",
-        R"(,"prefill_capacity":262145)",
+        R"(,"prefill_capacity":2147483648)",
         R"(,"pool_capacity":256)",
         R"(,"pending_requests":-1)",
         R"(,"max_tokens":1.5)",

@@ -18,9 +18,6 @@
 extern "C" {
 #endif
 
-// Protocol output budget bound, independent of a deployment's context limit.
-#define LOOM_SERVE_TEXT_CHAT_MAX_OUTPUT_TOKENS 16384
-
 // Protocol resource bound for ordered content parts in one message. The HTTP
 // body has an independent byte bound; this limits the compact source-policy
 // record set created from pathologically small JSON objects.
