@@ -31,6 +31,12 @@ typedef struct loom_amdgpu_program_artifact_emission_t {
   const loom_amdgpu_encoded_instruction_stream_t* helper_streams;
   // Number of entries in |functions| and |helper_streams|.
   iree_host_size_t function_count;
+  // Physical helper instructions stored once in the artifact.
+  uint64_t instruction_count;
+  // Semantic helper code bytes stored once in the artifact.
+  uint64_t code_byte_count;
+  // Physical VOPD packets stored once in the artifact.
+  uint64_t coissued_instruction_count;
 } loom_amdgpu_program_artifact_emission_t;
 
 // Encodes every artifact helper exactly once for final HSACO layout.

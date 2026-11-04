@@ -777,6 +777,7 @@ static iree_status_t loom_amdgpu_hsaco_build_text(
   iree_host_size_t text_size = 0;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_hsaco_cast_host_size(text_size_u64, &text_size));
+  payloads->plan->executable_code_byte_length = text_size_u64;
   iree_byte_span_t text = iree_make_byte_span(NULL, 0);
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_hsaco_allocate_zeroed(arena, text_size, &text));

@@ -10,8 +10,10 @@
 
 #include "loom/ir/module.h"
 #include "loom/target/emit/native/amdgpu/encoding.h"
+#include "loom/target/emit/native/amdgpu/function_report.h"
 #include "loom/target/emit/native/amdgpu/kernel_assembly.h"
 #include "loom/target/emit/native/amdgpu/kernel_entry.h"
+#include "loom/target/reporting/low.h"
 
 static iree_string_view_t loom_amdgpu_program_emission_symbol_name(
     const loom_module_t* module, loom_symbol_ref_t symbol_ref) {
@@ -62,13 +64,19 @@ iree_status_t loom_amdgpu_program_artifact_emission_build(
   memset(functions, 0, artifact->helper_count * sizeof(*functions));
   memset(helper_streams, 0, artifact->helper_count * sizeof(*helper_streams));
 
+  uint64_t instruction_count = 0;
+  uint64_t code_byte_count = 0;
+  uint64_t coissued_instruction_count = 0;
   for (iree_host_size_t i = 0; i < artifact->helper_count; ++i) {
-    const loom_amdgpu_program_callable_t* callable = &artifact->helpers[i];
+    loom_amdgpu_program_callable_t* callable = &artifact->helpers[i];
     IREE_ASSERT_EQ(callable->helper_ordinal, i);
+    const loom_amdgpu_encode_instruction_stream_flags_t flags =
+        callable->report != NULL
+            ? LOOM_AMDGPU_ENCODE_INSTRUCTION_STREAM_FLAG_CAPTURE_NATIVE_INSERTIONS
+            : LOOM_AMDGPU_ENCODE_INSTRUCTION_STREAM_FLAG_NONE;
     IREE_RETURN_IF_ERROR(loom_amdgpu_program_emission_encode_function(
-        &callable->compilation, LOOM_AMDGPU_FUNCTION_RETURN_MODE_CALLER,
-        LOOM_AMDGPU_ENCODE_INSTRUCTION_STREAM_FLAG_NONE, &helper_streams[i],
-        table_arena));
+        &callable->compilation, LOOM_AMDGPU_FUNCTION_RETURN_MODE_CALLER, flags,
+        &helper_streams[i], table_arena));
     IREE_ASSERT_EQ(helper_streams[i].internal_call_fixup_count, 0);
     functions[i] = (loom_amdgpu_hsaco_function_t){
         .name = loom_amdgpu_program_emission_symbol_name(artifact->module,
@@ -77,11 +85,54 @@ iree_status_t loom_amdgpu_program_artifact_emission_build(
         .text_fixups = helper_streams[i].text_fixups,
         .text_fixup_count = helper_streams[i].text_fixup_count,
     };
+    if (callable->report != NULL) {
+      if (!iree_checked_add_u64(instruction_count,
+                                helper_streams[i].instruction_count,
+                                &instruction_count) ||
+          !iree_checked_add_u64(code_byte_count,
+                                helper_streams[i].text.data_length,
+                                &code_byte_count) ||
+          !iree_checked_add_u64(
+              coissued_instruction_count,
+              callable->compilation.plan.packet_plan.vopd_plan.pair_count,
+              &coissued_instruction_count)) {
+        return iree_make_status(
+            IREE_STATUS_RESOURCE_EXHAUSTED,
+            "AMDGPU artifact helper emission summary overflowed");
+      }
+      loom_target_compile_report_record_low_planning(
+          callable->report, &callable->compilation.planning_statistics);
+      loom_target_compile_report_low_dynamic_context_t dynamic_context = {0};
+      iree_status_t status =
+          loom_target_compile_report_low_dynamic_context_initialize(
+              &callable->compilation.frame, &dynamic_context);
+      if (iree_status_is_ok(status)) {
+        status =
+            loom_target_compile_report_record_low_emission_frame_with_dynamic_context(
+                callable->report, &callable->compilation.frame,
+                &dynamic_context);
+      }
+      if (iree_status_is_ok(status)) {
+        status = loom_amdgpu_function_report_record_plan(
+            callable->report, &callable->compilation.plan.packet_plan);
+      }
+      if (iree_status_is_ok(status)) {
+        status = loom_amdgpu_function_report_record_emission(
+            callable->report, &callable->compilation.frame, &dynamic_context,
+            &callable->compilation.plan, &helper_streams[i]);
+      }
+      loom_target_compile_report_low_dynamic_context_deinitialize(
+          &dynamic_context);
+      IREE_RETURN_IF_ERROR(status);
+    }
   }
 
   out_emission->functions = functions;
   out_emission->helper_streams = helper_streams;
   out_emission->function_count = artifact->helper_count;
+  out_emission->instruction_count = instruction_count;
+  out_emission->code_byte_count = code_byte_count;
+  out_emission->coissued_instruction_count = coissued_instruction_count;
   return iree_ok_status();
 }
 
@@ -226,23 +277,6 @@ static iree_status_t loom_amdgpu_program_emission_build_internal(
       root, &entry_stream, entry_envelope->text.data_length, table_arena,
       &call_fixups));
 
-  uint64_t body_instruction_count = entry_stream.instruction_count;
-  for (iree_host_size_t i = 0; i < root->helper_count; ++i) {
-    const loom_symbol_id_t helper_symbol_id = root->helper_symbols[i];
-    const loom_amdgpu_program_callable_t* callable =
-        root->call_table->callables_by_symbol[helper_symbol_id];
-    IREE_ASSERT_NE(callable, NULL);
-    IREE_ASSERT_LT(callable->helper_ordinal, artifact_emission->function_count);
-    if (!iree_checked_add_u64(
-            body_instruction_count,
-            artifact_emission->helper_streams[callable->helper_ordinal]
-                .instruction_count,
-            &body_instruction_count)) {
-      return iree_make_status(
-          IREE_STATUS_RESOURCE_EXHAUSTED,
-          "AMDGPU retained-program instruction count overflowed");
-    }
-  }
   IREE_RETURN_IF_ERROR(loom_amdgpu_program_emission_append_listing(
       compilation, artifact_emission, entry_plan, &entry_stream,
       include_artifact_functions_in_listing, target_listing, scratch_arena));
@@ -263,10 +297,10 @@ static iree_status_t loom_amdgpu_program_emission_build_internal(
               .call_fixups = call_fixups,
               .call_fixup_count = entry_stream.internal_call_fixup_count,
           },
-      .body_instruction_count = body_instruction_count,
+      .body = entry_stream,
       .entry_instruction_count = entry_envelope->instruction_count,
-      .native_insertions = entry_stream.native_insertions,
-      .native_insertion_count = entry_stream.native_insertion_count,
+      .coissued_instruction_count =
+          entry_plan->function.packet_plan.vopd_plan.pair_count,
   };
   return iree_ok_status();
 }

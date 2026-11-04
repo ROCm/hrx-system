@@ -15,6 +15,7 @@
 #include "loom/ir/ir.h"
 #include "loom/target/arch/amdgpu/abi/call_abi.h"
 #include "loom/target/emit/native/amdgpu/function_compile.h"
+#include "loom/target/reporting/report.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -52,6 +53,8 @@ typedef struct loom_amdgpu_program_callable_t {
   loom_amdgpu_call_state_t call_state;
   // Native function compilation paired with this exact contract.
   loom_amdgpu_function_compilation_t compilation;
+  // Optional function-local evidence retained for artifact composition.
+  loom_target_compile_report_t* report;
 } loom_amdgpu_program_callable_t;
 
 // Symbol-indexed helper contracts visible while allocating one entry function.

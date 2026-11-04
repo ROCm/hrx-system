@@ -37,6 +37,8 @@ enum {
 typedef struct loom_amdgpu_hsaco_plan_t {
   // Processor-specific ELF e_flags.
   uint32_t elf_flags;
+  // Exact executable `.text` extent including inter-symbol alignment.
+  uint64_t executable_code_byte_length;
   // Compact array of final code-object sections.
   loom_native_elf_section_t sections[LOOM_AMDGPU_HSACO_PLAN_SECTION_CAPACITY];
   // Number of initialized entries in |sections|.

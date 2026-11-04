@@ -67,10 +67,9 @@ iree_status_t loom_amdgpu_kernel_emission_build(
               .text_fixups = kernel_text_fixups,
               .text_fixup_count = stream.text_fixup_count,
           },
-      .body_instruction_count = stream.instruction_count,
+      .body = stream,
       .entry_instruction_count = entry_envelope->instruction_count,
-      .native_insertions = stream.native_insertions,
-      .native_insertion_count = stream.native_insertion_count,
+      .coissued_instruction_count = packet_plan->vopd_plan.pair_count,
   };
   return iree_ok_status();
 }

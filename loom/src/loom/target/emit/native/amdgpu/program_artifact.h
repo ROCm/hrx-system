@@ -15,6 +15,7 @@
 #include "loom/codegen/low/target_binding.h"
 #include "loom/target/emit/native/amdgpu/program_call.h"
 #include "loom/target/function_version.h"
+#include "loom/target/reporting/report.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -51,6 +52,8 @@ typedef struct loom_amdgpu_program_artifact_options_t {
   const loom_target_function_version_snapshot_t* function_versions;
   // Registry resolving helper representation contracts.
   const loom_low_descriptor_registry_t* descriptor_registry;
+  // Optional report fixing helper evidence retention and detail policy.
+  const loom_target_compile_report_t* report_template;
   // Diagnostic destination shared by artifact planning and compilation.
   iree_diagnostic_emitter_t emitter;
 } loom_amdgpu_program_artifact_options_t;

@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/target/emit/native/amdgpu/kernel_report.h"
+#include "loom/target/emit/native/amdgpu/function_report.h"
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -13,7 +13,7 @@
 namespace loom {
 namespace {
 
-class AmdgpuKernelReportTest : public ::testing::Test {
+class AmdgpuFunctionReportTest : public ::testing::Test {
  protected:
   void SetUp() override {
     loom_target_compile_report_initialize(&report_, iree_allocator_system());
@@ -42,7 +42,7 @@ class AmdgpuKernelReportTest : public ::testing::Test {
   loom_target_compile_report_t report_ = {};
 };
 
-TEST_F(AmdgpuKernelReportTest, NativeDestinationWaitWithoutCounterActions) {
+TEST_F(AmdgpuFunctionReportTest, NativeDestinationWaitWithoutCounterActions) {
   const loom_amdgpu_wait_state_t state = {
       .reason = LOOM_AMDGPU_WAIT_STATE_REASON_SGPR_READ_DEPENDENCY,
       .action = LOOM_AMDGPU_WAIT_STATE_ACTION_S_WAIT_ALU,
@@ -56,7 +56,7 @@ TEST_F(AmdgpuKernelReportTest, NativeDestinationWaitWithoutCounterActions) {
   };
   plan_.wait_states.states = &state;
   plan_.wait_states.state_count = 1;
-  IREE_ASSERT_OK(loom_amdgpu_kernel_report_record_plan(&report_, &plan_));
+  IREE_ASSERT_OK(loom_amdgpu_function_report_record_plan(&report_, &plan_));
   EXPECT_EQ(report_.wait_plan.action_count, 1u);
   EXPECT_EQ(report_.wait_plan.partial_wait_count, 1u);
   EXPECT_EQ(report_.wait_plan.full_drain_count, 0u);
@@ -74,7 +74,7 @@ TEST_F(AmdgpuKernelReportTest, NativeDestinationWaitWithoutCounterActions) {
   EXPECT_EQ(row->outstanding_after, 0u);
 }
 
-TEST_F(AmdgpuKernelReportTest, MergesCounterAndNativeActionsInScheduleOrder) {
+TEST_F(AmdgpuFunctionReportTest, MergesCounterAndNativeActionsInScheduleOrder) {
   const loom_amdgpu_wait_plan_action_t counter = {
       .kind = LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED,
       .reason = LOOM_AMDGPU_WAIT_PLAN_REASON_SSA_USE,
@@ -105,7 +105,7 @@ TEST_F(AmdgpuKernelReportTest, MergesCounterAndNativeActionsInScheduleOrder) {
   plan_.wait_plan.action_count = 1;
   plan_.wait_states.states = states;
   plan_.wait_states.state_count = IREE_ARRAYSIZE(states);
-  IREE_ASSERT_OK(loom_amdgpu_kernel_report_record_plan(&report_, &plan_));
+  IREE_ASSERT_OK(loom_amdgpu_function_report_record_plan(&report_, &plan_));
   EXPECT_EQ(report_.wait_plan.action_count, 3u);
   EXPECT_EQ(report_.wait_plan.full_drain_count, 1u);
   EXPECT_EQ(report_.wait_plan.partial_wait_count, 2u);
@@ -122,7 +122,7 @@ TEST_F(AmdgpuKernelReportTest, MergesCounterAndNativeActionsInScheduleOrder) {
   EXPECT_EQ(rows[1].drained_count, 1u);
 }
 
-TEST_F(AmdgpuKernelReportTest, SummaryDoesNotRetainActionDetails) {
+TEST_F(AmdgpuFunctionReportTest, SummaryDoesNotRetainActionDetails) {
   report_.requested_detail_flags = LOOM_TARGET_COMPILE_REPORT_DETAIL_NONE;
   const loom_amdgpu_wait_state_t state = {
       .reason = LOOM_AMDGPU_WAIT_STATE_REASON_SGPR_READ_DEPENDENCY,
@@ -134,14 +134,14 @@ TEST_F(AmdgpuKernelReportTest, SummaryDoesNotRetainActionDetails) {
   };
   plan_.wait_states.states = &state;
   plan_.wait_states.state_count = 1;
-  IREE_ASSERT_OK(loom_amdgpu_kernel_report_record_plan(&report_, &plan_));
+  IREE_ASSERT_OK(loom_amdgpu_function_report_record_plan(&report_, &plan_));
   EXPECT_EQ(report_.wait_plan.action_count, 1u);
   EXPECT_EQ(report_.wait_action_rows.count, 0u);
   EXPECT_EQ(report_.wait_counter_rows.count, 0u);
   EXPECT_EQ(report_.wait_reason_summary_rows.count, 1u);
 }
 
-TEST_F(AmdgpuKernelReportTest, IncomingBoundDoesNotIncreaseTrackedCount) {
+TEST_F(AmdgpuFunctionReportTest, IncomingBoundDoesNotIncreaseTrackedCount) {
   const loom_amdgpu_wait_plan_action_t counter = {
       .kind = LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED,
       .reason = LOOM_AMDGPU_WAIT_PLAN_REASON_SSA_USE,
@@ -155,7 +155,7 @@ TEST_F(AmdgpuKernelReportTest, IncomingBoundDoesNotIncreaseTrackedCount) {
   };
   plan_.wait_plan.actions = &counter;
   plan_.wait_plan.action_count = 1;
-  IREE_ASSERT_OK(loom_amdgpu_kernel_report_record_plan(&report_, &plan_));
+  IREE_ASSERT_OK(loom_amdgpu_function_report_record_plan(&report_, &plan_));
   ASSERT_EQ(report_.wait_action_rows.count, 1u);
   const auto* row =
       static_cast<const loom_target_compile_report_wait_action_row_t*>(

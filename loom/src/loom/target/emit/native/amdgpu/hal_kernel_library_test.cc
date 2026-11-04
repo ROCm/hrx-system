@@ -207,6 +207,24 @@ bool HasEntry(const loom_target_compile_report_t& report,
   return false;
 }
 
+const loom_target_compile_report_entry_t* FindEntry(
+    const loom_target_compile_report_t& report, const char* function_name) {
+  const iree_string_view_t expected_name =
+      iree_make_cstring_view(function_name);
+  for (const loom_target_compile_report_vec_t* vec = report.entry_rows.head;
+       vec != nullptr; vec = vec->next) {
+    const loom_target_compile_report_entry_t* rows =
+        static_cast<const loom_target_compile_report_entry_t*>(
+            loom_target_compile_report_vec_const_rows(vec));
+    for (iree_host_size_t i = 0; i < vec->count; ++i) {
+      if (iree_string_view_equal(rows[i].function_name, expected_name)) {
+        return &rows[i];
+      }
+    }
+  }
+  return nullptr;
+}
+
 uint32_t LoadLeU32(const uint8_t* bytes, size_t offset) {
   return (uint32_t)bytes[offset] | ((uint32_t)bytes[offset + 1] << 8) |
          ((uint32_t)bytes[offset + 2] << 16) |
@@ -867,10 +885,13 @@ TEST_F(AmdgpuHalKernelLibraryTest, SharesLeafFunctionAcrossKernelEntries) {
   loom_module_t* module = nullptr;
   ASSERT_NO_FATAL_FAILURE(ParseGfx11KernelsWithSharedLeafCall(&module));
 
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_options_t options = {
       .diagnostic_sink = capture.sink(),
       .max_errors = 20,
+      .report = &report,
       .capture_target_listing = true,
   };
   bool emitted = false;
@@ -957,8 +978,28 @@ TEST_F(AmdgpuHalKernelLibraryTest, SharesLeafFunctionAcrossKernelEntries) {
               (uint32_t)(displacement >> 32));
   }
 
+  ASSERT_EQ(report.entry_rows.count, 2u);
+  const loom_target_compile_report_entry_t* entry_a =
+      FindEntry(report, "loom_kernel_a");
+  const loom_target_compile_report_entry_t* entry_b =
+      FindEntry(report, "loom_kernel_b");
+  ASSERT_NE(entry_a, nullptr);
+  ASSERT_NE(entry_b, nullptr);
+  EXPECT_EQ(entry_a->emitted_code_byte_count, 52u);
+  EXPECT_EQ(entry_b->emitted_code_byte_count, 52u);
+  EXPECT_EQ(entry_a->schedule_node_count, entry_b->schedule_node_count);
+  EXPECT_GT(entry_a->schedule_node_count, 1u);
+  EXPECT_GT(entry_a->static_instruction_mix.scalar_alu_count, 0u);
+  EXPECT_GT(entry_b->static_instruction_mix.scalar_alu_count, 0u);
+  EXPECT_EQ(report.emitted_code_byte_count, 80u);
+  EXPECT_EQ(report.emitted_code_storage_byte_count, text.size);
+  EXPECT_LT(
+      report.emitted_instruction_count,
+      entry_a->emitted_instruction_count + entry_b->emitted_instruction_count);
+
   loom_amdgpu_hal_kernel_library_deinitialize(&library,
                                               iree_allocator_system());
+  loom_target_compile_report_deinitialize(&report);
   loom_module_free(module);
 }
 

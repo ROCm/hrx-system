@@ -436,6 +436,21 @@ static iree_status_t loom_amdgpu_program_artifact_compile_helpers(
     if (!abi_prepared) {
       return iree_ok_status();
     }
+    if (options->report_template != NULL) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, sizeof(*callable->report),
+                                               (void**)&callable->report));
+      loom_target_compile_report_initialize(callable->report,
+                                            iree_arena_allocator(arena));
+      callable->report->requested_detail_flags =
+          options->report_template->requested_detail_flags;
+      callable->report->artifact_kind = options->report_template->artifact_kind;
+      callable->report->backend_name = options->report_template->backend_name;
+      callable->report->target_family_name =
+          options->report_template->target_family_name;
+      callable->report->target_key = options->report_template->target_key;
+      callable->report->artifact_format =
+          options->report_template->artifact_format;
+    }
     const loom_amdgpu_function_compile_options_t helper_options = {
         .descriptor_registry = options->descriptor_registry,
         .resolved_target = &callable->target,
@@ -450,6 +465,7 @@ static iree_status_t loom_amdgpu_program_artifact_compile_helpers(
         .allocation_reserved_ranges = &call_control_reservation,
         .allocation_reserved_range_count = 1,
         .emitter = options->emitter,
+        .report = callable->report,
     };
     bool helper_compiled = false;
     IREE_RETURN_IF_ERROR(
