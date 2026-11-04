@@ -47,13 +47,15 @@ kernel.def @subgroup_reductions() {
                OpMemberDecorate %_struct_11 0 Offset 0
                OpDecorate %local_invocation_id BuiltIn LocalInvocationId
                OpDecorate %_ptr_PhysicalStorageBuffer_float ArrayStride 4
-               OpDecorate %_struct_51 Block
-               OpMemberDecorate %_struct_51 0 Offset 0
-               OpMemberDecorate %_struct_51 1 Offset 8
-               OpMemberDecorate %_struct_51 2 Offset 16
-               OpMemberDecorate %_struct_51 3 Offset 20
-               OpMemberDecorate %_struct_51 4 Offset 24
-               OpMemberDecorate %_struct_51 5 Offset 28
+               OpDecorate %47 NoContraction
+               OpDecorate %55 NoContraction
+               OpDecorate %_struct_65 Block
+               OpMemberDecorate %_struct_65 0 Offset 0
+               OpMemberDecorate %_struct_65 1 Offset 8
+               OpMemberDecorate %_struct_65 2 Offset 16
+               OpMemberDecorate %_struct_65 3 Offset 20
+               OpMemberDecorate %_struct_65 4 Offset 24
+               OpMemberDecorate %_struct_65 5 Offset 28
        %void = OpTypeVoid
           %4 = OpTypeFunction %void
       %ulong = OpTypeInt 64 0
@@ -75,11 +77,13 @@ kernel.def @subgroup_reductions() {
       %float = OpTypeFloat 32
 %_ptr_PhysicalStorageBuffer_float = OpTypePointer PhysicalStorageBuffer %float
      %uint_3 = OpConstant %uint 3
+    %float_0 = OpConstant %float 0
+       %bool = OpTypeBool
      %uint_8 = OpConstant %uint 8
   %ulong_4_0 = OpConstant %ulong 4
- %_struct_51 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint
-%_ptr_PushConstant__struct_51 = OpTypePointer PushConstant %_struct_51
-          %2 = OpVariable %_ptr_PushConstant__struct_51 PushConstant
+ %_struct_65 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint
+%_ptr_PushConstant__struct_65 = OpTypePointer PushConstant %_struct_65
+          %2 = OpVariable %_ptr_PushConstant__struct_65 PushConstant
 %subgroup_reductions = OpFunction %void None %4
           %5 = OpLabel
          %16 = OpAccessChain %_ptr_PushConstant_ulong %2 %int_0
@@ -101,11 +105,23 @@ kernel.def @subgroup_reductions() {
          %40 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %37
       %value = OpLoad %float %40 Aligned 4
         %sum = OpGroupNonUniformFAdd %float %uint_3 Reduce %value
-    %product = OpGroupNonUniformFMul %float %uint_3 ClusteredReduce %sum %uint_8
-         %46 = OpSConvert %ulong %lane
-         %48 = OpIMul %ulong %46 %ulong_4_0
-         %49 = OpIAdd %ulong %output %48
-         %50 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %49
-               OpStore %50 %product Aligned 4
+         %46 = OpFOrdLessThan %bool %sum %float_0
+         %47 = OpFSub %float %float_0 %sum
+         %49 = OpBitcast %uint %47
+         %50 = OpBitcast %uint %sum
+         %51 = OpSelect %uint %46 %49 %50
+         %48 = OpBitcast %float %51
+         %52 = OpGroupNonUniformFMul %float %uint_3 ClusteredReduce %48 %uint_8
+         %54 = OpGroupNonUniformLogicalXor %bool %uint_3 ClusteredReduce %46 %uint_8
+         %55 = OpFSub %float %float_0 %52
+         %57 = OpBitcast %uint %55
+         %58 = OpBitcast %uint %52
+         %59 = OpSelect %uint %54 %57 %58
+    %product = OpBitcast %float %59
+         %60 = OpSConvert %ulong %lane
+         %62 = OpIMul %ulong %60 %ulong_4_0
+         %63 = OpIAdd %ulong %output %62
+         %64 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %63
+               OpStore %64 %product Aligned 4
                OpReturn
                OpFunctionEnd

@@ -8,13 +8,7 @@
 
 #include "loom/ops/kernel/ops.h"
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
-
-typedef enum loom_spirv_collective_mode_e {
-  LOOM_SPIRV_COLLECTIVE_REDUCE,
-  LOOM_SPIRV_COLLECTIVE_CLUSTERED_REDUCE,
-  LOOM_SPIRV_COLLECTIVE_INCLUSIVE_SCAN,
-  LOOM_SPIRV_COLLECTIVE_EXCLUSIVE_SCAN,
-} loom_spirv_collective_mode_t;
+#include "loom/target/arch/spirv/features.h"
 
 struct loom_spirv_extrema_row_t {
   // Scalar integer constant descriptor.
@@ -98,10 +92,9 @@ static int64_t loom_spirv_extrema_infinity(
                                 : INT64_C(0x7ff0000000000000);
 }
 
-static iree_status_t loom_spirv_extrema_type(loom_low_lower_context_t* context,
-                                             loom_scalar_type_t element_type,
-                                             uint8_t lane_count,
-                                             loom_type_t* out_type) {
+static iree_status_t loom_spirv_collective_type(
+    loom_low_lower_context_t* context, loom_scalar_type_t element_type,
+    uint8_t lane_count, loom_type_t* out_type) {
   const loom_type_t type =
       lane_count == 1
           ? loom_type_scalar(element_type)
@@ -124,15 +117,15 @@ iree_status_t loom_spirv_collective_extrema_initialize(
       row->bit_count == 16   ? LOOM_SCALAR_TYPE_F16
       : row->bit_count == 32 ? LOOM_SCALAR_TYPE_F32
                              : LOOM_SCALAR_TYPE_F64;
-  IREE_RETURN_IF_ERROR(loom_spirv_extrema_type(
+  IREE_RETURN_IF_ERROR(loom_spirv_collective_type(
       context, float_type, row->lane_count, &out_arithmetic->float_type));
-  IREE_RETURN_IF_ERROR(loom_spirv_extrema_type(
+  IREE_RETURN_IF_ERROR(loom_spirv_collective_type(
       context, integer_type, row->lane_count, &out_arithmetic->integer_type));
   IREE_RETURN_IF_ERROR(
-      loom_spirv_extrema_type(context, LOOM_SCALAR_TYPE_I1, row->lane_count,
-                              &out_arithmetic->predicate_type));
-  IREE_RETURN_IF_ERROR(loom_spirv_extrema_type(context, integer_type, 1,
-                                               &out_arithmetic->constant_type));
+      loom_spirv_collective_type(context, LOOM_SCALAR_TYPE_I1, row->lane_count,
+                                 &out_arithmetic->predicate_type));
+  IREE_RETURN_IF_ERROR(loom_spirv_collective_type(
+      context, integer_type, 1, &out_arithmetic->constant_type));
   const iree_string_view_t constant_key =
       row->bit_count == 16   ? IREE_SV("i16_value")
       : row->bit_count == 32 ? IREE_SV("i32_value")
@@ -141,7 +134,7 @@ iree_status_t loom_spirv_collective_extrema_initialize(
                                    constant_key, &out_arithmetic->constant_key);
 }
 
-static iree_status_t loom_spirv_extrema_emit(
+static iree_status_t loom_spirv_collective_emit(
     loom_low_lower_context_t* context, loom_location_id_t location,
     uint32_t descriptor_ref, const loom_value_id_t* operands,
     iree_host_size_t operand_count, loom_named_attr_slice_t attributes,
@@ -157,12 +150,12 @@ static iree_status_t loom_spirv_extrema_emit(
   return iree_ok_status();
 }
 
-static iree_status_t loom_spirv_extrema_binary(
+static iree_status_t loom_spirv_collective_binary(
     loom_low_lower_context_t* context, loom_location_id_t location,
     uint32_t descriptor_ref, loom_value_id_t lhs, loom_value_id_t rhs,
     loom_type_t result_type, loom_value_id_t* out_value) {
   const loom_value_id_t operands[] = {lhs, rhs};
-  return loom_spirv_extrema_emit(
+  return loom_spirv_collective_emit(
       context, location, descriptor_ref, operands, IREE_ARRAYSIZE(operands),
       loom_named_attr_slice_empty(), result_type, out_value);
 }
@@ -187,10 +180,10 @@ static iree_status_t loom_spirv_extrema_constant(
     return iree_ok_status();
   }
   const loom_value_id_t components[] = {scalar, scalar, scalar, scalar};
-  return loom_spirv_extrema_emit(context, location, arithmetic->row->construct,
-                                 components, arithmetic->row->lane_count,
-                                 loom_named_attr_slice_empty(),
-                                 arithmetic->integer_type, out_value);
+  return loom_spirv_collective_emit(
+      context, location, arithmetic->row->construct, components,
+      arithmetic->row->lane_count, loom_named_attr_slice_empty(),
+      arithmetic->integer_type, out_value);
 }
 
 // The sign transform is an involution: negative IEEE bit patterns reverse
@@ -201,15 +194,15 @@ static iree_status_t loom_spirv_extrema_invert_sign(
     loom_spirv_extrema_constants_t constants, loom_value_id_t value,
     loom_value_id_t* out_value) {
   loom_value_id_t sign = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_spirv_extrema_binary(
+  IREE_RETURN_IF_ERROR(loom_spirv_collective_binary(
       context, location, arithmetic->row->shift_right, value,
       constants.sign_shift, arithmetic->integer_type, &sign));
-  IREE_RETURN_IF_ERROR(loom_spirv_extrema_binary(
+  IREE_RETURN_IF_ERROR(loom_spirv_collective_binary(
       context, location, arithmetic->row->bitwise_and, sign,
       constants.magnitude_mask, arithmetic->integer_type, &sign));
-  return loom_spirv_extrema_binary(context, location,
-                                   arithmetic->row->bitwise_xor, value, sign,
-                                   arithmetic->integer_type, out_value);
+  return loom_spirv_collective_binary(context, location,
+                                      arithmetic->row->bitwise_xor, value, sign,
+                                      arithmetic->integer_type, out_value);
 }
 
 iree_status_t loom_spirv_collective_extrema_encode(
@@ -228,13 +221,13 @@ iree_status_t loom_spirv_collective_extrema_encode(
       context, location, arithmetic, loom_spirv_extrema_infinity(row),
       &out_constants->infinity));
   loom_value_id_t bits, magnitude, is_nan, ordered;
-  IREE_RETURN_IF_ERROR(loom_spirv_extrema_emit(
+  IREE_RETURN_IF_ERROR(loom_spirv_collective_emit(
       context, location, row->to_bits, &value, 1, loom_named_attr_slice_empty(),
       arithmetic->integer_type, &bits));
-  IREE_RETURN_IF_ERROR(loom_spirv_extrema_binary(
+  IREE_RETURN_IF_ERROR(loom_spirv_collective_binary(
       context, location, row->bitwise_and, bits, out_constants->magnitude_mask,
       arithmetic->integer_type, &magnitude));
-  IREE_RETURN_IF_ERROR(loom_spirv_extrema_binary(
+  IREE_RETURN_IF_ERROR(loom_spirv_collective_binary(
       context, location, row->greater_than, magnitude, out_constants->infinity,
       arithmetic->predicate_type, &is_nan));
   IREE_RETURN_IF_ERROR(loom_spirv_extrema_invert_sign(
@@ -254,7 +247,7 @@ iree_status_t loom_spirv_collective_extrema_encode(
         context, location, arithmetic, nan_literal, &nan_key));
   }
   const loom_value_id_t operands[] = {is_nan, nan_key, ordered};
-  return loom_spirv_extrema_emit(
+  return loom_spirv_collective_emit(
       context, location, row->select, operands, IREE_ARRAYSIZE(operands),
       loom_named_attr_slice_empty(), arithmetic->integer_type, out_key);
 }
@@ -274,9 +267,9 @@ iree_status_t loom_spirv_collective_extrema_decode(
           loom_spirv_extrema_identity(arithmetic), &identity));
     }
     loom_value_id_t empty;
-    IREE_RETURN_IF_ERROR(
-        loom_spirv_extrema_binary(context, location, row->equal, key, identity,
-                                  arithmetic->predicate_type, &empty));
+    IREE_RETURN_IF_ERROR(loom_spirv_collective_binary(
+        context, location, row->equal, key, identity,
+        arithmetic->predicate_type, &empty));
     loom_value_id_t infinity = constants.infinity;
     if (!minimum) {
       IREE_RETURN_IF_ERROR(loom_spirv_extrema_constant(
@@ -284,16 +277,16 @@ iree_status_t loom_spirv_collective_extrema_decode(
           &infinity));
     }
     const loom_value_id_t operands[] = {empty, infinity, key};
-    IREE_RETURN_IF_ERROR(loom_spirv_extrema_emit(
+    IREE_RETURN_IF_ERROR(loom_spirv_collective_emit(
         context, location, row->select, operands, IREE_ARRAYSIZE(operands),
         loom_named_attr_slice_empty(), arithmetic->integer_type, &key));
   }
   loom_value_id_t bits = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_spirv_extrema_invert_sign(
       context, location, arithmetic, constants, key, &bits));
-  return loom_spirv_extrema_emit(context, location, row->from_bits, &bits, 1,
-                                 loom_named_attr_slice_empty(),
-                                 arithmetic->float_type, out_value);
+  return loom_spirv_collective_emit(context, location, row->from_bits, &bits, 1,
+                                    loom_named_attr_slice_empty(),
+                                    arithmetic->float_type, out_value);
 }
 
 typedef struct loom_spirv_subgroup_extrema_plan_t {
@@ -380,7 +373,7 @@ iree_status_t loom_spirv_emit_subgroup_extrema(
       plan->arithmetic.row->subgroup[plan->mode][!minimum];
   const loom_named_attr_t cluster = {
       .name_id = plan->cluster_key, .value = loom_attr_i64(plan->cluster_size)};
-  IREE_RETURN_IF_ERROR(loom_spirv_extrema_emit(
+  IREE_RETURN_IF_ERROR(loom_spirv_collective_emit(
       context, source_op->location, descriptor, &value, 1,
       loom_make_named_attr_slice(
           &cluster,
@@ -394,4 +387,280 @@ iree_status_t loom_spirv_emit_subgroup_extrema(
       scan ? loom_kernel_subgroup_scan_result(source_op)
            : loom_kernel_subgroup_reduce_result(source_op),
       value);
+}
+
+struct loom_spirv_product_row_t {
+  // Floating zero constant descriptor.
+  uint32_t constant;
+  // Ordered comparison against zero.
+  uint32_t negative;
+  // Floating subtraction used to negate a value without integer capabilities.
+  uint32_t subtract;
+  // Floating selection controlled by a Boolean sign.
+  uint32_t select;
+  // Scalar magnitude products indexed by native collective mode.
+  uint32_t product[4];
+  // Scalar extraction instructions for two-, three-, and four-lane packets.
+  uint32_t extract[3];
+  // Packet constructors for two-, three-, and four-lane results.
+  uint32_t construct[3];
+};
+
+#define LOOM_SPIRV_PRODUCT_ROW(F)                                                            \
+  {                                                                                          \
+      .constant = SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_CONSTANT_##F,                         \
+      .negative = SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_F_ORD_LESS_THAN_##F,                  \
+      .subtract = SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_FSUB_##F,                             \
+      .select = SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_SELECT_##F,                             \
+      .product =                                                                             \
+          {SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_GROUP_NON_UNIFORM_FMUL_REDUCE_##F,           \
+           SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_GROUP_NON_UNIFORM_FMUL_CLUSTERED_REDUCE_##F, \
+           SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_GROUP_NON_UNIFORM_FMUL_INCLUSIVE_SCAN_##F,   \
+           SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_GROUP_NON_UNIFORM_FMUL_EXCLUSIVE_SCAN_##F},  \
+      .extract =                                                                             \
+          {SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_COMPOSITE_EXTRACT_V2##F##_##F,               \
+           SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_COMPOSITE_EXTRACT_V3##F##_##F,               \
+           SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_COMPOSITE_EXTRACT_V4##F##_##F},              \
+      .construct =                                                                           \
+          {SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_COMPOSITE_CONSTRUCT_V2##F,                   \
+           SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_COMPOSITE_CONSTRUCT_V3##F,                   \
+           SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_COMPOSITE_CONSTRUCT_V4##F},                  \
+  }
+static const loom_spirv_product_row_t kProductRows[] = {
+    LOOM_SPIRV_PRODUCT_ROW(F16),
+    LOOM_SPIRV_PRODUCT_ROW(F32),
+};
+#undef LOOM_SPIRV_PRODUCT_ROW
+
+static const uint32_t kProductSignParity[] = {
+    SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_GROUP_NON_UNIFORM_LOGICAL_XOR_REDUCE_BOOL,
+    SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_GROUP_NON_UNIFORM_LOGICAL_XOR_CLUSTERED_REDUCE_BOOL,
+    SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_GROUP_NON_UNIFORM_LOGICAL_XOR_INCLUSIVE_SCAN_BOOL,
+    SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_GROUP_NON_UNIFORM_LOGICAL_XOR_EXCLUSIVE_SCAN_BOOL,
+};
+
+bool loom_spirv_collective_product_needed(loom_low_lower_context_t* context,
+                                          loom_combining_kind_t kind,
+                                          loom_value_id_t source_value) {
+  if (kind != LOOM_COMBINING_KIND_MULF) {
+    return false;
+  }
+  const loom_scalar_type_t element =
+      loom_type_element_type(loom_module_value_type(
+          loom_low_lower_context_module(context), source_value));
+  if (element != LOOM_SCALAR_TYPE_F16 && element != LOOM_SCALAR_TYPE_F32) {
+    return false;
+  }
+  return loom_value_facts_is_subgroup_uniform(loom_value_fact_table_lookup(
+      loom_low_lower_context_fact_table(context), source_value));
+}
+
+iree_status_t loom_spirv_collective_product_initialize(
+    loom_low_lower_context_t* context, loom_scalar_type_t element_type,
+    loom_spirv_collective_product_t* out_arithmetic) {
+  *out_arithmetic = (loom_spirv_collective_product_t){
+      .row = &kProductRows[element_type == LOOM_SCALAR_TYPE_F32]};
+  IREE_RETURN_IF_ERROR(loom_spirv_collective_type(context, element_type, 1,
+                                                  &out_arithmetic->float_type));
+  IREE_RETURN_IF_ERROR(loom_spirv_collective_type(
+      context, LOOM_SCALAR_TYPE_I1, 1, &out_arithmetic->predicate_type));
+  return loom_module_intern_string(loom_low_lower_context_module(context),
+                                   element_type == LOOM_SCALAR_TYPE_F16
+                                       ? IREE_SV("f16_bits")
+                                       : IREE_SV("f32_bits"),
+                                   &out_arithmetic->constant_key);
+}
+
+iree_status_t loom_spirv_collective_product_emit(
+    loom_low_lower_context_t* context, loom_location_id_t location,
+    const loom_spirv_collective_product_t* arithmetic,
+    loom_spirv_collective_mode_t mode, loom_named_attr_slice_t attributes,
+    loom_value_id_t value, loom_value_id_t* out_value) {
+  const loom_spirv_product_row_t* row = arithmetic->row;
+  const loom_low_lower_resolved_descriptor_t descriptor = {
+      .descriptor = loom_low_descriptor_set_descriptor_at(
+          loom_low_lower_context_descriptor_set(context), row->constant)};
+  const loom_named_attr_t attribute = {.name_id = arithmetic->constant_key,
+                                       .value = loom_attr_i64(0)};
+  loom_op_t* constant = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_const(
+      context, &descriptor, loom_make_named_attr_slice(&attribute, 1),
+      arithmetic->float_type, location, &constant));
+  const loom_value_id_t zero = loom_op_const_results(constant)[0];
+  loom_value_id_t negative, negated, magnitude, parity, product;
+  IREE_RETURN_IF_ERROR(loom_spirv_collective_binary(
+      context, location, row->negative, value, zero, arithmetic->predicate_type,
+      &negative));
+  IREE_RETURN_IF_ERROR(
+      loom_spirv_collective_binary(context, location, row->subtract, zero,
+                                   value, arithmetic->float_type, &negated));
+  IREE_RETURN_IF_ERROR(loom_spirv_collective_emit(
+      context, location, row->select,
+      (loom_value_id_t[]){negative, negated, value}, 3,
+      loom_named_attr_slice_empty(), arithmetic->float_type, &magnitude));
+  // Uniform products may be strength-reduced through log/exp by a driver.
+  // Keep every floating collective input nonnegative and reduce its sign
+  // separately, using the same active lanes and empty-prefix identity.
+  IREE_RETURN_IF_ERROR(loom_spirv_collective_emit(
+      context, location, row->product[mode], &magnitude, 1, attributes,
+      arithmetic->float_type, &product));
+  IREE_RETURN_IF_ERROR(loom_spirv_collective_emit(
+      context, location, kProductSignParity[mode], &negative, 1, attributes,
+      arithmetic->predicate_type, &parity));
+  IREE_RETURN_IF_ERROR(
+      loom_spirv_collective_binary(context, location, row->subtract, zero,
+                                   product, arithmetic->float_type, &negated));
+  return loom_spirv_collective_emit(
+      context, location, row->select,
+      (loom_value_id_t[]){parity, negated, product}, 3,
+      loom_named_attr_slice_empty(), arithmetic->float_type, out_value);
+}
+
+typedef struct loom_spirv_subgroup_product_plan_t {
+  // Scalar arithmetic shared with workgroup partials.
+  loom_spirv_collective_product_t arithmetic;
+  // Native source/result packet type; vector1 uses a scalar register.
+  loom_type_t packet_type;
+  // Collective topology shared by magnitude and sign.
+  loom_spirv_collective_mode_t mode;
+  // Explicit cluster extent, zero for whole-subgroup operations.
+  uint32_t cluster_size;
+  // Interned immediate name for a contiguous cluster's extent.
+  loom_string_id_t cluster_key;
+  // Interned immediate name for packet component extraction.
+  loom_string_id_t component_key;
+  // Number of scalar components independently reduced.
+  uint8_t component_count;
+} loom_spirv_subgroup_product_plan_t;
+
+iree_status_t loom_spirv_select_subgroup_product(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_plan_t* out_plan) {
+  const bool scan = loom_kernel_subgroup_scan_isa(source_op);
+  const loom_value_id_t value =
+      scan ? loom_kernel_subgroup_scan_value(source_op)
+           : loom_kernel_subgroup_reduce_value(source_op);
+  if (!loom_spirv_collective_product_needed(context, LOOM_COMBINING_KIND_MULF,
+                                            value) ||
+      (source_op->instance_flags & LOOM_KERNEL_COLLECTIVEMATHFLAGS_PRESERVE)) {
+    return iree_ok_status();
+  }
+  const uint32_t cluster_size =
+      (uint32_t)(scan ? loom_kernel_subgroup_scan_cluster_size(source_op)
+                      : loom_kernel_subgroup_reduce_cluster_size(source_op));
+  const uint32_t stride =
+      (uint32_t)(scan ? loom_kernel_subgroup_scan_cluster_stride(source_op)
+                      : loom_kernel_subgroup_reduce_cluster_stride(source_op));
+  const uint32_t subgroup_size =
+      loom_low_lower_context_bundle(context)->snapshot->subgroup_size;
+  const bool clustered = cluster_size != 0 && cluster_size != subgroup_size;
+  if (stride > 1 ||
+      (scan &&
+       (clustered || loom_kernel_subgroup_scan_direction(source_op) !=
+                         LOOM_KERNEL_SUBGROUP_SCAN_DIRECTION_FORWARD)) ||
+      (clustered && cluster_size != 1 &&
+       (cluster_size > subgroup_size ||
+        (cluster_size & (cluster_size - 1)) != 0))) {
+    return iree_ok_status();
+  }
+  loom_module_t* module = loom_low_lower_context_module(context);
+  const loom_type_t type = loom_module_value_type(module, value);
+  const loom_scalar_type_t element = loom_type_element_type(type);
+  const uint64_t lanes =
+      loom_type_is_scalar(type) ? 1
+      : loom_type_rank(type) == 1 && loom_type_is_all_static(type)
+          ? loom_type_dim_static_size_at(type, 0)
+          : 0;
+  const uint64_t required_features =
+      (clustered ? LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM_CLUSTERED
+                 : LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM_ARITHMETIC) |
+      (element == LOOM_SCALAR_TYPE_F16
+           ? LOOM_SPIRV_FEATURE_FLOAT16 |
+                 LOOM_SPIRV_FEATURE_SUBGROUP_EXTENDED_TYPES
+           : 0);
+  if (lanes == 0 || lanes > 4 ||
+      (required_features & ~loom_low_lower_context_bundle(context)
+                                ->config->contract_feature_bits)) {
+    return iree_ok_status();
+  }
+  loom_spirv_subgroup_product_plan_t* plan = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_allocate_plan_data(context, sizeof(*plan), (void**)&plan));
+  *plan = (loom_spirv_subgroup_product_plan_t){
+      .component_count = (uint8_t)lanes,
+      .cluster_size = cluster_size,
+      .mode = clustered ? LOOM_SPIRV_COLLECTIVE_CLUSTERED_REDUCE
+                        : LOOM_SPIRV_COLLECTIVE_REDUCE};
+  if (scan) {
+    plan->mode = loom_kernel_subgroup_scan_mode(source_op) ==
+                         LOOM_KERNEL_SUBGROUP_SCAN_MODE_INCLUSIVE
+                     ? LOOM_SPIRV_COLLECTIVE_INCLUSIVE_SCAN
+                     : LOOM_SPIRV_COLLECTIVE_EXCLUSIVE_SCAN;
+  }
+  IREE_RETURN_IF_ERROR(loom_spirv_collective_product_initialize(
+      context, element, &plan->arithmetic));
+  IREE_RETURN_IF_ERROR(loom_spirv_collective_type(
+      context, element, (uint8_t)lanes, &plan->packet_type));
+  IREE_RETURN_IF_ERROR(loom_module_intern_string(
+      module, IREE_SV("component_index"), &plan->component_key));
+  if (clustered) {
+    IREE_RETURN_IF_ERROR(loom_module_intern_string(
+        module, IREE_SV("cluster_size"), &plan->cluster_key));
+  }
+  IREE_RETURN_IF_ERROR(loom_low_lower_plan_value_type(
+      context,
+      scan ? loom_kernel_subgroup_scan_result(source_op)
+           : loom_kernel_subgroup_reduce_result(source_op),
+      plan->packet_type));
+  *out_plan = loom_low_lower_plan_make(source_op->kind, plan);
+  return iree_ok_status();
+}
+
+iree_status_t loom_spirv_emit_subgroup_product(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_plan_t selected_plan) {
+  const loom_spirv_subgroup_product_plan_t* plan = selected_plan.target_data;
+  const bool scan = loom_kernel_subgroup_scan_isa(source_op);
+  const loom_value_id_t packet = loom_low_lower_lookup_value(
+      context, scan ? loom_kernel_subgroup_scan_value(source_op)
+                    : loom_kernel_subgroup_reduce_value(source_op));
+  const loom_named_attr_t cluster = {
+      .name_id = plan->cluster_key, .value = loom_attr_i64(plan->cluster_size)};
+  const loom_named_attr_slice_t attributes = loom_make_named_attr_slice(
+      &cluster, plan->mode == LOOM_SPIRV_COLLECTIVE_CLUSTERED_REDUCE ? 1 : 0);
+  loom_value_id_t components[4];
+  iree_status_t status = iree_ok_status();
+  for (uint8_t i = 0; i < plan->component_count && iree_status_is_ok(status);
+       ++i) {
+    loom_value_id_t value = packet;
+    if (plan->component_count > 1) {
+      const loom_named_attr_t component = {.name_id = plan->component_key,
+                                           .value = loom_attr_i64(i)};
+      status = loom_spirv_collective_emit(
+          context, source_op->location,
+          plan->arithmetic.row->extract[plan->component_count - 2], &packet, 1,
+          loom_make_named_attr_slice(&component, 1),
+          plan->arithmetic.float_type, &value);
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_spirv_collective_product_emit(
+          context, source_op->location, &plan->arithmetic, plan->mode,
+          attributes, value, &components[i]);
+    }
+  }
+  if (iree_status_is_ok(status) && plan->component_count > 1) {
+    status = loom_spirv_collective_emit(
+        context, source_op->location,
+        plan->arithmetic.row->construct[plan->component_count - 2], components,
+        plan->component_count, loom_named_attr_slice_empty(), plan->packet_type,
+        &components[0]);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_low_lower_bind_value(
+        context,
+        scan ? loom_kernel_subgroup_scan_result(source_op)
+             : loom_kernel_subgroup_reduce_result(source_op),
+        components[0]);
+  }
+  return status;
 }
