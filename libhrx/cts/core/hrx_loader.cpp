@@ -124,7 +124,6 @@ void HrxLoader::load(const std::string& path) {
   LOAD(cpu_device_get);
 
   LOAD(device_get_property);
-  LOAD(device_synchronize);
   LOAD(device_get_type);
   LOAD(device_retain);
   LOAD(device_release);

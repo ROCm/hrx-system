@@ -166,19 +166,6 @@ hrx_status_t hrx_device_get_property(hrx_device_t device,
   }
 }
 
-hrx_status_t hrx_device_synchronize(hrx_device_t device) {
-  if (!device) {
-    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "device is NULL");
-  }
-  // Deprecated no-op compatibility shim. IREE requires callers to wait on
-  // explicit semaphore payloads; an empty wait list returns immediately.
-  iree_hal_semaphore_list_t empty = iree_hal_semaphore_list_empty();
-  iree_status_t status = iree_hal_device_wait_semaphores(
-      device->hal_device, IREE_ASYNC_WAIT_MODE_ALL, empty,
-      iree_infinite_timeout(), /*flags=*/0);
-  return hrx_status_from_iree(status);
-}
-
 hrx_status_t hrx_device_get_type(hrx_device_t device,
                                  hrx_accelerator_type_t* type) {
   if (!device || !type) {

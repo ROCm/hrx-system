@@ -54,10 +54,6 @@ TEST_CASE_METHOD(HrxTestFixture, "Device get_type matches accelerator",
   REQUIRE(type == g_test_device_type);
 }
 
-TEST_CASE_METHOD(HrxTestFixture, "Device synchronize succeeds", "[device]") {
-  REQUIRE_OK(hrx().device_synchronize(device_));
-}
-
 TEST_CASE_METHOD(HrxTestFixture, "Invalid device property returns error",
                  "[device]") {
   uint32_t val;

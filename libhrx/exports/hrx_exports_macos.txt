@@ -23,7 +23,6 @@ _hrx_cpu_shutdown
 _hrx_cpu_device_count
 _hrx_cpu_device_get
 _hrx_device_get_property
-_hrx_device_synchronize
 _hrx_device_get_type
 _hrx_device_retain
 _hrx_device_release

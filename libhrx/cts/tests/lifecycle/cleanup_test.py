@@ -13,11 +13,6 @@ def main():
     cases = [
         ("Runtime version is valid", 0, ""),
         (
-            "Fixture cleanup error reaches process exit",
-            1,
-            "fixture cleanup error witness",
-        ),
-        (
             "Accelerator cleanup error reaches process exit",
             1,
             "accelerator cleanup error witness",
