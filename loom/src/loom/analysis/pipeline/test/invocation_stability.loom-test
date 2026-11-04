@@ -89,3 +89,278 @@ invocation 1 @phase strands=2 channels=1
     repetitions=4 sources_stable=no
     group %group transfers=1 completed-by=%group
   worker 1 geometry=1:1:1 actions=2
+
+// ====
+// RUN: emit pipeline-invocations @test
+
+// The visible noinline consumer writes only its output view. Parent noalias
+// partitions survive both child bindings, so the producer can read ahead.
+func.def noinline @write_result(%payload: view<16xi32>, %output: view<16xi32>) {
+  %value = view.load %payload[0] : view<16xi32> -> i32
+  view.store %value, %output[0] : i32, view<16xi32>
+  func.return
+}
+
+func.def @copy_records(%input: view<16xi32>, %records: channel<tile<16xi32>>) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%begin: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %end : index
+  cfg.cond_br %more, ^copy, ^done
+^copy:
+  %write, %payload = channel.reserve %records : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+  %transfer = kernel.async.copy %input to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+  %group = kernel.async.group %transfer : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.publish %write : write<tile<16xi32>>
+  %next = index.add %iteration, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+func.def @consume_records(%output: view<16xi32>, %records: channel<tile<16xi32>>) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%begin: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %end : index
+  cfg.cond_br %more, ^consume, ^done
+^consume:
+  %read, %payload = channel.acquire %records : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+  func.call @write_result(%payload, %output) : (view<16xi32>, view<16xi32>)
+  channel.release %read : read<tile<16xi32>>
+  %next = index.add %iteration, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def @producer() run(%input: view<16xi32>, %records: channel<tile<16xi32>>) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @copy_records(%input, %records) : (view<16xi32>, channel<tile<16xi32>>)
+  }
+}
+
+pipeline.def @consumer() run(%output: view<16xi32>, %records: channel<tile<16xi32>>) {
+  pipeline.strand workers([1], [1], [1]) {
+    func.call @consume_records(%output, %records) : (view<16xi32>, channel<tile<16xi32>>)
+  }
+}
+
+pipeline.def public @test() run(%input_argument: buffer, %output_argument: buffer, %storage_argument: buffer) {
+  %input_unique, %output_unique, %storage_unique = buffer.assume.noalias %input_argument, %output_argument, %storage_argument : buffer, buffer, buffer
+  %input = buffer.assume.memory_space<global> %input_unique : buffer
+  %output = buffer.assume.memory_space<global> %output_unique : buffer
+  %storage = buffer.assume.memory_space<workgroup> %storage_unique : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %input_view = buffer.view %input[%origin] : buffer -> view<16xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<16xi32>
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x16xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.compose @producer(%input_view, %records) : (view<16xi32>, channel<tile<16xi32>>)
+  pipeline.compose @consumer(%output_view, %records) : (view<16xi32>, channel<tile<16xi32>>)
+}
+
+// ----
+inventory invocations=3 workers=2 channels=1
+  execution 0 = 1:0
+  execution 1 = 2:0
+  protocol 0 = 0:%records external
+invocation 0 @test strands=0 channels=1
+  concurrent 0
+invocation 1 @producer strands=1 channels=0
+  channel %records = 0:%records capacity=2 inventory=0
+  worker 0 geometry=0:1:1 actions=2
+    repetitions=4 sources_stable=yes
+    group %group transfers=1 completed-by=%group
+  concurrent 1
+invocation 2 @consumer strands=1 channels=0
+  channel %records = 0:%records capacity=2 inventory=0
+  worker 0 geometry=1:1:1 actions=2
+
+// ====
+// RUN: emit pipeline-invocations @test
+
+// A visible helper can still modify the source through a sibling child.
+// Forwarding the input view as output must invalidate the read-ahead proof.
+func.def noinline @write_result(%payload: view<16xi32>, %output: view<16xi32>) {
+  %value = view.load %payload[0] : view<16xi32> -> i32
+  view.store %value, %output[0] : i32, view<16xi32>
+  func.return
+}
+
+func.def @copy_records(%input: view<16xi32>, %records: channel<tile<16xi32>>) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%begin: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %end : index
+  cfg.cond_br %more, ^copy, ^done
+^copy:
+  %write, %payload = channel.reserve %records : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+  %transfer = kernel.async.copy %input to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+  %group = kernel.async.group %transfer : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.publish %write : write<tile<16xi32>>
+  %next = index.add %iteration, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+func.def @consume_records(%output: view<16xi32>, %records: channel<tile<16xi32>>) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%begin: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %end : index
+  cfg.cond_br %more, ^consume, ^done
+^consume:
+  %read, %payload = channel.acquire %records : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+  func.call @write_result(%payload, %output) : (view<16xi32>, view<16xi32>)
+  channel.release %read : read<tile<16xi32>>
+  %next = index.add %iteration, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def @producer() run(%input: view<16xi32>, %records: channel<tile<16xi32>>) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @copy_records(%input, %records) : (view<16xi32>, channel<tile<16xi32>>)
+  }
+}
+
+pipeline.def @consumer() run(%output: view<16xi32>, %records: channel<tile<16xi32>>) {
+  pipeline.strand workers([1], [1], [1]) {
+    func.call @consume_records(%output, %records) : (view<16xi32>, channel<tile<16xi32>>)
+  }
+}
+
+pipeline.def public @test() run(%input_argument: buffer, %output_argument: buffer, %storage_argument: buffer) {
+  %input_unique, %output_unique, %storage_unique = buffer.assume.noalias %input_argument, %output_argument, %storage_argument : buffer, buffer, buffer
+  %input = buffer.assume.memory_space<global> %input_unique : buffer
+  %output = buffer.assume.memory_space<global> %output_unique : buffer
+  %storage = buffer.assume.memory_space<workgroup> %storage_unique : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %input_view = buffer.view %input[%origin] : buffer -> view<16xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<16xi32>
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x16xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.compose @producer(%input_view, %records) : (view<16xi32>, channel<tile<16xi32>>)
+  pipeline.compose @consumer(%input_view, %records) : (view<16xi32>, channel<tile<16xi32>>)
+}
+
+// ----
+inventory invocations=3 workers=2 channels=1
+  execution 0 = 1:0
+  execution 1 = 2:0
+  protocol 0 = 0:%records external
+invocation 0 @test strands=0 channels=1
+  concurrent 0
+invocation 1 @producer strands=1 channels=0
+  channel %records = 0:%records capacity=2 inventory=0
+  worker 0 geometry=0:1:1 actions=2
+    repetitions=4 sources_stable=no
+    group %group transfers=1 completed-by=%group
+  concurrent 1
+invocation 2 @consumer strands=1 channels=0
+  channel %records = 0:%records capacity=2 inventory=0
+  worker 0 geometry=1:1:1 actions=2
+
+// ====
+// RUN: emit pipeline-invocations @test
+
+// An unavailable helper may have ambient writes. Distinct actual arguments
+// alone do not establish source stability without its effect contract.
+func.decl @write_result(%payload: view<16xi32>, %output: view<16xi32>)
+
+func.def @copy_records(%input: view<16xi32>, %records: channel<tile<16xi32>>) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%begin: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %end : index
+  cfg.cond_br %more, ^copy, ^done
+^copy:
+  %write, %payload = channel.reserve %records : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+  %transfer = kernel.async.copy %input to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+  %group = kernel.async.group %transfer : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.publish %write : write<tile<16xi32>>
+  %next = index.add %iteration, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+func.def @consume_records(%output: view<16xi32>, %records: channel<tile<16xi32>>) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%begin: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %end : index
+  cfg.cond_br %more, ^consume, ^done
+^consume:
+  %read, %payload = channel.acquire %records : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+  func.call @write_result(%payload, %output) : (view<16xi32>, view<16xi32>)
+  channel.release %read : read<tile<16xi32>>
+  %next = index.add %iteration, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def @producer() run(%input: view<16xi32>, %records: channel<tile<16xi32>>) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @copy_records(%input, %records) : (view<16xi32>, channel<tile<16xi32>>)
+  }
+}
+
+pipeline.def @consumer() run(%output: view<16xi32>, %records: channel<tile<16xi32>>) {
+  pipeline.strand workers([1], [1], [1]) {
+    func.call @consume_records(%output, %records) : (view<16xi32>, channel<tile<16xi32>>)
+  }
+}
+
+pipeline.def public @test() run(%input_argument: buffer, %output_argument: buffer, %storage_argument: buffer) {
+  %input_unique, %output_unique, %storage_unique = buffer.assume.noalias %input_argument, %output_argument, %storage_argument : buffer, buffer, buffer
+  %input = buffer.assume.memory_space<global> %input_unique : buffer
+  %output = buffer.assume.memory_space<global> %output_unique : buffer
+  %storage = buffer.assume.memory_space<workgroup> %storage_unique : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %input_view = buffer.view %input[%origin] : buffer -> view<16xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<16xi32>
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x16xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.compose @producer(%input_view, %records) : (view<16xi32>, channel<tile<16xi32>>)
+  pipeline.compose @consumer(%output_view, %records) : (view<16xi32>, channel<tile<16xi32>>)
+}
+
+// ----
+inventory invocations=3 workers=2 channels=1
+  execution 0 = 1:0
+  execution 1 = 2:0
+  protocol 0 = 0:%records external
+invocation 0 @test strands=0 channels=1
+  concurrent 0
+invocation 1 @producer strands=1 channels=0
+  channel %records = 0:%records capacity=2 inventory=0
+  worker 0 geometry=0:1:1 actions=2
+    repetitions=4 sources_stable=no
+    group %group transfers=1 completed-by=%group
+  concurrent 1
+invocation 2 @consumer strands=1 channels=0
+  channel %records = 0:%records capacity=2 inventory=0
+  worker 0 geometry=1:1:1 actions=2

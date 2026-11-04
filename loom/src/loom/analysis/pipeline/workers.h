@@ -11,6 +11,7 @@
 #include "loom/analysis/kernel_synchronization_legality.h"
 #include "loom/analysis/pipeline/arguments.h"
 #include "loom/analysis/pipeline/resources.h"
+#include "loom/analysis/storage_access.h"
 #include "loom/util/cfg_graph.h"
 #include "loom/util/fact_cfg.h"
 
@@ -247,9 +248,9 @@ typedef struct loom_pipeline_worker_t {
 // their originating construction instead of being reconstructed from addresses
 // or payload types. callables supplies visible channel-aware helper summaries
 // when such calls survive source inlining; ordinary calls need no summary.
-// is_root identifies the complete resident invocation. A child cannot prove
-// source stability from its own workers: concurrent outer workers can mutate
-// captured storage even when all of the child's channels are local.
+// storage_access belongs to the enclosing immutable source snapshot and is
+// shared by every concurrent child. This function does not prove external
+// source immutability from the effects of only one child.
 //
 // Each worker receives its own facts and communication plan, even when several
 // strands call the same function. Target selection consumes these results and
@@ -268,11 +269,24 @@ iree_status_t loom_pipeline_workers_build(
     loom_module_t* module, const loom_pipeline_resources_t* resources,
     const loom_value_fact_table_t* construction_facts,
     const loom_pipeline_channel_binding_t* incoming,
-    iree_host_size_t incoming_count, bool is_root,
-    const loom_func_like_t* functions,
+    iree_host_size_t incoming_count, const loom_func_like_t* functions,
     const loom_channel_plan_callable_t* const* callables,
+    loom_storage_access_scope_t* storage_access,
     iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
     loom_pipeline_worker_t* workers, bool* out_valid);
+
+// Proves repeated transport sources immutable across a complete concurrent
+// execution. The invocation owner supplies every worker occurrence in that
+// closed execution, including children receiving incoming channels. An open
+// child or a construction with unresolved compositions cannot close this proof.
+// Call once after construction and before physical selection or source
+// mutation. Uses the same canonical access scope as worker construction;
+// modified roots and alias partitions are indexed once for all source queries.
+// Unproven sources keep sources_stable false. Status carries arena allocation
+// failure.
+iree_status_t loom_pipeline_workers_prove_sources(
+    loom_storage_access_scope_t* storage_access,
+    loom_pipeline_worker_t* workers, iree_host_size_t worker_count);
 
 #ifdef __cplusplus
 }  // extern "C"

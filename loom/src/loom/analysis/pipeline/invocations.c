@@ -442,6 +442,8 @@ iree_status_t loom_pipeline_invocations_analyze_workers(
     loom_pipeline_worker_t** out_workers, bool* out_valid) {
   *out_workers = NULL;
   *out_valid = false;
+  loom_storage_access_scope_t storage_access;
+  loom_storage_access_scope_initialize(module, arena, &storage_access);
   loom_pipeline_worker_t* workers = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, invocations->worker_count, sizeof(*workers), (void**)&workers));
@@ -454,13 +456,15 @@ iree_status_t loom_pipeline_invocations_analyze_workers(
     IREE_RETURN_IF_ERROR(loom_pipeline_workers_build(
         module, invocation->resources, invocation->facts,
         invocation->arguments.channels, invocation->arguments.channel_count,
-        /*is_root=*/i == 0,
         functions ? functions + invocation->first_worker : NULL, NULL,
-        diagnostic_emitter, arena, workers + invocation->first_worker, &valid));
+        &storage_access, diagnostic_emitter, arena,
+        workers + invocation->first_worker, &valid));
     if (!valid) {
       return iree_ok_status();
     }
   }
+  IREE_RETURN_IF_ERROR(loom_pipeline_workers_prove_sources(
+      &storage_access, workers, invocations->worker_count));
   *out_workers = workers;
   *out_valid = true;
   return iree_ok_status();

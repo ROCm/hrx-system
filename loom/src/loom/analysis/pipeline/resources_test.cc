@@ -384,6 +384,8 @@ TEST_F(PipelineConstructionTest, CapturesKeepProtocolAndStorageSeparate) {
   // Selecting every worker before rewriting any of them retains those facts
   // without tying channel identity to the shared SSA argument or storage root.
   loom_pipeline_worker_t* workers[2] = {};
+  loom_storage_access_scope_t storage_access;
+  loom_storage_access_scope_initialize(module_, &arena_, &storage_access);
   const loom_pipeline_resources_t* occurrences[] = {&resources, &repeated};
   for (size_t occurrence = 0; occurrence < 2; ++occurrence) {
     IREE_ASSERT_OK(iree_arena_allocate_array(
@@ -391,8 +393,8 @@ TEST_F(PipelineConstructionTest, CapturesKeepProtocolAndStorageSeparate) {
         sizeof(*workers[occurrence]),
         reinterpret_cast<void**>(&workers[occurrence])));
     IREE_ASSERT_OK(loom_pipeline_workers_build(
-        module_, occurrences[occurrence], &facts, nullptr, 0, /*is_root=*/true,
-        nullptr, nullptr, {}, &arena_, workers[occurrence], &valid));
+        module_, occurrences[occurrence], &facts, nullptr, 0, nullptr, nullptr,
+        &storage_access, {}, &arena_, workers[occurrence], &valid));
     ASSERT_TRUE(valid);
   }
   const auto* worker_arguments =
@@ -483,8 +485,8 @@ TEST_F(PipelineConstructionTest, CapturesKeepProtocolAndStorageSeparate) {
     loom_pipeline_worker_t child_workers[1];
     IREE_ASSERT_OK(loom_pipeline_workers_build(
         module_, &child_resources, &child_facts, arguments.channels,
-        arguments.channel_count, /*is_root=*/false, nullptr, nullptr, {},
-        &arena_, child_workers, &valid));
+        arguments.channel_count, nullptr, nullptr, &storage_access, {}, &arena_,
+        child_workers, &valid));
     ASSERT_TRUE(valid);
     EXPECT_EQ(child_workers[0].axes[0].origin, 7u);
     for (size_t i = 0; i < 2; ++i) {

@@ -1,0 +1,206 @@
+// RUN: emit pipeline-transport @stream
+
+// The consumer writes a distinct noalias root. Its independent worker
+// does not invalidate the producer's repeated source.
+func.def @produce(%input: buffer, %records: channel<tile<1xi32>>) {
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<1xi32>
+  cfg.br ^header(%begin: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %end : index
+  cfg.cond_br %more, ^body, ^done
+^body:
+  %write, %payload = channel.reserve %records : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  %transfer = kernel.async.copy %source to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<1xi32> to view<1xi32> -> kernel.async.token
+  %group = kernel.async.group %transfer : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.publish %write : write<tile<1xi32>>
+  %next = index.add %iteration, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+func.def @consume(%output: buffer, %records: channel<tile<1xi32>>) {
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %destination = buffer.view %output[%origin] : buffer -> view<1xi32>
+  cfg.br ^header(%begin: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %end : index
+  cfg.cond_br %more, ^body, ^done
+^body:
+  %read, %payload = channel.acquire %records : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+  %value = view.load %payload[0] : view<1xi32> -> i32
+  view.store %value, %destination[0] : i32, view<1xi32>
+  channel.release %read : read<tile<1xi32>>
+  %next = index.add %iteration, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def<kernel> public @stream() run(%input_arg: buffer, %output_arg: buffer, %storage_arg: buffer) {
+  %input_unique, %output_unique, %storage_unique = buffer.assume.noalias %input_arg, %output_arg, %storage_arg : buffer, buffer, buffer
+  %input = buffer.assume.memory_space<global> %input_unique : buffer
+  %output = buffer.assume.memory_space<global> %output_unique : buffer
+  %storage = buffer.assume.memory_space<workgroup> %storage_unique : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x1xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<2x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @produce(%input, %records) : (buffer, channel<tile<1xi32>>)
+  }
+  pipeline.strand workers([1], [1], [1]) {
+    func.call @consume(%output, %records) : (buffer, channel<tile<1xi32>>)
+  }
+}
+
+// ----
+worker 0: transport=borrowed-movement execution_counts=exact batches=0 streams=1
+  repetitions=8 sources_stable=yes
+worker 1: transport=unproven execution_counts=exact batches=0 streams=0
+
+// ====
+// RUN: emit pipeline-transport @stream
+
+// A feedback write invalidates read-ahead even though the entry arguments
+// carry noalias facts: both workers actually receive the same storage.
+func.def @produce(%input: buffer, %records: channel<tile<1xi32>>) {
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<1xi32>
+  cfg.br ^header(%begin: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %end : index
+  cfg.cond_br %more, ^body, ^done
+^body:
+  %write, %payload = channel.reserve %records : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  %transfer = kernel.async.copy %source to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<1xi32> to view<1xi32> -> kernel.async.token
+  %group = kernel.async.group %transfer : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.publish %write : write<tile<1xi32>>
+  %next = index.add %iteration, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+func.def @consume(%output: buffer, %records: channel<tile<1xi32>>) {
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %destination = buffer.view %output[%origin] : buffer -> view<1xi32>
+  cfg.br ^header(%begin: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %end : index
+  cfg.cond_br %more, ^body, ^done
+^body:
+  %read, %payload = channel.acquire %records : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+  %value = view.load %payload[0] : view<1xi32> -> i32
+  view.store %value, %destination[0] : i32, view<1xi32>
+  channel.release %read : read<tile<1xi32>>
+  %next = index.add %iteration, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def<kernel> public @stream() run(%input_arg: buffer, %output_arg: buffer, %storage_arg: buffer) {
+  %input_unique, %output_unique, %storage_unique = buffer.assume.noalias %input_arg, %output_arg, %storage_arg : buffer, buffer, buffer
+  %input = buffer.assume.memory_space<global> %input_unique : buffer
+  %output = buffer.assume.memory_space<global> %output_unique : buffer
+  %storage = buffer.assume.memory_space<workgroup> %storage_unique : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x1xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<2x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @produce(%input, %records) : (buffer, channel<tile<1xi32>>)
+  }
+  pipeline.strand workers([1], [1], [1]) {
+    func.call @consume(%input, %records) : (buffer, channel<tile<1xi32>>)
+  }
+}
+
+// ----
+worker 0: transport=borrowed-movement execution_counts=exact batches=0 streams=1
+  repetitions=8 sources_stable=no
+worker 1: transport=unproven execution_counts=exact batches=0 streams=0
+
+// ====
+// RUN: emit pipeline-transport @stream
+
+// Different argument values alone do not prove disjoint storage.
+func.def @produce(%input: buffer, %records: channel<tile<1xi32>>) {
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<1xi32>
+  cfg.br ^header(%begin: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %end : index
+  cfg.cond_br %more, ^body, ^done
+^body:
+  %write, %payload = channel.reserve %records : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  %transfer = kernel.async.copy %source to %payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<1xi32> to view<1xi32> -> kernel.async.token
+  %group = kernel.async.group %transfer : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.publish %write : write<tile<1xi32>>
+  %next = index.add %iteration, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+func.def @consume(%output: buffer, %records: channel<tile<1xi32>>) {
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %destination = buffer.view %output[%origin] : buffer -> view<1xi32>
+  cfg.br ^header(%begin: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %end : index
+  cfg.cond_br %more, ^body, ^done
+^body:
+  %read, %payload = channel.acquire %records : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+  %value = view.load %payload[0] : view<1xi32> -> i32
+  view.store %value, %destination[0] : i32, view<1xi32>
+  channel.release %read : read<tile<1xi32>>
+  %next = index.add %iteration, %step : index
+  cfg.br ^header(%next: index)
+^done:
+  func.return
+}
+
+pipeline.def<kernel> public @stream() run(%input_arg: buffer, %output_arg: buffer, %storage_arg: buffer) {
+  %input = buffer.assume.memory_space<global> %input_arg : buffer
+  %output = buffer.assume.memory_space<global> %output_arg : buffer
+  %storage = buffer.assume.memory_space<workgroup> %storage_arg : buffer
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x1xi32>
+  %records = channel.bind<fifo> %slots, %capacity : view<2x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @produce(%input, %records) : (buffer, channel<tile<1xi32>>)
+  }
+  pipeline.strand workers([1], [1], [1]) {
+    func.call @consume(%output, %records) : (buffer, channel<tile<1xi32>>)
+  }
+}
+
+// ----
+worker 0: transport=borrowed-movement execution_counts=exact batches=0 streams=1
+  repetitions=8 sources_stable=no
+worker 1: transport=unproven execution_counts=exact batches=0 streams=0
