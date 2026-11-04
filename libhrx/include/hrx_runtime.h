@@ -508,10 +508,6 @@ HRX_API hrx_status_t hrx_device_get_property(hrx_device_t device,
                                              hrx_device_property_t prop,
                                              void* value, size_t value_size);
 
-// Deprecated: devices do not own a single implicit timeline. Synchronize
-// explicit streams, semaphores, or fences instead.
-HRX_API hrx_status_t hrx_device_synchronize(hrx_device_t device);
-
 HRX_API hrx_status_t hrx_device_get_type(hrx_device_t device,
                                          hrx_accelerator_type_t* type);
 

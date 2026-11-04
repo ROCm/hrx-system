@@ -206,8 +206,9 @@ cudaError_t CUDAAPI cudaDeviceReset(void) {
 }
 
 cudaError_t CUDAAPI cudaDeviceSynchronize(void) {
-  // TODO: Implement device synchronize.
-  return cudaErrorNotSupported;
+  cudaError_t result = iree_cuda_error_from_cu_result(cuCtxSynchronize());
+  iree_cuda_set_error(result);
+  return result;
 }
 
 cudaError_t CUDAAPI cudaDeviceGetLimit(size_t* pValue, cudaLimit limit) {

@@ -76,7 +76,6 @@ class HrxLoader {
 
   // Device ops.
   decltype(&hrx_device_get_property) device_get_property;
-  decltype(&hrx_device_synchronize) device_synchronize;
   decltype(&hrx_device_get_type) device_get_type;
   decltype(&hrx_device_retain) device_retain;
   decltype(&hrx_device_release) device_release;

@@ -44,23 +44,9 @@ TEST_CASE("Double init returns ALREADY_EXISTS", "[lifecycle]") {
   hrx().status_ignore(status);
 }
 
-// These hidden cases are launched by cleanup_test.py, which checks the real
-// harness exit status. Only dependency return values are replaced; the CPU
-// runtime still shuts down normally in each child process.
-TEST_CASE("Fixture cleanup error reaches process exit", "[.cleanup]") {
-  REQUIRE(g_test_device_type == HRX_ACCELERATOR_CPU);
-  const auto synchronize = hrx().device_synchronize;
-  hrx().device_synchronize = [](hrx_device_t) {
-    return hrx().make_status(HRX_STATUS_ABORTED,
-                             "fixture cleanup error witness");
-  };
-  {
-    struct Fixture : HrxTestFixture {};
-    Fixture fixture;
-  }
-  hrx().device_synchronize = synchronize;
-}
-
+// This hidden case is launched by cleanup_test.py, which checks the real
+// harness exit status. The CPU runtime shuts down normally before the injected
+// terminal error is reported.
 TEST_CASE("Accelerator cleanup error reaches process exit", "[.cleanup]") {
   REQUIRE(g_test_device_type == HRX_ACCELERATOR_CPU);
   static auto shutdown = hrx().cpu_shutdown;
