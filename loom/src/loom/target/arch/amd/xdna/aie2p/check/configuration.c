@@ -93,12 +93,16 @@ static iree_status_t loom_aie2p_configuration_check_run(loom_pass_t* pass,
       .scratch_arena = pass->arena,
       .allocator = iree_allocator_system(),
   };
+  loom_aie2p_program_source_table_t program_sources;
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_source_table_initialize(
+      module, &symbol_facts, &versions, &registry.registry,
+      pass->diagnostic_emitter, pass->arena, &program_sources));
   loom_aie2p_configuration_plan_t* plan = NULL;
   loom_aie2p_xdna_entry_t entry = {0};
   bool accepted = false;
   iree_status_t status = loom_aie2p_configuration_plan_build(
-      &request, &versions, entry_op, entry_facts->device_profile, &plan, &entry,
-      &accepted);
+      &request, &versions, &program_sources, entry_op,
+      entry_facts->device_profile, &plan, &entry, &accepted);
   if (iree_status_is_ok(status) && accepted) {
     loom_aie2p_program_compiler_t* compiler = NULL;
     status = loom_aie2p_program_compiler_allocate(

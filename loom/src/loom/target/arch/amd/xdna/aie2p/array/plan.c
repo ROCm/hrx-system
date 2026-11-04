@@ -118,8 +118,7 @@ typedef struct loom_aie2p_array_plan_builder_t {
   const loom_op_t* function_op;
   const loom_low_descriptor_set_t* descriptor_set;
   const loom_xdna_array_family_t* family;
-  const loom_aie2p_array_leaf_t* leaves;
-  iree_host_size_t leaf_count;
+  loom_aie2p_program_source_table_t* program_sources;
   // Caller-owned sink for structured failures in authored array topology.
   iree_diagnostic_emitter_t diagnostic_emitter;
   // Whether private construction still satisfies authored target admission.
@@ -184,18 +183,6 @@ static iree_status_t loom_aie2p_array_allocate_array(
 static bool loom_aie2p_array_symbol_ref_equal(loom_symbol_ref_t lhs,
                                               loom_symbol_ref_t rhs) {
   return lhs.module_id == rhs.module_id && lhs.symbol_id == rhs.symbol_id;
-}
-
-static const loom_aie2p_array_leaf_t* loom_aie2p_array_find_leaf(
-    const loom_aie2p_array_plan_builder_t* builder, loom_symbol_ref_t entry) {
-  const loom_aie2p_array_leaf_t* result = NULL;
-  for (iree_host_size_t i = 0; i < builder->leaf_count; ++i) {
-    if (loom_aie2p_array_symbol_ref_equal(builder->leaves[i].entry, entry)) {
-      IREE_ASSERT(result == NULL, "leaf table entries must be unique");
-      result = &builder->leaves[i];
-    }
-  }
-  return result;
 }
 
 static uint64_t loom_aie2p_array_constant(
@@ -437,9 +424,22 @@ static iree_status_t loom_aie2p_array_extract_worker(
     builder->valid = false;
     return iree_diagnostic_emit(builder->diagnostic_emitter, &emission);
   }
-  worker->leaf = loom_aie2p_array_find_leaf(builder, worker->entry);
-  IREE_ASSERT(worker->leaf != NULL,
-              "verified resident worker must select a core leaf");
+  bool source_resolved = false;
+  loom_aie2p_program_source_function_t* source = NULL;
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_source_table_resolve(
+      builder->program_sources, worker->entry, &source_resolved, &source));
+  if (!source_resolved) {
+    builder->valid = false;
+    return iree_ok_status();
+  }
+  bool helpers_admitted = false;
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_source_admit_direct_helpers(
+      builder->program_sources, source, &helpers_admitted));
+  if (!helpers_admitted) {
+    builder->valid = false;
+    return iree_ok_status();
+  }
+  worker->source = source;
   worker->fold_record_count = 0;
   worker->fold_output_port = 0;
   worker->fold_output_count = 0;
@@ -1197,7 +1197,8 @@ static bool loom_aie2p_array_read_only_data_proposal_conflicts(
     }
     const loom_low_read_only_data_requirement_t* prior_requirement =
         &builder->workers[worker_index]
-             .leaf->requirements.read_only_data[placement->requirement_ordinal];
+             .source->requirements
+             .read_only_data[placement->requirement_ordinal];
     if (!loom_aie2p_array_read_only_data_conflicts_with(
             requirement, prior_requirement->symbol)) {
       continue;
@@ -1246,8 +1247,9 @@ static iree_status_t loom_aie2p_array_plan_workers(
     loom_aie2p_array_plan_builder_t* builder) {
   for (iree_host_size_t i = 0; i < builder->plan->worker_count; ++i) {
     const loom_aie2p_array_worker_t* worker = &builder->workers[i];
-    const loom_aie2p_array_leaf_t* leaf = worker->leaf;
-    const loom_low_function_requirements_t* requirements = &leaf->requirements;
+    const loom_aie2p_program_source_function_t* source = worker->source;
+    const loom_low_function_requirements_t* requirements =
+        &source->requirements;
     builder->worker_plans[i] = (loom_aie2p_array_worker_plan_t){
         .worker_index = (uint32_t)i,
         .coordinate = worker->coordinate,
@@ -1306,7 +1308,7 @@ static iree_status_t loom_aie2p_array_plan_workers(
     builder->worker_plans[worker_index].first_read_only_data =
         (uint32_t)builder->read_only_data_cursor;
     const loom_low_function_requirements_t* requirements =
-        &worker->leaf->requirements;
+        &worker->source->requirements;
     loom_aie2p_array_tile_state_t* tile_state =
         loom_aie2p_array_tile_state(builder, worker->coordinate);
     for (iree_host_size_t requirement_ordinal = 0;
@@ -2266,7 +2268,7 @@ static iree_status_t loom_aie2p_array_admit_physical_cardinalities(
     const loom_aie2p_array_worker_t* worker = &builder->workers[i];
     out_cardinalities->worker_port_count += worker->active_endpoint_count;
     const loom_low_function_requirements_t* requirements =
-        &worker->leaf->requirements;
+        &worker->source->requirements;
     for (uint32_t space = 0; space < LOOM_STORAGE_SPACE_COUNT_; ++space) {
       out_cardinalities->worker_storage_count +=
           loom_low_storage_layout_requirement(&requirements->storage_layout,
@@ -2375,7 +2377,7 @@ static void loom_aie2p_array_finalize_worker_port_states(
     loom_aie2p_array_worker_plan_t* worker_plan =
         &builder->worker_plans[worker_index];
     uint32_t next_state_ordinal =
-        (uint32_t)worker->leaf->requirements.resource_count;
+        (uint32_t)worker->source->requirements.resource_count;
     for (uint32_t port_ordinal = 0; port_ordinal < worker_plan->port_count;
          ++port_ordinal) {
       loom_aie2p_array_worker_port_plan_t* port =
@@ -2412,7 +2414,7 @@ static void loom_aie2p_array_finalize_physical_counts(
 
 iree_status_t loom_aie2p_array_plan_build(
     const loom_module_t* module, const loom_op_t* function_op,
-    const loom_aie2p_array_leaf_t* leaves, iree_host_size_t leaf_count,
+    loom_aie2p_program_source_table_t* program_sources,
     iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
     loom_aie2p_array_plan_t* out_plan, bool* out_valid) {
   *out_plan = (loom_aie2p_array_plan_t){0};
@@ -2424,8 +2426,7 @@ iree_status_t loom_aie2p_array_plan_build(
   loom_aie2p_array_plan_t plan = {
       .function_op = function_op,
       .family = loom_xdna_npu2_array_family(),
-      .source_leaves = leaves,
-      .source_leaf_count = leaf_count,
+      .program_sources = program_sources,
   };
   const loom_aie2p_array_abi_layout_t abi_layout =
       loom_aie2p_array_abi_layout_from_verified(function_op);
@@ -2435,8 +2436,7 @@ iree_status_t loom_aie2p_array_plan_build(
       .function_op = function_op,
       .descriptor_set = loom_aie2p_array_descriptor_set(),
       .family = loom_xdna_npu2_array_family(),
-      .leaves = leaves,
-      .leaf_count = leaf_count,
+      .program_sources = program_sources,
       .diagnostic_emitter = diagnostic_emitter,
       .valid = true,
       .has_explicit_binding_slot_count = abi_layout.has_binding_slot_count,

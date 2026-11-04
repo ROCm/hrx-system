@@ -519,7 +519,7 @@ static iree_status_t loom_aie2p_array_topology_validate_worker_interfaces(
     const uint32_t worker_index = endpoint->owner_index;
     loom_aie2p_array_worker_t* worker = &topology->workers[worker_index];
     const loom_low_function_requirements_t* requirements =
-        &worker->leaf->requirements;
+        &worker->source->requirements;
     ++worker->active_endpoint_count;
 
     uint32_t active_endpoint_count = 0;
@@ -566,7 +566,7 @@ static iree_status_t loom_aie2p_array_topology_validate_worker_interfaces(
   for (uint32_t worker_index = 0; worker_index < topology->plan->worker_count;
        ++worker_index) {
     const loom_low_function_requirements_t* requirements =
-        &topology->workers[worker_index].leaf->requirements;
+        &topology->workers[worker_index].source->requirements;
     for (iree_host_size_t resource_ordinal = 0;
          resource_ordinal < requirements->resource_count; ++resource_ordinal) {
       const loom_op_t* resource = requirements->resources[resource_ordinal];

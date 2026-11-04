@@ -16,7 +16,6 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/abi_layout.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/configuration_descriptors.h"
-#include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/configuration_report.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/configuration_storage.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_compile.h"
@@ -63,8 +62,8 @@ typedef struct loom_aie2p_configuration_memory_t {
 typedef struct loom_aie2p_configuration_load_t {
   // Authored load operation used for placement diagnostics.
   const loom_op_t* op;
-  // Complete core function selected by the load.
-  loom_symbol_ref_t symbol;
+  // Admitted core source selected by the load.
+  const loom_aie2p_program_source_function_t* source;
   // Physical compute tile receiving the program.
   loom_xdna_tile_coordinate_t coordinate;
 } loom_aie2p_configuration_load_t;
@@ -74,6 +73,8 @@ struct loom_aie2p_configuration_plan_t {
   const loom_aie2p_xdna_artifact_request_t* request;
   // Entry-time symbol index borrowing versions from the compilation request.
   loom_target_function_version_snapshot_t versions;
+  // Artifact-scoped source-function index shared across configuration plans.
+  loom_aie2p_program_source_table_t* program_sources;
   // Device facts governing physical coordinates and DMA address encoding.
   const loom_xdna_array_family_t* family;
   // Product entry populated by the three explicit phases.
@@ -201,9 +202,24 @@ static iree_status_t loom_aie2p_configuration_plan_load(
     return loom_aie2p_configuration_diagnose(emitter, op, LOOM_ERR_XDNA_046,
                                              params, IREE_ARRAYSIZE(params));
   }
+  bool source_resolved = false;
+  loom_aie2p_program_source_function_t* source = NULL;
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_source_table_resolve(
+      emitter->program_sources, symbol, &source_resolved, &source));
+  if (!source_resolved) {
+    ++emitter->error_count;
+    return iree_ok_status();
+  }
+  bool helpers_admitted = false;
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_source_admit_direct_helpers(
+      emitter->program_sources, source, &helpers_admitted));
+  if (!helpers_admitted) {
+    ++emitter->error_count;
+    return iree_ok_status();
+  }
   *out_load = (loom_aie2p_configuration_load_t){
       .op = op,
-      .symbol = symbol,
+      .source = source,
       .coordinate = {(uint16_t)column, (uint16_t)row},
   };
   return iree_ok_status();
@@ -212,9 +228,11 @@ static iree_status_t loom_aie2p_configuration_plan_load(
 static iree_status_t loom_aie2p_configuration_compile_worker(
     loom_aie2p_configuration_plan_t* emitter,
     loom_aie2p_program_compiler_t* compiler,
-    loom_aie2p_configuration_worker_set_t* worker_set, loom_symbol_ref_t symbol,
+    loom_aie2p_configuration_worker_set_t* worker_set,
+    const loom_aie2p_program_source_function_t* source,
     loom_aie2p_leaf_contribution_t** out_worker) {
   const loom_aie2p_xdna_artifact_request_t* request = emitter->request;
+  const loom_symbol_ref_t symbol = source->symbol;
   loom_aie2p_leaf_contribution_t* worker =
       worker_set->contributions_by_symbol[symbol.symbol_id];
   if (!worker) {
@@ -224,62 +242,26 @@ static iree_status_t loom_aie2p_configuration_compile_worker(
     IREE_RETURN_IF_ERROR(iree_arena_allocate(request->scratch_arena,
                                              sizeof(*worker), (void**)&worker));
     *worker = (loom_aie2p_leaf_contribution_t){0};
-    loom_op_t* function =
-        request->module->symbols.entries[symbol.symbol_id].defining_op;
-    const loom_target_function_version_t* version =
-        loom_target_function_version_snapshot_at(&emitter->versions,
-                                                 symbol.symbol_id);
-    loom_low_function_requirements_t requirements = {0};
-    IREE_RETURN_IF_ERROR(loom_low_function_requirements_build(
-        request->module, loom_aie2p_core_descriptor_set(),
-        loom_low_func_def_body(function), request->scratch_arena,
-        &requirements));
+    loom_op_t* function = (loom_op_t*)source->function_op;
+    const loom_low_function_requirements_t* requirements =
+        &source->requirements;
     loom_aie2p_program_helper_t* direct_helpers = NULL;
-    if (requirements.direct_callees.count != 0) {
+    if (requirements->direct_callees.count != 0) {
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          request->scratch_arena, requirements.direct_callees.count,
+          request->scratch_arena, requirements->direct_callees.count,
           sizeof(*direct_helpers), (void**)&direct_helpers));
     }
-    for (iree_host_size_t i = 0; i < requirements.direct_callees.count; ++i) {
+    for (iree_host_size_t i = 0; i < requirements->direct_callees.count; ++i) {
       const loom_symbol_ref_t helper_ref =
-          requirements.direct_callees.values[i].symbol;
-      if (helper_ref.module_id != 0 ||
-          helper_ref.symbol_id >= request->module->symbols.count) {
-        return iree_make_status(
-            IREE_STATUS_UNIMPLEMENTED,
-            "AIE2P native helper must be a module-internal Low definition");
-      }
-      const loom_symbol_t* helper_symbol =
-          &request->module->symbols.entries[helper_ref.symbol_id];
-      if (helper_symbol->defining_op == NULL ||
-          !loom_low_func_def_isa(helper_symbol->defining_op) ||
-          !loom_func_like_is_module_internal(loom_func_like_const_cast(
-              request->module, helper_symbol->defining_op))) {
-        return iree_make_status(
-            IREE_STATUS_UNIMPLEMENTED,
-            "AIE2P native helper must be a module-internal Low definition");
-      }
-      loom_low_function_requirements_t helper_requirements = {0};
-      IREE_RETURN_IF_ERROR(loom_low_function_requirements_build(
-          request->module, loom_aie2p_core_descriptor_set(),
-          loom_low_func_def_body(helper_symbol->defining_op),
-          request->scratch_arena, &helper_requirements));
-      if (helper_requirements.direct_callees.count != 0) {
-        return iree_make_status(
-            IREE_STATUS_UNIMPLEMENTED,
-            "AIE2P native helpers must be direct, call-free leaves");
-      }
-      const loom_target_function_version_t* helper_version =
-          loom_target_function_version_snapshot_at(&emitter->versions,
-                                                   helper_ref.symbol_id);
+          requirements->direct_callees.values[i].symbol;
+      const loom_aie2p_program_source_function_t* helper =
+          loom_aie2p_program_source_table_lookup(emitter->program_sources,
+                                                 helper_ref);
       direct_helpers[i] = (loom_aie2p_program_helper_t){
           .function = helper_ref,
-          .function_target_facts =
-              helper_version ? helper_version->function_target_facts : NULL,
-          .memory_accesses =
-              helper_version ? helper_version->memory_accesses : NULL,
-          .loop_execution =
-              helper_version ? helper_version->loop_execution : NULL,
+          .function_target_facts = helper->target.target_facts,
+          .memory_accesses = helper->memory_accesses,
+          .loop_execution = helper->loop_execution,
       };
     }
     loom_target_compile_report_t report;
@@ -293,10 +275,9 @@ static iree_status_t loom_aie2p_configuration_compile_worker(
     }
     const loom_aie2p_leaf_compile_options_t options = {
         .descriptor_registry = request->low_descriptor_registry,
-        .function_target_facts =
-            version ? version->function_target_facts : NULL,
-        .memory_accesses = version ? version->memory_accesses : NULL,
-        .loop_execution = version ? version->loop_execution : NULL,
+        .function_target_facts = source->target.target_facts,
+        .memory_accesses = source->memory_accesses,
+        .loop_execution = source->loop_execution,
         .diagnostic_emitter = request->diagnostic_emitter,
         .compile_report = report_ptr,
     };
@@ -305,7 +286,7 @@ static iree_status_t loom_aie2p_configuration_compile_worker(
         compiler, function,
         (loom_aie2p_program_helper_list_t){
             .values = direct_helpers,
-            .count = requirements.direct_callees.count,
+            .count = requirements->direct_callees.count,
         },
         &options, &compiled, worker);
     if (report_ptr) {
@@ -849,6 +830,7 @@ static iree_status_t loom_aie2p_configuration_phase_emit(
 iree_status_t loom_aie2p_configuration_plan_build(
     const loom_aie2p_xdna_artifact_request_t* request,
     const loom_target_function_version_snapshot_t* versions,
+    loom_aie2p_program_source_table_t* program_sources,
     const loom_op_t* entry_op, const loom_xdna_device_profile_t* device_profile,
     loom_aie2p_configuration_plan_t** out_plan,
     loom_aie2p_xdna_entry_t* out_entry, bool* out_valid) {
@@ -868,6 +850,7 @@ iree_status_t loom_aie2p_configuration_plan_build(
   *plan = (loom_aie2p_configuration_plan_t){
       .request = request,
       .versions = *versions,
+      .program_sources = program_sources,
       .family = loom_xdna_device_profile_array_family(device_profile),
       .entry = out_entry,
       .initialize = loom_symbol_ref_null(),
@@ -960,7 +943,7 @@ iree_status_t loom_aie2p_configuration_plan_materialize(
     const loom_aie2p_configuration_load_t* load = &plan->loads[i];
     loom_aie2p_leaf_contribution_t* worker = NULL;
     IREE_RETURN_IF_ERROR(loom_aie2p_configuration_compile_worker(
-        plan, compiler, worker_set, load->symbol, &worker));
+        plan, compiler, worker_set, load->source, &worker));
     if (plan->error_count) {
       return iree_ok_status();
     }
