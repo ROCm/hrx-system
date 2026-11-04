@@ -159,13 +159,12 @@ static iree_status_t loom_serve_text_request_check_run(
   loom_serve_compilation_report_t compilation = {0};
   if ((!!FLAG_control[0] == !!FLAG_model[0]) ||
       (FLAG_preset[0] && !FLAG_model[0]) || !FLAG_tokenizer[0] ||
-      !FLAG_request[0] || FLAG_capacity <= 0 || FLAG_capacity > 262144 ||
-      FLAG_response_chunk_size < 0) {
+      !FLAG_request[0] || FLAG_capacity <= 0 || FLAG_response_chunk_size < 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "exactly one of --control or --model, --tokenizer, and --request "
         "are required; --preset requires --model; "
-        "capacity is [1, 262144]");
+        "capacity must be positive");
   }
   const loom_serve_sources_t requested_sources = {
       .base_directory = IREE_SV("."),
