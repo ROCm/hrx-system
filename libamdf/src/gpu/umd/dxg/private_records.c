@@ -18,6 +18,10 @@
 //   https://github.com/ROCm/rocm-systems/blob/develop/projects/rocr-runtime/libhsakmt/src/topology.c
 // - the open Linux KFD policy and DXG queue use documented by:
 //   https://github.com/ROCm/rocm-systems/pull/10573
+// - the public PAL scratch limits for GFX9 through GFX12 at commit
+//   c5e800072a32f68b6ccc4422936d96167c6e0728:
+//   https://github.com/GPUOpen-Drivers/pal/blob/c5e800072a32f68b6ccc4422936d96167c6e0728/src/core/hw/gfxip/gfx9/gfx9Chip.h
+//   https://github.com/GPUOpen-Drivers/pal/blob/c5e800072a32f68b6ccc4422936d96167c6e0728/src/core/hw/gfxip/gfx12/gfx12Chip.h
 
 #include "libamdf/src/gpu/umd/dxg/private_records.h"
 
@@ -336,15 +340,7 @@ static amdf_dxg_private_result_t amdf_dxg_private_decode_adapter(
   info.wavefront_size = amdf_dxg_private_load_u32(extended_record + 0xC5C);
   info.compute_unit_count = (uint32_t)compute_unit_count;
   info.maximum_wave_count_per_compute_unit = gfxip.major == 9 ? 40 : 32;
-  if (gfxip.major == 9) {
-    info.maximum_scratch_wave_count_per_compute_unit = 64;
-  } else if (gfxip.major == 12) {
-    info.maximum_scratch_wave_count_per_compute_unit = 256;
-  } else if (gfxip.major == 10 || gfxip.major == 11) {
-    info.maximum_scratch_wave_count_per_compute_unit = 128;
-  } else {
-    info.maximum_scratch_wave_count_per_compute_unit = 64;
-  }
+  info.maximum_scratch_wave_count_per_compute_unit = 32;
   info.local_data_share_byte_length = 64 * 1024;
   info.shader_engine_count = (uint32_t)shader_engine_count;
   info.xcc_count = xcc_count;

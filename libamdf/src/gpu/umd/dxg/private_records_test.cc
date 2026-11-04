@@ -579,7 +579,7 @@ TEST(PrivateRecordsTest, QueriesSelectedPhysicalAdapterExactly) {
   EXPECT_EQ(info.wavefront_size, 32u);
   EXPECT_EQ(info.compute_unit_count, 12u);
   EXPECT_EQ(info.maximum_wave_count_per_compute_unit, 32u);
-  EXPECT_EQ(info.maximum_scratch_wave_count_per_compute_unit, 128u);
+  EXPECT_EQ(info.maximum_scratch_wave_count_per_compute_unit, 32u);
   EXPECT_EQ(info.local_data_share_byte_length, 64u * 1024);
   EXPECT_EQ(info.shader_engine_count, 2u);
   EXPECT_EQ(info.xcc_count, 1u);
@@ -668,10 +668,10 @@ TEST(PrivateRecordsTest, DecodesEveryComputeUnitLayout) {
     uint32_t expected_scratch_wave_count;
   };
   const TestCase test_cases[] = {
-      {0x00090000, 12, 40, 64},
-      {0x000A0300, 14, 32, 128},
-      {0x000B0500, 14, 32, 128},
-      {0x000C0000, 14, 32, 256},
+      {0x00090000, 12, 40, 32},
+      {0x000A0300, 14, 32, 32},
+      {0x000B0500, 14, 32, 32},
+      {0x000C0000, 14, 32, 32},
   };
   for (const TestCase& test_case : test_cases) {
     AdapterQueryFixture fixture;
@@ -688,6 +688,8 @@ TEST(PrivateRecordsTest, DecodesEveryComputeUnitLayout) {
               test_case.expected_wave_count);
     EXPECT_EQ(info.maximum_scratch_wave_count_per_compute_unit,
               test_case.expected_scratch_wave_count);
+    EXPECT_LE(info.maximum_scratch_wave_count_per_compute_unit,
+              info.maximum_wave_count_per_compute_unit);
   }
 }
 
