@@ -216,6 +216,7 @@ _REL32_DESCRIPTOR_KEYS = (
     "amdgpu.s_add_u32.rhs_symbol_rel32_lo",
     "amdgpu.s_addc_u32.rhs_symbol_rel32_hi",
 )
+_COMPACT_DESCRIPTOR_ORDINAL_NONE = (1 << 16) - 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -818,6 +819,8 @@ def _materialize_descriptor_ref_tables(
             raise ValueError(f"AMDGPU target-ref generation is missing materialized descriptor set '{descriptor_set_info.key}'") from exc
         if descriptor_set.key != descriptor_set_info.key:
             raise ValueError(f"AMDGPU target-ref generation expected descriptor set '{descriptor_set_info.key}', got '{descriptor_set.key}'")
+        if len(descriptor_set.descriptors) > _COMPACT_DESCRIPTOR_ORDINAL_NONE:
+            raise ValueError(f"AMDGPU descriptor set '{descriptor_set.key}' has {len(descriptor_set.descriptors)} descriptors, which do not fit compact target-ref ordinals")
         _validate_lowering_descriptor_contracts(descriptor_set)
         descriptor_ordinals = {descriptor.key: ordinal for ordinal, descriptor in enumerate(descriptor_set.descriptors)}
         descriptor_refs = [_descriptor_ref_constant_name(descriptor.key) if descriptor.key in descriptor_ref_key_set else None for descriptor in descriptor_set.descriptors]
@@ -882,6 +885,7 @@ def _emit_tables_header(descriptor_sets: Sequence[DescriptorSet]) -> str:
         "",
         '#include "loom/codegen/low/immediate_fields.h"',
         "",
+        "#define LOOM_AMDGPU_DESCRIPTOR_ORDINAL_NONE UINT16_MAX",
         "#define LOOM_AMDGPU_DESCRIPTOR_REF_NONE UINT16_MAX",
         f"#define LOOM_AMDGPU_DESCRIPTOR_REF_COUNT {_u16_literal(len(descriptor_ref_keys))}",
         f"#define LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT {_u16_literal(len(sorted_descriptor_set_infos()))}",
@@ -938,9 +942,9 @@ def _emit_source(
     for descriptor_set_table in descriptor_set_tables:
         table_name = _descriptor_set_table_name(descriptor_set_table.descriptor_set_key)
         descriptor_ordinal_table_symbol = array_emitter.append_value_array(
-            "uint32_t",
+            "uint16_t",
             table_name,
-            ["LOOM_LOW_DESCRIPTOR_ORDINAL_NONE" if descriptor_ordinal is None else f"{descriptor_ordinal}u" for descriptor_ordinal in descriptor_set_table.descriptor_ordinals],
+            ["LOOM_AMDGPU_DESCRIPTOR_ORDINAL_NONE" if descriptor_ordinal is None else _u16_literal(descriptor_ordinal) for descriptor_ordinal in descriptor_set_table.descriptor_ordinals],
             emit_empty=True,
         )
         descriptor_ref_table_name = _descriptor_ref_table_name(descriptor_set_table.descriptor_set_key)
@@ -1006,7 +1010,7 @@ def _emit_source(
             reg_class_traits=reg_class_trait_table_symbol,
         )
 
-    lines.append("const uint32_t* const kLoomAmdgpuDescriptorRefOrdinalTables[LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT] = {")
+    lines.append("const uint16_t* const kLoomAmdgpuDescriptorRefOrdinalTables[LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT] = {")
     for descriptor_set_table in descriptor_set_tables:
         symbols = symbols_by_descriptor_set_key[descriptor_set_table.descriptor_set_key]
         lines.append(f"    [{_u16_literal(descriptor_set_table.descriptor_set_ordinal)}] = {symbols.descriptor_ordinals},")

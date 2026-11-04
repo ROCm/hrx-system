@@ -8,7 +8,7 @@
 
 #include <stddef.h>
 
-extern const uint32_t* const kLoomAmdgpuDescriptorRefOrdinalTables[];
+extern const uint16_t* const kLoomAmdgpuDescriptorRefOrdinalTables[];
 extern const uint16_t* const kLoomAmdgpuDescriptorRefByOrdinalTables[];
 extern const loom_amdgpu_descriptor_traits_t* const
     kLoomAmdgpuDescriptorTraitTables[];
@@ -33,7 +33,7 @@ static uint16_t loom_amdgpu_target_ref_descriptor_set_ordinal(
   return descriptor_set_ordinal;
 }
 
-static const uint32_t* loom_amdgpu_descriptor_ref_ordinal_table(
+static const uint16_t* loom_amdgpu_descriptor_ref_ordinal_table(
     const loom_low_descriptor_set_t* descriptor_set) {
   const uint16_t descriptor_set_ordinal =
       loom_amdgpu_target_ref_descriptor_set_ordinal(descriptor_set);
@@ -101,7 +101,7 @@ uint32_t loom_amdgpu_descriptor_ref_ordinal(
   if (descriptor_ref >= LOOM_AMDGPU_DESCRIPTOR_REF_COUNT) {
     return LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
   }
-  const uint32_t* descriptor_ordinals =
+  const uint16_t* descriptor_ordinals =
       loom_amdgpu_descriptor_ref_ordinal_table(descriptor_set);
   if (descriptor_ordinals == NULL) {
     return LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;

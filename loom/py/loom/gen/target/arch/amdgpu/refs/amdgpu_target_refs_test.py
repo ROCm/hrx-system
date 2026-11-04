@@ -310,6 +310,22 @@ def test_target_ref_tables_use_prebuilt_descriptor_sets() -> None:
     assert len(tables[0].cache_scope_immediate_slots) == len(descriptor_set.descriptors)
 
 
+def test_target_ref_tables_reject_descriptor_ordinals_wider_than_storage() -> None:
+    descriptor_set_info = sorted_descriptor_set_infos()[0]
+    descriptor_set = replace(
+        _descriptor_set(*_valid_contract_descriptors()),
+        key=descriptor_set_info.key,
+        descriptors=(_valid_contract_descriptors()[0],) * (amdgpu_target_refs._COMPACT_DESCRIPTOR_ORDINAL_NONE + 1),
+        reg_classes=_AMDGPU_CDNA2_CORE_DESCRIPTOR_SET_BASE.reg_classes,
+    )
+
+    with _raises_value_error("do not fit compact target-ref ordinals"):
+        amdgpu_target_refs._materialize_descriptor_ref_tables(
+            (descriptor_set_info,),
+            {descriptor_set_info.key: descriptor_set},
+        )
+
+
 def test_exact_target_materialization_includes_compatible_portable_view() -> None:
     rdna3_5_info = amdgpu_descriptor_set_info_by_generator_target("rdna3_5")
     gfx11_info = amdgpu_descriptor_set_info_by_generator_target("gfx11_generic")
@@ -361,6 +377,9 @@ def test_target_ref_source_shares_exact_tables() -> None:
         )
         assert f" {second_table_name}[] = {{" not in source
         assert (f"[{amdgpu_target_refs._u16_literal(amdgpu_descriptor_set_ordinal(second_info.key))}] = {first_table_name},") in source
+    first_ordinal_table_name = amdgpu_target_refs._descriptor_set_table_name(first_info.key)
+    assert f"static const uint16_t {first_ordinal_table_name}[] = {{" in source
+    assert "LOOM_AMDGPU_DESCRIPTOR_ORDINAL_NONE" in source
 
 
 def test_accumulator_class_ids_follow_each_descriptor_set() -> None:
