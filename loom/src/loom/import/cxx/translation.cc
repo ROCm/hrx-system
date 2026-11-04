@@ -34,7 +34,6 @@
 #include "iree/base/api.h"
 #include "loom/import/cxx/binding/assumptions.h"
 #include "loom/import/cxx/binding/command_programs.h"
-#include "loom/import/cxx/binding/command_schedule.h"
 #include "loom/import/cxx/binding/config.h"
 #include "loom/import/cxx/binding/constexpr.h"
 #include "loom/import/cxx/binding/exponent.h"
@@ -45,6 +44,7 @@
 #include "loom/import/cxx/binding/launch.h"
 #include "loom/import/cxx/binding/loop_schedule.h"
 #include "loom/import/cxx/binding/pipeline_strand.h"
+#include "loom/import/cxx/binding/schedule_region.h"
 #include "loom/import/cxx/binding/target_definitions.h"
 #include "loom/import/cxx/binding/template_definitions.h"
 #include "loom/import/cxx/check.h"
@@ -4657,36 +4657,39 @@ class Translator final : private Initialization::Evaluation {
     return iteration_statement(body, tracks_break);
   }
 
-  void command_schedule(const CommandSchedule& schedule) {
-    if (current_function_.kind != FunctionKind::CommandProgram) {
+  void schedule_region(const ScheduleRegion& schedule) {
+    const bool pipeline = current_function_.kind == FunctionKind::Pipeline;
+    if (!pipeline && current_function_.kind != FunctionKind::CommandProgram) {
       fail(schedule.body,
-           "serial and concurrent regions require a command_program body");
+           "schedule regions require a command_program or pipeline body");
+    }
+    if (pipeline && pipeline_strand_depth_) {
+      fail(schedule.body, "pipeline serial regions belong outside strands");
+    }
+    if (pipeline && schedule.kind != ScheduleRegion::Kind::Serial) {
+      fail(schedule.body, "pipeline schedules support serial regions only");
     }
     if (!live_mutations(schedule.body).empty()) {
       fail(schedule.body,
-           "command schedule regions cannot update enclosing automatic "
+           "schedule regions cannot update enclosing automatic "
            "values because they have no results");
-    }
-    if (control_->returns(schedule.body) != ExitFlow::None) {
-      fail(schedule.body,
-           "command schedule regions cannot contain function returns");
-    }
-    if (control_->iteration_exits(schedule.body) != ExitFlow::None) {
-      fail(schedule.body,
-           "command schedule regions cannot exit an enclosing loop");
     }
 
     loom_op_t* op;
-    if (schedule.kind == CommandSchedule::Kind::Serial) {
+    loom_region_t* region;
+    if (pipeline) {
+      check(loom_pipeline_serial_build(&builder_, locations_.get(schedule.body),
+                                       &op));
+      region = loom_pipeline_serial_body(op);
+    } else if (schedule.kind == ScheduleRegion::Kind::Serial) {
       check(loom_command_serial_build(&builder_, locations_.get(schedule.body),
                                       &op));
+      region = loom_command_serial_body(op);
     } else {
       check(loom_command_concurrent_build(&builder_,
                                           locations_.get(schedule.body), &op));
+      region = loom_command_concurrent_body(op);
     }
-    auto* region = schedule.kind == CommandSchedule::Kind::Serial
-                       ? loom_command_serial_body(op)
-                       : loom_command_concurrent_body(op);
     auto saved = loom_builder_enter_region(&builder_, op, region);
     auto outer_values = values_;
     for (auto* child : cxx::ListView{schedule.body->statementList}) {
@@ -4696,8 +4699,13 @@ class Translator final : private Initialization::Evaluation {
       }
     }
     loom_op_t* terminator;
-    check(loom_command_yield_build(&builder_, locations_.get(schedule.body),
-                                   &terminator));
+    if (pipeline) {
+      check(loom_pipeline_yield_build(&builder_, locations_.get(schedule.body),
+                                      &terminator));
+    } else {
+      check(loom_command_yield_build(&builder_, locations_.get(schedule.body),
+                                     &terminator));
+    }
     values_ = std::move(outer_values);
     loom_builder_restore(&builder_, saved);
   }
@@ -4710,12 +4718,6 @@ class Translator final : private Initialization::Evaluation {
       fail(strand.body,
            "pipeline strands cannot update enclosing automatic values "
            "because they have no results");
-    }
-    if (control_->returns(strand.body) != ExitFlow::None) {
-      fail(strand.body, "pipeline strands cannot contain function returns");
-    }
-    if (control_->iteration_exits(strand.body) != ExitFlow::None) {
-      fail(strand.body, "pipeline strands cannot exit an enclosing loop");
     }
 
     auto origins = dynamic_indices(strand.origins);
@@ -4814,8 +4816,8 @@ class Translator final : private Initialization::Evaluation {
     if (!ast) {
       return;
     }
-    if (auto schedule = CommandSchedule::resolve(unit_, diagnostics_, ast)) {
-      command_schedule(*schedule);
+    if (auto schedule = ScheduleRegion::resolve(unit_, diagnostics_, ast)) {
+      schedule_region(*schedule);
       return;
     }
     if (auto strand =

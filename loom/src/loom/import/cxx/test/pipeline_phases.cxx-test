@@ -1,0 +1,124 @@
+// RUN: roundtrip
+#include <loomcxx/pipeline.h>
+
+using Bytes = loom::type::buffer<unsigned>;
+
+// A definition inherits its composable contract from the declaration.
+[[loom::pipeline]] void child([[loom::launch]] Bytes output, unsigned phase);
+
+void child(Bytes output, unsigned phase) {
+  [[loom::strand(loom::type::indices{loom::type::index{0}, loom::type::index{2}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}})]] {
+    auto values = loom::buffer::view<4>(output, {});
+    loom::view::store(phase + 1u, values, phase);
+  }
+}
+
+[[loom::pipeline("kernel"), loom::retain]]
+void resident([[loom::launch]] Bytes output) {
+  [[loom::serial]] {
+    for (unsigned phase = 0; phase < 3; ++phase) {
+      loom::pipeline::compose<child>(output, phase);
+    }
+    [[loom::serial]] {
+      // A discarded return does not escape this region.
+      if constexpr (false) { return; }
+      loom::pipeline::compose<child>(output, 3u);
+    }
+  }
+}
+
+// ----
+pipeline.def public @child() run(%output: buffer, %phase: i32) {
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %2 = index.constant 0 : offset
+    %values = buffer.view %output[%2] : buffer -> view<4xi32>
+    %4 = scalar.constant 1 : i32
+    %5 = scalar.addi %phase, %4 : i32
+    %6 = scalar.extui %phase : i32 to i64
+    %7 = index.cast %6 : i64 to index
+    view.store %5, %values[%7] : i32, view<4xi32>
+  }
+}
+
+pipeline.def<kernel> public retain @resident() run(%output: buffer) {
+  pipeline.serial {
+    %phase = scalar.constant 0 : i32
+    %10 = index.cast %phase : i32 to offset
+    %11 = scalar.constant 3 : i32
+    %12 = index.cast %11 : i32 to offset
+    %13 = index.constant 1 : offset
+    scf.for %phase = [%10 to %12 step %13] {
+      %15 = index.cast %phase : offset to i32
+      pipeline.compose @child(%output, %15) : (buffer, i32)
+    }
+    pipeline.serial {
+      %16 = scalar.constant 3 : i32
+      pipeline.compose @child(%output, %16) : (buffer, i32)
+    }
+  }
+}
+
+// ====
+// Iteration exits owned by a loop inside a phase stay inside that phase.
+// RUN: roundtrip
+#include <loomcxx/pipeline.h>
+using Bytes = loom::type::buffer<unsigned>;
+[[loom::pipeline]] void child([[loom::launch]] Bytes output, unsigned phase);
+[[loom::pipeline("kernel")]] void local_exits([[loom::launch]] Bytes output) {
+  [[loom::serial]] {
+    for (unsigned phase = 0; phase < 4; ++phase) {
+      if (phase == 1) { continue; }
+      if (phase == 3) { break; }
+      loom::pipeline::compose<child>(output, phase);
+    }
+  }
+}
+
+// ----
+pipeline.def<kernel> public @local_exits() run(%output: buffer) {
+  pipeline.serial {
+    %phase$1 = scalar.constant 0 : i32
+    %2 = scalar.constant 1 : i1
+    %phase$6 = scf.while(%phase$3 = %phase$1 : i32, %4 = %2 : i1) -> (i32) {
+      %7, %phase$8 = scf.if %4 -> (i1, i32) {
+        %9 = scalar.constant 4 : i32
+        %10 = scalar.cmpi ult, %phase$3, %9 : i32
+        scf.yield %10, %phase$3 : i1, i32
+      } else {
+        %11 = scalar.constant 0 : i1
+        scf.yield %11, %phase$3 : i1, i32
+      }
+      scf.condition %7, %phase$8 : i1, i32
+    } do(%phase$5: i32) {
+      %12 = scalar.constant 1 : i32
+      %13 = scalar.cmpi eq, %phase$5, %12 : i32
+      %14, %15 = scf.if %13 -> (i1, i1) {
+        %16 = scalar.constant 0 : i1
+        %17 = scalar.constant 1 : i1
+        scf.yield %16, %17 : i1, i1
+      } else {
+        %18 = scalar.constant 3 : i32
+        %19 = scalar.cmpi eq, %phase$5, %18 : i32
+        %20, %21 = scf.if %19 -> (i1, i1) {
+          %22 = scalar.constant 0 : i1
+          scf.yield %22, %22 : i1, i1
+        } else {
+          pipeline.compose @child(%output, %phase$5) : (buffer, i32)
+          %23 = scalar.constant 1 : i1
+          scf.yield %23, %23 : i1, i1
+        }
+        scf.yield %20, %21 : i1, i1
+      }
+      %phase$24 = scf.if %15 -> (i32) {
+        %25 = scalar.constant 1 : i32
+        %phase = scalar.addi %phase$5, %25 : i32
+        scf.yield %phase : i32
+      } else {
+        scf.yield %phase$5 : i32
+      }
+      scf.yield %phase$24, %15 : i32, i1
+    }
+  }
+}
+
+pipeline.decl @child() run(%27: buffer, %28: i32)

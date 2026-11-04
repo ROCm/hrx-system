@@ -28,6 +28,7 @@ void PipelineContracts::declaration(
     return;
   }
   cxx::AttributeAST* pipeline_source = nullptr;
+  bool kernel_scope = false;
   visit_loom_attributes(
       unit_, attributes,
       [&](std::string_view name, cxx::AttributeAST* attribute) {
@@ -41,7 +42,10 @@ void PipelineContracts::declaration(
         }
         pipeline_source = attribute;
         auto* clause = attribute->attributeArgumentClause;
-        auto* arguments = clause ? clause->expressionList : nullptr;
+        if (!clause) {
+          return;
+        }
+        auto* arguments = clause->expressionList;
         auto* literal = arguments && !arguments->next
                             ? cxx::ast_cast<cxx::StringLiteralExpressionAST>(
                                   arguments->value)
@@ -49,8 +53,10 @@ void PipelineContracts::declaration(
         if (!literal || literal->literal->stringValue() != "kernel") {
           diagnostics_.reject(
               unit_, attribute,
-              "pipeline requires the single product scope \"kernel\"");
+              "pipeline accepts no argument clause or the product scope "
+              "\"kernel\"");
         }
+        kernel_scope = true;
       });
 
   auto found = contracts_.find(function->canonical());
@@ -90,8 +96,16 @@ void PipelineContracts::declaration(
   }
 
   auto& contract = contracts_[function->canonical()];
-  if (pipeline_source && !contract.source) {
-    contract.source = pipeline_source;
+  if (pipeline_source) {
+    if (contract.source && contract.kernel_scope != kernel_scope) {
+      diagnostics_.reject(
+          unit_, pipeline_source,
+          "conflicting artifact scopes across pipeline redeclarations");
+    }
+    if (!contract.source) {
+      contract.source = pipeline_source;
+    }
+    contract.kernel_scope = kernel_scope;
   }
   if (launch_source) {
     if (contract.launch_parameter_ordinal &&
@@ -154,6 +168,10 @@ bool PipelineContracts::contains(cxx::FunctionSymbol* function) const {
   }
   auto found = contracts_.find(function->canonical());
   return found != contracts_.end() && found->second.source;
+}
+
+bool PipelineContracts::has_kernel_scope(cxx::FunctionSymbol* function) const {
+  return contracts_.at(function->canonical()).kernel_scope;
 }
 
 cxx::AST* PipelineContracts::parameter_source(const Contract& contract,

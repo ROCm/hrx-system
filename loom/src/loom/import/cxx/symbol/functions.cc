@@ -1406,8 +1406,10 @@ void Functions::build_declarations(Types& types, Locations& locations,
       auto predicates = function_contracts_.bind(
           symbol, types, signature.source_identities,
           FunctionContractSignature::Flattened, source);
-      loom_pipeline_decl_build_flags_t flags =
-          LOOM_PIPELINE_DECL_BUILD_FLAG_HAS_SCOPE;
+      loom_pipeline_decl_build_flags_t flags = 0;
+      if (pipeline_contracts_.has_kernel_scope(symbol)) {
+        flags |= LOOM_PIPELINE_DECL_BUILD_FLAG_HAS_SCOPE;
+      }
       if (annotated(symbol, "retain")) {
         flags |= LOOM_PIPELINE_DECL_BUILD_FLAG_HAS_RETAIN;
       }
@@ -1672,8 +1674,10 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
         predicates.size(), locations.get(definition), &op));
   } else if (pipeline) {
     const auto target = target_definitions_.reference(symbol);
-    loom_pipeline_def_build_flags_t flags =
-        LOOM_PIPELINE_DEF_BUILD_FLAG_HAS_SCOPE;
+    loom_pipeline_def_build_flags_t flags = 0;
+    if (pipeline_contracts_.has_kernel_scope(symbol)) {
+      flags |= LOOM_PIPELINE_DEF_BUILD_FLAG_HAS_SCOPE;
+    }
     if (exported_.contains(symbol)) {
       flags |= LOOM_PIPELINE_DEF_BUILD_FLAG_HAS_VISIBILITY;
     }

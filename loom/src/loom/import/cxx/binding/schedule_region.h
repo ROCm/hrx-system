@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef LOOM_IMPORT_CXX_BINDING_COMMAND_SCHEDULE_H_
-#define LOOM_IMPORT_CXX_BINDING_COMMAND_SCHEDULE_H_
+#ifndef LOOM_IMPORT_CXX_BINDING_SCHEDULE_REGION_H_
+#define LOOM_IMPORT_CXX_BINDING_SCHEDULE_REGION_H_
 
 #include <cxx/ast_fwd.h>
 
@@ -20,14 +20,14 @@ namespace loom::cxx_import {
 class Diagnostics;
 
 // One attributed compound statement projected directly to a resultless
-// command scheduling region. The source braces remain the lexical scope; the
-// attribute only selects the region's sibling dependency contract.
-struct CommandSchedule {
+// command or pipeline scheduling region. The source braces remain the lexical
+// scope; the attribute selects the region's sibling dependency contract.
+struct ScheduleRegion {
   enum class Kind { Serial, Concurrent };
 
-  static std::optional<CommandSchedule> resolve(cxx::TranslationUnit& unit,
-                                                Diagnostics& diagnostics,
-                                                cxx::StatementAST* statement);
+  static std::optional<ScheduleRegion> resolve(cxx::TranslationUnit& unit,
+                                               Diagnostics& diagnostics,
+                                               cxx::StatementAST* statement);
 
   // Selected schedule dependency contract.
   Kind kind;
@@ -37,4 +37,4 @@ struct CommandSchedule {
 
 }  // namespace loom::cxx_import
 
-#endif  // LOOM_IMPORT_CXX_BINDING_COMMAND_SCHEDULE_H_
+#endif  // LOOM_IMPORT_CXX_BINDING_SCHEDULE_REGION_H_

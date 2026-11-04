@@ -22,9 +22,9 @@ namespace loom::cxx_import {
 
 class Types;
 
-// Owns pipeline declarations and definitions used as launchable symbols. The
-// first supported product carrier is kernel scope; one retained staged
-// signature governs declarations, definitions, composition, and launches.
+// Owns composable pipeline declarations and definitions. An optional kernel
+// scope makes the pipeline directly launchable; one retained staged signature
+// governs declarations, definitions, composition, and launches.
 class PipelineContracts {
  public:
   PipelineContracts(cxx::TranslationUnit& unit, Diagnostics& diagnostics)
@@ -38,8 +38,11 @@ class PipelineContracts {
   // Completes cross-declaration admission after the translation unit walk.
   void finish();
 
-  // Whether the canonical source function is a kernel-scoped pipeline.
+  // Whether the canonical source function is a pipeline.
   bool contains(cxx::FunctionSymbol* function) const;
+
+  // Whether a known pipeline has a directly launchable kernel boundary.
+  bool has_kernel_scope(cxx::FunctionSymbol* function) const;
 
   // Returns the retained source/native staged signature projection.
   const StagedSignatureProjection& project(cxx::FunctionSymbol* function,
@@ -55,6 +58,8 @@ class PipelineContracts {
   struct Contract {
     // First pipeline annotation owning cross-declaration diagnostics.
     cxx::AttributeAST* source = nullptr;
+    // The source explicitly requires one directly loadable kernel artifact.
+    bool kernel_scope = false;
     // First launch marker owning orphan/conflict diagnostics.
     cxx::AttributeAST* launch_source = nullptr;
     // Source boundary declared by launch_source; absent means no bindings.
@@ -72,7 +77,7 @@ class PipelineContracts {
   cxx::TranslationUnit& unit_;
   // Source admission diagnostic boundary.
   Diagnostics& diagnostics_;
-  // Kernel-scoped pipeline contracts occupy the index.
+  // Canonical source pipeline contracts, including composable children.
   std::unordered_map<cxx::FunctionSymbol*, Contract> contracts_;
 };
 

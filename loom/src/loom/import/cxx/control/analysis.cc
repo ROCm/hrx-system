@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <limits>
+#include <string>
 #include <string_view>
 
 #include "loom/import/cxx/source/attributes.h"
@@ -404,6 +405,28 @@ void ControlFlow::postVisit(cxx::AST* ast) {
     reject_misplaced_binding_statement(unit_, diagnostics_, statement,
                                        BindingAttributeScope::Statement);
     auto outcomes = classify_paths(statement);
+    // Schedule and strand bodies complete at their own region boundary.
+    // Reject escaping source exits before return/loop lowering can flatten
+    // the attributed compound into its enclosing control flow.
+    if (outcomes & (Return | Continue | Break)) {
+      visit_loom_attributes(
+          unit_, statement_attributes(statement),
+          [&](std::string_view name, cxx::AttributeAST*) {
+            std::string_view region;
+            if (name == "serial" || name == "concurrent") {
+              region = "schedule regions";
+            } else if (name == "strand") {
+              region = "pipeline strands";
+            } else {
+              return;
+            }
+            diagnostics_.reject(
+                unit_, statement,
+                std::string(region) + ((outcomes & Return)
+                                           ? " cannot contain function returns"
+                                           : " cannot exit an enclosing loop"));
+          });
+    }
     if (outcomes != Fallthrough) {
       paths_.emplace(statement, outcomes);
     }

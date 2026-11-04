@@ -67,7 +67,8 @@ std::optional<KernelLaunchIntrinsic> KernelLaunchIntrinsic::resolve(
           ? cxx::symbol_cast<cxx::FunctionSymbol>((*address)->symbol())
           : nullptr;
   const bool pipeline = kernel && pipelines.contains(kernel);
-  if (!kernel || (!annotated(kernel, "kernel") && !pipeline)) {
+  if (!kernel || (!annotated(kernel, "kernel") &&
+                  !(pipeline && pipelines.has_kernel_scope(kernel)))) {
     fail(
         "kernel.launch requires a kernel or kernel-scoped pipeline as its "
         "first template argument");

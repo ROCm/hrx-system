@@ -108,7 +108,7 @@ void invalid_discipline(Slots slots, loomt::index capacity) {
 }
 
 // ====
-// ERROR@+1: LOWERING/059 "pipeline requires the single product scope"
+// ERROR@+1: LOWERING/059 "pipeline accepts no argument clause or the product scope"
 [[loom::pipeline("device")]] void wrong_scope();
 
 // ====
@@ -269,4 +269,108 @@ using Bytes = loom::type::buffer<unsigned char>;
 [[loom::pipeline("kernel")]] void mismatched_composition(Bytes output) {
   // ERROR@+1: LOWERING/059 "pipeline.compose arguments must match the pipeline signature"
   loom::pipeline::compose<typed_child>(output);
+}
+
+// ====
+// ERROR@+1: LOWERING/059 "pipeline accepts no argument clause or the product scope"
+[[loom::pipeline()]] void empty_scope();
+
+// ====
+// ERROR@+1: LOWERING/059 "pipeline accepts no argument clause or the product scope"
+[[loom::pipeline(3)]] void numeric_scope();
+
+// ====
+// ERROR@+1: LOWERING/059 "pipeline accepts no argument clause or the product scope"
+[[loom::pipeline("kernel", "kernel")]] void multiple_scopes();
+
+// ====
+[[loom::pipeline]] void child();
+// ERROR@+1: LOWERING/059 "conflicting artifact scopes across pipeline redeclarations"
+[[loom::pipeline("kernel")]] void child();
+
+// ====
+[[loom::pipeline("kernel")]] void root();
+// ERROR@+1: LOWERING/059 "conflicting artifact scopes across pipeline redeclarations"
+[[loom::pipeline]] void root();
+
+// ====
+#include <loomcxx/kernel.h>
+[[loom::pipeline]] void child();
+[[loom::command_program]] void run() {
+  // ERROR@+1: LOWERING/059 "kernel.launch requires a kernel or kernel-scoped pipeline"
+  loom::kernel::launch<child>();
+}
+
+// ====
+[[loom::pipeline]] void concurrent_child() {
+  // ERROR@+1: LOWERING/059 "pipeline schedules support serial regions only"
+  [[loom::concurrent]] {}
+}
+
+// ====
+#include <loomcxx/pipeline.h>
+[[loom::pipeline]] void nested_in_strand() {
+  [[loom::strand(loom::type::indices{loom::type::index{0}, loom::type::index{2}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}})]] {
+    // ERROR@+1: LOWERING/059 "pipeline serial regions belong outside strands"
+    [[loom::serial]] {}
+  }
+}
+
+// ====
+#include <loomcxx/pipeline.h>
+[[loom::pipeline]] void consume([[loom::launch]] unsigned value);
+[[loom::pipeline]] void mutation([[loom::launch]] unsigned value) {
+  // ERROR@+1: LOWERING/059 "schedule regions cannot update enclosing automatic values because they have no results"
+  [[loom::serial]] { ++value; }
+  loom::pipeline::compose<consume>(value);
+}
+
+// ====
+[[loom::pipeline]] void returning() {
+  // ERROR@+1: LOWERING/059 "schedule regions cannot contain function returns"
+  [[loom::serial]] { return; }
+}
+
+// ====
+[[loom::pipeline]] void exiting_loop() {
+  for (unsigned phase = 0; phase < 3; ++phase) {
+    // ERROR@+1: LOWERING/059 "schedule regions cannot exit an enclosing loop"
+    [[loom::serial]] { break; }
+  }
+}
+
+// ====
+[[loom::pipeline]] void continuing_loop() {
+  for (unsigned phase = 0; phase < 3; ++phase) {
+    // ERROR@+1: LOWERING/059 "schedule regions cannot exit an enclosing loop"
+    [[loom::serial]] { if constexpr (true) { continue; } }
+  }
+}
+
+// ====
+#include <loomcxx/pipeline.h>
+namespace loomt = loom::type;
+[[loom::pipeline]] void returning_strand() {
+  // ERROR@+1: LOWERING/059 "pipeline strands cannot contain function returns"
+  [[loom::strand(loomt::indices{loomt::index{0}}, loomt::indices{loomt::index{1}}, loomt::indices{loomt::index{1}})]] { return; }
+}
+
+// ====
+#include <loomcxx/pipeline.h>
+namespace loomt = loom::type;
+[[loom::pipeline]] void exiting_strand() {
+  for (unsigned phase = 0; phase < 3; ++phase) {
+    // ERROR@+1: LOWERING/059 "pipeline strands cannot exit an enclosing loop"
+    [[loom::strand(loomt::indices{loomt::index{0}}, loomt::indices{loomt::index{1}}, loomt::indices{loomt::index{1}})]] { break; }
+  }
+}
+
+// ====
+#include <loomcxx/pipeline.h>
+namespace loomt = loom::type;
+[[loom::pipeline]] void continuing_strand() {
+  for (unsigned phase = 0; phase < 3; ++phase) {
+    // ERROR@+1: LOWERING/059 "pipeline strands cannot exit an enclosing loop"
+    [[loom::strand(loomt::indices{loomt::index{0}}, loomt::indices{loomt::index{1}}, loomt::indices{loomt::index{1}})]] { continue; }
+  }
 }
