@@ -116,11 +116,8 @@ class GpuAsanReportTest
       const auto* failure =
           reinterpret_cast<const iree_hal_device_driver_failure_event_t*>(
               event->payload.data);
-      // Unpublished work waiting on a dependency is cancelled by device
-      // failure; a capture reaching admission observes the original failure.
-      EXPECT_TRUE(failure->status_code == IREE_STATUS_ABORTED ||
-                  (self.pending_done_ &&
-                   failure->status_code == IREE_STATUS_CANCELLED));
+      // A shader report rejects work without cancelling its dependency join.
+      EXPECT_EQ(failure->status_code, IREE_STATUS_ABORTED);
       self.queue_failures_.fetch_add(1);
       return;
     }
@@ -196,7 +193,7 @@ class GpuAsanReportTest
   iree_hal_semaphore_t* done_ = nullptr;
   // Deliberately unsignaled dependency for a capture on the other queue.
   iree_hal_semaphore_t* pending_gate_ = nullptr;
-  // Public completion that must fail without satisfying pending_gate_.
+  // Public completion that must join pending_gate_ before reporting failure.
   iree_hal_semaphore_t* pending_done_ = nullptr;
   // Expected address set before publishing the faulting dispatch.
   std::atomic<uint64_t> expected_fault_ = 0;
@@ -259,10 +256,13 @@ TEST_P(GpuAsanReportTest, ValidAccessThenRedzoneReportPreservesRetirement) {
   EXPECT_EQ(reports_.load(), 1u);
   if (std::get<0>(GetParam())) {
     EXPECT_GE(queue_failures_.load(), 1u);
+    uint64_t pending_value = UINT64_MAX;
+    IREE_ASSERT_OK(iree_hal_semaphore_query(pending_done_, &pending_value));
+    EXPECT_EQ(pending_value, 0u);
+    IREE_ASSERT_OK(iree_hal_semaphore_signal(pending_gate_, 1, nullptr));
     const Status pending_status(
         iree_hal_semaphore_wait(pending_done_, 1, iree_infinite_timeout(), 0));
-    EXPECT_TRUE(pending_status.code() == StatusCode::kCancelled ||
-                pending_status.code() == StatusCode::kAborted);
+    EXPECT_EQ(pending_status.code(), StatusCode::kAborted);
   }
   // The fixture waits for actual capture, native memory, and worker
   // reclamation.

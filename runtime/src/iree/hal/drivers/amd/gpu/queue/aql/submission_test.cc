@@ -70,8 +70,8 @@ TEST_P(AqlSubmissionTest, AtomicTargetRetainsDeferredBackingUntilRetirement) {
   iree_hal_amd_gpu_aql_submission_t* capture = nullptr;
   IREE_EXPECT_STATUS_IS(
       GetParam() ? IREE_STATUS_INCOMPATIBLE : IREE_STATUS_PERMISSION_DENIED,
-      iree_hal_amd_gpu_aql_submission_control(&pool_, nullptr, &family, {}, {},
-                                              buffer, 8, command, 0, 0,
+      iree_hal_amd_gpu_aql_submission_control(&pool_, 128, nullptr, &family, {},
+                                              {}, buffer, 8, command, 0, 0,
                                               &capture));
   EXPECT_EQ(capture, nullptr);
   EXPECT_EQ(iree_atomic_ref_count_load(&buffer->resource.ref_count), 1);
@@ -79,14 +79,15 @@ TEST_P(AqlSubmissionTest, AtomicTargetRetainsDeferredBackingUntilRetirement) {
   command.flags |= IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE;
   IREE_EXPECT_STATUS_IS(
       GetParam() ? IREE_STATUS_INCOMPATIBLE : IREE_STATUS_PERMISSION_DENIED,
-      iree_hal_amd_gpu_aql_submission_control(&pool_, nullptr, &family, {}, {},
-                                              buffer, 8, command, 0, 0,
+      iree_hal_amd_gpu_aql_submission_control(&pool_, 128, nullptr, &family, {},
+                                              {}, buffer, 8, command, 0, 0,
                                               &capture));
   EXPECT_EQ(capture, nullptr);
   EXPECT_EQ(iree_atomic_ref_count_load(&buffer->resource.ref_count), 1);
   zero_compute[1] = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE << 8;
   IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_control(
-      &pool_, nullptr, &family, {}, {}, buffer, 8, command, 0, 0, &capture));
+      &pool_, 128, nullptr, &family, {}, {}, buffer, 8, command, 0, 0,
+      &capture));
   uint64_t address = 0;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         iree_hal_amd_gpu_control_resolve(
@@ -143,7 +144,7 @@ TEST_P(AqlSubmissionTest, CapturesInputsAndReleasesPayloadBeforeCompletion) {
     EXPECT_EQ(capture->dispatch.constants.data_length, 0u);
   } else {
     IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_capture(
-        &pool_, nullptr, &request, {}, {1, &semaphore, &value}, 17, 23,
+        &pool_, 128, nullptr, &request, {}, {1, &semaphore, &value}, 17, 23,
         &capture));
     constant = 0;
     uint32_t copied = 0;
@@ -264,7 +265,8 @@ TEST_P(AqlSubmissionTest, RejectionReleasesPayloadBeforeFailingPublicSignals) {
     EXPECT_EQ(capture->pool, nullptr);
   } else {
     IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_capture(
-        &pool_, nullptr, &request, {}, {1, &semaphore, &one}, 0, 0, &capture));
+        &pool_, 128, nullptr, &request, {}, {1, &semaphore, &one}, 0, 0,
+        &capture));
   }
   iree_hal_executable_release(&executable.base);
   iree_hal_buffer_release(buffer);
@@ -301,7 +303,7 @@ TEST_P(AqlSubmissionTest, OptionalProfileSharesInlineAndPooledCapture) {
       EXPECT_EQ(capture->pool, nullptr);
     } else {
       IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_capture(
-          &pool_, profiled ? &operation : nullptr, &barrier, {}, {}, 0, 0,
+          &pool_, 128, profiled ? &operation : nullptr, &barrier, {}, {}, 0, 0,
           &capture));
       EXPECT_EQ(capture->pool, &pool_);
     }
@@ -372,8 +374,8 @@ TEST(AqlTransferSubmissionTest, RejectedSuffixWaitsForAcceptedHostWrites) {
   uint64_t value = 1;
   iree_hal_amd_gpu_aql_submission_t* submission = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_transfer(
-      &pool, nullptr, &family, {}, {1, &semaphore, &value}, 1, &operation, 0, 0,
-      &submission));
+      &pool, 128, nullptr, &family, {}, {1, &semaphore, &value}, 1, &operation,
+      0, 0, &submission));
   struct Completion {
     // File callbacks distinguish failure notification from ending borrows.
     bool retired = false;
@@ -423,7 +425,7 @@ TEST(AqlTransferSubmissionTest, FileBoundaryJoinsFailureAndRetirement) {
   const iree_hal_queue_family_t family = {};
   iree_hal_amd_gpu_aql_submission_t* submission = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_transfer(
-      &pool, nullptr, &family, {}, {}, 0, nullptr, 17, 23, &submission));
+      &pool, 128, nullptr, &family, {}, {}, 0, nullptr, 17, 23, &submission));
   EXPECT_EQ(submission->entry.kind, IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER);
   EXPECT_EQ(submission->transfer.capture.count, 0u);
   EXPECT_EQ(submission->before, 17u);

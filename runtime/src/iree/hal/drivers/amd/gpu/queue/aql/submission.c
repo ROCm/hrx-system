@@ -7,7 +7,8 @@
 #include "iree/hal/drivers/amd/gpu/queue/aql/submission.h"
 
 static iree_status_t iree_hal_amd_gpu_aql_submission_allocate(
-    iree_hal_amd_gpu_capture_pool_t* pool, iree_byte_span_t inline_storage,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
+    iree_byte_span_t inline_storage,
     const iree_hal_amd_gpu_profile_operation_t* profile,
     const iree_hal_amd_gpu_aql_dispatch_request_t* request,
     iree_host_size_t wait_count, iree_hal_semaphore_list_t signals,
@@ -40,12 +41,21 @@ static iree_status_t iree_hal_amd_gpu_aql_submission_allocate(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AQL submission capture overflows");
   }
+  iree_host_size_t allocation_size = size;
+  if (wait_count && wait_storage_size &&
+      (!iree_host_size_checked_align(allocation_size, iree_max_align_t,
+                                     &allocation_size) ||
+       !iree_host_size_checked_add(allocation_size, wait_storage_size,
+                                   &allocation_size))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AQL submission wait storage overflows");
+  }
   iree_byte_span_t storage = inline_storage;
-  if (size <= storage.data_length) {
+  if (allocation_size <= storage.data_length) {
     pool = NULL;
   } else {
     IREE_RETURN_IF_ERROR(
-        iree_hal_amd_gpu_capture_pool_acquire(pool, size, &storage));
+        iree_hal_amd_gpu_capture_pool_acquire(pool, allocation_size, &storage));
   }
   iree_hal_amd_gpu_aql_submission_t* submission = (void*)storage.data;
   *submission = (iree_hal_amd_gpu_aql_submission_t){
@@ -102,15 +112,15 @@ static iree_status_t iree_hal_amd_gpu_aql_submission_allocate(
 }
 
 iree_status_t iree_hal_amd_gpu_aql_submission_capture(
-    iree_hal_amd_gpu_capture_pool_t* pool,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
     const iree_hal_amd_gpu_profile_operation_t* profile,
     const iree_hal_amd_gpu_aql_dispatch_request_t* request,
     iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
     uint32_t before, uint32_t after,
     iree_hal_amd_gpu_aql_submission_t** out_submission) {
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_submission_allocate(
-      pool, iree_byte_span_empty(), profile, request, waits.count, signals,
-      true, out_submission));
+      pool, wait_storage_size, iree_byte_span_empty(), profile, request,
+      waits.count, signals, true, out_submission));
   iree_hal_amd_gpu_aql_submission_t* submission = *out_submission;
   submission->before = before;
   submission->after = after;
@@ -131,8 +141,8 @@ iree_status_t iree_hal_amd_gpu_aql_submission_retirement(
     uint32_t native_wait_count, iree_hal_semaphore_list_t signals,
     iree_hal_amd_gpu_aql_submission_t** out_submission) {
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_submission_allocate(
-      pool, inline_storage, profile, request, native_wait_count, signals, false,
-      out_submission));
+      pool, 0, inline_storage, profile, request, native_wait_count, signals,
+      false, out_submission));
   iree_hal_amd_gpu_aql_submission_t* submission = *out_submission;
   submission->native_wait_count = native_wait_count;
   for (iree_host_size_t i = 0, target = 0; i < wait_count; ++i) {
@@ -145,7 +155,7 @@ iree_status_t iree_hal_amd_gpu_aql_submission_retirement(
 }
 
 static iree_status_t iree_hal_amd_gpu_aql_submission_acquire(
-    iree_hal_amd_gpu_capture_pool_t* pool,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
     const iree_hal_amd_gpu_profile_operation_t* profile,
     iree_hal_amd_gpu_aql_entry_kind_t kind, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_host_size_t payload_length,
@@ -162,9 +172,18 @@ static iree_status_t iree_hal_amd_gpu_aql_submission_acquire(
       IREE_STRUCT_FIELD(signals.count, iree_hal_semaphore_t*, &signals_offset),
       IREE_STRUCT_FIELD(signals.count, uint64_t, &values_offset),
       IREE_STRUCT_FIELD(payload_length, uint8_t, &payload_offset)));
+  iree_host_size_t allocation_size = size;
+  if (waits.count && wait_storage_size &&
+      (!iree_host_size_checked_align(allocation_size, iree_max_align_t,
+                                     &allocation_size) ||
+       !iree_host_size_checked_add(allocation_size, wait_storage_size,
+                                   &allocation_size))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AQL submission wait storage overflows");
+  }
   iree_byte_span_t storage;
   IREE_RETURN_IF_ERROR(
-      iree_hal_amd_gpu_capture_pool_acquire(pool, size, &storage));
+      iree_hal_amd_gpu_capture_pool_acquire(pool, allocation_size, &storage));
   iree_hal_amd_gpu_aql_submission_t* submission = (void*)storage.data;
   *submission = (iree_hal_amd_gpu_aql_submission_t){
       .entry.kind = kind,
@@ -197,7 +216,7 @@ static iree_status_t iree_hal_amd_gpu_aql_submission_acquire(
 }
 
 iree_status_t iree_hal_amd_gpu_aql_submission_execute(
-    iree_hal_amd_gpu_capture_pool_t* pool,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
     const iree_hal_amd_gpu_profile_operation_t* profile,
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t bindings, iree_hal_semaphore_list_t waits,
@@ -214,8 +233,8 @@ iree_status_t iree_hal_amd_gpu_aql_submission_execute(
   iree_hal_amd_gpu_aql_submission_t* submission = NULL;
   void* payload = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_submission_acquire(
-      pool, profile, IREE_HAL_AMD_GPU_AQL_ENTRY_EXECUTE, waits, signals,
-      payload_length, &submission, &payload));
+      pool, wait_storage_size, profile, IREE_HAL_AMD_GPU_AQL_ENTRY_EXECUTE,
+      waits, signals, payload_length, &submission, &payload));
   iree_status_t status = iree_hal_amd_gpu_aql_command_invocation_initialize(
       command_buffer, bindings, payload, flags, &submission->execute);
   if (iree_status_is_ok(status)) {
@@ -227,7 +246,7 @@ iree_status_t iree_hal_amd_gpu_aql_submission_execute(
 }
 
 iree_status_t iree_hal_amd_gpu_aql_submission_control(
-    iree_hal_amd_gpu_capture_pool_t* pool,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
     const iree_hal_amd_gpu_profile_operation_t* profile,
     const iree_hal_queue_family_t* family, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_hal_buffer_t* target,
@@ -249,8 +268,8 @@ iree_status_t iree_hal_amd_gpu_aql_submission_control(
   iree_hal_amd_gpu_aql_submission_t* submission = NULL;
   void* payload = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_submission_acquire(
-      pool, profile, IREE_HAL_AMD_GPU_AQL_ENTRY_CONTROL, waits, signals, 0,
-      &submission, &payload));
+      pool, wait_storage_size, profile, IREE_HAL_AMD_GPU_AQL_ENTRY_CONTROL,
+      waits, signals, 0, &submission, &payload));
   iree_hal_amd_gpu_aql_barrier_control(
       command.flags,
       (command.flags & IREE_HAL_ATOMIC_FLAG_RELEASE)
@@ -270,7 +289,7 @@ iree_status_t iree_hal_amd_gpu_aql_submission_control(
 }
 
 iree_status_t iree_hal_amd_gpu_aql_submission_transfer(
-    iree_hal_amd_gpu_capture_pool_t* pool,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
     const iree_hal_amd_gpu_profile_operation_t* profile,
     const iree_hal_queue_family_t* family, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_host_size_t count,
@@ -283,8 +302,8 @@ iree_status_t iree_hal_amd_gpu_aql_submission_transfer(
   iree_hal_amd_gpu_aql_submission_t* submission = NULL;
   void* payload = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_submission_acquire(
-      pool, profile, IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER, waits, signals,
-      layout.byte_length, &submission, &payload));
+      pool, wait_storage_size, profile, IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER,
+      waits, signals, layout.byte_length, &submission, &payload));
   submission->before = before;
   submission->after = after;
   iree_atomic_ref_count_init(&submission->transfer.ref_count);

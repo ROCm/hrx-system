@@ -183,9 +183,9 @@ class DeviceFailureTest : public ::testing::Test {
       iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
       uint64_t value = 1;
       IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
-          &queues_[i].captures, false, {}, {1, &outputs_[i], &value}, nullptr,
-          &function_, {}, {}, {}, {refs.size(), refs.data()}, &barriers_,
-          nullptr, 0, &capture));
+          &queues_[i].captures, 128, false, {}, {1, &outputs_[i], &value},
+          nullptr, &function_, {}, {}, {}, {refs.size(), refs.data()},
+          &barriers_, nullptr, 0, &capture));
       for (auto ref : refs) {
         iree_hal_buffer_release(ref.buffer);
       }

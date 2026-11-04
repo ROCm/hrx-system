@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <array>
+#include <vector>
 
 #include "iree/async/proactor_platform.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/state.h"
@@ -32,6 +33,15 @@ class Pm4LifecycleTest : public ::testing::Test {
       return AMDF_STATUS_OK;
     };
     queue_.context = &context_;
+    context_.event = reinterpret_cast<amdf_gpu_event_t*>(this);
+    gpu_.event_signal = [](amdf_gpu_event_t*) { return AMDF_STATUS_OK; };
+    queue_.options.signals = &signal_cache_;
+    queue_.options.publication = &publication_;
+    iree_notification_initialize(&publication_.notification);
+    iree_async_semaphore_wait_context_initialize(&queue_.wait_context);
+    iree_hal_amd_gpu_host_wait_set_initialize(&queue_.wait_context,
+                                              &queue_.pending.waits);
+
     queue_.options.retirement_capacity = issued_.size();
     queue_.issued = issued_.data();
     queue_.storage = {
@@ -40,8 +50,22 @@ class Pm4LifecycleTest : public ::testing::Test {
         .mapping = reinterpret_cast<amdf_user_queue_mapping_t*>(this),
     };
     iree_hal_amd_gpu_publisher_initialize(&queue_.publisher);
-    iree_hal_amd_gpu_capture_pool_initialize(2048, iree_allocator_system(),
+    const iree_allocator_t capture_allocator = {
+        this, [](void* user_data, iree_allocator_command_t command,
+                 const void* params, void** inout_pointer) {
+          auto* self = static_cast<Pm4LifecycleTest*>(user_data);
+          if (self->deny_allocations_ &&
+              command != IREE_ALLOCATOR_COMMAND_FREE) {
+            ++self->denied_allocations_;
+            return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+          }
+          const auto allocator = iree_allocator_system();
+          return allocator.ctl(allocator.self, command, params, inout_pointer);
+        }};
+    iree_hal_amd_gpu_capture_pool_initialize(2048, capture_allocator,
                                              &queue_.captures);
+    // A full capture block supplies the deferred wait's private sidecar.
+    queue_.pending_size = queue_.captures.block_size;
     iree_slim_mutex_initialize(&queue_.pending.completion_mutex);
     iree_hal_amd_gpu_signal_pool_initialize({}, &signal_pool_);
     iree_hal_amd_gpu_signal_block_initialize(
@@ -73,12 +97,16 @@ class Pm4LifecycleTest : public ::testing::Test {
     iree_hal_amd_gpu_signal_block_deinitialize(&signal_block_);
     iree_hal_amd_gpu_signal_pool_deinitialize(&signal_pool_);
     iree_hal_amd_gpu_publisher_deinitialize(&queue_.publisher);
+    iree_hal_amd_gpu_host_wait_set_deinitialize(&queue_.pending.waits);
+    iree_async_semaphore_wait_context_deinitialize(&queue_.wait_context);
+    iree_notification_deinitialize(&publication_.notification);
     iree_slim_mutex_deinitialize(&queue_.pending.completion_mutex);
     iree_async_frontier_tracker_release(queue_.frontier.tracker);
     iree_hal_semaphore_release(semaphore_);
     iree_async_proactor_release(proactor_);
   }
-  void Capture(bool partial = false) {
+  void Capture(bool partial = false, iree_hal_semaphore_list_t waits =
+                                         iree_hal_semaphore_list_empty()) {
     std::array<iree_hal_buffer_ref_t, 6> references;
     for (size_t i = 0; i < references.size(); ++i) {
       iree_hal_buffer_t* buffer = nullptr;
@@ -117,15 +145,20 @@ class Pm4LifecycleTest : public ::testing::Test {
         };
       }
       IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_transfer(
-          &queue_.captures, false, &family, {},
+          &queue_.captures, queue_.pending_size, false, &family, waits,
           {1, &semaphore_, &signal_value_}, operations.size(),
           operations.data(), &profile_, nullptr, {}, &capture_));
     } else {
       IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
-          &queue_.captures, false, {}, {1, &semaphore_, &signal_value_},
-          nullptr, &function_, {}, {}, {},
+          &queue_.captures, queue_.pending_size, false, waits,
+          {1, &semaphore_, &signal_value_}, nullptr, &function_, {}, {}, {},
           {references.size(), references.data()}, &profile_, nullptr, 0,
           &capture_));
+    }
+    if (waits.count) {
+      EXPECT_GE(capture_->allocation_size,
+                iree_host_align(capture_->capture_size, iree_max_align_t) +
+                    queue_.pending_size);
     }
     for (auto reference : references) {
       iree_hal_buffer_release(reference.buffer);
@@ -154,8 +187,24 @@ class Pm4LifecycleTest : public ::testing::Test {
                       iree_memory_order_relaxed);
     iree_hal_amd_gpu_pm4_queue_close(&queue_.base);
   }
-  void CheckShaderFailure(bool partial, bool abandon_suffix) {
-    Capture(partial);
+  void CheckShaderFailure(bool partial, bool abandon_suffix,
+                          bool pending_producer = false) {
+    iree_hal_semaphore_t* producer = nullptr;
+    iree_hal_amd_gpu_signal_t* producer_signal = nullptr;
+    uint64_t producer_value = 1;
+    if (pending_producer) {
+      IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
+          proactor_, nullptr, 0, 2, iree_allocator_system(), &producer));
+      producer_signal =
+          iree_hal_amd_gpu_signal_pool_try_acquire(&signal_pool_, 0);
+    }
+    Capture(partial,
+            producer ? iree_hal_semaphore_list_t{1, &producer, &producer_value}
+                     : iree_hal_semaphore_list_empty());
+    if (pending_producer) {
+      capture_->native_wait_count = 1;
+      capture_->waits[0].signal = producer_signal;
+    }
     iree_atomic_store(&queue_.native_failure, AMDF_STATUS_OK,
                       iree_memory_order_relaxed);
     std::array<iree_hal_amd_gpu_pm4_retirement_record_t, 4> records = {};
@@ -207,6 +256,14 @@ class Pm4LifecycleTest : public ::testing::Test {
       native_access_ended_ = i + 1 == count;
       records[i].action = reinterpret_cast<uintptr_t>(&issued_[i].action);
       iree_atomic_store(&records[i].generation, 1, iree_memory_order_release);
+      if (pending_producer && i == 0) {
+        EXPECT_FALSE(poll());
+        ExpectPending();
+        expect_frontier(false);
+        EXPECT_EQ(destroyed_, 0u);
+        iree_hal_amd_gpu_signal_retire(producer_signal, IREE_STATUS_OK);
+        IREE_ASSERT_OK(iree_hal_semaphore_signal(producer, 1, nullptr));
+      }
       EXPECT_TRUE(poll());
       expect_frontier(native_access_ended_);
       if (!native_access_ended_ || (partial && !abandon_suffix)) {
@@ -222,6 +279,145 @@ class Pm4LifecycleTest : public ::testing::Test {
     EXPECT_EQ(destroyed_, 6u);
     EXPECT_EQ(native_stops_, 0u);
     EXPECT_FALSE(poll());
+    iree_hal_semaphore_release(producer);
+  }
+  void CheckRejectedFollower(bool admitted, bool already_waiting,
+                             bool deny_allocations = false,
+                             bool prepared = false) {
+    Capture();
+    iree_atomic_store(&queue_.native_failure, 0, iree_memory_order_relaxed);
+    iree_hal_queue_family_t family = {};
+    queue_.base.queue_family = &family;
+    iree_hal_amd_gpu_feedback_control_t control = {};
+    iree_hal_amd_gpu_feedback_t feedback = {.control = &control};
+    queue_.options.feedback = &feedback;
+    uint32_t diagnostics = 0;
+    context_.event_sink = {
+        [](void* data, const iree_hal_device_event_t* event) {
+          EXPECT_EQ(event->type, IREE_HAL_DEVICE_EVENT_TYPE_DRIVER_FAILURE);
+          ++*static_cast<uint32_t*>(data);
+        },
+        &diagnostics};
+    iree_hal_semaphore_t* peer = nullptr;
+    iree_hal_semaphore_t* completion = nullptr;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
+        proactor_, nullptr, 0, 2, iree_allocator_system(), &peer));
+    IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_create(
+        proactor_, nullptr, 0, 2, iree_allocator_system(), &completion));
+    std::vector<iree_hal_semaphore_t*> waits(deny_allocations ? 128 : 2, peer);
+    waits[0] = semaphore_;
+    std::vector<uint64_t> values(waits.size(), 1);
+    std::array<iree_hal_semaphore_t*, 2> signals = {semaphore_, completion};
+    std::array<uint64_t, 2> signal_values = {2, 1};
+    iree_hal_amd_gpu_pm4_submission_t* follower = nullptr;
+    auto* peer_signal =
+        admitted ? iree_hal_amd_gpu_signal_pool_try_acquire(&signal_pool_, 0)
+                 : nullptr;
+    if (prepared) {
+      const iree_hal_amd_gpu_pm4_dispatch_request_t request = {};
+      const std::array<iree_hal_amd_gpu_pm4_submission_wait_t, 2> dependencies =
+          {{
+              {.semaphore = semaphore_, .value = 1, .signal = readers_[0]},
+              {.semaphore = peer, .value = 1, .signal = peer_signal},
+          }};
+      iree_hal_amd_gpu_signal_retain(readers_[0]);
+      IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_retirement(
+          &queue_.captures, queue_.pending_size, {}, &request,
+          dependencies.size(), dependencies.data(), dependencies.size(),
+          {signals.size(), signals.data(), signal_values.data()}, {}, {},
+          nullptr, &follower));
+    } else {
+      IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
+          &queue_.captures, queue_.pending_size, false,
+          {waits.size(), waits.data(), values.data()},
+          {signals.size(), signals.data(), signal_values.data()}, nullptr,
+          nullptr, {}, {}, {}, {}, &profile_, nullptr, 0, &follower));
+    }
+    auto* dependencies = follower->waits;
+    if (admitted && !prepared) {
+      // Every unresolved admitted dependency owns its native producer point.
+      follower->native_wait_count = waits.size();
+      dependencies[0].signal = readers_[0];
+      iree_hal_amd_gpu_signal_retain(readers_[0]);
+      dependencies[1].signal = peer_signal;
+    }
+    std::vector<iree_byte_span_t> held_blocks;
+    if (deny_allocations) {
+      ASSERT_GT(follower->capture_size, queue_.captures.block_size);
+      // Exhaust reusable capacity before denying backing allocations. The
+      // accepted follower must use its own tail for each successive wait.
+      while (queue_.captures.available.head || queue_.captures.returned.head) {
+        iree_byte_span_t storage;
+        IREE_ASSERT_OK(iree_hal_amd_gpu_capture_pool_acquire(&queue_.captures,
+                                                             1, &storage));
+        held_blocks.push_back(storage);
+      }
+      deny_allocations_ = true;
+    }
+    if (!already_waiting) {
+      iree_atomic_store(&feedback.failure_code, IREE_STATUS_ABORTED,
+                        iree_memory_order_release);
+    }
+    const auto publish =
+        iree_hal_amd_gpu_pm4_queue_publication_source(&queue_.base);
+    iree_hal_amd_gpu_publication_enqueue(&publication_, 0, &queue_.publisher,
+                                         &follower->entry.publication);
+    EXPECT_FALSE(publish.publish(publish.user_data));
+    if (already_waiting) {
+      iree_atomic_store(&feedback.failure_code, IREE_STATUS_ABORTED,
+                        iree_memory_order_release);
+      iree_hal_amd_gpu_pm4_queue_notify_failure(&queue_.base);
+      EXPECT_FALSE(publish.publish(publish.user_data));
+    }
+    uint64_t value = UINT64_MAX;
+    IREE_EXPECT_OK(iree_hal_semaphore_query(completion, &value));
+    EXPECT_EQ(value, 0u);
+    ExpectPending();
+    EXPECT_EQ(destroyed_, 0u);
+    EXPECT_GT(iree_atomic_load(&queue_.pending.host_owners,
+                               iree_memory_order_acquire),
+              0);
+
+    // Retiring the copy may fail the stream, but the follower still joins its
+    // other input before publishing its own private completion.
+    std::array<iree_hal_amd_gpu_pm4_retirement_record_t, 4> records = {};
+    queue_.retirement.records = records.data();
+    queue_.retirement.capacity_shift = 2;
+    records[0].action = reinterpret_cast<uintptr_t>(&issued_[0].action);
+    iree_atomic_store(&records[0].generation, 1, iree_memory_order_release);
+    const auto retire =
+        iree_hal_amd_gpu_pm4_queue_completion_source(&queue_.base);
+    iree_hal_amd_gpu_completion_wait_t wait = {};
+    native_access_ended_ = true;
+    EXPECT_TRUE(retire.fn(retire.user_data, AMDF_STATUS_OK, &wait));
+    EXPECT_EQ(destroyed_, 6u);
+    ExpectFailed();
+    IREE_EXPECT_OK(iree_hal_semaphore_query(completion, &value));
+    EXPECT_EQ(value, 0u);
+    if (admitted) {
+      EXPECT_EQ(follower->waits, dependencies);
+      EXPECT_EQ(follower->wait_count, waits.size());
+      EXPECT_EQ(dependencies[0].signal, readers_[0]);
+    }
+    if (peer_signal) {
+      iree_hal_amd_gpu_signal_retire(peer_signal, IREE_STATUS_DATA_LOSS);
+    }
+    iree_hal_semaphore_fail(peer, iree_status_from_code(IREE_STATUS_DATA_LOSS));
+    EXPECT_FALSE(publish.publish(publish.user_data));
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
+                          iree_hal_semaphore_query(completion, &value));
+    EXPECT_EQ(iree_atomic_load(&queue_.pending.host_owners,
+                               iree_memory_order_acquire),
+              0);
+    EXPECT_TRUE(iree_hal_amd_gpu_publisher_is_idle(&queue_.publisher));
+    EXPECT_GT(diagnostics, 0u);
+    EXPECT_EQ(native_stops_, 0u);
+    iree_hal_semaphore_release(completion);
+    iree_hal_semaphore_release(peer);
+    EXPECT_EQ(denied_allocations_, 0u);
+    for (auto storage : held_blocks) {
+      iree_hal_amd_gpu_capture_pool_release(&queue_.captures, storage);
+    }
   }
   void ExpectPending() {
     uint64_t value = UINT64_MAX;
@@ -280,6 +476,14 @@ class Pm4LifecycleTest : public ::testing::Test {
             &satisfied));
   }
 
+  // Allocator dependency denies new backing only after capture acceptance.
+  bool deny_allocations_ = false;
+  // Any denied request exposes an allocation on the dependency cleanup path.
+  uint32_t denied_allocations_ = 0;
+  // Device progress notification storage, driven synchronously by the test.
+  iree_hal_amd_gpu_publication_t publication_ = {};
+  // Native signal-capacity dependency; these cases require no acquisition.
+  iree_hal_amd_gpu_signal_cache_t signal_cache_ = {};
   // Actual concrete protocol ownership state, without creating native hardware.
   iree_hal_amd_gpu_pm4_queue_t queue_ = {};
   // Host issued actions; GPU completion storage is deliberately absent.
@@ -375,6 +579,38 @@ TEST_F(Pm4LifecycleTest, ShaderFailureJoinsEveryAcceptedPiece) {
 
 TEST_F(Pm4LifecycleTest, ShaderFailureJoinsUnpublishedSuffix) {
   CheckShaderFailure(/*partial=*/true, /*abandon_suffix=*/false);
+}
+
+TEST_F(Pm4LifecycleTest, ShaderFailureJoinsUnadmittedFollowers) {
+  CheckRejectedFollower(/*admitted=*/false, /*already_waiting=*/false);
+}
+
+TEST_F(Pm4LifecycleTest, ShaderFailureJoinsCapacityDeferredFollowers) {
+  CheckRejectedFollower(/*admitted=*/true, /*already_waiting=*/false);
+}
+
+TEST_F(Pm4LifecycleTest, ShaderFailurePreservesEnrolledDependencyWaits) {
+  CheckRejectedFollower(/*admitted=*/false, /*already_waiting=*/true);
+}
+
+TEST_F(Pm4LifecycleTest, ShaderFailureJoinsProducerHostRetirement) {
+  CheckShaderFailure(/*partial=*/false, /*abandon_suffix=*/false,
+                     /*pending_producer=*/true);
+}
+
+TEST_F(Pm4LifecycleTest, AbandonedSuffixKeepsNonterminalProducerJoin) {
+  CheckShaderFailure(/*partial=*/true, /*abandon_suffix=*/true,
+                     /*pending_producer=*/true);
+}
+
+TEST_F(Pm4LifecycleTest, OversizedFailureJoinsWithoutAllocating) {
+  CheckRejectedFollower(/*admitted=*/false, /*already_waiting=*/false,
+                        /*deny_allocations=*/true);
+}
+
+TEST_F(Pm4LifecycleTest, PreparedKernelFailureJoinsCapturedSources) {
+  CheckRejectedFollower(/*admitted=*/true, /*already_waiting=*/false,
+                        /*deny_allocations=*/false, /*prepared=*/true);
 }
 
 }  // namespace

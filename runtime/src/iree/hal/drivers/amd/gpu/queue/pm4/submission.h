@@ -203,10 +203,12 @@ iree_hal_amd_gpu_pm4_submission_profile(
 // Failure retains nothing and leaves out_submission NULL. Arrays and bytes
 // cease borrowing the caller on success. Buffer addresses remain unresolved
 // until queue-ordered allocation and dependency admission permit reading them.
+// Nonempty waits reserve wait_storage_size aligned bytes for the queue's
+// dependency tracker. That storage belongs to the capture before acceptance.
 iree_status_t iree_hal_amd_gpu_pm4_submission_create(
-    iree_hal_amd_gpu_capture_pool_t* pool, bool profiled,
-    iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
-    iree_hal_executable_t* executable,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
+    bool profiled, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_executable_t* executable,
     const iree_hal_amd_gpu_pm4_function_t* function,
     iree_hal_amd_gpu_pm4_dispatch_t dispatch, iree_hal_buffer_ref_t parameters,
     iree_const_byte_span_t constants, iree_hal_buffer_ref_list_t bindings,
@@ -215,7 +217,7 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create(
     iree_hal_amd_gpu_pm4_submission_t** out_submission);
 
 // Creates only the asynchronous ownership for a dispatch already prepared for
-// publication. Constants and wait semaphores are not captured. On success,
+// publication. Constants are not captured. On success,
 // transfers the native readers in waits, retains signals, and retains resources
 // unless flags borrow their lifetimes. No borrow of request or waits survives.
 // Failure transfers nothing.
@@ -225,8 +227,12 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create(
 // free the borrowed span; its owner reclaims those bytes afterward.
 // The prepared native command bytes, including arguments, must survive any
 // KERNEL capacity deferral; this object cannot reconstruct those bytes.
+// A nonzero wait_storage_size permits KERNEL capacity deferral: native readers
+// also retain their source semaphores and the capture reserves aligned wait
+// storage. Immediate USER publication passes zero and retains only readers.
 iree_status_t iree_hal_amd_gpu_pm4_submission_create_retirement(
-    iree_hal_amd_gpu_capture_pool_t* pool, iree_byte_span_t inline_storage,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
+    iree_byte_span_t inline_storage,
     const iree_hal_amd_gpu_pm4_dispatch_request_t* request,
     iree_host_size_t wait_count,
     const iree_hal_amd_gpu_pm4_submission_wait_t* waits,
@@ -239,10 +245,11 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_retirement(
 // address resolution waits for admission; the buffer is retained through
 // terminal retirement. Failure retains nothing.
 iree_status_t iree_hal_amd_gpu_pm4_submission_create_control(
-    iree_hal_amd_gpu_capture_pool_t* pool, bool profiled,
-    const iree_hal_queue_family_t* family, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals, iree_hal_buffer_t* target,
-    iree_device_size_t offset, iree_hal_amd_gpu_control_t command,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
+    bool profiled, const iree_hal_queue_family_t* family,
+    iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
+    iree_hal_buffer_t* target, iree_device_size_t offset,
+    iree_hal_amd_gpu_control_t command,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     const iree_hal_queue_barriers_t* barriers,
     iree_hal_amd_gpu_pm4_submission_t** out_submission);
@@ -254,10 +261,10 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_control(
 // An optional callback observes native retirement without a signal semaphore.
 // Construction failure retains nothing and invokes no callback.
 iree_status_t iree_hal_amd_gpu_pm4_submission_create_transfer(
-    iree_hal_amd_gpu_capture_pool_t* pool, bool profiled,
-    const iree_hal_queue_family_t* family, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals, iree_host_size_t count,
-    const iree_hal_transfer_operation_t* operations,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
+    bool profiled, const iree_hal_queue_family_t* family,
+    iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
+    iree_host_size_t count, const iree_hal_transfer_operation_t* operations,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     const iree_hal_queue_barriers_t* barriers,
     iree_hal_amd_gpu_retirement_callback_t callback,
@@ -302,8 +309,9 @@ void iree_hal_amd_gpu_pm4_submission_set_frontier(
 // semaphore ownership. Recorded barriers own payload visibility; execution adds
 // no implicit system-scope before/after boundary. Failure retains nothing.
 iree_status_t iree_hal_amd_gpu_pm4_submission_create_execute(
-    iree_hal_amd_gpu_capture_pool_t* pool, bool profiled,
-    iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
+    bool profiled, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals,
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t bindings,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
@@ -317,10 +325,9 @@ void iree_hal_amd_gpu_pm4_submission_profile_transfer(
     iree_hal_amd_gpu_pm4_submission_t* submission,
     iree_hal_amd_gpu_profile_t* profile, uint32_t queue_ordinal);
 
-// Borrows the unused, naturally aligned tail of a reusable capture block.
-// Oversized captures have no spare storage. Admission may place sidecars here
-// without another allocation; their users must join before the capture's final
-// release. The capture owns these bytes and this query transfers no ownership.
+// Borrows the naturally aligned capture tail, including reserved wait storage.
+// Admission places its sidecar here without another allocation. Its users join
+// before the capture's final release; this query transfers no ownership.
 iree_byte_span_t iree_hal_amd_gpu_pm4_submission_tail_storage(
     iree_hal_amd_gpu_pm4_submission_t* submission);
 

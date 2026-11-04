@@ -25,8 +25,8 @@ iree_hal_amd_gpu_pm4_submission_retirement(
 
 // Captures common ownership and allocates the operation payload in one block.
 static iree_status_t iree_hal_amd_gpu_pm4_submission_acquire_storage(
-    iree_hal_amd_gpu_capture_pool_t* pool, iree_byte_span_t inline_storage,
-    bool profiled, iree_host_size_t wait_count,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
+    iree_byte_span_t inline_storage, bool profiled, iree_host_size_t wait_count,
     iree_hal_semaphore_list_t signals, iree_host_size_t payload_size,
     iree_hal_amd_gpu_pm4_barrier_t before, iree_hal_amd_gpu_pm4_barrier_t after,
     iree_hal_amd_gpu_pm4_submission_t** out_submission, void** out_payload) {
@@ -46,12 +46,21 @@ static iree_status_t iree_hal_amd_gpu_pm4_submission_acquire_storage(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "submission capture size overflows");
   }
+  iree_host_size_t allocation_size = total_size;
+  if (wait_count && wait_storage_size &&
+      (!iree_host_size_checked_align(allocation_size, iree_max_align_t,
+                                     &allocation_size) ||
+       !iree_host_size_checked_add(allocation_size, wait_storage_size,
+                                   &allocation_size))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "submission wait storage overflows");
+  }
   iree_byte_span_t storage = inline_storage;
-  if (total_size <= storage.data_length) {
+  if (allocation_size <= storage.data_length) {
     pool = NULL;
   } else {
     IREE_RETURN_IF_ERROR(
-        iree_hal_amd_gpu_capture_pool_acquire(pool, total_size, &storage));
+        iree_hal_amd_gpu_capture_pool_acquire(pool, allocation_size, &storage));
   }
   iree_hal_amd_gpu_pm4_submission_t* submission = (void*)storage.data;
   *submission = (iree_hal_amd_gpu_pm4_submission_t){
@@ -85,15 +94,15 @@ static iree_status_t iree_hal_amd_gpu_pm4_submission_acquire_storage(
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_submission_acquire(
-    iree_hal_amd_gpu_capture_pool_t* pool, bool profiled,
-    iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
-    iree_host_size_t payload_size,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
+    bool profiled, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_host_size_t payload_size,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     const iree_hal_queue_barriers_t* barriers,
     iree_hal_amd_gpu_pm4_submission_t** out_submission, void** out_payload) {
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_acquire_storage(
-      pool, iree_byte_span_empty(), profiled, waits.count, signals,
-      payload_size,
+      pool, wait_storage_size, iree_byte_span_empty(), profiled, waits.count,
+      signals, payload_size,
       iree_hal_amd_gpu_pm4_barrier_prepare(profile,
                                            barriers ? barriers->before : NULL),
       iree_hal_amd_gpu_pm4_barrier_prepare(profile,
@@ -109,9 +118,9 @@ static iree_status_t iree_hal_amd_gpu_pm4_submission_acquire(
 }
 
 iree_status_t iree_hal_amd_gpu_pm4_submission_create(
-    iree_hal_amd_gpu_capture_pool_t* pool, bool profiled,
-    iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
-    iree_hal_executable_t* executable,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
+    bool profiled, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_executable_t* executable,
     const iree_hal_amd_gpu_pm4_function_t* function,
     iree_hal_amd_gpu_pm4_dispatch_t dispatch, iree_hal_buffer_ref_t parameters,
     iree_const_byte_span_t constants, iree_hal_buffer_ref_list_t bindings,
@@ -136,8 +145,8 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create(
   iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
   void* payload = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_acquire(
-      pool, profiled, waits, signals, payload_size, profile, barriers,
-      &submission, &payload));
+      pool, wait_storage_size, profiled, waits, signals, payload_size, profile,
+      barriers, &submission, &payload));
   submission->entry.kind = function ? IREE_HAL_AMD_GPU_PM4_ENTRY_DISPATCH
                                     : IREE_HAL_AMD_GPU_PM4_ENTRY_BARRIER;
   submission->dispatch.executable = executable;
@@ -171,7 +180,8 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create(
 }
 
 iree_status_t iree_hal_amd_gpu_pm4_submission_create_retirement(
-    iree_hal_amd_gpu_capture_pool_t* pool, iree_byte_span_t inline_storage,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
+    iree_byte_span_t inline_storage,
     const iree_hal_amd_gpu_pm4_dispatch_request_t* request,
     iree_host_size_t wait_count,
     const iree_hal_amd_gpu_pm4_submission_wait_t* waits,
@@ -190,7 +200,8 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_retirement(
   iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
   void* payload = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_acquire_storage(
-      pool, inline_storage, profile != NULL, native_wait_count, signals,
+      pool, wait_storage_size, inline_storage, profile != NULL,
+      native_wait_count, signals,
       reference_count * sizeof(iree_hal_buffer_ref_t), before, after,
       &submission, &payload));
   submission->entry.kind = request->function
@@ -199,8 +210,14 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_retirement(
   submission->native_wait_count = native_wait_count;
   for (iree_host_size_t i = 0, target = 0; i < wait_count; ++i) {
     if (waits[i].signal) {
-      submission->waits[target++] =
-          (iree_hal_amd_gpu_pm4_submission_wait_t){.signal = waits[i].signal};
+      submission->waits[target++] = (iree_hal_amd_gpu_pm4_submission_wait_t){
+          .semaphore = wait_storage_size ? waits[i].semaphore : NULL,
+          .value = waits[i].value,
+          .signal = waits[i].signal,
+      };
+      if (wait_storage_size) {
+        iree_hal_semaphore_retain(waits[i].semaphore);
+      }
     }
   }
   submission->dispatch.executable = request->executable;
@@ -230,10 +247,11 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_retirement(
 }
 
 iree_status_t iree_hal_amd_gpu_pm4_submission_create_control(
-    iree_hal_amd_gpu_capture_pool_t* pool, bool profiled,
-    const iree_hal_queue_family_t* family, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals, iree_hal_buffer_t* target,
-    iree_device_size_t offset, iree_hal_amd_gpu_control_t command,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
+    bool profiled, const iree_hal_queue_family_t* family,
+    iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
+    iree_hal_buffer_t* target, iree_device_size_t offset,
+    iree_hal_amd_gpu_control_t command,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     const iree_hal_queue_barriers_t* barriers,
     iree_hal_amd_gpu_pm4_submission_t** out_submission) {
@@ -252,8 +270,8 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_control(
   iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
   void* payload = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_acquire(
-      pool, profiled, waits, signals, 0, profile, barriers, &submission,
-      &payload));
+      pool, wait_storage_size, profiled, waits, signals, 0, profile, barriers,
+      &submission, &payload));
   submission->entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_CONTROL;
   submission->control.target = reference;
   submission->control.command = command;
@@ -263,10 +281,10 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_control(
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_submission_capture_transfer(
-    iree_hal_amd_gpu_capture_pool_t* pool, bool profiled,
-    const iree_hal_queue_family_t* family, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals, iree_host_size_t count,
-    const iree_hal_transfer_operation_t* operations,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
+    bool profiled, const iree_hal_queue_family_t* family,
+    iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
+    iree_host_size_t count, const iree_hal_transfer_operation_t* operations,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     const iree_hal_queue_barriers_t* barriers,
     iree_hal_amd_gpu_transfer_layout_t layout,
@@ -288,8 +306,8 @@ static iree_status_t iree_hal_amd_gpu_pm4_submission_capture_transfer(
   iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
   void* payload = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_acquire(
-      pool, profiled, waits, signals, payload_size, profile, barriers,
-      &submission, &payload));
+      pool, wait_storage_size, profiled, waits, signals, payload_size, profile,
+      barriers, &submission, &payload));
   iree_status_t status = iree_ok_status();
   if (layout.count) {
     submission->entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER;
@@ -316,10 +334,10 @@ static iree_status_t iree_hal_amd_gpu_pm4_submission_capture_transfer(
 }
 
 iree_status_t iree_hal_amd_gpu_pm4_submission_create_transfer(
-    iree_hal_amd_gpu_capture_pool_t* pool, bool profiled,
-    const iree_hal_queue_family_t* family, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals, iree_host_size_t count,
-    const iree_hal_transfer_operation_t* operations,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
+    bool profiled, const iree_hal_queue_family_t* family,
+    iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
+    iree_host_size_t count, const iree_hal_transfer_operation_t* operations,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     const iree_hal_queue_barriers_t* barriers,
     iree_hal_amd_gpu_retirement_callback_t callback,
@@ -329,8 +347,8 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_transfer(
   IREE_RETURN_IF_ERROR(
       iree_hal_amd_gpu_transfer_measure(count, operations, &layout));
   return iree_hal_amd_gpu_pm4_submission_capture_transfer(
-      pool, profiled, family, waits, signals, count, operations, profile,
-      barriers, layout, callback, out_submission);
+      pool, wait_storage_size, profiled, family, waits, signals, count,
+      operations, profile, barriers, layout, callback, out_submission);
 }
 
 iree_status_t iree_hal_amd_gpu_pm4_submission_create_file(
@@ -354,7 +372,7 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_file(
   const iree_hal_queue_barriers_t barriers = {&empty, &empty};
   iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_capture_transfer(
-      pool, false, family, iree_hal_semaphore_list_empty(),
+      pool, 0, false, family, iree_hal_semaphore_list_empty(),
       iree_hal_semaphore_list_empty(), operation ? 1 : 0, operation, &profile,
       &barriers, layout, callback, &submission));
   if (before) {
@@ -407,8 +425,9 @@ void iree_hal_amd_gpu_pm4_submission_set_frontier(
 }
 
 iree_status_t iree_hal_amd_gpu_pm4_submission_create_execute(
-    iree_hal_amd_gpu_capture_pool_t* pool, bool profiled,
-    iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
+    bool profiled, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals,
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t bindings,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
@@ -427,8 +446,8 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_execute(
   iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
   void* payload = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_acquire(
-      pool, profiled, waits, signals, payload_size, profile, &barriers,
-      &submission, &payload));
+      pool, wait_storage_size, profiled, waits, signals, payload_size, profile,
+      &barriers, &submission, &payload));
   submission->entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_EXECUTE;
   iree_status_t status = iree_hal_amd_gpu_pm4_command_invocation_initialize(
       command_buffer, bindings, payload, flags, &submission->execute);

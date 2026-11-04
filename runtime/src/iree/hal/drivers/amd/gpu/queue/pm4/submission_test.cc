@@ -90,8 +90,8 @@ TEST_P(SubmissionTest, AtomicTargetRetainsDeferredBackingUntilRetirement) {
   IREE_EXPECT_STATUS_IS(
       GetParam() ? IREE_STATUS_INCOMPATIBLE : IREE_STATUS_PERMISSION_DENIED,
       iree_hal_amd_gpu_pm4_submission_create_control(
-          &pool_, GetParam(), &family, {}, {}, buffer, 8, command, &profile_,
-          nullptr, &capture));
+          &pool_, 128, GetParam(), &family, {}, {}, buffer, 8, command,
+          &profile_, nullptr, &capture));
   EXPECT_EQ(capture, nullptr);
   EXPECT_EQ(iree_atomic_ref_count_load(&buffer->resource.ref_count), 1);
   scopes[1].atomic_operations = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE << 8;
@@ -99,13 +99,13 @@ TEST_P(SubmissionTest, AtomicTargetRetainsDeferredBackingUntilRetirement) {
   IREE_EXPECT_STATUS_IS(
       GetParam() ? IREE_STATUS_INCOMPATIBLE : IREE_STATUS_PERMISSION_DENIED,
       iree_hal_amd_gpu_pm4_submission_create_control(
-          &pool_, GetParam(), &family, {}, {}, buffer, 8, command, &profile_,
-          nullptr, &capture));
+          &pool_, 128, GetParam(), &family, {}, {}, buffer, 8, command,
+          &profile_, nullptr, &capture));
   EXPECT_EQ(capture, nullptr);
   EXPECT_EQ(iree_atomic_ref_count_load(&buffer->resource.ref_count), 1);
   zero_compute[1] = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE << 8;
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_control(
-      &pool_, GetParam(), &family, {}, {}, buffer, 8, command, &profile_,
+      &pool_, 128, GetParam(), &family, {}, {}, buffer, 8, command, &profile_,
       nullptr, &capture));
   uint64_t address = 0;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
@@ -152,7 +152,7 @@ TEST_P(SubmissionTest, PayloadRetiresBeforePublicCompletion) {
   uint32_t constant = 0x12345678;
   iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
-      &pool_, GetParam(), {1, &semaphore, &wait_value},
+      &pool_, 128, GetParam(), {1, &semaphore, &wait_value},
       {1, &semaphore, &signal_value}, &executable.base, &function_, {}, {},
       iree_make_const_byte_span(&constant, sizeof(constant)), {1, &reference},
       &profile_, nullptr, 0, &capture));
@@ -168,8 +168,8 @@ TEST_P(SubmissionTest, PayloadRetiresBeforePublicCompletion) {
   capture->signal = iree_hal_amd_gpu_signal_pool_try_acquire(&signal_pool, 0);
   iree_hal_amd_gpu_pm4_submission_t* consumer = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
-      &pool_, GetParam(), {1, &semaphore, &signal_value}, {}, nullptr, nullptr,
-      {}, {}, {}, {}, &profile_, nullptr, 0, &consumer));
+      &pool_, 128, GetParam(), {1, &semaphore, &signal_value}, {}, nullptr,
+      nullptr, {}, {}, {}, {}, &profile_, nullptr, 0, &consumer));
   // Native admission retains the producer's independent signal owner. GPU
   // completion alone must not let this consumer publish host completion.
   consumer->native_wait_count = 1;
@@ -285,7 +285,7 @@ TEST_P(SubmissionTest, RetirementOwnsNativeReadersWithoutCallerInputs) {
   iree_hal_amd_gpu_pm4_submission_t* retirement = nullptr;
   alignas(iree_hal_amd_gpu_pm4_submission_t) std::array<uint8_t, 512> storage;
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_retirement(
-      &pool_, iree_make_byte_span(storage.data(), storage.size()), &request,
+      &pool_, 0, iree_make_byte_span(storage.data(), storage.size()), &request,
       IREE_ARRAYSIZE(waits), waits, 1, {}, {}, {},
       GetParam() ? &profile : nullptr, &retirement));
   EXPECT_EQ(static_cast<void*>(retirement), storage.data());
@@ -331,8 +331,8 @@ TEST_P(SubmissionTest, InlineRetirementStorageReusesAfterLastOwner) {
     iree_hal_amd_gpu_profile_operation_t profile = {};
     iree_hal_amd_gpu_pm4_submission_t* submission = nullptr;
     IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_retirement(
-        &pool_, iree_make_byte_span(storage.data(), storage.size()), &request,
-        0, nullptr, 0, {}, {}, {}, GetParam() ? &profile : nullptr,
+        &pool_, 0, iree_make_byte_span(storage.data(), storage.size()),
+        &request, 0, nullptr, 0, {}, {}, {}, GetParam() ? &profile : nullptr,
         &submission));
     ASSERT_EQ(static_cast<void*>(submission), storage.data());
     EXPECT_EQ(submission->pool, nullptr);
@@ -376,8 +376,8 @@ TEST_P(SubmissionTest, RetirementSpillsWhenInlineExtentIsTooSmall) {
   iree_hal_amd_gpu_profile_operation_t profile = {};
   iree_hal_amd_gpu_pm4_submission_t* submission = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_retirement(
-      &pool_, iree_make_byte_span(storage.data(), storage.size()), &request, 0,
-      nullptr, 0, {}, {}, {}, GetParam() ? &profile : nullptr, &submission));
+      &pool_, 0, iree_make_byte_span(storage.data(), storage.size()), &request,
+      0, nullptr, 0, {}, {}, {}, GetParam() ? &profile : nullptr, &submission));
   EXPECT_NE(static_cast<void*>(submission), storage.data());
   EXPECT_EQ(submission->pool, &pool_);
   EXPECT_GT(submission->capture_size, storage.size());
@@ -426,7 +426,7 @@ TEST_P(SubmissionTest, CallerManagedResourcesStayBorrowedThroughRetirement) {
           retirement_storage;
       if (deferred) {
         IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
-            &pool_, GetParam(), {}, {}, &executable.base, &function_, {},
+            &pool_, 128, GetParam(), {}, {}, &executable.base, &function_, {},
             reference, {}, {1, &reference}, &profile_, nullptr, flags,
             &submission));
       } else {
@@ -439,7 +439,7 @@ TEST_P(SubmissionTest, CallerManagedResourcesStayBorrowedThroughRetirement) {
         };
         iree_hal_amd_gpu_profile_operation_t profile = {};
         IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_retirement(
-            &pool_,
+            &pool_, 0,
             iree_make_byte_span(retirement_storage.data(),
                                 retirement_storage.size()),
             &request, 0, nullptr, 0, {}, {}, {},
@@ -485,15 +485,15 @@ TEST_P(SubmissionTest, FailedDependencyStillJoinsOtherProducers) {
   std::array<iree_hal_amd_gpu_pm4_submission_t*, 2> producers = {};
   for (size_t i = 0; i < producers.size(); ++i) {
     IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
-        &pool_, GetParam(), {}, {1, &semaphores[i], &values[i]}, nullptr,
+        &pool_, 128, GetParam(), {}, {1, &semaphores[i], &values[i]}, nullptr,
         nullptr, {}, {}, {}, {}, &profile_, nullptr, 0, &producers[i]));
     producers[i]->signal =
         iree_hal_amd_gpu_signal_pool_try_acquire(&signal_pool, 0);
   }
   iree_hal_amd_gpu_pm4_submission_t* consumer = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
-      &pool_, GetParam(), {2, semaphores.data(), values.data()}, {}, nullptr,
-      nullptr, {}, {}, {}, {}, &profile_, nullptr, 0, &consumer));
+      &pool_, 128, GetParam(), {2, semaphores.data(), values.data()}, {},
+      nullptr, nullptr, {}, {}, {}, {}, &profile_, nullptr, 0, &consumer));
   consumer->native_wait_count = producers.size();
   for (size_t i = 0; i < producers.size(); ++i) {
     consumer->waits[i].signal = producers[i]->signal;
@@ -554,9 +554,9 @@ TEST_P(SubmissionTest, IndirectParametersRetireWithoutAddingShaderBindings) {
     auto reference = iree_hal_make_buffer_ref(parameters, 4, 12);
     iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
     IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
-        &pool_, GetParam(), {}, {}, &executable.base, &function_, {}, reference,
-        iree_make_const_byte_span(&constant, sizeof(constant)), {}, &profile_,
-        nullptr, flags, &capture));
+        &pool_, 128, GetParam(), {}, {}, &executable.base, &function_, {},
+        reference, iree_make_const_byte_span(&constant, sizeof(constant)), {},
+        &profile_, nullptr, flags, &capture));
     iree_hal_buffer_release(parameters);
     EXPECT_FALSE(destroyed);
     reference = {};
@@ -589,7 +589,7 @@ TEST_P(SubmissionTest, OversizedCaptureUsesCompleteOwnedStorage) {
   const iree_hal_barrier_list_t empty = {};
   const iree_hal_queue_barriers_t barriers = {&empty, &empty};
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
-      &pool_, GetParam(), {}, {}, &executable.base, &function_, {}, {},
+      &pool_, 128, GetParam(), {}, {}, &executable.base, &function_, {}, {},
       iree_make_const_byte_span(constants.data(), constants.size()), {},
       &profile_, &barriers, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS,
       &capture));
@@ -627,7 +627,7 @@ TEST_P(SubmissionTest, TailStoragePreservesArgumentsAtBlockBoundaries) {
     std::vector<uint8_t> constants(size, 0x35);
     iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
     IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
-        &pool_, GetParam(), {}, {}, &executable.base, &function_, {}, {},
+        &pool_, 128, GetParam(), {}, {}, &executable.base, &function_, {}, {},
         iree_make_const_byte_span(constants.data(), constants.size()), {},
         &profile_, nullptr, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS,
         &capture));
@@ -661,7 +661,7 @@ TEST_P(SubmissionTest, CaptureOverflowRetainsNoInputs) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
       iree_hal_amd_gpu_pm4_submission_create(
-          &pool_, GetParam(), {IREE_HOST_SIZE_MAX, nullptr, nullptr}, {},
+          &pool_, 128, GetParam(), {IREE_HOST_SIZE_MAX, nullptr, nullptr}, {},
           nullptr, nullptr, {}, {}, {}, {}, &profile_, nullptr, 0, &capture));
   EXPECT_EQ(capture, nullptr);
 }
@@ -948,8 +948,8 @@ TEST_P(SubmissionTest, CopyBatchesCaptureProgramCompatibilityAndKeepOwnership) {
         for (size_t count : {size_t{1}, size_t{2}}) {
           iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
           IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_transfer(
-              &pool_, GetParam(), &family, {}, {}, count, operations, &profile_,
-              nullptr, {}, &capture));
+              &pool_, 128, GetParam(), &family, {}, {}, count, operations,
+              &profile_, nullptr, {}, &capture));
           const auto usage = source ? IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE
                                     : IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET;
           EXPECT_EQ(
@@ -1019,8 +1019,8 @@ TEST_P(SubmissionTest, RejectedDownloadSuffixJoinsBeforeFailingPublicSignals) {
   uint64_t value = 1;
   iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_transfer(
-      &pool_, GetParam(), &family, {}, {1, &semaphore, &value}, 1, &operation,
-      &profile_, nullptr, {}, &capture));
+      &pool_, 128, GetParam(), &family, {}, {1, &semaphore, &value}, 1,
+      &operation, &profile_, nullptr, {}, &capture));
   ASSERT_TRUE(capture->transfer.host_completion_required);
   iree_hal_amd_gpu_pm4_submission_retain(capture);
   iree_hal_amd_gpu_pm4_submission_retain(capture);

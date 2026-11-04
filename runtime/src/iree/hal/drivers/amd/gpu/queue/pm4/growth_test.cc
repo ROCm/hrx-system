@@ -185,7 +185,7 @@ class GrowthTest : public ::testing::Test {
     };
     iree_hal_amd_gpu_pm4_submission_t* submission = nullptr;
     IREE_CHECK_OK(iree_hal_amd_gpu_pm4_submission_create(
-        &captures_, false, iree_hal_semaphore_list_empty(),
+        &captures_, 128, false, iree_hal_semaphore_list_empty(),
         iree_hal_semaphore_list_empty(), nullptr, nullptr, {}, {},
         iree_const_byte_span_empty(), iree_hal_buffer_ref_list_empty(),
         &profile, &barriers, 0, &submission));
@@ -586,10 +586,11 @@ class ProgramGrowthTest : public GrowthTest {
     IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer_));
     iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
     IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_execute(
-        &captures_, false, {}, {}, command_buffer_, {}, &profile, 0, &capture));
+        &captures_, 128, false, {}, {}, command_buffer_, {}, &profile, 0,
+        &capture));
     iree_hal_amd_gpu_pm4_submission_t* previous = nullptr;
     IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_execute(
-        &captures_, false, {}, {}, command_buffer_, {}, &profile, 0,
+        &captures_, 128, false, {}, {}, command_buffer_, {}, &profile, 0,
         &previous));
     auto* program = &capture->execute.program->resident;
     uint64_t frontier[3] = {};

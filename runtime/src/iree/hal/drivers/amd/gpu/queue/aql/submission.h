@@ -148,8 +148,10 @@ iree_hal_amd_gpu_aql_submission_profile(
 
 // Captures a deferred call in one reusable block. Retains all external owners
 // unless flags explicitly borrow payload lifetimes. Failure retains nothing.
+// Nonempty waits reserve wait_storage_size aligned bytes for the queue's
+// dependency tracker. That storage belongs to the capture before acceptance.
 iree_status_t iree_hal_amd_gpu_aql_submission_capture(
-    iree_hal_amd_gpu_capture_pool_t* pool,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
     const iree_hal_amd_gpu_profile_operation_t* profile,
     const iree_hal_amd_gpu_aql_dispatch_request_t* request,
     iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
@@ -160,7 +162,7 @@ iree_status_t iree_hal_amd_gpu_aql_submission_capture(
 // The pending suffix initially owns the sole invocation reference. Each
 // nonterminal native piece borrows a reference; the terminal piece takes it.
 iree_status_t iree_hal_amd_gpu_aql_submission_execute(
-    iree_hal_amd_gpu_capture_pool_t* pool,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
     const iree_hal_amd_gpu_profile_operation_t* profile,
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t bindings, iree_hal_semaphore_list_t waits,
@@ -171,7 +173,7 @@ iree_status_t iree_hal_amd_gpu_aql_submission_execute(
 // address resolution waits for admission; the buffer is retained through
 // terminal retirement. Failure retains nothing.
 iree_status_t iree_hal_amd_gpu_aql_submission_control(
-    iree_hal_amd_gpu_capture_pool_t* pool,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
     const iree_hal_amd_gpu_profile_operation_t* profile,
     const iree_hal_queue_family_t* family, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_hal_buffer_t* target,
@@ -182,7 +184,7 @@ iree_status_t iree_hal_amd_gpu_aql_submission_control(
 // Captures the entire transfer transaction before any native operation runs.
 // Empty transactions retain only their barrier and semaphore ownership.
 iree_status_t iree_hal_amd_gpu_aql_submission_transfer(
-    iree_hal_amd_gpu_capture_pool_t* pool,
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_host_size_t wait_storage_size,
     const iree_hal_amd_gpu_profile_operation_t* profile,
     const iree_hal_queue_family_t* family, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_host_size_t count,
