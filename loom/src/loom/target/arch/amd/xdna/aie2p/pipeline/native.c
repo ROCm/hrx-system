@@ -6,7 +6,6 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
 
-#include "loom/analysis/storage_geometry.h"
 #include "loom/error/parameter.h"
 #include "loom/ops/channel/ops.h"
 #include "loom/ops/func/ops.h"
@@ -83,7 +82,7 @@ static iree_status_t loom_aie2p_native_inventory(
 }
 
 static iree_status_t loom_aie2p_native_select_channels(
-    loom_aie2p_native_context_t* context, loom_module_t* module,
+    loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization, bool* out_valid) {
   const loom_pipeline_invocations_t* invocations = &realization->invocations;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -102,29 +101,20 @@ static iree_status_t loom_aie2p_native_select_channels(
     }
     loom_aie2p_native_tile_t* owner =
         context->pool_tiles[allocation->pool_index];
-    const loom_type_t storage_type = loom_module_value_type(
-        module, loom_channel_bind_storage(source->binding));
-    loom_storage_geometry_t geometry;
-    loom_storage_geometry_span_t record;
+    const loom_pipeline_channel_geometry_t* geometry = source->geometry;
     int64_t offset = 0;
-    uint64_t stride_bits = 0, record_bits = 0, extent = 0;
-    if (!loom_storage_geometry_query(&occurrence->invocation->facts->context,
-                                     module, storage_type, &geometry) ||
-        geometry.rank == 0 ||
-        !loom_storage_geometry_measure(&geometry, 1, &record) ||
+    uint64_t extent = 0;
+    if (!geometry ||
         !loom_value_facts_as_exact_i64(source->storage.base_byte_offset,
                                        &offset) ||
-        offset < 0 ||
-        !iree_checked_mul_u64(geometry.axes[0].element_stride,
-                              geometry.element_bit_count, &stride_bits) ||
-        !iree_checked_mul_u64(record.element_span, geometry.element_bit_count,
-                              &record_bits) ||
-        stride_bits % 8 || record_bits % 8 ||
-        !iree_checked_mul_u64(source->capacity - 1, stride_bits / 8, &extent) ||
-        !iree_checked_add_u64(extent, record_bits / 8, &extent) ||
+        offset < 0 || geometry->slot_bit_stride % 8 ||
+        geometry->record_bit_span % 8 ||
+        !iree_checked_mul_u64(source->capacity - 1,
+                              geometry->slot_bit_stride / 8, &extent) ||
+        !iree_checked_add_u64(extent, geometry->record_bit_span / 8, &extent) ||
         (uint64_t)offset > allocation->byte_length ||
         extent > allocation->byte_length - (uint64_t)offset ||
-        stride_bits / 8 > UINT32_MAX ||
+        geometry->slot_bit_stride / 8 > UINT32_MAX ||
         allocation->byte_offset > UINT32_MAX - (uint64_t)offset) {
       return loom_aie2p_native_reject(
           context, source->binding,
@@ -139,9 +129,9 @@ static iree_status_t loom_aie2p_native_select_channels(
         .source = source,
         .pool_index = allocation->pool_index,
         .byte_offset = (uint32_t)(allocation->byte_offset + (uint64_t)offset),
-        .byte_stride = (uint32_t)(stride_bits / 8),
-        .record_byte_length = (uint32_t)(record_bits / 8),
-        .record_dense = record.dense,
+        .byte_stride = (uint32_t)(geometry->slot_bit_stride / 8),
+        .record_byte_length = (uint32_t)(geometry->record_bit_span / 8),
+        .record_dense = geometry->record_dense,
         .free_lock = owner->next_lock++,
         .ready_lock = owner->next_lock++,
         .cursor = {.reader = {.worker = UINT32_MAX},
@@ -647,8 +637,8 @@ static iree_status_t loom_aie2p_native_select(
     const loom_pipeline_realization_t* realization, bool* out_valid) {
   loom_aie2p_native_context_t* context = user_data;
   *out_valid = false;
-  IREE_RETURN_IF_ERROR(loom_aie2p_native_select_channels(
-      context, module, realization, out_valid));
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_native_select_channels(context, realization, out_valid));
   if (!*out_valid) {
     return iree_ok_status();
   }

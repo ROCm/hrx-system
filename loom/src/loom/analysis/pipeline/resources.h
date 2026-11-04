@@ -70,6 +70,22 @@ typedef struct loom_pipeline_resource_allocation_t {
   uint64_t byte_alignment;
 } loom_pipeline_resource_allocation_t;
 
+// Exact slot geometry retained by the channel's construction owner. Bit units
+// preserve subbyte storage; byte-addressability belongs to physical selection.
+// Record envelopes can overlap even when their addressed elements are disjoint.
+typedef struct loom_pipeline_channel_geometry_t {
+  // Physical displacement between adjacent slot origins.
+  uint64_t slot_bit_stride;
+  // Logical elements in one record, counting repeated addresses separately.
+  uint64_t record_element_count;
+  // Envelope through the last addressed element, including padding.
+  uint64_t record_bit_span;
+  // Width of one physically stored scalar, including subbyte elements.
+  uint16_t element_bit_count;
+  // Logical row-major traversal visits consecutive physical elements.
+  bool record_dense;
+} loom_pipeline_channel_geometry_t;
+
 typedef struct loom_pipeline_resource_channel_t {
   // Fresh protocol binding, independent of its backing allocation identity.
   loom_op_t* binding;
@@ -81,6 +97,10 @@ typedef struct loom_pipeline_resource_channel_t {
   loom_value_fact_view_reference_t storage;
   // Specialized number of records in the authored binding.
   uint64_t capacity;
+  // Arena-owned exact geometry, shared by all importing occurrences. NULL when
+  // dimensions/layout/strides are unresolved or exceed the measurement domain;
+  // this does not reject source IR or imply a dense representation.
+  const loom_pipeline_channel_geometry_t* geometry;
 } loom_pipeline_resource_channel_t;
 
 typedef struct loom_pipeline_resource_strand_t {
