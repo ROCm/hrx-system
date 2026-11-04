@@ -88,65 +88,14 @@ static amdf_status_t amdf_gpu_linux_dxg_memory_make_resident(
   return AMDF_STATUS_OK;
 }
 
-static amdf_status_t amdf_gpu_linux_dxg_memory_query_device_state(
-    amdf_gpu_umd_device_t* device, uint32_t device_handle) {
-  D3DKMT_GETDEVICESTATE query = {
-      .hDevice = device_handle,
-      .StateType = D3DKMT_DEVICESTATE_EXECUTION,
-  };
-  const amdf_status_t status = amdf_linux_dxg_kmt_make_status(
-      amdf_linux_dxg_kmt_get_device_state(device->logical_device.kmt, &query));
-  if (!amdf_status_is_ok(status)) {
-    return status;
-  }
-  switch (query.ExecutionState) {
-    case D3DKMT_DEVICEEXECUTION_ACTIVE:
-      return AMDF_STATUS_OK;
-    case D3DKMT_DEVICEEXECUTION_RESET:
-    case D3DKMT_DEVICEEXECUTION_HUNG:
-    case D3DKMT_DEVICEEXECUTION_STOPPED:
-    case D3DKMT_DEVICEEXECUTION_ERROR_OUTOFMEMORY:
-    case D3DKMT_DEVICEEXECUTION_ERROR_DMAFAULT:
-    case D3DKMT_DEVICEEXECUTION_ERROR_DMAPAGEFAULT:
-      return amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
-    default:
-      return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
-  }
-}
-
 static amdf_status_t amdf_gpu_linux_dxg_memory_wait_for_paging(
     void* context, uint32_t device_handle,
     uint32_t synchronization_object_handle,
     const volatile uint64_t* progress_fence, uint64_t target_value) {
-  if (target_value == 0) {
-    return AMDF_STATUS_OK;
-  }
   amdf_gpu_umd_device_t* device = context;
-  uint64_t progress = 0;
-  if (progress_fence != NULL) {
-    progress = __atomic_load_n(progress_fence, __ATOMIC_ACQUIRE);
-    if (progress == UINT64_MAX) {
-      return amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
-    }
-  }
-  if (progress < target_value) {
-    D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMCPU wait = {
-        .hDevice = device_handle,
-        .ObjectCount = 1,
-        .ObjectHandleArray = &synchronization_object_handle,
-        .FenceValueArray = &target_value,
-    };
-    const amdf_status_t status = amdf_linux_dxg_kmt_make_status(
-        amdf_linux_dxg_kmt_wait_from_cpu(device->logical_device.kmt, &wait));
-    if (!amdf_status_is_ok(status)) {
-      return status;
-    }
-    if (progress_fence != NULL &&
-        __atomic_load_n(progress_fence, __ATOMIC_ACQUIRE) == UINT64_MAX) {
-      return amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
-    }
-  }
-  return amdf_gpu_linux_dxg_memory_query_device_state(device, device_handle);
+  return amdf_gpu_linux_dxg_device_status_wait_for_paging(
+      &device->status, device->logical_device.kmt, device_handle,
+      synchronization_object_handle, progress_fence, target_value);
 }
 
 static amdf_gpu_dxg_memory_release_result_t

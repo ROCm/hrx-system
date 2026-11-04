@@ -416,12 +416,15 @@ TEST_P(LinuxDxgMemoryPreparationFailureTest,
   if (GetParam() > FailureStage::kMap) {
     expected.push_back(Operation::kWait);
   }
-  if (GetParam() > FailureStage::kMapWait) {
+  if (GetParam() >= FailureStage::kMapWait) {
     expected.push_back(Operation::kQueryDeviceState);
+  }
+  if (GetParam() > FailureStage::kMapWait) {
     expected.push_back(Operation::kMakeResident);
   }
   if (GetParam() > FailureStage::kMakeResident) {
     expected.push_back(Operation::kWait);
+    expected.push_back(Operation::kQueryDeviceState);
   }
   if (GetParam() > FailureStage::kCreateAllocation) {
     expected.push_back(Operation::kDestroyAllocation);

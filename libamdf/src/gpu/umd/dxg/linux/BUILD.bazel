@@ -14,6 +14,20 @@ package(
 )
 
 amdf_cc_library(
+    name = "device_status",
+    srcs = ["device_status.c"],
+    hdrs = ["device_status.h"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        "//libamdf/src:atomics",
+        "//libamdf/src/platform/linux/dxg:kmt",
+    ],
+)
+
+amdf_cc_library(
     name = "memory_profile",
     srcs = ["memory_profile.c"],
     hdrs = ["memory_profile.h"],
@@ -67,6 +81,7 @@ amdf_cc_library(
         "@platforms//os:linux",
     ],
     deps = [
+        ":device_status",
         ":logical_device",
         ":memory_profile",
         ":paging_queue",
@@ -85,6 +100,7 @@ amdf_cc_library(
     ],
     deps = [
         ":device_state",
+        ":device_status",
         "//libamdf/src/gpu/umd:memory",
         "//libamdf/src/gpu/umd/dxg:memory",
         "//libamdf/src/platform/linux/dxg:kmt",
@@ -137,6 +153,21 @@ amdf_cc_library(
         "//libamdf/src/gpu/umd/dxg/rocdxg:loader",
         "//libamdf/src/platform/linux/dxg:endpoint",
         "//libamdf/src/platform/linux/dxg:kmt",
+    ],
+)
+
+amdf_cc_test(
+    name = "device_status_test",
+    srcs = ["device_status_test.cc"],
+    linkopts = ["-Wl,--wrap=amdf_linux_dxg_connection_invoke"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        ":device_status",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
     ],
 )
 

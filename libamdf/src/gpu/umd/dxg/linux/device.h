@@ -8,6 +8,7 @@
 #define AMDF_SRC_GPU_UMD_DXG_LINUX_DEVICE_H_
 
 #include "libamdf/src/gpu/umd/device.h"
+#include "libamdf/src/gpu/umd/dxg/linux/device_status.h"
 #include "libamdf/src/gpu/umd/dxg/linux/logical_device.h"
 #include "libamdf/src/gpu/umd/dxg/linux/memory_profile.h"
 #include "libamdf/src/gpu/umd/dxg/linux/paging_queue.h"
@@ -31,6 +32,8 @@ struct amdf_gpu_umd_device_t {
   amdf_gpu_dxg_rocdxg_loader_t bridge_loader;
   // Logical KMT device and private provider adapter owned together.
   amdf_gpu_linux_dxg_logical_device_t logical_device;
+  // Confirmed execution failure shared by every queue on this device.
+  amdf_gpu_linux_dxg_device_status_t status;
   // Paging queue owned by the logical device.
   amdf_gpu_linux_dxg_paging_queue_t paging_queue;
 };
