@@ -40,10 +40,15 @@ typedef struct loom_aie2p_program_helper_list_t {
 // target versions, and descriptor registry remain fixed for this lifetime.
 typedef struct loom_aie2p_program_compiler_t loom_aie2p_program_compiler_t;
 
-// Allocates a compiler in |arena|, which also owns its retained helper objects
-// and complete program contributions. The module outlives this compiler.
+// Allocates a compiler in |arena|, which also owns its retained helper objects,
+// compile reports, and complete program contributions. The module outlives the
+// compiler; |report_template| is borrowed only during allocation. Supplying a
+// template fixes report retention for the compiler lifetime, and every program
+// compiled with this instance must then supply a report with the same requested
+// detail flags.
 iree_status_t loom_aie2p_program_compiler_allocate(
     loom_module_t* module, iree_arena_allocator_t* arena,
+    const loom_target_compile_report_t* report_template,
     loom_aie2p_program_compiler_t** out_compiler);
 
 // Compiles |entry_function_op| and its producer-retained direct,

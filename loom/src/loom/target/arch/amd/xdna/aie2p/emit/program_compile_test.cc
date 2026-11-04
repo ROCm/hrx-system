@@ -30,6 +30,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/machine/machine.h"
 #include "loom/target/arch/amd/xdna/aie2p/provider.h"
 #include "loom/target/emit/native/object.h"
+#include "loom/target/reporting/report.h"
 #include "loom/testing/module_ptr.h"
 
 namespace loom {
@@ -330,7 +331,7 @@ class Aie2pProgramCompileTest : public ::testing::Test {
       loom_aie2p_program_compiler_t* compiler = nullptr) {
     if (compiler == nullptr) {
       IREE_RETURN_IF_ERROR(loom_aie2p_program_compiler_allocate(
-          module, &program_arena_, &compiler));
+          module, &program_arena_, options->compile_report, &compiler));
     }
     iree_arena_allocator_t requirements_arena;
     iree_arena_initialize(&program_block_pool_, &requirements_arena);
@@ -378,7 +379,7 @@ TEST_F(Aie2pProgramCompileTest, RetainsHelperObjectsAcrossProgramCompilations) {
     ASSERT_NE(entry, nullptr);
     loom_aie2p_program_compiler_t* compiler = nullptr;
     IREE_ASSERT_OK(loom_aie2p_program_compiler_allocate(
-        module.get(), &program_arena_, &compiler));
+        module.get(), &program_arena_, /*report_template=*/nullptr, &compiler));
     const uint8_t* helper_contents = nullptr;
     const uint8_t* entry_contents = nullptr;
     for (int program_index = 0; program_index < 3; ++program_index) {
@@ -415,6 +416,61 @@ TEST_F(Aie2pProgramCompileTest, RetainsHelperObjectsAcrossProgramCompilations) {
     ASSERT_EQ(other_contribution.object.section_count, 2u);
     EXPECT_NE(other_contribution.object.sections[1].contents.data,
               helper_contents);
+  }
+}
+
+TEST_F(Aie2pProgramCompileTest, ReportsCompleteProgramIncludingRetainedHelper) {
+  ModulePtr module = ParseModule(IREE_SV(kPointerHelperSource));
+  loom_op_t* entry = FindFunction(module.get(), IREE_SV("entry"));
+  loom_op_t* helper = FindFunction(module.get(), IREE_SV("sum_streams"));
+  ASSERT_NE(entry, nullptr);
+  ASSERT_NE(helper, nullptr);
+
+  loom_target_compile_report_t report_template;
+  loom_target_compile_report_initialize(&report_template,
+                                        iree_allocator_system());
+  loom_aie2p_program_compiler_t* compiler = nullptr;
+  IREE_ASSERT_OK(loom_aie2p_program_compiler_allocate(
+      module.get(), &program_arena_, &report_template, &compiler));
+  loom_target_compile_report_deinitialize(&report_template);
+
+  for (int program_index = 0; program_index < 2; ++program_index) {
+    loom_target_compile_report_t report;
+    loom_target_compile_report_initialize(&report, iree_allocator_system());
+    const loom_aie2p_leaf_compile_options_t options = {
+        .descriptor_registry = &low_registry_.registry,
+        .compile_report = &report,
+    };
+    bool compiled = false;
+    loom_aie2p_leaf_contribution_t contribution = {};
+    IREE_ASSERT_OK(CompileProgram(module.get(), entry, &options, &compiled,
+                                  &contribution, compiler));
+    ASSERT_TRUE(compiled);
+    ASSERT_EQ(contribution.object.section_count, 2u);
+
+    uint64_t semantic_code_bytes = 0;
+    for (iree_host_size_t i = 0; i < contribution.object.section_count; ++i) {
+      semantic_code_bytes +=
+          contribution.object.sections[i].contents.data_length;
+    }
+    EXPECT_EQ(report.emitted_code_byte_count, semantic_code_bytes);
+    EXPECT_EQ(report.emitted_code_storage_byte_count,
+              contribution.realization.code.byte_length);
+    EXPECT_EQ(report.emission_breakdown.body_instruction_count,
+              report.emitted_instruction_count);
+    EXPECT_EQ(report.static_instruction_mix.vector_alu_count, 1u);
+    EXPECT_EQ(report.dynamic_instruction_mix.vector_alu_count, 1u);
+
+    const loom_target_compile_report_call_edge_t* edge =
+        loom_target_compile_report_find_call_edge(
+            &report, loom_low_func_def_callee(entry),
+            loom_low_func_def_callee(helper));
+    ASSERT_NE(edge, nullptr);
+    EXPECT_EQ(edge->callsite_count, 1u);
+    EXPECT_TRUE(iree_all_bits_set(
+        edge->flags, LOOM_TARGET_COMPILE_REPORT_CALL_EDGE_DYNAMIC_COUNT));
+    EXPECT_EQ(edge->dynamic_call_count, 1u);
+    loom_target_compile_report_deinitialize(&report);
   }
 }
 
