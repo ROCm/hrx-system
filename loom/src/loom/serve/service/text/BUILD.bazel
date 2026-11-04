@@ -150,13 +150,16 @@ loom_cc_library(
     visibility = ["//visibility:private"],
     deps = [
         ":input_count",
+        ":sequence",
         ":source_service_fixture",
         ":stream",
         ":telemetry",
         "//loom/src/loom/serve/service/finite:component",
         "//loom/src/loom/serve/telemetry:latency",
+        "//loom/src/loom/serve/testing:native_allocator",
         "//loom/src/loom/serve/testing:worker_gate",
         "//runtime/src/iree/base/internal:base64",
+        "//runtime/src/iree/vm:test_support",
     ],
     alwayslink = True,
 )
