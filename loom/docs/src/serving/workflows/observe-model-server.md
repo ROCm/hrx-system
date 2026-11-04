@@ -46,13 +46,14 @@ native queue depth. Device and pool cards remain when models are unregistered.
 
 Each named pool appears once, even when multiple devices consume it. Its card
 shows committed serving allocations, observed peaks, reusable backing, and
-commitment histories, with links to the permitted devices. Native storage and
-elastic backing are distinct backing owners within the pool; their commitment
-adds. Workspace is shown as included, never added again. Elastic
-virtual reservations are address space, not physical RAM. These views exclude
-driver allocations and other processes, and do not invent a shared RAM capacity
-or a weights/KV/workspace partition from overlapping observations. Expand a pool
-to inspect its source counters.
+commitment histories, with links to the permitted devices. An elastic pool's
+retained backing is its complete managed physical total, including permanent
+storage and workspace. A fixed pool reports that total under native storage.
+The component counters describe included allocations. Elastic virtual
+reservations are address space, not physical RAM. These views exclude driver
+allocations and other processes; overlapping component counters cannot establish
+an exclusive weights/KV/workspace partition. Expand a pool to inspect its source
+counters.
 
 Unchanged snapshots stay off the wire. A small heartbeat settles the rate window,
 then backs off to once per minute while idle. New activity still appears at the

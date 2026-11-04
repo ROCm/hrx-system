@@ -265,8 +265,11 @@ TEST_P(ResidencyPressureTest, LogicalAdmissionCollectsFailureBeforeEviction) {
 
 TEST_P(ResidencyPressureTest, WarmAdmissionDoesNotQueryNativeCapacity) {
   ASSERT_NO_FATAL_FAILURE(UseDeferredBacking(2 * kSlabBytes));
-  IREE_ASSERT_OK(Register(0, 0, 0));
-  IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[0]));
+  IREE_ASSERT_OK(Compile(0, "direct_incomplete"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residencies_[0]));
   loom_serve_residency_release(residencies_[0]);
   uint32_t queries = 0;
   deferred_backing_->statistics_observer = [&queries] { ++queries; };
@@ -279,6 +282,11 @@ TEST_P(ResidencyPressureTest, WarmAdmissionDoesNotQueryNativeCapacity) {
   EXPECT_EQ(queries, 0u);
   deferred_backing_->statistics_observer = {};
   if (admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
+    ASSERT_NO_FATAL_FAILURE(ReadOutputOn(execution_, 0));
+    for (int32_t i = 0; i < 8; ++i) {
+      EXPECT_EQ(output_[i], 30 + i);
+    }
+    EXPECT_EQ(loom_serve_weights_activity(plans_[0]).activations, 1u);
     loom_serve_residency_release(residencies_[0]);
   }
 }
