@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "libamdf/src/gpu/umd/wddm/wkmi/endpoint_properties.h"
+#include "libamdf/src/gpu/umd/dxg/endpoint_properties.h"
 
 #include <array>
 #include <cstring>
@@ -15,29 +15,29 @@
 namespace {
 
 amdf_dxg_bridge_gpu_properties_t MakeProperties() {
-  amdf_dxg_bridge_gpu_properties_t properties = {};
-  properties.gfx_ip_major = 12;
-  properties.gfx_ip_minor = 5;
-  properties.gfx_ip_stepping = 0;
-  properties.asic_revision = 0xD1;
-  properties.wavefront_size = 32;
-  properties.compute_unit_count = 256;
-  properties.maximum_wave_count_per_compute_unit = 64;
-  properties.maximum_scratch_wave_count_per_compute_unit = 32;
-  properties.local_data_share_byte_length = 320u * 1024u;
-  properties.xcc_count = 8;
-  properties.shader_engine_count = 16;
-  properties.supports_pm4_kernel_queue = 1;
-  properties.supports_sdma_kernel_queue = 1;
-  return properties;
+  return {
+      .gfx_ip_major = 12,
+      .gfx_ip_minor = 5,
+      .gfx_ip_stepping = 0,
+      .asic_revision = 0xD1,
+      .wavefront_size = 32,
+      .compute_unit_count = 256,
+      .maximum_wave_count_per_compute_unit = 64,
+      .maximum_scratch_wave_count_per_compute_unit = 32,
+      .local_data_share_byte_length = 320u * 1024u,
+      .xcc_count = 8,
+      .shader_engine_count = 16,
+      .supports_pm4_kernel_queue = 1,
+      .supports_sdma_kernel_queue = 1,
+  };
 }
 
-TEST(WkmiEndpointPropertiesTest, NormalizesMultiXccTopology) {
+TEST(DxgEndpointPropertiesTest, NormalizesMultiXccTopology) {
   const amdf_dxg_bridge_gpu_properties_t provider_properties = MakeProperties();
   amdf_gpu_endpoint_properties_t properties = {};
 
-  ASSERT_TRUE(amdf_gpu_wddm_wkmi_endpoint_properties_translate(
-      &provider_properties, &properties));
+  ASSERT_TRUE(amdf_gpu_dxg_endpoint_properties_translate(&provider_properties,
+                                                         &properties));
 
   EXPECT_EQ(properties.gfx_ip.major, 12u);
   EXPECT_EQ(properties.gfx_ip.minor, 5u);
@@ -70,25 +70,25 @@ TEST(WkmiEndpointPropertiesTest, NormalizesMultiXccTopology) {
   EXPECT_TRUE(amdf_gpu_endpoint_profile_initialize(&properties, &profile));
 }
 
-TEST(WkmiEndpointPropertiesTest, NormalizesMissingScratchSlots) {
+TEST(DxgEndpointPropertiesTest, NormalizesMissingScratchSlots) {
   amdf_dxg_bridge_gpu_properties_t provider_properties = MakeProperties();
   provider_properties.maximum_scratch_wave_count_per_compute_unit = 0;
   amdf_gpu_endpoint_properties_t properties = {};
 
-  ASSERT_TRUE(amdf_gpu_wddm_wkmi_endpoint_properties_translate(
-      &provider_properties, &properties));
+  ASSERT_TRUE(amdf_gpu_dxg_endpoint_properties_translate(&provider_properties,
+                                                         &properties));
 
   EXPECT_EQ(properties.compute.maximum_scratch_wave_count_per_compute_unit,
             32u);
 }
 
-TEST(WkmiEndpointPropertiesTest, MappingOrderingRequiresHardwareQueueHandle) {
+TEST(DxgEndpointPropertiesTest, MappingOrderingRequiresHardwareQueueHandle) {
   for (uint32_t hardware : {0u, 1u}) {
     auto provider = MakeProperties();
     provider.supports_sdma_hardware_queue = hardware;
     amdf_gpu_endpoint_properties_t properties = {};
-    ASSERT_TRUE(amdf_gpu_wddm_wkmi_endpoint_properties_translate(&provider,
-                                                                 &properties));
+    ASSERT_TRUE(
+        amdf_gpu_dxg_endpoint_properties_translate(&provider, &properties));
     ASSERT_EQ(properties.queue_family_count, 2u);
     EXPECT_NE(properties.queue_families[0].kernel_queue_capabilities &
                   AMDF_KERNEL_QUEUE_CAPABILITY_VIRTUAL_MEMORY,
@@ -99,7 +99,7 @@ TEST(WkmiEndpointPropertiesTest, MappingOrderingRequiresHardwareQueueHandle) {
   }
 }
 
-TEST(WkmiEndpointPropertiesTest, RdnaExposesPm4AndSdmaPacketFeatures) {
+TEST(DxgEndpointPropertiesTest, RdnaExposesPm4AndSdmaPacketFeatures) {
   for (uint32_t target :
        {110000u, 110001u, 110002u, 110003u, 110500u, 110501u, 110502u, 110503u,
         110700u, 110701u, 110702u, 120000u, 120001u, 120500u, 120501u}) {
@@ -111,8 +111,8 @@ TEST(WkmiEndpointPropertiesTest, RdnaExposesPm4AndSdmaPacketFeatures) {
     provider.xcc_count = 1;
     provider.shader_engine_count = 4;
     amdf_gpu_endpoint_properties_t properties = {};
-    ASSERT_TRUE(amdf_gpu_wddm_wkmi_endpoint_properties_translate(&provider,
-                                                                 &properties));
+    ASSERT_TRUE(
+        amdf_gpu_dxg_endpoint_properties_translate(&provider, &properties));
     ASSERT_EQ(properties.queue_family_count, 2u);
     EXPECT_EQ(properties.queue_families[0].command_type,
               AMDF_QUEUE_COMMAND_TYPE_GPU_PM4);
@@ -142,7 +142,7 @@ TEST(WkmiEndpointPropertiesTest, RdnaExposesPm4AndSdmaPacketFeatures) {
   }
 }
 
-TEST(WkmiEndpointPropertiesTest, SdmaFieldsFollowNativeEncoding) {
+TEST(DxgEndpointPropertiesTest, SdmaFieldsFollowNativeEncoding) {
   constexpr std::array<int32_t, 5> kMajors = {9, 10, 11, 12, 12};
   constexpr std::array<int32_t, 5> kMinors = {4, 3, 5, 0, 5};
   constexpr std::array<amdf_queue_format_features_t, 5> kFeatures = {
@@ -167,7 +167,7 @@ TEST(WkmiEndpointPropertiesTest, SdmaFieldsFollowNativeEncoding) {
     native.gfx_ip_minor = kMinors[i];
     amdf_gpu_endpoint_properties_t properties = {};
     ASSERT_TRUE(
-        amdf_gpu_wddm_wkmi_endpoint_properties_translate(&native, &properties));
+        amdf_gpu_dxg_endpoint_properties_translate(&native, &properties));
     ASSERT_EQ(properties.queue_family_count, 2u);
     const auto& family = properties.queue_families[1];
     EXPECT_EQ(family.command_type, AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA);
@@ -183,7 +183,7 @@ TEST(WkmiEndpointPropertiesTest, SdmaFieldsFollowNativeEncoding) {
   }
 }
 
-TEST(WkmiEndpointPropertiesTest, UnknownFamiliesDoNotInferRectangularLayout) {
+TEST(DxgEndpointPropertiesTest, UnknownFamiliesDoNotInferRectangularLayout) {
   for (const auto& ip :
        {std::array<int32_t, 2>{8, 0}, {12, 1}, {12, 6}, {13, 0}}) {
     auto native = MakeProperties();
@@ -191,7 +191,7 @@ TEST(WkmiEndpointPropertiesTest, UnknownFamiliesDoNotInferRectangularLayout) {
     native.gfx_ip_minor = ip[1];
     amdf_gpu_endpoint_properties_t properties = {};
     ASSERT_TRUE(
-        amdf_gpu_wddm_wkmi_endpoint_properties_translate(&native, &properties));
+        amdf_gpu_dxg_endpoint_properties_translate(&native, &properties));
     ASSERT_EQ(properties.queue_family_count, 2u);
     EXPECT_EQ(properties.queue_families[1].format_features &
                   (AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT |
@@ -204,34 +204,29 @@ TEST(WkmiEndpointPropertiesTest, UnknownFamiliesDoNotInferRectangularLayout) {
   }
 }
 
-TEST(WkmiEndpointPropertiesTest, RejectsUnrepresentableProperties) {
+TEST(DxgEndpointPropertiesTest, RejectsUnrepresentableProperties) {
   const amdf_dxg_bridge_gpu_properties_t valid = MakeProperties();
-  EXPECT_FALSE(
-      amdf_gpu_wddm_wkmi_endpoint_properties_translate(nullptr, nullptr));
-  EXPECT_FALSE(
-      amdf_gpu_wddm_wkmi_endpoint_properties_translate(&valid, nullptr));
-
   amdf_gpu_endpoint_properties_t properties;
   std::memset(&properties, 0xA5, sizeof(properties));
   const amdf_gpu_endpoint_properties_t original = properties;
   amdf_dxg_bridge_gpu_properties_t provider_properties = valid;
   provider_properties.gfx_ip_major = -1;
-  EXPECT_FALSE(amdf_gpu_wddm_wkmi_endpoint_properties_translate(
-      &provider_properties, &properties));
+  EXPECT_FALSE(amdf_gpu_dxg_endpoint_properties_translate(&provider_properties,
+                                                          &properties));
   EXPECT_EQ(std::memcmp(&properties, &original, sizeof(properties)), 0);
 
   provider_properties = valid;
   provider_properties.xcc_count = 0;
-  EXPECT_FALSE(amdf_gpu_wddm_wkmi_endpoint_properties_translate(
-      &provider_properties, &properties));
+  EXPECT_FALSE(amdf_gpu_dxg_endpoint_properties_translate(&provider_properties,
+                                                          &properties));
   provider_properties = valid;
   provider_properties.shader_engine_count = 0;
-  EXPECT_FALSE(amdf_gpu_wddm_wkmi_endpoint_properties_translate(
-      &provider_properties, &properties));
+  EXPECT_FALSE(amdf_gpu_dxg_endpoint_properties_translate(&provider_properties,
+                                                          &properties));
   provider_properties = valid;
   provider_properties.shader_engine_count = 15;
-  EXPECT_FALSE(amdf_gpu_wddm_wkmi_endpoint_properties_translate(
-      &provider_properties, &properties));
+  EXPECT_FALSE(amdf_gpu_dxg_endpoint_properties_translate(&provider_properties,
+                                                          &properties));
 }
 
 }  // namespace

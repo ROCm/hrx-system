@@ -292,8 +292,8 @@ class WindowsGpuMemoryTest : public ::testing::Test {
     device_.memory_capabilities.read_only_memory_supported = 1;
     device_.memory_capabilities.no_execute_memory_supported = 1;
     device_.memory_capabilities.cache_coherent_memory_supported = 1;
-    device_.wkmi_adapter.api = &bridge_;
-    device_.wkmi_adapter.native =
+    device_.bridge_adapter.api = &bridge_;
+    device_.bridge_adapter.native =
         reinterpret_cast<amdf_dxg_bridge_gpu_adapter_t*>(&state_);
 
     create_info_.device_access =

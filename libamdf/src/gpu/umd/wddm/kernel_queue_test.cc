@@ -190,8 +190,8 @@ class WindowsGpuKernelQueueTest
     device_.host_allocator = {&state_, Allocate, nullptr, Free};
     device_.device = 0x10;
     device_.kmt = &kmt_;
-    device_.wkmi_adapter.api = &bridge_;
-    device_.wkmi_adapter.native =
+    device_.bridge_adapter.api = &bridge_;
+    device_.bridge_adapter.native =
         reinterpret_cast<amdf_dxg_bridge_gpu_adapter_t*>(&state_);
     amdf_kmt_device_status_initialize(&device_.status);
     ASSERT_EQ(amdf_gpu_umd_kernel_queue_create(&device_, GetParam(), &queue_),

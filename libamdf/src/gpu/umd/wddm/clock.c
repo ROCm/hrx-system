@@ -17,8 +17,8 @@ amdf_status_t amdf_gpu_umd_query_queue_clock_info(
           ? AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4
           : AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA;
   amdf_dxg_bridge_gpu_clock_sample_t sample = {0};
-  const amdf_status_t status = amdf_gpu_wddm_wkmi_adapter_query_clock_sample(
-      &device->wkmi_adapter, device->adapter, device->physical_adapter_index,
+  const amdf_status_t status = amdf_gpu_dxg_adapter_query_clock_sample(
+      &device->bridge_adapter, device->adapter, device->physical_adapter_index,
       native_type, &sample);
   if (amdf_status_is_ok(status)) {
     *out_info =
@@ -41,8 +41,8 @@ amdf_status_t amdf_gpu_umd_query_clock_sample(
     return status;
   }
   amdf_dxg_bridge_gpu_clock_sample_t native = {0};
-  status = amdf_gpu_wddm_wkmi_adapter_query_clock_sample(
-      &device->wkmi_adapter, device->adapter, device->physical_adapter_index,
+  status = amdf_gpu_dxg_adapter_query_clock_sample(
+      &device->bridge_adapter, device->adapter, device->physical_adapter_index,
       native_type, &native);
   if (!amdf_status_is_ok(status)) {
     return status;

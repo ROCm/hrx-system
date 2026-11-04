@@ -89,8 +89,8 @@ amdf_status_t amdf_gpu_umd_kernel_queue_create(
       .command_type = native_command_type,
   };
   if (amdf_status_is_ok(status)) {
-    status = amdf_gpu_wddm_wkmi_adapter_create_kernel_queue(
-        &device->wkmi_adapter, &create_info, &queue->native, &queue_info);
+    status = amdf_gpu_dxg_adapter_create_kernel_queue(
+        &device->bridge_adapter, &create_info, &queue->native, &queue_info);
   }
   if (amdf_status_is_ok(status)) {
     queue->command_buffer_alignment = queue_info.command_buffer_alignment;
@@ -131,8 +131,8 @@ amdf_status_t amdf_gpu_umd_kernel_queue_submit(
 
   MemoryBarrier();
   bool accepted = false;
-  amdf_status_t status = amdf_gpu_wddm_wkmi_adapter_submit_kernel_queue(
-      &queue->device->wkmi_adapter, queue->native, command_buffer_address,
+  amdf_status_t status = amdf_gpu_dxg_adapter_submit_kernel_queue(
+      &queue->device->bridge_adapter, queue->native, command_buffer_address,
       command_buffer_byte_length, submission, &accepted);
   if (!amdf_status_is_ok(status)) {
     status = amdf_kmt_device_status_observe_error(
@@ -374,8 +374,8 @@ amdf_status_t amdf_gpu_umd_kernel_queue_destroy(
     amdf_gpu_umd_kernel_queue_t* queue) {
   amdf_status_t status = queue->inactivation_status;
   if (queue->native != NULL) {
-    status = amdf_gpu_wddm_wkmi_adapter_destroy_kernel_queue(
-        &queue->device->wkmi_adapter, queue->native);
+    status = amdf_gpu_dxg_adapter_destroy_kernel_queue(
+        &queue->device->bridge_adapter, queue->native);
   }
   // Accepted work is retired and no waiter borrows the event. Its release is
   // independent of native queue removal; preserve the first cleanup error.
@@ -404,8 +404,8 @@ amdf_status_t amdf_gpu_umd_kernel_queue_inactivate(
       amdf_status_is_ok(failure)
           ? amdf_make_api_status(AMDF_STATUS_CODE_FAILED_PRECONDITION)
           : failure);
-  queue->inactivation_status = amdf_gpu_wddm_wkmi_adapter_destroy_kernel_queue(
-      &queue->device->wkmi_adapter, queue->native);
+  queue->inactivation_status = amdf_gpu_dxg_adapter_destroy_kernel_queue(
+      &queue->device->bridge_adapter, queue->native);
   // The bridge consumes its owner on every result. A failed removal cannot be
   // retried through a native handle that may already have been reused.
   queue->native = NULL;

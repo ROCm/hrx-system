@@ -221,9 +221,10 @@ static amdf_status_t amdf_windows_gpu_memory_create_allocations(
     create_info.host_pointer = memory->host_pointer;
   }
   uint32_t created_allocation_count = 0;
-  const amdf_status_t status = amdf_gpu_wddm_wkmi_adapter_create_allocations(
-      &memory->device->wkmi_adapter, &create_info, memory->allocation_capacity,
-      memory->allocation_handles, &memory->resource, &created_allocation_count);
+  const amdf_status_t status = amdf_gpu_dxg_adapter_create_allocations(
+      &memory->device->bridge_adapter, &create_info,
+      memory->allocation_capacity, memory->allocation_handles,
+      &memory->resource, &created_allocation_count);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -497,8 +498,8 @@ amdf_status_t amdf_gpu_umd_memory_prepare_import(
       .shared_handle = memory->shared_handle,
   };
   uint64_t buffer_byte_length = 0;
-  status = amdf_gpu_wddm_wkmi_adapter_prepare_buffer_import(
-      &device->wkmi_adapter, &native_import, &memory->resource,
+  status = amdf_gpu_dxg_adapter_prepare_buffer_import(
+      &device->bridge_adapter, &native_import, &memory->resource,
       &memory->allocation_handles[0], &memory->byte_length,
       &buffer_byte_length);
   memory->allocation_count = memory->allocation_handles[0] != 0 ? 1 : 0;
@@ -591,8 +592,8 @@ amdf_status_t amdf_gpu_umd_memory_prepare(
 
   uint32_t allocation_count = 0;
   uint64_t maximum_native_allocation_byte_length = 0;
-  amdf_status_t status = amdf_gpu_wddm_wkmi_adapter_query_allocation_layout(
-      &device->wkmi_adapter, plan.byte_length, &allocation_count,
+  amdf_status_t status = amdf_gpu_dxg_adapter_query_allocation_layout(
+      &device->bridge_adapter, plan.byte_length, &allocation_count,
       &maximum_native_allocation_byte_length);
   if (!amdf_status_is_ok(status)) {
     return status;

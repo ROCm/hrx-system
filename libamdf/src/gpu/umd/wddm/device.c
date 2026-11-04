@@ -16,9 +16,9 @@
 
 static amdf_status_t amdf_gpu_wddm_device_release_native(
     amdf_gpu_umd_device_t* device) {
-  if (device->wkmi_adapter.native != NULL) {
+  if (device->bridge_adapter.native != NULL) {
     const amdf_status_t status =
-        amdf_gpu_wddm_wkmi_adapter_deinitialize(&device->wkmi_adapter);
+        amdf_gpu_dxg_adapter_deinitialize(&device->bridge_adapter);
     if (!amdf_status_is_ok(status)) {
       return status;
     }
@@ -97,6 +97,11 @@ amdf_status_t amdf_gpu_umd_device_create(
 
   status = amdf_gpu_wddm_wkmi_loader_initialize(host_allocator,
                                                 &device->wkmi_loader);
+  const amdf_dxg_bridge_api_t* bridge_api = NULL;
+  if (amdf_status_is_ok(status)) {
+    status =
+        amdf_gpu_wddm_wkmi_loader_query_api(&device->wkmi_loader, &bridge_api);
+  }
   if (amdf_status_is_ok(status)) {
     const amdf_dxg_bridge_gpu_adapter_open_info_t open_info = {
         .structure_size = sizeof(open_info),
@@ -104,8 +109,8 @@ amdf_status_t amdf_gpu_umd_device_create(
         .physical_adapter_index = endpoint->physical_adapter_index,
         .adapter_luid = device->adapter_luid,
     };
-    status = amdf_gpu_wddm_wkmi_adapter_initialize(
-        &device->wkmi_loader, &open_info, host_allocator, &device->wkmi_adapter,
+    status = amdf_gpu_dxg_adapter_initialize(
+        bridge_api, &open_info, host_allocator, &device->bridge_adapter,
         &device->properties);
   }
   if (amdf_status_is_ok(status)) {

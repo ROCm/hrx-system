@@ -14,6 +14,25 @@ package(
 )
 
 amdf_cc_library(
+    name = "adapter",
+    srcs = ["adapter.c"],
+    hdrs = ["adapter.h"],
+    visibility = ["//libamdf/src/gpu/umd:__subpackages__"],
+    deps = [":bridge_api"],
+)
+
+amdf_cc_test(
+    name = "adapter_test",
+    srcs = ["adapter_test.cc"],
+    deps = [
+        ":adapter",
+        "//libamdf/src:allocator",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_library(
     name = "bridge_api",
     hdrs = ["bridge_api.h"],
     visibility = ["//libamdf/src/gpu/umd:__subpackages__"],
@@ -24,6 +43,27 @@ amdf_cc_library(
     hdrs = ["bridge_allocator.h"],
     visibility = ["//libamdf/src/gpu/umd:__subpackages__"],
     deps = [":bridge_api"],
+)
+
+amdf_cc_library(
+    name = "endpoint_properties",
+    srcs = ["endpoint_properties.c"],
+    hdrs = ["endpoint_properties.h"],
+    visibility = ["//libamdf/src/gpu/umd:__subpackages__"],
+    deps = [
+        ":bridge_api",
+        "//libamdf/src/gpu:endpoint_profile",
+    ],
+)
+
+amdf_cc_test(
+    name = "endpoint_properties_test",
+    srcs = ["endpoint_properties_test.cc"],
+    deps = [
+        ":endpoint_properties",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
 )
 
 amdf_cc_test(

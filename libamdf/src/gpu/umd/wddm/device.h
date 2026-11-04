@@ -8,8 +8,9 @@
 #define AMDF_SRC_GPU_UMD_WDDM_DEVICE_H_
 
 #include "libamdf/src/gpu/umd/device.h"
+#include "libamdf/src/gpu/umd/dxg/adapter.h"
 #include "libamdf/src/gpu/umd/wddm/memory_profile.h"
-#include "libamdf/src/gpu/umd/wddm/wkmi/adapter.h"
+#include "libamdf/src/gpu/umd/wddm/wkmi/loader.h"
 #include "libamdf/src/platform/windows/device_status.h"
 #include "libamdf/src/platform/windows/kmt_api.h"
 
@@ -31,8 +32,8 @@ struct amdf_gpu_umd_device_t {
   amdf_dxg_bridge_gpu_properties_t properties;
   // Loaded WKMI module outliving its borrowed API table and native adapter.
   amdf_gpu_wddm_wkmi_loader_t wkmi_loader;
-  // Parsed private WKMI adapter state shared by allocations and queues.
-  amdf_gpu_wddm_wkmi_adapter_t wkmi_adapter;
+  // Parsed private bridge adapter shared by allocations and queues.
+  amdf_gpu_dxg_adapter_t bridge_adapter;
   // Logical KMT device owning paging and future execution state.
   D3DKMT_HANDLE device;
   // Confirmed execution failure shared by every queue on this device.

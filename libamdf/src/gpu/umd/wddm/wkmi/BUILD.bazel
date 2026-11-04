@@ -16,19 +16,6 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-amdf_cc_library(
-    name = "adapter",
-    srcs = ["adapter.c"],
-    hdrs = ["adapter.h"],
-    target_compatible_with = ["@platforms//os:windows"],
-    visibility = ["//libamdf/src/gpu/umd/wddm:__pkg__"],
-    deps = [
-        ":loader",
-        "//libamdf/src/gpu/umd/dxg:bridge_api",
-        "//libamdf/src/platform/windows:kmt_api",
-    ],
-)
-
 amdf_windows_sidecar_library(
     name = "amdf_wkmi_bridge",
     srcs = [
@@ -129,18 +116,6 @@ iree_dynamic_library_bundle(
 )
 
 amdf_cc_library(
-    name = "endpoint_properties",
-    srcs = ["endpoint_properties.c"],
-    hdrs = ["endpoint_properties.h"],
-    target_compatible_with = ["@platforms//os:windows"],
-    visibility = ["//libamdf/src/gpu/umd/wddm:__pkg__"],
-    deps = [
-        "//libamdf/src/gpu:endpoint_profile",
-        "//libamdf/src/gpu/umd/dxg:bridge_api",
-    ],
-)
-
-amdf_cc_library(
     name = "loader",
     srcs = ["loader.c"],
     hdrs = ["loader.h"],
@@ -150,34 +125,6 @@ amdf_cc_library(
         "//libamdf/src:allocator",
         "//libamdf/src/gpu/umd/dxg:bridge_api",
         "//libamdf/src/platform/windows:kmt_api",
-    ],
-)
-
-amdf_cc_test(
-    name = "adapter_test",
-    srcs = ["adapter_test.cc"],
-    data = [":fake_wkmi_bridge_test"],
-    env = {
-        "AMDF_DXG_BRIDGE_PATH": "$(location :fake_wkmi_bridge_test)",
-    },
-    target_compatible_with = ["@platforms//os:windows"],
-    deps = [
-        ":adapter",
-        ":loader",
-        "//libamdf/src:allocator",
-        "//third_party:google_test",
-        "//third_party:google_test_main",
-    ],
-)
-
-amdf_cc_test(
-    name = "endpoint_properties_test",
-    srcs = ["endpoint_properties_test.cc"],
-    target_compatible_with = ["@platforms//os:windows"],
-    deps = [
-        ":endpoint_properties",
-        "//third_party:google_test",
-        "//third_party:google_test_main",
     ],
 )
 

@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef AMDF_SRC_GPU_UMD_WDDM_WKMI_ENDPOINT_PROPERTIES_H_
-#define AMDF_SRC_GPU_UMD_WDDM_WKMI_ENDPOINT_PROPERTIES_H_
+#ifndef AMDF_SRC_GPU_UMD_DXG_ENDPOINT_PROPERTIES_H_
+#define AMDF_SRC_GPU_UMD_DXG_ENDPOINT_PROPERTIES_H_
 
 #include <stdbool.h>
 
@@ -16,8 +16,8 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Translates one WKMI result into provider-neutral GPU endpoint properties.
-bool amdf_gpu_wddm_wkmi_endpoint_properties_translate(
+// Translates one private DXG result into provider-neutral endpoint properties.
+bool amdf_gpu_dxg_endpoint_properties_translate(
     const amdf_dxg_bridge_gpu_properties_t* provider_properties,
     amdf_gpu_endpoint_properties_t* out_properties);
 
@@ -25,4 +25,4 @@ bool amdf_gpu_wddm_wkmi_endpoint_properties_translate(
 }  // extern "C"
 #endif  // __cplusplus
 
-#endif  // AMDF_SRC_GPU_UMD_WDDM_WKMI_ENDPOINT_PROPERTIES_H_
+#endif  // AMDF_SRC_GPU_UMD_DXG_ENDPOINT_PROPERTIES_H_
