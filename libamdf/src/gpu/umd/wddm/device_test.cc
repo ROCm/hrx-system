@@ -15,6 +15,7 @@
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/wddm/memory_profile.h"
+#include "libamdf/src/gpu/umd/wddm/provider/fake_api.h"
 #include "libamdf/src/platform/windows/endpoint.h"
 
 namespace {
@@ -154,10 +155,6 @@ NTSTATUS APIENTRY FakeCloseAdapter(const D3DKMT_CLOSEADAPTER* close) {
   return kSuccess;
 }
 
-using ResetBridgeFn = void(__cdecl*)(void);
-using SetBridgeCountFn = void(__cdecl*)(uint32_t);
-using QueryBridgeCountFn = uint32_t(__cdecl*)(void);
-
 class WindowsGpuDeviceRollbackTest
     : public ::testing::TestWithParam<amdf_native_lifetime_t> {
  protected:
@@ -184,58 +181,13 @@ class WindowsGpuDeviceRollbackTest
     endpoint_->adapter = 0x08;
     endpoint_->physical_adapter_index = 0;
 
-    const DWORD path_capacity =
-        GetEnvironmentVariableW(L"AMDF_DXG_BRIDGE_PATH", nullptr, 0);
-    ASSERT_GT(path_capacity, 0u);
-    std::vector<wchar_t> path(path_capacity);
-    ASSERT_LT(GetEnvironmentVariableW(L"AMDF_DXG_BRIDGE_PATH", path.data(),
-                                      path_capacity),
-              path_capacity);
-    const DWORD absolute_capacity =
-        GetFullPathNameW(path.data(), 0, nullptr, nullptr);
-    ASSERT_GT(absolute_capacity, 0u);
-    std::vector<wchar_t> absolute_path(absolute_capacity);
-    ASSERT_LT(GetFullPathNameW(path.data(), absolute_capacity,
-                               absolute_path.data(), nullptr),
-              absolute_capacity);
-    bridge_module_ = LoadLibraryExW(
-        absolute_path.data(), nullptr,
-        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
-    ASSERT_NE(bridge_module_, nullptr);
-
-    reset_bridge_ = reinterpret_cast<ResetBridgeFn>(
-        GetProcAddress(bridge_module_, "amdf_test_wkmi_bridge_reset"));
-    set_bridge_close_failures_ = reinterpret_cast<SetBridgeCountFn>(
-        GetProcAddress(bridge_module_,
-                       "amdf_test_wkmi_bridge_set_adapter_close_failures"));
-    query_bridge_open_success_count_ =
-        reinterpret_cast<QueryBridgeCountFn>(GetProcAddress(
-            bridge_module_,
-            "amdf_test_wkmi_bridge_query_adapter_open_success_count"));
-    query_bridge_close_attempt_count_ =
-        reinterpret_cast<QueryBridgeCountFn>(GetProcAddress(
-            bridge_module_,
-            "amdf_test_wkmi_bridge_query_adapter_close_attempt_count"));
-    query_bridge_close_success_count_ =
-        reinterpret_cast<QueryBridgeCountFn>(GetProcAddress(
-            bridge_module_,
-            "amdf_test_wkmi_bridge_query_adapter_close_success_count"));
-    ASSERT_NE(reset_bridge_, nullptr);
-    ASSERT_NE(set_bridge_close_failures_, nullptr);
-    ASSERT_NE(query_bridge_open_success_count_, nullptr);
-    ASSERT_NE(query_bridge_close_attempt_count_, nullptr);
-    ASSERT_NE(query_bridge_close_success_count_, nullptr);
-    reset_bridge_();
+    amdf_test_wddm_provider_reset();
   }
 
   void TearDown() override {
     if (endpoint_ != nullptr) {
       EXPECT_EQ(amdf_platform_endpoint_close(endpoint_), AMDF_STATUS_OK);
       endpoint_ = nullptr;
-    }
-    if (bridge_module_ != nullptr) {
-      EXPECT_TRUE(FreeLibrary(bridge_module_));
-      bridge_module_ = nullptr;
     }
     EXPECT_EQ(state_.live_allocation_count, 0u);
     current_state = nullptr;
@@ -247,18 +199,6 @@ class WindowsGpuDeviceRollbackTest
   amdf_platform_instance_t instance_ = {};
   // Live endpoint owned through native construction rollback.
   amdf_platform_endpoint_t* endpoint_ = nullptr;
-  // Test-owned module reference for inspecting the bridge dependency.
-  HMODULE bridge_module_ = nullptr;
-  // Resets bridge observations and failures before each case.
-  ResetBridgeFn reset_bridge_ = nullptr;
-  // Selects the number of rejected bridge adapter closes.
-  SetBridgeCountFn set_bridge_close_failures_ = nullptr;
-  // Queries successful native adapter opens in the bridge.
-  QueryBridgeCountFn query_bridge_open_success_count_ = nullptr;
-  // Queries attempted native adapter releases in the bridge.
-  QueryBridgeCountFn query_bridge_close_attempt_count_ = nullptr;
-  // Queries successful native adapter releases in the bridge.
-  QueryBridgeCountFn query_bridge_close_success_count_ = nullptr;
 };
 
 TEST_P(WindowsGpuDeviceRollbackTest, AdapterQueryPreservesAtomicUpdateWidth) {
@@ -275,7 +215,7 @@ TEST_P(WindowsGpuDeviceRollbackTest, AdapterQueryPreservesAtomicUpdateWidth) {
               (std::vector<Operation>{Operation::kQueryMemoryCapabilities,
                                       Operation::kQueryStoreCapabilities}));
   }
-  EXPECT_EQ(query_bridge_open_success_count_(), 0u);
+  EXPECT_EQ(amdf_test_wddm_provider_query_adapter_open_success_count(), 0u);
 }
 
 TEST_P(WindowsGpuDeviceRollbackTest,
@@ -305,8 +245,8 @@ TEST_P(WindowsGpuDeviceRollbackTest,
       expected.push_back(Operation::kQueryStoreCapabilities);
     }
     EXPECT_EQ(state_.operations, expected);
-    EXPECT_EQ(query_bridge_open_success_count_(), 0u);
-    EXPECT_EQ(query_bridge_close_attempt_count_(), 0u);
+    EXPECT_EQ(amdf_test_wddm_provider_query_adapter_open_success_count(), 0u);
+    EXPECT_EQ(amdf_test_wddm_provider_query_adapter_close_attempt_count(), 0u);
   }
 }
 
@@ -331,9 +271,9 @@ TEST_P(WindowsGpuDeviceRollbackTest,
                                     Operation::kQueryStoreCapabilities,
                                     Operation::kCreateDevice,
                                     Operation::kCreatePagingQueue}));
-  EXPECT_EQ(query_bridge_open_success_count_(), 1u);
-  EXPECT_EQ(query_bridge_close_attempt_count_(), 1u);
-  EXPECT_EQ(query_bridge_close_success_count_(), 0u);
+  EXPECT_EQ(amdf_test_wddm_provider_query_adapter_open_success_count(), 1u);
+  EXPECT_EQ(amdf_test_wddm_provider_query_adapter_close_attempt_count(), 1u);
+  EXPECT_EQ(amdf_test_wddm_provider_query_adapter_close_success_count(), 0u);
   EXPECT_EQ(state_.paging_queue_destroy_success_count, 0u);
   EXPECT_EQ(state_.device_destroy_success_count, 0u);
   EXPECT_EQ(state_.adapter_close_success_count, 0u);
@@ -345,8 +285,8 @@ TEST_P(WindowsGpuDeviceRollbackTest,
                 Operation::kQueryMemoryCapabilities,
                 Operation::kQueryStoreCapabilities, Operation::kCreateDevice,
                 Operation::kCreatePagingQueue, Operation::kCloseAdapter}));
-  EXPECT_EQ(query_bridge_close_attempt_count_(), 1u);
-  EXPECT_EQ(query_bridge_close_success_count_(), 0u);
+  EXPECT_EQ(amdf_test_wddm_provider_query_adapter_close_attempt_count(), 1u);
+  EXPECT_EQ(amdf_test_wddm_provider_query_adapter_close_success_count(), 0u);
   EXPECT_EQ(state_.paging_queue_destroy_success_count, 0u);
   EXPECT_EQ(state_.device_destroy_success_count, 0u);
   EXPECT_EQ(state_.adapter_close_success_count, 1u);
@@ -355,7 +295,7 @@ TEST_P(WindowsGpuDeviceRollbackTest,
 
 TEST_P(WindowsGpuDeviceRollbackTest,
        FailedPagingRollbackLeavesNoEndpointCleanupObligation) {
-  set_bridge_close_failures_(0);
+  amdf_test_wddm_provider_set_adapter_close_failures(0);
   amdf_gpu_umd_device_t* device =
       reinterpret_cast<amdf_gpu_umd_device_t*>(uintptr_t{1});
   amdf_gpu_umd_device_result_t result;
@@ -376,8 +316,8 @@ TEST_P(WindowsGpuDeviceRollbackTest,
                 Operation::kQueryStoreCapabilities, Operation::kCreateDevice,
                 Operation::kCreatePagingQueue, Operation::kDestroyPagingQueue,
                 Operation::kCloseAdapter}));
-  EXPECT_EQ(query_bridge_close_attempt_count_(), 1u);
-  EXPECT_EQ(query_bridge_close_success_count_(), 1u);
+  EXPECT_EQ(amdf_test_wddm_provider_query_adapter_close_attempt_count(), 1u);
+  EXPECT_EQ(amdf_test_wddm_provider_query_adapter_close_success_count(), 1u);
   EXPECT_EQ(state_.paging_queue_destroy_success_count, 0u);
   EXPECT_EQ(state_.device_destroy_success_count, 0u);
   EXPECT_EQ(state_.live_allocation_count, 0u);
@@ -385,7 +325,7 @@ TEST_P(WindowsGpuDeviceRollbackTest,
 
 TEST_P(WindowsGpuDeviceRollbackTest,
        ExplicitDestroyFailurePreservesPublishedDevice) {
-  set_bridge_close_failures_(0);
+  amdf_test_wddm_provider_set_adapter_close_failures(0);
   state_.paging_sync_object = 0x30;
   amdf_gpu_umd_device_t* device = nullptr;
   amdf_gpu_umd_device_result_t result = {};
@@ -398,7 +338,7 @@ TEST_P(WindowsGpuDeviceRollbackTest,
   EXPECT_EQ(state_.live_allocation_count, 2u);
   EXPECT_EQ(state_.device_destroy_success_count, 0u);
   EXPECT_EQ(amdf_gpu_umd_device_destroy(device), AMDF_STATUS_OK);
-  EXPECT_EQ(query_bridge_close_attempt_count_(), 1u);
+  EXPECT_EQ(amdf_test_wddm_provider_query_adapter_close_attempt_count(), 1u);
   EXPECT_EQ(state_.paging_queue_destroy_success_count, 1u);
   EXPECT_EQ(state_.device_destroy_success_count, 1u);
   EXPECT_EQ(state_.live_allocation_count, 1u);

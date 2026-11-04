@@ -11,6 +11,7 @@
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/wddm/device.h"
 #include "libamdf/src/gpu/umd/wddm/memory_profile.h"
+#include "libamdf/src/gpu/umd/wddm/provider/api.h"
 #include "libamdf/src/platform/windows/endpoint.h"
 #include "libamdf/src/platform/windows/endpoint_properties.h"
 
@@ -19,13 +20,6 @@ static amdf_status_t amdf_gpu_wddm_device_release_native(
   if (device->bridge_adapter.native != NULL) {
     const amdf_status_t status =
         amdf_gpu_dxg_adapter_deinitialize(&device->bridge_adapter);
-    if (!amdf_status_is_ok(status)) {
-      return status;
-    }
-  }
-  if (device->wkmi_loader.module != NULL) {
-    const amdf_status_t status =
-        amdf_gpu_wddm_wkmi_loader_deinitialize(&device->wkmi_loader);
     if (!amdf_status_is_ok(status)) {
       return status;
     }
@@ -94,24 +88,15 @@ amdf_status_t amdf_gpu_umd_device_create(
   device->physical_adapter_index = endpoint->physical_adapter_index;
   device->memory_capabilities = memory_capabilities;
 
-  status = amdf_gpu_wddm_wkmi_loader_initialize(host_allocator,
-                                                &device->wkmi_loader);
-  const amdf_dxg_bridge_api_t* bridge_api = NULL;
-  if (amdf_status_is_ok(status)) {
-    status =
-        amdf_gpu_wddm_wkmi_loader_query_api(&device->wkmi_loader, &bridge_api);
-  }
-  if (amdf_status_is_ok(status)) {
-    const amdf_dxg_bridge_gpu_adapter_open_info_t open_info = {
-        .structure_size = sizeof(open_info),
-        .adapter_handle = (uint32_t)endpoint->adapter,
-        .physical_adapter_index = endpoint->physical_adapter_index,
-        .adapter_luid = device->adapter_luid,
-    };
-    status = amdf_gpu_dxg_adapter_initialize(
-        bridge_api, &open_info, host_allocator, &device->bridge_adapter,
-        &device->properties);
-  }
+  const amdf_dxg_bridge_gpu_adapter_open_info_t open_info = {
+      .structure_size = sizeof(open_info),
+      .adapter_handle = (uint32_t)endpoint->adapter,
+      .physical_adapter_index = endpoint->physical_adapter_index,
+      .adapter_luid = device->adapter_luid,
+  };
+  status = amdf_gpu_dxg_adapter_initialize(
+      amdf_gpu_wddm_default_api(), &open_info, host_allocator,
+      &device->bridge_adapter, &device->properties);
   if (amdf_status_is_ok(status)) {
     device->memory_capabilities.program_gfx_major =
         (uint32_t)device->properties.gfx_ip_major;

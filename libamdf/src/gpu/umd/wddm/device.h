@@ -10,7 +10,6 @@
 #include "libamdf/src/gpu/umd/device.h"
 #include "libamdf/src/gpu/umd/dxg/adapter.h"
 #include "libamdf/src/gpu/umd/wddm/memory_profile.h"
-#include "libamdf/src/gpu/umd/wddm/wkmi/loader.h"
 #include "libamdf/src/platform/windows/device_status.h"
 #include "libamdf/src/platform/windows/kmt_api.h"
 
@@ -30,8 +29,6 @@ struct amdf_gpu_umd_device_t {
   amdf_gpu_dxg_memory_capabilities_t memory_capabilities;
   // Immutable native target identity and queue-service facts.
   amdf_dxg_bridge_gpu_properties_t properties;
-  // Loaded WKMI module outliving its borrowed API table and native adapter.
-  amdf_gpu_wddm_wkmi_loader_t wkmi_loader;
   // Parsed private bridge adapter shared by allocations and queues.
   amdf_gpu_dxg_adapter_t bridge_adapter;
   // Logical KMT device owning paging and future execution state.

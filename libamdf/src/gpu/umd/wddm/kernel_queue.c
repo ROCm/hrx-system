@@ -18,9 +18,9 @@ enum {
 };
 
 struct amdf_gpu_umd_kernel_queue_t {
-  // Device and WKMI adapter borrowed for the lifetime of the queue.
+  // Device and provider adapter borrowed for the lifetime of the queue.
   amdf_gpu_umd_device_t* device;
-  // Private native queue state owned by the loaded WKMI bridge.
+  // Private native queue state owned by the statically linked provider.
   amdf_dxg_bridge_gpu_kernel_queue_t* native;
   // Required command-buffer base alignment in bytes.
   uint32_t command_buffer_alignment;

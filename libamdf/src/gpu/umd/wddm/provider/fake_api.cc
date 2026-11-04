@@ -4,9 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "libamdf/src/gpu/umd/wddm/provider/fake_api.h"
+
 #include <cstdint>
 
 #include "libamdf/src/gpu/umd/dxg/bridge_api.h"
+#include "libamdf/src/gpu/umd/wddm/provider/api.h"
 
 struct amdf_dxg_bridge_gpu_adapter_t {};
 struct amdf_dxg_bridge_gpu_kernel_queue_t {};
@@ -16,8 +19,6 @@ namespace {
 struct FakeBridgeState {
   // Stable parsed adapter identity returned by successful opens.
   amdf_dxg_bridge_gpu_adapter_t adapter;
-  // Result selected for bridge API negotiation.
-  amdf_dxg_bridge_result_t query_result = AMDF_DXG_BRIDGE_RESULT_SUCCESS;
   // Number of adapter-close operations rejected before native consumption.
   uint32_t adapter_close_failures_remaining = 1;
   // Number of successfully parsed adapters.
@@ -141,56 +142,31 @@ amdf_dxg_bridge_api_t api = {
 
 }  // namespace
 
-extern "C" __declspec(dllexport) amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL
-amdf_dxg_bridge_query_api(uint32_t minimum_version, uint32_t maximum_version,
-                          const amdf_dxg_bridge_api_t** out_api) {
-  if (out_api == nullptr) {
-    return AMDF_DXG_BRIDGE_RESULT_INVALID_ARGUMENT;
-  }
-  if (state.query_result != AMDF_DXG_BRIDGE_RESULT_SUCCESS) {
-    return state.query_result;
-  }
-  if (minimum_version > api.abi_version || maximum_version < api.abi_version) {
-    return AMDF_DXG_BRIDGE_RESULT_VERSION_MISMATCH;
-  }
-  *out_api = &api;
-  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+extern "C" const amdf_dxg_bridge_api_t* amdf_gpu_wddm_default_api(void) {
+  return &api;
 }
 
-extern "C" __declspec(dllexport) void AMDF_DXG_BRIDGE_CALL
-amdf_test_wkmi_bridge_reset(void) {
+extern "C" void amdf_test_wddm_provider_reset(void) {
   state = {};
-  state.query_result = AMDF_DXG_BRIDGE_RESULT_SUCCESS;
   state.adapter_close_failures_remaining = 1;
-  api.abi_version = AMDF_DXG_BRIDGE_ABI_VERSION_LATEST;
 }
 
-extern "C" __declspec(dllexport) void AMDF_DXG_BRIDGE_CALL
-amdf_test_wkmi_bridge_set_abi_version(uint32_t version) {
-  api.abi_version = version;
-}
-
-extern "C" __declspec(dllexport) void AMDF_DXG_BRIDGE_CALL
-amdf_test_wkmi_bridge_set_query_result(amdf_dxg_bridge_result_t result) {
-  state.query_result = result;
-}
-
-extern "C" __declspec(dllexport) void AMDF_DXG_BRIDGE_CALL
-amdf_test_wkmi_bridge_set_adapter_close_failures(uint32_t failure_count) {
+extern "C" void amdf_test_wddm_provider_set_adapter_close_failures(
+    uint32_t failure_count) {
   state.adapter_close_failures_remaining = failure_count;
 }
 
-extern "C" __declspec(dllexport) uint32_t AMDF_DXG_BRIDGE_CALL
-amdf_test_wkmi_bridge_query_adapter_open_success_count(void) {
+extern "C" uint32_t amdf_test_wddm_provider_query_adapter_open_success_count(
+    void) {
   return state.adapter_open_success_count;
 }
 
-extern "C" __declspec(dllexport) uint32_t AMDF_DXG_BRIDGE_CALL
-amdf_test_wkmi_bridge_query_adapter_close_attempt_count(void) {
+extern "C" uint32_t amdf_test_wddm_provider_query_adapter_close_attempt_count(
+    void) {
   return state.adapter_close_attempt_count;
 }
 
-extern "C" __declspec(dllexport) uint32_t AMDF_DXG_BRIDGE_CALL
-amdf_test_wkmi_bridge_query_adapter_close_success_count(void) {
+extern "C" uint32_t amdf_test_wddm_provider_query_adapter_close_success_count(
+    void) {
   return state.adapter_close_success_count;
 }

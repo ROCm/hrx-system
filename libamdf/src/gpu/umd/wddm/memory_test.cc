@@ -156,7 +156,7 @@ amdf_status_t AMDF_DXG_BRIDGE_CALL FakePrepareBufferImport(
 }
 
 NTSTATUS APIENTRY FakeUnexpectedCreateAllocation(D3DKMT_CREATEALLOCATION*) {
-  ADD_FAILURE() << "WKMI owns physical allocation construction";
+  ADD_FAILURE() << "the provider owns physical allocation construction";
   return kStatusNoMemory;
 }
 
@@ -311,7 +311,7 @@ class WindowsGpuMemoryTest : public ::testing::Test {
 
   // Native dependency responses and ordered observations.
   FakeMemoryState state_;
-  // Existing WKMI adapter seam used by production allocation code.
+  // Existing provider adapter seam used by production allocation code.
   amdf_dxg_bridge_api_t bridge_ = {};
   // Native KMT procedures used by production attachment and release code.
   amdf_kmt_api_t kmt_ = {};

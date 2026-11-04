@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "libamdf/src/gpu/umd/wddm/wkmi/kernel_queue.h"
+#include "libamdf/src/gpu/umd/wddm/provider/kernel_queue.h"
 
 #include <array>
 #include <cstddef>
@@ -27,7 +27,7 @@
 
 #include "libamdf/src/gpu/umd/dxg/bridge_allocator.h"
 #include "libamdf/src/gpu/umd/dxg/private_records.h"
-#include "libamdf/src/gpu/umd/wddm/wkmi/adapter_state.h"
+#include "libamdf/src/gpu/umd/wddm/provider/adapter_state.h"
 
 struct amdf_dxg_bridge_gpu_kernel_queue_t {
   // Parsed adapter state borrowed for the lifetime of the queue.
@@ -40,7 +40,7 @@ struct amdf_dxg_bridge_gpu_kernel_queue_t {
   D3DKMT_HANDLE progress_fence = 0;
 };
 
-namespace amdf::wkmi_bridge {
+namespace amdf::wddm_provider {
 
 using amdf::dxg_bridge::DestroyHostObject;
 using amdf::dxg_bridge::HostObject;
@@ -308,4 +308,4 @@ GpuKernelQueueDestroy(amdf_dxg_bridge_gpu_kernel_queue_t* queue,
              : MakeNativeFailure(native_status, out_native_status);
 }
 
-}  // namespace amdf::wkmi_bridge
+}  // namespace amdf::wddm_provider

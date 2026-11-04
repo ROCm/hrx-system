@@ -6,9 +6,8 @@
 
 #include "libamdf/src/gpu/umd/wddm/sparse_mapping_queue_test.h"
 
-#include <cstdlib>
+#include <array>
 #include <memory>
-#include <vector>
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -25,7 +24,7 @@
 #include <ntstatus.h>
 
 #include "amdf/gpu.h"
-#include "wkmi.h"
+#include "libamdf/src/gpu/umd/dxg/private_records.h"
 
 struct amdf_sparse_mapping_test_queue_t {
   // Borrowed device owning the native context and synchronization object.
@@ -36,65 +35,82 @@ struct amdf_sparse_mapping_test_queue_t {
   D3DKMT_HANDLE fence = 0;
   // Native-owned progress view, valid until the fence is destroyed.
   const volatile uint64_t* progress = nullptr;
-  // Reusable WKMI submission record, allocated before the first transfer.
-  std::vector<uint8_t> submission;
 };
 
 namespace {
 
-int32_t Select(uint32_t adapter,
-               amdf_sparse_mapping_test_scheduler_t* out_scheduler) {
-  Wkmi::DeviceInfo profile = {};
-  const NTSTATUS status = Wkmi::ParseAdapterInfo(adapter, &profile);
-  if (status != STATUS_SUCCESS) {
-    std::free(profile.adapter_info);
-    return status;
-  }
-  amdf_sparse_mapping_test_scheduler_t selection = {};
-  bool available = false;
-  for (int scheduler : profile.sdma_schedid) {
-    const int ordinal = Wkmi::EngineOrdinal(scheduler, &profile);
-    if (scheduler >= 0 && ordinal >= 0 &&
-        !Wkmi::GetHwsEnabled(scheduler, &profile)) {
-      selection.scheduler = static_cast<uint32_t>(scheduler);
-      selection.node_ordinal = static_cast<uint32_t>(ordinal);
-      selection.state_shadowing = profile.state_shadowing_by_cpfw;
-      available = true;
-      break;
-    }
-  }
-  // These packet fields belong to the native SDMA format, not HWS admission.
-  // Keep the same native family interpretation as endpoint_properties.c.
-  if (profile.major >= 12) {
-    selection.format_features |= AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM;
-  } else if (profile.major >= 10) {
-    selection.format_features |= AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_MEMORY_TYPE;
-  }
-  if (profile.major == 12 && profile.minor >= 5) {
-    selection.format_features |= AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE;
-  }
-  std::free(profile.adapter_info);
-  if (!available) {
+uint32_t QueryPrivateAdapter(void*, uint32_t adapter_handle, void* buffer,
+                             uint32_t buffer_byte_length) {
+  D3DKMT_QUERYADAPTERINFO query = {};
+  query.hAdapter = static_cast<D3DKMT_HANDLE>(adapter_handle);
+  query.Type = KMTQAITYPE_UMDRIVERPRIVATE;
+  query.pPrivateDriverData = buffer;
+  query.PrivateDriverDataSize = buffer_byte_length;
+  return static_cast<uint32_t>(D3DKMTQueryAdapterInfo(&query));
+}
+
+}  // namespace
+
+int32_t amdf_sparse_mapping_test_queue_select(
+    uint32_t adapter, amdf_sparse_mapping_test_scheduler_t* out_scheduler) {
+  std::array<uint8_t, AMDF_DXG_PRIVATE_SINGLE_QUERY_SCRATCH_BYTE_LENGTH>
+      scratch;
+  const amdf_dxg_private_adapter_query_t query = {
+      .adapter_handle = adapter,
+      .physical_adapter_index = 0,
+      .query_context = nullptr,
+      .query = QueryPrivateAdapter,
+      .scratch = scratch.data(),
+  };
+  amdf_dxg_private_adapter_info_t info = {};
+  uint32_t native_status = 0;
+  const amdf_dxg_private_result_t result =
+      amdf_dxg_private_query_single_adapter(&query, &info, &native_status);
+  if (result == AMDF_DXG_PRIVATE_RESULT_UNSUPPORTED) {
     return STATUS_NOT_SUPPORTED;
   }
-  *out_scheduler = selection;
+  if (result == AMDF_DXG_PRIVATE_RESULT_NATIVE_FAILURE) {
+    return static_cast<int32_t>(native_status);
+  }
+  if (result != AMDF_DXG_PRIVATE_RESULT_SUCCESS) {
+    return STATUS_INVALID_PARAMETER;
+  }
+
+  amdf_dxg_private_queue_profile_t pm4 = {};
+  amdf_dxg_private_queue_profile_t sdma = {};
+  amdf_dxg_private_initialize_queue_profiles(&info, &pm4, &sdma);
+  if (!sdma.is_supported || sdma.uses_hardware_scheduling) {
+    return STATUS_NOT_SUPPORTED;
+  }
+
+  amdf_sparse_mapping_test_scheduler_t scheduler = {
+      .scheduler = sdma.scheduler_id,
+      .node_ordinal = sdma.node_ordinal,
+      .supports_firmware_state_shadowing =
+          info.supports_firmware_state_shadowing,
+  };
+  if (info.gfx_ip_major >= 12) {
+    scheduler.format_features |= AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM;
+  } else if (info.gfx_ip_major >= 10) {
+    scheduler.format_features |= AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_MEMORY_TYPE;
+  }
+  if (info.gfx_ip_major == 12 && info.gfx_ip_minor >= 5) {
+    scheduler.format_features |= AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE;
+  }
+  *out_scheduler = scheduler;
   return STATUS_SUCCESS;
 }
 
-int32_t Create(uint32_t device, uint32_t physical_adapter_index,
-               const amdf_sparse_mapping_test_scheduler_t* scheduler,
-               amdf_sparse_mapping_test_queue_t** out_queue) {
-  const int context_size = Wkmi::GetContextPrivDataSize();
-  const int submission_size = Wkmi::GetSubmitPrivDataSize();
-  if (context_size <= 0 || submission_size <= 0) {
-    return STATUS_REVISION_MISMATCH;
-  }
+int32_t amdf_sparse_mapping_test_queue_create(
+    uint32_t device, uint32_t physical_adapter_index,
+    const amdf_sparse_mapping_test_scheduler_t* scheduler,
+    amdf_sparse_mapping_test_queue_t** out_queue) {
   auto queue = std::make_unique<amdf_sparse_mapping_test_queue_t>();
   queue->device = device;
-  queue->submission.resize(submission_size);
-  std::vector<uint8_t> context_data(context_size);
-  Wkmi::FillinContextPrivData(context_data.data(), scheduler->state_shadowing,
-                              scheduler->scheduler, 0);
+  std::array<uint8_t, AMDF_DXG_PRIVATE_CONTEXT_RECORD_BYTE_LENGTH> context_data;
+  amdf_dxg_private_initialize_context_record(
+      scheduler->supports_firmware_state_shadowing, scheduler->scheduler, 0,
+      context_data.data());
   D3DKMT_CREATECONTEXTVIRTUAL context = {};
   context.hDevice = device;
   context.NodeOrdinal = scheduler->node_ordinal;
@@ -124,18 +140,20 @@ int32_t Create(uint32_t device, uint32_t physical_adapter_index,
   return STATUS_SUCCESS;
 }
 
-int32_t Execute(amdf_sparse_mapping_test_queue_t* queue, uint64_t address,
-                uint32_t byte_length, uint64_t progress) {
-  Wkmi::FillinSubmitPrivData(queue->submission.data(), 0, address, byte_length,
-                             false);
+int32_t amdf_sparse_mapping_test_queue_execute(
+    amdf_sparse_mapping_test_queue_t* queue, uint64_t address,
+    uint32_t byte_length, uint64_t progress) {
+  std::array<uint8_t, AMDF_DXG_PRIVATE_SUBMISSION_RECORD_BYTE_LENGTH>
+      submission;
+  amdf_dxg_private_initialize_submission_record(0, address, byte_length, false,
+                                                submission.data());
   D3DKMT_SUBMITCOMMAND submit = {};
   submit.Commands = address;
   submit.CommandLength = byte_length;
   submit.BroadcastContextCount = 1;
   submit.BroadcastContext[0] = queue->context;
-  submit.pPrivateDriverData = queue->submission.data();
-  submit.PrivateDriverDataSize =
-      static_cast<uint32_t>(queue->submission.size());
+  submit.pPrivateDriverData = submission.data();
+  submit.PrivateDriverDataSize = static_cast<uint32_t>(submission.size());
   NTSTATUS status = D3DKMTSubmitCommand(&submit);
   if (status != STATUS_SUCCESS) {
     return status;
@@ -162,26 +180,15 @@ int32_t Execute(amdf_sparse_mapping_test_queue_t* queue, uint64_t address,
   return *queue->progress == progress ? STATUS_SUCCESS : STATUS_DEVICE_REMOVED;
 }
 
-int32_t Destroy(amdf_sparse_mapping_test_queue_t* queue) {
+int32_t amdf_sparse_mapping_test_queue_destroy(
+    amdf_sparse_mapping_test_queue_t* queue) {
   D3DKMT_DESTROYCONTEXT context = {queue->context};
-  NTSTATUS status = D3DKMTDestroyContext(&context);
-  if (status != STATUS_SUCCESS) {
-    return status;
-  }
+  NTSTATUS first_status = D3DKMTDestroyContext(&context);
   D3DKMT_DESTROYSYNCHRONIZATIONOBJECT fence = {queue->fence};
-  status = D3DKMTDestroySynchronizationObject(&fence);
-  if (status != STATUS_SUCCESS) {
-    return status;
+  const NTSTATUS fence_status = D3DKMTDestroySynchronizationObject(&fence);
+  if (first_status == STATUS_SUCCESS) {
+    first_status = fence_status;
   }
   delete queue;
-  return STATUS_SUCCESS;
-}
-
-}  // namespace
-
-extern "C" __declspec(dllexport) const amdf_sparse_mapping_test_queue_api_t*
-amdf_sparse_mapping_test_queue_api() {
-  static const amdf_sparse_mapping_test_queue_api_t api = {Select, Create,
-                                                           Execute, Destroy};
-  return &api;
+  return first_status;
 }

@@ -12,6 +12,7 @@
 
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
+#include "libamdf/src/gpu/umd/wddm/provider/fake_api.h"
 #include "libamdf/src/platform/windows/endpoint.h"
 
 namespace {
@@ -19,13 +20,7 @@ namespace {
 constexpr NTSTATUS kSuccess = 0;
 constexpr NTSTATUS kFailure = static_cast<NTSTATUS>(0xC0000001u);
 
-using ResetBridgeFn = void(__cdecl*)(void);
-using SetBridgeCountFn = void(__cdecl*)(uint32_t);
-using QueryBridgeCountFn = uint32_t(__cdecl*)(void);
-
 struct FakeKmtState {
-  // Bridge release count queried when the endpoint adapter is closed.
-  QueryBridgeCountFn query_bridge_close_success_count = nullptr;
   // Number of successfully closed endpoint adapters.
   uint32_t adapter_close_success_count = 0;
   // Native result returned by memory-capability qualification.
@@ -115,58 +110,13 @@ class WindowsGpuEndpointProfileTest : public ::testing::Test {
     endpoint_->adapter = 0x08;
     endpoint_->physical_adapter_index = 0;
 
-    const DWORD path_capacity =
-        GetEnvironmentVariableW(L"AMDF_DXG_BRIDGE_PATH", nullptr, 0);
-    ASSERT_GT(path_capacity, 0u);
-    std::vector<wchar_t> path(path_capacity);
-    ASSERT_LT(GetEnvironmentVariableW(L"AMDF_DXG_BRIDGE_PATH", path.data(),
-                                      path_capacity),
-              path_capacity);
-    const DWORD absolute_capacity =
-        GetFullPathNameW(path.data(), 0, nullptr, nullptr);
-    ASSERT_GT(absolute_capacity, 0u);
-    std::vector<wchar_t> absolute_path(absolute_capacity);
-    ASSERT_LT(GetFullPathNameW(path.data(), absolute_capacity,
-                               absolute_path.data(), nullptr),
-              absolute_capacity);
-    bridge_module_ = LoadLibraryExW(
-        absolute_path.data(), nullptr,
-        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
-    ASSERT_NE(bridge_module_, nullptr);
-
-    reset_bridge_ = reinterpret_cast<ResetBridgeFn>(
-        GetProcAddress(bridge_module_, "amdf_test_wkmi_bridge_reset"));
-    set_bridge_close_failures_ = reinterpret_cast<SetBridgeCountFn>(
-        GetProcAddress(bridge_module_,
-                       "amdf_test_wkmi_bridge_set_adapter_close_failures"));
-    query_bridge_open_success_count_ =
-        reinterpret_cast<QueryBridgeCountFn>(GetProcAddress(
-            bridge_module_,
-            "amdf_test_wkmi_bridge_query_adapter_open_success_count"));
-    query_bridge_close_attempt_count_ =
-        reinterpret_cast<QueryBridgeCountFn>(GetProcAddress(
-            bridge_module_,
-            "amdf_test_wkmi_bridge_query_adapter_close_attempt_count"));
-    state_.query_bridge_close_success_count =
-        reinterpret_cast<QueryBridgeCountFn>(GetProcAddress(
-            bridge_module_,
-            "amdf_test_wkmi_bridge_query_adapter_close_success_count"));
-    ASSERT_NE(reset_bridge_, nullptr);
-    ASSERT_NE(set_bridge_close_failures_, nullptr);
-    ASSERT_NE(query_bridge_open_success_count_, nullptr);
-    ASSERT_NE(query_bridge_close_attempt_count_, nullptr);
-    ASSERT_NE(state_.query_bridge_close_success_count, nullptr);
-    reset_bridge_();
+    amdf_test_wddm_provider_reset();
   }
 
   void TearDown() override {
     if (endpoint_ != nullptr) {
       EXPECT_EQ(amdf_platform_endpoint_close(endpoint_), AMDF_STATUS_OK);
       endpoint_ = nullptr;
-    }
-    if (bridge_module_ != nullptr) {
-      EXPECT_TRUE(FreeLibrary(bridge_module_));
-      bridge_module_ = nullptr;
     }
     current_state = nullptr;
   }
@@ -189,16 +139,6 @@ class WindowsGpuEndpointProfileTest : public ::testing::Test {
   amdf_platform_instance_t instance_ = {};
   // Live query endpoint, with no ownership of failed qualification.
   amdf_platform_endpoint_t* endpoint_ = nullptr;
-  // Test-owned bridge reference used to inspect shared fake state.
-  HMODULE bridge_module_ = nullptr;
-  // Resets all fake bridge state before each test.
-  ResetBridgeFn reset_bridge_ = nullptr;
-  // Selects the number of rejected bridge adapter closes.
-  SetBridgeCountFn set_bridge_close_failures_ = nullptr;
-  // Queries successful fake bridge adapter opens.
-  QueryBridgeCountFn query_bridge_open_success_count_ = nullptr;
-  // Queries all fake bridge adapter-close attempts.
-  QueryBridgeCountFn query_bridge_close_attempt_count_ = nullptr;
 };
 
 TEST_F(WindowsGpuEndpointProfileTest,
@@ -211,21 +151,21 @@ TEST_F(WindowsGpuEndpointProfileTest,
 
   EXPECT_EQ(amdf_status_code(status), AMDF_STATUS_CODE_BUSY);
   EXPECT_EQ(profile, sentinel_profile);
-  EXPECT_EQ(query_bridge_open_success_count_(), 1u);
-  EXPECT_EQ(query_bridge_close_attempt_count_(), 1u);
-  EXPECT_EQ(state_.query_bridge_close_success_count(), 0u);
+  EXPECT_EQ(amdf_test_wddm_provider_query_adapter_open_success_count(), 1u);
+  EXPECT_EQ(amdf_test_wddm_provider_query_adapter_close_attempt_count(), 1u);
+  EXPECT_EQ(amdf_test_wddm_provider_query_adapter_close_success_count(), 0u);
   EXPECT_EQ(state_.adapter_close_success_count, 0u);
 
   EXPECT_EQ(amdf_platform_endpoint_close(endpoint_), AMDF_STATUS_OK);
   endpoint_ = nullptr;
-  EXPECT_EQ(query_bridge_close_attempt_count_(), 1u);
-  EXPECT_EQ(state_.query_bridge_close_success_count(), 0u);
+  EXPECT_EQ(amdf_test_wddm_provider_query_adapter_close_attempt_count(), 1u);
+  EXPECT_EQ(amdf_test_wddm_provider_query_adapter_close_success_count(), 0u);
   EXPECT_EQ(state_.adapter_close_success_count, 1u);
 }
 
 TEST_F(WindowsGpuEndpointProfileTest,
        PublishesQualifiedProfileAfterProbeRelease) {
-  set_bridge_close_failures_(0);
+  amdf_test_wddm_provider_set_adapter_close_failures(0);
   amdf_gpu_endpoint_profile_t* profile = nullptr;
 
   EXPECT_EQ(amdf_gpu_umd_create_endpoint_profile(
@@ -238,9 +178,9 @@ TEST_F(WindowsGpuEndpointProfileTest,
   EXPECT_EQ(profile->info.gfx_ip.stepping, 1u);
   EXPECT_EQ(profile->info.compute.wavefront_size, 32u);
   amdf_free(instance_.host_allocator, profile);
-  EXPECT_EQ(query_bridge_open_success_count_(), 1u);
-  EXPECT_EQ(query_bridge_close_attempt_count_(), 1u);
-  EXPECT_EQ(state_.query_bridge_close_success_count(), 1u);
+  EXPECT_EQ(amdf_test_wddm_provider_query_adapter_open_success_count(), 1u);
+  EXPECT_EQ(amdf_test_wddm_provider_query_adapter_close_attempt_count(), 1u);
+  EXPECT_EQ(amdf_test_wddm_provider_query_adapter_close_success_count(), 1u);
 
   EXPECT_EQ(amdf_platform_endpoint_close(endpoint_), AMDF_STATUS_OK);
   endpoint_ = nullptr;
@@ -249,7 +189,7 @@ TEST_F(WindowsGpuEndpointProfileTest,
 
 TEST_F(WindowsGpuEndpointProfileTest,
        DiscoveryDoesNotAcquireMemoryOrQueryGpuMmu) {
-  set_bridge_close_failures_(0);
+  amdf_test_wddm_provider_set_adapter_close_failures(0);
   EnableMemoryOperations();
   state_.memory_capabilities_status = kFailure;
   state_.virtual_address_bit_count = 0;
@@ -275,7 +215,7 @@ TEST_F(WindowsGpuEndpointProfileTest,
     EXPECT_EQ((family.roles & AMDF_QUEUE_ROLE_VIRTUAL_MEMORY) != 0,
               supports_mapping);
   }
-  EXPECT_EQ(state_.query_bridge_close_success_count(), 1u);
+  EXPECT_EQ(amdf_test_wddm_provider_query_adapter_close_success_count(), 1u);
   amdf_free(instance_.host_allocator, profile);
 }
 

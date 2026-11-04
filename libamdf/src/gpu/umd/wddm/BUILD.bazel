@@ -7,7 +7,6 @@
 load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
 load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
 load("//libamdf/build_tools/bazel:cc_test.bzl", "amdf_cc_test")
-load("//libamdf/build_tools/bazel:windows_sidecar.bzl", "amdf_windows_sidecar_library")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -34,7 +33,6 @@ amdf_cc_library(
         ":memory_profile",
         "//libamdf/src/gpu/umd:device",
         "//libamdf/src/gpu/umd/dxg:adapter",
-        "//libamdf/src/gpu/umd/wddm/wkmi:loader",
         "//libamdf/src/platform/windows:device_status",
         "//libamdf/src/platform/windows:kmt_api",
     ],
@@ -111,6 +109,7 @@ amdf_cc_library(
         ":device_state",
         ":memory_profile",
         "//libamdf/src:allocator",
+        "//libamdf/src/gpu/umd/wddm/provider:api",
         "//libamdf/src/platform/windows:endpoint",
         "//libamdf/src/platform/windows:endpoint_properties",
     ],
@@ -128,7 +127,7 @@ amdf_cc_library(
         "//libamdf/src/gpu/umd:endpoint_profile",
         "//libamdf/src/gpu/umd/dxg:adapter",
         "//libamdf/src/gpu/umd/dxg:endpoint_properties",
-        "//libamdf/src/gpu/umd/wddm/wkmi:loader",
+        "//libamdf/src/gpu/umd/wddm/provider:api",
         "//libamdf/src/platform/windows:endpoint",
         "//libamdf/src/platform/windows:endpoint_properties",
     ],
@@ -148,32 +147,19 @@ amdf_cc_library(
         "//libamdf/src/gpu/umd/dxg:event",
         "//libamdf/src/gpu/umd/dxg:instance",
         "//libamdf/src/gpu/umd/dxg:user_queue",
+        "//libamdf/src/gpu/umd/wddm/provider",
     ],
-)
-
-amdf_windows_sidecar_library(
-    name = "sparse_mapping_queue_test_helper",
-    testonly = True,
-    srcs = [
-        "sparse_mapping_queue_test.cc",
-        "sparse_mapping_queue_test.h",
-        "//libamdf/src/gpu/umd/wddm/wkmi:dxcore_loader_compatibility.cc",
-    ],
-    linkopts = ["gdi32.lib"],
-    deps = ["//third_party:amdf_wkmi"],
 )
 
 amdf_cc_test(
     name = "sparse_mapping_test",
     size = "medium",
     srcs = [
+        "sparse_mapping_queue_test.cc",
         "sparse_mapping_queue_test.h",
         "sparse_mapping_test.cc",
     ],
-    data = [":sparse_mapping_queue_test_helper"],
-    env = {
-        "AMDF_SPARSE_MAPPING_QUEUE_TEST_PATH": "$(location :sparse_mapping_queue_test_helper)",
-    },
+    linkopts = ["gdi32.lib"],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = ["iree-run-requirement=libamdf.resource.amd_gpu"],
     target_compatible_with = ["@platforms//os:windows"],
@@ -187,6 +173,7 @@ amdf_cc_test(
         "//libamdf/src/gpu/umd:memory",
         "//libamdf/src/gpu/umd:memory_reservation",
         "//libamdf/src/gpu/umd:sparse_mapping_test_support",
+        "//libamdf/src/gpu/umd/dxg:private_records",
         "//libamdf/src/platform",
         "//libamdf/src/platform/windows:endpoint",
         "//third_party:google_test",
@@ -197,15 +184,12 @@ amdf_cc_test(
 amdf_cc_test(
     name = "endpoint_profile_test",
     srcs = ["endpoint_profile_test.cc"],
-    data = ["//libamdf/src/gpu/umd/wddm/wkmi:fake_wkmi_bridge_test"],
-    env = {
-        "AMDF_DXG_BRIDGE_PATH": "$(location //libamdf/src/gpu/umd/wddm/wkmi:fake_wkmi_bridge_test)",
-    },
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
         ":endpoint_profile",
         "//libamdf/src:allocator",
         "//libamdf/src/gpu/umd:endpoint_profile",
+        "//libamdf/src/gpu/umd/wddm/provider:fake_api",
         "//libamdf/src/platform/windows:endpoint",
         "//third_party:google_test",
         "//third_party:google_test_main",
@@ -215,16 +199,13 @@ amdf_cc_test(
 amdf_cc_test(
     name = "device_test",
     srcs = ["device_test.cc"],
-    data = ["//libamdf/src/gpu/umd/wddm/wkmi:fake_wkmi_bridge_test"],
-    env = {
-        "AMDF_DXG_BRIDGE_PATH": "$(location //libamdf/src/gpu/umd/wddm/wkmi:fake_wkmi_bridge_test)",
-    },
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
         ":device",
         ":memory_profile",
         "//libamdf/src:allocator",
         "//libamdf/src/gpu/umd:device",
+        "//libamdf/src/gpu/umd/wddm/provider:fake_api",
         "//libamdf/src/platform/windows:endpoint",
         "//third_party:google_test",
         "//third_party:google_test_main",

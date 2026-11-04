@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "libamdf/src/gpu/umd/wddm/wkmi/allocation.h"
+#include "libamdf/src/gpu/umd/wddm/provider/allocation.h"
 
 #include <malloc.h>
 
@@ -29,7 +29,7 @@
 #include <ntstatus.h>
 
 #include "libamdf/src/gpu/umd/dxg/private_records.h"
-#include "libamdf/src/gpu/umd/wddm/wkmi/adapter_state.h"
+#include "libamdf/src/gpu/umd/wddm/provider/adapter_state.h"
 
 namespace {
 
@@ -269,7 +269,7 @@ bool MalformedNativeSuccessPublishesResourceToCaller() {
     uint32_t allocation_count = 0xA2;
     uint32_t native_status = 0xA3;
 
-    AMDF_EXPECT(amdf::wkmi_bridge::GpuAllocationCreate(
+    AMDF_EXPECT(amdf::wddm_provider::GpuAllocationCreate(
                     &adapter, &create_info, 1, &allocation_handle,
                     &resource_handle, &allocation_count,
                     &native_status) == AMDF_DXG_BRIDGE_RESULT_SUCCESS);
@@ -282,7 +282,7 @@ bool MalformedNativeSuccessPublishesResourceToCaller() {
 
     native_status = 0xB0;
     AMDF_EXPECT(
-        amdf::wkmi_bridge::PrepareGpuAdapterClose(&adapter, &native_status) ==
+        amdf::wddm_provider::PrepareGpuAdapterClose(&adapter, &native_status) ==
         AMDF_DXG_BRIDGE_RESULT_SUCCESS);
     AMDF_EXPECT(native_status == 0);
     AMDF_EXPECT(native_state.destroy_attempt_count == 0);
@@ -310,7 +310,7 @@ bool SuccessfulCreatePublishesNativeHandles() {
     uint32_t allocation_count = 0xA2;
     uint32_t native_status = 0xA3;
 
-    AMDF_EXPECT(amdf::wkmi_bridge::GpuAllocationCreate(
+    AMDF_EXPECT(amdf::wddm_provider::GpuAllocationCreate(
                     &adapter, &create_info, 1, &allocation_handle,
                     &resource_handle, &allocation_count,
                     &native_status) == AMDF_DXG_BRIDGE_RESULT_SUCCESS);
@@ -321,7 +321,7 @@ bool SuccessfulCreatePublishesNativeHandles() {
     AMDF_EXPECT(native_state.destroy_attempt_count == 0);
 
     AMDF_EXPECT(
-        amdf::wkmi_bridge::PrepareGpuAdapterClose(&adapter, &native_status) ==
+        amdf::wddm_provider::PrepareGpuAdapterClose(&adapter, &native_status) ==
         AMDF_DXG_BRIDGE_RESULT_SUCCESS);
     AMDF_EXPECT(native_state.destroy_attempt_count == 0);
   }
@@ -360,7 +360,7 @@ bool AllocationFlagsPreserveIndependentPolicies() {
     uint32_t allocation_count = 0;
     uint32_t native_status = 0;
 
-    AMDF_EXPECT(amdf::wkmi_bridge::GpuAllocationCreate(
+    AMDF_EXPECT(amdf::wddm_provider::GpuAllocationCreate(
                     &adapter, &create_info, 1, &allocation_handle,
                     &resource_handle, &allocation_count,
                     &native_status) == AMDF_DXG_BRIDGE_RESULT_SUCCESS);
@@ -389,7 +389,7 @@ bool NativeCreateFailureLeavesOutputsUnchanged() {
     uint32_t allocation_count = 0xA2;
     uint32_t native_status = 0xA3;
 
-    AMDF_EXPECT(amdf::wkmi_bridge::GpuAllocationCreate(
+    AMDF_EXPECT(amdf::wddm_provider::GpuAllocationCreate(
                     &adapter, &create_info, 1, &allocation_handle,
                     &resource_handle, &allocation_count,
                     &native_status) == AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE);
@@ -420,7 +420,7 @@ bool InsufficientCapacityReportsCountWithoutAllocating() {
     uint32_t resource_handle = 0xA1;
     uint32_t allocation_count = 0;
     uint32_t native_status = 0xA3;
-    AMDF_EXPECT(amdf::wkmi_bridge::GpuAllocationCreate(
+    AMDF_EXPECT(amdf::wddm_provider::GpuAllocationCreate(
                     &adapter, &create_info, 0, nullptr, &resource_handle,
                     &allocation_count,
                     &native_status) == AMDF_DXG_BRIDGE_RESULT_BUFFER_TOO_SMALL);
@@ -441,14 +441,14 @@ bool QueryLayoutPublishesOnlyOnSuccess() {
   uint64_t maximum_allocation_byte_length = 0xA1;
 
   AMDF_EXPECT(
-      amdf::wkmi_bridge::GpuAllocationQueryLayout(
+      amdf::wddm_provider::GpuAllocationQueryLayout(
           &adapter, 1, &allocation_count, &maximum_allocation_byte_length) ==
       AMDF_DXG_BRIDGE_RESULT_INVALID_ARGUMENT);
   AMDF_EXPECT(allocation_count == 0xA0);
   AMDF_EXPECT(maximum_allocation_byte_length == 0xA1);
 
   AMDF_EXPECT(
-      amdf::wkmi_bridge::GpuAllocationQueryLayout(
+      amdf::wddm_provider::GpuAllocationQueryLayout(
           &adapter, 4096, &allocation_count, &maximum_allocation_byte_length) ==
       AMDF_DXG_BRIDGE_RESULT_SUCCESS);
   AMDF_EXPECT(allocation_count == 1);
@@ -488,7 +488,7 @@ bool NativeChunksPreserveExactPayloadExtent() {
     InitializeAdapter(&adapter, &allocator_state, native_state);
     uint32_t allocation_count = 0;
     uint64_t maximum_allocation_byte_length = 0;
-    AMDF_EXPECT(amdf::wkmi_bridge::GpuAllocationQueryLayout(
+    AMDF_EXPECT(amdf::wddm_provider::GpuAllocationQueryLayout(
                     &adapter, test_case.byte_length, &allocation_count,
                     &maximum_allocation_byte_length) ==
                 AMDF_DXG_BRIDGE_RESULT_SUCCESS);
@@ -506,7 +506,7 @@ bool NativeChunksPreserveExactPayloadExtent() {
     std::array<uint32_t, 3> handles = {};
     uint32_t resource_handle = 0;
     uint32_t native_status = 0;
-    AMDF_EXPECT(amdf::wkmi_bridge::GpuAllocationCreate(
+    AMDF_EXPECT(amdf::wddm_provider::GpuAllocationCreate(
                     &adapter, &create_info,
                     static_cast<uint32_t>(handles.size()), handles.data(),
                     &resource_handle, &allocation_count,
@@ -545,7 +545,7 @@ bool MetadataAllocationFailureLeavesOwnershipOutputsUnchanged() {
     uint32_t allocation_count = 0xA2;
     uint32_t native_status = 0xA3;
 
-    AMDF_EXPECT(amdf::wkmi_bridge::GpuAllocationCreate(
+    AMDF_EXPECT(amdf::wddm_provider::GpuAllocationCreate(
                     &adapter, &create_info, 1, &allocation_handle,
                     &resource_handle, &allocation_count, &native_status) ==
                 AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED);

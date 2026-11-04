@@ -233,7 +233,7 @@ class WindowsGpuKernelQueueTest
   amdf_native_event_t event_ = {};
   // Native dependency responses, with no hardware access.
   FakeQueueState state_;
-  // Existing WKMI function table seam, not a replacement queue implementation.
+  // Existing provider table seam, not a replacement queue implementation.
   amdf_dxg_bridge_api_t bridge_ = {};
   // Native KMT procedures needed by the production UMD wait path.
   amdf_kmt_api_t kmt_ = {};

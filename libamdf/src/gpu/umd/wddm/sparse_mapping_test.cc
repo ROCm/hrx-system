@@ -11,7 +11,6 @@
 #include <cinttypes>
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
 #include <span>
 #include <vector>
 
@@ -72,25 +71,6 @@ class WddmSparseMappingBackend final : public SparseMappingBackend {
   // software-scheduled witness owns its KMT context independently and does not
   // alter the provider's advertised queue families.
   bool SelectEndpoint() {
-    const char* helper_path =
-        std::getenv("AMDF_SPARSE_MAPPING_QUEUE_TEST_PATH");
-    Require(helper_path != nullptr, "locate native queue test helper");
-    // Bazel supplies explicit runtime paths. CMake colocates private DLLs
-    // with amdf, separate from this statically linked test executable.
-    if (std::getenv("AMDF_DXG_BRIDGE_PATH") == nullptr) {
-      auto bridge_path = std::filesystem::path(helper_path);
-      bridge_path.replace_filename("amdf_wkmi_bridge.dll");
-      Require(SetEnvironmentVariableW(L"AMDF_DXG_BRIDGE_PATH",
-                                      bridge_path.c_str()) != 0,
-              "select colocated WKMI bridge");
-    }
-    helper_module_ = LoadLibraryA(helper_path);
-    Require(helper_module_ != nullptr, "load native queue test helper");
-    using QueryApi = const amdf_sparse_mapping_test_queue_api_t* (*)();
-    const auto query_api = reinterpret_cast<QueryApi>(
-        GetProcAddress(helper_module_, "amdf_sparse_mapping_test_queue_api"));
-    Require(query_api != nullptr, "resolve native queue test API");
-    software_api_ = query_api();
     RequireStatus(
         amdf_platform_instance_create(amdf_allocator_system(), &platform_),
         "create platform");
@@ -138,7 +118,8 @@ class WddmSparseMappingBackend final : public SparseMappingBackend {
         amdf_free(amdf_allocator_system(), profile);
         if (memory.cache_coherent_memory_supported) {
           const NTSTATUS selection_status =
-              software_api_->select(endpoint_->adapter, &software_scheduler_);
+              amdf_sparse_mapping_test_queue_select(endpoint_->adapter,
+                                                    &software_scheduler_);
           if (selection_status != STATUS_NOT_SUPPORTED) {
             RequireStatus(amdf_kmt_make_status(selection_status),
                           "query software-scheduled SDMA engine");
@@ -158,8 +139,6 @@ class WddmSparseMappingBackend final : public SparseMappingBackend {
     RequireStatus(amdf_platform_instance_destroy(platform_),
                   "destroy platform without an admitted queue");
     platform_ = nullptr;
-    Require(FreeLibrary(helper_module_) != 0,
-            "unload native queue test helper");
     return false;
   }
 
@@ -228,7 +207,7 @@ class WddmSparseMappingBackend final : public SparseMappingBackend {
     // native submit path independently enforces the queried queue's limits.
     command_byte_capacity = page_size;
     if (software_scheduled_) {
-      RequireStatus(amdf_kmt_make_status(software_api_->create(
+      RequireStatus(amdf_kmt_make_status(amdf_sparse_mapping_test_queue_create(
                         device_->device, device_->physical_adapter_index,
                         &software_scheduler_, &software_queue_)),
                     "create persistent native SDMA context");
@@ -262,7 +241,7 @@ class WddmSparseMappingBackend final : public SparseMappingBackend {
     MemoryBarrier();
     if (software_scheduled_) {
       RequireStatus(
-          amdf_kmt_make_status(software_api_->execute(
+          amdf_kmt_make_status(amdf_sparse_mapping_test_queue_execute(
               software_queue_, command_address_,
               static_cast<uint32_t>(words.size_bytes()), ++progress_)),
           "execute prepared software-scheduled SDMA stream");
@@ -311,9 +290,9 @@ class WddmSparseMappingBackend final : public SparseMappingBackend {
                     "release detached address reservation");
     }
     if (software_scheduled_) {
-      RequireStatus(
-          amdf_kmt_make_status(software_api_->destroy(software_queue_)),
-          "destroy persistent native SDMA context");
+      RequireStatus(amdf_kmt_make_status(amdf_sparse_mapping_test_queue_destroy(
+                        software_queue_)),
+                    "destroy persistent native SDMA context");
     } else {
       RequireStatus(amdf_gpu_umd_kernel_queue_destroy(queue_),
                     "destroy persistent SDMA queue");
@@ -326,8 +305,6 @@ class WddmSparseMappingBackend final : public SparseMappingBackend {
     RequireStatus(amdf_platform_endpoint_close(endpoint_), "close endpoint");
     RequireStatus(amdf_platform_instance_destroy(platform_),
                   "destroy platform");
-    Require(FreeLibrary(helper_module_) != 0,
-            "unload native queue test helper");
     std::fprintf(stderr, "checked final detach and native release complete\n");
   }
 
@@ -420,10 +397,6 @@ class WddmSparseMappingBackend final : public SparseMappingBackend {
   amdf_gpu_umd_device_t* device_ = nullptr;
   // Persistent SDMA queue retained across all mapping generations.
   amdf_gpu_umd_kernel_queue_t* queue_ = nullptr;
-  // Test-only DLL retaining WKMI's binary C++ and release CRT ABI.
-  HMODULE helper_module_ = nullptr;
-  // Immutable native test operations, borrowed from helper_module_.
-  const amdf_sparse_mapping_test_queue_api_t* software_api_ = nullptr;
   // True when the selected native engine uses software scheduling.
   bool software_scheduled_ = false;
   // Native engine facts selected once during endpoint discovery.

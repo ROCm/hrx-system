@@ -9,6 +9,7 @@
 #include "libamdf/src/gpu/umd/dxg/bridge_allocator.h"
 #include "libamdf/src/gpu/umd/dxg/bridge_api.h"
 #include "libamdf/src/gpu/umd/dxg/private_records.h"
+#include "libamdf/src/gpu/umd/wddm/provider/api.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -24,10 +25,10 @@
 #include <d3dkmthk.h>
 #include <ntstatus.h>
 
-#include "libamdf/src/gpu/umd/wddm/wkmi/adapter_state.h"
-#include "libamdf/src/gpu/umd/wddm/wkmi/allocation.h"
-#include "libamdf/src/gpu/umd/wddm/wkmi/kernel_queue.h"
-#include "libamdf/src/gpu/umd/wddm/wkmi/shared_buffer.h"
+#include "libamdf/src/gpu/umd/wddm/provider/adapter_state.h"
+#include "libamdf/src/gpu/umd/wddm/provider/allocation.h"
+#include "libamdf/src/gpu/umd/wddm/provider/kernel_queue.h"
+#include "libamdf/src/gpu/umd/wddm/provider/shared_buffer.h"
 
 namespace {
 
@@ -161,7 +162,7 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL
 GpuAdapterClose(amdf_dxg_bridge_gpu_adapter_t* adapter,
                 uint32_t* out_native_status) noexcept {
   const amdf_dxg_bridge_result_t result =
-      amdf::wkmi_bridge::PrepareGpuAdapterClose(adapter, out_native_status);
+      amdf::wddm_provider::PrepareGpuAdapterClose(adapter, out_native_status);
   if (result != AMDF_DXG_BRIDGE_RESULT_SUCCESS) {
     return result;
   }
@@ -182,7 +183,7 @@ GpuClockSample(amdf_dxg_bridge_gpu_adapter_t* adapter, uint32_t adapter_handle,
   }
   *out_native_status = 0;
   const amdf_dxg_private_queue_profile_t* profile =
-      amdf::wkmi_bridge::SelectGpuKernelQueueProfile(adapter, command_type);
+      amdf::wddm_provider::SelectGpuKernelQueueProfile(adapter, command_type);
   if (profile == nullptr || !profile->is_supported) {
     return AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED;
   }
@@ -215,27 +216,17 @@ const amdf_dxg_bridge_api_t kBridgeApi = {
     AMDF_DXG_BRIDGE_ABI_VERSION_12,
     GpuAdapterOpen,
     GpuAdapterClose,
-    amdf::wkmi_bridge::GpuAllocationQueryLayout,
-    amdf::wkmi_bridge::GpuAllocationCreate,
-    amdf::wkmi_bridge::GpuKernelQueueCreate,
-    amdf::wkmi_bridge::GpuKernelQueueSubmit,
-    amdf::wkmi_bridge::GpuKernelQueueDestroy,
-    amdf::wkmi_bridge::GpuBufferPrepareImport,
+    amdf::wddm_provider::GpuAllocationQueryLayout,
+    amdf::wddm_provider::GpuAllocationCreate,
+    amdf::wddm_provider::GpuKernelQueueCreate,
+    amdf::wddm_provider::GpuKernelQueueSubmit,
+    amdf::wddm_provider::GpuKernelQueueDestroy,
+    amdf::wddm_provider::GpuBufferPrepareImport,
     GpuClockSample,
 };
 
 }  // namespace
 
-extern "C" __declspec(dllexport) amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL
-amdf_dxg_bridge_query_api(uint32_t minimum_version, uint32_t maximum_version,
-                          const amdf_dxg_bridge_api_t** out_api) {
-  if (out_api == nullptr) {
-    return AMDF_DXG_BRIDGE_RESULT_INVALID_ARGUMENT;
-  }
-  if (minimum_version > AMDF_DXG_BRIDGE_ABI_VERSION_12 ||
-      maximum_version < AMDF_DXG_BRIDGE_ABI_VERSION_12) {
-    return AMDF_DXG_BRIDGE_RESULT_VERSION_MISMATCH;
-  }
-  *out_api = &kBridgeApi;
-  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
+extern "C" const amdf_dxg_bridge_api_t* amdf_gpu_wddm_default_api(void) {
+  return &kBridgeApi;
 }

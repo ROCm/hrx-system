@@ -33,5 +33,4 @@ exports_files([
     "cts_gpu_kernel.bzl",
     "cts_gpu_targets.bzl",
     "library.bzl",
-    "windows_sidecar.bzl",
 ])

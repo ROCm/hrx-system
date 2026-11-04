@@ -11,7 +11,7 @@
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/dxg/adapter.h"
 #include "libamdf/src/gpu/umd/dxg/endpoint_properties.h"
-#include "libamdf/src/gpu/umd/wddm/wkmi/loader.h"
+#include "libamdf/src/gpu/umd/wddm/provider/api.h"
 #include "libamdf/src/host_memory.h"
 #include "libamdf/src/platform/windows/endpoint.h"
 #include "libamdf/src/platform/windows/endpoint_properties.h"
@@ -20,34 +20,26 @@ amdf_status_t amdf_gpu_umd_create_endpoint_profile(
     amdf_platform_endpoint_t* platform_endpoint,
     amdf_allocator_t host_allocator,
     amdf_gpu_endpoint_profile_t** out_profile) {
-  amdf_gpu_wddm_wkmi_loader_t loader = {0};
   amdf_gpu_dxg_adapter_t adapter = {0};
   bool profile_available = false;
   amdf_gpu_endpoint_profile_t profile = {0};
   amdf_dxg_bridge_gpu_properties_t provider_properties = {0};
-  amdf_status_t status =
-      amdf_gpu_wddm_wkmi_loader_initialize(host_allocator, &loader);
-  const amdf_dxg_bridge_api_t* bridge_api = NULL;
-  if (amdf_status_is_ok(status)) {
-    status = amdf_gpu_wddm_wkmi_loader_query_api(&loader, &bridge_api);
-  }
-  if (amdf_status_is_ok(status)) {
-    LUID adapter_luid;
-    uint32_t physical_adapter_index = 0;
-    amdf_windows_endpoint_id_decode(&platform_endpoint->id, &adapter_luid,
-                                    &physical_adapter_index);
-    const amdf_dxg_bridge_gpu_adapter_open_info_t open_info = {
-        .structure_size = sizeof(open_info),
-        .adapter_handle = (uint32_t)platform_endpoint->adapter,
-        .physical_adapter_index = physical_adapter_index,
-        .adapter_luid = ((uint64_t)(uint32_t)adapter_luid.HighPart << 32) |
-                        adapter_luid.LowPart,
-    };
-    status = amdf_gpu_dxg_adapter_initialize(
-        bridge_api, &open_info, host_allocator, &adapter, &provider_properties);
-    if (status == amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
-      status = AMDF_STATUS_OK;
-    }
+  LUID adapter_luid;
+  uint32_t physical_adapter_index = 0;
+  amdf_windows_endpoint_id_decode(&platform_endpoint->id, &adapter_luid,
+                                  &physical_adapter_index);
+  const amdf_dxg_bridge_gpu_adapter_open_info_t open_info = {
+      .structure_size = sizeof(open_info),
+      .adapter_handle = (uint32_t)platform_endpoint->adapter,
+      .physical_adapter_index = physical_adapter_index,
+      .adapter_luid = ((uint64_t)(uint32_t)adapter_luid.HighPart << 32) |
+                      adapter_luid.LowPart,
+  };
+  amdf_status_t status = amdf_gpu_dxg_adapter_initialize(
+      amdf_gpu_wddm_default_api(), &open_info, host_allocator, &adapter,
+      &provider_properties);
+  if (status == amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
+    status = AMDF_STATUS_OK;
   }
 
   if (amdf_status_is_ok(status) && adapter.native != NULL) {
@@ -103,9 +95,6 @@ amdf_status_t amdf_gpu_umd_create_endpoint_profile(
   amdf_status_t release_status = AMDF_STATUS_OK;
   if (adapter.native != NULL) {
     release_status = amdf_gpu_dxg_adapter_deinitialize(&adapter);
-  }
-  if (amdf_status_is_ok(release_status) && loader.module != NULL) {
-    release_status = amdf_gpu_wddm_wkmi_loader_deinitialize(&loader);
   }
   if (!amdf_status_is_ok(release_status)) {
     status = release_status;

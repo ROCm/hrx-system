@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "libamdf/src/gpu/umd/wddm/wkmi/allocation.h"
+#include "libamdf/src/gpu/umd/wddm/provider/allocation.h"
 
 #include <algorithm>
 #include <array>
@@ -27,9 +27,9 @@
 
 #include "libamdf/src/gpu/umd/dxg/bridge_allocator.h"
 #include "libamdf/src/gpu/umd/dxg/private_records.h"
-#include "libamdf/src/gpu/umd/wddm/wkmi/adapter_state.h"
+#include "libamdf/src/gpu/umd/wddm/provider/adapter_state.h"
 
-namespace amdf::wkmi_bridge {
+namespace amdf::wddm_provider {
 
 using amdf::dxg_bridge::HostBuffer;
 namespace {
@@ -234,4 +234,4 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuAllocationCreate(
       out_resource_handle, out_allocation_count, out_native_status);
 }
 
-}  // namespace amdf::wkmi_bridge
+}  // namespace amdf::wddm_provider

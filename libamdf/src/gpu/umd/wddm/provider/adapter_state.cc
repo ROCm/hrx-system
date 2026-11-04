@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "libamdf/src/gpu/umd/wddm/wkmi/adapter_state.h"
+#include "libamdf/src/gpu/umd/wddm/provider/adapter_state.h"
 
 #include <cassert>
 
@@ -12,7 +12,7 @@ amdf_dxg_bridge_gpu_adapter_t::~amdf_dxg_bridge_gpu_adapter_t() {
   assert(live_queue_count.load(std::memory_order_relaxed) == 0);
 }
 
-namespace amdf::wkmi_bridge {
+namespace amdf::wddm_provider {
 
 const amdf_dxg_private_queue_profile_t* SelectGpuKernelQueueProfile(
     const amdf_dxg_bridge_gpu_adapter_t* adapter,
@@ -39,4 +39,4 @@ amdf_dxg_bridge_result_t PrepareGpuAdapterClose(
              : AMDF_DXG_BRIDGE_RESULT_BUSY;
 }
 
-}  // namespace amdf::wkmi_bridge
+}  // namespace amdf::wddm_provider

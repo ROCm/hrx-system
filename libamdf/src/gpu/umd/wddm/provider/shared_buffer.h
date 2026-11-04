@@ -4,12 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef AMDF_SRC_GPU_UMD_WDDM_WKMI_SHARED_BUFFER_H_
-#define AMDF_SRC_GPU_UMD_WDDM_WKMI_SHARED_BUFFER_H_
+#ifndef AMDF_SRC_GPU_UMD_WDDM_PROVIDER_SHARED_BUFFER_H_
+#define AMDF_SRC_GPU_UMD_WDDM_PROVIDER_SHARED_BUFFER_H_
 
 #include "libamdf/src/gpu/umd/dxg/bridge_api.h"
 
-namespace amdf::wkmi_bridge {
+namespace amdf::wddm_provider {
 
 // Acquires a typed D3D12 buffer into an already-live native memory owner.
 // Acquired handle slots remain owned by the caller on every result.
@@ -20,6 +20,6 @@ amdf_status_t AMDF_DXG_BRIDGE_CALL GpuBufferPrepareImport(
     uint64_t* out_native_byte_length,
     uint64_t* out_buffer_byte_length) noexcept;
 
-}  // namespace amdf::wkmi_bridge
+}  // namespace amdf::wddm_provider
 
-#endif  // AMDF_SRC_GPU_UMD_WDDM_WKMI_SHARED_BUFFER_H_
+#endif  // AMDF_SRC_GPU_UMD_WDDM_PROVIDER_SHARED_BUFFER_H_

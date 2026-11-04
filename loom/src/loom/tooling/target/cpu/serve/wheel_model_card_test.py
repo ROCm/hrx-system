@@ -172,8 +172,7 @@ def main(
             project_binaries = {
                 name
                 for name in native_names
-                if name.endswith(".exe")
-                or name in companions | {"amdf_wkmi_bridge.dll"}
+                if name.endswith(".exe") or name in companions
             }
             expected_symbols = {
                 str(Path(name).with_suffix(".pdb")) for name in project_binaries

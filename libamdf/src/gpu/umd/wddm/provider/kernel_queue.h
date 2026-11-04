@@ -4,12 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef AMDF_SRC_GPU_UMD_WDDM_WKMI_KERNEL_QUEUE_H_
-#define AMDF_SRC_GPU_UMD_WDDM_WKMI_KERNEL_QUEUE_H_
+#ifndef AMDF_SRC_GPU_UMD_WDDM_PROVIDER_KERNEL_QUEUE_H_
+#define AMDF_SRC_GPU_UMD_WDDM_PROVIDER_KERNEL_QUEUE_H_
 
 #include "libamdf/src/gpu/umd/dxg/bridge_api.h"
 
-namespace amdf::wkmi_bridge {
+namespace amdf::wddm_provider {
 
 // Creates one native GPU execution context and its completion resources.
 amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuKernelQueueCreate(
@@ -32,6 +32,6 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL
 GpuKernelQueueDestroy(amdf_dxg_bridge_gpu_kernel_queue_t* queue,
                       uint32_t* out_native_status) noexcept;
 
-}  // namespace amdf::wkmi_bridge
+}  // namespace amdf::wddm_provider
 
-#endif  // AMDF_SRC_GPU_UMD_WDDM_WKMI_KERNEL_QUEUE_H_
+#endif  // AMDF_SRC_GPU_UMD_WDDM_PROVIDER_KERNEL_QUEUE_H_
