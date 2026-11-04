@@ -109,6 +109,12 @@ typedef struct amdf_gpu_kfd_topology_t {
 extern "C" {
 #endif
 
+// Native logical mask geometry, or zero when the native mapping is not
+// qualified. This query performs no allocation or native operation.
+amdf_gpu_execution_resource_geometry_t
+amdf_gpu_kfd_topology_execution_resources(
+    const amdf_gpu_kfd_topology_t* topology);
+
 // Reads a coherent cached topology snapshot, including physical heap totals
 // and owned peer metadata. Success transfers discovery metadata to the caller;
 // failure leaves the output unchanged. No execution resources are acquired.

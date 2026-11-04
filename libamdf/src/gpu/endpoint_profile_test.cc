@@ -184,6 +184,28 @@ TEST(GpuEndpointProfileTest, PreservesNativeIdentityIncludingUnavailable) {
   }
 }
 
+TEST(GpuEndpointProfileTest, PreservesAndValidatesExecutionResourceGeometry) {
+  auto properties =
+      MakeProperties(9, 4, 2, 0, 64, 304, 32, 32, 64u * 1024u, 8, 4);
+  properties.execution_resources = {1, 8, 1};
+  amdf_gpu_endpoint_profile_t profile = {};
+  ASSERT_TRUE(amdf_gpu_endpoint_profile_initialize(&properties, &profile));
+  EXPECT_EQ(profile.info.execution_resources.compute_units_per_resource, 1u);
+  EXPECT_EQ(profile.info.execution_resources.group_count, 8u);
+  EXPECT_EQ(
+      profile.info.execution_resources.minimum_selected_resources_per_group,
+      1u);
+  const amdf_gpu_execution_resource_geometry_t invalid[] = {
+      {0, 8, 1}, {1, 0, 1}, {3, 8, 1}, {1, 7, 1}, {1, 8, 39}, {608, 1, 0},
+  };
+  const auto original = profile;
+  for (const auto& geometry : invalid) {
+    properties.execution_resources = geometry;
+    EXPECT_FALSE(amdf_gpu_endpoint_profile_initialize(&properties, &profile));
+    EXPECT_EQ(std::memcmp(&profile, &original, sizeof(profile)), 0);
+  }
+}
+
 TEST(GpuEndpointProfileTest, RejectsIncompleteOrInconsistentProperties) {
   const amdf_gpu_endpoint_properties_t valid =
       MakeProperties(12, 5, 0, 1, 32, 256, 64, 32, 320u * 1024u, 8, 2);

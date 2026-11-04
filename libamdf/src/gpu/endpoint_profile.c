@@ -45,7 +45,8 @@ static bool amdf_gpu_queue_family_properties_validate(
   const amdf_user_queue_capabilities_t known_user_capabilities =
       AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
       AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER |
-      AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH;
+      AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH |
+      AMDF_USER_QUEUE_CAPABILITY_EXECUTION_RESOURCE_SELECTION;
   const amdf_kernel_queue_capabilities_t known_kernel_capabilities =
       AMDF_KERNEL_QUEUE_CAPABILITY_VECTOR_SUBMIT |
       AMDF_KERNEL_QUEUE_CAPABILITY_VIRTUAL_MEMORY |
@@ -100,7 +101,8 @@ static bool amdf_gpu_queue_family_properties_validate(
     return false;
   }
   if ((properties->user_queue_capabilities &
-       AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH) != 0 &&
+       (AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH |
+        AMDF_USER_QUEUE_CAPABILITY_EXECUTION_RESOURCE_SELECTION)) != 0 &&
       (properties->roles & AMDF_QUEUE_ROLE_COMPUTE) == 0) {
     return false;
   }
@@ -197,9 +199,31 @@ bool amdf_gpu_endpoint_profile_initialize(
       properties->compute.maximum_wave_count_per_compute_unit) {
     return false;
   }
+  const amdf_gpu_execution_resource_geometry_t* resources =
+      &properties->execution_resources;
+  if (resources->compute_units_per_resource != 0) {
+    const uint32_t resource_count = properties->compute.compute_unit_count /
+                                    resources->compute_units_per_resource;
+    if (resource_count == 0 ||
+        properties->compute.compute_unit_count %
+                resources->compute_units_per_resource !=
+            0 ||
+        resources->group_count == 0 ||
+        resource_count % resources->group_count != 0 ||
+        resources->minimum_selected_resources_per_group >
+            resource_count / resources->group_count) {
+      return false;
+    }
+  } else if (resources->group_count != 0 ||
+             resources->minimum_selected_resources_per_group != 0) {
+    return false;
+  }
   for (uint32_t i = 0; i < properties->queue_family_count; ++i) {
     if (!amdf_gpu_queue_family_properties_validate(
-            &properties->queue_families[i])) {
+            &properties->queue_families[i]) ||
+        ((properties->queue_families[i].user_queue_capabilities &
+          AMDF_USER_QUEUE_CAPABILITY_EXECUTION_RESOURCE_SELECTION) != 0 &&
+         resources->compute_units_per_resource == 0)) {
       return false;
     }
   }
@@ -212,6 +236,7 @@ bool amdf_gpu_endpoint_profile_initialize(
   profile.info.gfx_ip.stepping = properties->gfx_ip.stepping;
   profile.info.asic_revision = properties->asic_revision;
   profile.info.unique_id = properties->unique_id;
+  profile.info.execution_resources = properties->execution_resources;
   profile.info.compute.wavefront_size = properties->compute.wavefront_size;
   profile.info.compute.compute_unit_count =
       properties->compute.compute_unit_count;

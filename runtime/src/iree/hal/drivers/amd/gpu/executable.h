@@ -103,14 +103,17 @@ iree_status_t iree_hal_amd_gpu_executable_lookup_aql_for_queue(
     uint32_t queue_ordinal,
     const iree_hal_amd_gpu_aql_function_t** out_function);
 
-// Queries a loaded function's architectural residency on a full-endpoint
-// queue. The public queue boundary establishes exact-family compatibility and
-// nonzero dimensions; this validates the function token and its geometry. Uses
-// retained image/native facts without touching device memory or queue state.
-// The native per-wave trap reserve is captured once for this exact family at
-// executable construction, including its explicit unknown state.
+// Queries a loaded function's architectural residency on the selected
+// resources. A zero resource count denotes the complete endpoint. The public
+// queue boundary establishes exact-family compatibility, legal resource
+// selection, and nonzero dimensions; this validates the function token and its
+// geometry. Uses retained image/native facts without touching device memory or
+// walking resource lists. The native per-wave trap reserve is captured once for
+// this exact family at executable construction, including its explicit unknown
+// state.
 iree_status_t iree_hal_amd_gpu_executable_query_dispatch_concurrency(
     iree_hal_executable_t* executable, iree_hal_executable_function_t function,
+    iree_host_size_t execution_resource_count,
     iree_hal_queue_dispatch_concurrency_params_t params,
     iree_hal_queue_dispatch_concurrency_t* out_concurrency);
 

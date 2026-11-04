@@ -2171,7 +2171,8 @@ static iree_status_t iree_hal_amd_gpu_aql_queue_query_dispatch_concurrency(
     iree_hal_queue_dispatch_concurrency_flags_t flags,
     iree_hal_queue_dispatch_concurrency_t* out_concurrency) {
   return iree_hal_amd_gpu_executable_query_dispatch_concurrency(
-      executable, function, params, out_concurrency);
+      executable, function, queue->execution_resources.count, params,
+      out_concurrency);
 }
 
 static iree_status_t iree_hal_amd_gpu_aql_queue_control(
@@ -2682,9 +2683,15 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
       .submit = iree_hal_amd_gpu_aql_file_submit};
   iree_status_t status = iree_hal_amd_gpu_capture_pool_preallocate(
       &queue->captures, options->capture_block_count);
+  const amdf_gpu_queue_execution_resource_selection_t selection = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_QUEUE_EXECUTION_RESOURCE_SELECTION,
+      .structure_size = sizeof(selection),
+      .resource_count = (uint32_t)params->execution_resources.count,
+      .resource_ordinals = params->execution_resources.ordinals};
   const amdf_gpu_aql_scratch_service_info_t service = {
       .type = AMDF_STRUCTURE_TYPE_GPU_AQL_SCRATCH_SERVICE_INFO,
       .structure_size = sizeof(service),
+      .next = selection.resource_count ? &selection : NULL,
       .event = context->event};
   const amdf_gpu_user_queue_create_info_t native = {
       .type = AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO,

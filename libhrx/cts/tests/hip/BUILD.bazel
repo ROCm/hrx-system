@@ -323,6 +323,26 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
+    name = "hip_execution_resources_test",
+    srcs = [
+        "execution_resources_test.cpp",
+        "//libhrx/cts/core:amdgpu_executable_test_data.hpp",
+        "//libhrx/cts/core:amdgpu_test_data.hpp",
+    ],
+    data = [_HIP_RUNTIME],
+    env = _HIP_RUNTIME_ENV,
+    resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
+    sanitizer_suppressions = hsa_suppressions,
+    tags = AMD_GPU_CTS_TAGS,
+    target_compatible_with = _HIP_GPU_CTS_COMPATIBILITY,
+    deps = [
+        "//build_tools/amdgpu:target_map_h",
+        "//libhrx/cts/tests/executable:amdgpu_executable_test_kernels",
+        "//libhrx/src/binding/hip:hip_dso_test_util",
+    ] + _HIP_TEST_DEPS,
+)
+
+hrx_cc_test(
     name = "hip_device_event_sink_test",
     srcs = [
         "device_event_sink_test.cpp",

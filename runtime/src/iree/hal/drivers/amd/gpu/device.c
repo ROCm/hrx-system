@@ -431,9 +431,9 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
       placements |= IREE_HAL_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL;
     }
   }
-  // Native endpoint queues currently select the complete compute resource.
-  // One indivisible resource describes that contract without inventing native
-  // per-CU mask positions from a logical compute-unit count.
+  // Families without exact native selection expose one indivisible resource.
+  // Selectable families expand the cached logical geometry before the builder
+  // copies the queue specification.
   const iree_hal_queue_execution_resource_group_spec_t resource_group = {
       .minimum_selected_resource_count = 1};
   const iree_hal_queue_execution_resource_spec_t execution_resource = {
@@ -561,9 +561,43 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
         iree_hal_amd_gpu_device_memory_spec_params(device, family_ordinal);
     status = iree_hal_amd_fabric_memory_spec_populate(&memory, &builder);
   }
+  iree_hal_queue_execution_resource_group_spec_t* resource_groups = NULL;
+  if (iree_status_is_ok(status) && user_publication &&
+      (native_family->user_queue_capabilities &
+       AMDF_USER_QUEUE_CAPABILITY_EXECUTION_RESOURCE_SELECTION)) {
+    const amdf_gpu_execution_resource_geometry_t* geometry =
+        &native->execution_resources;
+    const uint32_t resource_count = native->compute.compute_unit_count /
+                                    geometry->compute_units_per_resource;
+    status = iree_allocator_malloc(
+        device->host_allocator,
+        geometry->group_count * sizeof(*resource_groups) +
+            resource_count * sizeof(iree_hal_queue_execution_resource_spec_t),
+        (void**)&resource_groups);
+    if (iree_status_is_ok(status)) {
+      iree_hal_queue_execution_resource_spec_t* resources =
+          (void*)(resource_groups + geometry->group_count);
+      for (uint32_t i = 0; i < geometry->group_count; ++i) {
+        resource_groups[i].minimum_selected_resource_count =
+            geometry->minimum_selected_resources_per_group;
+      }
+      for (uint32_t i = 0; i < resource_count; ++i) {
+        resources[i] = (iree_hal_queue_execution_resource_spec_t){
+            .group_ordinal = i % geometry->group_count,
+            .first_execution_unit_ordinal =
+                i * geometry->compute_units_per_resource,
+            .execution_unit_count = geometry->compute_units_per_resource};
+      }
+      family.execution_resource_group_count = geometry->group_count;
+      family.execution_resource_groups = resource_groups;
+      family.execution_resource_count = resource_count;
+      family.execution_resources = resources;
+    }
+  }
   if (iree_status_is_ok(status)) {
     status = iree_hal_device_spec_builder_set_queues(&builder, &queues);
   }
+  iree_allocator_free(device->host_allocator, resource_groups);
   if (iree_status_is_ok(status)) {
     status = iree_hal_device_spec_builder_set_timing(&builder, &timing);
   }

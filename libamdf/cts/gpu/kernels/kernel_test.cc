@@ -24,6 +24,8 @@
 #include "libamdf/cts/gpu/kernels/device_sdma_staged.h"
 #include "libamdf/cts/gpu/kernels/device_sdma_transfer_kernels.h"
 #include "libamdf/cts/gpu/kernels/device_sdma_upload_kernels.h"
+#include "libamdf/cts/gpu/kernels/execution_resources.h"
+#include "libamdf/cts/gpu/kernels/execution_resources_kernels.h"
 #include "libamdf/cts/gpu/kernels/geometry_ids.h"
 #include "libamdf/cts/gpu/kernels/geometry_ids_kernels.h"
 #include "libamdf/cts/gpu/kernels/immutable_data.h"
@@ -68,6 +70,21 @@ void CheckKernargAndWorkgroupInputs(const kernels::Kernel& kernel) {
   constexpr uint32_t kUserSgprMask = 0x3eu;
   EXPECT_GE((kernel.program.resource2 & kUserSgprMask) >> 1, 2u);
   EXPECT_EQ(kernel.program.resource2 & (0x1fffu & ~kUserSgprMask), 0x80u);
+}
+
+TEST(KernelTest, ExecutionResourceProductsPreserveTheCallerContract) {
+  namespace protocol = kernels::execution_resources;
+  for (const auto& kernel : protocol::kKernels.variants) {
+    SCOPED_TRACE(kernel.target);
+    CheckArgumentLayout(
+        kernel, protocol::kArgumentByteOffsets, protocol::kArgumentByteLengths,
+        protocol::kArgumentValueKinds, sizeof(protocol::Arguments),
+        alignof(protocol::Arguments));
+    EXPECT_EQ(kernel.workgroup_size(), 1u);
+    EXPECT_EQ(kernel.group_segment_byte_length, 0u);
+    EXPECT_EQ(kernel.private_segment_byte_length, 0u);
+    CheckKernargAndWorkgroupInputs(kernel);
+  }
 }
 
 TEST(KernelTest, ShaderEventProductsPreserveTheCallerContract) {

@@ -9,12 +9,14 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/child_tracker.h"
 #include "libamdf/src/device.h"
 #include "libamdf/src/gpu/device.h"
+#include "libamdf/src/gpu/endpoint_profile.h"
 #include "libamdf/src/gpu/event.h"
 #include "libamdf/src/gpu/umd/user_queue.h"
 #include "libamdf/src/memory.h"
@@ -73,6 +75,9 @@ struct FakeNativeState {
 namespace {
 
 amdf_queue_family_info_t current_family;
+// Cached discovery dependency; queue construction does not activate an
+// endpoint.
+amdf_gpu_endpoint_profile_t current_profile;
 
 struct TestGpuDevice {
   amdf_device_t base = {};
@@ -83,6 +88,9 @@ struct TestGpuDevice {
 class GpuUserQueueTest : public ::testing::Test {
  protected:
   void SetUp() override {
+    current_profile = {};
+    current_profile.info.compute.compute_unit_count = 16;
+    current_profile.info.execution_resources = {2, 2, 1};
     InitializeDevice(&consumer_, 7, 1, &consumer_state_);
     InitializeDevice(&producer_, 11, 3, &producer_state_);
     current_family = {
@@ -245,6 +253,131 @@ TEST_F(GpuUserQueueTest, RequiresAdvertisedPlacementAndReportsAchievement) {
   };
   ASSERT_EQ(amdf_user_queue_query_info(queue_, &info), AMDF_STATUS_OK);
   EXPECT_EQ(info.placement, create.placement);
+}
+
+TEST_F(GpuUserQueueTest, ExecutionSelectionRequiresCapabilityAndKeepsExactSet) {
+  auto create = MakeCreateInfo();
+  const uint32_t ordinals[] = {2, 5};
+  amdf_gpu_queue_execution_resource_selection_t selection = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_QUEUE_EXECUTION_RESOURCE_SELECTION,
+      .structure_size = sizeof(selection),
+      .resource_count = 2,
+      .resource_ordinals = ordinals,
+  };
+  create.next = &selection;
+  EXPECT_EQ(amdf_gpu_user_queue_create(&consumer_.base, &create, &queue_),
+            amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
+  EXPECT_EQ(consumer_state_.create_call_count, 0u);
+  current_family.user_queue_capabilities |=
+      AMDF_USER_QUEUE_CAPABILITY_EXECUTION_RESOURCE_SELECTION;
+  ASSERT_EQ(amdf_gpu_user_queue_create(&consumer_.base, &create, &queue_),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(consumer_state_.observed_create.resource_count, 2u);
+  EXPECT_EQ(consumer_state_.observed_create.resource_ordinals, ordinals);
+}
+
+TEST_F(GpuUserQueueTest, FullAndEmptyExecutionSelectionsNeedNoRestriction) {
+  auto create = MakeCreateInfo();
+  const uint32_t ordinals[] = {0, 1, 2, 3, 4, 5, 6, 7};
+  amdf_gpu_queue_execution_resource_selection_t selection = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_QUEUE_EXECUTION_RESOURCE_SELECTION,
+      .structure_size = sizeof(selection),
+      .resource_ordinals = ordinals,
+  };
+  create.next = &selection;
+  for (uint32_t count : {0u, 8u}) {
+    selection.resource_count = count;
+    ASSERT_EQ(amdf_gpu_user_queue_create(&consumer_.base, &create, &queue_),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(consumer_state_.observed_create.resource_count, 0u);
+    EXPECT_EQ(consumer_state_.observed_create.resource_ordinals, nullptr);
+    ASSERT_EQ(amdf_user_queue_destroy(queue_), AMDF_STATUS_OK);
+    queue_ = nullptr;
+  }
+}
+
+TEST_F(GpuUserQueueTest, InvalidExecutionSelectionsNeverReachNativeCreation) {
+  auto create = MakeCreateInfo();
+  current_family.user_queue_capabilities |=
+      AMDF_USER_QUEUE_CAPABILITY_EXECUTION_RESOURCE_SELECTION;
+  amdf_gpu_queue_execution_resource_selection_t selection = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_QUEUE_EXECUTION_RESOURCE_SELECTION,
+      .structure_size = sizeof(selection),
+  };
+  create.next = &selection;
+  const std::vector<uint32_t> invalid_sets[] = {
+      {0, 0}, {1, 0}, {0, 2}, {1, 3}, {0, 8}, {0, 1, 2, 3, 4, 5, 6, 7, 8},
+  };
+  for (const auto& ordinals : invalid_sets) {
+    selection.resource_count = ordinals.size();
+    selection.resource_ordinals = ordinals.data();
+    EXPECT_NE(amdf_gpu_user_queue_create(&consumer_.base, &create, &queue_),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(queue_, nullptr);
+    EXPECT_EQ(consumer_state_.create_call_count, 0u);
+  }
+  selection.resource_count = 1;
+  selection.resource_ordinals = nullptr;
+  EXPECT_EQ(amdf_gpu_user_queue_create(&consumer_.base, &create, &queue_),
+            amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+  EXPECT_EQ(consumer_state_.create_call_count, 0u);
+}
+
+TEST_F(GpuUserQueueTest, SelectionAndScratchExtensionsComposeInEitherOrder) {
+  auto create = MakeCreateInfo();
+  current_family.command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_AQL;
+  current_family.format_features |= AMDF_GPU_AQL_FORMAT_FEATURE_SCRATCH_SERVICE;
+  current_family.user_queue_capabilities |=
+      AMDF_USER_QUEUE_CAPABILITY_EXECUTION_RESOURCE_SELECTION;
+  const uint32_t ordinals[] = {0, 1};
+  amdf_gpu_queue_execution_resource_selection_t selection = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_QUEUE_EXECUTION_RESOURCE_SELECTION,
+      .structure_size = sizeof(selection),
+      .resource_count = 2,
+      .resource_ordinals = ordinals,
+  };
+  amdf_gpu_aql_scratch_service_info_t scratch = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_AQL_SCRATCH_SERVICE_INFO,
+      .structure_size = sizeof(scratch),
+  };
+  for (bool selection_first : {false, true}) {
+    selection.next = selection_first ? &scratch : nullptr;
+    scratch.next = selection_first ? nullptr : &selection;
+    create.next = selection_first ? static_cast<const void*>(&selection)
+                                  : static_cast<const void*>(&scratch);
+    ASSERT_EQ(amdf_gpu_user_queue_create(&consumer_.base, &create, &queue_),
+              AMDF_STATUS_OK);
+    EXPECT_TRUE(consumer_state_.observed_create.scratch_service);
+    EXPECT_EQ(consumer_state_.observed_create.resource_count, 2u);
+    ASSERT_EQ(amdf_user_queue_destroy(queue_), AMDF_STATUS_OK);
+    queue_ = nullptr;
+  }
+  selection.next = &scratch;
+  scratch.next = &selection;
+  const auto prior_calls = consumer_state_.create_call_count;
+  EXPECT_EQ(amdf_gpu_user_queue_create(&consumer_.base, &create, &queue_),
+            amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+  EXPECT_EQ(consumer_state_.create_call_count, prior_calls);
+}
+
+TEST_F(GpuUserQueueTest, CooperativeSelectionRequiresTheCompleteSet) {
+  auto create = MakeCreateInfo();
+  current_family.user_queue_capabilities |=
+      AMDF_USER_QUEUE_CAPABILITY_EXECUTION_RESOURCE_SELECTION |
+      AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH;
+  create.required_capabilities |=
+      AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH;
+  const uint32_t ordinals[] = {0, 1};
+  const amdf_gpu_queue_execution_resource_selection_t selection = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_QUEUE_EXECUTION_RESOURCE_SELECTION,
+      .structure_size = sizeof(selection),
+      .resource_count = 2,
+      .resource_ordinals = ordinals,
+  };
+  create.next = &selection;
+  EXPECT_EQ(amdf_gpu_user_queue_create(&consumer_.base, &create, &queue_),
+            amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
+  EXPECT_EQ(consumer_state_.create_call_count, 0u);
 }
 
 TEST_F(GpuUserQueueTest, RejectsUnknownPlacementBeforeNativeCreation) {
@@ -701,6 +834,14 @@ TEST_F(GpuUserQueueTest, ValidatesTheSelectedScratchAccess) {
 }  // namespace
 
 extern "C" {
+
+amdf_status_t amdf_endpoint_query_engine_profile(amdf_endpoint_t*,
+                                                 amdf_engine_kind_t engine_kind,
+                                                 const void** out_profile) {
+  EXPECT_EQ(engine_kind, AMDF_ENGINE_KIND_GPU);
+  *out_profile = &current_profile;
+  return AMDF_STATUS_OK;
+}
 
 amdf_status_t AMDF_CALL amdf_endpoint_query_queue_family_info(
     amdf_endpoint_t*, uint32_t ordinal, amdf_queue_family_info_t* out_info) {

@@ -43,7 +43,8 @@ static void BM_QueryConcurrency(benchmark::State& state) {
   for (auto _ : state) {
     iree_hal_queue_dispatch_concurrency_t concurrency;
     IREE_CHECK_OK(iree_hal_amd_gpu_dispatch_query_concurrency(
-        &target, &kernel, &metadata, 16, params, &concurrency));
+        &target, target.compute.compute_unit_count, &kernel, &metadata, 16,
+        params, &concurrency));
     benchmark::DoNotOptimize(concurrency);
   }
   state.SetItemsProcessed(state.iterations());

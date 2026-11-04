@@ -7,11 +7,13 @@
 #include "libamdf/src/gpu/user_queue.h"
 
 #include <stddef.h>
+#include <string.h>
 
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/device.h"
 #include "libamdf/src/endpoint.h"
 #include "libamdf/src/gpu/device.h"
+#include "libamdf/src/gpu/endpoint_profile.h"
 #include "libamdf/src/gpu/event.h"
 #include "libamdf/src/gpu/umd/user_queue.h"
 #include "libamdf/src/memory.h"
@@ -249,6 +251,113 @@ static amdf_status_t amdf_gpu_user_queue_validate_scratch(
   return AMDF_STATUS_OK;
 }
 
+// Recognized constructor inputs, borrowed through native construction.
+typedef struct amdf_gpu_user_queue_extensions_t {
+  // Optional caller-serviced scratch and error notification.
+  const amdf_gpu_aql_scratch_service_info_t* scratch_service;
+  // Optional exact immutable compute restriction.
+  const amdf_gpu_queue_execution_resource_selection_t* selection;
+} amdf_gpu_user_queue_extensions_t;
+
+static amdf_status_t amdf_gpu_user_queue_parse_extensions(
+    const void* next, amdf_gpu_user_queue_extensions_t* extensions) {
+  while (next != NULL) {
+    amdf_structure_type_t type;
+    memcpy(&type, next, sizeof(type));
+    uint32_t minimum_size;
+    if (type == AMDF_STRUCTURE_TYPE_GPU_AQL_SCRATCH_SERVICE_INFO) {
+      if (extensions->scratch_service != NULL) {
+        return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+      }
+      minimum_size = sizeof(*extensions->scratch_service);
+    } else if (type ==
+               AMDF_STRUCTURE_TYPE_GPU_QUEUE_EXECUTION_RESOURCE_SELECTION) {
+      if (extensions->selection != NULL) {
+        return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+      }
+      minimum_size = sizeof(*extensions->selection);
+    } else {
+      return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+    }
+    const amdf_status_t status =
+        amdf_structure_validate_header(next, type, minimum_size);
+    if (!amdf_status_is_ok(status)) {
+      return status;
+    }
+    if (type == AMDF_STRUCTURE_TYPE_GPU_AQL_SCRATCH_SERVICE_INFO) {
+      extensions->scratch_service = next;
+      next = extensions->scratch_service->next;
+    } else {
+      extensions->selection = next;
+      next = extensions->selection->next;
+    }
+  }
+  return AMDF_STATUS_OK;
+}
+
+static amdf_status_t amdf_gpu_user_queue_validate_selection(
+    amdf_device_t* device, const amdf_queue_family_info_t* family,
+    amdf_user_queue_capabilities_t required_capabilities,
+    const amdf_gpu_queue_execution_resource_selection_t* selection,
+    uint32_t* out_resource_count) {
+  if (selection == NULL || selection->resource_count == 0) {
+    *out_resource_count = 0;
+    return AMDF_STATUS_OK;
+  }
+  if (selection->resource_ordinals == NULL) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  const void* untyped_profile = NULL;
+  const amdf_status_t status = amdf_endpoint_query_engine_profile(
+      device->endpoint, AMDF_ENGINE_KIND_GPU, &untyped_profile);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  const amdf_gpu_endpoint_info_t* info =
+      &((const amdf_gpu_endpoint_profile_t*)untyped_profile)->info;
+  const amdf_gpu_execution_resource_geometry_t* geometry =
+      &info->execution_resources;
+  if (geometry->compute_units_per_resource == 0) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  const uint32_t resource_count =
+      info->compute.compute_unit_count / geometry->compute_units_per_resource;
+  if (selection->resource_count > resource_count) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
+  }
+  for (uint32_t i = 0; i < selection->resource_count; ++i) {
+    const uint32_t ordinal = selection->resource_ordinals[i];
+    if (ordinal >= resource_count) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
+    }
+    if (i != 0 && ordinal <= selection->resource_ordinals[i - 1]) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+    }
+  }
+  if (selection->resource_count == resource_count) {
+    *out_resource_count = 0;
+    return AMDF_STATUS_OK;
+  }
+  if ((family->user_queue_capabilities &
+       AMDF_USER_QUEUE_CAPABILITY_EXECUTION_RESOURCE_SELECTION) == 0 ||
+      (required_capabilities &
+       AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH) != 0) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  for (uint32_t group = 0; group < geometry->group_count; ++group) {
+    uint32_t selected_count = 0;
+    for (uint32_t i = 0; i < selection->resource_count; ++i) {
+      selected_count +=
+          selection->resource_ordinals[i] % geometry->group_count == group;
+    }
+    if (selected_count < geometry->minimum_selected_resources_per_group) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+    }
+  }
+  *out_resource_count = selection->resource_count;
+  return AMDF_STATUS_OK;
+}
+
 amdf_status_t AMDF_CALL amdf_gpu_user_queue_create(
     amdf_device_t* device, const amdf_gpu_user_queue_create_info_t* create_info,
     amdf_user_queue_t** out_queue) {
@@ -266,16 +375,13 @@ amdf_status_t AMDF_CALL amdf_gpu_user_queue_create(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  const amdf_gpu_aql_scratch_service_info_t* scratch_service =
-      create_info->next;
-  if (scratch_service != NULL) {
-    status = amdf_structure_validate_input(
-        scratch_service, AMDF_STRUCTURE_TYPE_GPU_AQL_SCRATCH_SERVICE_INFO,
-        sizeof(*scratch_service));
-    if (!amdf_status_is_ok(status)) {
-      return status;
-    }
+  amdf_gpu_user_queue_extensions_t extensions = {0};
+  status = amdf_gpu_user_queue_parse_extensions(create_info->next, &extensions);
+  if (!amdf_status_is_ok(status)) {
+    return status;
   }
+  const amdf_gpu_aql_scratch_service_info_t* scratch_service =
+      extensions.scratch_service;
   if ((create_info->flags & ~(amdf_gpu_user_queue_flags_t)
                                 AMDF_GPU_USER_QUEUE_FLAG_DISPATCH_TIMESTAMPS) !=
           0 ||
@@ -350,6 +456,13 @@ amdf_status_t AMDF_CALL amdf_gpu_user_queue_create(
     return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
   }
 
+  uint32_t resource_count = 0;
+  status = amdf_gpu_user_queue_validate_selection(
+      device, &family_info, create_info->required_capabilities,
+      extensions.selection, &resource_count);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
   amdf_gpu_umd_queue_scratch_t scratch = {0};
   status = amdf_gpu_user_queue_validate_scratch(
       device, family_info.roles, &create_info->scratch, &scratch);
@@ -385,6 +498,9 @@ amdf_status_t AMDF_CALL amdf_gpu_user_queue_create(
       .roles = family_info.roles,
       .ring_byte_length = create_info->ring_byte_length,
       .scratch = scratch,
+      .resource_count = resource_count,
+      .resource_ordinals =
+          resource_count != 0 ? extensions.selection->resource_ordinals : NULL,
   };
   const amdf_allocator_t host_allocator = amdf_device_host_allocator(device);
   amdf_gpu_user_queue_t* queue = NULL;

@@ -1,0 +1,25 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Physical execution identity excludes transient wave and SIMD slots.
+template.decl @execution_resource_id() -> (i32)
+
+low.func.def target<amdgpu.cdna2.core> @execution_resource_cdna2() -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %hardware = s_getreg_b32 {hwreg = 63492}
+  %domain = s_mov_b32 0
+  return %hardware, %domain
+}
+
+amdgpu.target<gfx90a> @resource_gfx90a_target
+template.def<@execution_resource_id> target(@resource_gfx90a_target) @resource_gfx90a() -> (i32) {
+  %hardware, %domain = low.invoke @execution_resource_cdna2() : () -> (i32, i32)
+  %mask = scalar.constant 65280 : i32
+  %unit = scalar.andi %hardware, %mask : i32
+  %shift = scalar.constant 24 : i32
+  %xcc = scalar.shli %domain, %shift : i32
+  %id = scalar.ori %unit, %xcc : i32
+  template.return %id : i32
+}

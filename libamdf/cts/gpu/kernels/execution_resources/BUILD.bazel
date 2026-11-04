@@ -1,0 +1,27 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+package(
+    default_visibility = ["//visibility:private"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+exports_files(
+    [
+        "cdna2.loom",
+        "cdna3.loom",
+        "cdna4.loom",
+        "gfx1250.loom",
+        "gfx1250_a0.loom",
+        "gfx1251.loom",
+        "kernel.loom",
+        "rdna3.loom",
+        "rdna35.loom",
+        "rdna4.loom",
+        "rdna4m.loom",
+    ],
+    visibility = ["//libamdf/cts/gpu/kernels:__pkg__"],
+)

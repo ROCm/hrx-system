@@ -8,6 +8,63 @@
 
 namespace {
 
+TEST_F(KfdUserQueueTest, ComputeSelectionProgramsAnUnpublishedQueue) {
+  for (const auto command_type :
+       {AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL}) {
+    SCOPED_TRACE(command_type);
+    native_state_.Reset();
+    device_.topology.properties.compute.compute_unit_count = 80;
+    const uint32_t ordinals[] = {0, 15, 16, 39};
+    auto info = MakeCreateInfo(command_type);
+    info.resource_count = 4;
+    info.resource_ordinals = ordinals;
+    ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &info, &queue_,
+                                             &queue_result_),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(native_state_.selection.call_count, 1u);
+    EXPECT_EQ(native_state_.selection.mask,
+              (std::vector<uint32_t>{0xc0000003u, 0x00000003u, 0x0000c000u}));
+    EXPECT_EQ(native_state_.doorbell_map_count, 1);
+    ASSERT_EQ(amdf_gpu_umd_user_queue_destroy(queue_), AMDF_STATUS_OK);
+    queue_ = nullptr;
+    EXPECT_EQ(native_state_.selection.call_count, 1u);
+  }
+}
+
+TEST_F(KfdUserQueueTest, CdnaSelectionPreservesInterleavedXccOrdinals) {
+  SelectAqlTopology();
+  const uint32_t ordinals[] = {0, 1, 2, 3, 12, 13, 14, 15};
+  auto info = MakeCreateInfo(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
+  info.resource_count = 8;
+  info.resource_ordinals = ordinals;
+  ASSERT_EQ(
+      amdf_gpu_umd_user_queue_create(&device_, &info, &queue_, &queue_result_),
+      AMDF_STATUS_OK);
+  EXPECT_EQ(native_state_.selection.mask, (std::vector<uint32_t>{0xf00fu}));
+}
+
+TEST_F(KfdUserQueueTest, FailedSelectionRemovesTheUnpublishedNativeQueue) {
+  device_.topology.properties.compute.compute_unit_count = 4;
+  const uint32_t ordinal = 1;
+  auto info = MakeCreateInfo();
+  info.resource_count = 1;
+  info.resource_ordinals = &ordinal;
+  native_state_.selection.status =
+      amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EIO);
+  auto* const sentinel =
+      reinterpret_cast<amdf_gpu_umd_user_queue_t*>(uintptr_t{1});
+  auto* queue = sentinel;
+  amdf_gpu_umd_user_queue_result_t result = {.ring_byte_length = 17};
+  EXPECT_EQ(amdf_gpu_umd_user_queue_create(&device_, &info, &queue, &result),
+            native_state_.selection.status);
+  EXPECT_EQ(queue, sentinel);
+  EXPECT_EQ(result.ring_byte_length, 17u);
+  EXPECT_EQ(native_state_.selection.call_count, 1u);
+  EXPECT_EQ(native_state_.doorbell_map_count, 0);
+  EXPECT_EQ(native_state_.queue_destroy_count, 1);
+  EXPECT_EQ(native_state_.LiveBufferCount(), 0u);
+}
+
 TEST_F(KfdUserQueueTest, CooperativeAdmissionBelongsToThePublishedQueue) {
   device_.topology.global_wave_sync_count = 64;
   for (const auto command_type :
@@ -98,9 +155,11 @@ TEST_F(KfdUserQueueTest, ConstructionDependenciesPublishOnlyOnSuccess) {
 TEST_F(KfdUserQueueTest, PublishesExactNativeQueueAndHostMapping) {
   ASSERT_NO_FATAL_FAILURE(CreateQueue());
   EXPECT_EQ(native_state_.cooperative.call_count, 0u);
+  EXPECT_EQ(native_state_.selection.call_count, 0u);
   EXPECT_TRUE(amdf_queue_id_is_valid(&queue_result_.queue_id));
   EXPECT_EQ(queue_result_.capabilities,
-            AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER);
+            AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
+                AMDF_USER_QUEUE_CAPABILITY_EXECUTION_RESOURCE_SELECTION);
   EXPECT_EQ(queue_result_.ring_byte_length, 4096u);
   EXPECT_EQ(queue_result_.metadata_ring_byte_length, 0u);
   EXPECT_EQ(native_state_.LiveBufferCount(), 5u);

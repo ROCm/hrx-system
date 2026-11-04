@@ -597,6 +597,44 @@ amdf_status_t amdf_gpu_kfd_topology_query_memory(
   return AMDF_STATUS_OK;
 }
 
+amdf_gpu_execution_resource_geometry_t
+amdf_gpu_kfd_topology_execution_resources(
+    const amdf_gpu_kfd_topology_t* topology) {
+  const amdf_gpu_endpoint_properties_t* properties = &topology->properties;
+  const uint32_t unit_count = properties->compute.compute_unit_count;
+  const uint32_t group_count = properties->topology.xcc_count;
+  const uint32_t major = properties->gfx_ip.major;
+  const uint32_t minor = properties->gfx_ip.minor;
+  const uint32_t stepping = properties->gfx_ip.stepping;
+  const bool cdna = major == 9 && ((minor == 0 && stepping == 10) ||
+                                   (minor == 4 && stepping <= 2) ||
+                                   (minor == 5 && stepping == 0));
+  const bool paired = major == 11 || (major == 12 && minor == 0);
+  // GC 12.1 maps one logical bit to a native pair; its reported compute-unit
+  // count already uses that unit. Compiler GFX125x alone does not identify the
+  // installed native mapper, so require its exact discovery identity.
+  const bool gc121 = major == 12 && minor == 5 && topology->gc_ip.exact &&
+                     topology->gc_ip.major == 12 &&
+                     topology->gc_ip.minor == 1 &&
+                     topology->gc_ip.revision == 0;
+  if ((!cdna && !paired && !gc121) || unit_count == 0 || unit_count > 1024 ||
+      group_count == 0 || (paired && group_count != 1)) {
+    return (amdf_gpu_execution_resource_geometry_t){0};
+  }
+  const uint32_t units_per_resource = paired ? 2 : 1;
+  if (unit_count % units_per_resource != 0 ||
+      (unit_count / units_per_resource) % group_count != 0) {
+    return (amdf_gpu_execution_resource_geometry_t){0};
+  }
+  // Each command processor retains at least one enabled resource. KFD maps
+  // interleaved logical mask positions onto enabled units after harvesting.
+  return (amdf_gpu_execution_resource_geometry_t){
+      .compute_units_per_resource = units_per_resource,
+      .group_count = group_count,
+      .minimum_selected_resources_per_group = 1,
+  };
+}
+
 amdf_status_t amdf_gpu_kfd_topology_initialize(
     const amdf_platform_endpoint_t* endpoint, amdf_allocator_t host_allocator,
     amdf_gpu_kfd_topology_t* out_topology) {
@@ -719,6 +757,8 @@ amdf_status_t amdf_gpu_kfd_topology_initialize(
     status = amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
   if (amdf_status_is_ok(status)) {
+    topology.properties.execution_resources =
+        amdf_gpu_kfd_topology_execution_resources(&topology);
     *out_topology = topology;
   } else {
     amdf_gpu_kfd_topology_deinitialize(&topology, host_allocator);

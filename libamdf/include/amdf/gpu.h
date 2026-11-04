@@ -78,6 +78,10 @@ typedef struct amdf_gpu_event_t amdf_gpu_event_t;
 #define AMDF_STRUCTURE_TYPE_GPU_AQL_SCRATCH_REQUEST \
   ((amdf_structure_type_t)0x0002000bu)
 
+/// An `amdf_gpu_queue_execution_resource_selection_t` input extension.
+#define AMDF_STRUCTURE_TYPE_GPU_QUEUE_EXECUTION_RESOURCE_SELECTION \
+  ((amdf_structure_type_t)0x0002000cu)
+
 /// Features available on a live device under its instance's lifetime policy.
 typedef uint64_t amdf_gpu_device_features_t;
 enum amdf_gpu_device_feature_bits_e {
@@ -95,6 +99,23 @@ enum amdf_gpu_device_feature_bits_e {
   /// blocking host observation without a library-owned worker.
   AMDF_GPU_DEVICE_FEATURE_NATIVE_EVENTS = UINT64_C(1) << 4,
 };
+
+/// Immutable geometry of the endpoint's independently selectable resources.
+///
+/// The resource count is the endpoint's compute-unit count divided by
+/// `compute_units_per_resource`. Resource r belongs to group r % group_count.
+/// These are logical selection ordinals, not physical shader IDs. Ordinals are
+/// stable for the endpoint lifetime; they are not portable device identities.
+/// An all-zero record exposes no subdivision. Each queue family's capability
+/// independently determines whether it can enforce a selection.
+typedef struct amdf_gpu_execution_resource_geometry_t {
+  /// Compute units per selectable resource, or zero for no subdivision.
+  uint32_t compute_units_per_resource;
+  /// Number of interleaved constraint groups, or zero for no subdivision.
+  uint32_t group_count;
+  /// Minimum selected resources in every group; may be zero.
+  uint32_t minimum_selected_resources_per_group;
+} amdf_gpu_execution_resource_geometry_t;
 
 /// Immutable target identity and compute topology of one GPU endpoint.
 ///
@@ -152,6 +173,8 @@ typedef struct amdf_gpu_endpoint_info_t {
   /// Device partitioning may change the identifier. Callers selecting by this
   /// value must reject ambiguity if a provider reports duplicate identifiers.
   uint64_t unique_id;
+  /// Cached compute-selection geometry, independent of memory placement.
+  amdf_gpu_execution_resource_geometry_t execution_resources;
 } amdf_gpu_endpoint_info_t;
 
 /// Hardware architecture family, independent of available execution services.
@@ -581,7 +604,7 @@ typedef struct amdf_gpu_aql_scratch_service_info_t {
   amdf_structure_type_t type;
   /// Must be at least `sizeof(amdf_gpu_aql_scratch_service_info_t)`.
   uint32_t structure_size;
-  /// Optional input extension chain. No extensions are currently defined.
+  /// Optional next queue-construction extension.
   const void* next;
   /// Optional event from the exact queue device, borrowed until successful
   /// queue destruction. Firmware uses it for scratch requests and queue errors.
@@ -643,6 +666,30 @@ enum amdf_gpu_user_queue_flag_bits_e {
   AMDF_GPU_USER_QUEUE_FLAG_DISPATCH_TIMESTAMPS = 1u << 0,
 };
 
+/// Exact immutable compute selection for a newly constructed GPU queue.
+///
+/// Append to `amdf_gpu_user_queue_create_info_t::next`. An absent extension or
+/// zero count selects every resource; an explicit complete list is equivalent.
+/// A proper subset requires EXECUTION_RESOURCE_SELECTION and must satisfy the
+/// endpoint's group minima. Cooperative dispatch currently requires the full
+/// set. Every kernel issued through the queue is confined to its selection.
+/// Other queues may select overlapping resources; no exclusive reservation or
+/// memory-placement change occurs. Construction either establishes the exact
+/// selection or fails without publishing a queue. No post-creation mutation
+/// is supported. Input storage is borrowed only for the construction call.
+typedef struct amdf_gpu_queue_execution_resource_selection_t {
+  /// Must be `AMDF_STRUCTURE_TYPE_GPU_QUEUE_EXECUTION_RESOURCE_SELECTION`.
+  amdf_structure_type_t type;
+  /// Must be at least `sizeof(amdf_gpu_queue_execution_resource_selection_t)`.
+  uint32_t structure_size;
+  /// Optional next queue-construction extension.
+  const void* next;
+  /// Number of selected ordinals; zero selects the complete resource set.
+  uint32_t resource_count;
+  /// Sorted, unique endpoint resource ordinals; required for nonzero count.
+  const uint32_t* resource_ordinals;
+} amdf_gpu_queue_execution_resource_selection_t;
+
 /// Parameters used to acquire one directly published GPU queue.
 typedef struct amdf_gpu_user_queue_create_info_t {
   /// Must be `AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO`.
@@ -650,7 +697,9 @@ typedef struct amdf_gpu_user_queue_create_info_t {
   /// Must be at least `sizeof(amdf_gpu_user_queue_create_info_t)`.
   uint32_t structure_size;
   /// Optional input extension chain. Accepts
-  /// `amdf_gpu_aql_scratch_service_info_t`.
+  /// `amdf_gpu_aql_scratch_service_info_t` and
+  /// `amdf_gpu_queue_execution_resource_selection_t`, at most once each and
+  /// in either order.
   const void* next;
   /// Endpoint-local PM4, SDMA, or AQL family supporting user publication.
   uint32_t queue_family_ordinal;

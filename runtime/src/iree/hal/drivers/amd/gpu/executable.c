@@ -1246,14 +1246,20 @@ const uint64_t* iree_hal_amd_gpu_executable_queue_image_addresses(
 iree_status_t iree_hal_amd_gpu_executable_query_dispatch_concurrency(
     iree_hal_executable_t* base_executable,
     iree_hal_executable_function_t token,
+    iree_host_size_t execution_resource_count,
     iree_hal_queue_dispatch_concurrency_params_t params,
     iree_hal_queue_dispatch_concurrency_t* out_concurrency) {
   iree_hal_amd_gpu_executable_t* executable = (void*)base_executable;
   IREE_RETURN_IF_ERROR(
       iree_hal_amd_gpu_executable_validate_function(executable, token));
+  const amdf_gpu_endpoint_info_t* target = &executable->context->target_info;
+  const uint32_t compute_unit_count =
+      execution_resource_count
+          ? (uint32_t)execution_resource_count *
+                target->execution_resources.compute_units_per_resource
+          : target->compute.compute_unit_count;
   return iree_hal_amd_gpu_dispatch_query_concurrency(
-      &executable->context->target_info,
-      &executable->image.kernels[token.value],
+      target, compute_unit_count, &executable->image.kernels[token.value],
       &executable->image.metadata.kernels[token.value],
       executable->scalar_register_reservation, params, out_concurrency);
 }
@@ -1292,6 +1298,7 @@ iree_status_t iree_hal_amd_gpu_executable_validate_cooperative_dispatch(
   iree_hal_queue_dispatch_concurrency_t concurrency;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_dispatch_query_concurrency(
       &executable->context->target_info,
+      executable->context->target_info.compute.compute_unit_count,
       &executable->image.kernels[token.value],
       &executable->image.metadata.kernels[token.value],
       executable->scalar_register_reservation, params, &concurrency));

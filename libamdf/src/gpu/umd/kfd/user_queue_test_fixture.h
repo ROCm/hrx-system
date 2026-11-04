@@ -21,6 +21,7 @@
 #include "libamdf/src/gpu/umd/kfd/aql.h"
 #include "libamdf/src/gpu/umd/kfd/device.h"
 #include "libamdf/src/gpu/umd/kfd/target/user_queue.h"
+#include "libamdf/src/gpu/umd/kfd/topology.h"
 #include "libamdf/src/gpu/umd/kfd/user_queue_native.h"
 #include "libamdf/src/gpu/umd/user_queue.h"
 
@@ -167,6 +168,22 @@ struct FakeNativeState {
                                          : AMDF_STATUS_OK;
   }
 
+  static amdf_status_t QueueSetComputeUnitMask(void* user_data,
+                                               amdf_gpu_umd_device_t*,
+                                               uint32_t queue_identifier,
+                                               uint32_t bit_count,
+                                               const uint32_t* mask) {
+    auto* self = static_cast<FakeNativeState*>(user_data);
+    EXPECT_EQ(self->queue_create_count, 1);
+    EXPECT_EQ(self->queue_destroy_count, 0);
+    EXPECT_EQ(self->doorbell_map_count, 0);
+    EXPECT_EQ(queue_identifier, self->created_queue_identifier);
+    EXPECT_EQ(bit_count % 32, 0u);
+    ++self->selection.call_count;
+    self->selection.mask.assign(mask, mask + bit_count / 32);
+    return self->selection.status;
+  }
+
   static amdf_status_t QueueUpdate(
       void* user_data, amdf_gpu_umd_device_t*,
       const struct kfd_ioctl_update_queue_args* arguments) {
@@ -273,6 +290,7 @@ struct FakeNativeState {
     queue_destroy_count = 0;
     queue_destroy_status = AMDF_STATUS_OK;
     cooperative = {};
+    selection = {};
     queue_update = {};
     host_publication = {};
     destroyed_queue_identifiers.clear();
@@ -320,6 +338,15 @@ struct FakeNativeState {
     // Native registration can remain live even after a failed admission call.
     bool live = false;
   } cooperative;
+  // Constructor-only native compute restriction, before producer publication.
+  struct {
+    // Number of native mask operations.
+    uint32_t call_count = 0;
+    // Complete word-aligned logical CU selection.
+    std::vector<uint32_t> mask;
+    // Native programming result, including failure after native queue creation.
+    amdf_status_t status = AMDF_STATUS_OK;
+  } selection;
   // Native host publication below the queue ownership boundary.
   struct {
     // Completed native release attempts.
@@ -395,6 +422,8 @@ class KfdUserQueueTest : public ::testing::Test {
     device_.topology.properties.compute.local_data_share_byte_length = 65536;
     device_.topology.properties.topology.xcc_count = 1;
     device_.topology.properties.topology.shader_engine_count_per_xcc = 1;
+    device_.topology.properties.execution_resources =
+        amdf_gpu_kfd_topology_execution_resources(&device_.topology);
     device_.topology.gpu_id = 73;
     device_.topology.compute_queue_count = 8;
     device_.topology.sdma.engine_count = 1;
@@ -493,6 +522,8 @@ class KfdUserQueueTest : public ::testing::Test {
     device_.topology.properties.compute.local_data_share_byte_length = 65536;
     device_.topology.properties.topology.xcc_count = 8;
     device_.topology.properties.topology.shader_engine_count_per_xcc = 2;
+    device_.topology.properties.execution_resources =
+        amdf_gpu_kfd_topology_execution_resources(&device_.topology);
   }
 
   amdf_atomic_uint64_t* ReadIndex() {
@@ -519,6 +550,7 @@ class KfdUserQueueTest : public ::testing::Test {
       .buffer_abandon = FakeNativeState::BufferAbandon,
       .queue_create = FakeNativeState::QueueCreate,
       .queue_enable_cooperative = FakeNativeState::QueueEnableCooperative,
+      .queue_set_compute_unit_mask = FakeNativeState::QueueSetComputeUnitMask,
       .queue_update = FakeNativeState::QueueUpdate,
       .queue_destroy = FakeNativeState::QueueDestroy,
       .doorbell_map = FakeNativeState::DoorbellMap,

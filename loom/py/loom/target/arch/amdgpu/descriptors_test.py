@@ -2258,6 +2258,20 @@ def test_s_delay_alu_descriptor_is_exposed_on_rdna_families() -> None:
     assert "amdgpu.s_delay_alu" in amdgpu_descriptor_ref_keys()
 
 
+@pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)
+def test_hardware_register_read_is_available_in_every_core(target: str) -> None:
+    builder = _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[target]
+    overlays = {row.descriptor_key: row for row in builder.overlay_rows()}
+    descriptor = overlays["amdgpu.s_getreg_b32"]
+    assert descriptor.instruction_name == "S_GETREG_B32"
+    assert descriptor.encoding_name == "ENC_SOPK"
+    assert descriptor.immediate_fields == ("SIMM16",)
+    assert descriptor.immediates[0].bit_width == 16
+    assert descriptor.immediates[0].unsigned_max == 65535
+    assert DescriptorFlag.SIDE_EFFECTING in descriptor.flags
+    assert DescriptorFlag.DEAD_REMOVABLE not in descriptor.flags
+
+
 def test_gfx125x_cluster_flat_rank_descriptor_matches_compiler_abi() -> None:
     overlays = {overlay.descriptor_key: overlay for overlay in _gfx125x_core_overlays()}
     descriptor = overlays["amdgpu.s_getreg_b32.cluster_workgroup_flat_id"]

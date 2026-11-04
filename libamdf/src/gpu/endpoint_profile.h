@@ -94,6 +94,8 @@ typedef struct amdf_gpu_endpoint_properties_t {
     // Uniform number of shader engines within each XCC.
     uint32_t shader_engine_count_per_xcc;
   } topology;
+  // Native-qualified logical resource geometry, or zero for no subdivision.
+  amdf_gpu_execution_resource_geometry_t execution_resources;
   // Number of constructible native queue families.
   uint32_t queue_family_count;
   // Exact native queue services implemented by the selected UMD.

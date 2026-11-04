@@ -47,6 +47,13 @@ typedef struct amdf_gpu_kfd_user_queue_native_api_t {
   amdf_status_t (*queue_enable_cooperative)(void* user_data,
                                             amdf_gpu_umd_device_t* device,
                                             uint32_t queue_identifier);
+  // Applies a validated logical CU mask to an unpublished empty queue. The
+  // mask is borrowed for this call. Failure requires ordinary queue rollback.
+  amdf_status_t (*queue_set_compute_unit_mask)(void* user_data,
+                                               amdf_gpu_umd_device_t* device,
+                                               uint32_t queue_identifier,
+                                               uint32_t bit_count,
+                                               const uint32_t* mask);
   // Disconnects or reconnects an existing queue. Failure does not prove its
   // native mapping state; the owner preserves all backing until destruction.
   amdf_status_t (*queue_update)(
