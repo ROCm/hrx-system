@@ -128,7 +128,6 @@ class ClientTest(unittest.TestCase):
                         "tokenizer": str(PACKAGE / "tokenizer.json"),
                         "rows": 4,
                         "context_capacity": 96,
-                        "pool_capacity": 256,
                         "prefill_capacity": 32,
                         "checkpoint_capacity": 2,
                         "max_tokens": 16,

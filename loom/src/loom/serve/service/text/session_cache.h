@@ -33,6 +33,8 @@ typedef struct loom_serve_text_session_cache_t {
   iree_host_size_t capacity;
   // Occupied records, including a pending pin before publication.
   iree_host_size_t count;
+  // One past the last claimed record, bounding sparse owner inspection.
+  iree_host_size_t entry_extent;
 } loom_serve_text_session_cache_t;
 
 // Inspects owner-only logical metadata across reusable rows followed by the

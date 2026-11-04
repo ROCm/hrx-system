@@ -324,7 +324,6 @@ Native capacity fields are:
 | `max_sessions` | omitted | Positive ceiling on resident session owners. Preparation and outstanding output retain their owners; extra requests wait in `pending_requests`. Omission leaves concurrency memory-limited. |
 | `rows` | `4` | Initial resident capacity hint, capped by `max_sessions` when set. The directory grows as requests arrive, independently of epoch token/span capacity and up to the configured maximum. |
 | `context_capacity` | `16384` | Per-row logical context limit in token positions, at most 262144. |
-| `pool_capacity` | `65536` | Shared logical cache token positions, in whole source-defined pages. |
 | `prefill_capacity` | `512` | Largest automatically specialized packed token shape; not a prompt-length limit. |
 | `checkpoint_capacity` | `0` | Explicit pinned endpoint slots, independent of execution rows. |
 | `session_cache_capacity` | automatic | Evictable idle histories beyond resident rows. An explicit count is exact; zero disables this cache. Nonzero counts also reserve one admission-exchange endpoint. |
@@ -335,14 +334,19 @@ Native capacity fields are:
 | `draft_depth` | `0` | Proposed tokens after each anchor, from 0 through 7; requires matching source support. |
 | `continuation_epochs` | `1` | Device-fed epochs per scheduling turn, either 1 or 2. |
 
-Context, pool and prefill capacities are positive. Packed token capacity may
-exceed an individual context limit: one epoch can combine many short sessions.
-It must fit an anchor plus every draft proposal.
-When a deployment raises `context_capacity` above the inherited pool and omits
-`pool_capacity`, registration rejects the deployment instead of exposing a
-window that no request can reach. Setting both fields is an explicit capacity
-choice; a deliberately smaller pool is accepted and admission rejects requests
-whose retained KV state cannot fit it.
+Context and prefill capacities are positive. Packed token capacity may exceed
+an individual context limit: one epoch can combine many short sessions. It must
+fit an anchor plus every draft proposal.
+
+Cache addressability is serving policy, not a model field. Fixed backing
+reserves one `context_capacity` shared across the model's resident rows.
+Elastic backing gives each model 4,194,304 logical token positions; this is a
+sparse virtual ceiling and does not commit the corresponding model storage.
+The pool's `memory_bytes` policy bounds physical backing shared by every model,
+parameter bank, state allocation, and workspace using that pool. Source
+preparation validates that its cache pages and native address arithmetic can
+represent the selected ceiling.
+
 Two-epoch continuation requires nonzero draft depth. A source can impose tighter
 shape limits or reject unsupported drafting modes. Endpoint capacities are
 nonnegative and their combined native index space must fit signed 32-bit indices.
@@ -435,7 +439,7 @@ stateful stage inside a larger inference pipeline without making it imitate a
 chat model.
 
 Sequence definitions share text's `rows`, `max_sessions`, `context_capacity`,
-`pool_capacity`, `prefill_capacity`, `checkpoint_capacity`, `session_cache_capacity`, and
+`prefill_capacity`, `checkpoint_capacity`, `session_cache_capacity`, and
 `admission_overtakes` fields and defaults. Admission reserves only the supplied
 known positions, rounded to cache blocks; it does not reserve generated tokens.
 Execution uses packed epochs and the same row/cache/checkpoint ownership.

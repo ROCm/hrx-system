@@ -233,7 +233,6 @@ typedef enum loom_serve_model_definition_field_e {
   DEFINITION_ROWS,
   DEFINITION_MAX_SESSIONS,
   DEFINITION_CONTEXT_CAPACITY,
-  DEFINITION_POOL_CAPACITY,
   DEFINITION_PREFILL_CAPACITY,
   DEFINITION_CHECKPOINT_CAPACITY,
   DEFINITION_PENDING_REQUESTS,
@@ -267,7 +266,6 @@ static iree_status_t loom_serve_model_configuration_text(
   *text = (loom_serve_text_configuration_t){
       .rows = 4,
       .context_capacity = 16384,
-      .pool_capacity = 65536,
       .prefill_capacity = 512,
       .session_cache_capacity = encodes ? 0 : LOOM_SERVE_TEXT_CACHE_AUTOMATIC,
       .prefix_cache_capacity = encodes ? 0 : LOOM_SERVE_TEXT_CACHE_AUTOMATIC,
@@ -296,10 +294,6 @@ static iree_status_t loom_serve_model_configuration_text(
   IREE_RETURN_IF_ERROR(
       loom_serve_model_configuration_size(&fields[DEFINITION_CONTEXT_CAPACITY],
                                           1, 262144, &text->context_capacity));
-  IREE_RETURN_IF_ERROR(loom_serve_model_configuration_size(
-      &fields[DEFINITION_POOL_CAPACITY], 1,
-      iree_min((uint64_t)IREE_HOST_SIZE_MAX, (uint64_t)INT64_MAX),
-      &text->pool_capacity));
   IREE_RETURN_IF_ERROR(
       loom_serve_model_configuration_size(&fields[DEFINITION_PREFILL_CAPACITY],
                                           1, 262144, &text->prefill_capacity));
@@ -410,9 +404,6 @@ static iree_status_t loom_serve_model_configuration_definition_parse(
       [DEFINITION_CONTEXT_CAPACITY] = {"context_capacity",
                                        IREE_JSON_VALUE_TYPE_NUMBER,
                                        .kinds = retained_kinds},
-      [DEFINITION_POOL_CAPACITY] = {"pool_capacity",
-                                    IREE_JSON_VALUE_TYPE_NUMBER,
-                                    .kinds = retained_kinds},
       [DEFINITION_PREFILL_CAPACITY] = {"prefill_capacity",
                                        IREE_JSON_VALUE_TYPE_NUMBER,
                                        .kinds = retained_kinds},
@@ -479,10 +470,6 @@ static iree_status_t loom_serve_model_configuration_definition_parse(
                                                      fields};
   IREE_RETURN_IF_ERROR(iree_json_enumerate_object_typed(
       value, loom_serve_model_configuration_field_visit, &context));
-  const bool authored_context_capacity =
-      fields[DEFINITION_CONTEXT_CAPACITY].value.data != NULL;
-  const bool authored_pool_capacity =
-      fields[DEFINITION_POOL_CAPACITY].value.data != NULL;
   const bool card = model->sources.card || model->sources.reference.path.size;
   if (model->sources.card) {
     const loom_model_selection_t* selection =
@@ -621,17 +608,6 @@ static iree_status_t loom_serve_model_configuration_definition_parse(
     IREE_RETURN_IF_ERROR(loom_serve_model_configuration_text(
         fields, model->kind == LOOM_SERVE_MODEL_KIND_SEQUENCE, &model->sources,
         &model->text, host_allocator));
-    if (authored_context_capacity && !authored_pool_capacity &&
-        !model->sources.reference.path.size &&
-        model->text.context_capacity > model->text.pool_capacity) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "context_capacity %zu exceeds implicit pool_capacity %zu; set "
-          "pool_capacity explicitly (at least %zu to admit one full-length "
-          "context)",
-          model->text.context_capacity, model->text.pool_capacity,
-          model->text.context_capacity);
-    }
     return iree_ok_status();
   }
   if (model->kind == LOOM_SERVE_MODEL_KIND_IMAGE ||

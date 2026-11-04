@@ -228,7 +228,7 @@ TEST_F(ConfigurationTest, SpeechOwnsAssetsAndSourceOptions) {
 TEST_F(ConfigurationTest, SequenceRequiresWeightsButNoTokenizerOrSampler) {
   IREE_ASSERT_OK(Parse(Document(
       "sequence",
-      R"(,"weights":"model.irpa","rows":4,"context_capacity":96,"pool_capacity":256,"prefill_capacity":32,"checkpoint_capacity":4,"session_cache_capacity":1)")));
+      R"(,"weights":"model.irpa","rows":4,"context_capacity":96,"prefill_capacity":32,"checkpoint_capacity":4,"session_cache_capacity":1)")));
   EXPECT_EQ(model_.kind, LOOM_SERVE_MODEL_KIND_SEQUENCE);
   EXPECT_EQ(String(model_.text.weights), "model.irpa");
   EXPECT_EQ(model_.text.tokenizer.size, 0u);
@@ -663,7 +663,6 @@ TEST_F(ConfigurationTest,
   EXPECT_EQ(model_.variant_capacity, 16u);
   EXPECT_EQ(model_.text.admission_overtakes, 4u);
   EXPECT_EQ(model_.text.context_capacity, 16384u);
-  EXPECT_EQ(model_.text.pool_capacity, 65536u);
   EXPECT_EQ(model_.text.prefill_capacity, 512u);
   EXPECT_EQ(model_.text.max_tokens, 512u);
   EXPECT_EQ(model_.text.draft_depth, 0u);
@@ -673,11 +672,10 @@ TEST_F(ConfigurationTest,
   EXPECT_EQ(model_.text.cache_target_bytes, IREE_HOST_SIZE_MAX);
   EXPECT_EQ(String(model_.options), "{}");
   IREE_ASSERT_OK(Parse(Text(
-      R"(,"rows":8,"context_capacity":262144,"pool_capacity":4096,"prefill_capacity":128,"draft_depth":3,"continuation_epochs":2,"checkpoint_capacity":2,"session_cache_capacity":24,"prefix_cache_capacity":4,"pending_requests":17,"max_tokens":128,"admission_overtakes":0,"options":{"draft_weights":"draft.gguf"})")));
+      R"(,"rows":8,"context_capacity":262144,"prefill_capacity":128,"draft_depth":3,"continuation_epochs":2,"checkpoint_capacity":2,"session_cache_capacity":24,"prefix_cache_capacity":4,"pending_requests":17,"max_tokens":128,"admission_overtakes":0,"options":{"draft_weights":"draft.gguf"})")));
   EXPECT_EQ(model_.text.rows, 8u);
   EXPECT_EQ(model_.text.admission_overtakes, 0u);
   EXPECT_EQ(model_.text.context_capacity, 262144u);
-  EXPECT_EQ(model_.text.pool_capacity, 4096u);
   EXPECT_EQ(model_.text.prefill_capacity, 128u);
   EXPECT_EQ(model_.text.checkpoint_capacity, 2u);
   EXPECT_EQ(model_.text.session_cache_capacity, 24u);
@@ -687,18 +685,12 @@ TEST_F(ConfigurationTest,
   EXPECT_EQ(String(model_.options), R"({"draft_weights":"draft.gguf"})");
 }
 
-TEST_F(ConfigurationTest, ContextOverrideRequiresAnExplicitUndersizedPool) {
-  iree::Status status(Parse(Text(R"(,"context_capacity":131072)")));
-  EXPECT_EQ(status.code(), iree::StatusCode::kInvalidArgument);
-  EXPECT_NE(status.ToString().find(
-                "context_capacity 131072 exceeds implicit pool_capacity 65536"),
-            std::string::npos)
-      << status.ToString();
-
-  IREE_ASSERT_OK(
-      Parse(Text(R"(,"context_capacity":131072,"pool_capacity":32768)")));
+TEST_F(ConfigurationTest, ContextCapacityHasNoModelLocalPoolQuota) {
+  IREE_ASSERT_OK(Parse(Text(R"(,"context_capacity":131072)")));
   EXPECT_EQ(model_.text.context_capacity, 131072u);
-  EXPECT_EQ(model_.text.pool_capacity, 32768u);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      Parse(Text(R"(,"context_capacity":131072,"pool_capacity":32768)")));
 }
 
 TEST_F(ConfigurationTest, CacheOmissionAndExplicitZeroRemainDistinct) {
@@ -783,37 +775,6 @@ TEST_F(ConfigurationTest, ImageDefaultsAndSpecializations) {
   EXPECT_EQ(model_.image.text_tokens, 1024u);
   EXPECT_EQ(model_.image.command_quantum, 64u);
   EXPECT_EQ(model_.pending_requests, 3u);
-}
-
-TEST_F(ConfigurationTest, SharedPoolCapacityPreservesTheSourceCount) {
-  const uint64_t maximum =
-      iree_min(uint64_t{IREE_HOST_SIZE_MAX}, uint64_t{INT64_MAX});
-  for (const char* kind : {"text", "sequence"}) {
-    for (uint64_t capacity : {uint64_t{4194305}, uint64_t{29360128},
-                              uint64_t{UINT32_MAX}, maximum}) {
-      SCOPED_TRACE(kind);
-      SCOPED_TRACE(capacity);
-      const std::string fields = R"(,"weights":"model.irpa","pool_capacity":)" +
-                                 std::to_string(capacity);
-      IREE_ASSERT_OK(Parse(
-          Document(kind, fields + (std::string(kind) == "text"
-                                       ? R"(,"tokenizer":"tokenizer.json")"
-                                       : ""))));
-      EXPECT_EQ(model_.text.pool_capacity, capacity);
-      EXPECT_EQ(model_.text.context_capacity, 16384u);
-      EXPECT_EQ(model_.text.prefill_capacity, 512u);
-    }
-    for (const std::string& capacity :
-         {std::string("0"), std::string("-1"), std::to_string(maximum + 1)}) {
-      IREE_EXPECT_STATUS_IS(
-          IREE_STATUS_INVALID_ARGUMENT,
-          Parse(Document(kind, R"(,"weights":"model.irpa","pool_capacity":)" +
-                                   capacity +
-                                   (std::string(kind) == "text"
-                                        ? R"(,"tokenizer":"tokenizer.json")"
-                                        : ""))));
-    }
-  }
 }
 
 TEST_F(ConfigurationTest, VariantCapacityAppliesToEveryService) {
@@ -910,7 +871,7 @@ TEST_F(ConfigurationTest, RejectsInvalidAndWrongModalityFields) {
         R"(,"continuation_epochs":2)",
         R"(,"prefill_capacity":2,"draft_depth":3)",
         R"(,"prefill_capacity":262145)",
-        R"(,"pool_capacity":0)",
+        R"(,"pool_capacity":256)",
         R"(,"pending_requests":-1)",
         R"(,"max_tokens":1.5)",
         R"(,"typo":true)",

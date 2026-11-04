@@ -476,7 +476,7 @@ TEST_F(RegisteredSequenceServiceTest,
       std::filesystem::absolute(directory_).string() +
       R"(","definition":{"kind":"sequence","prepare":"prepare.loom","control":"control.loom","sources":["advance.loom","sequence.loom","storage.loom"],"weights":")" +
       weights_ +
-      R"(","rows":4,"context_capacity":96,"pool_capacity":256,"prefill_capacity":32,"checkpoint_capacity":4,"session_cache_capacity":1}})";
+      R"(","rows":4,"context_capacity":96,"prefill_capacity":32,"checkpoint_capacity":4,"session_cache_capacity":1}})";
   auto response = Read(Send(declaration, "", "/v1/models/register"));
   ASSERT_EQ(response.find("HTTP/1.1 202"), 0u) << response;
   const auto first = Encode("[0,1,2]");

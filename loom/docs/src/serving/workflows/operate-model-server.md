@@ -284,7 +284,6 @@ Process limits and model capacities constrain different resources:
 | Model `pending_requests` | Modality request credit; text/image count waiting requests, finite services include the active cohort. |
 | Text `rows` | Concurrently advancing execution rows. |
 | Text `context_capacity` | Logical token ceiling of one context. |
-| Text `pool_capacity` | Shared logical KV capacity, independent of maximum context times row count. |
 | Text `variant_capacity` | Native choices, including the original, pending JITs and failed attempts. |
 | Pool `memory_bytes` / shortcut `--memory_bytes` | Shared elastic physical backing for parameters, state, invocation I/O, and workspace. Ordinary native buffers are outside this allowance. |
 
@@ -294,6 +293,11 @@ requests share an additional combined bound with held requests. Full credit
 returns 429. Incomplete requests and
 active response streams still consume transport credit; these bounds are not
 a promise that arbitrary slow clients leave connections free.
+
+Text cache addressability follows pool backing. Fixed backing reserves one
+model context shared across its rows. Elastic backing uses Loom's sparse 4M
+token-position ceiling per model, while `memory_bytes` remains the physical
+admission limit shared across all models in the pool.
 
 Text admission reserves a request's completion high-water. Short contexts grow
 by blocks rather than eagerly reserving each row's maximum physical slab.

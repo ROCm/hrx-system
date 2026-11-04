@@ -18,10 +18,14 @@ from urllib.parse import urlsplit
 from loom_serve_testing.http_harness import control, running_server, wait_status
 
 # This service-policy fixture uses native-sized backing so its 4 KiB parameter
-# page and 8 KiB state cohort have exact physical costs. Storage tests cover
-# packing those mappings into larger shared parents independently.
+# page and 8 KiB state cohort have exact physical costs. A peer needs 12 KiB;
+# retaining only parameters needs 16 KiB, retaining state needs 20 KiB, and
+# retaining both complete models needs 24 KiB. Storage tests cover packing
+# those mappings into larger shared parents independently.
 ONE_MODEL_LIMIT_BYTES = 12 * 1024
+PARAMETER_AND_PEER_LIMIT_BYTES = 16 * 1024
 MEDIA_AND_TEXT_LIMIT_BYTES = 20 * 1024
+CHECKPOINT_AND_PEER_LIMIT_BYTES = 20 * 1024
 TWO_MODEL_LIMIT_BYTES = 24 * 1024
 
 
@@ -165,7 +169,6 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
                 "tokenizer": str(source / "tokenizer.json"),
                 "rows": 2,
                 "context_capacity": 128,
-                "pool_capacity": 128,
                 "prefill_capacity": 32,
                 "checkpoint_capacity": 2,
                 "session_cache_capacity": 2,
@@ -302,12 +305,12 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
                 200,
                 headers={"X-Loom-Model": "alpha"},
             )
-            # Parameter pins survive pressure. At the one-model limit, the
-            # peer is admitted by reclaiming unpinned histories; the roomy
-            # case retains both histories and parameter residency.
+            # Parameter pins survive pressure. At the exact pin-and-peer
+            # limit, admission reclaims unpinned histories; the roomy case
+            # retains both histories and parameter residency.
             expected_sessions = (
                 set()
-                if memory_bytes == ONE_MODEL_LIMIT_BYTES
+                if memory_bytes == PARAMETER_AND_PEER_LIMIT_BYTES
                 else {f"conversation-{index}" for index in range(4)}
             )
             assert {session["name"] for session in sessions["data"]} == (
@@ -356,9 +359,11 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
             )
             assert resumed_status == 200, resumed
             assert output(resumed) == oracle("abxa" + output(first) + "#b"), resumed
-            assert cached_tokens(resumed) == (
-                0 if memory_bytes == ONE_MODEL_LIMIT_BYTES else 5
-            ), resumed
+            histories_reclaimed = memory_bytes == ONE_MODEL_LIMIT_BYTES or (
+                retention == "parameters"
+                and memory_bytes == PARAMETER_AND_PEER_LIMIT_BYTES
+            )
+            assert cached_tokens(resumed) == (0 if histories_reclaimed else 5), resumed
         # Removal owns pinned state as well as the service. A peer submitted
         # immediately after accepted unregister must complete without waiting
         # for a client-side polling loop to observe final model destruction.
@@ -473,17 +478,16 @@ def run_from_command_line(cases):
 
 
 # Pairwise coverage across worker count, physical memory limit, and retained
-# state policy. The manual pressure_stress_test target retains the complete
-# Cartesian product for explicit stress qualification.
+# state policy.
 _CASES = (
     # Media and text fit as sequential phases without requiring their combined
     # declared footprint. Tight cases force reclamation within one model's cap.
     (1, MEDIA_AND_TEXT_LIMIT_BYTES, "none"),
-    (1, ONE_MODEL_LIMIT_BYTES, "checkpoint"),
+    (1, CHECKPOINT_AND_PEER_LIMIT_BYTES, "checkpoint"),
     (1, TWO_MODEL_LIMIT_BYTES, "parameters"),
     (4, ONE_MODEL_LIMIT_BYTES, "none"),
     (4, TWO_MODEL_LIMIT_BYTES, "checkpoint"),
-    (4, ONE_MODEL_LIMIT_BYTES, "parameters"),
+    (4, PARAMETER_AND_PEER_LIMIT_BYTES, "parameters"),
 )
 
 

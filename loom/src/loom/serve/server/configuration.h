@@ -52,8 +52,6 @@ typedef struct loom_serve_text_configuration_t {
   iree_host_size_t admission_overtakes;
   // Logical context ceiling per row, not eagerly committed storage.
   iree_host_size_t context_capacity;
-  // Shared token positions in this model's logical cache pool.
-  iree_host_size_t pool_capacity;
   // Largest automatically specialized packed token shape.
   iree_host_size_t prefill_capacity;
   // Explicit pinned endpoint slots, independent of active rows.

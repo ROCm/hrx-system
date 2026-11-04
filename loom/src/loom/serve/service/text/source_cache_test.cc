@@ -4,8 +4,6 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <cerrno>
-
 #include "loom/serve/service/text/service_test_fixture.h"
 
 namespace {
@@ -697,10 +695,7 @@ TEST_F(RegisteredSourceTextServiceTest,
       retained.find(R"("position":5,"resident_tokens":8,"reserved_tokens":0,)"),
       std::string::npos)
       << retained;
-  EXPECT_NE(retained.find(R"("next_offset":64)"), std::string::npos);
-  EXPECT_NE(inspect("/v1/sessions", "X-Loom-Offset: 64\r\n")
-                .find(R"("data":[],"next_offset":null)"),
-            std::string::npos);
+  EXPECT_NE(retained.find(R"("next_offset":null)"), std::string::npos);
   EXPECT_NE(inspect("/v1/requests").find(R"("data":[],"next_offset":null)"),
             std::string::npos);
   for (const char* value : {"-1", "+1", "1x", "18446744073709551616"}) {
@@ -733,25 +728,9 @@ TEST_F(RegisteredSourceTextServiceTest,
   const auto replacement = inspect("/v1/sessions");
   EXPECT_NE(replacement.find(R"("incarnation":2,)"), std::string::npos)
       << replacement;
-  // Pagination addresses the retained directory, including empty cache slots.
-  // A fresh incarnation can have several empty pages without any old history.
-  std::string page = replacement;
-  uint64_t offset = 0;
-  const std::string next_key = R"("next_offset":)";
-  while (true) {
-    EXPECT_NE(page.find(R"("data":[])"), std::string::npos) << page;
-    const auto begin = page.find(next_key);
-    ASSERT_NE(begin, std::string::npos) << page;
-    const auto next = page.substr(begin + next_key.size());
-    if (next.starts_with("null")) {
-      break;
-    }
-    const auto next_offset = std::stoull(next);
-    ASSERT_GT(next_offset, offset);
-    offset = next_offset;
-    page = inspect("/v1/sessions",
-                   "X-Loom-Offset: " + std::to_string(offset) + "\r\n");
-  }
+  EXPECT_NE(replacement.find(R"("data":[],"next_offset":null)"),
+            std::string::npos)
+      << replacement;
   const auto old_inventory = inspector.Read();
   EXPECT_NE(old_inventory.find(R"("incarnation":1,)"), std::string::npos);
   EXPECT_NE(old_inventory.find(R"("name":"conversation0",)"),
@@ -810,18 +789,29 @@ TEST_F(RegisteredSourceTextServiceTest,
   EXPECT_NE(rewind.find("\"cached_tokens\":5}"), std::string::npos);
 }
 
-TEST_F(RegisteredSourceTextServiceTest,
+class ConstrainedCacheTextServiceTest : public SourceTextServiceTest {
+ protected:
+  loom_serve_text_options_t ModelOptions() const override {
+    auto options = SourceTextServiceTest::ModelOptions();
+    options.pool_capacity = 32;
+    options.cache = {
+        .target_bytes = 0,
+        .session_capacity = 2,
+        .prefix_capacity = 0,
+    };
+    return options;
+  }
+
+  loom_serve_text_service_options_t ServiceOptions() const override {
+    auto options = SourceTextServiceTest::ServiceOptions();
+    options.session_cache_capacity = 2;
+    return options;
+  }
+};
+
+TEST_F(ConstrainedCacheTextServiceTest,
        IdleCacheYieldsLogicalBlocksToAdmission) {
-  StartManaged();
-  std::string declaration = Declaration("fixture-text", directory_, "open",
-                                        R"(,"session_cache_capacity":2)");
-  const auto pool = declaration.find("\"pool_capacity\":256");
-  ASSERT_NE(pool, std::string::npos);
-  declaration.replace(pool, strlen("\"pool_capacity\":256"),
-                      "\"pool_capacity\":32");
-  ASSERT_EQ(
-      Read(Send(declaration, "", "/v1/models/register")).find("HTTP/1.1 202"),
-      0u);
+  Start();
   const auto first = Oracle::Complete("abxa", 2);
   for (size_t i = 0; i < 6; ++i) {
     EXPECT_EQ(Content(Read(Send(Request(Message("user", "abxa"), 2),

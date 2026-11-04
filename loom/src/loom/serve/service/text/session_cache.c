@@ -22,7 +22,7 @@ bool loom_serve_text_session_cache_inspect(
       out_snapshot->request = lifetime->serial;
       out_snapshot->reserved_tokens = row->request.reserved_tokens;
     }
-  } else if (cache->entries && index - row_count <= cache->capacity) {
+  } else if (cache->entries && index - row_count < cache->entry_extent) {
     lifetime = &cache->entries[index - row_count].lifetime;
     out_snapshot->storage = "cache";
   } else {
@@ -52,7 +52,7 @@ iree_status_t loom_serve_text_session_cache_initialize(
 void loom_serve_text_session_cache_reset(loom_serve_text_session_cache_t* cache,
                                          loom_serve_text_telemetry_t* telemetry,
                                          iree_status_code_t terminal_code) {
-  for (iree_host_size_t i = 0; cache->entries && i <= cache->capacity; ++i) {
+  for (iree_host_size_t i = 0; i < cache->entry_extent; ++i) {
     loom_serve_text_session_cache_entry_t* entry = &cache->entries[i];
     loom_serve_text_telemetry_session_end(telemetry, &entry->lifetime);
     if (terminal_code == IREE_STATUS_OK) {
@@ -63,6 +63,7 @@ void loom_serve_text_session_cache_reset(loom_serve_text_session_cache_t* cache,
     }
   }
   cache->count = 0;
+  cache->entry_extent = 0;
 }
 
 void loom_serve_text_session_cache_deinitialize(
@@ -73,8 +74,7 @@ void loom_serve_text_session_cache_deinitialize(
 
 loom_serve_text_session_cache_entry_t* loom_serve_text_session_cache_find(
     loom_serve_text_session_cache_t* cache, iree_string_view_t name) {
-  for (iree_host_size_t i = 0;
-       cache->entries && name.size && i <= cache->capacity; ++i) {
+  for (iree_host_size_t i = 0; name.size && i < cache->entry_extent; ++i) {
     if (iree_string_view_equal(
             name, iree_make_cstring_view(cache->entries[i].lifetime.name))) {
       return &cache->entries[i];
@@ -87,7 +87,7 @@ loom_serve_text_session_cache_entry_t* loom_serve_text_session_cache_oldest(
     loom_serve_text_session_cache_t* cache,
     const loom_serve_text_session_cache_entry_t* protected_entry) {
   loom_serve_text_session_cache_entry_t* oldest = NULL;
-  for (iree_host_size_t i = 0; cache->entries && i <= cache->capacity; ++i) {
+  for (iree_host_size_t i = 0; i < cache->entry_extent; ++i) {
     loom_serve_text_session_cache_entry_t* entry = &cache->entries[i];
     if (entry != protected_entry && !entry->endpoint.pending &&
         entry->lifetime.id &&
@@ -107,7 +107,7 @@ iree_status_t loom_serve_text_session_cache_submit(
   // until its incoming owner is consumed or the excess endpoint is evicted.
   IREE_ASSERT(cache->count <= cache->capacity);
   iree_host_size_t index = 0;
-  while (cache->entries[index].endpoint.state) {
+  while (index < cache->entry_extent && cache->entries[index].endpoint.state) {
     ++index;
   }
   loom_serve_text_session_cache_entry_t* entry = &cache->entries[index];
@@ -117,6 +117,7 @@ iree_status_t loom_serve_text_session_cache_submit(
   // record permits a full-cache handoff without stealing the incoming endpoint.
   IREE_ASSERT(entry->endpoint.state);
   ++cache->count;
+  cache->entry_extent = iree_max(cache->entry_extent, index + 1);
   *out_entry = entry;
   return iree_ok_status();
 }
@@ -133,9 +134,16 @@ void loom_serve_text_session_cache_release(
     loom_serve_text_session_cache_t* cache,
     loom_serve_text_session_cache_entry_t* entry,
     loom_serve_text_telemetry_t* telemetry) {
+  const iree_host_size_t index = (iree_host_size_t)(entry - cache->entries);
   loom_serve_text_telemetry_session_end(telemetry, &entry->lifetime);
   loom_serve_text_checkpoint_entry_release(&entry->endpoint);
   --cache->count;
+  if (index + 1 == cache->entry_extent) {
+    while (cache->entry_extent &&
+           !cache->entries[cache->entry_extent - 1].endpoint.state) {
+      --cache->entry_extent;
+    }
+  }
 }
 
 bool loom_serve_text_session_cache_evict(

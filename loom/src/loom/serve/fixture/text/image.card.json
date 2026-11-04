@@ -119,7 +119,6 @@
       "execution": {
         "rows": 4,
         "context_capacity": 96,
-        "pool_capacity": 256,
         "prefill_capacity": 32,
         "max_tokens": 16,
         "checkpoint_capacity": 2,

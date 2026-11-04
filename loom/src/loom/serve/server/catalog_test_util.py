@@ -616,7 +616,6 @@ def prepare_catalog(fixtures, directory):
                 weights=str(weights),
                 rows=2,
                 context_capacity=128,
-                pool_capacity=128,
                 checkpoint_capacity=2,
             )
         catalog["models"].append(model)

@@ -44,7 +44,7 @@ iree_status_t loom_serve_text_pending_request_prepare(
         IREE_STATUS_OUT_OF_RANGE,
         "request needs %zu page-rounded KV positions including completion "
         "and speculative credit, but the shared pool holds %zu; compact "
-        "history, lower max_tokens, or increase pool_capacity",
+        "history, lower max_tokens, or use elastic backing",
         reservation, geometry->capacity);
   }
   request->reservation = reservation;

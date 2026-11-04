@@ -796,6 +796,12 @@ static iree_status_t loom_serve_recognition_registration_create(
   return status;
 }
 
+// Logical token positions addressable by each model using elastic backing.
+// Sparse virtual backing and page identities scale with live state, so this
+// ceiling does not reserve physical memory. Sources validate their page
+// geometry and native address arithmetic during preparation.
+enum { LOOM_SERVE_TEXT_ELASTIC_ADDRESS_CAPACITY = 4194304 };
+
 typedef struct loom_serve_text_registration_t {
   // Allocator owning this operation and its stable shape table.
   iree_allocator_t host_allocator;
@@ -1036,7 +1042,8 @@ static iree_status_t loom_serve_text_registration_create(
       .sources = configuration->sources,
       .prefill_capacity = text->prefill_capacity,
       .context_capacity = text->context_capacity,
-      .pool_capacity = text->pool_capacity,
+      .pool_capacity = memory_pool ? LOOM_SERVE_TEXT_ELASTIC_ADDRESS_CAPACITY
+                                   : text->context_capacity,
       .epoch_count = shape_count,
       .epoch_shapes = registration->shapes,
       .draft_depth = text->draft_depth,
