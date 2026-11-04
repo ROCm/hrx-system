@@ -21,6 +21,51 @@ amdf_cc_library(
     deps = [":bridge_api"],
 )
 
+amdf_cc_library(
+    name = "clock",
+    srcs = ["clock.c"],
+    hdrs = ["clock.h"],
+    visibility = ["//libamdf/src/gpu/umd:__subpackages__"],
+    deps = [
+        ":adapter",
+        "//libamdf/src/gpu/umd:clock",
+        "//libamdf/src/platform:native_observation",
+        "//libamdf/src/platform:observation",
+    ],
+)
+
+amdf_cc_test(
+    name = "clock_test",
+    srcs = ["clock_test.cc"],
+    linkopts = ["-Wl,--wrap=amdf_platform_observation_query_host_clock"],
+    deps = [
+        ":clock",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_library(
+    name = "event",
+    srcs = ["event.c"],
+    visibility = ["//libamdf/src/gpu/umd:__subpackages__"],
+    deps = ["//libamdf/src/gpu/umd:event"],
+)
+
+amdf_cc_library(
+    name = "instance",
+    srcs = ["instance.c"],
+    visibility = ["//libamdf/src/gpu/umd:__subpackages__"],
+    deps = ["//libamdf/src/gpu/umd:instance"],
+)
+
+amdf_cc_library(
+    name = "user_queue",
+    srcs = ["user_queue.c"],
+    visibility = ["//libamdf/src/gpu/umd:__subpackages__"],
+    deps = ["//libamdf/src/gpu/umd:user_queue"],
+)
+
 amdf_cc_test(
     name = "adapter_test",
     srcs = ["adapter_test.cc"],

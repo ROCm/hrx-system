@@ -22,10 +22,7 @@ amdf_cc_library(
     deps = [
         ":device_state",
         "//libamdf/src/gpu/umd:clock",
-        "//libamdf/src/gpu/umd/dxg:adapter",
-        "//libamdf/src/gpu/umd/dxg:bridge_api",
-        "//libamdf/src/platform:native_observation",
-        "//libamdf/src/platform:observation",
+        "//libamdf/src/gpu/umd/dxg:clock",
     ],
 )
 
@@ -107,20 +104,6 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
-    name = "user_queue",
-    srcs = ["user_queue.c"],
-    target_compatible_with = ["@platforms//os:windows"],
-    deps = ["//libamdf/src/gpu/umd:user_queue"],
-)
-
-amdf_cc_library(
-    name = "instance",
-    srcs = ["instance.c"],
-    target_compatible_with = ["@platforms//os:windows"],
-    deps = ["//libamdf/src/gpu/umd:instance"],
-)
-
-amdf_cc_library(
     name = "device",
     srcs = ["device.c"],
     target_compatible_with = ["@platforms//os:windows"],
@@ -152,13 +135,6 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
-    name = "event",
-    srcs = ["event.c"],
-    target_compatible_with = ["@platforms//os:windows"],
-    deps = ["//libamdf/src/gpu/umd:event"],
-)
-
-amdf_cc_library(
     name = "wddm",
     target_compatible_with = ["@platforms//os:windows"],
     visibility = ["//libamdf/src/gpu/umd:__pkg__"],
@@ -166,12 +142,12 @@ amdf_cc_library(
         ":clock",
         ":device",
         ":endpoint_profile",
-        ":event",
-        ":instance",
         ":kernel_queue",
         ":memory",
         ":memory_reservation",
-        ":user_queue",
+        "//libamdf/src/gpu/umd/dxg:event",
+        "//libamdf/src/gpu/umd/dxg:instance",
+        "//libamdf/src/gpu/umd/dxg:user_queue",
     ],
 )
 

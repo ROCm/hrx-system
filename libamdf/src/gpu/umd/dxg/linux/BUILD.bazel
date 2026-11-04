@@ -14,6 +14,20 @@ package(
 )
 
 amdf_cc_library(
+    name = "clock",
+    srcs = ["clock.c"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        ":device_state",
+        "//libamdf/src/gpu/umd:clock",
+        "//libamdf/src/gpu/umd/dxg:clock",
+    ],
+)
+
+amdf_cc_library(
     name = "device_status",
     srcs = ["device_status.c"],
     hdrs = ["device_status.h"],
@@ -180,6 +194,26 @@ amdf_cc_library(
         "//libamdf/src/gpu/umd/dxg/rocdxg:loader",
         "//libamdf/src/platform/linux/dxg:endpoint",
         "//libamdf/src/platform/linux/dxg:kmt",
+    ],
+)
+
+amdf_cc_library(
+    name = "linux_dxg",
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    visibility = ["//libamdf/src/gpu/umd:__pkg__"],
+    deps = [
+        ":clock",
+        ":device",
+        ":endpoint_profile",
+        ":kernel_queue",
+        ":memory",
+        ":memory_reservation",
+        "//libamdf/src/gpu/umd/dxg:event",
+        "//libamdf/src/gpu/umd/dxg:instance",
+        "//libamdf/src/gpu/umd/dxg:user_queue",
     ],
 )
 
