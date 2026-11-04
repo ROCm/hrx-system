@@ -17,6 +17,7 @@
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/device.h"
 #include "libamdf/src/gpu/umd/memory.h"
+#include "libamdf/src/gpu/umd/memory_reservation.h"
 #include "libamdf/src/platform/endpoint.h"
 #include "libamdf/src/platform/host_memory.h"
 #include "libamdf/src/platform/instance.h"
@@ -104,6 +105,13 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    if (reservation_ != nullptr) {
+      const amdf_status_t status = InvokeSilently([&] {
+        return amdf_gpu_umd_memory_reservation_destroy(reservation_);
+      });
+      EXPECT_EQ(status, AMDF_STATUS_OK);
+      reservation_ = nullptr;
+    }
     if (mapping_ != nullptr) {
       amdf_gpu_umd_host_mapping_destroy(mapping_);
       mapping_ = nullptr;
@@ -163,9 +171,11 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
   void PrepareMemory(const amdf_memory_native_profile_t& profile,
                      amdf_memory_flags_t required_flags,
                      void* registered_host_pointer,
-                     amdf_gpu_umd_memory_result_t* out_result) {
+                     amdf_gpu_umd_memory_result_t* out_result,
+                     amdf_memory_access_t device_access =
+                         AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE) {
     const amdf_memory_native_create_info_t create_info = {
-        .device_access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+        .device_access = device_access,
         .required_flags = required_flags,
         .byte_length = kByteLength,
         .minimum_alignment = profile.device_address.minimum_alignment,
@@ -222,11 +232,22 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
     memory_ = nullptr;
   }
 
+  void ReleaseReservation() {
+    ASSERT_NE(reservation_, nullptr);
+    amdf_gpu_umd_memory_reservation_t* reservation = reservation_;
+    reservation_ = nullptr;
+    ASSERT_EQ(InvokeSilently([&] {
+                return amdf_gpu_umd_memory_reservation_destroy(reservation);
+              }),
+              AMDF_STATUS_OK);
+  }
+
   amdf_platform_instance_t* instance_ = nullptr;
   amdf_platform_endpoint_t* endpoint_ = nullptr;
   amdf_gpu_umd_device_t* device_ = nullptr;
   amdf_gpu_umd_device_result_t device_result_ = {};
   amdf_gpu_umd_memory_t* memory_ = nullptr;
+  amdf_gpu_umd_memory_reservation_t* reservation_ = nullptr;
   amdf_gpu_umd_host_mapping_t* mapping_ = nullptr;
   void* registered_pointer_ = nullptr;
 };
@@ -283,6 +304,95 @@ TEST_F(LinuxDxgMemorySystemTest, RegistersBorrowedHostMemory) {
   ASSERT_NO_FATAL_FAILURE(FlushMemory());
   ASSERT_NO_FATAL_FAILURE(ReleaseMemory());
   EXPECT_EQ(static_cast<uint8_t*>(registered_pointer_)[kByteLength - 1], 0xC3);
+}
+
+TEST_F(LinuxDxgMemorySystemTest, OwnsSparseVirtualMemory) {
+  const amdf_memory_native_profile_t profile = QueryProfile(0);
+  ASSERT_NE(profile.supported_flags & AMDF_MEMORY_FLAG_MAPPING_SOURCE, 0u);
+  amdf_memory_reservation_capabilities_t capabilities = {};
+  ASSERT_EQ(amdf_gpu_umd_query_memory_reservation_capabilities(device_, 0,
+                                                               &capabilities),
+            AMDF_STATUS_OK);
+  ASSERT_GT(capabilities.mapping_granularity, 0u);
+  ASSERT_LE(3 * capabilities.mapping_granularity, kByteLength);
+  const amdf_memory_access_t access =
+      capabilities.required_access | AMDF_MEMORY_ACCESS_WRITE;
+  amdf_gpu_umd_memory_result_t memory_result = {};
+  ASSERT_NO_FATAL_FAILURE(PrepareMemory(profile,
+                                        AMDF_MEMORY_FLAG_MAPPING_SOURCE,
+                                        nullptr, &memory_result, access));
+
+  amdf_gpu_umd_device_t* devices[] = {device_};
+  ASSERT_EQ(InvokeSilently([&] {
+              return amdf_gpu_umd_memory_reservation_create(
+                  amdf_allocator_system(), 1, devices, kByteLength,
+                  capabilities.reservation_granularity, 0, &reservation_);
+            }),
+            AMDF_STATUS_OK);
+
+  uint64_t address = 0;
+  uint32_t mapping_access_ordinal = UINT32_MAX;
+  uint64_t mapping_granularity = 0;
+  amdf_memory_access_t required_access = 0;
+  amdf_gpu_umd_memory_reservation_query_access(
+      reservation_, 0, &address, &mapping_access_ordinal, &mapping_granularity,
+      &required_access);
+  ASSERT_NE(address, 0u);
+  EXPECT_EQ(mapping_access_ordinal, 0u);
+  ASSERT_EQ(mapping_granularity, capabilities.mapping_granularity);
+  EXPECT_EQ(required_access, capabilities.required_access);
+  const amdf_gpu_umd_mapping_update_t initial[] = {
+      {
+          .target_byte_offset = 0,
+          .byte_length = mapping_granularity,
+          .memory = memory_,
+          .source_byte_offset = 0,
+          .access = access,
+      },
+      {
+          .target_byte_offset = 2 * mapping_granularity,
+          .byte_length = mapping_granularity,
+          .memory = memory_,
+          .source_byte_offset = mapping_granularity,
+          .access = access,
+      },
+  };
+  bool mutation_started = false;
+  ASSERT_EQ(InvokeSilently([&] {
+              return amdf_gpu_umd_memory_reservation_update(
+                  reservation_, 0, 2, initial, &mutation_started);
+            }),
+            AMDF_STATUS_OK);
+  ASSERT_TRUE(mutation_started);
+
+  const amdf_gpu_umd_mapping_update_t replacement = {
+      .target_byte_offset = 0,
+      .byte_length = mapping_granularity,
+      .memory = memory_,
+      .source_byte_offset = 2 * mapping_granularity,
+      .access = access,
+  };
+  mutation_started = false;
+  ASSERT_EQ(InvokeSilently([&] {
+              return amdf_gpu_umd_memory_reservation_update(
+                  reservation_, 0, 1, &replacement, &mutation_started);
+            }),
+            AMDF_STATUS_OK);
+  ASSERT_TRUE(mutation_started);
+
+  const amdf_gpu_umd_mapping_update_t clear = {
+      .target_byte_offset = 2 * mapping_granularity,
+      .byte_length = mapping_granularity,
+  };
+  mutation_started = false;
+  ASSERT_EQ(InvokeSilently([&] {
+              return amdf_gpu_umd_memory_reservation_update(
+                  reservation_, 0, 1, &clear, &mutation_started);
+            }),
+            AMDF_STATUS_OK);
+  ASSERT_TRUE(mutation_started);
+  ASSERT_NO_FATAL_FAILURE(ReleaseReservation());
+  ASSERT_NO_FATAL_FAILURE(ReleaseMemory());
 }
 
 }  // namespace
