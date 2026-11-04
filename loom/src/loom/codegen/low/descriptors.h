@@ -27,7 +27,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 67u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 68u
 
 // Sentinel for absent target-family or descriptor-set stable IDs.
 #define LOOM_LOW_STABLE_ID_NONE UINT64_C(0)
@@ -547,6 +547,8 @@ typedef uint16_t loom_low_descriptor_flags_t;
 // identical packet under the same implicit-state read epochs adds no state.
 // The packet remains dead-removable when all SSA results are unused.
 #define LOOM_LOW_DESCRIPTOR_FLAG_IDEMPOTENT_STATE_UPDATE ((uint16_t)1u << 14)
+// At least one symbolic immediate references module-local read-only data.
+#define LOOM_LOW_DESCRIPTOR_FLAG_READ_ONLY_DATA_IMMEDIATES ((uint16_t)1u << 15)
 
 // Target-neutral semantic classes attached to generated low descriptors.
 // Multiple classes may be present when a packet contributes to several

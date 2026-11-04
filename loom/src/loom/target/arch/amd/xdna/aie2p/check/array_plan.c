@@ -128,8 +128,9 @@ static iree_status_t loom_aie2p_array_plan_check_collect_leaves(
         .function_target_facts = target.target_facts,
     };
     IREE_RETURN_IF_ERROR(loom_low_function_requirements_build(
-        module, loom_low_func_def_body(symbol->defining_op),
-        request->case_arena, &leaves[leaf_index].requirements));
+        module, target.descriptor_set,
+        loom_low_func_def_body(symbol->defining_op), request->case_arena,
+        &leaves[leaf_index].requirements));
     ++leaf_index;
   }
   *out_leaves = leaves;

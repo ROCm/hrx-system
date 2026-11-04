@@ -2446,7 +2446,8 @@ static iree_status_t loom_low_verify_descriptor(
           LOOM_LOW_DESCRIPTOR_FLAG_STATE_ASSIGNMENT |
           LOOM_LOW_DESCRIPTOR_FLAG_LATE_READ |
           LOOM_LOW_DESCRIPTOR_FLAG_TIED_RESULTS |
-          LOOM_LOW_DESCRIPTOR_FLAG_IDEMPOTENT_STATE_UPDATE,
+          LOOM_LOW_DESCRIPTOR_FLAG_IDEMPOTENT_STATE_UPDATE |
+          LOOM_LOW_DESCRIPTOR_FLAG_READ_ONLY_DATA_IMMEDIATES,
       "descriptor", descriptor_index));
   iree_string_view_t descriptor_key = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
@@ -2493,6 +2494,34 @@ static iree_status_t loom_low_verify_descriptor(
   IREE_RETURN_IF_ERROR(loom_low_verify_span(
       descriptor_layout->immediate_start, descriptor_layout->immediate_count,
       descriptor_set->immediate_count, "immediates"));
+  bool has_enum_immediates = false;
+  bool has_read_only_data_immediates = false;
+  for (uint16_t i = 0; i < descriptor_layout->immediate_count; ++i) {
+    const loom_low_immediate_t* immediate =
+        &descriptor_set
+             ->immediates[descriptor_layout->immediate_start + (uint32_t)i];
+    has_enum_immediates |= immediate->kind == LOOM_LOW_IMMEDIATE_KIND_ENUM;
+    has_read_only_data_immediates |= iree_any_bit_set(
+        immediate->flags, LOOM_LOW_IMMEDIATE_FLAG_READ_ONLY_DATA);
+  }
+  if (iree_any_bit_set(descriptor->flags,
+                       LOOM_LOW_DESCRIPTOR_FLAG_ENUM_IMMEDIATES) !=
+      has_enum_immediates) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low descriptor %" PRIu32
+        " enum-immediates summary does not match its immediate rows",
+        descriptor_index);
+  }
+  if (iree_any_bit_set(descriptor->flags,
+                       LOOM_LOW_DESCRIPTOR_FLAG_READ_ONLY_DATA_IMMEDIATES) !=
+      has_read_only_data_immediates) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low descriptor %" PRIu32
+        " read-only-data-immediates summary does not match its immediate rows",
+        descriptor_index);
+  }
   IREE_RETURN_IF_ERROR(loom_low_verify_span(
       descriptor_layout->effect_start, descriptor_layout->effect_count,
       descriptor_set->effect_count, "effects"));

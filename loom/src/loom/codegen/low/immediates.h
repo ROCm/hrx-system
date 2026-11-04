@@ -9,6 +9,7 @@
 #ifndef LOOM_CODEGEN_LOW_IMMEDIATES_H_
 #define LOOM_CODEGEN_LOW_IMMEDIATES_H_
 
+#include "iree/base/internal/math.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/ir/module.h"
 
@@ -32,6 +33,18 @@ uint32_t loom_low_bind_immediate_presence(
     const loom_module_t* module,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, loom_named_attr_slice_t attrs);
+
+// Reads one immediate from a canonical dictionary and its bound presence mask.
+// Omission remains ABSENT; numeric consumers apply descriptor defaults.
+static inline loom_attribute_t loom_low_bound_immediate_attr(
+    loom_named_attr_slice_t attrs, uint32_t presence,
+    const loom_low_immediate_t* immediate) {
+  const uint32_t field = immediate->attribute_mask;
+  return (presence & field)
+             ? attrs.entries[iree_math_count_ones_u32(presence & (field - 1))]
+                   .value
+             : loom_attr_absent();
+}
 
 #ifdef __cplusplus
 }  // extern "C"

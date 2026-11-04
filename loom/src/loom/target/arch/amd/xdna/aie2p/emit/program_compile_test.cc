@@ -337,8 +337,8 @@ class Aie2pProgramCompileTest : public ::testing::Test {
     iree_arena_initialize(&program_block_pool_, &requirements_arena);
     loom_low_function_requirements_t requirements = {};
     iree_status_t status = loom_low_function_requirements_build(
-        module, loom_low_func_def_body(entry), &requirements_arena,
-        &requirements);
+        module, loom_aie2p_core_descriptor_set(), loom_low_func_def_body(entry),
+        &requirements_arena, &requirements);
     if (iree_status_is_ok(status)) {
       std::vector<loom_aie2p_program_helper_t> direct_helpers(
           requirements.direct_callees.count);

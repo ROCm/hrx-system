@@ -357,6 +357,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amd/xdna/aie2p/array:program",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/array:resident",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:configuration",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/records:target_records",
         "//loom/src/loom/target/arch/amd/xdna/device:profile",
         "//loom/src/loom/target/reporting:low",

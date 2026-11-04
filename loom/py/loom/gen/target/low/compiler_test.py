@@ -270,6 +270,32 @@ def test_enum_immediate_projection_retains_semantic_values() -> None:
     assert {value.token: value.value for value in compiled.enum_values} == {"reverse": -5, "forward": 7}
 
 
+def test_read_only_data_immediate_projection() -> None:
+    base = TEST_LOW_CONST_I32_DESCRIPTOR
+    descriptor = replace(
+        base,
+        immediates=(
+            replace(
+                base.immediates[0],
+                kind=ImmediateKind.ORDINAL,
+                flags=(ImmediateFlag.SYMBOLIC, ImmediateFlag.READ_ONLY_DATA),
+            ),
+        ),
+    )
+    compiled = compiler.compile_descriptor_set(replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,)))
+    assert DescriptorFlag.READ_ONLY_DATA_IMMEDIATES in compiled.descriptors[0].flags
+
+
+def test_read_only_data_descriptor_summary_cannot_be_authored() -> None:
+    base = TEST_LOW_CONST_I32_DESCRIPTOR
+    descriptor = replace(
+        base,
+        flags=(*base.flags, DescriptorFlag.READ_ONLY_DATA_IMMEDIATES),
+    )
+    with pytest.raises(ValueError, match="authors the derived read-only-data"):
+        compiler.compile_descriptor_set(replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,)))
+
+
 @pytest.mark.parametrize(
     ("second_uses", "expected_units"),
     [
