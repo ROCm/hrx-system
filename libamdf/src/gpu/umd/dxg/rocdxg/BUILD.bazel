@@ -32,6 +32,9 @@ amdf_cc_library(
 amdf_linux_sidecar_library(
     name = "amdf_rocdxg_bridge",
     srcs = [
+        "adapter_state.h",
+        "allocation.cc",
+        "allocation.h",
         "bridge.cc",
         "gfxip_compatibility.cc",
     ],

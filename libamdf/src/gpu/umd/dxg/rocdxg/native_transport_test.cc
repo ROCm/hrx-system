@@ -35,9 +35,17 @@ NTSTATUS QueryAdapterInfo(D3DKMT_QUERYADAPTERINFO* query) {
   return loader.pfn_D3DKMTQueryAdapterInfo(query);
 }
 
+NTSTATUS CreateAllocation(D3DKMT_CREATEALLOCATION* create) {
+  auto& loader = wsl::thunk::dxcore::DxcoreLoader::Instance();
+  EXPECT_TRUE(loader.Initialize());
+  return loader.pfn_D3DKMTCreateAllocation2(create);
+}
+
 TEST(RocdxgNativeTransportTest, RejectsCallsOutsideAnOwningBridgeScope) {
   D3DKMT_QUERYADAPTERINFO query = {};
   EXPECT_EQ(static_cast<uint32_t>(QueryAdapterInfo(&query)), 0xC0000184u);
+  D3DKMT_CREATEALLOCATION create = {};
+  EXPECT_EQ(static_cast<uint32_t>(CreateAllocation(&create)), 0xC0000184u);
 }
 
 TEST(RocdxgNativeTransportTest, ForwardsAndRestoresNestedTransportScopes) {
@@ -60,6 +68,12 @@ TEST(RocdxgNativeTransportTest, ForwardsAndRestoresNestedTransportScopes) {
               outer_invocation.result);
     EXPECT_EQ(outer_invocation.request, expected_request);
     EXPECT_EQ(outer_invocation.arguments, &query);
+    D3DKMT_CREATEALLOCATION create = {};
+    EXPECT_EQ(static_cast<uint32_t>(CreateAllocation(&create)),
+              outer_invocation.result);
+    EXPECT_EQ(outer_invocation.request,
+              _IOWR('G', 0x06, D3DKMT_CREATEALLOCATION));
+    EXPECT_EQ(outer_invocation.arguments, &create);
     {
       amdf::rocdxg_bridge::NativeTransportScope inner_scope(inner_transport);
       EXPECT_EQ(static_cast<uint32_t>(QueryAdapterInfo(&query)),

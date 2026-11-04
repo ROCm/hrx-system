@@ -59,6 +59,20 @@ bool ExerciseSidecar(const char* path, std::string* out_error) {
     dlclose(module);
     return false;
   }
+  uint32_t allocation_count = 0;
+  uint64_t maximum_allocation_byte_length = 0;
+  auto* opaque_adapter =
+      reinterpret_cast<amdf_dxg_bridge_gpu_adapter_t*>(uintptr_t{1});
+  if (api->gpu_allocation_query_layout(
+          opaque_adapter, UINT64_C(2) * 1024 * 1024 * 1024 + 4096,
+          &allocation_count,
+          &maximum_allocation_byte_length) != AMDF_DXG_BRIDGE_RESULT_SUCCESS ||
+      allocation_count != 2 ||
+      maximum_allocation_byte_length != UINT64_C(2) * 1024 * 1024 * 1024) {
+    *out_error = "allocation layout query returned the wrong chunking";
+    dlclose(module);
+    return false;
+  }
   const amdf_dxg_bridge_gpu_adapter_open_info_t open_info = {
       .structure_size = sizeof(amdf_dxg_bridge_gpu_adapter_open_info_t),
       .adapter_handle = 1,

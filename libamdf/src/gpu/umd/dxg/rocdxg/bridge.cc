@@ -8,25 +8,16 @@
 
 #include "libamdf/src/gpu/umd/dxg/bridge_allocator.h"
 #include "libamdf/src/gpu/umd/dxg/bridge_api.h"
+#include "libamdf/src/gpu/umd/dxg/rocdxg/adapter_state.h"
+#include "libamdf/src/gpu/umd/dxg/rocdxg/allocation.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/native_transport.h"
 #include "shared/include/dxcore_loader.h"
 #include "shared/include/thunk_proxy/thunk_proxy.h"
 
-struct amdf_dxg_bridge_gpu_adapter_t {
-  // Parent-instance allocator copied for all bridge-controlled storage.
-  amdf_allocator_t host_allocator = {};
-  // Borrowed native transport installed only during synchronous bridge calls.
-  amdf_dxg_bridge_native_transport_t native_transport = {};
-  // Private topology context owned by this adapter.
-  thunk_proxy::ChainContext* chain = nullptr;
-  // Private physical-device context owned by this adapter.
-  thunk_proxy::DeviceContext* device = nullptr;
-
-  ~amdf_dxg_bridge_gpu_adapter_t() {
-    delete device;
-    delete chain;
-  }
-};
+amdf_dxg_bridge_gpu_adapter_t::~amdf_dxg_bridge_gpu_adapter_t() {
+  delete device;
+  delete chain;
+}
 
 struct amdf_dxg_bridge_gpu_kernel_queue_t {};
 
@@ -166,21 +157,6 @@ GpuAdapterClose(amdf_dxg_bridge_gpu_adapter_t* adapter,
   return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
 }
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuAllocationQueryLayout(
-    amdf_dxg_bridge_gpu_adapter_t*, uint64_t, uint32_t*, uint64_t*) noexcept {
-  return AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED;
-}
-
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuAllocationCreate(
-    amdf_dxg_bridge_gpu_adapter_t*,
-    const amdf_dxg_bridge_gpu_allocation_create_info_t*, uint32_t, uint32_t*,
-    uint32_t*, uint32_t*, uint32_t* out_native_status) noexcept {
-  if (out_native_status != nullptr) {
-    *out_native_status = 0;
-  }
-  return AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED;
-}
-
 amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL
 GpuKernelQueueCreate(amdf_dxg_bridge_gpu_adapter_t*,
                      const amdf_dxg_bridge_gpu_kernel_queue_create_info_t*,
@@ -233,8 +209,8 @@ const amdf_dxg_bridge_api_t kBridgeApi = {
     AMDF_DXG_BRIDGE_ABI_VERSION_13,
     GpuAdapterOpen,
     GpuAdapterClose,
-    GpuAllocationQueryLayout,
-    GpuAllocationCreate,
+    amdf::rocdxg_bridge::GpuAllocationQueryLayout,
+    amdf::rocdxg_bridge::GpuAllocationCreate,
     GpuKernelQueueCreate,
     GpuKernelQueueSubmit,
     GpuKernelQueueDestroy,

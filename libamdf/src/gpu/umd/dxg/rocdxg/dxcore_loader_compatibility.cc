@@ -23,6 +23,15 @@ NTSTATUS InvokeQueryAdapterInfo(void* arguments) {
       arguments));
 }
 
+NTSTATUS InvokeCreateAllocation(void* arguments) {
+  if (active_transport == nullptr) {
+    return static_cast<NTSTATUS>(0xC0000184u);  // STATUS_INVALID_DEVICE_STATE
+  }
+  return static_cast<NTSTATUS>(active_transport->invoke(
+      active_transport->context, _IOWR('G', 0x06, D3DKMT_CREATEALLOCATION),
+      arguments));
+}
+
 }  // namespace
 
 namespace amdf::rocdxg_bridge {
@@ -58,7 +67,7 @@ DxcoreLoaderCleanup loader_cleanup;
 }  // namespace
 
 DxcoreLoader::DxcoreLoader()
-    : pfn_D3DKMTCreateAllocation2(nullptr),
+    : pfn_D3DKMTCreateAllocation2(InvokeCreateAllocation),
       pfn_D3DKMTDestroyAllocation2(nullptr),
       pfn_D3DKMTMapGpuVirtualAddress(nullptr),
       pfn_D3DKMTReserveGpuVirtualAddress(nullptr),
