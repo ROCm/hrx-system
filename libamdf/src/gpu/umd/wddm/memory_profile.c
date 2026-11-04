@@ -6,6 +6,7 @@
 
 #include "libamdf/src/gpu/umd/wddm/memory_profile.h"
 
+#include "libamdf/src/platform/host_memory.h"
 #include "libamdf/src/platform/windows/endpoint.h"
 #include "libamdf/src/platform/windows/kmt_api.h"
 
@@ -33,7 +34,7 @@ amdf_status_t amdf_gpu_wddm_query_memory_capabilities(
     return scheduling_status;
   }
 
-  const amdf_gpu_dxg_memory_capabilities_t capabilities = {
+  amdf_gpu_dxg_memory_capabilities_t capabilities = {
       .virtual_address_bit_count = query.Caps.VirtualAddressBitCount,
       .read_only_memory_supported = query.Caps.Flags.ReadOnlyMemorySupported,
       .no_execute_memory_supported = query.Caps.Flags.NoExecuteMemorySupported,
@@ -42,6 +43,12 @@ amdf_status_t amdf_gpu_wddm_query_memory_capabilities(
       .atomic_update_64_supported = scheduling.Support64BitAtomics,
       .d3d12_resource_supported = 1,
   };
+  const amdf_status_t host_status =
+      amdf_platform_host_memory_query_cache_transition(
+          &capabilities.host_cache_transition);
+  if (!amdf_status_is_ok(host_status)) {
+    return host_status;
+  }
   *out_capabilities = capabilities;
   return AMDF_STATUS_OK;
 }

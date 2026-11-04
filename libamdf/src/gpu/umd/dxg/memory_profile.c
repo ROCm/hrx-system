@@ -17,6 +17,31 @@ static amdf_memory_site_description_t amdf_gpu_dxg_describe_program_site(
       access, &amdf_endpoint_get_cached_info(device->endpoint)->id, operations);
 }
 
+static amdf_memory_host_description_t amdf_gpu_dxg_describe_host(
+    const void* data, amdf_external_memory_type_t external_memory_type,
+    amdf_memory_flags_t flags, amdf_host_memory_properties_t properties) {
+  (void)external_memory_type;
+  const amdf_gpu_dxg_memory_capabilities_t* capabilities = data;
+  const bool coherent = (flags & AMDF_MEMORY_FLAG_HOST_COHERENT) != 0;
+  amdf_memory_host_description_t result = {
+      .properties = properties,
+      .cache_line_size = capabilities->host_cache_transition.range_granularity,
+      .flush = capabilities->host_cache_transition,
+      .invalidate = capabilities->host_cache_transition,
+  };
+  result.flush.host_operation = AMDF_HOST_CACHE_OPERATION_FLUSH;
+  result.invalidate.host_operation = AMDF_HOST_CACHE_OPERATION_INVALIDATE;
+  if (!coherent) {
+    // The host callback owns both CPU writeback and native allocation
+    // publication for noncoherent mappings.
+    result.flush.executor = AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API;
+    result.flush.host_instruction = AMDF_HOST_CACHE_INSTRUCTION_NONE;
+    result.flush.host_fence_before = AMDF_HOST_CACHE_FENCE_NONE;
+    result.flush.host_fence_after = AMDF_HOST_CACHE_FENCE_NONE;
+  }
+  return result;
+}
+
 static amdf_memory_atomic_capabilities_t amdf_gpu_dxg_query_program_atomics(
     const amdf_memory_native_profile_t* profile, amdf_memory_flags_t flags) {
   const amdf_gpu_dxg_memory_capabilities_t* capabilities =
@@ -111,8 +136,13 @@ amdf_status_t amdf_gpu_dxg_query_memory_profile(
       .ordinal = memory_profile_ordinal,
       .query_program_atomics = amdf_gpu_dxg_query_program_atomics,
       .construction = {.data = capabilities},
-      .visibility = {.describe_site = amdf_gpu_umd_memory_describe_site,
-                     .describe_program = amdf_gpu_dxg_describe_program_site},
+      .visibility =
+          {
+              .describe_site = amdf_gpu_umd_memory_describe_site,
+              .describe_program = amdf_gpu_dxg_describe_program_site,
+              .describe_host = amdf_gpu_dxg_describe_host,
+              .data = capabilities,
+          },
       .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU,
       .guaranteed_device_access = guaranteed_device_access,
       .supported_device_access = AMDF_MEMORY_ACCESS_READ |

@@ -51,6 +51,8 @@ amdf_cc_library(
     deps = [
         "//libamdf/src/gpu/umd/dxg:memory_profile",
         "//libamdf/src/platform",
+        "//libamdf/src/platform:host_memory",
+        "//libamdf/src/platform:native_host_memory",
         "//libamdf/src/platform/windows:endpoint",
         "//libamdf/src/platform/windows:kmt_api",
     ],
@@ -64,11 +66,9 @@ amdf_cc_library(
     deps = [
         ":device_state",
         ":memory_profile",
-        "//libamdf/src:allocator",
         "//libamdf/src/gpu/umd:memory",
-        "//libamdf/src/platform:host_memory",
-        "//libamdf/src/platform:native_host_memory",
-        "//libamdf/src/platform/windows:host_cache",
+        "//libamdf/src/gpu/umd/dxg:memory",
+        "//libamdf/src/platform/windows:device_status",
         "//libamdf/src/platform/windows:kmt_api",
     ],
 )

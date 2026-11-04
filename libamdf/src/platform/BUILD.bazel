@@ -82,6 +82,7 @@ amdf_cc_library(
     }),
     visibility = [
         "//libamdf/src:__pkg__",
+        "//libamdf/src/gpu/umd/dxg:__subpackages__",
         "//libamdf/src/gpu/umd/wddm:__pkg__",
     ],
     deps = select({

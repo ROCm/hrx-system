@@ -23,6 +23,8 @@ amdf_cc_library(
     ],
     deps = [
         "//libamdf/src/gpu/umd/dxg:memory_profile",
+        "//libamdf/src/platform:host_memory",
+        "//libamdf/src/platform:native_host_memory",
         "//libamdf/src/platform/linux/dxg:endpoint",
         "//libamdf/src/platform/linux/dxg:kmt",
     ],

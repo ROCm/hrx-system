@@ -6,6 +6,8 @@
 
 #include "libamdf/src/gpu/umd/dxg/linux/memory_profile.h"
 
+#include "libamdf/src/platform/host_memory.h"
+
 static amdf_status_t amdf_gpu_linux_dxg_query_adapter_info(
     const amdf_platform_endpoint_t* endpoint, KMTQUERYADAPTERINFOTYPE type,
     void* data, uint32_t data_size) {
@@ -38,7 +40,7 @@ amdf_status_t amdf_gpu_linux_dxg_query_memory_capabilities(
         endpoint, KMTQAITYPE_WDDM_2_0_CAPS, &scheduling, sizeof(scheduling));
   }
   if (amdf_status_is_ok(status)) {
-    *out_capabilities = (amdf_gpu_dxg_memory_capabilities_t){
+    amdf_gpu_dxg_memory_capabilities_t capabilities = {
         .virtual_address_bit_count = memory.Caps.VirtualAddressBitCount,
         .read_only_memory_supported = memory.Caps.Flags.ReadOnlyMemorySupported,
         .no_execute_memory_supported =
@@ -47,6 +49,11 @@ amdf_status_t amdf_gpu_linux_dxg_query_memory_capabilities(
             memory.Caps.Flags.CacheCoherentMemorySupported,
         .atomic_update_64_supported = scheduling.Support64BitAtomics,
     };
+    status = amdf_platform_host_memory_query_cache_transition(
+        &capabilities.host_cache_transition);
+    if (amdf_status_is_ok(status)) {
+      *out_capabilities = capabilities;
+    }
   }
   return status;
 }

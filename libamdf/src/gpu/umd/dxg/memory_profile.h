@@ -36,6 +36,8 @@ typedef struct amdf_gpu_dxg_memory_capabilities_t {
   uint32_t program_host_rmw_supported;
   // Nonzero for an integrated CPU/GPU fabric with integer bitwise atomics.
   uint32_t program_host_is_fabric;
+  // Qualified host cache-maintenance program for CPU-visible memory.
+  amdf_cache_transition_t host_cache_transition;
 } amdf_gpu_dxg_memory_capabilities_t;
 
 // Derives complete memory capabilities from qualified adapter facts.
