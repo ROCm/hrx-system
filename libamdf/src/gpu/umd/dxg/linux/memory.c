@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "libamdf/src/gpu/umd/memory.h"
+#include "libamdf/src/gpu/umd/dxg/linux/memory.h"
 
 #include <stdint.h>
 
@@ -217,7 +217,7 @@ static const amdf_gpu_dxg_memory_native_api_t
             amdf_gpu_linux_dxg_memory_invalidate_allocation,
 };
 
-static amdf_gpu_dxg_memory_device_t amdf_gpu_linux_dxg_memory_device(
+amdf_gpu_dxg_memory_device_t amdf_gpu_linux_dxg_memory_device(
     amdf_gpu_umd_device_t* device) {
   return (amdf_gpu_dxg_memory_device_t){
       .host_allocator = device->host_allocator,
