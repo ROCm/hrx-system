@@ -123,6 +123,29 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "kernel_queue",
+    srcs = ["kernel_queue.c"],
+    linkopts = ["-pthread"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        ":device_state",
+        ":device_status",
+        "//libamdf/src:allocator",
+        "//libamdf/src:atomics",
+        "//libamdf/src:wait",
+        "//libamdf/src/gpu/umd:kernel_queue",
+        "//libamdf/src/gpu/umd/dxg:adapter",
+        "//libamdf/src/platform:native_event",
+        "//libamdf/src/platform:wait",
+        "//libamdf/src/platform/linux:file",
+        "//libamdf/src/platform/linux:native_event",
+    ],
+)
+
+amdf_cc_library(
     name = "device",
     srcs = ["device.c"],
     target_compatible_with = [
@@ -222,6 +245,25 @@ amdf_cc_test(
         ":memory",
         "//libamdf/src:allocator",
         "//libamdf/src/gpu/umd:memory",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "kernel_queue_test",
+    srcs = ["kernel_queue_test.cc"],
+    linkopts = ["-Wl,--wrap=amdf_linux_dxg_connection_invoke"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        ":device_state",
+        ":kernel_queue",
+        "//libamdf/src:allocator",
+        "//libamdf/src:wait",
+        "//libamdf/src/gpu/umd:kernel_queue",
         "//third_party:google_test",
         "//third_party:google_test_main",
     ],
