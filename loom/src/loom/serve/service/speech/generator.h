@@ -144,7 +144,7 @@ typedef struct loom_serve_speech_generator_t {
   // capacity. Borrowed through service retirement and never dereferenced here.
   const void* capacity_domain;
   // Optional copied parameter activity, queried only on serialized owner turns.
-  loom_serve_weight_activity_t (*weight_activity)(void* self);
+  loom_runtime_parameter_activity_t (*parameter_activity)(void* self);
 } loom_serve_speech_generator_t;
 
 #ifdef __cplusplus

@@ -11,6 +11,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/serve/service/text/telemetry.h"
+#include "loom/service/telemetry/record.h"
 
 namespace {
 
@@ -75,7 +76,7 @@ class TextCheckpointControlTest : public ::testing::Test {
 
   void TearDown() override {
     if (consumer_.self) {
-      consumer_.abort(consumer_.self, LOOM_SERVE_TELEMETRY_CANCELLED,
+      consumer_.abort(consumer_.self, LOOM_SERVICE_TELEMETRY_CANCELLED,
                       iree_status_from_code(IREE_STATUS_CANCELLED), &telemetry_,
                       &receipt_);
     }
@@ -127,7 +128,7 @@ TEST_F(TextCheckpointControlTest, CloseRetainsExecutionReceiptUntilAbort) {
   loom_serve_text_checkpoint_control_close(control_);
   control_ = nullptr;
   EXPECT_FALSE(consumer_.is_open(consumer_.self));
-  consumer_.abort(consumer_.self, LOOM_SERVE_TELEMETRY_CANCELLED,
+  consumer_.abort(consumer_.self, LOOM_SERVICE_TELEMETRY_CANCELLED,
                   iree_status_from_code(IREE_STATUS_CANCELLED), &telemetry_,
                   &receipt_);
   consumer_ = {};
@@ -152,7 +153,7 @@ TEST_F(TextCheckpointControlTest, RejectionOwnsStatusBeyondDelivery) {
 
 TEST_F(TextCheckpointControlTest, FailedRetirementPublishesFailure) {
   auto failure = iree_make_status(IREE_STATUS_ABORTED, "device work failed");
-  consumer_.abort(consumer_.self, LOOM_SERVE_TELEMETRY_FAILED, failure,
+  consumer_.abort(consumer_.self, LOOM_SERVICE_TELEMETRY_FAILED, failure,
                   &telemetry_, &receipt_);
   consumer_ = {};
   iree_status_free(failure);

@@ -523,7 +523,7 @@ TEST_F(CachedSequenceCohortTest, FittingCachedCohortTrimsAtEpochBoundary) {
     const size_t first = (cohort % 2) * 4;
     std::vector<int> clients;
     uint64_t cursor =
-        loom_serve_telemetry_stream_head(interface.telemetry.stream);
+        loom_runtime_telemetry_stream_head(interface.telemetry.stream);
     for (size_t i = first; i < first + 4; ++i) {
       const int32_t token = static_cast<int32_t>((i + cohort) % 3);
       clients.push_back(
@@ -542,12 +542,12 @@ TEST_F(CachedSequenceCohortTest, FittingCachedCohortTrimsAtEpochBoundary) {
     }
     size_t admitted = 0, trims = 0, epochs = 0;
     const auto head =
-        loom_serve_telemetry_stream_head(interface.telemetry.stream);
+        loom_runtime_telemetry_stream_head(interface.telemetry.stream);
     while (cursor < head) {
-      loom_serve_telemetry_record_t record;
-      ASSERT_EQ(loom_serve_telemetry_stream_read(interface.telemetry.stream,
-                                                 &cursor, &record),
-                LOOM_SERVE_TELEMETRY_READ_RECORD);
+      loom_runtime_telemetry_record_t record;
+      ASSERT_EQ(loom_runtime_telemetry_stream_read(interface.telemetry.stream,
+                                                   &cursor, &record),
+                LOOM_RUNTIME_TELEMETRY_READ_RECORD);
       const std::string event = record.event->name;
       if (event == "admit") {
         ++admitted;

@@ -1641,6 +1641,7 @@ loom_cc_test(
         ":test_compiler",
         ":test_device",
         "//loom/binding/c:loomc",
+        "//loom/src/loom/runtime/parameter:telemetry",
         "//loom/src/loom/serve/runtime/device",
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/parameter:activation",

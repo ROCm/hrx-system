@@ -110,7 +110,7 @@ iree_hal_pool_stats_t loom_serve_workspace_statistics(
 
 // Physical-owner ledger for virtual workspace ranges, without collecting or
 // querying native work. Zero for fixed backing. Called on the serialized owner.
-loom_serve_memory_usage_t loom_serve_workspace_memory_usage(
+loom_runtime_storage_usage_t loom_serve_workspace_memory_usage(
     const loom_serve_workspace_t* workspace);
 
 // Actual committed or pending backing unavailable to pressure reclamation.

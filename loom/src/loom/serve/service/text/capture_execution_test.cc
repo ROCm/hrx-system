@@ -118,9 +118,9 @@ TEST_F(SourceEncodingExecutionTest, SelectionRejectsBeforeMutation) {
   const int32_t token = 0;
   loom_serve_execution_frontier_t ready;
   const auto initial = loom_serve_text_model_pool_usage(model_);
-  for (uint32_t flags : {uint32_t{LOOM_SERVE_TEXT_SPAN_FLAG_SELECT},
-                         uint32_t{LOOM_SERVE_TEXT_SPAN_FLAG_SELECT |
-                                  LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE}}) {
+  for (uint32_t flags : {uint32_t{LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT},
+                         uint32_t{LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT |
+                                  LOOM_SERVICE_TEXT_SPAN_FLAG_PROPOSE}}) {
     const loom_serve_text_span_t span = {0, 1, &token, flags};
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,

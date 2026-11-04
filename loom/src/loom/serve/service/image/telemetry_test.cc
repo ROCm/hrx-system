@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/serve/service/image/telemetry.h"
+#include "loom/service/image/telemetry.h"
 
 #include <array>
 
@@ -12,15 +12,15 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/runtime/telemetry/field.h"
+#include "loom/runtime/telemetry/stream.h"
 #include "loom/serve/telemetry/record.h"
-#include "loom/serve/telemetry/stream.h"
 
 namespace {
 
 TEST(ImageTelemetryTest, SamplesCompletedWorkWithoutAnEventStream) {
-  const loom_serve_image_totals_t totals = {
+  const loom_service_image_totals_t totals = {
       1, UINT64_MAX, {3, 4, 5, 6, 7, 8, 9, 10}};
-  IREE_ASSERT_OK(loom_serve_image_sample_totals(
+  IREE_ASSERT_OK(loom_service_image_sample_totals(
       &totals, {nullptr, [](void*, const loom_runtime_telemetry_topic_t* topic,
                             const uint64_t* values) {
                   EXPECT_STREQ(topic->name, "image");
@@ -40,21 +40,21 @@ TEST(ImageTelemetryTest, SamplesCompletedWorkWithoutAnEventStream) {
 }
 
 TEST(ImageTelemetryTest, PreparedFieldsPreserveSignedTagsAfterRetirement) {
-  loom_serve_telemetry_stream_t* stream = nullptr;
-  IREE_ASSERT_OK(loom_serve_telemetry_stream_allocate(
+  loom_runtime_telemetry_stream_t* stream = nullptr;
+  IREE_ASSERT_OK(loom_runtime_telemetry_stream_allocate(
       2, iree_allocator_system(), &stream));
   for (uint64_t request = 1; request <= 2; ++request) {
-    const loom_serve_image_prepared_t prepared = {
+    const loom_service_image_prepared_t prepared = {
         1, request == 1 ? INT64_MIN : INT64_MAX, 48};
-    loom_serve_image_record_prepared(stream, request, &prepared);
+    loom_service_image_record_prepared(stream, request, &prepared);
   }
-  std::array<loom_serve_telemetry_record_t, 2> records;
+  std::array<loom_runtime_telemetry_record_t, 2> records;
   uint64_t cursor = 0;
   for (auto& record : records) {
-    ASSERT_EQ(loom_serve_telemetry_stream_read(stream, &cursor, &record),
-              LOOM_SERVE_TELEMETRY_READ_RECORD);
+    ASSERT_EQ(loom_runtime_telemetry_stream_read(stream, &cursor, &record),
+              LOOM_RUNTIME_TELEMETRY_READ_RECORD);
   }
-  loom_serve_telemetry_stream_free(stream);
+  loom_runtime_telemetry_stream_free(stream);
   for (const auto& record : records) {
     int64_t expected_tag = record.request == 1 ? INT64_MIN : INT64_MAX;
     IREE_ASSERT_OK(record.event->read_fields(

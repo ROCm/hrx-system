@@ -7,6 +7,7 @@
 #include "loom/serve/service/speech/voice.h"
 
 #include "iree/base/internal/unicode.h"
+#include "loom/service/telemetry/record.h"
 
 iree_status_t loom_serve_speech_voice_request_initialize(
     iree_string_view_t id, iree_string_view_t content_type,
@@ -94,11 +95,11 @@ static void loom_serve_speech_voice_upload_cancel(void* self) {
 }
 
 static iree_status_t loom_serve_speech_voice_upload_end(
-    void* self, loom_serve_telemetry_outcome_t outcome,
+    void* self, loom_service_telemetry_outcome_t outcome,
     const iree_status_t status) {
   loom_serve_speech_voice_upload_t* upload = self;
   upload->service_open = false;
-  if (outcome != LOOM_SERVE_TELEMETRY_COMPLETED) {
+  if (outcome != LOOM_SERVICE_TELEMETRY_COMPLETED) {
     upload->status = iree_status_is_ok(status)
                          ? iree_status_from_code(IREE_STATUS_CANCELLED)
                          : iree_status_clone(status);

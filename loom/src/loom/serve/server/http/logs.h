@@ -7,7 +7,8 @@
 #ifndef LOOM_SERVE_SERVER_HTTP_LOGS_H_
 #define LOOM_SERVE_SERVER_HTTP_LOGS_H_
 
-#include "loom/serve/telemetry/stream.h"
+#include "loom/runtime/telemetry/stream.h"
+#include "loom/service/telemetry/record.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,7 +19,7 @@ extern "C" {
 // stream incarnation with FAILED_PRECONDITION. Later owner turns carry the
 // returned position directly and verify the selected stream's lifetime.
 iree_status_t loom_serve_http_logs_resume(
-    const loom_serve_telemetry_stream_t* stream, iree_string_view_t cursor,
+    const loom_runtime_telemetry_stream_t* stream, iree_string_view_t cursor,
     uint64_t* out_position);
 
 typedef enum loom_serve_http_logs_flag_bits_e {
@@ -36,8 +37,8 @@ typedef uint32_t loom_serve_http_logs_flags_t;
 // the owner preserves that identity before subsequent calls. No record slot
 // or counter pointer escapes. NULL counters reports unavailable, not zero.
 iree_status_t loom_serve_http_logs_format(
-    const loom_serve_telemetry_stream_t* stream,
-    const loom_serve_telemetry_counters_t* counters, iree_string_view_t model,
+    const loom_runtime_telemetry_stream_t* stream,
+    const loom_service_telemetry_counters_t* counters, iree_string_view_t model,
     loom_serve_http_logs_flags_t flags, uint64_t* position,
     iree_string_builder_t* output);
 
@@ -51,8 +52,8 @@ iree_status_t loom_serve_http_logs_format(
 // An empty model name selects server scope. A NULL counters pointer omits the
 // current snapshot and reports counters_available=false, not invented zeros.
 iree_status_t loom_serve_http_logs(
-    const loom_serve_telemetry_stream_t* stream,
-    const loom_serve_telemetry_counters_t* counters, iree_string_view_t model,
+    const loom_runtime_telemetry_stream_t* stream,
+    const loom_service_telemetry_counters_t* counters, iree_string_view_t model,
     iree_string_view_t cursor, iree_string_builder_t* output);
 
 #ifdef __cplusplus

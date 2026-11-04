@@ -9,6 +9,8 @@
 #include <math.h>
 #include <string.h>
 
+#include "loom/service/telemetry/record.h"
+
 struct loom_serve_speech_stream_t {
   // Allocator owning the handle and its bounded waveform storage.
   iree_allocator_t host_allocator;
@@ -82,11 +84,11 @@ static void loom_serve_speech_stream_cancel(void* self) {
 }
 
 static iree_status_t loom_serve_speech_stream_end(
-    void* self, loom_serve_telemetry_outcome_t outcome,
+    void* self, loom_service_telemetry_outcome_t outcome,
     const iree_status_t status) {
   loom_serve_speech_stream_t* stream = self;
   stream->service_open = false;
-  if (outcome != LOOM_SERVE_TELEMETRY_COMPLETED) {
+  if (outcome != LOOM_SERVICE_TELEMETRY_COMPLETED) {
     stream->published = false;
     stream->status = iree_status_is_ok(status)
                          ? iree_status_from_code(IREE_STATUS_CANCELLED)

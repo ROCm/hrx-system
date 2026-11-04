@@ -98,7 +98,7 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
     const auto before_filler = loom_serve_memory_pool_statistics(memory_pool);
     ASSERT_GT(before_filler.cached_bytes, 0u);
     ASSERT_EQ(before_filler.cached_bytes % native_size, 0u);
-    loom_serve_memory_statistics_t filler_statistics = {0};
+    loom_runtime_storage_statistics_t filler_statistics = {0};
     loom_serve_virtual_buffer_t* filler = nullptr;
     IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
         memory_pool, loom_serve_pool_state_geometry(storage_owner_),
@@ -199,7 +199,7 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
     IREE_ASSERT_OK(iree_hal_semaphore_create(
         loom_serve_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
         0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &filler_ready_));
-    loom_serve_memory_statistics_t before_filler = {};
+    loom_runtime_storage_statistics_t before_filler = {};
     // The fixture has one worker: owner turns exclude router pool accesses,
     // while native readiness is awaited only by the outer test thread.
     ASSERT_EQ(WorkerCount(), 1u);
@@ -274,7 +274,7 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
   // Spare shared backing held through router shutdown in cold-admission cases.
   loom_serve_virtual_buffer_t* filler_ = nullptr;
   // Accounting outlives the filler's asynchronous commitment and destruction.
-  loom_serve_memory_statistics_t filler_statistics_ = {};
+  loom_runtime_storage_statistics_t filler_statistics_ = {};
   // Accepted commitment retained until the serialized router owner has joined.
   loom_serve_memory_operation_t* filler_operation_ = nullptr;
   // Native readiness waited by the outer test without publishing pool state.

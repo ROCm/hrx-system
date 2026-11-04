@@ -203,7 +203,7 @@ TEST_F(RegisteredReconfigurationHttpTextTest,
 TEST_F(ReconfigurationHttpTextTest,
        StageSelectRollbackPreserveWeightsAndConversation) {
   IREE_ASSERT_OK(loom_serve_text_model_activate(model_));
-  const auto weights = loom_serve_text_model_weight_activity(model_);
+  const auto weights = loom_serve_text_model_parameter_activity(model_);
   Start();
   const auto listing = Inventory();
   ASSERT_EQ(listing.find("HTTP/1.1 200"), 0u) << listing;
@@ -271,7 +271,7 @@ TEST_F(ReconfigurationHttpTextTest,
   // mutable model state into this test thread.
   loom_serve_http_server_request_stop(server_);
   IREE_ASSERT_OK(http_.Join());
-  const auto retained = loom_serve_text_model_weight_activity(model_);
+  const auto retained = loom_serve_text_model_parameter_activity(model_);
   EXPECT_EQ(retained.read_bytes, weights.read_bytes);
   EXPECT_EQ(retained.prepared_bytes, weights.prepared_bytes);
   EXPECT_EQ(retained.activations, weights.activations);

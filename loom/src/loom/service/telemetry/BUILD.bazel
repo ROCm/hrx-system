@@ -1,0 +1,89 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+loom_cc_library(
+    name = "record",
+    srcs = ["record.c"],
+    hdrs = ["record.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime/telemetry:field",
+        "//loom/src/loom/runtime/telemetry:record",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "latency",
+    srcs = ["latency.c"],
+    hdrs = ["latency.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":record",
+        "//loom/src/loom/runtime/telemetry:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "latency_test",
+    srcs = ["latency_test.cc"],
+    deps = [
+        ":latency",
+        ":record",
+        "//loom/src/loom/runtime/telemetry:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "tracing",
+    srcs = ["tracing.c"],
+    hdrs = ["tracing.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "tracing_test",
+    srcs = ["tracing_test.cc"],
+    target_compatible_with = select({
+        "//runtime/config/base/tracing:provider_console": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":tracing",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_assert_dependency_boundary(
+    name = "telemetry_is_service_only",
+    forbidden_subtrees = [
+        "//loom/binding/...",
+        "//loom/src/loom/serve/...",
+        "//loom/src/loom/service/text/...",
+        "//loom/src/loom/service/image/...",
+        "//loom/src/loom/target/...",
+    ],
+    message = "Shared service telemetry must not import serving or modality implementation",
+    target = ":latency",
+)

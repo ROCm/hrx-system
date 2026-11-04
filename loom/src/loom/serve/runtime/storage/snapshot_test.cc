@@ -109,7 +109,7 @@ class SnapshotTest : public ::testing::Test {
   // Physical budget enclosing both independent roots.
   loom_serve_memory_pool_t* pool = nullptr;
   // Accounting survives destruction and replacement of the roots.
-  loom_serve_memory_statistics_t statistics = {};
+  loom_runtime_storage_statistics_t statistics = {};
   // Counter enclosing all exported root references before address release.
   loom_serve_retirement_t retirement = {};
   // Owned tracked views retained through successful or failed transfers.

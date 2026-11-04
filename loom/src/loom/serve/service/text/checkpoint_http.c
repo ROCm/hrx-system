@@ -7,6 +7,7 @@
 #include "loom/serve/service/text/checkpoint_http.h"
 
 #include "loom/serve/service/text/http.h"
+#include "loom/service/telemetry/record.h"
 
 iree_status_t loom_serve_text_checkpoint_http_parse(
     const loom_serve_http_request_t* request,
@@ -44,7 +45,7 @@ static bool loom_serve_text_checkpoint_http_open(void* self) {
 }
 
 static void loom_serve_text_checkpoint_http_abort(
-    void* self, loom_serve_telemetry_outcome_t outcome,
+    void* self, loom_service_telemetry_outcome_t outcome,
     const iree_status_t status, loom_serve_text_telemetry_t* telemetry,
     const loom_serve_text_receipt_t* receipt) {
   loom_serve_text_telemetry_end(telemetry, *receipt, outcome, 0, status);
@@ -94,7 +95,7 @@ static iree_status_t loom_serve_text_checkpoint_http_end(
       request->name.data, result->position, release ? "false" : "true",
       result->host_bytes);
   if (!iree_status_is_ok(status)) {
-    loom_serve_text_checkpoint_http_abort(self, LOOM_SERVE_TELEMETRY_FAILED,
+    loom_serve_text_checkpoint_http_abort(self, LOOM_SERVICE_TELEMETRY_FAILED,
                                           status, telemetry, receipt);
     return status;
   }
@@ -102,11 +103,11 @@ static iree_status_t loom_serve_text_checkpoint_http_end(
       loom_serve_http_connection_send(self, iree_string_builder_view(scratch));
   if (iree_status_is_ok(sent)) {
     loom_serve_text_telemetry_end(telemetry, *receipt,
-                                  LOOM_SERVE_TELEMETRY_COMPLETED, 0, sent);
+                                  LOOM_SERVICE_TELEMETRY_COMPLETED, 0, sent);
     loom_serve_http_connection_finish(self);
   } else {
-    loom_serve_text_checkpoint_http_abort(self, LOOM_SERVE_TELEMETRY_CANCELLED,
-                                          sent, telemetry, receipt);
+    loom_serve_text_checkpoint_http_abort(
+        self, LOOM_SERVICE_TELEMETRY_CANCELLED, sent, telemetry, receipt);
     iree_status_free(sent);
   }
   return iree_ok_status();

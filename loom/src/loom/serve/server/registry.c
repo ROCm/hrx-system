@@ -10,7 +10,8 @@
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/service/kind.h"
 #include "loom/serve/service/text/checkpoint_control.h"
-#include "loom/serve/telemetry/tracing.h"
+#include "loom/service/telemetry/record.h"
+#include "loom/service/telemetry/tracing.h"
 
 struct loom_serve_registry_t {
   // Allocator owning the table and registration operations.
@@ -30,9 +31,9 @@ struct loom_serve_registry_t {
   // Final observations accumulated exactly once before registration slot reuse.
   struct {
     // Completed work from removed incarnations.
-    loom_serve_telemetry_counters_t counters;
+    loom_service_telemetry_counters_t counters;
     // Terminal duration distributions from removed incarnations.
-    loom_serve_telemetry_latency_t latency;
+    loom_service_telemetry_latency_t latency;
   } retired;
 };
 
@@ -54,11 +55,11 @@ static void loom_serve_registry_set_phase(
       IREE_TRACE_SECTION_LEAVE(model->trace.lifecycle);
       model->trace.lifecycle = 0;
       if (phase == LOOM_SERVE_REGISTRATION_PREPARING) {
-        model->trace.lifecycle = loom_serve_trace_section_enter(
-            LOOM_SERVE_TRACE_SECTION_PREPARE, model->service.name);
+        model->trace.lifecycle = loom_service_trace_section_enter(
+            LOOM_SERVICE_TRACE_SECTION_PREPARE, model->service.name);
       } else if (phase == LOOM_SERVE_REGISTRATION_RETIRING) {
-        model->trace.lifecycle = loom_serve_trace_section_enter(
-            LOOM_SERVE_TRACE_SECTION_RETIRE, model->service.name);
+        model->trace.lifecycle = loom_service_trace_section_enter(
+            LOOM_SERVICE_TRACE_SECTION_RETIRE, model->service.name);
       }
     }
   });
@@ -80,9 +81,9 @@ static void loom_serve_registry_set_parameter_operation(
       IREE_TRACE_SECTION_LEAVE(model->trace.parameters);
       model->trace.parameters =
           operation != LOOM_SERVE_PARAMETER_OPERATION_NONE
-              ? loom_serve_trace_section_enter(
-                    is_warmup ? LOOM_SERVE_TRACE_SECTION_WARMUP
-                              : LOOM_SERVE_TRACE_SECTION_DEACTIVATE,
+              ? loom_service_trace_section_enter(
+                    is_warmup ? LOOM_SERVICE_TRACE_SECTION_WARMUP
+                              : LOOM_SERVICE_TRACE_SECTION_DEACTIVATE,
                     model->service.name)
               : 0;
     }
@@ -91,8 +92,8 @@ static void loom_serve_registry_set_parameter_operation(
 }
 
 static void loom_serve_registry_add_counters(
-    loom_serve_telemetry_counters_t* target,
-    const loom_serve_telemetry_counters_t* source) {
+    loom_service_telemetry_counters_t* target,
+    const loom_service_telemetry_counters_t* source) {
   target->requests += source->requests;
   target->completed += source->completed;
   target->rejected += source->rejected;
@@ -146,14 +147,14 @@ iree_status_t loom_serve_registry_allocate(
                                          (void**)&registry->models);
   }
   if (iree_status_is_ok(status)) {
-    IREE_TRACE(loom_serve_trace_initialize());
+    IREE_TRACE(loom_service_trace_initialize());
     const int64_t registered_unix_seconds = loom_serve_clock_now_unix_seconds();
     for (iree_host_size_t i = 0; i < service_count; ++i) {
       registry->models[i].service = services[i];
       registry->models[i].phase = LOOM_SERVE_REGISTRATION_READY;
       registry->models[i].registered_unix_seconds = registered_unix_seconds;
       const iree_time_t since_ns = services[i].telemetry.stream
-                                       ? loom_serve_telemetry_stream_identity(
+                                       ? loom_runtime_telemetry_stream_identity(
                                              services[i].telemetry.stream)
                                              .created_ns
                                        : 0;
@@ -186,7 +187,7 @@ iree_status_t loom_serve_registry_free(loom_serve_registry_t* registry) {
     IREE_TRACE_SECTION_LEAVE(model->trace.lifecycle);
     IREE_TRACE_SECTION_LEAVE(model->trace.parameters);
     iree_status_free(model->status);
-    loom_serve_telemetry_stream_free(model->stream);
+    loom_runtime_telemetry_stream_free(model->stream);
     loom_serve_model_configuration_deinitialize(&model->configuration);
   }
   iree_allocator_free(registry->host_allocator, registry->models);
@@ -426,7 +427,7 @@ iree_status_t loom_serve_registry_register(
     configuration->pool = iree_make_string_view(storage, name.size);
   }
   loom_serve_registered_model_t* model = &registry->models[available];
-  IREE_RETURN_IF_ERROR(loom_serve_telemetry_stream_allocate(
+  IREE_RETURN_IF_ERROR(loom_runtime_telemetry_stream_allocate(
       128, registry->host_allocator, &model->stream));
   model->configuration = *configuration;
   model->configuration.device_index = device_index;
@@ -443,11 +444,13 @@ iree_status_t loom_serve_registry_register(
   model->service.telemetry.counters = &model->counters;
   model->service.telemetry.latency = &model->latency;
   model->service.telemetry.stream = model->stream;
-  const loom_serve_telemetry_record_t begin = {
+  loom_runtime_telemetry_record_t begin = {
       .time_ns = iree_time_now(),
-      .event = &LOOM_SERVE_TELEMETRY_STREAM_BEGIN,
-      .data.snapshot.phase = "registered"};
-  loom_serve_telemetry_stream_append(model->stream, &begin);
+      .event = &LOOM_SERVICE_TELEMETRY_STREAM_BEGIN};
+  loom_service_telemetry_snapshot_record_t telemetry_payload = {
+      .phase = "registered"};
+  memcpy(begin.data.words, &telemetry_payload, sizeof(telemetry_payload));
+  loom_runtime_telemetry_stream_append(model->stream, &begin);
   ++registry->count;
   *out_index = available;
   return iree_ok_status();
@@ -632,10 +635,12 @@ static void loom_serve_registry_release_service(
 
 static void loom_serve_registry_record_error(
     loom_serve_registered_model_t* model, const iree_status_t status) {
-  loom_serve_telemetry_record_t record = {.time_ns = iree_time_now(),
-                                          .event = &LOOM_SERVE_TELEMETRY_ERROR};
-  loom_serve_telemetry_diagnostic_capture(status, &record.data.error);
-  loom_serve_telemetry_stream_append(model->stream, &record);
+  loom_runtime_telemetry_record_t record = {
+      .time_ns = iree_time_now(), .event = &LOOM_SERVICE_TELEMETRY_ERROR};
+  loom_service_telemetry_diagnostic_t telemetry_payload = {0};
+  loom_service_telemetry_diagnostic_capture(status, &telemetry_payload);
+  memcpy(record.data.words, &telemetry_payload, sizeof(telemetry_payload));
+  loom_runtime_telemetry_stream_append(model->stream, &record);
 }
 
 iree_status_t loom_serve_registry_fail(loom_serve_registry_t* registry,
@@ -871,13 +876,14 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
     }
   }
   if (model->phase != previous_phase) {
-    loom_serve_telemetry_record_t record = {
-        .time_ns = iree_time_now(),
-        .event = &LOOM_SERVE_TELEMETRY_SNAPSHOT,
-        .data.snapshot.counters = model->counters};
+    loom_runtime_telemetry_record_t record = {
+        .time_ns = iree_time_now(), .event = &LOOM_SERVICE_TELEMETRY_SNAPSHOT};
+    loom_service_telemetry_snapshot_record_t telemetry_payload = {
+        .counters = model->counters};
     const char* phase = loom_serve_registry_phase(model);
-    memcpy(record.data.snapshot.phase, phase, strlen(phase) + 1);
-    loom_serve_telemetry_stream_append(model->stream, &record);
+    memcpy(telemetry_payload.phase, phase, strlen(phase) + 1);
+    memcpy(record.data.words, &telemetry_payload, sizeof(telemetry_payload));
+    loom_runtime_telemetry_stream_append(model->stream, &record);
   }
   if (model->removal && !model->resolution && !model->registration.self &&
       !model->held_count && !model->tokenizer_count) {
@@ -885,10 +891,10 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
     IREE_TRACE_SECTION_LEAVE(model->trace.parameters);
     loom_serve_registry_add_counters(&registry->retired.counters,
                                      &model->counters);
-    loom_serve_telemetry_latency_merge(&registry->retired.latency,
-                                       &model->latency);
+    loom_service_telemetry_latency_merge(&registry->retired.latency,
+                                         &model->latency);
     iree_status_free(model->status);
-    loom_serve_telemetry_stream_free(model->stream);
+    loom_runtime_telemetry_stream_free(model->stream);
     loom_serve_model_configuration_deinitialize(&model->configuration);
     memset(model, 0, sizeof(*model));
     --registry->count;
@@ -924,7 +930,7 @@ uint64_t loom_serve_registry_preparation_duration_ns(
 
 bool loom_serve_registry_counters(
     const loom_serve_registry_t* registry,
-    loom_serve_telemetry_counters_t* out_counters) {
+    loom_service_telemetry_counters_t* out_counters) {
   *out_counters = registry->retired.counters;
   for (iree_host_size_t i = 0; i < registry->capacity; ++i) {
     const loom_serve_service_t* service = &registry->models[i].service;
@@ -939,8 +945,9 @@ bool loom_serve_registry_counters(
   return true;
 }
 
-bool loom_serve_registry_latency(const loom_serve_registry_t* registry,
-                                 loom_serve_telemetry_latency_t* out_latency) {
+bool loom_serve_registry_latency(
+    const loom_serve_registry_t* registry,
+    loom_service_telemetry_latency_t* out_latency) {
   *out_latency = registry->retired.latency;
   for (iree_host_size_t i = 0; i < registry->capacity; ++i) {
     const loom_serve_service_t* service = &registry->models[i].service;
@@ -950,7 +957,8 @@ bool loom_serve_registry_latency(const loom_serve_registry_t* registry,
     if (!service->telemetry.latency) {
       return false;
     }
-    loom_serve_telemetry_latency_merge(out_latency, service->telemetry.latency);
+    loom_service_telemetry_latency_merge(out_latency,
+                                         service->telemetry.latency);
   }
   return true;
 }

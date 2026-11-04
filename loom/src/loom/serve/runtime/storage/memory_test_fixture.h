@@ -518,7 +518,7 @@ class MemoryTest : public ::testing::Test {
   // Native address geometry qualified against the private pool's real source.
   iree_hal_virtual_buffer_capabilities_t reservation_capabilities = {};
   // Independent accounting groups competing for the same physical budget.
-  std::array<loom_serve_memory_statistics_t, 3> statistics = {};
+  std::array<loom_runtime_storage_statistics_t, 3> statistics = {};
   // First model-like reservation with independently owned sparse backing.
   loom_serve_virtual_buffer_t* first = nullptr;
   // Independent reservation competing for the same physical budget.

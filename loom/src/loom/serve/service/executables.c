@@ -182,7 +182,7 @@ struct loom_serve_executables_t {
     // Unborrowed banks awaiting asynchronous consumer/native retirement.
     loom_serve_checkpoint_t* retired;
     // Cumulative activity of destroyed entries, independent of cache retention.
-    loom_serve_weight_activity_t activity;
+    loom_runtime_parameter_activity_t activity;
     // Cumulative physical returns from destroyed banks.
     uint64_t released_bytes;
     // Physical retention policy inherited by newly prepared cache entries.
@@ -245,8 +245,9 @@ static void loom_serve_checkpoint_touch(loom_serve_executables_t* executables,
   executables->parameters.entries = checkpoint;
 }
 
-static void loom_serve_weight_activity_add(loom_serve_weight_activity_t* total,
-                                           loom_serve_weight_activity_t value) {
+static void loom_serve_parameter_activity_add(
+    loom_runtime_parameter_activity_t* total,
+    loom_runtime_parameter_activity_t value) {
   total->activations += value.activations;
   total->deactivations += value.deactivations;
   total->read_bytes += value.read_bytes;
@@ -742,16 +743,16 @@ iree_status_t loom_serve_executables_query_status(
         checkpoint->bank
             ? loom_serve_parameter_bank_weights(checkpoint->bank, 0)
             : NULL;
-    const loom_serve_weight_activity_t activity =
+    const loom_runtime_parameter_activity_t activity =
         weights ? loom_serve_weights_activity(weights)
-                : (loom_serve_weight_activity_t){0};
-    const loom_serve_memory_statistics_t memory =
+                : (loom_runtime_parameter_activity_t){0};
+    const loom_runtime_storage_statistics_t memory =
         weights ? loom_serve_weights_statistics(weights)
-                : (loom_serve_memory_statistics_t){0};
+                : (loom_runtime_storage_statistics_t){0};
     status = loom_serve_parameter_bank_free(checkpoint->bank);
     if (iree_status_is_ok(status)) {
-      loom_serve_weight_activity_add(&executables->parameters.activity,
-                                     activity);
+      loom_serve_parameter_activity_add(&executables->parameters.activity,
+                                        activity);
       executables->parameters.released_bytes +=
           memory.released_bytes + memory.committed_bytes;
       if (checkpoint->arena) {
@@ -796,8 +797,8 @@ loom_serve_residency_snapshot_t loom_serve_executables_parameters(
       loom_serve_residency_statistics(executables->options.residency);
   result.activity =
       loom_serve_residency_activity(executables->options.residency);
-  loom_serve_weight_activity_add(&result.activity,
-                                 executables->parameters.activity);
+  loom_serve_parameter_activity_add(&result.activity,
+                                    executables->parameters.activity);
   result.memory.released_bytes += executables->parameters.released_bytes;
   const uint32_t arena_count =
       loom_serve_preparation_arena_count(executables->options.preparation);
@@ -820,7 +821,7 @@ loom_serve_residency_snapshot_t loom_serve_executables_parameters(
       if (!weights) {
         continue;
       }
-      const loom_serve_memory_statistics_t memory =
+      const loom_runtime_storage_statistics_t memory =
           loom_serve_weights_statistics(weights);
       if (!entry->arena) {
         result.memory.reserved_bytes += memory.reserved_bytes;
@@ -829,8 +830,8 @@ loom_serve_residency_snapshot_t loom_serve_executables_parameters(
       result.memory.pending_bytes += memory.pending_bytes;
       result.memory.releasing_bytes += memory.releasing_bytes;
       result.memory.released_bytes += memory.released_bytes;
-      loom_serve_weight_activity_add(&result.activity,
-                                     loom_serve_weights_activity(weights));
+      loom_serve_parameter_activity_add(&result.activity,
+                                        loom_serve_weights_activity(weights));
     }
   }
   return result;

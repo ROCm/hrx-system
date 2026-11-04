@@ -8,9 +8,10 @@
 
 #include <inttypes.h>
 
+#include "loom/runtime/telemetry/stream.h"
 #include "loom/serve/service/kind.h"
 #include "loom/serve/telemetry/sample.h"
-#include "loom/serve/telemetry/stream.h"
+#include "loom/service/telemetry/record.h"
 #include "loom/util/json.h"
 
 typedef struct loom_serve_observation_source_t {
@@ -110,7 +111,7 @@ static iree_status_t loom_serve_observation_update(
 }
 
 static iree_status_t loom_serve_observation_counters(
-    const loom_serve_telemetry_counters_t* counters,
+    const loom_service_telemetry_counters_t* counters,
     iree_string_builder_t* output) {
   if (!counters) {
     return iree_string_builder_append_cstring(output, "null");
@@ -186,7 +187,7 @@ static iree_status_t loom_serve_observation_model(
       loom_serve_observation_counters(service->telemetry.counters, output));
   IREE_RETURN_IF_ERROR(loom_serve_observation_epoch(
       service->telemetry.stream
-          ? loom_serve_telemetry_stream_identity(service->telemetry.stream)
+          ? loom_runtime_telemetry_stream_identity(service->telemetry.stream)
                 .created_ns
           : 0,
       output));
@@ -217,7 +218,7 @@ iree_status_t loom_serve_observation_sample(
   loom_serve_registry_t* registry = observation->registry;
   iree_string_builder_reset(output);
   if (!*cursor) {
-    loom_serve_telemetry_counters_t counters;
+    loom_service_telemetry_counters_t counters;
     const bool available = loom_serve_registry_counters(registry, &counters);
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         output,

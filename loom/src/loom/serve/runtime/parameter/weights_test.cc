@@ -316,7 +316,7 @@ TEST_P(WeightsTest, SharedActivationImportsReadinessWithoutReloading) {
   IREE_ASSERT_OK(iree_hal_semaphore_create(
       device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &consumer_gate_));
-  loom_serve_weight_activity_t activity = {};
+  loom_runtime_parameter_activity_t activity = {};
   {
     // Elastic backing cannot finish while the actual native allocator is
     // held. Both consumers must inherit that dependency without host waits.
@@ -701,7 +701,7 @@ TEST_P(WeightsTest, CachedConsumersSurviveBackingReuseAndPreparationReplay) {
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).cached_bytes,
             2 * kSlabBytes);
   loom_serve_virtual_buffer_t* other = nullptr;
-  loom_serve_memory_statistics_t other_statistics = {};
+  loom_runtime_storage_statistics_t other_statistics = {};
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
       pool_, loom_serve_pool_state_geometry(storage_owner_), 2 * kSlabBytes,
       256, &other_statistics, &other));
@@ -1356,7 +1356,7 @@ TEST_P(WeightsTest, ReclaimsIdleHistoryOnlyWhenProtectedParametersFit) {
   IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(state_, 0, kSlabBytes));
   struct loom_serve_test_weight_cache_owner_t {
     // Actual source ledger, shared with this test's real virtual reservation.
-    const loom_serve_memory_statistics_t* memory;
+    const loom_runtime_storage_statistics_t* memory;
     // Logical ownership can be released once, independently of physical trim.
     bool retained = true;
     // Accepted maintenance keeps backing alive until its owner retires it.

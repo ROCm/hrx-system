@@ -12,15 +12,16 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/test_allocator.h"
 #include "loom/runtime/telemetry/sample.h"
+#include "loom/runtime/telemetry/stream.h"
 #include "loom/serve/service/service.h"
-#include "loom/serve/telemetry/stream.h"
+#include "loom/service/telemetry/record.h"
 
 namespace {
 
 class ObservationTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    IREE_ASSERT_OK(loom_serve_telemetry_stream_allocate(
+    IREE_ASSERT_OK(loom_runtime_telemetry_stream_allocate(
         4, iree_allocator_system(), &stream_));
     const loom_serve_service_t service = {
         .name = IREE_SV("model"),
@@ -62,7 +63,7 @@ class ObservationTest : public ::testing::Test {
     iree_string_builder_deinitialize(&output_);
     loom_serve_observation_free(observation_);
     IREE_EXPECT_OK(loom_serve_registry_free(registry_));
-    loom_serve_telemetry_stream_free(stream_);
+    loom_runtime_telemetry_stream_free(stream_);
   }
 
   void Sample(iree_time_t now) {
@@ -85,7 +86,7 @@ class ObservationTest : public ::testing::Test {
   // Real registry and observation owner; the service dependency supplies facts.
   loom_serve_registry_t* registry_ = nullptr;
   // Real borrowed telemetry lifetime, owned until registry retirement.
-  loom_serve_telemetry_stream_t* stream_ = nullptr;
+  loom_runtime_telemetry_stream_t* stream_ = nullptr;
   // Copied source cache independent of service storage and reader count.
   loom_serve_observation_t* observation_ = nullptr;
   // Borrowed application resources; service-only tests have no device binding.
@@ -97,7 +98,7 @@ class ObservationTest : public ::testing::Test {
   // Reusable view over storage_, never a growable output.
   iree_string_builder_t output_ = {};
   // Service-owned common counters.
-  loom_serve_telemetry_counters_t counters_ = {};
+  loom_service_telemetry_counters_t counters_ = {};
   // Source-defined gauge, independent of common request counters.
   uint64_t resident_ = 4096;
   // Scheduler-owned current activity.
@@ -107,7 +108,7 @@ class ObservationTest : public ::testing::Test {
 };
 
 TEST_F(ObservationTest, LifetimeEpochIsCopiedAndIndependentOfReaderAdmission) {
-  const auto since = loom_serve_telemetry_stream_identity(stream_).created_ns;
+  const auto since = loom_runtime_telemetry_stream_identity(stream_).created_ns;
   EXPECT_EQ(loom_serve_registry_counters_since_ns(registry_), since);
   counters_.requests = counters_.completed = 17;
   Sample(since + 1000000000);

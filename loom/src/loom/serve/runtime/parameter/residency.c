@@ -280,14 +280,14 @@ bool loom_serve_residency_cache_is_reclaiming(
   return false;
 }
 
-loom_serve_memory_usage_t loom_serve_residency_group_statistics(
+loom_runtime_storage_usage_t loom_serve_residency_group_statistics(
     const loom_serve_residency_group_t* group) {
-  loom_serve_memory_usage_t total = {0};
+  loom_runtime_storage_usage_t total = {0};
   if (!group) {
     return total;
   }
   for (iree_host_size_t i = 0; i < group->weight_count; ++i) {
-    const loom_serve_memory_statistics_t domain =
+    const loom_runtime_storage_statistics_t domain =
         loom_serve_weights_statistics(group->weights[i]);
     total.reserved_bytes += domain.reserved_bytes;
     total.committed_bytes += domain.committed_bytes;
@@ -298,14 +298,14 @@ loom_serve_memory_usage_t loom_serve_residency_group_statistics(
   return total;
 }
 
-loom_serve_weight_activity_t loom_serve_residency_group_activity(
+loom_runtime_parameter_activity_t loom_serve_residency_group_activity(
     const loom_serve_residency_group_t* group) {
-  loom_serve_weight_activity_t total = {0};
+  loom_runtime_parameter_activity_t total = {0};
   if (!group) {
     return total;
   }
   for (iree_host_size_t i = 0; i < group->weight_count; ++i) {
-    const loom_serve_weight_activity_t domain =
+    const loom_runtime_parameter_activity_t domain =
         loom_serve_weights_activity(group->weights[i]);
     total.activations += domain.activations;
     total.deactivations += domain.deactivations;
@@ -316,11 +316,11 @@ loom_serve_weight_activity_t loom_serve_residency_group_activity(
   return total;
 }
 
-loom_serve_memory_usage_t loom_serve_residency_statistics(
+loom_runtime_storage_usage_t loom_serve_residency_statistics(
     const loom_serve_residency_t* residency) {
-  loom_serve_memory_usage_t total = {0};
+  loom_runtime_storage_usage_t total = {0};
   for (iree_host_size_t i = 0; i < residency->group_count; ++i) {
-    const loom_serve_memory_usage_t group =
+    const loom_runtime_storage_usage_t group =
         loom_serve_residency_group_statistics(residency->entries[i].group);
     total.reserved_bytes += group.reserved_bytes;
     total.committed_bytes += group.committed_bytes;
@@ -331,11 +331,11 @@ loom_serve_memory_usage_t loom_serve_residency_statistics(
   return total;
 }
 
-loom_serve_weight_activity_t loom_serve_residency_activity(
+loom_runtime_parameter_activity_t loom_serve_residency_activity(
     const loom_serve_residency_t* residency) {
-  loom_serve_weight_activity_t total = {0};
+  loom_runtime_parameter_activity_t total = {0};
   for (iree_host_size_t i = 0; i < residency->group_count; ++i) {
-    const loom_serve_weight_activity_t group =
+    const loom_runtime_parameter_activity_t group =
         loom_serve_residency_group_activity(residency->entries[i].group);
     total.activations += group.activations;
     total.deactivations += group.deactivations;
@@ -546,7 +546,7 @@ static uint64_t loom_serve_residency_group_live_bytes(
     const loom_serve_residency_group_t* group) {
   uint64_t bytes = 0;
   for (iree_host_size_t i = 0; i < group->weight_count; ++i) {
-    const loom_serve_memory_usage_t memory =
+    const loom_runtime_storage_usage_t memory =
         loom_serve_weights_memory_usage(group->weights[i]);
     bytes +=
         memory.committed_bytes + memory.pending_bytes - memory.releasing_bytes;
@@ -586,7 +586,7 @@ iree_status_t loom_serve_residency_cache_trim(
   iree_status_t status = iree_ok_status();
   for (loom_serve_residency_group_t* entry = cache->groups.oldest;
        entry && iree_status_is_ok(status); entry = entry->next) {
-    const loom_serve_memory_statistics_t memory =
+    const loom_runtime_storage_statistics_t memory =
         loom_serve_memory_pool_statistics(cache->pool);
     const uint64_t remaining = memory.committed_bytes + memory.pending_bytes -
                                memory.releasing_bytes - memory.cached_bytes;
@@ -604,13 +604,13 @@ iree_status_t loom_serve_residency_cache_trim(
 
 static uint64_t loom_serve_residency_mutable_bytes(
     const loom_serve_residency_cache_t* cache, uint64_t parameter_bytes) {
-  const loom_serve_memory_usage_t workspace =
+  const loom_runtime_storage_usage_t workspace =
       cache->workspace ? loom_serve_workspace_memory_usage(cache->workspace)
-                       : (loom_serve_memory_usage_t){0};
-  const loom_serve_memory_usage_t permanent =
+                       : (loom_runtime_storage_usage_t){0};
+  const loom_runtime_storage_usage_t permanent =
       cache->permanent_source
           ? loom_serve_virtual_pool_source_memory_usage(cache->permanent_source)
-          : (loom_serve_memory_usage_t){0};
+          : (loom_runtime_storage_usage_t){0};
   return loom_serve_memory_pool_live_bytes(cache->pool) - parameter_bytes -
          workspace.committed_bytes - workspace.pending_bytes -
          permanent.committed_bytes - permanent.pending_bytes;
@@ -665,7 +665,7 @@ static iree_status_t loom_serve_residency_reclaim(void* user_data,
   // without further collection: a failed acquisition can lower both aggregate
   // and group charges, and mixing those epochs invents reclaimable history.
   const bool reclaiming = loom_serve_residency_cache_is_reclaiming(cache);
-  const loom_serve_memory_statistics_t memory =
+  const loom_runtime_storage_statistics_t memory =
       loom_serve_memory_pool_snapshot(cache->pool);
   uint64_t remaining = memory.committed_bytes + memory.pending_bytes -
                        memory.releasing_bytes + memory.abandoned_bytes;
@@ -703,7 +703,7 @@ static iree_status_t loom_serve_residency_reclaim(void* user_data,
     uint64_t parameter_bytes = 0;
     for (loom_serve_residency_group_t* entry = cache->groups.oldest; entry;
          entry = entry->next) {
-      const loom_serve_memory_usage_t usage =
+      const loom_runtime_storage_usage_t usage =
           loom_serve_residency_group_statistics(entry);
       parameter_bytes += usage.committed_bytes + usage.pending_bytes;
     }
@@ -1078,7 +1078,7 @@ static bool loom_serve_residency_state_budget(
     const bool needed = loom_serve_residency_group_is_pinned(group) ||
                         loom_serve_residency_contains_group(residency, group);
     for (iree_host_size_t i = 0; i < group->weight_count; ++i) {
-      const loom_serve_memory_usage_t memory =
+      const loom_runtime_storage_usage_t memory =
           loom_serve_weights_memory_usage(group->weights[i]);
       parameter_bytes += memory.committed_bytes + memory.pending_bytes;
       if (needed) {

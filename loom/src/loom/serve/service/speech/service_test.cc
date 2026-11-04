@@ -7,6 +7,7 @@
 #include "loom/serve/service/speech/service_test.h"
 
 #include "iree/base/tooling/flags.h"
+#include "loom/service/telemetry/record.h"
 
 IREE_FLAG(int32_t, test_workers, 1, "Workers in the speech test application.");
 IREE_FLAG(bool, test_elastic, false, "Use elastic backing for source speech.");
@@ -31,7 +32,7 @@ iree_status_t OpenSpeech(loom_serve_speech_service_t* service,
 }
 
 uint64_t ObservationCount(
-    const loom_serve_telemetry_latency_histogram_t& histogram) {
+    const loom_service_telemetry_latency_histogram_t& histogram) {
   uint64_t count = 0;
   for (uint64_t bucket : histogram.buckets) {
     count += bucket;

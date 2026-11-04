@@ -3,6 +3,7 @@
 // Licensed under the Apache License v2.0 WITH LLVM Exceptions.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/runtime/parameter/telemetry.h"
 #include "loom/serve/runtime/parameter/weights_test_base.h"
 #include "loom/serve/testing/worker_gate.h"
 
@@ -106,11 +107,46 @@ TEST_P(WindowedWeightsTest, CrossSlabTensorPreparesOnceAndReloads) {
   EXPECT_EQ(activity.read_bytes, 2097248u);
   EXPECT_EQ(activity.prepared_bytes, activity.read_bytes);
   EXPECT_EQ(activity.groups, GetParam() ? 2u : 3u);
+  loom_runtime_telemetry_stream_t* stream = nullptr;
+  IREE_ASSERT_OK(loom_runtime_telemetry_stream_allocate(
+      2, iree_allocator_system(), &stream));
+  loom_runtime_parameter_record_activity(stream, 1, &activity);
   if (GetParam()) {
     ASSERT_NO_FATAL_FAILURE(Reload());
     ASSERT_NO_FATAL_FAILURE(VerifyWindowedStorage());
     EXPECT_EQ(loom_serve_weights_activity(plans_[0]).prepared_bytes,
               activity.prepared_bytes * 2);
+  }
+  const auto completed = loom_serve_weights_activity(plans_[0]);
+  loom_runtime_parameter_record_activity(stream, 2, &completed);
+  std::array<loom_runtime_telemetry_record_t, 2> records;
+  uint64_t cursor = 0;
+  for (auto& record : records) {
+    ASSERT_EQ(loom_runtime_telemetry_stream_read(stream, &cursor, &record),
+              LOOM_RUNTIME_TELEMETRY_READ_RECORD);
+  }
+  loom_runtime_telemetry_stream_free(stream);
+  // Retire the actual plans, commands, buffers, and storage owners before
+  // interpreting observations. The fixture's outer cleanup is idempotent.
+  TearDown();
+  for (const auto& record : records) {
+    auto expected = record.time_ns == 1 ? activity : completed;
+    IREE_ASSERT_OK(record.event->read_fields(
+        &record,
+        {&expected, [](void* self, iree_host_size_t count,
+                       const loom_runtime_telemetry_field_t* fields) {
+           const auto& expected =
+               *static_cast<const loom_runtime_parameter_activity_t*>(self);
+           EXPECT_EQ(count, 5u);
+           if (count == 5) {
+             EXPECT_EQ(fields[0].value.uint64_value, expected.activations);
+             EXPECT_EQ(fields[1].value.uint64_value, expected.deactivations);
+             EXPECT_EQ(fields[2].value.uint64_value, expected.read_bytes);
+             EXPECT_EQ(fields[3].value.uint64_value, expected.prepared_bytes);
+             EXPECT_EQ(fields[4].value.uint64_value, expected.groups);
+           }
+           return iree_ok_status();
+         }}));
   }
 }
 

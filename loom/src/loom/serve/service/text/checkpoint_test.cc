@@ -54,8 +54,8 @@ TEST_F(SourceTextServiceTest,
     const int32_t source_token = 0;
     const int32_t branch_token = 2;
     const loom_serve_text_span_t branches[] = {
-        {0, 1, &source_token, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT},
-        {1, 1, &branch_token, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT},
+        {0, 1, &source_token, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT},
+        {1, 1, &branch_token, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT},
     };
     IREE_ASSERT_OK(loom_serve_text_model_epoch(
         model_, 1, IREE_ARRAYSIZE(branches), branches));

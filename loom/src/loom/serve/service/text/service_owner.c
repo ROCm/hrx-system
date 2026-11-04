@@ -23,8 +23,8 @@ iree_status_t loom_serve_text_await_work(loom_serve_text_service_t* service,
   service->completion.work = work;
   IREE_TRACE({
     if (work == TEXT_WORK_EPOCH) {
-      service->completion.section = loom_serve_trace_section_enter(
-          LOOM_SERVE_TRACE_SECTION_EXECUTE, service->name);
+      service->completion.section = loom_service_trace_section_enter(
+          LOOM_SERVICE_TRACE_SECTION_EXECUTE, service->name);
     }
   });
   return iree_ok_status();
@@ -57,7 +57,7 @@ void loom_serve_text_observe(loom_serve_text_service_t* service,
     }
   }
   iree_slim_mutex_lock(&service->heartbeat.mutex);
-  loom_serve_text_heartbeat_snapshot_t* state = &service->heartbeat.snapshot;
+  loom_service_text_statistics_t* state = &service->heartbeat.snapshot;
   if (strcmp(state->phase, phase)) {
     state->phase = phase;
     state->phase_start = iree_time_now();
@@ -80,12 +80,18 @@ void loom_serve_text_observe(loom_serve_text_service_t* service,
   state->cache_target_bytes = cache.target_bytes;
   state->cache_additional_bytes = cache.additional_bytes;
   state->state_memory = loom_serve_text_model_memory_statistics(service->model);
-  state->weight_memory =
+  state->parameter_memory =
       loom_serve_text_model_weight_statistics(service->model);
-  state->weight_activity =
-      loom_serve_text_model_weight_activity(service->model);
-  state->pool_memory =
+  state->parameter_activity =
+      loom_serve_text_model_parameter_activity(service->model);
+  const loom_serve_pool_statistics_t pool_memory =
       loom_serve_pool_statistics(loom_serve_text_model_pool(service->model));
+  state->pool_memory = (loom_runtime_storage_shared_memory_record_t){
+      .retained_committed_bytes = pool_memory.retained.committed_bytes,
+      .workspace_committed_bytes = pool_memory.workspace.bytes_committed,
+      .workspace_live_bytes = pool_memory.workspace.bytes_reserved,
+      .workspace_slab_count = pool_memory.workspace.slab_count,
+      .workspace_reuse_count = pool_memory.workspace.reuse_count};
   state->prefill_rows = prefill;
   state->decode_rows = decode;
   state->backpressured_rows = backpressured;

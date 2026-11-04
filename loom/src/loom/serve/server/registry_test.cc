@@ -13,11 +13,12 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
+#include "loom/runtime/telemetry/stream.h"
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/service/recognition/request.h"
 #include "loom/serve/service/service.h"
 #include "loom/serve/service/speech/request.h"
-#include "loom/serve/telemetry/stream.h"
+#include "loom/service/telemetry/record.h"
 
 namespace {
 
@@ -42,13 +43,13 @@ TEST(RegistryTimeTest, BorrowedServicesShareRegistrationTimestamp) {
 }
 
 TEST(RegistryTimeTest, CounterEpochIncludesBorrowedHistory) {
-  loom_serve_telemetry_stream_t* streams[2] = {};
+  loom_runtime_telemetry_stream_t* streams[2] = {};
   for (auto& stream : streams) {
-    IREE_ASSERT_OK(loom_serve_telemetry_stream_allocate(
+    IREE_ASSERT_OK(loom_runtime_telemetry_stream_allocate(
         4, iree_allocator_system(), &stream));
   }
   // Reverse order ensures the aggregate does not simply select the first slot.
-  const loom_serve_telemetry_counters_t counters[2] = {};
+  const loom_service_telemetry_counters_t counters[2] = {};
   const loom_serve_service_t services[] = {
       {
           .name = IREE_SV("newer"),
@@ -64,10 +65,10 @@ TEST(RegistryTimeTest, CounterEpochIncludesBorrowedHistory) {
       loom_serve_registry_allocate(IREE_ARRAYSIZE(services), services, 0, {},
                                    iree_allocator_system(), &registry));
   EXPECT_EQ(loom_serve_registry_counters_since_ns(registry),
-            loom_serve_telemetry_stream_identity(streams[0]).created_ns);
+            loom_runtime_telemetry_stream_identity(streams[0]).created_ns);
   IREE_EXPECT_OK(loom_serve_registry_free(registry));
   for (auto* stream : streams) {
-    loom_serve_telemetry_stream_free(stream);
+    loom_runtime_telemetry_stream_free(stream);
   }
 }
 
@@ -95,7 +96,7 @@ class RegistryTest : public ::testing::TestWithParam<bool> {
             [](void* self,
                const loom_serve_model_configuration_t* configuration,
                loom_serve_wake_callback_t observer,
-               loom_serve_telemetry_stream_t* stream,
+               loom_runtime_telemetry_stream_t* stream,
                iree_allocator_t host_allocator,
                loom_serve_registration_t* out_registration) {
               ADD_FAILURE() << "Drained metadata must not prepare a model";

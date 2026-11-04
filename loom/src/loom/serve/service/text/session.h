@@ -15,7 +15,7 @@
 #include "loom/serve/service/text/media_projector.h"
 #include "loom/serve/service/text/model.h"
 #include "loom/serve/service/text/sequence.h"
-#include "loom/serve/telemetry/record.h"
+#include "loom/service/telemetry/record.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -45,7 +45,7 @@ typedef struct loom_serve_text_session_lifetime_t {
   uint64_t id;
   // Cumulative work across retained continuations, independent of log
   // retention.
-  loom_serve_telemetry_counters_t counters;
+  loom_service_telemetry_counters_t counters;
   // Last completed endpoint, retained even when replacement resets the row.
   iree_host_size_t position;
   // Owned positions at that endpoint, including any shared prefix.
@@ -124,10 +124,10 @@ typedef struct loom_serve_text_session_t {
       bool recorded;
     } publication;
     // Owner-only completed work, independent of client output translation.
-    loom_serve_telemetry_counters_t counters;
+    loom_service_telemetry_counters_t counters;
     // CPU output failure copied before consuming its status; owner publishes
     // only after the CPU job releases the session.
-    loom_serve_telemetry_diagnostic_t diagnostic;
+    loom_service_telemetry_diagnostic_t diagnostic;
   } request;
 } loom_serve_text_session_t;
 

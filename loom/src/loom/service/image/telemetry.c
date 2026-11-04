@@ -4,14 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/serve/service/image/telemetry.h"
+#include "loom/service/image/telemetry.h"
 
 #include <string.h>
 
 #include "loom/runtime/telemetry/field.h"
 
-iree_status_t loom_serve_image_sample_totals(
-    const loom_serve_image_totals_t* totals,
+iree_status_t loom_service_image_sample_totals(
+    const loom_service_image_totals_t* totals,
     loom_runtime_telemetry_sample_sink_t sink) {
   static const loom_runtime_telemetry_metric_t fields[] = {
       {"generated_images", "images", LOOM_RUNTIME_TELEMETRY_COUNTER},
@@ -39,10 +39,10 @@ iree_status_t loom_serve_image_sample_totals(
   return sink.emit(sink.self, &topic, values);
 }
 
-static iree_status_t loom_serve_image_prepared_fields(
-    const loom_serve_telemetry_record_t* record,
+static iree_status_t loom_service_image_prepared_fields(
+    const loom_runtime_telemetry_record_t* record,
     loom_runtime_telemetry_field_sink_t sink) {
-  loom_serve_image_prepared_t prepared;
+  loom_service_image_prepared_t prepared;
   static_assert(sizeof(prepared) <= sizeof(record->data), "record capacity");
   memcpy(&prepared, record->data.words, sizeof(prepared));
   const loom_runtime_telemetry_field_t fields[] = {
@@ -55,8 +55,8 @@ static iree_status_t loom_serve_image_prepared_fields(
 
 enum { IMAGE_WORK_FIELD_COUNT = 8 };
 
-static void loom_serve_image_work_read_fields(
-    const loom_serve_image_work_t* work,
+static void loom_service_image_work_read_fields(
+    const loom_service_image_work_t* work,
     loom_runtime_telemetry_field_t fields[IMAGE_WORK_FIELD_COUNT]) {
   fields[0] = loom_runtime_telemetry_field_uint64("queue_ns", work->queue_ns);
   fields[1] =
@@ -71,21 +71,21 @@ static void loom_serve_image_work_read_fields(
   fields[7] = loom_runtime_telemetry_field_uint64("png_bytes", work->png_bytes);
 }
 
-static iree_status_t loom_serve_image_request_fields(
-    const loom_serve_telemetry_record_t* record,
+static iree_status_t loom_service_image_request_fields(
+    const loom_runtime_telemetry_record_t* record,
     loom_runtime_telemetry_field_sink_t sink) {
-  loom_serve_image_work_t value;
+  loom_service_image_work_t value;
   static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
   memcpy(&value, record->data.words, sizeof(value));
   loom_runtime_telemetry_field_t fields[IMAGE_WORK_FIELD_COUNT];
-  loom_serve_image_work_read_fields(&value, fields);
+  loom_service_image_work_read_fields(&value, fields);
   return sink.emit(sink.self, IREE_ARRAYSIZE(fields), fields);
 }
 
-static iree_status_t loom_serve_image_totals_fields(
-    const loom_serve_telemetry_record_t* record,
+static iree_status_t loom_service_image_totals_fields(
+    const loom_runtime_telemetry_record_t* record,
     loom_runtime_telemetry_field_sink_t sink) {
-  loom_serve_image_totals_t value;
+  loom_service_image_totals_t value;
   static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
   memcpy(&value, record->data.words, sizeof(value));
   loom_runtime_telemetry_field_t fields[2 + IMAGE_WORK_FIELD_COUNT] = {
@@ -94,49 +94,51 @@ static iree_status_t loom_serve_image_totals_fields(
       loom_runtime_telemetry_field_uint64("generated_pixels",
                                           value.generated_pixels),
   };
-  loom_serve_image_work_read_fields(&value.work, fields + 2);
+  loom_service_image_work_read_fields(&value.work, fields + 2);
   return sink.emit(sink.self, IREE_ARRAYSIZE(fields), fields);
 }
 
-const loom_serve_telemetry_event_t LOOM_SERVE_IMAGE_STARTED = {"image_started",
-                                                               NULL};
-const loom_serve_telemetry_event_t LOOM_SERVE_IMAGE_SUBMITTED = {
+const loom_runtime_telemetry_event_t LOOM_SERVICE_IMAGE_STARTED = {
+    "image_started", NULL};
+const loom_runtime_telemetry_event_t LOOM_SERVICE_IMAGE_SUBMITTED = {
     "image_submitted", NULL};
-const loom_serve_telemetry_event_t LOOM_SERVE_IMAGE_GENERATED = {
+const loom_runtime_telemetry_event_t LOOM_SERVICE_IMAGE_GENERATED = {
     "image_generated", NULL};
-const loom_serve_telemetry_event_t LOOM_SERVE_IMAGE_SHUTDOWN = {
+const loom_runtime_telemetry_event_t LOOM_SERVICE_IMAGE_SHUTDOWN = {
     "image_shutdown", NULL};
-static const loom_serve_telemetry_event_t image_prepared_event = {
-    .name = "image_prepared", .read_fields = loom_serve_image_prepared_fields};
-static const loom_serve_telemetry_event_t image_request_event = {
-    "image_request_stats", loom_serve_image_request_fields};
-static const loom_serve_telemetry_event_t image_totals_event = {
-    "image_work", loom_serve_image_totals_fields};
+static const loom_runtime_telemetry_event_t image_prepared_event = {
+    .name = "image_prepared",
+    .read_fields = loom_service_image_prepared_fields};
+static const loom_runtime_telemetry_event_t image_request_event = {
+    "image_request_stats", loom_service_image_request_fields};
+static const loom_runtime_telemetry_event_t image_totals_event = {
+    "image_work", loom_service_image_totals_fields};
 
-void loom_serve_image_record_prepared(
-    loom_serve_telemetry_stream_t* stream, uint64_t request,
-    const loom_serve_image_prepared_t* prepared) {
-  loom_serve_telemetry_record_t record = {.time_ns = iree_time_now(),
-                                          .request = request,
-                                          .event = &image_prepared_event};
+void loom_service_image_record_prepared(
+    loom_runtime_telemetry_stream_t* stream, uint64_t request,
+    const loom_service_image_prepared_t* prepared) {
+  loom_runtime_telemetry_record_t record = {.time_ns = iree_time_now(),
+                                            .request = request,
+                                            .event = &image_prepared_event};
   memcpy(record.data.words, prepared, sizeof(*prepared));
-  loom_serve_telemetry_stream_append(stream, &record);
+  loom_runtime_telemetry_stream_append(stream, &record);
 }
 
-void loom_serve_image_record_work(loom_serve_telemetry_stream_t* stream,
-                                  uint64_t request,
-                                  const loom_serve_image_work_t* work) {
-  loom_serve_telemetry_record_t record = {.time_ns = iree_time_now(),
-                                          .request = request,
-                                          .event = &image_request_event};
+void loom_service_image_record_work(loom_runtime_telemetry_stream_t* stream,
+                                    uint64_t request,
+                                    const loom_service_image_work_t* work) {
+  loom_runtime_telemetry_record_t record = {.time_ns = iree_time_now(),
+                                            .request = request,
+                                            .event = &image_request_event};
   memcpy(record.data.words, work, sizeof(*work));
-  loom_serve_telemetry_stream_append(stream, &record);
+  loom_runtime_telemetry_stream_append(stream, &record);
 }
 
-void loom_serve_image_record_totals(loom_serve_telemetry_stream_t* stream,
-                                    const loom_serve_image_totals_t* totals) {
-  loom_serve_telemetry_record_t record = {.time_ns = iree_time_now(),
-                                          .event = &image_totals_event};
+void loom_service_image_record_totals(
+    loom_runtime_telemetry_stream_t* stream,
+    const loom_service_image_totals_t* totals) {
+  loom_runtime_telemetry_record_t record = {.time_ns = iree_time_now(),
+                                            .event = &image_totals_event};
   memcpy(record.data.words, totals, sizeof(*totals));
-  loom_serve_telemetry_stream_append(stream, &record);
+  loom_runtime_telemetry_stream_append(stream, &record);
 }

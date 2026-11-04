@@ -3,6 +3,8 @@
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <cstring>
+
 #include "loom/serve/runtime/parameter/weights_test_base.h"
 
 namespace loom_serve::testing {

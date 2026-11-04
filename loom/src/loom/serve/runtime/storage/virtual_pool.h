@@ -51,14 +51,14 @@ uint64_t loom_serve_virtual_pool_round_size(
 
 // Copies aggregate usage across this owner's sources without collecting native
 // work or querying logical allocators. A subset of the physical owner's totals.
-loom_serve_memory_usage_t loom_serve_virtual_pool_memory_usage(
+loom_runtime_storage_usage_t loom_serve_virtual_pool_memory_usage(
     const loom_serve_virtual_pool_t* pool);
 
 // Copies one source's physical usage on the serialized owner. source is an
 // interface returned by handle or create_source, not a child logical allocator.
 // Disjoint source accounting keeps permanent backing separate from workspace
 // whose realized bytes already fulfill protected execution credit.
-loom_serve_memory_usage_t loom_serve_virtual_pool_source_memory_usage(
+loom_runtime_storage_usage_t loom_serve_virtual_pool_source_memory_usage(
     const iree_hal_pool_t* source);
 
 // Charged backing that cannot currently be reclaimed from this source. Includes

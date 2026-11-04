@@ -24,13 +24,13 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
+#include "loom/runtime/telemetry/stream.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/text/input.h"
 #include "loom/serve/service/text/owner_turn_test_util.h"
 #include "loom/serve/service/text/service.h"
 #include "loom/serve/service/text/source_test_oracle.h"
-#include "loom/serve/telemetry/stream.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/model.h"
 #include "loom/serve/testing/model_wait.h"
@@ -127,9 +127,9 @@ class SourceTextServiceTest : public ::testing::Test {
     };
   }
 
-  void Start(
-      iree_host_size_t chunk_size = 3,
-      loom_serve_text_schedule_mode_t mode = LOOM_SERVE_TEXT_SCHEDULE_PACKED) {
+  void Start(iree_host_size_t chunk_size = 3,
+             loom_service_text_schedule_mode_t mode =
+                 LOOM_SERVICE_TEXT_SCHEDULE_PACKED) {
     http_.Start([this, chunk_size, mode] {
       auto options = ServiceOptions();
       options.chunk_size = chunk_size;
@@ -310,7 +310,7 @@ class SourceTextServiceTest : public ::testing::Test {
     return result;
   }
 
-  void CheckScheduledResponses(loom_serve_text_schedule_mode_t mode) {
+  void CheckScheduledResponses(loom_service_text_schedule_mode_t mode) {
     Start(3, mode);
     const std::vector<std::string> prompts = {"abxa", "abxabba", "xab"};
     std::vector<int> clients;
@@ -334,7 +334,7 @@ class SourceTextServiceTest : public ::testing::Test {
         Read(Send("", "X-Loom-Model: fixture-text\r\n", "/logz", "GET"));
     EXPECT_NE(log.find(R"("token_slots":)"), std::string::npos) << log;
     EXPECT_EQ(log.find(R"("token_slots":null)") != std::string::npos,
-              mode != LOOM_SERVE_TEXT_SCHEDULE_PACKED)
+              mode != LOOM_SERVICE_TEXT_SCHEDULE_PACKED)
         << log;
   }
 
@@ -584,12 +584,12 @@ class SourceTextServiceTest : public ::testing::Test {
         uint64_t cursor = 0;
         uint64_t prepared = UINT64_MAX, first_epoch = UINT64_MAX;
         const auto head =
-            loom_serve_telemetry_stream_head(interface.telemetry.stream);
+            loom_runtime_telemetry_stream_head(interface.telemetry.stream);
         while (cursor < head) {
-          loom_serve_telemetry_record_t record;
-          ASSERT_EQ(loom_serve_telemetry_stream_read(interface.telemetry.stream,
-                                                     &cursor, &record),
-                    LOOM_SERVE_TELEMETRY_READ_RECORD);
+          loom_runtime_telemetry_record_t record;
+          ASSERT_EQ(loom_runtime_telemetry_stream_read(
+                        interface.telemetry.stream, &cursor, &record),
+                    LOOM_RUNTIME_TELEMETRY_READ_RECORD);
           if (std::string(record.event->name) == "prepared" &&
               record.request == 2) {
             prepared = cursor;

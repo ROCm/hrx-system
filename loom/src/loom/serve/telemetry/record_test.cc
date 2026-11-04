@@ -6,22 +6,24 @@
 
 #include "loom/serve/telemetry/record.h"
 
+#include <cstring>
 #include <string>
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/runtime/telemetry/field.h"
-#include "loom/serve/telemetry/stream.h"
+#include "loom/runtime/telemetry/stream.h"
 
 namespace {
 
 TEST(TelemetryRecord, FirstOutputIdentifiesTheRequestWithoutContent) {
-  loom_serve_telemetry_record_t record = {
+  loom_runtime_telemetry_record_t record = {
       .time_ns = 71,
       .request = 5,
-      .event = &LOOM_SERVE_TELEMETRY_FIRST_OUTPUT,
+      .event = &LOOM_SERVICE_TELEMETRY_FIRST_OUTPUT,
   };
-  record.data.first_output.duration_ns = 37;
+  const loom_service_telemetry_first_output_record_t first_output = {37};
+  std::memcpy(record.data.words, &first_output, sizeof(first_output));
   iree_string_builder_t output;
   iree_string_builder_initialize(iree_allocator_system(), &output);
   IREE_ASSERT_OK(loom_serve_telemetry_record_format(2, &record, &output));
@@ -37,8 +39,8 @@ TEST(TelemetryRecord, DiagnosticsOutliveTheirBorrowedStatus) {
   const std::string message(200, 'x');
   iree_status_t status =
       iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "%s", message.c_str());
-  loom_serve_telemetry_diagnostic_t diagnostic;
-  loom_serve_telemetry_diagnostic_capture(status, &diagnostic);
+  loom_service_telemetry_diagnostic_t diagnostic;
+  loom_service_telemetry_diagnostic_capture(status, &diagnostic);
 #if (IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS)
   const auto original_message = iree_status_message(status);
   EXPECT_EQ(std::string(original_message.data, original_message.size), message);
@@ -51,7 +53,7 @@ TEST(TelemetryRecord, DiagnosticsOutliveTheirBorrowedStatus) {
   EXPECT_EQ(std::string(diagnostic.message, diagnostic.length),
             message.substr(0, diagnostic.length));
 #endif
-  loom_serve_telemetry_diagnostic_capture(iree_ok_status(), &diagnostic);
+  loom_service_telemetry_diagnostic_capture(iree_ok_status(), &diagnostic);
   EXPECT_EQ(diagnostic.code, 0u);
   EXPECT_EQ(diagnostic.length, 0u);
   EXPECT_EQ(diagnostic.truncated, 0u);
@@ -60,31 +62,31 @@ TEST(TelemetryRecord, DiagnosticsOutliveTheirBorrowedStatus) {
 TEST(TelemetryRecord, PublicationDoesNotRenderOrBorrowProducerPayload) {
   static int render_count;
   render_count = 0;
-  static const loom_serve_telemetry_event_t event = {
-      "epoch", [](const loom_serve_telemetry_record_t* record,
+  static const loom_runtime_telemetry_event_t event = {
+      "epoch", [](const loom_runtime_telemetry_record_t* record,
                   loom_runtime_telemetry_field_sink_t sink) {
         ++render_count;
         const auto field = loom_runtime_telemetry_field_uint64(
             "useful_tokens", record->data.words[0]);
         return sink.emit(sink.self, 1, &field);
       }};
-  loom_serve_telemetry_stream_t* stream = nullptr;
-  IREE_ASSERT_OK(loom_serve_telemetry_stream_allocate(
+  loom_runtime_telemetry_stream_t* stream = nullptr;
+  IREE_ASSERT_OK(loom_runtime_telemetry_stream_allocate(
       2, iree_allocator_system(), &stream));
-  loom_serve_telemetry_record_t record = {
+  loom_runtime_telemetry_record_t record = {
       .time_ns = 19,
       .request = 5,
       .event = &event,
   };
   record.data.words[0] = 37;
-  loom_serve_telemetry_stream_append(stream, &record);
+  loom_runtime_telemetry_stream_append(stream, &record);
   record.data.words[0] = 0;
   EXPECT_EQ(render_count, 0);
   uint64_t cursor = 0;
-  loom_serve_telemetry_record_t copy;
-  ASSERT_EQ(loom_serve_telemetry_stream_read(stream, &cursor, &copy),
-            LOOM_SERVE_TELEMETRY_READ_RECORD);
-  loom_serve_telemetry_stream_free(stream);
+  loom_runtime_telemetry_record_t copy;
+  ASSERT_EQ(loom_runtime_telemetry_stream_read(stream, &cursor, &copy),
+            LOOM_RUNTIME_TELEMETRY_READ_RECORD);
+  loom_runtime_telemetry_stream_free(stream);
   iree_string_builder_t output;
   iree_string_builder_initialize(iree_allocator_system(), &output);
   IREE_ASSERT_OK(loom_serve_telemetry_record_format(0, &copy, &output));

@@ -86,16 +86,16 @@ iree_status_t loom_serve_text_complete_trim(
     return loom_serve_text_await_work(service, TEXT_WORK_TRIM);
   }
   service->pool.trim.pending = false;
-  const loom_serve_memory_statistics_t memory =
+  const loom_runtime_storage_statistics_t memory =
       loom_serve_text_model_memory_statistics(service->model);
-  const loom_serve_text_trim_record_t value = {
+  const loom_service_text_trim_record_t value = {
       .duration_ns = iree_time_now() - service->pool.trim.start_time,
       .moved_blocks = result->moved_blocks,
       .copied_bytes = result->copied_bytes,
       .released_bytes = result->released_bytes,
       .committed_bytes = memory.committed_bytes};
-  loom_serve_text_record(service->telemetry.stream, &LOOM_SERVE_TEXT_TRIM, 0,
-                         &value, sizeof(value));
+  loom_service_text_record(service->telemetry.stream, &LOOM_SERVICE_TEXT_TRIM,
+                           0, &value, sizeof(value));
   return iree_ok_status();
 }
 
@@ -537,7 +537,7 @@ iree_status_t loom_serve_text_complete_preparation(
   } else {
     service->pending.prepared.session =
         service->pending.prepared.resolved_session;
-    const loom_serve_text_admission_record_t value = {
+    const loom_service_text_admission_record_t value = {
         .row =
             loom_serve_text_row_index(service->pending.prepared.session->row),
         .retained_tokens = pending->input.retained_count,
@@ -545,8 +545,9 @@ iree_status_t loom_serve_text_complete_preparation(
         .reservation_tokens = pending->reservation,
         .max_tokens = pending->chat.max_tokens,
         .prepare_ns = pending->prepare_duration};
-    loom_serve_text_record(service->telemetry.stream, &LOOM_SERVE_TEXT_PREPARED,
-                           pending->receipt.serial, &value, sizeof(value));
+    loom_service_text_record(service->telemetry.stream,
+                             &LOOM_SERVICE_TEXT_PREPARED,
+                             pending->receipt.serial, &value, sizeof(value));
   }
   return iree_ok_status();
 }

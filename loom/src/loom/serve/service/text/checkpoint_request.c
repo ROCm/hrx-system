@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include "loom/service/telemetry/record.h"
+
 static iree_status_t loom_serve_text_checkpoint_reject(
     loom_serve_text_checkpoint_operation_t* control,
     loom_serve_text_telemetry_t* telemetry, iree_status_t failure,
@@ -26,24 +28,25 @@ static void loom_serve_text_checkpoint_fail(
     loom_serve_text_telemetry_t* telemetry, const iree_status_t status) {
   const loom_serve_text_checkpoint_operation_t operation = *control;
   memset(control, 0, sizeof(*control));
-  operation.consumer.abort(operation.consumer.self, LOOM_SERVE_TELEMETRY_FAILED,
-                           status, telemetry, &operation.receipt);
+  operation.consumer.abort(operation.consumer.self,
+                           LOOM_SERVICE_TELEMETRY_FAILED, status, telemetry,
+                           &operation.receipt);
 }
 
 static iree_status_t loom_serve_text_checkpoint_reply(
     loom_serve_text_checkpoint_operation_t* control,
     loom_serve_text_telemetry_t* telemetry, iree_string_builder_t* scratch,
     iree_host_size_t position, iree_host_size_t host_bytes) {
-  static const loom_serve_telemetry_event_t* const events[] = {
-      &LOOM_SERVE_TEXT_CHECKPOINT_PIN,
-      &LOOM_SERVE_TEXT_CHECKPOINT_SUSPEND,
-      &LOOM_SERVE_TEXT_CHECKPOINT_RELEASE,
+  static const loom_runtime_telemetry_event_t* const events[] = {
+      &LOOM_SERVICE_TEXT_CHECKPOINT_PIN,
+      &LOOM_SERVICE_TEXT_CHECKPOINT_SUSPEND,
+      &LOOM_SERVICE_TEXT_CHECKPOINT_RELEASE,
   };
-  loom_serve_text_checkpoint_record_t value = {.position = position,
-                                               .host_bytes = host_bytes};
+  loom_service_text_checkpoint_record_t value = {.position = position,
+                                                 .host_bytes = host_bytes};
   memcpy(value.name, control->request.name.data, control->request.name.size);
-  loom_serve_text_record(telemetry->stream, events[control->request.action],
-                         control->receipt.serial, &value, sizeof(value));
+  loom_service_text_record(telemetry->stream, events[control->request.action],
+                           control->receipt.serial, &value, sizeof(value));
   if (!control->consumer.is_open(control->consumer.self)) {
     loom_serve_text_checkpoint_request_abort(control, telemetry);
     return iree_ok_status();
@@ -197,11 +200,12 @@ void loom_serve_text_checkpoint_request_abort(
     const loom_serve_text_checkpoint_operation_t operation = *control;
     memset(control, 0, sizeof(*control));
     const bool failed = !iree_status_is_ok(telemetry->failure);
-    operation.consumer.abort(
-        operation.consumer.self,
-        failed ? LOOM_SERVE_TELEMETRY_FAILED : LOOM_SERVE_TELEMETRY_CANCELLED,
-        failed ? telemetry->failure
-               : iree_status_from_code(IREE_STATUS_CANCELLED),
-        telemetry, &operation.receipt);
+    operation.consumer.abort(operation.consumer.self,
+                             failed ? LOOM_SERVICE_TELEMETRY_FAILED
+                                    : LOOM_SERVICE_TELEMETRY_CANCELLED,
+                             failed
+                                 ? telemetry->failure
+                                 : iree_status_from_code(IREE_STATUS_CANCELLED),
+                             telemetry, &operation.receipt);
   }
 }

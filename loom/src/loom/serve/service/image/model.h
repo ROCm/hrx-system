@@ -205,10 +205,10 @@ void loom_serve_image_model_set_pinned(loom_serve_image_model_t* model,
 iree_status_t loom_serve_image_model_query_status(
     loom_serve_image_model_t* model);
 bool loom_serve_image_model_is_pending(const loom_serve_image_model_t* model);
-loom_serve_memory_usage_t loom_serve_image_model_weight_statistics(
+loom_runtime_storage_usage_t loom_serve_image_model_weight_statistics(
     const loom_serve_image_model_t* model);
 // Copies cumulative submission activity across the model's parameter domains.
-loom_serve_weight_activity_t loom_serve_image_model_weight_activity(
+loom_runtime_parameter_activity_t loom_serve_image_model_parameter_activity(
     const loom_serve_image_model_t* model);
 
 // Borrows the source-declared public identifier for this residency.
@@ -243,7 +243,7 @@ iree_status_t loom_serve_image_model_prepare_batch(
     loom_serve_image_model_t* model, iree_host_size_t count,
     const loom_serve_prepared_request_t* requests,
     const iree_host_size_t* output_lengths,
-    loom_serve_image_prepared_t* out_prepared);
+    loom_service_image_prepared_t* out_prepared);
 
 // Installs the serialized owner's nonblocking compilation wake. Detachment
 // follows terminal advance of all accepted preparation work.
@@ -288,7 +288,8 @@ iree_const_byte_span_t loom_serve_image_model_complete(
 // when subsequent admission or device work fails.
 iree_status_t loom_serve_image_model_generate(
     loom_serve_image_model_t* model, const loom_serve_image_request_t* request,
-    loom_serve_image_prepared_t* out_prepared, iree_const_byte_span_t* out_rgb);
+    loom_service_image_prepared_t* out_prepared,
+    iree_const_byte_span_t* out_rgb);
 
 #ifdef __cplusplus
 }  // extern "C"

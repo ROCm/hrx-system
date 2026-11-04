@@ -141,7 +141,7 @@ TEST_F(TextServiceCapacityTest, HttpDemandGrowsWithoutDuplicatingTheModel) {
   }
   EXPECT_EQ(interface_.telemetry.counters->completed, 100u);
   EXPECT_EQ(interface_.telemetry.counters->failed, 0u);
-  EXPECT_EQ(loom_serve_text_model_weight_activity(model_).activations, 1u);
+  EXPECT_EQ(loom_serve_text_model_parameter_activity(model_).activations, 1u);
 
   // The last named history survives directory publication and resumes through
   // the same route and resident, without reconstructing its consumed prefix.
@@ -229,7 +229,7 @@ TEST_P(LimitedTextServiceCapacityTest,
   }
   EXPECT_EQ(interface_.telemetry.counters->completed, clients.size());
   EXPECT_EQ(interface_.telemetry.counters->failed, 0u);
-  EXPECT_EQ(loom_serve_text_model_weight_activity(model_).activations, 1u);
+  EXPECT_EQ(loom_serve_text_model_parameter_activity(model_).activations, 1u);
 }
 
 INSTANTIATE_TEST_SUITE_P(DeploymentLimits, LimitedTextServiceCapacityTest,

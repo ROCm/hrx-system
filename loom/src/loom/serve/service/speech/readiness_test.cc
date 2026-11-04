@@ -25,12 +25,13 @@
 #include "loom/serve/service/speech/service.h"
 #include "loom/serve/service/speech/service_test.h"
 #include "loom/serve/service/speech/stream.h"
-#include "loom/serve/telemetry/latency.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/stalled_http_client.h"
 #include "loom/serve/testing/worker_gate.h"
 #include "loom/serve/transport/http/listener.h"
 #include "loom/serve/transport/http/server.h"
+#include "loom/service/telemetry/latency.h"
+#include "loom/service/telemetry/record.h"
 
 namespace {
 
@@ -907,10 +908,9 @@ TEST_F(SpeechReadinessTest, ShutdownJoinsAcceptedWorkWithoutFurtherSynthesis) {
   EXPECT_EQ(released_.load(), 1u);
   ASSERT_NE(actual_.telemetry.latency, nullptr);
   EXPECT_EQ(ObservationCount(actual_.telemetry.latency->first_output), 1u);
-  EXPECT_EQ(
-      ObservationCount(
-          actual_.telemetry.latency->outcomes[LOOM_SERVE_TELEMETRY_CANCELLED]),
-      1u);
+  EXPECT_EQ(ObservationCount(actual_.telemetry.latency
+                                 ->outcomes[LOOM_SERVICE_TELEMETRY_CANCELLED]),
+            1u);
 }
 
 TEST_F(SpeechReadinessTest, FailedReadinessKeepsRequestForModelRetirement) {
@@ -928,7 +928,7 @@ TEST_F(SpeechReadinessTest, FailedReadinessKeepsRequestForModelRetirement) {
   EXPECT_EQ(ObservationCount(actual_.telemetry.latency->first_output), 1u);
   EXPECT_EQ(
       ObservationCount(
-          actual_.telemetry.latency->outcomes[LOOM_SERVE_TELEMETRY_FAILED]),
+          actual_.telemetry.latency->outcomes[LOOM_SERVICE_TELEMETRY_FAILED]),
       1u);
 }
 
@@ -944,10 +944,9 @@ TEST_F(SpeechReadinessTest, EmptyFinalResponseHasNoFirstAudioMilestone) {
   IREE_ASSERT_OK(http_.Join());
   ASSERT_NE(actual_.telemetry.latency, nullptr);
   EXPECT_EQ(ObservationCount(actual_.telemetry.latency->first_output), 0u);
-  EXPECT_EQ(
-      ObservationCount(
-          actual_.telemetry.latency->outcomes[LOOM_SERVE_TELEMETRY_COMPLETED]),
-      1u);
+  EXPECT_EQ(ObservationCount(actual_.telemetry.latency
+                                 ->outcomes[LOOM_SERVICE_TELEMETRY_COMPLETED]),
+            1u);
 }
 
 TEST_F(SpeechReadinessTest, SlowReaderResumesFromBoundedSendCredit) {

@@ -32,6 +32,7 @@
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/transport/http/listener.h"
+#include "loom/service/telemetry/record.h"
 
 namespace loom_serve::testing {
 
@@ -295,9 +296,9 @@ struct loom_serve_test_model_service_t {
     loom_serve_service_flags_t flags = 0;
   } admission;
   // Optional immutable historical work, published before owner startup.
-  const loom_serve_telemetry_counters_t* counters = nullptr;
+  const loom_service_telemetry_counters_t* counters = nullptr;
   // Optional immutable duration distributions published before owner startup.
-  const loom_serve_telemetry_latency_t* latency = nullptr;
+  const loom_service_telemetry_latency_t* latency = nullptr;
   // Immutable source facts configured before the service is published.
   loom_serve_reasoning_t reasoning = {};
 

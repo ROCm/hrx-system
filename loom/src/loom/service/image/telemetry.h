@@ -4,12 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef LOOM_SERVE_SERVICE_IMAGE_TELEMETRY_H_
-#define LOOM_SERVE_SERVICE_IMAGE_TELEMETRY_H_
+#ifndef LOOM_SERVICE_IMAGE_TELEMETRY_H_
+#define LOOM_SERVICE_IMAGE_TELEMETRY_H_
 
 #include "loom/runtime/telemetry/sample.h"
-#include "loom/serve/service/image/generator.h"
-#include "loom/serve/telemetry/stream.h"
+#include "loom/runtime/telemetry/stream.h"
+#include "loom/service/image/preparation.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,7 +18,7 @@ extern "C" {
 // Host-observed work for one image, copied only after the CPU borrower releases
 // it. Shared cohort work contributes to each member's latency, not additional
 // work. These durations are not GPU timestamps or individual kernel timings.
-typedef struct loom_serve_image_work_t {
+typedef struct loom_service_image_work_t {
   // Receipt through cohort selection, excluding this request's CPU preparation.
   uint64_t queue_ns;
   // CPU source-input preparation plus shared cohort capture time.
@@ -35,9 +35,9 @@ typedef struct loom_serve_image_work_t {
   uint64_t json_ns;
   // Encoded PNG bytes, excluding JSON/base64 and HTTP overhead.
   uint64_t png_bytes;
-} loom_serve_image_work_t;
+} loom_service_image_work_t;
 
-typedef struct loom_serve_image_totals_t {
+typedef struct loom_service_image_totals_t {
   // Successful model completions, including results for disconnected peers.
   uint64_t generated_images;
   // Pixels in successfully completed model output, not bytes or tokens.
@@ -45,32 +45,33 @@ typedef struct loom_serve_image_totals_t {
   // Completed work; shared cohort preparation/admission/device time counts
   // once. Queue time sums per-request waiting, and encoding counts each result
   // once.
-  loom_serve_image_work_t work;
-} loom_serve_image_totals_t;
+  loom_service_image_work_t work;
+} loom_service_image_totals_t;
 
 // Samples cumulative completed work on the serialized service owner. Shared
 // cohort work is counted once; no in-flight CPU job is inspected.
-iree_status_t loom_serve_image_sample_totals(
-    const loom_serve_image_totals_t* totals,
+iree_status_t loom_service_image_sample_totals(
+    const loom_service_image_totals_t* totals,
     loom_runtime_telemetry_sample_sink_t sink);
 
-extern const loom_serve_telemetry_event_t LOOM_SERVE_IMAGE_STARTED;
-extern const loom_serve_telemetry_event_t LOOM_SERVE_IMAGE_SUBMITTED;
+extern const loom_runtime_telemetry_event_t LOOM_SERVICE_IMAGE_STARTED;
+extern const loom_runtime_telemetry_event_t LOOM_SERVICE_IMAGE_SUBMITTED;
 // Successful device completion and pin release, before CPU output encoding.
-extern const loom_serve_telemetry_event_t LOOM_SERVE_IMAGE_GENERATED;
-extern const loom_serve_telemetry_event_t LOOM_SERVE_IMAGE_SHUTDOWN;
+extern const loom_runtime_telemetry_event_t LOOM_SERVICE_IMAGE_GENERATED;
+extern const loom_runtime_telemetry_event_t LOOM_SERVICE_IMAGE_SHUTDOWN;
 
 // Owner-only publication; payloads own their bytes and format only on readers.
-void loom_serve_image_record_prepared(
-    loom_serve_telemetry_stream_t* stream, uint64_t request,
-    const loom_serve_image_prepared_t* prepared);
-void loom_serve_image_record_work(loom_serve_telemetry_stream_t* stream,
-                                  uint64_t request,
-                                  const loom_serve_image_work_t* work);
-void loom_serve_image_record_totals(loom_serve_telemetry_stream_t* stream,
-                                    const loom_serve_image_totals_t* totals);
+void loom_service_image_record_prepared(
+    loom_runtime_telemetry_stream_t* stream, uint64_t request,
+    const loom_service_image_prepared_t* prepared);
+void loom_service_image_record_work(loom_runtime_telemetry_stream_t* stream,
+                                    uint64_t request,
+                                    const loom_service_image_work_t* work);
+void loom_service_image_record_totals(
+    loom_runtime_telemetry_stream_t* stream,
+    const loom_service_image_totals_t* totals);
 
 #ifdef __cplusplus
 }  // extern "C"
 #endif
-#endif  // LOOM_SERVE_SERVICE_IMAGE_TELEMETRY_H_
+#endif  // LOOM_SERVICE_IMAGE_TELEMETRY_H_

@@ -18,7 +18,10 @@ loom_cc_library(
     hdrs = ["telemetry.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":statistics",
+        "//loom/src/loom/runtime/telemetry:field",
         "//loom/src/loom/runtime/telemetry:sample",
+        "//loom/src/loom/runtime/telemetry:stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
     ],
@@ -48,4 +51,11 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
+)
+
+loom_cc_library(
+    name = "statistics",
+    hdrs = ["statistics.h"],
+    visibility = ["//visibility:public"],
+    deps = ["//runtime/src/iree/base"],
 )

@@ -80,7 +80,7 @@ TEST_F(SourceEpochUploadTest, LivePacketsPreserveUnusedHostAndDeviceCapacity) {
         reference[row].Consume(inputs[row][i]);
       }
       spans[row] = {row, tokens_per_span, inputs[row].data(),
-                    LOOM_SERVE_TEXT_SPAN_FLAG_SELECT};
+                    LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT};
     }
     IREE_ASSERT_OK(
         loom_serve_text_model_epoch(model_, 1, span_count, spans.data()));

@@ -4,11 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <cstring>
+
 #include "iree/base/internal/json.h"
 #include "loom/runtime/telemetry/field.h"
 #include "loom/serve/server/http/logs.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/serve/service/text/telemetry.h"
+#include "loom/serve/telemetry/record.h"
 
 namespace {
 
@@ -26,7 +29,7 @@ const loom_runtime_telemetry_field_t* FindField(
   return nullptr;
 }
 
-void ExpectEpochFields(const loom_serve_text_epoch_record_t& expected,
+void ExpectEpochFields(const loom_service_text_epoch_record_t& expected,
                        iree_host_size_t count,
                        const loom_runtime_telemetry_field_t* fields) {
   ASSERT_EQ(count, 16u);
@@ -44,9 +47,9 @@ void ExpectEpochFields(const loom_serve_text_epoch_record_t& expected,
   const auto mode = expected.schedule_mode;
   EXPECT_TRUE(iree_string_view_equal(
       scheduler->value.string_value,
-      mode == LOOM_SERVE_TEXT_SCHEDULE_PACKED    ? IREE_SV("packed")
-      : mode == LOOM_SERVE_TEXT_SCHEDULE_MATCHED ? IREE_SV("matched")
-                                                 : IREE_SV("isolated")));
+      mode == LOOM_SERVICE_TEXT_SCHEDULE_PACKED    ? IREE_SV("packed")
+      : mode == LOOM_SERVICE_TEXT_SCHEDULE_MATCHED ? IREE_SV("matched")
+                                                   : IREE_SV("isolated")));
   const auto* draft = FindField(count, fields, "draft");
   ASSERT_NE(draft, nullptr);
   ASSERT_EQ(draft->kind, LOOM_RUNTIME_TELEMETRY_FIELD_OBJECT);
@@ -62,23 +65,23 @@ void ExpectEpochFields(const loom_serve_text_epoch_record_t& expected,
 TEST_F(SourceTextServiceTest, CopiedTelemetryOutlivesOwnersAndNameReuse) {
   struct Batch {
     // Original construction identity, independent of the reused display name.
-    loom_serve_telemetry_identity_t identity;
+    loom_runtime_telemetry_identity_t identity;
     // Copied source association, never looked up after owner retirement.
     std::string name;
     // Three bounded polls of an eight-record stream, not borrowed ring slots.
-    std::vector<loom_serve_telemetry_record_t> records;
+    std::vector<loom_runtime_telemetry_record_t> records;
   };
   std::vector<Batch> batches;
   for (const auto mode :
-       {LOOM_SERVE_TEXT_SCHEDULE_PACKED, LOOM_SERVE_TEXT_SCHEDULE_ISOLATED,
-        LOOM_SERVE_TEXT_SCHEDULE_MATCHED}) {
+       {LOOM_SERVICE_TEXT_SCHEDULE_PACKED, LOOM_SERVICE_TEXT_SCHEDULE_ISOLATED,
+        LOOM_SERVICE_TEXT_SCHEDULE_MATCHED}) {
     SCOPED_TRACE(mode);
-    loom_serve_telemetry_stream_t* stream_value = nullptr;
-    IREE_ASSERT_OK(loom_serve_telemetry_stream_allocate(8, host_allocator_,
-                                                        &stream_value));
-    std::unique_ptr<loom_serve_telemetry_stream_t,
-                    decltype(&loom_serve_telemetry_stream_free)>
-        stream(stream_value, loom_serve_telemetry_stream_free);
+    loom_runtime_telemetry_stream_t* stream_value = nullptr;
+    IREE_ASSERT_OK(loom_runtime_telemetry_stream_allocate(8, host_allocator_,
+                                                          &stream_value));
+    std::unique_ptr<loom_runtime_telemetry_stream_t,
+                    decltype(&loom_runtime_telemetry_stream_free)>
+        stream(stream_value, loom_runtime_telemetry_stream_free);
     auto options = ServiceOptions();
     options.schedule_mode = mode;
     loom_serve_text_service_t* service_value = nullptr;
@@ -91,7 +94,7 @@ TEST_F(SourceTextServiceTest, CopiedTelemetryOutlivesOwnersAndNameReuse) {
         service_value, destroy);
     const auto interface = loom_serve_text_service_interface(service.get());
     Observe(interface);
-    Batch batch{loom_serve_telemetry_stream_identity(stream.get()),
+    Batch batch{loom_runtime_telemetry_stream_identity(stream.get()),
                 std::string(options.name.data, options.name.size),
                 {}};
     batch.records.reserve(24);
@@ -106,24 +109,24 @@ TEST_F(SourceTextServiceTest, CopiedTelemetryOutlivesOwnersAndNameReuse) {
                !interface.snapshot(interface.self).queued_requests;
       }));
       EXPECT_EQ(Content(Read(client)), Oracle::Complete(prompt, 2));
-      const auto head = loom_serve_telemetry_stream_head(stream.get());
+      const auto head = loom_runtime_telemetry_stream_head(stream.get());
       while (cursor < head) {
-        loom_serve_telemetry_record_t record;
+        loom_runtime_telemetry_record_t record;
         const auto result =
-            loom_serve_telemetry_stream_read(stream.get(), &cursor, &record);
-        if (result == LOOM_SERVE_TELEMETRY_READ_GAP) {
+            loom_runtime_telemetry_stream_read(stream.get(), &cursor, &record);
+        if (result == LOOM_RUNTIME_TELEMETRY_READ_GAP) {
           continue;
         }
-        ASSERT_EQ(result, LOOM_SERVE_TELEMETRY_READ_RECORD);
+        ASSERT_EQ(result, LOOM_RUNTIME_TELEMETRY_READ_RECORD);
         batch.records.push_back(record);
       }
     }
     EXPECT_EQ(interface.telemetry.counters->completed, 3u);
     uint64_t stalled_cursor = 0;
-    loom_serve_telemetry_record_t unused;
-    ASSERT_EQ(loom_serve_telemetry_stream_read(stream.get(), &stalled_cursor,
-                                               &unused),
-              LOOM_SERVE_TELEMETRY_READ_GAP);
+    loom_runtime_telemetry_record_t unused;
+    ASSERT_EQ(loom_runtime_telemetry_stream_read(stream.get(), &stalled_cursor,
+                                                 &unused),
+              LOOM_RUNTIME_TELEMETRY_READ_GAP);
     EXPECT_GT(stalled_cursor, 0u);
     iree_string_builder_t output;
     iree_string_builder_initialize(host_allocator_, &output);
@@ -148,20 +151,20 @@ TEST_F(SourceTextServiceTest, CopiedTelemetryOutlivesOwnersAndNameReuse) {
       EXPECT_NE(batches[i].identity.ordinal, batches[i - 1].identity.ordinal);
     }
     for (const auto& record : batches[i].records) {
-      if (record.event == &LOOM_SERVE_TEXT_EPOCH) {
-        loom_serve_text_epoch_record_t expected;
+      if (record.event == &LOOM_SERVICE_TEXT_EPOCH) {
+        loom_service_text_epoch_record_t expected;
         std::memcpy(&expected, record.data.words, sizeof(expected));
         IREE_ASSERT_OK(record.event->read_fields(
             &record,
             {&expected, [](void* self, iree_host_size_t count,
                            const loom_runtime_telemetry_field_t* fields) {
                ExpectEpochFields(
-                   *static_cast<loom_serve_text_epoch_record_t*>(self), count,
+                   *static_cast<loom_service_text_epoch_record_t*>(self), count,
                    fields);
                return iree_ok_status();
              }}));
         ++epochs;
-      } else if (record.event == &LOOM_SERVE_TELEMETRY_REQUEST_END) {
+      } else if (record.event == &LOOM_SERVICE_TELEMETRY_REQUEST_END) {
         ++ends;
       } else {
         continue;
@@ -173,7 +176,7 @@ TEST_F(SourceTextServiceTest, CopiedTelemetryOutlivesOwnersAndNameReuse) {
       IREE_ASSERT_OK(iree_json_lookup_object_value(
           iree_string_builder_view(&output), IREE_SV("event"), &event));
       EXPECT_TRUE(
-          iree_string_view_equal(event, record.event == &LOOM_SERVE_TEXT_EPOCH
+          iree_string_view_equal(event, record.event == &LOOM_SERVICE_TEXT_EPOCH
                                             ? IREE_SV("epoch")
                                             : IREE_SV("request_end")));
       iree_string_builder_deinitialize(&output);

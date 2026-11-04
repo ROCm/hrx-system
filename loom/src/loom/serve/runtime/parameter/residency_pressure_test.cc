@@ -168,7 +168,7 @@ TEST_P(ResidencyPressureTest,
   IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(state_, 0, kSlabBytes));
   ASSERT_NO_FATAL_FAILURE(Fill(loom_serve_virtual_buffer_handle(state_)));
   history_retained_ = true;
-  loom_serve_memory_statistics_t incoming_statistics = {};
+  loom_runtime_storage_statistics_t incoming_statistics = {};
   loom_serve_virtual_buffer_t* incoming = nullptr;
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
       pool_, geometry, 2 * kSlabBytes, 256, &incoming_statistics, &incoming));
@@ -275,7 +275,7 @@ TEST_P(ResidencyPressureTest, LogicalAdmissionCollectsFailureBeforeEviction) {
   IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(state_, 0, kSlabBytes));
   ASSERT_NO_FATAL_FAILURE(Fill(loom_serve_virtual_buffer_handle(state_)));
 
-  loom_serve_memory_statistics_t incoming_statistics = {};
+  loom_runtime_storage_statistics_t incoming_statistics = {};
   loom_serve_virtual_buffer_t* incoming = nullptr;
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
       pool_, geometry, kSlabBytes, 256, &incoming_statistics, &incoming));

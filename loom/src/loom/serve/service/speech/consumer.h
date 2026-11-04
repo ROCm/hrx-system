@@ -8,7 +8,7 @@
 #define LOOM_SERVE_SERVICE_SPEECH_CONSUMER_H_
 
 #include "loom/serve/service/speech/generator.h"
-#include "loom/serve/telemetry/record.h"
+#include "loom/service/telemetry/record.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -42,7 +42,7 @@ typedef struct loom_serve_speech_consumer_t {
   // released its request or retained it for terminal model teardown; neither
   // path can access this consumer again. Status is borrowed during the call.
   // Independently owned final output/status may survive this operation.
-  iree_status_t (*end)(void* self, loom_serve_telemetry_outcome_t outcome,
+  iree_status_t (*end)(void* self, loom_service_telemetry_outcome_t outcome,
                        const iree_status_t status);
 } loom_serve_speech_consumer_t;
 

@@ -50,6 +50,7 @@ loom_cc_library(
     hdrs = ["memory.h"],
     deps = [
         ":backing_directory",
+        "//loom/src/loom/runtime/storage:statistics",
         "//loom/src/loom/serve/runtime/host:wake",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",

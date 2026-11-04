@@ -8,27 +8,17 @@
 #define LOOM_SERVE_SERVICE_IMAGE_GENERATOR_H_
 
 #include "iree/tokenizer/tokenizer.h"
+#include "loom/runtime/parameter/activity.h"
 #include "loom/serve/runtime/execution/execution.h"
 #include "loom/serve/runtime/parameter/residency.h"
 #include "loom/serve/service/execution_reconfiguration.h"
 #include "loom/serve/service/image/request.h"
 #include "loom/serve/service/prepared_request.h"
+#include "loom/service/image/preparation.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// Copied source-selected cohort facts, valid after successful batch
-// preparation. No pointer into the source VM or its request payload escapes in
-// this value.
-typedef struct loom_serve_image_prepared_t {
-  // Retained command index selected by the source program.
-  uint64_t stage;
-  // Source-declared stage tag; its units and interpretation are model-defined.
-  int64_t tag;
-  // Bytes of opaque prepared input consumed by this invocation.
-  uint64_t input_bytes;
-} loom_serve_image_prepared_t;
 
 enum loom_serve_image_submit_flag_bits_e {
   // At a retired part boundary, release invocation resources without issuing
@@ -61,7 +51,7 @@ typedef struct loom_serve_image_generator_t {
   iree_status_t (*prepare_batch)(void* self, iree_host_size_t count,
                                  const loom_serve_prepared_request_t* requests,
                                  const iree_host_size_t* output_lengths,
-                                 loom_serve_image_prepared_t* out_prepared);
+                                 loom_service_image_prepared_t* out_prepared);
   // Installs the serialized owner's nonblocking wake before preparation. The
   // owner detaches it only after every accepted compilation has retired.
   void (*set_observer)(void* self, loom_serve_wake_callback_t observer);
@@ -88,7 +78,7 @@ typedef struct loom_serve_image_generator_t {
   // Optional owner-side cumulative parameter activity. This query reads only
   // activation-owner data, even while CPU preparation borrows the invocation.
   // NULL means the generator does not expose weight activity, not zero work.
-  loom_serve_weight_activity_t (*weight_activity)(void* self);
+  loom_runtime_parameter_activity_t (*parameter_activity)(void* self);
   // Optional owner-side collection of idle checkpoint retirement. A failure
   // preserves native ownership for outer model teardown, never silent retry.
   iree_status_t (*query_status)(void* self);

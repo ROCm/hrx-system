@@ -9,6 +9,7 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
+#include "loom/runtime/storage/statistics.h"
 #include "loom/serve/runtime/host/wake.h"
 
 #ifdef __cplusplus
@@ -61,49 +62,6 @@ iree_status_t loom_serve_memory_pool_query_geometry(
     iree_hal_pool_t* storage_pool, iree_device_size_t backing_size,
     loom_serve_memory_geometry_t* out_geometry);
 
-// Additive usage across distinct reservations or banks on one serialized owner.
-// Views borrowing overlapping owners cannot be summed. Historical peaks are
-// not additive and belong to the storage owner that observes their transitions.
-typedef struct loom_serve_memory_usage_t {
-  // Reserved virtual bytes, including final slab alignment.
-  uint64_t reserved_bytes;
-  // Unique backing bytes currently published by the owner.
-  uint64_t committed_bytes;
-  // Budget charged to accepted commitments not yet published by the owner.
-  uint64_t pending_bytes;
-  // Backing selected for return, until logical release is published.
-  uint64_t releasing_bytes;
-  // Cumulative backing returns published by the owner.
-  uint64_t released_bytes;
-} loom_serve_memory_usage_t;
-
-// Statistics maintained by one storage owner, not reconstructed from views of
-// independently activated or retired banks.
-typedef struct loom_serve_memory_statistics_t {
-  // Reserved virtual bytes, including final slab alignment.
-  uint64_t reserved_bytes;
-  // Unique backing bytes; pool-wide queries include cached idle slabs and
-  // pending or abandoned native retirement. Per-reservation groups contain
-  // only live slabs.
-  uint64_t committed_bytes;
-  // Pool-only committed charge whose native backing could not be returned.
-  // Monotonic; neither reusable nor pending, and not attributed to live roots.
-  uint64_t abandoned_bytes;
-  // Physically committed idle slabs available to any reservation in the pool.
-  // Only pool-wide queries include this shared cache; per-reservation is zero.
-  uint64_t cached_bytes;
-  // Budget charged to accepted native commitments not yet published by owner.
-  uint64_t pending_bytes;
-  // Backing selected for return. Per-buffer accounting ends at logical return;
-  // pool-wide accounting also includes outstanding native release.
-  uint64_t releasing_bytes;
-  // Maximum simultaneously committed physical bytes.
-  uint64_t peak_bytes;
-  // Cumulative logical backing returns by reservations, including cache reuse.
-  // This is not cumulative native disposal or available physical capacity.
-  uint64_t released_bytes;
-} loom_serve_memory_statistics_t;
-
 // Retains the mapping-source pool and copies the exact virtual-target scope.
 // The sealed group and selected transfer queue outlive this pool. Geometries
 // have been qualified by query_geometry for this source and scope. limit_bytes
@@ -122,7 +80,7 @@ iree_status_t loom_serve_memory_pool_allocate(
 
 void loom_serve_memory_pool_free(loom_serve_memory_pool_t* pool);
 
-loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
+loom_runtime_storage_statistics_t loom_serve_memory_pool_statistics(
     loom_serve_memory_pool_t* pool);
 
 // Reads the serialized owner's published range ledger without collecting
@@ -130,7 +88,7 @@ loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
 // releasing bytes exclude idle caches and native retirement; abandoned bytes
 // are reported separately. Related per-owner snapshots remain consistent until
 // this owner explicitly collects or changes their backing.
-loom_serve_memory_statistics_t loom_serve_memory_pool_snapshot(
+loom_runtime_storage_statistics_t loom_serve_memory_pool_snapshot(
     const loom_serve_memory_pool_t* pool);
 
 // Returns idle physical slabs toward target_bytes of total native commitment.
@@ -230,7 +188,7 @@ iree_status_t loom_serve_memory_pool_prepare(
 iree_status_t loom_serve_virtual_buffer_allocate(
     loom_serve_memory_pool_t* pool, loom_serve_memory_geometry_t geometry,
     iree_device_size_t length, iree_device_size_t alignment,
-    loom_serve_memory_statistics_t* statistics,
+    loom_runtime_storage_statistics_t* statistics,
     loom_serve_virtual_buffer_t** out_buffer);
 
 // Reserves one address interval for independently backed parameter ranges.
@@ -255,7 +213,7 @@ iree_hal_buffer_t* loom_serve_memory_arena_handle(
 // peers.
 iree_status_t loom_serve_virtual_buffer_allocate_in_arena(
     loom_serve_memory_arena_t* arena, iree_device_size_t length,
-    iree_device_size_t alignment, loom_serve_memory_statistics_t* statistics,
+    iree_device_size_t alignment, loom_runtime_storage_statistics_t* statistics,
     loom_serve_virtual_buffer_t** out_buffer);
 
 // Terminal checked removal after every arena consumer and accepted mapping

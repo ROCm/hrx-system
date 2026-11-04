@@ -11,7 +11,7 @@
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/service/recognition/document.h"
 #include "loom/serve/service/recognition/generator.h"
-#include "loom/serve/telemetry/record.h"
+#include "loom/service/telemetry/record.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,7 +31,7 @@ typedef struct loom_serve_recognition_completion_t {
   // On terminal failure, accepted device resources remain with model teardown.
   // The status is borrowed for this call; no numerical work or blocking is
   // permitted. NULL omits notification.
-  void (*end)(void* self, loom_serve_telemetry_outcome_t outcome,
+  void (*end)(void* self, loom_service_telemetry_outcome_t outcome,
               const iree_status_t status);
 } loom_serve_recognition_completion_t;
 

@@ -12,7 +12,8 @@
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/internal/unicode.h"
 #include "iree/base/threading/mutex.h"
-#include "loom/serve/telemetry/tracing.h"
+#include "loom/service/telemetry/record.h"
+#include "loom/service/telemetry/tracing.h"
 
 typedef enum loom_serve_recognition_row_phase_e {
   RECOGNITION_ROW_QUEUED = 0,
@@ -63,7 +64,7 @@ struct loom_serve_recognition_stream_t {
   // Owned terminal failure, independent of service/model lifetime.
   iree_status_t status;
   // Producer-established terminal classification, independent of status codes.
-  loom_serve_telemetry_outcome_t outcome;
+  loom_service_telemetry_outcome_t outcome;
   // Optional recipient retained through execution ownership, never by results.
   loom_serve_recognition_completion_t completion;
   // CPU-published offer, read only after its task's final release callback.
@@ -299,8 +300,8 @@ static iree_status_t loom_serve_recognition_wait(
   service->phase = phase;
   IREE_TRACE({
     if (phase == RECOGNITION_PHASE_EXECUTING) {
-      service->device.section = loom_serve_trace_section_enter(
-          LOOM_SERVE_TRACE_SECTION_EXECUTE, service->options.name);
+      service->device.section = loom_service_trace_section_enter(
+          LOOM_SERVICE_TRACE_SECTION_EXECUTE, service->options.name);
     }
   });
   return iree_ok_status();
@@ -330,7 +331,7 @@ static void loom_serve_recognition_stream_end(
   loom_serve_recognition_input_deinitialize(&stream->input);
   if (stream->cancelled && iree_status_is_ok(stream->status)) {
     stream->status = iree_status_from_code(IREE_STATUS_CANCELLED);
-    stream->outcome = LOOM_SERVE_TELEMETRY_CANCELLED;
+    stream->outcome = LOOM_SERVICE_TELEMETRY_CANCELLED;
   }
   if (!iree_status_is_ok(stream->status)) {
     stream->pending_count = 0;
@@ -399,7 +400,7 @@ static iree_status_t loom_serve_recognition_release_finished(
       service->admission = NULL;
     }
     if (!iree_status_is_ok(status) && iree_status_is_ok(row->status)) {
-      row->outcome = LOOM_SERVE_TELEMETRY_FAILED;
+      row->outcome = LOOM_SERVICE_TELEMETRY_FAILED;
     }
     row->status = iree_status_join(row->status, iree_status_clone(status));
     service->rows[i] = NULL;
@@ -464,7 +465,7 @@ static iree_status_t loom_serve_recognition_admit(
     row->status = iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         "model parameters and recognition state exceed available capacity");
-    row->outcome = LOOM_SERVE_TELEMETRY_REJECTED;
+    row->outcome = LOOM_SERVICE_TELEMETRY_REJECTED;
     row->phase = RECOGNITION_ROW_COMPLETE;
     service->admission = NULL;
     *progress = true;
@@ -498,7 +499,7 @@ static iree_status_t loom_serve_recognition_collect(
       iree_status_is_ok(status)) {
     loom_serve_recognition_stream_t* row = service->admission;
     row->status = cpu_status;
-    row->outcome = LOOM_SERVE_TELEMETRY_REJECTED;
+    row->outcome = LOOM_SERVICE_TELEMETRY_REJECTED;
     row->phase = RECOGNITION_ROW_COMPLETE;
     service->admission = NULL;
     return iree_ok_status();
@@ -552,7 +553,7 @@ static iree_status_t loom_serve_recognition_collect(
                                            row->result.consumed_frames);
       if (!iree_status_is_ok(row->result.status) &&
           iree_status_is_ok(row->status)) {
-        row->outcome = LOOM_SERVE_TELEMETRY_FAILED;
+        row->outcome = LOOM_SERVICE_TELEMETRY_FAILED;
       }
       row->status = iree_status_join(row->status, row->result.status);
       row->result.status = iree_ok_status();
@@ -657,7 +658,7 @@ iree_status_t loom_serve_recognition_stream_service_advance(
       if (row) {
         row->cancelled = true;
         if (iree_status_is_ok(row->status)) {
-          row->outcome = LOOM_SERVE_TELEMETRY_FAILED;
+          row->outcome = LOOM_SERVICE_TELEMETRY_FAILED;
         }
         row->status =
             iree_status_join(row->status, iree_status_clone(service->failure));

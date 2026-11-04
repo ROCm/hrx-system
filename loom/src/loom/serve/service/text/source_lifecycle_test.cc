@@ -5,11 +5,13 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <cerrno>
+#include <cstring>
 
 #include "loom/runtime/telemetry/field.h"
 #include "loom/serve/service/text/service_test_fixture.h"
-#include "loom/serve/telemetry/latency.h"
 #include "loom/serve/testing/worker_gate.h"
+#include "loom/service/telemetry/latency.h"
+#include "loom/service/telemetry/record.h"
 
 namespace {
 
@@ -52,7 +54,7 @@ class FailedTextDiagnosticsTest : public SourceTextServiceTest {
     IREE_ASSERT_OK(loom_serve_text_model_allocate(
         device_, storage_owner_, &model_options, host_allocator_, &model_));
     IREE_ASSERT_OK(
-        loom_serve_telemetry_stream_allocate(256, host_allocator_, &stream_));
+        loom_runtime_telemetry_stream_allocate(256, host_allocator_, &stream_));
     auto options = ServiceOptions();
     options.row_count = 1;
     options.max_sessions = 1;
@@ -64,7 +66,7 @@ class FailedTextDiagnosticsTest : public SourceTextServiceTest {
 
   void TearDown() override {
     loom_serve_text_service_free(service_, IREE_STATUS_OK);
-    loom_serve_telemetry_stream_free(stream_);
+    loom_runtime_telemetry_stream_free(stream_);
     SourceTextServiceTest::TearDown();
   }
 
@@ -77,21 +79,22 @@ class FailedTextDiagnosticsTest : public SourceTextServiceTest {
   void ExpectFailedEnds(size_t expected_count) {
     uint64_t cursor = 0;
     size_t count = 0;
-    const auto head = loom_serve_telemetry_stream_head(stream_);
+    const auto head = loom_runtime_telemetry_stream_head(stream_);
     while (cursor < head) {
-      loom_serve_telemetry_record_t record;
-      ASSERT_EQ(loom_serve_telemetry_stream_read(stream_, &cursor, &record),
-                LOOM_SERVE_TELEMETRY_READ_RECORD);
-      if (record.event != &LOOM_SERVE_TELEMETRY_REQUEST_END) {
+      loom_runtime_telemetry_record_t record;
+      ASSERT_EQ(loom_runtime_telemetry_stream_read(stream_, &cursor, &record),
+                LOOM_RUNTIME_TELEMETRY_READ_RECORD);
+      if (record.event != &LOOM_SERVICE_TELEMETRY_REQUEST_END) {
         continue;
       }
       ++count;
-      EXPECT_EQ(record.data.end.outcome, LOOM_SERVE_TELEMETRY_FAILED);
-      EXPECT_EQ(record.data.end.diagnostic.code, IREE_STATUS_INVALID_ARGUMENT);
-      EXPECT_EQ(std::string(record.data.end.diagnostic.message,
-                            record.data.end.diagnostic.length),
+      loom_service_telemetry_end_record_t end;
+      std::memcpy(&end, record.data.words, sizeof(end));
+      EXPECT_EQ(end.outcome, LOOM_SERVICE_TELEMETRY_FAILED);
+      EXPECT_EQ(end.diagnostic.code, IREE_STATUS_INVALID_ARGUMENT);
+      EXPECT_EQ(std::string(end.diagnostic.message, end.diagnostic.length),
                 "source boundary failed");
-      EXPECT_FALSE(record.data.end.diagnostic.truncated);
+      EXPECT_FALSE(end.diagnostic.truncated);
       IREE_ASSERT_OK(record.event->read_fields(
           &record,
           {nullptr, [](void*, iree_host_size_t field_count,
@@ -120,7 +123,7 @@ class FailedTextDiagnosticsTest : public SourceTextServiceTest {
   // Production owner callbacks, serialized by this test's driver.
   loom_serve_service_t interface_ = {};
   // Registration-style history, retained beyond service destruction.
-  loom_serve_telemetry_stream_t* stream_ = nullptr;
+  loom_runtime_telemetry_stream_t* stream_ = nullptr;
 };
 
 TEST_F(FailedTextDiagnosticsTest, OutputFailureRetainsRequestDiagnostic) {
@@ -836,16 +839,16 @@ TEST_F(SourceTextServiceTest, TelemetryWrapDoesNotBlockTextOrChangeCounters) {
 }
 
 TEST_F(SourceTextServiceTest, IsolatedEpochsPreserveRetainedHttpHistory) {
-  CheckScheduledResponses(LOOM_SERVE_TEXT_SCHEDULE_ISOLATED);
+  CheckScheduledResponses(LOOM_SERVICE_TEXT_SCHEDULE_ISOLATED);
 }
 
 TEST_F(SourceTextServiceTest, MatchedEpochsPreserveRetainedHttpHistory) {
-  CheckScheduledResponses(LOOM_SERVE_TEXT_SCHEDULE_MATCHED);
+  CheckScheduledResponses(LOOM_SERVICE_TEXT_SCHEDULE_MATCHED);
 }
 
 class PackedTextServiceTest
     : public SourceTextServiceTest,
-      public ::testing::WithParamInterface<loom_serve_text_packing_mode_t> {
+      public ::testing::WithParamInterface<loom_service_text_packing_mode_t> {
  protected:
   loom_serve_text_service_options_t ServiceOptions() const override {
     auto options = SourceTextServiceTest::ServiceOptions();
@@ -855,12 +858,12 @@ class PackedTextServiceTest
 };
 
 TEST_P(PackedTextServiceTest, RetainsHttpHistoryAcrossPackingPolicies) {
-  CheckScheduledResponses(LOOM_SERVE_TEXT_SCHEDULE_PACKED);
+  CheckScheduledResponses(LOOM_SERVICE_TEXT_SCHEDULE_PACKED);
 }
 
 INSTANTIATE_TEST_SUITE_P(PackingPolicies, PackedTextServiceTest,
-                         ::testing::Values(LOOM_SERVE_TEXT_PACKING_MIXED,
-                                           LOOM_SERVE_TEXT_PACKING_SEPARATE));
+                         ::testing::Values(LOOM_SERVICE_TEXT_PACKING_MIXED,
+                                           LOOM_SERVICE_TEXT_PACKING_SEPARATE));
 
 TEST_F(SourceTextServiceTest, CancelledPreparationRetainsPartialOwnership) {
   const auto before = loom_serve_pool_statistics(storage_owner_);
@@ -1016,14 +1019,16 @@ TEST_F(SourceTextServiceTest,
   uint64_t reported_queued = UINT64_MAX;
   auto read_snapshots = [&] {
     const uint64_t head =
-        loom_serve_telemetry_stream_head(interface.telemetry.stream);
+        loom_runtime_telemetry_stream_head(interface.telemetry.stream);
     while (cursor < head) {
-      loom_serve_telemetry_record_t record;
-      ASSERT_EQ(loom_serve_telemetry_stream_read(interface.telemetry.stream,
-                                                 &cursor, &record),
-                LOOM_SERVE_TELEMETRY_READ_RECORD);
-      if (record.event == &LOOM_SERVE_TELEMETRY_SNAPSHOT) {
-        reported_queued = record.data.snapshot.queued;
+      loom_runtime_telemetry_record_t record;
+      ASSERT_EQ(loom_runtime_telemetry_stream_read(interface.telemetry.stream,
+                                                   &cursor, &record),
+                LOOM_RUNTIME_TELEMETRY_READ_RECORD);
+      if (record.event == &LOOM_SERVICE_TELEMETRY_SNAPSHOT) {
+        loom_service_telemetry_snapshot_record_t snapshot;
+        std::memcpy(&snapshot, record.data.words, sizeof(snapshot));
+        reported_queued = snapshot.queued;
       }
     }
   };

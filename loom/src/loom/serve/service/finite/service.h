@@ -34,7 +34,7 @@ iree_status_t loom_serve_finite_service_allocate(
     loom_serve_host_t* host, loom_serve_finite_model_t* model,
     const loom_serve_finite_protocol_t* protocol, iree_string_view_t name,
     iree_host_size_t capacity, iree_host_size_t variant_capacity,
-    iree_duration_t heartbeat_interval, loom_serve_telemetry_stream_t* stream,
+    iree_duration_t heartbeat_interval, loom_runtime_telemetry_stream_t* stream,
     iree_allocator_t host_allocator, loom_serve_finite_service_t** out_service);
 
 loom_serve_service_t loom_serve_finite_service_interface(

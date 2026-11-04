@@ -22,11 +22,11 @@
 #include "loom/serve/server/resources.h"
 #include "loom/serve/service/recognition/stream.h"
 #include "loom/serve/service/recognition/transcription.h"
-#include "loom/serve/telemetry/record.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/service_application.h"
 #include "loom/serve/transport/http/listener.h"
 #include "loom/serve/transport/http/server.h"
+#include "loom/service/telemetry/record.h"
 
 IREE_FLAG(string, model, "", "Recognition model document for qualification.");
 IREE_FLAG(string, input, "", "Optional 16-kHz mono PCM16LE recording.");
@@ -401,7 +401,7 @@ TEST_F(RegistryRecognitionTest, NativeDrainAndHttpPeerPreserveFinalDocument) {
   ASSERT_NO_FATAL_FAILURE(ReadFinal(&input, &text));
   ASSERT_NO_FATAL_FAILURE(
       AdvanceUntil([&] { return loom_serve_registry_count(registry_) == 0; }));
-  loom_serve_telemetry_counters_t counters;
+  loom_service_telemetry_counters_t counters;
   ASSERT_TRUE(loom_serve_registry_counters(registry_, &counters));
   EXPECT_EQ(counters.requests, 2u);
   EXPECT_EQ(counters.completed, 2u);
@@ -447,7 +447,7 @@ TEST_F(RegistryRecognitionTest, AbortRetiresNativeLedgerAndRetainsStatus) {
   second.stream.reset();
   ASSERT_NO_FATAL_FAILURE(
       AdvanceUntil([&] { return loom_serve_registry_count(registry_) == 0; }));
-  loom_serve_telemetry_counters_t counters;
+  loom_service_telemetry_counters_t counters;
   ASSERT_TRUE(loom_serve_registry_counters(registry_, &counters));
   EXPECT_EQ(counters.requests, 2u);
   EXPECT_EQ(counters.cancelled, 2u);
@@ -483,7 +483,7 @@ TEST_F(RegistryRecognitionTest, InvalidOptionsLeaveAdmissionAvailable) {
   IREE_ASSERT_OK(loom_serve_registry_remove(Model(), LOOM_SERVE_REMOVAL_DRAIN));
   ASSERT_NO_FATAL_FAILURE(
       AdvanceUntil([&] { return loom_serve_registry_count(registry_) == 0; }));
-  loom_serve_telemetry_counters_t counters;
+  loom_service_telemetry_counters_t counters;
   ASSERT_TRUE(loom_serve_registry_counters(registry_, &counters));
   EXPECT_EQ(counters.requests, 1u);
   EXPECT_EQ(counters.completed, 1u);
@@ -605,7 +605,7 @@ TEST_F(RegistryActivityTest, AbortRetiresActivityPeersAndRetainsCallerStatus) {
   second.stream.reset();
   ASSERT_NO_FATAL_FAILURE(
       AdvanceUntil([&] { return loom_serve_registry_count(registry_) == 0; }));
-  loom_serve_telemetry_counters_t counters;
+  loom_service_telemetry_counters_t counters;
   ASSERT_TRUE(loom_serve_registry_counters(registry_, &counters));
   EXPECT_EQ(counters.requests, 2u);
   EXPECT_EQ(counters.cancelled, 2u);

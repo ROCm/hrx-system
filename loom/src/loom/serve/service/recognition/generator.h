@@ -114,7 +114,7 @@ typedef struct loom_serve_recognition_generator_t {
   // Shared capacity identity, borrowed through service retirement.
   const void* capacity_domain;
   // Optional copied parameter activity, queried only on serialized owner turns.
-  loom_serve_weight_activity_t (*weight_activity)(void* self);
+  loom_runtime_parameter_activity_t (*parameter_activity)(void* self);
 } loom_serve_recognition_generator_t;
 
 #endif  // LOOM_SERVE_SERVICE_RECOGNITION_GENERATOR_H_

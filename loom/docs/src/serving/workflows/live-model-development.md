@@ -302,7 +302,7 @@ weights and unchanged request contract provide their common starting point.
 
 The [observation workflow](observe-model-server.md) connects client results to
 `/logz/stream`, counters, epoch packing and memory accounting. Comparing
-`weight_activity` snapshots before and after a swap can show whether additional
+`parameter_activity` snapshots before and after a swap can show whether additional
 activation, file reads or preparation occurred. Compiler JIT diagnostics are
 not kernel performance reports, and serving-managed memory is not total process
 or device memory. Keep these measurement boundaries explicit.

@@ -10,8 +10,8 @@
 
 #include "loom/runtime/telemetry/sample.h"
 #include "loom/serve/service/kind.h"
-#include "loom/serve/telemetry/latency.h"
-#include "loom/serve/telemetry/record.h"
+#include "loom/service/telemetry/latency.h"
+#include "loom/service/telemetry/record.h"
 
 // Prometheus labels preserve UTF-8 and escape only backslash, quote and LF.
 // JSON escaping is different for control characters and Unicode separators.
@@ -242,39 +242,39 @@ typedef struct loom_serve_metrics_counter_field_t {
   const char* name;
   // Counter units and ownership semantics.
   const char* description;
-  // Byte offset of a uint64_t in loom_serve_telemetry_counters_t.
+  // Byte offset of a uint64_t in loom_service_telemetry_counters_t.
   iree_host_size_t offset;
 } loom_serve_metrics_counter_field_t;
 
 static const loom_serve_metrics_counter_field_t metrics_counter_fields[] = {
     {"requests", "Requests reaching a model protocol, including rejections.",
-     offsetof(loom_serve_telemetry_counters_t, requests)},
+     offsetof(loom_service_telemetry_counters_t, requests)},
     {"completed", "Successful responses copied into the HTTP carrier.",
-     offsetof(loom_serve_telemetry_counters_t, completed)},
+     offsetof(loom_service_telemetry_counters_t, completed)},
     {"rejected", "Protocol, source validation or capacity rejections.",
-     offsetof(loom_serve_telemetry_counters_t, rejected)},
+     offsetof(loom_service_telemetry_counters_t, rejected)},
     {"cancelled", "Requests abandoned by peers or orderly shutdown.",
-     offsetof(loom_serve_telemetry_counters_t, cancelled)},
+     offsetof(loom_service_telemetry_counters_t, cancelled)},
     {"failed", "Requests terminated by transport or execution failures.",
-     offsetof(loom_serve_telemetry_counters_t, failed)},
+     offsetof(loom_service_telemetry_counters_t, failed)},
     {"input_tokens",
      "Tokens in completed model work, including abandoned work.",
-     offsetof(loom_serve_telemetry_counters_t, input_tokens)},
+     offsetof(loom_service_telemetry_counters_t, input_tokens)},
     {"output_tokens", "Selected model output tokens, including EOS.",
-     offsetof(loom_serve_telemetry_counters_t, output_tokens)},
+     offsetof(loom_service_telemetry_counters_t, output_tokens)},
     {"batches", "Completed model invocations or cohorts, not HTTP requests.",
-     offsetof(loom_serve_telemetry_counters_t, batches)},
+     offsetof(loom_service_telemetry_counters_t, batches)},
 };
 
 static uint64_t loom_serve_http_metrics_counter_value(
-    const loom_serve_telemetry_counters_t* counters,
+    const loom_service_telemetry_counters_t* counters,
     const loom_serve_metrics_counter_field_t* field) {
   return *(const uint64_t*)((const uint8_t*)counters + field->offset);
 }
 
 static iree_status_t loom_serve_http_metrics_counters(
     loom_serve_registry_t* registry, iree_string_builder_t* output) {
-  loom_serve_telemetry_counters_t total;
+  loom_service_telemetry_counters_t total;
   const bool available = loom_serve_registry_counters(registry, &total);
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output,
@@ -340,21 +340,21 @@ static iree_status_t loom_serve_http_metrics_latency_prefix(
 static iree_status_t loom_serve_http_metrics_histogram(
     iree_string_builder_t* output, const char* metric,
     const loom_serve_registered_model_t* model, const char* outcome,
-    const loom_serve_telemetry_latency_histogram_t* histogram) {
+    const loom_service_telemetry_latency_histogram_t* histogram) {
   const char* separator = model || outcome ? "," : "";
   uint64_t count = 0;
-  for (iree_host_size_t i = 0; i < LOOM_SERVE_TELEMETRY_LATENCY_BUCKET_COUNT;
+  for (iree_host_size_t i = 0; i < LOOM_SERVICE_TELEMETRY_LATENCY_BUCKET_COUNT;
        ++i) {
     count += histogram->buckets[i];
     IREE_RETURN_IF_ERROR(loom_serve_http_metrics_latency_prefix(
         output, metric, "bucket", model, outcome));
-    if (i + 1 == LOOM_SERVE_TELEMETRY_LATENCY_BUCKET_COUNT) {
+    if (i + 1 == LOOM_SERVICE_TELEMETRY_LATENCY_BUCKET_COUNT) {
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           output, "%sle=\"+Inf\"} %" PRIu64 "\n", separator, count));
     } else {
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           output, "%sle=\"%.9g\"} %" PRIu64 "\n", separator,
-          loom_serve_telemetry_latency_bound_ns(i) / 1e9, count));
+          loom_service_telemetry_latency_bound_ns(i) / 1e9, count));
     }
   }
   IREE_RETURN_IF_ERROR(loom_serve_http_metrics_latency_prefix(
@@ -369,11 +369,12 @@ static iree_status_t loom_serve_http_metrics_histogram(
 
 static iree_status_t loom_serve_http_metrics_latency_values(
     iree_string_builder_t* output, const loom_serve_registered_model_t* model,
-    const loom_serve_telemetry_latency_t* latency) {
+    const loom_service_telemetry_latency_t* latency) {
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(latency->outcomes); ++i) {
     IREE_RETURN_IF_ERROR(loom_serve_http_metrics_histogram(
         output, "request_duration", model,
-        loom_serve_telemetry_outcome_name((loom_serve_telemetry_outcome_t)i),
+        loom_service_telemetry_outcome_name(
+            (loom_service_telemetry_outcome_t)i),
         &latency->outcomes[i]));
   }
   return loom_serve_http_metrics_histogram(output, "first_output", model, NULL,
@@ -382,7 +383,7 @@ static iree_status_t loom_serve_http_metrics_latency_values(
 
 static iree_status_t loom_serve_http_metrics_latency(
     loom_serve_registry_t* registry, iree_string_builder_t* output) {
-  loom_serve_telemetry_latency_t total;
+  loom_service_telemetry_latency_t total;
   const bool available = loom_serve_registry_latency(registry, &total);
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output,

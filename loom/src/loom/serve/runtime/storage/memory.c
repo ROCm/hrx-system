@@ -72,7 +72,7 @@ struct loom_serve_memory_pool_t {
   // Finite physical admission ceiling selected when the pool is created.
   uint64_t limit_bytes;
   // Accounting across all buffers, with physical allocations counted once.
-  loom_serve_memory_statistics_t statistics;
+  loom_runtime_storage_statistics_t statistics;
   // Published and accepted backing, including failed demand until a joined
   // source observation, partitioned by physical class.
   loom_serve_memory_demand_t demand;
@@ -135,7 +135,7 @@ struct loom_serve_virtual_buffer_t {
   // Borrowed physical owner outliving this reservation.
   loom_serve_memory_pool_t* pool;
   // Borrowed caller accounting group, independent of the shared pool budget.
-  loom_serve_memory_statistics_t* statistics;
+  loom_runtime_storage_statistics_t* statistics;
   // Owned stable virtual reservation or range view, independent of backing.
   iree_hal_buffer_t* handle;
   // Previous standalone reservation retained through cold growth mapping.
@@ -620,11 +620,11 @@ void loom_serve_memory_pool_free(loom_serve_memory_pool_t* pool) {
   iree_allocator_free(pool->host_allocator, pool);
 }
 
-loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
+loom_runtime_storage_statistics_t loom_serve_memory_pool_statistics(
     loom_serve_memory_pool_t* pool) {
   loom_serve_memory_pool_collect(pool);
   loom_serve_memory_pool_observe_retirement(pool);
-  loom_serve_memory_statistics_t statistics = pool->statistics;
+  loom_runtime_storage_statistics_t statistics = pool->statistics;
   const uint64_t retiring = pool->retiring_bytes;
   if (pool->weight.cache) {
     iree_hal_pool_stats_t weight;
@@ -643,7 +643,7 @@ loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
   return statistics;
 }
 
-loom_serve_memory_statistics_t loom_serve_memory_pool_snapshot(
+loom_runtime_storage_statistics_t loom_serve_memory_pool_snapshot(
     const loom_serve_memory_pool_t* pool) {
   return pool->statistics;
 }
@@ -1013,7 +1013,7 @@ static uint64_t* loom_serve_memory_slab_demand(
 static iree_status_t loom_serve_virtual_buffer_allocate_metadata(
     loom_serve_memory_pool_t* pool, loom_serve_memory_geometry_t geometry,
     iree_device_size_t length, iree_device_size_t alignment,
-    loom_serve_memory_statistics_t* statistics,
+    loom_runtime_storage_statistics_t* statistics,
     loom_serve_memory_arena_t* arena,
     loom_serve_virtual_buffer_t** out_buffer) {
   *out_buffer = NULL;
@@ -1067,7 +1067,7 @@ static iree_status_t loom_serve_virtual_buffer_allocate_metadata(
 iree_status_t loom_serve_virtual_buffer_allocate(
     loom_serve_memory_pool_t* pool, loom_serve_memory_geometry_t geometry,
     iree_device_size_t length, iree_device_size_t alignment,
-    loom_serve_memory_statistics_t* statistics,
+    loom_runtime_storage_statistics_t* statistics,
     loom_serve_virtual_buffer_t** out_buffer) {
   *out_buffer = NULL;
   loom_serve_virtual_buffer_t* buffer = NULL;
@@ -1149,7 +1149,7 @@ iree_hal_buffer_t* loom_serve_memory_arena_handle(
 
 iree_status_t loom_serve_virtual_buffer_allocate_in_arena(
     loom_serve_memory_arena_t* arena, iree_device_size_t length,
-    iree_device_size_t alignment, loom_serve_memory_statistics_t* statistics,
+    iree_device_size_t alignment, loom_runtime_storage_statistics_t* statistics,
     loom_serve_virtual_buffer_t** out_buffer) {
   *out_buffer = NULL;
   IREE_RETURN_IF_ERROR(iree_status_clone(arena->target.failure));

@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/serve/runtime/host/clock.h"
+#include "loom/service/telemetry/record.h"
 
 bool loom_serve_text_session_name_valid(iree_string_view_t name) {
   if (name.size > 64) {
@@ -305,8 +306,8 @@ iree_status_t loom_serve_text_session_append_tokens(
     // Device work completed, but translation cannot establish client history.
     // The consumer discards the partial stage and preserves the terminal error.
     loom_serve_text_chat_completion_deinitialize(&session->completion);
-    loom_serve_telemetry_diagnostic_capture(status,
-                                            &session->request.diagnostic);
+    loom_service_telemetry_diagnostic_capture(status,
+                                              &session->request.diagnostic);
     session->request.publication.pending = false;
     status = session->request.consumer.vtable->fail(
         session->request.consumer.self, session->request.chat.flags, status);

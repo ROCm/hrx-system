@@ -329,7 +329,7 @@ class MemoryLossTest : public ::testing::Test {
   // Qualified native replacement geometry used by all reservations.
   loom_serve_memory_geometry_t geometry_ = {};
   // Logical accounting shared by this fixture's reservations.
-  loom_serve_memory_statistics_t statistics_ = {};
+  loom_runtime_storage_statistics_t statistics_ = {};
   // Three initially live roots and a fourth which can reuse surviving backing.
   std::array<loom_serve_virtual_buffer_t*, 4> buffers_ = {};
 };

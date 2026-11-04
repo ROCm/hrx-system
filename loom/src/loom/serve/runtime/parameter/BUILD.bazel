@@ -199,6 +199,7 @@ loom_cc_library(
         ":inputs",
         ":sources",
         "//loom/binding/c:loomc",
+        "//loom/src/loom/runtime/parameter:activity",
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/execution:retirement",
         "//loom/src/loom/serve/runtime/execution:workspace",

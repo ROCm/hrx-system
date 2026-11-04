@@ -7,7 +7,9 @@
 #define LOOM_RUNTIME_STORAGE_TELEMETRY_H_
 
 #include "iree/hal/pool.h"
+#include "loom/runtime/storage/statistics.h"
 #include "loom/runtime/telemetry/sample.h"
+#include "loom/runtime/telemetry/stream.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,6 +26,11 @@ extern "C" {
 iree_status_t loom_runtime_storage_sample_pool(
     const char* name, const iree_hal_pool_stats_t* statistics,
     loom_runtime_telemetry_sample_sink_t sink);
+
+// Captures copied shared-owner facts without querying live storage or devices.
+void loom_runtime_storage_record_shared_memory(
+    loom_runtime_telemetry_stream_t* stream, iree_time_t time_ns,
+    const loom_runtime_storage_shared_memory_record_t* memory);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -6,10 +6,12 @@
 
 #include "loom/serve/server/http/logs.h"
 
+#include <cstring>
 #include <string>
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/service/telemetry/record.h"
 
 namespace {
 
@@ -17,14 +19,14 @@ class LogsTest : public ::testing::Test {
  protected:
   void SetUp() override {
     iree_string_builder_initialize(iree_allocator_system(), &output_);
-    IREE_ASSERT_OK(loom_serve_telemetry_stream_allocate(
+    IREE_ASSERT_OK(loom_runtime_telemetry_stream_allocate(
         128, iree_allocator_system(), &stream_));
-    const auto identity = loom_serve_telemetry_stream_identity(stream_);
+    const auto identity = loom_runtime_telemetry_stream_identity(stream_);
     prefix_ = std::to_string(identity.created_ns) + ":" +
               std::to_string(identity.ordinal) + ":";
   }
   void TearDown() override {
-    loom_serve_telemetry_stream_free(stream_);
+    loom_runtime_telemetry_stream_free(stream_);
     iree_string_builder_deinitialize(&output_);
   }
   iree_status_t Poll(const std::string& cursor = {}) {
@@ -38,9 +40,9 @@ class LogsTest : public ::testing::Test {
   }
 
   // Real bounded publisher used by the HTTP serializer.
-  loom_serve_telemetry_stream_t* stream_ = nullptr;
+  loom_runtime_telemetry_stream_t* stream_ = nullptr;
   // Owner-only cumulative state, deliberately independent of event history.
-  loom_serve_telemetry_counters_t counters_ = {};
+  loom_service_telemetry_counters_t counters_ = {};
   // Consumer-owned copied HTTP bytes.
   iree_string_builder_t output_;
   // Current stream incarnation in the HTTP cursor representation.
@@ -48,13 +50,13 @@ class LogsTest : public ::testing::Test {
 };
 
 TEST_F(LogsTest, BoundsPollWorkAndPreservesIndependentTotals) {
-  const loom_serve_telemetry_record_t record = {
+  const loom_runtime_telemetry_record_t record = {
       .time_ns = 12,
       .request = 7,
-      .event = &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN,
+      .event = &LOOM_SERVICE_TELEMETRY_REQUEST_BEGIN,
   };
   for (int i = 0; i < 80; ++i) {
-    loom_serve_telemetry_stream_append(stream_, &record);
+    loom_runtime_telemetry_stream_append(stream_, &record);
   }
   counters_.requests = 999;
   IREE_ASSERT_OK(Poll());
@@ -82,25 +84,22 @@ TEST_F(LogsTest, RejectsMalformedFutureAndDifferentLifetimeCursors) {
 }
 
 TEST_F(LogsTest, CopiesEscapedErrorBeforeStatusRetires) {
-  loom_serve_telemetry_record_t record = {
+  loom_runtime_telemetry_record_t record = {
       .time_ns = 42,
       .request = 9,
-      .event = &LOOM_SERVE_TELEMETRY_REQUEST_END,
-      .data =
-          {
-              .end =
-                  {
-                      .outcome = LOOM_SERVE_TELEMETRY_REJECTED,
-                      .duration_ns = 17,
-                      .input_tokens = 3,
-                  },
-          },
+      .event = &LOOM_SERVICE_TELEMETRY_REQUEST_END,
+  };
+  loom_service_telemetry_end_record_t end = {
+      .outcome = LOOM_SERVICE_TELEMETRY_REJECTED,
+      .duration_ns = 17,
+      .input_tokens = 3,
   };
   iree_status_t status =
       iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "bad \"value\"\n");
-  loom_serve_telemetry_diagnostic_capture(status, &record.data.end.diagnostic);
+  loom_service_telemetry_diagnostic_capture(status, &end.diagnostic);
   iree_status_free(status);
-  loom_serve_telemetry_stream_append(stream_, &record);
+  std::memcpy(record.data.words, &end, sizeof(end));
+  loom_runtime_telemetry_stream_append(stream_, &record);
   IREE_ASSERT_OK(Poll());
   EXPECT_NE(
       Output().find(
@@ -113,11 +112,11 @@ TEST_F(LogsTest, CopiesEscapedErrorBeforeStatusRetires) {
 }
 
 TEST_F(LogsTest, DiagnosticOnlyScopeDoesNotInventCounters) {
-  const loom_serve_telemetry_record_t record = {
+  const loom_runtime_telemetry_record_t record = {
       .time_ns = 10,
-      .event = &LOOM_SERVE_TELEMETRY_STREAM_BEGIN,
+      .event = &LOOM_SERVICE_TELEMETRY_STREAM_BEGIN,
   };
-  loom_serve_telemetry_stream_append(stream_, &record);
+  loom_runtime_telemetry_stream_append(stream_, &record);
   IREE_ASSERT_OK(loom_serve_http_logs(stream_, nullptr,
                                       iree_string_view_empty(),
                                       iree_string_view_empty(), &output_));
@@ -133,13 +132,13 @@ TEST_F(LogsTest, DiagnosticOnlyScopeDoesNotInventCounters) {
 }
 
 TEST_F(LogsTest, SsePreservesJsonRecordsAndOpaqueResumeBoundary) {
-  const loom_serve_telemetry_record_t record = {
+  const loom_runtime_telemetry_record_t record = {
       .time_ns = 12,
       .request = 7,
-      .event = &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN,
+      .event = &LOOM_SERVICE_TELEMETRY_REQUEST_BEGIN,
   };
   for (int i = 0; i < 80; ++i) {
-    loom_serve_telemetry_stream_append(stream_, &record);
+    loom_runtime_telemetry_stream_append(stream_, &record);
   }
   uint64_t position = 0;
   IREE_ASSERT_OK(loom_serve_http_logs_resume(stream_, IREE_SV(""), &position));
@@ -175,12 +174,12 @@ TEST_F(LogsTest, SsePreservesJsonRecordsAndOpaqueResumeBoundary) {
 }
 
 TEST_F(LogsTest, SseReportsOverwriteWithoutChangingAnotherReader) {
-  const loom_serve_telemetry_record_t record = {
+  const loom_runtime_telemetry_record_t record = {
       .time_ns = 12,
-      .event = &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN,
+      .event = &LOOM_SERVICE_TELEMETRY_REQUEST_BEGIN,
   };
   for (int i = 0; i < 140; ++i) {
-    loom_serve_telemetry_stream_append(stream_, &record);
+    loom_runtime_telemetry_stream_append(stream_, &record);
   }
   uint64_t slow = 0;
   IREE_ASSERT_OK(loom_serve_http_logs_format(
@@ -201,12 +200,12 @@ TEST_F(LogsTest, SseReportsOverwriteWithoutChangingAnotherReader) {
 }
 
 TEST_F(LogsTest, FailedBatchFormattingPreservesTheReaderPosition) {
-  const loom_serve_telemetry_record_t record = {
+  const loom_runtime_telemetry_record_t record = {
       .time_ns = 12,
-      .event = &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN,
+      .event = &LOOM_SERVICE_TELEMETRY_REQUEST_BEGIN,
   };
   for (int i = 0; i < 16; ++i) {
-    loom_serve_telemetry_stream_append(stream_, &record);
+    loom_runtime_telemetry_stream_append(stream_, &record);
   }
   char storage[512];
   iree_string_builder_t limited;

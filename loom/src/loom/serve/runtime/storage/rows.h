@@ -33,7 +33,7 @@ typedef struct loom_serve_rows_t {
   // Borrowed model timeline, enclosing state mapping and release readiness.
   loom_serve_execution_t* execution;
   // Accounting shared by all virtual reservations below.
-  loom_serve_memory_statistics_t statistics;
+  loom_runtime_storage_statistics_t statistics;
   // Final queue ownership, independent of success/failure readiness.
   loom_serve_retirement_t retirement;
   // One native capacity transition, serialized with other model mutation.

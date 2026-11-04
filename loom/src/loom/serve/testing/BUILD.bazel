@@ -156,9 +156,10 @@ loom_cc_library(
     }),
     visibility = ["//loom/src/loom/serve:implementation"],
     deps = [
-        "//loom/src/loom/serve/telemetry:stream",
+        "//loom/src/loom/runtime/telemetry:stream",
         "//loom/src/loom/serve/transport/http:listener",
         "//loom/src/loom/serve/transport/http:server",
+        "//loom/src/loom/service/telemetry:record",
         "//runtime/src/iree/base",
     ],
 )

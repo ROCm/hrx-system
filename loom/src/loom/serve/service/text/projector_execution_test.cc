@@ -171,14 +171,14 @@ TEST_P(PixelProjectorExecutionTest, RgbAndRgbaCohortConditionsRetainedText) {
           .row_index = 0,
           .token_count = 4,
           .token_ids = tokens[0],
-          .flags = LOOM_SERVE_TEXT_SPAN_FLAG_SELECT,
+          .flags = LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT,
           .media = &media[0],
       },
       {
           .row_index = 1,
           .token_count = 4,
           .token_ids = tokens[1],
-          .flags = LOOM_SERVE_TEXT_SPAN_FLAG_SELECT,
+          .flags = LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT,
           .media = &media[1],
       },
   };

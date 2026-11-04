@@ -104,7 +104,7 @@ class RetirementTest : public ::testing::TestWithParam<bool> {
   // Parameter/state-like virtual reservation, independent of view references.
   loom_serve_virtual_buffer_t* reservation = nullptr;
   // Reservation accounting retained through destruction.
-  loom_serve_memory_statistics_t statistics = {};
+  loom_runtime_storage_statistics_t statistics = {};
   // Final ownership counter shared with queue completion callbacks.
   loom_serve_retirement_t retirement = {};
   // Protects the nonblocking callback publication to the outer test owner.
