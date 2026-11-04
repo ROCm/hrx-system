@@ -48,6 +48,11 @@ struct amdf_dxg_bridge_gpu_adapter_t {
 
 namespace amdf::rocdxg_bridge {
 
+// Selects the immutable scheduler profile for one command family.
+const amdf_rocdxg_kernel_queue_profile_t* SelectGpuKernelQueueProfile(
+    const amdf_dxg_bridge_gpu_adapter_t* adapter,
+    amdf_dxg_bridge_gpu_queue_command_type_t command_type) noexcept;
+
 // Verifies that no live queue borrows `adapter`.
 amdf_dxg_bridge_result_t PrepareGpuAdapterClose(
     amdf_dxg_bridge_gpu_adapter_t* adapter,

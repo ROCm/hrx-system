@@ -38,6 +38,8 @@ amdf_linux_sidecar_library(
         "allocation.cc",
         "allocation.h",
         "bridge.cc",
+        "clock.cc",
+        "clock.h",
         "gfxip_compatibility.cc",
         "kernel_queue.cc",
         "kernel_queue.h",
@@ -130,6 +132,32 @@ amdf_cc_test(
     deps = [
         ":native_transport",
         "//third_party:amdf_rocdxg_headers",
+        "//third_party:amdf_wkmi",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "clock_test",
+    srcs = [
+        "adapter_state.cc",
+        "adapter_state.h",
+        "clock.cc",
+        "clock.h",
+        "clock_test.cc",
+        "gfxip_compatibility.cc",
+    ],
+    copts = ["-Wno-unknown-pragmas"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        ":native_transport",
+        "//libamdf/src/gpu/umd/dxg:bridge_api",
+        "//third_party:amdf_rocdxg_headers",
+        "//third_party:amdf_rocdxg_thunk_proxy",
         "//third_party:amdf_wkmi",
         "//third_party:google_test",
         "//third_party:google_test_main",

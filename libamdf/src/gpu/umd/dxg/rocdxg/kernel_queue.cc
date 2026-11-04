@@ -125,19 +125,6 @@ bool TryMakeQueueProfile(const thunk_proxy::DeviceContext& device,
   return true;
 }
 
-const amdf_rocdxg_kernel_queue_profile_t* SelectQueueProfile(
-    const amdf_dxg_bridge_gpu_adapter_t* adapter,
-    amdf_dxg_bridge_gpu_queue_command_type_t command_type) {
-  switch (command_type) {
-    case AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4:
-      return &adapter->pm4_queue_profile;
-    case AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA:
-      return &adapter->sdma_queue_profile;
-    default:
-      return nullptr;
-  }
-}
-
 amdf_dxg_bridge_result_t CreateNativeQueue(
     amdf_dxg_bridge_gpu_adapter_t* adapter,
     const amdf_dxg_bridge_gpu_kernel_queue_create_info_t& create_info,
@@ -145,7 +132,7 @@ amdf_dxg_bridge_result_t CreateNativeQueue(
     amdf_dxg_bridge_gpu_kernel_queue_info_t* out_info,
     uint32_t* out_native_status) {
   const amdf_rocdxg_kernel_queue_profile_t* profile =
-      SelectQueueProfile(adapter, create_info.command_type);
+      SelectGpuKernelQueueProfile(adapter, create_info.command_type);
   if (profile == nullptr || !profile->is_supported) {
     return AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED;
   }

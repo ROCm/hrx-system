@@ -10,6 +10,7 @@
 #include "libamdf/src/gpu/umd/dxg/bridge_api.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/adapter_state.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/allocation.h"
+#include "libamdf/src/gpu/umd/dxg/rocdxg/clock.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/kernel_queue.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/native_transport.h"
 #include "shared/include/dxcore_loader.h"
@@ -166,16 +167,6 @@ GpuBufferPrepareImport(amdf_dxg_bridge_gpu_adapter_t*,
   return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
 }
 
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuClockSample(
-    amdf_dxg_bridge_gpu_adapter_t*, uint32_t, uint32_t,
-    amdf_dxg_bridge_gpu_queue_command_type_t,
-    amdf_dxg_bridge_gpu_clock_sample_t*, uint32_t* out_native_status) noexcept {
-  if (out_native_status != nullptr) {
-    *out_native_status = 0;
-  }
-  return AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED;
-}
-
 const amdf_dxg_bridge_api_t kBridgeApi = {
     sizeof(amdf_dxg_bridge_api_t),
     AMDF_DXG_BRIDGE_ABI_VERSION_13,
@@ -187,7 +178,7 @@ const amdf_dxg_bridge_api_t kBridgeApi = {
     amdf::rocdxg_bridge::GpuKernelQueueSubmit,
     amdf::rocdxg_bridge::GpuKernelQueueDestroy,
     GpuBufferPrepareImport,
-    GpuClockSample,
+    amdf::rocdxg_bridge::GpuClockSample,
 };
 
 }  // namespace

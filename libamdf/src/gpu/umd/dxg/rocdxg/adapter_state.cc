@@ -16,6 +16,19 @@ amdf_dxg_bridge_gpu_adapter_t::~amdf_dxg_bridge_gpu_adapter_t() {
 
 namespace amdf::rocdxg_bridge {
 
+const amdf_rocdxg_kernel_queue_profile_t* SelectGpuKernelQueueProfile(
+    const amdf_dxg_bridge_gpu_adapter_t* adapter,
+    amdf_dxg_bridge_gpu_queue_command_type_t command_type) noexcept {
+  switch (command_type) {
+    case AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4:
+      return &adapter->pm4_queue_profile;
+    case AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA:
+      return &adapter->sdma_queue_profile;
+    default:
+      return nullptr;
+  }
+}
+
 amdf_dxg_bridge_result_t PrepareGpuAdapterClose(
     amdf_dxg_bridge_gpu_adapter_t* adapter,
     uint32_t* out_native_status) noexcept {
