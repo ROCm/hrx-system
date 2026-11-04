@@ -24,6 +24,7 @@ load(
     "AMDGPU_PEERS_RESOURCE",
     "AMDGPU_RESOURCE",
     "LIBAMDF",
+    "LIBAMDF_DXG",
     "LIBAMDF_GPU",
     "LIBAMDF_XDNA",
     "XDNA_RESOURCE",
@@ -65,6 +66,14 @@ PACKAGE_POLICIES = [
         ],
         build_requirements = [LIBAMDF_GPU],
         forbidden_deps = ["//libamdf/src/xdna/..."],
+    ),
+    package_policy(
+        packages = [
+            "libamdf/src/gpu/umd/dxg/...",
+            "libamdf/src/platform/dxg/...",
+            "libamdf/src/platform/linux/dxg/...",
+        ],
+        build_requirements = [LIBAMDF_DXG],
     ),
     package_policy(
         packages = [

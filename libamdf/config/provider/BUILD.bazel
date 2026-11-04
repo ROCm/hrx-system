@@ -70,6 +70,14 @@ selects.config_setting_group(
 )
 
 selects.config_setting_group(
+    name = "dxg",
+    match_any = [
+        ":linux_dxg",
+        ":wddm",
+    ],
+)
+
+selects.config_setting_group(
     name = "linux_xdna",
     match_all = [
         ":linux_kfd",
