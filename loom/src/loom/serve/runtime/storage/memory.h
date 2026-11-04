@@ -125,6 +125,14 @@ void loom_serve_memory_pool_free(loom_serve_memory_pool_t* pool);
 loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
     loom_serve_memory_pool_t* pool);
 
+// Reads the serialized owner's published range ledger without collecting
+// completions or querying native pools. Unlike statistics(), committed and
+// releasing bytes exclude idle caches and native retirement; abandoned bytes
+// are reported separately. Related per-owner snapshots remain consistent until
+// this owner explicitly collects or changes their backing.
+loom_serve_memory_statistics_t loom_serve_memory_pool_snapshot(
+    const loom_serve_memory_pool_t* pool);
+
 // Returns idle physical slabs toward target_bytes of total native commitment.
 // Live mappings remain intact. Accepted detachments retain this trim policy
 // through completion; native disposal remains charged until it finishes.

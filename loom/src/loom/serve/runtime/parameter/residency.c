@@ -542,12 +542,16 @@ iree_status_t loom_serve_residency_cache_query_status(
   return status;
 }
 
-static uint64_t loom_serve_residency_cache_projected_bytes(
-    loom_serve_residency_cache_t* cache) {
-  const loom_serve_memory_statistics_t memory =
-      loom_serve_memory_pool_statistics(cache->pool);
-  return memory.committed_bytes + memory.pending_bytes -
-         memory.releasing_bytes - memory.cached_bytes;
+static uint64_t loom_serve_residency_group_live_bytes(
+    const loom_serve_residency_group_t* group) {
+  uint64_t bytes = 0;
+  for (iree_host_size_t i = 0; i < group->weight_count; ++i) {
+    const loom_serve_memory_usage_t memory =
+        loom_serve_weights_memory_usage(group->weights[i]);
+    bytes +=
+        memory.committed_bytes + memory.pending_bytes - memory.releasing_bytes;
+  }
+  return bytes;
 }
 
 iree_status_t loom_serve_residency_cache_trim_idle(
@@ -581,12 +585,16 @@ iree_status_t loom_serve_residency_cache_trim(
   }
   iree_status_t status = iree_ok_status();
   for (loom_serve_residency_group_t* entry = cache->groups.oldest;
-       entry && iree_status_is_ok(status) &&
-       loom_serve_residency_cache_projected_bytes(cache) > target_bytes;
-       entry = entry->next) {
+       entry && iree_status_is_ok(status); entry = entry->next) {
+    const loom_serve_memory_statistics_t memory =
+        loom_serve_memory_pool_statistics(cache->pool);
+    const uint64_t remaining = memory.committed_bytes + memory.pending_bytes -
+                               memory.releasing_bytes - memory.cached_bytes;
+    if (remaining <= target_bytes) {
+      break;
+    }
     if (entry->active && !loom_serve_residency_group_is_pinned(entry) &&
-        !entry->releasing &&
-        loom_serve_residency_group_statistics(entry).committed_bytes) {
+        !entry->releasing && loom_serve_residency_group_live_bytes(entry)) {
       bool complete = false;
       status = loom_serve_residency_group_deactivate(entry, &complete);
     }
@@ -607,17 +615,25 @@ static iree_status_t loom_serve_residency_reclaim(void* user_data,
       return iree_ok_status();
     }
   }
-  uint64_t remaining = loom_serve_residency_cache_projected_bytes(cache);
-  uint64_t pinned_bytes = cache->permanent_source
-                              ? loom_serve_virtual_pool_source_protected_bytes(
-                                    cache->permanent_source)
-                              : 0;
+  // Readiness may collect completions. Classify the resulting owner ledger
+  // without further collection: a failed acquisition can lower both aggregate
+  // and group charges, and mixing those epochs invents reclaimable history.
+  const bool reclaiming = loom_serve_residency_cache_is_reclaiming(cache);
+  const loom_serve_memory_statistics_t memory =
+      loom_serve_memory_pool_snapshot(cache->pool);
+  uint64_t remaining = memory.committed_bytes + memory.pending_bytes -
+                       memory.releasing_bytes + memory.abandoned_bytes;
+  uint64_t pinned_bytes = memory.abandoned_bytes;
+  if (cache->permanent_source) {
+    pinned_bytes +=
+        loom_serve_virtual_pool_source_protected_bytes(cache->permanent_source);
+  }
+  if (cache->workspace) {
+    pinned_bytes += loom_serve_workspace_protected_bytes(cache->workspace);
+  }
   for (loom_serve_residency_group_t* entry = cache->groups.oldest;
        entry && remaining > target_bytes; entry = entry->next) {
-    const loom_serve_memory_usage_t memory =
-        loom_serve_residency_group_statistics(entry);
-    const uint64_t live_bytes =
-        memory.committed_bytes + memory.pending_bytes - memory.releasing_bytes;
+    const uint64_t live_bytes = loom_serve_residency_group_live_bytes(entry);
     if (loom_serve_residency_group_is_pinned(entry) || !entry->active) {
       pinned_bytes += live_bytes;
     } else {
@@ -627,8 +643,9 @@ static iree_status_t loom_serve_residency_reclaim(void* user_data,
   if (remaining <= target_bytes) {
     return loom_serve_residency_cache_trim(cache, target_bytes);
   }
-  // Permanent roots, pinned parameters, and terminal partial loads cannot be
-  // evicted. No idle history can help while that backing exceeds the target.
+  // Live scratch, permanent roots, pinned parameters, partial loads, and lost
+  // native backing cannot be evicted. No idle history can help while that
+  // backing exceeds the target.
   if (pinned_bytes > target_bytes) {
     return iree_ok_status();
   }
@@ -636,7 +653,7 @@ static iree_status_t loom_serve_residency_reclaim(void* user_data,
   // Release at most one idle logical owner, then let its normal asynchronous
   // maintenance retire before asking for more. A physical trim here could
   // recurse into admission for compaction destinations.
-  if (!loom_serve_residency_cache_is_reclaiming(cache)) {
+  if (!reclaiming) {
     for (loom_serve_residency_t* entry = cache->oldest; entry;
          entry = entry->next) {
       if (entry->reclaimer.request &&

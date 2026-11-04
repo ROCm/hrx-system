@@ -113,6 +113,12 @@ iree_hal_pool_stats_t loom_serve_workspace_statistics(
 loom_serve_memory_usage_t loom_serve_workspace_memory_usage(
     const loom_serve_workspace_t* workspace);
 
+// Actual committed or pending backing unavailable to pressure reclamation.
+// Idle source extents are excluded. Reads owner counters without collection or
+// native queries; fixed backing returns zero.
+uint64_t loom_serve_workspace_protected_bytes(
+    const loom_serve_workspace_t* workspace);
+
 // Rounds a declared simultaneous workspace peak to physical slab bytes for
 // admission. Fixed backing leaves the bound unchanged. This uses immutable
 // geometry, not allocator availability or currently retained backing.

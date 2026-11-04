@@ -10,6 +10,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstring>
+#include <functional>
 #include <mutex>
 #include <vector>
 
@@ -29,6 +30,9 @@ struct DeferredBackingPool : iree_hal_pool_t {
   bool defer = false;
   // Whether the dependency exposes its optional physical-capacity fact.
   bool report_physical_capacity = true;
+  // Owner-installed observation boundary for completing a held dependency
+  // between native statistics and the caller's next publication pass.
+  std::function<void()> statistics_observer;
   // Active parent calls, including asynchronous callbacks before submit
   // returns.
   std::atomic<size_t> depth{0};
@@ -143,9 +147,13 @@ struct DeferredBackingPool : iree_hal_pool_t {
             },
         .query_stats =
             [](const iree_hal_pool_t* base, iree_hal_pool_stats_t* stats) {
-              iree_hal_pool_query_stats(
-                  static_cast<const DeferredBackingPool*>(base)->backing,
-                  stats);
+              const auto* self = static_cast<const DeferredBackingPool*>(base);
+              iree_hal_pool_query_stats(self->backing, stats);
+              // A copied callback can safely detach itself during observation.
+              const auto observer = self->statistics_observer;
+              if (observer) {
+                observer();
+              }
             },
         .trim =
             [](iree_hal_pool_t* base, iree_hal_pool_trim_flags_t flags,

@@ -643,6 +643,11 @@ loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
   return statistics;
 }
 
+loom_serve_memory_statistics_t loom_serve_memory_pool_snapshot(
+    const loom_serve_memory_pool_t* pool) {
+  return pool->statistics;
+}
+
 static uint64_t loom_serve_memory_pool_trim_weight_cache(
     loom_serve_memory_pool_t* pool, uint64_t target_bytes,
     loom_serve_memory_demand_t additional, uint64_t projected) {
