@@ -121,6 +121,7 @@ amdf_cc_library(
     deps = [
         ":kmt_api",
         "//libamdf/src:pci",
+        "//libamdf/src/platform/dxg:endpoint_identity",
     ],
 )
 
