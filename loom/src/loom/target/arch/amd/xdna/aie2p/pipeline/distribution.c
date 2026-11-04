@@ -326,15 +326,11 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
     loom_aie2p_native_distribution_endpoint_t* receiver =
         &distribution->receivers[ordinal];
     receiver->wait_for_idle = true;
-    if ((tile->facts->kind == LOOM_XDNA_TILE_KIND_MEMORY &&
-         receiver->tile->facts->kind != LOOM_XDNA_TILE_KIND_COMPUTE &&
-         tile->coordinate.column != receiver->tile->coordinate.column) ||
-        (tile == receiver->tile && (engine >= dma->loopback_channel_count ||
-                                    engine != receiver->engine))) {
+    if (tile == receiver->tile &&
+        (engine >= dma->loopback_channel_count || engine != receiver->engine)) {
       return loom_aie2p_native_reject(
           context, first->admission->op,
-          IREE_SV("same-column SRAM-to-SRAM routes and matching same-tile DMA "
-                  "channels"));
+          IREE_SV("matching same-tile DMA channels"));
     }
   }
   // Packet identities belong to the physical path, so every phase can select
@@ -684,14 +680,6 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
               context->workers[reader->worker].execution ==
                   LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION;
           distribution->sender.wait_for_idle |= receiver->wait_for_idle;
-          if (sender->tile->facts->kind == LOOM_XDNA_TILE_KIND_MEMORY &&
-              receiver->tile->facts->kind != LOOM_XDNA_TILE_KIND_COMPUTE &&
-              sender->tile->coordinate.column !=
-                  receiver->tile->coordinate.column) {
-            return loom_aie2p_native_reject(
-                context, destination->copy,
-                IREE_SV("same-column channel-copy routes between SRAM tiles"));
-          }
           if (sender->tile == receiver->tile &&
               (sender->engine >=
                    sender->tile->facts->dma.loopback_channel_count ||

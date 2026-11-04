@@ -1,4 +1,5 @@
-// One multicast receiver is a compute tile; the other forwards through SRAM.
+// One multicast receiver is a compute tile; the other forwards through two
+// SRAM columns, crossing east into SRAM and west between SRAM tiles.
 // Configured record and ring sizes cross DMA task and descriptor boundaries.
 // Every case changes all inputs and output buffers on invocation replay.
 
@@ -17,7 +18,8 @@ pipeline.def<kernel> @finite_fanout(%record_count: index, %capacity: index) run(
 
   %source_memory = pipeline.memory<workgroup>[0, 3] : pool
   %left_memory = pipeline.memory<workgroup>[0, 4] : pool
-  %relay_memory = pipeline.memory<workgroup>[0, 1] : pool
+  %relay_memory = pipeline.memory<workgroup>[1, 1] : pool
+  %return_memory = pipeline.memory<workgroup>[0, 1] : pool
   %right_memory = pipeline.memory<workgroup>[0, 5] : pool
 
   %source_storage = buffer.alloca<workgroup> pool(%source_memory) align(64) %storage_bytes : buffer
@@ -42,9 +44,21 @@ pipeline.def<kernel> @finite_fanout(%record_count: index, %capacity: index) run(
   %relay_slots = buffer.view %relay_storage[%origin] : buffer -> view<[%capacity]x16xi32>
   %relay = channel.bind<fifo> %relay_slots, %capacity : view<[%capacity]x16xi32>, index -> channel<tile<16xi32>>
 
+  %return_storage = buffer.alloca<workgroup> pool(%return_memory) align(64) %storage_bytes : buffer
+  %return_slots = buffer.view %return_storage[%origin] : buffer -> view<[%capacity]x16xi32>
+  %returned = channel.bind<fifo> %return_slots, %capacity : view<[%capacity]x16xi32>, index -> channel<tile<16xi32>>
+
   pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
     scf.for %record = [%begin to %record_count step %step] {
       %read, %payload = channel.acquire %relay : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+      %write, %destination = channel.reserve %returned : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      channel.copy %read -> %write : read<tile<16xi32>>, write<tile<16xi32>>
+    }
+  }
+
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %record_count step %step] {
+      %read, %payload = channel.acquire %returned : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
       %write, %destination = channel.reserve %right : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
       channel.copy %read -> %write : read<tile<16xi32>>, write<tile<16xi32>>
     }

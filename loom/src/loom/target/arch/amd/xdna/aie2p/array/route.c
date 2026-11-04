@@ -157,14 +157,17 @@ static iree_host_size_t loom_aie2p_array_horizontal_link_index(
 
 static loom_aie2p_array_route_direction_t loom_aie2p_array_route_direction(
     loom_xdna_tile_coordinate_t source, loom_xdna_tile_coordinate_t destination,
-    bool vertical_first) {
-  if (source.column != destination.column &&
-      (!vertical_first || source.row == destination.row)) {
-    return source.column > destination.column ? LOOM_AIE2P_ARRAY_ROUTE_WEST
-                                              : LOOM_AIE2P_ARRAY_ROUTE_EAST;
+    uint16_t horizontal_row) {
+  uint16_t next_row = destination.row;
+  if (source.column != destination.column) {
+    if (source.row == horizontal_row) {
+      return source.column > destination.column ? LOOM_AIE2P_ARRAY_ROUTE_WEST
+                                                : LOOM_AIE2P_ARRAY_ROUTE_EAST;
+    }
+    next_row = horizontal_row;
   }
-  return source.row < destination.row ? LOOM_AIE2P_ARRAY_ROUTE_NORTH
-                                      : LOOM_AIE2P_ARRAY_ROUTE_SOUTH;
+  return source.row < next_row ? LOOM_AIE2P_ARRAY_ROUTE_NORTH
+                               : LOOM_AIE2P_ARRAY_ROUTE_SOUTH;
 }
 
 static loom_aie2p_array_route_step_t loom_aie2p_array_route_step(
@@ -232,7 +235,7 @@ static bool loom_aie2p_array_plan_route(
     loom_aie2p_array_route_builder_t* builder, uint32_t channel_index,
     iree_host_size_t node_index, loom_xdna_tile_coordinate_t destination,
     loom_xdna_stream_port_t destination_port, uint8_t destination_channel,
-    bool vertical_first, bool packet) {
+    uint16_t horizontal_row, bool packet) {
   // Existing multicast prefixes retain their physical arrival and lane. Only
   // the unreserved suffix participates in lane selection.
   while (builder->prefixes.nodes[node_index].coordinate.column !=
@@ -243,7 +246,7 @@ static bool loom_aie2p_array_plan_route(
         &builder->prefixes.nodes[node_index];
     const loom_aie2p_array_route_direction_t direction =
         loom_aie2p_array_route_direction(node->coordinate, destination,
-                                         vertical_first);
+                                         horizontal_row);
     if (node->children[direction] == IREE_HOST_SIZE_MAX) {
       break;
     }
@@ -272,7 +275,7 @@ static bool loom_aie2p_array_plan_route(
          coordinate.row != destination.row) {
     const loom_aie2p_array_route_direction_t direction =
         loom_aie2p_array_route_direction(coordinate, destination,
-                                         vertical_first);
+                                         horizontal_row);
     loom_aie2p_array_route_step_t* step = &builder->steps[step_count++];
     *step = loom_aie2p_array_route_step(builder, coordinate, incoming_port,
                                         direction);
@@ -342,7 +345,8 @@ bool loom_aie2p_array_route_ingress(
   }
   return loom_aie2p_array_plan_route(
       builder, channel_index, *root, worker_coordinate,
-      LOOM_XDNA_STREAM_PORT_DMA, worker_dma_channel, false, false);
+      LOOM_XDNA_STREAM_PORT_DMA, worker_dma_channel, shim_coordinate.row,
+      false);
 }
 
 static iree_host_size_t loom_aie2p_array_route_worker_source(
@@ -371,7 +375,8 @@ bool loom_aie2p_array_route_egress(
       shim_dma_channel);
   if (!loom_aie2p_array_plan_route(builder, channel_index, node_index,
                                    shim_coordinate, LOOM_XDNA_STREAM_PORT_SOUTH,
-                                   shim_link_channel, true, false)) {
+                                   shim_link_channel, shim_coordinate.row,
+                                   false)) {
     return false;
   }
   loom_aie2p_array_append_route(builder, channel_index, shim_coordinate,
@@ -395,16 +400,24 @@ bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
     *root = loom_aie2p_array_create_route_node(builder, source, source_port,
                                                source_channel);
   }
-  // Memory tiles have only north/south stream links. Reach the receiver's
-  // compute row before branching horizontally across its multicast cohort.
-  const bool vertical_first =
+  // SRAM switches have only north/south links. Cross-column traffic turns on
+  // the receiving core's row, or on the first compute row for SRAM-to-SRAM
+  // copies. These are switch hops, not additional DMA or core execution.
+  uint16_t horizontal_row = source.row;
+  if (source.column != destination.column &&
       loom_xdna_array_tile_facts(builder->family, source)->kind ==
-          LOOM_XDNA_TILE_KIND_MEMORY &&
-      loom_xdna_array_tile_facts(builder->family, destination)->kind ==
-          LOOM_XDNA_TILE_KIND_COMPUTE;
+          LOOM_XDNA_TILE_KIND_MEMORY) {
+    horizontal_row =
+        loom_xdna_array_tile_facts(builder->family, destination)->kind ==
+                LOOM_XDNA_TILE_KIND_MEMORY
+            ? loom_xdna_array_tile_kind_facts(builder->family,
+                                              LOOM_XDNA_TILE_KIND_COMPUTE)
+                  ->first_row
+            : destination.row;
+  }
   return loom_aie2p_array_plan_route(builder, channel_index, *root, destination,
                                      destination_port, destination_channel,
-                                     vertical_first, packet);
+                                     horizontal_row, packet);
 }
 
 bool loom_aie2p_array_route_workers(

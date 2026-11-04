@@ -79,7 +79,6 @@ loom_test(
         "finite_ingress.loom",
         "ordered_prefix.loom",
         "ordered_replay.loom",
-        "packet_phases.loom",
         "partial_record.loom",
         "retained_lifetime.loom",
         "retained_replay.loom",
@@ -95,6 +94,7 @@ loom_test(
     srcs = [
         "channel_fanout.loom",
         "joined_phases.loom",
+        "packet_phases.loom",
         "retained_handoff.loom",
     ],
     benchmark_smoke = False,
