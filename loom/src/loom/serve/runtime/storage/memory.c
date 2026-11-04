@@ -220,9 +220,11 @@ struct loom_serve_memory_operation_t {
   iree_slim_mutex_t mutex;
   // Outer-thread wait only; shared task workers never wait here.
   iree_notification_t notification;
-  // Both queue operations and submission have released captured ownership.
+  // Both queue operations and submission have released captured ownership;
+  // protected by mutex.
   bool complete;
-  // Serialized owner has installed native results and returned budget credit.
+  // Serialized owner has installed native results and returned budget credit;
+  // protected by mutex.
   bool published;
   // Owned terminal result, independent of other operations on the same pool.
   iree_status_t status;
@@ -1311,7 +1313,13 @@ static void loom_serve_memory_pool_collect(loom_serve_memory_pool_t* pool) {
     }
     operation->pending_next = NULL;
     operation->pending_previous_link = NULL;
+    // Another thread may have flushed this operation and still be publishing
+    // while its caller waits. Publish the terminal state under the operation
+    // join and wake that caller only after the collector's final access.
+    iree_slim_mutex_lock(&operation->mutex);
     operation->published = true;
+    iree_notification_post(&operation->notification, IREE_ALL_WAITERS);
+    iree_slim_mutex_unlock(&operation->mutex);
     completed = next;
   }
   if (!pool->pending_operations) {
@@ -1834,13 +1842,21 @@ void loom_serve_memory_operation_set_observer(
   }
 }
 
+static bool loom_serve_memory_operation_is_published(void* user_data) {
+  loom_serve_memory_operation_t* operation = user_data;
+  iree_slim_mutex_lock(&operation->mutex);
+  const bool published = operation->published;
+  iree_slim_mutex_unlock(&operation->mutex);
+  return published;
+}
+
 bool loom_serve_memory_operation_is_complete(
     loom_serve_memory_operation_t* operation) {
-  if (!operation || operation->published) {
+  if (!operation || loom_serve_memory_operation_is_published(operation)) {
     return true;
   }
   loom_serve_memory_pool_collect(operation->pool);
-  return operation->published;
+  return loom_serve_memory_operation_is_published(operation);
 }
 
 static bool loom_serve_memory_operation_is_retired(void* user_data) {
@@ -1858,6 +1874,9 @@ void loom_serve_memory_operation_await(
                             loom_serve_memory_operation_is_retired, operation,
                             iree_infinite_timeout());
     loom_serve_memory_pool_collect(operation->pool);
+    iree_notification_await(&operation->notification,
+                            loom_serve_memory_operation_is_published, operation,
+                            iree_infinite_timeout());
   }
 }
 
@@ -1869,7 +1888,7 @@ iree_status_t loom_serve_memory_operation_query_status(
 void loom_serve_memory_operation_free(
     loom_serve_memory_operation_t* operation) {
   if (operation) {
-    IREE_ASSERT(operation->published);
+    IREE_ASSERT(loom_serve_memory_operation_is_published(operation));
     iree_notification_deinitialize(&operation->notification);
     iree_slim_mutex_deinitialize(&operation->mutex);
     iree_hal_semaphore_release(operation->stages[0].semaphore);
