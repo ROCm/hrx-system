@@ -355,6 +355,7 @@ static amdf_dxg_private_result_t amdf_dxg_private_decode_adapter(
   info.user_queue_byte_length =
       amdf_dxg_private_load_u32(extended_record + 0x30E8);
   const uint32_t native_queue_bits = extended_record[0x35C0];
+  info.pm4_scheduler_id = (native_queue_bits & 0x14u) == 0x14u ? 6u : 5u;
   info.native_queue_flags =
       ((native_queue_bits & (1u << 2)) != 0 ? AMDF_DXG_PRIVATE_NATIVE_QUEUE_AQL
                                             : 0) |
@@ -369,6 +370,67 @@ static amdf_dxg_private_result_t amdf_dxg_private_decode_adapter(
                                                 info.scheduler_ids);
   *out_info = info;
   return AMDF_DXG_PRIVATE_RESULT_SUCCESS;
+}
+
+static bool amdf_dxg_private_try_make_queue_profile(
+    const amdf_dxg_private_adapter_info_t* info, uint8_t scheduler_id,
+    bool require_hardware_scheduling,
+    amdf_dxg_private_queue_profile_t* out_profile) {
+  uint32_t node_ordinal = 0;
+  while (node_ordinal < AMDF_DXG_PRIVATE_SCHEDULER_ID_COUNT &&
+         info->scheduler_ids[node_ordinal] != scheduler_id) {
+    ++node_ordinal;
+  }
+  if (node_ordinal == AMDF_DXG_PRIVATE_SCHEDULER_ID_COUNT) {
+    return false;
+  }
+  const bool uses_hardware_scheduling =
+      ((info->hardware_scheduling_node_mask >> node_ordinal) & 1u) != 0;
+  if (require_hardware_scheduling && !uses_hardware_scheduling) {
+    return false;
+  }
+  *out_profile = (amdf_dxg_private_queue_profile_t){
+      .scheduler_id = scheduler_id,
+      .node_ordinal = node_ordinal,
+      .is_supported = true,
+      .uses_hardware_scheduling = uses_hardware_scheduling,
+  };
+  return true;
+}
+
+void amdf_dxg_private_initialize_queue_profiles(
+    const amdf_dxg_private_adapter_info_t* info,
+    amdf_dxg_private_queue_profile_t* out_pm4_profile,
+    amdf_dxg_private_queue_profile_t* out_sdma_profile) {
+  memset(out_pm4_profile, 0, sizeof(*out_pm4_profile));
+  memset(out_sdma_profile, 0, sizeof(*out_sdma_profile));
+  amdf_dxg_private_try_make_queue_profile(info, info->pm4_scheduler_id,
+                                          /*require_hardware_scheduling=*/true,
+                                          out_pm4_profile);
+
+  for (uint32_t i = 0; i < AMDF_DXG_PRIVATE_SCHEDULER_ID_COUNT; ++i) {
+    const uint8_t scheduler_id = info->scheduler_ids[i];
+    if ((scheduler_id == 4 || scheduler_id == 7) &&
+        amdf_dxg_private_try_make_queue_profile(
+            info, scheduler_id, /*require_hardware_scheduling=*/true,
+            out_sdma_profile)) {
+      return;
+    }
+  }
+  // A nonzero user-queue size means the driver selected persistent user-mode
+  // SDMA rings, which the immutable command-stream API does not represent.
+  if (info->user_queue_byte_length != 0) {
+    return;
+  }
+  for (uint32_t i = 0; i < AMDF_DXG_PRIVATE_SCHEDULER_ID_COUNT; ++i) {
+    const uint8_t scheduler_id = info->scheduler_ids[i];
+    if ((scheduler_id == 4 || scheduler_id == 7) &&
+        amdf_dxg_private_try_make_queue_profile(
+            info, scheduler_id, /*require_hardware_scheduling=*/false,
+            out_sdma_profile)) {
+      return;
+    }
+  }
 }
 
 amdf_dxg_private_result_t amdf_dxg_private_query_linked_adapter(

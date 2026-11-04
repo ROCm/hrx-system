@@ -81,6 +81,7 @@ MakeCommonAllocationRecord(uint64_t byte_length) {
 TEST(PrivateRecordsTest, AbiLayoutsAreFixed) {
   static_assert(sizeof(amdf_dxg_private_adapter_query_t) == 32);
   static_assert(sizeof(amdf_dxg_private_adapter_info_t) == 120);
+  static_assert(sizeof(amdf_dxg_private_queue_profile_t) == 16);
   static_assert(sizeof(amdf_dxg_private_allocation_info_t) == 16);
   static_assert(sizeof(amdf_dxg_private_allocation_metadata_t) == 32);
   EXPECT_EQ(AMDF_DXG_PRIVATE_LINKED_QUERY_SCRATCH_BYTE_LENGTH, 0xF160u);
@@ -193,7 +194,7 @@ TEST(PrivateRecordsTest, InitializesWddmSystemAndRegisteredRecordsExactly) {
     amdf_dxg_private_allocation_domain_t domain;
     int32_t gfx_ip_major;
     amdf_dxg_private_allocation_flags_t flags;
-    uint32_t native_queue_flags;
+    uint8_t native_queue_flags;
     uint32_t expected_segment_flags;
     uint8_t expected_queue_byte;
     uint8_t expected_cache_policy;
@@ -378,6 +379,64 @@ TEST(PrivateRecordsTest, InitializesHardwareAndSoftwareSubmissionsExactly) {
   }
 }
 
+TEST(PrivateRecordsTest, DerivesComputeAndHardwareSdmaQueueProfiles) {
+  amdf_dxg_private_adapter_info_t info = {};
+  info.pm4_scheduler_id = 6;
+  info.scheduler_ids[0] = 4;
+  info.scheduler_ids[1] = 5;
+  info.scheduler_ids[2] = 6;
+  info.scheduler_ids[3] = 7;
+  info.hardware_scheduling_node_mask = (1u << 2) | (1u << 3);
+
+  amdf_dxg_private_queue_profile_t pm4_profile = {};
+  amdf_dxg_private_queue_profile_t sdma_profile = {};
+  amdf_dxg_private_initialize_queue_profiles(&info, &pm4_profile,
+                                             &sdma_profile);
+  EXPECT_TRUE(pm4_profile.is_supported);
+  EXPECT_EQ(pm4_profile.scheduler_id, 6u);
+  EXPECT_EQ(pm4_profile.node_ordinal, 2u);
+  EXPECT_TRUE(pm4_profile.uses_hardware_scheduling);
+  EXPECT_TRUE(sdma_profile.is_supported);
+  EXPECT_EQ(sdma_profile.scheduler_id, 7u);
+  EXPECT_EQ(sdma_profile.node_ordinal, 3u);
+  EXPECT_TRUE(sdma_profile.uses_hardware_scheduling);
+}
+
+TEST(PrivateRecordsTest, AllowsSoftwareSdmaOnlyWithoutPersistentUserQueues) {
+  amdf_dxg_private_adapter_info_t info = {};
+  info.pm4_scheduler_id = 5;
+  info.scheduler_ids[0] = 5;
+  info.scheduler_ids[1] = 4;
+  info.hardware_scheduling_node_mask = 1u << 0;
+
+  amdf_dxg_private_queue_profile_t pm4_profile = {};
+  amdf_dxg_private_queue_profile_t sdma_profile = {};
+  amdf_dxg_private_initialize_queue_profiles(&info, &pm4_profile,
+                                             &sdma_profile);
+  EXPECT_TRUE(pm4_profile.is_supported);
+  EXPECT_TRUE(sdma_profile.is_supported);
+  EXPECT_EQ(sdma_profile.scheduler_id, 4u);
+  EXPECT_FALSE(sdma_profile.uses_hardware_scheduling);
+
+  info.user_queue_byte_length = 4096;
+  amdf_dxg_private_initialize_queue_profiles(&info, &pm4_profile,
+                                             &sdma_profile);
+  EXPECT_TRUE(pm4_profile.is_supported);
+  EXPECT_FALSE(sdma_profile.is_supported);
+}
+
+TEST(PrivateRecordsTest, DoesNotSubstituteAnUnrelatedComputeScheduler) {
+  amdf_dxg_private_adapter_info_t info = {};
+  info.pm4_scheduler_id = 5;
+  info.scheduler_ids[0] = 0;
+  info.hardware_scheduling_node_mask = 1;
+  amdf_dxg_private_queue_profile_t pm4_profile = {};
+  amdf_dxg_private_queue_profile_t sdma_profile = {};
+  amdf_dxg_private_initialize_queue_profiles(&info, &pm4_profile,
+                                             &sdma_profile);
+  EXPECT_FALSE(pm4_profile.is_supported);
+}
+
 struct FakePrivateQuery {
   std::array<uint32_t, 4> byte_lengths = {};
   uint32_t call_count = 0;
@@ -388,6 +447,7 @@ struct FakePrivateQuery {
   uint32_t asic_revision = 0x10;
   uint32_t encoded_gfxip = 0x000B0500;
   uint16_t vendor_id = 0x1002;
+  uint8_t native_queue_bits = (1u << 2) | (1u << 5);
   bool supports_wddm2 = true;
   bool corrupt_checksum = false;
   bool valid_compute_unit_mask = true;
@@ -440,7 +500,7 @@ void FillExtendedRecord(uint8_t* record, const FakePrivateQuery& fake) {
   record[0x89E] = 5;
   record[0x89F] = 7;
   record[0x2E03] = 1;
-  record[0x35C0] = (1u << 2) | (1u << 5);
+  record[0x35C0] = fake.native_queue_bits;
   Store64(record, 0x35C4, (UINT64_C(1) << 1) | (UINT64_C(1) << 2));
 }
 
@@ -537,6 +597,7 @@ TEST(PrivateRecordsTest, QueriesSelectedPhysicalAdapterExactly) {
   EXPECT_EQ(info.supports_firmware_state_shadowing, 1u);
   EXPECT_EQ(info.supports_platform_atomics, 1u);
   EXPECT_EQ(info.user_queue_byte_length, 0u);
+  EXPECT_EQ(info.pm4_scheduler_id, 5u);
   EXPECT_EQ(info.native_queue_flags, AMDF_DXG_PRIVATE_NATIVE_QUEUE_AQL |
                                          AMDF_DXG_PRIVATE_NATIVE_QUEUE_SDMA);
   EXPECT_EQ(info.invisible_local_heap_byte_length, 0x12345000u);
@@ -577,6 +638,18 @@ TEST(PrivateRecordsTest, QueriesSingleAdapterRecordsExactly) {
   EXPECT_EQ(info.gfx_ip_major, 11);
   EXPECT_EQ(info.gfx_ip_minor, 5);
   EXPECT_EQ(info.asic_revision, 0x10u);
+}
+
+TEST(PrivateRecordsTest, DecodesDriverSelectedComputeScheduler) {
+  AdapterQueryFixture fixture;
+  fixture.fake.native_queue_bits = (1u << 2) | (1u << 4);
+  amdf_dxg_private_adapter_info_t info = {};
+  uint32_t native_status = UINT32_MAX;
+  ASSERT_EQ(amdf_dxg_private_query_linked_adapter(&fixture.query, &info,
+                                                  &native_status),
+            AMDF_DXG_PRIVATE_RESULT_SUCCESS);
+  EXPECT_EQ(info.pm4_scheduler_id, 6u);
+  EXPECT_EQ(info.native_queue_flags, AMDF_DXG_PRIVATE_NATIVE_QUEUE_AQL);
 }
 
 TEST(PrivateRecordsTest, DecodesEveryComputeUnitLayout) {

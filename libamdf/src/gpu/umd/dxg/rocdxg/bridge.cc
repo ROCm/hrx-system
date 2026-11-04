@@ -113,7 +113,9 @@ amdf_dxg_bridge_result_t GpuAdapterOpenImpl(
   }
   adapter->private_info = private_info;
 
-  amdf::rocdxg_bridge::InitializeGpuKernelQueueProfiles(adapter.get());
+  amdf_dxg_private_initialize_queue_profiles(&adapter->private_info,
+                                             &adapter->pm4_queue_profile,
+                                             &adapter->sdma_queue_profile);
   PopulateGpuProperties(*adapter.get(), out_properties);
   *out_adapter = adapter.release();
   return AMDF_DXG_BRIDGE_RESULT_SUCCESS;

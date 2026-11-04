@@ -40,7 +40,7 @@ GpuClockSample(amdf_dxg_bridge_gpu_adapter_t* adapter, uint32_t adapter_handle,
     return AMDF_DXG_BRIDGE_RESULT_INVALID_ARGUMENT;
   }
   *out_native_status = 0;
-  const amdf_rocdxg_kernel_queue_profile_t* profile =
+  const amdf_dxg_private_queue_profile_t* profile =
       SelectGpuKernelQueueProfile(adapter, command_type);
   if (profile == nullptr || !profile->is_supported) {
     return AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED;

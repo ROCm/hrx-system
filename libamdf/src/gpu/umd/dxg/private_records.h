@@ -103,8 +103,10 @@ typedef struct amdf_dxg_private_adapter_info_t {
   uint32_t supports_platform_atomics;
   // Native persistent user-queue byte length, or zero when absent.
   uint32_t user_queue_byte_length;
+  // Compute scheduler selected for immutable PM4 command streams.
+  uint8_t pm4_scheduler_id;
   // AMDF_DXG_PRIVATE_NATIVE_QUEUE_* capabilities published by the driver.
-  uint32_t native_queue_flags;
+  uint8_t native_queue_flags;
   // Device-local heap bytes that are not CPU visible.
   uint64_t invisible_local_heap_byte_length;
   // Scheduler identifier for each D3DKMT node ordinal.
@@ -120,6 +122,24 @@ enum amdf_dxg_private_native_queue_flag_bits_e {
   // Native HSA SDMA queues are accepted by the kernel driver.
   AMDF_DXG_PRIVATE_NATIVE_QUEUE_SDMA = 1u << 1,
 };
+
+// Immutable scheduler facts for one native command family.
+typedef struct amdf_dxg_private_queue_profile_t {
+  // Scheduler identifier encoded into the private context record.
+  uint32_t scheduler_id;
+  // D3DKMT node ordinal used to create the execution context.
+  uint32_t node_ordinal;
+  // Nonzero when the driver exposes a usable scheduler.
+  uint32_t is_supported;
+  // Nonzero when the scheduler requires a hardware-queue object.
+  uint32_t uses_hardware_scheduling;
+} amdf_dxg_private_queue_profile_t;
+
+// Derives the immutable PM4 and SDMA command-stream scheduler profiles.
+void amdf_dxg_private_initialize_queue_profiles(
+    const amdf_dxg_private_adapter_info_t* info,
+    amdf_dxg_private_queue_profile_t* out_pm4_profile,
+    amdf_dxg_private_queue_profile_t* out_sdma_profile);
 
 // Queries and decodes one physical adapter from a linked-adapter chain.
 //

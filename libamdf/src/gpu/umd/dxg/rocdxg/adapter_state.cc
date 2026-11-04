@@ -14,7 +14,7 @@ amdf_dxg_bridge_gpu_adapter_t::~amdf_dxg_bridge_gpu_adapter_t() {
 
 namespace amdf::rocdxg_bridge {
 
-const amdf_rocdxg_kernel_queue_profile_t* SelectGpuKernelQueueProfile(
+const amdf_dxg_private_queue_profile_t* SelectGpuKernelQueueProfile(
     const amdf_dxg_bridge_gpu_adapter_t* adapter,
     amdf_dxg_bridge_gpu_queue_command_type_t command_type) noexcept {
   switch (command_type) {

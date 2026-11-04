@@ -8,6 +8,7 @@
 
 #include <sys/ioctl.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -27,15 +28,12 @@ struct amdf_dxg_bridge_gpu_kernel_queue_t {
   D3DKMT_HANDLE handle = 0;
   // Separately owned monitored fence for software scheduling.
   D3DKMT_HANDLE progress_fence = 0;
-  // Fixed private record reused by externally serialized submissions.
-  amdf::dxg_bridge::HostBuffer submission_private_data;
 };
 
 namespace amdf::rocdxg_bridge {
 namespace {
 
 using amdf::dxg_bridge::DestroyHostObject;
-using amdf::dxg_bridge::HostBuffer;
 using amdf::dxg_bridge::HostObject;
 
 constexpr uint32_t kCreateContextOperation = 0x04;
@@ -100,38 +98,13 @@ NTSTATUS DestroyNativeQueue(amdf_dxg_bridge_gpu_kernel_queue_t* queue) {
   return first_status;
 }
 
-bool TryMakeQueueProfile(const amdf_dxg_private_adapter_info_t& info,
-                         uint8_t scheduler_id, bool require_hws,
-                         amdf_rocdxg_kernel_queue_profile_t* out_profile) {
-  uint32_t node_ordinal = 0;
-  while (node_ordinal < AMDF_DXG_PRIVATE_SCHEDULER_ID_COUNT &&
-         info.scheduler_ids[node_ordinal] != scheduler_id) {
-    ++node_ordinal;
-  }
-  if (node_ordinal == AMDF_DXG_PRIVATE_SCHEDULER_ID_COUNT) {
-    return false;
-  }
-  const bool uses_hardware_scheduling =
-      ((info.hardware_scheduling_node_mask >> node_ordinal) & 1u) != 0;
-  if (require_hws && !uses_hardware_scheduling) {
-    return false;
-  }
-  *out_profile = {
-      .scheduler_id = scheduler_id,
-      .node_ordinal = static_cast<uint32_t>(node_ordinal),
-      .is_supported = true,
-      .uses_hardware_scheduling = uses_hardware_scheduling,
-  };
-  return true;
-}
-
 amdf_dxg_bridge_result_t CreateNativeQueue(
     amdf_dxg_bridge_gpu_adapter_t* adapter,
     const amdf_dxg_bridge_gpu_kernel_queue_create_info_t& create_info,
     amdf_dxg_bridge_gpu_kernel_queue_t** out_queue,
     amdf_dxg_bridge_gpu_kernel_queue_info_t* out_info,
     uint32_t* out_native_status) {
-  const amdf_rocdxg_kernel_queue_profile_t* profile =
+  const amdf_dxg_private_queue_profile_t* profile =
       SelectGpuKernelQueueProfile(adapter, create_info.command_type);
   if (profile == nullptr || !profile->is_supported) {
     return AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED;
@@ -141,21 +114,10 @@ amdf_dxg_bridge_result_t CreateNativeQueue(
   if (!queue.Allocate()) {
     return AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED;
   }
-  HostBuffer context_private;
-  HostBuffer queue_private;
-  if (!context_private.Allocate(adapter->host_allocator,
-                                AMDF_DXG_PRIVATE_CONTEXT_RECORD_BYTE_LENGTH) ||
-      (profile->uses_hardware_scheduling &&
-       !queue_private.Allocate(
-           adapter->host_allocator,
-           AMDF_DXG_PRIVATE_HARDWARE_QUEUE_RECORD_BYTE_LENGTH)) ||
-      !queue->submission_private_data.Allocate(
-          adapter->host_allocator,
-          AMDF_DXG_PRIVATE_SUBMISSION_RECORD_BYTE_LENGTH)) {
-    return AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED;
-  }
   queue->adapter = adapter;
 
+  std::array<uint8_t, AMDF_DXG_PRIVATE_CONTEXT_RECORD_BYTE_LENGTH>
+      context_private;
   amdf_dxg_private_initialize_context_record(
       adapter->private_info.supports_firmware_state_shadowing,
       profile->scheduler_id, 0, context_private.data());
@@ -165,8 +127,7 @@ amdf_dxg_bridge_result_t CreateNativeQueue(
       .EngineAffinity = 1,
       .Flags = {.HwQueueSupported = profile->uses_hardware_scheduling},
       .pPrivateDriverData = context_private.data(),
-      .PrivateDriverDataSize =
-          static_cast<uint32_t>(context_private.byte_length()),
+      .PrivateDriverDataSize = static_cast<uint32_t>(context_private.size()),
       .ClientHint = D3DKMT_CLIENTHINT_OPENCL,
   };
   NTSTATUS native_status =
@@ -180,6 +141,8 @@ amdf_dxg_bridge_result_t CreateNativeQueue(
 
   D3DKMT_CREATEHWQUEUE create_queue = {};
   D3DKMT_CREATESYNCHRONIZATIONOBJECT2 create_fence = {};
+  std::array<uint8_t, AMDF_DXG_PRIVATE_HARDWARE_QUEUE_RECORD_BYTE_LENGTH>
+      queue_private;
   if (native_status == STATUS_SUCCESS && profile->uses_hardware_scheduling) {
     // This queue publishes complete immutable PM4 or SDMA command buffers;
     // both use the operating-system PM4 hardware-queue representation.
@@ -190,7 +153,7 @@ amdf_dxg_bridge_result_t CreateNativeQueue(
     create_queue.Flags.DisableGpuTimeout = 0;
     create_queue.pPrivateDriverData = queue_private.data();
     create_queue.PrivateDriverDataSize =
-        static_cast<uint32_t>(queue_private.byte_length());
+        static_cast<uint32_t>(queue_private.size());
     native_status =
         InvokeNative<kCreateHardwareQueueOperation>(adapter, &create_queue);
     if (native_status == STATUS_SUCCESS) {
@@ -253,42 +216,6 @@ amdf_dxg_bridge_result_t CreateNativeQueue(
 
 }  // namespace
 
-void InitializeGpuKernelQueueProfiles(
-    amdf_dxg_bridge_gpu_adapter_t* adapter) noexcept {
-  const amdf_dxg_private_adapter_info_t& info = adapter->private_info;
-  uint8_t compute_scheduler = 0;
-  for (uint32_t i = 0; i < AMDF_DXG_PRIVATE_SCHEDULER_ID_COUNT; ++i) {
-    if (info.scheduler_ids[i] == 5) {
-      compute_scheduler = 5;
-      break;
-    }
-  }
-  TryMakeQueueProfile(info, compute_scheduler, true,
-                      &adapter->pm4_queue_profile);
-
-  for (uint32_t i = 0; i < AMDF_DXG_PRIVATE_SCHEDULER_ID_COUNT; ++i) {
-    const uint8_t scheduler_id = info.scheduler_ids[i];
-    if ((scheduler_id == 4 || scheduler_id == 7) &&
-        TryMakeQueueProfile(info, scheduler_id, true,
-                            &adapter->sdma_queue_profile)) {
-      return;
-    }
-  }
-  // A nonzero user-queue size means the driver selected persistent user-mode
-  // SDMA rings, which this immutable command-stream API does not represent.
-  if (info.user_queue_byte_length != 0) {
-    return;
-  }
-  for (uint32_t i = 0; i < AMDF_DXG_PRIVATE_SCHEDULER_ID_COUNT; ++i) {
-    const uint8_t scheduler_id = info.scheduler_ids[i];
-    if ((scheduler_id == 4 || scheduler_id == 7) &&
-        TryMakeQueueProfile(info, scheduler_id, false,
-                            &adapter->sdma_queue_profile)) {
-      return;
-    }
-  }
-}
-
 amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuKernelQueueCreate(
     amdf_dxg_bridge_gpu_adapter_t* adapter,
     const amdf_dxg_bridge_gpu_kernel_queue_create_info_t* create_info,
@@ -326,10 +253,12 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuKernelQueueSubmit(
   }
   *out_accepted = 0;
   *out_native_status = 0;
+  std::array<uint8_t, AMDF_DXG_PRIVATE_SUBMISSION_RECORD_BYTE_LENGTH>
+      submission_private_data;
   amdf_dxg_private_initialize_submission_record(
       queue->handle, command_buffer_address,
       static_cast<uint32_t>(command_buffer_byte_length), queue->handle != 0,
-      queue->submission_private_data.data());
+      submission_private_data.data());
 
   if (queue->handle == 0) {
     D3DKMT_SUBMITCOMMAND submit = {
@@ -338,9 +267,9 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuKernelQueueSubmit(
         .BroadcastContextCount = 1,
     };
     submit.BroadcastContext[0] = queue->context;
-    submit.pPrivateDriverData = queue->submission_private_data.data();
+    submit.pPrivateDriverData = submission_private_data.data();
     submit.PrivateDriverDataSize =
-        static_cast<uint32_t>(queue->submission_private_data.byte_length());
+        static_cast<uint32_t>(submission_private_data.size());
     NTSTATUS native_status =
         InvokeNative<kSubmitCommandOperation>(queue->adapter, &submit);
     if (native_status != STATUS_SUCCESS) {
@@ -366,8 +295,8 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuKernelQueueSubmit(
       .CommandBuffer = command_buffer_address,
       .CommandLength = static_cast<uint32_t>(command_buffer_byte_length),
       .PrivateDriverDataSize =
-          static_cast<uint32_t>(queue->submission_private_data.byte_length()),
-      .pPrivateDriverData = queue->submission_private_data.data(),
+          static_cast<uint32_t>(submission_private_data.size()),
+      .pPrivateDriverData = submission_private_data.data(),
   };
   const NTSTATUS native_status =
       InvokeNative<kSubmitCommandToHardwareQueueOperation>(queue->adapter,

@@ -11,10 +11,6 @@
 
 namespace amdf::rocdxg_bridge {
 
-// Records the adapter's qualified immutable-stream scheduler profiles.
-void InitializeGpuKernelQueueProfiles(
-    amdf_dxg_bridge_gpu_adapter_t* adapter) noexcept;
-
 // Creates one native GPU execution context and its completion resources.
 amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuKernelQueueCreate(
     amdf_dxg_bridge_gpu_adapter_t* adapter,

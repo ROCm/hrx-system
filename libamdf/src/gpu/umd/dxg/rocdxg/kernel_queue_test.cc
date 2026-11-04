@@ -193,13 +193,15 @@ class RocdxgKernelQueueTest : public ::testing::Test {
   }
 
   void ObserveSubmissionPrivateData(void* pointer, uint32_t byte_length) {
-    EXPECT_EQ(byte_length, 72u);
+    EXPECT_EQ(byte_length, AMDF_DXG_PRIVATE_SUBMISSION_RECORD_BYTE_LENGTH);
     EXPECT_NE(pointer, nullptr);
-    if (submission_private_data_ == nullptr) {
-      submission_private_data_ = pointer;
-    } else {
-      EXPECT_EQ(pointer, submission_private_data_);
-    }
+    std::array<uint8_t, AMDF_DXG_PRIVATE_SUBMISSION_RECORD_BYTE_LENGTH>
+        expected = {};
+    amdf_dxg_private_initialize_submission_record(
+        expected_hardware_scheduling_ ? 0x201 : 0, expected_command_address_,
+        expected_command_length_, expected_hardware_scheduling_,
+        expected.data());
+    EXPECT_EQ(std::memcmp(pointer, expected.data(), expected.size()), 0);
   }
 
   amdf_dxg_bridge_result_t CreateQueue(
@@ -244,11 +246,10 @@ class RocdxgKernelQueueTest : public ::testing::Test {
   uint64_t expected_command_address_ = 0;
   uint32_t expected_command_length_ = 0;
   uint64_t expected_progress_value_ = 0;
-  void* submission_private_data_ = nullptr;
 };
 
 TEST_F(RocdxgKernelQueueTest,
-       HardwareQueueOwnsFixedSubmissionStorageAndNativeLifetime) {
+       HardwareQueueSubmitsExactRecordsAndOwnsNativeLifetime) {
   amdf_dxg_bridge_gpu_kernel_queue_t* queue = nullptr;
   amdf_dxg_bridge_gpu_kernel_queue_info_t info = {};
   uint32_t native_status = 0;
@@ -375,48 +376,6 @@ TEST_F(RocdxgKernelQueueTest, UnsupportedProfileDoesNotStartConstruction) {
   EXPECT_EQ(native_status, 0u);
   EXPECT_TRUE(operations_.empty());
   EXPECT_EQ(allocator_.allocation_count, 0u);
-}
-
-TEST(RocdxgKernelQueueProfileTest,
-     SelectsComputeAndHardwareScheduledSdmaNodes) {
-  amdf_dxg_bridge_gpu_adapter_t adapter;
-  adapter.private_info.scheduler_ids[0] = 4;
-  adapter.private_info.scheduler_ids[1] = 5;
-  adapter.private_info.scheduler_ids[2] = 7;
-  adapter.private_info.hardware_scheduling_node_mask = (1u << 1) | (1u << 2);
-
-  amdf::rocdxg_bridge::InitializeGpuKernelQueueProfiles(&adapter);
-
-  EXPECT_TRUE(adapter.pm4_queue_profile.is_supported);
-  EXPECT_EQ(adapter.pm4_queue_profile.scheduler_id, 5u);
-  EXPECT_EQ(adapter.pm4_queue_profile.node_ordinal, 1u);
-  EXPECT_TRUE(adapter.pm4_queue_profile.uses_hardware_scheduling);
-  EXPECT_TRUE(adapter.sdma_queue_profile.is_supported);
-  EXPECT_EQ(adapter.sdma_queue_profile.scheduler_id, 7u);
-  EXPECT_EQ(adapter.sdma_queue_profile.node_ordinal, 2u);
-  EXPECT_TRUE(adapter.sdma_queue_profile.uses_hardware_scheduling);
-}
-
-TEST(RocdxgKernelQueueProfileTest,
-     AllowsSoftwareSdmaOnlyWithoutPersistentUserQueues) {
-  amdf_dxg_bridge_gpu_adapter_t software_adapter;
-  software_adapter.private_info.scheduler_ids[0] = 5;
-  software_adapter.private_info.scheduler_ids[1] = 4;
-  software_adapter.private_info.hardware_scheduling_node_mask = 1u << 0;
-
-  amdf::rocdxg_bridge::InitializeGpuKernelQueueProfiles(&software_adapter);
-
-  EXPECT_TRUE(software_adapter.pm4_queue_profile.is_supported);
-  EXPECT_TRUE(software_adapter.sdma_queue_profile.is_supported);
-  EXPECT_EQ(software_adapter.sdma_queue_profile.scheduler_id, 4u);
-  EXPECT_FALSE(software_adapter.sdma_queue_profile.uses_hardware_scheduling);
-
-  amdf_dxg_bridge_gpu_adapter_t persistent_adapter;
-  persistent_adapter.private_info = software_adapter.private_info;
-  persistent_adapter.private_info.user_queue_byte_length = 4096;
-  amdf::rocdxg_bridge::InitializeGpuKernelQueueProfiles(&persistent_adapter);
-  EXPECT_TRUE(persistent_adapter.pm4_queue_profile.is_supported);
-  EXPECT_FALSE(persistent_adapter.sdma_queue_profile.is_supported);
 }
 
 }  // namespace
