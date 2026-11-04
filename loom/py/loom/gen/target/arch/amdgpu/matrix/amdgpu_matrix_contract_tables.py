@@ -1354,16 +1354,55 @@ def _fragment_role_initializer(
     return lines
 
 
+def _fragment_role_catalog(
+    role_plan_indices: Mapping[tuple[str, str], int],
+) -> tuple[
+    tuple[tuple[str, ...], ...],
+    Mapping[tuple[str, str], int],
+]:
+    rows: list[tuple[str, ...]] = []
+    row_indices: dict[tuple[str, ...], int] = {}
+    role_indices: dict[tuple[str, str], int] = {}
+    for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS:
+        for role in layout_roles(layout):
+            row = tuple(
+                _fragment_role_initializer(
+                    layout,
+                    role,
+                    role_plan_indices[(layout.key, role.role)],
+                )
+            )
+            row_index = row_indices.get(row)
+            if row_index is None:
+                row_index = len(rows)
+                rows.append(row)
+                row_indices[row] = row_index
+            role_indices[(layout.key, role.role)] = row_index
+    return tuple(rows), role_indices
+
+
+def _fragment_role_table_lines(
+    rows: Sequence[Sequence[str]],
+) -> list[str]:
+    lines = [
+        "static const loom_matrix_fragment_role_layout_t",
+        "    kLoomAmdgpuMatrixFragmentRoleLayouts[] = {",
+    ]
+    for row in rows:
+        lines.extend(row)
+    lines.extend(["};", ""])
+    return lines
+
+
 def _fragment_layout_initializer(
     layout: AmdgpuMatrixFragmentLayout,
-    role_plan_indices: Mapping[tuple[str, str], int],
+    role_indices: Mapping[tuple[str, str], int],
     native_contractions: NativeContractionFactTable,
 ) -> list[str]:
     block_count, row_count, column_count, reduction_count = layout.tile_shape
     lines = [
         f"[{layout.c_kind}] = {{",
         f"    .kind = {layout.c_kind},",
-        f'    .name = IREE_SVL("{layout.name}"),',
         f"    .wave_size = {layout.wave_size},",
         "    .tile_shape = {",
         f"        .block_count = {block_count},",
@@ -1377,9 +1416,7 @@ def _fragment_layout_initializer(
         layout_roles(layout),
         strict=True,
     ):
-        role_lines = _fragment_role_initializer(layout, role, role_plan_indices[(layout.key, role.role)])
-        lines.append(f"    .{field_name} = {role_lines[0]}")
-        lines.extend(f"    {line}" for line in role_lines[1:])
+        lines.append(f"    .{field_name} = &kLoomAmdgpuMatrixFragmentRoleLayouts[{role_indices[(layout.key, role.role)]}],")
     lines.append(f"    .native_contraction_facts = {native_contractions.reference(matrix_fragment_native_contraction_facts(layout))},")
     lines.append("},")
     return lines
@@ -1398,10 +1435,11 @@ def _emit_source(*, public_header: str) -> str:
     )
     _validate_matrix_profile_descriptor_sets(global_descriptor_keys=descriptor_keys)
     coordinate_plans, role_plan_indices = _fragment_coordinate_plan_catalog()
+    fragment_role_rows, role_indices = _fragment_role_catalog(role_plan_indices)
     native_contractions = NativeContractionFactTable("kLoomAmdgpuNativeContractionFacts")
     fragment_layout_lines: list[str] = []
     for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS:
-        fragment_layout_lines.extend(_fragment_layout_initializer(layout, role_plan_indices, native_contractions))
+        fragment_layout_lines.extend(_fragment_layout_initializer(layout, role_indices, native_contractions))
     lines = [
         "// Copyright 2026 The IREE Authors",
         "//",
@@ -1415,6 +1453,7 @@ def _emit_source(*, public_header: str) -> str:
         "",
         *_matrix_feature_profile_table_lines(),
         *_fragment_coordinate_plan_table_lines(coordinate_plans),
+        *_fragment_role_table_lines(fragment_role_rows),
         *native_contractions.definition_lines(),
         "const loom_amdgpu_matrix_fragment_layout_t",
         "    kLoomAmdgpuMatrixFragmentLayouts[",

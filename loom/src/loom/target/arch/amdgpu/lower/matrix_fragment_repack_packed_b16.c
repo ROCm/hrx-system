@@ -74,8 +74,8 @@ bool loom_amdgpu_select_result_to_rhs_packed_b16_fragment_repack_plan(
   plan->reason = LOOM_AMDGPU_FRAGMENT_REPACK_REASON_NONE;
   plan->native_contraction_facts = layout->native_contraction_facts;
   plan->native_transition_facts = projection->native_transition_facts;
-  plan->source_register_count = layout->result.register_count;
-  plan->result_register_count = layout->rhs.register_count;
+  plan->source_register_count = layout->result->register_count;
+  plan->result_register_count = layout->rhs->register_count;
   plan->strategy_payload.result_to_rhs.exchange = exchange;
   plan->strategy_payload.result_to_rhs.reverse_lane_mask =
       projection->reverse_lane_mask;

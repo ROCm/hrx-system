@@ -140,20 +140,19 @@ typedef struct loom_matrix_fragment_role_layout_t {
 typedef struct loom_matrix_fragment_layout_t {
   // Stable owner-defined layout kind. Zero means unknown or absent.
   uint32_t kind;
-  // Stable layout name used by diagnostics and tests.
-  iree_string_view_t name;
   // Subgroup or wave size for which lane formulas are defined.
   uint16_t wave_size;
   // Logical tile shape covered by the layout.
   loom_matrix_fragment_tile_shape_t tile_shape;
-  // Matrix A source role layout.
-  loom_matrix_fragment_role_layout_t lhs;
-  // Matrix B source role layout.
-  loom_matrix_fragment_role_layout_t rhs;
-  // Matrix C accumulator input role layout.
-  loom_matrix_fragment_role_layout_t accumulator;
-  // Matrix D result role layout.
-  loom_matrix_fragment_role_layout_t result;
+  // Immutable matrix A source role layout owned by the target catalog.
+  const loom_matrix_fragment_role_layout_t* lhs;
+  // Immutable matrix B source role layout owned by the target catalog.
+  const loom_matrix_fragment_role_layout_t* rhs;
+  // Immutable matrix C accumulator input role layout owned by the target
+  // catalog.
+  const loom_matrix_fragment_role_layout_t* accumulator;
+  // Immutable matrix D result role layout owned by the target catalog.
+  const loom_matrix_fragment_role_layout_t* result;
   // Generated compact placement facts for this native contraction layout.
   const loom_native_contraction_facts_t* native_contraction_facts;
 } loom_matrix_fragment_layout_t;

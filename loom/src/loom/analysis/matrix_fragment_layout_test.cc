@@ -39,19 +39,28 @@ TEST(MatrixFragmentLayoutTest, MapsAxesToCoordinateDimensions) {
 }
 
 TEST(MatrixFragmentLayoutTest, SelectsRoleLayouts) {
-  loom_matrix_fragment_layout_t layout = {};
+  const loom_matrix_fragment_role_layout_t lhs = {};
+  const loom_matrix_fragment_role_layout_t rhs = {};
+  const loom_matrix_fragment_role_layout_t accumulator = {};
+  const loom_matrix_fragment_role_layout_t result = {};
+  const loom_matrix_fragment_layout_t layout = {
+      .lhs = &lhs,
+      .rhs = &rhs,
+      .accumulator = &accumulator,
+      .result = &result,
+  };
   EXPECT_EQ(
       loom_matrix_fragment_role_layout(&layout, LOOM_CONTRACT_OPERAND_ROLE_LHS),
-      &layout.lhs);
+      &lhs);
   EXPECT_EQ(
       loom_matrix_fragment_role_layout(&layout, LOOM_CONTRACT_OPERAND_ROLE_RHS),
-      &layout.rhs);
+      &rhs);
   EXPECT_EQ(loom_matrix_fragment_role_layout(
                 &layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR),
-            &layout.accumulator);
+            &accumulator);
   EXPECT_EQ(loom_matrix_fragment_role_layout(&layout,
                                              LOOM_CONTRACT_OPERAND_ROLE_RESULT),
-            &layout.result);
+            &result);
   EXPECT_EQ(loom_matrix_fragment_role_layout(
                 &layout, LOOM_CONTRACT_OPERAND_ROLE_UNKNOWN),
             nullptr);

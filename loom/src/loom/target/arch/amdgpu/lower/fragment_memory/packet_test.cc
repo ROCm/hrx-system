@@ -245,7 +245,7 @@ TEST(AmdgpuFragmentMemoryPacketTest,
   loom_amdgpu_fragment_memory_address_layout_t address_layout = {};
   loom_amdgpu_fragment_memory_runtime_axis_t runtime_axes[3] = {};
   ASSERT_TRUE(loom_amdgpu_fragment_memory_compile_address_layout(
-      LOOM_CONTRACT_OPERAND_ROLE_RESULT, &layout->result, representation->flags,
+      LOOM_CONTRACT_OPERAND_ROLE_RESULT, layout->result, representation->flags,
       2, axis_strides, &address_layout, runtime_axes, nullptr));
   const uint32_t static_axis_byte_strides[2] = {32, 2};
   const loom_low_schedule_model_t* schedule_model =
@@ -264,7 +264,7 @@ TEST(AmdgpuFragmentMemoryPacketTest,
       .representation_flags = representation->flags,
       .payload_form =
           LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16,
-      .register_count = layout->result.register_count,
+      .register_count = layout->result->register_count,
       .element_byte_count = 2,
       .view_rank = 2,
       .source_flags = LOOM_AMDGPU_FRAGMENT_PUBLICATION_SOURCE_FLAG_NONE,
@@ -281,7 +281,7 @@ TEST(AmdgpuFragmentMemoryPacketTest,
   plan.source.memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP;
   plan.view_rank = 2;
   plan.representation_flags = representation->flags;
-  plan.register_count = layout->result.register_count;
+  plan.register_count = layout->result->register_count;
   plan.element_byte_count = 2;
   plan.address_layout = address_layout;
   plan.payload_form =

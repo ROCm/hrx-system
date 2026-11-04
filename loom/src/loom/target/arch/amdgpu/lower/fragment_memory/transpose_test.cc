@@ -45,10 +45,6 @@ loom_amdgpu_matrix_feature_bits_t MatrixFeatureBits(
   return feature_bits;
 }
 
-std::string LayoutName(const loom_amdgpu_matrix_fragment_layout_t* layout) {
-  return std::string(layout->name.data, layout->name.size);
-}
-
 loom_amdgpu_fragment_memory_plan_t TransposedPlan(
     const loom_amdgpu_matrix_fragment_layout_t* layout,
     loom_contract_operand_role_t role,
@@ -139,7 +135,7 @@ TEST(AmdgpuFragmentMemoryTransposeTest, Gfx1200FamilyMatchesSemanticLayouts) {
         continue;
       }
 
-      SCOPED_TRACE(LayoutName(layout) +
+      SCOPED_TRACE(std::to_string(layout->kind) +
                    (role == LOOM_CONTRACT_OPERAND_ROLE_LHS ? " lhs" : " rhs"));
       loom_amdgpu_fragment_memory_plan_t plan = TransposedPlan(layout, role);
       loom_amdgpu_fragment_memory_transpose_choice_t choice = {};
@@ -218,7 +214,7 @@ TEST(AmdgpuFragmentMemoryTransposeTest, Gfx1250ExtendsEveryEightBitRole) {
     }
     visited[layout->kind] = true;
     const bool mixed_format =
-        layout->lhs.element_bit_count != layout->rhs.element_bit_count;
+        layout->lhs->element_bit_count != layout->rhs->element_bit_count;
     if (!mixed_format) {
       continue;
     }
@@ -229,7 +225,7 @@ TEST(AmdgpuFragmentMemoryTransposeTest, Gfx1250ExtendsEveryEightBitRole) {
       if (role_layout->element_bit_count != 8) {
         continue;
       }
-      SCOPED_TRACE(LayoutName(layout));
+      SCOPED_TRACE(std::to_string(layout->kind));
       const loom_amdgpu_fragment_memory_plan_t plan =
           TransposedPlan(layout, role);
       loom_amdgpu_fragment_memory_transpose_choice_t choice = {};
@@ -328,7 +324,7 @@ TEST(AmdgpuFragmentMemoryTransposeTest, Gfx950B16FamilyMatchesSemanticLayouts) {
         continue;
       }
 
-      SCOPED_TRACE(LayoutName(layout) +
+      SCOPED_TRACE(std::to_string(layout->kind) +
                    (role == LOOM_CONTRACT_OPERAND_ROLE_LHS ? " lhs" : " rhs"));
       loom_amdgpu_fragment_memory_plan_t plan =
           TransposedPlan(layout, role, LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP);
@@ -442,7 +438,7 @@ TEST(AmdgpuFragmentMemoryTransposeTest, RejectsCompressedAndDynamicLayouts) {
   const auto* layout = loom_amdgpu_matrix_fragment_layout_for_kind(
       LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_SWMMAC_32BIT_16X16X32_PACKED16_W64);
   ASSERT_NE(layout, nullptr);
-  ASSERT_NE(layout->lhs.reduction_group.storage_element_count, 0u);
+  ASSERT_NE(layout->lhs->reduction_group.storage_element_count, 0u);
 
   loom_amdgpu_fragment_memory_transpose_choice_t choice = {};
   loom_amdgpu_fragment_memory_plan_t lhs_plan =
