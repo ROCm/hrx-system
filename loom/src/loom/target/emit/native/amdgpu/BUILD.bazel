@@ -548,6 +548,7 @@ loom_cc_library(
         ":kernel_record",
         ":preflight",
         ":storage_layout",
+        ":symbol_name",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low:function",
         "//loom/src/loom/codegen/low:packet",
@@ -882,6 +883,26 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "symbol_name",
+    srcs = ["symbol_name.c"],
+    hdrs = ["symbol_name.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_library(
+    name = "artifact_symbols",
+    srcs = ["artifact_symbols.c"],
+    hdrs = ["artifact_symbols.h"],
+    deps = [
+        ":hsaco_build",
+        ":symbol_name",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "data_symbol_directory",
     srcs = ["data_symbol_directory.c"],
     hdrs = ["data_symbol_directory.h"],
@@ -912,6 +933,7 @@ loom_cc_library(
     hdrs = ["hal_kernel_library.h"],
     visibility = _AMDGPU_HAL_KERNEL_LIBRARY_VISIBILITY,
     deps = [
+        ":artifact_symbols",
         ":data_symbol_directory",
         ":function_compile",
         ":hsaco",

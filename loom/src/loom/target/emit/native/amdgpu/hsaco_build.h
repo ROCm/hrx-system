@@ -6,9 +6,10 @@
 
 // AMDGPU HSA code-object plan construction.
 //
-// This layer validates a complete code-object input and resolves AMDGPU ABI
-// policy into a final HSACO plan. Metadata notes, symbols, descriptor bytes,
-// executable text, fixups, and virtual addresses are all finalized here.
+// This layer consumes a compiler-owned code-object input and resolves AMDGPU
+// ABI policy into a final HSACO plan. Metadata notes, symbols, descriptor
+// bytes, executable text, fixups, and virtual addresses are all finalized
+// here. The artifact producer owns symbol admission and fixup validity.
 
 #ifndef LOOM_TARGET_EMIT_NATIVE_AMDGPU_HSACO_BUILD_H_
 #define LOOM_TARGET_EMIT_NATIVE_AMDGPU_HSACO_BUILD_H_

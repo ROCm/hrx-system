@@ -6,6 +6,7 @@
 
 #include "loom/target/emit/native/amdgpu/data_symbol_directory.h"
 
+#include <inttypes.h>
 #include <string.h>
 
 #include "loom/ops/global/ops.h"
@@ -178,6 +179,16 @@ iree_status_t loom_amdgpu_data_symbol_directory_bind_fixups(
           IREE_STATUS_FAILED_PRECONDITION,
           "AMDGPU data symbol '%.*s' has no definition in this artifact",
           (int)symbol_name.size, symbol_name.data);
+    }
+    const loom_amdgpu_hsaco_data_symbol_t* symbol =
+        &directory->symbols[symbol_ordinal];
+    if (fixups[i].target_symbol_byte_offset > symbol->byte_length) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "AMDGPU data symbol '%.*s' byte offset %" PRIu64
+                              " exceeds its %" PRIu64 "-byte storage",
+                              (int)symbol->name.size, symbol->name.data,
+                              fixups[i].target_symbol_byte_offset,
+                              symbol->byte_length);
     }
     bound_fixups[i] = (loom_amdgpu_hsaco_text_fixup_t){
         .kind = fixups[i].kind,

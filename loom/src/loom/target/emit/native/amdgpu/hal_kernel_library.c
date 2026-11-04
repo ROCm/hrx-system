@@ -29,6 +29,7 @@
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_info.h"
+#include "loom/target/emit/native/amdgpu/artifact_symbols.h"
 #include "loom/target/emit/native/amdgpu/data_symbol_directory.h"
 #include "loom/target/emit/native/amdgpu/function_compile.h"
 #include "loom/target/emit/native/amdgpu/hsaco.h"
@@ -938,8 +939,12 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
           .data_symbol_count = data_symbols.symbol_count,
           .data_layout = data_symbols.layout,
       };
-      status =
-          loom_amdgpu_hsaco_plan_build(&hsaco_input, &hsaco_plan, table_arena);
+      status = loom_amdgpu_artifact_symbols_validate(module, &hsaco_input,
+                                                     table_arena);
+      if (iree_status_is_ok(status)) {
+        status = loom_amdgpu_hsaco_plan_build(&hsaco_input, &hsaco_plan,
+                                              table_arena);
+      }
     }
     if (iree_status_is_ok(status) && report != NULL) {
       uint64_t artifact_instruction_count = 0;
