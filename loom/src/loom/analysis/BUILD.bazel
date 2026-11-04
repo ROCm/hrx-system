@@ -918,6 +918,7 @@ loom_cc_library(
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/error:parameter",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:special_values",
         "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/ops/cfg",
         "//loom/src/loom/ops/channel",

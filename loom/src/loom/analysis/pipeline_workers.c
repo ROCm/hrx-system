@@ -16,6 +16,7 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/pipeline/ops.h"
+#include "loom/ops/special_values.h"
 #include "loom/ops/type_registry.h"
 #include "loom/util/fact_cfg.h"
 #include "loom/util/fact_extensions.h"
@@ -730,6 +731,7 @@ static iree_status_t loom_pipeline_worker_build(
   IREE_RETURN_IF_ERROR(loom_value_fact_table_initialize(inputs, arena, 0));
   inputs->context.resolve_type_domain =
       construction_facts->context.resolve_type_domain;
+  const loom_op_t** literal_captures = NULL;
   for (uint16_t i = 0; i < formal_count; ++i) {
     const loom_type_t type = loom_module_value_type(module, formals[i]);
     loom_value_facts_t facts;
@@ -739,6 +741,24 @@ static iree_status_t loom_pipeline_worker_build(
         &facts));
     IREE_RETURN_IF_ERROR(
         loom_value_fact_table_define(inputs, formals[i], facts));
+    if (!loom_value_facts_can_materialize_constant(facts, type) &&
+        !loom_type_may_reference_values(type)) {
+      const loom_value_t* actual = loom_module_value(module, actuals.values[i]);
+      const loom_op_t* literal =
+          loom_value_is_block_arg(actual) ? NULL : loom_value_def_op(actual);
+      if (literal &&
+          iree_all_bits_set(literal->traits, LOOM_TRAIT_CONSTANT_LIKE) &&
+          !loom_type_may_reference_values(
+              loom_module_value_type(module, actuals.values[i]))) {
+        if (!literal_captures) {
+          IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+              arena, formal_count, sizeof(*literal_captures),
+              (void**)&literal_captures));
+          memset(literal_captures, 0, formal_count * sizeof(*literal_captures));
+        }
+        literal_captures[i] = literal;
+      }
+    }
     if (!loom_channel_type_isa(type)) {
       continue;
     }
@@ -768,6 +788,7 @@ static iree_status_t loom_pipeline_worker_build(
         .value_id = formals[i], .channel = &binding.channel->identity};
   }
   worker->bindings = bindings;
+  worker->literal_captures = literal_captures;
   IREE_RETURN_IF_ERROR(loom_value_fact_table_seed_values(
       &worker->facts,
       (loom_value_fact_table_view_t){inputs, formals, formal_count}, module));
