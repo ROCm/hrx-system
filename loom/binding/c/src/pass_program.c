@@ -19,7 +19,6 @@
 #include "loom/pass/tooling.h"
 #include "loom/target/pipeline.h"
 #include "loom/target/predicate.h"
-#include "loomc/interop.h"
 #include "loomc/iree.h"
 #include "loomc/target.h"
 #include "module.h"
@@ -110,6 +109,27 @@ static loomc_status_t loomc_pass_program_validate_options(
   return loomc_pass_program_validate_string_view(options->identifier);
 }
 
+static bool loomc_target_pipeline_options_has_diagnostic_flags(
+    const loomc_target_pipeline_options_t* options) {
+  return options->structure_size >=
+         offsetof(loomc_target_pipeline_options_t,
+                  source_to_low_diagnostic_flags) +
+             sizeof(options->source_to_low_diagnostic_flags);
+}
+
+static loom_target_low_legality_diagnostic_flags_t
+loomc_target_pipeline_diagnostic_flags(
+    loomc_source_to_low_diagnostic_flags_t public_flags) {
+  loom_target_low_legality_diagnostic_flags_t flags = 0;
+  if ((public_flags & LOOMC_SOURCE_TO_LOW_DIAGNOSTIC_MEMORY_ACCESS) != 0) {
+    flags |= LOOM_TARGET_LOW_LEGALITY_DIAGNOSTIC_MEMORY_ACCESS;
+  }
+  if ((public_flags & LOOMC_SOURCE_TO_LOW_DIAGNOSTIC_OPERAND_FORM) != 0) {
+    flags |= LOOM_TARGET_LOW_LEGALITY_DIAGNOSTIC_OPERAND_FORM;
+  }
+  return flags;
+}
+
 static loomc_status_t loomc_pass_program_validate_target_pipeline_options(
     const loomc_target_pipeline_options_t* options) {
   if (options == NULL) {
@@ -122,7 +142,8 @@ static loomc_status_t loomc_pass_program_validate_target_pipeline_options(
         "target pipeline options have an unknown structure type");
   }
   if (options->structure_size != 0 &&
-      options->structure_size < sizeof(*options)) {
+      options->structure_size < offsetof(loomc_target_pipeline_options_t,
+                                         source_to_low_diagnostic_flags)) {
     return loomc_make_status(
         LOOMC_STATUS_INVALID_ARGUMENT,
         "target pipeline options structure_size is too small");
@@ -135,6 +156,7 @@ static loomc_status_t loomc_pass_program_validate_target_pipeline_options(
   switch (options->kind) {
     case LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW:
     case LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW:
+    case LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW_ARTIFACTS:
       break;
     default:
       return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
@@ -147,6 +169,13 @@ static loomc_status_t loomc_pass_program_validate_target_pipeline_options(
     default:
       return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                                "target control-flow lowering mode is invalid");
+  }
+  if (loomc_target_pipeline_options_has_diagnostic_flags(options) &&
+      (options->source_to_low_diagnostic_flags &
+       ~LOOMC_SOURCE_TO_LOW_DIAGNOSTIC_ALL) != 0) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "source-to-low diagnostic flags contain unknown bits");
   }
   return loomc_ok_status();
 }
@@ -303,6 +332,11 @@ loomc_pass_program_target_pipeline_options(
   }
   return (loom_target_pipeline_options_t){
       .source_to_low_max_errors = options->source_to_low_max_errors,
+      .source_to_low_legality_diagnostic_flags =
+          loomc_target_pipeline_options_has_diagnostic_flags(options)
+              ? loomc_target_pipeline_diagnostic_flags(
+                    options->source_to_low_diagnostic_flags)
+              : 0,
       .control_flow_lowering = loomc_pass_program_target_control_flow_lowering(
           options->control_flow_lowering),
       .sanitizer = option_chain ? option_chain->sanitizer
@@ -417,52 +451,6 @@ loomc_status_t loomc_pass_program_create_from_internal_target_pipeline(
       LOOMC_PASS_PROGRAM_TRACE_STAGE_PREPARED_LOW,
       IREE_SV("__loomc_target_pipeline"), pipeline_options, allocator, result,
       out_pass_program);
-}
-
-loomc_status_t loomc_pass_program_create_from_native_source_low_pipeline(
-    loomc_context_t* context, loom_target_pipeline_build_fn_t build_pipeline,
-    loomc_string_view_t identifier,
-    const loom_target_pipeline_options_t* options, loomc_allocator_t allocator,
-    loomc_pass_program_t** out_pass_program, loomc_result_t** out_result) {
-  if (out_pass_program == NULL || out_result == NULL) {
-    return loomc_make_status(
-        LOOMC_STATUS_INVALID_ARGUMENT,
-        "out_pass_program and out_result must not be NULL");
-  }
-  *out_pass_program = NULL;
-  *out_result = NULL;
-  if (context == NULL || build_pipeline == NULL) {
-    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
-                             "context and build_pipeline must not be NULL");
-  }
-  if (loomc_context_target_environment(context) == NULL) {
-    return loomc_make_status(LOOMC_STATUS_FAILED_PRECONDITION,
-                             "context has no target environment");
-  }
-
-  loomc_result_t* result = NULL;
-  LOOMC_RETURN_IF_ERROR(loomc_result_create(
-      LOOMC_STATUS_OK, loomc_context_source_retention(context), allocator,
-      &result));
-  const iree_string_view_t pipeline_identifier =
-      loomc_string_view_is_empty(identifier)
-          ? IREE_SV("__loomc_native_source_low_pipeline")
-          : iree_string_view_from_loomc(identifier);
-  const loom_target_pipeline_options_t pipeline_options =
-      options ? *options : (loom_target_pipeline_options_t){0};
-  loomc_pass_program_t* pass_program = NULL;
-  loomc_status_t status = loomc_pass_program_create_target_pipeline_into_result(
-      context, build_pipeline, LOOMC_PASS_PROGRAM_TRACE_STAGE_SOURCE_LOW,
-      pipeline_identifier, &pipeline_options, allocator, result, &pass_program);
-  if (loomc_status_is_ok(status)) {
-    *out_pass_program = pass_program;
-    *out_result = result;
-    pass_program = NULL;
-    result = NULL;
-  }
-  loomc_pass_program_release(pass_program);
-  loomc_result_release(result);
-  return status;
 }
 
 loomc_status_t loomc_pass_program_create_empty(
@@ -688,6 +676,10 @@ loomc_status_t loomc_pass_program_create_from_target_pipeline(
   if (options != NULL &&
       options->kind == LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW) {
     build_pipeline = loom_target_pipeline_build_to_source_low;
+    trace_stage = LOOMC_PASS_PROGRAM_TRACE_STAGE_SOURCE_LOW;
+  } else if (options != NULL &&
+             options->kind == LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW_ARTIFACTS) {
+    build_pipeline = loom_target_pipeline_build_to_source_low_artifacts;
     trace_stage = LOOMC_PASS_PROGRAM_TRACE_STAGE_SOURCE_LOW;
   }
   loomc_pass_program_t* pass_program = NULL;

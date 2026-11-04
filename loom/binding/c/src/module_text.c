@@ -64,6 +64,18 @@ static void loomc_module_text_print_options(
   }
 }
 
+static bool loomc_module_op_matches_dialect(const loom_op_vtable_t* vtable,
+                                            loomc_string_view_t dialect) {
+  if (vtable == NULL || dialect.size == 0) {
+    return false;
+  }
+  const iree_string_view_t op_name = loom_op_vtable_name(vtable);
+  const iree_string_view_t dialect_name = iree_string_view_from_loomc(dialect);
+  return op_name.size > dialect_name.size &&
+         op_name.data[dialect_name.size] == '.' &&
+         iree_string_view_starts_with(op_name, dialect_name);
+}
+
 static loomc_status_t loomc_module_print_internal_text_to_source(
     const loomc_context_t* context, const loom_module_t* internal_module,
     const loomc_module_resolved_serialize_options_t* options,
@@ -74,9 +86,42 @@ static loomc_status_t loomc_module_print_internal_text_to_source(
                                  &builder);
   loom_text_print_options_t print_options;
   loomc_module_text_print_options(context, options, &print_options);
-  loomc_status_t status =
-      loomc_status_from_iree(loom_text_print_module_to_builder_with_options(
-          internal_module, &builder, &print_options));
+  loomc_status_t status = loomc_ok_status();
+  if (loomc_string_view_is_empty(options->top_level_dialect)) {
+    status =
+        loomc_status_from_iree(loom_text_print_module_to_builder_with_options(
+            internal_module, &builder, &print_options));
+  } else {
+    // A filtered view omits module-level encoding aliases. Inline every
+    // encoding so each selected operation remains independently parseable.
+    print_options.flags &= ~LOOM_TEXT_PRINT_USE_ALIASES;
+    loom_output_stream_t stream;
+    loom_output_stream_for_builder(&builder, &stream);
+    loom_text_printer_t printer;
+    loom_text_printer_initialize(internal_module, &printer);
+    bool has_output = false;
+    const loom_block_t* block =
+        loom_region_const_entry_block(internal_module->body);
+    iree_status_t print_status = iree_ok_status();
+    for (const loom_op_t* op = block ? block->first_op : NULL;
+         op != NULL && iree_status_is_ok(print_status); op = op->next_op) {
+      const loom_op_vtable_t* vtable = loom_op_vtable(internal_module, op);
+      if (!loomc_module_op_matches_dialect(vtable,
+                                           options->top_level_dialect)) {
+        continue;
+      }
+      if (has_output) {
+        print_status = loom_output_stream_write_char(&stream, '\n');
+      }
+      if (iree_status_is_ok(print_status)) {
+        print_status = loom_text_printer_write_operation(&printer, op, &stream,
+                                                         &print_options);
+      }
+      has_output = true;
+    }
+    loom_text_printer_deinitialize(&printer);
+    status = loomc_status_from_iree(print_status);
+  }
   const iree_host_size_t length = iree_string_builder_size(&builder);
   char* storage = NULL;
   if (loomc_status_is_ok(status)) {

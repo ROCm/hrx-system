@@ -20,6 +20,8 @@ typedef struct loom_target_pipeline_build_context_t {
   const loom_target_pipeline_options_t* options;
   // True when source-low output is a required-asm artifact surface.
   bool source_low_artifact_preparation;
+  // True when this inspection pipeline must verify its final target-Low IR.
+  bool verify_source_low_output;
   // Sanitizer options resolved for the pipeline being built.
   loom_sanitizer_options_t sanitizer_options;
 } loom_target_pipeline_build_context_t;
@@ -920,7 +922,11 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
         loom_target_pipeline_build_source_low_artifact_preparation, user_data,
         &for_op));
   }
-  return loom_target_pipeline_build_low_cleanup(builder, user_data);
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_low_cleanup(builder, user_data));
+  return context->verify_source_low_output
+             ? loom_target_pipeline_build_run(builder, IREE_SV("verify-low"))
+             : iree_ok_status();
 }
 
 static iree_status_t loom_target_pipeline_build_prepared_low_body(
@@ -955,6 +961,7 @@ iree_status_t loom_target_pipeline_build_to_source_low(
       .target_environment = target_environment,
       .pass_environment = pass_environment,
       .options = options,
+      .verify_source_low_output = true,
       .sanitizer_options = sanitizer_options,
   };
   return loom_pass_ir_build_pipeline(pipeline_module, name,
@@ -981,6 +988,7 @@ iree_status_t loom_target_pipeline_build_to_source_low_artifacts(
       .pass_environment = pass_environment,
       .options = options,
       .source_low_artifact_preparation = true,
+      .verify_source_low_output = true,
       .sanitizer_options = sanitizer_options,
   };
   return loom_pass_ir_build_pipeline(pipeline_module, name,

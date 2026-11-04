@@ -181,6 +181,9 @@ static bool loomc_module_function_populate_from_symbol(
   if (loomc_module_function_symbol_has_export_info(module, symbol)) {
     out_function->flags |= LOOMC_MODULE_FUNCTION_FLAG_HAS_EXPORT_INFO;
   }
+  if (loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_KERNEL_ENTRY)) {
+    out_function->flags |= LOOMC_MODULE_FUNCTION_FLAG_KERNEL_ENTRY;
+  }
   return true;
 }
 

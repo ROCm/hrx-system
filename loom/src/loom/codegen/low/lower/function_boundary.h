@@ -144,6 +144,11 @@ iree_status_t loom_low_lower_plan_declaration(
     loom_low_lower_result_t* out_result,
     const loom_low_lower_declaration_plan_t** out_plan);
 
+// Publishes a planned declaration's physical boundary for direct callers.
+iree_status_t loom_low_lower_declaration_plan_publish_call_interface(
+    const loom_low_lower_declaration_plan_t* plan,
+    loom_low_lower_call_interface_index_t* index);
+
 // Publishes a planned low.func.decl without consulting target policy or facts.
 //
 // The emitted low declaration preserves source symbol identity and callable

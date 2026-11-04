@@ -453,14 +453,9 @@ static iree_status_t loom_check_execute_pass_with_output(
         session, target_request.target, &target_profile);
     if (iree_status_is_ok(status) &&
         iree_string_view_is_empty(target_request.function_name)) {
-      loomc_module_interop_view_t view = {0};
-      status = loom_check_compile_project_module(module, &diagnostic_collector,
-                                                 allocator, &view, &succeeded);
-      if (iree_status_is_ok(status) && succeeded) {
-        status = loom_check_compile_select_source_function(
-            view.module, target_request.function_name,
-            &target_request.function_name);
-      }
+      status = loom_check_compile_select_source_function(
+          module, target_request.function_name, &diagnostic_collector,
+          &target_request.function_name);
     }
   }
   loomc_pass_program_t* pass_program = NULL;

@@ -1458,6 +1458,92 @@ TEST(TargetTest, AcceptsSanitizerPipelineOptions) {
   EXPECT_NE(pass_program.get(), nullptr);
 }
 
+TEST(TargetTest, AcceptsSourceLowArtifactPipeline) {
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  ContextPtr context = CreateTargetContext(target_environment.get());
+  loomc_target_pipeline_options_t pipeline_options = {
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
+      .structure_size = sizeof(pipeline_options),
+      .kind = LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW_ARTIFACTS,
+      .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
+  };
+  PassProgramPtr pass_program =
+      CreateTargetPipelinePassProgram(context.get(), &pipeline_options);
+  EXPECT_NE(pass_program.get(), nullptr);
+}
+
+TEST(TargetTest, AcceptsSourceToLowDiagnosticFlags) {
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  ContextPtr context = CreateTargetContext(target_environment.get());
+  loomc_target_pipeline_options_t pipeline_options = {
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
+      .structure_size = sizeof(pipeline_options),
+      .kind = LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW,
+      .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
+      .source_to_low_diagnostic_flags = LOOMC_SOURCE_TO_LOW_DIAGNOSTIC_ALL,
+  };
+  PassProgramPtr pass_program =
+      CreateTargetPipelinePassProgram(context.get(), &pipeline_options);
+  EXPECT_NE(pass_program.get(), nullptr);
+}
+
+TEST(TargetTest, OlderTargetPipelineOptionsIgnoreTailPadding) {
+  struct TargetPipelineOptionsPrefix {
+    // Structure discriminator in the original descriptor.
+    loomc_structure_type_t type;
+    // Original descriptor size, including its tail padding.
+    loomc_host_size_t structure_size;
+    // Original extension chain.
+    const void* next;
+    // Original pipeline identifier.
+    loomc_string_view_t identifier;
+    // Original target pipeline boundary.
+    loomc_target_pipeline_kind_t kind;
+    // Original source control-flow selection.
+    loomc_target_control_flow_lowering_t control_flow_lowering;
+    // Last field in the original descriptor.
+    uint32_t source_to_low_max_errors;
+  } prefix;
+  static_assert(sizeof(prefix) == offsetof(loomc_target_pipeline_options_t,
+                                           source_to_low_diagnostic_flags));
+  memset(&prefix, 0xFF, sizeof(prefix));
+  prefix.type = LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS;
+  prefix.structure_size = sizeof(prefix);
+  prefix.next = nullptr;
+  prefix.identifier = loomc_string_view_empty();
+  prefix.kind = LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW;
+  prefix.control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG;
+  prefix.source_to_low_max_errors = 0;
+
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  ContextPtr context = CreateTargetContext(target_environment.get());
+  PassProgramPtr pass_program = CreateTargetPipelinePassProgram(
+      context.get(),
+      reinterpret_cast<const loomc_target_pipeline_options_t*>(&prefix));
+  EXPECT_NE(pass_program.get(), nullptr);
+}
+
+TEST(TargetTest, RejectsUnknownSourceToLowDiagnosticFlags) {
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  ContextPtr context = CreateTargetContext(target_environment.get());
+  loomc_target_pipeline_options_t pipeline_options = {
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
+      .structure_size = sizeof(pipeline_options),
+      .kind = LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW,
+      .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
+      .source_to_low_diagnostic_flags = 1u << 31,
+  };
+
+  loomc_pass_program_t* pass_program = nullptr;
+  loomc_result_t* result = nullptr;
+  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT,
+                         loomc_pass_program_create_from_target_pipeline(
+                             context.get(), &pipeline_options,
+                             loomc_allocator_system(), &pass_program, &result));
+  EXPECT_EQ(pass_program, nullptr);
+  EXPECT_EQ(result, nullptr);
+}
+
 TEST(TargetTest, RejectsUnknownSanitizerCheckBits) {
   TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
   ContextPtr context = CreateTargetContext(target_environment.get());

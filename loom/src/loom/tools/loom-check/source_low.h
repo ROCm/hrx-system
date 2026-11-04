@@ -10,7 +10,6 @@
 #define LOOM_TOOLS_LOOM_CHECK_SOURCE_LOW_H_
 
 #include "loom/sanitizer/options.h"
-#include "loom/target/pipeline_options.h"
 #include "loom/tools/loom-check/execute.h"
 #include "loomc/target.h"
 
@@ -44,9 +43,9 @@ typedef struct loom_check_source_low_request_t {
   // modes.
   loom_check_source_low_options_t options;
   // Requested source-to-low legality diagnostics.
-  loom_target_low_legality_diagnostic_flags_t diagnostic_flags;
+  loomc_source_to_low_diagnostic_flags_t diagnostic_flags;
   // Control-flow shape for the selected lowering pipeline.
-  loom_target_control_flow_lowering_t control_flow_lowering;
+  loomc_target_control_flow_lowering_t control_flow_lowering;
   // Requested sanitizer instrumentation and reporting policy.
   loom_sanitizer_options_t sanitizer;
   // Optional source function to specialize. With TARGET but no name, select

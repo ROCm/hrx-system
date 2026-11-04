@@ -23,6 +23,11 @@ static bool loom_target_pass_capability_satisfies_requirement(
           IREE_SV(LOOM_TARGET_PASS_REQUIREMENT_MUTABLE_FUNCTION_VERSIONS))) {
     return target_capability->supports_mutable_function_versions;
   }
+  if (iree_string_view_equal(
+          requirement,
+          IREE_SV(LOOM_TARGET_PASS_REQUIREMENT_PROVIDER_ENVIRONMENT))) {
+    return target_capability->target_environment != NULL;
+  }
   return false;
 }
 

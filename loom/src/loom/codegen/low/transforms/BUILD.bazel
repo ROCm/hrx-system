@@ -171,3 +171,17 @@ loom_cc_library(
         "//runtime/src/iree/base/internal:arena",
     ],
 )
+
+loom_cc_library(
+    name = "verification",
+    srcs = ["verification.c"],
+    hdrs = ["verification.h"],
+    deps = [
+        "//loom/src/loom/codegen/low:verify",
+        "//loom/src/loom/codegen/low/pipeline:pass_environment",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/target:pass_environment",
+        "//loom/src/loom/target:provider",
+        "//runtime/src/iree/base",
+    ],
+)

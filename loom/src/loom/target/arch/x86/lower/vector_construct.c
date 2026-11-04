@@ -594,6 +594,34 @@ static iree_status_t loom_x86_vector_construct_emit_read_only(
       out_result);
 }
 
+static bool loom_x86_vector_construct_source_is_exclusive(
+    const loom_x86_vector_construct_emitter_t* emitter,
+    loom_value_id_t source_value_id) {
+  const loom_module_t* module = loom_low_lower_context_module(emitter->context);
+  const loom_value_t* source_value = loom_module_value(module, source_value_id);
+  return source_value != NULL && loom_value_has_single_use(source_value) &&
+         !loom_value_has_attribute_uses(source_value) &&
+         !loom_module_value_has_type_uses(module, source_value_id) &&
+         loom_use_user_op(*loom_value_single_use(source_value)) ==
+             emitter->source_op;
+}
+
+static iree_status_t loom_x86_vector_construct_copy_shared_source(
+    loom_x86_vector_construct_emitter_t* emitter,
+    loom_value_id_t source_value_id, loom_value_id_t* inout_low_value_id) {
+  if (loom_x86_vector_construct_source_is_exclusive(emitter, source_value_id)) {
+    return iree_ok_status();
+  }
+  const loom_type_t type = loom_module_value_type(
+      loom_low_lower_context_module(emitter->context), *inout_low_value_id);
+  loom_op_t* copy_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_copy_build(
+      loom_low_lower_context_builder(emitter->context), *inout_low_value_id,
+      /*detached=*/false, type, emitter->source_op->location, &copy_op));
+  *inout_low_value_id = loom_low_copy_result(copy_op);
+  return iree_ok_status();
+}
+
 static uint8_t loom_x86_vector_construct_width_index(
     uint8_t element_bit_width) {
   switch (element_bit_width) {
@@ -789,6 +817,9 @@ static iree_status_t loom_x86_vector_construct_pack_predicate_half(
     IREE_RETURN_IF_ERROR(loom_x86_vector_construct_emit_constant_i32(
         emitter, exact_bits, out_bits));
   }
+  uint16_t accumulator_source_lane = UINT16_MAX;
+  const loom_value_slice_t source_elements =
+      loom_vector_from_elements_elements(emitter->source_op);
   for (uint16_t lane = 0; lane < count; ++lane) {
     const uint16_t source_lane = begin + lane;
     if (iree_any_bit_set(construction->predicate_exact_lane_mask,
@@ -797,6 +828,8 @@ static iree_status_t loom_x86_vector_construct_pack_predicate_half(
     }
     loom_value_id_t lane_bits = values[source_lane];
     if (lane != 0) {
+      IREE_RETURN_IF_ERROR(loom_x86_vector_construct_copy_shared_source(
+          emitter, source_elements.values[source_lane], &lane_bits));
       IREE_RETURN_IF_ERROR(loom_x86_vector_construct_emit_immediate(
           emitter, emitter->descriptors->scalar.shift_left_i32, lane_bits,
           emitter->shift_name, lane, emitter->gpr32_type,
@@ -804,7 +837,14 @@ static iree_status_t loom_x86_vector_construct_pack_predicate_half(
     }
     if (*out_bits == LOOM_VALUE_ID_INVALID) {
       *out_bits = lane_bits;
+      accumulator_source_lane = lane == 0 ? source_lane : UINT16_MAX;
     } else {
+      if (accumulator_source_lane != UINT16_MAX) {
+        IREE_RETURN_IF_ERROR(loom_x86_vector_construct_copy_shared_source(
+            emitter, source_elements.values[accumulator_source_lane],
+            out_bits));
+        accumulator_source_lane = UINT16_MAX;
+      }
       IREE_RETURN_IF_ERROR(loom_x86_vector_construct_emit_binary(
           emitter, emitter->descriptors->scalar.or_i32, *out_bits, lane_bits,
           emitter->gpr32_type, /*tie_lhs=*/true, out_bits));
@@ -947,10 +987,15 @@ static iree_status_t loom_x86_vector_construct_emit_avx2_predicate(
           continue;
         }
         loom_value_id_t normalized = LOOM_VALUE_ID_INVALID;
+        loom_value_id_t source = values[source_lane];
+        const loom_value_slice_t source_elements =
+            loom_vector_from_elements_elements(emitter->source_op);
+        IREE_RETURN_IF_ERROR(loom_x86_vector_construct_copy_shared_source(
+            emitter, source_elements.values[source_lane], &source));
         IREE_RETURN_IF_ERROR(loom_x86_vector_construct_emit_op(
-            emitter, emitter->descriptors->scalar.negate_i32,
-            &values[source_lane], 1, loom_named_attr_slice_empty(),
-            emitter->gpr32_type, /*tie_first=*/true, &normalized));
+            emitter, emitter->descriptors->scalar.negate_i32, &source, 1,
+            loom_named_attr_slice_empty(), emitter->gpr32_type,
+            /*tie_first=*/true, &normalized));
         if (wide_lane) {
           IREE_RETURN_IF_ERROR(loom_x86_vector_construct_emit_unary(
               emitter, emitter->descriptors->scalar.sign_extend_i32, normalized,
@@ -972,12 +1017,17 @@ static iree_status_t loom_x86_vector_construct_emit_avx2_predicate(
 
     loom_value_id_t normalized[16];
     IREE_ASSERT_LE(count, IREE_ARRAYSIZE(normalized));
+    const loom_value_slice_t source_elements =
+        loom_vector_from_elements_elements(emitter->source_op);
     for (uint16_t lane = 0; lane < count; ++lane) {
       const uint16_t source_lane = begin + lane;
+      loom_value_id_t source = values[source_lane];
+      IREE_RETURN_IF_ERROR(loom_x86_vector_construct_copy_shared_source(
+          emitter, source_elements.values[source_lane], &source));
       IREE_RETURN_IF_ERROR(loom_x86_vector_construct_emit_op(
-          emitter, emitter->descriptors->scalar.negate_i32,
-          &values[source_lane], 1, loom_named_attr_slice_empty(),
-          emitter->gpr32_type, /*tie_first=*/true, &normalized[lane]));
+          emitter, emitter->descriptors->scalar.negate_i32, &source, 1,
+          loom_named_attr_slice_empty(), emitter->gpr32_type,
+          /*tie_first=*/true, &normalized[lane]));
       if (wide_lane) {
         IREE_RETURN_IF_ERROR(loom_x86_vector_construct_emit_unary(
             emitter, emitter->descriptors->scalar.sign_extend_i32,

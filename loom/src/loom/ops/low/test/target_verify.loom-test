@@ -130,10 +130,10 @@ low.func.def target<test.low.core>(@test_target) @copy_changes_class_preserves_v
 // ====
 
 test.target<low_core> @test_target
-low.func.def target<test.low.core>(@test_target) @slice_bad_class(%pair: reg<test.i32 x2>) {
-  // ERROR@+1: TYPE/001
-  %lane = low.slice %pair[0] : reg<test.i32 x2> -> reg<test.i64>
-  low.return
+
+low.func.def target<test.low.core>(@test_target) @slice_changes_class_preserves_range(%pair: reg<test.i32 x2>) asm {
+  %lane = slice %pair[0] : reg<test.i32 x2> -> reg<test.i64>
+  return
 }
 
 // ====

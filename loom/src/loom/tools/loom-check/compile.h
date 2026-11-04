@@ -10,8 +10,6 @@
 #define LOOM_TOOLS_LOOM_CHECK_COMPILE_H_
 
 #include "loom/sanitizer/options.h"
-#include "loom/target/pipeline_options.h"
-#include "loom/target/reporting/report.h"
 #include "loom/tooling/input/loomc.h"
 #include "loom/tools/loom-check/execute.h"
 #include "loomc/compile.h"
@@ -84,22 +82,14 @@ typedef struct loom_check_compile_artifact_options_t {
   const loomc_compile_report_options_t* report;
 } loom_check_compile_artifact_options_t;
 
-// Source-Low pass-program boundary selected by a checker provider.
-typedef enum loom_check_compile_source_low_pipeline_e {
-  // Full source-to-Low target pipeline.
-  LOOM_CHECK_COMPILE_SOURCE_LOW_PIPELINE_DEFAULT = 0,
-  // Full target pipeline prepared for required low-asm output.
-  LOOM_CHECK_COMPILE_SOURCE_LOW_PIPELINE_ARTIFACT = 1,
-} loom_check_compile_source_low_pipeline_t;
-
 // One source-to-Low checker compilation request.
 typedef struct loom_check_compile_source_low_options_t {
   // Pass-program boundary to prepare and execute.
-  loom_check_compile_source_low_pipeline_t pipeline;
+  loomc_target_pipeline_kind_t pipeline_kind;
   // Source-to-Low legality diagnostics requested by the checker case.
-  loom_target_low_legality_diagnostic_flags_t diagnostic_flags;
+  loomc_source_to_low_diagnostic_flags_t diagnostic_flags;
   // Control-flow representation selected for lowering.
-  loom_target_control_flow_lowering_t control_flow_lowering;
+  loomc_target_control_flow_lowering_t control_flow_lowering;
   // Sanitizer instrumentation and reporting policy.
   loom_sanitizer_options_t sanitizer;
   // Optional function symbol to specialize.
@@ -110,24 +100,10 @@ typedef struct loom_check_compile_source_low_options_t {
   loom_target_compile_report_t* report;
 } loom_check_compile_source_low_options_t;
 
-// Borrowed public and exact-version views of one compiled source module.
-typedef struct loom_check_compile_source_low_view_t {
-  // Public module retained by the compile helper during the callback.
-  const loomc_module_t* public_module;
-  // Context-target-verified native module owned by |public_module|.
-  const loom_module_t* module;
-  // Exact source snapshots for native diagnostics during the callback.
-  loom_source_resolver_t source_resolver;
-} loom_check_compile_source_low_view_t;
-
 // Consumes one verified mutable native projection of an admitted public
 // module. The projection remains valid only for the callback invocation.
 typedef iree_status_t (*loom_check_compile_native_module_consumer_fn_t)(
     void* user_data, const loom_check_emit_native_module_t* native_module);
-
-// Consumes one successfully compiled source-Low module before it is released.
-typedef iree_status_t (*loom_check_compile_source_low_consumer_fn_t)(
-    void* user_data, const loom_check_compile_source_low_view_t* view);
 
 // Releases all public compiler state prepared by |session|.
 void loom_check_compile_session_deinitialize(
@@ -157,7 +133,8 @@ iree_status_t loom_check_compile_admit_module(
 // Selects the explicit function name, sole definition, or unique public/kernel
 // entry among private helpers. The returned name borrows module storage.
 iree_status_t loom_check_compile_select_source_function(
-    const loom_module_t* module, iree_string_view_t function_name,
+    const loomc_module_t* module, iree_string_view_t function_name,
+    loom_check_diagnostic_collector_t* collector,
     iree_string_view_t* out_function_name);
 
 // Borrows verified IR for native inspection. The view remains valid until the
@@ -200,13 +177,11 @@ iree_status_t loom_check_compile_select_artifact(
     const loomc_result_t* result, loomc_artifact_kind_t kind,
     iree_string_view_t format, const loomc_artifact_t** out_artifact);
 
-// Lowers the request's admitted public module through LoomC, then invokes
-// |consumer| on the successfully compiled module. User diagnostics suppress
-// the callback and return OK for normal loom-check annotation matching.
+// Lowers the request's admitted public module through LoomC. User diagnostics
+// leave |out_compiled| false and return OK for normal annotation matching.
 iree_status_t loom_check_compile_source_low(
     const loom_check_emit_provider_request_t* request,
-    const loom_check_compile_source_low_options_t* options,
-    loom_check_compile_source_low_consumer_fn_t consumer, void* user_data);
+    const loom_check_compile_source_low_options_t* options, bool* out_compiled);
 
 // Admits and compiles one source case through LoomC's final artifact producer.
 // Success requires a nonempty artifact or exactly

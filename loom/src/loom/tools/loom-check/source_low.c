@@ -6,15 +6,8 @@
 
 #include "loom/tools/loom-check/source_low.h"
 
-#include "loom/codegen/low/text_asm.h"
 #include "loom/error/error_catalog.h"
-#include "loom/error/source.h"
-#include "loom/format/text/printer.h"
-#include "loom/ir/module.h"
-#include "loom/ops/low/ops.h"
-#include "loom/ops/op_defs.h"
-#include "loom/target/entry_selection.h"
-#include "loom/target/provider.h"
+#include "loom/error/parameter.h"
 #include "loom/tools/loom-check/compile.h"
 #include "loom/tools/loom-check/compile_diagnostics.h"
 #include "loom/tools/loom-check/diagnostics.h"
@@ -46,13 +39,11 @@ static iree_status_t loom_check_emit_parse_source_low_option(
     if (iree_string_view_equal(value, IREE_SV("none"))) {
       request->diagnostic_flags = 0;
     } else if (iree_string_view_equal(value, IREE_SV("memory"))) {
-      request->diagnostic_flags =
-          LOOM_TARGET_LOW_LEGALITY_DIAGNOSTIC_MEMORY_ACCESS;
+      request->diagnostic_flags = LOOMC_SOURCE_TO_LOW_DIAGNOSTIC_MEMORY_ACCESS;
     } else if (iree_string_view_equal(value, IREE_SV("operand-forms"))) {
-      request->diagnostic_flags =
-          LOOM_TARGET_LOW_LEGALITY_DIAGNOSTIC_OPERAND_FORM;
+      request->diagnostic_flags = LOOMC_SOURCE_TO_LOW_DIAGNOSTIC_OPERAND_FORM;
     } else if (iree_string_view_equal(value, IREE_SV("all"))) {
-      request->diagnostic_flags = LOOM_TARGET_LOW_LEGALITY_DIAGNOSTIC_ALL;
+      request->diagnostic_flags = LOOMC_SOURCE_TO_LOW_DIAGNOSTIC_ALL;
     } else {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
@@ -70,10 +61,10 @@ static iree_status_t loom_check_emit_parse_source_low_option(
                               "duplicate source-low option 'control-flow'");
     }
     if (iree_string_view_equal(value, IREE_SV("cfg"))) {
-      request->control_flow_lowering = LOOM_TARGET_CONTROL_FLOW_LOWERING_CFG;
+      request->control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG;
     } else if (iree_string_view_equal(value, IREE_SV("structured-low"))) {
       request->control_flow_lowering =
-          LOOM_TARGET_CONTROL_FLOW_LOWERING_STRUCTURED_LOW;
+          LOOMC_TARGET_CONTROL_FLOW_LOWERING_STRUCTURED_LOW;
     } else {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
@@ -143,7 +134,7 @@ iree_status_t loom_check_source_low_parse(
     iree_string_view_t text, loom_check_source_low_request_t* request) {
   *request = (loom_check_source_low_request_t){
       .output = LOOM_CHECK_EMIT_SOURCE_LOW_OUTPUT_MODULE,
-      .control_flow_lowering = LOOM_TARGET_CONTROL_FLOW_LOWERING_CFG,
+      .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
   };
   text = iree_string_view_trim(text);
   if (iree_string_view_starts_with_char(text, '@')) {
@@ -184,66 +175,6 @@ iree_status_t loom_check_source_low_parse(
         "source-low specialization requires module, low, or none output");
   }
   return iree_ok_status();
-}
-
-static void loom_check_emit_initialize_source_low_print_options(
-    const loom_low_descriptor_registry_t* descriptor_registry,
-    loom_text_low_asm_environment_t* low_asm_environment,
-    loom_text_print_options_t* print_options) {
-  loom_low_descriptor_text_asm_environment_initialize(descriptor_registry,
-                                                      low_asm_environment);
-  *print_options = (loom_text_print_options_t){
-      .flags = LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_REQUIRE_LOW_ASM,
-      .low_asm_environment = *low_asm_environment,
-  };
-}
-
-static iree_status_t loom_check_emit_write_source_low_artifacts(
-    const loom_module_t* module,
-    const loom_low_descriptor_registry_t* descriptor_registry,
-    iree_string_builder_t* output) {
-  loom_text_low_asm_environment_t low_asm_environment = {0};
-  loom_text_print_options_t print_options = {0};
-  loom_check_emit_initialize_source_low_print_options(
-      descriptor_registry, &low_asm_environment, &print_options);
-  loom_output_stream_t stream;
-  loom_output_stream_for_builder(output, &stream);
-  loom_text_printer_t printer;
-  loom_text_printer_initialize(module, &printer);
-  bool has_artifact = false;
-  const loom_block_t* block = loom_region_const_entry_block(module->body);
-  iree_status_t status = iree_ok_status();
-  for (const loom_op_t* op = block->first_op; op && iree_status_is_ok(status);
-       op = op->next_op) {
-    if (loom_op_dialect_id(op->kind) != LOOM_DIALECT_LOW) {
-      continue;
-    }
-    if (has_artifact) {
-      status = loom_output_stream_write_char(&stream, '\n');
-    }
-    if (iree_status_is_ok(status)) {
-      status = loom_text_printer_write_operation(&printer, op, &stream,
-                                                 &print_options);
-    }
-    has_artifact = true;
-  }
-  loom_text_printer_deinitialize(&printer);
-  if (iree_status_is_ok(status) && !has_artifact) {
-    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "source-low produced no low artifacts");
-  }
-  return status;
-}
-
-static bool loom_check_emit_has_low_function(const loom_module_t* module) {
-  const loom_block_t* block = loom_region_const_entry_block(module->body);
-  const loom_op_t* op = NULL;
-  loom_block_for_each_op(block, op) {
-    if (loom_low_func_def_isa(op) || loom_low_kernel_def_isa(op)) {
-      return true;
-    }
-  }
-  return false;
 }
 
 static iree_status_t loom_check_emit_write_source_low_pipeline_text(
@@ -290,8 +221,7 @@ static iree_status_t loom_check_emit_write_source_low_pipeline_text(
                         : loomc_make_cstring_view("__loom_check_source_low"),
       .kind = prepared ? LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW
                        : LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW,
-      .control_flow_lowering =
-          (loomc_target_control_flow_lowering_t)request->control_flow_lowering,
+      .control_flow_lowering = request->control_flow_lowering,
   };
   loomc_pass_program_t* pass_program = NULL;
   loomc_result_t* result = NULL;
@@ -323,41 +253,63 @@ static iree_status_t loom_check_emit_write_source_low_pipeline_text(
   return status;
 }
 
-typedef struct loom_check_source_low_consumer_t {
-  // Provider invocation receiving diagnostics and comparable output.
-  const loom_check_emit_provider_request_t* provider_request;
-  // Parsed source-low presentation request.
-  const loom_check_source_low_request_t* source_request;
-} loom_check_source_low_consumer_t;
+static iree_status_t loom_check_source_low_query_has_function_kind(
+    const loom_check_emit_provider_request_t* provider_request,
+    loomc_module_function_kind_t kind, bool* out_has_function) {
+  *out_has_function = false;
+  const loomc_module_function_query_options_t options = {
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_FUNCTION_QUERY_OPTIONS,
+      .structure_size = sizeof(options),
+      .kind = kind,
+  };
+  loomc_host_size_t function_count = 0;
+  loomc_result_t* result = NULL;
+  iree_status_t status = iree_status_from_loomc(loomc_module_query_functions(
+      provider_request->public_module, &options,
+      loomc_allocator_from_iree(
+          iree_arena_allocator(provider_request->diagnostic_collector->arena)),
+      /*function_capacity=*/0, /*out_functions=*/NULL, &function_count,
+      &result));
+  bool queried = false;
+  if (iree_status_is_ok(status)) {
+    status = loom_check_compile_append_result(
+        provider_request->diagnostic_collector, result, &queried);
+  }
+  if (iree_status_is_ok(status) && queried) {
+    *out_has_function = function_count != 0;
+  }
+  loomc_result_release(result);
+  return status;
+}
+
+static iree_status_t loom_check_source_low_query_has_function(
+    const loom_check_emit_provider_request_t* provider_request,
+    bool* out_has_function) {
+  IREE_RETURN_IF_ERROR(loom_check_source_low_query_has_function_kind(
+      provider_request, LOOMC_MODULE_FUNCTION_KIND_TARGET_FUNCTION,
+      out_has_function));
+  if (*out_has_function) {
+    return iree_ok_status();
+  }
+  return loom_check_source_low_query_has_function_kind(
+      provider_request, LOOMC_MODULE_FUNCTION_KIND_TARGET_KERNEL,
+      out_has_function);
+}
 
 static iree_status_t loom_check_emit_write_source_low_module(
-    void* user_data, const loom_check_compile_source_low_view_t* view) {
-  const loom_check_source_low_consumer_t* consumer =
-      (const loom_check_source_low_consumer_t*)user_data;
-  const loom_check_emit_provider_request_t* provider_request =
-      consumer->provider_request;
-  const loom_check_source_low_request_t* request = consumer->source_request;
-  const loom_module_t* module = view->module;
-  const loom_target_entry_options_t entry_options = {
-      .diagnostic_sink = {.fn = loom_check_diagnostic_collector_sink,
-                          .user_data = provider_request->diagnostic_collector},
-      .source_resolver = view->source_resolver,
-      .max_errors = 20,
-  };
-  loom_target_entry_diagnostic_emitter_t pass_emitter = {0};
-  loom_target_entry_diagnostic_emitter_initialize(
-      module, &entry_options, LOOM_EMITTER_PASS, &pass_emitter);
-  if (!loom_check_emit_has_low_function(module)) {
+    const loom_check_emit_provider_request_t* provider_request,
+    const loom_check_source_low_request_t* request) {
+  bool has_function = false;
+  IREE_RETURN_IF_ERROR(loom_check_source_low_query_has_function(
+      provider_request, &has_function));
+  if (!has_function) {
     const loom_diagnostic_param_t params[] = {
         loom_param_string(IREE_SV("source-to-low")),
     };
-    const loom_diagnostic_emission_t emission = {
-        .error = LOOM_ERR_TARGET_011,
-        .params = params,
-        .param_count = IREE_ARRAYSIZE(params),
-    };
-    return iree_diagnostic_emit(loom_target_entry_emitter(&pass_emitter),
-                                &emission);
+    return loom_check_diagnostic_collector_emit_case_source(
+        provider_request->diagnostic_collector, provider_request->test_case,
+        provider_request->filename, LOOM_EMITTER_PASS, LOOM_ERR_TARGET_011,
+        params, IREE_ARRAYSIZE(params));
   }
 
   if (request->output == LOOM_CHECK_EMIT_SOURCE_LOW_OUTPUT_NONE) {
@@ -365,30 +317,37 @@ static iree_status_t loom_check_emit_write_source_low_module(
     return iree_ok_status();
   }
 
-  if (request->output == LOOM_CHECK_EMIT_SOURCE_LOW_OUTPUT_LOW) {
-    return loom_check_emit_write_source_low_artifacts(
-        module, &provider_request->low_registry->registry,
-        &provider_request->result->actual_output);
-  }
-
-  const loomc_module_serialize_options_t serialize_options = {
+  const loomc_module_serialize_options_t print_options = {
       .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-      .structure_size = sizeof(serialize_options),
+      .structure_size = sizeof(print_options),
       .format = LOOMC_SOURCE_FORMAT_TEXT,
       .text_presentation = LOOMC_MODULE_TEXT_PRESENTATION_LOW_ASM,
+      .top_level_dialect =
+          request->output == LOOM_CHECK_EMIT_SOURCE_LOW_OUTPUT_LOW
+              ? loomc_make_cstring_view("low")
+              : loomc_string_view_empty(),
   };
   loomc_source_t* source = NULL;
-  iree_status_t status =
-      iree_status_from_loomc(loomc_module_serialize_text_to_source(
-          view->public_module, &serialize_options,
-          loomc_allocator_from_iree(provider_request->host_allocator),
-          &source));
+  const loomc_allocator_t allocator =
+      loomc_allocator_from_iree(provider_request->host_allocator);
+  const loomc_status_t print_status =
+      request->output == LOOM_CHECK_EMIT_SOURCE_LOW_OUTPUT_LOW
+          ? loomc_module_print_text_to_source(provider_request->public_module,
+                                              &print_options, allocator,
+                                              &source)
+          : loomc_module_serialize_text_to_source(
+                provider_request->public_module, &print_options, allocator,
+                &source);
+  iree_status_t status = iree_status_from_loomc(print_status);
   if (iree_status_is_ok(status)) {
     const loomc_byte_span_t contents = loomc_source_contents(source);
     status = iree_string_builder_append_string(
         &provider_request->result->actual_output,
         iree_make_string_view((const char*)contents.data,
                               contents.data_length));
+  }
+  if (iree_status_is_ok(status)) {
+    provider_request->result->has_actual_output = true;
   }
   loomc_source_release(source);
   return status;
@@ -415,28 +374,28 @@ iree_status_t loom_check_source_low_execute(
 
   // Diagnostics observe the same source normalization and lowering regardless
   // of output scope. Only assembly printing needs extra artifact preparation.
-  loom_check_compile_source_low_pipeline_t pipeline =
-      LOOM_CHECK_COMPILE_SOURCE_LOW_PIPELINE_DEFAULT;
+  loomc_target_pipeline_kind_t pipeline_kind =
+      LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW;
   if (request.output != LOOM_CHECK_EMIT_SOURCE_LOW_OUTPUT_NONE) {
     // Both IR output scopes require assembly-ready Low, without materializing
     // the target ABI or otherwise advancing to prepared-Low.
-    pipeline = LOOM_CHECK_COMPILE_SOURCE_LOW_PIPELINE_ARTIFACT;
+    pipeline_kind = LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW_ARTIFACTS;
   }
   const loom_check_compile_source_low_options_t compile_options = {
-      .pipeline = pipeline,
+      .pipeline_kind = pipeline_kind,
       .diagnostic_flags = request.diagnostic_flags,
       .control_flow_lowering = request.control_flow_lowering,
       .sanitizer = request.sanitizer,
       .function_name = request.function_name,
       .target_profile = target_profile,
   };
-  const loom_check_source_low_consumer_t consumer = {
-      .provider_request = provider_request,
-      .source_request = &request,
-  };
-  return loom_check_compile_source_low(provider_request, &compile_options,
-                                       loom_check_emit_write_source_low_module,
-                                       (void*)&consumer);
+  bool compiled = false;
+  IREE_RETURN_IF_ERROR(loom_check_compile_source_low(
+      provider_request, &compile_options, &compiled));
+  if (!compiled) {
+    return iree_ok_status();
+  }
+  return loom_check_emit_write_source_low_module(provider_request, &request);
 }
 
 static iree_status_t loom_check_source_low_emit_provider_execute(

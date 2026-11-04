@@ -99,6 +99,10 @@ typedef struct PipelineRunCounts {
   int source_to_low = 0;
   // Lexical pass-run ordinal of source-to-low.
   int source_to_low_ordinal = 0;
+  // Number of final target-Low verification pass runs.
+  int low_verification = 0;
+  // Lexical pass-run ordinal of final target-Low verification.
+  int low_verification_ordinal = 0;
   // Number of symbol-DCE runs after source-to-Low lowering.
   int symbol_dce = 0;
   // Lexical pass-run ordinal of symbol DCE.
@@ -295,6 +299,9 @@ iree_status_t InspectPipelineRun(void* user_data, loom_op_t* op,
     counts->source_to_low_sanitizer_reporting =
         FindStringOption(count_context->module, loom_pass_run_options(op),
                          IREE_SV("sanitizer-reporting"));
+  } else if (iree_string_view_equal(key, IREE_SV("verify-low"))) {
+    ++counts->low_verification;
+    counts->low_verification_ordinal = count_context->current_run_ordinal;
   } else if (iree_string_view_equal(key, IREE_SV("symbol-dce"))) {
     if (counts->boundary_refinement != 0 && counts->source_to_low == 0) {
       counts->boundary_cleanup_ordinal = count_context->current_run_ordinal;
@@ -397,6 +404,7 @@ TEST_F(TargetPipelineTest, ZeroChecksStillMaterializesAuthoredAssertions) {
   EXPECT_EQ(counts.worker_outlining, 2);
   EXPECT_EQ(counts.boundary_projection, 1);
   EXPECT_EQ(counts.source_to_low, 1);
+  EXPECT_EQ(counts.low_verification, 0);
   EXPECT_EQ(counts.symbol_dce, 1);
   EXPECT_LT(counts.final_template_selection_ordinal,
             counts.target_callgraph_specialization_ordinals[0]);
@@ -473,6 +481,32 @@ TEST_F(TargetPipelineTest, ZeroChecksStillMaterializesAuthoredAssertions) {
   EXPECT_LT(counts.sanitizer_materialize_assertions_ordinal,
             counts.boundary_projection_ordinal);
   EXPECT_EQ(counts.other_sanitizer_runs, 0);
+}
+
+TEST_F(TargetPipelineTest, SourceLowInspectionVerifiesProducedLow) {
+  const loom_target_pipeline_options_t options = {0};
+
+  ModulePtr source_module = AllocateModule(IREE_SV("source_low"));
+  loom_op_t* source_pipeline = nullptr;
+  IREE_ASSERT_OK(loom_target_pipeline_build_to_source_low(
+      source_module.get(), IREE_SV("compile"), &options, &environment_,
+      loom_pass_environment_empty(), &source_pipeline));
+  const PipelineRunCounts source_counts =
+      CountPipelineRuns(source_module.get(), source_pipeline);
+  EXPECT_EQ(source_counts.low_verification, 1);
+  EXPECT_LT(source_counts.source_to_low_ordinal,
+            source_counts.low_verification_ordinal);
+
+  ModulePtr artifact_module = AllocateModule(IREE_SV("source_low_artifacts"));
+  loom_op_t* artifact_pipeline = nullptr;
+  IREE_ASSERT_OK(loom_target_pipeline_build_to_source_low_artifacts(
+      artifact_module.get(), IREE_SV("compile"), &options, &environment_,
+      loom_pass_environment_empty(), &artifact_pipeline));
+  const PipelineRunCounts artifact_counts =
+      CountPipelineRuns(artifact_module.get(), artifact_pipeline);
+  EXPECT_EQ(artifact_counts.low_verification, 1);
+  EXPECT_LT(artifact_counts.source_to_low_ordinal,
+            artifact_counts.low_verification_ordinal);
 }
 
 TEST_F(TargetPipelineTest, StructuredControlFlowExpandsSourceLoopPolicies) {

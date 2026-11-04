@@ -451,32 +451,6 @@ TEST(InteropTest, CreatesOwnedNativeTargetEnvironment) {
   EXPECT_EQ(native_environment->provider_set, &provider_set);
 }
 
-TEST(InteropTest, BuildsNativeSourceLowPassProgram) {
-  const loom_target_provider_set_t provider_set = {};
-
-  loomc_target_environment_t* target_environment = nullptr;
-  LOOMC_EXPECT_OK(loomc_target_environment_create_from_provider_set(
-      &provider_set, loomc_allocator_system(), &target_environment));
-  TargetEnvironmentPtr target_environment_ptr(target_environment);
-  ContextPtr context = CreateTargetContext(target_environment_ptr.get());
-
-  loomc_pass_program_t* pass_program = nullptr;
-  loomc_result_t* result = nullptr;
-  LOOMC_EXPECT_OK(loomc_pass_program_create_from_native_source_low_pipeline(
-      context.get(), loom_target_pipeline_build_to_source_low_artifacts,
-      loomc_string_view_empty(), /*options=*/nullptr, loomc_allocator_system(),
-      &pass_program, &result));
-  PassProgramPtr pass_program_ptr(pass_program);
-  ResultPtr result_ptr(result);
-  EXPECT_TRUE(loomc_result_succeeded(result_ptr.get()));
-  EXPECT_NE(pass_program_ptr.get(), nullptr);
-
-  result_ptr.reset();
-  pass_program_ptr.reset();
-  context.reset();
-  target_environment_ptr.reset();
-}
-
 TEST(InteropTest, CompilesPublicModuleWithNativeReport) {
   const loom_target_provider_set_t provider_set = {};
 

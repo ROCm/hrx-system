@@ -374,17 +374,9 @@ loom_cc_library(
     deps = [
         ":execute",
         "//loom/binding/c:loomc",
-        "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/error:error_defs",
-        "//loom/src/loom/error:source",
-        "//loom/src/loom/format/text:printer",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/ops/low",
+        "//loom/src/loom/error:parameter",
         "//loom/src/loom/sanitizer:options",
-        "//loom/src/loom/target:entry_selection",
-        "//loom/src/loom/target:pipeline_options",
-        "//loom/src/loom/target:provider",
         "//runtime/src/iree/base",
     ],
 )
