@@ -249,10 +249,20 @@ typedef struct loom_aie2p_array_fold_state_plan_t {
   uint32_t span_count;
 } loom_aie2p_array_fold_state_plan_t;
 
+// One uniquely materialized and compiled resident worker program.
+typedef struct loom_aie2p_array_resident_program_plan_t {
+  // First logical worker instance using this program.
+  uint32_t representative_worker_index;
+  // Number of physical worker instances using this program.
+  uint32_t instance_count;
+} loom_aie2p_array_resident_program_plan_t;
+
 // Final placement of one resident worker before native compilation.
 typedef struct loom_aie2p_array_worker_plan_t {
   // Index of the logical worker represented by this placement.
   uint32_t worker_index;
+  // Resident program shared by protocol-equivalent worker instances.
+  uint32_t resident_program_index;
   // Physical compute tile executing the worker.
   loom_xdna_tile_coordinate_t coordinate;
   // First worker_ports row and worker_resource_ports entry for this worker.
@@ -498,6 +508,10 @@ typedef struct loom_aie2p_array_plan_t {
   const loom_aie2p_array_worker_plan_t* worker_plans;
   // Number of physical worker placements.
   iree_host_size_t worker_plan_count;
+  // Unique resident programs in first-instance order.
+  const loom_aie2p_array_resident_program_plan_t* resident_programs;
+  // Number of unique resident programs.
+  iree_host_size_t resident_program_count;
   // Function-local worker storage placements.
   const loom_aie2p_array_worker_storage_plan_t* worker_storage;
   // Number of function-local worker storage placements.

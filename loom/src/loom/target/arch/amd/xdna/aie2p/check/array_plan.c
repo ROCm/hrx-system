@@ -680,18 +680,20 @@ static iree_status_t loom_aie2p_array_plan_check_resident_program_in_module(
     loom_module_t* resident_module, const loom_aie2p_array_plan_t* plan,
     bool low_only, iree_diagnostic_emitter_t diagnostic_emitter) {
   const loom_check_emit_provider_request_t* request = context->request;
-  loom_aie2p_array_resident_program_t program = {0};
+  loom_aie2p_array_resident_program_set_t program_set = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_array_materialize_resident_programs(
       context->module, resident_module, plan, /*plan_count=*/1,
-      request->case_arena, &program));
+      request->case_arena, &program_set));
   if (!low_only) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         &request->result->actual_output,
-        "\nresident-program workers=%" PRIhsz "\n", program.worker_count));
+        "\nresident-programs count=%" PRIhsz " instances=%" PRIhsz "\n",
+        program_set.program_count, plan->worker_count));
   }
 
-  for (iree_host_size_t i = 0; i < program.worker_count; ++i) {
-    const loom_aie2p_array_resident_worker_t* resident = &program.workers[i];
+  for (iree_host_size_t i = 0; i < program_set.program_count; ++i) {
+    const loom_aie2p_array_resident_program_t* resident =
+        &program_set.programs[i];
     const loom_aie2p_leaf_compile_options_t compile_options = {
         .function_target_facts = resident->function_target_facts,
         .memory_accesses = resident->memory_accesses,
@@ -713,17 +715,20 @@ static iree_status_t loom_aie2p_array_plan_check_resident_program_in_module(
           "materialized AIE2P resident worker retains resource imports");
     }
     if (!low_only) {
+      const uint32_t representative_worker_index =
+          resident->representative_worker_index;
       const loom_xdna_tile_coordinate_t coordinate =
-          plan->worker_plans[resident->worker_index].coordinate;
+          plan->worker_plans[representative_worker_index].coordinate;
       const iree_string_view_t entry_name =
           loom_low_diagnostic_symbol_name(resident_module, resident->entry);
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           &request->result->actual_output,
-          "resident worker=%" PRIu32
-          " entry=@%.*s tile=(%u,%u) code-bytes=%" PRIu64 " resources=%" PRIhsz
-          " fixups=%" PRIhsz "\n",
-          resident->worker_index, (int)entry_name.size, entry_name.data,
-          coordinate.column, coordinate.row,
+          "resident-program index=%" PRIhsz " representative-worker=%" PRIu32
+          " instances=%" PRIu32 " entry=@%.*s tile=(%u,%u) code-bytes=%" PRIu64
+          " resources=%" PRIhsz " fixups=%" PRIhsz "\n",
+          i, representative_worker_index,
+          plan->resident_programs[i].instance_count, (int)entry_name.size,
+          entry_name.data, coordinate.column, coordinate.row,
           contribution.realization.code.byte_length,
           contribution.realization.resource_import_count,
           contribution.object.fixup_count));
@@ -743,13 +748,14 @@ static iree_status_t loom_aie2p_array_plan_check_resident_program_in_module(
   loom_text_printer_initialize(resident_module, &printer);
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
-       i < program.worker_count && iree_status_is_ok(status); ++i) {
+       i < program_set.program_count && iree_status_is_ok(status); ++i) {
     if (!low_only || i != 0) {
       status = loom_output_stream_write_char(&stream, '\n');
     }
     if (iree_status_is_ok(status)) {
       status = loom_text_printer_write_operation(
-          &printer, program.workers[i].function_op, &stream, &print_options);
+          &printer, program_set.programs[i].function_op, &stream,
+          &print_options);
     }
   }
   loom_text_printer_deinitialize(&printer);

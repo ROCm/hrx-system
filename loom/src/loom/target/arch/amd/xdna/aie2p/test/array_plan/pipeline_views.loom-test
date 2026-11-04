@@ -146,9 +146,8 @@ control-relocation index=0 record=0 word=1 binding=0 addend=64 alignment=4
 control-relocation index=1 record=2 word=1 binding=1 addend=128 alignment=4
 control-relocation index=2 record=5 word=1 binding=1 addend=140 alignment=4
 
-resident-program workers=2
-resident worker=0 entry=@broadcast_read_array$worker$0 tile=(0,2) code-bytes=122 resources=0 fixups=1
-resident worker=1 entry=@broadcast_read_array$worker$1 tile=(0,3) code-bytes=122 resources=0 fixups=1
+resident-programs count=1 instances=2
+resident-program index=0 representative-worker=0 instances=2 entry=@broadcast_read_array$worker$0 tile=(0,2) code-bytes=122 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core> @broadcast_read_array$worker$0() asm {
   %acquire_delta = mov.short -1
@@ -173,31 +172,6 @@ low.func.def retain target<amd.xdna.aie2p.core> @broadcast_read_array$worker$0()
   %14 = xor %13, %10
   %15 = mov.scalar-to-address %14
   low.br ^_bb1(%12: reg<aie2p.ep>, %15: reg<aie2p.ep>)
-}
-
-low.func.def retain target<amd.xdna.aie2p.core> @broadcast_read_array$worker$1() asm {
-  %acquire_delta = mov.short -1
-  %release_delta = mov.short 1
-  %34 = mov.local-address 458752
-  %35 = mov.local-address 491520
-  low.br ^_bb1(%34: reg<aie2p.ep>, %35: reg<aie2p.ep>)
-^_bb1(%23: reg<aie2p.ep>, %25: reg<aie2p.ep>):
-  acq %acquire_delta, 49
-  acq %acquire_delta, 50
-  %input_aligned = copy %23 : reg<aie2p.ep> -> reg<aie2p.ep>
-  %output_aligned = copy %25 : reg<aie2p.ep> -> reg<aie2p.ep>
-  %value = lda %input_aligned, 0
-  st %value, %output_aligned, 0
-  rel %release_delta, 51
-  rel %release_delta, 48
-  %27 = mov.address-to-scalar %23
-  %28 = mov.i32 16384
-  %29 = xor %27, %28
-  %30 = mov.scalar-to-address %29
-  %31 = mov.address-to-scalar %25
-  %32 = xor %31, %28
-  %33 = mov.scalar-to-address %32
-  low.br ^_bb1(%30: reg<aie2p.ep>, %33: reg<aie2p.ep>)
 }
 
 // ====
@@ -361,9 +335,8 @@ control-relocation index=1 record=2 word=1 binding=0 addend=12 alignment=4
 control-relocation index=2 record=4 word=1 binding=1 addend=0 alignment=4
 control-relocation index=3 record=7 word=1 binding=1 addend=12 alignment=4
 
-resident-program workers=2
-resident worker=0 entry=@partitioned_write_array$worker$0 tile=(0,2) code-bytes=122 resources=0 fixups=1
-resident worker=1 entry=@partitioned_write_array$worker$1 tile=(0,3) code-bytes=122 resources=0 fixups=1
+resident-programs count=1 instances=2
+resident-program index=0 representative-worker=0 instances=2 entry=@partitioned_write_array$worker$0 tile=(0,2) code-bytes=122 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core> @partitioned_write_array$worker$0() asm {
   %acquire_delta = mov.short -1
@@ -388,29 +361,4 @@ low.func.def retain target<amd.xdna.aie2p.core> @partitioned_write_array$worker$
   %14 = xor %13, %10
   %15 = mov.scalar-to-address %14
   low.br ^_bb1(%12: reg<aie2p.ep>, %15: reg<aie2p.ep>)
-}
-
-low.func.def retain target<amd.xdna.aie2p.core> @partitioned_write_array$worker$1() asm {
-  %acquire_delta = mov.short -1
-  %release_delta = mov.short 1
-  %34 = mov.local-address 458752
-  %35 = mov.local-address 491520
-  low.br ^_bb1(%34: reg<aie2p.ep>, %35: reg<aie2p.ep>)
-^_bb1(%23: reg<aie2p.ep>, %25: reg<aie2p.ep>):
-  acq %acquire_delta, 49
-  acq %acquire_delta, 50
-  %input_aligned = copy %23 : reg<aie2p.ep> -> reg<aie2p.ep>
-  %output_aligned = copy %25 : reg<aie2p.ep> -> reg<aie2p.ep>
-  %value = lda %input_aligned, 0
-  st %value, %output_aligned, 0
-  rel %release_delta, 51
-  rel %release_delta, 48
-  %27 = mov.address-to-scalar %23
-  %28 = mov.i32 16384
-  %29 = xor %27, %28
-  %30 = mov.scalar-to-address %29
-  %31 = mov.address-to-scalar %25
-  %32 = xor %31, %28
-  %33 = mov.scalar-to-address %32
-  low.br ^_bb1(%30: reg<aie2p.ep>, %33: reg<aie2p.ep>)
 }

@@ -501,9 +501,9 @@ static uint32_t loom_aie2p_array_resident_port_slot_address(
   return address;
 }
 
-static iree_status_t loom_aie2p_array_resident_add_symbol(
+static iree_status_t loom_aie2p_array_resident_make_symbol_name(
     loom_aie2p_array_resident_builder_t* builder, uint32_t worker_index,
-    loom_symbol_ref_t* out_ref) {
+    iree_string_view_t* out_name) {
   const loom_func_like_t array_function = loom_func_like_const_cast(
       builder->source_module, builder->plan->function_op);
   const loom_symbol_ref_t array_ref = loom_func_like_callee(array_function);
@@ -548,16 +548,24 @@ static iree_status_t loom_aie2p_array_resident_add_symbol(
             LOOM_SYMBOL_ID_INVALID) {
       continue;
     }
-    loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
-    IREE_RETURN_IF_ERROR(
-        loom_module_intern_string(builder->module, name, &name_id));
-    out_ref->module_id = 0;
-    return loom_module_add_symbol(builder->module, name_id,
-                                  &out_ref->symbol_id);
+    *out_name = name;
+    return iree_ok_status();
   }
   return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                           "could not create a unique AIE2P resident worker "
                           "symbol");
+}
+
+static iree_status_t loom_aie2p_array_resident_add_symbol(
+    loom_aie2p_array_resident_builder_t* builder, uint32_t worker_index,
+    loom_symbol_ref_t* out_ref, iree_string_view_t* out_name) {
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_make_symbol_name(
+      builder, worker_index, out_name));
+  loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_module_intern_string(builder->module, *out_name, &name_id));
+  out_ref->module_id = 0;
+  return loom_module_add_symbol(builder->module, name_id, &out_ref->symbol_id);
 }
 
 static iree_status_t loom_aie2p_array_resident_build_constant(
@@ -1982,7 +1990,8 @@ static iree_status_t loom_aie2p_array_resident_fuse_blocks(
 
 static iree_status_t loom_aie2p_array_resident_materialize_worker(
     loom_aie2p_array_resident_builder_t* builder, uint32_t worker_index,
-    loom_aie2p_array_resident_worker_t* out_worker) {
+    loom_aie2p_array_resident_program_t* out_program,
+    iree_string_view_t* out_instance_name) {
   const loom_aie2p_array_worker_t* worker =
       &builder->plan->workers[worker_index];
   const loom_aie2p_array_worker_plan_t* worker_plan =
@@ -1993,7 +2002,7 @@ static iree_status_t loom_aie2p_array_resident_materialize_worker(
 
   loom_symbol_ref_t resident_ref = loom_symbol_ref_null();
   IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_add_symbol(
-      builder, worker_index, &resident_ref));
+      builder, worker_index, &resident_ref, out_instance_name));
   loom_low_memory_access_map_t* memory_accesses = NULL;
   loom_low_loop_execution_map_t* loop_execution = NULL;
   loom_ir_remap_options_t remap_options = {
@@ -2111,8 +2120,8 @@ static iree_status_t loom_aie2p_array_resident_materialize_worker(
       IREE_ASSERT(loom_symbol_ref_is_valid(direct_helpers[i].entry));
     }
   }
-  *out_worker = (loom_aie2p_array_resident_worker_t){
-      .worker_index = worker_index,
+  *out_program = (loom_aie2p_array_resident_program_t){
+      .representative_worker_index = worker_index,
       .entry = resident_ref,
       .function_op = resident_function,
       .function_target_facts = leaf->function_target_facts,
@@ -2128,12 +2137,12 @@ iree_status_t loom_aie2p_array_materialize_resident_programs(
     const loom_module_t* source_module, loom_module_t* resident_module,
     const loom_aie2p_array_plan_t* plans, iree_host_size_t plan_count,
     iree_arena_allocator_t* arena,
-    loom_aie2p_array_resident_program_t* out_programs) {
+    loom_aie2p_array_resident_program_set_t* out_program_sets) {
   IREE_ASSERT_ARGUMENT(source_module);
   IREE_ASSERT_ARGUMENT(resident_module);
   IREE_ASSERT_ARGUMENT(plans || plan_count == 0);
   IREE_ASSERT_ARGUMENT(arena);
-  IREE_ASSERT_ARGUMENT(out_programs || plan_count == 0);
+  IREE_ASSERT_ARGUMENT(out_program_sets || plan_count == 0);
   IREE_ASSERT(source_module != resident_module);
   IREE_ASSERT(source_module->context == resident_module->context);
   loom_aie2p_array_resident_builder_t builder = {
@@ -2192,17 +2201,38 @@ iree_status_t loom_aie2p_array_materialize_resident_programs(
       loom_aie2p_array_resident_clone_helpers(&builder, plans, plan_count));
   for (iree_host_size_t plan_index = 0; plan_index < plan_count; ++plan_index) {
     const loom_aie2p_array_plan_t* plan = &plans[plan_index];
-    loom_aie2p_array_resident_worker_t* workers = NULL;
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, plan->worker_count, sizeof(*workers), (void**)&workers));
+    loom_aie2p_array_resident_program_t* programs = NULL;
+    iree_string_view_t* instance_names = NULL;
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(arena, plan->resident_program_count,
+                                  sizeof(*programs), (void**)&programs));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, plan->worker_count,
+                                                   sizeof(*instance_names),
+                                                   (void**)&instance_names));
     builder.plan = plan;
-    for (iree_host_size_t i = 0; i < plan->worker_count; ++i) {
+    for (iree_host_size_t i = 0; i < plan->resident_program_count; ++i) {
+      const uint32_t representative_worker_index =
+          plan->resident_programs[i].representative_worker_index;
       IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_materialize_worker(
-          &builder, (uint32_t)i, &workers[i]));
+          &builder, representative_worker_index, &programs[i],
+          &instance_names[representative_worker_index]));
     }
-    out_programs[plan_index] = (loom_aie2p_array_resident_program_t){
-        .workers = workers,
-        .worker_count = plan->worker_count,
+    for (iree_host_size_t worker_index = 0; worker_index < plan->worker_count;
+         ++worker_index) {
+      const uint32_t program_index =
+          plan->worker_plans[worker_index].resident_program_index;
+      IREE_ASSERT_LT(program_index, plan->resident_program_count);
+      const loom_aie2p_array_resident_program_t* program =
+          &programs[program_index];
+      if (program->representative_worker_index != worker_index) {
+        IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_make_symbol_name(
+            &builder, (uint32_t)worker_index, &instance_names[worker_index]));
+      }
+    }
+    out_program_sets[plan_index] = (loom_aie2p_array_resident_program_set_t){
+        .programs = programs,
+        .program_count = plan->resident_program_count,
+        .instance_names = instance_names,
     };
   }
   return iree_ok_status();

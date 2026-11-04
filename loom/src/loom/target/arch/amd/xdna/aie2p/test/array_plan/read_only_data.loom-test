@@ -61,7 +61,7 @@ CHECK: worker-rodata worker=0 requirement=2 offset=0x0c020 load-address=0x7c020 
 CHECK: worker-rodata worker=0 requirement=3 offset=0x08020 load-address=0x78020 bytes=8
 CHECK: worker-rodata worker=0 requirement=4 offset=0x0c040 load-address=0x7c040 bytes=8
 CHECK-NOT: worker-rodata worker=0 requirement=5
-CHECK: resident worker=0 entry=@read_table$worker$0 tile=(0,2) * fixups=6
+CHECK: resident-program index=0 representative-worker=0 instances=1 entry=@read_table$worker$0 tile=(0,2) * fixups=6
 CHECK:   %other = mov.local-address @other
 CHECK:   %table = mov.local-address @table
 CHECK:   %table_again_value = lda %table, 0
