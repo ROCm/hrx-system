@@ -545,7 +545,7 @@ iree_status_t loom_aie2p_native_build_sequence(
           layout->address,
           (layout->local_address_base + byte_offset + slot * byte_stride) >>
               dma->address_encoding_shift);
-      if (chain_length == 1) {
+      if (chain_length == 1 && capacity > 1) {
         const uint32_t step_units =
             byte_stride / dma->transfer_length_granularity;
         words[layout->iteration_word] =

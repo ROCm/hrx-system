@@ -321,6 +321,42 @@ TEST_P(Aie2pDmaSequenceTest, QueueAndRingBoundariesPreserveEveryRecord) {
   }
 }
 
+TEST_P(Aie2pDmaSequenceTest, SingleSlotDoesNotEncodeTheLogicalRecordStride) {
+  if (!layout()) {
+    return;
+  }
+  // A 36 KiB accumulator fits compute memory and its transfer-length field,
+  // but its logical record stride exceeds the compute iterator's step field.
+  constexpr uint32_t kRecordBytes = 36864;
+  auto words = descriptor_template();
+  words[0] = kRecordBytes / dma()->transfer_length_granularity -
+             dma()->transfer_length_offset;
+  for (auto direction : {LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM,
+                         LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY}) {
+    for (uint32_t count : {3u, 257u, 4097u}) {
+      // Separate record credits and one retained lifetime exercise both the
+      // ordinary sequence and its first/middle/last replay decomposition.
+      for (uint32_t credit_interval : {1u, count}) {
+        SCOPED_TRACE(::testing::Message()
+                     << "direction=" << direction << " count=" << count
+                     << " credit_interval=" << credit_interval);
+        loom_aie2p_native_dma_sequence_t sequence = {};
+        iree_string_view_t reason;
+        bool valid = false;
+        IREE_ASSERT_OK(loom_aie2p_native_build_sequence(
+            dma(), layout(), first_descriptor(), bank_size() - 2, direction,
+            count, 1, 128, kRecordBytes, credit_interval, words.data(), &arena_,
+            &sequence, &reason, &valid));
+        ASSERT_TRUE(valid);
+        for (uint16_t i = 0; i < sequence.descriptor_count; ++i) {
+          EXPECT_EQ(sequence.words[i][layout()->iteration_word], 0u);
+        }
+        ExpectExecution(sequence, direction, count, 1, credit_interval);
+      }
+    }
+  }
+}
+
 TEST_P(Aie2pDmaSequenceTest, RetainedRingCreditsBracketEveryCompleteReplay) {
   if (!layout()) {
     return;

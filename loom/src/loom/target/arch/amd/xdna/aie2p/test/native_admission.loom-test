@@ -329,6 +329,45 @@ pipeline.def<kernel> public retain target(@device) @interleaved_distribution() r
 
 aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
 
+// Two slots really rotate. Padding makes their step one word larger than the
+// compute DMA iterator can encode, while both records still fit local memory.
+pipeline.def<kernel> public retain target(@device) @wide_rotating_stride() run() {
+  %source_memory = pipeline.memory<workgroup>[0, 2] : pool
+  %destination_memory = pipeline.memory<workgroup>[0, 3] : pool
+  %source_bytes = index.constant 32836 : offset
+  %destination_bytes = index.constant 128 : offset
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 2 : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %source_storage = buffer.alloca<workgroup> pool(%source_memory) align(64) %source_bytes : buffer
+  %source_slots = buffer.view %source_storage[%origin] : buffer -> view<2x16xi32, #encoding.layout.strided<strides=[8193, 1]>>
+  %source = channel.bind<fifo> %source_slots, %capacity : view<2x16xi32, #encoding.layout.strided<strides=[8193, 1]>>, index -> channel<tile<16xi32>>
+  %destination_storage = buffer.alloca<workgroup> pool(%destination_memory) align(64) %destination_bytes : buffer
+  %destination_slots = buffer.view %destination_storage[%origin] : buffer -> view<2x16xi32>
+  %destination = channel.bind<fifo> %destination_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %capacity step %step] {
+      %write, %payload = channel.reserve %source : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      %values = vector.splati 42 : vector<16xi32>
+      vector.store %values, %payload[0] : vector<16xi32>, view<16xi32>
+      channel.publish %write : write<tile<16xi32>>
+    }
+  }
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %capacity step %step] {
+      // ERROR@+1: XDNA/051 {requirement="DMA-aligned channel storage with a representable rotating slot stride"}
+      %read = channel.accept %source : channel<tile<16xi32>> -> read<tile<16xi32>>
+      %write, %payload = channel.reserve %destination : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      channel.copy %read -> %write : read<tile<16xi32>>, write<tile<16xi32>>
+    }
+  }
+}
+
+// ====
+
+aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
+
 // SRAM-to-SRAM cross-column routes would need a detour through compute rows;
 // the monotonic router cannot implement that path.
 pipeline.def<kernel> public retain target(@device) @cross_column_sram_distribution() run(%input_arg: buffer) {

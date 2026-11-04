@@ -51,11 +51,14 @@ static iree_status_t loom_aie2p_native_select_distribution_endpoint(
         IREE_SV("a channel record length representable by its memory DMA");
     return iree_ok_status();
   }
-  const uint64_t step_units =
-      channel->byte_stride / dma->transfer_length_granularity;
+  // A retained batch is one contiguous transfer. Single-slot transfers also
+  // return to the same address, regardless of the logical record stride.
+  const uint32_t capacity = batch_records ? 1 : channel->source->capacity;
+  const uint32_t byte_stride = capacity > 1 ? channel->byte_stride : 0;
+  const uint64_t step_units = byte_stride / dma->transfer_length_granularity;
   if (channel->byte_offset % dma->address_alignment ||
-      channel->byte_stride % dma->transfer_length_granularity ||
-      channel->source->capacity > (UINT64_C(1) << dma->iteration_bits) ||
+      byte_stride % dma->transfer_length_granularity ||
+      capacity > (UINT64_C(1) << dma->iteration_bits) ||
       step_units > (UINT64_C(1) << dma->step_size_bits)) {
     *out_reason = IREE_SV(
         "DMA-aligned channel storage with a representable "
@@ -96,9 +99,8 @@ static iree_status_t loom_aie2p_native_select_distribution_endpoint(
   }
   return loom_aie2p_native_select_sequence(
       context, tile, out_endpoint->engine, direction,
-      batch_records ? repetitions / batch_records : repetitions,
-      batch_records ? 1 : channel->source->capacity, channel->byte_offset,
-      batch_records ? 0 : channel->byte_stride, credit_interval, words,
+      batch_records ? repetitions / batch_records : repetitions, capacity,
+      channel->byte_offset, byte_stride, credit_interval, words,
       &out_endpoint->sequence, out_reason, out_valid);
 }
 

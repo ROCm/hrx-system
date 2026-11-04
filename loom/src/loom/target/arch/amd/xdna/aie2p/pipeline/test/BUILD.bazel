@@ -83,6 +83,7 @@ loom_test(
         "partial_record.loom",
         "retained_lifetime.loom",
         "retained_replay.loom",
+        "single_slot.loom",
     ],
     benchmark_smoke = False,
     execution_profiles = [_XDNA_ONE_COLUMN_PROFILE],

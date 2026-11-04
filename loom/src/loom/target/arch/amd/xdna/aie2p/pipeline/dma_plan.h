@@ -141,7 +141,8 @@ bool loom_aie2p_native_encode_ingress(const loom_xdna_array_family_t* family,
 // Builds a finite program within the caller's available descriptor bank. All
 // tasks fit the hardware queue before any completion wait. The layout is NULL
 // for shim descriptors, whose external address is bound during invocation.
-// Record capacity, alignment, and stride have already passed DMA admission.
+// Record capacity, alignment, and rotating stride have passed DMA admission.
+// Capacity one always uses a fixed address; its logical stride is not encoded.
 // credit_interval is one for record credits, one complete retained ring
 // rotation, or the complete finite sequence. Admission is on the interval's
 // first record and reclamation on its last. Retained intervals contain whole

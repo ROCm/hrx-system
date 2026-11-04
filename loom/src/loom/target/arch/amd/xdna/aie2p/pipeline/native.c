@@ -612,12 +612,15 @@ static bool loom_aie2p_native_can_repeat(
        transport->repetitions % channel->replay.record_count)) {
     return false;
   }
+  const uint32_t capacity =
+      channel->replay.record_count ? 1 : channel->source->capacity;
+  const uint32_t byte_stride = capacity > 1 ? channel->byte_stride : 0;
   if (begin < 0 || begin > UINT32_MAX || stride < 0 || stride > UINT32_MAX ||
       transport->repetitions > UINT32_MAX ||
-      channel->source->capacity > (UINT64_C(1) << local_dma->iteration_bits) ||
-      (channel->byte_stride % local_dma->transfer_length_granularity) ||
+      capacity > (UINT64_C(1) << local_dma->iteration_bits) ||
+      (byte_stride % local_dma->transfer_length_granularity) ||
       (stride % shim_dma->transfer_length_granularity) ||
-      channel->byte_stride / local_dma->transfer_length_granularity >
+      byte_stride / local_dma->transfer_length_granularity >
           (UINT64_C(1) << local_dma->step_size_bits) ||
       !loom_aie2p_native_select_ingress_descriptor(
           context, source, request, (uint32_t)stride,
