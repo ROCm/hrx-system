@@ -7,6 +7,7 @@
 #include <dlfcn.h>
 #include <errno.h>
 
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -16,6 +17,8 @@
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/device.h"
+#include "libamdf/src/gpu/umd/dxg/adapter.h"
+#include "libamdf/src/gpu/umd/dxg/linux/device.h"
 #include "libamdf/src/gpu/umd/memory.h"
 #include "libamdf/src/gpu/umd/memory_reservation.h"
 #include "libamdf/src/platform/endpoint.h"
@@ -25,6 +28,24 @@
 namespace {
 
 constexpr uint64_t kByteLength = 64 * 1024;
+constexpr uint64_t kPm4SourceByteOffset = 4096;
+constexpr uint64_t kPm4ResultByteOffset = 8192;
+
+std::array<uint32_t, 6> MakePm4CopyData32(uint64_t source_address,
+                                          uint64_t target_address) {
+  constexpr uint32_t kCopyDataHeader = (3u << 30) | (4u << 16) | (0x40u << 8);
+  constexpr uint32_t kTcL2Source = 2u << 0;
+  constexpr uint32_t kTcL2Target = 2u << 8;
+  constexpr uint32_t kWaitForWriteConfirmation = 1u << 20;
+  return {
+      kCopyDataHeader,
+      kTcL2Source | kTcL2Target | kWaitForWriteConfirmation,
+      static_cast<uint32_t>(source_address),
+      static_cast<uint32_t>(source_address >> 32),
+      static_cast<uint32_t>(target_address),
+      static_cast<uint32_t>(target_address >> 32),
+  };
+}
 
 template <typename Function>
 auto InvokeSilently(Function&& function) {
@@ -105,6 +126,14 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    if (queue_ != nullptr) {
+      const amdf_status_t status = InvokeSilently([&] {
+        return amdf_gpu_dxg_adapter_destroy_kernel_queue(
+            &device_->logical_device.bridge_adapter, queue_);
+      });
+      EXPECT_EQ(status, AMDF_STATUS_OK);
+      queue_ = nullptr;
+    }
     if (reservation_ != nullptr) {
       const amdf_status_t status = InvokeSilently([&] {
         return amdf_gpu_umd_memory_reservation_destroy(reservation_);
@@ -221,6 +250,62 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
               AMDF_STATUS_OK);
   }
 
+  void InvalidateMemory() {
+    ASSERT_EQ(InvokeSilently([&] {
+                return amdf_gpu_umd_host_mapping_cache_control(
+                    mapping_, AMDF_HOST_CACHE_OPERATION_INVALIDATE, 0,
+                    kByteLength);
+              }),
+              AMDF_STATUS_OK);
+  }
+
+  amdf_dxg_bridge_gpu_kernel_queue_info_t CreatePm4Queue() {
+    EXPECT_NE(device_->properties.supports_pm4_kernel_queue, 0u);
+    const amdf_dxg_bridge_gpu_kernel_queue_create_info_t create_info = {
+        .structure_size = sizeof(create_info),
+        .device_handle = device_->logical_device.native,
+        .command_type = AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4,
+    };
+    amdf_dxg_bridge_gpu_kernel_queue_info_t info = {};
+    EXPECT_EQ(InvokeSilently([&] {
+                return amdf_gpu_dxg_adapter_create_kernel_queue(
+                    &device_->logical_device.bridge_adapter, &create_info,
+                    &queue_, &info);
+              }),
+              AMDF_STATUS_OK);
+    EXPECT_NE(queue_, nullptr);
+    return info;
+  }
+
+  void WaitForQueue(const amdf_dxg_bridge_gpu_kernel_queue_info_t& info,
+                    uint64_t progress_value) {
+    ASSERT_NE(info.progress_fence_pointer, nullptr);
+    D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMCPU wait = {
+        .hDevice = device_->logical_device.native,
+        .ObjectCount = 1,
+        .ObjectHandleArray = &info.progress_fence_handle,
+        .FenceValueArray = &progress_value,
+    };
+    ASSERT_EQ(InvokeSilently([&] {
+                return amdf_linux_dxg_kmt_wait_from_cpu(
+                    device_->logical_device.kmt, &wait);
+              }),
+              0);
+    EXPECT_GE(__atomic_load_n(info.progress_fence_pointer, __ATOMIC_ACQUIRE),
+              progress_value);
+  }
+
+  void ReleaseQueue() {
+    ASSERT_NE(queue_, nullptr);
+    amdf_dxg_bridge_gpu_kernel_queue_t* queue = queue_;
+    queue_ = nullptr;
+    ASSERT_EQ(InvokeSilently([&] {
+                return amdf_gpu_dxg_adapter_destroy_kernel_queue(
+                    &device_->logical_device.bridge_adapter, queue);
+              }),
+              AMDF_STATUS_OK);
+  }
+
   void ReleaseMemory() {
     if (mapping_ != nullptr) {
       amdf_gpu_umd_host_mapping_destroy(mapping_);
@@ -247,6 +332,7 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
   amdf_gpu_umd_device_t* device_ = nullptr;
   amdf_gpu_umd_device_result_t device_result_ = {};
   amdf_gpu_umd_memory_t* memory_ = nullptr;
+  amdf_dxg_bridge_gpu_kernel_queue_t* queue_ = nullptr;
   amdf_gpu_umd_memory_reservation_t* reservation_ = nullptr;
   amdf_gpu_umd_host_mapping_t* mapping_ = nullptr;
   void* registered_pointer_ = nullptr;
@@ -304,6 +390,57 @@ TEST_F(LinuxDxgMemorySystemTest, RegistersBorrowedHostMemory) {
   ASSERT_NO_FATAL_FAILURE(FlushMemory());
   ASSERT_NO_FATAL_FAILURE(ReleaseMemory());
   EXPECT_EQ(static_cast<uint8_t*>(registered_pointer_)[kByteLength - 1], 0xC3);
+}
+
+TEST_F(LinuxDxgMemorySystemTest, ExecutesPm4ThroughPrivateKernelQueue) {
+  const amdf_memory_native_profile_t profile = QueryProfile(0);
+  ASSERT_EQ(profile.memory_class, AMDF_MEMORY_CLASS_SYSTEM);
+  ASSERT_NE(profile.supported_flags & AMDF_MEMORY_FLAG_QUEUE_STORAGE, 0u);
+
+  amdf_gpu_umd_memory_result_t memory_result = {};
+  ASSERT_NO_FATAL_FAILURE(PrepareMemory(
+      profile,
+      AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+          AMDF_MEMORY_FLAG_QUEUE_STORAGE,
+      nullptr, &memory_result,
+      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
+          AMDF_MEMORY_ACCESS_EXECUTE));
+  amdf_gpu_umd_host_mapping_result_t mapping_result = {};
+  ASSERT_NO_FATAL_FAILURE(MapMemory(profile, &mapping_result));
+
+  auto* words = static_cast<uint32_t*>(mapping_result.pointer);
+  auto* source = reinterpret_cast<uint32_t*>(
+      static_cast<uint8_t*>(mapping_result.pointer) + kPm4SourceByteOffset);
+  auto* result = reinterpret_cast<uint32_t*>(
+      static_cast<uint8_t*>(mapping_result.pointer) + kPm4ResultByteOffset);
+  constexpr uint32_t kExpected = 0x13579BDFu;
+  *source = kExpected;
+  *result = ~kExpected;
+  const auto commands =
+      MakePm4CopyData32(memory_result.device_address + kPm4SourceByteOffset,
+                        memory_result.device_address + kPm4ResultByteOffset);
+  std::memcpy(words, commands.data(), commands.size() * sizeof(uint32_t));
+  ASSERT_NO_FATAL_FAILURE(FlushMemory());
+
+  const amdf_dxg_bridge_gpu_kernel_queue_info_t queue_info = CreatePm4Queue();
+  ASSERT_NE(queue_, nullptr);
+  constexpr uint64_t kProgressValue = 1;
+  bool accepted = false;
+  ASSERT_EQ(InvokeSilently([&] {
+              return amdf_gpu_dxg_adapter_submit_kernel_queue(
+                  &device_->logical_device.bridge_adapter, queue_,
+                  memory_result.device_address,
+                  commands.size() * sizeof(uint32_t), kProgressValue,
+                  &accepted);
+            }),
+            AMDF_STATUS_OK);
+  ASSERT_TRUE(accepted);
+  ASSERT_NO_FATAL_FAILURE(WaitForQueue(queue_info, kProgressValue));
+  ASSERT_NO_FATAL_FAILURE(InvalidateMemory());
+  EXPECT_EQ(*result, kExpected);
+
+  ASSERT_NO_FATAL_FAILURE(ReleaseQueue());
+  ASSERT_NO_FATAL_FAILURE(ReleaseMemory());
 }
 
 TEST_F(LinuxDxgMemorySystemTest, OwnsSparseVirtualMemory) {
