@@ -28,7 +28,7 @@ class AqlLifecycleTest : public ::testing::Test {
       EXPECT_EQ(self->destroyed_, 0u);
       EXPECT_NE(self->queue_.storage.mapping, nullptr);
       ++self->native_stops_;
-      self->native_stopped_ = true;
+      self->native_access_ended_ = true;
       return AMDF_STATUS_OK;
     };
     queue_.context = &context_;
@@ -87,7 +87,7 @@ class AqlLifecycleTest : public ::testing::Test {
           iree_make_byte_span(bytes_[i].data(), bytes_[i].size()),
           {[](void* data, iree_hal_buffer_t*) {
              auto* self = static_cast<AqlLifecycleTest*>(data);
-             EXPECT_TRUE(self->native_stopped_);
+             EXPECT_TRUE(self->native_access_ended_);
              self->ExpectPending();
              ++self->destroyed_;
            },
@@ -149,6 +149,81 @@ class AqlLifecycleTest : public ::testing::Test {
     iree_atomic_store(&queue_.failure, IREE_STATUS_ABORTED,
                       iree_memory_order_relaxed);
     iree_hal_amd_gpu_aql_queue_close(&queue_.base);
+  }
+  void CheckShaderFailure(bool partial, bool abandon_suffix) {
+    Capture(partial);
+    iree_atomic_store(&queue_.failure, IREE_STATUS_OK,
+                      iree_memory_order_relaxed);
+    iree_hal_amd_gpu_aql_growth_context_t growth = {
+        .context = &context_,
+    };
+    queue_.scratch.growth = &growth;
+    gpu_.user_queue_query_scratch = [](amdf_user_queue_t*,
+                                       amdf_gpu_aql_scratch_request_t*) {
+      return AMDF_STATUS_OK;
+    };
+    iree_hal_queue_family_t family = {};
+    queue_.base.queue_family = &family;
+    iree_hal_amd_gpu_feedback_control_t control = {};
+    iree_hal_amd_gpu_feedback_t feedback = {.control = &control};
+    queue_.options.feedback = &feedback;
+    uint32_t diagnostics = 0;
+    context_.event_sink = {
+        [](void* data, const iree_hal_device_event_t* event) {
+          EXPECT_EQ(event->type, IREE_HAL_DEVICE_EVENT_TYPE_DRIVER_FAILURE);
+          ++*static_cast<uint32_t*>(data);
+        },
+        &diagnostics};
+    iree_atomic_store(&feedback.failure_code, IREE_STATUS_ABORTED,
+                      iree_memory_order_release);
+    const auto source =
+        iree_hal_amd_gpu_aql_queue_completion_source(&queue_.base);
+    auto poll = [&]() {
+      iree_hal_amd_gpu_completion_wait_t wait = {};
+      return source.fn(source.user_data, AMDF_STATUS_OK, &wait);
+    };
+    const uint64_t count = partial ? 2 : 1;
+    iree_async_single_frontier_t frontier;
+    iree_async_single_frontier_initialize(&frontier, queue_.frontier.axis,
+                                          count);
+    auto expect_frontier = [&](bool expected) {
+      bool satisfied = !expected;
+      IREE_EXPECT_OK(iree_async_frontier_tracker_query(
+          queue_.frontier.tracker,
+          iree_async_single_frontier_as_const_frontier(&frontier), &satisfied));
+      EXPECT_EQ(satisfied, expected);
+    };
+
+    EXPECT_FALSE(poll());
+    EXPECT_GT(diagnostics, 0u);
+    ExpectPending();
+    expect_frontier(false);
+    EXPECT_EQ(destroyed_, 0u);
+    if (partial && abandon_suffix) {
+      // The publisher drops its suffix while accepted pieces still own it.
+      iree_hal_amd_gpu_aql_submission_release(capture_);
+      ExpectPending();
+    }
+    for (uint64_t i = 0; i < count; ++i) {
+      native_access_ended_ = i + 1 == count;
+      iree_atomic_store(
+          reinterpret_cast<iree_atomic_int64_t*>(readers_[i]->host_value), 0,
+          iree_memory_order_release);
+      EXPECT_TRUE(poll());
+      expect_frontier(native_access_ended_);
+      if (!native_access_ended_ || (partial && !abandon_suffix)) {
+        ExpectPending();
+        EXPECT_EQ(destroyed_, 0u);
+      }
+    }
+    if (partial && !abandon_suffix) {
+      // GPU completion alone cannot end the publisher's remaining borrow.
+      iree_hal_amd_gpu_aql_submission_release(capture_);
+    }
+    ExpectFailed();
+    EXPECT_EQ(destroyed_, 6u);
+    EXPECT_EQ(native_stops_, 0u);
+    EXPECT_FALSE(poll());
   }
   void ExpectPending() {
     uint64_t value = UINT64_MAX;
@@ -249,7 +324,7 @@ class AqlLifecycleTest : public ::testing::Test {
   // Number of native removal calls; repeated terminal cleanup is idempotent.
   uint32_t native_stops_ = 0;
   // Native access proof observed by every buffer final-release callback.
-  bool native_stopped_ = false;
+  bool native_access_ended_ = false;
   // Number of buffer references whose final release has run.
   uint32_t destroyed_ = 0;
 };
@@ -287,6 +362,18 @@ TEST_F(AqlLifecycleTest, UnpublishedSuffixRetainsItsIndependentHostOwnership) {
   iree_hal_amd_gpu_aql_submission_release(capture_);
   EXPECT_EQ(destroyed_, 6u);
   ExpectFailed();
+}
+
+TEST_F(AqlLifecycleTest, ShaderFailureWaitsForNativeCompletion) {
+  CheckShaderFailure(/*partial=*/false, /*abandon_suffix=*/false);
+}
+
+TEST_F(AqlLifecycleTest, ShaderFailureJoinsEveryAcceptedPiece) {
+  CheckShaderFailure(/*partial=*/true, /*abandon_suffix=*/true);
+}
+
+TEST_F(AqlLifecycleTest, ShaderFailureJoinsUnpublishedSuffix) {
+  CheckShaderFailure(/*partial=*/true, /*abandon_suffix=*/false);
 }
 
 }  // namespace

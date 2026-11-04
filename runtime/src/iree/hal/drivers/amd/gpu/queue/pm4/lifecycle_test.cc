@@ -18,13 +18,17 @@ namespace {
 class Pm4LifecycleTest : public ::testing::Test {
  protected:
   void SetUp() override {
+    IREE_ASSERT_OK(iree_allocator_malloc(iree_allocator_system(),
+                                         sizeof(*contract_),
+                                         reinterpret_cast<void**>(&contract_)));
+    contract_->scopes = scopes_.data();
     context_.gpu = &gpu_;
     gpu_.user_queue_inactivate = [](amdf_user_queue_t* native) {
       auto* self = reinterpret_cast<Pm4LifecycleTest*>(native);
       EXPECT_EQ(self->destroyed_, 0u);
       EXPECT_NE(self->queue_.storage.mapping, nullptr);
       ++self->native_stops_;
-      self->native_stopped_ = true;
+      self->native_access_ended_ = true;
       return AMDF_STATUS_OK;
     };
     queue_.context = &context_;
@@ -61,6 +65,7 @@ class Pm4LifecycleTest : public ::testing::Test {
   }
   void TearDown() override {
     EXPECT_EQ(destroyed_, 6u);
+    iree_allocator_free(iree_allocator_system(), contract_);
     iree_hal_amd_gpu_capture_pool_deinitialize(&queue_.captures);
     for (auto* reader : readers_) {
       iree_hal_amd_gpu_signal_release(reader);
@@ -83,7 +88,7 @@ class Pm4LifecycleTest : public ::testing::Test {
           iree_make_byte_span(bytes_[i].data(), bytes_[i].size()),
           {[](void* data, iree_hal_buffer_t*) {
              auto* self = static_cast<Pm4LifecycleTest*>(data);
-             EXPECT_TRUE(self->native_stopped_);
+             EXPECT_TRUE(self->native_access_ended_);
              self->ExpectPending();
              ++self->destroyed_;
            },
@@ -91,10 +96,37 @@ class Pm4LifecycleTest : public ::testing::Test {
           iree_allocator_system(), &buffer));
       references[i] = iree_hal_make_buffer_ref(buffer, 0, bytes_[i].size());
     }
-    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
-        &queue_.captures, false, {}, {1, &semaphore_, &signal_value_}, nullptr,
-        &function_, {}, {}, {}, {references.size(), references.data()},
-        &profile_, nullptr, 0, &capture_));
+    if (partial) {
+      std::array<iree_hal_transfer_operation_t, 6> operations = {};
+      const iree_hal_queue_family_t family = {};
+      const uint32_t pattern = 0;
+      for (size_t i = 0; i < references.size(); ++i) {
+        references[i].buffer->memory = {
+            .contract = contract_,
+            .bindings = &bindings_[i],
+        };
+        operations[i] = {
+            .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+            .fill =
+                {
+                    .target_buffer = references[i].buffer,
+                    .length = bytes_[i].size(),
+                    .pattern = &pattern,
+                    .pattern_length = sizeof(pattern),
+                },
+        };
+      }
+      IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_transfer(
+          &queue_.captures, false, &family, {},
+          {1, &semaphore_, &signal_value_}, operations.size(),
+          operations.data(), &profile_, nullptr, {}, &capture_));
+    } else {
+      IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
+          &queue_.captures, false, {}, {1, &semaphore_, &signal_value_},
+          nullptr, &function_, {}, {}, {},
+          {references.size(), references.data()}, &profile_, nullptr, 0,
+          &capture_));
+    }
     for (auto reference : references) {
       iree_hal_buffer_release(reference.buffer);
     }
@@ -121,6 +153,75 @@ class Pm4LifecycleTest : public ::testing::Test {
                       amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST),
                       iree_memory_order_relaxed);
     iree_hal_amd_gpu_pm4_queue_close(&queue_.base);
+  }
+  void CheckShaderFailure(bool partial, bool abandon_suffix) {
+    Capture(partial);
+    iree_atomic_store(&queue_.native_failure, AMDF_STATUS_OK,
+                      iree_memory_order_relaxed);
+    std::array<iree_hal_amd_gpu_pm4_retirement_record_t, 4> records = {};
+    queue_.retirement.records = records.data();
+    queue_.retirement.capacity_shift = 2;
+    iree_hal_queue_family_t family = {};
+    queue_.base.queue_family = &family;
+    iree_hal_amd_gpu_feedback_control_t control = {};
+    iree_hal_amd_gpu_feedback_t feedback = {.control = &control};
+    queue_.options.feedback = &feedback;
+    uint32_t diagnostics = 0;
+    context_.event_sink = {
+        [](void* data, const iree_hal_device_event_t* event) {
+          EXPECT_EQ(event->type, IREE_HAL_DEVICE_EVENT_TYPE_DRIVER_FAILURE);
+          ++*static_cast<uint32_t*>(data);
+        },
+        &diagnostics};
+    iree_atomic_store(&feedback.failure_code, IREE_STATUS_ABORTED,
+                      iree_memory_order_release);
+    const auto source =
+        iree_hal_amd_gpu_pm4_queue_completion_source(&queue_.base);
+    auto poll = [&]() {
+      iree_hal_amd_gpu_completion_wait_t wait = {};
+      return source.fn(source.user_data, AMDF_STATUS_OK, &wait);
+    };
+    const uint64_t count = partial ? 2 : 1;
+    iree_async_single_frontier_t frontier;
+    iree_async_single_frontier_initialize(&frontier, queue_.frontier.axis,
+                                          count);
+    auto expect_frontier = [&](bool expected) {
+      bool satisfied = !expected;
+      IREE_EXPECT_OK(iree_async_frontier_tracker_query(
+          queue_.frontier.tracker,
+          iree_async_single_frontier_as_const_frontier(&frontier), &satisfied));
+      EXPECT_EQ(satisfied, expected);
+    };
+
+    EXPECT_FALSE(poll());
+    EXPECT_GT(diagnostics, 0u);
+    ExpectPending();
+    expect_frontier(false);
+    EXPECT_EQ(destroyed_, 0u);
+    if (partial && abandon_suffix) {
+      // The publisher drops its suffix while accepted pieces still own it.
+      iree_hal_amd_gpu_pm4_submission_release(capture_);
+      ExpectPending();
+    }
+    for (uint64_t i = 0; i < count; ++i) {
+      native_access_ended_ = i + 1 == count;
+      records[i].action = reinterpret_cast<uintptr_t>(&issued_[i].action);
+      iree_atomic_store(&records[i].generation, 1, iree_memory_order_release);
+      EXPECT_TRUE(poll());
+      expect_frontier(native_access_ended_);
+      if (!native_access_ended_ || (partial && !abandon_suffix)) {
+        ExpectPending();
+        EXPECT_EQ(destroyed_, 0u);
+      }
+    }
+    if (partial && !abandon_suffix) {
+      // GPU completion alone cannot end the publisher's remaining borrow.
+      iree_hal_amd_gpu_pm4_submission_release(capture_);
+    }
+    ExpectFailed();
+    EXPECT_EQ(destroyed_, 6u);
+    EXPECT_EQ(native_stops_, 0u);
+    EXPECT_FALSE(poll());
   }
   void ExpectPending() {
     uint64_t value = UINT64_MAX;
@@ -203,6 +304,12 @@ class Pm4LifecycleTest : public ::testing::Test {
   std::array<iree_hal_amd_gpu_signal_t*, 4> readers_ = {};
   // Six application buffers with final-release observations.
   std::array<std::array<uint8_t, 16>, 6> bytes_ = {};
+  // Queue/program address contract for the split transfer capture.
+  std::array<iree_hal_memory_scope_access_t, 2> scopes_ = {};
+  // Stable contract retained by the six actual HAL buffers.
+  iree_hal_memory_contract_t* contract_ = nullptr;
+  // One qualified address slot per buffer; no address is consumed by cleanup.
+  std::array<iree_hal_buffer_native_binding_t, 6> bindings_ = {};
   // Non-owning published capture, or owning unpublished suffix in partial
   // tests.
   iree_hal_amd_gpu_pm4_submission_t* capture_ = nullptr;
@@ -215,7 +322,7 @@ class Pm4LifecycleTest : public ::testing::Test {
   // Number of native removal calls; repeated terminal cleanup is idempotent.
   uint32_t native_stops_ = 0;
   // Native access proof observed by every buffer final-release callback.
-  bool native_stopped_ = false;
+  bool native_access_ended_ = false;
   // Number of buffer references whose final release has run.
   uint32_t destroyed_ = 0;
   // Public barrier policy consumed only when the capture is constructed.
@@ -256,6 +363,18 @@ TEST_F(Pm4LifecycleTest, UnpublishedSuffixRetainsItsIndependentHostOwnership) {
   iree_hal_amd_gpu_pm4_submission_release(capture_);
   EXPECT_EQ(destroyed_, 6u);
   ExpectFailed();
+}
+
+TEST_F(Pm4LifecycleTest, ShaderFailureWaitsForNativeCompletion) {
+  CheckShaderFailure(/*partial=*/false, /*abandon_suffix=*/false);
+}
+
+TEST_F(Pm4LifecycleTest, ShaderFailureJoinsEveryAcceptedPiece) {
+  CheckShaderFailure(/*partial=*/true, /*abandon_suffix=*/true);
+}
+
+TEST_F(Pm4LifecycleTest, ShaderFailureJoinsUnpublishedSuffix) {
+  CheckShaderFailure(/*partial=*/true, /*abandon_suffix=*/false);
 }
 
 }  // namespace

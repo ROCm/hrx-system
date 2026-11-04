@@ -110,15 +110,16 @@ static void iree_hal_amd_gpu_pm4_wake_shutdown(
   }
 }
 
-// Consumes an operation failure through its public signals and diagnostic sink.
-// This is also the terminal diagnostic boundary for a call without signals.
+// Records failure for the capture's final release and reports diagnostics now.
+// Accepted pieces retain the capture until their native accesses end; failing
+// public signals here would return borrowed memory before those pieces retire.
 static void iree_hal_amd_gpu_pm4_fail_submission(
     iree_hal_amd_gpu_pm4_queue_t* queue,
     iree_hal_amd_gpu_pm4_submission_t* submission, iree_status_t status) {
   iree_hal_amd_gpu_context_report_status(
       queue->context, queue->base.queue_family->device, status);
   iree_hal_amd_gpu_pm4_submission_fail(submission, status);
-  iree_hal_semaphore_list_fail(submission->signals, status);
+  iree_status_free(status);
 }
 
 static void iree_hal_amd_gpu_pm4_abandon(
@@ -1930,11 +1931,8 @@ static bool iree_hal_amd_gpu_pm4_retire(
           queue, submission,
           iree_make_status(feedback_failure, "GPU sanitizer failure"));
     }
-    if (published && queue->frontier.tracker) {
-      iree_async_frontier_tracker_fail_axis(
-          queue->frontier.tracker, queue->frontier.axis,
-          iree_make_status(feedback_failure, "GPU sanitizer failure"));
-    }
+    // Shader reports invalidate results, not native progress. Advance the
+    // lifetime frontier only as each issued piece actually retires below.
     queue->feedback_failure_delivered = true;
   }
   uint64_t native_retired = 0;
