@@ -109,6 +109,12 @@ alias(
 )
 
 alias(
+    name = "amdf_rocdxg_thunk_proxy",
+    actual = "@rocdxg_thunk_proxy//:thunk_proxy",
+    visibility = [":libamdf_users"],
+)
+
+alias(
     name = "linux_udmabuf_uapi",
     actual = "//build_tools/third_party/linux_uapi:linux_udmabuf_uapi",
     tags = ["manual"],

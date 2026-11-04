@@ -1,0 +1,37 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("@rules_cc//cc:cc_import.bzl", "cc_import")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+package(default_visibility = ["//visibility:private"])
+
+exports_files(["LICENSE.md"])
+
+cc_import(
+    name = "archive",
+    static_library = "shared/src/thunk_proxy/libthunk_proxy.a",
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+)
+
+cc_library(
+    name = "thunk_proxy",
+    hdrs = glob(["shared/include/**/*.h"]),
+    includes = ["."],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":archive",
+        "@directx_headers//:wsl_stubs",
+        "@libdxg_headers//:headers",
+    ],
+)

@@ -1,0 +1,85 @@
+diff --git a/shared/include/d3dkmt_types.h b/shared/include/d3dkmt_types.h
+index b610d7d..7587059 100644
+--- a/shared/include/d3dkmt_types.h
++++ b/shared/include/d3dkmt_types.h
+@@ -44,7 +44,6 @@
+ #define SHARED_D3DKMT_TYPES_H
+
+ #include <cstdint>
+-#include <ntstatus.h>
+ #include "shared/include/wddm_types.h"
+ // windows wchar is 16bit, but linux is 32bit
+ // seems libdxcore (not dxgkrnl.ko) convert thunk windows wchar to linux one
+@@ -52,7 +51,8 @@
+ // use 16bit wchar
+ #define WCHAR wchar_t
+ #define PCWSTR const wchar_t *
+-#include <d3dkmthk.h>
++#define D3DKMDT_SPECIAL_MULTIPLATFORM_TOOL
++#include <dxg/d3dkmthk.h>
+ #undef WCHAR
+ #undef PCWSTR
+
+diff --git a/shared/include/wddm_types.h b/shared/include/wddm_types.h
+index af70fa8..bffd473 100644
+--- a/shared/include/wddm_types.h
++++ b/shared/include/wddm_types.h
+@@ -45,10 +45,10 @@
+
+ #include <stdint.h>
+
+-#include <no_sal2.h>
+
+ typedef uint32_t UINT, *UINT_PTR;
+ typedef int32_t  INT32;
++typedef int64_t  INT64;
+ typedef int32_t  LONG;
+ typedef uint32_t ULONG, *ULONG_PTR;
+ typedef int64_t  LONGLONG;
+@@ -141,16 +141,24 @@ typedef struct _LUID {
+     LONG HighPart;
+ } LUID, *PLUID;
+
+-typedef enum _DEVICE_POWER_STATE {
+-    PowerDeviceUnspecified = 0,
+-    PowerDeviceD0,
+-    PowerDeviceD1,
+-    PowerDeviceD2,
+-    PowerDeviceD3,
+-    PowerDeviceMaximum
+-} DEVICE_POWER_STATE, *PDEVICE_POWER_STATE;
+
++#define _Field_range_(minimum, maximum)
++#define _Field_size_(size)
++#define _Field_size_bytes_(size)
++#define _Field_size_bytes_part_(size, count)
++#define _Field_size_bytes_part_opt_(size, count)
++#define _Field_size_opt_(size)
++#define _IRQL_requires_(level)
++#define _IRQL_requires_max_(level)
+ #define _Check_return_
++#define _In_
++#define _In_range_(minimum, maximum)
++#define _In_reads_(size)
++#define _In_reads_bytes_opt_(size)
++#define _Inout_
++#define _Out_
++#define _Out_writes_bytes_(size)
++#define _Out_writes_bytes_all_opt_(size)
+ #define APIENTRY
+ #define CONST const
+ #define IN
+@@ -169,6 +177,12 @@ typedef struct _GUID {
+ } GUID;
+ #endif
+
+-#include <guiddef.h>
++#ifndef DEFINE_GUID
++#ifdef __cplusplus
++#define DEFINE_GUID(name, ...) extern "C" const GUID name
++#else
++#define DEFINE_GUID(name, ...) extern const GUID name
++#endif
++#endif
+
+ #endif
