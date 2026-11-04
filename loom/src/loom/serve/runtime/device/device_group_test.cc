@@ -135,8 +135,8 @@ TEST_F(DeviceGroupTest, IndependentSlabSizesPreserveShortTails) {
       group_, {IREE_SV("pool"), 1}, &pool_options, &storage_owner));
   const auto weights = loom_serve_pool_weight_geometry(storage_owner);
   const auto state = loom_serve_pool_state_geometry(storage_owner);
-  EXPECT_EQ(weights.slab_size, slab_size);
-  EXPECT_EQ(state.slab_size, kSlabBytes);
+  EXPECT_EQ(weights.mapping_size, slab_size);
+  EXPECT_EQ(state.mapping_size, kSlabBytes);
   EXPECT_EQ(weights.granularity, state.granularity);
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
       loom_serve_pool_memory(storage_owner), weights, slab_size + 1, 256,

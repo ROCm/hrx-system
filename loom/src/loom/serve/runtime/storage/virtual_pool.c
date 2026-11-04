@@ -287,7 +287,7 @@ static iree_status_t loom_serve_virtual_pool_acquire_reservations(
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
     const iree_device_size_t alignment = iree_max(requests[i].min_alignment, 1);
     if (!requests[i].allocation_size ||
-        requests[i].allocation_size > INT64_MAX - pool->geometry.slab_size ||
+        requests[i].allocation_size > INT64_MAX - pool->geometry.mapping_size ||
         !iree_device_size_is_valid_alignment(alignment) ||
         alignment > pool->capabilities.max_allocation_alignment) {
       status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -575,7 +575,7 @@ iree_status_t loom_serve_virtual_pool_allocate(
   iree_notification_initialize(&pool->notification);
   loom_serve_virtual_pool_entry_t* entry = NULL;
   iree_status_t status =
-      loom_serve_virtual_pool_create_entry(pool, geometry.slab_size, &entry);
+      loom_serve_virtual_pool_create_entry(pool, geometry.mapping_size, &entry);
   if (iree_status_is_ok(status)) {
     const iree_hal_pool_buffer_range_t* range = &entry->range;
     pool->capabilities = (iree_hal_pool_capabilities_t){
@@ -619,10 +619,10 @@ iree_hal_pool_t* loom_serve_virtual_pool_handle(
 
 uint64_t loom_serve_virtual_pool_round_size(
     const loom_serve_virtual_pool_t* pool, uint64_t byte_length) {
-  const uint64_t padding = pool->geometry.slab_size - 1;
+  const uint64_t padding = pool->geometry.mapping_size - 1;
   return byte_length > UINT64_MAX - padding
              ? UINT64_MAX
-             : iree_device_align(byte_length, pool->geometry.slab_size);
+             : iree_device_align(byte_length, pool->geometry.mapping_size);
 }
 
 loom_serve_memory_usage_t loom_serve_virtual_pool_memory_usage(

@@ -25,11 +25,13 @@ typedef struct loom_serve_memory_arena_t loom_serve_memory_arena_t;
 typedef struct loom_serve_virtual_buffer_t loom_serve_virtual_buffer_t;
 typedef struct loom_serve_memory_operation_t loom_serve_memory_operation_t;
 
-// Physical replacement geometry qualified against one mapping source and its
-// virtual targets. Logical tensor/block sizes remain independent of it.
+// Virtual replacement and physical backing geometry qualified against one
+// mapping source and its targets. Logical tensor/block sizes are independent.
 typedef struct loom_serve_memory_geometry_t {
-  // Maximum independently allocated and replaced extent in bytes.
-  iree_device_size_t slab_size;
+  // Maximum independently allocated and replaced virtual extent in bytes.
+  iree_device_size_t mapping_size;
+  // Physical parent extent from which mapping sources are allocated.
+  iree_device_size_t backing_size;
   // Common source/target alignment for physical extents and virtual addresses.
   iree_device_size_t granularity;
   // Minimum native extent, including source/target alignment.
@@ -52,11 +54,13 @@ typedef struct loom_serve_memory_demand_t {
 void loom_serve_memory_demand_add(loom_serve_memory_demand_t* demand,
                                   loom_serve_memory_demand_t additional);
 
-// Qualifies explicit power-of-two slab bytes, or the source recommendation
-// when zero, against the native source and all targets in its scope.
+// Qualifies an explicit physical backing extent, or the source recommendation
+// when zero, against the native source and all targets in its scope. Mapping
+// and backing sizes are initially equal; pool policy may divide backing into
+// smaller independently replaced mappings.
 iree_status_t loom_serve_memory_pool_query_geometry(
     const iree_hal_virtual_buffer_capabilities_t* capabilities,
-    iree_hal_pool_t* storage_pool, iree_device_size_t slab_size,
+    iree_hal_pool_t* storage_pool, iree_device_size_t backing_size,
     loom_serve_memory_geometry_t* out_geometry);
 
 // Additive usage across distinct reservations or banks on one serialized owner.
@@ -270,8 +274,8 @@ iree_status_t loom_serve_virtual_buffer_grow_async(
     iree_hal_semaphore_t* readiness, uint64_t value,
     loom_serve_memory_operation_t** out_operation);
 
-// Independent physical replacement size in this root.
-iree_device_size_t loom_serve_virtual_buffer_slab_size(
+// Independently replaceable virtual extent in this root.
+iree_device_size_t loom_serve_virtual_buffer_mapping_size(
     const loom_serve_virtual_buffer_t* buffer);
 // Number of independently mapped physical slots spanning this root.
 iree_host_size_t loom_serve_virtual_buffer_slab_count(

@@ -1580,7 +1580,7 @@ TEST_P(SmallRootWeightsTest, SmallRootCommitsOnlyItsNativeExtent) {
     const auto memory = loom_serve_weights_statistics(plans_[0]);
     EXPECT_EQ(memory.reserved_bytes, geometry.minimum_size);
     EXPECT_EQ(memory.committed_bytes, geometry.minimum_size);
-    EXPECT_LT(memory.committed_bytes, geometry.slab_size);
+    EXPECT_LT(memory.committed_bytes, geometry.mapping_size);
     IREE_ASSERT_OK(loom_serve_residency_cache_trim(ResidencyCache(), 0));
     DrainNativeReturns();
     EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes, 0u);

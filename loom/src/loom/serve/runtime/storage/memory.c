@@ -369,7 +369,7 @@ static bool loom_serve_memory_pool_observe_capacity(
 
 iree_status_t loom_serve_memory_pool_query_geometry(
     const iree_hal_virtual_buffer_capabilities_t* capabilities,
-    iree_hal_pool_t* storage_pool, iree_device_size_t slab_size,
+    iree_hal_pool_t* storage_pool, iree_device_size_t backing_size,
     loom_serve_memory_geometry_t* out_geometry) {
   *out_geometry = (loom_serve_memory_geometry_t){0};
   const iree_hal_memory_mapping_operations_t required =
@@ -390,33 +390,34 @@ iree_status_t loom_serve_memory_pool_query_geometry(
   iree_hal_pool_query_capabilities(storage_pool, &source_capabilities);
   const iree_device_size_t minimum_size = iree_device_align(
       iree_max(minimum, source_capabilities.min_allocation_size), minimum);
-  if (!slab_size) {
-    slab_size = iree_max(minimum_size, requirements.recommended_granularity);
+  if (!backing_size) {
+    backing_size = iree_max(minimum_size, requirements.recommended_granularity);
   }
-  if (!iree_device_size_is_valid_alignment(slab_size) ||
-      slab_size > INT64_MAX || slab_size % minimum) {
+  if (!iree_device_size_is_valid_alignment(backing_size) ||
+      backing_size > INT64_MAX || backing_size % minimum) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "slab size must be a power-of-two multiple of %" PRIdsz, minimum);
   }
   if (source_capabilities.max_allocation_size &&
-      slab_size > source_capabilities.max_allocation_size) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "slab size %" PRIdsz
-                            " exceeds backing source limit %" PRIdsz,
-                            slab_size, source_capabilities.max_allocation_size);
+      backing_size > source_capabilities.max_allocation_size) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "slab size %" PRIdsz " exceeds backing source limit %" PRIdsz,
+        backing_size, source_capabilities.max_allocation_size);
   }
   if (minimum > source_capabilities.max_allocation_alignment) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "backing source cannot satisfy slab alignment");
   }
-  if (slab_size < minimum_size) {
+  if (backing_size < minimum_size) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "slab size is smaller than source minimum %" PRIdsz,
                             minimum_size);
   }
   *out_geometry = (loom_serve_memory_geometry_t){
-      .slab_size = slab_size,
+      .mapping_size = backing_size,
+      .backing_size = backing_size,
       .granularity = minimum,
       .minimum_size = minimum_size,
   };
@@ -455,7 +456,7 @@ iree_status_t loom_serve_memory_pool_allocate(
   for (iree_host_size_t i = 0;
        i < LOOM_SERVE_MEMORY_CLASS_COUNT && iree_status_is_ok(status); ++i) {
     const iree_hal_pool_reservation_request_t request =
-        iree_hal_make_pool_reservation_request(geometries[i].slab_size,
+        iree_hal_make_pool_reservation_request(geometries[i].mapping_size,
                                                geometries[i].granularity);
     if (i &&
         request.allocation_size == pool->classes[0].request.allocation_size &&
@@ -741,8 +742,8 @@ static uint8_t loom_serve_memory_pool_class(
 
 static iree_device_size_t loom_serve_memory_slab_length(
     const loom_serve_virtual_buffer_t* buffer, iree_host_size_t index) {
-  return iree_min(buffer->geometry.slab_size,
-                  buffer->byte_length - index * buffer->geometry.slab_size);
+  return iree_min(buffer->geometry.mapping_size,
+                  buffer->byte_length - index * buffer->geometry.mapping_size);
 }
 
 iree_status_t loom_serve_memory_ranges_footprint(
@@ -753,7 +754,7 @@ iree_status_t loom_serve_memory_ranges_footprint(
   for (iree_host_size_t r = 0; r < range_count && iree_status_is_ok(status);
        ++r) {
     loom_serve_virtual_buffer_t* buffer = ranges[r].buffer;
-    const iree_device_size_t slab_size = buffer->geometry.slab_size;
+    const iree_device_size_t slab_size = buffer->geometry.mapping_size;
     const iree_host_size_t end =
         (ranges[r].offset + ranges[r].length - 1) / slab_size + 1;
     for (iree_host_size_t i = ranges[r].offset / slab_size;
@@ -774,7 +775,7 @@ iree_status_t loom_serve_memory_ranges_footprint(
   }
   for (iree_host_size_t r = 0; r < range_count; ++r) {
     loom_serve_virtual_buffer_t* buffer = ranges[r].buffer;
-    const iree_device_size_t slab_size = buffer->geometry.slab_size;
+    const iree_device_size_t slab_size = buffer->geometry.mapping_size;
     const iree_host_size_t end =
         (ranges[r].offset + ranges[r].length - 1) / slab_size + 1;
     for (iree_host_size_t i = ranges[r].offset / slab_size; i < end; ++i) {
@@ -813,7 +814,7 @@ static iree_status_t loom_serve_virtual_buffer_allocate_metadata(
     loom_serve_memory_arena_t* arena,
     loom_serve_virtual_buffer_t** out_buffer) {
   *out_buffer = NULL;
-  if (!length || length > INT64_MAX - geometry.slab_size) {
+  if (!length || length > INT64_MAX - geometry.mapping_size) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "invalid virtual buffer extent");
   }
@@ -822,8 +823,9 @@ static iree_status_t loom_serve_virtual_buffer_allocate_metadata(
         IREE_STATUS_UNIMPLEMENTED,
         "virtual reservation cannot guarantee alignment %" PRIdsz, alignment);
   }
-  const uint64_t count = (length + geometry.slab_size - 1) / geometry.slab_size;
-  const iree_device_size_t tail = length % geometry.slab_size;
+  const uint64_t count =
+      (length + geometry.mapping_size - 1) / geometry.mapping_size;
+  const iree_device_size_t tail = length % geometry.mapping_size;
   const iree_device_size_t byte_length =
       length - tail +
       (tail ? iree_device_align(iree_max(tail, geometry.minimum_size),
@@ -850,8 +852,8 @@ static iree_status_t loom_serve_virtual_buffer_allocate_metadata(
   buffer->alignment = alignment;
   buffer->byte_length = byte_length;
   buffer->slab_count = (iree_host_size_t)count;
-  buffer->regular_class = loom_serve_memory_pool_class(pool, geometry.slab_size,
-                                                       geometry.granularity);
+  buffer->regular_class = loom_serve_memory_pool_class(
+      pool, geometry.mapping_size, geometry.granularity);
   buffer->tail_class = loom_serve_memory_pool_class(
       pool, loom_serve_memory_slab_length(buffer, count - 1),
       geometry.granularity);
@@ -871,7 +873,7 @@ iree_status_t loom_serve_virtual_buffer_allocate(
   const iree_hal_virtual_buffer_options_t options = {
       .byte_length = buffer->byte_length,
       .min_alignment = alignment,
-      .mapping_granularity = geometry.slab_size,
+      .mapping_granularity = geometry.mapping_size,
   };
   iree_status_t status = iree_hal_virtual_buffer_create(
       pool->group, pool->scope,
@@ -1007,9 +1009,9 @@ iree_hal_buffer_t* loom_serve_virtual_buffer_handle(
   return buffer->handle;
 }
 
-iree_device_size_t loom_serve_virtual_buffer_slab_size(
+iree_device_size_t loom_serve_virtual_buffer_mapping_size(
     const loom_serve_virtual_buffer_t* buffer) {
-  return buffer->geometry.slab_size;
+  return buffer->geometry.mapping_size;
 }
 
 iree_host_size_t loom_serve_virtual_buffer_slab_count(
@@ -1021,10 +1023,10 @@ loom_serve_memory_demand_t loom_serve_virtual_buffer_missing_demand(
     const loom_serve_virtual_buffer_t* buffer) {
   loom_serve_memory_demand_t demand = {0};
   const uint64_t regular_count =
-      buffer->byte_length / buffer->geometry.slab_size;
+      buffer->byte_length / buffer->geometry.mapping_size;
   const uint64_t regular_bytes =
       (regular_count - buffer->backed_regular_count) *
-      buffer->geometry.slab_size;
+      buffer->geometry.mapping_size;
   if (buffer->regular_class == LOOM_SERVE_MEMORY_CLASS_COUNT) {
     demand.uncached_bytes = regular_bytes;
   } else {
@@ -1054,7 +1056,7 @@ static void loom_serve_memory_slab_publish(
   const uint64_t length = loom_serve_memory_slab_length(buffer, index);
   if ((entry->physical || entry->in_flight) && !result->physical) {
     *loom_serve_memory_slab_demand(&pool->demand, buffer, index) -= length;
-    if (length == buffer->geometry.slab_size) {
+    if (length == buffer->geometry.mapping_size) {
       --buffer->backed_regular_count;
     }
   }
@@ -1349,7 +1351,7 @@ static void loom_serve_memory_operation_enqueue(
     operation->mappings[i] = (iree_hal_memory_mapping_t){
         .target = edit->buffer->handle,
         .scope = pool->mapping_scope,
-        .target_range = {edit->index * edit->buffer->geometry.slab_size,
+        .target_range = {edit->index * edit->buffer->geometry.mapping_size,
                          length},
         .access = operation->releasing ? IREE_HAL_MEMORY_ACCESS_NONE
                                        : IREE_HAL_MEMORY_ACCESS_ALL,
@@ -1420,7 +1422,7 @@ iree_status_t loom_serve_virtual_buffer_grow_async(
   if (length <= buffer->byte_length) {
     return iree_ok_status();
   }
-  const iree_device_size_t slab_size = buffer->geometry.slab_size;
+  const iree_device_size_t slab_size = buffer->geometry.mapping_size;
   if (buffer->byte_length % slab_size || length > INT64_MAX - slab_size) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "growth requires a whole-slab reservation extent");
@@ -1512,7 +1514,7 @@ iree_status_t loom_serve_memory_pool_commit_with_demand_async(
   for (iree_host_size_t r = 0; r < range_count && iree_status_is_ok(status);
        ++r) {
     loom_serve_virtual_buffer_t* buffer = ranges[r].buffer;
-    const iree_device_size_t slab_size = buffer->geometry.slab_size;
+    const iree_device_size_t slab_size = buffer->geometry.mapping_size;
     const iree_host_size_t end =
         (ranges[r].offset + ranges[r].length - 1) / slab_size + 1;
     for (iree_host_size_t i = ranges[r].offset / slab_size;
@@ -1546,7 +1548,7 @@ iree_status_t loom_serve_memory_pool_commit_with_demand_async(
   iree_host_size_t edit_index = 0;
   for (iree_host_size_t r = 0; r < range_count; ++r) {
     loom_serve_virtual_buffer_t* buffer = ranges[r].buffer;
-    const iree_device_size_t slab_size = buffer->geometry.slab_size;
+    const iree_device_size_t slab_size = buffer->geometry.mapping_size;
     const iree_host_size_t end =
         (ranges[r].offset + ranges[r].length - 1) / slab_size + 1;
     for (iree_host_size_t i = ranges[r].offset / slab_size; i < end; ++i) {
@@ -1562,7 +1564,7 @@ iree_status_t loom_serve_memory_pool_commit_with_demand_async(
         entry->in_flight = true;
         const uint64_t length = loom_serve_memory_slab_length(buffer, i);
         buffer->statistics->pending_bytes += length;
-        if (length == buffer->geometry.slab_size) {
+        if (length == buffer->geometry.mapping_size) {
           ++buffer->backed_regular_count;
         }
       } else if (!entry->physical && !entry->keep) {
@@ -1770,7 +1772,7 @@ iree_status_t loom_serve_virtual_buffer_keep(
   if (!length) {
     return iree_ok_status();
   }
-  const iree_device_size_t slab_size = buffer->geometry.slab_size;
+  const iree_device_size_t slab_size = buffer->geometry.mapping_size;
   const iree_host_size_t end = (offset + length - 1) / slab_size + 1;
   for (iree_host_size_t i = offset / slab_size; i < end; ++i) {
     loom_serve_backing_entry_t* entry = NULL;

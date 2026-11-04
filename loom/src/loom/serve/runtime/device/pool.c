@@ -130,7 +130,7 @@ static iree_status_t loom_serve_pool_initialize_elastic(
   // Small command allocations pack into a logical slab. Larger requirements
   // use dedicated virtual ranges drawing from the same physical owner.
   const iree_hal_pool_reservation_request_t range = {
-      .allocation_size = pool->weight_geometry.slab_size,
+      .allocation_size = pool->weight_geometry.mapping_size,
       .min_alignment = 256,
   };
   return loom_serve_workspace_create_from_virtual(group, pool->workspace_pool,

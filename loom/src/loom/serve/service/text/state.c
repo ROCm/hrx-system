@@ -135,7 +135,7 @@ iree_status_t loom_serve_text_state_allocate(
             loom_serve_pool_state_geometry(pool);
         status = loom_serve_virtual_buffer_allocate(
             state->memory.pool, geometry,
-            iree_device_align(length, geometry.slab_size), alignment,
+            iree_device_align(length, geometry.mapping_size), alignment,
             &state->memory.statistics, &state->memory.buffers[i]);
         if (iree_status_is_ok(status)) {
           *allocation =
