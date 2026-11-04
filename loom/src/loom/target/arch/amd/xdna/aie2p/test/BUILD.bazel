@@ -172,6 +172,7 @@ loom_check_test_suite(
         "move_routes.loom-test",
         "native_bindings.loom-test",
         "native_completion.loom-test",
+        "native_constant_captures.loom-test",
         "native_dma_completions.loom-test",
         "native_dma_descriptors.loom-test",
         "native_local_buffers.loom-test",

@@ -1,0 +1,50 @@
+// RUN: with-checks emit source-low output=low
+
+// Captured literals become constants inside the tile entry: there is no caller
+// to supply vector arguments. Both dense vectors exceed the small-lane fact
+// representation. Instruction selection for their payloads is covered by the
+// vector construction tests; the invariant here is the closed entry interface.
+aie2p.target<array> @device {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+pipeline.def<kernel> public retain target(@device) @captured_coefficients() run(%integer_output_arg: buffer, %float_output_arg: buffer) {
+  %integer_output, %float_output = buffer.assume.alignment %integer_output_arg, %float_output_arg {minimum_alignment = 64} : buffer, buffer
+  %integer_splat = vector.splati -9 : vector<32xi32>
+  %float_splat = vector.splatf 0.5 : vector<32xf32>
+  %integer_lanes = vector.constanti [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32] : vector<32xi32>
+  %float_lanes = vector.constantf [1.25, 2.25, 3.25, 4.25, 5.25, 6.25, 7.25, 8.25, 9.25, 10.25, 11.25, 12.25, 13.25, 14.25, 15.25, 16.25, 17.25, 18.25, 19.25, 20.25, 21.25, 22.25, 23.25, 24.25, 25.25, 26.25, 27.25, 28.25, 29.25, 30.25, 31.25, 32.25] : vector<32xf32>
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %capacity = index.constant 1 : index
+  %integer_storage = buffer.alloca<workgroup> pool(%memory) align(64) %bytes : buffer
+  %integer_slots = buffer.view %integer_storage[%origin] : buffer -> view<1x64xi32>
+  %integers = channel.bind<fifo> %integer_slots, %capacity : view<1x64xi32>, index -> channel<tile<64xi32>>
+  %float_storage = buffer.alloca<workgroup> pool(%memory) align(64) %bytes : buffer
+  %float_slots = buffer.view %float_storage[%origin] : buffer -> view<1x64xf32>
+  %floats = channel.bind<fifo> %float_slots, %capacity : view<1x64xf32>, index -> channel<tile<64xf32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %integer_write, %integer_record = channel.reserve %integers : channel<tile<64xi32>> -> (write<tile<64xi32>>, view<64xi32>)
+    vector.store %integer_splat, %integer_record[0] : vector<32xi32>, view<64xi32>
+    vector.store %integer_lanes, %integer_record[32] : vector<32xi32>, view<64xi32>
+    channel.publish %integer_write : write<tile<64xi32>>
+    %integer_read, %integer_source = channel.acquire %integers : channel<tile<64xi32>> -> (read<tile<64xi32>>, view<64xi32>)
+    %integer_destination = buffer.view %integer_output[%origin] : buffer -> view<64xi32>
+    %integer_copy = kernel.async.copy %integer_source to %integer_destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<64xi32> to view<64xi32> -> kernel.async.token
+    %integer_group = kernel.async.group %integer_copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %integer_group {newer_groups = 0} : kernel.async.group
+    channel.release %integer_read : read<tile<64xi32>>
+    %float_write, %float_record = channel.reserve %floats : channel<tile<64xf32>> -> (write<tile<64xf32>>, view<64xf32>)
+    vector.store %float_splat, %float_record[0] : vector<32xf32>, view<64xf32>
+    vector.store %float_lanes, %float_record[32] : vector<32xf32>, view<64xf32>
+    channel.publish %float_write : write<tile<64xf32>>
+    %float_read, %float_source = channel.acquire %floats : channel<tile<64xf32>> -> (read<tile<64xf32>>, view<64xf32>)
+    %float_destination = buffer.view %float_output[%origin] : buffer -> view<64xf32>
+    %float_copy = kernel.async.copy %float_source to %float_destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<64xf32> to view<64xf32> -> kernel.async.token
+    %float_group = kernel.async.group %float_copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %float_group {newer_groups = 0} : kernel.async.group
+    channel.release %float_read : read<tile<64xf32>>
+  }
+}
+
+// ----
+CHECK: low.func.def inline target<amd.xdna.aie2p.core> @__pipeline_worker_0() asm {

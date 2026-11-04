@@ -12,6 +12,8 @@
 #include "loom/pass/report.h"
 #include "loom/pass/value_facts.h"
 #include "loom/rewrite/callable.h"
+#include "loom/rewrite/materialize.h"
+#include "loom/rewrite/remap.h"
 #include "loom/target/function_contract.h"
 #include "loom/target/function_version.h"
 #include "loom/target/pass_environment.h"
@@ -279,6 +281,11 @@ iree_status_t loom_pipeline_realize(
       loom_block_t* entry =
           loom_region_entry_block(loom_func_like_body(worker->function));
       loom_builder_set_before(&rewriter.builder, entry->first_op);
+      loom_ir_remap_t literals;
+      if (worker->literal_captures) {
+        status = loom_ir_remap_initialize(module, module, pass->arena, NULL,
+                                          &literals);
+      }
       for (uint16_t j = 0; j < entry->arg_count && iree_status_is_ok(status);
            ++j) {
         const loom_value_id_t argument = entry->arg_ids[j];
@@ -293,6 +300,15 @@ iree_status_t loom_pipeline_realize(
           if (iree_status_is_ok(status)) {
             status = loom_rewriter_replace_all_uses_with(&rewriter, argument,
                                                          constant);
+          }
+        } else if (worker->literal_captures && worker->literal_captures[j]) {
+          loom_op_t* constant = NULL;
+          status =
+              loom_ir_clone_op(&rewriter.builder, worker->literal_captures[j],
+                               &literals, &constant);
+          if (iree_status_is_ok(status)) {
+            status = loom_rewriter_replace_all_uses_with(
+                &rewriter, argument, loom_op_results(constant)[0]);
           }
         }
       }

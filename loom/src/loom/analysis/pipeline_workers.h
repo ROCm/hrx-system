@@ -225,6 +225,10 @@ typedef struct loom_pipeline_worker_t {
   iree_host_size_t binding_count;
   // Facts seeded from the actual captures, including storage projections.
   loom_value_fact_table_t facts;
+  // Closed constant producers not representable by scalar facts, indexed by
+  // formal argument. NULL when every capture uses facts or runtime bindings.
+  // Producers remain immutable through the consuming worker rewrite.
+  const loom_op_t* const* literal_captures;
   // Retained ordinal domain. Released after construction; restore before
   // querying ordinal-indexed plans or starting their consuming rewrite.
   loom_local_value_domain_t value_domain;
