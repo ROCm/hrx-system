@@ -16,7 +16,6 @@ AMDF_LINUX_DXG_KMT_OPERATION(create_paging_queue, D3DKMT_CREATEPAGINGQUEUE,
                              0x07)
 AMDF_LINUX_DXG_KMT_OPERATION(reserve_gpu_virtual_address,
                              D3DDDI_RESERVEGPUVIRTUALADDRESS, 0x08)
-AMDF_LINUX_DXG_KMT_OPERATION(query_adapter_info, D3DKMT_QUERYADAPTERINFO, 0x09)
 AMDF_LINUX_DXG_KMT_OPERATION(query_video_memory_info,
                              D3DKMT_QUERYVIDEOMEMORYINFO, 0x0A)
 AMDF_LINUX_DXG_KMT_OPERATION(make_resident, D3DDDI_MAKERESIDENT, 0x0B)

@@ -31,18 +31,36 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Issues the complete published KMT operation family consumed by libamdf.
+// Borrowed state required to issue typed KMT operations on one connection.
+typedef struct amdf_linux_dxg_kmt_t {
+  // Instance-owned connection used by every synchronous operation.
+  const amdf_linux_dxg_connection_t* connection;
+  // Borrowed host allocator used for temporary Windows wire-layout conversions.
+  const amdf_allocator_t* host_allocator;
+} amdf_linux_dxg_kmt_t;
+
+// Issues the complete fixed-layout KMT operation family consumed by libamdf.
 // Argument storage is borrowed only for the synchronous ioctl invocation.
-// QueryAdapterInfo forwards payload bytes exactly; string-bearing queries need
-// an explicit UTF-16 layout instead of the Linux wchar_t declarations.
-#define AMDF_LINUX_DXG_KMT_OPERATION(name, type, operation)                \
-  static inline NTSTATUS amdf_linux_dxg_kmt_##name(                        \
-      const amdf_linux_dxg_connection_t* connection, type* arguments) {    \
-    return (NTSTATUS)amdf_linux_dxg_connection_invoke(                     \
-        (void*)connection, _IOWR('G', operation, type), (void*)arguments); \
+#define AMDF_LINUX_DXG_KMT_OPERATION(name, type, operation)  \
+  static inline NTSTATUS amdf_linux_dxg_kmt_##name(          \
+      const amdf_linux_dxg_kmt_t* kmt, type* arguments) {    \
+    return (NTSTATUS)amdf_linux_dxg_connection_invoke(       \
+        (void*)kmt->connection, _IOWR('G', operation, type), \
+        (void*)arguments);                                   \
   }
 #include "libamdf/src/platform/linux/dxg/kmt_operations.inc"
 #undef AMDF_LINUX_DXG_KMT_OPERATION
+
+// Queries adapter information while translating Linux wchar_t declarations
+// to the Windows UTF-16 wire layouts required by /dev/dxg.
+NTSTATUS amdf_linux_dxg_kmt_query_adapter_info(
+    const amdf_linux_dxg_kmt_t* kmt, D3DKMT_QUERYADAPTERINFO* arguments);
+
+// Issues a bridge-supplied KMT request through the typed Linux boundary.
+// String-bearing QueryAdapterInfo payloads receive their required conversion;
+// every fixed-layout operation is forwarded unchanged.
+uint32_t amdf_linux_dxg_kmt_invoke(void* context, uint64_t request,
+                                   void* arguments);
 
 #ifdef __cplusplus
 }  // extern "C"

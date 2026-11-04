@@ -26,6 +26,8 @@ amdf_status_t amdf_platform_instance_create(
   }
   instance->host_allocator = host_allocator;
   instance->connection.descriptor = -1;
+  instance->kmt.connection = &instance->connection;
+  instance->kmt.host_allocator = &instance->host_allocator;
   instance->page_size = (size_t)page_size;
   const int mutex_error = pthread_mutex_init(&instance->native_mutex, NULL);
   if (mutex_error != 0) {

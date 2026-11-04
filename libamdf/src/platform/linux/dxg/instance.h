@@ -12,12 +12,15 @@
 
 #include "libamdf/src/platform/instance.h"
 #include "libamdf/src/platform/linux/dxg/connection.h"
+#include "libamdf/src/platform/linux/dxg/kmt.h"
 
 struct amdf_platform_instance_t {
   // Host allocator copied from the public provider instance.
   amdf_allocator_t host_allocator;
   // Explicit instance-owned connection to /dev/dxg.
   amdf_linux_dxg_connection_t connection;
+  // Typed KMT view borrowing the instance connection and allocator.
+  amdf_linux_dxg_kmt_t kmt;
   // Qualified native host page length in bytes, cached before discovery.
   size_t page_size;
   // Optional owned-page exporter and its cached availability and limits.

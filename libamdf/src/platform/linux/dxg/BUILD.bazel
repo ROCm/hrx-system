@@ -27,6 +27,7 @@ amdf_cc_library(
 
 amdf_cc_library(
     name = "kmt",
+    srcs = ["kmt.c"],
     hdrs = [
         "kmt.h",
         "kmt_operations.inc",
@@ -38,6 +39,8 @@ amdf_cc_library(
     visibility = ["//libamdf/src:__subpackages__"],
     deps = [
         ":connection",
+        "//libamdf/src:allocator",
+        "//third_party:amdf_directx_wsl_stubs",
         "//third_party:amdf_dxg_headers",
     ],
 )
@@ -54,6 +57,7 @@ amdf_cc_library(
     visibility = ["//libamdf/src/platform:__pkg__"],
     deps = [
         ":connection",
+        ":kmt",
         "//libamdf/src:allocator",
         "//libamdf/src/platform",
         "//libamdf/src/platform/linux:file",
@@ -109,6 +113,23 @@ amdf_cc_test(
     ],
     deps = [
         ":kmt",
+        "//libamdf/src:allocator",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "kmt_query_test",
+    srcs = ["kmt_query_test.cc"],
+    linkopts = ["-Wl,--wrap=amdf_linux_dxg_connection_invoke"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        ":kmt",
+        "//libamdf/src:allocator",
         "//third_party:google_test",
         "//third_party:google_test_main",
     ],

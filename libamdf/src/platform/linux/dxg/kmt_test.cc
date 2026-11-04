@@ -7,6 +7,7 @@
 #include "libamdf/src/platform/linux/dxg/kmt.h"
 
 #include "gtest/gtest.h"
+#include "libamdf/src/allocator.h"
 
 namespace {
 
@@ -25,17 +26,22 @@ Invocation invocation;
 
 TEST(DxgKmtTest, ForwardsCompletePublishedOperationFamily) {
   const amdf_linux_dxg_connection_t connection = {.descriptor = 17};
+  const amdf_allocator_t host_allocator = amdf_allocator_system();
+  const amdf_linux_dxg_kmt_t kmt = {
+      .connection = &connection,
+      .host_allocator = &host_allocator,
+  };
   invocation.result = 0xC0000001u;
 
-#define AMDF_LINUX_DXG_KMT_OPERATION(name, type, operation)                 \
-  {                                                                         \
-    type arguments = {};                                                    \
-    invocation = {.result = 0xC0000001u};                                   \
-    EXPECT_EQ((uint32_t)amdf_linux_dxg_kmt_##name(&connection, &arguments), \
-              invocation.result);                                           \
-    EXPECT_EQ(invocation.connection, &connection);                          \
-    EXPECT_EQ(invocation.request, (uint64_t)_IOWR('G', operation, type));   \
-    EXPECT_EQ(invocation.arguments, &arguments);                            \
+#define AMDF_LINUX_DXG_KMT_OPERATION(name, type, operation)               \
+  {                                                                       \
+    type arguments = {};                                                  \
+    invocation = {.result = 0xC0000001u};                                 \
+    EXPECT_EQ((uint32_t)amdf_linux_dxg_kmt_##name(&kmt, &arguments),      \
+              invocation.result);                                         \
+    EXPECT_EQ(invocation.connection, &connection);                        \
+    EXPECT_EQ(invocation.request, (uint64_t)_IOWR('G', operation, type)); \
+    EXPECT_EQ(invocation.arguments, &arguments);                          \
   }
 #include "libamdf/src/platform/linux/dxg/kmt_operations.inc"
 #undef AMDF_LINUX_DXG_KMT_OPERATION

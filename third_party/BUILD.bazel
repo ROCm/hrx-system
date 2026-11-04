@@ -127,6 +127,12 @@ alias(
 )
 
 alias(
+    name = "amdf_directx_wsl_stubs",
+    actual = "@directx_headers//:wsl_stubs",
+    visibility = [":libamdf_users"],
+)
+
+alias(
     name = "linux_udmabuf_uapi",
     actual = "//build_tools/third_party/linux_uapi:linux_udmabuf_uapi",
     tags = ["manual"],

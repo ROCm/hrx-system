@@ -164,6 +164,8 @@ class DxgEndpointTest : public ::testing::Test {
     fake_dxg = &native_;
     instance_.host_allocator = amdf_allocator_system();
     instance_.connection.descriptor = 17;
+    instance_.kmt.connection = &instance_.connection;
+    instance_.kmt.host_allocator = &instance_.host_allocator;
     expected_connection = &instance_.connection;
   }
 

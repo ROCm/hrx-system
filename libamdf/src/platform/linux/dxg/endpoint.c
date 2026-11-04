@@ -30,7 +30,7 @@ static LUID amdf_linux_dxg_luid_decode(uint64_t value) {
 }
 
 static amdf_status_t amdf_linux_dxg_query_adapter_info(
-    const amdf_linux_dxg_connection_t* connection, D3DKMT_HANDLE adapter,
+    const amdf_linux_dxg_kmt_t* kmt, D3DKMT_HANDLE adapter,
     KMTQUERYADAPTERINFOTYPE type, void* data, uint32_t data_size) {
   D3DKMT_QUERYADAPTERINFO query = {
       .hAdapter = adapter,
@@ -39,16 +39,16 @@ static amdf_status_t amdf_linux_dxg_query_adapter_info(
       .PrivateDriverDataSize = data_size,
   };
   return amdf_linux_dxg_make_status(
-      amdf_linux_dxg_kmt_query_adapter_info(connection, &query));
+      amdf_linux_dxg_kmt_query_adapter_info(kmt, &query));
 }
 
 static amdf_status_t amdf_linux_dxg_query_physical_adapter_count(
-    const amdf_linux_dxg_connection_t* connection, D3DKMT_HANDLE adapter,
+    const amdf_linux_dxg_kmt_t* kmt, D3DKMT_HANDLE adapter,
     uint32_t* out_count) {
   D3DKMT_PHYSICAL_ADAPTER_COUNT physical_adapter_count = {0};
   const amdf_status_t status = amdf_linux_dxg_query_adapter_info(
-      connection, adapter, KMTQAITYPE_PHYSICALADAPTERCOUNT,
-      &physical_adapter_count, sizeof(physical_adapter_count));
+      kmt, adapter, KMTQAITYPE_PHYSICALADAPTERCOUNT, &physical_adapter_count,
+      sizeof(physical_adapter_count));
   if (amdf_status_is_ok(status)) {
     *out_count = physical_adapter_count.Count;
   }
@@ -56,21 +56,20 @@ static amdf_status_t amdf_linux_dxg_query_physical_adapter_count(
 }
 
 static amdf_status_t amdf_linux_dxg_query_endpoint_info(
-    const amdf_linux_dxg_connection_t* connection, D3DKMT_HANDLE adapter,
-    LUID adapter_luid, uint32_t physical_adapter_index,
-    amdf_endpoint_info_t* out_info) {
+    const amdf_linux_dxg_kmt_t* kmt, D3DKMT_HANDLE adapter, LUID adapter_luid,
+    uint32_t physical_adapter_index, amdf_endpoint_info_t* out_info) {
   D3DKMT_QUERY_DEVICE_IDS device_ids = {
       .PhysicalAdapterIndex = physical_adapter_index,
   };
   amdf_status_t status = amdf_linux_dxg_query_adapter_info(
-      connection, adapter, KMTQAITYPE_PHYSICALADAPTERDEVICEIDS, &device_ids,
+      kmt, adapter, KMTQAITYPE_PHYSICALADAPTERDEVICEIDS, &device_ids,
       sizeof(device_ids));
 
   D3DKMT_ADAPTERTYPE adapter_type = {0};
   if (amdf_status_is_ok(status)) {
-    status = amdf_linux_dxg_query_adapter_info(
-        connection, adapter, KMTQAITYPE_ADAPTERTYPE, &adapter_type,
-        sizeof(adapter_type));
+    status =
+        amdf_linux_dxg_query_adapter_info(kmt, adapter, KMTQAITYPE_ADAPTERTYPE,
+                                          &adapter_type, sizeof(adapter_type));
   }
 
   amdf_endpoint_info_t info = {0};
@@ -133,7 +132,7 @@ static amdf_status_t amdf_linux_dxg_query_endpoint_info(
 }
 
 static amdf_status_t amdf_linux_dxg_close_adapters(
-    const amdf_linux_dxg_connection_t* connection, uint32_t adapter_count,
+    const amdf_linux_dxg_kmt_t* kmt, uint32_t adapter_count,
     const D3DKMT_ADAPTERINFO* adapters) {
   amdf_status_t status = AMDF_STATUS_OK;
   for (uint32_t i = 0; i < adapter_count; ++i) {
@@ -144,7 +143,7 @@ static amdf_status_t amdf_linux_dxg_close_adapters(
         .hAdapter = adapters[i].hAdapter,
     };
     const amdf_status_t close_status = amdf_linux_dxg_make_status(
-        amdf_linux_dxg_kmt_close_adapter(connection, &close_adapter));
+        amdf_linux_dxg_kmt_close_adapter(kmt, &close_adapter));
     if (amdf_status_is_ok(status)) {
       status = close_status;
     }
@@ -178,9 +177,8 @@ amdf_status_t amdf_platform_endpoint_enumerate(
   }
 
   D3DKMT_ENUMADAPTERS2 enumeration = {0};
-  amdf_status_t status =
-      amdf_linux_dxg_make_status(amdf_linux_dxg_kmt_enumerate_adapters(
-          &instance->connection, &enumeration));
+  amdf_status_t status = amdf_linux_dxg_make_status(
+      amdf_linux_dxg_kmt_enumerate_adapters(&instance->kmt, &enumeration));
   const uint32_t adapter_capacity = enumeration.NumAdapters;
   D3DKMT_ADAPTERINFO* adapters = NULL;
   if (amdf_status_is_ok(status) && adapter_capacity != 0) {
@@ -190,8 +188,8 @@ amdf_status_t amdf_platform_endpoint_enumerate(
   }
   if (amdf_status_is_ok(status) && adapter_capacity != 0) {
     enumeration.pAdapters = adapters;
-    status = amdf_linux_dxg_make_status(amdf_linux_dxg_kmt_enumerate_adapters(
-        &instance->connection, &enumeration));
+    status = amdf_linux_dxg_make_status(
+        amdf_linux_dxg_kmt_enumerate_adapters(&instance->kmt, &enumeration));
     if (amdf_status_is_ok(status) &&
         enumeration.NumAdapters > adapter_capacity) {
       status = amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
@@ -208,7 +206,7 @@ amdf_status_t amdf_platform_endpoint_enumerate(
        ++adapter_index) {
     uint32_t physical_adapter_count = 0;
     status = amdf_linux_dxg_query_physical_adapter_count(
-        &instance->connection, adapters[adapter_index].hAdapter,
+        &instance->kmt, adapters[adapter_index].hAdapter,
         &physical_adapter_count);
     if (amdf_status_is_ok(status) && physical_adapter_count == 0) {
       status = amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
@@ -219,7 +217,7 @@ amdf_status_t amdf_platform_endpoint_enumerate(
          ++physical_adapter_index) {
       amdf_endpoint_info_t info = {0};
       status = amdf_linux_dxg_query_endpoint_info(
-          &instance->connection, adapters[adapter_index].hAdapter,
+          &instance->kmt, adapters[adapter_index].hAdapter,
           adapters[adapter_index].AdapterLuid, physical_adapter_index, &info);
       if (!amdf_status_is_ok(status) ||
           info.engine_kind != AMDF_ENGINE_KIND_GPU) {
@@ -238,7 +236,7 @@ amdf_status_t amdf_platform_endpoint_enumerate(
   }
 
   const amdf_status_t close_status = amdf_linux_dxg_close_adapters(
-      &instance->connection, enumerated_adapter_count, adapters);
+      &instance->kmt, enumerated_adapter_count, adapters);
   if (!amdf_status_is_ok(close_status)) {
     status = close_status;
   }
@@ -269,7 +267,7 @@ static amdf_status_t amdf_linux_dxg_close_endpoint_adapter(
   };
   const amdf_status_t status =
       amdf_linux_dxg_make_status(amdf_linux_dxg_kmt_close_adapter(
-          &endpoint->instance->connection, &close_adapter));
+          &endpoint->instance->kmt, &close_adapter));
   if (amdf_status_is_ok(status)) {
     endpoint->adapter = 0;
   }
@@ -297,8 +295,8 @@ amdf_status_t amdf_platform_endpoint_open(
   D3DKMT_OPENADAPTERFROMLUID open_adapter = {
       .AdapterLuid = adapter_luid,
   };
-  status = amdf_linux_dxg_make_status(amdf_linux_dxg_kmt_open_adapter_from_luid(
-      &instance->connection, &open_adapter));
+  status = amdf_linux_dxg_make_status(
+      amdf_linux_dxg_kmt_open_adapter_from_luid(&instance->kmt, &open_adapter));
   endpoint->adapter = open_adapter.hAdapter;
   if (amdf_status_is_ok(status) && endpoint->adapter == 0) {
     status = amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
@@ -307,7 +305,7 @@ amdf_status_t amdf_platform_endpoint_open(
   uint32_t physical_adapter_count = 0;
   if (amdf_status_is_ok(status)) {
     status = amdf_linux_dxg_query_physical_adapter_count(
-        &instance->connection, endpoint->adapter, &physical_adapter_count);
+        &instance->kmt, endpoint->adapter, &physical_adapter_count);
   }
   if (amdf_status_is_ok(status) &&
       endpoint->physical_adapter_index >= physical_adapter_count) {
@@ -315,7 +313,7 @@ amdf_status_t amdf_platform_endpoint_open(
   }
   if (amdf_status_is_ok(status)) {
     status = amdf_linux_dxg_query_endpoint_info(
-        &instance->connection, endpoint->adapter, adapter_luid,
+        &instance->kmt, endpoint->adapter, adapter_luid,
         endpoint->physical_adapter_index, &endpoint->info);
   }
   if (amdf_status_is_ok(status) &&
