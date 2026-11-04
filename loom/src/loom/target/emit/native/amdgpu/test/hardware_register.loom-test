@@ -1,0 +1,139 @@
+// Physical hardware-register reads retain the packed HWREG selector and
+// native opcode across CDNA and RDNA encoding generations.
+// RUN: emit amdgpu-assembly @hardware_register
+amdgpu.target<gfx90a> @target
+
+low.func.def target<amdgpu.cdna2.core>(@target) @hardware_register() -> (reg<amdgpu.sgpr>) asm {
+  %identity = s_getreg_b32 {hwreg = 63492}
+  return %identity
+}
+
+// ----
+  s_getreg_b32 s0, 0xf804
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-native-words @hardware_register
+amdgpu.target<gfx90a> @target
+
+low.func.def target<amdgpu.cdna2.core>(@target) @hardware_register() -> (reg<amdgpu.sgpr>) asm {
+  %identity = s_getreg_b32 {hwreg = 63492}
+  return %identity
+}
+
+// ----
+0xB880F804
+0xBF810000
+
+// ====
+
+// RUN: emit amdgpu-assembly @hardware_register
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @hardware_register() -> (reg<amdgpu.sgpr>) asm {
+  %identity = s_getreg_b32 {hwreg = 6164}
+  return %identity
+}
+
+// ----
+  s_getreg_b32 s0, 0x1814
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-native-words @hardware_register
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @hardware_register() -> (reg<amdgpu.sgpr>) asm {
+  %identity = s_getreg_b32 {hwreg = 6164}
+  return %identity
+}
+
+// ----
+0xB8801814
+0xBF810000
+
+// ====
+
+// RUN: emit amdgpu-assembly @hardware_register
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @hardware_register() -> (reg<amdgpu.sgpr>) asm {
+  %identity = s_getreg_b32 {hwreg = 63511}
+  return %identity
+}
+
+// ----
+  s_getreg_b32 s0, 0xf817
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-native-words @hardware_register
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @hardware_register() -> (reg<amdgpu.sgpr>) asm {
+  %identity = s_getreg_b32 {hwreg = 63511}
+  return %identity
+}
+
+// ----
+0xB880F817
+0xBFB00000
+
+// ====
+
+// RUN: emit amdgpu-assembly @hardware_register
+amdgpu.target<gfx1201> @target
+
+low.func.def target<amdgpu.rdna4.core>(@target) @hardware_register() -> (reg<amdgpu.sgpr>) asm {
+  %identity = s_getreg_b32 {hwreg = 63511}
+  return %identity
+}
+
+// ----
+  s_getreg_b32 s0, 0xf817
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-native-words @hardware_register
+amdgpu.target<gfx1201> @target
+
+low.func.def target<amdgpu.rdna4.core>(@target) @hardware_register() -> (reg<amdgpu.sgpr>) asm {
+  %identity = s_getreg_b32 {hwreg = 63511}
+  return %identity
+}
+
+// ----
+0xB880F817
+0xBFB00000
+
+// ====
+
+// RUN: emit amdgpu-assembly @hardware_register
+amdgpu.target<gfx1250> @target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @hardware_register() -> (reg<amdgpu.sgpr>) asm {
+  %identity = s_getreg_b32 {hwreg = 63511}
+  return %identity
+}
+
+// ----
+  s_getreg_b32 s0, 0xf817
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-native-words @hardware_register
+amdgpu.target<gfx1250> @target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @hardware_register() -> (reg<amdgpu.sgpr>) asm {
+  %identity = s_getreg_b32 {hwreg = 63511}
+  return %identity
+}
+
+// ----
+0xB880F817
+0xBFB00000

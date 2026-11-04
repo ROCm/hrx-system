@@ -46,6 +46,37 @@ def _cache_control_effects(completion_counter: int) -> tuple[Effect, ...]:
     )
 
 
+def _s_getreg_b32_overlay() -> AmdgpuDescriptorOverlay:
+    # HWREG is the ISA's packed register ID, bit offset, and size-minus-one.
+    # Arbitrary hardware state can change between observations; this is not a
+    # pure scalar expression that may be folded or reused across reads.
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.s_getreg_b32",
+        instruction_name="S_GETREG_B32",
+        mnemonic="s_getreg_b32",
+        encoding_name="ENC_SOPK",
+        semantic_tag="control.hardware.register.read",
+        schedule_class=_SCHEDULE_SALU,
+        operands=(AmdgpuOperandOverlay("SDST", _sgpr_result()),),
+        immediate_fields=("SIMM16",),
+        immediates=(
+            Immediate(
+                "hwreg", ImmediateKind.UNSIGNED, bit_width=16, unsigned_max=65535
+            ),
+        ),
+        asm_forms=_asm(
+            results=("dst",),
+            immediates=("hwreg",),
+            named_immediates=True,
+            native_assembly_values=(
+                _native_result("dst"),
+                _native_unsigned_hex_immediate("hwreg", 16),
+            ),
+        ),
+        flags=(DescriptorFlag.SIDE_EFFECTING,),
+    )
+
+
 def _s_mov_b64_shared_base_overlay(
     *, encoding_condition: str = "default"
 ) -> AmdgpuDescriptorOverlay:
@@ -783,6 +814,7 @@ __all__ = (
     "_s_barrier_wait_all_overlay",
     "_s_delay_alu_descriptor",
     "_s_dcache_discard_overlay",
+    "_s_getreg_b32_overlay",
     "_s_mov_b64_shared_base_overlay",
     "_s_prefetch_overlay",
     "_s_sendmsg_overlay",

@@ -979,6 +979,7 @@ def _cdna_core_overlays(
         *(_gfx950_ds_transpose_read_overlays() if (isa_generation >= 4) else ()),
         *matrix_overlays,
         _s_barrier_overlay(),
+        _s_getreg_b32_overlay(),
         _s_sendmsg_overlay(),
         _s_sethalt_overlay(),
         _s_trap_overlay(),
@@ -1635,6 +1636,7 @@ def _gfx11_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
             )
         ),
         _s_barrier_overlay(),
+        _s_getreg_b32_overlay(),
         _s_sendmsg_overlay(),
         *(_s_sendmsg_rtn_overlay(bits) for bits in (32, 64)),
         _s_sethalt_overlay(),
@@ -2395,6 +2397,7 @@ def _rdna4_core_overlays(
         *_v_swmmac_16x16_overlays(wave_size=64, op_sel_hi_field="OPSEL_HI"),
         _s_barrier_signal_all_overlay(),
         _s_barrier_wait_all_overlay(),
+        _s_getreg_b32_overlay(),
         _s_sendmsg_overlay(),
         *(_s_sendmsg_rtn_overlay(bits) for bits in (32, 64)),
         _s_sethalt_overlay(),
