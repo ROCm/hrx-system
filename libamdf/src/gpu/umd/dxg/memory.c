@@ -99,6 +99,10 @@ static void amdf_gpu_dxg_memory_plan(
   if ((create_info->required_flags & AMDF_MEMORY_FLAG_HOST_COHERENT) != 0) {
     plan.allocation_flags |= AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_FINE_GRAIN;
   }
+  if ((create_info->required_flags & AMDF_MEMORY_FLAG_DEVICE_UNCACHED) != 0) {
+    plan.allocation_flags |=
+        AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_DEVICE_UNCACHED;
+  }
   if ((create_info->required_flags & AMDF_MEMORY_FLAG_QUEUE_STORAGE) != 0) {
     plan.allocation_flags |= AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_QUEUE_STORAGE;
   }

@@ -14,6 +14,7 @@
 
 #include "libamdf/src/gpu/umd/dxg/bridge_allocator.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/adapter_state.h"
+#include "libamdf/src/gpu/umd/dxg/rocdxg/native_allocation_flags.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/native_transport.h"
 #include "shared/include/dxcore_loader.h"
 #include "shared/include/thunk_proxy/thunk_proxy.h"
@@ -52,17 +53,6 @@ thunk_proxy::AllocDomain ToNativeAllocationDomain(
     default:
       return thunk_proxy::kSystem;
   }
-}
-
-uint32_t ToNativeAllocationFlags(amdf_dxg_bridge_gpu_allocation_flags_t flags) {
-  uint32_t native_flags = 0;
-  if ((flags & AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_FINE_GRAIN) != 0) {
-    native_flags |= thunk_proxy::kFineGrain;
-  }
-  // Queue storage remains in its ordinary physical domain. The proxy's
-  // kUserQueue domain denotes a separate driver-owned SWS queue object; it is
-  // not a property of caller-owned user-mode queue storage.
-  return native_flags;
 }
 
 amdf_dxg_bridge_result_t GpuAllocationCreateImpl(
@@ -108,11 +98,11 @@ amdf_dxg_bridge_result_t GpuAllocationCreateImpl(
         create_info.domain == AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL
             ? create_info.placement_device_address + byte_offset
             : 0;
-    thunk_proxy::SetAllocationInfo(allocation_private_data, chunk_byte_length,
-                                   ToNativeAllocationDomain(create_info.domain),
-                                   placement_device_address,
-                                   ToNativeAllocationFlags(create_info.flags),
-                                   thunk_proxy::KCOMPUTE0, *adapter->device);
+    thunk_proxy::SetAllocationInfo(
+        allocation_private_data, chunk_byte_length,
+        ToNativeAllocationDomain(create_info.domain), placement_device_address,
+        EncodeNativeAllocationFlags(create_info.flags), thunk_proxy::KCOMPUTE0,
+        *adapter->device);
 
     D3DDDI_ALLOCATIONINFO2& native_info = native_infos[i];
     if (create_info.host_pointer != nullptr) {
@@ -188,7 +178,8 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuAllocationCreate(
   *out_native_status = 0;
   const amdf_dxg_bridge_gpu_allocation_flags_t known_flags =
       AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_FINE_GRAIN |
-      AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_QUEUE_STORAGE;
+      AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_QUEUE_STORAGE |
+      AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_DEVICE_UNCACHED;
   const bool is_local =
       create_info->domain == AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL;
   const bool has_host_pointer = create_info->host_pointer != nullptr;

@@ -229,6 +229,8 @@ enum amdf_dxg_bridge_gpu_allocation_flag_bits_e {
   AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_FINE_GRAIN = 1u << 0,
   // Marks directly published user-mode queue storage.
   AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_QUEUE_STORAGE = 1u << 1,
+  // Requests an uncached GPU mapping independently of coherence.
+  AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_DEVICE_UNCACHED = 1u << 2,
 };
 
 // Parameters for one grouped native allocation creation.

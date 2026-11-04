@@ -43,6 +43,7 @@ amdf_linux_sidecar_library(
         "gfxip_compatibility.cc",
         "kernel_queue.cc",
         "kernel_queue.h",
+        "native_allocation_flags.h",
     ],
     exports_file = "exports.map",
     visibility = ["//libamdf/src/gpu/umd/dxg/linux:__pkg__"],
@@ -99,6 +100,25 @@ amdf_cc_test(
     deps = [
         ":loader",
         "//libamdf/src:allocator",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "native_allocation_flags_test",
+    srcs = [
+        "native_allocation_flags.h",
+        "native_allocation_flags_test.cc",
+    ],
+    copts = ["-Wno-unknown-pragmas"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        "//libamdf/src/gpu/umd/dxg:bridge_api",
+        "//third_party:amdf_rocdxg_headers",
         "//third_party:google_test",
         "//third_party:google_test_main",
     ],

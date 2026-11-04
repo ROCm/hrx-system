@@ -181,7 +181,8 @@ amdf_status_t amdf_gpu_dxg_query_memory_profile(
                                AMDF_MEMORY_FLAG_HOST_FILE_IO;
     profile.supported_flags =
         profile.guaranteed_flags | AMDF_MEMORY_FLAG_QUEUE_STORAGE |
-        AMDF_MEMORY_FLAG_MAPPING_SOURCE | AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE;
+        AMDF_MEMORY_FLAG_MAPPING_SOURCE | AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE |
+        AMDF_MEMORY_FLAG_DEVICE_UNCACHED;
     if (capabilities->cache_coherent_memory_supported) {
       profile.supported_flags |= AMDF_MEMORY_FLAG_HOST_COHERENT;
       // DXG CPU-visible updates are at least 32 bits; the adapter reports
@@ -208,9 +209,9 @@ amdf_status_t amdf_gpu_dxg_query_memory_profile(
     profile.roles = AMDF_MEMORY_PROFILE_ROLE_CREATE;
     profile.guaranteed_flags =
         AMDF_MEMORY_FLAG_DEVICE_LOCAL | AMDF_MEMORY_FLAG_DEVICE_ADDRESS;
-    profile.supported_flags = profile.guaranteed_flags |
-                              AMDF_MEMORY_FLAG_QUEUE_STORAGE |
-                              AMDF_MEMORY_FLAG_MAPPING_SOURCE;
+    profile.supported_flags =
+        profile.guaranteed_flags | AMDF_MEMORY_FLAG_QUEUE_STORAGE |
+        AMDF_MEMORY_FLAG_MAPPING_SOURCE | AMDF_MEMORY_FLAG_DEVICE_UNCACHED;
     profile.device_address.minimum_alignment =
         AMDF_GPU_DXG_RESERVATION_GRANULARITY;
     profile.allocation = allocation;

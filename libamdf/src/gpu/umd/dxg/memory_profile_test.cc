@@ -41,6 +41,47 @@ TEST(DxgMemoryProfileTest, ReportsExactHostMappingFeatures) {
             AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS);
 }
 
+TEST(DxgMemoryProfileTest, ReportsExactAllocationFlagSupport) {
+  const amdf_gpu_dxg_memory_capabilities_t capabilities = {
+      .virtual_address_bit_count = 48,
+      .cache_coherent_memory_supported = 1,
+      .d3d12_resource_supported = 1,
+  };
+  amdf_memory_native_profile_t profile = {};
+
+  ASSERT_EQ(amdf_gpu_dxg_query_memory_profile(&capabilities, 0, &profile),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(
+      profile.supported_flags,
+      AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_HOST_COHERENT |
+          AMDF_MEMORY_FLAG_DEVICE_ADDRESS | AMDF_MEMORY_FLAG_MAPPING_SOURCE |
+          AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE | AMDF_MEMORY_FLAG_HOST_FILE_IO |
+          AMDF_MEMORY_FLAG_QUEUE_STORAGE | AMDF_MEMORY_FLAG_DEVICE_UNCACHED);
+
+  ASSERT_EQ(amdf_gpu_dxg_query_memory_profile(&capabilities, 1, &profile),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(profile.supported_flags, AMDF_MEMORY_FLAG_DEVICE_LOCAL |
+                                         AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+                                         AMDF_MEMORY_FLAG_MAPPING_SOURCE |
+                                         AMDF_MEMORY_FLAG_QUEUE_STORAGE |
+                                         AMDF_MEMORY_FLAG_DEVICE_UNCACHED);
+
+  ASSERT_EQ(amdf_gpu_dxg_query_memory_profile(&capabilities, 2, &profile),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(profile.supported_flags, AMDF_MEMORY_FLAG_HOST_VISIBLE |
+                                         AMDF_MEMORY_FLAG_HOST_COHERENT |
+                                         AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+                                         AMDF_MEMORY_FLAG_MAPPING_SOURCE |
+                                         AMDF_MEMORY_FLAG_QUEUE_STORAGE);
+
+  ASSERT_EQ(amdf_gpu_dxg_query_memory_profile(&capabilities, 3, &profile),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(profile.supported_flags, AMDF_MEMORY_FLAG_DEVICE_LOCAL |
+                                         AMDF_MEMORY_FLAG_SHAREABLE |
+                                         AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+                                         AMDF_MEMORY_FLAG_MAPPING_SOURCE);
+}
+
 TEST(DxgMemoryProfileTest, ExternalResourceProfileRequiresHostSupport) {
   amdf_gpu_dxg_memory_capabilities_t capabilities = {
       .virtual_address_bit_count = 48,

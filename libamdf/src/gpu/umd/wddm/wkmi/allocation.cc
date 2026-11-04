@@ -68,6 +68,9 @@ uint32_t ToWkmiAllocationFlags(amdf_dxg_bridge_gpu_allocation_flags_t flags) {
   if ((flags & AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_FINE_GRAIN) != 0) {
     wkmi_flags |= Wkmi::kFineGrain;
   }
+  if ((flags & AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_DEVICE_UNCACHED) != 0) {
+    wkmi_flags |= Wkmi::kKernarg;
+  }
   if ((flags & AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_QUEUE_STORAGE) != 0) {
     wkmi_flags |= Wkmi::kQueueObject;
   }
@@ -211,7 +214,8 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuAllocationCreate(
   *out_native_status = 0;
   const amdf_dxg_bridge_gpu_allocation_flags_t known_flags =
       AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_FINE_GRAIN |
-      AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_QUEUE_STORAGE;
+      AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_QUEUE_STORAGE |
+      AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_DEVICE_UNCACHED;
   const bool is_local =
       create_info->domain == AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL;
   const bool has_host_pointer = create_info->host_pointer != nullptr;

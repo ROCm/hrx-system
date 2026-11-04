@@ -72,6 +72,8 @@ struct NativeAllocationRequest {
   Wkmi::AllocDomain domain;
   // Requested device address for local memory, zero for system memory.
   uint64_t address;
+  // Native memory-policy bits encoded into the private allocation payload.
+  uint32_t memory_flags = 0;
 };
 
 struct FakeNativeState {
@@ -182,8 +184,8 @@ void SetAllocationInfo(void* allocation_private_data, uint64_t byte_length,
     RecordDependencyExpectation(byte_length == expected.byte_length);
     RecordDependencyExpectation(domain == expected.domain);
     RecordDependencyExpectation(address == expected.address);
+    RecordDependencyExpectation(memory_flags == expected.memory_flags);
   }
-  RecordDependencyExpectation(memory_flags == 0);
   RecordDependencyExpectation(engine_flag == KCOMPUTE0);
 }
 
@@ -267,6 +269,43 @@ bool SuccessfulCreatePublishesNativeHandles() {
   AMDF_EXPECT(native_state.dependency_failure_count == 0);
   AMDF_EXPECT(allocator_state.live_allocation_count == 0);
   AMDF_EXPECT(allocator_state.invalid_alignment_count == 0);
+  g_fake_native_state = nullptr;
+  return passed;
+}
+
+bool AllocationFlagsPreserveIndependentPolicies() {
+  bool passed = true;
+  FakeNativeState native_state;
+  TestAllocatorState allocator_state;
+  native_state.expected_allocations = {{
+      4096,
+      Wkmi::kSystem,
+      0,
+      Wkmi::kFineGrain | Wkmi::kKernarg | Wkmi::kQueueObject,
+  }};
+  g_fake_native_state = &native_state;
+  {
+    amdf_dxg_bridge_gpu_adapter_t adapter;
+    adapter.host_allocator = MakeTestAllocator(&allocator_state);
+    alignas(4096) std::array<uint8_t, 4096> host_storage = {};
+    amdf_dxg_bridge_gpu_allocation_create_info_t create_info =
+        MakeSystemCreateInfo(host_storage.data(), host_storage.size());
+    create_info.flags = AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_FINE_GRAIN |
+                        AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_QUEUE_STORAGE |
+                        AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_DEVICE_UNCACHED;
+    uint32_t allocation_handle = 0;
+    uint32_t resource_handle = 0;
+    uint32_t allocation_count = 0;
+    uint32_t native_status = 0;
+
+    AMDF_EXPECT(amdf::wkmi_bridge::GpuAllocationCreate(
+                    &adapter, &create_info, 1, &allocation_handle,
+                    &resource_handle, &allocation_count,
+                    &native_status) == AMDF_DXG_BRIDGE_RESULT_SUCCESS);
+    AMDF_EXPECT(native_state.dependency_failure_count == 0);
+    AMDF_EXPECT(native_state.allocation_info_count == 1);
+  }
+  AMDF_EXPECT(allocator_state.live_allocation_count == 0);
   g_fake_native_state = nullptr;
   return passed;
 }
@@ -475,6 +514,8 @@ int main() {
        MalformedNativeSuccessPublishesResourceToCaller},
       {"SuccessfulCreatePublishesNativeHandles",
        SuccessfulCreatePublishesNativeHandles},
+      {"AllocationFlagsPreserveIndependentPolicies",
+       AllocationFlagsPreserveIndependentPolicies},
       {"NativeCreateFailureLeavesOutputsUnchanged",
        NativeCreateFailureLeavesOutputsUnchanged},
       {"QueryLayoutPublishesOnlyOnSuccess", QueryLayoutPublishesOnlyOnSuccess},

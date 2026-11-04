@@ -54,6 +54,8 @@ struct FakeMemoryState {
   void* host_pointer = nullptr;
   amdf_dxg_bridge_gpu_allocation_domain_t allocation_domain =
       AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL;
+  // Exact private allocation-policy bits expected at the bridge boundary.
+  amdf_dxg_bridge_gpu_allocation_flags_t allocation_flags = 0;
   std::vector<Operation> operations;
   std::vector<uint64_t> wait_targets;
   std::vector<Invalidation> invalidations;
@@ -85,6 +87,7 @@ amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeCreateAllocations(
   state->operations.push_back(Operation::kCreateAllocation);
   EXPECT_EQ(create_info->device_handle, 0x10u);
   EXPECT_EQ(create_info->domain, state->allocation_domain);
+  EXPECT_EQ(create_info->flags, state->allocation_flags);
   EXPECT_EQ(create_info->byte_length, 65536u);
   if (state->allocation_domain == AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL) {
     EXPECT_EQ(create_info->placement_device_address, 0x200000u);
@@ -391,6 +394,38 @@ TEST_F(DxgMemoryTest, AlignsSystemStorageAndPublishesEachNativeSpan) {
   EXPECT_EQ(state_.invalidations,
             (std::vector<Invalidation>{{0x20, 32760, 8}, {0x21, 0, 8}}));
   EXPECT_EQ(amdf_gpu_dxg_memory_destroy(memory), AMDF_STATUS_OK);
+}
+
+TEST_F(DxgMemoryTest, PreservesIndependentNativeAllocationPolicies) {
+  state_.allocation_domain = AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
+  const amdf_memory_native_profile_t profile = Profile(0);
+  struct TestCase {
+    // One independent public policy requested by the allocation.
+    amdf_memory_flags_t memory_flag;
+    // Corresponding private bridge policy.
+    amdf_dxg_bridge_gpu_allocation_flags_t allocation_flag;
+  };
+  const TestCase test_cases[] = {
+      {AMDF_MEMORY_FLAG_HOST_COHERENT,
+       AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_FINE_GRAIN},
+      {AMDF_MEMORY_FLAG_DEVICE_UNCACHED,
+       AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_DEVICE_UNCACHED},
+      {AMDF_MEMORY_FLAG_QUEUE_STORAGE,
+       AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_QUEUE_STORAGE},
+  };
+  for (const TestCase& test_case : test_cases) {
+    create_info_.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE |
+                                  AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+                                  test_case.memory_flag;
+    state_.allocation_flags = test_case.allocation_flag;
+    amdf_gpu_dxg_memory_t* memory = nullptr;
+    amdf_gpu_umd_memory_result_t result = {};
+    ASSERT_EQ(amdf_gpu_dxg_memory_prepare(&device_, &profile, &create_info_,
+                                          &memory, &result),
+              AMDF_STATUS_OK);
+    ASSERT_NE(memory, nullptr);
+    EXPECT_EQ(amdf_gpu_dxg_memory_destroy(memory), AMDF_STATUS_OK);
+  }
 }
 
 TEST_F(DxgMemoryTest, ConsumedFailureAdvancesBeforeRetry) {
