@@ -61,6 +61,14 @@ loom_serve_memory_usage_t loom_serve_virtual_pool_memory_usage(
 loom_serve_memory_usage_t loom_serve_virtual_pool_source_memory_usage(
     const iree_hal_pool_t* source);
 
+// Charged backing that cannot currently be reclaimed from this source. Includes
+// unpublished acquisitions and failed ranges, excludes idle reusable ranges and
+// accepted returns. A trim still awaiting consumer history remains protected.
+// Called on the serialized owner; performs no allocation, native query, or
+// scan.
+uint64_t loom_serve_virtual_pool_source_protected_bytes(
+    const iree_hal_pool_t* source);
+
 // Installs the owner's nonblocking wake. Detachment joins callback access.
 // A blocking outer caller may instead use wait below. Neither callback may
 // invoke advance, free, or another operation on the physical owner.

@@ -1615,6 +1615,14 @@ TEST_F(MemoryTest, PendingCommitChargesBudgetAndLeavesPublishedStorageUsable) {
   IREE_ASSERT_OK(iree_hal_semaphore_create(
       loom_serve_device_handle(device), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &ready));
+  // Reclamation receives the same total-backing target before and after
+  // publication. The policy may collect completions while deciding what to
+  // evict; a target discounted by an earlier pending snapshot is unstable.
+  loom_serve_memory_pool_set_reclaimer(
+      pool, {nullptr, [](void*, uint64_t target_bytes) -> iree_status_t {
+               EXPECT_EQ(target_bytes, 2 * kSlabSize);
+               return iree_ok_status();
+             }});
   loom_serve_memory_operation_t* operation = nullptr;
   {
     deferred_backing->defer = true;
@@ -1650,6 +1658,11 @@ TEST_F(MemoryTest, PendingCommitChargesBudgetAndLeavesPublishedStorageUsable) {
   const auto completed = loom_serve_memory_pool_statistics(pool);
   EXPECT_EQ(completed.committed_bytes, 3 * kSlabSize);
   EXPECT_EQ(completed.pending_bytes, 0u);
+  loom_serve_memory_admission_t admission;
+  IREE_ASSERT_OK(loom_serve_memory_pool_prepare(
+      pool, {.weight_bytes = kSlabSize}, &admission));
+  EXPECT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_CAPACITY);
+  loom_serve_memory_pool_set_reclaimer(pool, {});
   RoundTrip(loom_serve_virtual_buffer_handle(first), 2 * kSlabSize, 0x87654321);
   loom_serve_memory_operation_free(operation);
   operation = nullptr;

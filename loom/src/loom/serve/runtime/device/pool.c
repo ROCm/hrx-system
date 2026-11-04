@@ -199,7 +199,8 @@ iree_status_t loom_serve_pool_allocate(iree_hal_device_group_t* group,
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_residency_cache_allocate(
-        pool->memory, pool->workspace, host_allocator, &pool->residency_cache);
+        pool->memory, pool->workspace, pool->storage.source, host_allocator,
+        &pool->residency_cache);
   }
   if (iree_status_is_ok(status)) {
     *out_pool = pool;

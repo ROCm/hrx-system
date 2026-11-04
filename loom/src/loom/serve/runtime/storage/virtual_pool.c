@@ -109,6 +109,9 @@ struct loom_serve_virtual_pool_source_t {
   uint64_t trim_generation;
   // Logical statistics under the owner mutex.
   iree_hal_pool_stats_t statistics;
+  // Fully backed READY ranges, updated under the owner mutex and sampled by
+  // admission without taking that mutex. Pending trims are tracked by memory.
+  iree_atomic_int64_t idle_bytes;
   // Next independently accounted source sharing the same physical owner.
   loom_serve_virtual_pool_source_t* next;
 };
@@ -137,6 +140,25 @@ struct loom_serve_virtual_pool_t {
   // Owner-side trim failure, retained through outer cleanup.
   iree_status_t failure;
 };
+
+// State transitions own the reusable-byte fact; admission never rediscovers it
+// by walking ranges. Writers already hold the pool mutex, so publication needs
+// only a relaxed atomic store, not another read-modify-write synchronization.
+static void loom_serve_virtual_pool_entry_set_state(
+    loom_serve_virtual_pool_entry_t* entry,
+    loom_serve_virtual_pool_entry_state_t state) {
+  const bool was_idle = entry->state == VIRTUAL_POOL_ENTRY_READY;
+  const bool is_idle = state == VIRTUAL_POOL_ENTRY_READY;
+  if (was_idle != is_idle) {
+    const uint64_t idle_bytes = (uint64_t)iree_atomic_load(
+        &entry->source->idle_bytes, iree_memory_order_relaxed);
+    iree_atomic_store(&entry->source->idle_bytes,
+                      (int64_t)(is_idle ? idle_bytes + entry->range.length
+                                        : idle_bytes - entry->range.length),
+                      iree_memory_order_relaxed);
+  }
+  entry->state = state;
+}
 
 static const iree_async_frontier_t* loom_serve_virtual_pool_frontier(
     const loom_serve_virtual_pool_entry_t* entry) {
@@ -224,7 +246,8 @@ static loom_serve_virtual_pool_entry_t* loom_serve_virtual_pool_take(
     }
   }
   if (selected) {
-    selected->state = VIRTUAL_POOL_ENTRY_ACQUIRED;
+    loom_serve_virtual_pool_entry_set_state(selected,
+                                            VIRTUAL_POOL_ENTRY_ACQUIRED);
   }
   return selected;
 }
@@ -274,9 +297,10 @@ static void loom_serve_virtual_pool_restore(
     iree_host_size_t count, const loom_serve_virtual_pool_element_t* elements,
     bool failed_commit) {
   for (iree_host_size_t i = 0; i < count; ++i) {
-    elements[i].entry->state = elements[i].ready ? VIRTUAL_POOL_ENTRY_READY
-                               : failed_commit   ? VIRTUAL_POOL_ENTRY_FAILED
-                                                 : VIRTUAL_POOL_ENTRY_EMPTY;
+    loom_serve_virtual_pool_entry_set_state(
+        elements[i].entry, elements[i].ready ? VIRTUAL_POOL_ENTRY_READY
+                           : failed_commit   ? VIRTUAL_POOL_ENTRY_FAILED
+                                             : VIRTUAL_POOL_ENTRY_EMPTY);
   }
 }
 
@@ -385,7 +409,7 @@ static void loom_serve_virtual_pool_release_reservations(
       entry->frontier.entry_count = 0;
     }
     entry->ownership_transferred = false;
-    entry->state = VIRTUAL_POOL_ENTRY_READY;
+    loom_serve_virtual_pool_entry_set_state(entry, VIRTUAL_POOL_ENTRY_READY);
     source->statistics.bytes_reserved -= entry->range.length;
     --source->statistics.reservation_count;
     ++source->statistics.release_count;
@@ -688,6 +712,16 @@ loom_serve_memory_usage_t loom_serve_virtual_pool_source_memory_usage(
   };
 }
 
+uint64_t loom_serve_virtual_pool_source_protected_bytes(
+    const iree_hal_pool_t* base_pool) {
+  const loom_serve_virtual_pool_source_t* source =
+      (const loom_serve_virtual_pool_source_t*)base_pool;
+  const uint64_t idle_bytes = (uint64_t)iree_atomic_load(
+      &source->idle_bytes, iree_memory_order_relaxed);
+  return source->memory.committed_bytes + source->memory.pending_bytes -
+         source->memory.releasing_bytes - idle_bytes;
+}
+
 static void loom_serve_virtual_pool_finish_acquire(
     loom_serve_virtual_pool_t* pool, loom_serve_virtual_pool_acquire_t* acquire,
     iree_status_t status, bool admitted) {
@@ -838,7 +872,8 @@ static void loom_serve_virtual_pool_advance_trim(
     iree_slim_mutex_lock(&pool->mutex);
     if (source->trim_requested && entry->state == VIRTUAL_POOL_ENTRY_READY &&
         retained > source->trim_floor) {
-      entry->state = VIRTUAL_POOL_ENTRY_TRIMMING;
+      loom_serve_virtual_pool_entry_set_state(entry,
+                                              VIRTUAL_POOL_ENTRY_TRIMMING);
       retained -= entry->range.length;
       iree_atomic_store(&entry->history_pending, 2, iree_memory_order_relaxed);
       start = true;
@@ -895,9 +930,9 @@ static void loom_serve_virtual_pool_advance_trim(
     if (iree_status_is_ok(status)) {
       // Successful actual completion and detach make old history irrelevant.
       entry->frontier.entry_count = 0;
-      entry->state = VIRTUAL_POOL_ENTRY_EMPTY;
+      loom_serve_virtual_pool_entry_set_state(entry, VIRTUAL_POOL_ENTRY_EMPTY);
     } else {
-      entry->state = VIRTUAL_POOL_ENTRY_FAILED;
+      loom_serve_virtual_pool_entry_set_state(entry, VIRTUAL_POOL_ENTRY_FAILED);
       pool->failure = iree_status_join(pool->failure, status);
     }
     iree_slim_mutex_unlock(&pool->mutex);

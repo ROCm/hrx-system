@@ -643,6 +643,11 @@ loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
   return statistics;
 }
 
+loom_serve_memory_statistics_t loom_serve_memory_pool_snapshot(
+    const loom_serve_memory_pool_t* pool) {
+  return pool->statistics;
+}
+
 static uint64_t loom_serve_memory_pool_trim_weight_cache(
     loom_serve_memory_pool_t* pool, uint64_t target_bytes,
     loom_serve_memory_demand_t additional, uint64_t projected) {
@@ -815,10 +820,8 @@ iree_status_t loom_serve_memory_pool_prepare(
     const uint64_t target = pool->limit_bytes - additional_bytes;
     IREE_TRACE_ZONE_BEGIN_NAMED(z_reclaim, "loom_serve_memory_reclaim");
     IREE_TRACE_ZONE_APPEND_VALUE_I64(z_reclaim, additional_bytes);
-    iree_status_t status = pool->reclaimer.fn(
-        pool->reclaimer.user_data, target > pool->statistics.pending_bytes
-                                       ? target - pool->statistics.pending_bytes
-                                       : 0);
+    iree_status_t status =
+        pool->reclaimer.fn(pool->reclaimer.user_data, target);
     IREE_TRACE_ZONE_END(z_reclaim);
     if (!iree_status_is_ok(status)) {
       if (iree_status_is_ok(pool->failure)) {

@@ -125,6 +125,14 @@ void loom_serve_memory_pool_free(loom_serve_memory_pool_t* pool);
 loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
     loom_serve_memory_pool_t* pool);
 
+// Reads the serialized owner's published range ledger without collecting
+// completions or querying native pools. Unlike statistics(), committed and
+// releasing bytes exclude idle caches and native retirement; abandoned bytes
+// are reported separately. Related per-owner snapshots remain consistent until
+// this owner explicitly collects or changes their backing.
+loom_serve_memory_statistics_t loom_serve_memory_pool_snapshot(
+    const loom_serve_memory_pool_t* pool);
+
 // Returns idle physical slabs toward target_bytes of total native commitment.
 // Live mappings remain intact. Accepted detachments retain this trim policy
 // through completion; native disposal remains charged until it finishes.
@@ -175,9 +183,10 @@ bool loom_serve_memory_pool_is_pending(loom_serve_memory_pool_t* pool);
 iree_status_t loom_serve_memory_pool_await(loom_serve_memory_pool_t* pool);
 
 // Cold pressure policy, independent of logical storage geometry. The callback
-// may trim eligible reservations toward target_bytes of total commitment; it
-// returns a status only for an actual platform/IO failure. An unreachable
-// target is not an error. It must not commit memory or recurse into admission.
+// may trim eligible reservations toward target_bytes of committed plus pending
+// backing; it returns a status only for an actual platform/IO failure. An
+// unreachable target is not an error. It must not commit memory or recurse into
+// admission.
 typedef struct loom_serve_memory_reclaimer_t {
   // Borrowed policy owner, alive until the callback is removed.
   void* user_data;
