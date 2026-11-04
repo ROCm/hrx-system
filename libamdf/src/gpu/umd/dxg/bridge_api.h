@@ -157,7 +157,8 @@ typedef struct amdf_dxg_bridge_gpu_clock_sample_t {
   uint64_t frequency_hz;
   // GPU counter sampled by the native driver.
   uint64_t timestamp;
-  // Paired CPU counter in QueryPerformanceCounter units.
+  // Paired host observation in the provider platform's common clock units.
+  // This is QPC on Windows and CLOCK_MONOTONIC_RAW nanoseconds on Linux.
   uint64_t host_timestamp;
 } amdf_dxg_bridge_gpu_clock_sample_t;
 

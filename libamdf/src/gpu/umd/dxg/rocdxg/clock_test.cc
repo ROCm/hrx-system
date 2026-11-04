@@ -7,6 +7,7 @@
 #include "libamdf/src/gpu/umd/dxg/rocdxg/clock.h"
 
 #include <sys/ioctl.h>
+#include <time.h>
 
 #include <cstdint>
 
@@ -17,10 +18,14 @@
 namespace {
 
 constexpr NTSTATUS kNativeFailure = static_cast<NTSTATUS>(0xC0000001u);
+uint32_t host_query_count = 0;
+int32_t host_failure_ordinal = -1;
 
 class RocdxgClockTest : public ::testing::Test {
  protected:
   void SetUp() override {
+    host_query_count = 0;
+    host_failure_ordinal = -1;
     adapter_.native_transport = {
         .context = this,
         .invoke = Invoke,
@@ -78,6 +83,7 @@ TEST_F(RocdxgClockTest, SamplesExactQueueEngineClocks) {
            AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4,
            AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA,
        }) {
+    host_query_count = 0;
     amdf_dxg_bridge_gpu_clock_sample_t sample = {};
     uint32_t native_status = 99;
     EXPECT_EQ(Sample(command_type, &sample, &native_status),
@@ -85,7 +91,24 @@ TEST_F(RocdxgClockTest, SamplesExactQueueEngineClocks) {
     EXPECT_EQ(native_status, 0u);
     EXPECT_EQ(sample.frequency_hz, frequency_hz_);
     EXPECT_EQ(sample.timestamp, 123u);
-    EXPECT_EQ(sample.host_timestamp, 456u);
+    EXPECT_EQ(sample.host_timestamp, 110u);
+  }
+}
+
+TEST_F(RocdxgClockTest, PreservesOutputWhenHostClockFails) {
+  for (const int32_t failure_ordinal : {0, 1}) {
+    SCOPED_TRACE(failure_ordinal);
+    host_query_count = 0;
+    host_failure_ordinal = failure_ordinal;
+    amdf_dxg_bridge_gpu_clock_sample_t sample = {11, 13, 17};
+    uint32_t native_status = 99;
+    EXPECT_EQ(Sample(AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4, &sample,
+                     &native_status),
+              AMDF_DXG_BRIDGE_RESULT_INTERNAL);
+    EXPECT_EQ(native_status, 0u);
+    EXPECT_EQ(sample.frequency_hz, 11u);
+    EXPECT_EQ(sample.timestamp, 13u);
+    EXPECT_EQ(sample.host_timestamp, 17u);
   }
 }
 
@@ -127,3 +150,16 @@ TEST_F(RocdxgClockTest, RejectsUnavailableCommandFamilies) {
 }
 
 }  // namespace
+
+extern "C" int __wrap_clock_gettime(clockid_t clock_id, timespec* out_time) {
+  EXPECT_EQ(clock_id, CLOCK_MONOTONIC_RAW);
+  if (static_cast<int32_t>(host_query_count) == host_failure_ordinal) {
+    ++host_query_count;
+    return -1;
+  }
+  const uint64_t timestamp =
+      100 + static_cast<uint64_t>(host_query_count++) * 20;
+  out_time->tv_sec = static_cast<time_t>(timestamp / 1'000'000'000u);
+  out_time->tv_nsec = static_cast<long>(timestamp % 1'000'000'000u);
+  return 0;
+}

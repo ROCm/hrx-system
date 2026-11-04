@@ -7,6 +7,7 @@
 #include "libamdf/src/gpu/umd/dxg/rocdxg/clock.h"
 
 #include <sys/ioctl.h>
+#include <time.h>
 
 #include "libamdf/src/gpu/umd/dxg/rocdxg/adapter_state.h"
 #include "shared/include/d3dkmt_types.h"
@@ -15,6 +16,16 @@ namespace amdf::rocdxg_bridge {
 namespace {
 
 constexpr uint32_t kQueryClockCalibrationOperation = 0x3D;
+
+bool ReadHostClock(uint64_t* out_timestamp) {
+  timespec now = {};
+  if (clock_gettime(CLOCK_MONOTONIC_RAW, &now) != 0) {
+    return false;
+  }
+  *out_timestamp = static_cast<uint64_t>(now.tv_sec) * 1'000'000'000u +
+                   static_cast<uint64_t>(now.tv_nsec);
+  return true;
+}
 
 }  // namespace
 
@@ -35,6 +46,10 @@ GpuClockSample(amdf_dxg_bridge_gpu_adapter_t* adapter, uint32_t adapter_handle,
     return AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED;
   }
 
+  uint64_t host_before = 0;
+  if (!ReadHostClock(&host_before)) {
+    return AMDF_DXG_BRIDGE_RESULT_INTERNAL;
+  }
   D3DKMT_QUERYCLOCKCALIBRATION query = {
       .hAdapter = static_cast<D3DKMT_HANDLE>(adapter_handle),
       .NodeOrdinal = profile->node_ordinal,
@@ -57,10 +72,19 @@ GpuClockSample(amdf_dxg_bridge_gpu_adapter_t* adapter, uint32_t adapter_handle,
       query.ClockData.GpuFrequency == 0) {
     return AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED;
   }
+  uint64_t host_after = 0;
+  if (!ReadHostClock(&host_after) || host_after < host_before) {
+    return AMDF_DXG_BRIDGE_RESULT_INTERNAL;
+  }
+  // DXG returns a Windows QPC sample, which does not share Linux's boot epoch.
+  // The native GPU/QPC pair was sampled during the ioctl, so project that
+  // observation into the tighter Linux-host bracket. The public outer bracket
+  // retains the complete call latency and bounds this midpoint estimate.
+  const uint64_t host_timestamp = host_before + (host_after - host_before) / 2;
   *out_sample = {
       query.ClockData.GpuFrequency,
       query.ClockData.GpuClockCounter,
-      query.ClockData.CpuClockCounter,
+      host_timestamp,
   };
   return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
 }

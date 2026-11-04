@@ -149,6 +149,7 @@ amdf_cc_test(
         "gfxip_compatibility.cc",
     ],
     copts = ["-Wno-unknown-pragmas"],
+    linkopts = ["-Wl,--wrap=clock_gettime"],
     target_compatible_with = [
         "@platforms//cpu:x86_64",
         "@platforms//os:linux",
