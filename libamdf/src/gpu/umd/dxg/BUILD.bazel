@@ -56,6 +56,30 @@ amdf_cc_library(
     ],
 )
 
+amdf_cc_library(
+    name = "memory_profile",
+    srcs = ["memory_profile.c"],
+    hdrs = ["memory_profile.h"],
+    visibility = ["//libamdf/src/gpu/umd:__subpackages__"],
+    deps = [
+        "//libamdf/src:device",
+        "//libamdf/src:endpoint",
+        "//libamdf/src:memory_profile",
+        "//libamdf/src/gpu/umd:memory",
+    ],
+)
+
+amdf_cc_test(
+    name = "memory_profile_test",
+    srcs = ["memory_profile_test.cc"],
+    deps = [
+        ":memory_profile",
+        "//libamdf:amdf_static",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
 amdf_cc_test(
     name = "endpoint_properties_test",
     srcs = ["endpoint_properties_test.cc"],

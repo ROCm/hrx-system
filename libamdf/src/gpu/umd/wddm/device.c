@@ -67,10 +67,9 @@ amdf_status_t amdf_gpu_umd_device_create(
   if (!amdf_kmt_api_supports_paging_devices(&endpoint->instance->kmt)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
-  amdf_windows_gpu_memory_capabilities_t memory_capabilities = {0};
+  amdf_gpu_dxg_memory_capabilities_t memory_capabilities = {0};
   const amdf_status_t capabilities_status =
-      amdf_windows_gpu_query_memory_capabilities(endpoint,
-                                                 &memory_capabilities);
+      amdf_gpu_wddm_query_memory_capabilities(endpoint, &memory_capabilities);
   if (!amdf_status_is_ok(capabilities_status)) {
     return capabilities_status;
   }

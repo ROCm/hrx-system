@@ -115,9 +115,9 @@ class WddmSparseMappingBackend final : public SparseMappingBackend {
           endpoint_, amdf_allocator_system(), &profile);
       if (status != amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
         RequireStatus(status, "query GPU profile");
-        amdf_windows_gpu_memory_capabilities_t memory = {};
+        amdf_gpu_dxg_memory_capabilities_t memory = {};
         RequireStatus(
-            amdf_windows_gpu_query_memory_capabilities(endpoint_, &memory),
+            amdf_gpu_wddm_query_memory_capabilities(endpoint_, &memory),
             "query GPU memory capabilities");
         for (uint32_t i = 0; i < profile->queue_family_count; ++i) {
           const auto& candidate = profile->queue_families[i];
@@ -205,7 +205,7 @@ class WddmSparseMappingBackend final : public SparseMappingBackend {
       backing_addresses.push_back(backing_.back().device_address);
     }
 
-    const uint64_t page_size = AMDF_WINDOWS_GPU_PAGE_SIZE;
+    const uint64_t page_size = AMDF_GPU_DXG_PAGE_SIZE;
     const uint64_t stride =
         (payload_byte_length + page_size - 1) & ~(page_size - 1);
     transport_ = Allocate(3 * stride + 2 * page_size,
@@ -365,8 +365,8 @@ class WddmSparseMappingBackend final : public SparseMappingBackend {
                             amdf_memory_access_t access) {
     NativeAllocation allocation;
     allocation.byte_length =
-        (byte_length + AMDF_WINDOWS_GPU_RESERVATION_GRANULARITY - 1) &
-        ~(AMDF_WINDOWS_GPU_RESERVATION_GRANULARITY - 1);
+        (byte_length + AMDF_GPU_DXG_RESERVATION_GRANULARITY - 1) &
+        ~(AMDF_GPU_DXG_RESERVATION_GRANULARITY - 1);
     const bool system = domain == AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
     amdf_memory_native_profile_t profile = {};
     RequireStatus(amdf_gpu_umd_device_query_memory_profile(

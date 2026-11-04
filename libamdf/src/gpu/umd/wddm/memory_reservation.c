@@ -58,7 +58,7 @@ amdf_status_t amdf_gpu_umd_query_memory_reservation_capabilities(
   const uint64_t maximum_address =
       bits == 64 ? UINT64_MAX : (UINT64_C(1) << bits) - 1;
   const uint64_t maximum_length =
-      (maximum_address / 2) & ~(AMDF_WINDOWS_GPU_RESERVATION_GRANULARITY - 1);
+      (maximum_address / 2) & ~(AMDF_GPU_DXG_RESERVATION_GRANULARITY - 1);
   uint64_t maximum_alignment = 1;
   while (maximum_alignment <= maximum_length / 2) {
     maximum_alignment <<= 1;
@@ -69,10 +69,10 @@ amdf_status_t amdf_gpu_umd_query_memory_reservation_capabilities(
       .required_access = amdf_gpu_wddm_required_mapping_access(device),
       .supported_flags = AMDF_MEMORY_RESERVATION_FLAG_REQUIRE_COMMON_ADDRESS,
       .maximum_byte_length = maximum_length,
-      .reservation_granularity = AMDF_WINDOWS_GPU_RESERVATION_GRANULARITY,
+      .reservation_granularity = AMDF_GPU_DXG_RESERVATION_GRANULARITY,
       .maximum_alignment = maximum_alignment,
-      .mapping_granularity = AMDF_WINDOWS_GPU_PAGE_SIZE,
-      .minimum_address = AMDF_WINDOWS_GPU_RESERVATION_GRANULARITY,
+      .mapping_granularity = AMDF_GPU_DXG_PAGE_SIZE,
+      .minimum_address = AMDF_GPU_DXG_RESERVATION_GRANULARITY,
       .maximum_address = maximum_address,
   };
   return AMDF_STATUS_OK;
@@ -106,17 +106,16 @@ amdf_status_t amdf_gpu_umd_memory_reservation_create(
     reservation->devices[i] = devices[i];
   }
   const uint64_t alignment =
-      minimum_alignment > AMDF_WINDOWS_GPU_RESERVATION_GRANULARITY
+      minimum_alignment > AMDF_GPU_DXG_RESERVATION_GRANULARITY
           ? minimum_alignment
-          : AMDF_WINDOWS_GPU_RESERVATION_GRANULARITY;
+          : AMDF_GPU_DXG_RESERVATION_GRANULARITY;
   D3DDDI_RESERVEGPUVIRTUALADDRESS native = {0};
   native.hAdapter = devices[0]->adapter;
   native.BaseAddress = common_address;
-  native.Size =
-      common_address != 0
-          ? byte_length
-          : byte_length + alignment - AMDF_WINDOWS_GPU_RESERVATION_GRANULARITY;
-  native.MinimumAddress = AMDF_WINDOWS_GPU_RESERVATION_GRANULARITY;
+  native.Size = common_address != 0 ? byte_length
+                                    : byte_length + alignment -
+                                          AMDF_GPU_DXG_RESERVATION_GRANULARITY;
+  native.MinimumAddress = AMDF_GPU_DXG_RESERVATION_GRANULARITY;
   status = amdf_kmt_make_status(
       devices[0]->kmt->reserve_gpu_virtual_address(&native));
   if (amdf_status_is_ok(status)) {
@@ -138,7 +137,7 @@ void amdf_gpu_umd_memory_reservation_query_access(
     amdf_memory_access_t* out_required_access) {
   *out_address = reservation->address;
   *out_mapping_access_ordinal = 0;
-  *out_mapping_granularity = AMDF_WINDOWS_GPU_PAGE_SIZE;
+  *out_mapping_granularity = AMDF_GPU_DXG_PAGE_SIZE;
   *out_required_access = amdf_gpu_wddm_required_mapping_access(
       reservation->devices[access_ordinal]);
 }
@@ -151,8 +150,8 @@ static amdf_status_t amdf_gpu_wddm_reservation_map(
   map.hPagingQueue = device->paging_queue;
   map.BaseAddress = address;
   map.hAllocation = allocation;
-  map.OffsetInPages = source_byte_offset / AMDF_WINDOWS_GPU_PAGE_SIZE;
-  map.SizeInPages = byte_length / AMDF_WINDOWS_GPU_PAGE_SIZE;
+  map.OffsetInPages = source_byte_offset / AMDF_GPU_DXG_PAGE_SIZE;
+  map.SizeInPages = byte_length / AMDF_GPU_DXG_PAGE_SIZE;
   map.Protection.Write = (access & AMDF_MEMORY_ACCESS_WRITE) != 0;
   map.Protection.Execute = (access & AMDF_MEMORY_ACCESS_EXECUTE) != 0;
   map.Protection.NoAccess = allocation == 0;

@@ -265,10 +265,9 @@ TEST_P(WindowsGpuDeviceRollbackTest, AdapterQueryPreservesAtomicUpdateWidth) {
   for (bool supported : {false, true}) {
     state_.atomic_update_64 = supported;
     state_.operations.clear();
-    amdf_windows_gpu_memory_capabilities_t capabilities = {};
-    ASSERT_EQ(
-        amdf_windows_gpu_query_memory_capabilities(endpoint_, &capabilities),
-        AMDF_STATUS_OK);
+    amdf_gpu_dxg_memory_capabilities_t capabilities = {};
+    ASSERT_EQ(amdf_gpu_wddm_query_memory_capabilities(endpoint_, &capabilities),
+              AMDF_STATUS_OK);
     EXPECT_EQ(capabilities.atomic_update_64_supported, supported ? 1u : 0u);
     EXPECT_EQ(capabilities.cache_coherent_memory_supported, 1u);
     EXPECT_EQ(capabilities.virtual_address_bit_count, 48u);

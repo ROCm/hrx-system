@@ -49,12 +49,10 @@ amdf_cc_library(
     hdrs = ["memory_profile.h"],
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
-        "//libamdf/src:device",
-        "//libamdf/src:endpoint",
-        "//libamdf/src:memory_profile",
-        "//libamdf/src/gpu/umd:memory",
+        "//libamdf/src/gpu/umd/dxg:memory_profile",
         "//libamdf/src/platform",
         "//libamdf/src/platform/windows:endpoint",
+        "//libamdf/src/platform/windows:kmt_api",
     ],
 )
 
