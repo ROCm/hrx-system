@@ -15,7 +15,7 @@ package(
 exports_files(
     [
         "bank_test.cc",
-        "residency_test.cc",
+        "residency_pressure_test.cc",
         "weights_test.cc",
         "weights_test_base.h",
         "weights_packing_test.cc",

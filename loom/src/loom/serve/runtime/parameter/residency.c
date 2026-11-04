@@ -990,15 +990,24 @@ static bool loom_serve_residency_contains_group(
   return false;
 }
 
+typedef enum loom_serve_residency_capacity_e {
+  // The complete working set fits without releasing mutable state.
+  LOOM_SERVE_RESIDENCY_CAPACITY_AVAILABLE,
+  // Protected requirements cannot fit even if every idle history is released.
+  LOOM_SERVE_RESIDENCY_CAPACITY_PROTECTED,
+  // Protected requirements fit; a history owner may be able to release space.
+  LOOM_SERVE_RESIDENCY_CAPACITY_HISTORY,
+} loom_serve_residency_capacity_t;
+
 // Forecast against service-owned requirements and live reservation accounting.
 // Unpinned weight groups are reclaimable; shared pinned groups count once.
 // Native allocator availability and idle slab caches are not scheduling inputs.
-static bool loom_serve_residency_admit_working_set(
+static loom_serve_residency_capacity_t loom_serve_residency_forecast_capacity(
     const loom_serve_residency_t* residency, uint64_t additional_state,
-    uint64_t private_bytes, bool reclaim_history) {
+    uint64_t private_bytes) {
   loom_serve_residency_cache_t* cache = residency->cache;
   if (!cache->pool) {
-    return true;
+    return LOOM_SERVE_RESIDENCY_CAPACITY_AVAILABLE;
   }
   uint64_t remaining = loom_serve_memory_pool_limit(cache->pool);
   loom_serve_memory_usage_t permanent = {0};
@@ -1008,7 +1017,7 @@ static bool loom_serve_residency_admit_working_set(
     const uint64_t protected_bytes =
         loom_serve_virtual_pool_source_protected_bytes(cache->permanent_source);
     if (protected_bytes > remaining) {
-      return false;
+      return LOOM_SERVE_RESIDENCY_CAPACITY_PROTECTED;
     }
     remaining -= protected_bytes;
   }
@@ -1023,7 +1032,7 @@ static bool loom_serve_residency_admit_working_set(
       parameter_bytes += memory.committed_bytes + memory.pending_bytes;
       if (needed) {
         if (memory.reserved_bytes > remaining) {
-          return false;
+          return LOOM_SERVE_RESIDENCY_CAPACITY_PROTECTED;
         }
         remaining -= memory.reserved_bytes;
       }
@@ -1045,7 +1054,7 @@ static bool loom_serve_residency_admit_working_set(
   const uint64_t output_bytes = cache->output_bytes;
   iree_slim_mutex_unlock(&cache->output_mutex);
   if (output_bytes > remaining) {
-    return false;
+    return LOOM_SERVE_RESIDENCY_CAPACITY_PROTECTED;
   }
   remaining -= output_bytes;
   for (const loom_serve_residency_t* entry = cache->oldest; entry;
@@ -1056,14 +1065,14 @@ static bool loom_serve_residency_admit_working_set(
           entry == residency ? private_bytes : entry->private_bytes,
           entry->output_bytes);
       if (required > remaining) {
-        return false;
+        return LOOM_SERVE_RESIDENCY_CAPACITY_PROTECTED;
       }
       remaining -= required;
     }
   }
   const uint64_t output = residency->pin_count ? 0 : residency->output_bytes;
   if (output > remaining) {
-    return false;
+    return LOOM_SERVE_RESIDENCY_CAPACITY_PROTECTED;
   }
   remaining -= output;
   // Logical peers can pack into the same slab; round their aggregate once.
@@ -1072,26 +1081,11 @@ static bool loom_serve_residency_admit_working_set(
       cache, workspace_capacity - remaining);
   if (workspace_bytes > workspace_capacity ||
       additional_state > workspace_capacity - workspace_bytes) {
-    return false;
+    return LOOM_SERVE_RESIDENCY_CAPACITY_PROTECTED;
   }
   remaining = workspace_capacity - workspace_bytes - additional_state;
-  if (mutable_bytes <= remaining) {
-    return true;
-  }
-  // Protected work fits; idle mutable history is the only remaining pressure.
-  // Ask one eligible owner to retire its history, preserving every accepted
-  // consumer and borrowed preparation. Native retirement wakes the owner;
-  // this admission neither waits nor probes allocator space.
-  if (reclaim_history && !loom_serve_residency_cache_is_reclaiming(cache)) {
-    for (loom_serve_residency_t* entry = cache->oldest; entry;
-         entry = entry->next) {
-      if (!entry->pin_count && entry->reclaimer.request &&
-          entry->reclaimer.request(entry->reclaimer.self)) {
-        break;
-      }
-    }
-  }
-  return false;
+  return mutable_bytes <= remaining ? LOOM_SERVE_RESIDENCY_CAPACITY_AVAILABLE
+                                    : LOOM_SERVE_RESIDENCY_CAPACITY_HISTORY;
 }
 
 iree_status_t loom_serve_residency_check_private_peak(
@@ -1106,11 +1100,18 @@ iree_status_t loom_serve_residency_check_private_peak(
   IREE_RETURN_IF_ERROR(loom_serve_residency_check_working_set(
       residency, IREE_ARRAYSIZE(extents), extents));
   if (residency->pin_count && private_bytes > residency->private_bytes &&
-      !loom_serve_residency_admit_working_set(residency, 0, private_bytes,
-                                              false)) {
-    return iree_make_status(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        "replacement command workspace exceeds available serving capacity");
+      loom_serve_residency_forecast_capacity(residency, 0, private_bytes) !=
+          LOOM_SERVE_RESIDENCY_CAPACITY_AVAILABLE) {
+    // Completed failures may still be charged. Refresh only under pressure;
+    // replacing workspace never requests logical history eviction.
+    IREE_RETURN_IF_ERROR(
+        loom_serve_memory_pool_query_status(residency->cache->pool));
+    if (loom_serve_residency_forecast_capacity(residency, 0, private_bytes) !=
+        LOOM_SERVE_RESIDENCY_CAPACITY_AVAILABLE) {
+      return iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "replacement command workspace exceeds available serving capacity");
+    }
   }
   return iree_ok_status();
 }
@@ -1162,9 +1163,35 @@ static iree_status_t loom_serve_residency_acquire_parameters(
         state->range_count, state->ranges, &footprint));
   }
   const uint64_t additional_state = footprint.missing_bytes;
-  if (!loom_serve_residency_admit_working_set(residency, additional_state,
-                                              residency->private_bytes, true)) {
-    return iree_ok_status();
+  loom_serve_residency_capacity_t capacity =
+      loom_serve_residency_forecast_capacity(residency, additional_state,
+                                             residency->private_bytes);
+  if (capacity != LOOM_SERVE_RESIDENCY_CAPACITY_AVAILABLE) {
+    // A readiness query can publish failed or retired backing. Recalculate
+    // before discarding history, keeping successful admission query-free.
+    loom_serve_residency_cache_t* cache = residency->cache;
+    const bool reclaiming = loom_serve_residency_cache_is_reclaiming(cache);
+    IREE_RETURN_IF_ERROR(loom_serve_memory_pool_query_status(cache->pool));
+    capacity = loom_serve_residency_forecast_capacity(
+        residency, additional_state, residency->private_bytes);
+    if (capacity != LOOM_SERVE_RESIDENCY_CAPACITY_AVAILABLE) {
+      if (reclaiming) {
+        // Keep this pending observation even if its wake has already arrived.
+        *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED;
+      } else if (capacity == LOOM_SERVE_RESIDENCY_CAPACITY_HISTORY) {
+        // Parameter pins protect weights, not every history of that model.
+        // Each history owner excludes accepted consumers and borrowed state.
+        for (loom_serve_residency_t* entry = cache->oldest; entry;
+             entry = entry->next) {
+          if (entry->reclaimer.request &&
+              entry->reclaimer.request(entry->reclaimer.self)) {
+            *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED;
+            break;
+          }
+        }
+      }
+      return iree_ok_status();
+    }
   }
   // Nested execution shares parameter protection. A new row still admits its
   // complete state growth before borrowing another pin.
@@ -1309,7 +1336,8 @@ static iree_status_t loom_serve_residency_admit(
       loom_serve_residency_acquire_parameters(residency, state, out_admission));
   if (*out_admission != LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
     loom_serve_residency_queue_admission(residency);
-    if (loom_serve_residency_cache_is_reclaiming(cache)) {
+    if (*out_admission == LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY &&
+        loom_serve_residency_cache_is_reclaiming(cache)) {
       *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED;
     }
   }

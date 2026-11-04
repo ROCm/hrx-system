@@ -981,7 +981,7 @@ loom_cc_test(
     name = "weights_test",
     srcs = [
         "//loom/src/loom/serve/runtime/parameter:bank_test.cc",
-        "//loom/src/loom/serve/runtime/parameter:residency_test.cc",
+        "//loom/src/loom/serve/runtime/parameter:residency_pressure_test.cc",
         "//loom/src/loom/serve/runtime/parameter:weights_packing_test.cc",
         "//loom/src/loom/serve/runtime/parameter:weights_streaming_test.cc",
         "//loom/src/loom/serve/runtime/parameter:weights_test.cc",

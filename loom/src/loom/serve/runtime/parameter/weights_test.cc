@@ -1336,7 +1336,7 @@ TEST_P(WeightsTest, IdleExpiryPreservesPinsAndReloadsWithoutRecompiling) {
   EXPECT_TRUE(loom_serve_residency_snapshot(residencies_[1]).active);
 }
 
-TEST_P(WeightsTest, PinnedWeightsDeferIdleCacheReclamationUntilItCanHelp) {
+TEST_P(WeightsTest, ReclaimsIdleHistoryOnlyWhenProtectedParametersFit) {
   if (!GetParam()) {
     return;
   }
@@ -1347,6 +1347,9 @@ TEST_P(WeightsTest, PinnedWeightsDeferIdleCacheReclamationUntilItCanHelp) {
   }
   IREE_ASSERT_OK(Register(0, 0, 2));
   IREE_ASSERT_OK(Register(1, 0, 0));
+  // An accepted consumer holds this model's parameter pin independently of
+  // idle history owned by its reclaimer.
+  IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[1]));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
       pool_, loom_serve_pool_state_geometry(storage_owner_), kSlabBytes, 256,
       &state_statistics_, &state_));
@@ -1411,6 +1414,7 @@ TEST_P(WeightsTest, PinnedWeightsDeferIdleCacheReclamationUntilItCanHelp) {
   IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
   EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
   EXPECT_EQ(owner.requests, 1u);
+  EXPECT_EQ(loom_serve_residency_snapshot(residencies_[1]).pin_count, 1u);
   // Cancelling admission does not pretend accepted maintenance has retired.
   loom_serve_residency_cancel_admission(residencies_[0]);
   EXPECT_TRUE(loom_serve_residency_cache_is_reclaiming(cache));
@@ -1424,6 +1428,8 @@ TEST_P(WeightsTest, PinnedWeightsDeferIdleCacheReclamationUntilItCanHelp) {
   loom_serve_residency_release(residencies_[0]);
   loom_serve_residency_set_reclaimer(residencies_[1], {});
   EXPECT_EQ(owner.requests, 1u);
+  EXPECT_EQ(loom_serve_residency_snapshot(residencies_[1]).pin_count, 1u);
+  loom_serve_residency_release(residencies_[1]);
 }
 
 TEST_P(WeightsTest, MutableGrowthReclaimsIdleParametersWithoutDiscardingState) {
