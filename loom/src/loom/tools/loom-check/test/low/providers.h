@@ -21,6 +21,11 @@ extern const loom_check_emit_provider_t loom_check_test_low_allocation_provider;
 // Reports focused schedule relationships for authored Low operations.
 extern const loom_check_emit_provider_t loom_check_test_low_schedule_provider;
 
+// Reports complete scheduling, allocation, packet, and report observations for
+// authored Low compiler tests.
+extern const loom_check_emit_provider_t
+    loom_check_test_low_observation_provider;
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
