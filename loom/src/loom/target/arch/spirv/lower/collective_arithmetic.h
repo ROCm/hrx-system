@@ -14,6 +14,14 @@
 extern "C" {
 #endif
 
+// Native subgroup topology shared by product and extremum arithmetic.
+typedef enum loom_spirv_collective_mode_e {
+  LOOM_SPIRV_COLLECTIVE_REDUCE,
+  LOOM_SPIRV_COLLECTIVE_CLUSTERED_REDUCE,
+  LOOM_SPIRV_COLLECTIVE_INCLUSIVE_SCAN,
+  LOOM_SPIRV_COLLECTIVE_EXCLUSIVE_SCAN,
+} loom_spirv_collective_mode_t;
+
 // Immutable native-carrier instructions shared by subgroup and workgroup
 // extrema. Ordered keys preserve subnormals and signed zeros without floating
 // arithmetic; the combining kind selects number preference or NaN propagation.
@@ -75,6 +83,44 @@ iree_status_t loom_spirv_select_subgroup_extrema(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_plan_t* out_plan);
 iree_status_t loom_spirv_emit_subgroup_extrema(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_plan_t plan);
+
+// Scalar floating instructions for magnitude and sign-parity products.
+typedef struct loom_spirv_product_row_t loom_spirv_product_row_t;
+
+typedef struct loom_spirv_collective_product_t {
+  // Immutable instructions for the native floating component.
+  const loom_spirv_product_row_t* row;
+  // Native floating operand and result register type.
+  loom_type_t float_type;
+  // Boolean sign and sign-parity register type.
+  loom_type_t predicate_type;
+  // Immediate name for the floating zero constant's bits.
+  loom_string_id_t constant_key;
+} loom_spirv_collective_product_t;
+
+// Returns whether a native F16/F32 product has subgroup-uniform input. Such
+// products keep the sign outside floating collective strength reduction.
+bool loom_spirv_collective_product_needed(loom_low_lower_context_t* context,
+                                          loom_combining_kind_t kind,
+                                          loom_value_id_t source_value);
+iree_status_t loom_spirv_collective_product_initialize(
+    loom_low_lower_context_t* context, loom_scalar_type_t element_type,
+    loom_spirv_collective_product_t* out_arithmetic);
+
+// Emits one scalar component with identical magnitude and sign participation.
+// Cluster attributes are empty except for a contiguous clustered reduction.
+iree_status_t loom_spirv_collective_product_emit(
+    loom_low_lower_context_t* context, loom_location_id_t location,
+    const loom_spirv_collective_product_t* arithmetic,
+    loom_spirv_collective_mode_t mode, loom_named_attr_slice_t attributes,
+    loom_value_id_t value, loom_value_id_t* out_value);
+
+iree_status_t loom_spirv_select_subgroup_product(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_plan_t* out_plan);
+iree_status_t loom_spirv_emit_subgroup_product(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_plan_t plan);
 

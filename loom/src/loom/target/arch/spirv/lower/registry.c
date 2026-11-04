@@ -522,7 +522,15 @@ static iree_status_t loom_spirv_preselect_op(void* user_data,
   }
   if (loom_kernel_subgroup_reduce_isa(source_op) ||
       loom_kernel_subgroup_scan_isa(source_op)) {
-    return loom_spirv_select_subgroup_extrema(context, source_op, out_plan);
+    const loom_combining_kind_t kind =
+        loom_kernel_subgroup_scan_isa(source_op)
+            ? loom_kernel_subgroup_scan_kind(source_op)
+            : loom_kernel_subgroup_reduce_kind(source_op);
+    return kind == LOOM_COMBINING_KIND_MULF
+               ? loom_spirv_select_subgroup_product(context, source_op,
+                                                    out_plan)
+               : loom_spirv_select_subgroup_extrema(context, source_op,
+                                                    out_plan);
   }
   return loom_spirv_select_workgroup_plan(context, source_op, out_plan);
 }
@@ -537,7 +545,13 @@ static iree_status_t loom_spirv_emit_op(void* user_data,
   }
   if (loom_kernel_subgroup_reduce_isa(source_op) ||
       loom_kernel_subgroup_scan_isa(source_op)) {
-    return loom_spirv_emit_subgroup_extrema(context, source_op, plan);
+    const loom_combining_kind_t kind =
+        loom_kernel_subgroup_scan_isa(source_op)
+            ? loom_kernel_subgroup_scan_kind(source_op)
+            : loom_kernel_subgroup_reduce_kind(source_op);
+    return kind == LOOM_COMBINING_KIND_MULF
+               ? loom_spirv_emit_subgroup_product(context, source_op, plan)
+               : loom_spirv_emit_subgroup_extrema(context, source_op, plan);
   }
   return loom_spirv_lower_workgroup_op(context, source_op, plan);
 }
@@ -557,7 +571,13 @@ static iree_status_t loom_spirv_describe_plan(
   }
   if (loom_kernel_subgroup_reduce_isa(source_op) ||
       loom_kernel_subgroup_scan_isa(source_op)) {
-    out_report->plan_key = IREE_SV("integer_float_extrema");
+    const loom_combining_kind_t kind =
+        loom_kernel_subgroup_scan_isa(source_op)
+            ? loom_kernel_subgroup_scan_kind(source_op)
+            : loom_kernel_subgroup_reduce_kind(source_op);
+    out_report->plan_key = kind == LOOM_COMBINING_KIND_MULF
+                               ? IREE_SV("uniform_float_product")
+                               : IREE_SV("integer_float_extrema");
   }
   return iree_ok_status();
 }

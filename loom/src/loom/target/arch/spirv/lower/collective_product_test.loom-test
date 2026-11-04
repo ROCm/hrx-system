@@ -1,0 +1,345 @@
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal source-to-low{control-flow=structured-low}
+
+// A uniform-address load retains its distribution through lowering. Each mode
+// uses matching magnitude and sign collectives, including the empty prefix.
+kernel.def @uniform_products() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xf32>
+  %value = view.load %source[0] : view<1xf32> -> f32
+  %reduction = kernel.subgroup.reduce<mulf> %value : f32
+  %inclusive = kernel.subgroup.scan<mulf> %value {direction = forward, mode = inclusive} : f32
+  %exclusive = kernel.subgroup.scan<mulf> %value {direction = forward, mode = exclusive} : f32
+  %destination = buffer.view %output[%base] : buffer -> view<3xf32>
+  view.store %reduction, %destination[0] : f32, view<3xf32>
+  view.store %inclusive, %destination[1] : f32, view<3xf32>
+  view.store %exclusive, %destination[2] : f32, view<3xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @uniform_products() asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %13 = OpConstant.offset64 0
+  %14 = OpPtrAccessChain.storage_buffer.f32.byte_offset %input, %13
+  %value = OpLoad.storage_buffer.f32 %14
+  %16 = OpConstant.f32 0
+  %17 = OpFOrdLessThan.f32 %value, %16
+  %18 = OpFSub.f32 %16, %value
+  %19 = OpSelect.f32 %17, %18, %value
+  %20 = OpGroupNonUniformFMul.reduce.f32 %19
+  %21 = OpGroupNonUniformLogicalXor.reduce.bool %17
+  %22 = OpFSub.f32 %16, %20
+  %reduction = OpSelect.f32 %21, %22, %20
+  %24 = OpConstant.f32 0
+  %25 = OpFOrdLessThan.f32 %value, %24
+  %26 = OpFSub.f32 %24, %value
+  %27 = OpSelect.f32 %25, %26, %value
+  %28 = OpGroupNonUniformFMul.inclusive_scan.f32 %27
+  %29 = OpGroupNonUniformLogicalXor.inclusive_scan.bool %25
+  %30 = OpFSub.f32 %24, %28
+  %inclusive = OpSelect.f32 %29, %30, %28
+  %32 = OpConstant.f32 0
+  %33 = OpFOrdLessThan.f32 %value, %32
+  %34 = OpFSub.f32 %32, %value
+  %35 = OpSelect.f32 %33, %34, %value
+  %36 = OpGroupNonUniformFMul.exclusive_scan.f32 %35
+  %37 = OpGroupNonUniformLogicalXor.exclusive_scan.bool %33
+  %38 = OpFSub.f32 %32, %36
+  %exclusive = OpSelect.f32 %37, %38, %36
+  %40 = OpConstant.offset64 0
+  %41 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %40
+  OpStore.storage_buffer.f32 %41, %reduction
+  %42 = OpConstant.offset64 4
+  %43 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %42
+  OpStore.storage_buffer.f32 %43, %inclusive
+  %44 = OpConstant.offset64 8
+  %45 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %44
+  OpStore.storage_buffer.f32 %45, %exclusive
+  return
+}
+
+// ====
+
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal source-to-low
+
+// Half products require Float16 and subgroup extended types, but no Int16.
+kernel.def @half_cluster() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%output: buffer) {
+  %value = scalar.constant -1.0 : f16
+  %product = kernel.subgroup.reduce<mulf> %value {cluster_size = 8} : f16
+  %base = index.constant 0 : offset
+  %destination = buffer.view %output[%base] : buffer -> view<1xf16>
+  view.store %product, %destination[0] : f16, view<1xf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer) -> ()}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @half_cluster() asm {
+  %output = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %value = OpConstant.f16 48128
+  %9 = OpConstant.f16 0
+  %10 = OpFOrdLessThan.f16 %value, %9
+  %11 = OpFSub.f16 %9, %value
+  %12 = OpSelect.f16 %10, %11, %value
+  %13 = OpGroupNonUniformFMul.clustered_reduce.f16 %12, 8
+  %14 = OpGroupNonUniformLogicalXor.clustered_reduce.bool %10, 8
+  %15 = OpFSub.f16 %9, %13
+  %product = OpSelect.f16 %14, %15, %13
+  %17 = OpConstant.offset64 0
+  %18 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %17
+  OpStore.storage_buffer.f16 %18, %product
+  return
+}
+
+// ====
+
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal source-to-low
+
+// Vector components remain independent and are reconstructed in source order.
+kernel.def @packet_product() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%first: f32, %second: f32, %third: f32, %output: buffer) {
+  %base = index.constant 0 : offset
+  %value = vector.from_elements %first, %second, %third : vector<3xf32>
+  %product = kernel.subgroup.scan<mulf> %value {direction = forward, mode = exclusive} : vector<3xf32>
+  %destination = buffer.view %output[%base] : buffer -> view<3xf32>
+  %first_result = vector.extract %product[0] : vector<3xf32> -> f32
+  %second_result = vector.extract %product[1] : vector<3xf32> -> f32
+  %third_result = vector.extract %product[2] : vector<3xf32> -> f32
+  view.store %first_result, %destination[0] : f32, view<3xf32>
+  view.store %second_result, %destination[1] : f32, view<3xf32>
+  view.store %third_result, %destination[2] : f32, view<3xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (f32, f32, f32, buffer) -> ()}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @packet_product(%first: reg<spirv.id : f32>, %second: reg<spirv.id : f32>, %third: reg<spirv.id : f32>) asm {
+  %output = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %value = OpCompositeConstruct.v3f32 %first, %second, %third
+  %18 = OpCompositeExtract.v3f32.f32 %value, 0
+  %19 = OpConstant.f32 0
+  %20 = OpFOrdLessThan.f32 %18, %19
+  %21 = OpFSub.f32 %19, %18
+  %22 = OpSelect.f32 %20, %21, %18
+  %23 = OpGroupNonUniformFMul.exclusive_scan.f32 %22
+  %24 = OpGroupNonUniformLogicalXor.exclusive_scan.bool %20
+  %25 = OpFSub.f32 %19, %23
+  %26 = OpSelect.f32 %24, %25, %23
+  %27 = OpCompositeExtract.v3f32.f32 %value, 1
+  %28 = OpConstant.f32 0
+  %29 = OpFOrdLessThan.f32 %27, %28
+  %30 = OpFSub.f32 %28, %27
+  %31 = OpSelect.f32 %29, %30, %27
+  %32 = OpGroupNonUniformFMul.exclusive_scan.f32 %31
+  %33 = OpGroupNonUniformLogicalXor.exclusive_scan.bool %29
+  %34 = OpFSub.f32 %28, %32
+  %35 = OpSelect.f32 %33, %34, %32
+  %36 = OpCompositeExtract.v3f32.f32 %value, 2
+  %37 = OpConstant.f32 0
+  %38 = OpFOrdLessThan.f32 %36, %37
+  %39 = OpFSub.f32 %37, %36
+  %40 = OpSelect.f32 %38, %39, %36
+  %41 = OpGroupNonUniformFMul.exclusive_scan.f32 %40
+  %42 = OpGroupNonUniformLogicalXor.exclusive_scan.bool %38
+  %43 = OpFSub.f32 %37, %41
+  %44 = OpSelect.f32 %42, %43, %41
+  %product = OpCompositeConstruct.v3f32 %26, %35, %44
+  %first_result = OpCompositeExtract.v3f32.f32 %product, 0
+  %second_result = OpCompositeExtract.v3f32.f32 %product, 1
+  %third_result = OpCompositeExtract.v3f32.f32 %product, 2
+  %49 = OpConstant.offset64 0
+  %50 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %49
+  OpStore.storage_buffer.f32 %50, %first_result
+  %51 = OpConstant.offset64 4
+  %52 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %51
+  OpStore.storage_buffer.f32 %52, %second_result
+  %53 = OpConstant.offset64 8
+  %54 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %53
+  OpStore.storage_buffer.f32 %54, %third_result
+  return
+}
+
+// ====
+
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal source-to-low
+
+// Lane-varying products retain one native instruction.
+kernel.def @varying_product() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.subgroup.lane.id : index
+  %source = buffer.view %input[%base] : buffer -> view<32xf32>
+  %value = view.load %source[%lane] : view<32xf32> -> f32
+  %product = kernel.subgroup.scan<mulf> %value {direction = forward, mode = inclusive} : f32
+  %destination = buffer.view %output[%base] : buffer -> view<1xf32>
+  view.store %product, %destination[0] : f32, view<1xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @varying_product() asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %lane = OpLoadBuiltin.subgroup_local_invocation_id
+  %13 = OpSConvert.i32.offset64 %lane
+  %14 = OpConstant.offset64 4
+  %15 = OpIMul.offset64 %13, %14
+  %16 = OpPtrAccessChain.storage_buffer.f32.byte_offset %input, %15
+  %value = OpLoad.storage_buffer.f32 %16
+  %product = OpGroupNonUniformFMul.inclusive_scan.f32 %value : reg<spirv.id>
+  %19 = OpConstant.offset64 0
+  %20 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %19
+  OpStore.storage_buffer.f32 %20, %product
+  return
+}
+
+// ====
+
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal source-to-low
+
+// A one-element vector uses the scalar carrier at this boundary.
+kernel.def @single_component() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: f32, %output: buffer) {
+  %base = index.constant 0 : offset
+  %packet = vector.splat %value : vector<1xf32>
+  %product = kernel.subgroup.reduce<mulf> %packet : vector<1xf32>
+  %result = vector.extract %product[0] : vector<1xf32> -> f32
+  %destination = buffer.view %output[%base] : buffer -> view<1xf32>
+  view.store %result, %destination[0] : f32, view<1xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (f32, buffer) -> ()}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @single_component(%packet: reg<spirv.id : f32>) asm {
+  %output = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %11 = OpConstant.f32 0
+  %12 = OpFOrdLessThan.f32 %packet, %11
+  %13 = OpFSub.f32 %11, %packet
+  %14 = OpSelect.f32 %12, %13, %packet
+  %15 = OpGroupNonUniformFMul.reduce.f32 %14
+  %16 = OpGroupNonUniformLogicalXor.reduce.bool %12
+  %17 = OpFSub.f32 %11, %15
+  %result = OpSelect.f32 %16, %17, %15
+  %19 = OpConstant.offset64 0
+  %20 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %19
+  OpStore.storage_buffer.f32 %20, %result
+  return
+}
+
+// ====
+
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal source-to-low{control-flow=structured-low}
+
+// Mixed payloads share workgroup topology. Only the uniform product uses sign
+// parity, in both subgroup stages; scratch still contains floating products.
+// One-element packets retain scalar carriers through either arithmetic path.
+kernel.def @workgroup_products() {
+  %unit = index.constant 1 : index
+  %width = index.constant 67 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%uniform: f32, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.subgroup.lane.id : index
+  %lane_integer = index.cast %lane : index to i32
+  %varying = scalar.sitofp %lane_integer : i32 to f32
+  %uniform_packet = vector.splat %uniform : vector<1xf32>
+  %varying_packet = vector.splat %varying : vector<1xf32>
+  %uniform_result, %varying_result = kernel.workgroup.reduce<mulf> %uniform_packet, %varying_packet : vector<1xf32>, vector<1xf32>
+  %uniform_product = vector.extract %uniform_result[0] : vector<1xf32> -> f32
+  %varying_product = vector.extract %varying_result[0] : vector<1xf32> -> f32
+  %destination = buffer.view %output[%base] : buffer -> view<2xf32>
+  view.store %uniform_product, %destination[0] : f32, view<2xf32>
+  view.store %varying_product, %destination[1] : f32, view<2xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (f32, buffer) -> ()}) workgroup_size(67, 1, 1) workgroup_count(1, 1, 1) @workgroup_products(%uniform_packet: reg<spirv.id : f32>) asm {
+  %output = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %lane = OpLoadBuiltin.subgroup_local_invocation_id
+  %lane_integer = OpCopyObject.i32 %lane
+  %varying_packet = OpConvertSToF.i32.f32 %lane_integer
+  %20 = OpConstant.i32 0
+  %21 = OpConstant.i32 1
+  %22 = OpLoadBuiltin.subgroup_id : reg<spirv.id : i32>
+  %23 = OpLoadBuiltin.num_subgroups : reg<spirv.id : i32>
+  %24 = OpGroupNonUniformIAdd.exclusive_scan.i32 %21
+  %25 = OpConstant.f32 1065353216
+  %26 = OpConstant.f32 0
+  %27 = OpFOrdLessThan.f32 %uniform_packet, %26
+  %28 = OpFSub.f32 %26, %uniform_packet
+  %29 = OpSelect.f32 %27, %28, %uniform_packet
+  %30 = OpGroupNonUniformFMul.reduce.f32 %29
+  %31 = OpGroupNonUniformLogicalXor.reduce.bool %27
+  %32 = OpFSub.f32 %26, %30
+  %33 = OpSelect.f32 %31, %32, %30
+  %34 = storage {byte_alignment = 4, byte_length = 272} : low.storage<workgroup>
+  %35 = storage_address %34 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.f32>
+  %36 = OpConstant.f32 1065353216
+  %37 = OpGroupNonUniformFMul.reduce.f32 %varying_packet
+  %38 = storage {byte_alignment = 4, byte_length = 272} : low.storage<workgroup>
+  %39 = storage_address %38 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.f32>
+  %40 = OpIEqual %24, %20
+  low.scf.if %40 {
+    %41 = OpAccessChain.workgroup.f32.element_index %35, %22
+    OpStore.workgroup.f32 %41, %33
+    %42 = OpAccessChain.workgroup.f32.element_index %39, %22
+    OpStore.workgroup.f32 %42, %37
+  }
+  OpControlBarrier.workgroup.workgroup.acq_rel
+  %43 = OpConstant.i32 67
+  %44 = OpAccessChain.workgroup.f32.element_index %35, %43
+  %45 = OpAccessChain.workgroup.f32.element_index %39, %43
+  %46 = OpIEqual %22, %20
+  low.scf.if %46 {
+    %47 = OpGroupNonUniformIAdd.reduce.i32 %21
+    %51, %52 = low.scf.for unsigned [%24 to %23 step %47] iter_args(%25: reg<spirv.id : f32>, %36: reg<spirv.id : f32>) -> (reg<spirv.id : f32>, reg<spirv.id : f32>) do(%48: reg<spirv.id : i32>, %49: reg<spirv.id : f32>, %50: reg<spirv.id : f32>) {
+      %53 = OpAccessChain.workgroup.f32.element_index %35, %48
+      %54 = OpLoad.workgroup.f32 %53
+      %55 = OpFMul.f32 %49, %54
+      %56 = OpAccessChain.workgroup.f32.element_index %39, %48
+      %57 = OpLoad.workgroup.f32 %56
+      %58 = OpFMul.f32 %50, %57
+      low.scf.yield %55, %58 : reg<spirv.id : f32>, reg<spirv.id : f32>
+    }
+    %59 = OpConstant.f32 0
+    %60 = OpFOrdLessThan.f32 %51, %59
+    %61 = OpFSub.f32 %59, %51
+    %62 = OpSelect.f32 %60, %61, %51
+    %63 = OpGroupNonUniformFMul.reduce.f32 %62
+    %64 = OpGroupNonUniformLogicalXor.reduce.bool %60
+    %65 = OpFSub.f32 %59, %63
+    %66 = OpSelect.f32 %64, %65, %63
+    %67 = OpGroupNonUniformFMul.reduce.f32 %52
+    low.scf.if %40 {
+      OpStore.workgroup.f32 %44, %66
+      OpStore.workgroup.f32 %45, %67
+    }
+  }
+  OpControlBarrier.workgroup.workgroup.acq_rel
+  %uniform_product = OpLoad.workgroup.f32 %44
+  %varying_product = OpLoad.workgroup.f32 %45
+  %70 = OpConstant.offset64 0
+  %71 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %70
+  OpStore.storage_buffer.f32 %71, %uniform_product
+  %72 = OpConstant.offset64 4
+  %73 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %72
+  OpStore.storage_buffer.f32 %73, %varying_product
+  return
+}

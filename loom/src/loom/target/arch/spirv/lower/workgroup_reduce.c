@@ -84,7 +84,9 @@ typedef struct loom_spirv_workgroup_payload_t {
   const loom_spirv_workgroup_carrier_t* carrier;
   // Optional function-arena ordered-key arithmetic for floating extrema.
   loom_spirv_collective_extrema_t* extrema;
-  // Native source/result packet type, including scalar-shaped vectors.
+  // Optional function-arena magnitude/sign arithmetic for uniform products.
+  loom_spirv_collective_product_t* product;
+  // Native source/result packet type; vector1 uses a scalar register.
   loom_type_t packet_type;
   // Scalar source/result component type before arithmetic conversion.
   loom_type_t source_type;
@@ -246,8 +248,8 @@ iree_status_t loom_spirv_select_workgroup_reduce(
       break;
     }
     status = loom_low_lower_make_typed_register_type(
-        context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, 1, type,
-        &payload->packet_type);
+        context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, 1,
+        lanes == 1 ? loom_type_scalar(element) : type, &payload->packet_type);
     if (iree_status_is_ok(status)) {
       status =
           loom_spirv_workgroup_type(context, element, &payload->source_type);
@@ -285,6 +287,16 @@ iree_status_t loom_spirv_select_workgroup_reduce(
             context,
             loom_spirv_collective_extrema_row(loom_type_scalar(element)), kind,
             payload->extrema);
+      }
+    }
+    if (iree_status_is_ok(status) &&
+        loom_spirv_collective_product_needed(
+            context, kind, loom_op_const_operands(source_op)[i])) {
+      status = loom_low_lower_allocate_function_array(
+          context, 1, sizeof(*payload->product), (void**)&payload->product);
+      if (iree_status_is_ok(status)) {
+        status = loom_spirv_collective_product_initialize(context, element,
+                                                          payload->product);
       }
     }
     if (iree_status_is_ok(status)) {
@@ -407,6 +419,22 @@ static iree_status_t loom_spirv_workgroup_storage_value(
       (loom_value_id_t[]){value, zero}, 2, payload->arithmetic_type, out_value);
 }
 
+// Both subgroup stages use the retained source arithmetic policy. In
+// particular, a singleton workgroup's final fold may remain uniform too.
+static iree_status_t loom_spirv_workgroup_reduce_subgroup(
+    loom_low_lower_context_t* context, loom_location_id_t location,
+    const loom_spirv_workgroup_payload_t* payload, loom_value_id_t value,
+    loom_value_id_t* out_value) {
+  if (payload->product) {
+    return loom_spirv_collective_product_emit(
+        context, location, payload->product, LOOM_SPIRV_COLLECTIVE_REDUCE,
+        loom_named_attr_slice_empty(), value, out_value);
+  }
+  return loom_spirv_workgroup_emit(context, location,
+                                   payload->arithmetic->subgroup, &value, 1,
+                                   payload->arithmetic_type, out_value);
+}
+
 static iree_status_t loom_spirv_workgroup_combine(
     loom_low_lower_context_t* context, loom_location_id_t location,
     const loom_spirv_workgroup_payload_t* payload, loom_type_t predicate_type,
@@ -486,9 +514,8 @@ static iree_status_t loom_spirv_workgroup_prepare_components(
                                            1, payload->arithmetic_type, &value);
       }
       if (iree_status_is_ok(status)) {
-        status = loom_spirv_workgroup_emit(
-            context, location, payload->arithmetic->subgroup, &value, 1,
-            payload->arithmetic_type, &value);
+        status = loom_spirv_workgroup_reduce_subgroup(context, location,
+                                                      payload, value, &value);
       }
       if (iree_status_is_ok(status)) {
         status = loom_spirv_workgroup_storage_value(context, location, payload,
@@ -576,9 +603,8 @@ static iree_status_t loom_spirv_workgroup_fold_partials(
     const loom_spirv_workgroup_payload_t* payload = components[i].payload;
     const loom_value_id_t local_total =
         loom_low_scf_for_results(fold).values[i];
-    status = loom_spirv_workgroup_emit(
-        context, location, payload->arithmetic->subgroup, &local_total, 1,
-        payload->arithmetic_type, &values[i]);
+    status = loom_spirv_workgroup_reduce_subgroup(context, location, payload,
+                                                  local_total, &values[i]);
     if (iree_status_is_ok(status)) {
       status = loom_spirv_workgroup_storage_value(
           context, location, payload, values[i], true, zero, one, &values[i]);
