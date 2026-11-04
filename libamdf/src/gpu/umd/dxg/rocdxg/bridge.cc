@@ -10,16 +10,10 @@
 #include "libamdf/src/gpu/umd/dxg/bridge_api.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/adapter_state.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/allocation.h"
+#include "libamdf/src/gpu/umd/dxg/rocdxg/kernel_queue.h"
 #include "libamdf/src/gpu/umd/dxg/rocdxg/native_transport.h"
 #include "shared/include/dxcore_loader.h"
 #include "shared/include/thunk_proxy/thunk_proxy.h"
-
-amdf_dxg_bridge_gpu_adapter_t::~amdf_dxg_bridge_gpu_adapter_t() {
-  delete device;
-  delete chain;
-}
-
-struct amdf_dxg_bridge_gpu_kernel_queue_t {};
 
 namespace {
 
@@ -40,8 +34,9 @@ amdf_dxg_bridge_result_t MapAdapterError(ErrorCode error) {
   }
 }
 
-void PopulateGpuProperties(const thunk_proxy::DeviceContext& device,
+void PopulateGpuProperties(const amdf_dxg_bridge_gpu_adapter_t& adapter,
                            amdf_dxg_bridge_gpu_properties_t* out_properties) {
+  const thunk_proxy::DeviceContext& device = *adapter.device;
   const amdf_dxg_bridge_gpu_properties_t properties = {
       .gfx_ip_major = device.Major(),
       .gfx_ip_minor = device.Minor(),
@@ -57,7 +52,12 @@ void PopulateGpuProperties(const thunk_proxy::DeviceContext& device,
       // published proxy surface exposes no distinct XCC topology.
       .xcc_count = 1,
       .shader_engine_count = device.NumShaderEngine(),
+      .supports_pm4_kernel_queue = adapter.pm4_queue_profile.is_supported,
+      .supports_sdma_kernel_queue = adapter.sdma_queue_profile.is_supported,
       .is_discrete = device.IsDgpu(),
+      .supports_sdma_hardware_queue =
+          adapter.sdma_queue_profile.is_supported &&
+          adapter.sdma_queue_profile.uses_hardware_scheduling,
       .platform_atomic_support = device.SupportPlatformAtomic(),
   };
   *out_properties = properties;
@@ -110,7 +110,8 @@ amdf_dxg_bridge_result_t GpuAdapterOpenImpl(
     return AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED;
   }
 
-  PopulateGpuProperties(*adapter->device, out_properties);
+  amdf::rocdxg_bridge::InitializeGpuKernelQueueProfiles(adapter.get());
+  PopulateGpuProperties(*adapter.get(), out_properties);
   *out_adapter = adapter.release();
   return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
 }
@@ -146,45 +147,16 @@ GpuAdapterOpen(const amdf_dxg_bridge_gpu_adapter_open_info_t* open_info,
 amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL
 GpuAdapterClose(amdf_dxg_bridge_gpu_adapter_t* adapter,
                 uint32_t* out_native_status) noexcept {
-  if (adapter == nullptr || out_native_status == nullptr) {
-    return AMDF_DXG_BRIDGE_RESULT_INVALID_ARGUMENT;
+  const amdf_dxg_bridge_result_t result =
+      amdf::rocdxg_bridge::PrepareGpuAdapterClose(adapter, out_native_status);
+  if (result != AMDF_DXG_BRIDGE_RESULT_SUCCESS) {
+    return result;
   }
-  *out_native_status = 0;
   amdf::rocdxg_bridge::NativeTransportScope transport_scope(
       adapter->native_transport);
   const amdf_allocator_t host_allocator = adapter->host_allocator;
   amdf::dxg_bridge::DestroyHostObject(host_allocator, adapter);
   return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
-}
-
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL
-GpuKernelQueueCreate(amdf_dxg_bridge_gpu_adapter_t*,
-                     const amdf_dxg_bridge_gpu_kernel_queue_create_info_t*,
-                     amdf_dxg_bridge_gpu_kernel_queue_t**,
-                     amdf_dxg_bridge_gpu_kernel_queue_info_t*,
-                     uint32_t* out_native_status) noexcept {
-  if (out_native_status != nullptr) {
-    *out_native_status = 0;
-  }
-  return AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED;
-}
-
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuKernelQueueSubmit(
-    amdf_dxg_bridge_gpu_kernel_queue_t*, uint64_t, uint64_t, uint64_t,
-    uint32_t* out_accepted, uint32_t* out_native_status) noexcept {
-  if (out_accepted != nullptr && out_native_status != nullptr) {
-    *out_accepted = 0;
-    *out_native_status = 0;
-  }
-  return AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED;
-}
-
-amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL GpuKernelQueueDestroy(
-    amdf_dxg_bridge_gpu_kernel_queue_t*, uint32_t* out_native_status) noexcept {
-  if (out_native_status != nullptr) {
-    *out_native_status = 0;
-  }
-  return AMDF_DXG_BRIDGE_RESULT_UNSUPPORTED;
 }
 
 amdf_status_t AMDF_DXG_BRIDGE_CALL
@@ -211,9 +183,9 @@ const amdf_dxg_bridge_api_t kBridgeApi = {
     GpuAdapterClose,
     amdf::rocdxg_bridge::GpuAllocationQueryLayout,
     amdf::rocdxg_bridge::GpuAllocationCreate,
-    GpuKernelQueueCreate,
-    GpuKernelQueueSubmit,
-    GpuKernelQueueDestroy,
+    amdf::rocdxg_bridge::GpuKernelQueueCreate,
+    amdf::rocdxg_bridge::GpuKernelQueueSubmit,
+    amdf::rocdxg_bridge::GpuKernelQueueDestroy,
     GpuBufferPrepareImport,
     GpuClockSample,
 };

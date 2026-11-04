@@ -32,11 +32,14 @@ amdf_cc_library(
 amdf_linux_sidecar_library(
     name = "amdf_rocdxg_bridge",
     srcs = [
+        "adapter_state.cc",
         "adapter_state.h",
         "allocation.cc",
         "allocation.h",
         "bridge.cc",
         "gfxip_compatibility.cc",
+        "kernel_queue.cc",
+        "kernel_queue.h",
     ],
     exports_file = "exports.map",
     visibility = ["//libamdf/src/gpu/umd/dxg/linux:__pkg__"],
@@ -46,6 +49,7 @@ amdf_linux_sidecar_library(
         "//libamdf/src/gpu/umd/dxg:bridge_api",
         "//third_party:amdf_rocdxg_headers",
         "//third_party:amdf_rocdxg_thunk_proxy",
+        "//third_party:amdf_wkmi",
     ],
 )
 
@@ -113,6 +117,38 @@ amdf_cc_test(
     deps = [
         ":native_transport",
         "//third_party:amdf_rocdxg_headers",
+        "//third_party:amdf_wkmi",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "kernel_queue_test",
+    srcs = [
+        "adapter_state.cc",
+        "adapter_state.h",
+        "gfxip_compatibility.cc",
+        "kernel_queue.cc",
+        "kernel_queue.h",
+        "kernel_queue_test.cc",
+    ],
+    copts = ["-Wno-unknown-pragmas"],
+    cxxopts = [
+        "-fexceptions",
+        "-frtti",
+    ],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        ":native_transport",
+        "//libamdf/src:allocator",
+        "//libamdf/src/gpu/umd/dxg:bridge_allocator",
+        "//libamdf/src/gpu/umd/dxg:bridge_api",
+        "//third_party:amdf_rocdxg_headers",
+        "//third_party:amdf_rocdxg_thunk_proxy",
         "//third_party:amdf_wkmi",
         "//third_party:google_test",
         "//third_party:google_test_main",
