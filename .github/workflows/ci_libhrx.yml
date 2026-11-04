@@ -82,7 +82,7 @@ jobs:
           - name: TSAN
             sanitizer: tsan
             assertions: true
-            ctest_exclude_regex: "^iree/async/platform/io_uring/cts/core_tests$"
+            ctest_exclude_regex: ""
             package: false
           - name: UBSAN
             sanitizer: ubsan
