@@ -422,5 +422,50 @@ TEST_F(LowFunctionRequirementsTest, RetainsUniqueDirectCalleesInCallOrder) {
             first_ref.symbol_id);
 }
 
+TEST_F(LowFunctionRequirementsTest, RetainsManyUniqueDirectCalleesInCallOrder) {
+  const loom_symbol_ref_t entry_ref = AddSymbol(IREE_SV("entry"));
+  const loom_symbol_ref_t callees[] = {
+      AddSymbol(IREE_SV("callee0")), AddSymbol(IREE_SV("callee1")),
+      AddSymbol(IREE_SV("callee2")), AddSymbol(IREE_SV("callee3")),
+      AddSymbol(IREE_SV("callee4")), AddSymbol(IREE_SV("callee5")),
+      AddSymbol(IREE_SV("callee6")), AddSymbol(IREE_SV("callee7")),
+  };
+  loom_op_t* entry = BuildFunction(entry_ref);
+  for (loom_symbol_ref_t callee : callees) {
+    BuildFunction(callee);
+  }
+  loom_symbol_ref_t remote_callee = callees[5];
+  remote_callee.module_id = 1;
+  const loom_symbol_ref_t call_order[] = {
+      callees[5], callees[0],    callees[6], callees[1],    callees[4],
+      callees[2], callees[3],    callees[7], remote_callee, callees[5],
+      callees[0], remote_callee, callees[7],
+  };
+  loom_builder_t builder = BodyBuilder(entry);
+  for (loom_symbol_ref_t callee : call_order) {
+    loom_op_t* call = nullptr;
+    IREE_ASSERT_OK(loom_low_func_call_build(
+        &builder, /*build_flags=*/0, /*effect_contract=*/0,
+        /*inline_policy=*/0, callee, /*operands=*/nullptr,
+        /*operands_count=*/0, /*result_types=*/nullptr, /*result_count=*/0,
+        /*tied_results=*/nullptr, /*tied_result_count=*/0,
+        LOOM_LOCATION_UNKNOWN, &call));
+  }
+  BuildReturn(&builder);
+
+  const auto requirements = Analyze(entry);
+  const loom_symbol_ref_t expected_order[] = {
+      callees[5], callees[0], callees[6], callees[1],    callees[4],
+      callees[2], callees[3], callees[7], remote_callee,
+  };
+  ASSERT_EQ(requirements.direct_callees.count, IREE_ARRAYSIZE(expected_order));
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(expected_order); ++i) {
+    EXPECT_EQ(requirements.direct_callees.values[i].module_id,
+              expected_order[i].module_id);
+    EXPECT_EQ(requirements.direct_callees.values[i].symbol_id,
+              expected_order[i].symbol_id);
+  }
+}
+
 }  // namespace
 }  // namespace loom
