@@ -23,6 +23,9 @@ AMDF_LINUX_DXG_KMT_OPERATION(map_gpu_virtual_address,
                              D3DDDI_MAPGPUVIRTUALADDRESS, 0x0C)
 AMDF_LINUX_DXG_KMT_OPERATION(escape, D3DKMT_ESCAPE, 0x0D)
 AMDF_LINUX_DXG_KMT_OPERATION(get_device_state, D3DKMT_GETDEVICESTATE, 0x0E)
+AMDF_LINUX_DXG_KMT_OPERATION(submit_command, D3DKMT_SUBMITCOMMAND, 0x0F)
+AMDF_LINUX_DXG_KMT_OPERATION(create_synchronization_object,
+                             D3DKMT_CREATESYNCHRONIZATIONOBJECT2, 0x10)
 AMDF_LINUX_DXG_KMT_OPERATION(destroy_allocation, D3DKMT_DESTROYALLOCATION2,
                              0x13)
 AMDF_LINUX_DXG_KMT_OPERATION(enumerate_adapters, D3DKMT_ENUMADAPTERS2, 0x14)
@@ -33,10 +36,14 @@ AMDF_LINUX_DXG_KMT_OPERATION(destroy_hardware_queue, D3DKMT_DESTROYHWQUEUE,
                              0x1B)
 AMDF_LINUX_DXG_KMT_OPERATION(destroy_paging_queue, D3DDDI_DESTROYPAGINGQUEUE,
                              0x1C)
+AMDF_LINUX_DXG_KMT_OPERATION(destroy_synchronization_object,
+                             D3DKMT_DESTROYSYNCHRONIZATIONOBJECT, 0x1D)
 AMDF_LINUX_DXG_KMT_OPERATION(free_gpu_virtual_address,
                              D3DKMT_FREEGPUVIRTUALADDRESS, 0x20)
 AMDF_LINUX_DXG_KMT_OPERATION(invalidate_cache, D3DKMT_INVALIDATECACHE, 0x24)
 AMDF_LINUX_DXG_KMT_OPERATION(lock, D3DKMT_LOCK2, 0x25)
+AMDF_LINUX_DXG_KMT_OPERATION(signal_synchronization_object_from_gpu,
+                             D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU, 0x32)
 AMDF_LINUX_DXG_KMT_OPERATION(submit_command_to_hardware_queue,
                              D3DKMT_SUBMITCOMMANDTOHWQUEUE, 0x34)
 AMDF_LINUX_DXG_KMT_OPERATION(wait_on_hardware_queue,
