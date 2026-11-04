@@ -153,32 +153,6 @@ class AmdfBuildFileFunctions(
         self._converter.body += "endif()\n"
         self._emit_platform_guard_end(policy["target_compatible_with"])
 
-    def amdf_windows_sidecar_library(self, **kwargs):
-        kwargs = dict(kwargs)
-        kwargs["target_compatible_with"] = (
-            kwargs.get("target_compatible_with") or []
-        ) + [
-            "@platforms//cpu:x86_64",
-            "@platforms//os:windows",
-        ]
-        self.amdf_cc_binary(
-            _cmake_rule="amdf_windows_sidecar_library", _native_linking=True, **kwargs
-        )
-
-    def iree_dynamic_library_bundle(self, **kwargs):
-        # CMake colocates private companions with the public library, matching
-        # the installed layout. Bazel's runfiles tree requires the explicit
-        # environment bindings carried by this rule.
-        del kwargs
-
-    def amdf_windows_sidecar_test(self, **kwargs):
-        kwargs = dict(kwargs)
-        kwargs["target_compatible_with"] = [
-            "@platforms//cpu:x86_64",
-            "@platforms//os:windows",
-        ]
-        self.amdf_cc_test(_cmake_rule="amdf_windows_sidecar_test", **kwargs)
-
     def amdf_library(
         self,
         name,
