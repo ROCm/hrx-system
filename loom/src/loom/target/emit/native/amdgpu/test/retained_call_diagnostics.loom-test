@@ -64,3 +64,20 @@ low.kernel.def target<amdgpu.cdna2.core>(@target) workgroup_size(64, 1, 1) @pass
   low.func.call noinline @accumulator_argument(%accumulator) : (reg<amdgpu.agpr>)
   return
 }
+
+// ====
+
+// RUN: emit amdgpu-kernel-assembly
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @workgroup_storage() asm {
+  %storage = storage {byte_alignment = 4, byte_length = 4} : low.storage<workgroup>
+  return
+}
+
+low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @calls_workgroup_storage() asm {
+  // ERROR@+1: AMDGPU/054 {function_name="calls_workgroup_storage", callee_name="workgroup_storage", reason_key="workgroup-storage"}
+  low.func.call noinline @workgroup_storage() : ()
+  return
+}

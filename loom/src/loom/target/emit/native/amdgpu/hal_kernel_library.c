@@ -36,6 +36,7 @@
 #include "loom/target/emit/native/amdgpu/kernel_emission.h"
 #include "loom/target/emit/native/amdgpu/kernel_plan_build.h"
 #include "loom/target/emit/native/amdgpu/kernel_report.h"
+#include "loom/target/emit/native/amdgpu/program_artifact.h"
 #include "loom/target/emit/native/amdgpu/program_compile.h"
 #include "loom/target/emit/native/amdgpu/program_emission.h"
 #include "loom/target/emit/native/amdgpu/runtime_globals.h"
@@ -625,8 +626,9 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel(
     loom_module_t* module,
     const loom_target_low_descriptor_registry_t* low_registry,
     const loom_amdgpu_hal_kernel_library_kernel_plan_t* plan,
-    const loom_symbol_reference_table_t* symbol_references,
-    const loom_target_function_version_snapshot_t* function_versions,
+    const loom_amdgpu_program_artifact_root_t* artifact_root,
+    const loom_amdgpu_program_artifact_emission_t* artifact_emission,
+    bool include_artifact_functions_in_listing,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
     iree_arena_allocator_t* table_arena, iree_string_builder_t* target_listing,
     loom_target_compile_report_t* report, bool* out_built,
@@ -652,10 +654,9 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel(
   }
   loom_amdgpu_program_compilation_t compilation = {0};
   bool program_compiled = false;
-  if (symbol_references != NULL) {
+  if (artifact_root != NULL) {
     const loom_amdgpu_program_compile_options_t program_options = {
-        .references = symbol_references,
-        .function_versions = function_versions,
+        .artifact_root = artifact_root,
         .entry = compile_options,
     };
     IREE_RETURN_IF_ERROR(loom_amdgpu_program_compile(
@@ -714,7 +715,8 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel(
   if (iree_status_is_ok(status)) {
     status = compilation.has_retained_calls
                  ? loom_amdgpu_program_emission_build(
-                       &compilation, &native_plan, emission_flags,
+                       &compilation, artifact_emission, &native_plan,
+                       emission_flags, include_artifact_functions_in_listing,
                        target_listing, &emission_result, table_arena)
                  : loom_amdgpu_kernel_emission_build(
                        &entry_compilation->frame, &native_plan, emission_flags,
@@ -931,6 +933,40 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
         module, &plans[i], table_arena);
   }
 
+  loom_amdgpu_program_artifact_t program_artifact = {0};
+  loom_amdgpu_program_artifact_emission_t program_artifact_emission = {0};
+  if (iree_status_is_ok(status) && !diagnostics_failed &&
+      symbol_references != NULL) {
+    loom_amdgpu_program_artifact_root_input_t* root_inputs = NULL;
+    status = iree_arena_allocate_array(
+        table_arena, entries.count, sizeof(*root_inputs), (void**)&root_inputs);
+    for (uint16_t i = 0; i < entries.count && iree_status_is_ok(status); ++i) {
+      root_inputs[i] = (loom_amdgpu_program_artifact_root_input_t){
+          .function_op = plans[i].low_function_op,
+          .target = &plans[i].target,
+      };
+    }
+    const loom_amdgpu_program_artifact_options_t artifact_options = {
+        .references = symbol_references,
+        .function_versions = function_versions,
+        .descriptor_registry = &low_registry->registry,
+        .emitter = loom_target_entry_emitter(diagnostic_emitter),
+    };
+    bool artifact_built = false;
+    if (iree_status_is_ok(status)) {
+      status = loom_amdgpu_program_artifact_build(
+          module, root_inputs, entries.count, &artifact_options, table_arena,
+          &artifact_built, &program_artifact);
+    }
+    if (iree_status_is_ok(status) && !artifact_built) {
+      diagnostics_failed = true;
+    }
+    if (iree_status_is_ok(status) && !diagnostics_failed) {
+      status = loom_amdgpu_program_artifact_emission_build(
+          &program_artifact, &program_artifact_emission, table_arena);
+    }
+  }
+
   loom_amdgpu_hsaco_kernel_t* kernels = NULL;
   if (iree_status_is_ok(status) && !diagnostics_failed) {
     status = iree_arena_allocate_array(table_arena, entries.count,
@@ -943,18 +979,28 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
     iree_string_builder_initialize(allocator, &target_listing);
     target_listing_initialized = true;
   }
+  bool artifact_functions_listed = false;
   for (uint16_t i = 0;
        i < entries.count && iree_status_is_ok(status) && !diagnostics_failed;
        ++i) {
+    const loom_amdgpu_program_artifact_root_t* artifact_root =
+        symbol_references != NULL ? &program_artifact.roots[i] : NULL;
+    const bool include_artifact_functions_in_listing =
+        target_listing_initialized && !artifact_functions_listed &&
+        artifact_root != NULL && artifact_root->helper_count != 0;
     bool kernel_built = false;
     status = loom_amdgpu_hal_kernel_library_build_kernel(
-        module, low_registry, &plans[i], symbol_references, function_versions,
+        module, low_registry, &plans[i], artifact_root,
+        &program_artifact_emission, include_artifact_functions_in_listing,
         diagnostic_emitter, table_arena,
         target_listing_initialized ? &target_listing : NULL,
         entry_reports != NULL ? &entry_reports[i] : NULL, &kernel_built,
         &kernels[i]);
     if (iree_status_is_ok(status) && !kernel_built) {
       diagnostics_failed = true;
+    } else if (iree_status_is_ok(status) &&
+               include_artifact_functions_in_listing) {
+      artifact_functions_listed = true;
     }
   }
   if (iree_status_is_ok(status) && !diagnostics_failed) {
@@ -984,6 +1030,8 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
           .target_identity = *code_object_identity,
           .kernels = kernels,
           .kernel_count = entries.count,
+          .functions = program_artifact_emission.functions,
+          .function_count = program_artifact_emission.function_count,
           .data_symbols = code_object_data_symbols,
           .data_symbol_count = code_object_data_symbol_count,
           .data_layout =
