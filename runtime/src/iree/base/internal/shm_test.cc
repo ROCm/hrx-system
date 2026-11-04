@@ -12,6 +12,7 @@
 
 #if defined(IREE_PLATFORM_WINDOWS)
 #include <process.h>
+#include <windows.h>
 #elif !defined(IREE_PLATFORM_ANDROID)
 #include <unistd.h>
 #endif
@@ -183,6 +184,80 @@ TEST_F(ShmReservationTest, DetachesBackingWhileRetainingAddressesForReuse) {
     iree_shm_close(&source_);
     IREE_ASSERT_OK(iree_shm_create(nullptr, 4 * granularity_, &source_));
   }
+}
+
+TEST_F(ShmReservationTest, SparseDetachPreservesHolesAndOutsideMappings) {
+  IREE_ASSERT_OK(iree_shm_reservation_deinitialize(&reservation_));
+  IREE_ASSERT_OK(iree_shm_reservation_initialize(16 * granularity_, 0,
+                                                 granularity_, &reservation_));
+  // Detaching an empty interior must not turn one address reservation into a
+  // descriptor for every replacement unit, even before any backing exists.
+  const iree_shm_mapping_update_t empty = {granularity_, 2 * granularity_};
+  IREE_ASSERT_OK(iree_shm_reservation_update(&reservation_, 1, &empty));
+#if defined(IREE_PLATFORM_WINDOWS)
+  MEMORY_BASIC_INFORMATION untouched = {};
+  ASSERT_NE(VirtualQuery(reservation_.base, &untouched, sizeof(untouched)), 0u);
+  EXPECT_EQ(untouched.State, MEM_RESERVE);
+  EXPECT_EQ(untouched.RegionSize, reservation_.byte_length);
+#endif
+
+  auto* source = static_cast<uint8_t*>(source_.base);
+  for (iree_host_size_t i = 0; i < 3; ++i) {
+    std::memset(source + i * granularity_, static_cast<int>(31 + i),
+                granularity_);
+  }
+  const iree_shm_mapping_update_t mappings[] = {
+      Mapping(2 * granularity_, 0, granularity_),
+      Mapping(10 * granularity_, granularity_, granularity_),
+      Mapping(14 * granularity_, 2 * granularity_, granularity_),
+  };
+  IREE_ASSERT_OK(iree_shm_reservation_update(
+      &reservation_, IREE_ARRAYSIZE(mappings), mappings));
+#if defined(IREE_PLATFORM_WINDOWS)
+  MEMORY_BASIC_INFORMATION hole = {};
+  ASSERT_NE(
+      VirtualQuery(reservation_.base + 3 * granularity_, &hole, sizeof(hole)),
+      0u);
+  ASSERT_EQ(hole.State, MEM_RESERVE);
+  ASSERT_EQ(hole.RegionSize, 7 * granularity_);
+#endif
+
+  // Both endpoints lie within empty placeholders; two occupied views and the
+  // entire intervening hole are inside, while the last view stays untouched.
+  const iree_shm_mapping_update_t middle = {granularity_, 11 * granularity_};
+  IREE_ASSERT_OK(iree_shm_reservation_update(&reservation_, 1, &middle));
+  EXPECT_EQ(reservation_.base[14 * granularity_ + 7], 33);
+  reservation_.base[14 * granularity_ + 7] = 79;
+  EXPECT_EQ(source[2 * granularity_ + 7], 79);
+#if defined(IREE_PLATFORM_WINDOWS)
+  MEMORY_BASIC_INFORMATION preserved = {};
+  ASSERT_NE(VirtualQuery(reservation_.base + 3 * granularity_, &preserved,
+                         sizeof(preserved)),
+            0u);
+  EXPECT_EQ(preserved.State, MEM_RESERVE);
+  EXPECT_EQ(preserved.AllocationBase, hole.AllocationBase);
+  EXPECT_EQ(preserved.RegionSize, hole.RegionSize);
+  for (iree_host_size_t index : {2, 10}) {
+    MEMORY_BASIC_INFORMATION detached = {};
+    ASSERT_NE(VirtualQuery(reservation_.base + index * granularity_, &detached,
+                           sizeof(detached)),
+              0u);
+    EXPECT_EQ(detached.State, MEM_RESERVE);
+  }
+#endif
+
+  // Both a formerly occupied unit and an untouched hole remain replaceable.
+  const iree_shm_mapping_update_t replacements[] = {
+      Mapping(3 * granularity_, 0, granularity_),
+      Mapping(10 * granularity_, 2 * granularity_, granularity_),
+  };
+  IREE_ASSERT_OK(iree_shm_reservation_update(
+      &reservation_, IREE_ARRAYSIZE(replacements), replacements));
+  EXPECT_EQ(reservation_.base[3 * granularity_ + 7], 31);
+  EXPECT_EQ(reservation_.base[10 * granularity_ + 7], 79);
+  EXPECT_EQ(reservation_.base[14 * granularity_ + 7], 79);
+  IREE_ASSERT_OK(iree_shm_reservation_detach(&reservation_));
+  IREE_ASSERT_OK(iree_shm_reservation_detach(&reservation_));
 }
 
 TEST_F(ShmReservationTest, CoarseUnitsPreserveShortTailAndNeighbors) {
