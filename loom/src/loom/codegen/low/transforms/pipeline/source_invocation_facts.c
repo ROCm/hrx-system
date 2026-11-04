@@ -35,6 +35,13 @@ typedef struct loom_low_source_invocation_collect_t {
   loom_value_fact_table_t* outgoing_facts;
 } loom_low_source_invocation_collect_t;
 
+typedef struct loom_low_source_invocation_scc_nodes_t {
+  // First call-graph node in module order, or UINT16_MAX when empty.
+  uint16_t first_node;
+  // Last call-graph node in module order, or UINT16_MAX when empty.
+  uint16_t last_node;
+} loom_low_source_invocation_scc_nodes_t;
+
 static iree_status_t loom_low_source_invocation_merge_fact(
     const loom_module_t* module, loom_value_fact_table_t* target,
     loom_value_id_t value_id, const loom_value_fact_table_t* source,
@@ -207,16 +214,46 @@ iree_status_t loom_low_source_invocation_facts_compute(
     status = loom_call_graph_build(module, arena, &out_facts->call_graph);
   }
   const loom_call_graph_t* call_graph = &out_facts->call_graph;
+  // Preserve module order within each SCC while indexing every node once.
+  // Descending SCC traversal then costs O(V + S) instead of O(V * S).
+  loom_low_source_invocation_scc_nodes_t* scc_nodes = NULL;
+  uint16_t* next_scc_node = NULL;
+  if (iree_status_is_ok(status) && call_graph->node_count != 0) {
+    status = iree_arena_allocate_array(&analysis_arena, call_graph->scc_count,
+                                       sizeof(*scc_nodes), (void**)&scc_nodes);
+  }
+  if (iree_status_is_ok(status) && call_graph->node_count != 0) {
+    status = iree_arena_allocate_array(&analysis_arena, call_graph->node_count,
+                                       sizeof(*next_scc_node),
+                                       (void**)&next_scc_node);
+  }
+  if (iree_status_is_ok(status) && call_graph->node_count != 0) {
+    for (uint16_t i = 0; i < call_graph->scc_count; ++i) {
+      scc_nodes[i] = (loom_low_source_invocation_scc_nodes_t){
+          .first_node = UINT16_MAX,
+          .last_node = UINT16_MAX,
+      };
+    }
+    for (uint16_t node_index = 0; node_index < call_graph->node_count;
+         ++node_index) {
+      const uint16_t scc_id = call_graph->nodes[node_index].scc_id;
+      loom_low_source_invocation_scc_nodes_t* nodes = &scc_nodes[scc_id];
+      next_scc_node[node_index] = UINT16_MAX;
+      if (nodes->first_node == UINT16_MAX) {
+        nodes->first_node = node_index;
+      } else {
+        next_scc_node[nodes->last_node] = node_index;
+      }
+      nodes->last_node = node_index;
+    }
+  }
   for (uint16_t scc = call_graph->scc_count;
        iree_status_is_ok(status) && scc > 0; --scc) {
     const uint16_t scc_id = (uint16_t)(scc - 1);
-    for (uint16_t node_index = 0;
-         iree_status_is_ok(status) && node_index < call_graph->node_count;
-         ++node_index) {
+    for (uint16_t node_index = scc_nodes[scc_id].first_node;
+         iree_status_is_ok(status) && node_index != UINT16_MAX;
+         node_index = next_scc_node[node_index]) {
       const loom_call_graph_node_t* node = &call_graph->nodes[node_index];
-      if (node->scc_id != scc_id) {
-        continue;
-      }
 
       const loom_symbol_t* symbol = &module->symbols.entries[node->symbol_id];
       const loom_func_like_t function =
