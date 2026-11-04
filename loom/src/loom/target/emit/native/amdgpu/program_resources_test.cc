@@ -75,5 +75,41 @@ TEST_F(AmdgpuProgramResourcesTest, AggregatesFunctionAndControlResources) {
   EXPECT_EQ(resources.agpr_count, 8u);
 }
 
+TEST_F(AmdgpuProgramResourcesTest, SharesPrivateLeafFramesBelowEntryStorage) {
+  loom_amdgpu_program_resource_builder_t builder = {};
+  IREE_ASSERT_OK(
+      loom_amdgpu_program_resource_builder_initialize(0, &arena_, &builder));
+
+  loom_amdgpu_program_resource_builder_require_private_frame(12, &builder);
+  loom_amdgpu_program_resource_builder_require_private_frame(20, &builder);
+
+  const loom_amdgpu_storage_layout_record_t entry_record = {
+      .storage_value_id = 1,
+      .reservation =
+          {
+              .space = LOOM_STORAGE_SPACE_PRIVATE,
+              .byte_size = 8,
+              .byte_alignment = 16,
+          },
+  };
+  loom_low_emission_frame_t entry_frame = {};
+  const loom_amdgpu_function_plan_t entry_plan = {
+      .storage_layout =
+          {
+              .segment_sizes = {.private_segment_fixed_size = 8},
+              .records = &entry_record,
+              .record_count = 1,
+          },
+  };
+  loom_amdgpu_storage_layout_t entry_layout = {};
+  IREE_ASSERT_OK(loom_amdgpu_program_resource_builder_append_function(
+      &entry_frame, &entry_plan, &arena_, &builder, &entry_layout));
+
+  ASSERT_EQ(entry_layout.record_count, 1u);
+  EXPECT_EQ(entry_layout.records[0].reservation.byte_offset, 32u);
+  EXPECT_EQ(entry_layout.segment_sizes.private_segment_fixed_size, 40u);
+  EXPECT_EQ(builder.storage_segment_sizes.private_segment_fixed_size, 40u);
+}
+
 }  // namespace
 }  // namespace loom
