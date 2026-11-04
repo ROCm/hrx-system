@@ -343,6 +343,89 @@ class Pm4MappingTest : public Pm4MappingFixture {
                                    kPayloadLength, 37));
   }
 
+  void RunSourceSlicesAcrossReservations(amdf_memory_scope_t* scope) {
+    ASSERT_NO_FATAL_FAILURE(Prepare(scope));
+    if (IsSkipped()) {
+      return;
+    }
+    GpuMemory* backing = nullptr;
+    ASSERT_NO_FATAL_FAILURE(CreateBacking(kSlabByteLength, &backing));
+    const uint64_t page = reservation_info_.mapping_granularity;
+    const amdf_memory_mapping_update_t first_aliases[] = {
+        {
+            .byte_length = page,
+            .memory = backing->memory,
+            .access = access_,
+            .source_byte_offset = page,
+        },
+        {
+            .target_byte_offset = 2 * kSlabByteLength,
+            .byte_length = page,
+            .memory = backing->memory,
+            .access = access_,
+        },
+    };
+    ASSERT_EQ(
+        api_->memory_reservation_update(reservation_, 0, 2, first_aliases),
+        AMDF_STATUS_OK);
+
+    const amdf_memory_reservation_access_t access = {device_, 0, access_};
+    const amdf_memory_reservation_create_info_t create = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CREATE_INFO,
+        .structure_size = sizeof(create),
+        .byte_length = reservation_info_.byte_length,
+        .access_count = 1,
+        .accesses = &access,
+    };
+    ASSERT_EQ(api_->memory_reservation_create(instance_, &create,
+                                              &second_reservation_),
+              AMDF_STATUS_OK);
+    amdf_memory_reservation_access_info_t second = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_ACCESS_INFO,
+        .structure_size = sizeof(second),
+    };
+    ASSERT_EQ(api_->memory_reservation_query_access_info(second_reservation_, 0,
+                                                         &second),
+              AMDF_STATUS_OK);
+    const amdf_memory_mapping_update_t second_alias = {
+        .byte_length = page,
+        .memory = backing->memory,
+        .access = access_,
+        .source_byte_offset = 2 * page,
+    };
+    ASSERT_EQ(api_->memory_reservation_update(second_reservation_, 0, 1,
+                                              &second_alias),
+              AMDF_STATUS_OK);
+
+    constexpr uint32_t kOwners[] = {23, 37, 91};
+    const uint64_t addresses[] = {
+        reservation_info_.address + first_aliases[1].target_byte_offset,
+        reservation_info_.address + first_aliases[0].target_byte_offset,
+        second.address + second_alias.target_byte_offset,
+    };
+    const uint64_t payload_byte_length = page - kPayloadByteOffset;
+    auto* words = static_cast<uint32_t*>(upload_->host.pointer);
+    for (uint32_t i = 0; i < std::size(addresses); ++i) {
+      for (uint64_t word = 0; word < payload_byte_length / sizeof(uint32_t);
+           ++word) {
+        words[word] = TaggedWord(kOwners[i], word);
+      }
+      ASSERT_NO_FATAL_FAILURE(Copy(upload_->device_address,
+                                   addresses[i] + kPayloadByteOffset,
+                                   payload_byte_length));
+    }
+    for (uint32_t i = 0; i < std::size(addresses); ++i) {
+      ASSERT_NO_FATAL_FAILURE(Verify(addresses[i] + kPayloadByteOffset,
+                                     payload_byte_length, kOwners[i]));
+      ASSERT_NO_FATAL_FAILURE(
+          Verify(backing->device_address + i * page + kPayloadByteOffset,
+                 payload_byte_length, kOwners[i]));
+    }
+    ASSERT_NO_FATAL_FAILURE(ReleaseReservation(&reservation_));
+    ASSERT_NO_FATAL_FAILURE(Verify(second.address + kPayloadByteOffset,
+                                   payload_byte_length, kOwners[2]));
+  }
+
   void RunSharedDomain(amdf_memory_scope_t* scope) {
     // This case deliberately owns a second logical device: its paging owner
     // and allocation handles must work with the first device's existing queue.
@@ -586,6 +669,17 @@ TEST_F(Pm4MappingTest, LocalBackingSlicesAndAliasesSharePhysicalStorage) {
     GTEST_SKIP() << "endpoint has no local storage scope";
   }
   RunSourceSlices(local_scope_);
+}
+
+TEST_F(Pm4MappingTest, SystemBackingSlicesSpanIndependentReservations) {
+  RunSourceSlicesAcrossReservations(system_scope_);
+}
+
+TEST_F(Pm4MappingTest, LocalBackingSlicesSpanIndependentReservations) {
+  if (local_scope_ == nullptr) {
+    GTEST_SKIP() << "endpoint has no local storage scope";
+  }
+  RunSourceSlicesAcrossReservations(local_scope_);
 }
 
 TEST_F(Pm4MappingTest, SystemBackingPermutesRetainedSparseRanges) {
