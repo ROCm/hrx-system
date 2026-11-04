@@ -71,21 +71,18 @@ static iree_status_t loom_serve_http_tokenization_parse(
 }
 
 static iree_status_t loom_serve_http_tokenization_append_ids(
-    iree_string_builder_t* output, iree_host_size_t count, const int32_t* ids) {
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(output, "{\"tokens\":["));
+    iree_string_builder_t* output, iree_host_size_t count, const int32_t* ids,
+    bool* first) {
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
     status = iree_string_builder_append_format(output, "%s%" PRId32,
-                                               i ? "," : "", ids[i]);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_string_builder_append_cstring(output, "]}");
+                                               *first ? "" : ",", ids[i]);
+    *first = false;
   }
   return status;
 }
 
-// Pull at most one token beyond the public limit, including final output.
+// Output credit bounds temporary IDs, not the complete utility response.
 static iree_status_t loom_serve_http_tokenization_encode(
     const iree_tokenizer_t* tokenizer, iree_string_view_t text,
     iree_tokenizer_encode_flags_t flags, iree_string_builder_t* output,
@@ -94,56 +91,61 @@ static iree_status_t loom_serve_http_tokenization_encode(
   IREE_RETURN_IF_ERROR(
       iree_tokenizer_encode_state_calculate_size(tokenizer, &state_size));
   const iree_host_size_t transform_size =
-      iree_tokenizer_transform_buffer_oneshot_size(text.size);
-  uint8_t* storage = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      host_allocator, state_size + transform_size, (void**)&storage));
-  const iree_host_size_t capacity = LOOM_SERVE_HTTP_TOKENIZATION_MAX_TOKENS + 1;
-  int32_t* tokens = NULL;
-  iree_status_t status = iree_allocator_malloc_array(
-      host_allocator, capacity, sizeof(*tokens), (void**)&tokens);
-  iree_tokenizer_encode_state_t* state = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_tokenizer_encode_state_initialize(
-        tokenizer, iree_make_byte_span(storage, state_size),
-        iree_make_byte_span(storage + state_size, transform_size),
-        (iree_tokenizer_offset_run_list_t){0},
-        IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START | flags, host_allocator,
-        &state);
+      iree_tokenizer_transform_buffer_recommended_size(text.size);
+  iree_host_size_t storage_size = 0;
+  if (!iree_host_size_checked_add(state_size, transform_size, &storage_size)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "tokenizer storage size overflow");
   }
-  iree_host_size_t count = 0;
-  while (iree_status_is_ok(status) && text.size && count < capacity) {
+  uint8_t* storage = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, storage_size, (void**)&storage));
+  iree_tokenizer_encode_state_t* state = NULL;
+  iree_status_t status = iree_tokenizer_encode_state_initialize(
+      tokenizer, iree_make_byte_span(storage, state_size),
+      iree_make_byte_span(storage + state_size, transform_size),
+      (iree_tokenizer_offset_run_list_t){0},
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START | flags, host_allocator,
+      &state);
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_cstring(output, "{\"tokens\":[");
+  }
+  int32_t tokens[1024];
+  bool first = true;
+  while (iree_status_is_ok(status) && text.size) {
     iree_host_size_t consumed = 0, produced = 0;
     status = iree_tokenizer_encode_state_feed(
         state, text,
-        iree_tokenizer_make_token_output(tokens + count, NULL, NULL,
-                                         capacity - count),
+        iree_tokenizer_make_token_output(tokens, NULL, NULL,
+                                         IREE_ARRAYSIZE(tokens)),
         &consumed, &produced);
     text = iree_string_view_substr(text, consumed, IREE_STRING_VIEW_NPOS);
-    count += produced;
-  }
-  if (iree_status_is_ok(status) && count < capacity) {
-    iree_host_size_t produced = 0;
-    status = iree_tokenizer_encode_state_finalize(
-        state,
-        iree_tokenizer_make_token_output(tokens + count, NULL, NULL,
-                                         capacity - count),
-        &produced);
-    count += produced;
+    if (iree_status_is_ok(status)) {
+      status = loom_serve_http_tokenization_append_ids(output, produced, tokens,
+                                                       &first);
+    }
   }
   if (iree_status_is_ok(status)) {
-    if (count > LOOM_SERVE_HTTP_TOKENIZATION_MAX_TOKENS) {
-      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "tokenization exceeds %u tokens",
-                                LOOM_SERVE_HTTP_TOKENIZATION_MAX_TOKENS);
-    } else {
-      status = loom_serve_http_tokenization_append_ids(output, count, tokens);
-    }
+    do {
+      iree_host_size_t produced = 0;
+      status = iree_tokenizer_encode_state_finalize(
+          state,
+          iree_tokenizer_make_token_output(tokens, NULL, NULL,
+                                           IREE_ARRAYSIZE(tokens)),
+          &produced);
+      if (iree_status_is_ok(status)) {
+        status = loom_serve_http_tokenization_append_ids(output, produced,
+                                                         tokens, &first);
+      }
+    } while (iree_status_is_ok(status) &&
+             iree_tokenizer_encode_state_has_pending(state));
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_cstring(output, "]}");
   }
   if (state) {
     iree_tokenizer_encode_state_deinitialize(state);
   }
-  iree_allocator_free(host_allocator, tokens);
   iree_allocator_free(host_allocator, storage);
   return status;
 }
@@ -183,28 +185,13 @@ iree_status_t loom_serve_http_tokenize(const iree_tokenizer_t* tokenizer,
                             "raw token pieces are not supported");
   }
   char* text = NULL;
-  // JSON unescaping cannot expand its source span. Allocate no more than the
-  // declared text bound even when the transport admits a larger escaped body.
-  const iree_host_size_t capacity = iree_min(
-      fields[1].value.size, LOOM_SERVE_HTTP_TOKENIZATION_MAX_TEXT_BYTES + 1);
+  // JSON unescaping cannot expand the transport-admitted source span.
+  const iree_host_size_t capacity = fields[1].value.size;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       host_allocator, iree_max(1, capacity), (void**)&text));
   iree_host_size_t length = 0;
   iree_status_t status =
       iree_json_unescape_string(fields[1].value, capacity, text, &length);
-  if (iree_status_is_resource_exhausted(status)) {
-    status = iree_status_join(
-        iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                         "content exceeds %u decoded bytes",
-                         LOOM_SERVE_HTTP_TOKENIZATION_MAX_TEXT_BYTES),
-        status);
-  }
-  if (iree_status_is_ok(status) &&
-      length > LOOM_SERVE_HTTP_TOKENIZATION_MAX_TEXT_BYTES) {
-    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "content exceeds %u decoded bytes",
-                              LOOM_SERVE_HTTP_TOKENIZATION_MAX_TEXT_BYTES);
-  }
   const iree_string_view_t value = iree_make_string_view(text, length);
   if (iree_status_is_ok(status) && !iree_unicode_utf8_validate(value)) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -264,62 +251,77 @@ static iree_status_t loom_serve_http_tokenization_decode(
   iree_host_size_t state_size = 0;
   IREE_RETURN_IF_ERROR(
       iree_tokenizer_decode_state_calculate_size(tokenizer, &state_size));
-  const iree_host_size_t capacity =
-      LOOM_SERVE_HTTP_TOKENIZATION_MAX_TEXT_BYTES + 1;
   uint8_t* storage = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      host_allocator, state_size + capacity, (void**)&storage));
-  char* text = (char*)storage + state_size;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, state_size, (void**)&storage));
   iree_tokenizer_decode_state_t* state = NULL;
   iree_status_t status = iree_tokenizer_decode_state_initialize(
       tokenizer, IREE_TOKENIZER_DECODE_FLAG_NONE,
       iree_make_byte_span(storage, state_size), &state);
-  iree_host_size_t length = 0;
-  while (iree_status_is_ok(status) && tokens.count) {
-    iree_host_size_t consumed = 0, produced = 0;
-    status = iree_tokenizer_decode_state_feed(
-        state, tokens,
-        iree_make_mutable_string_view(text + length, capacity - length),
-        &consumed, &produced);
-    tokens.values += consumed;
-    tokens.count -= consumed;
-    length += produced;
-    if (iree_status_is_ok(status) && !consumed && !produced) {
-      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "decoded content exceeds %u bytes",
-                                LOOM_SERVE_HTTP_TOKENIZATION_MAX_TEXT_BYTES);
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    iree_host_size_t produced = 0;
-    status = iree_tokenizer_decode_state_finalize(
-        state, iree_make_mutable_string_view(text + length, capacity - length),
-        &produced);
-    length += produced;
-    // Finalize owns no allocations; RESOURCE_EXHAUSTED here means its output
-    // does not fit, not failure to allocate the independent decoder state.
-    if (iree_status_is_resource_exhausted(status)) {
-      status = iree_status_join(
-          iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                           "decoded content exceeds %u bytes",
-                           LOOM_SERVE_HTTP_TOKENIZATION_MAX_TEXT_BYTES),
-          status);
-    }
-  }
-  if (iree_status_is_ok(status) &&
-      length > LOOM_SERVE_HTTP_TOKENIZATION_MAX_TEXT_BYTES) {
-    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "decoded content exceeds %u bytes",
-                              LOOM_SERVE_HTTP_TOKENIZATION_MAX_TEXT_BYTES);
-  }
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(output, &stream);
+  loom_json_string_writer_t string;
   if (iree_status_is_ok(status)) {
     status = iree_string_builder_append_cstring(output, "{\"content\":");
   }
   if (iree_status_is_ok(status)) {
-    loom_output_stream_t stream;
-    loom_output_stream_for_builder(output, &stream);
-    status = loom_json_write_escaped_string(
-        &stream, iree_make_string_view(text, length));
+    status = loom_json_string_begin(&stream, &string);
+  }
+  iree_string_builder_t scratch;
+  iree_string_builder_initialize(host_allocator, &scratch);
+  iree_host_size_t minimum_capacity =
+      IREE_TOKENIZER_DECODE_OUTPUT_RECOMMENDED_SIZE;
+  while (iree_status_is_ok(status) && tokens.count) {
+    char* text = NULL;
+    iree_host_size_t capacity = 0;
+    status = iree_string_builder_reserve_for_append(&scratch, minimum_capacity,
+                                                    &text, &capacity);
+    iree_host_size_t consumed = 0, produced = 0;
+    if (iree_status_is_ok(status)) {
+      status = iree_tokenizer_decode_state_feed(
+          state, tokens, iree_make_mutable_string_view(text, capacity),
+          &consumed, &produced);
+    }
+    tokens.values += consumed;
+    tokens.count -= consumed;
+    if (iree_status_is_ok(status)) {
+      status = loom_output_stream_write(&string.stream,
+                                        iree_make_string_view(text, produced));
+      // An indivisible token may exceed the usual output chunk. Grow only
+      // when fresh output credit could not consume or produce anything.
+      if (!consumed && !produced) {
+        minimum_capacity = capacity + 1;
+      }
+    }
+  }
+  bool complete = false;
+  while (iree_status_is_ok(status) && !complete) {
+    char* text = NULL;
+    iree_host_size_t capacity = 0;
+    status = iree_string_builder_reserve_for_append(&scratch, minimum_capacity,
+                                                    &text, &capacity);
+    iree_host_size_t produced = 0;
+    if (iree_status_is_ok(status)) {
+      status = iree_tokenizer_decode_state_finalize(
+          state, iree_make_mutable_string_view(text, capacity), &produced);
+      // Finalize allocates nothing and uses RESOURCE_EXHAUSTED for output
+      // credit. Preserve its written prefix and resume the retained tail.
+      complete = !iree_status_is_resource_exhausted(status);
+      if (!complete) {
+        iree_status_free(status);
+        status = iree_ok_status();
+        if (!produced) {
+          minimum_capacity = capacity + 1;
+        }
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_output_stream_write(&string.stream,
+                                        iree_make_string_view(text, produced));
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_json_string_end(&string);
   }
   if (iree_status_is_ok(status)) {
     status = iree_string_builder_append_cstring(output, "}");
@@ -327,6 +329,7 @@ static iree_status_t loom_serve_http_tokenization_decode(
   if (state) {
     iree_tokenizer_decode_state_deinitialize(state);
   }
+  iree_string_builder_deinitialize(&scratch);
   iree_allocator_free(host_allocator, storage);
   return status;
 }
@@ -347,11 +350,6 @@ iree_status_t loom_serve_http_detokenize(const iree_tokenizer_t* tokenizer,
   }
   iree_host_size_t count = 0;
   IREE_RETURN_IF_ERROR(iree_json_array_length(fields[1].value, &count));
-  if (count > LOOM_SERVE_HTTP_TOKENIZATION_MAX_TOKENS) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "detokenization exceeds %u tokens",
-                            LOOM_SERVE_HTTP_TOKENIZATION_MAX_TOKENS);
-  }
   loom_serve_http_tokenization_ids_t ids = {
       .vocab = iree_tokenizer_vocab(tokenizer)};
   IREE_RETURN_IF_ERROR(
