@@ -896,7 +896,7 @@ TEST_F(GpuHostNumaMemoryTest, CopiesUsingPagesOnEveryAllowedHostNode) {
   constexpr uint32_t kEpochCount = 2;
   // Each epoch has two copies, optional acquire/release, and a fence. The
   // finite stream appends across all nodes and leaves one ring word free.
-  constexpr size_t kMaximumEpochWords = 2 * 7 + 2 * 5 + 4;
+  constexpr size_t kMaximumEpochWords = 2 * 7 + 2 * 5 + 4 + 7;
   const uint64_t command_word_capacity = allowed_node_count *
                                              kMemoryFlags.size() * kEpochCount *
                                              kMaximumEpochWords +
@@ -907,6 +907,12 @@ TEST_F(GpuHostNumaMemoryTest, CopiesUsingPagesOnEveryAllowedHostNode) {
   GpuCommandQueue* queue = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue, command_byte_length));
   SdmaCommandWriter commands(queue->words().data(), family_.format_features);
+  const bool user_gcr =
+      (family_.format_features & AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR) != 0;
+  const bool submission_gcr =
+      queue->publication_mode() == AMDF_QUEUE_PUBLICATION_MODE_KERNEL &&
+      (family_.format_features & AMDF_GPU_SDMA_FORMAT_FEATURE_SUBMISSION_GCR) !=
+          0;
   uint32_t tested_nodes = 0;
   for (uint32_t node = 0; node < node_count; ++node) {
     if ((allowed[node / kWordBits] & (1UL << (node % kWordBits))) == 0) {
@@ -980,10 +986,10 @@ TEST_F(GpuHostNumaMemoryTest, CopiesUsingPagesOnEveryAllowedHostNode) {
           ASSERT_EQ(device_transition.executor,
                     AMDF_CACHE_TRANSITION_EXECUTOR_QUEUE);
           ASSERT_EQ(device_transition.operation, operation);
-          ASSERT_NE(
-              family_.format_features & AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR,
-              0u);
-          cache_operations |= UINT64_C(1) << operation;
+          ASSERT_TRUE(user_gcr || submission_gcr);
+          if (user_gcr) {
+            cache_operations |= UINT64_C(1) << operation;
+          }
         }
         std::swap(pair_query.producer, pair_query.consumer);
         std::swap(source, target);
@@ -1012,16 +1018,17 @@ TEST_F(GpuHostNumaMemoryTest, CopiesUsingPagesOnEveryAllowedHostNode) {
           commands.ReleaseToSystem();
         }
         commands.Fence32(memory->device_address + page_size * 3, epoch);
+        commands.PadToEightWords();
         ASSERT_NO_FATAL_FAILURE(
             queue->Publish(api_, gpu_api_, commands.word_count()));
         ASSERT_TRUE(GpuWaitEqual<uint32_t>(completion, epoch));
+        ASSERT_NO_FATAL_FAILURE(queue->WaitRetired(api_));
         for (uint32_t destination = 1; destination <= 2; ++destination) {
           EXPECT_EQ(std::memcmp(bytes, bytes + page_size * destination,
                                 page_size - 1),
                     0);
           EXPECT_EQ(bytes[page_size * (destination + 1) - 1], 0xA5);
         }
-        ASSERT_NO_FATAL_FAILURE(queue->WaitRetired(api_));
         for (uint32_t page = 0; page < 4; ++page) {
           int resident_node = -1;
           ASSERT_EQ(
