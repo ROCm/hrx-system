@@ -35,6 +35,8 @@
 #include "iree/hal/utils/resource_set.h"
 
 #define ARENA_BLOCK_SIZE (32 * 1024)
+#define EXECUTABLE_RECYCLER_MAX_BYTES (256 * 1024 * 1024)
+#define EXECUTABLE_RECYCLER_MAX_BLOCKS 4096
 
 static const iree_hal_device_vtable_t iree_hal_amdxdna_device_vtable;
 
@@ -59,6 +61,9 @@ static void iree_hal_amdxdna_device_initialize(
 
   iree_arena_block_pool_initialize(ARENA_BLOCK_SIZE, host_allocator,
                                    &device->block_pool);
+  iree_hal_amdxdna_host_recycler_initialize(
+      host_allocator, EXECUTABLE_RECYCLER_MAX_BYTES,
+      EXECUTABLE_RECYCLER_MAX_BLOCKS, &device->executable_host_recycler);
 
   IREE_TRACE_ZONE_END(z0);
 }
@@ -249,7 +254,9 @@ static iree_status_t iree_hal_amdxdna_device_load_executable(
   iree_hal_amdxdna_device* device = IREE_HAL_AMDXDNA_CHECKED_VTABLE_CAST(
       base_device, iree_hal_amdxdna_device_vtable, iree_hal_amdxdna_device);
   iree_status_t status = iree_hal_amdxdna_native_executable_create(
-      device->native_device, load_params, device->host_allocator,
+      device->native_device, load_params,
+      iree_hal_amdxdna_host_recycler_allocator(
+          &device->executable_host_recycler),
       out_executable);
   if (iree_status_is_ok(status)) {
     iree_hal_amdxdna_executable_bind_device(*out_executable, device);
@@ -1814,6 +1821,8 @@ static void iree_hal_amdxdna_device_destroy(iree_hal_device_t* base_device) {
   // first; accessing `device->` after deinitialize is intentionally avoided.
   iree_allocator_t host_allocator = device->host_allocator;
   iree_hal_amdxdna_device_deinitialize(device);
+  iree_hal_amdxdna_host_recycler_deinitialize(
+      &device->executable_host_recycler);
   iree_allocator_free(host_allocator, device);
 
   IREE_TRACE_ZONE_END(z0);
@@ -2003,7 +2012,29 @@ iree_status_t iree_hal_amdxdna_device_create(
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdxdna_single_command_cache_create(
-        device->host_allocator, &device->single_command_cache);
+        device->host_allocator, device->native_caps.max_cached_single_commands,
+        &device->single_command_cache);
+    if (iree_status_is_ok(status)) {
+      // KMQ instruction BOs share the DEV heap with context images. Its
+      // negotiated miss reserve is also the command-cache working set reserved
+      // above when sizing the context-image cache. Backends without a shared
+      // code heap (Windows MCDM and Linux UMQ) use the conservative
+      // aperture-scale default.
+      iree_host_size_t max_retained_code_bytes =
+          kAmdxdnaSingleCommandCacheDefaultMaxRetainedCodeBytes;
+      if (device->native_caps.max_shared_code_memory_bytes != 0) {
+        max_retained_code_bytes =
+            device->native_caps.shared_code_memory_miss_reserve_bytes;
+        if (max_retained_code_bytes == 0) {
+          max_retained_code_bytes =
+              device->native_caps.max_shared_code_memory_bytes / 4;
+        }
+      }
+      if (max_retained_code_bytes != 0) {
+        iree_hal_amdxdna_single_command_cache_set_max_retained_code_bytes(
+            device->single_command_cache, max_retained_code_bytes);
+      }
+    }
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdxdna_chain_command_cache_create(

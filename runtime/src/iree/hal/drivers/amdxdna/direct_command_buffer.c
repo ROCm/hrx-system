@@ -1265,9 +1265,15 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_single_start_npu_cmd(
         fresh->src_constant_count, fresh->src_use_native_partial_elf,
         mapped_ptr);
   }
-  IREE_RETURN_IF_ERROR(
+  iree_status_t constants_status =
       iree_hal_amdxdna_single_command_cache_entry_store_constants(
-          cache, cached, fresh->src_constants, fresh->src_constant_count));
+          cache, cached, fresh->src_constants, fresh->src_constant_count);
+  if (!iree_status_is_ok(constants_status)) {
+    // The native command and control bytes have already been rewritten. Do not
+    // leave a partially updated entry available for a later cache hit.
+    iree_hal_amdxdna_single_command_cache_entry_discard(cache, cached);
+    return constants_status;
+  }
   iree_hal_amdxdna_copy_ctrl_binding_snapshot(
       cached->binding_buffers, cached->binding_device_addrs,
       cached->binding_offsets, cached->binding_lengths, fresh);
@@ -1344,34 +1350,51 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_single_partial_elf_cmd(
   IREE_ASSERT_ARGUMENT(fresh);
   if (IREE_UNLIKELY(!cached->ctrl_code_buffer || !cached->command ||
                     !fresh->src_asm_inst || !fresh->src_patches ||
-                    !fresh->src_use_native_partial_elf ||
-                    cached->ctrl_word_count != fresh->src_asm_inst->count ||
-                    cached->binding_count != fresh->binding_count)) {
+                    !fresh->src_use_native_partial_elf)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "amdxdna PARTIAL_ELF single cache rewrite has incompatible shape");
   }
 
+  const size_t control_bytes =
+      fresh->src_asm_inst->count * sizeof(uint32_t);
+  if (IREE_UNLIKELY(control_bytes > cached->ctrl_code_capacity)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "amdxdna PARTIAL_ELF reusable slot has insufficient control capacity");
+  }
+  const bool shape_changed =
+      cached->ctrl_word_count != fresh->src_asm_inst->count ||
+      cached->binding_count != fresh->binding_count;
   void* mapped_ptr = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdxdna_remap_ctrl_code(
       cached->ctrl_code_buffer, &cached->ctrl_code_mapped_ptr));
   mapped_ptr = cached->ctrl_code_mapped_ptr;
   uint32_t* dst = (uint32_t*)mapped_ptr;
-  const size_t control_bytes = fresh->src_asm_inst->count * sizeof(uint32_t);
   bool txn_changed = false;
-  const bool control_changed = iree_hal_amdxdna_ctrl_inputs_changed(
-      &cached->owned_src_asm_inst, cached->owned_src_constants,
-      cached->src_constant_count, cached->binding_device_addrs,
-      cached->binding_count, fresh, &txn_changed);
-  const bool bindings_changed = iree_hal_amdxdna_ctrl_bindings_changed(
-      cached->binding_buffers, cached->binding_offsets, cached->binding_lengths,
-      cached->binding_count, fresh);
+  const bool control_changed =
+      shape_changed ||
+      iree_hal_amdxdna_ctrl_inputs_changed(
+          &cached->owned_src_asm_inst, cached->owned_src_constants,
+          cached->src_constant_count, cached->binding_device_addrs,
+          cached->binding_count, fresh, &txn_changed);
+  const bool bindings_changed =
+      shape_changed ||
+      iree_hal_amdxdna_ctrl_bindings_changed(
+          cached->binding_buffers, cached->binding_offsets,
+          cached->binding_lengths, cached->binding_count, fresh);
+  if (shape_changed) {
+    txn_changed = true;
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdxdna_single_command_cache_entry_resize_signature(
+            cache, cached, fresh->src_asm_inst->count, fresh->binding_count));
+  }
 
   iree_status_t status = iree_ok_status();
   if (control_changed) {
     status = iree_hal_amdxdna_patch_publish_mapped_ctrl(
         cached->ctrl_code_buffer, dst, fresh);
-    if (iree_status_is_ok(status)) {
+    if (iree_status_is_ok(status) && !shape_changed) {
       status =
           iree_hal_amdxdna_native_command_c_mark_code_dirty(cached->command);
     }
@@ -1379,7 +1402,31 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_single_partial_elf_cmd(
       memcpy(cached->ctrl_words, dst, control_bytes);
     }
   }
-  if (iree_status_is_ok(status) && bindings_changed) {
+  if (iree_status_is_ok(status) && shape_changed) {
+    status = iree_hal_amdxdna_native_command_c_reset(cached->command);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_amdxdna_native_command_c_set_cu_index(
+          cached->command, fresh->src_cu_idx);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_amdxdna_native_command_c_add_control_buffer(
+          cached->command, cached->ctrl_code_buffer, control_bytes);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_amdxdna_native_command_c_add_arg_64(
+          cached->command, kAie2ExecBufferKernelOpTxn);
+    }
+    for (iree_host_size_t i = 0;
+         i < fresh->binding_count && iree_status_is_ok(status); ++i) {
+      status = iree_hal_amdxdna_native_command_c_bind_buffer(
+          cached->command, i + 1, fresh->binding_buffers[i],
+          fresh->binding_offsets[i], fresh->binding_lengths[i]);
+    }
+    if (iree_status_is_ok(status)) {
+      status =
+          iree_hal_amdxdna_native_command_c_mark_code_dirty(cached->command);
+    }
+  } else if (iree_status_is_ok(status) && bindings_changed) {
     status =
         iree_hal_amdxdna_native_command_c_reset_bound_buffers(cached->command);
     for (iree_host_size_t i = 0;
@@ -1399,9 +1446,14 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_single_partial_elf_cmd(
         fresh->src_constant_count, fresh->src_use_native_partial_elf,
         mapped_ptr);
   }
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdxdna_single_command_cache_entry_store_constants(
-          cache, cached, fresh->src_constants, fresh->src_constant_count));
+  status = iree_hal_amdxdna_single_command_cache_entry_store_constants(
+      cache, cached, fresh->src_constants, fresh->src_constant_count);
+  if (!iree_status_is_ok(status)) {
+    // The native command and control bytes have already been rewritten. Do not
+    // leave a partially updated entry available for a later cache hit.
+    iree_hal_amdxdna_single_command_cache_entry_discard(cache, cached);
+    return status;
+  }
   iree_hal_amdxdna_copy_ctrl_binding_snapshot(
       cached->binding_buffers, cached->binding_device_addrs,
       cached->binding_offsets, cached->binding_lengths, fresh);
@@ -2019,12 +2071,15 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
       }
       submit_command = cmd->command;
       if (iree_status_is_ok(status) && single_command_cache) {
-        single_cache_entry = iree_hal_amdxdna_store_single_command_cache_entry(
-            single_command_cache, group->queue, cmd->src_cu_idx.index,
-            cmd->ctrl_words, cmd->ctrl_word_count, cmd->binding_buffers,
-            cmd->binding_device_addrs, cmd->binding_offsets,
-            cmd->binding_lengths, cmd->binding_count, cmd->ctrl_code,
-            cmd->command);
+        single_cache_entry =
+            iree_hal_amdxdna_store_single_command_cache_entry_with_capacity(
+                single_command_cache, group->queue, cmd->src_cu_idx.index,
+                cmd->ctrl_words, cmd->ctrl_word_count, cmd->binding_buffers,
+                cmd->binding_device_addrs, cmd->binding_offsets,
+                cmd->binding_lengths, cmd->binding_count,
+                (iree_host_size_t)iree_hal_amdxdna_native_buffer_c_size(
+                    cmd->ctrl_code),
+                cmd->ctrl_code, cmd->command);
         if (single_cache_entry) {
           iree_hal_amdxdna_bind_prepared_single_command_identity(
               single_command_cache, single_cache_entry, cmd,
@@ -2093,8 +2148,10 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
   // share a same-shaped instruction BO instead of allocating on every miss.
   // Identified executables keep one prepared command per export: stealing
   // another template's BO would force that template to miss and allocate
-  // again, which is the paging-fence path this cache is meant to avoid.
+  // again below capacity. Once saturated, repurpose a capacity-compatible idle
+  // slot so admission no longer destroys and recreates native allocations.
   bool reused_partial_elf_shape = false;
+  bool repurposed_partial_elf_slot = false;
   if (iree_status_is_ok(status) && !single_cache_entry && single_cache_locked &&
       cmd->src_executable_identity == 0) {
     status = iree_hal_amdxdna_find_single_command_cache_partial_elf_shape_entry(
@@ -2102,13 +2159,22 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
         cmd->src_asm_inst->count, cmd->binding_count, &single_cache_entry);
     reused_partial_elf_shape = single_cache_entry != NULL;
   }
+  if (iree_status_is_ok(status) && !single_cache_entry &&
+      single_cache_locked) {
+    status = iree_hal_amdxdna_find_single_command_cache_reusable_entry(
+        single_command_cache, group->queue, cmd->src_cu_idx.index,
+        cmd->src_asm_inst->count, /*use_native_partial_elf=*/true,
+        &single_cache_entry);
+    repurposed_partial_elf_slot = single_cache_entry != NULL;
+  }
   if (iree_status_is_ok(status) && single_cache_entry) {
     status = iree_hal_amdxdna_rewrite_cached_single_partial_elf_cmd(
         command_buffer, single_command_cache, single_cache_entry, cmd);
     // The rewrite realized this dispatch's descriptor into the entry, so the
     // entry's recorded identity has to follow it or a later exact-descriptor
     // lookup would match contents that are no longer there.
-    if (iree_status_is_ok(status) && reused_partial_elf_shape) {
+    if (iree_status_is_ok(status) &&
+        (reused_partial_elf_shape || repurposed_partial_elf_slot)) {
       iree_hal_amdxdna_bind_prepared_single_command_identity(
           single_command_cache, single_cache_entry, cmd,
           single_cache_entry->ctrl_code_mapped_ptr);
@@ -2255,11 +2321,15 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
           cmd->binding_offsets[i], cmd->binding_lengths[i]);
     }
     if (iree_status_is_ok(status)) {
-      single_cache_entry = iree_hal_amdxdna_store_single_command_cache_entry(
-          single_command_cache, group->queue, cmd->src_cu_idx.index,
-          prepared_ctrl_words, cmd->src_asm_inst->count, cmd->binding_buffers,
-          cmd->binding_device_addrs, cmd->binding_offsets, cmd->binding_lengths,
-          cmd->binding_count, ctrl_code_buffer, command);
+      single_cache_entry =
+          iree_hal_amdxdna_store_single_command_cache_entry_with_capacity(
+              single_command_cache, group->queue, cmd->src_cu_idx.index,
+              prepared_ctrl_words, cmd->src_asm_inst->count,
+              cmd->binding_buffers, cmd->binding_device_addrs,
+              cmd->binding_offsets, cmd->binding_lengths, cmd->binding_count,
+              (iree_host_size_t)iree_hal_amdxdna_native_buffer_c_size(
+                  ctrl_code_buffer),
+              ctrl_code_buffer, command);
     }
     if (iree_status_is_ok(status) && single_cache_entry) {
       iree_hal_amdxdna_bind_prepared_single_command_identity(
@@ -2286,6 +2356,19 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
     single_cache_locked = false;
   }
 
+  // Admission can fail while every eviction candidate is in flight or when a
+  // single control program exceeds the retained-byte budget. Execute the
+  // freshly built command uncached; defer its ownership on async streams so it
+  // remains alive through completion.
+  if (iree_status_is_ok(status) && !submit_command) {
+    submit_command = command;
+    if (iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
+            command_buffer)) {
+      status =
+          iree_hal_amdxdna_direct_command_buffer_defer_native_command_and_buffer_destroy(
+              command_buffer, &command, &ctrl_code_buffer);
+    }
+  }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdxdna_direct_command_buffer_submit(
         command_buffer, group->queue, submit_command, IREE_SV("dispatch"));
@@ -3186,10 +3269,14 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_normal_run(
     }
     bool transferred_to_cache = false;
     if (iree_status_is_ok(status) && !single_cache_entry) {
-      single_cache_entry = iree_hal_amdxdna_store_single_command_cache_entry(
-          single_command_cache, queue, cu_idx.index, prepared_ctrl_words,
-          asm_inst->count, binding_buffers, binding_addrs, binding_offsets,
-          binding_lengths, native_binding_count, ctrl_code_buffer, command);
+      single_cache_entry =
+          iree_hal_amdxdna_store_single_command_cache_entry_with_capacity(
+              single_command_cache, queue, cu_idx.index, prepared_ctrl_words,
+              asm_inst->count, binding_buffers, binding_addrs, binding_offsets,
+              binding_lengths, native_binding_count,
+              (iree_host_size_t)iree_hal_amdxdna_native_buffer_c_size(
+                  ctrl_code_buffer),
+              ctrl_code_buffer, command);
       transferred_to_cache = single_cache_entry != NULL;
       if (transferred_to_cache) {
         single_cache_entry->ctrl_code_mapped_ptr = instr_buffer_ptr;

@@ -11,8 +11,25 @@
 
 #if defined(HRX_HAS_IREE_AMDXDNA_DRIVER)
 #include "iree/base/internal/flatcc/building.h"
+#include "iree/base/threading/call_once.h"
+#include "iree/base/threading/mutex.h"
 #include "iree/hal/drivers/amdxdna/direct_command_buffer_planning.h"
 #include "iree/schemas/amdxdna_xclbin_executable_def_builder.h"
+
+typedef struct hrx_amdxdna_serialization_workspace_t {
+  iree_slim_mutex_t mutex;
+  uint8_t* data;
+  size_t capacity;
+} hrx_amdxdna_serialization_workspace_t;
+
+static hrx_amdxdna_serialization_workspace_t
+    hrx_amdxdna_serialization_workspace;
+static iree_once_flag hrx_amdxdna_serialization_workspace_once =
+    IREE_ONCE_FLAG_INIT;
+
+static void hrx_amdxdna_serialization_workspace_initialize(void) {
+  iree_slim_mutex_initialize(&hrx_amdxdna_serialization_workspace.mutex);
+}
 
 static bool hrx_amdxdna_span_is_valid(hrx_const_byte_span_t span) {
   return span.data_length == 0 || span.data != NULL;
@@ -502,15 +519,14 @@ hrx_amdxdna_create_entry_point(
 }
 #endif  // HRX_HAS_IREE_AMDXDNA_DRIVER
 
-hrx_status_t hrx_amdxdna_xadx_serialize(
+static hrx_status_t hrx_amdxdna_xadx_serialize_reuse(
     const hrx_amdxdna_executable_create_params_t* params,
-    hrx_host_allocator_t host_allocator, uint8_t** out_data,
-    size_t* out_data_length) {
-  if (!out_data || !out_data_length) {
+    hrx_host_allocator_t host_allocator, uint8_t** inout_data,
+    size_t* inout_capacity, size_t* out_data_length) {
+  if (!inout_data || !inout_capacity || !out_data_length) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                           "out_data or out_data_length is NULL");
+                           "serialization output is NULL");
   }
-  *out_data = NULL;
   *out_data_length = 0;
 #if !defined(HRX_HAS_IREE_AMDXDNA_DRIVER)
   (void)params;
@@ -530,7 +546,6 @@ hrx_status_t hrx_amdxdna_xadx_serialize(
   iree_hal_amdxdna_xclbin_XclbinDef_ref_t* xclbin_refs = NULL;
   iree_hal_amdxdna_xclbin_PdiDef_ref_t* pdi_refs = NULL;
   iree_hal_amdxdna_xclbin_EntryPointDef_ref_t* entry_refs = NULL;
-  void* executable_data = NULL;
   size_t executable_data_size = 0;
   if (flatbuffers_failed(
           iree_hal_amdxdna_xclbin_ExecutableDef_start_as_root(&builder))) {
@@ -814,25 +829,51 @@ hrx_status_t hrx_amdxdna_xadx_serialize(
     }
   }
 
-  executable_data =
-      flatcc_builder_finalize_aligned_buffer(&builder, &executable_data_size);
-  if (!executable_data || executable_data_size == 0) {
+  executable_data_size = flatcc_builder_get_buffer_size(&builder);
+  if (executable_data_size == 0) {
     status = hrx_amdxdna_builder_failure(
         "failed to finalize amdxdna executable package");
     goto cleanup;
   }
-  status = hrx_host_allocator_clone(host_allocator, executable_data,
-                                    executable_data_size, (void**)out_data);
+  if (*inout_capacity < executable_data_size) {
+    status = hrx_host_allocator_realloc(
+        host_allocator, executable_data_size, (void**)inout_data);
+    if (!hrx_status_is_ok(status)) goto cleanup;
+    *inout_capacity = executable_data_size;
+  }
+  if (!flatcc_builder_copy_buffer(&builder, *inout_data, *inout_capacity)) {
+    status = hrx_amdxdna_builder_failure(
+        "failed to copy amdxdna executable package");
+    goto cleanup;
+  }
   if (hrx_status_is_ok(status)) *out_data_length = executable_data_size;
 
 cleanup:
-  flatcc_builder_aligned_free(executable_data);
   hrx_host_allocator_free(hrx_host_allocator_system(), entry_refs);
   hrx_host_allocator_free(hrx_host_allocator_system(), pdi_refs);
   hrx_host_allocator_free(hrx_host_allocator_system(), xclbin_refs);
   flatcc_builder_clear(&builder);
   return status;
 #endif  // HRX_HAS_IREE_AMDXDNA_DRIVER
+}
+
+hrx_status_t hrx_amdxdna_xadx_serialize(
+    const hrx_amdxdna_executable_create_params_t* params,
+    hrx_host_allocator_t host_allocator, uint8_t** out_data,
+    size_t* out_data_length) {
+  if (!out_data || !out_data_length) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "out_data or out_data_length is NULL");
+  }
+  *out_data = NULL;
+  size_t capacity = 0;
+  hrx_status_t status = hrx_amdxdna_xadx_serialize_reuse(
+      params, host_allocator, out_data, &capacity, out_data_length);
+  if (!hrx_status_is_ok(status)) {
+    hrx_host_allocator_free(host_allocator, *out_data);
+    *out_data = NULL;
+  }
+  return status;
 }
 
 hrx_status_t hrx_amdxdna_executable_create(
@@ -844,16 +885,19 @@ hrx_status_t hrx_amdxdna_executable_create(
   }
   *executable = NULL;
   hrx_host_allocator_t host_allocator = hrx_host_allocator_system();
-  uint8_t* executable_data = NULL;
+  iree_call_once(&hrx_amdxdna_serialization_workspace_once,
+                 hrx_amdxdna_serialization_workspace_initialize);
+  iree_slim_mutex_lock(&hrx_amdxdna_serialization_workspace.mutex);
   size_t executable_data_size = 0;
-  hrx_status_t status = hrx_amdxdna_xadx_serialize(
-      params, host_allocator, &executable_data, &executable_data_size);
+  hrx_status_t status = hrx_amdxdna_xadx_serialize_reuse(
+      params, host_allocator, &hrx_amdxdna_serialization_workspace.data,
+      &hrx_amdxdna_serialization_workspace.capacity, &executable_data_size);
   if (hrx_status_is_ok(status)) {
-    status =
-        hrx_executable_load_data(device, executable_data, executable_data_size,
-                                 HRX_AMDXDNA_EXECUTABLE_TARGET_FAMILY,
-                                 HRX_AMDXDNA_EXECUTABLE_TARGET_KEY, executable);
+    status = hrx_executable_load_data(
+        device, hrx_amdxdna_serialization_workspace.data, executable_data_size,
+        HRX_AMDXDNA_EXECUTABLE_TARGET_FAMILY,
+        HRX_AMDXDNA_EXECUTABLE_TARGET_KEY, executable);
   }
-  hrx_host_allocator_free(host_allocator, executable_data);
+  iree_slim_mutex_unlock(&hrx_amdxdna_serialization_workspace.mutex);
   return status;
 }

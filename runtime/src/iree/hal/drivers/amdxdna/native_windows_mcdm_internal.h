@@ -39,6 +39,15 @@ bool iree_hal_amdxdna_native_windows_calculate_ert_packet_bytes(
     uint32_t payload_dword_count, size_t allocation_size,
     size_t* out_packet_bytes);
 
+// Computes the opcode-9 boundaries for one runlist child. The end boundary is
+// the first slot boundary at or after the child's final byte; the start
+// boundary is released after the runlist retires.
+bool iree_hal_amdxdna_native_windows_plan_chain_child_code_range(
+    uint64_t aperture_code_offset, uint64_t parent_code_offset,
+    uint64_t child_code_offset, uint64_t child_code_size,
+    uint64_t code_slot_size, uint64_t* out_start_boundary,
+    uint64_t* out_end_boundary);
+
 // Returns true when a buffer belongs to context-owned command staging and
 // therefore cannot be materialized until the context exists.
 bool iree_hal_amdxdna_native_windows_buffer_requires_context(

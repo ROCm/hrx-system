@@ -13,6 +13,7 @@
 #include "iree/hal/drivers/amdxdna/context_cache.h"
 #include "iree/hal/drivers/amdxdna/ctrlcode_elf.h"
 #include "iree/hal/drivers/amdxdna/device.h"
+#include "iree/hal/drivers/amdxdna/direct_command_buffer_single_cache.h"
 #include "iree/hal/drivers/amdxdna/executable_internal.h"
 #include "iree/hal/drivers/amdxdna/util.h"
 #include "iree/hal/drivers/amdxdna/xclbin_util.h"
@@ -1556,12 +1557,21 @@ static void iree_hal_amdxdna_native_executable_destroy(
                                            iree_hal_amdxdna_executable);
   iree_allocator_t host_allocator = executable->host_allocator;
   iree_hal_amdxdna_device* hal_device = executable->hal_device;
-  // Deinitialize first. That releases this executable's context leases and
-  // destroys its PDI buffers, which frees code slots while the context cache
-  // still holds the hardware context.
+  // Release this executable's leases and host-side descriptor storage. Keep
+  // newly-unleased native contexts in the bounded device context cache: the
+  // next shape-specialized executable normally uses the same context image,
+  // and destroying/recreating that context between producer revisions both
+  // defeats the cache and races device-global cached commands that still refer
+  // to its queue. Capacity/resource-pressure eviction invalidates those
+  // commands before releasing a context; device teardown clears both caches in
+  // dependency order.
+  if (hal_device) {
+    iree_hal_amdxdna_single_command_cache_retire_executable(
+        iree_hal_amdxdna_get_single_command_cache(hal_device),
+        executable->cache_identity);
+  }
   iree_hal_amdxdna_executable_deinitialize(executable);
   if (hal_device) {
-    iree_hal_amdxdna_device_drop_unleased_contexts(hal_device);
     iree_hal_amdxdna_allocator_set_model_reuse(hal_device->device_allocator,
                                                /*active=*/0);
   }

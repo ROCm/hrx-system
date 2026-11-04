@@ -177,6 +177,7 @@ struct McdmAbiInfo {
   bool status_has_gpu_va;
   bool sync_has_allocation_handle;
   uint64_t command_aperture_code_slot_size;
+  bool command_aperture_release_wait_for_cpu;
   CommandApertureWritePublishMode command_aperture_write_publish_mode;
   uint64_t command_aperture_code_publish_granularity;
   bool command_aperture_residency_after_bootstrap;
@@ -616,6 +617,12 @@ bool SubmitPathB(const KmtApi& api, const Device& device, Context* context,
 bool WaitForPathBSubmits(const KmtApi& api, const Device& device,
                          Context* context, PathBPendingSubmit* pending,
                          size_t pending_count, Error* out_error);
+
+// Waits for a previously queued Path-B lifecycle marker before its context or
+// aperture resources are destroyed.
+bool WaitForPathBFence(const KmtApi& api, const Device& device,
+                       const Context& context, uint64_t fence_id,
+                       Error* out_error);
 
 // Non-blocking completion poll for an issued (but not yet waited) path-B
 // submit: true once the HW progress fence has reached pending.fence_id.

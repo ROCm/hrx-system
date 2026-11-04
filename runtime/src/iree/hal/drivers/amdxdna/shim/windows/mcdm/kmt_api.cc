@@ -987,6 +987,12 @@ McdmSubmissionPolicy GetMcdmSubmissionPolicy(McdmAbi abi) {
               /*uses_shared_command_code_view=*/true,
               /*submit_completion_is_deferred=*/false};
     case McdmAbi::legacy:
+      // XRT on the modern legacy contract restages each PARTIAL_ELF command
+      // into the context-local aperture base, then orders end/execute/release
+      // on the same HW queue. It does not assign command-owned aperture slots.
+      return {/*supports_command_chaining=*/true,
+              /*uses_shared_command_code_view=*/true,
+              /*submit_completion_is_deferred=*/true};
     case McdmAbi::compact:
       return {/*supports_command_chaining=*/true,
               /*uses_shared_command_code_view=*/false,
@@ -1091,7 +1097,10 @@ bool QueryProbedMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter,
 McdmAbiInfo GetMcdmAbiInfo(McdmAbi abi) {
   McdmAbiInfo info = {};
   info.command_aperture_code_slot_size = 0x8000;
+  info.command_aperture_release_wait_for_cpu = true;
   if (abi == McdmAbi::compact) {
+    info.command_aperture_code_slot_size = 0x10000;
+    info.command_aperture_release_wait_for_cpu = false;
     info.status_private_type = 0x332c;
     info.status_policy = 2;
     info.status_xcl_flags = 0x02000000;
@@ -1105,7 +1114,7 @@ McdmAbiInfo GetMcdmAbiInfo(McdmAbi abi) {
     info.sync_has_allocation_handle = false;
     info.command_aperture_write_publish_mode =
         CommandApertureWritePublishMode::cpu_cache_flush;
-    info.command_aperture_code_publish_granularity = 0x8000;
+    info.command_aperture_code_publish_granularity = 0x10000;
     info.command_aperture_residency_after_bootstrap = true;
     info.retain_command_aperture_mapping_across_contexts = true;
     info.retain_command_aperture_session_across_contexts = true;
@@ -1118,9 +1127,9 @@ McdmAbiInfo GetMcdmAbiInfo(McdmAbi abi) {
   info.sync_has_allocation_handle = true;
   info.command_aperture_write_publish_mode =
       CommandApertureWritePublishMode::kmt_invalidate;
-  info.command_aperture_remap_after_write = true;
   info.explicit_gpu_va_free_on_destroy = true;
   if (abi == McdmAbi::legacy_v0) {
+    info.command_aperture_remap_after_write = true;
     info.submit_private_prefix_size = 0x58;
     info.setup_private_size = 0x260;
     info.pathb_private_size = 0x258;
@@ -1130,6 +1139,7 @@ McdmAbiInfo GetMcdmAbiInfo(McdmAbi abi) {
     return info;
   }
   if (abi == McdmAbi::legacy_v2) {
+    info.command_aperture_remap_after_write = true;
     info.submit_private_prefix_size = 0x60;
     info.setup_private_size = 0x268;
     info.pathb_private_size = 0x260;
@@ -2928,7 +2938,6 @@ bool EnsureStatusRing(const KmtApi& api, const Device& device, Context* context,
   return true;
 }
 
-
 bool SubmitPathBImplNoWait(const KmtApi& api, const Device& device,
                            Context* context, const Buffer& exec_buffer,
                            const void* ert_packet, uint32_t ert_bytes,
@@ -3103,10 +3112,9 @@ bool WaitForPathBSubmits(const KmtApi& api, const Device& device,
     SetError(out_error, "WaitForPathBSubmits called without commands");
     return false;
   }
-  // Retire the final parent through KMT even when the CPU-visible progress
-  // fence already reports completion. The HW queue is in order, so reaching
-  // the final timeline value also retires every earlier parent in the batch.
-  // Completion state for every parent is still checked below.
+  // The HW queue is ordered, so retiring the final timeline value proves that
+  // every earlier parent and completion-ring write has also retired. This
+  // matches both compact and legacy XRT and avoids duplicate CPU waits.
   PathBPendingSubmit& last = pending[pending_count - 1];
   if (!WaitForHwQueueFenceCpu(
           api, device, *context, last.fence_id,
@@ -3157,6 +3165,16 @@ bool WaitForPathBSubmits(const KmtApi& api, const Device& device,
     }
   }
   return true;
+}
+
+bool WaitForPathBFence(const KmtApi& api, const Device& device,
+                       const Context& context, uint64_t fence_id,
+                       Error* out_error) {
+  if (!fence_id) return true;
+  return WaitForHwQueueFenceCpu(
+      api, device, context, fence_id,
+      "D3DKMTWaitForSynchronizationObjectFromCpu(pathb lifecycle drain)",
+      out_error);
 }
 
 

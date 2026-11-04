@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -390,6 +391,55 @@ TEST(NativeWindowsMcdmCodeSlotTest, ShrinksHighWatermarkAfterTailRelease) {
             2u);
   EXPECT_EQ(
       iree_hal_amdxdna_native_windows_code_slot_high_watermark(nullptr, 0), 0u);
+}
+
+TEST(NativeWindowsMcdmChainBoundaryTest,
+     PlansCapturedTwentyFourPlusOneRunlistTopology) {
+  constexpr uint64_t kApertureCodeOffset = 0x30000;
+  constexpr uint64_t kSlotSize = 0x8000;
+  std::vector<uint64_t> starts;
+  std::vector<uint64_t> ends;
+  for (uint64_t child = 0; child < 24; ++child) {
+    uint64_t start = 0;
+    uint64_t end = 0;
+    ASSERT_TRUE(
+        iree_hal_amdxdna_native_windows_plan_chain_child_code_range(
+            kApertureCodeOffset, /*parent_code_offset=*/0,
+            child * kSlotSize, /*child_code_size=*/0x4000, kSlotSize, &start,
+            &end));
+    starts.push_back(start);
+    ends.push_back(end);
+  }
+  uint64_t final_start = 0;
+  uint64_t final_end = 0;
+  ASSERT_TRUE(iree_hal_amdxdna_native_windows_plan_chain_child_code_range(
+      kApertureCodeOffset, /*parent_code_offset=*/24 * kSlotSize,
+      /*child_code_offset=*/0, /*child_code_size=*/0x4000, kSlotSize,
+      &final_start, &final_end));
+  starts.push_back(final_start);
+  ends.push_back(final_end);
+
+  ASSERT_EQ(starts.size(), 25u);
+  EXPECT_EQ(starts.front(), 0x30000u);
+  EXPECT_EQ(ends.front(), 0x38000u);
+  EXPECT_EQ(starts.back(), 0xf0000u);
+  EXPECT_EQ(ends.back(), 0xf8000u);
+  EXPECT_TRUE(std::is_sorted(starts.begin(), starts.end()));
+  std::reverse(starts.begin(), starts.end());
+  EXPECT_EQ(starts.front(), 0xf0000u);
+  EXPECT_EQ(starts.back(), 0x30000u);
+}
+
+TEST(NativeWindowsMcdmChainBoundaryTest,
+     RejectsInvalidSlotAndArithmeticOverflow) {
+  uint64_t start = 1;
+  uint64_t end = 1;
+  EXPECT_FALSE(iree_hal_amdxdna_native_windows_plan_chain_child_code_range(
+      0x30000, 0, 0, 0x1000, /*code_slot_size=*/0x6000, &start, &end));
+  EXPECT_FALSE(iree_hal_amdxdna_native_windows_plan_chain_child_code_range(
+      UINT64_MAX - 0x1000, 0x1000, 1, 0x1000, 0x8000, &start, &end));
+  EXPECT_EQ(start, 1u);
+  EXPECT_EQ(end, 1u);
 }
 
 TEST(NativeWindowsMcdmContextPoolTest,

@@ -410,11 +410,12 @@ TEST(KmtApiTest, LegacyAbiMatchesOriginalSubmitLayout) {
   EXPECT_FALSE(abi.status_has_gpu_va);
   EXPECT_TRUE(abi.sync_has_allocation_handle);
   EXPECT_EQ(abi.command_aperture_code_slot_size, 0x8000u);
+  EXPECT_TRUE(abi.command_aperture_release_wait_for_cpu);
   EXPECT_EQ(abi.command_aperture_write_publish_mode,
             CommandApertureWritePublishMode::kmt_invalidate);
   EXPECT_EQ(abi.command_aperture_code_publish_granularity, 0u);
   EXPECT_FALSE(abi.command_aperture_residency_after_bootstrap);
-  EXPECT_TRUE(abi.command_aperture_remap_after_write);
+  EXPECT_FALSE(abi.command_aperture_remap_after_write);
   EXPECT_FALSE(abi.retain_command_aperture_mapping_across_contexts);
   EXPECT_FALSE(abi.retain_command_aperture_session_across_contexts);
   EXPECT_EQ(abi.shared_resource_destroy_flags, 0u);
@@ -434,10 +435,11 @@ TEST(KmtApiTest, CompactAbiMatchesXrt221SubmitLayout) {
   EXPECT_EQ(abi.pathb_bo_table_entry_count, 6u);
   EXPECT_TRUE(abi.status_has_gpu_va);
   EXPECT_FALSE(abi.sync_has_allocation_handle);
-  EXPECT_EQ(abi.command_aperture_code_slot_size, 0x8000u);
+  EXPECT_EQ(abi.command_aperture_code_slot_size, 0x10000u);
+  EXPECT_FALSE(abi.command_aperture_release_wait_for_cpu);
   EXPECT_EQ(abi.command_aperture_write_publish_mode,
             CommandApertureWritePublishMode::cpu_cache_flush);
-  EXPECT_EQ(abi.command_aperture_code_publish_granularity, 0x8000u);
+  EXPECT_EQ(abi.command_aperture_code_publish_granularity, 0x10000u);
   EXPECT_TRUE(abi.command_aperture_residency_after_bootstrap);
   EXPECT_FALSE(abi.command_aperture_remap_after_write);
   EXPECT_TRUE(abi.retain_command_aperture_mapping_across_contexts);
@@ -620,9 +622,11 @@ TEST(KmtApiTest, CodeRangeUsesProtocolVaIndependentOfAllocatorMapping) {
   for (McdmAbi abi : {McdmAbi::legacy, McdmAbi::compact}) {
     ASSERT_TRUE(ConfigurePathBCodeRangeForSetupPayload(
         abi, 9952, &aperture, &error));
-    EXPECT_EQ(aperture.code_offset, 0x8000u);
-    EXPECT_EQ(aperture.code_gpu_va, 0x04008000u);
-    EXPECT_EQ(aperture.code_size, 0x03ff8000u);
+    const uint64_t first_code_offset =
+        abi == McdmAbi::compact ? 0x10000u : 0x8000u;
+    EXPECT_EQ(aperture.code_offset, first_code_offset);
+    EXPECT_EQ(aperture.code_gpu_va, 0x04000000u + first_code_offset);
+    EXPECT_EQ(aperture.code_size, 0x04000000u - first_code_offset);
 
     ASSERT_TRUE(ConfigurePathBCodeRangeForSetupPayload(
         abi, 107600, &aperture, &error));
@@ -632,7 +636,7 @@ TEST(KmtApiTest, CodeRangeUsesProtocolVaIndependentOfAllocatorMapping) {
 
     ASSERT_TRUE(ConfigurePathBCodeRangeForSetupPayload(
         abi, 0x8000, &aperture, &error));
-    EXPECT_EQ(aperture.code_offset, 0x8000u);
+    EXPECT_EQ(aperture.code_offset, first_code_offset);
     ASSERT_TRUE(ConfigurePathBCodeRangeForSetupPayload(
         abi, 0x8001, &aperture, &error));
     EXPECT_EQ(aperture.code_offset, 0x10000u);
@@ -996,13 +1000,19 @@ TEST(KmtApiTest, SubmissionPolicyFollowsNegotiatedAbiContract) {
     EXPECT_FALSE(policy.submit_completion_is_deferred);
     EXPECT_FALSE(SupportsHostBufferReuse(abi));
   }
-  for (McdmAbi abi : {McdmAbi::legacy, McdmAbi::compact}) {
-    const McdmSubmissionPolicy policy = GetMcdmSubmissionPolicy(abi);
-    EXPECT_TRUE(policy.supports_command_chaining);
-    EXPECT_FALSE(policy.uses_shared_command_code_view);
-    EXPECT_TRUE(policy.submit_completion_is_deferred);
-    EXPECT_TRUE(SupportsHostBufferReuse(abi));
-  }
+  const McdmSubmissionPolicy legacy =
+      GetMcdmSubmissionPolicy(McdmAbi::legacy);
+  EXPECT_TRUE(legacy.supports_command_chaining);
+  EXPECT_TRUE(legacy.uses_shared_command_code_view);
+  EXPECT_TRUE(legacy.submit_completion_is_deferred);
+  EXPECT_TRUE(SupportsHostBufferReuse(McdmAbi::legacy));
+
+  const McdmSubmissionPolicy compact =
+      GetMcdmSubmissionPolicy(McdmAbi::compact);
+  EXPECT_TRUE(compact.supports_command_chaining);
+  EXPECT_FALSE(compact.uses_shared_command_code_view);
+  EXPECT_TRUE(compact.submit_completion_is_deferred);
+  EXPECT_TRUE(SupportsHostBufferReuse(McdmAbi::compact));
 }
 
 TEST(KmtApiTest, SelectsLegacyLayoutForPost280Stx2DriverVersions) {
@@ -1480,6 +1490,7 @@ TEST(KmtApiTest, FailedPathBSubmitDoesNotCreatePendingCommand) {
 
   EXPECT_EQ(first.fence_id, 7u);
   EXPECT_NE(first.slot_cpu, nullptr);
+  EXPECT_EQ(first.exec_buffer.allocation, 0x40u);
   EXPECT_EQ(second.fence_id, 0u);
   EXPECT_EQ(second.slot_cpu, nullptr);
   EXPECT_EQ(g_submit_count, 2u);
@@ -1725,7 +1736,7 @@ TEST(KmtApiTest, CodeRangeLifecycleMatchesNegotiatedAbi) {
     ASSERT_TRUE(PublishPathBCodeWrite(
         api, device, &context, aperture, aperture.code_offset, 0x10000,
         &error));
-    EXPECT_EQ(g_submit_count, 2u);
+    EXPECT_EQ(g_submit_count, mcdm_abi == McdmAbi::compact ? 1u : 2u);
     ASSERT_TRUE(ReleasePathBCodeRange(
         api, device, &context, aperture, aperture.code_offset, 0x10000,
         &error));
@@ -1739,8 +1750,7 @@ TEST(KmtApiTest, CodeRangeLifecycleMatchesNegotiatedAbi) {
 
   run(McdmAbi::compact, 9952);
   const SetupCall compact_calls[] = {
-      SetupCall::submit, SetupCall::submit, SetupCall::submit,
-      SetupCall::submit, SetupCall::wait, SetupCall::submit,
+      SetupCall::submit, SetupCall::submit, SetupCall::wait,
       SetupCall::submit};
   ASSERT_EQ(g_setup_call_count, std::size(compact_calls));
   size_t compact_submit_index = 0;
@@ -1750,27 +1760,21 @@ TEST(KmtApiTest, CodeRangeLifecycleMatchesNegotiatedAbi) {
       EXPECT_EQ(g_submit_opcodes[compact_submit_index++], 9u);
     }
   }
-  ASSERT_EQ(g_submit_count, 6u);
-  EXPECT_EQ(g_submit_offsets[0], 0x10000u);
-  EXPECT_EQ(g_submit_offsets[1], 0x18000u);
-  EXPECT_EQ(g_submit_offsets[2], 0x10000u);
-  EXPECT_EQ(g_submit_offsets[3], 0x8000u);
-  EXPECT_EQ(g_submit_offsets[4], 0x10000u);
-  EXPECT_EQ(g_submit_offsets[5], 0x18000u);
+  ASSERT_EQ(g_submit_count, 3u);
+  EXPECT_EQ(g_submit_offsets[0], 0x20000u);
+  EXPECT_EQ(g_submit_offsets[1], 0x10000u);
+  EXPECT_EQ(g_submit_offsets[2], 0x20000u);
   EXPECT_EQ(g_wait_count, 1u);
-  EXPECT_EQ(g_wait_fences[0], 10u);
+  EXPECT_EQ(g_wait_fences[0], 8u);
 
   run(McdmAbi::compact, 107600);
   ASSERT_EQ(g_setup_call_count, std::size(compact_calls));
-  ASSERT_EQ(g_submit_count, 6u);
-  EXPECT_EQ(g_submit_offsets[0], 0x28000u);
-  EXPECT_EQ(g_submit_offsets[1], 0x30000u);
-  EXPECT_EQ(g_submit_offsets[2], 0x28000u);
-  EXPECT_EQ(g_submit_offsets[3], 0x20000u);
-  EXPECT_EQ(g_submit_offsets[4], 0x28000u);
-  EXPECT_EQ(g_submit_offsets[5], 0x30000u);
+  ASSERT_EQ(g_submit_count, 3u);
+  EXPECT_EQ(g_submit_offsets[0], 0x30000u);
+  EXPECT_EQ(g_submit_offsets[1], 0x20000u);
+  EXPECT_EQ(g_submit_offsets[2], 0x30000u);
   EXPECT_EQ(g_wait_count, 1u);
-  EXPECT_EQ(g_wait_fences[0], 10u);
+  EXPECT_EQ(g_wait_fences[0], 8u);
 
   run(McdmAbi::legacy, 107600);
   const SetupCall legacy_calls[] = {
@@ -1825,7 +1829,7 @@ TEST(KmtApiTest, QueueCodeRangeReleasePreservesMarkersWithoutCpuWait) {
     }
   };
 
-  run(McdmAbi::compact, 9952, 2u);
+  run(McdmAbi::compact, 9952, 1u);
   run(McdmAbi::legacy, 107600, 1u);
 }
 
@@ -1954,6 +1958,9 @@ TEST(KmtApiTest, CodeWriteRemapMatchesNegotiatedAbi) {
   EXPECT_EQ(g_setup_call_count, 0u);
 
   run(McdmAbi::legacy);
+  EXPECT_EQ(g_setup_call_count, 0u);
+
+  run(McdmAbi::legacy_v2);
   const SetupCall legacy_calls[] = {SetupCall::unlock, SetupCall::lock};
   ASSERT_EQ(g_setup_call_count, std::size(legacy_calls));
   for (size_t i = 0; i < std::size(legacy_calls); ++i) {

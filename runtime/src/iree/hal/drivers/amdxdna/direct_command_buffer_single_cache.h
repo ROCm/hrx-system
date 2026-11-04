@@ -25,10 +25,15 @@ extern "C" {
 // instances and rebound/rewritten in place to match a freshly recorded
 // dispatch. START_DPU keeps the instruction BO alive for the hwctx lifetime
 // (XRT module_run model) and restores+repatches it on each submit. Occupied
-// entries are never LRU-evicted: destroying an instruction BO records a paging
-// fence that later hardware-queue submits wait on inside the ioctl. The table
-// grows to hold every live template.
+// entries are LRU-evicted only while idle: destroying an instruction BO
+// records a paging fence that later hardware-queue submits wait on inside the
+// ioctl. Bounding the table prevents variable command shapes from retaining
+// one Windows KMT allocation set per distinct context length indefinitely.
 enum { kAmdxdnaSingleCommandCacheInitialCapacity = 8 };
+enum { kAmdxdnaSingleCommandCacheDefaultMaxEntries = 64 };
+enum {
+  kAmdxdnaSingleCommandCacheDefaultMaxRetainedCodeBytes = 64 * 1024 * 1024
+};
 
 typedef struct iree_hal_amdxdna_single_command_cache_entry_t {
   iree_hal_amdxdna_native_queue_t* queue;
@@ -46,6 +51,9 @@ typedef struct iree_hal_amdxdna_single_command_cache_entry_t {
   // Native code bytes retained by |ctrl_code_buffer|. Kept separately from
   // ctrl_word_count so cache-wide accounting remains exact during teardown.
   iree_host_size_t retained_code_bytes;
+  // Writable capacity of |ctrl_code_buffer|. This may exceed the logical
+  // control length and permits allocation-preserving shape reuse.
+  iree_host_size_t ctrl_code_capacity;
   // Process-unique executable identity plus the export/run that produced this
   // command. Non-zero identity is the hot-path lookup key: it does not ABA
   // after reload (unlike object addresses) and avoids a full TXN memcmp.
@@ -89,6 +97,12 @@ typedef struct iree_hal_amdxdna_device_single_command_cache_t {
   iree_hal_amdxdna_single_command_cache_entry_t* entries;
   iree_host_size_t entry_count;
   iree_host_size_t entry_capacity;
+  iree_host_size_t max_entries;
+  // Maximum native instruction-BO bytes retained by idle and in-flight
+  // entries. This complements |max_entries|: count bounds driver objects while
+  // bytes bound unusually large control programs. Entries that do not fit run
+  // uncached.
+  iree_host_size_t max_retained_code_bytes;
   uint64_t use_clock;
   // Lock-free snapshot used by chain-cache admission on every chain lookup.
   iree_atomic_int64_t retained_code_bytes;
@@ -97,8 +111,13 @@ typedef struct iree_hal_amdxdna_device_single_command_cache_t {
 typedef struct iree_hal_amdxdna_device iree_hal_amdxdna_device;
 
 iree_status_t iree_hal_amdxdna_single_command_cache_create(
-    iree_allocator_t host_allocator,
+    iree_allocator_t host_allocator, iree_host_size_t max_entries,
     iree_hal_amdxdna_device_single_command_cache_t** out_cache);
+
+// Sets the backend-derived byte limit immediately after cache creation.
+void iree_hal_amdxdna_single_command_cache_set_max_retained_code_bytes(
+    iree_hal_amdxdna_device_single_command_cache_t* cache,
+    iree_host_size_t max_retained_code_bytes);
 
 iree_hal_amdxdna_device_single_command_cache_t*
 iree_hal_amdxdna_get_single_command_cache(iree_hal_amdxdna_device* device);
@@ -152,6 +171,31 @@ iree_status_t iree_hal_amdxdna_find_single_command_cache_executable_entry(
     iree_host_size_t ctrl_word_count, iree_host_size_t binding_count,
     iree_hal_amdxdna_single_command_cache_entry_t** out_entry);
 
+// Retires commands belonging to an executable that has been destroyed. Native
+// command/BO storage remains cached and becomes eligible for immediate
+// capacity-compatible reuse; in-flight entries become reusable on completion.
+void iree_hal_amdxdna_single_command_cache_retire_executable(
+    iree_hal_amdxdna_device_single_command_cache_t* cache,
+    uint64_t executable_identity);
+
+// Finds the best-fit idle PARTIAL_ELF entry on the same native queue/CU whose
+// instruction BO can hold |ctrl_word_count| words. Retired/anonymous entries
+// are reusable immediately; live executable entries are repurposed only after
+// the cache reaches its count or retained-byte bound. The caller must rewrite
+// the complete command before submitting it.
+iree_status_t iree_hal_amdxdna_find_single_command_cache_reusable_entry(
+    iree_hal_amdxdna_device_single_command_cache_t* cache,
+    iree_hal_amdxdna_native_queue_t* queue, uint32_t cu_index,
+    iree_host_size_t ctrl_word_count, bool use_native_partial_elf,
+    iree_hal_amdxdna_single_command_cache_entry_t** out_entry);
+
+// Resizes only the host-side signature snapshot for an idle entry. Native
+// command and instruction-buffer ownership are preserved.
+iree_status_t iree_hal_amdxdna_single_command_cache_entry_resize_signature(
+    iree_hal_amdxdna_device_single_command_cache_t* cache,
+    iree_hal_amdxdna_single_command_cache_entry_t* entry,
+    iree_host_size_t ctrl_word_count, iree_host_size_t binding_count);
+
 iree_status_t iree_hal_amdxdna_update_single_command_cache_entry(
     iree_hal_amdxdna_device_single_command_cache_t* cache,
     iree_hal_amdxdna_single_command_cache_entry_t* entry,
@@ -170,6 +214,22 @@ iree_hal_amdxdna_store_single_command_cache_entry(
     const uint64_t* binding_device_addrs,
     const iree_device_size_t* binding_offsets,
     const iree_device_size_t* binding_lengths, iree_host_size_t binding_count,
+    iree_hal_amdxdna_native_buffer_t* ctrl_code_buffer,
+    iree_hal_amdxdna_native_command_t* command);
+
+// As above, with the physical instruction-BO capacity used for byte-budget
+// admission. Production paths use this when native allocation alignment makes
+// the capacity differ from the logical control-program size.
+iree_hal_amdxdna_single_command_cache_entry_t*
+iree_hal_amdxdna_store_single_command_cache_entry_with_capacity(
+    iree_hal_amdxdna_device_single_command_cache_t* cache,
+    iree_hal_amdxdna_native_queue_t* queue, uint32_t cu_index,
+    const uint32_t* ctrl_words, iree_host_size_t ctrl_word_count,
+    iree_hal_amdxdna_native_buffer_t* const* binding_buffers,
+    const uint64_t* binding_device_addrs,
+    const iree_device_size_t* binding_offsets,
+    const iree_device_size_t* binding_lengths, iree_host_size_t binding_count,
+    iree_host_size_t ctrl_code_capacity,
     iree_hal_amdxdna_native_buffer_t* ctrl_code_buffer,
     iree_hal_amdxdna_native_command_t* command);
 

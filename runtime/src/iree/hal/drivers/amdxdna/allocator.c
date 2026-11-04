@@ -12,6 +12,202 @@
 #include "iree/hal/drivers/amdxdna/buffer.h"
 #include "iree/hal/drivers/amdxdna/util.h"
 
+struct iree_alignas(iree_max_align_t)
+    iree_hal_amdxdna_host_recycler_block_t {
+  struct iree_hal_amdxdna_host_recycler_block_t* next;
+  iree_host_size_t capacity;
+};
+
+static_assert(sizeof(iree_hal_amdxdna_host_recycler_block_t) %
+                      iree_max_align_t ==
+                  0,
+              "recycler header must preserve natural alignment");
+
+static void* iree_hal_amdxdna_host_recycler_block_data(
+    iree_hal_amdxdna_host_recycler_block_t* block) {
+  return (void*)(block + 1);
+}
+
+static iree_hal_amdxdna_host_recycler_block_t*
+iree_hal_amdxdna_host_recycler_data_block(void* ptr) {
+  return ((iree_hal_amdxdna_host_recycler_block_t*)ptr) - 1;
+}
+
+static void iree_hal_amdxdna_host_recycler_free(
+    iree_hal_amdxdna_host_recycler_t* recycler, void** inout_ptr);
+
+static iree_status_t iree_hal_amdxdna_host_recycler_allocate(
+    iree_hal_amdxdna_host_recycler_t* recycler, iree_host_size_t byte_length,
+    bool zero_initialize, void** out_ptr) {
+  if (IREE_UNLIKELY(byte_length == 0)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "allocations must be >0 bytes");
+  }
+
+  iree_hal_amdxdna_host_recycler_block_t* best = NULL;
+  iree_hal_amdxdna_host_recycler_block_t** best_link = NULL;
+  iree_hal_amdxdna_host_recycler_block_t* largest = NULL;
+  iree_hal_amdxdna_host_recycler_block_t** largest_link = NULL;
+  iree_slim_mutex_lock(&recycler->mutex);
+  for (iree_hal_amdxdna_host_recycler_block_t** link = &recycler->free_list;
+       *link; link = &(*link)->next) {
+    iree_hal_amdxdna_host_recycler_block_t* candidate = *link;
+    if (!largest || candidate->capacity > largest->capacity) {
+      largest = candidate;
+      largest_link = link;
+    }
+    if (candidate->capacity >= byte_length &&
+        (!best || candidate->capacity < best->capacity)) {
+      best = candidate;
+      best_link = link;
+    }
+  }
+  // A monotonically growing shape sequence has no sufficient free block.
+  // Grow the largest retained block instead of leaving undersized blocks
+  // stranded while allocating a fresh block on every executable generation.
+  if (!best) {
+    best = largest;
+    best_link = largest_link;
+  }
+  if (best) {
+    *best_link = best->next;
+    recycler->retained_bytes -= best->capacity;
+    --recycler->retained_count;
+  }
+  iree_slim_mutex_unlock(&recycler->mutex);
+
+  if (IREE_UNLIKELY(byte_length >
+                    IREE_HOST_SIZE_MAX -
+                        sizeof(iree_hal_amdxdna_host_recycler_block_t))) {
+    if (best) {
+      void* data = iree_hal_amdxdna_host_recycler_block_data(best);
+      iree_hal_amdxdna_host_recycler_free(recycler, &data);
+    }
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "allocation size overflows recycler header");
+  }
+  if (best && best->capacity < byte_length) {
+    iree_status_t status = iree_allocator_realloc(
+        recycler->backing_allocator,
+        sizeof(iree_hal_amdxdna_host_recycler_block_t) + byte_length,
+        (void**)&best);
+    if (!iree_status_is_ok(status)) {
+      void* data = iree_hal_amdxdna_host_recycler_block_data(best);
+      iree_hal_amdxdna_host_recycler_free(recycler, &data);
+      return status;
+    }
+    best->capacity = byte_length;
+  } else if (!best) {
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_uninitialized(
+        recycler->backing_allocator,
+        sizeof(iree_hal_amdxdna_host_recycler_block_t) + byte_length,
+        (void**)&best));
+    best->capacity = byte_length;
+  }
+  best->next = NULL;
+  *out_ptr = iree_hal_amdxdna_host_recycler_block_data(best);
+  if (zero_initialize) memset(*out_ptr, 0, byte_length);
+  return iree_ok_status();
+}
+
+static void iree_hal_amdxdna_host_recycler_free(
+    iree_hal_amdxdna_host_recycler_t* recycler, void** inout_ptr) {
+  if (!*inout_ptr) return;
+  iree_hal_amdxdna_host_recycler_block_t* block =
+      iree_hal_amdxdna_host_recycler_data_block(*inout_ptr);
+  bool retain = false;
+  iree_slim_mutex_lock(&recycler->mutex);
+  if (block->capacity <= recycler->max_retained_bytes &&
+      recycler->retained_bytes <=
+          recycler->max_retained_bytes - block->capacity &&
+      recycler->retained_count < recycler->max_retained_count) {
+    block->next = recycler->free_list;
+    recycler->free_list = block;
+    recycler->retained_bytes += block->capacity;
+    ++recycler->retained_count;
+    retain = true;
+  }
+  iree_slim_mutex_unlock(&recycler->mutex);
+  if (!retain) {
+    iree_allocator_free(recycler->backing_allocator, block);
+  }
+  *inout_ptr = NULL;
+}
+
+static iree_status_t iree_hal_amdxdna_host_recycler_ctl(
+    void* self, iree_allocator_command_t command, const void* params,
+    void** inout_ptr) {
+  iree_hal_amdxdna_host_recycler_t* recycler =
+      (iree_hal_amdxdna_host_recycler_t*)self;
+  switch (command) {
+    case IREE_ALLOCATOR_COMMAND_MALLOC:
+    case IREE_ALLOCATOR_COMMAND_CALLOC: {
+      const iree_allocator_alloc_params_t* alloc_params =
+          (const iree_allocator_alloc_params_t*)params;
+      return iree_hal_amdxdna_host_recycler_allocate(
+          recycler, alloc_params->byte_length,
+          command == IREE_ALLOCATOR_COMMAND_CALLOC, inout_ptr);
+    }
+    case IREE_ALLOCATOR_COMMAND_REALLOC: {
+      const iree_allocator_alloc_params_t* alloc_params =
+          (const iree_allocator_alloc_params_t*)params;
+      if (!*inout_ptr) {
+        return iree_hal_amdxdna_host_recycler_allocate(
+            recycler, alloc_params->byte_length, false, inout_ptr);
+      }
+      iree_hal_amdxdna_host_recycler_block_t* old_block =
+          iree_hal_amdxdna_host_recycler_data_block(*inout_ptr);
+      if (old_block->capacity >= alloc_params->byte_length) {
+        return iree_ok_status();
+      }
+      void* new_ptr = NULL;
+      IREE_RETURN_IF_ERROR(iree_hal_amdxdna_host_recycler_allocate(
+          recycler, alloc_params->byte_length, false, &new_ptr));
+      memcpy(new_ptr, *inout_ptr, old_block->capacity);
+      iree_hal_amdxdna_host_recycler_free(recycler, inout_ptr);
+      *inout_ptr = new_ptr;
+      return iree_ok_status();
+    }
+    case IREE_ALLOCATOR_COMMAND_FREE:
+      iree_hal_amdxdna_host_recycler_free(recycler, inout_ptr);
+      return iree_ok_status();
+    default:
+      return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                              "unsupported host recycler command");
+  }
+}
+
+void iree_hal_amdxdna_host_recycler_initialize(
+    iree_allocator_t backing_allocator, iree_host_size_t max_retained_bytes,
+    iree_host_size_t max_retained_count,
+    iree_hal_amdxdna_host_recycler_t* out_recycler) {
+  memset(out_recycler, 0, sizeof(*out_recycler));
+  out_recycler->backing_allocator = backing_allocator;
+  out_recycler->max_retained_bytes = max_retained_bytes;
+  out_recycler->max_retained_count = max_retained_count;
+  iree_slim_mutex_initialize(&out_recycler->mutex);
+}
+
+void iree_hal_amdxdna_host_recycler_deinitialize(
+    iree_hal_amdxdna_host_recycler_t* recycler) {
+  iree_hal_amdxdna_host_recycler_block_t* block = recycler->free_list;
+  while (block) {
+    iree_hal_amdxdna_host_recycler_block_t* next = block->next;
+    iree_allocator_free(recycler->backing_allocator, block);
+    block = next;
+  }
+  iree_slim_mutex_deinitialize(&recycler->mutex);
+  memset(recycler, 0, sizeof(*recycler));
+}
+
+iree_allocator_t iree_hal_amdxdna_host_recycler_allocator(
+    iree_hal_amdxdna_host_recycler_t* recycler) {
+  return (iree_allocator_t){
+      .self = recycler,
+      .ctl = iree_hal_amdxdna_host_recycler_ctl,
+  };
+}
+
 static const iree_hal_allocator_vtable_t iree_hal_amdxdna_allocator_vtable;
 
 enum { kAmdxdnaAllocatorCacheCapacity = 64 };
@@ -145,6 +341,21 @@ int iree_hal_amdxdna_allocator_set_model_reuse(
   return 1;
 }
 
+iree_host_size_t iree_hal_amdxdna_allocator_find_best_fit(
+    const iree_device_size_t* capacities, iree_host_size_t capacity_count,
+    iree_device_size_t required_size) {
+  iree_host_size_t best_index = IREE_HOST_SIZE_MAX;
+  iree_device_size_t best_capacity = IREE_DEVICE_SIZE_MAX;
+  for (iree_host_size_t i = 0; i < capacity_count; ++i) {
+    if (capacities[i] < required_size || capacities[i] >= best_capacity) {
+      continue;
+    }
+    best_index = i;
+    best_capacity = capacities[i];
+  }
+  return best_index;
+}
+
 static iree_status_t iree_hal_amdxdna_allocator_take_cached_buffer(
     iree_hal_amdxdna_allocator_t* allocator, iree_device_size_t allocation_size,
     iree_hal_amdxdna_native_buffer_t** out_buffer) {
@@ -167,20 +378,25 @@ static iree_status_t iree_hal_amdxdna_allocator_take_cached_buffer(
     --allocator->cached_buffer_count;
     allocator->cached_buffers[allocator->cached_buffer_count] = NULL;
   }
+  iree_device_size_t capacities[kAmdxdnaAllocatorCacheCapacity];
   for (iree_host_size_t i = 0; i < allocator->cached_buffer_count; ++i) {
-    iree_hal_amdxdna_native_buffer_t* candidate = allocator->cached_buffers[i];
-    if (iree_hal_amdxdna_native_buffer_c_size(candidate) != allocation_size) {
-      continue;
-    }
-    *out_buffer = candidate;
-    const iree_host_size_t tail_count = allocator->cached_buffer_count - i - 1;
+    capacities[i] = iree_hal_amdxdna_native_buffer_c_size(
+        allocator->cached_buffers[i]);
+  }
+  const iree_host_size_t best_index =
+      iree_hal_amdxdna_allocator_find_best_fit(
+          capacities, allocator->cached_buffer_count, allocation_size);
+  if (best_index != IREE_HOST_SIZE_MAX) {
+    *out_buffer = allocator->cached_buffers[best_index];
+    const iree_host_size_t tail_count =
+        allocator->cached_buffer_count - best_index - 1;
     if (tail_count > 0) {
-      memmove(&allocator->cached_buffers[i], &allocator->cached_buffers[i + 1],
+      memmove(&allocator->cached_buffers[best_index],
+              &allocator->cached_buffers[best_index + 1],
               tail_count * sizeof(allocator->cached_buffers[0]));
     }
     --allocator->cached_buffer_count;
     allocator->cached_buffers[allocator->cached_buffer_count] = NULL;
-    break;
   }
   iree_slim_mutex_unlock(&allocator->cache_mutex);
   for (iree_host_size_t i = 0; i < stale_count; ++i) {

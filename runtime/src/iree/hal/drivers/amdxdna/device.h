@@ -11,6 +11,7 @@
 #include "iree/base/internal/atomics.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/api.h"
+#include "iree/hal/drivers/amdxdna/allocator.h"
 #include "iree/hal/drivers/amdxdna/api.h"
 #include "iree/hal/drivers/amdxdna/async_queue.h"
 #include "iree/hal/drivers/amdxdna/completion_queue.h"
@@ -43,6 +44,10 @@ typedef struct iree_hal_amdxdna_device {
   // block pool used for command buffer allocations, uses a larger block size
   // since command buffers can contain inlined data
   iree_arena_block_pool_t block_pool;
+  // Variable-size descriptor blocks recycled across executable generations.
+  // The recycler is byte/count bounded and best-fit, avoiding both system-heap
+  // retention from novel sizes and fixed-block internal fragmentation.
+  iree_hal_amdxdna_host_recycler_t executable_host_recycler;
 
   // Per-device async work queue. Defers HAL queue ops until their wait
   // semaphores are satisfied, then runs them on a single worker thread.

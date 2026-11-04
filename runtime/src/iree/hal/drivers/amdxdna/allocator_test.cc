@@ -56,6 +56,110 @@ class AllocatorCompatibilityTest : public ::testing::Test {
   iree_hal_allocator_t* allocator_ = nullptr;
 };
 
+TEST(AllocatorReuseTest, BestFitAcceptsLargerCapacity) {
+  const iree_device_size_t capacities[] = {4096, 1024, 2048, 8192};
+  EXPECT_EQ(iree_hal_amdxdna_allocator_find_best_fit(
+                capacities, IREE_ARRAYSIZE(capacities), /*required_size=*/1536),
+            2u);
+  EXPECT_EQ(iree_hal_amdxdna_allocator_find_best_fit(
+                capacities, IREE_ARRAYSIZE(capacities), /*required_size=*/1024),
+            1u);
+}
+
+TEST(AllocatorReuseTest, BestFitRejectsUndersizedCapacities) {
+  const iree_device_size_t capacities[] = {512, 1024, 2048};
+  EXPECT_EQ(iree_hal_amdxdna_allocator_find_best_fit(
+                capacities, IREE_ARRAYSIZE(capacities), /*required_size=*/4096),
+            IREE_HOST_SIZE_MAX);
+}
+
+TEST(HostRecyclerTest, ReusesSmallestSufficientBlockAndZerosCalloc) {
+  iree_hal_amdxdna_host_recycler_t recycler;
+  iree_hal_amdxdna_host_recycler_initialize(
+      iree_allocator_system(), /*max_retained_bytes=*/4096,
+      /*max_retained_count=*/4, &recycler);
+  iree_allocator_t allocator =
+      iree_hal_amdxdna_host_recycler_allocator(&recycler);
+
+  uint8_t* large = nullptr;
+  uint8_t* small = nullptr;
+  IREE_ASSERT_OK(iree_allocator_malloc_uninitialized(
+      allocator, 1024, reinterpret_cast<void**>(&large)));
+  IREE_ASSERT_OK(iree_allocator_malloc_uninitialized(
+      allocator, 512, reinterpret_cast<void**>(&small)));
+  memset(large, 0xAB, 1024);
+  iree_allocator_free(allocator, large);
+  iree_allocator_free(allocator, small);
+
+  uint8_t* reused = nullptr;
+  IREE_ASSERT_OK(
+      iree_allocator_malloc(allocator, 256, reinterpret_cast<void**>(&reused)));
+  EXPECT_EQ(reused, small);
+  for (iree_host_size_t i = 0; i < 256; ++i) EXPECT_EQ(reused[i], 0);
+  iree_allocator_free(allocator, reused);
+  iree_hal_amdxdna_host_recycler_deinitialize(&recycler);
+}
+
+TEST(HostRecyclerTest, EnforcesRetainedByteAndCountBudgets) {
+  iree_hal_amdxdna_host_recycler_t recycler;
+  iree_hal_amdxdna_host_recycler_initialize(
+      iree_allocator_system(), /*max_retained_bytes=*/1024,
+      /*max_retained_count=*/1, &recycler);
+  iree_allocator_t allocator =
+      iree_hal_amdxdna_host_recycler_allocator(&recycler);
+
+  void* first = nullptr;
+  void* second = nullptr;
+  IREE_ASSERT_OK(
+      iree_allocator_malloc_uninitialized(allocator, 768, &first));
+  IREE_ASSERT_OK(
+      iree_allocator_malloc_uninitialized(allocator, 512, &second));
+  iree_allocator_free(allocator, first);
+  iree_allocator_free(allocator, second);
+  EXPECT_EQ(recycler.retained_count, 1u);
+  EXPECT_EQ(recycler.retained_bytes, 768u);
+  iree_hal_amdxdna_host_recycler_deinitialize(&recycler);
+}
+
+TEST(HostRecyclerTest, ReallocPreservesContents) {
+  iree_hal_amdxdna_host_recycler_t recycler;
+  iree_hal_amdxdna_host_recycler_initialize(
+      iree_allocator_system(), /*max_retained_bytes=*/4096,
+      /*max_retained_count=*/4, &recycler);
+  iree_allocator_t allocator =
+      iree_hal_amdxdna_host_recycler_allocator(&recycler);
+
+  uint8_t* ptr = nullptr;
+  IREE_ASSERT_OK(iree_allocator_malloc_uninitialized(
+      allocator, 32, reinterpret_cast<void**>(&ptr)));
+  for (uint8_t i = 0; i < 32; ++i) ptr[i] = i;
+  IREE_ASSERT_OK(
+      iree_allocator_realloc(allocator, 128, reinterpret_cast<void**>(&ptr)));
+  for (uint8_t i = 0; i < 32; ++i) EXPECT_EQ(ptr[i], i);
+  iree_allocator_free(allocator, ptr);
+  iree_hal_amdxdna_host_recycler_deinitialize(&recycler);
+}
+
+TEST(HostRecyclerTest, GrowsLargestUndersizedRetainedBlock) {
+  iree_hal_amdxdna_host_recycler_t recycler;
+  iree_hal_amdxdna_host_recycler_initialize(
+      iree_allocator_system(), /*max_retained_bytes=*/4096,
+      /*max_retained_count=*/4, &recycler);
+  iree_allocator_t allocator =
+      iree_hal_amdxdna_host_recycler_allocator(&recycler);
+
+  void* ptr = nullptr;
+  IREE_ASSERT_OK(
+      iree_allocator_malloc_uninitialized(allocator, 512, &ptr));
+  iree_allocator_free(allocator, ptr);
+  IREE_ASSERT_OK(
+      iree_allocator_malloc_uninitialized(allocator, 1024, &ptr));
+  iree_allocator_free(allocator, ptr);
+  EXPECT_EQ(recycler.retained_count, 1u);
+  EXPECT_EQ(recycler.retained_bytes, 1024u);
+  iree_hal_amdxdna_host_recycler_deinitialize(&recycler);
+}
+
 TEST_F(AllocatorCompatibilityTest, CreateAndRelease) {
   ASSERT_NE(allocator_, nullptr);
 }

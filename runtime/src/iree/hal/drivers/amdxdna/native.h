@@ -127,6 +127,10 @@ typedef struct iree_hal_amdxdna_native_c_driver_stack_t {
 typedef struct iree_hal_amdxdna_native_c_device_caps_t {
   uint32_t max_effective_queues;
   uint32_t max_command_chain_slots;
+  // Maximum number of prepared single-dispatch native commands that the
+  // device-level cache may retain. Zero selects the common conservative
+  // default. This is an internal HAL/backend capability, not public HRX ABI.
+  uint32_t max_cached_single_commands;
   // Maximum number of native child commands that the device-level chain cache
   // may retain. Zero selects the common conservative default.
   uint32_t max_cached_chain_child_commands;

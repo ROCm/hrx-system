@@ -724,6 +724,10 @@ iree_status_t iree_hal_amdxdna_native_device_query_caps(
       device->supports_command_chain
           ? std::min(chain_slot_capacity(kMaxExecBoSize), kKmqDefaultChainSlots)
           : 0;
+  // Use the common single-command count guard. KMQ additionally derives its
+  // byte-pressure allowance from the shared DEV heap below, so exact heap
+  // occupancy can reclaim idle commands before allocation exhaustion.
+  caps.max_cached_single_commands = 0;
   // Zero selects the common conservative chain-cache retention budget.
   caps.max_cached_chain_child_commands = 0;
   // Linux keys contexts by PDI+CU and publishes the architecture table. Do
