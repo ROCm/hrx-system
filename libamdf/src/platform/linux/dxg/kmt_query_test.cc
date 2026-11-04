@@ -8,7 +8,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <new>
 #include <string>
 #include <string_view>
 
@@ -161,6 +160,19 @@ std::wstring ReadWideString(const void* source, size_t capacity) {
   return value;
 }
 
+template <typename T>
+void StoreNativeField(void* storage, size_t offset, T value) {
+  std::memcpy(static_cast<std::byte*>(storage) + offset, &value, sizeof(value));
+}
+
+template <typename T>
+T LoadNativeField(const void* storage, size_t offset) {
+  T value = {};
+  std::memcpy(&value, static_cast<const std::byte*>(storage) + offset,
+              sizeof(value));
+  return value;
+}
+
 struct ExpectedLayout {
   // Original caller storage that must not be passed to the kernel.
   void* native_data;
@@ -282,23 +294,41 @@ TEST_F(DxgKmtQueryTest, PreservesMixedFixedInputsAndOutputs) {
 
   alignas(wchar_t) std::array<std::byte, sizeof(D3DKMT_NODEMETADATA) + 2>
       metadata_storage = {};
-  auto* metadata = ::new (metadata_storage.data() + 2) D3DKMT_NODEMETADATA{};
-  metadata->NodeOrdinalAndAdapterIndex = 0x12340007u;
-  EXPECT_NE(reinterpret_cast<uintptr_t>(metadata->NodeData.FriendlyName) %
+  void* metadata = metadata_storage.data() + 2;
+  constexpr size_t kNodeDataOffset = offsetof(D3DKMT_NODEMETADATA, NodeData);
+  constexpr size_t kFriendlyNameOffset =
+      kNodeDataOffset + offsetof(DXGK_NODEMETADATA, FriendlyName);
+  StoreNativeField<UINT>(
+      metadata, offsetof(D3DKMT_NODEMETADATA, NodeOrdinalAndAdapterIndex),
+      0x12340007u);
+  EXPECT_NE((reinterpret_cast<uintptr_t>(metadata) + kFriendlyNameOffset) %
                 alignof(wchar_t),
             0u);
   query.Type = KMTQAITYPE_NODEMETADATA;
   query.pPrivateDriverData = metadata;
-  query.PrivateDriverDataSize = sizeof(*metadata);
+  query.PrivateDriverDataSize = sizeof(D3DKMT_NODEMETADATA);
   invocation.handler = PopulateNodeMetadata;
   EXPECT_EQ(amdf_linux_dxg_kmt_query_adapter_info(&kmt_, &query), 0);
-  EXPECT_EQ(metadata->NodeData.EngineType, DXGK_ENGINE_TYPE_3D);
-  EXPECT_EQ(ReadWideString(metadata->NodeData.FriendlyName,
-                           DXGK_MAX_METADATA_NAME_LENGTH),
+  EXPECT_EQ(
+      LoadNativeField<DXGK_ENGINE_TYPE>(
+          metadata, kNodeDataOffset + offsetof(DXGK_NODEMETADATA, EngineType)),
+      DXGK_ENGINE_TYPE_3D);
+  EXPECT_EQ(ReadWideString(
+                static_cast<const std::byte*>(metadata) + kFriendlyNameOffset,
+                DXGK_MAX_METADATA_NAME_LENGTH),
             L"Compute \u03A9");
-  EXPECT_EQ(metadata->NodeData.Flags.Value, 0x12345678u);
-  EXPECT_EQ(metadata->NodeData.GpuMmuSupported, 1u);
-  EXPECT_EQ(metadata->NodeData.IoMmuSupported, 1u);
+  EXPECT_EQ(LoadNativeField<DXGK_NODEMETADATA_FLAGS>(
+                metadata, kNodeDataOffset + offsetof(DXGK_NODEMETADATA, Flags))
+                .Value,
+            0x12345678u);
+  EXPECT_EQ(LoadNativeField<BOOLEAN>(
+                metadata,
+                kNodeDataOffset + offsetof(DXGK_NODEMETADATA, GpuMmuSupported)),
+            1u);
+  EXPECT_EQ(LoadNativeField<BOOLEAN>(
+                metadata,
+                kNodeDataOffset + offsetof(DXGK_NODEMETADATA, IoMmuSupported)),
+            1u);
 }
 
 struct RegistryStringState {

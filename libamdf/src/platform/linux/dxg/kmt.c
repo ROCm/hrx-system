@@ -324,23 +324,32 @@ static bool amdf_dxg_copy_adapter_guid_output(const void* source,
 
 static void amdf_dxg_copy_node_metadata_input(const void* source,
                                               void* target) {
-  const D3DKMT_NODEMETADATA* native = source;
   amdf_dxg_query_node_metadata_wire_t* wire = target;
-  wire->node_ordinal_and_adapter_index = native->NodeOrdinalAndAdapterIndex;
+  memcpy(&wire->node_ordinal_and_adapter_index,
+         (const uint8_t*)source +
+             offsetof(D3DKMT_NODEMETADATA, NodeOrdinalAndAdapterIndex),
+         sizeof(wire->node_ordinal_and_adapter_index));
 }
 
 static bool amdf_dxg_copy_node_metadata_output(const void* source,
                                                void* target) {
   const amdf_dxg_query_node_metadata_wire_t* wire = source;
-  D3DKMT_NODEMETADATA* native = target;
-  native->NodeData.EngineType = wire->node_data.engine_type;
-  native->NodeData.Flags = wire->node_data.flags;
-  native->NodeData.GpuMmuSupported = wire->node_data.gpu_mmu_supported;
-  native->NodeData.IoMmuSupported = wire->node_data.io_mmu_supported;
-  return amdf_dxg_convert_utf16_strings(wire->node_data.friendly_name,
-                                        DXGK_MAX_METADATA_NAME_LENGTH, false,
-                                        false, native->NodeData.FriendlyName,
-                                        DXGK_MAX_METADATA_NAME_LENGTH, NULL);
+  uint8_t* node_data =
+      (uint8_t*)target + offsetof(D3DKMT_NODEMETADATA, NodeData);
+  memcpy(node_data + offsetof(DXGK_NODEMETADATA, EngineType),
+         &wire->node_data.engine_type, sizeof(wire->node_data.engine_type));
+  memcpy(node_data + offsetof(DXGK_NODEMETADATA, Flags), &wire->node_data.flags,
+         sizeof(wire->node_data.flags));
+  memcpy(node_data + offsetof(DXGK_NODEMETADATA, GpuMmuSupported),
+         &wire->node_data.gpu_mmu_supported,
+         sizeof(wire->node_data.gpu_mmu_supported));
+  memcpy(node_data + offsetof(DXGK_NODEMETADATA, IoMmuSupported),
+         &wire->node_data.io_mmu_supported,
+         sizeof(wire->node_data.io_mmu_supported));
+  return amdf_dxg_convert_utf16_strings(
+      wire->node_data.friendly_name, DXGK_MAX_METADATA_NAME_LENGTH, false,
+      false, node_data + offsetof(DXGK_NODEMETADATA, FriendlyName),
+      DXGK_MAX_METADATA_NAME_LENGTH, NULL);
 }
 
 static const amdf_dxg_query_conversion_t amdf_dxg_query_conversions[] = {
