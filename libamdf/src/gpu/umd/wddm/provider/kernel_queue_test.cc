@@ -37,6 +37,8 @@ constexpr D3DKMT_HANDLE kQueue = 0x30;
 constexpr D3DKMT_HANDLE kFence = 0x40;
 
 struct FakeNativeState {
+  // Procedure table injected into the provider adapter.
+  amdf_kmt_api_t kmt = {};
   // Scheduler profile installed in the adapter for the selected command family.
   amdf_dxg_private_queue_profile_t profile = {
       .scheduler_id = 5,
@@ -96,6 +98,21 @@ struct FakeNativeState {
 
 FakeNativeState* current_state = nullptr;
 
+NTSTATUS APIENTRY FakeCreateContext(D3DKMT_CREATECONTEXTVIRTUAL* create);
+NTSTATUS APIENTRY FakeCreateHardwareQueue(D3DKMT_CREATEHWQUEUE* create);
+NTSTATUS APIENTRY
+FakeDestroyHardwareQueue(const D3DKMT_DESTROYHWQUEUE* destroy);
+NTSTATUS APIENTRY FakeDestroyContext(const D3DKMT_DESTROYCONTEXT* destroy);
+NTSTATUS APIENTRY
+FakeCreateSynchronizationObject(D3DKMT_CREATESYNCHRONIZATIONOBJECT2* create);
+NTSTATUS APIENTRY FakeDestroySynchronizationObject(
+    const D3DKMT_DESTROYSYNCHRONIZATIONOBJECT* destroy);
+NTSTATUS APIENTRY FakeSubmitCommand(const D3DKMT_SUBMITCOMMAND* submit);
+NTSTATUS APIENTRY
+FakeSignalFromGpu(const D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU* signal);
+NTSTATUS APIENTRY
+FakeSubmitCommandToHardwareQueue(const D3DKMT_SUBMITCOMMANDTOHWQUEUE* submit);
+
 void ExpectDependency(bool condition) {
   if (!condition) {
     ++current_state->dependency_failure_count;
@@ -154,7 +171,18 @@ void AMDF_CALL Free(void* user_data, void* allocation) {
 
 void InitializeAdapter(amdf_dxg_provider_gpu_adapter_t* adapter,
                        FakeNativeState* state) {
+  state->kmt.create_context_virtual = FakeCreateContext;
+  state->kmt.destroy_context = FakeDestroyContext;
+  state->kmt.create_synchronization_object = FakeCreateSynchronizationObject;
+  state->kmt.destroy_synchronization_object = FakeDestroySynchronizationObject;
+  state->kmt.create_hardware_queue = FakeCreateHardwareQueue;
+  state->kmt.destroy_hardware_queue = FakeDestroyHardwareQueue;
+  state->kmt.submit_command_to_hardware_queue =
+      FakeSubmitCommandToHardwareQueue;
+  state->kmt.submit_command = FakeSubmitCommand;
+  state->kmt.signal_from_gpu = FakeSignalFromGpu;
   adapter->host_allocator = {state, Allocate, nullptr, Free};
+  adapter->kmt = &state->kmt;
   adapter->private_info.supports_firmware_state_shadowing =
       state->supports_firmware_state_shadowing;
   adapter->pm4_queue_profile = state->profile;
@@ -181,10 +209,7 @@ bool Check(bool condition, const char* expression, int line) {
 #define AMDF_EXPECT(expression) \
   passed &= Check(static_cast<bool>(expression), #expression, __LINE__)
 
-}  // namespace
-
-extern "C" NTSTATUS APIENTRY
-D3DKMTCreateContextVirtual(D3DKMT_CREATECONTEXTVIRTUAL* create) {
+NTSTATUS APIENTRY FakeCreateContext(D3DKMT_CREATECONTEXTVIRTUAL* create) {
   ++current_state->context_create_count;
   ExpectDependency(create->hDevice == kDevice);
   ExpectDependency(create->NodeOrdinal == current_state->profile.node_ordinal);
@@ -206,7 +231,7 @@ D3DKMTCreateContextVirtual(D3DKMT_CREATECONTEXTVIRTUAL* create) {
   return current_state->create_context_status;
 }
 
-extern "C" NTSTATUS APIENTRY D3DKMTCreateHwQueue(D3DKMT_CREATEHWQUEUE* create) {
+NTSTATUS APIENTRY FakeCreateHardwareQueue(D3DKMT_CREATEHWQUEUE* create) {
   ++current_state->queue_create_count;
   ExpectDependency(create->hHwContext == kContext);
   ExpectDependency(create->Flags.DisableGpuTimeout == 0);
@@ -229,22 +254,21 @@ extern "C" NTSTATUS APIENTRY D3DKMTCreateHwQueue(D3DKMT_CREATEHWQUEUE* create) {
   return current_state->create_queue_status;
 }
 
-extern "C" NTSTATUS APIENTRY
-D3DKMTDestroyHwQueue(const D3DKMT_DESTROYHWQUEUE* destroy) {
+NTSTATUS APIENTRY
+FakeDestroyHardwareQueue(const D3DKMT_DESTROYHWQUEUE* destroy) {
   ++current_state->queue_destroy_count;
   ExpectDependency(destroy->hHwQueue == kQueue);
   return current_state->destroy_queue_status;
 }
 
-extern "C" NTSTATUS APIENTRY
-D3DKMTDestroyContext(const D3DKMT_DESTROYCONTEXT* destroy) {
+NTSTATUS APIENTRY FakeDestroyContext(const D3DKMT_DESTROYCONTEXT* destroy) {
   ++current_state->context_destroy_count;
   ExpectDependency(destroy->hContext == kContext);
   return current_state->destroy_context_status;
 }
 
-extern "C" NTSTATUS APIENTRY D3DKMTCreateSynchronizationObject2(
-    D3DKMT_CREATESYNCHRONIZATIONOBJECT2* create) {
+NTSTATUS APIENTRY
+FakeCreateSynchronizationObject(D3DKMT_CREATESYNCHRONIZATIONOBJECT2* create) {
   ++current_state->fence_create_count;
   ExpectDependency(create->hDevice == kDevice);
   ExpectDependency(create->Info.Type == D3DDDI_MONITORED_FENCE);
@@ -259,15 +283,14 @@ extern "C" NTSTATUS APIENTRY D3DKMTCreateSynchronizationObject2(
   return current_state->create_fence_status;
 }
 
-extern "C" NTSTATUS APIENTRY D3DKMTDestroySynchronizationObject(
+NTSTATUS APIENTRY FakeDestroySynchronizationObject(
     const D3DKMT_DESTROYSYNCHRONIZATIONOBJECT* destroy) {
   ++current_state->fence_destroy_count;
   ExpectDependency(destroy->hSyncObject == kFence);
   return current_state->destroy_fence_status;
 }
 
-extern "C" NTSTATUS APIENTRY
-D3DKMTSubmitCommand(const D3DKMT_SUBMITCOMMAND* submit) {
+NTSTATUS APIENTRY FakeSubmitCommand(const D3DKMT_SUBMITCOMMAND* submit) {
   ++current_state->submit_count;
   ExpectDependency(submit->Commands == 0x2000 && submit->CommandLength == 64);
   ExpectDependency(submit->BroadcastContextCount == 1);
@@ -278,8 +301,8 @@ D3DKMTSubmitCommand(const D3DKMT_SUBMITCOMMAND* submit) {
   return current_state->submit_status;
 }
 
-extern "C" NTSTATUS APIENTRY D3DKMTSignalSynchronizationObjectFromGpu(
-    const D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU* signal) {
+NTSTATUS APIENTRY
+FakeSignalFromGpu(const D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU* signal) {
   ++current_state->signal_count;
   ExpectDependency(signal->hContext == kContext);
   ExpectDependency(signal->ObjectCount == 1);
@@ -291,8 +314,8 @@ extern "C" NTSTATUS APIENTRY D3DKMTSignalSynchronizationObjectFromGpu(
   return current_state->signal_status;
 }
 
-extern "C" NTSTATUS APIENTRY
-D3DKMTSubmitCommandToHwQueue(const D3DKMT_SUBMITCOMMANDTOHWQUEUE* submit) {
+NTSTATUS APIENTRY
+FakeSubmitCommandToHardwareQueue(const D3DKMT_SUBMITCOMMANDTOHWQUEUE* submit) {
   ++current_state->submit_count;
   ExpectDependency(submit->hHwQueue == kQueue);
   ExpectDependency(submit->HwQueueProgressFenceId == 7);
@@ -306,8 +329,6 @@ D3DKMTSubmitCommandToHwQueue(const D3DKMT_SUBMITCOMMANDTOHWQUEUE* submit) {
   }
   return current_state->submit_status;
 }
-
-namespace {
 
 bool UnsupportedProfileHasNoOwnershipEffects() {
   bool passed = true;

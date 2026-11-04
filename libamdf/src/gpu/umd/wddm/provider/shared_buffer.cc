@@ -40,10 +40,10 @@ amdf_status_t HresultStatus(HRESULT result) {
                                               static_cast<uint32_t>(result));
 }
 
-amdf_status_t QueryBuffer(uint64_t adapter_luid, HANDLE shared_handle,
-                          uint64_t* out_byte_length) {
+amdf_status_t QueryBuffer(const amdf_d3d12_api_t* d3d12, uint64_t adapter_luid,
+                          HANDLE shared_handle, uint64_t* out_byte_length) {
   Microsoft::WRL::ComPtr<IDXGIFactory4> factory;
-  HRESULT result = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
+  HRESULT result = d3d12->create_dxgi_factory_1(IID_PPV_ARGS(&factory));
   if (FAILED(result)) {
     return HresultStatus(result);
   }
@@ -55,8 +55,8 @@ amdf_status_t QueryBuffer(uint64_t adapter_luid, HANDLE shared_handle,
     return HresultStatus(result);
   }
   Microsoft::WRL::ComPtr<ID3D12Device> device;
-  result = D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0,
-                             IID_PPV_ARGS(&device));
+  result = d3d12->create_device(adapter.Get(), D3D_FEATURE_LEVEL_11_0,
+                                IID_PPV_ARGS(&device));
   if (FAILED(result)) {
     return HresultStatus(result);
   }
@@ -112,15 +112,17 @@ amdf_status_t PrepareBuffer(
     uint32_t* resource_handle, uint32_t* allocation_handle,
     uint64_t* out_native_byte_length, uint64_t* out_buffer_byte_length) {
   uint64_t buffer_byte_length = 0;
-  amdf_status_t status = QueryBuffer(
-      import_info.adapter_luid, import_info.shared_handle, &buffer_byte_length);
+  amdf_status_t status =
+      QueryBuffer(adapter->d3d12, import_info.adapter_luid,
+                  import_info.shared_handle, &buffer_byte_length);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
   D3DKMT_QUERYRESOURCEINFOFROMNTHANDLE query = {};
   query.hDevice = import_info.device_handle;
   query.hNtHandle = import_info.shared_handle;
-  NTSTATUS native_status = D3DKMTQueryResourceInfoFromNtHandle(&query);
+  NTSTATUS native_status =
+      adapter->kmt->query_resource_info_from_handle(&query);
   if (native_status != STATUS_SUCCESS) {
     return amdf_make_status(AMDF_STATUS_DOMAIN_NTSTATUS,
                             static_cast<uint32_t>(native_status));
@@ -167,7 +169,7 @@ amdf_status_t PrepareBuffer(
   open.pResourcePrivateDriverData =
       RegionPointer(scratch.data(), resource_data_offset,
                     query.ResourcePrivateDriverDataSize);
-  native_status = D3DKMTOpenResourceFromNtHandle(&open);
+  native_status = adapter->kmt->open_resource_from_handle(&open);
   if (native_status != STATUS_SUCCESS) {
     return amdf_make_status(AMDF_STATUS_DOMAIN_NTSTATUS,
                             static_cast<uint32_t>(native_status));

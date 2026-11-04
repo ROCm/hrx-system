@@ -48,11 +48,12 @@ typedef uint32_t (*amdf_dxg_provider_native_invoke_fn_t)(void* context,
                                                          uint64_t request,
                                                          void* arguments);
 
-// Borrowed transport installed only while one provider call executes.
+// Borrowed native operation boundary retained through adapter close.
 typedef struct amdf_dxg_provider_native_transport_t {
-  // Owner-defined context forwarded unchanged to |invoke|.
+  // Owner-defined context retained or forwarded according to provider policy.
   void* context;
-  // Synchronous native operation callback, or NULL on native Windows.
+  // Synchronous native operation callback, or NULL when the provider consumes
+  // its typed context directly.
   amdf_dxg_provider_native_invoke_fn_t invoke;
 } amdf_dxg_provider_native_transport_t;
 
@@ -66,7 +67,7 @@ typedef struct amdf_dxg_provider_gpu_adapter_open_info_t {
   uint32_t physical_adapter_index;
   // Exact DXGI adapter LUID, low word first.
   uint64_t adapter_luid;
-  // Optional explicit native transport used by the Linux provider.
+  // Explicit host operation boundary retained by the provider adapter.
   amdf_dxg_provider_native_transport_t native_transport;
 } amdf_dxg_provider_gpu_adapter_open_info_t;
 

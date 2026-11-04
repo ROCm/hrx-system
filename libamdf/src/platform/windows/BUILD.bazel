@@ -16,6 +16,14 @@ package(
 WINDOWS_COMPATIBILITY = ["@platforms//os:windows"]
 
 amdf_cc_library(
+    name = "d3d12_api",
+    srcs = ["d3d12_api.c"],
+    hdrs = ["d3d12_api.h"],
+    target_compatible_with = WINDOWS_COMPATIBILITY,
+    visibility = ["//libamdf/src:__subpackages__"],
+)
+
+amdf_cc_library(
     name = "observation",
     srcs = ["observation.c"],
     linkopts = ["mincore.lib"],
@@ -156,6 +164,7 @@ amdf_cc_library(
     target_compatible_with = WINDOWS_COMPATIBILITY,
     visibility = ["//libamdf/src/platform:__pkg__"],
     deps = [
+        ":d3d12_api",
         ":endpoint_metadata",
         ":endpoint_snapshot",
         ":kmt_api",

@@ -28,11 +28,19 @@ amdf_status_t amdf_gpu_umd_create_endpoint_profile(
   uint32_t physical_adapter_index = 0;
   amdf_windows_endpoint_id_decode(&platform_endpoint->id, &adapter_luid,
                                   &physical_adapter_index);
+  amdf_gpu_wddm_provider_native_api_t provider_native_api = {
+      .kmt = &platform_endpoint->instance->kmt,
+      .d3d12 = &platform_endpoint->instance->d3d12,
+  };
   const amdf_dxg_provider_gpu_adapter_open_info_t open_info = {
       .adapter_handle = (uint32_t)platform_endpoint->adapter,
       .physical_adapter_index = physical_adapter_index,
       .adapter_luid = ((uint64_t)(uint32_t)adapter_luid.HighPart << 32) |
                       adapter_luid.LowPart,
+      .native_transport =
+          {
+              .context = &provider_native_api,
+          },
   };
   amdf_status_t status = amdf_gpu_dxg_adapter_initialize(
       amdf_gpu_wddm_default_api(), &open_info, host_allocator, &adapter,

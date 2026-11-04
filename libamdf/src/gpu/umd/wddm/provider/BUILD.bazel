@@ -24,7 +24,11 @@ amdf_cc_library(
     hdrs = ["api.h"],
     target_compatible_with = _WINDOWS_X86_64,
     visibility = ["//libamdf/src/gpu/umd/wddm:__pkg__"],
-    deps = ["//libamdf/src/gpu/umd/dxg:provider_api"],
+    deps = [
+        "//libamdf/src/gpu/umd/dxg:provider_api",
+        "//libamdf/src/platform/windows:d3d12_api",
+        "//libamdf/src/platform/windows:kmt_api",
+    ],
 )
 
 amdf_cc_library(
@@ -40,11 +44,6 @@ amdf_cc_library(
         "shared_buffer.cc",
         "shared_buffer.h",
     ],
-    linkopts = [
-        "d3d12.lib",
-        "dxgi.lib",
-        "gdi32.lib",
-    ],
     target_compatible_with = _WINDOWS_X86_64,
     visibility = ["//libamdf/src/gpu/umd/wddm:__pkg__"],
     deps = [
@@ -52,6 +51,8 @@ amdf_cc_library(
         "//libamdf/src/gpu/umd/dxg:private_records",
         "//libamdf/src/gpu/umd/dxg:provider_allocator",
         "//libamdf/src/gpu/umd/dxg:provider_api",
+        "//libamdf/src/platform/windows:d3d12_api",
+        "//libamdf/src/platform/windows:kmt_api",
     ],
 )
 
@@ -95,6 +96,8 @@ amdf_cc_test(
         "//libamdf/src/gpu/umd/dxg:private_records",
         "//libamdf/src/gpu/umd/dxg:provider_allocator",
         "//libamdf/src/gpu/umd/dxg:provider_api",
+        "//libamdf/src/platform/windows:d3d12_api",
+        "//libamdf/src/platform/windows:kmt_api",
     ],
 )
 
@@ -112,5 +115,7 @@ amdf_cc_test(
         "//libamdf/src/gpu/umd/dxg:private_records",
         "//libamdf/src/gpu/umd/dxg:provider_allocator",
         "//libamdf/src/gpu/umd/dxg:provider_api",
+        "//libamdf/src/platform/windows:d3d12_api",
+        "//libamdf/src/platform/windows:kmt_api",
     ],
 )

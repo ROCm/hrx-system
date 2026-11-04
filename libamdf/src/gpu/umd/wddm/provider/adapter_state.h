@@ -11,11 +11,17 @@
 
 #include "libamdf/src/gpu/umd/dxg/private_records.h"
 #include "libamdf/src/gpu/umd/dxg/provider_api.h"
+#include "libamdf/src/platform/windows/d3d12_api.h"
+#include "libamdf/src/platform/windows/kmt_api.h"
 
 // Parsed adapter state shared by live provider objects.
 struct amdf_dxg_provider_gpu_adapter_t {
   // Parent-instance allocator copied for all provider-controlled storage.
   amdf_allocator_t host_allocator = {};
+  // Instance-owned KMT procedures borrowed through adapter close.
+  const amdf_kmt_api_t* kmt = nullptr;
+  // Instance-owned Direct3D procedures borrowed through adapter close.
+  const amdf_d3d12_api_t* d3d12 = nullptr;
   // Immutable facts decoded from the native private adapter records.
   amdf_dxg_private_adapter_info_t private_info = {};
   // Qualified immutable-stream compute scheduler.

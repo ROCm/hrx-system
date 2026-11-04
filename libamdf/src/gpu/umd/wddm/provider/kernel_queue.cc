@@ -61,7 +61,8 @@ NTSTATUS DestroyNativeQueue(amdf_dxg_provider_gpu_kernel_queue_t* queue) {
   if (queue->handle != 0) {
     D3DKMT_DESTROYHWQUEUE destroy_queue = {};
     destroy_queue.hHwQueue = queue->handle;
-    const NTSTATUS status = D3DKMTDestroyHwQueue(&destroy_queue);
+    const NTSTATUS status =
+        queue->adapter->kmt->destroy_hardware_queue(&destroy_queue);
     if (first_status == STATUS_SUCCESS && status != STATUS_SUCCESS) {
       first_status = status;
     }
@@ -70,7 +71,8 @@ NTSTATUS DestroyNativeQueue(amdf_dxg_provider_gpu_kernel_queue_t* queue) {
   if (queue->context != 0) {
     D3DKMT_DESTROYCONTEXT destroy_context = {};
     destroy_context.hContext = queue->context;
-    const NTSTATUS status = D3DKMTDestroyContext(&destroy_context);
+    const NTSTATUS status =
+        queue->adapter->kmt->destroy_context(&destroy_context);
     if (first_status == STATUS_SUCCESS && status != STATUS_SUCCESS) {
       first_status = status;
     }
@@ -79,7 +81,8 @@ NTSTATUS DestroyNativeQueue(amdf_dxg_provider_gpu_kernel_queue_t* queue) {
   if (queue->progress_fence != 0) {
     D3DKMT_DESTROYSYNCHRONIZATIONOBJECT destroy_fence = {};
     destroy_fence.hSyncObject = queue->progress_fence;
-    const NTSTATUS status = D3DKMTDestroySynchronizationObject(&destroy_fence);
+    const NTSTATUS status =
+        queue->adapter->kmt->destroy_synchronization_object(&destroy_fence);
     if (first_status == STATUS_SUCCESS && status != STATUS_SUCCESS) {
       first_status = status;
     }
@@ -121,7 +124,8 @@ amdf_dxg_provider_result_t CreateNativeQueue(
   create_context.PrivateDriverDataSize =
       static_cast<uint32_t>(context_private.size());
   create_context.ClientHint = D3DKMT_CLIENTHINT_OPENCL;
-  NTSTATUS native_status = D3DKMTCreateContextVirtual(&create_context);
+  NTSTATUS native_status =
+      adapter->kmt->create_context_virtual(&create_context);
   if (native_status != STATUS_SUCCESS) {
     return MakeNativeFailure(native_status, out_native_status);
   }
@@ -145,7 +149,7 @@ amdf_dxg_provider_result_t CreateNativeQueue(
     create_queue.pPrivateDriverData = queue_private.data();
     create_queue.PrivateDriverDataSize =
         static_cast<uint32_t>(queue_private.size());
-    native_status = D3DKMTCreateHwQueue(&create_queue);
+    native_status = adapter->kmt->create_hardware_queue(&create_queue);
   }
   if (native_status == STATUS_SUCCESS && profile->uses_hardware_scheduling) {
     queue->handle = create_queue.hHwQueue;
@@ -159,7 +163,7 @@ amdf_dxg_provider_result_t CreateNativeQueue(
     create_fence.hDevice = static_cast<D3DKMT_HANDLE>(device_handle);
     create_fence.Info.Type = D3DDDI_MONITORED_FENCE;
     create_fence.Info.MonitoredFence.EngineAffinity = 1;
-    native_status = D3DKMTCreateSynchronizationObject2(&create_fence);
+    native_status = adapter->kmt->create_synchronization_object(&create_fence);
     if (native_status == STATUS_SUCCESS) {
       queue->progress_fence = create_fence.hSyncObject;
       if (queue->progress_fence == 0 ||
@@ -259,7 +263,7 @@ amdf_dxg_provider_result_t GpuKernelQueueSubmit(
     submit.pPrivateDriverData = submission_private_data.data();
     submit.PrivateDriverDataSize =
         static_cast<uint32_t>(submission_private_data.size());
-    NTSTATUS native_status = D3DKMTSubmitCommand(&submit);
+    NTSTATUS native_status = queue->adapter->kmt->submit_command(&submit);
     if (native_status != STATUS_SUCCESS) {
       return MakeNativeFailure(native_status, out_native_status);
     }
@@ -269,7 +273,7 @@ amdf_dxg_provider_result_t GpuKernelQueueSubmit(
     signal.ObjectCount = 1;
     signal.ObjectHandleArray = &queue->progress_fence;
     signal.MonitoredFenceValueArray = &progress_value;
-    native_status = D3DKMTSignalSynchronizationObjectFromGpu(&signal);
+    native_status = queue->adapter->kmt->signal_from_gpu(&signal);
     return native_status == STATUS_SUCCESS
                ? AMDF_DXG_PROVIDER_RESULT_SUCCESS
                : MakeNativeFailure(native_status, out_native_status);
@@ -283,7 +287,8 @@ amdf_dxg_provider_result_t GpuKernelQueueSubmit(
   submit.pPrivateDriverData = submission_private_data.data();
   submit.PrivateDriverDataSize =
       static_cast<uint32_t>(submission_private_data.size());
-  const NTSTATUS native_status = D3DKMTSubmitCommandToHwQueue(&submit);
+  const NTSTATUS native_status =
+      queue->adapter->kmt->submit_command_to_hardware_queue(&submit);
   *out_accepted = native_status == STATUS_SUCCESS;
   return native_status == STATUS_SUCCESS
              ? AMDF_DXG_PROVIDER_RESULT_SUCCESS

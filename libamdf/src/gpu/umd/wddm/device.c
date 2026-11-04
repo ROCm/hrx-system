@@ -88,10 +88,18 @@ amdf_status_t amdf_gpu_umd_device_create(
   device->physical_adapter_index = endpoint->physical_adapter_index;
   device->memory_capabilities = memory_capabilities;
 
+  amdf_gpu_wddm_provider_native_api_t provider_native_api = {
+      .kmt = &endpoint->instance->kmt,
+      .d3d12 = &endpoint->instance->d3d12,
+  };
   const amdf_dxg_provider_gpu_adapter_open_info_t open_info = {
       .adapter_handle = (uint32_t)endpoint->adapter,
       .physical_adapter_index = endpoint->physical_adapter_index,
       .adapter_luid = device->adapter_luid,
+      .native_transport =
+          {
+              .context = &provider_native_api,
+          },
   };
   status = amdf_gpu_dxg_adapter_initialize(
       amdf_gpu_wddm_default_api(), &open_info, host_allocator,

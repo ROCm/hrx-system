@@ -32,14 +32,15 @@
 
 namespace {
 
-uint32_t QueryPrivateAdapter(void*, uint32_t adapter_handle, void* buffer,
-                             uint32_t buffer_byte_length) {
+uint32_t QueryPrivateAdapter(void* context, uint32_t adapter_handle,
+                             void* buffer, uint32_t buffer_byte_length) {
+  const auto* kmt = static_cast<const amdf_kmt_api_t*>(context);
   D3DKMT_QUERYADAPTERINFO query = {};
   query.hAdapter = static_cast<D3DKMT_HANDLE>(adapter_handle);
   query.Type = KMTQAITYPE_UMDRIVERPRIVATE;
   query.pPrivateDriverData = buffer;
   query.PrivateDriverDataSize = buffer_byte_length;
-  return static_cast<uint32_t>(D3DKMTQueryAdapterInfo(&query));
+  return static_cast<uint32_t>(kmt->query_adapter_info(&query));
 }
 
 bool IsUnsupportedAdapterStatus(uint32_t status) {
@@ -99,7 +100,9 @@ void PopulateGpuProperties(const amdf_dxg_provider_gpu_adapter_t& adapter,
 }
 
 amdf_dxg_provider_result_t GpuAdapterOpenImpl(
-    uint32_t adapter_handle, amdf_allocator_t host_allocator,
+    const amdf_dxg_provider_gpu_adapter_open_info_t& open_info,
+    const amdf_gpu_wddm_provider_native_api_t& native_api,
+    amdf_allocator_t host_allocator,
     amdf_dxg_provider_gpu_adapter_t** out_adapter,
     amdf_dxg_provider_gpu_properties_t* out_properties,
     uint32_t* out_native_status) {
@@ -109,13 +112,15 @@ amdf_dxg_provider_result_t GpuAdapterOpenImpl(
     return AMDF_DXG_PROVIDER_RESULT_RESOURCE_EXHAUSTED;
   }
   adapter->host_allocator = host_allocator;
+  adapter->kmt = native_api.kmt;
+  adapter->d3d12 = native_api.d3d12;
 
   std::array<uint8_t, AMDF_DXG_PRIVATE_SINGLE_QUERY_SCRATCH_BYTE_LENGTH>
       query_scratch;
   const amdf_dxg_private_adapter_query_t query = {
-      .adapter_handle = adapter_handle,
+      .adapter_handle = open_info.adapter_handle,
       .physical_adapter_index = 0,
-      .query_context = nullptr,
+      .query_context = const_cast<amdf_kmt_api_t*>(adapter->kmt),
       .query = QueryPrivateAdapter,
       .scratch = query_scratch.data(),
   };
@@ -142,6 +147,8 @@ amdf_dxg_provider_result_t GpuAdapterOpen(
     amdf_dxg_provider_gpu_properties_t* out_properties,
     uint32_t* out_native_status) noexcept {
   if (open_info == nullptr || open_info->adapter_handle == 0 ||
+      open_info->native_transport.context == nullptr ||
+      open_info->native_transport.invoke != nullptr ||
       host_allocator == nullptr || host_allocator->allocate == nullptr ||
       host_allocator->free == nullptr || out_adapter == nullptr ||
       out_properties == nullptr || out_native_status == nullptr) {
@@ -151,7 +158,15 @@ amdf_dxg_provider_result_t GpuAdapterOpen(
   if (open_info->physical_adapter_index != 0) {
     return AMDF_DXG_PROVIDER_RESULT_UNSUPPORTED;
   }
-  return GpuAdapterOpenImpl(open_info->adapter_handle, *host_allocator,
+  const auto* native_api =
+      static_cast<const amdf_gpu_wddm_provider_native_api_t*>(
+          open_info->native_transport.context);
+  if (native_api->kmt == nullptr ||
+      native_api->kmt->query_adapter_info == nullptr ||
+      native_api->d3d12 == nullptr) {
+    return AMDF_DXG_PROVIDER_RESULT_INVALID_ARGUMENT;
+  }
+  return GpuAdapterOpenImpl(*open_info, *native_api, *host_allocator,
                             out_adapter, out_properties, out_native_status);
 }
 
@@ -188,7 +203,10 @@ amdf_dxg_provider_result_t GpuClockSample(
   query.hAdapter = static_cast<D3DKMT_HANDLE>(adapter_handle);
   query.PhysicalAdapterIndex = physical_adapter_index;
   query.NodeOrdinal = profile->node_ordinal;
-  const NTSTATUS status = D3DKMTQueryClockCalibration(&query);
+  if (adapter->kmt->query_clock_calibration == nullptr) {
+    return AMDF_DXG_PROVIDER_RESULT_UNSUPPORTED;
+  }
+  const NTSTATUS status = adapter->kmt->query_clock_calibration(&query);
   if (status == STATUS_NOT_SUPPORTED) {
     return AMDF_DXG_PROVIDER_RESULT_UNSUPPORTED;
   }

@@ -156,7 +156,7 @@ amdf_dxg_provider_result_t GpuAllocationCreateImpl(
       AMDF_DXG_PRIVATE_ALLOCATION_DRIVER_RECORD_BYTE_LENGTH;
   create.NumAllocations = allocation_count;
   create.pAllocationInfo2 = allocation_info_records;
-  const NTSTATUS native_status = D3DKMTCreateAllocation2(&create);
+  const NTSTATUS native_status = adapter->kmt->create_allocation(&create);
   if (native_status != STATUS_SUCCESS) {
     *out_native_status = static_cast<uint32_t>(native_status);
     return AMDF_DXG_PROVIDER_RESULT_NATIVE_FAILURE;

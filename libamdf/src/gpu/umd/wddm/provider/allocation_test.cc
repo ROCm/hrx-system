@@ -91,6 +91,8 @@ struct NativeAllocationRequest {
 };
 
 struct FakeNativeState {
+  // Procedure table injected into the provider adapter.
+  amdf_kmt_api_t kmt = {};
   // Status returned by native allocation creation.
   NTSTATUS create_status = STATUS_SUCCESS;
   // Number of successful creates that return a zero allocation handle.
@@ -112,6 +114,10 @@ struct FakeNativeState {
 
 FakeNativeState* g_fake_native_state = nullptr;
 
+NTSTATUS APIENTRY FakeCreateAllocation(D3DKMT_CREATEALLOCATION* create);
+NTSTATUS APIENTRY
+FakeDestroyAllocation(const D3DKMT_DESTROYALLOCATION2* destroy);
+
 uint32_t Load32(const void* pointer) {
   uint32_t value = 0;
   std::memcpy(&value, pointer, sizeof(value));
@@ -126,8 +132,11 @@ uint64_t Load64(const void* pointer) {
 
 void InitializeAdapter(amdf_dxg_provider_gpu_adapter_t* adapter,
                        TestAllocatorState* allocator_state,
-                       const FakeNativeState& native_state) {
+                       FakeNativeState& native_state) {
+  native_state.kmt.create_allocation = FakeCreateAllocation;
+  native_state.kmt.destroy_allocation = FakeDestroyAllocation;
   adapter->host_allocator = MakeTestAllocator(allocator_state);
+  adapter->kmt = &native_state.kmt;
   adapter->private_info = native_state.adapter_info;
 }
 
@@ -158,10 +167,7 @@ amdf_dxg_provider_gpu_allocation_create_info_t MakeSystemCreateInfo(
   return create_info;
 }
 
-}  // namespace
-
-extern "C" NTSTATUS APIENTRY
-D3DKMTCreateAllocation2(D3DKMT_CREATEALLOCATION* create) {
+NTSTATUS APIENTRY FakeCreateAllocation(D3DKMT_CREATEALLOCATION* create) {
   ++g_fake_native_state->create_attempt_count;
   RecordDependencyExpectation(create->hDevice == kDeviceHandle);
   RecordDependencyExpectation(create->NumAllocations ==
@@ -243,13 +249,10 @@ D3DKMTCreateAllocation2(D3DKMT_CREATEALLOCATION* create) {
   return STATUS_SUCCESS;
 }
 
-extern "C" NTSTATUS APIENTRY
-D3DKMTDestroyAllocation2(const D3DKMT_DESTROYALLOCATION2*) {
+NTSTATUS APIENTRY FakeDestroyAllocation(const D3DKMT_DESTROYALLOCATION2*) {
   ++g_fake_native_state->destroy_attempt_count;
   return kStatusNoMemory;
 }
-
-namespace {
 
 bool MalformedNativeSuccessPublishesResourceToCaller() {
   bool passed = true;
