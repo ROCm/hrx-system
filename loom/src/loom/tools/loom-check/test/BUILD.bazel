@@ -20,7 +20,12 @@ loom_cc_library(
     deps = [
         "//loom/binding/c:interop",
         "//loom/binding/c:loomc",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:source",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target:provider",
         "//loom/src/loom/tools/loom-check:execute",
         "//runtime/src/iree/base",
     ],

@@ -184,14 +184,14 @@ static iree_status_t loom_aie2p_leaf_check_execute(
                               (int)name.size, name.data);
     }
   }
-  loom_check_diagnostic_emitter_capture_t diagnostic_capture = {
-      .diagnostic_collector = request->diagnostic_collector,
+  loom_check_test_native_diagnostic_emitter_capture_t diagnostic_capture = {
+      .context = native_module->diagnostic_context,
       .module = native_module->module,
       .source_resolver = native_module->source_resolver,
       .emitter = LOOM_EMITTER_PASS,
   };
   const iree_diagnostic_emitter_t emitter = {
-      .fn = loom_check_diagnostic_emitter_capture_emit,
+      .fn = loom_check_test_native_diagnostic_emitter_capture_emit,
       .user_data = &diagnostic_capture,
   };
   loom_op_t* function = NULL;

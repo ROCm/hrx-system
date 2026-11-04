@@ -14,7 +14,6 @@
 #include "loom/tools/loom-check/execute.h"
 #include "loomc/compile.h"
 #include "loomc/compile_report.h"
-#include "loomc/interop.h"
 #include "loomc/sanitizer.h"
 #include "loomc/target.h"
 
@@ -96,8 +95,8 @@ typedef struct loom_check_compile_source_low_options_t {
   iree_string_view_t function_name;
   // Optional public target profile borrowed until source lowering returns.
   loomc_target_profile_t* target_profile;
-  // Optional caller-owned native compile report populated by the pipeline.
-  loom_target_compile_report_t* report;
+  // Optional public compile report artifact requested from the pipeline.
+  const loomc_compile_report_options_t* report;
 } loom_check_compile_source_low_options_t;
 
 // Releases all public compiler state prepared by |session|.
@@ -159,9 +158,12 @@ iree_status_t loom_check_compile_select_artifact(
 
 // Lowers the request's admitted public module through LoomC. User diagnostics
 // leave |out_compiled| false and return OK for normal annotation matching.
+// When non-NULL, |out_result| receives the successful result and owns it until
+// released; otherwise the result is discarded after diagnostics are copied.
 iree_status_t loom_check_compile_source_low(
     const loom_check_emit_provider_request_t* request,
-    const loom_check_compile_source_low_options_t* options, bool* out_compiled);
+    const loom_check_compile_source_low_options_t* options, bool* out_compiled,
+    loomc_result_t** out_result);
 
 // Admits and compiles one source case through LoomC's final artifact producer.
 // Success requires a nonempty artifact or exactly

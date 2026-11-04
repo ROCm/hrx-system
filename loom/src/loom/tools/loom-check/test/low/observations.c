@@ -388,9 +388,9 @@ static iree_status_t loom_check_test_low_observe_schedule(
   loom_low_schedule_table_t table = {0};
   iree_status_t status = loom_low_function_model_initialize(
       native_module->module, low_function,
-      /*function_target_facts=*/NULL, &request->low_registry->registry, emitter,
-      LOOM_LOW_FUNCTION_MODEL_FLAG_REQUIRE_SCHEDULE_MODEL, request->case_arena,
-      &model);
+      /*function_target_facts=*/NULL, &native_module->low_registry.registry,
+      emitter, LOOM_LOW_FUNCTION_MODEL_FLAG_REQUIRE_SCHEDULE_MODEL,
+      request->case_arena, &model);
   if (iree_status_is_ok(status) && model.context.error_count == 0) {
     status = loom_low_schedule_function(&model, &schedule_options,
                                         request->case_arena, &table);
@@ -479,8 +479,9 @@ static iree_status_t loom_check_test_low_build_allocation(
   loom_low_function_model_t model = {0};
   iree_status_t status = loom_low_function_model_initialize(
       native_module->module, low_function,
-      /*function_target_facts=*/NULL, &request->low_registry->registry, emitter,
-      LOOM_LOW_FUNCTION_MODEL_FLAG_REGION_TREE, request->case_arena, &model);
+      /*function_target_facts=*/NULL, &native_module->low_registry.registry,
+      emitter, LOOM_LOW_FUNCTION_MODEL_FLAG_REGION_TREE, request->case_arena,
+      &model);
   if (iree_status_is_ok(status)) {
     status = loom_low_allocate_function(&model, &allocation_options,
                                         request->case_arena, out_table);
@@ -612,7 +613,7 @@ static iree_status_t loom_check_test_low_observe_packet(
     return iree_ok_status();
   }
   const loom_low_emission_frame_options_t frame_options = {
-      .descriptor_registry = &request->low_registry->registry,
+      .descriptor_registry = &native_module->low_registry.registry,
       .schedule_strategy = options->schedule_strategy,
       .emitter = emitter,
   };
@@ -627,7 +628,7 @@ static iree_status_t loom_check_test_low_observe_packet(
   const loom_target_low_packet_diagnostics_options_t diagnostic_options = {
       .provider_list =
           loom_target_environment_low_packet_diagnostic_provider_list(
-              request->environment->target_environment),
+              native_module->target_environment),
       .diagnostic_flags = options->packet_diagnostic_flags,
       .emitter = emitter,
   };
@@ -653,7 +654,7 @@ static iree_status_t loom_check_test_low_observe_compile_report(
   }
 
   const loom_low_emission_frame_options_t frame_options = {
-      .descriptor_registry = &request->low_registry->registry,
+      .descriptor_registry = &native_module->low_registry.registry,
       .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
       .emitter = emitter,
   };
@@ -690,14 +691,14 @@ static iree_status_t loom_check_test_low_observation_execute(
   loom_check_test_low_observation_options_t options;
   IREE_RETURN_IF_ERROR(
       loom_check_test_low_observation_parse(request, &options));
-  loom_check_diagnostic_emitter_capture_t capture = {
-      .diagnostic_collector = request->diagnostic_collector,
+  loom_check_test_native_diagnostic_emitter_capture_t capture = {
+      .context = native_module->diagnostic_context,
       .module = native_module->module,
       .source_resolver = native_module->source_resolver,
       .emitter = LOOM_EMITTER_PASS,
   };
   const iree_diagnostic_emitter_t emitter = {
-      .fn = loom_check_diagnostic_emitter_capture_emit,
+      .fn = loom_check_test_native_diagnostic_emitter_capture_emit,
       .user_data = &capture,
   };
   const iree_host_size_t initial_output_size =

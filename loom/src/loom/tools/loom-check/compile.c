@@ -8,13 +8,10 @@
 
 #include <inttypes.h>
 
-#include "loom/ops/op_defs.h"
-#include "loom/target/pipeline.h"
 #include "loom/testing/test_file.h"
 #include "loom/tools/loom-check/compile_diagnostics.h"
 #include "loom/tools/loom-check/diagnostics.h"
 #include "loomc/artifact.h"
-#include "loomc/interop.h"
 #include "loomc/iree.h"
 
 void loom_check_compile_session_deinitialize(
@@ -317,9 +314,12 @@ iree_status_t loom_check_compile_select_source_function(
 
 iree_status_t loom_check_compile_source_low(
     const loom_check_emit_provider_request_t* request,
-    const loom_check_compile_source_low_options_t* options,
-    bool* out_compiled) {
+    const loom_check_compile_source_low_options_t* options, bool* out_compiled,
+    loomc_result_t** out_result) {
   *out_compiled = false;
+  if (out_result != NULL) {
+    *out_result = NULL;
+  }
   loom_check_compile_session_t* session = request->environment->compile_session;
   loomc_module_t* module = request->public_module;
   iree_status_t status = iree_ok_status();
@@ -342,15 +342,10 @@ iree_status_t loom_check_compile_source_low(
       .function_symbol = loomc_string_view_from_iree(function_name),
       .target_profile = target_profile,
   };
-  const loomc_native_compile_report_options_t report_options = {
-      .type = LOOMC_STRUCTURE_TYPE_NATIVE_COMPILE_REPORT_OPTIONS,
-      .structure_size = sizeof(report_options),
-      .report = options->report,
-  };
   const loomc_target_specialization_options_t target_options = {
       .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
       .structure_size = sizeof(target_options),
-      .next = options->report != NULL ? &report_options : NULL,
+      .next = options->report,
       .specializations = target_profile != NULL ? &specialization : NULL,
       .specialization_count = target_profile != NULL ? 1 : 0,
   };
@@ -371,6 +366,10 @@ iree_status_t loom_check_compile_source_low(
   if (iree_status_is_ok(status) && result != NULL) {
     status = loom_check_compile_append_result(request->diagnostic_collector,
                                               result, out_compiled);
+  }
+  if (iree_status_is_ok(status) && *out_compiled && out_result != NULL) {
+    *out_result = result;
+    result = NULL;
   }
   loomc_result_release(result);
   loomc_pass_program_release(pass_program);

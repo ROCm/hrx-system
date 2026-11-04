@@ -934,8 +934,8 @@ static iree_status_t loom_check_test_low_schedule_build(
     loom_liveness_analysis_t* out_scheduled_liveness, bool* out_accepted) {
   *out_scheduled_liveness = (loom_liveness_analysis_t){0};
   *out_accepted = false;
-  loom_check_diagnostic_emitter_capture_t diagnostic_capture = {
-      .diagnostic_collector = request->diagnostic_collector,
+  loom_check_test_native_diagnostic_emitter_capture_t diagnostic_capture = {
+      .context = native_module->diagnostic_context,
       .module = native_module->module,
       .source_resolver = native_module->source_resolver,
       .emitter = LOOM_EMITTER_PASS,
@@ -943,7 +943,7 @@ static iree_status_t loom_check_test_low_schedule_build(
   iree_diagnostic_emitter_t emitter = {0};
   if (request->diagnostic_collector != NULL) {
     emitter = (iree_diagnostic_emitter_t){
-        .fn = loom_check_diagnostic_emitter_capture_emit,
+        .fn = loom_check_test_native_diagnostic_emitter_capture_emit,
         .user_data = &diagnostic_capture,
     };
   }
@@ -967,9 +967,9 @@ static iree_status_t loom_check_test_low_schedule_build(
   loom_low_function_model_t model = {0};
   iree_status_t status = loom_low_function_model_initialize(
       native_module->module, low_function,
-      /*function_target_facts=*/NULL, &request->low_registry->registry, emitter,
-      LOOM_LOW_FUNCTION_MODEL_FLAG_REQUIRE_SCHEDULE_MODEL, request->case_arena,
-      &model);
+      /*function_target_facts=*/NULL, &native_module->low_registry.registry,
+      emitter, LOOM_LOW_FUNCTION_MODEL_FLAG_REQUIRE_SCHEDULE_MODEL,
+      request->case_arena, &model);
   if (iree_status_is_ok(status) && model.context.error_count == 0) {
     status = loom_low_storage_transport_build(
         &model, options->storage_transport_spaces, request->case_arena,

@@ -9,14 +9,11 @@
 
 #include <stdio.h>
 
-#include "loom/ops/test/registry.h"
 #include "loom/target/arch/cmd/check/provider.h"
-#include "loom/target/provider.h"
 #include "loom/tooling/export/cxx/loom_check.h"
 #include "loom/tooling/input/loomc_configured.h"
 #include "loom/tools/loom-check/compile.h"
 #include "loom/tools/loom-check/provider.h"
-#include "loomc/interop.h"
 #include "loomc/iree.h"
 #include "loomc/target/configured.h"
 #include "loomc/target/configured_target.h"
@@ -25,8 +22,12 @@
 #define LOOM_CHECK_HAVE_TEST_PROVIDER 0
 #endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 #if LOOM_CHECK_HAVE_TEST_PROVIDER
+#include "loom/target/provider.h"
 #include "loom/target/test/provider.h"
 #include "loom/tools/loom-check/test_provider.h"
+#include "loomc/interop.h"
+#else
+#include "loom/testing/target_environment.h"
 #endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 #ifndef LOOM_CHECK_HAVE_ARCH_AIE2P
 #define LOOM_CHECK_HAVE_ARCH_AIE2P 0
@@ -140,30 +141,19 @@ static const loom_check_provider_t* const kLoomCheckProviders[] = {
 #endif  // LOOM_CHECK_HAVE_ARTIFACT_X86_ELF
 };
 
-// Developer tools accept test.* syntax without synthetic compiler behavior.
-// The test binary's full provider registers that dialect along with its passes
-// and descriptors, so it replaces this syntax-only contribution.
-#if !LOOM_CHECK_HAVE_TEST_PROVIDER
-static const loom_target_provider_t kLoomCheckSyntaxProvider = {
-    .register_context = loom_test_dialect_register,
-};
-#endif  // !LOOM_CHECK_HAVE_TEST_PROVIDER
-
-static const loom_target_provider_t* const kLoomCheckTargetExtensions[] = {
 #if LOOM_CHECK_HAVE_TEST_PROVIDER
+static const loom_target_provider_t* const kLoomCheckTargetExtensions[] = {
     &loom_test_target_provider,
 #if LOOM_CHECK_HAVE_ARCH_AIE2P
     &loom_aie2p_configuration_check_target_provider,
 #endif  // LOOM_CHECK_HAVE_ARCH_AIE2P
-#else
-    &kLoomCheckSyntaxProvider,
-#endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 };
 
 static const loom_target_provider_set_t kLoomCheckTargetExtensionSet = {
     .providers = kLoomCheckTargetExtensions,
     .provider_count = IREE_ARRAYSIZE(kLoomCheckTargetExtensions),
 };
+#endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 
 static loomc_status_t loom_check_create_target_environment(
     loomc_allocator_t allocator, loomc_target_environment_t** out_environment) {
@@ -177,8 +167,12 @@ static loomc_status_t loom_check_create_target_environment(
     status = loomc_target_environment_create_configured(allocator, &inputs[1]);
   }
   if (loomc_status_is_ok(status)) {
+#if LOOM_CHECK_HAVE_TEST_PROVIDER
     status = loomc_target_environment_create_from_provider_set(
         &kLoomCheckTargetExtensionSet, allocator, &inputs[2]);
+#else
+    status = loomc_target_environment_create_test_ir(allocator, &inputs[2]);
+#endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
   }
   if (loomc_status_is_ok(status)) {
     status = loomc_target_environment_create(IREE_ARRAYSIZE(inputs), inputs,

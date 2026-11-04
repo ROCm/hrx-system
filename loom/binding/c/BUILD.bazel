@@ -295,6 +295,11 @@ loomc_shared_libraries(
         ],
         "//conditions:default": [],
     }) + select({
+        "//loom/config/arch:spirv": [
+            "//loom/binding/c/target/spirv:profile",
+        ],
+        "//conditions:default": [],
+    }) + select({
         "//loom/config/emit:spirv_binary": [
             "//loom/binding/c/target/spirv",
             "//loom/binding/c/target/spirv/vulkaninfo",

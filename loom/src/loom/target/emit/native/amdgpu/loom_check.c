@@ -303,8 +303,8 @@ static iree_status_t loom_amdgpu_loom_check_build_schedule_models(
     loom_low_schedule_structural_model_t* out_storage_address_model) {
   *out_affinities = loom_low_schedule_pair_affinity_list_empty();
   *out_state_reads = loom_low_schedule_structural_state_read_list_empty();
-  loom_check_diagnostic_emitter_capture_t diagnostic_capture = {
-      .diagnostic_collector = request->diagnostic_collector,
+  loom_check_test_native_diagnostic_emitter_capture_t diagnostic_capture = {
+      .context = native_module->diagnostic_context,
       .module = native_module->module,
       .source_resolver = native_module->source_resolver,
       .emitter = LOOM_EMITTER_PASS,
@@ -312,7 +312,7 @@ static iree_status_t loom_amdgpu_loom_check_build_schedule_models(
   iree_diagnostic_emitter_t emitter = {0};
   if (request->diagnostic_collector != NULL) {
     emitter = (iree_diagnostic_emitter_t){
-        .fn = loom_check_diagnostic_emitter_capture_emit,
+        .fn = loom_check_test_native_diagnostic_emitter_capture_emit,
         .user_data = &diagnostic_capture,
     };
   }
@@ -327,8 +327,8 @@ static iree_status_t loom_amdgpu_loom_check_build_schedule_models(
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
       native_module->module, symbol_facts, low_function,
-      /*function_target_facts=*/NULL, &request->low_registry->registry, emitter,
-      &target));
+      /*function_target_facts=*/NULL, &native_module->low_registry.registry,
+      emitter, &target));
   if (target.descriptor_set == NULL) {
     return iree_ok_status();
   }
@@ -357,7 +357,7 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
   loom_symbol_fact_table_t symbol_facts = {0};
   loom_symbol_fact_table_initialize(&symbol_facts, request->case_arena);
   loom_amdgpu_loom_check_spill_lowering_context_t spill_lowering_context = {
-      .descriptor_registry = &request->low_registry->registry,
+      .descriptor_registry = &native_module->low_registry.registry,
       .symbol_facts = &symbol_facts,
   };
   const loom_low_emission_frame_spill_free_options_t spill_free_options = {

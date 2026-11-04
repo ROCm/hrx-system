@@ -115,14 +115,14 @@ static iree_status_t loom_check_test_analysis_observation_find_function(
         .params = params,
         .param_count = IREE_ARRAYSIZE(params),
     };
-    loom_check_diagnostic_emitter_capture_t capture = {
-        .diagnostic_collector = request->diagnostic_collector,
+    loom_check_test_native_diagnostic_emitter_capture_t capture = {
+        .context = native_module->diagnostic_context,
         .module = module,
         .source_resolver = native_module->source_resolver,
         .emitter = LOOM_EMITTER_PASS,
     };
     const iree_diagnostic_emitter_t emitter = {
-        .fn = loom_check_diagnostic_emitter_capture_emit,
+        .fn = loom_check_test_native_diagnostic_emitter_capture_emit,
         .user_data = &capture,
     };
     return iree_diagnostic_emit(emitter, &emission);

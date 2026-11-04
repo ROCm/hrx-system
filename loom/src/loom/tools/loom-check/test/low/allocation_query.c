@@ -731,7 +731,8 @@ static iree_status_t loom_check_test_low_allocation_execute(
       .flags = LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_PRESERVE_LOW_ASM,
   };
   loom_low_descriptor_text_asm_environment_initialize(
-      &request->low_registry->registry, &print_options.low_asm_environment);
+      &native_module->low_registry.registry,
+      &print_options.low_asm_environment);
   return loom_text_print_module_to_builder_with_options(native_module->module,
                                                         output, &print_options);
 }

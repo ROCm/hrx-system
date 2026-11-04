@@ -119,14 +119,14 @@ static iree_status_t loom_check_test_pipeline_transport_execute(
   loom_type_registry_configure_fact_context(&facts.context);
   IREE_RETURN_IF_ERROR(loom_value_fact_table_compute(&facts, module, function));
 
-  loom_check_diagnostic_emitter_capture_t diagnostic_capture = {
-      .diagnostic_collector = request->diagnostic_collector,
+  loom_check_test_native_diagnostic_emitter_capture_t diagnostic_capture = {
+      .context = native_module->diagnostic_context,
       .module = module,
       .source_resolver = native_module->source_resolver,
       .emitter = LOOM_EMITTER_PASS,
   };
   const iree_diagnostic_emitter_t emitter = {
-      .fn = loom_check_diagnostic_emitter_capture_emit,
+      .fn = loom_check_test_native_diagnostic_emitter_capture_emit,
       .user_data = &diagnostic_capture,
   };
   loom_pipeline_resources_t resources;

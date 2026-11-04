@@ -34,6 +34,8 @@ typedef struct loom_aie2p_array_plan_check_context_t {
   const loom_module_t* module;
   // Exact source snapshots for diagnostics against |module|.
   loom_source_resolver_t source_resolver;
+  // Target-low descriptors composed by the test runner.
+  const loom_target_low_descriptor_registry_t* low_registry;
 } loom_aie2p_array_plan_check_context_t;
 
 static bool loom_aie2p_array_plan_check_matches(
@@ -113,7 +115,7 @@ static iree_status_t loom_aie2p_array_plan_check_collect_leaves(
     loom_low_resolved_target_t target = {0};
     IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
         module, &symbol_facts, symbol->defining_op,
-        /*function_target_facts=*/NULL, &request->low_registry->registry,
+        /*function_target_facts=*/NULL, &context->low_registry->registry,
         diagnostic_emitter, &target));
     if (target.descriptor_set == NULL) {
       return iree_ok_status();
@@ -694,7 +696,7 @@ static iree_status_t loom_aie2p_array_plan_check_resident_program_in_module(
         .function_target_facts = resident->function_target_facts,
         .memory_accesses = resident->memory_accesses,
         .loop_execution = resident->loop_execution,
-        .descriptor_registry = &request->low_registry->registry,
+        .descriptor_registry = &context->low_registry->registry,
         .diagnostic_emitter = diagnostic_emitter,
     };
     loom_aie2p_leaf_contribution_t contribution = {0};
@@ -730,7 +732,7 @@ static iree_status_t loom_aie2p_array_plan_check_resident_program_in_module(
 
   loom_text_low_asm_environment_t low_asm_environment = {0};
   loom_low_descriptor_text_asm_environment_initialize(
-      &request->low_registry->registry, &low_asm_environment);
+      &context->low_registry->registry, &low_asm_environment);
   const loom_text_print_options_t print_options = {
       .flags = LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_REQUIRE_LOW_ASM,
       .low_asm_environment = low_asm_environment,
@@ -785,16 +787,17 @@ static iree_status_t loom_aie2p_array_plan_check_consume(
       .request = request,
       .module = native_module->module,
       .source_resolver = native_module->source_resolver,
+      .low_registry = &native_module->low_registry,
   };
 
-  loom_check_diagnostic_emitter_capture_t diagnostic_capture = {
-      .diagnostic_collector = request->diagnostic_collector,
+  loom_check_test_native_diagnostic_emitter_capture_t diagnostic_capture = {
+      .context = native_module->diagnostic_context,
       .module = context.module,
       .source_resolver = context.source_resolver,
       .emitter = LOOM_EMITTER_PASS,
   };
   const iree_diagnostic_emitter_t diagnostic_emitter = {
-      .fn = loom_check_diagnostic_emitter_capture_emit,
+      .fn = loom_check_test_native_diagnostic_emitter_capture_emit,
       .user_data = &diagnostic_capture,
   };
   loom_op_t* array_function = NULL;
@@ -870,8 +873,8 @@ static iree_status_t loom_aie2p_array_plan_check_execute(
       .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
   };
   bool compiled = false;
-  IREE_RETURN_IF_ERROR(
-      loom_check_compile_source_low(request, &compile_options, &compiled));
+  IREE_RETURN_IF_ERROR(loom_check_compile_source_low(
+      request, &compile_options, &compiled, /*out_result=*/NULL));
   if (!compiled) {
     return iree_ok_status();
   }

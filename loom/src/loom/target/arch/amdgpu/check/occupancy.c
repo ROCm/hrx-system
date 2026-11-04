@@ -151,8 +151,8 @@ static iree_status_t loom_amdgpu_occupancy_check_emit_provider_execute(
     return iree_ok_status();
   }
 
-  loom_check_diagnostic_emitter_capture_t diagnostic_capture = {
-      .diagnostic_collector = request->diagnostic_collector,
+  loom_check_test_native_diagnostic_emitter_capture_t diagnostic_capture = {
+      .context = native_module->diagnostic_context,
       .module = native_module->module,
       .source_resolver = native_module->source_resolver,
       .emitter = LOOM_EMITTER_PASS,
@@ -160,7 +160,7 @@ static iree_status_t loom_amdgpu_occupancy_check_emit_provider_execute(
   const loom_amdgpu_occupancy_options_t occupancy_options = {
       .emitter =
           {
-              .fn = loom_check_diagnostic_emitter_capture_emit,
+              .fn = loom_check_test_native_diagnostic_emitter_capture_emit,
               .user_data = &diagnostic_capture,
           },
       .diagnostic_flags = options.occupancy_diagnostic_flags,

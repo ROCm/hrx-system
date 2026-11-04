@@ -218,13 +218,11 @@ iree_status_t TestForeignInputImport(
 
 const loom_check_environment_t kExecuteTestEnvironment = {
     .input_formats = {},
-    .target_environment = {},
     .compile_session = nullptr,
 };
 
 const loom_check_environment_t kExecuteTestProviderEnvironment = {
     .input_formats = {},
-    .target_environment = {},
     .compile_session = nullptr,
     .emit_providers =
         {
@@ -250,10 +248,7 @@ class ExecuteTest : public ::testing::Test {
         loomc_target_environment_create_from_provider_set(
             &target_provider_set_, loomc_allocator_system(),
             &public_target_environment)));
-    target_environment_ =
-        loomc_target_environment_get_interop_view(public_target_environment);
     execute_environment_ = kExecuteTestEnvironment;
-    execute_environment_.target_environment = target_environment_;
     compile_session_ = {
         .provider = nullptr,
         .host_allocator = iree_allocator_system(),
@@ -265,7 +260,6 @@ class ExecuteTest : public ::testing::Test {
         .provider_count = IREE_ARRAYSIZE(kTestEmitProviders),
     };
     provider_environment_ = kExecuteTestProviderEnvironment;
-    provider_environment_.target_environment = target_environment_;
     provider_environment_.compile_session = &compile_session_;
   }
 
@@ -360,7 +354,6 @@ class ExecuteTest : public ::testing::Test {
 
   iree_arena_block_pool_t block_pool_;
   loom_target_provider_set_t target_provider_set_;
-  const loom_target_environment_t* target_environment_;
   loom_check_compile_session_t compile_session_;
   loom_check_environment_t execute_environment_;
   loom_check_environment_t provider_environment_;

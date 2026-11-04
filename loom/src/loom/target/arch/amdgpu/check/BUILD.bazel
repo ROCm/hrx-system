@@ -20,9 +20,10 @@ loom_cc_library(
     srcs = ["bank_service.c"],
     hdrs = ["bank_service.h"],
     deps = [
-        "//loom/src/loom/target/reporting:report",
+        "//loom/binding/c:loomc",
         "//loom/src/loom/tools/loom-check:execute",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
     ],
 )
 

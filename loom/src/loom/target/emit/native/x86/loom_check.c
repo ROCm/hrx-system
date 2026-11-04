@@ -75,6 +75,7 @@ static iree_status_t loom_x86_loom_check_emit_native_bytes(
 
 static iree_status_t loom_x86_loom_check_prepare_abis(
     const loom_check_emit_provider_request_t* request, loom_module_t* module,
+    const loom_target_low_descriptor_registry_t* low_registry,
     loom_x86_module_abi_t* out_module_abi) {
   iree_host_size_t function_count = 0;
   for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
@@ -97,7 +98,7 @@ static iree_status_t loom_x86_loom_check_prepare_abis(
     }
     loom_low_resolved_target_t target = {0};
     IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-        module, &symbol_facts, op, NULL, &request->low_registry->registry,
+        module, &symbol_facts, op, NULL, &low_registry->registry,
         (iree_diagnostic_emitter_t){0}, &target));
     if (target.descriptor_set == NULL) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -136,7 +137,8 @@ static iree_status_t loom_x86_loom_check_emit_provider_execute(
 
   loom_x86_module_abi_t module_abi = {0};
   IREE_RETURN_IF_ERROR(loom_x86_loom_check_prepare_abis(
-      request, native_module->module, &module_abi));
+      request, native_module->module, &native_module->low_registry,
+      &module_abi));
   const loom_string_id_t function_name_id =
       loom_module_lookup_string(native_module->module, function_symbol_name);
   const loom_symbol_id_t function_symbol_id =
@@ -197,8 +199,8 @@ static iree_status_t loom_x86_loom_check_emit_provider_execute(
   if (!frame_accepted) {
     return iree_ok_status();
   }
-  loom_check_diagnostic_emitter_capture_t capture = {
-      .diagnostic_collector = request->diagnostic_collector,
+  loom_check_test_native_diagnostic_emitter_capture_t capture = {
+      .context = native_module->diagnostic_context,
       .module = native_module->module,
       .source_resolver = native_module->source_resolver,
   };
@@ -208,7 +210,7 @@ static iree_status_t loom_x86_loom_check_emit_provider_execute(
   IREE_RETURN_IF_ERROR(loom_x86_function_prepare(
       &frame, function_abi, &module_abi,
       (iree_diagnostic_emitter_t){
-          .fn = loom_check_diagnostic_emitter_capture_emit,
+          .fn = loom_check_test_native_diagnostic_emitter_capture_emit,
           .user_data = &capture,
       },
       request->case_arena, &accepted, &function));

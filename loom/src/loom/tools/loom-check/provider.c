@@ -10,7 +10,6 @@
 
 #include "loom/tools/loom-check/main.h"
 #include "loom/tools/loom-check/source_low.h"
-#include "loomc/interop.h"
 
 enum {
   LOOM_CHECK_PROVIDER_EMIT_PROVIDER_CAPACITY = 64,
@@ -92,8 +91,6 @@ int loom_check_provider_main(int argc, char** argv,
 
   const loom_check_environment_t environment = {
       .input_formats = input_formats,
-      .target_environment = loomc_target_environment_get_interop_view(
-          provider_set->target_environment),
       .emit_providers =
           {
               .providers = state.emit_providers,

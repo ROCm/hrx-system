@@ -29,7 +29,6 @@
 #include "iree/base/internal/arena.h"
 #include "loom/error/diagnostic.h"
 #include "loom/error/source.h"
-#include "loom/target/low_descriptor_registry.h"
 #include "loom/testing/test_file.h"
 #include "loom/tooling/input/format.h"
 #include "loom/tools/loom-check/report.h"
@@ -41,7 +40,6 @@
 extern "C" {
 #endif
 
-typedef struct loom_target_environment_t loom_target_environment_t;
 typedef struct loom_check_diagnostic_collector_t
     loom_check_diagnostic_collector_t;
 typedef struct loom_check_compile_session_t loom_check_compile_session_t;
@@ -160,8 +158,6 @@ typedef struct loom_check_emit_provider_request_t {
   const loom_check_environment_t* environment;
   // Public module admitted once through LoomC for this emit case.
   loomc_module_t* public_module;
-  // Linked target-low registry visible to this runner.
-  const loom_target_low_descriptor_registry_t* low_registry;
   // Diagnostic collector for provider diagnostics.
   loom_check_diagnostic_collector_t* diagnostic_collector;
   // Provider workspace, released after execute returns. Separate from the
@@ -261,8 +257,6 @@ typedef struct loom_check_requirement_provider_registry_t {
 struct loom_check_environment_t {
   // Optional source format metadata linked into this runner.
   loom_input_format_list_t input_formats;
-  // Composed target environment used by target-aware check modes.
-  const loom_target_environment_t* target_environment;
   // Lazy public session shared by all check modes.
   loom_check_compile_session_t* compile_session;
   // Optional emit providers linked into this runner.

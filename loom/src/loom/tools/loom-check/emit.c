@@ -4,8 +4,6 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/codegen/low/descriptors.h"
-#include "loom/target/provider.h"
 #include "loom/tools/loom-check/comparison.h"
 #include "loom/tools/loom-check/compile.h"
 #include "loom/tools/loom-check/diagnostics.h"
@@ -167,11 +165,6 @@ iree_status_t loom_check_execute_emit(
     return status;
   }
 
-  const loom_target_low_descriptor_registry_t low_registry =
-      loom_target_environment_low_descriptor_registry(
-          environment->target_environment);
-  loom_low_descriptor_text_print_context_initialize(
-      &low_registry.registry, &diagnostic_collector.type_print_context);
   if (provider->execute == NULL) {
     status =
         iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -189,7 +182,6 @@ iree_status_t loom_check_execute_emit(
       .filename = filename,
       .test_case = test_case,
       .environment = environment,
-      .low_registry = &low_registry,
       .diagnostic_collector = &diagnostic_collector,
       .block_pool = block_pool,
       .host_allocator = allocator,
