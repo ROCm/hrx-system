@@ -3,9 +3,9 @@
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/runtime/telemetry/pool.h"
+#include "loom/runtime/storage/telemetry.h"
 
-iree_status_t loom_runtime_telemetry_sample_pool(
+iree_status_t loom_runtime_storage_sample_pool(
     const char* name, const iree_hal_pool_stats_t* statistics,
     loom_runtime_telemetry_sample_sink_t sink) {
   static const loom_runtime_telemetry_metric_t fields[] = {

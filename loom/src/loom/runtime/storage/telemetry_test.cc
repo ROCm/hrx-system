@@ -3,7 +3,7 @@
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/runtime/telemetry/pool.h"
+#include "loom/runtime/storage/telemetry.h"
 
 #include <string>
 #include <vector>
@@ -13,7 +13,7 @@
 
 namespace {
 
-TEST(TelemetryPoolTest, NativeConsumerReceivesTypedOwnedValues) {
+TEST(StorageTelemetryTest, NativeConsumerReceivesTypedOwnedValues) {
   // The independent atomic observations need not form a coherent total.
   iree_hal_pool_stats_t statistics = {
       .bytes_reserved = 1,
@@ -35,7 +35,7 @@ TEST(TelemetryPoolTest, NativeConsumerReceivesTypedOwnedValues) {
       .quarantine_eviction_count = UINT64_MAX,
   };
   std::vector<uint64_t> captured;
-  IREE_ASSERT_OK(loom_runtime_telemetry_sample_pool(
+  IREE_ASSERT_OK(loom_runtime_storage_sample_pool(
       "storage", &statistics,
       {&captured, [](void* self, const loom_runtime_telemetry_topic_t* topic,
                      const uint64_t* values) {
@@ -83,9 +83,9 @@ TEST(TelemetryPoolTest, NativeConsumerReceivesTypedOwnedValues) {
   }
 }
 
-TEST(TelemetryPoolTest, ConsumerFailureRetainsOriginalStatus) {
+TEST(StorageTelemetryTest, ConsumerFailureRetainsOriginalStatus) {
   const iree_hal_pool_stats_t statistics = {};
-  iree_status_t status = loom_runtime_telemetry_sample_pool(
+  iree_status_t status = loom_runtime_storage_sample_pool(
       "workspace", &statistics,
       {nullptr, [](void*, const loom_runtime_telemetry_topic_t* topic,
                    const uint64_t* values) {

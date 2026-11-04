@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -19,39 +19,16 @@ loom_cc_library(
     deps = ["//runtime/src/iree/base"],
 )
 
-loom_cc_library(
-    name = "pool",
-    srcs = ["pool.c"],
-    hdrs = ["pool.h"],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":sample",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/hal",
-    ],
-)
-
 iree_assert_dependency_boundary(
     name = "sampling_is_runtime_only",
     forbidden_subtrees = [
         "//loom/binding/...",
+        "//loom/src/loom/runtime/parameter/...",
+        "//loom/src/loom/runtime/storage/...",
         "//loom/src/loom/serve/...",
         "//loom/src/loom/service/...",
         "//loom/src/loom/target/...",
     ],
-    message = "Runtime telemetry sampling must not depend on serving, services, or compiler implementation",
-    target = ":pool",
-)
-
-loom_cc_test(
-    name = "pool_test",
-    srcs = ["pool_test.cc"],
-    deps = [
-        ":pool",
-        ":sample",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
+    message = "Generic telemetry contracts must not depend on domain schemas, serving, services, or compiler implementation",
+    target = ":sample",
 )

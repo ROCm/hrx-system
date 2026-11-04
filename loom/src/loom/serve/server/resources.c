@@ -9,7 +9,7 @@
 #include <inttypes.h>
 
 #include "iree/base/internal/json.h"
-#include "loom/runtime/telemetry/pool.h"
+#include "loom/runtime/storage/telemetry.h"
 #include "loom/serve/runtime/execution/workspace.h"
 #include "loom/serve/runtime/parameter/residency.h"
 #include "loom/serve/telemetry/sample.h"
@@ -97,7 +97,7 @@ iree_status_t loom_serve_resources_sample(
   const loom_serve_memory_pool_t* retained = loom_serve_pool_memory(pool);
   const loom_serve_pool_statistics_t memory = loom_serve_pool_statistics(pool);
   IREE_RETURN_IF_ERROR(
-      loom_runtime_telemetry_sample_pool("storage", &memory.storage, sink));
+      loom_runtime_storage_sample_pool("storage", &memory.storage, sink));
   if (retained) {
     static const loom_runtime_telemetry_metric_t fields[] = {
         {"reserved_bytes", "bytes", LOOM_RUNTIME_TELEMETRY_GAUGE},
@@ -122,8 +122,7 @@ iree_status_t loom_serve_resources_sample(
     };
     IREE_RETURN_IF_ERROR(sink.emit(sink.self, &topic, values));
   }
-  return loom_runtime_telemetry_sample_pool("workspace", &memory.workspace,
-                                            sink);
+  return loom_runtime_storage_sample_pool("workspace", &memory.workspace, sink);
 }
 
 typedef struct loom_serve_resources_topic_writer_t {

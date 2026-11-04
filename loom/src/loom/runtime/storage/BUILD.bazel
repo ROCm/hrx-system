@@ -1,0 +1,51 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+loom_cc_library(
+    name = "telemetry",
+    srcs = ["telemetry.c"],
+    hdrs = ["telemetry.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime/telemetry:sample",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_assert_dependency_boundary(
+    name = "telemetry_is_storage_only",
+    forbidden_subtrees = [
+        "//loom/binding/...",
+        "//loom/src/loom/runtime/parameter/...",
+        "//loom/src/loom/serve/...",
+        "//loom/src/loom/service/...",
+        "//loom/src/loom/target/...",
+    ],
+    message = "Storage telemetry must not depend on parameter telemetry, serving, services, or compiler implementation",
+    target = ":telemetry",
+)
+
+loom_cc_test(
+    name = "telemetry_test",
+    srcs = ["telemetry_test.cc"],
+    deps = [
+        ":telemetry",
+        "//loom/src/loom/runtime/telemetry:sample",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

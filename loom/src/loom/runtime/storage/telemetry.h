@@ -3,8 +3,8 @@
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef LOOM_RUNTIME_TELEMETRY_POOL_H_
-#define LOOM_RUNTIME_TELEMETRY_POOL_H_
+#ifndef LOOM_RUNTIME_STORAGE_TELEMETRY_H_
+#define LOOM_RUNTIME_STORAGE_TELEMETRY_H_
 
 #include "iree/hal/pool.h"
 #include "loom/runtime/telemetry/sample.h"
@@ -21,11 +21,11 @@ extern "C" {
 // Performs no allocation, hardware query, or device wait. Descriptors and
 // values are borrowed only during the synchronous emit call. The only possible
 // failure is the sink's observation output/allocation failure.
-iree_status_t loom_runtime_telemetry_sample_pool(
+iree_status_t loom_runtime_storage_sample_pool(
     const char* name, const iree_hal_pool_stats_t* statistics,
     loom_runtime_telemetry_sample_sink_t sink);
 
 #ifdef __cplusplus
 }  // extern "C"
 #endif
-#endif  // LOOM_RUNTIME_TELEMETRY_POOL_H_
+#endif  // LOOM_RUNTIME_STORAGE_TELEMETRY_H_

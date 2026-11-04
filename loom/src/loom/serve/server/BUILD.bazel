@@ -137,7 +137,7 @@ loom_cc_library(
     srcs = ["resources.c"],
     hdrs = ["resources.h"],
     deps = [
-        "//loom/src/loom/runtime/telemetry:pool",
+        "//loom/src/loom/runtime/storage:telemetry",
         "//loom/src/loom/runtime/telemetry:sample",
         "//loom/src/loom/serve/runtime/device",
         "//loom/src/loom/serve/runtime/execution:workspace",
