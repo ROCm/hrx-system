@@ -21,7 +21,7 @@ struct amdf_gpu_umd_kernel_queue_t {
   // Device and WKMI adapter borrowed for the lifetime of the queue.
   amdf_gpu_umd_device_t* device;
   // Private native queue state owned by the loaded WKMI bridge.
-  amdf_wkmi_bridge_gpu_kernel_queue_t* native;
+  amdf_dxg_bridge_gpu_kernel_queue_t* native;
   // Required command-buffer base alignment in bytes.
   uint32_t command_buffer_alignment;
   // Maximum byte length accepted by one native submission.
@@ -54,13 +54,13 @@ struct amdf_gpu_umd_kernel_queue_t {
 amdf_status_t amdf_gpu_umd_kernel_queue_create(
     amdf_gpu_umd_device_t* device, amdf_queue_command_type_t command_type,
     amdf_gpu_umd_kernel_queue_t** out_queue) {
-  amdf_wkmi_bridge_gpu_queue_command_type_t native_command_type;
+  amdf_dxg_bridge_gpu_queue_command_type_t native_command_type;
   switch (command_type) {
     case AMDF_QUEUE_COMMAND_TYPE_GPU_PM4:
-      native_command_type = AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4;
+      native_command_type = AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4;
       break;
     case AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA:
-      native_command_type = AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA;
+      native_command_type = AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA;
       break;
     default:
       return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
@@ -82,8 +82,8 @@ amdf_status_t amdf_gpu_umd_kernel_queue_create(
     status = amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError());
   }
 
-  amdf_wkmi_bridge_gpu_kernel_queue_info_t queue_info = {0};
-  amdf_wkmi_bridge_gpu_kernel_queue_create_info_t create_info = {
+  amdf_dxg_bridge_gpu_kernel_queue_info_t queue_info = {0};
+  amdf_dxg_bridge_gpu_kernel_queue_create_info_t create_info = {
       .structure_size = sizeof(create_info),
       .device_handle = device->device,
       .command_type = native_command_type,

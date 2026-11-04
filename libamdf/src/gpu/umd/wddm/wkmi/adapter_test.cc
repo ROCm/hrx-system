@@ -15,7 +15,7 @@
 namespace {
 
 using ResetBridgeFn = void(__cdecl*)(void);
-using SetQueryResultFn = void(__cdecl*)(amdf_wkmi_bridge_result_t);
+using SetQueryResultFn = void(__cdecl*)(amdf_dxg_bridge_result_t);
 
 TEST(WkmiAdapterTest, FailedInitializationLeavesOutputsUnchanged) {
   amdf_gpu_wddm_wkmi_loader_t loader = {};
@@ -30,16 +30,16 @@ TEST(WkmiAdapterTest, FailedInitializationLeavesOutputsUnchanged) {
   ASSERT_NE(reset_bridge, nullptr);
   ASSERT_NE(set_query_result, nullptr);
   reset_bridge();
-  set_query_result(AMDF_WKMI_BRIDGE_RESULT_VERSION_MISMATCH);
+  set_query_result(AMDF_DXG_BRIDGE_RESULT_VERSION_MISMATCH);
 
   const amdf_gpu_wddm_wkmi_adapter_t sentinel_adapter = {
-      reinterpret_cast<const amdf_wkmi_bridge_api_t*>(uintptr_t{1}),
-      reinterpret_cast<amdf_wkmi_bridge_gpu_adapter_t*>(uintptr_t{2}),
+      reinterpret_cast<const amdf_dxg_bridge_api_t*>(uintptr_t{1}),
+      reinterpret_cast<amdf_dxg_bridge_gpu_adapter_t*>(uintptr_t{2}),
   };
   amdf_gpu_wddm_wkmi_adapter_t adapter = sentinel_adapter;
-  amdf_wkmi_bridge_gpu_properties_t properties = {};
+  amdf_dxg_bridge_gpu_properties_t properties = {};
   properties.gfx_ip_major = 99;
-  const amdf_wkmi_bridge_gpu_properties_t sentinel_properties = properties;
+  const amdf_dxg_bridge_gpu_properties_t sentinel_properties = properties;
 
   EXPECT_EQ(amdf_status_code(amdf_gpu_wddm_wkmi_adapter_initialize(
                 &loader, 0x08, 0, host_allocator, &adapter, &properties)),
@@ -49,7 +49,7 @@ TEST(WkmiAdapterTest, FailedInitializationLeavesOutputsUnchanged) {
   EXPECT_EQ(std::memcmp(&properties, &sentinel_properties, sizeof(properties)),
             0);
 
-  set_query_result(AMDF_WKMI_BRIDGE_RESULT_SUCCESS);
+  set_query_result(AMDF_DXG_BRIDGE_RESULT_SUCCESS);
   adapter = {};
   properties = {};
   ASSERT_EQ(amdf_gpu_wddm_wkmi_adapter_initialize(
@@ -60,10 +60,10 @@ TEST(WkmiAdapterTest, FailedInitializationLeavesOutputsUnchanged) {
   EXPECT_EQ(properties.gfx_ip_major, 11);
   EXPECT_EQ(properties.gfx_ip_minor, 5);
 
-  const amdf_wkmi_bridge_gpu_clock_sample_t sentinel_sample = {17, 19, 23};
+  const amdf_dxg_bridge_gpu_clock_sample_t sentinel_sample = {17, 19, 23};
   auto sample = sentinel_sample;
   EXPECT_EQ(amdf_gpu_wddm_wkmi_adapter_query_clock_sample(
-                &adapter, 0x08, 0, AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4,
+                &adapter, 0x08, 0, AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4,
                 &sample),
             amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
   EXPECT_EQ(std::memcmp(&sample, &sentinel_sample, sizeof(sample)), 0);

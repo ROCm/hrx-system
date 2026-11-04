@@ -35,8 +35,8 @@ enum class Operation {
 
 struct FakeMemoryState {
   // Native allocation domain selected by the caller's profile.
-  amdf_wkmi_bridge_gpu_allocation_domain_t allocation_domain =
-      AMDF_WKMI_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL;
+  amdf_dxg_bridge_gpu_allocation_domain_t allocation_domain =
+      AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL;
   // Allocation handle returned by native success, including malformed zero.
   D3DKMT_HANDLE allocation_handle = 0x20;
   // Resource handle returned by native success, or zero when ungrouped.
@@ -92,8 +92,8 @@ struct FakeMemoryState {
 
 FakeMemoryState* current_state = nullptr;
 
-amdf_wkmi_bridge_result_t AMDF_WKMI_BRIDGE_CALL
-FakeQueryAllocationLayout(amdf_wkmi_bridge_gpu_adapter_t* adapter,
+amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL
+FakeQueryAllocationLayout(amdf_dxg_bridge_gpu_adapter_t* adapter,
                           uint64_t byte_length, uint32_t* out_allocation_count,
                           uint64_t* out_maximum_allocation_byte_length) {
   auto* state = reinterpret_cast<FakeMemoryState*>(adapter);
@@ -101,12 +101,12 @@ FakeQueryAllocationLayout(amdf_wkmi_bridge_gpu_adapter_t* adapter,
   EXPECT_EQ(byte_length, UINT64_C(65536));
   *out_allocation_count = state->allocation_count;
   *out_maximum_allocation_byte_length = 65536 / state->allocation_count;
-  return AMDF_WKMI_BRIDGE_RESULT_SUCCESS;
+  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
 }
 
-amdf_wkmi_bridge_result_t AMDF_WKMI_BRIDGE_CALL FakeCreateAllocation(
-    amdf_wkmi_bridge_gpu_adapter_t* adapter,
-    const amdf_wkmi_bridge_gpu_allocation_create_info_t* create_info,
+amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeCreateAllocation(
+    amdf_dxg_bridge_gpu_adapter_t* adapter,
+    const amdf_dxg_bridge_gpu_allocation_create_info_t* create_info,
     uint32_t allocation_handle_capacity, uint32_t* out_allocation_handles,
     uint32_t* out_resource_handle, uint32_t* out_allocation_count,
     uint32_t* out_native_status) {
@@ -115,8 +115,7 @@ amdf_wkmi_bridge_result_t AMDF_WKMI_BRIDGE_CALL FakeCreateAllocation(
   EXPECT_EQ(create_info->device_handle, 0x10u);
   EXPECT_EQ(create_info->domain, state->allocation_domain);
   EXPECT_EQ(create_info->byte_length, UINT64_C(65536));
-  if (state->allocation_domain ==
-      AMDF_WKMI_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL) {
+  if (state->allocation_domain == AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL) {
     EXPECT_EQ(create_info->placement_device_address, UINT64_C(0x100000));
     EXPECT_EQ(create_info->host_pointer, nullptr);
   } else {
@@ -132,12 +131,12 @@ amdf_wkmi_bridge_result_t AMDF_WKMI_BRIDGE_CALL FakeCreateAllocation(
   *out_resource_handle = state->resource_handle;
   *out_allocation_count = state->allocation_count;
   *out_native_status = 0;
-  return AMDF_WKMI_BRIDGE_RESULT_SUCCESS;
+  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
 }
 
-amdf_status_t AMDF_WKMI_BRIDGE_CALL FakePrepareBufferImport(
-    amdf_wkmi_bridge_gpu_adapter_t* adapter,
-    const amdf_wkmi_bridge_gpu_buffer_import_info_t* info,
+amdf_status_t AMDF_DXG_BRIDGE_CALL FakePrepareBufferImport(
+    amdf_dxg_bridge_gpu_adapter_t* adapter,
+    const amdf_dxg_bridge_gpu_buffer_import_info_t* info,
     uint32_t* resource_handle, uint32_t* allocation_handle,
     uint64_t* out_native_byte_length, uint64_t* out_buffer_byte_length) {
   auto* state = reinterpret_cast<FakeMemoryState*>(adapter);
@@ -295,7 +294,7 @@ class WindowsGpuMemoryTest : public ::testing::Test {
     device_.memory_capabilities.cache_coherent_memory_supported = 1;
     device_.wkmi_adapter.api = &bridge_;
     device_.wkmi_adapter.native =
-        reinterpret_cast<amdf_wkmi_bridge_gpu_adapter_t*>(&state_);
+        reinterpret_cast<amdf_dxg_bridge_gpu_adapter_t*>(&state_);
 
     create_info_.device_access =
         AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
@@ -312,7 +311,7 @@ class WindowsGpuMemoryTest : public ::testing::Test {
   // Native dependency responses and ordered observations.
   FakeMemoryState state_;
   // Existing WKMI adapter seam used by production allocation code.
-  amdf_wkmi_bridge_api_t bridge_ = {};
+  amdf_dxg_bridge_api_t bridge_ = {};
   // Native KMT procedures used by production attachment and release code.
   amdf_kmt_api_t kmt_ = {};
   // Live device state borrowed by the memory attachment under test.
@@ -346,7 +345,7 @@ TEST_F(WindowsGpuMemoryTest, OwnsNativeAndOveralignedHostStorage) {
   for (uint64_t alignment : {UINT64_C(65536), UINT64_C(131072)}) {
     SCOPED_TRACE(alignment);
     state_ = {};
-    state_.allocation_domain = AMDF_WKMI_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
+    state_.allocation_domain = AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
     state_.expected_synchronous_destroy = 1;
     state_.reservation_byte_length = alignment;
     create_info_.minimum_alignment = alignment;
@@ -381,7 +380,7 @@ TEST_F(WindowsGpuMemoryTest, RemappableSystemStorageSharesOneAlignedSection) {
        {UINT64_C(65536), UINT64_C(131072), UINT64_C(2) << 20}) {
     SCOPED_TRACE(alignment);
     state_ = {};
-    state_.allocation_domain = AMDF_WKMI_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
+    state_.allocation_domain = AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
     state_.expected_synchronous_destroy = 1;
     state_.reservation_byte_length = alignment;
     state_.expected_mapping_address =
@@ -425,7 +424,7 @@ TEST_F(WindowsGpuMemoryTest, RemappableSystemStorageSharesOneAlignedSection) {
 }
 
 TEST_F(WindowsGpuMemoryTest, FailedGpuReclamationKeepsRemappableBackingAlive) {
-  state_.allocation_domain = AMDF_WKMI_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
+  state_.allocation_domain = AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
   state_.expected_synchronous_destroy = 1;
   create_info_.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE |
                                 AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
@@ -450,7 +449,7 @@ TEST_F(WindowsGpuMemoryTest, FailedGpuReclamationKeepsRemappableBackingAlive) {
 }
 
 TEST_F(WindowsGpuMemoryTest, BorrowsHostViewsAcrossNativeAllocationChunks) {
-  state_.allocation_domain = AMDF_WKMI_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
+  state_.allocation_domain = AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
   state_.allocation_count = 2;
   state_.expected_synchronous_destroy = 1;
   create_info_.required_flags =
@@ -628,24 +627,23 @@ TEST_F(WindowsGpuMemoryTest,
   // The queued form preserves the same chunk boundaries and permissions in a
   // single vector. Only native dependencies are substituted, not translation.
   bridge_.gpu_kernel_queue_create =
-      [](amdf_wkmi_bridge_gpu_adapter_t*,
-         const amdf_wkmi_bridge_gpu_kernel_queue_create_info_t*,
-         amdf_wkmi_bridge_gpu_kernel_queue_t** queue,
-         amdf_wkmi_bridge_gpu_kernel_queue_info_t* info,
-         uint32_t*) -> amdf_wkmi_bridge_result_t {
+      [](amdf_dxg_bridge_gpu_adapter_t*,
+         const amdf_dxg_bridge_gpu_kernel_queue_create_info_t*,
+         amdf_dxg_bridge_gpu_kernel_queue_t** queue,
+         amdf_dxg_bridge_gpu_kernel_queue_info_t* info,
+         uint32_t*) -> amdf_dxg_bridge_result_t {
     *queue =
-        reinterpret_cast<amdf_wkmi_bridge_gpu_kernel_queue_t*>(current_state);
+        reinterpret_cast<amdf_dxg_bridge_gpu_kernel_queue_t*>(current_state);
     *info = {};
     info->progress_fence_pointer = &current_state->paging_fence;
     info->progress_fence_handle = 0x50;
     info->context_handle = 0x60;
     info->queue_handle = 0x70;
-    return AMDF_WKMI_BRIDGE_RESULT_SUCCESS;
+    return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
   };
-  bridge_.gpu_kernel_queue_destroy =
-      [](amdf_wkmi_bridge_gpu_kernel_queue_t*,
-         uint32_t*) -> amdf_wkmi_bridge_result_t {
-    return AMDF_WKMI_BRIDGE_RESULT_SUCCESS;
+  bridge_.gpu_kernel_queue_destroy = [](amdf_dxg_bridge_gpu_kernel_queue_t*,
+                                        uint32_t*) -> amdf_dxg_bridge_result_t {
+    return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
   };
   kmt_.update_gpu_virtual_address =
       [](const D3DKMT_UPDATEGPUVIRTUALADDRESS* native) {
@@ -881,7 +879,7 @@ TEST_P(WindowsGpuResetFenceTest,
 
 TEST_F(WindowsGpuMemoryTest,
        MalformedNativeAllocationKeepsBackingOnFailedFree) {
-  state_.allocation_domain = AMDF_WKMI_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
+  state_.allocation_domain = AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
   state_.expected_synchronous_destroy = 1;
   state_.allocation_handle = 0;
   state_.resource_handle = 0x21;
@@ -936,7 +934,7 @@ TEST_F(WindowsGpuMemoryTest,
     SCOPED_TRACE(failing_wait_target);
     state_ = {};
     state_.allocation_domain =
-        AMDF_WKMI_BRIDGE_GPU_ALLOCATION_DOMAIN_REGISTERED_HOST;
+        AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_REGISTERED_HOST;
     state_.expected_synchronous_destroy = 1;
     state_.failing_wait_target = failing_wait_target;
     state_.wait_failures_remaining = 1;
@@ -1014,7 +1012,7 @@ TEST_F(WindowsGpuMemoryTest, EmptyGpuVaFailureDoesNotClaimLostPayload) {
 }
 
 TEST_F(WindowsGpuMemoryTest, FailedGpuVaReleaseRetainsOwnedHostBacking) {
-  state_.allocation_domain = AMDF_WKMI_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
+  state_.allocation_domain = AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
   state_.expected_synchronous_destroy = 1;
   create_info_.required_flags =
       AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_DEVICE_ADDRESS;

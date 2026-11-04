@@ -9,7 +9,7 @@
 #include <stddef.h>
 
 bool amdf_gpu_wddm_wkmi_endpoint_properties_translate(
-    const amdf_wkmi_bridge_gpu_properties_t* provider_properties,
+    const amdf_dxg_bridge_gpu_properties_t* provider_properties,
     amdf_gpu_endpoint_properties_t* out_properties) {
   if (provider_properties == NULL || out_properties == NULL) {
     return false;

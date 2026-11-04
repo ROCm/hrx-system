@@ -22,7 +22,7 @@ amdf_status_t amdf_gpu_umd_create_endpoint_profile(
   amdf_gpu_wddm_wkmi_adapter_t adapter = {0};
   bool profile_available = false;
   amdf_gpu_endpoint_profile_t profile = {0};
-  amdf_wkmi_bridge_gpu_properties_t provider_properties = {0};
+  amdf_dxg_bridge_gpu_properties_t provider_properties = {0};
   amdf_status_t status =
       amdf_gpu_wddm_wkmi_loader_initialize(host_allocator, &loader);
   if (amdf_status_is_ok(status)) {

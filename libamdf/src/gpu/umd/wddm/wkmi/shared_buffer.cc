@@ -109,8 +109,8 @@ amdf_status_t QueryBuffer(uint64_t adapter_luid, HANDLE shared_handle,
 }
 
 amdf_status_t PrepareBuffer(
-    amdf_wkmi_bridge_gpu_adapter_t* adapter,
-    const amdf_wkmi_bridge_gpu_buffer_import_info_t& import_info,
+    amdf_dxg_bridge_gpu_adapter_t* adapter,
+    const amdf_dxg_bridge_gpu_buffer_import_info_t& import_info,
     uint32_t* resource_handle, uint32_t* allocation_handle,
     uint64_t* out_native_byte_length, uint64_t* out_buffer_byte_length) {
   uint64_t buffer_byte_length = 0;
@@ -192,9 +192,9 @@ amdf_status_t PrepareBuffer(
 
 }  // namespace
 
-amdf_status_t AMDF_WKMI_BRIDGE_CALL GpuBufferPrepareImport(
-    amdf_wkmi_bridge_gpu_adapter_t* adapter,
-    const amdf_wkmi_bridge_gpu_buffer_import_info_t* import_info,
+amdf_status_t AMDF_DXG_BRIDGE_CALL GpuBufferPrepareImport(
+    amdf_dxg_bridge_gpu_adapter_t* adapter,
+    const amdf_dxg_bridge_gpu_buffer_import_info_t* import_info,
     uint32_t* resource_handle, uint32_t* allocation_handle,
     uint64_t* out_native_byte_length,
     uint64_t* out_buffer_byte_length) noexcept {

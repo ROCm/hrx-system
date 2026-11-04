@@ -108,11 +108,11 @@ void AMDF_CALL Free(void* user_data, void* allocation) {
   _aligned_free(allocation);
 }
 
-amdf_wkmi_bridge_gpu_kernel_queue_create_info_t MakeCreateInfo() {
-  amdf_wkmi_bridge_gpu_kernel_queue_create_info_t info = {};
+amdf_dxg_bridge_gpu_kernel_queue_create_info_t MakeCreateInfo() {
+  amdf_dxg_bridge_gpu_kernel_queue_create_info_t info = {};
   info.structure_size = sizeof(info);
   info.device_handle = kDevice;
-  info.command_type = AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4;
+  info.command_type = AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4;
   return info;
 }
 
@@ -301,10 +301,10 @@ bool NativeSchedulerSelectionPreservesCommandRepresentation() {
   state.schedulers = {FakeScheduler{4, true}, {5, true}, {6, false}, {7, true}};
   uint32_t scheduler = UINT32_MAX;
   AMDF_EXPECT(amdf::wkmi_bridge::SelectGpuKernelQueueScheduler(
-      device_info, AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4, &scheduler));
+      device_info, AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4, &scheduler));
   AMDF_EXPECT(scheduler == 0);
   AMDF_EXPECT(amdf::wkmi_bridge::SelectGpuKernelQueueScheduler(
-      device_info, AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA, &scheduler));
+      device_info, AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA, &scheduler));
   AMDF_EXPECT(scheduler == 3);
 
   // A valid AQL engine cannot substitute for an unavailable PM4 engine.
@@ -312,7 +312,7 @@ bool NativeSchedulerSelectionPreservesCommandRepresentation() {
     state.schedulers[0] = unavailable;
     scheduler = UINT32_MAX;
     AMDF_EXPECT(!amdf::wkmi_bridge::SelectGpuKernelQueueScheduler(
-        device_info, AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4, &scheduler));
+        device_info, AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4, &scheduler));
     AMDF_EXPECT(scheduler == UINT32_MAX);
   }
   // SWS accepts immutable streams only when the driver owns queue storage.
@@ -321,11 +321,11 @@ bool NativeSchedulerSelectionPreservesCommandRepresentation() {
   device_info.user_queue_size = 4096;
   scheduler = UINT32_MAX;
   AMDF_EXPECT(!amdf::wkmi_bridge::SelectGpuKernelQueueScheduler(
-      device_info, AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA, &scheduler));
+      device_info, AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA, &scheduler));
   AMDF_EXPECT(scheduler == UINT32_MAX);
   device_info.user_queue_size = 0;
   AMDF_EXPECT(amdf::wkmi_bridge::SelectGpuKernelQueueScheduler(
-      device_info, AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA, &scheduler));
+      device_info, AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA, &scheduler));
   AMDF_EXPECT(scheduler == 2);
   current_state = nullptr;
   return passed;
@@ -337,25 +337,25 @@ bool ContextUsesPm4SchedulerWhenAqlSchedulerDiffers() {
   state.schedulers = {
       FakeScheduler{4, true}, {5, true}, {-1, false}, {-1, false}};
   current_state = &state;
-  amdf_wkmi_bridge_gpu_adapter_t adapter;
+  amdf_dxg_bridge_gpu_adapter_t adapter;
   adapter.host_allocator = {&state, Allocate, nullptr, Free};
   adapter.device_info.compute_schedid = 1;
   adapter.device_info.pm4_compute_schedid = 0;
   const auto create = MakeCreateInfo();
-  amdf_wkmi_bridge_gpu_kernel_queue_t* queue = nullptr;
-  amdf_wkmi_bridge_gpu_kernel_queue_info_t info = {};
+  amdf_dxg_bridge_gpu_kernel_queue_t* queue = nullptr;
+  amdf_dxg_bridge_gpu_kernel_queue_info_t info = {};
   uint32_t native_status = 0;
   AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueCreate(&adapter, &create, &queue,
                                                       &info, &native_status) ==
-              AMDF_WKMI_BRIDGE_RESULT_SUCCESS);
+              AMDF_DXG_BRIDGE_RESULT_SUCCESS);
   if (queue != nullptr) {
     uint32_t accepted = 0;
     AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueSubmit(
                     queue, 0x2000, 64, 7, &accepted, &native_status) ==
-                AMDF_WKMI_BRIDGE_RESULT_SUCCESS);
+                AMDF_DXG_BRIDGE_RESULT_SUCCESS);
     AMDF_EXPECT(accepted == 1);
     AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueDestroy(
-                    queue, &native_status) == AMDF_WKMI_BRIDGE_RESULT_SUCCESS);
+                    queue, &native_status) == AMDF_DXG_BRIDGE_RESULT_SUCCESS);
   }
   AMDF_EXPECT(state.context_create_count == 1);
   AMDF_EXPECT(state.submit_count == 1);
@@ -371,17 +371,17 @@ bool AllocationFailureLeavesNoNativeOwnership() {
     FakeNativeState state;
     state.failure_ordinal = ordinal;
     current_state = &state;
-    amdf_wkmi_bridge_gpu_adapter_t adapter;
+    amdf_dxg_bridge_gpu_adapter_t adapter;
     adapter.host_allocator = {&state, Allocate, nullptr, Free};
     const auto create = MakeCreateInfo();
-    auto* queue = reinterpret_cast<amdf_wkmi_bridge_gpu_kernel_queue_t*>(1);
-    amdf_wkmi_bridge_gpu_kernel_queue_info_t info;
+    auto* queue = reinterpret_cast<amdf_dxg_bridge_gpu_kernel_queue_t*>(1);
+    amdf_dxg_bridge_gpu_kernel_queue_info_t info;
     std::memset(&info, 0xA5, sizeof(info));
     const auto original = info;
     uint32_t native_status = 1;
     AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueCreate(
                     &adapter, &create, &queue, &info, &native_status) ==
-                AMDF_WKMI_BRIDGE_RESULT_RESOURCE_EXHAUSTED);
+                AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED);
     AMDF_EXPECT(reinterpret_cast<uintptr_t>(queue) == 1);
     AMDF_EXPECT(std::memcmp(&info, &original, sizeof(info)) == 0);
     AMDF_EXPECT(native_status == 0);
@@ -431,17 +431,17 @@ bool NativeFailureLeavesNoAdapterCleanupObligation() {
     state.destroy_context_status = failure.destroy_context;
     state.fence = 0;
     current_state = &state;
-    amdf_wkmi_bridge_gpu_adapter_t adapter;
+    amdf_dxg_bridge_gpu_adapter_t adapter;
     adapter.host_allocator = {&state, Allocate, nullptr, Free};
     const auto create = MakeCreateInfo();
-    auto* queue = reinterpret_cast<amdf_wkmi_bridge_gpu_kernel_queue_t*>(1);
-    amdf_wkmi_bridge_gpu_kernel_queue_info_t info;
+    auto* queue = reinterpret_cast<amdf_dxg_bridge_gpu_kernel_queue_t*>(1);
+    amdf_dxg_bridge_gpu_kernel_queue_info_t info;
     std::memset(&info, 0xA5, sizeof(info));
     const auto original = info;
     uint32_t native_status = 0;
     AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueCreate(
                     &adapter, &create, &queue, &info, &native_status) ==
-                AMDF_WKMI_BRIDGE_RESULT_NATIVE_FAILURE);
+                AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE);
     AMDF_EXPECT(native_status ==
                 static_cast<uint32_t>(failure.expected_status));
     AMDF_EXPECT(reinterpret_cast<uintptr_t>(queue) == 1);
@@ -450,7 +450,7 @@ bool NativeFailureLeavesNoAdapterCleanupObligation() {
     AMDF_EXPECT(adapter.live_queue_count == 0);
     AMDF_EXPECT(
         amdf::wkmi_bridge::PrepareGpuAdapterClose(&adapter, &native_status) ==
-        AMDF_WKMI_BRIDGE_RESULT_SUCCESS);
+        AMDF_DXG_BRIDGE_RESULT_SUCCESS);
     AMDF_EXPECT(state.queue_destroy_count == failure.queue_destroy_count);
     AMDF_EXPECT(state.context_destroy_count == failure.context_destroy_count);
     AMDF_EXPECT(state.submit_count == 0);
@@ -465,15 +465,15 @@ bool FinalReleaseConsumesPublishedQueueOnEveryNativeResult() {
   for (uint32_t failure_stage = 0; failure_stage < 3; ++failure_stage) {
     FakeNativeState state;
     current_state = &state;
-    amdf_wkmi_bridge_gpu_adapter_t adapter;
+    amdf_dxg_bridge_gpu_adapter_t adapter;
     adapter.host_allocator = {&state, Allocate, nullptr, Free};
     const auto create = MakeCreateInfo();
-    amdf_wkmi_bridge_gpu_kernel_queue_t* queue = nullptr;
-    amdf_wkmi_bridge_gpu_kernel_queue_info_t info = {};
+    amdf_dxg_bridge_gpu_kernel_queue_t* queue = nullptr;
+    amdf_dxg_bridge_gpu_kernel_queue_info_t info = {};
     uint32_t native_status = 0;
     AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueCreate(
                     &adapter, &create, &queue, &info, &native_status) ==
-                AMDF_WKMI_BRIDGE_RESULT_SUCCESS);
+                AMDF_DXG_BRIDGE_RESULT_SUCCESS);
     if (queue == nullptr) {
       return false;
     }
@@ -482,11 +482,11 @@ bool FinalReleaseConsumesPublishedQueueOnEveryNativeResult() {
     AMDF_EXPECT(state.live_allocation_count == 2);
     AMDF_EXPECT(adapter.live_queue_count == 1);
     AMDF_EXPECT(amdf::wkmi_bridge::PrepareGpuAdapterClose(
-                    &adapter, &native_status) == AMDF_WKMI_BRIDGE_RESULT_BUSY);
+                    &adapter, &native_status) == AMDF_DXG_BRIDGE_RESULT_BUSY);
     uint32_t accepted = 0;
     AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueSubmit(
                     queue, 0x2000, 64, 7, &accepted, &native_status) ==
-                AMDF_WKMI_BRIDGE_RESULT_SUCCESS);
+                AMDF_DXG_BRIDGE_RESULT_SUCCESS);
     AMDF_EXPECT(accepted == 1);
     AMDF_EXPECT(*info.progress_fence_pointer == 7);
     if (failure_stage == 1) {
@@ -497,8 +497,8 @@ bool FinalReleaseConsumesPublishedQueueOnEveryNativeResult() {
     }
     AMDF_EXPECT(
         amdf::wkmi_bridge::GpuKernelQueueDestroy(queue, &native_status) ==
-        (failure_stage == 0 ? AMDF_WKMI_BRIDGE_RESULT_SUCCESS
-                            : AMDF_WKMI_BRIDGE_RESULT_NATIVE_FAILURE));
+        (failure_stage == 0 ? AMDF_DXG_BRIDGE_RESULT_SUCCESS
+                            : AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE));
     AMDF_EXPECT(native_status ==
                 static_cast<uint32_t>(failure_stage == 0 ? STATUS_SUCCESS
                                                          : STATUS_DEVICE_BUSY));
@@ -508,7 +508,7 @@ bool FinalReleaseConsumesPublishedQueueOnEveryNativeResult() {
     AMDF_EXPECT(state.context_destroy_count == (failure_stage == 1 ? 0u : 1u));
     AMDF_EXPECT(
         amdf::wkmi_bridge::PrepareGpuAdapterClose(&adapter, &native_status) ==
-        AMDF_WKMI_BRIDGE_RESULT_SUCCESS);
+        AMDF_DXG_BRIDGE_RESULT_SUCCESS);
     AMDF_EXPECT(state.submit_count == 1);
     AMDF_EXPECT(state.dependency_failure_count == 0);
   }
@@ -527,17 +527,17 @@ bool SoftwareSubmissionSeparatesAcceptanceFromSignal() {
     state.signal_status =
         failure_stage == 2 ? STATUS_NO_MEMORY : STATUS_SUCCESS;
     current_state = &state;
-    amdf_wkmi_bridge_gpu_adapter_t adapter;
+    amdf_dxg_bridge_gpu_adapter_t adapter;
     adapter.host_allocator = {&state, Allocate, nullptr, Free};
     adapter.device_info.sdma_schedid = {2};
     auto create = MakeCreateInfo();
-    create.command_type = AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA;
-    amdf_wkmi_bridge_gpu_kernel_queue_t* queue = nullptr;
-    amdf_wkmi_bridge_gpu_kernel_queue_info_t info = {};
+    create.command_type = AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA;
+    amdf_dxg_bridge_gpu_kernel_queue_t* queue = nullptr;
+    amdf_dxg_bridge_gpu_kernel_queue_info_t info = {};
     uint32_t native_status = 0;
     AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueCreate(
                     &adapter, &create, &queue, &info, &native_status) ==
-                AMDF_WKMI_BRIDGE_RESULT_SUCCESS);
+                AMDF_DXG_BRIDGE_RESULT_SUCCESS);
     if (queue == nullptr) {
       return false;
     }
@@ -548,8 +548,8 @@ bool SoftwareSubmissionSeparatesAcceptanceFromSignal() {
     uint32_t accepted = UINT32_MAX;
     AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueSubmit(
                     queue, 0x2000, 64, 7, &accepted, &native_status) ==
-                (failure_stage ? AMDF_WKMI_BRIDGE_RESULT_NATIVE_FAILURE
-                               : AMDF_WKMI_BRIDGE_RESULT_SUCCESS));
+                (failure_stage ? AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE
+                               : AMDF_DXG_BRIDGE_RESULT_SUCCESS));
     AMDF_EXPECT(accepted == (failure_stage == 1 ? 0u : 1u));
     AMDF_EXPECT(native_status == static_cast<uint32_t>(failure_stage
                                                            ? STATUS_NO_MEMORY
@@ -562,7 +562,7 @@ bool SoftwareSubmissionSeparatesAcceptanceFromSignal() {
     // Production callers must establish this before native queue destruction.
     state.progress = 7;
     AMDF_EXPECT(amdf::wkmi_bridge::GpuKernelQueueDestroy(
-                    queue, &native_status) == AMDF_WKMI_BRIDGE_RESULT_SUCCESS);
+                    queue, &native_status) == AMDF_DXG_BRIDGE_RESULT_SUCCESS);
     AMDF_EXPECT(state.queue_destroy_count == 0);
     AMDF_EXPECT(state.context_destroy_count == 1);
     AMDF_EXPECT(state.fence_destroy_count == 1);
@@ -588,13 +588,13 @@ bool SoftwareConstructionAndReleasePreserveOwnership() {
       state.fence = 0;
     }
     current_state = &state;
-    amdf_wkmi_bridge_gpu_adapter_t adapter;
+    amdf_dxg_bridge_gpu_adapter_t adapter;
     adapter.host_allocator = {&state, Allocate, nullptr, Free};
     adapter.device_info.sdma_schedid = {2};
     auto create = MakeCreateInfo();
-    create.command_type = AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA;
-    auto* queue = reinterpret_cast<amdf_wkmi_bridge_gpu_kernel_queue_t*>(1);
-    amdf_wkmi_bridge_gpu_kernel_queue_info_t info;
+    create.command_type = AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA;
+    auto* queue = reinterpret_cast<amdf_dxg_bridge_gpu_kernel_queue_t*>(1);
+    amdf_dxg_bridge_gpu_kernel_queue_info_t info;
     std::memset(&info, 0xA5, sizeof(info));
     const auto original = info;
     uint32_t native_status = 0;
@@ -602,16 +602,16 @@ bool SoftwareConstructionAndReleasePreserveOwnership() {
         &adapter, &create, &queue, &info, &native_status);
     if (failure_stage < 5) {
       AMDF_EXPECT(result == (failure_stage < 3
-                                 ? AMDF_WKMI_BRIDGE_RESULT_RESOURCE_EXHAUSTED
-                                 : AMDF_WKMI_BRIDGE_RESULT_NATIVE_FAILURE));
+                                 ? AMDF_DXG_BRIDGE_RESULT_RESOURCE_EXHAUSTED
+                                 : AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE));
       AMDF_EXPECT(reinterpret_cast<uintptr_t>(queue) == 1);
       AMDF_EXPECT(std::memcmp(&info, &original, sizeof(info)) == 0);
       AMDF_EXPECT(state.context_create_count == (failure_stage < 3 ? 0u : 1u));
       AMDF_EXPECT(state.context_destroy_count == (failure_stage < 3 ? 0u : 1u));
       AMDF_EXPECT(state.fence_destroy_count == 0);
     } else {
-      AMDF_EXPECT(result == AMDF_WKMI_BRIDGE_RESULT_SUCCESS);
-      if (result != AMDF_WKMI_BRIDGE_RESULT_SUCCESS) {
+      AMDF_EXPECT(result == AMDF_DXG_BRIDGE_RESULT_SUCCESS);
+      if (result != AMDF_DXG_BRIDGE_RESULT_SUCCESS) {
         return false;
       }
       if (failure_stage == 5) {
@@ -621,7 +621,7 @@ bool SoftwareConstructionAndReleasePreserveOwnership() {
       }
       AMDF_EXPECT(
           amdf::wkmi_bridge::GpuKernelQueueDestroy(queue, &native_status) ==
-          AMDF_WKMI_BRIDGE_RESULT_NATIVE_FAILURE);
+          AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE);
       AMDF_EXPECT(native_status == static_cast<uint32_t>(STATUS_DEVICE_BUSY));
       AMDF_EXPECT(state.context_destroy_count == 1);
       AMDF_EXPECT(state.fence_destroy_count == (failure_stage == 6 ? 1u : 0u));

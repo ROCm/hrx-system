@@ -22,8 +22,8 @@ amdf_cc_library(
     deps = [
         ":device_state",
         "//libamdf/src/gpu/umd:clock",
+        "//libamdf/src/gpu/umd/dxg:bridge_api",
         "//libamdf/src/gpu/umd/wddm/wkmi:adapter",
-        "//libamdf/src/gpu/umd/wddm/wkmi:bridge_api",
         "//libamdf/src/platform:native_observation",
         "//libamdf/src/platform:observation",
     ],
@@ -223,7 +223,7 @@ amdf_cc_test(
     srcs = ["endpoint_profile_test.cc"],
     data = ["//libamdf/src/gpu/umd/wddm/wkmi:fake_wkmi_bridge_test"],
     env = {
-        "AMDF_WKMI_BRIDGE_PATH": "$(location //libamdf/src/gpu/umd/wddm/wkmi:fake_wkmi_bridge_test)",
+        "AMDF_DXG_BRIDGE_PATH": "$(location //libamdf/src/gpu/umd/wddm/wkmi:fake_wkmi_bridge_test)",
     },
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
@@ -241,7 +241,7 @@ amdf_cc_test(
     srcs = ["device_test.cc"],
     data = ["//libamdf/src/gpu/umd/wddm/wkmi:fake_wkmi_bridge_test"],
     env = {
-        "AMDF_WKMI_BRIDGE_PATH": "$(location //libamdf/src/gpu/umd/wddm/wkmi:fake_wkmi_bridge_test)",
+        "AMDF_DXG_BRIDGE_PATH": "$(location //libamdf/src/gpu/umd/wddm/wkmi:fake_wkmi_bridge_test)",
     },
     target_compatible_with = ["@platforms//os:windows"],
     deps = [

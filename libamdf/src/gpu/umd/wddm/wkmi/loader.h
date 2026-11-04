@@ -17,7 +17,7 @@
 #include <windows.h>
 
 #include "amdf/amdf.h"
-#include "libamdf/src/gpu/umd/wddm/wkmi/bridge_api.h"
+#include "libamdf/src/gpu/umd/dxg/bridge_api.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -37,7 +37,7 @@ amdf_status_t amdf_gpu_wddm_wkmi_loader_initialize(
 // Failure leaves |out_api| unchanged.
 amdf_status_t amdf_gpu_wddm_wkmi_loader_query_api(
     const amdf_gpu_wddm_wkmi_loader_t* loader,
-    const amdf_wkmi_bridge_api_t** out_api);
+    const amdf_dxg_bridge_api_t** out_api);
 
 // Unloads the bridge after all calls through its API table have returned.
 amdf_status_t amdf_gpu_wddm_wkmi_loader_deinitialize(

@@ -22,9 +22,9 @@ typedef struct amdf_windows_gpu_memory_plan_t {
   // Guaranteed base alignment across every exposed address space.
   uint64_t alignment;
   // Private WKMI physical allocation domain.
-  amdf_wkmi_bridge_gpu_allocation_domain_t allocation_domain;
+  amdf_dxg_bridge_gpu_allocation_domain_t allocation_domain;
   // Private WKMI physical allocation behavior.
-  amdf_wkmi_bridge_gpu_allocation_flags_t allocation_flags;
+  amdf_dxg_bridge_gpu_allocation_flags_t allocation_flags;
   // Complete achieved public memory properties.
   amdf_memory_flags_t achieved_flags;
 } amdf_windows_gpu_memory_plan_t;
@@ -103,15 +103,14 @@ static void amdf_windows_gpu_memory_plan(
   plan.alignment = create_info->minimum_alignment;
   if ((profile->roles & AMDF_MEMORY_PROFILE_ROLE_REGISTER) != 0) {
     plan.allocation_domain =
-        AMDF_WKMI_BRIDGE_GPU_ALLOCATION_DOMAIN_REGISTERED_HOST;
+        AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_REGISTERED_HOST;
     if (plan.alignment < AMDF_WINDOWS_GPU_PAGE_SIZE) {
       plan.alignment = AMDF_WINDOWS_GPU_PAGE_SIZE;
     }
   } else {
-    plan.allocation_domain =
-        profile->memory_class == AMDF_MEMORY_CLASS_LOCAL
-            ? AMDF_WKMI_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL
-            : AMDF_WKMI_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
+    plan.allocation_domain = profile->memory_class == AMDF_MEMORY_CLASS_LOCAL
+                                 ? AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL
+                                 : AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_SYSTEM;
     if (plan.alignment < AMDF_WINDOWS_GPU_RESERVATION_GRANULARITY) {
       plan.alignment = AMDF_WINDOWS_GPU_RESERVATION_GRANULARITY;
     }
@@ -121,10 +120,10 @@ static void amdf_windows_gpu_memory_plan(
       (create_info->byte_length + AMDF_WINDOWS_GPU_PAGE_SIZE - 1) &
       ~(AMDF_WINDOWS_GPU_PAGE_SIZE - 1);
   if ((create_info->required_flags & AMDF_MEMORY_FLAG_HOST_COHERENT) != 0) {
-    plan.allocation_flags |= AMDF_WKMI_BRIDGE_GPU_ALLOCATION_FLAG_FINE_GRAIN;
+    plan.allocation_flags |= AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_FINE_GRAIN;
   }
   if ((create_info->required_flags & AMDF_MEMORY_FLAG_QUEUE_STORAGE) != 0) {
-    plan.allocation_flags |= AMDF_WKMI_BRIDGE_GPU_ALLOCATION_FLAG_QUEUE_STORAGE;
+    plan.allocation_flags |= AMDF_DXG_BRIDGE_GPU_ALLOCATION_FLAG_QUEUE_STORAGE;
   }
   *out_plan = plan;
 }
@@ -210,13 +209,13 @@ static amdf_status_t amdf_windows_gpu_memory_reserve_device_address(
 
 static amdf_status_t amdf_windows_gpu_memory_create_allocations(
     const amdf_windows_gpu_memory_plan_t* plan, amdf_gpu_umd_memory_t* memory) {
-  amdf_wkmi_bridge_gpu_allocation_create_info_t create_info = {0};
+  amdf_dxg_bridge_gpu_allocation_create_info_t create_info = {0};
   create_info.structure_size = sizeof(create_info);
   create_info.device_handle = memory->device->device;
   create_info.domain = plan->allocation_domain;
   create_info.flags = plan->allocation_flags;
   create_info.byte_length = plan->byte_length;
-  if (plan->allocation_domain == AMDF_WKMI_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL) {
+  if (plan->allocation_domain == AMDF_DXG_BRIDGE_GPU_ALLOCATION_DOMAIN_LOCAL) {
     create_info.placement_device_address = memory->device_address;
   } else {
     create_info.host_pointer = memory->host_pointer;
@@ -492,7 +491,7 @@ amdf_status_t amdf_gpu_umd_memory_prepare_import(
                        DUPLICATE_SAME_ACCESS)) {
     return amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError());
   }
-  const amdf_wkmi_bridge_gpu_buffer_import_info_t native_import = {
+  const amdf_dxg_bridge_gpu_buffer_import_info_t native_import = {
       .device_handle = device->device,
       .adapter_luid = device->adapter_luid,
       .shared_handle = memory->shared_handle,

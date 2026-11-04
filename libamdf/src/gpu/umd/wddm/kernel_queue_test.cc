@@ -35,8 +35,8 @@ struct FakeQueueState {
   // Total provider allocations, including allocations freed before return.
   uint32_t allocation_count = 0;
   // Command family selected by the parameterized native fixture.
-  amdf_wkmi_bridge_gpu_queue_command_type_t command_type =
-      AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4;
+  amdf_dxg_bridge_gpu_queue_command_type_t command_type =
+      AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4;
   // Progress published concurrently with a failed wait registration.
   uint64_t progress_on_wait_error = 0;
   // Explicit fence value published by a successful native wait, or zero to
@@ -83,11 +83,11 @@ void AMDF_CALL Free(void* user_data, void* allocation) {
   allocator.free(allocator.user_data, allocation);
 }
 
-amdf_wkmi_bridge_result_t AMDF_WKMI_BRIDGE_CALL FakeCreateQueue(
-    amdf_wkmi_bridge_gpu_adapter_t* adapter,
-    const amdf_wkmi_bridge_gpu_kernel_queue_create_info_t* create_info,
-    amdf_wkmi_bridge_gpu_kernel_queue_t** out_queue,
-    amdf_wkmi_bridge_gpu_kernel_queue_info_t* out_info,
+amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeCreateQueue(
+    amdf_dxg_bridge_gpu_adapter_t* adapter,
+    const amdf_dxg_bridge_gpu_kernel_queue_create_info_t* create_info,
+    amdf_dxg_bridge_gpu_kernel_queue_t** out_queue,
+    amdf_dxg_bridge_gpu_kernel_queue_info_t* out_info,
     uint32_t* out_native_status) {
   auto* state = reinterpret_cast<FakeQueueState*>(adapter);
   EXPECT_EQ(create_info->device_handle, 0x10u);
@@ -102,12 +102,12 @@ amdf_wkmi_bridge_result_t AMDF_WKMI_BRIDGE_CALL FakeCreateQueue(
   out_info->context_handle = 0x30;
   out_info->queue_handle = 0x40;
   *out_native_status = 0;
-  *out_queue = reinterpret_cast<amdf_wkmi_bridge_gpu_kernel_queue_t*>(state);
-  return AMDF_WKMI_BRIDGE_RESULT_SUCCESS;
+  *out_queue = reinterpret_cast<amdf_dxg_bridge_gpu_kernel_queue_t*>(state);
+  return AMDF_DXG_BRIDGE_RESULT_SUCCESS;
 }
 
-amdf_wkmi_bridge_result_t AMDF_WKMI_BRIDGE_CALL FakeSubmitQueue(
-    amdf_wkmi_bridge_gpu_kernel_queue_t* queue, uint64_t command_address,
+amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeSubmitQueue(
+    amdf_dxg_bridge_gpu_kernel_queue_t* queue, uint64_t command_address,
     uint64_t command_byte_length, uint64_t progress_value,
     uint32_t* out_accepted, uint32_t* out_native_status) {
   auto* state = reinterpret_cast<FakeQueueState*>(queue);
@@ -118,18 +118,18 @@ amdf_wkmi_bridge_result_t AMDF_WKMI_BRIDGE_CALL FakeSubmitQueue(
   const NTSTATUS status =
       *out_accepted ? state->signal_status : state->submit_status;
   *out_native_status = static_cast<uint32_t>(status);
-  return status == STATUS_SUCCESS ? AMDF_WKMI_BRIDGE_RESULT_SUCCESS
-                                  : AMDF_WKMI_BRIDGE_RESULT_NATIVE_FAILURE;
+  return status == STATUS_SUCCESS ? AMDF_DXG_BRIDGE_RESULT_SUCCESS
+                                  : AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE;
 }
 
-amdf_wkmi_bridge_result_t AMDF_WKMI_BRIDGE_CALL FakeDestroyQueue(
-    amdf_wkmi_bridge_gpu_kernel_queue_t* queue, uint32_t* out_native_status) {
+amdf_dxg_bridge_result_t AMDF_DXG_BRIDGE_CALL FakeDestroyQueue(
+    amdf_dxg_bridge_gpu_kernel_queue_t* queue, uint32_t* out_native_status) {
   auto* state = reinterpret_cast<FakeQueueState*>(queue);
   ++state->destroy_count;
   *out_native_status = static_cast<uint32_t>(state->destroy_status);
   return state->destroy_status == STATUS_SUCCESS
-             ? AMDF_WKMI_BRIDGE_RESULT_SUCCESS
-             : AMDF_WKMI_BRIDGE_RESULT_NATIVE_FAILURE;
+             ? AMDF_DXG_BRIDGE_RESULT_SUCCESS
+             : AMDF_DXG_BRIDGE_RESULT_NATIVE_FAILURE;
 }
 
 NTSTATUS APIENTRY FakeGetDeviceState(D3DKMT_GETDEVICESTATE* query) {
@@ -163,8 +163,8 @@ class WindowsGpuKernelQueueTest
   void SetUp() override {
     current_state = &state_;
     state_.command_type = GetParam() == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4
-                              ? AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4
-                              : AMDF_WKMI_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA;
+                              ? AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_PM4
+                              : AMDF_DXG_BRIDGE_GPU_QUEUE_COMMAND_TYPE_SDMA;
     bridge_.gpu_kernel_queue_create = FakeCreateQueue;
     bridge_.gpu_kernel_queue_submit = FakeSubmitQueue;
     bridge_.gpu_kernel_queue_destroy = FakeDestroyQueue;
@@ -192,7 +192,7 @@ class WindowsGpuKernelQueueTest
     device_.kmt = &kmt_;
     device_.wkmi_adapter.api = &bridge_;
     device_.wkmi_adapter.native =
-        reinterpret_cast<amdf_wkmi_bridge_gpu_adapter_t*>(&state_);
+        reinterpret_cast<amdf_dxg_bridge_gpu_adapter_t*>(&state_);
     amdf_kmt_device_status_initialize(&device_.status);
     ASSERT_EQ(amdf_gpu_umd_kernel_queue_create(&device_, GetParam(), &queue_),
               AMDF_STATUS_OK);
@@ -234,7 +234,7 @@ class WindowsGpuKernelQueueTest
   // Native dependency responses, with no hardware access.
   FakeQueueState state_;
   // Existing WKMI function table seam, not a replacement queue implementation.
-  amdf_wkmi_bridge_api_t bridge_ = {};
+  amdf_dxg_bridge_api_t bridge_ = {};
   // Native KMT procedures needed by the production UMD wait path.
   amdf_kmt_api_t kmt_ = {};
   // Device state consumed directly by the production queue.
@@ -544,10 +544,10 @@ TEST_P(WindowsGpuKernelQueueTest, SoftwareContextOmitsHardwareMappingOrdering) {
   EXPECT_GT(amdf_gpu_umd_kernel_queue_mapping_capacity(queue_), 0u);
   auto create = bridge_.gpu_kernel_queue_create;
   bridge_.gpu_kernel_queue_create =
-      [](amdf_wkmi_bridge_gpu_adapter_t* adapter,
-         const amdf_wkmi_bridge_gpu_kernel_queue_create_info_t* create_info,
-         amdf_wkmi_bridge_gpu_kernel_queue_t** out_queue,
-         amdf_wkmi_bridge_gpu_kernel_queue_info_t* out_info,
+      [](amdf_dxg_bridge_gpu_adapter_t* adapter,
+         const amdf_dxg_bridge_gpu_kernel_queue_create_info_t* create_info,
+         amdf_dxg_bridge_gpu_kernel_queue_t** out_queue,
+         amdf_dxg_bridge_gpu_kernel_queue_info_t* out_info,
          uint32_t* out_native_status) {
         const auto result = FakeCreateQueue(adapter, create_info, out_queue,
                                             out_info, out_native_status);

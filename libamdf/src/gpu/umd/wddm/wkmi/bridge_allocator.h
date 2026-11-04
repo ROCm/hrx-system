@@ -12,7 +12,7 @@
 #include <cstring>
 #include <new>
 
-#include "libamdf/src/gpu/umd/wddm/wkmi/bridge_api.h"
+#include "libamdf/src/gpu/umd/dxg/bridge_api.h"
 
 namespace amdf::wkmi_bridge {
 

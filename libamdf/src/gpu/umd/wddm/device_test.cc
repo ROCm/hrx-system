@@ -185,10 +185,10 @@ class WindowsGpuDeviceRollbackTest
     endpoint_->physical_adapter_index = 0;
 
     const DWORD path_capacity =
-        GetEnvironmentVariableW(L"AMDF_WKMI_BRIDGE_PATH", nullptr, 0);
+        GetEnvironmentVariableW(L"AMDF_DXG_BRIDGE_PATH", nullptr, 0);
     ASSERT_GT(path_capacity, 0u);
     std::vector<wchar_t> path(path_capacity);
-    ASSERT_LT(GetEnvironmentVariableW(L"AMDF_WKMI_BRIDGE_PATH", path.data(),
+    ASSERT_LT(GetEnvironmentVariableW(L"AMDF_DXG_BRIDGE_PATH", path.data(),
                                       path_capacity),
               path_capacity);
     const DWORD absolute_capacity =

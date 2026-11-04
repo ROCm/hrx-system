@@ -14,24 +14,24 @@
 
 namespace {
 
-using SetQueryResultFn = void(__cdecl*)(amdf_wkmi_bridge_result_t);
+using SetQueryResultFn = void(__cdecl*)(amdf_dxg_bridge_result_t);
 using SetAbiVersionFn = void(__cdecl*)(uint32_t);
 
 class WkmiLoaderTest : public ::testing::Test {
  protected:
   void SetUp() override {
     const DWORD path_capacity =
-        GetEnvironmentVariableW(L"AMDF_WKMI_BRIDGE_PATH", nullptr, 0);
+        GetEnvironmentVariableW(L"AMDF_DXG_BRIDGE_PATH", nullptr, 0);
     ASSERT_GT(path_capacity, 0u);
     bridge_path_.resize(path_capacity);
-    ASSERT_LT(GetEnvironmentVariableW(L"AMDF_WKMI_BRIDGE_PATH",
+    ASSERT_LT(GetEnvironmentVariableW(L"AMDF_DXG_BRIDGE_PATH",
                                       bridge_path_.data(), path_capacity),
               path_capacity);
   }
 
   void TearDown() override {
     if (!bridge_path_.empty()) {
-      EXPECT_TRUE(SetEnvironmentVariableW(L"AMDF_WKMI_BRIDGE_PATH",
+      EXPECT_TRUE(SetEnvironmentVariableW(L"AMDF_DXG_BRIDGE_PATH",
                                           bridge_path_.data()));
     }
   }
@@ -48,7 +48,7 @@ TEST_F(WkmiLoaderTest, FailedInitializationLeavesOutputUnchanged) {
       missing_path.end(), kMissingSuffix,
       kMissingSuffix + sizeof(kMissingSuffix) / sizeof(kMissingSuffix[0]));
   ASSERT_TRUE(
-      SetEnvironmentVariableW(L"AMDF_WKMI_BRIDGE_PATH", missing_path.data()));
+      SetEnvironmentVariableW(L"AMDF_DXG_BRIDGE_PATH", missing_path.data()));
 
   const HMODULE sentinel = reinterpret_cast<HMODULE>(uintptr_t{1});
   amdf_gpu_wddm_wkmi_loader_t loader = {};
@@ -69,18 +69,18 @@ TEST_F(WkmiLoaderTest, NegotiationFailurePreservesLiveModuleOwner) {
   const auto set_query_result = reinterpret_cast<SetQueryResultFn>(
       GetProcAddress(loader.module, "amdf_test_wkmi_bridge_set_query_result"));
   ASSERT_NE(set_query_result, nullptr);
-  set_query_result(AMDF_WKMI_BRIDGE_RESULT_VERSION_MISMATCH);
+  set_query_result(AMDF_DXG_BRIDGE_RESULT_VERSION_MISMATCH);
 
   const auto* sentinel_api =
-      reinterpret_cast<const amdf_wkmi_bridge_api_t*>(uintptr_t{1});
-  const amdf_wkmi_bridge_api_t* api = sentinel_api;
+      reinterpret_cast<const amdf_dxg_bridge_api_t*>(uintptr_t{1});
+  const amdf_dxg_bridge_api_t* api = sentinel_api;
   EXPECT_EQ(
       amdf_status_code(amdf_gpu_wddm_wkmi_loader_query_api(&loader, &api)),
       AMDF_STATUS_CODE_VERSION_MISMATCH);
   EXPECT_EQ(api, sentinel_api);
   EXPECT_EQ(loader.module, loaded_module);
 
-  set_query_result(AMDF_WKMI_BRIDGE_RESULT_SUCCESS);
+  set_query_result(AMDF_DXG_BRIDGE_RESULT_SUCCESS);
   ASSERT_EQ(amdf_gpu_wddm_wkmi_loader_query_api(&loader, &api), AMDF_STATUS_OK);
   EXPECT_NE(api, nullptr);
   EXPECT_EQ(loader.module, loaded_module);
@@ -97,17 +97,17 @@ TEST_F(WkmiLoaderTest, RejectsIncompatibleBridgeAbi) {
       GetProcAddress(loader.module, "amdf_test_wkmi_bridge_set_abi_version"));
   ASSERT_NE(set_version, nullptr);
   const auto* sentinel =
-      reinterpret_cast<const amdf_wkmi_bridge_api_t*>(uintptr_t{1});
-  const amdf_wkmi_bridge_api_t* api = sentinel;
-  for (uint32_t version = AMDF_WKMI_BRIDGE_ABI_VERSION_1;
-       version < AMDF_WKMI_BRIDGE_ABI_VERSION_LATEST; ++version) {
+      reinterpret_cast<const amdf_dxg_bridge_api_t*>(uintptr_t{1});
+  const amdf_dxg_bridge_api_t* api = sentinel;
+  for (uint32_t version = AMDF_DXG_BRIDGE_ABI_VERSION_1;
+       version < AMDF_DXG_BRIDGE_ABI_VERSION_LATEST; ++version) {
     SCOPED_TRACE(version);
     set_version(version);
     EXPECT_EQ(amdf_gpu_wddm_wkmi_loader_query_api(&loader, &api),
               amdf_make_api_status(AMDF_STATUS_CODE_VERSION_MISMATCH));
     EXPECT_EQ(api, sentinel);
   }
-  set_version(AMDF_WKMI_BRIDGE_ABI_VERSION_LATEST);
+  set_version(AMDF_DXG_BRIDGE_ABI_VERSION_LATEST);
   EXPECT_EQ(amdf_gpu_wddm_wkmi_loader_query_api(&loader, &api), AMDF_STATUS_OK);
   EXPECT_NE(api, sentinel);
   EXPECT_EQ(amdf_gpu_wddm_wkmi_loader_deinitialize(&loader), AMDF_STATUS_OK);

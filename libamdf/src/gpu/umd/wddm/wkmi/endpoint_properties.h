@@ -10,7 +10,7 @@
 #include <stdbool.h>
 
 #include "libamdf/src/gpu/endpoint_profile.h"
-#include "libamdf/src/gpu/umd/wddm/wkmi/bridge_api.h"
+#include "libamdf/src/gpu/umd/dxg/bridge_api.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,7 +18,7 @@ extern "C" {
 
 // Translates one WKMI result into provider-neutral GPU endpoint properties.
 bool amdf_gpu_wddm_wkmi_endpoint_properties_translate(
-    const amdf_wkmi_bridge_gpu_properties_t* provider_properties,
+    const amdf_dxg_bridge_gpu_properties_t* provider_properties,
     amdf_gpu_endpoint_properties_t* out_properties);
 
 #ifdef __cplusplus

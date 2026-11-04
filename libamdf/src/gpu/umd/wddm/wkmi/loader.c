@@ -13,8 +13,8 @@
 
 #include "libamdf/src/allocator.h"
 
-#define AMDF_WKMI_BRIDGE_PATH_ENVIRONMENT_VARIABLE L"AMDF_WKMI_BRIDGE_PATH"
-#define AMDF_WKMI_BRIDGE_FILE_NAME L"amdf_wkmi_bridge.dll"
+#define AMDF_DXG_BRIDGE_PATH_ENVIRONMENT_VARIABLE L"AMDF_DXG_BRIDGE_PATH"
+#define AMDF_DXG_BRIDGE_FILE_NAME L"amdf_wkmi_bridge.dll"
 #define AMDF_WINDOWS_MAXIMUM_PATH_CAPACITY 32768u
 
 static const char amdf_gpu_wddm_wkmi_module_anchor = 0;
@@ -56,7 +56,7 @@ static amdf_status_t amdf_gpu_wddm_wkmi_allocate_environment_path(
     amdf_allocator_t host_allocator, wchar_t** out_path) {
   SetLastError(ERROR_SUCCESS);
   const DWORD required_capacity = GetEnvironmentVariableW(
-      AMDF_WKMI_BRIDGE_PATH_ENVIRONMENT_VARIABLE, NULL, 0);
+      AMDF_DXG_BRIDGE_PATH_ENVIRONMENT_VARIABLE, NULL, 0);
   if (required_capacity == 0) {
     const DWORD error = GetLastError();
     if (error == ERROR_ENVVAR_NOT_FOUND) {
@@ -76,7 +76,7 @@ static amdf_status_t amdf_gpu_wddm_wkmi_allocate_environment_path(
     return status;
   }
   const DWORD path_length = GetEnvironmentVariableW(
-      AMDF_WKMI_BRIDGE_PATH_ENVIRONMENT_VARIABLE, path, required_capacity);
+      AMDF_DXG_BRIDGE_PATH_ENVIRONMENT_VARIABLE, path, required_capacity);
   if (path_length == 0 || path_length >= required_capacity) {
     const DWORD error = GetLastError();
     amdf_free(host_allocator, path);
@@ -148,7 +148,7 @@ static amdf_status_t amdf_gpu_wddm_wkmi_allocate_sibling_path(
   }
   const size_t directory_length = (size_t)(file_name - path);
   const size_t file_name_capacity =
-      sizeof(AMDF_WKMI_BRIDGE_FILE_NAME) / sizeof(wchar_t);
+      sizeof(AMDF_DXG_BRIDGE_FILE_NAME) / sizeof(wchar_t);
   const size_t sibling_capacity = directory_length + file_name_capacity;
   const size_t sibling_byte_length = sibling_capacity * sizeof(*path);
   amdf_status_t status =
@@ -159,7 +159,7 @@ static amdf_status_t amdf_gpu_wddm_wkmi_allocate_sibling_path(
     return status;
   }
   wchar_t* sibling_path = path;
-  memcpy(sibling_path + directory_length, AMDF_WKMI_BRIDGE_FILE_NAME,
+  memcpy(sibling_path + directory_length, AMDF_DXG_BRIDGE_FILE_NAME,
          file_name_capacity * sizeof(wchar_t));
   *out_path = sibling_path;
   return AMDF_STATUS_OK;
@@ -204,24 +204,23 @@ amdf_status_t amdf_gpu_wddm_wkmi_loader_initialize(
 
 amdf_status_t amdf_gpu_wddm_wkmi_loader_query_api(
     const amdf_gpu_wddm_wkmi_loader_t* loader,
-    const amdf_wkmi_bridge_api_t** out_api) {
-  const amdf_wkmi_bridge_query_api_fn_t query_api =
-      (amdf_wkmi_bridge_query_api_fn_t)GetProcAddress(
-          loader->module, "amdf_wkmi_bridge_query_api");
+    const amdf_dxg_bridge_api_t** out_api) {
+  const amdf_dxg_bridge_query_api_fn_t query_api =
+      (amdf_dxg_bridge_query_api_fn_t)GetProcAddress(
+          loader->module, "amdf_dxg_bridge_query_api");
   if (query_api == NULL) {
     return amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError());
   }
 
-  const amdf_wkmi_bridge_api_t* api = NULL;
-  const amdf_wkmi_bridge_result_t result =
-      query_api(AMDF_WKMI_BRIDGE_ABI_VERSION_11,
-                AMDF_WKMI_BRIDGE_ABI_VERSION_LATEST, &api);
-  if (result == AMDF_WKMI_BRIDGE_RESULT_VERSION_MISMATCH) {
+  const amdf_dxg_bridge_api_t* api = NULL;
+  const amdf_dxg_bridge_result_t result = query_api(
+      AMDF_DXG_BRIDGE_ABI_VERSION_11, AMDF_DXG_BRIDGE_ABI_VERSION_LATEST, &api);
+  if (result == AMDF_DXG_BRIDGE_RESULT_VERSION_MISMATCH) {
     return amdf_make_api_status(AMDF_STATUS_CODE_VERSION_MISMATCH);
   }
-  if (result != AMDF_WKMI_BRIDGE_RESULT_SUCCESS || api == NULL ||
-      api->structure_size < sizeof(amdf_wkmi_bridge_api_t) ||
-      api->abi_version != AMDF_WKMI_BRIDGE_ABI_VERSION_11 ||
+  if (result != AMDF_DXG_BRIDGE_RESULT_SUCCESS || api == NULL ||
+      api->structure_size < sizeof(amdf_dxg_bridge_api_t) ||
+      api->abi_version != AMDF_DXG_BRIDGE_ABI_VERSION_11 ||
       api->gpu_adapter_open == NULL || api->gpu_adapter_close == NULL ||
       api->gpu_allocation_query_layout == NULL ||
       api->gpu_allocation_create == NULL ||

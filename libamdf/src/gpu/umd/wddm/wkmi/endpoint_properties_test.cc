@@ -14,8 +14,8 @@
 
 namespace {
 
-amdf_wkmi_bridge_gpu_properties_t MakeProperties() {
-  amdf_wkmi_bridge_gpu_properties_t properties = {};
+amdf_dxg_bridge_gpu_properties_t MakeProperties() {
+  amdf_dxg_bridge_gpu_properties_t properties = {};
   properties.gfx_ip_major = 12;
   properties.gfx_ip_minor = 5;
   properties.gfx_ip_stepping = 0;
@@ -33,8 +33,7 @@ amdf_wkmi_bridge_gpu_properties_t MakeProperties() {
 }
 
 TEST(WkmiEndpointPropertiesTest, NormalizesMultiXccTopology) {
-  const amdf_wkmi_bridge_gpu_properties_t provider_properties =
-      MakeProperties();
+  const amdf_dxg_bridge_gpu_properties_t provider_properties = MakeProperties();
   amdf_gpu_endpoint_properties_t properties = {};
 
   ASSERT_TRUE(amdf_gpu_wddm_wkmi_endpoint_properties_translate(
@@ -72,7 +71,7 @@ TEST(WkmiEndpointPropertiesTest, NormalizesMultiXccTopology) {
 }
 
 TEST(WkmiEndpointPropertiesTest, NormalizesMissingScratchSlots) {
-  amdf_wkmi_bridge_gpu_properties_t provider_properties = MakeProperties();
+  amdf_dxg_bridge_gpu_properties_t provider_properties = MakeProperties();
   provider_properties.maximum_scratch_wave_count_per_compute_unit = 0;
   amdf_gpu_endpoint_properties_t properties = {};
 
@@ -206,7 +205,7 @@ TEST(WkmiEndpointPropertiesTest, UnknownFamiliesDoNotInferRectangularLayout) {
 }
 
 TEST(WkmiEndpointPropertiesTest, RejectsUnrepresentableProperties) {
-  const amdf_wkmi_bridge_gpu_properties_t valid = MakeProperties();
+  const amdf_dxg_bridge_gpu_properties_t valid = MakeProperties();
   EXPECT_FALSE(
       amdf_gpu_wddm_wkmi_endpoint_properties_translate(nullptr, nullptr));
   EXPECT_FALSE(
@@ -215,7 +214,7 @@ TEST(WkmiEndpointPropertiesTest, RejectsUnrepresentableProperties) {
   amdf_gpu_endpoint_properties_t properties;
   std::memset(&properties, 0xA5, sizeof(properties));
   const amdf_gpu_endpoint_properties_t original = properties;
-  amdf_wkmi_bridge_gpu_properties_t provider_properties = valid;
+  amdf_dxg_bridge_gpu_properties_t provider_properties = valid;
   provider_properties.gfx_ip_major = -1;
   EXPECT_FALSE(amdf_gpu_wddm_wkmi_endpoint_properties_translate(
       &provider_properties, &properties));

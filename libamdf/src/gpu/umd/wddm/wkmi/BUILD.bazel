@@ -17,21 +17,14 @@ package(
 )
 
 amdf_cc_library(
-    name = "bridge_api",
-    hdrs = ["bridge_api.h"],
-    target_compatible_with = ["@platforms//os:windows"],
-    visibility = ["//libamdf/src/gpu/umd/wddm:__pkg__"],
-)
-
-amdf_cc_library(
     name = "adapter",
     srcs = ["adapter.c"],
     hdrs = ["adapter.h"],
     target_compatible_with = ["@platforms//os:windows"],
     visibility = ["//libamdf/src/gpu/umd/wddm:__pkg__"],
     deps = [
-        ":bridge_api",
         ":loader",
+        "//libamdf/src/gpu/umd/dxg:bridge_api",
         "//libamdf/src/platform/windows:kmt_api",
     ],
 )
@@ -53,7 +46,7 @@ amdf_windows_sidecar_library(
     ],
     linkopts = ["gdi32.lib"],
     deps = [
-        ":bridge_api",
+        "//libamdf/src/gpu/umd/dxg:bridge_api",
         "//third_party:amdf_wkmi",
     ],
 )
@@ -68,7 +61,7 @@ amdf_cc_binary(
         "@platforms//os:windows",
     ],
     visibility = ["//libamdf/src/gpu/umd/wddm:__pkg__"],
-    deps = [":bridge_api"],
+    deps = ["//libamdf/src/gpu/umd/dxg:bridge_api"],
 )
 
 exports_files(
@@ -102,7 +95,7 @@ amdf_windows_sidecar_test(
         "bridge_allocator.h",
     ],
     deps = [
-        ":bridge_api",
+        "//libamdf/src/gpu/umd/dxg:bridge_api",
         "//third_party:amdf_wkmi",
     ],
 )
@@ -118,7 +111,7 @@ amdf_windows_sidecar_test(
         "kernel_queue_test.cc",
     ],
     deps = [
-        ":bridge_api",
+        "//libamdf/src/gpu/umd/dxg:bridge_api",
         "//third_party:amdf_wkmi",
     ],
 )
@@ -126,7 +119,7 @@ amdf_windows_sidecar_test(
 iree_dynamic_library_bundle(
     name = "runtime",
     environment = {
-        ":amdf_wkmi_bridge": "AMDF_WKMI_BRIDGE_PATH",
+        ":amdf_wkmi_bridge": "AMDF_DXG_BRIDGE_PATH",
     },
     target_compatible_with = [
         "@platforms//cpu:x86_64",
@@ -142,8 +135,8 @@ amdf_cc_library(
     target_compatible_with = ["@platforms//os:windows"],
     visibility = ["//libamdf/src/gpu/umd/wddm:__pkg__"],
     deps = [
-        ":bridge_api",
         "//libamdf/src/gpu:endpoint_profile",
+        "//libamdf/src/gpu/umd/dxg:bridge_api",
     ],
 )
 
@@ -154,8 +147,8 @@ amdf_cc_library(
     target_compatible_with = ["@platforms//os:windows"],
     visibility = ["//libamdf/src/gpu/umd/wddm:__pkg__"],
     deps = [
-        ":bridge_api",
         "//libamdf/src:allocator",
+        "//libamdf/src/gpu/umd/dxg:bridge_api",
         "//libamdf/src/platform/windows:kmt_api",
     ],
 )
@@ -165,7 +158,7 @@ amdf_cc_test(
     srcs = ["adapter_test.cc"],
     data = [":fake_wkmi_bridge_test"],
     env = {
-        "AMDF_WKMI_BRIDGE_PATH": "$(location :fake_wkmi_bridge_test)",
+        "AMDF_DXG_BRIDGE_PATH": "$(location :fake_wkmi_bridge_test)",
     },
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
@@ -193,7 +186,7 @@ amdf_cc_test(
     srcs = ["loader_test.cc"],
     data = [":fake_wkmi_bridge_test"],
     env = {
-        "AMDF_WKMI_BRIDGE_PATH": "$(location :fake_wkmi_bridge_test)",
+        "AMDF_DXG_BRIDGE_PATH": "$(location :fake_wkmi_bridge_test)",
     },
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
