@@ -174,28 +174,42 @@ static iree_status_t loom_serve_text_emit_output(
   return status;
 }
 
-static iree_status_t loom_serve_text_append_response(
-    loom_serve_text_session_t* session, iree_string_view_t text) {
-  if (text.size > 1024 * 1024 - iree_string_builder_size(&session->response)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "generated response exceeds 1 MiB text limit");
-  }
-  return iree_string_builder_append_string(&session->response, text);
-}
-
 static iree_status_t loom_serve_text_complete(
     loom_serve_text_session_t* session,
     const loom_serve_text_chat_response_t* response,
     iree_string_builder_t* scratch, loom_serve_text_tool_calls_t* tool_calls,
     loom_serve_text_chat_scratch_t* completion_scratch,
     iree_allocator_t scratch_allocator) {
-  char text[8192];
-  iree_host_size_t length = 0;
-  IREE_RETURN_IF_ERROR(iree_tokenizer_decode_state_finalize(
-      session->decoder, iree_make_mutable_string_view(text, sizeof(text)),
-      &length));
-  IREE_RETURN_IF_ERROR(loom_serve_text_append_response(
-      session, iree_make_string_view(text, length)));
+  iree_status_t status = iree_ok_status();
+  iree_host_size_t minimum_capacity =
+      IREE_TOKENIZER_DECODE_OUTPUT_RECOMMENDED_SIZE;
+  bool complete = false;
+  while (iree_status_is_ok(status) && !complete) {
+    char* text = NULL;
+    iree_host_size_t capacity = 0;
+    status = iree_string_builder_reserve_for_append(
+        &session->response, minimum_capacity, &text, &capacity);
+    if (iree_status_is_ok(status)) {
+      iree_host_size_t length = 0;
+      status = iree_tokenizer_decode_state_finalize(
+          session->decoder, iree_make_mutable_string_view(text, capacity),
+          &length);
+      // Finalize allocates nothing: exhausted output credit retains a tail
+      // after this written prefix. Drain it before publishing completion.
+      complete = !iree_status_is_resource_exhausted(status);
+      if (!complete) {
+        iree_status_free(status);
+        status = iree_ok_status();
+        if (!length) {
+          minimum_capacity = capacity + 1;
+        }
+      }
+      if (iree_status_is_ok(status)) {
+        iree_string_builder_commit_append(&session->response, length);
+      }
+    }
+  }
+  IREE_RETURN_IF_ERROR(status);
   if (iree_any_bit_set(response->flags, LOOM_SERVE_TEXT_CHAT_FLAG_STREAM)) {
     IREE_RETURN_IF_ERROR(loom_serve_text_emit_output(
         session, response, LOOM_SERVE_TEXT_CHAT_OUTPUT_COMPLETE, scratch,
@@ -242,20 +256,26 @@ static iree_status_t loom_serve_text_session_decode_tokens(
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
     ++session->request.output_count;
     iree_host_size_t consumed = 0;
+    iree_host_size_t minimum_capacity =
+        IREE_TOKENIZER_DECODE_OUTPUT_RECOMMENDED_SIZE;
     while (!consumed && iree_status_is_ok(status)) {
-      char text[8192];
+      char* text = NULL;
+      iree_host_size_t capacity = 0;
+      status = iree_string_builder_reserve_for_append(
+          &session->response, minimum_capacity, &text, &capacity);
       iree_host_size_t length = 0;
-      status = iree_tokenizer_decode_state_feed(
-          session->decoder, iree_tokenizer_make_token_id_list(tokens + i, 1),
-          iree_make_mutable_string_view(text, sizeof(text)), &consumed,
-          &length);
-      if (iree_status_is_ok(status) && !consumed && !length) {
-        status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                  "token exceeds streaming text capacity");
+      if (iree_status_is_ok(status)) {
+        status = iree_tokenizer_decode_state_feed(
+            session->decoder, iree_tokenizer_make_token_id_list(tokens + i, 1),
+            iree_make_mutable_string_view(text, capacity), &consumed, &length);
       }
       if (iree_status_is_ok(status)) {
-        status = loom_serve_text_append_response(
-            session, iree_make_string_view(text, length));
+        iree_string_builder_commit_append(&session->response, length);
+        // A complete token spelling may require more than the usual chunk.
+        // Grow only when fresh output credit could not make any progress.
+        if (!consumed && !length) {
+          minimum_capacity = capacity + 1;
+        }
       }
     }
   }
