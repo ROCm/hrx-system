@@ -21,6 +21,13 @@ static void iree_hip_execution_resource_descriptor_registry_initialize(void) {
       &iree_hip_execution_resource_descriptor_registry);
 }
 
+void iree_hip_execution_resource_descriptor_trim(void) {
+  iree_call_once(&iree_hip_execution_resource_descriptor_registry_once,
+                 iree_hip_execution_resource_descriptor_registry_initialize);
+  iree_hip_handle_registry_trim(
+      &iree_hip_execution_resource_descriptor_registry);
+}
+
 static hipError_t iree_hip_execution_resource_descriptor_consume_status(
     iree_status_t status) {
   const iree_status_code_t status_code = iree_status_code(status);

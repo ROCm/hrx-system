@@ -30,6 +30,7 @@ _LINUX_COMPATIBILITY = ["@platforms//os:linux"]
 # HIP GPU tests require a compiled AMDGPU backend before runtime device
 # discovery.
 _HIP_GPU_COMPATIBILITY = _LINUX_COMPATIBILITY + select({
+    "//runtime/config/hal:driver_amd_gpu": [],
     "//runtime/config/hal:driver_amdgpu": [],
     "//conditions:default": ["@platforms//:incompatible"],
 })
@@ -163,6 +164,7 @@ hrx_cc_library(
     hdrs = ["stream_value.h"],
     includes = ["../.."],
     deps = [
+        "//libhrx/src/binding/common",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
     ],
@@ -330,7 +332,34 @@ hrx_cc_library(
     srcs = ["device_properties.c"],
     hdrs = ["device_properties.h"],
     includes = ["../.."],
-    deps = ["//libhrx/src/binding/common:amdgpu_architecture"],
+    deps = [
+        "//libhrx/src/binding/common:amdgpu_architecture",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+hrx_cc_library(
+    name = "device_selection",
+    srcs = ["device_selection.c"],
+    hdrs = ["device_selection.h"],
+    includes = ["../.."],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+hrx_cc_test(
+    name = "device_selection_test",
+    srcs = ["device_selection_test.cc"],
+    deps = [
+        ":device_selection",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )
 
 hrx_cc_library(
@@ -342,6 +371,23 @@ hrx_cc_library(
         "//libhrx/src/binding/common",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+    ],
+)
+
+hrx_cc_test(
+    name = "staged_copy_test",
+    srcs = ["staged_copy_test.cc"],
+    deps = [
+        ":staged_copy",
+        "//libhrx/src/binding/common",
+        "//libhrx/src/binding/common:host_callback",
+        "//libhrx/src/libhrx:hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -380,6 +426,7 @@ hrx_cc_shared_library(
         ":array_lifetime",
         ":blocking_printf_provider",
         ":device_properties",
+        ":device_selection",
         ":error_state",
         ":execution_context",
         ":execution_resource",
@@ -443,6 +490,7 @@ hrx_cc_shared_library(
         ":array_lifetime",
         ":blocking_printf_provider",
         ":device_properties",
+        ":device_selection",
         ":error_state",
         ":execution_context",
         ":execution_resource",
@@ -647,6 +695,30 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
+    name = "hip_graph_memory_api_test",
+    srcs = [
+        "api.h",
+        "hip_graph_memory_api_test.cc",
+    ],
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    sanitizer_suppressions = hsa_suppressions,
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _HIP_GPU_COMPATIBILITY,
+    deps = [
+        ":hip_dso_test_util",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
     name = "hip_device_attribute_validation_api_test",
     srcs = [
         "api.h",
@@ -743,7 +815,7 @@ hrx_cc_test(
     target_compatible_with = _HIP_GPU_COMPATIBILITY,
     deps = [
         ":execution_resource",
-        "//build_tools/bazel:dl",
+        ":hip_dso_test_util",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -788,8 +860,8 @@ hrx_cc_test(
     ],
     target_compatible_with = _HIP_GPU_COMPATIBILITY,
     deps = [
+        ":hip_dso_test_util",
         ":launch_params",
-        "//build_tools/bazel:dl",
         "//build_tools/bazel:pthreads",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -839,6 +911,9 @@ hrx_cc_test(
     target_compatible_with = _HIP_GPU_COMPATIBILITY,
     deps = [
         ":hip_dso_test_util",
+        "//build_tools/bazel:pthreads",
+        "//libhrx/src/binding/common",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -861,8 +936,8 @@ hrx_cc_test(
     ],
     target_compatible_with = _HIP_GPU_COMPATIBILITY,
     deps = [
+        ":hip_dso_test_util",
         ":launch_params",
-        "//build_tools/bazel:dl",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -873,6 +948,7 @@ hrx_cc_test(
     srcs = ["hip_virtual_memory_api_test.cc"],
     data = [":amdhip64"],
     env = {
+        "HRX_GPU_DRIVER": "amdgpu",
         "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
     },
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
@@ -881,7 +957,37 @@ hrx_cc_test(
         "iree-run-requirement=runtime.resource.amd_gpu",
         "runtime-resource=amd-gpu",
     ],
-    target_compatible_with = _HIP_GPU_COMPATIBILITY,
+    target_compatible_with = _LINUX_COMPATIBILITY + select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":hip_dso_test_util",
+        ":launch_params",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "hip_legacy_virtual_memory_api_test",
+    srcs = ["hip_virtual_memory_api_test.cc"],
+    args = ["--gtest_filter=-HipVirtualMemoryApiTest.Native*"],
+    data = [":amdhip64"],
+    env = {
+        "HRX_GPU_DRIVER": "legacy-amdgpu",
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    sanitizer_suppressions = hsa_suppressions,
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _LINUX_COMPATIBILITY + select({
+        "//runtime/config/hal:driver_amdgpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":hip_dso_test_util",
         ":launch_params",

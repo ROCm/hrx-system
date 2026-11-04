@@ -24,7 +24,9 @@ namespace {
 
 // Identity of a slot as the device sees it: the eight bytes it names.
 struct SlotAddress {
+  // Allocation containing the slot's bytes.
   iree_hal_buffer_t* buffer;
+  // Byte offset within the allocation.
   iree_device_size_t offset;
 
   bool operator<(const SlotAddress& other) const {
@@ -45,6 +47,7 @@ SlotAddress AddressOf(const iree_hal_streaming_event_timestamp_slot_t* slot) {
 
 // Forwards to the system allocator and counts the allocations it serves.
 struct CountingAllocator {
+  // Number of allocation requests served by this fixture.
   std::atomic<int64_t> allocation_count{0};
 
   static iree_status_t Control(void* self, iree_allocator_command_t command,
@@ -350,16 +353,29 @@ TEST_F(EventTimestampPoolPendingTest,
          "returned";
 }
 
-TEST_F(EventTimestampPoolPendingTest, FailedSemaphoresRecycleTheSlot) {
-  auto* slot = Acquire();
-  const SlotAddress address = AddressOf(slot);
+TEST_F(EventTimestampPoolPendingTest, FailedSemaphoresDoNotRecycleSlots) {
+  auto in_flight = AcquireMany(kSlotsSpanningSeveralSlabs);
+  const auto addresses = AddressesOf(in_flight);
+  // Exercise failure both before release and after a slot is already pending.
+  const size_t split = in_flight.size() / 2;
+  for (size_t i = 0; i < split; ++i) {
+    iree_hal_streaming_event_timestamp_slot_release(in_flight[i], semaphore_,
+                                                    1);
+  }
   iree_hal_semaphore_fail(
       semaphore_, iree_make_status(IREE_STATUS_ABORTED, "test failure"));
-  iree_hal_streaming_event_timestamp_slot_release(slot, semaphore_,
-                                                  /*retire_value=*/1);
-  auto* recycled = Acquire();
-  EXPECT_TRUE(address == AddressOf(recycled));
-  iree_hal_streaming_event_timestamp_slot_release(recycled, nullptr, 0);
+  for (size_t i = split; i < in_flight.size(); ++i) {
+    iree_hal_streaming_event_timestamp_slot_release(in_flight[i], semaphore_,
+                                                    1);
+  }
+
+  // Exhaust free slots so acquisition also drains the pending list. Neither
+  // release order permits reusing bytes that an accepted write may still touch.
+  auto fresh = AcquireMany(kSlotsSpanningSeveralSlabs);
+  for (auto* slot : fresh) {
+    EXPECT_EQ(0u, addresses.count(AddressOf(slot)));
+    iree_hal_streaming_event_timestamp_slot_release(slot, nullptr, 0);
+  }
 }
 
 TEST_F(EventTimestampPoolTest, ConcurrentHoldersNeverShareASlot) {

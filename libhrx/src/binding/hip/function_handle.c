@@ -174,6 +174,11 @@ bool iree_hip_function_handle_lookup(const void* handle,
   return true;
 }
 
+void iree_hip_function_handle_trim(void) {
+  iree_hip_function_handle_ensure_initialized();
+  iree_hip_handle_registry_trim(&iree_hip_function_handle_registry);
+}
+
 void iree_hip_function_handle_retire_module(
     iree_hal_streaming_module_t* module) {
   if (!module) {

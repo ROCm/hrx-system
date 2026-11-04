@@ -8,34 +8,24 @@
 // Its event interval contains the measured hold and is contained by the full
 // host enqueue/wait window, independent of host scheduling and GPU throughput.
 
-#include <dlfcn.h>
-
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <new>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "binding/hip/api.h"
+#include "binding/hip/hip_dso_test_util.h"
 #include "iree/testing/gtest.h"
 #include "libhrx/cts/core/amdgpu_executable_test_data.hpp"
 
 namespace {
 
-const char* CandidateLibPath() {
-  if (const char* environment_path = std::getenv("HRX_TEST_LIBAMDHIP64");
-      environment_path && *environment_path != '\0') {
-    return environment_path;
-  }
-  return "libamdhip64.so";
-}
-
 template <typename T>
-T ResolveHipSymbol(void* library, const char* name) {
-  return reinterpret_cast<T>(dlsym(library, name));
+T ResolveHipSymbol(hrx::hip::testing::HipDso& library, const char* name) {
+  return library.Resolve<T>(name);
 }
 
 using HipInitFn = hipError_t (*)(unsigned int flags);
@@ -139,14 +129,23 @@ class HipEventTimingTest : public ::testing::Test {
       EXPECT_EQ(hipSuccess, module_unload_(module_));
       module_ = nullptr;
     }
-    // Not dlclosed: the runtime spawns background threads that outlive any
-    // teardown reachable from here and would execute unmapped text.
+    if (library_.is_open()) {
+      const auto deinit =
+          library_.Resolve<decltype(&hipHALDeinit)>("hipHALDeinit");
+      ASSERT_NE(nullptr, deinit) << library_.error();
+      EXPECT_EQ(hipSuccess, deinit());
+      EXPECT_TRUE(library_.Close()) << library_.error();
+    }
   }
 
   void SetUp() override {
     if (!skip_reason_.empty()) {
       GTEST_SKIP() << skip_reason_;
     }
+    const auto get_last_error =
+        library_.Resolve<decltype(&hipGetLastError)>("hipGetLastError");
+    ASSERT_NE(nullptr, get_last_error) << library_.error();
+    (void)get_last_error();
     ASSERT_NE(nullptr, gated_function_);
     ASSERT_NE(nullptr, kernel_state_);
     kernel_state_->Reset();
@@ -174,12 +173,7 @@ class HipEventTimingTest : public ::testing::Test {
   // state. Sets |skip_reason_| only when the machine has no device; every
   // other failure is a defect and fails the suite.
   static void InitializeSuite() {
-    library_ = dlopen(CandidateLibPath(), RTLD_NOW | RTLD_LOCAL);
-    ASSERT_NE(nullptr, library_)
-        << "cannot dlopen " << CandidateLibPath() << ": " << dlerror()
-        << "; the shim is a data dependency of this target, so it is present "
-           "and failing to load it is a defect rather than a missing "
-           "environment";
+    ASSERT_TRUE(library_.Open()) << library_.error();
 
     init_ = ResolveHipSymbol<HipInitFn>(library_, "hipInit");
     get_device_ = ResolveHipSymbol<HipGetDeviceFn>(library_, "hipGetDevice");
@@ -395,7 +389,10 @@ class HipEventTimingTest : public ::testing::Test {
   // machine has no HIP device, never for a failure of the runtime itself.
   inline static std::string skip_reason_;
 
-  inline static void* library_ = nullptr;
+  // Exact HIP artifact retained until all work and runtime services have
+  // joined.
+  inline static hrx::hip::testing::HipDso library_;
+  // Kernel module reused by every event-timing case.
   inline static hipModule_t module_ = nullptr;
   // Gated store kernel loaded from the suite-owned module.
   inline static hipFunction_t gated_function_ = nullptr;

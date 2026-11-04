@@ -1635,7 +1635,9 @@ typedef struct hipGraphNodeParams {
 
 // Initialization
 HIPAPI hipError_t hipInit(unsigned int flags);
-// Deinitializes the embedded HRX runtime.
+// Synchronously deinitializes the embedded HRX runtime. The application
+// releases its resources and joins threads calling HIP before invoking this
+// operation.
 HIPAPI hipError_t hipHALDeinit(void);
 // Sets the event sink used by the embedded HRX runtime. Must be called before
 // hipInit or after hipHALDeinit; otherwise returns hipErrorSetOnActiveProcess.
@@ -2355,6 +2357,8 @@ HIPAPI hipError_t hipGraphChildGraphNodeGetGraph(hipGraphNode_t node,
                                                  hipGraph_t* pGraph);
 HIPAPI hipError_t hipGraphHostNodeSetParams(hipGraphNode_t node,
                                             const void* pNodeParams);
+HIPAPI hipError_t hipGraphHostNodeGetParams(hipGraphNode_t node,
+                                            hipHostNodeParams* pNodeParams);
 HIPAPI hipError_t hipGraphKernelNodeGetParams(hipGraphNode_t node,
                                               void* pNodeParams);
 HIPAPI hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
@@ -2487,6 +2491,11 @@ HIPAPI hipError_t hipDeviceSetMemPool(int device, hipMemPool_t pool);
 HIPAPI hipError_t hipDeviceGetMemPool(hipMemPool_t* pool, int device);
 HIPAPI hipError_t hipDeviceGetDefaultMemPool(hipMemPool_t* pool_out,
                                              int device);
+HIPAPI hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
+                                   hipMemAllocationType type);
+HIPAPI hipError_t hipMemSetMemPool(hipMemLocation* location,
+                                   hipMemAllocationType type,
+                                   hipMemPool_t pool);
 
 // Async memory allocation
 HIPAPI hipError_t hipMallocAsync(void** ptr, size_t size, hipStream_t stream);

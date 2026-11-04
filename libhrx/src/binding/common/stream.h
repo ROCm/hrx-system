@@ -22,6 +22,8 @@ typedef struct iree_hal_streaming_graph_node_t iree_hal_streaming_graph_node_t;
 typedef struct iree_hal_streaming_symbol_t iree_hal_streaming_symbol_t;
 typedef struct iree_hal_streaming_value_flush_timer_t
     iree_hal_streaming_value_flush_timer_t;
+typedef struct iree_hal_streaming_value_wait_lane_t
+    iree_hal_streaming_value_wait_lane_t;
 
 typedef enum iree_hal_streaming_stream_flag_bits_e {
   IREE_HAL_STREAMING_STREAM_FLAG_NONE = 0ull,
@@ -108,6 +110,10 @@ typedef struct iree_hal_streaming_stream_t {
   // family, priority, and execution-resource set. NULL until first use.
   iree_hal_queue_t* cooperative_queue;
 
+  // Context-owned exclusive queue while native waits or their dependent work
+  // remain in flight. Access and completion detachment hold |mutex|.
+  iree_hal_streaming_value_wait_lane_t* value_wait_lane;
+
   // Event dependencies that establish safe cross-stream allocation reuse.
   iree_hal_streaming_memory_reuse_dependency_t* memory_reuse_dependencies;
   // Number of valid entries in |memory_reuse_dependencies|.
@@ -131,9 +137,6 @@ typedef struct iree_hal_streaming_stream_t {
   iree_host_size_t capture_dependency_capacity;
 
   // Synchronization.
-  // Serializes value-wait lane ownership for this logical stream. Ordinary
-  // stream dispatch and write-only value operations do not take this mutex.
-  iree_slim_mutex_t value_wait_mutex;
   iree_slim_mutex_t mutex;
 
   // Host allocator.
@@ -186,13 +189,14 @@ iree_status_t iree_hal_streaming_stream_create(
 void iree_hal_streaming_stream_retain(iree_hal_streaming_stream_t* stream);
 void iree_hal_streaming_stream_release(iree_hal_streaming_stream_t* stream);
 
-// Begins command buffer recording.
-// Synchronization: none (begins recording).
+// Begins command buffer recording and orders the next operation after any
+// preceding recorded dispatch. Synchronization: holds the stream mutex.
 iree_status_t iree_hal_streaming_stream_begin(
     iree_hal_streaming_stream_t* stream);
 
-// Ensures a stream command buffer is recording while the caller holds
-// stream->mutex. Use this when appending commands under the stream lock.
+// Ensures a stream command buffer is recording and orders the next operation
+// after any preceding recorded dispatch. Call once before appending each
+// operation while holding stream->mutex.
 iree_status_t iree_hal_streaming_stream_begin_locked(
     iree_hal_streaming_stream_t* stream);
 
@@ -346,7 +350,9 @@ iree_status_t iree_hal_streaming_execute_host_operation(
 
 // Enqueues one kernel launch on |stream| without waiting for completion.
 // Pointer-array arguments are copied into an owned native argument image before
-// the function returns. Graph capture is supported by the single-launch path.
+// the function returns. Outside capture the queue accepts the launch before
+// return, so progress does not depend on another call to this stream. Graph
+// capture is supported by the single-launch path.
 iree_status_t iree_hal_streaming_launch_kernel(
     iree_hal_streaming_symbol_t* symbol,
     const iree_hal_streaming_dispatch_params_t* params,

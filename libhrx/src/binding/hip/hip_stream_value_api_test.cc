@@ -4,8 +4,6 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <dlfcn.h>
-
 #include <algorithm>
 #include <array>
 #include <condition_variable>
@@ -18,6 +16,7 @@
 #include <vector>
 
 #include "binding/hip/api.h"
+#include "binding/hip/hip_dso_test_util.h"
 #include "iree/testing/gtest.h"
 
 namespace {
@@ -35,18 +34,6 @@ class ScopeExit {
 };
 template <typename Cleanup>
 ScopeExit(Cleanup) -> ScopeExit<Cleanup>;
-
-const char* CandidateLibPath() {
-  if (const char* env = std::getenv("HRX_TEST_LIBAMDHIP64");
-      env && *env != '\0') {
-    return env;
-  }
-#ifdef HRX_TEST_LIBAMDHIP64_PATH
-  return HRX_TEST_LIBAMDHIP64_PATH;
-#else
-  return "libamdhip64.so";
-#endif
-}
 
 using HipInitFn = hipError_t (*)(unsigned int flags);
 using HipDeviceGetAttributeFn = hipError_t (*)(int* value,
@@ -124,8 +111,6 @@ using HipGraphExecBatchMemOpNodeSetParamsFn = hipError_t (*)(
     hipGraphExec_t executable, hipGraphNode_t node, const void* params);
 
 struct HipRuntimeApi {
-  // Handle returned by dlopen for the HIP runtime instance.
-  void* library = nullptr;
   // Initializes the runtime.
   HipInitFn init = nullptr;
   // Queries one device capability.
@@ -208,8 +193,8 @@ struct HipRuntimeApi {
 };
 
 template <typename T>
-T ResolveHipSymbol(void* library, const char* name) {
-  return reinterpret_cast<T>(dlsym(library, name));
+T ResolveHipSymbol(hrx::hip::testing::HipDso& library, const char* name) {
+  return library.Resolve<T>(name);
 }
 
 class StartBarrier {
@@ -243,92 +228,83 @@ class StartBarrier {
 
 class HipStreamValueApiTest : public testing::Test {
  protected:
-  void SetUp() override {
-    if (!api_.library) {
-      const char* library_path = CandidateLibPath();
-      ASSERT_NE(nullptr, library_path)
-          << "the build must provide the libamdhip64 artifact under test";
-      api_.library = dlopen(library_path, RTLD_LAZY | RTLD_LOCAL);
-      ASSERT_NE(nullptr, api_.library)
-          << "cannot dlopen " << library_path << ": " << dlerror();
+  static void SetUpTestSuite() {
+    ASSERT_TRUE(library_.Open()) << library_.error();
 
-      api_.init = ResolveHipSymbol<HipInitFn>(api_.library, "hipInit");
-      api_.device_get_attribute = ResolveHipSymbol<HipDeviceGetAttributeFn>(
-          api_.library, "hipDeviceGetAttribute");
-      api_.malloc = ResolveHipSymbol<HipMallocFn>(api_.library, "hipMalloc");
-      api_.ext_malloc_with_flags = ResolveHipSymbol<HipExtMallocWithFlagsFn>(
-          api_.library, "hipExtMallocWithFlags");
-      api_.free = ResolveHipSymbol<HipFreeFn>(api_.library, "hipFree");
-      api_.malloc_host =
-          ResolveHipSymbol<HipMallocHostFn>(api_.library, "hipMallocHost");
-      api_.free_host =
-          ResolveHipSymbol<HipFreeHostFn>(api_.library, "hipFreeHost");
-      api_.host_get_device_pointer =
-          ResolveHipSymbol<HipHostGetDevicePointerFn>(
-              api_.library, "hipHostGetDevicePointer");
-      api_.memset = ResolveHipSymbol<HipMemsetFn>(api_.library, "hipMemset");
-      api_.memcpy = ResolveHipSymbol<HipMemcpyFn>(api_.library, "hipMemcpy");
-      api_.stream_create =
-          ResolveHipSymbol<HipStreamCreateFn>(api_.library, "hipStreamCreate");
-      api_.stream_destroy = ResolveHipSymbol<HipStreamDestroyFn>(
-          api_.library, "hipStreamDestroy");
-      api_.stream_query =
-          ResolveHipSymbol<HipStreamQueryFn>(api_.library, "hipStreamQuery");
-      api_.stream_synchronize = ResolveHipSymbol<HipStreamSynchronizeFn>(
-          api_.library, "hipStreamSynchronize");
-      api_.write_value_32 = ResolveHipSymbol<HipStreamWriteValue32Fn>(
-          api_.library, "hipStreamWriteValue32");
-      api_.write_value_64 = ResolveHipSymbol<HipStreamWriteValue64Fn>(
-          api_.library, "hipStreamWriteValue64");
-      api_.wait_value_32 = ResolveHipSymbol<HipStreamWaitValue32Fn>(
-          api_.library, "hipStreamWaitValue32");
-      api_.wait_value_64 = ResolveHipSymbol<HipStreamWaitValue64Fn>(
-          api_.library, "hipStreamWaitValue64");
-      api_.batch_mem_op = ResolveHipSymbol<HipStreamBatchMemOpFn>(
-          api_.library, "hipStreamBatchMemOp");
-      api_.stream_begin_capture = ResolveHipSymbol<HipStreamBeginCaptureFn>(
-          api_.library, "hipStreamBeginCapture");
-      api_.stream_end_capture = ResolveHipSymbol<HipStreamEndCaptureFn>(
-          api_.library, "hipStreamEndCapture");
-      api_.stream_is_capturing = ResolveHipSymbol<HipStreamIsCapturingFn>(
-          api_.library, "hipStreamIsCapturing");
-      api_.graph_instantiate = ResolveHipSymbol<HipGraphInstantiateFn>(
-          api_.library, "hipGraphInstantiate");
-      api_.graph_launch =
-          ResolveHipSymbol<HipGraphLaunchFn>(api_.library, "hipGraphLaunch");
-      api_.graph_exec_destroy = ResolveHipSymbol<HipGraphExecDestroyFn>(
-          api_.library, "hipGraphExecDestroy");
-      api_.graph_destroy =
-          ResolveHipSymbol<HipGraphDestroyFn>(api_.library, "hipGraphDestroy");
-      api_.ctx_create =
-          ResolveHipSymbol<HipCtxCreateFn>(api_.library, "hipCtxCreate");
-      api_.ctx_destroy =
-          ResolveHipSymbol<HipCtxDestroyFn>(api_.library, "hipCtxDestroy");
-      api_.ctx_get_current = ResolveHipSymbol<HipCtxGetCurrentFn>(
-          api_.library, "hipCtxGetCurrent");
-      api_.ctx_set_current = ResolveHipSymbol<HipCtxSetCurrentFn>(
-          api_.library, "hipCtxSetCurrent");
-      api_.ctx_enable_peer_access = ResolveHipSymbol<HipCtxEnablePeerAccessFn>(
-          api_.library, "hipCtxEnablePeerAccess");
-      api_.graph_create =
-          ResolveHipSymbol<HipGraphCreateFn>(api_.library, "hipGraphCreate");
-      api_.graph_get_nodes = ResolveHipSymbol<HipGraphGetNodesFn>(
-          api_.library, "hipGraphGetNodes");
-      api_.graph_node_get_type = ResolveHipSymbol<HipGraphNodeGetTypeFn>(
-          api_.library, "hipGraphNodeGetType");
-      api_.graph_add_batch_mem_op_node =
-          ResolveHipSymbol<HipGraphAddBatchMemOpNodeFn>(
-              api_.library, "hipGraphAddBatchMemOpNode");
-      api_.graph_batch_mem_op_node_get_params =
-          ResolveHipSymbol<HipGraphBatchMemOpNodeGetParamsFn>(
-              api_.library, "hipGraphBatchMemOpNodeGetParams");
-      api_.graph_batch_mem_op_node_set_params =
-          ResolveHipSymbol<HipGraphBatchMemOpNodeSetParamsFn>(
-              api_.library, "hipGraphBatchMemOpNodeSetParams");
-      api_.graph_exec_batch_mem_op_node_set_params =
-          ResolveHipSymbol<HipGraphExecBatchMemOpNodeSetParamsFn>(
-              api_.library, "hipGraphExecBatchMemOpNodeSetParams");
-    }
+    api_.init = ResolveHipSymbol<HipInitFn>(library_, "hipInit");
+    api_.device_get_attribute = ResolveHipSymbol<HipDeviceGetAttributeFn>(
+        library_, "hipDeviceGetAttribute");
+    api_.malloc = ResolveHipSymbol<HipMallocFn>(library_, "hipMalloc");
+    api_.ext_malloc_with_flags = ResolveHipSymbol<HipExtMallocWithFlagsFn>(
+        library_, "hipExtMallocWithFlags");
+    api_.free = ResolveHipSymbol<HipFreeFn>(library_, "hipFree");
+    api_.malloc_host =
+        ResolveHipSymbol<HipMallocHostFn>(library_, "hipMallocHost");
+    api_.free_host = ResolveHipSymbol<HipFreeHostFn>(library_, "hipFreeHost");
+    api_.host_get_device_pointer = ResolveHipSymbol<HipHostGetDevicePointerFn>(
+        library_, "hipHostGetDevicePointer");
+    api_.memset = ResolveHipSymbol<HipMemsetFn>(library_, "hipMemset");
+    api_.memcpy = ResolveHipSymbol<HipMemcpyFn>(library_, "hipMemcpy");
+    api_.stream_create =
+        ResolveHipSymbol<HipStreamCreateFn>(library_, "hipStreamCreate");
+    api_.stream_destroy =
+        ResolveHipSymbol<HipStreamDestroyFn>(library_, "hipStreamDestroy");
+    api_.stream_query =
+        ResolveHipSymbol<HipStreamQueryFn>(library_, "hipStreamQuery");
+    api_.stream_synchronize = ResolveHipSymbol<HipStreamSynchronizeFn>(
+        library_, "hipStreamSynchronize");
+    api_.write_value_32 = ResolveHipSymbol<HipStreamWriteValue32Fn>(
+        library_, "hipStreamWriteValue32");
+    api_.write_value_64 = ResolveHipSymbol<HipStreamWriteValue64Fn>(
+        library_, "hipStreamWriteValue64");
+    api_.wait_value_32 = ResolveHipSymbol<HipStreamWaitValue32Fn>(
+        library_, "hipStreamWaitValue32");
+    api_.wait_value_64 = ResolveHipSymbol<HipStreamWaitValue64Fn>(
+        library_, "hipStreamWaitValue64");
+    api_.batch_mem_op = ResolveHipSymbol<HipStreamBatchMemOpFn>(
+        library_, "hipStreamBatchMemOp");
+    api_.stream_begin_capture = ResolveHipSymbol<HipStreamBeginCaptureFn>(
+        library_, "hipStreamBeginCapture");
+    api_.stream_end_capture = ResolveHipSymbol<HipStreamEndCaptureFn>(
+        library_, "hipStreamEndCapture");
+    api_.stream_is_capturing = ResolveHipSymbol<HipStreamIsCapturingFn>(
+        library_, "hipStreamIsCapturing");
+    api_.graph_instantiate = ResolveHipSymbol<HipGraphInstantiateFn>(
+        library_, "hipGraphInstantiate");
+    api_.graph_launch =
+        ResolveHipSymbol<HipGraphLaunchFn>(library_, "hipGraphLaunch");
+    api_.graph_exec_destroy = ResolveHipSymbol<HipGraphExecDestroyFn>(
+        library_, "hipGraphExecDestroy");
+    api_.graph_destroy =
+        ResolveHipSymbol<HipGraphDestroyFn>(library_, "hipGraphDestroy");
+    api_.ctx_create =
+        ResolveHipSymbol<HipCtxCreateFn>(library_, "hipCtxCreate");
+    api_.ctx_destroy =
+        ResolveHipSymbol<HipCtxDestroyFn>(library_, "hipCtxDestroy");
+    api_.ctx_get_current =
+        ResolveHipSymbol<HipCtxGetCurrentFn>(library_, "hipCtxGetCurrent");
+    api_.ctx_set_current =
+        ResolveHipSymbol<HipCtxSetCurrentFn>(library_, "hipCtxSetCurrent");
+    api_.ctx_enable_peer_access = ResolveHipSymbol<HipCtxEnablePeerAccessFn>(
+        library_, "hipCtxEnablePeerAccess");
+    api_.graph_create =
+        ResolveHipSymbol<HipGraphCreateFn>(library_, "hipGraphCreate");
+    api_.graph_get_nodes =
+        ResolveHipSymbol<HipGraphGetNodesFn>(library_, "hipGraphGetNodes");
+    api_.graph_node_get_type = ResolveHipSymbol<HipGraphNodeGetTypeFn>(
+        library_, "hipGraphNodeGetType");
+    api_.graph_add_batch_mem_op_node =
+        ResolveHipSymbol<HipGraphAddBatchMemOpNodeFn>(
+            library_, "hipGraphAddBatchMemOpNode");
+    api_.graph_batch_mem_op_node_get_params =
+        ResolveHipSymbol<HipGraphBatchMemOpNodeGetParamsFn>(
+            library_, "hipGraphBatchMemOpNodeGetParams");
+    api_.graph_batch_mem_op_node_set_params =
+        ResolveHipSymbol<HipGraphBatchMemOpNodeSetParamsFn>(
+            library_, "hipGraphBatchMemOpNodeSetParams");
+    api_.graph_exec_batch_mem_op_node_set_params =
+        ResolveHipSymbol<HipGraphExecBatchMemOpNodeSetParamsFn>(
+            library_, "hipGraphExecBatchMemOpNodeSetParams");
 
     ASSERT_NE(nullptr, api_.init);
     ASSERT_NE(nullptr, api_.device_get_attribute);
@@ -370,6 +346,24 @@ class HipStreamValueApiTest : public testing::Test {
     ASSERT_NE(nullptr, api_.graph_exec_batch_mem_op_node_set_params);
 
     ASSERT_EQ(hipSuccess, api_.init(/*flags=*/0));
+  }
+
+  static void TearDownTestSuite() {
+    if (!library_.is_open()) {
+      return;
+    }
+    const auto deinit =
+        library_.Resolve<decltype(&hipHALDeinit)>("hipHALDeinit");
+    ASSERT_NE(nullptr, deinit) << library_.error();
+    EXPECT_EQ(hipSuccess, deinit());
+    EXPECT_TRUE(library_.Close()) << library_.error();
+  }
+
+  void SetUp() override {
+    const auto get_last_error =
+        library_.Resolve<decltype(&hipGetLastError)>("hipGetLastError");
+    ASSERT_NE(nullptr, get_last_error) << library_.error();
+    (void)get_last_error();
     int can_use_stream_wait_value = 0;
     ASSERT_EQ(hipSuccess,
               api_.device_get_attribute(&can_use_stream_wait_value,
@@ -434,16 +428,6 @@ class HipStreamValueApiTest : public testing::Test {
     return pointer;
   }
 
-  bool CheckWaitSupport(hipStream_t stream, void* signal) {
-    if (supports_value_waits_) {
-      return true;
-    }
-    EXPECT_EQ(hipErrorNotSupported,
-              api_.wait_value_32(stream, signal, 0, hipStreamWaitValueEq,
-                                 UINT32_MAX));
-    return false;
-  }
-
   void* AllocateHost(size_t size) {
     void* pointer = nullptr;
     EXPECT_EQ(hipSuccess, api_.malloc_host(&pointer, size));
@@ -465,6 +449,9 @@ class HipStreamValueApiTest : public testing::Test {
     streams_.erase(it);
   }
 
+  // Exact HIP artifact retained through synchronous suite shutdown.
+  static inline hrx::hip::testing::HipDso library_;
+  // Borrowed entry points resolved once before the suite initializes.
   static HipRuntimeApi api_;
   std::vector<hipStream_t> streams_;
   std::vector<void*> allocations_;
@@ -553,10 +540,14 @@ TEST_F(HipStreamValueApiTest, RejectsIncompatibleImportedBatchTargets) {
       owner_context = nullptr;
     }
   };
+  ScopeExit cleanup_guard(cleanup);
   hipError_t setup_result =
       api_.ctx_create(&owner_context, /*flags=*/0, /*device=*/0);
   if (setup_result == hipSuccess) {
     setup_result = api_.malloc(&allocation, sizeof(uint64_t));
+  }
+  if (setup_result == hipSuccess) {
+    setup_result = api_.memset(allocation, 0, sizeof(uint64_t));
   }
   if (setup_result == hipSuccess) {
     setup_result =
@@ -569,7 +560,6 @@ TEST_F(HipStreamValueApiTest, RejectsIncompatibleImportedBatchTargets) {
     setup_result = api_.stream_create(&stream);
   }
   if (setup_result != hipSuccess) {
-    cleanup();
     FAIL() << "cross-context target setup failed with " << setup_result;
   }
 
@@ -583,15 +573,26 @@ TEST_F(HipStreamValueApiTest, RejectsIncompatibleImportedBatchTargets) {
   parameters[1].writeValue.value64 = 1;
   parameters[1].writeValue.flags = hipStreamWriteValueDefault;
 
-  // Submission is deferred until the stream is flushed. Synchronization must
-  // preserve the incompatible imported target as an invalid value instead of
-  // misclassifying the initialized runtime as uninitialized.
-  ASSERT_EQ(hipSuccess, api_.batch_mem_op(stream, 2, parameters, /*flags=*/0));
-  EXPECT_EQ(hipErrorInvalidValue, api_.stream_synchronize(stream));
-  cleanup();
+  // A target may be rejected while recording or when publishing the batch.
+  // Both boundaries must preserve invalid-value classification, and an early
+  // rejection must leave the stream usable without accepting any writes.
+  const hipError_t batch_result =
+      api_.batch_mem_op(stream, 2, parameters, /*flags=*/0);
+  ASSERT_TRUE(batch_result == hipSuccess ||
+              batch_result == hipErrorInvalidValue);
+  EXPECT_EQ(batch_result == hipSuccess ? hipErrorInvalidValue : hipSuccess,
+            api_.stream_synchronize(stream));
+  ASSERT_EQ(hipSuccess, api_.ctx_set_current(owner_context));
+  uint64_t actual = UINT64_MAX;
+  ASSERT_EQ(hipSuccess, api_.memcpy(&actual, allocation, sizeof(actual),
+                                    hipMemcpyDeviceToHost));
+  EXPECT_EQ(0u, actual);
 }
 
 TEST_F(HipStreamValueApiTest, FailedWaitLaneDoesNotPoisonOtherStreams) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
+  }
   hipCtx_t original_context = nullptr;
   ASSERT_EQ(hipSuccess, api_.ctx_get_current(&original_context));
 
@@ -675,15 +676,6 @@ TEST_F(HipStreamValueApiTest, FailedWaitLaneDoesNotPoisonOtherStreams) {
     FAIL() << "cross-context wait-lane setup failed with " << setup_result;
   }
 
-  hipStream_t support_stream = nullptr;
-  ASSERT_EQ(hipSuccess, api_.stream_create(&support_stream));
-  context_streams.push_back(support_stream);
-  if (!CheckWaitSupport(support_stream, ready_signal)) {
-    GTEST_SKIP() << "stream memory waits are unsupported on this runner";
-  }
-  ASSERT_EQ(hipSuccess, api_.stream_destroy(support_stream));
-  context_streams.clear();
-
   for (bool synchronize_owner_first : {false, true}) {
     ASSERT_EQ(hipSuccess,
               api_.memcpy(blocked_signal, &blocked_value, sizeof(blocked_value),
@@ -714,19 +706,26 @@ TEST_F(HipStreamValueApiTest, FailedWaitLaneDoesNotPoisonOtherStreams) {
     invalid_operations[1].writeValue.value64 = 1;
     invalid_operations[1].writeValue.flags = hipStreamWriteValueDefault;
 
-    ASSERT_EQ(hipSuccess, api_.batch_mem_op(owner_stream, 2, invalid_operations,
-                                            /*flags=*/0));
+    const hipError_t batch_result =
+        api_.batch_mem_op(owner_stream, 2, invalid_operations, /*flags=*/0);
+    ASSERT_TRUE(batch_result == hipSuccess ||
+                batch_result == hipErrorInvalidValue);
+    const hipError_t owner_completion =
+        batch_result == hipSuccess ? hipErrorInvalidValue : hipSuccess;
     const hipError_t owner_query_result = api_.stream_query(owner_stream);
-    ASSERT_TRUE(owner_query_result == hipErrorNotReady ||
-                owner_query_result == hipErrorInvalidValue);
+    if (batch_result == hipSuccess) {
+      ASSERT_TRUE(owner_query_result == hipErrorNotReady ||
+                  owner_query_result == hipErrorInvalidValue);
+    } else {
+      EXPECT_EQ(hipErrorNotReady, owner_query_result);
+    }
     EXPECT_EQ(blocked_value,
               __atomic_load_n(static_cast<uint32_t*>(blocked_signal),
                               __ATOMIC_ACQUIRE));
 
-    // Command-buffer validation may fail eagerly or after the owner's earlier
-    // wait has completed. In either case, unrelated streams must make progress
-    // while the accepted lane remains occupied and must stay usable after the
-    // deferred owner error is observed.
+    // Rejecting the later batch must not release the owner's accepted wait or
+    // obstruct unrelated streams. A recording-time rejection leaves the owner
+    // healthy; an accepted batch reports its deferred error on synchronization.
     EXPECT_EQ(hipSuccess,
               api_.wait_value_32(peer_stream, ready_signal, ready_value,
                                  hipStreamWaitValueEq, UINT32_MAX));
@@ -739,21 +738,26 @@ TEST_F(HipStreamValueApiTest, FailedWaitLaneDoesNotPoisonOtherStreams) {
                      __ATOMIC_RELEASE);
 
     if (synchronize_owner_first) {
-      EXPECT_EQ(hipErrorInvalidValue, api_.stream_synchronize(owner_stream));
+      EXPECT_EQ(owner_completion, api_.stream_synchronize(owner_stream));
     }
     EXPECT_EQ(hipSuccess,
               api_.wait_value_32(peer_stream, ready_signal, ready_value,
                                  hipStreamWaitValueEq, UINT32_MAX));
     EXPECT_EQ(hipSuccess, api_.stream_synchronize(peer_stream));
     if (!synchronize_owner_first) {
-      EXPECT_EQ(hipErrorInvalidValue, api_.stream_synchronize(owner_stream));
+      EXPECT_EQ(owner_completion, api_.stream_synchronize(owner_stream));
     }
 
-    EXPECT_EQ(hipErrorInvalidValue, api_.stream_destroy(owner_stream));
+    EXPECT_EQ(owner_completion, api_.stream_destroy(owner_stream));
     EXPECT_EQ(hipSuccess, api_.stream_destroy(peer_stream));
     EXPECT_EQ(hipSuccess, api_.stream_destroy(fresh_stream));
     context_streams.clear();
   }
+  ASSERT_EQ(hipSuccess, api_.ctx_set_current(owner_context));
+  uint64_t actual = UINT64_MAX;
+  ASSERT_EQ(hipSuccess, api_.memcpy(&actual, imported_target, sizeof(actual),
+                                    hipMemcpyDeviceToHost));
+  EXPECT_EQ(0u, actual);
 }
 
 TEST_F(HipStreamValueApiTest, PublishesFinalWriteWithoutHostFlush) {
@@ -782,14 +786,37 @@ TEST_F(HipStreamValueApiTest, PublishesFinalWriteWithoutHostFlush) {
   EXPECT_EQ(kExpectedValue, __atomic_load_n(observed_value, __ATOMIC_ACQUIRE));
 }
 
+TEST_F(HipStreamValueApiTest,
+       SignalAllocationFollowsNativeProgressCapabilities) {
+  if (supports_value_waits_) {
+    ASSERT_NE(AllocateSignal(), nullptr);
+  } else {
+    void* signal = nullptr;
+    EXPECT_EQ(hipErrorNotSupported,
+              api_.ext_malloc_with_flags(&signal, sizeof(uint64_t),
+                                         hipMallocSignalMemory));
+    EXPECT_EQ(signal, nullptr);
+    hipStream_t stream = CreateStream();
+    void* payload = Allocate(sizeof(uint64_t));
+    ASSERT_NE(stream, nullptr);
+    ASSERT_NE(payload, nullptr);
+    EXPECT_EQ(hipErrorNotSupported,
+              api_.wait_value_32(stream, payload, 0, hipStreamWaitValueEq,
+                                 UINT32_MAX));
+    EXPECT_EQ(hipErrorNotSupported,
+              api_.wait_value_64(stream, payload, 0, hipStreamWaitValueEq,
+                                 UINT64_MAX));
+  }
+}
+
 TEST_F(HipStreamValueApiTest, ExecutesEveryWaitPredicateAtBothWidths) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
+  }
   hipStream_t stream = CreateStream();
   void* signal = AllocateSignal();
   ASSERT_NE(nullptr, stream);
   ASSERT_NE(nullptr, signal);
-  if (!CheckWaitSupport(stream, signal)) {
-    GTEST_SKIP() << "stream memory waits are unsupported on this runner";
-  }
 
   const unsigned int predicates[] = {
       hipStreamWaitValueGte,
@@ -857,32 +884,67 @@ TEST_F(HipStreamValueApiTest, ExecutesSystemScopeWritesOnHostMemory) {
   EXPECT_EQ(15u, observed_64);
 }
 
-TEST_F(HipStreamValueApiTest, ExecutesSystemScopeWaitsOnHostMemory) {
-  hipStream_t stream = CreateStream();
-  void* host_allocation = AllocateHost(16);
-  ASSERT_NE(nullptr, stream);
-  ASSERT_NE(nullptr, host_allocation);
-
-  hipDeviceptr_t device_pointer = nullptr;
-  ASSERT_EQ(hipSuccess, api_.host_get_device_pointer(
-                            &device_pointer, host_allocation, /*flags=*/0));
-  ASSERT_NE(nullptr, device_pointer);
-  if (!CheckWaitSupport(stream, device_pointer)) {
-    GTEST_SKIP() << "stream memory waits are unsupported on this runner";
+TEST_F(HipStreamValueApiTest, ExecutesSystemScopeWaitsOnSignalMemory) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
   }
+  hipStream_t stream = CreateStream();
+  void* signal_32 = AllocateSignal();
+  void* signal_64 = AllocateSignal();
+  ASSERT_NE(nullptr, stream);
+  ASSERT_NE(nullptr, signal_32);
+  ASSERT_NE(nullptr, signal_64);
 
   constexpr uint32_t kValue32 = 10;
   constexpr uint64_t kValue64 = 15;
-  std::memcpy(host_allocation, &kValue32, sizeof(kValue32));
-  std::memcpy(static_cast<uint8_t*>(host_allocation) + 8, &kValue64,
-              sizeof(kValue64));
-
-  EXPECT_EQ(hipSuccess, api_.wait_value_32(stream, device_pointer, kValue32,
+  std::memcpy(signal_32, &kValue32, sizeof(kValue32));
+  std::memcpy(signal_64, &kValue64, sizeof(kValue64));
+  EXPECT_EQ(hipSuccess, api_.wait_value_32(stream, signal_32, kValue32,
                                            hipStreamWaitValueEq, UINT32_MAX));
-  EXPECT_EQ(hipSuccess, api_.wait_value_64(
-                            stream, static_cast<uint8_t*>(device_pointer) + 8,
-                            kValue64, hipStreamWaitValueEq, UINT64_MAX));
+  EXPECT_EQ(hipSuccess, api_.wait_value_64(stream, signal_64, kValue64,
+                                           hipStreamWaitValueEq, UINT64_MAX));
   EXPECT_EQ(hipSuccess, api_.stream_synchronize(stream));
+}
+
+TEST_F(HipStreamValueApiTest,
+       MixedBatchUsesNativeWaitsAndShaderPayloadAtomics) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
+  }
+  hipStream_t stream = CreateStream();
+  void* signal = AllocateSignal();
+  void* payload = Allocate(16);
+  ASSERT_NE(nullptr, stream);
+  ASSERT_NE(nullptr, signal);
+  ASSERT_NE(nullptr, payload);
+  const uint64_t ready = 1;
+  std::memcpy(signal, &ready, sizeof(ready));
+  ASSERT_EQ(hipSuccess, api_.memset(payload, 0, 16));
+  hipStreamBatchMemOpParams parameters[4] = {};
+  parameters[0].waitValue.operation = hipStreamMemOpWaitValue32;
+  parameters[0].waitValue.address = (hipDeviceptr_t)(uintptr_t)signal;
+  parameters[0].waitValue.value = 1;
+  parameters[0].waitValue.flags = hipStreamWaitValueEq;
+  parameters[1].writeValue.operation = hipStreamMemOpWriteValue32;
+  parameters[1].writeValue.address = (hipDeviceptr_t)(uintptr_t)payload;
+  parameters[1].writeValue.value = 7;
+  parameters[1].writeValue.flags = hipExtStreamWriteValueIncrement;
+  parameters[2].waitValue.operation = hipStreamMemOpWaitValue64;
+  parameters[2].waitValue.address = (hipDeviceptr_t)(uintptr_t)signal;
+  parameters[2].waitValue.value64 = 1;
+  parameters[2].waitValue.flags = hipStreamWaitValueEq;
+  parameters[3].writeValue.operation = hipStreamMemOpWriteValue64;
+  parameters[3].writeValue.address =
+      (hipDeviceptr_t)(uintptr_t)(static_cast<uint8_t*>(payload) + 8);
+  parameters[3].writeValue.value64 = 11;
+  parameters[3].writeValue.flags = hipStreamWriteValueDefault;
+  ASSERT_EQ(hipSuccess, api_.batch_mem_op(stream, 4, parameters, 0));
+  ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream));
+  std::array<uint64_t, 2> output = {};
+  ASSERT_EQ(hipSuccess, api_.memcpy(output.data(), payload, sizeof(output),
+                                    hipMemcpyDeviceToHost));
+  EXPECT_EQ(output[0], 7u);
+  EXPECT_EQ(output[1], 11u);
 }
 
 TEST_F(HipStreamValueApiTest, ExecutesBatchAsOneOrderedTransaction) {
@@ -1030,6 +1092,9 @@ TEST_F(HipStreamValueApiTest, BatchDoesNotInterleaveWithSameStreamCall) {
 }
 
 TEST_F(HipStreamValueApiTest, IndependentStreamWaitsDoNotShareAQueueLane) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
+  }
   hipStream_t stream_a = CreateStream();
   hipStream_t stream_b = CreateStream();
   void* value_x = AllocateSignal();
@@ -1046,9 +1111,14 @@ TEST_F(HipStreamValueApiTest, IndependentStreamWaitsDoNotShareAQueueLane) {
   ASSERT_EQ(hipSuccess, api_.memset(value_y, 0, sizeof(uint64_t)));
   ASSERT_EQ(hipSuccess, api_.memset(value_x_64, 0, sizeof(uint64_t)));
   ASSERT_EQ(hipSuccess, api_.memset(value_y_64, 0, sizeof(uint64_t)));
-  if (!CheckWaitSupport(stream_a, value_x)) {
-    GTEST_SKIP() << "stream memory waits are unsupported on this runner";
-  }
+  // On an API failure, unblock accepted work before fixture teardown releases
+  // its storage. The successful path completes through the GPU producer.
+  ScopeExit release_waits([&] {
+    for (void* signal : {value_x, value_y, value_x_64, value_y_64}) {
+      __atomic_store_n(static_cast<uint64_t*>(signal), UINT64_C(1),
+                       __ATOMIC_RELEASE);
+    }
+  });
   ASSERT_EQ(hipSuccess, api_.wait_value_32(stream_a, value_x, 1,
                                            hipStreamWaitValueEq, UINT32_MAX));
   ASSERT_EQ(hipSuccess, api_.wait_value_64(stream_a, value_x_64, 1,
@@ -1081,15 +1151,119 @@ TEST_F(HipStreamValueApiTest, IndependentStreamWaitsDoNotShareAQueueLane) {
   EXPECT_EQ(hipSuccess, api_.stream_synchronize(stream_a));
 }
 
+TEST_F(HipStreamValueApiTest, DependentEventWaitLeavesProducerRunnable) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
+  }
+  const auto event_create =
+      library_.Resolve<decltype(&hipEventCreateWithFlags)>(
+          "hipEventCreateWithFlags");
+  const auto event_destroy =
+      library_.Resolve<decltype(&hipEventDestroy)>("hipEventDestroy");
+  const auto event_record =
+      library_.Resolve<decltype(&hipEventRecord)>("hipEventRecord");
+  const auto wait_event =
+      library_.Resolve<decltype(&hipStreamWaitEvent)>("hipStreamWaitEvent");
+  ASSERT_NE(nullptr, event_create);
+  ASSERT_NE(nullptr, event_destroy);
+  ASSERT_NE(nullptr, event_record);
+  ASSERT_NE(nullptr, wait_event);
+  hipEvent_t event = nullptr;
+  ASSERT_EQ(hipSuccess, event_create(&event, hipEventDisableTiming));
+  ScopeExit destroy_event([&] { EXPECT_EQ(hipSuccess, event_destroy(event)); });
+  hipStream_t source = CreateStream();
+  hipStream_t consumer = CreateStream();
+  hipStream_t producer = CreateStream();
+  void* signal = AllocateSignal();
+  void* result = Allocate(sizeof(uint32_t));
+  ASSERT_NE(nullptr, source);
+  ASSERT_NE(nullptr, consumer);
+  ASSERT_NE(nullptr, producer);
+  ASSERT_NE(nullptr, signal);
+  ASSERT_NE(nullptr, result);
+  ASSERT_EQ(hipSuccess, api_.memset(signal, 0, sizeof(uint64_t)));
+  ASSERT_EQ(hipSuccess, api_.memset(result, 0, sizeof(uint32_t)));
+  ScopeExit release_wait([&] {
+    __atomic_store_n(static_cast<uint32_t*>(signal), 1u, __ATOMIC_RELEASE);
+  });
+
+  ASSERT_EQ(hipSuccess, api_.wait_value_32(source, signal, 1,
+                                           hipStreamWaitValueEq, UINT32_MAX));
+  ASSERT_EQ(hipSuccess, event_record(event, source));
+  ASSERT_EQ(hipSuccess, wait_event(consumer, event, 0));
+  ASSERT_EQ(hipSuccess, api_.write_value_32(consumer, result, 7,
+                                            hipStreamWriteValueDefault));
+  // Query flushes the ordinary recorded write after the event wait. The
+  // consumer is pending, but must not occupy the later producer's queue.
+  EXPECT_EQ(hipErrorNotReady, api_.stream_query(consumer));
+  ASSERT_EQ(hipSuccess, api_.write_value_32(producer, signal, 1,
+                                            hipStreamWriteValueDefault));
+  ASSERT_EQ(hipSuccess, api_.stream_synchronize(producer));
+  ASSERT_EQ(hipSuccess, api_.stream_synchronize(consumer));
+  uint32_t actual = 0;
+  ASSERT_EQ(hipSuccess, api_.memcpy(&actual, result, sizeof(actual),
+                                    hipMemcpyDeviceToHost));
+  EXPECT_EQ(7u, actual);
+}
+
+TEST_F(HipStreamValueApiTest, GraphReplayDependencyLeavesProducerRunnable) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
+  }
+  hipStream_t source = CreateStream();
+  hipStream_t consumer = CreateStream();
+  hipStream_t producer = CreateStream();
+  void* signal = AllocateSignal();
+  void* result = Allocate(sizeof(uint32_t));
+  ASSERT_NE(nullptr, source);
+  ASSERT_NE(nullptr, consumer);
+  ASSERT_NE(nullptr, producer);
+  ASSERT_NE(nullptr, signal);
+  ASSERT_NE(nullptr, result);
+  ASSERT_EQ(hipSuccess, api_.memset(signal, 0, sizeof(uint64_t)));
+  ASSERT_EQ(hipSuccess, api_.memset(result, 0, sizeof(uint32_t)));
+  ASSERT_EQ(hipSuccess,
+            api_.stream_begin_capture(source, hipStreamCaptureModeGlobal));
+  ASSERT_EQ(hipSuccess,
+            api_.write_value_32(source, result, 7, hipStreamWriteValueDefault));
+  hipGraph_t graph = nullptr;
+  ASSERT_EQ(hipSuccess, api_.stream_end_capture(source, &graph));
+  graphs_.push_back(graph);
+  hipGraphExec_t executable = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.graph_instantiate(&executable, graph, nullptr, nullptr, 0));
+  graph_executables_.push_back(executable);
+  ScopeExit release_wait([&] {
+    __atomic_store_n(static_cast<uint32_t*>(signal), 1u, __ATOMIC_RELEASE);
+  });
+  ASSERT_EQ(hipSuccess, api_.wait_value_32(source, signal, 1,
+                                           hipStreamWaitValueEq, UINT32_MAX));
+  ASSERT_EQ(hipSuccess, api_.graph_launch(executable, source));
+  ASSERT_EQ(hipSuccess, api_.graph_launch(executable, consumer));
+  ASSERT_EQ(hipSuccess, api_.write_value_32(consumer, result, 9,
+                                            hipStreamWriteValueDefault));
+  EXPECT_EQ(hipErrorNotReady, api_.stream_query(consumer));
+  // The consumer inherits the graph's independent queue requirement. Its
+  // implicit replay dependency must leave this later producer runnable.
+  ASSERT_EQ(hipSuccess, api_.write_value_32(producer, signal, 1,
+                                            hipStreamWriteValueDefault));
+  ASSERT_EQ(hipSuccess, api_.stream_synchronize(producer));
+  ASSERT_EQ(hipSuccess, api_.stream_synchronize(consumer));
+  uint32_t actual = 0;
+  ASSERT_EQ(hipSuccess, api_.memcpy(&actual, result, sizeof(actual),
+                                    hipMemcpyDeviceToHost));
+  EXPECT_EQ(9u, actual);
+}
+
 TEST_F(HipStreamValueApiTest, SameStreamPendingWaitsShareAQueueLane) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
+  }
   hipStream_t wait_stream = CreateStream();
   void* signal = AllocateSignal();
   ASSERT_NE(nullptr, wait_stream);
   ASSERT_NE(nullptr, signal);
   ASSERT_EQ(hipSuccess, api_.memset(signal, 0, sizeof(uint32_t)));
-  if (!CheckWaitSupport(wait_stream, signal)) {
-    GTEST_SKIP() << "stream memory waits are unsupported on this runner";
-  }
 
   // Queue more unresolved waits than the backend's dynamic queue identity
   // space. Ordered waits on one logical stream must remain on one sticky lane
@@ -1105,13 +1279,16 @@ TEST_F(HipStreamValueApiTest, SameStreamPendingWaitsShareAQueueLane) {
     }
   }
 
-  *static_cast<volatile uint32_t*>(signal) = 1;
+  __atomic_store_n(static_cast<uint32_t*>(signal), 1u, __ATOMIC_RELEASE);
   ASSERT_EQ(hipSuccess, api_.stream_synchronize(wait_stream));
   EXPECT_EQ(hipSuccess, wait_result)
       << "accepted " << accepted_wait_count << " of " << kWaitCount << " waits";
 }
 
 TEST_F(HipStreamValueApiTest, CompletedWaitLanesRecycleAcrossLiveStreams) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
+  }
   void* signal = AllocateSignal();
   ASSERT_NE(nullptr, signal);
   const uint32_t ready_value = 1;
@@ -1120,9 +1297,6 @@ TEST_F(HipStreamValueApiTest, CompletedWaitLanesRecycleAcrossLiveStreams) {
 
   hipStream_t first_stream = CreateStream();
   ASSERT_NE(nullptr, first_stream);
-  if (!CheckWaitSupport(first_stream, signal)) {
-    GTEST_SKIP() << "stream memory waits are unsupported on this runner";
-  }
 
   // Keep more logical streams alive than the hardware queue identity space.
   // Each satisfied wait completes before the next stream submits, so a
@@ -1282,7 +1456,7 @@ TEST_F(HipStreamValueApiTest, CapturedWriteBatchReplaysAsOneNode) {
 
 TEST_F(HipStreamValueApiTest, DirectBatchNodeSupportsTemplateAndExecUpdates) {
   hipStream_t stream = CreateStream();
-  void* allocation = Allocate(16);
+  void* allocation = Allocate(3 * sizeof(uint64_t));
   ASSERT_NE(nullptr, stream);
   ASSERT_NE(nullptr, allocation);
 
@@ -1325,6 +1499,20 @@ TEST_F(HipStreamValueApiTest, DirectBatchNodeSupportsTemplateAndExecUpdates) {
   ASSERT_EQ(2u, queried_params.count);
   ASSERT_EQ(hipSuccess,
             api_.graph_batch_mem_op_node_set_params(node, &queried_params));
+
+  hipStreamBatchMemOpParams second_operation = operations[0];
+  second_operation.writeValue.address =
+      static_cast<uint8_t*>(allocation) + 2 * sizeof(uint64_t);
+  second_operation.writeValue.value64 = 7;
+  hipBatchMemOpNodeParams second_params = {
+      .ctx = context,
+      .count = 1,
+      .paramArray = &second_operation,
+      .flags = 0,
+  };
+  hipGraphNode_t second_node = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_add_batch_mem_op_node(
+                            &second_node, graph, &node, 1, &second_params));
   hipGraphExec_t executable = nullptr;
   ASSERT_EQ(hipSuccess,
             api_.graph_instantiate(&executable, graph, /*error_node=*/nullptr,
@@ -1336,6 +1524,9 @@ TEST_F(HipStreamValueApiTest, DirectBatchNodeSupportsTemplateAndExecUpdates) {
   operations[1].writeValue.value64 = 19;
   ASSERT_EQ(hipSuccess, api_.graph_exec_batch_mem_op_node_set_params(
                             executable, node, &params));
+  second_operation.writeValue.value64 = 23;
+  ASSERT_EQ(hipSuccess, api_.graph_exec_batch_mem_op_node_set_params(
+                            executable, second_node, &second_params));
 
   hipBatchMemOpNodeParams observed_params = {};
   ASSERT_EQ(hipSuccess,
@@ -1345,14 +1536,15 @@ TEST_F(HipStreamValueApiTest, DirectBatchNodeSupportsTemplateAndExecUpdates) {
   EXPECT_EQ(11u, observed_params.paramArray[0].writeValue.value64);
   EXPECT_EQ(13u, observed_params.paramArray[1].writeValue.value64);
 
-  ASSERT_EQ(hipSuccess, api_.memset(allocation, 0, 16));
+  ASSERT_EQ(hipSuccess, api_.memset(allocation, 0, 3 * sizeof(uint64_t)));
   ASSERT_EQ(hipSuccess, api_.graph_launch(executable, stream));
   ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream));
-  uint64_t observed[2] = {};
+  uint64_t observed[3] = {};
   ASSERT_EQ(hipSuccess, api_.memcpy(observed, allocation, sizeof(observed),
                                     hipMemcpyDeviceToHost));
   EXPECT_EQ(17u, observed[0]);
   EXPECT_EQ(19u, observed[1]);
+  EXPECT_EQ(23u, observed[2]);
 
   hipGraphExec_t template_executable = nullptr;
   ASSERT_EQ(hipSuccess,
@@ -1361,13 +1553,14 @@ TEST_F(HipStreamValueApiTest, DirectBatchNodeSupportsTemplateAndExecUpdates) {
                                    /*log_buffer=*/nullptr, /*buffer_size=*/0));
   ASSERT_NE(nullptr, template_executable);
   graph_executables_.push_back(template_executable);
-  ASSERT_EQ(hipSuccess, api_.memset(allocation, 0, 16));
+  ASSERT_EQ(hipSuccess, api_.memset(allocation, 0, 3 * sizeof(uint64_t)));
   ASSERT_EQ(hipSuccess, api_.graph_launch(template_executable, stream));
   ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream));
   ASSERT_EQ(hipSuccess, api_.memcpy(observed, allocation, sizeof(observed),
                                     hipMemcpyDeviceToHost));
   EXPECT_EQ(11u, observed[0]);
   EXPECT_EQ(13u, observed[1]);
+  EXPECT_EQ(7u, observed[2]);
 }
 
 TEST_F(HipStreamValueApiTest, UnsupportedWaitInvalidatesCapture) {
@@ -1428,13 +1621,13 @@ TEST_F(HipStreamValueApiTest, WaitInBatchInvalidatesCaptureWithoutWrites) {
 }
 
 TEST_F(HipStreamValueApiTest, CaptureBeginRacesValueWaitSubmission) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
+  }
   hipStream_t stream = CreateStream();
   void* allocation = AllocateSignal();
   ASSERT_NE(nullptr, stream);
   ASSERT_NE(nullptr, allocation);
-  if (!CheckWaitSupport(stream, allocation)) {
-    GTEST_SKIP() << "stream memory waits are unsupported on this runner";
-  }
 
   for (int iteration = 0; iteration < 64; ++iteration) {
     ASSERT_EQ(hipSuccess, api_.memset(allocation, 0, sizeof(uint32_t)));
@@ -1470,14 +1663,14 @@ TEST_F(HipStreamValueApiTest, CaptureBeginRacesValueWaitSubmission) {
 }
 
 TEST_F(HipStreamValueApiTest, CaptureEndRacesValueWaitSubmission) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
+  }
   hipStream_t stream = CreateStream();
   void* allocation = AllocateSignal();
   ASSERT_NE(nullptr, stream);
   ASSERT_NE(nullptr, allocation);
   ASSERT_EQ(hipSuccess, api_.memset(allocation, 0, sizeof(uint32_t)));
-  if (!CheckWaitSupport(stream, allocation)) {
-    GTEST_SKIP() << "stream memory waits are unsupported on this runner";
-  }
 
   for (int iteration = 0; iteration < 64; ++iteration) {
     ASSERT_EQ(hipSuccess,
@@ -1602,6 +1795,9 @@ TEST_F(HipStreamValueApiTest, BatchTargetLookupRacesFreeWithoutPartialCommit) {
 }
 
 TEST_F(HipStreamValueApiTest, StreamTeardownCompletesAfterIndependentProducer) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
+  }
   hipStream_t wait_stream = CreateStream();
   hipStream_t producer_stream = CreateStream();
   void* allocation = AllocateSignal();
@@ -1609,9 +1805,6 @@ TEST_F(HipStreamValueApiTest, StreamTeardownCompletesAfterIndependentProducer) {
   ASSERT_NE(nullptr, producer_stream);
   ASSERT_NE(nullptr, allocation);
   ASSERT_EQ(hipSuccess, api_.memset(allocation, 0, sizeof(uint32_t)));
-  if (!CheckWaitSupport(wait_stream, allocation)) {
-    GTEST_SKIP() << "stream memory waits are unsupported on this runner";
-  }
   ASSERT_EQ(hipSuccess, api_.wait_value_32(wait_stream, allocation, 1,
                                            hipStreamWaitValueEq, UINT32_MAX));
 
@@ -1619,8 +1812,12 @@ TEST_F(HipStreamValueApiTest, StreamTeardownCompletesAfterIndependentProducer) {
   hipError_t destroy_result = hipErrorUnknown;
   std::thread destroy_thread(
       [&] { destroy_result = api_.stream_destroy(wait_stream); });
-  EXPECT_EQ(hipSuccess, api_.write_value_32(producer_stream, allocation, 1,
-                                            hipStreamWriteValueDefault));
+  const hipError_t producer_result = api_.write_value_32(
+      producer_stream, allocation, 1, hipStreamWriteValueDefault);
+  EXPECT_EQ(hipSuccess, producer_result);
+  if (producer_result != hipSuccess) {
+    __atomic_store_n(static_cast<uint32_t*>(allocation), 1u, __ATOMIC_RELEASE);
+  }
   EXPECT_EQ(hipSuccess, api_.stream_synchronize(producer_stream));
   destroy_thread.join();
   EXPECT_EQ(hipSuccess, destroy_result);

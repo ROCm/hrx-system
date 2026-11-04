@@ -17,6 +17,7 @@ AMD_GPU_CTS_TAGS = [
 
 # Native kernel fixtures require the AMDGPU backend and its device toolchain.
 AMDGPU_CTS_COMPATIBILITY_CONDITIONS = {
+    "//runtime/config/hal:driver_amd_gpu": [],
     "//runtime/config/hal:driver_amdgpu": [],
     "//conditions:default": ["@platforms//:incompatible"],
 }

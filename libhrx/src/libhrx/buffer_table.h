@@ -125,7 +125,14 @@ void hrx_buffer_table_cancel_reserved_insert(hrx_buffer_table_t* table);
 hrx_status_t hrx_buffer_table_remove(hrx_buffer_table_t* table,
                                      uint64_t any_ptr);
 
-// Looks up a buffer containing |any_ptr| (device or host).
+// Looks up a buffer containing |any_ptr| (device or host) without creating a
+// status for an ordinary miss. Outputs borrow the inserting caller's handles;
+// a miss clears them. Any out-parameter may be NULL if not needed.
+bool hrx_buffer_table_try_find(hrx_buffer_table_t* table, uint64_t any_ptr,
+                               hrx_buffer_t* out_buffer, size_t* out_offset,
+                               void** out_user_data);
+
+// Looks up a required buffer containing |any_ptr| (device or host).
 // Returns the buffer, byte offset within it, and optional user_data.
 // Any out-parameter may be NULL if not needed.
 hrx_status_t hrx_buffer_table_find(hrx_buffer_table_t* table, uint64_t any_ptr,

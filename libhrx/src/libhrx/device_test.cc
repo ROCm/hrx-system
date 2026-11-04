@@ -7,10 +7,88 @@
 #include "hrx_internal.h"
 #include "iree/hal/testing/mock_device.h"
 #include "iree/hal/topology_builder.h"
+#include "iree/hal/utils/device_spec_builder.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
 namespace {
+
+TEST(DeviceMemoryCapacityTest, CountsLocalPhysicalHeapsOnce) {
+  const iree_hal_memory_heap_spec_t heaps[] = {
+      {.capacity_bytes = UINT64_C(8) << 30, .physical_device_affinity = 1},
+      {.capacity_bytes = UINT64_C(32) << 30, .physical_device_affinity = 1},
+  };
+  const iree_hal_memory_type_spec_t types[] = {
+      {.heap_index = 0, .memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL},
+      {
+          .heap_index = 0,
+          .memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
+                         IREE_HAL_MEMORY_TYPE_HOST_VISIBLE,
+      },
+      {.heap_index = 1, .memory_type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL},
+  };
+  const iree_hal_device_memory_spec_t memory = {
+      .heap_count = IREE_ARRAYSIZE(heaps),
+      .heaps = heaps,
+      .memory_type_count = IREE_ARRAYSIZE(types),
+      .memory_types = types,
+  };
+  const iree_hal_physical_device_spec_t physical = {
+      .partition_count = 1,
+      .physical_device_affinity = 1,
+  };
+  const iree_hal_device_identity_spec_t identity = {
+      .logical_device_id = IREE_SV("test"),
+      .physical_device_count = 1,
+      .physical_devices = &physical,
+  };
+  iree_hal_device_spec_builder_t builder;
+  iree_hal_device_spec_builder_initialize(iree_allocator_system(), &builder);
+  IREE_ASSERT_OK(
+      iree_hal_device_spec_builder_set_identity(&builder, &identity));
+  IREE_ASSERT_OK(iree_hal_device_spec_builder_set_memory(&builder, &memory));
+  iree_hal_device_spec_t* spec = nullptr;
+  IREE_ASSERT_OK(iree_hal_device_spec_builder_finalize(&builder, &spec));
+  iree_hal_device_spec_builder_deinitialize(&builder);
+  iree_hal_mock_device_options_t options;
+  iree_hal_mock_device_options_initialize(&options);
+  options.device_spec = spec;
+  iree_hal_device_t* device = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_mock_device_create(&options, iree_allocator_system(), &device));
+  iree_hal_device_spec_release(spec);
+  hrx_device_s hrx_device = {.hal_device = device};
+  for (hrx_accelerator_type_t type :
+       {HRX_ACCELERATOR_GPU, HRX_ACCELERATOR_CPU}) {
+    hrx_device.type = type;
+    bool known = false;
+    iree_device_size_t total = 0;
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_device_query_total_memory_from_spec(&hrx_device, &known, &total)));
+    EXPECT_TRUE(known);
+    EXPECT_EQ(total, (type == HRX_ACCELERATOR_GPU ? UINT64_C(8) : UINT64_C(32))
+                         << 30);
+  }
+  iree_hal_device_release(device);
+}
+
+TEST(DeviceMemoryCapacityTest, OrdinaryBackendDoesNotExposeLegacyAllocatorVmm) {
+  hrx_allocator_s allocator = {};
+  bool supported = true;
+  size_t minimum = 123;
+  size_t recommended = 456;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_allocator_query_virtual_memory(
+      &allocator, HRX_MEMORY_TYPE_DEVICE_LOCAL, &supported, &minimum,
+      &recommended)));
+  EXPECT_FALSE(supported);
+  EXPECT_EQ(minimum, 0u);
+  EXPECT_EQ(recommended, 0u);
+  hrx_buffer_t reservation = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                        hrx_status_to_iree(hrx_allocator_virtual_memory_reserve(
+                            &allocator, 0, 65536, &reservation)));
+  EXPECT_EQ(reservation, nullptr);
+}
 
 iree_hal_topology_edge_t MakePeerEdge(
     iree_hal_topology_interop_mode_t noncoherent_read,

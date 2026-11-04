@@ -76,6 +76,19 @@ hrx_cc_library(
 )
 
 hrx_cc_library(
+    name = "host_callback",
+    srcs = ["host_callback.c"],
+    hdrs = ["host_callback.h"],
+    includes = [".."],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/threading:thread",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+hrx_cc_library(
     name = "common",
     srcs = [
         "context.c",
@@ -98,6 +111,7 @@ hrx_cc_library(
         "registry.c",
         "stream.c",
         "stream_host_call.c",
+        "stream_queue.c",
         "stream_value.c",
         "tls.c",
     ],
@@ -120,6 +134,7 @@ hrx_cc_library(
         "peer.h",
         "registry.h",
         "stream.h",
+        "stream_queue.h",
         "stream_value.h",
         "tls.h",
     ],
@@ -135,6 +150,7 @@ hrx_cc_library(
         ":capture_admission",
         ":execution_resource",
         ":function_attributes",
+        ":host_callback",
         "//build_tools/bazel:pthreads",
         "//libhrx/src/libhrx:hrx_static",
         "//runtime/src/iree/async",
@@ -147,6 +163,22 @@ hrx_cc_library(
         "//runtime/src/iree/hal/utils:resource_set",
         "//runtime/src/iree/io:file_handle",
         "//third_party:zstd",
+    ],
+)
+
+hrx_cc_test(
+    name = "host_callback_test",
+    srcs = ["host_callback_test.cc"],
+    deps = [
+        ":host_callback",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:host_semaphore",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -229,6 +261,18 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
+    name = "context_test",
+    srcs = ["context_test.cc"],
+    deps = [
+        ":common",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
     name = "device_test",
     srcs = ["device_test.cc"],
     deps = [
@@ -256,12 +300,36 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
-    name = "stream_value_test",
-    srcs = ["stream_value_test.cc"],
+    name = "stream_test",
+    srcs = ["stream_test.cc"],
+    deps = [
+        ":common",
+        "//libhrx/src/libhrx:hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "stream_queue_test",
+    srcs = ["stream_queue_test.cc"],
     deps = [
         ":common",
         "//libhrx/src/libhrx:hrx_static",
         "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "stream_value_test",
+    srcs = ["stream_value_test.cc"],
+    deps = [
+        ":common",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -285,14 +353,9 @@ hrx_cc_test(
 hrx_cc_test(
     name = "memory_test",
     srcs = ["memory_test.cc"],
-    linkopts = select({
-        "@platforms//os:linux": [
-            "-Wl,--wrap=iree_hal_command_buffer_barrier",
-        ],
-        "//conditions:default": [],
-    }),
     deps = [
         ":common",
+        ":host_callback",
         "//libhrx/src/libhrx:hrx_static",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
@@ -306,6 +369,7 @@ hrx_cc_test(
     srcs = ["graph_exec_test.cc"],
     deps = [
         ":common",
+        ":host_callback",
         "//libhrx/src/libhrx:hrx_static",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
@@ -344,6 +408,17 @@ hrx_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/testing:mock_device",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "registry_test",
+    srcs = ["registry_test.cc"],
+    deps = [
+        ":common",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

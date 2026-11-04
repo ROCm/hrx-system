@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <limits>
@@ -282,6 +283,20 @@ class HipLaunchValidationApiTest : public testing::Test {
 
   void TearDown() override {
     if (stream_) {
+      EXPECT_EQ(hipSuccess, api_.stream_synchronize(stream_));
+    }
+    for (auto executable : update_executables_) {
+      if (executable) {
+        EXPECT_EQ(hipSuccess, api_.graph_exec_destroy(executable));
+      }
+    }
+    if (update_graph_) {
+      EXPECT_EQ(hipSuccess, api_.graph_destroy(update_graph_));
+    }
+    if (update_buffer_) {
+      EXPECT_EQ(hipSuccess, update_free_(update_buffer_));
+    }
+    if (stream_) {
       EXPECT_EQ(hipSuccess, api_.stream_destroy(stream_));
       stream_ = nullptr;
     }
@@ -321,6 +336,16 @@ class HipLaunchValidationApiTest : public testing::Test {
   static bool supports_cooperative_launch_;
   // Stream supplied to immediate launch entry points.
   hipStream_t stream_ = nullptr;
+  // Update-test template retained until its executables have been released.
+  hipGraph_t update_graph_ = nullptr;
+  // Independently compiled snapshots exercised by mixed node updates.
+  std::array<hipGraphExec_t, 2> update_executables_ = {};
+  // Device output kept alive across assertion failures and accepted launches.
+  void* update_buffer_ = nullptr;
+  // Matching release operation from the loaded frontend.
+  decltype(&hipFree) update_free_ = nullptr;
+  // Host callback outputs kept alive until teardown joins the stream.
+  std::array<int, 2> update_callbacks_ = {};
 };
 
 HipRuntimeApi HipLaunchValidationApiTest::api_;
@@ -329,6 +354,103 @@ hipModule_t HipLaunchValidationApiTest::module_;
 hipFunction_t HipLaunchValidationApiTest::empty_function_;
 hipFunction_t HipLaunchValidationApiTest::prepacked_function_;
 bool HipLaunchValidationApiTest::supports_cooperative_launch_ = false;
+
+TEST_F(HipLaunchValidationApiTest,
+       MixedExecutableUpdatesPreserveKernelArguments) {
+  const auto allocate = dso_.Resolve<decltype(&hipMalloc)>("hipMalloc");
+  update_free_ = dso_.Resolve<decltype(&hipFree)>("hipFree");
+  const auto copy = dso_.Resolve<decltype(&hipMemcpy)>("hipMemcpy");
+  const auto add_memset =
+      dso_.Resolve<decltype(&hipGraphAddMemsetNode)>("hipGraphAddMemsetNode");
+  const auto add_host =
+      dso_.Resolve<decltype(&hipGraphAddHostNode)>("hipGraphAddHostNode");
+  const auto update_node = dso_.Resolve<decltype(&hipGraphExecNodeSetParams)>(
+      "hipGraphExecNodeSetParams");
+  ASSERT_NE(allocate, nullptr);
+  ASSERT_NE(update_free_, nullptr);
+  ASSERT_NE(copy, nullptr);
+  ASSERT_NE(add_memset, nullptr);
+  ASSERT_NE(add_host, nullptr);
+  ASSERT_NE(update_node, nullptr);
+  ASSERT_EQ(hipSuccess, allocate(&update_buffer_, 2 * sizeof(uint32_t)));
+  hipFunction_t store = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.module_get_function(&store, module_, "hrx_store_output"));
+  ASSERT_EQ(hipSuccess, api_.graph_create(&update_graph_, 0));
+
+  hipMemsetParams fill = {
+      .dst = static_cast<uint32_t*>(update_buffer_) + 1,
+      .elementSize = 1,
+      .height = 1,
+      .pitch = 0,
+      .value = 1,
+      .width = sizeof(uint32_t),
+  };
+  hipGraphNode_t fill_node = nullptr;
+  ASSERT_EQ(hipSuccess,
+            add_memset(&fill_node, update_graph_, nullptr, 0, &fill));
+  uint32_t value = 17;
+  void* arguments[] = {&update_buffer_, &value};
+  hipKernelNodeParams kernel = {
+      .blockDim = {1, 1, 1},
+      .extra = nullptr,
+      .func = reinterpret_cast<void*>(store),
+      .gridDim = {1, 1, 1},
+      .kernelParams = arguments,
+      .sharedMemBytes = 0,
+  };
+  hipGraphNode_t kernel_node = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_add_kernel_node(&kernel_node, update_graph_,
+                                                   &fill_node, 1, &kernel));
+  hipHostNodeParams host = {
+      .fn = +[](void* pointer) { ++*static_cast<int*>(pointer); },
+      .userData = &update_callbacks_[0],
+  };
+  hipGraphNode_t host_node = nullptr;
+  ASSERT_EQ(hipSuccess,
+            add_host(&host_node, update_graph_, &kernel_node, 1, &host));
+  for (auto& executable : update_executables_) {
+    ASSERT_EQ(hipSuccess, api_.graph_instantiate(&executable, update_graph_,
+                                                 nullptr, nullptr, 0));
+  }
+
+  hipGraphNodeParams update = {
+      .type = hipGraphNodeTypeKernel,
+      .kernel = kernel,
+  };
+  value = 31;
+  ASSERT_EQ(hipSuccess,
+            update_node(update_executables_[0], kernel_node, &update));
+  update.type = hipGraphNodeTypeMemset;
+  update.memset = fill;
+  update.memset.value = 0x5A;
+  ASSERT_EQ(hipSuccess,
+            update_node(update_executables_[0], fill_node, &update));
+  update.type = hipGraphNodeTypeHost;
+  update.host = host;
+  update.host.userData = &update_callbacks_[1];
+  ASSERT_EQ(hipSuccess,
+            update_node(update_executables_[0], host_node, &update));
+
+  update.type = hipGraphNodeTypeKernel;
+  update.kernel = kernel;
+  update.kernel.gridDim.x = 0;
+  EXPECT_EQ(hipErrorInvalidConfiguration,
+            update_node(update_executables_[0], kernel_node, &update));
+  const std::array<std::array<uint32_t, 2>, 2> expected = {
+      std::array<uint32_t, 2>{31, 0x5A5A5A5A},
+      std::array<uint32_t, 2>{17, 0x01010101},
+  };
+  for (size_t i = 0; i < update_executables_.size(); ++i) {
+    ASSERT_EQ(hipSuccess, api_.graph_launch(update_executables_[i], stream_));
+    ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
+    std::array<uint32_t, 2> actual = {};
+    ASSERT_EQ(hipSuccess, copy(actual.data(), update_buffer_, sizeof(actual),
+                               hipMemcpyDeviceToHost));
+    EXPECT_EQ(actual, expected[i]);
+  }
+  EXPECT_EQ(update_callbacks_, (std::array<int, 2>{1, 1}));
+}
 
 TEST_F(HipLaunchValidationApiTest,
        FunctionDynamicSharedMemoryAttributeRejectsInvalidValues) {

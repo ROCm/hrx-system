@@ -4,31 +4,18 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <dlfcn.h>
-
+#include <algorithm>
 #include <condition_variable>
-#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <mutex>
 #include <vector>
 
 #include "binding/hip/api.h"
+#include "binding/hip/hip_dso_test_util.h"
 #include "iree/testing/gtest.h"
 
 namespace {
-
-const char* CandidateLibPath() {
-  if (const char* env = std::getenv("HRX_TEST_LIBAMDHIP64");
-      env && *env != '\0') {
-    return env;
-  }
-#ifdef HRX_TEST_LIBAMDHIP64_PATH
-  return HRX_TEST_LIBAMDHIP64_PATH;
-#else
-  return nullptr;
-#endif
-}
 
 using HipInitFn = hipError_t (*)(unsigned int flags);
 using HipGetDeviceFn = hipError_t (*)(int* device);
@@ -239,12 +226,8 @@ class HostGate {
   bool is_open_ = false;
 };
 
-// Owns the process-scoped HIP runtime under test and its resource entry points.
-// Calls cross the shared-library ABI instead of linking the implementation.
+// Borrowed resource entry points from the suite-owned HIP shared library.
 struct HipRuntimeApi {
-  // Handle returned by dlopen for the HIP runtime instance.
-  void* library = nullptr;
-
   // Initializes the HIP runtime instance.
   HipInitFn init = nullptr;
 
@@ -397,132 +380,123 @@ struct HipRuntimeApi {
 };
 
 template <typename T>
-T ResolveHipSymbol(void* library, const char* name) {
-  return reinterpret_cast<T>(dlsym(library, name));
+T ResolveHipSymbol(hrx::hip::testing::HipDso& library, const char* name) {
+  return library.Resolve<T>(name);
 }
 
 class HipExecutionResourceApiTest : public testing::Test {
  protected:
-  void SetUp() override {
-    if (!api_.library) {
-      const char* library_path = CandidateLibPath();
-      ASSERT_NE(library_path, nullptr)
-          << "the build must provide the libamdhip64 artifact under test";
-      api_.library = dlopen(library_path, RTLD_LAZY | RTLD_LOCAL);
-      ASSERT_NE(api_.library, nullptr)
-          << "cannot dlopen " << library_path << ": " << dlerror();
+  static void SetUpTestSuite() {
+    ASSERT_TRUE(library_.Open()) << library_.error();
 
-      api_.init = ResolveHipSymbol<HipInitFn>(api_.library, "hipInit");
-      api_.get_device =
-          ResolveHipSymbol<HipGetDeviceFn>(api_.library, "hipGetDevice");
-      api_.get_device_properties =
-          ResolveHipSymbol<HipGetDevicePropertiesR0600Fn>(
-              api_.library, "hipGetDevicePropertiesR0600");
-      api_.device_get_attribute = ResolveHipSymbol<HipDeviceGetAttributeFn>(
-          api_.library, "hipDeviceGetAttribute");
-      api_.device_get_resource = ResolveHipSymbol<HipDeviceGetDevResourceFn>(
-          api_.library, "hipDeviceGetDevResource");
-      api_.device_execution_context =
-          ResolveHipSymbol<HipDeviceGetExecutionCtxFn>(
-              api_.library, "hipDeviceGetExecutionCtx");
-      api_.split_sm_by_count = ResolveHipSymbol<HipDevSmResourceSplitByCountFn>(
-          api_.library, "hipDevSmResourceSplitByCount");
-      api_.split_sm = ResolveHipSymbol<HipDevSmResourceSplitFn>(
-          api_.library, "hipDevSmResourceSplit");
-      api_.generate_descriptor = ResolveHipSymbol<HipDevResourceGenerateDescFn>(
-          api_.library, "hipDevResourceGenerateDesc");
-      api_.create_context = ResolveHipSymbol<HipGreenCtxCreateFn>(
-          api_.library, "hipGreenCtxCreate");
-      api_.destroy_context = ResolveHipSymbol<HipExecutionCtxDestroyFn>(
-          api_.library, "hipExecutionCtxDestroy");
-      api_.context_get_resource =
-          ResolveHipSymbol<HipExecutionCtxGetDevResourceFn>(
-              api_.library, "hipExecutionCtxGetDevResource");
-      api_.context_get_device = ResolveHipSymbol<HipExecutionCtxGetDeviceFn>(
-          api_.library, "hipExecutionCtxGetDevice");
-      api_.context_get_id = ResolveHipSymbol<HipExecutionCtxGetIdFn>(
-          api_.library, "hipExecutionCtxGetId");
-      api_.context_stream_create =
-          ResolveHipSymbol<HipExecutionCtxStreamCreateFn>(
-              api_.library, "hipExecutionCtxStreamCreate");
-      api_.context_record_event =
-          ResolveHipSymbol<HipExecutionCtxRecordEventFn>(
-              api_.library, "hipExecutionCtxRecordEvent");
-      api_.context_wait_event = ResolveHipSymbol<HipExecutionCtxWaitEventFn>(
-          api_.library, "hipExecutionCtxWaitEvent");
-      api_.context_synchronize = ResolveHipSymbol<HipExecutionCtxSynchronizeFn>(
-          api_.library, "hipExecutionCtxSynchronize");
-      api_.device_get_stream_priority_range =
-          ResolveHipSymbol<HipDeviceGetStreamPriorityRangeFn>(
-              api_.library, "hipDeviceGetStreamPriorityRange");
-      api_.stream_create_with_priority =
-          ResolveHipSymbol<HipStreamCreateWithPriorityFn>(
-              api_.library, "hipStreamCreateWithPriority");
-      api_.stream_create_with_cu_mask =
-          ResolveHipSymbol<HipExtStreamCreateWithCUMaskFn>(
-              api_.library, "hipExtStreamCreateWithCUMask");
-      api_.stream_get_cu_mask = ResolveHipSymbol<HipExtStreamGetCUMaskFn>(
-          api_.library, "hipExtStreamGetCUMask");
-      api_.stream_get_resource = ResolveHipSymbol<HipStreamGetDevResourceFn>(
-          api_.library, "hipStreamGetDevResource");
-      api_.stream_get_flags = ResolveHipSymbol<HipStreamGetFlagsFn>(
-          api_.library, "hipStreamGetFlags");
-      api_.stream_get_priority = ResolveHipSymbol<HipStreamGetPriorityFn>(
-          api_.library, "hipStreamGetPriority");
-      api_.stream_begin_capture = ResolveHipSymbol<HipStreamBeginCaptureFn>(
-          api_.library, "hipStreamBeginCapture");
-      api_.stream_end_capture = ResolveHipSymbol<HipStreamEndCaptureFn>(
-          api_.library, "hipStreamEndCapture");
-      api_.stream_is_capturing = ResolveHipSymbol<HipStreamIsCapturingFn>(
-          api_.library, "hipStreamIsCapturing");
-      api_.stream_destroy = ResolveHipSymbol<HipStreamDestroyFn>(
-          api_.library, "hipStreamDestroy");
-      api_.write_value_32 = ResolveHipSymbol<HipStreamWriteValue32Fn>(
-          api_.library, "hipStreamWriteValue32");
-      api_.write_value_64 = ResolveHipSymbol<HipStreamWriteValue64Fn>(
-          api_.library, "hipStreamWriteValue64");
-      api_.wait_value_32 = ResolveHipSymbol<HipStreamWaitValue32Fn>(
-          api_.library, "hipStreamWaitValue32");
-      api_.wait_value_64 = ResolveHipSymbol<HipStreamWaitValue64Fn>(
-          api_.library, "hipStreamWaitValue64");
-      api_.batch_mem_op = ResolveHipSymbol<HipStreamBatchMemOpFn>(
-          api_.library, "hipStreamBatchMemOp");
-      api_.launch_host_function = ResolveHipSymbol<HipLaunchHostFuncFn>(
-          api_.library, "hipLaunchHostFunc");
-      api_.launch_kernel_ex = ResolveHipSymbol<HipLaunchKernelExCFn>(
-          api_.library, "hipLaunchKernelExC");
-      api_.driver_launch_kernel_ex = ResolveHipSymbol<HipDrvLaunchKernelExFn>(
-          api_.library, "hipDrvLaunchKernelEx");
-      api_.module_launch_cooperative_kernel =
-          ResolveHipSymbol<HipModuleLaunchCooperativeKernelFn>(
-              api_.library, "hipModuleLaunchCooperativeKernel");
-      api_.launch_multi_device =
-          ResolveHipSymbol<HipExtLaunchMultiKernelMultiDeviceFn>(
-              api_.library, "hipExtLaunchMultiKernelMultiDevice");
-      api_.graph_create =
-          ResolveHipSymbol<HipGraphCreateFn>(api_.library, "hipGraphCreate");
-      api_.graph_add_empty_node = ResolveHipSymbol<HipGraphAddEmptyNodeFn>(
-          api_.library, "hipGraphAddEmptyNode");
-      api_.graph_instantiate = ResolveHipSymbol<HipGraphInstantiateFn>(
-          api_.library, "hipGraphInstantiate");
-      api_.graph_launch =
-          ResolveHipSymbol<HipGraphLaunchFn>(api_.library, "hipGraphLaunch");
-      api_.graph_exec_destroy = ResolveHipSymbol<HipGraphExecDestroyFn>(
-          api_.library, "hipGraphExecDestroy");
-      api_.graph_destroy =
-          ResolveHipSymbol<HipGraphDestroyFn>(api_.library, "hipGraphDestroy");
-      api_.event_create_with_flags =
-          ResolveHipSymbol<HipEventCreateWithFlagsFn>(
-              api_.library, "hipEventCreateWithFlags");
-      api_.event_destroy =
-          ResolveHipSymbol<HipEventDestroyFn>(api_.library, "hipEventDestroy");
-      api_.event_record =
-          ResolveHipSymbol<HipEventRecordFn>(api_.library, "hipEventRecord");
-      api_.event_query =
-          ResolveHipSymbol<HipEventQueryFn>(api_.library, "hipEventQuery");
-      api_.event_synchronize = ResolveHipSymbol<HipEventSynchronizeFn>(
-          api_.library, "hipEventSynchronize");
-    }
+    api_.init = ResolveHipSymbol<HipInitFn>(library_, "hipInit");
+    api_.get_device =
+        ResolveHipSymbol<HipGetDeviceFn>(library_, "hipGetDevice");
+    api_.get_device_properties =
+        ResolveHipSymbol<HipGetDevicePropertiesR0600Fn>(
+            library_, "hipGetDevicePropertiesR0600");
+    api_.device_get_attribute = ResolveHipSymbol<HipDeviceGetAttributeFn>(
+        library_, "hipDeviceGetAttribute");
+    api_.device_get_resource = ResolveHipSymbol<HipDeviceGetDevResourceFn>(
+        library_, "hipDeviceGetDevResource");
+    api_.device_execution_context =
+        ResolveHipSymbol<HipDeviceGetExecutionCtxFn>(
+            library_, "hipDeviceGetExecutionCtx");
+    api_.split_sm_by_count = ResolveHipSymbol<HipDevSmResourceSplitByCountFn>(
+        library_, "hipDevSmResourceSplitByCount");
+    api_.split_sm = ResolveHipSymbol<HipDevSmResourceSplitFn>(
+        library_, "hipDevSmResourceSplit");
+    api_.generate_descriptor = ResolveHipSymbol<HipDevResourceGenerateDescFn>(
+        library_, "hipDevResourceGenerateDesc");
+    api_.create_context =
+        ResolveHipSymbol<HipGreenCtxCreateFn>(library_, "hipGreenCtxCreate");
+    api_.destroy_context = ResolveHipSymbol<HipExecutionCtxDestroyFn>(
+        library_, "hipExecutionCtxDestroy");
+    api_.context_get_resource =
+        ResolveHipSymbol<HipExecutionCtxGetDevResourceFn>(
+            library_, "hipExecutionCtxGetDevResource");
+    api_.context_get_device = ResolveHipSymbol<HipExecutionCtxGetDeviceFn>(
+        library_, "hipExecutionCtxGetDevice");
+    api_.context_get_id = ResolveHipSymbol<HipExecutionCtxGetIdFn>(
+        library_, "hipExecutionCtxGetId");
+    api_.context_stream_create =
+        ResolveHipSymbol<HipExecutionCtxStreamCreateFn>(
+            library_, "hipExecutionCtxStreamCreate");
+    api_.context_record_event = ResolveHipSymbol<HipExecutionCtxRecordEventFn>(
+        library_, "hipExecutionCtxRecordEvent");
+    api_.context_wait_event = ResolveHipSymbol<HipExecutionCtxWaitEventFn>(
+        library_, "hipExecutionCtxWaitEvent");
+    api_.context_synchronize = ResolveHipSymbol<HipExecutionCtxSynchronizeFn>(
+        library_, "hipExecutionCtxSynchronize");
+    api_.device_get_stream_priority_range =
+        ResolveHipSymbol<HipDeviceGetStreamPriorityRangeFn>(
+            library_, "hipDeviceGetStreamPriorityRange");
+    api_.stream_create_with_priority =
+        ResolveHipSymbol<HipStreamCreateWithPriorityFn>(
+            library_, "hipStreamCreateWithPriority");
+    api_.stream_create_with_cu_mask =
+        ResolveHipSymbol<HipExtStreamCreateWithCUMaskFn>(
+            library_, "hipExtStreamCreateWithCUMask");
+    api_.stream_get_cu_mask = ResolveHipSymbol<HipExtStreamGetCUMaskFn>(
+        library_, "hipExtStreamGetCUMask");
+    api_.stream_get_resource = ResolveHipSymbol<HipStreamGetDevResourceFn>(
+        library_, "hipStreamGetDevResource");
+    api_.stream_get_flags =
+        ResolveHipSymbol<HipStreamGetFlagsFn>(library_, "hipStreamGetFlags");
+    api_.stream_get_priority = ResolveHipSymbol<HipStreamGetPriorityFn>(
+        library_, "hipStreamGetPriority");
+    api_.stream_begin_capture = ResolveHipSymbol<HipStreamBeginCaptureFn>(
+        library_, "hipStreamBeginCapture");
+    api_.stream_end_capture = ResolveHipSymbol<HipStreamEndCaptureFn>(
+        library_, "hipStreamEndCapture");
+    api_.stream_is_capturing = ResolveHipSymbol<HipStreamIsCapturingFn>(
+        library_, "hipStreamIsCapturing");
+    api_.stream_destroy =
+        ResolveHipSymbol<HipStreamDestroyFn>(library_, "hipStreamDestroy");
+    api_.write_value_32 = ResolveHipSymbol<HipStreamWriteValue32Fn>(
+        library_, "hipStreamWriteValue32");
+    api_.write_value_64 = ResolveHipSymbol<HipStreamWriteValue64Fn>(
+        library_, "hipStreamWriteValue64");
+    api_.wait_value_32 = ResolveHipSymbol<HipStreamWaitValue32Fn>(
+        library_, "hipStreamWaitValue32");
+    api_.wait_value_64 = ResolveHipSymbol<HipStreamWaitValue64Fn>(
+        library_, "hipStreamWaitValue64");
+    api_.batch_mem_op = ResolveHipSymbol<HipStreamBatchMemOpFn>(
+        library_, "hipStreamBatchMemOp");
+    api_.launch_host_function =
+        ResolveHipSymbol<HipLaunchHostFuncFn>(library_, "hipLaunchHostFunc");
+    api_.launch_kernel_ex =
+        ResolveHipSymbol<HipLaunchKernelExCFn>(library_, "hipLaunchKernelExC");
+    api_.driver_launch_kernel_ex = ResolveHipSymbol<HipDrvLaunchKernelExFn>(
+        library_, "hipDrvLaunchKernelEx");
+    api_.module_launch_cooperative_kernel =
+        ResolveHipSymbol<HipModuleLaunchCooperativeKernelFn>(
+            library_, "hipModuleLaunchCooperativeKernel");
+    api_.launch_multi_device =
+        ResolveHipSymbol<HipExtLaunchMultiKernelMultiDeviceFn>(
+            library_, "hipExtLaunchMultiKernelMultiDevice");
+    api_.graph_create =
+        ResolveHipSymbol<HipGraphCreateFn>(library_, "hipGraphCreate");
+    api_.graph_add_empty_node = ResolveHipSymbol<HipGraphAddEmptyNodeFn>(
+        library_, "hipGraphAddEmptyNode");
+    api_.graph_instantiate = ResolveHipSymbol<HipGraphInstantiateFn>(
+        library_, "hipGraphInstantiate");
+    api_.graph_launch =
+        ResolveHipSymbol<HipGraphLaunchFn>(library_, "hipGraphLaunch");
+    api_.graph_exec_destroy = ResolveHipSymbol<HipGraphExecDestroyFn>(
+        library_, "hipGraphExecDestroy");
+    api_.graph_destroy =
+        ResolveHipSymbol<HipGraphDestroyFn>(library_, "hipGraphDestroy");
+    api_.event_create_with_flags = ResolveHipSymbol<HipEventCreateWithFlagsFn>(
+        library_, "hipEventCreateWithFlags");
+    api_.event_destroy =
+        ResolveHipSymbol<HipEventDestroyFn>(library_, "hipEventDestroy");
+    api_.event_record =
+        ResolveHipSymbol<HipEventRecordFn>(library_, "hipEventRecord");
+    api_.event_query =
+        ResolveHipSymbol<HipEventQueryFn>(library_, "hipEventQuery");
+    api_.event_synchronize = ResolveHipSymbol<HipEventSynchronizeFn>(
+        library_, "hipEventSynchronize");
 
     ASSERT_NE(api_.init, nullptr);
     ASSERT_NE(api_.get_device, nullptr);
@@ -576,10 +550,30 @@ class HipExecutionResourceApiTest : public testing::Test {
     ASSERT_NE(api_.event_synchronize, nullptr);
 
     ASSERT_EQ(hipSuccess, api_.init(/*flags=*/0));
+  }
+
+  static void TearDownTestSuite() {
+    if (!library_.is_open()) {
+      return;
+    }
+    const auto deinit =
+        library_.Resolve<decltype(&hipHALDeinit)>("hipHALDeinit");
+    ASSERT_NE(nullptr, deinit) << library_.error();
+    EXPECT_EQ(hipSuccess, deinit());
+    EXPECT_TRUE(library_.Close()) << library_.error();
+  }
+
+  void SetUp() override {
+    const auto get_last_error =
+        library_.Resolve<decltype(&hipGetLastError)>("hipGetLastError");
+    ASSERT_NE(nullptr, get_last_error) << library_.error();
+    (void)get_last_error();
     ASSERT_EQ(hipSuccess, api_.get_device(&device_));
   }
 
-  // Runtime entry points loaded once from the HIP shared object under test.
+  // Exact HIP artifact retained through synchronous suite shutdown.
+  static inline hrx::hip::testing::HipDso library_;
+  // Borrowed entry points resolved once before the suite initializes.
   static HipRuntimeApi api_;
 
   // Live device ordinal used by resource queries.
@@ -715,27 +709,31 @@ TEST_F(HipExecutionResourceApiTest, SplitsStructuredResourcesThroughPublicAbi) {
   ASSERT_EQ(hipSuccess, api_.device_get_resource(device_, &full_resource,
                                                  hipDevResourceTypeSm));
   ASSERT_GT(full_resource.sm.minSmPartitionSize, 0u);
-  ASSERT_GE(full_resource.sm.smCount, 3u * full_resource.sm.minSmPartitionSize);
+  const unsigned int available_partition_count =
+      full_resource.sm.smCount / full_resource.sm.minSmPartitionSize;
+  ASSERT_GT(available_partition_count, 0u);
+  const unsigned int group_count = std::min(available_partition_count, 2u);
 
   hipDevSmResourceGroupParams group_parameters[2] = {};
-  group_parameters[0].smCount = 2u * full_resource.sm.minSmPartitionSize;
+  group_parameters[0].smCount = (available_partition_count >= 3 ? 2u : 1u) *
+                                full_resource.sm.minSmPartitionSize;
   group_parameters[1].smCount = full_resource.sm.minSmPartitionSize;
   hipDevResource partitions[2];
   hipDevResource remainder;
   ASSERT_EQ(hipSuccess,
-            api_.split_sm(partitions, /*group_count=*/2, &full_resource,
-                          &remainder, /*flags=*/0, group_parameters));
+            api_.split_sm(partitions, group_count, &full_resource, &remainder,
+                          /*flags=*/0, group_parameters));
 
-  EXPECT_EQ(partitions[0].sm.smCount, group_parameters[0].smCount);
-  EXPECT_EQ(partitions[1].sm.smCount, group_parameters[1].smCount);
-  for (const auto& parameter : group_parameters) {
+  uint64_t returned_sm_count = 0;
+  for (unsigned int i = 0; i < group_count; ++i) {
+    const auto& parameter = group_parameters[i];
+    EXPECT_EQ(partitions[i].sm.smCount, parameter.smCount);
     EXPECT_EQ(parameter.coscheduledSmCount,
               full_resource.sm.smCoscheduledAlignment);
     EXPECT_EQ(parameter.preferredCoscheduledSmCount,
               parameter.coscheduledSmCount);
+    returned_sm_count += partitions[i].sm.smCount;
   }
-  uint64_t returned_sm_count =
-      partitions[0].sm.smCount + partitions[1].sm.smCount;
   if (remainder.type == hipDevResourceTypeSm) {
     returned_sm_count += remainder.sm.smCount;
   } else {
@@ -781,6 +779,28 @@ TEST_F(HipExecutionResourceApiTest, RejectsUnsupportedSplitWithoutPublishing) {
       /*flags=*/4, full_resource.sm.minSmPartitionSize, hipErrorInvalidValue);
   expect_failure_without_publication(/*flags=*/0, full_resource.sm.smCount + 1,
                                      hipErrorInvalidValue);
+
+  if (full_resource.sm.minSmPartitionSize > 1) {
+    hipDevSmResourceGroupParams parameters = {
+        .smCount = full_resource.sm.minSmPartitionSize - 1,
+    };
+    const auto expected_parameters = parameters;
+    hipDevResource partition;
+    std::memset(&partition, 0xA5, sizeof(partition));
+    const auto expected_partition = partition;
+    hipDevResource remainder;
+    std::memset(&remainder, 0x5A, sizeof(remainder));
+    const auto expected_remainder = remainder;
+    EXPECT_EQ(hipErrorInvalidResourceConfiguration,
+              api_.split_sm(&partition, 1, &full_resource, &remainder,
+                            /*flags=*/0, &parameters));
+    EXPECT_EQ(
+        0, std::memcmp(&parameters, &expected_parameters, sizeof(parameters)));
+    EXPECT_EQ(0,
+              std::memcmp(&partition, &expected_partition, sizeof(partition)));
+    EXPECT_EQ(0,
+              std::memcmp(&remainder, &expected_remainder, sizeof(remainder)));
+  }
 }
 
 TEST_F(HipExecutionResourceApiTest,
@@ -1271,10 +1291,21 @@ TEST_F(HipExecutionResourceApiTest, CreatesStreamsAtClampedHardwarePriorities) {
   ASSERT_EQ(hipSuccess,
             api_.stream_get_priority(low_priority_stream, &actual_priority));
   EXPECT_EQ(actual_priority, least_priority);
+}
 
+TEST_F(HipExecutionResourceApiTest, PriorityPreservesTheFullExecutionResource) {
   hipDevResource full_resource;
   ASSERT_EQ(hipSuccess, api_.device_get_resource(device_, &full_resource,
                                                  hipDevResourceTypeSm));
+  int greatest_priority = 0;
+  ASSERT_EQ(hipSuccess,
+            api_.device_get_stream_priority_range(nullptr, &greatest_priority));
+  hipStream_t high_priority_stream = nullptr;
+  ASSERT_EQ(hipSuccess, api_.stream_create_with_priority(&high_priority_stream,
+                                                         hipStreamNonBlocking,
+                                                         greatest_priority));
+  ScopedStream high_priority_stream_guard(high_priority_stream,
+                                          StreamDeleter{api_.stream_destroy});
   hipDevResource stream_resource;
   ASSERT_EQ(hipSuccess,
             api_.stream_get_resource(high_priority_stream, &stream_resource,

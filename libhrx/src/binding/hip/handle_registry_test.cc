@@ -114,6 +114,40 @@ TEST_F(HandleRegistryTest, RetainsEntriesAcrossGrowthAndTombstoneReuse) {
   }
 }
 
+TEST_F(HandleRegistryTest, TrimPreservesLiveEntriesAndReclaimsEmptyStorage) {
+  constexpr uintptr_t handle_count = 128;
+  for (uintptr_t handle = 1; handle <= handle_count; ++handle) {
+    IREE_ASSERT_OK(iree_hip_handle_registry_insert_value(
+        &registry_, handle, handle + handle_count));
+  }
+  for (uintptr_t handle = 2; handle <= handle_count; ++handle) {
+    EXPECT_TRUE(iree_hip_handle_registry_remove(&registry_, handle));
+  }
+  iree_hip_handle_registry_trim(&registry_);
+  uintptr_t value = 0;
+  EXPECT_TRUE(iree_hip_handle_registry_lookup_retain_value(
+      &registry_, 1, RetainValue, &value));
+  EXPECT_EQ(value, 1 + handle_count);
+  EXPECT_TRUE(iree_hip_handle_registry_remove(&registry_, 1));
+
+  iree_hip_handle_registry_trim(&registry_);
+  for (const auto& shard : registry_.shards) {
+    EXPECT_EQ(shard.handles, nullptr);
+    EXPECT_EQ(shard.values, nullptr);
+    EXPECT_EQ(shard.states, nullptr);
+    EXPECT_EQ(shard.capacity, 0u);
+    EXPECT_EQ(shard.count, 0u);
+    EXPECT_EQ(shard.tombstone_count, 0u);
+  }
+  IREE_ASSERT_OK(iree_hip_handle_registry_insert_value(&registry_, 2, 47));
+  EXPECT_FALSE(iree_hip_handle_registry_lookup_retain_value(
+      &registry_, 1, RetainValue, &value));
+  EXPECT_TRUE(iree_hip_handle_registry_lookup_retain_value(
+      &registry_, 2, RetainValue, &value));
+  EXPECT_EQ(value, 47u);
+  EXPECT_TRUE(iree_hip_handle_registry_remove(&registry_, 2));
+}
+
 TEST_F(HandleRegistryTest, ConcurrentLookupsAndRemovalRejectStaleHandles) {
   constexpr uintptr_t handle_count = 256;
   constexpr int thread_count = 8;

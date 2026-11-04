@@ -7,6 +7,7 @@
 #ifndef HRX_BINDING_HIP_STREAM_VALUE_H_
 #define HRX_BINDING_HIP_STREAM_VALUE_H_
 
+#include "common/memory.h"
 #include "iree/hal/api.h"
 
 #ifdef __cplusplus
@@ -37,6 +38,17 @@ typedef struct iree_hip_stream_value_write_params_t {
   // Parameters used when |operation| is ADD or SUBTRACT.
   iree_hal_atomic_rmw_params_t update;
 } iree_hip_stream_value_write_params_t;
+
+// Selects the coherence domain promised by the API allocation identity.
+// A private CPU mapping of device memory does not make the allocation a
+// host-shared atomic target. The caller holds the target's preparation lease.
+static inline iree_hal_atomic_flags_t iree_hip_stream_value_target_scope(
+    const iree_hal_streaming_retained_buffer_ref_t* target) {
+  return target->is_cross_context || target->owner_wrapper->memory_kind !=
+                                         IREE_HAL_STREAMING_MEMORY_KIND_DEVICE
+             ? IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE
+             : IREE_HAL_ATOMIC_FLAG_NONE;
+}
 
 // Translates one HIP write operation to generic HAL atomic parameters.
 iree_status_t iree_hip_stream_write_value_params_initialize(

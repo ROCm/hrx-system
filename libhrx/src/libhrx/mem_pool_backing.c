@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "hrx_internal.h"
+#include "iree/hal/memory/fixed_block_pool.h"
 #include "iree/hal/memory/slab_cache.h"
 
 // Default slab length for growable GPU allocation pools.
@@ -79,6 +80,7 @@ typedef enum hrx_mem_pool_source_kind_e {
   HRX_MEM_POOL_SOURCE_DEVICE = 0,
   HRX_MEM_POOL_SOURCE_UNCACHED_DEVICE,
   HRX_MEM_POOL_SOURCE_HOST,
+  HRX_MEM_POOL_SOURCE_SIGNAL,
   HRX_MEM_POOL_SOURCE_HOST_IMPORT,
   HRX_MEM_POOL_SOURCE_DEVICE_IMPORT,
 } hrx_mem_pool_source_kind_t;
@@ -97,6 +99,8 @@ static iree_hal_pool_t** hrx_mem_pool_backing_source_slot(
                             : &backing->uncached_device.ordinary;
     case HRX_MEM_POOL_SOURCE_HOST:
       return mapping_source ? &backing->host.mapping : &backing->host.ordinary;
+    case HRX_MEM_POOL_SOURCE_SIGNAL:
+      return &backing->signals;
     case HRX_MEM_POOL_SOURCE_HOST_IMPORT:
       return &backing->host_import_source;
     case HRX_MEM_POOL_SOURCE_DEVICE_IMPORT:
@@ -148,12 +152,31 @@ static iree_status_t hrx_mem_pool_backing_create_source(
       if (mapping_source) {
         family->interfaces = UINT64_C(1)
                              << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE;
+      } else {
+        family->interfaces =
+            UINT64_C(1) << (device->type == HRX_ACCELERATOR_CPU
+                                ? IREE_HAL_BUFFER_INTERFACE_HOST
+                                : IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS);
       }
       if (kind == HRX_MEM_POOL_SOURCE_UNCACHED_DEVICE) {
         family->requirements = IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED;
       } else if (kind == HRX_MEM_POOL_SOURCE_HOST ||
+                 kind == HRX_MEM_POOL_SOURCE_SIGNAL ||
                  kind == HRX_MEM_POOL_SOURCE_HOST_IMPORT) {
         family->requirements = IREE_HAL_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST;
+      }
+      if (kind == HRX_MEM_POOL_SOURCE_SIGNAL &&
+          family->family == iree_hal_queue_family(device->dispatch_queue)) {
+        const iree_hal_atomic_operation_flags_t operations =
+            IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
+            IREE_HAL_ATOMIC_OPERATION_FLAG_STORE;
+        family->atomics.queue_zero_compute =
+            (iree_hal_atomic_operation_capabilities_t){
+                .device_scope_32 = operations,
+                .device_scope_64 = operations,
+                .system_scope_32 = operations,
+                .system_scope_64 = operations,
+            };
       }
     }
   }
@@ -180,7 +203,9 @@ static iree_status_t hrx_mem_pool_backing_create_source(
     options.imports.class_count = 1;
     options.imports.classes = &import_class;
   }
-  const bool requires_host = kind == HRX_MEM_POOL_SOURCE_HOST || imports_host ||
+  const bool requires_host = kind == HRX_MEM_POOL_SOURCE_HOST ||
+                             kind == HRX_MEM_POOL_SOURCE_SIGNAL ||
+                             imports_host ||
                              (kind == HRX_MEM_POOL_SOURCE_DEVICE &&
                               device->type == HRX_ACCELERATOR_CPU);
   if (requires_host) {
@@ -222,6 +247,9 @@ static iree_status_t hrx_mem_pool_backing_create_source(
     case HRX_MEM_POOL_SOURCE_HOST:
       options.trace_name = iree_make_cstring_view("hrx-host-source");
       break;
+    case HRX_MEM_POOL_SOURCE_SIGNAL:
+      options.trace_name = iree_make_cstring_view("hrx-signal-source");
+      break;
     case HRX_MEM_POOL_SOURCE_HOST_IMPORT:
       options.trace_name = iree_make_cstring_view("hrx-host-import-source");
       break;
@@ -233,6 +261,42 @@ static iree_status_t hrx_mem_pool_backing_create_source(
       iree_hal_slab_pool_create(device->hal_device_group, scope, &options,
                                 iree_allocator_system(), out_pool);
   iree_allocator_free(iree_allocator_system(), families);
+  return status;
+}
+
+static iree_status_t hrx_mem_pool_backing_create_signal_pool(
+    hrx_device_t device, iree_hal_pool_t** out_pool) {
+  // A 4 KiB logical slab holds 512 signals. Native allocation granularity can
+  // round backing upward; per-signal reservations remain eight bytes. ASAN
+  // guards are accounted for by the fixed-block pool's backing request.
+  iree_hal_fixed_block_pool_options_t options = {
+      .block_size = sizeof(uint64_t),
+      .blocks_per_slab = 512,
+      .alignment = sizeof(uint64_t),
+      .asan = iree_hal_device_spec_sanitizer(
+                  iree_hal_device_spec(device->hal_device))
+                  ->asan.pool_options,
+      .trace_name = IREE_SV("hrx-signals"),
+  };
+  iree_hal_pool_t* source = NULL;
+  iree_status_t status = hrx_mem_pool_backing_create_source(
+      device, HRX_MEM_POOL_SOURCE_SIGNAL, HRX_BUFFER_USAGE_DEFAULT, &source);
+  iree_hal_slab_cache_options_t cache_options = {.max_count = 1};
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_fixed_block_pool_query_backing_request(
+        source, &options, &cache_options.slab);
+  }
+  iree_hal_pool_t* cache = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_slab_cache_create(source, &cache_options,
+                                        iree_allocator_system(), &cache);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_fixed_block_pool_create(
+        cache, &options, iree_allocator_system(), out_pool);
+  }
+  iree_hal_pool_release(cache);
+  iree_hal_pool_release(source);
   return status;
 }
 
@@ -304,6 +368,7 @@ void hrx_mem_pool_backing_deinitialize(hrx_mem_pool_backing_t* backing) {
   iree_hal_pool_release(backing->uncached_device.mapping);
   iree_hal_pool_release(backing->host.ordinary);
   iree_hal_pool_release(backing->host.mapping);
+  iree_hal_pool_release(backing->signals);
   iree_hal_pool_release(backing->host_import_source);
   iree_hal_pool_release(backing->device_import_source);
   iree_slim_mutex_deinitialize(&backing->mutex);
@@ -320,8 +385,10 @@ static iree_status_t hrx_mem_pool_backing_retain_source(
       hrx_mem_pool_backing_source_slot(backing, kind, usage);
   iree_status_t status = iree_ok_status();
   if (!*source_slot) {
-    status =
-        hrx_mem_pool_backing_create_source(device, kind, usage, source_slot);
+    status = kind == HRX_MEM_POOL_SOURCE_SIGNAL
+                 ? hrx_mem_pool_backing_create_signal_pool(device, source_slot)
+                 : hrx_mem_pool_backing_create_source(device, kind, usage,
+                                                      source_slot);
   }
   if (iree_status_is_ok(status)) {
     *out_pool = *source_slot;
@@ -341,6 +408,12 @@ iree_status_t hrx_mem_pool_backing_retain_allocation_source(
     kind = HRX_MEM_POOL_SOURCE_UNCACHED_DEVICE;
   }
   return hrx_mem_pool_backing_retain_source(device, kind, usage, out_pool);
+}
+
+iree_status_t hrx_mem_pool_backing_retain_signal_pool(
+    hrx_device_t device, iree_hal_pool_t** out_pool) {
+  return hrx_mem_pool_backing_retain_source(device, HRX_MEM_POOL_SOURCE_SIGNAL,
+                                            HRX_BUFFER_USAGE_DEFAULT, out_pool);
 }
 
 iree_status_t hrx_mem_pool_backing_retain_import_source(

@@ -3,6 +3,9 @@
 
 #include "hrx_internal.h"
 
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
+                           IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
+                           "virtual buffer address constraints must match HAL");
 IREE_STATIC_ASSERT_ENUM_EQ(HRX_MEMORY_SITE_HOST, IREE_HAL_MEMORY_SITE_HOST,
                            "memory sites must match HAL");
 IREE_STATIC_ASSERT_ENUM_EQ(HRX_MEMORY_SITE_QUEUE, IREE_HAL_MEMORY_SITE_QUEUE,
@@ -124,29 +127,42 @@ hrx_status_t hrx_device_query_memory_scope(hrx_device_t device,
   return hrx_status_from_iree(status);
 }
 
-// HRX's ordinary allocation classes supply the accepted backing contract.
-// Host-accessible reservations use the coherent host class; execution-only
-// reservations admit the device class of each named device. This acquires only
-// source metadata, using the same owners as later MAPPING_SOURCE allocations.
+// Acquire metadata from the same owners as later MAPPING_SOURCE allocations.
+// Virtual host access does not imply coherent host-owned physical backing.
 static iree_status_t hrx_virtual_buffer_prepare_sources(
-    hrx_virtual_buffer_scope_t scope, iree_hal_pool_t*** out_pools) {
+    iree_hal_device_group_t* group, hrx_virtual_buffer_sources_t sources,
+    iree_hal_pool_t*** out_pools) {
   *out_pools = NULL;
+  if (!sources.source_count || !sources.sources) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "reservation requires accepted backing classes");
+  }
   iree_hal_pool_t** pools = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc_array(iree_allocator_system(), scope.device_count,
+      iree_allocator_malloc_array(iree_allocator_system(), sources.source_count,
                                   sizeof(*pools), (void**)&pools));
   iree_status_t status = iree_ok_status();
-  for (size_t i = 0; i < scope.device_count && iree_status_is_ok(status); ++i) {
-    status = hrx_mem_pool_backing_retain_allocation_source(
-        scope.devices[i],
-        scope.host_access ? HRX_MEMORY_TYPE_HOST_LOCAL
-                          : HRX_MEMORY_TYPE_DEVICE_LOCAL,
-        HRX_BUFFER_USAGE_MAPPING_SOURCE, &pools[i]);
+  size_t acquired_count = 0;
+  for (size_t i = 0; i < sources.source_count && iree_status_is_ok(status);
+       ++i) {
+    const hrx_virtual_buffer_source_t* source = &sources.sources[i];
+    if (!source->device || source->device->hal_device_group != group) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "reservation source must belong to the same sealed group");
+    } else {
+      status = hrx_mem_pool_backing_retain_allocation_source(
+          source->device, source->memory_type, HRX_BUFFER_USAGE_MAPPING_SOURCE,
+          &pools[acquired_count]);
+      if (iree_status_is_ok(status)) {
+        ++acquired_count;
+      }
+    }
   }
   if (iree_status_is_ok(status)) {
     *out_pools = pools;
   } else {
-    for (size_t i = 0; i < scope.device_count; ++i) {
+    for (size_t i = 0; i < acquired_count; ++i) {
       iree_hal_pool_release(pools[i]);
     }
     iree_allocator_free(iree_allocator_system(), pools);
@@ -166,7 +182,7 @@ static void hrx_virtual_buffer_release_sources(size_t count,
 }
 
 hrx_status_t hrx_virtual_buffer_query_capabilities(
-    hrx_virtual_buffer_scope_t scope,
+    hrx_virtual_buffer_scope_t scope, hrx_virtual_buffer_sources_t sources,
     hrx_virtual_buffer_capabilities_t* out_capabilities) {
   if (!out_capabilities) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
@@ -179,12 +195,13 @@ hrx_status_t hrx_virtual_buffer_query_capabilities(
     return hrx_status_from_iree(status);
   }
   iree_hal_pool_t** source_pools = NULL;
-  status = hrx_virtual_buffer_prepare_sources(scope, &source_pools);
+  status = hrx_virtual_buffer_prepare_sources(
+      scope.devices[0]->hal_device_group, sources, &source_pools);
   iree_hal_virtual_buffer_capabilities_t capabilities = {0};
   if (iree_status_is_ok(status)) {
     status = iree_hal_virtual_buffer_query_capabilities(
         scope.devices[0]->hal_device_group, hal_scope,
-        (iree_hal_virtual_buffer_sources_t){scope.device_count, source_pools},
+        (iree_hal_virtual_buffer_sources_t){sources.source_count, source_pools},
         iree_allocator_system(), &capabilities);
   }
   if (iree_status_is_ok(status) &&
@@ -198,15 +215,16 @@ hrx_status_t hrx_virtual_buffer_query_capabilities(
         .max_alignment =
             (size_t)iree_min(capabilities.max_alignment, (SIZE_MAX >> 1) + 1),
         .operations = capabilities.operations,
+        .supported_flags = capabilities.supported_flags,
     };
   }
-  hrx_virtual_buffer_release_sources(scope.device_count, source_pools);
+  hrx_virtual_buffer_release_sources(sources.source_count, source_pools);
   iree_allocator_free(iree_allocator_system(), (void*)hal_scope.families);
   return hrx_status_from_iree(status);
 }
 
 hrx_status_t hrx_virtual_buffer_create(
-    hrx_virtual_buffer_scope_t scope,
+    hrx_virtual_buffer_scope_t scope, hrx_virtual_buffer_sources_t sources,
     const hrx_virtual_buffer_options_t* options, hrx_buffer_t* out_buffer) {
   if (!out_buffer) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
@@ -223,17 +241,19 @@ hrx_status_t hrx_virtual_buffer_create(
     return hrx_status_from_iree(status);
   }
   iree_hal_pool_t** source_pools = NULL;
-  status = hrx_virtual_buffer_prepare_sources(scope, &source_pools);
+  status = hrx_virtual_buffer_prepare_sources(
+      scope.devices[0]->hal_device_group, sources, &source_pools);
   iree_hal_buffer_t* buffer = NULL;
   const iree_hal_virtual_buffer_options_t hal_options = {
       .byte_length = options->byte_length,
       .min_alignment = options->min_alignment,
       .mapping_granularity = options->mapping_granularity,
+      .flags = options->flags,
   };
   if (iree_status_is_ok(status)) {
     status = iree_hal_virtual_buffer_create(
         scope.devices[0]->hal_device_group, hal_scope,
-        (iree_hal_virtual_buffer_sources_t){scope.device_count, source_pools},
+        (iree_hal_virtual_buffer_sources_t){sources.source_count, source_pools},
         &hal_options, iree_allocator_system(), &buffer);
   }
   if (iree_status_is_ok(status)) {
@@ -261,7 +281,7 @@ hrx_status_t hrx_virtual_buffer_create(
         buffer, device, HRX_MEMORY_TYPE_DEVICE_VISIBLE, options->byte_length,
         pointer, out_buffer);
   }
-  hrx_virtual_buffer_release_sources(scope.device_count, source_pools);
+  hrx_virtual_buffer_release_sources(sources.source_count, source_pools);
   iree_allocator_free(iree_allocator_system(), (void*)hal_scope.families);
   iree_hal_buffer_release(buffer);
   return hrx_status_from_iree(status);

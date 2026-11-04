@@ -35,11 +35,18 @@ TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
         .devices = &device_,
         .host_access = HRX_MEMORY_ACCESS_ALL,
     };
+    const hrx_virtual_buffer_source_t source_class = {
+        .device = device_,
+        .memory_type = HRX_MEMORY_TYPE_HOST_LOCAL,
+    };
     hrx_virtual_buffer_capabilities_t capabilities;
-    IREE_ASSERT_OK(hrx_status_to_iree(
-        hrx_virtual_buffer_query_capabilities(scope, &capabilities)));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_virtual_buffer_query_capabilities(
+        scope, {1, &source_class}, &capabilities)));
     ASSERT_GT(capabilities.max_byte_length, 0u);
     EXPECT_EQ(0xFu, capabilities.operations);
+    EXPECT_NE(capabilities.supported_flags &
+                  HRX_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
+              0u);
     hrx_memory_mapping_requirements_t requirements;
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_allocator_query_mapping_requirements(
         hrx_device_allocator(device_), HRX_MEMORY_TYPE_HOST_LOCAL,
@@ -52,11 +59,12 @@ TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
         .byte_length = 2 * unit,
         .min_alignment = 2 * unit,
         .mapping_granularity = unit,
+        .flags = HRX_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
     };
     std::vector<hrx_buffer_t> reservations(count);
     for (auto& reservation : reservations) {
-      IREE_ASSERT_OK(hrx_status_to_iree(
-          hrx_virtual_buffer_create(scope, &options, &reservation)));
+      IREE_ASSERT_OK(hrx_status_to_iree(hrx_virtual_buffer_create(
+          scope, {1, &source_class}, &options, &reservation)));
       hrx_virtual_buffer_info_t info;
       IREE_ASSERT_OK(hrx_status_to_iree(
           hrx_virtual_buffer_query_info(reservation, &info)));
@@ -225,23 +233,55 @@ TEST_F(CpuVirtualBufferTest, ValidatesConstructionBeforeAcquiringAddresses) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       hrx_status_to_iree(
-          hrx_virtual_buffer_query_capabilities({}, &capabilities)));
+          hrx_virtual_buffer_query_capabilities({}, {}, &capabilities)));
   EXPECT_EQ(0u, capabilities.max_byte_length);
   std::array<hrx_device_t, 2> repeated = {device_, device_};
   const hrx_virtual_buffer_scope_t scope = {
       .device_count = repeated.size(),
       .devices = repeated.data(),
   };
+  const hrx_virtual_buffer_source_t source_class = {
+      .device = device_,
+      .memory_type = HRX_MEMORY_TYPE_HOST_LOCAL,
+  };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      hrx_status_to_iree(
-          hrx_virtual_buffer_query_capabilities(scope, &capabilities)));
+      hrx_status_to_iree(hrx_virtual_buffer_query_capabilities(
+          scope, {1, &source_class}, &capabilities)));
   EXPECT_EQ(0u, capabilities.max_byte_length);
   hrx_buffer_t reservation = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         hrx_status_to_iree(hrx_virtual_buffer_create(
-                            scope, nullptr, &reservation)));
+                            scope, {1, &source_class}, nullptr, &reservation)));
   EXPECT_EQ(nullptr, reservation);
+
+  const hrx_virtual_buffer_scope_t valid_scope = {
+      .device_count = 1,
+      .devices = &device_,
+  };
+  const std::array<hrx_virtual_buffer_source_t, 2> incomplete_sources = {
+      source_class,
+      hrx_virtual_buffer_source_t{},
+  };
+  const hrx_virtual_buffer_options_t options = {.byte_length = 65536};
+  const std::array<hrx_virtual_buffer_sources_t, 4> invalid_sources = {
+      hrx_virtual_buffer_sources_t{},
+      hrx_virtual_buffer_sources_t{1, nullptr},
+      hrx_virtual_buffer_sources_t{1, &incomplete_sources[1]},
+      hrx_virtual_buffer_sources_t{incomplete_sources.size(),
+                                   incomplete_sources.data()},
+  };
+  for (const auto& sources : invalid_sources) {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        hrx_status_to_iree(hrx_virtual_buffer_query_capabilities(
+            valid_scope, sources, &capabilities)));
+    EXPECT_EQ(0u, capabilities.max_byte_length);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          hrx_status_to_iree(hrx_virtual_buffer_create(
+                              valid_scope, sources, &options, &reservation)));
+    EXPECT_EQ(nullptr, reservation);
+  }
   hrx_buffer_release(nullptr);
 }
 
@@ -250,15 +290,19 @@ TEST_F(CpuVirtualBufferTest, HostRegistrationCannotBecomeADetach) {
       .device_count = 1,
       .devices = &device_,
   };
+  const hrx_virtual_buffer_source_t source_class = {
+      .device = device_,
+      .memory_type = HRX_MEMORY_TYPE_HOST_LOCAL,
+  };
   hrx_virtual_buffer_capabilities_t capabilities;
-  IREE_ASSERT_OK(hrx_status_to_iree(
-      hrx_virtual_buffer_query_capabilities(scope, &capabilities)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_virtual_buffer_query_capabilities(
+      scope, {1, &source_class}, &capabilities)));
   const hrx_virtual_buffer_options_t options = {
       .byte_length = capabilities.reservation_granularity,
   };
   hrx_buffer_t reservation = nullptr;
-  IREE_ASSERT_OK(hrx_status_to_iree(
-      hrx_virtual_buffer_create(scope, &options, &reservation)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_virtual_buffer_create(
+      scope, {1, &source_class}, &options, &reservation)));
   std::vector<uint8_t> storage(options.byte_length);
   IREE_ASSERT_OK(hrx_status_to_iree(
       hrx_host_memory_register(device_, storage.data(), storage.size(), 0)));

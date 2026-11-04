@@ -52,6 +52,16 @@ typedef enum iree_hal_streaming_host_register_flag_bits_e {
   IREE_HAL_STREAMING_HOST_REGISTER_FLAG_HIP_NON_COHERENT = 1ull << 31,
 } iree_hal_streaming_host_register_flags_t;
 
+// API allocation identity, independent of physical placement or CPU mapping.
+typedef enum iree_hal_streaming_memory_kind_e {
+  // Device allocations, pools, executable globals, and virtual reservations.
+  IREE_HAL_STREAMING_MEMORY_KIND_DEVICE = 0,
+  // Owned or registered host allocations, including internal host staging.
+  IREE_HAL_STREAMING_MEMORY_KIND_HOST = 1,
+  // Managed allocations and imported managed variables.
+  IREE_HAL_STREAMING_MEMORY_KIND_MANAGED = 2,
+} iree_hal_streaming_memory_kind_t;
+
 // Describes how a streaming buffer wrapper keeps its context alive.
 typedef enum iree_hal_streaming_buffer_context_ownership_e {
   // The containing context owns the wrapper and must outlive it.
@@ -111,7 +121,8 @@ typedef struct iree_hal_streaming_buffer_t {
   // True while this pool-backed buffer contributes to logical pool usage.
   bool is_pool_allocation_live;
 
-  // Platform-specific memory type.
+  // Actual HAL memory capabilities; unified memory may be host and device
+  // local.
   int memory_type;
 
   // Host registration flags (if registered host memory).
@@ -120,8 +131,8 @@ typedef struct iree_hal_streaming_buffer_t {
   // True when host memory was imported by registration rather than allocated.
   bool imported_host_allocation;
 
-  // True when the allocation was created by hipMallocManaged.
-  bool is_managed;
+  // Immutable allocation identity established before buffer-table publication.
+  iree_hal_streaming_memory_kind_t memory_kind;
 
   // Coordinates operation preparation leases with allocation teardown.
   iree_hal_streaming_allocation_preparation_t preparation;
@@ -234,6 +245,13 @@ typedef enum iree_hal_streaming_memory_flag_bits_e {
 // Synchronization: none (returns pointer value).
 iree_hal_streaming_deviceptr_t iree_hal_streaming_buffer_device_pointer(
     iree_hal_streaming_buffer_t* buffer);
+
+// Finds an allocation by device or host alias without an error for a miss.
+// The returned wrapper is borrowed; the caller keeps its allocation alive.
+bool iree_hal_streaming_memory_try_lookup(
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_deviceptr_t pointer,
+    iree_hal_streaming_buffer_ref_t* out_ref);
 
 // Looks up a buffer by device pointer.
 // Returns a borrowed reference to the buffer (does not transfer ownership).
@@ -361,10 +379,6 @@ iree_status_t iree_hal_streaming_memory_import_managed(
 iree_status_t iree_hal_streaming_memory_free_host(
     iree_hal_streaming_context_t* context, void* ptr);
 
-// Synchronization: none; called during context destruction after streams idle.
-void iree_hal_streaming_memory_release_pageable_staging(
-    iree_hal_streaming_context_t* context);
-
 // Wraps an existing HAL buffer and registers it in the context pointer map.
 // The wrapper retains |buffer| for HRX interop, but callers must still ensure
 // the backing owner remains live for the duration required by the HAL API.
@@ -394,6 +408,10 @@ iree_status_t iree_hal_streaming_memory_host_flags(
     iree_hal_streaming_context_t* context, void* ptr,
     iree_hal_streaming_host_register_flags_t* out_flags);
 
+// With a stream these helpers may append to its current recording so a
+// frontend can batch rows/chunks within one API operation. The frontend must
+// flush after the complete non-captured operation and before returning success.
+// Flush transfers ownership to the queue; it does not wait for completion.
 // Synchronization: stream or blocking (async if stream, sync if NULL stream).
 iree_status_t iree_hal_streaming_memory_memset(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
@@ -415,21 +433,17 @@ iree_status_t iree_hal_streaming_memcpy_peer(
     iree_hal_streaming_deviceptr_t src, iree_device_size_t size,
     iree_hal_streaming_stream_t* stream);
 
-// Memory copy helpers for different transfer types.
-// Synchronization: stream or blocking (async if stream, sync if NULL stream).
+// Outside capture, registered sources and small pageable snapshots remain
+// asynchronous when a stream is supplied. Large pageable sources stay borrowed
+// through a blocking transfer. NULL-stream copies complete on the caller.
 iree_status_t iree_hal_streaming_memcpy_host_to_device(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
     const void* src, iree_device_size_t size,
     iree_hal_streaming_stream_t* stream);
 
-// Copies immediate value bytes into graph-owned storage during capture so the
-// caller storage need not outlive this call.
-iree_status_t iree_hal_streaming_memcpy_value_to_device(
-    iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
-    const void* src, iree_device_size_t size,
-    iree_hal_streaming_stream_t* stream);
-
-// Synchronization: stream or blocking (async if stream, sync if NULL stream).
+// Outside capture, registered host destinations remain asynchronous when a
+// stream is supplied. Unregistered host destinations and NULL-stream copies
+// complete on the caller.
 iree_status_t iree_hal_streaming_memcpy_device_to_host(
     iree_hal_streaming_context_t* context, void* dst,
     iree_hal_streaming_deviceptr_t src, iree_device_size_t size,
@@ -482,27 +496,27 @@ iree_status_t iree_hal_streaming_memory_allocate_host_staging(
     iree_hal_streaming_context_t* context, iree_host_size_t size,
     iree_hal_streaming_buffer_t** out_buffer);
 
-// Enqueues a pitched H2D copy as one command-buffer transaction.
-// Synchronization: stream-ordered.
+// Enqueues registered H2D rows in one stream-ordered transfer batch.
+// Unregistered sources are snapshotted while recording before returning.
 iree_status_t iree_hal_streaming_memcpy_host_to_device_2d(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
     iree_device_size_t dst_pitch, const void* src, iree_device_size_t src_pitch,
     iree_device_size_t width, iree_host_size_t height,
     iree_hal_streaming_stream_t* stream);
 
-// Enqueues a pitched D2H copy through queue-visible staging. A stream-ordered
-// host call scatters the packed staging rows into |dst| after the device copies
-// complete.
-// Synchronization: stream-ordered.
+// Copies a pitched D2H region. Registered host destinations use asynchronous
+// copies into the destination buffer with one system visibility boundary.
+// Unregistered host destinations complete on the caller through one
+// stream-ordered transfer batch.
 iree_status_t iree_hal_streaming_memcpy_device_to_host_2d(
     iree_hal_streaming_context_t* context, void* dst,
     iree_device_size_t dst_pitch, iree_hal_streaming_deviceptr_t src,
     iree_device_size_t src_pitch, iree_device_size_t width,
     iree_host_size_t height, iree_hal_streaming_stream_t* stream);
 
-// Enqueues a pitched D2D copy as one command-buffer transaction.
-// Synchronization: stream-ordered. If recording fails after accepting any
-// rows, the accepted prefix completes before the original error is returned.
+// Enqueues a pitched D2D copy as one stream-ordered transfer batch. Every row
+// is validated before acceptance. A post-accept flush error joins the batch
+// before returning.
 iree_status_t iree_hal_streaming_memcpy_device_to_device_2d(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
     iree_device_size_t dst_pitch, iree_hal_streaming_deviceptr_t src,

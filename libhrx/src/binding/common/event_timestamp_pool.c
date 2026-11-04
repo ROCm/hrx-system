@@ -174,9 +174,9 @@ static iree_status_t iree_hal_streaming_event_timestamp_pool_grow(
 }
 
 // Moves every pending slot whose device write has retired onto the free list.
-// Called with |pool->mutex| held. A failed semaphore counts as retired: the
-// queue that would have made the write is in a failure state, so none is
-// coming.
+// Called with |pool->mutex| held. A failed public semaphore does not prove that
+// an accepted device write has stopped. Its slot remains pending until
+// teardown.
 static void iree_hal_streaming_event_timestamp_pool_drain_pending(
     iree_hal_streaming_event_timestamp_pool_t* pool) {
   iree_hal_streaming_event_timestamp_slot_t* slot = pool->pending_slots;
@@ -187,7 +187,7 @@ static void iree_hal_streaming_event_timestamp_pool_drain_pending(
     iree_status_t status =
         iree_hal_semaphore_query(slot->retire_semaphore, &current_value);
     const bool write_retired =
-        !iree_status_is_ok(status) || current_value >= slot->retire_value;
+        iree_status_is_ok(status) && current_value >= slot->retire_value;
     iree_status_ignore(status);
     if (write_retired) {
       iree_hal_semaphore_release(slot->retire_semaphore);
@@ -263,7 +263,7 @@ void iree_hal_streaming_event_timestamp_slot_release(
     uint64_t current_value = 0;
     iree_status_t status =
         iree_hal_semaphore_query(retire_semaphore, &current_value);
-    write_retired = !iree_status_is_ok(status) || current_value >= retire_value;
+    write_retired = iree_status_is_ok(status) && current_value >= retire_value;
     iree_status_ignore(status);
   }
 

@@ -82,7 +82,7 @@ iree_status_t iree_hip_stream_wait_value_params_initialize(
   *out_params = (iree_hal_atomic_wait_params_t){
       .value = value,
       .mask = mask,
-      .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE,
+      .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE,
       .width = width,
       .target_error_mode = IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE,
   };

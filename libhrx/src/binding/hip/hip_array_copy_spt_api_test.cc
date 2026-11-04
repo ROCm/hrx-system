@@ -125,6 +125,8 @@ struct HipRuntimeApi {
   HipHrxSetArrayLeaseObserverForTestingFn set_array_lease_observer = nullptr;
   // Initializes the exact runtime under test.
   HipInitFn init = nullptr;
+  // Synchronously destroys runtime services before the fixture unloads its DSO.
+  hipError_t (*hal_deinit)() = nullptr;
   // Queries devices available to the exact runtime under test.
   HipGetDeviceCountFn get_device_count = nullptr;
   // Selects the current device for the calling thread.
@@ -209,6 +211,7 @@ class HipArrayCopySptApiTest : public testing::Test {
   api_.field = dso_.Resolve<decltype(api_.field)>(symbol); \
   ASSERT_NE(nullptr, api_.field) << dso_.error()
     HRX_RESOLVE_HIP_FIELD(init, "hipInit");
+    HRX_RESOLVE_HIP_FIELD(hal_deinit, "hipHALDeinit");
     HRX_RESOLVE_HIP_FIELD(set_array_lease_observer,
                           "hipHRXSetArrayLeaseObserverForTesting");
     HRX_RESOLVE_HIP_FIELD(get_device_count, "hipGetDeviceCount");
@@ -253,6 +256,16 @@ class HipArrayCopySptApiTest : public testing::Test {
     HRX_RESOLVE_HIP_FIELD(graph_destroy, "hipGraphDestroy");
 #undef HRX_RESOLVE_HIP_FIELD
     ASSERT_EQ(hipSuccess, api_.init(/*flags=*/0));
+  }
+
+  static void TearDownTestSuite() {
+    if (!dso_.is_open()) {
+      return;
+    }
+    ASSERT_NE(nullptr, api_.hal_deinit);
+    EXPECT_EQ(hipSuccess, api_.hal_deinit());
+    api_ = {};
+    EXPECT_TRUE(dso_.Close()) << dso_.error();
   }
 
   void TearDown() override {
@@ -719,12 +732,23 @@ void WaitForRelease(void* user_data) {
 }
 
 struct CountedWaitGate {
+  explicit CountedWaitGate(int target_count) : target_count(target_count) {}
+
+  // Returning before the target observer is a failed test outcome, not a wait
+  // for an observer that can no longer run.
+  void NotifyReturned() { ready.Post(); }
+
+  bool WaitUntilEnteredOrReturned() {
+    ready.Wait();
+    return count.load(std::memory_order_acquire) >= target_count;
+  }
+
   // Observer invocation that represents the post-lookup copy boundary.
-  int target_count = 0;
+  const int target_count;
   // Total observer invocations reached.
   std::atomic<int> count = 0;
-  // Posted when |target_count| is reached.
-  TestNotification entered;
+  // Posted when the target observer enters or the copy operation returns.
+  TestNotification ready;
   // Posted by the test to let the target invocation return.
   TestNotification release;
 };
@@ -735,8 +759,33 @@ void WaitForTargetCount(void* user_data) {
   if (count != gate->target_count) {
     return;
   }
-  gate->entered.Post();
+  gate->ready.Post();
   gate->release.Wait();
+}
+
+TEST(ArrayCopyLeaseGateTest, EarlyOperationReturnWakesObserverWaiter) {
+  CountedWaitGate gate(2);
+  std::thread operation([&] {
+    WaitForTargetCount(&gate);
+    gate.NotifyReturned();
+  });
+  EXPECT_FALSE(gate.WaitUntilEnteredOrReturned());
+  gate.release.Post();
+  operation.join();
+  EXPECT_EQ(gate.count, 1);
+}
+
+TEST(ArrayCopyLeaseGateTest, TargetObserverRemainsHeldUntilReleased) {
+  CountedWaitGate gate(2);
+  std::thread operation([&] {
+    WaitForTargetCount(&gate);
+    WaitForTargetCount(&gate);
+    gate.NotifyReturned();
+  });
+  EXPECT_TRUE(gate.WaitUntilEnteredOrReturned());
+  EXPECT_EQ(gate.count, 2);
+  gate.release.Post();
+  operation.join();
 }
 
 TEST_F(HipArrayCopySptApiTest, StridedCopyWaitsForLegacyProducer) {
@@ -911,18 +960,21 @@ TEST_F(HipArrayCopySptApiTest, ContiguousCopyWaitsForLegacyProducer) {
 
 TEST_F(HipArrayCopySptApiTest, PageableCopiesWaitOnlyForTheirSelectedStream) {
   constexpr size_t kWidth = 8;
-  AllocateArray(kWidth, 1);
-  AllocateHost(kWidth);
+  constexpr size_t kHeight = 3;
+  constexpr size_t kPitchedWidth = kWidth + 3;
+  constexpr size_t kSize = kWidth * kHeight;
+  AllocateArray(kWidth, kHeight);
+  AllocateHost(kSize);
   auto* source = static_cast<uint8_t*>(host_pointer_);
-  for (size_t i = 0; i < kWidth; ++i) {
+  for (size_t i = 0; i < kSize; ++i) {
     source[i] = static_cast<uint8_t>(i + 1);
   }
-  ASSERT_EQ(hipSuccess, api_.malloc(&device_pointer_, kWidth));
-  ASSERT_EQ(hipSuccess, api_.memcpy(device_pointer_, source, kWidth,
-                                    hipMemcpyHostToDevice));
+  ASSERT_EQ(hipSuccess, api_.malloc(&device_pointer_, kSize));
   ASSERT_EQ(hipSuccess,
-            api_.memcpy_2d_to_array_spt(array_, 0, 0, source, kWidth, kWidth, 1,
-                                        hipMemcpyHostToDevice));
+            api_.memcpy(device_pointer_, source, kSize, hipMemcpyHostToDevice));
+  ASSERT_EQ(hipSuccess,
+            api_.memcpy_2d_to_array_spt(array_, 0, 0, source, kWidth, kWidth,
+                                        kHeight, hipMemcpyHostToDevice));
 
   // A non-default priority selects a distinct hardware queue. This keeps the
   // blocked callback from physically obstructing the default queue while
@@ -935,29 +987,37 @@ TEST_F(HipArrayCopySptApiTest, PageableCopiesWaitOnlyForTheirSelectedStream) {
             api_.launch_host_function(stream_, WaitForRelease, &gate));
   gate.entered.Wait();
 
-  std::array<uint8_t, kWidth> generic_destination = {};
+  std::array<uint8_t, kSize> generic_destination = {};
   hipMemcpy3DParms parameters = {};
   parameters.srcPtr.ptr = device_pointer_;
   parameters.srcPtr.pitch = kWidth;
   parameters.srcPtr.xsize = kWidth;
-  parameters.srcPtr.ysize = 1;
+  parameters.srcPtr.ysize = kHeight;
   parameters.dstPtr.ptr = generic_destination.data();
   parameters.dstPtr.pitch = kWidth;
   parameters.dstPtr.xsize = kWidth;
-  parameters.dstPtr.ysize = 1;
-  parameters.extent = {.width = kWidth, .height = 1, .depth = 1};
+  parameters.dstPtr.ysize = kHeight;
+  parameters.extent = {.width = kWidth, .height = kHeight, .depth = 1};
   parameters.kind = hipMemcpyDeviceToHost;
   EXPECT_EQ(hipSuccess, api_.memcpy_3d_async(&parameters, nullptr));
 
-  std::array<uint8_t, kWidth> array_destination = {};
-  EXPECT_EQ(hipSuccess, api_.memcpy_2d_from_array_async_spt(
-                            array_destination.data(), kWidth, array_, 0, 0,
-                            kWidth, 1, hipMemcpyDeviceToHost, hipStreamLegacy));
+  std::array<uint8_t, kPitchedWidth * kHeight> array_destination;
+  array_destination.fill(0xcd);
+  EXPECT_EQ(hipSuccess,
+            api_.memcpy_2d_from_array_async_spt(
+                array_destination.data(), kPitchedWidth, array_, 0, 0, kWidth,
+                kHeight, hipMemcpyDeviceToHost, hipStreamLegacy));
 
   gate.release.Post();
   ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
-  EXPECT_EQ(0, std::memcmp(source, generic_destination.data(), kWidth));
-  EXPECT_EQ(0, std::memcmp(source, array_destination.data(), kWidth));
+  EXPECT_EQ(0, std::memcmp(source, generic_destination.data(), kSize));
+  for (size_t row = 0; row < kHeight; ++row) {
+    const auto* destination = array_destination.data() + row * kPitchedWidth;
+    EXPECT_EQ(0, std::memcmp(source + row * kWidth, destination, kWidth));
+    for (size_t column = kWidth; column < kPitchedWidth; ++column) {
+      EXPECT_EQ(destination[column], 0xcd);
+    }
+  }
 }
 
 TEST_F(HipArrayCopySptApiTest, NoOpAndDeviceCopyDoNotDrainPerThreadStream) {
@@ -1195,9 +1255,9 @@ TEST_F(HipArrayCopySptApiTest,
             api_.launch_host_function(stream_, WaitForRelease, &callback_gate));
   callback_gate.entered.Wait();
 
-  WaitGate lease_gate;
+  CountedWaitGate lease_gate(1);
   ASSERT_EQ(hipSuccess,
-            api_.set_array_lease_observer(WaitForRelease, &lease_gate));
+            api_.set_array_lease_observer(WaitForTargetCount, &lease_gate));
   TestNotification copy_returned;
   TestNotification free_started;
   TestNotification free_returned;
@@ -1208,10 +1268,19 @@ TEST_F(HipArrayCopySptApiTest,
     copy_result = api_.memcpy_2d_from_array_async_spt(
         destination, kWidth, array, 0, 0, kWidth, 1, hipMemcpyDeviceToHost,
         stream_);
+    lease_gate.NotifyReturned();
     copy_returned.Post();
   });
 
-  lease_gate.entered.Wait();
+  const bool lease_entered = lease_gate.WaitUntilEnteredOrReturned();
+  EXPECT_TRUE(lease_entered) << "copy returned " << copy_result;
+  if (!lease_entered) {
+    callback_gate.release.Post();
+    copy_thread.join();
+    EXPECT_EQ(hipSuccess, api_.set_array_lease_observer(nullptr, nullptr));
+    EXPECT_EQ(hipSuccess, api_.stream_synchronize(stream_));
+    return;
+  }
 
   std::thread free_thread([&] {
     free_started.Post();
@@ -1266,8 +1335,7 @@ TEST_F(HipArrayCopySptApiTest,
     }
     std::memset(destination, 0, kWidth);
 
-    CountedWaitGate lease_gate;
-    lease_gate.target_count = 2;
+    CountedWaitGate lease_gate(2);
     ASSERT_EQ(hipSuccess,
               api_.set_array_lease_observer(WaitForTargetCount, &lease_gate));
     hipError_t copy_result = hipErrorUnknown;
@@ -1286,9 +1354,17 @@ TEST_F(HipArrayCopySptApiTest,
           copy_result = api_.memcpy_atod(device_pointer_, array, 0, kWidth);
           break;
       }
+      lease_gate.NotifyReturned();
     });
 
-    lease_gate.entered.Wait();
+    const bool lease_entered = lease_gate.WaitUntilEnteredOrReturned();
+    EXPECT_TRUE(lease_entered) << "copy returned " << copy_result;
+    if (!lease_entered) {
+      copy_thread.join();
+      EXPECT_EQ(hipSuccess, api_.set_array_lease_observer(nullptr, nullptr));
+      EXPECT_EQ(hipSuccess, api_.free_array(array));
+      continue;
+    }
 
     TestNotification free_started;
     TestNotification free_returned;
@@ -1347,8 +1423,7 @@ TEST_F(HipArrayCopySptApiTest,
 
     WaitGate callback_gate;
 
-    CountedWaitGate lease_gate;
-    lease_gate.target_count = 2;
+    CountedWaitGate lease_gate(2);
     ASSERT_EQ(hipSuccess,
               api_.set_array_lease_observer(WaitForTargetCount, &lease_gate));
     TestNotification copy_returned;
@@ -1358,10 +1433,19 @@ TEST_F(HipArrayCopySptApiTest,
           array_is_source
               ? api_.memcpy_atoh_async(destination, array, 0, kWidth, stream)
               : api_.memcpy_htoa_async(array, 0, source, kWidth, stream);
+      lease_gate.NotifyReturned();
       copy_returned.Post();
     });
 
-    lease_gate.entered.Wait();
+    const bool lease_entered = lease_gate.WaitUntilEnteredOrReturned();
+    EXPECT_TRUE(lease_entered) << "copy returned " << copy_result;
+    if (!lease_entered) {
+      copy_thread.join();
+      EXPECT_EQ(hipSuccess, api_.set_array_lease_observer(nullptr, nullptr));
+      EXPECT_EQ(hipSuccess, api_.free_array(array));
+      EXPECT_EQ(hipSuccess, api_.stream_destroy(stream));
+      continue;
+    }
 
     TestNotification free_started;
     TestNotification free_returned;
@@ -1374,9 +1458,14 @@ TEST_F(HipArrayCopySptApiTest,
     free_started.Wait();
     EXPECT_FALSE(free_returned.IsPosted());
 
-    ASSERT_EQ(hipSuccess, api_.launch_host_function(stream, WaitForRelease,
-                                                    &callback_gate));
-    callback_gate.entered.Wait();
+    const hipError_t launch_result =
+        api_.launch_host_function(stream, WaitForRelease, &callback_gate);
+    EXPECT_EQ(hipSuccess, launch_result);
+    if (launch_result == hipSuccess) {
+      callback_gate.entered.Wait();
+    } else {
+      callback_gate.release.Post();
+    }
 
     lease_gate.release.Post();
     copy_returned.Wait();
@@ -1411,17 +1500,25 @@ TEST_F(HipArrayCopySptApiTest, LegacyAtoAHoldsBothArrayLeasesThroughDispatch) {
   ASSERT_EQ(hipSuccess,
             api_.malloc_array(&destination_array, &descriptor, kWidth, 1, 0));
 
-  CountedWaitGate lease_gate;
-  lease_gate.target_count = 3;
+  CountedWaitGate lease_gate(3);
   ASSERT_EQ(hipSuccess,
             api_.set_array_lease_observer(WaitForTargetCount, &lease_gate));
   hipError_t copy_result = hipErrorUnknown;
   std::thread copy_thread([&] {
     copy_result =
         api_.memcpy_atoa(destination_array, 0, source_array, 0, kWidth);
+    lease_gate.NotifyReturned();
   });
 
-  lease_gate.entered.Wait();
+  const bool lease_entered = lease_gate.WaitUntilEnteredOrReturned();
+  EXPECT_TRUE(lease_entered) << "copy returned " << copy_result;
+  if (!lease_entered) {
+    copy_thread.join();
+    EXPECT_EQ(hipSuccess, api_.set_array_lease_observer(nullptr, nullptr));
+    EXPECT_EQ(hipSuccess, api_.free_array(source_array));
+    EXPECT_EQ(hipSuccess, api_.free_array(destination_array));
+    return;
+  }
 
   TestNotification source_free_started;
   TestNotification destination_free_started;

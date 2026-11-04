@@ -13,15 +13,21 @@ extern hrx_device_t g_test_device;
 extern hrx_accelerator_type_t g_test_device_type;
 extern std::string g_test_hip_library_path;
 
+// Reports and consumes a failed status, marking the process unsuccessful even
+// when no Catch assertion can run. Safe during fixture destruction.
+void ReportHrxTestFailure(const char* context, hrx_status_t status) noexcept;
+
 class HrxTestFixture {
  protected:
+  // Borrowed device owned by the CTS process until accelerator shutdown.
   hrx_device_t device_ = nullptr;
 
   HrxTestFixture() { device_ = g_test_device; }
 
   ~HrxTestFixture() {
     if (device_) {
-      hrx().device_synchronize(device_);
+      ReportHrxTestFailure("Fixture device synchronization",
+                           hrx().device_synchronize(device_));
     }
   }
 
@@ -30,18 +36,13 @@ class HrxTestFixture {
 };
 
 // Convenience: check hrx_status_t in tests.
-#define REQUIRE_OK(expr)                        \
-  do {                                          \
-    hrx_status_t _s = (expr);                   \
-    if (!hrx_status_is_ok(_s)) {                \
-      char* msg = nullptr;                      \
-      size_t len = 0;                           \
-      hrx().status_to_string(_s, &msg, &len);   \
-      INFO("hrx error: " << (msg ? msg : "?")); \
-      hrx().status_free_message(msg);           \
-      hrx().status_ignore(_s);                  \
-      REQUIRE(false);                           \
-    }                                           \
+#define REQUIRE_OK(expr)               \
+  do {                                 \
+    hrx_status_t _s = (expr);          \
+    if (!hrx_status_is_ok(_s)) {       \
+      ReportHrxTestFailure(#expr, _s); \
+      REQUIRE(false);                  \
+    }                                  \
   } while (0)
 
 #endif  // HRX_CTS_TEST_FIXTURE_HPP

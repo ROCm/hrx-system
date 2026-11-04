@@ -6,22 +6,19 @@
 #include "hrx_internal.h"
 
 iree_status_t hrx_hal_queue_transfer_and_wait(
-    hrx_device_t device, iree_host_size_t operation_count,
-    const iree_hal_transfer_operation_t* operations) {
-  IREE_ASSERT_ARGUMENT(device);
+    iree_hal_queue_t* queue, iree_host_size_t operation_count,
+    const iree_hal_transfer_operation_t* operations,
+    iree_async_wait_flags_t wait_flags) {
+  IREE_ASSERT_ARGUMENT(queue);
   IREE_ASSERT_ARGUMENT(operation_count == 0 || operations);
 
-  iree_hal_queue_t* queue = device->transfer_queue;
-  if (IREE_UNLIKELY(!queue)) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "HRX device has no transfer queue");
-  }
-
+  const iree_hal_queue_family_t* family = iree_hal_queue_family(queue);
   const iree_hal_queue_family_ordinal_t family_ordinal =
-      iree_hal_queue_family_ordinal(iree_hal_queue_family(queue));
+      iree_hal_queue_family_ordinal(family);
   iree_hal_semaphore_t* semaphore = NULL;
   iree_status_t status = iree_hal_semaphore_create(
-      device->hal_device, iree_hal_make_queue_family_affinity(family_ordinal),
+      iree_hal_queue_family_device(family),
+      iree_hal_make_queue_family_affinity(family_ordinal),
       /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore);
   uint64_t signal_value = 1;
   const iree_hal_semaphore_list_t signal_semaphores = {
@@ -36,8 +33,7 @@ iree_status_t hrx_hal_queue_transfer_and_wait(
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_semaphore_wait(semaphore, signal_value,
-                                     iree_infinite_timeout(),
-                                     IREE_ASYNC_WAIT_FLAG_NONE);
+                                     iree_infinite_timeout(), wait_flags);
   }
   iree_hal_semaphore_release(semaphore);
   return status;
@@ -111,8 +107,9 @@ hrx_status_t hrx_synchronous_h2d(hrx_device_t device, const void* host_src,
           },
   };
   HRX_RETURN_AND_END_ZONE(
-      z0, hrx_status_from_iree(
-              hrx_hal_queue_transfer_and_wait(device, 1, &operation)));
+      z0,
+      hrx_status_from_iree(hrx_hal_queue_transfer_and_wait(
+          device->transfer_queue, 1, &operation, IREE_ASYNC_WAIT_FLAG_NONE)));
 }
 
 hrx_status_t hrx_synchronous_d2h(hrx_device_t device, hrx_buffer_t src,
@@ -146,8 +143,9 @@ hrx_status_t hrx_synchronous_d2h(hrx_device_t device, hrx_buffer_t src,
           },
   };
   HRX_RETURN_AND_END_ZONE(
-      z0, hrx_status_from_iree(
-              hrx_hal_queue_transfer_and_wait(device, 1, &operation)));
+      z0,
+      hrx_status_from_iree(hrx_hal_queue_transfer_and_wait(
+          device->transfer_queue, 1, &operation, IREE_ASYNC_WAIT_FLAG_NONE)));
 }
 
 //===----------------------------------------------------------------------===//

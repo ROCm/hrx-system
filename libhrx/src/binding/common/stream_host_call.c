@@ -4,26 +4,11 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "common/device.h"
 #include "common/graph.h"
+#include "common/host_callback.h"
 #include "common/stream.h"
-
-// Captured HIP callback adapted to the HAL host-call ABI.
-typedef struct iree_hal_streaming_host_callback_t {
-  // User callback invoked at the stream timeline point.
-  void (*fn)(void* user_data);
-  // Opaque argument passed to |fn|.
-  void* user_data;
-} iree_hal_streaming_host_callback_t;
-
-static iree_status_t iree_hal_streaming_host_callback_thunk(
-    void* user_data, const uint64_t args[4],
-    iree_hal_host_call_context_t* context) {
-  iree_hal_streaming_host_callback_t* callback =
-      (iree_hal_streaming_host_callback_t*)user_data;
-  callback->fn(callback->user_data);
-  iree_allocator_free(iree_allocator_system(), callback);
-  return iree_ok_status();
-}
+#include "common/stream_queue.h"
 
 typedef struct iree_hal_streaming_capture_host_function_t {
   void (*fn)(void* user_data);
@@ -63,16 +48,16 @@ iree_status_t iree_hal_streaming_queue_host_call(
         .semaphores = &stream->timeline_semaphore,
         .payload_values = &wait_value,
     };
-    const iree_hal_semaphore_list_t signal_semaphores = {
-        .count = 1,
-        .semaphores = &stream->timeline_semaphore,
-        .payload_values = &signal_value,
-    };
-    status = iree_hal_queue_host_call(stream->queue, wait_semaphores,
-                                      signal_semaphores, call, args, flags);
+    iree_hal_streaming_submission_t submission;
+    status = iree_hal_streaming_submission_prepare_locked(
+        stream, stream->queue, signal_value,
+        IREE_HAL_STREAMING_SUBMISSION_FLAG_NONE, &submission);
     if (iree_status_is_ok(status)) {
-      stream->pending_value = signal_value;
+      status = iree_hal_queue_host_call(submission.queue, wait_semaphores,
+                                        submission.signals, call, args, flags);
     }
+    iree_hal_streaming_submission_finish_locked(stream, &submission,
+                                                iree_status_is_ok(status));
   }
   iree_slim_mutex_unlock(&stream->mutex);
 
@@ -100,21 +85,17 @@ iree_status_t iree_hal_streaming_launch_host_function(
     return iree_ok_status();
   }
 
-  iree_hal_streaming_host_callback_t* callback = NULL;
+  iree_hal_host_call_t call;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(iree_allocator_system(), sizeof(*callback),
-                                (void**)&callback));
-  callback->fn = fn;
-  callback->user_data = user_data;
+      z0, iree_hal_streaming_host_callback_prepare(
+              stream->context->device_entry->host_callbacks,
+              iree_hal_streaming_make_host_function(fn), user_data,
+              /*user_data_size=*/0, /*resource=*/NULL, &call));
 
   const uint64_t args[4] = {0, 0, 0, 0};
-  const iree_hal_host_call_t call =
-      iree_hal_make_host_call(iree_hal_streaming_host_callback_thunk, callback);
   iree_status_t status = iree_hal_streaming_queue_host_call(
       stream, call, args, IREE_HAL_HOST_CALL_FLAG_NONE);
-  if (!iree_status_is_ok(status)) {
-    iree_allocator_free(iree_allocator_system(), callback);
-  }
+  iree_hal_resource_release(call.resource);
 
   IREE_TRACE_ZONE_END(z0);
   return status;

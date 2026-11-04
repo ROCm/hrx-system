@@ -258,6 +258,37 @@ hrx_status_t hrx_buffer_get_device_ptr(hrx_buffer_t buffer, void** device_ptr) {
                                             "buffer has no device address"));
   }
 
+  const iree_hal_buffer_memory_view_t memory =
+      iree_hal_buffer_memory_view(buffer->hal_buffer);
+  if (memory.contract && buffer->device) {
+    const iree_hal_queue_family_t* family =
+        iree_hal_queue_family(buffer->device->dispatch_queue);
+    const uint32_t scope_id = family->memory.queue_scope_id + 1;
+    const iree_hal_buffer_interface_t type =
+        buffer->device->type == HRX_ACCELERATOR_CPU
+            ? IREE_HAL_BUFFER_INTERFACE_HOST
+            : IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS;
+    if (memory.contract->domain != family->memory.domain ||
+        scope_id >= memory.contract->scope_count ||
+        !iree_any_bit_set(memory.contract->scopes[scope_id].interfaces,
+                          UINT32_C(1) << type)) {
+      HRX_RETURN_AND_END_ZONE(
+          z0, hrx_make_status(HRX_STATUS_UNAVAILABLE,
+                              "buffer has no address for its HRX device"));
+    }
+    const iree_hal_buffer_native_binding_slot_t slot = {
+        .index = memory.contract->scopes[scope_id].bindings[type],
+        .type = type,
+    };
+    const iree_hal_buffer_native_binding_t binding =
+        iree_hal_buffer_memory_native_binding(&memory, slot);
+    *device_ptr = type == IREE_HAL_BUFFER_INTERFACE_HOST
+                      ? binding.host_pointer
+                      : (void*)(uintptr_t)binding.device_address;
+    HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
+  }
+
+  // Unscoped legacy allocator buffers expose their address through export.
   // A scoped mapping grants access only to its interval and cannot provide a
   // whole-buffer device address. Native export leaves any active map untouched.
   iree_hal_external_storage_t external_buffer = {0};

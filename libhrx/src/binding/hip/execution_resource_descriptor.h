@@ -73,6 +73,9 @@ bool iree_hip_execution_resource_descriptor_take(
 void iree_hip_execution_resource_descriptor_release(
     iree_hip_execution_resource_descriptor_t* descriptor);
 
+// Reclaims empty public-handle tables after runtime teardown.
+void iree_hip_execution_resource_descriptor_trim(void);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

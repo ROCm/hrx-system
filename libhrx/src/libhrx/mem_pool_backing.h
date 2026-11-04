@@ -45,6 +45,8 @@ typedef struct hrx_mem_pool_backing_t {
   hrx_mem_pool_sources_t uncached_device;
   // Retained sources with required coherent public host access.
   hrx_mem_pool_sources_t host;
+  // Retained fixed-block pool for coherent eight-byte native queue signals.
+  iree_hal_pool_t* signals;
   // Retained import-only source for caller-owned host pointers.
   iree_hal_pool_t* host_import_source;
   // Retained import-only source for native device addresses.
@@ -59,8 +61,8 @@ typedef struct hrx_mem_pool_backing_t {
 
 void hrx_mem_pool_backing_initialize(hrx_mem_pool_backing_t* backing);
 
-// Joins maintenance and releases the shared cache before native device
-// teardown. All public pools, buffers and reservations must have retired.
+// Releases shared storage before native device teardown. All public pools,
+// buffers, and reservations must have retired.
 void hrx_mem_pool_backing_deinitialize(hrx_mem_pool_backing_t* backing);
 
 // Creates one independent allocation policy over the device's shared cache.
@@ -79,6 +81,12 @@ iree_status_t hrx_mem_pool_backing_create_pool(hrx_device_t device,
 iree_status_t hrx_mem_pool_backing_retain_allocation_source(
     hrx_device_t device, hrx_memory_type_t memory_type,
     hrx_buffer_usage_t usage, iree_hal_pool_t** out_pool);
+
+// Retains the device-owned eight-byte signal pool. Signals have coherent host
+// access and native 32/64-bit waits and stores on the dispatch family. Small
+// allocations share backing; one idle slab is retained until device teardown.
+iree_status_t hrx_mem_pool_backing_retain_signal_pool(
+    hrx_device_t device, iree_hal_pool_t** out_pool);
 
 // Retains the device-owned import-only source for |storage_class|. Portable
 // host pointers and native device addresses are the supported HRX interop

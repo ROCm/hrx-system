@@ -7,6 +7,7 @@
 #ifndef IREE_EXPERIMENTAL_STREAMING_GRAPH_H_
 #define IREE_EXPERIMENTAL_STREAMING_GRAPH_H_
 
+#include "common/host_callback.h"
 #include "common/memory.h"
 #include "common/stream.h"
 #include "iree/base/api.h"
@@ -162,11 +163,29 @@ typedef struct iree_hal_streaming_graph_memcpy_driver_node_attrs_t {
   iree_device_size_t depth;
 } iree_hal_streaming_graph_memcpy_driver_node_attrs_t;
 
+typedef enum iree_hal_streaming_graph_staging_direction_e {
+  IREE_HAL_STREAMING_GRAPH_STAGING_NONE = 0,
+  IREE_HAL_STREAMING_GRAPH_STAGING_UPLOAD,
+  IREE_HAL_STREAMING_GRAPH_STAGING_DOWNLOAD,
+} iree_hal_streaming_graph_staging_direction_t;
+
 typedef struct iree_hal_streaming_graph_memcpy_node_attrs_t {
+  // Borrowed host preparation node in this graph, or NULL for direct copies.
+  iree_hal_streaming_graph_node_t* pre_callback;
+  // Borrowed host completion node in this graph, or NULL for direct copies.
+  iree_hal_streaming_graph_node_t* post_callback;
   // Destination buffer reference.
   iree_hal_streaming_buffer_ref_t dst_ref;
   // Source buffer reference.
   iree_hal_streaming_buffer_ref_t src_ref;
+  // Staging requirements recorded by templates and materialized by executable
+  // snapshots. The staged endpoint's buffer ref is empty in a template.
+  struct {
+    // Upload stages the source; download stages the destination.
+    iree_hal_streaming_graph_staging_direction_t direction;
+    // Byte offset of the staging pointer within its helper's parameter data.
+    iree_host_size_t parameter_offset;
+  } staging;
   // Number of contiguous bytes to copy.
   iree_device_size_t size;
   // Copy flags passed to HAL.
@@ -251,12 +270,17 @@ typedef struct iree_hal_streaming_graph_memset_node_attrs_t {
 } iree_hal_streaming_graph_memset_node_attrs_t;
 
 typedef struct iree_hal_streaming_graph_host_call_node_attrs_t {
-  // Host callback function.
-  void (*fn)(void* user_data);
+  // Borrowed public copy owning this hidden helper, or NULL for host nodes.
+  iree_hal_streaming_graph_node_t* copy_node;
+  // Application function or fallible compatibility operation.
+  iree_hal_streaming_host_callback_t callback;
   // User data passed to the host callback function.
   void* user_data;
   // Bytes of graph-owned user data to copy into graph execs, or zero.
   iree_host_size_t user_data_size;
+  // Retained owner of objects referenced by the parameter bytes, or NULL.
+  // Captured by submitted callbacks through execution or cancellation.
+  iree_hal_resource_t* resource;
 } iree_hal_streaming_graph_host_call_node_attrs_t;
 
 typedef struct iree_hal_streaming_graph_child_graph_node_attrs_t {
@@ -278,6 +302,9 @@ typedef struct iree_hal_streaming_graph_mem_alloc_node_attrs_t {
   void* dptr;
   // Allocation size in bytes.
   iree_device_size_t bytesize;
+  // Original allocation owner for a cloned node, borrowed through the retained
+  // template chain. NULL means this node's graph owns the allocation.
+  iree_hal_streaming_graph_t* allocation_owner;
   // True when |dptr| is owned by this graph template and must be released with
   // the node.
   bool owns_device_allocation;
@@ -391,9 +418,28 @@ iree_status_t iree_hal_streaming_graph_create(
     iree_hal_streaming_graph_flags_t flags, iree_allocator_t host_allocator,
     iree_hal_streaming_graph_t** out_graph);
 
+typedef enum iree_hal_streaming_graph_clone_mode_e {
+  // Independent public graph; direct allocation nodes cannot be cloned.
+  IREE_HAL_STREAMING_GRAPH_CLONE_MODE_TEMPLATE = 0,
+  // Embedded child descriptions, including shared allocation-node addresses.
+  // Transfer staging is materialized only when an executable is instantiated.
+  IREE_HAL_STREAMING_GRAPH_CLONE_MODE_CHILD,
+  // Private executable descriptions. Recursively copies node parameters and
+  // retains the source graph's allocations without duplicating their contents.
+  IREE_HAL_STREAMING_GRAPH_CLONE_MODE_EXECUTABLE,
+} iree_hal_streaming_graph_clone_mode_t;
+
 iree_status_t iree_hal_streaming_graph_clone(
     iree_hal_streaming_graph_t* source_graph,
+    iree_hal_streaming_graph_clone_mode_t mode,
     iree_hal_streaming_graph_t** out_graph);
+
+// Associates an already-created host helper with its copy in the same graph.
+// Each copy has at most one preparation and one completion helper. The caller
+// supplies the helper's dependency on the copy, or the copy's on the helper.
+void iree_hal_streaming_graph_attach_copy_callback(
+    iree_hal_streaming_graph_node_t* copy_node,
+    iree_hal_streaming_graph_node_t* callback_node, bool after_copy);
 
 // Synchronization: none (reference counting).
 void iree_hal_streaming_graph_retain(iree_hal_streaming_graph_t* graph);
@@ -437,13 +483,18 @@ iree_status_t iree_hal_streaming_graph_add_copy_buffer_node(
     iree_hal_streaming_buffer_ref_t src_ref, iree_device_size_t size,
     iree_hal_streaming_graph_node_t** out_node);
 
-iree_status_t iree_hal_streaming_graph_add_copy_ptr_node_with_extra_dependency(
+// Records a staged transfer of a validated local endpoint. Staging is described
+// by direction and the byte offset of its pointer in the helper parameters.
+// |preparation| is the upload helper, or NULL for a download.
+iree_status_t iree_hal_streaming_graph_add_staged_copy_node(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count,
-    iree_hal_streaming_graph_node_t* extra_dependency,
-    iree_hal_streaming_deviceptr_t dst, iree_hal_streaming_deviceptr_t src,
-    iree_device_size_t size, iree_hal_streaming_graph_node_t** out_node);
+    iree_hal_streaming_graph_node_t* preparation,
+    iree_hal_streaming_graph_staging_direction_t direction,
+    iree_hal_streaming_deviceptr_t local_pointer, iree_device_size_t local_span,
+    iree_device_size_t size, iree_host_size_t parameter_offset,
+    iree_hal_streaming_graph_node_t** out_node);
 
 iree_status_t iree_hal_streaming_graph_add_fill_ptr_node(
     iree_hal_streaming_graph_t* graph,
@@ -457,6 +508,16 @@ iree_status_t iree_hal_streaming_graph_add_host_call_node(
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count, void (*fn)(void*), void* user_data,
     iree_hal_streaming_graph_node_t** out_node);
+
+// Adds an internal compatibility operation whose failure propagates through
+// graph completion. Unlike application host functions, operations can fail due
+// to allocation or transfer dependencies. Owned payloads set user_data_size on
+// the returned node so cloning and instantiation preserve their storage.
+iree_status_t iree_hal_streaming_graph_add_host_operation_node(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count, iree_status_t (*operation)(void*),
+    void* user_data, iree_hal_streaming_graph_node_t** out_node);
 
 iree_status_t iree_hal_streaming_graph_add_event_node(
     iree_hal_streaming_graph_t* graph,
@@ -489,6 +550,8 @@ iree_status_t iree_hal_streaming_graph_set_batch_mem_op_node_params(
     const iree_hal_streaming_value_operation_t* operations,
     const hrx_buffer_t* owners, iree_host_size_t operation_count);
 
+// Removes an ordinary operation and its helpers. Allocation and free nodes
+// remain with the template until its final owner releases it.
 iree_status_t iree_hal_streaming_graph_destroy_node(
     iree_hal_streaming_graph_node_t* node);
 
@@ -611,20 +674,6 @@ typedef struct iree_hal_streaming_graph_edge_t {
   iree_hal_streaming_graph_node_t* to;    // Dependent (waits for 'from')
 } iree_hal_streaming_graph_edge_t;
 
-// Graph-owned host allocation that backs staged host/device copy nodes.
-typedef struct iree_hal_streaming_graph_owned_host_allocation_t {
-  // Next allocation in the graph-owned singly-linked list.
-  struct iree_hal_streaming_graph_owned_host_allocation_t* next;
-  // Streaming buffer wrapper for this host-visible allocation.
-  iree_hal_streaming_buffer_t* buffer;
-  // Host pointer returned by the streaming host allocation.
-  void* host_ptr;
-  // Device pointer associated with the host-visible allocation.
-  iree_hal_streaming_deviceptr_t device_ptr;
-  // Allocation size in bytes.
-  iree_device_size_t size;
-} iree_hal_streaming_graph_owned_host_allocation_t;
-
 typedef iree_status_t (*iree_hal_streaming_graph_user_object_retain_fn_t)(
     void* object, uint64_t count);
 typedef void (*iree_hal_streaming_graph_user_object_release_fn_t)(
@@ -701,15 +750,29 @@ typedef struct iree_hal_streaming_graph_t {
   iree_hal_streaming_graph_edge_t* additional_edges;
   iree_host_size_t additional_edge_count;
 
-  // Host allocations owned by this graph template.
-  iree_hal_streaming_graph_owned_host_allocation_t* owned_host_allocations;
+  // Retained source of an executable snapshot or allocation-bearing child.
+  // Keeps allocation-node addresses, query payloads, and source handles alive.
+  iree_hal_streaming_graph_t* template_graph;
+  // True only for private descriptions with materialized transfer staging.
+  bool is_executable_snapshot;
+  // Number of host helpers attached to public copy operations.
+  iree_host_size_t copy_helper_count;
   // Opaque user objects retained by this graph template.
   iree_hal_streaming_graph_user_object_ref_t* user_object_refs;
+  // Optional frontend notification before final destruction. Not inherited by
+  // clones; lets a frontend invalidate borrowed handles without retaining us.
+  void (*destroy_callback)(iree_hal_streaming_graph_t* graph);
 
-  // True when the graph contains HIP memory allocation or free nodes.
+  // True when the graph directly contains memory allocation or free nodes.
   bool has_graph_memory_nodes;
-  // Number of live executable graphs instantiated from memory-node graph.
-  uint32_t active_graph_memory_exec_count;
+  // Exclusive logical executable using this graph's direct allocations.
+  // Protected by capture_mutex; rebuilds and children share one identity.
+  struct {
+    // Borrowed identity, NULL when no compiled version has a claim.
+    iree_hal_streaming_graph_exec_t* executable;
+    // Number of compiled versions holding this admission.
+    iree_host_size_t count;
+  } memory_admission;
 
   // Graph creation flags.
   uint32_t flags;
@@ -801,18 +864,39 @@ typedef struct iree_hal_streaming_graph_partition_block_t {
   iree_hal_streaming_graph_partition_t partitions[];
 } iree_hal_streaming_graph_partition_block_t;
 
+// Creates private execution state. Children borrow their root's stable
+// |execution_owner| identity; NULL starts a new independent executable.
 iree_status_t iree_hal_streaming_graph_exec_create(
     iree_hal_streaming_context_t* context, iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_instantiate_flags_t flags,
+    iree_hal_streaming_graph_exec_t* execution_owner,
     iree_allocator_t host_allocator,
     iree_hal_streaming_graph_exec_t** out_exec);
 
-iree_status_t iree_hal_streaming_graph_exec_instantiate_from_template(
-    iree_hal_streaming_graph_exec_t* exec,
-    iree_hal_streaming_node_block_t* node_blocks, iree_host_size_t node_count);
-
-iree_status_t iree_hal_streaming_graph_exec_rebuild_from_template(
+// Compiles the executable's private descriptions during construction.
+iree_status_t iree_hal_streaming_graph_exec_compile(
     iree_hal_streaming_graph_exec_t* exec);
+
+// Locks the executable and returns its private parameters for |node|, or NULL
+// for an invalid source handle. The caller always unlocks, including on NULL.
+// Successful parameter changes must be compiled before unlocking; a compilation
+// error leaves the old compiled state intact and requires restoring parameters.
+iree_hal_streaming_graph_node_t* iree_hal_streaming_graph_exec_lock_node(
+    iree_hal_streaming_graph_exec_t* exec,
+    iree_hal_streaming_graph_node_t* node);
+void iree_hal_streaming_graph_exec_unlock(
+    iree_hal_streaming_graph_exec_t* exec);
+
+// Requires the executable lock. Replaces compiled state only on success.
+iree_status_t iree_hal_streaming_graph_exec_rebuild_locked(
+    iree_hal_streaming_graph_exec_t* exec);
+
+// Replaces one executable's child description with a topology-compatible
+// snapshot. The source template and prior launches retain their parameters.
+iree_status_t iree_hal_streaming_graph_exec_set_child_graph(
+    iree_hal_streaming_graph_exec_t* exec,
+    iree_hal_streaming_graph_node_t* node,
+    iree_hal_streaming_graph_t* child_graph);
 
 bool iree_hal_streaming_graph_exec_owns_node(
     iree_hal_streaming_graph_exec_t* exec,
@@ -856,6 +940,13 @@ typedef struct iree_hal_streaming_graph_schedule_t {
   iree_host_size_t block_count;
 } iree_hal_streaming_graph_schedule_t;
 
+// Adds execution dependencies across complete copy operations, including their
+// host preparation/completion helpers. The returned list shares the graph's
+// immutable additional edges and allocates only new edges from |arena|.
+iree_status_t iree_hal_streaming_graph_schedule_copy_dependencies(
+    iree_hal_streaming_graph_t* graph, iree_arena_allocator_t* arena,
+    iree_hal_streaming_graph_edge_t** out_edges);
+
 // Unified scheduler that performs topological sorting, partitioning, and
 // workstream detection in an efficient three-phase algorithm.
 //
@@ -879,10 +970,9 @@ iree_status_t iree_hal_streaming_graph_schedule_nodes(
 
 // Checks whether |child_graph| may be the child graph of a node in
 // |parent_graph|: the two must be distinct, must belong to the same context,
-// and |child_graph| must not reach |parent_graph| through its own child graph
-// nodes. Instantiating a node's child graph instantiates that graph's own child
-// graph nodes in turn, so containment that leads back to |parent_graph| would
-// recurse until the stack ran out.
+// and |child_graph| must not reach |parent_graph| through child nodes or
+// retained allocation templates. Such edges would create recursive containment
+// or a reference cycle when the child snapshot is published.
 iree_status_t iree_hal_streaming_graph_validate_child_graph(
     iree_hal_streaming_graph_t* parent_graph,
     iree_hal_streaming_graph_t* child_graph);
@@ -895,10 +985,42 @@ iree_status_t iree_hal_streaming_graph_add_dependencies(
     iree_hal_streaming_graph_node_t** from_nodes,
     iree_hal_streaming_graph_node_t** to_nodes, iree_host_size_t count);
 
-// Allocates a host-visible staging buffer owned by |graph|.
-iree_status_t iree_hal_streaming_graph_allocate_host_staging(
-    iree_hal_streaming_graph_t* graph, iree_device_size_t size,
-    iree_hal_streaming_buffer_t** out_buffer);
+// Prepares the staging endpoint and its helper parameter pointer. Templates
+// retain only the recipe; executable snapshots allocate one backing. The caller
+// transfers the returned resource to the helper on successful publication.
+iree_status_t iree_hal_streaming_graph_prepare_copy_staging(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_memcpy_node_attrs_t* attrs,
+    void* callback_parameters, iree_hal_resource_t** out_resource);
+
+// Rollback boundary for one append-only staged copy construction. Construction
+// may append copy/host nodes, but cannot edit existing nodes or add
+// additional edges. The frontend balances any external context references.
+typedef struct iree_hal_streaming_graph_copy_checkpoint_t {
+  // Number of nodes preceding the copy and its helpers.
+  iree_host_size_t node_count;
+  // Number of root nodes preceding construction.
+  iree_host_size_t root_count;
+  // Number of attached helpers preceding construction.
+  iree_host_size_t helper_count;
+} iree_hal_streaming_graph_copy_checkpoint_t;
+
+// Captures a construction boundary without allocating or retaining resources.
+static inline iree_hal_streaming_graph_copy_checkpoint_t
+iree_hal_streaming_graph_copy_checkpoint(
+    const iree_hal_streaming_graph_t* graph) {
+  return (iree_hal_streaming_graph_copy_checkpoint_t){
+      .node_count = graph->node_count,
+      .root_count = graph->root_count,
+      .helper_count = graph->copy_helper_count,
+  };
+}
+
+// Discards a rejected construction's topology and host parameter resources.
+// No completion wait is needed; existing graph operations remain unchanged.
+void iree_hal_streaming_graph_rollback_copy(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_copy_checkpoint_t checkpoint);
 
 #ifdef __cplusplus
 }

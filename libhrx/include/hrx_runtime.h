@@ -630,12 +630,12 @@ HRX_API hrx_status_t hrx_buffer_map(hrx_buffer_t buffer, hrx_map_flags_t flags,
 
 HRX_API hrx_status_t hrx_buffer_unmap(hrx_buffer_t buffer);
 
-// Returns the whole-buffer native device address. This does not map the buffer
-// or alter an active scoped mapping. HRX allocates and imports CPU storage with
-// persistent mapping permission to expose its address. A buffer wrapped from an
-// external HAL caller must already permit persistent mapping on CPU storage.
-// The caller retains the buffer while using the address. On failure the output
-// is NULL and the native export error is returned.
+// Returns the whole-buffer native address for its HRX device using the prepared
+// program binding. This does not map the buffer or alter an active scoped
+// mapping. Unscoped legacy buffers use native address export. The caller
+// completes allocation prerequisites and retains the buffer while using the
+// address. On failure the output is NULL and the address-access error is
+// returned.
 HRX_API hrx_status_t hrx_buffer_get_device_ptr(hrx_buffer_t buffer,
                                                void** device_ptr);
 
@@ -866,10 +866,8 @@ HRX_API hrx_status_t hrx_device_query_memory_scope(
 
 // Complete simultaneous access to one address reservation. All families of
 // every listed device participate. Devices must belong to the same sealed
-// group; the arrays are borrowed only for query/construction. The immutable
-// backing contract covers each device's normal remappable allocation class,
-// or its coherent host class when host_access is requested. Later mappings
-// must preserve those cache and atomic guarantees.
+// group; the arrays are borrowed only for query/construction. Host access
+// describes the virtual views and does not select physical backing placement.
 typedef struct hrx_virtual_buffer_scope_t {
   // Nonzero number of distinct participating devices.
   size_t device_count;
@@ -878,6 +876,28 @@ typedef struct hrx_virtual_buffer_scope_t {
   // Required public host mapping access, or NONE for execution-only addresses.
   hrx_memory_access_t host_access;
 } hrx_virtual_buffer_scope_t;
+
+// One ordinary allocation class that may back a virtual reservation. Preparing
+// its metadata does not allocate physical payload or change its placement.
+typedef struct hrx_virtual_buffer_source_t {
+  // Device whose allocator supplies this class, in the reservation's group.
+  hrx_device_t device;
+  // Memory type passed to MAPPING_SOURCE allocations from this device.
+  hrx_memory_type_t memory_type;
+} hrx_virtual_buffer_source_t;
+
+// Accepted backing classes, borrowed only during query/construction. The
+// reservation captures cache obligations and atomic guarantees per site/pair
+// from the classes serving those sites. Device-only backing can serve GPU
+// projections alongside shared backing serving CPU and GPU projections. Later
+// mappings preserve this fixed contract and cover all sites sharing the
+// selected native page tables, including for classes not listed here.
+typedef struct hrx_virtual_buffer_sources_t {
+  // Nonzero number of accepted allocation classes.
+  size_t source_count;
+  // Explicit physical owners and memory types, independent of virtual access.
+  const hrx_virtual_buffer_source_t* sources;
+} hrx_virtual_buffer_sources_t;
 
 // Caller-declared prior state. No installed-source table is maintained by HRX.
 typedef enum hrx_memory_mapping_operation_t {
@@ -891,6 +911,14 @@ typedef enum hrx_memory_mapping_operation_t {
   HRX_MEMORY_MAPPING_OPERATION_PROTECT = 3,
 } hrx_memory_mapping_operation_t;
 
+// Explicit address constraints; zero leaves native address equality
+// unconstrained.
+typedef uint32_t hrx_virtual_buffer_flags_t;
+#define HRX_VIRTUAL_BUFFER_FLAG_NONE 0u
+// Every admitted host and program binding uses the same numeric base address.
+// Host access still requires an explicit host_access in the reservation scope.
+#define HRX_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS (1u << 0)
+
 typedef struct hrx_virtual_buffer_capabilities_t {
   // Largest address interval in bytes; zero means the scope is unsupported.
   size_t max_byte_length;
@@ -902,6 +930,8 @@ typedef struct hrx_virtual_buffer_capabilities_t {
   size_t max_alignment;
   // Supported operations, with bit N corresponding to mapping operation N.
   uint32_t operations;
+  // Address constraints supported across the complete simultaneous scope.
+  hrx_virtual_buffer_flags_t supported_flags;
 } hrx_virtual_buffer_capabilities_t;
 
 // Cold query: prepares the allocation source metadata without acquiring
@@ -909,7 +939,7 @@ typedef struct hrx_virtual_buffer_capabilities_t {
 // zero capabilities; source preparation, invalid scope, and native failures
 // propagate.
 HRX_API hrx_status_t hrx_virtual_buffer_query_capabilities(
-    hrx_virtual_buffer_scope_t scope,
+    hrx_virtual_buffer_scope_t scope, hrx_virtual_buffer_sources_t sources,
     hrx_virtual_buffer_capabilities_t* out_capabilities);
 
 typedef struct hrx_virtual_buffer_options_t {
@@ -919,13 +949,15 @@ typedef struct hrx_virtual_buffer_options_t {
   size_t min_alignment;
   // Minimum power-of-two mapping unit; zero selects the native minimum.
   size_t mapping_granularity;
+  // Required address constraints; zero preserves independent native policy.
+  hrx_virtual_buffer_flags_t flags;
 } hrx_virtual_buffer_options_t;
 
 // Reserves addresses without physical payload and returns one owned ordinary
 // buffer reference. On failure the output is NULL. Buffer references and views
 // keep addresses live; installed backing remains independently caller-owned.
 HRX_API hrx_status_t hrx_virtual_buffer_create(
-    hrx_virtual_buffer_scope_t scope,
+    hrx_virtual_buffer_scope_t scope, hrx_virtual_buffer_sources_t sources,
     const hrx_virtual_buffer_options_t* options, hrx_buffer_t* out_buffer);
 
 typedef struct hrx_virtual_buffer_info_t {

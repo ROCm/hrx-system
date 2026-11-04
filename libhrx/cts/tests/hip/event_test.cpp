@@ -1,7 +1,6 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
-#include <dlfcn.h>
 #include <sched.h>
 
 #include <algorithm>
@@ -9,26 +8,18 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <thread>
 #include <vector>
 
 #include "binding/hip/api.h"
+#include "binding/hip/hip_dso_test_util.h"
 #include "iree/testing/gtest.h"
 
 namespace {
 
-const char* CandidateLibPath() {
-  if (const char* environment_path = std::getenv("HRX_TEST_LIBAMDHIP64");
-      environment_path && *environment_path != '\0') {
-    return environment_path;
-  }
-  return "libamdhip64.so";
-}
-
 template <typename T>
-T ResolveHipSymbol(void* library, const char* name) {
-  return reinterpret_cast<T>(dlsym(library, name));
+T ResolveHipSymbol(hrx::hip::testing::HipDso& library, const char* name) {
+  return library.Resolve<T>(name);
 }
 
 using HipInitFn = hipError_t (*)(unsigned int flags);
@@ -277,12 +268,25 @@ constexpr double kMaximumHostFactor = 4.0;
 
 class HipEventTest : public ::testing::Test {
  protected:
-  void SetUp() override {
-    library_ = dlopen(CandidateLibPath(), RTLD_NOW | RTLD_LOCAL);
-    ASSERT_NE(nullptr, library_)
-        << "cannot dlopen " << CandidateLibPath() << ": " << dlerror();
+  static void SetUpTestSuite() {
+    ASSERT_TRUE(library_.Open()) << library_.error();
+    const auto initialize = library_.Resolve<HipInitFn>("hipInit");
+    ASSERT_NE(nullptr, initialize) << library_.error();
+    ASSERT_EQ(hipSuccess, initialize(/*flags=*/0));
+  }
 
-    hip_.init = ResolveHipSymbol<HipInitFn>(library_, "hipInit");
+  static void TearDownTestSuite() {
+    if (!library_.is_open()) {
+      return;
+    }
+    const auto deinitialize =
+        library_.Resolve<hipError_t (*)()>("hipHALDeinit");
+    ASSERT_NE(nullptr, deinitialize) << library_.error();
+    EXPECT_EQ(hipSuccess, deinitialize());
+    EXPECT_TRUE(library_.Close()) << library_.error();
+  }
+
+  void SetUp() override {
     hip_.stream_create =
         ResolveHipSymbol<HipStreamCreateFn>(library_, "hipStreamCreate");
     hip_.stream_destroy =
@@ -364,7 +368,6 @@ class HipEventTest : public ::testing::Test {
     hip_.ctx_set_current =
         ResolveHipSymbol<HipCtxSetCurrentFn>(library_, "hipCtxSetCurrent");
 
-    ASSERT_NE(nullptr, hip_.init);
     ASSERT_NE(nullptr, hip_.stream_create);
     ASSERT_NE(nullptr, hip_.stream_destroy);
     ASSERT_NE(nullptr, hip_.stream_synchronize);
@@ -402,11 +405,11 @@ class HipEventTest : public ::testing::Test {
     ASSERT_NE(nullptr, hip_.ctx_get_current);
     ASSERT_NE(nullptr, hip_.ctx_set_current);
 
-    const hipError_t init_result = hip_.init(/*flags=*/0);
-    if (init_result == hipErrorNoDevice) {
-      GTEST_SKIP() << "no HIP device available";
-    }
-    ASSERT_EQ(hipSuccess, init_result) << "hipInit failed";
+    const auto get_last_error =
+        library_.Resolve<decltype(&hipGetLastError)>("hipGetLastError");
+    ASSERT_NE(nullptr, get_last_error) << library_.error();
+    // Expected errors from another case do not become this case's TLS state.
+    (void)get_last_error();
   }
 
   // Destroys the handles the body created, in reverse order of the dependencies
@@ -644,14 +647,10 @@ class HipEventTest : public ::testing::Test {
   // here for the whole test.
   std::atomic<bool> graph_host_node_ran_{false};
 
-  // HIP shim under test. Intentionally never dlclose()d: the shim owns
-  // process-global device state shared by every test in this file.
-  void* library_ = nullptr;
-  // Entry points resolved from |library_| by SetUp, each named for the hip*
-  // symbol it was resolved from. SetUp fails if any is unresolved, so every
-  // one is non-null for the duration of a test body.
+  // One exact HIP artifact and runtime shared through synchronous teardown.
+  static inline hrx::hip::testing::HipDso library_;
+  // Per-case entry points resolved from the suite-owned runtime before use.
   struct {
-    HipInitFn init;
     HipStreamCreateFn stream_create;
     HipStreamDestroyFn stream_destroy;
     HipStreamSynchronizeFn stream_synchronize;

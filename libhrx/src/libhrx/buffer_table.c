@@ -351,9 +351,9 @@ static void hrx_buffer_table_retain_entry(
   };
 }
 
-hrx_status_t hrx_buffer_table_find(hrx_buffer_table_t* table, uint64_t any_ptr,
-                                   hrx_buffer_t* out_buffer, size_t* out_offset,
-                                   void** out_user_data) {
+bool hrx_buffer_table_try_find(hrx_buffer_table_t* table, uint64_t any_ptr,
+                               hrx_buffer_t* out_buffer, size_t* out_offset,
+                               void** out_user_data) {
   iree_slim_mutex_lock(&table->mutex);
 
   size_t idx = hrx_buffer_table_find_index_locked(table, any_ptr);
@@ -368,13 +368,23 @@ hrx_status_t hrx_buffer_table_find(hrx_buffer_table_t* table, uint64_t any_ptr,
     if (out_user_data) {
       *out_user_data = NULL;
     }
-    return hrx_make_status(HRX_STATUS_NOT_FOUND,
-                           "pointer not found in buffer table");
+    return false;
   }
 
   hrx_buffer_table_fill_result(&table->entries[idx], any_ptr, out_buffer,
                                out_offset, out_user_data);
   iree_slim_mutex_unlock(&table->mutex);
+  return true;
+}
+
+hrx_status_t hrx_buffer_table_find(hrx_buffer_table_t* table, uint64_t any_ptr,
+                                   hrx_buffer_t* out_buffer, size_t* out_offset,
+                                   void** out_user_data) {
+  if (!hrx_buffer_table_try_find(table, any_ptr, out_buffer, out_offset,
+                                 out_user_data)) {
+    return hrx_make_status(HRX_STATUS_NOT_FOUND,
+                           "pointer not found in buffer table");
+  }
   return hrx_ok_status();
 }
 

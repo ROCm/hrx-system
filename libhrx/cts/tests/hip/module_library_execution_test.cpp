@@ -454,7 +454,7 @@ void ExpectPublishedError(const HipApi& api, const char* operation_name,
 
 class HipModuleLibraryExecutionTest : public ::testing::Test {
  protected:
-  void SetUp() override {
+  static void SetUpTestSuite() {
     library_ = dlopen(CandidateLibPath(), RTLD_NOW | RTLD_LOCAL);
     if (!library_) {
       if (HasConfiguredCandidateLib()) {
@@ -472,6 +472,11 @@ class HipModuleLibraryExecutionTest : public ::testing::Test {
       }
       GTEST_SKIP() << "hipInit failed: " << init_result;
     }
+  }
+
+  void SetUp() override {
+    // Error observations belong to each case; the device runtime is shared.
+    (void)api_.get_last_error();
     ASSERT_EQ(hipSuccess, api_.get_device(&device_));
     ASSERT_EQ(hipSuccess, api_.get_device_properties(&properties_, device_));
     executable_image_ =
@@ -484,18 +489,21 @@ class HipModuleLibraryExecutionTest : public ::testing::Test {
         << "no embedded HIP HSACO for " << properties_.gcnArchName;
   }
 
-  void TearDown() override {
+  static void TearDownTestSuite() {
     if (!library_) {
       return;
     }
     if (api_.deinit) {
       EXPECT_EQ(hipSuccess, api_.deinit());
     }
-    dlclose(library_);
+    EXPECT_EQ(0, dlclose(library_));
+    library_ = nullptr;
   }
 
-  void* library_ = nullptr;
-  HipApi api_;
+  // One exact HIP artifact retained through the suite's runtime shutdown.
+  static inline void* library_ = nullptr;
+  // Immutable entry points from that artifact, resolved before any case runs.
+  static inline HipApi api_;
   int device_ = 0;
   hipDeviceProp_t properties_ = {};
   hrx_cts::AmdgpuExecutableTestImage executable_image_;

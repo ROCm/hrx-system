@@ -225,6 +225,42 @@ TEST(BufferTableTest, LookupExact) {
   FreeDummyBuffer(buffer, allocator);
 }
 
+TEST(BufferTableTest, OptionalLookupBorrowsAliasesAndClearsMissOutputs) {
+  hrx_buffer_table_t table;
+  hrx_buffer_table_initialize(&table);
+  iree_hal_streaming_buffer_t buffer = {
+      .device_ptr = 0x1000,
+      .host_ptr = reinterpret_cast<void*>(uintptr_t{0x2000}),
+      .size = 16,
+      .padding = {},
+  };
+  int user_data = 0;
+  IREE_ASSERT_OK(BufferTableStatus(hrx_buffer_table_insert(
+      &table, buffer.device_ptr, buffer.host_ptr, buffer.size,
+      reinterpret_cast<hrx_buffer_t>(&buffer), &user_data)));
+
+  hrx_buffer_t found_buffer = nullptr;
+  size_t offset = 0;
+  void* found_user_data = nullptr;
+  for (uint64_t pointer : {uint64_t{0x1004}, uint64_t{0x2004}}) {
+    ASSERT_TRUE(hrx_buffer_table_try_find(&table, pointer, &found_buffer,
+                                          &offset, &found_user_data));
+    EXPECT_EQ(reinterpret_cast<hrx_buffer_t>(&buffer), found_buffer);
+    EXPECT_EQ(4u, offset);
+    EXPECT_EQ(&user_data, found_user_data);
+  }
+  EXPECT_FALSE(hrx_buffer_table_try_find(&table, 0x2010, &found_buffer, &offset,
+                                         &found_user_data));
+  EXPECT_EQ(nullptr, found_buffer);
+  EXPECT_EQ(0u, offset);
+  EXPECT_EQ(nullptr, found_user_data);
+  EXPECT_TRUE(
+      hrx_buffer_table_try_find(&table, 0x1000, nullptr, nullptr, nullptr));
+  EXPECT_FALSE(
+      hrx_buffer_table_try_find(&table, 0x3000, nullptr, nullptr, nullptr));
+  hrx_buffer_table_deinitialize(&table);
+}
+
 TEST(BufferTableTest, RemoveSingle) {
   iree_allocator_t allocator = iree_allocator_system();
   iree_hal_streaming_buffer_table_t* table = nullptr;

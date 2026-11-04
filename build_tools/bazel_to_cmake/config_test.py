@@ -1327,7 +1327,7 @@ cc_library(
                         )
                         converter.convert()
 
-    def test_cc_binary_benchmark_converts_location_args_to_source_paths(self):
+    def test_cc_binary_benchmark_converts_declared_runtime_data(self):
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
@@ -1343,6 +1343,11 @@ cc_library(
                 "$(location input.txt)",
                 "--flag=$(rootpath nested/input.bin)",
             ],
+            data=["//runtime/src/iree/testing:runtime"],
+            env={
+                "RUNTIME": "$(rootpath //runtime/src/iree/testing:runtime)",
+                "INPUT": "$(location input.txt)",
+            },
         )
 
         self.assertIn('"{{${PROJECT_SOURCE_DIR}/pkg/input.txt}}"', converter.body)
@@ -1350,6 +1355,11 @@ cc_library(
             '"--flag={{${PROJECT_SOURCE_DIR}/pkg/nested/input.bin}}"',
             converter.body,
         )
+        self.assertIn(
+            '"RUNTIME={{$<TARGET_FILE:iree::testing::runtime>}}"', converter.body
+        )
+        self.assertIn('"INPUT={{${PROJECT_SOURCE_DIR}/pkg/input.txt}}"', converter.body)
+        self.assertIn('DATA\n    "iree::testing::runtime"', converter.body)
 
     def test_runtime_hal_cts_test_suite_converts_location_args_to_source_paths(
         self,

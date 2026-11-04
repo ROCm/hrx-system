@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("@rules_python//python:defs.bzl", "py_test")
 load("//libhrx/build_tools/bazel:cts.bzl", "hrx_cts_test")
 load("//libhrx/cts:defs.bzl", "AMD_GPU_CTS_RESOURCE_GROUP", "AMD_GPU_CTS_TAGS")
 
@@ -18,4 +19,17 @@ hrx_cts_test(
     srcs = ["lifecycle_test.cpp"],
     resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
     tags = AMD_GPU_CTS_TAGS,
+)
+
+py_test(
+    name = "cleanup_test",
+    srcs = ["cleanup_test.py"],
+    args = [
+        "$(location :hrx_cts_lifecycle)",
+        "$(location //libhrx/src/libhrx:hrx)",
+    ],
+    data = [
+        ":hrx_cts_lifecycle",
+        "//libhrx/src/libhrx:hrx",
+    ],
 )

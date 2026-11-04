@@ -956,6 +956,7 @@ class BuildFileFunctions:
         defines=None,
         linkopts=None,
         args=None,
+        env=None,
         tags=None,
         resource_group=None,
         testonly=True,
@@ -977,6 +978,9 @@ class BuildFileFunctions:
         args_block = self._convert_string_list_block(
             "ARGS", self._convert_test_location_args(args), sort=False
         )
+        env_block = self._convert_string_list_block(
+            "ENV", self._convert_test_env(env), sort=False
+        )
         testonly_block = self._convert_option_block("TESTONLY", testonly)
         labels_block = self._convert_string_list_block("LABELS", tags)
         resource_group_block = self._convert_string_arg_block(
@@ -994,6 +998,7 @@ class BuildFileFunctions:
             f"{defines_block}"
             f"{linkopts_block}"
             f"{args_block}"
+            f"{env_block}"
             f"{testonly_block}"
             f"{labels_block}"
             f"{resource_group_block}"

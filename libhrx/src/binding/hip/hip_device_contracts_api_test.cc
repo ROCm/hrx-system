@@ -190,11 +190,14 @@ static void InjectIllegalAddressAtFirstPublication(hipError_t* result,
 }
 
 TEST_F(HipDeviceContractsApiTest,
-       OldGenerationStreamCompletionCannotPoisonReinitializedRuntime) {
+       OldGenerationStreamCompletionCannotPoisonNewErrorState) {
   const ErrorStateSetPublishHookFn set_publish_hook =
       dso_.ResolveLocalForTest<ErrorStateSetPublishHookFn>(
           "iree_hip_error_state_test_set_publish_hook");
   ASSERT_NE(nullptr, set_publish_hook) << dso_.error();
+  const auto reset_error_state =
+      dso_.ResolveLocalForTest<void (*)()>("iree_hip_error_state_reset");
+  ASSERT_NE(nullptr, reset_error_state) << dso_.error();
 
   PublicationBarrier barrier;
   set_publish_hook(InjectIllegalAddressAtFirstPublication, &barrier);
@@ -220,19 +223,16 @@ TEST_F(HipDeviceContractsApiTest,
   while (!barrier.reached.load(std::memory_order_acquire)) {
     std::this_thread::yield();
   }
-  const hipError_t deinit_result = api_.hal_deinit();
-  const hipError_t init_result =
-      deinit_result == hipSuccess ? api_.init(/*flags=*/0) : deinit_result;
+  // Advance the publication generation while preserving the live runtime
+  // borrowed by the blocked API call. Native teardown requires joined callers.
+  reset_error_state();
   int main_device_count = 0;
   const hipError_t main_query_result =
-      init_result == hipSuccess ? api_.get_device_count(&main_device_count)
-                                : init_result;
+      api_.get_device_count(&main_device_count);
   barrier.proceed.store(true, std::memory_order_release);
   publisher.join();
   set_publish_hook(nullptr, nullptr);
 
-  ASSERT_EQ(hipSuccess, deinit_result);
-  ASSERT_EQ(hipSuccess, init_result);
   ASSERT_EQ(hipSuccess, main_query_result);
   EXPECT_GT(main_device_count, 0);
   EXPECT_EQ(hipErrorIllegalAddress,

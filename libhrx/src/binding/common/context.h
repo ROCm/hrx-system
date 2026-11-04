@@ -40,7 +40,7 @@ typedef iree_host_size_t iree_hal_streaming_device_ordinal_t;
 
 // Scheduling policy.
 typedef enum iree_hal_streaming_scheduling_mode_e {
-  // Automatic scheduling.
+  // Bounded active progress before yielding to the backend's blocking wait.
   IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO = 0,
   // Spin wait (busy wait).
   IREE_HAL_STREAMING_SCHEDULING_MODE_SPIN,
@@ -103,8 +103,8 @@ struct iree_hal_streaming_context_t {
   // Unused, and never grown, when |timestamp_domain| is zeroed.
   iree_hal_streaming_event_timestamp_pool_t timestamp_pool;
 
-  // Context flags.
-  iree_hal_streaming_context_flags_t flags;
+  // Encoded context flags, accessed atomically through the flag accessors.
+  iree_atomic_uint32_t flags;
 
   // Default stream for this context (always created during context
   // initialization).
@@ -127,11 +127,6 @@ struct iree_hal_streaming_context_t {
 
   // Serializes access to |pending_free_head| and terminal free callbacks.
   iree_slim_mutex_t pending_free_mutex;
-
-  // Cached host-visible staging buffer for blocking pageable H2D transfers.
-  // Guarded by |mutex| and released during context destruction.
-  iree_hal_streaming_buffer_t* pageable_h2d_staging_buffer;
-  iree_device_size_t pageable_h2d_staging_size;
 
   // Number of streams in this context with capture state other than NONE.
   iree_atomic_int32_t capture_stream_count;
@@ -204,8 +199,19 @@ struct iree_hal_streaming_context_t {
   // Timeline covering context-wide event records submitted on behalf of this
   // context and every binding scheduling domain layered over it.
   iree_hal_streaming_operation_timeline_t event_record_timeline;
+  // Lazily acquired queue for context-wide event joins, owned until context
+  // destruction. Independent of stream producers; guarded by
+  // event_record_mutex.
+  iree_hal_queue_t* event_record_queue;
   // Serializes event record submission and |event_record_timeline| updates.
   iree_slim_mutex_t event_record_mutex;
+
+  // Lazily selected bulk queue, owned until joined context teardown. Context
+  // copies and shared-primary streams use it with their existing ordering.
+  iree_hal_queue_t* transfer_queue;
+  // Guards construction and borrowing of |transfer_queue|. Native acquisition
+  // happens outside stream locks; execution callbacks never take this mutex.
+  iree_slim_mutex_t transfer_queue_mutex;
 
   // Global context list node pointers for cleanup tracking.
   // These are used to link all contexts in a global list for proper cleanup.
@@ -257,16 +263,35 @@ void iree_hal_streaming_context_release(iree_hal_streaming_context_t* context);
 bool iree_hal_streaming_context_try_retain(
     iree_hal_streaming_context_t* context);
 
-// Synchronization: none (queries flags).
+// Loads one coherent snapshot of the caller-selected context flags.
 iree_hal_streaming_context_flags_t iree_hal_streaming_context_flags(
+    iree_hal_streaming_context_t* context);
+
+// Publishes caller-selected context flags atomically for subsequent waits.
+void iree_hal_streaming_context_set_flags(
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_context_flags_t flags);
+
+// Resolves the current scheduling policy to the HAL's progress preference.
+// The backend owns progression; this does not change completion guarantees.
+iree_async_wait_flags_t iree_hal_streaming_context_wait_flags(
     iree_hal_streaming_context_t* context);
 
 // Synchronization: none (thread-local access).
 uintptr_t iree_hal_streaming_current_thread_token(void);
 
+// Adopts a current context after registering thread-exit cleanup. A native
+// thread-storage failure preserves the previous context. NULL clears it.
 // Synchronization: none (thread-local modification).
-void iree_hal_streaming_context_set_current(
+iree_status_t iree_hal_streaming_context_set_current(
     iree_hal_streaming_context_t* context);
+
+// Clears the current context without changing stacked context ownership.
+void iree_hal_streaming_context_clear_current(void);
+
+// Releases the calling thread's context references and stack storage. Used as
+// the registry-owned TLS destructor and before global registry teardown.
+void iree_hal_streaming_context_cleanup_thread(void* state);
 
 // Synchronization: none (thread-local stack operation).
 iree_status_t iree_hal_streaming_context_push(

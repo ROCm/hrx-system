@@ -1,8 +1,6 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
-#include <dlfcn.h>
-
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -10,7 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -19,6 +17,7 @@
 #include <vector>
 
 #include "binding/hip/api.h"
+#include "binding/hip/hip_dso_test_util.h"
 #include "iree/testing/gtest.h"
 #include "libhrx/cts/core/amdgpu_executable_test_data.hpp"
 #include "libhrx/cts/core/amdgpu_hip_cooperative_test_data.hpp"
@@ -26,20 +25,36 @@
 
 namespace {
 
-const char* CandidateLibPath() {
-  if (const char* environment_path = std::getenv("HRX_TEST_LIBAMDHIP64");
-      environment_path && *environment_path != '\0') {
-    return environment_path;
+class HipModuleExecutionTest : public testing::Test {
+ protected:
+  static void SetUpTestSuite() {
+    ASSERT_TRUE(library_.Open()) << library_.error();
+    const auto initialize = library_.Resolve<decltype(&hipInit)>("hipInit");
+    ASSERT_NE(initialize, nullptr);
+    ASSERT_EQ(hipSuccess, initialize(0));
   }
-  return "libamdhip64.so";
-}
+
+  static void TearDownTestSuite() {
+    if (library_.is_open()) {
+      const auto deinitialize =
+          library_.Resolve<hipError_t (*)()>("hipHALDeinit");
+      ASSERT_NE(deinitialize, nullptr);
+      EXPECT_EQ(hipSuccess, deinitialize());
+      EXPECT_TRUE(library_.Close()) << library_.error();
+    }
+  }
+
+  // One exact HIP artifact and runtime shared through synchronous teardown.
+  static inline hrx::hip::testing::HipDso library_;
+
+  void CheckVirtualAliases(bool host_input);
+};
 
 template <typename T>
-T ResolveHipSymbol(void* library, const char* name) {
-  return reinterpret_cast<T>(dlsym(library, name));
+T ResolveHipSymbol(hrx::hip::testing::HipDso& library, const char* name) {
+  return library.Resolve<T>(name);
 }
 
-using HipInitFn = hipError_t (*)(unsigned int flags);
 using HipGetDeviceFn = hipError_t (*)(int* device);
 using HipSetDeviceFn = hipError_t (*)(int device);
 using HipGetDeviceCountFn = hipError_t (*)(int* device_count);
@@ -178,6 +193,68 @@ struct StreamDeleter {
 };
 
 using ScopedStream = std::unique_ptr<hipStream_st, StreamDeleter>;
+
+struct ScopedModule {
+  ~ScopedModule() {
+    if (value) {
+      EXPECT_EQ(hipSuccess, unload(value));
+    }
+  }
+
+  // Loaded executable released after its accepted work completes.
+  hipModule_t value = nullptr;
+  // Module release entry point from the exact DSO.
+  HipModuleUnloadFn unload = nullptr;
+};
+
+struct ScopedVirtualAliases {
+  ~ScopedVirtualAliases() {
+    if (address) {
+      const hipError_t completion = synchronize();
+      EXPECT_EQ(hipSuccess, completion);
+      if (completion != hipSuccess) {
+        return;
+      }
+      for (size_t i = 0; i < mapped.size(); ++i) {
+        if (!mapped[i]) {
+          continue;
+        }
+        const hipError_t result = unmap(Address(i), unit);
+        EXPECT_EQ(hipSuccess, result);
+        if (result != hipSuccess) {
+          return;
+        }
+      }
+      EXPECT_EQ(hipSuccess, close(address, 4 * unit));
+    }
+    for (auto handle : backing) {
+      if (handle) {
+        EXPECT_EQ(hipSuccess, release(handle));
+      }
+    }
+  }
+
+  void* Address(size_t index) {
+    return static_cast<uint8_t*>(address) + index * unit;
+  }
+
+  // Native mapping unit queried for the selected physical device.
+  size_t unit = 0;
+  // Address interval containing two aliases each of input and output backing.
+  void* address = nullptr;
+  // Public input/output references until explicitly released before dispatch.
+  std::array<hipMemGenericAllocationHandle_t, 2> backing = {};
+  // Successful native mappings requiring removal on every exit path.
+  std::array<bool, 4> mapped = {};
+  // Completion boundary before removing addresses used by accepted work.
+  HipDeviceSynchronizeFn synchronize = nullptr;
+  // Checked native alias removal from the exact DSO.
+  decltype(&hipMemUnmap) unmap = nullptr;
+  // Address owner release from the exact DSO.
+  decltype(&hipMemAddressFree) close = nullptr;
+  // Public physical-handle release from the exact DSO.
+  decltype(&hipMemRelease) release = nullptr;
+};
 
 struct ScopedRegistration {
   ~ScopedRegistration() {
@@ -413,13 +490,8 @@ hipError_t AddPrintfGraphNode(HipGraphAddKernelNodeFn add_kernel_node,
   return add_result;
 }
 
-TEST(HipModuleExecutionTest, OwnsLoadAndGraphInputsAcrossReloads) {
-  void* library = dlopen(CandidateLibPath(), RTLD_NOW | RTLD_LOCAL);
-  if (!library) {
-    GTEST_SKIP() << "cannot dlopen " << CandidateLibPath() << ": " << dlerror();
-  }
-
-  const auto init = ResolveHipSymbol<HipInitFn>(library, "hipInit");
+TEST_F(HipModuleExecutionTest, OwnsLoadAndGraphInputsAcrossReloads) {
+  auto& library = library_;
   const auto get_device =
       ResolveHipSymbol<HipGetDeviceFn>(library, "hipGetDevice");
   const auto get_device_properties =
@@ -453,7 +525,6 @@ TEST(HipModuleExecutionTest, OwnsLoadAndGraphInputsAcrossReloads) {
   const auto graph_exec_destroy =
       ResolveHipSymbol<HipGraphExecDestroyFn>(library, "hipGraphExecDestroy");
 
-  ASSERT_NE(nullptr, init);
   ASSERT_NE(nullptr, get_device);
   ASSERT_NE(nullptr, get_device_properties);
   ASSERT_NE(nullptr, module_load_data);
@@ -472,10 +543,6 @@ TEST(HipModuleExecutionTest, OwnsLoadAndGraphInputsAcrossReloads) {
   ASSERT_NE(nullptr, graph_launch);
   ASSERT_NE(nullptr, graph_exec_destroy);
 
-  const hipError_t init_result = init(/*flags=*/0);
-  if (init_result != hipSuccess) {
-    GTEST_SKIP() << "hipInit failed: " << init_result;
-  }
   int device = 0;
   ASSERT_EQ(hipSuccess, get_device(&device));
   hipDeviceProp_t properties = {};
@@ -558,6 +625,25 @@ TEST(HipModuleExecutionTest, OwnsLoadAndGraphInputsAcrossReloads) {
                                    hipMemcpyDeviceToHost));
   EXPECT_EQ((std::array<uint32_t, 4>{5, 9, 13, 17}), actual);
 
+  // Reuse GPU-cached input after a synchronous CPU upload. Unified memory
+  // takes the mapped copy path, which must transfer cache ownership as well
+  // as wait for the preceding dispatch to finish.
+  const std::array<uint32_t, 4> updated_input_values = {2, 4, 6, 8};
+  ASSERT_EQ(hipSuccess,
+            hip_memcpy(input, updated_input_values.data(),
+                       sizeof(updated_input_values), hipMemcpyHostToDevice));
+  ASSERT_EQ(hipSuccess, module_launch_kernel(function, 1, 1, 1, 1, 1, 1,
+                                             /*shared_memory_bytes=*/0,
+                                             /*stream=*/nullptr, arguments,
+                                             /*extra=*/nullptr));
+  ASSERT_EQ(hipSuccess, device_synchronize());
+  ASSERT_EQ(hipSuccess, hip_memcpy(actual.data(), output, sizeof(actual),
+                                   hipMemcpyDeviceToHost));
+  EXPECT_EQ((std::array<uint32_t, 4>{9, 17, 25, 33}), actual);
+  ASSERT_EQ(hipSuccess,
+            hip_memcpy(input, input_values.data(), sizeof(input_values),
+                       hipMemcpyHostToDevice));
+
   ASSERT_EQ(hipSuccess, module_unload(module));
   module = nullptr;
   function = nullptr;
@@ -637,14 +723,307 @@ TEST(HipModuleExecutionTest, OwnsLoadAndGraphInputsAcrossReloads) {
   EXPECT_EQ(hipSuccess, hip_free(input));
 }
 
-TEST(HipModuleExecutionTest,
-     ExtMultiKernelLaunchExecutesEntriesAndHonorsSynchronizationFlags) {
-  void* library = dlopen(CandidateLibPath(), RTLD_NOW | RTLD_LOCAL);
-  if (!library) {
-    GTEST_SKIP() << "cannot dlopen " << CandidateLibPath() << ": " << dlerror();
+TEST_F(HipModuleExecutionTest, StreamDependenciesAcrossRecordingBoundaries) {
+  const auto get_device = library_.Resolve<HipGetDeviceFn>("hipGetDevice");
+  const auto get_properties = library_.Resolve<HipGetDevicePropertiesR0600Fn>(
+      "hipGetDevicePropertiesR0600");
+  const auto load = library_.Resolve<HipModuleLoadDataFn>("hipModuleLoadData");
+  const auto unload = library_.Resolve<HipModuleUnloadFn>("hipModuleUnload");
+  const auto get_function =
+      library_.Resolve<HipModuleGetFunctionFn>("hipModuleGetFunction");
+  const auto launch =
+      library_.Resolve<HipModuleLaunchKernelFn>("hipModuleLaunchKernel");
+  const auto allocate = library_.Resolve<HipMallocFn>("hipMalloc");
+  const auto release = library_.Resolve<HipFreeFn>("hipFree");
+  const auto copy = library_.Resolve<HipMemcpyAsyncFn>("hipMemcpyAsync");
+  const auto fill = library_.Resolve<HipMemsetAsyncFn>("hipMemsetAsync");
+  const auto create_stream =
+      library_.Resolve<HipStreamCreateFn>("hipStreamCreate");
+  const auto destroy_stream =
+      library_.Resolve<HipStreamDestroyFn>("hipStreamDestroy");
+  const auto synchronize =
+      library_.Resolve<HipStreamSynchronizeFn>("hipStreamSynchronize");
+  const auto create_event =
+      library_.Resolve<decltype(&hipEventCreateWithFlags)>(
+          "hipEventCreateWithFlags");
+  const auto destroy_event =
+      library_.Resolve<decltype(&hipEventDestroy)>("hipEventDestroy");
+  const auto record_event =
+      library_.Resolve<decltype(&hipEventRecord)>("hipEventRecord");
+  ASSERT_NE(get_device, nullptr);
+  ASSERT_NE(get_properties, nullptr);
+  ASSERT_NE(load, nullptr);
+  ASSERT_NE(unload, nullptr);
+  ASSERT_NE(get_function, nullptr);
+  ASSERT_NE(launch, nullptr);
+  ASSERT_NE(allocate, nullptr);
+  ASSERT_NE(release, nullptr);
+  ASSERT_NE(copy, nullptr);
+  ASSERT_NE(fill, nullptr);
+  ASSERT_NE(create_stream, nullptr);
+  ASSERT_NE(destroy_stream, nullptr);
+  ASSERT_NE(synchronize, nullptr);
+  ASSERT_NE(create_event, nullptr);
+  ASSERT_NE(destroy_event, nullptr);
+  ASSERT_NE(record_event, nullptr);
+
+  int device = 0;
+  ASSERT_EQ(hipSuccess, get_device(&device));
+  hipDeviceProp_t properties = {};
+  ASSERT_EQ(hipSuccess, get_properties(&properties, device));
+  const auto image =
+      hrx_cts::FindAmdgpuExecutableTestImage(properties.gcnArchName);
+  ASSERT_NE(image.file, nullptr) << properties.gcnArchName;
+  ScopedModule module = {.unload = unload};
+  ASSERT_EQ(hipSuccess, load(&module.value, image.file->data));
+  hipFunction_t function = nullptr;
+  ASSERT_EQ(hipSuccess, get_function(&function, module.value,
+                                     "hrx_transform_nested_pointers"));
+  hipDeviceptr_t allocation = nullptr;
+  ASSERT_EQ(hipSuccess, allocate(&allocation, 8 * sizeof(uint32_t)));
+  auto release_allocation = [release](void* value) {
+    EXPECT_EQ(hipSuccess, release(value));
+  };
+  std::unique_ptr<void, decltype(release_allocation)> allocation_guard(
+      allocation, release_allocation);
+  auto* input = static_cast<uint32_t*>(allocation);
+  auto* output = input + 4;
+  hipStream_t stream = nullptr;
+  ASSERT_EQ(hipSuccess, create_stream(&stream));
+  ScopedStream stream_guard(stream, StreamDeleter{destroy_stream});
+  hipEvent_t event = nullptr;
+  ASSERT_EQ(hipSuccess, create_event(&event, hipEventDisableTiming));
+  auto release_event = [destroy_event](hipEvent_t value) {
+    EXPECT_EQ(hipSuccess, destroy_event(value));
+  };
+  std::unique_ptr<hipEvent_st, decltype(release_event)> event_guard(
+      event, release_event);
+
+  for (bool split_recordings : {false, true}) {
+    SCOPED_TRACE(split_recordings);
+    ASSERT_EQ(hipSuccess, fill(input, 0, 4 * sizeof(uint32_t), stream));
+    uint32_t expected = 0;
+    auto transform = [&](uint32_t* source, uint32_t* target, uint32_t scale,
+                         uint32_t offset) {
+      PointerArguments pointers = {source, target};
+      void* arguments[] = {&pointers, &scale, &offset};
+      ASSERT_EQ(hipSuccess, launch(function, 1, 1, 1, 1, 1, 1, 0, stream,
+                                   arguments, nullptr));
+      expected = expected * scale + offset;
+      if (split_recordings) {
+        // Recording an event submits the producer without a host wait. The
+        // following operation must consume it through the stream timeline.
+        ASSERT_EQ(hipSuccess, record_event(event, stream));
+      }
+    };
+    for (uint32_t i = 0; i < 16; ++i) {
+      ASSERT_NO_FATAL_FAILURE(transform(input, output, 3, i + 1));
+      ASSERT_NO_FATAL_FAILURE(transform(output, input, 2, 1));
+      ASSERT_EQ(hipSuccess, copy(output, input, 4 * sizeof(uint32_t),
+                                 hipMemcpyDeviceToDevice, stream));
+      ASSERT_NO_FATAL_FAILURE(transform(output, input, 1, 7));
+      ASSERT_NO_FATAL_FAILURE(transform(input, output, 3, 2));
+      ASSERT_EQ(hipSuccess, copy(input, output, 4 * sizeof(uint32_t),
+                                 hipMemcpyDeviceToDevice, stream));
+    }
+    std::array<uint32_t, 4> actual = {};
+    ASSERT_EQ(hipSuccess, copy(actual.data(), input, sizeof(actual),
+                               hipMemcpyDeviceToHost, stream));
+    ASSERT_EQ(hipSuccess, synchronize(stream));
+    EXPECT_EQ((std::array<uint32_t, 4>{expected, expected, expected, expected}),
+              actual);
+  }
+}
+
+TEST_F(HipModuleExecutionTest,
+       ThreadExitReleasesCurrentStackAndPerThreadStream) {
+  const auto get_device =
+      library_.Resolve<decltype(&hipGetDevice)>("hipGetDevice");
+  const auto get_current =
+      library_.Resolve<decltype(&hipCtxGetCurrent)>("hipCtxGetCurrent");
+  const auto push_current =
+      library_.Resolve<decltype(&hipCtxPushCurrent)>("hipCtxPushCurrent");
+  const auto synchronize =
+      library_.Resolve<decltype(&hipStreamSynchronize)>("hipStreamSynchronize");
+  ASSERT_NE(get_device, nullptr);
+  ASSERT_NE(get_current, nullptr);
+  ASSERT_NE(push_current, nullptr);
+  ASSERT_NE(synchronize, nullptr);
+  ASSERT_EQ(hipSuccess, synchronize(hipStreamPerThread));
+  std::thread worker([&] {
+    int device = -1;
+    ASSERT_EQ(hipSuccess, get_device(&device));
+    hipCtx_t context = nullptr;
+    ASSERT_EQ(hipSuccess, get_current(&context));
+    ASSERT_NE(context, nullptr);
+    ASSERT_EQ(hipSuccess, push_current(context));
+    ASSERT_EQ(hipSuccess, push_current(context));
+    ASSERT_EQ(hipSuccess, synchronize(hipStreamPerThread));
+  });
+  worker.join();
+}
+
+void HipModuleExecutionTest::CheckVirtualAliases(bool host_input) {
+  const auto get_device =
+      library_.Resolve<decltype(&hipGetDevice)>("hipGetDevice");
+  const auto set_device = library_.Resolve<HipSetDeviceFn>("hipSetDevice");
+  const auto get_device_count =
+      library_.Resolve<HipGetDeviceCountFn>("hipGetDeviceCount");
+  const auto get_properties = library_.Resolve<HipGetDevicePropertiesR0600Fn>(
+      "hipGetDevicePropertiesR0600");
+  const auto granularity =
+      library_.Resolve<decltype(&hipMemGetAllocationGranularity)>(
+          "hipMemGetAllocationGranularity");
+  const auto reserve =
+      library_.Resolve<decltype(&hipMemAddressReserve)>("hipMemAddressReserve");
+  const auto create = library_.Resolve<decltype(&hipMemCreate)>("hipMemCreate");
+  const auto map = library_.Resolve<decltype(&hipMemMap)>("hipMemMap");
+  const auto set_access =
+      library_.Resolve<decltype(&hipMemSetAccess)>("hipMemSetAccess");
+  const auto load = library_.Resolve<HipModuleLoadDataFn>("hipModuleLoadData");
+  const auto get_function =
+      library_.Resolve<HipModuleGetFunctionFn>("hipModuleGetFunction");
+  const auto launch =
+      library_.Resolve<HipModuleLaunchKernelFn>("hipModuleLaunchKernel");
+  const auto copy = library_.Resolve<HipMemcpyFn>("hipMemcpy");
+  const auto unload = library_.Resolve<HipModuleUnloadFn>("hipModuleUnload");
+  ScopedVirtualAliases aliases = {
+      .synchronize =
+          library_.Resolve<HipDeviceSynchronizeFn>("hipDeviceSynchronize"),
+      .unmap = library_.Resolve<decltype(&hipMemUnmap)>("hipMemUnmap"),
+      .close =
+          library_.Resolve<decltype(&hipMemAddressFree)>("hipMemAddressFree"),
+      .release = library_.Resolve<decltype(&hipMemRelease)>("hipMemRelease"),
+  };
+  ASSERT_NE(get_device, nullptr);
+  ASSERT_NE(set_device, nullptr);
+  ASSERT_NE(get_device_count, nullptr);
+  ASSERT_NE(get_properties, nullptr);
+  ASSERT_NE(granularity, nullptr);
+  ASSERT_NE(reserve, nullptr);
+  ASSERT_NE(create, nullptr);
+  ASSERT_NE(map, nullptr);
+  ASSERT_NE(set_access, nullptr);
+  ASSERT_NE(load, nullptr);
+  ASSERT_NE(get_function, nullptr);
+  ASSERT_NE(launch, nullptr);
+  ASSERT_NE(copy, nullptr);
+  ASSERT_NE(unload, nullptr);
+  ASSERT_NE(aliases.synchronize, nullptr);
+  ASSERT_NE(aliases.unmap, nullptr);
+  ASSERT_NE(aliases.close, nullptr);
+  ASSERT_NE(aliases.release, nullptr);
+
+  int device = 0;
+  ASSERT_EQ(hipSuccess, get_device(&device));
+  ScopedDeviceSelection restore_device = {
+      .original_device = device,
+      .set_device = set_device,
+  };
+  int device_count = 0;
+  ASSERT_EQ(hipSuccess, get_device_count(&device_count));
+  RecordProperty("participating_device_count", device_count);
+  hipMemAllocationProp allocation = {
+      .type = hipMemAllocationTypePinned,
+      .location = {.type = hipMemLocationTypeDevice, .id = device},
+  };
+  ASSERT_EQ(hipSuccess, granularity(&aliases.unit, &allocation,
+                                    hipMemAllocationGranularityMinimum));
+  if (host_input) {
+    allocation.location = {.type = hipMemLocationTypeHost, .id = 0};
+    size_t host_unit = 0;
+    ASSERT_EQ(hipSuccess, granularity(&host_unit, &allocation,
+                                      hipMemAllocationGranularityMinimum));
+    aliases.unit = std::max(aliases.unit, host_unit);
+  }
+  ASSERT_EQ(hipSuccess, reserve(&aliases.address, 4 * aliases.unit,
+                                aliases.unit, nullptr, 0));
+  ASSERT_EQ(hipSuccess,
+            create(&aliases.backing[0], aliases.unit, &allocation, 0));
+  allocation.location = {.type = hipMemLocationTypeDevice, .id = device};
+  ASSERT_EQ(hipSuccess,
+            create(&aliases.backing[1], aliases.unit, &allocation, 0));
+  for (size_t i = 0; i < aliases.mapped.size(); ++i) {
+    ASSERT_EQ(hipSuccess, map(aliases.Address(i), aliases.unit, 0,
+                              aliases.backing[i % 2], 0));
+    aliases.mapped[i] = true;
+  }
+  std::vector<hipMemAccessDesc> accesses(device_count);
+  for (int i = 0; i < device_count; ++i) {
+    accesses[i] = {
+        .location = {.type = hipMemLocationTypeDevice, .id = i},
+        .flags = hipMemAccessFlagsProtReadWrite,
+    };
+  }
+  ASSERT_EQ(hipSuccess, set_access(aliases.address, 4 * aliases.unit,
+                                   accesses.data(), accesses.size()));
+  if (host_input) {
+    const hipMemAccessDesc host_access = {
+        .location = {.type = hipMemLocationTypeHost, .id = 0},
+        .flags = hipMemAccessFlagsProtReadWrite,
+    };
+    for (size_t i : {0u, 2u}) {
+      ASSERT_EQ(hipSuccess,
+                set_access(aliases.Address(i), aliases.unit, &host_access, 1));
+    }
+  }
+  for (auto& handle : aliases.backing) {
+    ASSERT_EQ(hipSuccess, aliases.release(handle));
+    handle = nullptr;
   }
 
-  const auto init = ResolveHipSymbol<HipInitFn>(library, "hipInit");
+  const std::array<uint32_t, 4> input = {1, 2, 3, 4};
+  PointerArguments pointers = {
+      .input = static_cast<uint32_t*>(aliases.Address(2)),
+      .output = static_cast<uint32_t*>(aliases.Address(3)),
+  };
+  for (int i = 0; i < device_count; ++i) {
+    SCOPED_TRACE(i);
+    ASSERT_EQ(hipSuccess, set_device(i));
+    if (host_input) {
+      std::memcpy(aliases.Address(0), input.data(), sizeof(input));
+    } else {
+      ASSERT_EQ(hipSuccess, copy(aliases.Address(0), input.data(),
+                                 sizeof(input), hipMemcpyDefault));
+    }
+    hipDeviceProp_t properties = {};
+    ASSERT_EQ(hipSuccess, get_properties(&properties, i));
+    const auto image =
+        hrx_cts::FindAmdgpuExecutableTestImage(properties.gcnArchName);
+    ASSERT_NE(image.file, nullptr) << properties.gcnArchName;
+    ScopedModule module = {.unload = unload};
+    ASSERT_EQ(hipSuccess, load(&module.value, image.file->data));
+    hipFunction_t function = nullptr;
+    ASSERT_EQ(hipSuccess, get_function(&function, module.value,
+                                       "hrx_transform_nested_pointers"));
+    uint32_t scale = 4 + i;
+    uint32_t offset = 1 + i;
+    void* arguments[] = {&pointers, &scale, &offset};
+    ASSERT_EQ(hipSuccess, launch(function, 1, 1, 1, 1, 1, 1, 0, nullptr,
+                                 arguments, nullptr));
+    ASSERT_EQ(hipSuccess, aliases.synchronize());
+    std::array<uint32_t, 4> output = {};
+    ASSERT_EQ(hipSuccess, copy(output.data(), aliases.Address(1),
+                               sizeof(output), hipMemcpyDefault));
+    for (size_t j = 0; j < output.size(); ++j) {
+      EXPECT_EQ(output[j], input[j] * scale + offset);
+    }
+  }
+}
+
+TEST_F(HipModuleExecutionTest,
+       KernelUsesVirtualAliasesAfterBackingHandleRelease) {
+  CheckVirtualAliases(false);
+}
+
+TEST_F(HipModuleExecutionTest,
+       KernelUsesMixedVirtualAliasesAfterBackingHandleRelease) {
+  CheckVirtualAliases(true);
+}
+
+TEST_F(HipModuleExecutionTest,
+       ExtMultiKernelLaunchExecutesEntriesAndHonorsSynchronizationFlags) {
+  auto& library = library_;
   const auto get_device =
       ResolveHipSymbol<HipGetDeviceFn>(library, "hipGetDevice");
   const auto set_device =
@@ -684,7 +1063,6 @@ TEST(HipModuleExecutionTest,
   const auto register_function =
       ResolveHipSymbol<HipRegisterFunctionFn>(library, "__hipRegisterFunction");
 
-  ASSERT_NE(nullptr, init);
   ASSERT_NE(nullptr, get_device);
   ASSERT_NE(nullptr, set_device);
   ASSERT_NE(nullptr, get_device_count);
@@ -705,10 +1083,6 @@ TEST(HipModuleExecutionTest,
   ASSERT_NE(nullptr, unregister_fat_binary);
   ASSERT_NE(nullptr, register_function);
 
-  const hipError_t init_result = init(/*flags=*/0);
-  if (init_result != hipSuccess) {
-    GTEST_SKIP() << "hipInit failed: " << init_result;
-  }
   int original_device = 0;
   ASSERT_EQ(hipSuccess, get_device(&original_device));
   ScopedDeviceSelection restore_device = {
@@ -938,17 +1312,12 @@ TEST(HipModuleExecutionTest,
 // Requires device libraries using the stack/tag hostcall ABI; phase/occupancy
 // device libraries are incompatible with this provider. With a matching device
 // library, opt in using --gtest_also_run_disabled_tests.
-TEST(HipModuleExecutionTest, DISABLED_BlockingPrintfDirectAndGraphReplay) {
+TEST_F(HipModuleExecutionTest, DISABLED_BlockingPrintfDirectAndGraphReplay) {
   if (hrx_cts_amdgpu_hip_printf_test_kernels_size() == 0) {
     GTEST_SKIP() << "ROCm device libraries are unavailable";
   }
 
-  void* library = dlopen(CandidateLibPath(), RTLD_NOW | RTLD_LOCAL);
-  if (!library) {
-    GTEST_SKIP() << "cannot dlopen " << CandidateLibPath() << ": " << dlerror();
-  }
-
-  const auto init = ResolveHipSymbol<HipInitFn>(library, "hipInit");
+  auto& library = library_;
   const auto get_device =
       ResolveHipSymbol<HipGetDeviceFn>(library, "hipGetDevice");
   const auto get_device_properties =
@@ -980,7 +1349,6 @@ TEST(HipModuleExecutionTest, DISABLED_BlockingPrintfDirectAndGraphReplay) {
   const auto graph_exec_destroy =
       ResolveHipSymbol<HipGraphExecDestroyFn>(library, "hipGraphExecDestroy");
 
-  ASSERT_NE(nullptr, init);
   ASSERT_NE(nullptr, get_device);
   ASSERT_NE(nullptr, get_device_properties);
   ASSERT_NE(nullptr, module_load_data);
@@ -998,10 +1366,6 @@ TEST(HipModuleExecutionTest, DISABLED_BlockingPrintfDirectAndGraphReplay) {
   ASSERT_NE(nullptr, graph_launch);
   ASSERT_NE(nullptr, graph_exec_destroy);
 
-  const hipError_t init_result = init(/*flags=*/0);
-  if (init_result != hipSuccess) {
-    GTEST_SKIP() << "hipInit failed: " << init_result;
-  }
   int device = 0;
   ASSERT_EQ(hipSuccess, get_device(&device));
   hipDeviceProp_t properties = {};
@@ -1139,17 +1503,13 @@ TEST(HipModuleExecutionTest, DISABLED_BlockingPrintfDirectAndGraphReplay) {
   EXPECT_EQ(hipSuccess, module_unload(module));
 }
 
-TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
-  if (hrx_cts_amdgpu_hip_cooperative_test_kernels_size() == 0) {
+TEST_F(HipModuleExecutionTest,
+       CooperativeLaunchPreservesStreamAndGraphOrdering) {
+  if (iree_hal_amd_gpu_cooperative_images_size() == 0) {
     GTEST_SKIP() << "ROCm device libraries are unavailable";
   }
 
-  void* library = dlopen(CandidateLibPath(), RTLD_NOW | RTLD_LOCAL);
-  if (!library) {
-    GTEST_SKIP() << "cannot dlopen " << CandidateLibPath() << ": " << dlerror();
-  }
-
-  const auto init = ResolveHipSymbol<HipInitFn>(library, "hipInit");
+  auto& library = library_;
   const auto get_device =
       ResolveHipSymbol<HipGetDeviceFn>(library, "hipGetDevice");
   const auto get_device_properties =
@@ -1225,7 +1585,6 @@ TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
   const auto register_function =
       ResolveHipSymbol<HipRegisterFunctionFn>(library, "__hipRegisterFunction");
 
-  ASSERT_NE(nullptr, init);
   ASSERT_NE(nullptr, get_device);
   ASSERT_NE(nullptr, get_device_properties);
   ASSERT_NE(nullptr, module_load_data);
@@ -1261,10 +1620,6 @@ TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
   ASSERT_NE(nullptr, unregister_fat_binary);
   ASSERT_NE(nullptr, register_function);
 
-  const hipError_t init_result = init(/*flags=*/0);
-  if (init_result != hipSuccess) {
-    GTEST_SKIP() << "hipInit failed: " << init_result;
-  }
   int device = 0;
   ASSERT_EQ(hipSuccess, get_device(&device));
   hipDeviceProp_t properties = {};

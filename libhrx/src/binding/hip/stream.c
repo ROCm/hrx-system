@@ -20,6 +20,12 @@ static void iree_hip_stream_registry_initialize(void) {
   iree_hip_handle_registry_initialize(&iree_hip_stream_registry);
 }
 
+void iree_hip_stream_trim(void) {
+  iree_call_once(&iree_hip_stream_registry_once,
+                 iree_hip_stream_registry_initialize);
+  iree_hip_handle_registry_trim(&iree_hip_stream_registry);
+}
+
 static void iree_hip_stream_handle_retain(uintptr_t handle) {
   hipStream_t stream = (hipStream_t)handle;
   iree_atomic_ref_count_inc(&stream->ref_count);

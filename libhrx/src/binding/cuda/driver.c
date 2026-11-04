@@ -20,6 +20,7 @@
 #include "common/occupancy.h"
 #include "common/peer.h"
 #include "common/stream.h"
+#include "libhrx/src/libhrx/runtime.h"
 
 //===----------------------------------------------------------------------===//
 // Flag translation functions
@@ -227,8 +228,9 @@ static CUresult iree_event_record_status_to_cu_result(iree_status_t status) {
 
 CUDAAPI CUresult cuInit(unsigned int Flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_status_t status = iree_hal_streaming_init_global(
-      /*device_extensions=*/NULL, iree_allocator_system());
+  const hrx_gpu_initialize_options_t options = {0};
+  iree_status_t status =
+      iree_hal_streaming_init_global(&options, iree_allocator_system());
   CUresult result = iree_status_to_cu_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
@@ -289,8 +291,8 @@ CUDAAPI CUresult cuSetDevice(int device) {
   }
 
   // Set the primary context as current.
-  iree_hal_streaming_context_set_current(primary_context);
-  return CUDA_SUCCESS;
+  return iree_status_to_cu_result(
+      iree_hal_streaming_context_set_current(primary_context));
 }
 
 //===----------------------------------------------------------------------===//
@@ -359,9 +361,13 @@ CUDAAPI CUresult cuCtxCreate(CUcontext* pctx, unsigned int flags,
       device_registry->host_allocator, &context);
 
   if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_context_set_current(context);
+  }
+  if (iree_status_is_ok(status)) {
     *pctx = (CUcontext)context;
-    // Make it current.
-    iree_hal_streaming_context_set_current(context);
+  } else {
+    iree_hal_streaming_unregister_context(context);
+    iree_hal_streaming_context_release(context);
   }
 
   CUresult result = iree_status_to_cu_result(status);
@@ -380,7 +386,7 @@ CUDAAPI CUresult cuCtxDestroy(CUcontext ctx) {
   // If so, clear it from TLS to avoid a dangling reference.
   if (ctx == (CUcontext)iree_hal_streaming_context_current()) {
     // This will release the TLS reference.
-    iree_hal_streaming_context_set_current(NULL);
+    iree_hal_streaming_context_clear_current();
   }
 
   // Release the context.
@@ -413,9 +419,10 @@ CUDAAPI CUresult cuCtxPopCurrent(CUcontext* pctx) {
 
 CUDAAPI CUresult cuCtxSetCurrent(CUcontext ctx) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_hal_streaming_context_set_current((iree_hal_streaming_context_t*)ctx);
+  iree_status_t status = iree_hal_streaming_context_set_current(
+      (iree_hal_streaming_context_t*)ctx);
   IREE_TRACE_ZONE_END(z0);
-  return CUDA_SUCCESS;
+  return iree_status_to_cu_result(status);
 }
 
 CUDAAPI CUresult cuCtxGetCurrent(CUcontext* pctx) {
@@ -455,10 +462,12 @@ CUDAAPI CUresult cuCtxGetFlags(unsigned int* flags) {
   }
 
   // Convert internal flags structure to CUDA flags.
+  const iree_hal_streaming_context_flags_t context_flags =
+      iree_hal_streaming_context_flags(context);
   *flags = 0;
 
   // Convert scheduling mode.
-  switch (context->flags.scheduling_mode) {
+  switch (context_flags.scheduling_mode) {
     case IREE_HAL_STREAMING_SCHEDULING_MODE_SPIN:
       *flags |= CU_CTX_SCHED_SPIN;
       break;
@@ -475,10 +484,10 @@ CUDAAPI CUresult cuCtxGetFlags(unsigned int* flags) {
   }
 
   // Convert other flags.
-  if (context->flags.map_host_memory) {
+  if (context_flags.map_host_memory) {
     *flags |= CU_CTX_MAP_HOST;
   }
-  if (context->flags.resize_local_mem_to_max) {
+  if (context_flags.resize_local_mem_to_max) {
     *flags |= CU_CTX_LMEM_RESIZE_TO_MAX;
   }
 
@@ -1059,7 +1068,7 @@ CUDAAPI CUresult cuDevicePrimaryCtxReset(CUdevice dev) {
     iree_hal_streaming_context_t* current_context =
         iree_hal_streaming_context_current();
     if (current_context == device->primary_context) {
-      iree_hal_streaming_context_set_current(NULL);
+      iree_hal_streaming_context_clear_current();
     }
   }
 

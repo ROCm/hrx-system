@@ -9,6 +9,9 @@ import bazel_to_cmake_converter
 
 
 class HrxBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
+    def _should_emit_python_target(self):
+        return self._current_package().startswith("libhrx/cts/")
+
     def select(self, selector):
         if all(
             condition == "//conditions:default"

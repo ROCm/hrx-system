@@ -4,27 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <dlfcn.h>
-
 #include <cstdint>
-#include <cstdlib>
+#include <initializer_list>
 
 #include "binding/hip/api.h"
+#include "binding/hip/hip_dso_test_util.h"
 #include "iree/testing/gtest.h"
 
 namespace {
-
-const char* CandidateLibPath() {
-  if (const char* env = std::getenv("HRX_TEST_LIBAMDHIP64");
-      env && *env != '\0') {
-    return env;
-  }
-#ifdef HRX_TEST_LIBAMDHIP64_PATH
-  return HRX_TEST_LIBAMDHIP64_PATH;
-#else
-  return "libamdhip64.so";
-#endif
-}
 
 using HipInitFn = hipError_t (*)(unsigned int flags);
 using HipGetDeviceFn = hipError_t (*)(int* device);
@@ -45,11 +32,8 @@ using HipGraphAddMemAllocNodeFn = hipError_t (*)(
     hipGraphNode_t* node, hipGraph_t graph, const hipGraphNode_t* dependencies,
     size_t dependency_count, void* allocation_parameters);
 
-// Owns an RTLD_LOCAL HIP runtime instance and the entry points exercised by
-// this test. All calls use the loaded library instead of a link-time runtime.
+// Borrowed entry points from the suite-owned HIP shared library.
 struct HipRuntimeApi {
-  // Handle returned by dlopen for the HIP runtime instance.
-  void* library = nullptr;
   // Initializes the HIP runtime instance.
   HipInitFn init = nullptr;
   // Returns the current device ordinal.
@@ -77,46 +61,39 @@ struct HipRuntimeApi {
 };
 
 template <typename T>
-T ResolveHipSymbol(void* library, const char* name) {
-  return reinterpret_cast<T>(dlsym(library, name));
+T ResolveHipSymbol(hrx::hip::testing::HipDso& library, const char* name) {
+  return library.Resolve<T>(name);
 }
 
 class HipMemoryPoolApiTest : public testing::Test {
  protected:
-  void SetUp() override {
-    if (!api_.library) {
-      api_.library = dlopen(CandidateLibPath(), RTLD_LAZY | RTLD_LOCAL);
-      if (!api_.library) {
-        GTEST_SKIP() << "cannot dlopen " << CandidateLibPath() << ": "
-                     << dlerror();
-      }
+  static void SetUpTestSuite() {
+    ASSERT_TRUE(library_.Open()) << library_.error();
 
-      api_.init = ResolveHipSymbol<HipInitFn>(api_.library, "hipInit");
-      api_.get_device =
-          ResolveHipSymbol<HipGetDeviceFn>(api_.library, "hipGetDevice");
-      api_.stream_create =
-          ResolveHipSymbol<HipStreamCreateFn>(api_.library, "hipStreamCreate");
-      api_.stream_destroy = ResolveHipSymbol<HipStreamDestroyFn>(
-          api_.library, "hipStreamDestroy");
-      api_.device_get_default_mem_pool =
-          ResolveHipSymbol<HipDeviceGetDefaultMemPoolFn>(
-              api_.library, "hipDeviceGetDefaultMemPool");
-      api_.device_set_mem_pool = ResolveHipSymbol<HipDeviceSetMemPoolFn>(
-          api_.library, "hipDeviceSetMemPool");
-      api_.mem_pool_create = ResolveHipSymbol<HipMemPoolCreateFn>(
-          api_.library, "hipMemPoolCreate");
-      api_.mem_pool_destroy = ResolveHipSymbol<HipMemPoolDestroyFn>(
-          api_.library, "hipMemPoolDestroy");
-      api_.malloc_from_pool_async = ResolveHipSymbol<HipMallocFromPoolAsyncFn>(
-          api_.library, "hipMallocFromPoolAsync");
-      api_.graph_create =
-          ResolveHipSymbol<HipGraphCreateFn>(api_.library, "hipGraphCreate");
-      api_.graph_destroy =
-          ResolveHipSymbol<HipGraphDestroyFn>(api_.library, "hipGraphDestroy");
-      api_.graph_add_mem_alloc_node =
-          ResolveHipSymbol<HipGraphAddMemAllocNodeFn>(
-              api_.library, "hipGraphAddMemAllocNode");
-    }
+    api_.init = ResolveHipSymbol<HipInitFn>(library_, "hipInit");
+    api_.get_device =
+        ResolveHipSymbol<HipGetDeviceFn>(library_, "hipGetDevice");
+    api_.stream_create =
+        ResolveHipSymbol<HipStreamCreateFn>(library_, "hipStreamCreate");
+    api_.stream_destroy =
+        ResolveHipSymbol<HipStreamDestroyFn>(library_, "hipStreamDestroy");
+    api_.device_get_default_mem_pool =
+        ResolveHipSymbol<HipDeviceGetDefaultMemPoolFn>(
+            library_, "hipDeviceGetDefaultMemPool");
+    api_.device_set_mem_pool = ResolveHipSymbol<HipDeviceSetMemPoolFn>(
+        library_, "hipDeviceSetMemPool");
+    api_.mem_pool_create =
+        ResolveHipSymbol<HipMemPoolCreateFn>(library_, "hipMemPoolCreate");
+    api_.mem_pool_destroy =
+        ResolveHipSymbol<HipMemPoolDestroyFn>(library_, "hipMemPoolDestroy");
+    api_.malloc_from_pool_async = ResolveHipSymbol<HipMallocFromPoolAsyncFn>(
+        library_, "hipMallocFromPoolAsync");
+    api_.graph_create =
+        ResolveHipSymbol<HipGraphCreateFn>(library_, "hipGraphCreate");
+    api_.graph_destroy =
+        ResolveHipSymbol<HipGraphDestroyFn>(library_, "hipGraphDestroy");
+    api_.graph_add_mem_alloc_node = ResolveHipSymbol<HipGraphAddMemAllocNodeFn>(
+        library_, "hipGraphAddMemAllocNode");
 
     ASSERT_NE(nullptr, api_.init);
     ASSERT_NE(nullptr, api_.get_device);
@@ -131,14 +108,26 @@ class HipMemoryPoolApiTest : public testing::Test {
     ASSERT_NE(nullptr, api_.graph_destroy);
     ASSERT_NE(nullptr, api_.graph_add_mem_alloc_node);
 
-    const hipError_t init_result = api_.init(/*flags=*/0);
-    if (init_result != hipSuccess) {
-      GTEST_SKIP() << "hipInit failed: " << init_result;
+    ASSERT_EQ(hipSuccess, api_.init(/*flags=*/0));
+  }
+
+  static void TearDownTestSuite() {
+    if (!library_.is_open()) {
+      return;
     }
-    const hipError_t get_device_result = api_.get_device(&device_);
-    if (get_device_result != hipSuccess) {
-      GTEST_SKIP() << "hipGetDevice failed: " << get_device_result;
-    }
+    const auto deinit =
+        library_.Resolve<decltype(&hipHALDeinit)>("hipHALDeinit");
+    ASSERT_NE(nullptr, deinit) << library_.error();
+    EXPECT_EQ(hipSuccess, deinit());
+    EXPECT_TRUE(library_.Close()) << library_.error();
+  }
+
+  void SetUp() override {
+    const auto get_last_error =
+        library_.Resolve<decltype(&hipGetLastError)>("hipGetLastError");
+    ASSERT_NE(nullptr, get_last_error) << library_.error();
+    (void)get_last_error();
+    ASSERT_EQ(hipSuccess, api_.get_device(&device_));
     ASSERT_EQ(hipSuccess, api_.stream_create(&stream_));
   }
 
@@ -147,11 +136,11 @@ class HipMemoryPoolApiTest : public testing::Test {
       EXPECT_EQ(hipSuccess, api_.stream_destroy(stream_));
       stream_ = nullptr;
     }
-    // The runtime owns process-scoped driver services that cannot be
-    // reinitialized after the final dlclose in the same process.
   }
 
-  // Runtime entry points loaded once from the HIP shared object under test.
+  // Exact HIP artifact retained through synchronous suite shutdown.
+  static inline hrx::hip::testing::HipDso library_;
+  // Borrowed entry points resolved once before the suite initializes.
   static HipRuntimeApi api_;
   // Stream supplied to asynchronous allocation entry points.
   hipStream_t stream_ = nullptr;
@@ -169,6 +158,30 @@ TEST_F(HipMemoryPoolApiTest, ZeroByteAllocationReturnsNull) {
   EXPECT_EQ(hipSuccess,
             api_.malloc_from_pool_async(&pointer, /*size=*/0, pool, stream_));
   EXPECT_EQ(nullptr, pointer);
+}
+
+TEST_F(HipMemoryPoolApiTest, DefaultPoolHandlesAreBorrowed) {
+  const auto get_pool =
+      library_.Resolve<decltype(&hipMemGetMemPool)>("hipMemGetMemPool");
+  const auto set_pool =
+      library_.Resolve<decltype(&hipMemSetMemPool)>("hipMemSetMemPool");
+  ASSERT_NE(nullptr, get_pool) << library_.error();
+  ASSERT_NE(nullptr, set_pool) << library_.error();
+  hipMemLocation location = {
+      .type = hipMemLocationTypeDevice,
+      .id = device_,
+  };
+  for (auto type : {hipMemAllocationTypePinned, hipMemAllocationTypeManaged}) {
+    SCOPED_TRACE(type);
+    hipMemPool_t pool = nullptr;
+    ASSERT_EQ(hipSuccess, get_pool(&pool, &location, type));
+    ASSERT_NE(nullptr, pool);
+    EXPECT_EQ(hipErrorInvalidValue, api_.mem_pool_destroy(pool));
+    ASSERT_EQ(hipSuccess, set_pool(&location, type, pool));
+    hipMemPool_t selected_pool = nullptr;
+    ASSERT_EQ(hipSuccess, get_pool(&selected_pool, &location, type));
+    EXPECT_EQ(pool, selected_pool);
+  }
 }
 
 TEST_F(HipMemoryPoolApiTest, GraphAllocationReleasesSelectedPool) {
