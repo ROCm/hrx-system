@@ -49,7 +49,9 @@ class NativeReportTest(unittest.TestCase):
                 names = {entry["function"] for entry in document.entries}
                 self.assertTrue(expected_exports <= names, names)
                 self.assertEqual(len(names), len(document.entries))
-                self.assertTrue(any(name.startswith(helper) for name in names), names)
+                self.assertEqual(
+                    sum(name.startswith(helper) for name in names), 1, names
+                )
                 for entry in document.entries:
                     self.assertTrue(entry["target_bundle"])
                     self.assertGreater(entry["instruction_count"], 0)
@@ -72,8 +74,8 @@ class NativeReportTest(unittest.TestCase):
         self.check_report(
             callable_source,
             "x86:znver5",
-            ["call_pair"],
-            {"call_pair"},
+            ["call_pair", "call_pair_again"],
+            {"call_pair", "call_pair_again"},
             "draw_arguments",
         )
 
