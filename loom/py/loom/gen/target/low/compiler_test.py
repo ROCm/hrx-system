@@ -228,9 +228,36 @@ def test_immediate_identity_is_part_of_interned_layout() -> None:
             ),
             "marks read-only data without symbolic",
         ),
+        (
+            replace(
+                TEST_LOW_CONST_I32_DESCRIPTOR.immediates[0],
+                flags=(ImmediateFlag.SYMBOLIC, ImmediateFlag.DATA_SYMBOL),
+            ),
+            "marks a data symbol on a non-ordinal",
+        ),
+        (
+            replace(
+                TEST_LOW_CONST_I32_DESCRIPTOR.immediates[0],
+                kind=ImmediateKind.ORDINAL,
+                flags=(ImmediateFlag.DATA_SYMBOL,),
+            ),
+            "marks a data symbol without symbolic",
+        ),
+        (
+            replace(
+                TEST_LOW_CONST_I32_DESCRIPTOR.immediates[0],
+                kind=ImmediateKind.ORDINAL,
+                flags=(
+                    ImmediateFlag.SYMBOLIC,
+                    ImmediateFlag.READ_ONLY_DATA,
+                    ImmediateFlag.DATA_SYMBOL,
+                ),
+            ),
+            "cannot be both read-only data and a data symbol",
+        ),
     ],
 )
-def test_read_only_data_immediate_requires_symbolic_ordinal(immediate, message) -> None:
+def test_data_immediate_requires_one_symbolic_ordinal_contract(immediate, message) -> None:
     descriptor = replace(
         TEST_LOW_CONST_I32_DESCRIPTOR,
         immediates=(immediate,),

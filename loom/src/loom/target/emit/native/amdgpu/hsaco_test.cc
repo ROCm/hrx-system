@@ -796,30 +796,30 @@ TEST(AmdgpuHsacoTest, PatchesDataSymbolRel32TextFixups) {
   const loom_amdgpu_hsaco_text_fixup_t text_fixups[] = {
       {
           .kind = LOOM_AMDGPU_HSACO_TEXT_FIXUP_KIND_DATA_SYMBOL_REL32_LO,
+          .target_data_symbol_ordinal = 0,
           .literal_byte_offset = 4,
           .base_pc_byte_offset = 0,
-          .target_symbol = IREE_SV("loom_const_tag"),
           .target_symbol_byte_offset = 4,
       },
       {
           .kind = LOOM_AMDGPU_HSACO_TEXT_FIXUP_KIND_DATA_SYMBOL_REL32_HI,
+          .target_data_symbol_ordinal = 0,
           .literal_byte_offset = 12,
           .base_pc_byte_offset = 0,
-          .target_symbol = IREE_SV("loom_const_tag"),
           .target_symbol_byte_offset = 4,
       },
       {
           .kind = LOOM_AMDGPU_HSACO_TEXT_FIXUP_KIND_DATA_SYMBOL_REL32_LO,
+          .target_data_symbol_ordinal = 1,
           .literal_byte_offset = 28,
           .base_pc_byte_offset = 16,
-          .target_symbol = IREE_SV(kFeedbackConfigGlobalName),
           .target_symbol_byte_offset = 16,
       },
       {
           .kind = LOOM_AMDGPU_HSACO_TEXT_FIXUP_KIND_DATA_SYMBOL_REL32_HI,
+          .target_data_symbol_ordinal = 1,
           .literal_byte_offset = 36,
           .base_pc_byte_offset = 16,
-          .target_symbol = IREE_SV(kFeedbackConfigGlobalName),
           .target_symbol_byte_offset = 16,
       },
   };
@@ -916,9 +916,9 @@ TEST(AmdgpuHsacoTest, RejectsInvalidTextFixups) {
   {
     const loom_amdgpu_hsaco_text_fixup_t text_fixup = {
         .kind = LOOM_AMDGPU_HSACO_TEXT_FIXUP_KIND_DATA_SYMBOL_REL32_LO,
+        .target_data_symbol_ordinal = 0,
         .literal_byte_offset = 1,
         .base_pc_byte_offset = 0,
-        .target_symbol = IREE_SV("loom_data"),
     };
     const loom_amdgpu_hsaco_kernel_t kernel = {
         .metadata =
@@ -945,9 +945,9 @@ TEST(AmdgpuHsacoTest, RejectsInvalidTextFixups) {
   {
     const loom_amdgpu_hsaco_text_fixup_t text_fixup = {
         .kind = LOOM_AMDGPU_HSACO_TEXT_FIXUP_KIND_DATA_SYMBOL_REL32_LO,
+        .target_data_symbol_ordinal = 1,
         .literal_byte_offset = 0,
         .base_pc_byte_offset = 0,
-        .target_symbol = IREE_SV("missing_data"),
     };
     const loom_amdgpu_hsaco_kernel_t kernel = {
         .metadata =
@@ -967,7 +967,7 @@ TEST(AmdgpuHsacoTest, RejectsInvalidTextFixups) {
 
     StreamPtr stream = CreateStream();
     TestArena arena;
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                           WriteHsaco(&file, stream.get(), arena.arena()));
   }
 }

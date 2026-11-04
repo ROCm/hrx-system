@@ -21,6 +21,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/cache.h"
+#include "loom/ops/global/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/op_registry.h"
@@ -99,6 +100,17 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
         .module_id = 0,
         .symbol_id = symbol_id,
     };
+  }
+
+  loom_symbol_ref_t AddRodataDeclaration(iree_string_view_t name) {
+    const loom_symbol_ref_t symbol = AddSymbol(name);
+    loom_builder_t module_builder;
+    loom_builder_initialize(module_, &module_->arena,
+                            loom_module_block(module_), &module_builder);
+    loom_op_t* declaration = nullptr;
+    IREE_CHECK_OK(loom_global_rodata_decl_build(
+        &module_builder, symbol, LOOM_LOCATION_UNKNOWN, &declaration));
+    return symbol;
   }
 
   void BuildFunctionBody() {
@@ -387,7 +399,7 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
       loom_amdgpu_feedback_channel_header_values_t* out_channel_values,
       loom_amdgpu_feedback_packet_address_t* out_packet_address) {
     loom_symbol_ref_t config_symbol =
-        AddSymbol(IREE_SV("iree_feedback_config"));
+        AddRodataDeclaration(IREE_SV("iree_feedback_config"));
     IREE_RETURN_IF_ERROR(loom_amdgpu_build_feedback_config_values(
         &builder_, descriptor_set_, config_symbol, LOOM_LOCATION_UNKNOWN,
         out_config_values));
@@ -636,7 +648,8 @@ TEST_F(AmdgpuSanitizerRaceReportTest, BranchesColdSitesToSharedReportIsland) {
                                    /*args=*/nullptr, /*args_count=*/0,
                                    LOOM_LOCATION_UNKNOWN, &entry_branch_op));
 
-  loom_symbol_ref_t config_symbol = AddSymbol(IREE_SV("iree_feedback_config"));
+  loom_symbol_ref_t config_symbol =
+      AddRodataDeclaration(IREE_SV("iree_feedback_config"));
   loom_amdgpu_sanitizer_race_report_island_t island = {};
   IREE_ASSERT_OK(loom_amdgpu_build_sanitizer_race_report_island(
       &builder_, descriptor_set_, second_site_block, config_symbol,
@@ -722,7 +735,8 @@ TEST_F(AmdgpuSanitizerRaceReportTest,
                                    /*args=*/nullptr, /*args_count=*/0,
                                    LOOM_LOCATION_UNKNOWN, &entry_branch_op));
 
-  loom_symbol_ref_t config_symbol = AddSymbol(IREE_SV("iree_feedback_config"));
+  loom_symbol_ref_t config_symbol =
+      AddRodataDeclaration(IREE_SV("iree_feedback_config"));
   loom_amdgpu_sanitizer_race_report_island_t island = {};
   IREE_ASSERT_OK(loom_amdgpu_build_sanitizer_race_report_island(
       &builder_, descriptor_set_, second_site_block, config_symbol,

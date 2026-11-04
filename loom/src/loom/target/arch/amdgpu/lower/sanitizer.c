@@ -158,6 +158,24 @@ static iree_status_t loom_amdgpu_sanitizer_get_or_create_symbol(
   return iree_ok_status();
 }
 
+static iree_status_t loom_amdgpu_sanitizer_get_or_create_runtime_global(
+    loom_module_t* module, iree_string_view_t name,
+    loom_symbol_ref_t* out_symbol_ref) {
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_sanitizer_get_or_create_symbol(module, name, out_symbol_ref));
+  loom_symbol_t* symbol = &module->symbols.entries[out_symbol_ref->symbol_id];
+  if (symbol->defining_op != NULL) {
+    return iree_ok_status();
+  }
+
+  loom_builder_t builder;
+  loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                          &builder);
+  loom_op_t* declaration = NULL;
+  return loom_global_rodata_decl_build(&builder, *out_symbol_ref,
+                                       LOOM_LOCATION_UNKNOWN, &declaration);
+}
+
 static iree_status_t loom_amdgpu_sanitizer_lower_state(
     loom_low_lower_context_t* context,
     loom_amdgpu_sanitizer_lower_state_t** out_state) {
@@ -215,7 +233,7 @@ static iree_status_t loom_amdgpu_sanitizer_ensure_feedback_config_symbol(
     loom_amdgpu_sanitizer_lower_state_t* state) {
   if (!state->has_feedback_config_symbol) {
     loom_module_t* module = loom_low_lower_context_module(context);
-    IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_get_or_create_symbol(
+    IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_get_or_create_runtime_global(
         module, IREE_SV("iree_feedback_config"),
         &state->feedback_config_symbol));
     state->has_feedback_config_symbol = true;
@@ -228,7 +246,7 @@ static iree_status_t loom_amdgpu_sanitizer_ensure_asan_config_symbol(
     loom_amdgpu_sanitizer_lower_state_t* state) {
   if (!state->has_asan_config_symbol) {
     loom_module_t* module = loom_low_lower_context_module(context);
-    IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_get_or_create_symbol(
+    IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_get_or_create_runtime_global(
         module, IREE_SV("iree_asan_config"), &state->asan_config_symbol));
     state->has_asan_config_symbol = true;
   }
@@ -240,7 +258,7 @@ static iree_status_t loom_amdgpu_sanitizer_ensure_tsan_config_symbol(
     loom_amdgpu_sanitizer_lower_state_t* state) {
   if (!state->has_tsan_config_symbol) {
     loom_module_t* module = loom_low_lower_context_module(context);
-    IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_get_or_create_symbol(
+    IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_get_or_create_runtime_global(
         module, IREE_SV(LOOM_AMDGPU_TSAN_CONFIG_GLOBAL_NAME),
         &state->tsan_config_symbol));
     state->has_tsan_config_symbol = true;

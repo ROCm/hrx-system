@@ -33,7 +33,11 @@ def _symbol_rel32_immediate(field_name: str = "symbol") -> Immediate:
     return Immediate(
         field_name,
         ImmediateKind.ORDINAL,
-        flags=(ImmediateFlag.SYMBOLIC, ImmediateFlag.RELATIVE),
+        flags=(
+            ImmediateFlag.SYMBOLIC,
+            ImmediateFlag.RELATIVE,
+            ImmediateFlag.DATA_SYMBOL,
+        ),
         bit_width=32,
         unsigned_max=(2**32) - 1,
         encoding_field_id=amdgpu_encoding_field_id("LITERAL"),

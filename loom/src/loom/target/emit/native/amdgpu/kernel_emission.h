@@ -13,6 +13,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/base/string_builder.h"
 #include "loom/codegen/low/frame.h"
+#include "loom/target/emit/native/amdgpu/data_symbol_directory.h"
 #include "loom/target/emit/native/amdgpu/encoding.h"
 #include "loom/target/emit/native/amdgpu/hsaco_build.h"
 #include "loom/target/emit/native/amdgpu/kernel_plan.h"
@@ -50,6 +51,7 @@ typedef struct loom_amdgpu_kernel_emission_result_t {
 iree_status_t loom_amdgpu_kernel_emission_build(
     const loom_low_emission_frame_t* frame,
     const loom_amdgpu_kernel_plan_t* plan,
+    const loom_amdgpu_data_symbol_directory_t* data_symbols,
     loom_amdgpu_kernel_emission_flags_t flags,
     iree_string_builder_t* target_listing,
     loom_amdgpu_kernel_emission_result_t* out_result,

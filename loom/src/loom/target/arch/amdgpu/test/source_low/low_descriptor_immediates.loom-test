@@ -423,3 +423,29 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @dx9_zero_mul_asm_alias_re
   %product = v_mul_dx9_zero_f32 %a, %b
   return
 }
+
+// ====
+
+amdgpu.target<gfx1100> @gfx11_target
+
+global.rodata.decl @external_data
+
+global.rodata.def @defined_data = bytes("00000000")
+
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @rel32_data_symbols(%pc: reg<amdgpu.sgpr>) asm {
+  %external, %external_carry = s_add_u32_rhs_symbol_rel32_lo %pc {symbol = @external_data}
+  %defined, %defined_carry = s_add_u32_rhs_symbol_rel32_lo %pc {symbol = @defined_data}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @gfx11_target
+
+global.constant @not_data : i32
+
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @rel32_wrong_symbol_kind(%pc: reg<amdgpu.sgpr>) asm {
+  // ERROR@+1: SYMBOL/003 {symbol_name="not_data", actual_kind="global.constant", expected_kind="read-only data symbol"}
+  %address, %carry = s_add_u32_rhs_symbol_rel32_lo %pc {symbol = @not_data}
+  return
+}

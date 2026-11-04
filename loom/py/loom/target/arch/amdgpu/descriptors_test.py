@@ -2989,6 +2989,11 @@ def test_symbol_relative_salu_descriptors_have_lossless_low_asm_forms() -> None:
         assert tuple(
             immediate.field_name for immediate in add_lo.asm_forms[0].immediates
         ) == ("symbol", "byte_offset")
+        assert add_lo.immediates[0].flags == (
+            ImmediateFlag.SYMBOLIC,
+            ImmediateFlag.RELATIVE,
+            ImmediateFlag.DATA_SYMBOL,
+        )
 
         addc_hi = descriptors["amdgpu.s_addc_u32.rhs_symbol_rel32_hi"]
         assert addc_hi.effects == pc_relative_effect
@@ -2999,6 +3004,11 @@ def test_symbol_relative_salu_descriptors_have_lossless_low_asm_forms() -> None:
         assert tuple(
             immediate.field_name for immediate in addc_hi.asm_forms[0].immediates
         ) == ("symbol", "byte_offset")
+        assert addc_hi.immediates[0].flags == (
+            ImmediateFlag.SYMBOLIC,
+            ImmediateFlag.RELATIVE,
+            ImmediateFlag.DATA_SYMBOL,
+        )
 
 
 def _assert_feedback_atomic64_overlay(

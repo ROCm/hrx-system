@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "iree/base/string_builder.h"
+#include "loom/target/emit/native/amdgpu/data_symbol_directory.h"
 #include "loom/target/emit/native/amdgpu/kernel_emission.h"
 #include "loom/target/emit/native/amdgpu/kernel_plan.h"
 #include "loom/target/emit/native/amdgpu/program_artifact.h"
@@ -42,6 +43,7 @@ typedef struct loom_amdgpu_program_artifact_emission_t {
 // Encodes every artifact helper exactly once for final HSACO layout.
 iree_status_t loom_amdgpu_program_artifact_emission_build(
     const loom_amdgpu_program_artifact_t* artifact,
+    const loom_amdgpu_data_symbol_directory_t* data_symbols,
     loom_amdgpu_program_artifact_emission_t* out_emission,
     iree_arena_allocator_t* table_arena);
 
@@ -54,6 +56,7 @@ iree_status_t loom_amdgpu_program_artifact_emission_build(
 iree_status_t loom_amdgpu_program_emission_build(
     const loom_amdgpu_program_compilation_t* compilation,
     const loom_amdgpu_program_artifact_emission_t* artifact_emission,
+    const loom_amdgpu_data_symbol_directory_t* data_symbols,
     const loom_amdgpu_kernel_plan_t* entry_plan,
     loom_amdgpu_kernel_emission_flags_t flags,
     bool include_artifact_functions_in_listing,

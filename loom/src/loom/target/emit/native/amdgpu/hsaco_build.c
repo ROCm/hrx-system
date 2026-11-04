@@ -244,20 +244,6 @@ static bool loom_amdgpu_hsaco_data_symbol_is_writable(
                           LOOM_AMDGPU_HSACO_DATA_SYMBOL_FLAG_WRITABLE);
 }
 
-static const loom_amdgpu_hsaco_data_symbol_t*
-loom_amdgpu_hsaco_find_data_symbol(const loom_amdgpu_hsaco_input_t* input,
-                                   iree_string_view_t name,
-                                   iree_host_size_t* out_index) {
-  for (iree_host_size_t i = 0; i < input->data_symbol_count; ++i) {
-    if (iree_string_view_equal(input->data_symbols[i].name, name)) {
-      *out_index = i;
-      return &input->data_symbols[i];
-    }
-  }
-  *out_index = IREE_HOST_SIZE_MAX;
-  return NULL;
-}
-
 static iree_status_t loom_amdgpu_hsaco_store_u32(iree_byte_span_t target,
                                                  iree_host_size_t byte_offset,
                                                  uint32_t value) {
@@ -391,8 +377,6 @@ static iree_status_t loom_amdgpu_hsaco_validate_text_fragment(
                                 (int)kind.size, kind.data, (int)name.size,
                                 name.data, i, (int)fixup->kind);
     }
-    IREE_RETURN_IF_ERROR(loom_amdgpu_hsaco_validate_symbol(
-        fixup->target_symbol, IREE_SV("text_fixup.target_symbol")));
     if (fixup->literal_byte_offset > text.data_length ||
         text.data_length - fixup->literal_byte_offset < 4u ||
         fixup->base_pc_byte_offset > text.data_length) {
@@ -402,18 +386,16 @@ static iree_status_t loom_amdgpu_hsaco_validate_text_fragment(
                               (int)kind.size, kind.data, (int)name.size,
                               name.data, i);
     }
-    iree_host_size_t symbol_index = IREE_HOST_SIZE_MAX;
-    const loom_amdgpu_hsaco_data_symbol_t* symbol =
-        loom_amdgpu_hsaco_find_data_symbol(input, fixup->target_symbol,
-                                           &symbol_index);
-    if (symbol == NULL) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "AMDGPU HSACO %.*s '%.*s' text fixup %" PRIhsz
-                              " references unknown data symbol '%.*s'",
-                              (int)kind.size, kind.data, (int)name.size,
-                              name.data, i, (int)fixup->target_symbol.size,
-                              fixup->target_symbol.data);
+    if (fixup->target_data_symbol_ordinal >= input->data_symbol_count) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "AMDGPU HSACO %.*s '%.*s' text fixup %" PRIhsz
+          " targets data symbol ordinal %u outside the data-symbol array",
+          (int)kind.size, kind.data, (int)name.size, name.data, i,
+          fixup->target_data_symbol_ordinal);
     }
+    const loom_amdgpu_hsaco_data_symbol_t* symbol =
+        &input->data_symbols[fixup->target_data_symbol_ordinal];
     if (fixup->target_symbol_byte_offset > symbol->byte_length) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "AMDGPU HSACO %.*s '%.*s' text fixup %" PRIhsz
@@ -802,19 +784,10 @@ static iree_status_t loom_amdgpu_hsaco_build_text(
 }
 
 static iree_status_t loom_amdgpu_hsaco_data_symbol_address(
-    const loom_amdgpu_hsaco_input_t* input,
     const loom_amdgpu_hsaco_payloads_t* payloads, uint64_t rodata_address,
-    uint64_t data_address, iree_string_view_t name, uint64_t* out_address) {
-  iree_host_size_t symbol_index = IREE_HOST_SIZE_MAX;
-  const loom_amdgpu_hsaco_data_symbol_t* symbol =
-      loom_amdgpu_hsaco_find_data_symbol(input, name, &symbol_index);
-  if (symbol == NULL) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU HSACO data symbol '%.*s' not found",
-                            (int)name.size, name.data);
-  }
+    uint64_t data_address, uint32_t symbol_ordinal, uint64_t* out_address) {
   const loom_amdgpu_hsaco_data_symbol_layout_t* layout =
-      &payloads->data_symbol_layouts[symbol_index];
+      &payloads->data_symbol_layouts[symbol_ordinal];
   const uint64_t section_address =
       layout->logical_section_index == LOOM_AMDGPU_HSACO_SECTION_DATA
           ? data_address
@@ -828,7 +801,6 @@ static iree_status_t loom_amdgpu_hsaco_data_symbol_address(
 }
 
 static iree_status_t loom_amdgpu_hsaco_apply_fragment_fixups(
-    const loom_amdgpu_hsaco_input_t* input,
     const loom_amdgpu_hsaco_payloads_t* payloads, uint64_t rodata_address,
     uint64_t text_address, uint64_t data_address, uint64_t fragment_text_offset,
     const loom_amdgpu_hsaco_text_fixup_t* text_fixups,
@@ -845,8 +817,8 @@ static iree_status_t loom_amdgpu_hsaco_apply_fragment_fixups(
     const loom_amdgpu_hsaco_text_fixup_t* fixup = &text_fixups[i];
     uint64_t target_address = 0;
     IREE_RETURN_IF_ERROR(loom_amdgpu_hsaco_data_symbol_address(
-        input, payloads, rodata_address, data_address, fixup->target_symbol,
-        &target_address));
+        payloads, rodata_address, data_address,
+        fixup->target_data_symbol_ordinal, &target_address));
     if (!iree_checked_add_u64(target_address, fixup->target_symbol_byte_offset,
                               &target_address)) {
       return iree_make_status(
@@ -923,7 +895,7 @@ static iree_status_t loom_amdgpu_hsaco_apply_text_fixups(
   for (iree_host_size_t i = 0; i < input->kernel_count; ++i) {
     const loom_amdgpu_hsaco_kernel_t* kernel = &input->kernels[i];
     IREE_RETURN_IF_ERROR(loom_amdgpu_hsaco_apply_fragment_fixups(
-        input, payloads, rodata_address, text_address, data_address,
+        payloads, rodata_address, text_address, data_address,
         payloads->kernel_layouts[i].text_offset, kernel->text_fixups,
         kernel->text_fixup_count, kernel->call_fixups, kernel->call_fixup_count,
         text));
@@ -931,7 +903,7 @@ static iree_status_t loom_amdgpu_hsaco_apply_text_fixups(
   for (iree_host_size_t i = 0; i < input->function_count; ++i) {
     const loom_amdgpu_hsaco_function_t* function = &input->functions[i];
     IREE_RETURN_IF_ERROR(loom_amdgpu_hsaco_apply_fragment_fixups(
-        input, payloads, rodata_address, text_address, data_address,
+        payloads, rodata_address, text_address, data_address,
         payloads->function_layouts[i].text_offset, function->text_fixups,
         function->text_fixup_count, function->call_fixups,
         function->call_fixup_count, text));

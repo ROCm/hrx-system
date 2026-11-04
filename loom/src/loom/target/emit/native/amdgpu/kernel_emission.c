@@ -13,6 +13,7 @@
 iree_status_t loom_amdgpu_kernel_emission_build(
     const loom_low_emission_frame_t* frame,
     const loom_amdgpu_kernel_plan_t* plan,
+    const loom_amdgpu_data_symbol_directory_t* data_symbols,
     loom_amdgpu_kernel_emission_flags_t flags,
     iree_string_builder_t* target_listing,
     loom_amdgpu_kernel_emission_result_t* out_result,
@@ -39,9 +40,13 @@ iree_status_t loom_amdgpu_kernel_emission_build(
   const loom_amdgpu_kernel_entry_envelope_t* entry_envelope =
       record->entry_envelope;
   iree_const_byte_span_t kernel_text = iree_const_byte_span_empty();
+  const loom_amdgpu_hsaco_text_fixup_t* body_text_fixups = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_data_symbol_directory_bind_fixups(
+      data_symbols, stream.text_fixups, stream.text_fixup_count, table_arena,
+      &body_text_fixups));
   const loom_amdgpu_hsaco_text_fixup_t* kernel_text_fixups = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_entry_prepend_text(
-      entry_envelope, stream.text, stream.text_fixups, stream.text_fixup_count,
+      entry_envelope, stream.text, body_text_fixups, stream.text_fixup_count,
       &kernel_text, &kernel_text_fixups, table_arena));
   if (target_listing != NULL) {
     if (iree_string_builder_size(target_listing) != 0) {

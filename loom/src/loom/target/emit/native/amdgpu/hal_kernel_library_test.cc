@@ -2216,6 +2216,46 @@ TEST_F(AmdgpuHalKernelLibraryTest, RejectsRel32AddWithoutPcProvenance) {
 }
 
 TEST_F(AmdgpuHalKernelLibraryTest,
+       RejectsRel32ReferenceWithoutArtifactDefinition) {
+  static const char kSource[] =
+      "amdgpu.target<gfx1100> @gfx_target\n"
+      "global.rodata.decl @external_data\n"
+      "low.kernel.def target<amdgpu.rdna3.core>(@gfx_target) "
+      "workgroup_size(64, 1, 1) @loom_kernel() {\n"
+      "  %pc = low.op<amdgpu.s_getpc_b64>() : () -> "
+      "reg<amdgpu.sgpr x2>\n"
+      "  %pc_lo = low.slice %pc[0] : reg<amdgpu.sgpr x2> -> "
+      "reg<amdgpu.sgpr>\n"
+      "  %address, %carry = "
+      "low.op<amdgpu.s_add_u32.rhs_symbol_rel32_lo>(%pc_lo) "
+      "{symbol = @external_data} : "
+      "(reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>, reg<amdgpu.scc>\n"
+      "  low.return\n"
+      "}\n";
+  loom_module_t* module = nullptr;
+  ASSERT_NO_FATAL_FAILURE(
+      ParseSource(iree_make_cstring_view(kSource), &module));
+
+  DiagnosticCapture capture;
+  loom_amdgpu_hal_kernel_library_t library = {};
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      .diagnostic_sink = capture.sink(),
+      .max_errors = 20,
+  };
+  bool emitted = false;
+  iree::Status status(loom_amdgpu_compile_hal_kernel_library(
+      module, &options, iree_allocator_system(), &emitted, &library));
+
+  EXPECT_EQ(status.code(), iree::StatusCode::kFailedPrecondition);
+  EXPECT_THAT(status.ToString(),
+              ::testing::HasSubstr(
+                  "data symbol 'external_data' has no definition in this "
+                  "artifact"));
+  EXPECT_FALSE(emitted);
+  loom_module_free(module);
+}
+
+TEST_F(AmdgpuHalKernelLibraryTest,
        EmitsGlobalRodataSymbolsAndRel32AddressMaterialization) {
   static constexpr char kSiteSymbolName[] = "loom_sanitizer_sites";
   static const uint8_t kSiteRecords[] = {

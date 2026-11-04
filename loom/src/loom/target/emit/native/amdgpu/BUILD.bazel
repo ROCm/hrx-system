@@ -387,6 +387,16 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "data_symbol_fixup",
+    hdrs = ["data_symbol_fixup.h"],
+    deps = [
+        ":text_fixup",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "delay_layout",
     srcs = ["delay_layout.c"],
     hdrs = ["delay_layout.h"],
@@ -411,11 +421,11 @@ loom_cc_library(
     hdrs = ["encoding.h"],
     deps = [
         ":branch_layout",
+        ":data_symbol_fixup",
         ":delay_layout",
         ":function_text",
         ":register_class",
         ":storage_layout",
-        ":text_fixup",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:packet",
@@ -725,6 +735,7 @@ loom_cc_library(
     srcs = ["kernel_emission.c"],
     hdrs = ["kernel_emission.h"],
     deps = [
+        ":data_symbol_directory",
         ":encoding",
         ":hsaco_build",
         ":kernel_assembly",
@@ -741,6 +752,7 @@ loom_cc_library(
     srcs = ["program_emission.c"],
     hdrs = ["program_emission.h"],
     deps = [
+        ":data_symbol_directory",
         ":encoding",
         ":function_report",
         ":kernel_assembly",
@@ -869,6 +881,21 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "data_symbol_directory",
+    srcs = ["data_symbol_directory.c"],
+    hdrs = ["data_symbol_directory.h"],
+    deps = [
+        ":data_symbol_fixup",
+        ":hsaco_build",
+        ":runtime_globals",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/global",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
 loom_cc_test(
     name = "runtime_globals_test",
     srcs = ["runtime_globals_test.cc"],
@@ -885,6 +912,7 @@ loom_cc_library(
     hdrs = ["hal_kernel_library.h"],
     visibility = _AMDGPU_HAL_KERNEL_LIBRARY_VISIBILITY,
     deps = [
+        ":data_symbol_directory",
         ":function_compile",
         ":hsaco",
         ":hsaco_build",
@@ -895,7 +923,6 @@ loom_cc_library(
         ":program_compile",
         ":program_emission",
         ":program_report",
-        ":runtime_globals",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/codegen/low:target_binding",
@@ -903,7 +930,6 @@ loom_cc_library(
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:source",
         "//loom/src/loom/ir",
-        "//loom/src/loom/ops/global",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:entry_selection",
         "//loom/src/loom/target:function_version",
@@ -1035,6 +1061,7 @@ loom_cc_test(
         "runtime-resource=amd-gpu",
     ],
     deps = [
+        ":data_symbol_directory",
         ":hsaco",
         ":hsaco_build",
         ":kernel_emission",
