@@ -58,6 +58,16 @@ def _resolve_output_arguments(ctx, outputs_by_name):
         fail("output_args missing declared outputs: %s" % ", ".join(missing_outputs))
     return resolved_outputs
 
+def _expand_action_location(ctx, argument, location_targets):
+    """Expands a location into an execroot-relative action input path."""
+
+    # Generator actions consume artifacts from the execroot, never runfiles.
+    # Normalize all accepted location spellings before Bazel expands them so a
+    # configurable argument list cannot preserve a runfiles-relative rootpath.
+    argument = argument.replace("$(rootpath ", "$(location ")
+    argument = argument.replace("$(execpath ", "$(location ")
+    return ctx.expand_location(argument, targets = location_targets)
+
 def _register_generated_action(ctx, outputs_by_name):
     outputs = outputs_by_name.values()
     outputs_by_argument = _resolve_output_arguments(ctx, outputs_by_name)
@@ -65,7 +75,7 @@ def _register_generated_action(ctx, outputs_by_name):
     location_targets = ctx.attr.srcs + ctx.attr.data
     command_args = []
     for arg in ctx.attr.args:
-        command_args.append(ctx.expand_location(arg, targets = location_targets))
+        command_args.append(_expand_action_location(ctx, arg, location_targets))
 
     for output_name, output_arg in ctx.attr.output_args.items():
         command_args.extend(_expand_output_arg(output_arg, outputs_by_argument[output_name]))

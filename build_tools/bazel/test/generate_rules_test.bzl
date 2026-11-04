@@ -222,6 +222,36 @@ def _test_generated_sources_declares_shared_action_impl(env, target):
         "_iree_generated/test_generated_sources_declares_shared_action_family__source_generator/test_generated_sources_declares_shared_action/generated.h",
     )
 
+def _test_generated_sources_consumes_generated_source(name, **kwargs):
+    producer_label = "//build_tools/bazel/test/generate_fixture:producer.h"
+    iree_generated_sources(
+        name = name + "_consumer",
+        args = ["--input=$(rootpath %s)" % producer_label],
+        outs = [name + "/consumer.h"],
+        output_args = {name + "/consumer.h": "--header={path}"},
+        srcs = [producer_label],
+        tags = ["manual"],
+        tool = "//build_tools/bazel/test:generate_rule_fixture_tool",
+    )
+    analysis_test(
+        name = name,
+        impl = _test_generated_sources_consumes_generated_source_impl,
+        target = name + "_consumer__source_generator",
+        **kwargs
+    )
+
+def _test_generated_sources_consumes_generated_source_impl(env, target):
+    actions = target[TestingAspectInfo].actions
+    env.expect.that_int(len(actions)).equals(1)
+    action = actions[0]
+    producer_paths = [
+        file.path
+        for file in action.inputs.to_list()
+        if file.basename == "producer.h"
+    ]
+    env.expect.that_int(len(producer_paths)).equals(1)
+    _expect_value(env, action.argv, "--input=" + producer_paths[0])
+
 def _test_invalid_output_arguments(name, outs, output_args, impl, **kwargs):
     util.helper_target(
         iree_generated_files,
@@ -310,5 +340,6 @@ def generate_rules_test_suite(name):
             _test_generated_files_rejects_ambiguous_basename,
             _test_generated_sources_exposes_public_paths,
             _test_generated_sources_declares_shared_action,
+            _test_generated_sources_consumes_generated_source,
         ],
     )
