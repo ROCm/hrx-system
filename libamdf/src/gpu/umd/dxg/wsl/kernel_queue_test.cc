@@ -330,7 +330,7 @@ TEST_F(WslDxgKernelQueueTest,
 
 TEST_F(WslDxgKernelQueueTest,
        CreationFailuresRollBackAndPreserveCallerOutputs) {
-  for (const auto [command_type, failed_operation] : std::array<
+  for (const auto& [command_type, failed_operation] : std::array<
            std::pair<amdf_dxg_provider_gpu_queue_command_type_t, uint32_t>, 2>{{
            {AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_PM4, 0x18},
            {AMDF_DXG_PROVIDER_GPU_QUEUE_COMMAND_TYPE_SDMA, 0x10},

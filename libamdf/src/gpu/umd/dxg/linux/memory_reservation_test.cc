@@ -131,9 +131,9 @@ extern "C" uint32_t __wrap_amdf_linux_dxg_connection_invoke(void* context,
           .allocation_handle = map->hAllocation,
           .source_byte_offset = map->OffsetInPages * 4096,
           .byte_length = map->SizeInPages * 4096,
-          .write = map->Protection.Write,
-          .execute = map->Protection.Execute,
-          .no_access = map->Protection.NoAccess,
+          .write = static_cast<uint32_t>(map->Protection.Write),
+          .execute = static_cast<uint32_t>(map->Protection.Execute),
+          .no_access = static_cast<uint32_t>(map->Protection.NoAccess),
       });
       if (current_state->map_status != kStatusPending &&
           current_state->map_status != 0) {
