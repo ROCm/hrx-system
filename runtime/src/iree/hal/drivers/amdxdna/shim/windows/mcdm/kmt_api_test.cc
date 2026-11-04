@@ -1833,6 +1833,41 @@ TEST(KmtApiTest, QueueCodeRangeReleasePreservesMarkersWithoutCpuWait) {
   run(McdmAbi::legacy, 107600, 1u);
 }
 
+TEST(KmtApiTest, CompactQueuedReleaseRetainsOnlyTheFirstSlot) {
+  ResetFakes();
+  KmtApi api = {};
+  api.submit_command_to_hw_queue = FakeSubmitCommandToHwQueue;
+  api.wait_from_cpu = FakeWaitFromCpu;
+  Device device = {};
+  device.device = 0x10;
+  device.mcdm_abi = McdmAbi::compact;
+  Context context = {};
+  context.hw_queue = 0x20;
+  context.progress_fence = 0x21;
+  context.next_fence_id = 7;
+  CommandAperture aperture = {};
+  aperture.gpu_allocation = 0x30;
+  alignas(64) static std::array<uint8_t, 0x100000> aperture_storage = {};
+  aperture.gpu_cpu_ptr = aperture_storage.data();
+  aperture.gpu_va_size = aperture_storage.size();
+  Error error = {};
+  ASSERT_TRUE(ConfigurePathBCodeRangeForSetupPayload(
+      McdmAbi::compact, 9952, &aperture, &error));
+
+  ASSERT_TRUE(QueuePathBCodeRangeExtensionRelease(
+      api, device, &context, aperture, aperture.code_offset, 0x10000, &error))
+      << ErrorMessage(&error);
+  EXPECT_EQ(g_submit_count, 0u);
+
+  ASSERT_TRUE(QueuePathBCodeRangeExtensionRelease(
+      api, device, &context, aperture, aperture.code_offset, 0x30000, &error))
+      << ErrorMessage(&error);
+  ASSERT_EQ(g_submit_count, 2u);
+  EXPECT_EQ(g_submit_offsets[0], aperture.code_offset + 0x20000u);
+  EXPECT_EQ(g_submit_offsets[1], aperture.code_offset + 0x10000u);
+  EXPECT_EQ(g_wait_count, 0u);
+}
+
 TEST(KmtApiTest, PublishPathBCodeWriteRepeatsOpcode9WithoutRewrite) {
   // Opcode-9 is a queue-ordered happens-before, not a copy. Repeating
   // PublishPathBCodeWrite must emit the same end-marker sequence without

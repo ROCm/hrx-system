@@ -594,6 +594,14 @@ bool QueuePathBCodeRangeRelease(const KmtApi& api, const Device& device,
                                 uint64_t offset, uint64_t length,
                                 Error* out_error);
 
+// Compact hot-path release for an unchanged command-owned range. Retains the
+// first slot and queues reverse release markers only for extension slots.
+// Replacement, eviction, and teardown must use QueuePathBCodeRangeRelease.
+bool QueuePathBCodeRangeExtensionRelease(
+    const KmtApi& api, const Device& device, Context* context,
+    const CommandAperture& aperture, uint64_t offset, uint64_t length,
+    Error* out_error);
+
 // Path B: per-dispatch hwqueue_aie4-style submit. Reserve an 8-byte completion
 // slot, build the driver-negotiated private packet with the ERT packet inline,
 // and submit the exec BO via SubmitCommandToHwQueue. `ert_packet`/`ert_bytes`

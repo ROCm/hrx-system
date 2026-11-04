@@ -1385,10 +1385,20 @@ iree_status_t stage_windows_dpu_code_buffer(
                     static_cast<size_t>(command->control_buffer_size)) == 0));
   if (same_staged_code) {
     if (is_partial_elf) {
+      bool activated = false;
       IREE_RETURN_IF_ERROR(ensure_pathb_single_code_range_active(
           queue, code_offset, command->control_buffer_size,
-          /*out_activated=*/nullptr));
+          &activated));
       IREE_RETURN_IF_ERROR(set_npu_instruction_fields());
+      // Compact command-owned base slots remain active after a successful
+      // consume. If the immutable code still fits in that one retained slot,
+      // there is no host write to publish and no extension slot to reacquire.
+      if (!uses_shared_command_code_view &&
+          !pathb_release_waits_for_cpu(queue->context) &&
+          !activated &&
+          command->control_buffer_size <= slot_size) {
+        return iree_ok_status();
+      }
     }
   } else {
     IREE_RETURN_IF_ERROR(close_pathb_single_code_range(queue, code_offset));
@@ -5054,13 +5064,27 @@ static iree_status_t iree_hal_amdxdna_native_submit_wait(
     queue->exec_command_count++;
     if (packet->state == ERT_CMD_STATE_COMPLETED) {
       if (s->is_pathb_partial_elf) {
-        // The legacy XRT qhdl lifecycle releases the consumed aperture range
-        // after every state-3 completion, even when the next dispatch reuses
-        // identical code. Without this start marker, repeated commands
-        // republish an already-active range and can leave firmware waiting
-        // until the WDDM engine watchdog resets it.
-        IREE_RETURN_IF_ERROR(close_pathb_single_code_range(
-            queue, command->pathb_single_code_aperture_offset));
+        if (pathb_release_waits_for_cpu(queue->context)) {
+          // Legacy XRT releases and waits after every state-3 completion.
+          IREE_RETURN_IF_ERROR(close_pathb_single_code_range(
+              queue, command->pathb_single_code_aperture_offset));
+        } else if (command->control_buffer_size >
+                   mcdm::GetMcdmAbiInfo(queue->context->kmt.mcdm_abi)
+                       .command_aperture_code_slot_size) {
+          // Compact XRT keeps the command-owned base slot active. Release only
+          // extension slots; replacement/eviction/teardown takes the full
+          // close path before any overwrite.
+          if (!mcdm::QueuePathBCodeRangeExtensionRelease(
+                  command->device->api, command->device->device,
+                  &queue->context->context,
+                  queue->context->command_aperture,
+                  command->pathb_single_code_aperture_offset,
+                  command->control_buffer_size, &error)) {
+            return status_from_mcdm_error(
+                "amdxdna Windows MCDM pathb extension release failed", error);
+          }
+          note_pathb_queued_release(queue->context);
+        }
       } else if (!mcdm::SubmitPathBApertureSync(
                      command->device->api, command->device->device,
                      &queue->context->context,

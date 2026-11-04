@@ -2792,7 +2792,7 @@ bool PublishPathBCodeEndMarker(const KmtApi& api, const Device& device,
 static bool ReleasePathBCodeRangeImpl(
     const KmtApi& api, const Device& device, Context* context,
     const CommandAperture& aperture, uint64_t offset, uint64_t length,
-    bool wait_for_cpu, Error* out_error) {
+    bool wait_for_cpu, bool retain_first_slot, Error* out_error) {
   const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
   if (!ValidatePathBCodeRange(abi, aperture, offset, length, out_error)) {
     return false;
@@ -2808,6 +2808,12 @@ static bool ReleasePathBCodeRangeImpl(
       aperture.code_offset + (relative_begin & ~(slot_size - 1));
   uint64_t slot_start = aperture.code_offset +
                         ((relative_begin + length - 1) & ~(slot_size - 1));
+  // Compact XRT keeps the first slot of a command-owned range in the active
+  // aperture session and queues reverse release markers only for extension
+  // slots. The next consume republishes the final boundary after rewriting
+  // the same base slot. Full release paths (replacement, eviction, teardown)
+  // still include the first slot and wait for completion.
+  if (retain_first_slot && slot_start <= first_slot) return true;
   for (;;) {
     if (!SubmitPathBApertureSync(api, device, context, aperture, slot_start,
                                  /*wait_for_cpu=*/
@@ -2815,7 +2821,10 @@ static bool ReleasePathBCodeRangeImpl(
                                  out_error)) {
       return false;
     }
-    if (slot_start <= first_slot) break;
+    if (slot_start <= first_slot ||
+        (retain_first_slot && slot_start <= first_slot + slot_size)) {
+      break;
+    }
     slot_start -= slot_size;
   }
   return true;
@@ -2826,7 +2835,8 @@ bool ReleasePathBCodeRange(const KmtApi& api, const Device& device,
                            const CommandAperture& aperture, uint64_t offset,
                            uint64_t length, Error* out_error) {
   return ReleasePathBCodeRangeImpl(api, device, context, aperture, offset,
-                                   length, /*wait_for_cpu=*/true, out_error);
+                                   length, /*wait_for_cpu=*/true,
+                                   /*retain_first_slot=*/false, out_error);
 }
 
 bool QueuePathBCodeRangeRelease(const KmtApi& api, const Device& device,
@@ -2835,7 +2845,20 @@ bool QueuePathBCodeRangeRelease(const KmtApi& api, const Device& device,
                                 uint64_t offset, uint64_t length,
                                 Error* out_error) {
   return ReleasePathBCodeRangeImpl(api, device, context, aperture, offset,
-                                   length, /*wait_for_cpu=*/false, out_error);
+                                   length, /*wait_for_cpu=*/false,
+                                   /*retain_first_slot=*/false, out_error);
+}
+
+bool QueuePathBCodeRangeExtensionRelease(
+    const KmtApi& api, const Device& device, Context* context,
+    const CommandAperture& aperture, uint64_t offset, uint64_t length,
+    Error* out_error) {
+  return ReleasePathBCodeRangeImpl(api, device, context, aperture, offset,
+                                   length, /*wait_for_cpu=*/false,
+                                   /*retain_first_slot=*/
+                                       !UsesLegacyCpuBufferHandles(
+                                           device.mcdm_abi),
+                                   out_error);
 }
 
 // Allocate the firmware completion ring using the status object selected by
