@@ -68,6 +68,7 @@ hrx_cc_test(
         "runtime_test.cc",
     ],
     includes = ["../.."],
+    local_defines = ["IREE_HAL_STREAMING_CUDA_EXPORTS"],
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
