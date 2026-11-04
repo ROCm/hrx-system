@@ -11,18 +11,18 @@
 
 iree_status_t loom_serve_image_sample_totals(
     const loom_serve_image_totals_t* totals,
-    loom_serve_telemetry_sample_sink_t sink) {
-  static const loom_serve_telemetry_metric_t fields[] = {
-      {"generated_images", "images", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"generated_pixels", "pixels", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"queue", "nanoseconds", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"prepare", "nanoseconds", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"admission", "nanoseconds", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"submit", "nanoseconds", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"execution", "nanoseconds", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"png", "nanoseconds", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"json", "nanoseconds", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"png_bytes", "bytes", LOOM_SERVE_TELEMETRY_COUNTER},
+    loom_runtime_telemetry_sample_sink_t sink) {
+  static const loom_runtime_telemetry_metric_t fields[] = {
+      {"generated_images", "images", LOOM_RUNTIME_TELEMETRY_COUNTER},
+      {"generated_pixels", "pixels", LOOM_RUNTIME_TELEMETRY_COUNTER},
+      {"queue", "nanoseconds", LOOM_RUNTIME_TELEMETRY_COUNTER},
+      {"prepare", "nanoseconds", LOOM_RUNTIME_TELEMETRY_COUNTER},
+      {"admission", "nanoseconds", LOOM_RUNTIME_TELEMETRY_COUNTER},
+      {"submit", "nanoseconds", LOOM_RUNTIME_TELEMETRY_COUNTER},
+      {"execution", "nanoseconds", LOOM_RUNTIME_TELEMETRY_COUNTER},
+      {"png", "nanoseconds", LOOM_RUNTIME_TELEMETRY_COUNTER},
+      {"json", "nanoseconds", LOOM_RUNTIME_TELEMETRY_COUNTER},
+      {"png_bytes", "bytes", LOOM_RUNTIME_TELEMETRY_COUNTER},
   };
   const uint64_t values[] = {
       totals->generated_images,  totals->generated_pixels,
@@ -33,8 +33,8 @@ iree_status_t loom_serve_image_sample_totals(
   };
   static_assert(IREE_ARRAYSIZE(fields) == IREE_ARRAYSIZE(values),
                 "one value per image field");
-  const loom_serve_telemetry_topic_t topic = {"image", 1,
-                                              IREE_ARRAYSIZE(fields), fields};
+  const loom_runtime_telemetry_topic_t topic = {"image", 1,
+                                                IREE_ARRAYSIZE(fields), fields};
   return sink.emit(sink.self, &topic, values);
 }
 

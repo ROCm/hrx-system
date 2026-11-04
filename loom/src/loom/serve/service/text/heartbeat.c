@@ -13,29 +13,29 @@
 
 iree_status_t loom_serve_text_heartbeat_sample(
     loom_serve_text_heartbeat_t* heartbeat,
-    loom_serve_telemetry_sample_sink_t sink) {
+    loom_runtime_telemetry_sample_sink_t sink) {
   const loom_serve_text_heartbeat_snapshot_t state =
       loom_serve_text_heartbeat_read(heartbeat);
-  static const loom_serve_telemetry_metric_t fields[] = {
-      {"prefill_rows", "requests", LOOM_SERVE_TELEMETRY_GAUGE},
-      {"decode_rows", "requests", LOOM_SERVE_TELEMETRY_GAUGE},
-      {"backpressured_rows", "requests", LOOM_SERVE_TELEMETRY_GAUGE},
-      {"session_capacity", "sessions", LOOM_SERVE_TELEMETRY_GAUGE},
-      {"pool_capacity", "tokens", LOOM_SERVE_TELEMETRY_GAUGE},
-      {"pool_resident", "tokens", LOOM_SERVE_TELEMETRY_GAUGE},
-      {"pool_reserved", "tokens", LOOM_SERVE_TELEMETRY_GAUGE},
-      {"session_cache_endpoints", "sessions", LOOM_SERVE_TELEMETRY_GAUGE},
-      {"prefix_cache_endpoints", "prefixes", LOOM_SERVE_TELEMETRY_GAUGE},
-      {"checkpoint_host_bytes", "bytes", LOOM_SERVE_TELEMETRY_GAUGE},
-      {"elastic_state_committed_bytes", "bytes", LOOM_SERVE_TELEMETRY_GAUGE},
-      {"elastic_state_reserved_bytes", "bytes", LOOM_SERVE_TELEMETRY_GAUGE},
-      {"completed_epochs", "epochs", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"traversals", "traversals", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"prefill_tokens", "tokens", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"decode_tokens", "tokens", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"model_duration", "nanoseconds", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"draft_proposed_tokens", "tokens", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"draft_accepted_inputs", "tokens", LOOM_SERVE_TELEMETRY_COUNTER},
+  static const loom_runtime_telemetry_metric_t fields[] = {
+      {"prefill_rows", "requests", LOOM_RUNTIME_TELEMETRY_GAUGE},
+      {"decode_rows", "requests", LOOM_RUNTIME_TELEMETRY_GAUGE},
+      {"backpressured_rows", "requests", LOOM_RUNTIME_TELEMETRY_GAUGE},
+      {"session_capacity", "sessions", LOOM_RUNTIME_TELEMETRY_GAUGE},
+      {"pool_capacity", "tokens", LOOM_RUNTIME_TELEMETRY_GAUGE},
+      {"pool_resident", "tokens", LOOM_RUNTIME_TELEMETRY_GAUGE},
+      {"pool_reserved", "tokens", LOOM_RUNTIME_TELEMETRY_GAUGE},
+      {"session_cache_endpoints", "sessions", LOOM_RUNTIME_TELEMETRY_GAUGE},
+      {"prefix_cache_endpoints", "prefixes", LOOM_RUNTIME_TELEMETRY_GAUGE},
+      {"checkpoint_host_bytes", "bytes", LOOM_RUNTIME_TELEMETRY_GAUGE},
+      {"elastic_state_committed_bytes", "bytes", LOOM_RUNTIME_TELEMETRY_GAUGE},
+      {"elastic_state_reserved_bytes", "bytes", LOOM_RUNTIME_TELEMETRY_GAUGE},
+      {"completed_epochs", "epochs", LOOM_RUNTIME_TELEMETRY_COUNTER},
+      {"traversals", "traversals", LOOM_RUNTIME_TELEMETRY_COUNTER},
+      {"prefill_tokens", "tokens", LOOM_RUNTIME_TELEMETRY_COUNTER},
+      {"decode_tokens", "tokens", LOOM_RUNTIME_TELEMETRY_COUNTER},
+      {"model_duration", "nanoseconds", LOOM_RUNTIME_TELEMETRY_COUNTER},
+      {"draft_proposed_tokens", "tokens", LOOM_RUNTIME_TELEMETRY_COUNTER},
+      {"draft_accepted_inputs", "tokens", LOOM_RUNTIME_TELEMETRY_COUNTER},
   };
   const uint64_t values[] = {
       state.prefill_rows,
@@ -60,8 +60,8 @@ iree_status_t loom_serve_text_heartbeat_sample(
   };
   static_assert(IREE_ARRAYSIZE(fields) == IREE_ARRAYSIZE(values),
                 "one value per text field");
-  const loom_serve_telemetry_topic_t topic = {"text", 1, IREE_ARRAYSIZE(fields),
-                                              fields};
+  const loom_runtime_telemetry_topic_t topic = {"text", 1,
+                                                IREE_ARRAYSIZE(fields), fields};
   return sink.emit(sink.self, &topic, values);
 }
 

@@ -9,6 +9,7 @@
 #include <inttypes.h>
 
 #include "iree/base/internal/json.h"
+#include "loom/runtime/telemetry/pool.h"
 #include "loom/serve/runtime/execution/workspace.h"
 #include "loom/serve/runtime/parameter/residency.h"
 #include "loom/serve/telemetry/sample.h"
@@ -88,76 +89,29 @@ iree_host_size_t loom_serve_resources_observation_count(
              : 0;
 }
 
-static iree_status_t loom_serve_resources_pool_topic(
-    const char* name, const iree_hal_pool_stats_t* statistics,
-    loom_serve_telemetry_sample_sink_t sink) {
-  static const loom_serve_telemetry_metric_t fields[] = {
-      {"reserved_bytes", "bytes", LOOM_SERVE_TELEMETRY_GAUGE},
-      {"committed_bytes", "bytes", LOOM_SERVE_TELEMETRY_GAUGE},
-      {"free_bytes", "bytes", LOOM_SERVE_TELEMETRY_GAUGE},
-      {"quarantined_bytes", "bytes", LOOM_SERVE_TELEMETRY_GAUGE},
-      {"abandoned_bytes", "bytes", LOOM_SERVE_TELEMETRY_GAUGE},
-      {"budget_limit", "bytes", LOOM_SERVE_TELEMETRY_GAUGE},
-      {"reservation_count", "reservations", LOOM_SERVE_TELEMETRY_GAUGE},
-      {"slab_count", "slabs", LOOM_SERVE_TELEMETRY_GAUGE},
-      {"reserve_count", "reservations", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"release_count", "reservations", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"reuse_count", "reservations", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"reuse_miss_count", "reservations", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"fresh_count", "reservations", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"exhausted_count", "reservations", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"over_budget_count", "reservations", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"wait_count", "reservations", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"quarantine_eviction_count", "reservations",
-       LOOM_SERVE_TELEMETRY_COUNTER},
-  };
-  const loom_serve_telemetry_topic_t topic = {name, 1, IREE_ARRAYSIZE(fields),
-                                              fields};
-  const uint64_t values[] = {
-      statistics->bytes_reserved,
-      statistics->bytes_committed,
-      statistics->bytes_free,
-      statistics->bytes_quarantined,
-      statistics->bytes_abandoned,
-      statistics->budget_limit,
-      statistics->reservation_count,
-      statistics->slab_count,
-      statistics->reserve_count,
-      statistics->release_count,
-      statistics->reuse_count,
-      statistics->reuse_miss_count,
-      statistics->fresh_count,
-      statistics->exhausted_count,
-      statistics->over_budget_count,
-      statistics->wait_count,
-      statistics->quarantine_eviction_count,
-  };
-  return sink.emit(sink.self, &topic, values);
-}
-
 iree_status_t loom_serve_resources_sample(
     const loom_serve_resources_t* resources, iree_host_size_t pool_index,
-    loom_serve_telemetry_sample_sink_t sink) {
+    loom_runtime_telemetry_sample_sink_t sink) {
   loom_serve_pool_t* pool =
       loom_serve_device_group_pool_at(resources->device_group, pool_index);
   const loom_serve_memory_pool_t* retained = loom_serve_pool_memory(pool);
   const loom_serve_pool_statistics_t memory = loom_serve_pool_statistics(pool);
   IREE_RETURN_IF_ERROR(
-      loom_serve_resources_pool_topic("storage", &memory.storage, sink));
+      loom_runtime_telemetry_sample_pool("storage", &memory.storage, sink));
   if (retained) {
-    static const loom_serve_telemetry_metric_t fields[] = {
-        {"reserved_bytes", "bytes", LOOM_SERVE_TELEMETRY_GAUGE},
-        {"committed_bytes", "bytes", LOOM_SERVE_TELEMETRY_GAUGE},
-        {"cached_bytes", "bytes", LOOM_SERVE_TELEMETRY_GAUGE},
-        {"pending_bytes", "bytes", LOOM_SERVE_TELEMETRY_GAUGE},
-        {"releasing_bytes", "bytes", LOOM_SERVE_TELEMETRY_GAUGE},
-        {"abandoned_bytes", "bytes", LOOM_SERVE_TELEMETRY_GAUGE},
-        {"peak_bytes", "bytes", LOOM_SERVE_TELEMETRY_GAUGE},
-        {"budget_limit", "bytes", LOOM_SERVE_TELEMETRY_GAUGE},
-        {"released_bytes", "bytes", LOOM_SERVE_TELEMETRY_COUNTER},
+    static const loom_runtime_telemetry_metric_t fields[] = {
+        {"reserved_bytes", "bytes", LOOM_RUNTIME_TELEMETRY_GAUGE},
+        {"committed_bytes", "bytes", LOOM_RUNTIME_TELEMETRY_GAUGE},
+        {"cached_bytes", "bytes", LOOM_RUNTIME_TELEMETRY_GAUGE},
+        {"pending_bytes", "bytes", LOOM_RUNTIME_TELEMETRY_GAUGE},
+        {"releasing_bytes", "bytes", LOOM_RUNTIME_TELEMETRY_GAUGE},
+        {"abandoned_bytes", "bytes", LOOM_RUNTIME_TELEMETRY_GAUGE},
+        {"peak_bytes", "bytes", LOOM_RUNTIME_TELEMETRY_GAUGE},
+        {"budget_limit", "bytes", LOOM_RUNTIME_TELEMETRY_GAUGE},
+        {"released_bytes", "bytes", LOOM_RUNTIME_TELEMETRY_COUNTER},
     };
-    const loom_serve_telemetry_topic_t topic = {"elastic", 1,
-                                                IREE_ARRAYSIZE(fields), fields};
+    const loom_runtime_telemetry_topic_t topic = {
+        "elastic", 1, IREE_ARRAYSIZE(fields), fields};
     const uint64_t limit = loom_serve_memory_pool_limit(retained);
     const uint64_t values[] = {
         memory.retained.reserved_bytes,  memory.retained.committed_bytes,
@@ -168,7 +122,8 @@ iree_status_t loom_serve_resources_sample(
     };
     IREE_RETURN_IF_ERROR(sink.emit(sink.self, &topic, values));
   }
-  return loom_serve_resources_pool_topic("workspace", &memory.workspace, sink);
+  return loom_runtime_telemetry_sample_pool("workspace", &memory.workspace,
+                                            sink);
 }
 
 typedef struct loom_serve_resources_topic_writer_t {
@@ -179,7 +134,7 @@ typedef struct loom_serve_resources_topic_writer_t {
 } loom_serve_resources_topic_writer_t;
 
 static iree_status_t loom_serve_resources_write_topic(
-    void* self, const loom_serve_telemetry_topic_t* topic,
+    void* self, const loom_runtime_telemetry_topic_t* topic,
     const uint64_t* values) {
   loom_serve_resources_topic_writer_t* writer = self;
   if (writer->has_topic) {
@@ -275,8 +230,8 @@ iree_status_t loom_serve_resources_write_observation(
   loom_serve_resources_topic_writer_t writer = {.output = output};
   IREE_RETURN_IF_ERROR(loom_serve_resources_sample(
       resources, pool_index,
-      (loom_serve_telemetry_sample_sink_t){&writer,
-                                           loom_serve_resources_write_topic}));
+      (loom_runtime_telemetry_sample_sink_t){
+          &writer, loom_serve_resources_write_topic}));
   return iree_string_builder_append_cstring(output, "]}");
 }
 

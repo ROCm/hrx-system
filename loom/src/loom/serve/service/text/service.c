@@ -1320,7 +1320,7 @@ static iree_status_t loom_serve_text_open_checkpoint(
 }
 
 static iree_status_t loom_serve_text_sample(
-    void* self, loom_serve_telemetry_sample_sink_t sink) {
+    void* self, loom_runtime_telemetry_sample_sink_t sink) {
   loom_serve_text_service_t* service = self;
   return loom_serve_text_heartbeat_sample(&service->heartbeat, sink);
 }

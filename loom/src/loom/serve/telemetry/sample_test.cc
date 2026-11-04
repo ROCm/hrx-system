@@ -14,11 +14,11 @@
 namespace {
 
 TEST(TelemetrySampleTest, ExactIntegersAndFieldSemantics) {
-  const loom_serve_telemetry_metric_t fields[] = {
-      {"completed", "requests", LOOM_SERVE_TELEMETRY_COUNTER},
-      {"resident", "bytes", LOOM_SERVE_TELEMETRY_GAUGE},
+  const loom_runtime_telemetry_metric_t fields[] = {
+      {"completed", "requests", LOOM_RUNTIME_TELEMETRY_COUNTER},
+      {"resident", "bytes", LOOM_RUNTIME_TELEMETRY_GAUGE},
   };
-  const loom_serve_telemetry_topic_t topic = {"work", 1, 2, fields};
+  const loom_runtime_telemetry_topic_t topic = {"work", 1, 2, fields};
   const uint64_t values[] = {UINT64_MAX, 0};
   iree_string_builder_t output;
   iree_string_builder_initialize(iree_allocator_system(), &output);
@@ -40,7 +40,7 @@ TEST(TelemetrySampleTest, FixedOutputCapacityFailsExplicitly) {
   iree_string_builder_t output;
   iree_string_builder_initialize_with_storage(storage, sizeof(storage),
                                               &output);
-  const loom_serve_telemetry_topic_t topic = {"empty", 1, 0, nullptr};
+  const loom_runtime_telemetry_topic_t topic = {"empty", 1, 0, nullptr};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
       loom_serve_telemetry_sample_write_json(&topic, nullptr, &output));

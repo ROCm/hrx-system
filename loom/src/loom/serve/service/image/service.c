@@ -956,7 +956,7 @@ static iree_status_t loom_serve_image_accept(
 }
 
 static iree_status_t loom_serve_image_sample(
-    void* self, loom_serve_telemetry_sample_sink_t sink) {
+    void* self, loom_runtime_telemetry_sample_sink_t sink) {
   loom_serve_image_service_t* service = self;
   return loom_serve_image_sample_totals(&service->telemetry.totals, sink);
 }

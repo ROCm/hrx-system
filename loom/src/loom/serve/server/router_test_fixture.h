@@ -28,6 +28,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
+#include "loom/runtime/telemetry/sample.h"
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/transport/http/listener.h"
@@ -447,11 +448,11 @@ struct loom_serve_test_model_service_t {
   }
 
   static iree_status_t Sample(void* self,
-                              loom_serve_telemetry_sample_sink_t sink) {
+                              loom_runtime_telemetry_sample_sink_t sink) {
     const auto* service = static_cast<loom_serve_test_model_service_t*>(self);
-    const loom_serve_telemetry_metric_t field = {"consumed", "tokens",
-                                                 LOOM_SERVE_TELEMETRY_COUNTER};
-    const loom_serve_telemetry_topic_t topic = {"work", 1, 1, &field};
+    const loom_runtime_telemetry_metric_t field = {
+        "consumed", "tokens", LOOM_RUNTIME_TELEMETRY_COUNTER};
+    const loom_runtime_telemetry_topic_t topic = {"work", 1, 1, &field};
     return sink.emit(sink.self, &topic, &service->counters->input_tokens);
   }
 

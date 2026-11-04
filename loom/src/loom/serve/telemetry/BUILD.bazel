@@ -23,7 +23,10 @@ loom_cc_library(
     name = "sample",
     srcs = ["sample.c"],
     hdrs = ["sample.h"],
-    deps = ["//runtime/src/iree/base"],
+    deps = [
+        "//loom/src/loom/runtime/telemetry:sample",
+        "//runtime/src/iree/base",
+    ],
 )
 
 loom_cc_test(

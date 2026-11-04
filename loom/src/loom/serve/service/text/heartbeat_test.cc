@@ -13,6 +13,7 @@
 #include "iree/base/threading/notification.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/serve/telemetry/sample.h"
 
 namespace {
 
@@ -192,7 +193,7 @@ TEST_F(TextHeartbeatTest, SamplingIsIndependentOfTimerAndRingRetention) {
   iree_string_builder_initialize(iree_allocator_system(), &output);
   IREE_EXPECT_OK(loom_serve_text_heartbeat_sample(
       &heartbeat_,
-      {&output, [](void* self, const loom_serve_telemetry_topic_t* topic,
+      {&output, [](void* self, const loom_runtime_telemetry_topic_t* topic,
                    const uint64_t* values) {
          EXPECT_STREQ(topic->name, "text");
          EXPECT_EQ(topic->version, 1u);

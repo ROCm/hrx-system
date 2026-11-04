@@ -11,8 +11,8 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/test_allocator.h"
+#include "loom/runtime/telemetry/sample.h"
 #include "loom/serve/service/service.h"
-#include "loom/serve/telemetry/sample.h"
 #include "loom/serve/telemetry/stream.h"
 
 namespace {
@@ -39,13 +39,13 @@ class ObservationTest : public ::testing::Test {
                 .stream = stream_,
                 .counters = &counters_,
                 .sample =
-                    [](void* self, loom_serve_telemetry_sample_sink_t sink) {
+                    [](void* self, loom_runtime_telemetry_sample_sink_t sink) {
                       auto* test = static_cast<ObservationTest*>(self);
                       ++test->samples_;
-                      static const loom_serve_telemetry_metric_t fields[] = {
-                          {"resident", "bytes", LOOM_SERVE_TELEMETRY_GAUGE}};
-                      const loom_serve_telemetry_topic_t topic = {"storage", 1,
-                                                                  1, fields};
+                      static const loom_runtime_telemetry_metric_t fields[] = {
+                          {"resident", "bytes", LOOM_RUNTIME_TELEMETRY_GAUGE}};
+                      const loom_runtime_telemetry_topic_t topic = {
+                          "storage", 1, 1, fields};
                       return sink.emit(sink.self, &topic, &test->resident_);
                     },
             },

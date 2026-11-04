@@ -17,11 +17,11 @@ loom_cc_library(
     srcs = ["metrics.c"],
     hdrs = ["metrics.h"],
     deps = [
+        "//loom/src/loom/runtime/telemetry:sample",
         "//loom/src/loom/serve/server:registry",
         "//loom/src/loom/serve/service:kind",
         "//loom/src/loom/serve/telemetry:latency",
         "//loom/src/loom/serve/telemetry:record",
-        "//loom/src/loom/serve/telemetry:sample",
         "//runtime/src/iree/base",
     ],
 )

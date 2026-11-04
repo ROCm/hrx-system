@@ -8,10 +8,10 @@
 
 #include <inttypes.h>
 
+#include "loom/runtime/telemetry/sample.h"
 #include "loom/serve/service/kind.h"
 #include "loom/serve/telemetry/latency.h"
 #include "loom/serve/telemetry/record.h"
-#include "loom/serve/telemetry/sample.h"
 
 // Prometheus labels preserve UTF-8 and escape only backslash, quote and LF.
 // JSON escaping is different for control characters and Unicode separators.
@@ -113,18 +113,18 @@ typedef struct loom_serve_http_metrics_extension_t {
 } loom_serve_http_metrics_extension_t;
 
 static iree_status_t loom_serve_http_metrics_extension_emit(
-    void* self, const loom_serve_telemetry_topic_t* topic,
+    void* self, const loom_runtime_telemetry_topic_t* topic,
     const uint64_t* values) {
   const loom_serve_http_metrics_extension_t* extension = self;
   iree_string_builder_t* output = extension->output;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < topic->count && iree_status_is_ok(status);
        ++i) {
-    const loom_serve_telemetry_metric_t* field = &topic->fields[i];
+    const loom_runtime_telemetry_metric_t* field = &topic->fields[i];
     status = loom_serve_http_metrics_sample_begin(
         output,
-        field->kind == LOOM_SERVE_TELEMETRY_COUNTER ? "observation_total"
-                                                    : "observation",
+        field->kind == LOOM_RUNTIME_TELEMETRY_COUNTER ? "observation_total"
+                                                      : "observation",
         extension->model, "topic", topic->name);
     if (iree_status_is_ok(status)) {
       status = iree_string_builder_append_format(
@@ -161,7 +161,7 @@ static iree_status_t loom_serve_http_metrics_extensions(
     loom_serve_http_metrics_extension_t extension = {output, model};
     status = model->service.telemetry.sample(
         model->service.self,
-        (loom_serve_telemetry_sample_sink_t){
+        (loom_runtime_telemetry_sample_sink_t){
             &extension, loom_serve_http_metrics_extension_emit});
   }
   return status;
