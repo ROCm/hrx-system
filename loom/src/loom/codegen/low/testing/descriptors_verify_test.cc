@@ -1564,6 +1564,28 @@ TEST(LowDescriptorsTest, RejectsExtraneousReadOnlyDataImmediateSummary) {
                         loom_low_descriptor_set_verify(&tables.set));
 }
 
+TEST(LowDescriptorsTest, AcceptsDataSymbolImmediate) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.immediates[0].kind = LOOM_LOW_IMMEDIATE_KIND_ORDINAL;
+  tables.immediates[0].flags =
+      LOOM_LOW_IMMEDIATE_FLAG_SYMBOLIC | LOOM_LOW_IMMEDIATE_FLAG_DATA_SYMBOL;
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsConflictingDataImmediateFlags) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.immediates[0].kind = LOOM_LOW_IMMEDIATE_KIND_ORDINAL;
+  tables.immediates[0].flags = LOOM_LOW_IMMEDIATE_FLAG_SYMBOLIC |
+                               LOOM_LOW_IMMEDIATE_FLAG_READ_ONLY_DATA |
+                               LOOM_LOW_IMMEDIATE_FLAG_DATA_SYMBOL;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
 TEST(LowDescriptorsTest, RejectsNonOrdinalReadOnlyDataImmediate) {
   TestTables tables;
   InitializeTestTables(&tables);

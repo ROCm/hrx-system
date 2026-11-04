@@ -16,6 +16,7 @@
 #include "loom/target/emit/native/amdgpu/kernel_entry.h"
 #include "loom/target/emit/native/amdgpu/preflight.h"
 #include "loom/target/emit/native/amdgpu/storage_layout.h"
+#include "loom/target/emit/native/amdgpu/symbol_name.h"
 #include "loom/target/launch.h"
 
 static bool loom_amdgpu_kernel_record_has_abi_source(
@@ -53,39 +54,6 @@ static iree_status_t loom_amdgpu_kernel_record_concat3(
   return iree_ok_status();
 }
 
-static bool loom_amdgpu_kernel_record_symbol_start_char(char c) {
-  return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_' ||
-         c == '$';
-}
-
-static bool loom_amdgpu_kernel_record_symbol_continue_char(char c) {
-  return loom_amdgpu_kernel_record_symbol_start_char(c) ||
-         (c >= '0' && c <= '9') || c == '.';
-}
-
-static iree_status_t loom_amdgpu_kernel_record_validate_symbol(
-    iree_string_view_t symbol) {
-  if (iree_string_view_is_empty(symbol)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU kernel emission symbol is required");
-  }
-  if (!loom_amdgpu_kernel_record_symbol_start_char(symbol.data[0])) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU kernel emission symbol '%.*s' has an invalid first character",
-        (int)symbol.size, symbol.data);
-  }
-  for (iree_host_size_t i = 1; i < symbol.size; ++i) {
-    if (!loom_amdgpu_kernel_record_symbol_continue_char(symbol.data[i])) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AMDGPU kernel emission symbol '%.*s' contains an invalid character",
-          (int)symbol.size, symbol.data);
-    }
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_amdgpu_kernel_record_symbol_name(
     const loom_module_t* module, const loom_op_t* function_op,
     iree_string_view_t* out_symbol) {
@@ -105,7 +73,7 @@ static iree_status_t loom_amdgpu_kernel_record_symbol_name(
                             "module string");
   }
   *out_symbol = loom_string_table_get(&module->strings, symbol->name_id);
-  return loom_amdgpu_kernel_record_validate_symbol(*out_symbol);
+  return loom_amdgpu_symbol_name_validate(*out_symbol);
 }
 
 static iree_status_t loom_amdgpu_kernel_record_export_symbol(
@@ -114,7 +82,7 @@ static iree_status_t loom_amdgpu_kernel_record_export_symbol(
   const loom_target_bundle_t* bundle = loom_low_resolved_target_bundle(target);
   if (!iree_string_view_is_empty(bundle->export_plan->export_symbol)) {
     *out_symbol = bundle->export_plan->export_symbol;
-    return loom_amdgpu_kernel_record_validate_symbol(*out_symbol);
+    return loom_amdgpu_symbol_name_validate(*out_symbol);
   }
   return loom_amdgpu_kernel_record_symbol_name(module, function_op, out_symbol);
 }

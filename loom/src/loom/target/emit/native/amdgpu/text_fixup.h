@@ -24,19 +24,21 @@ typedef enum loom_amdgpu_hsaco_text_fixup_kind_e {
   LOOM_AMDGPU_HSACO_TEXT_FIXUP_KIND_DATA_SYMBOL_REL32_HI = 2,
 } loom_amdgpu_hsaco_text_fixup_kind_t;
 
-// One text literal patch against an AMDGPU code-object data symbol.
+// One final text literal patch against an AMDGPU code-object data symbol.
 typedef struct loom_amdgpu_hsaco_text_fixup_t {
   // Kind of literal value written by this fixup.
   loom_amdgpu_hsaco_text_fixup_kind_t kind;
+  // Direct index into the code object's data-symbol array.
+  uint32_t target_data_symbol_ordinal;
   // Byte offset of the 32-bit literal word within the function text bytes.
   uint64_t literal_byte_offset;
   // Byte offset within the function text of the PC-relative base address.
   uint64_t base_pc_byte_offset;
-  // Data symbol used as the target address.
-  iree_string_view_t target_symbol;
-  // Byte offset from the start of |target_symbol|.
+  // Byte offset from the start of the target data symbol.
   uint64_t target_symbol_byte_offset;
 } loom_amdgpu_hsaco_text_fixup_t;
+static_assert(sizeof(loom_amdgpu_hsaco_text_fixup_t) == 32,
+              "AMDGPU data-symbol fixups stay compact");
 
 #ifdef __cplusplus
 }  // extern "C"

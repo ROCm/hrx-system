@@ -20,6 +20,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/cache.h"
+#include "loom/ops/global/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/op_registry.h"
@@ -91,6 +92,17 @@ class AmdgpuFeedbackTest : public ::testing::Test {
         .module_id = 0,
         .symbol_id = symbol_id,
     };
+  }
+
+  loom_symbol_ref_t AddRodataDeclaration(iree_string_view_t name) {
+    const loom_symbol_ref_t symbol = AddSymbol(name);
+    loom_builder_t module_builder;
+    loom_builder_initialize(module_, &module_->arena,
+                            loom_module_block(module_), &module_builder);
+    loom_op_t* declaration = nullptr;
+    IREE_CHECK_OK(loom_global_rodata_decl_build(
+        &module_builder, symbol, LOOM_LOCATION_UNKNOWN, &declaration));
+    return symbol;
   }
 
   bool ResetModuleForDescriptorSet(iree_string_view_t key,
@@ -305,7 +317,7 @@ class AmdgpuFeedbackTest : public ::testing::Test {
       loom_amdgpu_feedback_config_values_t* out_config_values,
       loom_amdgpu_feedback_channel_header_values_t* out_channel_values) {
     loom_symbol_ref_t config_symbol =
-        AddSymbol(IREE_SV("iree_feedback_config"));
+        AddRodataDeclaration(IREE_SV("iree_feedback_config"));
     IREE_RETURN_IF_ERROR(loom_amdgpu_build_feedback_config_values(
         &builder_, descriptor_set_, config_symbol, LOOM_LOCATION_UNKNOWN,
         out_config_values));
@@ -722,7 +734,8 @@ class AmdgpuFeedbackTest : public ::testing::Test {
 };
 
 TEST_F(AmdgpuFeedbackTest, LoadsCommonFeedbackConfigValues) {
-  loom_symbol_ref_t config_symbol = AddSymbol(IREE_SV("iree_feedback_config"));
+  loom_symbol_ref_t config_symbol =
+      AddRodataDeclaration(IREE_SV("iree_feedback_config"));
   loom_amdgpu_feedback_config_values_t values = {};
   IREE_ASSERT_OK(loom_amdgpu_build_feedback_config_values(
       &builder_, descriptor_set_, config_symbol, LOOM_LOCATION_UNKNOWN,
@@ -757,7 +770,8 @@ TEST_F(AmdgpuFeedbackTest, LoadsCommonFeedbackConfigValues) {
 }
 
 TEST_F(AmdgpuFeedbackTest, TestsFeedbackConfigEnabledFlag) {
-  loom_symbol_ref_t config_symbol = AddSymbol(IREE_SV("iree_feedback_config"));
+  loom_symbol_ref_t config_symbol =
+      AddRodataDeclaration(IREE_SV("iree_feedback_config"));
   loom_amdgpu_feedback_config_values_t values = {};
   IREE_ASSERT_OK(loom_amdgpu_build_feedback_config_values(
       &builder_, descriptor_set_, config_symbol, LOOM_LOCATION_UNKNOWN,
@@ -788,7 +802,8 @@ TEST_F(AmdgpuFeedbackTest, TestsFeedbackConfigEnabledFlag) {
 }
 
 TEST_F(AmdgpuFeedbackTest, LoadsFeedbackChannelHeaderValues) {
-  loom_symbol_ref_t config_symbol = AddSymbol(IREE_SV("iree_feedback_config"));
+  loom_symbol_ref_t config_symbol =
+      AddRodataDeclaration(IREE_SV("iree_feedback_config"));
   loom_amdgpu_feedback_config_values_t config_values = {};
   IREE_ASSERT_OK(loom_amdgpu_build_feedback_config_values(
       &builder_, descriptor_set_, config_symbol, LOOM_LOCATION_UNKNOWN,
@@ -834,7 +849,8 @@ TEST_F(AmdgpuFeedbackTest, LoadsFeedbackChannelHeaderValues) {
 }
 
 TEST_F(AmdgpuFeedbackTest, BuildsUniformPacketAddress) {
-  loom_symbol_ref_t config_symbol = AddSymbol(IREE_SV("iree_feedback_config"));
+  loom_symbol_ref_t config_symbol =
+      AddRodataDeclaration(IREE_SV("iree_feedback_config"));
   loom_amdgpu_feedback_config_values_t config_values = {};
   IREE_ASSERT_OK(loom_amdgpu_build_feedback_config_values(
       &builder_, descriptor_set_, config_symbol, LOOM_LOCATION_UNKNOWN,
@@ -858,7 +874,8 @@ TEST_F(AmdgpuFeedbackTest, BuildsUniformPacketAddress) {
 }
 
 TEST_F(AmdgpuFeedbackTest, IncrementsDroppedPacketCount) {
-  loom_symbol_ref_t config_symbol = AddSymbol(IREE_SV("iree_feedback_config"));
+  loom_symbol_ref_t config_symbol =
+      AddRodataDeclaration(IREE_SV("iree_feedback_config"));
   loom_amdgpu_feedback_config_values_t config_values = {};
   IREE_ASSERT_OK(loom_amdgpu_build_feedback_config_values(
       &builder_, descriptor_set_, config_symbol, LOOM_LOCATION_UNKNOWN,
@@ -886,7 +903,8 @@ TEST_F(AmdgpuFeedbackTest, IncrementsDroppedPacketCountOnCdna) {
                                    LOOM_AMDGPU_TARGET_KIND_GFX942)) {
     GTEST_SKIP() << "CDNA3 descriptor set is not linked.";
   }
-  loom_symbol_ref_t config_symbol = AddSymbol(IREE_SV("iree_feedback_config"));
+  loom_symbol_ref_t config_symbol =
+      AddRodataDeclaration(IREE_SV("iree_feedback_config"));
   loom_amdgpu_feedback_config_values_t config_values = {};
   IREE_ASSERT_OK(loom_amdgpu_build_feedback_config_values(
       &builder_, descriptor_set_, config_symbol, LOOM_LOCATION_UNKNOWN,
@@ -916,7 +934,8 @@ TEST_F(AmdgpuFeedbackTest, IncrementsDroppedPacketCountWithGfx12SystemScope) {
                                    LOOM_AMDGPU_TARGET_KIND_GFX1200)) {
     GTEST_SKIP() << "RDNA4 descriptor set is not linked.";
   }
-  loom_symbol_ref_t config_symbol = AddSymbol(IREE_SV("iree_feedback_config"));
+  loom_symbol_ref_t config_symbol =
+      AddRodataDeclaration(IREE_SV("iree_feedback_config"));
   loom_amdgpu_feedback_config_values_t config_values = {};
   IREE_ASSERT_OK(loom_amdgpu_build_feedback_config_values(
       &builder_, descriptor_set_, config_symbol, LOOM_LOCATION_UNKNOWN,
@@ -941,7 +960,8 @@ TEST_F(AmdgpuFeedbackTest, IncrementsDroppedPacketCountWithGfx12SystemScope) {
 }
 
 TEST_F(AmdgpuFeedbackTest, LoadsReservationHead) {
-  loom_symbol_ref_t config_symbol = AddSymbol(IREE_SV("iree_feedback_config"));
+  loom_symbol_ref_t config_symbol =
+      AddRodataDeclaration(IREE_SV("iree_feedback_config"));
   loom_amdgpu_feedback_config_values_t config_values = {};
   IREE_ASSERT_OK(loom_amdgpu_build_feedback_config_values(
       &builder_, descriptor_set_, config_symbol, LOOM_LOCATION_UNKNOWN,
@@ -972,7 +992,8 @@ TEST_F(AmdgpuFeedbackTest, LoadsReservationHeadWithCdnaSystemScope) {
                                    LOOM_AMDGPU_TARGET_KIND_GFX942)) {
     GTEST_SKIP() << "CDNA3 descriptor set is not linked.";
   }
-  loom_symbol_ref_t config_symbol = AddSymbol(IREE_SV("iree_feedback_config"));
+  loom_symbol_ref_t config_symbol =
+      AddRodataDeclaration(IREE_SV("iree_feedback_config"));
   loom_amdgpu_feedback_config_values_t config_values = {};
   IREE_ASSERT_OK(loom_amdgpu_build_feedback_config_values(
       &builder_, descriptor_set_, config_symbol, LOOM_LOCATION_UNKNOWN,
@@ -1005,7 +1026,8 @@ TEST_F(AmdgpuFeedbackTest, LoadsReservationHeadWithGfx12SystemScope) {
                                    LOOM_AMDGPU_TARGET_KIND_GFX1200)) {
     GTEST_SKIP() << "RDNA4 descriptor set is not linked.";
   }
-  loom_symbol_ref_t config_symbol = AddSymbol(IREE_SV("iree_feedback_config"));
+  loom_symbol_ref_t config_symbol =
+      AddRodataDeclaration(IREE_SV("iree_feedback_config"));
   loom_amdgpu_feedback_config_values_t config_values = {};
   IREE_ASSERT_OK(loom_amdgpu_build_feedback_config_values(
       &builder_, descriptor_set_, config_symbol, LOOM_LOCATION_UNKNOWN,
@@ -1512,7 +1534,8 @@ TEST_F(AmdgpuFeedbackTest, TestsReservationSucceededMask) {
 }
 
 TEST_F(AmdgpuFeedbackTest, EmitsPacketHeaderStores) {
-  loom_symbol_ref_t config_symbol = AddSymbol(IREE_SV("iree_feedback_config"));
+  loom_symbol_ref_t config_symbol =
+      AddRodataDeclaration(IREE_SV("iree_feedback_config"));
   loom_amdgpu_feedback_config_values_t config_values = {};
   IREE_ASSERT_OK(loom_amdgpu_build_feedback_config_values(
       &builder_, descriptor_set_, config_symbol, LOOM_LOCATION_UNKNOWN,
@@ -1680,7 +1703,8 @@ TEST_F(AmdgpuFeedbackTest, PublishesPacketStateWithGfx12SystemScope) {
 }
 
 TEST_F(AmdgpuFeedbackTest, PublishesPacketAndNotifiesHost) {
-  loom_symbol_ref_t config_symbol = AddSymbol(IREE_SV("iree_feedback_config"));
+  loom_symbol_ref_t config_symbol =
+      AddRodataDeclaration(IREE_SV("iree_feedback_config"));
   loom_amdgpu_feedback_config_values_t config_values = {};
   IREE_ASSERT_OK(loom_amdgpu_build_feedback_config_values(
       &builder_, descriptor_set_, config_symbol, LOOM_LOCATION_UNKNOWN,

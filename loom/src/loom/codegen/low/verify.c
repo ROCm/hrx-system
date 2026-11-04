@@ -684,9 +684,10 @@ static bool loom_low_immediate_has_default(
                           LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE);
 }
 
-static iree_status_t loom_low_verify_read_only_data_immediate(
+static iree_status_t loom_low_verify_data_symbol_immediate(
     loom_low_function_verify_state_t* function_state, const loom_op_t* op,
-    uint16_t attrs_attr_index, loom_symbol_ref_t ref) {
+    uint16_t attrs_attr_index, loom_symbol_ref_t ref,
+    bool requires_definition) {
   loom_low_verify_state_t* state = function_state->state;
   const loom_diagnostic_field_ref_t field_ref = loom_diagnostic_field_ref(
       LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, attrs_attr_index);
@@ -716,7 +717,9 @@ static iree_status_t loom_low_verify_read_only_data_immediate(
     return loom_low_verify_emit(state, op, LOOM_ERR_SYMBOL_002, params,
                                 IREE_ARRAYSIZE(params), NULL, 0);
   }
-  if (loom_global_rodata_def_isa(symbol->defining_op)) {
+  if (requires_definition
+          ? loom_global_rodata_def_isa(symbol->defining_op)
+          : loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_RODATA)) {
     return iree_ok_status();
   }
 
@@ -725,7 +728,8 @@ static iree_status_t loom_low_verify_read_only_data_immediate(
           loom_param_string(loom_low_verify_symbol_name(state->module, symbol)),
           field_ref),
       loom_param_string(loom_op_name(state->module, symbol->defining_op)),
-      loom_param_string(IREE_SV("global.rodata.def")),
+      loom_param_string(requires_definition ? IREE_SV("global.rodata.def")
+                                            : IREE_SV("read-only data symbol")),
   };
   const loom_diagnostic_related_op_t related_ops[] = {{
       .label = IREE_SV("defined here"),
@@ -760,9 +764,16 @@ static iree_status_t loom_low_verify_descriptor_immediate_attr(
           iree_all_bits_set(immediate->flags,
                             LOOM_LOW_IMMEDIATE_FLAG_SYMBOLIC)) {
         if (iree_any_bit_set(immediate->flags,
+                             LOOM_LOW_IMMEDIATE_FLAG_DATA_SYMBOL)) {
+          return loom_low_verify_data_symbol_immediate(
+              function_state, op, attrs_attr_index, attr->value.symbol,
+              /*requires_definition=*/false);
+        }
+        if (iree_any_bit_set(immediate->flags,
                              LOOM_LOW_IMMEDIATE_FLAG_READ_ONLY_DATA)) {
-          return loom_low_verify_read_only_data_immediate(
-              function_state, op, attrs_attr_index, attr->value.symbol);
+          return loom_low_verify_data_symbol_immediate(
+              function_state, op, attrs_attr_index, attr->value.symbol,
+              /*requires_definition=*/true);
         }
         return iree_ok_status();
       }

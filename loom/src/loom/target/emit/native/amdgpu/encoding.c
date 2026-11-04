@@ -117,7 +117,7 @@ typedef struct loom_amdgpu_encode_stream_output_t {
 
 typedef struct loom_amdgpu_encode_text_fixup_output_t {
   // Text literal fixups, or NULL during the sizing pass.
-  loom_amdgpu_hsaco_text_fixup_t* values;
+  loom_amdgpu_data_symbol_fixup_t* values;
   // Capacity of |values| in entries, or zero during the sizing pass.
   iree_host_size_t capacity;
   // Number of text literal fixups planned or written so far.
@@ -633,10 +633,10 @@ static bool loom_amdgpu_descriptor_semantic_tag_is(
   return iree_string_view_equal(semantic_tag, expected_tag);
 }
 
-static iree_status_t loom_amdgpu_symbol_name_from_attr(
+static iree_status_t loom_amdgpu_symbol_ref_from_attr(
     const loom_amdgpu_encode_state_t* state, loom_attribute_t attr,
-    iree_string_view_t field_name, iree_string_view_t* out_symbol_name) {
-  *out_symbol_name = iree_string_view_empty();
+    iree_string_view_t field_name, loom_symbol_ref_t* out_symbol_ref) {
+  *out_symbol_ref = loom_symbol_ref_null();
   if (attr.kind == LOOM_ATTR_ABSENT) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "AMDGPU native encoding immediate '%.*s' is "
@@ -657,24 +657,15 @@ static iree_status_t loom_amdgpu_symbol_name_from_attr(
         "AMDGPU native encoding immediate '%.*s' references an invalid symbol",
         (int)field_name.size, field_name.data);
   }
-  const loom_symbol_t* symbol =
-      &state->inputs.schedule->module->symbols.entries[symbol_ref.symbol_id];
-  if (symbol->name_id >= state->inputs.schedule->module->strings.count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU native encoding immediate '%.*s' "
-                            "references an unnamed symbol",
-                            (int)field_name.size, field_name.data);
-  }
-  *out_symbol_name = loom_string_table_get(
-      &state->inputs.schedule->module->strings, symbol->name_id);
+  *out_symbol_ref = symbol_ref;
   return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_read_immediate_symbol(
     const loom_amdgpu_encode_state_t* state,
     const loom_low_packet_view_t* packet, uint16_t descriptor_immediate_index,
-    iree_string_view_t* out_symbol_name) {
-  *out_symbol_name = iree_string_view_empty();
+    loom_symbol_ref_t* out_symbol_ref) {
+  *out_symbol_ref = loom_symbol_ref_null();
   const loom_low_descriptor_set_t* descriptor_set =
       state->inputs.schedule->target.descriptor_set;
   const uint32_t immediate_row = loom_amdgpu_descriptor_immediate_row(
@@ -685,8 +676,8 @@ static iree_status_t loom_amdgpu_read_immediate_symbol(
       descriptor_set, immediate->field_name_string_ref);
   const loom_attribute_t attr =
       loom_low_packet_immediate_attr(packet, immediate);
-  return loom_amdgpu_symbol_name_from_attr(state, attr, field_name,
-                                           out_symbol_name);
+  return loom_amdgpu_symbol_ref_from_attr(state, attr, field_name,
+                                          out_symbol_ref);
 }
 
 static iree_status_t loom_amdgpu_read_immediate_u64(
@@ -737,7 +728,7 @@ loom_amdgpu_descriptor_rel32_text_fixup_info(
 
 static void loom_amdgpu_append_text_fixup(
     loom_amdgpu_encode_state_t* state,
-    const loom_amdgpu_hsaco_text_fixup_t* fixup) {
+    const loom_amdgpu_data_symbol_fixup_t* fixup) {
   if (state->text_fixups.values != NULL) {
     IREE_ASSERT_LT(state->text_fixups.count, state->text_fixups.capacity);
     state->text_fixups.values[state->text_fixups.count] = *fixup;
@@ -1497,7 +1488,7 @@ static iree_status_t loom_amdgpu_encode_generic_descriptor_packet(
       loom_amdgpu_descriptor_rel32_text_fixup_info(state, packet->descriptor);
   const bool has_rel32_text_fixup =
       rel32_fixup.kind != LOOM_AMDGPU_HSACO_TEXT_FIXUP_KIND_NONE;
-  iree_string_view_t rel32_target_symbol = iree_string_view_empty();
+  loom_symbol_ref_t rel32_target_symbol = loom_symbol_ref_null();
   uint64_t rel32_target_symbol_byte_offset = 0;
   uint64_t rel32_base_pc_byte_offset = 0;
   if (has_rel32_text_fixup) {
@@ -1584,11 +1575,11 @@ static iree_status_t loom_amdgpu_encode_generic_descriptor_packet(
                               "AMDGPU native encoding rel32 literal offset "
                               "overflowed");
     }
-    const loom_amdgpu_hsaco_text_fixup_t fixup = {
+    const loom_amdgpu_data_symbol_fixup_t fixup = {
         .kind = rel32_fixup.kind,
+        .target_symbol = rel32_target_symbol,
         .literal_byte_offset = literal_byte_offset,
         .base_pc_byte_offset = rel32_base_pc_byte_offset,
-        .target_symbol = rel32_target_symbol,
         .target_symbol_byte_offset = rel32_target_symbol_byte_offset,
     };
     loom_amdgpu_append_text_fixup(state, &fixup);
@@ -2678,7 +2669,7 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
   if (iree_status_is_ok(status) && final_byte_length != 0) {
     status = iree_arena_allocate(arena, final_byte_length, (void**)&data);
   }
-  loom_amdgpu_hsaco_text_fixup_t* text_fixups = NULL;
+  loom_amdgpu_data_symbol_fixup_t* text_fixups = NULL;
   if (iree_status_is_ok(status) && sizing_state.text_fixups.count != 0) {
     status =
         iree_arena_allocate_array(arena, sizing_state.text_fixups.count,

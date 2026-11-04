@@ -42,6 +42,7 @@
 #include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/arch/amdgpu/target_info.h"
+#include "loom/target/emit/native/amdgpu/data_symbol_directory.h"
 #include "loom/target/emit/native/amdgpu/hsaco.h"
 #include "loom/target/emit/native/amdgpu/hsaco_build.h"
 #include "loom/target/emit/native/amdgpu/kernel_emission.h"
@@ -885,14 +886,20 @@ class LowKernelEmitter {
     if (!plan_accepted) {
       return iree_ok_status();
     }
+    loom_amdgpu_data_symbol_directory_t data_symbols = {};
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_data_symbol_directory_build(module_, arena, &data_symbols));
     loom_amdgpu_kernel_emission_result_t emission_result = {};
     IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_emission_build(
-        &frame, &plan, LOOM_AMDGPU_KERNEL_EMISSION_FLAG_NONE,
+        &frame, &plan, &data_symbols, LOOM_AMDGPU_KERNEL_EMISSION_FLAG_NONE,
         /*target_listing=*/nullptr, &emission_result, arena));
     const loom_amdgpu_hsaco_input_t hsaco_input = {
         .target_identity = target_profile->identity,
         .kernels = &emission_result.kernel,
         .kernel_count = 1,
+        .data_symbols = data_symbols.symbols,
+        .data_symbol_count = data_symbols.symbol_count,
+        .data_layout = data_symbols.layout,
     };
     loom_amdgpu_hsaco_plan_t hsaco_plan = {};
     IREE_RETURN_IF_ERROR(

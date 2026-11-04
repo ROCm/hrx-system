@@ -253,6 +253,8 @@ typedef uint16_t loom_low_immediate_flags_t;
 #define LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE ((uint16_t)1u << 2)
 // Symbolic form names a module-local global.rodata.def payload.
 #define LOOM_LOW_IMMEDIATE_FLAG_READ_ONLY_DATA ((uint16_t)1u << 3)
+// Symbolic form names a module-local data declaration or definition.
+#define LOOM_LOW_IMMEDIATE_FLAG_DATA_SYMBOL ((uint16_t)1u << 4)
 
 typedef enum loom_low_effect_kind_e {
   // Unknown or uninitialized effect kind.

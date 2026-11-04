@@ -14,10 +14,10 @@
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/schedule/types.h"
 #include "loom/target/emit/native/amdgpu/branch_layout.h"
+#include "loom/target/emit/native/amdgpu/data_symbol_fixup.h"
 #include "loom/target/emit/native/amdgpu/delay_layout.h"
 #include "loom/target/emit/native/amdgpu/function_text.h"
 #include "loom/target/emit/native/amdgpu/storage_layout.h"
-#include "loom/target/emit/native/amdgpu/text_fixup.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -96,8 +96,8 @@ typedef struct loom_amdgpu_encoded_instruction_stream_t {
   uint64_t instruction_count;
   // Arena-owned native placement decisions applied to |text|.
   loom_amdgpu_instruction_layout_t layout;
-  // Text literal fixups resolved after final HSACO section layout.
-  const loom_amdgpu_hsaco_text_fixup_t* text_fixups;
+  // Module-local data-symbol fixups retained for artifact binding.
+  const loom_amdgpu_data_symbol_fixup_t* text_fixups;
   // Number of entries in |text_fixups|.
   iree_host_size_t text_fixup_count;
   // Module-internal calls resolved after function text layout.

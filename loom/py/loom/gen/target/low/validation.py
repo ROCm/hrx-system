@@ -1351,13 +1351,20 @@ def validate_immediate_encoding(descriptor: Descriptor, immediate: Immediate) ->
 
 
 def validate_immediate_flags(descriptor: Descriptor, immediate: Immediate) -> None:
-    if ImmediateFlag.READ_ONLY_DATA not in immediate.flags:
+    data_flags = {
+        ImmediateFlag.READ_ONLY_DATA,
+        ImmediateFlag.DATA_SYMBOL,
+    }
+    if data_flags.isdisjoint(immediate.flags):
         return
     description = f"descriptor '{descriptor.key}' immediate '{immediate.field_name}'"
+    if data_flags.issubset(immediate.flags):
+        raise ValueError(f"{description} cannot be both read-only data and a data symbol")
+    data_kind = "read-only data" if ImmediateFlag.READ_ONLY_DATA in immediate.flags else "a data symbol"
     if immediate.kind is not ImmediateKind.ORDINAL:
-        raise ValueError(f"{description} marks read-only data on a non-ordinal")
+        raise ValueError(f"{description} marks {data_kind} on a non-ordinal")
     if ImmediateFlag.SYMBOLIC not in immediate.flags:
-        raise ValueError(f"{description} marks read-only data without symbolic")
+        raise ValueError(f"{description} marks {data_kind} without symbolic")
 
 
 def hazard_reference_count(hazard: Hazard) -> int:

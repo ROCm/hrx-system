@@ -2216,6 +2216,118 @@ TEST_F(AmdgpuHalKernelLibraryTest, RejectsRel32AddWithoutPcProvenance) {
 }
 
 TEST_F(AmdgpuHalKernelLibraryTest,
+       RejectsRel32ReferenceWithoutArtifactDefinition) {
+  static const char kSource[] =
+      "amdgpu.target<gfx1100> @gfx_target\n"
+      "global.rodata.decl @external_data\n"
+      "low.kernel.def target<amdgpu.rdna3.core>(@gfx_target) "
+      "workgroup_size(64, 1, 1) @loom_kernel() {\n"
+      "  %pc = low.op<amdgpu.s_getpc_b64>() : () -> "
+      "reg<amdgpu.sgpr x2>\n"
+      "  %pc_lo = low.slice %pc[0] : reg<amdgpu.sgpr x2> -> "
+      "reg<amdgpu.sgpr>\n"
+      "  %address, %carry = "
+      "low.op<amdgpu.s_add_u32.rhs_symbol_rel32_lo>(%pc_lo) "
+      "{symbol = @external_data} : "
+      "(reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>, reg<amdgpu.scc>\n"
+      "  low.return\n"
+      "}\n";
+  loom_module_t* module = nullptr;
+  ASSERT_NO_FATAL_FAILURE(
+      ParseSource(iree_make_cstring_view(kSource), &module));
+
+  DiagnosticCapture capture;
+  loom_amdgpu_hal_kernel_library_t library = {};
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      .diagnostic_sink = capture.sink(),
+      .max_errors = 20,
+  };
+  bool emitted = false;
+  iree::Status status(loom_amdgpu_compile_hal_kernel_library(
+      module, &options, iree_allocator_system(), &emitted, &library));
+
+  EXPECT_EQ(status.code(), iree::StatusCode::kFailedPrecondition);
+  EXPECT_THAT(status.ToString(),
+              ::testing::HasSubstr(
+                  "data symbol 'external_data' has no definition in this "
+                  "artifact"));
+  EXPECT_FALSE(emitted);
+  loom_module_free(module);
+}
+
+TEST_F(AmdgpuHalKernelLibraryTest,
+       RejectsRel32ReferenceBeyondArtifactDefinition) {
+  static const char kSource[] =
+      "global.rodata.def @shared_data = "
+      "bytes(\"000102030405060708090a0b0c0d0e0f\")\n"
+      "amdgpu.target<gfx1100> @gfx_target\n"
+      "low.kernel.def target<amdgpu.rdna3.core>(@gfx_target) "
+      "workgroup_size(64, 1, 1) @loom_kernel() {\n"
+      "  %pc = low.op<amdgpu.s_getpc_b64>() : () -> "
+      "reg<amdgpu.sgpr x2>\n"
+      "  %pc_lo = low.slice %pc[0] : reg<amdgpu.sgpr x2> -> "
+      "reg<amdgpu.sgpr>\n"
+      "  %address, %carry = "
+      "low.op<amdgpu.s_add_u32.rhs_symbol_rel32_lo>(%pc_lo) "
+      "{symbol = @shared_data, byte_offset = 17} : "
+      "(reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>, reg<amdgpu.scc>\n"
+      "  low.return\n"
+      "}\n";
+  loom_module_t* module = nullptr;
+  ASSERT_NO_FATAL_FAILURE(
+      ParseSource(iree_make_cstring_view(kSource), &module));
+
+  DiagnosticCapture capture;
+  loom_amdgpu_hal_kernel_library_t library = {};
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      .diagnostic_sink = capture.sink(),
+      .max_errors = 20,
+  };
+  bool emitted = false;
+  iree::Status status(loom_amdgpu_compile_hal_kernel_library(
+      module, &options, iree_allocator_system(), &emitted, &library));
+
+  EXPECT_EQ(status.code(), iree::StatusCode::kOutOfRange);
+  EXPECT_THAT(status.ToString(),
+              ::testing::HasSubstr(
+                  "data symbol 'shared_data' byte offset 17 exceeds its "
+                  "16-byte storage"));
+  EXPECT_FALSE(emitted);
+  loom_module_free(module);
+}
+
+TEST_F(AmdgpuHalKernelLibraryTest, RejectsDescriptorSymbolCollision) {
+  static const char kSource[] =
+      "global.rodata.def @loom_kernel.kd = bytes(\"00\")\n"
+      "amdgpu.target<gfx1100> @gfx_target\n"
+      "low.kernel.def target<amdgpu.rdna3.core>(@gfx_target) "
+      "workgroup_size(64, 1, 1) @loom_kernel() {\n"
+      "  low.return\n"
+      "}\n";
+  loom_module_t* module = nullptr;
+  ASSERT_NO_FATAL_FAILURE(
+      ParseSource(iree_make_cstring_view(kSource), &module));
+
+  DiagnosticCapture capture;
+  loom_amdgpu_hal_kernel_library_t library = {};
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      .diagnostic_sink = capture.sink(),
+      .max_errors = 20,
+  };
+  bool emitted = false;
+  iree::Status status(loom_amdgpu_compile_hal_kernel_library(
+      module, &options, iree_allocator_system(), &emitted, &library));
+
+  EXPECT_EQ(status.code(), iree::StatusCode::kInvalidArgument);
+  EXPECT_THAT(
+      status.ToString(),
+      ::testing::HasSubstr(
+          "artifact symbol 'loom_kernel.kd' is emitted more than once"));
+  EXPECT_FALSE(emitted);
+  loom_module_free(module);
+}
+
+TEST_F(AmdgpuHalKernelLibraryTest,
        EmitsGlobalRodataSymbolsAndRel32AddressMaterialization) {
   static constexpr char kSiteSymbolName[] = "loom_sanitizer_sites";
   static const uint8_t kSiteRecords[] = {
