@@ -181,8 +181,12 @@ TEST(EncodingTest, DenseIdsRoundTripStableNames) {
         (loom_aie2p_instruction_id_t)i;
     loom_aie2p_instruction_info_t info;
     ASSERT_TRUE(loom_aie2p_encoding_query_instruction_info(instruction, &info));
+    EXPECT_TRUE(iree_string_view_equal(
+        loom_aie2p_encoding_instruction_name(instruction), info.name));
     EXPECT_EQ(loom_aie2p_encoding_find_instruction(info.name), instruction);
   }
+  EXPECT_TRUE(iree_string_view_is_empty(
+      loom_aie2p_encoding_instruction_name(LOOM_AIE2P_INSTRUCTION_ID_INVALID)));
   EXPECT_EQ(loom_aie2p_encoding_find_instruction(IREE_SV("missing")),
             LOOM_AIE2P_INSTRUCTION_ID_INVALID);
 

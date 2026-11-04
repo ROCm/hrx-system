@@ -143,6 +143,11 @@ loom_aie2p_bundle_format_id_t loom_aie2p_encoding_find_bundle_format_for_slots(
 iree_string_view_t loom_aie2p_encoding_field_name(
     loom_aie2p_encoding_field_id_t field);
 
+// Returns the stable target instruction name, or an empty view for an invalid
+// ID.
+iree_string_view_t loom_aie2p_encoding_instruction_name(
+    loom_aie2p_instruction_id_t instruction);
+
 // Queries instruction metadata. Returns false for an invalid identifier or
 // output pointer.
 bool loom_aie2p_encoding_query_instruction_info(

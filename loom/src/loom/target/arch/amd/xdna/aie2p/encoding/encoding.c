@@ -150,7 +150,7 @@ static const loom_aie2p_bundle_layout_t* loom_aie2p_encoding_bundle_layout(
   return &kLoomAie2pBundleLayouts[format];
 }
 
-static iree_string_view_t loom_aie2p_encoding_instruction_name(
+static iree_string_view_t loom_aie2p_encoding_instruction_form_name(
     const loom_aie2p_instruction_form_t* form) {
   return iree_make_string_view(kLoomAie2pInstructionNames + form->name_offset,
                                form->name_length);
@@ -296,8 +296,9 @@ loom_aie2p_instruction_id_t loom_aie2p_encoding_find_instruction(
   iree_host_size_t end = IREE_ARRAYSIZE(kLoomAie2pInstructionForms);
   while (begin < end) {
     const iree_host_size_t middle = begin + (end - begin) / 2;
-    const iree_string_view_t middle_name = loom_aie2p_encoding_instruction_name(
-        &kLoomAie2pInstructionForms[middle]);
+    const iree_string_view_t middle_name =
+        loom_aie2p_encoding_instruction_form_name(
+            &kLoomAie2pInstructionForms[middle]);
     const int comparison = iree_string_view_compare(name, middle_name);
     if (comparison == 0) {
       return (loom_aie2p_instruction_id_t)middle;
@@ -390,6 +391,14 @@ iree_string_view_t loom_aie2p_encoding_field_name(
   return kLoomAie2pEncodingFieldNames[field];
 }
 
+iree_string_view_t loom_aie2p_encoding_instruction_name(
+    loom_aie2p_instruction_id_t instruction) {
+  const loom_aie2p_instruction_form_t* form =
+      loom_aie2p_encoding_instruction_form(instruction);
+  return form ? loom_aie2p_encoding_instruction_form_name(form)
+              : iree_string_view_empty();
+}
+
 static iree_string_view_t loom_aie2p_encoding_diagnostic_field_name(
     uint8_t field) {
   iree_string_view_t name =
@@ -411,7 +420,7 @@ bool loom_aie2p_encoding_query_instruction_info(
   const loom_aie2p_instruction_layout_t* layout =
       loom_aie2p_encoding_instruction_layout(form);
   *out_info = (loom_aie2p_instruction_info_t){
-      .name = loom_aie2p_encoding_instruction_name(form),
+      .name = loom_aie2p_encoding_instruction_form_name(form),
       .slot = (loom_aie2p_slot_t)layout->slot_id,
       .bit_count = kLoomAie2pSlotBitCounts[layout->slot_id],
       .field_count = layout->field_count,
@@ -498,7 +507,7 @@ iree_status_t loom_aie2p_encoding_pack_instruction(
   const loom_aie2p_instruction_layout_t* layout =
       loom_aie2p_encoding_instruction_layout(form);
   const iree_string_view_t instruction_name =
-      loom_aie2p_encoding_instruction_name(form);
+      loom_aie2p_encoding_instruction_form_name(form);
 
   for (iree_host_size_t i = 0; i < field_value_count; ++i) {
     bool expected_field = false;
@@ -600,7 +609,7 @@ iree_status_t loom_aie2p_encoding_unpack_instruction(
   const loom_aie2p_instruction_layout_t* layout =
       loom_aie2p_encoding_instruction_layout(form);
   const iree_string_view_t instruction_name =
-      loom_aie2p_encoding_instruction_name(form);
+      loom_aie2p_encoding_instruction_form_name(form);
   if (out_field_value_count != NULL) {
     *out_field_value_count = layout->field_count;
   }

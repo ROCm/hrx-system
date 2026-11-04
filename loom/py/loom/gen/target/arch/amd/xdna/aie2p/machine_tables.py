@@ -49,7 +49,7 @@ def _machine_strings(table: MachineTable) -> tuple[str, ...]:
     result.extend(adapter.name for adapter in table.register_adapters)
     result.extend(immediate.name for immediate in table.immediates)
     for form in table.forms:
-        result.extend((form.name, form.assembly))
+        result.append(form.assembly)
         for operand in (*form.outputs, *form.inputs):
             result.extend((operand.name, operand.type_name))
     return tuple(result)
@@ -279,7 +279,6 @@ def emit_tables(table: MachineTable, encoding_table: EncodingTable) -> str:
         )
         form_lines.append(
             "    {"
-            f".name_offset = UINT16_C({string_offsets[form.name]}), "
             f".assembly_offset = UINT16_C({string_offsets[form.assembly]}), "
             f".operand_list_id = UINT16_C({operand_list_ids[operand_key]}), "
             f".property_flags = UINT16_C({form.property_bits}), "
