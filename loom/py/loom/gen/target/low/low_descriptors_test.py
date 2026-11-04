@@ -18,6 +18,7 @@ from loom.gen.target.low import compiler, views
 from loom.gen.target.low.low_descriptors import (
     DescriptorAllowlist,
     compile_descriptor_set_family,
+    descriptor_set_family_string_values,
     generate_descriptor_set,
     generate_descriptor_set_family,
 )
@@ -2256,6 +2257,12 @@ def test_descriptor_set_family_compiles_complete_view_string_vocabulary() -> Non
 
     assert compiled_view.spec is view
     assert view_key in compiled.string_pool.value_to_label
+    assert set(compiled.string_pool.value_to_label).issubset(
+        descriptor_set_family_string_values(
+            TEST_LOW_CORE_DESCRIPTOR_SET,
+            (view,),
+        )
+    )
 
 
 def test_descriptor_set_family_pools_schedule_names_with_same_physical_row() -> None:

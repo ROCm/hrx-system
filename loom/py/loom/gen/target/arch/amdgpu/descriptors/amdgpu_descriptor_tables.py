@@ -25,6 +25,13 @@ _ensure_runtime_py_on_path()
 
 from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
+from loom.gen.support.string_pool import CStringBank  # noqa: E402
+from loom.gen.target.arch.amdgpu.amdgpu_target_table_family import (  # noqa: E402
+    amdgpu_target_table_family,
+)
+from loom.gen.target.arch.amdgpu.descriptors.amdgpu_descriptors import (  # noqa: E402
+    amdgpu_descriptor_table_family_string_values,
+)
 from loom.gen.target.arch.amdgpu.descriptors.amdgpu_lower_capabilities import (  # noqa: E402
     generate_lower_capability_header,
 )
@@ -46,6 +53,7 @@ from loom.gen.target.arch.amdgpu.refs.amdgpu_target_refs import (  # noqa: E402
 from loom.target.arch.amdgpu.descriptors.matrix import MATRIX_OPERAND_PLACEMENT_QUALIFICATIONS  # noqa: E402
 from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     amdgpu_descriptor_set_ordinal,
+    amdgpu_descriptor_set_storage_info_by_generator_target,
     amdgpu_target_descriptor_set_key,
     sorted_processor_infos,
     sorted_target_infos,
@@ -128,6 +136,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--vopd-source", type=Path, required=True)
     parser.add_argument("--placement-bindings", type=Path, required=True)
     parser.add_argument("--lower-capabilities-header", type=Path, required=True)
+    parser.add_argument("--descriptor-strings-header", type=Path, required=True)
+    parser.add_argument("--descriptor-strings-source", type=Path, required=True)
+    parser.add_argument("--descriptor-strings-layout", type=Path, required=True)
+    parser.add_argument("--descriptor-strings-public-header", required=True)
+    parser.add_argument("--descriptor-strings-symbol", required=True)
+    parser.add_argument(
+        "--descriptor-shared-strings",
+        type=Path,
+        required=True,
+        help="Secondary string bank shared with descriptor tables.",
+    )
     args = parser.parse_args(argv)
 
     inputs = load_amdgpu_planning_table_inputs(
@@ -136,6 +155,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     selected_descriptor_set_infos = select_target_ref_descriptor_set_infos(args.descriptor_set)
     selected_descriptor_sets = tuple(inputs.descriptor_sets_by_key[info.key] for info in selected_descriptor_set_infos)
+    storage_generator_targets = tuple(dict.fromkeys(amdgpu_descriptor_set_storage_info_by_generator_target(info.generator_target).generator_target for info in selected_descriptor_set_infos))
+    descriptor_string_values = frozenset().union(
+        *(
+            amdgpu_descriptor_table_family_string_values(
+                amdgpu_target_table_family(storage_generator_target),
+                inputs.descriptor_sets_by_generator_target,
+            )
+            for storage_generator_target in storage_generator_targets
+        )
+    )
+    descriptor_shared_strings = CStringBank.read(args.descriptor_shared_strings)
+    descriptor_strings = CStringBank.build(
+        descriptor_string_values,
+        symbol=args.descriptor_strings_symbol,
+        header=args.descriptor_strings_public_header,
+        shared=descriptor_shared_strings,
+    )
+    write_text_file(args.descriptor_strings_header, descriptor_strings.emit_header())
+    write_text_file(args.descriptor_strings_source, descriptor_strings.emit_source())
+    write_text_file(args.descriptor_strings_layout, descriptor_strings.manifest())
     generate_target_ref_outputs(
         public_header=args.target_ref_public_header,
         descriptor_set_infos=selected_descriptor_set_infos,

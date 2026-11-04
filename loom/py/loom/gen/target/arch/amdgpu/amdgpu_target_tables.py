@@ -79,7 +79,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         required=True,
     )
-    parser.add_argument("--shared-strings", type=Path, help="Producer-owned shared string-bank layout.")
+    parser.add_argument(
+        "--primary-strings",
+        type=Path,
+        help="Producer-owned primary string-bank layout.",
+    )
+    parser.add_argument(
+        "--primary-strings-target",
+        action="append",
+        default=[],
+        help="Storage target covered by the primary string bank; may repeat.",
+    )
+    parser.add_argument(
+        "--shared-strings",
+        type=Path,
+        help="Producer-owned secondary string-bank layout.",
+    )
     args = parser.parse_args(argv)
 
     if not (len(args.target) == len(args.descriptor_source) == len(args.encoding_source)):
@@ -100,7 +115,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         isa_specs,
     )
 
+    primary_strings = CStringBank.read(args.primary_strings) if args.primary_strings else None
     shared_strings = CStringBank.read(args.shared_strings) if args.shared_strings else None
+    primary_string_targets = frozenset(args.primary_strings_target)
     for family, descriptor_source, encoding_source in zip(
         families,
         args.descriptor_source,
@@ -113,6 +130,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             descriptor_sets_by_generator_target,
             descriptor_source_path=descriptor_source,
             encoding_source_path=encoding_source,
+            primary_strings=(primary_strings if family.storage_info.generator_target in primary_string_targets else None),
             shared_strings=shared_strings,
         )
     return 0

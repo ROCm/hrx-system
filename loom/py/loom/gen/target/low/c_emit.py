@@ -577,6 +577,7 @@ def emit_source_for_views(
     compiled: CompiledDescriptorSet,
     *,
     views: Sequence[DescriptorSetView],
+    primary_strings: CStringBank | None = None,
     shared_strings: CStringBank | None = None,
 ) -> str:
     spec = compiled.spec
@@ -602,9 +603,19 @@ def emit_source_for_views(
         lines.append(f"const loom_low_descriptor_set_t* {view.spec.function_name}(void);")
     if len(views) > 1:
         lines.append("")
-    string_layout = layout_c_string_pool(pool, shared_strings)
-    if string_layout.shared is not None:
-        lines.extend([f'#include "{string_layout.shared.header}"', ""])
+    string_layout = layout_c_string_pool(
+        pool,
+        shared_strings,
+        primary=primary_strings,
+    )
+    external_headers = tuple(dict.fromkeys(bank.header for bank in (string_layout.primary, string_layout.shared) if bank is not None))
+    if external_headers:
+        lines.extend(
+            [
+                *(f'#include "{header}"' for header in external_headers),
+                "",
+            ]
+        )
     _emit_string_pool(compiled, lines, string_layout)
 
     view_array_emitter = c_arrays.StaticArrayEmitter(lines)
@@ -1556,9 +1567,15 @@ def emit_source_for_views(
     return "\n".join(lines) + "\n"
 
 
-def emit_source(compiled: CompiledDescriptorSet, shared_strings: CStringBank | None = None) -> str:
+def emit_source(
+    compiled: CompiledDescriptorSet,
+    shared_strings: CStringBank | None = None,
+    *,
+    primary_strings: CStringBank | None = None,
+) -> str:
     return emit_source_for_views(
         compiled,
+        primary_strings=primary_strings,
         shared_strings=shared_strings,
         views=[
             DescriptorSetView(

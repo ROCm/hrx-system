@@ -32,6 +32,7 @@ from loom.gen.target.arch.amdgpu.amdgpu_target_table_family import (  # noqa: E4
 )
 from loom.gen.target.low.compiled import GeneratedDescriptorSetFamily  # noqa: E402
 from loom.gen.target.low.low_descriptors import (  # noqa: E402
+    descriptor_set_family_string_values,
     generate_descriptor_set_family,
     write_descriptor_set_to_paths,
 )
@@ -106,14 +107,13 @@ def _shared_storage_descriptor_set(
     )
 
 
-def generate_amdgpu_descriptor_table_family(
+def _amdgpu_descriptor_table_family_specs(
     family: AmdgpuTargetTableFamily,
     descriptor_sets: Mapping[str, DescriptorSet],
     *,
     source_public_header: str,
-    shared_strings: CStringBank | None = None,
-) -> GeneratedDescriptorSetFamily:
-    """Generates descriptor storage and views from a materialized corpus."""
+) -> tuple[DescriptorSet, tuple[DescriptorSet, ...]]:
+    """Materializes the shared storage and view specs for one table family."""
 
     storage_descriptor_set = descriptor_sets[family.storage_info.generator_target]
     representation_targets = {info.generator_target for info in family.representation_infos}
@@ -134,9 +134,45 @@ def generate_amdgpu_descriptor_table_family(
         ),
         public_header=source_public_header,
     )
+    return shared_storage_descriptor_set, (
+        storage_descriptor_set,
+        *view_descriptor_sets,
+    )
+
+
+def amdgpu_descriptor_table_family_string_values(
+    family: AmdgpuTargetTableFamily,
+    descriptor_sets: Mapping[str, DescriptorSet],
+) -> frozenset[str]:
+    """Returns a vocabulary covering every string retained by one family."""
+
+    storage_spec, view_specs = _amdgpu_descriptor_table_family_specs(
+        family,
+        descriptor_sets,
+        source_public_header=descriptor_sets[family.storage_info.generator_target].public_header,
+    )
+    return descriptor_set_family_string_values(storage_spec, view_specs)
+
+
+def generate_amdgpu_descriptor_table_family(
+    family: AmdgpuTargetTableFamily,
+    descriptor_sets: Mapping[str, DescriptorSet],
+    *,
+    source_public_header: str,
+    primary_strings: CStringBank | None = None,
+    shared_strings: CStringBank | None = None,
+) -> GeneratedDescriptorSetFamily:
+    """Generates descriptor storage and views from a materialized corpus."""
+
+    storage_spec, view_specs = _amdgpu_descriptor_table_family_specs(
+        family,
+        descriptor_sets,
+        source_public_header=source_public_header,
+    )
     return generate_descriptor_set_family(
-        shared_storage_descriptor_set,
-        (storage_descriptor_set, *view_descriptor_sets),
+        storage_spec,
+        view_specs,
+        primary_strings=primary_strings,
         shared_strings=shared_strings,
     )
 

@@ -145,7 +145,7 @@ def test_slice_reference_pool_bound_and_none_sentinel() -> None:
             _slice_reference(0x800000, 0, bank)
         with pytest.raises(ValueError, match="23-bit"):
             _slice_reference(0x7FFFFF, 255, bank)
-    with pytest.raises(ValueError, match="private or shared"):
+    with pytest.raises(ValueError, match="primary or secondary"):
         _slice_reference(0, 0, 2)
 
 
@@ -169,6 +169,50 @@ def test_shared_bank_preserves_bytes_and_independent_layout(tmp_path) -> None:
     assert "test_strings" in layout.initializer("private_data")
     assert "extern const char test_strings[" in bank.emit_header()
     assert '#include "test/strings.h"' in bank.emit_source()
+
+
+def test_external_primary_bank_composes_with_shared_bank() -> None:
+    shared = CStringBank.build(
+        frozenset({"amdgpu.s_add_f32"}),
+        symbol="test_instruction_strings",
+        header="test/instruction_strings.h",
+    )
+    values = frozenset(
+        {
+            "",
+            "amdgpu.s_add_f32",
+            "descriptor-only metadata",
+        }
+    )
+    primary = CStringBank.build(
+        values,
+        symbol="test_descriptor_strings",
+        header="test/descriptor_strings.h",
+        shared=shared,
+    )
+    assert primary.values == frozenset({"", "descriptor-only metadata"})
+
+    pool = CStringPool("TEST")
+    for index, value in enumerate(sorted(values)):
+        pool.intern(f"value_{index}", value)
+    layout = layout_c_string_pool(pool, shared, primary=primary)
+
+    assert layout.data == b""
+    assert layout.primary is primary
+    assert layout.shared is shared
+    assert "test_descriptor_strings" in layout.initializer("unused_local_data")
+    assert "test_instruction_strings" in layout.initializer("unused_local_data")
+    emitted = emit_c_string_pool(pool, "unused_local_data", layout=layout)
+    assert not any("const char unused_local_data" in line for line in emitted)
+    assert any("sizeof(test_descriptor_strings)" in line for line in emitted)
+
+    incomplete_primary = CStringBank.build(
+        frozenset({""}),
+        symbol="test_incomplete_strings",
+        header="test/incomplete_strings.h",
+    )
+    with pytest.raises(ValueError, match="does not contain 'descriptor-only metadata'"):
+        layout_c_string_pool(pool, shared, primary=incomplete_primary)
 
 
 def test_incidental_substrings_do_not_acquire_shared_bank() -> None:

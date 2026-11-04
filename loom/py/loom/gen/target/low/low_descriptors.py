@@ -33,6 +33,64 @@ from loom.gen.target.low.compiled import (
 from loom.target.low_descriptors import DescriptorSet, ScheduleClass
 
 
+def _descriptor_set_string_values(spec: DescriptorSet) -> set[str]:
+    """Returns the conservative runtime string vocabulary of one set spec."""
+
+    values = {"", spec.key}
+    values.update(value for value in (spec.target_key, spec.feature_key) if value is not None)
+    values.update(reg_class.name for reg_class in spec.reg_classes)
+    values.update(register.name for register in spec.physical_registers)
+    values.update(resource.name for resource in spec.register_packing_resources)
+    values.update(part.name for part in spec.register_parts)
+    values.update(resource.name for resource in spec.resources)
+    values.update(schedule_class.name for schedule_class in spec.schedule_classes)
+    values.update(event.name for event in spec.timing_events)
+    for model in spec.schedule_models:
+        values.update(resource.name for resource in model.resources)
+        values.update(schedule_class.name for schedule_class in model.schedule_classes)
+        values.update(event.name for event in model.timing_events)
+    for domain in spec.enum_domains:
+        values.add(domain.name)
+        values.update(enum_value.token for enum_value in domain.values)
+    for descriptor in spec.descriptors:
+        values.add(descriptor.key)
+        values.update(value for value in (descriptor.mnemonic, descriptor.semantic_tag) if value is not None)
+        values.update(operand.field_name for operand in descriptor.operands)
+        values.update(immediate.field_name for immediate in descriptor.immediates)
+        for lease in descriptor.storage_leases:
+            values.update(
+                (
+                    lease.release_class_name,
+                    lease.release_action_name,
+                    lease.release_reason_name,
+                )
+            )
+        for asm_form in descriptor.asm_forms:
+            values.add(validation.asm_form_mnemonic(descriptor, asm_form))
+            if asm_form.native_assembly_mnemonic is not None:
+                values.add(asm_form.native_assembly_mnemonic)
+            values.update(immediate.name for immediate in asm_form.immediates if immediate.name is not None)
+            values.update(native_value.literal for native_value in asm_form.native_assembly_values if native_value.literal is not None)
+    return values
+
+
+def descriptor_set_family_string_values(
+    storage_spec: DescriptorSet,
+    view_specs: Sequence[DescriptorSet],
+) -> frozenset[str]:
+    """Returns a generation-time superset of one family's retained strings.
+
+    This query intentionally reads source specifications without compiling
+    descriptor tables. External string-bank layout remains strict: generation
+    fails if compilation ever retains a value absent from this vocabulary.
+    """
+
+    values = _descriptor_set_string_values(storage_spec)
+    for view_spec in view_specs:
+        values.update(_descriptor_set_string_values(view_spec))
+    return frozenset(values)
+
+
 def _pool_family_schedule_classes(
     compiled: CompiledDescriptorSet,
     descriptor_set_views: Sequence[DescriptorSetView],
@@ -154,6 +212,7 @@ def generate_descriptor_set(
     spec: DescriptorSet,
     allowlist: DescriptorAllowlist | None = None,
     *,
+    primary_strings: CStringBank | None = None,
     shared_strings: CStringBank | None = None,
     required_schedule_class_names: Sequence[str] = (),
 ) -> GeneratedDescriptorSet:
@@ -181,12 +240,17 @@ def generate_descriptor_set(
             source=c_emit.emit_source_for_views(
                 compiled,
                 views=(view,),
+                primary_strings=primary_strings,
                 shared_strings=shared_strings,
             ),
         )
     return GeneratedDescriptorSet(
         header=c_emit.emit_header(compiled),
-        source=c_emit.emit_source(compiled, shared_strings),
+        source=c_emit.emit_source(
+            compiled,
+            shared_strings,
+            primary_strings=primary_strings,
+        ),
     )
 
 
@@ -246,6 +310,7 @@ def generate_descriptor_set_family(
     storage_spec: DescriptorSet,
     view_specs: Sequence[DescriptorSet],
     *,
+    primary_strings: CStringBank | None = None,
     shared_strings: CStringBank | None = None,
 ) -> GeneratedDescriptorSetFamily:
     """Generates shared C storage and public headers for descriptor-set views."""
@@ -257,6 +322,7 @@ def generate_descriptor_set_family(
         source=c_emit.emit_source_for_views(
             compiled,
             views=descriptor_set_views,
+            primary_strings=primary_strings,
             shared_strings=shared_strings,
         ),
         view_headers=tuple(
@@ -276,8 +342,14 @@ def write_descriptor_set_to_paths(
     header_path: Path,
     source_path: Path,
     allowlist: DescriptorAllowlist | None = None,
+    primary_strings: CStringBank | None = None,
     shared_strings: CStringBank | None = None,
 ) -> None:
-    generated = generate_descriptor_set(spec, allowlist, shared_strings=shared_strings)
+    generated = generate_descriptor_set(
+        spec,
+        allowlist,
+        primary_strings=primary_strings,
+        shared_strings=shared_strings,
+    )
     write_text_file(header_path, generated.header)
     write_text_file(source_path, generated.source)

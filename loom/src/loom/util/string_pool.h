@@ -10,8 +10,9 @@
 #include "iree/base/api.h"
 
 // A static string slice: low 23 bits are a byte offset, bit 23 selects the
-// bank, and high 8 bits are its byte length. Bank zero holds private bytes and
-// bank one holds shared bytes. Slices may overlap and need no terminator.
+// bank, and high 8 bits are its byte length. Bank zero holds primary bytes and
+// bank one holds optional secondary bytes. Either bank may be shared by several
+// table owners. Slices may overlap and need no terminator.
 // Generation proves each slice fits its bank, each bank is at most 8 MiB, and
 // every length is at most 255. The reference stays four bytes in descriptor
 // rows.
@@ -27,7 +28,7 @@ typedef uint32_t loom_string_ref_t;
                        (uint32_t)(offset)))
 
 typedef struct loom_string_pool_t {
-  // Borrowed private and shared bytes; returned views retain their lifetime.
+  // Borrowed primary and secondary bytes; returned views retain their lifetime.
   const char* data[2];
   // Byte count of each bank, excluding any trailing C literal terminator.
   uint32_t data_length[2];

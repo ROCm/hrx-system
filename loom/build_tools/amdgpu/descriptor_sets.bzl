@@ -152,6 +152,14 @@ def loom_amdgpu_selected_descriptor_set_key_args():
         for descriptor_set_key, capability in LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY.items()
     })
 
+def loom_amdgpu_selected_descriptor_storage_generator_target_args():
+    """Returns generator args naming storage families selected by capabilities."""
+    return loom_amdgpu_selected_descriptor_set_values({
+        capability: "--primary-strings-target=" + storage_generator_target
+        for storage_generator_target, capabilities in LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES_BY_STORAGE_GENERATOR_TARGET.items()
+        for capability in capabilities
+    })
+
 def loom_amdgpu_selected_descriptor_set_deps(targets):
     """Selects dependency labels keyed by descriptor-set capability.
 

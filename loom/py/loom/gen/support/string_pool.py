@@ -70,17 +70,20 @@ class CStringPool:
 
 @dataclass(frozen=True, slots=True)
 class CStringLayout:
-    """Private bytes and bank/23-bit-offset/8-bit-length references by label."""
+    """Inline bytes and bank/23-bit-offset/8-bit-length references by label."""
 
     data: bytes
     references: dict[str, int]
+    primary: CStringBank | None = None
     shared: CStringBank | None = None
 
     def initializer(self, data_name: str) -> str:
         """Returns the initializer for the checked-in C pool representation."""
+        primary_data = self.primary.symbol if self.primary is not None else data_name
+        primary_length = len(self.primary.data) if self.primary is not None else len(self.data)
         shared_data = self.shared.symbol if self.shared is not None else "NULL"
         shared_length = len(self.shared.data) if self.shared is not None else 0
-        return f"{{.data = {{{data_name}, {shared_data}}}, .data_length = {{{len(self.data)}, {shared_length}}}}}"
+        return f"{{.data = {{{primary_data}, {shared_data}}}, .data_length = {{{primary_length}, {shared_length}}}}}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,11 +96,19 @@ class CStringBank:
     header: str
 
     @staticmethod
-    def build(values: frozenset[str], *, symbol: str, header: str) -> CStringBank:
+    def build(
+        values: frozenset[str],
+        *,
+        symbol: str,
+        header: str,
+        shared: CStringBank | None = None,
+    ) -> CStringBank:
         pool = CStringPool(symbol.upper())
         for index, value in enumerate(sorted(values)):
             pool.intern(f"value_{index}", value)
-        return CStringBank(layout_c_string_pool(pool).data, values, symbol, header)
+        layout = layout_c_string_pool(pool, shared)
+        primary_values = frozenset(entry.value for entry in pool.entries if not (layout.references[entry.label] >> 23) & 1)
+        return CStringBank(layout.data, primary_values, symbol, header)
 
     def manifest(self) -> str:
         """Carries the producer's layout across independent generator actions."""
@@ -143,12 +154,20 @@ def _slice_reference(offset: int, length: int, bank: int = 0) -> int:
     if not 0 <= offset < 1 << 23 or offset + length > 1 << 23:
         raise ValueError("string bank exceeds 23-bit slice offset encoding")
     if bank not in (0, 1):
-        raise ValueError("string bank must be private or shared")
+        raise ValueError("string bank must be primary or secondary")
     return (length << 24) | (bank << 23) | offset
 
 
-def layout_c_string_pool(pool: CStringPool, shared: CStringBank | None = None) -> CStringLayout:
-    """Shares contiguous substrings, with deterministic longest-first placement."""
+def layout_c_string_pool(
+    pool: CStringPool,
+    shared: CStringBank | None = None,
+    *,
+    primary: CStringBank | None = None,
+) -> CStringLayout:
+    """Lays out local or external banks with longest-first substring sharing."""
+
+    if primary is shared and primary is not None:
+        raise ValueError("primary and shared string banks must be distinct")
     data = bytearray()
     references: dict[str, int] = {}
     # An incidental substring must not introduce an otherwise unused library.
@@ -163,6 +182,12 @@ def layout_c_string_pool(pool: CStringPool, shared: CStringBank | None = None) -
             if offset >= 0:
                 references[label] = _slice_reference(offset, length, 1)
                 continue
+        if primary is not None:
+            offset = primary.data.find(payload)
+            if offset < 0:
+                raise ValueError(f"primary string bank does not contain '{payload.decode()}'")
+            references[label] = _slice_reference(offset, length)
+            continue
         offset = data.find(payload)
         if offset < 0:
             offset = len(data)
@@ -171,7 +196,7 @@ def layout_c_string_pool(pool: CStringPool, shared: CStringBank | None = None) -
         else:
             reference = _slice_reference(offset, length)
         references[label] = reference
-    return CStringLayout(bytes(data), references, shared)
+    return CStringLayout(bytes(data), references, primary, shared)
 
 
 def _emit_data(data: bytes, data_name: str, *, storage: str = "static ") -> list[str]:
@@ -193,7 +218,7 @@ def emit_c_string_pool(pool: CStringPool, data_name: str, *, layout: CStringLayo
         return []
     if layout is None:
         layout = layout_c_string_pool(pool)
-    lines = _emit_data(layout.data, data_name)
+    lines = [] if layout.primary is not None else _emit_data(layout.data, data_name)
     lines.append("enum {")
     for entry in pool.entries:
         reference = layout.references[entry.label]
@@ -201,7 +226,7 @@ def emit_c_string_pool(pool: CStringPool, data_name: str, *, layout: CStringLayo
     lines.extend(
         [
             "};",
-            f'static_assert(sizeof({data_name}) - 1 == {len(layout.data)}, "string pool byte length must match generated slices");',
+            f'static_assert(sizeof({layout.primary.symbol if layout.primary is not None else data_name}) - 1 == {len(layout.primary.data) if layout.primary is not None else len(layout.data)}, "string pool byte length must match generated slices");',
             "",
         ]
     )
