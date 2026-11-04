@@ -9,6 +9,7 @@
 
 #include "iree/async/frontier.h"
 #include "iree/base/internal/atomics.h"
+#include "iree/base/threading/notification.h"
 #include "iree/base/threading/thread.h"
 #include "iree/hal/drivers/amd/gpu/context.h"
 
@@ -67,8 +68,9 @@ typedef bool (*iree_hal_amd_gpu_completion_fn_t)(
 
 // One completion source, such as queue retirement or shader reports. Callback
 // bindings are immutable and borrowed until source replacement or worker join.
-// The drain mutex protects table replacement, callbacks, and wait-hint
-// observation, including the lifetime of each borrowed coherent word.
+// Exclusive drain ownership protects callbacks and wait-hint observation,
+// including the lifetime of each borrowed coherent word. Table replacement
+// excludes new owners and joins the last borrowed access.
 typedef struct iree_hal_amd_gpu_completion_source_t {
   // Bounded observation or terminal native-failure delivery.
   iree_hal_amd_gpu_completion_fn_t fn;
@@ -87,29 +89,32 @@ typedef struct iree_hal_amd_gpu_completion_source_t {
 typedef struct iree_hal_amd_gpu_completion_t {
   // Borrowed context whose event and API table outlive the worker join.
   const iree_hal_amd_gpu_context_t* context;
-  // Number of sources, protected by drain_mutex.
+  // Number of sources, protected by drain ownership.
   iree_host_size_t source_count;
-  // Borrowed contiguous source array, replaced only under drain_mutex.
+  // Borrowed contiguous source array, replaced after joining drain ownership.
   iree_hal_amd_gpu_completion_source_t* sources;
   // Maximum active observation after progress, in ns; zero parks immediately.
   iree_duration_t spin_ns;
   // Owned thread, or NULL after failed initialization or a successful join.
   iree_thread_t* thread;
-  // Stop and source-replacement requests interrupt active coherent observation.
+  // Drain ownership, enrolled joins, and requests interrupting observation.
   iree_atomic_int32_t state;
-  // Serializes source retirement and every borrowed wait-hint observation.
-  iree_slim_mutex_t drain_mutex;
+  // Joins active CPU callbacks for the worker, source replacement, and stop.
+  // Ordinary caller retirement never waits on this notification.
+  iree_notification_t released;
   // First native execution/observation failure. Cold membership can observe it
-  // before the terminal worker joins, without taking the drain mutex.
+  // before the terminal worker joins, without acquiring drain ownership.
   iree_atomic_int64_t failure;
 } iree_hal_amd_gpu_completion_t;
 
 // Attempts one bounded source round without waiting for another observer.
 // Returns whether this round made progress; contention or a stopped observer
-// returns false. An active caller uses this after observing native completion,
-// then joins the public timeline. It does not repeatedly scan pending sources.
+// returns false. A contending caller requests that the worker rescan instead
+// of continuing coherent observation. Recursive calls request no extra round.
+// An active caller uses this after observing native completion, then joins the
+// public timeline. It does not repeatedly scan pending sources.
 // The caller keeps the enclosing device alive through the final access; owner
-// teardown joins all such callers before deinitializing the drain mutex.
+// teardown joins all such callers before deinitializing the notification.
 bool iree_hal_amd_gpu_completion_try_drain(
     iree_hal_amd_gpu_completion_t* completion);
 

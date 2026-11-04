@@ -14,7 +14,16 @@ enum {
   IREE_HAL_AMD_GPU_COMPLETION_STOP_REQUESTED = 1 << 0,
   IREE_HAL_AMD_GPU_COMPLETION_STOPPED = 1 << 1,
   IREE_HAL_AMD_GPU_COMPLETION_REPLACING_SOURCES = 1 << 2,
+  IREE_HAL_AMD_GPU_COMPLETION_OWNED = 1 << 3,
+  IREE_HAL_AMD_GPU_COMPLETION_WORKER = 1 << 4,
+  IREE_HAL_AMD_GPU_COMPLETION_RESCAN = 1 << 5,
+  IREE_HAL_AMD_GPU_COMPLETION_JOIN = 1 << 6,
 };
+
+// Set once by the worker, not on submission or caller retirement. A callback
+// recursively trying to help this worker must not request another source round.
+static IREE_THREAD_LOCAL iree_hal_amd_gpu_completion_t*
+    iree_hal_amd_gpu_completion_current_worker = NULL;
 
 static bool iree_hal_amd_gpu_completion_stop_requested(
     iree_hal_amd_gpu_completion_t* completion) {
@@ -35,18 +44,88 @@ static bool iree_hal_amd_gpu_completion_drain(
   return ready;
 }
 
+// Releases borrowed source accesses and consumes requests before deciding
+// whether the worker may park. Uncontended retirement touches only state.
+static bool iree_hal_amd_gpu_completion_release(
+    iree_hal_amd_gpu_completion_t* completion) {
+  const int32_t previous = iree_atomic_fetch_and(
+      &completion->state,
+      ~(IREE_HAL_AMD_GPU_COMPLETION_OWNED | IREE_HAL_AMD_GPU_COMPLETION_WORKER |
+        IREE_HAL_AMD_GPU_COMPLETION_RESCAN | IREE_HAL_AMD_GPU_COMPLETION_JOIN),
+      iree_memory_order_release);
+  if (iree_any_bit_set(previous, IREE_HAL_AMD_GPU_COMPLETION_JOIN)) {
+    iree_notification_post(&completion->released, IREE_ALL_WAITERS);
+  }
+  return iree_any_bit_set(previous, IREE_HAL_AMD_GPU_COMPLETION_RESCAN);
+}
+
 bool iree_hal_amd_gpu_completion_try_drain(
     iree_hal_amd_gpu_completion_t* completion) {
-  if (!iree_slim_mutex_try_lock(&completion->drain_mutex)) {
-    return false;
+  int32_t expected = IREE_HAL_AMD_GPU_COMPLETION_RUNNING;
+  if (iree_atomic_compare_exchange_strong(
+          &completion->state, &expected, IREE_HAL_AMD_GPU_COMPLETION_OWNED,
+          iree_memory_order_acquire, iree_memory_order_relaxed)) {
+    const bool ready =
+        iree_hal_amd_gpu_completion_drain(completion, AMDF_STATUS_OK);
+    iree_hal_amd_gpu_completion_release(completion);
+    return ready;
   }
-  bool ready = false;
-  if (iree_atomic_load(&completion->state, iree_memory_order_acquire) ==
-      IREE_HAL_AMD_GPU_COMPLETION_RUNNING) {
-    ready = iree_hal_amd_gpu_completion_drain(completion, AMDF_STATUS_OK);
+  if (iree_any_bit_set(expected, IREE_HAL_AMD_GPU_COMPLETION_WORKER) &&
+      !iree_any_bit_set(expected,
+                        IREE_HAL_AMD_GPU_COMPLETION_STOP_REQUESTED |
+                            IREE_HAL_AMD_GPU_COMPLETION_STOPPED |
+                            IREE_HAL_AMD_GPU_COMPLETION_REPLACING_SOURCES |
+                            IREE_HAL_AMD_GPU_COMPLETION_RESCAN) &&
+      iree_hal_amd_gpu_completion_current_worker != completion) {
+    // No retry or native wake: a live worker consumes this before parking.
+    // A failed CAS means it released ownership, another request arrived, or
+    // a lifecycle join interrupted it. Native completion events remain armed.
+    iree_atomic_compare_exchange_strong(
+        &completion->state, &expected,
+        expected | IREE_HAL_AMD_GPU_COMPLETION_RESCAN,
+        iree_memory_order_release, iree_memory_order_relaxed);
   }
-  iree_slim_mutex_unlock(&completion->drain_mutex);
-  return ready;
+  return false;
+}
+
+static bool iree_hal_amd_gpu_completion_acquire_worker(void* user_data) {
+  iree_hal_amd_gpu_completion_t* completion = user_data;
+  int32_t expected =
+      iree_atomic_load(&completion->state, iree_memory_order_relaxed);
+  return !iree_any_bit_set(expected,
+                           IREE_HAL_AMD_GPU_COMPLETION_OWNED |
+                               IREE_HAL_AMD_GPU_COMPLETION_REPLACING_SOURCES) &&
+         iree_atomic_compare_exchange_strong(
+             &completion->state, &expected,
+             expected | IREE_HAL_AMD_GPU_COMPLETION_OWNED |
+                 IREE_HAL_AMD_GPU_COMPLETION_WORKER,
+             iree_memory_order_acquire, iree_memory_order_relaxed);
+}
+
+static bool iree_hal_amd_gpu_completion_is_unowned(void* user_data) {
+  iree_hal_amd_gpu_completion_t* completion = user_data;
+  return !iree_any_bit_set(
+      iree_atomic_load(&completion->state, iree_memory_order_acquire),
+      IREE_HAL_AMD_GPU_COMPLETION_OWNED);
+}
+
+// Only the worker and cold lifecycle owners join active CPU callbacks. A
+// prepared notification plus JOIN closes release-before-enrollment races;
+// ownership release and source replacement wake every enrolled predicate.
+static void iree_hal_amd_gpu_completion_await(
+    iree_hal_amd_gpu_completion_t* completion, iree_condition_fn_t condition) {
+  while (!condition(completion)) {
+    const iree_wait_token_t token =
+        iree_notification_prepare_wait(&completion->released);
+    iree_atomic_fetch_or(&completion->state, IREE_HAL_AMD_GPU_COMPLETION_JOIN,
+                         iree_memory_order_acq_rel);
+    if (condition(completion)) {
+      iree_notification_cancel_wait(&completion->released);
+      return;
+    }
+    iree_notification_commit_wait(&completion->released, token, 0,
+                                  IREE_TIME_INFINITE_FUTURE);
+  }
 }
 
 // The source drain establishes these addresses once. Unchanged native work
@@ -54,7 +133,8 @@ bool iree_hal_amd_gpu_completion_try_drain(
 static bool iree_hal_amd_gpu_completion_observe(
     iree_hal_amd_gpu_completion_t* completion, iree_time_t deadline) {
   while (iree_atomic_load(&completion->state, iree_memory_order_relaxed) ==
-             IREE_HAL_AMD_GPU_COMPLETION_RUNNING &&
+             (IREE_HAL_AMD_GPU_COMPLETION_OWNED |
+              IREE_HAL_AMD_GPU_COMPLETION_WORKER) &&
          iree_time_now() < deadline) {
     bool has_address = false;
     for (iree_host_size_t i = 0; i < completion->source_count; ++i) {
@@ -79,30 +159,29 @@ static bool iree_hal_amd_gpu_completion_observe(
 static int iree_hal_amd_gpu_completion_main(void* user_data) {
   iree_hal_amd_gpu_completion_t* completion = user_data;
   const iree_hal_amd_gpu_context_t* context = completion->context;
+  iree_hal_amd_gpu_completion_current_worker = completion;
   iree_time_t spin_deadline = IREE_TIME_INFINITE_PAST;
   while (!iree_hal_amd_gpu_completion_stop_requested(completion)) {
-    iree_slim_mutex_lock(&completion->drain_mutex);
+    iree_hal_amd_gpu_completion_await(
+        completion, iree_hal_amd_gpu_completion_acquire_worker);
     if (iree_hal_amd_gpu_completion_stop_requested(completion)) {
-      iree_slim_mutex_unlock(&completion->drain_mutex);
+      iree_hal_amd_gpu_completion_release(completion);
       break;
     }
     bool ready = iree_hal_amd_gpu_completion_drain(completion, AMDF_STATUS_OK);
-    if (ready) {
-      if (completion->spin_ns) {
-        const iree_time_t now = iree_time_now();
-        spin_deadline = completion->spin_ns < IREE_TIME_INFINITE_FUTURE - now
-                            ? now + completion->spin_ns
-                            : IREE_TIME_INFINITE_FUTURE;
-      }
-      iree_slim_mutex_unlock(&completion->drain_mutex);
+    if (ready && completion->spin_ns) {
+      const iree_time_t now = iree_time_now();
+      spin_deadline = completion->spin_ns < IREE_TIME_INFINITE_FUTURE - now
+                          ? now + completion->spin_ns
+                          : IREE_TIME_INFINITE_FUTURE;
+    }
+    if (!ready && completion->spin_ns) {
+      ready = iree_hal_amd_gpu_completion_observe(completion, spin_deadline);
+    }
+    const bool rescan = iree_hal_amd_gpu_completion_release(completion);
+    if (ready || rescan) {
       continue;
     }
-    if (completion->spin_ns &&
-        iree_hal_amd_gpu_completion_observe(completion, spin_deadline)) {
-      iree_slim_mutex_unlock(&completion->drain_mutex);
-      continue;
-    }
-    iree_slim_mutex_unlock(&completion->drain_mutex);
     if (iree_hal_amd_gpu_completion_stop_requested(completion)) {
       break;
     }
@@ -137,25 +216,28 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
       break;
     }
   }
-  iree_slim_mutex_lock(&completion->drain_mutex);
+  iree_hal_amd_gpu_completion_await(completion,
+                                    iree_hal_amd_gpu_completion_acquire_worker);
   const amdf_status_t failure =
       iree_hal_amd_gpu_completion_query_status(completion);
   if (!amdf_status_is_ok(failure)) {
     // Join active helpers before the one terminal notification round. Native
-    // inactivation runs outside this mutex so CPU publishers can hand off.
+    // inactivation runs outside drain ownership so CPU publishers can hand off.
     iree_hal_amd_gpu_completion_drain(completion, failure);
   }
-  iree_slim_mutex_unlock(&completion->drain_mutex);
+  iree_hal_amd_gpu_completion_release(completion);
   if (!amdf_status_is_ok(failure) && context->execution_failure.join) {
     context->execution_failure.join(context->execution_failure.user_data,
                                     failure);
   }
   // Final release joins the terminal owner too; stopped helpers cannot enter
   // another source round.
-  iree_slim_mutex_lock(&completion->drain_mutex);
+  iree_hal_amd_gpu_completion_await(completion,
+                                    iree_hal_amd_gpu_completion_acquire_worker);
   iree_atomic_fetch_or(&completion->state, IREE_HAL_AMD_GPU_COMPLETION_STOPPED,
                        iree_memory_order_release);
-  iree_slim_mutex_unlock(&completion->drain_mutex);
+  iree_hal_amd_gpu_completion_release(completion);
+  iree_hal_amd_gpu_completion_current_worker = NULL;
   return 0;
 }
 
@@ -168,7 +250,7 @@ iree_status_t iree_hal_amd_gpu_completion_initialize(
   memset(out_completion, 0, sizeof(*out_completion));
   out_completion->context = context;
   out_completion->spin_ns = spin_ns;
-  iree_slim_mutex_initialize(&out_completion->drain_mutex);
+  iree_notification_initialize(&out_completion->released);
   iree_hal_amd_gpu_completion_set_sources(out_completion, source_count,
                                           sources);
   const iree_thread_create_params_t params = {
@@ -181,7 +263,7 @@ iree_status_t iree_hal_amd_gpu_completion_initialize(
       iree_thread_create(iree_hal_amd_gpu_completion_main, out_completion,
                          params, host_allocator, &out_completion->thread);
   if (!iree_status_is_ok(status)) {
-    iree_slim_mutex_deinitialize(&out_completion->drain_mutex);
+    iree_notification_deinitialize(&out_completion->released);
     IREE_TRACE_ZONE_END(z0);
     return status;
   }
@@ -198,13 +280,18 @@ void iree_hal_amd_gpu_completion_set_sources(
   iree_atomic_fetch_or(&completion->state,
                        IREE_HAL_AMD_GPU_COMPLETION_REPLACING_SOURCES,
                        iree_memory_order_release);
-  iree_slim_mutex_lock(&completion->drain_mutex);
+  iree_hal_amd_gpu_completion_await(completion,
+                                    iree_hal_amd_gpu_completion_is_unowned);
   completion->sources = sources;
   completion->source_count = source_count;
-  iree_atomic_fetch_and(&completion->state,
-                        ~IREE_HAL_AMD_GPU_COMPLETION_REPLACING_SOURCES,
-                        iree_memory_order_release);
-  iree_slim_mutex_unlock(&completion->drain_mutex);
+  const int32_t previous =
+      iree_atomic_fetch_and(&completion->state,
+                            ~(IREE_HAL_AMD_GPU_COMPLETION_REPLACING_SOURCES |
+                              IREE_HAL_AMD_GPU_COMPLETION_JOIN),
+                            iree_memory_order_release);
+  if (iree_any_bit_set(previous, IREE_HAL_AMD_GPU_COMPLETION_JOIN)) {
+    iree_notification_post(&completion->released, IREE_ALL_WAITERS);
+  }
 }
 
 amdf_status_t iree_hal_amd_gpu_completion_query_status(
@@ -253,7 +340,7 @@ iree_status_t iree_hal_amd_gpu_completion_deinitialize(
               "gpu.event_signal"));
   iree_thread_release(completion->thread);
   completion->thread = NULL;
-  iree_slim_mutex_deinitialize(&completion->drain_mutex);
+  iree_notification_deinitialize(&completion->released);
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }

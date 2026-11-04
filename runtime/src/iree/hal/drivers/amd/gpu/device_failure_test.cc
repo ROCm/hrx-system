@@ -218,7 +218,7 @@ class DeviceFailureTest : public ::testing::Test {
     if (completion_.thread) {
       iree_thread_release(completion_.thread);
       completion_.thread = nullptr;
-      iree_slim_mutex_deinitialize(&completion_.drain_mutex);
+      iree_notification_deinitialize(&completion_.released);
     }
     iree_hal_amd_gpu_publication_deinitialize(&publication_);
     iree_hal_amd_gpu_device_failure_deinitialize(&failure_);

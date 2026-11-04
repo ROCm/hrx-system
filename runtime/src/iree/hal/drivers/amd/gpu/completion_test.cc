@@ -40,6 +40,8 @@ class NativeEvent {
       return self->signaled_ || !amdf_status_is_ok(self->wait_status_);
     });
     self->signaled_ = false;
+    ++self->wait_return_count_;
+    self->condition_.notify_all();
     return self->wait_status_;
   }
 
@@ -62,6 +64,11 @@ class NativeEvent {
   void AwaitSignalCount(uint32_t count) {
     std::unique_lock<std::mutex> lock(mutex_);
     condition_.wait(lock, [&] { return signal_count_ >= count; });
+  }
+
+  void AwaitWaitReturnCount(uint32_t count) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    condition_.wait(lock, [&] { return wait_return_count_ >= count; });
   }
 
   void SetWaitStatus(amdf_status_t status) {
@@ -89,6 +96,8 @@ class NativeEvent {
   bool signaled_ = false;
   // Number of calls entering the native wait boundary.
   uint32_t wait_count_ = 0;
+  // Native waits that consumed their wake before returning to the worker.
+  uint32_t wait_return_count_ = 0;
   // Number of attempted host signals, including failures.
   uint32_t signal_count_ = 0;
   // Native failure delivered to the waiting worker, if any.
@@ -202,7 +211,7 @@ TEST_F(CompletionTest, CoherentChangeProgressesWithoutNativeWake) {
   // Joining directly avoids a controller stop racing the changed-word drain.
   iree_thread_release(completion_.thread);
   completion_.thread = nullptr;
-  iree_slim_mutex_deinitialize(&completion_.drain_mutex);
+  iree_notification_deinitialize(&completion_.released);
   EXPECT_EQ(calls, 3u);
   EXPECT_EQ(other_calls, 3u);
   EXPECT_EQ(event_.signal_count(), 1u);  // Only the callback's final stop.
@@ -596,7 +605,7 @@ TEST_F(CompletionTest, NativeWaitFailureReachesEverySourceAndStops) {
   EXPECT_EQ(reports_, (std::vector<uint64_t>{failure}));
 }
 
-TEST_F(CompletionTest, FinalReleaseJoinsTerminalOwnerOutsideDrainMutex) {
+TEST_F(CompletionTest, FinalReleaseJoinsTerminalOwnerOutsideDrain) {
   struct Terminal {
     // Completion owner whose worker executes this cold terminal join.
     iree_hal_amd_gpu_completion_t* completion;
@@ -611,12 +620,9 @@ TEST_F(CompletionTest, FinalReleaseJoinsTerminalOwnerOutsideDrainMutex) {
   context_.execution_failure.join = [](void* data, amdf_status_t status) {
     auto* terminal = static_cast<Terminal*>(data);
     EXPECT_EQ(status, amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST));
-    const bool acquired =
-        iree_slim_mutex_try_lock(&terminal->completion->drain_mutex);
-    EXPECT_TRUE(acquired);
-    if (acquired) {
-      iree_slim_mutex_unlock(&terminal->completion->drain_mutex);
-    }
+    // Terminal ownership can join/remove source bindings without recursively
+    // waiting on its own completion drain.
+    iree_hal_amd_gpu_completion_set_sources(terminal->completion, 0, nullptr);
     terminal->entered.release();
     terminal->finish.acquire();
     terminal->final_access = true;
@@ -692,41 +698,115 @@ TEST_F(CompletionTest, CallerRetiresWhileWorkerParks) {
   EXPECT_EQ(calls, 2u);
 }
 
-TEST_F(CompletionTest, ActiveObservationProtectsBorrowedHintFromCallerDrain) {
-  auto* word = new iree_atomic_int32_t;
-  iree_atomic_store(word, 0, iree_memory_order_relaxed);
+TEST_F(CompletionTest, CallerInterruptsObservationOfUnchangedSource) {
+  auto word = std::make_unique<iree_atomic_int32_t>();
+  iree_atomic_store(word.get(), 0, iree_memory_order_relaxed);
   std::binary_semaphore armed{0};
   std::binary_semaphore consumed{0};
+  uint32_t calls = 0;
+  uint32_t foreground_calls = 0;
+  std::atomic<bool> foreground_ready = false;
+  WaitCallback callback = [&](amdf_status_t status,
+                              iree_hal_amd_gpu_completion_wait_t* out_wait) {
+    EXPECT_TRUE(amdf_status_is_ok(status));
+    EXPECT_FALSE(iree_hal_amd_gpu_completion_try_drain(&completion_));
+    *out_wait = {.address = word.get(), .value = 0};
+    return ++calls == 1;
+  };
+  Callback foreground = [&](amdf_status_t status) {
+    EXPECT_TRUE(amdf_status_is_ok(status));
+    ++foreground_calls;
+    if (foreground_ready.exchange(false)) {
+      // A new completion in a source with no cached hint must interrupt the
+      // unrelated bulk source's unchanged word without a native wake.
+      EXPECT_TRUE(amdf_status_is_ok(
+          iree_hal_amd_gpu_completion_request_stop(&completion_)));
+      consumed.release();
+    } else if (foreground_calls == 2) {
+      // All sources in this round have observed no new completion. The worker
+      // still owns their borrowed hints until the controller requests a rescan.
+      armed.release();
+    }
+    return false;
+  };
+  iree_hal_amd_gpu_completion_source_t sources[] = {Source(callback),
+                                                    Source(foreground)};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, IREE_ARRAYSIZE(sources), sources, IREE_DURATION_INFINITE, {},
+      iree_allocator_system(), &completion_));
+  armed.acquire();
+  foreground_ready.store(true);
+  EXPECT_FALSE(iree_hal_amd_gpu_completion_try_drain(&completion_));
+  consumed.acquire();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+  EXPECT_EQ(iree_atomic_load(word.get(), iree_memory_order_relaxed), 0);
+  EXPECT_EQ(calls, 3u);
+  EXPECT_EQ(foreground_calls, 3u);
+}
+
+TEST_F(CompletionTest, NativeWakeDuringCallerDrainPreservesPendingWork) {
+  std::binary_semaphore entered{0};
+  std::binary_semaphore finish{0};
+  std::binary_semaphore retired{0};
+  std::atomic<bool> pending = false;
+  uint32_t calls = 0;
+  Callback callback = [&](amdf_status_t status) {
+    EXPECT_TRUE(amdf_status_is_ok(status));
+    const bool ready = pending.exchange(false);
+    if (++calls == 2) {
+      entered.release();
+      finish.acquire();
+    }
+    if (ready) {
+      retired.release();
+    }
+    return false;
+  };
+  auto source = Source(callback);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, 1, &source, 0, {}, iree_allocator_system(), &completion_));
+  event_.AwaitWaitCount(1);
+  std::thread caller([&] {
+    EXPECT_FALSE(iree_hal_amd_gpu_completion_try_drain(&completion_));
+  });
+  entered.acquire();
+  // The caller has already observed no work while holding source ownership.
+  // The worker consumes this only wake before the caller can release it.
+  pending.store(true);
+  EXPECT_TRUE(amdf_status_is_ok(NativeEvent::Signal(event_.handle())));
+  event_.AwaitWaitReturnCount(1);
+  finish.release();
+  caller.join();
+  retired.acquire();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+  EXPECT_EQ(calls, 3u);
+}
+
+TEST_F(CompletionTest, CallerRetirementReleasesPriorHintWhileWorkerParks) {
+  auto word = std::make_unique<iree_atomic_int32_t>();
+  iree_atomic_store(word.get(), 0, iree_memory_order_relaxed);
   uint32_t calls = 0;
   WaitCallback callback = [&](amdf_status_t status,
                               iree_hal_amd_gpu_completion_wait_t* out_wait) {
     EXPECT_TRUE(amdf_status_is_ok(status));
-    if (++calls == 3) {
-      delete word;
-      word = nullptr;
-      EXPECT_TRUE(amdf_status_is_ok(
-          iree_hal_amd_gpu_completion_request_stop(&completion_)));
-      consumed.release();
-      return false;
+    if (++calls == 1) {
+      *out_wait = {.address = word.get(), .value = 0};
+    } else {
+      // Native retirement can reclaim an AQL signal block. No observer may
+      // retain its prior borrowed hint across this callback.
+      word.reset();
     }
-    *out_wait = {.address = word, .value = 0};
-    if (calls == 2) {
-      armed.release();
-    }
-    return calls == 1;
+    return false;
   };
   auto source = Source(callback);
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
-      &context_, 1, &source, IREE_DURATION_INFINITE, {},
-      iree_allocator_system(), &completion_));
-  armed.acquire();
-  // The worker owns the hint until observation ends. A caller cannot retire
-  // its backing concurrently with that coherent load.
+      &context_, 1, &source, 0, {}, iree_allocator_system(), &completion_));
+  event_.AwaitWaitCount(1);
   EXPECT_FALSE(iree_hal_amd_gpu_completion_try_drain(&completion_));
-  iree_atomic_store(word, 1, iree_memory_order_release);
-  consumed.acquire();
-  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
   EXPECT_EQ(word, nullptr);
+  EXPECT_TRUE(amdf_status_is_ok(NativeEvent::Signal(event_.handle())));
+  event_.AwaitWaitCount(2);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
   EXPECT_EQ(calls, 3u);
 }
 

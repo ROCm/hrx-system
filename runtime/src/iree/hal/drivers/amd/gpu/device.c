@@ -933,7 +933,7 @@ static void iree_hal_amd_gpu_device_destroy(iree_hal_device_t* base) {
         "GPU observer exited with unproven native uses; preserving ownership");
     return;
   }
-  iree_slim_mutex_deinitialize(&device->completion.drain_mutex);
+  iree_notification_deinitialize(&device->completion.released);
   if (!iree_hal_amd_gpu_device_release_children(device)) {
     return;
   }
