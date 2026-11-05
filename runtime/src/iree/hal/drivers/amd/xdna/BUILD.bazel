@@ -274,6 +274,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/fabric:event",
         "//runtime/src/iree/hal/drivers/amd/fabric:file_transfer",
         "//runtime/src/iree/hal/drivers/amd/fabric:transient_buffer",
+        "//runtime/src/iree/hal/drivers/amd/fabric:transient_buffer_pool",
     ],
 )
 

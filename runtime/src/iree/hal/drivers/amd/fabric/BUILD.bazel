@@ -340,6 +340,7 @@ iree_runtime_cc_test(
         "memory_backend_atomic_test.cc",
         "memory_backend_mapping_test.cc",
         "memory_backend_test.cc",
+        "transient_buffer_native_test.cc",
         "virtual_buffer_test.cc",
     ],
     target_compatible_with = select({
@@ -352,6 +353,8 @@ iree_runtime_cc_test(
         ":memory_backend",
         ":memory_backend_test_base",
         ":slab_provider",
+        ":transient_buffer",
+        ":transient_buffer_pool",
         "//libamdf:headers",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async:platform",
@@ -427,15 +430,37 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "transient_buffer_pool",
+    srcs = ["transient_buffer_pool.c"],
+    hdrs = ["transient_buffer_pool.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "transient_buffer",
     srcs = ["transient_buffer.c"],
     hdrs = ["transient_buffer.h"],
     deps = [
+        ":transient_buffer_pool",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "transient_buffer_pool_test",
+    srcs = ["transient_buffer_pool_test.cc"],
+    deps = [
+        ":transient_buffer_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -444,8 +469,8 @@ iree_runtime_cc_test(
     srcs = ["transient_buffer_test.cc"],
     deps = [
         ":transient_buffer",
+        ":transient_buffer_pool",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/memory:heap_pool",
         "//runtime/src/iree/testing:gtest",

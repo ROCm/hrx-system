@@ -11,6 +11,7 @@
 #include "iree/async/semaphore.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/drivers/amd/fabric/event.h"
+#include "iree/hal/drivers/amd/fabric/transient_buffer_pool.h"
 #include "iree/hal/drivers/amd/status.h"
 #include "iree/hal/drivers/amd/xdna/barrier.h"
 #include "iree/hal/drivers/amd/xdna/executable.h"
@@ -1469,6 +1470,7 @@ static void iree_hal_amd_xdna_queue_destroy(iree_hal_queue_t* base) {
   iree_status_free(iree_hal_amd_xdna_queue_failure_status(queue));
   iree_async_event_release(queue->event);
   iree_allocator_free(queue->host_allocator, queue->pending.entries);
+  iree_hal_amd_fabric_transient_buffer_pool_deinitialize(&queue->buffers);
   iree_hal_amd_xdna_queue_storage_deinitialize(&queue->storage);
   iree_slim_mutex_deinitialize(&queue->completion_drain_mutex);
   iree_slim_mutex_deinitialize(&queue->state_mutex);
@@ -1485,6 +1487,8 @@ iree_status_t iree_hal_amd_xdna_queue_create(
       iree_allocator_malloc(host_allocator, sizeof(*queue), (void**)&queue));
   memset(queue, 0, sizeof(*queue));
   iree_hal_amd_xdna_queue_storage_initialize(host_allocator, &queue->storage);
+  iree_hal_amd_fabric_transient_buffer_pool_initialize(host_allocator,
+                                                       &queue->buffers);
   iree_hal_amd_xdna_queue_producer_index_initialize(&queue->producer_index);
   iree_slim_mutex_initialize(&queue->state_mutex);
   iree_slim_mutex_initialize(&queue->completion_drain_mutex);
@@ -1616,6 +1620,7 @@ uint32_t iree_hal_amd_xdna_queue_maximum_command_count(iree_hal_queue_t* base) {
 void iree_hal_amd_xdna_queue_trim(iree_hal_queue_t* base) {
   iree_hal_amd_xdna_queue_t* queue = (iree_hal_amd_xdna_queue_t*)base;
   iree_hal_amd_xdna_queue_storage_trim(&queue->storage);
+  iree_hal_amd_fabric_transient_buffer_pool_trim(&queue->buffers);
 }
 
 static iree_status_t iree_hal_amd_xdna_queue_flush(iree_hal_queue_t* queue) {

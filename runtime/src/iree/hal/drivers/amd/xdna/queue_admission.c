@@ -576,7 +576,6 @@ iree_status_t iree_hal_amd_xdna_operation_allocate(
   memset(operation, 0, sizeof(*operation));
   operation->queue = queue;
   operation->device = iree_hal_queue_family_device(queue->base.queue_family);
-  operation->metadata_block_pool = &queue->storage.metadata_block_pool;
   operation->capture = capture;
   operation->kind = kind;
   iree_hal_amd_xdna_frontier_state_initialize(&operation->frontier);

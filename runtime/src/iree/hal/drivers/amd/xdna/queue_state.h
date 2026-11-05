@@ -11,6 +11,7 @@
 #include "iree/async/event.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/base/threading/notification.h"
+#include "iree/hal/drivers/amd/fabric/transient_buffer_pool.h"
 #include "iree/hal/drivers/amd/xdna/profile.h"
 #include "iree/hal/drivers/amd/xdna/queue.h"
 #include "iree/hal/drivers/amd/xdna/queue_operation.h"
@@ -64,6 +65,8 @@ struct iree_hal_amd_xdna_queue_t {
   iree_allocator_t host_allocator;
   // Reusable operation metadata and captured payload blocks.
   iree_hal_amd_xdna_queue_storage_t storage;
+  // Transient roots outlive captures and return their slots independently.
+  iree_hal_amd_fabric_transient_buffer_pool_t buffers;
   // Session recorder owned by this queue under the idle begin/end contract.
   iree_hal_amd_xdna_profile_t* profile;
   // Borrowed device owner dominating all native children.

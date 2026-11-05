@@ -134,8 +134,6 @@ struct iree_hal_amd_xdna_operation_t {
   iree_hal_amd_xdna_queue_t* queue;
   // Retained device dominating the queue through arena return.
   iree_hal_device_t* device;
-  // Borrowed reusable block pool kept live by |device|.
-  iree_arena_block_pool_t* metadata_block_pool;
   // Queue-owned arenas containing this operation and captured payloads.
   iree_hal_amd_xdna_queue_capture_t capture;
   // Intrusive readiness linkage, independent of proactor linkage.

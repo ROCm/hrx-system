@@ -10,6 +10,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/base/internal/atomic_slist.h"
 #include "iree/hal/api.h"
+#include "iree/hal/drivers/amd/fabric/transient_buffer_pool.h"
 #include "iree/hal/drivers/amd/gpu/publication.h"
 
 #ifdef __cplusplus
@@ -32,8 +33,10 @@ typedef struct iree_hal_amd_gpu_allocation_context_t {
   iree_atomic_slist_t ready;
   // Sole publisher's detached batch, consumed in bounded turns.
   iree_atomic_slist_entry_t* ready_head;
-  // Reusable CPU storage for transactions, pool waits, and transient roots.
+  // Reusable CPU storage for transactions and pool waits.
   iree_arena_block_pool_t blocks;
+  // Independently lived roots and histories, packed into bitmap-managed slots.
+  iree_hal_amd_fabric_transient_buffer_pool_t buffers;
 } iree_hal_amd_gpu_allocation_context_t;
 
 // Initializes embedded state without creating a worker or native allocation.

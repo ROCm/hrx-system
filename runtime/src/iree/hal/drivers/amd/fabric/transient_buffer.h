@@ -18,8 +18,8 @@
 
 #include "iree/async/frontier.h"
 #include "iree/base/api.h"
-#include "iree/base/internal/arena.h"
 #include "iree/hal/api.h"
+#include "iree/hal/drivers/amd/fabric/transient_buffer_pool.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,24 +28,22 @@ extern "C" {
 typedef struct iree_hal_amd_fabric_transient_buffer_t
     iree_hal_amd_fabric_transient_buffer_t;
 
-// Creates a transient buffer with the given metadata but no backing memory.
-// The buffer starts in the uncommitted state.
-//
-// |allocation_size| is the physical reservation size to report through
-// iree_hal_buffer_allocation_size() and |byte_length| is the logical byte range
-// exposed by the wrapper. |byte_length| must be <= |allocation_size|.
+// Creates uncommitted roots for the already-validated allocation requests.
+// Captures slot runs from |buffer_pool|, independently owned by each root.
+// |out_buffers| starts zeroed. On failure, its initialized prefix remains owned
+// by the caller and all remaining entries stay NULL.
 //
 // |source_pool| is borrowed for the complete logical allocation lifetime and
 // may be queried before queue ordering allows a physical reservation to be
-// acquired. |block_pool| supplies one reusable wrapper block; unusually large
-// native tables use its allocator directly. The application's device ownership
-// keeps this metadata owner alive through the root's final release.
-iree_status_t iree_hal_amd_fabric_transient_buffer_create(
+// acquired. The application's device ownership keeps |buffer_pool| alive
+// through the roots' final releases, including independently held subviews.
+iree_status_t iree_hal_amd_fabric_transient_buffer_create_batch(
     iree_hal_buffer_placement_t placement, iree_hal_memory_type_t memory_type,
     iree_hal_memory_access_t allowed_access,
-    iree_hal_buffer_usage_t allowed_usage, iree_device_size_t allocation_size,
-    iree_device_size_t byte_length, iree_hal_pool_t* source_pool,
-    iree_arena_block_pool_t* block_pool, iree_hal_buffer_t** out_buffer);
+    iree_hal_buffer_usage_t allowed_usage, iree_hal_pool_t* source_pool,
+    iree_hal_amd_fabric_transient_buffer_pool_t* buffer_pool,
+    iree_host_size_t count, const iree_hal_pool_reservation_request_t* requests,
+    iree_hal_buffer_t** out_buffers);
 
 // Attaches a pool reservation to the transient buffer. |pool| must be the
 // source pool captured at creation. The wrapper takes ownership until
@@ -58,8 +56,8 @@ void iree_hal_amd_fabric_transient_buffer_attach_reservation(
 // is retained, but remains invisible to map/flush/invalidate calls until
 // iree_hal_amd_fabric_transient_buffer_commit() publishes it. Reuse history is
 // copied so logical reservation return cannot invalidate the old root's view.
-// Ordinary roots hold the history in their existing cached metadata block;
-// larger histories can fail allocation before staging any backing.
+// Ordinary roots hold history in their slot's spare capacity; larger histories
+// use another slot and can fail cold growth before staging any backing.
 iree_status_t iree_hal_amd_fabric_transient_buffer_stage_backing(
     iree_hal_buffer_t* buffer, const iree_hal_pool_reservation_view_t* backing);
 
