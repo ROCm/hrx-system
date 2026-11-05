@@ -90,4 +90,12 @@ iree_status_t loom_aie2p_worker_control_write(
     uint8_t packet_id, uint32_t register_offset, const loom_value_id_t* words,
     iree_host_size_t count);
 
+// Reads 1..4 consecutive registers from a 16-byte-aligned address through a
+// selected return route. The scalar stream has been drained before the request:
+// its packet header and values cannot interleave with outstanding task tokens.
+iree_status_t loom_aie2p_worker_control_read(
+    loom_aie2p_worker_builder_t* context, loom_builder_t* builder,
+    uint8_t packet_id, uint8_t reply_id, uint32_t register_offset,
+    iree_host_size_t count, loom_value_id_t* out_values);
+
 #endif  // LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_PIPELINE_WORKER_H_

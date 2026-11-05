@@ -11,6 +11,7 @@
 #include "loom/analysis/movement.h"
 #include "loom/analysis/value_relation.h"
 #include "loom/ir/context.h"
+#include "loom/ops/callable_effects.h"
 #include "loom/ops/global/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/util/walk.h"
@@ -29,6 +30,8 @@ typedef struct loom_storage_access_function_record_t {
   loom_func_like_t function;
   // Module-local symbol indexing this record.
   uint16_t symbol_id;
+  // True while this function's growing invalidation bound awaits propagation.
+  bool unbounded_queued;
   // Sparse symbol index branch; the first record needs only its leaf.
   struct {
     // Tagged branch or untagged leaf for each value of |bit|.
@@ -104,6 +107,17 @@ static loom_func_like_t loom_storage_access_call_function(
     }
   }
   return (loom_func_like_t){0};
+}
+
+static loom_memory_space_mask_t loom_storage_access_call_write_spaces(
+    const loom_module_t* module, loom_call_like_t call) {
+  const loom_symbol_ref_t callee = loom_call_like_callee(call);
+  const loom_func_like_t function =
+      callee.module_id == 0
+          ? loom_func_like_cast(
+                module, module->symbols.entries[callee.symbol_id].defining_op)
+          : (loom_func_like_t){0};
+  return loom_callable_effects_written_memory_spaces(function);
 }
 
 // Tagged branches and leaves share stable function-record storage. Every branch
@@ -363,11 +377,21 @@ static iree_status_t loom_storage_access_record_barrier(
 
 static void loom_storage_access_mark_unbounded(
     loom_storage_access_state_t* state,
-    loom_storage_access_function_record_t* function) {
-  if (function->graph.has_unbounded_memory_access) {
+    loom_storage_access_function_record_t* function,
+    loom_memory_space_mask_t write_spaces) {
+  const loom_memory_space_mask_t combined =
+      function->graph.unbounded_write_spaces | write_spaces;
+  if (function->graph.has_unbounded_memory_access &&
+      function->graph.unbounded_write_spaces == combined) {
     return;
   }
   function->graph.has_unbounded_memory_access = true;
+  function->graph.unbounded_write_spaces = combined;
+  if (function->unbounded_queued) {
+    return;
+  }
+  function->unbounded_queued = true;
+  function->next_unbounded = NULL;
   if (state->last_unbounded) {
     state->last_unbounded->next_unbounded = function;
   } else {
@@ -427,7 +451,8 @@ static iree_status_t loom_storage_access_visit(
                                              .next = callee_record->callers};
     callee_record->callers = caller;
     if (callee_record->graph.has_unbounded_memory_access) {
-      loom_storage_access_mark_unbounded(state, state->current);
+      loom_storage_access_mark_unbounded(
+          state, state->current, callee_record->graph.unbounded_write_spaces);
     }
     const loom_value_slice_t arguments = loom_call_like_operands(call);
     const uint16_t argument_offset = loom_call_like_operand_offset(call);
@@ -449,7 +474,9 @@ static iree_status_t loom_storage_access_visit(
     if (iree_any_bit_set(traits, LOOM_TRAIT_READS_MEMORY |
                                      LOOM_TRAIT_WRITES_MEMORY |
                                      LOOM_TRAIT_UNKNOWN_EFFECTS)) {
-      loom_storage_access_mark_unbounded(state, state->current);
+      loom_storage_access_mark_unbounded(
+          state, state->current,
+          loom_storage_access_call_write_spaces(module, call));
     }
   } else {
     bool described_read = false;
@@ -488,6 +515,8 @@ static iree_status_t loom_storage_access_visit(
          (iree_any_bit_set(traits, LOOM_TRAIT_WRITES_MEMORY) &&
           !described_write))) {
       state->current->graph.has_unknown_memory_access = true;
+      loom_storage_access_mark_unbounded(
+          state, state->current, loom_op_written_memory_spaces(op, traits));
     }
     const loom_value_relation_mask_t mask =
         LOOM_VALUE_RELATION_MASK_ALL &
@@ -560,7 +589,6 @@ static iree_status_t loom_storage_access_build_pending(
                          &walk_result);
     if (iree_status_is_ok(status) &&
         state->current->graph.has_unknown_memory_access) {
-      loom_storage_access_mark_unbounded(state, state->current);
       // An unmodeled local effect can reach every formal reference. Project
       // that uncertainty through argument edges, never through an unrelated
       // caller allocation. This runs once after the body's uses are classified.
@@ -592,9 +620,11 @@ static void loom_storage_access_solve(loom_storage_access_state_t* state) {
     if (!state->first_unbounded) {
       state->last_unbounded = NULL;
     }
+    function->unbounded_queued = false;
     for (const loom_storage_access_caller_t* caller = function->callers; caller;
          caller = caller->next) {
-      loom_storage_access_mark_unbounded(state, caller->function);
+      loom_storage_access_mark_unbounded(
+          state, caller->function, function->graph.unbounded_write_spaces);
     }
   }
   while (state->first_effect) {

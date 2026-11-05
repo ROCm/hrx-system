@@ -186,3 +186,35 @@ iree_status_t loom_aie2p_worker_control_write(
   }
   return iree_ok_status();
 }
+
+iree_status_t loom_aie2p_worker_control_read(
+    loom_aie2p_worker_builder_t* context, loom_builder_t* builder,
+    uint8_t packet_id, uint8_t reply_id, uint32_t register_offset,
+    iree_host_size_t count, loom_value_id_t* out_values) {
+  loom_value_id_t route, command;
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
+      context, builder, (int32_t)loom_aie2p_worker_odd_parity(packet_id),
+      &route));
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
+      context, builder,
+      (int32_t)loom_aie2p_worker_odd_parity(
+          register_offset | (uint32_t)(count - 1) << 20 | UINT32_C(1) << 22 |
+          (uint32_t)reply_id << 24),
+      &command));
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_op(
+      context, builder, AIE2P_CORE_DESCRIPTOR_REF_STREAM_WRITE_I32, &route, 1,
+      loom_named_attr_slice_empty(), NULL, NULL));
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_op(
+      context, builder, AIE2P_CORE_DESCRIPTOR_REF_STREAM_WRITE_LAST_I32,
+      &command, 1, loom_named_attr_slice_empty(), NULL, NULL));
+  loom_value_id_t header;
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_op(
+      context, builder, AIE2P_CORE_DESCRIPTOR_REF_STREAM_READ_I32, NULL, 0,
+      loom_named_attr_slice_empty(), &context->scalar_type, &header));
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_aie2p_worker_op(
+        context, builder, AIE2P_CORE_DESCRIPTOR_REF_STREAM_READ_I32, NULL, 0,
+        loom_named_attr_slice_empty(), &context->scalar_type, &out_values[i]));
+  }
+  return iree_ok_status();
+}

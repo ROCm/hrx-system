@@ -522,9 +522,9 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "command_schedule",
-    srcs = ["command_schedule.cc"],
-    hdrs = ["command_schedule.h"],
+    name = "schedule_region",
+    srcs = ["schedule_region.cc"],
+    hdrs = ["schedule_region.h"],
     cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [

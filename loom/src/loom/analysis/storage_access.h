@@ -115,6 +115,9 @@ typedef struct loom_storage_access_function_t {
   bool has_unknown_memory_access;
   // This body or a reached callee may access storage without a bounded operand.
   bool has_unbounded_memory_access;
+  // Memory spaces such accesses may invalidate. Reads and nonmemory state
+  // effects contribute no bits; UNKNOWN overlaps every mutable storage space.
+  loom_memory_space_mask_t unbounded_write_spaces;
 } loom_storage_access_function_t;
 
 typedef struct loom_storage_access_scope_t {

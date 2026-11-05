@@ -1,0 +1,90 @@
+// RUN: emit pipeline-invocations @test
+
+// Shared worker source receives distinct geometry at each child occurrence.
+// The completed DMA groups remain attached to their exact waits after binding
+// source and destination memory through the child boundary.
+func.def @copy(%input: view<32xi32>, %output: view<32xi32>) {
+  %input_first = view.subview %input[0] : view<32xi32> -> view<16xi32>
+  %input_second = view.subview %input[16] : view<32xi32> -> view<16xi32>
+  %output_first = view.subview %output[0] : view<32xi32> -> view<16xi32>
+  %output_second = view.subview %output[16] : view<32xi32> -> view<16xi32>
+  %first = kernel.async.copy %input_first to %output_first {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+  %first_group = kernel.async.group %first : kernel.async.token -> kernel.async.group
+  %second = kernel.async.copy %input_second to %output_second {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+  %second_group = kernel.async.group %second : kernel.async.token -> kernel.async.group
+  kernel.async.wait %first_group {newer_groups = 1} : kernel.async.group
+  kernel.async.wait %second_group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+pipeline.def @phase() run(%column: index, %input: view<32xi32>, %output: view<32xi32>) {
+  pipeline.strand workers([%column, 2], [1, 1], [1, 1]) {
+    func.call @copy(%input, %output) : (view<32xi32>, view<32xi32>)
+  }
+}
+
+pipeline.def public @test() run(%input_argument: buffer, %output_argument: buffer) {
+  %input = buffer.assume.memory_space<global> %input_argument : buffer
+  %output = buffer.assume.memory_space<workgroup> %output_argument : buffer
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<32xi32>
+  %left = index.constant 1 : index
+  %right = index.constant 5 : index
+  pipeline.serial {
+    pipeline.compose @phase(%left, %input_view, %output_view) : (index, view<32xi32>, view<32xi32>)
+    pipeline.compose @phase(%right, %input_view, %output_view) : (index, view<32xi32>, view<32xi32>)
+  }
+}
+
+// ----
+inventory invocations=3 workers=2 channels=0
+  execution 0 = 1:0
+  execution 1 = 2:0
+invocation 0 @test strands=0 channels=0
+  joined block=0 step=0
+invocation 1 @phase strands=1 channels=0
+  scalar %column = 1
+  worker 0 geometry=1:1:1,2:1:1 actions=0
+    group %first_group transfers=1 completed-by=%first_group
+    group %second_group transfers=1 completed-by=%second_group
+  joined block=0 step=1
+invocation 2 @phase strands=1 channels=0
+  scalar %column = 5
+  worker 0 geometry=5:1:1,2:1:1 actions=0
+    group %first_group transfers=1 completed-by=%first_group
+    group %second_group transfers=1 completed-by=%second_group
+
+// ====
+// RUN: emit pipeline-invocations @test
+
+// Entering a child does not hide its missing DMA completion. Reusing output
+// in the next child requires the copy to retire before this one returns.
+func.def @copy(%input: view<16xi32>, %output: view<16xi32>, %wait: i1) {
+  %copy = kernel.async.copy %input to %output {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+  // ERROR@+1: LOWERING/032 {op_name="kernel.async.group", phase_name="pipeline-worker"}
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  cfg.cond_br %wait, ^complete, ^done
+^complete:
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  cfg.br ^done
+^done:
+  func.return
+}
+
+pipeline.def @phase() run(%input: view<16xi32>, %output: view<16xi32>, %wait: i1) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @copy(%input, %output, %wait) : (view<16xi32>, view<16xi32>, i1)
+  }
+}
+
+pipeline.def public @test() run(%input_argument: buffer, %output_argument: buffer, %wait: i1) {
+  %input = buffer.assume.memory_space<global> %input_argument : buffer
+  %output = buffer.assume.memory_space<workgroup> %output_argument : buffer
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<16xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<16xi32>
+  pipeline.serial {
+    pipeline.compose @phase(%input_view, %output_view, %wait) : (view<16xi32>, view<16xi32>, i1)
+  }
+}

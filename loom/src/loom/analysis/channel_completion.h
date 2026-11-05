@@ -34,7 +34,7 @@ typedef struct loom_channel_completion_action_t {
   // Non-completions have zero.
   uint32_t credits;
   // Conservative bound on admissions by this endpoint during one invocation.
-  // Exact block execution counts refine this bound when supplied. Otherwise
+  // Per-block execution upper bounds refine this when supplied. Otherwise
   // a cyclic admission has UINT32_MAX; acyclic sites each contribute one.
   // Zero or one proves that this endpoint never advances beyond its first slot.
   uint32_t maximum_admissions;
@@ -94,12 +94,13 @@ typedef struct loom_channel_completion_t {
 // complete analyzed canonical view table for the same value domain; CFG
 // projection uses it to retain channel ownership through derived views. NULL
 // avoids its table and dataflow cost when the worker has no payload consumer.
-// Optional block_execution_counts contains exact counts from the shared CFG
-// recurrence analysis; NULL retains conservative cyclic admission bounds.
+// Optional block_execution_bounds contains upper bounds from shared CFG
+// recurrence analysis. UINT64_MAX denotes an unknown bound; NULL retains
+// conservative cyclic admission bounds for every block.
 iree_status_t loom_channel_completion_analyze(
     const loom_channel_plan_t* plan, const loom_cfg_graph_t* graph,
     const loom_view_region_table_t* view_regions,
-    const uint64_t* block_execution_counts, iree_arena_allocator_t* arena,
+    const uint64_t* block_execution_bounds, iree_arena_allocator_t* arena,
     loom_channel_completion_t* out_completion);
 
 // Looks up the current owned record for one borrowed payload view.

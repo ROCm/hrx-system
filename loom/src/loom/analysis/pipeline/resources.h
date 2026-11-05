@@ -8,6 +8,7 @@
 #define LOOM_ANALYSIS_PIPELINE_RESOURCES_H_
 
 #include "loom/analysis/channel_plan.h"
+#include "loom/analysis/pipeline/schedule.h"
 #include "loom/analysis/source_storage_packing.h"
 #include "loom/error/emitter.h"
 #include "loom/util/fact_table.h"
@@ -111,6 +112,11 @@ typedef struct loom_pipeline_resources_t {
   const loom_pipeline_resource_strand_t* strands;
   // Number of retained strand calls.
   iree_host_size_t strand_count;
+  // Empty strand declarations with no worker lifetime. Consuming rewrites erase
+  // these retained construction sites without rediscovering their bodies.
+  loom_op_t* const* empty_strands;
+  // Number of empty strand declarations.
+  iree_host_size_t empty_strand_count;
   // Child compositions retained at independent execution boundaries. Each call
   // supplies the actual arguments for a distinct child construction; equal
   // callee symbols or targets do not identify one resource instance. The
@@ -118,6 +124,11 @@ typedef struct loom_pipeline_resources_t {
   loom_op_t* const* compositions;
   // Number of retained child compositions.
   iree_host_size_t composition_count;
+  // Independent resident serial scopes. Their control and child lifetimes
+  // remain explicit instead of flattening their strands into this occurrence.
+  const loom_pipeline_schedule_t* const* schedules;
+  // Number of outer serial scopes; nested scopes belong to their parent plan.
+  iree_host_size_t schedule_count;
 } loom_pipeline_resources_t;
 
 // Resolves invocation-owned allocations in a specialized pipeline construction.
@@ -143,6 +154,9 @@ typedef struct loom_pipeline_resources_t {
 // Allocation construction must be straight-line with finite specialized sizes
 // and capacities. Strand bodies must have been outlined into ordinary calls;
 // executable control flow inside strands is unrestricted by this analysis.
+// Serial scopes retain their CFG and classified construction separately. Their
+// dynamic resources and child calls belong to the enclosing realization owner,
+// not this occurrence's invocation-long allocation table.
 // Other construction operations must be pure. Observable initialization must
 // have its own execution placement before this resource-only boundary.
 // Unresolved authored bindings, extents, or construction are diagnostics with
@@ -154,8 +168,8 @@ typedef struct loom_pipeline_resources_t {
 // packings may already include allocations from the rejected construction.
 iree_status_t loom_pipeline_resources_build(
     loom_module_t* module, loom_func_like_t pipeline,
-    const loom_value_fact_table_t* facts,
-    const loom_pipeline_resource_pool_t* pools, iree_host_size_t pool_count,
+    loom_value_fact_table_t* facts, const loom_pipeline_resource_pool_t* pools,
+    iree_host_size_t pool_count,
     const loom_pipeline_resource_memory_t* memories,
     iree_host_size_t memory_count,
     const loom_pipeline_resource_pool_binding_t* bindings,

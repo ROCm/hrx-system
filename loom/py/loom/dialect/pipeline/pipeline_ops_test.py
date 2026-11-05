@@ -55,6 +55,24 @@ def test_generic_pipeline_roundtrip() -> None:
     _roundtrip("pipeline.def @generic(%batch: index) run(%input: buffer) {\n}\n")
 
 
+@pytest.mark.parametrize("outer", ["serial", "concurrent"])
+@pytest.mark.parametrize("inner", ["serial", "concurrent"])
+def test_schedule_composition_roundtrip(outer: str, inner: str) -> None:
+    _roundtrip(
+        """pipeline.decl @stage() run(%state: buffer)
+
+pipeline.def @ordered() run(%state: buffer) {
+  pipeline.OUTER {
+    pipeline.compose @stage(%state) : (buffer)
+    pipeline.INNER {
+      pipeline.compose @stage(%state) : (buffer)
+    }
+  }
+}
+""".replace("OUTER", outer).replace("INNER", inner)
+    )
+
+
 @pytest.mark.parametrize("scope", ["", "<kernel>"])
 def test_pipeline_declaration_roundtrip(scope: str) -> None:
     _roundtrip(f"pipeline.decl{scope} @stage(%width: index) run(%input: channel<tile<[%width]xi32>>)\n")

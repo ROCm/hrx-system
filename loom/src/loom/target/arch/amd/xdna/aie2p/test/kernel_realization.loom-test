@@ -19,7 +19,7 @@ kernel.def @loop_store() {
 }
 
 // ----
-CHECK: low.func.def inline target<amd.xdna.aie2p.core>* @__pipeline_worker_*() asm {
+CHECK: low.func.def*target<amd.xdna.aie2p.core>*() asm {
 CHECK: low.func.def public retain target<amd.xdna.aie2p.configuration>* abi(array_program) @loop_store() asm {
 
 // ====
@@ -461,4 +461,31 @@ pipeline.def<kernel> public retain @memory_spaces() run(%40: buffer, %41: buffer
     channel.release %141 : read<tile<4xi8>>
     channel.release %143 : read<tile<4xi8>>
   }
+}
+
+// ====
+// RUN: pass target=amd.xdna.aie2p:amd.xdna.strix.17f0_10 aie2p-realize-kernel
+
+// A no-argument helper can still change external storage. Snapshotting the
+// kernel's explicit binding must account for those transitive hidden writes.
+func.decl @external_write()
+
+func.def @update_input() {
+  func.call @external_write() : ()
+  func.return
+}
+
+// ERROR@+1: XDNA/051 {requirement="fully described external memory effects"}
+kernel.def @hidden_write() {
+  %unit_extent = index.constant 1 : index
+  kernel.launch.config workgroups(%unit_extent, %unit_extent, %unit_extent) workgroup_size(%unit_extent, %unit_extent, %unit_extent) : index
+} launch(%input: buffer) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  %before = view.load %view[0] : view<1xi32> -> i32
+  func.call @update_input() : ()
+  %after = view.load %view[0] : view<1xi32> -> i32
+  %difference = scalar.subi %after, %before : i32
+  view.store %difference, %view[0] : i32, view<1xi32>
+  kernel.return
 }

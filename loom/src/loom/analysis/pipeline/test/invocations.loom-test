@@ -1,0 +1,176 @@
+// RUN: emit pipeline-invocations @test
+
+// The same complete producer/consumer phase receives two different outer
+// FIFOs. The runtime loop binds one static child site, not one copy per visit.
+func.def @produce(%stream: channel<tile<1xi32>>, %iteration: index) {
+  %value = index.cast %iteration : index to i32
+  %write, %payload = channel.reserve %stream : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  view.store %value, %payload[0] : i32, view<1xi32>
+  channel.publish %write : write<tile<1xi32>>
+  func.return
+}
+
+func.def @consume(%stream: channel<tile<1xi32>>, %output: view<1xi32>) {
+  %read, %payload = channel.acquire %stream : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+  %value = view.load %payload[0] : view<1xi32> -> i32
+  view.store %value, %output[0] : i32, view<1xi32>
+  channel.release %read : read<tile<1xi32>>
+  func.return
+}
+
+pipeline.def @phase() run(%stream: channel<tile<1xi32>>, %output: view<1xi32>, %iteration: index) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @produce(%stream, %iteration) : (channel<tile<1xi32>>, index)
+  }
+  pipeline.strand workers([1], [1], [1]) {
+    func.call @consume(%stream, %output) : (channel<tile<1xi32>>, view<1xi32>)
+  }
+}
+
+pipeline.def public @test() run(%storage: buffer, %output: view<1xi32>, %count: index) {
+  %begin = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %capacity = index.constant 2 : index
+  %first = index.constant 0 : offset
+  %second = index.constant 8 : offset
+  %left_slots = buffer.view %storage[%first] : buffer -> view<2x1xi32>
+  %right_slots = buffer.view %storage[%second] : buffer -> view<2x1xi32>
+  %left = channel.bind<fifo> %left_slots, %capacity : view<2x1xi32>, index -> channel<tile<1xi32>>
+  %right = channel.bind<fifo> %right_slots, %capacity : view<2x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.serial {
+    cfg.br ^header(%begin: index)
+  ^header(%iteration: index):
+    %more = index.cmp ult, %iteration, %count : index
+    cfg.cond_br %more, ^body, ^done
+  ^body:
+    pipeline.compose @phase(%left, %output, %iteration) : (channel<tile<1xi32>>, view<1xi32>, index)
+    pipeline.serial {
+      pipeline.compose @phase(%right, %output, %c1) : (channel<tile<1xi32>>, view<1xi32>, index)
+    }
+    %next = index.add %iteration, %c1 : index
+    cfg.br ^header(%next: index)
+  ^done:
+  }
+}
+
+// ----
+inventory invocations=3 workers=4 channels=2
+  execution 0 = 1:0
+  execution 1 = 1:1
+  execution 2 = 2:0
+  execution 3 = 2:1
+  protocol 0 = 0:%left external
+  protocol 1 = 0:%right external
+invocation 0 @test strands=0 channels=2
+  joined block=2 step=0
+invocation 1 @phase strands=2 channels=0
+  channel %stream = 0:%left capacity=2 inventory=0
+  scalar %iteration = runtime
+  worker 0 geometry=0:1:1 actions=2
+  worker 1 geometry=1:1:1 actions=2
+  joined block=0 step=0
+invocation 2 @phase strands=2 channels=0
+  channel %stream = 0:%right capacity=2 inventory=1
+  scalar %iteration = 1
+  worker 0 geometry=0:1:1 actions=2
+  worker 1 geometry=1:1:1 actions=2
+
+// ====
+// RUN: emit pipeline-invocations @test
+
+// Repeated wrapper calls create distinct local protocols while their imported
+// channel keeps the root's identity through another construction boundary.
+pipeline.def @leaf() run(%local: channel<tile<1xi32>>, %shared: channel<tile<1xi32>>) {
+}
+
+pipeline.def @wrapper() run(%storage: view<1x1xi32>, %shared: channel<tile<1xi32>>) {
+  %c1 = index.constant 1 : index
+  %local = channel.bind<fifo> %storage, %c1 : view<1x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.serial {
+    pipeline.compose @leaf(%local, %shared) : (channel<tile<1xi32>>, channel<tile<1xi32>>)
+  }
+}
+
+pipeline.def public @test() run(%local_storage: view<1x1xi32>, %shared_storage: view<1x1xi32>) {
+  %c1 = index.constant 1 : index
+  %shared = channel.bind<fifo> %shared_storage, %c1 : view<1x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.serial {
+    pipeline.compose @wrapper(%local_storage, %shared) : (view<1x1xi32>, channel<tile<1xi32>>)
+    pipeline.compose @wrapper(%local_storage, %shared) : (view<1x1xi32>, channel<tile<1xi32>>)
+  }
+}
+
+// ----
+inventory invocations=5 workers=0 channels=3
+  protocol 0 = 0:%shared external
+  protocol 1 = 1:%local external
+  protocol 2 = 3:%local external
+invocation 0 @test strands=0 channels=1
+  joined block=0 step=0
+invocation 1 @wrapper strands=0 channels=1
+  channel %shared = 0:%shared capacity=1 inventory=0
+  joined block=0 step=0
+invocation 2 @leaf strands=0 channels=0
+  channel %local = 1:%local capacity=1 inventory=1
+  channel %shared = 0:%shared capacity=1 inventory=0
+  joined block=0 step=1
+invocation 3 @wrapper strands=0 channels=1
+  channel %shared = 0:%shared capacity=1 inventory=0
+  joined block=0 step=0
+invocation 4 @leaf strands=0 channels=0
+  channel %local = 3:%local capacity=1 inventory=2
+  channel %shared = 0:%shared capacity=1 inventory=0
+
+// ====
+// RUN: emit pipeline-invocations @test
+
+// Concurrent and joined occurrences preserve their different completion
+// boundaries even when their callee and actual scalar value are identical.
+pipeline.def @child() run(%count: index) {
+}
+
+pipeline.def public @test() run() {
+  %count = index.constant 28 : index
+  pipeline.compose @child(%count) : (index)
+  pipeline.serial {
+    pipeline.compose @child(%count) : (index)
+  }
+}
+
+// ----
+inventory invocations=3 workers=0 channels=0
+invocation 0 @test strands=0 channels=0
+  concurrent 0
+invocation 1 @child strands=0 channels=0
+  scalar %count = 28
+  joined block=0 step=0
+invocation 2 @child strands=0 channels=0
+  scalar %count = 28
+
+// ====
+// RUN: emit pipeline-invocations @test
+
+pipeline.decl @missing() run()
+
+pipeline.def public @test() run() {
+  pipeline.serial {
+    // ERROR@+1: LOWERING/066 {requirement="a visible child pipeline construction"}
+    pipeline.compose @missing() : ()
+  }
+}
+
+// ====
+// RUN: emit pipeline-invocations @test
+
+pipeline.def @child() run() {
+  pipeline.serial {
+    // ERROR@+1: LOWERING/066 {requirement="finite nonrecursive pipeline construction"}
+    pipeline.compose @test() : ()
+  }
+}
+
+pipeline.def public @test() run() {
+  pipeline.serial {
+    pipeline.compose @child() : ()
+  }
+}

@@ -65,7 +65,7 @@ using Output = loomt::view<loomt::shape<4>, float>;
 
 // ====
 void schedule_outside_command() {
-  // ERROR@+1: LOWERING/059 "serial and concurrent regions require a command_program body"
+  // ERROR@+1: LOWERING/059 "schedule regions require a command_program or pipeline body"
   [[loom::serial]] {}
 }
 
@@ -77,7 +77,7 @@ void schedule_outside_command() {
 
 // ====
 [[loom::command_program]] void schedule_mutation(unsigned value) {
-  // ERROR@+1: LOWERING/059 "command schedule regions cannot update enclosing automatic values because they have no results"
+  // ERROR@+1: LOWERING/059 "schedule regions cannot update enclosing automatic values because they have no results"
   [[loom::concurrent]] { value = 1u; }
 }
 
@@ -107,4 +107,32 @@ using Parameters = loom::type::buffer<const unsigned char>;
   // ERROR@+1: LOWERING/059 "command.parameter requires a const-qualified result element type"
   auto value = loom::command::parameter<loom::type::shape<4>, float>(parameters, "weight");
   (void)value;
+}
+
+// ====
+[[loom::command_program]] void returning_serial() {
+  // ERROR@+1: LOWERING/059 "schedule regions cannot contain function returns"
+  [[loom::serial]] { return; }
+}
+
+// ====
+[[loom::command_program]] void returning_concurrent() {
+  // ERROR@+1: LOWERING/059 "schedule regions cannot contain function returns"
+  [[loom::concurrent]] { if constexpr (true) { return; } }
+}
+
+// ====
+[[loom::command_program]] void exiting_serial() {
+  for (unsigned phase = 0; phase < 3; ++phase) {
+    // ERROR@+1: LOWERING/059 "schedule regions cannot exit an enclosing loop"
+    [[loom::serial]] { break; }
+  }
+}
+
+// ====
+[[loom::command_program]] void continuing_concurrent() {
+  for (unsigned phase = 0; phase < 3; ++phase) {
+    // ERROR@+1: LOWERING/059 "schedule regions cannot exit an enclosing loop"
+    [[loom::concurrent]] { continue; }
+  }
 }

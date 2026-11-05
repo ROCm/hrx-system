@@ -582,6 +582,13 @@ static bool loom_inline_composition_shares_context(
   }
   const loom_inline_symbol_info_t* caller =
       &state->symbols[entry->source_symbol_id];
+  // A construction helper acquires its ordering context only when it expands
+  // into a pipeline. Flattening its compositions earlier would erase child
+  // completion boundaries when the helper is instantiated inside a serial
+  // schedule. The next reference snapshot owns that newly exposed context.
+  if (!loom_symbol_implements(caller->symbol, LOOM_SYMBOL_INTERFACE_PIPELINE)) {
+    return false;
+  }
   const loom_symbol_ref_t callee_target = loom_func_like_target(entry->callee);
   const loom_symbol_ref_t caller_target =
       loom_func_like_target(caller->function);
@@ -605,10 +612,12 @@ static bool loom_inline_composition_shares_context(
 }
 
 static void loom_inline_resolve_entry_policy(
-    loom_inline_callables_plan_t* state, loom_inline_plan_entry_t* entry) {
+    loom_inline_callables_plan_t* state, loom_inline_plan_entry_t* entry,
+    bool joins_composition) {
   const loom_call_like_kind_t call_kind = loom_call_like_kind(entry->call);
   if (call_kind == LOOM_CALL_LIKE_KIND_COMPOSITION &&
-      !loom_inline_composition_shares_context(state, entry)) {
+      (joins_composition ||
+       !loom_inline_composition_shares_context(state, entry))) {
     entry->action = LOOM_INLINE_PLAN_ACTION_KEEP;
     ++state->statistics.kept_edges;
     return;
@@ -736,7 +745,7 @@ void loom_inline_callables_plan_append(
     loom_symbol_id_t target_symbol_id, loom_op_t* call_op) {
   loom_inline_plan_entry_t* entry = loom_inline_append_entry(
       state, source_symbol_id, execution_scope, target_symbol_id, call_op);
-  loom_inline_resolve_entry_policy(state, entry);
+  loom_inline_resolve_entry_policy(state, entry, false);
   loom_inline_add_required_graph_edge(state, entry->ordinal);
 }
 
@@ -774,7 +783,7 @@ static iree_status_t loom_inline_build_plan(
         continue;
       }
     }
-    loom_inline_resolve_entry_policy(state, entry);
+    loom_inline_resolve_entry_policy(state, entry, edge->joins_composition);
     if (entry->action == LOOM_INLINE_PLAN_ACTION_KEEP &&
         loom_call_like_kind(entry->call) == LOOM_CALL_LIKE_KIND_SEMANTIC &&
         entry->source_symbol_id < state->module->symbols.count &&

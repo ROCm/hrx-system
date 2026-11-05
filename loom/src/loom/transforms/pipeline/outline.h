@@ -19,6 +19,8 @@ extern "C" {
 // binding consumes the call. Construction helpers must already be expanded.
 // This pass runs after required source inlining and registers worker target
 // versions for ordinary function legalization before binding consumes them.
+// Concurrent graphs become private child pipeline compositions with the same
+// typed capture contract, preserving the existing resource and join ownership.
 const loom_pass_info_t* loom_pipeline_outline_pass_info(void);
 iree_status_t loom_pipeline_outline_run(loom_pass_t* pass,
                                         loom_module_t* module);

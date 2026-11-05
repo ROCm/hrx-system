@@ -337,3 +337,148 @@ float configured_scalars() {
   }
   return v5;
 }
+
+// ====
+#include <loomcxx/pipeline.h>
+
+using Bytes = loom::type::buffer<unsigned>;
+
+// A definition inherits its composable contract from the declaration.
+[[loom::pipeline]] void child([[loom::launch]] Bytes output, unsigned phase);
+
+void child(Bytes output, unsigned phase) {
+  [[loom::strand(loom::type::indices{loom::type::index{0}, loom::type::index{2}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}})]] {
+    auto values = loom::buffer::view<4>(output, {});
+    loom::view::store(phase + 1u, values, phase);
+  }
+}
+
+[[loom::pipeline("kernel"), loom::retain]]
+void resident([[loom::launch]] Bytes output) {
+  [[loom::serial]] {
+    for (unsigned phase = 0; phase < 3; ++phase) {
+      loom::pipeline::compose<child>(output, phase);
+    }
+    [[loom::serial]] {
+      loom::pipeline::compose<child>(output, 3u);
+    }
+  }
+}
+
+// ----
+#include <loomcxx/pipeline.h>
+
+[[loom::pipeline, loom::symbol("child")]]
+void child([[loom::launch]] loom::type::buffer<unsigned char> output, unsigned phase);
+
+[[loom::pipeline("kernel"), loom::symbol("resident"), loom::retain]]
+void resident([[loom::launch]] loom::type::buffer<unsigned char> output);
+
+[[loom::pipeline, loom::symbol("child")]]
+void child([[loom::launch]] loom::type::buffer<unsigned char> output, unsigned phase) {
+  [[loom::strand(loom::type::indices{loom::type::index{0}, loom::type::index{2}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}})]] {
+    auto values = loom::buffer::view<4>(loom::buffer::cast<unsigned>(output), {});
+    loom::view::store((phase + 1u), values, loom::index::cast(phase));
+  }
+}
+
+[[loom::pipeline("kernel"), loom::symbol("resident"), loom::retain]]
+void resident([[loom::launch]] loom::type::buffer<unsigned char> output) {
+  [[loom::serial]] {
+    for (unsigned phase_1 = 0u; phase_1 < 3u; ++phase_1) {
+      loom::pipeline::compose<child>(output, phase_1);
+    }
+    [[loom::serial]] {
+      loom::pipeline::compose<child>(output, 3u);
+    }
+  }
+}
+
+// ====
+// Local typed storage crosses the same byte-buffer boundary as external roots.
+#include <loomcxx/pipeline.h>
+using Bytes = loom::type::buffer<unsigned char>;
+[[loom::pipeline]] void child(Bytes specialized, [[loom::launch]] Bytes runtime);
+[[loom::pipeline("kernel")]] void root() {
+  auto memory = loom::pipeline::memory<loom::memory_space::workgroup>(loom::type::indices{loom::type::index{0}, loom::type::index{2}});
+  auto* storage = loom::buffer::alloca<unsigned, loom::memory_space::workgroup, 64>(loom::type::index{4}, memory);
+  auto bytes = loom::buffer::cast<unsigned char>(loom::buffer::root(storage));
+  [[loom::serial]] {
+    loom::pipeline::compose<child>(bytes, bytes);
+  }
+  [[loom::strand(loom::type::indices{loom::type::index{0}, loom::type::index{2}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}})]] {
+    auto values = loom::buffer::view<4>(storage, {});
+    loom::view::store(7u, values, 0u);
+  }
+}
+
+// ----
+#include <loomcxx/pipeline.h>
+
+[[loom::pipeline("kernel"), loom::symbol("root")]]
+void root();
+
+[[loom::pipeline, loom::symbol("child")]]
+void child(loom::type::buffer<unsigned char> v13, [[loom::launch]] loom::type::buffer<unsigned char> v14);
+
+[[loom::pipeline("kernel"), loom::symbol("root")]]
+void root() {
+  auto memory = loom::pipeline::memory<loom::memory_space::workgroup>(loom::type::indices{loom::type::index{0}, loom::type::index{2}});
+  auto* storage = loom::buffer::alloca<loom::memory_space::workgroup, 64>(loom::index::scale(loom::type::index{4}, loom::type::offset{4}), memory);
+  [[loom::serial]] {
+    loom::pipeline::compose<child>(loom::buffer::root(storage), loom::buffer::root(storage));
+  }
+  [[loom::strand(loom::type::indices{loom::type::index{0}, loom::type::index{2}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}})]] {
+    auto values = loom::buffer::view<4>(reinterpret_cast<unsigned*>(reinterpret_cast<unsigned char*>(storage)), {});
+    loom::view::store(7u, values, loom::type::index{0});
+  }
+}
+
+// ====
+#include <loomcxx/pipeline.h>
+using Bytes = loom::type::buffer<unsigned>;
+[[loom::pipeline]] void child([[loom::launch]] Bytes output, unsigned phase);
+[[loom::pipeline("kernel")]] void nested([[loom::launch]] Bytes output) {
+  [[loom::serial]] {
+    for (unsigned phase = 0; phase < 3; ++phase) {
+      [[loom::concurrent]] {
+        loom::pipeline::compose<child>(output, phase);
+        [[loom::serial]] {
+          loom::pipeline::compose<child>(output, phase + 1u);
+          [[loom::concurrent]] {
+            loom::pipeline::compose<child>(output, phase + 2u);
+          }
+        }
+      }
+    }
+    loom::pipeline::compose<child>(output, 3u);
+  }
+}
+
+// ----
+#include <loomcxx/pipeline.h>
+
+[[loom::pipeline("kernel"), loom::symbol("nested")]]
+void nested([[loom::launch]] loom::type::buffer<unsigned char> output);
+
+[[loom::pipeline, loom::symbol("child")]]
+void child([[loom::launch]] loom::type::buffer<unsigned char> v13, unsigned v14);
+
+[[loom::pipeline("kernel"), loom::symbol("nested")]]
+void nested([[loom::launch]] loom::type::buffer<unsigned char> output) {
+  [[loom::serial]] {
+    for (unsigned phase = 0u; phase < 3u; ++phase) {
+      unsigned v7 = phase;
+      [[loom::concurrent]] {
+        loom::pipeline::compose<child>(output, v7);
+        [[loom::serial]] {
+          loom::pipeline::compose<child>(output, (v7 + 1u));
+          [[loom::concurrent]] {
+            loom::pipeline::compose<child>(output, (v7 + 2u));
+          }
+        }
+      }
+    }
+    loom::pipeline::compose<child>(output, 3u);
+  }
+}

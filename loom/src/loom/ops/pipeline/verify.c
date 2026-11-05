@@ -129,23 +129,7 @@ static iree_status_t loom_pipeline_verify_worker_axis_list(
 iree_status_t loom_pipeline_memory_verify(const loom_module_t* module,
                                           const loom_op_t* op,
                                           iree_diagnostic_emitter_t emitter) {
-  const loom_op_t* pipeline = op->parent_op;
-  while (pipeline && !loom_pipeline_def_isa(pipeline)) {
-    pipeline = pipeline->parent_op;
-  }
-  if (!pipeline || !loom_pipeline_def_has_scope(pipeline) ||
-      loom_pipeline_def_scope(pipeline) != LOOM_PIPELINE_SCOPE_KERNEL) {
-    const loom_diagnostic_param_t params[] = {
-        loom_param_string(loom_op_name(module, op)),
-        loom_param_string(IREE_SV("required")),
-        loom_param_string(IREE_SV("pipeline.def<kernel>")),
-        loom_param_string(pipeline
-                              ? IREE_SV("pipeline.def without kernel scope")
-                              : IREE_SV("none")),
-    };
-    return loom_pipeline_emit(emitter, op, LOOM_ERR_STRUCTURE_029, params,
-                              IREE_ARRAYSIZE(params));
-  }
+  (void)module;
   const loom_attribute_t coordinates =
       loom_pipeline_memory_static_coordinates(op);
   if (coordinates.count == 0) {
@@ -165,7 +149,24 @@ iree_status_t loom_pipeline_memory_verify(const loom_module_t* module,
 iree_status_t loom_pipeline_strand_verify(const loom_module_t* module,
                                           const loom_op_t* op,
                                           iree_diagnostic_emitter_t emitter) {
-  (void)module;
+  // A concurrent group establishes a fresh graph even when it is a child of a
+  // serial schedule. Direct serial children must be complete pipeline graphs.
+  for (const loom_op_t* parent = op->parent_op; parent;
+       parent = parent->parent_op) {
+    if (loom_pipeline_concurrent_isa(parent) || loom_pipeline_def_isa(parent)) {
+      break;
+    }
+    if (loom_pipeline_serial_isa(parent)) {
+      const loom_diagnostic_param_t params[] = {
+          loom_param_string(loom_op_name(module, op)),
+          loom_param_string(IREE_SV("forbidden")),
+          loom_param_string(IREE_SV("pipeline.serial")),
+          loom_param_string(loom_op_name(module, parent)),
+      };
+      return loom_pipeline_emit(emitter, op, LOOM_ERR_STRUCTURE_029, params,
+                                IREE_ARRAYSIZE(params));
+    }
+  }
   const loom_attribute_t origins = loom_pipeline_strand_static_origins(op);
   if (origins.count == 0) {
     const loom_diagnostic_param_t params[] = {
@@ -193,4 +194,22 @@ iree_status_t loom_pipeline_strand_verify(const loom_module_t* module,
         IREE_SV("implicit capture argument"), 0);
   }
   return iree_ok_status();
+}
+
+iree_status_t loom_pipeline_yield_verify(const loom_module_t* module,
+                                         const loom_op_t* op,
+                                         iree_diagnostic_emitter_t emitter) {
+  if (loom_pipeline_serial_isa(op->parent_op) ||
+      loom_pipeline_concurrent_isa(op->parent_op)) {
+    return iree_ok_status();
+  }
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_op_name(module, op)),
+      loom_param_string(IREE_SV("required parent")),
+      loom_param_string(IREE_SV("pipeline.serial or pipeline.concurrent")),
+      loom_param_string(op->parent_op ? loom_op_name(module, op->parent_op)
+                                      : IREE_SV("module")),
+  };
+  return loom_pipeline_emit(emitter, op, LOOM_ERR_STRUCTURE_029, params,
+                            IREE_ARRAYSIZE(params));
 }

@@ -65,6 +65,43 @@ remain the lossless forms. An operation without a validated C++ spelling stops
 rendering with the operation name and the unsupported semantic boundary; the
 tool never emits a partial approximation.
 
+## Resident pipelines and ordered phases
+
+`[[loom::pipeline]]` declares a composable child graph. Adding the `"kernel"`
+argument requires one directly loadable executable and permits
+`loom::kernel::launch`. A child without that artifact boundary is composed
+through `loom::pipeline::compose`; it cannot be launched independently.
+Declarations and definitions share the same scope and specialization boundary.
+
+Inside a pipeline, `[[loom::serial]]` joins each composed child's strands and
+transfers before starting the next child. Repeated compositions execute inside
+the same resident invocation. Storage owned outside the serial region persists
+across phases, while child-owned storage has the child's lifetime.
+
+```cpp
+#include <loomcxx/pipeline.h>
+
+using Bytes = loom::type::buffer<unsigned char>;
+
+[[loom::pipeline]] void prepare([[loom::launch]] Bytes state, unsigned layer);
+[[loom::pipeline]] void consume([[loom::launch]] Bytes state, unsigned layer);
+
+[[loom::pipeline("kernel")]] void resident([[loom::launch]] Bytes state) {
+  [[loom::serial]] {
+    for (unsigned layer = 0; layer < 28; ++layer) {
+      loom::pipeline::compose<prepare>(state, layer);
+      loom::pipeline::compose<consume>(state, layer);
+    }
+  }
+}
+```
+
+Compositions outside a serial region remain concurrent. Serial regions belong
+to pipeline construction, outside strand bodies. Their braces establish a
+lexical scope with no results, so they cannot update enclosing automatic values,
+return from the function, or exit an enclosing loop. The same attribute in a
+command program retains its command dependency semantics.
+
 ## Explicit 16-bit floating-point types
 
 `<stdfloat>` provides `std::float16_t` (IEEE FP16) and `std::bfloat16_t` (BF16).

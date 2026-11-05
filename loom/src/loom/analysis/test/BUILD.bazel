@@ -15,12 +15,3 @@ loom_check_test_suite(
         "storage_interference.loom-test",
     ],
 )
-
-loom_check_test_suite(
-    name = "pipeline_transport_test",
-    srcs = [
-        "pipeline_transport.loom-test",
-        "pipeline_transport_control.loom-test",
-        "pipeline_transport_replay.loom-test",
-    ],
-)

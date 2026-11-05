@@ -1,0 +1,95 @@
+// RUN: pass test.realize-pipeline,symbol-dce
+
+// The same worker has two bound occurrences. The head-only assumption is
+// contradictory in the down occurrence and disappears before worker analysis.
+// Its surviving runtime capture still uses the original parameter ordinal.
+func.decl @head(%state: buffer, %value: index)
+
+func.decl @down(%state: buffer, %value: index)
+
+func.def @worker(%group: index, %state: buffer, %value: index) {
+  %head_groups = index.constant 3 : index
+  %is_head = index.cmp ult, %group, %head_groups : index
+  cfg.cond_br %is_head, ^head, ^down
+^head:
+  %head_group = index.assume %group [range(%group, 0, 2)] : index
+  %head_value = index.add %head_group, %value : index
+  func.call @head(%state, %head_value) : (buffer, index)
+  cfg.br ^exit
+^down:
+  func.call @down(%state, %value) : (buffer, index)
+  cfg.br ^exit
+^exit:
+  func.return
+}
+
+pipeline.def @phase() run(%state: buffer, %group: index, %value: index) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @worker(%group, %state, %value) : (index, buffer, index)
+  }
+}
+
+pipeline.def public @root() run(%state: buffer, %value: index) {
+  %first = index.constant 1 : index
+  %last = index.constant 6 : index
+  pipeline.serial {
+    pipeline.compose @phase(%state, %first, %value) : (buffer, index, index)
+    pipeline.compose @phase(%state, %last, %value) : (buffer, index, index)
+  }
+}
+
+// ----
+func.decl @head(%state: buffer, %value: index)
+
+func.decl @down(%state: buffer, %value: index)
+
+func.def @__pipeline_worker_0(%state: buffer, %value: index) {
+  %32 = index.constant 1 : index
+  %head_group = index.assume %32 [range(%32, 0, 2)] : index
+  %head_value = index.add %head_group, %value : index
+  func.call @head(%state, %head_value) : (buffer, index)
+  func.return
+}
+
+func.def @__pipeline_worker_1(%state: buffer, %value: index) {
+  func.call @down(%state, %value) : (buffer, index)
+  func.return
+}
+
+func.decl @__test_phase_join(%34: index)
+
+func.decl @__test_phase_enter(%35: index)
+
+func.def inline @__pipeline_engine_0(%36: buffer, %38: index) {
+  cfg.br ^_bb1
+^_bb1:
+  func.call @__pipeline_worker_1(%36, %38) : (buffer, index)
+  func.return
+}
+
+func.def inline @__pipeline_engine_1(%42: buffer, %44: index) {
+  cfg.br ^_bb1
+^_bb1:
+  func.call @__pipeline_worker_0(%42, %44) : (buffer, index)
+  func.return
+}
+
+func.def public inline @__pipeline_engine_2(%48: buffer, %49: index) {
+  cfg.br ^_bb1
+^_bb1:
+  cfg.br ^_bb2
+^_bb2:
+  %56 = index.constant 0 : index
+  func.call @__test_phase_enter(%56) : (index)
+  func.call @__pipeline_engine_1(%48, %49) : (buffer, index)
+  %57 = index.constant 0 : index
+  func.call @__test_phase_join(%57) : (index)
+  %54 = index.constant 0 : index
+  func.call @__test_phase_enter(%54) : (index)
+  func.call @__pipeline_engine_0(%48, %49) : (buffer, index)
+  %55 = index.constant 0 : index
+  func.call @__test_phase_join(%55) : (index)
+  cfg.br ^_bb3
+^_bb3:
+  func.return
+}

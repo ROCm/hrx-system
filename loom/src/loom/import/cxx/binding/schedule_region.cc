@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/import/cxx/binding/command_schedule.h"
+#include "loom/import/cxx/binding/schedule_region.h"
 
 #include <cxx/ast.h>
 
@@ -13,7 +13,7 @@
 
 namespace loom::cxx_import {
 
-std::optional<CommandSchedule> CommandSchedule::resolve(
+std::optional<ScheduleRegion> ScheduleRegion::resolve(
     cxx::TranslationUnit& unit, Diagnostics& diagnostics,
     cxx::StatementAST* statement) {
   std::optional<Kind> kind;
@@ -31,7 +31,7 @@ std::optional<CommandSchedule> CommandSchedule::resolve(
         }
         if (attribute->attributeArgumentClause) {
           diagnostics.reject(unit, attribute,
-                             "command schedule attributes take no arguments");
+                             "schedule region attributes take no arguments");
         }
         source = attribute;
         kind = name == "serial" ? Kind::Serial : Kind::Concurrent;
@@ -45,7 +45,7 @@ std::optional<CommandSchedule> CommandSchedule::resolve(
         unit, source,
         "serial and concurrent require an attributed compound statement");
   }
-  return CommandSchedule{*kind, body};
+  return ScheduleRegion{*kind, body};
 }
 
 }  // namespace loom::cxx_import

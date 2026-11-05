@@ -13,12 +13,39 @@ package(
 )
 
 loom_cc_library(
+    name = "control",
+    srcs = ["control.c"],
+    hdrs = ["control.h"],
+    deps = [
+        ":realization",
+        "//loom/src/loom/analysis/pipeline:execution",
+        "//loom/src/loom/analysis/pipeline:invocations",
+        "//loom/src/loom/analysis/pipeline:resources",
+        "//loom/src/loom/analysis/pipeline:schedule",
+        "//loom/src/loom/analysis/pipeline:workers",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:symbol_map",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/pipeline",
+        "//loom/src/loom/rewrite:materialize",
+        "//loom/src/loom/rewrite:remap",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/util:adaptive_sort",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "realization",
     srcs = ["realization.c"],
     hdrs = ["realization.h"],
     deps = [
-        "//loom/src/loom/analysis:pipeline_resources",
-        "//loom/src/loom/analysis:pipeline_workers",
+        "//loom/src/loom/analysis/pipeline:invocations",
+        "//loom/src/loom/analysis/pipeline:resources",
+        "//loom/src/loom/analysis/pipeline:workers",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:symbol_map",
         "//loom/src/loom/ops:special_values",
@@ -33,6 +60,7 @@ loom_cc_library(
         "//loom/src/loom/target:function_contract",
         "//loom/src/loom/target:function_version",
         "//loom/src/loom/target:pass_environment",
+        "//loom/src/loom/transforms/cfg:cfg_simplify",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],

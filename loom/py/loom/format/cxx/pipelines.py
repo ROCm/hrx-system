@@ -261,7 +261,10 @@ class CxxPipelineRenderer(CxxCommandRenderer):
         return None
 
     def _render_pipeline_op(self, operation: Operation) -> tuple[str, ...] | None:
-        if operation.name in {"pipeline.finish", "pipeline.end"}:
+        if operation.name in {"pipeline.finish", "pipeline.end", "pipeline.yield"}:
+            return ()
+        if operation.name in {"pipeline.serial", "pipeline.concurrent"}:
+            self._render_schedule_region(operation)
             return ()
         if operation.name == "pipeline.memory":
             return self._render_pipeline_memory(operation)

@@ -338,13 +338,11 @@ class CxxCommandRenderer(CxxExpressionRenderer):
 
     def _pipeline_attributes(self, operation: Operation) -> list[str]:
         resolved = self._resolved(operation)
-        if resolved.attr("scope") != "kernel":
-            raise CxxRenderError(
-                operation, "only kernel-scoped pipeline contracts are launchable"
-            )
         symbol = str(resolved.attr("callee"))
         attributes = [
-            'loom::pipeline("kernel")',
+            'loom::pipeline("kernel")'
+            if resolved.attr("scope") == "kernel"
+            else "loom::pipeline",
             f"loom::symbol({_quote_string(symbol)})",
         ]
         if retain := self._retention_attribute(operation):
@@ -438,7 +436,9 @@ class CxxCommandRenderer(CxxExpressionRenderer):
                     operation, "pipeline call specialization arity is inconsistent"
                 )
             arguments.append(
-                self.expression(specializations[specialization_ordinal - 1])
+                self._staged_argument(
+                    parameter.value_id, specializations[specialization_ordinal - 1]
+                )
             )
         for parameter, binding in zip(source_bindings, bindings, strict=True):
             specialization_ordinal += len(parameter.dependencies)
@@ -446,12 +446,29 @@ class CxxCommandRenderer(CxxExpressionRenderer):
                 raise CxxRenderError(
                     operation, "pipeline call specialization arity is inconsistent"
                 )
-            arguments.append(self.expression(binding))
+            arguments.append(self._staged_argument(parameter.value_id, binding))
         if specialization_ordinal != len(specializations):
             raise CxxRenderError(
                 operation, "pipeline call specialization arity is inconsistent"
             )
         return arguments
+
+    def _staged_argument(self, parameter: int, argument: int) -> str:
+        """Preserves the byte-buffer contract of staged source parameters."""
+
+        expression = self.expression(argument)
+        if not (
+            isinstance(self.module.values[parameter].type, BufferType)
+            and isinstance(self.module.values[argument].type, BufferType)
+        ):
+            return expression
+        source_type = self.expression_type(argument)
+        if source_type.endswith("*"):
+            expression = f"loom::buffer::root({expression})"
+            source_type = f"loom::type::buffer<{source_type[:-1].strip()}>"
+        if source_type != "loom::type::buffer<unsigned char>":
+            expression = f"loom::buffer::cast<unsigned char>({expression})"
+        return expression
 
     def _render_command_program(self, operation: Operation) -> None:
         scope = self.operation_scopes[id(operation)]
@@ -496,7 +513,7 @@ class CxxCommandRenderer(CxxExpressionRenderer):
             specialization_count=len(specializations),
         )
         arguments = [
-            self.expression(parameter.value_id)
+            self._staged_argument(parameter.value_id, parameter.value_id)
             for parameter in (*source_specializations, *source_bindings)
         ]
         self.writer.line(f"loom::command::launch<{callee}>({', '.join(arguments)});")
@@ -623,13 +640,13 @@ class CxxCommandRenderer(CxxExpressionRenderer):
         )
         return ()
 
-    def _render_command_schedule(self, operation: Operation) -> None:
+    def _render_schedule_region(self, operation: Operation) -> None:
         body = self._resolved(operation).region("body")
         if body is None or len(body.blocks) != 1 or body.blocks[0].arg_ids:
             raise CxxRenderError(
-                operation, "command schedule must have one argument-free block"
+                operation, "schedule region must have one argument-free block"
             )
-        spelling = operation.name.removeprefix("command.")
+        spelling = operation.name.rsplit(".", 1)[1]
         self.writer.open(f"[[loom::{spelling}]]")
         self._render_block(body.blocks[0])
         self.writer.close()
@@ -646,6 +663,6 @@ class CxxCommandRenderer(CxxExpressionRenderer):
         if operation.name == "command.parameter.base":
             return self._render_command_parameter_base(operation)
         if operation.name in {"command.serial", "command.concurrent"}:
-            self._render_command_schedule(operation)
+            self._render_schedule_region(operation)
             return ()
         return None

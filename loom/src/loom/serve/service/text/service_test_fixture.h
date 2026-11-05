@@ -194,6 +194,9 @@ class SourceTextServiceTest : public ::testing::Test {
     for (const auto& path : additional_sources) {
       sources += ",\"" + path + "\"";
     }
+    // Exercise automatic cache sizing with a fixture-sized budget. The tiny
+    // recurrent state would fit millions of endpoints in the production
+    // default.
     return "{\"name\":\"" + name +
            "\",\"pool\":\"pool0\",\"base_directory\":\"" +
            std::filesystem::absolute(source).string() + "\",\"admission\":\"" +
@@ -207,7 +210,8 @@ class SourceTextServiceTest : public ::testing::Test {
            std::filesystem::absolute(tokenizer_).string() +
            "\",\"rows\":4,\"context_capacity\":96,"
            "\"prefill_capacity\":32,"
-           "\"checkpoint_capacity\":2,\"draft_depth\":0" +
+           "\"checkpoint_capacity\":2,\"cache_target_bytes\":65536,"
+           "\"draft_depth\":0" +
            definition_fields + "}}";
   }
 

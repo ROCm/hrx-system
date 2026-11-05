@@ -47,4 +47,4 @@ pipeline.def<kernel> public retain target(@device) @captured_coefficients() run(
 }
 
 // ----
-CHECK: low.func.def inline target<amd.xdna.aie2p.core> @__pipeline_worker_0() asm {
+CHECK: low.func.def target<amd.xdna.aie2p.core> @*() asm {

@@ -122,6 +122,7 @@
         "prefill_capacity": 32,
         "max_tokens": 16,
         "checkpoint_capacity": 2,
+        "cache_target_bytes": 65536,
         "draft_depth": 0
       },
       "components": {

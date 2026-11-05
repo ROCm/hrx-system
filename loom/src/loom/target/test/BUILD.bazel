@@ -85,17 +85,36 @@ loom_cc_library(
 
 loom_cc_library(
     name = "provider",
-    srcs = ["provider.c"],
+    srcs = [
+        "pipeline.c",
+        "provider.c",
+    ],
     hdrs = ["provider.h"],
     visibility = ["//loom/src/loom/tools/loom-check:__pkg__"],
     deps = [
         ":target_record_table",
+        "//loom/src/loom/analysis/pipeline:execution",
+        "//loom/src/loom/analysis/pipeline:invocations",
+        "//loom/src/loom/analysis/pipeline:workers",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func:builders",
+        "//loom/src/loom/ops/index:builders",
+        "//loom/src/loom/ops/pipeline:op_defs",
         "//loom/src/loom/ops/test",
+        "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:types",
         "//loom/src/loom/pass/test:registry",
+        "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:low_descriptor_registry_core_test",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/test/lower:registry",
+        "//loom/src/loom/transforms/pipeline:control",
+        "//loom/src/loom/transforms/pipeline:realization",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 

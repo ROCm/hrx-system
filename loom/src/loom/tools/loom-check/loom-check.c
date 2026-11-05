@@ -150,6 +150,7 @@ static const loom_check_provider_t* const kLoomCheckProviders[] = {
 #if LOOM_CHECK_HAVE_TEST_PROVIDER
 static const loom_target_provider_t* const kLoomCheckTargetExtensions[] = {
     &loom_test_target_provider,
+    &loom_test_pipeline_provider,
 #if LOOM_CHECK_HAVE_ARCH_AIE2P
     &loom_aie2p_configuration_check_target_provider,
 #endif  // LOOM_CHECK_HAVE_ARCH_AIE2P

@@ -7,9 +7,11 @@
 #ifndef LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_PIPELINE_NATIVE_H_
 #define LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_PIPELINE_NATIVE_H_
 
+#include "loom/analysis/pipeline/execution.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/route.h"
 #include "loom/target/arch/amd/xdna/aie2p/facts.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_plan.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/join.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/switch.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/worker.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
@@ -17,13 +19,18 @@
 
 // One endpoint's admitted cursor behavior for this execution occurrence.
 typedef struct loom_aie2p_native_cursor_t {
-  // Strand owning the cursor, or UINT32_MAX until selected.
+  // Representative strand owning the cursor, or UINT32_MAX until selected.
   uint32_t worker;
-  // Retained invocation admission bound, independent of physical slot count.
+  // Retained admission bound of the representative worker's invocation,
+  // independent of physical slot count. Shared cursors have no aggregate bound.
   uint32_t maximum_admissions;
   // Last claiming transport batch; each phase owns this cursor at most once.
   // Unused for instruction-executing cursor owners.
   uint32_t transport_batch;
+  // Several worker occurrences use this cursor. They require one physical
+  // engine with disjoint lifetimes; single-owner completion proofs do not
+  // apply.
+  bool shared;
   // Multiple admissions can select different physical slots.
   bool advances;
 } loom_aie2p_native_cursor_t;
@@ -70,6 +77,7 @@ typedef struct loom_aie2p_native_channel_access_t {
   // Protocol instance whose storage is addressed through this access window.
   const loom_aie2p_native_channel_t* channel;
   // Admitted owner aperture shared by payload addresses and lock selectors.
+  // NULL for a finite SRAM producer whose payload is consumed only by DMA.
   const loom_xdna_address_window_t* window;
   // First record's load address as seen by this worker.
   uint32_t address;
@@ -150,6 +158,12 @@ typedef struct loom_aie2p_native_dma_path_t {
   } control;
   // Shim completion controller, zero for ingress without task tokens.
   uint8_t completion_packet;
+  // Completion tokens consumed per task: zero for visible-memory ingress,
+  // one for shim egress, or two when both SRAM and shim must retire.
+  uint8_t completion_tokens;
+  // Latest selected token-producing task on this path. Other paths sharing
+  // the core stream must retire it or join it in the same source wait.
+  const struct loom_aie2p_native_transfer_t* last_token_transfer;
   // True for external reads, false for external writes.
   bool ingress;
 } loom_aie2p_native_dma_path_t;
@@ -193,6 +207,16 @@ typedef struct loom_aie2p_native_dma_descriptor_t {
 typedef struct loom_aie2p_native_transfer_task_t
     loom_aie2p_native_transfer_task_t;
 
+typedef struct loom_aie2p_native_relocation_t {
+  // First dynamic copy using this physical core's caller binding. It owns the
+  // invocation-time address initialization shared by all later copies.
+  const struct loom_aie2p_native_transfer_t* first_transfer;
+  // Immutable caller base address pair in the core's local memory module.
+  uint64_t storage_offset;
+  // Core-relative load address of that pair.
+  uint32_t load_address;
+} loom_aie2p_native_relocation_t;
+
 typedef struct loom_aie2p_native_transfer_t {
   // Next transfer in the worker's retained issue order.
   struct loom_aie2p_native_transfer_t* next;
@@ -214,11 +238,9 @@ typedef struct loom_aie2p_native_transfer_t {
   uint32_t binding;
   // Authored copies of adjacent records represented by this physical transfer.
   uint32_t source_count;
-  // Worker-local address pair when the descriptor patches its external address.
-  // Unused when invocation binding patches one shared fixed address directly.
-  uint64_t base_storage_offset;
-  // Worker-visible load address of the dynamic transfer's relocated base.
-  uint32_t base_load_address;
+  // Immutable caller base shared by this core's dynamic copies of one binding.
+  // NULL when invocation binding patches a fixed descriptor address directly.
+  const loom_aie2p_native_relocation_t* relocation;
   // Canonical external endpoint projection, retained through emission.
   const loom_view_region_t* external_view;
   // Canonical local endpoint projection, retained through emission.
@@ -295,6 +317,8 @@ typedef struct loom_aie2p_native_distribution_t {
   const struct loom_aie2p_native_distribution_t* path;
   // Canonical ownership and copy schedule used to intern geometry variants.
   const loom_pipeline_transport_batch_t* source;
+  // Loop table owning source; shared geometries may come from different calls.
+  const loom_pipeline_transport_t* transport;
   // Memory-to-stream endpoint reclaiming source records after transmission.
   loom_aie2p_native_distribution_endpoint_t sender;
   // Arena-owned stream-to-memory endpoints in the physical path's fanout order.
@@ -327,6 +351,20 @@ typedef struct loom_aie2p_native_distribution_phase_t {
   const loom_aie2p_native_distribution_t* distribution;
 } loom_aie2p_native_distribution_phase_t;
 
+// A finite child endpoint controlled by its producer or consuming core. The
+// child boundary queues it before local work and observes idle after all local
+// async waits, when the core's scalar reply stream is drained.
+typedef struct loom_aie2p_native_distribution_command_t {
+  // Next endpoint controlled by this worker occurrence.
+  struct loom_aie2p_native_distribution_command_t* next;
+  // Complete source child whose selected visit owns this endpoint lifetime.
+  const loom_pipeline_invocation_t* invocation;
+  // Immutable descriptor geometry selected for this child.
+  const loom_aie2p_native_distribution_endpoint_t* endpoint;
+  // Direction of the endpoint's DMA channel.
+  loom_xdna_dma_direction_t direction;
+} loom_aie2p_native_distribution_command_t;
+
 typedef enum loom_aie2p_native_execution_e {
   LOOM_AIE2P_NATIVE_EXECUTION_CORE,
   LOOM_AIE2P_NATIVE_EXECUTION_CONFIGURATION,
@@ -355,6 +393,9 @@ typedef struct loom_aie2p_native_worker_t {
   loom_aie2p_native_tile_t* tile;
   // Engine implementing the strand; only CORE occupies instruction memory.
   loom_aie2p_native_execution_t execution;
+  // Generated private cursor-frame formal, or invalid if the worker has no
+  // advancing endpoint. The physical entry initializes this state once.
+  loom_value_id_t cursor_state_argument;
   // Configuration channel turns indexed by the source channel action table.
   loom_aie2p_native_configuration_action_t* configuration_actions;
   // Fixed record byte offsets indexed by the source's owned-value domain.
@@ -392,19 +433,50 @@ typedef struct loom_aie2p_native_worker_t {
   } channels;
   // First selected borrowed DMA operation.
   loom_aie2p_native_transfer_t* transfers;
+  // Dynamic address slots indexed by caller binding, owned by the physical
+  // core representative across child occurrences. Allocated at first use.
+  loom_aie2p_native_relocation_t* relocations;
   // Physical tasks in first-member selection order.
   loom_aie2p_native_transfer_task_t* transfer_tasks;
-  // Physical local/shim endpoints in their first-use initialization order.
+  // Physical local/shim endpoints in first-use initialization order. Ordered
+  // core occurrences retain these on their representative instruction worker.
   loom_aie2p_native_dma_descriptor_t* descriptors;
-  // Physical arrival credits shared independently of descriptor geometry.
+  // Physical arrival credits shared independently of descriptor geometry and
+  // retained on the same representative as the descriptors they retire.
   loom_aie2p_native_dma_completion_t* dma_completions;
-  // First selected on-die channel distribution.
+  // Immutable geometries owned by the representative distribution engine.
   loom_aie2p_native_distribution_t* distributions;
   // Ordered uses driven by controller publications; NULL for autonomous paths.
   loom_aie2p_native_distribution_phase_t* distribution_phases;
-  // Ordered DMA paths owned exclusively by this worker.
+  // Child endpoints started and retired around this core's local worker call.
+  loom_aie2p_native_distribution_command_t* distribution_commands;
+  // Any occurrence sharing this distribution engine needs packet routing.
+  bool distribution_packets;
+  // DMA paths owned by this physical worker, shared by its ordered occurrences.
   loom_aie2p_native_dma_path_t* paths;
+  // Physical DMA paths indexed by tile and direction. The representative
+  // instruction worker owns these across its ordered child occurrences.
+  loom_aie2p_native_dma_path_t** paths_by_tile;
+  // Control-packet identity by destination tile, or UINT8_MAX when unassigned.
+  // Routes belong to the physical core, independently of child call sites.
+  uint8_t* control_packets;
+  // Tile-control reply identity by source tile, or UINT8_MAX when unassigned.
+  // Existing DMA-token routes can also carry explicitly requested status reads.
+  uint8_t* control_replies;
+  // Number of tile-control destinations selected for the physical core.
+  uint8_t control_packet_count;
+  // An external-write path already owns the core's completion stream.
+  bool has_egress;
 } loom_aie2p_native_worker_t;
+
+typedef struct loom_aie2p_native_join_t {
+  // Physical lock tree shared by scopes with exactly equal participant sets.
+  loom_aie2p_join_plan_t plan;
+  // Lazily emitted join helper per physical engine, shared across phase visits.
+  loom_symbol_ref_t* functions;
+  // Next distinct tree requiring configuration-time semaphore initialization.
+  struct loom_aie2p_native_join_t* next;
+} loom_aie2p_native_join_t;
 
 typedef struct loom_aie2p_native_context_t {
   // Common compiler lifecycle and diagnostic owner.
@@ -423,6 +495,30 @@ typedef struct loom_aie2p_native_context_t {
   loom_aie2p_native_channel_t* channels;
   // Bound workers in source strand order.
   loom_aie2p_native_worker_t* workers;
+  // Admitted core sharing and transitive participants at each phase boundary.
+  loom_pipeline_execution_t execution;
+  // Invocation-major core controllers of finite distribution boundaries, or
+  // NULL when there are no ordered distributions. A child borrowing its direct
+  // parent's controller retains that identity.
+  iree_host_size_t* distribution_controllers;
+  // Physical join selected for each canonical execution schedule row.
+  loom_aie2p_native_join_t** joins;
+  // Distinct join trees; equal participant sets share one initialized instance.
+  loom_aie2p_native_join_t* first_join;
+  // Admitted distribution-path sharing, separate from instruction engines.
+  loom_pipeline_execution_t distribution_execution;
+  // Physical core engine per worker; autonomous work has IREE_HOST_SIZE_MAX.
+  const iree_host_size_t* core_engines;
+  // Distribution path per worker; other execution has IREE_HOST_SIZE_MAX.
+  const iree_host_size_t* distribution_engines;
+  // Proposed transport-worker equalities from shared physical FIFO cursors.
+  loom_pipeline_execution_sharing_t* distribution_sharing;
+  // Number of retained distribution-sharing constraints.
+  iree_host_size_t distribution_sharing_count;
+  // Allocated capacity of the distribution-sharing constraint array.
+  iree_host_size_t distribution_sharing_capacity;
+  // Complete entry program per physical core, initialized and joined once.
+  loom_func_like_t* programs;
   // Caller buffer contracts in source argument order.
   loom_aie2p_native_binding_t* bindings;
   // Number of caller buffer contracts.
@@ -431,6 +527,9 @@ typedef struct loom_aie2p_native_context_t {
   loom_aie2p_array_route_builder_t routing;
   // Packet identity for every physical route edge.
   loom_aie2p_native_route_t* routes;
+  // Canonical packet source tree per tile's core and tile-control output.
+  // UINT32_MAX marks an unused output; destinations share its physical links.
+  uint32_t* control_sources;
   // Complete desired routing state for each traversed switch.
   loom_aie2p_native_switch_t* switches;
   // Typed ordinary helper emitter.
@@ -441,6 +540,16 @@ iree_status_t loom_aie2p_native_reject(
     const loom_aie2p_native_context_t* context, const loom_op_t* op,
     iree_string_view_t requirement);
 
+// Resolves a construction-owned protocol in the admitted execution inventory.
+// The channel plan retains this identity through captures and child calls.
+static inline loom_aie2p_native_channel_t* loom_aie2p_native_channel(
+    const loom_aie2p_native_context_t* context,
+    const loom_pipeline_realization_t* realization,
+    const loom_channel_identity_t* identity) {
+  return &context->channels[loom_pipeline_invocations_channel_index(
+      &realization->invocations, identity)];
+}
+
 iree_status_t loom_aie2p_native_emit_worker(
     void* user_data, loom_rewriter_t* rewriter,
     const loom_pipeline_realization_t* realization,
@@ -448,6 +557,33 @@ iree_status_t loom_aie2p_native_emit_worker(
 iree_status_t loom_aie2p_native_emit_configuration(
     void* user_data, loom_rewriter_t* rewriter,
     const loom_pipeline_realization_t* realization);
+
+// Builds the physical entries around common retained control projection.
+// Child workers return normally; each entry owns private cursor initialization
+// and the final completion publication and quiescent wait.
+// Unsupported caller captures emit a diagnostic and leave out_valid false.
+iree_status_t loom_aie2p_native_emit_programs(
+    loom_aie2p_native_context_t* context, loom_rewriter_t* rewriter,
+    const loom_pipeline_realization_t* realization, bool* out_valid);
+
+// Selects the lock trees consumed by serial child retirement, using retained
+// engine participation and physical resource capacities only.
+iree_status_t loom_aie2p_native_select_joins(
+    loom_aie2p_native_context_t* context, bool* out_valid);
+
+// Emits the selected collective after this core's child and DMA have retired.
+iree_status_t loom_aie2p_native_join_boundary(
+    loom_aie2p_native_context_t* context, loom_builder_t* builder,
+    iree_host_size_t engine, const loom_pipeline_invocation_schedule_t* scope);
+
+// Forms one scalar cursor cell in an invocation-private frame. Channel ordinal
+// and direction give a stable identity across child calls. Ordinary private
+// storage promotion carries these cells through the resulting control graph.
+iree_status_t loom_aie2p_native_cursor_view(loom_builder_t* builder,
+                                            loom_value_id_t frame,
+                                            iree_host_size_t channel,
+                                            bool writer,
+                                            loom_value_id_t* out_view);
 
 // Selects descriptor, engine, route, completion, and relocated-address storage
 // from the canonical movement streams before either executable is rewritten.
@@ -464,6 +600,17 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
 iree_status_t loom_aie2p_native_bind_distribution_phases(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization, bool* out_valid);
+
+iree_status_t loom_aie2p_native_select_control_route(
+    loom_aie2p_native_context_t* context,
+    const loom_pipeline_realization_t* realization,
+    iree_host_size_t worker_index, loom_aie2p_native_tile_t* tile, bool reply,
+    uint32_t* next_source, uint8_t* next_controller, bool* out_valid);
+
+iree_status_t loom_aie2p_native_distribution_boundary(
+    loom_aie2p_native_context_t* context, loom_builder_t* builder,
+    iree_host_size_t worker_index, const loom_pipeline_invocation_t* invocation,
+    bool before);
 
 // Shared physical descriptor allocation for external and on-chip transport.
 uint16_t* loom_aie2p_native_descriptor_bank(loom_aie2p_native_tile_t* tile,

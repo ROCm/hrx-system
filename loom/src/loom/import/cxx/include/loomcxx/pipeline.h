@@ -231,7 +231,9 @@ template <loom::memory_space Space, loom::type::size_type Rank>
     loom::type::indices<Rank> coordinates);
 
 // Constructs one fresh child graph and substitutes its complete staged
-// signature. This does not launch or wait for another invocation.
+// signature. Within [[loom::serial]], the child's strands and transfers finish
+// before the next child starts. Outside that region, children run concurrently.
+// All children remain part of their enclosing resident invocation.
 template <auto Pipeline, class... Args>
 [[loom::op("pipeline.compose")]] void compose(Args... arguments);
 

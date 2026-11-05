@@ -1,5 +1,24 @@
 // RUN: roundtrip
 
+// Serial schedules retain runtime control and complete child calls. Storage
+// passed into both children belongs to their enclosing invocation.
+pipeline.decl @stage() run(%state: buffer, %iteration: index)
+
+pipeline.def @ordered() run(%state: buffer, %count: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  pipeline.serial {
+    scf.for %iteration = [%begin to %count step %step] {
+      pipeline.compose @stage(%state, %iteration) : (buffer, index)
+      pipeline.serial {
+        pipeline.compose @stage(%state, %iteration) : (buffer, index)
+      }
+    }
+  }
+}
+
+// ====
+
 target.decl @npu
 
 pipeline.decl<kernel> public retain target(@npu) @resident(%width: index) run(%input: view<[%width]xi32>, %output: buffer) where [multiple_of(%width, 16)]
@@ -67,5 +86,52 @@ pipeline.def<kernel> @local_storage(%column: index) run() {
   pipeline.strand workers([%column, 2], [1, 1], [1, 1]) {
     %write, %payload = channel.reserve %channel : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
     channel.publish %write : write<tile<16xi32>>
+  }
+}
+
+// ====
+// RUN: roundtrip
+
+pipeline.decl @child() run(%state: buffer)
+pipeline.def public @mixed() run(%state: buffer, %count: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  pipeline.serial {
+    scf.for %iteration = [%begin to %count step %step] {
+      pipeline.concurrent {
+        pipeline.compose @child(%state) : (buffer)
+        pipeline.serial {
+          pipeline.compose @child(%state) : (buffer)
+          pipeline.concurrent {
+            pipeline.strand workers([0], [1], [1]) {
+            }
+          }
+        }
+      }
+    }
+    pipeline.compose @child(%state) : (buffer)
+  }
+}
+
+// ----
+pipeline.decl @child() run(%state: buffer)
+
+pipeline.def public @mixed() run(%state: buffer, %count: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  pipeline.serial {
+    scf.for %iteration = [%begin to %count step %step] {
+      pipeline.concurrent {
+        pipeline.compose @child(%state) : (buffer)
+        pipeline.serial {
+          pipeline.compose @child(%state) : (buffer)
+          pipeline.concurrent {
+            pipeline.strand workers([0], [1], [1]) {
+            }
+          }
+        }
+      }
+    }
+    pipeline.compose @child(%state) : (buffer)
   }
 }

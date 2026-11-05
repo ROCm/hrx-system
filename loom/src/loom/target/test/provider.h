@@ -16,6 +16,7 @@ extern "C" {
 #endif
 
 extern const loom_target_provider_t loom_test_target_provider;
+extern const loom_target_provider_t loom_test_pipeline_provider;
 
 #ifdef __cplusplus
 }  // extern "C"

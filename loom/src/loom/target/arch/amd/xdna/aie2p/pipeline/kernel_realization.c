@@ -459,7 +459,7 @@ static iree_status_t loom_aie2p_kernel_plan_bindings(
         &storage_scope, plan->function, &domain, &storage_access);
   }
   if (iree_status_is_ok(status) && !plan->rejected &&
-      storage_access->has_unknown_memory_access) {
+      storage_access->has_unbounded_memory_access) {
     plan->rejected = true;
     status = loom_aie2p_kernel_reject(
         pass, plan->function.op,

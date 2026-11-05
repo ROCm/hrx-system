@@ -1,0 +1,85 @@
+// A child-local FIFO starts at slot zero on every invocation. One record per
+// visit leaves the two-slot ring halfway through a turn; preserving that cursor
+// across visits would write the second slot instead of the first.
+// The lexical concurrent group owns the inlined child's protocol identities.
+aie2p.target<array> @device
+
+pipeline.def @write_record() run(%storage: buffer, %outgoing_storage: buffer, %output: buffer, %phase: index) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 8 : offset
+  %capacity = index.constant 2 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x1xi32>
+  %channel = channel.bind<fifo> %slots, %capacity : view<2x1xi32>, index -> channel<tile<1xi32>>
+  %result_capacity = index.constant 1 : index
+  %outgoing_slots = buffer.view %outgoing_storage[%origin] : buffer -> view<1x2xi32>
+  %outgoing = channel.bind<fifo> %outgoing_slots, %result_capacity : view<1x2xi32>, index -> channel<tile<2xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %contents = buffer.view %storage[%origin] : buffer -> view<2x1xi32>
+    %sentinel = scalar.constant -9999 : i32
+    view.store %sentinel, %contents[0, 0] : i32, view<2x1xi32>
+    view.store %sentinel, %contents[1, 0] : i32, view<2x1xi32>
+    %write, %destination = channel.reserve %channel : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+    %value = index.cast %phase : index to i32
+    view.store %value, %destination[0] : i32, view<1xi32>
+    channel.publish %write : write<tile<1xi32>>
+    %read, %source = channel.acquire %channel : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+    channel.release %read : read<tile<1xi32>>
+    %first = view.load %contents[0, 0] : view<2x1xi32> -> i32
+    %second = view.load %contents[1, 0] : view<2x1xi32> -> i32
+    %write_result, %result = channel.reserve %outgoing : channel<tile<2xi32>> -> (write<tile<2xi32>>, view<2xi32>)
+    view.store %first, %result[0] : i32, view<2xi32>
+    view.store %second, %result[1] : i32, view<2xi32>
+    channel.publish %write_result : write<tile<2xi32>>
+    %read_result, %payload = channel.acquire %outgoing : channel<tile<2xi32>> -> (read<tile<2xi32>>, view<2xi32>)
+    %offset = index.scale %phase, %bytes : index, offset -> offset
+    %external = buffer.view %output[%offset] : buffer -> view<2xi32>
+    %copy = kernel.async.copy %payload to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<2xi32> to view<2xi32> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.release %read_result : read<tile<2xi32>>
+  }
+}
+
+pipeline.def<kernel> public retain target(@device) @fresh_records() run(%output_argument: buffer) {
+  %output = buffer.assume.alignment %output_argument {minimum_alignment = 4} : buffer
+  %begin = index.constant 0 : index
+  %count = index.constant 3 : index
+  %step = index.constant 1 : index
+  pipeline.serial {
+    scf.for %phase = [%begin to %count step %step] {
+      pipeline.concurrent {
+        %memory = pipeline.memory<workgroup>[0, 2] : pool
+        %bytes = index.constant 8 : offset
+        %storage = buffer.alloca<workgroup> pool(%memory) align(4) %bytes : buffer
+        %outgoing_storage = buffer.alloca<workgroup> pool(%memory) align(4) %bytes : buffer
+        pipeline.compose @write_record(%storage, %outgoing_storage, %output, %phase) : (buffer, buffer, buffer, index)
+      }
+    }
+  }
+}
+
+func.def @reference(%output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %count = index.constant 3 : index
+  %step = index.constant 1 : index
+  %sentinel = scalar.constant -9999 : i32
+  %values = buffer.view %output[%origin] : buffer -> view<3x2xi32>
+  scf.for %phase = [%begin to %count step %step] {
+    %value = index.cast %phase : index to i32
+    view.store %value, %values[%phase, %begin] : i32, view<3x2xi32>
+    view.store %sentinel, %values[%phase, %step] : i32, view<3x2xi32>
+  }
+  func.return
+}
+
+check.scenario public @fresh_child_cursors {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(-7777) : tensor<38xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<38xi32> -> tensor<6xi32>
+    check.compare<@fresh_records, @reference>(%output) : (tensor<6xi32>) -> () {
+      check.expect.equal actual(%storage) expected(%storage) : tensor<38xi32>
+    }
+  }
+  check.return
+}
