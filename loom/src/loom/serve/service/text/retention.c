@@ -118,15 +118,6 @@ static void loom_serve_text_retention_remove_plan(
   }
 }
 
-static iree_host_size_t loom_serve_text_retention_allocation(
-    const loom_serve_text_state_t* state, loom_serve_virtual_buffer_t* buffer) {
-  iree_host_size_t index = 0;
-  while (state->memory.buffers[index] != buffer) {
-    ++index;
-  }
-  return index;
-}
-
 static iree_status_t loom_serve_text_retention_required_view(
     loom_serve_text_retention_t* query, iree_hal_buffer_t* view) {
   return view ? loom_serve_text_retention_append(
@@ -146,8 +137,8 @@ static iree_status_t loom_serve_text_retention_request(
          i < request->commitment_count && iree_status_is_ok(status); ++i) {
       const loom_serve_memory_range_t* range = &request->commitments[i];
       status = loom_serve_text_retention_append(
-          query, loom_serve_text_retention_allocation(state, range->buffer),
-          range->offset, range->length, range->length);
+          query, request->commitment_allocations[i], range->offset,
+          range->length, range->length);
     }
     return status;
   }
