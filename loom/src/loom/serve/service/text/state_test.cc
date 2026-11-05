@@ -288,6 +288,9 @@ TEST_P(TextStateTest, OptionalRootsRetainOriginsMapsAndCheckpointCarry) {
     loom_serve_text_storage_deinitialize(&storage);
     IREE_ASSERT_OK(status);
     IREE_ASSERT_OK(loom_serve_execution_drain(execution));
+    if (previous_carry) {
+      EXPECT_NE(state.carry, previous_carry.get());
+    }
     if (state.memory.pool && previous_carry) {
       EXPECT_GE(loom_serve_memory_pool_live_bytes(state.memory.pool),
                 iree_hal_buffer_byte_length(previous_carry.get()) +
@@ -299,6 +302,22 @@ TEST_P(TextStateTest, OptionalRootsRetainOriginsMapsAndCheckpointCarry) {
     ASSERT_NO_FATAL_FAILURE(CacheContents(row, false));
     ASSERT_NO_FATAL_FAILURE(
         CheckBytes(row->buffers[TEXT_RECURRENT], 0, recurrent));
+    if (state.memory.pool && capacity == 5) {
+      // Capture after one relocation, then restore after another. A cold
+      // image preserves logical bytes, never an old exported root or offset.
+      IREE_ASSERT_OK(
+          loom_serve_text_state_checkpoint_submit_suspend(checkpoint));
+      IREE_ASSERT_OK(loom_serve_execution_drain(execution));
+      loom_serve_text_state_checkpoint_complete_suspend(checkpoint);
+      EXPECT_EQ(loom_serve_snapshot_size(checkpoint->snapshot),
+                16 + carry.size() + state.storage.region_count * 32);
+      if (!carry.empty()) {
+        const auto index =
+            state.row_count + (checkpoint - state.checkpoints.values);
+        IREE_ASSERT_OK(
+            Upload(state.carry, index * state.storage.carry_stride, changed));
+      }
+    }
   }
   auto* fork = state.rows[1];
   bool restored = false;

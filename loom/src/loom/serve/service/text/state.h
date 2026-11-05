@@ -126,6 +126,10 @@ struct loom_serve_text_state_t {
   struct loom_serve_text_state_reservation_t* prepared_reservations;
   // Validated source geometry and retained initialization payloads.
   loom_serve_text_storage_t storage;
+  // Owned exported roots in source order and their borrowed transfer domains.
+  // Allocation, resize, snapshots, and retirement share this directory.
+  loom_serve_snapshot_buffer_t
+      allocations[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
   // Explicit endpoint records, separate from active row capacity.
   struct {
     // Configured cold record count, including before allocation.
@@ -202,31 +206,33 @@ struct loom_serve_text_state_t {
     iree_device_size_t
         private_lengths[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
   } memory;
-  // Source-positioned private views, recurrent slots, and target KV planes.
+  // Borrowed root containing private views, recurrent slots, and target KV.
   iree_hal_buffer_t* row_arena;
-  // Model-wide residual storage serialized by the execution timeline.
+  // Borrowed model-wide residual root serialized by the execution timeline.
   iree_hal_buffer_t* residual;
-  // Optional source-defined committed state indexed by retained row or
+  // Borrowed source-defined committed state indexed by retained row or
   // endpoint. Presence follows the source carry stride, independently of draft
   // scheduling.
   iree_hal_buffer_t* carry;
-  // Packed bindings; slots 1, 2, 4 and 5 are owned, others borrow roots.
+  // Packed bindings borrowing the source allocation directory.
   struct {
     // Residual, metadata, origins, arena, inputs and outputs.
     iree_hal_buffer_t* buffers[TEXT_BINDING_COUNT];
   } epoch;
   // Optional speculative proposal, cache, and feedback storage.
   struct {
-    // Accepted span metadata consumed by draft catch-up.
+    // Borrowed accepted span metadata consumed by draft catch-up.
     iree_hal_buffer_t* committed;
-    // Source-defined feedback records.
+    // Borrowed source-defined feedback records.
     iree_hal_buffer_t* results;
     // Owned view of the second result bank and original-span tags.
     iree_hal_buffer_t* next_results;
-    // Optional draft attention cache with source-defined pooled planes.
+    // Borrowed optional draft attention cache with source-defined pooled
+    // planes.
     iree_hal_buffer_t* cache;
-    // Optional draft row origins and logical-to-physical block maps. Presence
-    // is independent of a separate cache: source may reuse the target arena.
+    // Borrowed optional draft row origins and logical-to-physical block maps.
+    // Presence is independent of a separate cache: source may reuse the target
+    // arena.
     iree_hal_buffer_t* row_table;
   } draft;
 };
@@ -247,9 +253,9 @@ iree_status_t loom_serve_text_state_allocate(loom_serve_text_state_t* state,
                                              loom_serve_pool_t* pool,
                                              loom_serve_execution_t* execution);
 
-// Source slot to its owned root, shared by allocation and cold maintenance.
-iree_hal_buffer_t** loom_serve_text_state_allocation(
-    loom_serve_text_state_t* state, iree_host_size_t index);
+// Publishes the private adapter's borrowed views after root allocation or
+// replacement. The caller excludes readers until maintenance has retired.
+void loom_serve_text_state_bind_allocations(loom_serve_text_state_t* state);
 
 // Moves a validated enlarged source layout into retired state. Existing
 // private views, recurrent slots, and cache planes retain their byte offsets.

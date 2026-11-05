@@ -300,6 +300,23 @@ loom_cc_library(
     alwayslink = True,
 )
 
+loom_cc_library(
+    name = "state_tests",
+    testonly = True,
+    srcs = ["state_test.cc"],
+    target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
+    deps = [
+        ":model",
+        ":storage",
+        "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/testing:device",
+        "//loom/src/loom/serve/testing:service_application",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/vm",
+    ],
+    alwayslink = True,
+)
+
 # Source compilation and execution invariants shared by every physical target.
 loom_cc_library(
     name = "source_execution_tests",
@@ -311,7 +328,6 @@ loom_cc_library(
         "response_service_test.cc",
         "service_capacity_test.cc",
         "source_execution_test.cc",
-        "state_test.cc",
         "workspace_test.cc",
     ],
     target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
@@ -322,6 +338,7 @@ loom_cc_library(
         ":model",
         ":session",
         ":source_service_fixture",
+        ":state_tests",
         ":storage",
         ":stream",
         "//loom/src/loom/serve/runtime/device",

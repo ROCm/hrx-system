@@ -1537,6 +1537,22 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "text_state_elastic_test",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:x86_task_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":test_compiler",
+        ":test_elastic_device",
+        "//loom/src/loom/serve/service/text:state_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "source_text_checkpoint_elastic_test",
     data = TEXT_SOURCES,
     env = {

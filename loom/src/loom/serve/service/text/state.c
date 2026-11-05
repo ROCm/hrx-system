@@ -28,24 +28,20 @@ void loom_serve_text_state_initialize(const loom_serve_text_options_t* options,
   loom_serve_retirement_initialize(&out_state->retirement);
 }
 
-// Source allocation slots name the same exported roots during creation,
-// maintenance and execution. Every root carries state retirement tracking.
-iree_hal_buffer_t** loom_serve_text_state_allocation(
-    loom_serve_text_state_t* state, iree_host_size_t index) {
-  iree_hal_buffer_t** allocations[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT] = {
-      &state->residual,
-      &state->row_arena,
-      &state->epoch.buffers[1],
-      &state->epoch.buffers[2],
-      &state->epoch.buffers[4],
-      &state->epoch.buffers[5],
-      &state->carry,
-      &state->draft.committed,
-      &state->draft.results,
-      &state->draft.cache,
-      &state->draft.row_table,
-  };
-  return allocations[index];
+void loom_serve_text_state_bind_allocations(loom_serve_text_state_t* state) {
+  state->residual = state->allocations[0].buffer;
+  state->row_arena = state->allocations[1].buffer;
+  state->epoch.buffers[0] = state->residual;
+  state->epoch.buffers[1] = state->allocations[2].buffer;
+  state->epoch.buffers[2] = state->allocations[3].buffer;
+  state->epoch.buffers[3] = state->row_arena;
+  state->epoch.buffers[4] = state->allocations[4].buffer;
+  state->epoch.buffers[5] = state->allocations[5].buffer;
+  state->carry = state->allocations[6].buffer;
+  state->draft.committed = state->allocations[7].buffer;
+  state->draft.results = state->allocations[8].buffer;
+  state->draft.cache = state->allocations[9].buffer;
+  state->draft.row_table = state->allocations[10].buffer;
 }
 
 iree_status_t loom_serve_text_state_allocate(
@@ -96,7 +92,8 @@ iree_status_t loom_serve_text_state_allocate(
   for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT &&
                                iree_status_is_ok(status);
        ++i) {
-    iree_hal_buffer_t** allocation = loom_serve_text_state_allocation(state, i);
+    state->allocations[i].execution = execution;
+    iree_hal_buffer_t** allocation = &state->allocations[i].buffer;
     const loom_serve_text_allocation_t* record = &state->storage.allocations[i];
     const iree_device_size_t length = record->length;
     const iree_device_size_t alignment = record->alignment;
@@ -186,8 +183,7 @@ iree_status_t loom_serve_text_state_allocate(
       if (clear_lengths[i]) {
         transfers[transfer_count++] = (iree_hal_transfer_operation_t){
             .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
-            .fill = {.target_buffer =
-                         *loom_serve_text_state_allocation(state, i),
+            .fill = {.target_buffer = state->allocations[i].buffer,
                      .length = clear_lengths[i],
                      .pattern = &zero,
                      .pattern_length = sizeof(zero)},
@@ -196,6 +192,7 @@ iree_status_t loom_serve_text_state_allocate(
     }
   }
   if (iree_status_is_ok(status)) {
+    loom_serve_text_state_bind_allocations(state);
     status = loom_serve_block_pool_initialize(state->storage.recurrent.capacity,
                                               state->host_allocator,
                                               &state->recurrent.pool);
@@ -281,8 +278,6 @@ iree_status_t loom_serve_text_state_allocate(
   }
   if (iree_status_is_ok(status) &&
       iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_PACKED)) {
-    state->epoch.buffers[0] = state->residual;
-    state->epoch.buffers[3] = state->row_arena;
     const iree_const_byte_span_t origins =
         state->storage.bytes[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS];
     if (origins.data_length) {
@@ -364,9 +359,10 @@ void loom_serve_text_state_retire(loom_serve_text_state_t* state,
   state->draft.next_results = NULL;
   for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
        ++i) {
-    iree_hal_buffer_release(*loom_serve_text_state_allocation(state, i));
-    *loom_serve_text_state_allocation(state, i) = NULL;
+    iree_hal_buffer_release(state->allocations[i].buffer);
+    state->allocations[i].buffer = NULL;
   }
+  loom_serve_text_state_bind_allocations(state);
 }
 
 bool loom_serve_text_state_is_retired(loom_serve_text_state_t* state) {
@@ -743,8 +739,7 @@ static iree_status_t loom_serve_text_submit_compaction(
     const loom_serve_text_cache_region_t* region = &state->storage.regions[i];
     uint64_t copied_bytes = 0;
     status = loom_serve_block_region_relocate(
-        state->execution,
-        *loom_serve_text_state_allocation(state, region->allocation),
+        state->execution, state->allocations[region->allocation].buffer,
         &region->blocks, state->cache.pool.capacity, copy_destinations,
         &copied_bytes);
     out_result->copied_bytes += copied_bytes;
@@ -1068,16 +1063,6 @@ void loom_serve_text_state_row_reset(loom_serve_text_state_row_t* row) {
   loom_serve_text_row_release_recurrent(row);
 }
 
-static void loom_serve_text_state_snapshot_buffers(
-    loom_serve_text_state_t* state, loom_serve_snapshot_buffer_t* buffers) {
-  for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
-       ++i) {
-    buffers[i] = (loom_serve_snapshot_buffer_t){
-        .buffer = *loom_serve_text_state_allocation(state, i),
-        .execution = state->execution};
-  }
-}
-
 iree_status_t loom_serve_text_state_row_suspend(
     loom_serve_text_state_row_t* row) {
   loom_serve_text_state_t* state = row->owner;
@@ -1096,12 +1081,9 @@ iree_status_t loom_serve_text_state_row_suspend(
   IREE_RETURN_IF_ERROR(loom_serve_text_storage_plan_snapshot(
       &state->storage, index, &row->buffers[TEXT_CONTROL], true,
       row->block_count, blocks, state->host_allocator, &range_count, &ranges));
-  loom_serve_snapshot_buffer_t
-      buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
-  loom_serve_text_state_snapshot_buffers(state, buffers);
   iree_status_t status = loom_serve_snapshot_capture(
-      IREE_ARRAYSIZE(buffers), buffers, range_count, ranges,
-      state->host_allocator, &row->snapshot);
+      IREE_ARRAYSIZE(state->allocations), state->allocations, range_count,
+      ranges, state->host_allocator, &row->snapshot);
   status =
       iree_status_join(status, loom_serve_execution_drain(state->execution));
   if (iree_status_is_ok(status)) {
@@ -1147,11 +1129,9 @@ iree_status_t loom_serve_text_state_row_try_resume(
         loom_serve_text_try_commit_plan(state, range_count, ranges, &admitted);
   }
   if (iree_status_is_ok(status) && admitted) {
-    loom_serve_snapshot_buffer_t
-        buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
-    loom_serve_text_state_snapshot_buffers(state, buffers);
-    status = loom_serve_snapshot_restore(row->snapshot, IREE_ARRAYSIZE(buffers),
-                                         buffers, range_count, ranges);
+    status = loom_serve_snapshot_restore(
+        row->snapshot, IREE_ARRAYSIZE(state->allocations), state->allocations,
+        range_count, ranges);
   }
   if (iree_status_is_ok(status) && admitted) {
     const iree_hal_transfer_operation_t uploads[] = {
@@ -1298,12 +1278,9 @@ iree_status_t loom_serve_text_state_checkpoint_submit_suspend(
   loom_serve_snapshot_range_t* ranges = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_text_checkpoint_plan_snapshot(
       checkpoint, &range_count, &ranges));
-  loom_serve_snapshot_buffer_t
-      buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
-  loom_serve_text_state_snapshot_buffers(state, buffers);
   iree_status_t status = loom_serve_snapshot_capture(
-      IREE_ARRAYSIZE(buffers), buffers, range_count, ranges,
-      state->host_allocator, &checkpoint->snapshot);
+      IREE_ARRAYSIZE(state->allocations), state->allocations, range_count,
+      ranges, state->host_allocator, &checkpoint->snapshot);
   iree_allocator_free(state->host_allocator, ranges);
   return status;
 }
@@ -1384,12 +1361,9 @@ static iree_status_t loom_serve_text_checkpoint_try_resume(
                                                commitments, &admitted);
   }
   if (iree_status_is_ok(status) && admitted) {
-    loom_serve_snapshot_buffer_t
-        buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
-    loom_serve_text_state_snapshot_buffers(state, buffers);
-    status = loom_serve_snapshot_restore(checkpoint->snapshot,
-                                         IREE_ARRAYSIZE(buffers), buffers,
-                                         range_count, ranges);
+    status = loom_serve_snapshot_restore(
+        checkpoint->snapshot, IREE_ARRAYSIZE(state->allocations),
+        state->allocations, range_count, ranges);
     status =
         iree_status_join(status, loom_serve_execution_drain(state->execution));
   }
@@ -1510,8 +1484,7 @@ static iree_status_t loom_serve_text_fork_cache_block(
   for (iree_host_size_t r = 0;
        r < state->storage.region_count && iree_status_is_ok(status); ++r) {
     const loom_serve_text_cache_region_t* region = &state->storage.regions[r];
-    iree_hal_buffer_t* buffer =
-        *loom_serve_text_state_allocation(state, region->allocation);
+    iree_hal_buffer_t* buffer = state->allocations[region->allocation].buffer;
     for (iree_host_size_t plane = 0;
          plane < region->blocks.count && iree_status_is_ok(status); ++plane) {
       const iree_device_size_t origin =
@@ -1909,12 +1882,10 @@ iree_status_t loom_serve_text_state_reservation_submit(
                                       &state->memory.backing.value});
     }
     if (iree_status_is_ok(status) && reservation->cold) {
-      loom_serve_snapshot_buffer_t
-          buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
-      loom_serve_text_state_snapshot_buffers(state, buffers);
       status = loom_serve_snapshot_restore(
-          checkpoint->snapshot, IREE_ARRAYSIZE(buffers), buffers,
-          reservation->restore_count, reservation->restore_ranges);
+          checkpoint->snapshot, IREE_ARRAYSIZE(state->allocations),
+          state->allocations, reservation->restore_count,
+          reservation->restore_ranges);
       if (iree_status_is_ok(status)) {
         loom_serve_snapshot_release(checkpoint->snapshot);
         checkpoint->snapshot = NULL;

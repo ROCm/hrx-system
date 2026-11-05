@@ -63,7 +63,7 @@ static iree_status_t loom_serve_text_state_validate_resize(
   }
   for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
        ++i) {
-    iree_hal_buffer_t* root = *loom_serve_text_state_allocation(state, i);
+    iree_hal_buffer_t* root = state->allocations[i].buffer;
     const iree_device_size_t length = storage->allocations[i].length;
     const bool resizable = i == 1 || i == 3 || i == 6 || i >= 9;
     if ((length != 0) != (root != NULL) ||
@@ -181,7 +181,6 @@ static iree_status_t loom_serve_text_state_resize_views(
       row->recurrent.dirty = true;
     }
   }
-  state->epoch.buffers[3] = state->row_arena;
   return status;
 }
 
@@ -211,7 +210,7 @@ iree_status_t loom_serve_text_state_resize(loom_serve_text_state_t* state,
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(previous) && iree_status_is_ok(status); ++i) {
-    iree_hal_buffer_t** root = loom_serve_text_state_allocation(state, i);
+    iree_hal_buffer_t** root = &state->allocations[i].buffer;
     const loom_serve_text_allocation_t* record = &state->storage.allocations[i];
     const iree_device_size_t length = record->length;
     // Carry endpoints change index even when the source reserved spare bytes.
@@ -287,8 +286,7 @@ iree_status_t loom_serve_text_state_resize(loom_serve_text_state_t* state,
   if (iree_status_is_ok(status)) {
     const iree_host_size_t slots[] = {3, 10};
     for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(slots); ++i) {
-      iree_hal_buffer_t* table =
-          *loom_serve_text_state_allocation(state, slots[i]);
+      iree_hal_buffer_t* table = state->allocations[slots[i]].buffer;
       const iree_const_byte_span_t origins =
           state->storage.bytes[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS + i];
       if (table && origins.data_length) {
@@ -316,6 +314,7 @@ iree_status_t loom_serve_text_state_resize(loom_serve_text_state_t* state,
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(previous); ++i) {
     iree_hal_buffer_release(previous[i]);
   }
+  loom_serve_text_state_bind_allocations(state);
   if (iree_status_is_ok(status)) {
     status = loom_serve_text_state_resize_views(state);
   }
