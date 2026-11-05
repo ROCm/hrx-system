@@ -60,6 +60,14 @@ void loom_serve_block_pool_retain(loom_serve_block_pool_t* pool, uint32_t count,
 void loom_serve_block_pool_release(loom_serve_block_pool_t* pool,
                                    uint32_t count, const uint32_t* blocks);
 
+// Cold placement maintenance: moves preferred free IDs to the acquisition end
+// of the stack without changing any owned ID or reference. Visits each free ID
+// once and allocates nothing. Relative free-ID order is unspecified afterward.
+void loom_serve_block_pool_prioritize(loom_serve_block_pool_t* pool,
+                                      bool (*preferred)(void* user_data,
+                                                        uint32_t block),
+                                      void* user_data);
+
 static inline bool loom_serve_block_pool_is_shared(
     const loom_serve_block_pool_t* pool, uint32_t block) {
   return pool->references[block] > 1;

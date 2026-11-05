@@ -109,6 +109,14 @@ bool loom_serve_text_session_cache_evict(
     const loom_serve_text_session_cache_entry_t* protected_entry,
     loom_serve_text_telemetry_t* telemetry);
 
+// Marks exactly the logical references eviction could release. The serialized
+// caller queries source retention once, then clears all marks even on failure.
+void loom_serve_text_session_cache_select_reclaimable(
+    const loom_serve_text_session_cache_t* cache, iree_host_size_t row_count,
+    loom_serve_text_session_t* const* rows,
+    const loom_serve_text_session_t* protected_row,
+    const loom_serve_text_session_cache_entry_t* protected_entry);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

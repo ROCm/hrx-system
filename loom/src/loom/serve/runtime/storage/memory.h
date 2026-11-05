@@ -299,6 +299,13 @@ iree_host_size_t loom_serve_virtual_buffer_slab_count(
 loom_serve_memory_demand_t loom_serve_virtual_buffer_missing_demand(
     const loom_serve_virtual_buffer_t* buffer);
 
+// Whether every mapping intersecting a validated range has published backing.
+// The caller has retired prior mapping operations on this root. This cold
+// placement query neither allocates nor collects native completions.
+bool loom_serve_virtual_buffer_is_backed(
+    const loom_serve_virtual_buffer_t* buffer, iree_device_size_t offset,
+    iree_device_size_t length);
+
 // Backs the slabs intersecting a caller-validated nonempty byte range. Existing
 // contents survive. New contents are unspecified. No consumer may access new
 // ranges until this call succeeds. Failure can leave additional slabs owned;
@@ -333,6 +340,25 @@ typedef struct loom_serve_memory_footprint_t {
 iree_status_t loom_serve_memory_ranges_footprint(
     iree_host_size_t range_count, const loom_serve_memory_range_t* ranges,
     loom_serve_memory_footprint_t* out_footprint);
+
+// Selects actual accepted backing intersecting a validated range, without
+// allocating, collecting completion, or counting unbacked declarations.
+// Repeated ranges share the footprint query's temporary union mark. The
+// serialized owner visits every participating buffer before another footprint
+// query or mutation.
+void loom_serve_virtual_buffer_select_backing(
+    loom_serve_virtual_buffer_t* buffer, iree_device_size_t offset,
+    iree_device_size_t length);
+
+// Visits selected whole mappings once, in unspecified order, and clears all
+// marks even if a visitor fails. The visitor may allocate host query scratch,
+// but cannot mutate backing or reenter admission. Accepted pending and failed
+// mappings remain selected until their physical ownership actually retires.
+iree_status_t loom_serve_virtual_buffer_visit_backing(
+    loom_serve_virtual_buffer_t* buffer,
+    iree_status_t (*visitor)(void* user_data, iree_device_size_t offset,
+                             iree_device_size_t length),
+    void* user_data);
 
 // Admits and commits the union of missing slabs across all ranges. Overlapping
 // ranges and views sharing a slab are counted once. False is ordinary capacity

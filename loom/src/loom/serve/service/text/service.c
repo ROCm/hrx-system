@@ -973,9 +973,13 @@ static void loom_serve_text_set_observer(void* self,
   loom_serve_residency_set_reclaimer(
       loom_serve_text_model_residency(service->model),
       observer.wake
-          ? (loom_serve_residency_reclaimer_t){service,
-                                               loom_serve_text_cache_reclaim_request,
-                                               loom_serve_text_cache_reclaim_pending}
+          ? (loom_serve_residency_reclaimer_t){.self = service,
+                                               .request =
+                                                   loom_serve_text_cache_reclaim_request,
+                                               .is_pending =
+                                                   loom_serve_text_cache_reclaim_pending,
+                                               .forecast =
+                                                   loom_serve_text_cache_forecast}
           : (loom_serve_residency_reclaimer_t){0});
   loom_serve_timer_set_observer(&service->heartbeat.timer, observer);
 }

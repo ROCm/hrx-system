@@ -149,6 +149,24 @@ independently of execution rows. [Prefix cache](prefix_cache.h) entries share
 exact consumed-token frontiers between requests. Automatic entries can yield to
 admission pressure; explicit pins remain protected until released.
 
+The cold [retention forecast](retention.h) separates that policy from native
+ownership. The service marks only references its ordinary eviction path could
+release; every other reference remains protected. The model computes a necessary
+storage bound from source geometry and retained logical IDs. Fixed ranges use
+their actual backed union; movable KV and a retryable request's new slots may
+reuse any legal placement. Overlapping source domains do not double-charge
+aliases. Prepared continuations retain their exact commitment ranges, while
+unaccepted declarations alone consume no physical capacity.
+
+Both logical admission and physical reclamation use this bound before dropping
+history. It can prove eviction futile, but never grants backing or edits a plan.
+The ordinary allocator remains authoritative. Completed maintenance prioritizes
+free slots in surviving backing so retries can use newly freed IDs without
+requesting another physical slab. This reorders only free IDs; it does not move
+live recurrent state or change a prepared continuation. Fitting admissions and
+token execution do not run retention queries. Cold scratch scales with grown
+ownership metadata and backing, not the declared virtual token capacity.
+
 The [checkpoint registry](checkpoint_registry.h) owns named immutable endpoints
 and canonical transcripts. The [checkpoint request](checkpoint_request.h) owns
 one control claim through accepted capture or suspension. The service resolves

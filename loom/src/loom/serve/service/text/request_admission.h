@@ -32,6 +32,12 @@ bool loom_serve_text_cache_reclaim_pending(void* self);
 // Reclaims one unborrowed idle history on shared residency pressure.
 bool loom_serve_text_cache_reclaim_request(void* self);
 
+// Projects retained native state using the same eligibility as reclamation.
+// Explicit endpoints and currently borrowed state remain protected.
+iree_status_t loom_serve_text_cache_forecast(
+    void* self, const loom_serve_residency_forecast_t* request,
+    loom_serve_residency_projection_t* out_projection);
+
 // Lends an idle row to CPU preparation for the selected admission candidate.
 bool loom_serve_text_begin_preparation(loom_serve_text_service_t* service);
 

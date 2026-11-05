@@ -123,6 +123,8 @@ struct loom_serve_text_row_t {
   } planning;
   // Whether the latest completed work selected a token at the current position.
   bool has_prediction;
+  // Temporary policy eligibility on a serialized cold retention query.
+  bool reclaimable;
   // Completed stage counts and end-to-end host durations.
   loom_serve_text_metrics_t metrics;
   // Single-row publication facts, owned until successful complete_step.
@@ -154,6 +156,8 @@ struct loom_serve_text_checkpoint_t {
   iree_host_size_t references;
   // Prepared continuation borrowers; cold restores require exclusive planning.
   iree_host_size_t reservations;
+  // Eligible handle references during one cold query; aliases count separately.
+  iree_host_size_t reclaimable_references;
   // Endpoint storage owned until the last handle release.
   loom_serve_text_state_checkpoint_t* state;
   // Whether the exact endpoint selected an unconsumed prediction.

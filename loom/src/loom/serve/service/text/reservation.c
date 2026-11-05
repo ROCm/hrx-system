@@ -9,13 +9,25 @@
 #include <string.h>
 
 #include "loom/serve/service/text/model_instance.h"
+#include "loom/serve/service/text/retention.h"
 
 typedef struct loom_serve_text_reserve_context_t {
   // Borrowed model owning parameters and the selected row's state.
   loom_serve_text_model_t* model;
+  // Exact attempt whose logical requirements are already retained.
+  const loom_serve_text_state_reservation_t* reservation;
+  // This synchronous attempt is discarded after denial; IDs may be reselected.
+  bool replan;
   // Caller-owned result, distinct from a local logical-ID shortage.
   loom_serve_text_reserve_result_t* result;
 } loom_serve_text_reserve_context_t;
+
+static iree_status_t loom_serve_text_forecast_state(
+    void* user_data, loom_serve_residency_projection_t* out_projection) {
+  const loom_serve_text_reserve_context_t* context = user_data;
+  return loom_serve_text_retention_forecast(
+      context->model, context->reservation, context->replan, out_projection);
+}
 
 static iree_status_t loom_serve_text_admit_state(
     void* user_data, iree_host_size_t range_count,
@@ -23,10 +35,12 @@ static iree_status_t loom_serve_text_admit_state(
     uint64_t value, loom_serve_memory_admission_t* out_admission,
     loom_serve_memory_operation_t** out_operation) {
   loom_serve_text_reserve_context_t* context = user_data;
+  const loom_serve_residency_forecast_t forecast = {
+      .self = context, .query = loom_serve_text_forecast_state};
   loom_serve_residency_admission_t admission;
   const iree_status_t status = loom_serve_residency_try_admit_state(
-      context->model->residency, range_count, ranges, readiness, value,
-      &admission, out_operation);
+      context->model->residency, range_count, ranges, &forecast, readiness,
+      value, &admission, out_operation);
   switch (admission) {
     case LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY:
       *context->result = LOOM_SERVE_TEXT_RESERVE_CAPACITY;
@@ -107,8 +121,8 @@ uint64_t loom_serve_text_reservation_memory_footprint(
   return bytes;
 }
 
-iree_status_t loom_serve_text_reservation_submit(
-    loom_serve_text_reservation_t* reservation,
+static iree_status_t loom_serve_text_reservation_submit_plan(
+    loom_serve_text_reservation_t* reservation, bool replan,
     loom_serve_text_reserve_result_t* out_result,
     loom_serve_execution_frontier_t* out_frontier) {
   *out_result = LOOM_SERVE_TEXT_RESERVE_STATE_CAPACITY;
@@ -117,6 +131,8 @@ iree_status_t loom_serve_text_reservation_submit(
   const loom_serve_text_checkpoint_t* checkpoint = reservation->checkpoint;
   loom_serve_text_reserve_context_t context = {
       .model = row->model,
+      .reservation = reservation->state,
+      .replan = replan,
       .result = out_result,
   };
   loom_serve_memory_admission_t admission;
@@ -139,6 +155,34 @@ iree_status_t loom_serve_text_reservation_submit(
   }
   *out_frontier = loom_serve_execution_frontier(row->model->execution);
   return iree_ok_status();
+}
+
+iree_status_t loom_serve_text_reservation_submit(
+    loom_serve_text_reservation_t* reservation,
+    loom_serve_text_reserve_result_t* out_result,
+    loom_serve_execution_frontier_t* out_frontier) {
+  return loom_serve_text_reservation_submit_plan(reservation, false, out_result,
+                                                 out_frontier);
+}
+
+iree_status_t loom_serve_text_row_submit_reserve(
+    loom_serve_text_row_t* row, loom_serve_text_reserve_mode_t mode,
+    const loom_serve_text_checkpoint_t* checkpoint, iree_host_size_t extent,
+    loom_serve_text_reserve_result_t* out_result,
+    loom_serve_execution_frontier_t* out_frontier) {
+  *out_result = LOOM_SERVE_TEXT_RESERVE_STATE_CAPACITY;
+  *out_frontier = (loom_serve_execution_frontier_t){0};
+  loom_serve_text_reservation_t reservation;
+  IREE_RETURN_IF_ERROR(loom_serve_text_reservation_prepare(
+      row, mode, (loom_serve_text_checkpoint_t*)checkpoint, extent,
+      &reservation));
+  iree_status_t status = iree_ok_status();
+  if (reservation.state) {
+    status = loom_serve_text_reservation_submit_plan(&reservation, true,
+                                                     out_result, out_frontier);
+  }
+  loom_serve_text_reservation_deinitialize(&reservation);
+  return status;
 }
 
 void loom_serve_text_reservation_deinitialize(

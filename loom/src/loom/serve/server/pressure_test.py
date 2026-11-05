@@ -271,7 +271,7 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
         }
         print(json.dumps(result), flush=True)
         assert memory_after["peak_bytes"] <= memory_bytes, result
-        impossible_peer = retention == "parameters" and (
+        impossible_peer = retention in ("parameters", "checkpoint") and (
             memory_bytes == ONE_MODEL_LIMIT_BYTES
         )
         assert second_status == (503 if impossible_peer else 200), second
@@ -308,6 +308,18 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
             {"role": "assistant", "content": output(first)},
             {"role": "user", "content": "b"},
         ]
+        if impossible_peer:
+            # Named checkpoints and pinned parameters both exclude backing
+            # that idle history eviction cannot release. Denying an impossible
+            # peer must preserve those histories, including their shared state.
+            sessions = control(
+                address,
+                "GET",
+                "/v1/sessions",
+                200,
+                headers={"X-Loom-Model": "alpha"},
+            )
+            preserved_sessions = {session["name"] for session in sessions["data"]}
         if retention == "parameters":
             alpha = next(
                 item["loom"] for item in after["data"] if item["id"] == "alpha"
@@ -467,6 +479,11 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
         assert memory["peak_bytes"] <= memory_bytes, memory
         assert control(address, "GET", "/readyz", 200) == {"status": "ready"}
 
+        if impossible_peer:
+            assert preserved_sessions == {
+                f"conversation-{index}" for index in range(4)
+            }, {"retention": retention, "preserved_sessions": preserved_sessions}
+
 
 def run_from_command_line(cases):
     parser = argparse.ArgumentParser()
@@ -510,6 +527,7 @@ _CASES = (
     (4, TWO_MODEL_LIMIT_BYTES, "checkpoint"),
     (4, PARAMETER_AND_PEER_LIMIT_BYTES, "parameters"),
     (4, ONE_MODEL_LIMIT_BYTES, "parameters"),
+    (1, ONE_MODEL_LIMIT_BYTES, "checkpoint"),
 )
 
 

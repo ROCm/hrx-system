@@ -142,6 +142,7 @@ loom_cc_library(
     name = "memory_tests",
     testonly = True,
     srcs = [
+        "memory_query_test.cc",
         "memory_test.cc",
         "memory_test_fixture.cc",
         "virtual_pool_test.cc",

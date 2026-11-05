@@ -12,6 +12,7 @@
 #include "loom/serve/runtime/host/host.h"
 #include "loom/serve/runtime/storage/relocation.h"
 #include "loom/serve/runtime/storage/snapshot.h"
+#include "loom/serve/service/text/reservation_plan.h"
 
 void loom_serve_text_state_initialize(const loom_serve_text_options_t* options,
                                       iree_allocator_t host_allocator,
@@ -799,6 +800,37 @@ static iree_status_t loom_serve_text_submit_compaction(
   return status;
 }
 
+static bool loom_serve_text_recurrent_is_backed(void* user_data,
+                                                uint32_t slot) {
+  const loom_serve_text_state_t* state = user_data;
+  iree_hal_buffer_t* view = state->recurrent.buffers[slot];
+  return loom_serve_virtual_buffer_is_backed(state->memory.buffers[1],
+                                             iree_hal_buffer_byte_offset(view),
+                                             iree_hal_buffer_byte_length(view));
+}
+
+static bool loom_serve_text_block_is_backed(void* user_data, uint32_t block) {
+  const loom_serve_text_state_t* state = user_data;
+  for (iree_host_size_t i = 0; i < state->storage.region_count; ++i) {
+    const loom_serve_text_cache_region_t* region = &state->storage.regions[i];
+    loom_serve_virtual_buffer_t* buffer =
+        state->memory.buffers[region->allocation];
+    if (!buffer) {
+      continue;
+    }
+    for (iree_host_size_t plane = 0; plane < region->blocks.count; ++plane) {
+      if (!loom_serve_virtual_buffer_is_backed(
+              buffer,
+              region->blocks.origin + plane * region->blocks.stride +
+                  block * region->blocks.block_bytes,
+              region->blocks.block_bytes)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 iree_status_t loom_serve_text_state_complete_trim(
     loom_serve_text_state_t* state, loom_serve_text_trim_result_t* result,
     bool* out_complete) {
@@ -825,6 +857,16 @@ iree_status_t loom_serve_text_state_complete_trim(
   *out_complete = state->memory.trim.phase == LOOM_SERVE_TEXT_TRIM_COMPLETE &&
                   !state->memory.backing.operation;
   if (*out_complete) {
+    if (state->memory.buffers[1]) {
+      // Releasing a tentative plan restores its selected IDs to the stack.
+      // Maintenance must prefer holes in surviving backing over that failed
+      // placement; otherwise retries can request the same unavailable slab
+      // forever despite eviction having made a backed slot reusable.
+      loom_serve_block_pool_prioritize(
+          &state->recurrent.pool, loom_serve_text_recurrent_is_backed, state);
+      loom_serve_block_pool_prioritize(&state->cache.pool,
+                                       loom_serve_text_block_is_backed, state);
+    }
     result->released_bytes = state->memory.statistics.released_bytes -
                              state->memory.trim.released_before;
   }
@@ -1556,47 +1598,6 @@ static void loom_serve_text_release_reverse(loom_serve_block_pool_t* pool,
   }
 }
 
-struct loom_serve_text_state_reservation_t {
-  // Borrowed destination, unchanged until successful submission.
-  loom_serve_text_state_row_t* row;
-  // Borrowed restore endpoint, protected by the request through submission.
-  loom_serve_text_state_checkpoint_t* checkpoint;
-  // Cold checkpoint's prepared ownership, sharing the trailing block array.
-  loom_serve_text_state_checkpoint_t restored;
-  // Requested consumed-position high-water, including speculative slack.
-  uint32_t extent;
-  // Logical input frontier to install with the selected ownership.
-  uint32_t position;
-  // Source-owned frontier accompanying the logical input position.
-  uint32_t source_position;
-  // Consumed prefix pages preceding unused completion capacity.
-  uint32_t prefix;
-  // Complete selected page count in the trailing block array.
-  uint32_t count;
-  // Authoritative recurrent reader, or UINT32_MAX for a fresh row.
-  uint32_t reader;
-  // Private recurrent writer selected by the existing COW planner.
-  uint32_t writer;
-  // Original shared partial page retained until its copy retires.
-  uint32_t tail;
-  // Whether the checkpoint's contents need an asynchronous restore.
-  bool cold;
-  // Successful admission transferred logical ownership to row/checkpoint.
-  bool installed;
-  // Owned source restore descriptors; NULL without a cold checkpoint.
-  loom_serve_snapshot_range_t* restore_ranges;
-  // Number of restore descriptors.
-  iree_host_size_t restore_count;
-  // Owned exact physical range union input for admission and commitment.
-  loom_serve_memory_range_t* commitments;
-  // Number of physical ranges, zero for fixed-backed state.
-  iree_host_size_t commitment_count;
-  // Complete physical footprint of this continuation and shared model state.
-  uint64_t footprint_bytes;
-  // Selected row pages followed by cold checkpoint pages when present.
-  uint32_t blocks[];
-};
-
 iree_status_t loom_serve_text_state_row_prepare_reserve(
     loom_serve_text_state_row_t* row, loom_serve_text_reserve_mode_t mode,
     loom_serve_text_state_checkpoint_t* checkpoint, iree_host_size_t extent,
@@ -1721,7 +1722,12 @@ iree_status_t loom_serve_text_state_row_prepare_reserve(
       .tail = tail,
       .cold = cold,
   };
-  ++state->prepared_reservations;
+  reservation->next = state->prepared_reservations;
+  reservation->previous_link = &state->prepared_reservations;
+  if (reservation->next) {
+    reservation->next->previous_link = &reservation->next;
+  }
+  state->prepared_reservations = reservation;
   iree_hal_buffer_t* views[5];
   memcpy(views, &row->buffers[TEXT_CONTROL], sizeof(views));
   views[TEXT_RECURRENT - TEXT_CONTROL] = state->recurrent.buffers[writer];
@@ -1949,7 +1955,10 @@ void loom_serve_text_state_reservation_free(
     return;
   }
   loom_serve_text_state_t* state = reservation->row->owner;
-  --state->prepared_reservations;
+  *reservation->previous_link = reservation->next;
+  if (reservation->next) {
+    reservation->next->previous_link = reservation->previous_link;
+  }
   if (!reservation->installed) {
     loom_serve_block_pool_release(&state->recurrent.pool, 1,
                                   &reservation->writer);

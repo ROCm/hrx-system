@@ -326,6 +326,14 @@ Elastic pressure first reclaims idle allocator backing, then idle unpinned
 weights and eligible idle text history across models sharing the same pool.
 Accepted work, prepared continuations, and explicit checkpoint references remain
 protected.
+Before discarding history, admission checks a minimum memory requirement that
+allows legal cache-slot reuse and KV compaction. If even that minimum cannot fit
+beside retained state, the request is rejected without evicting conversations.
+For example, a named checkpoint can prevent a second model from fitting even
+when the first model's automatic session cache is eligible for eviction.
+Releasing the checkpoint can make the same request admissible. Passing the
+minimum check is not a reservation: actual placement and backing still determine
+whether the request can run.
 An evicted session can replay its full input history; a session name is not
 durable storage.
 Pool pressure does not automatically serialize conversations to disk. If all

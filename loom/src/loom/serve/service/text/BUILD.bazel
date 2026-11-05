@@ -195,6 +195,7 @@ loom_cc_library(
     srcs = [
         "checkpoint_test.cc",
         "reservation_test.cc",
+        "retention_test.cc",
         "state_reservation_test.cc",
     ],
     target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
@@ -207,6 +208,7 @@ loom_cc_library(
         "//loom/src/loom/serve/runtime/host",
         "//loom/src/loom/serve/runtime/storage:memory",
         "//loom/src/loom/serve/testing:device",
+        "//loom/src/loom/serve/testing:native_allocator",
         "//runtime/src/iree/base",
     ],
     alwayslink = True,
@@ -655,6 +657,8 @@ loom_cc_library(
         "model.c",
         "model_instance.h",
         "reservation.c",
+        "reservation_plan.h",
+        "retention.c",
         "row.c",
         "source.c",
         "stages.c",
@@ -670,6 +674,7 @@ loom_cc_library(
         "media_input.h",
         "model.h",
         "reservation.h",
+        "retention.h",
         "source.h",
         "stages.h",
         "state.h",
@@ -683,6 +688,7 @@ loom_cc_library(
         ":epoch_upload",
         ":packing",
         ":storage",
+        ":storage_bounds",
         ":tool_xml",
         "//loom/binding/c:loomc",
         "//loom/src/loom/serve/runtime/device",
@@ -724,6 +730,23 @@ loom_cc_library(
         "//runtime/src/iree/tokenizer/vocab",
         "//runtime/src/iree/tooling:device_profiling",
         "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "storage_bounds",
+    srcs = ["storage_bounds.c"],
+    hdrs = ["storage_bounds.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "storage_bounds_test",
+    srcs = ["storage_bounds_test.cc"],
+    deps = [
+        ":storage_bounds",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

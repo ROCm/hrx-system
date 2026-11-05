@@ -896,6 +896,54 @@ static iree_device_size_t loom_serve_memory_slab_length(
                   buffer->byte_length - index * buffer->geometry.mapping_size);
 }
 
+void loom_serve_virtual_buffer_select_backing(
+    loom_serve_virtual_buffer_t* buffer, iree_device_size_t offset,
+    iree_device_size_t length) {
+  if (!length) {
+    return;
+  }
+  const iree_device_size_t slab_size = buffer->geometry.mapping_size;
+  const iree_host_size_t begin = offset / slab_size;
+  const iree_host_size_t end = (offset + length - 1) / slab_size + 1;
+  if (end - begin < buffer->backing.capacity) {
+    for (iree_host_size_t i = begin; i < end; ++i) {
+      loom_serve_backing_entry_t* entry =
+          loom_serve_backing_directory_find(&buffer->backing, i);
+      if (entry && (entry->physical || entry->in_flight)) {
+        entry->counted = true;
+      }
+    }
+  } else {
+    for (iree_host_size_t i = 0; i < buffer->backing.capacity; ++i) {
+      loom_serve_backing_entry_t* entry = &buffer->backing.entries[i];
+      if (entry->occupied && entry->index >= begin && entry->index < end &&
+          (entry->physical || entry->in_flight)) {
+        entry->counted = true;
+      }
+    }
+  }
+}
+
+iree_status_t loom_serve_virtual_buffer_visit_backing(
+    loom_serve_virtual_buffer_t* buffer,
+    iree_status_t (*visitor)(void* user_data, iree_device_size_t offset,
+                             iree_device_size_t length),
+    void* user_data) {
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < buffer->backing.capacity; ++i) {
+    loom_serve_backing_entry_t* entry = &buffer->backing.entries[i];
+    if (entry->counted) {
+      entry->counted = false;
+      if (iree_status_is_ok(status) && visitor) {
+        status =
+            visitor(user_data, entry->index * buffer->geometry.mapping_size,
+                    loom_serve_memory_slab_length(buffer, entry->index));
+      }
+    }
+  }
+  return status;
+}
+
 iree_status_t loom_serve_memory_ranges_footprint(
     iree_host_size_t range_count, const loom_serve_memory_range_t* ranges,
     loom_serve_memory_footprint_t* out_footprint) {
@@ -1205,6 +1253,25 @@ loom_serve_memory_demand_t loom_serve_virtual_buffer_missing_demand(
     }
   }
   return demand;
+}
+
+bool loom_serve_virtual_buffer_is_backed(
+    const loom_serve_virtual_buffer_t* buffer, iree_device_size_t offset,
+    iree_device_size_t length) {
+  if (!length) {
+    return true;
+  }
+  const uint64_t begin = offset / buffer->geometry.mapping_size;
+  const uint64_t end =
+      (offset + length - 1) / buffer->geometry.mapping_size + 1;
+  for (uint64_t i = begin; i < end; ++i) {
+    const loom_serve_backing_entry_t* entry =
+        loom_serve_backing_directory_find_const(&buffer->backing, i);
+    if (!entry || !entry->physical) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // Publishes one native result on the serialized pool owner. Native work never

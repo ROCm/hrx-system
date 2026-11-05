@@ -82,6 +82,22 @@ void loom_serve_block_pool_release(loom_serve_block_pool_t* pool,
   }
 }
 
+void loom_serve_block_pool_prioritize(loom_serve_block_pool_t* pool,
+                                      bool (*preferred)(void* user_data,
+                                                        uint32_t block),
+                                      void* user_data) {
+  uint32_t begin = 0, end = pool->available;
+  while (begin < end) {
+    const uint32_t block = pool->free_blocks[begin];
+    if (preferred(user_data, block)) {
+      pool->free_blocks[begin] = pool->free_blocks[--end];
+      pool->free_blocks[end] = block;
+    } else {
+      ++begin;
+    }
+  }
+}
+
 uint32_t loom_serve_block_pool_plan_compaction(
     const loom_serve_block_pool_t* pool, uint32_t* destinations) {
   for (uint32_t i = 0; i < pool->capacity; ++i) {
