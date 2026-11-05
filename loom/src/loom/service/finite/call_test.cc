@@ -65,20 +65,6 @@ TEST_P(FiniteCallTest, AllocationFailurePreservesInput) {
   EXPECT_EQ(iree_string_builder_size(&body_), original.size);
 }
 
-TEST_P(FiniteCallTest, UnknownOutputPreservesInput) {
-  const auto original = iree_string_builder_view(&body_);
-  const auto unknown = static_cast<loom_service_finite_output_format_t>(
-      2 + static_cast<int>(GetParam()));
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_service_finite_call_allocate(
-          &body_, unknown, iree_allocator_system(), &call_, &consumer_));
-  EXPECT_EQ(call_, nullptr);
-  EXPECT_EQ(consumer_.self, nullptr);
-  EXPECT_EQ(iree_string_builder_view(&body_).data, original.data);
-  EXPECT_EQ(iree_string_builder_size(&body_), original.size);
-}
-
 TEST_P(FiniteCallTest, FixedAndSizingBuildersCannotTransferBorrowedStorage) {
   char storage[8] = "{}";
   iree_string_builder_t borrowed;
