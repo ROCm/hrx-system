@@ -295,27 +295,45 @@ iree_status_t loom_serve_residency_try_admit(
     loom_serve_residency_t* const* residencies,
     loom_serve_residency_admission_t* out_admission);
 
-// Admits parameters and the caller's complete mutable-state range union before
-// submitting either. The state_owner index selects one member whose physical
-// pool owns the ranges; their logical borrowers exclude reclamation for the
-// call. Every other pool is prepared before committing this state union. Denial
-// retains neither a parameter pin nor new backing; FIFO interest remains.
-// Success owns a pin per member and publishes state backing on readiness/value,
-// independently of parameter loading on each execution timeline. The caller
-// owns the returned operation through actual native retirement, including
-// terminal activation failure. A fixed-backed caller supplies no ranges or
-// readiness. An optional source forecast includes the complete incoming state
-// and legal placement changes after denial; NULL retains exact-range demand.
-// It is queried only under pressure, never to admit work. No task or device
-// wait occurs.
+// One caller-owned mutable-state union in a complete request admission.
+// Records are ordered by distinct residency index, at most one per member.
+// Ranges belong to that member's physical pool; logical borrowers exclude
+// reclamation until the admission call returns.
+typedef struct loom_serve_residency_state_t {
+  // Index in the caller's immutable distinct-pool residency set.
+  iree_host_size_t owner;
+  // Exact mutable-state ranges produced by the logical planner.
+  const loom_serve_memory_range_t* ranges;
+  // Number of ranges, including zero for fixed backing.
+  iree_host_size_t range_count;
+  // Optional producer projection including legal re-placement after denial.
+  const loom_serve_residency_forecast_t* forecast;
+  // Caller-owned mapping timeline, or NULL for fixed backing.
+  iree_hal_semaphore_t* readiness;
+  // Readiness value published after this owner's backing is usable.
+  uint64_t value;
+  // Caller-owned operation slot, preserved on terminal activation failure.
+  loom_serve_memory_operation_t** operation;
+} loom_serve_residency_state_t;
+
+// Admits parameters and every mutable-state union before submitting either.
+// The state span is bounded by IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT. Complete
+// preflight precedes history eviction; every pool prepares its combined demand
+// before the first mapping. Denial retains neither a parameter pin nor new
+// backing; FIFO interest remains. Success owns a pin per member and publishes
+// each state's backing on its readiness/value, independently of parameter
+// loading. The caller owns all returned operations through native retirement,
+// including partial submission and terminal activation failure. Fixed-backed
+// state supplies no ranges or readiness. Optional source forecasts include
+// each owner's complete incoming state and legal placement changes after
+// denial; NULL retains exact-range demand. They are queried only under
+// pressure, never to admit work. No task/device wait or cross-pool readiness
+// join occurs here; the model owns its consumer frontier.
 iree_status_t loom_serve_residency_try_admit_state(
     iree_host_size_t residency_count,
-    loom_serve_residency_t* const* residencies, iree_host_size_t state_owner,
-    iree_host_size_t range_count, const loom_serve_memory_range_t* ranges,
-    const loom_serve_residency_forecast_t* forecast,
-    iree_hal_semaphore_t* readiness, uint64_t value,
-    loom_serve_residency_admission_t* out_admission,
-    loom_serve_memory_operation_t** out_operation);
+    loom_serve_residency_t* const* residencies, iree_host_size_t state_count,
+    const loom_serve_residency_state_t* states,
+    loom_serve_residency_admission_t* out_admission);
 
 // Withdraws this model's pending admission, without changing any owned pin or
 // queued device work. Idempotent; called on the owner when its prepared request

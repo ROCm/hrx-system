@@ -1186,23 +1186,6 @@ void loom_serve_residency_set_private_peak(loom_serve_residency_t* residency,
   residency->private_bytes = private_bytes;
 }
 
-// Borrowed for one serialized admission, before either state or parameters
-// submit work. The state owner retains the resulting native operation.
-typedef struct loom_serve_residency_state_t {
-  // Exact mutable-state ranges produced by the caller's logical planner.
-  const loom_serve_memory_range_t* ranges;
-  // Number of ranges, including zero for fixed backing.
-  iree_host_size_t range_count;
-  // Optional producer projection including legal re-placement after denial.
-  const loom_serve_residency_forecast_t* forecast;
-  // State-owned mapping timeline, or NULL for fixed backing.
-  iree_hal_semaphore_t* readiness;
-  // State readiness value to publish after successful backing.
-  uint64_t value;
-  // Caller-owned operation slot, preserved on terminal activation failure.
-  loom_serve_memory_operation_t** operation;
-} loom_serve_residency_state_t;
-
 // A cold necessary bound, not a reservation or a claim that compaction will
 // succeed. Unknown mutable owners stay protected. Known owners replace only
 // their own actual charge with source-derived retained/incoming requirements.
@@ -1345,21 +1328,31 @@ static iree_status_t loom_serve_residency_activate_parameters(
 // bounds. One impossible peer must not discard another owner's useful history.
 static iree_status_t loom_serve_residency_preflight(
     iree_host_size_t residency_count,
-    loom_serve_residency_t* const* residencies, iree_host_size_t state_owner,
-    const loom_serve_residency_state_t* state, uint64_t additional_state,
-    bool* out_available, loom_serve_residency_admission_t* out_admission) {
+    loom_serve_residency_t* const* residencies, iree_host_size_t state_count,
+    const loom_serve_residency_state_t* states,
+    const loom_serve_memory_footprint_t* footprints, bool* out_available,
+    loom_serve_residency_admission_t* out_admission) {
   bool available = true;
   bool possible = true;
   iree_host_size_t history_owner = residency_count;
-  for (iree_host_size_t i = 0; i < residency_count; ++i) {
+  iree_host_size_t state_index = 0;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < residency_count && iree_status_is_ok(status);
+       ++i) {
     loom_serve_residency_t* residency = residencies[i];
-    const uint64_t additional = i == state_owner ? additional_state : 0;
+    const loom_serve_residency_state_t* state =
+        state_index < state_count && states[state_index].owner == i
+            ? &states[state_index]
+            : NULL;
+    const uint64_t additional =
+        state ? footprints[state_index++].missing_bytes : 0;
     if (!loom_serve_residency_fits(residency, additional,
                                    residency->private_bytes)) {
       loom_serve_residency_cache_t* cache = residency->cache;
       const bool reclaiming = loom_serve_residency_cache_is_reclaiming(cache);
-      IREE_RETURN_IF_ERROR(loom_serve_memory_pool_query_status(cache->pool));
-      if (!loom_serve_residency_fits(residency, additional,
+      status = loom_serve_memory_pool_query_status(cache->pool);
+      if (iree_status_is_ok(status) &&
+          !loom_serve_residency_fits(residency, additional,
                                      residency->private_bytes)) {
         available = false;
         if (reclaiming) {
@@ -1367,9 +1360,8 @@ static iree_status_t loom_serve_residency_preflight(
           *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED;
         } else {
           bool owner_possible = false;
-          IREE_RETURN_IF_ERROR(loom_serve_residency_can_reclaim(
-              residency, i == state_owner ? state : NULL, additional,
-              &owner_possible));
+          status = loom_serve_residency_can_reclaim(
+              residency, state, additional, &owner_possible);
           possible &= owner_possible;
           if (owner_possible && history_owner == residency_count) {
             history_owner = i;
@@ -1385,34 +1377,37 @@ static iree_status_t loom_serve_residency_preflight(
       }
     }
   }
-  if (!available && possible && history_owner != residency_count &&
+  if (iree_status_is_ok(status) && !available && possible &&
+      history_owner != residency_count &&
       *out_admission != LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED) {
     loom_serve_residency_request_history(residencies[history_owner],
                                          out_admission);
   }
   *out_available = available;
-  return iree_ok_status();
+  return status;
 }
 
 static iree_status_t loom_serve_residency_acquire_parameters(
     iree_host_size_t residency_count,
-    loom_serve_residency_t* const* residencies, iree_host_size_t state_owner,
-    const loom_serve_residency_state_t* state,
+    loom_serve_residency_t* const* residencies, iree_host_size_t state_count,
+    const loom_serve_residency_state_t* states,
+    loom_serve_memory_footprint_t* footprints,
     loom_serve_residency_admission_t* out_admission) {
-  loom_serve_memory_footprint_t footprint = {0};
-  if (state) {
-    IREE_RETURN_IF_ERROR(loom_serve_memory_ranges_footprint(
-        state->range_count, state->ranges, &footprint));
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < state_count && iree_status_is_ok(status);
+       ++i) {
+    status = loom_serve_memory_ranges_footprint(
+        states[i].range_count, states[i].ranges, &footprints[i]);
   }
+  IREE_RETURN_IF_ERROR(status);
   bool available = false;
   IREE_RETURN_IF_ERROR(loom_serve_residency_preflight(
-      residency_count, residencies, state_owner, state, footprint.missing_bytes,
-      &available, out_admission));
+      residency_count, residencies, state_count, states, footprints, &available,
+      out_admission));
   if (!available) {
     return iree_ok_status();
   }
 
-  iree_status_t status = iree_ok_status();
   iree_host_size_t protected_count = 0;
   while (protected_count < residency_count && iree_status_is_ok(status)) {
     status = loom_serve_residency_protect(residencies[protected_count]);
@@ -1424,13 +1419,17 @@ static iree_status_t loom_serve_residency_acquire_parameters(
   // remains valid until activation; no other admission can spend its capacity.
   loom_serve_memory_admission_t admission =
       LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE;
+  iree_host_size_t state_index = 0;
   for (iree_host_size_t i = 0;
        i < residency_count && iree_status_is_ok(status) &&
        admission == LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE;
        ++i) {
     loom_serve_residency_t* residency = residencies[i];
-    if (residency->pin_count == 1 && residency->cache->pool &&
-        (!state || i != state_owner)) {
+    if (state_index < state_count && states[state_index].owner == i) {
+      ++state_index;
+      continue;
+    }
+    if (residency->pin_count == 1 && residency->cache->pool) {
       const loom_serve_memory_demand_t demand =
           loom_serve_residency_missing_demand(residency);
       if (demand.weight_bytes || demand.packed_bytes ||
@@ -1440,17 +1439,27 @@ static iree_status_t loom_serve_residency_acquire_parameters(
       }
     }
   }
-  const bool preparing_state =
-      iree_status_is_ok(status) &&
-      admission == LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE && state;
-  if (preparing_state && residencies[state_owner]->cache->pool) {
-    loom_serve_memory_pool_t* pool = residencies[state_owner]->cache->pool;
-    loom_serve_memory_demand_t demand =
-        loom_serve_residency_missing_demand(residencies[state_owner]);
-    loom_serve_memory_demand_add(&demand, footprint.missing_demand);
-    status = loom_serve_memory_pool_prepare(pool, demand, &admission);
-    if (iree_status_is_ok(status) &&
-        admission == LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE) {
+  for (state_index = 0;
+       state_index < state_count && iree_status_is_ok(status) &&
+       admission == LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE;
+       ++state_index) {
+    loom_serve_residency_t* residency = residencies[states[state_index].owner];
+    if (residency->cache->pool) {
+      loom_serve_memory_demand_t demand =
+          loom_serve_residency_missing_demand(residency);
+      loom_serve_memory_demand_add(&demand,
+                                   footprints[state_index].missing_demand);
+      status = loom_serve_memory_pool_prepare(residency->cache->pool, demand,
+                                              &admission);
+    }
+  }
+  for (iree_host_size_t i = 0;
+       i < state_count && iree_status_is_ok(status) &&
+       admission == LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE;
+       ++i) {
+    const loom_serve_residency_state_t* state = &states[i];
+    loom_serve_memory_pool_t* pool = residencies[state->owner]->cache->pool;
+    if (pool) {
       status = loom_serve_memory_pool_commit_admitted_async(
           pool, state->range_count, state->ranges, state->readiness,
           state->value, state->operation);
@@ -1465,14 +1474,16 @@ static iree_status_t loom_serve_residency_acquire_parameters(
     }
     if (admission == LOOM_SERVE_MEMORY_ADMISSION_DEFERRED) {
       *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED;
-    } else if (iree_status_is_ok(status) && preparing_state &&
-               state->forecast) {
+    } else if (iree_status_is_ok(status) && state_index &&
+               states[state_index - 1].forecast) {
       // Exact placement can fail while source-guided relocation remains legal.
+      const loom_serve_residency_state_t* state = &states[state_index - 1];
       bool possible = false;
       status = loom_serve_residency_can_reclaim(
-          residencies[state_owner], state, footprint.missing_bytes, &possible);
+          residencies[state->owner], state,
+          footprints[state_index - 1].missing_bytes, &possible);
       if (iree_status_is_ok(status) && possible) {
-        loom_serve_residency_request_history(residencies[state_owner],
+        loom_serve_residency_request_history(residencies[state->owner],
                                              out_admission);
       }
     }
@@ -1491,7 +1502,8 @@ static iree_status_t loom_serve_residency_acquire_parameters(
 static iree_status_t loom_serve_residency_admit(
     iree_host_size_t residency_count,
     loom_serve_residency_t* const* residencies, bool new_work,
-    iree_host_size_t state_owner, const loom_serve_residency_state_t* state,
+    iree_host_size_t state_count, const loom_serve_residency_state_t* states,
+    loom_serve_memory_footprint_t* footprints,
     loom_serve_residency_admission_t* out_admission) {
   *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY;
   iree_status_t status = iree_ok_status();
@@ -1511,7 +1523,8 @@ static iree_status_t loom_serve_residency_admit(
   if (iree_status_is_ok(status) &&
       *out_admission != LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED) {
     status = loom_serve_residency_acquire_parameters(
-        residency_count, residencies, state_owner, state, out_admission);
+        residency_count, residencies, state_count, states, footprints,
+        out_admission);
   }
   if (iree_status_is_ok(status) && new_work &&
       *out_admission != LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
@@ -1532,7 +1545,7 @@ iree_status_t loom_serve_residency_try_acquire(
     loom_serve_residency_t* const* residencies, bool* out_admitted) {
   loom_serve_residency_admission_t admission;
   iree_status_t status = loom_serve_residency_admit(
-      residency_count, residencies, false, 0, NULL, &admission);
+      residency_count, residencies, false, 0, NULL, NULL, &admission);
   *out_admitted = admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED;
   return status;
 }
@@ -1542,28 +1555,22 @@ iree_status_t loom_serve_residency_try_admit(
     loom_serve_residency_t* const* residencies,
     loom_serve_residency_admission_t* out_admission) {
   return loom_serve_residency_admit(residency_count, residencies, true, 0, NULL,
-                                    out_admission);
+                                    NULL, out_admission);
 }
 
 iree_status_t loom_serve_residency_try_admit_state(
     iree_host_size_t residency_count,
-    loom_serve_residency_t* const* residencies, iree_host_size_t state_owner,
-    iree_host_size_t range_count, const loom_serve_memory_range_t* ranges,
-    const loom_serve_residency_forecast_t* forecast,
-    iree_hal_semaphore_t* readiness, uint64_t value,
-    loom_serve_residency_admission_t* out_admission,
-    loom_serve_memory_operation_t** out_operation) {
-  *out_operation = NULL;
-  const loom_serve_residency_state_t state = {
-      .ranges = ranges,
-      .range_count = range_count,
-      .forecast = forecast,
-      .readiness = readiness,
-      .value = value,
-      .operation = out_operation,
-  };
+    loom_serve_residency_t* const* residencies, iree_host_size_t state_count,
+    const loom_serve_residency_state_t* states,
+    loom_serve_residency_admission_t* out_admission) {
+  IREE_ASSERT(state_count <= IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT);
+  loom_serve_memory_footprint_t footprints[IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT];
+  for (iree_host_size_t i = 0; i < state_count; ++i) {
+    *states[i].operation = NULL;
+  }
   return loom_serve_residency_admit(residency_count, residencies, true,
-                                    state_owner, &state, out_admission);
+                                    state_count, states, footprints,
+                                    out_admission);
 }
 
 iree_status_t loom_serve_residency_acquire(

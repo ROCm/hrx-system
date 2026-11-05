@@ -53,7 +53,10 @@ loom_cc_library(
     name = "residency_tests",
     testonly = True,
     srcs = ["residency_test.cc"],
-    deps = [":weights_test_base"],
+    deps = [
+        ":weights_test_base",
+        "//loom/src/loom/serve/testing:worker_gate",
+    ],
     alwayslink = True,
 )
 

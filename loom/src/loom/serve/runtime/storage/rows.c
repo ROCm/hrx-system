@@ -90,9 +90,16 @@ iree_status_t loom_serve_rows_try_reserve(
     }
   }
   IREE_ASSERT(!state->backing.operation);
+  const loom_serve_residency_state_t commitment = {
+      .owner = 0,
+      .ranges = ranges,
+      .range_count = range_count,
+      .readiness = state->backing.semaphore,
+      .value = state->backing.value + 1,
+      .operation = &state->backing.operation,
+  };
   IREE_RETURN_IF_ERROR(loom_serve_residency_try_admit_state(
-      1, &residency, 0, range_count, ranges, NULL, state->backing.semaphore,
-      state->backing.value + 1, out_admission, &state->backing.operation));
+      1, &residency, 1, &commitment, out_admission));
   if (*out_admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
     if (state->pool) {
       ++state->backing.value;

@@ -179,10 +179,15 @@ TEST_P(ResidencyPressureTest,
       incoming_owner(incoming, free_buffer);
   const loom_serve_memory_range_t range = {incoming, 0, 2 * kSlabBytes};
   loom_serve_memory_operation_t* operation = nullptr;
+  const loom_serve_residency_state_t state = {
+      .owner = 0,
+      .ranges = &range,
+      .range_count = 1,
+      .operation = &operation,
+  };
   loom_serve_residency_admission_t logical;
-  IREE_ASSERT_OK(loom_serve_residency_try_admit_state(1, &residencies_[1], 0, 1,
-                                                      &range, nullptr, nullptr,
-                                                      0, &logical, &operation));
+  IREE_ASSERT_OK(loom_serve_residency_try_admit_state(1, &residencies_[1], 1,
+                                                      &state, &logical));
   EXPECT_EQ(logical, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
   EXPECT_EQ(operation, nullptr);
   loom_serve_memory_admission_t physical;
@@ -196,9 +201,8 @@ TEST_P(ResidencyPressureTest,
   // Dropping retention changes eligibility, not actual backing. Both callers
   // use the same owner fact and wait for its ordinary asynchronous release.
   history_retained_ = false;
-  IREE_ASSERT_OK(loom_serve_residency_try_admit_state(1, &residencies_[1], 0, 1,
-                                                      &range, nullptr, nullptr,
-                                                      0, &logical, &operation));
+  IREE_ASSERT_OK(loom_serve_residency_try_admit_state(1, &residencies_[1], 1,
+                                                      &state, &logical));
   EXPECT_EQ(logical, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
   EXPECT_EQ(history_requests_, 1u);
   EXPECT_EQ(state_statistics_.committed_bytes, kSlabBytes);
@@ -206,9 +210,8 @@ TEST_P(ResidencyPressureTest,
   IREE_ASSERT_OK(loom_serve_virtual_buffer_trim(state_));
   history_pending_ = false;
   DrainNativeReturns();
-  IREE_ASSERT_OK(loom_serve_residency_try_admit_state(1, &residencies_[1], 0, 1,
-                                                      &range, nullptr, nullptr,
-                                                      0, &logical, &operation));
+  IREE_ASSERT_OK(loom_serve_residency_try_admit_state(1, &residencies_[1], 1,
+                                                      &state, &logical));
   const auto free_operation = [](loom_serve_memory_operation_t* operation) {
     loom_serve_memory_operation_await(operation);
     loom_serve_memory_operation_free(operation);
@@ -306,9 +309,14 @@ TEST_P(ResidencyPressureTest, LogicalAdmissionCollectsFailureBeforeEviction) {
   const loom_serve_memory_range_t incoming_range = {incoming, 0, kSlabBytes};
   loom_serve_residency_admission_t admission;
   loom_serve_memory_operation_t* incoming_operation = nullptr;
-  IREE_ASSERT_OK(loom_serve_residency_try_admit_state(
-      1, &residencies_[1], 0, 1, &incoming_range, nullptr, nullptr, 0,
-      &admission, &incoming_operation));
+  const loom_serve_residency_state_t state = {
+      .owner = 0,
+      .ranges = &incoming_range,
+      .range_count = 1,
+      .operation = &incoming_operation,
+  };
+  IREE_ASSERT_OK(loom_serve_residency_try_admit_state(1, &residencies_[1], 1,
+                                                      &state, &admission));
   EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
   EXPECT_EQ(incoming_operation, nullptr);
   EXPECT_EQ(history_requests_, 0u);
@@ -320,9 +328,8 @@ TEST_P(ResidencyPressureTest, LogicalAdmissionCollectsFailureBeforeEviction) {
   // The failed allocation is complete but its owner charge is not published.
   // Logical admission must collect that result before requesting history loss.
   EXPECT_EQ(state_statistics_.pending_bytes, kSlabBytes);
-  IREE_ASSERT_OK(loom_serve_residency_try_admit_state(
-      1, &residencies_[1], 0, 1, &incoming_range, nullptr, nullptr, 0,
-      &admission, &incoming_operation));
+  IREE_ASSERT_OK(loom_serve_residency_try_admit_state(1, &residencies_[1], 1,
+                                                      &state, &admission));
   const std::unique_ptr<loom_serve_memory_operation_t, decltype(free_operation)>
       incoming_operation_owner(incoming_operation, free_operation);
   EXPECT_EQ(history_requests_, 0u);
