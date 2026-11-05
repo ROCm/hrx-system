@@ -80,10 +80,19 @@ static iree_status_t loom_pipeline_outline_collect(
   loom_region_t* body = concurrent ? loom_pipeline_concurrent_body(op)
                                    : loom_pipeline_strand_body(op);
   const loom_op_t* first = loom_region_entry_block(body)->first_op;
-  if (!concurrent && body->block_count == 1 &&
-      (loom_pipeline_end_isa(first) ||
-       (loom_func_call_isa(first) && loom_pipeline_end_isa(first->next_op)))) {
-    return iree_ok_status();
+  if (!concurrent && body->block_count == 1) {
+    if (loom_pipeline_end_isa(first)) {
+      return iree_ok_status();
+    }
+    if (loom_func_call_isa(first) && loom_pipeline_end_isa(first->next_op)) {
+      const loom_symbol_ref_t callee = loom_func_call_callee(first);
+      if (callee.module_id == 0 &&
+          loom_func_def_isa(
+              collection->module->symbols.entries[callee.symbol_id]
+                  .defining_op)) {
+        return iree_ok_status();
+      }
+    }
   }
   if (collection->count == collection->capacity) {
     IREE_RETURN_IF_ERROR(iree_arena_grow_array(

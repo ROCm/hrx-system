@@ -49,19 +49,19 @@ pipeline.def<kernel> public retain target(@device) @ordered_transfers() run(%inp
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_31() asm {
-  %358 = mov.short 1
+  %357 = mov.short 1
   %127 = mov.short -1
   %88 = mov.local-address 458752
   acq %127, 48
-  %361 = mov.short 0
+  %360 = mov.short 0
   %90 = mov.local-address 458760
   %91 = lda %90, 0
   %92 = lda %90, 4
-  %93 = add.rr %91, %361
+  %93 = add.rr %91, %360
   %94 = ltu %93, %91
   %95 = add.rr %92, %94
   %97 = mov.i32 -2146316284
-  mov.ms %358
+  mov.ms %357
   mov.ms %97
   mov.ms %93
   mov.ms.last %95
@@ -69,120 +69,118 @@ low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_31() asm {
   %101 = mov.i32 -2147361276
   mov.ms %100
   mov.ms %101
-  mov.ms.last %361
+  mov.ms.last %360
   %103 = mov.i32 119316
-  mov.ms %358
+  mov.ms %357
   mov.ms %103
-  mov.ms.last %361
+  mov.ms.last %360
   acq %127, 51
-  %value$362 = lda %88, 0
-  %incremented$363 = add.nc %value$362, %358
-  st %incremented$363, %88, 0
-  rel %358, 49
+  %value$361 = lda %88, 0
+  %incremented$362 = add.nc %value$361, %357
+  st %incremented$362, %88, 0
+  rel %357, 49
   acq %127, 49
   %108 = mov.local-address 458768
   %109 = lda %108, 0
   %110 = lda %108, 4
-  %111 = add.rr %109, %361
+  %111 = add.rr %109, %360
   %112 = ltu %111, %109
   %113 = add.rr %110, %112
-  %115 = mov.i32 1167396
-  mov.ms %358
-  mov.ms %115
+  mov.ms %357
+  mov.ms %97
   mov.ms %111
   mov.ms.last %113
-  %117 = mov.i32 -2147483647
   %119 = mov.i32 -2147364348
-  mov.ms %358
+  mov.ms %357
   mov.ms %119
-  mov.ms.last %117
+  mov.ms.last %100
   %121 = mov.i32 122388
   mov.ms %100
   mov.ms %121
-  mov.ms.last %358
+  mov.ms.last %357
   %122 = mov.ss
-  rel %358, 48
+  rel %357, 48
   acq %127, 48
-  %366 = mov.short 4
+  %365 = mov.short 4
   %143 = lda %90, 0
   %144 = lda %90, 4
-  %145 = add.rr %143, %366
+  %145 = add.rr %143, %365
   %146 = ltu %145, %143
   %147 = add.rr %144, %146
-  mov.ms %358
+  mov.ms %357
   mov.ms %97
   mov.ms %145
   mov.ms.last %147
   mov.ms %100
   mov.ms %101
-  mov.ms.last %361
-  mov.ms %358
+  mov.ms.last %360
+  mov.ms %357
   mov.ms %103
-  mov.ms.last %361
+  mov.ms.last %360
   acq %127, 51
-  %value$367 = lda %88, 0
-  %incremented$368 = add.nc %value$367, %358
-  st %incremented$368, %88, 0
-  rel %358, 49
+  %value$366 = lda %88, 0
+  %incremented$367 = add.nc %value$366, %357
+  st %incremented$367, %88, 0
+  rel %357, 49
   acq %127, 49
   %161 = lda %108, 0
   %162 = lda %108, 4
-  %163 = add.rr %161, %366
+  %163 = add.rr %161, %365
   %164 = ltu %163, %161
   %165 = add.rr %162, %164
-  mov.ms %358
-  mov.ms %115
+  mov.ms %357
+  mov.ms %97
   mov.ms %163
   mov.ms.last %165
-  mov.ms %358
+  mov.ms %357
   mov.ms %119
-  mov.ms.last %117
+  mov.ms.last %100
   mov.ms %100
   mov.ms %121
-  mov.ms.last %358
+  mov.ms.last %357
   %174 = mov.ss
-  rel %358, 48
+  rel %357, 48
   acq %127, 48
-  %371 = mov.short 8
+  %370 = mov.short 8
   %195 = lda %90, 0
   %196 = lda %90, 4
-  %197 = add.rr %195, %371
+  %197 = add.rr %195, %370
   %198 = ltu %197, %195
   %199 = add.rr %196, %198
-  mov.ms %358
+  mov.ms %357
   mov.ms %97
   mov.ms %197
   mov.ms.last %199
   mov.ms %100
   mov.ms %101
-  mov.ms.last %361
-  mov.ms %358
+  mov.ms.last %360
+  mov.ms %357
   mov.ms %103
-  mov.ms.last %361
+  mov.ms.last %360
   acq %127, 51
-  %value$372 = lda %88, 0
-  %incremented$373 = add.nc %value$372, %358
-  st %incremented$373, %88, 0
-  rel %358, 49
+  %value$371 = lda %88, 0
+  %incremented$372 = add.nc %value$371, %357
+  st %incremented$372, %88, 0
+  rel %357, 49
   acq %127, 49
   %213 = lda %108, 0
   %214 = lda %108, 4
-  %215 = add.rr %213, %371
+  %215 = add.rr %213, %370
   %216 = ltu %215, %213
   %217 = add.rr %214, %216
-  mov.ms %358
-  mov.ms %115
+  mov.ms %357
+  mov.ms %97
   mov.ms %215
   mov.ms.last %217
-  mov.ms %358
+  mov.ms %357
   mov.ms %119
-  mov.ms.last %117
+  mov.ms.last %100
   mov.ms %100
   mov.ms %121
-  mov.ms.last %358
+  mov.ms.last %357
   %226 = mov.ss
-  rel %358, 48
-  rel %358, 50
+  rel %357, 48
+  rel %357, 50
   low.br ^_bb1
 ^_bb1:
   %286 = mov.ss
@@ -258,47 +256,45 @@ low.func.def target<amd.xdna.aie2p.configuration>(@__aie2p_worker_helper_32) @__
   write.block32(%329)[%327, %290, %290, %290, %298, %330, %290, %330]
   %331 = constant 2215968 : reg<aie2p.config.scalar : i64>
   write.block32(%331)[%327, %290, %290, %290, %290, %330]
-  %332 = constant 118816 : reg<aie2p.config.scalar : i64>
-  write.block32(%332)[%327, %290, %290, %290, %298, %330, %290, %330]
   return
 }
 
 low.func.def target<amd.xdna.aie2p.configuration>(@__aie2p_worker_helper_32) @__aie2p_worker_helper_34() asm {
-  %333 = constant 0 : reg<aie2p.config.scalar : i64>
-  %334 = constant 1 : reg<aie2p.config.scalar : i64>
-  %335 = constant 12 : reg<aie2p.config.scalar : i64>
-  %336 = constant 4 : reg<aie2p.config.scalar : i64>
-  %337 = binding %333, %334, %335, %336
-  %338 = constant 2 : reg<aie2p.config.scalar : i64>
-  %339 = binding %334, %338, %335, %336
-  %340 = range %337, %333, %335
-  %341 = constant 2097160 : reg<aie2p.config.scalar : i64>
-  write.address %341, %340
-  %342 = range %339, %333, %335
-  %343 = constant 2097168 : reg<aie2p.config.scalar : i64>
-  write.address %343, %342
-  %344 = constant 2224128 : reg<aie2p.config.scalar : i64>
-  write32 %344, %334
-  %345 = constant 2224144 : reg<aie2p.config.scalar : i64>
-  write32 %345, %333
-  %346 = constant 2224160 : reg<aie2p.config.scalar : i64>
-  write32 %346, %333
-  %347 = constant 2224176 : reg<aie2p.config.scalar : i64>
-  write32 %347, %333
+  %332 = constant 0 : reg<aie2p.config.scalar : i64>
+  %333 = constant 1 : reg<aie2p.config.scalar : i64>
+  %334 = constant 12 : reg<aie2p.config.scalar : i64>
+  %335 = constant 4 : reg<aie2p.config.scalar : i64>
+  %336 = binding %332, %333, %334, %335
+  %337 = constant 2 : reg<aie2p.config.scalar : i64>
+  %338 = binding %333, %337, %334, %335
+  %339 = range %336, %332, %334
+  %340 = constant 2097160 : reg<aie2p.config.scalar : i64>
+  write.address %340, %339
+  %341 = range %338, %332, %334
+  %342 = constant 2097168 : reg<aie2p.config.scalar : i64>
+  write.address %342, %341
+  %343 = constant 2224128 : reg<aie2p.config.scalar : i64>
+  write32 %343, %333
+  %344 = constant 2224144 : reg<aie2p.config.scalar : i64>
+  write32 %344, %332
+  %345 = constant 2224160 : reg<aie2p.config.scalar : i64>
+  write32 %345, %332
+  %346 = constant 2224176 : reg<aie2p.config.scalar : i64>
+  write32 %346, %332
   measure.begin
-  %348 = constant 2301952 : reg<aie2p.config.scalar : i64>
-  write.mask32 %348, %338, %333
-  write.mask32 %348, %334, %334
-  %349 = constant 63 : reg<aie2p.config.scalar : i64>
-  wait.mask32 %346, %349, %334
+  %347 = constant 2301952 : reg<aie2p.config.scalar : i64>
+  write.mask32 %347, %337, %332
+  write.mask32 %347, %333, %333
+  %348 = constant 63 : reg<aie2p.config.scalar : i64>
+  wait.mask32 %345, %348, %333
   measure.end
-  %350 = constant 3 : reg<aie2p.config.scalar : i64>
-  write.mask32 %348, %350, %338
+  %349 = constant 3 : reg<aie2p.config.scalar : i64>
+  write.mask32 %347, %349, %337
   return
 }
 
 low.func.def public retain target<amd.xdna.aie2p.configuration>(@__aie2p_worker_helper_32) abi(array_program) @ordered_transfers() asm {
-  %351 = constant 1 : reg<aie2p.config.scalar : i64>
-  entry %351, @__aie2p_worker_helper_33, @__aie2p_worker_helper_34
+  %350 = constant 1 : reg<aie2p.config.scalar : i64>
+  entry %350, @__aie2p_worker_helper_33, @__aie2p_worker_helper_34
   return
 }
