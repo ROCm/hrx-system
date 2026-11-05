@@ -27,7 +27,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 70u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 72u
 
 // Sentinel for absent target-family or descriptor-set stable IDs.
 #define LOOM_LOW_STABLE_ID_NONE UINT64_C(0)
@@ -1500,10 +1500,14 @@ enum loom_low_asm_layout_flag_bits_e {
   // The named dictionary contains a field without a descriptor default.
   // Positional fields are excluded when the form has a positional prefix.
   LOOM_LOW_ASM_LAYOUT_FLAG_REQUIRED_NAMED_IMMEDIATES = 1u << 2,
+  // Native assembly uses the owning descriptor's mnemonic.
+  LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_MNEMONIC_DESCRIPTOR = 1u << 3,
+  // Native assembly trims a byte suffix from the Low form mnemonic.
+  LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_MNEMONIC_FORM_PREFIX = 1u << 4,
 };
-typedef uint16_t loom_low_asm_layout_flags_t;
+typedef uint8_t loom_low_asm_layout_flags_t;
 
-// Interned formatting spans shared by assembly forms in one storage provider.
+// Interned formatting and native-spelling recipes shared by assembly forms.
 // Low assembly values follow canonical packet order. Descriptor rows own their
 // result counts and input coordinates; no separate assembly projection exists.
 // Views share layouts when their recipes, spans and formatting flags agree.
@@ -1522,35 +1526,37 @@ typedef struct loom_low_asm_layout_t {
   // First native assembly value row for this asm form.
   uint16_t native_assembly_value_start;
   // Number of default IR ownership rows, in descriptor constraint order.
-  uint16_t tied_result_count;
+  uint8_t tied_result_count;
   // Number of delimited input operand segments for this asm form.
-  uint16_t operand_segment_count;
+  uint8_t operand_segment_count;
   // Number of explicit spelling rows before the implicit descriptor suffix.
-  uint16_t explicit_immediate_count;
+  uint8_t explicit_immediate_count;
   // Number of native assembly value rows for this asm form.
-  uint16_t native_assembly_value_count;
+  uint8_t native_assembly_value_count;
+  // Explicit native mnemonic-pool index plus one, or the form suffix byte
+  // count removed when NATIVE_MNEMONIC_FORM_PREFIX is set. Zero selects the
+  // ordinary form or descriptor mnemonic without an explicit pool row.
+  uint8_t native_mnemonic_data;
   // Generation-owned syntax facts derived from the form and its descriptor.
   loom_low_asm_layout_flags_t flags;
 } loom_low_asm_layout_t;
 
-static_assert(sizeof(loom_low_asm_layout_t) == 20,
-              "loom_low_asm_layout_t must be 20 bytes");
+static_assert(sizeof(loom_low_asm_layout_t) == 16,
+              "loom_low_asm_layout_t must be 16 bytes");
 
-// Assembly identity remains separate from its shared formatting layout so
+// Low assembly identity remains separate from its shared formatting layout so
 // mnemonic lookup and packet selection do not load formatting spans.
 typedef struct loom_low_asm_form_t {
   // String-pool reference for the unqualified asm mnemonic.
   loom_string_ref_t mnemonic_string_ref;
-  // Optional string-pool reference for the native assembly mnemonic.
-  loom_string_ref_t native_assembly_mnemonic_string_ref;
   // Descriptor ordinal selected by this asm form.
   uint16_t descriptor_ordinal;
   // Index into the descriptor set's shared asm_layouts table.
   uint16_t layout_index;
 } loom_low_asm_form_t;
 
-static_assert(sizeof(loom_low_asm_form_t) == 12,
-              "loom_low_asm_form_t must be 12 bytes");
+static_assert(sizeof(loom_low_asm_form_t) == 8,
+              "loom_low_asm_form_t must be 8 bytes");
 
 typedef enum loom_low_descriptor_set_flag_bits_e {
   // Emitters consume the shared schedule without downstream reordering and
@@ -1686,6 +1692,10 @@ typedef struct loom_low_descriptor_set_t {
   const loom_low_asm_form_t* asm_forms;
   // Number of asm form rows owned by this set.
   uint32_t asm_form_count;
+  // Number of refs in |asm_native_mnemonic_string_refs|.
+  uint8_t asm_native_mnemonic_count;
+  // Distinct non-derived native assembly mnemonic refs selected by layouts.
+  const loom_string_ref_t* asm_native_mnemonic_string_refs;
   // Interned formatting layouts shared by this storage provider's forms/views.
   const loom_low_asm_layout_t* asm_layouts;
   // Number of rows in the shared asm_layouts table.
@@ -1841,6 +1851,32 @@ typedef struct loom_low_descriptor_set_t {
   // share a 16-byte aligned slot; byte counts are used only for verification.
   iree_alignas(16) loom_string_pool_t string_pool;
 } loom_low_descriptor_set_t;
+
+// Resolves the native assembly mnemonic selected by a verified asm form and
+// layout. Ordinary forms use their own mnemonic. Generated layouts instead
+// select the descriptor mnemonic, a byte prefix of the form mnemonic, or a
+// compact explicit-mnemonic pool row when those spellings differ.
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_string_ref_t
+loom_low_asm_form_native_mnemonic_string_ref(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor, const loom_low_asm_form_t* form,
+    const loom_low_asm_layout_t* layout) {
+  if (layout->native_mnemonic_data == 0) {
+    return iree_any_bit_set(layout->flags,
+                            LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_MNEMONIC_DESCRIPTOR)
+               ? descriptor->mnemonic_string_ref
+               : form->mnemonic_string_ref;
+  }
+  if (iree_any_bit_set(layout->flags,
+                       LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_MNEMONIC_FORM_PREFIX)) {
+    const uint32_t native_length =
+        (form->mnemonic_string_ref >> 24) - layout->native_mnemonic_data;
+    return (form->mnemonic_string_ref & UINT32_C(0x00FFFFFF)) |
+           (native_length << 24);
+  }
+  return descriptor_set
+      ->asm_native_mnemonic_string_refs[layout->native_mnemonic_data - 1];
+}
 
 // Returns a verified descriptor's operand by descriptor-local index. Rows are
 // immutable and shared; the local index, not the row address, identifies a use.

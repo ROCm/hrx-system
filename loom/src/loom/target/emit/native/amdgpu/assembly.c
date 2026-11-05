@@ -937,13 +937,12 @@ static iree_status_t loom_amdgpu_lookup_canonical_asm_form(
 
 static iree_string_view_t loom_amdgpu_asm_form_native_mnemonic(
     const loom_native_assembly_packet_context_t* context,
-    const loom_low_asm_form_t* form) {
+    const loom_low_asm_form_t* form, const loom_low_asm_layout_t* layout) {
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
-  loom_string_ref_t string_ref = form->mnemonic_string_ref;
-  if (form->native_assembly_mnemonic_string_ref != LOOM_STRING_REF_NONE) {
-    string_ref = form->native_assembly_mnemonic_string_ref;
-  }
+  const loom_string_ref_t string_ref =
+      loom_low_asm_form_native_mnemonic_string_ref(
+          descriptor_set, context->packet->descriptor, form, layout);
   return loom_native_assembly_descriptor_string(descriptor_set, string_ref);
 }
 
@@ -1310,7 +1309,7 @@ static iree_status_t loom_amdgpu_append_canonical_asm_form_packet(
       &context->schedule->target.descriptor_set
            ->asm_layouts[form->layout_index];
   const iree_string_view_t mnemonic =
-      loom_amdgpu_asm_form_native_mnemonic(context, form);
+      loom_amdgpu_asm_form_native_mnemonic(context, form, layout);
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_string(context->builder, mnemonic));
   bool in_list = false;
@@ -1386,7 +1385,7 @@ static iree_status_t loom_amdgpu_try_append_native_memory_packet(
   }
   *out_matched = true;
   const iree_string_view_t mnemonic =
-      loom_amdgpu_asm_form_native_mnemonic(context, form);
+      loom_amdgpu_asm_form_native_mnemonic(context, form, layout);
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_string(context->builder, mnemonic));
   bool in_list = false;
@@ -1419,8 +1418,11 @@ static iree_status_t loom_amdgpu_append_memory_packet(
   } else {
     const loom_low_asm_form_t* form = NULL;
     IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_canonical_asm_form(context, &form));
+    const loom_low_asm_layout_t* layout =
+        &context->schedule->target.descriptor_set
+             ->asm_layouts[form->layout_index];
     const iree_string_view_t mnemonic =
-        loom_amdgpu_asm_form_native_mnemonic(context, form);
+        loom_amdgpu_asm_form_native_mnemonic(context, form, layout);
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_string(context->builder, mnemonic));
     bool in_list = false;

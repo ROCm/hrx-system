@@ -1518,7 +1518,7 @@ def compile_descriptor_set(
             canonical_asm_form_ordinals[descriptor_ordinal] = None
 
     asm_table_storage = CompiledAsmTableStorage()
-    asm_table_storage.append_forms(asm_forms)
+    asm_table_storage.append_forms(asm_forms, selected_descriptors)
 
     reg_class_alts: list[tuple[int | None, int | None, tuple[RegClassAltFlag, ...], int, int]] = []
     reg_alt_group_starts: dict[

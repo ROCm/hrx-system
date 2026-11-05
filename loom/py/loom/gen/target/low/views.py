@@ -558,7 +558,7 @@ def _compile_view_asm_forms(
         label_scope=f"view_{view_spec.key}",
     )
     validation.validate_u16_table_count(len(asm_forms), f"descriptor set view '{view_spec.key}' asm form")
-    compiled.asm_table_storage.append_forms(asm_forms)
+    compiled.asm_table_storage.append_forms(asm_forms, view_spec.descriptors)
     return asm_forms
 
 

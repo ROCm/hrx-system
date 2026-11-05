@@ -226,6 +226,10 @@ static iree_status_t loom_low_verify_tables_present(
   IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
       descriptor_set->asm_forms, descriptor_set->asm_form_count, "asm_forms"));
   IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
+      descriptor_set->asm_native_mnemonic_string_refs,
+      descriptor_set->asm_native_mnemonic_count,
+      "asm_native_mnemonic_string_refs"));
+  IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
       descriptor_set->asm_layouts, descriptor_set->asm_layout_count,
       "asm_layouts"));
   IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
@@ -790,11 +794,6 @@ static iree_status_t loom_low_verify_asm_form(
   IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
       descriptor_set, asm_form->mnemonic_string_ref, "asm_form.mnemonic",
       &mnemonic));
-  if (asm_form->native_assembly_mnemonic_string_ref != LOOM_STRING_REF_NONE) {
-    IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
-        descriptor_set, asm_form->native_assembly_mnemonic_string_ref,
-        "asm_form.native_assembly_mnemonic", NULL));
-  }
   if (!loom_low_descriptor_set_has_descriptor(descriptor_set,
                                               asm_form->descriptor_ordinal)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -815,6 +814,46 @@ static iree_status_t loom_low_verify_asm_form(
   }
   const loom_low_asm_layout_t* layout =
       &descriptor_set->asm_layouts[asm_form->layout_index];
+  const loom_low_asm_layout_flags_t native_mnemonic_flags =
+      layout->flags & (LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_MNEMONIC_DESCRIPTOR |
+                       LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_MNEMONIC_FORM_PREFIX);
+  if (native_mnemonic_flags ==
+      (LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_MNEMONIC_DESCRIPTOR |
+       LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_MNEMONIC_FORM_PREFIX)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low asm form %" PRIu32
+                            " selects conflicting native mnemonic recipes",
+                            asm_form_index);
+  }
+  if (native_mnemonic_flags ==
+      LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_MNEMONIC_DESCRIPTOR) {
+    if (layout->native_mnemonic_data != 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low asm form %" PRIu32
+          " descriptor mnemonic recipe has unexpected data %u",
+          asm_form_index, (unsigned)layout->native_mnemonic_data);
+    }
+  } else if (native_mnemonic_flags ==
+             LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_MNEMONIC_FORM_PREFIX) {
+    if (layout->native_mnemonic_data == 0 ||
+        layout->native_mnemonic_data >= mnemonic.size) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low asm form %" PRIu32
+          " native mnemonic suffix length %u is invalid for %" PRIhsz " bytes",
+          asm_form_index, (unsigned)layout->native_mnemonic_data,
+          mnemonic.size);
+    }
+  } else if (layout->native_mnemonic_data >
+             descriptor_set->asm_native_mnemonic_count) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "low asm form %" PRIu32
+        " references native mnemonic %u but only %u exist",
+        asm_form_index, (unsigned)layout->native_mnemonic_data,
+        (unsigned)descriptor_set->asm_native_mnemonic_count);
+  }
   IREE_RETURN_IF_ERROR(loom_low_verify_span(
       layout->tied_result_start, layout->tied_result_count,
       descriptor_set->asm_tied_result_count, "asm_tied_results"));
@@ -977,7 +1016,9 @@ static iree_status_t loom_low_verify_asm_form(
       layout->flags,
       LOOM_LOW_ASM_LAYOUT_FLAG_NAMED_IMMEDIATES |
           LOOM_LOW_ASM_LAYOUT_FLAG_REQUIRED_NAMED_IMMEDIATES |
-          LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_IMMEDIATE_SYNTAX,
+          LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_IMMEDIATE_SYNTAX |
+          LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_MNEMONIC_DESCRIPTOR |
+          LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_MNEMONIC_FORM_PREFIX,
       "asm_layouts", asm_form->layout_index));
   IREE_RETURN_IF_ERROR(loom_low_verify_span(
       layout->native_assembly_value_start, layout->native_assembly_value_count,
@@ -1043,6 +1084,11 @@ static iree_status_t loom_low_verify_asm_result_type(
 
 static iree_status_t loom_low_verify_asm_forms(
     const loom_low_descriptor_set_t* descriptor_set) {
+  for (uint16_t i = 0; i < descriptor_set->asm_native_mnemonic_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
+        descriptor_set, descriptor_set->asm_native_mnemonic_string_refs[i],
+        "asm_native_mnemonic_string_refs", NULL));
+  }
   for (uint32_t i = 0; i < descriptor_set->asm_result_type_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_low_verify_asm_result_type(
         &descriptor_set->asm_result_types[i], i));
@@ -1052,11 +1098,12 @@ static iree_status_t loom_low_verify_asm_forms(
         descriptor_set->asm_operand_segment_count != 0 ||
         descriptor_set->asm_result_type_count != 0 ||
         descriptor_set->asm_immediate_count != 0 ||
+        descriptor_set->asm_native_mnemonic_count != 0 ||
         descriptor_set->native_asm_value_count != 0) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "low descriptor set has asm operand, result type, immediate, or "
-          "native value rows but no asm forms");
+          "low descriptor set has asm operand, result type, immediate, native "
+          "mnemonic, or native value rows but no asm forms");
     }
     return iree_ok_status();
   }
@@ -1072,12 +1119,6 @@ static iree_status_t loom_low_verify_asm_forms(
       IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
           descriptor_set, asm_form->mnemonic_string_ref, "asm_form.mnemonic",
           &mnemonic));
-      if (asm_form->native_assembly_mnemonic_string_ref !=
-          LOOM_STRING_REF_NONE) {
-        IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
-            descriptor_set, asm_form->native_assembly_mnemonic_string_ref,
-            "asm_form.native_assembly_mnemonic", NULL));
-      }
     } else {
       IREE_RETURN_IF_ERROR(
           loom_low_verify_asm_form(descriptor_set, i, &mnemonic));

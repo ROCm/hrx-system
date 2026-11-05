@@ -113,6 +113,12 @@ def _emitted_initializer(source: str, declaration: str) -> str:
     return source[start : source.index("\n};", start)]
 
 
+def _emitted_table_symbol(source: str, field_name: str) -> str:
+    match = re.search(rf"\.{re.escape(field_name)} = ([A-Za-z0-9_]+),", source)
+    assert match is not None
+    return match.group(1)
+
+
 def _explicit_physical_descriptor_set():
     physical_registers = (
         PhysicalRegister("test.r0", (0, 1)),
@@ -3278,7 +3284,7 @@ def test_generator_rejects_empty_asm_form_mnemonic() -> None:
         generate_descriptor_set(descriptor_set)
 
 
-def test_generator_emits_asm_form_native_assembly_mnemonic() -> None:
+def test_generator_derives_descriptor_asm_form_native_assembly_mnemonic() -> None:
     descriptor = replace(
         TEST_LOW_ADD_I32_DESCRIPTOR,
         asm_forms=(
@@ -3301,7 +3307,87 @@ def test_generator_emits_asm_form_native_assembly_mnemonic() -> None:
     assert asm_form.native_assembly_mnemonic == "test.add.i32"
     _assert_emitted_string_reference(generated.source, compiled.string_pool, "mnemonic_string_ref", asm_form.mnemonic_label)
     assert asm_form.native_assembly_mnemonic_label is not None
-    _assert_emitted_string_reference(generated.source, compiled.string_pool, "native_assembly_mnemonic_string_ref", asm_form.native_assembly_mnemonic_label)
+    assert "native_assembly_mnemonic_string_ref" not in generated.source
+    assert ".native_mnemonic_data = 0," in generated.source
+    assert "LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_MNEMONIC_DESCRIPTOR" in generated.source
+    assert ".asm_native_mnemonic_string_refs" not in generated.source
+
+
+def test_generator_derives_prefix_asm_form_native_assembly_mnemonic() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        asm_forms=(
+            AsmForm(
+                mnemonic="test.add.i32_low",
+                native_assembly_mnemonic="test.add",
+                results=("dst",),
+                operands=("lhs", "rhs"),
+            ),
+        ),
+    )
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    generated = generate_descriptor_set(descriptor_set)
+
+    assert ".native_mnemonic_data = 8," in generated.source
+    assert "LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_MNEMONIC_FORM_PREFIX" in generated.source
+    assert ".asm_native_mnemonic_string_refs" not in generated.source
+
+
+def test_generator_pools_explicit_asm_form_native_assembly_mnemonics() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        asm_forms=(
+            AsmForm(
+                mnemonic="test.add.i32_low",
+                native_assembly_mnemonic="native.add.i32",
+                results=("dst",),
+                operands=("lhs", "rhs"),
+            ),
+            AsmForm(
+                mnemonic="test.add.i32_alias",
+                native_assembly_mnemonic="native.add.i32",
+                results=("dst",),
+                operands=("lhs", "rhs"),
+            ),
+        ),
+    )
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+    generated = generate_descriptor_set(descriptor_set)
+
+    assert len(compiled.asm_table_storage.native_mnemonic_labels) == 1
+    assert generated.source.count(".native_mnemonic_data = 1,") == 1
+    string_ref_symbol = _emitted_table_symbol(generated.source, "asm_native_mnemonic_string_refs")
+    string_ref_initializer = _emitted_initializer(
+        generated.source,
+        f"static const loom_string_ref_t {string_ref_symbol}[] = {{",
+    )
+    native_label = compiled.asm_forms[0].native_assembly_mnemonic_label
+    assert native_label is not None
+    assert compiled.string_pool.ref(native_label) in string_ref_initializer
+    assert len(string_ref_initializer.splitlines()[1:]) == 1
+    assert f".asm_native_mnemonic_count = IREE_ARRAYSIZE({string_ref_symbol})," in generated.source
+
+
+def test_generator_rejects_more_than_255_explicit_native_assembly_mnemonics() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        asm_forms=tuple(
+            AsmForm(
+                mnemonic=f"test.add.i32_alias_{ordinal}",
+                native_assembly_mnemonic=f"native.add.i32_{ordinal}",
+                results=("dst",),
+                operands=("lhs", "rhs"),
+            )
+            for ordinal in range(256)
+        ),
+    )
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    with pytest.raises(ValueError, match="asm native mnemonic count does not fit u8"):
+        compiler.compile_descriptor_set(descriptor_set)
 
 
 def test_generator_emits_asm_form_native_assembly_values() -> None:

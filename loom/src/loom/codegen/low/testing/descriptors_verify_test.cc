@@ -75,7 +75,9 @@ struct TestTables {
   // Descriptor ordinals ordered by stable identity.
   uint16_t descriptor_refs[2];
   loom_low_asm_form_t asm_forms[2];
-  // Formatting layouts addressed independently of the sorted assembly forms.
+  loom_string_ref_t asm_native_mnemonic_string_refs[1];
+  // Formatting and native-spelling layouts addressed independently of the
+  // sorted assembly forms.
   loom_low_asm_layout_t asm_layouts[2];
   // Default packet ownership copied from assembly layouts.
   loom_tied_result_t asm_tied_results[1];
@@ -317,8 +319,6 @@ void AddAsmForms(TestTables* tables) {
   tables->asm_immediates[0].name_string_ref = LOOM_STRING_REF_NONE;
 
   tables->asm_forms[0].mnemonic_string_ref = TEST_STRING_REF(mnemonic_add);
-  tables->asm_forms[0].native_assembly_mnemonic_string_ref =
-      LOOM_STRING_REF_NONE;
   tables->asm_forms[0].descriptor_ordinal = 1;
   tables->asm_forms[0].layout_index = 0;
   tables->asm_layouts[0].result_type_start =
@@ -327,8 +327,6 @@ void AddAsmForms(TestTables* tables) {
   tables->asm_layouts[0].explicit_immediate_count = 0;
 
   tables->asm_forms[1].mnemonic_string_ref = TEST_STRING_REF(mnemonic_const);
-  tables->asm_forms[1].native_assembly_mnemonic_string_ref =
-      LOOM_STRING_REF_NONE;
   tables->asm_forms[1].descriptor_ordinal = 0;
   tables->asm_forms[1].layout_index = 1;
   tables->asm_layouts[1].result_type_start =
@@ -341,6 +339,16 @@ void AddAsmForms(TestTables* tables) {
   tables->set.asm_immediate_count = IREE_ARRAYSIZE(tables->asm_immediates);
   tables->descriptor_views[0].canonical_asm_form_ordinal = 1;
   tables->descriptor_views[1].canonical_asm_form_ordinal = 0;
+}
+
+void AddAsmNativeMnemonic(TestTables* tables, loom_string_ref_t string_ref) {
+  AddAsmForms(tables);
+  tables->asm_layouts[0].native_mnemonic_data = 1;
+  tables->asm_native_mnemonic_string_refs[0] = string_ref;
+  tables->set.asm_native_mnemonic_count =
+      IREE_ARRAYSIZE(tables->asm_native_mnemonic_string_refs);
+  tables->set.asm_native_mnemonic_string_refs =
+      tables->asm_native_mnemonic_string_refs;
 }
 
 void AddAsmResultTypes(TestTables* tables) {
@@ -2164,19 +2172,96 @@ TEST(LowDescriptorsTest, RejectsOperandInferredAsmResultValueType) {
 TEST(LowDescriptorsTest, AcceptsAsmFormNativeAssemblyMnemonic) {
   TestTables tables;
   InitializeTestTables(&tables);
-  AddAsmForms(&tables);
-  tables.asm_forms[0].native_assembly_mnemonic_string_ref =
-      TEST_STRING_REF(mnemonic_const);
+  AddAsmNativeMnemonic(&tables, TEST_STRING_REF(mnemonic_const));
 
   IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+  EXPECT_EQ(loom_low_asm_form_native_mnemonic_string_ref(
+                &tables.set, &tables.descriptors[1], &tables.asm_forms[0],
+                &tables.asm_layouts[0]),
+            TEST_STRING_REF(mnemonic_const));
+  EXPECT_EQ(loom_low_asm_form_native_mnemonic_string_ref(
+                &tables.set, &tables.descriptors[0], &tables.asm_forms[1],
+                &tables.asm_layouts[1]),
+            TEST_STRING_REF(mnemonic_const));
 }
 
 TEST(LowDescriptorsTest, RejectsEmptyAsmFormNativeAssemblyMnemonic) {
   TestTables tables;
   InitializeTestTables(&tables);
+  AddAsmNativeMnemonic(&tables, TEST_STRING_REF(empty));
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, AcceptsDescriptorAsmFormNativeAssemblyMnemonic) {
+  TestTables tables;
+  InitializeTestTables(&tables);
   AddAsmForms(&tables);
-  tables.asm_forms[0].native_assembly_mnemonic_string_ref =
-      TEST_STRING_REF(empty);
+  tables.asm_layouts[0].flags =
+      LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_MNEMONIC_DESCRIPTOR;
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+  EXPECT_EQ(loom_low_asm_form_native_mnemonic_string_ref(
+                &tables.set, &tables.descriptors[1], &tables.asm_forms[0],
+                &tables.asm_layouts[0]),
+            TEST_STRING_REF(mnemonic_add));
+}
+
+TEST(LowDescriptorsTest, AcceptsPrefixAsmFormNativeAssemblyMnemonic) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmForms(&tables);
+  tables.asm_layouts[0].flags =
+      LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_MNEMONIC_FORM_PREFIX;
+  tables.asm_layouts[0].native_mnemonic_data = 4;
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+  EXPECT_EQ(loom_low_asm_form_native_mnemonic_string_ref(
+                &tables.set, &tables.descriptors[1], &tables.asm_forms[0],
+                &tables.asm_layouts[0]),
+            LOOM_STRING_REF(0, 120, 3));
+}
+
+TEST(LowDescriptorsTest, RejectsOutOfRangeAsmFormNativeAssemblyMnemonic) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmNativeMnemonic(&tables, TEST_STRING_REF(mnemonic_const));
+  tables.asm_layouts[0].native_mnemonic_data = 2;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsInvalidPrefixAsmFormNativeAssemblyMnemonic) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmForms(&tables);
+  tables.asm_layouts[0].flags =
+      LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_MNEMONIC_FORM_PREFIX;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsConflictingAsmFormNativeMnemonicRecipes) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmForms(&tables);
+  tables.asm_layouts[0].flags =
+      LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_MNEMONIC_DESCRIPTOR |
+      LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_MNEMONIC_FORM_PREFIX;
+  tables.asm_layouts[0].native_mnemonic_data = 1;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsMissingAsmFormNativeMnemonicStringRefs) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmNativeMnemonic(&tables, TEST_STRING_REF(mnemonic_const));
+  tables.set.asm_native_mnemonic_string_refs = nullptr;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));
