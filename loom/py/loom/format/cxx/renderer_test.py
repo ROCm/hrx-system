@@ -1678,6 +1678,49 @@ func.def public noinline @math.identity(%input: i32) -> (i32) {
     assert '[[loom::symbol("math.identity"), loom::noinline]]' in result
 
 
+def test_preserves_external_import_names() -> None:
+    source = r"""func.decl import("host") @host.sample(%value: i32) -> (i32)
+func.decl import("host\"quoted", "lookup\\entry") @lookup(%value: i32) -> (i32)
+"""
+
+    result = render_module(load_module(source.encode()))
+
+    assert (
+        result
+        == r"""
+[[loom::symbol("host.sample"), loom::import("host")]]
+unsigned host_sample(unsigned value);
+
+[[loom::symbol("lookup"), loom::import("host\"quoted", "lookup\\entry")]]
+unsigned lookup(unsigned value);
+
+"""
+    )
+
+
+@pytest.mark.parametrize("type_name", ["hal.buffer", "hal.buffer_view", "hal.fence"])
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "func.decl @consume(%value: {type_name})",
+        "func.decl @create() -> ({type_name})",
+        "func.def public @identity(%value: {type_name}) -> ({type_name}) {{\n"
+        "  func.return %value : {type_name}\n}}",
+    ],
+)
+def test_rejects_opaque_types_without_a_cpp_carrier(
+    type_name: str, declaration: str
+) -> None:
+    module = load_module(declaration.format(type_name=type_name).encode())
+
+    with pytest.raises(CxxRenderError) as error:
+        render_module(module)
+
+    assert str(error.value) == (
+        f"cannot project module: value type {type_name} has no C++ value spelling"
+    )
+
+
 def test_projects_multiple_function_results_through_a_record() -> None:
     source = """\
 func.def public inline @math.sum_pair(%input: i32) -> (i32) {

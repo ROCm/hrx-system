@@ -145,3 +145,23 @@ def test_reports_invalid_input_without_a_traceback() -> None:
 
     assert exit_code == 2
     assert stderr.getvalue().startswith("loom-export-cxx: error: ")
+
+
+def test_rejects_opaque_signature_without_emitting_partial_cpp() -> None:
+    stdout = io.BytesIO()
+    stderr = io.StringIO()
+
+    exit_code = run(
+        "-",
+        "-",
+        stdin=io.BytesIO(b"func.decl @create() -> (hal.buffer)\n"),
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == 2
+    assert stdout.getvalue() == b""
+    assert stderr.getvalue() == (
+        "loom-export-cxx: error: cannot project module: "
+        "value type hal.buffer has no C++ value spelling\n"
+    )
