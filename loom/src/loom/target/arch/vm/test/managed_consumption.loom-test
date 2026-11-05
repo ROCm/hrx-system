@@ -88,3 +88,27 @@ low.func.def public target<vm.core>(@vm) abi(vm_function) @consume_and_return(%o
   low.func.call @take(%owner) : (reg<vm.ref : ref<@Object>>)
   return %pointer
 }
+
+// ====
+// Moving to storage invalidates an owning or borrowed register identity.
+// RUN: verify
+vm.target<core> @vm
+type.decl import("provider", "object") @Object
+low.func.def public target<vm.core>(@vm) abi(vm_function) @use_after_store(%value: reg<vm.ref : ref<@Object>>) -> (reg<vm.ref : ref<@Object>>) asm {
+  %slot = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
+  low.spill.move %value, %slot : reg<vm.ref : ref<@Object>>, low.storage<private>
+  // ERROR@+1: DOMINANCE/002 {value_name="value", consuming_op="low.spill.move"}
+  return %value
+}
+
+// ====
+// Moving to storage invalidates an owning or borrowed register identity.
+// RUN: verify
+vm.target<core> @vm
+type.decl import("provider", "object") @Object
+low.func.def public target<vm.core>(@vm) abi(vm_function) @use_after_store(%value: reg<vm.ref : ptr<@Object>>) -> (reg<vm.ref : ptr<@Object>>) asm {
+  %slot = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
+  low.spill.move %value, %slot : reg<vm.ref : ptr<@Object>>, low.storage<private>
+  // ERROR@+1: DOMINANCE/002 {value_name="value", consuming_op="low.spill.move"}
+  return %value
+}

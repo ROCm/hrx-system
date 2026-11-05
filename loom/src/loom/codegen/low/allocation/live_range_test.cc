@@ -83,6 +83,30 @@ TEST(LowAllocationLiveRangeTest, ZeroUnitAssignmentsUseWholeAssignmentEnd) {
             5u);
 }
 
+TEST(LowAllocationLiveRangeTest, SparseStorageRetiresIndependentlyOnEachPath) {
+  const uint32_t unit_end_points[] = {12};
+  const loom_liveness_segment_t segments[] = {{2, 5}, {8, 12}};
+  auto assignment = Assignment(1, 0, 2, 12, 0, 1, 1, 0);
+  assignment.liveness_segments = {.start = 0, .count = 2};
+  for (uint32_t point = 0; point <= 13; ++point) {
+    EXPECT_EQ(loom_low_allocation_live_range_assignment_live_at_point(
+                  segments, unit_end_points, 1, &assignment, point),
+              (point >= 2 && point < 5) || (point >= 8 && point < 12))
+        << point;
+  }
+}
+
+TEST(LowAllocationLiveRangeTest, ContinuousStorageIncludesUnitRefinements) {
+  const uint32_t unit_end_points[] = {7, 11};
+  const auto assignment = Assignment(1, 0, 2, 5, 0, 2, 2, 0);
+  for (uint32_t point = 0; point <= 12; ++point) {
+    EXPECT_EQ(loom_low_allocation_live_range_assignment_live_at_point(
+                  nullptr, unit_end_points, 2, &assignment, point),
+              point >= 2 && point < 11)
+        << point;
+  }
+}
+
 TEST(LowAllocationLiveRangeTest, ClassifiesAllocatableIntervals) {
   loom_liveness_interval_t register_interval = {};
   register_interval.value_class.type_kind = LOOM_TYPE_REGISTER;

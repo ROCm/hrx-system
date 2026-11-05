@@ -1,0 +1,152 @@
+// Moving storage transfers preserve their source semantics through aliased
+// views, reordered boundary arguments, and loads with later users.
+// RUN: emit vm-dis
+vm.target<core> @vm
+
+type.decl import("provider", "object") @Object
+
+low.func.decl import(native, "use", module = "provider") target<vm.core>(@vm) abi(vm_function) @use(%value: reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "pair", module = "provider") target<vm.core>(@vm) abi(vm_function) @pair(%left: reg<vm.ref : ptr<@Object>>, %right: reg<vm.ref : ptr<@Object>>)
+
+// Both results read the original cell. The copy precedes its final move even
+// though the return lists the moving result first.
+low.func.def public target<vm.core>(@vm) abi(vm_function) @copy_then_move(%value: reg<vm.ref : ptr<@Object>>) -> (reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>) asm {
+  %slot = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
+  %alias = storage_view %slot {byte_length = 16} : low.storage<private> -> low.storage<private>
+  low.spill.move %value, %slot : reg<vm.ref : ptr<@Object>>, low.storage<private>
+  %copy = low.reload %alias : low.storage<private> -> reg<vm.ref : ptr<@Object>>
+  %moved = low.reload.move %slot : low.storage<private> -> reg<vm.ref : ptr<@Object>>
+  return %moved, %copy
+}
+
+// The second result observes canonical null after the destructive load.
+low.func.def public target<vm.core>(@vm) abi(vm_function) @move_then_copy(%value: reg<vm.ref : ptr<@Object>>) -> (reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>) asm {
+  %slot = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
+  %alias = storage_view %slot {byte_length = 16} : low.storage<private> -> low.storage<private>
+  low.spill.move %value, %slot : reg<vm.ref : ptr<@Object>>, low.storage<private>
+  %moved = low.reload.move %slot : low.storage<private> -> reg<vm.ref : ptr<@Object>>
+  %copy = low.reload %alias : low.storage<private> -> reg<vm.ref : ptr<@Object>>
+  return %moved, %copy
+}
+
+// A moving load with later consumers stays in a register. Earlier copying
+// loads cannot move past its write merely because their sole consumer can.
+low.func.def public target<vm.core>(@vm) abi(vm_function) @live_moved_value(%value: reg<vm.ref : ptr<@Object>>) asm {
+  %slot = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
+  low.spill.move %value, %slot : reg<vm.ref : ptr<@Object>>, low.storage<private>
+  %copy = low.reload %slot : low.storage<private> -> reg<vm.ref : ptr<@Object>>
+  %moved = low.reload.move %slot : low.storage<private> -> reg<vm.ref : ptr<@Object>>
+  low.func.call @pair(%moved, %copy) : (reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.func.call @use(%moved) : (reg<vm.ref : ptr<@Object>>)
+  return
+}
+
+// A different last use on each branch consumes the physical guard on either
+// path, independently of which branch appears last in linear IR order.
+low.func.def public target<vm.core>(@vm) abi(vm_function) @branch(%condition: reg<vm.value : i1>, %value: reg<vm.ref : ptr<@Object>>) asm {
+  low.cond_br %condition, ^left, ^right : reg<vm.value : i1>
+^left:
+  low.func.call @use(%value) : (reg<vm.ref : ptr<@Object>>)
+  return
+^right:
+  low.func.call @use(%value) : (reg<vm.ref : ptr<@Object>>)
+  return
+}
+
+// ----
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "branch"
+    string @string1 = "copy_then_move"
+    string @string2 = "live_moved_value"
+    string @string3 = "move_then_copy"
+    string @string4 = "provider"
+    string @string5 = "object"
+    string @string6 = "provider"
+    string @string7 = "pair"
+    string @string8 = "use"
+  }
+
+  section ref_types alignment(8) {
+    namespace @ref_group0 name(@string4) {
+      ref_type @ref_type0 name(@string5)
+    }
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 (ptr(@ref_type0)) -> ()
+    signature @signature1 (ptr(@ref_type0)) -> (ptr(@ref_type0), ptr(@ref_type0))
+    signature @signature2 (i32, ptr(@ref_type0)) -> ()
+    signature @signature3 (ptr(@ref_type0), ptr(@ref_type0)) -> ()
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+    callable @callable1 flags([]) depth(0) : @signature1
+    callable @callable2 flags([]) depth(0) : @signature2
+    callable @callable3 flags([]) depth(0) : @signature3
+  }
+
+  section imports alignment(8) {
+    group @import_group0 module_name(@string6) {
+      import @import0 name(@string7) flags([]) : @callable3
+      import @import1 name(@string8) flags([]) : @callable0
+    }
+  }
+
+  section exports alignment(8) {
+    export @export0 name(@string0) : @callable2 = @function3
+    export @export1 name(@string1) : @callable1 = @function0
+    export @export2 name(@string2) : @callable0 = @function2
+    export @export3 name(@string3) : @callable1 = @function1
+  }
+
+  section functions alignment(8) {
+    func @function0 : @callable1 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 2, function_registers = 0, local_refs = 1, local_functions = 0) {
+    ^bb0:
+      control.block
+      ref.stack.store.move %r0, #r0
+      %r0 = ref.stack.load.retain #r0
+      %r1 = ref.stack.load.move #r0
+      control.return
+    }
+    func @function1 : @callable1 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 2, function_registers = 0, local_refs = 1, local_functions = 0) {
+    ^bb0:
+      control.block
+      ref.stack.store.move %r0, #r0
+      %r0 = ref.stack.load.move #r0
+      %r1 = ref.stack.load.retain #r0
+      control.return
+    }
+    func @function2 : @callable0 flags([has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 3, function_registers = 0, local_refs = 1, local_functions = 0) {
+    ^bb0:
+      control.block
+      ref.stack.store.move %r0, #r0
+    ^bb1:
+      control.block
+      %r0 = ref.stack.load.retain #r0
+      %r2 = ref.stack.load.move #r0
+      %r1 = ref.move %r0
+      %r0 = ref.retain %r2
+      control.call @import0 {direct_ref_move_mask = 0x0003}
+      %r0 = ref.move %r2
+      control.call @import1 {direct_ref_move_mask = 0x0001}
+      control.return
+    }
+    func @function3 : @callable2 flags([has_call]) frame(local_bytes = 0, value_registers = 1, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      control.branch.unless.s32 %v0, ^bb2
+    ^bb1:
+      control.block
+      control.call @import1 {direct_ref_move_mask = 0x0001}
+      control.return
+    ^bb2:
+      control.block
+      control.call @import1 {direct_ref_move_mask = 0x0001}
+      control.return
+    }
+  }
+
+}

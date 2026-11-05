@@ -7,6 +7,7 @@
 #include "loom/codegen/low/function.h"
 
 #include "loom/ops/low/ops.h"
+#include "loom/ops/low/storage.h"
 
 bool loom_low_function_def_isa(const loom_op_t* op) {
   return loom_low_func_def_isa(op) || loom_low_kernel_def_isa(op);
@@ -89,7 +90,8 @@ bool loom_low_function_entry_preamble_op(const loom_op_t* op) {
 }
 
 bool loom_low_function_entry_traffic_op(const loom_op_t* op) {
-  return loom_low_function_entry_preamble_op(op) || loom_low_spill_isa(op);
+  return loom_low_function_entry_preamble_op(op) ||
+         loom_low_storage_store_isa(op);
 }
 
 iree_status_t loom_low_function_materialize_schedule(

@@ -203,6 +203,7 @@ static void loom_op_record_operand_ownership(loom_module_t* module,
       case LOOM_OPERAND_OWNERSHIP_CONSUME:
       case LOOM_OPERAND_OWNERSHIP_RELEASE:
       case LOOM_OPERAND_OWNERSHIP_DISCARD:
+      case LOOM_OPERAND_OWNERSHIP_MOVE:
       case LOOM_OPERAND_OWNERSHIP_ESCAPE: {
         for (uint16_t i = 0; i < count; ++i) {
           loom_op_mark_operand_ownership(module, op, start + i,

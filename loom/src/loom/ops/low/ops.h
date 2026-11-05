@@ -56,7 +56,9 @@ enum {
   LOOM_OP_LOW_FUNC_EXIT = LOOM_OP_KIND(LOOM_DIALECT_LOW, 32),
   LOOM_OP_LOW_UNREACHABLE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 33),
   LOOM_OP_LOW_BR_IDENTITY = LOOM_OP_KIND(LOOM_DIALECT_LOW, 34),
-  LOOM_OP_LOW_COUNT_ = 35,
+  LOOM_OP_LOW_SPILL_MOVE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 35),
+  LOOM_OP_LOW_RELOAD_MOVE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 36),
+  LOOM_OP_LOW_COUNT_ = 37,
 };
 
 // Symbol visibility. Absent (0) means private (module-internal).
@@ -984,6 +986,40 @@ iree_status_t loom_low_br_identity_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_low_br_identity_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_SPILL_MOVE: Transfer a register value into low storage, invalidating the source register value. Managed carriers move without retaining and clear their source; scalar carriers need no physical clearing.
+// low.spill.move %value, %slot : reg<amdgpu.vgpr x4>, low.storage<private>
+LOOM_DEFINE_ISA(loom_low_spill_move_isa, LOOM_OP_LOW_SPILL_MOVE)
+LOOM_DEFINE_OPERAND(loom_low_spill_move_value, 0)
+LOOM_DEFINE_OPERAND(loom_low_spill_move_storage, 1)
+LOOM_DEFINE_ATTR_I64(loom_low_spill_move_offset, 0)
+iree_status_t loom_low_spill_move_build(
+    loom_builder_t* builder,
+    loom_value_id_t value,
+    loom_value_id_t storage,
+    int64_t offset,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_spill_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_RELOAD_MOVE: Transfer a stored value into a register, ending the stored value's lifetime. Managed storage becomes canonical null; scalar storage is unspecified until rewritten.
+// %value = low.reload.move %slot : low.storage<private> -> reg<amdgpu.vgpr x4>
+LOOM_DEFINE_ISA(loom_low_reload_move_isa, LOOM_OP_LOW_RELOAD_MOVE)
+LOOM_DEFINE_OPERAND(loom_low_reload_move_storage, 0)
+LOOM_DEFINE_RESULT(loom_low_reload_move_result, 0)
+LOOM_DEFINE_ATTR_I64(loom_low_reload_move_offset, 0)
+iree_status_t loom_low_reload_move_build(
+    loom_builder_t* builder,
+    loom_may_consume loom_value_id_t storage,
+    int64_t offset,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_reload_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 

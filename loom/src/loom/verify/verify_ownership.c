@@ -417,8 +417,15 @@ iree_status_t loom_verify_tied_results(loom_verify_state_t* state,
   return iree_ok_status();
 }
 
-iree_status_t loom_verify_moved_results(loom_verify_state_t* state,
-                                        const loom_op_t* op) {
+iree_status_t loom_verify_moves(loom_verify_state_t* state,
+                                const loom_op_t* op) {
+  for (uint16_t i = 0; i < op->operand_count; ++i) {
+    loom_ownership_operand_effect_t effect = {0};
+    if (loom_ownership_operand_effect_at(state->module, op, i, &effect) &&
+        effect.effect == LOOM_OPERAND_OWNERSHIP_MOVE) {
+      IREE_RETURN_IF_ERROR(loom_verify_consumption_record(state, op, i));
+    }
+  }
   for (uint16_t i = 0; i < op->result_count; ++i) {
     loom_ownership_result_effect_t effect = {0};
     if (!loom_ownership_result_effect_at(state->module, op, i, &effect) ||

@@ -16,6 +16,7 @@
 #include "loom/ir/context.h"
 #include "loom/ops/global/ops.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/low/storage.h"
 #include "loom/target/arch/vm/descriptors/descriptors.h"
 
 // Branch displacement fields are patched after the single emission walk. Dense
@@ -354,6 +355,14 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_vm_function_return(
     }
     scratch->moves[direct_count] =
         (loom_low_move_t){.source = source, .destination = source};
+    if (assignment->location_kind == LOOM_LOW_ALLOCATION_LOCATION_STORAGE) {
+      const loom_low_storage_transport_t* transport =
+          frame->allocation.storage_transport;
+      if (transport->bindings[transport->bindings_by_value_ordinal[ordinals[i]]]
+              .moves_source) {
+        scratch->moves[direct_count].kind = LOOM_LOW_MOVE_KIND_TRANSFER;
+      }
+    }
     scratch->moves[direct_count].destination.location_kind =
         LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
     scratch->moves[direct_count++].destination.location = ordinal;
@@ -607,12 +616,11 @@ static iree_status_t loom_vm_function_storage(
     const loom_low_emission_frame_t* frame,
     const loom_low_schedule_node_t* node,
     const loom_vm_function_storage_t* storage, iree_io_stream_t* stream) {
-  const bool is_store = loom_low_spill_isa(node->op);
-  const loom_value_id_t storage_value = is_store
-                                            ? loom_low_spill_storage(node->op)
-                                            : loom_low_reload_storage(node->op);
-  const uint64_t relative_offset = is_store ? loom_low_spill_offset(node->op)
-                                            : loom_low_reload_offset(node->op);
+  const bool is_store = loom_low_storage_store_isa(node->op);
+  const loom_value_id_t storage_value =
+      is_store ? loom_low_storage_store_storage(node->op)
+               : loom_low_storage_load_storage(node->op);
+  const uint64_t relative_offset = loom_low_storage_transfer_offset(node->op);
   const loom_low_storage_layout_t* layout =
       &frame->schedule.requirements.storage_layout;
   loom_low_storage_layout_reference_t reference;
@@ -654,12 +662,14 @@ static iree_status_t loom_vm_function_storage(
           IREE_STATUS_INVALID_ARGUMENT,
           "VM reference storage requires cell-aligned offsets");
     }
-    // A storage cell owns its reference until overwritten or the frame unwinds.
-    // Reloads retain that owner, allowing multiple loads and aliased results.
+    const bool moves = loom_low_storage_transfer_moves(node->op);
+    // Copying transfers preserve the source; moving transfers clear it.
     return loom_vm_function_transfer_refs(
         stream,
-        is_store ? IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_RETAIN
-                 : IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_RETAIN,
+        is_store ? (moves ? IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_MOVE
+                          : IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_RETAIN)
+                 : (moves ? IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_MOVE
+                          : IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_RETAIN),
         (uint16_t)(storage->packet_ref_count + byte_offset / cell_bytes),
         (uint16_t)assignment->location_base,
         (uint16_t)assignment->location_count);
@@ -984,8 +994,8 @@ iree_status_t loom_vm_function_plan_write(
       } else if (loom_low_storage_reserve_isa(node->op) ||
                  loom_low_storage_view_isa(node->op)) {
         // Storage layout is already fixed by the shared scheduler.
-      } else if (loom_low_spill_isa(node->op) ||
-                 loom_low_reload_isa(node->op)) {
+      } else if (loom_low_storage_store_isa(node->op) ||
+                 loom_low_storage_load_isa(node->op)) {
         status = loom_vm_function_storage(&frame, node, &storage, stream);
       } else if (loom_low_return_isa(node->op)) {
         status = loom_vm_function_return(&frame, node, &return_scratch,

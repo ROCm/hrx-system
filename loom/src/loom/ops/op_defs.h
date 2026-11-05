@@ -369,6 +369,8 @@ enum loom_operand_ownership_effect_e {
   LOOM_OPERAND_OWNERSHIP_DISCARD = 5,
   // Operand resource escapes to an untracked owner.
   LOOM_OPERAND_OWNERSHIP_ESCAPE = 6,
+  // Transfers the exact owned or borrowed state and invalidates the source.
+  LOOM_OPERAND_OWNERSHIP_MOVE = 7,
 };
 typedef uint8_t loom_operand_ownership_effect_t;
 

@@ -85,6 +85,7 @@ OPERAND_OWNERSHIP_EFFECT_MAP: dict[OperandOwnershipEffectKind, str] = {
     OperandOwnershipEffectKind.RELEASE: "LOOM_OPERAND_OWNERSHIP_RELEASE",
     OperandOwnershipEffectKind.DISCARD: "LOOM_OPERAND_OWNERSHIP_DISCARD",
     OperandOwnershipEffectKind.ESCAPE: "LOOM_OPERAND_OWNERSHIP_ESCAPE",
+    OperandOwnershipEffectKind.MOVE: "LOOM_OPERAND_OWNERSHIP_MOVE",
 }
 
 OPERAND_ROLE_MAP: dict[OperandRole, str] = {

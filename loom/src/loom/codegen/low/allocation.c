@@ -442,16 +442,21 @@ loom_low_allocation_append_boundary_moves(
                                 loom_type_is_reference(*value_type) &&
                                 loom_type_reference_ownership(*value_type) ==
                                     LOOM_REFERENCE_OWNERSHIP_OWNED;
-    // A folded reload names persistent storage, not the reloaded SSA value's
-    // temporary carrier. Its last use cannot consume the backing cell: another
-    // reload may observe that cell after this boundary.
+    // A copying reload leaves its backing cell alive independently of the
+    // loaded SSA value. A moving reload carries an explicit consuming transfer.
+    const loom_low_storage_transport_t* transport =
+        state->options->storage_transport;
     const bool consume_source =
         from_abi ||
-        (assignment->location_kind != LOOM_LOW_ALLOCATION_LOCATION_STORAGE &&
-         (consumes_owner ||
-          loom_low_allocation_live_range_assignment_max_unit_end_point(
-              state->unit_liveness.end_points, state->unit_liveness.point_count,
-              assignment) <= point));
+        (assignment->location_kind == LOOM_LOW_ALLOCATION_LOCATION_STORAGE
+             ? transport
+                   ->bindings[transport->bindings_by_value_ordinal[ordinals[i]]]
+                   .moves_source
+             : (consumes_owner ||
+                !loom_low_allocation_live_range_assignment_live_at_point(
+                    state->unit_liveness.storage_segments.entries,
+                    state->unit_liveness.end_points,
+                    state->unit_liveness.point_count, assignment, point)));
     loom_low_allocation_move_plan_append_assignment(
         &state->move_plan, from_abi ? &boundary : assignment, 0,
         from_abi ? assignment : &boundary, 0, assignment->location_count,

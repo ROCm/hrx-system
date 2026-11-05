@@ -1671,6 +1671,7 @@ class OperandOwnershipEffectKind(Enum):
     RELEASE = "release"
     DISCARD = "discard"
     ESCAPE = "escape"
+    MOVE = "move"
 
 
 @unique
@@ -1752,6 +1753,11 @@ def Escape(
 ) -> OperandOwnershipEffect:
     """Operand resource escapes to an untracked owner."""
     return OperandOwnershipEffect(operand, OperandOwnershipEffectKind.ESCAPE, carrier)
+
+
+def Move(operand: str) -> OperandOwnershipEffect:
+    """Transfer a value's exact owned or borrowed state, invalidating the source."""
+    return OperandOwnershipEffect(operand, OperandOwnershipEffectKind.MOVE)
 
 
 def FreshResult(result: str) -> ResultOwnershipEffect:

@@ -496,6 +496,7 @@ loom_cc_library(
     hdrs = ["spill_plan.h"],
     deps = [
         ":assignment",
+        ":live_range",
         ":spill_storage",
         ":table",
         "//loom/src/loom/analysis:liveness",

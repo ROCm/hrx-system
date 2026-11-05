@@ -96,6 +96,7 @@ from loom.dsl import (
     ImplicitTerminator,
     IterArgsMatchResults,
     LoopLikeInterface,
+    Move,
     MovedResult,
     NoAncestor,
     Op,
@@ -1725,6 +1726,54 @@ low_reload = Op(
     ],
 )
 
+# Destructive storage transfers preserve a logical value while moving its
+# physical carrier. Ordinary spill/reload operations preserve their source.
+low_spill_move = Op(
+    "low.spill.move",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Transfer a register value into low storage, invalidating the source register value. Managed carriers move without retaining and clear their source; scalar carriers need no physical clearing."
+    ),
+    operands=[Operand("value", REGISTER), Operand("storage", STORAGE)],
+    attrs=[AttrDef("offset", ATTR_TYPE_I64, default=0, elide_default=True)],
+    traits=[UNKNOWN_EFFECTS],
+    ownership_effects=[Move("value")],
+    verify="loom_low_spill_verify",
+    format=[
+        Ref("value"),
+        COMMA,
+        Ref("storage"),
+        AttrDict(),
+        COLON,
+        TypeOf("value"),
+        COMMA,
+        TypeOf("storage"),
+    ],
+    examples=["low.spill.move %value, %slot : reg<amdgpu.vgpr x4>, low.storage<private>"],
+)
+
+low_reload_move = Op(
+    "low.reload.move",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Transfer a stored value into a register, ending the stored value's lifetime. Managed storage becomes canonical null; scalar storage is unspecified until rewritten."),
+    operands=[Operand("storage", STORAGE)],
+    attrs=[AttrDef("offset", ATTR_TYPE_I64, default=0, elide_default=True)],
+    results=[Result("result", REGISTER)],
+    traits=[UNKNOWN_EFFECTS],
+    verify="loom_low_reload_verify",
+    format=[
+        Ref("storage"),
+        AttrDict(),
+        COLON,
+        TypeOf("storage"),
+        ARROW,
+        ResultType("result"),
+    ],
+    examples=["%value = low.reload.move %slot : low.storage<private> -> reg<amdgpu.vgpr x4>"],
+)
+
 # ============================================================================
 # low.storage.address — materialize a storage address
 # ============================================================================
@@ -2001,4 +2050,6 @@ ALL_LOW_OPS: tuple[Op, ...] = (
     low_unreachable,
     # Appended to preserve every existing serialized Low operation ordinal.
     low_br_identity,
+    low_spill_move,
+    low_reload_move,
 )

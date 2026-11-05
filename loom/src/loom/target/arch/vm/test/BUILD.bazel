@@ -43,6 +43,7 @@ loom_check_test_suite(
         "native_references.loom-test",
         "reference_transfers.loom-test",
         "storage.loom-test",
+        "storage_transfers.loom-test",
     ],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/emit:vm_binary",

@@ -15,6 +15,7 @@
 #include "loom/ops/function_contract_verify.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/low/schedule_scope.h"
+#include "loom/ops/low/storage.h"
 #include "loom/ops/successor_verify.h"
 #include "loom/target/registers.h"
 #include "loom/util/stable_id.h"
@@ -1590,7 +1591,8 @@ iree_status_t loom_low_spill_verify(const loom_module_t* module,
                                     const loom_op_t* op,
                                     iree_diagnostic_emitter_t emitter) {
   return loom_low_verify_storage_use(
-      module, op, loom_low_spill_storage(op), 1, loom_low_spill_offset(op),
+      module, op, loom_low_storage_store_storage(op), 1,
+      loom_low_storage_transfer_offset(op),
       loom_low_spill_offset_diagnostic_ref(), emitter);
 }
 
@@ -1598,7 +1600,8 @@ iree_status_t loom_low_reload_verify(const loom_module_t* module,
                                      const loom_op_t* op,
                                      iree_diagnostic_emitter_t emitter) {
   return loom_low_verify_storage_use(
-      module, op, loom_low_reload_storage(op), 0, loom_low_reload_offset(op),
+      module, op, loom_low_storage_load_storage(op), 0,
+      loom_low_storage_transfer_offset(op),
       loom_low_reload_offset_diagnostic_ref(), emitter);
 }
 

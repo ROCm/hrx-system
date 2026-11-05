@@ -100,7 +100,9 @@ typedef enum loom_low_spill_materialization_action_kind_e {
 // target stable occurrences instead of rediscovering uses from rewritten IR.
 typedef struct loom_low_spill_materialization_action_t {
   // Action kind selecting the active union member.
-  loom_low_spill_materialization_action_kind_t kind;
+  uint8_t kind;
+  // True when this transfer invalidates its source carrier.
+  bool moves_source;
   // Index of the spill plan whose storage this action reads or writes.
   uint32_t spill_plan_index;
   union {
@@ -226,6 +228,8 @@ typedef enum loom_low_spill_materialization_traffic_kind_e {
 typedef struct loom_low_spill_materialization_traffic_t {
   // Store or reload traffic for the reported action.
   loom_low_spill_materialization_traffic_kind_t kind;
+  // True when the retained plan transfers rather than copies the carrier.
+  bool moves_source;
   // Complete register value transferred by the action.
   loom_type_t value_type;
   // Byte offset within the action's spill slot.

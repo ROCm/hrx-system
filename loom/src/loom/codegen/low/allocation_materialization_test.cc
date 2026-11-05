@@ -149,6 +149,7 @@ low.func.def target<test.low.core>(@test_target) @stale_slice_plan(%wide: reg<te
   loom_low_allocation_table_t table = {
       .module = module.get(),
       .function_op = function_op,
+      .target = {.descriptor_set = loom_test_low_core_descriptor_set()},
   };
   const loom_region_t* body = loom_low_func_def_body(function_op);
   IREE_ASSERT_OK(

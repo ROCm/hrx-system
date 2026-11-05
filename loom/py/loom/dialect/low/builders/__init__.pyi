@@ -407,3 +407,22 @@ class LowBuilder(DialectBuilder):
         args: list[ValueRef] = ...,
         location_id: int | None = ...,
     ) -> None: ...
+    def spill_move(
+        self,
+        *,
+        value: ValueRef,
+        storage: ValueRef,
+        offset: int,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def reload_move(
+        self,
+        *,
+        storage: ValueRef,
+        offset: int,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...

@@ -387,6 +387,8 @@ static iree_string_view_t loom_ownership_lifetime_operand_effect_name(
       return IREE_SV("discard");
     case LOOM_OPERAND_OWNERSHIP_ESCAPE:
       return IREE_SV("escape");
+    case LOOM_OPERAND_OWNERSHIP_MOVE:
+      return IREE_SV("move");
     case LOOM_OPERAND_OWNERSHIP_NONE:
       return IREE_SV("none");
   }
@@ -768,6 +770,23 @@ static iree_status_t loom_ownership_lifetime_apply_operand_effect(
     case LOOM_OPERAND_OWNERSHIP_ESCAPE:
       return loom_ownership_lifetime_apply_owned_consume(state, bits, op,
                                                          effect);
+    case LOOM_OPERAND_OWNERSHIP_MOVE: {
+      const loom_value_ordinal_t ordinal =
+          loom_ownership_lifetime_try_ordinal(state, effect->value_id);
+      if (ordinal == LOOM_VALUE_ORDINAL_INVALID) {
+        return iree_ok_status();
+      }
+      if (loom_ownership_lifetime_state_bits_get(bits, ordinal) ==
+              LOOM_OWNERSHIP_LIFETIME_VALUE_UNKNOWN &&
+          loom_ownership_lifetime_value_ever_seen(state, ordinal)) {
+        return loom_ownership_lifetime_emit_use_after_consume(
+            state, op, effect->operand_index, effect->value_id);
+      }
+      loom_ownership_lifetime_state_bits_set(
+          bits, ordinal, LOOM_OWNERSHIP_LIFETIME_VALUE_UNKNOWN);
+      loom_ownership_lifetime_mark_ever_seen(state, ordinal);
+      return iree_ok_status();
+    }
     case LOOM_OPERAND_OWNERSHIP_NONE:
       return iree_ok_status();
   }

@@ -14,6 +14,7 @@
 #include "loom/error/x86_error_catalog.h"
 #include "loom/ir/context.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/low/storage.h"
 #include "loom/target/arch/x86/register_classes.h"
 #include "loom/target/emit/native/x86/transport.h"
 
@@ -971,15 +972,14 @@ static iree_status_t loom_x86_function_storage(
     loom_x86_function_builder_t* builder) {
   const loom_op_t* op = packet->node->op;
   const bool is_address = loom_low_storage_address_isa(op);
-  const bool is_store = loom_low_spill_isa(op);
+  const bool is_store = loom_low_storage_store_isa(op);
   const loom_value_id_t storage_value =
       is_address ? loom_low_storage_address_storage(op)
-                 : (is_store ? loom_low_spill_storage(op)
-                             : loom_low_reload_storage(op));
-  const uint64_t relative_offset =
-      is_address
-          ? loom_low_storage_address_offset(op)
-          : (is_store ? loom_low_spill_offset(op) : loom_low_reload_offset(op));
+                 : (is_store ? loom_low_storage_store_storage(op)
+                             : loom_low_storage_load_storage(op));
+  const uint64_t relative_offset = is_address
+                                       ? loom_low_storage_address_offset(op)
+                                       : loom_low_storage_transfer_offset(op);
   const loom_low_storage_layout_t* layout =
       &frame->schedule.requirements.storage_layout;
   loom_low_storage_layout_reference_t reference;
@@ -1065,7 +1065,8 @@ static iree_status_t loom_x86_function_structural(
       loom_low_storage_view_isa(node->op)) {
     return iree_ok_status();
   }
-  if (loom_low_spill_isa(node->op) || loom_low_reload_isa(node->op) ||
+  if (loom_low_storage_store_isa(node->op) ||
+      loom_low_storage_load_isa(node->op) ||
       loom_low_storage_address_isa(node->op)) {
     return loom_x86_function_storage(frame, packet, builder);
   }

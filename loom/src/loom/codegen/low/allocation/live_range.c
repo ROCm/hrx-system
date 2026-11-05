@@ -112,6 +112,20 @@ uint32_t loom_low_allocation_live_range_assignment_max_unit_end_point(
   return end_point;
 }
 
+bool loom_low_allocation_live_range_assignment_live_at_point(
+    const loom_liveness_segment_t* storage_segments,
+    const uint32_t* unit_end_points, iree_host_size_t unit_point_count,
+    const loom_low_allocation_assignment_t* assignment, uint32_t point) {
+  if (point < assignment->start_point ||
+      (assignment->liveness_segments.count != 0 &&
+       !loom_liveness_segment_range_contains(
+           storage_segments, assignment->liveness_segments, point))) {
+    return false;
+  }
+  return loom_low_allocation_live_range_assignment_max_unit_end_point(
+             unit_end_points, unit_point_count, assignment) > point;
+}
+
 static bool loom_low_allocation_value_list_contains(
     const loom_value_id_t* values, iree_host_size_t count,
     loom_value_id_t value_id) {
