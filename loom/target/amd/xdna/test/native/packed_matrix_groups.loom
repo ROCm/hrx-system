@@ -1,0 +1,142 @@
+// Two groups per operand cross the FIFO refill boundary. The first and last
+// matrix in each group expose both boundary positions without retaining every
+// intermediate matrix. Inputs use signed mantissas and distinct row exponents.
+// The target fragment stores RHS rows as output columns (the native A * B^T).
+kernel.def @packed_matrix_groups() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input_arg: buffer, %output_arg: buffer) {
+  %input, %output = buffer.assume.alignment %input_arg, %output_arg {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %right_offset = index.constant 1152 : offset
+  %extent = index.constant 8 : index
+  %blocks = index.constant 16 : index
+  %schema = encoding.define #encoding.operand<element_format=bfp16ebs8, payload_elements=64, payload_packing=target_fragment, payload_registers=18, rounding=flush_subnormal> : encoding<schema>
+  %left_view = buffer.view %input[%origin] : buffer -> view<1152xi8>
+  %right_view = buffer.view %input[%right_offset] : buffer -> view<1152xi8>
+  %left_bytes = vector.load %left_view[0] : view<1152xi8> -> vector<1152xi8>
+  %left = vector.fragment<lhs> %left_bytes shape [blocks(%blocks), %extent, %extent] using {schema = %schema : encoding<schema>} : vector<1152xi8>
+  %right_bytes = vector.load %right_view[0] : view<1152xi8> -> vector<1152xi8>
+  %right = vector.fragment<rhs> %right_bytes shape [blocks(%blocks), %extent, %extent] using {schema = %schema : encoding<schema>} : vector<1152xi8>
+  %initial = vector.splatf 0.0 : vector<64xf32>
+  %acc0 = vector.fragment<init> %initial shape [%extent, %extent] : vector<64xf32>
+  %left_bytes1 = vector.slice %left[0] : vector<1152xi8> -> vector<72xi8>
+  %right_bytes1 = vector.slice %right[0] : vector<1152xi8> -> vector<72xi8>
+  %left1 = vector.fragment<lhs> %left_bytes1 shape [%extent, %extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %right1 = vector.fragment<rhs> %right_bytes1 shape [%extent, %extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %acc1 = vector.mma %left1, %right1, %acc0 : vector<72xi8>, vector<72xi8>, vector<64xf32>
+  %left_bytes2 = vector.slice %left[504] : vector<1152xi8> -> vector<72xi8>
+  %right_bytes2 = vector.slice %right[504] : vector<1152xi8> -> vector<72xi8>
+  %left2 = vector.fragment<lhs> %left_bytes2 shape [%extent, %extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %right2 = vector.fragment<rhs> %right_bytes2 shape [%extent, %extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %acc2 = vector.mma %left2, %right2, %acc1 : vector<72xi8>, vector<72xi8>, vector<64xf32>
+  %left_bytes3 = vector.slice %left[576] : vector<1152xi8> -> vector<72xi8>
+  %right_bytes3 = vector.slice %right[576] : vector<1152xi8> -> vector<72xi8>
+  %left3 = vector.fragment<lhs> %left_bytes3 shape [%extent, %extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %right3 = vector.fragment<rhs> %right_bytes3 shape [%extent, %extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %acc3 = vector.mma %left3, %right3, %acc2 : vector<72xi8>, vector<72xi8>, vector<64xf32>
+  %left_bytes4 = vector.slice %left[1080] : vector<1152xi8> -> vector<72xi8>
+  %right_bytes4 = vector.slice %right[1080] : vector<1152xi8> -> vector<72xi8>
+  %left4 = vector.fragment<lhs> %left_bytes4 shape [%extent, %extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %right4 = vector.fragment<rhs> %right_bytes4 shape [%extent, %extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %acc4 = vector.mma %left4, %right4, %acc3 : vector<72xi8>, vector<72xi8>, vector<64xf32>
+  %destination = buffer.view %output[%origin] : buffer -> view<8x8xf32>
+  vector.fragment.store<result> %acc4, %destination[0, 0] shape [%extent, %extent] : vector<64xf32>, view<8x8xf32>
+  kernel.return
+}
+
+// For these finite inputs, exponent 133 represents integer mantissas exactly.
+// Alternating exponents 133..135 distinguish all eight row exponent bytes.
+func.def @set_packed_exponents(%input: buffer) {
+  %origin = index.constant 0 : offset
+  %bytes = buffer.view %input[%origin] : buffer -> view<2304xi8>
+  %begin = index.constant 0 : index
+  %end = index.constant 256 : index
+  %step = index.constant 1 : index
+  %record_bytes = index.constant 9 : index
+  %period = index.constant 3 : index
+  %bias = index.constant 133 : index
+  scf.for %record = [%begin to %end step %step] {
+    %position = index.mul %record, %record_bytes : index
+    %phase = index.rem %record, %period : index
+    %exponent = index.add %phase, %bias : index
+    %value = index.cast %exponent : index to i8
+    view.store %value, %bytes[%position] : i8, view<2304xi8>
+  }
+  func.return
+}
+
+// Independent scalar decoding: a signed mantissa times 2^(exponent - 133).
+// The reference consumes ordinary bytes and contains no fragment operations.
+func.def inline @decode_packed_element(%input: buffer, %matrix_base: index, %row: index, %column: index) -> (f32) {
+  %origin = index.constant 0 : offset
+  %bytes = buffer.view %input[%origin] : buffer -> view<2304xi8>
+  %record_bytes = index.constant 9 : index
+  %payload_start = index.constant 1 : index
+  %row_offset = index.mul %row, %record_bytes : index
+  %exponent_position = index.add %matrix_base, %row_offset : index
+  %mantissa_base = index.add %exponent_position, %payload_start : index
+  %mantissa_position = index.add %mantissa_base, %column : index
+  %exponent_byte = view.load %bytes[%exponent_position] : view<2304xi8> -> i8
+  %mantissa_byte = view.load %bytes[%mantissa_position] : view<2304xi8> -> i8
+  %exponent = scalar.extui %exponent_byte : i8 to i32
+  %mantissa = scalar.extsi %mantissa_byte : i8 to i32
+  %bias = scalar.constant 133 : i32
+  %shift = scalar.subi %exponent, %bias : i32
+  %integer = scalar.shli %mantissa, %shift : i32
+  %value = scalar.sitofp %integer : i32 to f32
+  func.return %value : f32
+}
+
+func.def @packed_matrix_groups_reference(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %destination = buffer.view %output[%origin] : buffer -> view<8x8xf32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %extent = index.constant 8 : index
+  %selected_count = index.constant 4 : index
+  %edges_per_group = index.constant 2 : index
+  %last_matrix = index.constant 7 : index
+  %matrix_bytes = index.constant 72 : index
+  %right_offset = index.constant 1152 : index
+  %initial = scalar.constant 0.0 : f32
+  scf.for %row = [%begin to %extent step %step] {
+    scf.for %column = [%begin to %extent step %step] {
+      %sum = scf.for %selected = [%begin to %selected_count step %step](%acc = %initial : f32) -> (f32) {
+        %group = index.div %selected, %edges_per_group : index
+        %edge = index.rem %selected, %edges_per_group : index
+        %group_first = index.mul %group, %extent : index
+        %edge_offset = index.mul %edge, %last_matrix : index
+        %matrix = index.add %group_first, %edge_offset : index
+        %left_base = index.mul %matrix, %matrix_bytes : index
+        %right_base = index.add %left_base, %right_offset : index
+        %next = scf.for %inner = [%begin to %extent step %step](%partial = %acc : f32) -> (f32) {
+          %left = func.call @decode_packed_element(%input, %left_base, %row, %inner) : (buffer, index, index, index) -> (f32)
+          %right = func.call @decode_packed_element(%input, %right_base, %column, %inner) : (buffer, index, index, index) -> (f32)
+          %product = scalar.mulf %left, %right : f32
+          %updated = scalar.addf %partial, %product : f32
+          scf.yield %updated : f32
+        }
+        scf.yield %next : f32
+      }
+      view.store %sum, %destination[%row, %column] : f32, view<8x8xf32>
+    }
+  }
+  func.return
+}
+
+check.scenario @packed_group_boundaries {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-16 to 16) : tensor<2432xi8>
+    %input = check.tensor.view %input_storage offset(64) : tensor<2432xi8> -> tensor<2304xi8>
+    check.generate<@set_packed_exponents>(%input) : (tensor<2304xi8>) -> ()
+    %output_storage = check.generate.fill value(-8192.0) : tensor<96xf32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<96xf32> -> tensor<64xf32>
+    check.compare<@packed_matrix_groups, @packed_matrix_groups_reference>(%input, %output) : (tensor<2304xi8>, tensor<64xf32>) -> () {
+      check.expect.bitwise actual(%input_storage) expected(%input_storage) : tensor<2432xi8>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<96xf32>
+    }
+  }
+  check.return
+}

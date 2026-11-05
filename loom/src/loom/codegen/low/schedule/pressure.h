@@ -388,6 +388,9 @@ enum loom_low_schedule_candidate_flag_bits_e {
   // Candidate produces a private value whose per-user placement was retained
   // before allocation repair materialized any spill traffic.
   LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_RETAINS_PRE_SPILL_PLACEMENT = 1u << 14,
+  // Candidate fills required storage without advancing the selected
+  // completion that can release storage in that same physical domain.
+  LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_CONSUMES_COMPLETION_HEADROOM = 1u << 15,
   // Candidate opens required storage above a spillable bank's capacity.
   // Other live values can still spill, so this is pressure debt, not proof
   // that the candidate's mandatory physical footprint cannot fit.
@@ -415,7 +418,7 @@ enum loom_low_schedule_candidate_flag_bits_e {
       LOOM_LOW_SCHEDULE_NODE_FLAG_DESCRIPTOR_SETUP,
 };
 static_assert(
-    LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_RETAINS_PRE_SPILL_PLACEMENT <= UINT16_MAX,
+    LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_CONSUMES_COMPLETION_HEADROOM <= UINT16_MAX,
     "candidate flags must fit in loom_low_schedule_candidate_score_t");
 static_assert(
     (LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_TRANSPARENT << 1u) ==

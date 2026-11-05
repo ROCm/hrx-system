@@ -1396,6 +1396,51 @@ def _derive_accumulator_quarter_adapters(
     )
 
 
+BFP_STORAGE_FIELDS = (
+    ("mantissas", ("sub_bfp16_x",), ("OP_mMvBMXDst",)),
+    ("exponents_low32", ("sub_bfp16_e", "sub_lo_exp"), ("OP_mElm",)),
+    ("exponents_high32", ("sub_bfp16_e", "sub_hi_exp"), ("OP_mEhm",)),
+)
+
+
+def _derive_bfp_storage_adapters(
+    source_adapters: tuple[RegisterAdapter, ...],
+    register_classes: tuple[RegisterClass, ...],
+    physical_registers: tuple[PhysicalRegister, ...],
+) -> tuple[RegisterAdapter, ...]:
+    """Projects EX mantissas and exponent words into native operand fields."""
+
+    classes = {row.name: row for row in register_classes}
+    registers = {row.name: row for row in physical_registers}
+    adapters = {row.name: row for row in source_adapters}
+    result = []
+    for component, path, adapter_names in BFP_STORAGE_FIELDS:
+        projected_registers = []
+        for name in classes["mEXa"].candidates:
+            selected = name
+            for index in path:
+                register = registers[selected]
+                selected = dict(
+                    zip(
+                        register.subregister_indices, register.subregisters, strict=True
+                    )
+                )[index]
+            projected_registers.append((name, selected))
+        for adapter_name in adapter_names:
+            encodings = dict(adapters[adapter_name].effective_register_encodings)
+            result.append(
+                RegisterAdapter(
+                    name=f"LOOM_mEXa_{component}_{adapter_name}",
+                    register_class="mEXa",
+                    register_encodings=tuple(
+                        (name, encodings[selected])
+                        for name, selected in projected_registers
+                    ),
+                )
+            )
+    return tuple(result)
+
+
 def _derive_fifo_storage_adapters(
     source_adapters: tuple[RegisterAdapter, ...],
     register_classes: tuple[RegisterClass, ...],
@@ -1540,6 +1585,11 @@ _REGISTER_ADAPTERS = (
         _PHYSICAL_REGISTERS,
     ),
     *_derive_fifo_storage_adapters(
+        _SOURCE_REGISTER_ADAPTERS,
+        _REGISTER_CLASSES,
+        _PHYSICAL_REGISTERS,
+    ),
+    *_derive_bfp_storage_adapters(
         _SOURCE_REGISTER_ADAPTERS,
         _REGISTER_CLASSES,
         _PHYSICAL_REGISTERS,

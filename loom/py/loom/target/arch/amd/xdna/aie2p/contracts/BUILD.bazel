@@ -68,6 +68,21 @@ iree_py_library(
 )
 
 iree_py_test(
+    name = "bfp_test",
+    size = "small",
+    srcs = [
+        "bfp_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.amd.xdna.aie2p.contracts.bfp_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":contracts",
+        "//loom/py/loom/target/contracts",
+    ],
+)
+
+iree_py_test(
     name = "integer_shift_test",
     size = "small",
     srcs = [

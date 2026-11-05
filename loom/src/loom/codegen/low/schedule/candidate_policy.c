@@ -466,6 +466,32 @@ bool loom_low_schedule_candidate_score_less(
       loom_low_schedule_candidate_defers_materialization(compare_mode, lhs);
   const bool rhs_defers_materialization =
       loom_low_schedule_candidate_defers_materialization(compare_mode, rhs);
+  const bool lhs_consumes_completion_headroom = iree_any_bit_set(
+      lhs->flags,
+      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_CONSUMES_COMPLETION_HEADROOM);
+  const bool rhs_consumes_completion_headroom = iree_any_bit_set(
+      rhs->flags,
+      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_CONSUMES_COMPLETION_HEADROOM);
+  if (lhs_consumes_completion_headroom != rhs_consumes_completion_headroom) {
+    const loom_low_schedule_candidate_score_t* preserving =
+        lhs_consumes_completion_headroom ? rhs : lhs;
+    const loom_low_schedule_candidate_score_t* consuming =
+        lhs_consumes_completion_headroom ? lhs : rhs;
+    const bool preserving_defers_materialization =
+        lhs_consumes_completion_headroom ? rhs_defers_materialization
+                                         : lhs_defers_materialization;
+    // Headroom priority must avoid a physical pressure cliff or reduce it.
+    // Moving equal debt between banks does not justify that priority. Blocked
+    // setup still needs a strict improvement to override its deferral.
+    if ((preserving->pressure_cliff_penalty == 0 ||
+         preserving->pressure_cliff_penalty <
+             consuming->pressure_cliff_penalty) &&
+        (!preserving_defers_materialization ||
+         preserving->pressure_cliff_penalty <
+             consuming->pressure_cliff_penalty)) {
+      return !lhs_consumes_completion_headroom;
+    }
+  }
   // A setup whose consumer is blocked cannot relieve the pressure blocking
   // that consumer. Opening its destination first can occupy a singleton
   // register across earlier uses required to make the consumer ready.

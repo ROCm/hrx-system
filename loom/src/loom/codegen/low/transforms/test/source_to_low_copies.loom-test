@@ -69,3 +69,22 @@ low.func.def target<test.low.core>(@test_target) abi(object_function) @copied_pe
   %result = concat(%10, %13, %16, %19) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
   return %result
 }
+
+// ====
+// RUN: pass source-to-low
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @concatenated_temporary_carriers(%a: i32, %b: i32) -> (vector<2xi32>) {
+  %result = vector.from_elements %a, %b : vector<2xi32>
+  func.return %result : vector<2xi32>
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) abi(object_function) @concatenated_temporary_carriers(%a: reg<test.i32>, %b: reg<test.i32>) -> (reg<test.i32 x2>) asm {
+  %7 = concat(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %result = move %7 : reg<test.i32 x2> -> reg<test.i32 x2>
+  return %result
+}

@@ -1031,7 +1031,8 @@ static iree_status_t loom_low_lower_rule_guard_matches(
               .count ==
           loom_low_lower_rule_set_guard_payload(rule_set, guard)->u64;
       return iree_ok_status();
-    case LOOM_LOW_LOWER_GUARD_ATTR_I64_ARRAY_ELEMENT_RANGE: {
+    case LOOM_LOW_LOWER_GUARD_ATTR_I64_ARRAY_ELEMENT_RANGE:
+    case LOOM_LOW_LOWER_GUARD_ATTR_I64_ARRAY_ELEMENT_MULTIPLE: {
       if (guard->selector.attribute.attr_index >= source_op->attribute_count ||
           loom_op_const_attrs(source_op)[guard->selector.attribute.attr_index]
                   .kind != LOOM_ATTR_I64_ARRAY) {
@@ -1046,8 +1047,11 @@ static iree_status_t loom_low_lower_rule_guard_matches(
           attr.i64_array[guard->selector.attribute.element_index];
       const loom_low_lower_guard_payload_t* payload =
           loom_low_lower_rule_set_guard_payload(rule_set, guard);
-      *out_matches = value >= payload->i64_range.minimum &&
-                     value <= payload->i64_range.maximum;
+      *out_matches =
+          guard->kind == LOOM_LOW_LOWER_GUARD_ATTR_I64_ARRAY_ELEMENT_MULTIPLE
+              ? value % payload->i64 == 0
+              : value >= payload->i64_range.minimum &&
+                    value <= payload->i64_range.maximum;
       return iree_ok_status();
     }
     case LOOM_LOW_LOWER_GUARD_ATTR_I64_ARRAY_ELEMENTS_RANGE: {

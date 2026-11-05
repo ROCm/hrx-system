@@ -382,7 +382,7 @@ def source_memory_row(
     _append_field(
         fields,
         "vector_lane_count",
-        constraint.vector_lane_count,
+        constraint.vector_lane_count or 0,
         always=True,
     )
     _append_field(fields, "shape_index", shape_index, always=True)
@@ -667,6 +667,7 @@ def guard_row(
         GuardKind.OPERAND_SEGMENT_EXACT_BITS,
         GuardKind.I64_ARRAY_COUNT,
         GuardKind.I64_ARRAY_ELEMENT_RANGE,
+        GuardKind.I64_ARRAY_ELEMENT_MULTIPLE,
         GuardKind.I64_ARRAY_ELEMENTS_RANGE,
     ):
         _append_field(
@@ -683,7 +684,7 @@ def guard_row(
             row.type_pattern_index,
             always=True,
         )
-    elif row.kind == GuardKind.I64_ARRAY_ELEMENT_RANGE:
+    elif row.kind in (GuardKind.I64_ARRAY_ELEMENT_RANGE, GuardKind.I64_ARRAY_ELEMENT_MULTIPLE):
         _append_field(
             fields,
             "selector.attribute.element_index",
@@ -773,7 +774,7 @@ def guard_payload_row(row: LowerGuard) -> list[str]:
         return [f".u64 = {u64_payload}"]
     if row.kind == GuardKind.VALUE_EXACT_POWER_OF_TWO_I64:
         return [f".addend = {_c_i64_literal(row.addend)}"]
-    if row.kind == GuardKind.I64_ATTRS_SUM_EQUALS:
+    if row.kind in (GuardKind.I64_ATTRS_SUM_EQUALS, GuardKind.I64_ARRAY_ELEMENT_MULTIPLE):
         return [f".i64 = {_c_i64_literal(row.literal_i64)}"]
     if row.kind in (
         GuardKind.I64_RANGE,
@@ -1008,7 +1009,7 @@ def emit_ref_row(descriptor_refs: Mapping[str, int], row: LowerEmit, emit_index:
 
 def emit_row(row: LowerEmit) -> list[str]:
     fields: list[str] = []
-    flags = lower_rule_spelling.emit_flags(row.flags)
+    flags = lower_rule_spelling.emit_flags(row.flags, row.kind)
     _append_field(fields, "kind", lower_rule_spelling.EMIT_KIND_C_NAMES[row.kind], always=True)
     _append_field(fields, "flags", flags)
     if row.operand_materialization is not DescriptorOperandMaterialization.DIRECT:
@@ -1060,12 +1061,13 @@ def emit_row(row: LowerEmit) -> list[str]:
             always=True,
         )
     if row.attr_copy_count:
-        _append_field(
-            fields,
-            "payload.descriptor.attr_copy_start",
-            row.attr_copy_start,
-            always=True,
-        )
+        if row.kind not in (LowerEmitKind.REGISTER_SLICE, LowerEmitKind.REGISTER_SLICE_CLASS):
+            _append_field(
+                fields,
+                "payload.descriptor.attr_copy_start",
+                row.attr_copy_start,
+                always=True,
+            )
         _append_field(fields, "attr_copy_count", row.attr_copy_count, always=True)
     _append_field(fields, "has_read_only_data_attributes", int(row.has_read_only_data_attributes))
     if row.tied_result_count:
@@ -1093,13 +1095,13 @@ def emit_row(row: LowerEmit) -> list[str]:
             row.structural_offset,
             always=True,
         )
-        if row.structural_unit_count:
-            _append_field(
-                fields,
-                "payload.structural.unit_count",
-                row.structural_unit_count,
-                always=True,
-            )
+    if row.structural_unit_count:
+        _append_field(
+            fields,
+            "payload.structural.unit_count",
+            row.structural_unit_count,
+            always=True,
+        )
     return fields
 
 

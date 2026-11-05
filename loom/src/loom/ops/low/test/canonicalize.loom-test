@@ -786,3 +786,83 @@ low.func.def target<test.low.core>(@test_target) @captured_later_alias_projectio
   %first = slice %whole[0] : reg<test.i32 x3> -> reg<test.i32 x2>
   return %first, %changed
 }
+
+// ====
+
+// A projection contained in one operand need not materialize its siblings.
+// RUN: pass canonicalize
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @partial_concat_operands(%a: reg<test.i32 x3>, %b: reg<test.i32 x3>, %c: reg<test.i32 x3>) -> (reg<test.i32>, reg<test.i32 x2>, reg<test.i32>) asm {
+  %whole = concat(%a, %b, %c) : (reg<test.i32 x3>, reg<test.i32 x3>, reg<test.i32 x3>) -> reg<test.i32 x9>
+  %first = slice %whole[1] : reg<test.i32 x9> -> reg<test.i32>
+  %middle = slice %whole[4] : reg<test.i32 x9> -> reg<test.i32 x2>
+  %last = slice %whole[8] : reg<test.i32 x9> -> reg<test.i32>
+  return %first, %middle, %last
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @partial_concat_operands(%a: reg<test.i32 x3>, %b: reg<test.i32 x3>, %c: reg<test.i32 x3>) -> (reg<test.i32>, reg<test.i32 x2>, reg<test.i32>) asm {
+  %first = slice %a[1] : reg<test.i32 x3> -> reg<test.i32>
+  %middle = slice %b[1] : reg<test.i32 x3> -> reg<test.i32 x2>
+  %last = slice %c[2] : reg<test.i32 x3> -> reg<test.i32>
+  return %first, %middle, %last
+}
+
+// ====
+
+// The same projection composes through multiple levels of grouped operands.
+// RUN: pass canonicalize
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @nested_concat_projection(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>, %d: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %left = concat(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %right = concat(%c, %d) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %whole = concat(%left, %right) : (reg<test.i32 x2>, reg<test.i32 x2>) -> reg<test.i32 x4>
+  %first = slice %whole[1] : reg<test.i32 x4> -> reg<test.i32>
+  %last = slice %whole[3] : reg<test.i32 x4> -> reg<test.i32>
+  return %first, %last
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @nested_concat_projection(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>, %d: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  return %b, %d
+}
+
+// ====
+
+// A partial observation must stay before the original operand's ownership move.
+// RUN: pass canonicalize
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @partial_concat_capture_across_move(%prefix: reg<test.i32>, %source: reg<test.i32 x4>) -> (reg<test.i32 x2>, reg<test.i32 x4>) asm {
+  %whole = concat(%prefix, %source) : (reg<test.i32>, reg<test.i32 x4>) -> reg<test.i32 x5>
+  %moved = move %source : reg<test.i32 x4> -> reg<test.i32 x4>
+  %saved = slice %whole[2] : reg<test.i32 x5> -> reg<test.i32 x2>
+  return %saved, %moved
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @partial_concat_capture_across_move(%prefix: reg<test.i32>, %source: reg<test.i32 x4>) -> (reg<test.i32 x2>, reg<test.i32 x4>) asm {
+  %saved = slice %source[1] : reg<test.i32 x4> -> reg<test.i32 x2>
+  %moved = move %source : reg<test.i32 x4> -> reg<test.i32 x4>
+  return %saved, %moved
+}
+
+// ====
+
+// A cross-operand interval does not fit either source and retains its capture.
+// RUN: pass canonicalize
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @cross_operand_partial_slice(%a: reg<test.i32 x2>, %b: reg<test.i32 x2>) -> (reg<test.i32 x2>) asm {
+  %whole = concat(%a, %b) : (reg<test.i32 x2>, reg<test.i32 x2>) -> reg<test.i32 x4>
+  %middle = slice %whole[1] : reg<test.i32 x4> -> reg<test.i32 x2>
+  return %middle
+}

@@ -297,12 +297,11 @@ low.func.def public retain target<amd.xdna.aie2p.core>(@core_target) abi(object_
   %8 = copy %aligned : reg<aie2p.ep> -> reg<aie2p.ep>
   %aligned_view = padda %8, 64
   %10 = copy %aligned : reg<aie2p.ep> -> reg<aie2p.ep>
-  %11 = mov.static-byte-offset 4
-  %12 = mov.modifier %11
-  %general_view = padda.modifier %10, %12
-  %14 = copy %aligned : reg<aie2p.ep> -> reg<aie2p.ep>
-  %15 = mov.modifier %dynamic_origin
-  %dynamic_view = padda.modifier %14, %15
+  %11 = mova.modifier 4
+  %general_view = padda.modifier %10, %11
+  %13 = copy %aligned : reg<aie2p.ep> -> reg<aie2p.ep>
+  %14 = mov.modifier %dynamic_origin
+  %dynamic_view = padda.modifier %13, %14
   %aligned_value = low.func.call @read_byte(%aligned_view) : (reg<aie2p.ep>) -> (reg<aie2p.er>)
   %general_value = low.func.call @read_byte(%general_view) : (reg<aie2p.ep>) -> (reg<aie2p.er>)
   %dynamic_value = low.func.call @read_byte(%dynamic_view) : (reg<aie2p.ep>) -> (reg<aie2p.er>)

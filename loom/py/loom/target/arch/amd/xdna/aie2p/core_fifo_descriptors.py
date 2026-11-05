@@ -99,6 +99,25 @@ def _fifo_load_descriptor_specs(
                 memory_width_bits=512,
             )
             result.extend(_fifo_address_variants(spec, "pop"))
+            if shape == "bfp16ebs8":
+                # At position 64 the pop consumes only the initialized low
+                # FIFO half and its next 64-byte fetch. Later pops carry the
+                # complete state produced here. Other positions require the
+                # ordinary full-state descriptor.
+                result.append(
+                    replace(
+                        spec,
+                        key=spec.key + ".buffered64",
+                        semantic_tag=spec.semantic_tag + ".buffered64",
+                        asm_mnemonic=spec.asm_mnemonic + ".buffered64",
+                        operand_register_parts=(
+                            ("fifo_reg", "aie2p.eldfiforeg.low512"),
+                        ),
+                        schedule_alternatives=tuple(
+                            key + ".buffered64" for key in spec.schedule_alternatives
+                        ),
+                    )
+                )
     return tuple(result)
 
 
@@ -210,6 +229,16 @@ def _fifo_storage_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
             "II_MOVS_eP_eP",
             storage_overrides=(("dst", "mPfs"), ("src", "eP")),
             asm_mnemonic="mov.store-fifo.pointer",
+        )
+    )
+    result.append(
+        _DescriptorSpec(
+            "MOVS",
+            f"{_TARGET_KEY}.move.load-fifo.pointer",
+            "register.move.load-fifo.pointer",
+            "II_MOVS_eP_eP",
+            storage_overrides=(("dst", "ePS"), ("src", "eP")),
+            asm_mnemonic="mov.load-fifo.pointer",
         )
     )
     return tuple(result)

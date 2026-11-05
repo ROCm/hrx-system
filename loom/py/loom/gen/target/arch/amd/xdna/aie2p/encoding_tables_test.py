@@ -32,6 +32,24 @@ def test_check_validates_without_output() -> None:
     assert encoding_tables.main(["--check"]) == 0
 
 
+def test_bfp_parts_follow_physical_mantissas_and_exponent_words() -> None:
+    compiled = encoding_tables.compile_descriptor_set(encoding_tables.AIE2P_CORE_DESCRIPTOR_SET)
+    masks = encoding_tables._register_part_unit_masks(compiled)
+    part_masks = {part.name: mask for part, mask in zip(compiled.register_parts, masks, strict=True) if part.reg_class == "aie2p.mexa"}
+    registers = {register.name: register for register in encoding_tables.CORE_MACHINE_TABLE.physical_registers}
+    for index in range(12):
+        register = registers[f"ex{index}"]
+        assert {name: {unit for ordinal, unit in enumerate(register.atomic_units) if mask & (1 << ordinal)} for name, mask in part_masks.items()} == {
+            "aie2p.mexa.mantissas": set(registers[f"x{index}"].atomic_units),
+            "aie2p.mexa.exponents.low32": set(registers[f"el{index}"].atomic_units),
+            "aie2p.mexa.exponents.high32": set(registers[f"eh{index}"].atomic_units),
+            "aie2p.mexa.mantissas.exponents.low32": {
+                *registers[f"x{index}"].atomic_units,
+                *registers[f"el{index}"].atomic_units,
+            },
+        }
+
+
 @pytest.mark.parametrize(
     "outputs",
     [

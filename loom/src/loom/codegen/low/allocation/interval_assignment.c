@@ -315,6 +315,44 @@ static void loom_low_allocation_interval_assignment_failure_set_conflict(
   failure->conflict_location_count = assignment->location_count;
 }
 
+static iree_status_t
+loom_low_allocation_interval_assignment_retain_failure_component(
+    const loom_low_allocation_interval_assignment_state_t* state,
+    loom_value_ordinal_t value_ordinal,
+    loom_low_allocation_failure_t* failure) {
+  const loom_low_placement_value_component_t component =
+      loom_low_placement_hard_register_ordinal_component(
+          state->context->placement, value_ordinal);
+  if (component.count == 0) {
+    return iree_ok_status();
+  }
+  loom_low_allocation_assignment_t* requirements = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(state->context->arena, component.count,
+                                sizeof(*requirements), (void**)&requirements));
+  uint32_t count = 0;
+  for (uint32_t i = 0; i < component.count; ++i) {
+    const loom_value_ordinal_t member = component.members[i];
+    const loom_liveness_interval_t* interval =
+        loom_liveness_interval_for_value_ordinal(state->context->liveness,
+                                                 member);
+    // Unused block arguments retain component membership without storage.
+    if (interval == NULL) {
+      continue;
+    }
+    const loom_low_allocation_class_capacity_t capacity = {
+        .descriptor_reg_class_id = interval->value_class.register_class_id,
+        .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+    };
+    requirements[count++] =
+        loom_low_allocation_interval_assignment_failure_candidate(
+            state, interval, member, &capacity, UINT32_MAX);
+  }
+  failure->component_requirements = requirements;
+  failure->component_requirement_count = count;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_allocation_interval_assignment_record_failure(
     loom_low_allocation_interval_assignment_state_t* state,
     const loom_liveness_interval_t* interval,
@@ -354,6 +392,9 @@ static iree_status_t loom_low_allocation_interval_assignment_record_failure(
       .conflict_location_base = UINT32_MAX,
       .conflict_location_count = 0,
   };
+  IREE_RETURN_IF_ERROR(
+      loom_low_allocation_interval_assignment_retain_failure_component(
+          state, value_ordinal, &failure));
 
   if (capacity->is_bounded && interval->unit_count > capacity->max_units) {
     failure.blocking_kind =

@@ -21,7 +21,7 @@ low.func.def target<test.low.core>(@target) @reloads_32(%input: reg<test.pressur
 spills: 0
 materialized traffic: stores=0 reloads=0
 value %first: test.pressure.alias32 -> physical_register[0:4]
-value %second: test.pressure.alias32 -> physical_register[4:4]
+value %second: test.pressure.alias32 -> physical_register[0:4]
 value %third: test.pressure.alias32 -> physical_register[0:4]
 
 // ====
@@ -49,7 +49,7 @@ low.func.def target<test.low.core>(@target) @reloads_64(%input: reg<test.pressur
 spills: 0
 materialized traffic: stores=0 reloads=0
 value %first: test.pressure.alias64 -> physical_register[0:4]
-value %second: test.pressure.alias64 -> physical_register[4:4]
+value %second: test.pressure.alias64 -> physical_register[0:4]
 value %third: test.pressure.alias64 -> physical_register[0:4]
 
 // ====

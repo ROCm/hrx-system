@@ -115,4 +115,4 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @fresh_groups(%weights: reg<ai
 
 // ----
 block 1 order: 26, 51
-scheduled pressure aie2p.mexa: peak-live-units=12 peak-live-values=12
+scheduled pressure aie2p.mexa: peak-live-units=11 peak-live-values=11

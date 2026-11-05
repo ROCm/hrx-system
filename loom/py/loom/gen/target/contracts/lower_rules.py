@@ -56,6 +56,7 @@ _STRUCTURAL_EMIT_KINDS = (
     LowerEmitKind.REGISTER_SLICE,
     LowerEmitKind.REGISTER_SLICE_CLASS,
     LowerEmitKind.REGISTER_CONCAT,
+    LowerEmitKind.REGISTER_CONCAT_PER_LANE_SEQUENCE,
     LowerEmitKind.REGISTER_COPY,
     LowerEmitKind.REGISTER_MOVE,
 )
@@ -1024,7 +1025,7 @@ def _validate_c_table_shape(
             f"{row_subject} element byte count",
         )
         _require_u16(
-            constraint.vector_lane_count,
+            constraint.vector_lane_count or 0,
             f"{row_subject} vector lane count",
         )
         _require_i64(
@@ -1135,7 +1136,7 @@ def _validate_c_table_shape(
             "diagnostic",
         )
         _require_u64(row.u64, f"{row_subject} u64 payload")
-        if row.kind == GuardKind.I64_ARRAY_ELEMENT_RANGE:
+        if row.kind in (GuardKind.I64_ARRAY_ELEMENT_RANGE, GuardKind.I64_ARRAY_ELEMENT_MULTIPLE):
             _require_u16(row.u64, f"{row_subject} array element index")
         if row.kind in (
             GuardKind.VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES,
@@ -1222,10 +1223,16 @@ def _validate_c_table_shape(
             f"{row_subject} structural unit count",
         )
         if is_structural_emit:
-            if row.attr_copy_start != 0 or row.attr_copy_count != 0 or row.tied_result_start != 0 or row.tied_result_count != 0:
+            projected_slice = row.kind in (LowerEmitKind.REGISTER_SLICE, LowerEmitKind.REGISTER_SLICE_CLASS) and row.attr_copy_count == 1 and row.structural_offset == row.attr_copy_start
+            if row.tied_result_start != 0 or row.tied_result_count != 0 or ((row.attr_copy_start != 0 or row.attr_copy_count != 0) and not projected_slice):
                 raise ValueError(f"{row_subject} structural emit cannot carry descriptor table ranges")
-            if row.kind not in (LowerEmitKind.REGISTER_SLICE, LowerEmitKind.REGISTER_SLICE_CLASS) and (row.structural_offset != 0 or row.structural_unit_count != 0):
-                raise ValueError(f"{row_subject} only register-slice emits can carry a structural payload")
+            if row.kind not in (LowerEmitKind.REGISTER_SLICE, LowerEmitKind.REGISTER_SLICE_CLASS) and row.structural_offset != 0:
+                raise ValueError(f"{row_subject} only register-slice emits can carry a structural offset")
+            if (
+                row.kind not in (LowerEmitKind.REGISTER_SLICE, LowerEmitKind.REGISTER_SLICE_CLASS, LowerEmitKind.REGISTER_CONCAT, LowerEmitKind.REGISTER_CONCAT_PER_LANE_SEQUENCE)
+                and row.structural_unit_count != 0
+            ):
+                raise ValueError(f"{row_subject} only register-slice and register-concat emits can carry a structural unit count")
         elif row.structural_offset != 0 or row.structural_unit_count != 0:
             raise ValueError(f"{row_subject} descriptor emit cannot carry a structural payload")
         _require_u8(row.flags, f"{row_subject} flags")
@@ -1236,7 +1243,7 @@ def _validate_c_table_shape(
         _require_u16(row.operand_ref_start, f"{row_subject} operand-ref start")
         _require_unsigned_bits(
             row.operand_ref_count,
-            3,
+            4,
             f"{row_subject} operand-ref count",
         )
         _require_table_range(
@@ -1269,7 +1276,7 @@ def _validate_c_table_shape(
         )
         _require_unsigned_bits(
             row.result_ref_count,
-            2,
+            3,
             f"{row_subject} result-ref count",
         )
         if row.flags & LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN and row.flags & LOWER_EMIT_FLAG_RESULT_DESCRIPTOR_TYPE:
@@ -1326,7 +1333,7 @@ def _validate_c_table_shape(
         _require_u16(row.tied_result_start, f"{row_subject} tied-result start")
         _require_unsigned_bits(
             row.tied_result_count,
-            2,
+            3,
             f"{row_subject} tied-result count",
         )
         _require_table_range(

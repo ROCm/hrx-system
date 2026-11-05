@@ -9,19 +9,83 @@ func.def target(@test_target) @shared_lane_setup(%lhs: vector<2xi32>, %rhs: vect
   func.return %result : vector<2xi32>
 }
 
+// One pair skips its update entirely. Three pairs retain the coordinate
+// across repeated multi-result steps and update only between pairs.
+func.def target(@test_target) @one_pair(%base: i32, %step: i32) -> (vector<2xi32>) {
+  %result = vector.iota %base step %step : vector<2xi32>
+  func.return %result : vector<2xi32>
+}
+
+func.def target(@test_target) @three_pairs(%base: i32, %step: i32) -> (vector<6xi32>) {
+  %result = vector.iota %base step %step : vector<6xi32>
+  func.return %result : vector<6xi32>
+}
+
 // ----
 test.target<low_core> @test_target
 
 low.func.def target<test.low.core>(@test_target) abi(object_function) @shared_lane_setup(%lhs: reg<test.i32 x2>, %rhs: reg<test.i32 x2>) -> (reg<test.i32 x2>) asm {
+  %15 = test.const.i32 0
+  %16 = slice %lhs[0] : reg<test.i32 x2> -> reg<test.i32>
+  %17 = slice %rhs[0] : reg<test.i32 x2> -> reg<test.i32>
+  %18 = test.mul.i32 %16, %17
+  %19 = test.add.i32 %18, %15
+  %20 = slice %lhs[1] : reg<test.i32 x2> -> reg<test.i32>
+  %21 = slice %rhs[1] : reg<test.i32 x2> -> reg<test.i32>
+  %22 = test.mul.i32 %20, %21
+  %23 = test.add.i32 %22, %15
+  %result = concat(%19, %23) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  return %result
+}
+
+low.func.def target<test.low.core>(@test_target) abi(object_function) @one_pair(%base: reg<test.i32>, %step: reg<test.i32>) -> (reg<test.i32 x2>) asm {
+  %28 = copy %base : reg<test.i32> -> reg<test.i32>
+  %29, %30 = test.iota.pair.i32 %28, %step
+  %result = concat(%29, %30) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  return %result
+}
+
+low.func.def target<test.low.core>(@test_target) abi(object_function) @three_pairs(%base: reg<test.i32>, %step: reg<test.i32>) -> (reg<test.i32 x6>) asm {
+  %35 = copy %base : reg<test.i32> -> reg<test.i32>
+  %36, %37 = test.iota.pair.i32 %35, %step
+  %38 = test.add.i32 %37, %step
+  %39 = concat(%36, %37) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %40, %41 = test.iota.pair.i32 %38, %step
+  %42 = test.add.i32 %41, %step
+  %43 = concat(%40, %41) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %44, %45 = test.iota.pair.i32 %42, %step
+  %46 = concat(%44, %45) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %result = concat(%39, %43, %46) : (reg<test.i32 x2>, reg<test.i32 x2>, reg<test.i32 x2>) -> reg<test.i32 x6>
+  return %result
+}
+
+// ====
+// RUN: pass source-to-low
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @stream_packets(%input: buffer) -> (vector<12xi32>) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<12xi32>
+  %result = vector.load<volatile> %view[0] : view<12xi32> -> vector<12xi32>
+  func.return %result : vector<12xi32>
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) abi(object_function) @stream_packets() -> (reg<test.i32 x12>) asm {
+  %view = resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
   %7 = test.const.i32 0
-  %8 = slice %lhs[0] : reg<test.i32 x2> -> reg<test.i32>
-  %9 = slice %rhs[0] : reg<test.i32 x2> -> reg<test.i32>
-  %10 = test.mul.i32 %8, %9
-  %11 = test.add.i32 %10, %7
-  %12 = slice %lhs[1] : reg<test.i32 x2> -> reg<test.i32>
-  %13 = slice %rhs[1] : reg<test.i32 x2> -> reg<test.i32>
-  %14 = test.mul.i32 %12, %13
-  %15 = test.add.i32 %14, %7
-  %result = concat(%11, %15) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %8 = test.const.i32 16
+  %9 = test.load.index.ordered.v4i32<volatile> %view, %7
+  %10 = test.add.i32 %7, %8
+  %11 = concat(%9) : (reg<test.i32 x4>) -> reg<test.i32 x4>
+  %12 = test.load.index.ordered.v4i32<volatile> %view, %10
+  %13 = test.add.i32 %10, %8
+  %14 = concat(%12) : (reg<test.i32 x4>) -> reg<test.i32 x4>
+  %15 = test.load.index.ordered.v4i32<volatile> %view, %13
+  %16 = concat(%15) : (reg<test.i32 x4>) -> reg<test.i32 x4>
+  %result = concat(%11, %14, %16) : (reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x12>
   return %result
 }

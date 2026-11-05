@@ -25,12 +25,13 @@ from loom.dsl import (
 from loom.target.contracts.descriptors import _require_descriptor
 from loom.target.contracts.emits import (
     ContractEmit,
-    DescriptorEmitForm,
+    DescriptorResultType,
     EmitDescriptorOp,
     EmitRegisterConcat,
     EmitRegisterCopy,
     EmitRegisterMove,
     EmitRegisterSlice,
+    is_per_lane_sequence,
 )
 from loom.target.contracts.guards import Guard, GuardKind
 from loom.target.contracts.immediates import OperandSegmentProject
@@ -272,6 +273,8 @@ class DescriptorRule:
     priority: int = 0
     report_key: str = ""
     target_query: bool = True
+    # Setup temporaries updated by the repeated tail and carried to its next lane.
+    sequence_carried: tuple[str, ...] = ()
 
     def __init__(
         self,
@@ -284,6 +287,7 @@ class DescriptorRule:
         priority: int = 0,
         report_key: str = "",
         target_query: bool = True,
+        sequence_carried: Sequence[str] = (),
     ) -> None:
         object.__setattr__(self, "source_op", source_op)
         object.__setattr__(self, "descriptor", descriptor)
@@ -293,6 +297,7 @@ class DescriptorRule:
         object.__setattr__(self, "priority", priority)
         object.__setattr__(self, "report_key", report_key)
         object.__setattr__(self, "target_query", target_query)
+        object.__setattr__(self, "sequence_carried", tuple(sequence_carried))
         if priority < 0:
             raise ValueError("descriptor rule priority must be non-negative")
         if priority > MAX_RULE_PRIORITY:
@@ -323,6 +328,7 @@ class DescriptorRule:
         self._validate_source_graph_forest(source_ops)
         for guard in self.guards:
             guard.validate(self.source_op)
+        self._validate_per_lane_sequence()
         defined_temporaries = set[str]()
         for emit in self.emit:
             if (
@@ -330,16 +336,24 @@ class DescriptorRule:
                 and emit.descriptor != self.descriptor
             ):
                 _require_descriptor(descriptor_set, emit.descriptor)
-            produced_temporaries = emit.validate(
-                self.source_op,
-                descriptor_set,
-                defined_temporaries,
-                source_ops=source_ops,
-            )
+            if isinstance(emit, EmitDescriptorOp):
+                produced_temporaries = emit.validate(
+                    self.source_op,
+                    descriptor_set,
+                    defined_temporaries,
+                    source_ops=source_ops,
+                    sequence_carried=self.sequence_carried,
+                )
+            else:
+                produced_temporaries = emit.validate(
+                    self.source_op,
+                    descriptor_set,
+                    defined_temporaries,
+                    source_ops=source_ops,
+                )
             defined_temporaries.update(produced_temporaries)
         self._validate_operand_segment_projections()
         self._validate_source_memory_preservation()
-        self._validate_per_lane_sequence()
         self._validate_source_results(source_ops)
         self._validate_terminator_emit()
 
@@ -570,21 +584,21 @@ class DescriptorRule:
     def _validate_per_lane_sequence(self) -> None:
         sequence_start = next(
             (
-                emit_index
-                for emit_index, emit in enumerate(self.emit)
-                if isinstance(emit, EmitDescriptorOp)
-                and emit.form == DescriptorEmitForm.PER_LANE_SEQUENCE
+                index
+                for index, emit in enumerate(self.emit)
+                if is_per_lane_sequence(emit)
             ),
             None,
         )
         if sequence_start is None:
+            if self.sequence_carried:
+                raise ValueError(
+                    f"{self.source_op.name}: "
+                    "carried temporaries require a per-lane sequence"
+                )
             return
         sequence_emits = self.emit[sequence_start:]
-        if any(
-            not isinstance(emit, EmitDescriptorOp)
-            or emit.form != DescriptorEmitForm.PER_LANE_SEQUENCE
-            for emit in sequence_emits
-        ):
+        if not all(is_per_lane_sequence(emit) for emit in sequence_emits):
             raise ValueError(
                 f"{self.source_op.name}: per-lane-sequence emits must form the "
                 "final contiguous emit-program tail"
@@ -594,53 +608,168 @@ class DescriptorRule:
                 f"{self.source_op.name}: a single per-lane-sequence emit "
                 "requires shared setup"
             )
+        carried = set(self.sequence_carried)
+        if len(carried) != len(self.sequence_carried) or any(
+            not name for name in carried
+        ):
+            raise ValueError(
+                f"{self.source_op.name}: "
+                "carried temporary names must be unique and nonempty"
+            )
+        setup = {
+            ref.field
+            for emit in self.emit[:sequence_start]
+            for ref in (
+                tuple(emit.results.values())
+                if isinstance(emit, EmitDescriptorOp)
+                else (emit.result,)
+            )
+            if ref.kind is SourceValueKind.TEMPORARY
+        }
+        if not carried <= setup:
+            raise ValueError(
+                f"{self.source_op.name}: carried temporaries require a setup definition"
+            )
+        updated = set[str]()
         for sequence_index, emit in enumerate(sequence_emits):
-            emit_index = sequence_start + sequence_index
-            result_bindings = emit.results if emit.results is not None else {}
-            result_refs = []
-            for descriptor_operand in emit.descriptor.operands:
+            final = sequence_index + 1 == len(sequence_emits)
+            if isinstance(emit, EmitRegisterConcat):
+                if not final:
+                    raise ValueError(
+                        f"{self.source_op.name}: "
+                        "per-lane-sequence concat must be the final emit"
+                    )
+                result_refs = (emit.result,)
+                operand_refs = emit.sources
+            else:
+                for operand in emit.descriptor.operands:
+                    if (
+                        operand.role is not OperandRole.IMPLICIT
+                        and operand.unit_count == 0
+                    ):
+                        raise ValueError(
+                            f"{self.source_op.name}: per-lane-sequence descriptor "
+                            f"'{emit.descriptor.key}' field '{operand.field_name}' "
+                            "requires a fixed register width"
+                        )
+                result_refs = tuple(emit.results.values())
+                operand_refs = tuple(emit.operands.values())
+                if emit.skip_last_lane and (
+                    final
+                    or any(
+                        ref.kind is not SourceValueKind.TEMPORARY
+                        or ref.field not in carried
+                        for ref in result_refs
+                    )
+                ):
+                    raise ValueError(
+                        f"{self.source_op.name}: "
+                        "skipped sequence results must update carried temporaries"
+                    )
+            if final:
+                if len(result_refs) != 1:
+                    raise ValueError(
+                        f"{self.source_op.name}: "
+                        "per-lane-sequence final emit must bind exactly one result"
+                    )
+                if result_refs[0].kind is not SourceValueKind.RESULT:
+                    raise ValueError(
+                        f"{self.source_op.name}: "
+                        "per-lane-sequence final emit must bind a source result"
+                    )
+            elif any(ref.kind is not SourceValueKind.TEMPORARY for ref in result_refs):
+                raise ValueError(
+                    f"{self.source_op.name}: "
+                    "per-lane-sequence intermediate emit must bind a temporary"
+                )
+            updated.update(
+                ref.field
+                for ref in result_refs
+                if ref.kind is SourceValueKind.TEMPORARY
+            )
+            if any(ref.materializer is not None for ref in operand_refs):
+                raise ValueError(
+                    f"{self.source_op.name}: "
+                    "per-lane-sequence operands cannot use value materializers"
+                )
+            if any(
+                ref.kind
+                in (
+                    SourceValueKind.SOURCE_MEMORY_ROOT,
+                    SourceValueKind.SOURCE_MEMORY_DYNAMIC_TERM,
+                    SourceValueKind.SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET,
+                    SourceValueKind.SOURCE_MEMORY_BYTE_OFFSET,
+                    SourceValueKind.SOURCE_MEMORY_ADDRESS,
+                    SourceValueKind.SOURCE_MEMORY_ELEMENT_STRIDE,
+                )
+                for ref in operand_refs
+            ):
+                raise ValueError(
+                    f"{self.source_op.name}: per-lane-sequence address geometry "
+                    "must be materialized in shared setup"
+                )
+        if not carried <= updated:
+            raise ValueError(
+                f"{self.source_op.name}: carried temporaries require a sequence update"
+            )
+        self._validate_sequence_carriers(carried)
+
+    def _validate_sequence_carriers(self, carried: set[str]) -> None:
+        # Compare symbolic type identities at generation time. A reference to
+        # the incoming temporary preserves that type directly; native descriptor
+        # bindings preserve it when their register class and width agree.
+        if not carried:
+            return
+        types: dict[str, object] = {}
+        for emit in self.emit:
+            if isinstance(emit, EmitDescriptorOp):
+                definitions = []
+                for operand in emit.descriptor.operands:
+                    ref = emit.results.get(operand.field_name)
+                    if ref is None or ref.kind is not SourceValueKind.TEMPORARY:
+                        continue
+                    binding = (emit.result_types or {}).get(operand.field_name, ref)
+                    if isinstance(binding, DescriptorResultType):
+                        binding = (operand.reg_alts[0].reg_class, operand.unit_count)
+                    definitions.append((ref, binding))
+            else:
+                source = (
+                    emit.sources[0]
+                    if isinstance(emit, EmitRegisterConcat)
+                    else emit.source
+                )
+                definitions = [(emit.result, emit.result_type or source)]
+            resolved = []
+            for ref, binding in definitions:
                 if (
-                    descriptor_operand.role is not OperandRole.IMPLICIT
-                    and descriptor_operand.unit_count == 0
+                    isinstance(binding, ValueRef)
+                    and binding.kind is SourceValueKind.TEMPORARY
+                ):
+                    binding = types.get(binding.field, binding)
+                if (
+                    isinstance(emit, (EmitRegisterSlice, EmitRegisterConcat))
+                    and emit.unit_count is not None
+                ):
+                    if (
+                        isinstance(emit, EmitRegisterSlice)
+                        and emit.result_register_class
+                    ):
+                        binding = (emit.result_register_class, emit.unit_count)
+                    elif isinstance(binding, tuple):
+                        binding = (binding[0], emit.unit_count)
+                    else:
+                        binding = (binding, emit.unit_count)
+                if (
+                    is_per_lane_sequence(emit)
+                    and ref.field in carried
+                    and binding != types.get(ref.field)
                 ):
                     raise ValueError(
-                        f"{self.source_op.name}: per-lane-sequence descriptor "
-                        f"'{emit.descriptor.key}' field "
-                        f"'{descriptor_operand.field_name}' requires a fixed "
-                        "register width"
+                        f"{self.source_op.name}: carried temporary '{ref.field}' "
+                        "must preserve its incoming result type"
                     )
-                if descriptor_operand.role not in (
-                    OperandRole.RESULT,
-                    OperandRole.OPERAND_RESULT,
-                ):
-                    continue
-                value_ref = result_bindings.get(descriptor_operand.field_name)
-                if value_ref is not None:
-                    result_refs.append(value_ref)
-            if len(result_refs) != 1:
-                raise ValueError(
-                    f"{self.source_op.name}: per-lane-sequence emit "
-                    f"{emit_index} must bind exactly one result"
-                )
-            result_ref = result_refs[0]
-            if sequence_index + 1 == len(sequence_emits):
-                if result_ref.kind != SourceValueKind.RESULT:
-                    raise ValueError(
-                        f"{self.source_op.name}: per-lane-sequence final emit "
-                        "must bind a source result"
-                    )
-            elif result_ref.kind != SourceValueKind.TEMPORARY:
-                raise ValueError(
-                    f"{self.source_op.name}: per-lane-sequence intermediate emit "
-                    "must bind a temporary"
-                )
-            operand_bindings = emit.operands if emit.operands is not None else {}
-            for value_ref in operand_bindings.values():
-                if value_ref.materializer is not None:
-                    raise ValueError(
-                        f"{self.source_op.name}: per-lane-sequence operands "
-                        "cannot use value materializers"
-                    )
+                resolved.append((ref.field, binding))
+            types.update(resolved)
 
     def _validate_terminator_emit(self) -> None:
         for emit_index, emit in enumerate(self.emit):

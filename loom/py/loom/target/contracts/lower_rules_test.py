@@ -223,6 +223,11 @@ def test_compile_structural_register_emits() -> None:
                             ValueRef.operand("elements", element=0),
                             ValueRef.operand("elements", element=1),
                         ),
+                        result=ValueRef.temporary("pair"),
+                        unit_count=2,
+                    ),
+                    EmitRegisterMove(
+                        source=ValueRef.temporary("pair"),
                         result=ValueRef.result("result"),
                     ),
                 ),
@@ -290,6 +295,7 @@ def test_compile_structural_register_emits() -> None:
     ]
     assert concat_emit.kind is LowerEmitKind.REGISTER_CONCAT
     assert concat_emit.operand_ref_count == 2
+    assert concat_emit.structural_unit_count == 2
 
     extract_rule = rules_by_source_op[vector.vector_extract]
     slice_emits = compiled.emits[
@@ -324,6 +330,52 @@ def test_compile_structural_register_emits() -> None:
     assert copy_emit.kind is LowerEmitKind.REGISTER_COPY
     assert copy_emit.operand_ref_count == 1
     assert copy_emit.result_ref_count == 1
+
+
+def test_compile_descriptor_result_type_from_preceding_temporary() -> None:
+    descriptor = TEST_LOW_ADD_I32_DESCRIPTOR
+    fragment = ContractFragment(
+        name="temporary.result_type",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=(
+            DescriptorRule(
+                source_op=scalar_arithmetic.scalar_addi,
+                descriptor=descriptor,
+                guards=(Guard.value_type("result", Scalar("i32")),),
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=descriptor,
+                        operands={
+                            "lhs": ValueRef.operand("lhs"),
+                            "rhs": ValueRef.operand("rhs"),
+                        },
+                        results={"dst": ValueRef.temporary("partial")},
+                        result_types={"dst": Scalar("i32")},
+                        form=DescriptorEmitForm.OP,
+                    ),
+                    EmitDescriptorOp(
+                        descriptor=descriptor,
+                        operands={
+                            "lhs": ValueRef.temporary("partial"),
+                            "rhs": ValueRef.operand("rhs"),
+                        },
+                        results={"dst": ValueRef.result("result")},
+                        result_types={"dst": ValueRef.temporary("partial")},
+                        form=DescriptorEmitForm.OP,
+                    ),
+                ),
+            ),
+        ),
+    )
+    compiled = compile_lower_rule_set(fragment, dialect_ops={"scalar": ALL_SCALAR_OPS})
+    first, second = compiled.emits
+    temporary = compiled.value_refs[first.result_bind_ref_start]
+    result_type = compiled.value_refs[second.result_ref_start]
+    assert result_type.kind is SourceValueKind.TEMPORARY
+    assert result_type.index == temporary.index
+    assert (
+        compiled.value_refs[second.result_bind_ref_start].kind is SourceValueKind.RESULT
+    )
 
 
 def test_compile_register_copy_from_selected_source_memory_root() -> None:

@@ -178,6 +178,7 @@ loom_check_test_suite(
         "native_local_buffers.loom-test",
         "native_stream_routes.loom-test",
         "operand_ties.loom-test",
+        "packed_streams.loom-test",
         "strand_targets.loom-test",
         "target_legalize_report.loom-test",
         "vector_extract_shape.loom-test",

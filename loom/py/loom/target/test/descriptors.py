@@ -730,6 +730,22 @@ TEST_LOW_REMATERIALIZE_TIED_EXPLICIT32_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
+TEST_LOW_STREAM_STEP_I32_DESCRIPTOR = Descriptor(
+    key="test.stream.step.i32",
+    mnemonic="test.stream.step.i32",
+    semantic_tag="test.stream.step.i32",
+    operands=(
+        _explicit32_result(),
+        _recolor32_result("next_state"),
+        _recolor32_operand("state"),
+        _i32_operand("input"),
+    ),
+    constraints=(Constraint(ConstraintKind.TIED, 1, 2),),
+    asm_forms=_asm(results=("dst", "next_state"), operands=("state", "input")),
+    schedule_class=_SCHEDULE_LOAD,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
 TEST_LOW_REMATERIALIZE_PAIR_EXPLICIT32_DESCRIPTOR = Descriptor(
     key="test.rematerialize.pair.explicit32",
     mnemonic="test.rematerialize.pair.explicit32",
@@ -751,6 +767,22 @@ TEST_LOW_ADD_I32_DESCRIPTOR = Descriptor(
     semantic_tag="integer.add.i32",
     operands=(_i32_result(), _i32_operand("lhs"), _i32_operand("rhs")),
     asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+# Produces two adjacent coordinates without consuming the following pair.
+TEST_LOW_IOTA_PAIR_I32_DESCRIPTOR = Descriptor(
+    key="test.iota.pair.i32",
+    mnemonic="test.iota.pair.i32",
+    semantic_tag="test.iota.pair.i32",
+    operands=(
+        _i32_result("first"),
+        _i32_result("second"),
+        _i32_operand("base"),
+        _i32_operand("step"),
+    ),
+    asm_forms=_asm(results=("first", "second"), operands=("base", "step")),
     schedule_class=_SCHEDULE_SCALAR_ALU,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
@@ -2878,6 +2910,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_REMATERIALIZE_SPILLABLE_EXPLICIT32_DESCRIPTOR,
         TEST_LOW_REMATERIALIZE_EXPLICIT32_DESCRIPTOR,
         TEST_LOW_REMATERIALIZE_TIED_EXPLICIT32_DESCRIPTOR,
+        TEST_LOW_STREAM_STEP_I32_DESCRIPTOR,
         TEST_LOW_REMATERIALIZE_PAIR_EXPLICIT32_DESCRIPTOR,
         TEST_LOW_ADD_I32_DESCRIPTOR,
         TEST_LOW_ADD_LOW4_I32_DESCRIPTOR,
@@ -2887,6 +2920,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_MASK_SAMPLE_I32_DESCRIPTOR,
         TEST_LOW_ADD_I32_PHYS_RHS_DESCRIPTOR,
         TEST_LOW_CONVERGENT_I32_DESCRIPTOR,
+        TEST_LOW_IOTA_PAIR_I32_DESCRIPTOR,
         TEST_LOW_MUL_I32_DESCRIPTOR,
         TEST_LOW_ADD_MUL_I32_DESCRIPTOR,
         TEST_LOW_MUL_ADD_I32_DESCRIPTOR,

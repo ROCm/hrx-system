@@ -595,6 +595,11 @@ def _implicit_register_layout(register_name: str) -> RegisterLayout:
 
 
 def _reg_classes() -> tuple[RegClass, ...]:
+    full_part_masks: dict[str, int] = {}
+    for part in descriptor_specs._REGISTER_PARTS:
+        full_part_masks[part.reg_class] = (
+            full_part_masks.get(part.reg_class, 0) | part.mask
+        )
     result: list[RegClass] = []
     for target_bank_id, machine_name in enumerate(
         _EXPLICIT_STORAGE_MACHINE_CLASS_NAMES, start=1
@@ -611,16 +616,8 @@ def _reg_classes() -> tuple[RegClass, ...]:
                     RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
                 ),
                 target_bank_id=target_bank_id,
-                full_register_part_mask=(
-                    # The upper modifier is not an input of 3D addressing.
-                    0x7F
-                    if machine_name == "eDS"
-                    else 0xF
-                    if machine_name == "eD"
-                    else 0x3
-                    if machine_name
-                    in ("eLPredicate", "VEC256", "eLdFifoReg", "mStFifo")
-                    else 0x1
+                full_register_part_mask=full_part_masks.get(
+                    _low_register_class_name(machine_name), 0x1
                 ),
                 physical_registers=machine_class.candidates,
             )
@@ -1513,6 +1510,22 @@ def _descriptor(spec: descriptor_specs._DescriptorSpec) -> Descriptor:
         ),
     )
     operand_names = tuple(operand.field_name for operand in operands)
+    native_constraints = descriptor_constraints(spec, form, operand_names)
+    if not spec.allocation_move:
+        # Native pointer uses accept the FIFO pointer subset. Tied updates
+        # preserve that domain; independent definitions still produce EP.
+        updated_outputs = {
+            constraint.lhs_operand_index
+            for constraint in native_constraints
+            if constraint.kind is ConstraintKind.TIED
+        }
+        operands = tuple(
+            replace(operand, reg_alts=(*operand.reg_alts, RegClassAlt("aie2p.eps")))
+            if operand.reg_alts == (RegClassAlt("aie2p.ep"),)
+            and (operand.role is OperandRole.OPERAND or ordinal in updated_outputs)
+            else operand
+            for ordinal, operand in enumerate(operands)
+        )
     # Required machine immediates share canonical IR dictionary order. Assembly
     # retains the machine operand order through its independent field mapping.
     immediates = tuple(
@@ -1556,7 +1569,7 @@ def _descriptor(spec: descriptor_specs._DescriptorSpec) -> Descriptor:
         ),
         effects=_effects(spec, form),
         constraints=(
-            *descriptor_constraints(spec, form, operand_names),
+            *native_constraints,
             *(
                 (Constraint(ConstraintKind.REMATERIALIZABLE, 0),)
                 if spec.op_kind is DescriptorOpKind.CONST or spec.rematerializable

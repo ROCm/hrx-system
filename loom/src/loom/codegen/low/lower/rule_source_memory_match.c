@@ -483,10 +483,11 @@ loom_low_lower_rule_source_memory_rejection_reason(
   const uint32_t vector_lane_count =
       loom_target_contract_query_vector_lane_count(
           match_context->vector_lane_projection, access->vector_lane_count);
-  if (vector_lane_count != source_memory->vector_lane_count) {
+  if (source_memory->vector_lane_count != 0 &&
+      vector_lane_count != source_memory->vector_lane_count) {
     return LOOM_LOW_SOURCE_MEMORY_REJECTION_REASON_VECTOR_LANE_COUNT;
   }
-  if (source_memory->vector_lane_count > 1 &&
+  if (vector_lane_count > 1 &&
       access->vector_lane_byte_stride !=
           source_memory_shape->vector_lane_byte_stride) {
     return LOOM_LOW_SOURCE_MEMORY_REJECTION_REASON_VECTOR_LANE_BYTE_STRIDE;

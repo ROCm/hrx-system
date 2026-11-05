@@ -1154,6 +1154,24 @@ static void loom_low_schedule_score_active_unspillable_completions(
         &state->pressure_limits
              .unspillable_completion_domains[completion_domain_id];
     const uint32_t capacity = domain->capacity;
+    const loom_low_schedule_required_pressure_t* required =
+        &pressure_state->required_pressure[completion_domain_id];
+    if (required->candidate_delta_units > 0 &&
+        required->live_units + (uint64_t)required->candidate_delta_units >=
+            capacity) {
+      const uint32_t sink = loom_low_schedule_completion_demand_select(
+          &pressure_state->unspillable_completion_demand, state->nodes,
+          LOOM_LOW_SCHEDULE_COMPLETION_SELECTION_TRANSACTION,
+          completion_domain_id);
+      if (sink != LOOM_LOW_SCHEDULE_NODE_NONE &&
+          !loom_low_schedule_completion_demand_contains(
+              &pressure_state->unspillable_completion_demand,
+              LOOM_LOW_SCHEDULE_COMPLETION_SELECTION_TRANSACTION,
+              completion_domain_id, candidate_node)) {
+        score->flags |=
+            LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_CONSUMES_COMPLETION_HEADROOM;
+      }
+    }
     const bool can_improve_active =
         capacity < score->active_unspillable_completion_capacity;
     const bool can_improve_transaction_final =

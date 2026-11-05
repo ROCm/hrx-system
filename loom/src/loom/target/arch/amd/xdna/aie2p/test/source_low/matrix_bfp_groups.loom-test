@@ -1,0 +1,346 @@
+// RUN: emit source-low output=low
+aie2p.target<core> @target
+
+func.def target(@target) @matrix_bfp_group(%left: buffer, %right: buffer, %output: buffer) {
+  %left_aligned, %right_aligned, %output_aligned = buffer.assume.alignment %left, %right, %output {minimum_alignment = 64} : buffer, buffer, buffer
+  %origin = index.constant 0 : offset
+  %tile_extent = index.constant 8 : index
+  %schema = encoding.define #encoding.operand<element_format=bfp16ebs8, payload_elements=64, payload_packing=target_fragment, payload_registers=18, rounding=flush_subnormal> : encoding<schema>
+  %out = buffer.view %output_aligned[%origin] : buffer -> view<8x8xf32>
+  %left_view = buffer.view %left_aligned[%origin] : buffer -> view<576xi8>
+  %left_bytes = vector.load %left_view[0] : view<576xi8> -> vector<576xi8>
+  %left_group = vector.fragment<lhs> %left_bytes shape [blocks(%tile_extent), %tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<576xi8>
+  %right_view = buffer.view %right_aligned[%origin] : buffer -> view<576xi8>
+  %right_bytes = vector.load %right_view[0] : view<576xi8> -> vector<576xi8>
+  %right_group = vector.fragment<rhs> %right_bytes shape [blocks(%tile_extent), %tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<576xi8>
+  %initial_values = vector.splatf 0.0 : vector<64xf32>
+  %acc0 = vector.fragment<init> %initial_values shape [%tile_extent, %tile_extent] : vector<64xf32>
+  %left_0 = vector.slice %left_group[0] : vector<576xi8> -> vector<72xi8>
+  %left_tile_0 = vector.fragment<lhs> %left_0 shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %right_0 = vector.slice %right_group[0] : vector<576xi8> -> vector<72xi8>
+  %right_tile_0 = vector.fragment<rhs> %right_0 shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %acc1 = vector.mma %left_tile_0, %right_tile_0, %acc0 : vector<72xi8>, vector<72xi8>, vector<64xf32>
+  %left_1 = vector.slice %left_group[72] : vector<576xi8> -> vector<72xi8>
+  %left_tile_1 = vector.fragment<lhs> %left_1 shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %right_1 = vector.slice %right_group[72] : vector<576xi8> -> vector<72xi8>
+  %right_tile_1 = vector.fragment<rhs> %right_1 shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %acc2 = vector.mma %left_tile_1, %right_tile_1, %acc1 : vector<72xi8>, vector<72xi8>, vector<64xf32>
+  %left_2 = vector.slice %left_group[144] : vector<576xi8> -> vector<72xi8>
+  %left_tile_2 = vector.fragment<lhs> %left_2 shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %right_2 = vector.slice %right_group[144] : vector<576xi8> -> vector<72xi8>
+  %right_tile_2 = vector.fragment<rhs> %right_2 shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %acc3 = vector.mma %left_tile_2, %right_tile_2, %acc2 : vector<72xi8>, vector<72xi8>, vector<64xf32>
+  %left_3 = vector.slice %left_group[216] : vector<576xi8> -> vector<72xi8>
+  %left_tile_3 = vector.fragment<lhs> %left_3 shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %right_3 = vector.slice %right_group[216] : vector<576xi8> -> vector<72xi8>
+  %right_tile_3 = vector.fragment<rhs> %right_3 shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %acc4 = vector.mma %left_tile_3, %right_tile_3, %acc3 : vector<72xi8>, vector<72xi8>, vector<64xf32>
+  %left_4 = vector.slice %left_group[288] : vector<576xi8> -> vector<72xi8>
+  %left_tile_4 = vector.fragment<lhs> %left_4 shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %right_4 = vector.slice %right_group[288] : vector<576xi8> -> vector<72xi8>
+  %right_tile_4 = vector.fragment<rhs> %right_4 shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %acc5 = vector.mma %left_tile_4, %right_tile_4, %acc4 : vector<72xi8>, vector<72xi8>, vector<64xf32>
+  %left_5 = vector.slice %left_group[360] : vector<576xi8> -> vector<72xi8>
+  %left_tile_5 = vector.fragment<lhs> %left_5 shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %right_5 = vector.slice %right_group[360] : vector<576xi8> -> vector<72xi8>
+  %right_tile_5 = vector.fragment<rhs> %right_5 shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %acc6 = vector.mma %left_tile_5, %right_tile_5, %acc5 : vector<72xi8>, vector<72xi8>, vector<64xf32>
+  %left_6 = vector.slice %left_group[432] : vector<576xi8> -> vector<72xi8>
+  %left_tile_6 = vector.fragment<lhs> %left_6 shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %right_6 = vector.slice %right_group[432] : vector<576xi8> -> vector<72xi8>
+  %right_tile_6 = vector.fragment<rhs> %right_6 shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %acc7 = vector.mma %left_tile_6, %right_tile_6, %acc6 : vector<72xi8>, vector<72xi8>, vector<64xf32>
+  %left_7 = vector.slice %left_group[504] : vector<576xi8> -> vector<72xi8>
+  %left_tile_7 = vector.fragment<lhs> %left_7 shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %right_7 = vector.slice %right_group[504] : vector<576xi8> -> vector<72xi8>
+  %right_tile_7 = vector.fragment<rhs> %right_7 shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %acc8 = vector.mma %left_tile_7, %right_tile_7, %acc7 : vector<72xi8>, vector<72xi8>, vector<64xf32>
+  vector.fragment.store<result> %acc8, %out[0, 0] shape [%tile_extent, %tile_extent] : vector<64xf32>, view<8x8xf32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_bfp_group() asm {
+  %left_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %right_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %output_aligned = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
+  %61 = mov.load-fifo.pointer %left_aligned
+  %62 = vlda.load-fifo.low512 %61, 0
+  %63 = mova.fifo.position 64
+  %64, %65, %66, %67 = vlda.pop.bfp16ebs8.buffered64 %61, %62, %63
+  %68, %69, %70, %71 = vlda.pop.bfp16ebs8 %65, %66, %67
+  %72, %73, %74, %75 = vlda.pop.bfp16ebs8 %69, %70, %71
+  %76, %77, %78, %79 = vlda.pop.bfp16ebs8 %73, %74, %75
+  %80, %81, %82, %83 = vlda.pop.bfp16ebs8 %77, %78, %79
+  %84, %85, %86, %87 = vlda.pop.bfp16ebs8 %81, %82, %83
+  %88, %89, %90, %91 = vlda.pop.bfp16ebs8 %85, %86, %87
+  %92, %93, %94, %95 = vlda.pop.bfp16ebs8 %89, %90, %91
+  %97 = mov.load-fifo.pointer %right_aligned
+  %98 = vlda.load-fifo.low512 %97, 0
+  %99 = mova.fifo.position 64
+  %100, %101, %102, %103 = vlda.pop.bfp16ebs8.buffered64 %97, %98, %99
+  %104, %105, %106, %107 = vlda.pop.bfp16ebs8 %101, %102, %103
+  %108, %109, %110, %111 = vlda.pop.bfp16ebs8 %105, %106, %107
+  %112, %113, %114, %115 = vlda.pop.bfp16ebs8 %109, %110, %111
+  %116, %117, %118, %119 = vlda.pop.bfp16ebs8 %113, %114, %115
+  %120, %121, %122, %123 = vlda.pop.bfp16ebs8 %117, %118, %119
+  %124, %125, %126, %127 = vlda.pop.bfp16ebs8 %121, %122, %123
+  %128, %129, %130, %131 = vlda.pop.bfp16ebs8 %125, %126, %127
+  %135 = mova.i32 780
+  %acc1 = mmul.bfp16ebs8.m8n8k8 %64, %100, %135
+  %acc2 = mma.bfp16ebs8.m8n8k8 %acc1, %68, %104, %135
+  %acc3 = mma.bfp16ebs8.m8n8k8 %acc2, %72, %108, %135
+  %acc4 = mma.bfp16ebs8.m8n8k8 %acc3, %76, %112, %135
+  %acc5 = mma.bfp16ebs8.m8n8k8 %acc4, %80, %116, %135
+  %acc6 = mma.bfp16ebs8.m8n8k8 %acc5, %84, %120, %135
+  %acc7 = mma.bfp16ebs8.m8n8k8 %acc6, %88, %124, %135
+  %acc8 = mma.bfp16ebs8.m8n8k8 %acc7, %92, %128, %135
+  %165 = slice %acc8[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %165, %output_aligned, 0
+  %166 = slice %acc8[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %166, %output_aligned, 64
+  %167 = slice %acc8[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %167, %output_aligned, 128
+  %168 = slice %acc8[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %168, %output_aligned, 192
+  return
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @matrix_bfp_group_static(%input: buffer, %output: buffer) {
+  %aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 64 : offset
+  %origin = index.constant 0 : offset
+  %tile_extent = index.constant 8 : index
+  %schema = encoding.define #encoding.operand<element_format=bfp16ebs8, payload_elements=64, payload_packing=target_fragment, payload_registers=18, rounding=flush_subnormal> : encoding<schema>
+  %input_view = buffer.view %aligned[%base] : buffer -> view<576xi8>
+  %bytes = vector.load %input_view[0] : view<576xi8> -> vector<576xi8>
+  %group = vector.fragment<lhs> %bytes shape [blocks(%tile_extent), %tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<576xi8>
+  %first_bytes = vector.slice %group[0] : vector<576xi8> -> vector<72xi8>
+  %last_bytes = vector.slice %group[504] : vector<576xi8> -> vector<72xi8>
+  %first = vector.fragment<lhs> %first_bytes shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %last = vector.fragment<rhs> %last_bytes shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %initial_values = vector.splatf 0.0 : vector<64xf32>
+  %init = vector.fragment<init> %initial_values shape [%tile_extent, %tile_extent] : vector<64xf32>
+  %product = vector.mma %first, %last, %init : vector<72xi8>, vector<72xi8>, vector<64xf32>
+  %out = buffer.view %output_aligned[%origin] : buffer -> view<8x8xf32>
+  vector.fragment.store<result> %product, %out[0, 0] shape [%tile_extent, %tile_extent] : vector<64xf32>, view<8x8xf32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_bfp_group_static() asm {
+  %aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %21 = mov.load-fifo.pointer %aligned
+  %22 = mova.modifier 64
+  %23 = padda.modifier %21, %22
+  %24 = vlda.load-fifo.low512 %23, 0
+  %25 = mova.fifo.position 64
+  %26, %27, %28, %29 = vlda.pop.bfp16ebs8.buffered64 %23, %24, %25
+  %30, %31, %32, %33 = vlda.pop.bfp16ebs8 %27, %28, %29
+  %34, %35, %36, %37 = vlda.pop.bfp16ebs8 %31, %32, %33
+  %38, %39, %40, %41 = vlda.pop.bfp16ebs8 %35, %36, %37
+  %42, %43, %44, %45 = vlda.pop.bfp16ebs8 %39, %40, %41
+  %46, %47, %48, %49 = vlda.pop.bfp16ebs8 %43, %44, %45
+  %50, %51, %52, %53 = vlda.pop.bfp16ebs8 %47, %48, %49
+  %54, %55, %56, %57 = vlda.pop.bfp16ebs8 %51, %52, %53
+  %61 = mova.i32 780
+  %product = mmul.bfp16ebs8.m8n8k8 %26, %54, %61
+  %63 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %63, %output_aligned, 0
+  %64 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %64, %output_aligned, 64
+  %65 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %65, %output_aligned, 128
+  %66 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %66, %output_aligned, 192
+  return
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @matrix_bfp_group_dynamic(%input: buffer, %output: buffer, %record_input: index) {
+  %record = index.assume %record_input [range(%record_input, 0, 7)] : index
+  %aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 64 : offset
+  %origin = index.constant 0 : offset
+  %tile_extent = index.constant 8 : index
+  %schema = encoding.define #encoding.operand<element_format=bfp16ebs8, payload_elements=64, payload_packing=target_fragment, payload_registers=18, rounding=flush_subnormal> : encoding<schema>
+  %input_view = buffer.view %aligned[%base] : buffer -> view<8x576xi8>
+  %bytes = vector.load<volatile> %input_view[%record, 0] : view<8x576xi8> -> vector<576xi8>
+  %group = vector.fragment<lhs> %bytes shape [blocks(%tile_extent), %tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<576xi8>
+  %first_bytes = vector.slice %group[0] : vector<576xi8> -> vector<72xi8>
+  %last_bytes = vector.slice %group[504] : vector<576xi8> -> vector<72xi8>
+  %first = vector.fragment<lhs> %first_bytes shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %last = vector.fragment<rhs> %last_bytes shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %initial_values = vector.splatf 0.0 : vector<64xf32>
+  %init = vector.fragment<init> %initial_values shape [%tile_extent, %tile_extent] : vector<64xf32>
+  %product = vector.mma %first, %last, %init : vector<72xi8>, vector<72xi8>, vector<64xf32>
+  %out = buffer.view %output_aligned[%origin] : buffer -> view<8x8xf32>
+  vector.fragment.store<result> %product, %out[0, 0] shape [%tile_extent, %tile_extent] : vector<64xf32>, view<8x8xf32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_bfp_group_dynamic(%record: reg<aie2p.er>) asm {
+  %aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %28 = mov.load-fifo.pointer %aligned
+  %29 = mov.static-byte-offset 64
+  %30 = mov.i32 576
+  %31 = mac %29, %record, %30
+  %32 = mov.modifier %31
+  %33 = padda.modifier %28, %32
+  %34 = vlda.load-fifo.low512.volatile<volatile> %33, 0
+  %35 = mova.fifo.position 64
+  %36, %37, %38, %39 = vlda.pop.bfp16ebs8.buffered64.volatile<volatile> %33, %34, %35
+  %40, %41, %42, %43 = vlda.pop.bfp16ebs8.volatile<volatile> %37, %38, %39
+  %44, %45, %46, %47 = vlda.pop.bfp16ebs8.volatile<volatile> %41, %42, %43
+  %48, %49, %50, %51 = vlda.pop.bfp16ebs8.volatile<volatile> %45, %46, %47
+  %52, %53, %54, %55 = vlda.pop.bfp16ebs8.volatile<volatile> %49, %50, %51
+  %56, %57, %58, %59 = vlda.pop.bfp16ebs8.volatile<volatile> %53, %54, %55
+  %60, %61, %62, %63 = vlda.pop.bfp16ebs8.volatile<volatile> %57, %58, %59
+  %64, %65, %66, %67 = vlda.pop.bfp16ebs8.volatile<volatile> %61, %62, %63
+  %71 = mova.i32 780
+  %product = mmul.bfp16ebs8.m8n8k8 %36, %64, %71
+  %73 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %73, %output_aligned, 0
+  %74 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %74, %output_aligned, 64
+  %75 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %75, %output_aligned, 128
+  %76 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %76, %output_aligned, 192
+  return
+}
+
+// ====
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @matrix_bfp_three_groups(%input: buffer, %output: buffer, %record_input: index) {
+  %record = index.assume %record_input [range(%record_input, 0, 7)] : index
+  %aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 64 : offset
+  %origin = index.constant 0 : offset
+  %tile_extent = index.constant 8 : index
+  %schema = encoding.define #encoding.operand<element_format=bfp16ebs8, payload_elements=64, payload_packing=target_fragment, payload_registers=18, rounding=flush_subnormal> : encoding<schema>
+  %input_view = buffer.view %aligned[%base] : buffer -> view<8x1728xi8>
+  %bytes = vector.load<volatile> %input_view[%record, 0] : view<8x1728xi8> -> vector<1728xi8>
+  %block_count = index.constant 24 : index
+  %group = vector.fragment<lhs> %bytes shape [blocks(%block_count), %tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<1728xi8>
+  %first_bytes = vector.slice %group[0] : vector<1728xi8> -> vector<72xi8>
+  %last_bytes = vector.slice %group[1656] : vector<1728xi8> -> vector<72xi8>
+  %first = vector.fragment<lhs> %first_bytes shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %last = vector.fragment<rhs> %last_bytes shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %initial_values = vector.splatf 0.0 : vector<64xf32>
+  %init = vector.fragment<init> %initial_values shape [%tile_extent, %tile_extent] : vector<64xf32>
+  %product = vector.mma %first, %last, %init : vector<72xi8>, vector<72xi8>, vector<64xf32>
+  %out = buffer.view %output_aligned[%origin] : buffer -> view<8x8xf32>
+  vector.fragment.store<result> %product, %out[0, 0] shape [%tile_extent, %tile_extent] : vector<64xf32>, view<8x8xf32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_bfp_three_groups(%record: reg<aie2p.er>) asm {
+  %aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %29 = mov.load-fifo.pointer %aligned
+  %30 = mov.static-byte-offset 64
+  %31 = mov.i32 1728
+  %32 = mac %30, %record, %31
+  %33 = mov.modifier %32
+  %34 = padda.modifier %29, %33
+  %35 = vlda.load-fifo.low512.volatile<volatile> %34, 0
+  %36 = mova.fifo.position 64
+  %37, %38, %39, %40 = vlda.pop.bfp16ebs8.buffered64.volatile<volatile> %34, %35, %36
+  %41, %42, %43, %44 = vlda.pop.bfp16ebs8.volatile<volatile> %38, %39, %40
+  %45, %46, %47, %48 = vlda.pop.bfp16ebs8.volatile<volatile> %42, %43, %44
+  %49, %50, %51, %52 = vlda.pop.bfp16ebs8.volatile<volatile> %46, %47, %48
+  %53, %54, %55, %56 = vlda.pop.bfp16ebs8.volatile<volatile> %50, %51, %52
+  %57, %58, %59, %60 = vlda.pop.bfp16ebs8.volatile<volatile> %54, %55, %56
+  %61, %62, %63, %64 = vlda.pop.bfp16ebs8.volatile<volatile> %58, %59, %60
+  %65, %66, %67, %68 = vlda.pop.bfp16ebs8.volatile<volatile> %62, %63, %64
+  %69, %70, %71 = vlda.fill.512.volatile<volatile> %66, %67, %68
+  %73, %74, %75, %76 = vlda.pop.bfp16ebs8.buffered64.volatile<volatile> %69, %70, %71
+  %77, %78, %79, %80 = vlda.pop.bfp16ebs8.volatile<volatile> %74, %75, %76
+  %81, %82, %83, %84 = vlda.pop.bfp16ebs8.volatile<volatile> %78, %79, %80
+  %85, %86, %87, %88 = vlda.pop.bfp16ebs8.volatile<volatile> %82, %83, %84
+  %89, %90, %91, %92 = vlda.pop.bfp16ebs8.volatile<volatile> %86, %87, %88
+  %93, %94, %95, %96 = vlda.pop.bfp16ebs8.volatile<volatile> %90, %91, %92
+  %97, %98, %99, %100 = vlda.pop.bfp16ebs8.volatile<volatile> %94, %95, %96
+  %101, %102, %103, %104 = vlda.pop.bfp16ebs8.volatile<volatile> %98, %99, %100
+  %105, %106, %107 = vlda.fill.512.volatile<volatile> %102, %103, %104
+  %109, %110, %111, %112 = vlda.pop.bfp16ebs8.buffered64.volatile<volatile> %105, %106, %107
+  %113, %114, %115, %116 = vlda.pop.bfp16ebs8.volatile<volatile> %110, %111, %112
+  %117, %118, %119, %120 = vlda.pop.bfp16ebs8.volatile<volatile> %114, %115, %116
+  %121, %122, %123, %124 = vlda.pop.bfp16ebs8.volatile<volatile> %118, %119, %120
+  %125, %126, %127, %128 = vlda.pop.bfp16ebs8.volatile<volatile> %122, %123, %124
+  %129, %130, %131, %132 = vlda.pop.bfp16ebs8.volatile<volatile> %126, %127, %128
+  %133, %134, %135, %136 = vlda.pop.bfp16ebs8.volatile<volatile> %130, %131, %132
+  %137, %138, %139, %140 = vlda.pop.bfp16ebs8.volatile<volatile> %134, %135, %136
+  %145 = mova.i32 780
+  %product = mmul.bfp16ebs8.m8n8k8 %37, %137, %145
+  %147 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %147, %output_aligned, 0
+  %148 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %148, %output_aligned, 64
+  %149 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %149, %output_aligned, 128
+  %150 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %150, %output_aligned, 192
+  return
+}
+
+// ====
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @misaligned_record(%input: buffer) -> (vector<64xf32>) {
+  %aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %origin = index.constant 0 : offset
+  %tile_extent = index.constant 8 : index
+  %block_count = index.constant 8 : index
+  %schema = encoding.define #encoding.operand<element_format=bfp16ebs8, payload_elements=64, payload_packing=target_fragment, payload_registers=18, rounding=flush_subnormal> : encoding<schema>
+  %view = buffer.view %aligned[%origin] : buffer -> view<576xi8>
+  %bytes = vector.load %view[0] : view<576xi8> -> vector<576xi8>
+  %group = vector.fragment<lhs> %bytes shape [blocks(%block_count), %tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<576xi8>
+  // ERROR@+1: TARGET/003 {constraint_key="element_0_multiple_of_72"}
+  %slice = vector.slice %group[1] : vector<576xi8> -> vector<72xi8>
+  %left = vector.fragment<lhs> %slice shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %right = vector.fragment<rhs> %slice shape [%tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %initial_values = vector.splatf 0.0 : vector<64xf32>
+  %init = vector.fragment<init> %initial_values shape [%tile_extent, %tile_extent] : vector<64xf32>
+  %product = vector.mma %left, %right, %init : vector<72xi8>, vector<72xi8>, vector<64xf32>
+  func.return %product : vector<64xf32>
+}
+
+// ====
+// RUN: pass source-to-low
+
+aie2p.target<core> @target
+
+func.def target(@target) @incomplete_group(%input: buffer) {
+  %aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %origin = index.constant 0 : offset
+  %tile_extent = index.constant 8 : index
+  %block_count = index.constant 9 : index
+  %schema = encoding.define #encoding.operand<element_format=bfp16ebs8, payload_elements=64, payload_packing=target_fragment, payload_registers=18, rounding=flush_subnormal> : encoding<schema>
+  %view = buffer.view %aligned[%origin] : buffer -> view<648xi8>
+  // ERROR@+1: TARGET/004 {subject_name="result", constraint_key="static_dim0_multiple", expected_count="576"}
+  %bytes = vector.load<volatile> %view[0] : view<648xi8> -> vector<648xi8>
+  %group = vector.fragment<lhs> %bytes shape [blocks(%block_count), %tile_extent, %tile_extent] using {schema = %schema : encoding<schema>} : vector<648xi8>
+  func.return
+}

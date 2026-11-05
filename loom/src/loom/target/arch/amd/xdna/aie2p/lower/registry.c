@@ -228,11 +228,16 @@ static iree_status_t loom_aie2p_map_value(void* user_data,
   }
   if (loom_type_is_vector(source_type) && loom_type_rank(source_type) == 1 &&
       loom_type_element_type(source_type) == LOOM_SCALAR_TYPE_I8 &&
-      loom_type_dim_static_size_at(source_type, 0) == 72 &&
       loom_aie2p_value_has_bfp_storage(
           loom_low_lower_context_fact_table(context), source_value_id)) {
-    return loom_low_lower_make_register_type(
-        context, AIE2P_CORE_REG_CLASS_ID_AIE2P_MEXA, 1, out_low_type);
+    // Each packed matrix block contributes one complete native EX carrier.
+    const int64_t byte_count = loom_type_dim_static_size_at(source_type, 0);
+    if (byte_count > 0 && byte_count % 72 == 0 &&
+        byte_count / 72 <= UINT16_MAX) {
+      return loom_low_lower_make_register_type(
+          context, AIE2P_CORE_REG_CLASS_ID_AIE2P_MEXA,
+          (uint16_t)(byte_count / 72), out_low_type);
+    }
   }
   return loom_aie2p_map_type(user_data, context, source_op, source_type,
                              out_low_type);

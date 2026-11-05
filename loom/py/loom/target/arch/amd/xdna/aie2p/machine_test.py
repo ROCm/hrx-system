@@ -68,6 +68,22 @@ def test_q_register_adapters_repair_source_encoder_aliasing() -> None:
         assert dict(adapters[name].effective_register_encodings) == architectural_values
 
 
+def test_bfp_parts_encode_the_matching_mantissa_and_exponent_registers() -> None:
+    adapters = {
+        adapter.name: dict(adapter.effective_register_encodings)
+        for adapter in CORE_MACHINE_TABLE.register_adapters
+    }
+    for component, native_adapter, register_prefix in (
+        ("mantissas", "OP_mMvBMXDst", "x"),
+        ("exponents_low32", "OP_mElm", "el"),
+        ("exponents_high32", "OP_mEhm", "eh"),
+    ):
+        assert adapters[f"LOOM_mEXa_{component}_{native_adapter}"] == {
+            f"ex{index}": adapters[native_adapter][f"{register_prefix}{index}"]
+            for index in range(12)
+        }
+
+
 def test_el_subregister_adapters_are_derived_from_owned_register_facts() -> None:
     registers = {
         register.name: register for register in CORE_MACHINE_TABLE.physical_registers

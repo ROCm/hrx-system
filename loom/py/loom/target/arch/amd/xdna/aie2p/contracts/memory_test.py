@@ -17,7 +17,7 @@ from loom.target.arch.amd.xdna.aie2p.contracts.memory import (
     AIE2P_VIEW_ELEMENT_TYPES,
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.packet_memory import (
-    AIE2P_PACKET_MEMORY_RULES,
+    AIE2P_INDEXED_PACKET_MEMORY_RULES,
 )
 from loom.target.contracts import (
     DescriptorResultType,
@@ -211,32 +211,34 @@ def _assert_address_forms(
 
 
 def test_view_carriers_materialize_every_supported_view_as_one_address() -> None:
-    assert len(AIE2P_VIEW_CARRIER_RULES) == 2 * 4
+    assert len(AIE2P_VIEW_CARRIER_RULES) == 2 * 5
     view_type = View(AIE2P_VIEW_ELEMENT_TYPES)
     expected_descriptor_keys = (
         None,
         "amd.xdna.aie2p.address.add.a.immediate",
         "amd.xdna.aie2p.address.add.a.register",
         "amd.xdna.aie2p.address.add.a.register",
+        "amd.xdna.aie2p.address.add.a.register",
     )
     expected_shapes = (
         (0, 0, 0, 0, False, False, 0),
         (-512, 448, 0, 0, False, False, 64),
+        (-1024, 1023, 0, 0, False, False, 0),
         (_I32_MIN, _I32_MAX, 0, 0, False, False, 0),
         (_I32_MIN, _I32_MAX, None, 1, True, True, 0),
     )
     rule_index = 0
     for source_op in (buffer.buffer_view, view.view_subview):
-        rules = AIE2P_VIEW_CARRIER_RULES[rule_index : rule_index + 4]
-        rule_index += 4
-        assert [rule.source_op for rule in rules] == [source_op] * 4
+        rules = AIE2P_VIEW_CARRIER_RULES[rule_index : rule_index + 5]
+        rule_index += 5
+        assert [rule.source_op for rule in rules] == [source_op] * 5
         assert [
             rule.descriptor.key if rule.descriptor is not None else None
             for rule in rules
         ] == list(expected_descriptor_keys)
         assert [rule.guards for rule in rules] == [
             (Guard.value_type("result", view_type),)
-        ] * 4
+        ] * 5
         constraints = [_source_memory_emit(rule).source_memory for rule in rules]
         assert [
             (
@@ -272,11 +274,11 @@ def test_view_carriers_materialize_every_supported_view_as_one_address() -> None
             assert constraint.vector_lane_byte_stride == 1
             assert constraint.byte_offset_unsigned_bit_count == 32
 
-        zero, immediate, static_register, dynamic_register = rules
+        zero, immediate, compact_register, static_register, dynamic_register = rules
         assert isinstance(zero.emit[0], EmitRegisterCopy)
         assert zero.emit[0].source.kind is SourceValueKind.SOURCE_MEMORY_ROOT
         assert zero.emit[0].result == ValueRef.result("result")
-        for rule in (immediate, static_register, dynamic_register):
+        for rule in (immediate, compact_register, static_register, dynamic_register):
             root_copy = rule.emit[0]
             assert isinstance(root_copy, EmitRegisterCopy)
             assert root_copy.source.kind is SourceValueKind.SOURCE_MEMORY_ROOT
@@ -285,15 +287,26 @@ def test_view_carriers_materialize_every_supported_view_as_one_address() -> None
         assert immediate.emit[1].immediates == {
             "imm": SourceMemoryProject.static_byte_offset()
         }
-        assert [
-            emit.descriptor.key
-            for emit in static_register.emit
-            if isinstance(emit, EmitDescriptorOp)
-        ] == [
-            "amd.xdna.aie2p.materialize.static-byte-offset.i32",
-            "amd.xdna.aie2p.move.er.to.em",
-            "amd.xdna.aie2p.address.add.a.register",
-        ]
+        for rule, form, minimum, maximum in (
+            (compact_register, "mova", -1024, 1023),
+            (static_register, "movxm", _I32_MIN, _I32_MAX),
+        ):
+            assert [
+                emit.descriptor.key
+                for emit in rule.emit
+                if isinstance(emit, EmitDescriptorOp)
+            ] == [
+                f"amd.xdna.aie2p.constant.modifier.{form}",
+                "amd.xdna.aie2p.address.add.a.register",
+            ]
+            modifier = rule.emit[1]
+            assert modifier.immediates == {
+                "i": SourceMemoryProject.static_byte_offset()
+            }
+            (immediate,) = modifier.descriptor.immediates
+            assert immediate.signed_min == minimum
+            assert immediate.unsigned_max == maximum
+            assert rule.emit[-1].result_types == {"ptr_out": rule.emit[0].result}
         assert [
             emit.descriptor.key
             for emit in dynamic_register.emit
@@ -311,24 +324,27 @@ def test_view_carriers_materialize_every_supported_view_as_one_address() -> None
         assert dynamic_register.emit[-1].copy_operands == ()
 
 
-def test_memory_families_consume_their_planned_storage_root() -> None:
-    for rules in (AIE2P_MEMORY_RULES, AIE2P_PACKET_MEMORY_RULES):
-        pointer_emits = [
-            emit
-            for rule in rules
-            for emit in rule.emit
-            if isinstance(emit, EmitDescriptorOp)
-            and emit.source_memory is not None
-            and "ptr" in emit.operands
-        ]
-        assert pointer_emits
-        assert all(
-            emit.operands["ptr"].kind is SourceValueKind.SOURCE_MEMORY_ROOT
-            for emit in pointer_emits
-        )
+def test_indexed_memory_families_consume_their_planned_storage_root() -> None:
+    for rules in (AIE2P_MEMORY_RULES, AIE2P_INDEXED_PACKET_MEMORY_RULES):
+        for rule in rules:
+            pointers = {ValueRef.source_memory_root()}
+            memory = _source_memory_emit(rule).source_memory
+            for emit in rule.emit:
+                if (
+                    isinstance(emit, EmitRegisterCopy)
+                    and emit.source_memory is not None
+                ):
+                    assert emit.source in pointers
+                    assert emit.source_memory == memory
+                    pointers.add(emit.result)
+                elif isinstance(emit, EmitDescriptorOp) and "ptr" in emit.operands:
+                    assert emit.operands["ptr"] in pointers
+                    assert emit.source_memory == memory
+                    if "ptr_out" in emit.results:
+                        pointers.add(emit.results["ptr_out"])
 
 
-def test_all_memory_families_project_dynamic_offsets_directly_into_dj() -> None:
+def test_indexed_memory_families_materialize_the_complete_planned_address() -> None:
     no_index = SourceMemoryDynamicIndexSource.NONE
     value_index = SourceMemoryDynamicIndexSource.VALUE
     expected_dynamic_constraints = (
@@ -342,7 +358,7 @@ def test_all_memory_families_project_dynamic_offsets_directly_into_dj() -> None:
     )
     # Both tables include their volatile variants. Raw buffers, fragment stores,
     # scalarized accesses and fused packets use the same addressing contract.
-    for rules in (AIE2P_MEMORY_RULES, AIE2P_PACKET_MEMORY_RULES):
+    for rules in (AIE2P_MEMORY_RULES, AIE2P_INDEXED_PACKET_MEMORY_RULES):
         assert len(rules) % len(expected_dynamic_constraints) == 0
         for start in range(0, len(rules), len(expected_dynamic_constraints)):
             family = rules[start : start + len(expected_dynamic_constraints)]
@@ -358,10 +374,16 @@ def test_all_memory_families_project_dynamic_offsets_directly_into_dj() -> None:
                 for constraint in constraints
             ] == list(expected_dynamic_constraints)
             projects = [
-                emit.immediates["imm"]
+                project
                 for emit in family[0].emit
                 if isinstance(emit, EmitDescriptorOp)
-                and emit.descriptor == family[0].descriptor
+                for project in dict(emit.immediates).values()
+                if isinstance(project, SourceMemoryProject)
+                and project.kind
+                in (
+                    SourceMemoryProjectKind.STATIC_BYTE_OFFSET,
+                    SourceMemoryProjectKind.STATIC_BYTE_OFFSET_PLUS_LITERAL,
+                )
             ]
             assert projects
             maximum_chunk_offset = max(project.literal_i64 for project in projects)
@@ -373,11 +395,20 @@ def test_all_memory_families_project_dynamic_offsets_directly_into_dj() -> None:
                 for constraint in constraints[4:6]
             ] == [(-128, 127), (_I32_MIN, _I32_MAX - maximum_chunk_offset)]
 
+            rebases_pointer = any(
+                isinstance(emit, EmitRegisterCopy) and emit.source_memory is not None
+                for emit in family[6].emit
+            )
             complete_offset = next(
                 emit
                 for emit in family[6].emit
                 if isinstance(emit, EmitDescriptorOp)
-                and emit.descriptor.key == "amd.xdna.aie2p.move.to.address-index"
+                and emit.descriptor.key
+                == (
+                    "amd.xdna.aie2p.move.er.to.em"
+                    if rebases_pointer
+                    else "amd.xdna.aie2p.move.to.address-index"
+                )
             )
             assert complete_offset.operands["src"].kind is (
                 SourceValueKind.SOURCE_MEMORY_BYTE_OFFSET
@@ -397,6 +428,28 @@ def test_all_memory_families_project_dynamic_offsets_directly_into_dj() -> None:
             ]
 
             for address_form, rule in enumerate(family[1:], start=1):
+                if rebases_pointer:
+                    accesses = [
+                        emit
+                        for emit in rule.emit
+                        if isinstance(emit, EmitDescriptorOp)
+                        and emit.descriptor == rule.descriptor
+                    ]
+                    updates = [
+                        emit
+                        for emit in rule.emit
+                        if isinstance(emit, EmitDescriptorOp)
+                        and "ptr_out" in emit.results
+                    ]
+                    assert len(updates) == 1
+                    assert {emit.operands["ptr"] for emit in accesses} == {
+                        updates[0].results["ptr_out"]
+                    }
+                    assert [emit.immediates["imm"] for emit in accesses] == [
+                        project.literal_i64 for project in projects
+                    ]
+                    assert all("dj" not in emit.operands for emit in accesses)
+                    continue
                 producers = {
                     result: emit
                     for emit in rule.emit
@@ -407,7 +460,8 @@ def test_all_memory_families_project_dynamic_offsets_directly_into_dj() -> None:
                     emit
                     for emit in rule.emit
                     if isinstance(emit, EmitDescriptorOp)
-                    and emit.descriptor == rule.descriptor
+                    and emit.source_memory is not None
+                    and "ptr" in emit.operands
                 ]
                 for memory_emit, project in zip(memory_emits, projects, strict=True):
                     address = producers[memory_emit.operands["dj"]]
@@ -1242,10 +1296,8 @@ def test_accumulator_memory_rules_decompose_raw_payloads_into_native_chunks() ->
                 == element_byte_count
             ]
             assert [rule.descriptor.key for rule in rules] == [
-                "amd.xdna.aie2p.load.accumulator.indexed.immediate",
-                *("amd.xdna.aie2p.load.accumulator.indexed.register",) * 6,
-                "amd.xdna.aie2p.store.accumulator.indexed.immediate",
-                *("amd.xdna.aie2p.store.accumulator.indexed.register",) * 6,
+                *("amd.xdna.aie2p.load.accumulator.indexed.immediate",) * 7,
+                *("amd.xdna.aie2p.store.accumulator.indexed.immediate",) * 7,
             ]
             assert all(
                 rule.guards[-1].type_pattern.elements == element_types for rule in rules
@@ -1324,23 +1376,14 @@ def test_accumulator_memory_rules_decompose_raw_payloads_into_native_chunks() ->
                     == expected_chunk_offsets
                 )
 
-                for address_index, expected_offsets in (
-                    (1, expected_chunk_offsets),
-                    (2, expected_chunk_offsets[1:]),
-                    (3, expected_chunk_offsets),
-                    (4, expected_chunk_offsets),
-                    (5, expected_chunk_offsets),
-                    (6, expected_chunk_offsets[1:]),
-                ):
-                    static_projects = [
-                        project
-                        for emit in operation_rules[address_index].emit
+                for rule in operation_rules[1:]:
+                    accesses = [
+                        emit
+                        for emit in rule.emit
                         if isinstance(emit, EmitDescriptorOp)
-                        if isinstance(emit.immediates, dict)
-                        for project in emit.immediates.values()
-                        if isinstance(project, SourceMemoryProject)
+                        and emit.descriptor == rule.descriptor
                     ]
-                    assert (
-                        tuple(project.literal_i64 for project in static_projects)
-                        == expected_offsets
+                    assert tuple(emit.immediates["imm"] for emit in accesses) == (
+                        expected_chunk_offsets
                     )
+                    assert len({emit.operands["ptr"] for emit in accesses}) == 1

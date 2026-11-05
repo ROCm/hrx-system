@@ -266,19 +266,18 @@ low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @f32_uniform_sme
   %26 = slice %lhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
   %27 = slice %rhs[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr x2>
   %28 = v_pk_mul_f32 %26, %27
-  %scaled = concat(%25, %28) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
   %30 = v_mov_b32_copy %bias
-  %31 = slice %scaled[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %46 = slice %25[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %32 = slice %rhs[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %33 = v_fma_f32 %31, %32, %30
-  %34 = slice %scaled[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %33 = v_fma_f32 %46, %32, %30
+  %45 = slice %25[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %35 = slice %rhs[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %36 = v_fma_f32 %34, %35, %33
-  %37 = slice %scaled[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %36 = v_fma_f32 %45, %35, %33
+  %44 = slice %28[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %38 = slice %rhs[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %39 = v_fma_f32 %37, %38, %36
-  %40 = slice %scaled[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %39 = v_fma_f32 %44, %38, %36
+  %43 = slice %28[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %41 = slice %rhs[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %dot = v_fma_f32 %40, %41, %39
+  %dot = v_fma_f32 %43, %41, %39
   return %dot
 }

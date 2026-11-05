@@ -1,0 +1,486 @@
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @matrix_prepacked_bytes(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<72xi8>
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<72xi8>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<8x8xf32>
+  %m = index.constant 8 : index
+  %n = index.constant 8 : index
+  %k = index.constant 8 : index
+  %lhs_value = vector.load %lhs_view[0] : view<72xi8> -> vector<72xi8>
+  %rhs_value = vector.load %rhs_view[0] : view<72xi8> -> vector<72xi8>
+  %schema = encoding.define #encoding.operand<element_format=bfp16ebs8, payload_elements=64, payload_packing=target_fragment, payload_registers=18, rounding=flush_subnormal> : encoding<schema>
+  %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %accumulator_init = vector.splatf 0.0 : vector<64xf32>
+  %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xf32>
+  %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<72xi8>, vector<72xi8>, vector<64xf32>
+  vector.fragment.store<result> %product, %output_view[0, 0] shape [%m, %n] : vector<64xf32>, view<8x8xf32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_prepacked_bytes() asm {
+  %lhs_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %rhs_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %output_aligned = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
+  %24 = vlda.512.i8x64 %lhs_aligned, 0
+  %25 = mov.static-byte-offset 64
+  %26 = mov.address-index %25
+  %27 = lda.i32.index %lhs_aligned, %26
+  %28 = mov.static-byte-offset 68
+  %29 = mov.address-index %28
+  %30 = lda.i32.index %lhs_aligned, %29
+  %31 = vbcst.32 %30
+  %32 = vinsert.32.zero %31, %27
+  %33 = mov.short 1
+  %34 = vshift %24, %32, %33
+  %35 = mov.short 2
+  %36 = vshift %24, %32, %35
+  %37 = mov.short 12
+  %38 = select.mask %37, 0
+  %39 = vsel.32 %34, %36, %38
+  %40 = mov.short 3
+  %41 = vshift %24, %32, %40
+  %42 = mov.short 48
+  %43 = select.mask %42, 0
+  %44 = vsel.32 %39, %41, %43
+  %45 = mov.short 4
+  %46 = vshift %24, %32, %45
+  %47 = mov.short 192
+  %48 = select.mask %47, 0
+  %49 = vsel.32 %44, %46, %48
+  %50 = mov.short 5
+  %51 = vshift %24, %32, %50
+  %52 = mov.short 768
+  %53 = select.mask %52, 0
+  %54 = vsel.32 %49, %51, %53
+  %55 = mov.short 6
+  %56 = vshift %24, %32, %55
+  %57 = mov.i32 3072
+  %58 = select.mask %57, 0
+  %59 = vsel.32 %54, %56, %58
+  %60 = mov.short 7
+  %61 = vshift %24, %32, %60
+  %62 = mov.i32 12288
+  %63 = select.mask %62, 0
+  %64 = vsel.32 %59, %61, %63
+  %65 = mov.short 8
+  %66 = vshift %24, %32, %65
+  %67 = mov.i32 49152
+  %68 = select.mask %67, 0
+  %69 = vsel.32 %64, %66, %68
+  %70 = bfp.mantissas.from.vector512 %69
+  %72 = mov.short 16
+  %73 = mov.short 24
+  %74 = vextract.8.imm %24, 0
+  %75 = vextract.8.imm %24, 9
+  %76 = lshl %75, %65
+  %77 = or %74, %76
+  %78 = vextract.8.imm %24, 18
+  %79 = lshl %78, %72
+  %80 = or %77, %79
+  %81 = vextract.8.imm %24, 27
+  %82 = lshl %81, %73
+  %83 = or %80, %82
+  %84 = bfp.exponents.low32.from.scalar %83, %70
+  %85 = vextract.8.imm %24, 36
+  %86 = vextract.8.imm %24, 45
+  %87 = lshl %86, %65
+  %88 = or %85, %87
+  %89 = vextract.8.imm %24, 54
+  %90 = lshl %89, %72
+  %91 = or %88, %90
+  %92 = vextract.8.imm %24, 63
+  %93 = lshl %92, %73
+  %94 = or %91, %93
+  %lhs_fragment = bfp.exponents.high32.from.scalar %94, %84
+  %96 = vlda.512.i8x64 %rhs_aligned, 0
+  %99 = lda.i32.index %rhs_aligned, %26
+  %102 = lda.i32.index %rhs_aligned, %29
+  %103 = vbcst.32 %102
+  %104 = vinsert.32.zero %103, %99
+  %106 = vshift %96, %104, %33
+  %108 = vshift %96, %104, %35
+  %110 = select.mask %37, 0
+  %111 = vsel.32 %106, %108, %110
+  %113 = vshift %96, %104, %40
+  %115 = select.mask %42, 0
+  %116 = vsel.32 %111, %113, %115
+  %118 = vshift %96, %104, %45
+  %120 = select.mask %47, 0
+  %121 = vsel.32 %116, %118, %120
+  %123 = vshift %96, %104, %50
+  %125 = select.mask %52, 0
+  %126 = vsel.32 %121, %123, %125
+  %128 = vshift %96, %104, %55
+  %130 = select.mask %57, 0
+  %131 = vsel.32 %126, %128, %130
+  %133 = vshift %96, %104, %60
+  %135 = select.mask %62, 0
+  %136 = vsel.32 %131, %133, %135
+  %138 = vshift %96, %104, %65
+  %140 = select.mask %67, 0
+  %141 = vsel.32 %136, %138, %140
+  %142 = bfp.mantissas.from.vector512 %141
+  %146 = vextract.8.imm %96, 0
+  %147 = vextract.8.imm %96, 9
+  %148 = lshl %147, %65
+  %149 = or %146, %148
+  %150 = vextract.8.imm %96, 18
+  %151 = lshl %150, %72
+  %152 = or %149, %151
+  %153 = vextract.8.imm %96, 27
+  %154 = lshl %153, %73
+  %155 = or %152, %154
+  %156 = bfp.exponents.low32.from.scalar %155, %142
+  %157 = vextract.8.imm %96, 36
+  %158 = vextract.8.imm %96, 45
+  %159 = lshl %158, %65
+  %160 = or %157, %159
+  %161 = vextract.8.imm %96, 54
+  %162 = lshl %161, %72
+  %163 = or %160, %162
+  %164 = vextract.8.imm %96, 63
+  %165 = lshl %164, %73
+  %166 = or %163, %165
+  %rhs_fragment = bfp.exponents.high32.from.scalar %166, %156
+  %168 = mova.i32 780
+  %product = mmul.bfp16ebs8.m8n8k8 %lhs_fragment, %rhs_fragment, %168
+  %170 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %170, %output_aligned, 0
+  %171 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %171, %output_aligned, 64
+  %172 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %172, %output_aligned, 128
+  %173 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %173, %output_aligned, 192
+  return
+}
+
+// ====
+
+// Packed arguments may also have byte-oriented users; constructing a matrix
+// operand transfers the payload without changing any of its bits.
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @matrix_packed_value(%lhs_value: vector<72xi8>, %rhs_value: vector<72xi8>, %output: buffer) {
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<8x8xf32>
+  %m = index.constant 8 : index
+  %n = index.constant 8 : index
+  %k = index.constant 8 : index
+  %schema = encoding.define #encoding.operand<element_format=bfp16ebs8, payload_elements=64, payload_packing=target_fragment, payload_registers=18, rounding=flush_subnormal> : encoding<schema>
+  %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %accumulator_init = vector.splatf 0.0 : vector<64xf32>
+  %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xf32>
+  %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<72xi8>, vector<72xi8>, vector<64xf32>
+  vector.fragment.store<result> %product, %output_view[0, 0] shape [%m, %n] : vector<64xf32>, view<8x8xf32>
+  func.return
+}
+
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_packed_value(%lhs_value: reg<aie2p.vec256 x4>, %rhs_value: reg<aie2p.vec256 x4>) asm {
+  %output_aligned = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
+  %18 = slice %lhs_value[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %19 = slice %lhs_value[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %20 = mov.short 1
+  %21 = vshift %18, %19, %20
+  %22 = mov.short 2
+  %23 = vshift %18, %19, %22
+  %24 = mov.short 12
+  %25 = select.mask %24, 0
+  %26 = vsel.32 %21, %23, %25
+  %27 = mov.short 3
+  %28 = vshift %18, %19, %27
+  %29 = mov.short 48
+  %30 = select.mask %29, 0
+  %31 = vsel.32 %26, %28, %30
+  %32 = mov.short 4
+  %33 = vshift %18, %19, %32
+  %34 = mov.short 192
+  %35 = select.mask %34, 0
+  %36 = vsel.32 %31, %33, %35
+  %37 = mov.short 5
+  %38 = vshift %18, %19, %37
+  %39 = mov.short 768
+  %40 = select.mask %39, 0
+  %41 = vsel.32 %36, %38, %40
+  %42 = mov.short 6
+  %43 = vshift %18, %19, %42
+  %44 = mov.i32 3072
+  %45 = select.mask %44, 0
+  %46 = vsel.32 %41, %43, %45
+  %47 = mov.short 7
+  %48 = vshift %18, %19, %47
+  %49 = mov.i32 12288
+  %50 = select.mask %49, 0
+  %51 = vsel.32 %46, %48, %50
+  %52 = mov.short 8
+  %53 = vshift %18, %19, %52
+  %54 = mov.i32 49152
+  %55 = select.mask %54, 0
+  %56 = vsel.32 %51, %53, %55
+  %57 = bfp.mantissas.from.vector512 %56
+  %59 = mov.short 16
+  %60 = mov.short 24
+  %61 = vextract.8.imm %18, 0
+  %62 = vextract.8.imm %18, 9
+  %63 = lshl %62, %52
+  %64 = or %61, %63
+  %65 = vextract.8.imm %18, 18
+  %66 = lshl %65, %59
+  %67 = or %64, %66
+  %68 = vextract.8.imm %18, 27
+  %69 = lshl %68, %60
+  %70 = or %67, %69
+  %71 = bfp.exponents.low32.from.scalar %70, %57
+  %72 = vextract.8.imm %18, 36
+  %73 = vextract.8.imm %18, 45
+  %74 = lshl %73, %52
+  %75 = or %72, %74
+  %76 = vextract.8.imm %18, 54
+  %77 = lshl %76, %59
+  %78 = or %75, %77
+  %79 = vextract.8.imm %18, 63
+  %80 = lshl %79, %60
+  %81 = or %78, %80
+  %lhs_fragment = bfp.exponents.high32.from.scalar %81, %71
+  %83 = slice %rhs_value[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %84 = slice %rhs_value[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %86 = vshift %83, %84, %20
+  %88 = vshift %83, %84, %22
+  %90 = select.mask %24, 0
+  %91 = vsel.32 %86, %88, %90
+  %93 = vshift %83, %84, %27
+  %95 = select.mask %29, 0
+  %96 = vsel.32 %91, %93, %95
+  %98 = vshift %83, %84, %32
+  %100 = select.mask %34, 0
+  %101 = vsel.32 %96, %98, %100
+  %103 = vshift %83, %84, %37
+  %105 = select.mask %39, 0
+  %106 = vsel.32 %101, %103, %105
+  %108 = vshift %83, %84, %42
+  %110 = select.mask %44, 0
+  %111 = vsel.32 %106, %108, %110
+  %113 = vshift %83, %84, %47
+  %115 = select.mask %49, 0
+  %116 = vsel.32 %111, %113, %115
+  %118 = vshift %83, %84, %52
+  %120 = select.mask %54, 0
+  %121 = vsel.32 %116, %118, %120
+  %122 = bfp.mantissas.from.vector512 %121
+  %126 = vextract.8.imm %83, 0
+  %127 = vextract.8.imm %83, 9
+  %128 = lshl %127, %52
+  %129 = or %126, %128
+  %130 = vextract.8.imm %83, 18
+  %131 = lshl %130, %59
+  %132 = or %129, %131
+  %133 = vextract.8.imm %83, 27
+  %134 = lshl %133, %60
+  %135 = or %132, %134
+  %136 = bfp.exponents.low32.from.scalar %135, %122
+  %137 = vextract.8.imm %83, 36
+  %138 = vextract.8.imm %83, 45
+  %139 = lshl %138, %52
+  %140 = or %137, %139
+  %141 = vextract.8.imm %83, 54
+  %142 = lshl %141, %59
+  %143 = or %140, %142
+  %144 = vextract.8.imm %83, 63
+  %145 = lshl %144, %60
+  %146 = or %143, %145
+  %rhs_fragment = bfp.exponents.high32.from.scalar %146, %136
+  %148 = mova.i32 780
+  %product = mmul.bfp16ebs8.m8n8k8 %lhs_fragment, %rhs_fragment, %148
+  %150 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %150, %output_aligned, 0
+  %151 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %151, %output_aligned, 64
+  %152 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %152, %output_aligned, 128
+  %153 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %153, %output_aligned, 192
+  return
+}
+
+// ====
+
+// Dynamic record coordinates retain the complete byte offset and exact
+// 72-byte access; a wider row stride does not widen the memory read.
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @matrix_packed_record(%lhs: buffer, %rhs: buffer, %output: buffer, %record_input: index) {
+  %record = index.assume %record_input [range(%record_input, 0, 3)] : index
+  %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<4x128xi8>
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<4x128xi8>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<8x8xf32>
+  %m = index.constant 8 : index
+  %n = index.constant 8 : index
+  %k = index.constant 8 : index
+  %lhs_value = vector.load %lhs_view[%record, 0] : view<4x128xi8> -> vector<72xi8>
+  %rhs_value = vector.load %rhs_view[%record, 0] : view<4x128xi8> -> vector<72xi8>
+  %schema = encoding.define #encoding.operand<element_format=bfp16ebs8, payload_elements=64, payload_packing=target_fragment, payload_registers=18, rounding=flush_subnormal> : encoding<schema>
+  %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<72xi8>
+  %accumulator_init = vector.splatf 0.0 : vector<64xf32>
+  %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xf32>
+  %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<72xi8>, vector<72xi8>, vector<64xf32>
+  vector.fragment.store<result> %product, %output_view[0, 0] shape [%m, %n] : vector<64xf32>, view<8x8xf32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_packed_record(%record: reg<aie2p.er>) asm {
+  %lhs_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %rhs_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %output_aligned = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
+  %33 = mov.i32 7
+  %34 = lshl %record, %33
+  %35 = mov.address-index %34
+  %36 = vlda.512.i8x64.index %lhs_aligned, %35
+  %37 = add.address-index.immediate %34, 64
+  %38 = lda.i32.index %lhs_aligned, %37
+  %39 = add.address-index.immediate %34, 68
+  %40 = lda.i32.index %lhs_aligned, %39
+  %41 = vbcst.32 %40
+  %42 = vinsert.32.zero %41, %38
+  %43 = mov.short 1
+  %44 = vshift %36, %42, %43
+  %45 = mov.short 2
+  %46 = vshift %36, %42, %45
+  %47 = mov.short 12
+  %48 = select.mask %47, 0
+  %49 = vsel.32 %44, %46, %48
+  %50 = mov.short 3
+  %51 = vshift %36, %42, %50
+  %52 = mov.short 48
+  %53 = select.mask %52, 0
+  %54 = vsel.32 %49, %51, %53
+  %55 = mov.short 4
+  %56 = vshift %36, %42, %55
+  %57 = mov.short 192
+  %58 = select.mask %57, 0
+  %59 = vsel.32 %54, %56, %58
+  %60 = mov.short 5
+  %61 = vshift %36, %42, %60
+  %62 = mov.short 768
+  %63 = select.mask %62, 0
+  %64 = vsel.32 %59, %61, %63
+  %65 = mov.short 6
+  %66 = vshift %36, %42, %65
+  %67 = mov.i32 3072
+  %68 = select.mask %67, 0
+  %69 = vsel.32 %64, %66, %68
+  %70 = mov.short 7
+  %71 = vshift %36, %42, %70
+  %72 = mov.i32 12288
+  %73 = select.mask %72, 0
+  %74 = vsel.32 %69, %71, %73
+  %75 = mov.short 8
+  %76 = vshift %36, %42, %75
+  %77 = mov.i32 49152
+  %78 = select.mask %77, 0
+  %79 = vsel.32 %74, %76, %78
+  %80 = bfp.mantissas.from.vector512 %79
+  %82 = mov.short 16
+  %83 = mov.short 24
+  %84 = vextract.8.imm %36, 0
+  %85 = vextract.8.imm %36, 9
+  %86 = lshl %85, %75
+  %87 = or %84, %86
+  %88 = vextract.8.imm %36, 18
+  %89 = lshl %88, %82
+  %90 = or %87, %89
+  %91 = vextract.8.imm %36, 27
+  %92 = lshl %91, %83
+  %93 = or %90, %92
+  %94 = bfp.exponents.low32.from.scalar %93, %80
+  %95 = vextract.8.imm %36, 36
+  %96 = vextract.8.imm %36, 45
+  %97 = lshl %96, %75
+  %98 = or %95, %97
+  %99 = vextract.8.imm %36, 54
+  %100 = lshl %99, %82
+  %101 = or %98, %100
+  %102 = vextract.8.imm %36, 63
+  %103 = lshl %102, %83
+  %104 = or %101, %103
+  %lhs_fragment = bfp.exponents.high32.from.scalar %104, %94
+  %107 = vlda.512.i8x64.index %rhs_aligned, %35
+  %109 = lda.i32.index %rhs_aligned, %37
+  %111 = lda.i32.index %rhs_aligned, %39
+  %112 = vbcst.32 %111
+  %113 = vinsert.32.zero %112, %109
+  %115 = vshift %107, %113, %43
+  %117 = vshift %107, %113, %45
+  %119 = select.mask %47, 0
+  %120 = vsel.32 %115, %117, %119
+  %122 = vshift %107, %113, %50
+  %124 = select.mask %52, 0
+  %125 = vsel.32 %120, %122, %124
+  %127 = vshift %107, %113, %55
+  %129 = select.mask %57, 0
+  %130 = vsel.32 %125, %127, %129
+  %132 = vshift %107, %113, %60
+  %134 = select.mask %62, 0
+  %135 = vsel.32 %130, %132, %134
+  %137 = vshift %107, %113, %65
+  %139 = select.mask %67, 0
+  %140 = vsel.32 %135, %137, %139
+  %142 = vshift %107, %113, %70
+  %144 = select.mask %72, 0
+  %145 = vsel.32 %140, %142, %144
+  %147 = vshift %107, %113, %75
+  %149 = select.mask %77, 0
+  %150 = vsel.32 %145, %147, %149
+  %151 = bfp.mantissas.from.vector512 %150
+  %155 = vextract.8.imm %107, 0
+  %156 = vextract.8.imm %107, 9
+  %157 = lshl %156, %75
+  %158 = or %155, %157
+  %159 = vextract.8.imm %107, 18
+  %160 = lshl %159, %82
+  %161 = or %158, %160
+  %162 = vextract.8.imm %107, 27
+  %163 = lshl %162, %83
+  %164 = or %161, %163
+  %165 = bfp.exponents.low32.from.scalar %164, %151
+  %166 = vextract.8.imm %107, 36
+  %167 = vextract.8.imm %107, 45
+  %168 = lshl %167, %75
+  %169 = or %166, %168
+  %170 = vextract.8.imm %107, 54
+  %171 = lshl %170, %82
+  %172 = or %169, %171
+  %173 = vextract.8.imm %107, 63
+  %174 = lshl %173, %83
+  %175 = or %172, %174
+  %rhs_fragment = bfp.exponents.high32.from.scalar %175, %165
+  %177 = mova.i32 780
+  %product = mmul.bfp16ebs8.m8n8k8 %lhs_fragment, %rhs_fragment, %177
+  %179 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %179, %output_aligned, 0
+  %180 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %180, %output_aligned, 64
+  %181 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %181, %output_aligned, 128
+  %182 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %182, %output_aligned, 192
+  return
+}

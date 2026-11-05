@@ -87,7 +87,9 @@ static iree_status_t loom_low_slice_replace_at(loom_op_t* op,
 }
 
 static loom_value_slice_t loom_low_slice_concat_sources(
-    loom_rewriter_t* rewriter, loom_op_t* slice_op, loom_op_t* concat_op) {
+    loom_rewriter_t* rewriter, loom_op_t* slice_op, loom_op_t* concat_op,
+    uint32_t* out_offset) {
+  *out_offset = 0;
   const uint32_t slice_offset = (uint32_t)loom_low_slice_offset(slice_op);
   const loom_type_t slice_type =
       loom_module_value_type(rewriter->module, loom_low_slice_result(slice_op));
@@ -107,7 +109,12 @@ static loom_value_slice_t loom_low_slice_concat_sources(
         loom_module_value(rewriter->module, sources.values[i]);
     const uint32_t source_units =
         loom_low_register_type_unit_count(source->type);
+    const uint32_t operand_offset = source_offset;
     source_offset += source_units;
+    if (slice_offset >= operand_offset && slice_end <= source_offset) {
+      *out_offset = slice_offset - operand_offset;
+      return (loom_value_slice_t){.values = sources.values + i, .count = 1};
+    }
     if (!selected.values) {
       if (source_offset > slice_offset) {
         return (loom_value_slice_t){0};
@@ -116,9 +123,6 @@ static loom_value_slice_t loom_low_slice_concat_sources(
     }
     ++selected.count;
     if (selected.count == 1) {
-      if (source_offset == slice_end) {
-        return selected;
-      }
       // Materialize only at a sole result-less sink. Storage chains can
       // repeatedly project a new concat, and dead result-producing consumers
       // can release the inputs for another projection. Both can duplicate
@@ -195,8 +199,9 @@ static iree_status_t loom_low_slice_canonicalize_concat_slice(
     loom_op_t* op, loom_rewriter_t* rewriter, loom_op_t* concat_op,
     bool* out_changed) {
   *out_changed = false;
+  uint32_t offset = 0;
   const loom_value_slice_t sources =
-      loom_low_slice_concat_sources(rewriter, op, concat_op);
+      loom_low_slice_concat_sources(rewriter, op, concat_op, &offset);
   if (sources.count == 0) {
     return iree_ok_status();
   }
@@ -214,7 +219,7 @@ static iree_status_t loom_low_slice_canonicalize_concat_slice(
         rewriter, op, &replacement, 1, value_checkpoint));
   }
   IREE_RETURN_IF_ERROR(
-      loom_low_slice_replace_at(op, rewriter, concat_op, replacement, 0));
+      loom_low_slice_replace_at(op, rewriter, concat_op, replacement, offset));
   *out_changed = true;
   return iree_ok_status();
 }

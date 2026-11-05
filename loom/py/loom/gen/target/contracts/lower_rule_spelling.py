@@ -102,6 +102,7 @@ GUARD_KIND_C_NAMES = {
     GuardKind.OPERAND_SEGMENT_EXACT_BITS: "LOOM_LOW_LOWER_GUARD_OPERAND_SEGMENT_EXACT_BITS",
     GuardKind.I64_ARRAY_COUNT: "LOOM_LOW_LOWER_GUARD_ATTR_I64_ARRAY_COUNT_EQ",
     GuardKind.I64_ARRAY_ELEMENT_RANGE: "LOOM_LOW_LOWER_GUARD_ATTR_I64_ARRAY_ELEMENT_RANGE",
+    GuardKind.I64_ARRAY_ELEMENT_MULTIPLE: "LOOM_LOW_LOWER_GUARD_ATTR_I64_ARRAY_ELEMENT_MULTIPLE",
     GuardKind.I64_ARRAY_ELEMENTS_RANGE: "LOOM_LOW_LOWER_GUARD_ATTR_I64_ARRAY_ELEMENTS_RANGE",
     GuardKind.VALUE_SIGNED_BIT_COUNT: "LOOM_LOW_LOWER_GUARD_VALUE_SIGNED_BIT_COUNT",
     GuardKind.VALUE_UNSIGNED_BIT_COUNT: "LOOM_LOW_LOWER_GUARD_VALUE_UNSIGNED_BIT_COUNT",
@@ -202,6 +203,7 @@ EMIT_KIND_C_NAMES = {
     LowerEmitKind.DESCRIPTOR_OP_ACCUMULATE_LANES: "LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP_ACCUMULATE_LANES",
     LowerEmitKind.REGISTER_SLICE: "LOOM_LOW_LOWER_EMIT_REGISTER_SLICE",
     LowerEmitKind.REGISTER_CONCAT: "LOOM_LOW_LOWER_EMIT_REGISTER_CONCAT",
+    LowerEmitKind.REGISTER_CONCAT_PER_LANE_SEQUENCE: "LOOM_LOW_LOWER_EMIT_REGISTER_CONCAT_PER_LANE_SEQUENCE",
     LowerEmitKind.REGISTER_COPY: "LOOM_LOW_LOWER_EMIT_REGISTER_COPY",
     LowerEmitKind.REGISTER_SLICE_CLASS: "LOOM_LOW_LOWER_EMIT_REGISTER_SLICE_CLASS",
     LowerEmitKind.REGISTER_MOVE: "LOOM_LOW_LOWER_EMIT_REGISTER_MOVE",
@@ -370,10 +372,14 @@ def attr_kind_c_name(attr_kind: str | None) -> str:
     return c_name
 
 
-def emit_flags(flags: int) -> str:
+def emit_flags(flags: int, kind: LowerEmitKind | None = None) -> str:
     if flags == 0:
         return "0"
-    names = [c_name for bit, c_name in sorted(EMIT_FLAG_C_NAMES.items()) if flags & bit]
+    names = [
+        "LOOM_LOW_LOWER_EMIT_FLAG_SEQUENCE_SKIP_LAST_LANE" if bit == LOWER_EMIT_FLAG_ACCUMULATE_SKIP_FIRST_LANE and kind is LowerEmitKind.DESCRIPTOR_OP_PER_LANE_SEQUENCE else c_name
+        for bit, c_name in sorted(EMIT_FLAG_C_NAMES.items())
+        if flags & bit
+    ]
     unknown = flags & ~sum(EMIT_FLAG_C_NAMES)
     if unknown:
         raise ValueError(f"unknown emit flags 0x{unknown:x}")

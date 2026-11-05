@@ -483,6 +483,26 @@ def test_structural_register_emits_validate_program_shape() -> None:
             sources=(),
             result=ValueRef.result("result"),
         )
+    for unit_count in (0, 0x10000):
+        with pytest.raises(ValueError, match="register concat unit count must be"):
+            EmitRegisterConcat(
+                sources=(ValueRef.operand("elements"),),
+                result=ValueRef.temporary("pair"),
+                unit_count=unit_count,
+            )
+    with pytest.raises(ValueError, match="cannot specify both unit count"):
+        EmitRegisterConcat(
+            sources=(ValueRef.operand("elements"),),
+            result=ValueRef.temporary("pair"),
+            unit_count=2,
+            result_type=Vector("i32", lanes=2),
+        )
+    with pytest.raises(ValueError, match="only valid for temporary results"):
+        EmitRegisterConcat(
+            sources=(ValueRef.operand("elements"),),
+            result=ValueRef.result("result"),
+            unit_count=2,
+        )
     with pytest.raises(ValueError, match="register slice unit offset must fit u16"):
         EmitRegisterSlice(
             source=ValueRef.operand("source"),
@@ -1715,43 +1735,69 @@ def test_descriptor_rule_rejects_temporary_result_without_type() -> None:
         )
 
 
-def test_descriptor_rule_rejects_temporary_result_type_binding() -> None:
+def test_descriptor_rule_reuses_preceding_temporary_result_type() -> None:
     descriptor = TEST_LOW_ADD_I32_DESCRIPTOR
 
-    with pytest.raises(
-        ValueError,
-        match=r"scalar\.addi: descriptor result type 'dst' cannot bind a temporary",
-    ):
-        ContractFragment(
-            name="bad.temporary.result_type",
-            descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
-            cases=(
-                DescriptorRule(
-                    source_op=scalar_arithmetic.scalar_addi,
-                    descriptor=descriptor,
-                    emit=(
-                        EmitDescriptorOp(
-                            descriptor=descriptor,
-                            operands={
-                                "lhs": ValueRef.operand("lhs"),
-                                "rhs": ValueRef.operand("rhs"),
-                            },
-                            results={"dst": ValueRef.temporary("partial")},
-                            result_types={"dst": Scalar("i32")},
-                        ),
-                        EmitDescriptorOp(
-                            descriptor=descriptor,
-                            operands={
-                                "lhs": ValueRef.temporary("partial"),
-                                "rhs": ValueRef.operand("rhs"),
-                            },
-                            results={"dst": ValueRef.result("result")},
-                            result_types={"dst": ValueRef.temporary("partial")},
-                        ),
+    ContractFragment(
+        name="temporary.result_type",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=(
+            DescriptorRule(
+                source_op=scalar_arithmetic.scalar_addi,
+                descriptor=descriptor,
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=descriptor,
+                        operands={
+                            "lhs": ValueRef.operand("lhs"),
+                            "rhs": ValueRef.operand("rhs"),
+                        },
+                        results={"dst": ValueRef.temporary("partial")},
+                        result_types={"dst": Scalar("i32")},
+                    ),
+                    EmitDescriptorOp(
+                        descriptor=descriptor,
+                        operands={
+                            "lhs": ValueRef.temporary("partial"),
+                            "rhs": ValueRef.operand("rhs"),
+                        },
+                        results={"dst": ValueRef.result("result")},
+                        result_types={"dst": ValueRef.temporary("partial")},
                     ),
                 ),
             ),
-        )
+        ),
+    )
+
+
+def test_descriptor_result_type_requires_an_already_defined_temporary() -> None:
+    descriptor = TEST_LOW_ADD_I32_DESCRIPTOR
+    for temporary in ("missing", "partial"):
+        with pytest.raises(
+            ValueError,
+            match=f"descriptor result type 'dst' temporary '{temporary}' is not defined",
+        ):
+            ContractFragment(
+                name="undefined.result_type",
+                descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+                cases=(
+                    DescriptorRule(
+                        source_op=scalar_arithmetic.scalar_addi,
+                        descriptor=descriptor,
+                        emit=(
+                            EmitDescriptorOp(
+                                descriptor=descriptor,
+                                operands={
+                                    "lhs": ValueRef.operand("lhs"),
+                                    "rhs": ValueRef.operand("rhs"),
+                                },
+                                results={"dst": ValueRef.temporary("partial")},
+                                result_types={"dst": ValueRef.temporary(temporary)},
+                            ),
+                        ),
+                    ),
+                ),
+            )
 
 
 def test_descriptor_rule_rejects_immediate_literal_out_of_range() -> None:

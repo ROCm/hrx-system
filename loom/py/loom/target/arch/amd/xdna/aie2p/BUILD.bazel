@@ -70,6 +70,7 @@ iree_py_library(
         "array_descriptors.py",
         "configuration_descriptors.py",
         "core_address_descriptors.py",
+        "core_bfp_descriptors.py",
         "core_comparison_descriptors.py",
         "core_descriptor_constraints.py",
         "core_descriptor_spec.py",

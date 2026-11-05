@@ -22,6 +22,7 @@ from loom.target.contracts.emits import (
     ContractEmit,
     DescriptorAccumulatorSeed,
     DescriptorAccumulatorTree,
+    DescriptorEmitForm,
     DescriptorResultType,
     EmitDescriptorOp,
     EmitRegisterConcat,
@@ -113,6 +114,7 @@ from loom.target.contracts.lower_rule_tables import (
     LOWER_EMIT_FLAG_RECORD_SOURCE_MEMORY,
     LOWER_EMIT_FLAG_RESULT_DESCRIPTOR_TYPE,
     LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN,
+    LOWER_EMIT_FLAG_SEQUENCE_SKIP_LAST_LANE,
     LOWER_EMIT_FLAG_SWAP_OPERANDS_0_1,
     LOWER_RULE_FLAG_CONTRACT_ONLY,
     LOWER_RULE_FLAG_NONLOCAL_SOURCE_GRAPH,
@@ -523,7 +525,9 @@ class _LowerRuleSetCompiler:
 
         emit_start = len(self._emits)
         transferred_fields_by_emit = _transferred_descriptor_fields_by_emit(rule)
-        temporary_slot_plan = allocate_temporary_slots(rule.emit)
+        temporary_slot_plan = allocate_temporary_slots(
+            rule.emit, sequence_carried=rule.sequence_carried
+        )
         temporary_ordinals: dict[str, int] = {}
         primary_emit_ordinal = LOWER_RULE_PRIMARY_EMIT_NONE
         for emit, transferred_descriptor_fields, temporary_definition_slots in zip(
@@ -1032,6 +1036,28 @@ class _LowerRuleSetCompiler:
                         ),
                     ),
                     u64=guard.count,
+                )
+            )
+            return
+
+        if guard.kind == GuardKind.I64_ARRAY_ELEMENT_MULTIPLE:
+            self._guards.append(
+                LowerGuard(
+                    kind=guard.kind,
+                    attr_index=_source_attr_index(source_op, guard.field),
+                    diagnostic_index=self._append_diagnostic_ref(
+                        source_op,
+                        _guard_diagnostic(
+                            guard,
+                            _named_constraint_diagnostic(
+                                "i64_array",
+                                guard.field,
+                                f"element_{guard.element}_multiple_of_{guard.count}",
+                            ),
+                        ),
+                    ),
+                    u64=guard.element,
+                    literal_i64=guard.count,
                 )
             )
             return
@@ -1839,12 +1865,17 @@ class _LowerRuleSetCompiler:
         if isinstance(emit, EmitRegisterConcat):
             self._append_structural_emit(
                 source_op,
-                LowerEmitKind.REGISTER_CONCAT,
+                (
+                    LowerEmitKind.REGISTER_CONCAT_PER_LANE_SEQUENCE
+                    if emit.form is DescriptorEmitForm.PER_LANE_SEQUENCE
+                    else LowerEmitKind.REGISTER_CONCAT
+                ),
                 emit.sources,
                 emit.result,
                 emit.result_type,
                 temporary_ordinals,
                 temporary_definition_slots,
+                structural_unit_count=emit.unit_count or 0,
             )
             return
         if isinstance(emit, EmitRegisterCopy):
@@ -1985,6 +2016,8 @@ class _LowerRuleSetCompiler:
             flags |= LOWER_EMIT_FLAG_ACCUMULATE_SEED_FIRST_LANE
         if emit.accumulator_tree == DescriptorAccumulatorTree.BALANCED:
             flags |= LOWER_EMIT_FLAG_ACCUMULATE_TREE_BALANCED
+        if emit.skip_last_lane:
+            flags |= LOWER_EMIT_FLAG_SEQUENCE_SKIP_LAST_LANE
         if emit.skip_first_lane:
             flags |= LOWER_EMIT_FLAG_ACCUMULATE_SKIP_FIRST_LANE
 
@@ -2045,9 +2078,12 @@ class _LowerRuleSetCompiler:
             if emit_kind not in (
                 LowerEmitKind.DESCRIPTOR_OP,
                 LowerEmitKind.DESCRIPTOR_CONST,
+                LowerEmitKind.DESCRIPTOR_OP_PER_LANE_SEQUENCE,
             ):
                 raise ValueError(
-                    f"{source_op.name}: source-memory emits require op or constant form"
+                    f"{source_op.name}: "
+                    "source-memory emits require op, constant, "
+                    "or per-lane-sequence form"
                 )
             source_memory_ordinal = self._append_source_memory(
                 source_op,
@@ -2094,10 +2130,19 @@ class _LowerRuleSetCompiler:
         temporary_definition_slots: Mapping[str, int],
         *,
         source_memory: SourceMemoryConstraint | None = None,
-        structural_offset: int = 0,
+        structural_offset: int | AttrProject = 0,
         structural_unit_count: int = 0,
         structural_register_class: str | None = None,
     ) -> None:
+        attr_copy_start = 0
+        attr_copy_count = 0
+        if isinstance(structural_offset, AttrProject):
+            projection = self._lower_attr_project(
+                source_op, None, "offset", structural_offset
+            )
+            attr_copy_start = self._append_attr_copy_sequence((projection,))
+            attr_copy_count = 1
+            structural_offset = attr_copy_start
         operand_refs = tuple(
             self._lower_value_ref(source_op, source, temporary_ordinals)
             for source in sources
@@ -2128,7 +2173,10 @@ class _LowerRuleSetCompiler:
                 )
             result_ref_start = 0
             flags |= LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS
-        elif structural_unit_count != 0:
+        elif (
+            structural_unit_count != 0
+            and emit_kind is not LowerEmitKind.REGISTER_CONCAT_PER_LANE_SEQUENCE
+        ):
             result_ref_start = result_bind_ref_start
         elif isinstance(type_binding, TypePattern):
             _require_exact_result_type_pattern(
@@ -2183,6 +2231,8 @@ class _LowerRuleSetCompiler:
                 result_ref_count=1,
                 result_bind_ref_start=result_bind_ref_start,
                 source_memory_ordinal=source_memory_ordinal,
+                attr_copy_start=attr_copy_start,
+                attr_copy_count=attr_copy_count,
                 structural_offset=structural_offset,
                 structural_unit_count=structural_unit_count,
             )
@@ -2413,7 +2463,7 @@ class _LowerRuleSetCompiler:
     def _lower_attr_project(
         self,
         source_op: Op,
-        descriptor: Descriptor,
+        descriptor: Descriptor | None,
         target_name: str,
         project: AttrProject,
     ) -> LowerAttrCopy:
@@ -2437,7 +2487,7 @@ class _LowerRuleSetCompiler:
     def _lower_attr_project_for_op(
         self,
         source_op: Op,
-        descriptor: Descriptor,
+        descriptor: Descriptor | None,
         target_name: str,
         project: AttrProject,
     ) -> LowerAttrCopy:

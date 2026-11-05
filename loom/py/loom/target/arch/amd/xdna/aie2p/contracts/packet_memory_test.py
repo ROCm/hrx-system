@@ -8,6 +8,8 @@
 
 from collections import Counter, defaultdict
 
+import pytest
+
 from loom.dialect.encoding import defs as encoding
 from loom.dialect.vector import defs as vector
 from loom.dsl import EncodingOperandSummaryDef
@@ -18,9 +20,11 @@ from loom.target.arch.amd.xdna.aie2p.contracts.packet_conversion import (
     INTEGER_WIDEN_INSTRUCTIONS,
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.packet_memory import (
+    AIE2P_BFP_GROUP_MEMORY_RULES,
     AIE2P_PACKET_MEMORY_RULES,
 )
 from loom.target.contracts import (
+    DescriptorEmitForm,
     EmitDescriptorOp,
     EmitRegisterConcat,
     EmitRegisterSlice,
@@ -218,6 +222,38 @@ def test_fused_packet_memory_rules_cover_the_native_shape_matrix() -> None:
     for root_kind, memory_spaces in _MEMORY_ROOTS:
         for volatile in (True, False):
             volatile_suffix = ".volatile" if volatile else ""
+            # FIFO groups form a pointer before the first fetch. Static
+            # modifiers use either compact or full-range native constants.
+            for static_minimum, static_maximum, dynamic_count, dynamic_minimum in (
+                (0, 0, 0, 0),
+                (-1024, 1023, 0, 0),
+                (_I32_MIN, _I32_MAX, 0, 0),
+                (_I32_MIN, _I32_MAX, None, 1),
+            ):
+                expected_identities[
+                    (
+                        vector.vector_load.name,
+                        vector.vector_fragment.name,
+                        SourceNodeRelation.EXCLUSIVE_USER,
+                        "native_memory_load_bfp16ebs8_group",
+                        "amd.xdna.aie2p.load.load-fifo.low512" + volatile_suffix,
+                        SourceMemoryOperation.LOAD,
+                        root_kind,
+                        _expected_memory_spaces(
+                            SourceMemoryOperation.LOAD, memory_spaces
+                        ),
+                        1,
+                        None,
+                        64,
+                        static_minimum,
+                        static_maximum,
+                        dynamic_count,
+                        dynamic_minimum,
+                        SourceMemoryDynamicIndexSource.NONE,
+                        0,
+                        dynamic_count is None,
+                    )
+                ] += 1
             for (
                 source_op,
                 related_op,
@@ -269,44 +305,72 @@ def test_fused_packet_memory_rules_cover_the_native_shape_matrix() -> None:
                         else 1
                     )
 
-            # Both 64-byte packets must fit the selected addressing form.
+            # Both BF16 packets, or all 72 interleaved BFP bytes, must fit.
             for (
-                address_family,
-                static_minimum,
-                static_maximum,
-                dynamic_count,
-                dynamic_minimum,
-                dynamic_index_source,
-                dynamic_byte_stride,
-                dynamic_strides,
-            ) in _fused_address_cases(512, maximum_chunk_offset=64):
-                expected_identities[
-                    (
-                        vector.vector_load.name,
-                        vector.vector_encode.name,
-                        SourceNodeRelation.ADJACENT_UNIQUE_USER,
-                        "native_memory_load_bf16x64_to_bfp16ebs8",
+                related_op,
+                relation,
+                report_key,
+                descriptor_pattern,
+                element_bytes,
+                lanes,
+                final_offset,
+            ) in (
+                (
+                    vector.vector_encode,
+                    SourceNodeRelation.ADJACENT_UNIQUE_USER,
+                    "native_memory_load_bf16x64_to_bfp16ebs8",
+                    "amd.xdna.aie2p.load.convert.bf16x32.to.f32x32.indexed.{address}",
+                    2,
+                    64,
+                    64,
+                ),
+                (
+                    vector.vector_fragment,
+                    SourceNodeRelation.EXCLUSIVE_USER,
+                    "native_memory_load_packed_bfp16ebs8",
+                    "amd.xdna.aie2p.load.a.i8x64.indexed.{address}",
+                    1,
+                    72,
+                    68,
+                ),
+            ):
+                for (
+                    address_family,
+                    static_minimum,
+                    static_maximum,
+                    dynamic_count,
+                    dynamic_minimum,
+                    dynamic_index_source,
+                    dynamic_byte_stride,
+                    dynamic_strides,
+                ) in _fused_address_cases(512, maximum_chunk_offset=final_offset):
+                    expected_identities[
                         (
-                            "amd.xdna.aie2p.load.convert.bf16x32.to.f32x32."
-                            f"indexed.{address_family}{volatile_suffix}"
-                        ),
-                        SourceMemoryOperation.LOAD,
-                        root_kind,
-                        _expected_memory_spaces(
-                            SourceMemoryOperation.LOAD, memory_spaces
-                        ),
-                        2,
-                        64,
-                        64,
-                        static_minimum,
-                        static_maximum,
-                        dynamic_count,
-                        dynamic_minimum,
-                        dynamic_index_source,
-                        dynamic_byte_stride,
-                        dynamic_strides,
-                    )
-                ] += 1
+                            vector.vector_load.name,
+                            related_op.name,
+                            relation,
+                            report_key,
+                            descriptor_pattern.format(
+                                address=address_family,
+                            )
+                            + volatile_suffix,
+                            SourceMemoryOperation.LOAD,
+                            root_kind,
+                            _expected_memory_spaces(
+                                SourceMemoryOperation.LOAD, memory_spaces
+                            ),
+                            element_bytes,
+                            lanes,
+                            64,
+                            static_minimum,
+                            static_maximum,
+                            dynamic_count,
+                            dynamic_minimum,
+                            dynamic_index_source,
+                            dynamic_byte_stride,
+                            dynamic_strides,
+                        )
+                    ] += 1
 
     actual_identities = Counter(
         _fused_rule_identity(rule) for rule in AIE2P_PACKET_MEMORY_RULES
@@ -319,14 +383,23 @@ def test_fused_packet_memory_rules_preserve_graph_and_state_contracts() -> None:
         assert rule.priority == 1
         source_node = rule.source_nodes[0]
         memory_emit = _source_memory_emit(rule)
-        assert memory_emit.descriptor == rule.descriptor
+        assert any(
+            isinstance(emit, EmitDescriptorOp) and emit.descriptor == rule.descriptor
+            for emit in rule.emit
+        )
         assert memory_emit.source_memory.address_layout is SourceMemoryAddressLayout.ANY
 
         if rule.source_op is vector.vector_load:
-            assert source_node.relation is SourceNodeRelation.ADJACENT_UNIQUE_USER
+            assert source_node.relation is (
+                SourceNodeRelation.EXCLUSIVE_USER
+                if source_node.source_op is vector.vector_fragment
+                else SourceNodeRelation.ADJACENT_UNIQUE_USER
+            )
             assert source_node.parent_value == ValueRef.result("result")
             assert source_node.node_value == ValueRef.operand(
-                "source"
+                "data"
+                if source_node.source_op is vector.vector_fragment
+                else "source"
                 if source_node.source_op
                 in (
                     vector.vector_bitunpacku,
@@ -366,6 +439,137 @@ def test_fused_packet_memory_rules_preserve_graph_and_state_contracts() -> None:
                 "amd.xdna.aie2p.state.saturation.immediate",
                 "amd.xdna.aie2p.state.pack-size.immediate",
             ]
+
+
+def test_bfp_group_address_setup_preserves_the_fifo_pointer_domain() -> None:
+    forms = set()
+    for rule in AIE2P_BFP_GROUP_MEMORY_RULES:
+        memory = _source_memory_emit(rule).source_memory
+        pointer_move = rule.emit[0]
+        assert pointer_move.descriptor.key == "amd.xdna.aie2p.move.load-fifo.pointer"
+        pointer = pointer_move.results["dst"]
+        setup = rule.emit[1]
+        if ".constant.modifier." in setup.descriptor.key:
+            (immediate,) = setup.descriptor.immediates
+            assert memory.static_byte_offset_minimum == immediate.signed_min
+            assert memory.static_byte_offset_maximum == immediate.unsigned_max
+            assert memory.dynamic_term_count == 0
+            forms.add(setup.descriptor.key.rsplit(".", 1)[1])
+        elif setup.descriptor.key == "amd.xdna.aie2p.move.er.to.em":
+            assert memory.dynamic_term_count_minimum == 1
+            forms.add("dynamic")
+        else:
+            assert memory.static_byte_offset_minimum == 0
+            assert memory.static_byte_offset_maximum == 0
+            forms.add("zero")
+        if memory.static_byte_offset_maximum != 0:
+            update = rule.emit[2]
+            assert update.operands["ptr"] == pointer
+            assert update.result_types == {"ptr_out": pointer}
+            pointer = update.results["ptr_out"]
+        preload = next(
+            emit
+            for emit in rule.emit
+            if isinstance(emit, EmitDescriptorOp)
+            and ".load.load-fifo.low512" in emit.descriptor.key
+        )
+        first_pop = next(
+            emit
+            for emit in rule.emit
+            if isinstance(emit, EmitDescriptorOp)
+            and ".fifo.pop.buffered64" in emit.descriptor.key
+        )
+        assert preload.operands["ptr"] == pointer
+        assert first_pop.operands["ptr"] == pointer
+    assert forms == {"zero", "mova", "movxm", "dynamic"}
+
+
+@pytest.mark.parametrize("record_count", [8, 16, 24, 64, 128])
+def test_bfp_group_consumes_each_byte_once_without_reading_padding(
+    record_count: int,
+) -> None:
+    for rule in AIE2P_BFP_GROUP_MEMORY_RULES:
+        memory = _source_memory_emit(rule).source_memory
+        if memory.static_byte_offset_maximum != 0:
+            continue
+        # Unique byte identities make duplication, gaps, and record-order
+        # mistakes observable independently of exponent/mantissa arithmetic.
+        values = {ValueRef.source_memory_root(): 0}
+        reads = []
+
+        def fetch(start, *, reads=reads):
+            reads.append(start)
+            return tuple(range(start, start + 64))
+
+        sequence_start = next(
+            index
+            for index, emit in enumerate(rule.emit)
+            if emit.form is DescriptorEmitForm.PER_LANE_SEQUENCE
+        )
+        assert memory.vector_lane_count is None
+        group_count = record_count // 8
+        program = list(rule.emit[:sequence_start])
+        for group in range(group_count):
+            program.extend(
+                emit
+                for emit in rule.emit[sequence_start:]
+                if not (
+                    isinstance(emit, EmitDescriptorOp)
+                    and emit.skip_last_lane
+                    and group + 1 == group_count
+                )
+            )
+        result = ()
+        for emit in program:
+            if isinstance(emit, EmitRegisterConcat):
+                result += tuple(
+                    value for source in emit.sources for value in values[source]
+                )
+                continue
+            assert isinstance(emit, EmitDescriptorOp)
+            key = emit.descriptor.key.removesuffix(".volatile")
+            operands = {name: values[ref] for name, ref in emit.operands.items()}
+            if key.endswith("move.load-fifo.pointer"):
+                results = {"dst": operands["src"]}
+            elif key.endswith("load.load-fifo.low512"):
+                results = {"dst": fetch(operands["ptr"] + emit.immediates["imm"])}
+            elif key.endswith("constant.i32.fifo-position"):
+                results = {"dst": emit.immediates["i"]}
+            elif key.endswith("fifo.fill.512"):
+                pointer, fifo, position = (
+                    operands[name] for name in ("ptr", "fifo_reg", "pos")
+                )
+                assert fifo == () and position == 0
+                results = {
+                    "ptr_out": pointer,
+                    "fifo_reg_out": fetch(pointer),
+                    "pos_out": 64,
+                }
+            else:
+                assert ".bfp16ebs8.fifo.pop" in key
+                pointer, fifo, position = (
+                    operands[name] for name in ("ptr", "fifo_reg", "pos")
+                )
+                assert len(fifo) == position
+                assert 8 <= position <= 64
+                assert key.endswith(".buffered64") == (position == 64)
+                # A native pop fetches at pointer + position, consumes 72
+                # bytes, and carries the remaining bytes into the next pop.
+                available = fifo + fetch(pointer + position)
+                results = {
+                    "dst": available[:72],
+                    "ptr_out": pointer + 72,
+                    "fifo_reg_out": available[72:],
+                    "pos_out": position - 8,
+                }
+            for name, ref in emit.results.items():
+                values[ref] = results[name]
+        byte_count = record_count * 72
+        assert result == tuple(range(byte_count))
+        assert reads == list(range(0, byte_count, 64))
+        assert results["ptr_out"] == byte_count
+        assert results["pos_out"] == 0
+        assert results["fifo_reg_out"] == ()
 
 
 def test_fused_float_memory_rules_publish_subnormal_policy() -> None:
