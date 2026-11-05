@@ -776,10 +776,11 @@ TEST_F(SpeechReadinessTest, ClosedNativeHandleRetainsAcceptedEncodingStorage) {
   // CPU-device transfers share this executor too. Retire those borrowers on
   // the outer test thread before holding the workers for the encoding cut.
   const auto frontier = loom_serve_execution_frontier(execution_);
+  auto* workspace =
+      loom_serve_pool_workspace(loom_serve_device_group_pool_at(group_, 0));
   for (size_t i = 0; i < 2; ++i) {
     IREE_ASSERT_OK(loom_serve_workspace_wait(
-        loom_serve_pool_workspace(loom_serve_device_group_pool_at(group_, 0)),
-        frontier.semaphores[i], frontier.values[i]));
+        1, &workspace, frontier.semaphores[i], frontier.values[i]));
   }
   for (int i = 0; i < SpeechWorkerCount(); ++i) {
     workers.push_back(std::make_unique<loom_serve::testing::WorkerGate>(

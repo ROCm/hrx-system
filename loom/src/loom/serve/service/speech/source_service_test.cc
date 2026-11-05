@@ -304,11 +304,12 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
   }
 
   iree_status_t Wait(const loom_serve_execution_frontier_t& frontier) {
+    auto* workspace =
+        loom_serve_pool_workspace(loom_serve_device_group_pool_at(group_, 0));
     iree_status_t status = iree_ok_status();
     for (size_t i = 0; i < 2 && iree_status_is_ok(status); ++i) {
-      status = loom_serve_workspace_wait(
-          loom_serve_pool_workspace(loom_serve_device_group_pool_at(group_, 0)),
-          frontier.semaphores[i], frontier.values[i]);
+      status = loom_serve_workspace_wait(1, &workspace, frontier.semaphores[i],
+                                         frontier.values[i]);
     }
     return status;
   }

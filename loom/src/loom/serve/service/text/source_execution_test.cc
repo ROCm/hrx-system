@@ -451,10 +451,10 @@ TEST_F(GrowingTextServiceTest, GrowthKeepsLiveHistoriesHandlesAndCheckpoints) {
         loom_serve_text_model_submit_resize(model_, resize, &frontier);
     loom_serve_text_resize_free(resize);
     IREE_ASSERT_OK(status);
+    auto* workspace = loom_serve_pool_workspace(pool_);
     for (size_t i = 0; i < IREE_ARRAYSIZE(frontier.semaphores); ++i) {
-      IREE_ASSERT_OK(loom_serve_workspace_wait(loom_serve_pool_workspace(pool_),
-                                               frontier.semaphores[i],
-                                               frontier.values[i]));
+      IREE_ASSERT_OK(loom_serve_workspace_wait(
+          1, &workspace, frontier.semaphores[i], frontier.values[i]));
     }
     loom_serve_text_model_complete_resize(model_);
     EXPECT_EQ(loom_serve_text_model_row_count(model_), capacity);

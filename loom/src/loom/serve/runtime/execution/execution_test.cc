@@ -7,12 +7,17 @@
 #include "loom/serve/runtime/execution/execution.h"
 
 #include "iree/testing/gtest.h"
+#include "iree/testing/status_matchers.h"
 
 namespace {
 
 TEST(ExecutionTest, NullLifetimeOperations) {
   loom_serve_execution_retain(nullptr);
   loom_serve_execution_release(nullptr);
+  IREE_EXPECT_OK(loom_serve_execution_drain_all(0, nullptr));
+  loom_serve_execution_t* partial[] = {nullptr, nullptr};
+  IREE_EXPECT_OK(
+      loom_serve_execution_drain_all(IREE_ARRAYSIZE(partial), partial));
 }
 
 }  // namespace

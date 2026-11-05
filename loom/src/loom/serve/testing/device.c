@@ -98,7 +98,7 @@ iree_status_t loom_serve_test_pool_trim_and_drain(loom_serve_pool_t* owner,
     iree_notification_t notification;
     iree_notification_initialize(&notification);
     iree_status_t status = loom_serve_workspace_await(
-        workspace, &notification, loom_serve_test_pool_trim_complete,
+        1, &workspace, &notification, loom_serve_test_pool_trim_complete,
         workspace);
     iree_notification_deinitialize(&notification);
     status = iree_status_join(status, loom_serve_memory_pool_await(memory));

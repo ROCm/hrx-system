@@ -10,9 +10,7 @@
 #include <mutex>
 #include <tuple>
 
-#include "iree/async/semaphore.h"
 #include "iree/base/alignment.h"
-#include "iree/base/threading/notification.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -32,7 +30,7 @@ IREE_FLAG_LIST(string, placement_device,
 namespace {
 
 class TextPlacementTest
-    : public ::testing::TestWithParam<std::tuple<bool, bool>> {
+    : public ::testing::TestWithParam<std::tuple<std::array<size_t, 3>, bool>> {
  protected:
   static void SetUpTestSuite() {
     const auto allocator = iree_allocator_system();
@@ -86,7 +84,6 @@ class TextPlacementTest
   }
 
   void SetUp() override {
-    iree_notification_initialize(&notification_);
     directory_ =
         std::filesystem::path(FLAG_placement_sources).parent_path().string();
     sources_ = {
@@ -96,13 +93,8 @@ class TextPlacementTest
     };
     for (size_t i = 0; i < devices_.size(); ++i) {
       devices_[i] = loom_serve_device_group_at(group_, i);
-      pools_[i] = loom_serve_device_group_pool_at(
-          group_, (std::get<0>(GetParam()) ? 3 : 0) + i);
-      loom_serve_workspace_set_observer(loom_serve_pool_workspace(pools_[i]),
-                                        {Wake, &notification_});
-      if (auto* memory = loom_serve_pool_memory(pools_[i])) {
-        loom_serve_memory_pool_set_observer(memory, Wake, &notification_);
-      }
+      pools_[i] =
+          loom_serve_device_group_pool_at(group_, std::get<0>(GetParam())[i]);
       IREE_ASSERT_OK(loom_serve_device_create_execution(devices_[i], pools_[i],
                                                         &executions_[i]));
       IREE_ASSERT_OK(loom_serve_device_create_jit(
@@ -130,15 +122,8 @@ class TextPlacementTest
   }
 
   void TearDown() override {
-    for (auto* execution : executions_) {
-      if (execution) {
-        const auto frontier = loom_serve_execution_frontier(execution);
-        for (size_t i = 0; i < 2; ++i) {
-          IREE_EXPECT_OK(Wait(frontier.semaphores[i], frontier.values[i]));
-        }
-        IREE_EXPECT_OK(loom_serve_execution_drain(execution));
-      }
-    }
+    IREE_EXPECT_OK(
+        loom_serve_execution_drain_all(executions_.size(), executions_.data()));
     loom_serve_program_free(program_);
     iree_vm_module_release(module_);
     for (auto& stage : stages_) {
@@ -178,81 +163,21 @@ class TextPlacementTest
         const auto memory = loom_serve_pool_statistics(pools_[i]);
         EXPECT_EQ(memory.retained.committed_bytes, 0u);
         EXPECT_EQ(memory.workspace.bytes_committed, 0u);
-        loom_serve_workspace_set_observer(loom_serve_pool_workspace(pools_[i]),
-                                          {});
-        if (auto* physical = loom_serve_pool_memory(pools_[i])) {
-          loom_serve_memory_pool_set_observer(physical, nullptr, nullptr);
-        }
       }
     }
     if (checkpoint_.Exists()) {
       EXPECT_TRUE(checkpoint_.Remove());
     }
-    iree_notification_deinitialize(&notification_);
     IREE_EXPECT_OK(status_);
   }
 
-  static void Wake(void* user_data) {
-    iree_notification_post(static_cast<iree_notification_t*>(user_data),
-                           IREE_ALL_WAITERS);
-  }
-
-  // Like the server resource owner, a blocking test caller must keep every
-  // physical owner progressing while a cross-execution dependency is pending.
   iree_status_t Wait(iree_hal_semaphore_t* semaphore, uint64_t value) {
-    struct Completion {
-      // Joins the callback's final access, including notification publication.
-      std::mutex mutex;
-      // Borrows the fixture's common physical-owner wake through this wait.
-      iree_notification_t* notification;
-      // Callback has published its final status under mutex.
-      bool ready = false;
-      // Owned readiness failure, transferred to the caller after callback join.
-      iree_status_t status = iree_ok_status();
-    } completion{.notification = &notification_};
-    iree_async_semaphore_timepoint_t timepoint = {
-        .callback =
-            [](void* user_data, iree_async_semaphore_timepoint_t*,
-               iree_status_t status) {
-              auto* completion = static_cast<Completion*>(user_data);
-              std::lock_guard<std::mutex> lock(completion->mutex);
-              completion->status = status;
-              completion->ready = true;
-              Wake(completion->notification);
-            },
-        .user_data = &completion,
-    };
-    auto* native = reinterpret_cast<iree_async_semaphore_t*>(semaphore);
-    IREE_RETURN_IF_ERROR(
-        iree_async_semaphore_acquire_timepoint(native, value, &timepoint));
-    auto status = iree_ok_status();
-    bool complete = false;
-    bool cancelled = false;
-    while (!complete) {
-      const auto token = iree_notification_prepare_wait(&notification_);
-      for (auto* pool : pools_) {
-        if (pool) {
-          status = iree_status_join(
-              status,
-              loom_serve_workspace_advance(loom_serve_pool_workspace(pool)));
-        }
-      }
-      if (!iree_status_is_ok(status) && !cancelled) {
-        cancelled = true;
-        complete = iree_async_semaphore_cancel_timepoint(native, &timepoint);
-      }
-      {
-        std::lock_guard<std::mutex> lock(completion.mutex);
-        complete |= completion.ready;
-      }
-      if (complete) {
-        iree_notification_cancel_wait(&notification_);
-      } else {
-        iree_notification_commit_wait(&notification_, token, IREE_DURATION_ZERO,
-                                      IREE_TIME_INFINITE_FUTURE);
-      }
+    std::array<loom_serve_workspace_t*, 3> workspaces;
+    for (size_t i = 0; i < pools_.size(); ++i) {
+      workspaces[i] = loom_serve_pool_workspace(pools_[i]);
     }
-    return iree_status_join(status, completion.status);
+    return loom_serve_workspace_wait(workspaces.size(), workspaces.data(),
+                                     semaphore, value);
   }
 
   void ReleaseCatalogs() {
@@ -451,11 +376,10 @@ class TextPlacementTest
         EXPECT_EQ(output_[i], 30 + i);
       }
     }
-    for (auto* execution : executions_) {
-      IREE_ASSERT_OK(loom_serve_execution_drain(execution));
-    }
+    IREE_ASSERT_OK(
+        loom_serve_execution_drain_all(executions_.size(), executions_.data()));
     for (auto* pool : pools_) {
-      if (std::get<0>(GetParam())) {
+      if (loom_serve_pool_memory(pool)) {
         EXPECT_GE(loom_serve_pool_statistics(pool).retained.committed_bytes,
                   sizeof(output_));
       } else {
@@ -547,8 +471,6 @@ class TextPlacementTest
   iree_vm_function_t step_ = {};
   // Synchronizes final compilation publication with the outer test thread.
   std::mutex mutex_;
-  // Common wake for all physical owners while cross-execution work is pending.
-  iree_notification_t notification_;
   // Test-thread notification; no compiler worker waits on a child.
   std::condition_variable condition_;
   // Final callback has relinquished all borrowed compilation inputs.
@@ -575,8 +497,13 @@ TEST_P(TextPlacementTest, FailedOwnerCompilationJoinsOtherNativeProducts) {
   EXPECT_NE(compiled_->values[3], nullptr);
 }
 
-INSTANTIATE_TEST_SUITE_P(Placement, TextPlacementTest,
-                         ::testing::Combine(::testing::Bool(),
-                                            ::testing::Bool()));
+INSTANTIATE_TEST_SUITE_P(
+    Placement, TextPlacementTest,
+    ::testing::Combine(
+        ::testing::Values(std::array<size_t, 3>{0, 1, 2},   // Fixed.
+                          std::array<size_t, 3>{3, 4, 5},   // Elastic.
+                          std::array<size_t, 3>{3, 1, 5},   // Mixed.
+                          std::array<size_t, 3>{3, 3, 3}),  // Aliased.
+        ::testing::Bool()));
 
 }  // namespace

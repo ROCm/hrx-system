@@ -562,12 +562,29 @@ bool loom_serve_workspace_is_pending(loom_serve_workspace_t* workspace) {
          loom_serve_virtual_pool_is_pending(workspace->virtual_pool);
 }
 
-iree_status_t loom_serve_workspace_wait(loom_serve_workspace_t* workspace,
-                                        iree_hal_semaphore_t* semaphore,
-                                        uint64_t value) {
-  return workspace->virtual_pool
-             ? loom_serve_virtual_pool_wait(workspace->virtual_pool, semaphore,
-                                            value)
+// Deployment spans are bounded by the HAL group. Keep cold join metadata on
+// the stack: even teardown after allocation failure must service every owner.
+static iree_host_size_t loom_serve_workspace_collect_pools(
+    iree_host_size_t count, loom_serve_workspace_t* const* workspaces,
+    loom_serve_virtual_pool_t** pools) {
+  IREE_ASSERT(count <= IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT);
+  iree_host_size_t pool_count = 0;
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    if (workspaces[i]->virtual_pool) {
+      pools[pool_count++] = workspaces[i]->virtual_pool;
+    }
+  }
+  return pool_count;
+}
+
+iree_status_t loom_serve_workspace_wait(
+    iree_host_size_t workspace_count, loom_serve_workspace_t* const* workspaces,
+    iree_hal_semaphore_t* semaphore, uint64_t value) {
+  loom_serve_virtual_pool_t* pools[IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT];
+  const iree_host_size_t pool_count =
+      loom_serve_workspace_collect_pools(workspace_count, workspaces, pools);
+  return pool_count
+             ? loom_serve_virtual_pool_wait(pool_count, pools, semaphore, value)
              : iree_hal_semaphore_wait(semaphore, value,
                                        iree_infinite_timeout(),
                                        IREE_ASYNC_WAIT_FLAG_NONE);
@@ -577,22 +594,21 @@ static bool loom_serve_workspace_is_retired(void* user_data) {
   return loom_serve_retirement_is_idle(user_data);
 }
 
-iree_status_t loom_serve_workspace_await(loom_serve_workspace_t* workspace,
-                                         iree_notification_t* notification,
-                                         iree_condition_fn_t condition,
-                                         void* user_data) {
-  if (workspace->virtual_pool) {
-    return loom_serve_virtual_pool_await(workspace->virtual_pool, notification,
-                                         condition, user_data);
-  }
-  iree_notification_await(notification, condition, user_data,
-                          iree_infinite_timeout());
-  return iree_ok_status();
+iree_status_t loom_serve_workspace_await(
+    iree_host_size_t workspace_count, loom_serve_workspace_t* const* workspaces,
+    iree_notification_t* notification, iree_condition_fn_t condition,
+    void* user_data) {
+  loom_serve_virtual_pool_t* pools[IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT];
+  const iree_host_size_t pool_count =
+      loom_serve_workspace_collect_pools(workspace_count, workspaces, pools);
+  return loom_serve_virtual_pool_await(pool_count, pools, notification,
+                                       condition, user_data);
 }
 
 iree_status_t loom_serve_workspace_await_retirement(
-    loom_serve_workspace_t* workspace, loom_serve_retirement_t* retirement) {
-  return loom_serve_workspace_await(workspace, &retirement->notification,
-                                    loom_serve_workspace_is_retired,
-                                    retirement);
+    iree_host_size_t workspace_count, loom_serve_workspace_t* const* workspaces,
+    loom_serve_retirement_t* retirement) {
+  return loom_serve_workspace_await(
+      workspace_count, workspaces, &retirement->notification,
+      loom_serve_workspace_is_retired, retirement);
 }

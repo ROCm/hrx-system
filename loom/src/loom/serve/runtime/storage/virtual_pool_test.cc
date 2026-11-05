@@ -10,6 +10,182 @@ namespace {
 
 using VirtualPoolTest = loom_serve::testing::memory::MemoryTest;
 
+TEST_F(VirtualPoolTest, AliasedWaitsRestoreAcquisitionAndCapacityObservers) {
+  ASSERT_NO_FATAL_FAILURE(CreateVirtualPool());
+  loom_serve_virtual_pool_t* peer = nullptr;
+  IREE_ASSERT_OK(loom_serve_virtual_pool_allocate(
+      pool, loom_serve_pool_weight_geometry(storage_owner),
+      iree_allocator_system(), &peer));
+  const auto free_pool = [](loom_serve_virtual_pool_t* value) {
+    IREE_EXPECT_OK(loom_serve_virtual_pool_free(value));
+  };
+  const std::unique_ptr<loom_serve_virtual_pool_t, decltype(free_pool)>
+      peer_owner(peer, free_pool);
+
+  std::atomic<size_t> wakes[3] = {};
+  const auto wake = [](void* user_data) {
+    static_cast<std::atomic<size_t>*>(user_data)->fetch_add(1);
+  };
+  loom_serve_virtual_pool_set_observer(virtual_pool, {wake, &wakes[0]});
+  loom_serve_virtual_pool_set_observer(peer, {wake, &wakes[1]});
+  const auto previous =
+      loom_serve_memory_pool_set_observer(pool, wake, &wakes[2]);
+
+  // Exercise the full deployment bound with both kinds of alias: repeated
+  // virtual owners, and distinct virtual owners sharing one physical ledger.
+  std::array<loom_serve_virtual_pool_t*, IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT>
+      owners;
+  for (size_t i = 0; i < owners.size(); ++i) {
+    owners[i] = i % 2 ? peer : virtual_pool;
+  }
+  const auto frontier = loom_serve_execution_frontier(execution);
+  IREE_EXPECT_OK(loom_serve_virtual_pool_wait(owners.size(), owners.data(),
+                                              frontier.semaphores[0], 0));
+  iree_notification_t notification;
+  iree_notification_initialize(&notification);
+  IREE_EXPECT_OK(loom_serve_virtual_pool_await(
+      owners.size(), owners.data(), &notification, [](void*) { return true; },
+      nullptr));
+  const auto restored = loom_serve_memory_pool_set_observer(pool, previous.wake,
+                                                            previous.user_data);
+  EXPECT_EQ(restored.wake, wake);
+  EXPECT_EQ(restored.user_data, &wakes[2]);
+
+  struct Completion {
+    // Owner-side acquisition callbacks retired before local request arrays.
+    size_t count = 0;
+    // Joined allocation results consumed after the complete ownership join.
+    iree_status_t status = iree_ok_status();
+  } completion;
+  const iree_hal_pool_acquire_callback_t callback = {
+      .fn =
+          [](void* user_data, iree_status_t status,
+             iree_hal_pool_acquire_result_t result) {
+            auto* completion = static_cast<Completion*>(user_data);
+            ++completion->count;
+            completion->status = iree_status_join(completion->status, status);
+            EXPECT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
+          },
+      .user_data = &completion,
+  };
+  const auto request = iree_hal_make_pool_reservation_request(kSlabSize, 256);
+  iree_hal_pool_reservation_t reservations[2] = {};
+  iree_hal_pool_acquire_info_t infos[2] = {};
+  iree_host_size_t accepted = 0;
+  for (size_t i = 0; i < 2; ++i) {
+    auto status = iree_hal_pool_acquire_reservations(
+        loom_serve_virtual_pool_handle(owners[i]), 1, &request, nullptr,
+        &reservations[i], &infos[i], callback, IREE_HAL_POOL_RESERVE_FLAG_NONE);
+    accepted += iree_status_is_ok(status) ? 1 : 0;
+    IREE_EXPECT_OK(status);
+    EXPECT_GT(wakes[i].load(), 0u);
+  }
+  const auto complete = [](void* user_data) {
+    auto* pair =
+        static_cast<std::pair<Completion*, iree_host_size_t>*>(user_data);
+    return pair->first->count == pair->second;
+  };
+  std::pair<Completion*, iree_host_size_t> expected = {&completion, accepted};
+  IREE_EXPECT_OK(loom_serve_virtual_pool_await(
+      owners.size(), owners.data(), &notification, complete, &expected));
+  IREE_EXPECT_OK(completion.status);
+  for (size_t i = 0; i < 2; ++i) {
+    if (reservations[i].block_handle) {
+      iree_hal_pool_release_reservations(
+          loom_serve_virtual_pool_handle(owners[i]), 1, &reservations[i],
+          nullptr);
+    }
+    loom_serve_virtual_pool_set_observer(owners[i], {});
+  }
+  iree_notification_deinitialize(&notification);
+}
+
+TEST_F(VirtualPoolTest, FailedExecutionDrainStillProgressesPeerBacking) {
+  ASSERT_NO_FATAL_FAILURE(CreateVirtualPool(/*with_workspace=*/true));
+  loom_serve_execution_t* failed = nullptr;
+  IREE_ASSERT_OK(
+      loom_serve_device_create_execution(device, storage_owner, &failed));
+  const std::unique_ptr<loom_serve_execution_t,
+                        decltype(&loom_serve_execution_release)>
+      failed_owner(failed, loom_serve_execution_release);
+  const auto request = iree_hal_make_pool_reservation_request(256, 256);
+  iree_hal_buffer_t* held = nullptr;
+  auto status = loom_serve_execution_alloca(failed, 1, &request, &held);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_execution_wait(
+        failed, loom_serve_execution_frontier(failed).values[0]);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_hal_buffer_release(held);
+    IREE_EXPECT_OK(loom_serve_execution_drain(failed));
+    IREE_ASSERT_OK(status);
+  }
+  RoundTrip(held, 0, 0x31415926);
+
+  struct Completion {
+    // Caller-owned tracked view released only after the peer allocation
+    // retires.
+    iree_hal_buffer_t* held;
+    // Acquisition delivered exactly one final result.
+    bool complete = false;
+    // Owned peer allocation result, transferred after the drain.
+    iree_status_t status = iree_ok_status();
+  } completion{.held = held};
+  const iree_hal_pool_acquire_callback_t callback = {
+      .fn =
+          [](void* user_data, iree_status_t status,
+             iree_hal_pool_acquire_result_t result) {
+            auto* completion = static_cast<Completion*>(user_data);
+            EXPECT_FALSE(completion->complete);
+            completion->complete = true;
+            completion->status = status;
+            iree_hal_buffer_release(completion->held);
+            completion->held = nullptr;
+          },
+      .user_data = &completion,
+  };
+  iree_hal_pool_reservation_t reservation = {};
+  iree_hal_pool_acquire_info_t info = {};
+  auto* source = loom_serve_virtual_pool_handle(virtual_pool);
+  status = iree_hal_pool_acquire_reservations(source, 1, &request, nullptr,
+                                              &reservation, &info, callback,
+                                              IREE_HAL_POOL_RESERVE_FLAG_NONE);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_buffer_release(completion.held);
+    completion.held = nullptr;
+  }
+  IREE_EXPECT_OK(status);
+  EXPECT_FALSE(completion.complete);
+  EXPECT_FALSE(loom_serve_execution_is_retired(failed));
+  const auto failed_frontier = loom_serve_execution_frontier(failed);
+  iree_hal_semaphore_fail(failed_frontier.semaphores[0],
+                          iree_status_from_code(IREE_STATUS_CANCELLED));
+
+  // The first readiness error cannot authorize early return. Its tracked
+  // consumer needs another owner's cold backing to finish. NULL and repeated
+  // members also model partial construction and aliased cleanup paths.
+  loom_serve_execution_t* members[] = {nullptr, failed, execution, failed};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_CANCELLED,
+      loom_serve_execution_drain_all(IREE_ARRAYSIZE(members), members));
+  EXPECT_TRUE(completion.complete);
+  EXPECT_EQ(completion.held, nullptr);
+  EXPECT_TRUE(loom_serve_execution_is_retired(failed));
+  EXPECT_TRUE(loom_serve_execution_is_retired(execution));
+  IREE_EXPECT_OK(completion.status);
+  if (reservation.block_handle) {
+    iree_hal_pool_reservation_view_t view;
+    const bool has_view =
+        iree_hal_pool_query_reservation_views(source, 1, &reservation, &view);
+    EXPECT_TRUE(has_view);
+    if (has_view) {
+      EXPECT_GE(view.byte_length, request.allocation_size);
+      RoundTrip(view.buffer, view.byte_offset, 0x27182818);
+    }
+    iree_hal_pool_release_reservations(source, 1, &reservation, nullptr);
+  }
+}
+
 TEST_F(VirtualPoolTest,
        VirtualCommandPoolReusesRetainedSlabsAcrossTrimAndRegrowth) {
   ASSERT_NO_FATAL_FAILURE(UseDeferredBacking());

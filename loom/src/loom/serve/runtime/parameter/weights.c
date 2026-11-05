@@ -1708,13 +1708,13 @@ iree_status_t loom_serve_weights_await(loom_serve_weights_t* weights) {
   // owner also services cold staging requests from those queues.
   for (iree_host_size_t i = 0; i < weights->activation.count; ++i) {
     status = iree_status_join(
-        status, loom_serve_workspace_wait(weights->workspace,
+        status, loom_serve_workspace_wait(1, &weights->workspace,
                                           weights->activation.semaphores[i],
                                           weights->activation.values[i]));
   }
   status = iree_status_join(
       status, loom_serve_workspace_await_retirement(
-                  weights->workspace, &weights->activation.retirement));
+                  1, &weights->workspace, &weights->activation.retirement));
   loom_serve_weights_await_backing(weights);
   return iree_status_join(
       status, iree_status_clone(weights->activation.backing_status));
@@ -1842,10 +1842,10 @@ iree_status_t loom_serve_weights_await_retirement(
   loom_serve_weights_await_backing(weights);
   loom_serve_memory_operation_await(weights->deactivation);
   iree_status_t status = loom_serve_workspace_await_retirement(
-      weights->workspace, &weights->retirement);
+      1, &weights->workspace, &weights->retirement);
   return iree_status_join(
       status, loom_serve_workspace_await_retirement(
-                  weights->workspace, &weights->activation.retirement));
+                  1, &weights->workspace, &weights->activation.retirement));
 }
 
 iree_status_t loom_serve_weights_free(loom_serve_weights_t* weights) {

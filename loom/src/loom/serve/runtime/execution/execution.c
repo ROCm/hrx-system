@@ -393,27 +393,53 @@ iree_status_t loom_serve_execution_feedback(
 
 iree_status_t loom_serve_execution_wait(loom_serve_execution_t* execution,
                                         uint64_t value) {
-  return loom_serve_workspace_wait(execution->workspace,
+  return loom_serve_workspace_wait(1, &execution->workspace,
                                    execution->work.semaphore, value);
 }
 
 iree_status_t loom_serve_execution_feedback_wait(
     loom_serve_execution_t* execution, uint64_t value) {
-  return loom_serve_workspace_wait(execution->workspace,
+  return loom_serve_workspace_wait(1, &execution->workspace,
                                    execution->feedback.semaphore, value);
 }
 
 iree_status_t loom_serve_execution_drain(loom_serve_execution_t* execution) {
-  iree_slim_mutex_lock(&execution->mutex);
-  const uint64_t work_value = execution->work.submitted_value;
-  const uint64_t feedback_value = execution->feedback.submitted_value;
-  iree_slim_mutex_unlock(&execution->mutex);
-  iree_status_t status = loom_serve_execution_wait(execution, work_value);
-  status = iree_status_join(
-      status, loom_serve_execution_feedback_wait(execution, feedback_value));
-  // Consumer captures protect model payloads after early failed readiness.
-  // Raw allocation objects independently remain protected by the shared pool.
-  return iree_status_join(
-      status, loom_serve_workspace_await_retirement(execution->workspace,
-                                                    &execution->consumers));
+  return loom_serve_execution_drain_all(1, &execution);
+}
+
+iree_status_t loom_serve_execution_drain_all(
+    iree_host_size_t execution_count,
+    loom_serve_execution_t* const* executions) {
+  loom_serve_workspace_t* workspaces[IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT];
+  IREE_ASSERT(execution_count <= IREE_ARRAYSIZE(workspaces));
+  iree_host_size_t workspace_count = 0;
+  for (iree_host_size_t i = 0; i < execution_count; ++i) {
+    if (executions[i]) {
+      workspaces[workspace_count++] = executions[i]->workspace;
+    }
+  }
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < execution_count; ++i) {
+    if (!executions[i]) {
+      continue;
+    }
+    const loom_serve_execution_frontier_t frontier =
+        loom_serve_execution_frontier(executions[i]);
+    for (iree_host_size_t j = 0; j < IREE_ARRAYSIZE(frontier.semaphores); ++j) {
+      status = iree_status_join(
+          status, loom_serve_workspace_wait(workspace_count, workspaces,
+                                            frontier.semaphores[j],
+                                            frontier.values[j]));
+    }
+  }
+  // Readiness failure does not release queue-captured model payloads. Keep the
+  // complete physical domain progressing until every consumer actually retires.
+  for (iree_host_size_t i = 0; i < execution_count; ++i) {
+    if (executions[i]) {
+      status = iree_status_join(
+          status, loom_serve_workspace_await_retirement(
+                      workspace_count, workspaces, &executions[i]->consumers));
+    }
+  }
+  return status;
 }

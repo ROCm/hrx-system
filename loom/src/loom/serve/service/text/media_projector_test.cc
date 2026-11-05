@@ -239,10 +239,10 @@ TEST_F(MediaProjectorTest, PublishesAccordingToPhaseFootprintAndKeepsOrdinals) {
   loom_serve_execution_frontier_t ready;
   IREE_ASSERT_OK(loom_serve_finite_result_download(deferred->spans[0].result,
                                                    &snapshot, &ready));
+  auto* workspace = loom_serve_pool_workspace(storage_owner_);
   for (size_t i = 0; i < IREE_ARRAYSIZE(ready.semaphores); ++i) {
-    IREE_EXPECT_OK(
-        loom_serve_workspace_wait(loom_serve_pool_workspace(storage_owner_),
-                                  ready.semaphores[i], ready.values[i]));
+    IREE_EXPECT_OK(loom_serve_workspace_wait(1, &workspace, ready.semaphores[i],
+                                             ready.values[i]));
   }
   const std::array<float, 4> expected = {513, 0, 0, 3};
   for (size_t index : {0u, 2u}) {

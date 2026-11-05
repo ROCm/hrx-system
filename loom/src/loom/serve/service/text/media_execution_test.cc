@@ -60,10 +60,10 @@ class MediaExecutionTest : public SourceTextServiceTest {
   }
 
   void Wait(loom_serve_execution_frontier_t ready) {
+    auto* workspace = loom_serve_pool_workspace(storage_owner_);
     for (size_t i = 0; i < IREE_ARRAYSIZE(ready.semaphores); ++i) {
-      IREE_ASSERT_OK(
-          loom_serve_workspace_wait(loom_serve_pool_workspace(storage_owner_),
-                                    ready.semaphores[i], ready.values[i]));
+      IREE_ASSERT_OK(loom_serve_workspace_wait(
+          1, &workspace, ready.semaphores[i], ready.values[i]));
     }
   }
 

@@ -709,9 +709,10 @@ iree_status_t loom_serve_text_model_allocate(
       host_allocator, &load);
   if (iree_status_is_ok(status)) {
     loom_serve_text_load_wait_t wait = {.load = load};
-    status = loom_serve_workspace_await(
-        loom_serve_pool_workspace(pool), &notification,
-        loom_serve_text_load_wait_complete, &wait);
+    loom_serve_workspace_t* workspace = loom_serve_pool_workspace(pool);
+    status =
+        loom_serve_workspace_await(1, &workspace, &notification,
+                                   loom_serve_text_load_wait_complete, &wait);
     status = iree_status_join(status, wait.status);
   }
   if (load) {

@@ -408,10 +408,10 @@ class DeviceResultTest : public SourceEmbeddingServiceTest {
 
   void Complete(size_t ordinal) {
     auto ready = loom_serve_finite_result_ready(results_[ordinal]);
+    auto* workspace = loom_serve_pool_workspace(storage_owner_);
     for (size_t i = 0; i < IREE_ARRAYSIZE(ready.semaphores); ++i) {
-      IREE_ASSERT_OK(
-          loom_serve_workspace_wait(loom_serve_pool_workspace(storage_owner_),
-                                    ready.semaphores[i], ready.values[i]));
+      IREE_ASSERT_OK(loom_serve_workspace_wait(
+          1, &workspace, ready.semaphores[i], ready.values[i]));
     }
     loom_serve_finite_model_complete(model_);
     ReleaseInputs();
@@ -770,10 +770,10 @@ class RequestChoiceTest : public GenerationSelectionTest {
     IREE_ASSERT_OK(
         loom_serve_finite_result_download(results_[0], &snapshot, &ready));
     transfer_value_ = ready.values[1];
+    auto* workspace = loom_serve_pool_workspace(storage_owner_);
     for (size_t i = 0; i < IREE_ARRAYSIZE(ready.semaphores); ++i) {
-      IREE_EXPECT_OK(
-          loom_serve_workspace_wait(loom_serve_pool_workspace(storage_owner_),
-                                    ready.semaphores[i], ready.values[i]));
+      IREE_EXPECT_OK(loom_serve_workspace_wait(
+          1, &workspace, ready.semaphores[i], ready.values[i]));
     }
     const auto row = loom_serve_finite_snapshot_row(snapshot, 0, 0);
     EXPECT_EQ(row.data_length, expected.size() * sizeof(float));

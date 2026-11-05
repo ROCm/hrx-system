@@ -160,24 +160,30 @@ bool loom_serve_workspace_is_pending(loom_serve_workspace_t* workspace);
 
 // Outer blocking caller equivalent to scheduler progress plus a timeline wait.
 // The caller owns physical residency and excludes other owner operations.
-iree_status_t loom_serve_workspace_wait(loom_serve_workspace_t* workspace,
-                                        iree_hal_semaphore_t* semaphore,
-                                        uint64_t value);
+// The span covers every participating execution owner in one deployment and
+// contains at most IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT workspaces. Aliases and
+// an empty span are valid. All elastic owners progress during the wait.
+iree_status_t loom_serve_workspace_wait(
+    iree_host_size_t workspace_count, loom_serve_workspace_t* const* workspaces,
+    iree_hal_semaphore_t* semaphore, uint64_t value);
 
 // Joins an outer owner's completion condition while progressing accepted cold
 // allocations and returns. Both the condition's producer and allocator progress
 // wake notification. The caller excludes other physical-owner operations; task
-// schedulers instead advance the shared owner without blocking.
-iree_status_t loom_serve_workspace_await(loom_serve_workspace_t* workspace,
-                                         iree_notification_t* notification,
-                                         iree_condition_fn_t condition,
-                                         void* user_data);
+// schedulers instead advance the shared owner without blocking. The workspace
+// span follows wait's deployment bound and aliasing contract.
+iree_status_t loom_serve_workspace_await(
+    iree_host_size_t workspace_count, loom_serve_workspace_t* const* workspaces,
+    iree_notification_t* notification, iree_condition_fn_t condition,
+    void* user_data);
 
 // Joins final consumer ownership while advancing cold backing even after a
 // failed readiness timeline. Only an exclusive outer physical owner may wait;
 // shared task workers instead keep advancing until retirement is idle.
+// The workspace span follows wait's deployment bound and aliasing contract.
 iree_status_t loom_serve_workspace_await_retirement(
-    loom_serve_workspace_t* workspace, loom_serve_retirement_t* retirement);
+    iree_host_size_t workspace_count, loom_serve_workspace_t* const* workspaces,
+    loom_serve_retirement_t* retirement);
 
 #ifdef __cplusplus
 }  // extern "C"

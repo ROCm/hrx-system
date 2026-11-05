@@ -27,9 +27,9 @@ class JitWorkspaceTest : public loom_serve::testing::JitModuleTest {
       IREE_EXPECT_OK(loom_serve_execution_drain(held_.execution));
     }
     if (held_.completion) {
-      IREE_EXPECT_OK(
-          loom_serve_workspace_wait(loom_serve_pool_workspace(storage_owner_),
-                                    held_.completion, held_.completion_value));
+      auto* workspace = loom_serve_pool_workspace(storage_owner_);
+      IREE_EXPECT_OK(loom_serve_workspace_wait(1, &workspace, held_.completion,
+                                               held_.completion_value));
     }
     loom_serve_execution_release(held_.execution);
     iree_hal_semaphore_release(held_.completion);

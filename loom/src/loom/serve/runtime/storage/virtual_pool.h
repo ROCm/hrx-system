@@ -94,19 +94,24 @@ bool loom_serve_virtual_pool_is_pending(loom_serve_virtual_pool_t* pool);
 // Blocking outer-owner wait that also advances cold backing. Shared task
 // schedulers use advance and their normal semaphore observation instead.
 // The caller is the physical owner and excludes concurrent owner operations.
-iree_status_t loom_serve_virtual_pool_wait(loom_serve_virtual_pool_t* pool,
-                                           iree_hal_semaphore_t* semaphore,
-                                           uint64_t value);
+// The span contains the participating deployment's physical owners, at most
+// IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT. Repeated pools and an empty span are
+// valid.
+iree_status_t loom_serve_virtual_pool_wait(
+    iree_host_size_t pool_count, loom_serve_virtual_pool_t* const* pools,
+    iree_hal_semaphore_t* semaphore, uint64_t value);
 
 // Outer ownership join that keeps cold backing progressing after readiness
 // failure. condition observes final retirement and its producer signals
 // notification. Progress errors are returned only after condition is true:
 // they cannot release borrowed payloads early. The exclusive physical owner
 // calls this instead of waiting on notification without servicing cold work.
-iree_status_t loom_serve_virtual_pool_await(loom_serve_virtual_pool_t* pool,
-                                            iree_notification_t* notification,
-                                            iree_condition_fn_t condition,
-                                            void* user_data);
+// The pool span follows wait's deployment bound and aliasing contract. Observer
+// storage is stack-owned, so teardown cannot fail to join for lack of metadata.
+iree_status_t loom_serve_virtual_pool_await(
+    iree_host_size_t pool_count, loom_serve_virtual_pool_t* const* pools,
+    iree_notification_t* notification, iree_condition_fn_t condition,
+    void* user_data);
 
 // Outer teardown after all clients and accepted callbacks have retired.
 // Releases backing and addresses; cleanup failure retains ownership for retry.

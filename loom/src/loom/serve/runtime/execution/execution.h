@@ -169,6 +169,17 @@ iree_status_t loom_serve_execution_feedback_wait(
 // raw allocation bookkeeping transfers on release to the shared workspace.
 iree_status_t loom_serve_execution_drain(loom_serve_execution_t* execution);
 
+// Joins a complete deployment while advancing every participating physical
+// owner. Cross-execution dependencies can require cold backing from any owner;
+// sequential single-execution drains cannot supply that progress. The span has
+// at most IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT entries, one per deployed member.
+// NULL entries permit partial-construction cleanup. Repeated execution or
+// workspace owners are valid. Readiness failure still joins every accepted
+// consumer before returning, without allocating join metadata.
+iree_status_t loom_serve_execution_drain_all(
+    iree_host_size_t execution_count,
+    loom_serve_execution_t* const* executions);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
