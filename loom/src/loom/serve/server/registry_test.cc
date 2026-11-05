@@ -241,9 +241,9 @@ TEST_P(RegistryAllocationTest, FailurePreservesDeclarationAndSlotForRetry) {
       R"({"name":"vectors","admission":"drained",)" +
       std::string(explicit_device ? R"("device":"first",)" : "") +
       std::string(explicit_pool ? R"("pool":"pool",)" : "") +
-      R"("definition":{"kind":"embedding","assets":"/weights",)"
-      R"("prepare":"/boot.loom","control":"/run.loom",)"
-      R"("sources":["/kernel.loom"]}})";
+      R"("definition":{"kind":"embedding","assets":"weights",)"
+      R"("prepare":"boot.loom","control":"run.loom",)"
+      R"("sources":["kernel.loom"]}})";
   // Each missing binding is one owned string; registration also owns history.
   const size_t allocation_count = !explicit_device + !explicit_pool + 1;
   for (size_t fail_at = 0; fail_at < allocation_count; ++fail_at) {
@@ -254,7 +254,7 @@ TEST_P(RegistryAllocationTest, FailurePreservesDeclarationAndSlotForRetry) {
     loom_serve_model_configuration_t configuration = {};
     IREE_ASSERT_OK(loom_serve_model_configuration_initialize(
         iree_make_string_view(document.data(), document.size()),
-        iree_string_view_empty(), nullptr, declaration_allocator.allocator(),
+        IREE_SV("//files/models"), nullptr, declaration_allocator.allocator(),
         &configuration));
     const loom_serve_registration_factory_t factory = {
         .kinds = 1u << LOOM_SERVICE_KIND_EMBEDDING,

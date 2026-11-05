@@ -305,9 +305,9 @@ TEST(RegistrationOwnershipTest, DrainDoesNotRequireAnObservationSnapshot) {
   loom_serve_model_configuration_t configuration = {};
   IREE_ASSERT_OK(loom_serve_model_configuration_initialize(
       IREE_SV(R"({"name":"managed","definition":{"kind":"embedding",)"
-              R"("prepare":"/prepare.loom","control":"/control.loom",)"
-              R"("assets":"/weights","sources":["/kernel.loom"]}})"),
-      iree_string_view_empty(), nullptr, iree_allocator_system(),
+              R"("prepare":"prepare.loom","control":"control.loom",)"
+              R"("assets":"weights","sources":["kernel.loom"]}})"),
+      IREE_SV("//files/models"), nullptr, iree_allocator_system(),
       &configuration));
   loom_serve_registry_t* registry = nullptr;
   IREE_ASSERT_OK(loom_serve_registry_allocate(
