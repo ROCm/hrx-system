@@ -1170,8 +1170,7 @@ iree_status_t loom_value_fact_table_define_results(
     }
     // Inference may be less precise than the verified scalar result type.
     facts = loom_value_fact_table_clamp_scalar_type_domain(type, facts);
-    table->result_type_kind_bits |=
-        (uint16_t)(UINT16_C(1) << loom_type_kind(type));
+    table->result_type_kind_bits |= UINT32_C(1) << loom_type_kind(type);
     loom_value_facts_t previous;
     const bool defined =
         loom_value_fact_table_try_lookup(table, result, &previous);

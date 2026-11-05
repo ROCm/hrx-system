@@ -489,6 +489,21 @@ static iree_status_t loom_symbol_reference_summary_enter(
       frame.encoding_id = type.encoding_id;
     }
     switch (loom_type_kind(type)) {
+      case LOOM_TYPE_REFERENCE: {
+        const loom_symbol_ref_t declaration = {
+            .module_id = 0,
+            .symbol_id = loom_type_reference_declaration_id(type),
+        };
+        IREE_RETURN_IF_ERROR(
+            loom_symbol_reference_summary_check_target(summary, declaration));
+        IREE_RETURN_IF_ERROR(loom_symbol_reference_summary_make_leaf(
+            summary, &declaration, 1,
+            LOOM_SYMBOL_INTERFACE_RECORD |
+                ((uint64_t)LOOM_SYMBOL_REFERENCE_ROLE_DEPENDENCY << 32),
+            &entry->state.result));
+        entry->complete = true;
+        break;
+      }
       case LOOM_TYPE_FUNCTION: {
         const loom_func_type_data_t* data = loom_type_func_data(type);
         if (data) {

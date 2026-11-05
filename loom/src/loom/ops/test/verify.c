@@ -241,6 +241,8 @@ static bool loom_test_signature_type_matches(
       }
       return true;
     }
+    case LOOM_TYPE_REFERENCE:
+      return loom_type_equal(call_type, callee_type);
     case LOOM_TYPE_NONE:
     case LOOM_TYPE_SCALAR:
     case LOOM_TYPE_ENCODING:

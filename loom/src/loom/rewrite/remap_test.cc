@@ -1085,6 +1085,79 @@ static iree_status_t RemapSymbolByName(void* user_data,
   return iree_ok_status();
 }
 
+TEST_F(RemapTest, RemapsReferenceIdentityAndKeepsExistingTargetAlias) {
+  loom_string_id_t source_namespace;
+  loom_string_id_t source_name;
+  loom_string_id_t source_spelling;
+  loom_symbol_id_t source_declaration;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(source_, IREE_SV("input"), &source_namespace));
+  IREE_ASSERT_OK(
+      loom_module_intern_string(source_, IREE_SV("decoder"), &source_name));
+  IREE_ASSERT_OK(
+      loom_module_intern_string(source_, IREE_SV("Decoder"), &source_spelling));
+  IREE_ASSERT_OK(
+      loom_module_add_symbol(source_, source_spelling, &source_declaration));
+
+  loom_string_id_t target_namespace;
+  loom_string_id_t target_name;
+  loom_string_id_t target_spelling;
+  loom_symbol_id_t target_declaration;
+  IREE_ASSERT_OK(loom_module_intern_string(target_, IREE_SV("DecoderAlias"),
+                                           &target_spelling));
+  IREE_ASSERT_OK(
+      loom_module_add_symbol(target_, target_spelling, &target_declaration));
+  IREE_ASSERT_OK(
+      loom_module_intern_string(target_, IREE_SV("decoder"), &target_name));
+  IREE_ASSERT_OK(
+      loom_module_intern_string(target_, IREE_SV("input"), &target_namespace));
+  ASSERT_NE(source_namespace, target_namespace);
+  const auto target_owner =
+      loom_type_reference(LOOM_REFERENCE_OWNERSHIP_OWNED, target_namespace,
+                          target_name, target_declaration);
+  loom_type_t canonical_owner;
+  IREE_ASSERT_OK(
+      loom_module_intern_type(target_, target_owner, &canonical_owner));
+
+  const auto source_owner =
+      loom_type_reference(LOOM_REFERENCE_OWNERSHIP_OWNED, source_namespace,
+                          source_name, source_declaration);
+  const auto source_borrow =
+      loom_type_reference(LOOM_REFERENCE_OWNERSHIP_BORROWED, source_namespace,
+                          source_name, source_declaration);
+  loom_type_t source_signature;
+  IREE_ASSERT_OK(loom_module_intern_function_type(
+      source_, &source_owner, 1, &source_borrow, 1, &source_signature));
+  const loom_ir_remap_options_t options = {
+      .remap_symbol =
+          loom_ir_remap_symbol_callback_make(RemapSymbolByName, nullptr),
+  };
+  auto remap = InitializeRemap(&options);
+  loom_type_t target_signature;
+  IREE_ASSERT_OK(
+      loom_ir_remap_type(&remap, source_signature, &target_signature));
+  loom_module_free(source_);
+  source_ = nullptr;
+  iree_arena_block_pool_trim(&block_pool_);
+
+  const auto argument = loom_type_func_arg_types(target_signature)[0];
+  const auto result = loom_type_func_result_types(target_signature)[0];
+  EXPECT_TRUE(loom_type_equal(argument, canonical_owner));
+  EXPECT_EQ(loom_type_reference_declaration_id(argument), target_declaration);
+  EXPECT_EQ(loom_type_reference_ownership(result),
+            LOOM_REFERENCE_OWNERSHIP_BORROWED);
+  EXPECT_EQ(loom_type_reference_namespace_id(result), target_namespace);
+  EXPECT_EQ(loom_type_reference_name_id(result), target_name);
+  const auto result_declaration = loom_type_reference_declaration_id(result);
+  ASSERT_LT(result_declaration, target_->symbols.count);
+  EXPECT_TRUE(iree_string_view_equal(
+      loom_string_table_get(
+          &target_->strings,
+          target_->symbols.entries[result_declaration].name_id),
+      IREE_SV("Decoder")));
+  EXPECT_FALSE(loom_type_equal(argument, result));
+}
+
 TEST_F(RemapTest, CopiesOrderedF64ArraysAcrossModules) {
   const uint64_t source_bits[] = {
       UINT64_C(0x3FF0000000000000),

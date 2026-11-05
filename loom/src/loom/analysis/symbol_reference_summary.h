@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-static_assert(LOOM_TYPE_COUNT_ == 16,
+static_assert(LOOM_TYPE_COUNT_ == 17,
               "update symbol-bearing type classification for new kinds");
 
 // Shallow structural classification, without examining nested payloads. An
@@ -30,6 +30,7 @@ static inline bool loom_symbol_reference_type_may_contain_ref(
     case LOOM_TYPE_FUNCTION:
     case LOOM_TYPE_DIALECT:
     case LOOM_TYPE_PARAMETERIZED:
+    case LOOM_TYPE_REFERENCE:
       return true;
     case LOOM_TYPE_REGISTER:
       return loom_type_register_has_value_type(type);
