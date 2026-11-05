@@ -385,10 +385,11 @@ iree_runtime_cc_fuzz(
     name = "verifier_fuzz",
     srcs = ["verifier_fuzz.cc"],
     deps = [
+        ":module",
         ":module_fixture",
-        ":verifier",
         ":verifier_testdata",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/vm",
     ],
 )
 

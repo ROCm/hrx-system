@@ -68,6 +68,20 @@ typedef struct loom_serve_media_png_reader_t {
   iree_host_size_t offset;
 } loom_serve_media_png_reader_t;
 
+typedef struct loom_serve_media_png_error_t {
+  // Diagnostic supplied by libpng before unwinding.
+  char message[128];
+} loom_serve_media_png_error_t;
+
+static void loom_serve_media_png_fail(png_structp png,
+                                      png_const_charp message) {
+  loom_serve_media_png_error_t* error = png_get_error_ptr(png);
+  const size_t length = iree_min(strlen(message), sizeof(error->message) - 1);
+  memcpy(error->message, message, length);
+  error->message[length] = 0;
+  png_longjmp(png, 1);
+}
+
 static void loom_serve_media_png_read(png_structp png, png_bytep output,
                                       png_size_t length) {
   loom_serve_media_png_reader_t* reader = png_get_io_ptr(png);
@@ -81,8 +95,10 @@ static void loom_serve_media_png_read(png_structp png, png_bytep output,
 static iree_status_t loom_serve_media_png_decode(
     iree_const_byte_span_t data, const loom_serve_media_image_info_t* info,
     iree_byte_span_t pixels) {
-  png_structp png =
-      png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+  loom_serve_media_png_error_t error = {0};
+  png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, &error,
+                                           loom_serve_media_png_fail,
+                                           loom_serve_media_png_fail);
   if (!png) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "cannot allocate PNG decoder");
@@ -96,7 +112,7 @@ static iree_status_t loom_serve_media_png_decode(
   if (setjmp(png_jmpbuf(png))) {
     png_destroy_read_struct(&png, &header, NULL);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "invalid PNG pixel stream");
+                            "invalid PNG pixel stream: %s", error.message);
   }
   loom_serve_media_png_reader_t reader = {.data = data};
   png_set_read_fn(png, &reader, loom_serve_media_png_read);

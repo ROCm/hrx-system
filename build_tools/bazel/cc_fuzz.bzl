@@ -36,6 +36,7 @@ def _iree_cc_fuzz_impl(
         system_includes,
         linkopts,
         linkstatic,
+        args,
         tags,
         testonly,
         **kwargs):
@@ -54,6 +55,7 @@ def _iree_cc_fuzz_impl(
         system_includes = system_includes,
         linkopts = _append(linkopts, [_FUZZ_LINKOPT]),
         linkstatic = linkstatic,
+        args = args,
         tags = _append(tags, _FUZZ_TAGS),
         testonly = testonly,
         **kwargs
@@ -75,6 +77,9 @@ iree_cc_fuzz = macro(
         cc_attrs.binary_source,
         cc_attrs.link,
         {
+            "args": attr.string_list(
+                doc = "Command-line arguments used when this fuzzer is run by Bazel.",
+            ),
             "testonly": attr.bool(
                 configurable = False,
                 default = True,

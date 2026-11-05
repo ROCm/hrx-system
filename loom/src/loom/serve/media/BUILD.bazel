@@ -20,6 +20,16 @@ package(
     licenses = ["notice"],
 )
 
+IMAGE_FUZZ_SEEDS = [
+    "//loom/src/loom/serve/media/testdata/image_fuzz:gif.txt",
+    "//loom/src/loom/serve/media/testdata/image_fuzz:jpeg.txt",
+    "//loom/src/loom/serve/media/testdata/image_fuzz:pam_rgb.txt",
+    "//loom/src/loom/serve/media/testdata/image_fuzz:pam_rgba.txt",
+    "//loom/src/loom/serve/media/testdata/image_fuzz:pam_truncated.txt",
+    "//loom/src/loom/serve/media/testdata/image_fuzz:png.txt",
+    "//loom/src/loom/serve/media/testdata/image_fuzz:webp.txt",
+]
+
 loom_cc_library(
     name = "digest",
     hdrs = ["digest.h"],
@@ -212,6 +222,13 @@ loom_cc_test(
 loom_cc_fuzz(
     name = "image_fuzz",
     srcs = ["image_fuzz.cc"],
+    args = [
+        "-seed_inputs=" + ",".join([
+            "$(rootpath %s)" % seed
+            for seed in IMAGE_FUZZ_SEEDS
+        ]),
+    ],
+    data = IMAGE_FUZZ_SEEDS,
     deps = [
         ":image",
         ":image_codec",
@@ -226,20 +243,11 @@ loom_cc_fuzz(
 loom_py_test(
     name = "image_fuzz_test",
     srcs = ["image_fuzz_test.py"],
-    args = [
-        "$(rootpath :image_fuzz)",
-        "$(rootpath //loom/src/loom/serve/media/testdata/image_fuzz:png.txt)",
+    args = ["$(rootpath :image_fuzz)"] + [
+        "$(rootpath %s)" % seed
+        for seed in IMAGE_FUZZ_SEEDS
     ],
-    data = [
-        ":image_fuzz",
-        "//loom/src/loom/serve/media/testdata/image_fuzz:gif.txt",
-        "//loom/src/loom/serve/media/testdata/image_fuzz:jpeg.txt",
-        "//loom/src/loom/serve/media/testdata/image_fuzz:pam_rgb.txt",
-        "//loom/src/loom/serve/media/testdata/image_fuzz:pam_rgba.txt",
-        "//loom/src/loom/serve/media/testdata/image_fuzz:pam_truncated.txt",
-        "//loom/src/loom/serve/media/testdata/image_fuzz:png.txt",
-        "//loom/src/loom/serve/media/testdata/image_fuzz:webp.txt",
-    ],
+    data = [":image_fuzz"] + IMAGE_FUZZ_SEEDS,
     tags = [
         "manual",
         "skip-bazel_to_cmake",

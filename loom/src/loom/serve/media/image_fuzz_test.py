@@ -13,10 +13,16 @@ from pathlib import Path
 
 if __name__ == "__main__":
     executable = Path(sys.argv[1]).absolute()
-    seeds = Path(sys.argv[2]).absolute().parent
+    seeds = sorted(Path(seed).absolute() for seed in sys.argv[2:])
     with tempfile.TemporaryDirectory(prefix="image-fuzz-") as corpus:
         subprocess.run(
-            [str(executable), "-runs=4096", "-max_len=65536", corpus, str(seeds)],
+            [
+                str(executable),
+                "-runs=4096",
+                "-max_len=65536",
+                "-seed_inputs=" + ",".join(map(str, seeds)),
+                corpus,
+            ],
             cwd=corpus,
             check=True,
         )

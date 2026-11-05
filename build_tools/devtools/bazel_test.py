@@ -24,6 +24,61 @@ from build_tools.devtools import bazel as bazel_dev
 
 
 class BazelTest(unittest.TestCase):
+    def test_bazel_fuzz_parses_campaign_options_separately(self):
+        command = bazel_dev.parse_bazel_fuzz_args(
+            [
+                "--workers=4",
+                "--shard=1/3",
+                "--result=.notes/fuzz-result.json",
+                "//...",
+                "--config=asan",
+                "--",
+                "-max_total_time=60",
+            ]
+        )
+
+        self.assertEqual(command.target, "//...")
+        self.assertEqual(command.worker_count, 4)
+        self.assertEqual(command.shard_index, 1)
+        self.assertEqual(command.shard_count, 3)
+        self.assertEqual(command.result_path, Path(".notes/fuzz-result.json"))
+        self.assertEqual(command.bazel_args, ["--config=asan"])
+        self.assertEqual(command.program_args, ["-max_total_time=60"])
+
+    def test_bazel_fuzz_rejects_invalid_campaign_options(self):
+        invalid_arguments = [
+            ["--workers=0", "//..."],
+            ["--workers=lots", "//..."],
+            ["--shard=2/2", "//..."],
+            ["--shard=0/0", "//..."],
+            ["--shard=broken", "//..."],
+        ]
+        for arguments in invalid_arguments:
+            with self.subTest(arguments=arguments), self.assertRaises(ValueError):
+                bazel_dev.parse_bazel_fuzz_args(arguments)
+
+    def test_bazel_fuzz_target_shards_are_stable(self):
+        targets = [
+            "//a:first_fuzz",
+            "//b:second_fuzz",
+            "//c:third_fuzz",
+            "//d:fourth_fuzz",
+        ]
+        assignments = {
+            target: bazel_dev.fuzz.bazel_fuzz_target_shard(target, 3)
+            for target in targets
+        }
+
+        self.assertEqual(
+            assignments,
+            {
+                "//a:first_fuzz": 0,
+                "//b:second_fuzz": 0,
+                "//c:third_fuzz": 2,
+                "//d:fourth_fuzz": 1,
+            },
+        )
+
     def test_source_owner_query_filters_rule_kinds_before_expanding_attributes(self):
         query = bazel_dev._compiling_owner_query(
             {"//source:second.cc", "//source:first.c"},
@@ -665,6 +720,45 @@ class BazelTest(unittest.TestCase):
             env=None,
         )
 
+    def test_bazel_launch_metadata_can_skip_incompatible_targets(self):
+        execution_root = bazel_dev.REPO_ROOT / ".tmp/test-execution-root"
+        completed = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "label": "@@//pkg:disabled_fuzz",
+                    "incompatible": True,
+                    "executable": None,
+                    "argument_provider_count": 0,
+                    "arguments": [],
+                    "environment": {},
+                    "inherited_environment_names": [],
+                    "marked_arguments": [],
+                    "run_environment_names": [],
+                }
+            )
+            + "\n",
+            stderr="",
+        )
+        with (
+            mock.patch.object(bazel_dev, "run_captured", return_value=completed),
+            mock.patch.object(
+                bazel_dev, "bazel_execution_root", return_value=execution_root
+            ),
+        ):
+            result, metadata = bazel_dev.resolve_bazel_launch_metadata_for_targets(
+                bazel="bazel",
+                targets=["//pkg:disabled_fuzz"],
+                bazel_args=["--config=fuzzer"],
+                cwd=bazel_dev.REPO_ROOT,
+                env=None,
+                skip_incompatible=True,
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(metadata, {})
+
     def test_bazel_launch_metadata_rejects_control_environment_collision(self):
         completed = subprocess.CompletedProcess(
             args=[],
@@ -1061,7 +1155,11 @@ class BazelTest(unittest.TestCase):
                     script_path=script,
                 )
                 step = bazel_dev.BazelFuzzStep(
-                    "bazel", bazel_dev.BazelTargetCommand(target=launch.target)
+                    "bazel",
+                    bazel_dev.BazelFuzzCommand(
+                        target=launch.target,
+                        result_path=root / "result.json",
+                    ),
                 )
                 with (
                     mock.patch.object(
@@ -1082,6 +1180,11 @@ class BazelTest(unittest.TestCase):
                 self.assertEqual(child["marker"], "child environment")
                 self.assertEqual(child["args"], ["argument with spaces"])
                 self.assertFalse(script.exists())
+                campaign = json.loads(
+                    (root / "result.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(campaign["exit_code"], exit_code)
+                self.assertEqual(campaign["targets"][0]["label"], launch.target)
 
     def test_bazel_fuzz_single_target_removes_launch_after_start_failure(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -1102,7 +1205,11 @@ class BazelTest(unittest.TestCase):
                 script_path=script,
             )
             step = bazel_dev.BazelFuzzStep(
-                "bazel", bazel_dev.BazelTargetCommand(target=launch.target)
+                "bazel",
+                bazel_dev.BazelFuzzCommand(
+                    target=launch.target,
+                    result_path=root / "result.json",
+                ),
             )
             handlers = {s: signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM)}
             with (
@@ -1156,7 +1263,7 @@ class BazelTest(unittest.TestCase):
                     process.send_signal.assert_called_once_with(signum)
                 self.assertEqual({s: signal.getsignal(s) for s in handlers}, handlers)
 
-    def test_bazel_fuzz_builds_every_discovered_target_before_launching(self):
+    def test_bazel_fuzz_builds_compatible_targets_before_launching(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
             temporary_path = Path(temporary_dir)
             targets = ["//a:a_fuzz", "//z:z_fuzz"]
@@ -1185,10 +1292,12 @@ class BazelTest(unittest.TestCase):
                 )
                 for index, target in enumerate(targets)
             }
-            command = bazel_dev.BazelTargetCommand(
+            command = bazel_dev.BazelFuzzCommand(
                 target="//...",
                 bazel_args=["--config=asan"],
                 program_args=["-runs=10"],
+                worker_count=2,
+                result_path=temporary_path / "result.json",
             )
             step = bazel_dev.BazelFuzzStep("bazel", command)
             events = []
@@ -1198,7 +1307,14 @@ class BazelTest(unittest.TestCase):
                 return 0
 
             def resolve_metadata(**kwargs):
-                events.append(("metadata", kwargs["targets"], kwargs["bazel_args"]))
+                events.append(
+                    (
+                        "metadata",
+                        kwargs["targets"],
+                        kwargs["bazel_args"],
+                        kwargs["skip_incompatible"],
+                    )
+                )
                 return 0, metadata_by_target
 
             def generate(**kwargs):
@@ -1217,16 +1333,33 @@ class BazelTest(unittest.TestCase):
                 events.append(("prepare", launch.target, env))
                 return 0, processes[launch.target]
 
-            def run_many(generated_processes):
+            def run_many(generated_processes, worker_count):
                 events.append(
-                    ("run", [process.target for process in generated_processes])
+                    (
+                        "run",
+                        [process.target for process in generated_processes],
+                        worker_count,
+                    )
                 )
-                return 23
+                return bazel_dev.BazelFuzzRunResult(
+                    exit_code=23,
+                    targets=tuple(
+                        bazel_dev.BazelFuzzProcessResult(
+                            target=process.target,
+                            state="failed" if index == 0 else "cancelled",
+                            exit_code=23 if index == 0 else 130,
+                        )
+                        for index, process in enumerate(generated_processes)
+                    ),
+                )
 
             discovered = subprocess.CompletedProcess(
                 args=[],
                 returncode=0,
-                stdout="//z:z_fuzz\n//ignored:library\n//a:a_fuzz\n",
+                stdout=(
+                    "//z:z_fuzz\n//ignored:library\n//disabled:disabled_fuzz\n"
+                    "//a:a_fuzz\n"
+                ),
                 stderr="",
             )
             with (
@@ -1263,9 +1396,18 @@ class BazelTest(unittest.TestCase):
                 result = step.run(verbose=True)
 
             self.assertEqual(result, 23)
-            self.assertEqual(events[0][0], "build")
             self.assertEqual(
-                events[0][1],
+                events[0],
+                (
+                    "metadata",
+                    ["//a:a_fuzz", "//disabled:disabled_fuzz", "//z:z_fuzz"],
+                    ["--config=fuzzer", "--config=asan"],
+                    True,
+                ),
+            )
+            self.assertEqual(events[1][0], "build")
+            self.assertEqual(
+                events[1][1],
                 [
                     "bazel",
                     "build",
@@ -1273,10 +1415,6 @@ class BazelTest(unittest.TestCase):
                     "--config=asan",
                     *targets,
                 ],
-            )
-            self.assertEqual(
-                events[1],
-                ("metadata", targets, ["--config=fuzzer", "--config=asan"]),
             )
             self.assertEqual([event[1] for event in events[2:4]], targets)
             for event, target in zip(events[2:4], targets, strict=True):
@@ -1295,7 +1433,13 @@ class BazelTest(unittest.TestCase):
             self.assertEqual(
                 events[4:6], [("prepare", target, None) for target in targets]
             )
-            self.assertEqual(events[6], ("run", targets))
+            self.assertEqual(events[6], ("run", targets, 2))
+            campaign = json.loads(
+                (temporary_path / "result.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                campaign["incompatible_targets"], ["//disabled:disabled_fuzz"]
+            )
 
     def test_bazel_fuzz_stops_remaining_launches_after_a_failure(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -1346,9 +1490,9 @@ class BazelTest(unittest.TestCase):
                 "Popen",
                 side_effect=start,
             ) as popen:
-                result = bazel_dev.run_fuzzers(process_launches)
+                result = bazel_dev.run_fuzzers(process_launches, worker_count=2)
 
-            self.assertEqual(result, 7)
+            self.assertEqual(result.exit_code, 7)
             self.assertEqual(events[:2], ["start", "start"])
             self.assertEqual(processes[1].signal, bazel_dev.signal.SIGINT)
             self.assertEqual(popen.call_count, 2)
@@ -1359,6 +1503,101 @@ class BazelTest(unittest.TestCase):
                 self.assertEqual(call.kwargs["cwd"], process_launch.cwd)
                 self.assertEqual(call.kwargs["env"], process_launch.env)
                 self.assertFalse(process_launch.script_path.exists())
+
+    def test_bazel_fuzz_bounds_campaign_processes(self):
+        launches = [
+            bazel_dev.BazelProcess(
+                target=f"//pkg:fuzzer_{index}",
+                argv=[f"fuzzer-{index}"],
+                cwd=bazel_dev.REPO_ROOT,
+                env={},
+            )
+            for index in range(5)
+        ]
+        active_count = 0
+        maximum_active_count = 0
+
+        class FuzzerProcess:
+            def __init__(self):
+                self.completed = False
+
+            def poll(self):
+                nonlocal active_count
+                if not self.completed:
+                    self.completed = True
+                    active_count -= 1
+                return 0
+
+            def send_signal(self, sent_signal):
+                raise AssertionError(f"unexpected signal {sent_signal}")
+
+            def wait(self):
+                return 0
+
+        def start(*_args, **_kwargs):
+            nonlocal active_count, maximum_active_count
+            active_count += 1
+            maximum_active_count = max(maximum_active_count, active_count)
+            return FuzzerProcess()
+
+        with mock.patch.object(
+            bazel_dev.subprocess,
+            "Popen",
+            side_effect=start,
+        ):
+            result = bazel_dev.run_fuzzers(launches, worker_count=2)
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(maximum_active_count, 2)
+        self.assertEqual(
+            [target.state for target in result.targets], ["passed"] * len(launches)
+        )
+
+    def test_bazel_fuzz_forwards_termination_and_restores_handlers(self):
+        launch = bazel_dev.BazelProcess(
+            target="//pkg:one_fuzz",
+            argv=["fuzzer"],
+            cwd=bazel_dev.REPO_ROOT,
+            env={},
+        )
+
+        class FuzzerProcess:
+            returncode = None
+            sent_signal = None
+            terminated = False
+
+            def poll(self):
+                return self.returncode
+
+            def send_signal(self, sent_signal):
+                self.sent_signal = sent_signal
+                self.returncode = -sent_signal
+
+            def terminate(self):
+                self.terminated = True
+                self.returncode = -signal.SIGTERM
+
+            def wait(self):
+                return self.returncode
+
+        process = FuzzerProcess()
+        handlers = {s: signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM)}
+
+        def interrupt(_seconds):
+            signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+
+        with (
+            mock.patch.object(bazel_dev.subprocess, "Popen", return_value=process),
+            mock.patch.object(bazel_dev.time, "sleep", side_effect=interrupt),
+        ):
+            result = bazel_dev.run_fuzzers([launch], worker_count=1)
+
+        self.assertEqual(result.exit_code, 128 + signal.SIGTERM)
+        if os.name == "nt":
+            self.assertTrue(process.terminated)
+        else:
+            self.assertEqual(process.sent_signal, signal.SIGTERM)
+        self.assertEqual({s: signal.getsignal(s) for s in handlers}, handlers)
 
 
 if __name__ == "__main__":

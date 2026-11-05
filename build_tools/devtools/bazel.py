@@ -57,7 +57,8 @@ CLANG_TIDY_REPO_ENV = "--repo_env=IREE_CLANG_TIDY_LLVM=auto"
 RUNFILES_ENVIRONMENT_PROVIDER_SUFFIX = "%IreeRunfilesEnvironmentInfo"
 RUNFILES_ARGUMENTS_PROVIDER_SUFFIX = "%IreeRunfilesArgumentsInfo"
 BAZEL_LAUNCH_METADATA_QUERY_EXPRESSION = (
-    'json.encode({"label": str(target.label), "executable": ('
+    'json.encode({"label": str(target.label), "incompatible": '
+    '"IncompatiblePlatformProvider" in providers(target), "executable": ('
     'providers(target)["DefaultInfo"].files_to_run.executable.path '
     'if providers(target)["DefaultInfo"].files_to_run != None '
     'and providers(target)["DefaultInfo"].files_to_run.executable != None '
@@ -108,6 +109,14 @@ class BazelTargetCommand:
 class BazelRunCommand(BazelTargetCommand):
     print_path: bool = False
     run_cwd: Path = field(default_factory=Path.cwd)
+
+
+@dataclass(frozen=True)
+class BazelFuzzCommand(BazelTargetCommand):
+    worker_count: int = 1
+    shard_index: int = 0
+    shard_count: int = 1
+    result_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -190,6 +199,19 @@ class BazelProcess:
     script_path: Path | None = None
 
 
+@dataclass(frozen=True)
+class BazelFuzzProcessResult:
+    target: str
+    state: str
+    exit_code: int | None
+
+
+@dataclass(frozen=True)
+class BazelFuzzRunResult:
+    exit_code: int
+    targets: tuple[BazelFuzzProcessResult, ...]
+
+
 def split_program_args(arguments: list[str]) -> tuple[list[str], list[str]]:
     if "--" not in arguments:
         return arguments, []
@@ -224,12 +246,40 @@ def parse_bazel_run_args(
     )
 
 
-def parse_bazel_fuzz_args(arguments: list[str]) -> BazelTargetCommand:
+def parse_bazel_fuzz_shard(value: str) -> tuple[int, int]:
+    components = value.split("/", 1)
+    if len(components) != 2:
+        raise ValueError("Fuzz shard must have the form INDEX/COUNT")
+    try:
+        shard_index, shard_count = (int(component) for component in components)
+    except ValueError as exc:
+        raise ValueError("Fuzz shard must contain integer INDEX/COUNT") from exc
+    if shard_count <= 0 or shard_index < 0 or shard_index >= shard_count:
+        raise ValueError("Fuzz shard requires 0 <= INDEX < COUNT")
+    return shard_index, shard_count
+
+
+def parse_bazel_fuzz_args(arguments: list[str]) -> BazelFuzzCommand:
     tool_args, fuzzer_args = split_program_args(arguments)
     target = ""
     bazel_args = []
+    worker_count = 1
+    shard_index = 0
+    shard_count = 1
+    result_path = None
     for arg in tool_args:
-        if arg.startswith("-"):
+        if arg.startswith("--workers="):
+            try:
+                worker_count = int(arg.split("=", 1)[1])
+            except ValueError as exc:
+                raise ValueError("--workers requires a positive worker count") from exc
+            if worker_count <= 0:
+                raise ValueError("--workers requires a positive worker count")
+        elif arg.startswith("--shard="):
+            shard_index, shard_count = parse_bazel_fuzz_shard(arg.split("=", 1)[1])
+        elif arg.startswith("--result="):
+            result_path = Path(arg.split("=", 1)[1])
+        elif arg.startswith("-"):
             bazel_args.append(arg)
         elif not target:
             target = arg
@@ -237,10 +287,14 @@ def parse_bazel_fuzz_args(arguments: list[str]) -> BazelTargetCommand:
             bazel_args.append(arg)
     if not target:
         raise ValueError("Target is required for bazel fuzz")
-    return BazelTargetCommand(
+    return BazelFuzzCommand(
         target=target,
         bazel_args=bazel_args,
         program_args=fuzzer_args,
+        worker_count=worker_count,
+        shard_index=shard_index,
+        shard_count=shard_count,
+        result_path=result_path,
     )
 
 
@@ -554,6 +608,19 @@ def parse_bazel_launch_metadata(
     if not isinstance(payload, dict):
         print(f"dev.py: invalid Bazel launch metadata for {target}", file=sys.stderr)
         return None
+    incompatible = payload.get("incompatible", False)
+    if not isinstance(incompatible, bool):
+        print(
+            f"dev.py: invalid compatibility in Bazel launch metadata for {target}",
+            file=sys.stderr,
+        )
+        return None
+    if incompatible:
+        print(
+            f"dev.py: {target} is incompatible with the configured Bazel target",
+            file=sys.stderr,
+        )
+        return None
 
     argument_fields = ("arguments", "marked_arguments")
     for field_name in argument_fields:
@@ -662,6 +729,7 @@ def resolve_bazel_launch_metadata_for_targets(
     bazel_args: list[str],
     cwd: Path,
     env: dict[str, str] | None,
+    skip_incompatible: bool = False,
 ) -> tuple[int, dict[str, BazelLaunchMetadata] | None]:
     """Queries host-handoff metadata for configured executable targets."""
     if not targets:
@@ -690,16 +758,17 @@ def resolve_bazel_launch_metadata_for_targets(
         if len(targets) > 1:
             metadata_by_target = {}
             for target in targets:
-                result, metadata = resolve_bazel_launch_metadata(
+                result, single_metadata = resolve_bazel_launch_metadata_for_targets(
                     bazel=bazel,
-                    target=target,
+                    targets=[target],
                     bazel_args=bazel_args,
                     cwd=cwd,
                     env=env,
+                    skip_incompatible=skip_incompatible,
                 )
-                if result != 0 or metadata is None:
+                if result != 0 or single_metadata is None:
                     return result, None
-                metadata_by_target[target] = metadata
+                metadata_by_target.update(single_metadata)
             return 0, metadata_by_target
         print(
             f"dev.py: expected {len(targets)} configured launch targets, got "
@@ -735,6 +804,8 @@ def resolve_bazel_launch_metadata_for_targets(
         decoded_payloads.append(payload)
 
     if len(targets) == 1:
+        if skip_incompatible and decoded_payloads[0].get("incompatible") is True:
+            return 0, {}
         metadata = parse_bazel_launch_metadata(
             decoded_payloads[0],
             target=targets[0],
@@ -761,6 +832,8 @@ def resolve_bazel_launch_metadata_for_targets(
         if payload is None:
             unmatched_targets.append(target)
             continue
+        if skip_incompatible and payload.get("incompatible") is True:
+            continue
         metadata = parse_bazel_launch_metadata(
             payload,
             target=target,
@@ -770,16 +843,17 @@ def resolve_bazel_launch_metadata_for_targets(
             return 1, None
         metadata_by_target[target] = metadata
     for target in unmatched_targets:
-        result, metadata = resolve_bazel_launch_metadata(
+        result, single_metadata = resolve_bazel_launch_metadata_for_targets(
             bazel=bazel,
-            target=target,
+            targets=[target],
             bazel_args=bazel_args,
             cwd=cwd,
             env=env,
+            skip_incompatible=skip_incompatible,
         )
-        if result != 0 or metadata is None:
+        if result != 0 or single_metadata is None:
             return result, None
-        metadata_by_target[target] = metadata
+        metadata_by_target.update(single_metadata)
     return 0, metadata_by_target
 
 
@@ -1128,60 +1202,140 @@ def cleanup_compile_commands_scratch(scratch_dir: Path) -> None:
 
 
 def run_fuzzers(
-    fuzzer_processes: list[BazelProcess],
-) -> int:
-    processes: list[tuple[BazelProcess, subprocess.Popen]] = []
+    fuzzer_processes: list[BazelProcess], worker_count: int
+) -> BazelFuzzRunResult:
+    if worker_count <= 0:
+        raise ValueError("Fuzzer worker count must be positive")
+    order = {process.target: index for index, process in enumerate(fuzzer_processes)}
+    pending = list(fuzzer_processes)
+    active: list[tuple[BazelProcess, subprocess.Popen]] = []
+    results: list[BazelFuzzProcessResult] = []
+    result_code = 0
+    received_signal = None
+
+    def remove_launch_script(process_launch: BazelProcess) -> None:
+        if process_launch.script_path is not None:
+            bazel_launcher.remove_launch_script(process_launch.script_path)
+
+    def stop_active_processes(signum: int) -> None:
+        for _, process in active:
+            if process.poll() is None:
+                if os.name == "nt":
+                    if received_signal == signal.SIGINT:
+                        # Console Ctrl-C already reaches child processes on Windows.
+                        continue
+                    process.terminate()
+                else:
+                    process.send_signal(signum)
+
+    def forward_signal(signum, frame) -> None:
+        del frame
+        nonlocal received_signal
+        if received_signal is None:
+            received_signal = signum
+            stop_active_processes(signum)
+
+    previous_handlers = {}
     try:
-        for process_launch in fuzzer_processes:
-            processes.append(
-                (
-                    process_launch,
-                    subprocess.Popen(
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            previous_handlers[signum] = signal.signal(signum, forward_signal)
+        while pending or active:
+            while (
+                pending
+                and len(active) < worker_count
+                and result_code == 0
+                and received_signal is None
+            ):
+                process_launch = pending.pop(0)
+                try:
+                    process = subprocess.Popen(
                         process_launch.argv,
                         cwd=process_launch.cwd,
                         env=process_launch.env,
-                    ),
-                )
-            )
-    except (OSError, ValueError) as exc:
-        print(f"dev.py: failed to start fuzzer: {exc}", file=sys.stderr)
-        stop_fuzzers(processes)
-        for _, process in processes:
-            process.wait()
-        for process_launch in fuzzer_processes:
-            if process_launch.script_path is not None:
-                bazel_launcher.remove_launch_script(process_launch.script_path)
-        return 127
+                    )
+                except (OSError, ValueError) as exc:
+                    print(
+                        f"dev.py: failed to start fuzzer {process_launch.target}: "
+                        f"{exc}",
+                        file=sys.stderr,
+                    )
+                    remove_launch_script(process_launch)
+                    results.append(
+                        BazelFuzzProcessResult(
+                            target=process_launch.target,
+                            state="failed",
+                            exit_code=127,
+                        )
+                    )
+                    result_code = 127
+                    stop_active_processes(signal.SIGINT)
+                    break
+                active.append((process_launch, process))
 
-    result = 0
-    try:
-        while processes:
-            for process_launch, process in list(processes):
+            made_progress = False
+            for process_launch, process in list(active):
                 process_result = process.poll()
                 if process_result is None:
                     continue
-                processes.remove((process_launch, process))
-                if process_launch.script_path is not None:
-                    bazel_launcher.remove_launch_script(process_launch.script_path)
-                if process_result != 0 and result == 0:
+                made_progress = True
+                active.remove((process_launch, process))
+                remove_launch_script(process_launch)
+                exit_code = process_exit_code(process_result)
+                if received_signal is not None:
+                    state = "cancelled"
+                elif exit_code == 0:
+                    state = "passed"
+                elif result_code != 0:
+                    state = "cancelled"
+                else:
+                    state = "failed"
+                    result_code = exit_code
                     print(
                         f"dev.py: fuzzer failed: {process_launch.target} exited "
                         f"{process_result}",
                         file=sys.stderr,
                     )
-                    result = process_exit_code(process_result)
-            if result != 0:
-                stop_fuzzers(processes)
-                break
-            time.sleep(0.2)
-    except KeyboardInterrupt:
-        stop_fuzzers(processes)
-        result = 130
-    for process_launch, process in processes:
-        process.wait()
-        if process_launch.script_path is not None:
-            bazel_launcher.remove_launch_script(process_launch.script_path)
-    return result
+                    stop_active_processes(signal.SIGINT)
+                results.append(
+                    BazelFuzzProcessResult(
+                        target=process_launch.target,
+                        state=state,
+                        exit_code=exit_code,
+                    )
+                )
+
+            if result_code != 0 or received_signal is not None:
+                while pending:
+                    process_launch = pending.pop(0)
+                    remove_launch_script(process_launch)
+                    results.append(
+                        BazelFuzzProcessResult(
+                            target=process_launch.target,
+                            state="not_started",
+                            exit_code=None,
+                        )
+                    )
+            if active and not made_progress:
+                time.sleep(0.2)
+    finally:
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
+        stop_active_processes(received_signal or signal.SIGINT)
+        for process_launch, process in active:
+            process_result = process.wait()
+            remove_launch_script(process_launch)
+            results.append(
+                BazelFuzzProcessResult(
+                    target=process_launch.target,
+                    state="cancelled",
+                    exit_code=process_exit_code(process_result),
+                )
+            )
+
+    if received_signal is not None:
+        result_code = 128 + received_signal
+    results.sort(key=lambda result: order[result.target])
+    return BazelFuzzRunResult(exit_code=result_code, targets=tuple(results))
 
 
 def process_exit_code(process_result: int) -> int:
@@ -1190,10 +1344,47 @@ def process_exit_code(process_result: int) -> int:
     return process_result
 
 
-def stop_fuzzers(processes: list[tuple[BazelProcess, subprocess.Popen]]) -> None:
-    for _, process in processes:
-        if process.poll() is None:
-            process.send_signal(signal.SIGINT)
+def write_fuzz_campaign_result(
+    path: Path,
+    command: BazelFuzzCommand,
+    run_result: BazelFuzzRunResult,
+    incompatible_targets: list[str],
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    targets = []
+    for result in run_result.targets:
+        target_dir = fuzz.bazel_fuzz_target_dir(result.target)
+        targets.append(
+            {
+                "label": result.target,
+                "state": result.state,
+                "exit_code": result.exit_code,
+                "corpus_dir": str(target_dir / "corpus"),
+                "artifact_dir": str(target_dir / "artifacts"),
+            }
+        )
+    payload = {
+        "format": "iree.fuzz.campaign.v0",
+        "target_pattern": command.target,
+        "shard": {"index": command.shard_index, "count": command.shard_count},
+        "worker_count": command.worker_count,
+        "bazel_args": command.bazel_args,
+        "fuzzer_args": command.program_args,
+        "exit_code": run_result.exit_code,
+        "incompatible_targets": incompatible_targets,
+        "targets": targets,
+    }
+    temporary_path = path.with_name(
+        f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
+    )
+    try:
+        temporary_path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        os.replace(temporary_path, path)
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
 
 
 @dataclass(frozen=True)
@@ -1305,7 +1496,7 @@ class BazelRunStep:
 @dataclass(frozen=True)
 class BazelFuzzStep:
     bazel: str
-    command: BazelTargetCommand
+    command: BazelFuzzCommand
     env: dict[str, str] | None = None
 
     @property
@@ -1313,14 +1504,20 @@ class BazelFuzzStep:
         return ["--config=fuzzer", *self.command.bazel_args]
 
     def describe(self) -> str:
-        lines = [f"# bazel fuzz {self.command.target}"]
+        lines = [
+            f"# bazel fuzz {self.command.target}",
+            f"# select stable shard {self.command.shard_index}/{self.command.shard_count}",
+        ]
         if "..." in self.command.target:
             lines.append(quote_command([self.bazel, "query", self.command.target]))
             lines.append(
                 quote_command([self.bazel, "build", *self.bazel_args, "<fuzz targets>"])
             )
             lines.append("# generate one canonical Bazel launch script per fuzzer")
-            lines.append("run launch scripts concurrently without the Bazel lock")
+            lines.append(
+                f"run at most {self.command.worker_count} launch scripts concurrently "
+                "without the Bazel lock"
+            )
         else:
             lines.append("# build and generate canonical Bazel launch script")
             lines.append(
@@ -1346,6 +1543,11 @@ class BazelFuzzStep:
     def run(self, verbose: bool = False) -> int:
         if "..." in self.command.target:
             return self.run_target_pattern(verbose=verbose)
+        if (
+            fuzz.bazel_fuzz_target_shard(self.command.target, self.command.shard_count)
+            != self.command.shard_index
+        ):
+            return self.run_fuzzer_processes([], [])
         return self.run_target(self.command.target, verbose=verbose)
 
     def run_target_pattern(self, *, verbose: bool) -> int:
@@ -1357,17 +1559,52 @@ class BazelFuzzStep:
         if discovered.returncode != 0:
             print_process_failure(discovered)
             return discovered.returncode
-        targets = sorted(
+        discovered_targets = sorted(
             line.strip()
             for line in discovered.stdout.splitlines()
             if line.strip().endswith("_fuzz")
         )
-        if not targets:
+        if not discovered_targets:
             print(
                 f"dev.py: no fuzz targets found under {self.command.target}",
                 file=sys.stderr,
             )
             return 1
+        targets = [
+            target
+            for target in discovered_targets
+            if fuzz.bazel_fuzz_target_shard(target, self.command.shard_count)
+            == self.command.shard_index
+        ]
+        if self.command.shard_count > 1:
+            print(
+                f"dev.py: fuzz shard {self.command.shard_index}/"
+                f"{self.command.shard_count} selected {len(targets)} of "
+                f"{len(discovered_targets)} targets"
+            )
+        if not targets:
+            return self.run_fuzzer_processes([], [])
+        metadata_result, metadata_by_target = resolve_bazel_launch_metadata_for_targets(
+            bazel=self.bazel,
+            targets=targets,
+            bazel_args=self.bazel_args,
+            cwd=REPO_ROOT,
+            env=self.env,
+            skip_incompatible=True,
+        )
+        if metadata_result != 0 or metadata_by_target is None:
+            return metadata_result
+        incompatible_targets = [
+            target for target in targets if target not in metadata_by_target
+        ]
+        targets = [target for target in targets if target in metadata_by_target]
+        if incompatible_targets:
+            print(
+                f"dev.py: skipped {len(incompatible_targets)} incompatible fuzz "
+                "target(s) for this configuration"
+            )
+        if not targets:
+            return self.run_fuzzer_processes([], incompatible_targets)
         build_result = run_quietly(
             [self.bazel, "build", *self.bazel_args, *targets],
             cwd=REPO_ROOT,
@@ -1376,15 +1613,6 @@ class BazelFuzzStep:
         )
         if build_result != 0:
             return build_result
-        metadata_result, metadata_by_target = resolve_bazel_launch_metadata_for_targets(
-            bazel=self.bazel,
-            targets=targets,
-            bazel_args=self.bazel_args,
-            cwd=REPO_ROOT,
-            env=self.env,
-        )
-        if metadata_result != 0 or metadata_by_target is None:
-            return metadata_result
         fuzzer_launches = []
         for target in targets:
             launch_result, launch = self.generate_fuzzer_launch(
@@ -1408,7 +1636,7 @@ class BazelFuzzStep:
                     bazel_launcher.remove_launch_script(pending_launch.script_path)
                 return process_result
             fuzzer_processes.append(process_launch)
-        return run_fuzzers(fuzzer_processes)
+        return self.run_fuzzer_processes(fuzzer_processes, incompatible_targets)
 
     def run_target(self, target: str, *, verbose: bool) -> int:
         launch_result, launch = self.generate_fuzzer_launch(
@@ -1420,16 +1648,29 @@ class BazelFuzzStep:
         process_result, process_launch = prepare_bazel_process(launch, env=self.env)
         if process_result != 0 or process_launch is None:
             return process_result
-        # libFuzzer measures peak RSS through getrusage. A fresh child resets
-        # memory accounting that otherwise survives the launcher's exec chain.
-        try:
-            return wait_for_bazel_process(process_launch)
-        except (OSError, ValueError) as exc:
-            print(f"dev.py: failed to start fuzzer: {exc}", file=sys.stderr)
-            return 127
-        finally:
-            if process_launch.script_path is not None:
-                bazel_launcher.remove_launch_script(process_launch.script_path)
+        return self.run_fuzzer_processes([process_launch], [])
+
+    def run_fuzzer_processes(
+        self, processes: list[BazelProcess], incompatible_targets: list[str]
+    ) -> int:
+        run_result = run_fuzzers(processes, self.command.worker_count)
+        result_path = self.command.result_path
+        if result_path is None:
+            result_path = fuzz.bazel_fuzz_campaign_result_path(
+                self.command.target,
+                self.command.shard_index,
+                self.command.shard_count,
+            )
+        elif not result_path.is_absolute():
+            result_path = REPO_ROOT / result_path
+        write_fuzz_campaign_result(
+            result_path,
+            self.command,
+            run_result,
+            incompatible_targets,
+        )
+        print(f"dev.py: fuzz campaign result: {result_path}")
+        return run_result.exit_code
 
     def generate_fuzzer_launch(
         self,
