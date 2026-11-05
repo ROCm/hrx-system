@@ -65,6 +65,24 @@ iree_status_t loom_serve_text_storage_initialize(
     }
   }
   IREE_RETURN_IF_ERROR(status);
+  for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT &&
+                               iree_status_is_ok(status);
+       ++i) {
+    const uint8_t* record =
+        out_storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data + i * 24;
+    loom_serve_text_allocation_t* allocation = &out_storage->allocations[i];
+    allocation->length = iree_unaligned_load_le_u64(record);
+    allocation->alignment = iree_unaligned_load_le_u64(record + 8);
+    allocation->clear_length = iree_unaligned_load_le_u64(record + 16);
+    if (allocation->length > INT64_MAX ||
+        allocation->clear_length > allocation->length ||
+        !allocation->alignment ||
+        !iree_is_power_of_two_uint64(allocation->alignment)) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "invalid source allocation record %zu", i);
+    }
+  }
+  IREE_RETURN_IF_ERROR(status);
   const uint8_t* geometry =
       out_storage->bytes[LOOM_SERVE_TEXT_STORAGE_GEOMETRY].data;
   const uint64_t block_size = iree_unaligned_load_le_u64(geometry);
@@ -88,13 +106,9 @@ iree_status_t loom_serve_text_storage_initialize(
   const uint64_t slot_stride = iree_unaligned_load_le_u64(geometry + 40);
   const uint64_t slot_length = iree_unaligned_load_le_u64(geometry + 48);
   const uint64_t slot_count = iree_unaligned_load_le_u64(geometry + 56);
-  const uint8_t* arena =
-      out_storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data + 24;
-  const uint64_t arena_length = iree_unaligned_load_le_u64(arena);
-  const uint64_t clear_length = iree_unaligned_load_le_u64(arena + 16);
+  const uint64_t arena_length = out_storage->allocations[1].length;
   if (!slot_length || slot_stride < slot_length || slot_count < row_count ||
-      slot_count > UINT32_MAX || clear_length > arena_length ||
-      arena_length > INT64_MAX || slot_origin > arena_length ||
+      slot_count > UINT32_MAX || slot_origin > arena_length ||
       slot_length > arena_length - slot_origin ||
       slot_count - 1 >
           (arena_length - slot_origin - slot_length) / slot_stride) {
@@ -140,9 +154,8 @@ iree_status_t loom_serve_text_storage_initialize(
   // records. Optional unallocated tables have no upload or map consumers.
   const iree_host_size_t table_allocations[] = {3, 10};
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(table_allocations); ++i) {
-    const uint64_t length = iree_unaligned_load_le_u64(
-        out_storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data +
-        table_allocations[i] * 24);
+    const uint64_t length =
+        out_storage->allocations[table_allocations[i]].length;
     if (!length) {
       continue;
     }
@@ -192,12 +205,9 @@ iree_status_t loom_serve_text_storage_initialize(
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "cache page byte size is not representable");
     }
-    const uint64_t length = iree_unaligned_load_le_u64(
-        out_storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data +
-        allocation * 24);
-    const uint64_t clear_length = iree_unaligned_load_le_u64(
-        out_storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data +
-        allocation * 24 + 16);
+    const uint64_t length = out_storage->allocations[allocation].length;
+    const uint64_t clear_length =
+        out_storage->allocations[allocation].clear_length;
     const uint64_t blocks = pool_capacity / block_size;
     if (origin < clear_length || origin > length ||
         count - 1 > (length - origin) / stride ||
@@ -214,6 +224,7 @@ iree_status_t loom_serve_text_storage_initialize(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "cache region %zu overlaps private storage", i);
     }
+    out_storage->allocations[allocation].cache = true;
     out_storage->regions[i] = (loom_serve_text_cache_region_t){
         .allocation = allocation,
         .blocks = {origin, count, stride, block_bytes}};

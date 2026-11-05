@@ -97,11 +97,10 @@ iree_status_t loom_serve_text_state_allocate(
                                iree_status_is_ok(status);
        ++i) {
     iree_hal_buffer_t** allocation = loom_serve_text_state_allocation(state, i);
-    const uint8_t* record =
-        state->storage.bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data + i * 24;
-    const uint64_t length = iree_unaligned_load_le_u64(record);
-    const uint64_t alignment = iree_unaligned_load_le_u64(record + 8);
-    const uint64_t clear_length = iree_unaligned_load_le_u64(record + 16);
+    const loom_serve_text_allocation_t* record = &state->storage.allocations[i];
+    const iree_device_size_t length = record->length;
+    const iree_device_size_t alignment = record->alignment;
+    const iree_device_size_t clear_length = record->clear_length;
     // Carry belongs to the source's retained state, not the drafting policy.
     // Speculative feedback and optional draft cache roots still require
     // drafting.
@@ -116,17 +115,11 @@ iree_status_t loom_serve_text_state_allocate(
     const bool optional =
         i >= 9 &&
         iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_DRAFT);
-    if (((length != 0) != required && !optional) || clear_length > length ||
-        length > INT64_MAX || !alignment ||
-        !iree_is_power_of_two_uint64(alignment)) {
+    if ((length != 0) != required && !optional) {
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "invalid source allocation record %zu", i);
+                                "invalid source allocation role %zu", i);
     } else if (length) {
-      bool elastic = false;
-      for (iree_host_size_t j = 0; j < state->storage.region_count; ++j) {
-        elastic |= state->storage.regions[j].allocation == i;
-      }
-      if (state->memory.pool && state->cache.capacity && elastic) {
+      if (state->memory.pool && record->cache) {
         const loom_serve_memory_geometry_t geometry =
             loom_serve_pool_state_geometry(pool);
         status = loom_serve_virtual_buffer_allocate(

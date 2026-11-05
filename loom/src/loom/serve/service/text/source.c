@@ -151,8 +151,7 @@ static iree_status_t loom_serve_text_prepare(
         options->checkpoint_capacity
             ? 2 * options->row_count + options->checkpoint_capacity
             : options->row_count;
-    const uint64_t carry_bytes = iree_unaligned_load_le_u64(
-        storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data + 6 * 24);
+    const uint64_t carry_bytes = storage->allocations[6].length;
     if (storage->recurrent.capacity < slots ||
         (storage->carry_stride &&
          options->row_count + options->checkpoint_capacity >
@@ -203,10 +202,8 @@ static iree_status_t loom_serve_text_storage_declared_bytes(
   *out_bytes = 0;
   for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
        ++i) {
-    const uint64_t length = iree_unaligned_load_le_u64(
-        storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data + i * 24);
-    if (length > INT64_MAX ||
-        !iree_checked_add_u64(*out_bytes, length, out_bytes)) {
+    if (!iree_checked_add_u64(*out_bytes, storage->allocations[i].length,
+                              out_bytes)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "source storage size exceeds byte accounting");
     }

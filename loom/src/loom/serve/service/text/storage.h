@@ -26,6 +26,18 @@ enum {
   LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT = 11,
 };
 
+// One validated physical root requested by source bootstrap.
+typedef struct loom_serve_text_allocation_t {
+  // Addressable byte extent; zero omits this root.
+  iree_device_size_t length;
+  // Required power-of-two device address alignment.
+  iree_device_size_t alignment;
+  // Initialized prefix outside demand-backed cache planes.
+  iree_device_size_t clear_length;
+  // A source cache region names this root, allowing demand backing.
+  bool cache;
+} loom_serve_text_allocation_t;
+
 typedef struct loom_serve_text_cache_region_t {
   // Source allocation slot containing these repeated cache planes.
   iree_host_size_t allocation;
@@ -42,6 +54,9 @@ typedef struct loom_serve_text_storage_t {
   iree_vm_buffer_t* buffers[LOOM_SERVE_TEXT_STORAGE_RESULT_COUNT];
   // Immutable mappings borrowing buffers until release_payloads.
   iree_const_byte_span_t bytes[LOOM_SERVE_TEXT_STORAGE_RESULT_COUNT];
+  // Validated root records, retained after source payload release.
+  loom_serve_text_allocation_t
+      allocations[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
   // Positions in one page, declared by the model source.
   iree_host_size_t block_size;
   // Useful bytes contributed by one physical page across every cache plane.
