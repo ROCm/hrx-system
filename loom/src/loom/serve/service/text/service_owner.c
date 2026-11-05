@@ -84,8 +84,8 @@ void loom_serve_text_observe(loom_serve_text_service_t* service,
       loom_serve_text_model_weight_statistics(service->model);
   state->parameter_activity =
       loom_serve_text_model_parameter_activity(service->model);
-  const loom_serve_pool_statistics_t pool_memory =
-      loom_serve_pool_statistics(loom_serve_text_model_pool(service->model));
+  const loom_runtime_pool_statistics_t pool_memory =
+      loom_runtime_pool_statistics(loom_serve_text_model_pool(service->model));
   state->pool_memory = (loom_runtime_storage_shared_memory_record_t){
       .retained_committed_bytes = pool_memory.retained.committed_bytes,
       .workspace_committed_bytes = pool_memory.workspace.bytes_committed,

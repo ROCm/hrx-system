@@ -10,8 +10,8 @@
 
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/threading/mutex.h"
+#include "loom/runtime/host/timer.h"
 #include "loom/runtime/wake.h"
-#include "loom/serve/runtime/host/timer.h"
 #include "loom/serve/service/execution_reconfiguration.h"
 #include "loom/serve/service/finite/result.h"
 #include "loom/serve/service/kind.h"
@@ -120,14 +120,14 @@ struct loom_serve_finite_service_t {
     // Intrusive wait owned until its callback finishes.
     iree_async_semaphore_wait_operation_t operation;
     // Accepted work and feedback values.
-    loom_serve_execution_frontier_t frontier;
+    loom_runtime_execution_frontier_t frontier;
     // Toll-free async handles of the same HAL semaphores.
     iree_async_semaphore_t* semaphores[2];
     // Accepted batch through readiness collection, including result download.
     IREE_TRACE(iree_section_id_t section;)
   } device;
   // Independent heartbeat readiness, drained before service destruction.
-  loom_serve_timer_t timer;
+  loom_runtime_timer_t timer;
   // Producer-owned observation; neither counters nor publication wait on sinks.
   struct {
     // Bounded typed event storage with independent reader cursors.
@@ -262,7 +262,7 @@ static void loom_serve_finite_finish(loom_serve_finite_service_t* service,
   service->result = NULL;
   loom_serve_finite_snapshot_release(service->snapshot);
   service->snapshot = NULL;
-  loom_serve_residency_cancel_admission(
+  loom_runtime_residency_cancel_admission(
       loom_serve_finite_model_residency(service->model));
   for (iree_host_size_t i = 0; i < service->cohort_count; ++i) {
     loom_serve_finite_job_destroy(service, service->cohort[i], terminal_status);
@@ -510,7 +510,7 @@ static bool loom_serve_finite_is_pending(void* self) {
          loom_serve_finite_model_is_pending(service->model) ||
          loom_serve_execution_reconfiguration_pending(
              service->reconfiguration) ||
-         loom_serve_timer_is_pending(&service->timer);
+         loom_runtime_timer_is_pending(&service->timer);
 }
 
 static loom_service_snapshot_t loom_serve_finite_snapshot(void* self) {
@@ -736,15 +736,15 @@ static iree_status_t loom_serve_finite_advance(
       loom_serve_finite_finish(service, iree_ok_status());
       *out_progress = true;
     } else {
-      loom_serve_residency_admission_t admission;
-      status = loom_serve_residency_try_admit(
+      loom_runtime_residency_admission_t admission;
+      status = loom_runtime_residency_try_admit(
           loom_serve_finite_model_residency(service->model), &admission);
       if (iree_status_is_ok(status) &&
-          admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
+          admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED) {
         status = loom_serve_finite_submit(service);
         *out_progress = true;
       } else if (iree_status_is_ok(status) &&
-                 admission == LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY &&
+                 admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY &&
                  !iree_any_bit_set(flags,
                                    LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY)) {
         iree_status_t rejection =
@@ -773,8 +773,8 @@ static iree_status_t loom_serve_finite_advance(
   bool tick = false;
   const bool stop_timer = service->stopping || !iree_status_is_ok(status);
   status = iree_status_join(
-      status, loom_serve_timer_advance(&service->timer, stop_timer, true,
-                                       &timer_progress, &tick));
+      status, loom_runtime_timer_advance(&service->timer, stop_timer, true,
+                                         &timer_progress, &tick));
   *out_progress |= timer_progress;
   if (tick) {
     loom_serve_finite_heartbeat(service);
@@ -870,7 +870,7 @@ static void loom_serve_finite_set_observer(
   iree_slim_mutex_lock(&service->event.mutex);
   service->event.observer = observer;
   iree_slim_mutex_unlock(&service->event.mutex);
-  loom_serve_timer_set_observer(&service->timer, observer);
+  loom_runtime_timer_set_observer(&service->timer, observer);
   loom_serve_finite_model_set_observer(service->model, observer);
   loom_serve_execution_reconfiguration_set_observer(service->reconfiguration,
                                                     observer);
@@ -889,7 +889,7 @@ loom_serve_finite_service_interface_t loom_serve_finite_service_interface(
       .name = service->name,
       .runtime = {.self = service,
                   .vtable = &vtable,
-                  .capacity_domain = loom_serve_residency_cache(
+                  .capacity_domain = loom_runtime_residency_cache(
                       loom_serve_finite_model_residency(service->model))},
       .kind = service->protocol->kind,
       .tokenizer = loom_serve_finite_model_tokenizer(service->model),
@@ -923,7 +923,7 @@ void loom_serve_finite_service_free(loom_serve_finite_service_t* service) {
   loom_serve_finite_finish(service, iree_ok_status());
   iree_status_free(service->failure);
   loom_serve_execution_reconfiguration_free(service->reconfiguration);
-  loom_serve_timer_deinitialize(&service->timer);
+  loom_runtime_timer_deinitialize(&service->timer);
   iree_slim_mutex_deinitialize(&service->event.mutex);
   iree_allocator_free(service->host_allocator, service->pending);
   iree_allocator_free(service->host_allocator, service->cohort);
@@ -936,7 +936,7 @@ void loom_serve_finite_service_free(loom_serve_finite_service_t* service) {
 }
 
 iree_status_t loom_serve_finite_service_allocate(
-    loom_serve_host_t* host, loom_serve_finite_model_t* model,
+    loom_runtime_host_t* host, loom_serve_finite_model_t* model,
     const loom_serve_finite_protocol_t* protocol, iree_string_view_t name,
     iree_host_size_t capacity, iree_host_size_t variant_capacity,
     iree_duration_t heartbeat_interval, loom_runtime_telemetry_stream_t* stream,
@@ -960,9 +960,9 @@ iree_status_t loom_serve_finite_service_allocate(
   service->capacity = capacity;
   service->telemetry.stream = stream;
   service->telemetry.owns_stream = !stream;
-  service->executor = loom_serve_host_executor(host);
+  service->executor = loom_runtime_host_executor(host);
   iree_slim_mutex_initialize(&service->event.mutex);
-  loom_serve_timer_initialize(&service->timer);
+  loom_runtime_timer_initialize(&service->timer);
   iree_status_t status = iree_allocator_malloc_array(host_allocator, capacity,
                                                      sizeof(*service->pending),
                                                      (void**)&service->pending);
@@ -982,7 +982,7 @@ iree_status_t loom_serve_finite_service_allocate(
                                          (void**)&service->rows);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_async_proactor_pool_get(loom_serve_host_proactor_pool(host),
+    status = iree_async_proactor_pool_get(loom_runtime_host_proactor_pool(host),
                                           0, &service->proactor);
   }
   if (iree_status_is_ok(status)) {
@@ -995,8 +995,8 @@ iree_status_t loom_serve_finite_service_allocate(
                                                     &service->telemetry.stream);
   }
   if (iree_status_is_ok(status)) {
-    loom_serve_timer_configure(&service->timer, service->proactor,
-                               heartbeat_interval);
+    loom_runtime_timer_configure(&service->timer, service->proactor,
+                                 heartbeat_interval);
     loom_runtime_telemetry_record_t record = {
         .time_ns = iree_time_now(),
         .event = stream ? &LOOM_SERVICE_TELEMETRY_SNAPSHOT

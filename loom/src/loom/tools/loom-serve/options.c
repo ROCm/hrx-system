@@ -58,10 +58,10 @@ IREE_FLAG(string, parameter_idle_ms, "",
           "remain resident.");
 
 iree_status_t loom_serve_host_create_from_flags(
-    const loom_serve_compiler_options_t* compiler_options,
-    iree_allocator_t host_allocator, loom_serve_host_t** out_host) {
-  return loom_serve_host_create((iree_host_size_t)FLAG_workers,
-                                compiler_options, host_allocator, out_host);
+    const loom_runtime_compiler_options_t* compiler_options,
+    iree_allocator_t host_allocator, loom_runtime_host_t** out_host) {
+  return loom_runtime_host_create((iree_host_size_t)FLAG_workers,
+                                  compiler_options, host_allocator, out_host);
 }
 
 static iree_status_t loom_serve_device_configuration_from_flags(
@@ -100,7 +100,7 @@ static iree_status_t loom_serve_device_configuration_from_flags(
   }
   IREE_RETURN_IF_ERROR(loom_serve_device_configuration_initialize_uri(
       devices.values[0], host_allocator, out_configuration));
-  loom_serve_pool_options_t* options = &out_configuration->pools[0].options;
+  loom_runtime_pool_options_t* options = &out_configuration->pools[0].options;
   if (!strcmp(FLAG_pool_backing, "fixed")) {
     options->elastic = false;
   } else if (FLAG_pool_backing[0] && strcmp(FLAG_pool_backing, "elastic")) {
@@ -141,17 +141,17 @@ static iree_status_t loom_serve_device_configuration_from_flags(
   options->weight_slab_size = (iree_device_size_t)numbers[0];
   options->state_slab_size = (iree_device_size_t)numbers[1];
   options->memory_limit = numbers[2];
-  out_configuration->idle[0] = (loom_serve_pool_idle_policy_t){
+  out_configuration->idle[0] = (loom_runtime_pool_idle_policy_t){
       .workspace_timeout = (iree_duration_t)numbers[3] * 1000000,
       .parameter_timeout = (iree_duration_t)numbers[4] * 1000000};
   return iree_ok_status();
 }
 
 iree_status_t loom_serve_device_group_allocate_from_flags(
-    loom_serve_host_t* host, iree_hal_driver_registry_t* driver_registry,
+    loom_runtime_host_t* host, iree_hal_driver_registry_t* driver_registry,
     iree_allocator_t host_allocator,
     loom_serve_device_configuration_t* out_configuration,
-    loom_serve_device_group_t** out_group,
+    loom_runtime_device_group_t** out_group,
     iree_hal_profiling_from_flags_t** out_profiling) {
   *out_group = NULL;
   *out_profiling = NULL;
@@ -175,7 +175,7 @@ iree_status_t loom_serve_device_group_allocate_from_flags(
     iree_hal_driver_t* handle;
   } drivers[IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT] = {0};
   iree_host_size_t driver_count = 0;
-  loom_serve_device_options_t* options = out_configuration->options;
+  loom_runtime_device_options_t* options = out_configuration->options;
   for (iree_host_size_t i = 0;
        i < out_configuration->count && iree_status_is_ok(status); ++i) {
     const iree_string_view_t name = iree_uri_schema(options[i].uri);
@@ -187,7 +187,7 @@ iree_status_t loom_serve_device_group_allocate_from_flags(
     if (driver_index == driver_count) {
       drivers[driver_index].name = name;
       if (iree_string_view_equal(name, IREE_SV("task"))) {
-        drivers[driver_index].handle = loom_serve_host_task_driver(host);
+        drivers[driver_index].handle = loom_runtime_host_task_driver(host);
         iree_hal_driver_retain(drivers[driver_index].handle);
       } else if (!driver_registry) {
         status = iree_make_status(IREE_STATUS_NOT_FOUND,
@@ -206,20 +206,20 @@ iree_status_t loom_serve_device_group_allocate_from_flags(
     options[i].retain_profile_metadata = retain_profile_metadata;
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_device_group_allocate(
+    status = loom_runtime_device_group_allocate(
         host, out_configuration->count, options, host_allocator, out_group);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_begin_device_group_profiling_from_flags(
-        loom_serve_device_group_handle(*out_group), host_allocator,
+        loom_runtime_device_group_handle(*out_group), host_allocator,
         out_profiling);
   }
   for (iree_host_size_t i = 0;
        i < out_configuration->pool_count && iree_status_is_ok(status); ++i) {
     const loom_serve_pool_configuration_t* declaration =
         &out_configuration->pools[i];
-    loom_serve_pool_t* pool = NULL;
-    status = loom_serve_device_group_create_pool(
+    loom_runtime_pool_t* pool = NULL;
+    status = loom_runtime_device_group_create_pool(
         *out_group, declaration->binding, &declaration->options, &pool);
   }
   for (iree_host_size_t i = 0; i < driver_count; ++i) {
@@ -232,7 +232,8 @@ iree_status_t loom_serve_device_group_allocate_from_flags(
     status = iree_status_join(
         status, iree_hal_end_profiling_from_flags(*out_profiling));
     *out_profiling = NULL;
-    status = iree_status_join(status, loom_serve_device_group_free(*out_group));
+    status =
+        iree_status_join(status, loom_runtime_device_group_free(*out_group));
     *out_group = NULL;
   }
   return status;

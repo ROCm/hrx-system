@@ -19,17 +19,17 @@
 
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
-#include "loom/serve/runtime/program/package.h"
+#include "loom/runtime/program/package.h"
+#include "loom/runtime/testing/stalled_stderr.h"
 #include "loom/serve/service/finite/embedding/protocol.h"
 #include "loom/serve/service/finite/embedding/source_service_test_fixture.h"
 #include "loom/serve/service/finite/result.h"
 #include "loom/serve/testing/model.h"
 #include "loom/serve/testing/package.h"
-#include "loom/serve/testing/stalled_stderr.h"
 
 namespace loom_serve::testing::embedding {
 
-using loom_serve::testing::StalledStderr;
+using loom_runtime::testing::StalledStderr;
 
 TEST_F(SourceEmbeddingServiceTest, ReconfiguresCommandToEliminateWorkspace) {
   StartRouter();
@@ -359,8 +359,8 @@ class DeviceResultTest : public SourceEmbeddingServiceTest {
     }
     iree_hal_buffer_release(target_);
     if (consumer_) {
-      IREE_EXPECT_OK(loom_serve_execution_drain(consumer_));
-      loom_serve_execution_release(consumer_);
+      IREE_EXPECT_OK(loom_runtime_execution_drain(consumer_));
+      loom_runtime_execution_release(consumer_);
     }
     iree_hal_semaphore_release(gate_);
     for (auto* result : results_) {
@@ -392,11 +392,11 @@ class DeviceResultTest : public SourceEmbeddingServiceTest {
     IREE_ASSERT_OK(
         loom_serve_finite_model_advance_batch(model_, false, &code_ready));
     ASSERT_TRUE(code_ready);
-    loom_serve_residency_admission_t admission;
-    IREE_ASSERT_OK(loom_serve_residency_try_admit(
+    loom_runtime_residency_admission_t admission;
+    IREE_ASSERT_OK(loom_runtime_residency_try_admit(
         loom_serve_finite_model_residency(model_), &admission));
-    ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
-    loom_serve_execution_frontier_t frontier;
+    ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+    loom_runtime_execution_frontier_t frontier;
     IREE_ASSERT_OK(
         loom_serve_finite_model_submit(model_, &results_[ordinal], &frontier));
     EXPECT_EQ(frontier.values[1], transfer_value_);
@@ -410,9 +410,9 @@ class DeviceResultTest : public SourceEmbeddingServiceTest {
   void Complete(size_t ordinal) {
     auto ready = loom_serve_finite_result_ready(results_[ordinal]);
     for (size_t i = 0; i < IREE_ARRAYSIZE(ready.semaphores); ++i) {
-      IREE_ASSERT_OK(
-          loom_serve_workspace_wait(loom_serve_pool_workspace(storage_owner_),
-                                    ready.semaphores[i], ready.values[i]));
+      IREE_ASSERT_OK(loom_runtime_workspace_wait(
+          loom_runtime_pool_workspace(storage_owner_), ready.semaphores[i],
+          ready.values[i]));
     }
     loom_serve_finite_model_complete(model_);
     ReleaseInputs();
@@ -430,7 +430,7 @@ class DeviceResultTest : public SourceEmbeddingServiceTest {
   }
 
   // Independent device consumer, held past producer model destruction.
-  loom_serve_execution_t* consumer_ = nullptr;
+  loom_runtime_execution_t* consumer_ = nullptr;
   // Explicit readiness control for the final device reader.
   iree_hal_semaphore_t* gate_ = nullptr;
   // Consumer-owned pooled destination, independent of finite output geometry.
@@ -462,7 +462,7 @@ class GenerationSelectionTest : public DeviceResultTest,
     if (candidate_) {
       update_.dispose(candidate_);
     }
-    loom_serve_package_release(package_);
+    loom_runtime_package_release(package_);
     IREE_EXPECT_OK(status_);
     DeviceResultTest::TearDown();
   }
@@ -484,17 +484,17 @@ class GenerationSelectionTest : public DeviceResultTest,
     const size_t position = contents[1].find(original);
     ASSERT_NE(position, std::string::npos);
     contents[1].replace(position, original.size(), "scalar.constant 2 : i32");
-    const loom_serve_package_file_t files[] = {
+    const loom_runtime_package_file_t files[] = {
         {IREE_SV("model/config.loom"),
          iree_make_const_byte_span(contents[0].data(), contents[0].size())},
         {IREE_SV("model/stage.loom"),
          iree_make_const_byte_span(contents[1].data(), contents[1].size())}};
-    IREE_ASSERT_OK(loom_serve_package_create(IREE_SV("model/model.json"),
-                                             IREE_ARRAYSIZE(files), files,
-                                             host_allocator_, &package_));
+    IREE_ASSERT_OK(loom_runtime_package_create(IREE_SV("model/model.json"),
+                                               IREE_ARRAYSIZE(files), files,
+                                               host_allocator_, &package_));
     const iree_string_view_t providers[] = {IREE_SV("config.loom"),
                                             IREE_SV("stage.loom")};
-    const loom_serve_sources_t sources = {
+    const loom_runtime_sources_t sources = {
         .count = IREE_ARRAYSIZE(providers),
         .values = providers,
         .package = package_,
@@ -502,7 +502,7 @@ class GenerationSelectionTest : public DeviceResultTest,
     IREE_ASSERT_OK(update_.compile(
         update_.self, &sources,
         [](void* self, iree_status_t status, void* value,
-           const loom_serve_compilation_report_t* report) {
+           const loom_runtime_compilation_report_t* report) {
           auto* test = static_cast<GenerationSelectionTest*>(self);
           std::lock_guard<std::mutex> lock(test->mutex_);
           test->candidate_ = value;
@@ -514,7 +514,7 @@ class GenerationSelectionTest : public DeviceResultTest,
     std::unique_lock<std::mutex> lock(mutex_);
     condition_.wait(lock, [&] { return ready_; });
     IREE_ASSERT_OK(std::exchange(status_, iree_ok_status()));
-    loom_serve_package_release(std::exchange(package_, nullptr));
+    loom_runtime_package_release(std::exchange(package_, nullptr));
   }
 
   // Public model replacement capability, valid through candidate disposal.
@@ -522,7 +522,7 @@ class GenerationSelectionTest : public DeviceResultTest,
   // Terminal compiler payload, independently retained by model selections.
   void* candidate_ = nullptr;
   // Provider package retired immediately after compilation finishes.
-  loom_serve_package_t* package_ = nullptr;
+  loom_runtime_package_t* package_ = nullptr;
   // Joins the real asynchronous compiler's final callback with the outer test.
   std::mutex mutex_;
   // Outer-thread notification; no serving worker waits for compilation.
@@ -547,11 +547,11 @@ TEST_P(GenerationSelectionTest,
   ASSERT_NO_FATAL_FAILURE(SubmitPrepared(1));
   ASSERT_NO_FATAL_FAILURE(Complete(1));
 
-  IREE_ASSERT_OK(
-      loom_serve_device_create_execution(device_, storage_owner_, &consumer_));
+  IREE_ASSERT_OK(loom_runtime_device_create_execution(device_, storage_owner_,
+                                                      &consumer_));
   for (size_t i = 0; i < results_.size(); ++i) {
     auto ready = loom_serve_finite_result_ready(results_[i]);
-    IREE_ASSERT_OK(loom_serve_execution_barrier(
+    IREE_ASSERT_OK(loom_runtime_execution_barrier(
         consumer_, {2, ready.semaphores, ready.values}));
     const auto row = loom_serve_finite_result_row(results_[i], 0, 0);
     ASSERT_EQ(row.length, 4 * sizeof(float));
@@ -567,9 +567,9 @@ TEST_P(GenerationSelectionTest,
     };
     uint64_t value = 0;
     IREE_ASSERT_OK(
-        loom_serve_execution_transfer(consumer_, 1, &download, &value));
+        loom_runtime_execution_transfer(consumer_, 1, &download, &value));
   }
-  IREE_ASSERT_OK(loom_serve_execution_drain(consumer_));
+  IREE_ASSERT_OK(loom_runtime_execution_drain(consumer_));
   const float expected[] = {1, 1, 1, 1, 2, 1, 2, 1};
   for (size_t i = 0; i < IREE_ARRAYSIZE(expected); ++i) {
     EXPECT_EQ(output_[i], expected[i]);
@@ -603,11 +603,11 @@ class RequestChoiceTest : public GenerationSelectionTest {
       loom_serve_finite_model_release_batch(model_);
       ReleaseInputs();
     }
-    loom_serve_package_release(package_);
+    loom_runtime_package_release(package_);
     GenerationSelectionTest::TearDown();
   }
 
-  void Load(loom_serve_variant_cache_options_t cache,
+  void Load(loom_runtime_variant_cache_options_t cache,
             bool reject_two_units = false,
             std::array<uint32_t, 2> capacity_factors = {20, 16}) {
     interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
@@ -628,7 +628,7 @@ class RequestChoiceTest : public GenerationSelectionTest {
         IREE_SV("model/control_base.loom"), IREE_SV("model/control.loom"),
         IREE_SV("model/prepare.loom"),      IREE_SV("model/tokenizer.json")};
     std::string contents[IREE_ARRAYSIZE(paths)];
-    loom_serve_package_file_t files[IREE_ARRAYSIZE(paths)] = {};
+    loom_runtime_package_file_t files[IREE_ARRAYSIZE(paths)] = {};
     for (size_t i = 0; i < IREE_ARRAYSIZE(paths); ++i) {
       std::ifstream input(paths[i]);
       ASSERT_TRUE(input.good()) << paths[i];
@@ -682,9 +682,9 @@ class RequestChoiceTest : public GenerationSelectionTest {
       files[i] = {names[i], iree_make_const_byte_span(contents[i].data(),
                                                       contents[i].size())};
     }
-    IREE_ASSERT_OK(loom_serve_package_create(IREE_SV("model/model.json"),
-                                             IREE_ARRAYSIZE(files), files,
-                                             host_allocator_, &package_));
+    IREE_ASSERT_OK(loom_runtime_package_create(IREE_SV("model/model.json"),
+                                               IREE_ARRAYSIZE(files), files,
+                                               host_allocator_, &package_));
     const iree_string_view_t providers[] = {IREE_SV("config.loom"),
                                             IREE_SV("stage.loom"),
                                             IREE_SV("control_base.loom")};
@@ -707,7 +707,7 @@ class RequestChoiceTest : public GenerationSelectionTest {
     model_ = load.model;
     transfer_value_ = 0;
     update_ = loom_serve_finite_model_execution_update(model_);
-    loom_serve_package_release(std::exchange(package_, nullptr));
+    loom_runtime_package_release(std::exchange(package_, nullptr));
     ASSERT_NO_FATAL_FAILURE(CreateService(0));
     loom_serve_finite_model_set_observer(model_, {Wake, this});
   }
@@ -767,14 +767,14 @@ class RequestChoiceTest : public GenerationSelectionTest {
   void CheckChoice(std::initializer_list<float> expected) {
     ASSERT_NO_FATAL_FAILURE(SubmitPrepared(0));
     loom_serve_finite_snapshot_t* snapshot = nullptr;
-    loom_serve_execution_frontier_t ready;
+    loom_runtime_execution_frontier_t ready;
     IREE_ASSERT_OK(
         loom_serve_finite_result_download(results_[0], &snapshot, &ready));
     transfer_value_ = ready.values[1];
     for (size_t i = 0; i < IREE_ARRAYSIZE(ready.semaphores); ++i) {
-      IREE_EXPECT_OK(
-          loom_serve_workspace_wait(loom_serve_pool_workspace(storage_owner_),
-                                    ready.semaphores[i], ready.values[i]));
+      IREE_EXPECT_OK(loom_runtime_workspace_wait(
+          loom_runtime_pool_workspace(storage_owner_), ready.semaphores[i],
+          ready.values[i]));
     }
     const auto row = loom_serve_finite_snapshot_row(snapshot, 0, 0);
     EXPECT_EQ(row.data_length, expected.size() * sizeof(float));
@@ -815,7 +815,7 @@ class RequestChoiceTest : public GenerationSelectionTest {
   // Preparation succeeded; teardown must collect/release this invocation.
   bool batch_active_ = false;
   // Temporary input package, released before the first request specialization.
-  loom_serve_package_t* package_ = nullptr;
+  loom_runtime_package_t* package_ = nullptr;
 };
 
 TEST_P(RequestChoiceTest, ShapeReuseAndLruEvictionSurviveProviderRetirement) {
@@ -852,7 +852,8 @@ TEST_P(RequestChoiceTest, AdmissionCeilingsDoNotSizeWorkspaceBacking) {
   const auto run = [&] {
     ASSERT_NO_FATAL_FAILURE(
         RunChoice(R"({"model":"fixture","input":"a"})", false, {1, 1, 1, 1}));
-    const auto workspace = loom_serve_pool_statistics(storage_owner_).workspace;
+    const auto workspace =
+        loom_runtime_pool_statistics(storage_owner_).workspace;
     EXPECT_GT(workspace.bytes_committed, 0u);
     EXPECT_LT(workspace.bytes_committed, kCapacityBytes);
   };
@@ -870,7 +871,7 @@ TEST_P(RequestChoiceTest, AdmissionCeilingsDoNotSizeWorkspaceBacking) {
   IREE_ASSERT_OK(Resolve());
   ASSERT_NO_FATAL_FAILURE(CheckChoice({31, 31, 1, 2}));
   EXPECT_LT(
-      loom_serve_pool_statistics(storage_owner_).workspace.bytes_committed,
+      loom_runtime_pool_statistics(storage_owner_).workspace.bytes_committed,
       kCapacityBytes);
 }
 
@@ -968,19 +969,19 @@ TEST_F(DeviceResultTest, RaggedCohortsComposeBeforeProducerRetirement) {
   ASSERT_NO_FATAL_FAILURE(Complete(0));
   ASSERT_NO_FATAL_FAILURE(Submit({R"({"model":"fixture","input":[0]})"}, 1));
 
-  IREE_ASSERT_OK(
-      loom_serve_device_create_execution(device_, storage_owner_, &consumer_));
+  IREE_ASSERT_OK(loom_runtime_device_create_execution(device_, storage_owner_,
+                                                      &consumer_));
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      loom_serve_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
-      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &gate_));
+      loom_runtime_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+      0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &gate_));
   auto ready = loom_serve_finite_result_ready(results_[1]);
   iree_hal_semaphore_t* waits[] = {ready.semaphores[0], gate_};
   uint64_t values[] = {ready.values[0], 1};
-  IREE_ASSERT_OK(loom_serve_execution_barrier(consumer_, {2, waits, values}));
+  IREE_ASSERT_OK(loom_runtime_execution_barrier(consumer_, {2, waits, values}));
   const auto reservation =
       iree_hal_make_pool_reservation_request(sizeof(output_), 16);
   IREE_ASSERT_OK(
-      loom_serve_execution_alloca(consumer_, 1, &reservation, &target_));
+      loom_runtime_execution_alloca(consumer_, 1, &reservation, &target_));
 
   std::array<iree_hal_transfer_operation_t, 3> copies = {};
   const std::array<std::array<size_t, 2>, 3> rows = {{{0, 0}, {0, 1}, {1, 0}}};
@@ -1002,8 +1003,8 @@ TEST_F(DeviceResultTest, RaggedCohortsComposeBeforeProducerRetirement) {
     offset += row.length;
   }
   uint64_t value = 0;
-  IREE_ASSERT_OK(loom_serve_execution_transfer(consumer_, copies.size(),
-                                               copies.data(), &value));
+  IREE_ASSERT_OK(loom_runtime_execution_transfer(consumer_, copies.size(),
+                                                 copies.data(), &value));
 
   // Enqueue the consumer before observing the second producer's completion.
   // Retaining the first cohort did not prevent producing the next one.
@@ -1019,7 +1020,7 @@ TEST_F(DeviceResultTest, RaggedCohortsComposeBeforeProducerRetirement) {
               .length = row.length,
           },
   };
-  IREE_ASSERT_OK(loom_serve_execution_transfer(consumer_, 1, &copy, &value));
+  IREE_ASSERT_OK(loom_runtime_execution_transfer(consumer_, 1, &copy, &value));
   ASSERT_NO_FATAL_FAILURE(Complete(1));
   EXPECT_EQ(loom_serve_finite_result_input_tokens(results_[0], 0), 4u);
   IREE_ASSERT_OK(loom_serve_finite_model_free(std::exchange(model_, nullptr)));
@@ -1028,7 +1029,7 @@ TEST_F(DeviceResultTest, RaggedCohortsComposeBeforeProducerRetirement) {
   }
   // Neither destruction of the producer nor final caller result release may
   // release the allocation captured by the still-blocked consumer.
-  IREE_ASSERT_OK(loom_serve_pool_trim(storage_owner_, 0));
+  IREE_ASSERT_OK(loom_runtime_pool_trim(storage_owner_, 0));
   IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, 1, nullptr));
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
@@ -1040,16 +1041,16 @@ TEST_F(DeviceResultTest, RaggedCohortsComposeBeforeProducerRetirement) {
           },
   };
   IREE_ASSERT_OK(
-      loom_serve_execution_transfer(consumer_, 1, &download, &value));
-  IREE_ASSERT_OK(loom_serve_execution_dealloca(consumer_, target_, &value));
+      loom_runtime_execution_transfer(consumer_, 1, &download, &value));
+  IREE_ASSERT_OK(loom_runtime_execution_dealloca(consumer_, target_, &value));
   iree_hal_buffer_release(std::exchange(target_, nullptr));
-  IREE_ASSERT_OK(loom_serve_execution_drain(consumer_));
+  IREE_ASSERT_OK(loom_runtime_execution_drain(consumer_));
   const std::array<float, 14> expected = {1, 1, 1, 3, 6, 3, 2,
                                           3, 4, 2, 1, 1, 1, 1};
   EXPECT_EQ(output_, expected);
-  IREE_ASSERT_OK(loom_serve_pool_trim(storage_owner_, 0));
+  IREE_ASSERT_OK(loom_runtime_pool_trim(storage_owner_, 0));
   EXPECT_EQ(
-      loom_serve_pool_statistics(storage_owner_).workspace.reservation_count,
+      loom_runtime_pool_statistics(storage_owner_).workspace.reservation_count,
       0u);
 }
 

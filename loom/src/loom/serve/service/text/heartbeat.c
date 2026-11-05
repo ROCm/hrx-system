@@ -105,7 +105,7 @@ void loom_serve_text_heartbeat_initialize(
     loom_serve_text_heartbeat_t* heartbeat) {
   *heartbeat = (loom_serve_text_heartbeat_t){0};
   iree_slim_mutex_initialize(&heartbeat->mutex);
-  loom_serve_timer_initialize(&heartbeat->timer);
+  loom_runtime_timer_initialize(&heartbeat->timer);
   heartbeat->snapshot.phase = "starting";
   heartbeat->snapshot.phase_start = iree_time_now();
   heartbeat->snapshot.last_completion = heartbeat->snapshot.phase_start;
@@ -118,19 +118,19 @@ void loom_serve_text_heartbeat_configure(
     iree_duration_t interval) {
   heartbeat->stream = stream;
   heartbeat->counters = counters;
-  loom_serve_timer_configure(&heartbeat->timer, proactor, interval);
+  loom_runtime_timer_configure(&heartbeat->timer, proactor, interval);
 }
 
 bool loom_serve_text_heartbeat_is_pending(
     loom_serve_text_heartbeat_t* heartbeat) {
-  return loom_serve_timer_is_pending(&heartbeat->timer);
+  return loom_runtime_timer_is_pending(&heartbeat->timer);
 }
 
 iree_status_t loom_serve_text_heartbeat_advance(
     loom_serve_text_heartbeat_t* heartbeat, bool stopping, bool* out_progress) {
   bool tick = false;
-  iree_status_t status = loom_serve_timer_advance(&heartbeat->timer, stopping,
-                                                  true, out_progress, &tick);
+  iree_status_t status = loom_runtime_timer_advance(&heartbeat->timer, stopping,
+                                                    true, out_progress, &tick);
   if (tick) {
     loom_serve_text_heartbeat_report(heartbeat);
   }
@@ -139,7 +139,7 @@ iree_status_t loom_serve_text_heartbeat_advance(
 
 void loom_serve_text_heartbeat_deinitialize(
     loom_serve_text_heartbeat_t* heartbeat) {
-  loom_serve_timer_deinitialize(&heartbeat->timer);
+  loom_runtime_timer_deinitialize(&heartbeat->timer);
   if (heartbeat->stream) {
     loom_serve_text_heartbeat_report(heartbeat);
   }

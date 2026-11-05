@@ -134,7 +134,7 @@ loom_serve_text_session_cache_entry_t* loom_serve_text_session_cache_oldest(
 iree_status_t loom_serve_text_session_cache_submit(
     loom_serve_text_session_cache_t* cache, loom_serve_text_session_t* session,
     loom_serve_text_session_cache_entry_t** out_entry,
-    loom_serve_execution_frontier_t* out_frontier) {
+    loom_runtime_execution_frontier_t* out_frontier) {
   *out_entry = NULL;
   // A single admission owns the exchange slot; another capture cannot begin
   // until its incoming owner is consumed or the excess endpoint is evicted.

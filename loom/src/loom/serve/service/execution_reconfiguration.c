@@ -12,16 +12,16 @@ struct loom_serve_execution_reconfiguration_t {
   // Borrowed live model through every candidate job and payload release.
   loom_serve_execution_update_t update;
   // Owned immutable compiled choices; contains no service selection policy.
-  loom_serve_variant_pool_t* pool;
+  loom_runtime_variant_pool_t* pool;
   // Borrowed wake target, installed on the same serialized owner.
   loom_runtime_wake_callback_t observer;
   // Acquired choice currently used by subsequent service invocations.
-  loom_serve_variant_entry_t* selected;
+  loom_runtime_variant_entry_t* selected;
   // One accepted policy change, applied only at the service's quiescent
   // boundary.
   struct {
     // Acquired ready candidate; NULL means no accepted selection.
-    loom_serve_variant_entry_t* entry;
+    loom_runtime_variant_entry_t* entry;
     // Terminal owner-thread notification, never a model callback thread.
     loom_serve_variant_selection_fn_t completion;
     // Borrowed caller state until completion, including shutdown cancellation.
@@ -35,31 +35,31 @@ typedef struct loom_serve_execution_reconfiguration_job_t {
   // Allocator retained independently of service retirement.
   iree_allocator_t host_allocator;
   // Stable pending entry, published only after the job relinquishes inputs.
-  loom_serve_variant_entry_t* entry;
+  loom_runtime_variant_entry_t* entry;
   // Owned provider locators, filesystem base and retained package, independent
   // of HTTP. Resolution stays with the source reader so relative file bases
   // and package namespaces keep their original meaning.
-  loom_serve_sources_t* sources;
+  loom_runtime_sources_t* sources;
 } loom_serve_execution_reconfiguration_job_t;
 
 static void loom_serve_execution_reconfiguration_job_free(
     loom_serve_execution_reconfiguration_job_t* job) {
-  loom_serve_sources_free(job->sources, job->host_allocator);
+  loom_runtime_sources_free(job->sources, job->host_allocator);
   iree_allocator_free(job->host_allocator, job);
 }
 
 static void loom_serve_execution_reconfiguration_complete(
     void* user_data, iree_status_t status, void* variant,
-    const loom_serve_compilation_report_t* report) {
+    const loom_runtime_compilation_report_t* report) {
   loom_serve_execution_reconfiguration_job_t* job = user_data;
-  loom_serve_variant_entry_t* entry = job->entry;
+  loom_runtime_variant_entry_t* entry = job->entry;
   loom_serve_execution_reconfiguration_job_free(job);
-  loom_serve_variant_entry_complete(entry, status, variant, report);
+  loom_runtime_variant_entry_complete(entry, status, variant, report);
 }
 
 static iree_status_t loom_serve_execution_reconfiguration_stage(
-    void* self, loom_serve_variant_id_t base,
-    const loom_serve_sources_t* sources, loom_serve_variant_id_t* out_id) {
+    void* self, loom_runtime_variant_id_t base,
+    const loom_runtime_sources_t* sources, loom_runtime_variant_id_t* out_id) {
   loom_serve_execution_reconfiguration_t* reconfiguration = self;
   *out_id = 0;
   if (reconfiguration->stopping) {
@@ -76,13 +76,13 @@ static iree_status_t loom_serve_execution_reconfiguration_stage(
                                              sizeof(*job), (void**)&job));
   job->host_allocator = reconfiguration->host_allocator;
   iree_status_t status =
-      loom_serve_sources_clone(sources, job->host_allocator, &job->sources);
+      loom_runtime_sources_clone(sources, job->host_allocator, &job->sources);
   if (iree_status_is_ok(status)) {
-    status =
-        loom_serve_variant_pool_begin(reconfiguration->pool, base, &job->entry);
+    status = loom_runtime_variant_pool_begin(reconfiguration->pool, base,
+                                             &job->entry);
   }
   if (iree_status_is_ok(status)) {
-    *out_id = loom_serve_variant_entry_id(job->entry);
+    *out_id = loom_runtime_variant_entry_id(job->entry);
     // From here the pool owns terminal observation, including submission
     // rejection. The caller receives a stable ID for every accepted attempt.
     status = reconfiguration->update.compile(
@@ -98,26 +98,27 @@ static iree_status_t loom_serve_execution_reconfiguration_stage(
   return status;
 }
 
-static loom_serve_variant_id_t loom_serve_execution_reconfiguration_selected(
+static loom_runtime_variant_id_t loom_serve_execution_reconfiguration_selected(
     void* self) {
   const loom_serve_execution_reconfiguration_t* reconfiguration = self;
-  return loom_serve_variant_entry_id(reconfiguration->selected);
+  return loom_runtime_variant_entry_id(reconfiguration->selected);
 }
 
 static iree_status_t loom_serve_execution_reconfiguration_select(
-    void* self, loom_serve_variant_id_t id, loom_serve_variant_id_t expected,
+    void* self, loom_runtime_variant_id_t id,
+    loom_runtime_variant_id_t expected,
     loom_serve_variant_selection_fn_t completion, void* user_data) {
   loom_serve_execution_reconfiguration_t* reconfiguration = self;
   if (reconfiguration->stopping || reconfiguration->selection.entry ||
-      loom_serve_variant_entry_id(reconfiguration->selected) != expected) {
+      loom_runtime_variant_entry_id(reconfiguration->selected) != expected) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "execution selection conflicts with shutdown, a pending "
         "selection or its base");
   }
-  loom_serve_variant_entry_t* entry = NULL;
+  loom_runtime_variant_entry_t* entry = NULL;
   IREE_RETURN_IF_ERROR(
-      loom_serve_variant_pool_acquire(reconfiguration->pool, id, &entry));
+      loom_runtime_variant_pool_acquire(reconfiguration->pool, id, &entry));
   reconfiguration->selection.entry = entry;
   reconfiguration->selection.completion = completion;
   reconfiguration->selection.user_data = user_data;
@@ -140,11 +141,11 @@ iree_status_t loom_serve_execution_reconfiguration_allocate(
       host_allocator, sizeof(*reconfiguration), (void**)&reconfiguration));
   reconfiguration->host_allocator = host_allocator;
   reconfiguration->update = update;
-  iree_status_t status = loom_serve_variant_pool_allocate(
+  iree_status_t status = loom_runtime_variant_pool_allocate(
       capacity, NULL, update.dispose, host_allocator,
       &reconfiguration->selected, &reconfiguration->pool);
   if (iree_status_is_ok(status)) {
-    loom_serve_variant_entry_retain(reconfiguration->selected);
+    loom_runtime_variant_entry_retain(reconfiguration->selected);
     *out_reconfiguration = reconfiguration;
   } else {
     loom_serve_execution_reconfiguration_free(reconfiguration);
@@ -158,8 +159,8 @@ void loom_serve_execution_reconfiguration_free(
     return;
   }
   IREE_ASSERT(!reconfiguration->selection.entry);
-  loom_serve_variant_entry_release(reconfiguration->selected);
-  loom_serve_variant_pool_free(reconfiguration->pool);
+  loom_runtime_variant_entry_release(reconfiguration->selected);
+  loom_runtime_variant_pool_free(reconfiguration->pool);
   iree_allocator_free(reconfiguration->host_allocator, reconfiguration);
 }
 
@@ -170,14 +171,14 @@ void loom_serve_execution_reconfiguration_set_observer(
     return;
   }
   reconfiguration->observer = observer;
-  loom_serve_variant_pool_set_observer(reconfiguration->pool, observer);
+  loom_runtime_variant_pool_set_observer(reconfiguration->pool, observer);
 }
 
 bool loom_serve_execution_reconfiguration_pending(
     const loom_serve_execution_reconfiguration_t* reconfiguration) {
   return reconfiguration &&
          (reconfiguration->selection.entry ||
-          loom_serve_variant_pool_pending(reconfiguration->pool));
+          loom_runtime_variant_pool_pending(reconfiguration->pool));
 }
 
 bool loom_serve_execution_reconfiguration_advance(
@@ -187,8 +188,8 @@ bool loom_serve_execution_reconfiguration_advance(
     return false;
   }
   reconfiguration->stopping |= stopping;
-  bool progress = loom_serve_variant_pool_collect(reconfiguration->pool);
-  loom_serve_variant_entry_t* entry = reconfiguration->selection.entry;
+  bool progress = loom_runtime_variant_pool_collect(reconfiguration->pool);
+  loom_runtime_variant_entry_t* entry = reconfiguration->selection.entry;
   if (!entry || (!quiescent && !reconfiguration->stopping)) {
     return progress;
   }
@@ -197,12 +198,12 @@ bool loom_serve_execution_reconfiguration_advance(
           ? iree_make_status(IREE_STATUS_CANCELLED, "service is stopping")
           : reconfiguration->update.select(
                 reconfiguration->update.self,
-                loom_serve_variant_entry_value(entry));
+                loom_runtime_variant_entry_value(entry));
   if (iree_status_is_ok(status)) {
-    loom_serve_variant_entry_release(reconfiguration->selected);
+    loom_runtime_variant_entry_release(reconfiguration->selected);
     reconfiguration->selected = entry;
   } else {
-    loom_serve_variant_entry_release(entry);
+    loom_runtime_variant_entry_release(entry);
   }
   const loom_serve_variant_selection_fn_t completion =
       reconfiguration->selection.completion;
@@ -211,7 +212,7 @@ bool loom_serve_execution_reconfiguration_advance(
   reconfiguration->selection.completion = NULL;
   reconfiguration->selection.user_data = NULL;
   completion(user_data, status,
-             loom_serve_variant_entry_id(reconfiguration->selected));
+             loom_runtime_variant_entry_id(reconfiguration->selected));
   return true;
 }
 

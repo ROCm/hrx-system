@@ -12,7 +12,7 @@ int main(int argc, char** argv) {
   const loomc_iree_hal_target_provider_t* providers[] = {
       loomc_cpu_iree_hal_target_provider(),
   };
-  const loom_serve_compiler_options_t compiler = {
+  const loom_runtime_compiler_options_t compiler = {
       .target_environment_create = loomc_target_environment_create_x86,
       .target_providers = providers,
       .target_provider_count = IREE_ARRAYSIZE(providers),

@@ -1,0 +1,183 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include "loom/runtime/parameter/activation.h"
+
+#include "iree/async/operations/semaphore.h"
+#include "iree/base/threading/mutex.h"
+
+struct loom_runtime_activation_t {
+  // Allocator owning this cold operation, released after callback retirement.
+  iree_allocator_t host_allocator;
+  // Borrowed parameter group outliving this operation and any failed load.
+  loom_runtime_residency_t* residency;
+  // Retained proactor progress ownership, shared with model and network I/O.
+  iree_async_proactor_pool_entry_t* entry;
+  // Owner-only phase; callback publication cannot alter admission or pins.
+  loom_runtime_activation_phase_t phase;
+  // Accepted readiness operation, reused only by creating a new warmup.
+  iree_async_semaphore_wait_operation_t wait;
+  // Borrowed exact model work and feedback values after accepted activation.
+  loom_runtime_execution_frontier_t frontier;
+  // Toll-free async handles for the frontier's HAL semaphores.
+  iree_async_semaphore_t* semaphores[2];
+  // Completion publication is the only cross-thread mutable state.
+  struct {
+    // Joins the callback's final access before the owner frees operation
+    // storage.
+    iree_slim_mutex_t mutex;
+    // Schedules the owner without accessing model resources inline.
+    void (*wake)(void* user_data);
+    // Borrowed scheduling target, live until terminal advance.
+    void* user_data;
+    // A terminal readiness result is available to the owner.
+    bool ready;
+    // Owned callback status, moved to the owner by advance.
+    iree_status_t status;
+  } event;
+};
+
+static void loom_runtime_activation_ready(void* user_data,
+                                          iree_async_operation_t* operation,
+                                          iree_status_t status,
+                                          iree_async_completion_flags_t flags) {
+  loom_runtime_activation_t* activation = user_data;
+  iree_slim_mutex_lock(&activation->event.mutex);
+  activation->event.status = status;
+  activation->event.ready = true;
+  if (activation->event.wake) {
+    activation->event.wake(activation->event.user_data);
+  }
+  iree_slim_mutex_unlock(&activation->event.mutex);
+}
+
+iree_status_t loom_runtime_activation_allocate(
+    loom_runtime_residency_t* residency, iree_async_proactor_pool_t* pool,
+    void (*wake)(void* user_data), void* user_data,
+    iree_allocator_t host_allocator,
+    loom_runtime_activation_t** out_activation) {
+  *out_activation = NULL;
+  loom_runtime_activation_t* activation = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+      host_allocator, sizeof(*activation), (void**)&activation));
+  activation->host_allocator = host_allocator;
+  activation->residency = residency;
+  activation->event.wake = wake;
+  activation->event.user_data = user_data;
+  iree_status_t status =
+      iree_async_proactor_pool_acquire(pool, 0, &activation->entry);
+  if (iree_status_is_ok(status)) {
+    iree_slim_mutex_initialize(&activation->event.mutex);
+    *out_activation = activation;
+  } else {
+    iree_allocator_free(host_allocator, activation);
+  }
+  return status;
+}
+
+iree_status_t loom_runtime_activation_advance(
+    loom_runtime_activation_t* activation,
+    loom_runtime_activation_flags_t flags,
+    loom_runtime_activation_phase_t* out_phase) {
+  iree_status_t status = iree_ok_status();
+  if (activation->phase == LOOM_RUNTIME_ACTIVATION_LOADING) {
+    iree_slim_mutex_lock(&activation->event.mutex);
+    const bool ready = activation->event.ready;
+    if (ready) {
+      status = activation->event.status;
+      activation->event.status = iree_ok_status();
+    }
+    iree_slim_mutex_unlock(&activation->event.mutex);
+    if (ready) {
+      if (iree_status_is_ok(status)) {
+        loom_runtime_residency_release(activation->residency);
+      }
+      activation->phase = LOOM_RUNTIME_ACTIVATION_COMPLETE;
+    }
+  } else if (iree_any_bit_set(flags, LOOM_RUNTIME_ACTIVATION_FLAG_CANCEL)) {
+    loom_runtime_residency_cancel_admission(activation->residency);
+    activation->phase = LOOM_RUNTIME_ACTIVATION_COMPLETE;
+  } else {
+    loom_runtime_residency_admission_t admission;
+    status =
+        loom_runtime_residency_try_admit(activation->residency, &admission);
+    if (iree_status_is_ok(status) &&
+        admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED) {
+      loom_runtime_residency_cancel_admission(activation->residency);
+      activation->frontier =
+          loom_runtime_residency_frontier(activation->residency);
+      iree_async_semaphore_wait_operation_t* wait = &activation->wait;
+      iree_async_operation_initialize(
+          &wait->base, IREE_ASYNC_OPERATION_TYPE_SEMAPHORE_WAIT,
+          IREE_ASYNC_OPERATION_FLAG_NONE, loom_runtime_activation_ready,
+          activation);
+      for (iree_host_size_t i = 0; i < 2; ++i) {
+        activation->semaphores[i] =
+            (iree_async_semaphore_t*)activation->frontier.semaphores[i];
+      }
+      wait->semaphores = activation->semaphores;
+      wait->values = activation->frontier.values;
+      wait->count = 2;
+      wait->mode = IREE_ASYNC_WAIT_MODE_ALL;
+      status = iree_async_proactor_submit_one(
+          iree_async_proactor_pool_entry_proactor(activation->entry),
+          &wait->base);
+      activation->phase = LOOM_RUNTIME_ACTIVATION_LOADING;
+    }
+    if (!iree_status_is_ok(status)) {
+      // Rejected submission owes no callback. Accepted load protection remains
+      // on the residency until the model's actual buffer borrowers retire.
+      loom_runtime_residency_cancel_admission(activation->residency);
+      activation->phase = LOOM_RUNTIME_ACTIVATION_COMPLETE;
+    }
+  }
+  *out_phase = activation->phase;
+  return status;
+}
+
+void loom_runtime_activation_set_observer(loom_runtime_activation_t* activation,
+                                          void (*wake)(void* user_data),
+                                          void* user_data) {
+  if (!activation) {
+    return;
+  }
+  iree_slim_mutex_lock(&activation->event.mutex);
+  activation->event.wake = wake;
+  activation->event.user_data = user_data;
+  if (wake && activation->event.ready) {
+    wake(user_data);
+  }
+  iree_slim_mutex_unlock(&activation->event.mutex);
+}
+
+void loom_runtime_activation_free(loom_runtime_activation_t* activation) {
+  IREE_ASSERT(activation->phase == LOOM_RUNTIME_ACTIVATION_COMPLETE);
+  iree_async_proactor_pool_entry_release(activation->entry);
+  iree_slim_mutex_deinitialize(&activation->event.mutex);
+  iree_allocator_free(activation->host_allocator, activation);
+}
+
+iree_status_t loom_runtime_activation_poll(
+    loom_runtime_activation_t** operation, loom_runtime_residency_t* residency,
+    iree_async_proactor_pool_t* pool, void (*wake)(void* user_data),
+    void* user_data, loom_runtime_activation_flags_t flags,
+    iree_allocator_t host_allocator,
+    loom_runtime_activation_phase_t* out_phase) {
+  *out_phase = LOOM_RUNTIME_ACTIVATION_COMPLETE;
+  if (!*operation) {
+    if (iree_any_bit_set(flags, LOOM_RUNTIME_ACTIVATION_FLAG_CANCEL)) {
+      return iree_ok_status();
+    }
+    IREE_RETURN_IF_ERROR(loom_runtime_activation_allocate(
+        residency, pool, wake, user_data, host_allocator, operation));
+  }
+  iree_status_t status =
+      loom_runtime_activation_advance(*operation, flags, out_phase);
+  if (*out_phase == LOOM_RUNTIME_ACTIVATION_COMPLETE) {
+    loom_runtime_activation_free(*operation);
+    *operation = NULL;
+  }
+  return status;
+}

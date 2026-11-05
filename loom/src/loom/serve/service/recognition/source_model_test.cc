@@ -13,9 +13,9 @@
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/serve/runtime/storage/memory.h"
+#include "loom/runtime/storage/memory.h"
+#include "loom/runtime/testing/application.h"
 #include "loom/serve/service/recognition/model.h"
-#include "loom/serve/testing/service_application.h"
 
 IREE_FLAG(string, model_source, "", "Recognition fixture bootstrap source.");
 IREE_FLAG(bool, test_elastic, false,
@@ -37,30 +37,30 @@ class SourceRecognitionModelTest : public ::testing::Test {
   };
 
   void SetUp() override {
-    auto options = loom_serve_test_application_options_default();
-    options.backing = FLAG_test_elastic ? LOOM_SERVE_POOL_BACKING_ELASTIC
-                                        : LOOM_SERVE_POOL_BACKING_FIXED;
+    auto options = loom_runtime_test_application_options_default();
+    options.backing = FLAG_test_elastic ? LOOM_RUNTIME_POOL_BACKING_ELASTIC
+                                        : LOOM_RUNTIME_POOL_BACKING_FIXED;
     options.slab_size = FLAG_test_elastic ? kRecognitionSlabSize : 0;
     options.memory_limit = FLAG_test_elastic ? 64 * 1024 : 0;
-    loom_serve_test_application_t* application = nullptr;
-    IREE_ASSERT_OK(loom_serve_test_application_acquire(&options, allocator_,
-                                                       &application));
-    device_ = loom_serve_test_application_device_at(application, 0);
-    auto* group = loom_serve_test_application_device_group(application);
-    if (loom_serve_device_group_pool_count(group) == 1) {
-      const loom_serve_pool_options_t pool_options = {
+    loom_runtime_test_application_t* application = nullptr;
+    IREE_ASSERT_OK(loom_runtime_test_application_acquire(&options, allocator_,
+                                                         &application));
+    device_ = loom_runtime_test_application_device_at(application, 0);
+    auto* group = loom_runtime_test_application_device_group(application);
+    if (loom_runtime_device_group_pool_count(group) == 1) {
+      const loom_runtime_pool_options_t pool_options = {
           .elastic = FLAG_test_elastic,
           .weight_slab_size = options.slab_size,
           .state_slab_size = options.slab_size,
           .memory_limit = options.memory_limit,
       };
-      IREE_ASSERT_OK(loom_serve_device_group_create_pool(
+      IREE_ASSERT_OK(loom_runtime_device_group_create_pool(
           group, {IREE_SV("recognition"), 1}, &pool_options, &storage_owner_));
     } else {
-      storage_owner_ = loom_serve_device_group_pool_at(group, 1);
+      storage_owner_ = loom_runtime_device_group_pool_at(group, 1);
     }
-    unused_owner_ = loom_serve_device_group_pool_at(group, 0);
-    default_memory_ = loom_serve_pool_statistics(unused_owner_);
+    unused_owner_ = loom_runtime_device_group_pool_at(group, 0);
+    default_memory_ = loom_runtime_pool_statistics(unused_owner_);
     const auto directory =
         std::filesystem::path(FLAG_model_source).parent_path().string();
     const iree_string_view_t sources[] = {IREE_SVL("generate.loom")};
@@ -76,7 +76,7 @@ class SourceRecognitionModelTest : public ::testing::Test {
     };
     IREE_ASSERT_OK(loom_serve_recognition_model_allocate(
         device_, storage_owner_, &model_options, allocator_, &model_));
-    const auto prepared_memory = loom_serve_pool_statistics(unused_owner_);
+    const auto prepared_memory = loom_runtime_pool_statistics(unused_owner_);
     EXPECT_EQ(prepared_memory.storage.bytes_reserved,
               default_memory_.storage.bytes_reserved);
     EXPECT_EQ(prepared_memory.retained.reserved_bytes,
@@ -106,7 +106,7 @@ class SourceRecognitionModelTest : public ::testing::Test {
       EXPECT_GT(deferred_release_count_, 0u);
     }
     IREE_EXPECT_OK(loom_serve_recognition_model_free(model_));
-    const auto memory = loom_serve_pool_statistics(unused_owner_);
+    const auto memory = loom_runtime_pool_statistics(unused_owner_);
     EXPECT_EQ(memory.storage.bytes_reserved,
               default_memory_.storage.bytes_reserved);
     EXPECT_EQ(memory.storage.bytes_committed,
@@ -120,14 +120,14 @@ class SourceRecognitionModelTest : public ::testing::Test {
     }
   }
 
-  iree_status_t Wait(const loom_serve_execution_frontier_t& frontier) {
+  iree_status_t Wait(const loom_runtime_execution_frontier_t& frontier) {
     iree_status_t status = iree_ok_status();
     for (size_t i = 0;
          i < IREE_ARRAYSIZE(frontier.semaphores) && iree_status_is_ok(status);
          ++i) {
-      status =
-          loom_serve_workspace_wait(loom_serve_pool_workspace(storage_owner_),
-                                    frontier.semaphores[i], frontier.values[i]);
+      status = loom_runtime_workspace_wait(
+          loom_runtime_pool_workspace(storage_owner_), frontier.semaphores[i],
+          frontier.values[i]);
     }
     return status;
   }
@@ -142,11 +142,11 @@ class SourceRecognitionModelTest : public ::testing::Test {
     };
     IREE_ASSERT_OK(
         generator_.prepare(generator_.self, index, &request, &row.invocation));
-    loom_serve_residency_admission_t admission;
-    loom_serve_execution_frontier_t frontier;
+    loom_runtime_residency_admission_t admission;
+    loom_runtime_execution_frontier_t frontier;
     IREE_ASSERT_OK(generator_.try_admit(generator_.self, row.invocation,
                                         &admission, &frontier));
-    ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+    ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
     IREE_ASSERT_OK(Wait(frontier));
     generator_.complete_admit(generator_.self, row.invocation);
   }
@@ -155,7 +155,7 @@ class SourceRecognitionModelTest : public ::testing::Test {
     auto& row = rows_[index];
     bool complete = false;
     while (!complete) {
-      loom_serve_execution_frontier_t frontier;
+      loom_runtime_execution_frontier_t frontier;
       IREE_ASSERT_OK(generator_.release(generator_.self, row.invocation,
                                         &complete, &frontier));
       if (!complete) {
@@ -238,20 +238,20 @@ class SourceRecognitionModelTest : public ::testing::Test {
 
   iree_allocator_t allocator_ = iree_allocator_system();
   // Borrowed process device, enclosing model lifetime.
-  loom_serve_device_t* device_ = nullptr;
+  loom_runtime_device_t* device_ = nullptr;
   // Independent process-owned pool selected for weights, rows, and workspace.
-  loom_serve_pool_t* storage_owner_ = nullptr;
+  loom_runtime_pool_t* storage_owner_ = nullptr;
   // Unselected pool whose accounting must remain unchanged.
-  loom_serve_pool_t* unused_owner_ = nullptr;
+  loom_runtime_pool_t* unused_owner_ = nullptr;
   // Device-default pool must remain untouched throughout the model lifecycle.
-  loom_serve_pool_statistics_t default_memory_ = {};
+  loom_runtime_pool_statistics_t default_memory_ = {};
   loom_serve_recognition_model_t* model_ = nullptr;
   loom_serve_recognition_generator_t generator_ = {};
   // Native backing releases observed before their completion frontier retires.
   size_t deferred_release_count_ = 0;
   std::array<loom_serve_test_recognition_row_t, 4> rows_;
   std::vector<size_t> members_;
-  loom_serve_execution_frontier_t frontier_ = {};
+  loom_runtime_execution_frontier_t frontier_ = {};
 };
 
 TEST_F(SourceRecognitionModelTest, ChangingMembershipRetainsInputAndRevisions) {
@@ -369,26 +369,26 @@ TEST_F(SourceRecognitionModelTest, RepeatedOffersDoNotAdvanceSourceState) {
 }
 
 TEST_F(SourceRecognitionModelTest, RowCapacityDenialPreservesPreparedRequest) {
-  auto* pool = loom_serve_pool_memory(storage_owner_);
+  auto* pool = loom_runtime_pool_memory(storage_owner_);
   auto* residency = loom_serve_recognition_model_residency(model_);
   loom_runtime_storage_statistics_t peer_statistics = {};
-  const auto release_peer = [](loom_serve_virtual_buffer_t* buffer) {
-    IREE_EXPECT_OK(loom_serve_virtual_buffer_free(buffer));
+  const auto release_peer = [](loom_runtime_virtual_buffer_t* buffer) {
+    IREE_EXPECT_OK(loom_runtime_virtual_buffer_free(buffer));
   };
-  std::unique_ptr<loom_serve_virtual_buffer_t, decltype(release_peer)> peer(
+  std::unique_ptr<loom_runtime_virtual_buffer_t, decltype(release_peer)> peer(
       nullptr, release_peer);
   if (pool) {
     // Tiny row roots each occupy one minimum native extent, not a full slab.
     // Leave two extents free; admission needs all three roots together.
-    const auto geometry = loom_serve_pool_state_geometry(storage_owner_);
+    const auto geometry = loom_runtime_pool_state_geometry(storage_owner_);
     const uint64_t peer_bytes =
-        loom_serve_memory_pool_limit(pool) - 2 * geometry.minimum_size;
-    loom_serve_virtual_buffer_t* buffer = nullptr;
-    IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
-        pool, loom_serve_pool_state_geometry(storage_owner_), peer_bytes, 16,
+        loom_runtime_memory_pool_limit(pool) - 2 * geometry.minimum_size;
+    loom_runtime_virtual_buffer_t* buffer = nullptr;
+    IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+        pool, loom_runtime_pool_state_geometry(storage_owner_), peer_bytes, 16,
         &peer_statistics, &buffer));
     peer.reset(buffer);
-    IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(buffer, 0, peer_bytes));
+    IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(buffer, 0, peer_bytes));
   }
   auto& row = rows_[0];
   const loom_serve_recognition_request_t request = {
@@ -396,21 +396,21 @@ TEST_F(SourceRecognitionModelTest, RowCapacityDenialPreservesPreparedRequest) {
   };
   IREE_ASSERT_OK(
       generator_.prepare(generator_.self, 0, &request, &row.invocation));
-  loom_serve_residency_admission_t admission;
-  loom_serve_execution_frontier_t frontier;
+  loom_runtime_residency_admission_t admission;
+  loom_runtime_execution_frontier_t frontier;
   if (pool) {
-    const uint64_t live = loom_serve_memory_pool_live_bytes(pool);
+    const uint64_t live = loom_runtime_memory_pool_live_bytes(pool);
     IREE_ASSERT_OK(generator_.try_admit(generator_.self, row.invocation,
                                         &admission, &frontier));
-    ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
-    EXPECT_EQ(loom_serve_memory_pool_live_bytes(pool), live);
-    EXPECT_EQ(loom_serve_residency_activity(residency).activations, 0u);
+    ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+    EXPECT_EQ(loom_runtime_memory_pool_live_bytes(pool), live);
+    EXPECT_EQ(loom_runtime_residency_activity(residency).activations, 0u);
     peer.reset();
-    IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+    IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
   }
   IREE_ASSERT_OK(generator_.try_admit(generator_.self, row.invocation,
                                       &admission, &frontier));
-  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
   IREE_ASSERT_OK(Wait(frontier));
   generator_.complete_admit(generator_.self, row.invocation);
   ASSERT_NO_FATAL_FAILURE(Append(0, {1, 1, 1}));

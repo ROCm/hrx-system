@@ -43,19 +43,19 @@ uint64_t ObservationCount(
 // The target leaf injects the compiler/driver pair. Each test process retains
 // one application; separate worker profiles preserve concurrent qualification.
 iree_status_t AcquireApplication(iree_allocator_t allocator,
-                                 loom_serve_host_t** out_host,
-                                 loom_serve_device_group_t** out_group) {
-  auto options = loom_serve_test_application_options_default();
+                                 loom_runtime_host_t** out_host,
+                                 loom_runtime_device_group_t** out_group) {
+  auto options = loom_runtime_test_application_options_default();
   options.worker_count = SpeechWorkerCount();
-  options.backing = SpeechElasticBacking() ? LOOM_SERVE_POOL_BACKING_ELASTIC
-                                           : LOOM_SERVE_POOL_BACKING_FIXED;
+  options.backing = SpeechElasticBacking() ? LOOM_RUNTIME_POOL_BACKING_ELASTIC
+                                           : LOOM_RUNTIME_POOL_BACKING_FIXED;
   options.slab_size = SpeechElasticBacking() ? kSpeechSlabSize : 0;
   options.memory_limit = SpeechElasticBacking() ? 64 * 1024 : 0;
-  loom_serve_test_application_t* application = nullptr;
+  loom_runtime_test_application_t* application = nullptr;
   IREE_RETURN_IF_ERROR(
-      loom_serve_test_application_acquire(&options, allocator, &application));
-  *out_host = loom_serve_test_application_host(application);
-  *out_group = loom_serve_test_application_device_group(application);
+      loom_runtime_test_application_acquire(&options, allocator, &application));
+  *out_host = loom_runtime_test_application_host(application);
+  *out_group = loom_runtime_test_application_device_group(application);
   return iree_ok_status();
 }
 

@@ -654,7 +654,7 @@ static void loom_serve_text_media_projector_publish(
 
 static iree_status_t loom_serve_text_media_projector_submit(
     loom_serve_text_media_projector_t* projector) {
-  loom_serve_execution_frontier_t ready;
+  loom_runtime_execution_frontier_t ready;
   IREE_RETURN_IF_ERROR(loom_serve_finite_model_submit(
       projector->model, &projector->result, &ready));
   loom_serve_text_media_projector_publish(projector, false);
@@ -810,21 +810,21 @@ iree_status_t loom_serve_text_media_projector_advance(
       live |= projector->cohort[i]->request != NULL;
     }
     if (stopping || !live) {
-      loom_serve_residency_cancel_admission(
+      loom_runtime_residency_cancel_admission(
           loom_serve_finite_model_residency(projector->model));
       loom_serve_finite_model_release_batch(projector->model);
       loom_serve_text_media_projector_complete(projector);
       *out_progress = true;
     } else {
-      loom_serve_residency_admission_t admission;
-      status = loom_serve_residency_try_admit(
+      loom_runtime_residency_admission_t admission;
+      status = loom_runtime_residency_try_admit(
           loom_serve_finite_model_residency(projector->model), &admission);
       if (iree_status_is_ok(status) &&
-          admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
+          admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED) {
         status = loom_serve_text_media_projector_submit(projector);
         *out_progress = true;
       } else if (iree_status_is_ok(status) &&
-                 admission == LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY &&
+                 admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY &&
                  !iree_any_bit_set(flags,
                                    LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY)) {
         for (iree_host_size_t i = 0; i < projector->cohort_count; ++i) {
@@ -835,7 +835,7 @@ iree_status_t loom_serve_text_media_projector_advance(
                                  "image parameters exceed available capacity");
           }
         }
-        loom_serve_residency_cancel_admission(
+        loom_runtime_residency_cancel_admission(
             loom_serve_finite_model_residency(projector->model));
         loom_serve_finite_model_release_batch(projector->model);
         loom_serve_text_media_projector_complete(projector);

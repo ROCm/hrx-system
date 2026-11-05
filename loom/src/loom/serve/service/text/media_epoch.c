@@ -277,16 +277,16 @@ iree_status_t loom_serve_text_media_epoch_initialize(
 }
 
 iree_status_t loom_serve_text_media_epoch_enqueue(
-    loom_serve_text_media_epoch_t* epoch, loom_serve_execution_t* execution,
+    loom_serve_text_media_epoch_t* epoch, loom_runtime_execution_t* execution,
     iree_hal_buffer_t* target, uint64_t* out_value) {
   // Cohorts from one component share timelines. Merge their values while
   // preserving distinct execution generations after component reconstruction.
-  loom_serve_execution_frontier_t ready =
+  loom_runtime_execution_frontier_t ready =
       loom_serve_finite_result_ready(epoch->transfer.results[0]);
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 1;
        i < epoch->transfer.result_count && iree_status_is_ok(status); ++i) {
-    const loom_serve_execution_frontier_t next =
+    const loom_runtime_execution_frontier_t next =
         loom_serve_finite_result_ready(epoch->transfer.results[i]);
     if (ready.semaphores[0] == next.semaphores[0] &&
         ready.semaphores[1] == next.semaphores[1]) {
@@ -295,20 +295,20 @@ iree_status_t loom_serve_text_media_epoch_enqueue(
     } else {
       const iree_hal_semaphore_list_t waits = {2, ready.semaphores,
                                                ready.values};
-      status = loom_serve_execution_barrier(execution, waits);
+      status = loom_runtime_execution_barrier(execution, waits);
       ready = next;
     }
   }
   if (iree_status_is_ok(status)) {
     const iree_hal_semaphore_list_t waits = {2, ready.semaphores, ready.values};
-    status = loom_serve_execution_barrier(execution, waits);
+    status = loom_runtime_execution_barrier(execution, waits);
   }
   iree_hal_transfer_operation_t* operations = epoch->transfer.operations;
   for (iree_host_size_t i = 0; i < epoch->transfer.operation_count; ++i) {
     operations[i].copy.target_buffer = target;
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_execution_transfer(
+    status = loom_runtime_execution_transfer(
         execution, epoch->transfer.operation_count, operations, out_value);
   }
   iree_allocator_free(epoch->host_allocator, epoch->transfer.operations);

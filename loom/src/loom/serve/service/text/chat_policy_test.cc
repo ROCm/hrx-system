@@ -28,17 +28,17 @@ class SourceChatPolicyTest : public ::testing::Test {
     const char* tokenizer = std::getenv("LOOM_SERVE_TEST_CHAT_TOKENIZER");
     ASSERT_NE(control, nullptr);
     ASSERT_NE(tokenizer, nullptr);
-    const loom_serve_sources_t sources = {
+    const loom_runtime_sources_t sources = {
         .base_directory = IREE_SV("."),
         .control = iree_make_cstring_view(control),
     };
-    loom_serve_compilation_report_t report = {};
+    loom_runtime_compilation_report_t report = {};
     auto status = loom_serve_test_text_policy_allocate(
         &sources, iree_make_cstring_view(tokenizer), IREE_SV("{}"), &report,
         iree_allocator_system(), &policy_owner_);
     loom_output_stream_t diagnostics;
     loom_output_stream_for_file(stderr, &diagnostics);
-    IREE_EXPECT_OK(loom_serve_compilation_write(&report, &diagnostics));
+    IREE_EXPECT_OK(loom_runtime_compilation_write(&report, &diagnostics));
     IREE_ASSERT_OK(status);
   }
 

@@ -8,7 +8,7 @@
 #define LOOM_SERVE_SERVICE_TEXT_CAPTURE_H_
 
 #include "iree/vm/buffer.h"
-#include "loom/serve/runtime/execution/execution.h"
+#include "loom/runtime/execution/execution.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,16 +34,16 @@ iree_status_t loom_serve_text_capture_create(
 // before any later epoch can overwrite residual. Called once by its serialized
 // owner. Partial submission retains queue ownership even on failure; caller
 // release is nonblocking and never substitutes for retirement.
-iree_status_t loom_serve_text_capture_submit(loom_serve_text_capture_t* capture,
-                                             loom_serve_execution_t* execution,
-                                             iree_hal_buffer_t* residual);
+iree_status_t loom_serve_text_capture_submit(
+    loom_serve_text_capture_t* capture, loom_runtime_execution_t* execution,
+    iree_hal_buffer_t* residual);
 
 void loom_serve_text_capture_retain(loom_serve_text_capture_t* capture);
 void loom_serve_text_capture_release(loom_serve_text_capture_t* capture);
 
 // Borrowed readiness and device views, valid through capture release. A device
 // consumer imports readiness and retains its view through queue retirement.
-loom_serve_execution_frontier_t loom_serve_text_capture_ready(
+loom_runtime_execution_frontier_t loom_serve_text_capture_ready(
     const loom_serve_text_capture_t* capture);
 iree_hal_buffer_ref_t loom_serve_text_capture_span(
     const loom_serve_text_capture_t* capture, iree_host_size_t span);
@@ -60,7 +60,7 @@ typedef struct loom_serve_text_capture_snapshot_t
 iree_status_t loom_serve_text_capture_download(
     loom_serve_text_capture_t* capture,
     loom_serve_text_capture_snapshot_t** out_snapshot,
-    loom_serve_execution_frontier_t* out_frontier);
+    loom_runtime_execution_frontier_t* out_frontier);
 void loom_serve_text_capture_snapshot_release(
     loom_serve_text_capture_snapshot_t* snapshot);
 iree_const_byte_span_t loom_serve_text_capture_snapshot_span(

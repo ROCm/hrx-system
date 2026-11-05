@@ -10,13 +10,13 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/serve/runtime/program/package.h"
+#include "loom/runtime/program/package.h"
 #include "loom/serve/server/registry.h"
 
 namespace {
 
 const iree_string_view_t kDeviceNames[] = {IREE_SV("device")};
-const loom_serve_pool_binding_t kPools[] = {{IREE_SV("pool"), 1}};
+const loom_runtime_pool_binding_t kPools[] = {{IREE_SV("pool"), 1}};
 
 constexpr char kCard[] = R"json({
   "schema_version": 1,
@@ -48,16 +48,16 @@ class ModelResolutionTest : public ::testing::Test {
   void Initialize(const std::string& card,
                   const std::string& deployment = kDeployment) {
     loom_serve_model_configuration_deinitialize(&configuration_);
-    const loom_serve_package_file_t file = {
+    const loom_runtime_package_file_t file = {
         IREE_SV("deployment/cards/model.json"),
         iree_make_const_byte_span(card.data(), card.size())};
-    loom_serve_package_t* package = nullptr;
-    IREE_ASSERT_OK(loom_serve_package_create(IREE_SV("deployment/serve.json"),
-                                             1, &file, allocator_, &package));
+    loom_runtime_package_t* package = nullptr;
+    IREE_ASSERT_OK(loom_runtime_package_create(IREE_SV("deployment/serve.json"),
+                                               1, &file, allocator_, &package));
     auto status = loom_serve_model_configuration_initialize(
         iree_make_cstring_view(deployment.c_str()), {}, package, allocator_,
         &configuration_);
-    loom_serve_package_release(package);
+    loom_runtime_package_release(package);
     IREE_ASSERT_OK(status);
   }
 
@@ -108,8 +108,8 @@ TEST_F(ModelResolutionTest, ResolvesDefaultsOnWorkerAndOwnsResult) {
   IREE_ASSERT_OK(loom_serve_model_configuration_resolve_device(
       &configuration_, {IREE_ARRAYSIZE(names), names},
       &configuration_.device_index));
-  const loom_serve_pool_binding_t pools[] = {{IREE_SV("shared"), 3},
-                                             {IREE_SV("gpu0-only"), 1}};
+  const loom_runtime_pool_binding_t pools[] = {{IREE_SV("shared"), 3},
+                                               {IREE_SV("gpu0-only"), 1}};
   IREE_ASSERT_OK(loom_serve_model_configuration_resolve_pool(
       &configuration_, IREE_ARRAYSIZE(pools), pools,
       configuration_.device_index, &configuration_.pool_index));

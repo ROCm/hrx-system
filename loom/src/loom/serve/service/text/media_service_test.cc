@@ -118,7 +118,7 @@ class MediaServiceTest : public SourceTextServiceTest {
       ASSERT_EQ(std::string(requests[i]->body.data, requests[i]->body.size),
                 bodies[i]);
     }
-    OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
+    OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
       for (size_t i = 0; i < bodies.size(); ++i) {
         IREE_ASSERT_OK(interface_.accept(interface_.runtime.self,
                                          connections[i], requests[i], 0));
@@ -134,7 +134,7 @@ class MediaServiceTest : public SourceTextServiceTest {
     while (!reached && !HasFatalFailure()) {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
-      OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
+      OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
         IREE_ASSERT_OK(interface_.runtime.vtable->advance(
             interface_.runtime.self, 0, &progress));
         if (std::string(interface_.snapshot(interface_.runtime.self).phase) ==
@@ -509,7 +509,7 @@ TEST_F(MediaServiceTest, CancelledMiddlePeerPreservesPreparedCohortOrdinals) {
     EXPECT_EQ(std::string(requests[i]->body.data, requests[i]->body.size),
               bodies[i]);
   }
-  OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
+  OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
     for (size_t i = 0; i < clients.size(); ++i) {
       IREE_ASSERT_OK(interface_.accept(interface_.runtime.self, connections[i],
                                        requests[i], 0));
@@ -568,7 +568,7 @@ TEST_F(MediaServiceTest, CrossRequestImagesConditionTextAndRetainedFollowup) {
   }
   // All three real HTTP claims arrive in one owner turn. The single shared
   // worker cannot run the first queued CPU preparation until this returns.
-  OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
+  OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
     for (size_t i = 0; i < clients.size(); ++i) {
       IREE_ASSERT_OK(interface_.accept(interface_.runtime.self, connections[i],
                                        requests[i], 0));

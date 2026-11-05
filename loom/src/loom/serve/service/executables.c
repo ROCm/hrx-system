@@ -10,9 +10,9 @@
 #include <string.h>
 
 #include "iree/base/threading/mutex.h"
-#include "loom/serve/runtime/parameter/module.h"
-#include "loom/serve/runtime/program/parameter_layout.h"
-#include "loom/serve/runtime/program/stage_set.h"
+#include "loom/runtime/parameter/module.h"
+#include "loom/runtime/program/parameter_layout.h"
+#include "loom/runtime/program/stage_set.h"
 #include "loomc/iree.h"
 
 typedef struct loom_serve_generation_t {
@@ -21,15 +21,15 @@ typedef struct loom_serve_generation_t {
   // Allocator owning this generation and its execution tables.
   iree_allocator_t host_allocator;
   // Retained immutable source snapshot and exact-input native reuse.
-  loom_serve_jit_t* jit;
+  loom_runtime_jit_t* jit;
   // Original model evidence or owned trailing storage for a new generation.
-  loom_serve_compilation_report_t* report;
+  loom_runtime_compilation_report_t* report;
   // Cold declaration count, including partial construction on failure.
   iree_host_size_t count;
   // Owned replacement stages; NULL for the model-owned original stages.
-  loom_serve_jit_stage_t** compiled;
+  loom_runtime_jit_stage_t** compiled;
   // Borrowed original table or owned recordings paired with compiled stages.
-  const loom_serve_stage_table_t* table;
+  const loom_runtime_stage_table_t* table;
   // Native payload retained by the immutable cold stages, excluding index
   // space.
   iree_host_size_t cold_native_bytes;
@@ -46,9 +46,9 @@ typedef struct loom_serve_generation_t {
 
 typedef struct loom_serve_parameter_arena_t {
   // Owned shared reservation, allocated on first adapted capture.
-  loom_serve_memory_arena_t* memory;
+  loom_runtime_memory_arena_t* memory;
   // Owned compiler placement, independent of code and checkpoint retention.
-  loom_serve_parameter_layout_t* layout;
+  loom_runtime_parameter_layout_t* layout;
   // Native-rounded size of each independently replaceable bank range.
   uint64_t range_bytes;
   // Allocated bank owners, including banks awaiting asynchronous retirement.
@@ -69,9 +69,9 @@ typedef struct loom_serve_checkpoint_t {
   // Source generation retaining the preparer's JIT and compilation report.
   loom_serve_generation_t* generation;
   // Owned checkpoint identity; path arrays/bytes follow this allocation.
-  loom_serve_preparation_parameter_t declaration;
+  loom_runtime_preparation_parameter_t declaration;
   // Owned single-domain bank, independent of any compiled request product.
-  loom_serve_parameter_bank_t* bank;
+  loom_runtime_parameter_bank_t* bank;
   // Borrowed indexed arena owner, or NULL for ordinary whole-root storage.
   loom_serve_parameter_arena_t* arena;
   // Sole active invocation borrowing this bank, independently of idle choices.
@@ -92,7 +92,7 @@ typedef struct loom_serve_choice_code_t {
   // Initialized products, including partial construction on failure.
   iree_host_size_t count;
   // Immutable compiler products shared independently of checkpoint bindings.
-  loom_serve_jit_stage_t** compiled;
+  loom_runtime_jit_stage_t** compiled;
   // Requested product and array storage, excluding shared native images.
   iree_host_size_t storage_size;
   // Owner collection has charged this bundle once, not once per choice.
@@ -105,18 +105,18 @@ typedef struct loom_serve_choice_t {
   // Retained source snapshot and cold descriptors preceding request stages.
   loom_serve_generation_t* generation;
   // Owned exact request key, borrowed by the compiler until completion.
-  loom_serve_preparation_t* preparation;
+  loom_runtime_preparation_t* preparation;
   // Owned indexed sources, retaining the model's immutable cold prefix.
-  loom_serve_parameter_sources_t* parameter_sources;
+  loom_runtime_parameter_sources_t* parameter_sources;
   // Pool entry receiving the terminal producer result.
-  loom_serve_variant_entry_t* entry;
+  loom_runtime_variant_entry_t* entry;
   // Shared immutable code, independent of this choice's checkpoint selection.
   loom_serve_choice_code_t* code;
   // Owned recordings with a borrowed cold prefix from the retained generation.
-  loom_serve_stage_table_t* table;
+  loom_runtime_stage_table_t* table;
   // Owned admission for cold roots plus request-selected checkpoint banks.
   // NULL borrows the model's original residency.
-  loom_serve_residency_t* residency;
+  loom_runtime_residency_t* residency;
   // Number of borrowed cache entries in the trailing pointer array.
   iree_host_size_t checkpoint_count;
   // Owned little-endian u64 offsets in source capture-ordinal order. Trailing
@@ -136,7 +136,7 @@ struct loom_serve_executables_t {
   // Immutable borrowed model resources, live through all compiler callbacks.
   loom_serve_executable_options_t options;
   // Owned original policy/checkpoint namespace, not replacement providers.
-  loom_serve_sources_t* sources;
+  loom_runtime_sources_t* sources;
   // Original source snapshot and descriptors, available for restoration.
   loom_serve_generation_t* original;
   // Retained source generation selected for subsequent batches.
@@ -148,9 +148,9 @@ struct loom_serve_executables_t {
   // Sole invocation's request declaration and compilation ownership.
   struct {
     // Unresolved declarations transferred from the source capability.
-    loom_serve_preparation_t* declarations;
+    loom_runtime_preparation_t* declarations;
     // Accepted producer, or retained ready request choice after collection.
-    loom_serve_variant_entry_t* entry;
+    loom_runtime_variant_entry_t* entry;
     // Accepted producer still owns model/compiler borrows.
     bool pending;
     // Intermediate producer handoffs; NULL after terminal recording is sent.
@@ -161,11 +161,11 @@ struct loom_serve_executables_t {
   // Lazy bounded reuse; cold-only models allocate no pool or entry storage.
   struct {
     // Existing variant publication and consumer-borrow mechanism.
-    loom_serve_variant_pool_t* pool;
+    loom_runtime_variant_pool_t* pool;
     // Ready provenance anchor, with no additional executable ownership.
-    loom_serve_variant_entry_t* original;
+    loom_runtime_variant_entry_t* original;
     // Runner's independent consumer borrow, retained between invocations.
-    loom_serve_variant_entry_t* bound;
+    loom_runtime_variant_entry_t* bound;
     // Nonblocking scheduling callback installed before any producer starts.
     loom_runtime_wake_callback_t observer;
     // Fixed pool and provenance metadata, excluded from idle payload limits.
@@ -194,9 +194,9 @@ struct loom_serve_executables_t {
   bool retiring;
 };
 
-static iree_host_size_t loom_serve_native_bytes(loom_serve_jit_t* jit) {
-  const loom_serve_jit_cache_storage_t storage =
-      loom_serve_jit_cache_storage(jit);
+static iree_host_size_t loom_serve_native_bytes(loom_runtime_jit_t* jit) {
+  const loom_runtime_jit_cache_storage_t storage =
+      loom_runtime_jit_cache_storage(jit);
   return storage.host_bytes - storage.index_bytes + storage.code_bytes;
 }
 
@@ -206,9 +206,9 @@ static void loom_serve_checkpoints_trim(loom_serve_executables_t* executables);
 // A source-only request preserves the cold stage table and resident bindings.
 // Otherwise all request stages share the first stage's checkpoint map.
 static iree_host_size_t loom_serve_choice_parameter_count(
-    const loom_serve_preparation_t* preparation) {
-  return loom_serve_preparation_stage_count(preparation)
-             ? loom_serve_preparation_stage(preparation, 0)->parameter_count
+    const loom_runtime_preparation_t* preparation) {
+  return loom_runtime_preparation_stage_count(preparation)
+             ? loom_runtime_preparation_stage(preparation, 0)->parameter_count
              : 0;
 }
 
@@ -218,13 +218,13 @@ static void loom_serve_parameter_arenas_reset(
     return;
   }
   const uint32_t count =
-      loom_serve_preparation_arena_count(executables->options.preparation);
+      loom_runtime_preparation_arena_count(executables->options.preparation);
   for (uint32_t i = 0; i < count; ++i) {
     loom_serve_parameter_arena_t* arena = &executables->parameters.arenas[i];
     if (arena->memory && !arena->banks &&
         (!arena->published || executables->retiring)) {
-      loom_serve_memory_arena_free(arena->memory);
-      loom_serve_parameter_layout_free(arena->layout);
+      loom_runtime_memory_arena_free(arena->memory);
+      loom_runtime_parameter_layout_free(arena->layout);
       *arena = (loom_serve_parameter_arena_t){0};
     }
   }
@@ -265,7 +265,8 @@ static void loom_serve_generation_retire(loom_serve_generation_t* generation) {
   if (generation && generation->compiled) {
     // Recordings borrow parameter roots. Compiled products and native preparers
     // remain alive until the banks have joined their consumers and retired.
-    loom_serve_stage_table_free((loom_serve_stage_table_t*)generation->table);
+    loom_runtime_stage_table_free(
+        (loom_runtime_stage_table_t*)generation->table);
     generation->table = NULL;
   }
 }
@@ -281,34 +282,34 @@ static void loom_serve_generation_release(void* value) {
   loom_serve_generation_retire(generation);
   if (generation->compiled) {
     for (iree_host_size_t i = 0; i < generation->count; ++i) {
-      loom_serve_jit_stage_free(generation->compiled[i]);
+      loom_runtime_jit_stage_free(generation->compiled[i]);
     }
-    loom_serve_jit_trim(generation->jit);
+    loom_runtime_jit_trim(generation->jit);
   }
-  loom_serve_jit_release(generation->jit);
+  loom_runtime_jit_release(generation->jit);
   iree_allocator_free(generation->host_allocator, generation->compiled);
   iree_allocator_free(generation->host_allocator, generation);
 }
 
 static iree_status_t loom_serve_generation_create(
-    loom_serve_jit_t* original, iree_allocator_t host_allocator,
+    loom_runtime_jit_t* original, iree_allocator_t host_allocator,
     loom_serve_generation_t** out_generation) {
   *out_generation = NULL;
   loom_serve_generation_t* generation = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       host_allocator,
       iree_sizeof_struct(*generation) +
-          (original ? 0 : sizeof(loom_serve_compilation_report_t)),
+          (original ? 0 : sizeof(loom_runtime_compilation_report_t)),
       (void**)&generation));
   iree_atomic_ref_count_init(&generation->ref_count);
   generation->host_allocator = host_allocator;
   generation->jit = original;
-  loom_serve_jit_retain(original);
+  loom_runtime_jit_retain(original);
   generation->report =
-      original
-          ? loom_serve_jit_report(original)
-          : (loom_serve_compilation_report_t*)((uint8_t*)generation +
-                                               iree_sizeof_struct(*generation));
+      original ? loom_runtime_jit_report(original)
+               : (loom_runtime_compilation_report_t*)((uint8_t*)generation +
+                                                      iree_sizeof_struct(
+                                                          *generation));
   *out_generation = generation;
   return iree_ok_status();
 }
@@ -328,7 +329,7 @@ iree_status_t loom_serve_executables_allocate(
   executables->host_allocator = host_allocator;
   executables->options = *options;
   const uint32_t arena_count =
-      loom_serve_preparation_arena_count(options->preparation);
+      loom_runtime_preparation_arena_count(options->preparation);
   iree_status_t status = iree_ok_status();
   if (arena_count) {
     status = iree_allocator_malloc_array(
@@ -336,8 +337,8 @@ iree_status_t loom_serve_executables_allocate(
         (void**)&executables->parameters.arenas);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_sources_clone(options->sources, host_allocator,
-                                      &executables->sources);
+    status = loom_runtime_sources_clone(options->sources, host_allocator,
+                                        &executables->sources);
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_generation_create(options->jit, host_allocator,
@@ -345,7 +346,8 @@ iree_status_t loom_serve_executables_allocate(
   }
   if (iree_status_is_ok(status)) {
     loom_serve_generation_t* original = executables->original;
-    original->count = loom_serve_preparation_stage_count(options->preparation);
+    original->count =
+        loom_runtime_preparation_stage_count(options->preparation);
     original->table = options->stages;
     original->cold_native_bytes = loom_serve_native_bytes(original->jit);
     executables->selected = original;
@@ -366,13 +368,13 @@ void loom_serve_executables_retire(loom_serve_executables_t* executables) {
     return;
   }
   executables->retiring = true;
-  loom_serve_preparation_free(executables->invocation.declarations);
-  loom_serve_module_clear_stages(executables->options.runner);
-  loom_serve_parameters_module_bind_sources(
+  loom_runtime_preparation_free(executables->invocation.declarations);
+  loom_runtime_module_clear_stages(executables->options.runner);
+  loom_runtime_parameters_module_bind_sources(
       executables->options.parameter_module, NULL);
-  loom_serve_variant_entry_release(executables->invocation.entry);
-  loom_serve_variant_entry_release(executables->cache.bound);
-  loom_serve_variant_pool_free(executables->cache.pool);
+  loom_runtime_variant_entry_release(executables->invocation.entry);
+  loom_runtime_variant_entry_release(executables->cache.bound);
+  loom_runtime_variant_pool_free(executables->cache.pool);
   executables->cache.pool = NULL;
   executables->invocation.entry = NULL;
   executables->invocation.declarations = NULL;
@@ -397,7 +399,7 @@ bool loom_serve_executables_is_retired(loom_serve_executables_t* executables) {
   for (loom_serve_checkpoint_t* entry =
            executables ? executables->parameters.retired : NULL;
        entry; entry = entry->next) {
-    retired &= loom_serve_parameter_bank_is_retired(entry->bank);
+    retired &= loom_runtime_parameter_bank_is_retired(entry->bank);
   }
   return retired;
 }
@@ -409,7 +411,7 @@ iree_status_t loom_serve_executables_await_retirement(
            executables ? executables->parameters.retired : NULL;
        entry; entry = entry->next) {
     status = iree_status_join(
-        status, loom_serve_parameter_bank_await_retirement(entry->bank));
+        status, loom_runtime_parameter_bank_await_retirement(entry->bank));
   }
   return status;
 }
@@ -426,7 +428,7 @@ iree_status_t loom_serve_executables_free(
   loom_serve_generation_release(executables->bound);
   loom_serve_generation_release(executables->selected);
   loom_serve_generation_release(executables->original);
-  loom_serve_sources_free(executables->sources, executables->host_allocator);
+  loom_runtime_sources_free(executables->sources, executables->host_allocator);
   iree_allocator_free(executables->host_allocator,
                       executables->parameters.arenas);
   iree_allocator_free(executables->host_allocator, executables);
@@ -439,7 +441,7 @@ void loom_serve_executables_capture(loom_serve_executables_t* executables) {
 }
 
 void loom_serve_executables_declare(loom_serve_executables_t* executables,
-                                    loom_serve_preparation_t* preparation) {
+                                    loom_runtime_preparation_t* preparation) {
   executables->invocation.declarations = preparation;
 }
 
@@ -448,34 +450,34 @@ void loom_serve_executables_set_observer(
     loom_runtime_wake_callback_t observer) {
   executables->cache.observer = observer;
   if (executables->cache.pool) {
-    loom_serve_variant_pool_set_observer(executables->cache.pool, observer);
+    loom_runtime_variant_pool_set_observer(executables->cache.pool, observer);
   }
   for (loom_serve_checkpoint_t* entry = executables->parameters.retired; entry;
        entry = entry->next) {
-    loom_serve_parameter_bank_retire(entry->bank, observer.wake,
-                                     observer.user_data);
+    loom_runtime_parameter_bank_retire(entry->bank, observer.wake,
+                                       observer.user_data);
   }
 }
 
 static iree_status_t loom_serve_executables_bind(
     loom_serve_executables_t* executables) {
   loom_serve_generation_t* generation = executables->captured;
-  loom_serve_variant_entry_t* entry = executables->invocation.entry;
+  loom_runtime_variant_entry_t* entry = executables->invocation.entry;
   if (executables->bound == generation && executables->cache.bound == entry) {
     return iree_ok_status();
   }
   const loom_serve_choice_t* choice =
-      entry ? loom_serve_variant_entry_value(entry) : NULL;
-  const loom_serve_stage_table_t* table =
+      entry ? loom_runtime_variant_entry_value(entry) : NULL;
+  const loom_runtime_stage_table_t* table =
       choice ? choice->table : generation->table;
-  IREE_RETURN_IF_ERROR(loom_serve_module_bind_stages(
+  IREE_RETURN_IF_ERROR(loom_runtime_module_bind_stages(
       executables->options.runner, table->part_count, table->parts));
-  loom_serve_parameters_module_bind_sources(
+  loom_runtime_parameters_module_bind_sources(
       executables->options.parameter_module,
       choice ? choice->parameter_sources
              : executables->options.parameter_sources);
-  loom_serve_variant_entry_retain(entry);
-  loom_serve_variant_entry_release(executables->cache.bound);
+  loom_runtime_variant_entry_retain(entry);
+  loom_runtime_variant_entry_release(executables->cache.bound);
   executables->cache.bound = entry;
   loom_serve_generation_retain(generation);
   loom_serve_generation_release(executables->bound);
@@ -484,17 +486,17 @@ static iree_status_t loom_serve_executables_bind(
 }
 
 void loom_serve_executables_release(loom_serve_executables_t* executables) {
-  loom_serve_residency_cancel_admission(
+  loom_runtime_residency_cancel_admission(
       loom_serve_executables_residency(executables));
-  loom_serve_preparation_free(executables->invocation.declarations);
+  loom_runtime_preparation_free(executables->invocation.declarations);
   loom_serve_choice_t* choice =
       executables->invocation.entry
-          ? loom_serve_variant_entry_value(executables->invocation.entry)
+          ? loom_runtime_variant_entry_value(executables->invocation.entry)
           : NULL;
   for (iree_host_size_t i = 0; choice && i < choice->checkpoint_count; ++i) {
     choice->checkpoints[i]->capture = NULL;
   }
-  loom_serve_variant_entry_release(executables->invocation.entry);
+  loom_runtime_variant_entry_release(executables->invocation.entry);
   memset(&executables->invocation, 0, sizeof(executables->invocation));
   loom_serve_generation_release(executables->captured);
   executables->captured = NULL;
@@ -510,32 +512,33 @@ typedef struct loom_serve_generation_job_t {
   // Owned generation transferred at terminal completion, including failure.
   loom_serve_generation_t* generation;
   // Provider namespace borrowed through source indexing only.
-  loom_serve_sources_t sources;
+  loom_runtime_sources_t sources;
   // Indexing outcome consumed after the task relinquishes compiler access.
   iree_status_t status;
   // Terminal ownership transfer after all model and source accesses retire.
-  loom_serve_variant_completion_fn_t completion;
+  loom_runtime_variant_completion_fn_t completion;
   // Borrowed terminal consumer state.
   void* user_data;
 } loom_serve_generation_job_t;
 
 static iree_status_t loom_serve_executables_record(
     const loom_serve_executable_options_t* options,
-    const loom_serve_stage_table_t* prefix, iree_host_size_t count,
-    loom_serve_jit_stage_t* const* stages, iree_allocator_t host_allocator,
-    loom_serve_stage_table_t** out_table) {
+    const loom_runtime_stage_table_t* prefix, iree_host_size_t count,
+    loom_runtime_jit_stage_t* const* stages, iree_allocator_t host_allocator,
+    loom_runtime_stage_table_t** out_table) {
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
-    status = loom_serve_stage_record_check(&options->recording, stages[i]);
-    const loom_cmd_program_t* program = loom_serve_jit_stage_program(stages[i]);
+    status = loom_runtime_stage_record_check(&options->recording, stages[i]);
+    const loom_cmd_program_t* program =
+        loom_runtime_jit_stage_program(stages[i]);
     if (iree_status_is_ok(status) && program) {
-      status =
-          loom_serve_parameter_bank_check_layout(options->parameters, program);
+      status = loom_runtime_parameter_bank_check_layout(options->parameters,
+                                                        program);
     }
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_stage_table_allocate(&options->recording, prefix, count,
-                                             stages, host_allocator, out_table);
+    status = loom_runtime_stage_table_allocate(
+        &options->recording, prefix, count, stages, host_allocator, out_table);
   }
   return status;
 }
@@ -559,8 +562,8 @@ static void loom_serve_choice_free(void* value) {
   }
   loom_serve_executables_t* executables = choice->owner;
   loom_serve_generation_t* generation = choice->generation;
-  loom_serve_stage_table_free(choice->table);
-  loom_serve_residency_free(choice->residency);
+  loom_runtime_stage_table_free(choice->table);
+  loom_runtime_residency_free(choice->residency);
   for (iree_host_size_t i = 0; i < choice->checkpoint_count; ++i) {
     if (choice->checkpoints[i]->capture == choice) {
       choice->checkpoints[i]->capture = NULL;
@@ -570,7 +573,7 @@ static void loom_serve_choice_free(void* value) {
   loom_serve_choice_code_t* code = choice->code;
   if (code && --code->users == 0) {
     for (iree_host_size_t i = 0; i < code->count; ++i) {
-      loom_serve_jit_stage_free(code->compiled[i]);
+      loom_runtime_jit_stage_free(code->compiled[i]);
     }
     if (code->accounted) {
       executables->cache.payload_bytes -= code->storage_size;
@@ -578,46 +581,46 @@ static void loom_serve_choice_free(void* value) {
     iree_allocator_free(executables->host_allocator, code->compiled);
     iree_allocator_free(executables->host_allocator, code);
   }
-  loom_serve_preparation_free(choice->preparation);
-  loom_serve_parameter_sources_release(choice->parameter_sources);
+  loom_runtime_preparation_free(choice->preparation);
+  loom_runtime_parameter_sources_release(choice->parameter_sources);
   if (choice->accounted) {
     executables->cache.payload_bytes -= choice->storage_size;
   }
   --generation->choices.count;
-  loom_serve_jit_trim(generation->jit);
+  loom_runtime_jit_trim(generation->jit);
   loom_serve_account_natives(executables, generation);
   loom_serve_generation_release(generation);
   iree_allocator_free(executables->host_allocator, choice);
 }
 
 static void loom_serve_choice_discard(loom_serve_executables_t* executables,
-                                      loom_serve_variant_entry_t* entry) {
+                                      loom_runtime_variant_entry_t* entry) {
   if (entry == executables->cache.bound) {
-    loom_serve_module_clear_stages(executables->options.runner);
-    loom_serve_parameters_module_bind_sources(
+    loom_runtime_module_clear_stages(executables->options.runner);
+    loom_runtime_parameters_module_bind_sources(
         executables->options.parameter_module, NULL);
-    loom_serve_variant_entry_release(executables->cache.bound);
+    loom_runtime_variant_entry_release(executables->cache.bound);
     executables->cache.bound = NULL;
     loom_serve_generation_release(executables->bound);
     executables->bound = NULL;
   }
-  loom_serve_variant_entry_discard(entry);
+  loom_runtime_variant_entry_discard(entry);
 }
 
 static void loom_serve_executables_trim(loom_serve_executables_t* executables) {
-  loom_serve_variant_pool_t* pool = executables->cache.pool;
+  loom_runtime_variant_pool_t* pool = executables->cache.pool;
   if (!pool) {
     return;
   }
-  while (loom_serve_variant_pool_count(pool) > 1 &&
-         (loom_serve_variant_pool_count(pool) - 1 >
+  while (loom_runtime_variant_pool_count(pool) > 1 &&
+         (loom_runtime_variant_pool_count(pool) - 1 >
               executables->options.cache.capacity ||
           executables->cache.payload_bytes + executables->cache.native_bytes +
-                  loom_serve_variant_pool_storage_size(pool) -
+                  loom_runtime_variant_pool_storage_size(pool) -
                   executables->cache.fixed_bytes >
               executables->options.cache.max_bytes)) {
-    loom_serve_variant_entry_t* entry =
-        loom_serve_variant_entry_next(executables->cache.original);
+    loom_runtime_variant_entry_t* entry =
+        loom_runtime_variant_entry_next(executables->cache.original);
     loom_serve_choice_discard(executables, entry);
   }
 }
@@ -626,13 +629,13 @@ static void loom_serve_executables_trim(loom_serve_executables_t* executables) {
 // An active capture excludes eviction even when another idle choice shares it.
 static void loom_serve_checkpoint_retire(loom_serve_executables_t* executables,
                                          loom_serve_checkpoint_t* checkpoint) {
-  for (loom_serve_variant_entry_t* entry =
+  for (loom_runtime_variant_entry_t* entry =
            executables->cache.pool
-               ? loom_serve_variant_entry_next(executables->cache.original)
+               ? loom_runtime_variant_entry_next(executables->cache.original)
                : NULL;
        entry;) {
-    loom_serve_variant_entry_t* next = loom_serve_variant_entry_next(entry);
-    const loom_serve_choice_t* choice = loom_serve_variant_entry_value(entry);
+    loom_runtime_variant_entry_t* next = loom_runtime_variant_entry_next(entry);
+    const loom_serve_choice_t* choice = loom_runtime_variant_entry_value(entry);
     for (iree_host_size_t i = 0; choice && i < choice->checkpoint_count; ++i) {
       if (choice->checkpoints[i] == checkpoint) {
         loom_serve_choice_discard(executables, entry);
@@ -657,8 +660,8 @@ static void loom_serve_checkpoint_retire(loom_serve_executables_t* executables,
     ++checkpoint->arena->retiring_banks;
   }
   const loom_runtime_wake_callback_t observer = executables->cache.observer;
-  loom_serve_parameter_bank_retire(checkpoint->bank, observer.wake,
-                                   observer.user_data);
+  loom_runtime_parameter_bank_retire(checkpoint->bank, observer.wake,
+                                     observer.user_data);
   if (observer.wake) {
     observer.wake(observer.user_data);
   }
@@ -697,12 +700,12 @@ iree_status_t loom_serve_executables_query_status(
   if (executables->retiring && executables->parameters.arenas &&
       loom_serve_executables_is_retired(executables)) {
     const uint32_t count =
-        loom_serve_preparation_arena_count(executables->options.preparation);
+        loom_runtime_preparation_arena_count(executables->options.preparation);
     iree_status_t status = iree_ok_status();
     for (uint32_t i = 0; i < count && iree_status_is_ok(status); ++i) {
       loom_serve_parameter_arena_t* arena = &executables->parameters.arenas[i];
       if (arena->memory && !arena->detached) {
-        status = loom_serve_memory_arena_detach(arena->memory);
+        status = loom_runtime_memory_arena_detach(arena->memory);
         arena->detached = iree_status_is_ok(status);
       }
     }
@@ -712,7 +715,7 @@ iree_status_t loom_serve_executables_query_status(
   iree_status_t status = iree_ok_status();
   while (*cursor && iree_status_is_ok(status)) {
     loom_serve_checkpoint_t* checkpoint = *cursor;
-    if (!loom_serve_parameter_bank_is_retired(checkpoint->bank)) {
+    if (!loom_runtime_parameter_bank_is_retired(checkpoint->bank)) {
       cursor = &checkpoint->next;
       continue;
     }
@@ -721,36 +724,36 @@ iree_status_t loom_serve_executables_query_status(
         cursor = &checkpoint->next;
         continue;
       }
-      loom_serve_residency_group_t* group =
-          loom_serve_parameter_bank_group(checkpoint->bank);
+      loom_runtime_residency_group_t* group =
+          loom_runtime_parameter_bank_group(checkpoint->bank);
       // A partially allocated bank has no group and has never been activated.
       if (group) {
         bool complete = false;
-        status = loom_serve_residency_group_deactivate(group, &complete);
+        status = loom_runtime_residency_group_deactivate(group, &complete);
         if (!iree_status_is_ok(status)) {
           break;
         }
         if (!complete) {
           const loom_runtime_wake_callback_t observer =
               executables->cache.observer;
-          loom_serve_parameter_bank_retire(checkpoint->bank, observer.wake,
-                                           observer.user_data);
+          loom_runtime_parameter_bank_retire(checkpoint->bank, observer.wake,
+                                             observer.user_data);
           cursor = &checkpoint->next;
           continue;
         }
       }
     }
-    loom_serve_weights_t* weights =
+    loom_runtime_weights_t* weights =
         checkpoint->bank
-            ? loom_serve_parameter_bank_weights(checkpoint->bank, 0)
+            ? loom_runtime_parameter_bank_weights(checkpoint->bank, 0)
             : NULL;
     const loom_runtime_parameter_activity_t activity =
-        weights ? loom_serve_weights_activity(weights)
+        weights ? loom_runtime_weights_activity(weights)
                 : (loom_runtime_parameter_activity_t){0};
     const loom_runtime_storage_statistics_t memory =
-        weights ? loom_serve_weights_statistics(weights)
+        weights ? loom_runtime_weights_statistics(weights)
                 : (loom_runtime_storage_statistics_t){0};
-    status = loom_serve_parameter_bank_free(checkpoint->bank);
+    status = loom_runtime_parameter_bank_free(checkpoint->bank);
     if (iree_status_is_ok(status)) {
       loom_serve_parameter_activity_add(&executables->parameters.activity,
                                         activity);
@@ -763,7 +766,7 @@ iree_status_t loom_serve_executables_query_status(
       *cursor = checkpoint->next;
       loom_serve_generation_t* generation = checkpoint->generation;
       --generation->parameters;
-      loom_serve_jit_trim(generation->jit);
+      loom_runtime_jit_trim(generation->jit);
       loom_serve_account_natives(executables, generation);
       loom_serve_generation_release(generation);
       iree_allocator_free(executables->host_allocator, checkpoint);
@@ -780,35 +783,35 @@ bool loom_serve_executables_is_pending(
   return executables && executables->parameters.retired;
 }
 
-loom_serve_residency_t* loom_serve_executables_residency(
+loom_runtime_residency_t* loom_serve_executables_residency(
     const loom_serve_executables_t* executables) {
   const loom_serve_choice_t* choice =
       executables->invocation.entry && !executables->invocation.pending
-          ? loom_serve_variant_entry_value(executables->invocation.entry)
+          ? loom_runtime_variant_entry_value(executables->invocation.entry)
           : NULL;
   return choice && choice->residency ? choice->residency
                                      : executables->options.residency;
 }
 
-loom_serve_residency_snapshot_t loom_serve_executables_parameters(
+loom_runtime_residency_snapshot_t loom_serve_executables_parameters(
     const loom_serve_executables_t* executables) {
-  loom_serve_residency_snapshot_t result = loom_serve_residency_snapshot(
+  loom_runtime_residency_snapshot_t result = loom_runtime_residency_snapshot(
       loom_serve_executables_residency(executables));
   result.memory =
-      loom_serve_residency_statistics(executables->options.residency);
+      loom_runtime_residency_statistics(executables->options.residency);
   result.activity =
-      loom_serve_residency_activity(executables->options.residency);
+      loom_runtime_residency_activity(executables->options.residency);
   loom_serve_parameter_activity_add(&result.activity,
                                     executables->parameters.activity);
   result.memory.released_bytes += executables->parameters.released_bytes;
   const uint32_t arena_count =
-      loom_serve_preparation_arena_count(executables->options.preparation);
+      loom_runtime_preparation_arena_count(executables->options.preparation);
   for (uint32_t i = 0; i < arena_count; ++i) {
     const loom_serve_parameter_arena_t* arena =
         &executables->parameters.arenas[i];
     if (arena->memory) {
       result.memory.reserved_bytes += iree_hal_buffer_byte_length(
-          loom_serve_memory_arena_handle(arena->memory));
+          loom_runtime_memory_arena_handle(arena->memory));
     }
   }
   const loom_serve_checkpoint_t* lists[] = {executables->parameters.entries,
@@ -816,14 +819,14 @@ loom_serve_residency_snapshot_t loom_serve_executables_parameters(
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(lists); ++i) {
     for (const loom_serve_checkpoint_t* entry = lists[i]; entry;
          entry = entry->next) {
-      loom_serve_weights_t* weights =
-          entry->bank ? loom_serve_parameter_bank_weights(entry->bank, 0)
+      loom_runtime_weights_t* weights =
+          entry->bank ? loom_runtime_parameter_bank_weights(entry->bank, 0)
                       : NULL;
       if (!weights) {
         continue;
       }
       const loom_runtime_storage_statistics_t memory =
-          loom_serve_weights_statistics(weights);
+          loom_runtime_weights_statistics(weights);
       if (!entry->arena) {
         result.memory.reserved_bytes += memory.reserved_bytes;
       }
@@ -832,7 +835,7 @@ loom_serve_residency_snapshot_t loom_serve_executables_parameters(
       result.memory.releasing_bytes += memory.releasing_bytes;
       result.memory.released_bytes += memory.released_bytes;
       loom_serve_parameter_activity_add(&result.activity,
-                                        loom_serve_weights_activity(weights));
+                                        loom_runtime_weights_activity(weights));
     }
   }
   return result;
@@ -841,13 +844,13 @@ loom_serve_residency_snapshot_t loom_serve_executables_parameters(
 void loom_serve_executables_set_pinned(loom_serve_executables_t* executables,
                                        bool pinned) {
   executables->parameters.pinned = pinned;
-  loom_serve_residency_set_pinned(executables->options.residency, pinned);
+  loom_runtime_residency_set_pinned(executables->options.residency, pinned);
   for (loom_serve_checkpoint_t* entry = executables->parameters.entries; entry;
        entry = entry->next) {
-    loom_serve_residency_group_t* group =
-        loom_serve_parameter_bank_group(entry->bank);
+    loom_runtime_residency_group_t* group =
+        loom_runtime_parameter_bank_group(entry->bank);
     if (group) {
-      loom_serve_residency_group_set_pinned(group, pinned);
+      loom_runtime_residency_group_set_pinned(group, pinned);
     }
   }
 }
@@ -855,27 +858,28 @@ void loom_serve_executables_set_pinned(loom_serve_executables_t* executables,
 iree_status_t loom_serve_executables_deactivate(
     loom_serve_executables_t* executables, bool* out_complete) {
   *out_complete = false;
-  bool pinned = loom_serve_residency_is_pinned(executables->options.residency);
+  bool pinned =
+      loom_runtime_residency_is_pinned(executables->options.residency);
   for (loom_serve_checkpoint_t* entry = executables->parameters.entries; entry;
        entry = entry->next) {
-    const loom_serve_residency_group_t* group =
-        loom_serve_parameter_bank_group(entry->bank);
-    pinned |= group && loom_serve_residency_group_is_pinned(group);
+    const loom_runtime_residency_group_t* group =
+        loom_runtime_parameter_bank_group(entry->bank);
+    pinned |= group && loom_runtime_residency_group_is_pinned(group);
   }
   if (pinned) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "deactivation requires unpinned parameters");
   }
   bool complete = false;
-  IREE_RETURN_IF_ERROR(loom_serve_residency_deactivate(
+  IREE_RETURN_IF_ERROR(loom_runtime_residency_deactivate(
       executables->options.residency, &complete));
   iree_status_t status = iree_ok_status();
   for (loom_serve_checkpoint_t* entry = executables->parameters.entries;
        entry && iree_status_is_ok(status); entry = entry->next) {
     if (entry->ready) {
       bool released = false;
-      status = loom_serve_residency_group_deactivate(
-          loom_serve_parameter_bank_group(entry->bank), &released);
+      status = loom_runtime_residency_group_deactivate(
+          loom_runtime_parameter_bank_group(entry->bank), &released);
       complete &= released;
     }
   }
@@ -889,7 +893,7 @@ iree_status_t loom_serve_executables_deactivate(
 
 static iree_status_t loom_serve_checkpoint_allocate(
     loom_serve_choice_t* choice,
-    const loom_serve_preparation_parameter_t* declaration,
+    const loom_runtime_preparation_parameter_t* declaration,
     const loom_cmd_program_t* program, uint32_t domain,
     loom_serve_parameter_arena_t* arena,
     loom_serve_checkpoint_t** out_checkpoint) {
@@ -967,19 +971,19 @@ static iree_status_t loom_serve_checkpoint_allocate(
   }
   executables->parameters.entries = checkpoint;
   *out_checkpoint = checkpoint;
-  iree_status_t status = loom_serve_parameter_bank_allocate_domain(
+  iree_status_t status = loom_runtime_parameter_bank_allocate_domain(
       executables->options.device, executables->options.pool, program, domain,
       arena ? arena->memory : NULL, executables->host_allocator,
       &checkpoint->bank);
   if (iree_status_is_ok(status)) {
     if (arena && !arena->range_bytes) {
       arena->range_bytes =
-          loom_serve_weights_memory_usage(
-              loom_serve_parameter_bank_weights(checkpoint->bank, 0))
+          loom_runtime_weights_memory_usage(
+              loom_runtime_parameter_bank_weights(checkpoint->bank, 0))
               .reserved_bytes;
     }
-    loom_serve_residency_group_set_pinned(
-        loom_serve_parameter_bank_group(checkpoint->bank),
+    loom_runtime_residency_group_set_pinned(
+        loom_runtime_parameter_bank_group(checkpoint->bank),
         executables->parameters.pinned);
   }
   return status;
@@ -1010,7 +1014,7 @@ struct loom_serve_choice_job_t {
   loom_serve_checkpoint_t* preparing;
   // Fixed roots and selected banks, followed by fixed buffer pointers and
   // distinct group pointers. Arena roots borrow a selected bank for checking.
-  loom_serve_parameter_binding_t bindings[];
+  loom_runtime_parameter_binding_t bindings[];
 };
 
 static void loom_serve_choice_job_free(loom_serve_choice_job_t* job) {
@@ -1031,14 +1035,14 @@ static void loom_serve_choice_prepared(void* user_data, iree_status_t status) {
   iree_slim_mutex_unlock(&job->mutex);
 }
 
-static const loom_serve_preparation_parameter_t* loom_serve_choice_parameter(
+static const loom_runtime_preparation_parameter_t* loom_serve_choice_parameter(
     const loom_serve_choice_t* choice, iree_host_size_t index) {
   const iree_host_size_t count =
       loom_serve_choice_parameter_count(choice->preparation);
-  return index < count ? &loom_serve_preparation_stage(choice->preparation, 0)
+  return index < count ? &loom_runtime_preparation_stage(choice->preparation, 0)
                               ->parameters[index]
-                       : loom_serve_preparation_bank(choice->preparation,
-                                                     (uint32_t)(index - count));
+                       : loom_runtime_preparation_bank(
+                             choice->preparation, (uint32_t)(index - count));
 }
 
 // Compiled shape alone never establishes checkpoint identity. Arena banks
@@ -1046,7 +1050,7 @@ static const loom_serve_preparation_parameter_t* loom_serve_choice_parameter(
 static loom_serve_checkpoint_t* loom_serve_choice_find_parameter(
     loom_serve_choice_job_t* job, iree_host_size_t index) {
   loom_serve_choice_t* choice = job->choice;
-  const loom_serve_preparation_parameter_t* declaration =
+  const loom_runtime_preparation_parameter_t* declaration =
       loom_serve_choice_parameter(choice, index);
   loom_serve_executables_t* executables = choice->owner;
   loom_serve_parameter_arena_t* arena =
@@ -1057,11 +1061,11 @@ static loom_serve_checkpoint_t* loom_serve_choice_find_parameter(
        checkpoint; checkpoint = checkpoint->next) {
     if (checkpoint->ready && checkpoint->generation == choice->generation &&
         checkpoint->arena == arena &&
-        loom_serve_preparation_parameter_equal(declaration,
-                                               &checkpoint->declaration) &&
-        (arena || loom_serve_parameter_bank_matches_domain(
+        loom_runtime_preparation_parameter_equal(declaration,
+                                                 &checkpoint->declaration) &&
+        (arena || loom_runtime_parameter_bank_matches_domain(
                       checkpoint->bank,
-                      loom_serve_jit_stage_program(choice->code->compiled[0]),
+                      loom_runtime_jit_stage_program(choice->code->compiled[0]),
                       declaration->binding))) {
       return checkpoint;
     }
@@ -1077,16 +1081,17 @@ static void loom_serve_choice_retain_parameter(
   ++checkpoint->users;
   checkpoint->capture = choice;
   choice->checkpoints[choice->checkpoint_count++] = checkpoint;
-  job->bindings[index] = (loom_serve_parameter_binding_t){checkpoint->bank, 0};
+  job->bindings[index] =
+      (loom_runtime_parameter_binding_t){checkpoint->bank, 0};
   const iree_host_size_t count =
       loom_serve_choice_parameter_count(choice->preparation);
   if (index >= count) {
-    const loom_serve_preparation_parameter_t* declaration =
+    const loom_runtime_preparation_parameter_t* declaration =
         loom_serve_choice_parameter(choice, index);
     job->bindings[declaration->binding] = job->bindings[index];
     const uint64_t offset =
         iree_hal_buffer_virtual_view(
-            loom_serve_parameter_bank_buffers(checkpoint->bank)[0])
+            loom_runtime_parameter_bank_buffers(checkpoint->bank)[0])
             .byte_offset;
     iree_unaligned_store_le_u64(&choice->parameter_offsets[index - count],
                                 offset);
@@ -1097,7 +1102,7 @@ static bool loom_serve_parameter_arena_full(
     const loom_serve_parameter_arena_t* arena) {
   return arena->range_bytes &&
          arena->banks >= iree_hal_buffer_byte_length(
-                             loom_serve_memory_arena_handle(arena->memory)) /
+                             loom_runtime_memory_arena_handle(arena->memory)) /
                              arena->range_bytes;
 }
 
@@ -1113,7 +1118,7 @@ static iree_status_t loom_serve_choice_bind_parameter(
     loom_serve_choice_retain_parameter(job, index, retained);
     return iree_ok_status();
   }
-  const loom_serve_preparation_parameter_t* declaration =
+  const loom_runtime_preparation_parameter_t* declaration =
       loom_serve_choice_parameter(choice, index);
   loom_serve_parameter_arena_t* arena =
       declaration->arena
@@ -1149,7 +1154,7 @@ static iree_status_t loom_serve_choice_bind_parameter(
   loom_serve_checkpoint_t* checkpoint = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_checkpoint_allocate(
       choice, declaration,
-      loom_serve_jit_stage_program(choice->code->compiled[0]),
+      loom_runtime_jit_stage_program(choice->code->compiled[0]),
       declaration->binding, arena, &checkpoint));
   loom_serve_choice_retain_parameter(job, index, checkpoint);
   *out_preparing = checkpoint;
@@ -1163,7 +1168,7 @@ static iree_status_t loom_serve_choice_prepare_arenas(
       loom_serve_choice_parameter_count(choice->preparation);
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
-    const loom_serve_preparation_parameter_t* declaration =
+    const loom_runtime_preparation_parameter_t* declaration =
         loom_serve_choice_parameter(choice, i);
     if (!declaration->arena) {
       continue;
@@ -1171,29 +1176,29 @@ static iree_status_t loom_serve_choice_prepare_arenas(
     loom_serve_parameter_arena_t* arena =
         &executables->parameters.arenas[declaration->arena - 1];
     const loom_cmd_program_t* program =
-        loom_serve_jit_stage_program(choice->code->compiled[0]);
+        loom_runtime_jit_stage_program(choice->code->compiled[0]);
     if (arena->layout) {
-      status = loom_serve_parameter_layout_check_domain(arena->layout, program,
-                                                        (uint32_t)i);
+      status = loom_runtime_parameter_layout_check_domain(arena->layout,
+                                                          program, (uint32_t)i);
     } else {
-      loom_serve_memory_pool_t* pool =
-          loom_serve_pool_memory(executables->options.pool);
+      loom_runtime_memory_pool_t* pool =
+          loom_runtime_pool_memory(executables->options.pool);
       if (!pool) {
         status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                                   "parameter arenas require elastic storage");
       } else {
-        status = loom_serve_parameter_layout_allocate_domain(
+        status = loom_runtime_parameter_layout_allocate_domain(
             program, (uint32_t)i, executables->host_allocator, &arena->layout);
       }
       if (iree_status_is_ok(status)) {
-        status = loom_serve_memory_arena_allocate(
-            pool, loom_serve_pool_weight_geometry(executables->options.pool),
-            loom_serve_preparation_arena_capacity(
+        status = loom_runtime_memory_arena_allocate(
+            pool, loom_runtime_pool_weight_geometry(executables->options.pool),
+            loom_runtime_preparation_arena_capacity(
                 executables->options.preparation, declaration->arena - 1),
             &arena->memory);
       }
       if (!iree_status_is_ok(status)) {
-        loom_serve_parameter_layout_free(arena->layout);
+        loom_runtime_parameter_layout_free(arena->layout);
         arena->layout = NULL;
       }
     }
@@ -1207,28 +1212,28 @@ static iree_status_t loom_serve_choice_check(loom_serve_choice_t* choice) {
   if (!code->count) {
     return iree_ok_status();
   }
-  const loom_serve_preparation_stage_t* canonical =
-      loom_serve_preparation_stage(choice->preparation, 0);
+  const loom_runtime_preparation_stage_t* canonical =
+      loom_runtime_preparation_stage(choice->preparation, 0);
   const loom_cmd_program_t* program =
-      loom_serve_jit_stage_program(code->compiled[0]);
+      loom_runtime_jit_stage_program(code->compiled[0]);
   const iree_host_size_t count = canonical->parameter_count;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < code->count && iree_status_is_ok(status);
        ++i) {
-    const loom_serve_preparation_stage_t* declaration =
-        loom_serve_preparation_stage(choice->preparation, i);
+    const loom_runtime_preparation_stage_t* declaration =
+        loom_runtime_preparation_stage(choice->preparation, i);
     const loom_cmd_program_t* candidate =
-        loom_serve_jit_stage_program(code->compiled[i]);
+        loom_runtime_jit_stage_program(code->compiled[i]);
     if (count) {
-      status = loom_serve_stage_record_check(&executables->options.recording,
-                                             code->compiled[i]);
+      status = loom_runtime_stage_record_check(&executables->options.recording,
+                                               code->compiled[i]);
     }
     if (iree_status_is_ok(status) && candidate) {
-      status = loom_serve_preparation_stage_check_workspace(
+      status = loom_runtime_preparation_stage_check_workspace(
           declaration, candidate->requirements.transient.required_byte_length);
     }
     if (iree_status_is_ok(status) && count) {
-      status = loom_serve_preparation_stage_check_parameters(
+      status = loom_runtime_preparation_stage_check_parameters(
           declaration, candidate, canonical, program);
     } else if (iree_status_is_ok(status) && declaration->parameter_count) {
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1252,24 +1257,24 @@ static iree_status_t loom_serve_choice_record(loom_serve_choice_job_t* job) {
   }
 
   const iree_host_size_t bank_count =
-      loom_serve_preparation_bank_count(choice->preparation);
+      loom_runtime_preparation_bank_count(choice->preparation);
   iree_hal_buffer_t** buffers =
       (iree_hal_buffer_t**)(job->bindings + count + bank_count);
   for (iree_host_size_t i = 0; i < count; ++i) {
     const uint32_t arena = loom_serve_choice_parameter(choice, i)->arena;
-    buffers[i] = arena ? loom_serve_memory_arena_handle(
+    buffers[i] = arena ? loom_runtime_memory_arena_handle(
                              executables->parameters.arenas[arena - 1].memory)
-                       : loom_serve_parameter_bank_buffers(
+                       : loom_runtime_parameter_bank_buffers(
                              job->bindings[i].bank)[job->bindings[i].domain];
   }
-  iree_status_t status = loom_serve_parameter_bindings_check_layout(
-      count, job->bindings, loom_serve_jit_stage_program(code->compiled[0]),
+  iree_status_t status = loom_runtime_parameter_bindings_check_layout(
+      count, job->bindings, loom_runtime_jit_stage_program(code->compiled[0]),
       executables->host_allocator);
   if (iree_status_is_ok(status)) {
-    loom_serve_stage_record_options_t recording =
+    loom_runtime_stage_record_options_t recording =
         executables->options.recording;
     recording.parameters = buffers;
-    status = loom_serve_stage_table_allocate(
+    status = loom_runtime_stage_table_allocate(
         &recording, choice->generation->table, code->count, code->compiled,
         executables->host_allocator, &choice->table);
   }
@@ -1280,15 +1285,15 @@ static void loom_serve_choice_complete(loom_serve_choice_t* choice,
                                        iree_status_t status) {
   if (iree_status_is_ok(status)) {
     choice->storage_size +=
-        loom_serve_preparation_storage_size(choice->preparation) +
-        loom_serve_stage_table_storage_size(choice->table);
+        loom_runtime_preparation_storage_size(choice->preparation) +
+        loom_runtime_stage_table_storage_size(choice->table);
   }
-  loom_serve_variant_entry_complete(choice->entry, status, choice,
-                                    choice->generation->report);
+  loom_runtime_variant_entry_complete(choice->entry, status, choice,
+                                      choice->generation->report);
 }
 
 static void loom_serve_choice_compiled(void* user_data, iree_status_t status,
-                                       loom_serve_stage_set_t* stages) {
+                                       loom_runtime_stage_set_t* stages) {
   loom_serve_choice_job_t* job = user_data;
   loom_serve_choice_t* choice = job->choice;
   loom_serve_choice_code_t* code = choice->code;
@@ -1296,12 +1301,12 @@ static void loom_serve_choice_compiled(void* user_data, iree_status_t status,
   code->compiled = stages->values;
   stages->count = 0;
   stages->values = NULL;
-  loom_serve_stage_set_free(stages);
+  loom_runtime_stage_set_free(stages);
   if (iree_status_is_ok(status)) {
     code->storage_size = sizeof(*code) + code->count * sizeof(*code->compiled);
     for (iree_host_size_t i = 0; i < code->count; ++i) {
       code->storage_size +=
-          loom_serve_jit_stage_storage_size(code->compiled[i]);
+          loom_runtime_jit_stage_storage_size(code->compiled[i]);
     }
     if (!job->needs_parameters) {
       status = loom_serve_choice_check(choice);
@@ -1320,8 +1325,8 @@ static void loom_serve_choice_index_execute(loomc_task_t* task,
   loom_serve_choice_t* choice = job->choice;
   const loom_model_file_list_t* paths = NULL;
   const uint32_t count =
-      loom_serve_preparation_local_sources(choice->preparation, &paths);
-  job->status = loom_serve_parameter_sources_create(
+      loom_runtime_preparation_local_sources(choice->preparation, &paths);
+  job->status = loom_runtime_parameter_sources_create(
       choice->owner->options.parameter_sources, choice->owner->sources, count,
       paths, choice->owner->host_allocator, &choice->parameter_sources);
 }
@@ -1331,7 +1336,7 @@ static void loom_serve_choice_index_complete(loomc_task_t* task) {
   iree_status_t status = job->status;
   job->status = iree_ok_status();
   if (iree_status_is_ok(status) && job->needs_compilation) {
-    status = loom_serve_stage_set_compile_catalog_async(
+    status = loom_runtime_stage_set_compile_catalog_async(
         job->choice->generation->jit, job->choice->preparation, NULL,
         loom_serve_choice_compiled, job, job->choice->owner->host_allocator);
     if (iree_status_is_ok(status)) {
@@ -1370,15 +1375,15 @@ static iree_status_t loom_serve_choice_record_async(
   loom_serve_executables_t* executables = job->choice->owner;
   loomc_task_initialize(&loom_serve_choice_record_vtable, &job->task);
   iree_status_t status = iree_status_from_loomc(loomc_task_sink_submit(
-      loom_serve_host_compiler_sink(
-          loom_serve_device_host(executables->options.device)),
+      loom_runtime_host_compiler_sink(
+          loom_runtime_device_host(executables->options.device)),
       &job->task));
   return status;
 }
 
 static int loom_serve_group_compare(const void* lhs, const void* rhs) {
-  const uintptr_t a = (uintptr_t)*(loom_serve_residency_group_t* const*)lhs;
-  const uintptr_t b = (uintptr_t)*(loom_serve_residency_group_t* const*)rhs;
+  const uintptr_t a = (uintptr_t)*(loom_runtime_residency_group_t* const*)lhs;
+  const uintptr_t b = (uintptr_t)*(loom_runtime_residency_group_t* const*)rhs;
   return (a > b) - (a < b);
 }
 
@@ -1393,19 +1398,19 @@ static iree_status_t loom_serve_choice_allocate_residency(
       loom_serve_choice_parameter_count(choice->preparation);
   iree_hal_buffer_t** buffers =
       (iree_hal_buffer_t**)(job->bindings + count +
-                            loom_serve_preparation_bank_count(
+                            loom_runtime_preparation_bank_count(
                                 choice->preparation));
-  loom_serve_residency_group_t** groups =
-      (loom_serve_residency_group_t**)(buffers + count);
+  loom_runtime_residency_group_t** groups =
+      (loom_runtime_residency_group_t**)(buffers + count);
   iree_host_size_t group_count = 0;
-  loom_serve_residency_group_t* base =
-      loom_serve_parameter_bank_group(executables->options.parameters);
+  loom_runtime_residency_group_t* base =
+      loom_runtime_parameter_bank_group(executables->options.parameters);
   if (base) {
     groups[group_count++] = base;
   }
   for (iree_host_size_t i = 0; i < choice->checkpoint_count; ++i) {
     groups[group_count++] =
-        loom_serve_parameter_bank_group(choice->checkpoints[i]->bank);
+        loom_runtime_parameter_bank_group(choice->checkpoints[i]->bank);
   }
   qsort(groups, group_count, sizeof(*groups), loom_serve_group_compare);
   iree_host_size_t distinct_count = 0;
@@ -1414,8 +1419,8 @@ static iree_status_t loom_serve_choice_allocate_residency(
       groups[distinct_count++] = groups[i];
     }
   }
-  return loom_serve_residency_allocate(
-      loom_serve_pool_residency_cache(executables->options.pool),
+  return loom_runtime_residency_allocate(
+      loom_runtime_pool_residency_cache(executables->options.pool),
       executables->options.execution, distinct_count, groups,
       executables->host_allocator, &choice->residency);
 }
@@ -1449,7 +1454,7 @@ static void loom_serve_choice_advance(loom_serve_executables_t* executables,
   const iree_host_size_t count =
       loom_serve_choice_parameter_count(choice->preparation);
   const iree_host_size_t total =
-      count + loom_serve_preparation_bank_count(choice->preparation);
+      count + loom_runtime_preparation_bank_count(choice->preparation);
   if (!job->checked && iree_status_is_ok(status)) {
     status = loom_serve_choice_check(choice);
     if (iree_status_is_ok(status)) {
@@ -1487,9 +1492,9 @@ static void loom_serve_choice_advance(loom_serve_executables_t* executables,
     ++job->index;
     if (iree_status_is_ok(status) && job->preparing) {
       job->pending = true;
-      status = loom_serve_weights_prepare_async(
-          loom_serve_parameter_bank_weights(job->preparing->bank, 0),
-          loom_serve_device_host(executables->options.device),
+      status = loom_runtime_weights_prepare_async(
+          loom_runtime_parameter_bank_weights(job->preparing->bank, 0),
+          loom_runtime_device_host(executables->options.device),
           choice->generation->jit, executables->options.recording.command_mode,
           executables->sources, &job->preparing->declaration,
           choice->parameter_sources, loom_serve_choice_prepared, job);
@@ -1518,36 +1523,36 @@ static void loom_serve_choice_advance(loom_serve_executables_t* executables,
 static iree_status_t loom_serve_choice_begin(
     loom_serve_executables_t* executables) {
   if (!executables->cache.pool) {
-    IREE_RETURN_IF_ERROR(loom_serve_variant_pool_allocate(
+    IREE_RETURN_IF_ERROR(loom_runtime_variant_pool_allocate(
         executables->options.cache.capacity + 2, NULL, loom_serve_choice_free,
         executables->host_allocator, &executables->cache.original,
         &executables->cache.pool));
     executables->cache.fixed_bytes =
-        loom_serve_variant_pool_storage_size(executables->cache.pool);
-    loom_serve_variant_pool_set_observer(executables->cache.pool,
-                                         executables->cache.observer);
+        loom_runtime_variant_pool_storage_size(executables->cache.pool);
+    loom_runtime_variant_pool_set_observer(executables->cache.pool,
+                                           executables->cache.observer);
   }
   loom_serve_choice_code_t* shared = NULL;
-  for (loom_serve_variant_entry_t* entry =
-           loom_serve_variant_entry_next(executables->cache.original);
-       entry; entry = loom_serve_variant_entry_next(entry)) {
-    const loom_serve_choice_t* choice = loom_serve_variant_entry_value(entry);
+  for (loom_runtime_variant_entry_t* entry =
+           loom_runtime_variant_entry_next(executables->cache.original);
+       entry; entry = loom_runtime_variant_entry_next(entry)) {
+    const loom_serve_choice_t* choice = loom_runtime_variant_entry_value(entry);
     if (choice->generation == executables->captured &&
-        loom_serve_preparation_equal(choice->preparation,
-                                     executables->invocation.declarations)) {
-      loom_serve_variant_entry_retain(entry);
-      loom_serve_variant_entry_touch(entry);
+        loom_runtime_preparation_equal(choice->preparation,
+                                       executables->invocation.declarations)) {
+      loom_runtime_variant_entry_retain(entry);
+      loom_runtime_variant_entry_touch(entry);
       executables->invocation.entry = entry;
       for (iree_host_size_t i = 0; i < choice->checkpoint_count; ++i) {
         loom_serve_checkpoint_touch(executables, choice->checkpoints[i]);
         choice->checkpoints[i]->capture = (loom_serve_choice_t*)choice;
       }
-      loom_serve_preparation_free(executables->invocation.declarations);
+      loom_runtime_preparation_free(executables->invocation.declarations);
       executables->invocation.declarations = NULL;
       return iree_ok_status();
     }
     if (choice->generation == executables->captured &&
-        loom_serve_preparation_code_equal(
+        loom_runtime_preparation_code_equal(
             choice->preparation, executables->invocation.declarations)) {
       shared = choice->code;
     }
@@ -1556,7 +1561,7 @@ static iree_status_t loom_serve_choice_begin(
   const iree_host_size_t count =
       loom_serve_choice_parameter_count(executables->invocation.declarations);
   const iree_host_size_t bank_count =
-      loom_serve_preparation_bank_count(executables->invocation.declarations);
+      loom_runtime_preparation_bank_count(executables->invocation.declarations);
   iree_host_size_t total = 0;
   iree_host_size_t size = 0;
   bool fits = iree_host_size_checked_add(count, bank_count, &total);
@@ -1585,9 +1590,10 @@ static iree_status_t loom_serve_choice_begin(
   if (shared) {
     ++shared->users;
   }
-  iree_status_t status = loom_serve_variant_pool_begin(
+  iree_status_t status = loom_runtime_variant_pool_begin(
       executables->cache.pool,
-      loom_serve_variant_entry_id(executables->cache.original), &choice->entry);
+      loom_runtime_variant_entry_id(executables->cache.original),
+      &choice->entry);
   if (!iree_status_is_ok(status)) {
     loom_serve_choice_free(choice);
     return status;
@@ -1598,8 +1604,8 @@ static iree_status_t loom_serve_choice_begin(
   executables->invocation.pending = true;
   loom_serve_choice_job_t* job = NULL;
   fits = iree_host_size_checked_mul_add(
-      sizeof(*job) + sizeof(loom_serve_residency_group_t*), total,
-      sizeof(*job->bindings) + sizeof(loom_serve_residency_group_t*), &size);
+      sizeof(*job) + sizeof(loom_runtime_residency_group_t*), total,
+      sizeof(*job->bindings) + sizeof(loom_runtime_residency_group_t*), &size);
   fits &= iree_host_size_checked_mul_add(size, count,
                                          sizeof(iree_hal_buffer_t*), &size);
   status =
@@ -1610,17 +1616,17 @@ static iree_status_t loom_serve_choice_begin(
   if (iree_status_is_ok(status)) {
     iree_slim_mutex_initialize(&job->mutex);
     job->choice = choice;
-    const loom_serve_preparation_stage_t* selected =
-        count ? loom_serve_preparation_stage(choice->preparation, 0) : NULL;
-    const loom_serve_preparation_stage_t* retained =
-        loom_serve_preparation_stage(executables->options.preparation, 0);
+    const loom_runtime_preparation_stage_t* selected =
+        count ? loom_runtime_preparation_stage(choice->preparation, 0) : NULL;
+    const loom_runtime_preparation_stage_t* retained =
+        loom_runtime_preparation_stage(executables->options.preparation, 0);
     for (iree_host_size_t i = 0; i < count; ++i) {
       for (uint32_t domain = 0;
            !selected->parameters[i].arena && domain < retained->parameter_count;
            ++domain) {
-        if (loom_serve_preparation_parameter_equal(
+        if (loom_runtime_preparation_parameter_equal(
                 &selected->parameters[i], &retained->parameters[domain])) {
-          job->bindings[i] = (loom_serve_parameter_binding_t){
+          job->bindings[i] = (loom_runtime_parameter_binding_t){
               executables->options.parameters, domain};
           break;
         }
@@ -1642,8 +1648,8 @@ static iree_status_t loom_serve_choice_begin(
     job->pending = true;
     loomc_task_initialize(&loom_serve_choice_index_vtable, &job->task);
     status = iree_status_from_loomc(loomc_task_sink_submit(
-        loom_serve_host_preparation_sink(
-            loom_serve_device_host(executables->options.device)),
+        loom_runtime_host_preparation_sink(
+            loom_runtime_device_host(executables->options.device)),
         &job->task));
   }
   if (!iree_status_is_ok(status)) {
@@ -1651,7 +1657,7 @@ static iree_status_t loom_serve_choice_begin(
     if (job) {
       loom_serve_choice_job_free(job);
     }
-    loom_serve_variant_entry_complete(choice->entry, status, choice, NULL);
+    loom_runtime_variant_entry_complete(choice->entry, status, choice, NULL);
   }
   return iree_ok_status();
 }
@@ -1676,18 +1682,18 @@ iree_status_t loom_serve_executables_advance(
     loom_serve_choice_advance(executables, cancel);
   }
   if (executables->invocation.pending) {
-    loom_serve_variant_pool_collect(executables->cache.pool);
-    loom_serve_variant_entry_t* entry = executables->invocation.entry;
-    const loom_serve_variant_snapshot_t snapshot =
-        loom_serve_variant_entry_snapshot(entry);
-    if (snapshot.phase == LOOM_SERVE_VARIANT_COMPILING) {
+    loom_runtime_variant_pool_collect(executables->cache.pool);
+    loom_runtime_variant_entry_t* entry = executables->invocation.entry;
+    const loom_runtime_variant_snapshot_t snapshot =
+        loom_runtime_variant_entry_snapshot(entry);
+    if (snapshot.phase == LOOM_RUNTIME_VARIANT_COMPILING) {
       *out_complete = false;
       return iree_ok_status();
     }
     executables->invocation.pending = false;
-    if (snapshot.phase == LOOM_SERVE_VARIANT_FAILED) {
-      iree_status_t status = loom_serve_variant_entry_status(entry);
-      loom_serve_variant_entry_discard(entry);
+    if (snapshot.phase == LOOM_RUNTIME_VARIANT_FAILED) {
+      iree_status_t status = loom_runtime_variant_entry_status(entry);
+      loom_runtime_variant_entry_discard(entry);
       executables->invocation.entry = NULL;
       if (cancel && iree_status_is_cancelled(status)) {
         iree_status_free(status);
@@ -1695,9 +1701,9 @@ iree_status_t loom_serve_executables_advance(
       }
       return status;
     }
-    loom_serve_choice_t* choice = loom_serve_variant_entry_value(entry);
-    if (cancel && loom_serve_preparation_bank_count(choice->preparation)) {
-      loom_serve_variant_entry_discard(entry);
+    loom_serve_choice_t* choice = loom_runtime_variant_entry_value(entry);
+    if (cancel && loom_runtime_preparation_bank_count(choice->preparation)) {
+      loom_runtime_variant_entry_discard(entry);
       executables->invocation.entry = NULL;
       return iree_ok_status();
     }
@@ -1713,7 +1719,7 @@ iree_status_t loom_serve_executables_advance(
       executables->cache.payload_bytes += choice->code->storage_size;
     }
     loom_serve_account_natives(executables, choice->generation);
-    loom_serve_variant_entry_retain(entry);
+    loom_runtime_variant_entry_retain(entry);
   }
   return cancel ? iree_ok_status() : loom_serve_executables_bind(executables);
 }
@@ -1722,22 +1728,22 @@ iree_const_byte_span_t loom_serve_executables_parameter_offsets(
     const loom_serve_executables_t* executables) {
   const loom_serve_choice_t* choice =
       executables->invocation.entry
-          ? loom_serve_variant_entry_value(executables->invocation.entry)
+          ? loom_runtime_variant_entry_value(executables->invocation.entry)
           : NULL;
   return choice ? iree_make_const_byte_span(
                       choice->parameter_offsets,
-                      loom_serve_preparation_bank_count(choice->preparation) *
+                      loom_runtime_preparation_bank_count(choice->preparation) *
                           sizeof(*choice->parameter_offsets))
                 : iree_const_byte_span_empty();
 }
 
-const loom_serve_stage_launch_t* loom_serve_executables_stage(
+const loom_runtime_stage_launch_t* loom_serve_executables_stage(
     const loom_serve_executables_t* executables, uint32_t ordinal) {
   const loom_serve_choice_t* choice =
       executables->invocation.entry
-          ? loom_serve_variant_entry_value(executables->invocation.entry)
+          ? loom_runtime_variant_entry_value(executables->invocation.entry)
           : NULL;
-  const loom_serve_stage_table_t* table =
+  const loom_runtime_stage_table_t* table =
       choice ? choice->table : executables->captured->table;
   return &table->launches[ordinal];
 }
@@ -1745,7 +1751,7 @@ const loom_serve_stage_launch_t* loom_serve_executables_stage(
 static void loom_serve_generation_complete(loom_serve_generation_job_t* job,
                                            iree_status_t status) {
   loom_serve_generation_t* generation = job->generation;
-  const loom_serve_variant_completion_fn_t completion = job->completion;
+  const loom_runtime_variant_completion_fn_t completion = job->completion;
   void* user_data = job->user_data;
   iree_allocator_free(generation->host_allocator, job);
   completion(user_data, status, generation, generation->report);
@@ -1753,15 +1759,15 @@ static void loom_serve_generation_complete(loom_serve_generation_job_t* job,
 
 static void loom_serve_generation_compiled(void* user_data,
                                            iree_status_t status,
-                                           loom_serve_stage_set_t* stages) {
+                                           loom_runtime_stage_set_t* stages) {
   loom_serve_generation_job_t* job = user_data;
   job->generation->count = stages->count;
   job->generation->compiled = stages->values;
   stages->count = 0;
   stages->values = NULL;
-  loom_serve_stage_set_free(stages);
+  loom_runtime_stage_set_free(stages);
   if (iree_status_is_ok(status)) {
-    loom_serve_stage_table_t* table = NULL;
+    loom_runtime_stage_table_t* table = NULL;
     status = loom_serve_executables_record(
         &job->executables->options, NULL, job->generation->count,
         job->generation->compiled, job->generation->host_allocator, &table);
@@ -1781,8 +1787,8 @@ static void loom_serve_generation_index(loomc_task_t* task,
                                      offsetof(loom_serve_generation_job_t,
                                               task));
   loom_serve_generation_t* generation = job->generation;
-  loom_serve_device_t* device = job->executables->options.device;
-  job->status = loom_serve_device_create_jit(
+  loom_runtime_device_t* device = job->executables->options.device;
+  job->status = loom_runtime_device_create_jit(
       device, &job->sources, NULL, generation->report, &generation->jit);
 }
 
@@ -1793,7 +1799,7 @@ static void loom_serve_generation_indexed(loomc_task_t* task) {
                                               task));
   iree_status_t status = job->status;
   if (iree_status_is_ok(status)) {
-    status = loom_serve_stage_set_compile_catalog_async(
+    status = loom_runtime_stage_set_compile_catalog_async(
         job->generation->jit, job->executables->options.preparation, NULL,
         loom_serve_generation_compiled, job, job->generation->host_allocator);
   }
@@ -1808,8 +1814,8 @@ static const loomc_task_vtable_t executable_generation_task_vtable = {
 };
 
 static iree_status_t loom_serve_generation_compile(
-    void* self, const loom_serve_sources_t* sources,
-    loom_serve_variant_completion_fn_t completion, void* user_data) {
+    void* self, const loom_runtime_sources_t* sources,
+    loom_runtime_variant_completion_fn_t completion, void* user_data) {
   loom_serve_executables_t* executables = self;
   loom_serve_generation_t* generation = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_generation_create(
@@ -1825,8 +1831,8 @@ static iree_status_t loom_serve_generation_compile(
     job->user_data = user_data;
     loomc_task_initialize(&executable_generation_task_vtable, &job->task);
     status = iree_status_from_loomc(loomc_task_sink_submit(
-        loom_serve_host_compiler_sink(
-            loom_serve_device_host(executables->options.device)),
+        loom_runtime_host_compiler_sink(
+            loom_runtime_device_host(executables->options.device)),
         &job->task));
   }
   if (!iree_status_is_ok(status)) {

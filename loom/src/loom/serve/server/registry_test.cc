@@ -25,7 +25,7 @@
 namespace {
 
 const iree_string_view_t kDeviceNames[] = {IREE_SV("first"), IREE_SV("second")};
-const loom_serve_pool_binding_t kPools[] = {{IREE_SV("pool"), 3}};
+const loom_runtime_pool_binding_t kPools[] = {{IREE_SV("pool"), 3}};
 
 TEST(RegistryTimeTest, BorrowedServicesShareRegistrationTimestamp) {
   const loom_serve_service_t services[] = {{.name = IREE_SV("first")},

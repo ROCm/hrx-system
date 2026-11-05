@@ -10,8 +10,8 @@
 
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/threading/mutex.h"
+#include "loom/runtime/host/timer.h"
 #include "loom/runtime/parameter/telemetry.h"
-#include "loom/serve/runtime/host/timer.h"
 #include "loom/serve/service/kind.h"
 #include "loom/serve/service/speech/http.h"
 #include "loom/serve/service/speech/stream.h"
@@ -189,14 +189,14 @@ struct loom_serve_speech_service_t {
     // Wait storage retained through its final callback.
     iree_async_semaphore_wait_operation_t operation;
     // Last accepted frontier; an idle cut has successfully consumed it.
-    loom_serve_execution_frontier_t frontier;
+    loom_runtime_execution_frontier_t frontier;
     // Toll-free semaphore handles for the proactor API.
     iree_async_semaphore_t* semaphores[2];
     // Accepted numerical batch through readiness; zero for admission/release.
     IREE_TRACE(iree_section_id_t section;)
   } device;
   // Periodic observation and its independently retired cancellation receipt.
-  loom_serve_timer_t timer;
+  loom_runtime_timer_t timer;
   // Bounded host-only FIFO, excluding requests assigned to resident slots.
   loom_serve_speech_pending_t* pending;
   // Occupied queue entries in arrival order.
@@ -664,17 +664,17 @@ static void loom_serve_speech_prepared(loom_serve_speech_service_t* service,
                                        loom_runtime_service_flags_t flags,
                                        bool* progress) {
   loom_serve_speech_row_t* row = service->admission;
-  loom_serve_residency_admission_t admission;
-  const loom_serve_execution_frontier_t previous = service->device.frontier;
-  loom_serve_execution_frontier_t frontier;
+  loom_runtime_residency_admission_t admission;
+  const loom_runtime_execution_frontier_t previous = service->device.frontier;
+  loom_runtime_execution_frontier_t frontier;
   service->status = service->generator.try_admit(
       service->generator.self, row->invocation, &admission, &frontier);
   if (iree_status_is_ok(service->status) &&
-      admission == LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED) {
+      admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED) {
     return;
   }
   if (iree_status_is_ok(service->status) &&
-      admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
+      admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED) {
     // An unchanged, successfully consumed frontier needs no new wait.
     const bool complete = previous.semaphores[0] == frontier.semaphores[0] &&
                           previous.semaphores[1] == frontier.semaphores[1] &&
@@ -691,7 +691,7 @@ static void loom_serve_speech_prepared(loom_serve_speech_service_t* service,
     }
   }
   if (iree_status_is_ok(service->status) &&
-      admission == LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY) {
+      admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY) {
     if (loom_serve_speech_has_resident(service) ||
         iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY)) {
       return;
@@ -1297,7 +1297,7 @@ static void loom_serve_speech_set_observer(
   iree_slim_mutex_lock(&service->events.mutex);
   service->events.observer = observer;
   iree_slim_mutex_unlock(&service->events.mutex);
-  loom_serve_timer_set_observer(&service->timer, observer);
+  loom_runtime_timer_set_observer(&service->timer, observer);
 }
 
 static bool loom_serve_speech_has_requests(void* self) {
@@ -1323,7 +1323,7 @@ static bool loom_serve_speech_is_active(void* self) {
 static bool loom_serve_speech_is_pending(void* self) {
   loom_serve_speech_service_t* service = self;
   return loom_serve_speech_is_active(service) ||
-         loom_serve_timer_is_pending(&service->timer);
+         loom_runtime_timer_is_pending(&service->timer);
 }
 
 // Offers are queried from a fresh snapshot on the CPU. A blocked output row
@@ -1400,9 +1400,9 @@ static iree_status_t loom_serve_speech_advance(
   bool tick = false;
   service->status = iree_status_join(
       service->status,
-      loom_serve_timer_advance(&service->timer,
-                               service->stopping && !service->occupied_count,
-                               true, &timer_progress, &tick));
+      loom_runtime_timer_advance(&service->timer,
+                                 service->stopping && !service->occupied_count,
+                                 true, &timer_progress, &tick));
   *out_progress |= timer_progress;
   if (tick) {
     loom_serve_speech_heartbeat(service);
@@ -1492,7 +1492,7 @@ void loom_serve_speech_service_free(loom_serve_speech_service_t* service) {
   }
   bool progress = false;
   loom_serve_speech_release_finished(service, &progress);
-  loom_serve_timer_deinitialize(&service->timer);
+  loom_runtime_timer_deinitialize(&service->timer);
   if (service->telemetry.stream) {
     loom_serve_speech_heartbeat(service);
   }
@@ -1515,7 +1515,7 @@ void loom_serve_speech_service_free(loom_serve_speech_service_t* service) {
 }
 
 iree_status_t loom_serve_speech_service_allocate(
-    loom_serve_host_t* host, loom_serve_speech_generator_t generator,
+    loom_runtime_host_t* host, loom_serve_speech_generator_t generator,
     const loom_serve_speech_service_options_t* options,
     loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_speech_service_t** out_service) {
@@ -1547,10 +1547,10 @@ iree_status_t loom_serve_speech_service_allocate(
   service->generator = generator;
   service->options = *options;
   service->telemetry.stream = stream;
-  service->executor = loom_serve_host_executor(host);
+  service->executor = loom_runtime_host_executor(host);
   service->admit_next = true;
   iree_slim_mutex_initialize(&service->events.mutex);
-  loom_serve_timer_initialize(&service->timer);
+  loom_runtime_timer_initialize(&service->timer);
   iree_status_t status = iree_allocator_malloc_array(
       host_allocator, generator.request_capacity, sizeof(*service->rows),
       (void**)&service->rows);
@@ -1589,12 +1589,12 @@ iree_status_t loom_serve_speech_service_allocate(
     } else {
       loom_serve_speech_event(service, &LOOM_SERVICE_TELEMETRY_STREAM_BEGIN, 0);
     }
-    status = iree_async_proactor_pool_get(loom_serve_host_proactor_pool(host),
+    status = iree_async_proactor_pool_get(loom_runtime_host_proactor_pool(host),
                                           0, &service->proactor);
   }
   if (iree_status_is_ok(status)) {
-    loom_serve_timer_configure(&service->timer, service->proactor,
-                               options->heartbeat_interval);
+    loom_runtime_timer_configure(&service->timer, service->proactor,
+                                 options->heartbeat_interval);
     *out_service = service;
   } else {
     loom_serve_speech_service_free(service);

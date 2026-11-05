@@ -22,14 +22,14 @@ typedef struct loom_serve_execution_update_t {
   // Accepts independent compilation on shared workers. Success owes completion
   // once (possibly before return); rejection owes none. Inputs remain borrowed
   // through completion. Compiling never mutates the model's active execution.
-  iree_status_t (*compile)(void* self, const loom_serve_sources_t* sources,
-                           loom_serve_variant_completion_fn_t completion,
+  iree_status_t (*compile)(void* self, const loom_runtime_sources_t* sources,
+                           loom_runtime_variant_completion_fn_t completion,
                            void* user_data);
   // Owner-only atomic publication at the service's semantic boundary. NULL
   // restores original execution. Failure keeps the previous execution usable.
   iree_status_t (*select)(void* self, void* value);
   // Destroys an unborrowed candidate on the owner; NULL denotes original code.
-  loom_serve_variant_dispose_fn_t dispose;
+  loom_runtime_variant_dispose_fn_t dispose;
 } loom_serve_execution_update_t;
 
 typedef struct loom_serve_execution_reconfiguration_t

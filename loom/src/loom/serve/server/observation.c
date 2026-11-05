@@ -225,11 +225,11 @@ iree_status_t loom_serve_observation_sample(
         "\"pool_count\":%zu,\"counters\":",
         loom_serve_registry_capacity(registry),
         observation->resources->device_group
-            ? loom_serve_device_group_count(
+            ? loom_runtime_device_group_count(
                   observation->resources->device_group)
             : 0,
         observation->resources->device_group
-            ? loom_serve_device_group_pool_count(
+            ? loom_runtime_device_group_pool_count(
                   observation->resources->device_group)
             : 0));
     IREE_RETURN_IF_ERROR(

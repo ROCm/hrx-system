@@ -105,7 +105,7 @@ TEST_F(DeviceConfigurationTest, UriConvenienceCreatesOneExplicitPool) {
   EXPECT_EQ(actual.weight_slab_size, UINT64_C(1) << 30);
   EXPECT_EQ(actual.state_slab_size, UINT64_C(64) << 20);
   EXPECT_EQ(actual.memory_limit, 0u);
-  EXPECT_EQ(actual.placement.kind, LOOM_SERVE_POOL_PLACEMENT_AUTOMATIC);
+  EXPECT_EQ(actual.placement.kind, LOOM_RUNTIME_POOL_PLACEMENT_AUTOMATIC);
   loom_serve_device_configuration_deinitialize(&convenience);
 }
 
@@ -182,14 +182,14 @@ TEST_F(DeviceConfigurationTest, PlacementIsIndependentOfConsumerMembership) {
   ASSERT_EQ(configuration_.pool_count, 3u);
   EXPECT_EQ(configuration_.pools[0].binding.device_mask, 1u);
   EXPECT_EQ(configuration_.pools[0].options.placement.kind,
-            LOOM_SERVE_POOL_PLACEMENT_DEVICE);
+            LOOM_RUNTIME_POOL_PLACEMENT_DEVICE);
   EXPECT_EQ(configuration_.pools[0].options.placement.ordinal, 1u);
   EXPECT_EQ(configuration_.pools[1].binding.device_mask, 3u);
   EXPECT_EQ(configuration_.pools[1].options.placement.kind,
-            LOOM_SERVE_POOL_PLACEMENT_HOST_NUMA);
+            LOOM_RUNTIME_POOL_PLACEMENT_HOST_NUMA);
   EXPECT_EQ(configuration_.pools[1].options.placement.ordinal, 3u);
   EXPECT_EQ(configuration_.pools[2].options.placement.kind,
-            LOOM_SERVE_POOL_PLACEMENT_AUTOMATIC);
+            LOOM_RUNTIME_POOL_PLACEMENT_AUTOMATIC);
 }
 
 TEST_F(DeviceConfigurationTest, RejectsInvalidOrAmbiguousPlacement) {

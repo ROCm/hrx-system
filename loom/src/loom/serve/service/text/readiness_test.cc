@@ -11,7 +11,7 @@
 #include "iree/base/threading/notification.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/serve/runtime/host/host.h"
+#include "loom/runtime/host/host.h"
 
 namespace {
 
@@ -20,11 +20,11 @@ class TextReadinessTest : public ::testing::Test {
   void SetUp() override {
     iree_notification_initialize(&notification_);
     IREE_ASSERT_OK(
-        loom_serve_host_create(1, nullptr, iree_allocator_system(), &host_));
+        loom_runtime_host_create(1, nullptr, iree_allocator_system(), &host_));
     iree_async_proactor_t* proactor = nullptr;
     IREE_ASSERT_OK(iree_async_proactor_pool_get(
-        loom_serve_host_proactor_pool(host_), 0, &proactor));
-    loom_serve_text_readiness_initialize(loom_serve_host_executor(host_),
+        loom_runtime_host_proactor_pool(host_), 0, &proactor));
+    loom_serve_text_readiness_initialize(loom_runtime_host_executor(host_),
                                          proactor, &readiness_);
     loom_serve_text_readiness_set_observer(&readiness_, {Wake, this});
     for (size_t i = 0; i < 2; ++i) {
@@ -43,7 +43,7 @@ class TextReadinessTest : public ::testing::Test {
     for (auto* semaphore : semaphores_) {
       iree_async_semaphore_release(semaphore);
     }
-    loom_serve_host_release(host_);
+    loom_runtime_host_release(host_);
     iree_notification_deinitialize(&notification_);
   }
 
@@ -69,13 +69,13 @@ class TextReadinessTest : public ::testing::Test {
   }
 
   // Production task/proactor owner, outliving both publication channels.
-  loom_serve_host_t* host_ = nullptr;
+  loom_runtime_host_t* host_ = nullptr;
   // Callback storage reused only after owner consumption.
   loom_serve_text_readiness_t readiness_ = {};
   // Independently signaled model-work and feedback frontiers.
   iree_async_semaphore_t* semaphores_[2] = {};
   // Submission capture borrowed only during await registration.
-  loom_serve_execution_frontier_t frontier_ = {};
+  loom_runtime_execution_frontier_t frontier_ = {};
   // Owner notification with prepare/check/commit lost-wakeup protection.
   iree_notification_t notification_;
 };

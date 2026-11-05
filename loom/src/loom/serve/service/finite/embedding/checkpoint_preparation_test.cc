@@ -10,14 +10,14 @@
 
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
+#include "loom/runtime/testing/stalled_stderr.h"
 #include "loom/serve/service/finite/embedding/source_service_test_fixture.h"
 #include "loom/serve/testing/model.h"
 #include "loom/serve/testing/package.h"
-#include "loom/serve/testing/stalled_stderr.h"
 
 namespace loom_serve::testing::embedding {
 
-using loom_serve::testing::StalledStderr;
+using loom_runtime::testing::StalledStderr;
 
 TEST_F(SourceEmbeddingServiceTest,
        CheckpointLoadSharesTheServingWorkerAndNeverWritesStderr) {
@@ -51,7 +51,7 @@ TEST_F(SourceEmbeddingServiceTest,
 
   // Loading indexes the checkpoint without activating it. First use doubles
   // the factor from 1.0 to 2.0 in place; later requests reuse that value.
-  EXPECT_EQ(loom_serve_residency_activity(
+  EXPECT_EQ(loom_runtime_residency_activity(
                 loom_serve_finite_model_residency(retained_))
                 .activations,
             0u);
@@ -68,7 +68,7 @@ TEST_F(SourceEmbeddingServiceTest,
   Drain();
   EXPECT_NE(Read(changed).find(R"("embedding":[12,6])"), std::string::npos);
   EXPECT_EQ(
-      loom_serve_residency_activity(loom_serve_finite_model_residency(model_))
+      loom_runtime_residency_activity(loom_serve_finite_model_residency(model_))
           .activations,
       1u);
 }
@@ -84,7 +84,7 @@ TEST_F(SourceEmbeddingServiceTest,
   ASSERT_NO_FATAL_FAILURE(CreateService(0));
   CheckAbandonedCohort(0, R"("embedding":[2,2,2,2])");
   EXPECT_EQ(
-      loom_serve_residency_activity(loom_serve_finite_model_residency(model_))
+      loom_runtime_residency_activity(loom_serve_finite_model_residency(model_))
           .activations,
       1u);
 }
@@ -99,7 +99,7 @@ TEST_F(SourceEmbeddingServiceTest,
   loom_serve_finite_service_free(std::exchange(service_, nullptr));
   ASSERT_NO_FATAL_FAILURE(CreateService(0));
   EXPECT_EQ(
-      loom_serve_residency_activity(loom_serve_finite_model_residency(model_))
+      loom_runtime_residency_activity(loom_serve_finite_model_residency(model_))
           .activations,
       0u);
   StartRouter();
@@ -157,7 +157,7 @@ TEST_F(SourceEmbeddingServiceTest,
   // Reversible admission never evicted/reloaded the in-place prepared
   // parameter. Applying preparation twice would also change the exact output.
   EXPECT_EQ(
-      loom_serve_residency_activity(loom_serve_finite_model_residency(model_))
+      loom_runtime_residency_activity(loom_serve_finite_model_residency(model_))
           .activations,
       1u);
 }

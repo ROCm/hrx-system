@@ -54,11 +54,11 @@ class PixelProjectorExecutionTest : public SourceTextServiceTest,
     }
   }
 
-  void Wait(loom_serve_execution_frontier_t ready) {
+  void Wait(loom_runtime_execution_frontier_t ready) {
     for (size_t i = 0; i < IREE_ARRAYSIZE(ready.semaphores); ++i) {
-      IREE_ASSERT_OK(
-          loom_serve_workspace_wait(loom_serve_pool_workspace(storage_owner_),
-                                    ready.semaphores[i], ready.values[i]));
+      IREE_ASSERT_OK(loom_runtime_workspace_wait(
+          loom_runtime_pool_workspace(storage_owner_), ready.semaphores[i],
+          ready.values[i]));
     }
   }
 
@@ -143,11 +143,11 @@ TEST_P(PixelProjectorExecutionTest, RgbAndRgbaCohortConditionsRetainedText) {
   IREE_ASSERT_OK(loom_serve_finite_model_prepare_batch(
       projector_, prepared_.size(), prepared_.data(), expected_rows));
   ASSERT_NO_FATAL_FAILURE(ResolveCode());
-  loom_serve_residency_admission_t admission;
-  IREE_ASSERT_OK(loom_serve_residency_try_admit(
+  loom_runtime_residency_admission_t admission;
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(
       loom_serve_finite_model_residency(projector_), &admission));
-  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
-  loom_serve_execution_frontier_t ready;
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+  loom_runtime_execution_frontier_t ready;
   IREE_ASSERT_OK(loom_serve_finite_model_submit(projector_, &result_, &ready));
   EXPECT_EQ(ready.values[1], 0u);
   const loom_serve_text_media_input_span_t images[] = {

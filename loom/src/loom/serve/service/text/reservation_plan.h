@@ -42,11 +42,11 @@ struct loom_serve_text_state_reservation_t {
   // Successful admission transferred logical ownership to row/checkpoint.
   bool installed;
   // Owned source restore descriptors; NULL without a cold checkpoint.
-  loom_serve_snapshot_range_t* restore_ranges;
+  loom_runtime_snapshot_range_t* restore_ranges;
   // Number of restore descriptors.
   iree_host_size_t restore_count;
   // Owned exact physical range union input for admission and commitment.
-  loom_serve_memory_range_t* commitments;
+  loom_runtime_memory_range_t* commitments;
   // Source allocation per commitment, coallocated with the native ranges.
   iree_host_size_t* commitment_allocations;
   // Number of physical ranges, zero for fixed-backed state.

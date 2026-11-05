@@ -9,7 +9,7 @@ struct loom_serve_finite_registration_t {
   // Allocator owning this operation, independent of model allocations.
   iree_allocator_t host_allocator;
   // Borrowed execution device, alive through retirement.
-  loom_serve_device_t* device;
+  loom_runtime_device_t* device;
   // Copied service configuration; its views retain their original ownership.
   loom_serve_finite_registration_options_t options;
   // Nonblocking notification target, alive through retirement.
@@ -21,13 +21,13 @@ struct loom_serve_finite_registration_t {
   // Owned service, destroyed after all request and CPU borrowers retire.
   loom_serve_finite_service_t* service;
   // Explicit warmup, joined before model retirement.
-  loom_serve_activation_t* activation;
+  loom_runtime_activation_t* activation;
   // Model consumers have been relinquished with an ownership wake installed.
   bool retiring;
 };
 
 iree_status_t loom_serve_finite_registration_allocate(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
+    loom_runtime_device_t* device, loom_runtime_pool_t* pool,
     const loom_serve_finite_model_options_t* model_options,
     const loom_serve_finite_registration_options_t* options,
     loom_runtime_wake_callback_t observer, iree_allocator_t host_allocator,
@@ -55,7 +55,7 @@ iree_status_t loom_serve_finite_registration_prepare(
     loom_serve_finite_registration_t* registration,
     loom_serve_finite_load_flags_t flags, bool* out_complete,
     loom_serve_finite_service_t** out_service,
-    loom_serve_compilation_report_t* out_report) {
+    loom_runtime_compilation_report_t* out_report) {
   *out_service = NULL;
   iree_status_t status =
       loom_serve_finite_load_advance(registration->load, flags, out_complete);
@@ -74,7 +74,7 @@ iree_status_t loom_serve_finite_registration_prepare(
     const loom_serve_finite_registration_options_t* options =
         &registration->options;
     status = loom_serve_finite_service_allocate(
-        loom_serve_device_host(registration->device), registration->model,
+        loom_runtime_device_host(registration->device), registration->model,
         options->protocol, options->name, options->capacity,
         options->variant_capacity, options->heartbeat_interval, options->stream,
         registration->host_allocator, &registration->service);
@@ -85,7 +85,7 @@ iree_status_t loom_serve_finite_registration_prepare(
   return status;
 }
 
-loom_serve_residency_snapshot_t loom_serve_finite_registration_parameters(
+loom_runtime_residency_snapshot_t loom_serve_finite_registration_parameters(
     const loom_serve_finite_registration_t* registration) {
   return loom_serve_finite_model_parameters(registration->model);
 }
@@ -97,13 +97,13 @@ void loom_serve_finite_registration_set_pinned(
 
 iree_status_t loom_serve_finite_registration_activate(
     loom_serve_finite_registration_t* registration,
-    loom_serve_activation_flags_t flags,
-    loom_serve_activation_phase_t* out_phase) {
-  return loom_serve_activation_poll(
+    loom_runtime_activation_flags_t flags,
+    loom_runtime_activation_phase_t* out_phase) {
+  return loom_runtime_activation_poll(
       &registration->activation,
       loom_serve_finite_model_residency(registration->model),
-      loom_serve_host_proactor_pool(
-          loom_serve_device_host(registration->device)),
+      loom_runtime_host_proactor_pool(
+          loom_runtime_device_host(registration->device)),
       registration->observer.wake, registration->observer.user_data, flags,
       registration->host_allocator, out_phase);
 }

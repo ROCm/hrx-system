@@ -30,8 +30,8 @@ class PoolBindingTest : public SourceEmbeddingServiceTest {
     const std::string package =
         iree::testing::MakeTempFilePath("embedding_pool_binding");
     ASSERT_NO_FATAL_FAILURE(WriteCheckpointPackage(package));
-    ASSERT_NO_FATAL_FAILURE(Load(package, loom_serve_device_group_at(group_, 0),
-                                 shared_, &producer_));
+    ASSERT_NO_FATAL_FAILURE(Load(
+        package, loom_runtime_device_group_at(group_, 0), shared_, &producer_));
     ASSERT_NO_FATAL_FAILURE(Load(package, device_, shared_, &peer_));
     ASSERT_NO_FATAL_FAILURE(Load(package, device_, isolated_, &model_));
     IREE_ASSERT_OK(loom_serve_finite_service_allocate(
@@ -39,7 +39,7 @@ class PoolBindingTest : public SourceEmbeddingServiceTest {
         16, 0, nullptr, host_allocator_, &service_));
     interface_ = loom_serve_finite_http_interface(service_);
     EXPECT_EQ(interface_.runtime.capacity_domain,
-              loom_serve_pool_residency_cache(isolated_));
+              loom_runtime_pool_residency_cache(isolated_));
   }
 
   void TearDown() override {
@@ -53,21 +53,21 @@ class PoolBindingTest : public SourceEmbeddingServiceTest {
     SourceEmbeddingServiceTest::TearDown();
   }
 
-  void CreatePool(loom_serve_pool_t** out_pool) {
+  void CreatePool(loom_runtime_pool_t** out_pool) {
     const std::string name =
-        "pool" + std::to_string(loom_serve_device_group_pool_count(group_));
-    const loom_serve_pool_options_t options = {
+        "pool" + std::to_string(loom_runtime_device_group_pool_count(group_));
+    const loom_runtime_pool_options_t options = {
         .elastic = true,
         .weight_slab_size = 4096,
         .state_slab_size = 4096,
         .memory_limit = 8192,
     };
-    IREE_ASSERT_OK(loom_serve_device_group_create_pool(
+    IREE_ASSERT_OK(loom_runtime_device_group_create_pool(
         group_, {iree_make_cstring_view(name.c_str()), 3}, &options, out_pool));
   }
 
-  void Load(const std::string& package, loom_serve_device_t* device,
-            loom_serve_pool_t* pool, loom_serve_finite_model_t** out_model) {
+  void Load(const std::string& package, loom_runtime_device_t* device,
+            loom_runtime_pool_t* pool, loom_serve_finite_model_t** out_model) {
     ModelDocument document;
     IREE_ASSERT_OK(document.Load(package + "/model.json"));
     const loom_serve_finite_model_options_t options = {
@@ -78,9 +78,9 @@ class PoolBindingTest : public SourceEmbeddingServiceTest {
     IREE_ASSERT_OK(loom_serve_finite_model_allocate(
         device, pool, &options, host_allocator_, out_model));
     EXPECT_EQ(loom_serve_finite_model_memory_limit(*out_model), 8192u);
-    EXPECT_EQ(loom_serve_residency_cache(
+    EXPECT_EQ(loom_runtime_residency_cache(
                   loom_serve_finite_model_residency(*out_model)),
-              loom_serve_pool_residency_cache(pool));
+              loom_runtime_pool_residency_cache(pool));
   }
 
   void Prepare(loom_serve_finite_model_t* model) {
@@ -104,13 +104,13 @@ class PoolBindingTest : public SourceEmbeddingServiceTest {
     ASSERT_TRUE(complete);  // This source uses its already-compiled cold stage.
   }
 
-  void Submit(loom_serve_finite_model_t* model, loom_serve_pool_t* pool) {
-    loom_serve_execution_frontier_t ready;
+  void Submit(loom_serve_finite_model_t* model, loom_runtime_pool_t* pool) {
+    loom_runtime_execution_frontier_t ready;
     IREE_ASSERT_OK(loom_serve_finite_model_submit(model, &result_, &ready));
-    auto* workspace = loom_serve_pool_workspace(pool);
+    auto* workspace = loom_runtime_pool_workspace(pool);
     for (size_t i = 0; i < IREE_ARRAYSIZE(ready.semaphores); ++i) {
-      IREE_ASSERT_OK(loom_serve_workspace_wait(workspace, ready.semaphores[i],
-                                               ready.values[i]));
+      IREE_ASSERT_OK(loom_runtime_workspace_wait(workspace, ready.semaphores[i],
+                                                 ready.values[i]));
     }
     loom_serve_finite_model_complete(model);
     EXPECT_EQ(loom_serve_finite_result_output_length(result_), 1024u);
@@ -120,8 +120,8 @@ class PoolBindingTest : public SourceEmbeddingServiceTest {
     iree_status_t status = iree_ok_status();
     for (size_t i = 0; i < IREE_ARRAYSIZE(ready.semaphores); ++i) {
       status = iree_status_join(
-          status, loom_serve_workspace_wait(workspace, ready.semaphores[i],
-                                            ready.values[i]));
+          status, loom_runtime_workspace_wait(workspace, ready.semaphores[i],
+                                              ready.values[i]));
     }
     if (iree_status_is_ok(status)) {
       const auto row = loom_serve_finite_snapshot_row(snapshot, 0, 0);
@@ -136,9 +136,9 @@ class PoolBindingTest : public SourceEmbeddingServiceTest {
   }
 
   // Explicit owner shared by producer and peer on separate execution devices.
-  loom_serve_pool_t* shared_ = nullptr;
+  loom_runtime_pool_t* shared_ = nullptr;
   // Second allowance; no capacity is inferred from its physical placement.
-  loom_serve_pool_t* isolated_ = nullptr;
+  loom_runtime_pool_t* isolated_ = nullptr;
   // Source producing retained output before the HTTP service runs.
   loom_serve_finite_model_t* producer_ = nullptr;
   // Prepared source sharing the producer's admission and storage owner.
@@ -148,32 +148,34 @@ class PoolBindingTest : public SourceEmbeddingServiceTest {
 };
 
 TEST_F(PoolBindingTest, RetainedResultsChargeOnlyTheirExplicitPool) {
-  EXPECT_EQ(loom_serve_device_group_count(group_), 2u);
-  EXPECT_NE(loom_serve_pool_memory(shared_), loom_serve_pool_memory(isolated_));
+  EXPECT_EQ(loom_runtime_device_group_count(group_), 2u);
+  EXPECT_NE(loom_runtime_pool_memory(shared_),
+            loom_runtime_pool_memory(isolated_));
   ASSERT_NO_FATAL_FAILURE(Prepare(producer_));
-  loom_serve_residency_admission_t admission;
-  IREE_ASSERT_OK(loom_serve_residency_try_admit(
+  loom_runtime_residency_admission_t admission;
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(
       loom_serve_finite_model_residency(producer_), &admission));
-  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
   ASSERT_NO_FATAL_FAILURE(Submit(producer_, shared_));
   IREE_ASSERT_OK(
       loom_serve_finite_model_free(std::exchange(producer_, nullptr)));
-  IREE_ASSERT_OK(loom_serve_memory_pool_await(loom_serve_pool_memory(shared_)));
-  auto* cache = loom_serve_pool_residency_cache(shared_);
-  EXPECT_TRUE(loom_serve_residency_cache_is_pending(cache));
+  IREE_ASSERT_OK(
+      loom_runtime_memory_pool_await(loom_runtime_pool_memory(shared_)));
+  auto* cache = loom_runtime_pool_residency_cache(shared_);
+  EXPECT_TRUE(loom_runtime_residency_cache_is_pending(cache));
   ASSERT_NO_FATAL_FAILURE(Prepare(peer_));
   auto* residency = loom_serve_finite_model_residency(peer_);
-  IREE_ASSERT_OK(loom_serve_residency_try_admit(residency, &admission));
-  EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
-  EXPECT_TRUE(loom_serve_residency_snapshot(residency).admission.waiting);
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residency, &admission));
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+  EXPECT_TRUE(loom_runtime_residency_snapshot(residency).admission.waiting);
 
   // Cancelling an unsubmitted cohort withdraws its interest, without releasing
   // anyone else's output. The next cohort must encounter the same pressure.
   loom_serve_finite_model_release_batch(peer_);
-  EXPECT_FALSE(loom_serve_residency_snapshot(residency).admission.waiting);
+  EXPECT_FALSE(loom_runtime_residency_snapshot(residency).admission.waiting);
   ASSERT_NO_FATAL_FAILURE(Prepare(peer_));
-  IREE_ASSERT_OK(loom_serve_residency_try_admit(residency, &admission));
-  EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residency, &admission));
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
 
   StartRouter();
   const auto response =
@@ -189,33 +191,35 @@ TEST_F(PoolBindingTest, RetainedResultsChargeOnlyTheirExplicitPool) {
   loom_serve_finite_result_release(std::exchange(result_, nullptr));
   loom_serve_http_server_request_stop(server_);
   IREE_ASSERT_OK(http_.Join());
-  EXPECT_FALSE(loom_serve_residency_cache_is_pending(cache));
-  IREE_ASSERT_OK(loom_serve_residency_try_admit(residency, &admission));
-  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  EXPECT_FALSE(loom_runtime_residency_cache_is_pending(cache));
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residency, &admission));
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
   ASSERT_NO_FATAL_FAILURE(Submit(peer_, shared_));
-  EXPECT_LE(loom_serve_memory_pool_statistics(loom_serve_pool_memory(shared_))
-                .peak_bytes,
-            8192u);
-  EXPECT_LE(loom_serve_memory_pool_statistics(loom_serve_pool_memory(isolated_))
-                .peak_bytes,
-            8192u);
+  EXPECT_LE(
+      loom_runtime_memory_pool_statistics(loom_runtime_pool_memory(shared_))
+          .peak_bytes,
+      8192u);
+  EXPECT_LE(
+      loom_runtime_memory_pool_statistics(loom_runtime_pool_memory(isolated_))
+          .peak_bytes,
+      8192u);
 }
 
 TEST_F(PoolBindingTest, LastResultOutlivesEveryModelInItsPool) {
   ASSERT_NO_FATAL_FAILURE(Prepare(producer_));
-  loom_serve_residency_admission_t admission;
-  IREE_ASSERT_OK(loom_serve_residency_try_admit(
+  loom_runtime_residency_admission_t admission;
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(
       loom_serve_finite_model_residency(producer_), &admission));
-  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
   ASSERT_NO_FATAL_FAILURE(Submit(producer_, shared_));
   IREE_ASSERT_OK(
       loom_serve_finite_model_free(std::exchange(producer_, nullptr)));
   IREE_ASSERT_OK(loom_serve_finite_model_free(std::exchange(peer_, nullptr)));
-  EXPECT_TRUE(loom_serve_pool_is_in_use(shared_));
+  EXPECT_TRUE(loom_runtime_pool_is_in_use(shared_));
   loom_serve_finite_result_release(std::exchange(result_, nullptr));
-  EXPECT_FALSE(loom_serve_pool_is_in_use(shared_));
+  EXPECT_FALSE(loom_runtime_pool_is_in_use(shared_));
   // The independent model still owns its own pool on the peer's device.
-  EXPECT_TRUE(loom_serve_pool_is_in_use(isolated_));
+  EXPECT_TRUE(loom_runtime_pool_is_in_use(isolated_));
 }
 
 TEST_F(PoolBindingTest, TrimReclaimsOnlyTheSelectedPoolAndPreservesReload) {
@@ -226,43 +230,46 @@ TEST_F(PoolBindingTest, TrimReclaimsOnlyTheSelectedPoolAndPreservesReload) {
   for (const auto& [model, pool] :
        {std::pair{producer_, shared_}, std::pair{model_, isolated_}}) {
     ASSERT_NO_FATAL_FAILURE(Prepare(model));
-    loom_serve_residency_admission_t admission;
-    IREE_ASSERT_OK(loom_serve_residency_try_admit(
+    loom_runtime_residency_admission_t admission;
+    IREE_ASSERT_OK(loom_runtime_residency_try_admit(
         loom_serve_finite_model_residency(model), &admission));
-    ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+    ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
     ASSERT_NO_FATAL_FAILURE(Submit(model, pool));
     loom_serve_finite_result_release(std::exchange(result_, nullptr));
-    IREE_ASSERT_OK(loom_serve_memory_pool_await(loom_serve_pool_memory(pool)));
-    EXPECT_GT(loom_serve_pool_statistics(pool).retained.committed_bytes, 0u);
+    IREE_ASSERT_OK(
+        loom_runtime_memory_pool_await(loom_runtime_pool_memory(pool)));
+    EXPECT_GT(loom_runtime_pool_statistics(pool).retained.committed_bytes, 0u);
   }
   auto* shared_residency = loom_serve_finite_model_residency(producer_);
   auto* isolated_residency = loom_serve_finite_model_residency(model_);
-  const auto before = loom_serve_pool_statistics(isolated_);
-  const auto activity = loom_serve_residency_activity(shared_residency);
+  const auto before = loom_runtime_pool_statistics(isolated_);
+  const auto activity = loom_runtime_residency_activity(shared_residency);
 
-  IREE_ASSERT_OK(loom_serve_pool_trim(shared_, 0));
-  IREE_ASSERT_OK(loom_serve_memory_pool_await(loom_serve_pool_memory(shared_)));
-  EXPECT_FALSE(loom_serve_residency_snapshot(shared_residency).active);
-  EXPECT_TRUE(loom_serve_residency_snapshot(isolated_residency).active);
-  EXPECT_EQ(loom_serve_pool_statistics(shared_).retained.committed_bytes, 0u);
-  EXPECT_EQ(loom_serve_pool_statistics(isolated_).retained.committed_bytes,
+  IREE_ASSERT_OK(loom_runtime_pool_trim(shared_, 0));
+  IREE_ASSERT_OK(
+      loom_runtime_memory_pool_await(loom_runtime_pool_memory(shared_)));
+  EXPECT_FALSE(loom_runtime_residency_snapshot(shared_residency).active);
+  EXPECT_TRUE(loom_runtime_residency_snapshot(isolated_residency).active);
+  EXPECT_EQ(loom_runtime_pool_statistics(shared_).retained.committed_bytes, 0u);
+  EXPECT_EQ(loom_runtime_pool_statistics(isolated_).retained.committed_bytes,
             before.retained.committed_bytes);
 
   // Storage eviction and code trimming preserve live tokenizer borrowers,
   // including models on another execution device or in another storage pool.
-  loom_serve_device_trim_programs(device_);
+  loom_runtime_device_trim_programs(device_);
   EXPECT_EQ(loom_serve_finite_model_tokenizer(producer_), tokenizer);
   EXPECT_EQ(loom_serve_finite_model_tokenizer(peer_), tokenizer);
   EXPECT_EQ(loom_serve_finite_model_tokenizer(model_), tokenizer);
 
   ASSERT_NO_FATAL_FAILURE(Prepare(producer_));
-  loom_serve_residency_admission_t admission;
-  IREE_ASSERT_OK(loom_serve_residency_try_admit(shared_residency, &admission));
-  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  loom_runtime_residency_admission_t admission;
+  IREE_ASSERT_OK(
+      loom_runtime_residency_try_admit(shared_residency, &admission));
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
   ASSERT_NO_FATAL_FAILURE(Submit(producer_, shared_));
-  EXPECT_EQ(loom_serve_residency_activity(shared_residency).activations,
+  EXPECT_EQ(loom_runtime_residency_activity(shared_residency).activations,
             activity.activations + 1);
-  EXPECT_EQ(loom_serve_pool_statistics(isolated_).retained.committed_bytes,
+  EXPECT_EQ(loom_runtime_pool_statistics(isolated_).retained.committed_bytes,
             before.retained.committed_bytes);
 }
 

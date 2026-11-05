@@ -165,7 +165,7 @@ TEST_F(TextComponentServiceTest, OrdinaryTextLeavesImageDormant) {
             LOOM_SERVE_FINITE_COMPONENT_DECLARED);
   EXPECT_EQ(loom_serve_finite_component_report(image_)->commands, 0u);
   EXPECT_TRUE(
-      loom_serve_residency_snapshot(loom_serve_text_model_residency(model_))
+      loom_runtime_residency_snapshot(loom_serve_text_model_residency(model_))
           .active);
 }
 

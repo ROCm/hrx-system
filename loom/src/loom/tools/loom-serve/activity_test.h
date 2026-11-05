@@ -8,7 +8,7 @@
 #define LOOM_TOOLS_LOOM_SERVE_ACTIVITY_TEST_H_
 
 #include "iree/hal/driver_registry.h"
-#include "loom/serve/runtime/host/host.h"
+#include "loom/runtime/host/host.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,7 +19,7 @@ extern "C" {
 // until the call returns; one application owns every test's shared resources.
 int loom_serve_activity_test_main(
     int argc, char** argv,
-    const loom_serve_compiler_options_t* compiler_options,
+    const loom_runtime_compiler_options_t* compiler_options,
     iree_hal_driver_registry_t* driver_registry);
 
 #ifdef __cplusplus

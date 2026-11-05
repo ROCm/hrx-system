@@ -7,10 +7,10 @@
 #ifndef LOOM_SERVE_SERVER_REGISTRY_H_
 #define LOOM_SERVE_SERVER_REGISTRY_H_
 
+#include "loom/runtime/parameter/activation.h"
+#include "loom/runtime/parameter/residency.h"
+#include "loom/runtime/program/compilation.h"
 #include "loom/runtime/wake.h"
-#include "loom/serve/runtime/parameter/activation.h"
-#include "loom/serve/runtime/parameter/residency.h"
-#include "loom/serve/runtime/program/compilation.h"
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_resolution.h"
 #include "loom/serve/service/service.h"
@@ -52,11 +52,11 @@ typedef struct loom_serve_registration_parameters_t {
   // Quiescent release is supported, possibly by retiring an optional model.
   bool deactivatable;
   // Copied parameter-only accounting, meaningful only when prepared is true.
-  loom_serve_residency_snapshot_t parameters;
+  loom_runtime_residency_snapshot_t parameters;
   // Borrowed preparation failure retained by the component; never consumed.
   iree_status_t status;
   // Borrowed cumulative compilation evidence, or NULL for no separate report.
-  const loom_serve_compilation_report_t* compilation;
+  const loom_runtime_compilation_report_t* compilation;
   // Optional-component preparation elapsed in ns; primary timing is
   // registry-owned.
   uint64_t preparation_duration_ns;
@@ -86,7 +86,7 @@ typedef struct loom_serve_registration_t {
                            loom_serve_registration_prepare_flags_t flags,
                            bool* out_complete,
                            loom_serve_service_t* out_service,
-                           loom_serve_compilation_report_t* out_report);
+                           loom_runtime_compilation_report_t* out_report);
   // Called after preparation terminates and service/tokenizer borrowers retire.
   // Drops service consumers, then waits by ownership wake, not readiness value.
   // Terminal success releases all model resources. Terminal failure retains
@@ -112,8 +112,8 @@ typedef struct loom_serve_registration_t {
   // checks the factory's shared failure channel before keeping service open.
   // Paired with parameters; no model handle escapes the adapter.
   iree_status_t (*activate)(void* self, loom_serve_model_component_t component,
-                            loom_serve_activation_flags_t flags,
-                            loom_serve_activation_phase_t* out_phase,
+                            loom_runtime_activation_flags_t flags,
+                            loom_runtime_activation_phase_t* out_phase,
                             iree_status_t* out_component_status);
   // Releases reloadable parameter storage after admitted service activity has
   // retired. Preserves primary mutable state. Optional models may retire and
@@ -139,7 +139,7 @@ typedef struct loom_serve_registration_factory_t {
   // Number of immutable storage owners, independent of device count.
   iree_host_size_t pool_count;
   // Borrowed pool keys and qualified consumer membership through destruction.
-  const loom_serve_pool_binding_t* pools;
+  const loom_runtime_pool_binding_t* pools;
   // Shared cold-work sink for resolving local model cards before create.
   // An empty sink supports direct declarations only.
   loomc_task_sink_t resolution_sink;
@@ -241,7 +241,7 @@ typedef struct loom_serve_registered_model_t {
   // Terminal load/release evidence, owned until removal or explicit retry.
   iree_status_t status;
   // Copied source diagnostics, independent of compiler and operation lifetimes.
-  loom_serve_compilation_report_t compilation;
+  loom_runtime_compilation_report_t compilation;
   // Monotonic registration identity; zero denotes an externally owned service.
   uint64_t incarnation;
   // Wall-clock Unix seconds at registration, fixed until deployment retirement.

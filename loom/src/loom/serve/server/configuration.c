@@ -131,9 +131,9 @@ static iree_status_t loom_serve_model_configuration_options(
 }
 
 static iree_status_t loom_serve_model_configuration_specialization_cache(
-    iree_string_view_t value, loom_serve_variant_cache_options_t* cache) {
-  *cache = (loom_serve_variant_cache_options_t){.capacity = 16,
-                                                .max_bytes = 16 * 1024 * 1024};
+    iree_string_view_t value, loom_runtime_variant_cache_options_t* cache) {
+  *cache = (loom_runtime_variant_cache_options_t){
+      .capacity = 16, .max_bytes = 16 * 1024 * 1024};
   if (!value.data) {
     return iree_ok_status();
   }
@@ -259,8 +259,8 @@ typedef enum loom_serve_model_definition_field_e {
 
 static iree_status_t loom_serve_model_configuration_text(
     const loom_serve_model_configuration_field_t* fields, bool encodes,
-    const loom_serve_sources_t* sources, loom_serve_text_configuration_t* text,
-    iree_allocator_t host_allocator) {
+    const loom_runtime_sources_t* sources,
+    loom_serve_text_configuration_t* text, iree_allocator_t host_allocator) {
   const bool pending = sources->reference.path.size != 0;
   const bool card = sources->card || pending;
   *text = (loom_serve_text_configuration_t){
@@ -636,13 +636,13 @@ void loom_serve_model_configuration_deinitialize(
   iree_allocator_free(host_allocator, (void*)model->pool.data);
   iree_allocator_free(host_allocator, (void*)model->document.data);
   if (model->resolved_sources) {
-    loom_serve_sources_free(model->resolved_sources, host_allocator);
+    loom_runtime_sources_free(model->resolved_sources, host_allocator);
   } else {
     iree_allocator_free(host_allocator,
                         (void*)model->sources.base_directory.data);
     iree_allocator_free(host_allocator, (void*)model->sources.prepare.data);
     iree_allocator_free(host_allocator, (void*)model->sources.control.data);
-    loom_serve_package_release(model->sources.package);
+    loom_runtime_package_release(model->sources.package);
     for (iree_host_size_t i = 0;
          model->sources.values && i < model->sources.count; ++i) {
       iree_allocator_free(host_allocator, (void*)model->sources.values[i].data);
@@ -682,7 +682,8 @@ void loom_serve_model_configuration_deinitialize(
 
 static iree_status_t loom_serve_model_configuration_model_parse(
     iree_string_view_t json, iree_string_view_t document_directory,
-    loom_serve_package_t* package, const loom_serve_sources_t* resolved_sources,
+    loom_runtime_package_t* package,
+    const loom_runtime_sources_t* resolved_sources,
     iree_allocator_t host_allocator,
     loom_serve_model_configuration_t* out_model) {
   *out_model =
@@ -691,12 +692,12 @@ static iree_status_t loom_serve_model_configuration_model_parse(
                                          .pool_index = IREE_HOST_SIZE_MAX,
                                          .pending_requests = 32};
   if (resolved_sources) {
-    IREE_RETURN_IF_ERROR(loom_serve_sources_clone(
+    IREE_RETURN_IF_ERROR(loom_runtime_sources_clone(
         resolved_sources, host_allocator, &out_model->resolved_sources));
     out_model->sources = *out_model->resolved_sources;
   } else {
     out_model->sources.package = package;
-    loom_serve_package_retain(package);
+    loom_runtime_package_retain(package);
   }
   const iree_string_view_t document = json;
   iree_string_view_t object;
@@ -777,9 +778,9 @@ static iree_status_t loom_serve_model_configuration_model_parse(
   if (!resolved_sources && fields[3].value.data) {
     IREE_RETURN_IF_ERROR(loom_serve_model_configuration_string(
         &fields[3], host_allocator, &out_model->sources.base_directory));
-    if (!loom_serve_path_is_absolute(out_model->sources.base_directory)) {
+    if (!loom_runtime_path_is_absolute(out_model->sources.base_directory)) {
       char* base = NULL;
-      IREE_RETURN_IF_ERROR(loom_serve_path_resolve(
+      IREE_RETURN_IF_ERROR(loom_runtime_path_resolve(
           document_directory, out_model->sources.base_directory, host_allocator,
           &base));
       iree_allocator_free(host_allocator,
@@ -808,7 +809,7 @@ static iree_status_t loom_serve_model_configuration_model_parse(
         : out_model->kind == LOOM_SERVE_MODEL_KIND_IMAGE
             ? out_model->image.adapter
             : iree_string_view_empty();
-    if (checkpoint.size && !loom_serve_path_is_absolute(checkpoint)) {
+    if (checkpoint.size && !loom_runtime_path_is_absolute(checkpoint)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "relative checkpoint paths require base_directory");
@@ -839,13 +840,13 @@ static iree_status_t loom_serve_model_configuration_model_parse(
           ? out_model->text.image.assets
           : iree_string_view_empty()};
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(paths); ++i) {
-    if (paths[i].size && !loom_serve_path_is_absolute(paths[i])) {
+    if (paths[i].size && !loom_runtime_path_is_absolute(paths[i])) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "relative model paths require base_directory");
     }
   }
   for (iree_host_size_t i = 0; i < out_model->sources.count; ++i) {
-    if (!loom_serve_path_is_absolute(out_model->sources.values[i])) {
+    if (!loom_runtime_path_is_absolute(out_model->sources.values[i])) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "relative source paths require base_directory");
     }
@@ -855,7 +856,7 @@ static iree_status_t loom_serve_model_configuration_model_parse(
 
 iree_status_t loom_serve_model_configuration_initialize(
     iree_string_view_t json, iree_string_view_t document_directory,
-    loom_serve_package_t* package, iree_allocator_t host_allocator,
+    loom_runtime_package_t* package, iree_allocator_t host_allocator,
     loom_serve_model_configuration_t* out_model) {
   iree_status_t status = loom_serve_model_configuration_model_parse(
       json, document_directory, package, NULL, host_allocator, out_model);
@@ -870,13 +871,13 @@ iree_status_t loom_serve_model_configuration_resolve(
     iree_allocator_t host_allocator,
     loom_serve_model_configuration_t* out_model) {
   *out_model = (loom_serve_model_configuration_t){0};
-  loom_serve_sources_t* sources = NULL;
+  loom_runtime_sources_t* sources = NULL;
   IREE_RETURN_IF_ERROR(
-      loom_serve_sources_resolve(&model->sources, host_allocator, &sources));
+      loom_runtime_sources_resolve(&model->sources, host_allocator, &sources));
   iree_status_t status = loom_serve_model_configuration_model_parse(
       model->document, iree_string_view_empty(), NULL, sources, host_allocator,
       out_model);
-  loom_serve_sources_free(sources, host_allocator);
+  loom_runtime_sources_free(sources, host_allocator);
   if (iree_status_is_ok(status)) {
     out_model->device_index = model->device_index;
     out_model->pool_index = model->pool_index;
@@ -918,10 +919,10 @@ static iree_status_t loom_serve_model_configuration_card(
   iree_status_t status =
       loom_model_card_parse(json, &selector, host_allocator, &card);
   if (iree_status_is_ok(status)) {
-    const loom_serve_sources_t sources = {.base_directory = directory,
-                                          .card = card};
-    status = loom_serve_sources_clone(&sources, host_allocator,
-                                      &out_model->resolved_sources);
+    const loom_runtime_sources_t sources = {.base_directory = directory,
+                                            .card = card};
+    status = loom_runtime_sources_clone(&sources, host_allocator,
+                                        &out_model->resolved_sources);
   }
   if (iree_status_is_ok(status)) {
     out_model->sources = *out_model->resolved_sources;
@@ -1013,7 +1014,7 @@ iree_status_t loom_serve_model_configuration_resolve_device(
 
 iree_status_t loom_serve_model_configuration_resolve_pool(
     const loom_serve_model_configuration_t* model, iree_host_size_t pool_count,
-    const loom_serve_pool_binding_t* pools, iree_host_size_t device_index,
+    const loom_runtime_pool_binding_t* pools, iree_host_size_t device_index,
     iree_host_size_t* out_pool_index) {
   if (!model->pool.size && pool_count != 1) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

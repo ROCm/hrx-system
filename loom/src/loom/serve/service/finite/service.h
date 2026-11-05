@@ -68,7 +68,7 @@ typedef struct loom_serve_finite_service_interface_t {
 // shares the serialized owner's publication order. NULL creates a service-owned
 // stream.
 iree_status_t loom_serve_finite_service_allocate(
-    loom_serve_host_t* host, loom_serve_finite_model_t* model,
+    loom_runtime_host_t* host, loom_serve_finite_model_t* model,
     const loom_serve_finite_protocol_t* protocol, iree_string_view_t name,
     iree_host_size_t capacity, iree_host_size_t variant_capacity,
     iree_duration_t heartbeat_interval, loom_runtime_telemetry_stream_t* stream,

@@ -208,7 +208,7 @@ static iree_status_t loom_serve_http_metrics_parameters(
       if (!parameters.prepared) {
         continue;
       }
-      const loom_serve_residency_snapshot_t state = parameters.parameters;
+      const loom_runtime_residency_snapshot_t state = parameters.parameters;
       const char* name = loom_serve_model_component_name(component);
       status = loom_serve_http_metrics_integer(output, "parameter_pins", model,
                                                name, state.pin_count);

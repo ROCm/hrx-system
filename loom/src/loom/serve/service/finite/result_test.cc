@@ -13,9 +13,9 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/serve/runtime/device/device.h"
-#include "loom/serve/runtime/execution/retirement.h"
-#include "loom/serve/runtime/execution/workspace.h"
+#include "loom/runtime/device/device.h"
+#include "loom/runtime/execution/retirement.h"
+#include "loom/runtime/execution/workspace.h"
 
 namespace {
 
@@ -161,29 +161,30 @@ class SnapshotLifetimeTest : public ResultTest,
  protected:
   void SetUp() override {
     IREE_ASSERT_OK(
-        loom_serve_host_create(4, nullptr, iree_allocator_system(), &host_));
-    const loom_serve_device_options_t options = {
-        .driver = loom_serve_host_task_driver(host_),
+        loom_runtime_host_create(4, nullptr, iree_allocator_system(), &host_));
+    const loom_runtime_device_options_t options = {
+        .driver = loom_runtime_host_task_driver(host_),
         .uri = IREE_SV("task"),
     };
-    IREE_ASSERT_OK(loom_serve_device_group_allocate(
+    IREE_ASSERT_OK(loom_runtime_device_group_allocate(
         host_, 1, &options, iree_allocator_system(), &group_));
-    device_ = loom_serve_device_group_at(group_, 0);
-    const loom_serve_pool_options_t pool_options = {};
-    IREE_ASSERT_OK(loom_serve_device_group_create_pool(
+    device_ = loom_runtime_device_group_at(group_, 0);
+    const loom_runtime_pool_options_t pool_options = {};
+    IREE_ASSERT_OK(loom_runtime_device_group_create_pool(
         group_, {IREE_SV("pool"), 1}, &pool_options, &storage_owner_));
-    IREE_ASSERT_OK(loom_serve_device_create_execution(device_, storage_owner_,
-                                                      &execution_));
-    IREE_ASSERT_OK(loom_serve_execution_reserve_workspace(execution_, 32, 16));
+    IREE_ASSERT_OK(loom_runtime_device_create_execution(device_, storage_owner_,
+                                                        &execution_));
+    IREE_ASSERT_OK(
+        loom_runtime_execution_reserve_workspace(execution_, 32, 16));
     IREE_ASSERT_OK(iree_hal_semaphore_create(
-        loom_serve_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+        loom_runtime_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
         0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &gate_));
     uint64_t value = 1;
     IREE_ASSERT_OK(
-        loom_serve_execution_barrier(execution_, {1, &gate_, &value}));
+        loom_runtime_execution_barrier(execution_, {1, &gate_, &value}));
     const auto request = iree_hal_make_pool_reservation_request(32, 16);
     IREE_ASSERT_OK(
-        loom_serve_execution_alloca(execution_, 1, &request, &source_));
+        loom_runtime_execution_alloca(execution_, 1, &request, &source_));
     const uint32_t pattern = 0x3F800000;
     const iree_hal_transfer_operation_t fill = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
@@ -195,7 +196,8 @@ class SnapshotLifetimeTest : public ResultTest,
                 .pattern_length = sizeof(pattern),
             },
     };
-    IREE_ASSERT_OK(loom_serve_execution_transfer(execution_, 1, &fill, &value));
+    IREE_ASSERT_OK(
+        loom_runtime_execution_transfer(execution_, 1, &fill, &value));
     IREE_ASSERT_OK(CreatePlan());
     IREE_ASSERT_OK(CreateResult(allocator_.allocator()));
     loom_serve_finite_result_bind(result_, execution_,
@@ -210,32 +212,32 @@ class SnapshotLifetimeTest : public ResultTest,
     iree_hal_buffer_release(source_);
     ResultTest::TearDown();
     if (execution_) {
-      auto status = loom_serve_execution_drain(execution_);
+      auto status = loom_runtime_execution_drain(execution_);
       if (failed_) {
         IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, status);
       } else {
         IREE_EXPECT_OK(status);
       }
-      loom_serve_execution_release(execution_);
+      loom_runtime_execution_release(execution_);
     }
     allocator_.AwaitEmpty();
     iree_hal_semaphore_release(gate_);
-    IREE_EXPECT_OK(loom_serve_device_group_free(group_));
-    loom_serve_host_release(host_);
+    IREE_EXPECT_OK(loom_runtime_device_group_free(group_));
+    loom_runtime_host_release(host_);
   }
 
   // Result allocation evidence, outliving every asynchronous release callback.
   LifetimeAllocator allocator_;
   // Production task runtime and device ownership.
-  loom_serve_host_t* host_ = nullptr;
+  loom_runtime_host_t* host_ = nullptr;
   // Application group enclosing the execution and all raw root captures.
-  loom_serve_device_group_t* group_ = nullptr;
+  loom_runtime_device_group_t* group_ = nullptr;
   // Borrowed group device used by the producer and explicit snapshot.
-  loom_serve_device_t* device_ = nullptr;
+  loom_runtime_device_t* device_ = nullptr;
   // Fixed pool retained through the final result and snapshot references.
-  loom_serve_pool_t* storage_owner_ = nullptr;
+  loom_runtime_pool_t* storage_owner_ = nullptr;
   // Producer timeline with an independent download branch.
-  loom_serve_execution_t* execution_ = nullptr;
+  loom_runtime_execution_t* execution_ = nullptr;
   // Unsignaled input dependency, independent of failed output readiness.
   iree_hal_semaphore_t* gate_ = nullptr;
   // Producer's tracked view, distinct from the result allocation root.
@@ -247,7 +249,7 @@ class SnapshotLifetimeTest : public ResultTest,
 };
 
 TEST_P(SnapshotLifetimeTest, EarlyReleasePreservesAcceptedDownloadStorage) {
-  loom_serve_execution_frontier_t frontier;
+  loom_runtime_execution_frontier_t frontier;
   IREE_ASSERT_OK(
       loom_serve_finite_result_download(result_, &snapshot_, &frontier));
   if (GetParam()) {
@@ -277,25 +279,25 @@ INSTANTIATE_TEST_SUITE_P(FailedReadiness, SnapshotLifetimeTest,
 class SuballocationLifetimeTest : public ResultTest {
  protected:
   void SetUp() override {
-    loom_serve_retirement_initialize(&producer_);
+    loom_runtime_retirement_initialize(&producer_);
     IREE_ASSERT_OK(
-        loom_serve_host_create(2, nullptr, iree_allocator_system(), &host_));
-    const loom_serve_device_options_t options = {
-        .driver = loom_serve_host_task_driver(host_),
+        loom_runtime_host_create(2, nullptr, iree_allocator_system(), &host_));
+    const loom_runtime_device_options_t options = {
+        .driver = loom_runtime_host_task_driver(host_),
         .uri = IREE_SV("task"),
     };
-    IREE_ASSERT_OK(loom_serve_device_group_allocate(
+    IREE_ASSERT_OK(loom_runtime_device_group_allocate(
         host_, 1, &options, iree_allocator_system(), &group_));
-    auto* device = loom_serve_device_group_at(group_, 0);
-    const loom_serve_pool_options_t pool_options = {};
-    loom_serve_pool_t* storage_owner = nullptr;
-    IREE_ASSERT_OK(loom_serve_device_group_create_pool(
+    auto* device = loom_runtime_device_group_at(group_, 0);
+    const loom_runtime_pool_options_t pool_options = {};
+    loom_runtime_pool_t* storage_owner = nullptr;
+    IREE_ASSERT_OK(loom_runtime_device_group_create_pool(
         group_, {IREE_SV("pool"), 1}, &pool_options, &storage_owner));
-    IREE_ASSERT_OK(
-        loom_serve_device_create_execution(device, storage_owner, &execution_));
-    auto* workspace = loom_serve_pool_workspace(storage_owner);
-    IREE_ASSERT_OK(loom_serve_workspace_reserve(workspace, 2048, 256));
-    IREE_ASSERT_OK(loom_serve_workspace_acquire_pool(workspace, &pool_));
+    IREE_ASSERT_OK(loom_runtime_device_create_execution(device, storage_owner,
+                                                        &execution_));
+    auto* workspace = loom_runtime_pool_workspace(storage_owner);
+    IREE_ASSERT_OK(loom_runtime_workspace_reserve(workspace, 2048, 256));
+    IREE_ASSERT_OK(loom_runtime_workspace_acquire_pool(workspace, &pool_));
     IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
         pool_, iree_hal_make_pool_reservation_request(256, 256),
         iree_infinite_timeout(), &prefix_));
@@ -311,22 +313,22 @@ class SuballocationLifetimeTest : public ResultTest {
     iree_hal_buffer_release(output_);
     iree_hal_buffer_release(prefix_);
     if (execution_) {
-      IREE_EXPECT_OK(loom_serve_execution_drain(execution_));
+      IREE_EXPECT_OK(loom_runtime_execution_drain(execution_));
     }
-    loom_serve_retirement_await(&producer_);
-    loom_serve_retirement_deinitialize(&producer_);
-    loom_serve_execution_release(execution_);
+    loom_runtime_retirement_await(&producer_);
+    loom_runtime_retirement_deinitialize(&producer_);
+    loom_runtime_execution_release(execution_);
     iree_hal_pool_release(pool_);
-    IREE_EXPECT_OK(loom_serve_device_group_free(group_));
-    loom_serve_host_release(host_);
+    IREE_EXPECT_OK(loom_runtime_device_group_free(group_));
+    loom_runtime_host_release(host_);
   }
 
   // Runtime owner kept through every pool and queue consumer.
-  loom_serve_host_t* host_ = nullptr;
+  loom_runtime_host_t* host_ = nullptr;
   // One task device with its application-owned persistent workspace.
-  loom_serve_device_group_t* group_ = nullptr;
+  loom_runtime_device_group_t* group_ = nullptr;
   // Producer and download timelines, also retained by the result.
-  loom_serve_execution_t* execution_ = nullptr;
+  loom_runtime_execution_t* execution_ = nullptr;
   // Shared logical allocator outliving its ordinary suballocated buffers.
   iree_hal_pool_t* pool_ = nullptr;
   // Occupied prefix forcing the output to a nonzero physical offset.
@@ -334,7 +336,7 @@ class SuballocationLifetimeTest : public ResultTest {
   // Independent output storage with its own reservation-release obligation.
   iree_hal_buffer_t* output_ = nullptr;
   // Producer tracking, which must retire while the result remains usable.
-  loom_serve_retirement_t producer_;
+  loom_runtime_retirement_t producer_;
   // Producer-only view captured by the upload operation.
   iree_hal_buffer_t* view_ = nullptr;
   // Explicit host result, independent of the device output after download.
@@ -350,8 +352,8 @@ TEST_F(SuballocationLifetimeTest, RetainsLogicalStorageAfterProducerRetires) {
   IREE_ASSERT_OK(CreateResult(iree_allocator_system()));
   view_ = output_;
   iree_hal_buffer_retain(view_);
-  IREE_ASSERT_OK(
-      loom_serve_retirement_track(&producer_, &view_, iree_allocator_system()));
+  IREE_ASSERT_OK(loom_runtime_retirement_track(&producer_, &view_,
+                                               iree_allocator_system()));
   const iree_hal_transfer_operation_t upload = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
       .upload =
@@ -363,25 +365,25 @@ TEST_F(SuballocationLifetimeTest, RetainsLogicalStorageAfterProducerRetires) {
   };
   uint64_t completion = 0;
   IREE_ASSERT_OK(
-      loom_serve_execution_transfer(execution_, 1, &upload, &completion));
+      loom_runtime_execution_transfer(execution_, 1, &upload, &completion));
   loom_serve_finite_result_bind(result_, execution_, output_);
   const auto row = loom_serve_finite_result_row(result_, 0, 0);
   EXPECT_EQ(row.buffer, output_);
   EXPECT_EQ(row.offset, 8u);
   iree_hal_buffer_release(std::exchange(output_, nullptr));
   iree_hal_buffer_release(std::exchange(view_, nullptr));
-  IREE_ASSERT_OK(loom_serve_execution_wait(execution_, completion));
-  loom_serve_retirement_await(&producer_);
+  IREE_ASSERT_OK(loom_runtime_execution_wait(execution_, completion));
+  loom_runtime_retirement_await(&producer_);
   iree_hal_pool_stats_t statistics;
   iree_hal_pool_query_stats(pool_, &statistics);
   EXPECT_EQ(statistics.reservation_count, 2u);
 
-  loom_serve_execution_frontier_t ready;
+  loom_runtime_execution_frontier_t ready;
   IREE_ASSERT_OK(
       loom_serve_finite_result_download(result_, &snapshot_, &ready));
   loom_serve_finite_result_release(std::exchange(result_, nullptr));
   IREE_ASSERT_OK(
-      loom_serve_execution_feedback_wait(execution_, ready.values[1]));
+      loom_runtime_execution_feedback_wait(execution_, ready.values[1]));
   const auto first = loom_serve_finite_snapshot_row(snapshot_, 0, 0);
   const auto second = loom_serve_finite_snapshot_row(snapshot_, 0, 1);
   const auto third = loom_serve_finite_snapshot_row(snapshot_, 1, 0);

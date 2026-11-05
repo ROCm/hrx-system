@@ -154,7 +154,7 @@ TEST_F(TextStorageTest, LogicalOrderAndCarrySurviveBootstrapPayloadRelease) {
   iree_hal_buffer_t* private_views[5] = {};
   const uint32_t blocks[] = {7, 2, 5};
   iree_host_size_t count = 0;
-  loom_serve_snapshot_range_t* ranges = nullptr;
+  loom_runtime_snapshot_range_t* ranges = nullptr;
   IREE_ASSERT_OK(loom_serve_text_storage_plan_snapshot(
       &storage, 2, private_views, true, 3, blocks, host_allocator, &count,
       &ranges));
@@ -198,11 +198,11 @@ TEST_F(TextStorageTest, AdjacentPagesShareRangesWithoutReorderingLogicalBytes) {
   const uint32_t blocks[] = {2, 3, 7, 0, 1};
   iree_hal_buffer_t* views[5] = {};
   iree_host_size_t count = 0;
-  loom_serve_snapshot_range_t* ranges = nullptr;
+  loom_runtime_snapshot_range_t* ranges = nullptr;
   IREE_ASSERT_OK(loom_serve_text_storage_plan_snapshot(
       &storage, 2, views, true, IREE_ARRAYSIZE(blocks), blocks, host_allocator,
       &count, &ranges));
-  const loom_serve_snapshot_range_t expected[] = {
+  const loom_runtime_snapshot_range_t expected[] = {
       {6, 256, 128},  {1, 512, 256},  {1, 1152, 128}, {1, 256, 256},
       {1, 4608, 256}, {1, 5248, 128}, {1, 4352, 256}, {9, 640, 128},
       {9, 960, 64},   {9, 512, 128},
@@ -233,7 +233,7 @@ TEST_F(TextStorageTest, FullPageIdSpacePreservesWideByteOffsets) {
   const uint32_t blocks[] = {UINT32_MAX - 1, 0, UINT32_MAX / 2 + 1};
   iree_hal_buffer_t* views[5] = {};
   iree_host_size_t count = 0;
-  loom_serve_snapshot_range_t* ranges = nullptr;
+  loom_runtime_snapshot_range_t* ranges = nullptr;
   IREE_ASSERT_OK(loom_serve_text_storage_plan_snapshot(
       &storage, 0, views, false, IREE_ARRAYSIZE(blocks), blocks, host_allocator,
       &count, &ranges));
@@ -260,7 +260,7 @@ TEST_F(TextStorageTest, AdjacentWidePageIdsKeepWideRunOffsetsAndLengths) {
   const uint32_t blocks[] = {UINT32_MAX - 2, UINT32_MAX - 1, 0};
   iree_hal_buffer_t* views[5] = {};
   iree_host_size_t count = 0;
-  loom_serve_snapshot_range_t* ranges = nullptr;
+  loom_runtime_snapshot_range_t* ranges = nullptr;
   IREE_ASSERT_OK(loom_serve_text_storage_plan_snapshot(
       &storage, 0, views, false, IREE_ARRAYSIZE(blocks), blocks, host_allocator,
       &count, &ranges));
@@ -310,7 +310,7 @@ TEST_F(TextStorageTest, DraftCacheWithoutCarryHasNoSnapshotCarryRange) {
   iree_hal_buffer_t* views[5] = {};
   const uint32_t blocks[] = {7, 2, 5};
   iree_host_size_t count = 0;
-  loom_serve_snapshot_range_t* ranges = nullptr;
+  loom_runtime_snapshot_range_t* ranges = nullptr;
   IREE_ASSERT_OK(loom_serve_text_storage_plan_snapshot(
       &storage, 2, views, true, 3, blocks, host_allocator, &count, &ranges));
   ASSERT_EQ(count, 9u);
@@ -345,7 +345,7 @@ TEST_F(TextStorageTest, IndependentEndpointOmitsRowPrivateExecutionState) {
       iree_hal_buffer_subspan(arena, 72, 32, host_allocator, &views[1]));
   const uint32_t blocks[] = {7, 2};
   iree_host_size_t count = 0;
-  loom_serve_snapshot_range_t* ranges = nullptr;
+  loom_runtime_snapshot_range_t* ranges = nullptr;
   IREE_ASSERT_OK(loom_serve_text_storage_plan_snapshot(
       &storage, 4, views, true, 2, blocks, host_allocator, &count, &ranges));
   ASSERT_EQ(count, 8u);

@@ -244,7 +244,7 @@ iree_status_t loom_serve_text_storage_plan_snapshot(
     iree_hal_buffer_t* const* private_views, bool include_carry,
     uint32_t block_count, const uint32_t* blocks,
     iree_allocator_t host_allocator, iree_host_size_t* out_count,
-    loom_serve_snapshot_range_t** out_ranges) {
+    loom_runtime_snapshot_range_t** out_ranges) {
   *out_count = 0;
   *out_ranges = NULL;
   include_carry &= storage->carry_stride != 0;
@@ -266,10 +266,10 @@ iree_status_t loom_serve_text_storage_plan_snapshot(
   iree_host_size_t allocation_size = 0, runs_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       0, &allocation_size,
-      IREE_STRUCT_FIELD(capacity, loom_serve_snapshot_range_t, NULL),
+      IREE_STRUCT_FIELD(capacity, loom_runtime_snapshot_range_t, NULL),
       IREE_STRUCT_FIELD(run_count, loom_serve_text_storage_block_run_t,
                         &runs_offset)));
-  loom_serve_snapshot_range_t* ranges = NULL;
+  loom_runtime_snapshot_range_t* ranges = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, allocation_size, (void**)&ranges));
   loom_serve_text_storage_block_run_t* runs =
@@ -285,20 +285,20 @@ iree_status_t loom_serve_text_storage_plan_snapshot(
   iree_host_size_t count = 0;
   for (iree_host_size_t i = 0; i < 5; ++i) {
     if (private_views[i]) {
-      ranges[count++] = (loom_serve_snapshot_range_t){
+      ranges[count++] = (loom_runtime_snapshot_range_t){
           1, iree_hal_buffer_byte_offset(private_views[i]),
           iree_hal_buffer_byte_length(private_views[i])};
     }
   }
   if (include_carry) {
-    ranges[count++] = (loom_serve_snapshot_range_t){
+    ranges[count++] = (loom_runtime_snapshot_range_t){
         6, carry_index * storage->carry_stride, storage->carry_stride};
   }
   for (iree_host_size_t r = 0; r < storage->region_count; ++r) {
     const loom_serve_text_cache_region_t* region = &storage->regions[r];
     for (iree_host_size_t plane = 0; plane < region->blocks.count; ++plane) {
       for (uint32_t run = 0; run < run_count; ++run) {
-        ranges[count++] = (loom_serve_snapshot_range_t){
+        ranges[count++] = (loom_runtime_snapshot_range_t){
             region->allocation,
             region->blocks.origin + plane * region->blocks.stride +
                 runs[run].first * region->blocks.block_bytes,

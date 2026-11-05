@@ -276,7 +276,7 @@ class AdmissionServiceTest : public SourceTextServiceTest {
       // Cancel the unborrowed head and reuse its exact queue credit/name
       // while the selected tail still owns an outstanding CPU borrow.
       loom_serve::testing::text::OwnerTurn::Run(
-          loom_serve_host_executor(host_), [&] {
+          loom_runtime_host_executor(host_), [&] {
             IREE_ASSERT_OK(interface.accept(interface.runtime.self,
                                             tail_connection, tail_request, 0));
             EXPECT_TRUE(
@@ -368,7 +368,7 @@ TEST_F(AdmissionServiceTest,
   const auto before = loom_serve_text_model_pool_usage(model_);
   auto* row = loom_serve_text_model_row(model_, 0);
   loom_serve_text_reserve_result_t result;
-  loom_serve_execution_frontier_t frontier;
+  loom_runtime_execution_frontier_t frontier;
   IREE_ASSERT_OK(loom_serve_text_row_submit_reserve(
       row, LOOM_SERVE_TEXT_RESERVE_FRESH, nullptr, 96, &result, &frontier));
   EXPECT_EQ(result, LOOM_SERVE_TEXT_RESERVE_STATE_CAPACITY);
@@ -377,8 +377,8 @@ TEST_F(AdmissionServiceTest,
   EXPECT_EQ(loom_serve_text_row_position(row), 0u);
   EXPECT_EQ(loom_serve_text_model_parameter_activity(model_).activations, 0u);
   EXPECT_EQ(loom_serve_text_model_parameter_activity(model_).read_bytes, 0u);
-  EXPECT_FALSE(
-      loom_serve_residency_is_pinned(loom_serve_text_model_residency(model_)));
+  EXPECT_FALSE(loom_runtime_residency_is_pinned(
+      loom_serve_text_model_residency(model_)));
 
   // The unchanged cold model remains usable through the real HTTP lifecycle.
   Start();

@@ -8,8 +8,8 @@
 #include "iree/io/file_contents.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 #include "loom/model/card.h"
-#include "loom/serve/runtime/program/input.h"
-#include "loom/serve/runtime/program/json.h"
+#include "loom/runtime/program/input.h"
+#include "loom/runtime/program/json.h"
 #include "loom/serve/service/text/tool_xml.h"
 #include "loomc/iree.h"
 #include "loomc/target/vm.h"
@@ -22,9 +22,9 @@ struct loom_serve_test_text_policy_t {
   // Owned tokenizer borrowed by the program's input module.
   iree_tokenizer_t* tokenizer;
   // Owned resolved providers and card configuration borrowed by the program.
-  loom_serve_sources_t* sources;
+  loom_runtime_sources_t* sources;
   // Owned JIT program and serialized invocation.
-  loom_serve_program_t* program;
+  loom_runtime_program_t* program;
   // Resolved source functions and owned deployment defaults.
   loom_serve_text_chat_policy_t chat;
 };
@@ -34,24 +34,24 @@ void loom_serve_test_text_policy_free(loom_serve_test_text_policy_t* policy) {
     return;
   }
   loom_serve_text_chat_policy_deinitialize(&policy->chat);
-  loom_serve_program_free(policy->program);
-  loom_serve_sources_free(policy->sources, policy->host_allocator);
+  loom_runtime_program_free(policy->program);
+  loom_runtime_sources_free(policy->sources, policy->host_allocator);
   iree_tokenizer_free(policy->tokenizer);
   iree_vm_environment_free(policy->environment);
   iree_allocator_free(policy->host_allocator, policy);
 }
 
 iree_status_t loom_serve_test_text_policy_allocate(
-    const loom_serve_sources_t* requested_sources,
+    const loom_runtime_sources_t* requested_sources,
     iree_string_view_t tokenizer_path, iree_string_view_t options,
-    loom_serve_compilation_report_t* report, iree_allocator_t host_allocator,
+    loom_runtime_compilation_report_t* report, iree_allocator_t host_allocator,
     loom_serve_test_text_policy_t** out_policy) {
   *out_policy = NULL;
   loom_serve_test_text_policy_t* policy = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*policy), (void**)&policy));
   policy->host_allocator = host_allocator;
-  iree_status_t status = loom_serve_sources_resolve(
+  iree_status_t status = loom_runtime_sources_resolve(
       requested_sources, host_allocator, &policy->sources);
   if (iree_status_is_ok(status) && policy->sources->card) {
     const loom_model_selection_t* selection =
@@ -81,12 +81,12 @@ iree_status_t loom_serve_test_text_policy_allocate(
   iree_io_file_contents_free(tokenizer_contents);
   iree_vm_module_t* libraries[3] = {0};
   if (iree_status_is_ok(status)) {
-    status = loom_serve_input_module_create(
+    status = loom_runtime_input_module_create(
         policy->environment, policy->tokenizer, host_allocator, &libraries[0]);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_json_module_create(policy->environment, host_allocator,
-                                           &libraries[1]);
+    status = loom_runtime_json_module_create(policy->environment,
+                                             host_allocator, &libraries[1]);
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_text_tool_xml_module_create(
@@ -106,7 +106,7 @@ iree_status_t loom_serve_test_text_policy_allocate(
         loomc_allocator_from_iree(host_allocator), &target_environment));
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_program_allocate_service(
+    status = loom_runtime_program_allocate_service(
         target_environment, policy->environment, policy->sources,
         policy->sources->control, IREE_ARRAYSIZE(roots), roots,
         iree_vm_module_span_from_array(libraries), report, host_allocator,

@@ -28,10 +28,12 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
 #include "iree/vm/buffer.h"
+#include "loom/runtime/program/package.h"
+#include "loom/runtime/program/variant_pool.h"
 #include "loom/runtime/telemetry/field.h"
 #include "loom/runtime/telemetry/stream.h"
-#include "loom/serve/runtime/program/package.h"
-#include "loom/serve/runtime/program/variant_pool.h"
+#include "loom/runtime/testing/application.h"
+#include "loom/runtime/testing/stalled_stderr.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/image/model.h"
@@ -42,8 +44,6 @@
 #include "loom/serve/testing/model.h"
 #include "loom/serve/testing/model_wait.h"
 #include "loom/serve/testing/package.h"
-#include "loom/serve/testing/service_application.h"
-#include "loom/serve/testing/stalled_stderr.h"
 #include "loom/serve/transport/http/listener.h"
 
 namespace {
@@ -71,25 +71,25 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
   void SetUp() override {
     const char* source_path = std::getenv("LOOM_SERVE_TEST_MODEL_SOURCE");
     ASSERT_NE(source_path, nullptr);
-    auto application_options = loom_serve_test_application_options_default();
-    if (application_options.backing == LOOM_SERVE_POOL_BACKING_ELASTIC) {
+    auto application_options = loom_runtime_test_application_options_default();
+    if (application_options.backing == LOOM_RUNTIME_POOL_BACKING_ELASTIC) {
       // Small fixture images fit, but a 64x64 float image does not.
       application_options.slab_size = 4096;
       application_options.memory_limit = 32 * 1024;
     }
-    loom_serve_test_application_t* application = nullptr;
-    IREE_ASSERT_OK(loom_serve_test_application_acquire(
+    loom_runtime_test_application_t* application = nullptr;
+    IREE_ASSERT_OK(loom_runtime_test_application_acquire(
         &application_options, host_allocator_, &application));
-    host_ = loom_serve_test_application_host(application);
-    group_ = loom_serve_test_application_device_group(application);
-    device_ = loom_serve_test_application_device_at(application, 0);
-    storage_owner_ = loom_serve_device_group_pool_at(
-        loom_serve_test_application_device_group(application), 0);
+    host_ = loom_runtime_test_application_host(application);
+    group_ = loom_runtime_test_application_device_group(application);
+    device_ = loom_runtime_test_application_device_at(application, 0);
+    storage_owner_ = loom_runtime_device_group_pool_at(
+        loom_runtime_test_application_device_group(application), 0);
     const std::string source = source_path;
     directory_ = source.substr(0, source.find_last_of('/'));
     auto options = loom_serve_http_server_options_default();
     IREE_ASSERT_OK(
-        loom_serve_http_server_allocate(loom_serve_host_proactor_pool(host_),
+        loom_serve_http_server_allocate(loom_runtime_host_proactor_pool(host_),
                                         &options, host_allocator_, &server_));
     auto listener_options = loom_serve_http_listener_options_default();
     listener_options.address = IREE_SV("127.0.0.1:0");
@@ -113,7 +113,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
       const loom_serve_image_generator_t generator =
           loom_serve_image_model_generator(model_);
       EXPECT_EQ(generator.capacity_domain,
-                loom_serve_pool_residency_cache(storage_owner_));
+                loom_runtime_pool_residency_cache(storage_owner_));
       const loom_serve_image_service_options_t options = {
           .name = loom_serve_image_model_name(model_),
           .width = kWidth,
@@ -132,7 +132,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
                                               host_allocator_, &registry);
         if (iree_status_is_ok(status)) {
           status = loom_serve_router_run(
-              loom_serve_host_executor(host_), server_, registry,
+              loom_runtime_host_executor(host_), server_, registry,
               {
                   .request_quota = options.pending_capacity,
                   .holding_capacity =
@@ -149,7 +149,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
   }
 
   void CreateStandaloneModel(
-      loom_serve_variant_cache_options_t cache = {2, 16 * 1024 * 1024},
+      loom_runtime_variant_cache_options_t cache = {2, 16 * 1024 * 1024},
       iree_allocator_t allocator = iree_allocator_system()) {
     loom_serve::testing::ModelDocument document;
     IREE_ASSERT_OK(document.Load(directory_ + "/model.json"));
@@ -166,10 +166,10 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
         device_, storage_owner_, &options, allocator, &model_));
   }
 
-  void Wait(loom_serve_execution_frontier_t frontier) {
+  void Wait(loom_runtime_execution_frontier_t frontier) {
     for (size_t i = 0; i < IREE_ARRAYSIZE(frontier.semaphores); ++i) {
-      IREE_ASSERT_OK(loom_serve_workspace_wait(
-          loom_serve_pool_workspace(storage_owner_), frontier.semaphores[i],
+      IREE_ASSERT_OK(loom_runtime_workspace_wait(
+          loom_runtime_pool_workspace(storage_owner_), frontier.semaphores[i],
           frontier.values[i]));
     }
   }
@@ -185,7 +185,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
           0, nullptr, 2, loom_serve_model_registration_factory(&options),
           host_allocator_, &registry));
       iree_status_t status = loom_serve_router_run(
-          loom_serve_host_executor(host_), server_, registry,
+          loom_runtime_host_executor(host_), server_, registry,
           {
               .request_quota = 16,
               .holding_capacity = 8,
@@ -645,13 +645,13 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
   // Allocator for model, transport and expected encoded output.
   const iree_allocator_t host_allocator_ = iree_allocator_system();
   // Shared CPU/JIT resources outlive every model and service task.
-  loom_serve_host_t* host_ = nullptr;
+  loom_runtime_host_t* host_ = nullptr;
   // Application group enclosing all model and device resources.
-  loom_serve_device_group_t* group_ = nullptr;
+  loom_runtime_device_group_t* group_ = nullptr;
   // Borrowed device record within the application group.
-  loom_serve_device_t* device_ = nullptr;
+  loom_runtime_device_t* device_ = nullptr;
   // Explicit storage owner selected independently from execution placement.
-  loom_serve_pool_t* storage_owner_ = nullptr;
+  loom_runtime_pool_t* storage_owner_ = nullptr;
   // Source and tokenizer package borrowed by cold and HTTP registration.
   std::string directory_;
   // Real source-JIT model with two kernels and reflected private workspace.
@@ -796,20 +796,21 @@ TEST_P(SourceImageServiceTest, PreparedShapePinsCodeAcrossSelectionAndRemoval) {
   contents[1].insert(
       launch_position,
       "  kernel.launch @colors(%request, %colors) : (buffer, buffer)\n");
-  const loom_serve_package_file_t files[] = {
+  const loom_runtime_package_file_t files[] = {
       {IREE_SV("model/config.loom"),
        iree_make_const_byte_span(contents[0].data(), contents[0].size())},
       {IREE_SV("model/generate.loom"),
        iree_make_const_byte_span(contents[1].data(), contents[1].size())}};
-  loom_serve_package_t* package = nullptr;
-  IREE_ASSERT_OK(loom_serve_package_create(IREE_SV("model/model.json"),
-                                           IREE_ARRAYSIZE(files), files,
-                                           host_allocator_, &package));
-  std::unique_ptr<loom_serve_package_t, decltype(&loom_serve_package_release)>
-      retained_package(package, loom_serve_package_release);
+  loom_runtime_package_t* package = nullptr;
+  IREE_ASSERT_OK(loom_runtime_package_create(IREE_SV("model/model.json"),
+                                             IREE_ARRAYSIZE(files), files,
+                                             host_allocator_, &package));
+  std::unique_ptr<loom_runtime_package_t,
+                  decltype(&loom_runtime_package_release)>
+      retained_package(package, loom_runtime_package_release);
   const iree_string_view_t providers[] = {IREE_SV("config.loom"),
                                           IREE_SV("generate.loom")};
-  const loom_serve_sources_t sources = {
+  const loom_runtime_sources_t sources = {
       .count = IREE_ARRAYSIZE(providers),
       .values = providers,
       .package = package,
@@ -831,7 +832,7 @@ TEST_P(SourceImageServiceTest, PreparedShapePinsCodeAcrossSelectionAndRemoval) {
   IREE_ASSERT_OK(update.compile(
       update.self, &sources,
       [](void* self, iree_status_t status, void* value,
-         const loom_serve_compilation_report_t*) {
+         const loom_runtime_compilation_report_t*) {
         auto* compilation = static_cast<Compilation*>(self);
         std::lock_guard<std::mutex> lock(compilation->mutex);
         compilation->candidate = value;
@@ -844,7 +845,7 @@ TEST_P(SourceImageServiceTest, PreparedShapePinsCodeAcrossSelectionAndRemoval) {
     std::unique_lock<std::mutex> lock(compilation.mutex);
     compilation.condition.wait(lock, [&] { return compilation.complete; });
   }
-  std::unique_ptr<void, loom_serve_variant_dispose_fn_t> candidate(
+  std::unique_ptr<void, loom_runtime_variant_dispose_fn_t> candidate(
       compilation.candidate, update.dispose);
   IREE_ASSERT_OK(std::exchange(compilation.status, iree_ok_status()));
   retained_package.reset();
@@ -872,12 +873,12 @@ TEST_P(SourceImageServiceTest, PreparedShapePinsCodeAcrossSelectionAndRemoval) {
                                    [&] { return compilation.wakes != before; });
       }
     }
-    IREE_ASSERT_OK(loom_serve_residency_acquire_wait(
+    IREE_ASSERT_OK(loom_runtime_residency_acquire_wait(
         loom_serve_image_model_residency(model_)));
     bool finished = false;
     uint32_t parts = 0;
     while (!finished) {
-      loom_serve_execution_frontier_t frontier;
+      loom_runtime_execution_frontier_t frontier;
       IREE_ASSERT_OK(generator.submit(generator.self, 0, &frontier, &finished));
       ASSERT_NO_FATAL_FAILURE(Wait(frontier));
       ++parts;
@@ -955,16 +956,16 @@ TEST_P(SourceImageServiceTest, SelectionWaitsForWholeImageAndEncoderRelease) {
   sources.control = {};
   const auto& configuration = interface.reconfiguration;
   const auto original = configuration.selected(configuration.self);
-  loom_serve_variant_id_t candidate = 0;
+  loom_runtime_variant_id_t candidate = 0;
   IREE_ASSERT_OK(configuration.stage_native(configuration.self, original,
                                             &sources, &candidate));
-  loom_serve_variant_snapshot_t snapshot;
+  loom_runtime_variant_snapshot_t snapshot;
   ASSERT_NO_FATAL_FAILURE(advance_until([&] {
-    return loom_serve_variant_pool_snapshot(configuration.pool, candidate,
-                                            &snapshot) &&
-           snapshot.phase != LOOM_SERVE_VARIANT_COMPILING;
+    return loom_runtime_variant_pool_snapshot(configuration.pool, candidate,
+                                              &snapshot) &&
+           snapshot.phase != LOOM_RUNTIME_VARIANT_COMPILING;
   }));
-  ASSERT_EQ(snapshot.phase, LOOM_SERVE_VARIANT_READY)
+  ASSERT_EQ(snapshot.phase, LOOM_RUNTIME_VARIANT_READY)
       << std::string(snapshot.message.data ? snapshot.message.data : "",
                      snapshot.message.size);
   const int client =
@@ -988,7 +989,7 @@ TEST_P(SourceImageServiceTest, SelectionWaitsForWholeImageAndEncoderRelease) {
   IREE_ASSERT_OK(configuration.select(
       configuration.self, candidate, original,
       [](void* user_data, iree_status_t status,
-         loom_serve_variant_id_t selected) {
+         loom_runtime_variant_id_t selected) {
         auto* selection =
             static_cast<loom_serve_test_image_selection_t*>(user_data);
         IREE_EXPECT_OK(status);
@@ -1013,7 +1014,7 @@ TEST_P(SourceImageServiceTest, SourcePixelsAndHttpPngPreserveRequestIdentity) {
   // A parameter-free model needs no device allocation until an invocation is
   // admitted. Compilation and tokenizer preparation leave its timeline idle.
   const auto loaded =
-      loom_serve_residency_frontier(loom_serve_image_model_residency(model_));
+      loom_runtime_residency_frontier(loom_serve_image_model_residency(model_));
   EXPECT_EQ(loaded.values[0], 0u);
   EXPECT_EQ(loaded.values[1], 0u);
   loom_service_image_prepared_t prepared;
@@ -1109,7 +1110,7 @@ TEST_P(SourceImageServiceTest, ImpossibleWorkingSetLeavesModelUsable) {
   const auto large = Read(Send(
       "POST", "/v1/images/generations",
       R"({"model":"fixture-image","prompt":"aba","seed":1,"size":"64x64"})"));
-  if (loom_serve_pool_memory(storage_owner_)) {
+  if (loom_runtime_pool_memory(storage_owner_)) {
     ASSERT_EQ(large.find("HTTP/1.1 503"), 0u) << large;
     EXPECT_NE(large.find("invocation working set"), std::string::npos);
   } else {
@@ -1260,7 +1261,7 @@ TEST_P(SourceImageServiceTest, ShapeCompilationFailureLeavesModelReusable) {
 
 TEST_P(SourceImageServiceTest, IndependentLogReadersCannotBlockColdImageWork) {
   ASSERT_NO_FATAL_FAILURE(CreateStandaloneModel());
-  loom_serve::testing::StalledStderr stalled;
+  loom_runtime::testing::StalledStderr stalled;
   ASSERT_NO_FATAL_FAILURE(stalled.Begin());
   Start();
   auto poll = [&](const std::string& cursor) {
@@ -1367,7 +1368,7 @@ TEST_P(SourceImageServiceTest, DynamicImageAdmissionRetirementAndReuse) {
   StartManaged();
   EXPECT_NE(Read(Send("GET", "/v1/models")).find(R"("data":[])"),
             std::string::npos);
-  loom_serve::testing::StalledStderr stalled;
+  loom_runtime::testing::StalledStderr stalled;
   ASSERT_NO_FATAL_FAILURE(stalled.Begin());
   EXPECT_EQ(Read(Send("POST", "/v1/models/register",
                       Declaration("pixels", directory_, "drained")))
@@ -1534,14 +1535,14 @@ TEST_P(SourceImageServiceTest, TokenizerFailureRetiresCompiledModel) {
       .text_tokens = 32,
       .command_quantum = GetParam(),
   };
-  const auto before = loom_serve_pool_statistics(storage_owner_);
+  const auto before = loom_runtime_pool_statistics(storage_owner_);
   loom_serve_image_model_t* failed = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_NOT_FOUND,
       loom_serve_image_model_allocate(device_, storage_owner_, &options,
                                       host_allocator_, &failed));
   EXPECT_EQ(failed, nullptr);
-  const auto after = loom_serve_pool_statistics(storage_owner_);
+  const auto after = loom_runtime_pool_statistics(storage_owner_);
   EXPECT_EQ(after.retained.reserved_bytes, before.retained.reserved_bytes);
   EXPECT_EQ(after.retained.committed_bytes, before.retained.committed_bytes);
 
@@ -1569,7 +1570,7 @@ TEST_P(SourceImageServiceTest, FailedImageSourceLeavesPeerUsable) {
     ASSERT_TRUE(source.good());
   }
   StartManaged();
-  loom_serve::testing::StalledStderr stalled;
+  loom_runtime::testing::StalledStderr stalled;
   ASSERT_NO_FATAL_FAILURE(stalled.Begin());
   EXPECT_EQ(
       Read(Send("POST", "/v1/models/register", Declaration("peer", directory_)))
@@ -1629,10 +1630,10 @@ TEST_P(SourceImageServiceTest, FailedPartReadinessPreservesActualRetirement) {
   bool resolved = false;
   IREE_ASSERT_OK(generator.advance_batch(generator.self, false, &resolved));
   ASSERT_TRUE(resolved);
-  loom_serve_residency_admission_t admission;
+  loom_runtime_residency_admission_t admission;
   IREE_ASSERT_OK(generator.try_admit(generator.self, &admission));
-  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
-  loom_serve_execution_frontier_t frontier;
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+  loom_runtime_execution_frontier_t frontier;
   bool complete = false;
   IREE_ASSERT_OK(generator.submit(generator.self, 0, &frontier, &complete));
   EXPECT_EQ(complete, GetParam() == 0);
@@ -1774,14 +1775,14 @@ class ImageSpecializationTest : public SourceImageServiceTest {
     IREE_ASSERT_OK(Resolve(false));
     EXPECT_EQ(compiler_allocations_.load() == before, reuse);
     const auto generator = loom_serve_image_model_generator(model_);
-    IREE_ASSERT_OK(loom_serve_residency_acquire_wait(
+    IREE_ASSERT_OK(loom_runtime_residency_acquire_wait(
         loom_serve_image_model_residency(model_)));
     // From admission onward, teardown joins the model's accepted ownership.
     prepared_ = false;
     uint32_t parts = 0;
     bool complete = false;
     while (!complete) {
-      loom_serve_execution_frontier_t frontier;
+      loom_runtime_execution_frontier_t frontier;
       IREE_ASSERT_OK(generator.submit(
           generator.self,
           cancel && parts ? LOOM_SERVE_IMAGE_SUBMIT_FLAG_CANCEL : 0, &frontier,
@@ -1868,7 +1869,7 @@ TEST_P(ImageSpecializationTest, PeerAdmissionRetainsWholeInvocationWorkingSet) {
   };
   ASSERT_NO_FATAL_FAILURE(CreateStandaloneModel());
   ASSERT_NO_FATAL_FAILURE(prepare());
-  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(
+  IREE_ASSERT_OK(loom_runtime_residency_acquire_wait(
       loom_serve_image_model_residency(model_)));
   prepared_ = false;
   const auto destroy = [](loom_serve_image_model_t* model) {
@@ -1880,15 +1881,15 @@ TEST_P(ImageSpecializationTest, PeerAdmissionRetainsWholeInvocationWorkingSet) {
   ASSERT_NO_FATAL_FAILURE(prepare());
   const auto peer = loom_serve_image_model_generator(model_);
   const auto expect_peer_capacity = [&] {
-    loom_serve_residency_admission_t admission;
+    loom_runtime_residency_admission_t admission;
     IREE_ASSERT_OK(peer.try_admit(peer.self, &admission));
     // Each image's float output is 19,200 bytes. Both fit individually, but
     // together exceed the bounded domain's 32 KiB before input and scratch.
-    EXPECT_EQ(admission, loom_serve_pool_memory(storage_owner_)
-                             ? LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY
-                             : LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
-    if (admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
-      loom_serve_residency_release(loom_serve_image_model_residency(model_));
+    EXPECT_EQ(admission, loom_runtime_pool_memory(storage_owner_)
+                             ? LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY
+                             : LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+    if (admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED) {
+      loom_runtime_residency_release(loom_serve_image_model_residency(model_));
     }
   };
   ASSERT_NO_FATAL_FAILURE(expect_peer_capacity());
@@ -1896,7 +1897,7 @@ TEST_P(ImageSpecializationTest, PeerAdmissionRetainsWholeInvocationWorkingSet) {
     const auto generator = loom_serve_image_model_generator(model);
     bool complete = false;
     while (!complete) {
-      loom_serve_execution_frontier_t frontier;
+      loom_runtime_execution_frontier_t frontier;
       IREE_ASSERT_OK(generator.submit(generator.self, 0, &frontier, &complete));
       ASSERT_NO_FATAL_FAILURE(Wait(frontier));
       if (check_peer) {
@@ -1917,9 +1918,9 @@ TEST_P(ImageSpecializationTest, PeerAdmissionRetainsWholeInvocationWorkingSet) {
   ASSERT_NO_FATAL_FAILURE(finish(first.get(), true));
 
   // The identical prepared peer now fits, without another JIT or preparation.
-  loom_serve_residency_admission_t admission;
+  loom_runtime_residency_admission_t admission;
   IREE_ASSERT_OK(peer.try_admit(peer.self, &admission));
-  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
   prepared_ = false;
   ASSERT_NO_FATAL_FAILURE(finish(model_, false));
 }

@@ -8,7 +8,7 @@
 
 #include <string.h>
 
-#include "loom/serve/runtime/host/clock.h"
+#include "loom/runtime/host/clock.h"
 #include "loom/service/telemetry/record.h"
 
 bool loom_serve_text_session_name_valid(iree_string_view_t name) {
@@ -129,7 +129,7 @@ static loom_serve_text_chat_response_t loom_serve_text_response_metadata(
 iree_status_t loom_serve_text_session_begin(loom_serve_text_session_t* session,
                                             const iree_tokenizer_t* tokenizer,
                                             iree_string_view_t model_name) {
-  session->request.created_unix_seconds = loom_serve_clock_now_unix_seconds();
+  session->request.created_unix_seconds = loom_runtime_clock_now_unix_seconds();
   iree_string_builder_reset(&session->response);
   loom_serve_text_chat_completion_deinitialize(&session->completion);
   if (session->mode == LOOM_SERVE_TEXT_MODE_ENCODE) {

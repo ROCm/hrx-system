@@ -9,8 +9,8 @@
 
 #include "iree/base/tooling/flags.h"
 #include "loom/model/card.h"
-#include "loom/serve/runtime/parameter/weights_test_base.h"
-#include "loom/serve/runtime/program/package.h"
+#include "loom/runtime/parameter/weights_test_base.h"
+#include "loom/runtime/program/package.h"
 #include "loom/serve/service/image/model.h"
 
 IREE_FLAG(string, parameter_image_source, "",
@@ -19,19 +19,19 @@ IREE_FLAG(string, parameter_image_tokenizer, "", "Parameter image tokenizer.");
 
 namespace loom_serve::testing {
 
-class ImageParameterTest : public WeightsTest {
+class ImageParameterTest : public loom_runtime::testing::WeightsTest {
  protected:
   void SetUpPool() override {
-    ASSERT_NO_FATAL_FAILURE(WeightsTest::SetUpPool());
+    ASSERT_NO_FATAL_FAILURE(loom_runtime::testing::WeightsTest::SetUpPool());
     const uint64_t root_bytes =
-        loom_serve_pool_weight_geometry(storage_owner_).minimum_size;
+        loom_runtime_pool_weight_geometry(storage_owner_).minimum_size;
     // Three parameter ranges plus one shared activation/execution workspace.
     ASSERT_NO_FATAL_FAILURE(AllocatePool(4 * root_bytes));
   }
 
   void TearDown() override {
     IREE_EXPECT_OK(loom_serve_image_model_free(model_));
-    WeightsTest::TearDown();
+    loom_runtime::testing::WeightsTest::TearDown();
   }
 
   void Create(bool card_backed = false,
@@ -45,23 +45,26 @@ class ImageParameterTest : public WeightsTest {
     ASSERT_TRUE(
         std::filesystem::copy_file(FLAG_parameter_image_tokenizer,
                                    checkpoint_directory + "/tokenizer.json"));
-    std::unique_ptr<loom_serve_package_t, decltype(&loom_serve_package_release)>
-        package(nullptr, loom_serve_package_release);
+    std::unique_ptr<loom_runtime_package_t,
+                    decltype(&loom_runtime_package_release)>
+        package(nullptr, loom_runtime_package_release);
     std::unique_ptr<loom_model_card_t, decltype(&loom_model_card_release)> card(
         nullptr, loom_model_card_release);
     if (card_backed) {
       const std::filesystem::path paths[] = {
-          FLAG_parameter_image_source, WeightSourcePath(),
-          std::filesystem::path(WeightSourcePath()).parent_path() /
+          FLAG_parameter_image_source,
+          loom_runtime::testing::WeightSourcePath(),
+          std::filesystem::path(loom_runtime::testing::WeightSourcePath())
+                  .parent_path() /
               "policy.loom",
           FLAG_parameter_image_tokenizer};
       const iree_string_view_t names[] = {
           IREE_SV("parameters.loom"), IREE_SV("weights.loom"),
-          IREE_SV("loom/src/loom/serve/runtime/parameter/testdata/weights/"
+          IREE_SV("loom/src/loom/runtime/parameter/testdata/weights/"
                   "policy.loom"),
           IREE_SV("tokenizer.json")};
       std::string contents[IREE_ARRAYSIZE(paths)];
-      loom_serve_package_file_t files[IREE_ARRAYSIZE(paths)];
+      loom_runtime_package_file_t files[IREE_ARRAYSIZE(paths)];
       for (size_t i = 0; i < IREE_ARRAYSIZE(paths); ++i) {
         std::ifstream input(paths[i], std::ios::binary);
         ASSERT_TRUE(input.good()) << paths[i];
@@ -69,10 +72,10 @@ class ImageParameterTest : public WeightsTest {
         files[i] = {names[i], iree_make_const_byte_span(contents[i].data(),
                                                         contents[i].size())};
       }
-      loom_serve_package_t* value = nullptr;
-      IREE_ASSERT_OK(loom_serve_package_create(IREE_SV("model.json"),
-                                               IREE_ARRAYSIZE(files), files,
-                                               host_allocator_, &value));
+      loom_runtime_package_t* value = nullptr;
+      IREE_ASSERT_OK(loom_runtime_package_create(IREE_SV("model.json"),
+                                                 IREE_ARRAYSIZE(files), files,
+                                                 host_allocator_, &value));
       package.reset(value);
       std::ifstream input(std::filesystem::path(FLAG_parameter_image_source)
                               .replace_extension(".json"));
@@ -88,7 +91,8 @@ class ImageParameterTest : public WeightsTest {
         card_backed ? IREE_SV("parameters.loom")
                     : iree_make_cstring_view(FLAG_parameter_image_source);
     const iree_string_view_t providers[] = {
-        iree_make_cstring_view(WeightSourcePath()), source};
+        iree_make_cstring_view(loom_runtime::testing::WeightSourcePath()),
+        source};
     const loom_serve_image_model_options_t options = {
         .sources =
             {

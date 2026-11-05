@@ -9,9 +9,9 @@
 
 #include "iree/tokenizer/tokenizer.h"
 #include "iree/vm/buffer.h"
-#include "loom/serve/runtime/device/device.h"
-#include "loom/serve/runtime/program/compilation.h"
-#include "loom/serve/runtime/program/sources.h"
+#include "loom/runtime/device/device.h"
+#include "loom/runtime/program/compilation.h"
+#include "loom/runtime/program/sources.h"
 #include "loom/serve/service/execution_reconfiguration.h"
 #include "loom/serve/service/finite/result.h"
 #include "loom/serve/service/prepared_request.h"
@@ -36,13 +36,13 @@ loom_serve_execution_update_t loom_serve_finite_model_execution_update(
 
 typedef struct loom_serve_finite_model_options_t {
   // Explicit program inputs and local base, borrowed through load completion.
-  loom_serve_sources_t sources;
+  loom_runtime_sources_t sources;
   // Asset directory interpreted by the cold source program.
   iree_string_view_t asset_directory;
   // Source-owned JSON object configuring capacity and model policy.
   iree_string_view_t options;
   // Bounded idle reuse of source-declared request executables.
-  loom_serve_variant_cache_options_t specialization_cache;
+  loom_runtime_variant_cache_options_t specialization_cache;
 } loom_serve_finite_model_options_t;
 
 // Owner-driven preparation. Private CPU/JIT work runs on the shared host;
@@ -60,7 +60,7 @@ typedef void (*loom_serve_finite_load_wake_fn_t)(void* user_data);
 // and pool are separate borrowed bindings; the pool's complete access scope
 // includes the device's execution and transfer families.
 iree_status_t loom_serve_finite_load_allocate(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
+    loom_runtime_device_t* device, loom_runtime_pool_t* pool,
     const loom_serve_finite_model_options_t* options,
     loom_serve_finite_load_wake_fn_t wake, void* user_data,
     iree_allocator_t host_allocator, loom_serve_finite_load_t** out_load);
@@ -82,7 +82,7 @@ iree_status_t loom_serve_finite_load_advance(
 
 // Terminal-only queries. Evidence is borrowed until take_model or destruction;
 // take_model transfers a successfully prepared, still-unactivated model.
-const loom_serve_compilation_report_t* loom_serve_finite_load_report(
+const loom_runtime_compilation_report_t* loom_serve_finite_load_report(
     const loom_serve_finite_load_t* load);
 loom_serve_finite_model_t* loom_serve_finite_load_take_model(
     loom_serve_finite_load_t* load);
@@ -137,7 +137,7 @@ iree_status_t loom_serve_finite_load_free(loom_serve_finite_load_t* load);
 // through load_report; this wrapper performs no process-global output. Live
 // owners use load_advance instead.
 iree_status_t loom_serve_finite_model_allocate(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
+    loom_runtime_device_t* device, loom_runtime_pool_t* pool,
     const loom_serve_finite_model_options_t* options,
     iree_allocator_t host_allocator, loom_serve_finite_model_t** out_model);
 
@@ -174,7 +174,7 @@ iree_host_size_t loom_serve_finite_model_input_capacity(
     const loom_serve_finite_model_t* model);
 const iree_tokenizer_t* loom_serve_finite_model_tokenizer(
     const loom_serve_finite_model_t* model);
-loom_serve_residency_t* loom_serve_finite_model_residency(
+loom_runtime_residency_t* loom_serve_finite_model_residency(
     const loom_serve_finite_model_t* model);
 
 // Source-owned forecast for producing one complete logical request, possibly
@@ -211,7 +211,7 @@ iree_status_t loom_serve_finite_model_forecast_memory(
     loom_serve_finite_memory_forecast_t* out_forecast);
 
 // Model-wide checkpoint accounting and policy, including idle cached banks.
-loom_serve_residency_snapshot_t loom_serve_finite_model_parameters(
+loom_runtime_residency_snapshot_t loom_serve_finite_model_parameters(
     const loom_serve_finite_model_t* model);
 void loom_serve_finite_model_set_pinned(loom_serve_finite_model_t* model,
                                         bool pinned);
@@ -265,7 +265,7 @@ iree_status_t loom_serve_finite_model_advance_batch(
 // terminal; payload and parameter protection remain until producer retirement.
 iree_status_t loom_serve_finite_model_submit(
     loom_serve_finite_model_t* model, loom_serve_finite_result_t** out_result,
-    loom_serve_execution_frontier_t* out_frontier);
+    loom_runtime_execution_frontier_t* out_frontier);
 
 // Scheduler consumes successful producer readiness, releasing the residency pin
 // and uploaded payload. Independent results may remain live across subsequent

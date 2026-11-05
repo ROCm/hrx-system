@@ -8,7 +8,7 @@
 #define LOOM_SERVE_SERVER_ROUTER_H_
 
 #include "iree/task/executor.h"
-#include "loom/serve/runtime/device/device.h"
+#include "loom/runtime/device/device.h"
 #include "loom/serve/server/registry.h"
 #include "loom/serve/server/resources.h"
 

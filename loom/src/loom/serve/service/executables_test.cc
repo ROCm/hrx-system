@@ -12,24 +12,24 @@
 #include "iree/base/tooling/flags.h"
 #include "iree/vm/buffer.h"
 #include "iree/vm/sync.h"
-#include "loom/serve/runtime/parameter/module.h"
-#include "loom/serve/runtime/parameter/weights_test_base.h"
-#include "loom/serve/runtime/program/program.h"
+#include "loom/runtime/parameter/module.h"
+#include "loom/runtime/parameter/weights_test_base.h"
+#include "loom/runtime/program/program.h"
 
 IREE_FLAG(string, executable_sources, "", "Request executable source fixture.");
 
 namespace loom_serve::testing {
 
-class ExecutablesTest : public WeightsTest {
+class ExecutablesTest : public loom_runtime::testing::WeightsTest {
  protected:
   virtual uint64_t SlabCount() const { return 2; }
 
   void SetUpPool() override {
-    ASSERT_NO_FATAL_FAILURE(WeightsTest::SetUpPool());
+    ASSERT_NO_FATAL_FAILURE(loom_runtime::testing::WeightsTest::SetUpPool());
     if (GetParam()) {
       // Resolve the native extent before fixing this case's physical budget.
       const uint64_t root_bytes =
-          loom_serve_pool_weight_geometry(storage_owner_).minimum_size;
+          loom_runtime_pool_weight_geometry(storage_owner_).minimum_size;
       ASSERT_NO_FATAL_FAILURE(AllocatePool(SlabCount() * root_bytes));
     }
   }
@@ -39,7 +39,7 @@ class ExecutablesTest : public WeightsTest {
       return;
     }
     if (execution_) {
-      IREE_EXPECT_OK(loom_serve_execution_drain(execution_));
+      IREE_EXPECT_OK(loom_runtime_execution_drain(execution_));
     }
     if (executables_ && !retiring_) {
       loom_serve_executables_release(executables_);
@@ -47,24 +47,24 @@ class ExecutablesTest : public WeightsTest {
     loom_serve_executables_retire(executables_);
     IREE_EXPECT_OK(loom_serve_executables_await_retirement(executables_));
     IREE_EXPECT_OK(loom_serve_executables_free(executables_));
-    loom_serve_program_free(control_);
+    loom_runtime_program_free(control_);
     iree_vm_module_release(runner_);
     iree_vm_module_release(parameters_);
-    loom_serve_stage_table_free(table_);
-    loom_serve_preparation_free(preparation_);
-    loom_serve_parameter_sources_release(parameter_sources_);
+    loom_runtime_stage_table_free(table_);
+    loom_runtime_preparation_free(preparation_);
+    loom_runtime_parameter_sources_release(parameter_sources_);
     iree_vm_environment_free(environment_);
-    loom_serve_parameter_bank_retire(bank_, nullptr, nullptr);
-    IREE_EXPECT_OK(loom_serve_parameter_bank_await_retirement(bank_));
-    loom_serve_residency_free(residency_);
-    IREE_EXPECT_OK(loom_serve_parameter_bank_free(bank_));
+    loom_runtime_parameter_bank_retire(bank_, nullptr, nullptr);
+    IREE_EXPECT_OK(loom_runtime_parameter_bank_await_retirement(bank_));
+    loom_runtime_residency_free(residency_);
+    IREE_EXPECT_OK(loom_runtime_parameter_bank_free(bank_));
     iree_notification_deinitialize(&notification_);
-    WeightsTest::TearDown();
+    loom_runtime::testing::WeightsTest::TearDown();
   }
 
   iree_status_t Declare(const char* root, bool swapped, int32_t count,
                         int64_t tag, uint64_t limit,
-                        loom_serve_preparation_t** out_preparation,
+                        loom_runtime_preparation_t** out_preparation,
                         const char* entry = "declare") {
     const std::string policy = directory_ + "/policy.loom";
     const std::string strings[] = {
@@ -97,43 +97,43 @@ class ExecutablesTest : public WeightsTest {
     arguments[5] = iree_vm_variant_from_i64(tag);
     arguments[6] = iree_vm_variant_from_i64(static_cast<int64_t>(limit));
     iree_vm_module_t* capture = nullptr;
-    loom_serve_program_t* program = nullptr;
+    loom_runtime_program_t* program = nullptr;
     if (iree_status_is_ok(status)) {
-      status = loom_serve_preparation_module_create(
+      status = loom_runtime_preparation_module_create(
           environment_, nullptr, nullptr, host_allocator_, &capture);
     }
     if (iree_status_is_ok(status)) {
-      loom_serve_preparation_module_begin(
+      loom_runtime_preparation_module_begin(
           capture, preparation_ ? 1 : 0, preparation_,
-          LOOM_SERVE_PREPARATION_FLAG_PARAMETERS |
+          LOOM_RUNTIME_PREPARATION_FLAG_PARAMETERS |
               (preparation_ ? 0
-                            : LOOM_SERVE_PREPARATION_FLAG_PARAMETER_ARENAS));
-      loom_serve_compilation_report_t report = {};
+                            : LOOM_RUNTIME_PREPARATION_FLAG_PARAMETER_ARENAS));
+      loom_runtime_compilation_report_t report = {};
       const auto root = iree_make_cstring_view(entry);
-      status = loom_serve_program_allocate(
-          loom_serve_host_target_environment(
-              loom_serve_device_host(device_owner_)),
+      status = loom_runtime_program_allocate(
+          loom_runtime_host_target_environment(
+              loom_runtime_device_host(device_owner_)),
           environment_, &sources_,
           iree_make_cstring_view(FLAG_executable_sources), 1, &root,
           {&capture, 1}, &report, host_allocator_, &program);
       iree_vm_function_t function = {};
       if (iree_status_is_ok(status)) {
-        status =
-            iree_vm_process_lookup_function(loom_serve_program_process(program),
-                                            IREE_SV("model"), root, &function);
+        status = iree_vm_process_lookup_function(
+            loom_runtime_program_process(program), IREE_SV("model"), root,
+            &function);
       }
       if (iree_status_is_ok(status)) {
         status =
-            iree_vm_invoke(loom_serve_program_invocation(program), function,
+            iree_vm_invoke(loom_runtime_program_invocation(program), function,
                            iree_vm_variant_span_from_array(arguments), {});
       }
-      *out_preparation = loom_serve_preparation_module_take(capture);
+      *out_preparation = loom_runtime_preparation_module_take(capture);
       if (!iree_status_is_ok(status)) {
-        loom_serve_preparation_free(*out_preparation);
+        loom_runtime_preparation_free(*out_preparation);
         *out_preparation = nullptr;
       }
     }
-    loom_serve_program_free(program);
+    loom_runtime_program_free(program);
     iree_vm_module_release(capture);
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
     return status;
@@ -161,29 +161,29 @@ class ExecutablesTest : public WeightsTest {
                                  arena_bytes ? "declare_arena" : "declare"));
     const loom_model_file_list_t* paths = nullptr;
     const uint32_t source_count =
-        loom_serve_preparation_local_sources(preparation_, &paths);
-    IREE_RETURN_IF_ERROR(loom_serve_parameter_sources_create(
+        loom_runtime_preparation_local_sources(preparation_, &paths);
+    IREE_RETURN_IF_ERROR(loom_runtime_parameter_sources_create(
         nullptr, &sources_, source_count, paths, host_allocator_,
         &parameter_sources_));
     IREE_RETURN_IF_ERROR(Compile(0, root_name));
-    IREE_RETURN_IF_ERROR(loom_serve_parameter_bank_allocate(
+    IREE_RETURN_IF_ERROR(loom_runtime_parameter_bank_allocate(
         device_owner_, storage_owner_,
-        loom_serve_jit_stage_program(compiled_[0]), host_allocator_, &bank_));
-    const auto* declaration = loom_serve_preparation_stage(preparation_, 0);
+        loom_runtime_jit_stage_program(compiled_[0]), host_allocator_, &bank_));
+    const auto* declaration = loom_runtime_preparation_stage(preparation_, 0);
     iree_status_t status = iree_ok_status();
     for (size_t i = 0;
          i < declaration->parameter_count && iree_status_is_ok(status); ++i) {
-      status = loom_serve_weights_prepare(
-          loom_serve_parameter_bank_weights(bank_, i),
-          loom_serve_device_host(device_owner_), jit_,
+      status = loom_runtime_weights_prepare(
+          loom_runtime_parameter_bank_weights(bank_, i),
+          loom_runtime_device_host(device_owner_), jit_,
           IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, &sources_,
           &declaration->parameters[i], parameter_sources_);
     }
     IREE_RETURN_IF_ERROR(status);
-    auto* group = loom_serve_parameter_bank_group(bank_);
-    IREE_RETURN_IF_ERROR(loom_serve_residency_allocate(
-        loom_serve_pool_residency_cache(storage_owner_), execution_, 1, &group,
-        host_allocator_, &residency_));
+    auto* group = loom_runtime_parameter_bank_group(bank_);
+    IREE_RETURN_IF_ERROR(loom_runtime_residency_allocate(
+        loom_runtime_pool_residency_cache(storage_owner_), execution_, 1,
+        &group, host_allocator_, &residency_));
     loom_serve_executable_options_t options = {
         .device = device_owner_,
         .pool = storage_owner_,
@@ -197,26 +197,26 @@ class ExecutablesTest : public WeightsTest {
         .recording =
             {
                 .queue_family = iree_hal_queue_family(dispatch_),
-                .parameters = loom_serve_parameter_bank_buffers(bank_),
+                .parameters = loom_runtime_parameter_bank_buffers(bank_),
                 .binding_count = static_cast<uint16_t>(arena_bytes ? 2 : 1),
             },
         .cache = {capacity, max_bytes},
         .parameter_cache = {parameter_capacity, parameter_bytes},
     };
-    IREE_RETURN_IF_ERROR(loom_serve_stage_table_allocate(
+    IREE_RETURN_IF_ERROR(loom_runtime_stage_table_allocate(
         &options.recording, nullptr, 1, compiled_.data(), host_allocator_,
         &table_));
-    const loom_serve_module_options_t module_options = {
+    const loom_runtime_module_options_t module_options = {
         .binding_capacity = static_cast<uint16_t>(arena_bytes ? 2 : 1),
         .stages = {table_->part_count, table_->parts},
     };
-    IREE_RETURN_IF_ERROR(loom_serve_module_create(
+    IREE_RETURN_IF_ERROR(loom_runtime_module_create(
         &hal_types_, execution_, module_options, host_allocator_, &runner_));
     options.stages = table_;
     options.runner = runner_;
-    IREE_RETURN_IF_ERROR(loom_serve_parameters_module_create(
+    IREE_RETURN_IF_ERROR(loom_runtime_parameters_module_create(
         environment_, &hal_types_,
-        loom_serve_device_transfer_queue(device_owner_), parameter_sources_,
+        loom_runtime_device_transfer_queue(device_owner_), parameter_sources_,
         host_allocator_, &parameters_));
     options.parameter_module = parameters_;
     IREE_RETURN_IF_ERROR(loom_serve_executables_allocate(
@@ -230,18 +230,18 @@ class ExecutablesTest : public WeightsTest {
                        &notification_});
     const iree_string_view_t roots[] = {IREE_SV("submit"),
                                         IREE_SV("submit_indexed")};
-    loom_serve_compilation_report_t report = {};
-    IREE_RETURN_IF_ERROR(loom_serve_program_allocate(
-        loom_serve_host_target_environment(
-            loom_serve_device_host(device_owner_)),
+    loom_runtime_compilation_report_t report = {};
+    IREE_RETURN_IF_ERROR(loom_runtime_program_allocate(
+        loom_runtime_host_target_environment(
+            loom_runtime_device_host(device_owner_)),
         environment_, &sources_,
         iree_make_cstring_view(FLAG_executable_sources), arena_bytes ? 2 : 1,
         roots, {&runner_, 1}, &report, host_allocator_, &control_));
     IREE_RETURN_IF_ERROR(
-        iree_vm_process_lookup_function(loom_serve_program_process(control_),
+        iree_vm_process_lookup_function(loom_runtime_program_process(control_),
                                         IREE_SV("model"), roots[0], &submit_));
     return arena_bytes ? iree_vm_process_lookup_function(
-                             loom_serve_program_process(control_),
+                             loom_runtime_program_process(control_),
                              IREE_SV("model"), roots[1], &submit_indexed_)
                        : iree_ok_status();
   }
@@ -255,7 +255,7 @@ class ExecutablesTest : public WeightsTest {
   iree_status_t Begin(const char* root, bool swapped, int32_t count = 2,
                       int64_t tag = 0, uint64_t limit = 0,
                       const char* entry = "declare") {
-    loom_serve_preparation_t* declaration = nullptr;
+    loom_runtime_preparation_t* declaration = nullptr;
     IREE_RETURN_IF_ERROR(
         Declare(root, swapped, count, tag, limit, &declaration, entry));
     loom_serve_executables_capture(executables_);
@@ -282,13 +282,13 @@ class ExecutablesTest : public WeightsTest {
 
   void Execute(int32_t first, int32_t stride = 3, int32_t stage = 1) {
     auto* residency = loom_serve_executables_residency(executables_);
-    IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residency));
+    IREE_ASSERT_OK(loom_runtime_residency_acquire_wait(residency));
     iree_vm_variant_t arguments[] = {
         iree_vm_variant_from_i32(stage),
         iree_hal_buffer_variant_from_ptr_borrowed(&hal_types_, output_buffer_)};
     iree_vm_variant_t results[1] = {};
     auto status =
-        iree_vm_invoke(loom_serve_program_invocation(control_), submit_,
+        iree_vm_invoke(loom_runtime_program_invocation(control_), submit_,
                        iree_vm_variant_span_from_array(arguments),
                        iree_vm_variant_span_from_array(results));
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
@@ -305,9 +305,10 @@ class ExecutablesTest : public WeightsTest {
     };
     uint64_t completion = 0;
     IREE_ASSERT_OK(
-        loom_serve_execution_feedback(execution_, 1, &download, &completion));
-    IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
-    loom_serve_residency_release(residency);
+        loom_runtime_execution_feedback(execution_, 1, &download, &completion));
+    IREE_ASSERT_OK(
+        loom_runtime_execution_feedback_wait(execution_, completion));
+    loom_runtime_residency_release(residency);
     for (size_t i = 0; i < output_.size(); ++i) {
       EXPECT_EQ(output_[i], first + stride * i);
     }
@@ -332,7 +333,7 @@ class ExecutablesTest : public WeightsTest {
   iree_status_t ReplaceSources() {
     const iree_string_view_t providers[] = {IREE_SV("stages.loom"),
                                             IREE_SV("packing.loom")};
-    const loom_serve_sources_t sources = {
+    const loom_runtime_sources_t sources = {
         .base_directory =
             iree_make_string_view(directory_.data(), directory_.size()),
         .count = IREE_ARRAYSIZE(providers),
@@ -354,7 +355,7 @@ class ExecutablesTest : public WeightsTest {
     IREE_RETURN_IF_ERROR(update.compile(
         update.self, &sources,
         [](void* self, iree_status_t status, void* value,
-           const loom_serve_compilation_report_t* report) {
+           const loom_runtime_compilation_report_t* report) {
           auto* completion = static_cast<Completion*>(self);
           std::lock_guard<std::mutex> lock(completion->mutex);
           completion->status = status;
@@ -376,7 +377,7 @@ class ExecutablesTest : public WeightsTest {
   }
 
   // Authored locators are rooted in the test's declared runfiles namespace.
-  const loom_serve_sources_t sources_ = {.base_directory = IREE_SV(".")};
+  const loom_runtime_sources_t sources_ = {.base_directory = IREE_SV(".")};
   // VM identities outliving every source capture and native module.
   iree_vm_environment_t* environment_ = nullptr;
   // Canonical builtin VM reference identities.
@@ -384,15 +385,15 @@ class ExecutablesTest : public WeightsTest {
   // Canonical native buffer identities.
   iree_hal_module_types_t hal_types_ = {};
   // Immutable registration declarations.
-  loom_serve_preparation_t* preparation_ = nullptr;
+  loom_runtime_preparation_t* preparation_ = nullptr;
   // Original checkpoint indexes shared by parameter banks and request choices.
-  loom_serve_parameter_sources_t* parameter_sources_ = nullptr;
+  loom_runtime_parameter_sources_t* parameter_sources_ = nullptr;
   // Registration's independently loaded roots with colliding tensor names.
-  loom_serve_parameter_bank_t* bank_ = nullptr;
+  loom_runtime_parameter_bank_t* bank_ = nullptr;
   // Atomic admission for all registration-owned parameters.
-  loom_serve_residency_t* residency_ = nullptr;
+  loom_runtime_residency_t* residency_ = nullptr;
   // Original recordings borrowed by the executable owner.
-  loom_serve_stage_table_t* table_ = nullptr;
+  loom_runtime_stage_table_t* table_ = nullptr;
   // Native runner consuming the selected request table.
   iree_vm_module_t* runner_ = nullptr;
   // Demand-read capability selected atomically with the request's command
@@ -401,7 +402,7 @@ class ExecutablesTest : public WeightsTest {
   // Source-selected request ownership under test.
   loom_serve_executables_t* executables_ = nullptr;
   // Real VM caller of the runner ABI.
-  loom_serve_program_t* control_ = nullptr;
+  loom_runtime_program_t* control_ = nullptr;
   // Bound request entry, borrowing control_.
   iree_vm_function_t submit_ = {};
   // Bound two-buffer consumer for indexed bank cohorts.
@@ -418,7 +419,7 @@ class ExecutablesTest : public WeightsTest {
 
 TEST_P(ExecutablesTest, RebindsCheckpointDataWithoutRecompilingSharedCode) {
   IREE_ASSERT_OK(Create(1));
-  const auto* base = loom_serve_parameter_bank_buffers(bank_)[0];
+  const auto* base = loom_runtime_parameter_bank_buffers(bank_)[0];
   const auto before = compilation_.commands;
   IREE_ASSERT_OK(Select("domains", false));
   ASSERT_NO_FATAL_FAILURE(Execute(290));
@@ -433,22 +434,22 @@ TEST_P(ExecutablesTest, RebindsCheckpointDataWithoutRecompilingSharedCode) {
   IREE_ASSERT_OK(Select("domains", false));
   ASSERT_NO_FATAL_FAILURE(Execute(290));
   EXPECT_EQ(compilation_.commands, before + 1);
-  EXPECT_EQ(loom_serve_parameter_bank_buffers(bank_)[0], base);
-  EXPECT_EQ(loom_serve_residency_activity(residency_).activations, 2u);
+  EXPECT_EQ(loom_runtime_parameter_bank_buffers(bank_)[0], base);
+  EXPECT_EQ(loom_runtime_residency_activity(residency_).activations, 2u);
 }
 
 TEST_P(ExecutablesTest, SourceOnlyChoicesPreserveColdCodeAndResidentBindings) {
   IREE_ASSERT_OK(Create(1));
   const auto commands = compilation_.commands;
   const auto kernels = compilation_.kernels;
-  const auto* base = loom_serve_parameter_bank_buffers(bank_)[0];
+  const auto* base = loom_runtime_parameter_bank_buffers(bank_)[0];
   for (bool swapped : {false, true, false}) {
     IREE_ASSERT_OK(Begin("domains", swapped, 0, 0, 0, "sources_only"));
     IREE_ASSERT_OK(Advance(false));
     ASSERT_NO_FATAL_FAILURE(Execute(290, 3, 0));
     EXPECT_EQ(compilation_.commands, commands);
     EXPECT_EQ(compilation_.kernels, kernels);
-    EXPECT_EQ(loom_serve_parameter_bank_buffers(bank_)[0], base);
+    EXPECT_EQ(loom_runtime_parameter_bank_buffers(bank_)[0], base);
   }
 }
 
@@ -491,7 +492,7 @@ TEST_P(ExecutablesTest, CancellationJoinsRecordingWithoutActivatingParameters) {
   IREE_ASSERT_OK(Select("domains", false));
   ASSERT_NO_FATAL_FAILURE(Execute(290));
   const auto commands = compilation_.commands;
-  const auto activity = loom_serve_residency_activity(residency_);
+  const auto activity = loom_runtime_residency_activity(residency_);
   IREE_ASSERT_OK(Begin("domains", true));
   bool complete = false;
   IREE_ASSERT_OK(
@@ -499,7 +500,7 @@ TEST_P(ExecutablesTest, CancellationJoinsRecordingWithoutActivatingParameters) {
   IREE_ASSERT_OK(Advance(true));
   loom_serve_executables_release(executables_);
   EXPECT_EQ(compilation_.commands, commands);
-  EXPECT_EQ(loom_serve_residency_activity(residency_).activations,
+  EXPECT_EQ(loom_runtime_residency_activity(residency_).activations,
             activity.activations);
   IREE_ASSERT_OK(Select("domains", true));
   ASSERT_NO_FATAL_FAILURE(Execute(190));
@@ -560,18 +561,18 @@ TEST_P(ExecutablesTest, PreparesNewCheckpointWithoutReplacingColdStorage) {
   iree::testing::TempFilePath checkpoint("loom_request", ".safetensors");
   WriteCheckpoint(checkpoint.path(), 200);
   selected_checkpoint_ = checkpoint.path();
-  const auto* base = loom_serve_parameter_bank_buffers(bank_)[0];
+  const auto* base = loom_runtime_parameter_bank_buffers(bank_)[0];
   IREE_ASSERT_OK(Select("raw", false, 1));
   ASSERT_NO_FATAL_FAILURE(Execute(690));
   const auto commands = compilation_.commands;
   IREE_ASSERT_OK(Select("raw", false, 1));
-  EXPECT_EQ(loom_serve_residency_activity(
+  EXPECT_EQ(loom_runtime_residency_activity(
                 loom_serve_executables_residency(executables_))
                 .activations,
             2u);
   ASSERT_NO_FATAL_FAILURE(Execute(690));
   EXPECT_EQ(compilation_.commands, commands);
-  EXPECT_EQ(loom_serve_parameter_bank_buffers(bank_)[0], base);
+  EXPECT_EQ(loom_runtime_parameter_bank_buffers(bank_)[0], base);
 }
 
 TEST_P(ExecutablesTest, CodeEvictionKeepsPreparedCheckpoint) {
@@ -583,7 +584,7 @@ TEST_P(ExecutablesTest, CodeEvictionKeepsPreparedCheckpoint) {
   ASSERT_NO_FATAL_FAILURE(Execute(690));
   const auto commands = compilation_.commands;
   IREE_ASSERT_OK(Select("raw", false, 1));
-  EXPECT_EQ(loom_serve_residency_activity(
+  EXPECT_EQ(loom_runtime_residency_activity(
                 loom_serve_executables_residency(executables_))
                 .activations,
             2u);
@@ -602,13 +603,14 @@ TEST_P(ExecutablesTest, ParameterByteBudgetRetiresRecordingsAndBank) {
   const auto first = loom_serve_executables_parameters(executables_);
   EXPECT_EQ(first.activity.activations, 2u);
   const uint64_t root_bytes =
-      GetParam() ? loom_serve_pool_weight_geometry(storage_owner_).minimum_size
-                 : 0;
+      GetParam()
+          ? loom_runtime_pool_weight_geometry(storage_owner_).minimum_size
+          : 0;
   EXPECT_EQ(first.memory.reserved_bytes, root_bytes);
   EXPECT_EQ(first.memory.committed_bytes, root_bytes);
   EXPECT_EQ(first.memory.released_bytes, root_bytes);
   IREE_ASSERT_OK(Select("raw", false, 1));
-  EXPECT_EQ(loom_serve_residency_activity(
+  EXPECT_EQ(loom_runtime_residency_activity(
                 loom_serve_executables_residency(executables_))
                 .activations,
             1u);
@@ -638,13 +640,13 @@ TEST_P(ExecutablesTest, RetainedCheckpointsDoNotAddIndependentPeaks) {
   ASSERT_NO_FATAL_FAILURE(Execute(990));
   const auto memory = loom_serve_executables_parameters(executables_).memory;
   const uint64_t root_bytes =
-      loom_serve_pool_weight_geometry(storage_owner_).minimum_size;
+      loom_runtime_pool_weight_geometry(storage_owner_).minimum_size;
   EXPECT_EQ(memory.reserved_bytes, 3 * root_bytes);
   EXPECT_EQ(memory.committed_bytes, 2 * root_bytes);
   EXPECT_EQ(memory.released_bytes, root_bytes);
   // The pool observes the actual overlap. A retained checkpoint's historical
   // peak cannot be added to the independently activated replacement's peak.
-  EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).peak_bytes,
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).peak_bytes,
             2 * root_bytes);
 }
 
@@ -725,8 +727,8 @@ TEST_P(ExecutablesTest, PinnedBanksSurviveCodeEvictionAndDrainReloads) {
   ASSERT_NO_FATAL_FAILURE(Execute(690));
   const auto before = loom_serve_executables_parameters(executables_);
   EXPECT_EQ(before.activity.activations, 2u);
-  IREE_ASSERT_OK(loom_serve_residency_cache_trim(
-      loom_serve_pool_residency_cache(storage_owner_), 0));
+  IREE_ASSERT_OK(loom_runtime_residency_cache_trim(
+      loom_runtime_pool_residency_cache(storage_owner_), 0));
   EXPECT_EQ(
       loom_serve_executables_parameters(executables_).memory.committed_bytes,
       before.memory.committed_bytes);
@@ -736,7 +738,7 @@ TEST_P(ExecutablesTest, PinnedBanksSurviveCodeEvictionAndDrainReloads) {
       loom_serve_executables_deactivate(executables_, &complete));
   loom_serve_executables_set_pinned(executables_, false);
   IREE_ASSERT_OK(loom_serve_executables_deactivate(executables_, &complete));
-  IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
+  IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool_));
   IREE_ASSERT_OK(loom_serve_executables_deactivate(executables_, &complete));
   EXPECT_TRUE(complete);
   const auto drained = loom_serve_executables_parameters(executables_);
@@ -776,7 +778,7 @@ TEST_P(ExecutablesTest, CancellationJoinsNewBankAllocationBeforeReuse) {
   IREE_ASSERT_OK(Begin("raw", false, 1));
   std::atomic<bool> cancel = false;
   iree_status_t status = iree_ok_status();
-  ScopedNativeHold hold(device_owner_);
+  loom_runtime::testing::ScopedNativeHold hold(device_owner_);
   std::thread owner([&] {
     bool complete = false;
     while (!complete && iree_status_is_ok(status)) {
@@ -853,19 +855,19 @@ TEST_P(ExecutablesTest, ReplacementRecordingsRetireBeforeCheckpointJoin) {
   ASSERT_NO_FATAL_FAILURE(Execute(690));
   auto update = loom_serve_executables_update(executables_);
   IREE_ASSERT_OK(update.select(update.self, nullptr));
-  IREE_ASSERT_OK(loom_serve_execution_drain(execution_));
+  IREE_ASSERT_OK(loom_runtime_execution_drain(execution_));
   retiring_ = true;
   loom_serve_executables_retire(executables_);
-  loom_serve_program_free(control_);
+  loom_runtime_program_free(control_);
   control_ = nullptr;
   iree_vm_module_release(runner_);
   runner_ = nullptr;
-  loom_serve_stage_table_free(table_);
+  loom_runtime_stage_table_free(table_);
   table_ = nullptr;
-  loom_serve_parameter_bank_retire(bank_, nullptr, nullptr);
+  loom_runtime_parameter_bank_retire(bank_, nullptr, nullptr);
   // No producer remains. A retained replacement table would keep a root view
   // alive forever and make the model's bank-retirement join self-dependent.
-  EXPECT_TRUE(loom_serve_parameter_bank_is_retired(bank_));
+  EXPECT_TRUE(loom_runtime_parameter_bank_is_retired(bank_));
 }
 
 INSTANTIATE_TEST_SUITE_P(Native, ExecutablesTest, ::testing::Bool());
@@ -878,7 +880,7 @@ class ArenaExecutablesTest : public ExecutablesTest {
   iree_status_t CreateArena(uint64_t banks) {
     return Create(
         4, 16 * 1024 * 1024, 16, 1024 * 1024, true,
-        banks * loom_serve_pool_weight_geometry(storage_owner_).minimum_size);
+        banks * loom_runtime_pool_weight_geometry(storage_owner_).minimum_size);
   }
 
   iree_status_t BeginBanks(const std::vector<std::string>& paths,
@@ -928,11 +930,11 @@ class ArenaExecutablesTest : public ExecutablesTest {
     iree_hal_buffer_release(workspace_);
     workspace_ = nullptr;
     IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
-        WeightConsumerPool(),
+        loom_runtime::testing::WeightConsumerPool(),
         iree_hal_make_pool_reservation_request(payload.size(), 8),
         iree_infinite_timeout(), &workspace_));
     auto* residency = loom_serve_executables_residency(executables_);
-    IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residency));
+    IREE_ASSERT_OK(loom_runtime_residency_acquire_wait(residency));
     const iree_hal_transfer_operation_t upload = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
         .upload =
@@ -944,16 +946,16 @@ class ArenaExecutablesTest : public ExecutablesTest {
     };
     uint64_t completion = 0;
     IREE_ASSERT_OK(
-        loom_serve_execution_transfer(execution_, 1, &upload, &completion));
+        loom_runtime_execution_transfer(execution_, 1, &upload, &completion));
     iree_vm_variant_t arguments[] = {
         iree_vm_variant_from_i32(1),
         iree_hal_buffer_variant_from_ptr_borrowed(&hal_types_, workspace_),
         iree_hal_buffer_variant_from_ptr_borrowed(&hal_types_, output_buffer_)};
     iree_vm_variant_t results[1] = {};
-    auto status =
-        iree_vm_invoke(loom_serve_program_invocation(control_), submit_indexed_,
-                       iree_vm_variant_span_from_array(arguments),
-                       iree_vm_variant_span_from_array(results));
+    auto status = iree_vm_invoke(loom_runtime_program_invocation(control_),
+                                 submit_indexed_,
+                                 iree_vm_variant_span_from_array(arguments),
+                                 iree_vm_variant_span_from_array(results));
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
     IREE_ASSERT_OK(status);
@@ -967,9 +969,10 @@ class ArenaExecutablesTest : public ExecutablesTest {
             },
     };
     IREE_ASSERT_OK(
-        loom_serve_execution_feedback(execution_, 1, &download, &completion));
-    IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
-    loom_serve_residency_release(residency);
+        loom_runtime_execution_feedback(execution_, 1, &download, &completion));
+    IREE_ASSERT_OK(
+        loom_runtime_execution_feedback_wait(execution_, completion));
+    loom_runtime_residency_release(residency);
     size_t first = 0;
     for (size_t item = 0; item < counts.size(); ++item) {
       for (size_t element = 0; element < 4; ++element) {
@@ -1044,12 +1047,12 @@ TEST_P(ArenaExecutablesTest, CapacityRecyclingProtectsLaterHits) {
 
 TEST_P(ArenaExecutablesTest, FailedFirstPreparationDoesNotPublishLayout) {
   IREE_ASSERT_OK(CreateArena(2));
-  const auto before = loom_serve_memory_pool_statistics(pool_).reserved_bytes;
+  const auto before = loom_runtime_memory_pool_statistics(pool_).reserved_bytes;
   IREE_ASSERT_OK(BeginBanks({path_.path()}, "bank_missing"));
   IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND, Advance(false));
   loom_serve_executables_release(executables_);
   ASSERT_NO_FATAL_FAILURE(CollectIdle());
-  EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).reserved_bytes, before);
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).reserved_bytes, before);
   IREE_ASSERT_OK(BeginBanks({path_.path(), adapter_path_.path()}));
   IREE_ASSERT_OK(Advance(false));
   ASSERT_NO_FATAL_FAILURE(ExecuteBanks({1, 1}, {1, 2}, {0, 100}));
@@ -1057,15 +1060,15 @@ TEST_P(ArenaExecutablesTest, FailedFirstPreparationDoesNotPublishLayout) {
 
 TEST_P(ArenaExecutablesTest, CancelledFirstCaptureReleasesProvisionalArena) {
   IREE_ASSERT_OK(CreateArena(2));
-  const auto before = loom_serve_memory_pool_statistics(pool_).reserved_bytes;
+  const auto before = loom_runtime_memory_pool_statistics(pool_).reserved_bytes;
   IREE_ASSERT_OK(BeginBanks({path_.path(), adapter_path_.path()}));
   bool complete = false;
-  while (loom_serve_memory_pool_statistics(pool_).reserved_bytes == before) {
+  while (loom_runtime_memory_pool_statistics(pool_).reserved_bytes == before) {
     const uint32_t ticket = iree_notification_prepare_wait(&notification_);
     auto status =
         loom_serve_executables_advance(executables_, false, &complete);
     if (iree_status_is_ok(status) && !complete &&
-        loom_serve_memory_pool_statistics(pool_).reserved_bytes == before) {
+        loom_runtime_memory_pool_statistics(pool_).reserved_bytes == before) {
       iree_notification_commit_wait(&notification_, ticket, IREE_DURATION_ZERO,
                                     IREE_TIME_INFINITE_FUTURE);
     } else {
@@ -1077,7 +1080,7 @@ TEST_P(ArenaExecutablesTest, CancelledFirstCaptureReleasesProvisionalArena) {
   IREE_ASSERT_OK(Advance(true));
   loom_serve_executables_release(executables_);
   ASSERT_NO_FATAL_FAILURE(CollectIdle());
-  EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).reserved_bytes, before);
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).reserved_bytes, before);
   IREE_ASSERT_OK(BeginBanks({adapter_path_.path(), path_.path()}));
   IREE_ASSERT_OK(Advance(false));
   ASSERT_NO_FATAL_FAILURE(ExecuteBanks({1, 1}, {1, 3}, {100, 0}));
@@ -1147,7 +1150,8 @@ TEST_P(ArenaExecutablesTest, ReconfigurationPreservesCapturedBanksAndArena) {
   IREE_ASSERT_OK(BeginBanks({path_.path(), adapter_path_.path()}));
   IREE_ASSERT_OK(Advance(false));
   const auto offsets = Offsets();
-  const auto reserved = loom_serve_memory_pool_statistics(pool_).reserved_bytes;
+  const auto reserved =
+      loom_runtime_memory_pool_statistics(pool_).reserved_bytes;
   // Selecting a new source generation cannot change the captured invocation.
   IREE_ASSERT_OK(ReplaceSources());
   EXPECT_EQ(Offsets(), offsets);
@@ -1160,7 +1164,8 @@ TEST_P(ArenaExecutablesTest, ReconfigurationPreservesCapturedBanksAndArena) {
   IREE_ASSERT_OK(BeginBanks({adapter_path_.path(), path_.path()}));
   IREE_ASSERT_OK(Advance(false));
   ASSERT_NO_FATAL_FAILURE(ExecuteBanks({1, 1}, {-1, 7}, {100, 0}));
-  EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).reserved_bytes, reserved);
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).reserved_bytes,
+            reserved);
   EXPECT_EQ(
       loom_serve_executables_parameters(executables_).activity.activations,
       activations + 2);
@@ -1170,7 +1175,8 @@ TEST_P(ArenaExecutablesTest, ReconfigurationPreservesCapturedBanksAndArena) {
   IREE_ASSERT_OK(BeginBanks({path_.path(), adapter_path_.path()}));
   IREE_ASSERT_OK(Advance(false));
   ASSERT_NO_FATAL_FAILURE(ExecuteBanks({1, 1}, {5, 3}, {0, 100}));
-  EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).reserved_bytes, reserved);
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).reserved_bytes,
+            reserved);
   EXPECT_EQ(
       loom_serve_executables_parameters(executables_).activity.activations,
       activations + 4);

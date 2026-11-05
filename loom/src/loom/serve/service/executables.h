@@ -7,13 +7,13 @@
 #ifndef LOOM_SERVE_SERVICE_EXECUTABLES_H_
 #define LOOM_SERVE_SERVICE_EXECUTABLES_H_
 
-#include "loom/serve/runtime/device/device.h"
-#include "loom/serve/runtime/parameter/bank.h"
-#include "loom/serve/runtime/parameter/sources.h"
-#include "loom/serve/runtime/program/jit.h"
-#include "loom/serve/runtime/program/module.h"
-#include "loom/serve/runtime/program/preparation.h"
-#include "loom/serve/runtime/program/stage_table.h"
+#include "loom/runtime/device/device.h"
+#include "loom/runtime/parameter/bank.h"
+#include "loom/runtime/parameter/sources.h"
+#include "loom/runtime/program/jit.h"
+#include "loom/runtime/program/module.h"
+#include "loom/runtime/program/preparation.h"
+#include "loom/runtime/program/stage_table.h"
 #include "loom/serve/service/execution_reconfiguration.h"
 
 #ifdef __cplusplus
@@ -27,38 +27,38 @@ typedef struct loom_serve_executables_t loom_serve_executables_t;
 
 typedef struct loom_serve_executable_options_t {
   // Shared device and compiler host, borrowed through destruction.
-  loom_serve_device_t* device;
+  loom_runtime_device_t* device;
   // Explicit storage and admission owner, borrowed through destruction.
-  loom_serve_pool_t* pool;
+  loom_runtime_pool_t* pool;
   // Original indexed source generation; its report outlives this owner.
-  loom_serve_jit_t* jit;
+  loom_runtime_jit_t* jit;
   // Original policy/checkpoint namespace, copied during allocation. Files stay
   // immutable while registered; replacement native providers do not replace it.
-  const loom_serve_sources_t* sources;
+  const loom_runtime_sources_t* sources;
   // Borrowed execution and cold working set, outliving every request choice.
-  loom_serve_execution_t* execution;
+  loom_runtime_execution_t* execution;
   // Default admission, including every root reachable through cold ordinals.
-  loom_serve_residency_t* residency;
+  loom_runtime_residency_t* residency;
   // Immutable cold declarations, borrowed through every replacement job.
-  const loom_serve_preparation_t* preparation;
+  const loom_runtime_preparation_t* preparation;
   // Immutable cold source catalog, borrowed through every request choice.
-  loom_serve_parameter_sources_t* parameter_sources;
+  loom_runtime_parameter_sources_t* parameter_sources;
   // Borrowed checkpoint owner and placement, live through every recording.
   // NULL for a parameter-free model.
-  const loom_serve_parameter_bank_t* parameters;
+  const loom_runtime_parameter_bank_t* parameters;
   // Original recorded table, borrowed until terminal retirement.
-  const loom_serve_stage_table_t* stages;
+  const loom_runtime_stage_table_t* stages;
   // Recording and workspace ownership policy shared by every generation.
-  loom_serve_stage_record_options_t recording;
+  loom_runtime_stage_record_options_t recording;
   // Borrowed runner, initially bound to stages and alive through retirement.
   iree_vm_module_t* runner;
   // Borrowed demand-read capability, bound alongside each invocation's code.
   iree_vm_module_t* parameter_module;
   // Bounds reusable request products without restricting one active request.
-  loom_serve_variant_cache_options_t cache;
+  loom_runtime_variant_cache_options_t cache;
   // Independent bounds on retained checkpoint entries and final packed bytes.
   // One active request may exceed these idle retention limits.
-  loom_serve_variant_cache_options_t parameter_cache;
+  loom_runtime_variant_cache_options_t parameter_cache;
 } loom_serve_executable_options_t;
 
 iree_status_t loom_serve_executables_allocate(
@@ -86,12 +86,12 @@ bool loom_serve_executables_is_pending(
 
 // Captured invocation working set, including cold and selected checkpoints.
 // Called after successful advance and before releasing the invocation.
-loom_serve_residency_t* loom_serve_executables_residency(
+loom_runtime_residency_t* loom_serve_executables_residency(
     const loom_serve_executables_t* executables);
 
 // Model-wide management counts each bank once, including idle entries; request
 // residencies overlap and must never be summed for physical accounting.
-loom_serve_residency_snapshot_t loom_serve_executables_parameters(
+loom_runtime_residency_snapshot_t loom_serve_executables_parameters(
     const loom_serve_executables_t* executables);
 void loom_serve_executables_set_pinned(loom_serve_executables_t* executables,
                                        bool pinned);
@@ -111,7 +111,7 @@ void loom_serve_executables_capture(loom_serve_executables_t* executables);
 // whole original layout. All request stages share one binding map. Serialized
 // with owner advance and selection.
 void loom_serve_executables_declare(loom_serve_executables_t* executables,
-                                    loom_serve_preparation_t* preparation);
+                                    loom_runtime_preparation_t* preparation);
 
 // Installs a nonblocking owner wake before accepting compilations. Detachment
 // follows terminal advance of every accepted request compilation.
@@ -141,7 +141,7 @@ void loom_serve_executables_release(loom_serve_executables_t* executables);
 // and the invocation retains its table through producer retirement.
 // Runner-owned workspace stages use source ordinals directly without an
 // additional mapping.
-const loom_serve_stage_launch_t* loom_serve_executables_stage(
+const loom_runtime_stage_launch_t* loom_serve_executables_stage(
     const loom_serve_executables_t* executables, uint32_t ordinal);
 
 #ifdef __cplusplus

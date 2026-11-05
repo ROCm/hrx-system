@@ -16,8 +16,8 @@
 #include "iree/task/executor.h"
 #include "iree/task/process.h"
 #include "iree/testing/gtest.h"
-#include "loom/serve/runtime/device/device.h"
-#include "loom/serve/runtime/program/compilation.h"
+#include "loom/runtime/device/device.h"
+#include "loom/runtime/program/compilation.h"
 #include "loom/serve/service/finite/model.h"
 #include "loom/serve/service/finite/service.h"
 #include "loom/serve/service/service.h"
@@ -41,24 +41,24 @@ struct loom_serve_test_embedding_model_lifecycle_t {
 
   static void Release(iree_task_process_t* process);
 
-  iree_status_t Run(loom_serve_device_t* device,
-                    loom_serve_pool_t* storage_owner,
+  iree_status_t Run(loom_runtime_device_t* device,
+                    loom_runtime_pool_t* storage_owner,
                     const loom_serve_finite_model_options_t& options,
                     iree_allocator_t host_allocator = iree_allocator_system());
 
-  iree_status_t Retire(loom_serve_device_t* device,
-                       loom_serve_pool_t* storage_owner);
+  iree_status_t Retire(loom_runtime_device_t* device,
+                       loom_runtime_pool_t* storage_owner);
 
-  iree_status_t RunOwner(loom_serve_device_t* device,
-                         loom_serve_pool_t* storage_owner);
+  iree_status_t RunOwner(loom_runtime_device_t* device,
+                         loom_runtime_pool_t* storage_owner);
 
   // Borrowed shared executor for both owner turns and private preparation.
   iree_task_executor_t* executor = nullptr;
   // Borrowed capacity domain whose wakes keep this owner runnable under
   // pressure.
-  loom_serve_memory_pool_t* pool = nullptr;
+  loom_runtime_memory_pool_t* pool = nullptr;
   // Borrowed queue workspace advanced by this same serialized owner.
-  loom_serve_workspace_t* workspace = nullptr;
+  loom_runtime_workspace_t* workspace = nullptr;
   // Optional live service advanced by this same serialized pool owner.
   loom_serve_service_t* service = nullptr;
   // Owned in-progress load, consumed at its terminal owner turn.
@@ -66,7 +66,7 @@ struct loom_serve_test_embedding_model_lifecycle_t {
   // Prepared model returned by loading, or owned model consumed by retirement.
   loom_serve_finite_model_t* model = nullptr;
   // Copied terminal evidence, surviving failed or cancelled preparation.
-  loom_serve_compilation_report_t report = {};
+  loom_runtime_compilation_report_t report = {};
   // Exclusive single-drainer process; asynchronous callbacks only wake it.
   iree_task_process_t process = {};
   // Publishes final release to the outer test, independent of owner turns.
@@ -162,13 +162,13 @@ class SourceEmbeddingServiceTest : public ::testing::Test {
   // teardown.
   std::atomic<bool> fail_listener_allocations_{false};
   // Shared CPU/JIT/task runtime.
-  loom_serve_host_t* host_ = nullptr;
+  loom_runtime_host_t* host_ = nullptr;
   // Application group enclosing every device and model resource.
-  loom_serve_device_group_t* group_ = nullptr;
+  loom_runtime_device_group_t* group_ = nullptr;
   // Borrowed placement of the source-defined embedding model.
-  loom_serve_device_t* device_ = nullptr;
+  loom_runtime_device_t* device_ = nullptr;
   // Explicit storage owner selected independently from execution placement.
-  loom_serve_pool_t* storage_owner_ = nullptr;
+  loom_runtime_pool_t* storage_owner_ = nullptr;
   // Shared source-JIT finite model.
   loom_serve_finite_model_t* model_ = nullptr;
   // A second actual model retaining parameter capacity during the pressure

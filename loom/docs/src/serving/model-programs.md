@@ -180,7 +180,7 @@ cold source. Each request choice owns its declarations independently; selecting
 another choice does not change the checkpoint identity of accepted work.
 
 The exact signatures and ownership are in the
-[preparation contract](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/runtime/program/preparation.h).
+[preparation contract](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/runtime/program/preparation.h).
 Declarations copy their strings; opaque returned state must own its storage or
 retain its inputs. Preparation is not a place to submit device work.
 
@@ -195,7 +195,7 @@ The warm `control` VM imports the runner-local `runner.execute_N` and
 buffers; `feedback` transfers a bounded final result into a registered host slot.
 Both enqueue work without waiting. The native model owner schedules completion
 on work/feedback timelines and preserves buffers until their actual last use.
-The [runner-module contract](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/runtime/program/module.h)
+The [runner-module contract](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/runtime/program/module.h)
 defines arity, buffer types and lifetime. This is a coarse serving capability,
 not a source program's ownership of the entire device or process scheduler.
 
@@ -512,7 +512,7 @@ The plan can reuse retained control state and is consumed during submission;
 packet bytes stay immutable until accepted transfers retire, including failure.
 Source reuse, destination visibility, and destination reuse after consumption
 are separate ownership boundaries. See the
-[byte-placement contract](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/runtime/program/transfer_plan.h)
+[byte-placement contract](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/runtime/program/transfer_plan.h)
 for the encoding and validation rules.
 The same contract applies to generative text and media epochs. See
 [epoch uploads](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/service/text/epoch_upload.h)

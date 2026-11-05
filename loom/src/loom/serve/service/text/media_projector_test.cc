@@ -12,8 +12,8 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/runtime/testing/application.h"
 #include "loom/serve/testing/model.h"
-#include "loom/serve/testing/service_application.h"
 
 namespace {
 
@@ -68,17 +68,17 @@ class MediaProjectorTest : public ::testing::Test {
     iree_notification_initialize(&notification_);
     iree_string_builder_initialize(host_allocator_,
                                    &chat_.projections.metadata);
-    auto options = loom_serve_test_application_options_default();
-    options.backing = LOOM_SERVE_POOL_BACKING_ELASTIC;
+    auto options = loom_runtime_test_application_options_default();
+    options.backing = LOOM_RUNTIME_POOL_BACKING_ELASTIC;
     options.slab_size = 4096;
     options.memory_limit = 16 * 1024;
-    loom_serve_test_application_t* application = nullptr;
-    IREE_ASSERT_OK(loom_serve_test_application_acquire(
+    loom_runtime_test_application_t* application = nullptr;
+    IREE_ASSERT_OK(loom_runtime_test_application_acquire(
         &options, host_allocator_, &application));
-    auto* host = loom_serve_test_application_host(application);
-    device_ = loom_serve_test_application_device_at(application, 0);
-    storage_owner_ = loom_serve_device_group_pool_at(
-        loom_serve_test_application_device_group(application), 0);
+    auto* host = loom_runtime_test_application_host(application);
+    device_ = loom_runtime_test_application_device_at(application, 0);
+    storage_owner_ = loom_runtime_device_group_pool_at(
+        loom_runtime_test_application_device_group(application), 0);
     const char* source = std::getenv("LOOM_SERVE_TEST_PROJECTOR_SOURCE");
     ASSERT_NE(source, nullptr);
     IREE_ASSERT_OK(document_.Load(source));
@@ -91,7 +91,7 @@ class MediaProjectorTest : public ::testing::Test {
         device_, storage_owner_, &model_options, host_allocator_, &model_));
     iree_async_proactor_t* proactor = nullptr;
     IREE_ASSERT_OK(iree_async_proactor_pool_get(
-        loom_serve_host_proactor_pool(host), 0, &proactor));
+        loom_runtime_host_proactor_pool(host), 0, &proactor));
     const loom_runtime_wake_callback_t observer = {
         [](void* data) {
           iree_notification_post(static_cast<iree_notification_t*>(data),
@@ -99,11 +99,11 @@ class MediaProjectorTest : public ::testing::Test {
         },
         &notification_,
     };
-    loom_serve_workspace_set_observer(loom_serve_pool_workspace(storage_owner_),
-                                      observer);
+    loom_runtime_workspace_set_observer(
+        loom_runtime_pool_workspace(storage_owner_), observer);
     IREE_ASSERT_OK(loom_serve_text_media_projector_allocate(
-        model_, requests_.size() * 3, loom_serve_host_executor(host), proactor,
-        observer, host_allocator_, &projector_));
+        model_, requests_.size() * 3, loom_runtime_host_executor(host),
+        proactor, observer, host_allocator_, &projector_));
     image_.source = loom_serve_media_image_source_from_data_url(IREE_SV(
         "data:image/x-portable-arbitrarymap;base64,"
         "UDcKV0lEVEggMgpIRUlHSFQgMgpERVBUSCAzCk1BWFZBTCAyNTUKVFVQTFRZUEUg"
@@ -141,8 +141,8 @@ class MediaProjectorTest : public ::testing::Test {
       loom_serve_text_media_projector_free(projector_);
     }
     IREE_EXPECT_OK(loom_serve_finite_model_free(model_));
-    loom_serve_workspace_set_observer(loom_serve_pool_workspace(storage_owner_),
-                                      {});
+    loom_runtime_workspace_set_observer(
+        loom_runtime_pool_workspace(storage_owner_), {});
     iree_notification_deinitialize(&notification_);
     iree_string_builder_deinitialize(&chat_.projections.metadata);
   }
@@ -152,8 +152,8 @@ class MediaProjectorTest : public ::testing::Test {
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
       bool progress = false;
-      auto status = loom_serve_workspace_advance(
-          loom_serve_pool_workspace(storage_owner_));
+      auto status = loom_runtime_workspace_advance(
+          loom_runtime_pool_workspace(storage_owner_));
       status = iree_status_join(status, loom_serve_text_media_projector_advance(
                                             projector_, 0, &progress));
       if (ready() || progress || !iree_status_is_ok(status)) {
@@ -181,9 +181,9 @@ class MediaProjectorTest : public ::testing::Test {
   // Source ownership encloses every asynchronous compile and invocation.
   loom_serve::testing::ModelDocument document_;
   // Borrowed device whose workspace is driven by this serialized owner.
-  loom_serve_device_t* device_ = nullptr;
+  loom_runtime_device_t* device_ = nullptr;
   // Explicit storage owner selected independently from execution placement.
-  loom_serve_pool_t* storage_owner_ = nullptr;
+  loom_runtime_pool_t* storage_owner_ = nullptr;
   // Actual source-defined pixel producer, not a mocked projection service.
   loom_serve_finite_model_t* model_ = nullptr;
   // Serialized preparation/cohort/publication owner under test.
@@ -236,13 +236,13 @@ TEST_F(MediaProjectorTest, PublishesAccordingToPhaseFootprintAndKeepsOrdinals) {
   EXPECT_EQ(deferred->spans[0].request_index, 2u);
 
   loom_serve_finite_snapshot_t* snapshot = nullptr;
-  loom_serve_execution_frontier_t ready;
+  loom_runtime_execution_frontier_t ready;
   IREE_ASSERT_OK(loom_serve_finite_result_download(deferred->spans[0].result,
                                                    &snapshot, &ready));
   for (size_t i = 0; i < IREE_ARRAYSIZE(ready.semaphores); ++i) {
     IREE_EXPECT_OK(
-        loom_serve_workspace_wait(loom_serve_pool_workspace(storage_owner_),
-                                  ready.semaphores[i], ready.values[i]));
+        loom_runtime_workspace_wait(loom_runtime_pool_workspace(storage_owner_),
+                                    ready.semaphores[i], ready.values[i]));
   }
   const std::array<float, 4> expected = {513, 0, 0, 3};
   for (size_t index : {0u, 2u}) {

@@ -19,7 +19,7 @@
 #include "iree/task/executor.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/serve/testing/worker_gate.h"
+#include "loom/runtime/testing/worker_gate.h"
 #include "loom/serve/transport/http/listener.h"
 #include "loom/serve/transport/websocket/handshake.h"
 
@@ -482,10 +482,10 @@ TEST_P(WebSocketBorrowTest, LaterControlsPassAnAcceptedCpuBorrower) {
   std::unique_ptr<iree_task_executor_t, decltype(&iree_task_executor_release)>
       executor(raw_executor, iree_task_executor_release);
   WebSocketReadJob job;
-  std::vector<std::unique_ptr<loom_serve::testing::WorkerGate>> gates;
+  std::vector<std::unique_ptr<loom_runtime::testing::WorkerGate>> gates;
   for (size_t i = 0; i < GetParam(); ++i) {
     gates.emplace_back(
-        std::make_unique<loom_serve::testing::WorkerGate>(executor.get()));
+        std::make_unique<loom_runtime::testing::WorkerGate>(executor.get()));
   }
   job.Schedule(executor.get(), payload);
 

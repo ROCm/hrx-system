@@ -8,7 +8,7 @@
 
 #include <inttypes.h>
 
-#include "loom/serve/runtime/host/timer.h"
+#include "loom/runtime/host/timer.h"
 #include "loom/serve/server/http/response.h"
 #include "loom/serve/server/observation.h"
 #include "loom/serve/transport/websocket/connection.h"
@@ -41,7 +41,7 @@ struct loom_serve_http_live_t {
   // Shared copied current state; sampling cost does not multiply with readers.
   loom_serve_observation_t* observation;
   // Shared proactor alarm, enabled only while readers exist.
-  loom_serve_timer_t timer;
+  loom_runtime_timer_t timer;
   // Cursor of an in-progress bounded sampling sweep; zero starts/ends a sweep.
   iree_host_size_t sample_cursor;
   // A timer tick has requested a sweep that has not yet completed.
@@ -77,7 +77,7 @@ iree_status_t loom_serve_http_live_allocate(
       (void**)&live));
   live->host_allocator = host_allocator;
   live->server = server;
-  loom_serve_timer_initialize(&live->timer);
+  loom_runtime_timer_initialize(&live->timer);
   iree_async_proactor_t* proactor = NULL;
   iree_status_t status = iree_async_proactor_pool_get(
       loom_serve_http_server_proactor_pool(server), 0, &proactor);
@@ -86,12 +86,12 @@ iree_status_t loom_serve_http_live_allocate(
         registry, resources, host_allocator, &live->observation);
   }
   if (iree_status_is_ok(status)) {
-    loom_serve_timer_configure(&live->timer, proactor,
-                               iree_make_duration_ms(250));
-    loom_serve_timer_set_observer(&live->timer, observer);
+    loom_runtime_timer_configure(&live->timer, proactor,
+                                 iree_make_duration_ms(250));
+    loom_runtime_timer_set_observer(&live->timer, observer);
     *out_live = live;
   } else {
-    loom_serve_timer_deinitialize(&live->timer);
+    loom_runtime_timer_deinitialize(&live->timer);
     iree_allocator_free(host_allocator, live);
   }
   return status;
@@ -207,7 +207,7 @@ iree_status_t loom_serve_http_live_advance(loom_serve_http_live_t* live,
   }
   bool tick = false;
   bool timer_progress = false;
-  iree_status_t timer_status = loom_serve_timer_advance(
+  iree_status_t timer_status = loom_runtime_timer_advance(
       &live->timer, stopping, live->count != 0, &timer_progress, &tick);
   *out_progress |= timer_progress;
   stopping |= !iree_status_is_ok(timer_status);
@@ -342,16 +342,16 @@ iree_host_size_t loom_serve_http_live_count(
 }
 
 bool loom_serve_http_live_is_pending(loom_serve_http_live_t* live) {
-  return live && (live->count || loom_serve_timer_is_pending(&live->timer));
+  return live && (live->count || loom_runtime_timer_is_pending(&live->timer));
 }
 
 void loom_serve_http_live_free(loom_serve_http_live_t* live) {
   if (!live) {
     return;
   }
-  loom_serve_timer_set_observer(&live->timer,
-                                (loom_runtime_wake_callback_t){0});
-  loom_serve_timer_deinitialize(&live->timer);
+  loom_runtime_timer_set_observer(&live->timer,
+                                  (loom_runtime_wake_callback_t){0});
+  loom_runtime_timer_deinitialize(&live->timer);
   loom_serve_observation_free(live->observation);
   iree_allocator_free(live->host_allocator, live);
 }

@@ -7,8 +7,8 @@
 #ifndef LOOM_SERVE_SERVER_RESOURCES_H_
 #define LOOM_SERVE_SERVER_RESOURCES_H_
 
+#include "loom/runtime/device/device.h"
 #include "loom/runtime/telemetry/sample.h"
-#include "loom/serve/runtime/device/device.h"
 #include "loom/serve/transport/http/listener.h"
 #include "loom/util/stream.h"
 
@@ -21,12 +21,12 @@ extern "C" {
 // Membership is immutable during routing; models can independently come and go.
 typedef struct loom_serve_resources_t {
   // Application's single cooperating group, or NULL for externally owned work.
-  loom_serve_device_group_t* device_group;
+  loom_runtime_device_group_t* device_group;
   // Zero disables idle reclamation; otherwise equals the group's pool count.
   iree_host_size_t idle_policy_count;
   // Borrowed immutable policies, in pool-inventory order, through the router
   // join.
-  const loom_serve_pool_idle_policy_t* idle_policies;
+  const loom_runtime_pool_idle_policy_t* idle_policies;
   // Number of bound listeners published by this application.
   iree_host_size_t listener_count;
   // Borrowed array; listener storage survives stop until routing has joined.

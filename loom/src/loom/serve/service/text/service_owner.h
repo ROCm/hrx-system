@@ -83,7 +83,7 @@ struct loom_serve_text_service_t {
     // Owner-only operation discriminator; NONE means no callback is accepted.
     loom_serve_text_work_t work;
     // Exact work and feedback values captured by submission.
-    loom_serve_execution_frontier_t frontier;
+    loom_runtime_execution_frontier_t frontier;
     // Host observation before registering this operation's readiness wait.
     iree_time_t start_time;
     // Accepted epoch through readiness collection; zero for maintenance work.

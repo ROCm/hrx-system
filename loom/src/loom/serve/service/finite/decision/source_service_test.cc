@@ -20,6 +20,7 @@
 #include "iree/base/internal/json.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/runtime/testing/application.h"
 #include "loom/serve/server/resources.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/finite/call.h"
@@ -30,7 +31,6 @@
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/model.h"
 #include "loom/serve/testing/package.h"
-#include "loom/serve/testing/service_application.h"
 #include "loom/serve/transport/http/listener.h"
 
 namespace {
@@ -60,23 +60,23 @@ class SourceDecisionServiceTest : public ::testing::Test {
     embedding_source_ = embedding_source;
     iree_notification_initialize(&notification_);
     const auto application_options =
-        loom_serve_test_application_options_default();
-    loom_serve_test_application_t* application = nullptr;
-    IREE_ASSERT_OK(loom_serve_test_application_acquire(
+        loom_runtime_test_application_options_default();
+    loom_runtime_test_application_t* application = nullptr;
+    IREE_ASSERT_OK(loom_runtime_test_application_acquire(
         &application_options, host_allocator_, &application));
-    host_ = loom_serve_test_application_host(application);
+    host_ = loom_runtime_test_application_host(application);
     resources_.device_group =
-        loom_serve_test_application_device_group(application);
-    device_ = loom_serve_test_application_device_at(application, 0);
-    storage_owner_ = loom_serve_device_group_pool_at(
-        loom_serve_test_application_device_group(application), 0);
+        loom_runtime_test_application_device_group(application);
+    device_ = loom_runtime_test_application_device_at(application, 0);
+    storage_owner_ = loom_runtime_device_group_pool_at(
+        loom_runtime_test_application_device_group(application), 0);
     ASSERT_NO_FATAL_FAILURE(CreateModel(model_source_.c_str(), &models_[0]));
     IREE_ASSERT_OK(loom_serve_finite_service_allocate(
         host_, models_[0], loom_serve_decision_protocol(), IREE_SV("decisions"),
         16, 16, 0, nullptr, host_allocator_, &services_[0]));
     interfaces_[0] = loom_serve_finite_http_interface(services_[0]);
     EXPECT_EQ(interfaces_[0].runtime.capacity_domain,
-              loom_serve_pool_residency_cache(storage_owner_));
+              loom_runtime_pool_residency_cache(storage_owner_));
     const loom_runtime_wake_callback_t observer = {
         [](void* self) {
           auto* test = static_cast<SourceDecisionServiceTest*>(self);
@@ -86,10 +86,10 @@ class SourceDecisionServiceTest : public ::testing::Test {
         this};
     interfaces_[0].runtime.vtable->set_observer(interfaces_[0].runtime.self,
                                                 observer);
-    loom_serve_device_group_set_observer(resources_.device_group, observer);
+    loom_runtime_device_group_set_observer(resources_.device_group, observer);
     auto http_options = loom_serve_http_server_options_default();
     IREE_ASSERT_OK(loom_serve_http_server_allocate(
-        loom_serve_host_proactor_pool(host_), &http_options, host_allocator_,
+        loom_runtime_host_proactor_pool(host_), &http_options, host_allocator_,
         &server_));
     auto listener_options = loom_serve_http_listener_options_default();
     listener_options.address = IREE_SV("127.0.0.1:0");
@@ -114,7 +114,7 @@ class SourceDecisionServiceTest : public ::testing::Test {
     for (auto* model : models_) {
       IREE_EXPECT_OK(loom_serve_finite_model_free(model));
     }
-    loom_serve_device_group_set_observer(resources_.device_group, {});
+    loom_runtime_device_group_set_observer(resources_.device_group, {});
     iree_notification_deinitialize(&notification_);
   }
   int Send(const std::string& body, const char* target = "/v1/systemone",
@@ -161,12 +161,12 @@ class SourceDecisionServiceTest : public ::testing::Test {
   }
   bool Step() {
     const uint64_t previous = wakes_.load();
-    IREE_EXPECT_OK(loom_serve_device_group_advance(resources_.device_group));
+    IREE_EXPECT_OK(loom_runtime_device_group_advance(resources_.device_group));
     bool progress = false;
     IREE_EXPECT_OK(interfaces_[0].runtime.vtable->advance(
         interfaces_[0].runtime.self, 0, &progress));
     if (interfaces_[0].runtime.vtable->is_active(interfaces_[0].runtime.self) ||
-        loom_serve_device_group_is_pending(resources_.device_group)) {
+        loom_runtime_device_group_is_pending(resources_.device_group)) {
       struct loom_serve_test_decision_wait_t {
         // Shared release generation.
         std::atomic<uint64_t>* wakes;
@@ -200,13 +200,13 @@ class SourceDecisionServiceTest : public ::testing::Test {
     interfaces_[1] = loom_serve_finite_http_interface(services_[1]);
     interfaces_[0].runtime.vtable->set_observer(interfaces_[0].runtime.self,
                                                 {});
-    loom_serve_device_group_set_observer(resources_.device_group, {});
+    loom_runtime_device_group_set_observer(resources_.device_group, {});
     http_.Start([this]() -> iree_status_t {
       loom_serve_registry_t* registry = nullptr;
       IREE_RETURN_IF_ERROR(loom_serve_registry_allocate(
           2, interfaces_, 0, {}, host_allocator_, &registry));
       iree_status_t status = loom_serve_router_run(
-          loom_serve_host_executor(host_), server_, registry,
+          loom_runtime_host_executor(host_), server_, registry,
           {
               .request_quota = 16,
               .holding_capacity = 8,
@@ -223,13 +223,13 @@ class SourceDecisionServiceTest : public ::testing::Test {
   // Independent source package used for cross-modality routing.
   std::string embedding_source_;
   // Real shared CPU/JIT executor and asynchronous I/O owner.
-  loom_serve_host_t* host_ = nullptr;
+  loom_runtime_host_t* host_ = nullptr;
   // Borrowed application resources progressed by the direct owner or router.
   loom_serve_resources_t resources_ = {};
   // Borrowed device record within the application group.
-  loom_serve_device_t* device_ = nullptr;
+  loom_runtime_device_t* device_ = nullptr;
   // Explicit storage owner selected independently from execution placement.
-  loom_serve_pool_t* storage_owner_ = nullptr;
+  loom_runtime_pool_t* storage_owner_ = nullptr;
   // Independently compiled source models, not mock callbacks.
   loom_serve_finite_model_t* models_[2] = {};
   // Bounded modality services borrowing the corresponding models.

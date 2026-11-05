@@ -12,18 +12,18 @@
 #include "iree/base/threading/notification.h"
 #include "iree/vm/buffer.h"
 #include "iree/vm/sync.h"
-#include "loom/serve/runtime/device/device.h"
-#include "loom/serve/runtime/parameter/bank.h"
-#include "loom/serve/runtime/parameter/module.h"
-#include "loom/serve/runtime/parameter/sources.h"
-#include "loom/serve/runtime/parameter/weights.h"
-#include "loom/serve/runtime/program/input.h"
-#include "loom/serve/runtime/program/json.h"
-#include "loom/serve/runtime/program/module.h"
-#include "loom/serve/runtime/program/preparation.h"
-#include "loom/serve/runtime/program/program.h"
-#include "loom/serve/runtime/program/stage_set.h"
-#include "loom/serve/runtime/program/tokenizer_load.h"
+#include "loom/runtime/device/device.h"
+#include "loom/runtime/parameter/bank.h"
+#include "loom/runtime/parameter/module.h"
+#include "loom/runtime/parameter/sources.h"
+#include "loom/runtime/parameter/weights.h"
+#include "loom/runtime/program/input.h"
+#include "loom/runtime/program/json.h"
+#include "loom/runtime/program/module.h"
+#include "loom/runtime/program/preparation.h"
+#include "loom/runtime/program/program.h"
+#include "loom/runtime/program/stage_set.h"
+#include "loom/runtime/program/tokenizer_load.h"
 #include "loom/serve/service/executables.h"
 #include "loomc/iree.h"
 
@@ -31,7 +31,7 @@ struct loom_serve_finite_model_t {
   // Allocator owning this model and its invocation metadata.
   iree_allocator_t host_allocator;
   // Copied startup evidence, independent of every compiler result lifetime.
-  loom_serve_compilation_report_t compilation;
+  loom_runtime_compilation_report_t compilation;
   // Owned public identifier returned by the source bootstrap.
   iree_string_view_t name;
   // Positive additive cohort capacity returned by the cold source.
@@ -43,18 +43,18 @@ struct loom_serve_finite_model_t {
   // Maximum live result bytes within the physical device output.
   iree_host_size_t result_capacity;
   // Immutable tokenizer reused by each independent request encoder.
-  loom_serve_tokenizer_t* tokenizer;
+  loom_runtime_tokenizer_t* tokenizer;
   // Borrowed execution device and compiler host, outliving the model.
-  loom_serve_device_t* owner;
+  loom_runtime_device_t* owner;
   // Borrowed storage, command workspace, and admission owner.
-  loom_serve_pool_t* pool;
+  loom_runtime_pool_t* pool;
   // Owned model work and feedback timelines, independent of other models.
-  loom_serve_execution_t* execution;
+  loom_runtime_execution_t* execution;
   // Owned checkpoint roots and plans, outliving borrowing invocation
   // residencies.
-  loom_serve_parameter_bank_t* parameters;
+  loom_runtime_parameter_bank_t* parameters;
   // Atomic invocation working set and independent admission interest.
-  loom_serve_residency_t* residency;
+  loom_runtime_residency_t* residency;
   // Cohort input remains live through actual producer retirement.
   struct {
     // Prepared upload, retained even after partial enqueue failure.
@@ -65,23 +65,23 @@ struct loom_serve_finite_model_t {
     uint32_t stage;
   } invocation;
   // Cold live-source compiler borrowing the shared host task pool.
-  loom_serve_jit_t* jit;
+  loom_runtime_jit_t* jit;
   // Owned source declarations, independent of the bootstrap VM and arguments.
-  loom_serve_preparation_t* preparation;
+  loom_runtime_preparation_t* preparation;
   // Owned immutable indexes shared by resident and demand-read consumers.
-  loom_serve_parameter_sources_t* parameter_sources;
+  loom_runtime_parameter_sources_t* parameter_sources;
   // Code generations and batch captures, independent of checkpoint residency.
   loom_serve_executables_t* executables;
   // Idle request-code policy captured independently of source-owned options.
-  loom_serve_variant_cache_options_t specialization_cache;
+  loom_runtime_variant_cache_options_t specialization_cache;
   // Cold retained shapes sharing one parameter and issue-time buffer bank.
   struct {
     // Number of owned slots, including partially initialized slots on failure.
     uint32_t count;
     // Owned stage array in source declaration order.
-    loom_serve_jit_stage_t** values;
+    loom_runtime_jit_stage_t** values;
     // Original recordings, independent of the compiler product lifetime.
-    loom_serve_stage_table_t* table;
+    loom_runtime_stage_table_t* table;
   } stages;
   // Shared source control and its native submission capabilities.
   struct {
@@ -94,7 +94,7 @@ struct loom_serve_finite_model_t {
     // Owned stage tags in little-endian i64 declaration order.
     iree_vm_buffer_t* tags;
     // One source-JIT process for every serialized request in this residency.
-    loom_serve_program_t* program;
+    loom_runtime_program_t* program;
     // Retained runner module whose execution table can change independently.
     iree_vm_module_t* runner;
     // Scoped request declaration capability, retained beside the runner.
@@ -122,7 +122,7 @@ struct loom_serve_finite_model_t {
 static void loom_serve_finite_model_release_consumers(
     loom_serve_finite_model_t* model) {
   loom_serve_executables_retire(model->executables);
-  loom_serve_program_free(model->control.program);
+  loom_runtime_program_free(model->control.program);
   model->control.program = NULL;
   iree_vm_module_release(model->control.runner);
   iree_vm_module_release(model->control.preparation);
@@ -130,7 +130,7 @@ static void loom_serve_finite_model_release_consumers(
   iree_vm_module_release(model->control.parameters);
   model->control.parameters = NULL;
   model->control.runner = NULL;
-  loom_serve_stage_table_free(model->stages.table);
+  loom_runtime_stage_table_free(model->stages.table);
   model->stages.table = NULL;
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(model->buffers); ++i) {
     iree_hal_buffer_release(model->buffers[i]);
@@ -146,11 +146,11 @@ void loom_serve_finite_model_retire(loom_serve_finite_model_t* model,
         model->executables, (loom_runtime_wake_callback_t){wake, user_data});
   }
   if (model->execution) {
-    loom_serve_execution_set_retirement_observer(model->execution, wake,
-                                                 user_data);
+    loom_runtime_execution_set_retirement_observer(model->execution, wake,
+                                                   user_data);
   }
   loom_serve_finite_model_release_consumers(model);
-  loom_serve_parameter_bank_retire(model->parameters, wake, user_data);
+  loom_runtime_parameter_bank_retire(model->parameters, wake, user_data);
 }
 
 bool loom_serve_finite_model_is_retired(loom_serve_finite_model_t* model) {
@@ -158,8 +158,8 @@ bool loom_serve_finite_model_is_retired(loom_serve_finite_model_t* model) {
     return true;
   }
   bool retired =
-      !model->execution || loom_serve_execution_is_retired(model->execution);
-  retired &= loom_serve_parameter_bank_is_retired(model->parameters);
+      !model->execution || loom_runtime_execution_is_retired(model->execution);
+  retired &= loom_runtime_parameter_bank_is_retired(model->parameters);
   retired &= loom_serve_executables_is_retired(model->executables);
   return retired;
 }
@@ -172,36 +172,36 @@ static iree_status_t loom_serve_finite_model_destroy_resources(
     return iree_ok_status();
   }
   loom_serve_finite_model_release_consumers(model);
-  loom_serve_parameter_bank_retire(model->parameters, NULL, NULL);
+  loom_runtime_parameter_bank_retire(model->parameters, NULL, NULL);
   IREE_ASSERT(loom_serve_finite_model_is_retired(model));
   IREE_RETURN_IF_ERROR(loom_serve_executables_free(model->executables));
   model->executables = NULL;
-  loom_serve_residency_free(model->residency);
+  loom_runtime_residency_free(model->residency);
   model->residency = NULL;
-  iree_status_t status = loom_serve_parameter_bank_free(model->parameters);
+  iree_status_t status = loom_runtime_parameter_bank_free(model->parameters);
   if (iree_status_is_ok(status)) {
     model->parameters = NULL;
     iree_vm_buffer_release(model->control.tags);
     iree_vm_buffer_release(model->control.state);
     for (uint32_t i = 0; i < model->stages.count; ++i) {
-      loom_serve_jit_stage_free(model->stages.values[i]);
+      loom_runtime_jit_stage_free(model->stages.values[i]);
     }
     iree_allocator_free(model->host_allocator, model->stages.values);
-    loom_serve_preparation_free(model->preparation);
-    loom_serve_parameter_sources_release(model->parameter_sources);
+    loom_runtime_preparation_free(model->preparation);
+    loom_runtime_parameter_sources_release(model->parameter_sources);
     loom_serve_finite_result_release(model->invocation.result);
     iree_vm_buffer_release(model->invocation.payload);
     iree_vm_environment_free(model->control.environment);
     if (model->execution) {
       // Results can retain the timeline after this model and its wake payload
       // are gone. No producer views remain, so detach the completed observer.
-      loom_serve_execution_set_retirement_observer(model->execution, NULL,
-                                                   NULL);
+      loom_runtime_execution_set_retirement_observer(model->execution, NULL,
+                                                     NULL);
     }
-    loom_serve_execution_release(model->execution);
+    loom_runtime_execution_release(model->execution);
     iree_allocator_free(model->host_allocator, (void*)model->name.data);
-    loom_serve_jit_release(model->jit);
-    loom_serve_tokenizer_release(model->tokenizer);
+    loom_runtime_jit_release(model->jit);
+    loom_runtime_tokenizer_release(model->tokenizer);
     iree_allocator_free(model->host_allocator, model);
   }
   return status;
@@ -217,9 +217,9 @@ iree_status_t loom_serve_finite_model_free(loom_serve_finite_model_t* model) {
     return iree_ok_status();
   }
   loom_serve_finite_model_retire(model, NULL, NULL);
-  iree_status_t status = loom_serve_execution_drain(model->execution);
+  iree_status_t status = loom_runtime_execution_drain(model->execution);
   status = iree_status_join(
-      status, loom_serve_parameter_bank_await_retirement(model->parameters));
+      status, loom_runtime_parameter_bank_await_retirement(model->parameters));
   status = iree_status_join(
       status, loom_serve_executables_await_retirement(model->executables));
   return iree_status_join(status,
@@ -232,7 +232,7 @@ static iree_status_t loom_serve_finite_prepare(
     loom_serve_finite_model_t* model,
     const loom_serve_finite_model_options_t* options,
     void (*wake)(void* user_data), void* user_data,
-    loom_serve_tokenizer_load_t** out_tokenizer_load) {
+    loom_runtime_tokenizer_load_t** out_tokenizer_load) {
   const iree_allocator_t host_allocator = model->host_allocator;
   IREE_RETURN_IF_ERROR(iree_vm_environment_allocate(
       host_allocator, &model->control.environment));
@@ -241,11 +241,11 @@ static iree_status_t loom_serve_finite_prepare(
                                     model->control.environment, IREE_SV("vm")),
                                 &model->control.vm_types));
   iree_vm_module_t* modules[2] = {0};
-  iree_status_t status = loom_serve_input_module_create(
+  iree_status_t status = loom_runtime_input_module_create(
       model->control.environment, NULL, host_allocator, &modules[0]);
   if (iree_status_is_ok(status)) {
-    status = loom_serve_json_module_create(model->control.environment,
-                                           host_allocator, &modules[1]);
+    status = loom_runtime_json_module_create(model->control.environment,
+                                             host_allocator, &modules[1]);
   }
   iree_vm_variant_t arguments[2] = {0};
   const iree_string_view_t inputs[] = {options->asset_directory,
@@ -264,11 +264,11 @@ static iree_status_t loom_serve_finite_prepare(
   }
   iree_vm_variant_t results[7] = {0};
   if (iree_status_is_ok(status)) {
-    status = loom_serve_preparation_allocate_cached(
+    status = loom_runtime_preparation_allocate_cached(
         model->jit, model->control.environment, &options->sources,
         options->sources.prepare, IREE_SV("prepare"),
-        LOOM_SERVE_PREPARATION_FLAG_PARAMETERS |
-            LOOM_SERVE_PREPARATION_FLAG_MEMORY_FORECAST,
+        LOOM_RUNTIME_PREPARATION_FLAG_PARAMETERS |
+            LOOM_RUNTIME_PREPARATION_FLAG_MEMORY_FORECAST,
         iree_vm_variant_span_from_array(arguments),
         iree_vm_variant_span_from_array(results),
         (iree_vm_module_span_t){modules, 2}, host_allocator,
@@ -320,9 +320,9 @@ static iree_status_t loom_serve_finite_prepare(
                               "source state must not be null");
   }
   if (iree_status_is_ok(status) && metadata[0].data_length) {
-    status = loom_serve_tokenizer_load_start(
-        loom_serve_device_tokenizer_cache(model->owner),
-        loom_serve_host_compiler_sink(loom_serve_device_host(model->owner)),
+    status = loom_runtime_tokenizer_load_start(
+        loom_runtime_device_tokenizer_cache(model->owner),
+        loom_runtime_host_compiler_sink(loom_runtime_device_host(model->owner)),
         &options->sources, options->asset_directory,
         iree_make_string_view((const char*)metadata[0].data,
                               metadata[0].data_length),
@@ -334,7 +334,7 @@ static iree_status_t loom_serve_finite_prepare(
   iree_vm_module_release(modules[1]);
   if (iree_status_is_ok(status)) {
     const iree_host_size_t count =
-        loom_serve_preparation_stage_count(model->preparation);
+        loom_runtime_preparation_stage_count(model->preparation);
     status = iree_allocator_malloc_array(host_allocator, count,
                                          sizeof(*model->stages.values),
                                          (void**)&model->stages.values);
@@ -350,17 +350,17 @@ static iree_status_t loom_serve_finite_prepare(
 static iree_status_t loom_serve_finite_check_layouts(
     loom_serve_finite_model_t* model) {
   const loom_cmd_program_t* canonical =
-      loom_serve_jit_stage_program(model->stages.values[0]);
-  const loom_serve_stage_record_options_t recording = {.binding_count = 2};
+      loom_runtime_jit_stage_program(model->stages.values[0]);
+  const loom_runtime_stage_record_options_t recording = {.binding_count = 2};
   for (uint32_t i = 0; i < model->stages.count; ++i) {
-    const loom_serve_jit_stage_t* stage = model->stages.values[i];
-    const loom_cmd_program_t* program = loom_serve_jit_stage_program(stage);
-    const loom_serve_preparation_stage_t* declaration =
-        loom_serve_preparation_stage(model->preparation, i);
-    IREE_RETURN_IF_ERROR(loom_serve_preparation_stage_check_parameters(
+    const loom_runtime_jit_stage_t* stage = model->stages.values[i];
+    const loom_cmd_program_t* program = loom_runtime_jit_stage_program(stage);
+    const loom_runtime_preparation_stage_t* declaration =
+        loom_runtime_preparation_stage(model->preparation, i);
+    IREE_RETURN_IF_ERROR(loom_runtime_preparation_stage_check_parameters(
         declaration, program,
-        loom_serve_preparation_stage(model->preparation, 0), canonical));
-    IREE_RETURN_IF_ERROR(loom_serve_stage_record_check(&recording, stage));
+        loom_runtime_preparation_stage(model->preparation, 0), canonical));
+    IREE_RETURN_IF_ERROR(loom_runtime_stage_record_check(&recording, stage));
   }
   return iree_ok_status();
 }
@@ -378,9 +378,9 @@ static iree_status_t loom_serve_finite_create_control(
   for (uint32_t i = 0; i < model->stages.count; ++i) {
     iree_unaligned_store_le_u64(
         tags.data + i * sizeof(int64_t),
-        (uint64_t)loom_serve_preparation_stage(model->preparation, i)->tag);
+        (uint64_t)loom_runtime_preparation_stage(model->preparation, i)->tag);
   }
-  const loom_serve_module_options_t options = {
+  const loom_runtime_module_options_t options = {
       .binding_capacity = 2,
       .stages = {model->stages.table->part_count, model->stages.table->parts},
   };
@@ -393,44 +393,44 @@ static iree_status_t loom_serve_finite_create_control(
     iree_vm_buffer_release(model->control.tags);
     model->control.tags = read_only_tags;
     status =
-        loom_serve_module_create(&model->control.hal_types, model->execution,
-                                 options, host_allocator, &native_modules[0]);
+        loom_runtime_module_create(&model->control.hal_types, model->execution,
+                                   options, host_allocator, &native_modules[0]);
   }
   if (iree_status_is_ok(status)) {
     model->control.runner = native_modules[0];
     iree_vm_module_retain(model->control.runner);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_input_module_create(
+    status = loom_runtime_input_module_create(
         model->control.environment,
-        loom_serve_tokenizer_value(model->tokenizer), host_allocator,
+        loom_runtime_tokenizer_value(model->tokenizer), host_allocator,
         &native_modules[1]);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_json_module_create(model->control.environment,
-                                           host_allocator, &native_modules[2]);
+    status = loom_runtime_json_module_create(
+        model->control.environment, host_allocator, &native_modules[2]);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_preparation_module_create(
+    status = loom_runtime_preparation_module_create(
         model->control.environment,
-        loom_serve_preparation_card(model->preparation),
-        loom_serve_preparation_component(model->preparation), host_allocator,
+        loom_runtime_preparation_card(model->preparation),
+        loom_runtime_preparation_component(model->preparation), host_allocator,
         &native_modules[3]);
     model->control.preparation = native_modules[3];
     iree_vm_module_retain(model->control.preparation);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_parameters_module_create(
+    status = loom_runtime_parameters_module_create(
         model->control.environment, &model->control.hal_types,
-        loom_serve_device_transfer_queue(model->owner),
+        loom_runtime_device_transfer_queue(model->owner),
         model->parameter_sources, host_allocator, &native_modules[4]);
     model->control.parameters = native_modules[4];
     iree_vm_module_retain(model->control.parameters);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_program_link_service(
-        module, loom_serve_preparation_card(model->preparation),
-        loom_serve_preparation_component(model->preparation),
+    status = loom_runtime_program_link_service(
+        module, loom_runtime_preparation_card(model->preparation),
+        loom_runtime_preparation_component(model->preparation),
         (iree_vm_module_span_t){native_modules, 5}, host_allocator,
         &model->control.program);
   }
@@ -459,7 +459,7 @@ static iree_status_t loom_serve_finite_create_control(
   const iree_vm_signature_type_t batch_results[] = {i32, buffer, buffer};
   const iree_vm_signature_type_t run_arguments[] = {i32, device_buffer,
                                                     device_buffer};
-  const loom_serve_program_binding_t bindings[] = {
+  const loom_runtime_program_binding_t bindings[] = {
       {IREE_SVL("prepare_request"),
        {request_arguments, IREE_ARRAYSIZE(request_arguments)},
        {request_results, IREE_ARRAYSIZE(request_results)},
@@ -473,21 +473,21 @@ static iree_status_t loom_serve_finite_create_control(
        {NULL, 0},
        &model->control.run},
   };
-  IREE_RETURN_IF_ERROR(loom_serve_program_bind_service(
+  IREE_RETURN_IF_ERROR(loom_runtime_program_bind_service(
       model->control.program, IREE_ARRAYSIZE(bindings), bindings));
   const iree_string_view_t forecast_root =
-      loom_serve_preparation_memory_forecast(model->preparation);
+      loom_runtime_preparation_memory_forecast(model->preparation);
   if (!iree_string_view_is_empty(forecast_root)) {
     const iree_vm_signature_type_t forecast_arguments[] = {buffer, buffer,
                                                            buffer};
     const iree_vm_signature_type_t forecast_results[] = {i64, i64, i64};
-    const loom_serve_program_binding_t forecast = {
+    const loom_runtime_program_binding_t forecast = {
         forecast_root,
         {forecast_arguments, IREE_ARRAYSIZE(forecast_arguments)},
         {forecast_results, IREE_ARRAYSIZE(forecast_results)},
         &model->control.memory_forecast};
     IREE_RETURN_IF_ERROR(
-        loom_serve_program_bind(model->control.program, 1, &forecast));
+        loom_runtime_program_bind(model->control.program, 1, &forecast));
   }
   return iree_ok_status();
 }
@@ -495,25 +495,25 @@ static iree_status_t loom_serve_finite_create_control(
 static iree_status_t loom_serve_finite_model_bind(
     loom_serve_finite_model_t* model) {
   IREE_RETURN_IF_ERROR(loom_serve_finite_check_layouts(model));
-  IREE_RETURN_IF_ERROR(loom_serve_device_create_execution(
+  IREE_RETURN_IF_ERROR(loom_runtime_device_create_execution(
       model->owner, model->pool, &model->execution));
   const loom_cmd_program_t* program =
-      loom_serve_jit_stage_program(model->stages.values[0]);
-  return loom_serve_parameter_bank_allocate(model->owner, model->pool, program,
-                                            model->host_allocator,
-                                            &model->parameters);
+      loom_runtime_jit_stage_program(model->stages.values[0]);
+  return loom_runtime_parameter_bank_allocate(model->owner, model->pool,
+                                              program, model->host_allocator,
+                                              &model->parameters);
 }
 
 static iree_status_t loom_serve_finite_model_link(
     loom_serve_finite_model_t* model, iree_vm_module_t* module,
-    const loom_serve_sources_t* sources,
+    const loom_runtime_sources_t* sources,
     iree_hal_command_buffer_mode_t command_mode) {
   const iree_allocator_t host_allocator = model->host_allocator;
-  iree_hal_queue_t* dispatch = loom_serve_device_dispatch_queue(model->owner);
-  loom_serve_residency_group_t* group =
-      loom_serve_parameter_bank_group(model->parameters);
-  IREE_RETURN_IF_ERROR(loom_serve_residency_allocate(
-      loom_serve_pool_residency_cache(model->pool), model->execution,
+  iree_hal_queue_t* dispatch = loom_runtime_device_dispatch_queue(model->owner);
+  loom_runtime_residency_group_t* group =
+      loom_runtime_parameter_bank_group(model->parameters);
+  IREE_RETURN_IF_ERROR(loom_runtime_residency_allocate(
+      loom_runtime_pool_residency_cache(model->pool), model->execution,
       group ? 1 : 0, &group, host_allocator, &model->residency));
   const loom_serve_executable_options_t options = {
       .device = model->owner,
@@ -527,12 +527,12 @@ static iree_status_t loom_serve_finite_model_link(
       .parameters = model->parameters,
       .recording = {.queue_family = iree_hal_queue_family(dispatch),
                     .parameters =
-                        loom_serve_parameter_bank_buffers(model->parameters),
+                        loom_runtime_parameter_bank_buffers(model->parameters),
                     .command_mode = command_mode,
                     .binding_count = 2},
       .cache = model->specialization_cache,
       .parameter_cache = {16, 1024 * 1024 * 1024}};
-  IREE_RETURN_IF_ERROR(loom_serve_stage_table_allocate(
+  IREE_RETURN_IF_ERROR(loom_runtime_stage_table_allocate(
       &options.recording, NULL, model->stages.count, model->stages.values,
       host_allocator, &model->stages.table));
   IREE_RETURN_IF_ERROR(loom_serve_finite_create_control(model, module));
@@ -580,7 +580,7 @@ struct loom_serve_finite_load_t {
   // Private CPU task outcome, handed off by its final release callback.
   iree_status_t task_status;
   // Tokenizer construction overlaps control/native compilation and indexing.
-  loom_serve_tokenizer_load_t* tokenizer_load;
+  loom_runtime_tokenizer_load_t* tokenizer_load;
   // Terminal outcome retained until tokenizer and backing ownership retire.
   iree_status_t terminal_status;
   // Completion publication shared with workers; owner consumes under mutex.
@@ -614,15 +614,15 @@ static iree_status_t loom_serve_finite_load_prepare(
   model->specialization_cache = load->options.specialization_cache;
   const iree_allocator_t host_allocator = model->host_allocator;
   IREE_RETURN_IF_ERROR(
-      loom_serve_device_create_jit(model->owner, &load->options.sources, NULL,
-                                   &model->compilation, &model->jit));
+      loom_runtime_device_create_jit(model->owner, &load->options.sources, NULL,
+                                     &model->compilation, &model->jit));
   IREE_RETURN_IF_ERROR(
       loom_serve_finite_prepare(model, &load->options, load->event.wake,
                                 load->event.user_data, &load->tokenizer_load));
   const loom_model_file_list_t* paths = NULL;
   const uint32_t source_count =
-      loom_serve_preparation_local_sources(model->preparation, &paths);
-  IREE_RETURN_IF_ERROR(loom_serve_parameter_sources_create(
+      loom_runtime_preparation_local_sources(model->preparation, &paths);
+  IREE_RETURN_IF_ERROR(loom_runtime_parameter_sources_create(
       NULL, &load->options.sources, source_count, paths, host_allocator,
       &model->parameter_sources));
   const iree_vm_ref_type_table_t* table = NULL;
@@ -633,10 +633,10 @@ static iree_status_t loom_serve_finite_load_prepare(
   const iree_string_view_t roles[] = {
       IREE_SVL("prepare_request"), IREE_SVL("prepare_batch"), IREE_SVL("run")};
   const iree_string_view_t forecast =
-      loom_serve_preparation_memory_forecast(model->preparation);
+      loom_runtime_preparation_memory_forecast(model->preparation);
   const iree_string_view_list_t additional_roots = {
       !iree_string_view_is_empty(forecast), &forecast};
-  iree_status_t status = loom_serve_program_compile_service_cached(
+  iree_status_t status = loom_runtime_program_compile_service_cached(
       model->jit, model->control.environment, &load->options.sources,
       load->options.sources.control, IREE_ARRAYSIZE(roles), roles,
       additional_roots, host_allocator, &load->module);
@@ -660,20 +660,19 @@ static const loomc_task_vtable_t finite_load_vtable = {
     .destroy = loom_serve_finite_load_release,
 };
 
-static void loom_serve_finite_load_compiled(void* user_data,
-                                            iree_status_t status,
-                                            loom_serve_stage_set_t* compiled) {
+static void loom_serve_finite_load_compiled(
+    void* user_data, iree_status_t status, loom_runtime_stage_set_t* compiled) {
   loom_serve_finite_load_t* load = user_data;
   for (iree_host_size_t i = 0; i < compiled->count; ++i) {
     load->model->stages.values[i] = compiled->values[i];
     compiled->values[i] = NULL;
   }
-  loom_serve_stage_set_free(compiled);
+  loom_runtime_stage_set_free(compiled);
   loom_serve_finite_load_complete(load, status);
 }
 
 iree_status_t loom_serve_finite_load_allocate(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
+    loom_runtime_device_t* device, loom_runtime_pool_t* pool,
     const loom_serve_finite_model_options_t* options,
     loom_serve_finite_load_wake_fn_t wake, void* user_data,
     iree_allocator_t host_allocator, loom_serve_finite_load_t** out_load) {
@@ -683,7 +682,7 @@ iree_status_t loom_serve_finite_load_allocate(
       iree_allocator_malloc(host_allocator, sizeof(*load), (void**)&load));
   load->host_allocator = host_allocator;
   load->options = *options;
-  load->command_mode = loom_serve_device_command_mode(device);
+  load->command_mode = loom_runtime_device_command_mode(device);
   load->event.wake = wake;
   load->event.user_data = user_data;
   iree_slim_mutex_initialize(&load->event.mutex);
@@ -722,7 +721,7 @@ iree_status_t loom_serve_finite_load_advance(
     status = iree_make_status(IREE_STATUS_CANCELLED, "model load cancelled");
   }
   loom_serve_finite_model_t* model = load->model;
-  loom_serve_host_t* host = loom_serve_device_host(model->owner);
+  loom_runtime_host_t* host = loom_runtime_device_host(model->owner);
   bool submitted = false;
   while (iree_status_is_ok(status) && !submitted &&
          load->phase != FINITE_LOAD_COMPLETE) {
@@ -733,7 +732,7 @@ iree_status_t loom_serve_finite_load_advance(
         load->event.pending = true;
         iree_slim_mutex_unlock(&load->event.mutex);
         status = iree_status_from_loomc(loomc_task_sink_submit(
-            loom_serve_host_compiler_sink(host), &load->task));
+            loom_runtime_host_compiler_sink(host), &load->task));
         submitted = iree_status_is_ok(status);
         break;
       case FINITE_LOAD_STAGES:
@@ -741,7 +740,7 @@ iree_status_t loom_serve_finite_load_advance(
         iree_slim_mutex_lock(&load->event.mutex);
         load->event.pending = true;
         iree_slim_mutex_unlock(&load->event.mutex);
-        status = loom_serve_stage_set_compile_catalog_async(
+        status = loom_runtime_stage_set_compile_catalog_async(
             model->jit, model->preparation, NULL,
             loom_serve_finite_load_compiled, load, load->host_allocator);
         submitted = iree_status_is_ok(status);
@@ -751,17 +750,18 @@ iree_status_t loom_serve_finite_load_advance(
         load->phase = FINITE_LOAD_WEIGHTS;
         break;
       case FINITE_LOAD_WEIGHTS:
-        if (load->index < loom_serve_parameter_bank_count(model->parameters)) {
+        if (load->index <
+            loom_runtime_parameter_bank_count(model->parameters)) {
           const uint32_t i = load->index++;
-          const loom_serve_preparation_stage_t* declaration =
-              loom_serve_preparation_stage(model->preparation, 0);
-          const loom_serve_preparation_parameter_t* parameter =
+          const loom_runtime_preparation_stage_t* declaration =
+              loom_runtime_preparation_stage(model->preparation, 0);
+          const loom_runtime_preparation_parameter_t* parameter =
               &declaration->parameters[i];
           iree_slim_mutex_lock(&load->event.mutex);
           load->event.pending = true;
           iree_slim_mutex_unlock(&load->event.mutex);
-          status = loom_serve_weights_prepare_async(
-              loom_serve_parameter_bank_weights(model->parameters, i), host,
+          status = loom_runtime_weights_prepare_async(
+              loom_runtime_parameter_bank_weights(model->parameters, i), host,
               model->jit, load->command_mode, &load->options.sources, parameter,
               model->parameter_sources, loom_serve_finite_load_complete, load);
           submitted = iree_status_is_ok(status);
@@ -770,8 +770,8 @@ iree_status_t loom_serve_finite_load_advance(
         }
         break;
       case FINITE_LOAD_LINK:
-        if (!loom_serve_tokenizer_load_take(&load->tokenizer_load, &status,
-                                            &model->tokenizer)) {
+        if (!loom_runtime_tokenizer_load_take(&load->tokenizer_load, &status,
+                                              &model->tokenizer)) {
           return iree_ok_status();
         }
         if (iree_status_is_ok(status)) {
@@ -792,8 +792,8 @@ iree_status_t loom_serve_finite_load_advance(
     load->phase = FINITE_LOAD_COMPLETE;
   }
   if (load->phase == FINITE_LOAD_COMPLETE &&
-      !loom_serve_tokenizer_load_take(&load->tokenizer_load, &status,
-                                      &model->tokenizer)) {
+      !loom_runtime_tokenizer_load_take(&load->tokenizer_load, &status,
+                                        &model->tokenizer)) {
     load->terminal_status = status;
     return iree_ok_status();
   }
@@ -811,7 +811,7 @@ iree_status_t loom_serve_finite_load_advance(
   return status;
 }
 
-const loom_serve_compilation_report_t* loom_serve_finite_load_report(
+const loom_runtime_compilation_report_t* loom_serve_finite_load_report(
     const loom_serve_finite_load_t* load) {
   return &load->model->compilation;
 }
@@ -841,7 +841,7 @@ static void loom_serve_finite_load_notify(void* user_data) {
 }
 
 iree_status_t loom_serve_finite_model_allocate(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
+    loom_runtime_device_t* device, loom_runtime_pool_t* pool,
     const loom_serve_finite_model_options_t* options,
     iree_allocator_t host_allocator, loom_serve_finite_model_t** out_model) {
   *out_model = NULL;
@@ -885,13 +885,14 @@ iree_host_size_t loom_serve_finite_model_input_capacity(
 bool loom_serve_finite_model_has_memory_forecast(
     const loom_serve_finite_model_t* model) {
   return !iree_string_view_is_empty(
-      loom_serve_preparation_memory_forecast(model->preparation));
+      loom_runtime_preparation_memory_forecast(model->preparation));
 }
 
 uint64_t loom_serve_finite_model_memory_limit(
     const loom_serve_finite_model_t* model) {
-  const loom_serve_memory_pool_t* pool = loom_serve_pool_memory(model->pool);
-  return pool ? loom_serve_memory_pool_limit(pool) : UINT64_MAX;
+  const loom_runtime_memory_pool_t* pool =
+      loom_runtime_pool_memory(model->pool);
+  return pool ? loom_runtime_memory_pool_limit(pool) : UINT64_MAX;
 }
 
 iree_status_t loom_serve_finite_model_forecast_memory(
@@ -912,7 +913,7 @@ iree_status_t loom_serve_finite_model_forecast_memory(
                                                descriptors)};
   iree_vm_variant_t results[3] = {0};
   iree_status_t status =
-      iree_vm_invoke(loom_serve_program_invocation(model->control.program),
+      iree_vm_invoke(loom_runtime_program_invocation(model->control.program),
                      model->control.memory_forecast,
                      iree_vm_variant_span_from_array(arguments),
                      iree_vm_variant_span_from_array(results));
@@ -938,15 +939,15 @@ iree_status_t loom_serve_finite_model_forecast_memory(
 
 const iree_tokenizer_t* loom_serve_finite_model_tokenizer(
     const loom_serve_finite_model_t* model) {
-  return loom_serve_tokenizer_value(model->tokenizer);
+  return loom_runtime_tokenizer_value(model->tokenizer);
 }
 
-loom_serve_residency_t* loom_serve_finite_model_residency(
+loom_runtime_residency_t* loom_serve_finite_model_residency(
     const loom_serve_finite_model_t* model) {
   return loom_serve_executables_residency(model->executables);
 }
 
-loom_serve_residency_snapshot_t loom_serve_finite_model_parameters(
+loom_runtime_residency_snapshot_t loom_serve_finite_model_parameters(
     const loom_serve_finite_model_t* model) {
   return loom_serve_executables_parameters(model->executables);
 }
@@ -983,7 +984,7 @@ iree_status_t loom_serve_finite_model_prepare_request(
                                                input)};
   iree_vm_variant_t results[3] = {0};
   iree_status_t status =
-      iree_vm_invoke(loom_serve_program_invocation(model->control.program),
+      iree_vm_invoke(loom_runtime_program_invocation(model->control.program),
                      model->control.prepare_request,
                      iree_vm_variant_span_from_array(arguments),
                      iree_vm_variant_span_from_array(results));
@@ -1031,9 +1032,9 @@ iree_status_t loom_serve_finite_model_prepare_batch(
   IREE_RETURN_IF_ERROR(loom_serve_prepared_requests_pack(
       count, requests, model->host_allocator, &ranges, &packed));
   loom_serve_executables_capture(model->executables);
-  loom_serve_preparation_module_begin(model->control.preparation,
-                                      model->stages.count, model->preparation,
-                                      LOOM_SERVE_PREPARATION_FLAG_PARAMETERS);
+  loom_runtime_preparation_module_begin(
+      model->control.preparation, model->stages.count, model->preparation,
+      LOOM_RUNTIME_PREPARATION_FLAG_PARAMETERS);
   iree_vm_variant_t arguments[] = {
       iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
                                                model->control.state),
@@ -1044,15 +1045,15 @@ iree_status_t loom_serve_finite_model_prepare_batch(
   iree_vm_variant_t results[3] = {0};
   iree_vm_buffer_t* plan = NULL;
   iree_status_t status = iree_vm_invoke(
-      loom_serve_program_invocation(model->control.program),
+      loom_runtime_program_invocation(model->control.program),
       model->control.prepare_batch, iree_vm_variant_span_from_array(arguments),
       iree_vm_variant_span_from_array(results));
   int32_t stage = 0;
-  loom_serve_preparation_t* declarations =
-      loom_serve_preparation_module_take(model->control.preparation);
+  loom_runtime_preparation_t* declarations =
+      loom_runtime_preparation_module_take(model->control.preparation);
   const iree_host_size_t stage_count =
       model->stages.count +
-      (declarations ? loom_serve_preparation_stage_count(declarations) : 0);
+      (declarations ? loom_runtime_preparation_stage_count(declarations) : 0);
   loom_serve_executables_declare(model->executables, declarations);
   if (iree_status_is_ok(status)) {
     status = iree_vm_i32_from_variant(results[0], &stage);
@@ -1105,11 +1106,11 @@ iree_status_t loom_serve_finite_model_advance_batch(
     const uint64_t input_bytes =
         iree_vm_buffer_length(model->invocation.payload);
     const uint64_t private_bytes =
-        input_bytes +
-        iree_min(loom_serve_module_workspace_requirement(model->control.runner)
-                     .allocation_size,
-                 UINT64_MAX - input_bytes);
-    return loom_serve_residency_prepare_working_set(
+        input_bytes + iree_min(loom_runtime_module_workspace_requirement(
+                                   model->control.runner)
+                                   .allocation_size,
+                               UINT64_MAX - input_bytes);
+    return loom_runtime_residency_prepare_working_set(
         loom_serve_executables_residency(model->executables), private_bytes,
         loom_serve_finite_result_output_length(model->invocation.result));
   }
@@ -1118,22 +1119,22 @@ iree_status_t loom_serve_finite_model_advance_batch(
 
 iree_status_t loom_serve_finite_model_submit(
     loom_serve_finite_model_t* model, loom_serve_finite_result_t** out_result,
-    loom_serve_execution_frontier_t* out_frontier) {
+    loom_runtime_execution_frontier_t* out_frontier) {
   *out_result = NULL;
-  *out_frontier = (loom_serve_execution_frontier_t){0};
-  loom_serve_residency_cancel_admission(
+  *out_frontier = (loom_runtime_execution_frontier_t){0};
+  loom_runtime_residency_cancel_admission(
       loom_serve_executables_residency(model->executables));
   iree_const_byte_span_t input;
   IREE_RETURN_IF_ERROR(iree_vm_buffer_map_read(
       model->invocation.payload, 0,
       iree_vm_buffer_length(model->invocation.payload), &input));
-  loom_serve_execution_t* execution = model->execution;
+  loom_runtime_execution_t* execution = model->execution;
   const iree_host_size_t output_length =
       loom_serve_finite_result_output_length(model->invocation.result);
   // Admission ceilings bound source plans, not physical slab geometry. Register
   // only this cohort's extents before allocating either buffer; command-private
   // workspace is registered separately from its reflected requirements.
-  IREE_RETURN_IF_ERROR(loom_serve_execution_reserve_workspace(
+  IREE_RETURN_IF_ERROR(loom_runtime_execution_reserve_workspace(
       execution, iree_max(input.data_length, output_length),
       LOOM_SERVE_FINITE_BUFFER_ALIGNMENT));
   const iree_hal_pool_reservation_request_t requests[] = {
@@ -1142,7 +1143,7 @@ iree_status_t loom_serve_finite_model_submit(
       iree_hal_make_pool_reservation_request(
           output_length, LOOM_SERVE_FINITE_BUFFER_ALIGNMENT),
   };
-  iree_status_t status = loom_serve_execution_alloca(
+  iree_status_t status = loom_runtime_execution_alloca(
       execution, IREE_ARRAYSIZE(requests), requests, model->buffers);
   uint64_t value = 0;
   if (iree_status_is_ok(status)) {
@@ -1151,7 +1152,7 @@ iree_status_t loom_serve_finite_model_submit(
         .upload = {.source = input.data,
                    .target_buffer = model->buffers[0],
                    .length = input.data_length}};
-    status = loom_serve_execution_transfer(execution, 1, &upload, &value);
+    status = loom_runtime_execution_transfer(execution, 1, &upload, &value);
   }
   if (iree_status_is_ok(status)) {
     iree_vm_variant_t arguments[] = {
@@ -1161,20 +1162,20 @@ iree_status_t loom_serve_finite_model_submit(
         iree_hal_buffer_variant_from_ptr_borrowed(&model->control.hal_types,
                                                   model->buffers[1])};
     status = iree_vm_invoke(
-        loom_serve_program_invocation(model->control.program),
+        loom_runtime_program_invocation(model->control.program),
         model->control.run, iree_vm_variant_span_from_array(arguments),
         iree_vm_variant_span_empty());
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
   }
   if (iree_status_is_ok(status)) {
     status =
-        loom_serve_execution_dealloca(execution, model->buffers[0], &value);
+        loom_runtime_execution_dealloca(execution, model->buffers[0], &value);
   }
   if (iree_status_is_ok(status)) {
     iree_hal_buffer_t* output =
         iree_hal_buffer_allocated_buffer(model->buffers[1]);
     iree_hal_buffer_retain(output);
-    status = loom_serve_residency_track_output(
+    status = loom_runtime_residency_track_output(
         loom_serve_executables_residency(model->executables), &output);
     if (iree_status_is_ok(status)) {
       loom_serve_finite_result_bind(model->invocation.result, execution,
@@ -1196,7 +1197,7 @@ iree_status_t loom_serve_finite_model_submit(
 }
 
 void loom_serve_finite_model_complete(loom_serve_finite_model_t* model) {
-  loom_serve_residency_release(
+  loom_runtime_residency_release(
       loom_serve_executables_residency(model->executables));
   loom_serve_finite_model_release_batch(model);
 }

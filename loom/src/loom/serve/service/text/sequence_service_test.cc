@@ -6,10 +6,10 @@
 
 #include "iree/base/internal/base64.h"
 #include "iree/vm/test_allocator.h"
+#include "loom/runtime/testing/native_allocator.h"
 #include "loom/serve/service/text/sequence.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/serve/service/text/stream.h"
-#include "loom/serve/testing/native_allocator.h"
 
 namespace {
 
@@ -104,7 +104,7 @@ TEST_F(SourceSequencePreparationTest, OwnsActualInputAcrossCapacityRetries) {
     const auto request = iree_make_string_view(body.data(), body.size());
     loom_serve_text_sequence_t sequence = {};
     IREE_ASSERT_OK(loom_serve_text_sequence_parse(request, &sequence));
-    loom_serve::testing::NativeAllocator allocator;
+    loom_runtime::testing::NativeAllocator allocator;
     loom_serve_text_input_t input = {};
     auto status =
         loom_serve_text_sequence_prepare(&sequence, model_, request, 1, {},
@@ -153,7 +153,7 @@ TEST_F(SourceSequenceServiceTest, PreparationFailureLeavesInputUnpublished) {
     iree::vm::testing::CountingAllocator failures(ordinal);
     // Tracks live ownership independently of reallocation attempts and joins
     // all released storage before the injected allocator leaves scope.
-    loom_serve::testing::NativeAllocator allocator(failures.allocator());
+    loom_runtime::testing::NativeAllocator allocator(failures.allocator());
     loom_serve_text_sequence_t sequence = {};
     IREE_ASSERT_OK(loom_serve_text_sequence_parse(request, &sequence));
     loom_serve_text_input_t input = {};

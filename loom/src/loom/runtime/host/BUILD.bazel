@@ -1,0 +1,99 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+
+package(
+    default_visibility = ["//loom/src/loom/runtime:__subpackages__"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+loom_cc_library(
+    name = "clock",
+    srcs = ["clock.c"],
+    hdrs = ["clock.h"],
+    visibility = ["//visibility:public"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_library(
+    name = "host",
+    srcs = ["host.c"],
+    hdrs = ["host.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c:task_pool",
+        "//loom/binding/c:task_queue",
+        "//loom/binding/c/target/vm",
+        "//loom/src/loom/runtime/program:native_artifact",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/async/util:proactor_thread",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/task:driver",
+        "//runtime/src/iree/hal/drivers/task/executable:loader",
+        "//runtime/src/iree/hal/drivers/task/executable/loaders/registration",
+        "//runtime/src/iree/task",
+    ],
+)
+
+iree_assert_dependency_boundary(
+    name = "host_has_no_x86_compiler_dependency",
+    forbidden_subtrees = [
+        "//loom/binding/c/target/cpu/...",
+        "//loom/binding/c/target/x86/...",
+        "//loom/src/loom/target/arch/x86/...",
+    ],
+    message = "The runtime host task driver must remain independent of Loom x86 compiler support",
+    target = ":host",
+)
+
+loom_cc_test(
+    name = "host_test",
+    srcs = ["host_test.cc"],
+    deps = [
+        ":host",
+        "//loom/binding/c:task_pool",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "timer",
+    srcs = ["timer.c"],
+    hdrs = ["timer.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime:wake",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
+loom_cc_test(
+    name = "timer_test",
+    srcs = ["timer_test.cc"],
+    deps = [
+        ":timer",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

@@ -160,7 +160,7 @@ struct loom_serve_recognition_stream_service_t {
     // Proactor-owned wait storage through completion callback return.
     iree_async_semaphore_wait_operation_t operation;
     // Last accepted frontier, consumed successfully before reuse on idle cuts.
-    loom_serve_execution_frontier_t frontier;
+    loom_runtime_execution_frontier_t frontier;
     // Toll-free semaphore interfaces borrowed from the frontier.
     iree_async_semaphore_t* semaphores[2];
     // Accepted numerical batch through readiness; zero for admission/release.
@@ -433,15 +433,15 @@ static iree_status_t loom_serve_recognition_admit(
     loom_serve_recognition_stream_service_t* service, bool shared_activity,
     bool* progress) {
   loom_serve_recognition_stream_t* row = service->admission;
-  loom_serve_residency_admission_t admission;
-  loom_serve_execution_frontier_t frontier;
+  loom_runtime_residency_admission_t admission;
+  loom_runtime_execution_frontier_t frontier;
   IREE_RETURN_IF_ERROR(service->generator.try_admit(
       service->generator.self, row->invocation, &admission, &frontier));
-  if (admission == LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED) {
+  if (admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED) {
     return iree_ok_status();
   }
-  if (admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
-    const loom_serve_execution_frontier_t previous = service->device.frontier;
+  if (admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED) {
+    const loom_runtime_execution_frontier_t previous = service->device.frontier;
     const bool complete = previous.semaphores[0] == frontier.semaphores[0] &&
                           previous.semaphores[1] == frontier.semaphores[1] &&
                           previous.values[0] == frontier.values[0] &&
@@ -457,7 +457,7 @@ static iree_status_t loom_serve_recognition_admit(
     *progress = true;
     return iree_ok_status();
   }
-  if (admission == LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY &&
+  if (admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY &&
       !shared_activity &&
       !loom_serve_recognition_stream_service_is_active(service)) {
     service->generator.discard(service->generator.self, row->invocation);
@@ -881,7 +881,7 @@ void loom_serve_recognition_stream_service_free(
 }
 
 iree_status_t loom_serve_recognition_stream_service_allocate(
-    loom_serve_host_t* host, loom_serve_recognition_generator_t generator,
+    loom_runtime_host_t* host, loom_serve_recognition_generator_t generator,
     const loom_serve_recognition_stream_service_options_t* options,
     iree_allocator_t host_allocator,
     loom_serve_recognition_stream_service_t** out_service) {
@@ -915,7 +915,7 @@ iree_status_t loom_serve_recognition_stream_service_allocate(
   service->host_allocator = host_allocator;
   service->generator = generator;
   service->options = *options;
-  service->executor = loom_serve_host_executor(host);
+  service->executor = loom_runtime_host_executor(host);
   service->admit_next = true;
   iree_slim_mutex_initialize(&service->events.mutex);
   iree_status_t status = iree_allocator_malloc_array(
@@ -938,7 +938,7 @@ iree_status_t loom_serve_recognition_stream_service_allocate(
                                     (void**)&service->batch.invocations);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_async_proactor_pool_get(loom_serve_host_proactor_pool(host),
+    status = iree_async_proactor_pool_get(loom_runtime_host_proactor_pool(host),
                                           0, &service->proactor);
   }
   if (iree_status_is_ok(status)) {

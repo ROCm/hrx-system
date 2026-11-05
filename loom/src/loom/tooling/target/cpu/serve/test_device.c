@@ -4,13 +4,13 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/serve/testing/device.h"
+#include "loom/runtime/testing/device.h"
 
-const loom_serve_test_device_t* loom_serve_test_device(void) {
-  static const loom_serve_test_device_t device = {
+const loom_runtime_test_device_t* loom_runtime_test_device(void) {
+  static const loom_runtime_test_device_t device = {
       .driver_name = IREE_SVL("task"),
       .device_uri = IREE_SVL("task"),
-      .service_backing = LOOM_SERVE_POOL_BACKING_FIXED,
+      .service_backing = LOOM_RUNTIME_POOL_BACKING_FIXED,
   };
   return &device;
 }

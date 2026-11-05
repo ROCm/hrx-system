@@ -6,7 +6,7 @@
 #ifndef LOOM_SERVE_SERVICE_FINITE_REGISTRATION_H_
 #define LOOM_SERVE_SERVICE_FINITE_REGISTRATION_H_
 
-#include "loom/serve/runtime/parameter/activation.h"
+#include "loom/runtime/parameter/activation.h"
 #include "loom/serve/service/finite/service.h"
 
 #ifdef __cplusplus
@@ -39,7 +39,7 @@ typedef struct loom_serve_finite_registration_options_t {
 // terminal preparation. Device, pool, protocol, name, stream, and observer
 // payload survive retirement. Failure returns no owner.
 iree_status_t loom_serve_finite_registration_allocate(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
+    loom_runtime_device_t* device, loom_runtime_pool_t* pool,
     const loom_serve_finite_model_options_t* model_options,
     const loom_serve_finite_registration_options_t* options,
     loom_runtime_wake_callback_t observer, iree_allocator_t host_allocator,
@@ -54,10 +54,10 @@ iree_status_t loom_serve_finite_registration_prepare(
     loom_serve_finite_registration_t* registration,
     loom_serve_finite_load_flags_t flags, bool* out_complete,
     loom_serve_finite_service_t** out_service,
-    loom_serve_compilation_report_t* out_report);
+    loom_runtime_compilation_report_t* out_report);
 
 // Copies ready-model parameter accounting on the serialized owner.
-loom_serve_residency_snapshot_t loom_serve_finite_registration_parameters(
+loom_runtime_residency_snapshot_t loom_serve_finite_registration_parameters(
     const loom_serve_finite_registration_t* registration);
 
 // Changes ready-model eviction policy without loading or changing admission.
@@ -68,8 +68,8 @@ void loom_serve_finite_registration_set_pinned(
 // including on cancellation, before permitting service work or retirement.
 iree_status_t loom_serve_finite_registration_activate(
     loom_serve_finite_registration_t* registration,
-    loom_serve_activation_flags_t flags,
-    loom_serve_activation_phase_t* out_phase);
+    loom_runtime_activation_flags_t flags,
+    loom_runtime_activation_phase_t* out_phase);
 
 // Releases reloadable parameters after service activity and warmup retire.
 // Nonterminal success owes an ownership wake; failure preserves ownership.

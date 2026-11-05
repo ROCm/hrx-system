@@ -7,24 +7,24 @@
 #include "loom/serve/service/text/warmup.h"
 
 #include "iree/base/threading/notification.h"
-#include "loom/serve/runtime/parameter/activation.h"
+#include "loom/runtime/parameter/activation.h"
 
 struct loom_serve_text_warmup_t {
   // Host ownership, independent of the preparing caller's lifetime.
   iree_allocator_t host_allocator;
   // Independent parameter-ready timeline; never gates state initialization.
-  loom_serve_execution_t* execution;
+  loom_runtime_execution_t* execution;
   // Owned invocation borrow protecting the model's shared parameter group.
-  loom_serve_residency_t* residency;
+  loom_runtime_residency_t* residency;
   // Completion storage retained across preparation-to-service handoff.
-  loom_serve_activation_t* activation;
+  loom_runtime_activation_t* activation;
   // Owned terminal outcome, preserved until model destruction.
   iree_status_t status;
 };
 
 iree_status_t loom_serve_text_warmup_allocate(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
-    loom_serve_residency_group_t* group, void (*wake)(void* user_data),
+    loom_runtime_device_t* device, loom_runtime_pool_t* pool,
+    loom_runtime_residency_group_t* group, void (*wake)(void* user_data),
     void* user_data, iree_allocator_t host_allocator,
     loom_serve_text_warmup_t** out_warmup) {
   *out_warmup = NULL;
@@ -33,23 +33,23 @@ iree_status_t loom_serve_text_warmup_allocate(
       iree_allocator_malloc(host_allocator, sizeof(*warmup), (void**)&warmup));
   warmup->host_allocator = host_allocator;
   iree_status_t status =
-      loom_serve_device_create_execution(device, pool, &warmup->execution);
+      loom_runtime_device_create_execution(device, pool, &warmup->execution);
   if (iree_status_is_ok(status)) {
-    status = loom_serve_residency_allocate(
-        loom_serve_pool_residency_cache(pool), warmup->execution, 1, &group,
+    status = loom_runtime_residency_allocate(
+        loom_runtime_pool_residency_cache(pool), warmup->execution, 1, &group,
         host_allocator, &warmup->residency);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_activation_allocate(
+    status = loom_runtime_activation_allocate(
         warmup->residency,
-        loom_serve_host_proactor_pool(loom_serve_device_host(device)), wake,
+        loom_runtime_host_proactor_pool(loom_runtime_device_host(device)), wake,
         user_data, host_allocator, &warmup->activation);
   }
   if (iree_status_is_ok(status)) {
     *out_warmup = warmup;
   } else {
-    loom_serve_residency_free(warmup->residency);
-    loom_serve_execution_release(warmup->execution);
+    loom_runtime_residency_free(warmup->residency);
+    loom_runtime_execution_release(warmup->execution);
     iree_allocator_free(host_allocator, warmup);
   }
   return status;
@@ -59,16 +59,17 @@ void loom_serve_text_warmup_poll(loom_serve_text_warmup_t* warmup) {
   if (!warmup || !warmup->activation) {
     return;
   }
-  loom_serve_activation_phase_t phase;
-  warmup->status = loom_serve_activation_advance(warmup->activation, 0, &phase);
-  if (phase == LOOM_SERVE_ACTIVATION_WAITING) {
+  loom_runtime_activation_phase_t phase;
+  warmup->status =
+      loom_runtime_activation_advance(warmup->activation, 0, &phase);
+  if (phase == LOOM_RUNTIME_ACTIVATION_WAITING) {
     warmup->status = iree_status_join(
         warmup->status,
-        loom_serve_activation_advance(
-            warmup->activation, LOOM_SERVE_ACTIVATION_FLAG_CANCEL, &phase));
+        loom_runtime_activation_advance(
+            warmup->activation, LOOM_RUNTIME_ACTIVATION_FLAG_CANCEL, &phase));
   }
-  if (phase == LOOM_SERVE_ACTIVATION_COMPLETE) {
-    loom_serve_activation_free(warmup->activation);
+  if (phase == LOOM_RUNTIME_ACTIVATION_COMPLETE) {
+    loom_runtime_activation_free(warmup->activation);
     warmup->activation = NULL;
   }
 }
@@ -77,7 +78,7 @@ void loom_serve_text_warmup_set_observer(loom_serve_text_warmup_t* warmup,
                                          void (*wake)(void* user_data),
                                          void* user_data) {
   if (warmup) {
-    loom_serve_activation_set_observer(warmup->activation, wake, user_data);
+    loom_runtime_activation_set_observer(warmup->activation, wake, user_data);
   }
 }
 
@@ -119,8 +120,8 @@ void loom_serve_text_warmup_free(loom_serve_text_warmup_t* warmup) {
     return;
   }
   IREE_ASSERT(!warmup->activation);
-  loom_serve_residency_free(warmup->residency);
-  loom_serve_execution_release(warmup->execution);
+  loom_runtime_residency_free(warmup->residency);
+  loom_runtime_execution_release(warmup->execution);
   iree_status_free(warmup->status);
   iree_allocator_free(warmup->host_allocator, warmup);
 }

@@ -1,0 +1,108 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
+
+package(
+    default_visibility = ["//loom/src/loom/runtime:__subpackages__"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+exports_files(
+    [
+        "device_group_test.cc",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+loom_cc_library(
+    name = "device",
+    srcs = ["device.c"],
+    hdrs = ["device.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":pool",
+        "//loom/src/loom/runtime:wake",
+        "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/runtime/execution:queues",
+        "//loom/src/loom/runtime/execution:workspace",
+        "//loom/src/loom/runtime/host",
+        "//loom/src/loom/runtime/parameter:residency",
+        "//loom/src/loom/runtime/program:jit",
+        "//loom/src/loom/runtime/program:tokenizer_cache",
+        "//loom/src/loom/runtime/storage:memory",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
+    name = "pool",
+    srcs = ["pool.c"],
+    hdrs = ["pool.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime/execution:workspace",
+        "//loom/src/loom/runtime/parameter:residency",
+        "//loom/src/loom/runtime/storage:memory",
+        "//loom/src/loom/runtime/storage:virtual_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/memory:tlsf_pool",
+    ],
+)
+
+iree_assert_dependency_boundary(
+    name = "device_is_independent_of_services",
+    forbidden_subtrees = [
+        "//loom/src/loom/serve/...",
+        "//loom/src/loom/service/...",
+    ],
+    message = "Shared device resources must not depend on services or server policy",
+    target = ":device",
+)
+
+iree_assert_dependency_boundary(
+    name = "device_has_no_cli_profiling",
+    forbidden_dependencies = ["//runtime/src/iree/tooling:device_profiling"],
+    message = "Device ownership must not select command-line profiling policy",
+    target = ":device",
+)
+
+loom_cc_test(
+    name = "device_test",
+    srcs = ["device_test.cc"],
+    deps = [
+        ":device",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "device_cpu_test",
+    srcs = ["device_cpu_test.cc"],
+    target_compatible_with = loom_config_compatible_with([
+        "//runtime/config/hal:driver_task",
+    ]),
+    deps = [
+        ":device",
+        "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/runtime/host",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

@@ -8,7 +8,7 @@
 #define LOOM_SERVE_SERVICE_FINITE_RESULT_H_
 
 #include "iree/vm/buffer.h"
-#include "loom/serve/runtime/execution/execution.h"
+#include "loom/runtime/execution/execution.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -45,7 +45,7 @@ iree_status_t loom_serve_finite_result_create(
 // the result and every later buffer consumer. The producer separately retains
 // its tracked view through completion or terminal retirement.
 void loom_serve_finite_result_bind(loom_serve_finite_result_t* result,
-                                   loom_serve_execution_t* execution,
+                                   loom_runtime_execution_t* execution,
                                    iree_hal_buffer_t* output);
 
 void loom_serve_finite_result_retain(loom_serve_finite_result_t* result);
@@ -66,7 +66,7 @@ iree_host_size_t loom_serve_finite_result_length(
 
 // Borrowed producer readiness, stable through result release. Import this
 // frontier before using device rows; no host wait is required for composition.
-loom_serve_execution_frontier_t loom_serve_finite_result_ready(
+loom_runtime_execution_frontier_t loom_serve_finite_result_ready(
     const loom_serve_finite_result_t* result);
 
 // Trusted queries into the checked plan. Request and row ordinals retain the
@@ -91,7 +91,7 @@ typedef struct loom_serve_finite_snapshot_t loom_serve_finite_snapshot_t;
 iree_status_t loom_serve_finite_result_download(
     const loom_serve_finite_result_t* result,
     loom_serve_finite_snapshot_t** out_snapshot,
-    loom_serve_execution_frontier_t* out_frontier);
+    loom_runtime_execution_frontier_t* out_frontier);
 
 // Releases caller ownership, independently of any accepted download capture.
 // NULL is accepted. Row borrowers must have retired first.

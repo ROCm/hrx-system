@@ -11,9 +11,9 @@
 #include "iree/base/internal/json.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/task/owner.h"
+#include "loom/runtime/device/device.h"
 #include "loom/runtime/wake.h"
 #include "loom/serve/dashboard/assets.h"
-#include "loom/serve/runtime/device/device.h"
 #include "loom/serve/server/driver.h"
 #include "loom/serve/server/http/live.h"
 #include "loom/serve/server/http/logs.h"
@@ -442,7 +442,7 @@ static const char* loom_serve_router_admission_phase(
 }
 
 static iree_status_t loom_serve_router_describe_residency(
-    loom_serve_residency_snapshot_t state, iree_string_builder_t* output) {
+    loom_runtime_residency_snapshot_t state, iree_string_builder_t* output) {
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output,
       ",\"active\":%s,\"backing\":\"%s\",\"activations\":"
@@ -517,7 +517,7 @@ static iree_status_t loom_serve_router_describe_parameters(
         status = iree_string_builder_append_cstring(output, "}");
       }
     }
-    const loom_serve_compilation_report_t* report = state.compilation;
+    const loom_runtime_compilation_report_t* report = state.compilation;
     if (iree_status_is_ok(status) && report &&
         (report->commands || report->severities[0] || report->severities[1] ||
          report->severities[2])) {
@@ -525,7 +525,7 @@ static iree_status_t loom_serve_router_describe_parameters(
       if (iree_status_is_ok(status)) {
         loom_output_stream_t stream;
         loom_output_stream_for_builder(output, &stream);
-        status = loom_serve_compilation_write(report, &stream);
+        status = loom_runtime_compilation_write(report, &stream);
       }
     }
     if (iree_status_is_ok(status)) {
@@ -638,7 +638,7 @@ static iree_status_t loom_serve_router_describe_service(
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         output, ",\"variants\":{\"selected\":%" PRIu64 ",\"count\":%zu}",
         service->reconfiguration.selected(service->reconfiguration.self),
-        loom_serve_variant_pool_count(service->reconfiguration.pool)));
+        loom_runtime_variant_pool_count(service->reconfiguration.pool)));
   }
   if (admission->incarnation) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
@@ -659,7 +659,7 @@ static iree_status_t loom_serve_router_describe_service(
           output, iree_status_message(admission->status)));
       IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "}"));
     }
-    const loom_serve_compilation_report_t* report = &admission->compilation;
+    const loom_runtime_compilation_report_t* report = &admission->compilation;
     if (include_status) {
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           output, ",\"preparation_duration_ns\":%" PRIu64,
@@ -671,7 +671,7 @@ static iree_status_t loom_serve_router_describe_service(
           iree_string_builder_append_cstring(output, ",\"compilation\":"));
       loom_output_stream_t stream;
       loom_output_stream_for_builder(output, &stream);
-      IREE_RETURN_IF_ERROR(loom_serve_compilation_write(report, &stream));
+      IREE_RETURN_IF_ERROR(loom_runtime_compilation_write(report, &stream));
     }
   }
   if (include_status) {
@@ -1048,7 +1048,7 @@ static iree_status_t loom_serve_router_register(
     const loom_serve_http_request_t* request) {
   loom_serve_model_configuration_t configuration = {0};
   iree_string_view_t json;
-  loom_serve_package_t* package = NULL;
+  loom_runtime_package_t* package = NULL;
   iree_status_t status = loom_serve_http_package_parse(
       request, router->host_allocator, &json, &package);
   if (iree_status_is_ok(status)) {
@@ -1056,7 +1056,7 @@ static iree_status_t loom_serve_router_register(
         json, iree_string_view_empty(), package, router->host_allocator,
         &configuration);
   }
-  loom_serve_package_release(package);
+  loom_runtime_package_release(package);
   iree_host_size_t index = 0;
   if (iree_status_is_ok(status)) {
     status = loom_serve_registry_register(router->driver.registry,
@@ -1546,7 +1546,7 @@ static void loom_serve_router_advance(
       loom_serve_http_server_is_stopping(router->server);
   router->driver.runtime.status = iree_status_join(
       router->driver.runtime.status,
-      loom_serve_device_group_advance(router->resources.device_group));
+      loom_runtime_device_group_advance(router->resources.device_group));
   router->driver.runtime.stopping |=
       !iree_status_is_ok(router->driver.runtime.status);
   *out_progress = false;
@@ -1604,7 +1604,8 @@ static void loom_serve_router_advance(
   bool pending = router->tokenizations != NULL || router->held.count != 0 ||
                  router->logs.count != 0 ||
                  loom_serve_http_variants_pending(router->variants);
-  pending |= loom_serve_device_group_is_pending(router->resources.device_group);
+  pending |=
+      loom_runtime_device_group_is_pending(router->resources.device_group);
   pending |= loom_serve_maintenance_is_pending(&router->maintenance);
   pending |= loom_serve_http_live_is_pending(router->live);
   pending |= loom_serve_driver_collect(&router->driver, out_progress);
@@ -1612,8 +1613,8 @@ static void loom_serve_router_advance(
       !loom_serve_http_server_has_pending_responses(router->server)) {
     loom_serve_maintenance_set_observer(&router->maintenance,
                                         (loom_runtime_wake_callback_t){0});
-    loom_serve_device_group_set_observer(router->resources.device_group,
-                                         (loom_runtime_wake_callback_t){0});
+    loom_runtime_device_group_set_observer(router->resources.device_group,
+                                           (loom_runtime_wake_callback_t){0});
     loom_serve_driver_set_observer(&router->driver,
                                    (loom_runtime_wake_callback_t){0});
     loom_serve_http_server_set_observer(router->server,
@@ -1627,8 +1628,8 @@ static void loom_serve_router_start(void* self) {
   const loom_runtime_wake_callback_t observer = {loom_serve_router_wake,
                                                  router};
   loom_serve_maintenance_set_observer(&router->maintenance, observer);
-  loom_serve_device_group_set_observer(router->resources.device_group,
-                                       observer);
+  loom_runtime_device_group_set_observer(router->resources.device_group,
+                                         observer);
   loom_serve_driver_set_observer(&router->driver, observer);
   loom_serve_http_server_set_observer(router->server, observer);
 }

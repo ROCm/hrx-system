@@ -10,9 +10,9 @@ struct loom_serve_finite_component_t {
   // Allocator owning the handle and its preparation operation.
   iree_allocator_t host_allocator;
   // Borrowed execution device, surviving final model retirement.
-  loom_serve_device_t* device;
+  loom_runtime_device_t* device;
   // Borrowed storage owner, preserved across lazy preparation and reload.
-  loom_serve_pool_t* pool;
+  loom_runtime_pool_t* pool;
   // Borrowed definition and package, independent of any requesting connection.
   loom_serve_finite_model_options_t options;
   // Immutable owner wake target, live until all callbacks have retired.
@@ -34,7 +34,7 @@ struct loom_serve_finite_component_t {
   // Owned terminal preparation error, cloned only for affected consumers.
   iree_status_t status;
   // Cumulative evidence independent of load/model destruction.
-  loom_serve_compilation_report_t report;
+  loom_runtime_compilation_report_t report;
 };
 
 static void loom_serve_finite_component_set_phase(
@@ -54,7 +54,7 @@ static void loom_serve_finite_component_set_phase(
 }
 
 iree_status_t loom_serve_finite_component_allocate(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
+    loom_runtime_device_t* device, loom_runtime_pool_t* pool,
     const loom_serve_finite_model_options_t* options,
     loom_runtime_wake_callback_t observer, iree_allocator_t host_allocator,
     loom_serve_finite_component_t** out_component) {
@@ -91,7 +91,7 @@ bool loom_serve_finite_component_is_pending(
           loom_serve_finite_model_is_pending(component->model));
 }
 
-const loom_serve_compilation_report_t* loom_serve_finite_component_report(
+const loom_runtime_compilation_report_t* loom_serve_finite_component_report(
     const loom_serve_finite_component_t* component) {
   return &component->report;
 }
@@ -103,8 +103,8 @@ iree_status_t loom_serve_finite_component_status(
 
 bool loom_serve_finite_component_parameters(
     const loom_serve_finite_component_t* component,
-    loom_serve_residency_snapshot_t* out_parameters) {
-  *out_parameters = (loom_serve_residency_snapshot_t){0};
+    loom_runtime_residency_snapshot_t* out_parameters) {
+  *out_parameters = (loom_runtime_residency_snapshot_t){0};
   if (!component->model) {
     return false;
   }
@@ -144,8 +144,8 @@ bool loom_serve_finite_component_advance(
   if (!complete) {
     return false;
   }
-  loom_serve_compilation_merge(&component->report,
-                               loom_serve_finite_load_report(component->load));
+  loom_runtime_compilation_merge(
+      &component->report, loom_serve_finite_load_report(component->load));
   if (iree_status_is_ok(component->status)) {
     component->model = loom_serve_finite_load_take_model(component->load);
     loom_serve_finite_model_set_pinned(component->model, component->pinned);
@@ -220,12 +220,12 @@ iree_status_t loom_serve_finite_component_trim(
     return iree_ok_status();
   }
   if (component->phase != LOOM_SERVE_FINITE_COMPONENT_RELEASING) {
-    loom_serve_residency_t* residency =
+    loom_runtime_residency_t* residency =
         loom_serve_finite_model_residency(component->model);
-    if (loom_serve_residency_is_pinned(residency)) {
+    if (loom_runtime_residency_is_pinned(residency)) {
       return iree_ok_status();
     }
-    if (loom_serve_residency_snapshot(residency).elastic) {
+    if (loom_runtime_residency_snapshot(residency).elastic) {
       return loom_serve_finite_model_deactivate(component->model, out_complete);
     }
   }

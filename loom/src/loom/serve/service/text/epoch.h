@@ -155,7 +155,7 @@ iree_status_t loom_serve_text_epoch_submit(
     const loom_serve_text_epoch_t* epoch,
     const loom_serve_text_continuation_t* continuation,
     loom_serve_text_capture_t** out_capture,
-    loom_serve_execution_frontier_t* out_frontier);
+    loom_runtime_execution_frontier_t* out_frontier);
 
 // Consumes successful ALL readiness and publishes authoritative model progress
 // into results. Isolated execution completes exactly the current span and

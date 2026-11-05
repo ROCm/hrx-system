@@ -11,9 +11,9 @@
 #include "iree/vm/buffer.h"
 #include "iree/vm/environment.h"
 #include "iree/vm/module.h"
-#include "loom/serve/runtime/parameter/sources.h"
-#include "loom/serve/runtime/program/preparation.h"
-#include "loom/serve/runtime/program/tokenizer_cache.h"
+#include "loom/runtime/parameter/sources.h"
+#include "loom/runtime/program/preparation.h"
+#include "loom/runtime/program/tokenizer_cache.h"
 #include "loom/serve/service/text/model.h"
 #include "loom/serve/service/text/storage.h"
 #include "loomc/target.h"
@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-typedef struct loom_serve_jit_t loom_serve_jit_t;
+typedef struct loom_runtime_jit_t loom_runtime_jit_t;
 
 // Source-owned preparation, independent of device bindings and invocation.
 // Private construction may run on a shared worker; the model retains this
@@ -39,9 +39,9 @@ typedef struct loom_serve_text_source_t {
   // Resolved HAL reference descriptors, without device capabilities.
   iree_hal_module_types_t types;
   // Owned source declarations and parameter policies.
-  loom_serve_preparation_t* preparation;
+  loom_runtime_preparation_t* preparation;
   // Owned immutable checkpoint indexes shared by resident and demand reads.
-  loom_serve_parameter_sources_t* parameter_sources;
+  loom_runtime_parameter_sources_t* parameter_sources;
   // Compiled control bytecode awaiting native capability linking.
   iree_vm_module_t* module;
   // Opaque source state retained independently of the bootstrap invocation.
@@ -49,7 +49,7 @@ typedef struct loom_serve_text_source_t {
   // Owned deployment JSON shared with bootstrap and cold request policy.
   iree_vm_buffer_t* options;
   // Owned parsed vocabulary reused across requests and tokenizer borrowers.
-  loom_serve_tokenizer_t* tokenizer;
+  loom_runtime_tokenizer_t* tokenizer;
   // Source terminal marker retained until independent tokenizer construction.
   iree_vm_buffer_t* terminal_marker;
   // Source terminal marker resolved once against the tokenizer.
@@ -72,7 +72,7 @@ typedef struct loom_serve_text_source_t {
 // source-returned state may retain its own copied inputs.
 // jit supplies the source grammar, model-local report, and immutable VM cache.
 iree_status_t loom_serve_text_source_initialize(
-    loom_serve_jit_t* jit, const loom_serve_text_options_t* options,
+    loom_runtime_jit_t* jit, const loom_serve_text_options_t* options,
     iree_allocator_t host_allocator, loom_serve_text_source_t* out_source,
     loom_serve_text_storage_t* out_storage);
 
@@ -82,7 +82,7 @@ iree_status_t loom_serve_text_source_initialize(
 // remain owned by source on failure. Options and jit are borrowed through
 // return.
 iree_status_t loom_serve_text_source_compile_control(
-    loom_serve_jit_t* jit, const loom_serve_text_options_t* options,
+    loom_runtime_jit_t* jit, const loom_serve_text_options_t* options,
     loom_serve_text_source_t* source);
 
 // Resolves source terminal semantics after the model owner joins tokenizer

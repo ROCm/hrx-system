@@ -21,7 +21,7 @@ typedef struct loom_serve_configuration_t {
   // Product version and source revision reported by help and --version.
   loom_serve_build_identity_t build_identity;
   // Compiler target package, or NULL for a runtime-only application.
-  const loom_serve_compiler_options_t* compiler_options;
+  const loom_runtime_compiler_options_t* compiler_options;
   // Exact linked non-task runtime drivers, or NULL for a task-only application.
   iree_hal_driver_registry_t* driver_registry;
 } loom_serve_configuration_t;

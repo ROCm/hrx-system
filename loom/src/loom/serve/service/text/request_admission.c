@@ -120,10 +120,10 @@ static bool loom_serve_text_cache_can_reclaim(
 }
 
 iree_status_t loom_serve_text_cache_forecast(
-    void* self, const loom_serve_residency_forecast_t* request,
-    loom_serve_residency_projection_t* out_projection) {
+    void* self, const loom_runtime_residency_forecast_t* request,
+    loom_runtime_residency_projection_t* out_projection) {
   loom_serve_text_service_t* service = self;
-  *out_projection = (loom_serve_residency_projection_t){0};
+  *out_projection = (loom_runtime_residency_projection_t){0};
   if (!loom_serve_text_cache_can_reclaim(service)) {
     // No inspection of borrowed model state. Its entire pool charge remains
     // unclassified and therefore protected by the common forecast.
@@ -189,7 +189,7 @@ static iree_status_t loom_serve_text_reclaim_idle(
     // Sparse backing is already valid for admission. Fitting requests retain
     // their completion credit while maintenance accumulates across the cohort.
     loom_serve_text_reserve_result_t admission;
-    loom_serve_execution_frontier_t frontier;
+    loom_runtime_execution_frontier_t frontier;
     loom_serve_text_pending_continuation_t* continuation =
         &service->pending.prepared.request->continuation;
     status = continuation->session
@@ -214,7 +214,7 @@ static iree_status_t loom_serve_text_reclaim_idle(
         admission == LOOM_SERVE_TEXT_RESERVE_ACQUIRED) {
       // The previous frontier was consumed successfully before this call. An
       // unchanged pair needs no new wait.
-      const loom_serve_execution_frontier_t previous =
+      const loom_runtime_execution_frontier_t previous =
           service->completion.frontier;
       const bool complete = previous.semaphores[0] == frontier.semaphores[0] &&
                             previous.semaphores[1] == frontier.semaphores[1] &&
@@ -239,7 +239,7 @@ static iree_status_t loom_serve_text_reclaim_idle(
         service->completion.work != TEXT_WORK_NONE) {
       break;
     }
-    if (loom_serve_residency_cache_is_reclaiming(loom_serve_residency_cache(
+    if (loom_runtime_residency_cache_is_reclaiming(loom_runtime_residency_cache(
             loom_serve_text_model_residency(service->model)))) {
       *out_result = TEXT_ADMISSION_QUEUED;
       break;
@@ -733,7 +733,7 @@ iree_status_t loom_serve_text_admit_pending(loom_serve_text_service_t* service,
         const bool probe = loom_serve_text_admission_blocked(
             &service->pending.admission, service->pending.count);
         if (previous != service->pending.admission.cursor) {
-          loom_serve_residency_cancel_admission(
+          loom_runtime_residency_cancel_admission(
               loom_serve_text_model_residency(service->model));
           memset(&service->pending.prepared, 0,
                  sizeof(service->pending.prepared));

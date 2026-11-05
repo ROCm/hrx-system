@@ -6,8 +6,8 @@
 
 #include "loom/serve/server/registry.h"
 
+#include "loom/runtime/host/clock.h"
 #include "loom/runtime/wake.h"
-#include "loom/serve/runtime/host/clock.h"
 #include "loom/serve/service/kind.h"
 #include "loom/serve/service/text/checkpoint_control.h"
 #include "loom/service/telemetry/record.h"
@@ -173,7 +173,7 @@ iree_status_t loom_serve_registry_allocate(
     registry->models[i].registry = registry;
   }
   IREE_TRACE(loom_service_trace_initialize());
-  const int64_t registered_unix_seconds = loom_serve_clock_now_unix_seconds();
+  const int64_t registered_unix_seconds = loom_runtime_clock_now_unix_seconds();
   for (iree_host_size_t i = 0; i < service_count; ++i) {
     registry->models[i].service = services[i];
     registry->models[i].phase = LOOM_SERVE_REGISTRATION_READY;
@@ -487,7 +487,7 @@ iree_status_t loom_serve_registry_register(
     model->stream = stream;
     model->closed = model->configuration.start_drained;
     model->incarnation = registry->next_incarnation++;
-    model->registered_unix_seconds = loom_serve_clock_now_unix_seconds();
+    model->registered_unix_seconds = loom_runtime_clock_now_unix_seconds();
     model->service.name = model->configuration.name;
     // Protocol metadata is known before source preparation, without model
     // access.
@@ -850,12 +850,12 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
              model->service.runtime.self) &&
          !model->service.runtime.vtable->is_active(
              model->service.runtime.self))) {
-      loom_serve_activation_phase_t phase = LOOM_SERVE_ACTIVATION_COMPLETE;
+      loom_runtime_activation_phase_t phase = LOOM_RUNTIME_ACTIVATION_COMPLETE;
       iree_status_t component_status = iree_ok_status();
       iree_status_t status = model->registration.activate(
           model->registration.self, model->parameter_component,
           model->removal || !iree_status_is_ok(model->status)
-              ? LOOM_SERVE_ACTIVATION_FLAG_CANCEL
+              ? LOOM_RUNTIME_ACTIVATION_FLAG_CANCEL
               : 0,
           &phase, &component_status);
       if (!iree_status_is_ok(component_status)) {
@@ -869,9 +869,9 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
         }
       }
       const loom_serve_parameter_operation_t operation =
-          phase == LOOM_SERVE_ACTIVATION_COMPLETE
+          phase == LOOM_RUNTIME_ACTIVATION_COMPLETE
               ? LOOM_SERVE_PARAMETER_OPERATION_NONE
-          : phase == LOOM_SERVE_ACTIVATION_LOADING
+          : phase == LOOM_RUNTIME_ACTIVATION_LOADING
               ? LOOM_SERVE_PARAMETER_OPERATION_ACTIVATING
               : LOOM_SERVE_PARAMETER_OPERATION_WAITING;
       progress |= operation != model->parameter_operation;

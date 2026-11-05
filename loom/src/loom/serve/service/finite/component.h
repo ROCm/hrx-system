@@ -34,7 +34,7 @@ typedef enum loom_serve_finite_component_phase_e {
 // destruction. The observer must schedule the shared owner without reentering
 // this object.
 iree_status_t loom_serve_finite_component_allocate(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
+    loom_runtime_device_t* device, loom_runtime_pool_t* pool,
     const loom_serve_finite_model_options_t* options,
     loom_runtime_wake_callback_t observer, iree_allocator_t host_allocator,
     loom_serve_finite_component_t** out_component);
@@ -76,7 +76,7 @@ bool loom_serve_finite_component_is_pending(
 // Cumulative evidence from terminal preparation attempts. A cold declaration
 // has an empty report; elastic reactivation adds no compilation. The pointer
 // remains valid until destruction and is read only on the serialized owner.
-const loom_serve_compilation_report_t* loom_serve_finite_component_report(
+const loom_runtime_compilation_report_t* loom_serve_finite_component_report(
     const loom_serve_finite_component_t* component);
 
 // Borrows the current preparation diagnostic on the serialized owner. The
@@ -88,7 +88,7 @@ iree_status_t loom_serve_finite_component_status(
 // release. False means no residency exists; it is not an inactive fixed model.
 bool loom_serve_finite_component_parameters(
     const loom_serve_finite_component_t* component,
-    loom_serve_residency_snapshot_t* out_parameters);
+    loom_runtime_residency_snapshot_t* out_parameters);
 
 // Persistent eviction policy for present and subsequently prepared parameters.
 // Does not start preparation, activate weights, or change invocation-owned

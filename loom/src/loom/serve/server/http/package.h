@@ -7,7 +7,7 @@
 #ifndef LOOM_SERVE_SERVER_HTTP_PACKAGE_H_
 #define LOOM_SERVE_SERVER_HTTP_PACKAGE_H_
 
-#include "loom/serve/runtime/program/package.h"
+#include "loom/runtime/program/package.h"
 #include "loom/serve/transport/http/request.h"
 
 #ifdef __cplusplus
@@ -28,7 +28,7 @@ extern "C" {
 // types reject.
 iree_status_t loom_serve_http_package_parse(
     const loom_serve_http_request_t* request, iree_allocator_t host_allocator,
-    iree_string_view_t* out_json, loom_serve_package_t** out_package);
+    iree_string_view_t* out_json, loom_runtime_package_t** out_package);
 
 #ifdef __cplusplus
 }  // extern "C"

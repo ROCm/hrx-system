@@ -7,7 +7,7 @@
 #ifndef LOOM_SERVE_SERVICE_IMAGE_SERVICE_H_
 #define LOOM_SERVE_SERVICE_IMAGE_SERVICE_H_
 
-#include "loom/serve/runtime/host/host.h"
+#include "loom/runtime/host/host.h"
 #include "loom/serve/service/image/generator.h"
 #include "loom/serve/service/service.h"
 
@@ -42,7 +42,7 @@ typedef struct loom_serve_image_service_t loom_serve_image_service_t;
 // this object. A supplied telemetry stream is borrowed through destruction and
 // preserves the registration's history; NULL creates a service-owned stream.
 iree_status_t loom_serve_image_service_allocate(
-    loom_serve_host_t* host, loom_serve_image_generator_t generator,
+    loom_runtime_host_t* host, loom_serve_image_generator_t generator,
     const loom_serve_image_service_options_t* options,
     loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_image_service_t** out_service);

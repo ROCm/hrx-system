@@ -18,12 +18,12 @@
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/serve/runtime/device/device.h"
+#include "loom/runtime/device/device.h"
+#include "loom/runtime/testing/application.h"
+#include "loom/runtime/testing/worker_gate.h"
 #include "loom/serve/service/recognition/model.h"
 #include "loom/serve/service/recognition/service.h"
 #include "loom/serve/testing/http_harness.h"
-#include "loom/serve/testing/service_application.h"
-#include "loom/serve/testing/worker_gate.h"
 
 IREE_FLAG(string, model_source, "", "Recognition fixture bootstrap source.");
 IREE_FLAG(bool, test_elastic, false, "Use elastic backing for recognition.");
@@ -93,16 +93,16 @@ std::string Request(uint32_t sample_rate, size_t frame_count = 0,
 class SourceRecognitionHttpTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    auto options = loom_serve_test_application_options_default();
-    options.backing = FLAG_test_elastic ? LOOM_SERVE_POOL_BACKING_ELASTIC
-                                        : LOOM_SERVE_POOL_BACKING_FIXED;
+    auto options = loom_runtime_test_application_options_default();
+    options.backing = FLAG_test_elastic ? LOOM_RUNTIME_POOL_BACKING_ELASTIC
+                                        : LOOM_RUNTIME_POOL_BACKING_FIXED;
     options.slab_size = FLAG_test_elastic ? 2 * 1024 * 1024 : 0;
     options.worker_count = FLAG_test_workers;
-    loom_serve_test_application_t* application = nullptr;
-    IREE_ASSERT_OK(loom_serve_test_application_acquire(
+    loom_runtime_test_application_t* application = nullptr;
+    IREE_ASSERT_OK(loom_runtime_test_application_acquire(
         &options, iree_allocator_system(), &application));
-    host_ = loom_serve_test_application_host(application);
-    group_ = loom_serve_test_application_device_group(application);
+    host_ = loom_runtime_test_application_host(application);
+    group_ = loom_runtime_test_application_device_group(application);
     const auto directory =
         std::filesystem::path(FLAG_model_source).parent_path().string();
     const iree_string_view_t sources[] = {IREE_SVL("generate.loom")};
@@ -117,13 +117,13 @@ class SourceRecognitionHttpTest : public ::testing::Test {
             },
     };
     IREE_ASSERT_OK(loom_serve_recognition_model_allocate(
-        loom_serve_test_application_device_at(application, 0),
-        loom_serve_device_group_pool_at(
-            loom_serve_test_application_device_group(application), 0),
+        loom_runtime_test_application_device_at(application, 0),
+        loom_runtime_device_group_pool_at(
+            loom_runtime_test_application_device_group(application), 0),
         &model_options, iree_allocator_system(), &model_));
     const auto server_options = loom_serve_http_server_options_default();
     IREE_ASSERT_OK(loom_serve_http_server_allocate(
-        loom_serve_host_proactor_pool(host_), &server_options,
+        loom_runtime_host_proactor_pool(host_), &server_options,
         iree_allocator_system(), &server_));
     auto listener_options = loom_serve_http_listener_options_default();
     listener_options.address = IREE_SV("127.0.0.1:0");
@@ -150,7 +150,7 @@ class SourceRecognitionHttpTest : public ::testing::Test {
         },
         loom_serve_http_server_notification(server_)};
     interface_.runtime.vtable->set_observer(interface_.runtime.self, observer);
-    loom_serve_device_group_set_observer(group_, observer);
+    loom_runtime_device_group_set_observer(group_, observer);
   }
   void TearDown() override {
     if (service_) {
@@ -159,19 +159,19 @@ class SourceRecognitionHttpTest : public ::testing::Test {
           [&] {
             return !interface_.runtime.vtable->is_pending(
                        interface_.runtime.self) &&
-                   !loom_serve_device_group_is_pending(group_);
+                   !loom_runtime_device_group_is_pending(group_);
           },
           true);
       interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
       loom_serve_recognition_service_free(service_);
     }
-    loom_serve_device_group_set_observer(group_, {});
+    loom_runtime_device_group_set_observer(group_, {});
     IREE_EXPECT_OK(loom_serve_http_listener_free(listener_));
     loom_serve_http_server_free(server_);
     IREE_EXPECT_OK(loom_serve_recognition_model_free(model_));
   }
   iree_status_t AdvanceService(bool stopping, bool* progress) {
-    auto status = loom_serve_device_group_advance(group_);
+    auto status = loom_runtime_device_group_advance(group_);
     return iree_status_join(
         status,
         interface_.runtime.vtable->advance(
@@ -206,9 +206,9 @@ class SourceRecognitionHttpTest : public ::testing::Test {
   }
 
   // Shared application host; worker gates establish the pre-execution cut.
-  loom_serve_host_t* host_ = nullptr;
+  loom_runtime_host_t* host_ = nullptr;
   // Borrowed application group owning shared pool progress and retirement.
-  loom_serve_device_group_t* group_ = nullptr;
+  loom_runtime_device_group_t* group_ = nullptr;
   // Real source-owned request state and numerical execution.
   loom_serve_recognition_model_t* model_ = nullptr;
   // Independent HTTP connection owner.
@@ -308,10 +308,10 @@ TEST_P(SourceRecognitionHttpRetirementTest,
   EXPECT_TRUE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
   EXPECT_EQ(interface_.snapshot(interface_.runtime.self).queued_requests, 1u);
   const std::string body(request->body.data, request->body.size);
-  std::vector<std::unique_ptr<loom_serve::testing::WorkerGate>> gates;
+  std::vector<std::unique_ptr<loom_runtime::testing::WorkerGate>> gates;
   for (int32_t i = 0; i < FLAG_test_workers; ++i) {
-    gates.push_back(std::make_unique<loom_serve::testing::WorkerGate>(
-        loom_serve_host_executor(host_)));
+    gates.push_back(std::make_unique<loom_runtime::testing::WorkerGate>(
+        loom_runtime_host_executor(host_)));
   }
   ASSERT_NO_FATAL_FAILURE(Advance(false));
   EXPECT_TRUE(interface_.runtime.vtable->is_active(interface_.runtime.self));

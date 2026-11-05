@@ -4,9 +4,9 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/runtime/testing/native_allocator.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/serve/service/text/session.h"
-#include "loom/serve/testing/native_allocator.h"
 
 namespace {
 
@@ -19,7 +19,7 @@ TEST_F(SourceTextServiceTest, IdleSessionOwnsOnlyOutputStorage) {
   for (const auto mode :
        {LOOM_SERVE_TEXT_MODE_ENCODE, LOOM_SERVE_TEXT_MODE_GENERATE}) {
     SCOPED_TRACE(mode);
-    loom_serve::testing::NativeAllocator allocator;
+    loom_runtime::testing::NativeAllocator allocator;
     loom_serve_text_session_t session = {};
     auto status = loom_serve_text_session_initialize(
         mode, loom_serve_text_model_tokenizer(model_), allocator.allocator(),

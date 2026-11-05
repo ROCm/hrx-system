@@ -168,7 +168,7 @@ TEST_F(InputCountTest, StopJoinsBorrowedHeadAndCancelsQueuedQueries) {
   IREE_ASSERT_OK(http_.TakeRequest(first, &connections[0], &requests[0]));
   const int second = Send(body, "", kInputTokens);
   IREE_ASSERT_OK(http_.TakeRequest(second, &connections[1], &requests[1]));
-  OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
+  OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
     for (size_t i = 0; i < 2; ++i) {
       IREE_ASSERT_OK(interface_.accept(interface_.runtime.self, connections[i],
                                        requests[i], 0));
@@ -203,7 +203,7 @@ TEST_F(InputCountTest, FullQueueRejectsWithoutDisturbingAcceptedQueries) {
     IREE_ASSERT_OK(
         http_.TakeRequest(clients[i], &connections[i], &requests[i]));
   }
-  OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
+  OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
     for (size_t i = 0; i < 3; ++i) {
       IREE_ASSERT_OK(interface_.accept(interface_.runtime.self, connections[i],
                                        requests[i], 0));
@@ -231,7 +231,7 @@ TEST_F(InputCountTest, DisconnectRetiresTheHeadBeforeReusingItsClaim) {
   IREE_ASSERT_OK(http_.TakeRequest(first, &connections[0], &requests[0]));
   const int second = Send(Request(Message("user", "bax")), "", kInputTokens);
   IREE_ASSERT_OK(http_.TakeRequest(second, &connections[1], &requests[1]));
-  OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
+  OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
     for (size_t i = 0; i < 2; ++i) {
       IREE_ASSERT_OK(interface_.accept(interface_.runtime.self, connections[i],
                                        requests[i], 0));

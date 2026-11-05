@@ -9,27 +9,28 @@
 #include <inttypes.h>
 
 #include "iree/base/internal/json.h"
+#include "loom/runtime/execution/workspace.h"
+#include "loom/runtime/parameter/residency.h"
 #include "loom/runtime/storage/telemetry.h"
-#include "loom/serve/runtime/execution/workspace.h"
-#include "loom/serve/runtime/parameter/residency.h"
 #include "loom/serve/telemetry/sample.h"
 #include "loom/util/json.h"
 
 iree_host_size_t loom_serve_resources_observation_count(
     const loom_serve_resources_t* resources) {
   return resources->device_group
-             ? loom_serve_device_group_count(resources->device_group) +
-                   loom_serve_device_group_pool_count(resources->device_group)
+             ? loom_runtime_device_group_count(resources->device_group) +
+                   loom_runtime_device_group_pool_count(resources->device_group)
              : 0;
 }
 
 iree_status_t loom_serve_resources_sample(
     const loom_serve_resources_t* resources, iree_host_size_t pool_index,
     loom_runtime_telemetry_sample_sink_t sink) {
-  loom_serve_pool_t* pool =
-      loom_serve_device_group_pool_at(resources->device_group, pool_index);
-  const loom_serve_memory_pool_t* retained = loom_serve_pool_memory(pool);
-  const loom_serve_pool_statistics_t memory = loom_serve_pool_statistics(pool);
+  loom_runtime_pool_t* pool =
+      loom_runtime_device_group_pool_at(resources->device_group, pool_index);
+  const loom_runtime_memory_pool_t* retained = loom_runtime_pool_memory(pool);
+  const loom_runtime_pool_statistics_t memory =
+      loom_runtime_pool_statistics(pool);
   IREE_RETURN_IF_ERROR(
       loom_runtime_storage_sample_pool("storage", &memory.storage, sink));
   if (retained) {
@@ -46,7 +47,7 @@ iree_status_t loom_serve_resources_sample(
     };
     const loom_runtime_telemetry_topic_t topic = {
         "elastic", 1, IREE_ARRAYSIZE(fields), fields};
-    const uint64_t limit = loom_serve_memory_pool_limit(retained);
+    const uint64_t limit = loom_runtime_memory_pool_limit(retained);
     const uint64_t values[] = {
         memory.retained.reserved_bytes,  memory.retained.committed_bytes,
         memory.retained.cached_bytes,    memory.retained.pending_bytes,
@@ -81,12 +82,12 @@ static iree_status_t loom_serve_resources_write_topic(
 static iree_status_t loom_serve_resources_write_device_observation(
     const loom_serve_resources_t* resources, iree_host_size_t device_index,
     iree_string_builder_t* output) {
-  loom_serve_device_t* device =
-      loom_serve_device_group_at(resources->device_group, device_index);
+  loom_runtime_device_t* device =
+      loom_runtime_device_group_at(resources->device_group, device_index);
   const iree_hal_device_identity_spec_t* identity =
       iree_hal_device_spec_identity(
-          iree_hal_device_spec(loom_serve_device_handle(device)));
-  const iree_string_view_t key = loom_serve_device_name(device);
+          iree_hal_device_spec(loom_runtime_device_handle(device)));
+  const iree_string_view_t key = loom_runtime_device_name(device);
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output, "{\"type\":\"device\",\"index\":%zu,\"key\":", device_index));
   loom_output_stream_t stream;
@@ -115,7 +116,7 @@ static iree_status_t loom_serve_resources_write_members(
   iree_status_t status = loom_output_stream_write_cstring(output, "[");
   bool first = true;
   for (iree_host_size_t i = 0;
-       i < loom_serve_device_group_count(resources->device_group) &&
+       i < loom_runtime_device_group_count(resources->device_group) &&
        iree_status_is_ok(status);
        ++i) {
     if (!(device_mask & (UINT64_C(1) << i))) {
@@ -135,17 +136,17 @@ iree_status_t loom_serve_resources_write_observation(
     const loom_serve_resources_t* resources, iree_host_size_t resource_index,
     iree_string_builder_t* output) {
   const iree_host_size_t device_count =
-      loom_serve_device_group_count(resources->device_group);
+      loom_runtime_device_group_count(resources->device_group);
   if (resource_index < device_count) {
     return loom_serve_resources_write_device_observation(
         resources, resource_index, output);
   }
   const iree_host_size_t pool_index = resource_index - device_count;
-  const loom_serve_pool_binding_t* binding =
-      &loom_serve_device_group_pool_bindings(
+  const loom_runtime_pool_binding_t* binding =
+      &loom_runtime_device_group_pool_bindings(
           resources->device_group)[pool_index];
-  loom_serve_pool_t* pool =
-      loom_serve_device_group_pool_at(resources->device_group, pool_index);
+  loom_runtime_pool_t* pool =
+      loom_runtime_device_group_pool_at(resources->device_group, pool_index);
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output, "{\"type\":\"pool\",\"index\":%zu,\"key\":", pool_index));
   loom_output_stream_t stream;
@@ -155,7 +156,7 @@ iree_status_t loom_serve_resources_write_observation(
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output, ",\"key_truncated\":%s,\"backing\":\"%s\",\"devices\":",
       binding->name.size > 256 ? "true" : "false",
-      loom_serve_pool_memory(pool) ? "elastic" : "fixed"));
+      loom_runtime_pool_memory(pool) ? "elastic" : "fixed"));
   IREE_RETURN_IF_ERROR(loom_serve_resources_write_members(
       resources, binding->device_mask, &stream));
   IREE_RETURN_IF_ERROR(
@@ -201,16 +202,17 @@ static iree_status_t loom_serve_resources_write_physical_devices(
 }
 
 static iree_status_t loom_serve_resources_write_memory(
-    const loom_serve_pool_t* pool, loom_output_stream_t* output) {
-  const loom_serve_memory_pool_t* retained = loom_serve_pool_memory(pool);
-  const loom_serve_pool_statistics_t memory = loom_serve_pool_statistics(pool);
+    const loom_runtime_pool_t* pool, loom_output_stream_t* output) {
+  const loom_runtime_memory_pool_t* retained = loom_runtime_pool_memory(pool);
+  const loom_runtime_pool_statistics_t memory =
+      loom_runtime_pool_statistics(pool);
   IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
       output,
       "{\"backing\":\"%s\",\"retained\":", retained ? "elastic" : "fixed"));
   if (retained) {
     IREE_RETURN_IF_ERROR(
         loom_output_stream_write_cstring(output, "{\"limit_bytes\":"));
-    const uint64_t limit = loom_serve_memory_pool_limit(retained);
+    const uint64_t limit = loom_runtime_memory_pool_limit(retained);
     IREE_RETURN_IF_ERROR(
         loom_output_stream_write_format(output, "%" PRIu64, limit));
     IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
@@ -255,14 +257,14 @@ static iree_status_t loom_serve_resources_write_memory(
 static iree_status_t loom_serve_resources_write_device(
     const loom_serve_resources_t* resources, iree_host_size_t device_index,
     loom_output_stream_t* output) {
-  loom_serve_device_t* device =
-      loom_serve_device_group_at(resources->device_group, device_index);
+  loom_runtime_device_t* device =
+      loom_runtime_device_group_at(resources->device_group, device_index);
   const iree_hal_device_identity_spec_t* identity =
       iree_hal_device_spec_identity(
-          iree_hal_device_spec(loom_serve_device_handle(device)));
+          iree_hal_device_spec(loom_runtime_device_handle(device)));
   IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(output, "{\"key\":"));
   IREE_RETURN_IF_ERROR(
-      loom_json_write_escaped_string(output, loom_serve_device_name(device)));
+      loom_json_write_escaped_string(output, loom_runtime_device_name(device)));
   IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(output, ",\"id\":"));
   IREE_RETURN_IF_ERROR(
       loom_json_write_escaped_string(output, identity->logical_device_id));
@@ -287,12 +289,12 @@ static iree_status_t loom_serve_resources_write_device(
 static iree_status_t loom_serve_resources_write_pool(
     const loom_serve_resources_t* resources, iree_host_size_t pool_index,
     loom_output_stream_t* output) {
-  const loom_serve_pool_binding_t* binding =
-      &loom_serve_device_group_pool_bindings(
+  const loom_runtime_pool_binding_t* binding =
+      &loom_runtime_device_group_pool_bindings(
           resources->device_group)[pool_index];
-  const loom_serve_pool_idle_policy_t idle =
+  const loom_runtime_pool_idle_policy_t idle =
       resources->idle_policy_count ? resources->idle_policies[pool_index]
-                                   : (loom_serve_pool_idle_policy_t){0};
+                                   : (loom_runtime_pool_idle_policy_t){0};
   IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(output, "{\"key\":"));
   IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(output, binding->name));
   IREE_RETURN_IF_ERROR(
@@ -305,7 +307,7 @@ static iree_status_t loom_serve_resources_write_pool(
       "},\"memory\":",
       idle.workspace_timeout / 1000000, idle.parameter_timeout / 1000000));
   IREE_RETURN_IF_ERROR(loom_serve_resources_write_memory(
-      loom_serve_device_group_pool_at(resources->device_group, pool_index),
+      loom_runtime_device_group_pool_at(resources->device_group, pool_index),
       output));
   return loom_output_stream_write_cstring(output, "}");
 }
@@ -342,7 +344,7 @@ iree_status_t loom_serve_resources_write_json(
   }
   const iree_host_size_t device_count =
       resources->device_group
-          ? loom_serve_device_group_count(resources->device_group)
+          ? loom_runtime_device_group_count(resources->device_group)
           : 0;
   for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
        ++i) {
@@ -358,7 +360,7 @@ iree_status_t loom_serve_resources_write_json(
   }
   const iree_host_size_t pool_count =
       resources->device_group
-          ? loom_serve_device_group_pool_count(resources->device_group)
+          ? loom_runtime_device_group_pool_count(resources->device_group)
           : 0;
   for (iree_host_size_t i = 0; i < pool_count && iree_status_is_ok(status);
        ++i) {
@@ -437,11 +439,11 @@ iree_status_t loom_serve_resources_parse_trim(
       fields.pool, fields.pool.size, storage, &length);
   const iree_host_size_t pool_count =
       resources->device_group
-          ? loom_serve_device_group_pool_count(resources->device_group)
+          ? loom_runtime_device_group_pool_count(resources->device_group)
           : 0;
-  const loom_serve_pool_binding_t* pools =
+  const loom_runtime_pool_binding_t* pools =
       resources->device_group
-          ? loom_serve_device_group_pool_bindings(resources->device_group)
+          ? loom_runtime_device_group_pool_bindings(resources->device_group)
           : NULL;
   iree_host_size_t index = 0;
   if (iree_status_is_ok(status)) {
@@ -468,8 +470,8 @@ iree_status_t loom_serve_resources_trim(const loom_serve_resources_t* resources,
                                         iree_host_size_t pool_index,
                                         uint64_t target_bytes,
                                         loom_output_stream_t* output) {
-  IREE_RETURN_IF_ERROR(loom_serve_pool_trim(
-      loom_serve_device_group_pool_at(resources->device_group, pool_index),
+  IREE_RETURN_IF_ERROR(loom_runtime_pool_trim(
+      loom_runtime_device_group_pool_at(resources->device_group, pool_index),
       target_bytes));
   IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
       output, "{\"target_bytes\":%" PRIu64 ",\"pool\":", target_bytes));
@@ -516,7 +518,7 @@ iree_status_t loom_serve_resources_parse_trim_programs(
       iree_json_unescape_string(escaped, escaped.size, storage, &length);
   const iree_string_view_list_t names =
       resources->device_group
-          ? loom_serve_device_group_names(resources->device_group)
+          ? loom_runtime_device_group_names(resources->device_group)
           : (iree_string_view_list_t){0};
   iree_host_size_t index = 0;
   if (iree_status_is_ok(status)) {
@@ -541,8 +543,8 @@ iree_status_t loom_serve_resources_parse_trim_programs(
 iree_status_t loom_serve_resources_trim_programs(
     const loom_serve_resources_t* resources, iree_host_size_t device_index,
     loom_output_stream_t* output) {
-  loom_serve_device_trim_programs(
-      loom_serve_device_group_at(resources->device_group, device_index));
+  loom_runtime_device_trim_programs(
+      loom_runtime_device_group_at(resources->device_group, device_index));
   IREE_RETURN_IF_ERROR(
       loom_output_stream_write_cstring(output, "{\"device\":"));
   IREE_RETURN_IF_ERROR(

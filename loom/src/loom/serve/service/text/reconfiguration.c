@@ -7,8 +7,8 @@
 #include "loom/serve/service/text/reconfiguration.h"
 
 static iree_status_t loom_serve_text_reconfiguration_compile(
-    void* self, const loom_serve_sources_t* sources,
-    loom_serve_variant_completion_fn_t completion, void* user_data) {
+    void* self, const loom_runtime_sources_t* sources,
+    loom_runtime_variant_completion_fn_t completion, void* user_data) {
   return loom_serve_text_model_compile_variant_async(self, sources, NULL,
                                                      completion, user_data);
 }

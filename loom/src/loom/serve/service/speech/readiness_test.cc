@@ -18,8 +18,9 @@
 #include "iree/base/threading/notification.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/serve/runtime/device/device.h"
-#include "loom/serve/runtime/execution/execution.h"
+#include "loom/runtime/device/device.h"
+#include "loom/runtime/execution/execution.h"
+#include "loom/runtime/testing/worker_gate.h"
 #include "loom/serve/server/registry.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/speech/service.h"
@@ -27,7 +28,6 @@
 #include "loom/serve/service/speech/stream.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/stalled_http_client.h"
-#include "loom/serve/testing/worker_gate.h"
 #include "loom/serve/transport/http/listener.h"
 #include "loom/serve/transport/http/server.h"
 #include "loom/service/telemetry/latency.h"
@@ -71,18 +71,18 @@ class SpeechReadinessTest : public ::testing::Test {
     held_members_ = held_members;
     batch_.reserve(capacity);
     IREE_ASSERT_OK(AcquireApplication(allocator_, &host_, &group_));
-    auto* device = loom_serve_device_group_at(group_, 0);
-    auto* storage_owner = loom_serve_device_group_pool_at(group_, 0);
-    IREE_ASSERT_OK(
-        loom_serve_device_create_execution(device, storage_owner, &execution_));
-    IREE_ASSERT_OK(loom_serve_execution_reserve_workspace(
+    auto* device = loom_runtime_device_group_at(group_, 0);
+    auto* storage_owner = loom_runtime_device_group_pool_at(group_, 0);
+    IREE_ASSERT_OK(loom_runtime_device_create_execution(device, storage_owner,
+                                                        &execution_));
+    IREE_ASSERT_OK(loom_runtime_execution_reserve_workspace(
         execution_, frames * format.channels * sizeof(float) * capacity, 16));
     IREE_ASSERT_OK(iree_hal_semaphore_create(
-        loom_serve_device_handle(device), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
-        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &gate_));
+        loom_runtime_device_handle(device), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+        0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &gate_));
     const auto transport_options = loom_serve_http_server_options_default();
     IREE_ASSERT_OK(loom_serve_http_server_allocate(
-        loom_serve_host_proactor_pool(host_), &transport_options, allocator_,
+        loom_runtime_host_proactor_pool(host_), &transport_options, allocator_,
         &server_));
     auto listener_options = loom_serve_http_listener_options_default();
     listener_options.address = IREE_SV("127.0.0.1:0");
@@ -133,12 +133,12 @@ class SpeechReadinessTest : public ::testing::Test {
                   .reset();
             },
         .try_admit =
-            [](void* self, void*, loom_serve_residency_admission_t* out,
-               loom_serve_execution_frontier_t* frontier) {
+            [](void* self, void*, loom_runtime_residency_admission_t* out,
+               loom_runtime_execution_frontier_t* frontier) {
               auto* test = static_cast<SpeechReadinessTest*>(self);
               ++test->admission_attempts_;
               *out = test->admission_;
-              *frontier = loom_serve_execution_frontier(test->execution_);
+              *frontier = loom_runtime_execution_frontier(test->execution_);
               return iree_ok_status();
             },
         .complete_admit =
@@ -163,7 +163,7 @@ class SpeechReadinessTest : public ::testing::Test {
               return iree_ok_status();
             },
         .submit =
-            [](void* self, loom_serve_execution_frontier_t* out) {
+            [](void* self, loom_runtime_execution_frontier_t* out) {
               return static_cast<SpeechReadinessTest*>(self)->Submit(out);
             },
         .collect =
@@ -207,7 +207,7 @@ class SpeechReadinessTest : public ::testing::Test {
             },
         .release =
             [](void* self, void* invocation, bool* out_complete,
-               loom_serve_execution_frontier_t* out_frontier) {
+               loom_runtime_execution_frontier_t* out_frontier) {
               auto* test = static_cast<SpeechReadinessTest*>(self);
               test->invocations_
                   [static_cast<loom_serve_test_speech_invocation_t*>(invocation)
@@ -326,7 +326,7 @@ class SpeechReadinessTest : public ::testing::Test {
       IREE_RETURN_IF_ERROR(loom_serve_registry_allocate(1, &wrapped_, 0, {},
                                                         allocator_, &registry));
       iree_status_t status = loom_serve_router_run(
-          loom_serve_host_executor(host_), server_, registry,
+          loom_runtime_host_executor(host_), server_, registry,
           {
               .request_quota = 4,
               .holding_capacity = 4,
@@ -337,7 +337,7 @@ class SpeechReadinessTest : public ::testing::Test {
     });
   }
 
-  iree_status_t Submit(loom_serve_execution_frontier_t* out) {
+  iree_status_t Submit(loom_runtime_execution_frontier_t* out) {
     iree_status_t status = iree_ok_status();
     bool held = false;
     std::array<iree_hal_transfer_operation_t, 4> uploads = {};
@@ -346,8 +346,8 @@ class SpeechReadinessTest : public ::testing::Test {
       auto& invocation = *batch_[i];
       const auto reservation =
           iree_hal_make_pool_reservation_request(invocation.input.size(), 16);
-      status = loom_serve_execution_alloca(execution_, 1, &reservation,
-                                           &invocation.buffer);
+      status = loom_runtime_execution_alloca(execution_, 1, &reservation,
+                                             &invocation.buffer);
       held |= invocation.block == held_block_;
       uploads[i] = {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
@@ -371,28 +371,28 @@ class SpeechReadinessTest : public ::testing::Test {
     held &= batch_.size() >= held_members_;
     if (iree_status_is_ok(status) && held) {
       uint64_t value = 1;
-      status = loom_serve_execution_barrier(execution_, {1, &gate_, &value});
+      status = loom_runtime_execution_barrier(execution_, {1, &gate_, &value});
     }
     uint64_t value = 0;
     if (iree_status_is_ok(status)) {
-      status = loom_serve_execution_transfer(execution_, batch_.size(),
-                                             uploads.data(), &value);
+      status = loom_runtime_execution_transfer(execution_, batch_.size(),
+                                               uploads.data(), &value);
     }
     if (iree_status_is_ok(status)) {
-      status = loom_serve_execution_feedback(execution_, batch_.size(),
-                                             downloads.data(), &value);
+      status = loom_runtime_execution_feedback(execution_, batch_.size(),
+                                               downloads.data(), &value);
     }
     if (iree_status_is_ok(status)) {
-      auto frontier = loom_serve_execution_frontier(execution_);
-      status = loom_serve_execution_barrier(
+      auto frontier = loom_runtime_execution_frontier(execution_);
+      status = loom_runtime_execution_barrier(
           execution_, {1, &frontier.semaphores[1], &frontier.values[1]});
     }
     for (size_t i = 0; i < batch_.size() && iree_status_is_ok(status); ++i) {
-      status =
-          loom_serve_execution_dealloca(execution_, batch_[i]->buffer, &value);
+      status = loom_runtime_execution_dealloca(execution_, batch_[i]->buffer,
+                                               &value);
     }
     if (iree_status_is_ok(status)) {
-      *out = loom_serve_execution_frontier(execution_);
+      *out = loom_runtime_execution_frontier(execution_);
       for (auto* invocation : batch_) {
         row_submitted_[invocation->row].fetch_add(1);
       }
@@ -455,8 +455,8 @@ class SpeechReadinessTest : public ::testing::Test {
       }
     }
     if (execution_) {
-      CheckStatus(loom_serve_execution_drain(execution_));
-      loom_serve_execution_release(execution_);
+      CheckStatus(loom_runtime_execution_drain(execution_));
+      loom_runtime_execution_release(execution_);
     }
     for (auto& invocation : invocations_) {
       invocation.reset();
@@ -507,11 +507,11 @@ class SpeechReadinessTest : public ::testing::Test {
   // Model and service use the same application resource owners.
   iree_allocator_t allocator_ = iree_allocator_system();
   // Borrowed process task/proactor owner; one worker detects blocking waits.
-  loom_serve_host_t* host_ = nullptr;
+  loom_runtime_host_t* host_ = nullptr;
   // Borrowed process device group enclosing all execution allocations.
-  loom_serve_device_group_t* group_ = nullptr;
+  loom_runtime_device_group_t* group_ = nullptr;
   // Actual queue dependencies and tracked request views.
-  loom_serve_execution_t* execution_ = nullptr;
+  loom_runtime_execution_t* execution_ = nullptr;
   // Explicit device dependency held by the test's outer client thread.
   iree_hal_semaphore_t* gate_ = nullptr;
   // Outer-thread gate signal/failure has been published once.
@@ -537,8 +537,8 @@ class SpeechReadinessTest : public ::testing::Test {
   // Minimum cohort size importing the held dependency.
   size_t held_members_ = 1;
   // Dependency result changed only between manually driven owner turns.
-  loom_serve_residency_admission_t admission_ =
-      LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED;
+  loom_runtime_residency_admission_t admission_ =
+      LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED;
   // Owner-only admission attempts, including deferred capacity decisions.
   size_t admission_attempts_ = 0;
   // Owner-only completion count, including unchanged readiness frontiers.
@@ -672,7 +672,7 @@ INSTANTIATE_TEST_SUITE_P(SourceAndEncoding, SpeechOutputFailureTest,
 TEST_F(SpeechReadinessTest,
        DeferredAdmissionRetainsRequestUntilCapacityReturns) {
   ASSERT_NO_FATAL_FAILURE(Initialize(3, 1, UINT64_MAX, 1, 1, false));
-  admission_ = LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED;
+  admission_ = LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED;
   loom_serve::testing::HttpClient client;
   IREE_ASSERT_OK(Send(&client));
   loom_serve_http_connection_t* connection = nullptr;
@@ -693,7 +693,7 @@ TEST_F(SpeechReadinessTest,
   EXPECT_EQ(actual_.telemetry.counters->completed, 0u);
   EXPECT_EQ(submitted_.load(), 0u);
 
-  admission_ = LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED;
+  admission_ = LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED;
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return released_.load() == 1; }));
   std::string response;
   IREE_ASSERT_OK(http_.Read(client.release(), false, &response));
@@ -796,19 +796,20 @@ TEST_F(SpeechReadinessTest, ClosedNativeHandleRetainsAcceptedEncodingStorage) {
   IREE_ASSERT_OK(
       OpenSpeech(service_, IREE_SV("abcd"), IREE_SV("positive"), 0, &stream));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return held_.load(); }));
-  std::vector<std::unique_ptr<loom_serve::testing::WorkerGate>> workers;
+  std::vector<std::unique_ptr<loom_runtime::testing::WorkerGate>> workers;
   ReleaseDependency();
   // CPU-device transfers share this executor too. Retire those borrowers on
   // the outer test thread before holding the workers for the encoding cut.
-  const auto frontier = loom_serve_execution_frontier(execution_);
+  const auto frontier = loom_runtime_execution_frontier(execution_);
   for (size_t i = 0; i < 2; ++i) {
-    IREE_ASSERT_OK(loom_serve_workspace_wait(
-        loom_serve_pool_workspace(loom_serve_device_group_pool_at(group_, 0)),
+    IREE_ASSERT_OK(loom_runtime_workspace_wait(
+        loom_runtime_pool_workspace(
+            loom_runtime_device_group_pool_at(group_, 0)),
         frontier.semaphores[i], frontier.values[i]));
   }
   for (int i = 0; i < SpeechWorkerCount(); ++i) {
-    workers.push_back(std::make_unique<loom_serve::testing::WorkerGate>(
-        loom_serve_host_executor(host_)));
+    workers.push_back(std::make_unique<loom_runtime::testing::WorkerGate>(
+        loom_runtime_host_executor(host_)));
   }
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
     return std::string(actual_.snapshot(actual_.runtime.self).phase) ==

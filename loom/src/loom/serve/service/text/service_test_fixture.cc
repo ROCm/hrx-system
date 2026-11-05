@@ -9,7 +9,7 @@
 #include <cstdlib>
 #include <string>
 
-#include "loom/serve/testing/service_application.h"
+#include "loom/runtime/testing/application.h"
 
 namespace loom_serve::testing::text {
 
@@ -30,20 +30,20 @@ void SourceTextServiceTest::EditNativeProvider(const std::string& source_path,
 }
 
 void SourceTextServiceTest::SetUp() {
-  auto application_options = loom_serve_test_application_options_default();
+  auto application_options = loom_runtime_test_application_options_default();
   application_options.worker_count = WorkerCount();
   application_options.device_count = DeviceCount();
-  if (application_options.backing == LOOM_SERVE_POOL_BACKING_ELASTIC) {
+  if (application_options.backing == LOOM_RUNTIME_POOL_BACKING_ELASTIC) {
     application_options.memory_limit = 64 * 1024 * 1024;
   }
-  loom_serve_test_application_t* application = nullptr;
-  IREE_ASSERT_OK(loom_serve_test_application_acquire(
+  loom_runtime_test_application_t* application = nullptr;
+  IREE_ASSERT_OK(loom_runtime_test_application_acquire(
       &application_options, host_allocator_, &application));
-  host_ = loom_serve_test_application_host(application);
-  group_ = loom_serve_test_application_device_group(application);
-  device_ = loom_serve_test_application_device_at(application, 0);
-  storage_owner_ = loom_serve_device_group_pool_at(
-      loom_serve_test_application_device_group(application), 0);
+  host_ = loom_runtime_test_application_host(application);
+  group_ = loom_runtime_test_application_device_group(application);
+  device_ = loom_runtime_test_application_device_at(application, 0);
+  storage_owner_ = loom_runtime_device_group_pool_at(
+      loom_runtime_test_application_device_group(application), 0);
   const char* source_path = std::getenv("LOOM_SERVE_TEST_MODEL_SOURCE");
   ASSERT_NE(source_path, nullptr);
   const std::string source = source_path;
@@ -59,7 +59,7 @@ void SourceTextServiceTest::SetUp() {
   }
   auto server_options = ServerOptions();
   IREE_ASSERT_OK(loom_serve_http_server_allocate(
-      loom_serve_host_proactor_pool(host_), &server_options, host_allocator_,
+      loom_runtime_host_proactor_pool(host_), &server_options, host_allocator_,
       &server_));
   auto listener_options = loom_serve_http_listener_options_default();
   listener_options.address = IREE_SV("127.0.0.1:0");

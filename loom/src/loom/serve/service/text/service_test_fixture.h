@@ -25,6 +25,7 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
 #include "loom/runtime/telemetry/stream.h"
+#include "loom/runtime/testing/stalled_stderr.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/text/input.h"
@@ -35,7 +36,6 @@
 #include "loom/serve/testing/model.h"
 #include "loom/serve/testing/model_wait.h"
 #include "loom/serve/testing/stalled_http_client.h"
-#include "loom/serve/testing/stalled_stderr.h"
 #include "loom/serve/transport/http/listener.h"
 
 namespace loom_serve::testing::text {
@@ -144,7 +144,7 @@ class SourceTextServiceTest : public ::testing::Test {
                                               host_allocator_, &registry);
         if (iree_status_is_ok(status)) {
           status = loom_serve_router_run(
-              loom_serve_host_executor(host_), server_, registry,
+              loom_runtime_host_executor(host_), server_, registry,
               {
                   .request_quota = options.row_count,
                   .holding_capacity =
@@ -160,11 +160,11 @@ class SourceTextServiceTest : public ::testing::Test {
     });
   }
 
-  void StartManaged(loom_serve_pool_idle_policy_t idle = {}) {
+  void StartManaged(loom_runtime_pool_idle_policy_t idle = {}) {
     ASSERT_EQ(model_, nullptr);
     http_.Start([this, idle]() -> iree_status_t {
-      std::vector<loom_serve_pool_idle_policy_t> policies(
-          loom_serve_device_group_pool_count(group_));
+      std::vector<loom_runtime_pool_idle_policy_t> policies(
+          loom_runtime_device_group_pool_count(group_));
       policies[0] = idle;
       const loom_serve_model_registration_options_t options = {
           .device_group = group_, .heartbeat_interval = 0};
@@ -173,7 +173,7 @@ class SourceTextServiceTest : public ::testing::Test {
           0, nullptr, 3, loom_serve_model_registration_factory(&options),
           host_allocator_, &registry));
       iree_status_t status = loom_serve_router_run(
-          loom_serve_host_executor(host_), server_, registry,
+          loom_runtime_host_executor(host_), server_, registry,
           {
               .request_quota = 16,
               .holding_capacity = 8,
@@ -704,13 +704,13 @@ class SourceTextServiceTest : public ::testing::Test {
   // Tiny generated checkpoint owned by the test runner's temp directory.
   std::string weights_;
   // Borrowed process-wide task/JIT owner outliving every test model.
-  loom_serve_host_t* host_ = nullptr;
+  loom_runtime_host_t* host_ = nullptr;
   // Borrowed process-wide application group enclosing all test models.
-  loom_serve_device_group_t* group_ = nullptr;
+  loom_runtime_device_group_t* group_ = nullptr;
   // Borrowed device record within the process-wide application group.
-  loom_serve_device_t* device_ = nullptr;
+  loom_runtime_device_t* device_ = nullptr;
   // Explicit storage owner selected independently from execution placement.
-  loom_serve_pool_t* storage_owner_ = nullptr;
+  loom_runtime_pool_t* storage_owner_ = nullptr;
   // Actual source-defined text model, with no native mock implementation.
   loom_serve_text_model_t* model_ = nullptr;
   // Real loopback HTTP carrier.

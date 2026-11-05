@@ -10,8 +10,8 @@
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/task/executor.h"
+#include "loom/runtime/execution/execution.h"
 #include "loom/runtime/wake.h"
-#include "loom/serve/runtime/execution/execution.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -86,7 +86,7 @@ void loom_serve_text_readiness_notify(loom_serve_text_readiness_t* readiness);
 // frontier semaphores until take_device consumes its terminal outcome.
 iree_status_t loom_serve_text_readiness_await(
     loom_serve_text_readiness_t* readiness,
-    const loom_serve_execution_frontier_t* frontier);
+    const loom_runtime_execution_frontier_t* frontier);
 
 // Runs one finite borrower on shared workers. A prior CPU job has been taken.
 void loom_serve_text_readiness_schedule(loom_serve_text_readiness_t* readiness,

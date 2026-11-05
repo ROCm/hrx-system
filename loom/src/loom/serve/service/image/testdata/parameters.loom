@@ -47,7 +47,7 @@ func.def public @prepare(%height: i64, %width: i64, %text: i64, %directory: buff
   %second = func.call @source(%directory, %second_path) : (buffer, buffer) -> (i32)
   %root = buffer.constant utf8("bank_image_base") : buffer
   %stage = func.call @stage(%root, %zero64) : (buffer, i64) -> (i32)
-  %policy = buffer.constant utf8("loom/src/loom/serve/runtime/parameter/testdata/weights/policy.loom") : buffer
+  %policy = buffer.constant utf8("loom/src/loom/runtime/parameter/testdata/weights/policy.loom") : buffer
   func.call @parameter(%stage, %c0, %c0, %first, %policy) : (i32, i32, i32, i32, buffer)
   %capacity = scalar.constant 1073741824 : i64
   %arena = func.call @parameter_arena(%capacity) : (i64) -> (i32)
@@ -111,7 +111,7 @@ func.def public @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %
   %length = index.constant 4 : offset
   %sources = buffer.alloca<private> align(4) %length : buffer
   %source_view = buffer.view %sources[%origin] : buffer -> view<1xi32>
-  %policy = buffer.constant utf8("loom/src/loom/serve/runtime/parameter/testdata/weights/policy.loom") : buffer
+  %policy = buffer.constant utf8("loom/src/loom/runtime/parameter/testdata/weights/policy.loom") : buffer
   %c0 = scalar.constant 0 : i32
   %begin = index.constant 1 : index
   %end = index.constant 3 : index

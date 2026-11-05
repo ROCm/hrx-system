@@ -263,7 +263,7 @@ TEST(RegistrationOwnershipTest, DrainDoesNotRequireAnObservationSnapshot) {
   std::vector<size_t> retired;
   Service service = {.visits = &retired};
   const iree_string_view_t device_name = IREE_SV("device");
-  const loom_serve_pool_binding_t pool = {IREE_SV("pool"), 1};
+  const loom_runtime_pool_binding_t pool = {IREE_SV("pool"), 1};
   const loom_serve_registration_factory_t factory = {
       .self = &service,
       .kinds = 1u << LOOM_SERVE_MODEL_KIND_EMBEDDING,
@@ -279,7 +279,7 @@ TEST(RegistrationOwnershipTest, DrainDoesNotRequireAnObservationSnapshot) {
                 .prepare =
                     [](void* self, loom_serve_registration_prepare_flags_t,
                        bool* out_complete, loom_serve_service_t* out_service,
-                       loom_serve_compilation_report_t*) {
+                       loom_runtime_compilation_report_t*) {
                       static const loom_service_telemetry_counters_t counters =
                           {};
                       static const loom_service_telemetry_latency_t latency =

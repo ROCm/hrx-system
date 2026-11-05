@@ -764,7 +764,7 @@ void loom_serve_recognition_service_free(
 }
 
 iree_status_t loom_serve_recognition_service_allocate(
-    loom_serve_host_t* host, loom_serve_recognition_generator_t generator,
+    loom_runtime_host_t* host, loom_serve_recognition_generator_t generator,
     const loom_serve_recognition_service_options_t* options,
     loom_runtime_telemetry_stream_t* telemetry, iree_allocator_t host_allocator,
     loom_serve_recognition_service_t** out_service) {
@@ -806,7 +806,7 @@ iree_status_t loom_serve_recognition_service_allocate(
   service->host_allocator = host_allocator;
   service->options = *options;
   service->generator = generator;
-  service->executor = loom_serve_host_executor(host);
+  service->executor = loom_runtime_host_executor(host);
   service->telemetry = telemetry;
   service->capacity = generator.request_capacity + options->pending_capacity;
   iree_slim_mutex_initialize(&service->events.mutex);

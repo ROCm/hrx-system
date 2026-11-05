@@ -16,11 +16,11 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/runtime/driver.h"
+#include "loom/runtime/testing/application.h"
 #include "loom/serve/service/finite/decision/protocol.h"
 #include "loom/serve/service/finite/registration.h"
 #include "loom/serve/service/finite/service.h"
 #include "loom/serve/testing/model.h"
-#include "loom/serve/testing/service_application.h"
 
 namespace {
 
@@ -31,15 +31,15 @@ class NativeDecisionServiceTest : public ::testing::Test {
  protected:
   void SetUp() override {
     iree_notification_initialize(&notification_);
-    const auto options = loom_serve_test_application_options_default();
-    loom_serve_test_application_t* application = nullptr;
-    IREE_ASSERT_OK(loom_serve_test_application_acquire(
+    const auto options = loom_runtime_test_application_options_default();
+    loom_runtime_test_application_t* application = nullptr;
+    IREE_ASSERT_OK(loom_runtime_test_application_acquire(
         &options, iree_allocator_system(), &application));
-    group_ = loom_serve_test_application_device_group(application);
-    device_ = loom_serve_test_application_device_at(application, 0);
-    pool_ = loom_serve_device_group_pool_at(group_, 0);
+    group_ = loom_runtime_test_application_device_group(application);
+    device_ = loom_runtime_test_application_device_at(application, 0);
+    pool_ = loom_runtime_device_group_pool_at(group_, 0);
     const loom_runtime_wake_callback_t observer = {Wake, this};
-    loom_serve_device_group_set_observer(group_, observer);
+    loom_runtime_device_group_set_observer(group_, observer);
     const char* source = std::getenv("LOOM_SERVE_TEST_MODEL_SOURCE");
     ASSERT_NE(source, nullptr);
     const std::string file = source;
@@ -69,11 +69,11 @@ class NativeDecisionServiceTest : public ::testing::Test {
       RetireService();
     }
     if (consumer_) {
-      IREE_EXPECT_OK(loom_serve_execution_drain(consumer_));
+      IREE_EXPECT_OK(loom_runtime_execution_drain(consumer_));
     }
-    loom_serve_execution_release(consumer_);
+    loom_runtime_execution_release(consumer_);
     iree_hal_semaphore_release(gate_);
-    loom_serve_device_group_set_observer(group_, {});
+    loom_runtime_device_group_set_observer(group_, {});
     iree_notification_deinitialize(&notification_);
     iree_status_free(driver_.status);
   }
@@ -99,11 +99,11 @@ class NativeDecisionServiceTest : public ::testing::Test {
 
   iree_status_t Prepare(loom_serve_finite_load_flags_t flags) {
     iree_status_t status = iree_ok_status();
-    loom_serve_compilation_report_t report = {};
+    loom_runtime_compilation_report_t report = {};
     while (!preparation_complete_) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
       status =
-          iree_status_join(status, loom_serve_device_group_advance(group_));
+          iree_status_join(status, loom_runtime_device_group_advance(group_));
       status = iree_status_join(
           status, loom_serve_finite_registration_prepare(
                       registration_,
@@ -128,7 +128,7 @@ class NativeDecisionServiceTest : public ::testing::Test {
     while (true) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
       driver_.status = iree_status_join(
-          driver_.status, loom_serve_device_group_advance(group_));
+          driver_.status, loom_runtime_device_group_advance(group_));
       bool progress = false;
       loom_runtime_driver_advance(&driver_, &progress);
       loom_runtime_driver_collect(&driver_, &progress);
@@ -166,7 +166,7 @@ class NativeDecisionServiceTest : public ::testing::Test {
     bool complete = false;
     while (!complete) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
-      auto status = loom_serve_device_group_advance(group_);
+      auto status = loom_runtime_device_group_advance(group_);
       status = iree_status_join(status, loom_serve_finite_registration_retire(
                                             registration_, &complete));
       if (complete || !iree_status_is_ok(status)) {
@@ -188,12 +188,12 @@ class NativeDecisionServiceTest : public ::testing::Test {
    public:
     explicit Owner(NativeDecisionServiceTest& fixture) : fixture_(fixture) {
       iree_task_owner_initialize(
-          loom_serve_host_executor(loom_serve_device_host(fixture.device_)),
+          loom_runtime_host_executor(loom_runtime_device_host(fixture.device_)),
           Advance, this, &owner_);
       Call([&] {
         const loom_runtime_wake_callback_t observer = {Wake, this};
         loom_runtime_driver_set_observer(&fixture_.driver_, observer);
-        loom_serve_device_group_set_observer(fixture_.group_, observer);
+        loom_runtime_device_group_set_observer(fixture_.group_, observer);
       });
     }
 
@@ -211,7 +211,7 @@ class NativeDecisionServiceTest : public ::testing::Test {
       const loom_runtime_wake_callback_t observer = {
           NativeDecisionServiceTest::Wake, &fixture_};
       loom_runtime_driver_set_observer(&fixture_.driver_, observer);
-      loom_serve_device_group_set_observer(fixture_.group_, observer);
+      loom_runtime_device_group_set_observer(fixture_.group_, observer);
     }
 
     template <typename Fn>
@@ -250,14 +250,14 @@ class NativeDecisionServiceTest : public ::testing::Test {
       auto& fixture = owner.fixture_;
       fixture.driver_.status =
           iree_status_join(fixture.driver_.status,
-                           loom_serve_device_group_advance(fixture.group_));
+                           loom_runtime_device_group_advance(fixture.group_));
       loom_runtime_driver_advance(&fixture.driver_, &result->did_work);
       bool pending =
           loom_runtime_driver_collect(&fixture.driver_, &result->did_work);
-      pending |= loom_serve_device_group_is_pending(fixture.group_);
+      pending |= loom_runtime_device_group_is_pending(fixture.group_);
       if (fixture.driver_.stopping && !pending) {
         loom_runtime_driver_set_observer(&fixture.driver_, {});
-        loom_serve_device_group_set_observer(fixture.group_, {});
+        loom_runtime_device_group_set_observer(fixture.group_, {});
         result->completed = true;
       }
     }
@@ -287,11 +287,11 @@ class NativeDecisionServiceTest : public ::testing::Test {
   }
 
   // Shared application resource owners, alive through every escaped result.
-  loom_serve_device_group_t* group_ = nullptr;
+  loom_runtime_device_group_t* group_ = nullptr;
   // Execution placement of this real source service.
-  loom_serve_device_t* device_ = nullptr;
+  loom_runtime_device_t* device_ = nullptr;
   // Shared physical admission independent of execution placement.
-  loom_serve_pool_t* pool_ = nullptr;
+  loom_runtime_pool_t* pool_ = nullptr;
   // Owns source views until every preparation/cancellation attempt retires.
   loom_serve::testing::ModelDocument document_;
   // Shared production preparation/service/retirement owner.
@@ -309,7 +309,7 @@ class NativeDecisionServiceTest : public ::testing::Test {
   // Caller-owned receipts, including after service removal.
   std::array<loom_serve_finite_call_t*, 4> calls_ = {};
   // Independent downstream work, never submitted through the source model.
-  loom_serve_execution_t* consumer_ = nullptr;
+  loom_runtime_execution_t* consumer_ = nullptr;
   // Explicit consumer dependency proving retirement does not wait for peers.
   iree_hal_semaphore_t* gate_ = nullptr;
   // Downstream logical output, released after its queue captures it.
@@ -354,7 +354,7 @@ TEST_F(NativeDecisionServiceTest, PreparationCancellationJoinsAcceptedLoad) {
       .options = IREE_SV("{\"batch_units\":64}"),
   };
   IREE_ASSERT_OK(AllocateRegistration(options));
-  loom_serve_compilation_report_t report = {};
+  loom_runtime_compilation_report_t report = {};
   IREE_ASSERT_OK(loom_serve_finite_registration_prepare(
       registration_, 0, &preparation_complete_, &service_, &report));
   EXPECT_FALSE(preparation_complete_);
@@ -390,19 +390,19 @@ TEST_F(NativeDecisionServiceTest, DeviceOutputEscapesBeforeServiceRetirement) {
   EXPECT_EQ(ready.values[1], 0u);
 
   IREE_ASSERT_OK(
-      loom_serve_device_create_execution(device_, pool_, &consumer_));
+      loom_runtime_device_create_execution(device_, pool_, &consumer_));
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      loom_serve_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
-      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &gate_));
+      loom_runtime_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+      0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &gate_));
   iree_hal_semaphore_t* waits[] = {ready.semaphores[0], ready.semaphores[1],
                                    gate_};
   uint64_t wait_values[] = {ready.values[0], ready.values[1], 1};
   IREE_ASSERT_OK(
-      loom_serve_execution_barrier(consumer_, {3, waits, wait_values}));
+      loom_runtime_execution_barrier(consumer_, {3, waits, wait_values}));
   const auto allocation =
       iree_hal_make_pool_reservation_request(sizeof(values_), 16);
   IREE_ASSERT_OK(
-      loom_serve_execution_alloca(consumer_, 1, &allocation, &target_));
+      loom_runtime_execution_alloca(consumer_, 1, &allocation, &target_));
   const auto row =
       loom_serve_finite_result_row(second->result, second->request_index, 0);
   ASSERT_EQ(row.length, sizeof(values_));
@@ -417,7 +417,7 @@ TEST_F(NativeDecisionServiceTest, DeviceOutputEscapesBeforeServiceRetirement) {
           },
   };
   uint64_t value = 0;
-  IREE_ASSERT_OK(loom_serve_execution_transfer(consumer_, 1, &copy, &value));
+  IREE_ASSERT_OK(loom_runtime_execution_transfer(consumer_, 1, &copy, &value));
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download =
@@ -428,7 +428,7 @@ TEST_F(NativeDecisionServiceTest, DeviceOutputEscapesBeforeServiceRetirement) {
           },
   };
   IREE_ASSERT_OK(
-      loom_serve_execution_feedback(consumer_, 1, &download, &value));
+      loom_runtime_execution_feedback(consumer_, 1, &download, &value));
   iree_hal_buffer_release(std::exchange(target_, nullptr));
   for (auto*& call : calls_) {
     loom_serve_finite_call_close(std::exchange(call, nullptr));
@@ -439,7 +439,7 @@ TEST_F(NativeDecisionServiceTest, DeviceOutputEscapesBeforeServiceRetirement) {
   // now own the result. Releasing the gate must still yield the packed output.
   IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, 1, nullptr));
   iree_hal_semaphore_release(std::exchange(gate_, nullptr));
-  IREE_ASSERT_OK(loom_serve_execution_drain(consumer_));
+  IREE_ASSERT_OK(loom_runtime_execution_drain(consumer_));
   EXPECT_FLOAT_EQ(values_[0], 0.75f);
   EXPECT_FLOAT_EQ(values_[1], 0.25f);
 }

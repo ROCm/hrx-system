@@ -8,8 +8,8 @@
 #include <cstring>
 
 #include "loom/runtime/telemetry/field.h"
+#include "loom/runtime/testing/worker_gate.h"
 #include "loom/serve/service/text/service_test_fixture.h"
-#include "loom/serve/testing/worker_gate.h"
 #include "loom/service/telemetry/latency.h"
 #include "loom/service/telemetry/record.h"
 
@@ -479,7 +479,7 @@ TEST_F(RegisteredSourceTextServiceTest,
     ASSERT_TRUE(source.good());
   }
   StartManaged();
-  loom_serve::testing::StalledStderr stalled;
+  loom_runtime::testing::StalledStderr stalled;
   ASSERT_NO_FATAL_FAILURE(stalled.Begin());
   EXPECT_EQ(Read(Send(Declaration("fixture-text", directory_), "",
                       "/v1/models/register"))
@@ -514,7 +514,7 @@ TEST_F(RegisteredSourceTextServiceTest,
   StalledClient unregister;
   StalledClient status;
   {
-    loom_serve::testing::WorkerGate gate(loom_serve_host_executor(host_));
+    loom_runtime::testing::WorkerGate gate(loom_runtime_host_executor(host_));
     unregister.Send(server_, R"({"model":"broken"})", "/v1/models/unregister");
     unregister.WaitUntilRequestSent();
     status.Send(server_, "", "/v1/status", "GET");
@@ -753,7 +753,7 @@ TEST_F(SourceTextServiceTest, TelemetryWrapDoesNotBlockTextOrChangeCounters) {
       fast = next;
     }
   };
-  loom_serve::testing::StalledStderr stalled;
+  loom_runtime::testing::StalledStderr stalled;
   ASSERT_NO_FATAL_FAILURE(stalled.Begin());
   uint64_t input_tokens = 0;
   for (size_t wave = 0; wave < 10; ++wave) {
@@ -871,7 +871,7 @@ INSTANTIATE_TEST_SUITE_P(PackingPolicies, PackedTextServiceTest,
                                            LOOM_SERVICE_TEXT_PACKING_SEPARATE));
 
 TEST_F(SourceTextServiceTest, CancelledPreparationRetainsPartialOwnership) {
-  const auto before = loom_serve_pool_statistics(storage_owner_);
+  const auto before = loom_runtime_pool_statistics(storage_owner_);
   auto options = ModelOptions();
   iree_notification_t notification;
   iree_notification_initialize(&notification);
@@ -907,13 +907,13 @@ TEST_F(SourceTextServiceTest, CancelledPreparationRetainsPartialOwnership) {
   ASSERT_TRUE(loom_serve_text_model_is_retired(partial));
   IREE_ASSERT_OK(loom_serve_text_model_free_retired(partial));
   iree_notification_deinitialize(&notification);
-  const auto after = loom_serve_pool_statistics(storage_owner_);
+  const auto after = loom_runtime_pool_statistics(storage_owner_);
   EXPECT_EQ(after.retained.reserved_bytes, before.retained.reserved_bytes);
   EXPECT_EQ(after.retained.committed_bytes, before.retained.committed_bytes);
 }
 
 TEST_F(SourceTextServiceTest, TokenizerFailureRetiresCompiledModel) {
-  const auto before = loom_serve_pool_statistics(storage_owner_);
+  const auto before = loom_runtime_pool_statistics(storage_owner_);
   auto options = ModelOptions();
   options.tokenizer_path = IREE_SV("absent-tokenizer.json");
   loom_serve_text_model_t* model = nullptr;
@@ -922,7 +922,7 @@ TEST_F(SourceTextServiceTest, TokenizerFailureRetiresCompiledModel) {
       loom_serve_text_model_allocate(device_, storage_owner_, &options,
                                      host_allocator_, &model));
   EXPECT_EQ(model, nullptr);
-  const auto after = loom_serve_pool_statistics(storage_owner_);
+  const auto after = loom_runtime_pool_statistics(storage_owner_);
   EXPECT_EQ(after.retained.reserved_bytes, before.retained.reserved_bytes);
   EXPECT_EQ(after.retained.committed_bytes, before.retained.committed_bytes);
 
@@ -1017,7 +1017,7 @@ TEST_F(SourceTextServiceTest,
       value, destroy);
   auto interface = loom_serve_text_service_interface(value);
   EXPECT_EQ(interface.runtime.capacity_domain,
-            loom_serve_pool_residency_cache(storage_owner_));
+            loom_runtime_pool_residency_cache(storage_owner_));
   Observe(interface);
   auto* notification = loom_serve_http_server_notification(server_);
   uint64_t cursor = 0;
@@ -1066,7 +1066,7 @@ TEST_F(SourceTextServiceTest,
   // accepts it. A single-worker turn cannot run the preparation it just queued:
   // that borrowed head must survive, while both unborrowed tails retire now.
   loom_serve::testing::text::OwnerTurn::Run(
-      loom_serve_host_executor(host_), [&] {
+      loom_runtime_host_executor(host_), [&] {
         for (const auto& claim : claims) {
           IREE_ASSERT_OK(interface.accept(interface.runtime.self,
                                           claim.connection, claim.request, 0));

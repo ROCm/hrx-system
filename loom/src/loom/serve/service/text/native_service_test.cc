@@ -5,7 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "iree/base/tooling/flags.h"
-#include "loom/serve/runtime/device/device.h"
+#include "loom/runtime/device/device.h"
 #include "loom/serve/service/text/checkpoint_control.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/serve/service/text/stream.h"
@@ -70,7 +70,7 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
 
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(RegisteredSourceTextServiceTest::SetUp());
-    loom_serve_device_group_set_observer(
+    loom_runtime_device_group_set_observer(
         group_, {[](void* self) {
                    iree_notification_post(
                        static_cast<iree_notification_t*>(self),
@@ -112,7 +112,7 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
       reader_.join();
     }
     IREE_EXPECT_OK(read_status_);
-    loom_serve_device_group_set_observer(group_, {});
+    loom_runtime_device_group_set_observer(group_, {});
     RegisteredSourceTextServiceTest::TearDown();
   }
 
@@ -153,7 +153,7 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
-      auto status = loom_serve_device_group_advance(group_);
+      auto status = loom_runtime_device_group_advance(group_);
       if (iree_status_is_ok(status) &&
           Model()->phase == LOOM_SERVE_REGISTRATION_READY) {
         auto& service = Model()->service;
@@ -479,7 +479,7 @@ TEST_F(NativeTextRegistryTest, AbortRetiresAcceptedWorkBeforeReleasingInput) {
     const auto phase = loom_serve_registry_snapshot(Model()).phase;
     return std::string(phase) == "execute";
   }));
-  OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
+  OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
     IREE_ASSERT_OK(Open(body_, "second", &second));
     ASSERT_NE(second, nullptr);
     EXPECT_EQ(Model()->service.telemetry.counters->batches, 0u);
@@ -964,7 +964,7 @@ TEST_F(NativeTextRegistryTest,
   ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] {
     return loom_serve_text_checkpoint_control_is_complete(suspended.get());
   }));
-  if (loom_serve_pool_memory(loom_serve_device_group_pool_at(group_, 0))) {
+  if (loom_runtime_pool_memory(loom_runtime_device_group_pool_at(group_, 0))) {
     IREE_ASSERT_OK(loom_serve_text_checkpoint_control_status(suspended.get()));
     const auto* result =
         loom_serve_text_checkpoint_control_result(suspended.get());

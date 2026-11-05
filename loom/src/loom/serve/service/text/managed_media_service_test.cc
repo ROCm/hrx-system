@@ -222,7 +222,7 @@ class ManagedMediaServiceTest : public RegisteredSourceTextServiceTest,
     while (model->incarnation && !HasFatalFailure()) {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
-      OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
+      OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
         if (model->phase == LOOM_SERVE_REGISTRATION_READY) {
           IREE_ASSERT_OK(model->service.runtime.vtable->advance(
               model->service.runtime.self,

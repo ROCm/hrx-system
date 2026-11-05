@@ -8,9 +8,9 @@
 #define LOOM_SERVE_SERVICE_RECOGNITION_GENERATOR_H_
 
 #include "iree/tokenizer/tokenizer.h"
-#include "loom/serve/runtime/execution/execution.h"
-#include "loom/serve/runtime/parameter/residency.h"
-#include "loom/serve/runtime/storage/memory.h"
+#include "loom/runtime/execution/execution.h"
+#include "loom/runtime/parameter/residency.h"
+#include "loom/runtime/storage/memory.h"
 #include "loom/serve/service/recognition/events.h"
 #include "loom/serve/service/recognition/input.h"
 #include "loom/serve/service/recognition/request.h"
@@ -68,8 +68,8 @@ typedef struct loom_serve_recognition_generator_t {
   // the row, activation pin, and readiness frontier; denial owns neither row
   // nor pin. Accepted work remains under model retirement on readiness failure.
   iree_status_t (*try_admit)(void* self, void* invocation,
-                             loom_serve_residency_admission_t* out_admission,
-                             loom_serve_execution_frontier_t* out_frontier);
+                             loom_runtime_residency_admission_t* out_admission,
+                             loom_runtime_execution_frontier_t* out_frontier);
   // Collects successful admission readiness, retaining the admitted row and
   // pin. Capacity is decided before submission, never again at completion.
   void (*complete_admit)(void* self, void* invocation);
@@ -88,7 +88,7 @@ typedef struct loom_serve_recognition_generator_t {
                                  void* const* invocations);
   // Queues one prepared numerical batch, retaining all original members.
   iree_status_t (*submit)(void* self,
-                          loom_serve_execution_frontier_t* out_frontier);
+                          loom_runtime_execution_frontier_t* out_frontier);
   // Interprets successfully retired feedback and checks source event metadata.
   // Every original ordinal is collected, including cancelled members. Copies
   // into caller-owned event storage before another source call can overwrite
@@ -108,7 +108,7 @@ typedef struct loom_serve_recognition_generator_t {
   // readiness, excluding other model mutation. Backing release never blocks
   // the owner. Platform failure retains the handle for model teardown.
   iree_status_t (*release)(void* self, void* invocation, bool* out_complete,
-                           loom_serve_execution_frontier_t* out_frontier);
+                           loom_runtime_execution_frontier_t* out_frontier);
   // Optional immutable tokenizer, borrowed through model retirement.
   const iree_tokenizer_t* tokenizer;
   // Shared capacity identity, borrowed through service retirement.

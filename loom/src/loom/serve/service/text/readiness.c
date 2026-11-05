@@ -50,7 +50,7 @@ static void loom_serve_text_readiness_device_completed(
 
 iree_status_t loom_serve_text_readiness_await(
     loom_serve_text_readiness_t* readiness,
-    const loom_serve_execution_frontier_t* frontier) {
+    const loom_runtime_execution_frontier_t* frontier) {
   iree_async_semaphore_wait_operation_t* wait = &readiness->device.operation;
   memset(wait, 0, sizeof(*wait));
   iree_async_operation_initialize(

@@ -8,9 +8,9 @@
 #define LOOM_SERVE_SERVICE_IMAGE_GENERATOR_H_
 
 #include "iree/tokenizer/tokenizer.h"
+#include "loom/runtime/execution/execution.h"
 #include "loom/runtime/parameter/activity.h"
-#include "loom/serve/runtime/execution/execution.h"
-#include "loom/serve/runtime/parameter/residency.h"
+#include "loom/runtime/parameter/residency.h"
 #include "loom/serve/service/execution_reconfiguration.h"
 #include "loom/serve/service/image/request.h"
 #include "loom/serve/service/prepared_request.h"
@@ -64,13 +64,13 @@ typedef struct loom_serve_image_generator_t {
   // New-work admission on the shared owner; policy deferral differs from
   // physical denial. ACQUIRED pins and enqueues parameter activation.
   iree_status_t (*try_admit)(void* self,
-                             loom_serve_residency_admission_t* out_admission);
+                             loom_runtime_residency_admission_t* out_admission);
   // Enqueues one source-controlled part, returning borrowed completion handles.
   // The first call follows admission; each subsequent call follows successful
   // retirement of both previous frontiers. A terminal part authorizes complete
   // only after its frontiers retire. CANCEL is valid between submitted parts.
   iree_status_t (*submit)(void* self, loom_serve_image_submit_flags_t flags,
-                          loom_serve_execution_frontier_t* out_frontier,
+                          loom_runtime_execution_frontier_t* out_frontier,
                           bool* out_complete);
   // Consumes successful completion and releases model pins. Borrowed F32 CHW
   // RGB in [-1,1] remains live until the next invocation or model destruction.
