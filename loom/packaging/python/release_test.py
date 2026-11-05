@@ -21,6 +21,7 @@ from release import (
     PLATFORMS,
     PROFILES,
     SERVER_BINARIES,
+    ReleaseChannel,
     checksum_document,
     inspect_server_archive,
     inspect_wheel,
@@ -118,12 +119,19 @@ class ReleaseTest(unittest.TestCase):
             )
 
     def test_canonical_versions_and_tag_boundary(self):
-        for version in ("1.2.3", "1.2.3a1", "1.2.3b2", "1.2.3rc3"):
+        versions = {
+            "1.2.3": ReleaseChannel.STABLE,
+            "1.2.3a1": ReleaseChannel.PRERELEASE,
+            "1.2.3b2": ReleaseChannel.PRERELEASE,
+            "1.2.3rc3": ReleaseChannel.PRERELEASE,
+        }
+        for version, channel in versions.items():
             with self.subTest(version=version):
                 identity = parse_identity(
                     dict(self.identity.document(), **{"package-version": version})
                 )
-                identity.check_tag("v" + version)
+                self.assertEqual(identity.tag, "v" + version)
+                self.assertIs(identity.check_tag(identity.tag), channel)
                 with self.assertRaisesRegex(ValueError, "does not match"):
                     identity.check_tag(version)
         for version in ("1.2.3.dev0", "1.2.3rc2.dev1"):
@@ -146,6 +154,34 @@ class ReleaseTest(unittest.TestCase):
                 )
         with self.assertRaisesRegex(ValueError, "does not match"):
             self.identity.check_tag("v1.2.4")
+
+    def test_check_tag_reports_release_channel(self):
+        for version, channel in (
+            ("1.2.3", ReleaseChannel.STABLE),
+            ("1.2.3rc1", ReleaseChannel.PRERELEASE),
+        ):
+            with self.subTest(version=version):
+                identity = parse_identity(
+                    dict(self.identity.document(), **{"package-version": version})
+                )
+                self.version_file.write_text(json.dumps(identity.document()))
+                output = io.StringIO()
+                with (
+                    contextlib.redirect_stdout(output),
+                    contextlib.redirect_stderr(io.StringIO()),
+                ):
+                    self.assertEqual(
+                        main(
+                            [
+                                "--identity",
+                                str(self.version_file),
+                                "check-tag",
+                                identity.tag,
+                            ]
+                        ),
+                        0,
+                    )
+                self.assertEqual(output.getvalue(), channel.value + "\n")
 
     def test_release_requires_public_catalog(self):
         for catalog in (

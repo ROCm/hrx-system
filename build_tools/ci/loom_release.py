@@ -30,21 +30,42 @@ GITHUB_RELEASE_BODY_MAXIMUM = 125_000
 GITHUB_ASSET_PAGE_SIZE = 100
 
 
-def github_release_body(identity: release.Identity) -> str:
+def github_release_body(identity: release.Identity, repository: str) -> str:
     """Builds the bounded product description used for GitHub releases."""
     server_archives = "".join(
         f"- `{release.server_archive_name(identity, platform)}`\n"
         for platform in release.PLATFORMS
     )
     linux_archive = release.server_archive_name(identity, release.LINUX_X86_64_PLATFORM)
+    if identity.release_channel is release.ReleaseChannel.STABLE:
+        installation = (
+            "Install the optimized profile from PyPI:\n\n"
+            "```console\n"
+            f"python -m pip install hrx-loom=={identity.version}\n"
+            "```\n"
+        )
+    else:
+        wheels = {
+            platform: f"hrx_loom-{identity.version}-py3-none-{platform}.whl"
+            for platform in release.PLATFORMS
+        }
+        installation = (
+            "This public release candidate is not published to PyPI. Install the "
+            "attached Release wheel directly:\n\n"
+            "```console\n"
+            "# Linux x86-64\n"
+            f"python -m pip install https://github.com/{repository}/releases/download/"
+            f"{identity.tag}/{wheels[release.LINUX_X86_64_PLATFORM]}\n"
+            "\n"
+            "# Windows x86-64\n"
+            f"python -m pip install https://github.com/{repository}/releases/download/"
+            f"{identity.tag}/{wheels[release.WINDOWS_X86_64_PLATFORM]}\n"
+            "```\n"
+        )
     body = (
         f"Loom SDK {identity.version} contains the compiler, runtime, command-line "
         "tools, and Python APIs for Linux x86-64 and Windows x86-64.\n\n"
-        "After the release workflow completes, install the optimized profile "
-        "from PyPI:\n\n"
-        "```console\n"
-        f"python -m pip install hrx-loom=={identity.version}\n"
-        "```\n\n"
+        f"{installation}\n"
         "For use outside Python, download the standalone archive for your platform:\n\n"
         f"{server_archives}\n"
         "Each archive contains one `loom-serve` executable with the SDK target "
@@ -110,7 +131,7 @@ def publish_github(
         artifact.path.name: (artifact.path, artifact.digest) for artifact in artifacts
     }
     assets[checksums.name] = (checksums, _digest(checksums))
-    prerelease = re.fullmatch(r"\d+\.\d+\.\d+", identity.version) is None
+    prerelease = identity.release_channel is release.ReleaseChannel.PRERELEASE
     if existing is None:
         options = ["--prerelease", "--latest=false"] if prerelease else []
         _gh(
@@ -124,7 +145,7 @@ def publish_github(
             "--title",
             f"Loom {tag}",
             "--notes",
-            github_release_body(identity),
+            github_release_body(identity, repository),
             *options,
         )
         return
@@ -195,6 +216,8 @@ def stage_pypi(
     wheels: list[release.Wheel], identity: release.Identity, output: Path
 ) -> bool:
     """Copies only missing normal wheels into a fresh upload directory."""
+    if identity.release_channel is not release.ReleaseChannel.STABLE:
+        raise ValueError("PyPI publication requires a stable X.Y.Z version")
     normal = {wheel.path.name: wheel for wheel in wheels if wheel.profile == "release"}
     request = urllib.request.Request(
         f"https://pypi.org/pypi/hrx-loom/{identity.version}/json",

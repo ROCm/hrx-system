@@ -2,8 +2,9 @@
 
 An SDK release publishes `hrx-loom` for Linux x86-64 and Windows x86-64 from one
 reviewed source revision. Each platform has Release, Tracy, Debug, and ASAN
-wheels. GitHub Releases receives all eight wheels and `SHA256SUMS`; PyPI receives
-the two Release wheels. Publication uses the exact artifacts that passed the
+wheels. GitHub Releases receives all eight wheels, a standalone `loom-serve`
+archive for each platform, and `SHA256SUMS`. Stable releases also publish the two
+Release wheels to PyPI. Publication uses the exact artifacts that passed the
 installed tests.
 
 This guide covers release ownership and maintenance. The [SDK build guide](README.md)
@@ -16,7 +17,8 @@ from the repository root with Python 3.12 or newer; GitHub commands use `gh`.
 | --- | --- | --- |
 | Ordinary PR / main CI | Release | Workflow artifacts only |
 | Manual SDK workflow | Requested profiles | Workflow artifacts only |
-| Release tag or manual release workflow on that tag | Release, Tracy, Debug, ASAN | GitHub Releases, then PyPI |
+| Prerelease tag or manual release workflow on that tag | Release, Tracy, Debug, ASAN | Public GitHub prerelease |
+| Stable tag or manual release workflow on that tag | Release, Tracy, Debug, ASAN | GitHub Releases, then PyPI |
 
 The shared [artifact producer](../../../.github/workflows/build_loom_sdk_artifacts.yml)
 runs once per requested profile on Linux. It builds and tests the Linux wheel,
@@ -31,10 +33,10 @@ uses one Windows job to qualify every requested profile. Windows qualification
 invokes no build tool. Existing PR sanitizer jobs retain their source-test
 coverage; they do not produce instrumented SDK wheels.
 
-The publication workflow consumes only `loom-sdk-wheel-*` artifacts. The
-`loom-sdk-inputs-windows-*` artifacts contain inputs awaiting native qualification
-and are not publication artifacts. Build and qualification artifacts are retained
-for 14 days.
+The publication workflow consumes `loom-sdk-wheel-*` and
+`loom-server-archive-*` artifacts. The `loom-sdk-inputs-windows-*` artifacts
+contain inputs awaiting native qualification and are not publication artifacts.
+Build and qualification artifacts are retained for 14 days.
 
 ## Publishing account setup
 
@@ -108,6 +110,36 @@ native inference, and independent server shutdown. Native Windows additionally
 exercises real console control events. The [build guide](README.md#build-and-test)
 describes local execution of the same checks.
 
+## Run a release-candidate cycle
+
+A release line isolates candidate stabilization from continued work on `main`.
+Create `release/vX.Y` from the reviewed main revision selected for the release,
+then target the identity-preparation pull request at that branch. The repository
+tag and release line can be shared by additional HRX packages in the future;
+this workflow publishes the Loom SDK assets. The release branch owns the
+candidate and stable identities, while ordinary development continues on
+`main`.
+
+The first candidate sets `package-version` to `X.Y.Zrc1` and pins an immutable,
+qualified catalog reference. Tag its merged release-line commit as
+`vX.Y.Zrc1`. The tag publishes a public GitHub prerelease with direct wheel and
+standalone-server installation instructions. It does not enter the PyPI
+environment or stage a PyPI upload.
+
+Feedback fixes land on `main` first and are then cherry-picked onto the release
+line. Each changed candidate increments the package version and tag (`rc2`,
+`rc3`, and so on), which preserves the exact bytes testers used and keeps every
+feedback report attributable to one source revision. Unrelated features remain
+on `main`; the release line takes only fixes needed to qualify the selected
+release.
+
+When the candidate is accepted, a final identity pull request on the same
+release line changes `X.Y.ZrcN` to `X.Y.Z` without changing the selected catalog.
+The stable tag runs the complete qualification again, publishes a normal GitHub
+release, and then publishes its two Release wheels to PyPI. Promoting GitHub
+metadata or reusing candidate artifacts cannot substitute for the stable build:
+the stable version has its own tag, wheel metadata, checksums, and attestations.
+
 ## Publish the reviewed tag
 
 From the reviewed source revision, the release owner can check the intended tag:
@@ -126,23 +158,27 @@ gh workflow run release_loom_sdk.yml --repo ROCm/hrx-system --ref v1.2.3
 This is a publishing workflow. It checks the tag against the committed identity,
 builds all four profiles for both platforms, and requires every installed test
 to pass. The bundle job verifies the complete set and writes `SHA256SUMS`.
-Both publication jobs verify the bundle again and consume its bytes without
-recompiling. GitHub publication completes before PyPI publication starts.
+Publication consumes those bytes without recompiling. GitHub publication
+completes before the stable-only PyPI publication starts.
 
-GitHub publication writes a compact SDK description naming the PyPI install,
-attached native profiles, and checksum document. The body comes from the
-committed SDK identity and artifact contract, so the first release cannot expand
-into the repository's complete pull-request history.
+GitHub publication writes a compact SDK description naming the installation
+path, attached native profiles, standalone servers, and checksum document.
+Stable releases install from PyPI; prereleases install their attached Release
+wheel directly. The body comes from the committed SDK identity and artifact
+contract, so the first release cannot expand into the repository's complete
+pull-request history.
 
 The normal filenames have no local-version suffix; instrumented filenames use
 `+tracy`, `+debug`, or `+asan`. Linux release wheels carry the audited
-`manylinux_2_39_x86_64` tag; Windows wheels carry `win_amd64`. Prerelease versions
-create GitHub prereleases. All profiles install the same distribution, so users
-choose an instrumented wheel explicitly or use separate virtual environments.
+`manylinux_2_39_x86_64` tag; Windows wheels carry `win_amd64`. Versions containing
+`aN`, `bN`, or `rcN` create public GitHub prereleases and never publish to PyPI.
+All profiles install the same distribution, so users choose an instrumented
+wheel explicitly or use separate virtual environments.
 
-A complete release has eight wheels and `SHA256SUMS` on GitHub, and the two
-normal wheels on PyPI. From a checkout of the release tag, a downloaded complete
-bundle can be checked without network access:
+A complete GitHub release has eight wheels, two standalone server archives, and
+`SHA256SUMS`. A stable release additionally has the two normal wheels on PyPI.
+From a checkout of the release tag, a downloaded complete bundle can be checked
+without network access:
 
 ```sh
 python -m build_tools.ci.loom_release verify \

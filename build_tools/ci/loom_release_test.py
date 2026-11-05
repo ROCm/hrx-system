@@ -118,7 +118,7 @@ class LoomReleaseTest(unittest.TestCase):
             )
 
     def test_new_github_release_uses_existing_tag_and_complete_assets(self):
-        for version in ("1.2.3", "1.2.3rc1"):
+        for version in ("1.2.3", "1.2.3a1", "1.2.3b2", "1.2.3rc1"):
             if version != self.identity.version:
                 self.bundle(version)
             with (
@@ -138,9 +138,23 @@ class LoomReleaseTest(unittest.TestCase):
                 self.assertIn("--verify-tag", command)
                 self.assertNotIn("--clobber", command)
                 self.assertNotIn("--generate-notes", command)
-                self.assertEqual("--prerelease" in command, version.endswith("rc1"))
+                prerelease = (
+                    self.identity.release_channel is release.ReleaseChannel.PRERELEASE
+                )
+                self.assertEqual("--prerelease" in command, prerelease)
                 body = command[command.index("--notes") + 1]
-                self.assertIn(f"hrx-loom=={version}", body)
+                if prerelease:
+                    self.assertIn("not published to PyPI", body)
+                    self.assertNotIn(f"hrx-loom=={version}", body)
+                    for platform in release.PLATFORMS:
+                        wheel = f"hrx_loom-{version}-py3-none-{platform}.whl"
+                        self.assertIn(
+                            f"https://github.com/fixture/sdk/releases/download/"
+                            f"{self.identity.tag}/{wheel}",
+                            body,
+                        )
+                else:
+                    self.assertIn(f"hrx-loom=={version}", body)
                 for server in self.servers:
                     self.assertIn(server.path.name, body)
                 self.assertIn("./loom-serve --version", body)
@@ -159,7 +173,7 @@ class LoomReleaseTest(unittest.TestCase):
         limit = loom_release.GITHUB_RELEASE_BODY_MAXIMUM
         identity = release.Identity("1" * limit, self.identity.catalog)
         with self.assertRaisesRegex(ValueError, f"{limit}-character service limit"):
-            loom_release.github_release_body(identity)
+            loom_release.github_release_body(identity, "fixture/sdk")
 
     def test_partial_retry_checks_all_overlaps_before_upload(self):
         present = {
@@ -353,6 +367,16 @@ class LoomReleaseTest(unittest.TestCase):
             )
             for path in output.iterdir():
                 self.assertEqual(path.read_bytes(), self.assets[path.name].read_bytes())
+
+    def test_pypi_rejects_prerelease_before_network_or_staging(self):
+        self.bundle("1.2.3rc1")
+        with (
+            patch("urllib.request.urlopen") as request,
+            self.assertRaisesRegex(ValueError, "stable X.Y.Z"),
+        ):
+            loom_release.stage_pypi(self.wheels, self.identity, self.output)
+        request.assert_not_called()
+        self.assertFalse(self.output.exists())
 
     def test_pypi_conflicts_are_not_silently_skipped(self):
         record = self.pypi_records()[0]

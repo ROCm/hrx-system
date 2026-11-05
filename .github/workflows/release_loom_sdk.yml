@@ -19,17 +19,23 @@ jobs:
   identity:
     name: Validate / Release identity
     runs-on: ubuntu-24.04
+    outputs:
+      release_channel: ${{ steps.release.outputs.release_channel }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Require the canonical release tag and catalog
+        id: release
         run: |
           if [[ "$GITHUB_REF_TYPE" != tag ]]; then
             echo 'Select a release tag when dispatching this workflow.' >&2
             exit 1
           fi
-          python3 loom/packaging/python/release.py check-tag "$GITHUB_REF_NAME"
+          release_channel=$(
+            python3 loom/packaging/python/release.py check-tag "$GITHUB_REF_NAME"
+          )
+          echo "release_channel=$release_channel" >> "$GITHUB_OUTPUT"
 
   build_release:
     name: Release
@@ -136,7 +142,8 @@ jobs:
 
   pypi:
     name: Publish / PyPI wheels
-    needs: github
+    needs: [identity, github]
+    if: needs.identity.outputs.release_channel == 'stable'
     runs-on: ubuntu-24.04
     environment:
       name: pypi
