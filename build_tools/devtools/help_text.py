@@ -911,7 +911,27 @@ label, so adding a target does not move existing targets between machines. The
 result lists incompatible targets skipped by a pattern; naming one directly
 fails with a configuration diagnostic. Fuzzer arguments go after `--`;
 libFuzzer `-jobs` multiplies work inside every selected target and is usually
-inappropriate for pattern campaigns."""
+inappropriate for pattern campaigns.
+
+Merge an external corpus into the target's persistent corpus with libFuzzer's
+normal merge mode:
+
+```bash
+iree-bazel-fuzz //path:target_fuzz -- -merge=1 /path/to/source-corpus
+```
+
+The campaign result names each target's artifact directory. Reproduce and
+minimize a crash with the ordinary Bazel run wrapper:
+
+```bash
+iree-bazel-run --config=fuzzer //path:target_fuzz -- /path/to/crash
+iree-bazel-run --config=fuzzer //path:target_fuzz -- \\
+  -minimize_crash=1 -runs=10000 \\
+  -exact_artifact_path=/path/to/minimized /path/to/crash
+```
+
+Always bound minimization with `-runs` or `-max_total_time`; libFuzzer otherwise
+defaults to a 600-second search."""
 
     return bazel_agent_markdown()
 

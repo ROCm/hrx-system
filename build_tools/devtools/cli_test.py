@@ -1321,6 +1321,9 @@ class CliTest(unittest.TestCase):
         self.assertIn("## iree-bazel-fuzz", fuzz_output)
         self.assertIn("--config=fuzzer", fuzz_output)
         self.assertIn("IREE_FUZZ_CACHE", fuzz_output)
+        self.assertIn("-merge=1", fuzz_output)
+        self.assertIn("-minimize_crash=1 -runs=10000", fuzz_output)
+        self.assertIn("defaults to a 600-second search", fuzz_output)
         self.assertNotIn("## iree-bazel-try", fuzz_output)
 
     def test_cmake_try_agents_md_is_focused(self):
