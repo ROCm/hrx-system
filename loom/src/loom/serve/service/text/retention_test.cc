@@ -21,8 +21,9 @@ class TextRetentionTest : public SourceTextServiceTest {
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(SourceTextServiceTest::SetUp());
     const auto options = ModelOptions();
-    IREE_ASSERT_OK(loom_serve_text_model_allocate(
-        device_, storage_owner_, &options, allocations_.allocator(), &model_));
+    IREE_ASSERT_OK(
+        loom_serve_text_model_allocate(1, &device_, &storage_owner_, &options,
+                                       allocations_.allocator(), &model_));
   }
 
   void TearDown() override {
@@ -161,8 +162,9 @@ TEST_F(TextRetentionTest, QueryScratchTracksOwnershipNotVirtualCapacity) {
     model_ = nullptr;
     auto options = ModelOptions();
     options.pool_capacity = capacity;
-    IREE_ASSERT_OK(loom_serve_text_model_allocate(
-        device_, storage_owner_, &options, allocations_.allocator(), &model_));
+    IREE_ASSERT_OK(
+        loom_serve_text_model_allocate(1, &device_, &storage_owner_, &options,
+                                       allocations_.allocator(), &model_));
     ASSERT_NO_FATAL_FAILURE(Capture());
     allocations_.ResetAllocationMetrics();
     loom_serve_residency_projection_t retained;

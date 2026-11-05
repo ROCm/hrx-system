@@ -39,8 +39,9 @@ static iree_status_t loom_serve_text_admit_state(
       .self = context, .query = loom_serve_text_forecast_state};
   loom_serve_residency_admission_t admission;
   const iree_status_t status = loom_serve_residency_try_admit_state(
-      1, &context->model->residency, 0, range_count, ranges, &forecast,
-      readiness, value, &admission, out_operation);
+      context->model->residency.count, context->model->residency.values, 0,
+      range_count, ranges, &forecast, readiness, value, &admission,
+      out_operation);
   switch (admission) {
     case LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY:
       *context->result = LOOM_SERVE_TEXT_RESERVE_CAPACITY;
@@ -107,16 +108,24 @@ uint64_t loom_serve_text_reservation_memory_footprint(
     const loom_serve_text_reservation_t* reservation) {
   const loom_serve_text_model_t* model = reservation->row->model;
   const uint64_t extents[] = {
-      loom_serve_residency_activation_footprint(model->residency),
       loom_serve_text_state_reservation_footprint(reservation->state),
-      loom_serve_module_workspace_requirement(model->control.native_module, 0)
-          .allocation_size,
       2ull * model->source.prefill_capacity *
           LOOM_SERVE_TEXT_MEDIA_PACKET_RECORD_BYTES,
   };
   uint64_t bytes = 0;
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(extents); ++i) {
     bytes += iree_min(extents[i], UINT64_MAX - bytes);
+  }
+  for (uint32_t i = 0; i < model->residency.count; ++i) {
+    bytes += iree_min(
+        loom_serve_residency_activation_footprint(model->residency.values[i]),
+        UINT64_MAX - bytes);
+  }
+  for (uint32_t i = 0; i < model->device_count; ++i) {
+    bytes += iree_min(
+        loom_serve_module_workspace_requirement(model->control.native_module, i)
+            .allocation_size,
+        UINT64_MAX - bytes);
   }
   return bytes;
 }
@@ -153,7 +162,7 @@ static iree_status_t loom_serve_text_reservation_submit_plan(
           checkpoint->token == row->model->source.eos_token;
     }
   }
-  *out_frontier = loom_serve_execution_frontier(row->model->execution);
+  *out_frontier = loom_serve_execution_frontier(row->model->executions[0]);
   return iree_ok_status();
 }
 

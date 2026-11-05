@@ -481,28 +481,39 @@ iree_status_t loom_serve_residency_group_deactivate(
   return status;
 }
 
-iree_status_t loom_serve_residency_deactivate(loom_serve_residency_t* residency,
-                                              bool* out_complete) {
+iree_status_t loom_serve_residency_deactivate(
+    iree_host_size_t residency_count,
+    loom_serve_residency_t* const* residencies, bool* out_complete) {
   *out_complete = false;
-  bool pinned = residency->pin_count || residency->pinned;
-  for (iree_host_size_t i = 0; i < residency->group_count; ++i) {
-    const loom_serve_residency_group_t* group = residency->entries[i].group;
-    pinned |= !group->releasing && loom_serve_residency_group_is_pinned(group);
+  bool deactivatable = true;
+  for (iree_host_size_t i = 0; i < residency_count; ++i) {
+    const loom_serve_residency_t* residency = residencies[i];
+    deactivatable &= !residency->pin_count && !residency->pinned &&
+                     residency->cache->pool != NULL;
+    for (iree_host_size_t j = 0; j < residency->group_count; ++j) {
+      const loom_serve_residency_group_t* group = residency->entries[j].group;
+      deactivatable &=
+          group->releasing || !loom_serve_residency_group_is_pinned(group);
+    }
   }
-  if (pinned || !residency->cache->pool) {
+  if (!deactivatable) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "deactivation requires unpinned elastic residency");
   }
   iree_status_t status = iree_ok_status();
   bool complete = true;
-  for (iree_host_size_t i = 0;
-       i < residency->group_count && iree_status_is_ok(status); ++i) {
-    bool group_complete = false;
-    status = loom_serve_residency_group_deactivate(residency->entries[i].group,
-                                                   &group_complete);
-    complete &= group_complete;
+  for (iree_host_size_t i = 0; i < residency_count && iree_status_is_ok(status);
+       ++i) {
+    loom_serve_residency_t* residency = residencies[i];
+    for (iree_host_size_t j = 0;
+         j < residency->group_count && iree_status_is_ok(status); ++j) {
+      bool group_complete = false;
+      status = loom_serve_residency_group_deactivate(
+          residency->entries[j].group, &group_complete);
+      complete &= group_complete;
+    }
+    residency->active = false;
   }
-  residency->active = false;
   *out_complete = iree_status_is_ok(status) && complete;
   return status;
 }

@@ -45,7 +45,7 @@ class TextResponseServiceTest : public SourceTextServiceTest,
     auto options = ModelOptions();
     options.tokenizer_path = iree_make_cstring_view(path.c_str());
     IREE_ASSERT_OK(loom_serve_text_model_allocate(
-        device_, storage_owner_, &options, host_allocator_, &model_));
+        1, &device_, &storage_owner_, &options, host_allocator_, &model_));
     for (const char token : Oracle::Complete("b", 3)) {
       expected_ += token == 'a'
                        ? std::string(spelling_.size() * repetitions, 'a')

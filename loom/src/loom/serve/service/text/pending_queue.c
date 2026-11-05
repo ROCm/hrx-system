@@ -280,8 +280,7 @@ void loom_serve_text_pending_queue_remove(
   loom_serve_text_pending_request_t* request = queue->values[index];
   loom_serve_text_pending_continuation_deinitialize(&request->continuation);
   if (request == queue->prepared.request) {
-    loom_serve_residency_cancel_admission(
-        loom_serve_text_model_residency(queue->model));
+    loom_serve_text_model_cancel_admission(queue->model);
     memset(&queue->prepared, 0, sizeof(queue->prepared));
   } else if (queue->prepared.request && index < queue->prepared.index) {
     --queue->prepared.index;

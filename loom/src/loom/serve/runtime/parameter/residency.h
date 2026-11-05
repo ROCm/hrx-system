@@ -371,11 +371,13 @@ iree_status_t loom_serve_residency_activate(
 
 // Starts/advances asynchronous release after consumers retire. New requests
 // cannot reactivate this residency until native release completes. Rejects
-// pinned/fixed backing before submission; pinning cannot cancel accepted
-// release. The pool owner receives completion wakes; true joins all native
-// release work.
-iree_status_t loom_serve_residency_deactivate(loom_serve_residency_t* residency,
-                                              bool* out_complete);
+// pinned/fixed backing across the complete set before submitting any release;
+// pinning cannot cancel accepted release. Pool owners receive completion wakes;
+// true joins every member's native release work. Membership follows acquire's
+// nonempty, distinct-cache contract.
+iree_status_t loom_serve_residency_deactivate(
+    iree_host_size_t residency_count,
+    loom_serve_residency_t* const* residencies, bool* out_complete);
 
 // Combined accounting for this working set. Shared groups appear in each
 // borrower's snapshot; summing borrower snapshots is not physical accounting.

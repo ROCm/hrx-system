@@ -518,7 +518,7 @@ TEST_P(WeightsTest, SharedWorkingSetsAdmitAtomicallyAndEvictOnlyIdleGroups) {
   bool complete = false;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
-      loom_serve_residency_deactivate(residencies_[0], &complete));
+      loom_serve_residency_deactivate(1, &residencies_[0], &complete));
   loom_serve_residency_release(residencies_[1]);
 
   // Persistent retention is counted across borrowers, not last-writer-wins.
@@ -645,7 +645,7 @@ TEST_P(WeightsTest, AdmissionUsesRecencyOnlyAmongUnpinnedGroups) {
   if (!GetParam()) {
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_FAILED_PRECONDITION,
-        loom_serve_residency_deactivate(residencies_[0], &complete));
+        loom_serve_residency_deactivate(1, &residencies_[0], &complete));
     ASSERT_NO_FATAL_FAILURE(RunPinned(1, 70));
     return;
   }
@@ -657,7 +657,7 @@ TEST_P(WeightsTest, AdmissionUsesRecencyOnlyAmongUnpinnedGroups) {
   IREE_ASSERT_OK(loom_serve_residency_acquire(1, &residencies_[0]));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
-      loom_serve_residency_deactivate(residencies_[0], &complete));
+      loom_serve_residency_deactivate(1, &residencies_[0], &complete));
   IREE_ASSERT_OK(loom_serve_residency_cache_trim(ResidencyCache(), 0));
   IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes,
@@ -712,8 +712,9 @@ TEST_P(WeightsTest, PersistentPinningOnlyChangesParameterEvictionEligibility) {
   EXPECT_TRUE(loom_serve_residency_snapshot(residency).active);
   EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes,
             GetParam() ? kSlabBytes : 0u);
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
-                        loom_serve_residency_deactivate(residency, &complete));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      loom_serve_residency_deactivate(1, &residency, &complete));
   loom_serve_residency_set_pinned(residency, false);
   loom_serve_residency_set_pinned(residency, false);
   EXPECT_TRUE(loom_serve_residency_snapshot(residency).active);
@@ -1587,9 +1588,11 @@ TEST_P(ArenaWeightsTest, IndependentPreparedRangesReloadAndRecycleAbove4GiB) {
   // Deactivation preserves the first recording and its address while returning
   // only that bank's backing. The peer remains live throughout native return.
   bool complete = false;
-  IREE_ASSERT_OK(loom_serve_residency_deactivate(residencies_[0], &complete));
+  IREE_ASSERT_OK(
+      loom_serve_residency_deactivate(1, &residencies_[0], &complete));
   IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
-  IREE_ASSERT_OK(loom_serve_residency_deactivate(residencies_[0], &complete));
+  IREE_ASSERT_OK(
+      loom_serve_residency_deactivate(1, &residencies_[0], &complete));
   ASSERT_TRUE(complete);
   EXPECT_EQ(loom_serve_weights_memory_usage(plans_[0]).committed_bytes, 0u);
   EXPECT_EQ(loom_serve_weights_memory_usage(plans_[1]).committed_bytes,
@@ -1611,9 +1614,11 @@ TEST_P(ArenaWeightsTest, IndependentPreparedRangesReloadAndRecycleAbove4GiB) {
   iree_hal_command_buffer_release(commands_[0]);
   commands_[0] = nullptr;
   IREE_ASSERT_OK(loom_serve_weights_await_retirement(plans_[0]));
-  IREE_ASSERT_OK(loom_serve_residency_deactivate(residencies_[0], &complete));
+  IREE_ASSERT_OK(
+      loom_serve_residency_deactivate(1, &residencies_[0], &complete));
   IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
-  IREE_ASSERT_OK(loom_serve_residency_deactivate(residencies_[0], &complete));
+  IREE_ASSERT_OK(
+      loom_serve_residency_deactivate(1, &residencies_[0], &complete));
   ASSERT_TRUE(complete);
   loom_serve_residency_free(residencies_[0]);
   residencies_[0] = nullptr;

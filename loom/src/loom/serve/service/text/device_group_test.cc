@@ -30,9 +30,10 @@ class GroupTextServiceTest : public SourceTextServiceTest {
     iree_notification_t notification;
     iree_notification_initialize(&notification);
     loom_serve_text_load_t* load = nullptr;
+    auto* device = loom_serve_device_group_at(group_, index);
+    auto* pool = loom_serve_device_group_pool_at(group_, index);
     auto status = loom_serve_text_load_allocate(
-        loom_serve_device_group_at(group_, index),
-        loom_serve_device_group_pool_at(group_, index), &options,
+        1, &device, &pool, &options,
         [](void* payload) {
           iree_notification_post(static_cast<iree_notification_t*>(payload),
                                  IREE_ALL_WAITERS);

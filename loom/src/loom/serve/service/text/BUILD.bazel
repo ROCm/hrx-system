@@ -267,6 +267,23 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "deployment_tests",
+    testonly = True,
+    srcs = [
+        "deployment_test.cc",
+        "model_instance.h",
+    ],
+    target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
+    deps = [
+        ":model",
+        ":source_service_fixture",
+        "//loom/src/loom/serve/testing:device",
+        "//loom/src/loom/serve/testing:service_application",
+    ],
+    alwayslink = True,
+)
+
+loom_cc_library(
     name = "device_group_tests",
     testonly = True,
     srcs = ["device_group_test.cc"],
@@ -686,7 +703,6 @@ loom_cc_library(
         "source.h",
         "stages.h",
         "state.h",
-        "variant.h",
         "warmup.h",
     ],
     deps = [

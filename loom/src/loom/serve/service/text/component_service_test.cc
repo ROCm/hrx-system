@@ -160,9 +160,7 @@ TEST_F(TextComponentServiceTest, OrdinaryTextLeavesImageDormant) {
   EXPECT_EQ(loom_serve_finite_component_phase(image_),
             LOOM_SERVE_FINITE_COMPONENT_DECLARED);
   EXPECT_EQ(loom_serve_finite_component_report(image_)->commands, 0u);
-  EXPECT_TRUE(
-      loom_serve_residency_snapshot(loom_serve_text_model_residency(model_))
-          .active);
+  EXPECT_TRUE(loom_serve_text_model_parameter_snapshot(model_).active);
 }
 
 TEST_F(TextComponentServiceTest, ImageFailureDoesNotFailConcurrentText) {

@@ -26,7 +26,7 @@ class TextStateReservationTest
                                                 &options.kernel_sanitizer,
                                                 &compilation_, &jit_));
     IREE_ASSERT_OK(loom_serve_text_source_initialize(
-        jit_, &options, host_allocator_, &source_, &state_.storage));
+        jit_, 1, &options, host_allocator_, &source_, &state_.storage));
     IREE_ASSERT_OK(loom_serve_device_create_execution(device_, storage_owner_,
                                                       &execution_));
     IREE_ASSERT_OK(loom_serve_text_state_allocate(&state_, device_,

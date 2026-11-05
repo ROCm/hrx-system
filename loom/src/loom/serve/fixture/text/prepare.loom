@@ -1,5 +1,7 @@
 config.def @fixture.card = false : i1
 
+func.decl import("prepare") @execution_count() -> (i32)
+
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
 func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
@@ -14,11 +16,15 @@ func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %owner: i32, 
 
 func.decl import("prepare") @source_scope(%scope: buffer) -> (i32)
 
-func.decl @fixture_storage(%maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64) -> (buffer, buffer, buffer, buffer, buffer)
+func.decl @fixture_storage(%executions: i64, %maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64) -> (buffer, buffer, buffer, buffer, buffer)
 
 // One shared command handles every host token/span bucket. The cold program
 // owns storage geometry; the host owns physical page IDs and recurrent slots.
 func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64, %draft_depth: i32, %shapes: buffer, %shape_count: i64, %weights: buffer, %options: buffer) -> (i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer) {
+  %execution_count = func.call @execution_count() : () -> (i32)
+  %bounded_executions = scalar.assume %execution_count [range(%execution_count, 1, 32)] : i32
+  %executions64 = scalar.extui %bounded_executions : i32 to i64
+  %execution_extent = index.cast %bounded_executions : i32 to index
   %primary_execution = scalar.constant 0 : i32
   %c0_source = scalar.constant 0 : i32
   %origin = index.constant 0 : offset
@@ -50,6 +56,9 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %media_stage = func.call @stage(%media_root, %primary_execution, %c1_i64) : (buffer, i32, i64) -> (i32)
   %context_key = buffer.constant utf8("fixture.context") : buffer
   %media_key = buffer.constant utf8("fixture.media") : buffer
+  %executions_key = buffer.constant utf8("fixture.executions") : buffer
+  func.call @config_i64(%stage, %executions_key, %executions64) : (i32, buffer, i64)
+  func.call @config_i64(%media_stage, %executions_key, %executions64) : (i32, buffer, i64)
   func.call @config_i64(%stage, %context_key, %context) : (i32, buffer, i64)
   func.call @config_i64(%media_stage, %context_key, %context) : (i32, buffer, i64)
   func.call @config_i64(%stage, %media_key, %c0_i64) : (i32, buffer, i64)
@@ -67,7 +76,10 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   }
   func.call @parameter(%stage, %c0_i32, %primary_execution, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, i32, buffer)
   func.call @parameter(%media_stage, %c0_i32, %primary_execution, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, i32, buffer)
-  %state_bytes = index.constant 128 : offset
+  %state_prefix = index.constant 128 : offset
+  %word_bytes = index.constant 4 : offset
+  %owner_bytes = index.scale %execution_extent, %word_bytes : index, offset -> offset
+  %state_bytes = index.add %state_prefix, %owner_bytes : offset
   %state = buffer.alloca<private> align(8) %state_bytes : buffer
   %state_view = buffer.view %state[%origin] : buffer -> view<2xi32>
   view.store %stage, %state_view[0] : i32, view<2xi32>
@@ -90,6 +102,21 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %spans_key = buffer.constant utf8("fixture.spans") : buffer
   func.call @config_i64(%stage, %spans_key, %span_capacity) : (i32, buffer, i64)
   func.call @config_i64(%media_stage, %spans_key, %span_capacity) : (i32, buffer, i64)
+  // Each auxiliary execution writes a disjoint contribution. Checkpoint names
+  // match across owners; placement must not merge their native reservations.
+  %owners = buffer.view %state[%state_prefix] : buffer -> view<[%execution_extent]xi32>
+  view.store %execution_count, %owners[0] : i32, view<[%execution_extent]xi32>
+  %contribution_root = buffer.constant utf8("contribute") : buffer
+  %owner_key = buffer.constant utf8("fixture.owner") : buffer
+  scf.for %owner = [%c1 to %execution_extent step %c1] {
+    %owner32 = index.cast %owner : index to i32
+    %owner64 = index.cast %owner : index to i64
+    %auxiliary = func.call @stage(%contribution_root, %owner32, %owner64) : (buffer, i32, i64) -> (i32)
+    func.call @config_i64(%auxiliary, %spans_key, %span_capacity) : (i32, buffer, i64)
+    func.call @config_i64(%auxiliary, %owner_key, %owner64) : (i32, buffer, i64)
+    func.call @parameter(%auxiliary, %c0_i32, %owner32, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, i32, buffer)
+    view.store %auxiliary, %owners[%owner] : i32, view<[%execution_extent]xi32>
+  }
   %layout_origin = index.constant 88 : offset
   %layout = buffer.view %state[%layout_origin] : buffer -> view<5xi64>
   view.store %maximum, %layout[0] : i64, view<5xi64>
@@ -97,7 +124,7 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   view.store %context, %layout[2] : i64, view<5xi64>
   view.store %pool, %layout[3] : i64, view<5xi64>
   view.store %pins, %layout[4] : i64, view<5xi64>
-  %allocations, %views, %origins, %draft, %geometry = func.call @fixture_storage(%maximum, %span_capacity, %context, %pool, %rows, %pins) : (i64, i64, i64, i64, i64, i64) -> (buffer, buffer, buffer, buffer, buffer)
+  %allocations, %views, %origins, %draft, %geometry = func.call @fixture_storage(%executions64, %maximum, %span_capacity, %context, %pool, %rows, %pins) : (i64, i64, i64, i64, i64, i64, i64) -> (buffer, buffer, buffer, buffer, buffer)
   %terminal = buffer.constant utf8("#") : buffer
   func.return %effective, %c2_i32, %state, %terminal, %allocations, %views, %origins, %empty, %geometry : i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer
 }

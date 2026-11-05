@@ -34,8 +34,8 @@ iree_status_t loom_serve_text_source_resolve_tokenizer(
 // Bootstrap returns ordinary source-owned references. Its temporary program
 // is gone before device setup; the shared environment outlives warm control.
 static iree_status_t loom_serve_text_prepare(
-    iree_vm_module_t* module, loom_serve_text_source_t* source,
-    const loom_serve_text_options_t* options,
+    iree_vm_module_t* module, uint32_t execution_count,
+    loom_serve_text_source_t* source, const loom_serve_text_options_t* options,
     loom_serve_text_storage_t* storage) {
   const iree_allocator_t host_allocator = source->host_allocator;
   iree_vm_buffer_t* shapes = NULL;
@@ -97,8 +97,8 @@ static iree_status_t loom_serve_text_prepare(
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_preparation_evaluate(
-        source->environment, module, &options->sources, IREE_SV("prepare"), 1,
-        LOOM_SERVE_PREPARATION_FLAG_PARAMETERS,
+        source->environment, module, &options->sources, IREE_SV("prepare"),
+        execution_count, LOOM_SERVE_PREPARATION_FLAG_PARAMETERS,
         iree_vm_variant_span_from_array(arguments),
         iree_vm_variant_span_from_array(results),
         iree_vm_module_span_from_array(modules), host_allocator,
@@ -171,6 +171,8 @@ static iree_status_t loom_serve_text_prepare(
 typedef struct loom_serve_text_source_sizing_t {
   // Immutable preparation bytecode shared across isolated candidate processes.
   iree_vm_module_t* module;
+  // Deployment execution ordinals preserved across sizing candidates.
+  uint32_t execution_count;
   // Borrowed original deployment inputs; candidates change only endpoint count.
   const loom_serve_text_options_t* options;
   // Candidate declarations, independently owned by the enclosing source.
@@ -220,8 +222,9 @@ static iree_status_t loom_serve_text_source_resolve_pool_capacity(
   loom_serve_text_options_t probe = *sizing->options;
   probe.checkpoint_capacity = checkpoint_capacity;
   probe.pool_capacity = probe.context_capacity;
-  IREE_RETURN_IF_ERROR(loom_serve_text_prepare(sizing->module, sizing->source,
-                                               &probe, sizing->storage));
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_prepare(sizing->module, sizing->execution_count,
+                              sizing->source, &probe, sizing->storage));
   const loom_serve_text_storage_t* storage = sizing->storage;
   const uint64_t probe_page_count = probe.pool_capacity / storage->block_size;
   const uint64_t limit_bytes = sizing->options->cache_limit_bytes;
@@ -258,8 +261,8 @@ static iree_status_t loom_serve_text_source_evaluate_cache(
   loom_serve_text_options_t options = *sizing->options;
   options.checkpoint_capacity = checkpoint_capacity;
   options.pool_capacity = sizing->pool_capacity;
-  IREE_RETURN_IF_ERROR(
-      loom_serve_text_prepare(sizing->module, source, &options, storage));
+  IREE_RETURN_IF_ERROR(loom_serve_text_prepare(
+      sizing->module, sizing->execution_count, source, &options, storage));
   if (sizing->page_bytes && storage->page_bytes != sizing->page_bytes) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -283,8 +286,9 @@ static iree_status_t loom_serve_text_source_evaluate_cache(
 }
 
 iree_status_t loom_serve_text_source_initialize(
-    loom_serve_jit_t* jit, const loom_serve_text_options_t* options,
-    iree_allocator_t host_allocator, loom_serve_text_source_t* out_source,
+    loom_serve_jit_t* jit, uint32_t execution_count,
+    const loom_serve_text_options_t* options, iree_allocator_t host_allocator,
+    loom_serve_text_source_t* out_source,
     loom_serve_text_storage_t* out_storage) {
   memset(out_source, 0, sizeof(*out_source));
   memset(out_storage, 0, sizeof(*out_storage));
@@ -299,6 +303,7 @@ iree_status_t loom_serve_text_source_initialize(
                                 &out_source->vm_types));
   const iree_string_view_t prepare = IREE_SV("prepare");
   loom_serve_text_source_sizing_t sizing = {
+      .execution_count = execution_count,
       .options = options,
       .source = out_source,
       .storage = out_storage,

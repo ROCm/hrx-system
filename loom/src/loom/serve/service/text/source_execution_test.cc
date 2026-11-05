@@ -54,7 +54,7 @@ TEST_F(SourceTextServiceTest, PreparationActivatesWeightsOnlyWithDemand) {
     iree_notification_initialize(&notification);
     loom_serve_text_load_t* load = nullptr;
     IREE_ASSERT_OK(loom_serve_text_load_allocate(
-        device_, storage_owner_, &options,
+        1, &device_, &storage_owner_, &options,
         [](void* payload) {
           iree_notification_post(static_cast<iree_notification_t*>(payload),
                                  IREE_ALL_WAITERS);
@@ -73,8 +73,7 @@ TEST_F(SourceTextServiceTest, PreparationActivatesWeightsOnlyWithDemand) {
     }
     auto* model = loom_serve_text_load_take_model(load);
     loom_serve_text_load_free(load);
-    const auto parameters =
-        loom_serve_residency_snapshot(loom_serve_text_model_residency(model));
+    const auto parameters = loom_serve_text_model_parameter_snapshot(model);
     // Warmup owns an independent invocation. Preparation does not import its
     // weight-ready dependency into the mutable-state execution timeline.
     EXPECT_FALSE(parameters.active);
@@ -146,7 +145,7 @@ TEST_F(SourceTextServiceTest, IndependentParameterPreparationJoinsAllDomains) {
     options.sources.base_directory = iree_make_cstring_view(package.c_str());
     loom_serve_text_model_t* model = nullptr;
     auto status = loom_serve_text_model_allocate(
-        device_, storage_owner_, &options, host_allocator_, &model);
+        1, &device_, &storage_owner_, &options, host_allocator_, &model);
     if (fail_policy) {
       IREE_EXPECT_NOT_OK(status);
       EXPECT_EQ(model, nullptr);
@@ -188,7 +187,7 @@ TEST_F(SourceTextServiceTest, FailedControlCompileRetiresNativePreparation) {
   options.sources.control = iree_make_cstring_view(control.c_str());
   loom_serve_text_model_t* failed = nullptr;
   IREE_EXPECT_NOT_OK(loom_serve_text_model_allocate(
-      device_, storage_owner_, &options, host_allocator_, &failed));
+      1, &device_, &storage_owner_, &options, host_allocator_, &failed));
   EXPECT_EQ(failed, nullptr);
   if (pool) {
     IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
@@ -241,7 +240,7 @@ TEST_F(SourceTextServiceTest, FailedLinkRetiresAcceptedInitialization) {
                            IREE_ALL_WAITERS);
   };
   loom_serve_text_load_t* load = nullptr;
-  IREE_ASSERT_OK(loom_serve_text_load_allocate(device_, storage_owner_,
+  IREE_ASSERT_OK(loom_serve_text_load_allocate(1, &device_, &storage_owner_,
                                                &options, wake, &notification,
                                                host_allocator_, &load));
   bool complete = false;
@@ -303,7 +302,7 @@ TEST_F(SourceTextServiceTest, MissingCheckpointFailsBeforeParameterPlacement) {
   iree_notification_initialize(&notification);
   loom_serve_text_load_t* load = nullptr;
   IREE_ASSERT_OK(loom_serve_text_load_allocate(
-      device_, storage_owner_, &options,
+      1, &device_, &storage_owner_, &options,
       [](void* payload) {
         iree_notification_post(static_cast<iree_notification_t*>(payload),
                                IREE_ALL_WAITERS);
@@ -394,12 +393,12 @@ class GrowingTextServiceTest : public SourceTextServiceTest {
         group_, {iree_make_cstring_view(name.c_str()), 1}, &pool_options,
         &pool_));
     const auto options = ModelOptions();
-    IREE_ASSERT_OK(loom_serve_text_model_allocate(device_, pool_, &options,
+    IREE_ASSERT_OK(loom_serve_text_model_allocate(1, &device_, &pool_, &options,
                                                   host_allocator_, &model_));
     EXPECT_EQ(loom_serve_text_model_pool(model_), pool_);
-    EXPECT_EQ(
-        loom_serve_residency_cache(loom_serve_text_model_residency(model_)),
-        loom_serve_pool_residency_cache(pool_));
+    EXPECT_EQ(loom_serve_residency_cache(
+                  loom_serve_text_model_state_residency(model_)),
+              loom_serve_pool_residency_cache(pool_));
   }
 
   loom_serve_text_options_t ModelOptions() const override {
@@ -691,7 +690,7 @@ TEST_F(SourceTextServiceTest, RejectsPoolOutsideSourceIntegerRepresentation) {
   loom_serve_text_model_t* rejected = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_text_model_allocate(device_, storage_owner_, &options,
+      loom_serve_text_model_allocate(1, &device_, &storage_owner_, &options,
                                      host_allocator_, &rejected));
   EXPECT_EQ(rejected, nullptr);
 }
@@ -703,7 +702,7 @@ TEST_F(SourceTextServiceTest, PoolByteLimitDerivesLogicalAddressability) {
   options.pool_capacity = 0;
   options.cache_limit_bytes = 65536;
   IREE_ASSERT_OK(loom_serve_text_model_allocate(
-      device_, storage_owner_, &options, host_allocator_, &model_));
+      1, &device_, &storage_owner_, &options, host_allocator_, &model_));
   const auto usage = loom_serve_text_model_pool_usage(model_);
   EXPECT_EQ(usage.block_size, 4u);
   EXPECT_EQ(usage.capacity, 16384u);
@@ -717,7 +716,7 @@ TEST_F(SourceTextServiceTest, PoolByteLimitMustFitOneContext) {
   loom_serve_text_model_t* rejected = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
-      loom_serve_text_model_allocate(device_, storage_owner_, &options,
+      loom_serve_text_model_allocate(1, &device_, &storage_owner_, &options,
                                      host_allocator_, &rejected));
   EXPECT_EQ(rejected, nullptr);
 }
@@ -731,10 +730,10 @@ TEST_F(SourceTextServiceTest, AutomaticEndpointsRequirePooledStorage) {
       .session_capacity = LOOM_SERVE_TEXT_CACHE_AUTOMATIC,
   };
   loom_serve_text_load_t* rejected = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_text_load_allocate(device_, storage_owner_, &options, nullptr,
-                                    nullptr, host_allocator_, &rejected));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_text_load_allocate(
+                            1, &device_, &storage_owner_, &options, nullptr,
+                            nullptr, host_allocator_, &rejected));
   EXPECT_EQ(rejected, nullptr);
   loom_serve_text_load_free(rejected);
 }
@@ -752,7 +751,7 @@ TEST_F(SourceTextServiceTest, WideSourceEpochsRetainExactHttpHistory) {
     options.epoch_count = IREE_ARRAYSIZE(shapes);
     options.epoch_shapes = shapes;
     IREE_ASSERT_OK(loom_serve_text_model_allocate(
-        device_, storage_owner_, &options, host_allocator_, &model_));
+        1, &device_, &storage_owner_, &options, host_allocator_, &model_));
     EXPECT_EQ(loom_serve_text_model_prefill_capacity(model_), capacity);
     std::vector<int32_t> tokens(capacity - 9);
     Oracle reference;
@@ -826,14 +825,14 @@ TEST_F(SourceTextServiceTest,
   loom_serve_text_model_t* unsupported = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_text_model_allocate(device_, storage_owner_, &options,
+      loom_serve_text_model_allocate(1, &device_, &storage_owner_, &options,
                                      host_allocator_, &unsupported));
   EXPECT_EQ(unsupported, nullptr);
   options.draft_depth = 0;
   options.options = IREE_SV("{\"unknown\":true}");
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_text_model_allocate(device_, storage_owner_, &options,
+      loom_serve_text_model_allocate(1, &device_, &storage_owner_, &options,
                                      host_allocator_, &unsupported));
   EXPECT_EQ(unsupported, nullptr);
   options.options = IREE_SV("{}");
@@ -841,7 +840,7 @@ TEST_F(SourceTextServiceTest,
   options.checkpoint_capacity = 0;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_text_model_allocate(device_, storage_owner_, &options,
+      loom_serve_text_model_allocate(1, &device_, &storage_owner_, &options,
                                      host_allocator_, &unsupported));
   EXPECT_EQ(unsupported, nullptr);
   IREE_ASSERT_OK(loom_serve_text_model_free(model_));
@@ -849,7 +848,7 @@ TEST_F(SourceTextServiceTest,
   ASSERT_NO_FATAL_FAILURE(WriteWeights(7));
   options = ModelOptions();
   IREE_ASSERT_OK(loom_serve_text_model_allocate(
-      device_, storage_owner_, &options, host_allocator_, &model_));
+      1, &device_, &storage_owner_, &options, host_allocator_, &model_));
   Start();
   const std::string prompt = "axb";
   const std::string actual =
@@ -910,7 +909,7 @@ TEST_F(SourceTextServiceTest, CheckpointMapExtentFailureRetiresTheLoad) {
                                      ? IREE_STATUS_OUT_OF_RANGE
                                      : IREE_STATUS_RESOURCE_EXHAUSTED;
     IREE_EXPECT_STATUS_IS(expected_status, loom_serve_text_model_allocate(
-                                               device_, storage_owner_,
+                                               1, &device_, &storage_owner_,
                                                &options, allocator, &rejected));
     EXPECT_EQ(rejected, nullptr);
     IREE_EXPECT_OK(loom_serve_text_model_free(rejected));
@@ -926,7 +925,7 @@ TEST_F(SourceTextServiceTest, CheckpointMapExtentFailureRetiresTheLoad) {
   options.checkpoint_capacity = 2;
   loom_serve_text_model_t* recovered = nullptr;
   IREE_ASSERT_OK(loom_serve_text_model_allocate(
-      device_, storage_owner_, &options, allocator, &recovered));
+      1, &device_, &storage_owner_, &options, allocator, &recovered));
   const int32_t tokens[] = {0, 1, 2, 0};
   auto* row = loom_serve_text_model_row(recovered, 0);
   IREE_EXPECT_OK(

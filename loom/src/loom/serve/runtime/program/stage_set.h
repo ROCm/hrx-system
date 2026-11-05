@@ -47,13 +47,14 @@ typedef void (*loom_serve_stage_set_layout_fn_t)(
 // Each exact device/family has an independent catalog and report accumulator.
 // Reuses identical kernel requests within each catalog. Success owes one
 // completion, possibly before return; rejection owes none. Devices,
-// preparation, sources and user_data remain borrowed through completion. No
-// model/queue state or parameter residency is mutated and no caller/worker
-// waits.
+// preparation, sources, optional sanitizer, and user_data remain borrowed
+// through completion. No model/queue state or parameter residency is mutated
+// and no caller/worker waits.
 iree_status_t loom_serve_stage_set_compile_async(
     loom_serve_device_t* const* devices,
     const loom_serve_preparation_t* preparation,
     const loom_serve_sources_t* sources,
+    const loomc_sanitizer_options_t* sanitizer,
     loom_serve_stage_set_completion_fn_t completion, void* user_data,
     iree_allocator_t host_allocator);
 

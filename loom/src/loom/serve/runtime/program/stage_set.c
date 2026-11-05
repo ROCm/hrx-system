@@ -33,6 +33,8 @@ struct loom_serve_stage_set_job_t {
   const loom_serve_preparation_t* preparation;
   // Borrowed provider namespace through source indexing.
   loom_serve_sources_t sources;
+  // Optional compiler instrumentation, borrowed through source indexing.
+  const loomc_sanitizer_options_t* sanitizer;
   // Number of immutable execution domains retained from source preparation.
   uint32_t execution_count;
   // Inline array of retained exact-device catalogs, nullable during indexing.
@@ -149,8 +151,8 @@ static void loom_serve_stage_set_execute(loomc_task_t* task,
   for (uint32_t i = 0;
        i < job->execution_count && iree_status_is_ok(job->status); ++i) {
     loom_serve_device_t* device = job->devices[i];
-    job->status = loom_serve_device_create_jit(device, &job->sources, NULL,
-                                               &job->reports[i], &job->jits[i]);
+    job->status = loom_serve_device_create_jit(
+        device, &job->sources, job->sanitizer, &job->reports[i], &job->jits[i]);
   }
 }
 
@@ -185,8 +187,10 @@ static iree_status_t loom_serve_stage_set_job_create(
       sizeof(loom_serve_stage_set_job_t), &job_size,
       IREE_STRUCT_FIELD(count, loom_serve_stage_set_entry_t, &entries_offset),
       IREE_STRUCT_FIELD(execution_count, loom_serve_jit_t*, &jits_offset),
-      IREE_STRUCT_FIELD(private_catalogs ? execution_count : 0,
-                        loom_serve_compilation_report_t, &reports_offset)));
+      IREE_STRUCT_FIELD_ALIGNED(private_catalogs ? execution_count : 0,
+                                loom_serve_compilation_report_t,
+                                iree_alignof(loom_serve_compilation_report_t),
+                                &reports_offset)));
   loom_serve_stage_set_t* stages = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*stages), (void**)&stages));
@@ -233,6 +237,7 @@ iree_status_t loom_serve_stage_set_compile_async(
     loom_serve_device_t* const* devices,
     const loom_serve_preparation_t* preparation,
     const loom_serve_sources_t* sources,
+    const loomc_sanitizer_options_t* sanitizer,
     loom_serve_stage_set_completion_fn_t completion, void* user_data,
     iree_allocator_t host_allocator) {
   loom_serve_stage_set_job_t* job = NULL;
@@ -241,6 +246,7 @@ iree_status_t loom_serve_stage_set_compile_async(
       host_allocator, &job));
   job->devices = devices;
   job->sources = *sources;
+  job->sanitizer = sanitizer;
   iree_status_t status = iree_status_from_loomc(loomc_task_sink_submit(
       loom_serve_host_compiler_sink(loom_serve_device_host(devices[0])),
       &job->task));

@@ -392,9 +392,14 @@ typedef void (*loom_serve_text_load_wake_fn_t)(void* user_data);
 
 // Allocates an unstarted operation without source I/O, device reservation or
 // task submission. Option views remain borrowed until terminal advance.
+// Copies a nonempty ordered deployment from one application group. Source
+// ordinals index devices/pools in that order; pool aliases share admission.
+// Every pool must already permit its assigned execution devices. All devices
+// and pools outlive the model, but the pointer arrays need only survive this
+// call. Execution zero owns host input, state, and observable completion.
 iree_status_t loom_serve_text_load_allocate(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
-    const loom_serve_text_options_t* options,
+    iree_host_size_t device_count, loom_serve_device_t* const* devices,
+    loom_serve_pool_t* const* pools, const loom_serve_text_options_t* options,
     loom_serve_text_load_wake_fn_t wake, void* user_data,
     iree_allocator_t host_allocator, loom_serve_text_load_t** out_load);
 
@@ -433,16 +438,16 @@ void loom_serve_text_load_free(loom_serve_text_load_t* load);
 
 // Cold outer-thread wrapper drives the same asynchronous preparation. Compiles
 // stages, records commands and indexes parameters without loading weight
-// payloads. The execution device and storage pool outlive the model; the caller
-// serializes model calls. The pool supplies elastic backing or explicit fixed
+// payloads. Execution devices and storage pools outlive the model; the caller
+// serializes model calls. Pools supply elastic backing or explicit fixed
 // allocations. Pooled state grows on row/page activation. Options strings are
 // borrowed only for this call. Failure releases partial ownership. Compilation
 // evidence is available through the owner-driven load interface; this wrapper
 // performs no process-global output.
 iree_status_t loom_serve_text_model_allocate(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
-    const loom_serve_text_options_t* options, iree_allocator_t host_allocator,
-    loom_serve_text_model_t** out_model);
+    iree_host_size_t device_count, loom_serve_device_t* const* devices,
+    loom_serve_pool_t* const* pools, const loom_serve_text_options_t* options,
+    iree_allocator_t host_allocator, loom_serve_text_model_t** out_model);
 
 // Begins irreversible removal after service CPU tasks, waits, candidate jobs
 // and external tokenizer borrowers retire, and candidate handles are released.
@@ -468,11 +473,11 @@ iree_status_t loom_serve_text_model_free_retired(
 // row/tokenizer pointers become invalid. NULL is accepted.
 iree_status_t loom_serve_text_model_free(loom_serve_text_model_t* model);
 
-// Borrowed execution device, outliving model work and asynchronous preparation.
+// Borrowed primary execution device, outliving model work and preparation.
 loom_serve_device_t* loom_serve_text_model_device(
     const loom_serve_text_model_t* model);
 
-// Borrowed storage and residency owner, independent of the execution device.
+// Borrowed primary storage owner, independent of the execution device.
 // Its pressure operations share the serialized host owner with model work.
 loom_serve_pool_t* loom_serve_text_model_pool(
     const loom_serve_text_model_t* model);
@@ -488,10 +493,31 @@ iree_status_t loom_serve_text_model_activate(loom_serve_text_model_t* model);
 iree_status_t loom_serve_text_model_deactivate(loom_serve_text_model_t* model,
                                                bool* out_complete);
 
-// Borrowed admission/retention handle. A caller can try_acquire before choosing
-// work, retaining the returned pin across invocations until release. Ordinary
-// capacity backpressure leaves all model state unchanged.
-loom_serve_residency_t* loom_serve_text_model_residency(
+// Borrowed state owner for source-root pressure callbacks. Parameter admission
+// always uses the complete residency set, not this one physical member.
+loom_serve_residency_t* loom_serve_text_model_state_residency(
+    const loom_serve_text_model_t* model);
+
+// Borrowed distinct-pool admission set. A caller may acquire it before choosing
+// work and retain its pins across invocations, releasing the whole set through
+// model_release_parameters. Model destruction invalidates the array.
+loom_serve_residency_t* const* loom_serve_text_model_residencies(
+    const loom_serve_text_model_t* model, iree_host_size_t* out_count);
+
+// Whole-model parameter policy and serialized admission ownership.
+void loom_serve_text_model_set_pinned(loom_serve_text_model_t* model,
+                                      bool pinned);
+void loom_serve_text_model_cancel_admission(loom_serve_text_model_t* model);
+void loom_serve_text_model_release_parameters(loom_serve_text_model_t* model);
+
+// True while any participating pool still has accepted history reclamation.
+bool loom_serve_text_model_is_reclaiming(const loom_serve_text_model_t* model);
+
+// Aggregate parameter observations, with each actual pool counted once. Active
+// and elastic require every member; pins and wait counters use the maximum
+// across members, not a sum of parallel events. This is a management view, not
+// a coherent physical-admission snapshot.
+loom_serve_residency_snapshot_t loom_serve_text_model_parameter_snapshot(
     const loom_serve_text_model_t* model);
 
 // Borrowed demanded parameter warmup, or NULL for cold preparation. The service

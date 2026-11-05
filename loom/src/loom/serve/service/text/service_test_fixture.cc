@@ -55,7 +55,7 @@ void SourceTextServiceTest::SetUp() {
   if (NeedsStandaloneModel()) {
     auto options = ModelOptions();
     IREE_ASSERT_OK(loom_serve_text_model_allocate(
-        device_, storage_owner_, &options, host_allocator_, &model_));
+        1, &device_, &storage_owner_, &options, host_allocator_, &model_));
   }
   auto server_options = ServerOptions();
   IREE_ASSERT_OK(loom_serve_http_server_allocate(

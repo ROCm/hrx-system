@@ -239,8 +239,7 @@ static iree_status_t loom_serve_text_reclaim_idle(
         service->completion.work != TEXT_WORK_NONE) {
       break;
     }
-    if (loom_serve_residency_cache_is_reclaiming(loom_serve_residency_cache(
-            loom_serve_text_model_residency(service->model)))) {
+    if (loom_serve_text_model_is_reclaiming(service->model)) {
       *out_result = TEXT_ADMISSION_QUEUED;
       break;
     }
@@ -733,8 +732,7 @@ iree_status_t loom_serve_text_admit_pending(loom_serve_text_service_t* service,
         const bool probe = loom_serve_text_admission_blocked(
             &service->pending.admission, service->pending.count);
         if (previous != service->pending.admission.cursor) {
-          loom_serve_residency_cancel_admission(
-              loom_serve_text_model_residency(service->model));
+          loom_serve_text_model_cancel_admission(service->model);
           memset(&service->pending.prepared, 0,
                  sizeof(service->pending.prepared));
         }

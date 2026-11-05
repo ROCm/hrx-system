@@ -46,7 +46,7 @@ void loom_serve_text_row_reset_retired(loom_serve_text_row_t* row) {
   const bool reserved = row->state->reserved_extent != 0;
   loom_serve_text_state_row_reset(row->state);
   if (reserved) {
-    loom_serve_residency_release(row->model->residency);
+    loom_serve_text_model_release_parameters(row->model);
   }
   row->has_prediction = false;
   memset(&row->transfer, 0, sizeof(row->transfer));
@@ -54,7 +54,8 @@ void loom_serve_text_row_reset_retired(loom_serve_text_row_t* row) {
 }
 
 iree_status_t loom_serve_text_row_reset(loom_serve_text_row_t* row) {
-  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(row->model->execution));
+  IREE_RETURN_IF_ERROR(loom_serve_execution_drain_all(row->model->device_count,
+                                                      row->model->executions));
   loom_serve_text_row_reset_retired(row);
   return iree_ok_status();
 }
@@ -69,11 +70,16 @@ iree_status_t loom_serve_text_row_suspend(loom_serve_text_row_t* row) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "cannot suspend an active request reservation");
   }
+  IREE_RETURN_IF_ERROR(loom_serve_execution_drain_all(row->model->device_count,
+                                                      row->model->executions));
   return loom_serve_text_state_row_suspend(row->state);
 }
 
 iree_status_t loom_serve_text_row_try_resume(loom_serve_text_row_t* row,
                                              bool* out_resumed) {
+  *out_resumed = false;
+  IREE_RETURN_IF_ERROR(loom_serve_execution_drain_all(row->model->device_count,
+                                                      row->model->executions));
   return loom_serve_text_state_row_try_resume(row->state, out_resumed);
 }
 
@@ -102,20 +108,22 @@ iree_status_t loom_serve_text_row_submit_pin(
                                      .has_prediction = row->has_prediction,
                                      .token = row->transfer.token};
   *out_checkpoint = checkpoint;
-  *out_frontier = loom_serve_execution_frontier(row->model->execution);
+  *out_frontier = loom_serve_execution_frontier(row->model->executions[0]);
   return iree_ok_status();
 }
 
 iree_status_t loom_serve_text_row_try_pin(
     loom_serve_text_row_t* row, loom_serve_text_checkpoint_t** out_checkpoint) {
   *out_checkpoint = NULL;
-  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(row->model->execution));
+  IREE_RETURN_IF_ERROR(loom_serve_execution_drain_all(row->model->device_count,
+                                                      row->model->executions));
   loom_serve_text_checkpoint_t* checkpoint = NULL;
   loom_serve_execution_frontier_t frontier;
   iree_status_t status =
       loom_serve_text_row_submit_pin(row, &checkpoint, &frontier);
-  status = iree_status_join(status,
-                            loom_serve_execution_drain(row->model->execution));
+  status = iree_status_join(
+      status, loom_serve_execution_drain_all(row->model->device_count,
+                                             row->model->executions));
   if (iree_status_is_ok(status)) {
     *out_checkpoint = checkpoint;
   }
@@ -134,6 +142,8 @@ iree_status_t loom_serve_text_row_try_restore(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "cannot replace an active request reservation");
   }
+  IREE_RETURN_IF_ERROR(loom_serve_execution_drain_all(row->model->device_count,
+                                                      row->model->executions));
   IREE_RETURN_IF_ERROR(loom_serve_text_state_row_try_restore(
       row->state, checkpoint->state, out_restored));
   if (*out_restored) {
@@ -150,7 +160,7 @@ iree_status_t loom_serve_text_row_try_restore(
 
 void loom_serve_text_row_complete_reserve(loom_serve_text_row_t* row) {
   loom_serve_text_state_row_complete_reserve(row->state);
-  loom_serve_residency_cancel_admission(row->model->residency);
+  loom_serve_text_model_cancel_admission(row->model);
 }
 
 iree_status_t loom_serve_text_row_try_reserve(
@@ -158,14 +168,16 @@ iree_status_t loom_serve_text_row_try_reserve(
     const loom_serve_text_checkpoint_t* checkpoint, iree_host_size_t extent,
     bool* out_admitted) {
   *out_admitted = false;
-  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(row->model->execution));
+  IREE_RETURN_IF_ERROR(loom_serve_execution_drain_all(row->model->device_count,
+                                                      row->model->executions));
   loom_serve_text_reserve_result_t result;
   loom_serve_execution_frontier_t frontier;
   iree_status_t status = loom_serve_text_row_submit_reserve(
       row, mode, checkpoint, extent, &result, &frontier);
-  loom_serve_residency_cancel_admission(row->model->residency);
-  status = iree_status_join(status,
-                            loom_serve_execution_drain(row->model->execution));
+  loom_serve_text_model_cancel_admission(row->model);
+  status = iree_status_join(
+      status, loom_serve_execution_drain_all(row->model->device_count,
+                                             row->model->executions));
   if (iree_status_is_ok(status) && result == LOOM_SERVE_TEXT_RESERVE_ACQUIRED) {
     loom_serve_text_row_complete_reserve(row);
     *out_admitted = true;
@@ -178,7 +190,7 @@ void loom_serve_text_row_release_reservation(loom_serve_text_row_t* row) {
     return;
   }
   loom_serve_text_state_row_release_reservation(row->state);
-  loom_serve_residency_release(row->model->residency);
+  loom_serve_text_model_release_parameters(row->model);
 }
 
 void loom_serve_text_checkpoint_retain(
@@ -207,7 +219,8 @@ iree_status_t loom_serve_text_checkpoint_submit_suspend(
   }
   IREE_RETURN_IF_ERROR(
       loom_serve_text_state_checkpoint_submit_suspend(checkpoint->state));
-  *out_frontier = loom_serve_execution_frontier(checkpoint->model->execution);
+  *out_frontier =
+      loom_serve_execution_frontier(checkpoint->model->executions[0]);
   return iree_ok_status();
 }
 
@@ -218,12 +231,15 @@ void loom_serve_text_checkpoint_complete_suspend(
 
 iree_status_t loom_serve_text_checkpoint_suspend(
     loom_serve_text_checkpoint_t* checkpoint) {
-  loom_serve_execution_t* execution = checkpoint->model->execution;
-  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(execution));
+  loom_serve_text_model_t* model = checkpoint->model;
+  IREE_RETURN_IF_ERROR(
+      loom_serve_execution_drain_all(model->device_count, model->executions));
   loom_serve_execution_frontier_t frontier;
   iree_status_t status =
       loom_serve_text_checkpoint_submit_suspend(checkpoint, &frontier);
-  status = iree_status_join(status, loom_serve_execution_drain(execution));
+  status = iree_status_join(
+      status,
+      loom_serve_execution_drain_all(model->device_count, model->executions));
   if (iree_status_is_ok(status)) {
     loom_serve_text_checkpoint_complete_suspend(checkpoint);
   }

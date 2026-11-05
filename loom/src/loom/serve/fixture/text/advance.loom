@@ -4,7 +4,14 @@ config.decl @fixture.spans : %value: index where [range(%value, 1, 2147483647)]
 
 config.decl @fixture.media : %value: index where [range(%value, 0, 1)]
 
+config.decl @fixture.executions : %value: index where [range(%value, 1, 32)]
+
+config.decl @fixture.owner : %value: index where [range(%value, 1, 31)]
+
 config.def @fixture.bias_delta = 0 : i32
+
+// Replacement programs can require private scratch without changing bindings.
+config.def @fixture.private_bytes = 0 : offset
 
 target.decl @target
 
@@ -112,7 +119,17 @@ kernel.def target(@target) @consume() {
     }
     %checkpoint_bias = view.load %bias[0] : view<1xi32> -> i32
     %bias_delta = config.get @fixture.bias_delta : i32
-    %bias_value = scalar.addi %checkpoint_bias, %bias_delta : i32
+    %initial_bias = scalar.addi %checkpoint_bias, %bias_delta : i32
+    %executions = config.get @fixture.executions : index
+    %auxiliary_count = index.sub %executions, %c1 : index
+    %word_bytes = index.constant 4 : offset
+    %tail = index.scale %spans, %word_bytes : index, offset -> offset
+    %contributions = buffer.view %residual[%tail] : buffer -> view<[%auxiliary_count]xi32>
+    %bias_value = scf.for %owner = [%c0 to %auxiliary_count step %c1](%sum = %initial_bias : i32) -> (i32) {
+      %value = view.load %contributions[%owner] : view<[%auxiliary_count]xi32> -> i32
+      %next = scalar.addi %sum, %value : i32
+      scf.yield %next : i32
+    }
     %media_mode = config.get @fixture.media : index
     %is_media = index.cmp ne, %media_mode, %c0 : index
     %token_bytes64 = scalar.constant 4 : i64
@@ -258,5 +275,61 @@ command.def public @advance_media() launch(%weights: buffer, %residual: buffer, 
   %bias = command.parameter %weights, "bias" : view<1xi32>
   kernel.launch @consume(%bias, %residual, %metadata, %origins, %arena, %tokens) : (view<1xi32>, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @select(%residual, %metadata, %origins, %arena, %outputs) : (buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+// Each owner's distinct coefficient participates in the final token. The
+// native fixture shares residual storage explicitly across execution devices.
+func.def @contribution_offset() -> (offset) {
+  %rows = config.get @fixture.spans : index
+  %owner = config.get @fixture.owner : index
+  %c1 = index.constant 1 : index
+  %relative = index.sub %owner, %c1 : index
+  %slot = index.add %rows, %relative : index
+  %word = index.constant 4 : offset
+  %offset = index.scale %slot, %word : index, offset -> offset
+  func.return %offset : offset
+}
+
+kernel.def target(@target) @contribution() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%bias: view<1xi32>, %residual: buffer) {
+  %offset = func.call @contribution_offset() : () -> (offset)
+  %output = buffer.view %residual[%offset] : buffer -> view<1xi32>
+  %owner = config.get @fixture.owner : index
+  %c1 = index.constant 1 : index
+  %coefficient = index.add %owner, %c1 : index
+  %coefficient32 = index.cast %coefficient : index to i32
+  %value = view.load %bias[0] : view<1xi32> -> i32
+  %weighted = scalar.muli %value, %coefficient32 : i32
+  view.store %weighted, %output[0] : i32, view<1xi32>
+  kernel.return
+}
+
+kernel.def target(@target) @relay() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%temporary: buffer, %residual: buffer) {
+  %offset = func.call @contribution_offset() : () -> (offset)
+  %input = buffer.view %temporary[%offset] : buffer -> view<1xi32>
+  %output = buffer.view %residual[%offset] : buffer -> view<1xi32>
+  %value = view.load %input[0] : view<1xi32> -> i32
+  view.store %value, %output[0] : i32, view<1xi32>
+  kernel.return
+}
+
+command.def public @contribute() launch(%weights: buffer, %residual: buffer) {
+  %bias = command.parameter %weights, "bias" : view<1xi32>
+  %bytes = config.get @fixture.private_bytes : offset
+  %c0 = index.constant 0 : offset
+  %private = index.cmp ne, %bytes, %c0 : offset
+  scf.if %private {
+    %temporary = buffer.alloca<global> align(256) %bytes : buffer
+    kernel.launch @contribution(%bias, %temporary) : (view<1xi32>, buffer)
+    kernel.launch @relay(%temporary, %residual) : (buffer, buffer)
+  } else {
+    kernel.launch @contribution(%bias, %residual) : (view<1xi32>, buffer)
+  }
   command.return
 }

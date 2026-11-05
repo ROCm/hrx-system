@@ -68,8 +68,8 @@ TEST_F(SourceEpochUploadTest, LivePacketsPreserveUnusedHostAndDeviceCapacity) {
                   .pattern_length = sizeof(device_canary_),
               },
       };
-      IREE_ASSERT_OK(loom_serve_execution_transfer(model_->execution, 1, &fill,
-                                                   &completion));
+      IREE_ASSERT_OK(loom_serve_execution_transfer(model_->executions[0], 1,
+                                                   &fill, &completion));
     }
     std::array<std::vector<int32_t>, 4> inputs;
     std::array<loom_serve_text_span_t, 4> spans;
@@ -102,10 +102,11 @@ TEST_F(SourceEpochUploadTest, LivePacketsPreserveUnusedHostAndDeviceCapacity) {
                   .length = downloaded_[slot].size(),
               },
       };
-      IREE_ASSERT_OK(loom_serve_execution_transfer(model_->execution, 1,
+      IREE_ASSERT_OK(loom_serve_execution_transfer(model_->executions[0], 1,
                                                    &download, &completion));
     }
-    IREE_ASSERT_OK(loom_serve_execution_wait(model_->execution, completion));
+    IREE_ASSERT_OK(
+        loom_serve_execution_wait(model_->executions[0], completion));
     for (size_t slot = 0; slot < host.size(); ++slot) {
       EXPECT_EQ(std::memcmp(downloaded_[slot].data(), host[slot].data,
                             live_lengths[slot]),

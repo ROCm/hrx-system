@@ -147,7 +147,7 @@ iree_status_t loom_serve_text_model_submit_resize(
     }
   }
   if (iree_status_is_ok(status)) {
-    *out_frontier = loom_serve_execution_frontier(model->execution);
+    *out_frontier = loom_serve_execution_frontier(model->executions[0]);
   }
   IREE_RETURN_AND_END_ZONE(z0, status);
 }

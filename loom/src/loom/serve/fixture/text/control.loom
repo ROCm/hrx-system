@@ -1,3 +1,12 @@
+// Exercises retirement after accepted peer work when a source call fails.
+config.def @fixture.fail_epoch = false : i1
+
+func.decl import("runner") @execute_1(%stage: i32, %buffer: hal.buffer) -> (i64)
+
+func.decl import("runner") @fence(%execution: i32, %value: i64) -> (hal.fence)
+
+func.decl import("runner") @join(%execution: i32, %ready: hal.fence)
+
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
 func.decl import("input") @encode(%text: buffer, %flags: i32, %capacity: i64) -> (buffer, i64)
@@ -34,7 +43,7 @@ func.def @equal(%a: buffer, %b: buffer) -> (i1) {
   func.return %same : i1
 }
 
-func.def @join(%a: buffer, %b: buffer) -> (buffer) {
+func.def @concatenate(%a: buffer, %b: buffer) -> (buffer) {
   %c0 = index.constant 0 : offset
   %a_length = buffer.length %a
   %b_length = buffer.length %b
@@ -349,7 +358,7 @@ func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %pa
   } else {
     scf.yield %content, %empty, %c0_i64 : buffer, buffer, i64
   }
-  %fragment = func.call @join(%ordered, %suffix) : (buffer, buffer) -> (buffer)
+  %fragment = func.call @concatenate(%ordered, %suffix) : (buffer, buffer) -> (buffer)
   func.return %fragment, %state, %plan, %count : buffer, i64, buffer, i64
 }
 
@@ -457,7 +466,7 @@ func.def public @complete_text(%prompt: buffer, %response: buffer, %content: buf
   %result = scf.if %empty -> (buffer) {
     scf.yield %prompt : buffer
   } else {
-    %joined = func.call @join(%prompt, %response) : (buffer, buffer) -> (buffer)
+    %joined = func.call @concatenate(%prompt, %response) : (buffer, buffer) -> (buffer)
     scf.yield %joined : buffer
   }
   %reusable = scalar.constant 1 : i32
@@ -721,7 +730,26 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
   %c0 = scalar.constant 0 : i32
   %has_media = scalar.cmpi ne, %media_count, %c0 : i32
   %stage = scf.select %has_media, %media_stage, %text_stage : i32
+  %owner_origin = index.constant 128 : offset
+  %header = buffer.view %control_state[%owner_origin] : buffer -> view<1xi32>
+  %execution_count = view.load %header[0] : view<1xi32> -> i32
+  %bounded_executions = scalar.assume %execution_count [range(%execution_count, 1, 32)] : i32
+  %execution_extent = index.cast %bounded_executions : i32 to index
+  %owners = buffer.view %control_state[%owner_origin] : buffer -> view<[%execution_extent]xi32>
+  %c1 = index.constant 1 : index
+  scf.for %owner = [%c1 to %execution_extent step %c1] {
+    %auxiliary = view.load %owners[%owner] : view<[%execution_extent]xi32> -> i32
+    %work = func.call @execute_1(%auxiliary, %residual) : (i32, hal.buffer) -> (i64)
+    %owner32 = index.cast %owner : index to i32
+    %ready = func.call @fence(%owner32, %work) : (i32, i64) -> (hal.fence)
+    func.call @join(%c0, %ready) : (i32, hal.fence)
+  }
   %completion = func.call @execute_6(%stage, %residual, %metadata, %origins, %state, %tokens, %outputs) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+  %fail = config.get @fixture.fail_epoch : i1
+  scf.if %fail {
+    %error = buffer.constant utf8("fixture rejects epoch after accepted work") : buffer
+    func.call @require(%c0, %error) : (i32, buffer)
+  }
   %c0_i64 = scalar.constant 0 : i64
   %c4_i64 = scalar.constant 4 : i64
   %count64 = scalar.extui %span_count : i32 to i64
@@ -730,9 +758,13 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
   func.return %completion : i64
 }
 
-func.decl @fixture_storage(%maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64) -> (buffer, buffer, buffer, buffer, buffer)
+func.decl @fixture_storage(%executions: i64, %maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64) -> (buffer, buffer, buffer, buffer, buffer)
 
 func.def public @resize_state(%state: buffer, %rows: i64) -> (buffer, buffer, buffer, buffer, buffer, buffer) {
+  %owner_origin = index.constant 128 : offset
+  %owners = buffer.view %state[%owner_origin] : buffer -> view<1xi32>
+  %execution_count = view.load %owners[0] : view<1xi32> -> i32
+  %executions64 = scalar.extui %execution_count : i32 to i64
   %layout_origin = index.constant 88 : offset
   %layout = buffer.view %state[%layout_origin] : buffer -> view<5xi64>
   %maximum = view.load %layout[0] : view<5xi64> -> i64
@@ -740,6 +772,6 @@ func.def public @resize_state(%state: buffer, %rows: i64) -> (buffer, buffer, bu
   %context = view.load %layout[2] : view<5xi64> -> i64
   %pool = view.load %layout[3] : view<5xi64> -> i64
   %pins = view.load %layout[4] : view<5xi64> -> i64
-  %allocations, %views, %origins, %draft, %geometry = func.call @fixture_storage(%maximum, %span_capacity, %context, %pool, %rows, %pins) : (i64, i64, i64, i64, i64, i64) -> (buffer, buffer, buffer, buffer, buffer)
+  %allocations, %views, %origins, %draft, %geometry = func.call @fixture_storage(%executions64, %maximum, %span_capacity, %context, %pool, %rows, %pins) : (i64, i64, i64, i64, i64, i64, i64) -> (buffer, buffer, buffer, buffer, buffer)
   func.return %state, %allocations, %views, %origins, %draft, %geometry : buffer, buffer, buffer, buffer, buffer, buffer
 }

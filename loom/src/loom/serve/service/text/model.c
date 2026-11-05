@@ -27,15 +27,16 @@
 #include "loom/serve/service/text/stages.h"
 #include "loom/serve/service/text/state.h"
 #include "loom/serve/service/text/storage.h"
-#include "loom/serve/service/text/variant.h"
 
 void loom_serve_text_model_retire(loom_serve_text_model_t* model,
                                   void (*wake)(void* user_data),
                                   void* user_data) {
   loom_serve_text_warmup_set_observer(model->warmup, wake, user_data);
-  if (model->execution) {
-    loom_serve_execution_set_retirement_observer(model->execution, wake,
-                                                 user_data);
+  for (uint32_t i = 0; i < model->device_count; ++i) {
+    if (model->executions[i]) {
+      loom_serve_execution_set_retirement_observer(model->executions[i], wake,
+                                                   user_data);
+    }
   }
   for (iree_host_size_t i = 0; i < model->parameters.count; ++i) {
     loom_serve_weights_set_retirement_observer(model->parameters.plans[i], wake,
@@ -58,13 +59,16 @@ bool loom_serve_text_model_is_retired(loom_serve_text_model_t* model) {
     return true;
   }
   loom_serve_text_warmup_poll(model->warmup);
-  bool retired =
-      !loom_serve_text_warmup_is_pending(model->warmup) &&
-      (!model->execution || loom_serve_execution_is_retired(model->execution));
+  bool retired = !loom_serve_text_warmup_is_pending(model->warmup);
+  for (uint32_t i = 0; i < model->device_count; ++i) {
+    retired &= !model->executions[i] ||
+               loom_serve_execution_is_retired(model->executions[i]);
+  }
   for (iree_host_size_t i = 0; i < model->parameters.count; ++i) {
     retired &= loom_serve_weights_is_retired(model->parameters.plans[i]);
   }
-  return retired && loom_serve_text_state_is_retired(&model->state);
+  retired &= loom_serve_text_state_is_retired(&model->state);
+  return retired;
 }
 
 iree_status_t loom_serve_text_model_free_retired(
@@ -75,10 +79,12 @@ iree_status_t loom_serve_text_model_free_retired(
   IREE_ASSERT(loom_serve_text_model_is_retired(model));
   iree_status_t warmup_status = loom_serve_text_warmup_free(model->warmup);
   model->warmup = NULL;
-  loom_serve_residency_free(model->residency);
-  model->residency = NULL;
-  loom_serve_residency_group_free(model->parameter_group);
-  model->parameter_group = NULL;
+  for (uint32_t i = 0; i < model->residency.count; ++i) {
+    loom_serve_residency_free(model->residency.values[i]);
+    model->residency.values[i] = NULL;
+    loom_serve_residency_group_free(model->residency.groups[i]);
+    model->residency.groups[i] = NULL;
+  }
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < model->parameters.count && iree_status_is_ok(status); ++i) {
@@ -102,14 +108,16 @@ iree_status_t loom_serve_text_model_free_retired(
   iree_allocator_free(model->host_allocator, model->stage_bindings);
   iree_allocator_free(model->host_allocator, model->parameters.plans);
   iree_allocator_free(model->host_allocator, model->parameters.sources);
-  loom_serve_jit_release(model->jit);
   loom_serve_text_media_epoch_deinitialize(&model->invocation.media);
   loom_serve_text_control_deinitialize(&model->control);
   iree_allocator_free(model->host_allocator, model->rows);
   iree_arena_deinitialize(&model->row_records);
   iree_allocator_free(model->host_allocator, model->invocation.row_indices);
   iree_allocator_free(model->host_allocator, model->checkpoints);
-  loom_serve_execution_release(model->execution);
+  for (uint32_t i = 0; i < model->device_count; ++i) {
+    loom_serve_jit_release(model->compiler.catalogs[i]);
+    loom_serve_execution_release(model->executions[i]);
+  }
   loom_serve_text_source_deinitialize(&model->source);
   iree_allocator_free(model->host_allocator, model);
   return warmup_status;
@@ -121,9 +129,8 @@ iree_status_t loom_serve_text_model_free(loom_serve_text_model_t* model) {
   }
   loom_serve_text_model_retire(model, NULL, NULL);
   loom_serve_text_warmup_await(model->warmup);
-  iree_status_t status = model->execution
-                             ? loom_serve_execution_drain(model->execution)
-                             : iree_ok_status();
+  iree_status_t status =
+      loom_serve_execution_drain_all(model->device_count, model->executions);
   for (iree_host_size_t i = 0; i < model->parameters.count; ++i) {
     status = iree_status_join(status, loom_serve_weights_await_retirement(
                                           model->parameters.plans[i]));
@@ -134,38 +141,12 @@ iree_status_t loom_serve_text_model_free(loom_serve_text_model_t* model) {
 
 loom_serve_device_t* loom_serve_text_model_device(
     const loom_serve_text_model_t* model) {
-  return model->device_owner;
+  return model->devices[0];
 }
 
 loom_serve_pool_t* loom_serve_text_model_pool(
     const loom_serve_text_model_t* model) {
-  return model->pool;
-}
-
-iree_status_t loom_serve_text_model_compile_variant_async(
-    loom_serve_text_model_t* model, const loom_serve_sources_t* sources,
-    const loomc_sanitizer_options_t* sanitizer,
-    loom_serve_variant_completion_fn_t completion, void* user_data) {
-  return loom_serve_text_variant_compile_async(
-      model, model->device_owner, model->source.preparation,
-      model->source.shared_stage_count, model->stage_count, model->stages,
-      model->command_mode, sources, sanitizer, completion, user_data,
-      model->host_allocator);
-}
-
-iree_status_t loom_serve_text_model_select_variant(
-    loom_serve_text_model_t* model, const loom_serve_text_variant_t* variant) {
-  if (variant) {
-    return loom_serve_text_variant_bind(
-        variant, model, model->control.native_module, model->residency);
-  }
-  IREE_RETURN_IF_ERROR(loom_serve_residency_check_private_peak(
-      model->residency, model->stage_workspace_bytes));
-  IREE_RETURN_IF_ERROR(loom_serve_module_bind_stages(
-      model->control.native_module, model->stage_count, model->stage_bindings));
-  loom_serve_residency_set_private_peak(model->residency,
-                                        model->stage_workspace_bytes);
-  return iree_ok_status();
+  return model->pools[0];
 }
 
 loom_serve_text_row_t* loom_serve_text_model_row(loom_serve_text_model_t* model,
@@ -180,17 +161,94 @@ loom_runtime_storage_statistics_t loom_serve_text_model_memory_statistics(
 
 loom_runtime_storage_usage_t loom_serve_text_model_weight_statistics(
     const loom_serve_text_model_t* model) {
-  return loom_serve_residency_group_statistics(model->parameter_group);
+  loom_serve_memory_usage_t usage = {0};
+  for (uint32_t i = 0; i < model->residency.count; ++i) {
+    const loom_serve_memory_usage_t owner =
+        loom_serve_residency_group_statistics(model->residency.groups[i]);
+    usage.reserved_bytes += owner.reserved_bytes;
+    usage.committed_bytes += owner.committed_bytes;
+    usage.pending_bytes += owner.pending_bytes;
+    usage.releasing_bytes += owner.releasing_bytes;
+    usage.released_bytes += owner.released_bytes;
+  }
+  return usage;
 }
 
 loom_runtime_parameter_activity_t loom_serve_text_model_parameter_activity(
     const loom_serve_text_model_t* model) {
-  return loom_serve_residency_group_activity(model->parameter_group);
+  loom_serve_weight_activity_t activity = {0};
+  for (uint32_t i = 0; i < model->residency.count; ++i) {
+    const loom_serve_weight_activity_t owner =
+        loom_serve_residency_group_activity(model->residency.groups[i]);
+    activity.activations += owner.activations;
+    activity.deactivations += owner.deactivations;
+    activity.read_bytes += owner.read_bytes;
+    activity.prepared_bytes += owner.prepared_bytes;
+    activity.groups += owner.groups;
+  }
+  return activity;
 }
 
-loom_serve_residency_t* loom_serve_text_model_residency(
+loom_serve_residency_t* loom_serve_text_model_state_residency(
     const loom_serve_text_model_t* model) {
-  return model->residency;
+  return model->residency.values[0];
+}
+
+loom_serve_residency_t* const* loom_serve_text_model_residencies(
+    const loom_serve_text_model_t* model, iree_host_size_t* out_count) {
+  *out_count = model->residency.count;
+  return model->residency.values;
+}
+
+loom_serve_residency_snapshot_t loom_serve_text_model_parameter_snapshot(
+    const loom_serve_text_model_t* model) {
+  loom_serve_residency_snapshot_t snapshot = {.active = true, .elastic = true};
+  for (uint32_t i = 0; i < model->residency.count; ++i) {
+    const loom_serve_residency_snapshot_t owner =
+        loom_serve_residency_snapshot(model->residency.values[i]);
+    snapshot.active &= owner.active;
+    snapshot.elastic &= owner.elastic;
+    snapshot.pin_count = iree_max(snapshot.pin_count, owner.pin_count);
+    snapshot.admission.waiting |= owner.admission.waiting;
+    snapshot.admission.count =
+        iree_max(snapshot.admission.count, owner.admission.count);
+    snapshot.admission.duration_ns =
+        iree_max(snapshot.admission.duration_ns, owner.admission.duration_ns);
+    snapshot.admission.age_ns =
+        iree_max(snapshot.admission.age_ns, owner.admission.age_ns);
+  }
+  snapshot.memory = loom_serve_text_model_weight_statistics(model);
+  snapshot.activity = loom_serve_text_model_weight_activity(model);
+  return snapshot;
+}
+
+void loom_serve_text_model_set_pinned(loom_serve_text_model_t* model,
+                                      bool pinned) {
+  for (uint32_t i = 0; i < model->residency.count; ++i) {
+    loom_serve_residency_set_pinned(model->residency.values[i], pinned);
+  }
+}
+
+void loom_serve_text_model_cancel_admission(loom_serve_text_model_t* model) {
+  for (uint32_t i = 0; i < model->residency.count; ++i) {
+    loom_serve_residency_cancel_admission(model->residency.values[i]);
+  }
+}
+
+void loom_serve_text_model_release_parameters(loom_serve_text_model_t* model) {
+  for (uint32_t i = 0; i < model->residency.count; ++i) {
+    loom_serve_residency_release(model->residency.values[i]);
+  }
+}
+
+bool loom_serve_text_model_is_reclaiming(const loom_serve_text_model_t* model) {
+  for (uint32_t i = 0; i < model->residency.count; ++i) {
+    if (loom_serve_residency_cache_is_reclaiming(
+            loom_serve_residency_cache(model->residency.values[i]))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 loom_serve_text_warmup_t* loom_serve_text_model_warmup(
@@ -199,12 +257,14 @@ loom_serve_text_warmup_t* loom_serve_text_model_warmup(
 }
 
 iree_status_t loom_serve_text_model_activate(loom_serve_text_model_t* model) {
-  return loom_serve_residency_activate(1, &model->residency);
+  return loom_serve_residency_activate(model->residency.count,
+                                       model->residency.values);
 }
 
 iree_status_t loom_serve_text_model_deactivate(loom_serve_text_model_t* model,
                                                bool* out_complete) {
-  return loom_serve_residency_deactivate(model->residency, out_complete);
+  return loom_serve_residency_deactivate(model->residency.count,
+                                         model->residency.values, out_complete);
 }
 
 const iree_tokenizer_t* loom_serve_text_model_tokenizer(
@@ -294,7 +354,7 @@ iree_status_t loom_serve_text_model_submit_trim(
   *out_frontier = (loom_serve_execution_frontier_t){0};
   IREE_RETURN_IF_ERROR(
       loom_serve_text_state_submit_trim(&model->state, out_result));
-  *out_frontier = loom_serve_execution_frontier(model->execution);
+  *out_frontier = loom_serve_execution_frontier(model->executions[0]);
   return iree_ok_status();
 }
 
@@ -304,26 +364,68 @@ iree_status_t loom_serve_text_model_complete_trim(
   *out_frontier = (loom_serve_execution_frontier_t){0};
   IREE_RETURN_IF_ERROR(
       loom_serve_text_state_complete_trim(&model->state, result, out_complete));
-  *out_frontier = loom_serve_execution_frontier(model->execution);
+  *out_frontier = loom_serve_execution_frontier(model->executions[0]);
   return iree_ok_status();
 }
 
 iree_status_t loom_serve_text_model_trim(
     loom_serve_text_model_t* model, loom_serve_text_trim_result_t* out_result) {
-  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(model->execution));
+  IREE_RETURN_IF_ERROR(
+      loom_serve_execution_drain_all(model->device_count, model->executions));
   loom_serve_execution_frontier_t frontier;
   iree_status_t status =
       loom_serve_text_model_submit_trim(model, out_result, &frontier);
   bool complete = false;
   do {
-    status =
-        iree_status_join(status, loom_serve_execution_drain(model->execution));
+    status = iree_status_join(
+        status,
+        loom_serve_execution_drain_all(model->device_count, model->executions));
     if (iree_status_is_ok(status)) {
       status = loom_serve_text_model_complete_trim(model, out_result, &complete,
                                                    &frontier);
     }
   } while (iree_status_is_ok(status) && !complete);
   return status;
+}
+
+// Snapshot all timelines before inserting any dependency. A snapshot taken
+// after a peer imports an earlier one could close a dependency cycle.
+static iree_hal_semaphore_list_t loom_serve_text_dependencies(
+    loom_serve_text_model_t* model) {
+  for (uint32_t i = 0; i < model->device_count; ++i) {
+    const loom_serve_execution_frontier_t frontier =
+        loom_serve_execution_frontier(model->executions[i]);
+    memcpy(model->dependencies.semaphores + 2 * i, frontier.semaphores,
+           sizeof(frontier.semaphores));
+    memcpy(model->dependencies.values + 2 * i, frontier.values,
+           sizeof(frontier.values));
+  }
+  return (iree_hal_semaphore_list_t){2 * model->device_count,
+                                     model->dependencies.semaphores,
+                                     model->dependencies.values};
+}
+
+static iree_status_t loom_serve_text_begin_invocation(
+    loom_serve_text_model_t* model) {
+  if (model->device_count == 1) {
+    return iree_ok_status();
+  }
+  const iree_hal_semaphore_list_t waits = loom_serve_text_dependencies(model);
+  iree_status_t status = iree_ok_status();
+  for (uint32_t i = 0; i < model->device_count && iree_status_is_ok(status);
+       ++i) {
+    status = loom_serve_execution_barrier(model->executions[i], waits);
+  }
+  return status;
+}
+
+static iree_status_t loom_serve_text_end_invocation(
+    loom_serve_text_model_t* model) {
+  if (model->device_count == 1) {
+    return iree_ok_status();
+  }
+  return loom_serve_execution_barrier(model->executions[0],
+                                      loom_serve_text_dependencies(model));
 }
 
 static iree_status_t loom_serve_text_invoke(loom_serve_text_model_t* model,
@@ -341,7 +443,9 @@ static iree_status_t loom_serve_text_submit_step(
     loom_serve_text_row_t* row, int32_t initialize,
     loom_serve_execution_frontier_t* out_frontier) {
   loom_serve_text_model_t* model = row->model;
-  IREE_RETURN_IF_ERROR(loom_serve_residency_acquire(1, &model->residency));
+  IREE_RETURN_IF_ERROR(loom_serve_residency_acquire(model->residency.count,
+                                                    model->residency.values));
+  IREE_RETURN_IF_ERROR(loom_serve_text_begin_invocation(model));
   iree_vm_variant_t arguments[TEXT_BINDING_COUNT + 4] = {
       iree_vm_buffer_variant_from_ptr_borrowed(&model->source.vm_types,
                                                model->source.control_state),
@@ -365,6 +469,9 @@ static iree_status_t loom_serve_text_submit_step(
     row->step.source_position = (uint32_t)source_position;
   }
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_text_end_invocation(model);
+  }
   const iree_hal_transfer_operation_t downloads[] = {
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
        .download = {.source_buffer = row->state->buffers[TEXT_TOKENS],
@@ -377,11 +484,12 @@ static iree_status_t loom_serve_text_submit_step(
   };
   uint64_t completion = 0;
   if (iree_status_is_ok(status)) {
-    status = loom_serve_execution_feedback(
-        model->execution, IREE_ARRAYSIZE(downloads), downloads, &completion);
+    status = loom_serve_execution_feedback(model->executions[0],
+                                           IREE_ARRAYSIZE(downloads), downloads,
+                                           &completion);
   }
   if (iree_status_is_ok(status)) {
-    *out_frontier = loom_serve_execution_frontier(model->execution);
+    *out_frontier = loom_serve_execution_frontier(model->executions[0]);
   }
   return status;
 }
@@ -437,7 +545,7 @@ static iree_status_t loom_serve_text_publish_state_bindings(
                    .length = origins.data_length},
     };
     uint64_t completion = 0;
-    IREE_RETURN_IF_ERROR(loom_serve_execution_transfer(model->execution, 1,
+    IREE_RETURN_IF_ERROR(loom_serve_execution_transfer(model->executions[0], 1,
                                                        &upload, &completion));
   }
   model->state.recurrent.dirty_count = 0;
@@ -678,11 +786,12 @@ iree_status_t loom_serve_text_model_submit_epoch(
   }
   if (iree_status_is_ok(status) && media.plan) {
     status = loom_serve_execution_reserve_workspace(
-        model->execution, media.device_length,
+        model->executions[0], media.device_length,
         LOOM_SERVE_TEXT_MEDIA_PACKET_FEATURE_ALIGNMENT);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_residency_acquire(1, &model->residency);
+    status = loom_serve_residency_acquire(model->residency.count,
+                                          model->residency.values);
   }
   if (!iree_status_is_ok(status)) {
     loom_serve_text_media_epoch_deinitialize(&media);
@@ -781,7 +890,7 @@ iree_status_t loom_serve_text_model_submit_epoch(
         .allocation_size = invocation_media->device_length,
         .min_alignment = LOOM_SERVE_TEXT_MEDIA_PACKET_FEATURE_ALIGNMENT,
     };
-    status = loom_serve_execution_alloca(model->execution, 1, &request,
+    status = loom_serve_execution_alloca(model->executions[0], 1, &request,
                                          &dynamic_input);
   }
   iree_hal_buffer_t* device_input =
@@ -797,14 +906,14 @@ iree_status_t loom_serve_text_model_submit_epoch(
     };
     iree_hal_buffer_t* targets[] = {model->state.epoch.buffers[1],
                                     device_input};
-    status = loom_serve_text_epoch_upload(model->execution, transfer_ranges,
+    status = loom_serve_text_epoch_upload(model->executions[0], transfer_ranges,
                                           packets, targets);
   }
   iree_vm_buffer_release(transfer_plan);
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(encode_results));
   if (iree_status_is_ok(status) && has_media_packet) {
     status = loom_serve_text_media_epoch_enqueue(
-        invocation_media, model->execution, device_input, &completion);
+        invocation_media, model->executions[0], device_input, &completion);
   }
   iree_hal_buffer_t* buffers[] = {
       model->state.residual,
@@ -841,17 +950,23 @@ iree_status_t loom_serve_text_model_submit_epoch(
   }
   iree_vm_variant_t results[1] = {0};
   if (iree_status_is_ok(status)) {
+    status = loom_serve_text_begin_invocation(model);
+  }
+  if (iree_status_is_ok(status)) {
     status = loom_serve_text_invoke(model, model->control.epoch_step,
                                     iree_vm_variant_span_from_array(arguments),
                                     iree_vm_variant_span_from_array(results));
   }
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_text_end_invocation(model);
+  }
   if (iree_status_is_ok(status) && capture) {
-    status = loom_serve_text_capture_submit(capture, model->execution,
+    status = loom_serve_text_capture_submit(capture, model->executions[0],
                                             model->state.residual);
   }
   if (iree_status_is_ok(status) && dynamic_input) {
-    status = loom_serve_execution_dealloca(model->execution, dynamic_input,
+    status = loom_serve_execution_dealloca(model->executions[0], dynamic_input,
                                            &completion);
   }
   iree_hal_buffer_release(dynamic_input);
@@ -860,7 +975,7 @@ iree_status_t loom_serve_text_model_submit_epoch(
       *out_capture = capture;
       capture = NULL;
     }
-    *out_frontier = loom_serve_execution_frontier(model->execution);
+    *out_frontier = loom_serve_execution_frontier(model->executions[0]);
   }
   loom_serve_text_capture_release(capture);
   return status;
@@ -926,7 +1041,7 @@ iree_status_t loom_serve_text_model_complete_epoch(
   }
   model->invocation.span_count = 0;
   loom_serve_text_media_epoch_deinitialize(&model->invocation.media);
-  loom_serve_residency_release(model->residency);
+  loom_serve_text_model_release_parameters(model);
   return iree_ok_status();
 }
 
@@ -940,7 +1055,8 @@ static iree_status_t loom_serve_text_epoch(
   IREE_RETURN_IF_ERROR(loom_serve_text_model_submit_epoch(
       model, shape_index, span_count, spans, output_limits, continuation, NULL,
       &frontier));
-  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(model->execution));
+  IREE_RETURN_IF_ERROR(
+      loom_serve_execution_drain_all(model->device_count, model->executions));
   return loom_serve_text_model_complete_epoch(model, out_results);
 }
 
@@ -1018,7 +1134,7 @@ iree_status_t loom_serve_text_row_submit_prefill(
   };
   uint64_t completion = 0;
   iree_status_t status = loom_serve_execution_transfer(
-      model->execution, IREE_ARRAYSIZE(uploads), uploads, &completion);
+      model->executions[0], IREE_ARRAYSIZE(uploads), uploads, &completion);
   if (iree_status_is_ok(status)) {
     status = loom_serve_text_submit_step(row, 1, out_frontier);
   }
@@ -1074,7 +1190,7 @@ iree_status_t loom_serve_text_row_submit_decode(
   };
   uint64_t completion = 0;
   iree_status_t status = loom_serve_execution_transfer(
-      row->model->execution, IREE_ARRAYSIZE(uploads), uploads, &completion);
+      row->model->executions[0], IREE_ARRAYSIZE(uploads), uploads, &completion);
   if (iree_status_is_ok(status)) {
     status = loom_serve_text_submit_step(row, 0, out_frontier);
   }
@@ -1090,7 +1206,7 @@ iree_status_t loom_serve_text_row_complete_step(loom_serve_text_row_t* row) {
     row->state->position += row->step.token_count;
     row->state->source_position = row->step.source_position;
     row->has_prediction = true;
-    loom_serve_residency_release(model->residency);
+    loom_serve_text_model_release_parameters(model);
   }
   const iree_duration_t duration = iree_time_now() - row->step.start_time;
   if (row->step.kind == TEXT_STEP_PREFILL) {
@@ -1110,13 +1226,15 @@ iree_status_t loom_serve_text_row_prefill(loom_serve_text_row_t* row,
   loom_serve_execution_frontier_t frontier;
   IREE_RETURN_IF_ERROR(
       loom_serve_text_row_submit_prefill(row, count, token_ids, &frontier));
-  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(row->model->execution));
+  IREE_RETURN_IF_ERROR(loom_serve_execution_drain_all(row->model->device_count,
+                                                      row->model->executions));
   return loom_serve_text_row_complete_step(row);
 }
 
 iree_status_t loom_serve_text_row_decode(loom_serve_text_row_t* row) {
   loom_serve_execution_frontier_t frontier;
   IREE_RETURN_IF_ERROR(loom_serve_text_row_submit_decode(row, &frontier));
-  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(row->model->execution));
+  IREE_RETURN_IF_ERROR(loom_serve_execution_drain_all(row->model->device_count,
+                                                      row->model->executions));
   return loom_serve_text_row_complete_step(row);
 }

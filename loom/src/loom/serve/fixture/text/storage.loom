@@ -10,7 +10,7 @@ func.def @allocation(%records: buffer, %slot: index, %bytes: i64, %clear: i64) {
 }
 
 // KV is a stable prefix; private views and recurrent slots grow by appending.
-func.def public @fixture_storage(%maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64) -> (buffer, buffer, buffer, buffer, buffer) {
+func.def public @fixture_storage(%executions: i64, %maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64) -> (buffer, buffer, buffer, buffer, buffer) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -54,7 +54,10 @@ func.def public @fixture_storage(%maximum: i64, %span_capacity: i64, %context: i
   scf.for %i = [%c0 to %allocation_count step %c1] {
     func.call @allocation(%allocations, %i, %c0_i64, %c0_i64) : (buffer, index, i64, i64)
   }
-  %residual_bytes = scalar.muli %span_capacity, %c4_i64 : i64
+  %auxiliary_count = scalar.subi %executions, %c1_i64 : i64
+  %residual_words = scalar.addi %span_capacity, %auxiliary_count : i64
+  %residual_bytes = scalar.muli %residual_words, %c4_i64 : i64
+  %output_bytes = scalar.muli %span_capacity, %c4_i64 : i64
   %header_bytes = scalar.constant 16 : i64
   %record_bytes = scalar.constant 36 : i64
   %plan_bytes = scalar.muli %span_capacity, %record_bytes : i64
@@ -68,7 +71,7 @@ func.def public @fixture_storage(%maximum: i64, %span_capacity: i64, %context: i
   func.call @allocation(%allocations, %c2, %metadata_bytes, %c0_i64) : (buffer, index, i64, i64)
   func.call @allocation(%allocations, %c3, %table_bytes, %c0_i64) : (buffer, index, i64, i64)
   func.call @allocation(%allocations, %c4, %token_bytes, %c0_i64) : (buffer, index, i64, i64)
-  func.call @allocation(%allocations, %c5, %residual_bytes, %c0_i64) : (buffer, index, i64, i64)
+  func.call @allocation(%allocations, %c5, %output_bytes, %c0_i64) : (buffer, index, i64, i64)
 
   %view_stride = index.constant 64 : offset
   %view_bytes = index.scale %row_count, %view_stride : index, offset -> offset

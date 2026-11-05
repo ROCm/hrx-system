@@ -71,9 +71,11 @@ typedef struct loom_serve_text_source_t {
 // pool mutation occurs. Option views are borrowed only through this call;
 // source-returned state may retain its own copied inputs.
 // jit supplies the source grammar, model-local report, and immutable VM cache.
+// execution_count bounds the source-selected deployment ordinals.
 iree_status_t loom_serve_text_source_initialize(
-    loom_serve_jit_t* jit, const loom_serve_text_options_t* options,
-    iree_allocator_t host_allocator, loom_serve_text_source_t* out_source,
+    loom_serve_jit_t* jit, uint32_t execution_count,
+    const loom_serve_text_options_t* options, iree_allocator_t host_allocator,
+    loom_serve_text_source_t* out_source,
     loom_serve_text_storage_t* out_storage);
 
 // Compiles control bytecode after source initialization. Native compilation and

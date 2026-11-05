@@ -65,7 +65,7 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
     options.pool_capacity = 4 * options.context_capacity;
     loom_serve_text_model_t* source = nullptr;
     IREE_ASSERT_OK(loom_serve_text_model_allocate(
-        device_, storage_owner_, &options, host_allocator_, &source));
+        1, &device_, &storage_owner_, &options, host_allocator_, &source));
     const auto release_model = [](loom_serve_text_model_t* model) {
       IREE_EXPECT_OK(loom_serve_text_model_free(model));
     };
@@ -314,7 +314,7 @@ TEST_F(ElasticTextServiceTest,
     options.cache_limit_bytes = uint64_t{capacity} * sizeof(int32_t);
     loom_serve_text_model_t* source = nullptr;
     IREE_ASSERT_OK(loom_serve_text_model_allocate(
-        device_, storage_owner_, &options, host_allocator_, &source));
+        1, &device_, &storage_owner_, &options, host_allocator_, &source));
     const auto release_model = [](loom_serve_text_model_t* model) {
       IREE_EXPECT_OK(loom_serve_text_model_free(model));
     };
@@ -378,7 +378,7 @@ TEST_F(ElasticTextServiceTest, TrimPreservesSparseCacheWithoutPhysicalSavings) {
     options.pool_capacity = slab_size / 2;
     loom_serve_text_model_t* sparse = nullptr;
     IREE_ASSERT_OK(loom_serve_text_model_allocate(
-        device_, storage_owner_, &options, host_allocator_, &sparse));
+        1, &device_, &storage_owner_, &options, host_allocator_, &sparse));
     const auto release_model = [](loom_serve_text_model_t* model) {
       IREE_EXPECT_OK(loom_serve_text_model_free(model));
     };
@@ -442,7 +442,7 @@ TEST_F(ElasticTextServiceTest, PrefixTailRetiresBeforeCompactionAndPeerReuse) {
   options.pool_capacity = slab_size / 2;
   loom_serve_text_model_t* sparse = nullptr;
   IREE_ASSERT_OK(loom_serve_text_model_allocate(
-      device_, storage_owner_, &options, host_allocator_, &sparse));
+      1, &device_, &storage_owner_, &options, host_allocator_, &sparse));
   const auto release_model = [](loom_serve_text_model_t* model) {
     IREE_EXPECT_OK(loom_serve_text_model_free(model));
   };
@@ -617,7 +617,7 @@ TEST_F(ElasticTextServiceTest,
   options.row_count = 8;
   loom_serve_text_model_t* sparse = nullptr;
   IREE_ASSERT_OK(loom_serve_text_model_allocate(
-      device_, storage_owner_, &options, host_allocator_, &sparse));
+      1, &device_, &storage_owner_, &options, host_allocator_, &sparse));
   const auto release_model = [](loom_serve_text_model_t* model) {
     IREE_EXPECT_OK(loom_serve_text_model_free(model));
   };
@@ -737,7 +737,7 @@ TEST_F(ElasticTextServiceTest,
       loom_serve_test_application_options_default().slab_size / 4;
   loom_serve_text_model_t* retiring = nullptr;
   IREE_ASSERT_OK(loom_serve_text_model_allocate(
-      device_, storage_owner_, &options, host_allocator_, &retiring));
+      1, &device_, &storage_owner_, &options, host_allocator_, &retiring));
   const auto release_model = [](loom_serve_text_model_t* model) {
     IREE_EXPECT_OK(loom_serve_text_model_free(model));
   };
@@ -844,7 +844,7 @@ TEST_F(ElasticTextServiceTest, RetirementOwnsAcceptedCheckpointCapture) {
 
   // Same host, queues, and parameter pool remain available to the replacement.
   IREE_ASSERT_OK(loom_serve_text_model_allocate(
-      device_, storage_owner_, &options, host_allocator_, &model_));
+      1, &device_, &storage_owner_, &options, host_allocator_, &model_));
   row = loom_serve_text_model_row(model_, 0);
   IREE_ASSERT_OK(
       loom_serve_text_row_prefill(row, tokens.size(), tokens.data()));

@@ -867,7 +867,7 @@ iree_status_t loom_serve_executables_deactivate(
   }
   bool complete = false;
   IREE_RETURN_IF_ERROR(loom_serve_residency_deactivate(
-      executables->options.residency, &complete));
+      1, &executables->options.residency, &complete));
   iree_status_t status = iree_ok_status();
   for (loom_serve_checkpoint_t* entry = executables->parameters.entries;
        entry && iree_status_is_ok(status); entry = entry->next) {

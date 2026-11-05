@@ -16,11 +16,12 @@
 #include "loom/serve/service/text/tool_xml.h"
 
 iree_status_t loom_serve_text_control_initialize(
-    const loom_serve_text_source_t* source, loom_serve_execution_t* execution,
-    iree_hal_queue_t* transfer, const loom_serve_text_state_t* state,
-    iree_host_size_t shape_count, const loom_serve_packing_shape_t* shapes,
-    iree_host_size_t stage_count, const loom_serve_stage_t* stages,
-    iree_allocator_t host_allocator, loom_serve_text_control_t* out_control) {
+    const loom_serve_text_source_t* source, uint32_t execution_count,
+    loom_serve_execution_t* const* executions, iree_hal_queue_t* transfer,
+    const loom_serve_text_state_t* state, iree_host_size_t shape_count,
+    const loom_serve_packing_shape_t* shapes, iree_host_size_t stage_count,
+    const loom_serve_stage_t* stages, iree_allocator_t host_allocator,
+    loom_serve_text_control_t* out_control) {
   loom_serve_text_control_t* control = out_control;
   memset(control, 0, sizeof(*control));
   // Both dense padding and semantic packed inputs belong to the single model
@@ -96,7 +97,7 @@ iree_status_t loom_serve_text_control_initialize(
   };
   const loom_serve_module_options_t options = {
       .binding_capacity = 7,
-      .executions = {1, &execution},
+      .executions = {execution_count, executions},
       .stages = {stage_count, stages},
       .feedback = {IREE_ARRAYSIZE(feedback), feedback},
   };

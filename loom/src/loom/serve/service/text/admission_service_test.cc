@@ -367,8 +367,7 @@ TEST_F(AdmissionServiceTest,
   EXPECT_EQ(loom_serve_text_row_position(row), 0u);
   EXPECT_EQ(loom_serve_text_model_parameter_activity(model_).activations, 0u);
   EXPECT_EQ(loom_serve_text_model_parameter_activity(model_).read_bytes, 0u);
-  EXPECT_FALSE(
-      loom_serve_residency_is_pinned(loom_serve_text_model_residency(model_)));
+  EXPECT_FALSE(loom_serve_text_model_parameter_snapshot(model_).pin_count);
 
   // The unchanged cold model remains usable through the real HTTP lifecycle.
   Start();

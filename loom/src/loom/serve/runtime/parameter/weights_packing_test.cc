@@ -291,9 +291,11 @@ TEST_P(WeightPackingTest, InvocationWorkingSetRetiresColdActivationCredit) {
     // and source plan survive. Retained state cannot spend that credit.
     loom_serve_residency_set_pinned(residencies_[0], false);
     bool complete = false;
-    IREE_ASSERT_OK(loom_serve_residency_deactivate(residencies_[0], &complete));
+    IREE_ASSERT_OK(
+        loom_serve_residency_deactivate(1, &residencies_[0], &complete));
     IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
-    IREE_ASSERT_OK(loom_serve_residency_deactivate(residencies_[0], &complete));
+    IREE_ASSERT_OK(
+        loom_serve_residency_deactivate(1, &residencies_[0], &complete));
     EXPECT_TRUE(complete);
     IREE_ASSERT_OK(loom_serve_residency_try_admit_state(
         1, &residencies_[0], 0, 1, &range, nullptr, nullptr, 0, &admission,

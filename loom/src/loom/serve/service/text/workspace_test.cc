@@ -162,7 +162,7 @@ TEST_F(SourceTextServiceTest, NativeWorkspaceReplacementPreservesAdmission) {
   options.sources.values = providers;
   loom_serve_text_model_t* cold_model = nullptr;
   IREE_ASSERT_OK(loom_serve_text_model_allocate(
-      device_, storage_owner_, &options, host_allocator_, &cold_model));
+      1, &device_, &storage_owner_, &options, host_allocator_, &cold_model));
   const auto release_model = [](loom_serve_text_model_t* model) {
     IREE_EXPECT_OK(loom_serve_text_model_free(model));
   };

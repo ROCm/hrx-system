@@ -228,8 +228,8 @@ class TextPlacementTest
   iree_status_t Compile(bool release_catalogs = false) {
     auto status = std::get<1>(GetParam())
                       ? loom_serve_stage_set_compile_async(
-                            devices_.data(), preparation_, &sources_, Complete,
-                            this, allocator_)
+                            devices_.data(), preparation_, &sources_, nullptr,
+                            Complete, this, allocator_)
                       : loom_serve_stage_set_compile_catalog_async(
                             jits_.data(), preparation_, nullptr, Complete, this,
                             allocator_);

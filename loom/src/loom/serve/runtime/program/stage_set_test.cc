@@ -35,8 +35,8 @@ class StageSetTest : public loom_serve::testing::JitTest {
     auto status =
         private_catalog
             ? loom_serve_stage_set_compile_async(&device_owner_, preparation_,
-                                                 &sources, Complete, this,
-                                                 host_allocator_)
+                                                 &sources, nullptr, Complete,
+                                                 this, host_allocator_)
             : loom_serve_stage_set_compile_catalog_async(
                   &jit_, preparation_, Layout, Complete, this, host_allocator_);
     IREE_RETURN_IF_ERROR(status);

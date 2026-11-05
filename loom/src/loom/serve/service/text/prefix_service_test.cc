@@ -162,7 +162,7 @@ TEST_F(PrefixServiceTest, PressureReplaysWhenSelectedPrefixCannotFit) {
   auto options = ModelOptions();
   options.pool_capacity = 16;
   IREE_ASSERT_OK(loom_serve_text_model_allocate(
-      device_, storage_owner_, &options, host_allocator_, &model_));
+      1, &device_, &storage_owner_, &options, host_allocator_, &model_));
   // A partial two-page endpoint consumes six tokens. Restoring a full-pool
   // request would need its shared partial tail plus a private replacement.
   // Dropping the optional prefix makes all sixteen positions available.

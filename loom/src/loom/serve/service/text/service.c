@@ -762,8 +762,7 @@ static iree_status_t loom_serve_text_service_initialize(
 static void loom_serve_text_stop(loom_serve_text_service_t* service,
                                  iree_status_code_t terminal_code) {
   service->stopping = true;
-  loom_serve_residency_cancel_admission(
-      loom_serve_text_model_residency(service->model));
+  loom_serve_text_model_cancel_admission(service->model);
   for (iree_host_size_t i = 0; i < service->row_count; ++i) {
     loom_serve_text_session_t* session = service->sessions[i];
     if (session->request.consumer.self) {
@@ -810,7 +809,7 @@ void loom_serve_text_service_free(loom_serve_text_service_t* service,
   loom_serve_text_warmup_set_observer(
       loom_serve_text_model_warmup(service->model), NULL, NULL);
   loom_serve_residency_set_reclaimer(
-      loom_serve_text_model_residency(service->model),
+      loom_serve_text_model_state_residency(service->model),
       (loom_serve_residency_reclaimer_t){0});
   if (!iree_status_is_ok(service->telemetry.failure)) {
     terminal_code = iree_status_code(service->telemetry.failure);
@@ -975,7 +974,7 @@ static void loom_serve_text_set_observer(void* self,
   loom_serve_execution_reconfiguration_set_observer(service->reconfiguration,
                                                     observer);
   loom_serve_residency_set_reclaimer(
-      loom_serve_text_model_residency(service->model),
+      loom_serve_text_model_state_residency(service->model),
       observer.wake
           ? (loom_serve_residency_reclaimer_t){.self = service,
                                                .request =
@@ -1486,5 +1485,5 @@ loom_serve_service_t loom_serve_text_service_interface(
                     .latency = &service->telemetry.latency,
                     .sample = loom_serve_text_sample},
       .capacity_domain = loom_serve_residency_cache(
-          loom_serve_text_model_residency(service->model))};
+          loom_serve_text_model_state_residency(service->model))};
 }

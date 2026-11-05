@@ -33,32 +33,49 @@ struct loom_serve_text_model_t {
   iree_allocator_t host_allocator;
   // Source-owned metadata and bytecode, independent of native model bindings.
   loom_serve_text_source_t source;
-  // Model-local diagnostics and work evidence from VM and native compilation.
-  loom_serve_compilation_report_t compilation;
-  // Borrowed shared owner outliving every model resource and host I/O payload.
-  loom_serve_device_t* device_owner;
-  // Borrowed storage and residency owner, independent of execution placement.
-  loom_serve_pool_t* pool;
-  // Native execution device borrowed from device_owner.
-  iree_hal_device_t* device;
-  // Semaphore namespace borrowed from device_owner.
-  iree_hal_device_group_t* group;
-  // Borrowed exact dispatch queue, retained by execution.
-  iree_hal_queue_t* dispatch;
+  // Immutable source execution ordinals, bounded by the application group.
+  uint32_t device_count;
+  // Borrowed exact execution devices, outliving every model resource.
+  loom_serve_device_t** devices;
+  // Borrowed storage owners in execution order; aliases are permitted.
+  loom_serve_pool_t** pools;
   // Borrowed exact transfer queue, retained by execution.
   iree_hal_queue_t* transfer;
-  // Owned model stage/input timeline with independently retired feedback.
-  loom_serve_execution_t* execution;
+  // Owned timelines in source execution order, including independent feedback.
+  loom_serve_execution_t** executions;
   // Cold recording policy for every reusable stage in this residency.
   iree_hal_command_buffer_mode_t command_mode;
-  // Source catalog retaining compilation reuse through this model residency.
-  loom_serve_jit_t* jit;
+  // Per-execution compilation ownership retained through model residency.
+  struct {
+    // Catalogs pin immutable source generations across device cache trims.
+    loom_serve_jit_t** catalogs;
+    // Independent report accumulators, borrowed by their respective catalogs.
+    loom_serve_compilation_report_t* reports;
+  } compiler;
   // Checkpoint domains owning stable parameter reservations across all stages.
   loom_serve_text_parameters_t parameters;
-  // Owned physical parameter group, outliving borrowing invocation residencies.
-  loom_serve_residency_group_t* parameter_group;
-  // Atomic invocation working set and independent admission interest.
-  loom_serve_residency_t* residency;
+  // Physical ownership canonicalized once, independently of execution order.
+  struct {
+    // Number of distinct actual pools represented below.
+    uint32_t count;
+    // Maps each source execution to its canonical pool ordinal.
+    uint32_t* pool_indices;
+    // First execution using each actual pool, in first-use order.
+    uint32_t* execution_indices;
+    // Owned parameter groups, each containing every plan in its actual pool.
+    loom_serve_residency_group_t** groups;
+    // Atomic invocation working set and admission interest per actual pool.
+    loom_serve_residency_t** values;
+    // Original private peaks, summed across executions sharing each pool.
+    uint64_t* workspace_bytes;
+  } residency;
+  // Reusable invocation dependency snapshot; serialized with model execution.
+  struct {
+    // Borrowed compute/feedback semaphores from every execution.
+    iree_hal_semaphore_t** semaphores;
+    // Corresponding frontier values captured before inserting dependencies.
+    uint64_t* values;
+  } dependencies;
   // Independent demanded parameter I/O, retained across service publication.
   loom_serve_text_warmup_t* warmup;
   // Source-declared command programs, owned in declaration order.
@@ -67,8 +84,6 @@ struct loom_serve_text_model_t {
   iree_host_size_t stage_count;
   // Original native bindings borrowing stages, retained for explicit restore.
   loom_serve_stage_t* stage_bindings;
-  // Original command private peak, retained for explicit variant restoration.
-  uint64_t stage_workspace_bytes;
   // Number of target packed shapes, independent of auxiliary draft stages.
   iree_host_size_t shape_count;
   // Immutable prepared shape capacities, owned in epoch option order.

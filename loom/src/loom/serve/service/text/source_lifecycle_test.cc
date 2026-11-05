@@ -51,8 +51,9 @@ class FailedTextDiagnosticsTest : public SourceTextServiceTest {
     auto model_options = ModelOptions();
     model_options.row_count = 1;
     model_options.sources.control = iree_make_cstring_view(control.c_str());
-    IREE_ASSERT_OK(loom_serve_text_model_allocate(
-        device_, storage_owner_, &model_options, host_allocator_, &model_));
+    IREE_ASSERT_OK(loom_serve_text_model_allocate(1, &device_, &storage_owner_,
+                                                  &model_options,
+                                                  host_allocator_, &model_));
     IREE_ASSERT_OK(
         loom_runtime_telemetry_stream_allocate(256, host_allocator_, &stream_));
     auto options = ServiceOptions();
@@ -872,7 +873,7 @@ TEST_F(SourceTextServiceTest, CancelledPreparationRetainsPartialOwnership) {
   iree_notification_initialize(&notification);
   loom_serve_text_load_t* load = nullptr;
   IREE_ASSERT_OK(loom_serve_text_load_allocate(
-      device_, storage_owner_, &options,
+      1, &device_, &storage_owner_, &options,
       [](void* payload) {
         iree_notification_post(static_cast<iree_notification_t*>(payload),
                                IREE_ALL_WAITERS);
@@ -914,7 +915,7 @@ TEST_F(SourceTextServiceTest, TokenizerFailureRetiresCompiledModel) {
   loom_serve_text_model_t* model = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_NOT_FOUND,
-      loom_serve_text_model_allocate(device_, storage_owner_, &options,
+      loom_serve_text_model_allocate(1, &device_, &storage_owner_, &options,
                                      host_allocator_, &model));
   EXPECT_EQ(model, nullptr);
   const auto after = loom_serve_pool_statistics(storage_owner_);

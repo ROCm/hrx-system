@@ -89,7 +89,7 @@ TEST_F(SourceTextServiceTest, ActivePrefixPinDenialPreservesFullPoolRequest) {
   auto options = ModelOptions();
   options.pool_capacity = 16;
   IREE_ASSERT_OK(loom_serve_text_model_allocate(
-      device_, storage_owner_, &options, host_allocator_, &model_));
+      1, &device_, &storage_owner_, &options, host_allocator_, &model_));
   auto* source = loom_serve_text_model_row(model_, 0);
   bool admitted = false;
   IREE_ASSERT_OK(loom_serve_text_row_try_reserve(
