@@ -124,7 +124,7 @@ jobs:
       PIP_CACHE_DIR: ${{ github.workspace }}/build/linux/caches/pip
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -150,7 +150,7 @@ jobs:
 
       - name: Upload public package
         if: ${{ matrix.package }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hrx-public-linux-x86_64
           path: |
@@ -161,7 +161,7 @@ jobs:
 
       - name: Upload public dependency package
         if: ${{ matrix.package }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hrx-public-deps-linux-x86_64
           path: |
@@ -172,7 +172,7 @@ jobs:
 
       - name: Upload ROCm build environment package
         if: ${{ matrix.package }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hrx-rocm-buildenv-linux-x86_64
           path: |
@@ -183,7 +183,7 @@ jobs:
 
       - name: Upload failed test results
         if: ${{ always() && steps.core_tests.outcome == 'failure' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ctest-results-core-linux-${{ matrix.sanitizer }}-attempt-${{ github.run_attempt }}
           path: |
@@ -237,7 +237,7 @@ jobs:
       PIP_CACHE_DIR: ${{ github.workspace }}/build/linux-gpu/caches/pip
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -247,7 +247,7 @@ jobs:
           git config --global --add safe.directory "$PWD"
 
       - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
 
@@ -285,7 +285,7 @@ jobs:
 
       - name: Upload native test results
         if: ${{ always() && (steps.core_tests.outcome == 'success' || steps.core_tests.outcome == 'failure') }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ctest-results-core-linux-gpu-source-attempt-${{ github.run_attempt }}
           path: |
@@ -327,7 +327,7 @@ jobs:
       PIP_CACHE_DIR: ${{ github.workspace }}/build/linux-gpu/caches/pip
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -335,7 +335,7 @@ jobs:
         run: git config --global --add safe.directory "$PWD"
 
       - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
 
@@ -373,7 +373,7 @@ jobs:
 
       - name: Upload native test results
         if: ${{ always() && (steps.core_tests.outcome == 'success' || steps.core_tests.outcome == 'failure') }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ctest-results-core-linux-gpu-attempt-${{ github.run_attempt }}
           path: |
@@ -428,7 +428,7 @@ jobs:
       PIP_CACHE_DIR: ${{ github.workspace }}/build/windows/${{ matrix.toolchain }}/caches/pip
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -481,7 +481,7 @@ jobs:
 
       - name: Upload Windows build failure evidence
         if: ${{ failure() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-build-failures-core-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
           path: ${{ env.IREE_CI_FAILURE_ARTIFACT_DIR }}
@@ -490,7 +490,7 @@ jobs:
 
       - name: Upload public package
         if: ${{ matrix.package }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hrx-public-windows-${{ matrix.toolchain }}-x86_64
           path: |
@@ -502,7 +502,7 @@ jobs:
 
       - name: Upload public dependency package
         if: ${{ matrix.package }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hrx-public-deps-windows-${{ matrix.toolchain }}-x86_64
           path: |
@@ -514,7 +514,7 @@ jobs:
 
       - name: Upload ROCm build environment package
         if: ${{ matrix.package }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hrx-rocm-buildenv-windows-${{ matrix.toolchain }}-x86_64
           path: |
@@ -526,7 +526,7 @@ jobs:
 
       - name: Upload failed test results
         if: ${{ always() && (steps.core_tests.outcome == 'failure' || steps.relocated_tests.outcome == 'failure') }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ctest-results-core-windows-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
           path: |
@@ -557,7 +557,7 @@ jobs:
       PIP_CACHE_DIR: ${{ github.workspace }}/build/libhrx-bazel/caches/pip
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 

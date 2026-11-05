@@ -90,7 +90,7 @@ jobs:
       PIP_CACHE_DIR: ${{ github.workspace }}/build/windows/${{ inputs.windows_toolchain }}/caches/pip
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -144,7 +144,7 @@ jobs:
 
       - name: Upload Windows build failure evidence
         if: ${{ failure() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-build-failures-core-${{ inputs.windows_toolchain }}-attempt-${{ github.run_attempt }}
           path: ${{ env.IREE_CI_FAILURE_ARTIFACT_DIR }}
@@ -153,7 +153,7 @@ jobs:
 
       - name: Upload public package
         if: ${{ inputs.package }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hrx-public-windows-${{ inputs.windows_toolchain }}-x86_64
           path: |
@@ -165,7 +165,7 @@ jobs:
 
       - name: Upload public dependency package
         if: ${{ inputs.package }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hrx-public-deps-windows-${{ inputs.windows_toolchain }}-x86_64
           path: |
@@ -177,7 +177,7 @@ jobs:
 
       - name: Upload ROCm build environment package
         if: ${{ inputs.package }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hrx-rocm-buildenv-windows-${{ inputs.windows_toolchain }}-x86_64
           path: |
@@ -189,7 +189,7 @@ jobs:
 
       - name: Upload failed test results
         if: ${{ always() && (steps.core_tests.outcome == 'failure' || steps.relocated_tests.outcome == 'failure') }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ctest-results-core-windows-${{ inputs.windows_toolchain }}-attempt-${{ github.run_attempt }}
           path: build/windows/${{ inputs.windows_toolchain }}/**/Testing/Temporary/
