@@ -78,10 +78,10 @@ provide a local-all version script and remove local symbols after linking.
 Normal runtime builds use checked-in blobs from `prebuilt/`. The optional Bazel
 AMDGPU device toolchain repository defaults to an inert stub and source builds
 must opt into a real producer with
-`--repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm`, `llvm-tools`,
-`llvm-project`, or `auto`. This keeps AMDGPU HAL runtime rebuilds independent
-of the LLVM submodule and ROCm tools unless a developer explicitly asks to
-rebuild the device code objects from source.
+`--repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm`, `llvm-tools`, or `auto`.
+This keeps AMDGPU HAL runtime rebuilds independent of ROCm and installed LLVM
+tools unless a developer explicitly asks to rebuild the device code objects
+from source.
 
 Bazel source mode is enabled with:
 
@@ -94,12 +94,10 @@ iree-bazel-build \
   //runtime/src/iree/hal/drivers/amdgpu/device/binaries:toc
 ```
 
-Use `--repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=llvm-project` when
-deliberately building through the in-tree `@llvm-project` repository instead
-of ROCm tools. Source mode invokes
-`build_tools/scripts/amdgpu_device_binaries.py`; the target selector flag
-accepts the shared exact, code-object, and family selectors. Targets without
-checked-in artifacts, including the gfx12.5 family, must use source mode.
+Source mode invokes `build_tools/scripts/amdgpu_device_binaries.py`; the target
+selector flag accepts the shared exact, code-object, and family selectors.
+Targets without checked-in artifacts, including the gfx12.5 family, must use
+source mode.
 
 CMake uses the matching cache variables:
 

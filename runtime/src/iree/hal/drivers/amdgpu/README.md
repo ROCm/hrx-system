@@ -265,7 +265,7 @@ By default Bazel uses the checked-in prebuilt blobs. Developers editing the HAL
 device kernels can opt into live source rebuilds with
 `--//runtime/src/iree/hal/drivers/amdgpu/device/binaries:build_mode=source`
 and select the producer with
-`--repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm` or `llvm-project`.
+`--repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm` or `llvm-tools`.
 
 See
 [`build_tools/amdgpu/README.md`](../../../../../../build_tools/amdgpu/README.md)
