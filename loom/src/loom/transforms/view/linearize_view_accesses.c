@@ -117,9 +117,9 @@ typedef struct loom_linearize_view_accesses_context_t {
 typedef struct loom_linearize_view_accesses_vector_tile_t {
   // First view axis covered by the vector payload.
   uint8_t first_vector_axis;
-  // Number of view axes covered by the vector payload.
-  uint8_t vector_rank;
-  // Number of scalar elements in the innermost row-vector access.
+  // Number of outer vector axes selecting distinct contiguous memory runs.
+  uint8_t row_axis_count;
+  // Number of scalar elements in each contiguous memory run.
   int64_t inner_lane_count;
   // Number of row-vector accesses in the tile.
   int64_t row_count;
@@ -733,11 +733,6 @@ static bool loom_linearize_view_accesses_static_contiguous_vector_tile(
       flat_lane_count % (uint64_t)inner_lane_count != 0) {
     return false;
   }
-  const uint64_t row_count = flat_lane_count / (uint64_t)inner_lane_count;
-  if (row_count == 0 || row_count > INT64_MAX || row_count > UINT16_MAX) {
-    return false;
-  }
-
   int64_t vector_dims[LOOM_TYPE_MAX_RANK] = {0};
   for (uint8_t axis = 0; axis < vector_rank; ++axis) {
     const int64_t dim = loom_type_dim_static_size_at(vector_type, axis);
@@ -747,10 +742,28 @@ static bool loom_linearize_view_accesses_static_contiguous_vector_tile(
     vector_dims[axis] = dim;
   }
 
+  // Logical row boundaries do not split physically adjacent elements. Keep the
+  // largest contiguous suffix intact for target-specific access-width
+  // selection.
+  uint8_t row_axis_count = vector_rank - 1;
+  while (row_axis_count) {
+    const uint8_t axis = row_axis_count - 1;
+    int64_t stride = 0;
+    if (vector_dims[axis] != 1 &&
+        (!loom_vector_memory_access_static_axis_stride(
+             &access, access.first_vector_axis + axis, &stride) ||
+         stride != inner_lane_count)) {
+      break;
+    }
+    inner_lane_count *= vector_dims[axis];
+    --row_axis_count;
+  }
+  const uint64_t row_count = flat_lane_count / (uint64_t)inner_lane_count;
+
   const loom_scalar_type_t element_type = loom_type_element_type(vector_type);
   *out_tile = (loom_linearize_view_accesses_vector_tile_t){
       .first_vector_axis = access.first_vector_axis,
-      .vector_rank = vector_rank,
+      .row_axis_count = row_axis_count,
       .inner_lane_count = inner_lane_count,
       .row_count = (int64_t)row_count,
       .flat_lane_count = (int64_t)flat_lane_count,
@@ -770,9 +783,10 @@ static void loom_linearize_view_accesses_tile_row_offsets(
     const loom_linearize_view_accesses_vector_tile_t* tile, int64_t row_ordinal,
     int64_t* out_axis_static_offsets) {
   int64_t remaining = row_ordinal;
-  for (uint8_t reverse_axis = 0; reverse_axis < tile->vector_rank - 1;
+  for (uint8_t reverse_axis = 0; reverse_axis < tile->row_axis_count;
        ++reverse_axis) {
-    const uint8_t vector_axis = (uint8_t)(tile->vector_rank - reverse_axis - 2);
+    const uint8_t vector_axis =
+        (uint8_t)(tile->row_axis_count - reverse_axis - 1);
     const int64_t dim = tile->vector_dims[vector_axis];
     const int64_t coord = remaining % dim;
     remaining /= dim;

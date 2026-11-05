@@ -17,73 +17,73 @@ func.def @partial_predicate_packets(%input: buffer, %output: buffer) {
 
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @partial_predicate_packets(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) asm {
-  %98 = OpConstant.offset64 0
+  %95 = OpConstant.offset64 0
+  %96 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %95
+  %97 = OpLoad.storage_buffer.i8 %96
+  %98 = OpConstant.offset64 1
   %99 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %98
   %100 = OpLoad.storage_buffer.i8 %99
-  %101 = OpConstant.offset64 1
+  %101 = OpConstant.offset64 2
   %102 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %101
   %103 = OpLoad.storage_buffer.i8 %102
-  %104 = OpConstant.offset64 2
+  %104 = OpConstant.offset64 3
   %105 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %104
   %106 = OpLoad.storage_buffer.i8 %105
-  %107 = OpConstant.offset64 3
+  %107 = OpConstant.offset64 4
   %108 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %107
   %109 = OpLoad.storage_buffer.i8 %108
-  %110 = OpConstant.offset64 4
+  %110 = OpConstant.offset64 5
   %111 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %110
   %112 = OpLoad.storage_buffer.i8 %111
-  %113 = OpConstant.offset64 5
+  %113 = OpConstant.offset64 6
   %114 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %113
   %115 = OpLoad.storage_buffer.i8 %114
-  %116 = OpConstant.offset64 6
+  %116 = OpConstant.offset64 7
   %117 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %116
   %118 = OpLoad.storage_buffer.i8 %117
-  %119 = OpConstant.offset64 7
+  %119 = OpConstant.offset64 8
   %120 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %119
   %121 = OpLoad.storage_buffer.i8 %120
-  %122 = OpConstant.offset64 8
-  %123 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %122
-  %124 = OpLoad.storage_buffer.i8 %123
-  %125 = OpCompositeConstruct.v3i8 %100, %103, %106
-  %126 = OpConstant.i8 0
+  %122 = OpCompositeConstruct.v3i8 %97, %100, %103
+  %123 = OpConstant.i8 0
+  %124 = OpCompositeConstruct.v3i8 %123, %123, %123
+  %125 = OpINotEqual.v3i8 %122, %124
+  %126 = OpConstant.i8 1
   %127 = OpCompositeConstruct.v3i8 %126, %126, %126
-  %128 = OpINotEqual.v3i8 %125, %127
-  %129 = OpConstant.i8 1
-  %130 = OpCompositeConstruct.v3i8 %129, %129, %129
-  %131 = OpSelect.v3i8 %128, %130, %127
-  %132 = OpCompositeConstruct.v3i8 %109, %112, %115
-  %133 = OpINotEqual.v3i8 %132, %127
-  %134 = OpSelect.v3i8 %133, %130, %127
-  %135 = OpCompositeConstruct.v3i8 %118, %121, %124
-  %136 = OpINotEqual.v3i8 %135, %127
-  %137 = OpSelect.v3i8 %136, %130, %127
-  %138 = OpCompositeExtract.v3i8.i8 %131, 0
-  %139 = OpCompositeExtract.v3i8.i8 %131, 1
-  %140 = OpCompositeExtract.v3i8.i8 %131, 2
-  %142 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %98
-  OpStore.storage_buffer.i8 %142, %138
-  %144 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %101
-  OpStore.storage_buffer.i8 %144, %139
-  %146 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %104
-  OpStore.storage_buffer.i8 %146, %140
-  %147 = OpCompositeExtract.v3i8.i8 %134, 0
-  %148 = OpCompositeExtract.v3i8.i8 %134, 1
-  %149 = OpCompositeExtract.v3i8.i8 %134, 2
-  %151 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %107
-  OpStore.storage_buffer.i8 %151, %147
-  %153 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %110
-  OpStore.storage_buffer.i8 %153, %148
-  %155 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %113
-  OpStore.storage_buffer.i8 %155, %149
-  %156 = OpCompositeExtract.v3i8.i8 %137, 0
-  %157 = OpCompositeExtract.v3i8.i8 %137, 1
-  %158 = OpCompositeExtract.v3i8.i8 %137, 2
-  %160 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %116
-  OpStore.storage_buffer.i8 %160, %156
-  %162 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %119
-  OpStore.storage_buffer.i8 %162, %157
-  %164 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %122
-  OpStore.storage_buffer.i8 %164, %158
+  %128 = OpSelect.v3i8 %125, %127, %124
+  %129 = OpCompositeConstruct.v3i8 %106, %109, %112
+  %130 = OpINotEqual.v3i8 %129, %124
+  %131 = OpSelect.v3i8 %130, %127, %124
+  %132 = OpCompositeConstruct.v3i8 %115, %118, %121
+  %133 = OpINotEqual.v3i8 %132, %124
+  %134 = OpSelect.v3i8 %133, %127, %124
+  %135 = OpCompositeExtract.v3i8.i8 %128, 0
+  %136 = OpCompositeExtract.v3i8.i8 %128, 1
+  %137 = OpCompositeExtract.v3i8.i8 %128, 2
+  %139 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %95
+  OpStore.storage_buffer.i8 %139, %135
+  %141 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %98
+  OpStore.storage_buffer.i8 %141, %136
+  %143 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %101
+  OpStore.storage_buffer.i8 %143, %137
+  %144 = OpCompositeExtract.v3i8.i8 %131, 0
+  %145 = OpCompositeExtract.v3i8.i8 %131, 1
+  %146 = OpCompositeExtract.v3i8.i8 %131, 2
+  %148 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %104
+  OpStore.storage_buffer.i8 %148, %144
+  %150 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %107
+  OpStore.storage_buffer.i8 %150, %145
+  %152 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %110
+  OpStore.storage_buffer.i8 %152, %146
+  %153 = OpCompositeExtract.v3i8.i8 %134, 0
+  %154 = OpCompositeExtract.v3i8.i8 %134, 1
+  %155 = OpCompositeExtract.v3i8.i8 %134, 2
+  %157 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %113
+  OpStore.storage_buffer.i8 %157, %153
+  %159 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %116
+  OpStore.storage_buffer.i8 %159, %154
+  %161 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %119
+  OpStore.storage_buffer.i8 %161, %155
   return
 }
 

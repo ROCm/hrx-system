@@ -17,6 +17,7 @@ loom_check_test_suite(
     name = "test",
     srcs = [
         "boundary_transport.loom-test",
+        "contiguous_vector_tiles.loom-test",
         "linearize_view_accesses.loom-test",
         "load_coalescing.loom-test",
         "private_atomics.loom-test",

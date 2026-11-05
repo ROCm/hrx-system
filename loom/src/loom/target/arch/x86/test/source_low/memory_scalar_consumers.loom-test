@@ -1,0 +1,106 @@
+// RUN: emit source-low target=x86:avx2 output=low
+
+// Scalar integer division consumes native memory packets from a contiguous
+// tile wider than one register, without expanding its snapshot to lane loads.
+func.def @division_packets(%input: buffer, %output: buffer, %divisor: i64) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<2x4xi64>
+  %destination = buffer.view %output[%base] : buffer -> view<2x4xi64>
+  %values = vector.load %source[0, 0] : view<2x4xi64> -> vector<2x4xi64>
+  %divisors = vector.splat %divisor : vector<2x4xi64>
+  %quotients = vector.divsi %values, %divisors : vector<2x4xi64>
+  vector.store %quotients, %destination[0, 0] : vector<2x4xi64>, view<2x4xi64>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @division_packets(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %divisor: reg<x86.gpr64>) asm {
+  %44 = vmovdqu32.load.ymm %input {disp32 = 0}
+  %45 = vmovdqu32.load.ymm %input {disp32 = 32}
+  %46 = vextractf128.xmm %44, 0
+  %47 = vpextrq.xmm %46, 0
+  %48 = mov.dividend.low.gpr64 %47
+  %49 = sign.extend.dividend.gpr64 %48
+  %50 = divs.quotient.gpr64 %48, %49, %divisor
+  %51 = copy %50 : reg<x86.rax> -> reg<x86.gpr64>
+  %53 = vpextrq.xmm %46, 1
+  %54 = mov.dividend.low.gpr64 %53
+  %55 = sign.extend.dividend.gpr64 %54
+  %56 = divs.quotient.gpr64 %54, %55, %divisor
+  %57 = copy %56 : reg<x86.rax> -> reg<x86.gpr64>
+  %58 = vextractf128.xmm %44, 1
+  %59 = vpextrq.xmm %58, 0
+  %60 = mov.dividend.low.gpr64 %59
+  %61 = sign.extend.dividend.gpr64 %60
+  %62 = divs.quotient.gpr64 %60, %61, %divisor
+  %63 = copy %62 : reg<x86.rax> -> reg<x86.gpr64>
+  %65 = vpextrq.xmm %58, 1
+  %66 = mov.dividend.low.gpr64 %65
+  %67 = sign.extend.dividend.gpr64 %66
+  %68 = divs.quotient.gpr64 %66, %67, %divisor
+  %69 = copy %68 : reg<x86.rax> -> reg<x86.gpr64>
+  %70 = vextractf128.xmm %45, 0
+  %71 = vpextrq.xmm %70, 0
+  %72 = mov.dividend.low.gpr64 %71
+  %73 = sign.extend.dividend.gpr64 %72
+  %74 = divs.quotient.gpr64 %72, %73, %divisor
+  %75 = copy %74 : reg<x86.rax> -> reg<x86.gpr64>
+  %77 = vpextrq.xmm %70, 1
+  %78 = mov.dividend.low.gpr64 %77
+  %79 = sign.extend.dividend.gpr64 %78
+  %80 = divs.quotient.gpr64 %78, %79, %divisor
+  %81 = copy %80 : reg<x86.rax> -> reg<x86.gpr64>
+  %82 = vextractf128.xmm %45, 1
+  %83 = vpextrq.xmm %82, 0
+  %84 = mov.dividend.low.gpr64 %83
+  %85 = sign.extend.dividend.gpr64 %84
+  %86 = divs.quotient.gpr64 %84, %85, %divisor
+  %87 = copy %86 : reg<x86.rax> -> reg<x86.gpr64>
+  %89 = vpextrq.xmm %82, 1
+  %90 = mov.dividend.low.gpr64 %89
+  %91 = sign.extend.dividend.gpr64 %90
+  %92 = divs.quotient.gpr64 %90, %91, %divisor
+  %93 = copy %92 : reg<x86.rax> -> reg<x86.gpr64>
+  mov.store.gpr64 %51, %output {disp32 = 0}
+  mov.store.gpr64 %57, %output {disp32 = 8}
+  mov.store.gpr64 %63, %output {disp32 = 16}
+  mov.store.gpr64 %69, %output {disp32 = 24}
+  mov.store.gpr64 %75, %output {disp32 = 32}
+  mov.store.gpr64 %81, %output {disp32 = 40}
+  mov.store.gpr64 %87, %output {disp32 = 48}
+  mov.store.gpr64 %93, %output {disp32 = 56}
+  return
+}
+
+// ====
+// RUN: emit source-low target=x86:avx512 output=low
+
+// The same boundary retains wider memory packets on an AVX-512 target.
+func.def @wide_word_snapshot(%input: buffer) -> (i32, i32, i32) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %input[%base] : buffer -> view<17xi32>
+  %values = vector.load %view[0] : view<17xi32> -> vector<17xi32>
+  %replacement = scalar.constant 0 : i32
+  view.store %replacement, %view[7] : i32, view<17xi32>
+  view.store %replacement, %view[8] : i32, view<17xi32>
+  view.store %replacement, %view[16] : i32, view<17xi32>
+  %first = vector.extract %values[7] : vector<17xi32> -> i32
+  %second = vector.extract %values[8] : vector<17xi32> -> i32
+  %tail = vector.extract %values[16] : vector<17xi32> -> i32
+  func.return %first, %second, %tail : i32, i32, i32
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) @wide_word_snapshot(%input: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm {
+  %22 = vmovdqu32.load %input {disp32 = 0}
+  %tail = mov.load.gpr32 %input {disp32 = 64}
+  %replacement = mov.imm32 0
+  mov.store.gpr32 %replacement, %input {disp32 = 28}
+  mov.store.gpr32 %replacement, %input {disp32 = 32}
+  mov.store.gpr32 %replacement, %input {disp32 = 64}
+  %25 = vextractf32x4.xmm %22, 1
+  %first = vpextrd.xmm %25, 3
+  %27 = vextractf32x4.xmm %22, 2
+  %second = vpextrd.xmm %27, 0
+  return %first, %second, %tail
+}
