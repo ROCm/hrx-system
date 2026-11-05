@@ -103,6 +103,7 @@ _GUARD_OTHER_VALUE_REF_KINDS = frozenset(
 _LOWER_RULE_FLAG_WIDE_PRIMARY_EMIT = 1 << 3
 _LOWER_RULE_PRIMARY_EMIT_ORDINAL_MAX = 0xFE
 LOWER_RULE_REPORT_KEY_ORDINAL_MAX = 0xFE
+_EMIT_REF_STORAGE_BIT_COUNT = 24
 
 _GUARD_NO_PAYLOAD_KINDS = frozenset(
     (
@@ -1000,11 +1001,26 @@ def tied_result_row(row: LowerTiedResult) -> list[str]:
     return fields
 
 
-def emit_ref_row(descriptor_refs: Mapping[str, int], row: LowerEmit, emit_index: int) -> list[str]:
-    return [
-        f".descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.descriptor)}",
-        f".emit_index = {emit_index}",
-    ]
+def emit_ref_descriptor_bit_count(descriptor_refs: Mapping[str, int], rows: tuple[LowerEmit, ...]) -> int:
+    encoded_descriptor_refs = (0 if row.descriptor is None else _descriptor_ref_index(descriptor_refs, row.descriptor) + 1 for row in rows)
+    return max(1, max(encoded_descriptor_refs, default=0).bit_length())
+
+
+def emit_ref_row(
+    descriptor_refs: Mapping[str, int],
+    row: LowerEmit,
+    emit_index: int,
+    *,
+    descriptor_bit_count: int,
+) -> list[str]:
+    descriptor_ref = _descriptor_ref_index(descriptor_refs, row.descriptor)
+    encoded_descriptor_ref = 0 if descriptor_ref == 0xFFFF else descriptor_ref + 1
+    if encoded_descriptor_ref >= 1 << descriptor_bit_count:
+        raise ValueError("emit descriptor reference exceeds its packed field")
+    if emit_index >= 1 << (_EMIT_REF_STORAGE_BIT_COUNT - descriptor_bit_count):
+        raise ValueError("emit behavior reference exceeds its packed field")
+    packed_ref = encoded_descriptor_ref | (emit_index << descriptor_bit_count)
+    return [f".bytes = {{0x{packed_ref & 0xFF:02x}, 0x{(packed_ref >> 8) & 0xFF:02x}, 0x{(packed_ref >> 16) & 0xFF:02x}}}"]
 
 
 def emit_row(row: LowerEmit) -> list[str]:
@@ -1246,6 +1262,7 @@ def rule_set_row(
     emits_name: str,
     emit_refs: tuple[int, ...],
     emit_refs_name: str,
+    emit_ref_descriptor_bit_count: int,
     diagnostics_name: str,
 ) -> list[str]:
     fields: list[str] = []
@@ -1373,6 +1390,8 @@ def rule_set_row(
     _append_table_fields(fields, "attr_copies", table.attr_copies, attr_copies_name)
     _append_table_fields(fields, "tied_results", table.tied_results, tied_results_name)
     _append_table_fields(fields, "emit_refs", emit_refs, emit_refs_name)
+    if emit_refs:
+        fields.append(f".emit_ref_descriptor_bit_count = {emit_ref_descriptor_bit_count}")
     _append_table_fields(fields, "emits", emit_rows, emits_name)
     _append_table_fields(fields, "diagnostics", table.diagnostics, diagnostics_name)
     if table.literal_data:

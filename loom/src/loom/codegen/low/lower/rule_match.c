@@ -2341,7 +2341,8 @@ loom_low_lower_descriptor_ref_t loom_low_lower_rule_primary_descriptor_ref(
   IREE_ASSERT_LT(primary_emit_ordinal, rule->emit_count);
   const uint16_t emit_ref_index =
       (uint16_t)(rule->action.emit_start + primary_emit_ordinal);
-  return rule_set->emit_refs[emit_ref_index].descriptor_ref;
+  return loom_low_lower_rule_set_emit_ref_at(rule_set, emit_ref_index)
+      .descriptor_ref;
 }
 
 iree_status_t loom_low_lower_rule_query_primary_descriptor(

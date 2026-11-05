@@ -25,6 +25,7 @@ from loom.gen.target.contracts.lower_rule_rows import (
     diagnostic_has_implicit_target_context,
     diagnostic_stored_params,
     diagnostic_value_row,
+    emit_ref_descriptor_bit_count,
     emit_ref_row,
     emit_row,
     guard_payload_row,
@@ -976,9 +977,8 @@ def test_emit_references_keep_descriptor_identity_out_of_shared_behavior() -> No
         kind=LowerEmitKind.DESCRIPTOR_OP,
         descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
     )
-    assert emit_ref_row(descriptor_refs, descriptor_emit, 7) == [
-        ".descriptor_ref = 3",
-        ".emit_index = 7",
+    assert emit_ref_row(descriptor_refs, descriptor_emit, 7, descriptor_bit_count=3) == [
+        ".bytes = {0x3c, 0x00, 0x00}",
     ]
     assert emit_row(descriptor_emit) == [".kind = LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP"]
     for kind in (
@@ -987,10 +987,54 @@ def test_emit_references_keep_descriptor_identity_out_of_shared_behavior() -> No
         LowerEmitKind.REGISTER_COPY,
         LowerEmitKind.REGISTER_MOVE,
     ):
-        assert emit_ref_row({}, LowerEmit(kind=kind), 5) == [
-            ".descriptor_ref = 65535",
-            ".emit_index = 5",
+        assert emit_ref_row({}, LowerEmit(kind=kind), 5, descriptor_bit_count=1) == [
+            ".bytes = {0x0a, 0x00, 0x00}",
         ]
+
+
+def test_emit_references_fill_their_selected_three_byte_layout() -> None:
+    descriptor = TEST_LOW_ADD_I32_DESCRIPTOR
+    descriptor_refs = {descriptor.key: 4094}
+    descriptor_emit = LowerEmit(
+        kind=LowerEmitKind.DESCRIPTOR_OP,
+        descriptor=descriptor,
+    )
+    rows = (LowerEmit(kind=LowerEmitKind.REGISTER_COPY), descriptor_emit)
+    assert emit_ref_descriptor_bit_count(descriptor_refs, rows) == 12
+    assert emit_ref_row(
+        descriptor_refs,
+        descriptor_emit,
+        4095,
+        descriptor_bit_count=12,
+    ) == [
+        ".bytes = {0xff, 0xff, 0xff}",
+    ]
+
+    try:
+        emit_ref_row(
+            descriptor_refs,
+            descriptor_emit,
+            4096,
+            descriptor_bit_count=12,
+        )
+    except ValueError as error:
+        behavior_error = error
+    else:
+        raise AssertionError("expected the emit behavior field bound to be enforced")
+    assert str(behavior_error) == "emit behavior reference exceeds its packed field"
+
+    try:
+        emit_ref_row(
+            descriptor_refs,
+            descriptor_emit,
+            0,
+            descriptor_bit_count=11,
+        )
+    except ValueError as error:
+        descriptor_error = error
+    else:
+        raise AssertionError("expected the descriptor field bound to be enforced")
+    assert str(descriptor_error) == "emit descriptor reference exceeds its packed field"
 
 
 def test_generated_tables_share_bindings_without_merging_descriptors() -> None:
@@ -1020,12 +1064,12 @@ def test_generated_tables_share_bindings_without_merging_descriptors() -> None:
     compiled = compile_lower_rule_set(contract, dialect_ops={"scalar": ALL_SCALAR_OPS})
     generated = generate_lower_rule_set_from_compiled(contract, compiled=compiled)
     emit_rows = generated.source.split("static const loom_low_lower_emit_t ", 1)[1].split("};", 1)[0]
-    emit_refs = generated.source.split("static const loom_low_lower_emit_ref_t ", 1)[1].split("};", 1)[0]
+    emit_refs = generated.source.split("static const loom_low_lower_emit_ref_storage_t ", 1)[1].split("};", 1)[0]
     assert emit_rows.count(".kind = ") == 1
     assert ".descriptor_ref" not in emit_rows
-    assert emit_refs.count(".emit_index = 0,") == 2
-    assert emit_refs.count(".descriptor_ref = 0,") == 1
-    assert emit_refs.count(".descriptor_ref = 1,") == 1
+    assert emit_refs.count(".bytes = {0x01, 0x00, 0x00},") == 1
+    assert emit_refs.count(".bytes = {0x02, 0x00, 0x00},") == 1
+    assert ".emit_ref_descriptor_bit_count = 2," in generated.source
 
     # A different operand-copy contract must retain its own behavior row even
     # when the descriptor and every other field match an existing emit.
@@ -1036,11 +1080,12 @@ def test_generated_tables_share_bindings_without_merging_descriptors() -> None:
     changed = replace(contract, cases=(*contract.cases, copied_case))
     generated = generate_lower_rule_set(changed, dialect_ops={"scalar": ALL_SCALAR_OPS})
     emit_rows = generated.source.split("static const loom_low_lower_emit_t ", 1)[1].split("};", 1)[0]
-    emit_refs = generated.source.split("static const loom_low_lower_emit_ref_t ", 1)[1].split("};", 1)[0]
+    emit_refs = generated.source.split("static const loom_low_lower_emit_ref_storage_t ", 1)[1].split("};", 1)[0]
     assert emit_rows.count(".kind = ") == 2
     assert emit_rows.count(".copy_operand_mask = 1,") == 1
-    assert emit_refs.count(".emit_index = 0,") == 2
-    assert emit_refs.count(".emit_index = 1,") == 1
+    assert emit_refs.count(".bytes = {0x01, 0x00, 0x00},") == 1
+    assert emit_refs.count(".bytes = {0x02, 0x00, 0x00},") == 1
+    assert emit_refs.count(".bytes = {0x05, 0x00, 0x00},") == 1
 
 
 def test_emit_row_spells_target_operand_materialization() -> None:
@@ -1546,7 +1591,7 @@ def test_generate_lower_rule_set_emits_report_key_ordinals() -> None:
     assert ".report_key_ordinal = 1," in generated.source
     assert ".report_key_string_refs = " in generated.source
     assert ".report_key_count = IREE_ARRAYSIZE(" in generated.source
-    assert "static const loom_low_lower_emit_ref_t" in generated.source
+    assert "static const loom_low_lower_emit_ref_storage_t" in generated.source
     assert ".emit_refs = " in generated.source
     assert ".emit_ref_count = IREE_ARRAYSIZE(" in generated.source
     stable_id = descriptor_stable_id(TEST_LOW_ADD_F32_DESCRIPTOR.key)

@@ -26,6 +26,50 @@
 namespace loom {
 namespace {
 
+constexpr uint8_t kTestEmitRefDescriptorBitCount = 8;
+
+loom_low_lower_emit_ref_storage_t MakeTestEmitRef(
+    loom_low_lower_descriptor_ref_t descriptor_ref, uint16_t emit_index) {
+  const uint32_t encoded_descriptor_ref =
+      descriptor_ref == LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE
+          ? 0u
+          : (uint32_t)descriptor_ref + 1u;
+  const uint32_t packed_ref =
+      encoded_descriptor_ref |
+      ((uint32_t)emit_index << kTestEmitRefDescriptorBitCount);
+  return {
+      .bytes =
+          {
+              (uint8_t)packed_ref,
+              (uint8_t)(packed_ref >> 8),
+              (uint8_t)(packed_ref >> 16),
+          },
+  };
+}
+
+TEST(LowLowerRuleStorageTest, EmitReferenceDecodesPackedFieldBounds) {
+  const loom_low_lower_emit_ref_storage_t max_ref = {
+      .bytes = {0xff, 0xff, 0xff},
+  };
+  loom_low_lower_rule_set_t rule_set = {
+      .emit_refs = &max_ref,
+      .emit_ref_count = 1,
+      .emit_ref_descriptor_bit_count = 12,
+  };
+  loom_low_lower_emit_ref_t decoded =
+      loom_low_lower_rule_set_emit_ref_at(&rule_set, 0);
+  EXPECT_EQ(decoded.descriptor_ref, 4094);
+  EXPECT_EQ(decoded.emit_index, 4095);
+
+  const loom_low_lower_emit_ref_storage_t none_ref = {
+      .bytes = {0x00, 0xf0, 0xff},
+  };
+  rule_set.emit_refs = &none_ref;
+  decoded = loom_low_lower_rule_set_emit_ref_at(&rule_set, 0);
+  EXPECT_EQ(decoded.descriptor_ref, LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE);
+  EXPECT_EQ(decoded.emit_index, 4095);
+}
+
 iree_status_t ResolveDescriptorFromArray(
     void* user_data, const loom_low_lower_rule_match_context_t* context,
     const loom_low_lower_rule_set_t* rule_set,
@@ -456,10 +500,8 @@ class LowLowerRuleMatchTest : public ::testing::Test {
       source_nodes[0].guard_count = 1;
     }
     loom_low_lower_emit_t emit = {};
-    const loom_low_lower_emit_ref_t emit_ref = {
-        .descriptor_ref = LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE,
-        .emit_index = 0,
-    };
+    const loom_low_lower_emit_ref_storage_t emit_ref =
+        MakeTestEmitRef(LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE, /*emit_index=*/0);
     const bool has_related_user_chain =
         iree_any_bit_set(flags, kSourceGraphSelectionRelatedUserChain);
     loom_low_lower_rule_t rule = {
@@ -511,6 +553,7 @@ class LowLowerRuleMatchTest : public ::testing::Test {
     if (rule.emit_count != 0) {
       rule_set.emit_refs = &emit_ref;
       rule_set.emit_ref_count = 1;
+      rule_set.emit_ref_descriptor_bit_count = kTestEmitRefDescriptorBitCount;
       rule_set.emits = &emit;
       rule_set.emit_count = 1;
     }
@@ -1300,9 +1343,9 @@ TEST_F(LowLowerRuleMatchTest,
   const loom_low_lower_emit_t emit = {
       .kind = LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP,
   };
-  const loom_low_lower_emit_ref_t emit_refs[] = {
-      {.descriptor_ref = 0, .emit_index = 0},
-      {.descriptor_ref = 1, .emit_index = 0},
+  const loom_low_lower_emit_ref_storage_t emit_refs[] = {
+      MakeTestEmitRef(/*descriptor_ref=*/0, /*emit_index=*/0),
+      MakeTestEmitRef(/*descriptor_ref=*/1, /*emit_index=*/0),
   };
   loom_low_lower_rule_t rules[2] = {};
   rules[0].emit_count = 1;
@@ -1326,6 +1369,7 @@ TEST_F(LowLowerRuleMatchTest,
       .descriptor_ref_count = IREE_ARRAYSIZE(descriptors),
       .emit_refs = emit_refs,
       .emit_ref_count = IREE_ARRAYSIZE(emit_refs),
+      .emit_ref_descriptor_bit_count = kTestEmitRefDescriptorBitCount,
       .emits = &emit,
       .emit_count = 1,
   };

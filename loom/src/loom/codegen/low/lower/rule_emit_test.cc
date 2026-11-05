@@ -27,6 +27,25 @@
 namespace loom {
 namespace {
 
+loom_low_lower_emit_ref_storage_t PackEmitRef(
+    loom_low_lower_emit_ref_t emit_ref, uint8_t descriptor_bit_count) {
+  const uint32_t encoded_descriptor_ref =
+      emit_ref.descriptor_ref == LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE
+          ? 0u
+          : (uint32_t)emit_ref.descriptor_ref + 1u;
+  const uint32_t packed_ref =
+      encoded_descriptor_ref |
+      ((uint32_t)emit_ref.emit_index << descriptor_bit_count);
+  return {
+      .bytes =
+          {
+              (uint8_t)packed_ref,
+              (uint8_t)(packed_ref >> 8),
+              (uint8_t)(packed_ref >> 16),
+          },
+  };
+}
+
 class LowLowerRuleEmitTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -252,7 +271,7 @@ TEST_P(LowLowerWideRuleEmitTest, PlansAndEmitsEveryOperandAndResult) {
       rule_set.rules, rule_set.rules + rule_set.rule_count);
   std::vector<loom_low_lower_emit_t> emits(
       rule_set.emits, rule_set.emits + rule_set.emit_count);
-  std::vector<loom_low_lower_emit_ref_t> emit_refs(
+  std::vector<loom_low_lower_emit_ref_storage_t> emit_refs(
       rule_set.emit_refs, rule_set.emit_refs + rule_set.emit_ref_count);
   std::vector<loom_low_lower_value_ref_t> value_refs(
       rule_set.value_refs, rule_set.value_refs + rule_set.value_ref_count);
@@ -293,7 +312,8 @@ TEST_P(LowLowerWideRuleEmitTest, PlansAndEmitsEveryOperandAndResult) {
     if (rule.emit_count != 1) {
       continue;
     }
-    auto emit_ref = emit_refs[rule.action.emit_start];
+    auto emit_ref =
+        loom_low_lower_rule_set_emit_ref_at(&rule_set, rule.action.emit_start);
     if (emit_ref.descriptor_ref == LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE ||
         rule_set.descriptor_refs[emit_ref.descriptor_ref].stable_id !=
             loom_low_descriptor_stable_id(&descriptor_set, &descriptor)) {
@@ -330,7 +350,8 @@ TEST_P(LowLowerWideRuleEmitTest, PlansAndEmitsEveryOperandAndResult) {
     rule.action.emit_start = static_cast<uint16_t>(emit_refs.size());
     emit_ref.emit_index = static_cast<uint16_t>(emits.size());
     emits.push_back(emit);
-    emit_refs.push_back(emit_ref);
+    emit_refs.push_back(
+        PackEmitRef(emit_ref, rule_set.emit_ref_descriptor_bit_count));
     ++replaced_count;
   }
   ASSERT_GT(replaced_count, 0u);
