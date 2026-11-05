@@ -546,28 +546,12 @@ static iree_status_t iree_hal_amd_gpu_file_staging_query_effects(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_amd_gpu_file_staging_queue_effect(
-    const iree_hal_memory_transition_recipe_info_t* recipe, bool release,
-    iree_hal_memory_effects_t* effects) {
-  if (recipe->kind == IREE_HAL_MEMORY_TRANSITION_KIND_NONE) {
-    return iree_ok_status();
-  }
-  if (recipe->kind != IREE_HAL_MEMORY_TRANSITION_KIND_GLOBAL ||
-      recipe->executor != IREE_HAL_MEMORY_TRANSITION_EXECUTOR_QUEUE) {
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "file copy requires unsupported queue visibility");
-  }
-  effects->bits |= release ? IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM
-                           : IREE_HAL_MEMORY_EFFECT_GLOBAL_ACQUIRE_FROM_SYSTEM;
-  return iree_ok_status();
-}
-
 iree_status_t iree_hal_amd_gpu_file_staging_prepare(
     iree_hal_amd_gpu_file_staging_t* staging,
-    const iree_hal_queue_family_t* family, uint32_t native_family_ordinal,
+    const iree_hal_queue_family_t* family,
     iree_hal_amd_fabric_file_transfer_t* transfer,
     iree_hal_memory_effects_t* before, iree_hal_memory_effects_t* after) {
-  if (!staging || !transfer->sources.count) {
+  if (!staging) {
     return iree_make_status(
         IREE_STATUS_UNAVAILABLE,
         "file copy requires native SDMA and file-capable staging");
@@ -587,53 +571,48 @@ iree_status_t iree_hal_amd_gpu_file_staging_prepare(
           iree_hal_buffer_family_usage(transfer->buffer, family)) &
       IREE_HAL_MEMORY_ACCESS_WRITE;
   const bool acquire = transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ;
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0;
-       i < transfer->sources.count && iree_status_is_ok(status); ++i) {
-    iree_hal_amd_fabric_file_range_t* range = &transfer->sources.ranges[i];
-    if (range->contents.data) {
-      continue;
-    }
-    const amdf_memory_site_t device = {
-        .type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
-        .structure_size = sizeof(device),
-        .kind = AMDF_MEMORY_SITE_KIND_DEVICE,
-        .value.device = {.memory = range->storage->handle,
-                         .access_ordinal = range->access_ordinal,
-                         .queue_family_ordinal = native_family_ordinal}};
-    amdf_memory_site_t copy = device;
-    copy.value.device.queue_family_ordinal = staging->family_ordinal;
-    for (uint32_t edge = 0; edge < 2 && iree_status_is_ok(status); ++edge) {
-      if (edge == 0 ? !release : !acquire) {
-        continue;
-      }
-      amdf_memory_pair_info_t native = {
-          .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
-          .structure_size = sizeof(native)};
-      status = IREE_HAL_AMD_STATUS_FROM_AMDF(
-          staging->context->api->memory_query_pair_info(
-              edge ? &copy : &device, edge ? &device : &copy, &native),
-          "memory_query_pair_info(file copy)");
-      iree_hal_memory_pair_info_t pair;
-      if (iree_status_is_ok(status)) {
-        status = iree_hal_amd_fabric_memory_translate_pair(&native, &pair);
-      }
-      if (iree_status_is_ok(status)) {
-        status = iree_hal_amd_gpu_file_staging_queue_effect(
-            &pair.release, true, edge ? &range->effects : before);
-      }
-      if (iree_status_is_ok(status)) {
-        status = iree_hal_amd_gpu_file_staging_queue_effect(
-            &pair.acquire, false, edge ? after : &range->effects);
-      }
-    }
-    if (iree_status_is_ok(status) && range->effects.bits &&
-        !iree_hal_amd_gpu_sdma_queue_supports_cache_control(staging->queue)) {
-      status = iree_make_status(IREE_STATUS_UNAVAILABLE,
-                                "SDMA family lacks required cache operations");
-    }
+  const iree_hal_memory_contract_t* contract =
+      transfer->buffer->memory.contract;
+  if (contract->backend_type != IREE_HAL_MEMORY_BACKEND_AMDF ||
+      !contract->backend_data) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "buffer has no qualified copy-engine protocol");
   }
-  return status;
+  const iree_hal_amd_fabric_memory_copy_protocol_t* protocol =
+      (const iree_hal_amd_fabric_memory_copy_protocol_t*)
+          contract->backend_data +
+      family->memory.queue_scope_id;
+  iree_hal_memory_effects_t effects = {0};
+  iree_hal_memory_effects_t begin = {0}, end = {0};
+  if (release) {
+    begin = protocol->begin.release;
+    effects = iree_hal_memory_effects_combine(effects, protocol->begin.acquire);
+  }
+  if (acquire) {
+    end = protocol->end.acquire;
+    effects = iree_hal_memory_effects_combine(effects, protocol->end.release);
+  }
+  if (!iree_hal_memory_effects_is_supported(begin) ||
+      !iree_hal_memory_effects_is_supported(end) ||
+      !iree_hal_memory_effects_is_supported(effects) ||
+      (effects.bits &&
+       !iree_hal_amd_gpu_sdma_queue_supports_cache_control(staging->queue))) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "file copy requires unsupported queue visibility");
+  }
+  // Virtual destinations need only one address range. Its immutable contract
+  // already covers every declared backing source; no installed-source lookup
+  // or native pair query occurs on the I/O path.
+  if (!transfer->source.contents.data_length) {
+    transfer->source = (iree_hal_amd_fabric_file_source_t){
+        .contents = iree_make_byte_span(NULL, transfer->length)};
+  }
+  if (!transfer->source.contents.data) {
+    transfer->source.effects = effects;
+  }
+  *before = iree_hal_memory_effects_combine(*before, begin);
+  *after = iree_hal_memory_effects_combine(*after, end);
+  return iree_ok_status();
 }
 
 // Native extents include prefix/granularity, not merely the usable lane bytes.

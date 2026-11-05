@@ -737,12 +737,18 @@ TEST_P(GpuFilePoolTest,
          .byte_length = unit,
          .memory = pool->memory,
          .access = access,
-         .source_byte_offset = input_slot * unit},
+         .source_byte_offset = input_slot * unit,
+         .previous_memory = generation ? pool->memory : nullptr,
+         .previous_source_byte_offset =
+             generation ? (1 + 2 * ((generation - 1) % 2)) * unit : 0},
         {.target_byte_offset = unit,
          .byte_length = unit,
          .memory = pool->memory,
          .access = access,
-         .source_byte_offset = output_slot * unit},
+         .source_byte_offset = output_slot * unit,
+         .previous_memory = generation ? pool->memory : nullptr,
+         .previous_source_byte_offset =
+             generation ? (5 + 2 * ((generation - 1) % 2)) * unit : 0},
     }};
     // The previous iteration retired its final GPU reader before rebinding.
     ASSERT_EQ(api_->memory_reservation_update(pool_reservation_, 0,

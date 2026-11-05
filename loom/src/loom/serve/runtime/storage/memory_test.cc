@@ -2007,8 +2007,25 @@ TEST_F(MemoryTest, NativeAllocationFailurePreservesWarmWorkAndAllowsRetry) {
 
   native.FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC,
                             /*native_only=*/true);
+  const loom_serve_memory_range_t range = {second, 0, kSlabSize};
+  loom_serve_memory_admission_t admission;
+  loom_serve_memory_operation_t* operation = nullptr;
+  IREE_ASSERT_OK(loom_serve_memory_pool_commit_async(
+      pool, 1, &range, nullptr, 0, &admission, &operation));
+  ASSERT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE);
+  loom_serve_memory_operation_await(operation);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
-                        loom_serve_virtual_buffer_commit(second, 0, kSlabSize));
+                        loom_serve_memory_operation_query_status(operation));
+  // Parameter submission can capture the promised source after an allocation
+  // has already failed. Completion must leave that handle owned by the
+  // operation until the caller has captured it and joined the failure.
+  iree_hal_buffer_t* backing =
+      loom_serve_memory_operation_backing(operation, 0);
+  ASSERT_NE(backing, nullptr);
+  iree_hal_buffer_retain(backing);
+  loom_serve_memory_operation_free(operation);
+  EXPECT_EQ(iree_hal_buffer_byte_length(backing), kSlabSize);
+  iree_hal_buffer_release(backing);
   IREE_EXPECT_OK(loom_serve_memory_pool_query_status(pool));
   EXPECT_EQ(statistics[1].pending_bytes, 0u);
   EXPECT_EQ(statistics[1].committed_bytes, 0u);

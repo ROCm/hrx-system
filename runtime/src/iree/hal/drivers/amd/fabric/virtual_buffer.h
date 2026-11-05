@@ -8,7 +8,6 @@
 #define IREE_HAL_DRIVERS_AMD_FABRIC_VIRTUAL_BUFFER_H_
 
 #include "amdf/amdf.h"
-#include "iree/hal/drivers/amd/fabric/mapping_index.h"
 #include "iree/hal/memory_backend.h"
 #include "iree/hal/virtual_buffer.h"
 
@@ -33,20 +32,6 @@ iree_status_t iree_hal_amd_fabric_virtual_buffer_create(
     iree_hal_pool_scope_t scope, iree_hal_virtual_buffer_sources_t sources,
     const iree_hal_virtual_buffer_options_t* options,
     iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer);
-
-// Resolves the mapped prefix of a nonempty range in a native AMDF view.
-// The returned source offset is native-memory-relative; length stops at the
-// next source boundary. The access ordinal names the exact consumer of
-// scope_id, including when several consumers share one page table. The caller
-// orders mapping changes against the range's use and keeps its physical sources
-// live. No backing is retained. A short metadata lock protects the indexed
-// lookup; native calls and payload access occur only after it returns. Holes
-// and failed native mapping groups report errors instead of returning stale
-// sources.
-iree_status_t iree_hal_amd_fabric_virtual_buffer_query_source(
-    iree_hal_virtual_buffer_view_t view, uint32_t scope_id,
-    iree_device_size_t offset, iree_device_size_t length,
-    iree_hal_amd_fabric_virtual_mapping_t* out_mapping);
 
 #ifdef __cplusplus
 }  // extern "C"

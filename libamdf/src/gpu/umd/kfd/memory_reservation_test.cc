@@ -18,6 +18,7 @@
 #include <cstdarg>
 #include <cstring>
 #include <functional>
+#include <initializer_list>
 #include <semaphore>
 #include <thread>
 #include <vector>
@@ -339,10 +340,11 @@ class KfdMemoryReservationTest : public ::testing::Test {
         reservation_, 0, &address_, &owner, &granularity, &required_access);
   }
 
-  amdf_status_t Clear() {
+  amdf_status_t Clear(amdf_gpu_umd_memory_t* previous = nullptr) {
     const amdf_gpu_umd_mapping_update_t update = {
         .target_byte_offset = 4096,
         .byte_length = 4096,
+        .previous_memory = previous,
     };
     bool mutation_started = false;
     const auto status = amdf_gpu_umd_memory_reservation_update(
@@ -356,7 +358,7 @@ class KfdMemoryReservationTest : public ::testing::Test {
     return status;
   }
 
-  void CreateSource() {
+  void CreateSource(uint64_t byte_length = 8192) {
     const amdf_memory_native_profile_t profile = {
         .memory_class = AMDF_MEMORY_CLASS_LOCAL,
         .roles = AMDF_MEMORY_PROFILE_ROLE_CREATE,
@@ -365,7 +367,7 @@ class KfdMemoryReservationTest : public ::testing::Test {
         .device_access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
                          AMDF_MEMORY_ACCESS_EXECUTE,
         .required_flags = AMDF_MEMORY_FLAG_MAPPING_SOURCE,
-        .byte_length = 8192,
+        .byte_length = byte_length,
         .minimum_alignment = 4096,
     };
     amdf_gpu_umd_memory_result_t result;
@@ -373,6 +375,20 @@ class KfdMemoryReservationTest : public ::testing::Test {
     ASSERT_EQ(amdf_gpu_umd_memory_prepare(&device_, 0, nullptr, &profile, &info,
                                           &sources_.back(), &result),
               AMDF_STATUS_OK);
+  }
+
+  void Update(std::initializer_list<amdf_gpu_umd_mapping_update_t> updates,
+              std::vector<uint32_t> expected_handles,
+              uint32_t access_ordinal = 0) {
+    native_.publications.clear();
+    bool mutation_started = false;
+    ASSERT_EQ(amdf_gpu_umd_memory_reservation_update(
+                  reservation_, access_ordinal, updates.size(), updates.begin(),
+                  &mutation_started),
+              AMDF_STATUS_OK);
+    EXPECT_TRUE(mutation_started);
+    ASSERT_EQ(native_.publications.size(), 1u);
+    EXPECT_EQ(native_.publications[0].first, expected_handles);
   }
 
   // Shared connection admission, borrowed by every modeled native caller.
@@ -442,6 +458,182 @@ TEST_F(KfdMemoryReservationTest, PublishesEachBackingOnceWithExactMappings) {
     EXPECT_EQ(actual.operation,
               updates[i].memory ? AMDGPU_VA_OP_REPLACE : AMDGPU_VA_OP_CLEAR);
     EXPECT_EQ(actual.flags, AMDGPU_VM_DELAY_UPDATE | permissions[i]);
+  }
+}
+
+TEST_F(KfdMemoryReservationTest, PartialRemovalPublishesSurvivingSource) {
+  constexpr uint64_t kLength = 4 * 1024 * 1024;
+  ASSERT_NO_FATAL_FAILURE(Create(kLength));
+  ASSERT_NO_FATAL_FAILURE(CreateSource(kLength));
+  const amdf_gpu_umd_mapping_update_t mapped = {
+      .byte_length = kLength,
+      .memory = sources_[0],
+      .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+  };
+  bool mutation_started = false;
+  ASSERT_EQ(amdf_gpu_umd_memory_reservation_update(reservation_, 0, 1, &mapped,
+                                                   &mutation_started),
+            AMDF_STATUS_OK);
+  native_.publications.clear();
+  // Splitting a huge native leaf invalidates its surviving prefix/suffix.
+  // Their source must participate in the same publication as the hole.
+  ASSERT_EQ(Clear(sources_[0]), AMDF_STATUS_OK);
+  ASSERT_EQ(native_.publications.size(), 1u);
+  EXPECT_EQ(native_.publications[0].first, (std::vector<uint32_t>{29, 30}));
+}
+
+TEST_F(KfdMemoryReservationTest, RepeatedSplitsPublishCallerOwnedSource) {
+  ASSERT_NO_FATAL_FAILURE(Create());
+  ASSERT_NO_FATAL_FAILURE(CreateSource(32768));
+  ASSERT_NO_FATAL_FAILURE(Update({{
+                                     .byte_length = 32768,
+                                     .memory = sources_[0],
+                                     .access = AMDF_MEMORY_ACCESS_READ,
+                                 }},
+                                 {29, 30}));
+  // The caller already owns the backing being edited, including when a prior
+  // edit split a large native leaf or removed an adjacent range.
+  for (uint64_t offset : {4096u, 0u, 12288u, 16384u, 28672u}) {
+    ASSERT_NO_FATAL_FAILURE(Update({{
+                                       .target_byte_offset = offset,
+                                       .byte_length = 4096,
+                                       .previous_memory = sources_[0],
+                                   }},
+                                   {29, 30}));
+  }
+  ASSERT_EQ(amdf_gpu_umd_memory_reservation_detach(reservation_, 0),
+            AMDF_STATUS_OK);
+}
+
+TEST_F(KfdMemoryReservationTest, ReplacementPublishesBothSurvivingSources) {
+  ASSERT_NO_FATAL_FAILURE(Create());
+  for (int i = 0; i < 3; ++i) {
+    ASSERT_NO_FATAL_FAILURE(CreateSource(16384));
+  }
+  ASSERT_NO_FATAL_FAILURE(Update({{
+                                      .byte_length = 16384,
+                                      .memory = sources_[0],
+                                      .access = AMDF_MEMORY_ACCESS_READ,
+                                  },
+                                  {
+                                      .target_byte_offset = 16384,
+                                      .byte_length = 16384,
+                                      .memory = sources_[1],
+                                      .access = AMDF_MEMORY_ACCESS_READ,
+                                  }},
+                                 {29, 30, 31}));
+  // One transaction crosses two prior sources. The owner splits descriptors
+  // at that boundary while publication still covers the complete transaction.
+  ASSERT_NO_FATAL_FAILURE(Update({{
+                                      .target_byte_offset = 8192,
+                                      .byte_length = 8192,
+                                      .memory = sources_[2],
+                                      .access = AMDF_MEMORY_ACCESS_READ,
+                                      .previous_memory = sources_[0],
+                                  },
+                                  {
+                                      .target_byte_offset = 16384,
+                                      .byte_length = 8192,
+                                      .memory = sources_[2],
+                                      .source_byte_offset = 8192,
+                                      .access = AMDF_MEMORY_ACCESS_READ,
+                                      .previous_memory = sources_[1],
+                                  }},
+                                 {29, 30, 31, 32}));
+  ASSERT_NO_FATAL_FAILURE(Update({{
+                                     .target_byte_offset = 8192,
+                                     .byte_length = 16384,
+                                     .memory = sources_[0],
+                                     .access = AMDF_MEMORY_ACCESS_WRITE,
+                                     .previous_memory = sources_[2],
+                                 }},
+                                 {29, 30, 32}));
+  ASSERT_NO_FATAL_FAILURE(Update({{
+                                     .target_byte_offset = 8192,
+                                     .byte_length = 16384,
+                                     .previous_memory = sources_[0],
+                                 }},
+                                 {29, 30}));
+}
+
+TEST_F(KfdMemoryReservationTest, AliasedConsumersShareSplitSources) {
+  amdf_gpu_umd_device_t alias = device_;
+  amdf_gpu_umd_device_t* devices[] = {&device_, &alias};
+  ASSERT_EQ(
+      amdf_gpu_umd_memory_reservation_create(
+          amdf_allocator_system(), 2, devices, 32768, 4096, 0, &reservation_),
+      AMDF_STATUS_OK);
+  ASSERT_NO_FATAL_FAILURE(CreateSource(32768));
+  ASSERT_NO_FATAL_FAILURE(Update({{
+                                     .byte_length = 32768,
+                                     .memory = sources_[0],
+                                     .access = AMDF_MEMORY_ACCESS_READ,
+                                 }},
+                                 {29, 30}, 1));
+  ASSERT_NO_FATAL_FAILURE(Update({{
+                                     .target_byte_offset = 4096,
+                                     .byte_length = 4096,
+                                     .previous_memory = sources_[0],
+                                 }},
+                                 {29, 30}, 0));
+  ASSERT_NO_FATAL_FAILURE(Update({{
+                                     .target_byte_offset = 12288,
+                                     .byte_length = 4096,
+                                     .previous_memory = sources_[0],
+                                 }},
+                                 {29, 30}, 1));
+  ASSERT_EQ(amdf_gpu_umd_memory_reservation_detach(reservation_, 1),
+            AMDF_STATUS_OK);
+  ASSERT_NO_FATAL_FAILURE(
+      Update({{.target_byte_offset = 20480, .byte_length = 4096}}, {29}, 0));
+  // Consume the reservation before the borrowed alias leaves scope.
+  EXPECT_EQ(amdf_gpu_umd_memory_reservation_destroy(reservation_),
+            AMDF_STATUS_OK);
+  reservation_ = nullptr;
+}
+
+TEST_F(KfdMemoryReservationTest,
+       SplitPublicationKeepsAllSourcesBeforeBatchLimit) {
+  constexpr uint32_t kBatchCapacity = 128 * 1024 - 1;
+  constexpr uint32_t kCount = kBatchCapacity / 2 + 2;
+  ASSERT_NO_FATAL_FAILURE(Create(uint64_t{kCount} * 16384));
+  for (int i = 0; i < 3; ++i) {
+    ASSERT_NO_FATAL_FAILURE(CreateSource());
+  }
+  std::vector<amdf_gpu_umd_mapping_update_t> updates(kCount);
+  for (uint32_t i = 0; i < kCount; ++i) {
+    updates[i] = {
+        .target_byte_offset = uint64_t{i} * 8192,
+        .byte_length = 8192,
+        .memory = sources_[i % 2],
+        .access = AMDF_MEMORY_ACCESS_READ,
+    };
+  }
+  bool mutation_started = false;
+  ASSERT_EQ(
+      amdf_gpu_umd_memory_reservation_update(reservation_, 0, updates.size(),
+                                             updates.data(), &mutation_started),
+      AMDF_STATUS_OK);
+  native_.publications.clear();
+  native_.mutations.clear();
+  for (uint32_t i = 0; i < kCount; ++i) {
+    updates[i] = {
+        .target_byte_offset = uint64_t{i} * 8192 + 4096,
+        .byte_length = 4096,
+        .memory = sources_[2],
+        .access = AMDF_MEMORY_ACCESS_READ,
+        .previous_memory = sources_[i % 2],
+    };
+  }
+  ASSERT_EQ(
+      amdf_gpu_umd_memory_reservation_update(reservation_, 0, updates.size(),
+                                             updates.data(), &mutation_started),
+      AMDF_STATUS_OK);
+  ASSERT_EQ(native_.publications.size(), 2u);
+  EXPECT_EQ(native_.publications[0].second, kBatchCapacity / 2);
+  EXPECT_EQ(native_.publications[1].second, kCount);
+  for (const auto& publication : native_.publications) {
+    EXPECT_EQ(publication.first, (std::vector<uint32_t>{29, 30, 31, 32}));
   }
 }
 

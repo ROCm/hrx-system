@@ -691,6 +691,8 @@ void GpuNativeFileTest::BufferedRoundTrip(size_t length) {
     // the old slabs while this shader and write-back use the new page tables.
     uint64_t seven = 7, eight = 8, nine = 9, ten = 10, eleven = 11, twelve = 12;
     for (size_t i = 0; i < mappings_.size(); ++i) {
+      mappings_[i].previous_source = mappings_[i].source;
+      mappings_[i].previous_source_offset = mappings_[i].source_offset;
       mappings_[i].source = sources_[(i + 1) % sources_.size()];
       mappings_[i].source_offset *= 2;
       mappings_[i].operation = IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE;
@@ -710,10 +712,12 @@ void GpuNativeFileTest::BufferedRoundTrip(size_t length) {
     expected[accumulated_index] += 11;
     ASSERT_NO_FATAL_FAILURE(ExpectFile(expected));
 
-    // An unmapped middle range rejects the whole operation during preparation,
-    // before an earlier readable prefix can alter the destination file.
+    // File operations obey the same mapped-range precondition as dispatches.
+    // An unrelated hole does not prevent I/O over the surviving mapped prefix.
     if (mappings_.size() > 1) {
       auto hole = mappings_[1];
+      hole.previous_source = hole.source;
+      hole.previous_source_offset = hole.source_offset;
       hole.source = nullptr;
       hole.source_offset = 0;
       hole.access = 0;
@@ -722,10 +726,9 @@ void GpuNativeFileTest::BufferedRoundTrip(size_t length) {
                                         {1, &semaphore, &eleven}, 1, &hole, 0));
       IREE_ASSERT_OK(iree_hal_queue_write(
           queues_[0], {1, &semaphore, &eleven}, {1, &semaphore, &twelve},
-          buffer, kBufferOffset, file, 64, length, &barriers_, 0));
-      IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
-                            iree_hal_semaphore_wait(
-                                timeline_, twelve, iree_infinite_timeout(), 0));
+          buffer, kBufferOffset, file, 64,
+          hole.target_range.byte_offset - kBufferOffset, &barriers_, 0));
+      ASSERT_NO_FATAL_FAILURE(Wait(twelve));
       ASSERT_NO_FATAL_FAILURE(ExpectFile(expected));
     }
   }
@@ -1739,6 +1742,8 @@ TEST_P(GpuNativeRegisteredFileProgressTest,
   uint64_t one = 1, two = 2, three = 3, four = 4;
   auto unmaps = mappings_;
   for (auto& mapping : unmaps) {
+    mapping.previous_source = mapping.source;
+    mapping.previous_source_offset = mapping.source_offset;
     mapping.source = nullptr;
     mapping.source_offset = 0;
     mapping.access = 0;

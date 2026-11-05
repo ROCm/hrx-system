@@ -558,6 +558,8 @@ TEST_P(VulkanSparseBindingTest, QueueMapCapturesPendingAllocations) {
 
   auto replacement = protection;
   replacement.operation = IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE;
+  replacement.previous_source = replacement.source;
+  replacement.previous_source_offset = replacement.source_offset;
   replacement.source_offset = granularity;
   SemaphoreList replaced(device_, {0}, {1});
   IREE_ASSERT_OK(iree_hal_queue_map(&sparse_queue_->base, restored, replaced, 1,
@@ -582,9 +584,9 @@ TEST_P(VulkanSparseBindingTest, QueueMapCapturesPendingAllocations) {
   IREE_ASSERT_OK(iree_hal_virtual_buffer_query_info(targets[0], &info));
   EXPECT_EQ(info.mapping_granularity, capabilities_.mapping_granularity);
 
-  // General detach may span installed pages and holes. Backing is released
-  // only after the entire batch has detached and all readers have completed.
-  std::array<iree_hal_memory_mapping_t, 2> detach = {{
+  // Queue edits retain the known old source at each source boundary. The first
+  // reservation was detached above and therefore contains only holes.
+  std::array<iree_hal_memory_mapping_t, 3> detach = {{
       {
           .target = reservations_[0],
           .scope = scope,
@@ -593,8 +595,21 @@ TEST_P(VulkanSparseBindingTest, QueueMapCapturesPendingAllocations) {
       {
           .target = reservations_[1],
           .scope = scope,
-          .target_range = {.byte_length = 2 * granularity},
+          .target_range = {.byte_length = granularity},
           .operation = IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND,
+          .previous_source = source,
+          .previous_source_offset = 3 * granularity,
+      },
+      {
+          .target = reservations_[1],
+          .scope = scope,
+          .target_range =
+              {
+                  .byte_offset = granularity,
+                  .byte_length = granularity,
+              },
+          .operation = IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND,
+          .previous_source = source,
       },
   }};
   SemaphoreList detached(device_, {0}, {1});

@@ -1224,6 +1224,12 @@ iree_host_size_t loom_serve_virtual_buffer_slab_count(
   return buffer->slab_count;
 }
 
+iree_hal_buffer_t* loom_serve_virtual_buffer_backing(
+    const loom_serve_virtual_buffer_t* buffer, iree_host_size_t slab_index) {
+  return loom_serve_backing_directory_find_const(&buffer->backing, slab_index)
+      ->physical;
+}
+
 loom_serve_memory_demand_t loom_serve_virtual_buffer_missing_demand(
     const loom_serve_virtual_buffer_t* buffer) {
   loom_serve_memory_demand_t demand = {0};
@@ -1438,8 +1444,6 @@ static void loom_serve_memory_operation_complete(
       // Failed batches can have installed a subset. Checked whole-target
       // detach owns recovery after all consumers and captured work retire.
       result->mapped = true;
-    } else {
-      iree_hal_buffer_release(operation->sources[i]);
     }
   }
   iree_status_t status = iree_status_join(operation->stages[0].status,
@@ -1594,6 +1598,7 @@ static void loom_serve_memory_operation_enqueue(
         .operation = operation->releasing
                          ? IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND
                          : IREE_HAL_MEMORY_MAPPING_OPERATION_BIND,
+        .previous_source = operation->releasing ? operation->sources[i] : NULL,
     };
     if (operation->growing) {
       operation->mappings[i].source = operation->sources[i];
@@ -1616,6 +1621,7 @@ static void loom_serve_memory_operation_enqueue(
     for (iree_host_size_t i = 0; i < operation->count; ++i) {
       operation->mappings[i].target = operation->growing->previous_handle;
       operation->mappings[i].source = NULL;
+      operation->mappings[i].previous_source = operation->sources[i];
       operation->mappings[i].access = IREE_HAL_MEMORY_ACCESS_NONE;
       operation->mappings[i].operation =
           IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND;
@@ -1967,10 +1973,26 @@ iree_status_t loom_serve_memory_operation_query_status(
   return operation ? iree_status_clone(operation->status) : iree_ok_status();
 }
 
+iree_hal_buffer_t* loom_serve_memory_operation_backing(
+    const loom_serve_memory_operation_t* operation,
+    iree_host_size_t edit_index) {
+  return operation->sources[edit_index];
+}
+
 void loom_serve_memory_operation_free(
     loom_serve_memory_operation_t* operation) {
   if (operation) {
     IREE_ASSERT(loom_serve_memory_operation_is_published(operation));
+    for (iree_host_size_t i = 0;
+         !operation->releasing && !operation->growing && i < operation->count;
+         ++i) {
+      if (!operation->edits[i].result.physical) {
+        // Failed allocations never transferred source ownership to the
+        // reservation. Keep their handles capturable until this operation
+        // retires, including when failure completes before submission returns.
+        iree_hal_buffer_release(operation->sources[i]);
+      }
+    }
     iree_notification_deinitialize(&operation->notification);
     iree_slim_mutex_deinitialize(&operation->mutex);
     iree_hal_semaphore_release(operation->stages[0].semaphore);

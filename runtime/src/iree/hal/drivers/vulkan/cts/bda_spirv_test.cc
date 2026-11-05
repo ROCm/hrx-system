@@ -1596,7 +1596,10 @@ TEST_P(BdaSpirvTest, CommandBufferExecutesBdaShaderWithSparseBindings) {
                                                             12, -1, -1}));
 
   for (auto& mapping : mappings) {
+    mapping.previous_source = mapping.source;
+    mapping.previous_source_offset = mapping.source_offset;
     mapping.source = nullptr;
+    mapping.source_offset = 0;
     mapping.access = IREE_HAL_MEMORY_ACCESS_NONE;
     mapping.operation = IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND;
   }

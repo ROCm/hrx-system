@@ -790,9 +790,11 @@ typedef struct amdf_api_t {
   /// Validation failure changes nothing. A native failure can leave partial
   /// mappings and makes the affected native mapping group unusable except for
   /// full-group detach or terminal destruction. Old and proposed backing stay
-  /// alive until checked removal succeeds. The library retains no source
-  /// objects or backing identities. A provider may retain native view handles
-  /// in pre-sized reservation-local storage to support independent removal.
+  /// alive until checked removal succeeds. Each update describes its previous
+  /// and desired backing; the caller owns that installed-state information.
+  /// The library retains no source objects or backing identities after update
+  /// completion and maintains no installed-source index. Native view handles
+  /// required for address-space operations remain reservation-owned.
   /// This cold operation may allocate temporary descriptors, register native
   /// views, lock native VM mutation and wait for mapping readiness. None of
   /// this work occurs on dispatch. Zero updates is empty on a healthy

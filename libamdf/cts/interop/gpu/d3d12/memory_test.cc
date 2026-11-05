@@ -594,6 +594,9 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
               .memory = imported_memory_,
               .access = access.access,
               .source_byte_offset = source_offset - prefix,
+              .previous_memory = generation ? imported_memory_ : nullptr,
+              .previous_source_byte_offset =
+                  generation ? granularity - prefix : 0,
           },
           {
               .target_byte_offset = granularity,
@@ -601,6 +604,9 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
               .memory = imported_memory_,
               .access = access.access,
               .source_byte_offset = destination_offset - prefix,
+              .previous_memory = generation ? imported_memory_ : nullptr,
+              .previous_source_byte_offset =
+                  generation ? 2 * granularity - prefix : 0,
           },
       }};
       if (publication == MappingPublication::kQueueOrdered) {

@@ -229,6 +229,7 @@ iree_status_t iree_hal_amd_xdna_device_create(
          .address_kind = AMDF_MEMORY_ADDRESS_XDNA_DMA},
     };
     device->memory.family = (iree_hal_amd_fabric_memory_family_t){
+        .copy_family_ordinal = UINT32_MAX,
         .queue_family_ordinal = context->queue_family_ordinal,
         .supported_usage =
             IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH,

@@ -897,11 +897,12 @@ typedef struct hrx_virtual_buffer_sources_t {
 
 // Caller-declared prior state. No installed-source table is maintained by HRX.
 typedef enum hrx_memory_mapping_operation_t {
-  // Replaces the interval, including holes; a NULL source clears it.
+  // Replaces one homogeneous prior-source interval, including a hole.
+  // A NULL source clears it; previous_source identifies the old backing.
   HRX_MEMORY_MAPPING_OPERATION_REPLACE = 0,
   // Binds a non-NULL source into an interval the caller knows is unbound.
   HRX_MEMORY_MAPPING_OPERATION_BIND = 1,
-  // Removes a complete binding; requires NULL source and NONE access.
+  // Removes a binding; requires previous_source, NULL source, and NONE access.
   HRX_MEMORY_MAPPING_OPERATION_UNBIND = 2,
   // Changes permissions, supplying the currently installed source and offset.
   HRX_MEMORY_MAPPING_OPERATION_PROTECT = 3,
@@ -1027,6 +1028,11 @@ typedef struct hrx_memory_mapping_t {
   hrx_memory_access_t access;
   // Caller-declared operation and prior binding state.
   hrx_memory_mapping_operation_t operation;
+  // Borrowed prior backing for REPLACE or UNBIND, or NULL for a hole.
+  // BIND and PROTECT require NULL; PROTECT uses source as the prior backing.
+  hrx_buffer_t previous_source;
+  // Byte offset within previous_source; zero when previous_source is NULL.
+  size_t previous_source_offset;
 } hrx_memory_mapping_t;
 
 typedef uint64_t hrx_queue_map_flags_t;
@@ -1036,7 +1042,10 @@ typedef uint64_t hrx_queue_map_flags_t;
 // Submits the entire descriptor vector with the supplied dependencies. Arrays
 // are captured before returning. Native changes complete before signals become
 // satisfied; queue submission order alone does not establish ordering. An empty
-// batch is a dependency edge. Backing must remain live while installed.
+// batch is a dependency edge. Backing must remain live while installed; both
+// prior and desired backing remain live through terminal completion. Each edit
+// covers one homogeneous prior-source and desired-source range. The caller
+// splits edits at its existing source boundaries; HRX keeps no mapping ledger.
 // BORROW_BUFFERS also omits the optional HAL wrapper retention through
 // completion. Captured target references keep their address range live; neither
 // mode retains backing after completion or extends an ended allocation epoch.

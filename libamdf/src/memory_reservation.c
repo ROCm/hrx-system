@@ -341,10 +341,61 @@ static int amdf_memory_mapping_compare(const void* a, const void* b) {
 
 // This is the public range/ownership boundary. Native providers consume these
 // established facts directly and add only their concrete native source checks.
+static amdf_status_t amdf_memory_reservation_validate_source(
+    const amdf_memory_reservation_access_state_t* target,
+    const amdf_memory_t* memory, uint32_t access_ordinal,
+    uint64_t source_byte_offset, uint64_t byte_length,
+    amdf_memory_access_t access) {
+  const uint64_t granularity = target->info.mapping_granularity;
+  if (memory == NULL) {
+    return access_ordinal == 0 && access == 0 && source_byte_offset == 0
+               ? AMDF_STATUS_OK
+               : amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  if (source_byte_offset > memory->info.byte_length ||
+      byte_length > memory->info.byte_length - source_byte_offset) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
+  }
+  if ((memory->info.source_byte_offset + source_byte_offset) % granularity !=
+      0) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  if (target->device == NULL) {
+    if (access_ordinal != 0) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+    }
+    const amdf_memory_map_flags_t required =
+        ((access & AMDF_MEMORY_ACCESS_READ) != 0 ? AMDF_MEMORY_MAP_FLAG_READ
+                                                 : 0) |
+        ((access & AMDF_MEMORY_ACCESS_WRITE) != 0 ? AMDF_MEMORY_MAP_FLAG_WRITE
+                                                  : 0);
+    return (memory->info.flags & AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE) != 0 &&
+                   (required & ~memory->host_mapping.supported_access) == 0
+               ? AMDF_STATUS_OK
+               : amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  if (access_ordinal >= memory->info.access_count) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
+  }
+  const amdf_memory_access_state_t* source = &memory->accesses[access_ordinal];
+  if (source->device != target->device ||
+      source->info.address_domain_ordinal !=
+          target->info.address_domain_ordinal ||
+      (source->info.flags & AMDF_MEMORY_FLAG_MAPPING_SOURCE) == 0 ||
+      (access & ~source->info.access) != 0) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  return AMDF_STATUS_OK;
+}
+
 static amdf_status_t amdf_memory_reservation_validate_update(
+    const amdf_memory_reservation_t* reservation,
     const amdf_memory_reservation_access_state_t* target,
     const amdf_memory_mapping_update_t* update) {
   const uint64_t granularity = target->info.mapping_granularity;
+  if (update->reserved != 0) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
   if (update->byte_length == 0 ||
       update->target_byte_offset > target->info.byte_length ||
       update->byte_length >
@@ -355,54 +406,50 @@ static amdf_status_t amdf_memory_reservation_validate_update(
            target->info.byte_length - update->target_byte_offset)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
   }
-  if (update->memory == NULL) {
-    return update->memory_access_ordinal == 0 && update->access == 0 &&
-                   update->source_byte_offset == 0
-               ? AMDF_STATUS_OK
-               : amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
-  }
-  const amdf_memory_t* memory = update->memory;
-  if (update->source_byte_offset > memory->info.byte_length ||
-      update->byte_length >
-          memory->info.byte_length - update->source_byte_offset) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
-  }
-  if (update->access == 0 || (update->access & ~target->info.access) != 0 ||
-      (update->access & target->required_access) != target->required_access ||
-      (memory->info.source_byte_offset + update->source_byte_offset) %
-              granularity !=
-          0) {
+  if (update->memory != NULL &&
+      (update->access == 0 || (update->access & ~target->info.access) != 0 ||
+       (update->access & target->required_access) != target->required_access)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
-  if (target->device == NULL) {
-    if (update->memory_access_ordinal != 0) {
-      return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  amdf_status_t status = amdf_memory_reservation_validate_source(
+      target, update->memory, update->memory_access_ordinal,
+      update->source_byte_offset, update->byte_length, update->access);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  // Prior backing may have been installed through another logical consumer
+  // sharing these page tables. Its own admitted projection names the native
+  // source; the current publisher need not own an access to that allocation.
+  const amdf_memory_reservation_access_state_t* previous_target = target;
+  if (target->device && update->previous_memory &&
+      update->previous_memory_access_ordinal <
+          update->previous_memory->info.access_count) {
+    const amdf_memory_access_state_t* source =
+        &update->previous_memory
+             ->accesses[update->previous_memory_access_ordinal];
+    if (source->device != target->device) {
+      previous_target = NULL;
+      for (uint32_t i = 0; i < reservation->access_count; ++i) {
+        const amdf_memory_reservation_access_state_t* candidate =
+            &reservation->accesses[i];
+        if (candidate->device == source->device &&
+            candidate->info.address_domain_ordinal ==
+                source->info.address_domain_ordinal &&
+            candidate->info.mapping_access_ordinal ==
+                target->info.mapping_access_ordinal) {
+          previous_target = candidate;
+          break;
+        }
+      }
+      if (!previous_target) {
+        return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+      }
     }
-    const amdf_memory_map_flags_t required =
-        ((update->access & AMDF_MEMORY_ACCESS_READ) != 0
-             ? AMDF_MEMORY_MAP_FLAG_READ
-             : 0) |
-        ((update->access & AMDF_MEMORY_ACCESS_WRITE) != 0
-             ? AMDF_MEMORY_MAP_FLAG_WRITE
-             : 0);
-    return (memory->info.flags & AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE) != 0 &&
-                   (required & ~memory->host_mapping.supported_access) == 0
-               ? AMDF_STATUS_OK
-               : amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
-  if (update->memory_access_ordinal >= memory->info.access_count) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
-  }
-  const amdf_memory_access_state_t* source =
-      &memory->accesses[update->memory_access_ordinal];
-  if (source->device != target->device ||
-      source->info.address_domain_ordinal !=
-          target->info.address_domain_ordinal ||
-      (source->info.flags & AMDF_MEMORY_FLAG_MAPPING_SOURCE) == 0 ||
-      (update->access & ~source->info.access) != 0) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
-  }
-  return AMDF_STATUS_OK;
+  return amdf_memory_reservation_validate_source(
+      previous_target, update->previous_memory,
+      update->previous_memory_access_ordinal,
+      update->previous_source_byte_offset, update->byte_length, 0);
 }
 
 static amdf_status_t amdf_memory_reservation_apply(
@@ -429,8 +476,8 @@ static amdf_status_t amdf_memory_reservation_apply(
     return AMDF_STATUS_OK;
   }
   for (uint32_t i = 0; i < update_count; ++i) {
-    const amdf_status_t status =
-        amdf_memory_reservation_validate_update(target, &updates[i]);
+    const amdf_status_t status = amdf_memory_reservation_validate_update(
+        reservation, target, &updates[i]);
     if (!amdf_status_is_ok(status)) {
       return status;
     }
@@ -460,6 +507,13 @@ static amdf_status_t amdf_memory_reservation_apply(
                current->memory_access_ordinal ==
                    previous->memory_access_ordinal &&
                current->access == previous->access &&
+               current->previous_memory == previous->previous_memory &&
+               current->previous_memory_access_ordinal ==
+                   previous->previous_memory_access_ordinal &&
+               (current->previous_memory == NULL ||
+                current->previous_source_byte_offset ==
+                    previous->previous_source_byte_offset +
+                        previous->byte_length) &&
                (current->memory == NULL ||
                 current->source_byte_offset ==
                     previous->source_byte_offset + previous->byte_length)) {

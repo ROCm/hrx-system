@@ -421,8 +421,9 @@ static bool iree_hal_amd_fabric_slab_handle_free(
   }
   if (provider->options.asan) {
     iree_hal_amd_fabric_slab_asan_t* asan = (void*)(handle + 1);
-    if (!iree_hal_amd_fabric_asan_unmap_application(provider->options.asan,
-                                                    asan->application_range)) {
+    if (!iree_hal_amd_fabric_asan_unmap_application(
+            provider->options.asan, asan->application_range,
+            handle->memory.handle, provider->asan_access_ordinal)) {
       *out_release_info = (amdf_memory_release_info_t){
           .status = amdf_make_api_status(AMDF_STATUS_CODE_FAILED_PRECONDITION),
           .abandoned_byte_length =

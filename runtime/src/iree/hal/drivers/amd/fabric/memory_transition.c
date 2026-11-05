@@ -189,6 +189,32 @@ static iree_status_t iree_hal_amd_fabric_memory_translate_transition(
   return iree_ok_status();
 }
 
+static iree_hal_memory_effects_t iree_hal_amd_fabric_memory_queue_effect(
+    const iree_hal_memory_transition_recipe_info_t* recipe, bool release) {
+  if (recipe->kind == IREE_HAL_MEMORY_TRANSITION_KIND_NONE) {
+    return (iree_hal_memory_effects_t){0};
+  }
+  if (recipe->kind == IREE_HAL_MEMORY_TRANSITION_KIND_GLOBAL &&
+      recipe->executor == IREE_HAL_MEMORY_TRANSITION_EXECUTOR_QUEUE) {
+    return (iree_hal_memory_effects_t){
+        release ? IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM
+                : IREE_HAL_MEMORY_EFFECT_GLOBAL_ACQUIRE_FROM_SYSTEM};
+  }
+  return (iree_hal_memory_effects_t){IREE_HAL_MEMORY_EFFECT_UNSUPPORTED};
+}
+
+iree_hal_memory_transition_t iree_hal_amd_fabric_memory_queue_transition(
+    const iree_hal_memory_pair_info_t* pair) {
+  if (!iree_all_bits_set(pair->flags,
+                         IREE_HAL_MEMORY_PAIR_SHARED_BACKING_REACHABLE)) {
+    return (iree_hal_memory_transition_t){{IREE_HAL_MEMORY_EFFECT_UNSUPPORTED},
+                                          {IREE_HAL_MEMORY_EFFECT_UNSUPPORTED}};
+  }
+  return (iree_hal_memory_transition_t){
+      iree_hal_amd_fabric_memory_queue_effect(&pair->release, true),
+      iree_hal_amd_fabric_memory_queue_effect(&pair->acquire, false)};
+}
+
 iree_status_t iree_hal_amd_fabric_memory_translate_pair(
     const amdf_memory_pair_info_t* source,
     iree_hal_memory_pair_info_t* out_pair) {

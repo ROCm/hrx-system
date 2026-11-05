@@ -33,6 +33,9 @@ typedef struct amdf_gpu_umd_mapping_update_t {
   uint64_t source_byte_offset;
   // Exact installed permissions, or zero for detach.
   amdf_memory_access_t access;
+  // Borrowed prior backing, or NULL for an unbound range. Native publication
+  // consumes this source identity without retaining installed mapping state.
+  amdf_gpu_umd_memory_t* previous_memory;
 } amdf_gpu_umd_mapping_update_t;
 
 // Cached live native-domain limits; unsupported domains leave output unchanged.
