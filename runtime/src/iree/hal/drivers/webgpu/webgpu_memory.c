@@ -104,6 +104,26 @@ static void iree_hal_webgpu_slab_provider_destroy(
   iree_allocator_free(host_allocator, provider);
 }
 
+static iree_status_t iree_hal_webgpu_slab_provider_query_allocation_cost(
+    iree_hal_slab_provider_t* base_provider, iree_hal_slab_request_t request,
+    uint64_t* out_byte_length) {
+  if (IREE_UNLIKELY(request.min_length == 0)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "WebGPU slab allocations must be non-empty");
+  }
+  iree_device_size_t allocation_size = 0;
+  if (IREE_UNLIKELY(!iree_device_size_checked_align(request.min_length, 4,
+                                                    &allocation_size))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "WebGPU slab length overflow aligning %" PRIu64
+                            " bytes",
+                            (uint64_t)request.min_length);
+  }
+
+  *out_byte_length = allocation_size;
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_webgpu_slab_provider_acquire_slab(
     iree_hal_slab_provider_t* base_provider, iree_device_size_t min_length,
     iree_device_size_t min_alignment, iree_hal_slab_t* out_slab,
@@ -112,18 +132,10 @@ static iree_status_t iree_hal_webgpu_slab_provider_acquire_slab(
   iree_hal_webgpu_slab_provider_t* provider =
       (iree_hal_webgpu_slab_provider_t*)base_provider;
   memset(out_slab, 0, sizeof(*out_slab));
-  if (IREE_UNLIKELY(min_length == 0)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "WebGPU slab allocations must be non-empty");
-  }
-  iree_device_size_t allocation_size = 0;
-  if (IREE_UNLIKELY(
-          !iree_device_size_checked_align(min_length, 4, &allocation_size))) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "WebGPU slab length overflow aligning %" PRIu64
-                            " bytes",
-                            (uint64_t)min_length);
-  }
+  uint64_t allocation_size = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_webgpu_slab_provider_query_allocation_cost(
+      base_provider, (iree_hal_slab_request_t){min_length, min_alignment},
+      &allocation_size));
 
   const iree_hal_webgpu_handle_t buffer_handle =
       iree_hal_webgpu_import_device_create_buffer(
@@ -292,6 +304,8 @@ static void iree_hal_webgpu_slab_provider_release_slabs(
 static const iree_hal_slab_provider_vtable_t
     iree_hal_webgpu_slab_provider_vtable = {
         .destroy = iree_hal_webgpu_slab_provider_destroy,
+        .query_allocation_cost =
+            iree_hal_webgpu_slab_provider_query_allocation_cost,
         .acquire_slabs = iree_hal_webgpu_slab_provider_acquire_slabs,
         .release_slabs = iree_hal_webgpu_slab_provider_release_slabs,
         .wrap_buffer = iree_hal_webgpu_slab_provider_wrap_buffer,

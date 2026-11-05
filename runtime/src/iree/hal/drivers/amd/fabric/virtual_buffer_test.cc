@@ -1683,6 +1683,7 @@ TEST_P(MappingPriorityTest, MappingOvertakesRemainingNativeSteps) {
   iree_hal_amd_fabric_memory_options_t options = {.scope = native_.scope()};
   options.profile.roles = AMDF_MEMORY_PROFILE_ROLE_CREATE;
   options.profile.allocation.byte_length_granularity = 4096;
+  options.profile.allocation.native_byte_length_granularity = 4096;
   options.profile.allocation.minimum_alignment = 4096;
   options.profile.allocation.maximum_byte_length = UINT64_C(1) << 30;
   options.required_flags = native_.required_flags;

@@ -37,6 +37,7 @@ struct NativeAllocator {
     options.profile.ordinal = 7;
     options.profile.roles = AMDF_MEMORY_PROFILE_ROLE_CREATE;
     options.profile.allocation.byte_length_granularity = 64;
+    options.profile.allocation.native_byte_length_granularity = 64;
     options.profile.allocation.minimum_alignment = 64;
     options.profile.allocation.maximum_byte_length = 4096;
   }

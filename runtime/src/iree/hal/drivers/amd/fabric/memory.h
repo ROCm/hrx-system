@@ -157,6 +157,12 @@ typedef struct iree_hal_amd_fabric_memory_options_t {
   } io;
 } iree_hal_amd_fabric_memory_options_t;
 
+// Shapes the logical owned extent using the qualified native profile. This is
+// the size passed to native construction, before its physical padding.
+iree_status_t iree_hal_amd_fabric_memory_allocation_size(
+    const iree_hal_amd_fabric_memory_options_t* options, uint64_t byte_length,
+    uint64_t* out_length);
+
 // Converts independent native operation and reach facts. Unknown operation bits
 // confer no HAL support; narrower reach never establishes system scope.
 iree_hal_atomic_operation_capabilities_t

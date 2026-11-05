@@ -202,6 +202,15 @@ static void iree_hal_task_slab_provider_destroy(
   iree_hal_task_allocation_queue_release(queue);
 }
 
+static iree_status_t iree_hal_task_slab_provider_query_allocation_cost(
+    iree_hal_slab_provider_t* base, iree_hal_slab_request_t request,
+    uint64_t* out_byte_length) {
+  iree_hal_task_slab_provider_t* provider =
+      (iree_hal_task_slab_provider_t*)base;
+  return iree_hal_slab_provider_query_allocation_cost(provider->native_provider,
+                                                      request, out_byte_length);
+}
+
 static void iree_hal_task_slab_provider_acquire_slabs(
     iree_hal_slab_provider_t* base, iree_hal_slab_acquire_request_t* request) {
   iree_hal_task_slab_provider_t* provider =
@@ -319,6 +328,8 @@ static bool iree_hal_task_slab_provider_query_import_requirements(
 static const iree_hal_slab_provider_vtable_t
     iree_hal_task_slab_provider_vtable = {
         .destroy = iree_hal_task_slab_provider_destroy,
+        .query_allocation_cost =
+            iree_hal_task_slab_provider_query_allocation_cost,
         .acquire_slabs = iree_hal_task_slab_provider_acquire_slabs,
         .release_slabs = iree_hal_task_slab_provider_release_slabs,
         .wrap_buffer = iree_hal_task_slab_provider_wrap_buffer,

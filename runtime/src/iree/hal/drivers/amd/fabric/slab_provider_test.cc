@@ -399,6 +399,7 @@ class SlabProviderTest : public ::testing::Test {
     options.memory.profile.supported_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
     options.memory.profile.allocation.maximum_byte_length = maximum_byte_length;
     options.memory.profile.allocation.byte_length_granularity = 64;
+    options.memory.profile.allocation.native_byte_length_granularity = 4096;
     options.memory.profile.allocation.minimum_alignment = 64;
     options.memory.profile.allocation.maximum_alignment = 4096;
     options.memory.access_count = 2;
@@ -1083,6 +1084,74 @@ TEST_F(SlabPoolTest, ConstructorAndPrefixLossesStayWithOriginatingPool) {
   }
   EXPECT_EQ(Stats(pools_[0]).bytes_committed, 8192u);
   EXPECT_EQ(Stats(pools_[1]).bytes_committed, 0u);
+}
+
+TEST_F(SlabPoolTest,
+       NativeCreditsSettleUnpublishedLossAndFundIndependentSource) {
+  iree_hal_memory_budget_t* budget = nullptr;
+  IREE_ASSERT_OK(iree_hal_memory_budget_create(
+      12288, notification_, iree_allocator_system(), &budget));
+  native_.fail_create_at = 2;
+  native_.fail_memory_destroy = true;
+  native_.abandon_backing = true;
+  const iree_hal_pool_reservation_request_t requests[] = {
+      iree_hal_make_pool_reservation_request(64, 64),
+      iree_hal_make_pool_reservation_request(64, 256),
+      iree_hal_make_pool_reservation_request(65, 4096),
+  };
+  uint64_t cost = 0;
+  IREE_ASSERT_OK(
+      iree_hal_slab_pool_query_allocation_cost(pools_[0], 3, requests, &cost));
+  EXPECT_EQ(cost, 12288u);
+  EXPECT_EQ(native_.create_count, 0);
+  iree_hal_memory_credit_t credit = {};
+  ASSERT_TRUE(iree_hal_memory_budget_try_reserve(budget, cost, &credit));
+  iree_hal_pool_reservation_t reservations[3] = {};
+  iree_hal_pool_acquire_info_t infos[3] = {};
+  std::promise<iree_status_t> completed;
+  auto completion = completed.get_future();
+  IREE_ASSERT_OK(iree_hal_slab_pool_acquire_with_credit(
+      pools_[0], 3, requests, &credit, reservations, infos,
+      {[](void* user_data, iree_status_t status,
+          iree_hal_pool_acquire_result_t result) {
+         EXPECT_EQ(result, IREE_HAL_POOL_ACQUIRE_NONE);
+         static_cast<std::promise<iree_status_t>*>(user_data)->set_value(
+             std::move(status));
+       },
+       &completed}));
+  EXPECT_EQ(credit.budget, nullptr);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, completion.get());
+  EXPECT_EQ(iree_hal_memory_budget_charged(budget), 8192u);
+  EXPECT_EQ(iree_hal_memory_budget_abandoned(budget), 8192u);
+  EXPECT_EQ(native_.abandoned_backing.size(), 2u);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INTERNAL,
+                        iree_hal_memory_budget_query_loss(budget));
+  for (const auto& reservation : reservations) {
+    EXPECT_EQ(reservation.block_handle, 0u);
+  }
+
+  // The failed constructor did not consume its third allocation's credit.
+  // A distinct source can use that capacity even though both losses remain.
+  native_.fail_create_at = 0;
+  native_.fail_memory_destroy = false;
+  ASSERT_TRUE(iree_hal_memory_budget_try_reserve(budget, 4096, &credit));
+  std::promise<iree_status_t> peer_completed;
+  auto peer_completion = peer_completed.get_future();
+  IREE_ASSERT_OK(iree_hal_slab_pool_acquire_with_credit(
+      pools_[1], 1, requests, &credit, reservations, infos,
+      {[](void* user_data, iree_status_t status,
+          iree_hal_pool_acquire_result_t result) {
+         EXPECT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
+         static_cast<std::promise<iree_status_t>*>(user_data)->set_value(
+             std::move(status));
+       },
+       &peer_completed}));
+  IREE_ASSERT_OK(peer_completion.get());
+  EXPECT_EQ(iree_hal_memory_budget_charged(budget), 12288u);
+  Release(pools_[1], reservations);
+  AwaitNativeReturns(pools_[1]);
+  EXPECT_EQ(iree_hal_memory_budget_charged(budget), 8192u);
+  iree_hal_memory_budget_release(budget);
 }
 
 TEST_F(SlabPoolTest, CleanRollbackPreservesRecoverableAllocationFailure) {

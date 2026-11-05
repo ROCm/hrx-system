@@ -545,6 +545,11 @@ TEST_F(MemoryBackendTest,
   iree_hal_slab_cache_options_t cache_options;
   iree_hal_slab_cache_options_initialize(&cache_options);
   cache_options.slab = iree_hal_make_pool_reservation_request(4096, 128);
+  uint64_t native_cost = 0;
+  IREE_ASSERT_OK(iree_hal_slab_pool_query_allocation_cost(
+      pool, 1, &cache_options.slab, &native_cost));
+  EXPECT_EQ(native_cost, 8192u);
+  EXPECT_EQ(native_.create_count, 0);
   cache_options.max_count = 1;
   iree_hal_pool_t* cache = nullptr;
   IREE_ASSERT_OK(

@@ -407,16 +407,9 @@ static iree_status_t iree_hal_amd_fabric_memory_prepare(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_amd_fabric_memory_allocate(
-    const amdf_api_t* api, const iree_hal_amd_fabric_memory_options_t* options,
-    uint64_t byte_length, uint64_t alignment,
-    iree_hal_device_event_sink_t event_sink,
-    iree_hal_amd_fabric_memory_t* out_memory,
-    amdf_memory_release_info_t* out_release_info) {
-  *out_memory = (iree_hal_amd_fabric_memory_t){0};
-  if (out_release_info) {
-    *out_release_info = (amdf_memory_release_info_t){0};
-  }
+iree_status_t iree_hal_amd_fabric_memory_allocation_size(
+    const iree_hal_amd_fabric_memory_options_t* options, uint64_t byte_length,
+    uint64_t* out_length) {
   const uint64_t granularity =
       options->profile.allocation.byte_length_granularity;
   uint64_t allocation_length = 0;
@@ -431,6 +424,23 @@ iree_status_t iree_hal_amd_fabric_memory_allocate(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AMD allocation exceeds the native profile");
   }
+  *out_length = allocation_length;
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amd_fabric_memory_allocate(
+    const amdf_api_t* api, const iree_hal_amd_fabric_memory_options_t* options,
+    uint64_t byte_length, uint64_t alignment,
+    iree_hal_device_event_sink_t event_sink,
+    iree_hal_amd_fabric_memory_t* out_memory,
+    amdf_memory_release_info_t* out_release_info) {
+  *out_memory = (iree_hal_amd_fabric_memory_t){0};
+  if (out_release_info) {
+    *out_release_info = (amdf_memory_release_info_t){0};
+  }
+  uint64_t allocation_length = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_memory_allocation_size(
+      options, byte_length, &allocation_length));
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, allocation_length);
   const amdf_memory_create_info_t create_info = {

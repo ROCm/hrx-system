@@ -47,6 +47,31 @@ static void iree_hal_shared_slab_provider_destroy(
   iree_allocator_free(provider->base.host_allocator, provider);
 }
 
+static iree_status_t iree_hal_shared_slab_provider_query_allocation_cost(
+    iree_hal_slab_provider_t* base, iree_hal_slab_request_t request,
+    uint64_t* out_byte_length) {
+  iree_hal_shared_slab_provider_t* provider =
+      (iree_hal_shared_slab_provider_t*)base;
+  const iree_host_size_t page_size = provider->page_size;
+  const iree_device_size_t alignment =
+      iree_max(request.min_alignment, page_size);
+  // Overallocate only the alignment slack. Every slab coordinate is also a
+  // native section coordinate plus the captured prefix; no extra alias is
+  // needed to align the original host view.
+  iree_host_size_t native_length = 0;
+  if (request.min_length > IREE_HOST_SIZE_MAX ||
+      alignment > IREE_HOST_SIZE_MAX ||
+      !iree_host_size_checked_add((iree_host_size_t)request.min_length,
+                                  (iree_host_size_t)alignment - page_size,
+                                  &native_length) ||
+      native_length > IREE_HOST_SIZE_MAX - (page_size - 1)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "shared slab geometry exceeds host address space");
+  }
+  *out_byte_length = iree_host_align(native_length, page_size);
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_shared_slab_provider_acquire(
     iree_hal_slab_provider_t* base, iree_device_size_t min_length,
     iree_device_size_t min_alignment, iree_hal_slab_t* out_slab,
@@ -57,18 +82,10 @@ static iree_status_t iree_hal_shared_slab_provider_acquire(
   memset(out_slab, 0, sizeof(*out_slab));
   const iree_host_size_t page_size = provider->page_size;
   const iree_device_size_t alignment = iree_max(min_alignment, page_size);
-  // Overallocate only the alignment slack. Every slab coordinate is also a
-  // native section coordinate plus the captured prefix; no extra alias is
-  // needed to align the original host view.
-  iree_host_size_t native_length = 0;
-  if (min_length > IREE_HOST_SIZE_MAX || alignment > IREE_HOST_SIZE_MAX ||
-      !iree_host_size_checked_add((iree_host_size_t)min_length,
-                                  (iree_host_size_t)alignment - page_size,
-                                  &native_length) ||
-      native_length > IREE_HOST_SIZE_MAX - (page_size - 1)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "shared slab geometry exceeds host address space");
-  }
+  uint64_t native_length = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_shared_slab_provider_query_allocation_cost(
+      base, (iree_hal_slab_request_t){min_length, min_alignment},
+      &native_length));
   iree_hal_shared_slab_t* slab = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(provider->base.host_allocator,
                                              sizeof(*slab), (void**)&slab));
@@ -204,6 +221,8 @@ static void iree_hal_shared_slab_provider_release_slabs(
 static const iree_hal_slab_provider_vtable_t
     iree_hal_shared_slab_provider_vtable = {
         .destroy = iree_hal_shared_slab_provider_destroy,
+        .query_allocation_cost =
+            iree_hal_shared_slab_provider_query_allocation_cost,
         .acquire_slabs = iree_hal_shared_slab_provider_acquire_slabs,
         .release_slabs = iree_hal_shared_slab_provider_release_slabs,
         .wrap_buffer = iree_hal_shared_slab_provider_wrap,

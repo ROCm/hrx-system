@@ -214,8 +214,8 @@ iree_status_t iree_hal_vulkan_buffer_handle(iree_hal_buffer_t* buffer,
                                             VkBuffer* out_handle);
 
 // Returns captured native payload geometry for a directly allocated dense
-// buffer. This trusted provider query performs no native call and excludes
-// subspan and sparse wrappers.
+// or fully bound sparse buffer. This trusted provider query performs no native
+// call and excludes subspan and address-only reservation wrappers.
 iree_hal_buffer_allocation_info_t iree_hal_vulkan_buffer_allocation_info(
     iree_hal_buffer_t* buffer);
 
