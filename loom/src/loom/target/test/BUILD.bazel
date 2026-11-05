@@ -24,6 +24,7 @@ loom_check_test_suite(
         "source_boundary_cleanup.loom-test",
         "source_motion.loom-test",
         "source_switch_projection.loom-test",
+        "source_target_aliases.loom-test",
         "source_tied_carriers.loom-test",
         "strand_callgraph.loom-test",
     ],
