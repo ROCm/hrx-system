@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
 
 package(
@@ -198,6 +199,7 @@ loom_cc_library(
         ":inputs",
         ":sources",
         "//loom/binding/c:loomc",
+        "//loom/src/loom/runtime/parameter:activity",
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/execution:retirement",
         "//loom/src/loom/serve/runtime/execution:workspace",
@@ -216,6 +218,20 @@ loom_cc_library(
         "//runtime/src/iree/io:parameter_provider",
         "//runtime/src/iree/vm",
     ],
+)
+
+iree_assert_dependency_boundary(
+    name = "parameters_are_observation_free",
+    forbidden_dependencies = [
+        "//loom/src/loom/runtime/parameter:telemetry",
+        "//loom/src/loom/runtime/storage:telemetry",
+    ],
+    forbidden_subtrees = [
+        "//loom/src/loom/runtime/telemetry/...",
+        "//loom/src/loom/serve/telemetry/...",
+    ],
+    message = "Parameter ownership must not depend on telemetry observation or export",
+    target = ":weights",
 )
 
 loom_cc_test(
@@ -238,30 +254,5 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/testing:temp_file",
         "//runtime/src/iree/vm",
-    ],
-)
-
-loom_cc_library(
-    name = "telemetry",
-    srcs = ["telemetry.c"],
-    hdrs = ["telemetry.h"],
-    deps = [
-        ":weights",
-        "//loom/src/loom/serve/telemetry:record",
-        "//loom/src/loom/serve/telemetry:stream",
-        "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_test(
-    name = "telemetry_test",
-    srcs = ["telemetry_test.cc"],
-    deps = [
-        ":telemetry",
-        "//loom/src/loom/serve/telemetry:record",
-        "//loom/src/loom/serve/telemetry:stream",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
     ],
 )

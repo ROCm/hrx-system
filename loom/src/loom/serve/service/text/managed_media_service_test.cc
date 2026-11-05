@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <cstdlib>
+#include <cstring>
 
 #include "iree/base/internal/json.h"
 #include "loom/serve/media/image_codec.h"

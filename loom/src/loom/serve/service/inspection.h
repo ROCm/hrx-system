@@ -7,7 +7,7 @@
 #ifndef LOOM_SERVE_SERVICE_INSPECTION_H_
 #define LOOM_SERVE_SERVICE_INSPECTION_H_
 
-#include "loom/serve/telemetry/record.h"
+#include "loom/service/telemetry/record.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,7 +24,7 @@ typedef struct loom_serve_http_request_snapshot_t {
   // Immutable protocol receipt time, including time before model admission.
   iree_time_t arrival_time;
   // Completed work published by the owner, never read from in-flight outputs.
-  loom_serve_telemetry_counters_t counters;
+  loom_service_telemetry_counters_t counters;
 } loom_serve_http_request_snapshot_t;
 
 typedef struct loom_serve_http_session_snapshot_t {
@@ -43,7 +43,7 @@ typedef struct loom_serve_http_session_snapshot_t {
   // Page-rounded active completion bound; zero for idle histories.
   uint64_t reserved_tokens;
   // Cumulative completed work across retained continuations.
-  loom_serve_telemetry_counters_t counters;
+  loom_service_telemetry_counters_t counters;
 } loom_serve_http_session_snapshot_t;
 
 // Queries run only on the serialized service owner. They copy metadata without

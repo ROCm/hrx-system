@@ -686,15 +686,15 @@ iree_status_t loom_serve_text_state_submit_trim(
   *out_result = (loom_serve_text_trim_result_t){0};
   loom_serve_text_complete_backing(state);
   state->memory.trim.released_before = state->memory.statistics.released_bytes;
-  state->memory.trim.phase = LOOM_SERVE_TEXT_TRIM_COMPLETE;
+  state->memory.trim.phase = LOOM_SERVICE_TEXT_TRIM_COMPLETE;
   if (!state->memory.buffers[1]) {
     return iree_ok_status();
   }
   // Prepared continuations retain exact logical IDs, not relocation entries.
   // Dead backing can still retire; moving IDs waits until their plans retire.
   state->memory.trim.phase = state->prepared_reservations
-                                 ? LOOM_SERVE_TEXT_TRIM_COMPLETE
-                                 : LOOM_SERVE_TEXT_TRIM_RELOCATE;
+                                 ? LOOM_SERVICE_TEXT_TRIM_COMPLETE
+                                 : LOOM_SERVICE_TEXT_TRIM_RELOCATE;
   return loom_serve_text_trim_backing(state);
 }
 
@@ -837,24 +837,24 @@ iree_status_t loom_serve_text_state_complete_trim(
   *out_complete = false;
   loom_serve_text_complete_backing(state);
   switch (state->memory.trim.phase) {
-    case LOOM_SERVE_TEXT_TRIM_RELOCATE: {
+    case LOOM_SERVICE_TEXT_TRIM_RELOCATE: {
       IREE_RETURN_IF_ERROR(loom_serve_text_submit_compaction(state, result));
       state->memory.trim.phase = result->moved_blocks
-                                     ? LOOM_SERVE_TEXT_TRIM_RELEASE
-                                     : LOOM_SERVE_TEXT_TRIM_COMPLETE;
+                                     ? LOOM_SERVICE_TEXT_TRIM_RELEASE
+                                     : LOOM_SERVICE_TEXT_TRIM_COMPLETE;
       break;
     }
-    case LOOM_SERVE_TEXT_TRIM_RELEASE: {
+    case LOOM_SERVICE_TEXT_TRIM_RELEASE: {
       loom_serve_block_pool_commit_compaction(&state->cache.pool,
                                               state->cache.destinations);
       IREE_RETURN_IF_ERROR(loom_serve_text_trim_backing(state));
-      state->memory.trim.phase = LOOM_SERVE_TEXT_TRIM_COMPLETE;
+      state->memory.trim.phase = LOOM_SERVICE_TEXT_TRIM_COMPLETE;
       break;
     }
-    case LOOM_SERVE_TEXT_TRIM_COMPLETE:
+    case LOOM_SERVICE_TEXT_TRIM_COMPLETE:
       break;
   }
-  *out_complete = state->memory.trim.phase == LOOM_SERVE_TEXT_TRIM_COMPLETE &&
+  *out_complete = state->memory.trim.phase == LOOM_SERVICE_TEXT_TRIM_COMPLETE &&
                   !state->memory.backing.operation;
   if (*out_complete) {
     if (state->memory.buffers[1]) {

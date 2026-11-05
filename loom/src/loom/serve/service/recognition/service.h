@@ -45,7 +45,7 @@ typedef struct loom_serve_recognition_service_options_t {
 iree_status_t loom_serve_recognition_service_allocate(
     loom_serve_host_t* host, loom_serve_recognition_generator_t generator,
     const loom_serve_recognition_service_options_t* options,
-    loom_serve_telemetry_stream_t* telemetry, iree_allocator_t host_allocator,
+    loom_runtime_telemetry_stream_t* telemetry, iree_allocator_t host_allocator,
     loom_serve_recognition_service_t** out_service);
 
 loom_serve_service_t loom_serve_recognition_service_interface(

@@ -130,7 +130,7 @@ TEST_F(SourceTextServiceTest, NativeVariantPreservesLiveRowsAndPinnedPrefix) {
                   decltype(&loom_serve_text_checkpoint_release)>
       checkpoint(endpoint, loom_serve_text_checkpoint_release);
   const Oracle prefix = oracle;
-  const auto weights = loom_serve_text_model_weight_activity(model_);
+  const auto weights = loom_serve_text_model_parameter_activity(model_);
   const auto* chat_policy = loom_serve_text_model_chat_policy(model_);
   ASSERT_GT(weights.read_bytes, 0u);
 
@@ -189,7 +189,7 @@ TEST_F(SourceTextServiceTest, NativeVariantPreservesLiveRowsAndPinnedPrefix) {
   IREE_ASSERT_OK(loom_serve_text_row_decode(branch));
   branch_oracle.Consume(0);
   EXPECT_EQ(loom_serve_text_row_token(branch), branch_oracle.Predict());
-  const auto retained = loom_serve_text_model_weight_activity(model_);
+  const auto retained = loom_serve_text_model_parameter_activity(model_);
   EXPECT_EQ(retained.read_bytes, weights.read_bytes);
   EXPECT_EQ(retained.prepared_bytes, weights.prepared_bytes);
   EXPECT_EQ(retained.activations, weights.activations);
@@ -205,7 +205,7 @@ TEST_F(SourceTextServiceTest, FailedNativeVariantsLeaveCurrentModelUsable) {
   const int32_t token = 1;
   IREE_ASSERT_OK(loom_serve_text_row_prefill(row, 1, &token));
   oracle.Consume(token);
-  const auto weights = loom_serve_text_model_weight_activity(model_);
+  const auto weights = loom_serve_text_model_parameter_activity(model_);
   for (bool invalid_source : {true, false}) {
     SCOPED_TRACE(invalid_source);
     const auto path =
@@ -232,7 +232,7 @@ TEST_F(SourceTextServiceTest, FailedNativeVariantsLeaveCurrentModelUsable) {
     oracle.Consume(token);
     EXPECT_EQ(loom_serve_text_row_token(row), oracle.Predict());
   }
-  const auto retained = loom_serve_text_model_weight_activity(model_);
+  const auto retained = loom_serve_text_model_parameter_activity(model_);
   EXPECT_EQ(retained.read_bytes, weights.read_bytes);
   EXPECT_EQ(retained.prepared_bytes, weights.prepared_bytes);
   EXPECT_EQ(retained.activations, weights.activations);
@@ -385,7 +385,7 @@ class ReconfigurationTextServiceTest : public SourceTextServiceTest {
 
 TEST_F(ReconfigurationTextServiceTest,
        SwitchWaitsForBorrowersAndPreservesHttpSessionAcrossRollback) {
-  const auto unloaded = loom_serve_text_model_weight_activity(model_);
+  const auto unloaded = loom_serve_text_model_parameter_activity(model_);
   const auto path = iree::testing::MakeTempFilePath("service_variant", ".loom");
   ASSERT_NO_FATAL_FAILURE(EditNativeProvider(directory_ + "/advance.loom", path,
                                              "scalar.remui %total, %c3_i32",
@@ -398,7 +398,7 @@ TEST_F(ReconfigurationTextServiceTest,
       loom_serve_variant_pool_snapshot(configuration_.pool, id, &snapshot));
   ASSERT_EQ(snapshot.phase, LOOM_SERVE_VARIANT_READY);
   EXPECT_EQ(configuration_.selected(configuration_.self), original_);
-  const auto compiled = loom_serve_text_model_weight_activity(model_);
+  const auto compiled = loom_serve_text_model_parameter_activity(model_);
   EXPECT_EQ(compiled.read_bytes, unloaded.read_bytes);
   EXPECT_EQ(compiled.activations, unloaded.activations);
 
@@ -413,7 +413,7 @@ TEST_F(ReconfigurationTextServiceTest,
   EXPECT_EQ(interface_.telemetry.counters->batches, 0u);
   // First admission activates a demand-loaded model. Establish the resident
   // baseline here so the experiment measures replacement, not initial load.
-  const auto weights = loom_serve_text_model_weight_activity(model_);
+  const auto weights = loom_serve_text_model_parameter_activity(model_);
   EXPECT_GT(weights.read_bytes, 0u);
   const int second =
       Send(Request(Message("user", "baxab"), 3), "X-Loom-Session: second\r\n");
@@ -461,7 +461,7 @@ TEST_F(ReconfigurationTextServiceTest,
   EXPECT_EQ(Content(response), Oracle::Complete(prompt + "aaaa#bx", 2));
   EXPECT_NE(response.find(R"("cached_tokens":10)"), std::string::npos)
       << response;
-  const auto retained = loom_serve_text_model_weight_activity(model_);
+  const auto retained = loom_serve_text_model_parameter_activity(model_);
   EXPECT_EQ(retained.read_bytes, weights.read_bytes);
   EXPECT_EQ(retained.prepared_bytes, weights.prepared_bytes);
   EXPECT_EQ(retained.activations, weights.activations);
@@ -562,7 +562,7 @@ TEST_F(ReconfigurationTextServiceTest,
   IREE_ASSERT_OK(TakeSelectionStatus());
   EXPECT_EQ(selection_.id, id);
   EXPECT_NE(Read(client).find("{\"input_tokens\":4}"), std::string::npos);
-  EXPECT_EQ(loom_serve_text_model_weight_activity(model_).activations, 0u);
+  EXPECT_EQ(loom_serve_text_model_parameter_activity(model_).activations, 0u);
 }
 
 TEST_F(ReconfigurationTextServiceTest,

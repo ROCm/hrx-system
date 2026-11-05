@@ -103,7 +103,7 @@ typedef struct loom_serve_pool_statistics_t {
   // Persistent allocator backing when elastic; all native backing when fixed.
   iree_hal_pool_stats_t storage;
   // All virtual reservations and backing, including weights, state, workspace.
-  loom_serve_memory_statistics_t retained;
+  loom_runtime_storage_statistics_t retained;
   // Shared command workspace, including reusable idle backing.
   iree_hal_pool_stats_t workspace;
 } loom_serve_pool_statistics_t;

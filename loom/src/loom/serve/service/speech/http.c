@@ -7,6 +7,7 @@
 #include "loom/serve/service/speech/http.h"
 
 #include "loom/serve/service/speech/output.h"
+#include "loom/service/telemetry/record.h"
 #include "loom/util/json.h"
 
 static const char loom_serve_speech_http_headers[] =
@@ -126,12 +127,12 @@ static void loom_serve_speech_http_cancel(void* self) {
 }
 
 static iree_status_t loom_serve_speech_http_end(
-    void* self, loom_serve_telemetry_outcome_t outcome,
+    void* self, loom_service_telemetry_outcome_t outcome,
     const iree_status_t request_status) {
   loom_serve_speech_http_consumer_t* consumer = self;
   iree_status_t status = iree_ok_status();
   if (consumer->connection) {
-    if (outcome == LOOM_SERVE_TELEMETRY_COMPLETED) {
+    if (outcome == LOOM_SERVICE_TELEMETRY_COMPLETED) {
       if (consumer->voice_upload) {
         status = loom_serve_http_connection_send(
             consumer->connection,
@@ -147,8 +148,8 @@ static iree_status_t loom_serve_speech_http_end(
           status = iree_ok_status();
         }
       }
-    } else if ((outcome == LOOM_SERVE_TELEMETRY_REJECTED ||
-                outcome == LOOM_SERVE_TELEMETRY_FAILED) &&
+    } else if ((outcome == LOOM_SERVICE_TELEMETRY_REJECTED ||
+                outcome == LOOM_SERVICE_TELEMETRY_FAILED) &&
                !consumer->header_sent) {
       iree_string_view_t message = iree_status_message(request_status);
       if (!message.size) {
@@ -159,7 +160,7 @@ static iree_status_t loom_serve_speech_http_end(
           consumer->connection,
           iree_status_is_resource_exhausted(request_status)
               ? "503 Service Unavailable"
-          : outcome == LOOM_SERVE_TELEMETRY_REJECTED
+          : outcome == LOOM_SERVICE_TELEMETRY_REJECTED
               ? "400 Bad Request"
               : "500 Internal Server Error",
           message, consumer->host_allocator);

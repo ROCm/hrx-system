@@ -8,6 +8,7 @@
 
 #include <inttypes.h>
 
+#include "loom/serve/telemetry/record.h"
 #include "loom/util/json.h"
 
 static iree_status_t loom_serve_http_logs_quote(iree_string_builder_t* output,
@@ -40,12 +41,12 @@ static bool loom_serve_http_logs_cursor(iree_string_view_t value,
 }
 
 iree_status_t loom_serve_http_logs_resume(
-    const loom_serve_telemetry_stream_t* stream, iree_string_view_t cursor,
+    const loom_runtime_telemetry_stream_t* stream, iree_string_view_t cursor,
     uint64_t* out_position) {
   *out_position = 0;
-  const loom_serve_telemetry_identity_t identity =
-      loom_serve_telemetry_stream_identity(stream);
-  const uint64_t head = loom_serve_telemetry_stream_head(stream);
+  const loom_runtime_telemetry_identity_t identity =
+      loom_runtime_telemetry_stream_identity(stream);
+  const uint64_t head = loom_runtime_telemetry_stream_head(stream);
   if (cursor.size) {
     uint64_t fields[3];
     if (!loom_serve_http_logs_cursor(cursor, fields)) {
@@ -66,14 +67,14 @@ iree_status_t loom_serve_http_logs_resume(
 }
 
 iree_status_t loom_serve_http_logs_format(
-    const loom_serve_telemetry_stream_t* stream,
-    const loom_serve_telemetry_counters_t* counters, iree_string_view_t model,
+    const loom_runtime_telemetry_stream_t* stream,
+    const loom_service_telemetry_counters_t* counters, iree_string_view_t model,
     loom_serve_http_logs_flags_t flags, uint64_t* cursor,
     iree_string_builder_t* output) {
-  const loom_serve_telemetry_identity_t identity =
-      loom_serve_telemetry_stream_identity(stream);
-  const uint64_t head = loom_serve_telemetry_stream_head(stream);
-  const uint64_t capacity = loom_serve_telemetry_stream_capacity(stream);
+  const loom_runtime_telemetry_identity_t identity =
+      loom_runtime_telemetry_stream_identity(stream);
+  const uint64_t head = loom_runtime_telemetry_stream_head(stream);
+  const uint64_t capacity = loom_runtime_telemetry_stream_capacity(stream);
   const uint64_t oldest = head > capacity ? head - capacity : 0;
   uint64_t position = *cursor;
   const bool sse = iree_any_bit_set(flags, LOOM_SERVE_HTTP_LOGS_FLAG_SSE);
@@ -112,15 +113,15 @@ iree_status_t loom_serve_http_logs_format(
   for (iree_host_size_t i = 0;
        i < 64 && position < head && iree_status_is_ok(status); ++i) {
     const uint64_t previous = position;
-    loom_serve_telemetry_record_t record;
-    const loom_serve_telemetry_read_t result =
-        loom_serve_telemetry_stream_read(stream, &position, &record);
-    if (result == LOOM_SERVE_TELEMETRY_READ_RECORD) {
+    loom_runtime_telemetry_record_t record;
+    const loom_runtime_telemetry_read_t result =
+        loom_runtime_telemetry_stream_read(stream, &position, &record);
+    if (result == LOOM_RUNTIME_TELEMETRY_READ_RECORD) {
       status = iree_string_builder_append_cstring(output, prefix);
       if (iree_status_is_ok(status)) {
         status = loom_serve_telemetry_record_format(previous, &record, output);
       }
-    } else if (result == LOOM_SERVE_TELEMETRY_READ_GAP) {
+    } else if (result == LOOM_RUNTIME_TELEMETRY_READ_GAP) {
       status = iree_string_builder_append_format(
           output,
           "%s{\"event\":\"gap\",\"from\":%" PRIu64 ",\"to\":%" PRIu64 "}\n",
@@ -160,8 +161,8 @@ iree_status_t loom_serve_http_logs_format(
 }
 
 iree_status_t loom_serve_http_logs(
-    const loom_serve_telemetry_stream_t* stream,
-    const loom_serve_telemetry_counters_t* counters, iree_string_view_t model,
+    const loom_runtime_telemetry_stream_t* stream,
+    const loom_service_telemetry_counters_t* counters, iree_string_view_t model,
     iree_string_view_t cursor, iree_string_builder_t* output) {
   uint64_t position = 0;
   IREE_RETURN_IF_ERROR(loom_serve_http_logs_resume(stream, cursor, &position));

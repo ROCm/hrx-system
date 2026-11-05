@@ -7,6 +7,7 @@
 #include "loom/serve/service/text/http.h"
 
 #include "loom/serve/service/text/sequence.h"
+#include "loom/service/telemetry/record.h"
 #include "loom/util/json.h"
 
 static iree_status_t loom_serve_text_http_quote(iree_string_builder_t* output,
@@ -83,7 +84,7 @@ iree_status_t loom_serve_text_http_reject(
     int code, const char* reason, iree_status_t failure,
     iree_allocator_t host_allocator) {
   loom_serve_text_telemetry_end(telemetry, receipt,
-                                LOOM_SERVE_TELEMETRY_REJECTED, 0, failure);
+                                LOOM_SERVICE_TELEMETRY_REJECTED, 0, failure);
   return loom_serve_text_http_reply_failure(
       telemetry, connection, receipt, code, reason, failure, host_allocator);
 }

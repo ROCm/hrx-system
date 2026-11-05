@@ -526,11 +526,11 @@ void loom_serve_workspace_set_observer(loom_serve_workspace_t* workspace,
   }
 }
 
-loom_serve_memory_usage_t loom_serve_workspace_memory_usage(
+loom_runtime_storage_usage_t loom_serve_workspace_memory_usage(
     const loom_serve_workspace_t* workspace) {
   return workspace->virtual_pool ? loom_serve_virtual_pool_source_memory_usage(
                                        workspace->backing_pool)
-                                 : (loom_serve_memory_usage_t){0};
+                                 : (loom_runtime_storage_usage_t){0};
 }
 
 uint64_t loom_serve_workspace_protected_bytes(

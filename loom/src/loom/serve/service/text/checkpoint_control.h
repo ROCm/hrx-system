@@ -7,7 +7,7 @@
 #ifndef LOOM_SERVE_SERVICE_TEXT_CHECKPOINT_CONTROL_H_
 #define LOOM_SERVE_SERVICE_TEXT_CHECKPOINT_CONTROL_H_
 
-#include "loom/serve/telemetry/record.h"
+#include "loom/service/telemetry/record.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -69,7 +69,7 @@ typedef struct loom_serve_text_checkpoint_consumer_t {
                        iree_string_builder_t* scratch);
   // Consumes a cancelled or failed receipt without allocating a response.
   // Native storage belongs to model retirement, never to this recipient.
-  void (*abort)(void* self, loom_serve_telemetry_outcome_t outcome,
+  void (*abort)(void* self, loom_service_telemetry_outcome_t outcome,
                 const iree_status_t status,
                 struct loom_serve_text_telemetry_t* telemetry,
                 const struct loom_serve_text_receipt_t* receipt);

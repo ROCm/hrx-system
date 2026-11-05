@@ -86,7 +86,7 @@ TEST_F(SourceTextServiceTest, PreparationActivatesWeightsOnlyWithDemand) {
     Oracle reference;
     reference.Consume("a");
     EXPECT_EQ(loom_serve_text_row_token(row), reference.Predict());
-    EXPECT_EQ(loom_serve_text_model_weight_activity(model).activations, 1u);
+    EXPECT_EQ(loom_serve_text_model_parameter_activity(model).activations, 1u);
     loom_serve_text_warmup_poll(loom_serve_text_model_warmup(model));
     IREE_ASSERT_OK(
         loom_serve_text_warmup_status(loom_serve_text_model_warmup(model)));
@@ -157,7 +157,8 @@ TEST_F(SourceTextServiceTest, IndependentParameterPreparationJoinsAllDomains) {
       Oracle reference;
       reference.Consume("a");
       EXPECT_EQ(loom_serve_text_row_token(row), reference.Predict());
-      EXPECT_EQ(loom_serve_text_model_weight_activity(model).activations, 2u);
+      EXPECT_EQ(loom_serve_text_model_parameter_activity(model).activations,
+                2u);
     }
     IREE_ASSERT_OK(loom_serve_text_model_free(model));
     if (pool) {
@@ -261,7 +262,7 @@ TEST_F(SourceTextServiceTest, FailedLinkRetiresAcceptedInitialization) {
       std::string::npos);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND, status);
   auto* partial = loom_serve_text_load_take_model(load);
-  EXPECT_EQ(loom_serve_text_model_weight_activity(partial).activations, 1u);
+  EXPECT_EQ(loom_serve_text_model_parameter_activity(partial).activations, 1u);
   loom_serve_text_load_free(load);
   loom_serve_text_model_retire(partial, wake, &notification);
   EXPECT_TRUE(iree_notification_await(
@@ -326,7 +327,7 @@ TEST_F(SourceTextServiceTest, MissingCheckpointFailsBeforeParameterPlacement) {
   const auto parameters = loom_serve_text_model_weight_statistics(partial);
   EXPECT_EQ(parameters.reserved_bytes, 0u);
   EXPECT_EQ(parameters.committed_bytes, 0u);
-  EXPECT_EQ(loom_serve_text_model_weight_activity(partial).activations, 0u);
+  EXPECT_EQ(loom_serve_text_model_parameter_activity(partial).activations, 0u);
   loom_serve_text_load_free(load);
   EXPECT_TRUE(loom_serve_text_model_is_retired(partial));
   IREE_ASSERT_OK(loom_serve_text_model_free_retired(partial));
@@ -426,7 +427,7 @@ TEST_F(GrowingTextServiceTest, GrowthKeepsLiveHistoriesHandlesAndCheckpoints) {
   loom_serve_text_checkpoint_t* checkpoint = nullptr;
   IREE_ASSERT_OK(loom_serve_text_row_try_pin(original, &checkpoint));
   ASSERT_NE(checkpoint, nullptr);
-  const auto activity = loom_serve_text_model_weight_activity(model_);
+  const auto activity = loom_serve_text_model_parameter_activity(model_);
   for (size_t capacity : {17u, 129u}) {
     const auto previous_count = loom_serve_text_model_row_count(model_);
     const auto previous = loom_serve_text_model_memory_statistics(model_);
@@ -464,7 +465,7 @@ TEST_F(GrowingTextServiceTest, GrowthKeepsLiveHistoriesHandlesAndCheckpoints) {
     for (size_t i = 0; i < capacity; ++i) {
       tokens[i] = i % 3;
       references[i].Consume(tokens[i]);
-      spans[i] = {i, 1, &tokens[i], LOOM_SERVE_TEXT_SPAN_FLAG_SELECT};
+      spans[i] = {i, 1, &tokens[i], LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT};
     }
     IREE_ASSERT_OK(
         loom_serve_text_model_epoch(model_, 0, capacity, spans.data()));
@@ -487,7 +488,7 @@ TEST_F(GrowingTextServiceTest, GrowthKeepsLiveHistoriesHandlesAndCheckpoints) {
   EXPECT_EQ(loom_serve_text_row_token(fork), fork_reference.Predict());
   EXPECT_EQ(loom_serve_text_row_token(original), references[0].Predict());
   loom_serve_text_checkpoint_release(checkpoint);
-  const auto after = loom_serve_text_model_weight_activity(model_);
+  const auto after = loom_serve_text_model_parameter_activity(model_);
   EXPECT_EQ(after.activations, activity.activations);
   EXPECT_EQ(after.read_bytes, activity.read_bytes);
   const auto default_after = loom_serve_pool_statistics(storage_owner_);
@@ -511,7 +512,8 @@ TEST_F(WideCohortTextServiceTest, WideEpochsPreserveSparseResidentsAndForks) {
       for (size_t j = 0; j < count; ++j) {
         references[i].Consume(tokens[2 * i + j]);
       }
-      spans[i] = {row, count, &tokens[2 * i], LOOM_SERVE_TEXT_SPAN_FLAG_SELECT};
+      spans[i] = {row, count, &tokens[2 * i],
+                  LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT};
     }
     const loom_serve_text_span_t duplicate[] = {spans[0], spans[0]};
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -537,8 +539,8 @@ TEST_F(WideCohortTextServiceTest, WideEpochsPreserveSparseResidentsAndForks) {
   ASSERT_TRUE(restored);
   const int32_t a = 0, b = 1;
   const loom_serve_text_span_t branches[] = {
-      {255, 1, &a, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT},
-      {256, 1, &b, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT}};
+      {255, 1, &a, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT},
+      {256, 1, &b, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT}};
   IREE_ASSERT_OK(loom_serve_text_model_epoch(model_, 1, 2, branches));
   Oracle fork_reference = references[0];
   fork_reference.Consume(a);
@@ -588,8 +590,8 @@ TEST_P(PooledTextServiceTest, ChunkingRowsAndForksMatchDenseOracle) {
   const int32_t a = 0;
   const int32_t b = 1;
   const loom_serve_text_span_t spans[] = {
-      {0, 1, &a, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT},
-      {2, 1, &b, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT},
+      {0, 1, &a, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT},
+      {2, 1, &b, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT},
   };
   IREE_ASSERT_OK(
       loom_serve_text_model_epoch(model_, 1, IREE_ARRAYSIZE(spans), spans));
@@ -652,8 +654,8 @@ TEST_P(PooledTextServiceTest, KnownInputCheckpointsPreserveNoPrediction) {
   // An explicit later selection observes the independently evolved states.
   const int32_t x = Oracle::Id('x');
   const loom_serve_text_span_t branches[] = {
-      {0, 1, &x, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT},
-      {1, 1, &b, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT},
+      {0, 1, &x, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT},
+      {1, 1, &b, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT},
   };
   IREE_ASSERT_OK(loom_serve_text_model_epoch(
       model_, 1, IREE_ARRAYSIZE(branches), branches));
@@ -773,8 +775,8 @@ TEST_F(SourceTextServiceTest, WideSourceEpochsRetainExactHttpHistory) {
     const int32_t pending = loom_serve_text_row_token(full);
     tokens.resize(capacity - 1, 1);
     const loom_serve_text_span_t spans[] = {
-        {0, 1, &pending, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT},
-        {2, tokens.size(), tokens.data(), LOOM_SERVE_TEXT_SPAN_FLAG_SELECT},
+        {0, 1, &pending, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT},
+        {2, tokens.size(), tokens.data(), LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT},
     };
     IREE_ASSERT_OK(
         loom_serve_text_model_epoch(model_, 1, IREE_ARRAYSIZE(spans), spans));

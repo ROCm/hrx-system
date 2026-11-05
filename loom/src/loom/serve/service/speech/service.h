@@ -36,7 +36,7 @@ typedef struct loom_serve_speech_service_t loom_serve_speech_service_t;
 iree_status_t loom_serve_speech_service_allocate(
     loom_serve_host_t* host, loom_serve_speech_generator_t generator,
     const loom_serve_speech_service_options_t* options,
-    loom_serve_telemetry_stream_t* stream, iree_allocator_t host_allocator,
+    loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_speech_service_t** out_service);
 
 // Opens a native output stream in the same bounded queue and compatible cohorts

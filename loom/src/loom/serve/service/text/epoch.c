@@ -98,7 +98,7 @@ static iree_host_size_t loom_serve_text_epoch_prepare_continuation(
     }
   }
   const iree_host_size_t cursor = plan->next_span;
-  if (options->packing_mode == LOOM_SERVE_TEXT_PACKING_SEPARATE) {
+  if (options->packing_mode == LOOM_SERVICE_TEXT_PACKING_SEPARATE) {
     for (iree_host_size_t i = 0; i < count; ++i) {
       const iree_host_size_t first = (cursor + i) % count;
       if (!ready[first].token_count) {
@@ -131,8 +131,8 @@ static iree_host_size_t loom_serve_text_epoch_prepare_continuation(
         .token_ids = speculative
                          ? NULL
                          : rows[first].input_tokens + spans[first].token_count,
-        .flags = (select ? LOOM_SERVE_TEXT_SPAN_FLAG_SELECT : 0) |
-                 (speculative ? LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE : 0),
+        .flags = (select ? LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT : 0) |
+                 (speculative ? LOOM_SERVICE_TEXT_SPAN_FLAG_PROPOSE : 0),
         .input_offset =
             speculative ? 0
                         : rows[first].input_offset + spans[first].token_count,
@@ -206,8 +206,8 @@ iree_host_size_t loom_serve_text_epoch_prepare(
         .row_index = row,
         .token_count = scheduled[i].token_count,
         .token_ids = prefill ? input->input_tokens : &decode_tokens[i],
-        .flags = (select ? LOOM_SERVE_TEXT_SPAN_FLAG_SELECT : 0) |
-                 (output_limits[i] ? LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE : 0),
+        .flags = (select ? LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT : 0) |
+                 (output_limits[i] ? LOOM_SERVICE_TEXT_SPAN_FLAG_PROPOSE : 0),
         .input_offset = prefill ? input->input_offset : 0,
         .media = prefill ? input->media : NULL,
     };
@@ -227,7 +227,7 @@ iree_host_size_t loom_serve_text_epoch_prepare(
   epoch->input_count = plan->token_count;
   epoch->proposal_count = proposal_count;
   epoch->device_epochs = continuation->span_count ? 2 : 1;
-  if (options->schedule_mode == LOOM_SERVE_TEXT_SCHEDULE_PACKED) {
+  if (options->schedule_mode == LOOM_SERVICE_TEXT_SCHEDULE_PACKED) {
     epoch->token_slots = options->shapes[plan->shape_index].token_capacity;
     if (continuation->span_count) {
       epoch->token_slots +=
@@ -239,12 +239,12 @@ iree_host_size_t loom_serve_text_epoch_prepare(
 }
 
 iree_status_t loom_serve_text_epoch_submit(
-    loom_serve_text_model_t* model, loom_serve_text_schedule_mode_t mode,
+    loom_serve_text_model_t* model, loom_service_text_schedule_mode_t mode,
     const loom_serve_text_epoch_t* epoch,
     const loom_serve_text_continuation_t* continuation,
     loom_serve_text_capture_t** out_capture,
     loom_serve_execution_frontier_t* out_frontier) {
-  if (mode == LOOM_SERVE_TEXT_SCHEDULE_PACKED) {
+  if (mode == LOOM_SERVICE_TEXT_SCHEDULE_PACKED) {
     const bool verifies = epoch->proposal_count || epoch->device_epochs == 2;
     return loom_serve_text_model_submit_epoch(
         model, epoch->shape_index, epoch->count, epoch->spans,
@@ -260,7 +260,7 @@ iree_status_t loom_serve_text_epoch_submit(
   loom_serve_text_row_t* row =
       loom_serve_text_model_row(model, span->row_index);
   if (epoch->prefill[epoch->cursor] ||
-      mode == LOOM_SERVE_TEXT_SCHEDULE_MATCHED) {
+      mode == LOOM_SERVICE_TEXT_SCHEDULE_MATCHED) {
     return loom_serve_text_row_submit_prefill(row, span->token_count,
                                               span->token_ids, out_frontier);
   }
@@ -268,9 +268,9 @@ iree_status_t loom_serve_text_epoch_submit(
 }
 
 iree_status_t loom_serve_text_epoch_complete(
-    loom_serve_text_model_t* model, loom_serve_text_schedule_mode_t mode,
+    loom_serve_text_model_t* model, loom_service_text_schedule_mode_t mode,
     loom_serve_text_epoch_t* epoch) {
-  if (mode == LOOM_SERVE_TEXT_SCHEDULE_PACKED) {
+  if (mode == LOOM_SERVICE_TEXT_SCHEDULE_PACKED) {
     return loom_serve_text_model_complete_epoch(model, epoch->results);
   }
   const loom_serve_text_span_t* span = &epoch->spans[epoch->cursor];
@@ -286,7 +286,7 @@ iree_status_t loom_serve_text_epoch_complete(
   loom_serve_text_result_t* result = &epoch->results[epoch->cursor];
   result->consumed_count = (uint32_t)span->token_count;
   result->known_count = (uint32_t)span->token_count;
-  if (iree_any_bit_set(span->flags, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT)) {
+  if (iree_any_bit_set(span->flags, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT)) {
     result->output_count = 1;
     result->tokens[0] = loom_serve_text_row_token(row);
   }

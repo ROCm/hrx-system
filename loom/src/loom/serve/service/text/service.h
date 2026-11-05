@@ -54,9 +54,9 @@ typedef struct loom_serve_text_service_options_t {
   // Reporting interval in nanoseconds; zero disables periodic heartbeats.
   iree_duration_t heartbeat_interval;
   // Execution choice; the planner and HTTP lifecycle are shared by all modes.
-  loom_serve_text_schedule_mode_t schedule_mode;
+  loom_service_text_schedule_mode_t schedule_mode;
   // Whether prompt and decode inputs may share an epoch, independent of math.
-  loom_serve_text_packing_mode_t packing_mode;
+  loom_service_text_packing_mode_t packing_mode;
   // One or two device-fed epochs between transport/admission observations.
   // Two requires drafting; output credit and speculative residency cover both.
   iree_host_size_t continuation_epochs;
@@ -73,7 +73,7 @@ typedef struct loom_serve_text_service_t loom_serve_text_service_t;
 iree_status_t loom_serve_text_service_allocate(
     loom_serve_text_model_t* model,
     const loom_serve_text_service_options_t* options,
-    loom_serve_telemetry_stream_t* stream, iree_allocator_t host_allocator,
+    loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_text_service_t** out_service);
 
 // Enqueues native chat on the same serialized owner and bounded arrival queue

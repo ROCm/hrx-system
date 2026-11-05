@@ -10,6 +10,7 @@
 
 #include "loom/serve/service/text/session.h"
 #include "loom/serve/service/text/telemetry.h"
+#include "loom/service/telemetry/record.h"
 
 struct loom_serve_text_checkpoint_control_t {
   // Allocator owning this receipt and its trailing identifier bytes.
@@ -65,7 +66,7 @@ static bool loom_serve_text_checkpoint_control_open(void* self) {
 }
 
 static void loom_serve_text_checkpoint_control_retire(
-    void* self, loom_serve_telemetry_outcome_t outcome,
+    void* self, loom_service_telemetry_outcome_t outcome,
     const iree_status_t status, loom_serve_text_telemetry_t* telemetry,
     const loom_serve_text_receipt_t* receipt) {
   loom_serve_text_checkpoint_control_t* control = self;
@@ -86,7 +87,8 @@ static iree_status_t loom_serve_text_checkpoint_control_end(
   }
   loom_serve_text_checkpoint_control_retire(
       self,
-      result ? LOOM_SERVE_TELEMETRY_COMPLETED : LOOM_SERVE_TELEMETRY_REJECTED,
+      result ? LOOM_SERVICE_TELEMETRY_COMPLETED
+             : LOOM_SERVICE_TELEMETRY_REJECTED,
       failure, telemetry, receipt);
   return iree_ok_status();
 }

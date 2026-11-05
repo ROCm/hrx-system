@@ -11,8 +11,8 @@
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/threading/notification.h"
 #include "iree/net/carrier.h"
+#include "loom/runtime/telemetry/stream.h"
 #include "loom/serve/runtime/host/wake.h"
-#include "loom/serve/telemetry/stream.h"
 #include "loom/serve/transport/http/origin.h"
 #include "loom/serve/transport/http/request.h"
 
@@ -98,7 +98,7 @@ loom_serve_http_request_limits_t loom_serve_http_server_request_limits(
 // Borrowed diagnostic stream, valid until server destruction. Readers use
 // independent cursors and never acquire the transport's mutex. This stream
 // includes routing failures, connection rejection and retired peer failures.
-const loom_serve_telemetry_stream_t* loom_serve_http_server_diagnostics(
+const loom_runtime_telemetry_stream_t* loom_serve_http_server_diagnostics(
     const loom_serve_http_server_t* server);
 
 // Copies a borrowed error into the bounded diagnostic history, without

@@ -10,6 +10,7 @@
 #include "loom/serve/service/text/checkpoint_control.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/serve/service/text/stream.h"
+#include "loom/service/telemetry/record.h"
 #include "loom/util/json.h"
 
 IREE_FLAG(string, native_text_model, "",
@@ -447,7 +448,7 @@ TEST_F(NativeTextRegistryTest, StalledNativeAndHttpPeerRetainDetachedResult) {
   }
   ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil(
       [&] { return loom_serve_registry_count(registry_) == 0; }));
-  loom_serve_telemetry_counters_t counters;
+  loom_service_telemetry_counters_t counters;
   ASSERT_TRUE(loom_serve_registry_counters(registry_, &counters));
   EXPECT_EQ(counters.requests, 2u);
   EXPECT_EQ(counters.completed, 2u);
@@ -495,7 +496,7 @@ TEST_F(NativeTextRegistryTest, AbortRetiresAcceptedWorkBeforeReleasingInput) {
   });
   ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil(
       [&] { return loom_serve_registry_count(registry_) == 0; }));
-  loom_serve_telemetry_counters_t counters;
+  loom_service_telemetry_counters_t counters;
   ASSERT_TRUE(loom_serve_registry_counters(registry_, &counters));
   EXPECT_EQ(counters.requests, 2u);
   EXPECT_EQ(counters.cancelled, 2u);

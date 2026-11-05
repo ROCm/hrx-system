@@ -13,17 +13,13 @@ package(
 )
 
 loom_cc_library(
-    name = "tracing",
-    srcs = ["tracing.c"],
-    hdrs = ["tracing.h"],
-    deps = ["//runtime/src/iree/base"],
-)
-
-loom_cc_library(
     name = "sample",
     srcs = ["sample.c"],
     hdrs = ["sample.h"],
-    deps = ["//runtime/src/iree/base"],
+    deps = [
+        "//loom/src/loom/runtime/telemetry:sample",
+        "//runtime/src/iree/base",
+    ],
 )
 
 loom_cc_test(
@@ -37,64 +33,30 @@ loom_cc_test(
     ],
 )
 
-loom_cc_test(
-    name = "tracing_test",
-    srcs = ["tracing_test.cc"],
-    target_compatible_with = select({
-        "//runtime/config/base/tracing:provider_console": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
-    deps = [
-        ":tracing",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
 loom_cc_library(
     name = "record",
     srcs = ["record.c"],
     hdrs = ["record.h"],
     deps = [
+        "//loom/src/loom/runtime/telemetry:field",
+        "//loom/src/loom/runtime/telemetry:record",
+        "//loom/src/loom/service/telemetry:record",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
     ],
 )
 
-loom_cc_library(
-    name = "latency",
-    srcs = ["latency.c"],
-    hdrs = ["latency.h"],
-    deps = [
-        ":record",
-        ":stream",
-        "//runtime/src/iree/base",
-    ],
-)
-
 loom_cc_test(
-    name = "latency_test",
-    srcs = ["latency_test.cc"],
+    name = "parameter_test",
+    srcs = ["parameter_test.cc"],
     deps = [
-        ":latency",
         ":record",
-        ":stream",
+        "//loom/src/loom/runtime/parameter:telemetry",
+        "//loom/src/loom/runtime/telemetry:stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_library(
-    name = "stream",
-    srcs = ["stream.c"],
-    hdrs = ["stream.h"],
-    deps = [
-        ":record",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal",
     ],
 )
 
@@ -103,18 +65,8 @@ loom_cc_test(
     srcs = ["record_test.cc"],
     deps = [
         ":record",
-        ":stream",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_test(
-    name = "stream_test",
-    srcs = ["stream_test.cc"],
-    deps = [
-        ":stream",
+        "//loom/src/loom/runtime/telemetry:field",
+        "//loom/src/loom/runtime/telemetry:stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -126,7 +78,7 @@ loom_cc_benchmark(
     srcs = ["stream_benchmark.cc"],
     deps = [
         ":record",
-        ":stream",
+        "//loom/src/loom/runtime/telemetry:stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:benchmark_main",
     ],

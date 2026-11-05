@@ -125,7 +125,7 @@ class ImageParameterTest : public WeightsTest {
           .width = 1,
           .height = 1,
       };
-      loom_serve_image_prepared_t prepared = {};
+      loom_service_image_prepared_t prepared = {};
       iree_const_byte_span_t rgb = iree_const_byte_span_empty();
       IREE_ASSERT_OK(
           loom_serve_image_model_generate(model_, &request, &prepared, &rgb));

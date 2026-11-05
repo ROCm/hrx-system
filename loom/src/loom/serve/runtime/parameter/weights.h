@@ -6,6 +6,7 @@
 #ifndef LOOM_SERVE_RUNTIME_PARAMETER_WEIGHTS_H_
 #define LOOM_SERVE_RUNTIME_PARAMETER_WEIGHTS_H_
 
+#include "loom/runtime/parameter/activity.h"
 #include "loom/serve/runtime/execution/execution.h"
 #include "loom/serve/runtime/execution/workspace.h"
 #include "loom/serve/runtime/parameter/sources.h"
@@ -33,22 +34,6 @@ typedef struct loom_serve_weight_root_t {
 // and optional physical pool outlive this object. The plan owns its resolved
 // parameter keys and preparations independently of the compiler.
 typedef struct loom_serve_weights_t loom_serve_weights_t;
-
-// Cumulative owner-side submissions, independent of telemetry retention. These
-// are accepted producer operations, not measured storage traffic or device
-// time.
-typedef struct loom_serve_weight_activity_t {
-  // Fully submitted loads, excluding readiness imports by later consumers.
-  uint64_t activations;
-  // Active-to-inactive releases of physical backing.
-  uint64_t deactivations;
-  // Payload bytes accepted by cold read tasks, including later I/O failures.
-  uint64_t read_bytes;
-  // Final tensor bytes whose preparation dispatch was accepted.
-  uint64_t prepared_bytes;
-  // Gather groups accepted by cold read tasks across all activations.
-  uint64_t groups;
-} loom_serve_weight_activity_t;
 
 // Resolves final weight roots on the serialized pool owner, without waiting,
 // indexing files, or compiling source. The first
@@ -227,17 +212,17 @@ iree_status_t loom_serve_weights_deactivate(loom_serve_weights_t* weights,
 // Collects completed native activation records on the serialized owner and
 // reports parameter accounting, separate from state sharing the physical pool.
 // Fixed storage reports zero virtual-pool statistics.
-loom_serve_memory_statistics_t loom_serve_weights_statistics(
+loom_runtime_storage_statistics_t loom_serve_weights_statistics(
     loom_serve_weights_t* weights);
 
 // Copies already-published reservation accounting without collecting native
 // operations. Admission can combine multiple plans and the shared range ledger
 // in one owner snapshot; callbacks do not mutate any of these counters.
-loom_serve_memory_usage_t loom_serve_weights_memory_usage(
+loom_runtime_storage_usage_t loom_serve_weights_memory_usage(
     const loom_serve_weights_t* weights);
 
 // Copies cumulative submission counters on the serialized activation owner.
-loom_serve_weight_activity_t loom_serve_weights_activity(
+loom_runtime_parameter_activity_t loom_serve_weights_activity(
     const loom_serve_weights_t* weights);
 
 // Observes final ownership of both parameter consumers and activation I/O.

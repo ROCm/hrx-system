@@ -6,6 +6,7 @@
 
 #include "loom/serve/runtime/program/variant_pool.h"
 #include "loom/serve/server/router_test_fixture.h"
+#include "loom/service/telemetry/record.h"
 
 namespace {
 
@@ -28,11 +29,11 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
   // Terminal model destruction, independent of connection completion.
   std::atomic<unsigned> destroyed{0};
   // Service counters retained until the registry copies terminal totals.
-  loom_serve_telemetry_counters_t totals = {};
+  loom_service_telemetry_counters_t totals = {};
   // Terminal duration storage obeying the managed-service publication contract.
-  loom_serve_telemetry_latency_t durations = {};
+  loom_service_telemetry_latency_t durations = {};
   // Registration-owned stream borrowed through service retirement.
-  loom_serve_telemetry_stream_t* stream = nullptr;
+  loom_runtime_telemetry_stream_t* stream = nullptr;
   // Simulated compiler borrows protected by the inherited mutex.
   std::vector<loom_serve_variant_entry_t*> compilers;
   // Total accepted producer jobs, also protected by the mutex.
@@ -169,7 +170,7 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
   static iree_status_t Create(
       void* self, const loom_serve_model_configuration_t* configuration,
       loom_serve_wake_callback_t observer,
-      loom_serve_telemetry_stream_t* stream, iree_allocator_t host_allocator,
+      loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
       loom_serve_registration_t* out_registration) {
     auto* dependency = static_cast<loom_serve_test_variant_dependency_t*>(self);
     IREE_RETURN_IF_ERROR(loom_serve_variant_pool_allocate(

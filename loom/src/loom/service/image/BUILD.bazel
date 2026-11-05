@@ -1,0 +1,47 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+loom_cc_library(
+    name = "preparation",
+    hdrs = ["preparation.h"],
+    visibility = ["//visibility:public"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_library(
+    name = "telemetry",
+    srcs = ["telemetry.c"],
+    hdrs = ["telemetry.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":preparation",
+        "//loom/src/loom/runtime/telemetry:field",
+        "//loom/src/loom/runtime/telemetry:sample",
+        "//loom/src/loom/runtime/telemetry:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_assert_dependency_boundary(
+    name = "telemetry_is_image_only",
+    forbidden_subtrees = [
+        "//loom/binding/...",
+        "//loom/src/loom/serve/...",
+        "//loom/src/loom/service/text/...",
+        "//loom/src/loom/target/...",
+    ],
+    message = "Image observation must not import serving, sibling services, or compiler implementation",
+    target = ":telemetry",
+)

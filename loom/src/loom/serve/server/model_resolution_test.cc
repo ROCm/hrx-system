@@ -306,7 +306,7 @@ TEST_F(ModelResolutionTest, RemovalJoinsResolutionBeforeReleasingDeclaration) {
       .resolution_sink = Sink(),
       .create =
           +[](void*, const loom_serve_model_configuration_t*,
-              loom_serve_wake_callback_t, loom_serve_telemetry_stream_t*,
+              loom_serve_wake_callback_t, loom_runtime_telemetry_stream_t*,
               iree_allocator_t, loom_serve_registration_t*) {
             ADD_FAILURE() << "cancelled card resolution constructed a model";
             return iree_make_status(IREE_STATUS_INTERNAL,

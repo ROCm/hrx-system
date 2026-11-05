@@ -746,7 +746,7 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
   // Independent live-state allocation sharing the parameter pressure policy.
   loom_serve_virtual_buffer_t* state_ = nullptr;
   // Mutable-state accounting retained through virtual storage destruction.
-  loom_serve_memory_statistics_t state_statistics_ = {};
+  loom_runtime_storage_statistics_t state_statistics_ = {};
   // Number of plan slots initialized by the loading helper.
   size_t plan_count_ = 0;
   // Source catalog compiler shared across all stages and preparers.

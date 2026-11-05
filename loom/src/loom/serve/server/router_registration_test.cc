@@ -6,6 +6,7 @@
 
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/server/router_test_fixture.h"
+#include "loom/service/telemetry/record.h"
 
 namespace {
 
@@ -35,9 +36,9 @@ struct loom_serve_test_registration_dependency_t {
   loom_serve_model_kind_t kind = LOOM_SERVE_MODEL_KIND_EMBEDDING;
   // Model-protocol counters supplied by the dependency, not synthesized by
   // routing.
-  loom_serve_telemetry_counters_t counters = {};
+  loom_service_telemetry_counters_t counters = {};
   // Historical terminal observations owned by the dependency until retirement.
-  loom_serve_telemetry_latency_t latency = {};
+  loom_service_telemetry_latency_t latency = {};
   // Serializes retirement readiness and wake detachment with the owner.
   std::mutex mutex;
   // Outer-test synchronization on actual retirement entry.
@@ -45,7 +46,7 @@ struct loom_serve_test_registration_dependency_t {
   // Final device-borrower wake, independent of the service observer.
   loom_serve_wake_callback_t observer = {};
   // Registry-owned history borrowed by the prepared service.
-  loom_serve_telemetry_stream_t* stream = nullptr;
+  loom_runtime_telemetry_stream_t* stream = nullptr;
   // Retire has been called after all service and utility borrowers completed.
   bool retiring = false;
   // The test has returned final model ownership.
@@ -251,7 +252,7 @@ struct loom_serve_test_registration_dependency_t {
   static iree_status_t Create(
       void* self, const loom_serve_model_configuration_t* configuration,
       loom_serve_wake_callback_t observer,
-      loom_serve_telemetry_stream_t* stream, iree_allocator_t host_allocator,
+      loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
       loom_serve_registration_t* out_registration) {
     auto* dependency =
         static_cast<loom_serve_test_registration_dependency_t*>(self);
@@ -1310,7 +1311,7 @@ class HttpRouterRegistrationLatencyTest : public HttpRouterRegistrationTest {
   }
 
   // Immutable empty history for the externally owned peer dependencies.
-  loom_serve_telemetry_latency_t empty_latency_ = {};
+  loom_service_telemetry_latency_t empty_latency_ = {};
 };
 
 TEST_P(HttpRouterRegistrationLatencyTest,
@@ -1318,16 +1319,18 @@ TEST_P(HttpRouterRegistrationLatencyTest,
   {
     std::lock_guard<std::mutex> lock(managed_.mutex);
     managed_.counters = {.requests = 3, .completed = 2, .rejected = 1};
-    loom_serve_telemetry_latency_observe(
-        &managed_.latency.outcomes[LOOM_SERVE_TELEMETRY_COMPLETED], 100000000);
-    loom_serve_telemetry_latency_observe(
-        &managed_.latency.outcomes[LOOM_SERVE_TELEMETRY_COMPLETED], 2000000000);
-    loom_serve_telemetry_latency_observe(
-        &managed_.latency.outcomes[LOOM_SERVE_TELEMETRY_REJECTED], 3000000);
-    loom_serve_telemetry_latency_observe(&managed_.latency.first_output,
-                                         10000000);
-    loom_serve_telemetry_latency_observe(&managed_.latency.first_output,
-                                         500000000);
+    loom_service_telemetry_latency_observe(
+        &managed_.latency.outcomes[LOOM_SERVICE_TELEMETRY_COMPLETED],
+        100000000);
+    loom_service_telemetry_latency_observe(
+        &managed_.latency.outcomes[LOOM_SERVICE_TELEMETRY_COMPLETED],
+        2000000000);
+    loom_service_telemetry_latency_observe(
+        &managed_.latency.outcomes[LOOM_SERVICE_TELEMETRY_REJECTED], 3000000);
+    loom_service_telemetry_latency_observe(&managed_.latency.first_output,
+                                           10000000);
+    loom_service_telemetry_latency_observe(&managed_.latency.first_output,
+                                           500000000);
   }
   Register();
   const auto live = Read(Send("GET", "/metrics"));
@@ -1369,10 +1372,11 @@ TEST_P(HttpRouterRegistrationLatencyTest,
     managed_.retired = false;
     managed_.retiring = false;
     managed_.counters = {.requests = 1, .completed = 1};
-    loom_serve_telemetry_latency_observe(
-        &managed_.latency.outcomes[LOOM_SERVE_TELEMETRY_COMPLETED], 7000000000);
-    loom_serve_telemetry_latency_observe(&managed_.latency.first_output,
-                                         1000000000);
+    loom_service_telemetry_latency_observe(
+        &managed_.latency.outcomes[LOOM_SERVICE_TELEMETRY_COMPLETED],
+        7000000000);
+    loom_service_telemetry_latency_observe(&managed_.latency.first_output,
+                                           1000000000);
   }
   // Declare() expects the initial factory creation count. Register explicitly
   // here to exercise reuse of a name without resetting its history.

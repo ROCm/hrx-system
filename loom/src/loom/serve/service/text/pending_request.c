@@ -7,6 +7,7 @@
 #include "loom/serve/service/text/pending_request.h"
 
 #include "loom/serve/service/text/schedule.h"
+#include "loom/service/telemetry/record.h"
 
 iree_status_t loom_serve_text_pending_request_prepare(
     loom_serve_text_pending_request_t* request, loom_serve_text_model_t* model,
@@ -76,8 +77,8 @@ void loom_serve_text_pending_request_cancel(
   }
   const iree_status_code_t failure_code = iree_status_code(telemetry->failure);
   loom_serve_text_telemetry_end(telemetry, request->receipt,
-                                failure_code ? LOOM_SERVE_TELEMETRY_FAILED
-                                             : LOOM_SERVE_TELEMETRY_CANCELLED,
+                                failure_code ? LOOM_SERVICE_TELEMETRY_FAILED
+                                             : LOOM_SERVICE_TELEMETRY_CANCELLED,
                                 0, telemetry->failure);
   request->consumer.vtable->end(
       request->consumer.self, false,
@@ -91,6 +92,6 @@ iree_status_t loom_serve_text_pending_request_reject(
   failure = iree_status_join(failure, loom_serve_text_pending_request_release(
                                           request, host_allocator));
   loom_serve_text_telemetry_end(telemetry, request->receipt,
-                                LOOM_SERVE_TELEMETRY_REJECTED, 0, failure);
+                                LOOM_SERVICE_TELEMETRY_REJECTED, 0, failure);
   return request->consumer.vtable->reject(request->consumer.self, failure);
 }

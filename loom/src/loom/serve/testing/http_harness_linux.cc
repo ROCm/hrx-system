@@ -13,8 +13,9 @@
 #include <cstring>
 #include <utility>
 
-#include "loom/serve/telemetry/stream.h"
+#include "loom/runtime/telemetry/stream.h"
 #include "loom/serve/testing/http_harness.h"
+#include "loom/service/telemetry/record.h"
 
 namespace loom_serve::testing {
 namespace {
@@ -107,23 +108,25 @@ iree_status_t HttpHarness::Diagnose(iree_status_t status) {
     status = iree_status_join(status, iree_status_clone(status_));
   }
   const auto* stream = loom_serve_http_server_diagnostics(server_);
-  const uint64_t head = loom_serve_telemetry_stream_head(stream);
+  const uint64_t head = loom_runtime_telemetry_stream_head(stream);
   uint64_t cursor = 0;
   while (cursor < head) {
-    loom_serve_telemetry_record_t record;
+    loom_runtime_telemetry_record_t record;
     const auto result =
-        loom_serve_telemetry_stream_read(stream, &cursor, &record);
-    if (result == LOOM_SERVE_TELEMETRY_READ_BUSY ||
-        result == LOOM_SERVE_TELEMETRY_READ_EMPTY) {
+        loom_runtime_telemetry_stream_read(stream, &cursor, &record);
+    if (result == LOOM_RUNTIME_TELEMETRY_READ_BUSY ||
+        result == LOOM_RUNTIME_TELEMETRY_READ_EMPTY) {
       break;
     }
-    if (result == LOOM_SERVE_TELEMETRY_READ_RECORD &&
-        record.event == &LOOM_SERVE_TELEMETRY_ERROR) {
+    if (result == LOOM_RUNTIME_TELEMETRY_READ_RECORD &&
+        record.event == &LOOM_SERVICE_TELEMETRY_ERROR) {
+      loom_service_telemetry_diagnostic_t diagnostic;
+      std::memcpy(&diagnostic, record.data.words, sizeof(diagnostic));
       status = iree_status_annotate_f(
           status, "HTTP transport: %s: %.*s%s",
-          iree_status_code_string((iree_status_code_t)record.data.error.code),
-          (int)record.data.error.length, record.data.error.message,
-          record.data.error.truncated ? " [truncated]" : "");
+          iree_status_code_string((iree_status_code_t)diagnostic.code),
+          (int)diagnostic.length, diagnostic.message,
+          diagnostic.truncated ? " [truncated]" : "");
     }
   }
   return status;

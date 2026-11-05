@@ -20,10 +20,10 @@
 #include "loom/serve/runtime/program/compilation.h"
 #include "loom/serve/service/finite/model.h"
 #include "loom/serve/service/finite/service.h"
-#include "loom/serve/telemetry/record.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/model_wait.h"
 #include "loom/serve/transport/http/listener.h"
+#include "loom/service/telemetry/record.h"
 
 namespace loom_serve::testing::embedding {
 
@@ -191,7 +191,7 @@ class SourceEmbeddingServiceTest : public ::testing::Test {
   loom_serve::testing::HttpHarness http_;
   // Copied after the router joins, including counters from removed
   // incarnations.
-  loom_serve_telemetry_counters_t retired_counters_ = {};
+  loom_service_telemetry_counters_t retired_counters_ = {};
 };
 
 }  // namespace loom_serve::testing::embedding

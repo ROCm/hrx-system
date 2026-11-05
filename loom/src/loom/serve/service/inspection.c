@@ -8,6 +8,7 @@
 
 #include <inttypes.h>
 
+#include "loom/serve/telemetry/record.h"
 #include "loom/util/json.h"
 
 bool loom_serve_http_inspection_offset(iree_string_view_t value,

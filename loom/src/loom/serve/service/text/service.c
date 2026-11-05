@@ -43,7 +43,8 @@
 #include "loom/serve/service/text/session.h"
 #include "loom/serve/service/text/session_cache.h"
 #include "loom/serve/service/text/telemetry.h"
-#include "loom/serve/telemetry/tracing.h"
+#include "loom/service/telemetry/record.h"
+#include "loom/service/telemetry/tracing.h"
 
 static iree_status_t loom_serve_text_count_input(void* user_data) {
   loom_serve_text_service_t* service = user_data;
@@ -80,8 +81,8 @@ static void loom_serve_text_request_cancel(loom_serve_text_service_t* service,
   loom_serve_text_telemetry_request_end(
       &service->telemetry, session,
       failure_code || session->request.diagnostic.code
-          ? LOOM_SERVE_TELEMETRY_FAILED
-          : LOOM_SERVE_TELEMETRY_CANCELLED);
+          ? LOOM_SERVICE_TELEMETRY_FAILED
+          : LOOM_SERVICE_TELEMETRY_CANCELLED);
   const loom_serve_text_consumer_t consumer = session->request.consumer;
   const iree_status_code_t code =
       failure_code ? failure_code : session->request.diagnostic.code;
@@ -100,8 +101,8 @@ static void loom_serve_text_request_finish(loom_serve_text_service_t* service,
                                            loom_serve_text_session_t* session) {
   loom_serve_text_telemetry_request_end(&service->telemetry, session,
                                         session->request.diagnostic.code
-                                            ? LOOM_SERVE_TELEMETRY_FAILED
-                                            : LOOM_SERVE_TELEMETRY_COMPLETED);
+                                            ? LOOM_SERVICE_TELEMETRY_FAILED
+                                            : LOOM_SERVICE_TELEMETRY_COMPLETED);
   const loom_serve_text_consumer_t consumer = session->request.consumer;
   const iree_status_code_t code = session->request.diagnostic.code;
   loom_serve_text_request_release(service, session);
@@ -387,7 +388,7 @@ static iree_status_t loom_serve_text_prepare_ready(
   }
   if (session->request.publication.pending &&
       !session->request.publication.recorded) {
-    loom_serve_telemetry_latency_publish_output(
+    loom_service_telemetry_latency_publish_output(
         &service->telemetry.latency, service->telemetry.stream,
         session->lifetime.serial,
         session->request.start_time - session->request.queue_duration);
@@ -446,8 +447,8 @@ static iree_status_t loom_serve_text_submit_epoch(
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_TEXT(z0, service->name.data, service->name.size);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(
-      z0,
-      loom_serve_telemetry_stream_identity(service->telemetry.stream).ordinal);
+      z0, loom_runtime_telemetry_stream_identity(service->telemetry.stream)
+              .ordinal);
   loom_serve_text_epoch_row_t* rows = service->epoch.planning.rows;
   const iree_host_size_t count = plan->span_count;
   for (iree_host_size_t i = 0; i < count; ++i) {
@@ -482,7 +483,7 @@ static iree_status_t loom_serve_text_submit_epoch(
   loom_serve_text_observe(service, "execute");
   const iree_time_t start = iree_time_now();
   iree_slim_mutex_lock(&service->heartbeat.mutex);
-  loom_serve_text_heartbeat_snapshot_t* state = &service->heartbeat.snapshot;
+  loom_service_text_statistics_t* state = &service->heartbeat.snapshot;
   service->epoch.start.serial = state->issued_epochs + 1;
   service->epoch.start.time = start;
   state->issued_epochs += service->epoch.device_epochs;
@@ -539,8 +540,8 @@ static iree_status_t loom_serve_text_process_output(void* user_data) {
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_TEXT(z0, service->name.data, service->name.size);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(
-      z0,
-      loom_serve_telemetry_stream_identity(service->telemetry.stream).ordinal);
+      z0, loom_runtime_telemetry_stream_identity(service->telemetry.stream)
+              .ordinal);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, service->epoch.start.serial);
   iree_arena_allocator_t arena;
   iree_arena_initialize(loom_serve_host_block_pool(loom_serve_device_host(
@@ -586,12 +587,14 @@ static void loom_serve_text_complete_output(
     loom_serve_text_session_t* session =
         service->sessions[service->epoch.spans[i].row_index];
     if (session->request.diagnostic.code) {
-      loom_serve_telemetry_record_t record = {
+      loom_runtime_telemetry_record_t record = {
           .time_ns = iree_time_now(),
           .request = session->lifetime.serial,
-          .event = &LOOM_SERVE_TELEMETRY_ERROR,
-          .data.error = session->request.diagnostic};
-      loom_serve_telemetry_stream_append(service->telemetry.stream, &record);
+          .event = &LOOM_SERVICE_TELEMETRY_ERROR};
+      loom_service_telemetry_diagnostic_t telemetry_payload =
+          session->request.diagnostic;
+      memcpy(record.data.words, &telemetry_payload, sizeof(telemetry_payload));
+      loom_runtime_telemetry_stream_append(service->telemetry.stream, &record);
     }
     if (session->request.phase == LOOM_SERVE_TEXT_REQUEST_FINISHING) {
       loom_serve_text_row_release_reservation(session->row);
@@ -670,15 +673,16 @@ static iree_status_t loom_serve_text_complete_epoch(
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_TEXT(z0, service->name.data, service->name.size);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(
-      z0,
-      loom_serve_telemetry_stream_identity(service->telemetry.stream).ordinal);
+      z0, loom_runtime_telemetry_stream_identity(service->telemetry.stream)
+              .ordinal);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, service->epoch.start.serial);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
       loom_serve_text_epoch_complete(
           service->model, service->scheduling.schedule_mode, &service->epoch));
   if (iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
-    if (service->scheduling.schedule_mode != LOOM_SERVE_TEXT_SCHEDULE_PACKED) {
+    if (service->scheduling.schedule_mode !=
+        LOOM_SERVICE_TEXT_SCHEDULE_PACKED) {
       // Only these isolated spans were submitted; the remainder never ran.
       service->epoch.count = service->epoch.cursor;
     }
@@ -686,7 +690,7 @@ static iree_status_t loom_serve_text_complete_epoch(
     service->epoch.count = 0;
     IREE_RETURN_AND_END_ZONE(z0, iree_ok_status());
   }
-  if (service->scheduling.schedule_mode != LOOM_SERVE_TEXT_SCHEDULE_PACKED &&
+  if (service->scheduling.schedule_mode != LOOM_SERVICE_TEXT_SCHEDULE_PACKED &&
       service->epoch.cursor < service->epoch.count) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, loom_serve_text_epoch_submit(
@@ -708,7 +712,7 @@ static iree_status_t loom_serve_text_complete_epoch(
 
 static iree_status_t loom_serve_text_service_initialize(
     loom_serve_text_service_t* service, iree_host_size_t initial_count,
-    loom_serve_telemetry_stream_t* stream) {
+    loom_runtime_telemetry_stream_t* stream) {
   iree_host_size_t span_capacity = 0;
   for (iree_host_size_t i = 0; i < service->scheduling.shape_count; ++i) {
     span_capacity =
@@ -841,7 +845,7 @@ void loom_serve_text_service_free(loom_serve_text_service_t* service,
 iree_status_t loom_serve_text_service_allocate(
     loom_serve_text_model_t* model,
     const loom_serve_text_service_options_t* options,
-    loom_serve_telemetry_stream_t* stream, iree_allocator_t host_allocator,
+    loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_text_service_t** out_service) {
   *out_service = NULL;
   if (options->row_count != loom_serve_text_model_row_count(model)) {
@@ -855,7 +859,7 @@ iree_status_t loom_serve_text_service_allocate(
   const iree_host_size_t draft_depth = loom_serve_text_model_draft_depth(model);
   const loom_serve_text_mode_t model_mode = loom_serve_text_model_mode(model);
   if (model_mode == LOOM_SERVE_TEXT_MODE_ENCODE &&
-      (options->schedule_mode != LOOM_SERVE_TEXT_SCHEDULE_PACKED ||
+      (options->schedule_mode != LOOM_SERVICE_TEXT_SCHEDULE_PACKED ||
        options->image || options->prefix_cache_capacity ||
        options->continuation_epochs != 1)) {
     return iree_make_status(
@@ -865,7 +869,7 @@ iree_status_t loom_serve_text_service_allocate(
         "use session cache or explicit checkpoints, not chat prefix caching");
   }
   if ((draft_depth &&
-       options->schedule_mode != LOOM_SERVE_TEXT_SCHEDULE_PACKED) ||
+       options->schedule_mode != LOOM_SERVICE_TEXT_SCHEDULE_PACKED) ||
       options->continuation_epochs < 1 || options->continuation_epochs > 2 ||
       (options->continuation_epochs == 2 && !draft_depth)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1100,13 +1104,13 @@ static iree_status_t loom_serve_text_advance_work(
         loom_serve_text_complete_retention(service);
         break;
       case TEXT_WORK_PREFIX: {
-        const loom_serve_text_prefix_record_t record = {
+        const loom_service_text_prefix_record_t record = {
             .readiness_ns = iree_time_now() - service->completion.start_time,
             .capacity = service->prefixes.capacity,
             .endpoints = service->prefixes.count};
-        loom_serve_text_record(service->telemetry.stream,
-                               &LOOM_SERVE_TEXT_PREFIX_CAPTURE, 0, &record,
-                               sizeof(record));
+        loom_service_text_record(service->telemetry.stream,
+                                 &LOOM_SERVICE_TEXT_PREFIX_CAPTURE, 0, &record,
+                                 sizeof(record));
         if (iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
           service->epoch.count = 0;
         } else {
@@ -1180,7 +1184,8 @@ static iree_status_t loom_serve_text_advance_work(
     status = loom_serve_text_submit_trim(service);
   }
   if (iree_status_is_ok(status) && !loom_serve_text_has_work(service)) {
-    if (service->scheduling.packing_mode == LOOM_SERVE_TEXT_PACKING_SEPARATE) {
+    if (service->scheduling.packing_mode ==
+        LOOM_SERVICE_TEXT_PACKING_SEPARATE) {
       loom_serve_text_separate_ready(service, ready);
     }
     loom_serve_packed_span_t* spans = service->epoch.planning.scheduled;
@@ -1320,14 +1325,14 @@ static iree_status_t loom_serve_text_open_checkpoint(
 }
 
 static iree_status_t loom_serve_text_sample(
-    void* self, loom_serve_telemetry_sample_sink_t sink) {
+    void* self, loom_runtime_telemetry_sample_sink_t sink) {
   loom_serve_text_service_t* service = self;
   return loom_serve_text_heartbeat_sample(&service->heartbeat, sink);
 }
 
 static loom_serve_service_snapshot_t loom_serve_text_snapshot(void* self) {
   loom_serve_text_service_t* service = self;
-  const loom_serve_text_heartbeat_snapshot_t state =
+  const loom_service_text_statistics_t state =
       loom_serve_text_heartbeat_read(&service->heartbeat);
   const iree_time_t now = iree_time_now();
   const char* image_phase =

@@ -9,12 +9,13 @@
 #include <string.h>
 
 #include "iree/base/threading/mutex.h"
+#include "loom/runtime/parameter/telemetry.h"
 #include "loom/serve/media/audio_decoder.h"
 #include "loom/serve/media/audio_resampler.h"
 #include "loom/serve/media/audio_source.h"
-#include "loom/serve/runtime/parameter/telemetry.h"
 #include "loom/serve/service/kind.h"
 #include "loom/serve/service/recognition/transcription.h"
+#include "loom/service/telemetry/record.h"
 #include "loom/util/json.h"
 
 typedef struct loom_serve_recognition_job_t {
@@ -79,11 +80,11 @@ struct loom_serve_recognition_service_t {
   // Reused owner-side response storage; transport copies before the next use.
   iree_string_builder_t response;
   // Borrowed registration-wide history, or NULL when observation is omitted.
-  loom_serve_telemetry_stream_t* telemetry;
+  loom_runtime_telemetry_stream_t* telemetry;
   // Cumulative outcomes independent of bounded history retention.
-  loom_serve_telemetry_counters_t counters;
+  loom_service_telemetry_counters_t counters;
   // Receipt-to-completion observations independent of event history.
-  loom_serve_telemetry_latency_t latency;
+  loom_service_telemetry_latency_t latency;
   // One accepted conversion operation, separate from the typed model CPU owner.
   struct {
     // Intrusive storage reused only after the task's final release callback.
@@ -108,26 +109,29 @@ struct loom_serve_recognition_service_t {
 static void loom_serve_recognition_request_end(
     loom_serve_recognition_service_t* service,
     const loom_serve_recognition_job_t* row,
-    loom_serve_telemetry_outcome_t outcome,
+    loom_service_telemetry_outcome_t outcome,
     const iree_status_t borrowed_status) {
   const iree_time_t now = iree_time_now();
-  loom_serve_telemetry_count_outcome(&service->counters, outcome);
-  loom_serve_telemetry_latency_observe(&service->latency.outcomes[outcome],
-                                       now - row->arrival);
+  loom_service_telemetry_count_outcome(&service->counters, outcome);
+  loom_service_telemetry_latency_observe(&service->latency.outcomes[outcome],
+                                         now - row->arrival);
   if (service->telemetry) {
-    loom_serve_telemetry_record_t record = {
+    loom_runtime_telemetry_record_t record = {
         .time_ns = now,
         .request = row->id,
-        .event = &LOOM_SERVE_TELEMETRY_REQUEST_END};
-    record.data.end.outcome = outcome;
-    record.data.end.duration_ns = now - row->arrival;
-    loom_serve_telemetry_diagnostic_capture(borrowed_status,
-                                            &record.data.end.diagnostic);
-    loom_serve_telemetry_stream_append(service->telemetry, &record);
-    if (service->generator.weight_activity) {
-      const loom_serve_weight_activity_t activity =
-          service->generator.weight_activity(service->generator.self);
-      loom_serve_telemetry_record_weights(service->telemetry, now, &activity);
+        .event = &LOOM_SERVICE_TELEMETRY_REQUEST_END};
+    loom_service_telemetry_end_record_t telemetry_payload = {0};
+    telemetry_payload.outcome = outcome;
+    telemetry_payload.duration_ns = now - row->arrival;
+    loom_service_telemetry_diagnostic_capture(borrowed_status,
+                                              &telemetry_payload.diagnostic);
+    memcpy(record.data.words, &telemetry_payload, sizeof(telemetry_payload));
+    loom_runtime_telemetry_stream_append(service->telemetry, &record);
+    if (service->generator.parameter_activity) {
+      const loom_runtime_parameter_activity_t activity =
+          service->generator.parameter_activity(service->generator.self);
+      loom_runtime_parameter_record_activity(service->telemetry, now,
+                                             &activity);
     }
   }
 }
@@ -138,17 +142,17 @@ static loom_serve_recognition_job_t loom_serve_recognition_request_begin(
                                             .id = ++service->counters.requests,
                                             .arrival = iree_time_now()};
   if (service->telemetry) {
-    const loom_serve_telemetry_record_t record = {
+    const loom_runtime_telemetry_record_t record = {
         .time_ns = job.arrival,
         .request = job.id,
-        .event = &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN};
-    loom_serve_telemetry_stream_append(service->telemetry, &record);
+        .event = &LOOM_SERVICE_TELEMETRY_REQUEST_BEGIN};
+    loom_runtime_telemetry_stream_append(service->telemetry, &record);
   }
   return job;
 }
 
 static void loom_serve_recognition_native_end(
-    void* self, loom_serve_telemetry_outcome_t outcome,
+    void* self, loom_service_telemetry_outcome_t outcome,
     const iree_status_t status) {
   loom_serve_recognition_job_t* job = self;
   loom_serve_recognition_request_end(job->owner, job, outcome, status);
@@ -192,7 +196,7 @@ static iree_status_t loom_serve_recognition_try_open(
 static void loom_serve_transcription_release(
     loom_serve_recognition_service_t* service,
     loom_serve_recognition_job_t* row, bool finish,
-    loom_serve_telemetry_outcome_t outcome,
+    loom_service_telemetry_outcome_t outcome,
     const iree_status_t borrowed_status) {
   loom_serve_recognition_request_end(service, row, outcome, borrowed_status);
   if (row->stream) {
@@ -217,12 +221,12 @@ static void loom_serve_transcription_release(
 // transcript survives this call, including failed/reset peers.
 static void loom_serve_transcription_send(
     loom_serve_recognition_service_t* service,
-    loom_serve_recognition_job_t* row, loom_serve_telemetry_outcome_t outcome,
+    loom_serve_recognition_job_t* row, loom_service_telemetry_outcome_t outcome,
     const iree_status_t borrowed_status) {
   if (loom_serve_http_connection_failed(row->connection) ||
       !loom_serve_http_connection_can_send(row->connection)) {
     loom_serve_transcription_release(
-        service, row, false, LOOM_SERVE_TELEMETRY_CANCELLED, borrowed_status);
+        service, row, false, LOOM_SERVICE_TELEMETRY_CANCELLED, borrowed_status);
     return;
   }
   iree_status_t status = loom_serve_http_connection_send(
@@ -232,7 +236,7 @@ static void loom_serve_transcription_send(
                                      borrowed_status);
   } else {
     loom_serve_transcription_release(service, row, false,
-                                     LOOM_SERVE_TELEMETRY_FAILED, status);
+                                     LOOM_SERVICE_TELEMETRY_FAILED, status);
     iree_status_free(status);
   }
 }
@@ -257,11 +261,11 @@ static iree_status_t loom_serve_transcription_reject(
     status = iree_string_builder_append_cstring(&service->response, "}}");
   }
   if (iree_status_is_ok(status)) {
-    loom_serve_transcription_send(service, row, LOOM_SERVE_TELEMETRY_REJECTED,
+    loom_serve_transcription_send(service, row, LOOM_SERVICE_TELEMETRY_REJECTED,
                                   borrowed_status);
   } else {
     loom_serve_transcription_release(service, row, false,
-                                     LOOM_SERVE_TELEMETRY_FAILED, status);
+                                     LOOM_SERVICE_TELEMETRY_FAILED, status);
   }
   return status;
 }
@@ -495,11 +499,11 @@ static iree_status_t loom_serve_transcription_deliver(
         row->request.text_response, &service->response);
   }
   if (iree_status_is_ok(status)) {
-    loom_serve_transcription_send(service, row, LOOM_SERVE_TELEMETRY_COMPLETED,
-                                  iree_ok_status());
+    loom_serve_transcription_send(
+        service, row, LOOM_SERVICE_TELEMETRY_COMPLETED, iree_ok_status());
   } else {
     loom_serve_transcription_release(service, row, false,
-                                     LOOM_SERVE_TELEMETRY_FAILED, status);
+                                     LOOM_SERVICE_TELEMETRY_FAILED, status);
   }
   return status;
 }
@@ -527,7 +531,7 @@ static iree_status_t loom_serve_recognition_advance(
       if (service->stopping ||
           loom_serve_http_connection_failed(row->connection)) {
         loom_serve_transcription_release(
-            service, row, false, LOOM_SERVE_TELEMETRY_CANCELLED, cpu_status);
+            service, row, false, LOOM_SERVICE_TELEMETRY_CANCELLED, cpu_status);
       } else {
         status = loom_serve_transcription_fail(service, row, cpu_status);
       }
@@ -549,7 +553,7 @@ static iree_status_t loom_serve_recognition_advance(
       }
       if (row != service->cpu.row) {
         loom_serve_transcription_release(service, row, false,
-                                         LOOM_SERVE_TELEMETRY_CANCELLED,
+                                         LOOM_SERVICE_TELEMETRY_CANCELLED,
                                          iree_ok_status());
         *out_progress = true;
       }
@@ -754,7 +758,7 @@ void loom_serve_recognition_service_free(
 iree_status_t loom_serve_recognition_service_allocate(
     loom_serve_host_t* host, loom_serve_recognition_generator_t generator,
     const loom_serve_recognition_service_options_t* options,
-    loom_serve_telemetry_stream_t* telemetry, iree_allocator_t host_allocator,
+    loom_runtime_telemetry_stream_t* telemetry, iree_allocator_t host_allocator,
     loom_serve_recognition_service_t** out_service) {
   *out_service = NULL;
   if (options->kind != LOOM_SERVE_MODEL_KIND_RECOGNITION &&

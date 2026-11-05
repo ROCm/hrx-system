@@ -98,7 +98,7 @@ struct loom_serve_virtual_pool_source_t {
   // Unique physical owner; outer teardown joins every interface borrower.
   loom_serve_virtual_pool_t* owner;
   // Owner-only physical usage, a disjoint subset of memory_pool's totals.
-  loom_serve_memory_statistics_t memory;
+  loom_runtime_storage_statistics_t memory;
   // Stable range metadata; only owner progress adds/removes entries.
   loom_serve_virtual_pool_entry_t* entries;
   // Idle physical bytes to retain after the current trim request.
@@ -685,9 +685,9 @@ uint64_t loom_serve_virtual_pool_round_size(
              : iree_device_align(byte_length, pool->geometry.mapping_size);
 }
 
-loom_serve_memory_usage_t loom_serve_virtual_pool_memory_usage(
+loom_runtime_storage_usage_t loom_serve_virtual_pool_memory_usage(
     const loom_serve_virtual_pool_t* pool) {
-  loom_serve_memory_usage_t usage = {0};
+  loom_runtime_storage_usage_t usage = {0};
   for (const loom_serve_virtual_pool_source_t* source = pool->source; source;
        source = source->next) {
     usage.reserved_bytes += source->memory.reserved_bytes;
@@ -699,11 +699,11 @@ loom_serve_memory_usage_t loom_serve_virtual_pool_memory_usage(
   return usage;
 }
 
-loom_serve_memory_usage_t loom_serve_virtual_pool_source_memory_usage(
+loom_runtime_storage_usage_t loom_serve_virtual_pool_source_memory_usage(
     const iree_hal_pool_t* base_pool) {
   const loom_serve_virtual_pool_source_t* source =
       (const loom_serve_virtual_pool_source_t*)base_pool;
-  return (loom_serve_memory_usage_t){
+  return (loom_runtime_storage_usage_t){
       .reserved_bytes = source->memory.reserved_bytes,
       .committed_bytes = source->memory.committed_bytes,
       .pending_bytes = source->memory.pending_bytes,

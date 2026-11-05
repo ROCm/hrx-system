@@ -283,8 +283,8 @@ iree_status_t loom_serve_http_live_advance(loom_serve_http_live_t* live,
       iree_string_builder_t output;
       iree_string_builder_initialize_with_storage(
           live->storage, sizeof(live->storage), &output);
-      const loom_serve_telemetry_identity_t identity =
-          loom_serve_telemetry_stream_identity(
+      const loom_runtime_telemetry_identity_t identity =
+          loom_runtime_telemetry_stream_identity(
               loom_serve_http_server_diagnostics(live->server));
       status = iree_string_builder_append_format(
           &output,

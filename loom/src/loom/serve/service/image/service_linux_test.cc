@@ -20,6 +20,7 @@
 #include "loom/serve/runtime/device/device.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/image/service.h"
+#include "loom/serve/telemetry/record.h"
 #include "loom/serve/testing/device.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/transport/http/listener.h"
@@ -91,7 +92,7 @@ struct loom_serve_test_image_gate_t {
   static iree_status_t PrepareBatch(
       void* self, iree_host_size_t count,
       const loom_serve_prepared_request_t* requests, const iree_host_size_t*,
-      loom_serve_image_prepared_t* out_prepared) {
+      loom_service_image_prepared_t* out_prepared) {
     EXPECT_EQ(count, 1u);
     static_cast<loom_serve_test_image_gate_t*>(self)->admission_available =
         static_cast<const uint8_t*>(
@@ -314,10 +315,10 @@ class ImageServiceFixture : public ::testing::Test {
   iree_status_t WaitEvent(int client, const char* event, const char* field,
                           std::string* out_record) {
     for (;;) {
-      loom_serve_telemetry_record_t value;
-      if (loom_serve_telemetry_stream_read(services_[0].telemetry.stream,
-                                           &cursor_, &value) ==
-          LOOM_SERVE_TELEMETRY_READ_RECORD) {
+      loom_runtime_telemetry_record_t value;
+      if (loom_runtime_telemetry_stream_read(services_[0].telemetry.stream,
+                                             &cursor_, &value) ==
+          LOOM_RUNTIME_TELEMETRY_READ_RECORD) {
         iree_string_builder_t output;
         iree_string_builder_initialize(host_allocator_, &output);
         iree_status_t status =
@@ -344,15 +345,15 @@ class ImageServiceFixture : public ::testing::Test {
     // Periodic records are disabled for the admission cases, so their whole
     // request history fits. Read through the actual live cursor protocol.
     const auto* stream = services_[index].telemetry.stream;
-    const uint64_t head = loom_serve_telemetry_stream_head(stream);
+    const uint64_t head = loom_runtime_telemetry_stream_head(stream);
     uint64_t cursor = 0;
     size_t count = 0;
     while (cursor < head) {
-      loom_serve_telemetry_record_t record;
+      loom_runtime_telemetry_record_t record;
       const auto result =
-          loom_serve_telemetry_stream_read(stream, &cursor, &record);
-      EXPECT_EQ(result, LOOM_SERVE_TELEMETRY_READ_RECORD);
-      if (result != LOOM_SERVE_TELEMETRY_READ_RECORD) {
+          loom_runtime_telemetry_stream_read(stream, &cursor, &record);
+      EXPECT_EQ(result, LOOM_RUNTIME_TELEMETRY_READ_RECORD);
+      if (result != LOOM_RUNTIME_TELEMETRY_READ_RECORD) {
         break;
       }
       count += std::string(record.event->name) == "image_generated";

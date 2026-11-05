@@ -138,19 +138,19 @@ class AdmissionServiceTest : public SourceTextServiceTest {
     uint64_t cursor = 0;
     uint64_t prepared_head = 0, bypasses = 0;
     const auto end =
-        loom_serve_telemetry_stream_head(interface.telemetry.stream);
+        loom_runtime_telemetry_stream_head(interface.telemetry.stream);
     while (cursor < end) {
-      loom_serve_telemetry_record_t record;
-      ASSERT_EQ(loom_serve_telemetry_stream_read(interface.telemetry.stream,
-                                                 &cursor, &record),
-                LOOM_SERVE_TELEMETRY_READ_RECORD);
+      loom_runtime_telemetry_record_t record;
+      ASSERT_EQ(loom_runtime_telemetry_stream_read(interface.telemetry.stream,
+                                                   &cursor, &record),
+                LOOM_RUNTIME_TELEMETRY_READ_RECORD);
       if (std::string(record.event->name) == "prepared" &&
           record.request == head_id) {
         ++prepared_head;
       }
       if (std::string(record.event->name) == "admit" &&
           record.request > head_id) {
-        loom_serve_text_admission_record_t admission;
+        loom_service_text_admission_record_t admission;
         memcpy(&admission, record.data.words, sizeof(admission));
         ++bypasses;
         EXPECT_EQ(admission.queue_rank, 1u);
@@ -365,8 +365,8 @@ TEST_F(AdmissionServiceTest,
   EXPECT_EQ(loom_serve_text_model_pool_usage(model_).available,
             before.available);
   EXPECT_EQ(loom_serve_text_row_position(row), 0u);
-  EXPECT_EQ(loom_serve_text_model_weight_activity(model_).activations, 0u);
-  EXPECT_EQ(loom_serve_text_model_weight_activity(model_).read_bytes, 0u);
+  EXPECT_EQ(loom_serve_text_model_parameter_activity(model_).activations, 0u);
+  EXPECT_EQ(loom_serve_text_model_parameter_activity(model_).read_bytes, 0u);
   EXPECT_FALSE(
       loom_serve_residency_is_pinned(loom_serve_text_model_residency(model_)));
 

@@ -60,7 +60,7 @@ class DeviceGroupTest : public ::testing::Test {
   // Independent sparse roots that prevent premature group destruction.
   std::array<loom_serve_virtual_buffer_t*, 2> reservations_ = {};
   // Accounting borrowed through each reservation's final destruction.
-  std::array<loom_serve_memory_statistics_t, 2> statistics_ = {};
+  std::array<loom_runtime_storage_statistics_t, 2> statistics_ = {};
   // Download destinations outliving accepted transfers on either device.
   std::array<uint32_t, 2> output_ = {};
 };

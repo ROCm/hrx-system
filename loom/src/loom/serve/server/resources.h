@@ -7,9 +7,9 @@
 #ifndef LOOM_SERVE_SERVER_RESOURCES_H_
 #define LOOM_SERVE_SERVER_RESOURCES_H_
 
+#include "loom/runtime/telemetry/sample.h"
 #include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/host/wake.h"
-#include "loom/serve/telemetry/sample.h"
 #include "loom/serve/transport/http/listener.h"
 #include "loom/util/stream.h"
 
@@ -79,7 +79,7 @@ iree_host_size_t loom_serve_resources_observation_count(
 // Descriptors and values are borrowed only through the synchronous emit call.
 iree_status_t loom_serve_resources_sample(
     const loom_serve_resources_t* resources, iree_host_size_t pool_index,
-    loom_serve_telemetry_sample_sink_t sink);
+    loom_runtime_telemetry_sample_sink_t sink);
 
 // Copies one device identity or one pool's identity and numeric topics. Index
 // is from observation_count: devices first, then pools in inventory order.

@@ -11,6 +11,7 @@
 
 #include "iree/base/threading/mutex.h"
 #include "loom/serve/runtime/host/wake.h"
+#include "loom/service/telemetry/record.h"
 
 typedef enum loom_serve_http_connection_flag_bits_e {
   HTTP_CONNECTION_OCCUPIED = 1u << 0,
@@ -68,7 +69,7 @@ struct loom_serve_http_server_t {
   // Admission closure, protected by the mutex; active claims remain owned.
   bool stopping;
   // Bounded history, with network/application writers serialized by mutex.
-  loom_serve_telemetry_stream_t* diagnostics;
+  loom_runtime_telemetry_stream_t* diagnostics;
   // Fixed connection identities; a slot is reused only after caller and I/O
   // retire.
   loom_serve_http_connection_t* connections;
@@ -244,11 +245,13 @@ static bool loom_serve_http_server_drained(void* user_data) {
 
 void loom_serve_http_server_record_error(loom_serve_http_server_t* server,
                                          const iree_status_t status) {
-  loom_serve_telemetry_record_t record = {.time_ns = iree_time_now(),
-                                          .event = &LOOM_SERVE_TELEMETRY_ERROR};
-  loom_serve_telemetry_diagnostic_capture(status, &record.data.error);
+  loom_runtime_telemetry_record_t record = {
+      .time_ns = iree_time_now(), .event = &LOOM_SERVICE_TELEMETRY_ERROR};
+  loom_service_telemetry_diagnostic_t telemetry_payload = {0};
+  loom_service_telemetry_diagnostic_capture(status, &telemetry_payload);
   iree_slim_mutex_lock(&server->mutex);
-  loom_serve_telemetry_stream_append(server->diagnostics, &record);
+  memcpy(record.data.words, &telemetry_payload, sizeof(telemetry_payload));
+  loom_runtime_telemetry_stream_append(server->diagnostics, &record);
   loom_serve_http_notify_locked(server);
   iree_slim_mutex_unlock(&server->mutex);
 }
@@ -299,7 +302,7 @@ void loom_serve_http_server_free(loom_serve_http_server_t* server) {
   }
   iree_async_semaphore_release(server->capacity_semaphore);
   iree_async_proactor_pool_release(server->proactor_pool);
-  loom_serve_telemetry_stream_free(server->diagnostics);
+  loom_runtime_telemetry_stream_free(server->diagnostics);
   iree_notification_deinitialize(&server->notification);
   iree_slim_mutex_deinitialize(&server->mutex);
   iree_allocator_free(server->host_allocator, server->connections);
@@ -339,7 +342,7 @@ iree_status_t loom_serve_http_server_allocate(
   iree_async_proactor_pool_retain(proactor_pool);
   iree_slim_mutex_initialize(&server->mutex);
   iree_notification_initialize(&server->notification);
-  iree_status_t status = loom_serve_telemetry_stream_allocate(
+  iree_status_t status = loom_runtime_telemetry_stream_allocate(
       128, host_allocator, &server->diagnostics);
   if (iree_status_is_ok(status)) {
     iree_async_proactor_t* proactor = NULL;
@@ -350,10 +353,10 @@ iree_status_t loom_serve_http_server_allocate(
     }
   }
   if (iree_status_is_ok(status)) {
-    const loom_serve_telemetry_record_t begin = {
+    const loom_runtime_telemetry_record_t begin = {
         .time_ns = iree_time_now(),
-        .event = &LOOM_SERVE_TELEMETRY_STREAM_BEGIN};
-    loom_serve_telemetry_stream_append(server->diagnostics, &begin);
+        .event = &LOOM_SERVICE_TELEMETRY_STREAM_BEGIN};
+    loom_runtime_telemetry_stream_append(server->diagnostics, &begin);
     status = iree_allocator_malloc_array(
         host_allocator, options->connection_capacity,
         sizeof(*server->connections), (void**)&server->connections);
@@ -392,7 +395,7 @@ loom_serve_http_request_limits_t loom_serve_http_server_request_limits(
   return server->options.request_limits;
 }
 
-const loom_serve_telemetry_stream_t* loom_serve_http_server_diagnostics(
+const loom_runtime_telemetry_stream_t* loom_serve_http_server_diagnostics(
     const loom_serve_http_server_t* server) {
   return server->diagnostics;
 }

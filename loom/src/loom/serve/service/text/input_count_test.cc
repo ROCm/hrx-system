@@ -6,7 +6,10 @@
 
 #include "loom/serve/service/text/input_count.h"
 
+#include <cstring>
+
 #include "loom/serve/service/text/service_test_fixture.h"
+#include "loom/service/telemetry/record.h"
 
 namespace {
 
@@ -60,7 +63,7 @@ class InputCountTest : public SourceTextServiceTest {
   }
 
   void ExpectCold() {
-    const auto weights = loom_serve_text_model_weight_activity(model_);
+    const auto weights = loom_serve_text_model_parameter_activity(model_);
     EXPECT_EQ(weights.activations, 0u);
     EXPECT_EQ(weights.groups, 0u);
     EXPECT_EQ(weights.read_bytes, 0u);
@@ -355,8 +358,8 @@ TEST_F(InputCountOutcomeTest, ModelFailureAccountsBothBorrowedAndQueuedClaims) {
   ASSERT_NO_FATAL_FAILURE(Enqueue(&second));
   iree_status_t failure =
       iree_make_status(IREE_STATUS_UNAVAILABLE, "execution became unavailable");
-  loom_serve_telemetry_diagnostic_t expected;
-  loom_serve_telemetry_diagnostic_capture(failure, &expected);
+  loom_service_telemetry_diagnostic_t expected;
+  loom_service_telemetry_diagnostic_capture(failure, &expected);
   loom_serve_text_telemetry_fail(&telemetry_, failure);
   iree_status_free(failure);
   // Cleanup can report another error after the first failure has propagated
@@ -376,22 +379,23 @@ TEST_F(InputCountOutcomeTest, ModelFailureAccountsBothBorrowedAndQueuedClaims) {
   EXPECT_EQ(telemetry_.counters.input_tokens, 0u);
   uint64_t cursor = 0;
   size_t outcomes = 0;
-  const auto head = loom_serve_telemetry_stream_head(telemetry_.stream);
+  const auto head = loom_runtime_telemetry_stream_head(telemetry_.stream);
   while (cursor < head) {
-    loom_serve_telemetry_record_t record;
+    loom_runtime_telemetry_record_t record;
     ASSERT_EQ(
-        loom_serve_telemetry_stream_read(telemetry_.stream, &cursor, &record),
-        LOOM_SERVE_TELEMETRY_READ_RECORD);
-    if (record.event != &LOOM_SERVE_TELEMETRY_REQUEST_END) {
+        loom_runtime_telemetry_stream_read(telemetry_.stream, &cursor, &record),
+        LOOM_RUNTIME_TELEMETRY_READ_RECORD);
+    if (record.event != &LOOM_SERVICE_TELEMETRY_REQUEST_END) {
       continue;
     }
     ++outcomes;
-    EXPECT_EQ(record.data.end.outcome, LOOM_SERVE_TELEMETRY_FAILED);
-    EXPECT_EQ(record.data.end.diagnostic.code, expected.code);
-    EXPECT_EQ(record.data.end.diagnostic.length, expected.length);
-    EXPECT_EQ(record.data.end.diagnostic.truncated, expected.truncated);
-    EXPECT_EQ(std::string(record.data.end.diagnostic.message,
-                          record.data.end.diagnostic.length),
+    loom_service_telemetry_end_record_t end;
+    std::memcpy(&end, record.data.words, sizeof(end));
+    EXPECT_EQ(end.outcome, LOOM_SERVICE_TELEMETRY_FAILED);
+    EXPECT_EQ(end.diagnostic.code, expected.code);
+    EXPECT_EQ(end.diagnostic.length, expected.length);
+    EXPECT_EQ(end.diagnostic.truncated, expected.truncated);
+    EXPECT_EQ(std::string(end.diagnostic.message, end.diagnostic.length),
               std::string(expected.message, expected.length));
   }
   EXPECT_EQ(outcomes, 2u);

@@ -1673,8 +1673,8 @@ static iree_status_t loom_serve_recognition_generator_release(
   return iree_ok_status();
 }
 
-static loom_serve_weight_activity_t
-loom_serve_recognition_generator_weight_activity(void* self) {
+static loom_runtime_parameter_activity_t
+loom_serve_recognition_generator_parameter_activity(void* self) {
   loom_serve_recognition_model_t* model = self;
   return loom_serve_residency_activity(model->residency);
 }
@@ -1703,5 +1703,6 @@ loom_serve_recognition_generator_t loom_serve_recognition_model_generator(
       .release = loom_serve_recognition_generator_release,
       .tokenizer = loom_serve_tokenizer_value(model->tokenizer),
       .capacity_domain = loom_serve_residency_cache(model->residency),
-      .weight_activity = loom_serve_recognition_generator_weight_activity};
+      .parameter_activity =
+          loom_serve_recognition_generator_parameter_activity};
 }

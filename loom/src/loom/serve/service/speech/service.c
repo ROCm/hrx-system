@@ -10,14 +10,15 @@
 
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/threading/mutex.h"
+#include "loom/runtime/parameter/telemetry.h"
 #include "loom/serve/runtime/host/timer.h"
-#include "loom/serve/runtime/parameter/telemetry.h"
 #include "loom/serve/service/kind.h"
 #include "loom/serve/service/speech/http.h"
 #include "loom/serve/service/speech/stream.h"
 #include "loom/serve/service/speech/voice_http.h"
-#include "loom/serve/telemetry/latency.h"
-#include "loom/serve/telemetry/tracing.h"
+#include "loom/service/telemetry/latency.h"
+#include "loom/service/telemetry/record.h"
+#include "loom/service/telemetry/tracing.h"
 
 typedef enum loom_serve_speech_voice_phase_e {
   SPEECH_VOICE_EMPTY = 0,
@@ -101,7 +102,7 @@ typedef struct loom_serve_speech_row_t {
   // A CPU writer is joined before the owner reads this status.
   iree_status_t status;
   // Error classification established where the request fails.
-  loom_serve_telemetry_outcome_t outcome;
+  loom_service_telemetry_outcome_t outcome;
 } loom_serve_speech_row_t;
 
 typedef enum loom_serve_speech_phase_e {
@@ -203,13 +204,13 @@ struct loom_serve_speech_service_t {
   // Owner-only counters and bounded immutable observation history.
   struct {
     // Registration-borrowed or standalone-owned record stream.
-    loom_serve_telemetry_stream_t* stream;
+    loom_runtime_telemetry_stream_t* stream;
     // Standalone construction owns stream destruction.
     bool owns_stream;
     // Request outcomes and completed numerical cohorts.
-    loom_serve_telemetry_counters_t counters;
+    loom_service_telemetry_counters_t counters;
     // Request latency distributions retained independently of log readers.
-    loom_serve_telemetry_latency_t latency;
+    loom_service_telemetry_latency_t latency;
   } telemetry;
 };
 
@@ -322,20 +323,20 @@ iree_status_t loom_serve_speech_service_remove_voice(
 }
 
 static void loom_serve_speech_event(loom_serve_speech_service_t* service,
-                                    const loom_serve_telemetry_event_t* event,
+                                    const loom_runtime_telemetry_event_t* event,
                                     uint64_t request) {
-  const loom_serve_telemetry_record_t record = {
+  const loom_runtime_telemetry_record_t record = {
       .time_ns = iree_time_now(), .request = request, .event = event};
-  loom_serve_telemetry_stream_append(service->telemetry.stream, &record);
+  loom_runtime_telemetry_stream_append(service->telemetry.stream, &record);
 }
 
 static void loom_serve_speech_record_weights(
     loom_serve_speech_service_t* service, iree_time_t time_ns) {
-  if (service->generator.weight_activity) {
-    const loom_serve_weight_activity_t activity =
-        service->generator.weight_activity(service->generator.self);
-    loom_serve_telemetry_record_weights(service->telemetry.stream, time_ns,
-                                        &activity);
+  if (service->generator.parameter_activity) {
+    const loom_runtime_parameter_activity_t activity =
+        service->generator.parameter_activity(service->generator.self);
+    loom_runtime_parameter_record_activity(service->telemetry.stream, time_ns,
+                                           &activity);
   }
 }
 
@@ -343,30 +344,35 @@ static void loom_serve_speech_record_weights(
 static void loom_serve_speech_diagnose(loom_serve_speech_service_t* service,
                                        uint64_t request,
                                        const iree_status_t failure) {
-  loom_serve_telemetry_record_t record = {.time_ns = iree_time_now(),
-                                          .request = request,
-                                          .event = &LOOM_SERVE_TELEMETRY_ERROR};
-  loom_serve_telemetry_diagnostic_capture(failure, &record.data.error);
-  loom_serve_telemetry_stream_append(service->telemetry.stream, &record);
+  loom_runtime_telemetry_record_t record = {
+      .time_ns = iree_time_now(),
+      .request = request,
+      .event = &LOOM_SERVICE_TELEMETRY_ERROR};
+  loom_service_telemetry_diagnostic_t telemetry_payload = {0};
+  loom_service_telemetry_diagnostic_capture(failure, &telemetry_payload);
+  memcpy(record.data.words, &telemetry_payload, sizeof(telemetry_payload));
+  loom_runtime_telemetry_stream_append(service->telemetry.stream, &record);
 }
 
 static void loom_serve_speech_request_end(
     loom_serve_speech_service_t* service, const loom_serve_speech_job_t* job,
-    loom_serve_telemetry_outcome_t outcome,
+    loom_service_telemetry_outcome_t outcome,
     const iree_status_t borrowed_status) {
-  loom_serve_telemetry_count_outcome(&service->telemetry.counters, outcome);
-  loom_serve_telemetry_record_t record = {
+  loom_service_telemetry_count_outcome(&service->telemetry.counters, outcome);
+  loom_runtime_telemetry_record_t record = {
       .time_ns = iree_time_now(),
       .request = job->id,
-      .event = &LOOM_SERVE_TELEMETRY_REQUEST_END};
-  record.data.end.outcome = outcome;
-  record.data.end.duration_ns = record.time_ns - job->arrival_time;
-  loom_serve_telemetry_latency_observe(
+      .event = &LOOM_SERVICE_TELEMETRY_REQUEST_END};
+  loom_service_telemetry_end_record_t telemetry_payload = {0};
+  telemetry_payload.outcome = outcome;
+  telemetry_payload.duration_ns = record.time_ns - job->arrival_time;
+  loom_service_telemetry_latency_observe(
       &service->telemetry.latency.outcomes[outcome],
-      record.data.end.duration_ns);
-  loom_serve_telemetry_diagnostic_capture(borrowed_status,
-                                          &record.data.end.diagnostic);
-  loom_serve_telemetry_stream_append(service->telemetry.stream, &record);
+      telemetry_payload.duration_ns);
+  loom_service_telemetry_diagnostic_capture(borrowed_status,
+                                            &telemetry_payload.diagnostic);
+  memcpy(record.data.words, &telemetry_payload, sizeof(telemetry_payload));
+  loom_runtime_telemetry_stream_append(service->telemetry.stream, &record);
   loom_serve_speech_record_weights(service, record.time_ns);
 }
 
@@ -378,7 +384,7 @@ static iree_status_t loom_serve_speech_reject(
     iree_string_view_t message) {
   const iree_status_t status = loom_serve_speech_http_reject(
       connection, code, message, service->host_allocator);
-  loom_serve_speech_request_end(service, job, LOOM_SERVE_TELEMETRY_REJECTED,
+  loom_serve_speech_request_end(service, job, LOOM_SERVICE_TELEMETRY_REJECTED,
                                 status);
   return status;
 }
@@ -392,8 +398,8 @@ static iree_status_t loom_serve_speech_cpu_run(
                               service->options.name.size);
   IREE_TRACE_ZONE_APPEND_TEXT(z0, speech_phases[service->cpu.phase]);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(
-      z0,
-      loom_serve_telemetry_stream_identity(service->telemetry.stream).ordinal);
+      z0, loom_runtime_telemetry_stream_identity(service->telemetry.stream)
+              .ordinal);
   result->completed = true;
   result->did_work = true;
   if (service->cpu.phase == SPEECH_PHASE_PREPARING) {
@@ -450,7 +456,7 @@ static iree_status_t loom_serve_speech_cpu_run(
       row->last_block = block.complete;
       row->has_audio = block.frame_count != 0;
     }
-    row->outcome = LOOM_SERVE_TELEMETRY_FAILED;
+    row->outcome = LOOM_SERVICE_TELEMETRY_FAILED;
   }
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -524,8 +530,8 @@ static iree_status_t loom_serve_speech_wait(
   service->phase = phase;
   IREE_TRACE({
     if (phase == SPEECH_PHASE_GENERATING) {
-      service->device.section = loom_serve_trace_section_enter(
-          LOOM_SERVE_TRACE_SECTION_EXECUTE, service->options.name);
+      service->device.section = loom_service_trace_section_enter(
+          LOOM_SERVICE_TRACE_SECTION_EXECUTE, service->options.name);
     }
   });
   return iree_ok_status();
@@ -533,33 +539,34 @@ static iree_status_t loom_serve_speech_wait(
 
 static void loom_serve_speech_batch_event(
     loom_serve_speech_service_t* service,
-    const loom_serve_telemetry_event_t* event, uint64_t id) {
-  const loom_serve_telemetry_record_t record = {
-      .time_ns = iree_time_now(),
-      .event = event,
-      .data.batch = {.id = id, .requests = service->batch.count}};
-  loom_serve_telemetry_stream_append(service->telemetry.stream, &record);
+    const loom_runtime_telemetry_event_t* event, uint64_t id) {
+  loom_runtime_telemetry_record_t record = {.time_ns = iree_time_now(),
+                                            .event = event};
+  loom_service_telemetry_batch_record_t telemetry_payload = {
+      .id = id, .requests = service->batch.count};
+  memcpy(record.data.words, &telemetry_payload, sizeof(telemetry_payload));
+  loom_runtime_telemetry_stream_append(service->telemetry.stream, &record);
 }
 
 // The caller has either released source ownership at a retired cut, or left
 // every accepted handle with terminal model teardown.
 static void loom_serve_speech_finish(loom_serve_speech_service_t* service,
                                      loom_serve_speech_row_t* row,
-                                     loom_serve_telemetry_outcome_t outcome,
+                                     loom_service_telemetry_outcome_t outcome,
                                      const iree_status_t request_status) {
-  const bool row_failed = outcome == LOOM_SERVE_TELEMETRY_COMPLETED &&
+  const bool row_failed = outcome == LOOM_SERVICE_TELEMETRY_COMPLETED &&
                           !iree_status_is_ok(row->status);
   if (row_failed) {
     outcome = row->outcome;
   }
   if (!row->consumer.is_open(row->consumer.self) &&
-      (outcome == LOOM_SERVE_TELEMETRY_COMPLETED ||
-       outcome == LOOM_SERVE_TELEMETRY_REJECTED)) {
+      (outcome == LOOM_SERVICE_TELEMETRY_COMPLETED ||
+       outcome == LOOM_SERVICE_TELEMETRY_REJECTED)) {
     outcome = !iree_status_is_ok(service->failure)
-                  ? LOOM_SERVE_TELEMETRY_FAILED
-                  : LOOM_SERVE_TELEMETRY_CANCELLED;
+                  ? LOOM_SERVICE_TELEMETRY_FAILED
+                  : LOOM_SERVICE_TELEMETRY_CANCELLED;
   }
-  if (row->job.uploading && outcome == LOOM_SERVE_TELEMETRY_COMPLETED) {
+  if (row->job.uploading && outcome == LOOM_SERVICE_TELEMETRY_COMPLETED) {
     row->job.voice->phase = SPEECH_VOICE_READY;
   }
   loom_serve_speech_request_end(service, &row->job, outcome,
@@ -572,7 +579,7 @@ static void loom_serve_speech_finish(loom_serve_speech_service_t* service,
   row->cancelled = false;
   iree_status_free(row->status);
   row->status = iree_ok_status();
-  row->outcome = LOOM_SERVE_TELEMETRY_COMPLETED;
+  row->outcome = LOOM_SERVICE_TELEMETRY_COMPLETED;
   loom_serve_speech_job_deinitialize(service, &row->job);
   memset(&row->job, 0, sizeof(row->job));
   row->invocation = NULL;
@@ -633,8 +640,8 @@ static void loom_serve_speech_release_finished(
     }
     loom_serve_speech_finish(service, row,
                              failed || !iree_status_is_ok(service->status)
-                                 ? LOOM_SERVE_TELEMETRY_FAILED
-                                 : LOOM_SERVE_TELEMETRY_COMPLETED,
+                                 ? LOOM_SERVICE_TELEMETRY_FAILED
+                                 : LOOM_SERVICE_TELEMETRY_COMPLETED,
                              iree_status_is_ok(service->status)
                                  ? service->failure
                                  : service->status);
@@ -693,7 +700,7 @@ static void loom_serve_speech_prepared(loom_serve_speech_service_t* service,
     iree_status_t status = iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         "model parameters and request state exceed available capacity");
-    loom_serve_speech_finish(service, row, LOOM_SERVE_TELEMETRY_REJECTED,
+    loom_serve_speech_finish(service, row, LOOM_SERVICE_TELEMETRY_REJECTED,
                              status);
     iree_status_free(status);
   }
@@ -730,8 +737,8 @@ static void loom_serve_speech_collect(loom_serve_speech_service_t* service,
     const bool connected = row->consumer.is_open(row->consumer.self);
     loom_serve_speech_diagnose(service, row->job.id, cpu_status);
     loom_serve_speech_finish(service, row,
-                             connected ? LOOM_SERVE_TELEMETRY_REJECTED
-                                       : LOOM_SERVE_TELEMETRY_CANCELLED,
+                             connected ? LOOM_SERVICE_TELEMETRY_REJECTED
+                                       : LOOM_SERVICE_TELEMETRY_CANCELLED,
                              cpu_status);
     iree_status_free(cpu_status);
     return;
@@ -753,8 +760,8 @@ static void loom_serve_speech_collect(loom_serve_speech_service_t* service,
     if (loom_serve_speech_release(service, row)) {
       loom_serve_speech_finish(service, row,
                                iree_status_is_ok(service->status)
-                                   ? LOOM_SERVE_TELEMETRY_COMPLETED
-                                   : LOOM_SERVE_TELEMETRY_FAILED,
+                                   ? LOOM_SERVICE_TELEMETRY_COMPLETED
+                                   : LOOM_SERVICE_TELEMETRY_FAILED,
                                service->status);
     }
   } else if (phase == SPEECH_PHASE_RESERVING) {
@@ -767,7 +774,7 @@ static void loom_serve_speech_collect(loom_serve_speech_service_t* service,
     for (iree_host_size_t i = 0; i < service->batch.count; ++i) {
       ++service->batch.rows[i]->job.completed_parts;
     }
-    loom_serve_speech_batch_event(service, &LOOM_SERVE_TELEMETRY_BATCH_END,
+    loom_serve_speech_batch_event(service, &LOOM_SERVICE_TELEMETRY_BATCH_END,
                                   service->telemetry.counters.batches);
     loom_serve_speech_schedule_cpu(service, SPEECH_PHASE_ENCODING);
   } else if (phase == SPEECH_PHASE_PREPARING_BATCH) {
@@ -790,7 +797,7 @@ static void loom_serve_speech_collect(loom_serve_speech_service_t* service,
                                                   &service->device.frontier);
       if (iree_status_is_ok(service->status)) {
         loom_serve_speech_batch_event(service,
-                                      &LOOM_SERVE_TELEMETRY_BATCH_SUBMIT,
+                                      &LOOM_SERVICE_TELEMETRY_BATCH_SUBMIT,
                                       service->telemetry.counters.batches + 1);
         service->status =
             loom_serve_speech_wait(service, SPEECH_PHASE_GENERATING);
@@ -837,7 +844,7 @@ static void loom_serve_speech_deliver(loom_serve_speech_service_t* service,
       service->status = status;
     } else if (published) {
       if (row->has_audio && !row->job.output_published) {
-        loom_serve_telemetry_latency_publish_output(
+        loom_service_telemetry_latency_publish_output(
             &service->telemetry.latency, service->telemetry.stream, row->job.id,
             row->job.arrival_time);
         row->job.output_published = true;
@@ -864,12 +871,13 @@ static void loom_serve_speech_prune(loom_serve_speech_service_t* service,
     loom_serve_speech_pending_t pending = service->pending[i];
     if (!pending.consumer.is_open(pending.consumer.self)) {
       loom_serve_speech_request_end(service, &pending.job,
-                                    LOOM_SERVE_TELEMETRY_CANCELLED,
+                                    LOOM_SERVICE_TELEMETRY_CANCELLED,
                                     iree_ok_status());
       service->status = iree_status_join(
-          service->status, pending.consumer.end(pending.consumer.self,
-                                                LOOM_SERVE_TELEMETRY_CANCELLED,
-                                                iree_ok_status()));
+          service->status,
+          pending.consumer.end(pending.consumer.self,
+                               LOOM_SERVICE_TELEMETRY_CANCELLED,
+                               iree_ok_status()));
       loom_serve_speech_job_deinitialize(service, &pending.job);
       *progress = true;
     } else {
@@ -940,7 +948,7 @@ iree_status_t loom_serve_speech_service_try_open(
                                 .voice = pending.job.voice,
                                 .request = *request};
   *request = (loom_serve_speech_request_t){0};
-  loom_serve_speech_event(service, &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN,
+  loom_serve_speech_event(service, &LOOM_SERVICE_TELEMETRY_REQUEST_BEGIN,
                           pending.job.id);
   if (row) {
     loom_serve_speech_assign(service, row, pending);
@@ -977,7 +985,7 @@ iree_status_t loom_serve_speech_service_try_upload_voice(
   pending.job.arrival_time = iree_time_now();
   pending.job.upload = *request;
   *request = (loom_serve_speech_voice_request_t){0};
-  loom_serve_speech_event(service, &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN,
+  loom_serve_speech_event(service, &LOOM_SERVICE_TELEMETRY_REQUEST_BEGIN,
                           pending.job.id);
   if (row) {
     loom_serve_speech_assign(service, row, pending);
@@ -1026,9 +1034,9 @@ static iree_status_t loom_serve_speech_accept_voice(
     iree_string_builder_deinitialize(&id);
     if (iree_status_is_ok(status)) {
       loom_serve_speech_request_end(service, &pending->job,
-                                    LOOM_SERVE_TELEMETRY_COMPLETED, status);
+                                    LOOM_SERVICE_TELEMETRY_COMPLETED, status);
       return pending->consumer.end(pending->consumer.self,
-                                   LOOM_SERVE_TELEMETRY_COMPLETED, status);
+                                   LOOM_SERVICE_TELEMETRY_COMPLETED, status);
     }
   } else {
     pending->job.uploading = true;
@@ -1079,7 +1087,7 @@ static iree_status_t loom_serve_speech_accept(
   loom_serve_speech_pending_t pending = {
       .job = {.id = ++service->telemetry.counters.requests,
               .arrival_time = iree_time_now()}};
-  loom_serve_speech_event(service, &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN,
+  loom_serve_speech_event(service, &LOOM_SERVICE_TELEMETRY_REQUEST_BEGIN,
                           pending.job.id);
   const bool post = iree_string_view_equal(request->method, IREE_SV("POST"));
   const bool remove_voice = iree_string_view_equal(
@@ -1240,14 +1248,15 @@ static bool loom_serve_speech_request_at(
 static void loom_serve_speech_heartbeat(loom_serve_speech_service_t* service) {
   const loom_serve_service_snapshot_t state =
       loom_serve_speech_snapshot(service);
-  loom_serve_telemetry_record_t record = {
-      .time_ns = iree_time_now(),
-      .event = &LOOM_SERVE_TELEMETRY_SNAPSHOT,
-      .data.snapshot = {.counters = service->telemetry.counters,
-                        .queued = state.queued_requests,
-                        .active = state.active_requests}};
-  memcpy(record.data.snapshot.phase, state.phase, strlen(state.phase));
-  loom_serve_telemetry_stream_append(service->telemetry.stream, &record);
+  loom_runtime_telemetry_record_t record = {
+      .time_ns = iree_time_now(), .event = &LOOM_SERVICE_TELEMETRY_SNAPSHOT};
+  loom_service_telemetry_snapshot_record_t telemetry_payload = {
+      .counters = service->telemetry.counters,
+      .queued = state.queued_requests,
+      .active = state.active_requests};
+  memcpy(telemetry_payload.phase, state.phase, strlen(state.phase));
+  memcpy(record.data.words, &telemetry_payload, sizeof(telemetry_payload));
+  loom_runtime_telemetry_stream_append(service->telemetry.stream, &record);
   loom_serve_speech_record_weights(service, record.time_ns);
 }
 
@@ -1260,9 +1269,9 @@ static void loom_serve_speech_stop(loom_serve_speech_service_t* service) {
     service->failure = iree_status_clone(service->status);
   }
   service->stopping = true;
-  const loom_serve_telemetry_outcome_t outcome =
-      !iree_status_is_ok(service->failure) ? LOOM_SERVE_TELEMETRY_FAILED
-                                           : LOOM_SERVE_TELEMETRY_CANCELLED;
+  const loom_service_telemetry_outcome_t outcome =
+      !iree_status_is_ok(service->failure) ? LOOM_SERVICE_TELEMETRY_FAILED
+                                           : LOOM_SERVICE_TELEMETRY_CANCELLED;
   for (iree_host_size_t i = 0; i < service->pending_count; ++i) {
     loom_serve_speech_pending_t* pending = &service->pending[i];
     loom_serve_speech_request_end(service, &pending->job, outcome,
@@ -1484,7 +1493,7 @@ void loom_serve_speech_service_free(loom_serve_speech_service_t* service) {
   iree_allocator_free(host_allocator, service->pending);
   iree_slim_mutex_deinitialize(&service->events.mutex);
   if (service->telemetry.owns_stream) {
-    loom_serve_telemetry_stream_free(service->telemetry.stream);
+    loom_runtime_telemetry_stream_free(service->telemetry.stream);
   }
   iree_allocator_free_aligned(host_allocator, service);
 }
@@ -1492,7 +1501,7 @@ void loom_serve_speech_service_free(loom_serve_speech_service_t* service) {
 iree_status_t loom_serve_speech_service_allocate(
     loom_serve_host_t* host, loom_serve_speech_generator_t generator,
     const loom_serve_speech_service_options_t* options,
-    loom_serve_telemetry_stream_t* stream, iree_allocator_t host_allocator,
+    loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_speech_service_t** out_service) {
   *out_service = NULL;
   if (!generator.prepare || !generator.discard || !generator.try_admit ||
@@ -1554,15 +1563,15 @@ iree_status_t loom_serve_speech_service_allocate(
         (void**)&service->voices);
   }
   if (iree_status_is_ok(status) && !stream) {
-    status = loom_serve_telemetry_stream_allocate(128, host_allocator,
-                                                  &service->telemetry.stream);
+    status = loom_runtime_telemetry_stream_allocate(128, host_allocator,
+                                                    &service->telemetry.stream);
     service->telemetry.owns_stream = iree_status_is_ok(status);
   }
   if (iree_status_is_ok(status)) {
     if (stream) {
       loom_serve_speech_heartbeat(service);
     } else {
-      loom_serve_speech_event(service, &LOOM_SERVE_TELEMETRY_STREAM_BEGIN, 0);
+      loom_serve_speech_event(service, &LOOM_SERVICE_TELEMETRY_STREAM_BEGIN, 0);
     }
     status = iree_async_proactor_pool_get(loom_serve_host_proactor_pool(host),
                                           0, &service->proactor);

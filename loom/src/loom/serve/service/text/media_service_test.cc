@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdlib>
+#include <cstring>
 
 #include "loom/serve/media/image_codec.h"
 #include "loom/serve/service/finite/component.h"
@@ -451,7 +452,7 @@ TEST_P(CancelledMediaServiceTest,
     // Both real HTTP requests own their future rows before producing features,
     // but no language parameter activation or text state submission occurs.
     EXPECT_EQ(loom_serve_text_model_pool_usage(model_).available, 240u);
-    EXPECT_EQ(loom_serve_text_model_weight_activity(model_).activations, 0u);
+    EXPECT_EQ(loom_serve_text_model_parameter_activity(model_).activations, 0u);
     for (size_t i = 0; i < 4; ++i) {
       EXPECT_EQ(
           loom_serve_text_row_pool_usage(loom_serve_text_model_row(model_, i)),

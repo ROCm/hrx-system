@@ -6,24 +6,25 @@
 
 #include "loom/serve/service/text/telemetry.h"
 
-#include <inttypes.h>
 #include <string.h>
 
-#include "loom/serve/service/text/schedule.h"
+#include "loom/service/telemetry/record.h"
+#include "loom/service/text/schedule.h"
 
 iree_status_t loom_serve_text_telemetry_initialize(
-    loom_serve_telemetry_stream_t* stream, iree_allocator_t host_allocator,
+    loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_text_telemetry_t* out_telemetry) {
   *out_telemetry = (loom_serve_text_telemetry_t){.stream = stream};
   if (stream) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_serve_telemetry_stream_allocate(
+  IREE_RETURN_IF_ERROR(loom_runtime_telemetry_stream_allocate(
       256, host_allocator, &out_telemetry->stream));
   out_telemetry->owns_stream = true;
-  const loom_serve_telemetry_record_t begin = {
-      .time_ns = iree_time_now(), .event = &LOOM_SERVE_TELEMETRY_STREAM_BEGIN};
-  loom_serve_telemetry_stream_append(out_telemetry->stream, &begin);
+  const loom_runtime_telemetry_record_t begin = {
+      .time_ns = iree_time_now(),
+      .event = &LOOM_SERVICE_TELEMETRY_STREAM_BEGIN};
+  loom_runtime_telemetry_stream_append(out_telemetry->stream, &begin);
   return iree_ok_status();
 }
 
@@ -31,7 +32,7 @@ void loom_serve_text_telemetry_deinitialize(
     loom_serve_text_telemetry_t* telemetry) {
   iree_status_free(telemetry->failure);
   if (telemetry->owns_stream) {
-    loom_serve_telemetry_stream_free(telemetry->stream);
+    loom_runtime_telemetry_stream_free(telemetry->stream);
   }
   *telemetry = (loom_serve_text_telemetry_t){0};
 }
@@ -41,226 +42,25 @@ loom_serve_text_receipt_t loom_serve_text_telemetry_begin(
   const loom_serve_text_receipt_t receipt = {++telemetry->next_serial,
                                              iree_time_now()};
   ++telemetry->counters.requests;
-  const loom_serve_telemetry_record_t begin = {
+  const loom_runtime_telemetry_record_t begin = {
       .time_ns = receipt.arrival_time,
       .request = receipt.serial,
-      .event = &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN};
-  loom_serve_telemetry_stream_append(telemetry->stream, &begin);
+      .event = &LOOM_SERVICE_TELEMETRY_REQUEST_BEGIN};
+  loom_runtime_telemetry_stream_append(telemetry->stream, &begin);
   return receipt;
 }
-
-void loom_serve_text_record(loom_serve_telemetry_stream_t* stream,
-                            const loom_serve_telemetry_event_t* event,
-                            uint64_t request, const void* payload,
-                            iree_host_size_t payload_size) {
-  loom_serve_telemetry_record_t record = {
-      .time_ns = iree_time_now(), .request = request, .event = event};
-  memcpy(record.data.words, payload, payload_size);
-  loom_serve_telemetry_stream_append(stream, &record);
-}
-
-static iree_status_t loom_serve_text_admission_format(
-    const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
-  loom_serve_text_admission_record_t value;
-  static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
-  memcpy(&value, record->data.words, sizeof(value));
-  return iree_string_builder_append_format(
-      output,
-      ",\"session\":%" PRIu64 ",\"row\":%" PRIu64
-      ",\"retained_tokens\":%" PRIu64 ",\"appended_tokens\":%" PRIu64
-      ",\"reservation_tokens\":%" PRIu64 ",\"restored_bytes\":%" PRIu64
-      ",\"max_tokens\":%" PRIu64 ",\"prepare_ns\":%" PRIu64
-      ",\"queue_rank\":%" PRIu64 ",\"overtakes\":%" PRIu64
-      ",\"overtake_budget\":%" PRIu64 ",\"queue_ns\":%" PRIu64
-      ",\"pool_reserved_tokens\":%" PRIu64 ",\"pool_resident_tokens\":%" PRIu64,
-      value.session, value.row, value.retained_tokens, value.appended_tokens,
-      value.reservation_tokens, value.restored_bytes, value.max_tokens,
-      value.prepare_ns, value.queue_rank, value.overtakes,
-      value.overtake_budget, value.queue_ns, value.pool_reserved_tokens,
-      value.pool_resident_tokens);
-}
-
-static iree_status_t loom_serve_text_request_format(
-    const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
-  loom_serve_text_request_record_t value;
-  static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
-  memcpy(&value, record->data.words, sizeof(value));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      output,
-      ",\"session\":%" PRIu64 ",\"retained_tokens\":%" PRIu64
-      ",\"position\":%" PRIu64 ",\"queue_ns\":%" PRIu64
-      ",\"first_token_ns\":%" PRIu64 ",\"duration_ns\":%" PRIu64
-      ",\"finish_reason\":\"%s\",\"counters\":",
-      value.session, value.retained_tokens, value.position, value.queue_ns,
-      value.first_token_ns, value.duration_ns, value.finish_reason));
-  return loom_serve_telemetry_counters_format(&value.counters, output);
-}
-
-static iree_status_t loom_serve_text_session_begin_format(
-    const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
-  loom_serve_text_session_record_t value;
-  static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
-  memcpy(&value, record->data.words, sizeof(value));
-  // Session keys have already passed the ASCII identifier boundary.
-  return iree_string_builder_append_format(
-      output, ",\"session\":%" PRIu64 ",\"row\":%" PRIu64 ",\"name\":\"%s\"",
-      value.session, value.row, value.name);
-}
-
-static iree_status_t loom_serve_text_session_end_format(
-    const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
-  loom_serve_text_session_end_record_t value;
-  static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
-  memcpy(&value, record->data.words, sizeof(value));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      output,
-      ",\"session\":%" PRIu64 ",\"position\":%" PRIu64
-      ",\"resident_tokens\":%" PRIu64 ",\"counters\":",
-      value.session, value.position, value.resident_tokens));
-  return loom_serve_telemetry_counters_format(&value.counters, output);
-}
-
-static iree_status_t loom_serve_text_epoch_format(
-    const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
-  loom_serve_text_epoch_record_t value;
-  static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
-  memcpy(&value, record->data.words, sizeof(value));
-  const char* schedule =
-      value.schedule_mode == LOOM_SERVE_TEXT_SCHEDULE_PACKED    ? "packed"
-      : value.schedule_mode == LOOM_SERVE_TEXT_SCHEDULE_MATCHED ? "matched"
-                                                                : "isolated";
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(output, ",\"token_slots\":"));
-  if (value.token_slots) {
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(output, "%" PRIu64,
-                                                           value.token_slots));
-  } else {
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "null"));
-  }
-  return iree_string_builder_append_format(
-      output,
-      ",\"epoch\":%" PRIu64
-      ",\"scheduler\":\"%s\",\"packing\":\"%s\""
-      ",\"spans\":%" PRIu64 ",\"shape\":%" PRIu64 ",\"token_capacity\":%" PRIu64
-      ",\"span_capacity\":%" PRIu64 ",\"prefill_tokens\":%" PRIu64
-      ",\"decode_tokens\":%" PRIu64
-      ",\"selected_tokens_including_eos\":%" PRIu64 ",\"traversals\":%" PRIu64
-      ",\"model_ns\":%" PRIu64 ",\"device_epochs\":%" PRIu64
-      ",\"continued_prefill_tokens\":%" PRIu64
-      ",\"draft\":{\"verifications\":%" PRIu64 ",\"proposed_tokens\":%" PRIu64
-      ",\"accepted_draft_inputs\":%" PRIu64 "}",
-      value.epoch, schedule,
-      value.packing_mode == LOOM_SERVE_TEXT_PACKING_SEPARATE ? "separate"
-                                                             : "mixed",
-      value.spans, value.shape, value.token_capacity, value.span_capacity,
-      value.prefill_tokens, value.decode_tokens, value.output_tokens,
-      value.traversals, value.duration_ns, value.device_epochs,
-      value.continued_prefill_tokens, value.verifications,
-      value.verifications * value.draft_depth, value.accepted_draft_inputs);
-}
-
-static iree_status_t loom_serve_text_span_format(
-    const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
-  loom_serve_text_span_record_t value;
-  static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
-  memcpy(&value, record->data.words, sizeof(value));
-  return iree_string_builder_append_format(
-      output,
-      ",\"epoch\":%" PRIu64 ",\"session\":%" PRIu64 ",\"row\":%" PRIu64
-      ",\"kind\":\"%s\",\"position\":%" PRIu64 ",\"tokens\":%" PRIu64
-      ",\"select\":%s,\"consumed_tokens\":%" PRIu64
-      ",\"output_tokens\":%" PRIu64 ",\"output_limit\":%" PRIu64
-      ",\"known_tokens\":%" PRIu64 ",\"verification_epochs\":%" PRIu64,
-      value.epoch, value.session, value.row,
-      value.prefill        ? "prefill"
-      : value.output_limit ? "verify"
-                           : "decode",
-      value.position, value.tokens, value.select ? "true" : "false",
-      value.consumed_tokens, value.output_tokens, value.output_limit,
-      value.known_tokens, value.verification_epochs);
-}
-
-static iree_status_t loom_serve_text_checkpoint_format(
-    const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
-  loom_serve_text_checkpoint_record_t value;
-  static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
-  memcpy(&value, record->data.words, sizeof(value));
-  return iree_string_builder_append_format(
-      output,
-      ",\"checkpoint\":\"%s\",\"position\":%" PRIu64
-      ",\"host_snapshot_bytes\":%" PRIu64,
-      value.name, value.position, value.host_bytes);
-}
-
-static iree_status_t loom_serve_text_prefix_format(
-    const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
-  loom_serve_text_prefix_record_t value;
-  static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
-  memcpy(&value, record->data.words, sizeof(value));
-  return iree_string_builder_append_format(
-      output,
-      ",\"readiness_ns\":%" PRIu64 ",\"capacity\":%" PRIu64
-      ",\"endpoints\":%" PRIu64,
-      value.readiness_ns, value.capacity, value.endpoints);
-}
-
-const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_PREFIX_CAPTURE = {
-    "prefix_capture", loom_serve_text_prefix_format};
-
-static iree_status_t loom_serve_text_trim_format(
-    const loom_serve_telemetry_record_t* record,
-    iree_string_builder_t* output) {
-  loom_serve_text_trim_record_t value;
-  static_assert(sizeof(value) <= sizeof(record->data), "record capacity");
-  memcpy(&value, record->data.words, sizeof(value));
-  return iree_string_builder_append_format(
-      output,
-      ",\"duration_ns\":%" PRIu64 ",\"moved_blocks\":%" PRIu64
-      ",\"copied_bytes\":%" PRIu64 ",\"released_bytes\":%" PRIu64
-      ",\"committed_bytes\":%" PRIu64,
-      value.duration_ns, value.moved_blocks, value.copied_bytes,
-      value.released_bytes, value.committed_bytes);
-}
-
-const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_PREPARED = {
-    "prepared", loom_serve_text_admission_format};
-const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_ADMIT = {
-    "admit", loom_serve_text_admission_format};
-const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_REQUEST_STATS = {
-    "request_stats", loom_serve_text_request_format};
-const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_SESSION_BEGIN = {
-    "session_begin", loom_serve_text_session_begin_format};
-const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_SESSION_END = {
-    "session_end", loom_serve_text_session_end_format};
-const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_EPOCH = {
-    "epoch", loom_serve_text_epoch_format};
-const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_SPAN = {
-    "span", loom_serve_text_span_format};
-const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_CHECKPOINT_PIN = {
-    "checkpoint_pin", loom_serve_text_checkpoint_format};
-const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_CHECKPOINT_SUSPEND = {
-    "checkpoint_suspend", loom_serve_text_checkpoint_format};
-const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_CHECKPOINT_RELEASE = {
-    "checkpoint_release", loom_serve_text_checkpoint_format};
-const loom_serve_telemetry_event_t LOOM_SERVE_TEXT_TRIM = {
-    "state_trim", loom_serve_text_trim_format};
 
 void loom_serve_text_telemetry_diagnose(loom_serve_text_telemetry_t* telemetry,
                                         uint64_t request,
                                         iree_status_t status) {
-  loom_serve_telemetry_record_t record = {.time_ns = iree_time_now(),
-                                          .request = request,
-                                          .event = &LOOM_SERVE_TELEMETRY_ERROR};
-  loom_serve_telemetry_diagnostic_capture(status, &record.data.error);
-  loom_serve_telemetry_stream_append(telemetry->stream, &record);
+  loom_runtime_telemetry_record_t record = {
+      .time_ns = iree_time_now(),
+      .request = request,
+      .event = &LOOM_SERVICE_TELEMETRY_ERROR};
+  loom_service_telemetry_diagnostic_t telemetry_payload = {0};
+  loom_service_telemetry_diagnostic_capture(status, &telemetry_payload);
+  memcpy(record.data.words, &telemetry_payload, sizeof(telemetry_payload));
+  loom_runtime_telemetry_stream_append(telemetry->stream, &record);
   iree_status_free(status);
 }
 
@@ -269,50 +69,54 @@ void loom_serve_text_telemetry_fail(loom_serve_text_telemetry_t* telemetry,
   if (iree_status_is_ok(telemetry->failure)) {
     telemetry->failure = iree_status_clone(status);
   }
-  loom_serve_telemetry_record_t record = {.time_ns = iree_time_now(),
-                                          .event = &LOOM_SERVE_TELEMETRY_ERROR};
-  loom_serve_telemetry_diagnostic_capture(status, &record.data.error);
-  loom_serve_telemetry_stream_append(telemetry->stream, &record);
+  loom_runtime_telemetry_record_t record = {
+      .time_ns = iree_time_now(), .event = &LOOM_SERVICE_TELEMETRY_ERROR};
+  loom_service_telemetry_diagnostic_t telemetry_payload = {0};
+  loom_service_telemetry_diagnostic_capture(status, &telemetry_payload);
+  memcpy(record.data.words, &telemetry_payload, sizeof(telemetry_payload));
+  loom_runtime_telemetry_stream_append(telemetry->stream, &record);
 }
 
 static void loom_serve_text_telemetry_end_diagnostic(
     loom_serve_text_telemetry_t* telemetry, loom_serve_text_receipt_t receipt,
-    loom_serve_telemetry_outcome_t outcome, uint64_t input_tokens,
-    const loom_serve_telemetry_diagnostic_t* diagnostic) {
-  loom_serve_telemetry_count_outcome(&telemetry->counters, outcome);
-  loom_serve_telemetry_record_t record = {
+    loom_service_telemetry_outcome_t outcome, uint64_t input_tokens,
+    const loom_service_telemetry_diagnostic_t* diagnostic) {
+  loom_service_telemetry_count_outcome(&telemetry->counters, outcome);
+  loom_runtime_telemetry_record_t record = {
       .time_ns = iree_time_now(),
       .request = receipt.serial,
-      .event = &LOOM_SERVE_TELEMETRY_REQUEST_END};
-  record.data.end.outcome = outcome;
-  record.data.end.duration_ns = record.time_ns - receipt.arrival_time;
-  loom_serve_telemetry_latency_observe(&telemetry->latency.outcomes[outcome],
-                                       record.data.end.duration_ns);
-  record.data.end.input_tokens = input_tokens;
-  record.data.end.diagnostic = *diagnostic;
-  loom_serve_telemetry_stream_append(telemetry->stream, &record);
+      .event = &LOOM_SERVICE_TELEMETRY_REQUEST_END};
+  loom_service_telemetry_end_record_t telemetry_payload = {0};
+  telemetry_payload.outcome = outcome;
+  telemetry_payload.duration_ns = record.time_ns - receipt.arrival_time;
+  loom_service_telemetry_latency_observe(&telemetry->latency.outcomes[outcome],
+                                         telemetry_payload.duration_ns);
+  telemetry_payload.input_tokens = input_tokens;
+  telemetry_payload.diagnostic = *diagnostic;
+  memcpy(record.data.words, &telemetry_payload, sizeof(telemetry_payload));
+  loom_runtime_telemetry_stream_append(telemetry->stream, &record);
 }
 
 void loom_serve_text_telemetry_end(loom_serve_text_telemetry_t* telemetry,
                                    loom_serve_text_receipt_t receipt,
-                                   loom_serve_telemetry_outcome_t outcome,
+                                   loom_service_telemetry_outcome_t outcome,
                                    uint64_t input_tokens,
                                    const iree_status_t borrowed_status) {
-  loom_serve_telemetry_diagnostic_t diagnostic;
-  loom_serve_telemetry_diagnostic_capture(borrowed_status, &diagnostic);
+  loom_service_telemetry_diagnostic_t diagnostic;
+  loom_service_telemetry_diagnostic_capture(borrowed_status, &diagnostic);
   loom_serve_text_telemetry_end_diagnostic(telemetry, receipt, outcome,
                                            input_tokens, &diagnostic);
 }
 
 void loom_serve_text_telemetry_request_end(
     loom_serve_text_telemetry_t* telemetry, loom_serve_text_session_t* session,
-    loom_serve_telemetry_outcome_t outcome) {
-  loom_serve_telemetry_count_outcome(&session->request.counters, outcome);
-  loom_serve_telemetry_count_outcome(&session->lifetime.counters, outcome);
+    loom_service_telemetry_outcome_t outcome) {
+  loom_service_telemetry_count_outcome(&session->request.counters, outcome);
+  loom_service_telemetry_count_outcome(&session->lifetime.counters, outcome);
   const loom_serve_text_receipt_t receipt = {
       session->lifetime.serial,
       session->request.start_time - session->request.queue_duration};
-  loom_serve_text_request_record_t value = {
+  loom_service_text_request_record_t value = {
       .session = session->lifetime.id,
       .counters = session->request.counters,
       .retained_tokens = session->request.retained_count,
@@ -327,8 +131,8 @@ void loom_serve_text_telemetry_request_end(
     memcpy(value.finish_reason, session->request.finish_reason,
            strlen(session->request.finish_reason));
   }
-  loom_serve_text_record(telemetry->stream, &LOOM_SERVE_TEXT_REQUEST_STATS,
-                         session->lifetime.serial, &value, sizeof(value));
+  loom_service_text_record(telemetry->stream, &LOOM_SERVICE_TEXT_REQUEST_STATS,
+                           session->lifetime.serial, &value, sizeof(value));
   if (!iree_status_is_ok(telemetry->failure)) {
     loom_serve_text_telemetry_end(telemetry, receipt, outcome,
                                   value.counters.input_tokens,
@@ -346,13 +150,13 @@ void loom_serve_text_telemetry_session_end(
   if (!lifetime->id) {
     return;
   }
-  const loom_serve_text_session_end_record_t value = {
+  const loom_service_text_session_end_record_t value = {
       .session = lifetime->id,
       .counters = lifetime->counters,
       .position = lifetime->position,
       .resident_tokens = lifetime->resident_tokens};
-  loom_serve_text_record(telemetry->stream, &LOOM_SERVE_TEXT_SESSION_END, 0,
-                         &value, sizeof(value));
+  loom_service_text_record(telemetry->stream, &LOOM_SERVICE_TEXT_SESSION_END, 0,
+                           &value, sizeof(value));
   memset(lifetime, 0, sizeof(*lifetime));
 }
 
@@ -373,16 +177,17 @@ void loom_serve_text_telemetry_epoch(
   const iree_host_size_t device_epochs = cohort->device_epochs;
   const iree_host_size_t continued_prefill_count =
       cohort->continued_prefill_count;
-  const bool packed = options->schedule_mode == LOOM_SERVE_TEXT_SCHEDULE_PACKED;
+  const bool packed =
+      options->schedule_mode == LOOM_SERVICE_TEXT_SCHEDULE_PACKED;
   iree_host_size_t prefill_count = 0, decode_count = 0, output_count = 0;
   iree_host_size_t verification_count = 0, accepted_drafts = 0;
-  loom_serve_text_heartbeat_snapshot_t* state = &heartbeat->snapshot;
+  loom_service_text_statistics_t* state = &heartbeat->snapshot;
   const iree_time_t completed = iree_time_now();
   for (iree_host_size_t i = 0; i < count; ++i) {
     loom_serve_text_session_t* session = sessions[spans[i].row_index];
     const bool prefill = cohort->prefill[i];
     const bool select =
-        iree_any_bit_set(spans[i].flags, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT);
+        iree_any_bit_set(spans[i].flags, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT);
     prefill_count += prefill ? results[i].known_count : 0;
     decode_count +=
         results[i].consumed_count - (prefill ? results[i].known_count : 0);
@@ -399,7 +204,7 @@ void loom_serve_text_telemetry_epoch(
     session->lifetime.position = loom_serve_text_row_position(session->row);
     session->lifetime.resident_tokens =
         loom_serve_text_row_pool_usage(session->row);
-    const loom_serve_text_span_record_t value = {
+    const loom_service_text_span_record_t value = {
         .epoch = epoch,
         .session = session->lifetime.id,
         .row = spans[i].row_index,
@@ -412,8 +217,8 @@ void loom_serve_text_telemetry_epoch(
         .verification_epochs = results[i].verification_count,
         .prefill = prefill,
         .select = select};
-    loom_serve_text_record(telemetry->stream, &LOOM_SERVE_TEXT_SPAN,
-                           session->lifetime.serial, &value, sizeof(value));
+    loom_service_text_record(telemetry->stream, &LOOM_SERVICE_TEXT_SPAN,
+                             session->lifetime.serial, &value, sizeof(value));
   }
   iree_slim_mutex_lock(&heartbeat->mutex);
   state->completed_epochs += device_epochs;
@@ -428,7 +233,7 @@ void loom_serve_text_telemetry_epoch(
   telemetry->counters.input_tokens += prefill_count + decode_count;
   telemetry->counters.output_tokens += output_count;
   ++telemetry->counters.batches;
-  const loom_serve_text_epoch_record_t value = {
+  const loom_service_text_epoch_record_t value = {
       .epoch = epoch,
       .spans = count,
       .shape = shape_index,
@@ -447,6 +252,6 @@ void loom_serve_text_telemetry_epoch(
       .schedule_mode = options->schedule_mode,
       .packing_mode = options->packing_mode,
       .draft_depth = (uint8_t)options->draft_depth};
-  loom_serve_text_record(telemetry->stream, &LOOM_SERVE_TEXT_EPOCH, 0, &value,
-                         sizeof(value));
+  loom_service_text_record(telemetry->stream, &LOOM_SERVICE_TEXT_EPOCH, 0,
+                           &value, sizeof(value));
 }

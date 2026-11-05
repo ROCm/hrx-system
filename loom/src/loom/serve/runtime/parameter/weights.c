@@ -156,9 +156,9 @@ struct loom_serve_weights_t {
   // Borrowed shared transient backing, separate from retained parameter budget.
   loom_serve_workspace_t* workspace;
   // Parameter-only accounting across all unique roots.
-  loom_serve_memory_statistics_t statistics;
+  loom_runtime_storage_statistics_t statistics;
   // Accepted streaming/preparation work, never reconstructed from events.
-  loom_serve_weight_activity_t activity;
+  loom_runtime_parameter_activity_t activity;
   // Final consumer ownership before virtual roots can be unmapped at teardown.
   loom_serve_retirement_t retirement;
   // Activation lanes retained independently of their submitting host turn.
@@ -1785,7 +1785,7 @@ iree_status_t loom_serve_weights_deactivate(loom_serve_weights_t* weights,
   return status;
 }
 
-loom_serve_memory_statistics_t loom_serve_weights_statistics(
+loom_runtime_storage_statistics_t loom_serve_weights_statistics(
     loom_serve_weights_t* weights) {
   // Accounting is published by the serialized owner, never the cold executor.
   loom_serve_weights_collect_backing(weights);
@@ -1793,9 +1793,9 @@ loom_serve_memory_statistics_t loom_serve_weights_statistics(
   return weights->statistics;
 }
 
-loom_serve_memory_usage_t loom_serve_weights_memory_usage(
+loom_runtime_storage_usage_t loom_serve_weights_memory_usage(
     const loom_serve_weights_t* weights) {
-  return (loom_serve_memory_usage_t){
+  return (loom_runtime_storage_usage_t){
       .reserved_bytes = weights->statistics.reserved_bytes,
       .committed_bytes = weights->statistics.committed_bytes,
       .pending_bytes = weights->statistics.pending_bytes,
@@ -1804,7 +1804,7 @@ loom_serve_memory_usage_t loom_serve_weights_memory_usage(
   };
 }
 
-loom_serve_weight_activity_t loom_serve_weights_activity(
+loom_runtime_parameter_activity_t loom_serve_weights_activity(
     const loom_serve_weights_t* weights) {
   return weights->activity;
 }

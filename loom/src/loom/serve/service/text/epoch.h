@@ -28,9 +28,9 @@ typedef struct loom_serve_text_epoch_options_t {
   // Proposed tokens after the known anchor; zero disables drafting.
   iree_host_size_t draft_depth;
   // Packed, isolated or matched execution of the selected partition.
-  loom_serve_text_schedule_mode_t schedule_mode;
+  loom_service_text_schedule_mode_t schedule_mode;
   // Whether known inputs and verifiers may share a cohort.
-  loom_serve_text_packing_mode_t packing_mode;
+  loom_service_text_packing_mode_t packing_mode;
   // Borrowed cached shape catalog, stable through the model lifetime.
   const loom_serve_packing_shape_t* shapes;
   // Number of candidate token/span shapes.
@@ -151,7 +151,7 @@ iree_host_size_t loom_serve_text_epoch_prepare(
 // The owner consumes successful readiness before advancing the isolated cursor
 // or publishing results. Failed submission retains accepted model ownership.
 iree_status_t loom_serve_text_epoch_submit(
-    loom_serve_text_model_t* model, loom_serve_text_schedule_mode_t mode,
+    loom_serve_text_model_t* model, loom_service_text_schedule_mode_t mode,
     const loom_serve_text_epoch_t* epoch,
     const loom_serve_text_continuation_t* continuation,
     loom_serve_text_capture_t** out_capture,
@@ -162,7 +162,7 @@ iree_status_t loom_serve_text_epoch_submit(
 // advances cursor; it never synthesizes progress for unsubmitted spans. The
 // owner still decides whether to issue another span or stop on cancellation.
 iree_status_t loom_serve_text_epoch_complete(
-    loom_serve_text_model_t* model, loom_serve_text_schedule_mode_t mode,
+    loom_serve_text_model_t* model, loom_service_text_schedule_mode_t mode,
     loom_serve_text_epoch_t* epoch);
 
 #ifdef __cplusplus

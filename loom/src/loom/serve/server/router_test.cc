@@ -10,6 +10,7 @@
 #include "loom/serve/server/router_test_fixture.h"
 #include "loom/serve/service/reasoning.h"
 #include "loom/serve/transport/http/multipart.h"
+#include "loom/service/telemetry/record.h"
 
 namespace {
 
@@ -109,7 +110,7 @@ TEST_P(HttpRouterTest,
   loom_serve_http_server_record_error(server_, error);
   slow.WaitCredit(false);
   const auto* stream = loom_serve_http_server_diagnostics(server_);
-  for (size_t i = 0; i < loom_serve_telemetry_stream_capacity(stream) + 8;
+  for (size_t i = 0; i < loom_runtime_telemetry_stream_capacity(stream) + 8;
        ++i) {
     loom_serve_http_server_record_error(server_, error);
   }
@@ -1063,8 +1064,8 @@ class HttpRouterCountersTest : public HttpRouterTest {
           .batches = value,
       };
       for (uint64_t i = 0; i < value; ++i) {
-        loom_serve_telemetry_latency_observe(
-            &latency_[index].outcomes[LOOM_SERVE_TELEMETRY_COMPLETED],
+        loom_service_telemetry_latency_observe(
+            &latency_[index].outcomes[LOOM_SERVICE_TELEMETRY_COMPLETED],
             value * 2500000);
       }
       service->latency = &latency_[index];
@@ -1073,9 +1074,9 @@ class HttpRouterCountersTest : public HttpRouterTest {
     HttpRouterTest::SetUp();
   }
   // Distinct service owners, unchanged by cold observation/utility requests.
-  loom_serve_telemetry_counters_t counters_[5] = {};
+  loom_service_telemetry_counters_t counters_[5] = {};
   // Fixed historical samples supplied by the same dependency owners.
-  loom_serve_telemetry_latency_t latency_[5] = {};
+  loom_service_telemetry_latency_t latency_[5] = {};
 };
 
 class HttpRouterTightCapacityTest : public HttpRouterTest {

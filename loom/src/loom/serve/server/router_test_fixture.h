@@ -28,9 +28,11 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
+#include "loom/runtime/telemetry/sample.h"
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/transport/http/listener.h"
+#include "loom/service/telemetry/record.h"
 
 namespace loom_serve::testing {
 
@@ -294,9 +296,9 @@ struct loom_serve_test_model_service_t {
     loom_serve_service_flags_t flags = 0;
   } admission;
   // Optional immutable historical work, published before owner startup.
-  const loom_serve_telemetry_counters_t* counters = nullptr;
+  const loom_service_telemetry_counters_t* counters = nullptr;
   // Optional immutable duration distributions published before owner startup.
-  const loom_serve_telemetry_latency_t* latency = nullptr;
+  const loom_service_telemetry_latency_t* latency = nullptr;
   // Immutable source facts configured before the service is published.
   loom_serve_reasoning_t reasoning = {};
 
@@ -447,11 +449,11 @@ struct loom_serve_test_model_service_t {
   }
 
   static iree_status_t Sample(void* self,
-                              loom_serve_telemetry_sample_sink_t sink) {
+                              loom_runtime_telemetry_sample_sink_t sink) {
     const auto* service = static_cast<loom_serve_test_model_service_t*>(self);
-    const loom_serve_telemetry_metric_t field = {"consumed", "tokens",
-                                                 LOOM_SERVE_TELEMETRY_COUNTER};
-    const loom_serve_telemetry_topic_t topic = {"work", 1, 1, &field};
+    const loom_runtime_telemetry_metric_t field = {
+        "consumed", "tokens", LOOM_RUNTIME_TELEMETRY_COUNTER};
+    const loom_runtime_telemetry_topic_t topic = {"work", 1, 1, &field};
     return sink.emit(sink.self, &topic, &service->counters->input_tokens);
   }
 

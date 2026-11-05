@@ -164,11 +164,11 @@ loom_serve_text_cache_selection_t loom_serve_text_model_cache_selection(
 enum loom_serve_text_span_flag_bits_e {
   // Select the next token after consuming this span. An intermediate input
   // chunk can omit this flag; its previous prediction then becomes invalid.
-  LOOM_SERVE_TEXT_SPAN_FLAG_SELECT = 1u << 0,
+  LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT = 1u << 0,
   // Generate candidates on device before verification. The span reserves
   // draft_depth + 1 inputs but token_ids supplies only the pending anchor.
   // Requires SELECT and a nonzero output limit in the epoch plan.
-  LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE = 1u << 1,
+  LOOM_SERVICE_TEXT_SPAN_FLAG_PROPOSE = 1u << 1,
 };
 typedef uint32_t loom_serve_text_span_flags_t;
 
@@ -501,11 +501,11 @@ loom_serve_text_warmup_t* loom_serve_text_model_warmup(
     const loom_serve_text_model_t* model);
 
 // Parameter-only virtual/physical statistics, excluding mutable state.
-loom_serve_memory_usage_t loom_serve_text_model_weight_statistics(
+loom_runtime_storage_usage_t loom_serve_text_model_weight_statistics(
     const loom_serve_text_model_t* model);
 
 // Accepted parameter streaming/preparation work, including reactivation.
-loom_serve_weight_activity_t loom_serve_text_model_weight_activity(
+loom_runtime_parameter_activity_t loom_serve_text_model_parameter_activity(
     const loom_serve_text_model_t* model);
 
 // Queries return borrowed state owned by model. The row index is below the
@@ -533,7 +533,7 @@ loom_serve_text_pool_usage_t loom_serve_text_model_pool_usage(
     const loom_serve_text_model_t* model);
 // Mutable virtual state only; immutable weights and shared workspace are
 // separate allocations. Fixed backing reports zero virtual-pool statistics.
-loom_serve_memory_statistics_t loom_serve_text_model_memory_statistics(
+loom_runtime_storage_statistics_t loom_serve_text_model_memory_statistics(
     const loom_serve_text_model_t* model);
 // Positions in the row's owned pages; zero for dense comparison storage.
 iree_host_size_t loom_serve_text_row_pool_usage(

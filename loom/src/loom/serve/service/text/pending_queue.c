@@ -149,7 +149,7 @@ iree_status_t loom_serve_text_pending_queue_prepare(
   IREE_TRACE_ZONE_APPEND_TEXT(z0, name.data, name.size);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(
       z0,
-      loom_serve_telemetry_stream_identity(queue->telemetry->stream).ordinal);
+      loom_runtime_telemetry_stream_identity(queue->telemetry->stream).ordinal);
   loom_serve_text_pending_request_t* pending = queue->prepared.request;
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, pending->receipt.serial);
   const iree_time_t start = iree_time_now();
@@ -221,13 +221,13 @@ iree_status_t loom_serve_text_pending_queue_admit(
   session->lifetime.serial = request.receipt.serial;
   if (!session->lifetime.id) {
     session->lifetime.id = session->lifetime.serial;
-    loom_serve_text_session_record_t value = {
+    loom_service_text_session_record_t value = {
         .session = session->lifetime.id,
         .row = loom_serve_text_row_index(session->row)};
     memcpy(value.name, session->lifetime.name, sizeof(value.name));
-    loom_serve_text_record(queue->telemetry->stream,
-                           &LOOM_SERVE_TEXT_SESSION_BEGIN,
-                           session->lifetime.serial, &value, sizeof(value));
+    loom_service_text_record(queue->telemetry->stream,
+                             &LOOM_SERVICE_TEXT_SESSION_BEGIN,
+                             session->lifetime.serial, &value, sizeof(value));
   }
   ++session->lifetime.counters.requests;
   session->request.counters.requests = 1;
@@ -254,7 +254,7 @@ iree_status_t loom_serve_text_pending_queue_admit(
   if (iree_status_is_ok(status)) {
     const loom_serve_text_pool_usage_t pool =
         loom_serve_text_model_pool_usage(queue->model);
-    const loom_serve_text_admission_record_t value = {
+    const loom_service_text_admission_record_t value = {
         .session = session->lifetime.id,
         .row = loom_serve_text_row_index(session->row),
         .retained_tokens = retained_count,
@@ -269,8 +269,8 @@ iree_status_t loom_serve_text_pending_queue_admit(
         .queue_ns = session->request.queue_duration,
         .pool_reserved_tokens = pool.pending,
         .pool_resident_tokens = pool.capacity - pool.available - pool.pending};
-    loom_serve_text_record(queue->telemetry->stream, &LOOM_SERVE_TEXT_ADMIT,
-                           session->lifetime.serial, &value, sizeof(value));
+    loom_service_text_record(queue->telemetry->stream, &LOOM_SERVICE_TEXT_ADMIT,
+                             session->lifetime.serial, &value, sizeof(value));
   }
   return status;
 }

@@ -1108,12 +1108,12 @@ bool loom_serve_image_model_is_pending(const loom_serve_image_model_t* model) {
   return model && loom_serve_executables_is_pending(model->executables);
 }
 
-loom_serve_memory_usage_t loom_serve_image_model_weight_statistics(
+loom_runtime_storage_usage_t loom_serve_image_model_weight_statistics(
     const loom_serve_image_model_t* model) {
   return loom_serve_executables_parameters(model->executables).memory;
 }
 
-loom_serve_weight_activity_t loom_serve_image_model_weight_activity(
+loom_runtime_parameter_activity_t loom_serve_image_model_parameter_activity(
     const loom_serve_image_model_t* model) {
   return loom_serve_executables_parameters(model->executables).activity;
 }
@@ -1122,8 +1122,8 @@ iree_status_t loom_serve_image_model_prepare_batch(
     loom_serve_image_model_t* model, iree_host_size_t count,
     const loom_serve_prepared_request_t* requests,
     const iree_host_size_t* output_lengths,
-    loom_serve_image_prepared_t* out_prepared) {
-  *out_prepared = (loom_serve_image_prepared_t){0};
+    loom_service_image_prepared_t* out_prepared) {
+  *out_prepared = (loom_service_image_prepared_t){0};
   iree_host_size_t output_length = 0;
   for (iree_host_size_t i = 0; i < count; ++i) {
     if (output_lengths[i] >
@@ -1151,7 +1151,7 @@ iree_status_t loom_serve_image_model_prepare_batch(
   }
   model->invocation.cursor = 0;
   model->invocation.started = false;
-  *out_prepared = (loom_serve_image_prepared_t){
+  *out_prepared = (loom_service_image_prepared_t){
       .stage = model->invocation.stage,
       .tag = tag,
       .input_bytes = iree_vm_buffer_length(model->invocation.payload)};
@@ -1331,10 +1331,10 @@ iree_const_byte_span_t loom_serve_image_model_complete(
 
 iree_status_t loom_serve_image_model_generate(
     loom_serve_image_model_t* model, const loom_serve_image_request_t* request,
-    loom_serve_image_prepared_t* out_prepared,
+    loom_service_image_prepared_t* out_prepared,
     iree_const_byte_span_t* out_rgb) {
   *out_rgb = iree_const_byte_span_empty();
-  *out_prepared = (loom_serve_image_prepared_t){0};
+  *out_prepared = (loom_service_image_prepared_t){0};
   loom_serve_prepared_request_t prepared_request = {0};
   IREE_RETURN_IF_ERROR(loom_serve_image_model_prepare_request(
       model, request, &prepared_request));
@@ -1412,7 +1412,7 @@ static iree_status_t loom_serve_image_generator_prepare_batch(
     void* self, iree_host_size_t count,
     const loom_serve_prepared_request_t* requests,
     const iree_host_size_t* output_lengths,
-    loom_serve_image_prepared_t* out_prepared) {
+    loom_service_image_prepared_t* out_prepared) {
   return loom_serve_image_model_prepare_batch(self, count, requests,
                                               output_lengths, out_prepared);
 }
@@ -1442,9 +1442,9 @@ static iree_const_byte_span_t loom_serve_image_generator_complete(void* self) {
   return loom_serve_image_model_complete(self);
 }
 
-static loom_serve_weight_activity_t loom_serve_image_generator_weight_activity(
-    void* self) {
-  return loom_serve_image_model_weight_activity(self);
+static loom_runtime_parameter_activity_t
+loom_serve_image_generator_parameter_activity(void* self) {
+  return loom_serve_image_model_parameter_activity(self);
 }
 
 static iree_status_t loom_serve_image_generator_query_status(void* self) {
@@ -1468,7 +1468,7 @@ loom_serve_image_generator_t loom_serve_image_model_generator(
       .try_admit = loom_serve_image_generator_admit,
       .submit = loom_serve_image_generator_submit,
       .complete = loom_serve_image_generator_complete,
-      .weight_activity = loom_serve_image_generator_weight_activity,
+      .parameter_activity = loom_serve_image_generator_parameter_activity,
       .query_status = loom_serve_image_generator_query_status,
       .is_pending = loom_serve_image_generator_is_pending,
       .execution_update = loom_serve_executables_update(model->executables),

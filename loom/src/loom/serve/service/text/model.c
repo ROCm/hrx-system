@@ -868,17 +868,17 @@ loom_serve_text_row_t* loom_serve_text_model_row(loom_serve_text_model_t* model,
   return model->rows[index];
 }
 
-loom_serve_memory_statistics_t loom_serve_text_model_memory_statistics(
+loom_runtime_storage_statistics_t loom_serve_text_model_memory_statistics(
     const loom_serve_text_model_t* model) {
   return model->state.memory.statistics;
 }
 
-loom_serve_memory_usage_t loom_serve_text_model_weight_statistics(
+loom_runtime_storage_usage_t loom_serve_text_model_weight_statistics(
     const loom_serve_text_model_t* model) {
   return loom_serve_residency_group_statistics(model->parameter_group);
 }
 
-loom_serve_weight_activity_t loom_serve_text_model_weight_activity(
+loom_runtime_parameter_activity_t loom_serve_text_model_parameter_activity(
     const loom_serve_text_model_t* model) {
   return loom_serve_residency_group_activity(model->parameter_group);
 }
@@ -1207,8 +1207,8 @@ iree_status_t loom_serve_text_model_submit_epoch(
         span->row_index >= model->row_count || !span->token_count ||
         !span->token_ids ||
         span->token_count > shape.token_capacity - token_count ||
-        (span->flags & ~(LOOM_SERVE_TEXT_SPAN_FLAG_SELECT |
-                         LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE))) {
+        (span->flags & ~(LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT |
+                         LOOM_SERVICE_TEXT_SPAN_FLAG_PROPOSE))) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "invalid text epoch span %zu", i);
     }
@@ -1228,7 +1228,7 @@ iree_status_t loom_serve_text_model_submit_epoch(
                               "epoch span %zu exceeds remaining context", i);
     }
     const bool generates =
-        iree_any_bit_set(span->flags, LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE);
+        iree_any_bit_set(span->flags, LOOM_SERVICE_TEXT_SPAN_FLAG_PROPOSE);
     if (generates && span->media) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "speculative text span %zu carries media", i);
@@ -1241,7 +1241,7 @@ iree_status_t loom_serve_text_model_submit_epoch(
       const loom_serve_text_row_t* row = model->rows[span->row_index];
       if (output_limits[i] > width * epoch_count ||
           span->token_count != width ||
-          !iree_any_bit_set(span->flags, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT) ||
+          !iree_any_bit_set(span->flags, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT) ||
           !row->has_prediction || row->transfer.progress[7] ||
           span->token_ids[0] != row->transfer.token) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1272,8 +1272,8 @@ iree_status_t loom_serve_text_model_submit_epoch(
       const loom_serve_text_span_t* span = &continuation->spans[i];
       if (span->row_index >= model->row_count || !span->token_count ||
           span->token_count > next_shape.token_capacity - next_tokens ||
-          (span->flags & ~(LOOM_SERVE_TEXT_SPAN_FLAG_SELECT |
-                           LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE))) {
+          (span->flags & ~(LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT |
+                           LOOM_SERVICE_TEXT_SPAN_FLAG_PROPOSE))) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "invalid continuation span %zu", i);
       }
@@ -1294,10 +1294,11 @@ iree_status_t loom_serve_text_model_submit_epoch(
           model->rows[span->row_index]->state->position;
       if (limit) {
         if (limit < 3 || limit > 2 * width || span->token_count != width ||
-            span->flags != (LOOM_SERVE_TEXT_SPAN_FLAG_SELECT |
-                            LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE) ||
+            span->flags != (LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT |
+                            LOOM_SERVICE_TEXT_SPAN_FLAG_PROPOSE) ||
             span->media ||
-            !iree_any_bit_set(prior->flags, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT) ||
+            !iree_any_bit_set(prior->flags,
+                              LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT) ||
             (output_limits[first] && limit > output_limits[first])) {
           return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                   "invalid speculative continuation span %zu",
@@ -1313,7 +1314,8 @@ iree_status_t loom_serve_text_model_submit_epoch(
         continued_speculative = true;
       } else {
         if (!span->token_ids || output_limits[first] || prior->flags ||
-            iree_any_bit_set(span->flags, LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE)) {
+            iree_any_bit_set(span->flags,
+                             LOOM_SERVICE_TEXT_SPAN_FLAG_PROPOSE)) {
           return iree_make_status(
               IREE_STATUS_INVALID_ARGUMENT,
               "known continuation requires unselected known input");
@@ -1685,7 +1687,7 @@ iree_status_t loom_serve_text_row_submit_prefill(
         row->state->index,
         count,
         token_ids,
-        LOOM_SERVE_TEXT_SPAN_FLAG_SELECT,
+        LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT,
     };
     return loom_serve_text_model_submit_epoch(model, shape_index, 1, &span,
                                               NULL, NULL, NULL, out_frontier);
@@ -1745,7 +1747,7 @@ iree_status_t loom_serve_text_row_submit_decode(
         row->state->index,
         1,
         &token,
-        LOOM_SERVE_TEXT_SPAN_FLAG_SELECT,
+        LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT,
     };
     return loom_serve_text_model_submit_epoch(row->model, 0, 1, &span, NULL,
                                               NULL, NULL, out_frontier);

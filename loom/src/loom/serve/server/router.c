@@ -23,6 +23,7 @@
 #include "loom/serve/service/kind.h"
 #include "loom/serve/service/reasoning.h"
 #include "loom/serve/transport/http/multipart.h"
+#include "loom/service/telemetry/record.h"
 #include "loom/util/json.h"
 
 typedef struct loom_serve_router_tokenization_t {
@@ -71,7 +72,7 @@ typedef struct loom_serve_router_log_reader_t {
   // Stable registry slot, or router capacity for the server stream.
   iree_host_size_t service_index;
   // Original stream lifetime, compared before borrowing current storage.
-  loom_serve_telemetry_identity_t identity;
+  loom_runtime_telemetry_identity_t identity;
   // Next absolute record position; send admission never retains a ring slot.
   uint64_t position;
   // The initial HTTP headers and telemetry batch have been copied to transport.
@@ -79,7 +80,7 @@ typedef struct loom_serve_router_log_reader_t {
   // Whether the last emitted snapshot had complete counter ownership.
   bool counters_available;
   // Last emitted owner snapshot; unchanged counters do not sustain a send loop.
-  loom_serve_telemetry_counters_t counters;
+  loom_service_telemetry_counters_t counters;
 } loom_serve_router_log_reader_t;
 
 typedef struct loom_serve_router_t {
@@ -782,10 +783,10 @@ static iree_status_t loom_serve_router_logs(
   const bool streaming =
       iree_string_view_equal(request->target, IREE_SV("/logz/stream"));
   iree_host_size_t service_index = router->capacity;
-  const loom_serve_telemetry_stream_t* stream =
+  const loom_runtime_telemetry_stream_t* stream =
       loom_serve_http_server_diagnostics(router->server);
-  const loom_serve_telemetry_counters_t* counters = NULL;
-  loom_serve_telemetry_counters_t total;
+  const loom_service_telemetry_counters_t* counters = NULL;
+  loom_service_telemetry_counters_t total;
   iree_string_view_t name;
   if (loom_serve_http_request_lookup_header(request, IREE_SV("X-Loom-Model"),
                                             &name)) {
@@ -859,7 +860,7 @@ static iree_status_t loom_serve_router_logs(
             .connection = connection,
             .model = name,
             .service_index = service_index,
-            .identity = loom_serve_telemetry_stream_identity(stream),
+            .identity = loom_runtime_telemetry_stream_identity(stream),
             .position = position};
         ++router->logs.count;
         break;
@@ -886,7 +887,7 @@ static iree_status_t loom_serve_router_logs_advance(loom_serve_router_t* router,
   if (!router->logs.count) {
     return iree_ok_status();
   }
-  loom_serve_telemetry_counters_t total;
+  loom_service_telemetry_counters_t total;
   const bool total_available =
       loom_serve_registry_counters(router->registry, &total);
   const iree_host_size_t start = router->logs.cursor;
@@ -910,9 +911,9 @@ static iree_status_t loom_serve_router_logs_advance(loom_serve_router_t* router,
     if (!quota || !loom_serve_http_connection_can_send(reader->connection)) {
       continue;
     }
-    const loom_serve_telemetry_stream_t* stream =
+    const loom_runtime_telemetry_stream_t* stream =
         loom_serve_http_server_diagnostics(router->server);
-    const loom_serve_telemetry_counters_t* counters =
+    const loom_service_telemetry_counters_t* counters =
         total_available ? &total : NULL;
     if (reader->service_index < router->capacity) {
       const loom_serve_service_t* service =
@@ -920,9 +921,9 @@ static iree_status_t loom_serve_router_logs_advance(loom_serve_router_t* router,
       stream = service->telemetry.stream;
       counters = service->telemetry.counters;
     }
-    const loom_serve_telemetry_identity_t identity =
-        stream ? loom_serve_telemetry_stream_identity(stream)
-               : (loom_serve_telemetry_identity_t){0};
+    const loom_runtime_telemetry_identity_t identity =
+        stream ? loom_runtime_telemetry_stream_identity(stream)
+               : (loom_runtime_telemetry_identity_t){0};
     const bool ended = identity.created_ns != reader->identity.created_ns ||
                        identity.ordinal != reader->identity.ordinal;
     const bool counters_changed =
@@ -930,7 +931,7 @@ static iree_status_t loom_serve_router_logs_advance(loom_serve_router_t* router,
         (reader->counters_available != (counters != NULL) ||
          (counters && memcmp(&reader->counters, counters, sizeof(*counters))));
     if (!ended && reader->started && !counters_changed &&
-        reader->position == loom_serve_telemetry_stream_head(stream)) {
+        reader->position == loom_runtime_telemetry_stream_head(stream)) {
       continue;
     }
     // Charge formatting attempts, including a concurrent busy read that emits
@@ -1221,8 +1222,9 @@ static iree_status_t loom_serve_router_inspect(
   }
   if (iree_status_is_ok(status)) {
     if (model->service.telemetry.stream) {
-      const loom_serve_telemetry_identity_t identity =
-          loom_serve_telemetry_stream_identity(model->service.telemetry.stream);
+      const loom_runtime_telemetry_identity_t identity =
+          loom_runtime_telemetry_stream_identity(
+              model->service.telemetry.stream);
       status = iree_string_builder_append_format(
           output, ",\"identity\":\"%" PRIu64 ":%" PRIu64 "\"",
           identity.created_ns, identity.ordinal);

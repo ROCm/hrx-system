@@ -66,13 +66,13 @@ TEST_F(SourceTextServiceTest, NativeWorkspaceReplacementPreservesAdmission) {
   IREE_ASSERT_OK(completion.status);
 
   auto* pool = loom_serve_pool_memory(storage_owner_);
-  loom_serve_memory_statistics_t peer_statistics = {};
+  loom_runtime_storage_statistics_t peer_statistics = {};
   const auto release_peer = [](loom_serve_virtual_buffer_t* buffer) {
     IREE_EXPECT_OK(loom_serve_virtual_buffer_free(buffer));
   };
   std::unique_ptr<loom_serve_virtual_buffer_t, decltype(release_peer)> peer(
       nullptr, release_peer);
-  const auto activity = loom_serve_text_model_weight_activity(model_);
+  const auto activity = loom_serve_text_model_parameter_activity(model_);
   if (pool) {
     // The existing rows and parameters fit. The replacement's 4 MiB
     // transient exceeds both reusable workspace backing and the 4 KiB left
@@ -148,7 +148,7 @@ TEST_F(SourceTextServiceTest, NativeWorkspaceReplacementPreservesAdmission) {
   IREE_ASSERT_OK(loom_serve_text_row_decode(row));
   oracle.Consume(oracle.Predict());
   EXPECT_EQ(loom_serve_text_row_token(row), oracle.Predict());
-  const auto after = loom_serve_text_model_weight_activity(model_);
+  const auto after = loom_serve_text_model_parameter_activity(model_);
   EXPECT_EQ(after.activations, activity.activations);
   EXPECT_EQ(after.read_bytes, activity.read_bytes);
 

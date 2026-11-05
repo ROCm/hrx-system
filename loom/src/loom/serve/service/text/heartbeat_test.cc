@@ -13,6 +13,8 @@
 #include "iree/base/threading/notification.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/serve/telemetry/record.h"
+#include "loom/serve/telemetry/sample.h"
 
 namespace {
 
@@ -25,14 +27,14 @@ class TextHeartbeatTest : public ::testing::Test {
         1, nullptr, iree_async_proactor_pool_options_default(),
         iree_allocator_system(), &pool_));
     IREE_ASSERT_OK(iree_async_proactor_pool_get(pool_, 0, &proactor_));
-    IREE_ASSERT_OK(loom_serve_telemetry_stream_allocate(
+    IREE_ASSERT_OK(loom_runtime_telemetry_stream_allocate(
         8, iree_allocator_system(), &stream_));
   }
 
   void TearDown() override {
     IREE_EXPECT_OK(Stop());
     loom_serve_text_heartbeat_deinitialize(&heartbeat_);
-    loom_serve_telemetry_stream_free(stream_);
+    loom_runtime_telemetry_stream_free(stream_);
     iree_async_proactor_pool_release(pool_);
     iree_notification_deinitialize(&notification_);
   }
@@ -56,9 +58,9 @@ class TextHeartbeatTest : public ::testing::Test {
   std::string ReadRecords(uint64_t* cursor) {
     iree_string_builder_t output;
     iree_string_builder_initialize(iree_allocator_system(), &output);
-    loom_serve_telemetry_record_t record;
-    while (loom_serve_telemetry_stream_read(stream_, cursor, &record) ==
-           LOOM_SERVE_TELEMETRY_READ_RECORD) {
+    loom_runtime_telemetry_record_t record;
+    while (loom_runtime_telemetry_stream_read(stream_, cursor, &record) ==
+           LOOM_RUNTIME_TELEMETRY_READ_RECORD) {
       IREE_EXPECT_OK(
           loom_serve_telemetry_record_format(*cursor - 1, &record, &output));
     }
@@ -111,9 +113,9 @@ class TextHeartbeatTest : public ::testing::Test {
   // Callback count for explicit readiness, independent of wall-clock sleeps.
   std::atomic<uint32_t> wake_count_{0};
   // Bounded production transport; its readers never hold timer readiness.
-  loom_serve_telemetry_stream_t* stream_ = nullptr;
+  loom_runtime_telemetry_stream_t* stream_ = nullptr;
   // Serialized model-owner counters borrowed by heartbeat publication.
-  loom_serve_telemetry_counters_t counters_ = {};
+  loom_service_telemetry_counters_t counters_ = {};
 };
 
 TEST_F(TextHeartbeatTest, TimerReadinessPublishesCopiedCounters) {
@@ -125,7 +127,7 @@ TEST_F(TextHeartbeatTest, TimerReadinessPublishesCopiedCounters) {
   heartbeat_.snapshot.cache_target_bytes = 65536;
   heartbeat_.snapshot.cache_additional_bytes = 64000;
   counters_.input_tokens = 42;
-  heartbeat_.snapshot.weight_activity = {2, 1, 64, 32, 4};
+  heartbeat_.snapshot.parameter_activity = {2, 1, 64, 32, 4};
   heartbeat_.snapshot.state_memory = {
       .reserved_bytes = 100,
       .committed_bytes = 60,
@@ -134,8 +136,8 @@ TEST_F(TextHeartbeatTest, TimerReadinessPublishesCopiedCounters) {
       .peak_bytes = 80,
       .released_bytes = 40,
   };
-  heartbeat_.snapshot.weight_memory = {200, 90, 30, 15, 50};
-  heartbeat_.snapshot.pool_memory.workspace.bytes_committed = 1234;
+  heartbeat_.snapshot.parameter_memory = {200, 90, 30, 15, 50};
+  heartbeat_.snapshot.pool_memory.workspace_committed_bytes = 1234;
   const uint32_t previous_count = wake_count_.load(std::memory_order_acquire);
   bool progress = false;
   IREE_ASSERT_OK(
@@ -192,7 +194,7 @@ TEST_F(TextHeartbeatTest, SamplingIsIndependentOfTimerAndRingRetention) {
   iree_string_builder_initialize(iree_allocator_system(), &output);
   IREE_EXPECT_OK(loom_serve_text_heartbeat_sample(
       &heartbeat_,
-      {&output, [](void* self, const loom_serve_telemetry_topic_t* topic,
+      {&output, [](void* self, const loom_runtime_telemetry_topic_t* topic,
                    const uint64_t* values) {
          EXPECT_STREQ(topic->name, "text");
          EXPECT_EQ(topic->version, 1u);
@@ -211,7 +213,7 @@ TEST_F(TextHeartbeatTest, SamplingIsIndependentOfTimerAndRingRetention) {
   EXPECT_NE(json.find("\"name\":\"pool_reserved\",\"unit\":\"tokens\","
                       "\"kind\":\"gauge\",\"value\":\"16\""),
             std::string::npos);
-  EXPECT_EQ(loom_serve_telemetry_stream_head(stream_), 0u);
+  EXPECT_EQ(loom_runtime_telemetry_stream_head(stream_), 0u);
   EXPECT_FALSE(loom_serve_text_heartbeat_is_pending(&heartbeat_));
   iree_string_builder_deinitialize(&output);
 }

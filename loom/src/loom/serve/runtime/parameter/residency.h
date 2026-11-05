@@ -96,9 +96,9 @@ void loom_serve_residency_group_free(loom_serve_residency_group_t* group);
 // Storage and loading activity owned by the immutable parameter group,
 // independent of invocation admission. Valid during source preparation and
 // failed-load retirement. NULL reports zero before group registration.
-loom_serve_memory_usage_t loom_serve_residency_group_statistics(
+loom_runtime_storage_usage_t loom_serve_residency_group_statistics(
     const loom_serve_residency_group_t* group);
-loom_serve_weight_activity_t loom_serve_residency_group_activity(
+loom_runtime_parameter_activity_t loom_serve_residency_group_activity(
     const loom_serve_residency_group_t* group);
 
 // Bank-owner retention, independent of invocation residency lifetimes. Applies
@@ -364,12 +364,12 @@ iree_status_t loom_serve_residency_deactivate(loom_serve_residency_t* residency,
 // Combined accounting for this working set. Shared groups appear in each
 // borrower's snapshot; summing borrower snapshots is not physical accounting.
 // Independent group peaks cannot establish a simultaneous working-set peak.
-loom_serve_memory_usage_t loom_serve_residency_statistics(
+loom_runtime_storage_usage_t loom_serve_residency_statistics(
     const loom_serve_residency_t* residency);
 
 // Copies cumulative submission counters across every registered weight plan.
 // Called on the shared activation owner; no plan is activated or retained.
-loom_serve_weight_activity_t loom_serve_residency_activity(
+loom_runtime_parameter_activity_t loom_serve_residency_activity(
     const loom_serve_residency_t* residency);
 
 // Copied on the serialized owner. Active means activation was enqueued, not
@@ -395,9 +395,9 @@ typedef struct loom_serve_residency_snapshot_t {
     uint64_t age_ns;
   } admission;
   // Parameter-only virtual accounting, available only with elastic backing.
-  loom_serve_memory_usage_t memory;
+  loom_runtime_storage_usage_t memory;
   // Cumulative activation and preparation work, independent of current backing.
-  loom_serve_weight_activity_t activity;
+  loom_runtime_parameter_activity_t activity;
 } loom_serve_residency_snapshot_t;
 
 // Copies current ownership and cumulative work without advancing admission or

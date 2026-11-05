@@ -371,7 +371,7 @@ TEST_F(SourceRecognitionModelTest, RepeatedOffersDoNotAdvanceSourceState) {
 TEST_F(SourceRecognitionModelTest, RowCapacityDenialPreservesPreparedRequest) {
   auto* pool = loom_serve_pool_memory(storage_owner_);
   auto* residency = loom_serve_recognition_model_residency(model_);
-  loom_serve_memory_statistics_t peer_statistics = {};
+  loom_runtime_storage_statistics_t peer_statistics = {};
   const auto release_peer = [](loom_serve_virtual_buffer_t* buffer) {
     IREE_EXPECT_OK(loom_serve_virtual_buffer_free(buffer));
   };

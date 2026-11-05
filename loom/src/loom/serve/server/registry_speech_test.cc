@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <thread>
@@ -15,6 +16,7 @@
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/runtime/telemetry/stream.h"
 #include "loom/serve/runtime/host/host.h"
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_registration.h"
@@ -24,12 +26,11 @@
 #include "loom/serve/service/speech/output.h"
 #include "loom/serve/service/speech/request.h"
 #include "loom/serve/service/speech/stream.h"
-#include "loom/serve/telemetry/record.h"
-#include "loom/serve/telemetry/stream.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/service_application.h"
 #include "loom/serve/transport/http/listener.h"
 #include "loom/serve/transport/http/server.h"
+#include "loom/service/telemetry/record.h"
 #include "loom/util/json.h"
 #include "loom/util/stream.h"
 
@@ -137,17 +138,18 @@ class RegistrySpeechTest : public ::testing::Test {
             status, service.advance(service.self,
                                     loom_serve_registry_service_flags(Model()),
                                     &progress));
-        loom_serve_telemetry_record_t record;
-        loom_serve_telemetry_read_t result;
-        while ((result = loom_serve_telemetry_stream_read(
+        loom_runtime_telemetry_record_t record;
+        loom_runtime_telemetry_read_t result;
+        while ((result = loom_runtime_telemetry_stream_read(
                     service.telemetry.stream, &telemetry_cursor_, &record)) ==
-               LOOM_SERVE_TELEMETRY_READ_RECORD) {
-          if (record.event == &LOOM_SERVE_TELEMETRY_BATCH_SUBMIT) {
-            largest_batch_ =
-                std::max(largest_batch_, record.data.batch.requests);
+               LOOM_RUNTIME_TELEMETRY_READ_RECORD) {
+          if (record.event == &LOOM_SERVICE_TELEMETRY_BATCH_SUBMIT) {
+            loom_service_telemetry_batch_record_t batch;
+            std::memcpy(&batch, record.data.words, sizeof(batch));
+            largest_batch_ = std::max(largest_batch_, batch.requests);
           }
         }
-        EXPECT_EQ(result, LOOM_SERVE_TELEMETRY_READ_EMPTY);
+        EXPECT_EQ(result, LOOM_RUNTIME_TELEMETRY_READ_EMPTY);
       }
       bool registry_progress = false;
       if (iree_status_is_ok(status)) {

@@ -14,6 +14,7 @@
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_resolution.h"
 #include "loom/serve/service/service.h"
+#include "loom/service/telemetry/record.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -136,7 +137,7 @@ typedef struct loom_serve_registration_factory_t {
   iree_status_t (*create)(void* self,
                           const loom_serve_model_configuration_t* configuration,
                           loom_serve_wake_callback_t observer,
-                          loom_serve_telemetry_stream_t* stream,
+                          loom_runtime_telemetry_stream_t* stream,
                           iree_allocator_t host_allocator,
                           loom_serve_registration_t* out_registration);
   // Optional shared-resource failure query after a model operation fails.
@@ -217,12 +218,12 @@ typedef struct loom_serve_registered_model_t {
   // Copied scheduler observation for one response; never a readiness signal.
   loom_serve_service_snapshot_t snapshot;
   // Final work totals after service destruction, or zero before publication.
-  loom_serve_telemetry_counters_t counters;
+  loom_service_telemetry_counters_t counters;
   // Final duration distributions after service destruction, or zero before
   // publication. Separate from counters copied into compact event records.
-  loom_serve_telemetry_latency_t latency;
+  loom_service_telemetry_latency_t latency;
   // Owned history shared with the live service; identity survives preparation.
-  loom_serve_telemetry_stream_t* stream;
+  loom_runtime_telemetry_stream_t* stream;
   // Terminal load/release evidence, owned until removal or explicit retry.
   iree_status_t status;
   // Copied source diagnostics, independent of compiler and operation lifetimes.
@@ -420,13 +421,13 @@ uint64_t loom_serve_registry_preparation_duration_ns(
 // counters; unavailable totals are never presented as a complete partial sum.
 bool loom_serve_registry_counters(
     const loom_serve_registry_t* registry,
-    loom_serve_telemetry_counters_t* out_counters);
+    loom_service_telemetry_counters_t* out_counters);
 
 // Latency totals include removed incarnations. False means a borrowed
 // service omitted latency observations; the partial result must not be exposed
 // as a complete server distribution.
 bool loom_serve_registry_latency(const loom_serve_registry_t* registry,
-                                 loom_serve_telemetry_latency_t* out_latency);
+                                 loom_service_telemetry_latency_t* out_latency);
 
 #ifdef __cplusplus
 }  // extern "C"

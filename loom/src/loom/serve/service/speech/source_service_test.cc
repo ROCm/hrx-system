@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -32,7 +33,6 @@
 #include "loom/serve/service/speech/stream.h"
 #include "loom/serve/service/speech/voice.h"
 #include "loom/serve/service/speech/voice_load.h"
-#include "loom/serve/telemetry/latency.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/model.h"
 #include "loom/serve/testing/native_allocator.h"
@@ -40,6 +40,8 @@
 #include "loom/serve/testing/service_application.h"
 #include "loom/serve/testing/stalled_http_client.h"
 #include "loom/serve/testing/worker_gate.h"
+#include "loom/service/telemetry/latency.h"
+#include "loom/service/telemetry/record.h"
 
 IREE_FLAG(string, model_source, "", "Speech fixture bootstrap source.");
 
@@ -212,12 +214,14 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
                                       IREE_TIME_INFINITE_FUTURE);
       }
       IREE_ASSERT_OK(status);
-      loom_serve_telemetry_record_t record;
-      while (loom_serve_telemetry_stream_read(interface_.telemetry.stream,
-                                              &telemetry_cursor_, &record) ==
-             LOOM_SERVE_TELEMETRY_READ_RECORD) {
-        if (record.event == &LOOM_SERVE_TELEMETRY_BATCH_SUBMIT) {
-          largest_batch_ = std::max(largest_batch_, record.data.batch.requests);
+      loom_runtime_telemetry_record_t record;
+      while (loom_runtime_telemetry_stream_read(interface_.telemetry.stream,
+                                                &telemetry_cursor_, &record) ==
+             LOOM_RUNTIME_TELEMETRY_READ_RECORD) {
+        if (record.event == &LOOM_SERVICE_TELEMETRY_BATCH_SUBMIT) {
+          loom_service_telemetry_batch_record_t batch;
+          std::memcpy(&batch, record.data.words, sizeof(batch));
+          largest_batch_ = std::max(largest_batch_, batch.requests);
         }
       }
     }
@@ -421,7 +425,7 @@ TEST_P(SourceSpeechServiceTest, RowCapacityDenialLeavesParametersCold) {
   auto* storage_owner = loom_serve_device_group_pool_at(group_, 0);
   auto* pool = loom_serve_pool_memory(storage_owner);
   auto* residency = loom_serve_speech_model_residency(model_);
-  loom_serve_memory_statistics_t peer_statistics = {};
+  loom_runtime_storage_statistics_t peer_statistics = {};
   const auto release_peer = [](loom_serve_virtual_buffer_t* buffer) {
     IREE_EXPECT_OK(loom_serve_virtual_buffer_free(buffer));
   };
@@ -867,7 +871,7 @@ TEST_P(SourceSpeechServiceTest,
   EXPECT_EQ(interface.telemetry.counters->completed, 0u);
   EXPECT_EQ(ObservationCount(interface.telemetry.latency->first_output), 1u);
   EXPECT_EQ(ObservationCount(interface.telemetry.latency
-                                 ->outcomes[LOOM_SERVE_TELEMETRY_COMPLETED]),
+                                 ->outcomes[LOOM_SERVICE_TELEMETRY_COMPLETED]),
             0u);
   const linger reset = {1, 0};
   ASSERT_EQ(setsockopt(client, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
@@ -885,7 +889,7 @@ TEST_P(SourceSpeechServiceTest,
   EXPECT_EQ(interface.telemetry.counters->batches, 2u);
   EXPECT_FALSE(interface.is_pending(interface.self));
   EXPECT_EQ(ObservationCount(interface.telemetry.latency
-                                 ->outcomes[LOOM_SERVE_TELEMETRY_CANCELLED]),
+                                 ->outcomes[LOOM_SERVICE_TELEMETRY_CANCELLED]),
             1u);
   EXPECT_EQ(ObservationCount(interface.telemetry.latency->first_output), 1u);
   client = Send("POST", "/v1/audio/speech", Request());
@@ -894,7 +898,7 @@ TEST_P(SourceSpeechServiceTest,
       [&] { return interface.telemetry.counters->completed == 1; }));
   CheckAudio(Read(client), 17);
   EXPECT_EQ(ObservationCount(interface.telemetry.latency
-                                 ->outcomes[LOOM_SERVE_TELEMETRY_COMPLETED]),
+                                 ->outcomes[LOOM_SERVICE_TELEMETRY_COMPLETED]),
             1u);
   EXPECT_EQ(ObservationCount(interface.telemetry.latency->first_output), 2u);
 }

@@ -102,7 +102,7 @@ TEST_F(MemoryTest, UnknownPhysicalCapacityRequiresExplicitBudget) {
   const std::unique_ptr<loom_serve_memory_pool_t, decltype(release_pool)>
       selected_owner(selected, release_pool);
   EXPECT_EQ(loom_serve_memory_pool_limit(selected), kSlabSize);
-  loom_serve_memory_statistics_t statistics = {};
+  loom_runtime_storage_statistics_t statistics = {};
   loom_serve_virtual_buffer_t* reservation = nullptr;
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
       selected, geometry, kSlabSize, 256, &statistics, &reservation));
@@ -371,7 +371,7 @@ TEST_F(MemoryTest, LogicalExtentDoesNotAllocateDenseHostMetadata) {
   RecordProperty("reservation_bytes", std::to_string(sparse_length));
   const auto measure_reservation = [&](uint64_t length) {
     loom_serve_virtual_buffer_t* buffer = nullptr;
-    loom_serve_memory_statistics_t buffer_statistics = {};
+    loom_runtime_storage_statistics_t buffer_statistics = {};
     native.ResetAllocationMetrics();
     IREE_EXPECT_OK(loom_serve_virtual_buffer_allocate(
         pool, geometry, length, 256, &buffer_statistics, &buffer));

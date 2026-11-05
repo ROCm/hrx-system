@@ -17,7 +17,7 @@
 #include "loom/serve/service/text/readiness.h"
 #include "loom/serve/service/text/service.h"
 #include "loom/serve/service/text/service_capacity.h"
-#include "loom/serve/telemetry/tracing.h"
+#include "loom/service/telemetry/tracing.h"
 
 // Device work retained until readiness is consumed by the model owner.
 typedef enum loom_serve_text_work_e {

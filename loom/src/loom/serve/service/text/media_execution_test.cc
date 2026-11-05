@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdlib>
+#include <cstring>
 
 #include "loom/serve/service/finite/embedding/protocol.h"
 #include "loom/serve/service/text/epoch.h"
@@ -192,8 +193,8 @@ TEST_F(MediaExecutionTest, RaggedCohortConditionsPackedAndIsolatedTextChunks) {
        {Fingerprint(4), Fingerprint(1, 1), Fingerprint(9, 2), 2, 1},
        tokens[2]}};
   for (auto mode :
-       {LOOM_SERVE_TEXT_SCHEDULE_PACKED, LOOM_SERVE_TEXT_SCHEDULE_ISOLATED,
-        LOOM_SERVE_TEXT_SCHEDULE_MATCHED}) {
+       {LOOM_SERVICE_TEXT_SCHEDULE_PACKED, LOOM_SERVICE_TEXT_SCHEDULE_ISOLATED,
+        LOOM_SERVICE_TEXT_SCHEDULE_MATCHED}) {
     SCOPED_TRACE(mode);
     const loom_serve_text_epoch_options_t options = {
         .context_capacity = 96,
@@ -235,7 +236,7 @@ TEST_F(MediaExecutionTest, RaggedCohortConditionsPackedAndIsolatedTextChunks) {
         loom_serve_execution_frontier_t ready;
         IREE_ASSERT_OK(loom_serve_text_epoch_submit(
             model_, mode, &epoch, &continuation, nullptr, &ready));
-        if (mode == LOOM_SERVE_TEXT_SCHEDULE_MATCHED && chunk == 1 &&
+        if (mode == LOOM_SERVICE_TEXT_SCHEDULE_MATCHED && chunk == 1 &&
             epoch.cursor == 1) {
           // Both image requests have submitted their last readers. Their
           // metadata and result owner may disappear before text completion.
@@ -243,7 +244,7 @@ TEST_F(MediaExecutionTest, RaggedCohortConditionsPackedAndIsolatedTextChunks) {
         }
         ASSERT_NO_FATAL_FAILURE(Wait(ready));
         IREE_ASSERT_OK(loom_serve_text_epoch_complete(model_, mode, &epoch));
-      } while (mode != LOOM_SERVE_TEXT_SCHEDULE_PACKED && epoch.cursor < 3);
+      } while (mode != LOOM_SERVICE_TEXT_SCHEDULE_PACKED && epoch.cursor < 3);
       for (size_t row = 0; row < 3; ++row) {
         EXPECT_EQ(epoch.results[row].known_count, scheduled[row].token_count);
         offsets[row] += scheduled[row].token_count;

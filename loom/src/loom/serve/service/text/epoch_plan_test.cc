@@ -27,7 +27,8 @@ TEST(TextEpochPlanTest, KnownAndSpeculativeContinuationsPreserveSourceFacts) {
   const loom_serve_text_span_t first[] = {
       {1, 2, tokens, 0},
       {0, 4, tokens + 2,
-       LOOM_SERVE_TEXT_SPAN_FLAG_SELECT | LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE},
+       LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT |
+           LOOM_SERVICE_TEXT_SPAN_FLAG_PROPOSE},
   };
   const uint32_t limits[] = {0, 8};
   EXPECT_EQ(loom_serve_text_epoch_plan_write(rows, plan_bytes, input_bytes, 2,
@@ -47,8 +48,9 @@ TEST(TextEpochPlanTest, KnownAndSpeculativeContinuationsPreserveSourceFacts) {
   EXPECT_EQ(field(1, TEXT_PLAN_FIELD_OUTPUT_LIMIT), 8u);
   const loom_serve_text_span_t next[] = {
       {0, 4, nullptr,
-       LOOM_SERVE_TEXT_SPAN_FLAG_SELECT | LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE},
-      {1, 1, tokens + 3, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT},
+       LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT |
+           LOOM_SERVICE_TEXT_SPAN_FLAG_PROPOSE},
+      {1, 1, tokens + 3, LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT},
   };
   const uint32_t next_limits[] = {8, 0};
   const uint32_t first_indices[] = {1, 0};

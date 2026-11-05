@@ -23,7 +23,7 @@ iree_host_size_t loom_serve_text_epoch_plan_write(
   for (iree_host_size_t i = 0; i < span_count; ++i) {
     const loom_serve_text_span_t* span = &spans[i];
     const bool generates =
-        iree_any_bit_set(span->flags, LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE);
+        iree_any_bit_set(span->flags, LOOM_SERVICE_TEXT_SPAN_FLAG_PROPOSE);
     const iree_host_size_t input_count =
         span->token_ids && !(first_indices && generates)
             ? (generates ? 1 : span->token_count)

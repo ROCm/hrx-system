@@ -12,8 +12,8 @@
 
 namespace {
 
-constexpr auto kSelect = LOOM_SERVE_TEXT_SPAN_FLAG_SELECT;
-constexpr auto kPropose = LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE;
+constexpr auto kSelect = LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT;
+constexpr auto kPropose = LOOM_SERVICE_TEXT_SPAN_FLAG_PROPOSE;
 
 class Epoch : public loom_serve_text_epoch_t {
  public:
@@ -164,7 +164,7 @@ TEST(TextEpochTest, ContinuationMixesPromptTailsAndBoundedVerifiers) {
   EXPECT_EQ(next.spans[2].media, &media);
   EXPECT_EQ(next.output_limits[2], 0);
 
-  options.packing_mode = LOOM_SERVE_TEXT_PACKING_SEPARATE;
+  options.packing_mode = LOOM_SERVICE_TEXT_PACKING_SEPARATE;
   loom_serve_text_epoch_prepare(&options, rows, 13, &plan, scheduled, &epoch,
                                 &next);
   ASSERT_EQ(next.span_count, 2);
@@ -238,8 +238,8 @@ TEST(TextEpochTest, ContinuationCapacityTracksItsIndependentlySelectedBucket) {
 
 TEST(TextEpochTest, IsolatedStagesDoNotClaimPackedCapacity) {
   const loom_serve_packing_shape_t shape = {16, 4};
-  for (auto mode :
-       {LOOM_SERVE_TEXT_SCHEDULE_ISOLATED, LOOM_SERVE_TEXT_SCHEDULE_MATCHED}) {
+  for (auto mode : {LOOM_SERVICE_TEXT_SCHEDULE_ISOLATED,
+                    LOOM_SERVICE_TEXT_SCHEDULE_MATCHED}) {
     const loom_serve_text_epoch_options_t options = {
         .context_capacity = 64,
         .chunk_size = 8,
@@ -475,8 +475,8 @@ TEST(TextEpochTest, CompactContinuationMatchesResidentDomainRotation) {
           {0, 0}, {width, width}, {1, 1}, {64, 1}};
       for (size_t start = 0; start < 5; ++start) {
         for (bool pressured : {false, true}) {
-          for (auto mode : {LOOM_SERVE_TEXT_PACKING_MIXED,
-                            LOOM_SERVE_TEXT_PACKING_SEPARATE}) {
+          for (auto mode : {LOOM_SERVICE_TEXT_PACKING_MIXED,
+                            LOOM_SERVICE_TEXT_PACKING_SEPARATE}) {
             SCOPED_TRACE(::testing::Message()
                          << width << "/" << layout << "/" << start << "/"
                          << pressured << "/" << mode);
@@ -498,7 +498,7 @@ TEST(TextEpochTest, CompactContinuationMatchesResidentDomainRotation) {
                 break;
               }
             };
-            if (mode == LOOM_SERVE_TEXT_PACKING_SEPARATE) {
+            if (mode == LOOM_SERVICE_TEXT_PACKING_SEPARATE) {
               separate(ready, start);
             }
             size_t minima = 0;
@@ -545,7 +545,7 @@ TEST(TextEpochTest, CompactContinuationMatchesResidentDomainRotation) {
                 following[span.row_index] = {width, width};
               }
             }
-            if (mode == LOOM_SERVE_TEXT_PACKING_SEPARATE) {
+            if (mode == LOOM_SERVICE_TEXT_PACKING_SEPARATE) {
               separate(following, continuation_start);
             }
             loom_serve_packed_span_t expected[5];

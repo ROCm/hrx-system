@@ -77,7 +77,7 @@ class RelocationTest : public ::testing::Test {
   // Physical owner of the sparse plane reservation.
   loom_serve_memory_pool_t* pool = nullptr;
   // Mutable state accounting, independent of other pool consumers.
-  loom_serve_memory_statistics_t statistics = {};
+  loom_runtime_storage_statistics_t statistics = {};
   // Source and destination allocation with stable identity.
   loom_serve_virtual_buffer_t* buffer = nullptr;
   // Whole exported view capturing every relocation and transfer reference.
@@ -156,7 +156,7 @@ TEST_F(RelocationTest, RepeatedPlanesCrossBatchAndAddressBoundaries) {
   // allocation boundary exercised by the hold.
   const auto before_filler = loom_serve_memory_pool_statistics(pool);
   ASSERT_GT(before_filler.cached_bytes, 0u);
-  loom_serve_memory_statistics_t filler_statistics = {0};
+  loom_runtime_storage_statistics_t filler_statistics = {0};
   loom_serve_virtual_buffer_t* filler = nullptr;
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
       pool, loom_serve_pool_state_geometry(storage_owner),

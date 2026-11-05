@@ -21,10 +21,10 @@
 #include "loom/serve/server/resources.h"
 #include "loom/serve/service/recognition/model.h"
 #include "loom/serve/service/recognition/stream.h"
-#include "loom/serve/telemetry/record.h"
 #include "loom/serve/testing/native_allocator.h"
 #include "loom/serve/testing/service_application.h"
 #include "loom/serve/testing/worker_gate.h"
+#include "loom/service/telemetry/record.h"
 
 IREE_FLAG(string, model_source, "", "Recognition fixture bootstrap source.");
 IREE_FLAG(int32_t, test_workers, 1,
@@ -158,7 +158,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
       }
       return iree_ok_status();
     };
-    observed.weight_activity = nullptr;
+    observed.parameter_activity = nullptr;
     const loom_serve_recognition_stream_service_options_t service_options = {
         .name = IREE_SV("recognition"),
         .request_limit = 1024,
@@ -276,7 +276,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
                 LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT) {
     const loom_serve_recognition_request_t request = {.outputs = outputs};
     const loom_serve_recognition_completion_t completion = {
-        this, [](void* self, loom_serve_telemetry_outcome_t outcome,
+        this, [](void* self, loom_service_telemetry_outcome_t outcome,
                  const iree_status_t status) {
           auto* test = static_cast<SourceRecognitionStreamTest*>(self);
           ++test->end_count_;
@@ -356,8 +356,8 @@ class SourceRecognitionStreamTest : public ::testing::Test {
   // Owner completion notifications, independent of retained caller handles.
   size_t end_count_ = 0;
   // Most recent producer-established outcome supplied to completion.
-  loom_serve_telemetry_outcome_t last_end_outcome_ =
-      LOOM_SERVE_TELEMETRY_COMPLETED;
+  loom_service_telemetry_outcome_t last_end_outcome_ =
+      LOOM_SERVICE_TELEMETRY_COMPLETED;
   // Borrowed completion status observed without retaining the status payload.
   iree_status_code_t last_end_code_ = IREE_STATUS_OK;
   // Wake-driven test owner; no sleeps or deadline-based readiness guesses.
@@ -571,7 +571,7 @@ TEST_F(SourceRecognitionStreamTest, ShutdownCollectsAcceptedOriginalMembers) {
   EXPECT_EQ(released_[0], 1u);
   EXPECT_EQ(submitted_, 1u);
   EXPECT_EQ(end_count_, 1u);
-  EXPECT_EQ(last_end_outcome_, LOOM_SERVE_TELEMETRY_CANCELLED);
+  EXPECT_EQ(last_end_outcome_, LOOM_SERVICE_TELEMETRY_CANCELLED);
   EXPECT_EQ(last_end_code_, IREE_STATUS_CANCELLED);
   ASSERT_NO_FATAL_FAILURE(RetireModel());
   EXPECT_TRUE(loom_serve_recognition_stream_is_complete(stream));
@@ -602,7 +602,7 @@ TEST_F(SourceRecognitionStreamTest,
   ASSERT_NO_FATAL_FAILURE(Settle());
   EXPECT_EQ(released_[0], 1u);
   EXPECT_EQ(end_count_, 1u);
-  EXPECT_EQ(last_end_outcome_, LOOM_SERVE_TELEMETRY_COMPLETED);
+  EXPECT_EQ(last_end_outcome_, LOOM_SERVICE_TELEMETRY_COMPLETED);
   EXPECT_EQ(last_end_code_, IREE_STATUS_OK);
   EXPECT_FALSE(loom_serve_recognition_stream_is_complete(first));
 
@@ -658,7 +658,7 @@ TEST_F(SourceRecognitionStreamTest, ClosedCallerRetainsAcceptedInputBorrow) {
   EXPECT_EQ(submitted_, 0u);
   EXPECT_EQ(released_[0], 1u);
   EXPECT_EQ(end_count_, 1u);
-  EXPECT_EQ(last_end_outcome_, LOOM_SERVE_TELEMETRY_CANCELLED);
+  EXPECT_EQ(last_end_outcome_, LOOM_SERVICE_TELEMETRY_CANCELLED);
   EXPECT_EQ(last_end_code_, IREE_STATUS_CANCELLED);
 }
 
@@ -815,7 +815,7 @@ TEST_F(SourceRecognitionStreamTest,
   EXPECT_EQ(collected_[0].load(), 1u);
   EXPECT_EQ(released_[0], 1u);
   EXPECT_EQ(end_count_, 1u);
-  EXPECT_EQ(last_end_outcome_, LOOM_SERVE_TELEMETRY_CANCELLED);
+  EXPECT_EQ(last_end_outcome_, LOOM_SERVICE_TELEMETRY_CANCELLED);
 }
 
 TEST_F(SourceRecognitionStreamTest, ExplicitSelectionAndEmptyActivityEof) {
@@ -917,7 +917,7 @@ TEST_F(SourceRecognitionStreamTest,
   EXPECT_TRUE(loom_serve_recognition_stream_is_complete(stream));
   EXPECT_EQ(released_[0], 0u);
   EXPECT_EQ(end_count_, 1u);
-  EXPECT_EQ(last_end_outcome_, LOOM_SERVE_TELEMETRY_FAILED);
+  EXPECT_EQ(last_end_outcome_, LOOM_SERVICE_TELEMETRY_FAILED);
   EXPECT_EQ(last_end_code_, IREE_STATUS_ABORTED);
   ASSERT_NO_FATAL_FAILURE(RetireModel());
   EXPECT_EQ(end_count_, 1u);
@@ -950,7 +950,7 @@ TEST_F(SourceRecognitionStreamTest,
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED, AdvanceToFailure());
   ASSERT_NO_FATAL_FAILURE(RetireModel());
   EXPECT_EQ(end_count_, 1u);
-  EXPECT_EQ(last_end_outcome_, LOOM_SERVE_TELEMETRY_FAILED);
+  EXPECT_EQ(last_end_outcome_, LOOM_SERVICE_TELEMETRY_FAILED);
   EXPECT_EQ(last_end_code_, IREE_STATUS_ABORTED);
   EXPECT_TRUE(loom_serve_recognition_stream_is_complete(stream));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,

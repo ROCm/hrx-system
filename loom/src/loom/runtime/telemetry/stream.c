@@ -4,30 +4,30 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/serve/telemetry/stream.h"
+#include "loom/runtime/telemetry/stream.h"
 
 #include <string.h>
 
 #include "iree/base/internal/atomics.h"
 
-static_assert(sizeof(loom_serve_telemetry_record_t) % sizeof(uint64_t) == 0,
+static_assert(sizeof(loom_runtime_telemetry_record_t) % sizeof(uint64_t) == 0,
               "record storage is a whole number of atomic words");
 enum {
-  RECORD_WORDS = sizeof(loom_serve_telemetry_record_t) / sizeof(uint64_t),
+  RECORD_WORDS = sizeof(loom_runtime_telemetry_record_t) / sizeof(uint64_t),
 };
 
-typedef struct loom_serve_telemetry_slot_t {
+typedef struct loom_runtime_telemetry_slot_t {
   // Odd while being overwritten; even = 2 * (absolute position + 1).
   iree_atomic_uint64_t sequence;
   // Atomic payload prevents a C data race even when a reader loses its slot.
   iree_atomic_uint64_t words[RECORD_WORDS];
-} loom_serve_telemetry_slot_t;
+} loom_runtime_telemetry_slot_t;
 
-struct loom_serve_telemetry_stream_t {
+struct loom_runtime_telemetry_stream_t {
   // Allocator owning this object and its contiguous bounded slots.
   iree_allocator_t host_allocator;
   // Immutable lifetime identity, independent of physical wrap or model name.
-  loom_serve_telemetry_identity_t identity;
+  loom_runtime_telemetry_identity_t identity;
   // Power-of-two physical record capacity.
   iree_host_size_t capacity;
   // Writer-owned next position, never modified by a reader.
@@ -35,18 +35,18 @@ struct loom_serve_telemetry_stream_t {
   // Published one-past-last position, independently sampled by consumers.
   iree_atomic_uint64_t head;
   // Fixed-size slots addressed by the low bits of absolute positions.
-  loom_serve_telemetry_slot_t slots[];
+  loom_runtime_telemetry_slot_t slots[];
 };
 
 static iree_atomic_uint64_t telemetry_ordinal = IREE_ATOMIC_VAR_INIT(0);
 
-iree_status_t loom_serve_telemetry_stream_allocate(
+iree_status_t loom_runtime_telemetry_stream_allocate(
     iree_host_size_t capacity, iree_allocator_t host_allocator,
-    loom_serve_telemetry_stream_t** out_stream) {
+    loom_runtime_telemetry_stream_t** out_stream) {
   *out_stream = NULL;
   if (!capacity || (capacity & (capacity - 1)) ||
-      capacity > (SIZE_MAX - sizeof(loom_serve_telemetry_stream_t)) /
-                     sizeof(loom_serve_telemetry_slot_t)) {
+      capacity > (SIZE_MAX - sizeof(loom_runtime_telemetry_stream_t)) /
+                     sizeof(loom_runtime_telemetry_slot_t)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "telemetry capacity must be a representable power "
                             "of two");
@@ -55,7 +55,7 @@ iree_status_t loom_serve_telemetry_stream_allocate(
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "telemetry requires lock-free 64-bit atomics");
   }
-  loom_serve_telemetry_stream_t* stream = NULL;
+  loom_runtime_telemetry_stream_t* stream = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       host_allocator, sizeof(*stream) + capacity * sizeof(*stream->slots),
       (void**)&stream));
@@ -69,33 +69,34 @@ iree_status_t loom_serve_telemetry_stream_allocate(
   return iree_ok_status();
 }
 
-void loom_serve_telemetry_stream_free(loom_serve_telemetry_stream_t* stream) {
+void loom_runtime_telemetry_stream_free(
+    loom_runtime_telemetry_stream_t* stream) {
   if (stream) {
     iree_allocator_free(stream->host_allocator, stream);
   }
 }
 
-loom_serve_telemetry_identity_t loom_serve_telemetry_stream_identity(
-    const loom_serve_telemetry_stream_t* stream) {
+loom_runtime_telemetry_identity_t loom_runtime_telemetry_stream_identity(
+    const loom_runtime_telemetry_stream_t* stream) {
   return stream->identity;
 }
 
-uint64_t loom_serve_telemetry_stream_head(
-    const loom_serve_telemetry_stream_t* stream) {
+uint64_t loom_runtime_telemetry_stream_head(
+    const loom_runtime_telemetry_stream_t* stream) {
   return iree_atomic_load(&stream->head, iree_memory_order_acquire);
 }
 
-iree_host_size_t loom_serve_telemetry_stream_capacity(
-    const loom_serve_telemetry_stream_t* stream) {
+iree_host_size_t loom_runtime_telemetry_stream_capacity(
+    const loom_runtime_telemetry_stream_t* stream) {
   return stream->capacity;
 }
 
-void loom_serve_telemetry_stream_append(
-    loom_serve_telemetry_stream_t* stream,
-    const loom_serve_telemetry_record_t* record) {
+void loom_runtime_telemetry_stream_append(
+    loom_runtime_telemetry_stream_t* stream,
+    const loom_runtime_telemetry_record_t* record) {
   const uint64_t position = stream->next++;
   IREE_ASSERT(position < INT64_MAX - 1);
-  loom_serve_telemetry_slot_t* slot =
+  loom_runtime_telemetry_slot_t* slot =
       &stream->slots[position & (stream->capacity - 1)];
   iree_atomic_store(&slot->sequence, position * 2 + 1,
                     iree_memory_order_relaxed);
@@ -112,24 +113,24 @@ void loom_serve_telemetry_stream_append(
   iree_atomic_store(&stream->head, position + 1, iree_memory_order_release);
 }
 
-loom_serve_telemetry_read_t loom_serve_telemetry_stream_read(
-    const loom_serve_telemetry_stream_t* stream, uint64_t* cursor,
-    loom_serve_telemetry_record_t* out_record) {
-  const uint64_t head = loom_serve_telemetry_stream_head(stream);
+loom_runtime_telemetry_read_t loom_runtime_telemetry_stream_read(
+    const loom_runtime_telemetry_stream_t* stream, uint64_t* cursor,
+    loom_runtime_telemetry_record_t* out_record) {
+  const uint64_t head = loom_runtime_telemetry_stream_head(stream);
   if (*cursor >= head) {
-    return LOOM_SERVE_TELEMETRY_READ_EMPTY;
+    return LOOM_RUNTIME_TELEMETRY_READ_EMPTY;
   }
   const uint64_t oldest = head > stream->capacity ? head - stream->capacity : 0;
   if (*cursor < oldest) {
     *cursor = oldest;
-    return LOOM_SERVE_TELEMETRY_READ_GAP;
+    return LOOM_RUNTIME_TELEMETRY_READ_GAP;
   }
-  const loom_serve_telemetry_slot_t* slot =
+  const loom_runtime_telemetry_slot_t* slot =
       &stream->slots[*cursor & (stream->capacity - 1)];
   const uint64_t sequence = (*cursor + 1) * 2;
   if (iree_atomic_load(&slot->sequence, iree_memory_order_acquire) !=
       sequence) {
-    return LOOM_SERVE_TELEMETRY_READ_BUSY;
+    return LOOM_RUNTIME_TELEMETRY_READ_BUSY;
   }
   for (iree_host_size_t i = 0; i < RECORD_WORDS; ++i) {
     const uint64_t word =
@@ -138,8 +139,8 @@ loom_serve_telemetry_read_t loom_serve_telemetry_stream_read(
   }
   if (iree_atomic_load(&slot->sequence, iree_memory_order_acquire) !=
       sequence) {
-    return LOOM_SERVE_TELEMETRY_READ_BUSY;
+    return LOOM_RUNTIME_TELEMETRY_READ_BUSY;
   }
   ++*cursor;
-  return LOOM_SERVE_TELEMETRY_READ_RECORD;
+  return LOOM_RUNTIME_TELEMETRY_READ_RECORD;
 }

@@ -37,9 +37,9 @@ typedef uint32_t loom_serve_text_state_flags_t;
 
 // Next owner action after the current maintenance frontier succeeds.
 typedef enum loom_serve_text_trim_phase_e {
-  LOOM_SERVE_TEXT_TRIM_COMPLETE,
-  LOOM_SERVE_TEXT_TRIM_RELOCATE,
-  LOOM_SERVE_TEXT_TRIM_RELEASE,
+  LOOM_SERVICE_TEXT_TRIM_COMPLETE,
+  LOOM_SERVICE_TEXT_TRIM_RELOCATE,
+  LOOM_SERVICE_TEXT_TRIM_RELEASE,
 } loom_serve_text_trim_phase_t;
 
 typedef struct loom_serve_text_state_t loom_serve_text_state_t;
@@ -167,7 +167,7 @@ struct loom_serve_text_state_t {
     // Borrowed shared allocation domain for state and model parameters.
     loom_serve_memory_pool_t* pool;
     // Mutable virtual state only, excluding weights and execution workspace.
-    loom_serve_memory_statistics_t statistics;
+    loom_runtime_storage_statistics_t statistics;
     // Native backing changes exclude state mutation through their readiness.
     struct {
       // Owned native borrower, joined separately from failed queue readiness.

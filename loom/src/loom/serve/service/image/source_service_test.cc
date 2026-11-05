@@ -11,6 +11,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -27,6 +28,8 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
 #include "iree/vm/buffer.h"
+#include "loom/runtime/telemetry/field.h"
+#include "loom/runtime/telemetry/stream.h"
 #include "loom/serve/runtime/program/package.h"
 #include "loom/serve/runtime/program/variant_pool.h"
 #include "loom/serve/server/model_registration.h"
@@ -34,6 +37,7 @@
 #include "loom/serve/service/image/model.h"
 #include "loom/serve/service/image/output.h"
 #include "loom/serve/service/image/service.h"
+#include "loom/serve/telemetry/record.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/model.h"
 #include "loom/serve/testing/model_wait.h"
@@ -194,7 +198,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
 
   iree_status_t PrepareSingle(iree_string_view_t body, uint32_t width,
                               uint32_t height,
-                              loom_serve_image_prepared_t* out_prepared) {
+                              loom_service_image_prepared_t* out_prepared) {
     ImageRequest input;
     IREE_RETURN_IF_ERROR(input.Initialize(body, width, height));
     loom_serve_prepared_request_t request = {};
@@ -575,6 +579,52 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     // Two cohorts, not three serial images, each using the same source command.
     EXPECT_EQ(interface.telemetry.counters->batches, GetParam() ? 4u : 2u);
     EXPECT_STREQ(interface.snapshot(interface.self).phase, "idle");
+    std::vector<loom_runtime_telemetry_record_t> prepared_records;
+    uint64_t cursor = 0;
+    const auto head =
+        loom_runtime_telemetry_stream_head(interface.telemetry.stream);
+    while (cursor < head) {
+      loom_runtime_telemetry_record_t record;
+      ASSERT_EQ(loom_runtime_telemetry_stream_read(interface.telemetry.stream,
+                                                   &cursor, &record),
+                LOOM_RUNTIME_TELEMETRY_READ_RECORD);
+      if (std::strcmp(record.event->name, "image_prepared") == 0) {
+        prepared_records.push_back(record);
+      }
+    }
+    service.reset();
+    IREE_ASSERT_OK(loom_serve_image_model_free(model_));
+    model_ = nullptr;
+    ASSERT_EQ(prepared_records.size(), 3u);
+    for (const auto& record : prepared_records) {
+      loom_service_image_prepared_t expected;
+      std::memcpy(&expected, record.data.words, sizeof(expected));
+      IREE_ASSERT_OK(record.event->read_fields(
+          &record,
+          {&expected, [](void* self, iree_host_size_t count,
+                         const loom_runtime_telemetry_field_t* fields) {
+             const auto& expected =
+                 *static_cast<loom_service_image_prepared_t*>(self);
+             EXPECT_EQ(count, 3u);
+             if (count == 3) {
+               EXPECT_EQ(fields[0].value.uint64_value, expected.stage);
+               EXPECT_EQ(fields[1].kind, LOOM_RUNTIME_TELEMETRY_FIELD_INT64);
+               EXPECT_EQ(fields[1].value.int64_value, expected.tag);
+               EXPECT_EQ(fields[2].value.uint64_value, expected.input_bytes);
+             }
+             return iree_ok_status();
+           }}));
+      iree_string_builder_t output;
+      iree_string_builder_initialize(host_allocator_, &output);
+      IREE_ASSERT_OK(loom_serve_telemetry_record_format(0, &record, &output));
+      iree_string_view_t tag;
+      IREE_ASSERT_OK(iree_json_lookup_object_value(
+          iree_string_builder_view(&output), IREE_SV("tag"), &tag));
+      int64_t value = 0;
+      IREE_ASSERT_OK(iree_json_parse_int64(tag, &value));
+      EXPECT_EQ(value, expected.tag);
+      iree_string_builder_deinitialize(&output);
+    }
   }
 
   // Allocator for model, transport and expected encoded output.
@@ -603,7 +653,7 @@ TEST_P(SourceImageServiceTest,
        UploadedExecutionChangesPartsAndPixelsWithoutRelinking) {
   ASSERT_NO_FATAL_FAILURE(CreateStandaloneModel());
   IREE_ASSERT_OK(loom_serve_image_model_activate(model_));
-  const auto weights = loom_serve_image_model_weight_activity(model_);
+  const auto weights = loom_serve_image_model_parameter_activity(model_);
   Start();
   const auto inventory = Read(Send("GET", "/v1/models/variants", {},
                                    "X-Loom-Model: fixture-image\r\n"));
@@ -702,7 +752,7 @@ TEST_P(SourceImageServiceTest,
   generate(1);
   loom_serve_http_server_request_stop(server_);
   IREE_ASSERT_OK(http_.Join());
-  const auto retained = loom_serve_image_model_weight_activity(model_);
+  const auto retained = loom_serve_image_model_parameter_activity(model_);
   EXPECT_EQ(retained.read_bytes, weights.read_bytes);
   EXPECT_EQ(retained.prepared_bytes, weights.prepared_bytes);
   EXPECT_EQ(retained.activations, weights.activations);
@@ -826,7 +876,7 @@ TEST_P(SourceImageServiceTest, PreparedShapePinsCodeAcrossSelectionAndRemoval) {
                 expected[i]);
     }
   };
-  loom_serve_image_prepared_t prepared;
+  loom_service_image_prepared_t prepared;
   IREE_ASSERT_OK(
       PrepareSingle(IREE_SV(R"({"prompt":"aba","seed":1})"), 15, 9, &prepared));
   IREE_ASSERT_OK(update.select(update.self, candidate.get()));
@@ -948,7 +998,7 @@ TEST_P(SourceImageServiceTest, SourcePixelsAndHttpPngPreserveRequestIdentity) {
       loom_serve_residency_frontier(loom_serve_image_model_residency(model_));
   EXPECT_EQ(loaded.values[0], 0u);
   EXPECT_EQ(loaded.values[1], 0u);
-  loom_serve_image_prepared_t prepared;
+  loom_service_image_prepared_t prepared;
   IREE_ASSERT_OK(
       PrepareSingle(IREE_SV(R"({"prompt":"x"})"), kWidth, kHeight, &prepared));
   EXPECT_EQ(prepared.stage, 0u);
@@ -1271,7 +1321,7 @@ TEST_P(SourceImageServiceTest, IndependentLogReadersCannotBlockColdImageWork) {
   EXPECT_NE(events.find(R"("event":"image_prepared")"), std::string::npos);
   EXPECT_NE(events.find(R"("tag":32,"input_bytes":)"), std::string::npos);
   EXPECT_NE(events.find(R"("event":"image_generated")"), std::string::npos);
-  EXPECT_NE(events.find(R"("event":"weight_activity")"), std::string::npos);
+  EXPECT_NE(events.find(R"("event":"parameter_activity")"), std::string::npos);
   EXPECT_NE(
       events.find(
           R"("activations":0,"deactivations":0,"read_bytes":0,"prepared_bytes":0,"groups":0)"),
@@ -1554,7 +1604,7 @@ TEST_P(SourceImageServiceTest, StoppingDeviceImageSkipsEncoding) {
 
 TEST_P(SourceImageServiceTest, FailedPartReadinessPreservesActualRetirement) {
   ASSERT_NO_FATAL_FAILURE(CreateStandaloneModel());
-  loom_serve_image_prepared_t prepared;
+  loom_service_image_prepared_t prepared;
   IREE_ASSERT_OK(PrepareSingle(IREE_SV(R"({"prompt":"aba","seed":1})"), kWidth,
                                kHeight, &prepared));
   const auto generator = loom_serve_image_model_generator(model_);
@@ -1632,7 +1682,7 @@ class ImageSpecializationTest : public SourceImageServiceTest {
 
   void Run(uint32_t width, uint32_t height, bool reuse) {
     const auto before = compiler_allocations_.load();
-    loom_serve_image_prepared_t prepared;
+    loom_service_image_prepared_t prepared;
     iree_const_byte_span_t rgb;
     ImageRequest input;
     IREE_ASSERT_OK(input.Initialize(IREE_SV(R"({"prompt":"aba","seed":1})"),
@@ -1696,7 +1746,7 @@ class ImageSpecializationTest : public SourceImageServiceTest {
     EXPECT_EQ(prepared.requests[0].units, 1u);
     EXPECT_EQ(prepared.requests[0].tag, prepared.requests[1].tag);
     const iree_host_size_t lengths[] = {kPixels * 12, kPixels * 12};
-    loom_serve_image_prepared_t batch;
+    loom_service_image_prepared_t batch;
     IREE_ASSERT_OK(loom_serve_image_model_prepare_batch(
         model_, prepared.requests.size(), prepared.requests.data(), lengths,
         &batch));
@@ -1790,7 +1840,7 @@ TEST_P(ImageSpecializationTest, CohortPrivateValuesSurvivePartsAndReuse) {
 TEST_P(ImageSpecializationTest, PeerAdmissionRetainsWholeInvocationWorkingSet) {
   constexpr uint32_t kExtent = 40;
   const auto prepare = [this] {
-    loom_serve_image_prepared_t prepared;
+    loom_service_image_prepared_t prepared;
     IREE_ASSERT_OK(PrepareSingle(IREE_SV(R"({"prompt":"aba","seed":1})"),
                                  kExtent, kExtent, &prepared));
     prepared_ = true;
@@ -1867,7 +1917,7 @@ TEST_P(ImageSpecializationTest, CancellationJoinsAcceptedCompilerBeforeReuse) {
   ASSERT_NO_FATAL_FAILURE(
       CreateStandaloneModel({2, 16 * 1024 * 1024}, {this, Allocate}));
   loom_serve_image_model_set_observer(model_, {Wake, this});
-  loom_serve_image_prepared_t prepared;
+  loom_service_image_prepared_t prepared;
   IREE_ASSERT_OK(
       PrepareSingle(IREE_SV(R"({"prompt":"aba","seed":1})"), 15, 9, &prepared));
   prepared_ = true;

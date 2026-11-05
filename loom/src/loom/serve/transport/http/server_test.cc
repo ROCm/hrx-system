@@ -19,8 +19,9 @@
 #include "iree/async/proactor.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/serve/telemetry/stream.h"
+#include "loom/runtime/telemetry/stream.h"
 #include "loom/serve/transport/http/listener.h"
+#include "loom/service/telemetry/record.h"
 
 namespace {
 
@@ -415,16 +416,18 @@ TEST_F(HttpServerTest, DiagnosticsOwnMessageAfterStatusRetires) {
   iree_status_free(status);
   const auto* stream = loom_serve_http_server_diagnostics(server_);
   uint64_t cursor = 1;
-  loom_serve_telemetry_record_t record;
-  ASSERT_EQ(loom_serve_telemetry_stream_read(stream, &cursor, &record),
-            LOOM_SERVE_TELEMETRY_READ_RECORD);
-  EXPECT_EQ(record.event, &LOOM_SERVE_TELEMETRY_ERROR);
-  EXPECT_EQ(record.data.error.code, IREE_STATUS_INVALID_ARGUMENT);
+  loom_runtime_telemetry_record_t record;
+  ASSERT_EQ(loom_runtime_telemetry_stream_read(stream, &cursor, &record),
+            LOOM_RUNTIME_TELEMETRY_READ_RECORD);
+  EXPECT_EQ(record.event, &LOOM_SERVICE_TELEMETRY_ERROR);
+  loom_service_telemetry_diagnostic_t diagnostic;
+  std::memcpy(&diagnostic, record.data.words, sizeof(diagnostic));
+  EXPECT_EQ(diagnostic.code, IREE_STATUS_INVALID_ARGUMENT);
 #if (IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS)
-  EXPECT_EQ(std::string(record.data.error.message, record.data.error.length),
+  EXPECT_EQ(std::string(diagnostic.message, diagnostic.length),
             "malformed model selector");
 #else
-  EXPECT_EQ(record.data.error.length, 0u);
+  EXPECT_EQ(diagnostic.length, 0u);
 #endif
 }
 
