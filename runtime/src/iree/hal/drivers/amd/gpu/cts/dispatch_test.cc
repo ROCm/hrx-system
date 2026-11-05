@@ -1211,7 +1211,7 @@ TEST_P(GpuNativeDispatchTest,
 }
 
 TEST_P(GpuNativeDispatchTest, FixedArgumentsSurviveQueuedReplayAndTrim) {
-  options_.queue.ring_byte_length = 4096;
+  options_.queue.ring_byte_length = 16384;
   options_.queue.argument_capacity = 8;
   options_.queue.retirement_capacity = 4;
   Create();
@@ -1306,8 +1306,12 @@ TEST_P(GpuNativeDispatchTest, FixedArgumentsSurviveQueuedReplayAndTrim) {
       .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
       .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
   };
-  // Cover bounded templates and resident recordings with the same lifetime.
-  for (uint32_t dispatch_count : {1u, 16u, 32u, 97u}) {
+  // The first recording identifies whether native publication permits immutable
+  // argument placement through the CPU aperture. Both that path and staged code
+  // retain the same queued ownership and trim contract at each byte boundary.
+  bool immutable_arguments = false;
+  for (uint32_t dispatch_count : {1u, 16u, 32u, 33u, 64u, 128u, 129u, 257u}) {
+    SCOPED_TRACE(dispatch_count);
     IREE_ASSERT_OK(iree_hal_buffer_map_write(output, 0, &zero, sizeof(zero)));
     Ref<iree_hal_command_buffer_t> recording;
     IREE_ASSERT_OK(iree_hal_command_buffer_create(
@@ -1329,16 +1333,23 @@ TEST_P(GpuNativeDispatchTest, FixedArgumentsSurviveQueuedReplayAndTrim) {
       const auto* program =
           iree_hal_amd_gpu_aql_command_buffer_program(recording);
       ASSERT_EQ(program->value_count, 1u);
-      if (dispatch_count <= 32) {
+      if (dispatch_count == 1) {
+        immutable_arguments = program->constants.page != nullptr;
+      }
+      if (dispatch_count <= (immutable_arguments ? 128u : 32u)) {
         ASSERT_NE(program->host_template, nullptr);
         ASSERT_EQ(program->resident.pool, nullptr);
-        if (program->constants.page) {
+        ASSERT_EQ(program->constants.page != nullptr, immutable_arguments);
+        if (immutable_arguments) {
           EXPECT_EQ(program->host_template->fixup_count, 0u);
           EXPECT_EQ(program->host_template->byte_length, dispatch_count * 64);
         }
       } else {
+        ASSERT_EQ(program->host_template, nullptr);
         ASSERT_GT(program->resident.fixup_count, 0u);
-        ASSERT_GT(program->block_count, 1u);
+        if (dispatch_count == 257) {
+          ASSERT_GT(program->block_count, 1u);
+        }
       }
     }
     constexpr uint32_t kReplays = 8;
