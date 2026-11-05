@@ -986,7 +986,7 @@ static void iree_hal_amd_gpu_device_destroy(iree_hal_device_t* base) {
     return;
   }
   iree_hal_amd_gpu_context_free(device->context);
-  iree_allocator_free(device->host_allocator, device);
+  iree_allocator_free_aligned(device->host_allocator, device);
 }
 
 static void iree_hal_amd_gpu_device_try_retire(void* user_data) {
@@ -1253,8 +1253,9 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
                             "GPU device provisioning storage overflows");
   }
   iree_hal_amd_gpu_device_t* device = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(host_allocator, total_size, (void**)&device));
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_aligned(
+      host_allocator, total_size, iree_alignof(iree_hal_amd_gpu_device_t), 0,
+      (void**)&device));
   iree_hal_resource_initialize(&iree_hal_amd_gpu_device_vtable,
                                &device->resource);
   device->host_allocator = host_allocator;
@@ -1526,7 +1527,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
   if (iree_status_is_ok(status)) {
     *out_device = (void*)device;
   } else if (iree_hal_amd_gpu_device_release_children(device)) {
-    iree_allocator_free(host_allocator, device);
+    iree_allocator_free_aligned(host_allocator, device);
   } else {
     iree_atomic_store(&context->cleanup_blocked, 1, iree_memory_order_relaxed);
   }

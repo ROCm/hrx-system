@@ -171,7 +171,14 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
         .publication_source =
             [](iree_hal_queue_t* base) {
               return iree_hal_amd_gpu_publication_source_t{
-                  .publish = [](void*) { return false; },
+                  .publish =
+                      [](void* data) {
+                        auto* queue = static_cast<Queue*>(data);
+                        if (queue->owner->publish_) {
+                          queue->owner->publish_(queue);
+                        }
+                        return false;
+                      },
                   .user_data = base,
               };
             },
@@ -303,6 +310,8 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
   std::function<void(Queue*)> notify_;
   // Native scratch detachment dependency, borrowing a live queue.
   std::function<void(Queue*)> trim_;
+  // Native publication dependency, outside worker source-table bookkeeping.
+  std::function<void(Queue*)> publish_;
 };
 
 TEST_P(MembershipTest, IdleQueueReleaseRearmsRetainedDownload) {
@@ -496,6 +505,45 @@ TEST_P(MembershipTest, PendingReleasesJoinIndependently) {
   EXPECT_EQ(iree_hal_amd_gpu_context_signal(&context_), AMDF_STATUS_OK);
   first_releaser.join();
   EXPECT_EQ(destroyed_.load(), 2u);
+}
+
+TEST_P(MembershipTest, RetainedPublisherDoesNotBlockIndependentMembership) {
+  iree_hal_queue_params_t params;
+  iree_hal_queue_params_initialize(&params);
+  iree_hal_queue_t* first = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &first));
+  auto* queue = reinterpret_cast<Queue*>(first);
+  std::binary_semaphore entered{0};
+  std::binary_semaphore resume{0};
+  publish_ = [&](Queue* publishing) {
+    if (publishing == queue) {
+      entered.release();
+      resume.acquire();
+      publishing->idle = true;
+      EXPECT_EQ(iree_hal_amd_gpu_context_signal(&context_), AMDF_STATUS_OK);
+    }
+  };
+  queue->idle = false;
+  iree_hal_amd_gpu_publication_notify(&publication_, queue->ordinal + 3);
+  entered.acquire();
+
+  // These acquisitions grow and replace the actual immutable source arrays.
+  // Native frontier allocation is a separate dependency in this fixture.
+  iree_hal_queue_t* independent[4] = {};
+  for (auto& acquired : independent) {
+    IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+        &membership_, &params, &acquired));
+  }
+  for (auto* acquired : independent) {
+    iree_hal_queue_release(acquired);
+  }
+  EXPECT_EQ(destroyed_.load(), 4u);
+  EXPECT_FALSE(queue->idle.load());
+
+  resume.release();
+  iree_hal_queue_release(first);
+  EXPECT_EQ(destroyed_.load(), 5u);
 }
 
 TEST_P(MembershipTest, NativeConstructionAllowsIndependentGrowthAndRelease) {
