@@ -338,7 +338,14 @@ std::span<cxx::Symbol* const> ControlFlow::written(cxx::AST* owner) const {
 }
 
 bool ControlFlow::addressed(cxx::Symbol* binding) const {
-  return addressed_.contains(binding);
+  auto found = binding_storage_.find(binding);
+  return found != binding_storage_.end() && found->second.addressed;
+}
+
+bool ControlFlow::storage_backed(cxx::Symbol* binding) const {
+  auto found = binding_storage_.find(binding);
+  return found != binding_storage_.end() &&
+         (found->second.addressed || found->second.automatic_storage);
 }
 
 bool ControlFlow::reference_requires_storage(cxx::Symbol* parameter) const {
@@ -364,8 +371,7 @@ bool ControlFlow::argument_requires_storage(
       }
       continue;
     }
-    if (addressed(binding) || traits.is_array(binding->type()) ||
-        traits.is_volatile(binding->type())) {
+    if (storage_backed(binding)) {
       return true;
     }
   }
@@ -379,8 +385,7 @@ bool ControlFlow::require_reference_storage(cxx::Symbol* parameter) {
 bool ControlFlow::storage_backed(cxx::MemberExpressionAST* expression) const {
   auto* owner = object_owner(expression);
   return storage_expressions_.contains(expression) ||
-         (owner &&
-          (addressed(owner) || unit_.typeTraits().is_volatile(owner->type())));
+         (owner && storage_backed(owner));
 }
 
 cxx::Symbol* ControlFlow::object_owner(cxx::ExpressionAST* expression) const {
@@ -522,7 +527,7 @@ void ControlFlow::postVisit(cxx::AST* ast) {
       // array lvalue borrows its storage in either spelling.
       if (!reference_member && expression->type &&
           unit_.typeTraits().is_array(expression->type)) {
-        addressed_.insert(owner);
+        require_address(owner);
       }
     }
     if (classify_storage(expression)) {
@@ -1251,6 +1256,25 @@ bool ControlFlow::require_identity(cxx::ExpressionAST* expression) {
   return require_identity(retain_call_argument(expression));
 }
 
+bool ControlFlow::require_address(cxx::Symbol* binding) {
+  auto& facts = binding_storage_[binding];
+  const bool changed = !facts.addressed;
+  facts.addressed = true;
+  return changed;
+}
+
+void ControlFlow::retain_automatic_storage(cxx::VariableSymbol* variable,
+                                           cxx::ExpressionAST* initializer,
+                                           bool user_record_constructor) {
+  auto traits = unit_.typeTraits();
+  if (!traits.is_reference(variable->type()) &&
+      (!initializer || user_record_constructor ||
+       traits.is_array(variable->type()) ||
+       traits.is_volatile(variable->type()))) {
+    binding_storage_[variable].automatic_storage = true;
+  }
+}
+
 bool ControlFlow::require_identity(const CallArgument& argument) {
   bool changed = false;
   for (auto* call : argument.reference_calls) {
@@ -1276,7 +1300,7 @@ bool ControlFlow::require_identity(const CallArgument& argument) {
       receiver_requires_storage_ = true;
       continue;
     }
-    changed = addressed_.insert(binding).second || changed;
+    changed = require_address(binding) || changed;
   }
   return changed;
 }
@@ -1416,12 +1440,12 @@ void ControlFlow::retain_constructor_call(cxx::FunctionSymbol* constructor,
   calls_.push_back(std::move(retained));
 }
 
-void ControlFlow::retain_constructor(cxx::VariableSymbol* variable,
+bool ControlFlow::retain_constructor(cxx::VariableSymbol* variable,
                                      cxx::ExpressionAST* initializer,
                                      cxx::AST* owner) {
   if (!types_.is_user_record_constructor(variable->type(),
                                          variable->constructor(), owner)) {
-    return;
+    return false;
   }
   if (auto* conversion = constructor_conversion(initializer);
       conversion &&
@@ -1435,6 +1459,7 @@ void ControlFlow::retain_constructor(cxx::VariableSymbol* variable,
                               .write_binding = variable,
                           },
                           /*storage_receiver=*/false, owner);
+  return true;
 }
 
 void ControlFlow::retain_destructor_call(const Destruction& destruction,
@@ -1722,7 +1747,10 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
       reference_aliases_[variable] = referent;
     }
     retain_reference_initializers(variable, ast->initializer, ast);
-    retain_constructor(variable, ast->initializer, ast);
+    const bool user_record_constructor =
+        retain_constructor(variable, ast->initializer, ast);
+    retain_automatic_storage(variable, ast->initializer,
+                             user_record_constructor);
     analyze_default_constructor(variable->type(), variable->constructor(), ast);
     retain_automatic_destruction(variable, ast);
   }
@@ -1787,7 +1815,10 @@ void ControlFlow::visit(cxx::ConditionExpressionAST* ast) {
   cxx::ASTVisitor::visit(ast);
   if (ast->symbol) {
     retain_reference_initializers(ast->symbol, ast->initializer, ast);
-    retain_constructor(ast->symbol, ast->initializer, ast);
+    const bool user_record_constructor =
+        retain_constructor(ast->symbol, ast->initializer, ast);
+    retain_automatic_storage(ast->symbol, ast->initializer,
+                             user_record_constructor);
     analyze_default_constructor(ast->symbol->type(), ast->symbol->constructor(),
                                 ast);
     retain_automatic_destruction(ast->symbol, ast);

@@ -356,3 +356,74 @@ func.def public @stored_nested_zero_phase() -> (i32) {
   %147 = scalar.addi %131, %later$146 : i32
   func.return %147 : i32
 }
+
+// ====
+// Default-initialized objects retain physical storage before interprocedural
+// reference ABI selection. Explicit aggregate values remain ordinary SSA.
+struct Pair {
+  unsigned first;
+  unsigned second;
+};
+static void initialize_pair(unsigned seed, Pair& output) {
+  output.first = seed;
+  output.second = seed + 1u;
+}
+static void initialize_scalar(unsigned seed, unsigned& output) {
+  output = seed * 2u;
+}
+unsigned automatic_outputs(unsigned seed) {
+  Pair pair;
+  unsigned scalar;
+  initialize_pair(seed, pair);
+  initialize_scalar(pair.second, scalar);
+  return pair.first + scalar;
+}
+unsigned initialized_value(unsigned seed) {
+  Pair pair{seed, seed + 1u};
+  return pair.first + pair.second;
+}
+// ----
+func.def public @automatic_outputs(%seed: i32) -> (i32) {
+  %2 = index.constant 8 : offset
+  %pair_storage = buffer.alloca<private> align(4) %2 : buffer
+  %pair_storage_byte_offset = index.constant 0 : offset
+  %6 = index.constant 4 : offset
+  %scalar_storage = buffer.alloca<private> align(4) %6 : buffer
+  %scalar_view = buffer.view %scalar_storage[%pair_storage_byte_offset] : buffer -> view<1xi32>
+  func.call @initialize_pair(%seed, %pair_storage, %pair_storage_byte_offset) : (i32, buffer, offset)
+  %13 = buffer.view %pair_storage[%6] : buffer -> view<1xi32>
+  %second = view.load %13[0] : view<1xi32> -> i32
+  func.call @initialize_scalar(%second, %scalar_storage, %pair_storage_byte_offset) : (i32, buffer, offset)
+  %18 = buffer.view %pair_storage[%pair_storage_byte_offset] : buffer -> view<1xi32>
+  %first = view.load %18[0] : view<1xi32> -> i32
+  %scalar = view.load %scalar_view[0] : view<1xi32> -> i32
+  %21 = scalar.addi %first, %scalar : i32
+  func.return %21 : i32
+}
+
+func.def public @initialized_value(%seed: i32) -> (i32) {
+  %24 = scalar.constant 1 : i32
+  %46 = scalar.addi %seed, %seed : i32
+  %47 = scalar.addi %46, %24 : i32
+  func.return %47 : i32
+}
+
+func.def @initialize_pair(%seed: i32, %output: buffer, %output_byte_offset: offset) {
+  %32 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
+  view.store %seed, %32[0] : i32, view<1xi32>
+  %33 = scalar.constant 1 : i32
+  %34 = scalar.addi %seed, %33 : i32
+  %35 = index.constant 4 : offset
+  %36 = index.add %output_byte_offset, %35 : offset
+  %37 = buffer.view %output[%36] : buffer -> view<1xi32>
+  view.store %34, %37[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def @initialize_scalar(%seed: i32, %output: buffer, %output_byte_offset: offset) {
+  %48 = scalar.constant 1 : i32
+  %49 = scalar.shli %seed, %48 : i32
+  %43 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
+  view.store %49, %43[0] : i32, view<1xi32>
+  func.return
+}

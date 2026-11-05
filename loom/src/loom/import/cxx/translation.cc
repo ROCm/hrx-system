@@ -1523,15 +1523,10 @@ class Translator final : private Initialization::Evaluation {
     }
     const bool user_record_constructor = types_.is_user_record_constructor(
         variable->type(), variable->constructor(), owner);
-    const bool automatic_destruction =
-        control_->automatic_destruction(variable) != nullptr;
     const bool requires_initialization =
         initializer || user_record_constructor ||
         control_->default_constructor_initializes(variable->constructor());
-    if (unit_.typeTraits().is_array(variable->type()) ||
-        user_record_constructor || (!initializer && automatic_destruction) ||
-        control_->addressed(variable) ||
-        unit_.typeTraits().is_volatile(variable->type())) {
+    if (control_->storage_backed(variable)) {
       auto contents =
           unit_.typeTraits().is_volatile(variable->type())
               ? std::nullopt
@@ -1554,17 +1549,7 @@ class Translator final : private Initialization::Evaluation {
       activate_automatic_destruction(variable, owner);
       return;
     }
-    if (!initializer) {
-      const auto& partition = types_.partition(variable->type(), owner);
-      if (partition.kind != ValueKind::SSA) {
-        fail(owner,
-             "uninitialized locals require scalar or native vector object "
-             "storage");
-      }
-      allocate_local(variable, variable->explicitAlignment(), owner);
-      activate_automatic_destruction(variable, owner);
-      return;
-    }
+    IREE_ASSERT(initializer);
     types_.partition(variable->type(), owner);
     if (types_.address_domain(types_.unqualified(variable->type()), owner) ==
         LOOM_SCALAR_TYPE_NONE) {

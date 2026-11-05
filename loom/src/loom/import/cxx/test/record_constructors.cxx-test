@@ -17,16 +17,16 @@ unsigned build(unsigned seed) {
 
 // ----
 func.def public @build(%seed: i32) -> (i32) {
-  %35 = scalar.constant 1 : i32
-  %36 = scalar.addi %seed, %35 : i32
-  %39 = scalar.andi %seed, %35 : i32
-  %40 = scalar.constant 0 : i32
-  %41 = scalar.cmpi ne, %39, %40 : i32
-  %49 = scalar.constant 3 : i32
-  %50 = scalar.addi %seed, %49 : i32
-  %51 = scf.select %41, %50, %36 : i32
-  %26 = scalar.addi %seed, %51 : i32
-  func.return %26 : i32
+  %25 = scalar.constant 1 : i32
+  %26 = scalar.addi %seed, %25 : i32
+  %29 = scalar.andi %seed, %25 : i32
+  %30 = scalar.constant 0 : i32
+  %31 = scalar.cmpi ne, %29, %30 : i32
+  %39 = scalar.constant 3 : i32
+  %40 = scalar.addi %seed, %39 : i32
+  %41 = scf.select %31, %40, %26 : i32
+  %16 = scalar.addi %seed, %41 : i32
+  func.return %16 : i32
 }
 
 // ====
@@ -55,13 +55,13 @@ unsigned build(unsigned seed) {
 
 // ----
 func.def public @build(%seed: i32) -> (i32) {
-  %87 = scalar.constant 1 : i32
-  %88 = scalar.addi %seed, %87 : i32
-  %100 = scalar.addi %seed, %88 : i32
-  %102 = scalar.addi %100, %88 : i32
-  %104 = scalar.constant 7 : i32
-  %105 = scalar.addi %102, %104 : i32
-  func.return %105 : i32
+  %55 = scalar.constant 1 : i32
+  %56 = scalar.addi %seed, %55 : i32
+  %68 = scalar.addi %seed, %56 : i32
+  %70 = scalar.addi %68, %56 : i32
+  %72 = scalar.constant 7 : i32
+  %73 = scalar.addi %70, %72 : i32
+  func.return %73 : i32
 }
 
 // ====
@@ -432,8 +432,8 @@ func.def public @build_direct(%seed: i32) -> (i32) {
   %7 = index.add %value_storage_byte_offset, %6 : offset
   %8 = index.assume %7 [range(%7, 0, 0)] : offset
   %9 = buffer.view %value_storage[%8] : buffer -> view<1xi32>
-  %value_value = view.load %9[0] : view<1xi32> -> i32
-  func.return %value_value : i32
+  %value = view.load %9[0] : view<1xi32> -> i32
+  func.return %value : i32
 }
 
 func.def inline @Direct__Direct_storage(%this: buffer, %this_byte_offset: offset, %seed: i32) {

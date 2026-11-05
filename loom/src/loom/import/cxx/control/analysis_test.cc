@@ -470,6 +470,55 @@ TEST(ControlFlowTest, SourceSelectionRetainsInitializerAndSelectedWrites) {
   EXPECT_TRUE(std::ranges::equal(writes, analysis.written(body)));
 }
 
+TEST(ControlFlowTest, AutomaticObjectStorageRemainsDistinctFromAddressDemand) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct Pair { unsigned first; unsigned second; };
+    struct Constructed { Constructed(); unsigned value; };
+    void entry(unsigned input) {
+      Pair value{input, input + 1u};
+      Pair output;
+      unsigned scalar;
+      unsigned values[2] = {};
+      volatile unsigned observed = input;
+      unsigned addressed = input;
+      (void)&addressed;
+      Constructed constructed;
+    }
+    Constructed::Constructed() : value(0u) {}
+  )"),
+                IREE_SV("automatic_storage.cpp"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body,
+                       function->symbol);
+
+  std::vector<cxx::Symbol*> bindings;
+  for (auto* statement : cxx::ListView{body->statementList}) {
+    auto* declaration = cxx::ast_cast<cxx::DeclarationStatementAST>(statement);
+    if (!declaration) {
+      continue;
+    }
+    auto* simple =
+        cxx::ast_cast<cxx::SimpleDeclarationAST>(declaration->declaration);
+    ASSERT_NE(simple, nullptr);
+    bindings.push_back(simple->initDeclaratorList->value->symbol);
+  }
+  ASSERT_EQ(bindings.size(), 7u);
+  EXPECT_FALSE(analysis.storage_backed(bindings[0]));
+  for (auto* binding : std::span{bindings}.subspan(1)) {
+    EXPECT_TRUE(analysis.storage_backed(binding));
+  }
+  for (size_t index = 0; index < bindings.size(); ++index) {
+    EXPECT_EQ(analysis.addressed(bindings[index]), index == 5u);
+  }
+}
+
 TEST(ControlFlowTest, DecisionSyntaxAndInitializerWritesStayWithTheBinding) {
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);

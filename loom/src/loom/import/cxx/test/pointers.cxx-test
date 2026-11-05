@@ -214,7 +214,7 @@ int* local(int* input) {
 // An indeterminate pointer object still needs a memory representation before
 // a later source assignment can initialize it.
 int* deferred(int* input) {
-  // ERROR@+1: LOWERING/059 "uninitialized locals require scalar or native vector object storage"
+  // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
   int* result;
   result = input;
   return result;

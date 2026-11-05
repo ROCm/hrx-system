@@ -196,6 +196,10 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Whether an evaluated address expression requires this binding's object
   // identity. The complete function is classified before translation begins.
   bool addressed(cxx::Symbol* binding) const;
+  // Whether this binding has a physical source object instead of only High SSA
+  // components. Automatic declaration requirements and later address demand
+  // are both retained before callable signatures are frozen.
+  bool storage_backed(cxx::Symbol* binding) const;
   // Retained automatic-object destination, or no value for a memory access or
   // unsupported lvalue. A vector lane names its owning vector slice; whole
   // identifiers need no indexed projection record.
@@ -289,6 +293,13 @@ class ControlFlow final : private cxx::ASTVisitor {
   struct ValueUseFacts;
   struct ReferenceWriteFacts;
 
+  struct BindingStorageFacts {
+    // Whether an evaluated source expression requires object identity.
+    bool addressed = false;
+    // Whether the declaration inherently requires a physical source object.
+    bool automatic_storage = false;
+  };
+
   enum class ReferenceReturn {
     None,
     CurrentReceiver,
@@ -350,6 +361,10 @@ class ControlFlow final : private cxx::ASTVisitor {
       cxx::AST* call, std::span<cxx::AST* const> owners,
       std::span<cxx::FieldSymbol* const> receiver_fields);
   bool require_reference_storage(cxx::Symbol* parameter);
+  bool require_address(cxx::Symbol* binding);
+  void retain_automatic_storage(cxx::VariableSymbol* variable,
+                                cxx::ExpressionAST* initializer,
+                                bool user_record_constructor);
   bool add_receiver_write(cxx::FieldSymbol* field);
   void retain_reference_receiver_write(const DirectCall& call);
   CallArgument retain_call_argument(cxx::ExpressionAST* expression);
@@ -363,7 +378,7 @@ class ControlFlow final : private cxx::ASTVisitor {
                                CallArgument receiver, bool storage_receiver,
                                cxx::AST* owner);
   void retain_member_constructor(cxx::MemInitializerAST* initializer);
-  void retain_constructor(cxx::VariableSymbol* variable,
+  bool retain_constructor(cxx::VariableSymbol* variable,
                           cxx::ExpressionAST* initializer, cxx::AST* owner);
   void retain_automatic_destruction(cxx::Symbol* binding, cxx::AST* owner);
   void retain_subobject_destructions();
@@ -409,8 +424,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::vector<cxx::AST*> owners_;
   // Stable encounter order determines region argument/result order.
   std::unordered_map<cxx::AST*, std::vector<cxx::Symbol*>> writes_;
-  // Automatic bindings whose addresses occur in evaluated source expressions.
-  std::unordered_set<cxx::Symbol*> addressed_;
+  // Sparse physical-representation facts indexed by source binding identity.
+  std::unordered_map<cxx::Symbol*, BindingStorageFacts> binding_storage_;
   // Reference locals retain their once-evaluated source destination shape for
   // effect and identity classification during this same walk.
   std::unordered_map<cxx::Symbol*, cxx::ExpressionAST*> reference_aliases_;
