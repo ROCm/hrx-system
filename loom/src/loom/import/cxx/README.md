@@ -586,6 +586,11 @@ void copy_one(const float* input, float* output) {
 // Canonical exported C++ maintained by loom-check --update.
 ```
 
+`emit cxx roundtrip` also sends the rendered source back through the C++
+importer and verifies the resulting High module. This is useful when a source
+feature lowers to a different but equivalent C++ spelling, such as RAII objects
+becoming explicit cleanup calls.
+
 Additional `// ====` cases exercise independent source programs in the same
 file. This keeps feature-scale C++ import/export coverage in ordinary
 source-shaped fixtures; the CLI JSON smoke remains responsible for process and

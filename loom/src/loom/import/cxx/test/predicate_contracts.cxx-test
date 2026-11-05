@@ -134,3 +134,18 @@ func.def public @use_wave64(%value: i32) -> (i32) {
 }
 
 template.decl requires [#target.subgroup.size<64>] @test.wave64_only(%2: i32) -> (i32) where [multiple_of(%2, 16)]
+
+// ====
+// General function assumptions need only the predicate contract header; they
+// do not acquire a kernel source dependency.
+#include <loomcxx/predicate.h>
+
+void assume_bounded(unsigned value) {
+  loom::assume(loom::predicate::range(value, 1u, 8u));
+}
+
+// ----
+func.def public @assume_bounded(%value$0: i32) {
+  %value$1 = scalar.assume %value$0 [range(%value$0, 1, 8)] : i32
+  func.return
+}

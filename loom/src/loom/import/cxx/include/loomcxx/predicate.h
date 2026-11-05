@@ -10,7 +10,15 @@
 // Predicate expressions describe compile-time contracts. They are admitted
 // only inside loom::where attributes and loom::assume calls and have no runtime
 // implementation. The helper names match Loom's textual predicate vocabulary.
-namespace loom::predicate {
+namespace loom {
+
+// Declares integer truth, comparison, and conjunction contracts. Conditions
+// are retained as Loom facts without runtime evaluation. Calls, mutation,
+// volatile reads, and expressions without a retained scalar identity diagnose
+// at import.
+[[loom::assume]] void assume(bool condition);
+
+namespace predicate {
 
 // The first operand selects the predicate carrier. Later retained values use
 // that same type, while pure constants may keep their ordinary literal types.
@@ -89,6 +97,8 @@ template <class T>
 [[loom::predicate("not_inf")]] bool not_inf();
 [[loom::predicate("finite")]] bool finite();
 
-}  // namespace loom::predicate
+}  // namespace predicate
+
+}  // namespace loom
 
 #endif  // LOOMCXX_PREDICATE_H_

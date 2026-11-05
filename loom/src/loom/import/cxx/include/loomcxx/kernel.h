@@ -9,6 +9,7 @@
 
 #include <loomcxx/buffer.h>
 #include <loomcxx/cache.h>
+#include <loomcxx/predicate.h>
 #include <loomcxx/view.h>
 
 // Fixed launch geometry belongs on the entry with
@@ -62,12 +63,6 @@ class [[loom::type("kernel.async.token")]] async_token {};
 class [[loom::type("kernel.async.group")]] async_group {};
 
 }  // namespace type
-
-// Declares integer truth, comparison, and conjunction contracts. Conditions
-// are retained as Loom facts without runtime evaluation. Calls, mutation,
-// volatile reads, and expressions without a retained scalar identity diagnose
-// at import.
-[[loom::assume]] void assume(bool condition);
 
 namespace kernel {
 
