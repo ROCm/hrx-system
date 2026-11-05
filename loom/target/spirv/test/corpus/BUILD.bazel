@@ -166,8 +166,6 @@ _SCENARIO_EXCLUDES = {
 }
 
 _ALL_PROFILE_XFAILS = {
-    # Fragment memory descriptors require matching register and storage types.
-    "control/branch/guards.loom:@selected_fragment_scale": "TARGET/002",
     # These static profiles do not promise exact floating comparison controls.
     "control/schedule/ordered_read_ahead.loom:@ordered_guarded_else_depth_2": "TARGET/003",
     "control/schedule/ordered_read_ahead.loom:@ordered_guarded_else_depth_3": "TARGET/003",
@@ -301,6 +299,8 @@ _ALL_PROFILE_XFAILS = {
 
 _EXTENDED_TYPES_XFAILS = {
     "control/branch/guards.loom:@mixed_carriers": "TARGET/031,TARGET/002",
+    # Fragment memory descriptors require matching register and storage types.
+    "control/branch/guards.loom:@selected_fragment_scale": "TARGET/002",
     "kernel/subgroup/ballot.loom:@subgroup_ballot_divergent": "SUBRANGE/024",
     "kernel/subgroup/ballot.loom:@subgroup_ballot_helpers_and_loop": "TARGET/003",
     "kernel/subgroup/ballot.loom:@subgroup_ballot_masks": "SUBRANGE/024",
@@ -409,6 +409,8 @@ _NO_EXTENDED_TYPES_XFAILS = {
 
 _SUBGROUP_XFAILS = dict(list(_NO_EXTENDED_TYPES_XFAILS.items()) + list({
     "control/branch/guards.loom:@mixed_carriers": "TARGET/003",
+    # Fixed-width native fragment selection requires cooperative capabilities.
+    "control/branch/guards.loom:@selected_fragment_scale": "TARGET/003",
     "control/loop/carried_lane_liveness.loom:@loop_carried_lane_liveness": "TARGET/003",
     "kernel/subgroup/scan.loom:@subgroup_scan_wide_sums": "TARGET/003",
     "kernel/workgroup/publication.loom:@workgroup_publication_scan": "TARGET/003",
@@ -422,6 +424,8 @@ _SUBGROUP_XFAILS = dict(list(_NO_EXTENDED_TYPES_XFAILS.items()) + list({
 
 _BDA_XFAILS = dict(list(_NO_EXTENDED_TYPES_XFAILS.items()) + list({
     "control/branch/guards.loom:@mixed_carriers": "TARGET/031,TARGET/002",
+    # Fragment memory descriptors require matching register and storage types.
+    "control/branch/guards.loom:@selected_fragment_scale": "TARGET/002",
     "control/loop/carried_lane_liveness.loom:@loop_carried_lane_liveness": "TARGET/003",
     "kernel/subgroup/ballot.loom:@subgroup_ballot_divergent": "SUBRANGE/024",
     "kernel/subgroup/ballot.loom:@subgroup_ballot_helpers_and_loop": "TARGET/003",
@@ -471,7 +475,8 @@ _ALL_ROOTS_XFAIL = [
 ]
 
 _SPIRV_EXECUTION_XFAILS = {
-    "control/branch/guards.loom:@selected_fragment_scale_values": "TARGET/002",
+    # Native fragment loads require 16-byte alignment; this source proves four.
+    "control/branch/guards.loom:@selected_fragment_scale_values": "TARGET/050",
     "control/branch/structured.loom:@structured_branch_values": "TARGET/001",
     "function/buffer/arguments.loom:@buffer_argument_values": "TARGET/001",
     "function/buffer/arguments.loom:@buffer_extent_values": "TARGET/001",

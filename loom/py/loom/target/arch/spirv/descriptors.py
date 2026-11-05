@@ -44,8 +44,10 @@ from loom.target.arch.spirv.builtins import (
     BUILTIN_SCALAR_INDEX_QUERIES,
 )
 from loom.target.arch.spirv.cooperative_matrix import (
+    COOPERATIVE_MATRIX_ARITHMETIC,
     COOPERATIVE_MATRIX_CASES,
     COOPERATIVE_MATRIX_TYPES,
+    CooperativeMatrixArithmetic,
     CooperativeMatrixCase,
     CooperativeMatrixMemory,
     CooperativeMatrixType,
@@ -1536,6 +1538,28 @@ def _cooperative_matrix_mul_add_descriptor(
     )
 
 
+def _cooperative_matrix_arithmetic_descriptor(
+    matrix_type: CooperativeMatrixType, operation: CooperativeMatrixArithmetic
+) -> Descriptor:
+    key = matrix_type.arithmetic_key(operation)
+    names = ("lhs", "rhs") if operation.operand_count == 2 else ("value",)
+    immediates = (
+        (_ALLOW_CONTRACTION_IMMEDIATE,) if operation.controls_contraction else ()
+    )
+    return Descriptor(
+        key=key,
+        mnemonic=key.replace(f"spirv.op_{operation.suffix}", operation.mnemonic),
+        semantic_tag=key,
+        operands=(_id_result(), *(_id_operand(name) for name in names)),
+        immediates=immediates,
+        feature_mask_words=(matrix_type.feature_bits,),
+        effects=(Effect(EffectKind.CONVERGENT, flags=(EffectFlag.ORDERED,)),),
+        asm_forms=_asm(results=("dst",), operands=names),
+        schedule_class=_SCHEDULE_ALU,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 def _cooperative_matrix_descriptors() -> tuple[Descriptor, ...]:
     descriptors = [
         Descriptor(
@@ -1553,6 +1577,12 @@ def _cooperative_matrix_descriptors() -> tuple[Descriptor, ...]:
         )
         for matrix_type in COOPERATIVE_MATRIX_TYPES
     ]
+    descriptors.extend(
+        _cooperative_matrix_arithmetic_descriptor(matrix_type, operation)
+        for matrix_type in COOPERATIVE_MATRIX_TYPES
+        for operation in COOPERATIVE_MATRIX_ARITHMETIC
+        if operation.supports(matrix_type)
+    )
     descriptors.extend(
         _cooperative_matrix_store_descriptor(matrix_type=matrix_type, memory=memory)
         if role == "result"

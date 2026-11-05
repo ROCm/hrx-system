@@ -23,6 +23,7 @@ from loom.target.arch.spirv.builtins import (
     BUILTIN_SCALAR_INDEX_QUERIES,
 )
 from loom.target.arch.spirv.cooperative_matrix import (
+    COOPERATIVE_MATRIX_ARITHMETIC,
     COOPERATIVE_MATRIX_CASES,
     COOPERATIVE_MATRIX_TYPES,
     cooperative_matrix_descriptor_key,
@@ -118,6 +119,12 @@ def test_float_arithmetic_descriptors_carry_contraction_control() -> None:
             *ORDINARY_VECTOR_FLOAT_SCALE_INSTRUCTIONS,
         )
     )
+    expected_keys.update(
+        matrix_type.arithmetic_key(operation)
+        for matrix_type in COOPERATIVE_MATRIX_TYPES
+        for operation in COOPERATIVE_MATRIX_ARITHMETIC
+        if operation.supports(matrix_type) and operation.controls_contraction
+    )
     actual_keys = {
         descriptor.key
         for descriptor in descriptors.values()
@@ -127,7 +134,6 @@ def test_float_arithmetic_descriptors_carry_contraction_control() -> None:
         )
     }
 
-    assert len(expected_keys) == 69
     assert actual_keys == expected_keys
     for key in expected_keys:
         descriptor = descriptors[key]
@@ -395,6 +401,12 @@ def _extended_math_result_recipes() -> dict[str, AsmResultValueType]:
 
 def _cooperative_matrix_result_keys() -> list[str]:
     keys = [matrix_type.constructor_key for matrix_type in COOPERATIVE_MATRIX_TYPES]
+    keys.extend(
+        matrix_type.arithmetic_key(operation)
+        for matrix_type in COOPERATIVE_MATRIX_TYPES
+        for operation in COOPERATIVE_MATRIX_ARITHMETIC
+        if operation.supports(matrix_type)
+    )
     keys.extend(
         matrix_type.memory_key(role, memory)
         for matrix_type in COOPERATIVE_MATRIX_TYPES
