@@ -79,6 +79,7 @@ static iree_status_t loom_serve_device_group_initialize(
         iree_hal_device_create_params_default();
     params.proactor_pool = loom_serve_host_proactor_pool(group->host);
     params.event_sink = iree_hal_device_event_sink_stderr();
+    params.completion_wait_flags = options[i].completion_wait_flags;
     status = iree_hal_driver_create_device_by_uri(
         options[i].driver, options[i].uri, &params, group->host_allocator,
         &group->devices[i].handle);

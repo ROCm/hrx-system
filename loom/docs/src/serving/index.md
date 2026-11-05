@@ -39,6 +39,7 @@ above remain the ordinary entry point on every platform.
 | --- | --- | --- |
 | `--device=URI` | None | Shortcut constructing device `device` and pool `pool`. Mutually exclusive with `--devices`. |
 | `--devices=path` | None | Machine-local JSON declaring named devices and independent pools with their consumer membership, memory limits, and idle policy. |
+| `--wait_mode=active\|blocking` | `active` | Completion-wait policy for every device. Overrides the machine file's `wait_mode`. Requests remain asynchronous. |
 | `--model=path` | None, repeatable | A local model card or serving deployment document; omission starts empty. |
 | `--preset=name` | Card selection | Select a preset when loading one card directly. Fetched cards retain the selection made during acquisition. |
 | `--listen=address` | `127.0.0.1:8080`, repeatable | Numeric IPv4 `host:port`, IPv6 `[host]:port`, or `unix:path`. |
@@ -58,6 +59,28 @@ above remain the ordinary entry point on every platform.
 The backing, slab, memory, and idle flags apply only to the `--device` shortcut.
 With `--devices`, those settings belong to each pool entry; mixing the file with
 any single-device flag is rejected, including explicit default values.
+
+### Completion latency and CPU use
+
+`wait_mode` selects how devices observe completion. `active`, the default,
+favors latency and permits active observation by existing completion workers.
+`blocking` disables optional polling and waits for native completion events,
+reducing CPU use at the cost of possible wake-up latency. Both modes preserve
+asynchronous requests, device concurrency, and completion guarantees; idle
+devices can sleep in either mode.
+
+Set `"wait_mode": "blocking"` at the root of a machine configuration, or use
+`--wait_mode=blocking` with either `--device` or `--devices`. An explicit CLI
+value overrides the file for every device. The setting is fixed at startup.
+
+AMD GPU devices use their bounded coherent-completion observation budget in
+active mode: 100 µs by default, tunable with the device URI's
+`completion_spin_ns` parameter. Blocking mode sets that budget to zero even
+when the URI specifies a nonzero value. Native-event backends retain their
+completion notifications. CPU devices report completion directly from their
+execution workers; this setting leaves the shared CPU executor unchanged.
+
+### Memory and admission limits
 
 `--memory_bytes`, `--weight_slab_bytes`, and `--state_slab_bytes` accept decimal
 byte counts or lowercase size suffixes: `b`, `kb`, `kib`, `mb`, `mib`, `gb`, and
@@ -120,6 +143,8 @@ A URI is resolved by its linked HAL driver. The server neither chooses an
 implicit device nor falls back to a different backend.
 
 Each device entry contains `uri`. Each pool requires a nonempty `devices` array.
+The optional root `wait_mode` selects `active` (default) or `blocking` for all
+devices, as described under [completion latency and CPU use](#completion-latency-and-cpu-use).
 Optional pool fields `pool_backing`, `weight_slab_bytes`,
 `state_slab_bytes`, `memory_bytes`, `workspace_idle_ms`, and `parameter_idle_ms`
 have the same defaults and units as the single-device flags above. Byte counts

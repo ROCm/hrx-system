@@ -60,9 +60,13 @@ TEST_F(DeviceConfigurationTest, OwnsIndependentDeviceAndPoolInventories) {
   EXPECT_EQ(String(configuration_.options[0].name), "gpu");
   EXPECT_EQ(String(configuration_.options[0].uri), "amdgpu://0?queue_count=4");
   EXPECT_EQ(configuration_.options[0].driver, nullptr);
+  EXPECT_EQ(configuration_.options[0].completion_wait_flags,
+            IREE_ASYNC_WAIT_FLAG_ACTIVE);
   EXPECT_EQ(String(configuration_.options[1].name), "npu");
   EXPECT_EQ(String(configuration_.options[1].uri), "xdna://0");
   EXPECT_EQ(configuration_.options[1].driver, nullptr);
+  EXPECT_EQ(configuration_.options[1].completion_wait_flags,
+            IREE_ASYNC_WAIT_FLAG_ACTIVE);
   const auto& agents = configuration_.pools[0];
   EXPECT_EQ(String(agents.binding.name), "agents");
   EXPECT_EQ(agents.binding.device_mask, 3u);
@@ -92,6 +96,8 @@ TEST_F(DeviceConfigurationTest, UriConvenienceCreatesOneExplicitPool) {
   EXPECT_EQ(convenience.pool_count, 1u);
   EXPECT_EQ(String(convenience.options[0].name), "device");
   EXPECT_EQ(String(convenience.options[0].uri), "task");
+  EXPECT_EQ(convenience.options[0].completion_wait_flags,
+            configuration_.options[0].completion_wait_flags);
   EXPECT_EQ(String(convenience.pools[0].binding.name), "pool");
   EXPECT_EQ(convenience.pools[0].binding.device_mask, 1u);
   const auto& actual = convenience.pools[0].options;
@@ -101,6 +107,68 @@ TEST_F(DeviceConfigurationTest, UriConvenienceCreatesOneExplicitPool) {
   EXPECT_EQ(actual.memory_limit, 0u);
   EXPECT_EQ(actual.placement.kind, LOOM_SERVE_POOL_PLACEMENT_AUTOMATIC);
   loom_serve_device_configuration_deinitialize(&convenience);
+}
+
+TEST_F(DeviceConfigurationTest,
+       WaitModeAppliesToEveryDeviceWithoutChangingUris) {
+  IREE_ASSERT_OK(Parse(R"({
+    "devices":{"gpu":{"uri":"amdgpu://0?completion_spin_ns=50000"},
+               "cpu":{"uri":"task"}},
+    "pools":{"shared":{"devices":["gpu","cpu"]}},
+    "wait_mode":"block\u0069ng"
+  })"));
+  ASSERT_EQ(configuration_.count, 2u);
+  for (iree_host_size_t i = 0; i < configuration_.count; ++i) {
+    EXPECT_EQ(configuration_.options[i].completion_wait_flags,
+              IREE_ASYNC_WAIT_FLAG_NONE);
+  }
+  IREE_ASSERT_OK(loom_serve_device_configuration_set_wait_mode(
+      &configuration_, IREE_SV("active")));
+  for (iree_host_size_t i = 0; i < configuration_.count; ++i) {
+    EXPECT_EQ(configuration_.options[i].completion_wait_flags,
+              IREE_ASYNC_WAIT_FLAG_ACTIVE);
+  }
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_device_configuration_set_wait_mode(
+                            &configuration_, IREE_SV("busy")));
+  for (iree_host_size_t i = 0; i < configuration_.count; ++i) {
+    EXPECT_EQ(configuration_.options[i].completion_wait_flags,
+              IREE_ASYNC_WAIT_FLAG_ACTIVE);
+  }
+  IREE_ASSERT_OK(loom_serve_device_configuration_set_wait_mode(
+      &configuration_, IREE_SV("blocking")));
+  for (iree_host_size_t i = 0; i < configuration_.count; ++i) {
+    EXPECT_EQ(configuration_.options[i].completion_wait_flags,
+              IREE_ASYNC_WAIT_FLAG_NONE);
+  }
+  EXPECT_EQ(String(configuration_.options[0].uri),
+            "amdgpu://0?completion_spin_ns=50000");
+  EXPECT_EQ(String(configuration_.options[1].uri), "task");
+}
+
+TEST_F(DeviceConfigurationTest, ExplicitActiveWaitMode) {
+  IREE_ASSERT_OK(Parse(R"({"wait_mode":"active",
+    "devices":{"cpu":{"uri":"task"}},
+    "pools":{"pool":{"devices":["cpu"]}}})"));
+  EXPECT_EQ(configuration_.options[0].completion_wait_flags,
+            IREE_ASYNC_WAIT_FLAG_ACTIVE);
+}
+
+TEST_F(DeviceConfigurationTest, RejectsMalformedOrDuplicateWaitMode) {
+  for (const char* field :
+       {R"("wait_mode":"")", R"("wait_mode":"wait")", R"("wait_mode":"ACTIVE")",
+        R"("wait_mode":"active\u0000")", R"("wait_mode":null)",
+        R"("wait_mode":true)", R"("wait_mode":1)", R"("wait_mode":[])",
+        R"("wait_mode":{})",
+        R"("wait_mode":"active","wait_mode":"blocking")"}) {
+    SCOPED_TRACE(field);
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        Parse(std::string(R"({"devices":{"cpu":{"uri":"task"}},
+          "pools":{"pool":{"devices":["cpu"]}},)") +
+              field + "}"));
+    ExpectEmpty();
+  }
 }
 
 TEST_F(DeviceConfigurationTest, PlacementIsIndependentOfConsumerMembership) {

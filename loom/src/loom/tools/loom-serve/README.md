@@ -34,6 +34,10 @@ memory-scope virtual-memory contract. Task uses host VMM where available;
 Vulkan requires appropriate sparse-memory capabilities. The [command reference](../../../../docs/src/serving/index.md#devices-and-listeners)
 describes the backend and serving requirements separately.
 
+The global `--wait_mode=active|blocking` option overrides the machine file's
+`wait_mode` for every device. The [completion-policy reference](../../../../docs/src/serving/index.md#completion-latency-and-cpu-use)
+describes the latency/CPU tradeoff and backend behavior. Requests stay asynchronous.
+
 Generic URI parameters request immutable device runtime services. For example,
 `--device=amdgpu:?feedback` uses the default AMDGPU device and provisions the
 diagnostic channel used by authored kernel assertions. The parameters are
