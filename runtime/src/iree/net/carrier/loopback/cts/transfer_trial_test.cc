@@ -31,7 +31,7 @@ TEST_P(TransferTrialFailureTest,
   options.connection_count = 16;
   TransferTrialResult result;
   iree_status_t status =
-      RunTransferTrial(transport, GetParam().factory, options, &result);
+      RunTransferTrial(transport, GetParam().factory, options, {}, &result);
   if (!result.available && iree_status_is_unavailable(status)) {
     const std::string reason = iree::Status::ToString(status);
     iree_status_free(status);

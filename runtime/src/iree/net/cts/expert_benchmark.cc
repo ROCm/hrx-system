@@ -43,7 +43,7 @@ void RunBenchmark(::benchmark::State& state,
     state.PauseTiming();
     ExpertTrialResult result;
     iree::Status status(RunExpertTrial(GetTransportBackend(), create_proactor,
-                                       options, &result, measurement));
+                                       options, measurement, &result));
     state.ResumeTiming();
     if (!status.ok()) {
       if (!result.available && iree_status_is_unavailable(status.get())) {

@@ -212,8 +212,8 @@ struct Rank : CollectiveRank {
 iree_status_t RunGatherTrial(
     const TransportBackend& transport,
     const iree::async::cts::ProactorFactory& create_proactor,
-    const GatherTrialOptions& options, GatherTrialResult* out_result,
-    TransferTrialMeasurement measurement) {
+    const GatherTrialOptions& options, TransferTrialMeasurement measurement,
+    GatherTrialResult* out_result) {
   *out_result = {};
   if (options.rank_count < 2 || options.rank_count > 8 || !options.shard_size ||
       options.shard_size % 4 || !options.block_size || options.block_size % 4 ||
@@ -247,7 +247,7 @@ iree_status_t RunGatherTrial(
                                            edge_size, total_size));
   }
   iree_status_t status = RunCollectiveGroup(transport, create_proactor, control,
-                                            ranks, out_result, measurement);
+                                            ranks, measurement, out_result);
   if (iree_status_is_ok(status)) {
     out_result->gathers = options.measured_rounds;
     for (auto& rank : ranks) {

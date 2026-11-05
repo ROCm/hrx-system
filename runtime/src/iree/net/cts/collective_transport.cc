@@ -831,8 +831,8 @@ iree_status_t RunCollectiveGroup(
     const iree::async::cts::ProactorFactory& create_proactor,
     CollectiveControl& control,
     std::vector<std::unique_ptr<CollectiveRank>>& ranks,
-    CollectiveTransportResult* out_result,
-    TransferTrialMeasurement measurement) {
+    TransferTrialMeasurement measurement,
+    CollectiveTransportResult* out_result) {
   *out_result = {};
   for (auto& rank : ranks) {
     IREE_RETURN_IF_ERROR(rank->Initialize(transport, create_proactor));

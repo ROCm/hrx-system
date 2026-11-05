@@ -28,7 +28,7 @@ void CheckCollectiveTrial(
     options.delivery = delivery;
     CollectiveTrialResult result;
     iree_status_t status = RunCollectiveTrial(
-        GetTransportBackend(), create_proactor, options, &result);
+        GetTransportBackend(), create_proactor, options, {}, &result);
     if (!result.available && iree_status_is_unavailable(status)) {
       std::string reason = iree::Status::ToString(status);
       iree_status_free(status);
@@ -83,8 +83,8 @@ void CheckExpertTrial(const iree::async::cts::ProactorFactory& create_proactor,
                                                           : "registered");
     options.delivery = delivery;
     ExpertTrialResult result;
-    iree_status_t status = RunExpertTrial(GetTransportBackend(),
-                                          create_proactor, options, &result);
+    iree_status_t status = RunExpertTrial(
+        GetTransportBackend(), create_proactor, options, {}, &result);
     if (!result.available && iree_status_is_unavailable(status)) {
       std::string reason = iree::Status::ToString(status);
       iree_status_free(status);
@@ -139,8 +139,8 @@ void CheckGatherTrial(const iree::async::cts::ProactorFactory& create_proactor,
                                                           : "registered");
     options.delivery = delivery;
     GatherTrialResult result;
-    iree_status_t status = RunGatherTrial(GetTransportBackend(),
-                                          create_proactor, options, &result);
+    iree_status_t status = RunGatherTrial(
+        GetTransportBackend(), create_proactor, options, {}, &result);
     if (!result.available && iree_status_is_unavailable(status)) {
       std::string reason = iree::Status::ToString(status);
       iree_status_free(status);
@@ -186,7 +186,7 @@ void CheckPipelineRoundTrip(
     options.delivery = delivery;
     PipelineRoundTripResult result;
     iree_status_t status = RunPipelineRoundTrip(
-        GetTransportBackend(), create_proactor, options, &result);
+        GetTransportBackend(), create_proactor, options, {}, &result);
     if (!result.available && iree_status_is_unavailable(status)) {
       std::string reason = iree::Status::ToString(status);
       iree_status_free(status);

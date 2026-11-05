@@ -754,8 +754,8 @@ struct TrialSide {
 iree_status_t RunTransferTrial(
     const TransportBackend& transport,
     const iree::async::cts::ProactorFactory& create_proactor,
-    const TransferTrialOptions& options, TransferTrialResult* out_result,
-    TransferTrialMeasurement measurement) {
+    const TransferTrialOptions& options, TransferTrialMeasurement measurement,
+    TransferTrialResult* out_result) {
   *out_result = {};
   if (!options.connection_count || !options.record_size ||
       !options.batch_size || !options.window_size || !options.fragment_count ||
