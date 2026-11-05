@@ -768,7 +768,7 @@ iree_status_t loom_serve_text_model_free_retired(
     return iree_ok_status();
   }
   IREE_ASSERT(loom_serve_text_model_is_retired(model));
-  iree_status_t warmup_status = loom_serve_text_warmup_free(model->warmup);
+  loom_serve_text_warmup_free(model->warmup);
   model->warmup = NULL;
   loom_serve_residency_free(model->residency);
   model->residency = NULL;
@@ -786,7 +786,7 @@ iree_status_t loom_serve_text_model_free_retired(
     status = loom_serve_text_state_deinitialize(&model->state);
   }
   if (!iree_status_is_ok(status)) {
-    return iree_status_join(status, warmup_status);
+    return status;
   }
   for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
     loom_serve_jit_stage_free(model->stages[i].compiled);
@@ -807,7 +807,7 @@ iree_status_t loom_serve_text_model_free_retired(
   loom_serve_execution_release(model->execution);
   loom_serve_text_source_deinitialize(&model->source);
   iree_allocator_free(model->host_allocator, model);
-  return warmup_status;
+  return iree_ok_status();
 }
 
 iree_status_t loom_serve_text_model_free(loom_serve_text_model_t* model) {
@@ -816,6 +816,7 @@ iree_status_t loom_serve_text_model_free(loom_serve_text_model_t* model) {
   }
   loom_serve_text_model_retire(model, NULL, NULL);
   loom_serve_text_warmup_await(model->warmup);
+  iree_status_t warmup_status = loom_serve_text_warmup_status(model->warmup);
   iree_status_t status = model->execution
                              ? loom_serve_execution_drain(model->execution)
                              : iree_ok_status();
@@ -824,7 +825,8 @@ iree_status_t loom_serve_text_model_free(loom_serve_text_model_t* model) {
                                           model->parameters.plans[i]));
   }
   loom_serve_text_state_await_retirement(&model->state);
-  return iree_status_join(status, loom_serve_text_model_free_retired(model));
+  status = iree_status_join(status, loom_serve_text_model_free_retired(model));
+  return iree_status_join(status, warmup_status);
 }
 
 loom_serve_device_t* loom_serve_text_model_device(

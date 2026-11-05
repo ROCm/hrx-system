@@ -295,6 +295,7 @@ loom_cc_library(
         "service_capacity_test.cc",
         "source_execution_test.cc",
         "state_test.cc",
+        "warmup_test.cc",
         "workspace_test.cc",
     ],
     target_compatible_with = _SOURCE_TEST_COMPATIBILITY,

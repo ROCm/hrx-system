@@ -114,14 +114,13 @@ void loom_serve_text_warmup_await(loom_serve_text_warmup_t* warmup) {
   iree_notification_deinitialize(&notification);
 }
 
-iree_status_t loom_serve_text_warmup_free(loom_serve_text_warmup_t* warmup) {
+void loom_serve_text_warmup_free(loom_serve_text_warmup_t* warmup) {
   if (!warmup) {
-    return iree_ok_status();
+    return;
   }
   IREE_ASSERT(!warmup->activation);
   loom_serve_residency_free(warmup->residency);
   loom_serve_execution_release(warmup->execution);
-  iree_status_t status = warmup->status;
+  iree_status_free(warmup->status);
   iree_allocator_free(warmup->host_allocator, warmup);
-  return status;
 }
