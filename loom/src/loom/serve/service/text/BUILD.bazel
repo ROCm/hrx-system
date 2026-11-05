@@ -663,6 +663,7 @@ loom_cc_library(
         "media_epoch.c",
         "model.c",
         "model_instance.h",
+        "model_load.c",
         "reservation.c",
         "reservation_plan.h",
         "retention.c",

@@ -240,6 +240,9 @@ TEST_F(SourceTextServiceTest, FailedNativeVariantsLeaveCurrentModelUsable) {
 
 TEST_F(SourceTextServiceTest,
        EquivalentCandidateReusesCompilationWithIndependentReportAndState) {
+  // Trimming unused programs must preserve the live model's source generation,
+  // including reuse by a new catalog for an equivalent native candidate.
+  loom_serve_device_trim_programs(device_);
   const auto modified_path =
       iree::testing::MakeTempFilePath("independent_variant", ".loom");
   const std::string original_path = directory_ + "/advance.loom";

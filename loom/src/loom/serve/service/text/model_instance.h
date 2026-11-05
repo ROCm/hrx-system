@@ -51,7 +51,7 @@ struct loom_serve_text_model_t {
   loom_serve_execution_t* execution;
   // Cold recording policy for every reusable stage in this residency.
   iree_hal_command_buffer_mode_t command_mode;
-  // Shared source index and compiler for this model residency.
+  // Source catalog retaining compilation reuse through this model residency.
   loom_serve_jit_t* jit;
   // Checkpoint domains owning stable parameter reservations across all stages.
   loom_serve_text_parameters_t parameters;
