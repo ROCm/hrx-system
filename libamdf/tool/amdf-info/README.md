@@ -1,6 +1,6 @@
 # amdf-info
 
-`amdf-info` reports the GPUs, NPUs, system-memory pools, and native capabilities visible through libamdf on Linux and Windows. The default output is a compact machine inventory; detailed text and JSON expose the same public API records. It links against libamdf and needs neither ROCr nor XRT.
+`amdf-info` reports the GPUs, NPUs, system-memory pools, and native capabilities visible through libamdf on Linux and Windows. The default output is a compact machine inventory; detailed text and JSON expose the same public API records. It statically links libamdf and needs neither ROCr nor XRT.
 
 ```sh
 amdf-info
@@ -88,6 +88,6 @@ iree-bazel-run //libamdf/tool/amdf-info -- --help
 iree-bazel-run //libamdf/tool/amdf-info -- --format=json
 ```
 
-The CMake `AMDF` install component places `amdf-info` in `bin/` alongside the library distribution. Windows resolves the adjacent `amdf.dll`; the Unix install search path includes the sibling library directory. `find_package(amdf CONFIG REQUIRED)` exposes `amdf_TOOL_DIR` for locating the installed executable. Family-selective library builds retain the same tool; extension availability reports the composition actually linked.
+The CMake `AMDF` install component places `amdf-info` in `bin/` alongside the library distribution. The tool embeds the static libamdf implementation and does not require a companion libamdf shared library. `find_package(amdf CONFIG REQUIRED)` exposes `amdf_TOOL_DIR` for locating the installed executable. Family-selective library builds retain the same tool; extension availability reports the composition actually linked. The `hrx-loom` wheel also installs the tool into its Python environment's command directory.
 
 The executable is a public libamdf client. Argument parsing and selection, query traversal and lifetime ownership, typed record renderers, and stream encoding have separate implementation boundaries. OS leaves supply terminal detection and pathname identity only; driver discovery remains in libamdf. Hardware smoke targets declare GPU or XDNA resources independently. CPU-only tests exercise the real CLI against a test-only public API dependency, including partial reports, failed acquisition, checked teardown, selection ambiguity, and output errors.

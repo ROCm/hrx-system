@@ -7,18 +7,9 @@
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
-# Tools use the installed shared-library boundary in both build systems. Keep
-# Windows build outputs beside the DLL too, without copying it or relying on a
-# developer's PATH. Unix binaries retain the normal build and install RPATHs.
+# Tools install in bin/ alongside the distribution's other executables.
 function(amdf_cc_tool)
-  cmake_parse_arguments(_RULE "" "NAME" "" ${ARGN})
-  iree_cc_binary(${ARGN} INSTALL_COMPONENT AMDF SETUP_INSTALL_RPATH)
-  if(WIN32)
-    iree_package_ns(_PACKAGE_NS)
-    iree_package_target_name(_TARGET "${_PACKAGE_NS}::${_RULE_NAME}")
-    set_target_properties(${_TARGET} PROPERTIES
-      RUNTIME_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:amdf::amdf>")
-  endif()
+  iree_cc_binary(${ARGN} INSTALL_COMPONENT AMDF)
 endfunction()
 
 function(amdf_finalize_project)

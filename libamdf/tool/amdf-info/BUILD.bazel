@@ -75,7 +75,7 @@ amdf_cc_tool(
     visibility = ["//visibility:public"],
     deps = [
         ":implementation",
-        "//libamdf:amdf",
+        "//libamdf:amdf_static",
     ],
 )
 

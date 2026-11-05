@@ -65,10 +65,15 @@ includes the audio request, expected transcript, and offline/cache behavior.
 
 ## Tools and Python APIs
 
-The installed commands are `loom-benchmark`, `loom-check`, `loom-compile`,
+The installed commands are `amdf-info`, `loom-benchmark`, `loom-check`, `loom-compile`,
 `loom-compile-report`, `loom-export-cxx`, `loom-fetch`, `loom-format`,
 `loom-import-cxx`, `loom-link`, `loom-lint`, `loom-opt`, `loom-run`, `loom-serve`,
 and `loom-test`. Each provides `--help`.
+
+`amdf-info` reports AMD GPUs, NPUs, memory pools, and native capabilities without
+ROCr or XRT. Use `amdf-info --format=json` for automation and
+`amdf-info --device=xdna --activate` to check native device acquisition and
+release. Inventory alone does not activate devices.
 
 The `loom` Python package provides program authoring and model-card APIs using
 the Python standard library. Versioned JSON schemas are included with the SDK:

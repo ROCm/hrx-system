@@ -7,16 +7,17 @@
 """The native command and shared-library closure installed by the Loom wheel."""
 
 NATIVE_COMMANDS = [
-    "loom-benchmark",
-    "loom-check",
-    "loom-compile",
-    "loom-format",
-    "loom-import-cxx",
-    "loom-link",
-    "loom-opt",
-    "loom-run",
-    "loom-serve",
-    "loom-test",
+    "//libamdf/tool/amdf-info",
+    "//loom/src/loom/tools/loom-benchmark",
+    "//loom/src/loom/tools/loom-check",
+    "//loom/src/loom/tools/loom-compile",
+    "//loom/src/loom/tools/loom-format",
+    "//loom/src/loom/tools/loom-import-cxx",
+    "//loom/src/loom/tools/loom-link",
+    "//loom/src/loom/tools/loom-opt",
+    "//loom/src/loom/tools/loom-run",
+    "//loom/src/loom/tools/loom-serve",
+    "//loom/src/loom/tools/loom-test",
 ]
 
 _CONFIGURATION = {
@@ -153,7 +154,7 @@ loom_native_files = rule(
         ),
         "tools": attr.label_list(
             aspects = [_symbols],
-            default = ["//loom/src/loom/tools/" + name for name in NATIVE_COMMANDS],
+            default = NATIVE_COMMANDS,
         ),
         "_allowlist_function_transition": attr.label(
             default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
