@@ -33,6 +33,11 @@ typedef struct loom_low_source_invocation_collect_t {
   // Per-caller outgoing facts, merged into the durable summary after the
   // caller fact scope is released.
   loom_value_fact_table_t* outgoing_facts;
+
+  // Durable module-symbol index receiving retained direct call targets.
+  uint8_t* direct_call_targets;
+  // Number of entries in |direct_call_targets|.
+  iree_host_size_t direct_call_target_count;
 } loom_low_source_invocation_collect_t;
 
 typedef struct loom_low_source_invocation_scc_nodes_t {
@@ -82,12 +87,11 @@ static iree_status_t loom_low_source_invocation_merge_argument_fact(
                                                target, projected_facts);
 }
 
-static bool loom_low_source_invocation_can_refine_callee(
+static bool loom_low_source_invocation_resolve_callee(
     const loom_low_source_invocation_collect_t* collect,
     loom_symbol_ref_t callee, loom_func_like_t* out_function) {
   if (!loom_symbol_ref_is_valid(callee) || callee.module_id != 0 ||
-      callee.symbol_id >= collect->module->symbols.count ||
-      loom_call_graph_is_recursive(collect->call_graph, callee.symbol_id)) {
+      callee.symbol_id >= collect->module->symbols.count) {
     return false;
   }
 
@@ -99,13 +103,20 @@ static bool loom_low_source_invocation_can_refine_callee(
   }
   const loom_func_like_t function =
       loom_func_like_cast(collect->module, symbol->defining_op);
-  if (!loom_func_like_isa(function) || loom_func_like_body(function) == NULL ||
-      !loom_func_like_is_module_internal(function)) {
+  if (!loom_func_like_isa(function) || loom_func_like_body(function) == NULL) {
     return false;
   }
 
   *out_function = function;
   return true;
+}
+
+static bool loom_low_source_invocation_can_refine_callee(
+    const loom_low_source_invocation_collect_t* collect,
+    loom_func_like_t function) {
+  const loom_symbol_ref_t callee = loom_func_like_callee(function);
+  return loom_func_like_is_module_internal(function) &&
+         !loom_call_graph_is_recursive(collect->call_graph, callee.symbol_id);
 }
 
 static iree_status_t loom_low_source_invocation_collect_call(
@@ -122,18 +133,25 @@ static iree_status_t loom_low_source_invocation_collect_call(
   }
 
   loom_func_like_t callee_function = {0};
-  if (!loom_low_source_invocation_can_refine_callee(
+  if (!loom_low_source_invocation_resolve_callee(
           collect, loom_call_like_callee(call), &callee_function)) {
     return iree_ok_status();
   }
   if (collect->resolved_target == NULL ||
       loom_call_like_inline_policy(call) == LOOM_INLINE_POLICY_INLINE ||
-      loom_func_like_inline_policy(callee_function) !=
-          LOOM_INLINE_POLICY_NOINLINE ||
+      loom_func_like_inline_policy(callee_function) ==
+          LOOM_INLINE_POLICY_INLINE ||
       loom_target_provider_select_call_policy(
           collect->resolved_target, collect->module,
           LOOM_CALL_LIKE_KIND_SEMANTIC, call,
           callee_function) != LOOM_TARGET_CALL_POLICY_DIRECT) {
+    return iree_ok_status();
+  }
+
+  const loom_symbol_ref_t callee = loom_func_like_callee(callee_function);
+  IREE_ASSERT_LT(callee.symbol_id, collect->direct_call_target_count);
+  collect->direct_call_targets[callee.symbol_id] = 1;
+  if (!loom_low_source_invocation_can_refine_callee(collect, callee_function)) {
     return iree_ok_status();
   }
 
@@ -186,6 +204,14 @@ iree_status_t loom_low_source_invocation_facts_compute(
   if (module->symbols.count == 0) {
     return iree_ok_status();
   }
+  uint8_t* direct_call_targets = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, module->symbols.count,
+                                                 sizeof(*direct_call_targets),
+                                                 (void**)&direct_call_targets));
+  memset(direct_call_targets, 0,
+         module->symbols.count * sizeof(*direct_call_targets));
+  out_facts->direct_call_targets = direct_call_targets;
+  out_facts->direct_call_target_count = module->symbols.count;
 
   iree_arena_allocator_t analysis_arena;
   iree_arena_initialize(module->arena.block_pool, &analysis_arena);
@@ -293,6 +319,8 @@ iree_status_t loom_low_source_invocation_facts_compute(
                 target_version ? &target_version->resolved_target : NULL,
             .caller_facts = caller_facts,
             .outgoing_facts = &outgoing_facts,
+            .direct_call_targets = direct_call_targets,
+            .direct_call_target_count = module->symbols.count,
         };
         loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
         status = loom_walk_function(
@@ -333,4 +361,16 @@ loom_value_fact_table_view_t loom_low_source_invocation_facts_for_function(
       .value_ids = arguments,
       .value_count = argument_count,
   };
+}
+
+bool loom_low_source_invocation_facts_has_direct_callers(
+    const loom_low_source_invocation_facts_t* facts,
+    loom_func_like_t function) {
+  if (facts->direct_call_targets == NULL || !loom_func_like_isa(function)) {
+    return false;
+  }
+  const loom_symbol_ref_t callee = loom_func_like_callee(function);
+  return loom_symbol_ref_is_valid(callee) && callee.module_id == 0 &&
+         callee.symbol_id < facts->direct_call_target_count &&
+         facts->direct_call_targets[callee.symbol_id] != 0;
 }

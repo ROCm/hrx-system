@@ -395,7 +395,7 @@ class LowLowerPassTest : public ::testing::Test {
   void CheckSourceInvocationArgumentFacts(
       iree_string_view_t source,
       loom_target_select_call_policy_fn_t select_call_policy,
-      bool expect_argument_facts) {
+      bool expect_direct_callers, bool expect_argument_facts) {
     ModulePtr module = Parse(source);
     const loom_symbol_ref_t caller_ref =
         FindSymbolRef(module.get(), IREE_SV("caller"));
@@ -440,6 +440,10 @@ class LowLowerPassTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_low_source_invocation_facts_compute(
         &pass, module.get(), &selections, &arena, &invocation_facts));
 
+    EXPECT_EQ(loom_low_source_invocation_facts_has_direct_callers(
+                  &invocation_facts, helper),
+              expect_direct_callers);
+
     const loom_value_fact_table_view_t helper_facts =
         loom_low_source_invocation_facts_for_function(&invocation_facts,
                                                       helper);
@@ -465,7 +469,7 @@ class LowLowerPassTest : public ::testing::Test {
   loom_low_lower_policy_registry_t policy_registry_ = {};
 };
 
-TEST_F(LowLowerPassTest, InvocationFactsRequireExplicitDirectHelper) {
+TEST_F(LowLowerPassTest, InvocationFactsDescribeRetainedDirectCalls) {
   CheckSourceInvocationArgumentFacts(
       IREE_SV("func.def noinline @helper(%value: i32) {\n"
               "  func.return\n"
@@ -475,7 +479,7 @@ TEST_F(LowLowerPassTest, InvocationFactsRequireExplicitDirectHelper) {
               "  func.call @helper(%value) : (i32)\n"
               "  func.return\n"
               "}\n"),
-      loom_target_select_call_policy_direct, true);
+      loom_target_select_call_policy_direct, true, true);
   CheckSourceInvocationArgumentFacts(
       IREE_SV("func.def @helper(%value: i32) {\n"
               "  func.return\n"
@@ -485,7 +489,17 @@ TEST_F(LowLowerPassTest, InvocationFactsRequireExplicitDirectHelper) {
               "  func.call @helper(%value) : (i32)\n"
               "  func.return\n"
               "}\n"),
-      loom_target_select_call_policy_direct, false);
+      loom_target_select_call_policy_direct, true, true);
+  CheckSourceInvocationArgumentFacts(
+      IREE_SV("func.def inline @helper(%value: i32) {\n"
+              "  func.return\n"
+              "}\n"
+              "func.def @caller() {\n"
+              "  %value = scalar.constant 7 : i32\n"
+              "  func.call @helper(%value) : (i32)\n"
+              "  func.return\n"
+              "}\n"),
+      loom_target_select_call_policy_direct, false, false);
   CheckSourceInvocationArgumentFacts(
       IREE_SV("func.def noinline @helper(%value: i32) {\n"
               "  func.return\n"
@@ -495,7 +509,18 @@ TEST_F(LowLowerPassTest, InvocationFactsRequireExplicitDirectHelper) {
               "  func.call @helper(%value) : (i32)\n"
               "  func.return\n"
               "}\n"),
-      RequireInlineSemanticCalls, false);
+      RequireInlineSemanticCalls, false, false);
+  CheckSourceInvocationArgumentFacts(
+      IREE_SV("func.def @helper(%value: i32) {\n"
+              "  func.call @helper(%value) : (i32)\n"
+              "  func.return\n"
+              "}\n"
+              "func.def @caller() {\n"
+              "  %value = scalar.constant 7 : i32\n"
+              "  func.call @helper(%value) : (i32)\n"
+              "  func.return\n"
+              "}\n"),
+      loom_target_select_call_policy_direct, true, false);
 }
 
 TEST_F(LowLowerPassTest, SourceSelectionUsesPerFunctionTargetFacts) {

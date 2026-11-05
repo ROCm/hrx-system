@@ -50,6 +50,15 @@ static bool loom_wasm_type_is_scalar_f64(loom_type_t type) {
          loom_type_element_type(type) == LOOM_SCALAR_TYPE_F64;
 }
 
+bool loom_wasm_source_type_is_callable(loom_type_t source_type) {
+  return loom_type_is_buffer(source_type) || loom_type_is_view(source_type) ||
+         loom_wasm_type_is_i32_register(source_type) ||
+         loom_wasm_type_is_scalar_f32(source_type) ||
+         loom_wasm_type_is_scalar_i64(source_type) ||
+         loom_wasm_type_is_scalar_f64(source_type) ||
+         loom_wasm_vector_type_is_callable(source_type);
+}
+
 static bool loom_wasm_source_type_supported(void* user_data,
                                             const loom_module_t* module,
                                             loom_type_t source_type) {
@@ -207,8 +216,7 @@ static iree_status_t loom_wasm_map_argument(
       .abi_type = loom_type_none(),
       .body_type = loom_type_none(),
   };
-  if (loom_type_is_vector(source_type) &&
-      !loom_wasm_vector_type_is_callable(source_type)) {
+  if (!loom_wasm_source_type_is_callable(source_type)) {
     return iree_ok_status();
   }
   return loom_wasm_map_type(user_data, context, source_function_op, source_type,
