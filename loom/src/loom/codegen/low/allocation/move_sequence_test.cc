@@ -322,75 +322,105 @@ TEST(LowMoveSequenceTest, ReferenceTransfersPreserveParallelStateAndOwnership) {
   loom_low_move_sequence_scratch_t scratch;
   IREE_ASSERT_OK(loom_low_move_sequence_scratch_initialize(arena.arena(),
                                                            kCells, &scratch));
-  const loom_low_move_location_t temporary = Location(kCells);
+  const loom_low_move_location_t temporary = Location(kCells + 1);
   TemporaryResolver resolver = {&temporary, 1};
   const loom_low_move_sequence_options_t options = {
       ReferenceDescriptorSet(), {ResolveTemporary, &resolver}};
-  for (uint32_t shape = 0; shape < 64; ++shape) {
-    for (uint32_t consumed = 0; consumed < (1u << kCells); ++consumed) {
-      SCOPED_TRACE(shape);
-      SCOPED_TRACE(consumed);
-      const std::array<uint32_t, kCells + 1> original = {1, 2, 3, 0};
-      auto expected = original;
-      uint32_t destinations = 0;
-      uint32_t sources = 0;
-      uint32_t digits = shape;
-      iree_host_size_t count = 0;
-      for (uint32_t destination = 0; destination < kCells; ++destination) {
-        const uint32_t source = digits % (kCells + 1);
-        digits /= kCells + 1;
-        if (source == kCells) {
-          continue;
+  // Call arguments write packet cells; results read them. Neither group reads
+  // and writes the same packet cell. Packet zero and register zero are distinct
+  // owners, with packet zero represented by oracle cell three.
+  for (uint32_t packet_role = 0; packet_role < 3; ++packet_role) {
+    for (uint32_t shape = 0; shape < 64; ++shape) {
+      for (uint32_t consumed = 0; consumed < (1u << kCells); ++consumed) {
+        SCOPED_TRACE(packet_role);
+        SCOPED_TRACE(shape);
+        SCOPED_TRACE(consumed);
+        const std::array<uint32_t, kCells + 2> original = {1, 2, 3, 4, 0};
+        auto expected = original;
+        uint32_t destinations = 0;
+        uint32_t consumed_locations = 0;
+        uint32_t digits = shape;
+        iree_host_size_t count = 0;
+        for (uint32_t destination = 0; destination < kCells; ++destination) {
+          const uint32_t source = digits % (kCells + 1);
+          digits /= kCells + 1;
+          if (source == kCells) {
+            continue;
+          }
+          const uint32_t destination_cell =
+              packet_role == 1 && destination == 2 ? kCells : destination;
+          const uint32_t source_cell =
+              packet_role == 2 && source == 2 ? kCells : source;
+          destinations |= 1u << destination_cell;
+          if (consumed & (1u << source)) {
+            consumed_locations |= 1u << source_cell;
+          }
+          expected[destination_cell] = original[source_cell];
+          auto move = (consumed & (1u << source))
+                          ? Transfer(destination, source)
+                          : Move(destination, source);
+          if (destination_cell == kCells) {
+            move.destination.location_kind =
+                LOOM_LOW_ALLOCATION_LOCATION_CALL_STORAGE;
+            move.destination.location = 0;
+          }
+          if (source_cell == kCells) {
+            move.source.location_kind =
+                LOOM_LOW_ALLOCATION_LOCATION_CALL_STORAGE;
+            move.source.location = 0;
+          }
+          scratch.moves[count++] = move;
         }
-        destinations |= 1u << destination;
-        sources |= 1u << source;
-        expected[destination] = original[source];
-        scratch.moves[count++] = (consumed & (1u << source))
-                                     ? Transfer(destination, source)
-                                     : Move(destination, source);
+        for (uint32_t source = 0; source <= kCells; ++source) {
+          if ((consumed_locations & ~destinations) & (1u << source)) {
+            expected[source] = 0;
+          }
+        }
+        loom_low_move_t output[kCells * 2];
+        iree_host_size_t output_count = 0;
+        bool complete = false;
+        IREE_ASSERT_OK(loom_low_move_sequence_resolve(
+            &scratch, count, &options, IREE_ARRAYSIZE(output), output,
+            &output_count, nullptr, &complete));
+        ASSERT_TRUE(complete);
+        auto actual = original;
+        std::array<uint32_t, kCells + 2> owners = {0, 1, 1, 1, 1};
+        for (iree_host_size_t i = 0; i < output_count; ++i) {
+          const auto& move = output[i];
+          const auto source = move.source.location_kind ==
+                                      LOOM_LOW_ALLOCATION_LOCATION_CALL_STORAGE
+                                  ? kCells
+                                  : move.source.location;
+          const auto destination =
+              move.destination.location_kind ==
+                      LOOM_LOW_ALLOCATION_LOCATION_CALL_STORAGE
+                  ? kCells
+                  : move.destination.location;
+          const auto payload = actual[source];
+          ASSERT_NE(payload, 0u);
+          ASSERT_NE(owners[payload], 0u);
+          if (move.kind == LOOM_LOW_MOVE_KIND_TRANSFER) {
+            actual[source] = 0;
+          } else {
+            ASSERT_EQ(move.kind, LOOM_LOW_MOVE_KIND_COPY);
+            ++owners[payload];
+          }
+          const auto replaced = actual[destination];
+          if (replaced) {
+            ASSERT_NE(owners[replaced], 0u);
+            --owners[replaced];
+          }
+          actual[destination] = payload;
+        }
+        EXPECT_EQ(actual, expected);
+        std::array<uint32_t, kCells + 2> expected_owners = {};
+        for (uint32_t payload : expected) {
+          if (payload) {
+            ++expected_owners[payload];
+          }
+        }
+        EXPECT_EQ(owners, expected_owners);
       }
-      for (uint32_t source = 0; source < kCells; ++source) {
-        if ((sources & consumed & ~destinations) & (1u << source)) {
-          expected[source] = 0;
-        }
-      }
-      loom_low_move_t output[kCells * 2];
-      iree_host_size_t output_count = 0;
-      bool complete = false;
-      IREE_ASSERT_OK(loom_low_move_sequence_resolve(
-          &scratch, count, &options, IREE_ARRAYSIZE(output), output,
-          &output_count, nullptr, &complete));
-      ASSERT_TRUE(complete);
-      auto actual = original;
-      std::array<uint32_t, kCells + 1> owners = {0, 1, 1, 1};
-      for (iree_host_size_t i = 0; i < output_count; ++i) {
-        const auto& move = output[i];
-        const auto source = move.source.location;
-        const auto destination = move.destination.location;
-        const auto payload = actual[source];
-        ASSERT_NE(payload, 0u);
-        ASSERT_NE(owners[payload], 0u);
-        if (move.kind == LOOM_LOW_MOVE_KIND_TRANSFER) {
-          actual[source] = 0;
-        } else {
-          ASSERT_EQ(move.kind, LOOM_LOW_MOVE_KIND_COPY);
-          ++owners[payload];
-        }
-        const auto replaced = actual[destination];
-        if (replaced) {
-          ASSERT_NE(owners[replaced], 0u);
-          --owners[replaced];
-        }
-        actual[destination] = payload;
-      }
-      EXPECT_EQ(actual, expected);
-      std::array<uint32_t, kCells + 1> expected_owners = {};
-      for (uint32_t payload : expected) {
-        if (payload) {
-          ++expected_owners[payload];
-        }
-      }
-      EXPECT_EQ(owners, expected_owners);
     }
   }
 }

@@ -257,9 +257,9 @@ typedef struct loom_low_allocation_call_moves_t {
   uint16_t argument_count;
   // Complete semantic result count, including storage ABI results.
   uint16_t result_count;
-  // Register transport immediately before transferring control to the callee.
+  // Register and call-packet transport before transferring control.
   loom_low_move_group_t arguments;
-  // Register transport immediately after the callee returns.
+  // Register and call-packet transport after the callee returns.
   loom_low_move_group_t results;
 } loom_low_allocation_call_moves_t;
 

@@ -24,7 +24,7 @@ typedef struct loom_low_move_location_t {
   uint16_t location_kind;
   // Register class in the owning plan's descriptor set.
   uint16_t descriptor_reg_class_id;
-  // Physical register, target ID, provisional spill slot, or move-cell ordinal.
+  // Physical register, target ID, spill, move, binding, or call-packet ordinal.
   uint32_t location;
 } loom_low_move_location_t;
 

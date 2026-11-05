@@ -225,3 +225,77 @@ vm.module core(0.0) {
   }
 
 }
+
+// ====
+// Overflow call arguments transfer source owners through the same plan as the
+// direct register prefix. The packet copy must not retain the seventeenth
+// argument until this caller returns after its following observation.
+// RUN: emit vm-dis
+
+vm.target<core> @vm
+
+type.decl import("provider", "object") @Object
+
+func.decl import("provider", "consume") target(@vm) @consume(%value0: ref<@Object>, %value1: ref<@Object>, %value2: ref<@Object>, %value3: ref<@Object>, %value4: ref<@Object>, %value5: ref<@Object>, %value6: ref<@Object>, %value7: ref<@Object>, %value8: ref<@Object>, %value9: ref<@Object>, %value10: ref<@Object>, %value11: ref<@Object>, %value12: ref<@Object>, %value13: ref<@Object>, %value14: ref<@Object>, %value15: ref<@Object>, %value16: ref<@Object>)
+
+func.decl import("provider", "observe") target(@vm) @observe()
+
+func.def public target(@vm) @forward(%value0: ref<@Object>, %value1: ref<@Object>, %value2: ref<@Object>, %value3: ref<@Object>, %value4: ref<@Object>, %value5: ref<@Object>, %value6: ref<@Object>, %value7: ref<@Object>, %value8: ref<@Object>, %value9: ref<@Object>, %value10: ref<@Object>, %value11: ref<@Object>, %value12: ref<@Object>, %value13: ref<@Object>, %value14: ref<@Object>, %value15: ref<@Object>, %value16: ref<@Object>) {
+  func.call @consume(%value0, %value1, %value2, %value3, %value4, %value5, %value6, %value7, %value8, %value9, %value10, %value11, %value12, %value13, %value14, %value15, %value16) : (ref<@Object>, ref<@Object>, ref<@Object>, ref<@Object>, ref<@Object>, ref<@Object>, ref<@Object>, ref<@Object>, ref<@Object>, ref<@Object>, ref<@Object>, ref<@Object>, ref<@Object>, ref<@Object>, ref<@Object>, ref<@Object>, ref<@Object>)
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "forward"
+    string @string1 = "provider"
+    string @string2 = "object"
+    string @string3 = "provider"
+    string @string4 = "consume"
+    string @string5 = "observe"
+  }
+
+  section ref_types alignment(8) {
+    namespace @ref_group0 name(@string1) {
+      ref_type @ref_type0 name(@string2)
+    }
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 () -> ()
+    signature @signature1 (ref(@ref_type0), ref(@ref_type0), ref(@ref_type0), ref(@ref_type0), ref(@ref_type0), ref(@ref_type0), ref(@ref_type0), ref(@ref_type0), ref(@ref_type0), ref(@ref_type0), ref(@ref_type0), ref(@ref_type0), ref(@ref_type0), ref(@ref_type0), ref(@ref_type0), ref(@ref_type0), ref(@ref_type0)) -> ()
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+    callable @callable1 flags([]) depth(0) : @signature1
+  }
+
+  section imports alignment(8) {
+    group @import_group0 module_name(@string3) {
+      import @import0 name(@string4) flags([]) : @callable1
+      import @import1 name(@string5) flags([]) : @callable0
+    }
+  }
+
+  section exports alignment(8) {
+    export @export0 name(@string0) : @callable1 = @function0
+  }
+
+  section functions alignment(8) {
+    func @function0 : @callable1 flags([has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 17, function_registers = 0, local_refs = 1, local_functions = 0) {
+    ^bb0:
+      control.block
+      %r16 = ref.abi.argument.load.move 0
+    ^bb1:
+      control.block
+      ref.stack.store.move %r16, #r0
+      control.call @import0 {direct_ref_move_mask = 0xFFFF}
+      control.call @import1 {direct_ref_move_mask = 0x0000}
+      control.return
+    }
+  }
+
+}

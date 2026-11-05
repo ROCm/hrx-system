@@ -128,6 +128,35 @@ static iree_status_t loom_vm_function_copy_value(iree_io_stream_t* stream,
   return iree_io_stream_write(stream, sizeof(instruction), &instruction);
 }
 
+static bool loom_vm_move_location_is_storage(
+    const loom_low_move_location_t* location) {
+  return location->location_kind == LOOM_LOW_ALLOCATION_LOCATION_MOVE_STORAGE ||
+         location->location_kind == LOOM_LOW_ALLOCATION_LOCATION_STORAGE ||
+         location->location_kind == LOOM_LOW_ALLOCATION_LOCATION_CALL_STORAGE;
+}
+
+// The shared plan owns the storage category and coordinate. Frame layout only
+// translates it to the VM's byte offset or reference-slot ordinal.
+static uint16_t loom_vm_move_storage_location(
+    const loom_vm_function_storage_t* storage,
+    const loom_low_move_location_t* location) {
+  switch (location->location_kind) {
+    case LOOM_LOW_ALLOCATION_LOCATION_MOVE_STORAGE:
+      return storage->move_locations[location->location];
+    case LOOM_LOW_ALLOCATION_LOCATION_STORAGE:
+      return storage->binding_locations[location->location];
+    case LOOM_LOW_ALLOCATION_LOCATION_CALL_STORAGE:
+      return (uint16_t)(location->location *
+                        (location->descriptor_reg_class_id ==
+                                 VM_CORE_REG_CLASS_ID_REF
+                             ? 1
+                             : sizeof(uint64_t)));
+    default:
+      IREE_ASSERT_UNREACHABLE("move does not name a storage cell");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+}
+
 static iree_status_t loom_vm_function_moves(
     const loom_low_move_t* moves, loom_low_move_range_t range,
     const loom_vm_function_storage_t* storage, iree_io_stream_t* stream) {
@@ -135,25 +164,30 @@ static iree_status_t loom_vm_function_moves(
   for (iree_host_size_t i = 0; i < range.count && iree_status_is_ok(status);
        ++i) {
     const loom_low_move_t* move = &moves[range.start + i];
-    const bool is_store =
-        move->destination.location_kind ==
-            LOOM_LOW_ALLOCATION_LOCATION_MOVE_STORAGE ||
-        move->destination.location_kind == LOOM_LOW_ALLOCATION_LOCATION_STORAGE;
-    const bool is_load =
-        move->source.location_kind ==
-            LOOM_LOW_ALLOCATION_LOCATION_MOVE_STORAGE ||
-        move->source.location_kind == LOOM_LOW_ALLOCATION_LOCATION_STORAGE;
-    if (is_store || is_load) {
+    const bool is_store = loom_vm_move_location_is_storage(&move->destination);
+    const bool is_load = loom_vm_move_location_is_storage(&move->source);
+    const bool is_ref =
+        move->source.descriptor_reg_class_id == VM_CORE_REG_CLASS_ID_REF;
+    const bool transfer = move->kind == LOOM_LOW_MOVE_KIND_TRANSFER;
+    if (is_store && is_load) {
+      const uint16_t source =
+          loom_vm_move_storage_location(storage, &move->source);
+      const uint16_t destination =
+          loom_vm_move_storage_location(storage, &move->destination);
+      status =
+          is_ref ? loom_vm_function_copy_ref(
+                       stream, storage, destination, source,
+                       transfer ? IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_MOVE
+                                : IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_RETAIN,
+                       IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_MOVE)
+                 : loom_vm_function_copy_value(stream, destination, source);
+    } else if (is_store || is_load) {
       const loom_low_move_location_t* cell =
           is_store ? &move->destination : &move->source;
       const loom_low_move_location_t* reg =
           is_store ? &move->source : &move->destination;
-      const uint16_t location =
-          cell->location_kind == LOOM_LOW_ALLOCATION_LOCATION_STORAGE
-              ? storage->binding_locations[cell->location]
-              : storage->move_locations[cell->location];
-      if (reg->descriptor_reg_class_id == VM_CORE_REG_CLASS_ID_REF) {
-        const bool transfer = move->kind == LOOM_LOW_MOVE_KIND_TRANSFER;
+      const uint16_t location = loom_vm_move_storage_location(storage, cell);
+      if (is_ref) {
         status = loom_vm_function_transfer_refs(
             stream,
             is_store
@@ -166,21 +200,18 @@ static iree_status_t loom_vm_function_moves(
         status = loom_vm_function_transfer_stack(
             stream, location, (uint16_t)reg->location, 1, is_store);
       }
-      continue;
+    } else {
+      // Register-pair encodings share operand locations. Allocation retains
+      // whether a source survives or transfers its complete reference carrier.
+      const iree_vm_bytecode_value_copy_t instruction = {
+          .opcode = is_ref ? (transfer ? IREE_VM_BYTECODE_OPCODE_REF_MOVE
+                                       : IREE_VM_BYTECODE_OPCODE_REF_RETAIN)
+                           : IREE_VM_BYTECODE_OPCODE_VALUE_COPY,
+          .destination_v8 = (uint8_t)move->destination.location,
+          .source_v8 = (uint8_t)move->source.location,
+      };
+      status = iree_io_stream_write(stream, sizeof(instruction), &instruction);
     }
-    // Register-pair encodings share operand locations. Allocation retains
-    // whether a reference source survives or transfers its complete carrier.
-    const iree_vm_bytecode_value_copy_t instruction = {
-        .opcode =
-            move->source.descriptor_reg_class_id == VM_CORE_REG_CLASS_ID_REF
-                ? (move->kind == LOOM_LOW_MOVE_KIND_TRANSFER
-                       ? IREE_VM_BYTECODE_OPCODE_REF_MOVE
-                       : IREE_VM_BYTECODE_OPCODE_REF_RETAIN)
-                : IREE_VM_BYTECODE_OPCODE_VALUE_COPY,
-        .destination_v8 = (uint8_t)move->destination.location,
-        .source_v8 = (uint8_t)move->source.location,
-    };
-    status = iree_io_stream_write(stream, sizeof(instruction), &instruction);
   }
   return status;
 }
@@ -488,31 +519,12 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_vm_function_packet(
   return iree_io_stream_write(stream, packet_length, packet);
 }
 
-typedef struct loom_vm_call_bank_t {
-  // Source-ordered final argument assignments, including stored values.
-  const loom_low_allocation_assignment_t** arguments;
-  // Source-ordered final result assignments, including stored values.
-  const loom_low_allocation_assignment_t** results;
-  // Number of logical arguments carried by this bank.
-  uint16_t argument_count;
-  // Number of logical results carried by this bank.
-  uint16_t result_count;
-} loom_vm_call_bank_t;
-
-typedef struct loom_vm_call_scratch_t {
-  // Reusable source-ordered physical locations, partitioned by register bank.
-  loom_vm_call_bank_t banks[2];
-  // Invocation storage shared by calls, returns, entry, and ordinary traffic.
-  loom_vm_function_storage_t storage;
-} loom_vm_call_scratch_t;
-
 // The scheduler retains call sites; module collection retains their signatures.
 // Reserve the canonical offset-zero packet before projecting local storage.
 static iree_status_t loom_vm_function_plan_calls(
     const loom_low_emission_frame_t* frame,
-    const loom_vm_program_build_t* functions, iree_arena_allocator_t* arena,
-    loom_vm_call_scratch_t* scratch) {
-  uint16_t max_arguments[2] = {0}, max_results[2] = {0};
+    const loom_vm_program_build_t* functions,
+    loom_vm_function_storage_t* storage) {
   uint32_t packet_bytes = 0;
   uint32_t packet_refs = 0;
   for (iree_host_size_t i = 0; i < frame->schedule.call_node_count; ++i) {
@@ -536,17 +548,6 @@ static iree_status_t loom_vm_function_plan_calls(
                                iree_min(16, signature->argument_ref_count_u16) +
                                signature->result_ref_count_u16 -
                                iree_min(16, signature->result_ref_count_u16));
-    max_arguments[VM_CORE_REG_CLASS_ID_VALUE] =
-        iree_max(max_arguments[VM_CORE_REG_CLASS_ID_VALUE],
-                 signature->argument_value_count_u16);
-    max_arguments[VM_CORE_REG_CLASS_ID_REF] =
-        iree_max(max_arguments[VM_CORE_REG_CLASS_ID_REF],
-                 signature->argument_ref_count_u16);
-    max_results[VM_CORE_REG_CLASS_ID_VALUE] =
-        iree_max(max_results[VM_CORE_REG_CLASS_ID_VALUE],
-                 signature->result_value_count_u16);
-    max_results[VM_CORE_REG_CLASS_ID_REF] = iree_max(
-        max_results[VM_CORE_REG_CLASS_ID_REF], signature->result_ref_count_u16);
   }
   if (packet_bytes > UINT16_MAX ||
       frame->schedule.requirements.storage_layout.space_sizes.stack_bytes >
@@ -554,166 +555,58 @@ static iree_status_t loom_vm_function_plan_calls(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "VM local storage exceeds 65535 bytes");
   }
-  scratch->storage.local_base = (uint16_t)packet_bytes;
-  scratch->storage.packet_ref_count = packet_refs;
-  const iree_host_size_t location_count = (iree_host_size_t)max_arguments[0] +
-                                          max_arguments[1] + max_results[0] +
-                                          max_results[1];
-  if (location_count) {
-    const loom_low_allocation_assignment_t** locations = NULL;
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, location_count, sizeof(*locations), (void**)&locations));
-    for (uint16_t bank = 0; bank < 2; ++bank) {
-      scratch->banks[bank].arguments = locations;
-      locations += max_arguments[bank];
-      scratch->banks[bank].results = locations;
-      locations += max_results[bank];
-    }
-  }
+  storage->local_base = (uint16_t)packet_bytes;
+  storage->packet_ref_count = packet_refs;
   return iree_ok_status();
 }
 
-// Captures each allocated location once while partitioning logical operands
-// and results into the independent architectural banks.
-static void loom_vm_function_call_bindings(
-    const loom_low_emission_frame_t* frame,
-    const loom_low_schedule_node_t* node, loom_vm_call_bank_t* banks) {
-  for (uint16_t bank = 0; bank < 2; ++bank) {
-    banks[bank].argument_count = banks[bank].result_count = 0;
-  }
-  for (uint16_t side = 0; side < 2; ++side) {
-    const uint16_t count = side ? node->result_count : node->operand_count;
-    const loom_value_ordinal_t* ordinals =
-        side ? loom_low_schedule_node_const_result_ordinals(node)
-             : loom_low_schedule_node_const_operand_ordinals(node);
-    for (uint16_t i = 0; i < count; ++i) {
-      const loom_low_allocation_assignment_t* assignment =
-          loom_low_allocation_assignment_for_value_ordinal(&frame->allocation,
-                                                           ordinals[i], NULL);
-      loom_vm_call_bank_t* bank = &banks[assignment->descriptor_reg_class_id];
-      uint16_t* bank_count = side ? &bank->result_count : &bank->argument_count;
-      (side ? bank->results : bank->arguments)[(*bank_count)++] = assignment;
-    }
-  }
-}
-
-// The shared allocator preserves live caller values and resolves register
-// permutations. Overflow arguments are stored before the argument permutation;
-// overflow results load after direct results leave their ABI registers.
+// The shared plan preserves live callers and sequences the entire register and
+// packet transfer graph. Emission carries no separate overflow ownership rule.
 IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_vm_function_call(
     const loom_low_emission_frame_t* frame, uint32_t node_index,
-    const loom_vm_program_build_t* functions, loom_vm_call_scratch_t* scratch,
-    iree_io_stream_t* stream, iree_vm_bytecode_v0_function_row_t* out_row) {
+    const loom_vm_program_build_t* functions,
+    const loom_vm_function_storage_t* storage, iree_io_stream_t* stream,
+    iree_vm_bytecode_v0_function_row_t* out_row) {
   const loom_low_schedule_node_t* node = &frame->schedule.nodes[node_index];
   const loom_vm_program_callable_t* binding =
       functions
           ->bindings_by_symbol[loom_low_func_call_callee(node->op).symbol_id];
-  loom_vm_call_bank_t* banks = scratch->banks;
-  loom_vm_function_call_bindings(frame, node, banks);
-  const loom_vm_call_bank_t* values = &banks[VM_CORE_REG_CLASS_ID_VALUE];
-  const loom_vm_call_bank_t* refs = &banks[VM_CORE_REG_CLASS_ID_REF];
+  const iree_vm_bytecode_v0_signature_row_t* signature =
+      &binding->signature.row;
   const loom_low_allocation_call_moves_t* moves =
       loom_low_allocation_find_call_moves_by_source_ordinal(&frame->allocation,
                                                             node_index);
   out_row->flags_u16 |= IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL;
-  out_row->value_register_count_u16 = iree_max(
-      out_row->value_register_count_u16,
-      iree_min(16, iree_max(values->argument_count, values->result_count)));
-  out_row->ref_register_count_u16 = iree_max(
-      out_row->ref_register_count_u16,
-      iree_min(16, iree_max(refs->argument_count, refs->result_count)));
-  iree_status_t status = iree_ok_status();
-  for (uint16_t i = 16; i < values->argument_count && iree_status_is_ok(status);
-       ++i) {
-    const loom_low_allocation_assignment_t* source = values->arguments[i];
-    status =
-        source->location_kind == LOOM_LOW_ALLOCATION_LOCATION_STORAGE
-            ? loom_vm_function_copy_value(
-                  stream, (i - 16) * sizeof(uint64_t),
-                  scratch->storage.binding_locations[source->location_base])
-            : loom_vm_function_transfer_stack(
-                  stream, (i - 16) * sizeof(uint64_t),
-                  (uint16_t)source->location_base, 1, true);
-  }
-  for (uint16_t i = 16; i < refs->argument_count && iree_status_is_ok(status);
-       ++i) {
-    const loom_low_allocation_assignment_t* source = refs->arguments[i];
-    status =
-        source->location_kind == LOOM_LOW_ALLOCATION_LOCATION_STORAGE
-            ? loom_vm_function_copy_ref(
-                  stream, &scratch->storage, i - 16,
-                  scratch->storage.binding_locations[source->location_base],
-                  IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_RETAIN,
-                  IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_MOVE)
-            : loom_vm_function_transfer_refs(
-                  stream, IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_RETAIN,
-                  i - 16, (uint16_t)source->location_base, 1);
-  }
-  if (iree_status_is_ok(status)) {
-    status =
-        loom_vm_function_moves(frame->allocation.moves, moves->arguments.moves,
-                               &scratch->storage, stream);
-  }
-  if (iree_status_is_ok(status)) {
-    // The allocator keeps live references outside the overwritten prefix.
-    // Each argument register therefore transfers its owned reference to the
-    // callee, including identity moves omitted by the parallel-move solver.
-    const iree_vm_bytecode_control_call_t instruction = {
-        .opcode = IREE_VM_BYTECODE_OPCODE_CONTROL_CALL,
-        .target_kind_u8 = binding->target_kind,
-        .target_ordinal_u16 = binding->ordinal,
-        .direct_ref_move_mask_u16 =
-            (uint16_t)((1u << iree_min(16, refs->argument_count)) - 1),
-    };
-    status = iree_io_stream_write(stream, sizeof(instruction), &instruction);
-  }
-  if (iree_status_is_ok(status)) {
-    // Returned ABI cells transfer into their assigned locations. The shared
-    // move plan preserves aliases until their last read and retires scratch.
-    status =
-        loom_vm_function_moves(frame->allocation.moves, moves->results.moves,
-                               &scratch->storage, stream);
-  }
-  const uint16_t argument_overflow =
-      values->argument_count - iree_min(16, values->argument_count);
-  for (uint16_t i = 16; i < values->result_count && iree_status_is_ok(status);
-       ++i) {
-    const loom_low_allocation_assignment_t* destination = values->results[i];
-    status = destination->location_kind == LOOM_LOW_ALLOCATION_LOCATION_STORAGE
-                 ? loom_vm_function_copy_value(
-                       stream,
-                       scratch->storage
-                           .binding_locations[destination->location_base],
-                       (argument_overflow + i - 16) * sizeof(uint64_t))
-                 : loom_vm_function_transfer_stack(
-                       stream, (argument_overflow + i - 16) * sizeof(uint64_t),
-                       (uint16_t)destination->location_base, 1, false);
-  }
-  const uint16_t ref_argument_overflow =
-      refs->argument_count - iree_min(16, refs->argument_count);
-  for (uint16_t i = 16; i < refs->result_count && iree_status_is_ok(status);
-       ++i) {
-    const loom_low_allocation_assignment_t* destination = refs->results[i];
-    status = destination->location_kind == LOOM_LOW_ALLOCATION_LOCATION_STORAGE
-                 ? loom_vm_function_copy_ref(
-                       stream, &scratch->storage,
-                       scratch->storage
-                           .binding_locations[destination->location_base],
-                       ref_argument_overflow + i - 16,
-                       IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_MOVE,
-                       IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_MOVE)
-                 : loom_vm_function_transfer_refs(
-                       stream, IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_MOVE,
-                       ref_argument_overflow + i - 16,
-                       (uint16_t)destination->location_base, 1);
-  }
-  return status;
+  out_row->value_register_count_u16 =
+      iree_max(out_row->value_register_count_u16,
+               iree_min(16, iree_max(signature->argument_value_count_u16,
+                                     signature->result_value_count_u16)));
+  out_row->ref_register_count_u16 =
+      iree_max(out_row->ref_register_count_u16,
+               iree_min(16, iree_max(signature->argument_ref_count_u16,
+                                     signature->result_ref_count_u16)));
+  IREE_RETURN_IF_ERROR(loom_vm_function_moves(
+      frame->allocation.moves, moves->arguments.moves, storage, stream));
+  // Live source homes and repeated fields are preserved by the shared move
+  // plan. Every direct argument cell therefore transfers its complete state.
+  const iree_vm_bytecode_control_call_t instruction = {
+      .opcode = IREE_VM_BYTECODE_OPCODE_CONTROL_CALL,
+      .target_kind_u8 = binding->target_kind,
+      .target_ordinal_u16 = binding->ordinal,
+      .direct_ref_move_mask_u16 =
+          (uint16_t)((1u << iree_min(16, signature->argument_ref_count_u16)) -
+                     1),
+  };
+  IREE_RETURN_IF_ERROR(
+      iree_io_stream_write(stream, sizeof(instruction), &instruction));
+  return loom_vm_function_moves(frame->allocation.moves, moves->results.moves,
+                                storage, stream);
 }
 
 static iree_status_t loom_vm_function_storage(
     const loom_low_emission_frame_t* frame,
-    const loom_low_schedule_node_t* node, const loom_vm_call_scratch_t* scratch,
-    iree_io_stream_t* stream) {
+    const loom_low_schedule_node_t* node,
+    const loom_vm_function_storage_t* storage, iree_io_stream_t* stream) {
   const bool is_store = loom_low_spill_isa(node->op);
   const loom_value_id_t storage_value = is_store
                                             ? loom_low_spill_storage(node->op)
@@ -767,13 +660,12 @@ static iree_status_t loom_vm_function_storage(
         stream,
         is_store ? IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_RETAIN
                  : IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_RETAIN,
-        (uint16_t)(scratch->storage.packet_ref_count +
-                   byte_offset / cell_bytes),
+        (uint16_t)(storage->packet_ref_count + byte_offset / cell_bytes),
         (uint16_t)assignment->location_base,
         (uint16_t)assignment->location_count);
   }
   return loom_vm_function_transfer_stack(
-      stream, (uint16_t)(scratch->storage.local_base + byte_offset),
+      stream, (uint16_t)(storage->local_base + byte_offset),
       (uint16_t)assignment->location_base, (uint16_t)assignment->location_count,
       is_store);
 }
@@ -898,7 +790,7 @@ iree_status_t loom_vm_function_plan_write(
       .loop_execution =
           function_version != NULL ? function_version->loop_execution : NULL,
       .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
-      .allocation_entry_locations = signature->registers,
+      .allocation_entry_locations = signature->locations,
       .allocation_entry_location_count = argument_count,
       .call_contracts =
           {
@@ -932,37 +824,33 @@ iree_status_t loom_vm_function_plan_write(
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "VM local storage requires stack or private space");
   }
-  // Preparation writes the layout and location arrays. Each emitted call
-  // initializes its own bank counts; leaves never access the banks.
-  loom_vm_call_scratch_t call_scratch = {0};
+  // Preparation projects invocation storage once; calls consume retained moves.
+  loom_vm_function_storage_t storage = {0};
   IREE_RETURN_IF_ERROR(
-      loom_vm_function_plan_calls(&frame, functions, arena, &call_scratch));
-  uint64_t local_byte_length =
-      call_scratch.storage.local_base + local_storage.stack_bytes;
+      loom_vm_function_plan_calls(&frame, functions, &storage));
+  uint64_t local_byte_length = storage.local_base + local_storage.stack_bytes;
   const uint32_t ref_cell_bytes =
       frame.target.descriptor_set->reg_classes[VM_CORE_REG_CLASS_ID_REF]
           .alloc_unit_bits /
       8;
   const uint64_t private_ref_count =
       iree_device_size_ceil_div(local_storage.private_bytes, ref_cell_bytes);
-  uint64_t local_ref_count =
-      call_scratch.storage.packet_ref_count + private_ref_count;
+  uint64_t local_ref_count = storage.packet_ref_count + private_ref_count;
   if (frame.allocation.move_storage_count) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         arena, frame.allocation.move_storage_count,
-        sizeof(*call_scratch.storage.move_locations),
-        (void**)&call_scratch.storage.move_locations));
+        sizeof(*storage.move_locations), (void**)&storage.move_locations));
     for (iree_host_size_t i = 0; i < frame.allocation.move_storage_count; ++i) {
       const loom_low_move_storage_t* cell = &frame.allocation.move_storage[i];
       if (cell->register_class == VM_CORE_REG_CLASS_ID_REF) {
-        call_scratch.storage.move_locations[i] = (uint16_t)local_ref_count;
+        storage.move_locations[i] = (uint16_t)local_ref_count;
         local_ref_count += cell->byte_length / ref_cell_bytes;
       } else {
         uint64_t byte_offset = 0;
         IREE_RETURN_IF_ERROR(
             loom_storage_layout_append(cell->byte_length, cell->byte_alignment,
                                        &local_byte_length, &byte_offset));
-        call_scratch.storage.move_locations[i] = (uint16_t)byte_offset;
+        storage.move_locations[i] = (uint16_t)byte_offset;
       }
     }
   }
@@ -972,9 +860,8 @@ iree_status_t loom_vm_function_plan_write(
   bool needs_ref_scratch = signature->row.result_ref_count_u16 > 16;
   if (transport) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, transport->binding_count,
-        sizeof(*call_scratch.storage.binding_locations),
-        (void**)&call_scratch.storage.binding_locations));
+        arena, transport->binding_count, sizeof(*storage.binding_locations),
+        (void**)&storage.binding_locations));
     for (iree_host_size_t i = 0; i < transport->binding_count; ++i) {
       const loom_low_storage_transport_binding_t* binding =
           &transport->bindings[i];
@@ -990,17 +877,16 @@ iree_status_t loom_vm_function_plan_write(
             IREE_STATUS_INVALID_ARGUMENT,
             "VM reference storage requires cell-aligned offsets");
       }
-      call_scratch.storage.binding_locations[i] =
-          (uint16_t)(is_ref ? call_scratch.storage.packet_ref_count +
+      storage.binding_locations[i] =
+          (uint16_t)(is_ref ? storage.packet_ref_count +
                                   binding->byte_offset / ref_cell_bytes
-                            : call_scratch.storage.local_base +
-                                  binding->byte_offset);
+                            : storage.local_base + binding->byte_offset);
       // Direct ABI registers transfer to storage without a borrowed register.
       // Byte-stack packet copies do too; only incoming/return overflow needs
       // value scratch. Reference packet copies preserve an owner in a slot.
       if (is_ref) {
         needs_ref_scratch |= signature->row.argument_ref_count_u16 > 16 ||
-                             call_scratch.storage.packet_ref_count != 0;
+                             storage.packet_ref_count != 0;
       } else {
         needs_value_scratch |= signature->row.argument_value_count_u16 > 16 ||
                                signature->row.result_value_count_u16 > 16;
@@ -1011,10 +897,10 @@ iree_status_t loom_vm_function_plan_write(
     uint64_t byte_offset = 0;
     IREE_RETURN_IF_ERROR(loom_storage_layout_append(
         sizeof(uint64_t), sizeof(uint64_t), &local_byte_length, &byte_offset));
-    call_scratch.storage.borrowed_value = (uint16_t)byte_offset;
+    storage.borrowed_value = (uint16_t)byte_offset;
   }
   if (needs_ref_scratch) {
-    call_scratch.storage.borrowed_ref = (uint16_t)local_ref_count++;
+    storage.borrowed_ref = (uint16_t)local_ref_count++;
   }
   if (local_byte_length > UINT16_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -1068,11 +954,11 @@ iree_status_t loom_vm_function_plan_write(
     if (iree_status_is_ok(status)) {
       status = loom_vm_function_moves(frame.allocation.moves,
                                       frame.allocation.entry_moves.moves,
-                                      &call_scratch.storage, stream);
+                                      &storage, stream);
     }
     if (iree_status_is_ok(status)) {
       status = loom_vm_function_arguments(&frame, signature, argument_count,
-                                          &call_scratch.storage, stream);
+                                          &storage, stream);
     }
     ++out_row->block_count_u32;
   }
@@ -1093,18 +979,17 @@ iree_status_t loom_vm_function_plan_write(
       if (node->descriptor) {
         status = loom_vm_function_packet(&frame, node, functions, stream);
       } else if (loom_low_func_call_isa(node->op)) {
-        status = loom_vm_function_call(&frame, node_index, functions,
-                                       &call_scratch, stream, out_row);
+        status = loom_vm_function_call(&frame, node_index, functions, &storage,
+                                       stream, out_row);
       } else if (loom_low_storage_reserve_isa(node->op) ||
                  loom_low_storage_view_isa(node->op)) {
         // Storage layout is already fixed by the shared scheduler.
       } else if (loom_low_spill_isa(node->op) ||
                  loom_low_reload_isa(node->op)) {
-        status = loom_vm_function_storage(&frame, node, &call_scratch, stream);
+        status = loom_vm_function_storage(&frame, node, &storage, stream);
       } else if (loom_low_return_isa(node->op)) {
         status = loom_vm_function_return(&frame, node, &return_scratch,
-                                         &call_scratch.storage, stream,
-                                         signature, out_row);
+                                         &storage, stream, signature, out_row);
       } else if (loom_low_unreachable_isa(node->op)) {
         const iree_vm_bytecode_control_return_t instruction = {
             .opcode = IREE_VM_BYTECODE_OPCODE_CONTROL_RETURN,
@@ -1119,7 +1004,7 @@ iree_status_t loom_vm_function_plan_write(
               frame.allocation.edge_copy_groups[edge_copy_index++]
                   .move_group.moves;
           status = loom_vm_function_moves(frame.allocation.moves, range,
-                                          &call_scratch.storage, stream);
+                                          &storage, stream);
         }
         const uint16_t target =
             graph->successor_indices[graph->blocks[b].successor_start];
@@ -1163,7 +1048,7 @@ iree_status_t loom_vm_function_plan_write(
         if (group) {
           const loom_low_move_range_t range = group->move_group.moves;
           status = loom_vm_function_moves(frame.allocation.moves, range,
-                                          &call_scratch.storage, stream);
+                                          &storage, stream);
         }
       } else {
         status = iree_make_status(

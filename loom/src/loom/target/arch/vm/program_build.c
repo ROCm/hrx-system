@@ -268,22 +268,22 @@ static iree_status_t loom_vm_program_collect(
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(plan_arena, iree_max(descriptor_count, 1),
                                 sizeof(*descriptors), (void**)&descriptors));
-  loom_low_allocation_abi_location_t* registers = NULL;
+  loom_low_allocation_abi_location_t* locations = NULL;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(plan_arena, iree_max(descriptor_count, 1),
-                                sizeof(*registers), (void**)&registers));
+                                sizeof(*locations), (void**)&locations));
   for (uint32_t i = 0; i < count; ++i) {
     functions[i].signature.fields = descriptors;
-    functions[i].signature.registers = registers;
+    functions[i].signature.locations = locations;
     functions[i].call_contract = (loom_low_call_contract_t){
-        .arguments = registers,
+        .arguments = locations,
         .argument_count = functions[i].argument_count,
-        .results = registers + functions[i].argument_count,
+        .results = locations + functions[i].argument_count,
         .result_count = functions[i].results.count,
         .clobbers = {functions[i].call_clobbers, 2},
     };
     descriptors += functions[i].argument_count + functions[i].results.count;
-    registers += functions[i].argument_count + functions[i].results.count;
+    locations += functions[i].argument_count + functions[i].results.count;
   }
   *out_program = (loom_vm_program_build_t){
       .values = functions,
@@ -335,15 +335,23 @@ static iree_status_t loom_vm_program_resolve_signatures(
                            ? &row->argument_value_count_u16
                            : &row->result_value_count_u16;
         }
-        entry->signature.registers[j] = (loom_low_allocation_abi_location_t){
+        const uint16_t argument_bank_count =
+            is_reference ? row->argument_ref_count_u16
+                         : row->argument_value_count_u16;
+        const uint32_t packet_base =
+            j < entry->argument_count
+                ? 0
+                : argument_bank_count - iree_min(16, argument_bank_count);
+        entry->signature.locations[j] = (loom_low_allocation_abi_location_t){
             .location_kind =
                 *bank_count < 16
                     ? LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER
-                    : LOOM_LOW_ALLOCATION_LOCATION_UNASSIGNED,
+                    : LOOM_LOW_ALLOCATION_LOCATION_CALL_STORAGE,
             .descriptor_reg_class_id = is_reference
                                            ? VM_CORE_REG_CLASS_ID_REF
                                            : VM_CORE_REG_CLASS_ID_VALUE,
-            .location_base = *bank_count,
+            .location_base =
+                *bank_count < 16 ? *bank_count : packet_base + *bank_count - 16,
         };
         ++(*bank_count);
       }

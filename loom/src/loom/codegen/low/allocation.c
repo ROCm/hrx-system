@@ -325,6 +325,7 @@ loom_low_allocation_entry_destination(
   const uint32_t assignment_index =
       state->interval_assignment.assignment_indices_by_value_ordinal[ordinal];
   if (entry->location_kind == LOOM_LOW_ALLOCATION_LOCATION_UNASSIGNED ||
+      entry->location_kind == LOOM_LOW_ALLOCATION_LOCATION_CALL_STORAGE ||
       assignment_index == UINT32_MAX) {
     return NULL;
   }
@@ -453,8 +454,7 @@ loom_low_allocation_append_boundary_moves(
 }
 
 // Reads the already collected call sites and their target convention rows.
-// Capacity includes whole register views; memory ABI operands are materialized
-// by the target at this same boundary, before/after the register permutation.
+// Capacity includes whole register views and declared call-packet cells.
 static void loom_low_allocation_call_move_capacity(
     const loom_low_allocation_build_state_t* state,
     iree_host_size_t* total_count, iree_host_size_t* group_count) {
@@ -470,7 +470,7 @@ static void loom_low_allocation_call_move_capacity(
             state->options->call_contracts.user_data,
             loom_low_func_call_callee(node->op));
     for (uint16_t side = 0; side < 2; ++side) {
-      const loom_low_allocation_abi_location_t* registers =
+      const loom_low_allocation_abi_location_t* locations =
           side ? contract->results : contract->arguments;
       const uint16_t count =
           side ? iree_min(node->result_count, contract->result_count)
@@ -479,7 +479,7 @@ static void loom_low_allocation_call_move_capacity(
           side ? loom_low_schedule_node_const_result_ordinals(node)
                : loom_low_schedule_node_const_operand_ordinals(node);
       const iree_host_size_t units = loom_low_allocation_boundary_unit_count(
-          state, registers, ordinals, count);
+          state, locations, ordinals, count);
       *total_count += units;
       *group_count = iree_max(*group_count, units);
     }
@@ -514,7 +514,7 @@ static iree_status_t loom_low_allocation_build_call_moves(
         &state->liveness,
         state->move_plan.operation_indices_by_source_node[node_index]);
     for (uint16_t side = 0; side < 2; ++side) {
-      const loom_low_allocation_abi_location_t* registers =
+      const loom_low_allocation_abi_location_t* locations =
           side ? contract->results : contract->arguments;
       const uint16_t count =
           side ? iree_min(node->result_count, contract->result_count)
@@ -522,11 +522,10 @@ static iree_status_t loom_low_allocation_build_call_moves(
       const loom_value_ordinal_t* ordinals =
           side ? loom_low_schedule_node_const_result_ordinals(node)
                : loom_low_schedule_node_const_operand_ordinals(node);
-      // Overflow arguments have already been stored before register transport.
-      // The move set protects its own sources and destinations, including
-      // identities; other dying inputs are available for cycle scratch.
+      // The complete move set protects register and packet-cell sources and
+      // destinations, including identities and repeated argument sources.
       IREE_RETURN_IF_ERROR(loom_low_allocation_append_boundary_moves(
-          state, node->op, point->end_point, registers, ordinals, count,
+          state, node->op, point->end_point, locations, ordinals, count,
           side ? LOOM_LOW_ALLOCATION_BOUNDARY_DIRECTION_FROM_ABI
                : LOOM_LOW_ALLOCATION_BOUNDARY_DIRECTION_TO_ABI,
           side ? &call->results : &call->arguments));
