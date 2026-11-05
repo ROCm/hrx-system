@@ -1216,6 +1216,10 @@ def compile_descriptor_set(
     selected_descriptors = [projected_descriptors_by_key[descriptor.key] for descriptor in source_descriptors]
     if not selected_descriptors:
         raise ValueError(f"descriptor set '{spec.key}' selected no descriptors")
+    validation.validate_u16_table_count(
+        len(selected_descriptors),
+        f"descriptor set '{spec.key}' descriptor",
+    )
     validation.validate_descriptor_asm_surface(spec, selected_descriptors)
     descriptor_ordinals = {descriptor.key: i for i, descriptor in enumerate(selected_descriptors)}
     for reg_class in spec.reg_classes:

@@ -27,7 +27,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 68u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 69u
 
 // Sentinel for absent target-family or descriptor-set stable IDs.
 #define LOOM_LOW_STABLE_ID_NONE UINT64_C(0)
@@ -1670,11 +1670,12 @@ typedef struct loom_low_descriptor_set_t {
   uint32_t descriptor_count;
   // Exclusive upper bound of descriptor ordinals addressable by this view.
   uint32_t descriptor_ordinal_count;
-  // Descriptor ordinals ordered by the referenced row's stable_id. Shared
-  // backing storage may include descriptors outside the view; lookup filters
+  // Compact descriptor ordinals ordered by the referenced row's stable_id.
+  // Generated backing storage is limited to the uint16_t ordinal domain.
+  // Shared storage may include descriptors outside the view; lookup filters
   // those ordinals through |descriptor_membership_words|. Generation rejects
   // distinct keys with the same stable identity.
-  const uint32_t* descriptor_refs;
+  const uint16_t* descriptor_refs;
   // Number of descriptor ordinal references in backing storage.
   uint32_t descriptor_ref_count;
   // Sparse encoding-equivalent physical forms available during scheduling.

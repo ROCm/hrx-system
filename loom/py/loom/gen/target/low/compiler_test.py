@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+import re
 from dataclasses import replace
 from itertools import permutations
 from unittest.mock import patch
@@ -71,6 +72,22 @@ def test_descriptor_lookup_rejects_identity_collisions() -> None:
     spec = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(TEST_LOW_CONST_I32_DESCRIPTOR, TEST_LOW_ADD_I32_DESCRIPTOR))
     with patch.object(compiler, "descriptor_stable_id", return_value=1), pytest.raises(ValueError, match="stable ID collides"):
         compiler.compile_descriptor_set(spec)
+
+
+def test_descriptor_lookup_rejects_unrepresentable_storage_count() -> None:
+    selected_descriptors = (TEST_LOW_ADD_I32_DESCRIPTOR,) * 0x10000
+    with (
+        patch.object(
+            compiler,
+            "_select_descriptors",
+            return_value=selected_descriptors,
+        ),
+        pytest.raises(
+            ValueError,
+            match=re.escape("descriptor set 'test.low.core' descriptor count does not fit a u16-indexed table"),
+        ),
+    ):
+        compiler.compile_descriptor_set(TEST_LOW_CORE_DESCRIPTOR_SET)
 
 
 @pytest.mark.parametrize("alignment", [0, 3, 6, 65536])

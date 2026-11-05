@@ -1206,7 +1206,7 @@ def emit_source_for_views(
         descriptor_layout_rows,
     )
     storage_descriptor_ref_table_symbol = view_array_emitter.append_value_array(
-        "uint32_t",
+        "uint16_t",
         f"k{spec.c_table_prefix}DescriptorRefs",
         [str(ordinal) for ordinal in compiled.descriptor_refs],
     )
@@ -1216,7 +1216,7 @@ def emit_source_for_views(
             descriptor_ref_table_symbols[view.spec.key] = storage_descriptor_ref_table_symbol
         else:
             descriptor_ref_table_symbols[view.spec.key] = view_array_emitter.append_value_array(
-                "uint32_t",
+                "uint16_t",
                 f"k{view.spec.c_table_prefix}DescriptorRefs",
                 [str(ordinal) for ordinal in view.descriptor_refs],
             )

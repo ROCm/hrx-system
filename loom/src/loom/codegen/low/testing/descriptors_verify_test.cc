@@ -73,7 +73,7 @@ struct TestTables {
   loom_low_descriptor_layout_t descriptor_layouts[2];
   loom_low_descriptor_view_t descriptor_views[2];
   // Descriptor ordinals ordered by stable identity.
-  uint32_t descriptor_refs[2];
+  uint16_t descriptor_refs[2];
   loom_low_asm_form_t asm_forms[2];
   // Formatting layouts addressed independently of the sorted assembly forms.
   loom_low_asm_layout_t asm_layouts[2];
