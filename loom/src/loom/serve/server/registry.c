@@ -20,6 +20,12 @@ struct loom_serve_registry_t {
   loom_serve_registration_factory_t factory;
   // Stable slots, never compacted while borrowers refer to their indices.
   loom_serve_registered_model_t* models;
+  // Compact progression capabilities, published and retired with model slots.
+  loom_runtime_service_t* services;
+  // Serialized owner wake, borrowed through preparation and retirement.
+  loom_runtime_wake_callback_t wake;
+  // Synchronous observation between model progress and registration retirement.
+  loom_serve_registry_observer_t observer;
   // Total borrowed and managed slot capacity.
   iree_host_size_t capacity;
   // Number of names still registered, including failed/removing entries.
@@ -36,6 +42,18 @@ struct loom_serve_registry_t {
     loom_service_telemetry_latency_t latency;
   } retired;
 };
+
+static const loom_runtime_service_vtable_t loom_serve_registry_service_vtable;
+
+static void loom_serve_registry_publish_service(loom_serve_registry_t* registry,
+                                                iree_host_size_t index) {
+  loom_serve_registered_model_t* model = &registry->models[index];
+  registry->services[index] = (loom_runtime_service_t){
+      .self = model,
+      .vtable = &loom_serve_registry_service_vtable,
+      .capacity_domain = model->service.runtime.capacity_domain,
+  };
+}
 
 static void loom_serve_registry_set_phase(
     loom_serve_registered_model_t* model,
@@ -131,41 +149,46 @@ iree_status_t loom_serve_registry_allocate(
       }
     }
   }
+  const iree_host_size_t capacity = service_count + managed_capacity;
+  iree_host_size_t total_size = 0, models_offset = 0, services_offset = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      sizeof(loom_serve_registry_t), &total_size,
+      IREE_STRUCT_FIELD(capacity, loom_serve_registered_model_t,
+                        &models_offset),
+      IREE_STRUCT_FIELD(capacity, loom_runtime_service_t, &services_offset)));
   loom_serve_registry_t* registry = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*registry),
-                                             (void**)&registry));
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, total_size, (void**)&registry));
   registry->host_allocator = host_allocator;
   registry->factory = factory;
-  registry->capacity = service_count + managed_capacity;
+  registry->models =
+      (loom_serve_registered_model_t*)((uint8_t*)registry + models_offset);
+  registry->services =
+      (loom_runtime_service_t*)((uint8_t*)registry + services_offset);
+  registry->capacity = capacity;
   registry->count = service_count;
   registry->next_incarnation = 1;
   registry->counters_since_ns = iree_time_now();
-  iree_status_t status = iree_ok_status();
-  if (registry->capacity) {
-    status = iree_allocator_malloc_array(host_allocator, registry->capacity,
-                                         sizeof(*registry->models),
-                                         (void**)&registry->models);
+  for (iree_host_size_t i = 0; i < capacity; ++i) {
+    registry->models[i].registry = registry;
   }
-  if (iree_status_is_ok(status)) {
-    IREE_TRACE(loom_service_trace_initialize());
-    const int64_t registered_unix_seconds = loom_serve_clock_now_unix_seconds();
-    for (iree_host_size_t i = 0; i < service_count; ++i) {
-      registry->models[i].service = services[i];
-      registry->models[i].phase = LOOM_SERVE_REGISTRATION_READY;
-      registry->models[i].registered_unix_seconds = registered_unix_seconds;
-      const iree_time_t since_ns = services[i].telemetry.stream
-                                       ? loom_runtime_telemetry_stream_identity(
-                                             services[i].telemetry.stream)
-                                             .created_ns
-                                       : 0;
-      registry->counters_since_ns =
-          iree_min(registry->counters_since_ns, since_ns);
-    }
-    *out_registry = registry;
-  } else {
-    iree_allocator_free(host_allocator, registry);
+  IREE_TRACE(loom_service_trace_initialize());
+  const int64_t registered_unix_seconds = loom_serve_clock_now_unix_seconds();
+  for (iree_host_size_t i = 0; i < service_count; ++i) {
+    registry->models[i].service = services[i];
+    registry->models[i].phase = LOOM_SERVE_REGISTRATION_READY;
+    registry->models[i].registered_unix_seconds = registered_unix_seconds;
+    loom_serve_registry_publish_service(registry, i);
+    const iree_time_t since_ns = services[i].telemetry.stream
+                                     ? loom_runtime_telemetry_stream_identity(
+                                           services[i].telemetry.stream)
+                                           .created_ns
+                                     : 0;
+    registry->counters_since_ns =
+        iree_min(registry->counters_since_ns, since_ns);
   }
-  return status;
+  *out_registry = registry;
+  return iree_ok_status();
 }
 
 iree_status_t loom_serve_registry_free(loom_serve_registry_t* registry) {
@@ -190,7 +213,6 @@ iree_status_t loom_serve_registry_free(loom_serve_registry_t* registry) {
     loom_runtime_telemetry_stream_free(model->stream);
     loom_serve_model_configuration_deinitialize(&model->configuration);
   }
-  iree_allocator_free(registry->host_allocator, registry->models);
   iree_allocator_free(registry->host_allocator, registry);
   return iree_ok_status();
 }
@@ -213,6 +235,18 @@ iree_time_t loom_serve_registry_counters_since_ns(
 loom_serve_registered_model_t* loom_serve_registry_at(
     loom_serve_registry_t* registry, iree_host_size_t index) {
   return &registry->models[index];
+}
+
+loom_runtime_service_t* loom_serve_registry_services(
+    loom_serve_registry_t* registry) {
+  return registry->services;
+}
+
+void loom_serve_registry_set_advance_observer(
+    loom_serve_registry_t* registry, loom_runtime_wake_callback_t wake,
+    loom_serve_registry_observer_t observer) {
+  registry->wake = wake;
+  registry->observer = observer;
 }
 
 loom_service_snapshot_t loom_serve_registry_snapshot(
@@ -463,6 +497,7 @@ iree_status_t loom_serve_registry_register(
     model->service.telemetry.counters = &model->counters;
     model->service.telemetry.latency = &model->latency;
     model->service.telemetry.stream = model->stream;
+    loom_serve_registry_publish_service(registry, available);
     loom_runtime_telemetry_record_t begin = {
         .time_ns = iree_time_now(),
         .event = &LOOM_SERVICE_TELEMETRY_STREAM_BEGIN};
@@ -789,6 +824,8 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
           }
         }
         model->service = service;
+        registry->services[index].capacity_domain =
+            service.runtime.capacity_domain;
         service.runtime.vtable->set_observer(service.runtime.self, observer);
         loom_serve_registry_set_phase(model, LOOM_SERVE_REGISTRATION_READY);
       } else {
@@ -919,6 +956,8 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
     loom_runtime_telemetry_stream_free(model->stream);
     loom_serve_model_configuration_deinitialize(&model->configuration);
     memset(model, 0, sizeof(*model));
+    model->registry = registry;
+    registry->services[index] = (loom_runtime_service_t){0};
     --registry->count;
     progress = true;
   }
@@ -934,6 +973,102 @@ bool loom_serve_registry_pending(const loom_serve_registered_model_t* model) {
           model->service.runtime.vtable->is_pending(
               model->service.runtime.self));
 }
+
+static void loom_serve_registry_service_set_observer(
+    void* self, loom_runtime_wake_callback_t observer) {
+  loom_serve_registered_model_t* model = self;
+  model->registry->wake = observer;
+  if (model->phase == LOOM_SERVE_REGISTRATION_READY) {
+    model->service.runtime.vtable->set_observer(model->service.runtime.self,
+                                                observer);
+  }
+}
+
+static bool loom_serve_registry_service_has_requests(void* self) {
+  const loom_serve_registered_model_t* model = self;
+  return model->held_count || model->tokenizer_count ||
+         (model->phase == LOOM_SERVE_REGISTRATION_READY &&
+          model->service.runtime.vtable->has_requests(
+              model->service.runtime.self));
+}
+
+static bool loom_serve_registry_service_is_pending(void* self) {
+  const loom_serve_registered_model_t* model = self;
+  return loom_serve_registry_pending(model) ||
+         (model->removal == LOOM_SERVE_REMOVAL_ABORT &&
+          model->phase != LOOM_SERVE_REGISTRATION_RELEASE_FAILED);
+}
+
+static bool loom_serve_registry_service_is_active(void* self) {
+  const loom_serve_registered_model_t* model = self;
+  // Retirement can release backing after model callbacks are gone. A failed
+  // release is quiescent and cannot supply capacity to a waiting peer.
+  return model->phase == LOOM_SERVE_REGISTRATION_RETIRING ||
+         (model->phase == LOOM_SERVE_REGISTRATION_READY &&
+          (model->service.runtime.vtable->is_active(
+               model->service.runtime.self) ||
+           model->parameter_operation ==
+               LOOM_SERVE_PARAMETER_OPERATION_ACTIVATING));
+}
+
+static iree_status_t loom_serve_registry_service_advance(
+    void* self, loom_runtime_service_flags_t flags, bool* out_progress) {
+  loom_serve_registered_model_t* model = self;
+  loom_serve_registry_t* registry = model->registry;
+  const iree_host_size_t index = model - registry->models;
+  *out_progress = false;
+  IREE_TRACE_ZONE_BEGIN_NAMED(z_model, "loom_serve_model_advance");
+  IREE_TRACE_ZONE_APPEND_TEXT(z_model, model->service.name.data,
+                              model->service.name.size);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z_model, model->incarnation);
+  bool stopping = iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
+  iree_status_t status = iree_ok_status();
+  if (stopping && model->incarnation &&
+      model->removal != LOOM_SERVE_REMOVAL_ABORT) {
+    status = loom_serve_registry_remove(model, LOOM_SERVE_REMOVAL_ABORT);
+  }
+  if (model->phase == LOOM_SERVE_REGISTRATION_READY) {
+    const loom_runtime_service_t* service = &model->service.runtime;
+    bool progress = false;
+    iree_status_t service_status = service->vtable->advance(
+        service->self, flags | loom_serve_registry_service_flags(model),
+        &progress);
+    if (!iree_status_is_ok(service_status)) {
+      // Local failure starts model retirement. Application failure is latched
+      // by the shared driver, which schedules its one complete stopping turn.
+      progress |= model->incarnation && iree_status_is_ok(model->status);
+      service_status =
+          loom_serve_registry_fail(registry, index, service_status);
+    }
+    status = iree_status_join(status, service_status);
+    stopping |= !iree_status_is_ok(status);
+    *out_progress |= progress;
+  }
+  if (registry->observer.observe) {
+    bool progress = false;
+    status = iree_status_join(
+        status, registry->observer.observe(
+                    registry->observer.self, index,
+                    stopping || !iree_status_is_ok(model->status), &progress));
+    *out_progress |= progress;
+  }
+  bool progress = false;
+  status = iree_status_join(
+      status,
+      loom_serve_registry_advance(registry, index, registry->wake, &progress));
+  *out_progress |= progress;
+  IREE_TRACE_ZONE_END(z_model);
+  return status;
+}
+
+static const loom_runtime_service_vtable_t loom_serve_registry_service_vtable =
+    {
+        .set_observer = loom_serve_registry_service_set_observer,
+        .has_requests = loom_serve_registry_service_has_requests,
+        .is_pending = loom_serve_registry_service_is_pending,
+        .is_active = loom_serve_registry_service_is_active,
+        .advance = loom_serve_registry_service_advance,
+};
 
 const char* loom_serve_registry_phase(
     const loom_serve_registered_model_t* model) {

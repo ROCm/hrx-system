@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
 
 package(
@@ -29,22 +30,61 @@ loom_cc_library(
 
 # Compiled suite shared by physical target registrations; helpers stay private.
 loom_cc_library(
+    name = "native_service_tests",
+    testonly = True,
+    srcs = ["native_service_test.cc"],
+    deps = [
+        ":protocol",
+        "//loom/src/loom/runtime:driver",
+        "//loom/src/loom/runtime:service",
+        "//loom/src/loom/runtime:wake",
+        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/service/finite:call",
+        "//loom/src/loom/serve/service/finite:model",
+        "//loom/src/loom/serve/service/finite:registration",
+        "//loom/src/loom/serve/service/finite:result",
+        "//loom/src/loom/serve/service/finite:service",
+        "//loom/src/loom/serve/testing:model",
+        "//loom/src/loom/serve/testing:service_application",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/task:owner",
+        "//runtime/src/iree/testing:gtest",
+    ],
+    alwayslink = True,
+)
+
+iree_assert_dependency_boundary(
+    name = "native_execution_has_no_catalogue_dependency",
+    forbidden_dependencies = [
+        "//loom/src/loom/serve/server:driver",
+        "//loom/src/loom/serve/server:registry",
+        "//loom/src/loom/serve/server:router",
+        "//loom/src/loom/serve/service:service",
+    ],
+    forbidden_subtrees = ["//loom/src/loom/serve/transport/http/..."],
+    message = "Native decision execution must not depend on HTTP, the model registry, or the server driver",
+    target = ":native_service_tests",
+)
+
+loom_cc_library(
     name = "source_service_tests",
     testonly = True,
-    srcs = [
-        "native_service_test.cc",
-        "source_service_test.cc",
-    ],
+    srcs = ["source_service_test.cc"],
     target_compatible_with = select({
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     visibility = ["//loom/src/loom/serve:implementation"],
     deps = [
+        ":native_service_tests",
         "//loom/src/loom/serve/runtime/device",
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/host",
-        "//loom/src/loom/serve/server:driver",
         "//loom/src/loom/serve/server:registry",
         "//loom/src/loom/serve/server:resources",
         "//loom/src/loom/serve/server:router",

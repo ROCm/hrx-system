@@ -15,7 +15,7 @@
 #include "iree/task/owner.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/serve/server/driver.h"
+#include "loom/runtime/driver.h"
 #include "loom/serve/service/finite/decision/protocol.h"
 #include "loom/serve/service/finite/registration.h"
 #include "loom/serve/service/finite/service.h"
@@ -52,26 +52,9 @@ class NativeDecisionServiceTest : public ::testing::Test {
     };
     IREE_ASSERT_OK(AllocateRegistration(model_options));
     IREE_ASSERT_OK(Prepare(0));
-    const auto finite = loom_serve_finite_service_interface(service_);
-    interface_ = {
-        .name = finite.name,
-        .runtime = finite.runtime,
-        .kind = finite.kind,
-        .snapshot = finite.snapshot,
-        .inspection = finite.inspection,
-        .reconfiguration = finite.reconfiguration,
-        .telemetry =
-            {
-                .stream = finite.telemetry.stream,
-                .counters = finite.telemetry.counters,
-                .latency = finite.telemetry.latency,
-            },
-    };
-    loom_serve_registry_t* registry = nullptr;
-    IREE_ASSERT_OK(loom_serve_registry_allocate(
-        1, &interface_, 0, {}, iree_allocator_system(), &registry));
-    loom_serve_driver_initialize(registry, &driver_);
-    loom_serve_driver_set_observer(&driver_, observer);
+    interface_ = loom_serve_finite_service_interface(service_);
+    loom_runtime_driver_initialize(1, &interface_.runtime, &driver_);
+    loom_runtime_driver_set_observer(&driver_, observer);
   }
 
   void TearDown() override {
@@ -147,8 +130,8 @@ class NativeDecisionServiceTest : public ::testing::Test {
       driver_.status = iree_status_join(
           driver_.status, loom_serve_device_group_advance(group_));
       bool progress = false;
-      loom_serve_driver_advance(&driver_, {Wake, this}, {}, &progress);
-      loom_serve_driver_collect(&driver_, &progress);
+      loom_runtime_driver_advance(&driver_, &progress);
+      loom_runtime_driver_collect(&driver_, &progress);
       const bool complete = done();
       if (complete || progress || !iree_status_is_ok(driver_.status)) {
         iree_notification_cancel_wait(&notification_);
@@ -169,16 +152,16 @@ class NativeDecisionServiceTest : public ::testing::Test {
       IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
                             Prepare(LOOM_SERVE_FINITE_LOAD_FLAG_CANCEL));
     }
-    if (driver_.registry) {
+    if (driver_.capacity) {
       ASSERT_NO_FATAL_FAILURE(DriveUntil(
           [&] {
             return !interface_.runtime.vtable->is_pending(
                 interface_.runtime.self);
           },
           LOOM_RUNTIME_SERVICE_FLAG_STOPPING));
-      loom_serve_driver_set_observer(&driver_, {});
-      IREE_ASSERT_OK(
-          loom_serve_registry_free(std::exchange(driver_.registry, nullptr)));
+      loom_runtime_driver_set_observer(&driver_, {});
+      driver_.services = nullptr;
+      driver_.capacity = 0;
     }
     bool complete = false;
     while (!complete) {
@@ -209,7 +192,7 @@ class NativeDecisionServiceTest : public ::testing::Test {
           Advance, this, &owner_);
       Call([&] {
         const loom_runtime_wake_callback_t observer = {Wake, this};
-        loom_serve_driver_set_observer(&fixture_.driver_, observer);
+        loom_runtime_driver_set_observer(&fixture_.driver_, observer);
         loom_serve_device_group_set_observer(fixture_.group_, observer);
       });
     }
@@ -227,7 +210,7 @@ class NativeDecisionServiceTest : public ::testing::Test {
       iree_task_owner_deinitialize(&owner_);
       const loom_runtime_wake_callback_t observer = {
           NativeDecisionServiceTest::Wake, &fixture_};
-      loom_serve_driver_set_observer(&fixture_.driver_, observer);
+      loom_runtime_driver_set_observer(&fixture_.driver_, observer);
       loom_serve_device_group_set_observer(fixture_.group_, observer);
     }
 
@@ -268,13 +251,12 @@ class NativeDecisionServiceTest : public ::testing::Test {
       fixture.driver_.status =
           iree_status_join(fixture.driver_.status,
                            loom_serve_device_group_advance(fixture.group_));
-      loom_serve_driver_advance(&fixture.driver_, {Wake, self}, {},
-                                &result->did_work);
+      loom_runtime_driver_advance(&fixture.driver_, &result->did_work);
       bool pending =
-          loom_serve_driver_collect(&fixture.driver_, &result->did_work);
+          loom_runtime_driver_collect(&fixture.driver_, &result->did_work);
       pending |= loom_serve_device_group_is_pending(fixture.group_);
       if (fixture.driver_.stopping && !pending) {
-        loom_serve_driver_set_observer(&fixture.driver_, {});
+        loom_runtime_driver_set_observer(&fixture.driver_, {});
         loom_serve_device_group_set_observer(fixture.group_, {});
         result->completed = true;
       }
@@ -319,9 +301,9 @@ class NativeDecisionServiceTest : public ::testing::Test {
   // Borrowed real admission, batching, and CPU/device progression.
   loom_serve_finite_service_t* service_ = nullptr;
   // Owner-side operations, with no listener or HTTP notification.
-  loom_serve_service_t interface_ = {};
+  loom_serve_finite_service_interface_t interface_ = {};
   // Shared production traversal and retirement policy, also used by HTTP.
-  loom_serve_driver_t driver_ = {};
+  loom_runtime_driver_t driver_ = {};
   // Joined wake target for resource and service publications.
   iree_notification_t notification_;
   // Caller-owned receipts, including after service removal.

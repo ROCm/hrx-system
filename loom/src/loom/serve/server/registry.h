@@ -20,6 +20,18 @@
 extern "C" {
 #endif
 
+typedef struct loom_serve_registry_t loom_serve_registry_t;
+
+// Optional owner-side observation after service progress and before model
+// retirement. It copies terminal observations without retaining model storage.
+typedef struct loom_serve_registry_observer_t {
+  // Borrowed adapter state for the synchronous service traversal.
+  void* self;
+  // Reports actual progress. Failure is an application failure.
+  iree_status_t (*observe)(void* self, iree_host_size_t index, bool stopping,
+                           bool* out_progress);
+} loom_serve_registry_observer_t;
+
 // Independently controlled roles declared by the model document. Primary is
 // the default for unqualified parameter controls. Image denotes a text input
 // projector, not the primary computation of an image-generation service.
@@ -180,6 +192,8 @@ typedef enum loom_serve_parameter_operation_e {
 // expose just immutable route/capacity-domain metadata and copied counters,
 // never model pointers. The opaque capacity owner survives native retirement.
 typedef struct loom_serve_registered_model_t {
+  // Owning stable table, including while this slot is vacant or retiring.
+  loom_serve_registry_t* registry;
   // Borrowed ready interface or metadata-only description for an owned model.
   loom_serve_service_t service;
   // Owned declaration for managed entries; empty name denotes borrowed service.
@@ -241,8 +255,6 @@ typedef struct loom_serve_registered_model_t {
   } trace;)
 } loom_serve_registered_model_t;
 
-typedef struct loom_serve_registry_t loom_serve_registry_t;
-
 // Copies borrowed service interfaces into stable slots and reserves metadata
 // capacity for managed registrations. Borrowed services remain externally owned
 // and cannot be unregistered here. No source work or model allocation occurs.
@@ -269,6 +281,19 @@ iree_time_t loom_serve_registry_counters_since_ns(
     const loom_serve_registry_t* registry);
 loom_serve_registered_model_t* loom_serve_registry_at(
     loom_serve_registry_t* registry, iree_host_size_t index);
+
+// Borrows the compact runtime progression slots. Each occupied capability
+// composes model service progress with this registry's preparation, parameter
+// control, observation, and retirement; vacant slots have no vtable.
+loom_runtime_service_t* loom_serve_registry_services(
+    loom_serve_registry_t* registry);
+
+// Supplies owner context for the next synchronous service traversal. The wake
+// remains valid through accepted preparation/retirement; the observation is
+// borrowed only during that traversal and never runs from asynchronous work.
+void loom_serve_registry_set_advance_observer(
+    loom_serve_registry_t* registry, loom_runtime_wake_callback_t wake,
+    loom_serve_registry_observer_t observer);
 
 // Snapshots service state only after publication and before retirement.
 // Other states report their registration phase without calling a service.

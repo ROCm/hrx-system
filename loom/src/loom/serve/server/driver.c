@@ -8,139 +8,49 @@
 
 void loom_serve_driver_initialize(loom_serve_registry_t* registry,
                                   loom_serve_driver_t* out_driver) {
-  *out_driver = (loom_serve_driver_t){
-      .registry = registry,
-      .capacity = loom_serve_registry_capacity(registry),
-  };
+  *out_driver = (loom_serve_driver_t){.registry = registry};
+  loom_runtime_driver_initialize(loom_serve_registry_capacity(registry),
+                                 loom_serve_registry_services(registry),
+                                 &out_driver->runtime);
 }
 
 void loom_serve_driver_set_observer(loom_serve_driver_t* driver,
                                     loom_runtime_wake_callback_t observer) {
-  for (iree_host_size_t i = 0; i < driver->capacity; ++i) {
-    const loom_serve_registered_model_t* model =
-        loom_serve_registry_at(driver->registry, i);
-    if (model->phase == LOOM_SERVE_REGISTRATION_READY) {
-      model->service.runtime.vtable->set_observer(model->service.runtime.self,
-                                                  observer);
-    }
-  }
+  loom_serve_registry_set_advance_observer(driver->registry, observer,
+                                           (loom_serve_registry_observer_t){0});
+  loom_runtime_driver_set_observer(&driver->runtime, observer);
 }
 
 loom_runtime_service_flags_t loom_serve_driver_shared_activity(
     const loom_serve_driver_t* driver, iree_host_size_t selected) {
-  const void* capacity_domain =
-      loom_serve_registry_at(driver->registry, selected)
-          ->service.runtime.capacity_domain;
-  if (!capacity_domain) {
-    return 0;
-  }
-  for (iree_host_size_t i = 0; i < driver->capacity; ++i) {
-    const loom_serve_registered_model_t* model =
-        loom_serve_registry_at(driver->registry, i);
-    if (i == selected ||
-        model->service.runtime.capacity_domain != capacity_domain) {
-      continue;
-    }
-    // Retirement still owns backing after service callbacks are gone. Its
-    // ownership wake may release capacity; a quiescent failed release cannot.
-    if (model->phase == LOOM_SERVE_REGISTRATION_RETIRING ||
-        (model->phase == LOOM_SERVE_REGISTRATION_READY &&
-         (model->service.runtime.vtable->is_active(
-              model->service.runtime.self) ||
-          model->parameter_operation ==
-              LOOM_SERVE_PARAMETER_OPERATION_ACTIVATING))) {
-      return LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY;
-    }
-  }
-  return 0;
+  return loom_runtime_driver_shared_activity(&driver->runtime, selected);
 }
 
 void loom_serve_driver_advance(loom_serve_driver_t* driver,
                                loom_runtime_wake_callback_t wake,
-                               loom_serve_driver_observer_t observer,
+                               loom_serve_registry_observer_t observer,
                                bool* out_progress) {
-  *out_progress = false;
-  driver->stopping |= !iree_status_is_ok(driver->status);
-  driver->stopping_applied = driver->stopping;
-  for (iree_host_size_t i = 0; i < driver->capacity; ++i) {
-    const iree_host_size_t index = (driver->cursor + i) % driver->capacity;
-    loom_serve_registered_model_t* model =
-        loom_serve_registry_at(driver->registry, index);
-    if (!model->service.name.size) {
-      continue;
-    }
-    IREE_TRACE_ZONE_BEGIN_NAMED(z_model, "loom_serve_model_advance");
-    IREE_TRACE_ZONE_APPEND_TEXT(z_model, model->service.name.data,
-                                model->service.name.size);
-    IREE_TRACE_ZONE_APPEND_VALUE_I64(z_model, model->incarnation);
-    if (driver->stopping && model->incarnation &&
-        model->removal != LOOM_SERVE_REMOVAL_ABORT) {
-      driver->status = iree_status_join(
-          driver->status,
-          loom_serve_registry_remove(model, LOOM_SERVE_REMOVAL_ABORT));
-    }
-    if (model->phase == LOOM_SERVE_REGISTRATION_READY) {
-      const loom_serve_service_t* service = &model->service;
-      bool progress = false;
-      const loom_runtime_service_flags_t flags =
-          loom_serve_driver_shared_activity(driver, index) |
-          loom_serve_registry_service_flags(model) |
-          (driver->stopping ? LOOM_RUNTIME_SERVICE_FLAG_STOPPING : 0);
-      iree_status_t status = service->runtime.vtable->advance(
-          service->runtime.self, flags, &progress);
-      if (!iree_status_is_ok(status)) {
-        // The first failure requires another turn to stop admission. Repeated
-        // terminal status is not progress while accepted borrowers retire.
-        progress |= iree_status_is_ok(model->status);
-        status = loom_serve_registry_fail(driver->registry, index, status);
-      }
-      driver->status = iree_status_join(driver->status, status);
-      driver->stopping |= !iree_status_is_ok(driver->status);
-      *out_progress |= progress;
-    }
-    if (observer.observe) {
-      bool progress = false;
-      driver->status = iree_status_join(
-          driver->status,
-          observer.observe(
-              observer.self, index,
-              driver->stopping || !iree_status_is_ok(model->status),
-              &progress));
-      driver->stopping |= !iree_status_is_ok(driver->status);
-      *out_progress |= progress;
-    }
-    bool progress = false;
-    driver->status = iree_status_join(
-        driver->status,
-        loom_serve_registry_advance(driver->registry, index, wake, &progress));
-    driver->stopping |= !iree_status_is_ok(driver->status);
-    *out_progress |= progress;
-    IREE_TRACE_ZONE_END(z_model);
-  }
-  if (++driver->cursor >= driver->capacity) {
-    driver->cursor = 0;
-  }
+  loom_serve_registry_set_advance_observer(driver->registry, wake, observer);
+  loom_runtime_driver_advance(&driver->runtime, out_progress);
 }
 
 bool loom_serve_driver_collect(loom_serve_driver_t* driver,
                                bool* out_progress) {
-  driver->stopping |= !iree_status_is_ok(driver->status);
-  bool pending =
-      driver->capacity && driver->stopping && !driver->stopping_applied;
-  *out_progress |= pending;
-  for (iree_host_size_t i = 0; i < driver->capacity; ++i) {
-    loom_serve_registered_model_t* model =
-        loom_serve_registry_at(driver->registry, i);
-    if (driver->stopping && model->incarnation &&
-        model->removal != LOOM_SERVE_REMOVAL_ABORT) {
-      driver->status = iree_status_join(
-          driver->status,
-          loom_serve_registry_remove(model, LOOM_SERVE_REMOVAL_ABORT));
-      *out_progress = true;
+  driver->runtime.stopping |= !iree_status_is_ok(driver->runtime.status);
+  if (driver->runtime.stopping) {
+    // Seal managed admission before the owner unlocks, including when adapter
+    // delivery failed after the last service turn. Accepted borrowers still
+    // retire through subsequent runtime turns.
+    for (iree_host_size_t i = 0; i < driver->runtime.capacity; ++i) {
+      loom_serve_registered_model_t* model =
+          loom_serve_registry_at(driver->registry, i);
+      if (model->incarnation && model->removal != LOOM_SERVE_REMOVAL_ABORT) {
+        driver->runtime.status = iree_status_join(
+            driver->runtime.status,
+            loom_serve_registry_remove(model, LOOM_SERVE_REMOVAL_ABORT));
+        *out_progress = true;
+      }
     }
-    pending |= loom_serve_registry_pending(model) ||
-               (driver->stopping && model->incarnation &&
-                model->phase != LOOM_SERVE_REGISTRATION_RELEASE_FAILED);
   }
-  return pending;
+  return loom_runtime_driver_collect(&driver->runtime, out_progress);
 }

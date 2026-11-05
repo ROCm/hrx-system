@@ -101,7 +101,7 @@ class DriverTest : public ::testing::Test {
   void TearDown() override {
     loom_serve_driver_set_observer(&driver_, {});
     IREE_EXPECT_OK(loom_serve_registry_free(driver_.registry));
-    iree_status_free(driver_.status);
+    iree_status_free(driver_.runtime.status);
   }
 
   // Driver under test, borrowing the real registry.
@@ -117,7 +117,7 @@ class DriverTest : public ::testing::Test {
 };
 
 TEST_F(DriverTest, RotatesAcrossVacantSlotsAndObservesEachTurn) {
-  const loom_serve_driver_observer_t observer = {
+  const loom_serve_registry_observer_t observer = {
       .self = &visits_,
       .observe =
           [](void* self, iree_host_size_t index, bool stopping,
@@ -139,9 +139,9 @@ TEST_F(DriverTest, RotatesAcrossVacantSlotsAndObservesEachTurn) {
     EXPECT_EQ(visits_, turn);
     EXPECT_FALSE(progress);
     EXPECT_FALSE(loom_serve_driver_collect(&driver_, &progress));
-    IREE_EXPECT_OK(iree_status_clone(driver_.status));
+    IREE_EXPECT_OK(iree_status_clone(driver_.runtime.status));
   }
-  EXPECT_EQ(driver_.cursor, 0u);
+  EXPECT_EQ(driver_.runtime.cursor, 0u);
 }
 
 TEST_F(DriverTest, CapacityWaitingRequiresActivityInTheSameNonnullDomain) {
@@ -156,6 +156,10 @@ TEST_F(DriverTest, CapacityWaitingRequiresActivityInTheSameNonnullDomain) {
   auto* second = loom_serve_registry_at(driver_.registry, 1);
   first->service.runtime.capacity_domain = nullptr;
   second->service.runtime.capacity_domain = nullptr;
+  // These controlled dependencies change their publication together; actual
+  // model publication updates the capability at its owning transition.
+  driver_.runtime.services[0].capacity_domain = nullptr;
+  driver_.runtime.services[1].capacity_domain = nullptr;
   EXPECT_EQ(loom_serve_driver_shared_activity(&driver_, 0), 0u);
   services_[1].pending = false;
 }
@@ -170,10 +174,10 @@ TEST_F(DriverTest, ApplicationFailureStopsPeersButRetainsPendingOwnership) {
   services_[0].pending = true;
   bool progress = false;
   loom_serve_driver_advance(&driver_, wake, {}, &progress);
-  EXPECT_TRUE(driver_.stopping);
+  EXPECT_TRUE(driver_.runtime.stopping);
   EXPECT_TRUE(progress);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
-                        iree_status_clone(driver_.status));
+                        iree_status_clone(driver_.runtime.status));
   EXPECT_TRUE(services_[1].flags & LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
   EXPECT_TRUE(services_[2].flags & LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
   EXPECT_TRUE(loom_serve_driver_collect(&driver_, &progress));
@@ -189,7 +193,7 @@ TEST_F(DriverTest, LastServiceFailureMustStopEarlierQueuedBorrowers) {
   services_[2].fail = true;
   bool progress = false;
   loom_serve_driver_advance(&driver_, {}, {}, &progress);
-  EXPECT_TRUE(driver_.stopping);
+  EXPECT_TRUE(driver_.runtime.stopping);
   EXPECT_TRUE(services_[0].requests);
   EXPECT_FALSE(services_[0].flags & LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
 
@@ -214,7 +218,7 @@ TEST_F(DriverTest, AdapterFailureRequiresOneCompleteStoppingTurn) {
   bool progress = false;
   loom_serve_driver_advance(&driver_, {}, {}, &progress);
   EXPECT_FALSE(progress);
-  driver_.status =
+  driver_.runtime.status =
       iree_make_status(IREE_STATUS_DATA_LOSS, "adapter delivery failed");
   EXPECT_TRUE(loom_serve_driver_collect(&driver_, &progress));
   EXPECT_TRUE(progress);
@@ -245,13 +249,13 @@ TEST(EmptyDriverTest, ZeroSlotsCanStopWithoutWorkOrPolling) {
       0, nullptr, 0, {}, iree_allocator_system(), &registry));
   loom_serve_driver_t driver;
   loom_serve_driver_initialize(registry, &driver);
-  driver.stopping = true;
+  driver.runtime.stopping = true;
   bool progress = true;
   loom_serve_driver_advance(&driver, {}, {}, &progress);
   EXPECT_FALSE(progress);
   EXPECT_FALSE(loom_serve_driver_collect(&driver, &progress));
-  EXPECT_EQ(driver.cursor, 0u);
-  IREE_EXPECT_OK(driver.status);
+  EXPECT_EQ(driver.runtime.cursor, 0u);
+  IREE_EXPECT_OK(driver.runtime.status);
   IREE_EXPECT_OK(loom_serve_registry_free(registry));
 }
 

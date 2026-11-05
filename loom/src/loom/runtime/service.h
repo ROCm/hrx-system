@@ -57,8 +57,9 @@ typedef struct loom_runtime_service_vtable_t {
 
 // Borrowed service capability. Its composition retains both the implementation
 // and shared-capacity owner through every accepted asynchronous obligation.
-// Only a prepared, live service can be invoked; a metadata-only registration
-// may retain capacity identity without exposing an implementation or vtable.
+// A composition may include preparation and retirement in its own progression;
+// only it can invoke the underlying model service while that service is live.
+// Metadata without a progress implementation has no vtable and is not invoked.
 typedef struct loom_runtime_service_t {
   // Borrowed service state, live through observer detachment and all requests.
   void* self;

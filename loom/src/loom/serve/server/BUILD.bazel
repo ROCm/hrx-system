@@ -76,8 +76,9 @@ loom_cc_library(
     hdrs = ["driver.h"],
     deps = [
         ":registry",
+        "//loom/src/loom/runtime:driver",
+        "//loom/src/loom/runtime:service",
         "//loom/src/loom/runtime:wake",
-        "//loom/src/loom/serve/service",
         "//runtime/src/iree/base",
     ],
 )
@@ -364,6 +365,7 @@ loom_cc_library(
     deps = [
         ":configuration",
         ":model_resolution",
+        "//loom/src/loom/runtime:service",
         "//loom/src/loom/runtime:wake",
         "//loom/src/loom/runtime/telemetry:stream",
         "//loom/src/loom/serve/runtime/host:clock",

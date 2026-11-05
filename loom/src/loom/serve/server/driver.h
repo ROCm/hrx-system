@@ -7,45 +7,24 @@
 #ifndef LOOM_SERVE_SERVER_DRIVER_H_
 #define LOOM_SERVE_SERVER_DRIVER_H_
 
+#include "loom/runtime/driver.h"
 #include "loom/serve/server/registry.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Common service/registration progression on one serialized application owner.
-// Admission, resource progress, and transport delivery surround this turn; they
-// do not implement a second capacity or model-retirement policy. No worker,
-// model, or registry storage is owned here.
+// Catalogue composition of the shared runtime driver. The registry owns each
+// managed lifecycle; traversal, capacity activity, and stopping remain runtime
+// policy. Admission, resource progress, and transport delivery surround it.
 typedef struct loom_serve_driver_t {
+  // Shared allocation-free traversal over the registry's runtime capabilities.
+  loom_runtime_driver_t runtime;
   // Borrowed stable registration table, alive through final collection.
   loom_serve_registry_t* registry;
-  // Immutable slot count, including vacant registration credit.
-  iree_host_size_t capacity;
-  // Rotating service priority, advanced once per complete traversal.
-  iree_host_size_t cursor;
-  // Monotonic abort intent; accepted borrowers still require collection.
-  bool stopping;
-  // Every slot has been visited in a traversal that began with abort intent.
-  // Late failures require another complete turn before owner detachment.
-  bool stopping_applied;
-  // Owned terminal application failure, consumed by the outer owner after
-  // retirement. Managed model-local failures remain in their registry slots.
-  iree_status_t status;
 } loom_serve_driver_t;
 
-// Optional observer of a slot after its service advances and before its model
-// can retire. It copies terminal observations, never extends model lifetime,
-// waits, or retains borrowed slot data. Failure is an application failure.
-typedef struct loom_serve_driver_observer_t {
-  // Borrowed adapter state, valid through this synchronous traversal.
-  void* self;
-  // Absent for native-only use. Reports actual observation progress.
-  iree_status_t (*observe)(void* self, iree_host_size_t index, bool stopping,
-                           bool* out_progress);
-} loom_serve_driver_observer_t;
-
-// Initializes inert owner state. The caller later consumes driver.status.
+// Initializes inert owner state. The caller later consumes runtime.status.
 void loom_serve_driver_initialize(loom_serve_registry_t* registry,
                                   loom_serve_driver_t* out_driver);
 
@@ -65,7 +44,7 @@ loom_runtime_service_flags_t loom_serve_driver_shared_activity(
 // observer is the sole boundary between service progress and model retirement.
 void loom_serve_driver_advance(loom_serve_driver_t* driver,
                                loom_runtime_wake_callback_t wake,
-                               loom_serve_driver_observer_t observer,
+                               loom_serve_registry_observer_t observer,
                                bool* out_progress);
 
 // Collects pending ownership after the turn and any adapter delivery. A late
