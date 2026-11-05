@@ -1692,6 +1692,15 @@ def run_from_command_line(*, stress=False):
         catalog, catalog_path = prepare_catalog(arguments.fixture, directory)
         workers = 1
         if stress:
+            # These process-boundary contracts each construct independent server
+            # and device applications. Keep them in the explicit stress suite;
+            # the per-commit path below retains one complete catalog lifetime.
+            check_empty_server(
+                server_command, directory, arguments.driver, arguments.pool_backing
+            )
+            check_startup_failures(server_command, directory, catalog)
+            check_control_contracts(server_command, directory, catalog)
+            check_multiple_bindings(server_command, directory, catalog_path)
             check_dynamic_catalog(
                 server_command,
                 directory,
@@ -1700,10 +1709,22 @@ def run_from_command_line(*, stress=False):
                 copies=3,
                 connection_counts=(64, 256),
             )
-            with running_server(server_command, directory, catalog_path, workers) as (
-                client,
-                observations,
-            ):
+        with running_server(server_command, directory, catalog_path, workers) as (
+            client,
+            observations,
+        ):
+            assert client.request("/readyz") == {"status": "ready"}
+            discovered = client.request("/v1/models")
+            assert sorted(item["id"] for item in discovered["data"]) == sorted(
+                [
+                    "pixels",
+                    "vectors",
+                    "judge",
+                    "speech",
+                    "fixture-text",
+                ]
+            )
+            if stress:
                 with paused_log_reader(client, arguments.rounds):
                     for iteration in range(arguments.rounds):
                         print(
@@ -1722,40 +1743,18 @@ def run_from_command_line(*, stress=False):
                             ),
                             flush=True,
                         )
-            return
-        check_empty_server(
-            server_command, directory, arguments.driver, arguments.pool_backing
-        )
-        check_startup_failures(server_command, directory, catalog)
-        check_control_contracts(server_command, directory, catalog)
-        check_multiple_bindings(server_command, directory, catalog_path)
-        check_dynamic_catalog(server_command, directory, catalog, workers)
-        with running_server(server_command, directory, catalog_path, workers) as (
-            client,
-            observations,
-        ):
-            assert client.request("/readyz") == {"status": "ready"}
-            discovered = client.request("/v1/models")
-            assert sorted(item["id"] for item in discovered["data"]) == sorted(
-                [
-                    "pixels",
-                    "vectors",
-                    "judge",
-                    "speech",
-                    "fixture-text",
-                ]
-            )
-            for iteration in range(arguments.rounds):
-                print(
-                    json.dumps(
-                        {
-                            "event": "catalog_churn",
-                            "workers": workers,
-                            **run_round(client, iteration, observations),
-                        }
-                    ),
-                    flush=True,
-                )
+            else:
+                for iteration in range(arguments.rounds):
+                    print(
+                        json.dumps(
+                            {
+                                "event": "catalog_churn",
+                                "workers": workers,
+                                **run_round(client, iteration, observations),
+                            }
+                        ),
+                        flush=True,
+                    )
             check_counters(client, arguments.rounds)
             check_parameter_residency(client, arguments.pool_backing, workers)
             check_pool_trim(client, arguments.pool_backing, workers)
