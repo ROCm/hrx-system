@@ -19,9 +19,9 @@ extern "C" {
 // Magic header bytes for IREE HAL replay files: "IRRP".
 #define IREE_HAL_REPLAY_FILE_MAGIC 0x50525249u
 
-// Major version of the IREE HAL replay file format. Version 17 records the
-// source pool contracts admitted by each virtual buffer.
-#define IREE_HAL_REPLAY_FILE_VERSION_MAJOR 17u
+// Major version of the IREE HAL replay file format. Version 18 preserves
+// caller-owned prior sources in mapping transactions.
+#define IREE_HAL_REPLAY_FILE_VERSION_MAJOR 18u
 
 // Minor version of the IREE HAL replay file format. Pool scopes preserve
 // zero-compute atomic requirements in their previously reserved family word.
@@ -930,13 +930,15 @@ typedef struct iree_hal_replay_memory_mapping_payload_t {
   uint64_t byte_length;
   // Direct source range; a zero buffer ID represents detachment.
   iree_hal_replay_buffer_ref_payload_t source_ref;
+  // Prior source range; a zero buffer ID declares an unbound range.
+  iree_hal_replay_buffer_ref_payload_t previous_source_ref;
   // Required access permissions, including NONE for revocation.
   uint32_t access;
   // Reserved for future mapping metadata; must be zero.
   uint32_t reserved0;
 } iree_hal_replay_memory_mapping_payload_t;
-static_assert(sizeof(iree_hal_replay_memory_mapping_payload_t) == 72,
-              "mapping replay row must be 72 bytes");
+static_assert(sizeof(iree_hal_replay_memory_mapping_payload_t) == 104,
+              "mapping replay row must be 104 bytes");
 
 // Header for an exact-queue transfer transaction followed by semaphore
 // timepoints, operation descriptors, and captured data bytes.

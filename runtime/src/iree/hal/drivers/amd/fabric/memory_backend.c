@@ -961,6 +961,10 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_emit_plan(
     }
     iree_hal_memory_contract_finalize_atomic_operations(contract);
     if (iree_status_is_ok(status)) {
+      status = iree_hal_amd_fabric_memory_capture_copy_protocols(
+          &transition_query, contract);
+    }
+    if (iree_status_is_ok(status)) {
       status = iree_hal_memory_contract_initialize_transitions(
           contract, iree_hal_amd_fabric_memory_query_transition,
           &transition_query);
@@ -1575,6 +1579,7 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
           (iree_hal_amd_fabric_memory_transition_site_t){
               .kind = IREE_HAL_AMD_FABRIC_MEMORY_SITE_QUEUE,
               .program_atomics = family->program_atomics,
+              .copy_family_ordinal = family->copy_family_ordinal,
               .requires_host_coherent = iree_any_bit_set(
                   requested->requirements,
                   IREE_HAL_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST),
@@ -1599,6 +1604,7 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
             (iree_hal_amd_fabric_memory_transition_site_t){
                 .kind = shader ? IREE_HAL_AMD_FABRIC_MEMORY_SITE_PROGRAM
                                : IREE_HAL_AMD_FABRIC_MEMORY_SITE_QUEUE,
+                .copy_family_ordinal = UINT32_MAX,
                 .native = shader ? shader_site
                                  : transition_sites[queue_scope_id].native,
             };

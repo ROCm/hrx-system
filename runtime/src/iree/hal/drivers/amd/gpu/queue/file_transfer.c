@@ -248,7 +248,7 @@ static void iree_hal_amd_gpu_file_transfer_advance(
   if (iree_hal_amd_fabric_file_transfer_bytes_transferred(transfer) ==
       transfer->length) {
     iree_status_t status = iree_ok_status();
-    if (transfer->sources.host_count &&
+    if (transfer->source.contents.data &&
         transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ) {
       // Publish every host-written range once, after all I/O and native copies
       // have retired and before the final native consumer acquire.
@@ -257,8 +257,7 @@ static void iree_hal_amd_gpu_file_transfer_advance(
     iree_hal_amd_gpu_file_transfer_complete(operation, status);
     return;
   }
-  const iree_hal_amd_fabric_file_range_t* range =
-      iree_hal_amd_fabric_file_transfer_current_range(transfer);
+  const iree_hal_amd_fabric_file_source_t* range = &transfer->source;
   if (!range->contents.data) {
     const uint16_t index =
         transfer->buffer->memory.contract
@@ -275,7 +274,7 @@ static void iree_hal_amd_gpu_file_transfer_advance(
     operation->resume = iree_hal_amd_gpu_file_transfer_staged;
     iree_atomic_store(&operation->pending, 2, iree_memory_order_relaxed);
     iree_hal_amd_gpu_file_staging_submit(
-        &operation->staging, range->offset, range->contents.data_length,
+        &operation->staging, 0, range->contents.data_length,
         address + transfer->buffer_offset, range->effects,
         (iree_hal_amd_fabric_file_transfer_callback_t){
             iree_hal_amd_gpu_file_transfer_step_complete, operation});
@@ -316,7 +315,7 @@ static void iree_hal_amd_gpu_file_transfer_start(void* user_data,
   }
   iree_hal_amd_fabric_file_transfer_t* transfer = &operation->transfer;
   iree_hal_memory_effects_t before = {0}, after = {0};
-  status = iree_hal_amd_fabric_file_transfer_prepare_ranges(
+  status = iree_hal_amd_fabric_file_transfer_prepare_source(
       transfer, operation->executor->context->api,
       operation->executor->queue->queue_family,
       operation->executor->native_family_ordinal, &before, &after);
@@ -328,11 +327,10 @@ static void iree_hal_amd_gpu_file_transfer_start(void* user_data,
     iree_hal_amd_gpu_file_transfer_copy(operation);
     return;
   }
-  if (transfer->sources.host_count != transfer->sources.count ||
-      !transfer->sources.count) {
+  if (!transfer->source.contents.data) {
     status = iree_hal_amd_gpu_file_staging_prepare(
         operation->executor->staging, operation->executor->queue->queue_family,
-        operation->executor->native_family_ordinal, transfer, &before, &after);
+        transfer, &before, &after);
     const iree_hal_memory_contract_t* contract =
         transfer->buffer->memory.contract;
     if (iree_status_is_ok(status) &&

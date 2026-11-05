@@ -48,6 +48,8 @@ typedef struct loom_serve_weight_direct_read_t {
   iree_host_size_t count;
   // Payload bytes contributed by these fragments, excluding storage padding.
   uint64_t byte_length;
+  // Storage-relative origin of the physical target used by this gather.
+  iree_device_size_t target_offset;
   // Previous read on the lane and this window's mapping readiness.
   iree_hal_semaphore_t* waits[2];
   // Values paired with waits, retained through provider submission.
@@ -73,6 +75,9 @@ typedef struct loom_serve_weight_group_t {
   iree_host_size_t mapping_group;
   // Owned mapping readiness, released after accepted reads capture it.
   iree_hal_semaphore_t* mapped;
+  // Owned physical target, or NULL for reads into fixed storage. Captures
+  // allocation ownership while readiness still gates payload access.
+  iree_hal_buffer_t* target;
   // Read frontier established by this group.
   uint64_t signal_value;
 } loom_serve_weight_group_t;
@@ -968,6 +973,7 @@ static iree_status_t loom_serve_weight_enumerate(
   const loom_serve_weight_direct_read_t* read = user_data;
   *out_key = read->fragments[i].key;
   *out_span = read->fragments[i].range;
+  out_span->buffer_offset -= read->target_offset;
   return iree_ok_status();
 }
 
@@ -1099,6 +1105,7 @@ static void loom_serve_weight_stream_destroy(loomc_task_t* task) {
   if (job->plan.groups) {
     for (iree_host_size_t i = 0; i < job->plan.group_count; ++i) {
       iree_hal_semaphore_release(job->plan.groups[i].mapped);
+      iree_hal_buffer_release(job->plan.groups[i].target);
     }
   }
   iree_allocator_free(allocator, job->views);
@@ -1227,6 +1234,8 @@ static iree_status_t loom_serve_weight_stream(loom_serve_weights_t* weights) {
       if (group->mapping_group != i) {
         group->mapped = plan->groups[group->mapping_group].mapped;
         iree_hal_semaphore_retain(group->mapped);
+        group->target = plan->groups[group->mapping_group].target;
+        iree_hal_buffer_retain(group->target);
         continue;
       }
       status = iree_hal_semaphore_create(
@@ -1244,6 +1253,28 @@ static iree_status_t loom_serve_weight_stream(loom_serve_weights_t* weights) {
               iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                                "physical pool cannot back model parameters");
         }
+        if (iree_status_is_ok(status)) {
+          loom_serve_memory_operation_t* operation =
+              weights->activation
+                  .backing[weights->activation.backing_count - 1];
+          const iree_host_size_t slab_index =
+              group->backing.offset /
+              loom_serve_virtual_buffer_mapping_size(group->backing.buffer);
+          group->target =
+              operation ? loom_serve_memory_operation_backing(operation, 0)
+                        : loom_serve_virtual_buffer_backing(
+                              group->backing.buffer, slab_index);
+          if (group->target) {
+            iree_hal_buffer_retain(group->target);
+            status = loom_serve_retirement_track(
+                &weights->activation.retirement, &group->target, allocator);
+          } else {
+            // No source handle means submission failed before native work was
+            // accepted. Join that terminal result before reporting its cause.
+            loom_serve_memory_operation_await(operation);
+            status = loom_serve_memory_operation_query_status(operation);
+          }
+        }
       }
     }
   }
@@ -1255,6 +1286,8 @@ static iree_status_t loom_serve_weight_stream(loom_serve_weights_t* weights) {
         weights->pool ? group->mapped : weights->activation.backing_ready;
     for (iree_host_size_t r = group->read_begin; r < group->read_end; ++r) {
       loom_serve_weight_direct_read_t* read = &plan->reads[r];
+      read->target_offset =
+          weights->pool ? plan->groups[group->mapping_group].backing.offset : 0;
       read->waits[0] = lanes[lane];
       read->wait_values[0] = frontiers[lane];
       read->waits[1] = mapped;
@@ -1264,7 +1297,8 @@ static iree_status_t loom_serve_weight_stream(loom_serve_weights_t* weights) {
           &job->batches[read->fragments[0].source];
       job->gathers[batch->first + batch->count++] =
           (iree_io_parameter_gather_t){
-              .target_buffer = job->views[group->storage_index],
+              .target_buffer = group->target ? group->target
+                                             : job->views[group->storage_index],
               .count = read->count,
               .enumerator = {loom_serve_weight_enumerate, read},
               .wait_semaphore_list = {mapped ? 2 : 1, read->waits,

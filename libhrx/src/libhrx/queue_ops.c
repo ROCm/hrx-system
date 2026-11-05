@@ -145,7 +145,9 @@ hrx_status_t hrx_queue_map(hrx_device_t device, hrx_queue_affinity_t affinity,
     if (!mapping->target || !mapping->target->hal_buffer) {
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "mapping target is NULL or has no HAL storage");
-    } else if (mapping->source && !mapping->source->hal_buffer) {
+    } else if ((mapping->source && !mapping->source->hal_buffer) ||
+               (mapping->previous_source &&
+                !mapping->previous_source->hal_buffer)) {
       status =
           iree_make_status(IREE_STATUS_UNAVAILABLE,
                            "mapping source has no prepared native storage");
@@ -164,6 +166,10 @@ hrx_status_t hrx_queue_map(hrx_device_t device, hrx_queue_affinity_t affinity,
           .source_offset = mapping->source_offset,
           .access = mapping->access,
           .operation = (iree_hal_memory_mapping_operation_t)mapping->operation,
+          .previous_source = mapping->previous_source
+                                 ? mapping->previous_source->hal_buffer
+                                 : NULL,
+          .previous_source_offset = mapping->previous_source_offset,
       };
     }
   }

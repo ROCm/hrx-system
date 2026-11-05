@@ -686,14 +686,16 @@ TEST_F(AsanTest, ApplicationAliasesRespectAlignmentAndCoalesceAfterRelease) {
   EXPECT_EQ(ranges[2]->address, 0x11000u);
   EXPECT_EQ(native_.reservations[0]->pages.size(), 4u);
   for (size_t i : {size_t{1}, size_t{0}, size_t{2}}) {
-    EXPECT_TRUE(iree_hal_amd_fabric_asan_unmap_application(&state_, ranges[i]));
+    EXPECT_TRUE(iree_hal_amd_fabric_asan_unmap_application(
+        &state_, ranges[i], application_backing_, 0));
   }
   EXPECT_TRUE(native_.reservations[0]->pages.empty());
   IREE_ASSERT_OK(iree_hal_amd_fabric_asan_map_application(
       &state_, application_backing_, 0, 32768, 32768, &ranges[0]));
   EXPECT_EQ(ranges[0]->address, 0x10000u);
   EXPECT_EQ(ranges[0]->length, 32768u);
-  EXPECT_TRUE(iree_hal_amd_fabric_asan_unmap_application(&state_, ranges[0]));
+  EXPECT_TRUE(iree_hal_amd_fabric_asan_unmap_application(
+      &state_, ranges[0], application_backing_, 0));
 }
 
 TEST_F(AsanTest, QuarantineRetainsFifoUntilPressureAndFinalTeardown) {

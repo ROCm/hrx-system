@@ -249,6 +249,12 @@ iree_device_size_t loom_serve_virtual_buffer_mapping_size(
 iree_host_size_t loom_serve_virtual_buffer_slab_count(
     const loom_serve_virtual_buffer_t* buffer);
 
+// Borrows the published physical source of one committed slab. The serialized
+// owner has joined that slab's commitment and prevents trim until consumers
+// retire. Offsets within the returned source are relative to the slab.
+iree_hal_buffer_t* loom_serve_virtual_buffer_backing(
+    const loom_serve_virtual_buffer_t* buffer, iree_host_size_t slab_index);
+
 // Missing backing in the serialized owner's root state, excluding accepted
 // commitments, in constant time. Does not collect operations or establish
 // readiness. The caller resolves prior detaches or failed commitments on this
@@ -392,6 +398,16 @@ iree_status_t loom_serve_memory_pool_trim_async(
 void loom_serve_memory_operation_set_observer(
     loom_serve_memory_operation_t* operation, void (*wake)(void* user_data),
     void* user_data);
+
+// Borrows the source handle of one edit in a commitment operation. Handles
+// exist at submission, before payload readiness, and survive until operation
+// release. Consumers capture them with the commitment's readiness dependency.
+// A NULL handle means allocation submission failed; the operation is terminal
+// and its joined status reports that failure. Only commitment operations have
+// this contract; trim and reservation growth do not allocate sources.
+iree_hal_buffer_t* loom_serve_memory_operation_backing(
+    const loom_serve_memory_operation_t* operation,
+    iree_host_size_t edit_index);
 
 // Publishes completed native results and accounting on the serialized owner.
 // True joins captured queue ownership and the publisher's final callback

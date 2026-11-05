@@ -72,6 +72,8 @@ class FileTransferStagingTest : public MemoryBackendTest,
                                   AMDF_MEMORY_ADDRESS_GPU};
       native_.address_kinds[i] = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU;
       native_families_[i].host_usage = 0;
+      native_families_[i].copy_family_ordinal = 0;
+      native_.copy_family_ordinals[i] = 0;
     }
     IREE_ASSERT_OK(CreatePool(
         IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,

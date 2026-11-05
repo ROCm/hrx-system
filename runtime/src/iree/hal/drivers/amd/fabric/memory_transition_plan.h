@@ -34,6 +34,8 @@ typedef struct iree_hal_amd_fabric_memory_transition_site_t {
   iree_hal_atomic_operation_capabilities_t queue_atomics;
   // Prospective libamdf site for the exact cache executor.
   amdf_memory_profile_site_t native;
+  // Native private copy family, or UINT32_MAX without a copy executor.
+  uint32_t copy_family_ordinal;
 } iree_hal_amd_fabric_memory_transition_site_t;
 
 // Borrowed construction scratch. No native query state escapes into a pool.
@@ -74,6 +76,12 @@ iree_status_t iree_hal_amd_fabric_memory_query_transition(
     void* user_data, iree_hal_memory_scope_id_t producer_id,
     iree_hal_memory_scope_id_t consumer_id,
     iree_hal_memory_pair_info_t* out_info);
+
+// Captures private copy-engine handoffs across every native acquisition route.
+// Unsupported relations stay explicit without rejecting ordinary pool access.
+iree_status_t iree_hal_amd_fabric_memory_capture_copy_protocols(
+    iree_hal_amd_fabric_memory_transition_query_t* query,
+    iree_hal_memory_contract_t* contract);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -29,6 +29,8 @@ typedef struct iree_hal_amd_gpu_executable_options_t {
   const iree_hal_amd_gpu_target_identity_t* target;
   // Native family ordinal; its command protocol is independent of target ISA.
   uint32_t native_family_ordinal;
+  // Private file-copy family, or UINT32_MAX when the device has no executor.
+  uint32_t copy_family_ordinal;
   // Qualified owned backing with read/write/execute access for context->device
   // at native access ordinal zero. Host visibility is optional; placement is
   // always device-local. The loader never substitutes host backing.

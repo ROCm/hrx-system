@@ -66,6 +66,68 @@ class VirtualBufferContractTest : public MemoryBackendTest {
   std::array<iree_hal_pool_family_access_t, 3> accesses_ = {};
 };
 
+TEST_F(VirtualBufferContractTest,
+       CopyProtocolSurvivesSourcesAndConstrainsAdmission) {
+  constexpr uint32_t kCopyFamily = 97;
+  native_families_[0].copy_family_ordinal = kCopyFamily;
+  native_.copy_family_ordinals[0] = kCopyFamily;
+  iree_hal_pool_t* coherent = nullptr;
+  IREE_ASSERT_OK(CreateSource(&coherent));
+  const iree_hal_virtual_buffer_options_t options = {.byte_length = 4096};
+  iree_hal_buffer_t* target = nullptr;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_create(group_, Scope(), {1, &coherent},
+                                                &options, allocator_, &target));
+  const auto gpu = ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[0]);
+  const auto* protocols =
+      static_cast<const iree_hal_amd_fabric_memory_copy_protocol_t*>(
+          target->memory.contract->backend_data);
+  ASSERT_NE(protocols, nullptr);
+  EXPECT_EQ(protocols[gpu.id].begin.release.bits, 0u);
+  EXPECT_EQ(protocols[gpu.id].end.acquire.bits, 0u);
+  native_.api.memory_scope_query_pair_info =
+      [](amdf_memory_scope_t* scope,
+         const amdf_memory_profile_pair_query_t* query,
+         amdf_memory_pair_info_t* info) -> amdf_status_t {
+    const auto status =
+        FakeNative::MemoryScopeQueryPairInfo(scope, query, info);
+    if (amdf_status_is_ok(status) &&
+        query->producer.kind == AMDF_MEMORY_SITE_KIND_DEVICE &&
+        query->consumer.kind == AMDF_MEMORY_SITE_KIND_DEVICE &&
+        query->consumer.value.device.queue_family_ordinal == kCopyFamily) {
+      info->release = {
+          .kind = AMDF_CACHE_TRANSITION_KIND_GLOBAL,
+          .executor = AMDF_CACHE_TRANSITION_EXECUTOR_QUEUE,
+          .operation = AMDF_CACHE_OPERATION_RELEASE_TO_SYSTEM,
+      };
+    }
+    return status;
+  };
+  iree_hal_pool_t* cached = nullptr;
+  IREE_ASSERT_OK(CreateSource(&cached));
+  EXPECT_FALSE(
+      iree_hal_virtual_buffer_query_pool_compatibility(target, gpu, cached));
+  iree_hal_pool_t* sources[] = {coherent, cached};
+  iree_hal_buffer_t* joined = nullptr;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_create(group_, Scope(), {2, sources},
+                                                &options, allocator_, &joined));
+  for (auto* source : sources) {
+    EXPECT_TRUE(
+        iree_hal_virtual_buffer_query_pool_compatibility(joined, gpu, source));
+    iree_hal_pool_release(source);
+  }
+  const int queries = native_.pair_query_count;
+  const auto* joined_protocols =
+      static_cast<const iree_hal_amd_fabric_memory_copy_protocol_t*>(
+          joined->memory.contract->backend_data);
+  EXPECT_EQ(joined_protocols[gpu.id].begin.release.bits,
+            IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM);
+  EXPECT_EQ(protocols[gpu.id].begin.release.bits, 0u);
+  EXPECT_EQ(native_.pair_query_count, queries);
+  EXPECT_EQ(native_.create_count, 0);
+  iree_hal_buffer_release(joined);
+  iree_hal_buffer_release(target);
+}
+
 TEST_F(VirtualBufferContractTest, AtomicsIntersectSourcesAtEachExecutionSite) {
   std::array<iree_hal_pool_t*, 2> sources = {};
   IREE_ASSERT_OK(CreateSource(&sources[0]));
@@ -678,7 +740,7 @@ TEST_F(MemoryBackendTest, SharedTranslationsDoNotGrantSourceConsumerAccess) {
   iree_hal_pool_release(pool);
 }
 
-TEST_F(MemoryBackendTest, FileTransfersQualifySourcesAfterDeviceOnlyPrefix) {
+TEST_F(MemoryBackendTest, FileTransfersUseExplicitPhysicalSources) {
   native_.mapping_enabled = true;
   native_.host_mappable = false;
   native_.required_flags = 0;
@@ -700,22 +762,6 @@ TEST_F(MemoryBackendTest, FileTransfersQualifySourcesAfterDeviceOnlyPrefix) {
   iree_hal_buffer_t* target = nullptr;
   IREE_ASSERT_OK(
       CreateReservation(&target, pool, IREE_HAL_BUFFER_USAGE_TRANSFER));
-  iree_hal_semaphore_t* done = nullptr;
-  IREE_ASSERT_OK(iree_hal_semaphore_create(
-      cpu_device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0, 0, &done));
-  const auto scope = ResolveScope(IREE_HAL_MEMORY_SITE_PROGRAM, families_[0]);
-  iree_hal_memory_mapping_t mappings[2] = {
-      {
-          .target = target,
-          .scope = scope,
-          .target_range = {0, 8192},
-          .source = backing,
-          .access = IREE_HAL_MEMORY_ACCESS_ALL,
-          .operation = IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE,
-      },
-      {.target = target, .scope = scope, .target_range = {8192, 8192}},
-  };
-
   iree::testing::TempFilePath path("iree_fabric_file_sources");
   iree_io_file_handle_t* handle = nullptr;
   IREE_ASSERT_OK(iree_io_file_handle_create(
@@ -741,63 +787,31 @@ TEST_F(MemoryBackendTest, FileTransfersQualifySourcesAfterDeviceOnlyPrefix) {
   iree_io_file_handle_release(handle);
   IREE_ASSERT_OK(status);
 
-  uint64_t value = 0;
-  for (const auto access :
-       {IREE_HAL_MEMORY_ACCESS_READ, IREE_HAL_MEMORY_ACCESS_WRITE}) {
-    for (const auto suffix_access :
-         {IREE_HAL_MEMORY_ACCESS_NONE, IREE_HAL_MEMORY_ACCESS_READ,
-          IREE_HAL_MEMORY_ACCESS_ALL}) {
-      // Read-only mappings allow writing the file but deny reading into memory.
-      const auto expected = !suffix_access ? IREE_STATUS_FAILED_PRECONDITION
-                            : access == IREE_HAL_MEMORY_ACCESS_READ &&
-                                    suffix_access == IREE_HAL_MEMORY_ACCESS_READ
-                                ? IREE_STATUS_PERMISSION_DENIED
-                                : IREE_STATUS_OK;
-      SCOPED_TRACE(::testing::Message()
-                   << "file access=" << access << " expected=" << expected);
-      const bool mapped = suffix_access != IREE_HAL_MEMORY_ACCESS_NONE;
-      mappings[1].source = mapped ? backing : nullptr;
-      mappings[1].source_offset = mapped ? 8192 : 0;
-      mappings[1].access = suffix_access;
-      mappings[1].operation = mapped ? IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE
-                                     : IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND;
-      ++value;
-      IREE_ASSERT_OK(iree_hal_queue_map(
-          iree_hal_device_queue(cpu_device_, 0, 0), {}, {1, &done, &value},
-          IREE_ARRAYSIZE(mappings), mappings, 0));
-      IREE_ASSERT_OK(
-          iree_hal_semaphore_wait(done, value, iree_infinite_timeout(), 0));
-      for (auto* file : files) {
-        SCOPED_TRACE(iree_hal_file_async_handle(file) ? "platform" : "memory");
-        iree_hal_amd_fabric_file_transfer_t transfer = {};
-        IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_initialize(
-            file, access, 0, target, 0, 16384, allocator_, &transfer));
-        iree_hal_memory_effects_t before, after;
-        IREE_EXPECT_STATUS_IS(
-            expected,
-            iree_hal_amd_fabric_file_transfer_prepare_ranges(
-                &transfer, &native_.api, families_[0],
-                native_families_[0].queue_family_ordinal, &before, &after));
-        EXPECT_EQ(transfer.sources.host_count, 0u);
-        if (expected == IREE_STATUS_OK && iree_hal_file_async_handle(file)) {
-          EXPECT_GE(transfer.sources.count, 1u);
-          for (size_t i = 0; i < transfer.sources.count; ++i) {
-            EXPECT_NE(transfer.sources.ranges[i].storage, nullptr);
-            EXPECT_EQ(transfer.sources.ranges[i].contents.data, nullptr);
-          }
-        } else {
-          EXPECT_EQ(transfer.sources.count, 0u);
-        }
-        EXPECT_EQ(native_.map_count, 0);
-        iree_hal_amd_fabric_file_transfer_deinitialize(&transfer);
+  for (auto* buffer : {backing, target}) {
+    for (auto* file : files) {
+      iree_hal_amd_fabric_file_transfer_t transfer = {};
+      IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_initialize(
+          file, IREE_HAL_MEMORY_ACCESS_READ, 0, buffer, 0, 16384, allocator_,
+          &transfer));
+      iree_hal_memory_effects_t before, after;
+      IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_prepare_source(
+          &transfer, &native_.api, families_[0],
+          native_families_[0].queue_family_ordinal, &before, &after));
+      const bool physical =
+          buffer == backing && iree_hal_file_async_handle(file);
+      EXPECT_EQ(transfer.source.contents.data_length, physical ? 16384u : 0u);
+      EXPECT_EQ(transfer.source.contents.data, nullptr);
+      if (physical) {
+        EXPECT_NE(transfer.source.storage, nullptr);
       }
+      EXPECT_EQ(native_.map_count, 0);
+      iree_hal_amd_fabric_file_transfer_deinitialize(&transfer);
     }
   }
   for (auto* file : files) {
     iree_hal_file_release(file);
   }
   EXPECT_TRUE(path.Remove());
-  iree_hal_semaphore_release(done);
   iree_hal_buffer_release(target);
   iree_hal_buffer_release(backing);
   iree_hal_pool_release(pool);
@@ -881,16 +895,6 @@ TEST_P(ReservationBackendTest, MapsExactConsumersThroughNativeProjections) {
   EXPECT_EQ(native_.last_updates[0].source_byte_offset, 12288u);
   EXPECT_EQ(native_.last_updates[0].target_byte_offset, 4096u);
   EXPECT_EQ(native_.last_updates[0].byte_length, 8192u);
-  iree_hal_amd_fabric_virtual_mapping_t source;
-  for (uint32_t i = 0; i < 2; ++i) {
-    IREE_ASSERT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
-        iree_hal_buffer_virtual_view(reservations[i]), i ? second.id : first.id,
-        5000, 8000, &source));
-    EXPECT_EQ(source.native.source_byte_offset, 12288u + 904u);
-    EXPECT_EQ(source.native.byte_length, 8192u - 904u);
-    EXPECT_EQ(source.native.memory_access_ordinal, i);
-  }
-
   // ANY expands distinct projections while deduplicating native aliases.
   mappings[0].scope = {first.domain, IREE_HAL_MEMORY_SCOPE_ANY};
   ++value;
@@ -898,10 +902,6 @@ TEST_P(ReservationBackendTest, MapsExactConsumersThroughNativeProjections) {
   IREE_ASSERT_OK(
       iree_hal_semaphore_wait(done, value, iree_infinite_timeout(), 0));
   EXPECT_EQ(native_.update_count, native_.alias_projections ? 3 : 4);
-  IREE_ASSERT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
-      iree_hal_buffer_virtual_view(reservations[0]), second.id, 4096, 8192,
-      &source));
-  EXPECT_EQ(source.native.memory_access_ordinal, 1u);
   mappings[0].scope = first;
 
   // Distinct consumers of one page table still produce a single native vector.
@@ -940,61 +940,6 @@ TEST_P(ReservationBackendTest, MapsExactConsumersThroughNativeProjections) {
       iree_hal_semaphore_wait(done, value, iree_infinite_timeout(), 0));
   EXPECT_EQ(native_.last_updates[0].memory, nullptr);
   EXPECT_EQ(native_.last_updates[0].access, 0u);
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
-                        iree_hal_amd_fabric_virtual_buffer_query_source(
-                            iree_hal_buffer_virtual_view(reservations[0]),
-                            first.id, 4096, 1, &source));
-  IREE_ASSERT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
-      iree_hal_buffer_virtual_view(reservations[0]), first.id, 0, 16384,
-      &source));
-  EXPECT_EQ(source.native.byte_length, 4096u);
-  // Exercise source-index splits, holes, and coalescing through real queue_map
-  // admission. A page assignment oracle is independent of the run
-  // representation.
-  const uint32_t changes[][3] = {
-      {0, 4, 0},          {1, 2, 4},          {0, 1, UINT32_MAX},
-      {2, 2, 5},          {1, 3, UINT32_MAX}, {0, 4, 0},
-      {1, 1, UINT32_MAX}, {1, 1, 1},          {0, 4, UINT32_MAX},
-  };
-  std::array<uint32_t, 4> pages;
-  pages.fill(UINT32_MAX);
-  for (const auto& change : changes) {
-    const bool bind = change[2] != UINT32_MAX;
-    const iree_hal_memory_mapping_t mapping = {
-        .target = reservations[0],
-        .scope = first,
-        .target_range = {change[0] * 4096u, change[1] * 4096u},
-        .source = bind ? backing : nullptr,
-        .source_offset = bind ? change[2] * 4096u : 0,
-        .access = static_cast<iree_hal_memory_access_t>(
-            bind ? IREE_HAL_MEMORY_ACCESS_ALL : 0),
-        .operation = bind ? IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE
-                          : IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND,
-    };
-    ++value;
-    IREE_ASSERT_OK(iree_hal_queue_map(queue, {}, signals, 1, &mapping, 0));
-    IREE_ASSERT_OK(
-        iree_hal_semaphore_wait(done, value, iree_infinite_timeout(), 0));
-    for (uint32_t p = 0; p < change[1]; ++p) {
-      pages[change[0] + p] = bind ? change[2] + p : UINT32_MAX;
-    }
-    for (uint32_t p = 0; p < pages.size(); ++p) {
-      auto result = iree_hal_amd_fabric_virtual_buffer_query_source(
-          iree_hal_buffer_virtual_view(reservations[0]), first.id,
-          p * 4096u + 123, (4 - p) * 4096u - 123, &source);
-      if (pages[p] == UINT32_MAX) {
-        IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION, result);
-      } else {
-        IREE_ASSERT_OK(result);
-        EXPECT_EQ(source.native.source_byte_offset, pages[p] * 4096u + 123);
-        uint32_t end = p + 1;
-        while (end < pages.size() && pages[end] == pages[p] + end - p) {
-          ++end;
-        }
-        EXPECT_EQ(source.native.byte_length, (end - p) * 4096u - 123);
-      }
-    }
-  }
   for (auto* reservation : reservations) {
     iree_hal_buffer_release(reservation);
   }
@@ -1030,11 +975,6 @@ TEST_F(MemoryBackendTest, NativeMappingFailureReachesQueueCompletion) {
       iree_hal_semaphore_wait(done, value, iree_infinite_timeout(), 0));
   EXPECT_EQ(native_.update_count, 1);
   EXPECT_EQ(native_.reservation_count, 1);
-  iree_hal_amd_fabric_virtual_mapping_t source;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
-                        iree_hal_amd_fabric_virtual_buffer_query_source(
-                            iree_hal_buffer_virtual_view(reservation),
-                            mapping.scope.id, 0, 1, &source));
   iree_hal_buffer_release(reservation);
   EXPECT_EQ(native_.reservation_count, 0);
   iree_hal_semaphore_release(done);
@@ -1096,15 +1036,11 @@ class MappingPublicationTest : public MemoryBackendTest {
     };
   }
 
-  iree_status_t Update(const std::vector<iree_hal_memory_mapping_t>& mappings,
-                       bool fail_metadata = false) {
+  iree_status_t Update(const std::vector<iree_hal_memory_mapping_t>& mappings) {
     iree_hal_host_call_t call;
     IREE_RETURN_IF_ERROR(iree_hal_memory_mapping_prepare(
         iree_hal_device_queue(cpu_device_, 0, 0), mappings.size(),
         mappings.data(), 0, allocator_, &call));
-    // Admission is complete: rejection now targets the native adapter's index,
-    // not the HAL's captured transaction or a task-system allocation.
-    native_.fail_metadata_allocation.store(fail_metadata);
     const uint64_t args[4] = {};
     iree_status_t status = call.fn(call.user_data, args, nullptr);
     iree_hal_resource_release(call.resource);
@@ -1115,7 +1051,7 @@ class MappingPublicationTest : public MemoryBackendTest {
   iree_hal_pool_t* pool_ = nullptr;
   // Physical source kept live until all native aliases have been destroyed.
   iree_hal_buffer_t* backing_ = nullptr;
-  // Virtual buffer owning the published index.
+  // Virtual buffer owning the native address reservation.
   iree_hal_buffer_t* target_ = nullptr;
   // First native consumer's exact program scope.
   iree_hal_memory_scope_t scope_ = {};
@@ -1201,6 +1137,8 @@ TEST_F(MappingPublicationTest, CoalescesEachMappingOperation) {
           mapping.access = IREE_HAL_MEMORY_ACCESS_NONE;
         }
         if (removal) {
+          mapping.previous_source = mapping.source;
+          mapping.previous_source_offset = mapping.source_offset;
           mapping.source = nullptr;
           mapping.source_offset = 0;
           mapping.access = IREE_HAL_MEMORY_ACCESS_NONE;
@@ -1306,152 +1244,105 @@ TEST_F(MappingPublicationTest, RejectsOverlapBeforePublishingCompactedPrefix) {
 }
 
 TEST_F(MappingPublicationTest,
-       CoalescedPublicationPreservesPartialReclamation) {
+       PriorViewsSurviveCaptureAndReachNativePublication) {
+  iree_hal_buffer_t* previous = nullptr;
   IREE_ASSERT_OK(
-      Update({Mapping(8192, 4096, 8192), Mapping(0, 4096),
-              Mapping(12288, 4096, 12288), Mapping(4096, 4096, 4096)}));
+      iree_hal_buffer_subspan(backing_, 4096, 8192, allocator_, &previous));
+  auto removal = Mapping(4096, 8192);
+  removal.source = nullptr;
+  removal.access = IREE_HAL_MEMORY_ACCESS_NONE;
+  removal.operation = IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND;
+  removal.previous_source = previous;
+  iree_hal_host_call_t call;
+  IREE_ASSERT_OK(
+      iree_hal_memory_mapping_prepare(iree_hal_device_queue(cpu_device_, 0, 0),
+                                      1, &removal, 0, allocator_, &call));
+  iree_hal_buffer_release(previous);
+  const uint64_t args[4] = {};
+  IREE_ASSERT_OK(call.fn(call.user_data, args, nullptr));
   ASSERT_EQ(native_.last_updates.size(), 1u);
-  EXPECT_EQ(native_.last_updates[0].byte_length, 16384u);
-  const auto memory = native_.last_updates[0].memory;
-  // Publication does not make the native run an indivisible lifetime unit.
-  // Remove its middle, then reuse those bytes independently.
-  const iree_hal_memory_mapping_t removal[] = {
-      {.target = target_, .scope = scope_, .target_range = {4096, 4096}},
-      {.target = target_, .scope = scope_, .target_range = {8192, 4096}},
-  };
-  IREE_ASSERT_OK(Update({removal[0], removal[1]}));
-  ASSERT_EQ(native_.last_updates.size(), 1u);
+  EXPECT_NE(native_.last_updates[0].previous_memory, nullptr);
+  EXPECT_EQ(native_.last_updates[0].previous_source_byte_offset, 4096u);
   EXPECT_EQ(native_.last_updates[0].byte_length, 8192u);
   EXPECT_EQ(native_.last_updates[0].memory, nullptr);
-  for (uint64_t offset : {0u, 12288u}) {
-    iree_hal_amd_fabric_virtual_mapping_t mapping;
-    IREE_ASSERT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
-        iree_hal_buffer_virtual_view(target_), scope_.id, offset, 4096,
-        &mapping));
-    EXPECT_EQ(mapping.native.memory, memory);
-    EXPECT_EQ(mapping.native.source_byte_offset, offset);
-    EXPECT_EQ(mapping.native.byte_length, 4096u);
-  }
-  IREE_ASSERT_OK(
-      Update({Mapping(4096, 4096, 16384), Mapping(8192, 4096, 20480)}));
+  iree_hal_resource_release(call.resource);
+}
+
+TEST_F(MappingPublicationTest, PriorSourceBoundariesPreventCoalescing) {
+  auto first = Mapping(0, 4096);
+  first.previous_source = backing_;
+  first.previous_source_offset = 8192;
+  auto second = Mapping(4096, 4096, 4096);
+  second.previous_source = backing_;
+  second.previous_source_offset = 16384;
+  IREE_ASSERT_OK(Update({first, second}));
+  ASSERT_EQ(native_.last_updates.size(), 2u);
+  EXPECT_EQ(native_.last_updates[0].previous_source_byte_offset, 8192u);
+  EXPECT_EQ(native_.last_updates[1].previous_source_byte_offset, 16384u);
+  second.previous_source_offset = 12288;
+  IREE_ASSERT_OK(Update({first, second}));
   ASSERT_EQ(native_.last_updates.size(), 1u);
-  iree_hal_amd_fabric_virtual_mapping_t mapping;
-  IREE_ASSERT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
-      iree_hal_buffer_virtual_view(target_), scope_.id, 4096, 8192, &mapping));
-  EXPECT_EQ(mapping.native.memory, memory);
-  EXPECT_EQ(mapping.native.source_byte_offset, 16384u);
-  EXPECT_EQ(mapping.native.byte_length, 8192u);
+  EXPECT_EQ(native_.last_updates[0].previous_source_byte_offset, 8192u);
+  EXPECT_EQ(native_.last_updates[0].byte_length, 8192u);
 }
 
-TEST_F(MappingPublicationTest, AllocationFailurePrecedesNativeMutation) {
-  IREE_ASSERT_OK(Update({Mapping(0, 16384)}));
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
-                        Update({Mapping(4096, 4096, 8192)}, true));
-  EXPECT_EQ(native_.update_count, 1);
-  EXPECT_FALSE(native_.fail_metadata_allocation.load());
-  iree_hal_amd_fabric_virtual_mapping_t mapping;
-  IREE_ASSERT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
-      iree_hal_buffer_virtual_view(target_), scope_.id, 0, 16384, &mapping));
-  EXPECT_EQ(mapping.native.source_byte_offset, 0u);
-  EXPECT_EQ(mapping.native.byte_length, 16384u);
-  IREE_ASSERT_OK(Update({Mapping(4096, 4096, 8192)}));
-  IREE_ASSERT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
-      iree_hal_buffer_virtual_view(target_), scope_.id, 4096, 4096, &mapping));
-  EXPECT_EQ(mapping.native.source_byte_offset, 8192u);
+TEST_F(MappingPublicationTest, InvalidPriorSourceRejectsTheWholeBatch) {
+  const auto prior_references =
+      iree_atomic_ref_count_load(&backing_->resource.ref_count);
+  for (uint32_t failure = 0; failure < 5; ++failure) {
+    auto replacement = Mapping(4096, 4096);
+    replacement.previous_source = backing_;
+    iree_status_code_t expected = IREE_STATUS_INVALID_ARGUMENT;
+    switch (failure) {
+      case 0:
+        replacement.previous_source = nullptr;
+        replacement.previous_source_offset = 4096;
+        break;
+      case 1:
+        replacement.previous_source_offset =
+            iree_hal_buffer_byte_length(backing_);
+        expected = IREE_STATUS_OUT_OF_RANGE;
+        break;
+      case 2:
+        replacement.previous_source_offset = 1;
+        expected = IREE_STATUS_FAILED_PRECONDITION;
+        break;
+      case 3:
+        replacement.operation = IREE_HAL_MEMORY_MAPPING_OPERATION_BIND;
+        break;
+      case 4:
+        replacement.operation = IREE_HAL_MEMORY_MAPPING_OPERATION_PROTECT;
+        break;
+    }
+    IREE_EXPECT_STATUS_IS(expected, Update({Mapping(0, 4096), replacement}));
+    EXPECT_EQ(native_.update_count, 0);
+    EXPECT_EQ(iree_atomic_ref_count_load(&backing_->resource.ref_count),
+              prior_references);
+  }
 }
 
-TEST_F(MappingPublicationTest, PartialNativeFailurePoisonsEveryAlias) {
+TEST_F(MappingPublicationTest, PartialNativeFailureRetainsCheckedTeardown) {
   IREE_ASSERT_OK(Update({Mapping(0, 16384)}));
   native_.api.memory_reservation_update =
       +[](amdf_memory_reservation_t* handle, uint32_t ordinal, uint32_t count,
           const amdf_memory_mapping_update_t* updates) -> amdf_status_t {
     EXPECT_EQ(count, 2u);
-    // Model a native implementation that accepted one change before failing.
     FakeNative::ReservationUpdate(handle, ordinal, 1, updates);
     return amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
   };
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DATA_LOSS,
-      Update({Mapping(0, 4096, 16384), Mapping(8192, 4096, 24576)}));
+  auto first = Mapping(0, 4096, 16384);
+  first.previous_source = backing_;
+  auto second = Mapping(8192, 4096, 24576);
+  second.previous_source = backing_;
+  second.previous_source_offset = 8192;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, Update({first, second}));
   ASSERT_EQ(native_.last_updates.size(), 1u);
-  for (const auto* family : families_) {
-    const auto scope = ResolveScope(IREE_HAL_MEMORY_SITE_PROGRAM, family);
-    for (uint64_t position : {0u, 4096u, 8192u, 12288u}) {
-      iree_hal_amd_fabric_virtual_mapping_t mapping;
-      IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
-                            iree_hal_amd_fabric_virtual_buffer_query_source(
-                                iree_hal_buffer_virtual_view(target_), scope.id,
-                                position, 1, &mapping));
-      EXPECT_EQ(mapping.native.memory, nullptr);
-    }
-  }
-  // Checked removal clears metadata but preserves the first native failure.
   native_.detach_failure =
       amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                         iree_hal_virtual_buffer_detach(target_, scope_));
   native_.detach_failure = AMDF_STATUS_OK;
   IREE_ASSERT_OK(iree_hal_virtual_buffer_detach(target_, scope_));
-  iree_hal_amd_fabric_virtual_mapping_t mapping;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DATA_LOSS,
-      iree_hal_amd_fabric_virtual_buffer_query_source(
-          iree_hal_buffer_virtual_view(target_), scope_.id, 0, 1, &mapping));
-}
-
-TEST_F(MappingPublicationTest, NativeCallDoesNotBlockQueries) {
-  IREE_ASSERT_OK(Update({Mapping(0, 16384)}));
-  std::promise<void> entered;
-  std::promise<void> resume;
-  auto resumed = resume.get_future();
-  native_.before_update = [&] {
-    entered.set_value();
-    resumed.wait();
-  };
-  auto update = std::async(
-      std::launch::async, [&] { return Update({Mapping(4096, 4096, 16384)}); });
-  entered.get_future().wait();
-  iree_hal_amd_fabric_virtual_mapping_t mapping;
-  IREE_EXPECT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
-      iree_hal_buffer_virtual_view(target_), scope_.id, 0, 16384, &mapping));
-  EXPECT_EQ(mapping.native.byte_length, 16384u);
-  EXPECT_EQ(mapping.native.source_byte_offset, 0u);
-  resume.set_value();
-  IREE_ASSERT_OK(update.get());
-  native_.before_update = {};
-  IREE_ASSERT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
-      iree_hal_buffer_virtual_view(target_), scope_.id, 4096, 16384, &mapping));
-  EXPECT_EQ(mapping.native.byte_length, 4096u);
-  EXPECT_EQ(mapping.native.source_byte_offset, 16384u);
-}
-
-TEST_F(MappingPublicationTest, ConcurrentQueriesObserveCompleteBatches) {
-  IREE_ASSERT_OK(Update({Mapping(0, 16384)}));
-  std::array<std::vector<iree_hal_memory_mapping_t>, 2> versions;
-  for (size_t version = 0; version < versions.size(); ++version) {
-    for (uint64_t position = 0; position < 16384; position += 4096) {
-      versions[version].push_back(
-          Mapping(position, 4096, version * 16384 + position));
-    }
-  }
-  std::atomic<bool> done{false};
-  auto writer = std::async(std::launch::async, [&] {
-    for (size_t iteration = 0; iteration < 1000; ++iteration) {
-      IREE_EXPECT_OK(Update(versions[iteration % 2]));
-    }
-    done.store(true, std::memory_order_release);
-  });
-  do {
-    iree_hal_amd_fabric_virtual_mapping_t mapping;
-    IREE_EXPECT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
-        iree_hal_buffer_virtual_view(target_), scope_.id, 0, 16384, &mapping));
-    // Intermediate publication would expose a shorter prefix where old and new
-    // source coordinates meet. A complete batch always coalesces all four runs.
-    EXPECT_EQ(mapping.native.byte_length, 16384u);
-    EXPECT_TRUE(mapping.native.source_byte_offset == 0 ||
-                mapping.native.source_byte_offset == 16384);
-  } while (!done.load(std::memory_order_acquire));
-  writer.get();
 }
 
 class ConcurrentMemoryBackendTest : public MemoryBackendTest {

@@ -76,6 +76,7 @@ class Pm4MappingTest : public Pm4MappingFixture {
         .access = access_,
     };
     for (uint32_t generation = 0; generation < tails.size(); ++generation) {
+      last.previous_memory = last.memory;
       last.memory = tails[generation]->memory;
       ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, 1, &last),
                 AMDF_STATUS_OK);
@@ -90,6 +91,7 @@ class Pm4MappingTest : public Pm4MappingFixture {
     }
     // Clearing the exact terminal page must preserve the distant mapping and
     // cannot consume physical padding beyond the requested reservation extent.
+    last.previous_memory = last.memory;
     last.memory = nullptr;
     last.access = 0;
     ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, 1, &last),
@@ -101,6 +103,98 @@ class Pm4MappingTest : public Pm4MappingFixture {
       ASSERT_NO_FATAL_FAILURE(ReleaseBacking(tail));
     }
     ASSERT_NO_FATAL_FAILURE(ReleaseBacking(neighbor));
+  }
+
+  void RunPartialRemoval(amdf_memory_scope_t* scope) {
+    ASSERT_NO_FATAL_FAILURE(Prepare(scope));
+    if (IsSkipped()) {
+      return;
+    }
+    const uint64_t page = reservation_info_.mapping_granularity;
+    const uint64_t length = 2 * kSlabByteLength;
+    ASSERT_LT(4 * page, kSlabByteLength);
+    GpuMemory* original = nullptr;
+    GpuMemory* replacement = nullptr;
+    ASSERT_NO_FATAL_FAILURE(CreateBacking(length, &original));
+    ASSERT_NO_FATAL_FAILURE(CreateBacking(page, &replacement));
+    const amdf_memory_mapping_update_t initial = {
+        .target_byte_offset = kPlacementByteOffset,
+        .byte_length = length,
+        .memory = original->memory,
+        .access = access_,
+    };
+    ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, 1, &initial),
+              AMDF_STATUS_OK);
+    ASSERT_NO_FATAL_FAILURE(WriteAndVerify(
+        kPlacementByteOffset, length - kPayloadByteOffset, 100, *original));
+
+    const uint64_t address = reservation_info_.address + kPlacementByteOffset;
+    auto write_page = [&](uint64_t offset, uint64_t source, uint32_t tag) {
+      auto* input = static_cast<uint32_t*>(upload_->host.pointer);
+      for (uint64_t i = 0; i < page / sizeof(uint32_t); ++i) {
+        input[i] = TaggedWord(tag, i);
+      }
+      ASSERT_NO_FATAL_FAILURE(
+          Copy(upload_->device_address, address + offset, page));
+      ASSERT_NO_FATAL_FAILURE(Verify(address + offset, page, tag));
+      ASSERT_NO_FATAL_FAILURE(Verify(source, page, tag));
+    };
+    // A sub-page-table hole splits a coalesced native mapping. Its live prefix
+    // and suffix must be ready on the already-running compute queue immediately
+    // after update returns, including when the edit binds no new source.
+    const amdf_memory_mapping_update_t hole = {
+        .target_byte_offset = kPlacementByteOffset + page,
+        .byte_length = page,
+        .previous_memory = original->memory,
+        .previous_source_byte_offset = page,
+    };
+    ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, 1, &hole),
+              AMDF_STATUS_OK);
+    for (const uint64_t offset :
+         {uint64_t{0}, 2 * page, kSlabByteLength, length - page}) {
+      ASSERT_NO_FATAL_FAILURE(
+          write_page(offset, original->device_address + offset, 200));
+    }
+
+    const amdf_memory_mapping_update_t replace = {
+        .target_byte_offset = kPlacementByteOffset + kSlabByteLength + page,
+        .byte_length = page,
+        .memory = replacement->memory,
+        .access = access_,
+        .previous_memory = original->memory,
+        .previous_source_byte_offset = kSlabByteLength + page,
+    };
+    ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, 1, &replace),
+              AMDF_STATUS_OK);
+    ASSERT_NO_FATAL_FAILURE(
+        write_page(kSlabByteLength + page, replacement->device_address, 300));
+    for (const uint64_t offset : {2 * page, kSlabByteLength,
+                                  kSlabByteLength + 2 * page, length - page}) {
+      ASSERT_NO_FATAL_FAILURE(
+          write_page(offset, original->device_address + offset, 400));
+    }
+    const amdf_memory_mapping_update_t ends[] = {
+        {
+            .target_byte_offset = kPlacementByteOffset,
+            .byte_length = page,
+            .previous_memory = original->memory,
+        },
+        {
+            .target_byte_offset = kPlacementByteOffset + length - page,
+            .byte_length = page,
+            .previous_memory = original->memory,
+            .previous_source_byte_offset = length - page,
+        },
+    };
+    ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, 2, ends),
+              AMDF_STATUS_OK);
+    ASSERT_NO_FATAL_FAILURE(
+        write_page(2 * page, original->device_address + 2 * page, 500));
+    ASSERT_NO_FATAL_FAILURE(write_page(
+        length - 2 * page, original->device_address + length - 2 * page, 600));
+    EXPECT_NO_FATAL_FAILURE(
+        Verify(address + kSlabByteLength + page, page, 300));
+    EXPECT_NO_FATAL_FAILURE(Verify(replacement->device_address, page, 300));
   }
 
   void RunSplit(amdf_memory_scope_t* scope) {
@@ -124,6 +218,7 @@ class Pm4MappingTest : public Pm4MappingFixture {
         static_cast<const uint32_t*>(readback_->host.pointer);
     const std::vector<uint32_t> capture(
         captured, captured + kLargePayloadByteLength / sizeof(uint32_t));
+    first.previous_memory = first.memory;
     first.memory = nullptr;
     first.access = 0;
     ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, 1, &first),
@@ -173,6 +268,7 @@ class Pm4MappingTest : public Pm4MappingFixture {
       const amdf_memory_mapping_update_t detach = {
           .target_byte_offset = kPlacementByteOffset + i * kSlabByteLength,
           .byte_length = kSlabByteLength,
+          .previous_memory = slabs[i]->memory,
       };
       ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, 1, &detach),
                 AMDF_STATUS_OK);
@@ -191,7 +287,7 @@ class Pm4MappingTest : public Pm4MappingFixture {
       ASSERT_NO_FATAL_FAILURE(CreateBacking(kSlabByteLength, &slab));
     }
     // Descending descriptors also exercise admission and sorting of an ordinary
-    // caller vector. Replacement requires no knowledge of the previous owners.
+    // caller vector. Each generation carries the backing it replaces.
     constexpr uint64_t kHighOffset = (UINT64_C(5) << 30) + kSlabByteLength;
     for (uint32_t generation = 0; generation < slabs.size(); ++generation) {
       std::array<amdf_memory_mapping_update_t, 3> updates = {};
@@ -202,6 +298,10 @@ class Pm4MappingTest : public Pm4MappingFixture {
             .byte_length = kSlabByteLength,
             .memory = slabs[(position + generation) % slabs.size()]->memory,
             .access = access_,
+            .previous_memory =
+                generation
+                    ? slabs[(position + generation - 1) % slabs.size()]->memory
+                    : nullptr,
         };
       }
       ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, updates.size(),
@@ -333,6 +433,8 @@ class Pm4MappingTest : public Pm4MappingFixture {
     const amdf_memory_mapping_update_t detach = {
         .target_byte_offset = aliases[0].target_byte_offset,
         .byte_length = aliases[0].byte_length,
+        .previous_memory = backing->memory,
+        .previous_source_byte_offset = aliases[0].source_byte_offset,
     };
     ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, 1, &detach),
               AMDF_STATUS_OK);
@@ -472,6 +574,7 @@ class Pm4MappingTest : public Pm4MappingFixture {
               AMDF_STATUS_OK);
     ASSERT_NO_FATAL_FAILURE(
         WriteAndVerify(offset, 4096, 1, *secondary_backing));
+    update.previous_memory = update.memory;
     update.memory = primary_backing->memory;
     ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, 1, &update),
               AMDF_STATUS_OK);
@@ -579,6 +682,9 @@ class Pm4MappingTest : public Pm4MappingFixture {
         .source_byte_offset = granularity,
     };
     for (uint32_t generation = 1; generation <= sources.size(); ++generation) {
+      update.previous_memory = update.memory;
+      update.previous_source_byte_offset =
+          update.memory ? update.source_byte_offset : 0;
       update.memory = sources[generation - 1]->memory;
       auto* words = static_cast<uint32_t*>(upload_->host.pointer);
       for (uint64_t i = 0; i < payload_length / 4; ++i) {
@@ -627,6 +733,17 @@ TEST_F(Pm4MappingTest, LocalBackingReplacesExactShortTerminalExtent) {
 
 TEST_F(Pm4MappingTest, SystemBackingSplitReuseIsImmediatelyVisibleToCompute) {
   RunSplit(system_scope_);
+}
+
+TEST_F(Pm4MappingTest, SystemBackingPartialRemovalPreservesLiveNeighbors) {
+  RunPartialRemoval(system_scope_);
+}
+
+TEST_F(Pm4MappingTest, LocalBackingPartialRemovalPreservesLiveNeighbors) {
+  if (local_scope_ == nullptr) {
+    GTEST_SKIP() << "endpoint has no local storage scope";
+  }
+  RunPartialRemoval(local_scope_);
 }
 
 TEST_F(Pm4MappingTest, LocalBackingSplitReuseIsImmediatelyVisibleToCompute) {

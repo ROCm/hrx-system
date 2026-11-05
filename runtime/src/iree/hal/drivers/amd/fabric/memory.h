@@ -71,6 +71,17 @@ typedef struct iree_hal_amd_fabric_memory_scope_facts_t {
   uint32_t access_ordinal;
 } iree_hal_amd_fabric_memory_scope_facts_t;
 
+// Immutable handoff to a family's private copy engine. Each edge describes
+// both executors; UNSUPPORTED remains sticky across all admitted source routes.
+// AMDF contract backend_data is a scope_count-element array of copy protocols.
+// It contains no source allocation identity or installed-mapping state.
+typedef struct iree_hal_amd_fabric_memory_copy_protocol_t {
+  // Main queue release and copy engine acquire before copying payload.
+  iree_hal_memory_transition_t begin;
+  // Copy engine release and main queue acquire after copying payload.
+  iree_hal_memory_transition_t end;
+} iree_hal_amd_fabric_memory_copy_protocol_t;
+
 // Private suffix after the generic entries of a fabric native binding table.
 // Copies borrow the same physical owner and preserve its lifetime contract.
 // Translated host bindings establish byte correspondence for nested views.

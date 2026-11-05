@@ -730,6 +730,8 @@ TEST_P(ExecutionTest, ConsumerFirstKernelsShareOneBacking) {
           .access = IREE_HAL_MEMORY_ACCESS_ALL,
           .operation = replay ? IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE
                               : IREE_HAL_MEMORY_MAPPING_OPERATION_BIND,
+          .previous_source =
+              replay ? backings[(replay - 1) % backings.size()].get() : nullptr,
       };
       uint64_t previous_reader = replay * 4;
       iree_hal_semaphore_t* waits[] = {start, cpu_timeline};
@@ -831,6 +833,7 @@ TEST_P(ExecutionTest, ConsumerFirstKernelsShareOneBacking) {
         .scope = all_scopes,
         .target_range = {0, mapping_unit},
         .operation = IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND,
+        .previous_source = backings[2 % backings.size()],
     };
     IREE_ASSERT_OK(iree_hal_queue_map(participants_[kGpu].queue,
                                       {1, &cpu_timeline, &final_reader},

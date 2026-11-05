@@ -30,9 +30,9 @@ class FileTransferRangesTest
       public ::testing::WithParamInterface<std::tuple<uint32_t, bool, bool>> {};
 
 TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
-  static_assert(sizeof(iree_hal_amd_fabric_file_range_t) <= 64);
+  static_assert(sizeof(iree_hal_amd_fabric_file_source_t) <= 64);
   RecordProperty("source_record_bytes",
-                 sizeof(iree_hal_amd_fabric_file_range_t));
+                 sizeof(iree_hal_amd_fabric_file_source_t));
   constexpr uint64_t kUnit = 4096;
   constexpr uint64_t kBufferOffset = 128;
   constexpr uint64_t kFileOffset = 64;
@@ -85,10 +85,6 @@ TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
   }
   std::array<Ref<iree_hal_buffer_t>, 3> sources;
   std::array<uint8_t*, 3> source_contents;
-  std::array<iree_hal_memory_mapping_t, 3> mappings = {};
-  Ref<iree_hal_buffer_t> target;
-  IREE_ASSERT_OK(CreateReservation(target.out()));
-  const auto scope = ResolveScope(IREE_HAL_MEMORY_SITE_PROGRAM, families_[0]);
   for (uint32_t i = 0; i < sources.size(); ++i) {
     native_.host_mapping_features = kFeatures[source_routes[i]];
     IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
@@ -103,25 +99,7 @@ TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
     source_contents[i] = static_cast<uint8_t*>(native->data);
     std::memset(source_contents[i], 0xCD, 2 * kUnit);
     EXPECT_EQ(facts->memory->mapping != nullptr, source_routes[i] != 0);
-    mappings[i] = {
-        .target = target,
-        .scope = scope,
-        .target_range = {i * kUnit, kUnit},
-        .source = sources[i],
-        .source_offset = kUnit,
-        .access = IREE_HAL_MEMORY_ACCESS_ALL,
-    };
   }
-  Ref<iree_hal_semaphore_t> timeline;
-  IREE_ASSERT_OK(iree_hal_semaphore_create(
-      cpu_device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0, 0, timeline.out()));
-  auto* semaphore = timeline.get();
-  uint64_t mapped = 1;
-  IREE_ASSERT_OK(iree_hal_queue_map(iree_hal_device_queue(cpu_device_, 0, 0),
-                                    {}, {1, &semaphore, &mapped},
-                                    mappings.size(), mappings.data(), 0));
-  IREE_ASSERT_OK(
-      iree_hal_semaphore_wait(timeline, mapped, iree_infinite_timeout(), 0));
 
   std::vector<uint8_t> expected(kLength + 2 * kFileOffset, 0xCD);
   for (uint64_t i = 0; i < kLength; ++i) {
@@ -152,35 +130,32 @@ TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
   iree_io_file_handle_release(handle);
   IREE_ASSERT_OK(status);
 
-  iree_hal_amd_fabric_file_transfer_t transfer = {};
-  IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_initialize(
-      file, write ? IREE_HAL_MEMORY_ACCESS_WRITE : IREE_HAL_MEMORY_ACCESS_READ,
-      kFileOffset, target, kBufferOffset, kLength, allocator_, &transfer));
-  target.reset();
-  file.reset();
-  // This test resolves routes without issuing I/O. Model the imported file's
-  // direct-I/O requirement independently of the temporary filesystem's mode.
-  if (direct) {
-    transfer.async.file->flags |= IREE_ASYNC_FILE_FLAG_DIRECT;
-  }
-  iree_hal_memory_effects_t before = {}, after = {};
-  IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_prepare_ranges(
-      &transfer, &native_.api, families_[0],
-      native_families_[0].queue_family_ordinal, &before, &after));
-  EXPECT_EQ(before.bits, 0u);
-  EXPECT_EQ(after.bits, 0u);
-  ASSERT_EQ(transfer.sources.count, sources.size());
-  uint32_t host_count = 0;
+  // The owner already has the physical ranges. Each read preserves that
+  // identity rather than making the file path reconstruct installed aliases.
   for (uint32_t i = 0; i < sources.size(); ++i) {
     const uint64_t start = std::max(i * kUnit, kBufferOffset);
     const uint64_t end = std::min((i + 1) * kUnit, kBufferOffset + kLength);
     const bool host = source_routes[i] == 2;
-    host_count += host;
-    const auto& range = transfer.sources.ranges[i];
+    iree_hal_amd_fabric_file_transfer_t transfer = {};
+    IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_initialize(
+        file,
+        write ? IREE_HAL_MEMORY_ACCESS_WRITE : IREE_HAL_MEMORY_ACCESS_READ,
+        kFileOffset + start - kBufferOffset, sources[i], kUnit + start % kUnit,
+        end - start, allocator_, &transfer));
+    // Route qualification is independent of the temporary filesystem's mode.
+    if (direct) {
+      transfer.async.file->flags |= IREE_ASYNC_FILE_FLAG_DIRECT;
+    }
+    iree_hal_memory_effects_t before = {}, after = {};
+    IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_prepare_source(
+        &transfer, &native_.api, families_[0],
+        native_families_[0].queue_family_ordinal, &before, &after));
+    EXPECT_EQ(before.bits, 0u);
+    EXPECT_EQ(after.bits, 0u);
+    const auto& range = transfer.source;
     const auto* memory =
         reinterpret_cast<const FakeNative::Memory*>(range.storage->handle);
     EXPECT_EQ(memory->data, source_contents[i]);
-    EXPECT_EQ(range.offset, start - kBufferOffset);
     EXPECT_EQ(range.source_offset, kUnit + start % kUnit);
     EXPECT_EQ(range.contents.data_length, end - start);
     EXPECT_EQ(range.contents.data,
@@ -188,9 +163,7 @@ TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
     EXPECT_EQ(range.access_ordinal, 0u);
     EXPECT_EQ(range.region, nullptr);
     EXPECT_EQ(range.effects.bits, 0u);
-    transfer.async.request.offset = range.offset;
-    EXPECT_EQ(iree_hal_amd_fabric_file_transfer_current_range(&transfer),
-              &range);
+    transfer.async.request.offset = 0;
     if (host && !direct) {
       IREE_ASSERT_OK(
           iree_hal_amd_fabric_file_transfer_prepare_range(&transfer, &range));
@@ -206,9 +179,9 @@ TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
               : uint8_t{0xCD};
       EXPECT_EQ(source_contents[i][j], expected_byte) << i << ':' << j;
     }
+    iree_hal_amd_fabric_file_transfer_deinitialize(&transfer);
   }
-  EXPECT_EQ(transfer.sources.host_count, host_count);
-  iree_hal_amd_fabric_file_transfer_deinitialize(&transfer);
+  file.reset();
   iree_async_proactor_release(proactor);
   iree_io_file_contents_t* actual = nullptr;
   IREE_ASSERT_OK(
@@ -221,7 +194,7 @@ TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
   EXPECT_TRUE(file_path.Remove());
 }
 
-TEST_F(MemoryBackendTest, FileIoUsesReplacedSplitAndCoalescedMappings) {
+TEST_F(MemoryBackendTest, ExplicitSourcesPreserveIoCoordinatesAcrossLayouts) {
   constexpr uint64_t kUnit = 4096;
   native_.required_flags = 0;
   native_.mapping_enabled = true;
@@ -260,34 +233,6 @@ TEST_F(MemoryBackendTest, FileIoUsesReplacedSplitAndCoalescedMappings) {
     contents[i] = static_cast<uint8_t*>(
         reinterpret_cast<FakeNative::Memory*>(facts->memory->handle)->data);
   }
-  Ref<iree_hal_buffer_t> target;
-  IREE_ASSERT_OK(
-      CreateReservation(target.out(), pool, IREE_HAL_BUFFER_USAGE_TRANSFER));
-  const auto scope = ResolveScope(IREE_HAL_MEMORY_SITE_PROGRAM, families_[0]);
-  auto map = [&](uint64_t position, uint64_t length, int source,
-                 uint64_t source_offset) -> iree_status_t {
-    const iree_hal_memory_mapping_t mapping = {
-        .target = target,
-        .scope = scope,
-        .target_range = {position, length},
-        .source = source < 0 ? nullptr : sources[source].get(),
-        .source_offset = source_offset,
-        .access = static_cast<iree_hal_memory_access_t>(
-            source < 0 ? IREE_HAL_MEMORY_ACCESS_NONE
-                       : IREE_HAL_MEMORY_ACCESS_ALL),
-        .operation = source < 0 ? IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND
-                                : IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE,
-    };
-    iree_hal_host_call_t call;
-    IREE_RETURN_IF_ERROR(iree_hal_memory_mapping_prepare(
-        iree_hal_device_queue(cpu_device_, 0, 0), 1, &mapping, 0, allocator_,
-        &call));
-    const uint64_t args[4] = {};
-    iree_status_t status = call.fn(call.user_data, args, nullptr);
-    iree_hal_resource_release(call.resource);
-    return status;
-  };
-
   iree::testing::TempFilePath path("iree_mapping_file_round_trip");
   std::vector<uint8_t> expected(4 * kUnit);
   for (size_t i = 0; i < expected.size(); ++i) {
@@ -310,15 +255,9 @@ TEST_F(MemoryBackendTest, FileIoUsesReplacedSplitAndCoalescedMappings) {
   iree_io_file_handle_release(handle);
   IREE_ASSERT_OK(status);
 
-  IREE_ASSERT_OK(map(0, 4 * kUnit, 0, 0));
   for (uint32_t epoch = 0; epoch < 3; ++epoch) {
-    // Split one run, clear/rebind its middle, then restore contiguous source
-    // coordinates. Each epoch verifies actual I/O against the physical bytes.
-    IREE_ASSERT_OK(map(kUnit, 2 * kUnit, epoch < 2 ? 1 : 0, kUnit));
-    if (epoch == 1) {
-      IREE_ASSERT_OK(map(kUnit, 2 * kUnit, -1, 0));
-      IREE_ASSERT_OK(map(kUnit, 2 * kUnit, 1, kUnit));
-    }
+    // File bytes follow the owner's current physical layout, including a
+    // split middle source and a later return to one contiguous source.
     for (auto* bytes : contents) {
       std::memset(bytes, 0xCD, 4 * kUnit);
     }
@@ -331,48 +270,58 @@ TEST_F(MemoryBackendTest, FileIoUsesReplacedSplitAndCoalescedMappings) {
           contents[epoch < 2 && middle ? 1 : 0][i] = expected[i];
         }
       }
-      iree_hal_amd_fabric_file_transfer_t transfer = {};
-      IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_initialize(
-          file, access, 0, target, 0, 4 * kUnit, allocator_, &transfer));
-      iree_hal_memory_effects_t before = {}, after = {};
-      IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_prepare_ranges(
-          &transfer, &native_.api, families_[0],
-          native_families_[0].queue_family_ordinal, &before, &after));
-      EXPECT_EQ(transfer.sources.count, epoch < 2 ? 3u : 1u);
-      EXPECT_EQ(transfer.sources.host_count, transfer.sources.count);
-      EXPECT_EQ(before.bits, 0u);
-      EXPECT_EQ(after.bits, 0u);
-      while (iree_hal_amd_fabric_file_transfer_bytes_transferred(&transfer) <
-             transfer.length) {
-        const auto* range =
-            iree_hal_amd_fabric_file_transfer_current_range(&transfer);
-        IREE_ASSERT_OK(
-            iree_hal_amd_fabric_file_transfer_prepare_range(&transfer, range));
-        struct Completion {
-          // Set by the proactor callback before polling returns.
-          bool complete = false;
-          // Owned completion result, consumed before submitting another range.
-          iree_status_t status = iree_ok_status();
-        } completion;
-        IREE_ASSERT_OK(iree_hal_amd_fabric_file_request_submit(
-            &transfer.async.request,
-            {+[](void* user_data, iree_status_t status) {
-               auto* completion = static_cast<Completion*>(user_data);
-               completion->status = status;
-               completion->complete = true;
-             },
-             &completion}));
-        while (!completion.complete) {
-          IREE_ASSERT_OK(iree_async_proactor_poll(
-              proactor, iree_infinite_timeout(), nullptr));
+      const uint32_t range_count = epoch < 2 ? 3 : 1;
+      for (uint32_t i = 0; i < range_count; ++i) {
+        const uint64_t offset = range_count == 1 ? 0
+                                : i == 2         ? 3 * kUnit
+                                                 : i * kUnit;
+        const uint64_t length = range_count == 1 ? 4 * kUnit
+                                : i == 1         ? 2 * kUnit
+                                                 : kUnit;
+        const size_t owner = range_count > 1 && i == 1 ? 1 : 0;
+        iree_hal_amd_fabric_file_transfer_t transfer = {};
+        IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_initialize(
+            file, access, offset, sources[owner], offset, length, allocator_,
+            &transfer));
+        iree_hal_memory_effects_t before = {}, after = {};
+        IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_prepare_source(
+            &transfer, &native_.api, families_[0],
+            native_families_[0].queue_family_ordinal, &before, &after));
+        EXPECT_NE(transfer.source.contents.data, nullptr);
+        EXPECT_EQ(before.bits, 0u);
+        EXPECT_EQ(after.bits, 0u);
+        while (iree_hal_amd_fabric_file_transfer_bytes_transferred(&transfer) <
+               transfer.length) {
+          const auto* range = &transfer.source;
+          IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_prepare_range(
+              &transfer, range));
+          struct Completion {
+            // Set by the proactor callback before polling returns.
+            bool complete = false;
+            // Owned completion result, consumed before submitting another
+            // range.
+            iree_status_t status = iree_ok_status();
+          } completion;
+          IREE_ASSERT_OK(iree_hal_amd_fabric_file_request_submit(
+              &transfer.async.request,
+              {+[](void* user_data, iree_status_t status) {
+                 auto* completion = static_cast<Completion*>(user_data);
+                 completion->status = status;
+                 completion->complete = true;
+               },
+               &completion}));
+          while (!completion.complete) {
+            IREE_ASSERT_OK(iree_async_proactor_poll(
+                proactor, iree_infinite_timeout(), nullptr));
+          }
+          if (!iree_status_is_ok(completion.status)) {
+            iree_hal_amd_fabric_file_transfer_deinitialize(&transfer);
+          }
+          IREE_ASSERT_OK(completion.status);
         }
-        if (!iree_status_is_ok(completion.status)) {
-          iree_hal_amd_fabric_file_transfer_deinitialize(&transfer);
-        }
-        IREE_ASSERT_OK(completion.status);
+        IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_flush(&transfer));
+        iree_hal_amd_fabric_file_transfer_deinitialize(&transfer);
       }
-      IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_flush(&transfer));
-      iree_hal_amd_fabric_file_transfer_deinitialize(&transfer);
       for (size_t source = 0; source < contents.size(); ++source) {
         for (size_t i = 0; i < expected.size(); ++i) {
           const bool middle = i >= kUnit && i < 3 * kUnit;

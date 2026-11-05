@@ -262,6 +262,126 @@ TEST_F(MemoryReservationTest, CoalescesOnlyContiguousMappingsAndDetaches) {
   EXPECT_EQ(native_.update_count, 1u);
 }
 
+TEST_F(MemoryReservationTest, ValidatesPriorSourcesBeforeAnyNativeMutation) {
+  const std::array<amdf_memory_mapping_update_t, 2> valid = {{
+      {
+          .byte_length = 4096,
+          .memory = memory_,
+          .access = AMDF_MEMORY_ACCESS_READ,
+      },
+      {
+          .target_byte_offset = 8192,
+          .byte_length = 4096,
+          .previous_memory = memory_,
+          .previous_source_byte_offset = 4096,
+      },
+  }};
+  for (uint32_t failure = 0; failure < 6; ++failure) {
+    auto updates = valid;
+    auto& removal = updates[1];
+    amdf_status_code_t expected = AMDF_STATUS_CODE_INVALID_ARGUMENT;
+    switch (failure) {
+      case 0:
+        removal.reserved = 1;
+        break;
+      case 1:
+        removal.previous_memory = nullptr;
+        break;
+      case 2:
+        removal.previous_memory = nullptr;
+        removal.previous_source_byte_offset = 0;
+        removal.previous_memory_access_ordinal = 1;
+        break;
+      case 3:
+        removal.previous_source_byte_offset = 16384;
+        expected = AMDF_STATUS_CODE_OUT_OF_RANGE;
+        break;
+      case 4:
+        removal.previous_source_byte_offset = 1;
+        expected = AMDF_STATUS_CODE_UNSUPPORTED;
+        break;
+      case 5:
+        removal.previous_memory_access_ordinal = UINT32_MAX;
+        expected = AMDF_STATUS_CODE_OUT_OF_RANGE;
+        break;
+    }
+    EXPECT_EQ(amdf_status_code(amdf_memory_reservation_update(
+                  native_.reservation, 0, updates.size(), updates.data())),
+              expected)
+        << failure;
+    EXPECT_EQ(native_.update_count, 0u) << failure;
+  }
+  ASSERT_EQ(amdf_memory_reservation_update(native_.reservation, 0, valid.size(),
+                                           valid.data()),
+            AMDF_STATUS_OK);
+  ASSERT_EQ(native_.updates.size(), 2u);
+  EXPECT_EQ(native_.updates[1].previous_memory, memory_);
+  EXPECT_EQ(native_.updates[1].previous_source_byte_offset, 4096u);
+}
+
+TEST_F(MemoryReservationTest, PriorSourceUsesItsSharedLogicalProjection) {
+  const amdf_memory_mapping_update_t removal = {
+      .byte_length = 4096,
+      .previous_memory = memory_,
+      .previous_source_byte_offset = 4096,
+  };
+  // Device 0 owns the backing, but device 1 publishes the shared page tables.
+  ASSERT_EQ(amdf_memory_reservation_update(native_.reservation, 1, 1, &removal),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(native_.update_count, 1u);
+  ASSERT_EQ(native_.updates.size(), 1u);
+  EXPECT_EQ(native_.updates[0].previous_memory, memory_);
+  // The same source is not a valid prior binding in a distinct mapping group.
+  native_.accesses[1].info.mapping_access_ordinal = 1;
+  EXPECT_EQ(amdf_status_code(amdf_memory_reservation_update(native_.reservation,
+                                                            1, 1, &removal)),
+            AMDF_STATUS_CODE_UNSUPPORTED);
+  EXPECT_EQ(native_.update_count, 1u);
+  native_.accesses[1].info.mapping_access_ordinal = 0;
+}
+
+TEST_F(MemoryReservationTest, CoalescingPreservesPriorSourceRuns) {
+  std::array<amdf_memory_mapping_update_t, 2> updates = {{
+      {
+          .byte_length = 4096,
+          .memory = memory_,
+          .access = AMDF_MEMORY_ACCESS_READ,
+          .previous_memory = memory_,
+          .previous_source_byte_offset = 8192,
+      },
+      {
+          .target_byte_offset = 4096,
+          .byte_length = 4096,
+          .memory = memory_,
+          .access = AMDF_MEMORY_ACCESS_READ,
+          .source_byte_offset = 4096,
+          .previous_memory = memory_,
+          .previous_source_byte_offset = 12288,
+      },
+  }};
+  ASSERT_EQ(amdf_memory_reservation_update(native_.reservation, 0,
+                                           updates.size(), updates.data()),
+            AMDF_STATUS_OK);
+  ASSERT_EQ(native_.updates.size(), 1u);
+  EXPECT_EQ(native_.updates[0].byte_length, 8192u);
+  EXPECT_EQ(native_.updates[0].previous_source_byte_offset, 8192u);
+  // Consecutive destinations replacing aliases of one source page must remain
+  // separate even when the new backing is contiguous.
+  updates[1].previous_source_byte_offset = 8192;
+  ASSERT_EQ(amdf_memory_reservation_update(native_.reservation, 0,
+                                           updates.size(), updates.data()),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(native_.updates.size(), 2u);
+  // An adjacent hole is not part of the prior source's surviving run.
+  updates[1].previous_memory = nullptr;
+  updates[1].previous_source_byte_offset = 0;
+  ASSERT_EQ(amdf_memory_reservation_update(native_.reservation, 0,
+                                           updates.size(), updates.data()),
+            AMDF_STATUS_OK);
+  ASSERT_EQ(native_.updates.size(), 2u);
+  EXPECT_EQ(native_.updates[1].previous_memory, nullptr);
+}
+
 TEST_F(MemoryReservationTest,
        PreservesSourcePermissionAndDestinationBoundaries) {
   auto create = MakeMemoryCreateInfo(devices_[0]);

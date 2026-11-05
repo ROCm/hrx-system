@@ -1354,6 +1354,8 @@ TEST_P(GpuNativeProfileTest, MappingBatchIsOnePublicEvent) {
   IREE_ASSERT_OK(iree_hal_queue_map(queues_[0], {}, {1, &timeline, &one},
                                     mappings.size(), mappings.data(), 0));
   for (auto& mapping : mappings) {
+    mapping.previous_source = mapping.source;
+    mapping.previous_source_offset = mapping.source_offset;
     mapping.source = nullptr;
     mapping.source_offset = 0;
     mapping.access = 0;

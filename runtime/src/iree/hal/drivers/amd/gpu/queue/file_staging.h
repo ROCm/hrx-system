@@ -80,12 +80,12 @@ iree_status_t iree_hal_amd_gpu_file_staging_allocate(
     iree_allocator_t host_allocator,
     iree_hal_amd_gpu_file_staging_t** out_staging);
 
-// Qualifies each captured physical copy range once, before touching a prefix.
+// Consumes the captured copy protocol before touching any payload range.
 // Combines originating-queue effects into the operation's two boundaries and
 // stores copy-engine effects with each range. Direct host ranges are unchanged.
 iree_status_t iree_hal_amd_gpu_file_staging_prepare(
     iree_hal_amd_gpu_file_staging_t* staging,
-    const iree_hal_queue_family_t* family, uint32_t native_family_ordinal,
+    const iree_hal_queue_family_t* family,
     iree_hal_amd_fabric_file_transfer_t* transfer,
     iree_hal_memory_effects_t* before, iree_hal_memory_effects_t* after);
 

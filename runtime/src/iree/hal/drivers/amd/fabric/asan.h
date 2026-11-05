@@ -219,7 +219,8 @@ iree_status_t iree_hal_amd_fabric_asan_map_application(
 // ownership at the caller and marks the native parents as non-releasable.
 bool iree_hal_amd_fabric_asan_unmap_application(
     iree_hal_amd_fabric_asan_t* state,
-    iree_hal_amd_fabric_asan_application_range_t* range);
+    iree_hal_amd_fabric_asan_application_range_t* range, amdf_memory_t* memory,
+    uint32_t memory_access_ordinal);
 
 // Transfers an owned poisoned mapping to the bounded FIFO. Imports retain
 // their external lifetime contract and are never quarantined here.

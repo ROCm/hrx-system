@@ -190,13 +190,17 @@ class HostReservationTest
   }
 
   amdf_memory_mapping_update_t Bind(uint64_t target, uint64_t length,
-                                    amdf_memory_t* source, uint64_t offset) {
+                                    amdf_memory_t* source, uint64_t offset,
+                                    amdf_memory_t* previous = nullptr,
+                                    uint64_t previous_offset = 0) {
     return {
         .target_byte_offset = target,
         .byte_length = length,
         .memory = source,
         .access = access_,
         .source_byte_offset = offset,
+        .previous_memory = previous,
+        .previous_source_byte_offset = previous_offset,
     };
   }
 
@@ -248,7 +252,7 @@ TEST_P(HostReservationTest, CoarseReplacementUnitsPreserveExactShortTail) {
   ASSERT_NO_FATAL_FAILURE(Allocate(tail, capabilities_.required_source_flags,
                                    &replacement, &tail_source));
   std::fill_n(tail_source, tail / sizeof(uint32_t), 29u);
-  auto update = Bind(2 * unit_, tail, replacement, 0);
+  auto update = Bind(2 * unit_, tail, replacement, 0, original, 2 * unit_);
   ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, 1, &update),
             AMDF_STATUS_OK);
   EXPECT_EQ(std::memcmp(pointer, source, 2 * unit_), 0);
@@ -259,7 +263,7 @@ TEST_P(HostReservationTest, CoarseReplacementUnitsPreserveExactShortTail) {
   EXPECT_EQ(api_->memory_reservation_update(reservation_, 0, 1, &update),
             amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE));
   source[unit_ / sizeof(uint32_t)] = 37;
-  const auto full_unit = Bind(0, unit_, original, unit_);
+  const auto full_unit = Bind(0, unit_, original, unit_, original, 0);
   ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, 1, &full_unit),
             AMDF_STATUS_OK);
   EXPECT_EQ(pointer[0], 37u);
@@ -267,11 +271,14 @@ TEST_P(HostReservationTest, CoarseReplacementUnitsPreserveExactShortTail) {
   const amdf_memory_mapping_update_t detach = {
       .target_byte_offset = 2 * unit_,
       .byte_length = tail,
+      .previous_memory = replacement,
   };
   ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, 1, &detach),
             AMDF_STATUS_OK);
   EXPECT_EQ(pointer[0], 37u);
   update.target_byte_offset = 2 * unit_;
+  update.previous_memory = nullptr;
+  update.previous_source_byte_offset = 0;
   ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, 1, &update),
             AMDF_STATUS_OK);
   pointer[length / sizeof(uint32_t) - 1] = 41;
@@ -389,9 +396,11 @@ TEST_P(HostReservationTest, ReplacesBackingThroughAnUnchangedHostView) {
     std::vector<amdf_memory_mapping_update_t> updates;
     for (size_t slot = 0; slot < 3; ++slot) {
       if (epoch == 0 || backing[epoch][slot] != backing[epoch - 1][slot]) {
-        updates.push_back(Bind(slot * unit_, unit_,
-                               memories[backing[epoch][slot]],
-                               offsets[epoch][slot] * unit_));
+        updates.push_back(
+            Bind(slot * unit_, unit_, memories[backing[epoch][slot]],
+                 offsets[epoch][slot] * unit_,
+                 epoch ? memories[backing[epoch - 1][slot]] : nullptr,
+                 epoch ? offsets[epoch - 1][slot] * unit_ : 0));
       }
     }
     ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, updates.size(),
@@ -458,7 +467,10 @@ TEST_P(HostReservationTest, UpdatesDistantRangesWithoutPopulatingTheHoles) {
   auto* head = reinterpret_cast<const uint32_t*>(
       static_cast<uintptr_t>(address_.address));
   EXPECT_EQ(head[0], 0xac215673u);
-  const amdf_memory_mapping_update_t removal = {.byte_length = unit_};
+  const amdf_memory_mapping_update_t removal = {
+      .byte_length = unit_,
+      .previous_memory = memory,
+  };
   ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, 1, &removal),
             AMDF_STATUS_OK);
   EXPECT_EQ(tail[0], 0xac215673u);

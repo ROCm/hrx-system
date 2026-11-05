@@ -506,14 +506,14 @@ static void iree_hal_amd_xdna_host_worker_execute(
       !iree_hal_amd_fabric_file_transfer_bytes_transferred(
           operation->file.transfer)) {
     iree_hal_memory_effects_t before = {0}, after = {0};
-    operation->status = iree_hal_amd_fabric_file_transfer_prepare_ranges(
+    operation->status = iree_hal_amd_fabric_file_transfer_prepare_source(
         operation->file.transfer, queue->context->api, queue->base.queue_family,
         queue->context->queue_family_ordinal, &before, &after);
     // XDNA command boundaries supply global visibility, but this engine has
     // no command for a range-specific queue recipe.
     if (iree_status_is_ok(operation->status) &&
-        operation->file.transfer->sources.host_count ==
-            operation->file.transfer->sources.count &&
+        (!operation->file.transfer->source.contents.data_length ||
+         operation->file.transfer->source.contents.data) &&
         (iree_hal_memory_effects_requires_resources(before) ||
          iree_hal_memory_effects_requires_resources(after))) {
       operation->status = iree_make_status(

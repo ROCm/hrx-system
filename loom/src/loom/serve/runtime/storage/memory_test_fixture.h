@@ -83,9 +83,8 @@ class MemoryTestEnvironment : public ::testing::Environment {
 
 extern MemoryTestEnvironment* const memory_test_environment;
 
-// Observes and gates real mapping submissions, or rejects one before
-// acceptance. The storage owner uses only allocation, deallocation, and mapping
-// operations.
+// Observes and gates real mapping submissions, or rejects allocation or mapping
+// before acceptance. Accepted work always reaches the real native queue.
 class MappingQueue : public iree_hal_queue_t {
  public:
   ~MappingQueue() { Reset(); }
@@ -111,9 +110,13 @@ class MappingQueue : public iree_hal_queue_t {
                iree_host_size_t count,
                const iree_hal_pool_reservation_request_t* requests,
                iree_hal_buffer_t** buffers) {
-              return iree_hal_queue_alloca(
-                  static_cast<MappingQueue*>(base)->queue_, waits, signals,
-                  pool, count, requests, buffers);
+              auto* self = static_cast<MappingQueue*>(base);
+              if (self->fail_next_allocation) {
+                self->fail_next_allocation = false;
+                return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+              }
+              return iree_hal_queue_alloca(self->queue_, waits, signals, pool,
+                                           count, requests, buffers);
             },
         .dealloca =
             [](iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
@@ -171,6 +174,8 @@ class MappingQueue : public iree_hal_queue_t {
     }
   }
 
+  // Rejects one allocation before publishing handles or signal semaphores.
+  bool fail_next_allocation = false;
   // Rejects one mapping submission without changing its signal semaphores.
   bool fail_next_map = false;
   // Borrowed prerequisite added to exactly one real mapping submission.

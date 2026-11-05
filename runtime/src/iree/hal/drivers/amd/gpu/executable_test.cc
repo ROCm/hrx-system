@@ -393,6 +393,7 @@ class ExecutableTest : public ::testing::TestWithParam<
     options_ = {
         .target = &target_,
         .native_family_ordinal = 1,
+        .copy_family_ordinal = UINT32_MAX,
         .memory = &memory_,
         .placement = {IREE_HAL_POOL_PLACEMENT_REQUIRED, 17},
     };

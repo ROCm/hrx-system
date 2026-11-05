@@ -1395,6 +1395,9 @@ TEST_F(GpuNativeVirtualBufferTest,
           .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
           .operation = epoch ? IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE
                              : IREE_HAL_MEMORY_MAPPING_OPERATION_BIND,
+          .previous_source =
+              epoch ? backing[(epoch - 1 + i) % 2].get() : nullptr,
+          .previous_source_offset = epoch ? (1 + i) * unit : 0,
       };
     }
     uint64_t before = value++;
@@ -1410,6 +1413,8 @@ TEST_F(GpuNativeVirtualBufferTest,
       // Later protection supplies the original source coordinates itself.
       mappings[i].source = backing[(epoch + i) % 2];
       mappings[i].source_offset = (1 + i) * unit;
+      mappings[i].previous_source = nullptr;
+      mappings[i].previous_source_offset = 0;
       const uint32_t pattern = 0x01010000u + epoch * 16 + i;
       uint64_t filled = value++;
       IREE_ASSERT_OK(iree_hal_queue_fill(
@@ -1431,6 +1436,8 @@ TEST_F(GpuNativeVirtualBufferTest,
       uint64_t one = 1;
       auto removals = mappings;
       for (auto& removal : removals) {
+        removal.previous_source = removal.source;
+        removal.previous_source_offset = removal.source_offset;
         removal.source = nullptr;
         removal.source_offset = 0;
         removal.access = 0;
@@ -1473,6 +1480,8 @@ TEST_F(GpuNativeVirtualBufferTest,
     }
   }
   for (auto& mapping : mappings) {
+    mapping.previous_source = mapping.source;
+    mapping.previous_source_offset = mapping.source_offset;
     mapping.source = nullptr;
     mapping.source_offset = 0;
     mapping.access = 0;

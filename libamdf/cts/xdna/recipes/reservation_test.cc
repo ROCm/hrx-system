@@ -346,6 +346,11 @@ TEST_P(XdnaReservationTest, ReplacesRetainedBackingWithImmediateExecution) {
       if (epoch == 0 || binding.backing != epochs[epoch - 1][slot].backing ||
           binding.unit != epochs[epoch - 1][slot].unit) {
         updates.push_back(Mapping(slot, binding));
+        if (epoch) {
+          const auto previous = epochs[epoch - 1][slot];
+          updates.back().previous_memory = sources_[previous.backing].memory;
+          updates.back().previous_source_byte_offset = previous.unit * unit_;
+        }
       }
     }
     ASSERT_EQ(api_->memory_reservation_update(
@@ -358,6 +363,8 @@ TEST_P(XdnaReservationTest, ReplacesRetainedBackingWithImmediateExecution) {
   const amdf_memory_mapping_update_t hole = {
       .target_byte_offset = unit_,
       .byte_length = unit_,
+      .previous_memory = sources_[epochs.back()[1].backing].memory,
+      .previous_source_byte_offset = epochs.back()[1].unit * unit_,
   };
   ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, 1, &hole),
             AMDF_STATUS_OK);
