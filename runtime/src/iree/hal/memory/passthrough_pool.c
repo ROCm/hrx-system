@@ -315,10 +315,15 @@ static void iree_hal_passthrough_pool_unlink_allocation(
 
 // Accounts for a consumed native owner. Failed unpublished construction has
 // charged_length zero; published backing has already entered bytes_committed.
-// Loss and its diagnostic are published before terminal callbacks or wakes.
+// The source ledger and loss diagnostic precede credit settlement: observing
+// returned capacity must also observe the terminal native accounting.
 static void iree_hal_passthrough_pool_record_release(
     iree_hal_passthrough_pool_state_t* pool, iree_device_size_t charged_length,
-    iree_hal_slab_release_info_t release_info) {
+    iree_hal_slab_release_info_t release_info,
+    iree_hal_memory_credit_t* credit) {
+  iree_status_t credit_status = credit->budget
+                                    ? iree_status_clone(release_info.status)
+                                    : iree_ok_status();
   if (release_info.abandoned_byte_length) {
     intptr_t expected = (intptr_t)iree_ok_status();
     if (!iree_atomic_compare_exchange_strong(
@@ -336,6 +341,10 @@ static void iree_hal_passthrough_pool_record_release(
       &pool->bytes_committed,
       (int64_t)release_info.abandoned_byte_length - (int64_t)charged_length,
       iree_memory_order_relaxed);
+  if (credit->budget) {
+    iree_hal_memory_credit_settle(credit, release_info.abandoned_byte_length,
+                                  credit_status);
+  }
 }
 
 static void iree_hal_passthrough_pool_release_join(void* user_data) {
@@ -346,16 +355,11 @@ static void iree_hal_passthrough_pool_release_join(void* user_data) {
   }
   iree_hal_passthrough_pool_state_t* pool = state->pool;
   iree_hal_external_storage_release(&state->external_storage);
-  if (state->credit.budget) {
-    iree_hal_memory_credit_settle(
-        &state->credit, state->release_info.abandoned_byte_length,
-        iree_status_clone(state->release_info.status));
-  }
-  iree_hal_passthrough_pool_record_release(pool, state->charged_length,
-                                           state->release_info);
   if (state->charged_length) {
     iree_atomic_fetch_sub(&pool->slab_count, 1, iree_memory_order_relaxed);
   }
+  iree_hal_passthrough_pool_record_release(pool, state->charged_length,
+                                           state->release_info, &state->credit);
   iree_hal_passthrough_pool_unlink_allocation(pool, state);
   iree_allocator_free(pool->host_allocator, state);
   // Physical capacity becomes available only after the native free returns.
@@ -1044,16 +1048,12 @@ static void iree_hal_passthrough_pool_acquire_rollback_join(void* user_data) {
       1) {
     return;
   }
-  if (acquire->credit.budget) {
-    iree_hal_memory_credit_settle(
-        &acquire->credit, acquire->release_info.abandoned_byte_length,
-        iree_status_clone(acquire->release_info.status));
-  }
-  iree_hal_passthrough_pool_record_release(
-      acquire->pool, acquire->charged_length, acquire->release_info);
   iree_atomic_fetch_sub(&acquire->pool->slab_count,
                         (int32_t)acquire->native.count,
                         iree_memory_order_relaxed);
+  iree_hal_passthrough_pool_record_release(
+      acquire->pool, acquire->charged_length, acquire->release_info,
+      &acquire->credit);
   iree_async_notification_signal_if_observed(acquire->pool->notification,
                                              IREE_ALL_WAITERS);
   iree_hal_passthrough_pool_acquire_finish(acquire);
@@ -1073,13 +1073,8 @@ static void iree_hal_passthrough_pool_acquire_join(
     return;
   }
   if (!iree_status_is_ok(acquire->status)) {
-    if (acquire->credit.budget) {
-      iree_hal_memory_credit_settle(
-          &acquire->credit, acquire->release_info.abandoned_byte_length,
-          iree_status_clone(acquire->release_info.status));
-    }
-    iree_hal_passthrough_pool_record_release(acquire->pool, 0,
-                                             acquire->release_info);
+    iree_hal_passthrough_pool_record_release(
+        acquire->pool, 0, acquire->release_info, &acquire->credit);
     iree_async_notification_signal_if_observed(acquire->pool->notification,
                                                IREE_ALL_WAITERS);
     iree_hal_passthrough_pool_acquire_finish(acquire);

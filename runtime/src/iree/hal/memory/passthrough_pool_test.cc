@@ -562,9 +562,29 @@ class NativePassthroughPoolTest : public ::testing::Test {
 };
 
 TEST_F(NativePassthroughPoolTest, NativeCreditReturnsDespiteBlockedPeer) {
+  struct BudgetDisposal {
+    // Borrowed source outliving the capacity owner.
+    iree_hal_pool_t* pool;
+    // Source ledger visible when the last native credit releases the account.
+    iree_hal_pool_stats_t statistics = {};
+    // Whether the account allocator has observed its final release.
+    bool released = false;
+  } disposal{pool_};
+  const iree_allocator_t budget_allocator = {
+      &disposal,
+      [](void* user_data, iree_allocator_command_t command,
+         const void* parameters, void** pointer) -> iree_status_t {
+        auto* disposal = static_cast<BudgetDisposal*>(user_data);
+        if (command == IREE_ALLOCATOR_COMMAND_FREE) {
+          iree_hal_pool_query_stats(disposal->pool, &disposal->statistics);
+          disposal->released = true;
+        }
+        const auto allocator = iree_allocator_system();
+        return allocator.ctl(allocator.self, command, parameters, pointer);
+      }};
   iree_hal_memory_budget_t* budget = nullptr;
-  IREE_ASSERT_OK(iree_hal_memory_budget_create(
-      4096, notification_, iree_allocator_system(), &budget));
+  IREE_ASSERT_OK(iree_hal_memory_budget_create(4096, notification_,
+                                               budget_allocator, &budget));
   const auto request = MakeReservationRequest(2048, 16);
   iree_hal_pool_reservation_t reservations[3] = {};
   iree_hal_pool_acquire_info_t infos[3] = {};
@@ -615,9 +635,15 @@ TEST_F(NativePassthroughPoolTest, NativeCreditReturnsDespiteBlockedPeer) {
   EXPECT_EQ(completed, 3);
   native_->deferred.release = false;
   ReleaseOneReservation(pool_, &reservations[0], nullptr);
-  ReleaseOneReservation(pool_, &reservations[2], nullptr);
-  EXPECT_EQ(iree_hal_memory_budget_charged(budget), 0u);
+  EXPECT_EQ(iree_hal_memory_budget_charged(budget), 2048u);
+  // The last native credit owns the account through terminal publication. Its
+  // allocator can observe the source before the native callback returns.
   iree_hal_memory_budget_release(budget);
+  EXPECT_FALSE(disposal.released);
+  ReleaseOneReservation(pool_, &reservations[2], nullptr);
+  EXPECT_TRUE(disposal.released);
+  EXPECT_EQ(disposal.statistics.bytes_committed, 0u);
+  EXPECT_EQ(disposal.statistics.slab_count, 0u);
 }
 
 TEST_F(NativePassthroughPoolTest,
