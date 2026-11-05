@@ -316,7 +316,7 @@ static void iree_hal_vulkan_memory_resolve_frontier(
     iree_async_frontier_t* source =
         iree_async_fixed_frontier_as_frontier(&source_storage);
     const uint8_t count = iree_async_semaphore_query_frontier(
-        semaphore, source, IREE_HAL_VULKAN_QUEUE_FRONTIER_CAPACITY);
+        semaphore, IREE_HAL_VULKAN_QUEUE_FRONTIER_CAPACITY, source);
     if (count > IREE_HAL_VULKAN_QUEUE_FRONTIER_CAPACITY ||
         iree_async_semaphore_is_value_tainted(
             semaphore, operation->waits.payload_values[i]) ||
@@ -519,10 +519,10 @@ static void iree_hal_vulkan_memory_resume(
                 ? iree_async_fixed_frontier_as_const_frontier(
                       &operation->frontier)
                 : NULL,
-            operation->reservations, operation->infos,
             (iree_hal_pool_acquire_callback_t){
                 .fn = iree_hal_vulkan_memory_acquired, .user_data = operation},
-            IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER);
+            IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER,
+            operation->reservations, operation->infos);
         if (!iree_status_is_ok(status)) {
           iree_hal_vulkan_memory_acquired(operation, status,
                                           IREE_HAL_POOL_ACQUIRE_EXHAUSTED);

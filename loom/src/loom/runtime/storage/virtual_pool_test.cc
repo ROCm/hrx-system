@@ -320,8 +320,8 @@ TEST_F(VirtualPoolTest, VirtualBackingBatchDenialPreservesWarmPrefix) {
   iree_hal_pool_acquire_info_t infos[2] = {};
   deferred_backing->defer = true;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
-      source, 1, requests, nullptr, reservations, infos, callback,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      source, 1, requests, nullptr, callback, IREE_HAL_POOL_RESERVE_FLAG_NONE,
+      reservations, infos));
   IREE_ASSERT_OK(loom_runtime_virtual_pool_advance(virtual_pool));
   deferred_backing->WaitForAcquisition();
   EXPECT_EQ(completion.count, 0u);
@@ -348,8 +348,8 @@ TEST_F(VirtualPoolTest, VirtualBackingBatchDenialPreservesWarmPrefix) {
   reservations[0].block_handle = 17;
   reservations[1].block_handle = 29;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
-      source, 2, requests, nullptr, reservations, infos, callback,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      source, 2, requests, nullptr, callback, IREE_HAL_POOL_RESERVE_FLAG_NONE,
+      reservations, infos));
   // The warm prefix is protected before publication even though no logical
   // reservation or new physical commitment describes that ownership yet.
   iree_hal_pool_stats_t unpublished;
@@ -369,8 +369,8 @@ TEST_F(VirtualPoolTest, VirtualBackingBatchDenialPreservesWarmPrefix) {
   EXPECT_EQ(loom_runtime_virtual_pool_source_protected_bytes(source), 0u);
 
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
-      source, 1, requests, nullptr, reservations, infos, callback,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      source, 1, requests, nullptr, callback, IREE_HAL_POOL_RESERVE_FLAG_NONE,
+      reservations, infos));
   // No owner pass is needed for a warm hit after rollback.
   EXPECT_EQ(completion.count, 3u);
   IREE_ASSERT_OK(completion.status);
@@ -431,8 +431,8 @@ TEST_F(VirtualPoolTest, VirtualBackingWaitsForIncompatibleNativeReturn) {
   iree_hal_pool_acquire_info_t info = {};
   deferred_backing->DeferReturns();
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
-      source, 1, &request, nullptr, &reservation, &info, callback,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      source, 1, &request, nullptr, callback, IREE_HAL_POOL_RESERVE_FLAG_NONE,
+      &reservation, &info));
   IREE_ASSERT_OK(loom_runtime_virtual_pool_advance(virtual_pool));
   ASSERT_EQ(completion.count, 0u);
   deferred_backing->WaitForReturn();
@@ -482,8 +482,8 @@ TEST_F(VirtualPoolTest,
   iree_hal_pool_reservation_t warm = {};
   iree_hal_pool_acquire_info_t warm_info = {};
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
-      source, 1, &request, nullptr, &warm, &warm_info, callback,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      source, 1, &request, nullptr, callback, IREE_HAL_POOL_RESERVE_FLAG_NONE,
+      &warm, &warm_info));
   ASSERT_NO_FATAL_FAILURE(AwaitVirtualPool());
   ASSERT_TRUE(completion.complete);
   IREE_ASSERT_OK(completion.status);
@@ -500,8 +500,8 @@ TEST_F(VirtualPoolTest,
   iree_hal_pool_reservation_t reservation = {.block_handle = 17};
   iree_hal_pool_acquire_info_t info = {};
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
-      failing_source, 1, &request, nullptr, &reservation, &info, callback,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      failing_source, 1, &request, nullptr, callback,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE, &reservation, &info));
   ASSERT_NO_FATAL_FAILURE(AwaitVirtualPool());
   ASSERT_TRUE(completion.complete);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, completion.status);
@@ -544,8 +544,8 @@ TEST_F(VirtualPoolTest, VirtualBackingTrimWaitsForActualHistoryCompletion) {
   iree_hal_pool_reservation_t reservation = {};
   iree_hal_pool_acquire_info_t info = {};
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
-      source, 1, &request, nullptr, &reservation, &info, callback,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      source, 1, &request, nullptr, callback, IREE_HAL_POOL_RESERVE_FLAG_NONE,
+      &reservation, &info));
   ASSERT_NO_FATAL_FAILURE(AwaitVirtualPool());
   IREE_ASSERT_OK(completion.status);
   iree_hal_pool_reservation_view_t view;
@@ -572,8 +572,8 @@ TEST_F(VirtualPoolTest, VirtualBackingTrimWaitsForActualHistoryCompletion) {
   const auto* frontier = iree_async_fixed_frontier_as_const_frontier(&history);
   iree_hal_pool_release_reservations(source, 1, &reservation, frontier);
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
-      source, 1, &request, frontier, &reservation, &info, callback,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      source, 1, &request, frontier, callback, IREE_HAL_POOL_RESERVE_FLAG_NONE,
+      &reservation, &info));
   EXPECT_EQ(completion.count, 2u);
   IREE_ASSERT_OK(completion.status);
   EXPECT_EQ(info.result, IREE_HAL_POOL_ACQUIRE_OK);

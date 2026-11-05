@@ -243,8 +243,8 @@ class FileTransferTest : public ::testing::Test {
       EXPECT_EQ(queue.submissions, 2u);
       iree_async_single_frontier_t frontier = {};
       EXPECT_EQ(iree_async_semaphore_query_frontier(
-                    reinterpret_cast<iree_async_semaphore_t*>(completion_),
-                    iree_async_single_frontier_as_frontier(&frontier), 1),
+                    reinterpret_cast<iree_async_semaphore_t*>(completion_), 1,
+                    iree_async_single_frontier_as_frontier(&frontier)),
                 1u);
       EXPECT_EQ(frontier.entries[0].axis, 7u);
       EXPECT_EQ(frontier.entries[0].epoch, 2u);

@@ -565,7 +565,7 @@ TEST(SemaphoreTest, SignalWithFrontier) {
   uint8_t storage[sizeof(iree_async_frontier_t) +
                   2 * sizeof(iree_async_frontier_entry_t)];
   auto* out = reinterpret_cast<iree_async_frontier_t*>(storage);
-  uint8_t count = iree_async_semaphore_query_frontier(sem, out, 2);
+  uint8_t count = iree_async_semaphore_query_frontier(sem, 2, out);
 
   EXPECT_EQ(count, 1u);
   EXPECT_EQ(out->entry_count, 1u);
@@ -575,7 +575,7 @@ TEST(SemaphoreTest, SignalWithFrontier) {
   // Signal with another frontier — should merge.
   IREE_ASSERT_OK(
       iree_async_semaphore_signal(sem, 2, fb.Add(axis_b, 5).Build()));
-  count = iree_async_semaphore_query_frontier(sem, out, 2);
+  count = iree_async_semaphore_query_frontier(sem, 2, out);
 
   EXPECT_EQ(count, 2u);
   // Entries are sorted by axis.
@@ -606,7 +606,7 @@ TEST(SemaphoreTest, FrontierMergeMaxEpoch) {
   uint8_t storage[sizeof(iree_async_frontier_t) +
                   sizeof(iree_async_frontier_entry_t)];
   auto* out = reinterpret_cast<iree_async_frontier_t*>(storage);
-  iree_async_semaphore_query_frontier(sem, out, 1);
+  iree_async_semaphore_query_frontier(sem, 1, out);
 
   EXPECT_EQ(out->entries[0].epoch, 10u);  // Max of 10 and 5.
 
@@ -622,7 +622,7 @@ TEST(SemaphoreTest, SignalWithNullFrontier) {
   IREE_ASSERT_OK(iree_async_semaphore_signal(sem, 1, nullptr));
 
   // Frontier should be empty.
-  EXPECT_EQ(iree_async_semaphore_query_frontier(sem, nullptr, 0), 0u);
+  EXPECT_EQ(iree_async_semaphore_query_frontier(sem, 0, nullptr), 0u);
 
   iree_async_semaphore_release(sem);
 }

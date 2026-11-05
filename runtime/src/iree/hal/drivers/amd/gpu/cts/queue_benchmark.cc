@@ -759,8 +759,8 @@ class NativeQueue {
   uint64_t completed_publications() const {
     iree_async_single_frontier_t frontier;
     const uint8_t count = iree_async_semaphore_query_frontier(
-        reinterpret_cast<iree_async_semaphore_t*>(lanes_[0].timeline),
-        iree_async_single_frontier_as_frontier(&frontier), 1);
+        reinterpret_cast<iree_async_semaphore_t*>(lanes_[0].timeline), 1,
+        iree_async_single_frontier_as_frontier(&frontier));
     IREE_CHECK_OK(count == 1
                       ? iree_ok_status()
                       : iree_make_status(IREE_STATUS_DATA_LOSS,

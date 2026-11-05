@@ -420,14 +420,12 @@ TEST_F(NotificationRingTest, OmittedSnapshotDoesNotConsumeNextSnapshot) {
 
   iree_async_single_frontier_t queried_frontier;
   EXPECT_EQ(iree_async_semaphore_query_frontier(
-                private_semaphore,
-                iree_async_single_frontier_as_frontier(&queried_frontier),
-                /*capacity=*/1),
+                private_semaphore, /*capacity=*/1,
+                iree_async_single_frontier_as_frontier(&queried_frontier)),
             0u);
   EXPECT_EQ(iree_async_semaphore_query_frontier(
-                public_semaphore,
-                iree_async_single_frontier_as_frontier(&queried_frontier),
-                /*capacity=*/1),
+                public_semaphore, /*capacity=*/1,
+                iree_async_single_frontier_as_frontier(&queried_frontier)),
             1u);
   EXPECT_EQ(queried_frontier.entries[0].axis, public_axis);
   EXPECT_EQ(queried_frontier.entries[0].epoch, 42u);
@@ -670,10 +668,11 @@ TEST_F(NotificationRingTest, FrontierSnapshotWrapAround) {
   // semaphores[8]'s frontier snapshot is written after the byte-ring write
   // offset wraps back to the beginning, so this specifically verifies the
   // wrapped snapshot was not mistaken for an empty ring.
-  EXPECT_EQ(iree_async_semaphore_query_frontier(
-                semaphores[8], queried_frontier,
-                IREE_HAL_AMDGPU_MAX_FRONTIER_SNAPSHOT_ENTRY_COUNT),
-            IREE_HAL_AMDGPU_MAX_FRONTIER_SNAPSHOT_ENTRY_COUNT);
+  EXPECT_EQ(
+      iree_async_semaphore_query_frontier(
+          semaphores[8], IREE_HAL_AMDGPU_MAX_FRONTIER_SNAPSHOT_ENTRY_COUNT,
+          queried_frontier),
+      IREE_HAL_AMDGPU_MAX_FRONTIER_SNAPSHOT_ENTRY_COUNT);
   EXPECT_EQ(queried_frontier->entries[0].axis,
             snapshot_frontier->entries[0].axis);
   EXPECT_EQ(queried_frontier->entries[0].epoch,

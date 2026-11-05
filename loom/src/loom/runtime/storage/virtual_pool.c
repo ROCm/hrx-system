@@ -308,10 +308,10 @@ static iree_status_t loom_runtime_virtual_pool_acquire_reservations(
     iree_hal_pool_t* base_pool, iree_host_size_t count,
     const iree_hal_pool_reservation_request_t* requests,
     const iree_async_frontier_t* requester,
-    iree_hal_pool_reservation_t* reservations,
-    iree_hal_pool_acquire_info_t* infos,
     iree_hal_pool_acquire_callback_t completion,
-    iree_hal_pool_reserve_flags_t flags) {
+    iree_hal_pool_reserve_flags_t flags,
+    iree_hal_pool_reservation_t* reservations,
+    iree_hal_pool_acquire_info_t* infos) {
   loom_runtime_virtual_pool_source_t* source =
       (loom_runtime_virtual_pool_source_t*)base_pool;
   loom_runtime_virtual_pool_t* pool = source->owner;

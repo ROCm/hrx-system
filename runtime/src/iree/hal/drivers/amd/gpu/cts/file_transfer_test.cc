@@ -572,8 +572,8 @@ class GpuNativeFileTest : public GpuNativeTest,
   uint64_t Publications() {
     iree_async_single_frontier_t frontier;
     const uint8_t count = iree_async_semaphore_query_frontier(
-        reinterpret_cast<iree_async_semaphore_t*>(timeline_.get()),
-        iree_async_single_frontier_as_frontier(&frontier), 1);
+        reinterpret_cast<iree_async_semaphore_t*>(timeline_.get()), 1,
+        iree_async_single_frontier_as_frontier(&frontier));
     EXPECT_EQ(count, 1);
     return count == 1 ? frontier.entries[0].epoch : 0;
   }

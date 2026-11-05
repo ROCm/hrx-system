@@ -1002,8 +1002,8 @@ class SlabPoolTest : public SlabProviderTest {
     iree_hal_pool_acquire_info_t info = {};
     iree_hal_pool_acquire_result_t result;
     IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-        pool, 1, &request, nullptr, reservation, &info, &result,
-        IREE_HAL_POOL_RESERVE_FLAG_NONE));
+        pool, 1, &request, nullptr, IREE_HAL_POOL_RESERVE_FLAG_NONE,
+        reservation, &info, &result));
     EXPECT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
   }
 
@@ -1053,10 +1053,11 @@ TEST_F(SlabPoolTest, ConstructorAndPrefixLossesStayWithOriginatingPool) {
   iree_hal_pool_reservation_t reservations[3] = {};
   iree_hal_pool_acquire_info_t infos[3] = {};
   iree_hal_pool_acquire_result_t result;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
-                        iree_hal_pool_acquire_reservations_sync(
-                            pools_[0], 3, requests, nullptr, reservations,
-                            infos, &result, IREE_HAL_POOL_RESERVE_FLAG_NONE));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_hal_pool_acquire_reservations_sync(pools_[0], 3, requests, nullptr,
+                                              IREE_HAL_POOL_RESERVE_FLAG_NONE,
+                                              reservations, infos, &result));
   for (const auto& reservation : reservations) {
     EXPECT_EQ(reservation.block_handle, 0u);
   }
@@ -1111,14 +1112,15 @@ TEST_F(SlabPoolTest,
   std::promise<iree_status_t> completed;
   auto completion = completed.get_future();
   IREE_ASSERT_OK(iree_hal_slab_pool_acquire_with_credit(
-      pools_[0], 3, requests, &credit, reservations, infos,
+      pools_[0], 3, requests, &credit,
       {[](void* user_data, iree_status_t status,
           iree_hal_pool_acquire_result_t result) {
          EXPECT_EQ(result, IREE_HAL_POOL_ACQUIRE_NONE);
          static_cast<std::promise<iree_status_t>*>(user_data)->set_value(
              std::move(status));
        },
-       &completed}));
+       &completed},
+      reservations, infos));
   EXPECT_EQ(credit.budget, nullptr);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, completion.get());
   EXPECT_EQ(iree_hal_memory_budget_charged(budget), 8192u);
@@ -1138,14 +1140,15 @@ TEST_F(SlabPoolTest,
   std::promise<iree_status_t> peer_completed;
   auto peer_completion = peer_completed.get_future();
   IREE_ASSERT_OK(iree_hal_slab_pool_acquire_with_credit(
-      pools_[1], 1, requests, &credit, reservations, infos,
+      pools_[1], 1, requests, &credit,
       {[](void* user_data, iree_status_t status,
           iree_hal_pool_acquire_result_t result) {
          EXPECT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
          static_cast<std::promise<iree_status_t>*>(user_data)->set_value(
              std::move(status));
        },
-       &peer_completed}));
+       &peer_completed},
+      reservations, infos));
   IREE_ASSERT_OK(peer_completion.get());
   EXPECT_EQ(iree_hal_memory_budget_charged(budget), 12288u);
   Release(pools_[1], reservations);
@@ -1163,10 +1166,11 @@ TEST_F(SlabPoolTest, CleanRollbackPreservesRecoverableAllocationFailure) {
   iree_hal_pool_reservation_t reservations[2] = {};
   iree_hal_pool_acquire_info_t infos[2] = {};
   iree_hal_pool_acquire_result_t result;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
-                        iree_hal_pool_acquire_reservations_sync(
-                            pools_[0], 2, requests, nullptr, reservations,
-                            infos, &result, IREE_HAL_POOL_RESERVE_FLAG_NONE));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_hal_pool_acquire_reservations_sync(pools_[0], 2, requests, nullptr,
+                                              IREE_HAL_POOL_RESERVE_FLAG_NONE,
+                                              reservations, infos, &result));
   EXPECT_EQ(Stats(pools_[0]).bytes_committed, 0u);
   EXPECT_EQ(Stats(pools_[0]).bytes_abandoned, 0u);
   IREE_EXPECT_OK(iree_hal_pool_query_abandonment_status(pools_[0]));

@@ -189,8 +189,8 @@ static iree_status_t iree_async_semaphore_default_signal(
 }
 
 IREE_API_EXPORT uint8_t iree_async_semaphore_query_frontier(
-    iree_async_semaphore_t* semaphore, iree_async_frontier_t* out_frontier,
-    uint8_t capacity) {
+    iree_async_semaphore_t* semaphore, uint8_t capacity,
+    iree_async_frontier_t* out_frontier) {
   iree_slim_mutex_lock(&semaphore->mutex);
   uint8_t actual_count = semaphore->frontier->entry_count;
   if (out_frontier != NULL) {

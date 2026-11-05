@@ -178,8 +178,8 @@ class PoolCompositionTest : public ::testing::TestWithParam<
     const iree_hal_pool_reservation_request_t request =
         iree_hal_make_pool_reservation_request(length, kMinAlignment);
     return iree_hal_pool_acquire_reservations_sync(pool, 1, &request, frontier,
-                                                   out_reservation, out_info,
-                                                   out_result, flags);
+                                                   flags, out_reservation,
+                                                   out_info, out_result);
   }
 
   // Writes and reads through the actual native mapping, returning its address
@@ -259,8 +259,8 @@ TEST_P(PoolCompositionTest, SiblingReuseNeedsNoMetadataAllocation) {
     std::array<iree_hal_pool_acquire_info_t, 32> infos;
     iree_hal_pool_acquire_result_t result;
     IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-        child, count, requests.data(), nullptr, reservations.data(),
-        infos.data(), &result, IREE_HAL_POOL_RESERVE_FLAG_NONE));
+        child, count, requests.data(), nullptr, IREE_HAL_POOL_RESERVE_FLAG_NONE,
+        reservations.data(), infos.data(), &result));
     ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
     std::array<iree_hal_pool_reservation_view_t, 32> views;
     ASSERT_TRUE(iree_hal_pool_query_reservation_views(
@@ -339,8 +339,8 @@ TEST_P(PoolCompositionTest, ReusedMetadataAdoptsSiblingHistory) {
     iree_hal_pool_acquire_info_t info;
     iree_hal_pool_acquire_result_t result;
     IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-        child, 1, &request, history, &reservation, &info, &result,
-        IREE_HAL_POOL_RESERVE_FLAG_NONE));
+        child, 1, &request, history, IREE_HAL_POOL_RESERVE_FLAG_NONE,
+        &reservation, &info, &result));
     if (epoch) {
       ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK);
       ASSERT_NE(info.reuse_frontier, nullptr);
@@ -841,8 +841,8 @@ TEST_P(PoolCompositionTest, ParentPreparesAdvertisedChildAlignment) {
   request.min_alignment = iree_min(4096, capabilities.max_allocation_alignment);
   iree_hal_pool_reservation_t reservation;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      child, 1, &request, nullptr, &reservation, &info, &result,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      child, 1, &request, nullptr, IREE_HAL_POOL_RESERVE_FLAG_NONE,
+      &reservation, &info, &result));
   ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_pool_materialize_reservations(
@@ -868,8 +868,9 @@ TEST_P(PoolCompositionTest, BatchGrowthRollsBackAndReturnsWholeRanges) {
   std::array<iree_hal_pool_acquire_info_t, 7> infos;
   iree_hal_pool_acquire_result_t result;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      child, requests.size(), requests.data(), nullptr, reservations.data(),
-      infos.data(), &result, IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      child, requests.size(), requests.data(), nullptr,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE, reservations.data(), infos.data(),
+      &result));
   EXPECT_EQ(result, IREE_HAL_POOL_ACQUIRE_EXHAUSTED);
   EXPECT_EQ(memcmp(reservations.data(), unchanged.data(), sizeof(reservations)),
             0);
@@ -880,8 +881,8 @@ TEST_P(PoolCompositionTest, BatchGrowthRollsBackAndReturnsWholeRanges) {
   // The same capacity is available to a fitting batch after rollback. Each
   // parent extent contains two blocks, so this transaction spans three slabs.
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      child, 6, requests.data(), nullptr, reservations.data(), infos.data(),
-      &result, IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      child, 6, requests.data(), nullptr, IREE_HAL_POOL_RESERVE_FLAG_NONE,
+      reservations.data(), infos.data(), &result));
   ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
   EXPECT_EQ(Stats(child).slab_count, 3u);
   EXPECT_EQ(Stats(source).reservation_count, 3u);
@@ -1050,8 +1051,8 @@ TEST_P(FixedBlockPoolCompositionTest,
   std::array<iree_hal_pool_acquire_info_t, 5> infos;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
       child, requests.size(), requests.data(), previous_frontier,
-      reservations.data(), infos.data(), &result,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      IREE_HAL_POOL_RESERVE_FLAG_NONE, reservations.data(), infos.data(),
+      &result));
   ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK);
   for (const auto& acquired : infos) {
     ASSERT_NE(acquired.reuse_frontier, nullptr);
@@ -1091,8 +1092,9 @@ TEST_P(FixedBlockPoolCompositionTest,
   std::array<iree_hal_pool_acquire_info_t, 3> infos;
   iree_hal_pool_acquire_result_t result;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      child, requests.size(), requests.data(), nullptr, reservations.data(),
-      infos.data(), &result, IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      child, requests.size(), requests.data(), nullptr,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE, reservations.data(), infos.data(),
+      &result));
   ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
   for (uint8_t i = 0; i < 2; ++i) {
     iree_async_single_frontier_t frontier;
@@ -1106,8 +1108,9 @@ TEST_P(FixedBlockPoolCompositionTest,
   // The third block keeps this backing live. The two free blocks retain their
   // individual histories until a whole-backing return requires their union.
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      child, 2, requests.data(), nullptr, reservations.data(), infos.data(),
-      &result, IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER));
+      child, 2, requests.data(), nullptr,
+      IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER, reservations.data(),
+      infos.data(), &result));
   ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT);
   uint32_t seen = 0;
   for (size_t i = 0; i < 2; ++i) {

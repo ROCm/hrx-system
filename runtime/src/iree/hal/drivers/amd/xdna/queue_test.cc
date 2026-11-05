@@ -600,8 +600,8 @@ TEST(XdnaQueueTest, AcceptedSignalChainUsesNativeFifoBeforeRetirement) {
   iree_hal_amd_xdna_frontier_t frontier;
   EXPECT_EQ(iree_async_semaphore_query_frontier(
                 reinterpret_cast<iree_async_semaphore_t*>(harness.done),
-                iree_async_fixed_frontier_as_frontier(&frontier),
-                IREE_HAL_AMD_XDNA_FRONTIER_CAPACITY),
+                IREE_HAL_AMD_XDNA_FRONTIER_CAPACITY,
+                iree_async_fixed_frontier_as_frontier(&frontier)),
             1u);
   EXPECT_EQ(frontier.entries[0].axis, axis);
   EXPECT_EQ(frontier.entries[0].epoch, 2u);

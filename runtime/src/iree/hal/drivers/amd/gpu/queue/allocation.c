@@ -341,10 +341,11 @@ static void iree_hal_amd_gpu_allocation_acquire(
   iree_atomic_store(&operation->pending, 2, iree_memory_order_relaxed);
   iree_status_t status = iree_hal_pool_acquire_reservations(
       operation->pool, operation->count, operation->acquire.requests,
-      operation->requester, operation->reservations, operation->acquire.infos,
+      operation->requester,
       (iree_hal_pool_acquire_callback_t){
           .fn = iree_hal_amd_gpu_allocation_acquired, .user_data = operation},
-      IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER);
+      IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER, operation->reservations,
+      operation->acquire.infos);
   if (!iree_status_is_ok(status)) {
     if (operation->acquire.capacity_wait) {
       iree_hal_pool_wait_abort(operation->acquire.capacity_wait);

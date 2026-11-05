@@ -171,14 +171,15 @@ TEST_P(PoolTest, CreditedNativeCostsMatchPhysicalOwners) {
   std::promise<iree_status_t> completed;
   auto completion = completed.get_future();
   IREE_ASSERT_OK(iree_hal_slab_pool_acquire_with_credit(
-      pool, IREE_ARRAYSIZE(requests), requests, &credit, reservations, infos,
+      pool, IREE_ARRAYSIZE(requests), requests, &credit,
       {[](void* user_data, iree_status_t status,
           iree_hal_pool_acquire_result_t result) {
          EXPECT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
          static_cast<std::promise<iree_status_t>*>(user_data)->set_value(
              std::move(status));
        },
-       &completed}));
+       &completed},
+      reservations, infos));
   IREE_ASSERT_OK(completion.get());
   EXPECT_EQ(credit.budget, nullptr);
   EXPECT_EQ(iree_hal_memory_budget_charged(budget), cost);

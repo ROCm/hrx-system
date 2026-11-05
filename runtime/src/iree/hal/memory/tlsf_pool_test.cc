@@ -434,8 +434,8 @@ static iree_status_t AcquireOneReservation(
   const iree_hal_pool_reservation_request_t request =
       MakeReservationRequest(allocation_size, min_alignment);
   return iree_hal_pool_acquire_reservations_sync(
-      pool, 1, &request, requester_frontier, out_reservation, out_info,
-      out_result, flags);
+      pool, 1, &request, requester_frontier, flags, out_reservation, out_info,
+      out_result);
 }
 
 static void ReleaseOneReservation(
@@ -614,9 +614,9 @@ TEST_F(FiniteTLSFPoolTest, ReservationTransactionIsAllOrNoneWithoutGrowth) {
          sizeof(original_reservations));
   iree_hal_pool_acquire_info_t failed_infos[2];
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      pool_, IREE_ARRAYSIZE(requests), requests,
-      /*requester_frontier=*/NULL, failed_reservations, failed_infos, &result,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      pool_, IREE_ARRAYSIZE(requests), requests, /*requester_frontier=*/NULL,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE, failed_reservations, failed_infos,
+      &result));
 
   EXPECT_EQ(result, IREE_HAL_POOL_ACQUIRE_EXHAUSTED);
   EXPECT_EQ(memcmp(failed_reservations, original_reservations,
@@ -636,9 +636,8 @@ TEST_F(FiniteTLSFPoolTest, ReservationTransactionIsAllOrNoneWithoutGrowth) {
   iree_hal_pool_reservation_t reservation;
   iree_hal_pool_acquire_info_t info;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      pool_, 1, requests,
-      /*requester_frontier=*/NULL, &reservation, &info, &result,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      pool_, 1, requests, /*requester_frontier=*/NULL,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE, &reservation, &info, &result));
   EXPECT_NE(reservation.block_handle, 0u);
   iree_hal_pool_release_reservations(pool_, 1, &reservation,
                                      /*death_frontier=*/NULL);
@@ -653,9 +652,8 @@ TEST_F(TLSFPoolTest, MaterializationTransactionTransfersAllReservations) {
   iree_hal_pool_acquire_info_t infos[2];
   iree_hal_pool_acquire_result_t result;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      pool_, IREE_ARRAYSIZE(requests), requests,
-      /*requester_frontier=*/NULL, reservations, infos, &result,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      pool_, IREE_ARRAYSIZE(requests), requests, /*requester_frontier=*/NULL,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE, reservations, infos, &result));
 
   iree_hal_buffer_t* buffers[2];
   IREE_ASSERT_OK(iree_hal_pool_materialize_reservations(
@@ -773,8 +771,8 @@ TEST_F(TLSFPoolTest, SuballocationLimitRoutesLargerRequestsToDedicatedBacking) {
       MakeReservationRequest(256, 16), MakeReservationRequest(272, 16),
       MakeReservationRequest(256, 16)};
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      pool_, IREE_ARRAYSIZE(requests), requests, nullptr, reservations, infos,
-      &result, IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      pool_, IREE_ARRAYSIZE(requests), requests, nullptr,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE, reservations, infos, &result));
   ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
   EXPECT_EQ(ReservationBacking(pool_, reservations[0]),
             ReservationBacking(pool_, reservations[2]));
@@ -1749,8 +1747,8 @@ TEST(TLSFPool, MixedDedicatedBatchKeepsAdviceAtExecutionBoundaries) {
   iree_hal_pool_acquire_info_t infos[3];
   iree_hal_pool_acquire_result_t result;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      pool, 3, requests, nullptr, reservations, infos, &result,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      pool, 3, requests, nullptr, IREE_HAL_POOL_RESERVE_FLAG_NONE, reservations,
+      infos, &result));
   ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
   auto* provider = (iree_hal_test_opaque_slab_provider_t*)slab_provider;
   EXPECT_EQ(
@@ -1867,8 +1865,8 @@ TEST(TLSFPool, FailedBatchDoesNotApplyNativeAdvice) {
   iree_hal_pool_acquire_info_t infos[2];
   iree_hal_pool_acquire_result_t result;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      pool, 2, requests, nullptr, reservations, infos, &result,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      pool, 2, requests, nullptr, IREE_HAL_POOL_RESERVE_FLAG_NONE, reservations,
+      infos, &result));
   EXPECT_EQ(result, IREE_HAL_POOL_ACQUIRE_OVER_BUDGET);
   const auto* provider =
       reinterpret_cast<iree_hal_test_opaque_slab_provider_t*>(slab_provider);

@@ -1171,9 +1171,9 @@ static iree_status_t iree_hal_passthrough_pool_acquire(
     iree_hal_pool_t* base_pool, iree_host_size_t request_count,
     const iree_hal_pool_reservation_request_t* requests,
     iree_hal_memory_credit_t* credit,
+    iree_hal_pool_acquire_callback_t completion,
     iree_hal_pool_reservation_t* out_reservations,
-    iree_hal_pool_acquire_info_t* out_infos,
-    iree_hal_pool_acquire_callback_t completion) {
+    iree_hal_pool_acquire_info_t* out_infos) {
   iree_hal_passthrough_pool_state_t* pool =
       iree_hal_passthrough_pool_state(base_pool);
   if (!pool->owned_enabled) {
@@ -1262,22 +1262,24 @@ static iree_status_t iree_hal_passthrough_pool_acquire_reservations(
     iree_hal_pool_t* base_pool, iree_host_size_t request_count,
     const iree_hal_pool_reservation_request_t* requests,
     const iree_async_frontier_t* requester_frontier,
-    iree_hal_pool_reservation_t* out_reservations,
-    iree_hal_pool_acquire_info_t* out_infos,
     iree_hal_pool_acquire_callback_t completion,
-    iree_hal_pool_reserve_flags_t flags) {
+    iree_hal_pool_reserve_flags_t flags,
+    iree_hal_pool_reservation_t* out_reservations,
+    iree_hal_pool_acquire_info_t* out_infos) {
+  (void)requester_frontier;
+  (void)flags;
   return iree_hal_passthrough_pool_acquire(base_pool, request_count, requests,
-                                           NULL, out_reservations, out_infos,
-                                           completion);
+                                           NULL, completion, out_reservations,
+                                           out_infos);
 }
 
 static iree_status_t iree_hal_passthrough_pool_acquire_with_credit(
     iree_hal_pool_t* base_pool, iree_host_size_t request_count,
     const iree_hal_pool_reservation_request_t* requests,
     iree_hal_memory_credit_t* credit,
+    iree_hal_pool_acquire_callback_t completion,
     iree_hal_pool_reservation_t* out_reservations,
-    iree_hal_pool_acquire_info_t* out_infos,
-    iree_hal_pool_acquire_callback_t completion) {
+    iree_hal_pool_acquire_info_t* out_infos) {
   uint64_t cost = 0;
   IREE_RETURN_IF_ERROR(iree_hal_passthrough_pool_query_allocation_cost(
       base_pool, request_count, requests, &cost));
@@ -1288,8 +1290,8 @@ static iree_status_t iree_hal_passthrough_pool_acquire_with_credit(
                             cost, credit->byte_length);
   }
   return iree_hal_passthrough_pool_acquire(base_pool, request_count, requests,
-                                           credit, out_reservations, out_infos,
-                                           completion);
+                                           credit, completion, out_reservations,
+                                           out_infos);
 }
 
 static void iree_hal_passthrough_pool_release_one_reservation(
