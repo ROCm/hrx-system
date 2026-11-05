@@ -227,6 +227,140 @@ func.def public @read_defaulted_definition() -> (i32) {
 }
 
 // ====
+// A static cast to an rvalue reference changes only the source value category.
+// Trivial record moves retain SSA structure across named, member, conditional,
+// and subscript operands; an &&-qualified member call updates the same object.
+struct Movable {
+  unsigned value;
+  void increment() && { ++value; }
+};
+
+struct Outer {
+  Movable member;
+};
+
+unsigned move_sources(bool choose, unsigned first, unsigned second) {
+  Movable left{first};
+  Movable right{second};
+  Outer outer{{first + second}};
+  Movable named = static_cast<Movable&&>((left));
+  Movable member = static_cast<Movable&&>(outer.member);
+  Movable conditional = static_cast<Movable&&>(choose ? right : left);
+  Movable values[2] = {{first}, {second}};
+  Movable subscript = static_cast<Movable&&>(values[choose]);
+  const Movable fixed{3u};
+  Movable qualified = static_cast<const Movable&&>(fixed);
+  return named.value + member.value + conditional.value + subscript.value + qualified.value;
+}
+
+unsigned read_xvalue_array(unsigned first, unsigned second) {
+  unsigned values[2] = {first, second};
+  return static_cast<unsigned(&&)[2]>(values)[1];
+}
+
+unsigned mutate_xvalue(bool choose, unsigned value) {
+  Movable source{value};
+  if (choose) static_cast<Movable&&>(source).increment();
+  return source.value;
+}
+
+unsigned alias_xvalue(unsigned value) {
+  unsigned&& reference = static_cast<unsigned&&>(value);
+  ++reference;
+  return value;
+}
+
+unsigned extend_xvalue(unsigned value) {
+  Movable&& reference = Movable{value};
+  reference.value += 2u;
+  return reference.value;
+}
+
+// ----
+func.def public @move_sources(%choose: i1, %first: i32, %second: i32) -> (i32) {
+  %outer_member_value = scalar.addi %first, %second : i32
+  %conditional_value = scf.select %choose, %second, %first : i32
+  %6 = index.constant 8 : offset
+  %values_storage = buffer.alloca<private> align(4) %6 : buffer
+  %89 = index.constant 0 : offset
+  %13 = buffer.view %values_storage[%89] : buffer -> view<1xi32>
+  view.store %first, %13[0] : i32, view<1xi32>
+  %88 = index.constant 4 : offset
+  %19 = buffer.view %values_storage[%88] : buffer -> view<1xi32>
+  view.store %second, %19[0] : i32, view<1xi32>
+  %20 = scalar.extui %choose : i1 to i32
+  %21 = scalar.extsi %20 : i32 to i64
+  %90 = scalar.constant 2 : i64
+  %91 = scalar.shli %21, %90 : i64
+  %26 = scalar.assume %91 [range(%91, 0, 9223372036854775807)] : i64
+  %27 = index.cast %26 : i64 to offset
+  %30 = index.assume %27 [range(%27, 0, 4)] : offset
+  %31 = buffer.view %values_storage[%30] : buffer -> view<1xi32>
+  %subscript_value = view.load %31[0] : view<1xi32> -> i32
+  %fixed_value = scalar.constant 3 : i32
+  %34 = scalar.addi %first, %outer_member_value : i32
+  %35 = scalar.addi %34, %conditional_value : i32
+  %36 = scalar.addi %35, %subscript_value : i32
+  %37 = scalar.addi %36, %fixed_value : i32
+  func.return %37 : i32
+}
+
+func.def public @read_xvalue_array(%first: i32, %second: i32) -> (i32) {
+  func.return %second : i32
+}
+
+func.def public @mutate_xvalue(%choose: i1, %value: i32) -> (i32) {
+  %source_value = scf.if %choose -> (i32) {
+    %source_value = func.call pure @Movable__increment_value(%value) : (i32) -> (%value as i32)
+    scf.yield %source_value : i32
+  } else {
+    scf.yield %value : i32
+  }
+  func.return %source_value : i32
+}
+
+func.def public @alias_xvalue(%value$57: i32) -> (i32) {
+  %59 = scalar.constant 1 : i32
+  %value$60 = scalar.addi %value$57, %59 : i32
+  func.return %value$60 : i32
+}
+
+func.def public @extend_xvalue(%value: i32) -> (i32) {
+  %71 = scalar.constant 2 : i32
+  %77 = scalar.addi %value, %71 : i32
+  func.return %77 : i32
+}
+
+func.def @Movable__increment_value(%this_value: i32) -> (%this_value as i32) {
+  %85 = scalar.constant 1 : i32
+  %value = scalar.addi %this_value, %85 : i32
+  func.return %value : i32
+}
+
+// ====
+// Scalar, pointer, and native-vector xvalues remain their existing admitted
+// values; the category projection contributes no operation to the Loom IR.
+using UInt4 = unsigned __attribute__((vector_size(16)));
+unsigned move_scalar(unsigned value) { return static_cast<unsigned&&>(value); }
+unsigned move_pointer(unsigned* value) { return *static_cast<unsigned*&&>(value); }
+UInt4 move_vector(UInt4 value) { return static_cast<UInt4&&>(value); }
+
+// ----
+func.def public @move_scalar(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public @move_pointer(%value: buffer, %value_byte_offset: offset) -> (i32) {
+  %5 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
+  %6 = view.load %5[0] : view<1xi32> -> i32
+  func.return %6 : i32
+}
+
+func.def public @move_vector(%value: vector<4xi32>) -> (vector<4xi32>) {
+  func.return %value : vector<4xi32>
+}
+
+// ====
 // RUN: roundtrip
 // The retained constructor is a private storage-receiver callable over the
 // exact destination allocated by its construction site.

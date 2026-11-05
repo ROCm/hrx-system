@@ -298,7 +298,7 @@ class Translator final : private Initialization::Evaluation {
   }
 
   cxx::FieldSymbol* current_receiver_field(cxx::ExpressionAST* expression) {
-    expression = unwrap_expression(expression);
+    expression = unwrap_object_identity(unit_, expression);
     if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
       auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
       return field && receiver(field) ? field : nullptr;
@@ -1076,7 +1076,7 @@ class Translator final : private Initialization::Evaluation {
                            cxx::ExpressionAST* initializer,
                            ConstexprContract constexpr_contract,
                            cxx::AST* owner) {
-    if (unit_.typeTraits().is_lvalue_reference(variable->type())) {
+    if (unit_.typeTraits().is_reference(variable->type())) {
       if (!initializer) {
         fail(owner, "reference locals require an initializer");
       }
@@ -1417,10 +1417,7 @@ class Translator final : private Initialization::Evaluation {
   }
 
   StorageProjection object_address(cxx::ExpressionAST* ast) {
-    ast = strip_implicit_casts(ast);
-    if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(ast)) {
-      return object_address(nested->expression);
-    }
+    ast = unwrap_object_identity(unit_, ast);
     if (auto* literal = cxx::ast_cast<cxx::StringLiteralExpressionAST>(ast)) {
       return string_literal(literal);
     }
@@ -1729,10 +1726,7 @@ class Translator final : private Initialization::Evaluation {
   Lvalue destination(cxx::ExpressionAST* expression, cxx::AST* owner,
                      LvalueAccess access = LvalueAccess::Write,
                      bool preserve_identity = false) {
-    auto* projected = strip_implicit_casts(expression);
-    while (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(projected)) {
-      projected = strip_implicit_casts(nested->expression);
-    }
+    auto* projected = unwrap_object_identity(unit_, expression);
     if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(projected)) {
       if (auto found = references_.find(id->symbol);
           found != references_.end()) {
@@ -1763,13 +1757,17 @@ class Translator final : private Initialization::Evaluation {
       return vector_lane_destination(subscript, owner,
                                      control_->destination(expression), access);
     }
-    return {object_destination(expression, owner, access, std::nullopt,
+    auto retained = control_->destination(expression);
+    if (!retained && projected != expression) {
+      retained = control_->destination(projected);
+    }
+    return {object_destination(expression, owner, access, retained,
                                preserve_identity)};
   }
 
   Lvalue reference_lvalue(cxx::ExpressionAST* expression, cxx::AST* owner,
                           LvalueAccess access) {
-    auto* projected = unwrap_expression(expression);
+    auto* projected = unwrap_object_identity(unit_, expression);
     if (auto* conditional =
             cxx::ast_cast<cxx::ConditionalExpressionAST>(projected)) {
       auto condition = this->expression(conditional->condition).ssa();
@@ -3510,6 +3508,14 @@ class Translator final : private Initialization::Evaluation {
       return convert(cast->expression, cast->type, ast);
     }
     if (auto* cast = cxx::ast_cast<cxx::CppCastExpressionAST>(ast)) {
+      if (explicit_xvalue_operand(unit_, cast)) {
+        auto value = expression(cast->expression);
+        if (&value.partition() != &types_.partition(cast->type, cast)) {
+          fail(cast,
+               "xvalue casts must preserve the admitted source object type");
+        }
+        return value;
+      }
       auto input = loom_type_kind(types_.get(cast->expression->type, ast));
       auto output = loom_type_kind(types_.get(cast->type, ast));
       if (input != output ||

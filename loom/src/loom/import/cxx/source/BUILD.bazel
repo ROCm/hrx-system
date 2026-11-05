@@ -296,6 +296,7 @@ loom_cc_test(
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [
         ":error",
+        ":expressions",
         ":options",
         ":preamble",
         ":source",

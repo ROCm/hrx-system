@@ -383,6 +383,8 @@ void ControlFlow::postVisit(cxx::AST* ast) {
       if (cast->valueCategory != cxx::ValueCategory::kPrValue) {
         owner = object_owner(cast->expression);
       }
+    } else if (auto* operand = explicit_xvalue_operand(unit_, expression)) {
+      owner = object_owner(operand);
     }
     if (owner) {
       object_owners_.emplace(expression, owner);
@@ -904,7 +906,8 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
     return;
   }
   if (!is_current_object(call.receiver)) {
-    if (call.receiver->valueCategory == cxx::ValueCategory::kLValue) {
+    if (call.receiver->valueCategory == cxx::ValueCategory::kLValue ||
+        explicit_xvalue_operand(unit_, unwrap_expression(call.receiver))) {
       if (implicit_object_may_mutate(call.function)) {
         record(call.receiver);
       } else {
@@ -933,7 +936,7 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
 CallArgument ControlFlow::retain_call_argument(cxx::ExpressionAST* expression) {
   CallArgument argument = {expression, {}, nullptr, false, false, {}};
   collect_identity(expression, argument);
-  auto target = classify_destination(unwrap_expression(expression));
+  auto target = classify_destination(unwrap_object_identity(unit_, expression));
   argument.write_binding = target ? target->binding : nullptr;
   return argument;
 }
@@ -943,7 +946,7 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
   if (!expression) {
     return;
   }
-  expression = unwrap_expression(expression);
+  expression = unwrap_object_identity(unit_, expression);
   auto traits = unit_.typeTraits();
   auto append_binding = [&](cxx::Symbol* binding) {
     if (std::ranges::find(argument.identity_bindings, binding) ==
@@ -1083,7 +1086,7 @@ bool ControlFlow::record_callable_write(cxx::ExpressionAST* expression) {
   if (!expression) {
     return false;
   }
-  expression = unwrap_expression(expression);
+  expression = unwrap_object_identity(unit_, expression);
   if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
     if (auto found = reference_aliases_.find(id->symbol);
         found != reference_aliases_.end()) {
@@ -1288,8 +1291,7 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
   }
   cxx::ASTVisitor::visit(ast);
   if (variable) {
-    if (unit_.typeTraits().is_lvalue_reference(variable->type()) &&
-        ast->initializer) {
+    if (unit_.typeTraits().is_reference(variable->type()) && ast->initializer) {
       cxx::Initializer source(ast->initializer);
       auto* referent = source.singleExpression();
       if (!referent) {
@@ -1399,7 +1401,7 @@ bool ControlFlow::structured(cxx::AST* ast) {
 
 std::optional<Destination> ControlFlow::retain_destination(
     cxx::ExpressionAST* expression) {
-  auto target = classify_destination(unwrap_expression(expression));
+  auto target = classify_destination(unwrap_object_identity(unit_, expression));
   if (!target) {
     return std::nullopt;
   }
@@ -1437,7 +1439,8 @@ void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,
     auto* receiver = member->baseExpression;
     if (!is_current_object(receiver)) {
       if (member->accessOp == cxx::TokenKind::T_DOT &&
-          receiver->valueCategory == cxx::ValueCategory::kLValue) {
+          (receiver->valueCategory == cxx::ValueCategory::kLValue ||
+           explicit_xvalue_operand(unit_, unwrap_expression(receiver)))) {
         if (implicit_object_may_mutate(callee)) {
           record(receiver);
         } else {
@@ -1466,6 +1469,10 @@ void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,
 
 std::optional<Destination> ControlFlow::classify_destination(
     cxx::ExpressionAST* expression) {
+  auto* identity = unwrap_object_identity(unit_, expression);
+  if (identity != expression) {
+    return classify_destination(identity);
+  }
   if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
     if (auto found = reference_aliases_.find(id->symbol);
         found != reference_aliases_.end()) {
@@ -1529,6 +1536,9 @@ bool ControlFlow::classify_storage(cxx::ExpressionAST* expression) const {
   }
   if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression)) {
     return storage_expressions_.contains(cast->expression);
+  }
+  if (auto* operand = explicit_xvalue_operand(unit_, expression)) {
+    return storage_expressions_.contains(operand);
   }
   if (auto* subscript =
           cxx::ast_cast<cxx::SubscriptExpressionAST>(expression)) {
