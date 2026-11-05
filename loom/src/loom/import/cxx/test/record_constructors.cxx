@@ -37,6 +37,15 @@ struct DefaultDefined {
 
 DefaultDefined::DefaultDefined() = default;
 
+struct Movable {
+  unsigned value;
+  void increment() && { ++value; }
+};
+
+struct MoveOuter {
+  Movable member;
+};
+
 static unsigned sum(unsigned seed) {
   Packet packet(seed);
   return packet.cells[0].value + packet.cells[1].value;
@@ -57,15 +66,69 @@ static unsigned default_defined_value() {
   return value.value;
 }
 
+static unsigned move_sources(bool choose, unsigned first, unsigned second) {
+  Movable left{first};
+  Movable right{second};
+  MoveOuter outer{{first + second}};
+  Movable named = static_cast<Movable&&>((left));
+  Movable member = static_cast<Movable&&>(outer.member);
+  Movable conditional = static_cast<Movable&&>(choose ? right : left);
+  Movable values[2] = {{first}, {second}};
+  Movable subscript = static_cast<Movable&&>(values[choose]);
+  const Movable fixed{3u};
+  Movable qualified = static_cast<const Movable&&>(fixed);
+  return named.value + member.value + conditional.value + subscript.value +
+         qualified.value;
+}
+
+static unsigned read_xvalue_array(unsigned first, unsigned second) {
+  unsigned values[2] = {first, second};
+  return static_cast<unsigned (&&)[2]>(values)[1];
+}
+
+static unsigned mutate_xvalue(bool choose, unsigned value) {
+  Movable source{value};
+  if (choose) {
+    static_cast<Movable&&>(source).increment();
+  }
+  return source.value;
+}
+
+static unsigned alias_xvalue(unsigned value) {
+  unsigned&& reference = static_cast<unsigned&&>(value);
+  ++reference;
+  return value;
+}
+
+static unsigned extend_xvalue(unsigned value) {
+  Movable&& reference = Movable{value};
+  reference.value += 2u;
+  return reference.value;
+}
+
 LOOM_CHECK_CASE(record_constructors) {
   const auto even = sum(2u);
   const auto odd = sum(3u);
   const auto defaults = default_sum();
   const auto nested_defaults = nested_default_sum();
   const auto default_defined = default_defined_value();
+  const auto moved_first = move_sources(false, 2u, 5u);
+  const auto moved_second = move_sources(true, 2u, 5u);
+  const auto array_value = read_xvalue_array(7u, 11u);
+  const auto retained = mutate_xvalue(false, 13u);
+  const auto mutated = mutate_xvalue(true, 13u);
+  const auto aliased = alias_xvalue(17u);
+  const auto extended = extend_xvalue(19u);
   loom::check::expect_equal(even, 9u);
   loom::check::expect_equal(odd, 11u);
   loom::check::expect_equal(defaults, 4u);
   loom::check::expect_equal(nested_defaults, 4u);
   loom::check::expect_equal(default_defined, 3u);
+  loom::check::expect_equal(moved_first, 16u);
+  loom::check::expect_equal(moved_second, 22u);
+  loom::check::expect_equal(array_value, 11u);
+  loom::check::expect_equal(retained, 13u);
+  loom::check::expect_equal(mutated, 14u);
+  loom::check::expect_equal(aliased, 18u);
+  loom::check::expect_equal(extended, 21u);
 }

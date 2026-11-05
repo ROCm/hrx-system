@@ -30,6 +30,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/import/cxx/source/error.h"
+#include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/source/preamble.h"
 
 namespace loom::cxx_import {
@@ -382,6 +383,37 @@ TEST(SourceTest, StringizedTokensRetainInvocationRangesAndSeparateSpelling) {
     ++literal_count;
   }
   EXPECT_EQ(literal_count, 2u);
+}
+
+TEST(SourceTest, ExplicitXvalueRetainsItsTypeIdAndObjectIdentity) {
+  class Casts final : public cxx::ASTVisitor {
+   public:
+    void visit(cxx::CppCastExpressionAST* ast) override {
+      expressions.push_back(ast);
+      cxx::ASTVisitor::visit(ast);
+    }
+
+    std::vector<cxx::CppCastExpressionAST*> expressions;
+  } casts;
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV("struct Value { unsigned member; };"
+                        "unsigned read(Value value) {"
+                        "Value moved = static_cast<Value&&>((value));"
+                        "return static_cast<unsigned>(moved.member); }"),
+                IREE_SV("xvalue.cpp"), options);
+  casts.accept(source.unit().ast());
+  ASSERT_EQ(casts.expressions.size(), 2u);
+  auto* xvalue = casts.expressions[0];
+  ASSERT_NE(xvalue->typeId, nullptr);
+  EXPECT_EQ(xvalue->valueCategory, cxx::ValueCategory::kXValue);
+  EXPECT_TRUE(
+      source.unit().typeTraits().is_rvalue_reference(xvalue->typeId->type));
+  EXPECT_EQ(explicit_xvalue_operand(source.unit(), xvalue), xvalue->expression);
+  EXPECT_TRUE(cxx::ast_cast<cxx::IdExpressionAST>(
+      unwrap_object_identity(source.unit(), xvalue)));
+  EXPECT_EQ(explicit_xvalue_operand(source.unit(), casts.expressions[1]),
+            nullptr);
 }
 
 TEST(SourceTest, DiagnosticSinkFailureCrossesTheParserSafeBoundary) {

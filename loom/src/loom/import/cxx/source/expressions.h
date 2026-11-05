@@ -25,6 +25,19 @@ cxx::ExpressionAST* strip_implicit_casts(cxx::ExpressionAST* expression);
 // parentheses, and frontend wrappers around selected member initializers.
 cxx::ExpressionAST* unwrap_expression(cxx::ExpressionAST* expression);
 
+// Returns the operand of an explicit static cast to an rvalue reference, or
+// null when the expression is not that source category projection.
+cxx::ExpressionAST* explicit_xvalue_operand(cxx::TranslationUnit& unit,
+                                            cxx::ExpressionAST* expression);
+
+// Returns the object beneath transparent source wrappers and any explicit
+// xvalue category projections. Identity-preserving conversions are unwrapped;
+// a prvalue conversion remains as the producer of its temporary object.
+// Callers retain the original expression for cv and category rules selected by
+// the frontend.
+cxx::ExpressionAST* unwrap_object_identity(cxx::TranslationUnit& unit,
+                                           cxx::ExpressionAST* expression);
+
 // Returns a frontend-selected constructor conversion at the root of an
 // initializer, including transparent source initializer wrappers. Constructor
 // arguments are retained on the cast's expression in resolved parameter order.

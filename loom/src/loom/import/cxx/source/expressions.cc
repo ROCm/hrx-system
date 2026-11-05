@@ -39,6 +39,42 @@ cxx::ExpressionAST* unwrap_expression(cxx::ExpressionAST* expression) {
   }
 }
 
+cxx::ExpressionAST* explicit_xvalue_operand(cxx::TranslationUnit& unit,
+                                            cxx::ExpressionAST* expression) {
+  auto* cast = cxx::ast_cast<cxx::CppCastExpressionAST>(expression);
+  return cast && cast->castOp == cxx::TokenKind::T_STATIC_CAST &&
+                 cast->valueCategory == cxx::ValueCategory::kXValue &&
+                 cast->typeId &&
+                 unit.typeTraits().is_rvalue_reference(cast->typeId->type)
+             ? cast->expression
+             : nullptr;
+}
+
+cxx::ExpressionAST* unwrap_object_identity(cxx::TranslationUnit& unit,
+                                           cxx::ExpressionAST* expression) {
+  expression = unwrap_expression(expression);
+  while (auto* operand = explicit_xvalue_operand(unit, expression)) {
+    expression = operand;
+    for (;;) {
+      if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(expression)) {
+        expression = nested->expression;
+        continue;
+      }
+      if (auto* initializer =
+              cxx::ast_cast<cxx::DefaultInitializerExpressionAST>(expression)) {
+        expression = initializer->expression;
+        continue;
+      }
+      auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression);
+      if (!cast || cast->valueCategory == cxx::ValueCategory::kPrValue) {
+        break;
+      }
+      expression = cast->expression;
+    }
+  }
+  return expression;
+}
+
 cxx::ImplicitCastExpressionAST* constructor_conversion(
     cxx::ExpressionAST* initializer) {
   for (;;) {
