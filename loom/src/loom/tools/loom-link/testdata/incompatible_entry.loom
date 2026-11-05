@@ -1,0 +1,1 @@
+kernel.decl @entry(%rows: index) launch(%output: buffer)

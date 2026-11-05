@@ -304,6 +304,16 @@ TEST_P(JitTest, MixedArgumentsSurviveRecordingScratchReuseAndTrim) {
   }
 }
 
+TEST_P(JitTest, UnresolvedEntryIdentifiesCommandAndKernel) {
+  auto status = Compile(nullptr, 0, IREE_SV("unresolved_entry"));
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_NOT_FOUND);
+  const auto message = iree_status_message(status);
+  EXPECT_EQ(std::string(message.data, message.size),
+            "command @unresolved_entry entry 0 (@dynamic_scalar) has no source "
+            "provider");
+  iree_status_free(status);
+}
+
 class JitCacheTest : public JitTest {
  protected:
   void ReleaseProgram() override {

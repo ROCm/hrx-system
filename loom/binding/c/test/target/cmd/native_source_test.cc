@@ -330,6 +330,66 @@ class NativeSourceTest : public ::testing::TestWithParam<bool> {
   CompilerPtr compiler_;
 };
 
+TEST_P(NativeSourceTest, PublishesPhysicalAndLogicalEntrySources) {
+  Output logical;
+  LOOMC_ASSERT_OK(Build("{}", &logical));
+  ExpectSucceeded(logical);
+  const std::string expected_source = RequestBytes(logical);
+  const char* roots[] = {"physical_direct", "physical_indirect",
+                         "physical_before_logical", "logical_before_physical"};
+  for (const char* root : roots) {
+    SCOPED_TRACE(root);
+    Output output;
+    LOOMC_ASSERT_OK(Build("{}", &output, 0, {}, nullptr, root));
+    ExpectSucceeded(output);
+    ASSERT_EQ(output.requests.size(), 1u);
+    EXPECT_EQ(RequestBytes(output), expected_source);
+    ASSERT_EQ(loomc_request_binding_count(output.requests[0].get()), 1u);
+    loomc_request_binding_t binding = {};
+    ASSERT_TRUE(
+        loomc_request_binding_at(output.requests[0].get(), 0, &binding));
+    loomc_cmd_program_t program = {};
+    ASSERT_TRUE(loomc_cmd_program_product_program_at(output.product.get(), 0,
+                                                     &program));
+    ASSERT_EQ(program.entry_requirement_count, 1u);
+    EXPECT_EQ(program.entry_requirement_ordinals[0],
+              binding.requirement_ordinal);
+    loomc_cmd_entry_requirement_t requirement = {};
+    ASSERT_TRUE(loomc_cmd_program_product_entry_requirement_at(
+        output.product.get(), binding.requirement_ordinal, &requirement));
+    EXPECT_EQ(std::string(requirement.symbol.data, requirement.symbol.size),
+              "compute");
+  }
+}
+
+TEST_P(NativeSourceTest, PublishesPhysicalProviderSource) {
+  const char* roots[] = {"physical_provider", "indirect_provider",
+                         "physical_provider_before_logical",
+                         "logical_provider_before_physical"};
+  for (const char* root : roots) {
+    SCOPED_TRACE(root);
+    Output output;
+    LOOMC_ASSERT_OK(Build("{}", &output, 0, {}, nullptr, root));
+    ExpectSucceeded(output);
+    ASSERT_EQ(output.requests.size(), 1u);
+    ASSERT_EQ(loomc_request_binding_count(output.requests[0].get()), 1u);
+    loomc_request_binding_t binding = {};
+    ASSERT_TRUE(
+        loomc_request_binding_at(output.requests[0].get(), 0, &binding));
+    loomc_cmd_program_t program = {};
+    ASSERT_TRUE(loomc_cmd_program_product_program_at(output.product.get(), 0,
+                                                     &program));
+    ASSERT_EQ(program.entry_requirement_count, 1u);
+    EXPECT_EQ(program.entry_requirement_ordinals[0],
+              binding.requirement_ordinal);
+    loomc_cmd_entry_requirement_t requirement = {};
+    ASSERT_TRUE(loomc_cmd_program_product_entry_requirement_at(
+        output.product.get(), binding.requirement_ordinal, &requirement));
+    EXPECT_EQ(std::string(requirement.symbol.data, requirement.symbol.size),
+              "separate");
+  }
+}
+
 TEST_P(NativeSourceTest, MatchesSuccessfulClosureAndConfigurationPolicy) {
   const char* configurations[] = {
       "{}",

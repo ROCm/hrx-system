@@ -1048,3 +1048,47 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
   cmd.dispatch.direct<%13, %14>[%15, %15, %15]()
   return
 }
+
+// ====
+
+// Physical counts bypass logical configuration. Both call forms retain one
+// native entry, including when they share the same configured source symbol.
+// RUN: emit command-program @mixed_launch_dispatch
+
+kernel.def @configured_entry(%groups: index) {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%data: buffer) {
+  kernel.return
+}
+
+command.def public @mixed_launch_dispatch() launch(%metadata: buffer, %data: buffer) {
+  %origin = index.constant 0 : offset
+  %counts = buffer.view %metadata[%origin] : buffer -> view<3xi32>
+  %logical_groups = index.constant 17 : index
+  %physical_groups = index.constant 3 : index
+  kernel.dispatch @configured_entry[%physical_groups](%data) : [index](buffer)
+  kernel.launch @configured_entry[%logical_groups](%data) : [index](buffer)
+  kernel.dispatch @configured_entry[%counts](%data) indirect_lifetime(invocation) : [view<3xi32>](buffer)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 2}) @mixed_launch_dispatch() asm {
+  %18 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %19 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
+  %20 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %21 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %22 = cmd.constant.u64 0
+  %23 = cmd.constant.u64 -1
+  %24 = cmd.constant.u64 12
+  %25 = cmd.constant.u32 3
+  %26 = cmd.constant.u32 1
+  cmd.dispatch.direct<%20, %21>[%25, %26, %26](%19, %22, %23)
+  %27 = cmd.constant.u32 17
+  cmd.dispatch.direct.barrier<%20, %21>[%27, %26, %26](%19, %22, %23)
+  %28 = cmd.buffer.ref.binding %18, %22, %24
+  cmd.dispatch.indirect.static.barrier<%20, %21>[%28](%19, %22, %23)
+  return
+}

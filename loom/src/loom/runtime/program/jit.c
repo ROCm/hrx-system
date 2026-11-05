@@ -1007,10 +1007,15 @@ static iree_status_t loom_runtime_jit_job_bind(loom_runtime_jit_job_t* job) {
       stage->entries[i] =
           job->requirements[job->program.entry_requirement_ordinals[i]];
       if (!stage->entries[i].executable) {
-        status =
-            iree_make_status(IREE_STATUS_NOT_FOUND,
-                             "command @%.*s entry %zu has no source provider",
-                             (int)job->root.size, job->root.data, i);
+        loomc_cmd_entry_requirement_t requirement;
+        loomc_cmd_program_product_entry_requirement_at(
+            job->product, job->program.entry_requirement_ordinals[i],
+            &requirement);
+        status = iree_make_status(
+            IREE_STATUS_NOT_FOUND,
+            "command @%.*s entry %zu (@%.*s) has no source provider",
+            (int)job->root.size, job->root.data, i,
+            (int)requirement.symbol.size, requirement.symbol.data);
       }
     }
   }

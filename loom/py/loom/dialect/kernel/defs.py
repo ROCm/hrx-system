@@ -2183,9 +2183,10 @@ kernel_dispatch = Op(
     group=kernel_ops,
     phase=OpPhase.EXECUTABLE,
     doc=(
-        "Dispatch a resolved kernel.entry.decl with exact workgroup counts "
-        "and device-ABI operands. Configured kernel.def and kernel.decl "
-        "symbols are invoked with kernel.launch instead. Counts are one to "
+        "Dispatch a kernel entry with exact workgroup counts and device-ABI "
+        "operands. A kernel.entry.decl, kernel.decl, or kernel.def supplies "
+        "the entry ABI. Physical dispatch bypasses the workload-to-count "
+        "configuration consumed by kernel.launch. Counts are one to "
         "three index values or one dense view<3xi32> for indirect dispatch. "
         "An optional XYZ workgroup size overrides the executable entry "
         "default for targets supporting dispatch-time workgroup sizes. "

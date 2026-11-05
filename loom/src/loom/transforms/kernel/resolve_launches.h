@@ -22,7 +22,9 @@ extern "C" {
 // Results retained while resolving logical kernel launches.
 typedef struct loom_kernel_launch_resolution_t {
   // Scratch-arena-owned entry operation pointers indexed by pre-resolution
-  // logical symbol ID. NULL slots were not live. Operation pointers remain
+  // logical symbol ID. Existing configured declarations retain their entry
+  // interface even when only physical dispatches reference them. NULL slots
+  // expose no kernel entry. Operation pointers remain
   // stable across symbol-table compaction; the entry's callee accessor returns
   // its current module-local identity after each compaction.
   loom_op_t** entry_ops;
@@ -43,6 +45,9 @@ typedef struct loom_kernel_launch_resolution_t {
 // caller-owned CFG sites, derives one executable-entry declaration per logical
 // kernel, and replaces each kernel.launch with a kernel.dispatch targeting that
 // entry.
+// Existing physical dispatches keep their declaration and source projection;
+// a logical launch of the same kernel replaces that declaration with the
+// derived entry without changing its symbol identity.
 // Kernel-scoped pipelines retain their logical launches and declaration in
 // the entry table: their workload prefix specializes an independently compiled
 // artifact and does not compute a physical dispatch grid.

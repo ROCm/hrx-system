@@ -142,6 +142,13 @@ rewrites each workload-level launch at the same caller-owned CFG site:
 kernel.dispatch @project_block[%x, %y, %z](%weights, %input, %output) : [index, index, index](view<8xf32>, buffer, buffer)
 ```
 
+A caller that already has physical workgroup counts can author
+`kernel.dispatch` directly. Its target may be a `kernel.entry.decl`, a
+`kernel.decl`, or a `kernel.def`; each supplies the same device-entry ABI.
+Dispatch uses the supplied counts without evaluating the kernel's logical
+launch configuration. Linking an entry declaration to its implementation
+preserves this behavior. The executable still owns its native workgroup size.
+
 Ordinary canonicalization, CSE, inlining, and folding optimize those calls
 before schedule construction. Equal calls with equal SSA inputs can collapse;
 calls in different branches or loop iterations retain the control-flow scope

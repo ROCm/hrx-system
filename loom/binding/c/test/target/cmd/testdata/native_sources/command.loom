@@ -20,3 +20,59 @@ command.def public @dispatch() launch(%output: buffer) {
   kernel.launch @compute(%output) : (buffer)
   command.return
 }
+
+command.def public @physical_direct() launch(%output: buffer) {
+  %unit = index.constant 1 : index
+  kernel.dispatch @compute[%unit](%output) : [index](buffer)
+  command.return
+}
+
+command.def public @physical_indirect() launch(%output: buffer, %metadata: buffer) {
+  %offset = index.constant 0 : offset
+  %counts = buffer.view %metadata[%offset] : buffer -> view<3xi32>
+  kernel.dispatch @compute[%counts](%output) indirect_lifetime(invocation) : [view<3xi32>](buffer)
+  command.return
+}
+
+command.def public @physical_before_logical() launch(%output: buffer) {
+  %unit = index.constant 1 : index
+  kernel.dispatch @compute[%unit](%output) : [index](buffer)
+  kernel.launch @compute(%output) : (buffer)
+  command.return
+}
+
+command.def public @logical_before_physical() launch(%output: buffer) {
+  %unit = index.constant 1 : index
+  kernel.launch @compute(%output) : (buffer)
+  kernel.dispatch @compute[%unit](%output) : [index](buffer)
+  command.return
+}
+
+kernel.decl @separate(%groups: index) launch(%output: buffer)
+
+command.def public @physical_provider() launch(%output: buffer) {
+  %unit = index.constant 1 : index
+  kernel.dispatch @separate[%unit](%output) : [index](buffer)
+  command.return
+}
+
+command.def public @indirect_provider() launch(%output: buffer, %metadata: buffer) {
+  %offset = index.constant 0 : offset
+  %counts = buffer.view %metadata[%offset] : buffer -> view<3xi32>
+  kernel.dispatch @separate[%counts](%output) indirect_lifetime(invocation) : [view<3xi32>](buffer)
+  command.return
+}
+
+command.def public @physical_provider_before_logical() launch(%output: buffer) {
+  %unit = index.constant 1 : index
+  kernel.dispatch @separate[%unit](%output) : [index](buffer)
+  kernel.launch @separate[%unit](%output) : [index](buffer)
+  command.return
+}
+
+command.def public @logical_provider_before_physical() launch(%output: buffer) {
+  %unit = index.constant 1 : index
+  kernel.launch @separate[%unit](%output) : [index](buffer)
+  kernel.dispatch @separate[%unit](%output) : [index](buffer)
+  command.return
+}

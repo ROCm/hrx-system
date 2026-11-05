@@ -1374,7 +1374,20 @@ static iree_status_t loom_linker_clone_or_merge_symbol_op(
 
   const bool target_declaration =
       loom_link_symbol_is_declaration(target_symbol);
-  if (target_declaration && !source_declaration) {
+  bool replace_declaration = !source_declaration;
+  if (target_declaration && source_declaration) {
+    const loom_symbol_definition_descriptor_t* source_definition =
+        loom_link_op_symbol_definition(source->module, source_op);
+    const loom_symbol_definition_descriptor_t* target_definition =
+        loom_link_op_symbol_definition(linker->target_module, target_op);
+    // Keep the richer interface contract independent of declaration order.
+    // Merging the prior contract into it still checks every shared ABI fact.
+    replace_declaration =
+        source_definition->interfaces != target_definition->interfaces &&
+        loom_symbol_definition_satisfies(source_definition,
+                                         target_definition->interfaces);
+  }
+  if (target_declaration && replace_declaration) {
     loom_op_t* cloned_op = NULL;
     IREE_RETURN_IF_ERROR(
         loom_linker_clone_source_op(source, source_op, target_op, &cloned_op));

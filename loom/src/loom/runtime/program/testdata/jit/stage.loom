@@ -271,6 +271,13 @@ command.def public @invalid_native() launch(%storage: buffer) {
 
 kernel.entry.decl @dynamic_scalar(%value: i32)
 
+command.def public @unresolved_entry() launch() {
+  %c1 = index.constant 1 : index
+  %value = scalar.constant 7 : i32
+  kernel.dispatch @dynamic_scalar[%c1](%value) : [index](i32)
+  command.return
+}
+
 // Native requests are published before command argument lowering rejects the
 // dynamic scalar. Accepted native work remains useful without a parent product.
 command.def public @invalid_argument(%value: i32) launch(%storage: buffer) {

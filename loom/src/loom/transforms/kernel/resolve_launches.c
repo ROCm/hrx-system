@@ -215,7 +215,7 @@ static iree_status_t loom_kernel_launch_resolution_rewrite_launch(
       configuration_effect_contract == LOOM_CALLABLE_EFFECT_CONTRACT_READONLY);
 
   loom_op_t* entry_op = resolution->entry_ops[kernel_ref.symbol_id];
-  if (entry_op == NULL) {
+  if (entry_op == NULL || loom_kernel_decl_isa(entry_op)) {
     loom_op_t* declaration_op =
         resolution->module->symbols.entries[kernel_ref.symbol_id].defining_op;
     IREE_ASSERT(declaration_op != NULL);
@@ -295,8 +295,10 @@ iree_status_t loom_kernel_resolve_launches(
                                   sizeof(*entry_ops), (void**)&entry_ops));
     for (iree_host_size_t i = 0; i < references->symbol_count; ++i) {
       loom_op_t* defining_op = module->symbols.entries[i].defining_op;
-      entry_ops[i] =
-          loom_kernel_entry_decl_isa(defining_op) ? defining_op : NULL;
+      entry_ops[i] = loom_kernel_decl_isa(defining_op) ||
+                             loom_kernel_entry_decl_isa(defining_op)
+                         ? defining_op
+                         : NULL;
     }
   }
 

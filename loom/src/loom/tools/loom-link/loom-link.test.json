@@ -642,6 +642,192 @@
           }
         }
       ]
+    },
+    {
+      "name": "physical entry declarations resolve to configured source and bytecode providers",
+      "steps": [
+        {
+          "name": "resolve-source-entry",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{srcdir}/testdata/physical_entry.loom",
+              "--library={srcdir}/testdata/kernel_exports.loom",
+              "--mode=link",
+              "--root=@dispatch_entry"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "kernel.def @entry()",
+              "kernel.dispatch @entry[%groups]()",
+              "kernel.dispatch @entry[%counts]() indirect_lifetime(invocation)"
+            ]
+          }
+        },
+        {
+          "name": "encode-entry-provider",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{srcdir}/testdata/kernel_exports.loom",
+              "--mode=merge",
+              "--to=bc",
+              "--output={tmp}/physical-provider.loombc"
+            ]
+          }
+        },
+        {
+          "name": "resolve-bytecode-entry",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{srcdir}/testdata/physical_entry.loom",
+              "--library={tmp}/physical-provider.loombc",
+              "--mode=link",
+              "--root=@dispatch_entry"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "kernel.def @entry()",
+              "kernel.dispatch @entry[%groups]()",
+              "kernel.dispatch @entry[%counts]() indirect_lifetime(invocation)"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "kernel declarations preserve configured interface physical first",
+      "run": {
+        "tool": "loom-link",
+        "args": [
+          "{srcdir}/testdata/physical_entry.loom",
+          "{srcdir}/testdata/configured_entry.loom",
+          "--mode=merge"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "kernel.decl @entry(%rows: index) launch()"
+        ],
+        "not_contains": [
+          "kernel.entry.decl @entry"
+        ]
+      }
+    },
+    {
+      "name": "kernel declarations preserve configured interface configured first",
+      "run": {
+        "tool": "loom-link",
+        "args": [
+          "{srcdir}/testdata/configured_entry.loom",
+          "{srcdir}/testdata/physical_entry.loom",
+          "--mode=merge"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "kernel.decl @entry(%rows: index) launch()"
+        ],
+        "not_contains": [
+          "kernel.entry.decl @entry"
+        ]
+      }
+    },
+    {
+      "name": "mixed kernel declarations reject ABI mismatch physical first",
+      "run": {
+        "tool": "loom-link",
+        "args": [
+          "{srcdir}/testdata/physical_entry.loom",
+          "{srcdir}/testdata/incompatible_entry.loom",
+          "--mode=merge"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": [
+          "args"
+        ]
+      }
+    },
+    {
+      "name": "mixed kernel declarations reject ABI mismatch configured first",
+      "run": {
+        "tool": "loom-link",
+        "args": [
+          "{srcdir}/testdata/incompatible_entry.loom",
+          "{srcdir}/testdata/physical_entry.loom",
+          "--mode=merge"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": [
+          "args"
+        ]
+      }
+    },
+    {
+      "name": "bytecode kernel declarations preserve configured interface",
+      "steps": [
+        {
+          "name": "encode-configured",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{srcdir}/testdata/configured_entry.loom",
+              "--mode=merge",
+              "--to=bc",
+              "--output={tmp}/configured.loombc"
+            ]
+          }
+        },
+        {
+          "name": "merge-physical-first",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{srcdir}/testdata/physical_entry.loom",
+              "{tmp}/configured.loombc",
+              "--mode=merge"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "kernel.decl @entry(%rows: index) launch()"
+            ],
+            "not_contains": [
+              "kernel.entry.decl @entry"
+            ]
+          }
+        },
+        {
+          "name": "merge-configured-first",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{tmp}/configured.loombc",
+              "{srcdir}/testdata/physical_entry.loom",
+              "--mode=merge"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "kernel.decl @entry(%rows: index) launch()"
+            ],
+            "not_contains": [
+              "kernel.entry.decl @entry"
+            ]
+          }
+        }
+      ]
     }
   ]
 }

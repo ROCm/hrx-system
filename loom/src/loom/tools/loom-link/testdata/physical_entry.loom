@@ -1,0 +1,8 @@
+kernel.entry.decl @entry()
+
+command.def public @dispatch_entry() launch(%counts: view<3xi32>) {
+  %groups = index.constant 3 : index
+  kernel.dispatch @entry[%groups]() : [index]()
+  kernel.dispatch @entry[%counts]() indirect_lifetime(invocation) : [view<3xi32>]()
+  command.return
+}

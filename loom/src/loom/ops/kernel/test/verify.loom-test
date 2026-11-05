@@ -478,10 +478,8 @@ func.def @valid_launch(%count: index, %output: tensor<4xi32>) {
 
 kernel.decl @configured_contract(%workload: index) launch(%count: index, %output: buffer)
 
-func.def @configured_kernel_requires_launch(%groups: index, %counts: view<3xi32>, %count: index, %output: buffer) {
-  // ERROR@+1: STRUCTURE/063 {kernel_name="configured_contract"}
+func.def @configured_kernel_physical_dispatch(%groups: index, %counts: view<3xi32>, %count: index, %output: buffer) {
   kernel.dispatch @configured_contract[%groups](%count, %output) : [index](index, buffer)
-  // ERROR@+1: STRUCTURE/063 {kernel_name="configured_contract"}
   kernel.dispatch @configured_contract[%counts](%count, %output) : [view<3xi32>](index, buffer)
   func.return
 }
