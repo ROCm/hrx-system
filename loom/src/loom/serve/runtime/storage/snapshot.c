@@ -25,9 +25,9 @@ static void loom_serve_snapshot_release_view(void* user_data,
 }
 
 static iree_status_t loom_serve_snapshot_transfer(
-    loom_serve_snapshot_t* snapshot, loom_serve_execution_t* execution,
-    iree_host_size_t buffer_count, iree_hal_buffer_t* const* buffers,
-    iree_host_size_t range_count, const loom_serve_snapshot_range_t* ranges,
+    loom_serve_snapshot_t* snapshot, iree_host_size_t buffer_count,
+    const loom_serve_snapshot_buffer_t* buffers, iree_host_size_t range_count,
+    const loom_serve_snapshot_range_t* ranges,
     iree_hal_transfer_operation_type_t type) {
   iree_hal_buffer_t** views = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
@@ -35,10 +35,10 @@ static iree_status_t loom_serve_snapshot_transfer(
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < buffer_count && iree_status_is_ok(status);
        ++i) {
-    if (buffers[i]) {
+    if (buffers[i].buffer) {
       status = iree_hal_subspan_buffer_create_with_callback(
-          buffers[i], iree_hal_buffer_byte_offset(buffers[i]),
-          iree_hal_buffer_byte_length(buffers[i]),
+          buffers[i].buffer, iree_hal_buffer_byte_offset(buffers[i].buffer),
+          iree_hal_buffer_byte_length(buffers[i].buffer),
           (iree_hal_buffer_release_callback_t){loom_serve_snapshot_release_view,
                                                snapshot},
           snapshot->host_allocator, &views[i]);
@@ -54,6 +54,7 @@ static iree_status_t loom_serve_snapshot_transfer(
   for (iree_host_size_t i = 0; i < range_count && iree_status_is_ok(status);
        ++i) {
     const loom_serve_snapshot_range_t* range = &ranges[i];
+    loom_serve_execution_t* execution = buffers[range->buffer_index].execution;
     if (type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD) {
       operations[operation_count++] = (iree_hal_transfer_operation_t){
           .type = type,
@@ -70,15 +71,12 @@ static iree_status_t loom_serve_snapshot_transfer(
                        .length = range->length}};
     }
     data += range->length;
-    if (operation_count == IREE_ARRAYSIZE(operations)) {
+    if (operation_count == IREE_ARRAYSIZE(operations) || i + 1 == range_count ||
+        buffers[ranges[i + 1].buffer_index].execution != execution) {
       status = loom_serve_execution_transfer(execution, operation_count,
                                              operations, &completion);
       operation_count = 0;
     }
-  }
-  if (iree_status_is_ok(status) && operation_count) {
-    status = loom_serve_execution_transfer(execution, operation_count,
-                                           operations, &completion);
   }
   for (iree_host_size_t i = 0; i < buffer_count; ++i) {
     iree_hal_buffer_release(views[i]);
@@ -88,10 +86,9 @@ static iree_status_t loom_serve_snapshot_transfer(
 }
 
 iree_status_t loom_serve_snapshot_capture(
-    loom_serve_execution_t* execution, iree_host_size_t buffer_count,
-    iree_hal_buffer_t* const* buffers, iree_host_size_t range_count,
-    const loom_serve_snapshot_range_t* ranges, iree_allocator_t host_allocator,
-    loom_serve_snapshot_t** out_snapshot) {
+    iree_host_size_t buffer_count, const loom_serve_snapshot_buffer_t* buffers,
+    iree_host_size_t range_count, const loom_serve_snapshot_range_t* ranges,
+    iree_allocator_t host_allocator, loom_serve_snapshot_t** out_snapshot) {
   *out_snapshot = NULL;
   iree_host_size_t length = 0;
   for (iree_host_size_t i = 0; i < range_count; ++i) {
@@ -109,7 +106,7 @@ iree_status_t loom_serve_snapshot_capture(
   snapshot->host_allocator = host_allocator;
   snapshot->length = length;
   iree_status_t status = loom_serve_snapshot_transfer(
-      snapshot, execution, buffer_count, buffers, range_count, ranges,
+      snapshot, buffer_count, buffers, range_count, ranges,
       IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD);
   if (iree_status_is_ok(status)) {
     *out_snapshot = snapshot;
@@ -120,11 +117,11 @@ iree_status_t loom_serve_snapshot_capture(
 }
 
 iree_status_t loom_serve_snapshot_restore(
-    loom_serve_snapshot_t* snapshot, loom_serve_execution_t* execution,
-    iree_host_size_t buffer_count, iree_hal_buffer_t* const* buffers,
-    iree_host_size_t range_count, const loom_serve_snapshot_range_t* ranges) {
-  return loom_serve_snapshot_transfer(snapshot, execution, buffer_count,
-                                      buffers, range_count, ranges,
+    loom_serve_snapshot_t* snapshot, iree_host_size_t buffer_count,
+    const loom_serve_snapshot_buffer_t* buffers, iree_host_size_t range_count,
+    const loom_serve_snapshot_range_t* ranges) {
+  return loom_serve_snapshot_transfer(snapshot, buffer_count, buffers,
+                                      range_count, ranges,
                                       IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD);
 }
 

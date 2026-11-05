@@ -28,6 +28,14 @@ namespace {
 
 // More logical ranges than one native transfer batch can hold.
 constexpr size_t kRangeCount = 70;
+// Capacity granularity, independent of the packed transfer lengths.
+constexpr uint64_t kSlabSize = 2 * 1024 * 1024;
+
+std::array<loom_serve_snapshot_buffer_t, 2> SnapshotBuffers(
+    loom_serve_execution_t* execution,
+    const std::array<iree_hal_buffer_t*, 2>& roots) {
+  return {{{roots[0], execution}, {roots[1], execution}}};
+}
 
 class SnapshotEnvironment : public ::testing::Environment {
  public:
@@ -35,17 +43,36 @@ class SnapshotEnvironment : public ::testing::Environment {
     IREE_ASSERT_OK(
         loom_serve_host_create(1, nullptr, iree_allocator_system(), &host));
     IREE_ASSERT_OK(loom_serve_test_driver_acquire(host, &driver));
+    const loom_serve_device_options_t options = {
+        .driver = driver,
+        .uri = loom_serve_test_device()->device_uri,
+    };
+    const loom_serve_pool_options_t pool_options = {
+        .elastic = true,
+        .weight_slab_size = kSlabSize,
+        .state_slab_size = kSlabSize,
+        .memory_limit = 256 * kSlabSize,
+    };
+    IREE_ASSERT_OK(loom_serve_device_group_allocate(
+        host, 1, &options, iree_allocator_system(), &group));
+    IREE_ASSERT_OK(loom_serve_device_group_create_pool(
+        group, {IREE_SV("pool"), 1}, &pool_options, &pool));
   }
 
   void TearDown() override {
+    IREE_EXPECT_OK(loom_serve_device_group_free(group));
     iree_hal_driver_release(driver);
     loom_serve_host_release(host);
   }
 
   // Application infrastructure enclosing both synchronous and async suites.
   loom_serve_host_t* host = nullptr;
-  // One native connection outliving every independent test device.
+  // One native connection enclosing the shared device group.
   iree_hal_driver_t* driver = nullptr;
+  // One native device group shared by every case in the process.
+  loom_serve_device_group_t* group = nullptr;
+  // Shared physical backing; each case owns and retires its reservations.
+  loom_serve_pool_t* pool = nullptr;
 };
 
 SnapshotEnvironment* const environment = static_cast<SnapshotEnvironment*>(
@@ -55,31 +82,22 @@ class SnapshotTest : public ::testing::Test {
  protected:
   void SetUp() override {
     loom_serve_retirement_initialize(&retirement);
-    const loom_serve_device_options_t options = {
-        .driver = environment->driver,
-        .uri = loom_serve_test_device()->device_uri,
-    };
-    const loom_serve_pool_options_t pool_options = {
-        .elastic = true,
-        .weight_slab_size = kSlabSize,
-        .state_slab_size = kSlabSize,
-        .memory_limit = 256 * kSlabSize,
-    };
-    auto status = loom_serve_device_group_allocate(
-        environment->host, 1, &options, iree_allocator_system(), &group);
-    IREE_ASSERT_OK(status);
-    IREE_ASSERT_OK(loom_serve_device_group_create_pool(
-        group, {IREE_SV("pool"), 1}, &pool_options, &storage_owner));
-    device = loom_serve_device_group_at(group, 0);
+    storage_owner = environment->pool;
+    device = loom_serve_device_group_at(environment->group, 0);
     IREE_ASSERT_OK(
         loom_serve_device_create_execution(device, storage_owner, &execution));
     pool = loom_serve_pool_memory(storage_owner);
   }
 
   void TearDown() override {
+    if (gate) {
+      IREE_EXPECT_OK(iree_hal_semaphore_signal(gate, 2, nullptr));
+    }
     if (execution) {
+      loom_serve_execution_t* executions[] = {execution, peer_execution};
       IREE_EXPECT_STATUS_IS(terminal_code,
-                            loom_serve_execution_drain(execution));
+                            loom_serve_execution_drain_all(
+                                IREE_ARRAYSIZE(executions), executions));
     }
     loom_serve_snapshot_release(snapshot);
     for (auto* root : roots) {
@@ -90,22 +108,48 @@ class SnapshotTest : public ::testing::Test {
     for (auto* reservation : reservations) {
       IREE_EXPECT_OK(loom_serve_virtual_buffer_free(reservation));
     }
+    loom_serve_execution_release(peer_execution);
     loom_serve_execution_release(execution);
-    IREE_EXPECT_OK(loom_serve_device_group_free(group));
+    iree_hal_semaphore_release(gate);
+    EXPECT_EQ(statistics.reserved_bytes, 0u);
+    EXPECT_EQ(statistics.committed_bytes, 0u);
+    EXPECT_EQ(statistics.pending_bytes, 0u);
   }
 
-  // Capacity granularity, independent of the packed transfer lengths.
-  static constexpr uint64_t kSlabSize = 2 * 1024 * 1024;
+  void AllocateRoots() {
+    for (size_t i = 0; i < roots.size(); ++i) {
+      IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+          pool, loom_serve_pool_state_geometry(storage_owner), kSlabSize, 256,
+          &statistics, &reservations[i]));
+      roots[i] = loom_serve_virtual_buffer_handle(reservations[i]);
+      iree_hal_buffer_retain(roots[i]);
+      IREE_ASSERT_OK(loom_serve_retirement_track(&retirement, &roots[i],
+                                                 iree_allocator_system()));
+      IREE_ASSERT_OK(
+          loom_serve_virtual_buffer_commit(reservations[i], 0, 32768));
+    }
+  }
+
+  void Hold(loom_serve_execution_t* owner) {
+    IREE_ASSERT_OK(iree_hal_semaphore_create(
+        loom_serve_device_handle(device), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &gate));
+    uint64_t value = 1;
+    IREE_ASSERT_OK(loom_serve_execution_barrier(owner, {1, &gate, &value}));
+  }
+
   // Source contents deliberately use wide addresses.
   static constexpr uint64_t kHighOffset = (uint64_t{1} << 32) + 512;
-  // Application group enclosing all device resources.
-  loom_serve_device_group_t* group = nullptr;
-  // Borrowed device record within the application group.
+  // Borrowed process-owned device, shared by every case.
   loom_serve_device_t* device = nullptr;
-  // Independent storage owner selected for every reservation.
+  // Borrowed shared storage owner for case-owned reservations.
   loom_serve_pool_t* storage_owner = nullptr;
   // Owned model submission timeline.
   loom_serve_execution_t* execution = nullptr;
+  // Optional independent ordering domain sharing the physical pool.
+  loom_serve_execution_t* peer_execution = nullptr;
+  // Explicit predecessor, released by teardown after any failed assertion.
+  iree_hal_semaphore_t* gate = nullptr;
   // Physical budget enclosing both independent roots.
   loom_serve_memory_pool_t* pool = nullptr;
   // Accounting survives destruction and replacement of the roots.
@@ -149,8 +193,8 @@ TEST_F(SnapshotTest, LogicalRangesSurviveSourceDestructionAndFreshPlacement) {
   IREE_ASSERT_OK(loom_serve_execution_transfer(execution, fills.size(),
                                                fills.data(), &completion));
   IREE_ASSERT_OK(loom_serve_snapshot_capture(
-      execution, roots.size(), roots.data(), ranges.size(), ranges.data(),
-      iree_allocator_system(), &snapshot));
+      roots.size(), SnapshotBuffers(execution, roots).data(), ranges.size(),
+      ranges.data(), iree_allocator_system(), &snapshot));
   EXPECT_EQ(loom_serve_snapshot_size(snapshot), ranges.size() * 16);
   IREE_ASSERT_OK(loom_serve_execution_drain(execution));
   for (auto*& root : roots) {
@@ -177,9 +221,9 @@ TEST_F(SnapshotTest, LogicalRangesSurviveSourceDestructionAndFreshPlacement) {
     ranges[i].buffer_index = 1 - ranges[i].buffer_index;
     ranges[i].offset = 1024 + i * 128;
   }
-  IREE_ASSERT_OK(loom_serve_snapshot_restore(snapshot, execution, roots.size(),
-                                             roots.data(), ranges.size(),
-                                             ranges.data()));
+  IREE_ASSERT_OK(loom_serve_snapshot_restore(
+      snapshot, roots.size(), SnapshotBuffers(execution, roots).data(),
+      ranges.size(), ranges.data()));
   loom_serve_snapshot_release(std::exchange(snapshot, nullptr));
   std::array<std::array<uint32_t, 4>, kRangeCount> observed = {};
   std::array<iree_hal_transfer_operation_t, kRangeCount> downloads = {};
@@ -221,20 +265,22 @@ TEST_F(SnapshotTest, CaptureAndRestoreMayGroupTheSameLogicalBytesDifferently) {
   const loom_serve_snapshot_range_t fragmented[] = {
       {1, 64, 4}, {1, 128, 12}, {1, 16, 8}};
   IREE_ASSERT_OK(loom_serve_snapshot_capture(
-      execution, roots.size(), roots.data(), 1, &contiguous,
+      roots.size(), SnapshotBuffers(execution, roots).data(), 1, &contiguous,
       iree_allocator_system(), &snapshot));
   IREE_ASSERT_OK(loom_serve_snapshot_restore(
-      snapshot, execution, roots.size(), roots.data(),
+      snapshot, roots.size(), SnapshotBuffers(execution, roots).data(),
       IREE_ARRAYSIZE(fragmented), fragmented));
   IREE_ASSERT_OK(loom_serve_execution_drain(execution));
   loom_serve_snapshot_release(std::exchange(snapshot, nullptr));
 
   IREE_ASSERT_OK(loom_serve_snapshot_capture(
-      execution, roots.size(), roots.data(), IREE_ARRAYSIZE(fragmented),
-      fragmented, iree_allocator_system(), &snapshot));
+      roots.size(), SnapshotBuffers(execution, roots).data(),
+      IREE_ARRAYSIZE(fragmented), fragmented, iree_allocator_system(),
+      &snapshot));
   const loom_serve_snapshot_range_t restored = {0, 0, sizeof(expected)};
-  IREE_ASSERT_OK(loom_serve_snapshot_restore(snapshot, execution, roots.size(),
-                                             roots.data(), 1, &restored));
+  IREE_ASSERT_OK(loom_serve_snapshot_restore(
+      snapshot, roots.size(), SnapshotBuffers(execution, roots).data(), 1,
+      &restored));
   std::array<uint32_t, 6> observed = {};
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
@@ -244,6 +290,143 @@ TEST_F(SnapshotTest, CaptureAndRestoreMayGroupTheSameLogicalBytesDifferently) {
       loom_serve_execution_transfer(execution, 1, &download, &completion));
   IREE_ASSERT_OK(loom_serve_execution_wait(execution, completion));
   EXPECT_EQ(observed, expected);
+}
+
+TEST_F(SnapshotTest, DistinctOwnersPreserveLogicalOrderAndIndependentProgress) {
+  IREE_ASSERT_OK(loom_serve_device_create_execution(device, storage_owner,
+                                                    &peer_execution));
+  ASSERT_NO_FATAL_FAILURE(AllocateRoots());
+  loom_serve_execution_t* executions[] = {execution, peer_execution};
+  loom_serve_snapshot_buffer_t buffers[] = {{roots[0], execution},
+                                            {roots[1], peer_execution}};
+  ASSERT_NO_FATAL_FAILURE(Hold(peer_execution));
+  std::array<loom_serve_snapshot_range_t, kRangeCount> ranges;
+  std::array<uint32_t, kRangeCount> expected;
+  for (size_t owner = 0; owner < roots.size(); ++owner) {
+    std::array<iree_hal_transfer_operation_t, kRangeCount / 2> fills;
+    for (size_t j = 0; j < fills.size(); ++j) {
+      const size_t i = j * 2 + owner;
+      expected[i] = 0xABC00000u + static_cast<uint32_t>(i * 17);
+      ranges[i] = {owner, (kRangeCount - i - 1) * 256, sizeof(uint32_t)};
+      fills[j] = {
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+          .fill = {roots[owner], ranges[i].offset, sizeof(uint32_t),
+                   &expected[i], sizeof(expected[i])},
+      };
+    }
+    uint64_t completion = 0;
+    IREE_ASSERT_OK(loom_serve_execution_transfer(
+        executions[owner], fills.size(), fills.data(), &completion));
+  }
+  const auto before = loom_serve_execution_frontier(peer_execution);
+  IREE_ASSERT_OK(loom_serve_snapshot_capture(
+      IREE_ARRAYSIZE(buffers), buffers, ranges.size(), ranges.data(),
+      iree_allocator_system(), &snapshot));
+  EXPECT_EQ(loom_serve_snapshot_size(snapshot), sizeof(expected));
+  const auto after = loom_serve_execution_frontier(peer_execution);
+  ASSERT_GT(after.values[0], before.values[0]);
+  IREE_ASSERT_OK(loom_serve_execution_drain(execution));
+  uint64_t completed = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(after.semaphores[0], &completed));
+  EXPECT_LT(completed, after.values[0]);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate, 1, nullptr));
+  IREE_ASSERT_OK(
+      loom_serve_execution_drain_all(IREE_ARRAYSIZE(executions), executions));
+
+  // No source root or original placement survives into restoration. Swap the
+  // execution owners too; the packed host payload has no physical identities.
+  for (auto*& root : roots) {
+    iree_hal_buffer_release(std::exchange(root, nullptr));
+  }
+  loom_serve_retirement_await(&retirement);
+  for (auto*& reservation : reservations) {
+    IREE_ASSERT_OK(loom_serve_virtual_buffer_free(reservation));
+    reservation = nullptr;
+  }
+  ASSERT_NO_FATAL_FAILURE(AllocateRoots());
+  for (size_t i = 0; i < IREE_ARRAYSIZE(buffers); ++i) {
+    buffers[i] = {roots[i], executions[1 - i]};
+  }
+  for (size_t i = 0; i < ranges.size(); ++i) {
+    ranges[i].buffer_index = 1 - ranges[i].buffer_index;
+    ranges[i].offset = 1024 + i * 64;
+  }
+  const auto restore_before = loom_serve_execution_frontier(peer_execution);
+  IREE_ASSERT_OK(loom_serve_snapshot_restore(snapshot, IREE_ARRAYSIZE(buffers),
+                                             buffers, ranges.size(),
+                                             ranges.data()));
+  ASSERT_GT(loom_serve_execution_frontier(peer_execution).values[0],
+            restore_before.values[0]);
+  loom_serve_snapshot_release(std::exchange(snapshot, nullptr));
+  std::array<uint32_t, kRangeCount> observed = {};
+  for (size_t root = 0; root < roots.size(); ++root) {
+    std::array<iree_hal_transfer_operation_t, kRangeCount / 2> downloads;
+    for (size_t j = 0; j < downloads.size(); ++j) {
+      const size_t i = j * 2 + 1 - root;
+      downloads[j] = {
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+          .download = {roots[root], ranges[i].offset, &observed[i],
+                       sizeof(observed[i])},
+      };
+    }
+    uint64_t completion = 0;
+    IREE_ASSERT_OK(
+        loom_serve_execution_feedback(buffers[root].execution, downloads.size(),
+                                      downloads.data(), &completion));
+  }
+  IREE_ASSERT_OK(
+      loom_serve_execution_drain_all(IREE_ARRAYSIZE(executions), executions));
+  EXPECT_EQ(observed, expected);
+}
+
+TEST_F(SnapshotTest, LaterOwnerFailureRetainsEarlierAcceptedPayload) {
+  IREE_ASSERT_OK(loom_serve_device_create_execution(device, storage_owner,
+                                                    &peer_execution));
+  ASSERT_NO_FATAL_FAILURE(AllocateRoots());
+  const uint32_t expected = 0x12345678;
+  const iree_hal_transfer_operation_t fill = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+      .fill = {roots[0], 0, sizeof(expected), &expected, sizeof(expected)},
+  };
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(
+      loom_serve_execution_transfer(execution, 1, &fill, &completion));
+  const loom_serve_snapshot_range_t capture[] = {{0, 0, sizeof(expected)},
+                                                 {0, 0, sizeof(expected)}};
+  IREE_ASSERT_OK(loom_serve_snapshot_capture(
+      roots.size(), SnapshotBuffers(execution, roots).data(),
+      IREE_ARRAYSIZE(capture), capture, iree_allocator_system(), &snapshot));
+  IREE_ASSERT_OK(loom_serve_execution_drain(execution));
+  ASSERT_NO_FATAL_FAILURE(Hold(execution));
+  const auto peer = loom_serve_execution_frontier(peer_execution);
+  terminal_code = IREE_STATUS_CANCELLED;
+  iree_hal_semaphore_fail(peer.semaphores[0],
+                          iree_status_from_code(terminal_code));
+  const loom_serve_snapshot_buffer_t buffers[] = {{roots[0], execution},
+                                                  {roots[1], peer_execution}};
+  const loom_serve_snapshot_range_t restore[] = {{0, 256, sizeof(expected)},
+                                                 {1, 512, sizeof(expected)}};
+  auto status =
+      loom_serve_snapshot_restore(snapshot, IREE_ARRAYSIZE(buffers), buffers,
+                                  IREE_ARRAYSIZE(restore), restore);
+  // Drivers may observe failed prerequisites during enqueue or afterward.
+  // Neither outcome releases the payload borrowed by the held earlier owner.
+  if (!iree_status_is_ok(status)) {
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, status);
+  }
+  loom_serve_snapshot_release(std::exchange(snapshot, nullptr));
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate, 1, nullptr));
+  uint32_t observed = 0;
+  const iree_hal_transfer_operation_t download = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+      .download = {roots[0], 256, &observed, sizeof(observed)},
+  };
+  IREE_ASSERT_OK(
+      loom_serve_execution_feedback(execution, 1, &download, &completion));
+  IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution, completion));
+  EXPECT_EQ(observed, expected);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                        loom_serve_execution_drain(peer_execution));
 }
 
 TEST_F(SnapshotTest, LargeSparseStateSurvivesBackingReuseAndFreshPlacement) {
@@ -315,8 +498,8 @@ TEST_F(SnapshotTest, LargeSparseStateSurvivesBackingReuseAndFreshPlacement) {
     }
   }
   IREE_ASSERT_OK(loom_serve_snapshot_capture(
-      execution, roots.size(), roots.data(), ranges.size(), ranges.data(),
-      iree_allocator_system(), &snapshot));
+      roots.size(), SnapshotBuffers(execution, roots).data(), ranges.size(),
+      ranges.data(), iree_allocator_system(), &snapshot));
   IREE_ASSERT_OK(loom_serve_execution_drain(execution));
   for (auto* reservation : reservations) {
     loom_serve_virtual_buffer_begin_trim(reservation);
@@ -333,9 +516,9 @@ TEST_F(SnapshotTest, LargeSparseStateSurvivesBackingReuseAndFreshPlacement) {
     IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(
         reservations[range.buffer_index], range.offset, range.length));
   }
-  IREE_ASSERT_OK(loom_serve_snapshot_restore(snapshot, execution, roots.size(),
-                                             roots.data(), ranges.size(),
-                                             ranges.data()));
+  IREE_ASSERT_OK(loom_serve_snapshot_restore(
+      snapshot, roots.size(), SnapshotBuffers(execution, roots).data(),
+      ranges.size(), ranges.data()));
   loom_serve_snapshot_release(std::exchange(snapshot, nullptr));
   std::fill(observed.begin(), observed.end(), 0);
   offset = 0;
@@ -376,10 +559,12 @@ struct loom_serve_test_snapshot_transfer_t {
     auto status =
         self->snapshot
             ? loom_serve_snapshot_restore(
-                  self->snapshot, self->execution, self->roots.size(),
-                  self->roots.data(), local_ranges.size(), local_ranges.data())
+                  self->snapshot, self->roots.size(),
+                  SnapshotBuffers(self->execution, self->roots).data(),
+                  local_ranges.size(), local_ranges.data())
             : loom_serve_snapshot_capture(
-                  self->execution, self->roots.size(), self->roots.data(),
+                  self->roots.size(),
+                  SnapshotBuffers(self->execution, self->roots).data(),
                   local_ranges.size(), local_ranges.data(),
                   iree_allocator_system(), &self->snapshot);
     loom_serve_snapshot_release(std::exchange(self->snapshot, nullptr));
@@ -584,7 +769,8 @@ TEST_P(AsyncSnapshotTest, OneWorkerSubmitsAndReleasesBeforeNativeRetirement) {
                                                fills.data(), &completion));
   if (restore) {
     IREE_ASSERT_OK(loom_serve_snapshot_capture(
-        execution, transfer.roots.size(), transfer.roots.data(),
+        transfer.roots.size(),
+        SnapshotBuffers(execution, transfer.roots).data(),
         transfer.ranges.size(), transfer.ranges.data(), iree_allocator_system(),
         &transfer.snapshot));
   }

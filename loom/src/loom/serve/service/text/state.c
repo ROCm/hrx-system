@@ -1068,6 +1068,16 @@ void loom_serve_text_state_row_reset(loom_serve_text_state_row_t* row) {
   loom_serve_text_row_release_recurrent(row);
 }
 
+static void loom_serve_text_state_snapshot_buffers(
+    loom_serve_text_state_t* state, loom_serve_snapshot_buffer_t* buffers) {
+  for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
+       ++i) {
+    buffers[i] = (loom_serve_snapshot_buffer_t){
+        .buffer = *loom_serve_text_state_allocation(state, i),
+        .execution = state->execution};
+  }
+}
+
 iree_status_t loom_serve_text_state_row_suspend(
     loom_serve_text_state_row_t* row) {
   loom_serve_text_state_t* state = row->owner;
@@ -1086,12 +1096,11 @@ iree_status_t loom_serve_text_state_row_suspend(
   IREE_RETURN_IF_ERROR(loom_serve_text_storage_plan_snapshot(
       &state->storage, index, &row->buffers[TEXT_CONTROL], true,
       row->block_count, blocks, state->host_allocator, &range_count, &ranges));
-  iree_hal_buffer_t* buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(buffers); ++i) {
-    buffers[i] = *loom_serve_text_state_allocation(state, i);
-  }
+  loom_serve_snapshot_buffer_t
+      buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
+  loom_serve_text_state_snapshot_buffers(state, buffers);
   iree_status_t status = loom_serve_snapshot_capture(
-      state->execution, IREE_ARRAYSIZE(buffers), buffers, range_count, ranges,
+      IREE_ARRAYSIZE(buffers), buffers, range_count, ranges,
       state->host_allocator, &row->snapshot);
   status =
       iree_status_join(status, loom_serve_execution_drain(state->execution));
@@ -1138,13 +1147,11 @@ iree_status_t loom_serve_text_state_row_try_resume(
         loom_serve_text_try_commit_plan(state, range_count, ranges, &admitted);
   }
   if (iree_status_is_ok(status) && admitted) {
-    iree_hal_buffer_t* buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
-    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(buffers); ++i) {
-      buffers[i] = *loom_serve_text_state_allocation(state, i);
-    }
-    status = loom_serve_snapshot_restore(row->snapshot, state->execution,
-                                         IREE_ARRAYSIZE(buffers), buffers,
-                                         range_count, ranges);
+    loom_serve_snapshot_buffer_t
+        buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
+    loom_serve_text_state_snapshot_buffers(state, buffers);
+    status = loom_serve_snapshot_restore(row->snapshot, IREE_ARRAYSIZE(buffers),
+                                         buffers, range_count, ranges);
   }
   if (iree_status_is_ok(status) && admitted) {
     const iree_hal_transfer_operation_t uploads[] = {
@@ -1291,12 +1298,11 @@ iree_status_t loom_serve_text_state_checkpoint_submit_suspend(
   loom_serve_snapshot_range_t* ranges = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_text_checkpoint_plan_snapshot(
       checkpoint, &range_count, &ranges));
-  iree_hal_buffer_t* buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(buffers); ++i) {
-    buffers[i] = *loom_serve_text_state_allocation(state, i);
-  }
+  loom_serve_snapshot_buffer_t
+      buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
+  loom_serve_text_state_snapshot_buffers(state, buffers);
   iree_status_t status = loom_serve_snapshot_capture(
-      state->execution, IREE_ARRAYSIZE(buffers), buffers, range_count, ranges,
+      IREE_ARRAYSIZE(buffers), buffers, range_count, ranges,
       state->host_allocator, &checkpoint->snapshot);
   iree_allocator_free(state->host_allocator, ranges);
   return status;
@@ -1378,11 +1384,10 @@ static iree_status_t loom_serve_text_checkpoint_try_resume(
                                                commitments, &admitted);
   }
   if (iree_status_is_ok(status) && admitted) {
-    iree_hal_buffer_t* buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
-    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(buffers); ++i) {
-      buffers[i] = *loom_serve_text_state_allocation(state, i);
-    }
-    status = loom_serve_snapshot_restore(checkpoint->snapshot, state->execution,
+    loom_serve_snapshot_buffer_t
+        buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
+    loom_serve_text_state_snapshot_buffers(state, buffers);
+    status = loom_serve_snapshot_restore(checkpoint->snapshot,
                                          IREE_ARRAYSIZE(buffers), buffers,
                                          range_count, ranges);
     status =
@@ -1888,13 +1893,12 @@ iree_status_t loom_serve_text_state_reservation_submit(
                                       &state->memory.backing.value});
     }
     if (iree_status_is_ok(status) && reservation->cold) {
-      iree_hal_buffer_t* buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
-      for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(buffers); ++i) {
-        buffers[i] = *loom_serve_text_state_allocation(state, i);
-      }
+      loom_serve_snapshot_buffer_t
+          buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
+      loom_serve_text_state_snapshot_buffers(state, buffers);
       status = loom_serve_snapshot_restore(
-          checkpoint->snapshot, state->execution, IREE_ARRAYSIZE(buffers),
-          buffers, reservation->restore_count, reservation->restore_ranges);
+          checkpoint->snapshot, IREE_ARRAYSIZE(buffers), buffers,
+          reservation->restore_count, reservation->restore_ranges);
       if (iree_status_is_ok(status)) {
         loom_serve_snapshot_release(checkpoint->snapshot);
         checkpoint->snapshot = NULL;
