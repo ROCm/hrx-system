@@ -9,6 +9,7 @@
 #include "loom/serve/runtime/device/pool.h"
 #include "loom/serve/runtime/execution/execution.h"
 #include "loom/serve/runtime/host/host.h"
+#include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/runtime/parameter/residency.h"
 #include "loom/serve/runtime/program/jit.h"
 #include "loom/serve/runtime/storage/memory.h"
@@ -70,6 +71,27 @@ iree_status_t loom_serve_device_group_allocate(
 // released before its physical owner; a native cleanup error preserves the
 // remaining group resources for outer-owner cleanup.
 iree_status_t loom_serve_device_group_free(loom_serve_device_group_t* group);
+
+// Installs the serialized owner's nonblocking wake on every pool's residency,
+// workspace, and native capacity work. Pool membership is sealed before this
+// call. An empty observer detaches and joins its final callback access. The
+// callback only schedules the owner; it cannot reenter the group. NULL group
+// is accepted for applications with externally owned execution resources.
+void loom_serve_device_group_set_observer(loom_serve_device_group_t* group,
+                                          loom_serve_wake_callback_t observer);
+
+// Advances accepted workspace and capacity work before services advance.
+// Every pool is collected even after a shared failure so independent releases
+// can retire. Failures stop new admission but never destroy resource owners.
+// Called on the serialized owner, including while draining failed work; no
+// device or worker wait is performed. NULL group has no work.
+iree_status_t loom_serve_device_group_advance(loom_serve_device_group_t* group);
+
+// Collects and observes outstanding residency, workspace, and native capacity
+// borrowers across all pools. The owner joins these obligations independently
+// of model readiness or failed semaphores. True requires further owner progress
+// before detaching its observer. NULL group has no pending work.
+bool loom_serve_device_group_is_pending(loom_serve_device_group_t* group);
 
 // Constructs a named group-owned pool with explicit consumers and policy.
 // Called only during application setup, before resource observers and services

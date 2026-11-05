@@ -11,6 +11,7 @@
 #include "iree/base/internal/json.h"
 #include "iree/base/threading/mutex.h"
 #include "loom/serve/dashboard/assets.h"
+#include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/server/http/live.h"
 #include "loom/serve/server/http/logs.h"
@@ -1567,7 +1568,8 @@ static void loom_serve_router_advance(loom_serve_router_t* router,
                                       bool* out_progress) {
   router->stopping |= loom_serve_http_server_is_stopping(router->server);
   router->status = iree_status_join(
-      router->status, loom_serve_resources_advance(&router->resources));
+      router->status,
+      loom_serve_device_group_advance(router->resources.device_group));
   router->stopping |= !iree_status_is_ok(router->status);
   *out_progress = false;
   loom_serve_router_tokenizations_collect(router, out_progress);
@@ -1665,7 +1667,7 @@ static void loom_serve_router_advance(loom_serve_router_t* router,
   bool pending = router->tokenizations != NULL || router->held.count != 0 ||
                  router->logs.count != 0 ||
                  loom_serve_http_variants_pending(router->variants);
-  pending |= loom_serve_resources_is_pending(&router->resources);
+  pending |= loom_serve_device_group_is_pending(router->resources.device_group);
   pending |= loom_serve_maintenance_is_pending(&router->maintenance);
   pending |= loom_serve_http_live_is_pending(router->live);
   for (iree_host_size_t i = 0; i < router->capacity; ++i) {
@@ -1686,8 +1688,8 @@ static void loom_serve_router_advance(loom_serve_router_t* router,
       !loom_serve_http_server_has_pending_responses(router->server)) {
     loom_serve_maintenance_set_observer(&router->maintenance,
                                         (loom_serve_wake_callback_t){0});
-    loom_serve_resources_set_observer(&router->resources,
-                                      (loom_serve_wake_callback_t){0});
+    loom_serve_device_group_set_observer(router->resources.device_group,
+                                         (loom_serve_wake_callback_t){0});
     for (iree_host_size_t i = 0; i < router->capacity; ++i) {
       const loom_serve_registered_model_t* model =
           loom_serve_router_model_at(router, i);
@@ -1794,8 +1796,8 @@ iree_status_t loom_serve_router_run(iree_task_executor_t* executor,
   loom_serve_maintenance_set_observer(
       &router.maintenance,
       (loom_serve_wake_callback_t){loom_serve_router_wake, &router});
-  loom_serve_resources_set_observer(
-      &router.resources,
+  loom_serve_device_group_set_observer(
+      router.resources.device_group,
       (loom_serve_wake_callback_t){loom_serve_router_wake, &router});
   for (iree_host_size_t i = 0; i < router.capacity; ++i) {
     const loom_serve_registered_model_t* model =

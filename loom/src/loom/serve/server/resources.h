@@ -9,7 +9,6 @@
 
 #include "loom/runtime/telemetry/sample.h"
 #include "loom/serve/runtime/device/device.h"
-#include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/transport/http/listener.h"
 #include "loom/util/stream.h"
 
@@ -33,25 +32,6 @@ typedef struct loom_serve_resources_t {
   // Borrowed array; listener storage survives stop until routing has joined.
   loom_serve_http_listener_t* const* listeners;
 } loom_serve_resources_t;
-
-// Registers the router's nonblocking scheduling wake with native capacity work
-// and final output retirement, including cold workspace requests.
-// An empty observer detaches and joins callback access before router teardown.
-void loom_serve_resources_set_observer(const loom_serve_resources_t* resources,
-                                       loom_serve_wake_callback_t observer);
-
-// Advances accepted workspace growth/trim, publishes completed native capacity
-// work, and retires parameter admission interests before services advance.
-// Continue advancing during error draining until accepted work retires.
-// A terminal platform failure stops admission and initiates ordinary draining;
-// it never destroys shared owners.
-iree_status_t loom_serve_resources_advance(
-    const loom_serve_resources_t* resources);
-
-// Whether cold workspace, native capacity work, or accepted outputs borrow
-// application resources. Router shutdown joins this independently of readiness
-// or semaphore failure.
-bool loom_serve_resources_is_pending(const loom_serve_resources_t* resources);
 
 // Writes a JSON object with bound listeners, immutable device identities and
 // serving-managed memory observations. Called on the serialized serving owner;

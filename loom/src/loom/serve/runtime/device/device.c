@@ -262,6 +262,66 @@ iree_status_t loom_serve_device_group_free(loom_serve_device_group_t* group) {
   return status;
 }
 
+void loom_serve_device_group_set_observer(loom_serve_device_group_t* group,
+                                          loom_serve_wake_callback_t observer) {
+  if (!group) {
+    return;
+  }
+  for (iree_host_size_t i = 0; i < group->pool_count; ++i) {
+    loom_serve_pool_t* owner = group->pools[i];
+    loom_serve_residency_cache_set_observer(
+        loom_serve_pool_residency_cache(owner), observer);
+    loom_serve_workspace_set_observer(loom_serve_pool_workspace(owner),
+                                      observer);
+    loom_serve_memory_pool_t* pool = loom_serve_pool_memory(owner);
+    if (pool) {
+      loom_serve_memory_pool_set_observer(pool, observer.wake,
+                                          observer.user_data);
+    }
+  }
+}
+
+iree_status_t loom_serve_device_group_advance(
+    loom_serve_device_group_t* group) {
+  if (!group) {
+    return iree_ok_status();
+  }
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < group->pool_count; ++i) {
+    loom_serve_pool_t* owner = group->pools[i];
+    status = iree_status_join(
+        status, loom_serve_workspace_advance(loom_serve_pool_workspace(owner)));
+    loom_serve_memory_pool_t* pool = loom_serve_pool_memory(owner);
+    if (pool) {
+      status =
+          iree_status_join(status, loom_serve_memory_pool_query_status(pool));
+      status =
+          iree_status_join(status, loom_serve_residency_cache_query_status(
+                                       loom_serve_pool_residency_cache(owner)));
+    }
+  }
+  return status;
+}
+
+bool loom_serve_device_group_is_pending(loom_serve_device_group_t* group) {
+  if (!group) {
+    return false;
+  }
+  bool pending = false;
+  for (iree_host_size_t i = 0; i < group->pool_count; ++i) {
+    loom_serve_pool_t* owner = group->pools[i];
+    pending |= loom_serve_residency_cache_is_pending(
+        loom_serve_pool_residency_cache(owner));
+    pending |=
+        loom_serve_workspace_is_pending(loom_serve_pool_workspace(owner));
+    loom_serve_memory_pool_t* pool = loom_serve_pool_memory(owner);
+    if (pool) {
+      pending |= loom_serve_memory_pool_is_pending(pool);
+    }
+  }
+  return pending;
+}
+
 iree_status_t loom_serve_device_group_create_pool(
     loom_serve_device_group_t* group, loom_serve_pool_binding_t binding,
     const loom_serve_pool_options_t* options, loom_serve_pool_t** out_pool) {

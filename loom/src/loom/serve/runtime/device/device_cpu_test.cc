@@ -3,6 +3,9 @@
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <array>
+
+#include "iree/base/threading/notification.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/serve/runtime/device/device.h"
@@ -12,20 +15,143 @@ namespace {
 class CpuDeviceTest : public ::testing::TestWithParam<uint32_t> {
  protected:
   void SetUp() override {
+    iree_notification_initialize(&notification_);
     IREE_ASSERT_OK(loom_serve_host_create(GetParam(), nullptr,
                                           iree_allocator_system(), &host_));
   }
 
   void TearDown() override {
+    for (auto& work : work_) {
+      iree_hal_buffer_release(work.buffer);
+      work.buffer = nullptr;
+    }
+    AdvanceUntilRetired();
+    for (auto& work : work_) {
+      if (work.execution) {
+        IREE_EXPECT_OK(loom_serve_execution_drain(work.execution));
+        loom_serve_execution_set_retirement_observer(work.execution, nullptr,
+                                                     nullptr);
+        loom_serve_execution_release(work.execution);
+      }
+    }
+    loom_serve_device_group_set_observer(group_, {});
     IREE_EXPECT_OK(loom_serve_device_group_free(group_));
     loom_serve_host_release(host_);
+    iree_notification_deinitialize(&notification_);
+  }
+
+  static void Wake(void* self) {
+    auto* test = static_cast<CpuDeviceTest*>(self);
+    iree_notification_post(&test->notification_, IREE_ALL_WAITERS);
+  }
+
+  void AdvanceUntilRetired() {
+    while (true) {
+      const auto ticket = iree_notification_prepare_wait(&notification_);
+      auto status = loom_serve_device_group_advance(group_);
+      bool pending = loom_serve_device_group_is_pending(group_);
+      for (auto& work : work_) {
+        pending |=
+            work.execution && !loom_serve_execution_is_retired(work.execution);
+      }
+      if (!pending || !iree_status_is_ok(status)) {
+        iree_notification_cancel_wait(&notification_);
+      } else {
+        iree_notification_commit_wait(&notification_, ticket,
+                                      IREE_DURATION_ZERO,
+                                      IREE_TIME_INFINITE_FUTURE);
+      }
+      IREE_ASSERT_OK(status);
+      if (!pending) {
+        break;
+      }
+    }
   }
 
   // Shared workers retained through all device lifetimes.
   loom_serve_host_t* host_ = nullptr;
   // Nullable group also covering partial initialization failure.
   loom_serve_device_group_t* group_ = nullptr;
+  // All native producers wake this outer owner; no HTTP notification is used.
+  iree_notification_t notification_;
+  // Independent work sharing the group but not physical pool admission.
+  struct Work {
+    // Owned execution, released after its accepted consumers retire.
+    loom_serve_execution_t* execution = nullptr;
+    // Caller allocation view, relinquished after the download captures it.
+    iree_hal_buffer_t* buffer = nullptr;
+    // Host download destination, alive through accepted queue retirement.
+    std::array<uint32_t, 4> output = {};
+  } work_[2];
 };
+
+TEST_P(CpuDeviceTest, GroupProgressRetiresIndependentElasticPools) {
+  const loom_serve_device_options_t options = {
+      .driver = loom_serve_host_task_driver(host_),
+      .uri = IREE_SV("task"),
+  };
+  IREE_ASSERT_OK(loom_serve_device_group_allocate(
+      host_, 1, &options, iree_allocator_system(), &group_));
+  auto* device = loom_serve_device_group_at(group_, 0);
+  constexpr uint64_t kSlabSize = 2 * 1024 * 1024;
+  const loom_serve_pool_options_t pool_options = {
+      .elastic = true,
+      .weight_slab_size = kSlabSize,
+      .state_slab_size = kSlabSize / 4,
+      .memory_limit = 2 * kSlabSize,
+  };
+  for (const auto name : {IREE_SV("first"), IREE_SV("second")}) {
+    loom_serve_pool_t* pool = nullptr;
+    IREE_ASSERT_OK(loom_serve_device_group_create_pool(group_, {name, 1},
+                                                       &pool_options, &pool));
+  }
+  loom_serve_device_group_set_observer(group_, {Wake, this});
+  for (size_t i = 0; i < IREE_ARRAYSIZE(work_); ++i) {
+    auto& work = work_[i];
+    IREE_ASSERT_OK(loom_serve_device_create_execution(
+        device, loom_serve_device_group_pool_at(group_, i), &work.execution));
+    loom_serve_execution_set_retirement_observer(work.execution, Wake, this);
+    const auto request =
+        iree_hal_make_pool_reservation_request(sizeof(work.output), 16);
+    IREE_ASSERT_OK(
+        loom_serve_execution_alloca(work.execution, 1, &request, &work.buffer));
+    const uint32_t pattern = 0x12340000u + i;
+    const iree_hal_transfer_operation_t fill = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+        .fill =
+            {
+                .target_buffer = work.buffer,
+                .length = sizeof(work.output),
+                .pattern = &pattern,
+                .pattern_length = sizeof(pattern),
+            },
+    };
+    uint64_t value = 0;
+    IREE_ASSERT_OK(
+        loom_serve_execution_transfer(work.execution, 1, &fill, &value));
+    const iree_hal_transfer_operation_t download = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+        .download =
+            {
+                .source_buffer = work.buffer,
+                .target = work.output.data(),
+                .length = sizeof(work.output),
+            },
+    };
+    IREE_ASSERT_OK(
+        loom_serve_execution_feedback(work.execution, 1, &download, &value));
+    iree_hal_buffer_release(work.buffer);
+    work.buffer = nullptr;
+  }
+
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntilRetired());
+  for (size_t i = 0; i < IREE_ARRAYSIZE(work_); ++i) {
+    IREE_ASSERT_OK(loom_serve_execution_drain(work_[i].execution));
+    for (const auto value : work_[i].output) {
+      EXPECT_EQ(value, 0x12340000u + i);
+    }
+  }
+}
 
 TEST_P(CpuDeviceTest, DevicesUseApplicationWorkerBudgetAndOneGroup) {
   char first_name[] = "first";

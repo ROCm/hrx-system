@@ -29,6 +29,7 @@ loom_cc_library(
         "//loom/src/loom/serve/runtime/execution:queues",
         "//loom/src/loom/serve/runtime/execution:workspace",
         "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/runtime/host:wake",
         "//loom/src/loom/serve/runtime/parameter:residency",
         "//loom/src/loom/serve/runtime/program:jit",
         "//loom/src/loom/serve/runtime/program:tokenizer_cache",
@@ -76,8 +77,10 @@ loom_cc_test(
     ]),
     deps = [
         ":device",
+        "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/host",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/task",
         "//runtime/src/iree/testing:gtest",

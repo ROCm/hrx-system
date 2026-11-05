@@ -10,6 +10,12 @@
 
 namespace {
 
+TEST(DeviceGroupTest, ExternallyOwnedResourcesHaveNoProgressObligations) {
+  loom_serve_device_group_set_observer(nullptr, {});
+  IREE_ASSERT_OK(loom_serve_device_group_advance(nullptr));
+  EXPECT_FALSE(loom_serve_device_group_is_pending(nullptr));
+}
+
 class DeviceTest : public ::testing::Test {
  protected:
   void SetUp() override {

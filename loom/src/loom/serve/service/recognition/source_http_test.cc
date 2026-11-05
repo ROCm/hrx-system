@@ -18,7 +18,7 @@
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/serve/server/resources.h"
+#include "loom/serve/runtime/device/device.h"
 #include "loom/serve/service/recognition/model.h"
 #include "loom/serve/service/recognition/service.h"
 #include "loom/serve/testing/http_harness.h"
@@ -102,8 +102,7 @@ class SourceRecognitionHttpTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_serve_test_application_acquire(
         &options, iree_allocator_system(), &application));
     host_ = loom_serve_test_application_host(application);
-    resources_.device_group =
-        loom_serve_test_application_device_group(application);
+    group_ = loom_serve_test_application_device_group(application);
     const auto directory =
         std::filesystem::path(FLAG_model_source).parent_path().string();
     const iree_string_view_t sources[] = {IREE_SVL("generate.loom")};
@@ -151,7 +150,7 @@ class SourceRecognitionHttpTest : public ::testing::Test {
         },
         loom_serve_http_server_notification(server_)};
     interface_.set_observer(interface_.self, observer);
-    loom_serve_resources_set_observer(&resources_, observer);
+    loom_serve_device_group_set_observer(group_, observer);
   }
   void TearDown() override {
     if (service_) {
@@ -159,19 +158,19 @@ class SourceRecognitionHttpTest : public ::testing::Test {
       AdvanceUntil(
           [&] {
             return !interface_.is_pending(interface_.self) &&
-                   !loom_serve_resources_is_pending(&resources_);
+                   !loom_serve_device_group_is_pending(group_);
           },
           true);
       interface_.set_observer(interface_.self, {});
       loom_serve_recognition_service_free(service_);
     }
-    loom_serve_resources_set_observer(&resources_, {});
+    loom_serve_device_group_set_observer(group_, {});
     IREE_EXPECT_OK(loom_serve_http_listener_free(listener_));
     loom_serve_http_server_free(server_);
     IREE_EXPECT_OK(loom_serve_recognition_model_free(model_));
   }
   iree_status_t AdvanceService(bool stopping, bool* progress) {
-    auto status = loom_serve_resources_advance(&resources_);
+    auto status = loom_serve_device_group_advance(group_);
     return iree_status_join(
         status, interface_.advance(
                     interface_.self,
@@ -206,8 +205,8 @@ class SourceRecognitionHttpTest : public ::testing::Test {
 
   // Shared application host; worker gates establish the pre-execution cut.
   loom_serve_host_t* host_ = nullptr;
-  // Borrowed application resources progressed by this test's router role.
-  loom_serve_resources_t resources_ = {};
+  // Borrowed application group owning shared pool progress and retirement.
+  loom_serve_device_group_t* group_ = nullptr;
   // Real source-owned request state and numerical execution.
   loom_serve_recognition_model_t* model_ = nullptr;
   // Independent HTTP connection owner.

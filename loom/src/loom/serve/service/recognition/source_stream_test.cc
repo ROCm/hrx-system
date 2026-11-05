@@ -18,7 +18,7 @@
 #include "iree/hal/api.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/serve/server/resources.h"
+#include "loom/serve/runtime/device/device.h"
 #include "loom/serve/service/recognition/model.h"
 #include "loom/serve/service/recognition/stream.h"
 #include "loom/serve/testing/native_allocator.h"
@@ -49,8 +49,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_serve_test_application_acquire(&options, allocator_,
                                                        &application));
     host_ = loom_serve_test_application_host(application);
-    resources_.device_group =
-        loom_serve_test_application_device_group(application);
+    group_ = loom_serve_test_application_device_group(application);
     device_ = loom_serve_test_application_device_at(application, 0);
     storage_owner_ = loom_serve_device_group_pool_at(
         loom_serve_test_application_device_group(application), 0);
@@ -173,7 +172,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
         },
         &notification_};
     loom_serve_recognition_stream_service_set_observer(service_, observer);
-    loom_serve_resources_set_observer(&resources_, observer);
+    loom_serve_device_group_set_observer(group_, observer);
   }
 
   void TearDown() override {
@@ -182,7 +181,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
       loom_serve_recognition_stream_close(stream);
     }
     iree_hal_semaphore_release(failed_readiness_);
-    loom_serve_resources_set_observer(&resources_, {});
+    loom_serve_device_group_set_observer(group_, {});
     iree_notification_deinitialize(&notification_);
   }
 
@@ -225,7 +224,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
   }
 
   iree_status_t Advance(bool stopping, bool* progress) {
-    auto status = loom_serve_resources_advance(&resources_);
+    auto status = loom_serve_device_group_advance(group_);
     return iree_status_join(status,
                             loom_serve_recognition_stream_service_advance(
                                 service_, stopping, false, progress));
@@ -239,7 +238,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
       const bool idle =
           !progress &&
           !loom_serve_recognition_stream_service_is_pending(service_) &&
-          !loom_serve_resources_is_pending(&resources_);
+          !loom_serve_device_group_is_pending(group_);
       if (idle || progress || !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(&notification_);
       } else {
@@ -343,8 +342,8 @@ class SourceRecognitionStreamTest : public ::testing::Test {
   loom_serve_device_t* device_ = nullptr;
   // Explicit storage owner selected independently from execution placement.
   loom_serve_pool_t* storage_owner_ = nullptr;
-  // Borrowed application resources progressed by this test's router role.
-  loom_serve_resources_t resources_ = {};
+  // Borrowed application group owning shared pool progress and retirement.
+  loom_serve_device_group_t* group_ = nullptr;
   // Real source owner, destroyed only after service callbacks retire.
   loom_serve_recognition_model_t* model_ = nullptr;
   // Unmodified source callbacks behind the observation adapter.

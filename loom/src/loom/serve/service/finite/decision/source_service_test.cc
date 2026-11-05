@@ -81,7 +81,7 @@ class SourceDecisionServiceTest : public ::testing::Test {
         },
         this};
     interfaces_[0].set_observer(interfaces_[0].self, observer);
-    loom_serve_resources_set_observer(&resources_, observer);
+    loom_serve_device_group_set_observer(resources_.device_group, observer);
     auto http_options = loom_serve_http_server_options_default();
     IREE_ASSERT_OK(loom_serve_http_server_allocate(
         loom_serve_host_proactor_pool(host_), &http_options, host_allocator_,
@@ -108,7 +108,7 @@ class SourceDecisionServiceTest : public ::testing::Test {
     for (auto* model : models_) {
       IREE_EXPECT_OK(loom_serve_finite_model_free(model));
     }
-    loom_serve_resources_set_observer(&resources_, {});
+    loom_serve_device_group_set_observer(resources_.device_group, {});
     iree_notification_deinitialize(&notification_);
   }
   int Send(const std::string& body, const char* target = "/v1/systemone",
@@ -151,11 +151,11 @@ class SourceDecisionServiceTest : public ::testing::Test {
   }
   bool Step() {
     const uint64_t previous = wakes_.load();
-    IREE_EXPECT_OK(loom_serve_resources_advance(&resources_));
+    IREE_EXPECT_OK(loom_serve_device_group_advance(resources_.device_group));
     bool progress = false;
     IREE_EXPECT_OK(interfaces_[0].advance(interfaces_[0].self, 0, &progress));
     if (interfaces_[0].is_active(interfaces_[0].self) ||
-        loom_serve_resources_is_pending(&resources_)) {
+        loom_serve_device_group_is_pending(resources_.device_group)) {
       struct loom_serve_test_decision_wait_t {
         // Shared release generation.
         std::atomic<uint64_t>* wakes;
@@ -188,7 +188,7 @@ class SourceDecisionServiceTest : public ::testing::Test {
         16, 16, 0, nullptr, host_allocator_, &services_[1]));
     interfaces_[1] = loom_serve_finite_service_interface(services_[1]);
     interfaces_[0].set_observer(interfaces_[0].self, {});
-    loom_serve_resources_set_observer(&resources_, {});
+    loom_serve_device_group_set_observer(resources_.device_group, {});
     http_.Start([this]() -> iree_status_t {
       loom_serve_registry_t* registry = nullptr;
       IREE_RETURN_IF_ERROR(loom_serve_registry_allocate(

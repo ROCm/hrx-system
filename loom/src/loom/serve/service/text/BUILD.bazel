@@ -393,7 +393,6 @@ loom_cc_library(
         ":source_service_fixture",
         ":stream",
         "//loom/src/loom/serve/runtime/device",
-        "//loom/src/loom/serve/server:resources",
         "//loom/src/loom/service/telemetry:record",
         "//loom/src/loom/util:json",
         "//runtime/src/iree/base/tooling:flags",
