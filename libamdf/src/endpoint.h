@@ -32,6 +32,12 @@ void amdf_endpoint_set_queue_families(
 amdf_memory_scope_t* amdf_endpoint_local_memory_scope(
     amdf_endpoint_t* endpoint);
 
+// Publishes immutable physical-local metadata during explicit device creation.
+// The caller holds the instance native-state lock. Later devices reuse the
+// endpoint-owned descriptor without rewriting metadata visible to readers.
+void amdf_endpoint_publish_local_memory_scope(amdf_endpoint_t* endpoint,
+                                              const amdf_memory_scope_t* scope);
+
 // Copies immutable endpoint properties cached during open.
 amdf_status_t AMDF_CALL amdf_endpoint_query_info(
     amdf_endpoint_t* endpoint, amdf_endpoint_info_t* out_info);

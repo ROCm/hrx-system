@@ -85,7 +85,6 @@ amdf_dxg_provider_result_t FakeAdapterOpen(
     uint32_t* out_native_status) {
   current_state->operations.push_back(Operation::kOpenBridgeAdapter);
   EXPECT_EQ(open_info->adapter_handle, current_endpoint->adapter);
-  EXPECT_EQ(open_info->device_handle, current_state->device);
   EXPECT_EQ(open_info->physical_adapter_index,
             current_endpoint->physical_adapter_index);
   EXPECT_EQ(open_info->adapter_luid,
@@ -154,7 +153,8 @@ class LinuxDxgEndpointProfileTest : public ::testing::Test {
 };
 
 TEST_F(LinuxDxgEndpointProfileTest,
-       PublishesProfileAfterRetiringTemporaryProbeState) {
+       DiscoversWithoutNativeDeviceOrMemoryAdmission) {
+  state_.segment_query_result = kNativeFailure;
   amdf_gpu_endpoint_profile_t* profile = nullptr;
 
   ASSERT_EQ(amdf_gpu_linux_dxg_create_endpoint_profile(
@@ -168,18 +168,15 @@ TEST_F(LinuxDxgEndpointProfileTest,
   ASSERT_EQ(profile->queue_family_count, 1u);
   EXPECT_EQ(profile->queue_families[0].command_type,
             AMDF_QUEUE_COMMAND_TYPE_GPU_PM4);
-  EXPECT_EQ(profile->memory.flags, AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES);
-  EXPECT_EQ(profile->memory.capacity_byte_length, state_.local_capacity);
   amdf_free(instance_.host_allocator, profile);
   EXPECT_EQ(state_.operations,
-            (std::vector<Operation>{
-                Operation::kGetBridgeApi, Operation::kCreateDevice,
-                Operation::kOpenBridgeAdapter, Operation::kCloseBridgeAdapter,
-                Operation::kDestroyDevice, Operation::kSegmentQuery}));
+            (std::vector<Operation>{Operation::kGetBridgeApi,
+                                    Operation::kOpenBridgeAdapter,
+                                    Operation::kCloseBridgeAdapter}));
 }
 
 TEST_F(LinuxDxgEndpointProfileTest,
-       RejectedAdapterRetiresDeviceAndPreservesOutput) {
+       RejectedAdapterPreservesOutputWithoutCreatingDevice) {
   state_.provider_open_result = AMDF_DXG_PROVIDER_RESULT_UNSUPPORTED;
   auto* profile = reinterpret_cast<amdf_gpu_endpoint_profile_t*>(uintptr_t{1});
   const auto* expected_profile = profile;
@@ -190,13 +187,12 @@ TEST_F(LinuxDxgEndpointProfileTest,
 
   EXPECT_EQ(profile, expected_profile);
   EXPECT_EQ(state_.operations,
-            (std::vector<Operation>{
-                Operation::kGetBridgeApi, Operation::kCreateDevice,
-                Operation::kOpenBridgeAdapter, Operation::kDestroyDevice}));
+            (std::vector<Operation>{Operation::kGetBridgeApi,
+                                    Operation::kOpenBridgeAdapter}));
 }
 
 TEST_F(LinuxDxgEndpointProfileTest,
-       IntegratedProfileUsesTheInstanceMemoryScope) {
+       IntegratedDiscoveryDoesNotCreateAnAddressDomain) {
   state_.provider_properties.is_discrete = 0;
   amdf_gpu_endpoint_profile_t* profile = nullptr;
 
@@ -205,33 +201,12 @@ TEST_F(LinuxDxgEndpointProfileTest,
             AMDF_STATUS_OK);
 
   ASSERT_NE(profile, nullptr);
-  EXPECT_EQ(profile->memory.flags, AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED |
-                                       AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES);
-  EXPECT_EQ(profile->memory.capacity_byte_length, 0u);
+  EXPECT_EQ(profile->info.compute.compute_unit_count, 20u);
   amdf_free(instance_.host_allocator, profile);
   EXPECT_EQ(state_.operations,
-            (std::vector<Operation>{
-                Operation::kGetBridgeApi, Operation::kCreateDevice,
-                Operation::kOpenBridgeAdapter, Operation::kCloseBridgeAdapter,
-                Operation::kDestroyDevice}));
-}
-
-TEST_F(LinuxDxgEndpointProfileTest,
-       FailedCapacityQueryPreservesOutputAfterProbeRetires) {
-  state_.segment_query_result = kNativeFailure;
-  auto* profile = reinterpret_cast<amdf_gpu_endpoint_profile_t*>(uintptr_t{1});
-  const auto* expected_profile = profile;
-
-  EXPECT_EQ(amdf_gpu_linux_dxg_create_endpoint_profile(
-                &endpoint_, instance_.host_allocator, &profile),
-            amdf_make_status(AMDF_STATUS_DOMAIN_NTSTATUS, kNativeFailure));
-
-  EXPECT_EQ(profile, expected_profile);
-  EXPECT_EQ(state_.operations,
-            (std::vector<Operation>{
-                Operation::kGetBridgeApi, Operation::kCreateDevice,
-                Operation::kOpenBridgeAdapter, Operation::kCloseBridgeAdapter,
-                Operation::kDestroyDevice, Operation::kSegmentQuery}));
+            (std::vector<Operation>{Operation::kGetBridgeApi,
+                                    Operation::kOpenBridgeAdapter,
+                                    Operation::kCloseBridgeAdapter}));
 }
 
 TEST_F(LinuxDxgEndpointProfileTest,

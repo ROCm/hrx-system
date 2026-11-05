@@ -371,6 +371,14 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
   const uint32_t wait_conditions_64 = IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL;
   const amdf_queue_family_info_t* native_family =
       &device->context->families[family_ordinal];
+  amdf_queue_family_placement_info_t native_placement = {
+      .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_PLACEMENT_INFO,
+      .structure_size = sizeof(native_placement),
+  };
+  IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
+      device->context->api->device_query_queue_family_placement_info(
+          device->context->device, family_ordinal, &native_placement),
+      "device_query_queue_family_placement_info"));
   // Family support describes packet encodings. Each pool separately qualifies
   // these operations against its exact backing and requested access scopes.
   const amdf_atomic_capabilities_t* native_atomics =
@@ -423,11 +431,11 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
   }
   iree_hal_queue_placement_capabilities_t placements = 0;
   if (user_publication) {
-    if (native_family->placement_capabilities &
+    if (native_placement.placement_capabilities &
         AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL) {
       placements |= IREE_HAL_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL;
     }
-    if (native_family->placement_capabilities &
+    if (native_placement.placement_capabilities &
         AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL) {
       placements |= IREE_HAL_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL;
     }
@@ -503,7 +511,7 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
               (uint32_t)IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_KERNEL_CALL,
       "native and HAL publication requirements agree");
   if (placements) {
-    memcpy(family.host_publication, native_family->host_publication,
+    memcpy(family.host_publication, native_placement.host_publication,
            sizeof(family.host_publication));
   }
   const iree_hal_device_queue_spec_t queues = {

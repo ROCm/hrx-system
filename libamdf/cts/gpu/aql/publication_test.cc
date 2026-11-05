@@ -13,8 +13,15 @@ class AqlQueuePlacementTest
       public ::testing::WithParamInterface<amdf_queue_placement_t> {};
 
 TEST_P(AqlQueuePlacementTest, CompletesBarriersAndReusesRetiredSlots) {
+  amdf_queue_family_placement_info_t placement = {
+      .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_PLACEMENT_INFO,
+      .structure_size = sizeof(placement),
+  };
+  ASSERT_EQ(api_->device_query_queue_family_placement_info(
+                device_, family_.ordinal, &placement),
+            AMDF_STATUS_OK);
   if (GetParam() != AMDF_QUEUE_PLACEMENT_DEFAULT &&
-      !(family_.placement_capabilities & (1u << GetParam()))) {
+      !(placement.placement_capabilities & (1u << GetParam()))) {
     GTEST_SKIP() << "family does not support requested ring placement";
   }
   GpuMemory* storage = nullptr;

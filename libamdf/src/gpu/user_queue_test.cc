@@ -75,6 +75,7 @@ struct FakeNativeState {
 namespace {
 
 amdf_queue_family_info_t current_family;
+amdf_queue_family_placement_info_t current_placement;
 // Cached discovery dependency; queue construction does not activate an
 // endpoint.
 amdf_gpu_endpoint_profile_t current_profile;
@@ -88,6 +89,7 @@ struct TestGpuDevice {
 class GpuUserQueueTest : public ::testing::Test {
  protected:
   void SetUp() override {
+    current_placement = {};
     current_profile = {};
     current_profile.info.compute.compute_unit_count = 16;
     current_profile.info.execution_resources = {2, 2, 1};
@@ -130,6 +132,11 @@ class GpuUserQueueTest : public ::testing::Test {
 
   static void InitializeDevice(TestGpuDevice* device, uint64_t id,
                                uint64_t reset_epoch, FakeNativeState* state) {
+    static const amdf_device_vtable_t vtable = {
+        .query_queue_family_placement =
+            [](const amdf_device_t*, uint32_t) { return current_placement; },
+    };
+    device->base.vtable = &vtable;
     device->base.host_allocator = amdf_allocator_system();
     device->base.endpoint = reinterpret_cast<amdf_endpoint_t*>(uintptr_t{1});
     device->base.endpoint_id.words[0] = id;
@@ -243,7 +250,7 @@ TEST_F(GpuUserQueueTest, RequiresAdvertisedPlacementAndReportsAchievement) {
             amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
   EXPECT_EQ(consumer_state_.create_call_count, 0u);
   EXPECT_EQ(queue_, nullptr);
-  current_family.placement_capabilities =
+  current_placement.placement_capabilities =
       AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL;
   ASSERT_EQ(amdf_gpu_user_queue_create(&consumer_.base, &create, &queue_),
             AMDF_STATUS_OK);
@@ -254,6 +261,38 @@ TEST_F(GpuUserQueueTest, RequiresAdvertisedPlacementAndReportsAchievement) {
   };
   ASSERT_EQ(amdf_user_queue_query_info(queue_, &info), AMDF_STATUS_OK);
   EXPECT_EQ(info.placement, create.placement);
+}
+
+TEST_F(GpuUserQueueTest,
+       PlacementQueryRejectsInvalidRequestsWithoutPublication) {
+  amdf_queue_family_placement_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_PLACEMENT_INFO,
+      .structure_size = sizeof(info),
+      .ordinal = UINT32_MAX,
+      .placement_capabilities = UINT32_MAX,
+  };
+  const auto original = info;
+  EXPECT_EQ(amdf_device_query_queue_family_placement_info(nullptr, 0, &info),
+            amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+  EXPECT_EQ(amdf_device_query_queue_family_placement_info(&consumer_.base, 0,
+                                                          nullptr),
+            amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+  EXPECT_EQ(
+      amdf_device_query_queue_family_placement_info(&consumer_.base, 1, &info),
+      amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE));
+  EXPECT_EQ(std::memcmp(&info, &original, sizeof(info)), 0);
+  info.next = &info;
+  EXPECT_EQ(
+      amdf_device_query_queue_family_placement_info(&consumer_.base, 0, &info),
+      amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
+  EXPECT_EQ(info.next, &info);
+  EXPECT_EQ(info.ordinal, UINT32_MAX);
+  info.next = nullptr;
+  --info.structure_size;
+  EXPECT_EQ(
+      amdf_device_query_queue_family_placement_info(&consumer_.base, 0, &info),
+      amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+  EXPECT_EQ(info.ordinal, UINT32_MAX);
 }
 
 TEST_F(GpuUserQueueTest, ExecutionSelectionRequiresCapabilityAndKeepsExactSet) {
@@ -855,7 +894,7 @@ amdf_status_t AMDF_CALL amdf_endpoint_query_queue_family_info(
 
 const amdf_endpoint_info_t* amdf_endpoint_get_cached_info(
     const amdf_endpoint_t*) {
-  static const amdf_endpoint_info_t info = {};
+  static const amdf_endpoint_info_t info = {.queue_family_count = 1};
   return &info;
 }
 

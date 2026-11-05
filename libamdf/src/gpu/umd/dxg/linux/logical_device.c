@@ -56,7 +56,6 @@ amdf_status_t amdf_gpu_linux_dxg_logical_device_initialize(
   if (amdf_status_is_ok(status)) {
     const amdf_dxg_provider_gpu_adapter_open_info_t open_info = {
         .adapter_handle = endpoint->adapter,
-        .device_handle = device.native,
         .physical_adapter_index = endpoint->physical_adapter_index,
         .adapter_luid =
             endpoint->info.native_identity.value.windows_adapter.luid,

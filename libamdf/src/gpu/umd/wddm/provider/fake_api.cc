@@ -17,6 +17,8 @@ struct amdf_dxg_provider_gpu_kernel_queue_t {};
 namespace {
 
 struct FakeProviderState {
+  // Native package type returned with adapter properties.
+  uint32_t is_discrete = 0;
   // Stable parsed adapter identity returned by successful opens.
   amdf_dxg_provider_gpu_adapter_t adapter;
   // Number of adapter-close operations rejected before native consumption.
@@ -58,6 +60,7 @@ amdf_dxg_provider_result_t GpuAdapterOpen(
   properties.shader_engine_count = 2;
   properties.supports_pm4_kernel_queue = 1;
   properties.supports_sdma_kernel_queue = 1;
+  properties.is_discrete = state.is_discrete;
   ++state.adapter_open_success_count;
   *out_adapter = &state.adapter;
   *out_properties = properties;
@@ -145,6 +148,10 @@ extern "C" void amdf_test_wddm_provider_reset(void) {
 extern "C" void amdf_test_wddm_provider_set_adapter_close_failures(
     uint32_t failure_count) {
   state.adapter_close_failures_remaining = failure_count;
+}
+
+extern "C" void amdf_test_wddm_provider_set_discrete(uint32_t is_discrete) {
+  state.is_discrete = is_discrete;
 }
 
 extern "C" uint32_t amdf_test_wddm_provider_query_adapter_open_success_count(

@@ -26,9 +26,10 @@ amdf_status_t amdf_gpu_umd_create_endpoint_profile(
     amdf_allocator_t host_allocator, amdf_gpu_endpoint_profile_t** out_profile);
 
 // Samples physical storage through the endpoint's native allocation service.
-// The supplied flags were qualified by profile discovery. This cold query
-// acquires no execution resource and does not wait for queued work. Only data
-// fields are written after complete success; the caller owns the header.
+// The supplied flags were qualified during explicit device creation. This cold
+// observation may open a native file but creates no workload resource and does
+// not wait for queued work. Only data fields are written after complete
+// success; the caller owns the header.
 amdf_status_t amdf_gpu_umd_sample_memory_scope(
     const amdf_platform_endpoint_t* endpoint, amdf_memory_scope_flags_t flags,
     amdf_memory_scope_observation_t* out_observation);

@@ -43,6 +43,7 @@ amdf_cc_library(
     visibility = ["//libamdf/src/gpu:__subpackages__"],
     deps = [
         ":instance",
+        "//libamdf/src/gpu:endpoint_profile",
         "//libamdf/src/platform",
     ],
 )

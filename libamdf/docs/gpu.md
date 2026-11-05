@@ -21,6 +21,27 @@ format's packet layout contract, index units and publication ordering. The
 selected family also reports producer modes, priorities, ring limits, optional
 format features and cache operations.
 
+After creating the device, query its ring-placement contract for the selected
+family:
+
+```c
+amdf_queue_family_placement_info_t placement = {
+    .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_PLACEMENT_INFO,
+    .structure_size = sizeof(placement),
+};
+amdf_status_t status = api->device_query_queue_family_placement_info(
+    device, family.ordinal, &placement);
+```
+
+`placement_capabilities` admits explicit HOST_LOCAL or DEVICE_LOCAL primary
+ring storage. `host_publication` reports the native publication requirements
+for each placement, including the provider's DEFAULT. Integrated devices may
+satisfy both localities in the same memory. Discrete local storage may require
+a native publication operation; virtual functions may admit only host-local
+rings. These connection-dependent facts are established by device creation.
+The query only copies cached metadata and adds no work to command publication.
+Kernel-only families expose no user-ring placement choices.
+
 The native providers expose these combinations when the endpoint's driver,
 engine and storage requirements are satisfied:
 

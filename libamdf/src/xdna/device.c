@@ -62,7 +62,18 @@ static amdf_status_t amdf_xdna_device_query_memory_reservation_profile(
   return status;
 }
 
+static amdf_queue_family_placement_info_t
+amdf_xdna_device_query_queue_family_placement(const amdf_device_t* device,
+                                              uint32_t queue_family_ordinal) {
+  (void)device;
+  (void)queue_family_ordinal;
+  // XDNA kernel queues have no caller-selectable primary-ring placement.
+  return (amdf_queue_family_placement_info_t){0};
+}
+
 static const amdf_device_vtable_t amdf_xdna_device_vtable = {
+    .query_queue_family_placement =
+        amdf_xdna_device_query_queue_family_placement,
     .query_memory_reservation_profile =
         amdf_xdna_device_query_memory_reservation_profile,
     .query_memory_profile = amdf_xdna_device_query_memory_profile,

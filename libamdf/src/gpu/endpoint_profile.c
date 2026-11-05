@@ -70,9 +70,6 @@ static bool amdf_gpu_queue_family_properties_validate(
        properties->command_type != AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) ||
       properties->format_version == 0 || properties->publication_modes == 0 ||
       (properties->publication_modes & ~known_publication_modes) != 0 ||
-      (properties->placement_capabilities &
-       ~(AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
-         AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL)) != 0 ||
       properties->roles == 0 || (properties->roles & ~known_roles) != 0 ||
       (properties->cache_operations & ~known_cache_operations) != 0 ||
       (properties->cache_transition_kinds & ~known_cache_transition_kinds) !=
@@ -130,7 +127,6 @@ static bool amdf_gpu_queue_family_properties_validate(
   }
   if (!supports_user) {
     return properties->user_queue_capabilities == 0 &&
-           properties->placement_capabilities == 0 &&
            properties->producer_modes == 0 &&
            properties->priority_capabilities == 0 &&
            properties->metadata.command_type ==
@@ -269,14 +265,11 @@ bool amdf_gpu_endpoint_profile_initialize(
         .kernel_queue_capabilities = source->kernel_queue_capabilities,
         .producer_modes = source->producer_modes,
         .priority_capabilities = source->priority_capabilities,
-        .placement_capabilities = source->placement_capabilities,
         .metadata = source->metadata,
         .minimum_ring_byte_length = source->minimum_ring_byte_length,
         .maximum_ring_byte_length = source->maximum_ring_byte_length,
         .ring_byte_length_alignment = source->ring_byte_length_alignment,
     };
-    memcpy(profile.queue_families[i].host_publication, source->host_publication,
-           sizeof(source->host_publication));
   }
   *out_profile = profile;
   return true;

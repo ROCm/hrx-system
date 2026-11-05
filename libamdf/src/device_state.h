@@ -14,6 +14,10 @@
 struct amdf_memory_reservation_profile_t;
 
 typedef struct amdf_device_vtable_t {
+  // Returns cached placement facts for an already-validated family ordinal.
+  // All native qualification completes before device publication.
+  amdf_queue_family_placement_info_t (*query_queue_family_placement)(
+      const amdf_device_t* device, uint32_t queue_family_ordinal);
   // Reads live-domain reservation limits without native work or allocation.
   amdf_status_t (*query_memory_reservation_profile)(
       amdf_device_t* device, uint32_t address_domain_ordinal,

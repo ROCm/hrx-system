@@ -145,8 +145,25 @@ amdf_status_t amdf_gpu_umd_device_create(
     }
   }
 
+  amdf_gpu_umd_device_result_t result = {0};
   if (amdf_status_is_ok(status)) {
-    amdf_gpu_umd_device_result_t result = {0};
+    result.memory.flags = (device->properties.is_discrete
+                               ? 0
+                               : AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED) |
+                          (device->kmt->query_video_memory_info
+                               ? AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES
+                               : 0);
+    if (device->properties.is_discrete) {
+      D3DKMT_SEGMENTGROUPSIZEINFO sizes = {
+          .PhysicalAdapterIndex = endpoint->physical_adapter_index,
+      };
+      status = amdf_kmt_query_adapter_info(device->kmt, endpoint->adapter,
+                                           KMTQAITYPE_GETSEGMENTGROUPSIZE,
+                                           &sizes, sizeof(sizes));
+      result.memory.capacity_byte_length = sizes.LocalMemory;
+    }
+  }
+  if (amdf_status_is_ok(status)) {
     result.id.words[0] = endpoint->id.words[0];
     result.id.words[1] =
         ((uint64_t)device->paging_queue << 32) | device->device;

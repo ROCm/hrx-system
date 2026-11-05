@@ -61,8 +61,6 @@ typedef struct amdf_dxg_provider_native_transport_t {
 typedef struct amdf_dxg_provider_gpu_adapter_open_info_t {
   // Live native adapter handle.
   uint32_t adapter_handle;
-  // Live logical device handle, or zero when the provider does not require it.
-  uint32_t device_handle;
   // Physical adapter represented by the native handles.
   uint32_t physical_adapter_index;
   // Exact DXGI adapter LUID, low word first.
