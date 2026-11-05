@@ -1,0 +1,81 @@
+// RUN: emit cxx roundtrip
+// REQUIRES: loom-export-cxx
+// Tied SSA results project as mutable C++ references instead of fresh return
+// values. Re-import therefore restores the same destructive call contracts.
+static void bump(unsigned& state, unsigned amount) { state += amount; }
+
+static unsigned adjust(unsigned& state, unsigned amount) {
+  state += amount;
+  return state + amount;
+}
+
+unsigned entry(unsigned input, unsigned amount) {
+  unsigned observed = adjust(input, amount);
+  bump(input, amount);
+  return observed + input;
+}
+
+// ----
+
+[[loom::symbol("entry")]]
+unsigned entry(unsigned input, unsigned amount);
+
+[[loom::symbol("adjust")]]
+static unsigned adjust(unsigned& state, unsigned amount);
+
+[[loom::symbol("bump")]]
+static void bump(unsigned& state, unsigned amount);
+
+[[loom::symbol("entry")]]
+unsigned entry(unsigned input, unsigned amount) {
+  unsigned observed = adjust(input, amount);
+  bump(input, amount);
+  return (observed + input);
+}
+
+[[loom::symbol("adjust")]]
+static unsigned adjust(unsigned& state, unsigned amount) {
+  unsigned state_1 = state + amount;
+  state = state_1;
+  return (state_1 + amount);
+}
+
+[[loom::symbol("bump")]]
+static void bump(unsigned& state, unsigned amount) {
+  state = state + amount;
+  return;
+}
+
+// ====
+#include <loomcxx/view.h>
+
+namespace loomt = loom::type;
+using DynamicRow = loomt::view<loomt::shape<loomt::dynamic, 4>, const float, loomt::encoding<loom::encoding::role::layout, 2>>;
+
+static void dynamic_identity(DynamicRow& value) { value = value; }
+
+DynamicRow dynamic_entry(DynamicRow value) {
+  dynamic_identity(value);
+  return value;
+}
+
+// ----
+#include <loomcxx/view.h>
+
+[[loom::symbol("dynamic_entry")]]
+loom::type::view<loom::type::shape<loom::type::dynamic, 4>, const float, loom::type::encoding<loom::encoding::role::layout, 2>> dynamic_entry(loom::type::view<loom::type::shape<loom::type::dynamic, 4>, const float, loom::type::encoding<loom::encoding::role::layout, 2>> value);
+
+[[loom::symbol("dynamic_identity")]]
+static void dynamic_identity(loom::type::view<loom::type::shape<loom::type::dynamic, 4>, const float, loom::type::encoding<loom::encoding::role::layout, 2>>& value);
+
+[[loom::symbol("dynamic_entry")]]
+loom::type::view<loom::type::shape<loom::type::dynamic, 4>, const float, loom::type::encoding<loom::encoding::role::layout, 2>> dynamic_entry(loom::type::view<loom::type::shape<loom::type::dynamic, 4>, const float, loom::type::encoding<loom::encoding::role::layout, 2>> value) {
+  dynamic_identity(value);
+  return value;
+}
+
+[[loom::symbol("dynamic_identity")]]
+static void dynamic_identity(loom::type::view<loom::type::shape<loom::type::dynamic, 4>, const float, loom::type::encoding<loom::encoding::role::layout, 2>>& value) {
+  value = value;
+  return;
+}

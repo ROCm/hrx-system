@@ -26,7 +26,7 @@ from loom.ir import (
 
 
 @dataclass(frozen=True, slots=True)
-class _SourceParameter:
+class SourceParameter:
     """One reconstructed C++ parameter and its flattened type dependencies."""
 
     value_id: int
@@ -100,7 +100,7 @@ class CxxCommandRenderer(CxxExpressionRenderer):
         *,
         specialization_count: int | None = None,
         allow_nonstorage_bindings: bool = False,
-    ) -> tuple[list[_SourceParameter], list[_SourceParameter]]:
+    ) -> tuple[list[SourceParameter], list[SourceParameter]]:
         if specialization_count is None:
             specialization_count = operation.attributes.get("specialization_count")
         if (
@@ -115,7 +115,7 @@ class CxxCommandRenderer(CxxExpressionRenderer):
         bindings = arguments[specialization_count:]
         specialization_set = set(specializations)
 
-        binding_parameters: list[_SourceParameter] = []
+        binding_parameters: list[SourceParameter] = []
         binding_dependencies: set[int] = set()
         for binding in bindings:
             value_type = self.module.values[binding].type
@@ -143,7 +143,7 @@ class CxxCommandRenderer(CxxExpressionRenderer):
                     )
                 binding_dependencies.add(dependency)
             binding_parameters.append(
-                _SourceParameter(binding, dependencies, binding=True)
+                SourceParameter(binding, dependencies, binding=True)
             )
 
         remaining = [
@@ -172,7 +172,7 @@ class CxxCommandRenderer(CxxExpressionRenderer):
             specialization_views[value] = dependencies
 
         specialization_parameters = [
-            _SourceParameter(
+            SourceParameter(
                 value,
                 specialization_views.get(value, ()),
                 binding=False,
@@ -200,7 +200,7 @@ class CxxCommandRenderer(CxxExpressionRenderer):
 
     def _flat_source_parameters(
         self, operation: Operation, values: list[int]
-    ) -> list[_SourceParameter]:
+    ) -> list[SourceParameter]:
         """Reconstructs ordinary source values from flattened components."""
 
         dependencies = {
@@ -209,7 +209,7 @@ class CxxCommandRenderer(CxxExpressionRenderer):
             for dependency in self._source_type_dependencies(value)
         }
         parameters = [
-            _SourceParameter(
+            SourceParameter(
                 value,
                 self._source_type_dependencies(value),
                 binding=False,
@@ -264,7 +264,7 @@ class CxxCommandRenderer(CxxExpressionRenderer):
         arguments: list[int],
         *,
         allow_nonstorage_bindings: bool = False,
-    ) -> tuple[list[str], list[_SourceParameter], list[_SourceParameter]]:
+    ) -> tuple[list[str], list[SourceParameter], list[SourceParameter]]:
         specializations, bindings = self._source_parameters(
             operation,
             arguments,

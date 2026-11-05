@@ -174,6 +174,72 @@ static unsigned reference_member_access(unsigned input) {
          state.nested.value;
 }
 
+template <class T>
+struct RemoveReference {
+  using Type = T;
+};
+
+template <class T>
+struct RemoveReference<T&> {
+  using Type = T;
+};
+
+template <class T>
+using RemoveReferenceT = typename RemoveReference<T>::Type;
+
+template <class T>
+constexpr RemoveReferenceT<T>&& move(T&& value) {
+  return static_cast<RemoveReferenceT<T>&&>(value);
+}
+
+struct ReceiverValue {
+  unsigned member;
+
+  void increment() && { ++member; }
+  unsigned observe() const&& { return member; }
+  ReceiverValue&& advance(unsigned amount) && {
+    member += amount;
+    return static_cast<ReceiverValue&&>(*this);
+  }
+  ReceiverValue&& operator+() && {
+    member += 4u;
+    return static_cast<ReceiverValue&&>(*this);
+  }
+  ReceiverValue&& operator[](unsigned amount) && {
+    member += amount;
+    return static_cast<ReceiverValue&&>(*this);
+  }
+};
+
+static unsigned reference_receiver(bool condition, unsigned input) {
+  ReceiverValue value{input};
+  if (condition) {
+    (+move(value))[3u].advance(2u).increment();
+  }
+  return move(value).observe() + value.member;
+}
+
+static void mutate_receiver(ReceiverValue& value) { move(value).increment(); }
+
+static unsigned reference_parameter_receiver(unsigned input) {
+  ReceiverValue value{input};
+  mutate_receiver(value);
+  return value.member;
+}
+
+struct AddressedReceiverValue {
+  unsigned member;
+
+  unsigned* address() && { return &member; }
+};
+
+static unsigned storage_reference_receiver(unsigned input) {
+  AddressedReceiverValue value{input};
+  unsigned* pointer = move(value).address();
+  ++*pointer;
+  return value.member;
+}
+
 LOOM_CHECK_CASE(reference_accessors) {
   const auto local = local_alias_value(4u);
   const auto value_results = value_reference_results(true, 5u);
@@ -188,6 +254,10 @@ LOOM_CHECK_CASE(reference_accessors) {
   const auto matrix = matrix_access(17u, 1u, 2u);
   const auto defaulted = default_reference_value(19u, 5u);
   const auto members = reference_member_access(5u);
+  const auto receiver_false = reference_receiver(false, 5u);
+  const auto receiver_true = reference_receiver(true, 5u);
+  const auto receiver_parameter = reference_parameter_receiver(9u);
+  const auto receiver_storage = storage_reference_receiver(11u);
   loom::check::expect_equal(local, 28u);
   loom::check::expect_equal(value_results, 40u);
   loom::check::expect_equal(mutable_result, 6u);
@@ -201,4 +271,8 @@ LOOM_CHECK_CASE(reference_accessors) {
   loom::check::expect_equal(matrix, 34u);
   loom::check::expect_equal(defaulted, 2424u);
   loom::check::expect_equal(members, 22324u);
+  loom::check::expect_equal(receiver_false, 10u);
+  loom::check::expect_equal(receiver_true, 30u);
+  loom::check::expect_equal(receiver_parameter, 10u);
+  loom::check::expect_equal(receiver_storage, 12u);
 }

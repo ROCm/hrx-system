@@ -43,6 +43,20 @@ struct ControlFlow::ValueUseFacts {
   std::unordered_map<cxx::Symbol*, size_t> last_uses;
 };
 
+struct ControlFlow::ReferenceWriteFacts {
+  struct Result {
+    // Structured source constructs whose carried binding must be updated.
+    std::vector<cxx::AST*> owners;
+    // Exact current-object fields changed through the returned alias.
+    std::vector<cxx::FieldSymbol*> receiver_fields;
+  };
+
+  // Lexical scopes for calls whose receiver is a reference-returning call.
+  std::unordered_map<cxx::AST*, std::vector<cxx::AST*>> receiver_owners;
+  // Writes mapped backward through exact parameter or receiver aliases.
+  std::unordered_map<cxx::AST*, Result> results;
+};
+
 namespace {
 
 // Builds sparse future-use facts only for a function that reaches a mutable
@@ -1034,6 +1048,7 @@ void ControlFlow::retain_call(cxx::CallExpressionAST* call,
       retained.current_receiver = true;
     }
   }
+  retain_reference_receiver_write(retained);
   calls_.push_back(std::move(retained));
 }
 
@@ -1047,6 +1062,7 @@ void ControlFlow::retain_call(cxx::SubscriptExpressionAST* call,
       retained.receiver = retain_call_argument(call->baseExpression);
     }
   }
+  retain_reference_receiver_write(retained);
   calls_.push_back(std::move(retained));
 }
 
@@ -1067,6 +1083,7 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
       retained.storage_receiver = retained.receiver->inherent_storage;
     }
   }
+  retain_reference_receiver_write(retained);
   calls_.push_back(std::move(retained));
 
   auto parameters = call.function->parameters();
@@ -1297,6 +1314,77 @@ bool ControlFlow::record_callable_write(cxx::Symbol* binding) {
   return add_receiver_write(field);
 }
 
+bool ControlFlow::record_scoped_write(cxx::Symbol* binding,
+                                      std::span<cxx::AST* const> owners) {
+  if (!binding) {
+    return false;
+  }
+  bool changed = false;
+  for (auto* owner : owners) {
+    auto& writes = writes_[owner];
+    if (std::ranges::find(writes, binding) == writes.end()) {
+      writes.push_back(binding);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+bool ControlFlow::record_argument_write(
+    const CallArgument& argument, std::span<cxx::AST* const> owners,
+    std::span<cxx::FieldSymbol* const> receiver_fields) {
+  bool changed = false;
+  if (argument.write_binding) {
+    changed = record_scoped_write(argument.write_binding, owners) || changed;
+    changed = record_callable_write(argument.write_binding) || changed;
+  }
+  if (argument.current_receiver) {
+    for (auto* field : receiver_fields) {
+      changed = add_receiver_write(field) || changed;
+    }
+  }
+  for (auto* call : argument.reference_calls) {
+    changed =
+        record_reference_result_write(call, owners, receiver_fields) || changed;
+  }
+  return changed;
+}
+
+bool ControlFlow::record_reference_result_write(
+    cxx::AST* call, std::span<cxx::AST* const> owners,
+    std::span<cxx::FieldSymbol* const> receiver_fields) {
+  if (!reference_write_facts_) {
+    reference_write_facts_ = std::make_unique<ReferenceWriteFacts>();
+  }
+  auto& write = reference_write_facts_->results[call];
+  bool changed = false;
+  for (auto* owner : owners) {
+    if (std::ranges::find(write.owners, owner) == write.owners.end()) {
+      write.owners.push_back(owner);
+      changed = true;
+    }
+  }
+  for (auto* field : receiver_fields) {
+    if (std::ranges::find(write.receiver_fields, field) ==
+        write.receiver_fields.end()) {
+      write.receiver_fields.push_back(field);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+void ControlFlow::retain_reference_receiver_write(const DirectCall& call) {
+  if (!call.receiver || call.receiver->reference_calls.empty() ||
+      !implicit_object_may_mutate(call.function)) {
+    return;
+  }
+  if (!reference_write_facts_) {
+    reference_write_facts_ = std::make_unique<ReferenceWriteFacts>();
+  }
+  reference_write_facts_->receiver_owners.emplace(call.source, owners_);
+}
+
 bool ControlFlow::add_receiver_write(cxx::FieldSymbol* field) {
   if (std::ranges::find(receiver_writes_, field) != receiver_writes_.end()) {
     return false;
@@ -1511,6 +1599,33 @@ CallPropagation ControlFlow::propagate_call(const DirectCall& call,
           require_identity(call.arguments[*ordinal]) || caller_changed;
     }
   }
+  const ReferenceWriteFacts::Result* result_write = nullptr;
+  if (reference_write_facts_) {
+    auto found = reference_write_facts_->results.find(call.source);
+    if (found != reference_write_facts_->results.end()) {
+      result_write = &found->second;
+    }
+  }
+  if (result_write) {
+    const auto& write = *result_write;
+    if (auto ordinal = callee.reference_return_parameter()) {
+      caller_changed =
+          record_argument_write(call.arguments[*ordinal], write.owners,
+                                write.receiver_fields) ||
+          caller_changed;
+    } else if (call.function->isImplicitObjectMemberFunction() &&
+               callee.returns_current_receiver_reference()) {
+      if (call.current_receiver) {
+        for (auto* field : write.receiver_fields) {
+          caller_changed = add_receiver_write(field) || caller_changed;
+        }
+      } else if (!call.storage_receiver && call.receiver) {
+        caller_changed = record_argument_write(*call.receiver, write.owners,
+                                               write.receiver_fields) ||
+                         caller_changed;
+      }
+    }
+  }
   if (!call.function->isImplicitObjectMemberFunction()) {
     return {caller_changed, callee_changed};
   }
@@ -1544,8 +1659,16 @@ CallPropagation ControlFlow::propagate_call(const DirectCall& call,
       caller_changed = add_receiver_write(field) || caller_changed;
     }
   } else if (call.receiver) {
-    caller_changed =
-        record_callable_write(call.receiver->write_binding) || caller_changed;
+    std::span<cxx::AST* const> owners;
+    if (reference_write_facts_) {
+      auto found = reference_write_facts_->receiver_owners.find(call.source);
+      if (found != reference_write_facts_->receiver_owners.end()) {
+        owners = found->second;
+      }
+    }
+    caller_changed = record_argument_write(*call.receiver, owners,
+                                           callee.receiver_writes()) ||
+                     caller_changed;
   }
   return {caller_changed, callee_changed};
 }
@@ -1739,12 +1862,7 @@ bool ControlFlow::record(cxx::ExpressionAST* expression) {
 }
 
 void ControlFlow::record(cxx::Symbol* binding) {
-  for (auto* owner : owners_) {
-    auto& writes = writes_[owner];
-    if (std::ranges::find(writes, binding) == writes.end()) {
-      writes.push_back(binding);
-    }
-  }
+  record_scoped_write(binding, owners_);
 }
 
 void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,

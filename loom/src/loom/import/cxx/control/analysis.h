@@ -287,6 +287,7 @@ class ControlFlow final : private cxx::ASTVisitor {
  private:
   struct TemporaryDestructionFacts;
   struct ValueUseFacts;
+  struct ReferenceWriteFacts;
 
   enum class ReferenceReturn {
     None,
@@ -340,8 +341,17 @@ class ControlFlow final : private cxx::ASTVisitor {
   bool argument_requires_storage(const CallArgument& argument) const;
   bool record_callable_write(cxx::ExpressionAST* expression);
   bool record_callable_write(cxx::Symbol* binding);
+  bool record_scoped_write(cxx::Symbol* binding,
+                           std::span<cxx::AST* const> owners);
+  bool record_argument_write(
+      const CallArgument& argument, std::span<cxx::AST* const> owners,
+      std::span<cxx::FieldSymbol* const> receiver_fields);
+  bool record_reference_result_write(
+      cxx::AST* call, std::span<cxx::AST* const> owners,
+      std::span<cxx::FieldSymbol* const> receiver_fields);
   bool require_reference_storage(cxx::Symbol* parameter);
   bool add_receiver_write(cxx::FieldSymbol* field);
+  void retain_reference_receiver_write(const DirectCall& call);
   CallArgument retain_call_argument(cxx::ExpressionAST* expression);
   void collect_identity(cxx::ExpressionAST* expression, CallArgument& argument);
   void retain_call(cxx::CallExpressionAST* call, cxx::FunctionSymbol* function);
@@ -429,6 +439,10 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Identity-demanded results proven to alias their implicit object. This is
   // consumed directly when choosing the call site's receiver transport.
   std::unordered_set<cxx::AST*> storage_call_results_;
+  // Lazily allocated write-through facts for reference results used as
+  // mutable receivers. Ordinary source functions retain only this null
+  // pointer.
+  std::unique_ptr<ReferenceWriteFacts> reference_write_facts_;
   // True when a direct or transitive use requires current-object identity.
   bool receiver_requires_storage_ = false;
   // Common origin of every runtime reference return seen in the body.

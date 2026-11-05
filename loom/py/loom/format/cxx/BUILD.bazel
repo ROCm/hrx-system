@@ -21,6 +21,7 @@ iree_py_library(
         "context.py",
         "errors.py",
         "expressions.py",
+        "functions.py",
         "kernel_configurations.py",
         "naming.py",
         "pipelines.py",
