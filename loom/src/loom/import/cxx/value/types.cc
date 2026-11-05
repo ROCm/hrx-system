@@ -1130,13 +1130,12 @@ const RecordPartition* Types::record(const cxx::Type* input, cxx::AST* owner) {
   if (!source || !source->isComplete() || source->isUnion() ||
       !source->baseClasses().empty() ||
       (!traits.is_aggregate(input) && !has_user_provided_constructor(source)) ||
-      !traits.is_trivially_copyable(input) ||
-      !traits.has_trivial_destructor(input)) {
+      !has_trivial_value_operations(input)) {
     diagnostics_.reject(
         unit_, owner,
         "record values require a complete baseless non-union type with "
-        "aggregate or user-provided construction and trivial copy and "
-        "destruction");
+        "aggregate or user-provided construction and trivial copy and move "
+        "operations");
   }
   auto result = std::make_unique<RecordPartition>();
   result->kind = ValueKind::Record;
@@ -1423,6 +1422,10 @@ loom_type_t Types::get(const cxx::Type* input, cxx::AST* ast) {
   }
 }
 
+bool Types::has_trivial_value_operations(const cxx::Type* input) {
+  return unit_.typeTraits().has_trivial_value_operations(input);
+}
+
 void Types::require_record_storage(const cxx::ClassType* input,
                                    cxx::AST* owner) {
   auto* source = input->definition();
@@ -1441,13 +1444,12 @@ void Types::require_record_storage(const cxx::ClassType* input,
   if (!source || !source->isComplete() || source->isUnion() ||
       !source->baseClasses().empty() ||
       (!traits.is_aggregate(input) && !has_user_provided_constructor(source)) ||
-      !traits.is_trivially_copyable(input) ||
-      !traits.has_trivial_destructor(input)) {
+      !has_trivial_value_operations(input)) {
     diagnostics_.reject(
         unit_, owner,
         "record storage requires a complete baseless non-union type with "
-        "aggregate or user-provided construction and trivial copy and "
-        "destruction");
+        "aggregate or user-provided construction and trivial copy and move "
+        "operations");
   }
   for (auto* symbol : source->members()) {
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(symbol);

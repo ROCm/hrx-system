@@ -141,3 +141,21 @@ func.def public @boolean(%pointer: buffer, %pointer_byte_offset: offset) -> (buf
 func.def public @indirect(%pointer: buffer, %pointer_byte_offset: offset) -> (buffer, offset) {
   func.return %pointer, %pointer_byte_offset : buffer, offset
 }
+
+// ====
+// Pointee destruction does not alter ordinary pointer arithmetic.
+struct Owned { unsigned value; ~Owned() {} };
+const Owned* advance(const void* storage) {
+  auto* pointer = static_cast<const Owned*>(storage);
+  return pointer + 1;
+}
+
+// ----
+func.def public @advance(%storage: buffer, %storage_byte_offset: offset) -> (buffer, offset) {
+  %12 = scalar.constant 4 : i64
+  %8 = index.cast %storage_byte_offset : offset to i64
+  %9 = scalar.addi %8, %12 : i64
+  %10 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
+  %11 = index.cast %10 : i64 to offset
+  func.return %storage, %11 : buffer, offset
+}

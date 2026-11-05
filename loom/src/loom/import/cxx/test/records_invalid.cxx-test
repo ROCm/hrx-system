@@ -1,7 +1,7 @@
 // RUN: verify
 // Unions do not have an unconditional component partition.
 union Value { unsigned integer; float real; };
-// ERROR@+1: LOWERING/059 "record values require a complete baseless non-union type with aggregate or user-provided construction and trivial copy and destruction"
+// ERROR@+1: LOWERING/059 "record values require a complete baseless non-union type with aggregate or user-provided construction and trivial copy and move operations"
 Value entry(Value value) { return value; }
 
 // ====
@@ -14,7 +14,7 @@ Value entry() { return Value{}; }
 // Base subobjects need an explicit source-object contract.
 struct Base { unsigned base; };
 struct Value : Base { unsigned member; };
-// ERROR@+1: LOWERING/059 "record values require a complete baseless non-union type with aggregate or user-provided construction and trivial copy and destruction"
+// ERROR@+1: LOWERING/059 "record values require a complete baseless non-union type with aggregate or user-provided construction and trivial copy and move operations"
 Value entry(Value value) { return value; }
 
 // ====
@@ -28,15 +28,9 @@ struct Value {
 unsigned entry() { Value value; return value.member; }
 
 // ====
-// Destructors cannot disappear in SSA value copies.
-struct Value { unsigned member; ~Value() {} };
-// ERROR@+1: LOWERING/059 "record values require a complete baseless non-union type with aggregate or user-provided construction and trivial copy and destruction"
-Value entry(Value value) { return value; }
-
-// ====
 // An aggregate with user-defined assignment is not a trivial value.
 struct Value { unsigned member; Value& operator=(const Value& rhs) { member=rhs.member+1; return *this; } };
-// ERROR@+1: LOWERING/059 "record values require a complete baseless non-union type with aggregate or user-provided construction and trivial copy and destruction"
+// ERROR@+1: LOWERING/059 "record values require a complete baseless non-union type with aggregate or user-provided construction and trivial copy and move operations"
 Value entry(Value value) { return value; }
 
 // ====

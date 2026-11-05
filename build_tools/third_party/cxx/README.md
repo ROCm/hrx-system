@@ -5,7 +5,7 @@ changes live in the maintained fork rather than as patches in this directory:
 
 - Upstream: <https://github.com/robertoraggi/cplusplus>
 - Maintained fork: <https://github.com/benvanik/cplusplus>
-- Current stack: [`hrx-upstream/89-template-array-member-defaults`](https://github.com/benvanik/cplusplus/commits/hrx-upstream/89-template-array-member-defaults/)
+- Current stack: [`hrx-upstream/90-trivial-constructor-queries`](https://github.com/benvanik/cplusplus/commits/hrx-upstream/90-trivial-constructor-queries/)
 
 `../deps.MODULE.bazel` owns the archive commit and checksum. The generated root
 `MODULE.cmake.lock` carries the same identity for CMake. `cxx.BUILD.bazel` and
