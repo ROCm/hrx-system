@@ -1182,6 +1182,7 @@ def compile_descriptor_set(
     projected_descriptors_by_key: dict[str, Descriptor] = {}
     for descriptor in spec.descriptors:
         operand_layout = validation.validate_descriptor_operands(descriptor)
+        validation.validate_descriptor_layout_counts(descriptor, operand_layout)
         validation.validate_descriptor_speculation(descriptor)
         validation.validate_descriptor_state_assignment(descriptor, reg_class_inputs)
         validation.validate_descriptor_idempotent_state_update(descriptor, reg_class_inputs)

@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from loom.gen.target.low import compiler
+from loom.gen.target.low import compiler, validation
 from loom.ir import ScalarTypeKind
 from loom.target.low_descriptors import (
     AsmForm,
@@ -88,6 +88,43 @@ def test_descriptor_lookup_rejects_unrepresentable_storage_count() -> None:
         ),
     ):
         compiler.compile_descriptor_set(TEST_LOW_CORE_DESCRIPTOR_SET)
+
+
+@pytest.mark.parametrize(
+    ("field", "description"),
+    [
+        (None, "minimum packet operand"),
+        ("feature_mask_words", "feature mask word"),
+        ("encoding_field_values", "encoding field value"),
+        ("immediates", "immediate"),
+        ("effects", "effect"),
+        ("constraints", "constraint"),
+        ("storage_leases", "storage lease"),
+        ("operand_forms", "operand form"),
+    ],
+)
+@pytest.mark.parametrize("count", [255, 256])
+def test_descriptor_layout_counts_fit_compact_rows(field, description, count) -> None:
+    descriptor = TEST_LOW_ADD_I32_DESCRIPTOR
+    operand_layout = validation.validate_descriptor_operands(descriptor)
+    if field is None:
+        operand_layout = replace(
+            operand_layout,
+            minimum_packet_operand_count=count,
+        )
+    else:
+        descriptor = replace(descriptor, **{field: (None,) * count})
+    if count == 256:
+        with pytest.raises(
+            ValueError,
+            match=re.escape(f"descriptor 'test.add.i32' {description} count does not fit u8"),
+        ):
+            validation.validate_descriptor_layout_counts(
+                descriptor,
+                operand_layout,
+            )
+    else:
+        validation.validate_descriptor_layout_counts(descriptor, operand_layout)
 
 
 @pytest.mark.parametrize("alignment", [0, 3, 6, 65536])

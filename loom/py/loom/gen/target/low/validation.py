@@ -1387,6 +1387,26 @@ class DescriptorConstraintProjection:
     rematerialization_source_operand_indices: tuple[int | None, ...]
 
 
+def validate_descriptor_layout_counts(
+    descriptor: Descriptor,
+    operand_layout: DescriptorOperandLayout,
+) -> None:
+    """Checks descriptor-local arities stored in compact layout rows."""
+
+    counts = (
+        ("minimum packet operand", operand_layout.minimum_packet_operand_count),
+        ("feature mask word", len(descriptor.feature_mask_words)),
+        ("encoding field value", len(descriptor.encoding_field_values)),
+        ("immediate", len(descriptor.immediates)),
+        ("effect", len(descriptor.effects)),
+        ("constraint", len(descriptor.constraints)),
+        ("storage lease", len(descriptor.storage_leases)),
+        ("operand form", len(descriptor.operand_forms)),
+    )
+    for name, count in counts:
+        validate_u8(count, f"descriptor '{descriptor.key}' {name} count")
+
+
 def validate_descriptor_operands(descriptor: Descriptor) -> DescriptorOperandLayout:
     validate_u16(
         len(descriptor.operands),
