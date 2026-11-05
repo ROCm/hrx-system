@@ -8,17 +8,14 @@
 
 #include "iree/hal/memory_scope.h"
 
-static iree_status_t iree_hal_pool_buffer_range_initialize_view(
-    iree_hal_buffer_t* buffer, iree_device_size_t offset,
-    iree_device_size_t length, iree_hal_buffer_memory_view_t memory,
-    iree_device_size_t alignment, const iree_hal_asan_pool_options_t* asan,
-    iree_hal_pool_buffer_range_t* out_range) {
-  memset(out_range, 0, sizeof(*out_range));
-  if (!memory.backing) {
+static iree_status_t iree_hal_pool_buffer_range_qualify(
+    iree_hal_pool_buffer_range_t* range, iree_device_size_t alignment,
+    const iree_hal_asan_pool_options_t* asan) {
+  if (!range->memory.backing) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "buffer has no prepared native storage");
   }
-  const iree_hal_buffer_backing_facts_t* backing = memory.backing;
+  const iree_hal_buffer_backing_facts_t* backing = range->memory.backing;
   if (!backing->notification || !backing->tracker) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "buffer has no sealed-group progress services");
@@ -45,18 +42,15 @@ static iree_status_t iree_hal_pool_buffer_range_initialize_view(
     IREE_RETURN_IF_ERROR(
         backing->advice->validate_asan(backing->advice->user_data, asan));
   }
-  const iree_device_size_t padding = -memory.offset & (alignment - 1);
-  if (padding >= length || length - padding < alignment) {
+  const iree_device_size_t padding = -range->memory.offset & (alignment - 1);
+  if (padding >= range->length || range->length - padding < alignment) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "buffer range contains no aligned allocation");
   }
-  out_range->offset = offset + padding;
-  out_range->length = (length - padding) & ~(alignment - 1);
-  memory.offset += padding;
-  memory.binding_offset += padding;
-  out_range->memory = memory;
-  out_range->buffer = buffer;
-  iree_hal_buffer_retain(buffer);
+  range->offset += padding;
+  range->length = (range->length - padding) & ~(alignment - 1);
+  range->memory.offset += padding;
+  range->memory.binding_offset += padding;
   return iree_ok_status();
 }
 
@@ -69,11 +63,43 @@ iree_status_t iree_hal_pool_buffer_range_initialize(
   IREE_RETURN_IF_ERROR(
       iree_hal_buffer_calculate_range(0, iree_hal_buffer_byte_length(buffer),
                                       offset, length, &offset, &length));
-  iree_hal_buffer_memory_view_t memory = iree_hal_buffer_memory_view(buffer);
-  memory.offset += offset;
-  memory.binding_offset += offset;
-  return iree_hal_pool_buffer_range_initialize_view(
-      buffer, offset, length, memory, alignment, asan, out_range);
+  iree_hal_pool_buffer_range_t range = {
+      .buffer = buffer,
+      .offset = offset,
+      .length = length,
+      .memory = iree_hal_buffer_memory_view(buffer),
+  };
+  range.memory.offset += offset;
+  range.memory.binding_offset += offset;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_pool_buffer_range_qualify(&range, alignment, asan));
+  iree_hal_buffer_retain(buffer);
+  *out_range = range;
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_pool_buffer_range_capture(
+    iree_hal_pool_t* pool, const iree_hal_pool_reservation_request_t* request,
+    const iree_hal_pool_reservation_t* reservation,
+    iree_hal_pool_buffer_range_t* out_range) {
+  memset(out_range, 0, sizeof(*out_range));
+  iree_hal_pool_reservation_view_t view;
+  if (iree_hal_pool_query_reservation_views(pool, 1, reservation, &view)) {
+    *out_range = (iree_hal_pool_buffer_range_t){
+        .buffer = view.buffer,
+        .offset = view.byte_offset - iree_hal_buffer_byte_offset(view.buffer),
+        .length = view.byte_length,
+        .memory = view.memory,
+    };
+    iree_hal_buffer_retain(view.buffer);
+  } else {
+    IREE_RETURN_IF_ERROR(iree_hal_pool_materialize_reservations(
+        pool, 1, request, reservation, IREE_HAL_POOL_MATERIALIZE_FLAG_NONE,
+        &out_range->buffer));
+    out_range->length = iree_hal_buffer_byte_length(out_range->buffer);
+    out_range->memory = iree_hal_buffer_memory_view(out_range->buffer);
+  }
+  return iree_ok_status();
 }
 
 iree_status_t iree_hal_pool_buffer_range_prepare(
@@ -81,21 +107,13 @@ iree_status_t iree_hal_pool_buffer_range_prepare(
     const iree_hal_pool_reservation_t* reservation,
     iree_device_size_t alignment, const iree_hal_asan_pool_options_t* asan,
     iree_hal_pool_buffer_range_t* out_range) {
-  iree_hal_pool_reservation_view_t view;
-  if (iree_hal_pool_query_reservation_views(pool, 1, reservation, &view)) {
-    return iree_hal_pool_buffer_range_initialize_view(
-        view.buffer,
-        view.byte_offset - iree_hal_buffer_byte_offset(view.buffer),
-        view.byte_length, view.memory, alignment, asan, out_range);
+  IREE_RETURN_IF_ERROR(iree_hal_pool_buffer_range_capture(
+      pool, request, reservation, out_range));
+  iree_status_t status =
+      iree_hal_pool_buffer_range_qualify(out_range, alignment, asan);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_pool_buffer_range_deinitialize(out_range);
   }
-  memset(out_range, 0, sizeof(*out_range));
-  iree_hal_buffer_t* buffer = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_pool_materialize_reservations(
-      pool, 1, request, reservation, IREE_HAL_POOL_MATERIALIZE_FLAG_NONE,
-      &buffer));
-  iree_status_t status = iree_hal_pool_buffer_range_initialize(
-      buffer, 0, IREE_HAL_WHOLE_BUFFER, alignment, asan, out_range);
-  iree_hal_buffer_release(buffer);
   return status;
 }
 
