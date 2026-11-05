@@ -369,6 +369,20 @@ typedef struct loom_aie2p_native_distribution_phase_t {
   const loom_aie2p_native_distribution_t* distribution;
 } loom_aie2p_native_distribution_phase_t;
 
+// Repeated retirement observations of one physical DMA channel by one core.
+// The controller's routes and the channel's status geometry are identical at
+// every use, independently of descriptor contents or child invocation.
+typedef struct loom_aie2p_native_retirement_t {
+  // Next channel observed by this representative instruction worker.
+  struct loom_aie2p_native_retirement_t* next;
+  // First selected command supplying the immutable physical endpoint.
+  const struct loom_aie2p_native_distribution_command_t* source;
+  // Static child endpoint sites; runtime loop visits do not increase this.
+  iree_host_size_t use_count;
+  // Shared polling leaf, created during emission when several sites use it.
+  loom_symbol_ref_t function;
+} loom_aie2p_native_retirement_t;
+
 // A finite child endpoint controlled by its producer or consuming core. The
 // child boundary queues it before local work and observes idle after all local
 // async waits, when the core's scalar reply stream is drained.
@@ -381,6 +395,8 @@ typedef struct loom_aie2p_native_distribution_command_t {
   const loom_aie2p_native_distribution_endpoint_t* endpoint;
   // Direction of the endpoint's DMA channel.
   loom_xdna_dma_direction_t direction;
+  // Selected reuse group for this controller's status observation.
+  loom_aie2p_native_retirement_t* retirement;
 } loom_aie2p_native_distribution_command_t;
 
 typedef enum loom_aie2p_native_execution_e {
@@ -468,6 +484,8 @@ typedef struct loom_aie2p_native_worker_t {
   loom_aie2p_native_distribution_phase_t* distribution_phases;
   // Child endpoints started and retired around this core's local worker call.
   loom_aie2p_native_distribution_command_t* distribution_commands;
+  // Physical channel polling bodies shared by this core's ordered children.
+  loom_aie2p_native_retirement_t* retirements;
   // Any occurrence sharing this distribution engine needs packet routing.
   bool distribution_packets;
   // DMA paths owned by this physical worker, shared by its ordered occurrences.

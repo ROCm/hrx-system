@@ -173,7 +173,7 @@ static iree_status_t loom_aie2p_native_endpoint_start(
   return iree_ok_status();
 }
 
-static iree_status_t loom_aie2p_native_endpoint_retire(
+static iree_status_t loom_aie2p_native_endpoint_retire_body(
     loom_aie2p_native_context_t* context, loom_builder_t* builder,
     loom_region_t* region,
     const loom_aie2p_native_distribution_command_t* command, uint8_t packet,
@@ -214,6 +214,37 @@ static iree_status_t loom_aie2p_native_endpoint_retire(
                                               LOOM_LOCATION_UNKNOWN, &branch));
   loom_builder_set_block(builder, complete);
   return iree_ok_status();
+}
+
+static iree_status_t loom_aie2p_native_endpoint_retire(
+    loom_aie2p_native_context_t* context, loom_builder_t* builder,
+    loom_region_t* region,
+    const loom_aie2p_native_distribution_command_t* command, uint8_t packet,
+    uint8_t reply) {
+  loom_aie2p_native_retirement_t* group = command->retirement;
+  if (group->use_count == 1) {
+    return loom_aie2p_native_endpoint_retire_body(context, builder, region,
+                                                  command, packet, reply);
+  }
+  if (!loom_symbol_ref_is_valid(group->function)) {
+    loom_builder_t helper;
+    loom_op_t* function;
+    IREE_RETURN_IF_ERROR(loom_aie2p_worker_helper(&context->code, NULL, 0, NULL,
+                                                  0, &helper, &group->function,
+                                                  &function));
+    const loom_func_like_t callable =
+        loom_func_like_cast(context->code.module, function);
+    loom_op_attrs(function)[callable.vtable->inline_policy_attr_index] =
+        loom_attr_enum(LOOM_INLINE_POLICY_NOINLINE);
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_endpoint_retire_body(
+        context, &helper, loom_low_func_def_body(function), group->source,
+        packet, reply));
+    IREE_RETURN_IF_ERROR(loom_aie2p_worker_return(&helper, NULL, 0));
+  }
+  loom_op_t* call;
+  return loom_low_func_call_build(builder, 0, 0, 0, group->function, NULL, 0,
+                                  NULL, 0, NULL, 0, LOOM_LOCATION_UNKNOWN,
+                                  &call);
 }
 
 iree_status_t loom_aie2p_native_distribution_boundary(
