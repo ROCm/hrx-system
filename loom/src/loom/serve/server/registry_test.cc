@@ -6,6 +6,8 @@
 
 #include "loom/serve/server/registry.h"
 
+#include <array>
+#include <cstring>
 #include <filesystem>
 #include <string>
 
@@ -191,6 +193,120 @@ TEST_P(RegistryTest, FileRegistrationOwnsAuthoredPathsAndSelectedBase) {
 }
 
 INSTANTIATE_TEST_SUITE_P(DirectoryBase, RegistryTest, ::testing::Bool());
+
+class RegistryAllocationTest : public ::testing::TestWithParam<uint32_t> {
+ protected:
+  struct AllocationFault {
+    // Allocation attempt rejected after admission fault injection is enabled.
+    size_t fail_at = SIZE_MAX;
+    // Allocation attempts across both independently owned allocators.
+    size_t attempts = 0;
+  };
+
+  struct AllocatorState {
+    // Shared fault selection across declaration and registry ownership.
+    AllocationFault* fault;
+    // Live allocations owned by this allocator, including setup metadata.
+    size_t live = 0;
+
+    iree_allocator_t allocator() {
+      return {this, [](void* self, iree_allocator_command_t command,
+                       const void* parameters, void** pointer) {
+                auto& state = *static_cast<AllocatorState*>(self);
+                const bool had_storage = *pointer != nullptr;
+                if (command != IREE_ALLOCATOR_COMMAND_FREE &&
+                    state.fault->attempts++ == state.fault->fail_at) {
+                  return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+                }
+                const auto system = iree_allocator_system();
+                iree_status_t status =
+                    system.ctl(system.self, command, parameters, pointer);
+                if (iree_status_is_ok(status)) {
+                  if (command == IREE_ALLOCATOR_COMMAND_FREE) {
+                    state.live -= had_storage;
+                  } else if (!had_storage) {
+                    ++state.live;
+                  }
+                }
+                return status;
+              }};
+    }
+  };
+};
+
+TEST_P(RegistryAllocationTest, FailurePreservesDeclarationAndSlotForRetry) {
+  const bool explicit_device = (GetParam() & 1) != 0;
+  const bool explicit_pool = (GetParam() & 2) != 0;
+  const std::string document =
+      R"({"name":"vectors","admission":"drained",)" +
+      std::string(explicit_device ? R"("device":"first",)" : "") +
+      std::string(explicit_pool ? R"("pool":"pool",)" : "") +
+      R"("definition":{"kind":"embedding","assets":"/weights",)"
+      R"("prepare":"/boot.loom","control":"/run.loom",)"
+      R"("sources":["/kernel.loom"]}})";
+  // Each missing binding is one owned string; registration also owns history.
+  const size_t allocation_count = !explicit_device + !explicit_pool + 1;
+  for (size_t fail_at = 0; fail_at < allocation_count; ++fail_at) {
+    SCOPED_TRACE(fail_at);
+    AllocationFault fault;
+    AllocatorState declaration_allocator{&fault};
+    AllocatorState registry_allocator{&fault};
+    loom_serve_model_configuration_t configuration = {};
+    IREE_ASSERT_OK(loom_serve_model_configuration_initialize(
+        iree_make_string_view(document.data(), document.size()),
+        iree_string_view_empty(), nullptr, declaration_allocator.allocator(),
+        &configuration));
+    const loom_serve_registration_factory_t factory = {
+        .kinds = 1u << LOOM_SERVE_MODEL_KIND_EMBEDDING,
+        .device_names = {1, kDeviceNames},
+        .pool_count = 1,
+        .pools = kPools,
+    };
+    loom_serve_registry_t* registry = nullptr;
+    IREE_ASSERT_OK(loom_serve_registry_allocate(
+        0, nullptr, 1, factory, registry_allocator.allocator(), &registry));
+    const auto declaration_live = declaration_allocator.live;
+    const auto registry_live = registry_allocator.live;
+    std::array<unsigned char, sizeof(configuration)> before;
+    std::memcpy(before.data(), &configuration, before.size());
+    fault = {.fail_at = fail_at};
+    iree_host_size_t index = IREE_HOST_SIZE_MAX;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        loom_serve_registry_register(registry, &configuration, &index));
+    EXPECT_EQ(fault.attempts, fail_at + 1);
+    EXPECT_EQ(std::memcmp(&configuration, before.data(), before.size()), 0);
+    EXPECT_EQ(index, IREE_HOST_SIZE_MAX);
+    EXPECT_EQ(loom_serve_registry_count(registry), 0u);
+    const auto* model = loom_serve_registry_at(registry, 0);
+    EXPECT_EQ(model->service.name.size, 0u);
+    EXPECT_EQ(model->stream, nullptr);
+    EXPECT_EQ(model->incarnation, 0u);
+    EXPECT_EQ(declaration_allocator.live, declaration_live);
+    EXPECT_EQ(registry_allocator.live, registry_live);
+
+    fault = {};
+    IREE_ASSERT_OK(
+        loom_serve_registry_register(registry, &configuration, &index));
+    EXPECT_EQ(index, 0u);
+    EXPECT_EQ(loom_serve_registry_count(registry), 1u);
+    EXPECT_EQ(model->incarnation, 1u);
+    EXPECT_TRUE(
+        iree_string_view_equal(model->configuration.device, IREE_SV("first")));
+    EXPECT_TRUE(
+        iree_string_view_equal(model->configuration.pool, IREE_SV("pool")));
+    EXPECT_EQ(configuration.name.data, nullptr);
+    EXPECT_EQ(configuration.device.data, nullptr);
+    EXPECT_EQ(configuration.pool.data, nullptr);
+    IREE_EXPECT_OK(loom_serve_registry_free(registry));
+    loom_serve_model_configuration_deinitialize(&configuration);
+    EXPECT_EQ(declaration_allocator.live, 0u);
+    EXPECT_EQ(registry_allocator.live, 0u);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(ExplicitBindings, RegistryAllocationTest,
+                         ::testing::Range(uint32_t{0}, uint32_t{4}));
 
 TEST(RegistryAdmissionTest, NativeSpeechRejectionsPreserveOwnedInput) {
   const loom_serve_service_t services[] = {

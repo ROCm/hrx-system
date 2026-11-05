@@ -411,51 +411,72 @@ iree_status_t loom_serve_registry_register(
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "model registration capacity is full");
   }
+  // Binding strings belong to the declaration; history belongs to the registry.
+  // Keep both private until admission can publish the complete slot atomically.
+  const iree_string_view_t device_name =
+      registry->factory.device_names.values[device_index];
+  const iree_string_view_t pool_name = registry->factory.pools[pool_index].name;
+  char* device_storage = NULL;
+  char* pool_storage = NULL;
+  loom_runtime_telemetry_stream_t* stream = NULL;
+  iree_status_t status = iree_ok_status();
   if (!configuration->device.size) {
-    const iree_string_view_t name =
-        registry->factory.device_names.values[device_index];
-    char* storage = NULL;
-    IREE_RETURN_IF_ERROR(iree_allocator_clone(
+    status = iree_allocator_clone(
         configuration->host_allocator,
-        iree_make_const_byte_span(name.data, name.size), (void**)&storage));
-    configuration->device = iree_make_string_view(storage, name.size);
+        iree_make_const_byte_span(device_name.data, device_name.size),
+        (void**)&device_storage);
   }
-  if (!configuration->pool.size) {
-    const iree_string_view_t name = registry->factory.pools[pool_index].name;
-    char* storage = NULL;
-    IREE_RETURN_IF_ERROR(iree_allocator_clone(
+  if (iree_status_is_ok(status) && !configuration->pool.size) {
+    status = iree_allocator_clone(
         configuration->host_allocator,
-        iree_make_const_byte_span(name.data, name.size), (void**)&storage));
-    configuration->pool = iree_make_string_view(storage, name.size);
+        iree_make_const_byte_span(pool_name.data, pool_name.size),
+        (void**)&pool_storage);
   }
-  loom_serve_registered_model_t* model = &registry->models[available];
-  IREE_RETURN_IF_ERROR(loom_runtime_telemetry_stream_allocate(
-      128, registry->host_allocator, &model->stream));
-  model->configuration = *configuration;
-  model->configuration.device_index = device_index;
-  model->configuration.pool_index = pool_index;
-  memset(configuration, 0, sizeof(*configuration));
-  model->closed = model->configuration.start_drained;
-  model->incarnation = registry->next_incarnation++;
-  model->registered_unix_seconds = loom_serve_clock_now_unix_seconds();
-  model->service.name = model->configuration.name;
-  // Protocol metadata is known before source preparation, without model access.
-  model->service.kind = model->configuration.kind;
-  model->service.endpoint =
-      loom_serve_model_kind_endpoint(model->configuration.kind);
-  model->service.telemetry.counters = &model->counters;
-  model->service.telemetry.latency = &model->latency;
-  model->service.telemetry.stream = model->stream;
-  loom_runtime_telemetry_record_t begin = {
-      .time_ns = iree_time_now(),
-      .event = &LOOM_SERVICE_TELEMETRY_STREAM_BEGIN};
-  loom_service_telemetry_snapshot_record_t telemetry_payload = {
-      .phase = "registered"};
-  memcpy(begin.data.words, &telemetry_payload, sizeof(telemetry_payload));
-  loom_runtime_telemetry_stream_append(model->stream, &begin);
-  ++registry->count;
-  *out_index = available;
-  return iree_ok_status();
+  if (iree_status_is_ok(status)) {
+    status = loom_runtime_telemetry_stream_allocate(
+        128, registry->host_allocator, &stream);
+  }
+  if (iree_status_is_ok(status)) {
+    loom_serve_registered_model_t* model = &registry->models[available];
+    model->configuration = *configuration;
+    model->configuration.device_index = device_index;
+    model->configuration.pool_index = pool_index;
+    if (device_storage) {
+      model->configuration.device =
+          iree_make_string_view(device_storage, device_name.size);
+    }
+    if (pool_storage) {
+      model->configuration.pool =
+          iree_make_string_view(pool_storage, pool_name.size);
+    }
+    memset(configuration, 0, sizeof(*configuration));
+    model->stream = stream;
+    model->closed = model->configuration.start_drained;
+    model->incarnation = registry->next_incarnation++;
+    model->registered_unix_seconds = loom_serve_clock_now_unix_seconds();
+    model->service.name = model->configuration.name;
+    // Protocol metadata is known before source preparation, without model
+    // access.
+    model->service.kind = model->configuration.kind;
+    model->service.endpoint =
+        loom_serve_model_kind_endpoint(model->configuration.kind);
+    model->service.telemetry.counters = &model->counters;
+    model->service.telemetry.latency = &model->latency;
+    model->service.telemetry.stream = model->stream;
+    loom_runtime_telemetry_record_t begin = {
+        .time_ns = iree_time_now(),
+        .event = &LOOM_SERVICE_TELEMETRY_STREAM_BEGIN};
+    loom_service_telemetry_snapshot_record_t telemetry_payload = {
+        .phase = "registered"};
+    memcpy(begin.data.words, &telemetry_payload, sizeof(telemetry_payload));
+    loom_runtime_telemetry_stream_append(model->stream, &begin);
+    ++registry->count;
+    *out_index = available;
+  } else {
+    iree_allocator_free(configuration->host_allocator, device_storage);
+    iree_allocator_free(configuration->host_allocator, pool_storage);
+  }
+  return status;
 }
 
 iree_status_t loom_serve_registry_remove(loom_serve_registered_model_t* model,
