@@ -12,8 +12,11 @@ load("//loom/build_tools/bazel:defs.bzl", "loom_execution_profile")
 load(
     "//loom/requirements:defs.bzl",
     "ARCH_AIE2P",
+    "ARCH_VM",
     "ARTIFACT_AIE2P_ELF",
+    "ARTIFACT_VM_BINARY",
     "EXECUTE_IREE_HAL",
+    "EXECUTE_IREE_VM",
 )
 load("//runtime/requirements:defs.bzl", "HAL_AMD_XDNA")
 
@@ -23,8 +26,11 @@ XDNA_HARDWARE_PROFILE = loom_execution_profile(
         LIBAMDF,
         LIBAMDF_XDNA,
         ARCH_AIE2P,
+        ARCH_VM,
         ARTIFACT_AIE2P_ELF,
+        ARTIFACT_VM_BINARY,
         EXECUTE_IREE_HAL,
+        EXECUTE_IREE_VM,
         HAL_AMD_XDNA,
     ],
     executor = "hardware",
