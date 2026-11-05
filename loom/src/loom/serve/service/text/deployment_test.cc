@@ -157,6 +157,33 @@ class TextDeploymentTest : public SourceTextServiceTest {
     loom_serve_text_warmup_poll(model_->warmup);
   }
 
+  void CheckCapacityDomains() {
+    std::vector<const void*> expected;
+    for (auto* pool : pools_) {
+      const void* domain = loom_serve_pool_residency_cache(pool);
+      if (std::find(expected.begin(), expected.end(), domain) ==
+          expected.end()) {
+        expected.push_back(domain);
+      }
+    }
+    const auto options = ServiceOptions();
+    loom_serve_text_service_t* service = nullptr;
+    IREE_ASSERT_OK(loom_serve_text_service_allocate(model_, &options, nullptr,
+                                                    host_allocator_, &service));
+    const auto interface = loom_serve_text_service_interface(service);
+    EXPECT_EQ(interface.capacity_domain_count, expected.size());
+    for (size_t i = 0;
+         i < std::min(interface.capacity_domain_count, expected.size()); ++i) {
+      EXPECT_EQ(interface.capacity_domains[i], expected[i]);
+    }
+    // The router retains the span after service callbacks disappear.
+    loom_serve_text_service_free(service, IREE_STATUS_OK);
+    for (size_t i = 0;
+         i < std::min(interface.capacity_domain_count, expected.size()); ++i) {
+      EXPECT_EQ(interface.capacity_domains[i], expected[i]);
+    }
+  }
+
   // Ordered execution and storage spans remain alive through model retirement.
   std::array<loom_serve_device_t*, 3> devices_ = {};
   // Explicit pool membership permits aliases without merging executions.
@@ -173,6 +200,7 @@ class TextDeploymentTest : public SourceTextServiceTest {
 
 TEST_F(TextDeploymentTest, CompleteOwnerSetProducesRetainedHttpOutput) {
   IREE_ASSERT_OK(Load(ModelOptions()));
+  ASSERT_NO_FATAL_FAILURE(CheckCapacityDomains());
   iree_host_size_t count = 0;
   auto* const* residencies = loom_serve_text_model_residencies(model_, &count);
   ASSERT_EQ(count, devices_.size());
@@ -255,6 +283,7 @@ TEST_F(TextDeploymentTest, AliasedPoolsSumConcurrentExecutionPeaks) {
     IREE_ASSERT_OK(Load(ModelOptions()));
     const auto maximum = *std::max_element(owners.begin(), owners.end());
     EXPECT_EQ(model_->residency.count, maximum + 1);
+    ASSERT_NO_FATAL_FAILURE(CheckCapacityDomains());
     for (size_t i = 0; i < owners.size(); ++i) {
       EXPECT_EQ(model_->residency.pool_indices[i], owners[i]);
     }

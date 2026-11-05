@@ -173,11 +173,12 @@ typedef struct loom_serve_service_t {
   // Optional service-owned executable pool and preferred-choice policy. Its
   // producers and queued selections participate in is_pending retirement.
   loom_serve_reconfiguration_t reconfiguration;
-  // Borrowed shared-capacity owner identity, never dereferenced by the router.
-  // Only equal non-NULL identities can provide SHARED_ACTIVITY to each other;
-  // NULL means this service has no shared-capacity relationship. The owner
-  // outlives the service and every accepted asynchronous obligation.
-  const void* capacity_domain;
+  // Number of distinct shared-capacity identities; zero declares no sharing.
+  iree_host_size_t capacity_domain_count;
+  // Borrowed non-NULL identities, never dereferenced by the router. Any equal
+  // member permits SHARED_ACTIVITY. The array and its owners outlive service
+  // callbacks and every accepted obligation through final model retirement.
+  const void* const* capacity_domains;
   // Optional observation owned by the service and live through retirement.
   struct {
     // Bounded immutable-record history; NULL when this service has no stream.

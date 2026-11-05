@@ -196,6 +196,12 @@ loom_serve_residency_t* loom_serve_text_model_state_residency(
   return model->residency.values[0];
 }
 
+const void* const* loom_serve_text_model_capacity_domains(
+    const loom_serve_text_model_t* model, iree_host_size_t* out_count) {
+  *out_count = model->residency.count;
+  return model->residency.domains;
+}
+
 loom_serve_residency_t* const* loom_serve_text_model_residencies(
     const loom_serve_text_model_t* model, iree_host_size_t* out_count) {
   *out_count = model->residency.count;

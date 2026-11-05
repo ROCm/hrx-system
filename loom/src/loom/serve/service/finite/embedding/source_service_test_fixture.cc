@@ -231,7 +231,8 @@ void SourceEmbeddingServiceTest::CreateService(
       host_, model_, loom_serve_embedding_protocol(), IREE_SV("fixture"), 16,
       16, heartbeat_interval, nullptr, host_allocator_, &service_));
   interface_ = loom_serve_finite_service_interface(service_);
-  EXPECT_EQ(interface_.capacity_domain,
+  ASSERT_EQ(interface_.capacity_domain_count, 1u);
+  EXPECT_EQ(interface_.capacity_domains[0],
             loom_serve_pool_residency_cache(storage_owner_));
   const loom_serve_wake_callback_t observer = {
       [](void* self) {

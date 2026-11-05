@@ -140,9 +140,11 @@ typedef struct loom_serve_speech_generator_t {
                            loom_serve_execution_frontier_t* out_frontier);
   // Optional immutable tokenizer, live through model retirement.
   const iree_tokenizer_t* tokenizer;
-  // Shared admission identity; equal non-NULL domains can release each other's
-  // capacity. Borrowed through service retirement and never dereferenced here.
-  const void* capacity_domain;
+  // Number of distinct shared-capacity identities; zero declares no sharing.
+  iree_host_size_t capacity_domain_count;
+  // Borrowed non-NULL identities. Any equal member shares capacity across
+  // modalities. The array and its owners survive final model retirement.
+  const void* const* capacity_domains;
   // Optional copied parameter activity, queried only on serialized owner turns.
   loom_runtime_parameter_activity_t (*parameter_activity)(void* self);
 } loom_serve_speech_generator_t;

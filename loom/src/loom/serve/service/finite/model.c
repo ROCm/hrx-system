@@ -49,6 +49,8 @@ struct loom_serve_finite_model_t {
   loom_serve_device_t* owner;
   // Borrowed storage, command workspace, and admission owner.
   loom_serve_pool_t* pool;
+  // Stable shared-capacity membership, borrowed through final retirement.
+  const void* capacity_domains[1];
   // Owned model work and feedback timelines, independent of other models.
   loom_serve_execution_t* execution;
   // Owned checkpoint roots and plans, outliving borrowing invocation
@@ -702,6 +704,7 @@ iree_status_t loom_serve_finite_load_allocate(
     load->model->host_allocator = host_allocator;
     load->model->owner = device;
     load->model->pool = pool;
+    load->model->capacity_domains[0] = loom_serve_pool_residency_cache(pool);
     *out_load = load;
   } else {
     iree_slim_mutex_deinitialize(&load->event.mutex);
@@ -952,6 +955,12 @@ const iree_tokenizer_t* loom_serve_finite_model_tokenizer(
 loom_serve_residency_t* loom_serve_finite_model_residency(
     const loom_serve_finite_model_t* model) {
   return loom_serve_executables_residency(model->executables);
+}
+
+const void* const* loom_serve_finite_model_capacity_domains(
+    const loom_serve_finite_model_t* model, iree_host_size_t* out_count) {
+  *out_count = IREE_ARRAYSIZE(model->capacity_domains);
+  return model->capacity_domains;
 }
 
 loom_serve_residency_snapshot_t loom_serve_finite_model_parameters(

@@ -501,6 +501,11 @@ iree_status_t loom_serve_text_model_deactivate(loom_serve_text_model_t* model,
 loom_serve_residency_t* loom_serve_text_model_state_residency(
     const loom_serve_text_model_t* model);
 
+// Borrowed distinct shared-capacity identities. The span remains valid until
+// final model destruction, including after service callbacks are retired.
+const void* const* loom_serve_text_model_capacity_domains(
+    const loom_serve_text_model_t* model, iree_host_size_t* out_count);
+
 // Borrowed distinct-pool admission set. A caller may acquire it before choosing
 // work and retain its pins across invocations, releasing the whole set through
 // model_release_parameters. Model destruction invalidates the array.

@@ -95,6 +95,8 @@ struct loom_serve_speech_model_t {
   loom_serve_device_t* owner;
   // Borrowed storage and residency owner, independent of execution placement.
   loom_serve_pool_t* pool;
+  // Stable shared-capacity membership, borrowed through final retirement.
+  const void* capacity_domains[1];
   // Independent model work and feedback timelines on shared queues.
   loom_serve_execution_t* execution;
   // Stable source-addressed input/history and reusable conditioning ownership.
@@ -987,6 +989,7 @@ iree_status_t loom_serve_speech_load_allocate(
     loom_serve_rows_initialize(host_allocator, &load->model->state);
     load->model->owner = device;
     load->model->pool = pool;
+    load->model->capacity_domains[0] = loom_serve_pool_residency_cache(pool);
     *out_load = load;
   } else {
     iree_slim_mutex_deinitialize(&load->event.mutex);
@@ -1742,6 +1745,7 @@ loom_serve_speech_generator_t loom_serve_speech_model_generator(
       .release_batch = loom_serve_speech_generator_release_batch,
       .release = loom_serve_speech_generator_release,
       .tokenizer = loom_serve_tokenizer_value(model->tokenizer),
-      .capacity_domain = loom_serve_residency_cache(model->residency),
+      .capacity_domain_count = IREE_ARRAYSIZE(model->capacity_domains),
+      .capacity_domains = model->capacity_domains,
       .parameter_activity = loom_serve_speech_generator_parameter_activity};
 }

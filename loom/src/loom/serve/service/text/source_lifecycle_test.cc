@@ -1012,7 +1012,8 @@ TEST_F(SourceTextServiceTest,
   std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
       value, destroy);
   auto interface = loom_serve_text_service_interface(value);
-  EXPECT_EQ(interface.capacity_domain,
+  ASSERT_EQ(interface.capacity_domain_count, 1u);
+  EXPECT_EQ(interface.capacity_domains[0],
             loom_serve_pool_residency_cache(storage_owner_));
   Observe(interface);
   auto* notification = loom_serve_http_server_notification(server_);

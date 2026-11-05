@@ -623,14 +623,15 @@ static void loom_serve_registry_release_service(
     loom_serve_registered_model_t* model) {
   model->counters = *model->service.telemetry.counters;
   model->latency = *model->service.telemetry.latency;
-  model->service =
-      (loom_serve_service_t){.name = model->service.name,
-                             .kind = model->service.kind,
-                             .endpoint = model->service.endpoint,
-                             .capacity_domain = model->service.capacity_domain,
-                             .telemetry = {.stream = model->stream,
-                                           .counters = &model->counters,
-                                           .latency = &model->latency}};
+  model->service = (loom_serve_service_t){
+      .name = model->service.name,
+      .kind = model->service.kind,
+      .endpoint = model->service.endpoint,
+      .capacity_domain_count = model->service.capacity_domain_count,
+      .capacity_domains = model->service.capacity_domains,
+      .telemetry = {.stream = model->stream,
+                    .counters = &model->counters,
+                    .latency = &model->latency}};
 }
 
 static void loom_serve_registry_record_error(
@@ -871,6 +872,8 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
     } else if (complete) {
       model->registration.destroy(model->registration.self);
       model->registration = (loom_serve_registration_t){0};
+      model->service.capacity_domain_count = 0;
+      model->service.capacity_domains = NULL;
       loom_serve_registry_set_phase(model, LOOM_SERVE_REGISTRATION_FAILED);
       progress = true;
     }

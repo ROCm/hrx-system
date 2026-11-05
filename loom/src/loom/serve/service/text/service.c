@@ -1443,6 +1443,9 @@ loom_serve_service_t loom_serve_text_service_interface(
       service->image &&
       loom_serve_text_model_chat_policy(service->model)->images.maximum_count &&
       loom_serve_media_image_codecs(&codecs);
+  iree_host_size_t capacity_domain_count = 0;
+  const void* const* capacity_domains = loom_serve_text_model_capacity_domains(
+      service->model, &capacity_domain_count);
   return (loom_serve_service_t){
       .name = service->name,
       .self = service,
@@ -1484,6 +1487,6 @@ loom_serve_service_t loom_serve_text_service_interface(
                     .counters = &service->telemetry.counters,
                     .latency = &service->telemetry.latency,
                     .sample = loom_serve_text_sample},
-      .capacity_domain = loom_serve_residency_cache(
-          loom_serve_text_model_state_residency(service->model))};
+      .capacity_domain_count = capacity_domain_count,
+      .capacity_domains = capacity_domains};
 }

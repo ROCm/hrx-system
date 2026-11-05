@@ -71,7 +71,8 @@ class SourceDecisionServiceTest : public ::testing::Test {
         host_, models_[0], loom_serve_decision_protocol(), IREE_SV("decisions"),
         16, 16, 0, nullptr, host_allocator_, &services_[0]));
     interfaces_[0] = loom_serve_finite_service_interface(services_[0]);
-    EXPECT_EQ(interfaces_[0].capacity_domain,
+    ASSERT_EQ(interfaces_[0].capacity_domain_count, 1u);
+    EXPECT_EQ(interfaces_[0].capacity_domains[0],
               loom_serve_pool_residency_cache(storage_owner_));
     const loom_serve_wake_callback_t observer = {
         [](void* self) {

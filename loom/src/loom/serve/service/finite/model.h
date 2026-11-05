@@ -176,6 +176,10 @@ const iree_tokenizer_t* loom_serve_finite_model_tokenizer(
 loom_serve_residency_t* loom_serve_finite_model_residency(
     const loom_serve_finite_model_t* model);
 
+// Borrowed shared-capacity identities, valid through final model retirement.
+const void* const* loom_serve_finite_model_capacity_domains(
+    const loom_serve_finite_model_t* model, iree_host_size_t* out_count);
+
 // Source-owned forecast for producing one complete logical request, possibly
 // through several cohorts. Estimates exclude unrelated peers and host storage.
 typedef struct loom_serve_finite_memory_forecast_t {

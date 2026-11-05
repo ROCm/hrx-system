@@ -1462,7 +1462,8 @@ loom_serve_service_t loom_serve_speech_service_interface(
       .telemetry = {.stream = service->telemetry.stream,
                     .counters = &service->telemetry.counters,
                     .latency = &service->telemetry.latency},
-      .capacity_domain = service->generator.capacity_domain};
+      .capacity_domain_count = service->generator.capacity_domain_count,
+      .capacity_domains = service->generator.capacity_domains};
 }
 
 void loom_serve_speech_service_free(loom_serve_speech_service_t* service) {

@@ -66,6 +66,8 @@ struct loom_serve_text_model_t {
     loom_serve_residency_group_t** groups;
     // Atomic invocation working set and admission interest per actual pool.
     loom_serve_residency_t** values;
+    // Stable router identities, in the same distinct actual-pool order.
+    const void** domains;
     // Original private peaks, summed across executions sharing each pool.
     uint64_t* workspace_bytes;
   } residency;

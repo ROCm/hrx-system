@@ -111,8 +111,11 @@ typedef struct loom_serve_recognition_generator_t {
                            loom_serve_execution_frontier_t* out_frontier);
   // Optional immutable tokenizer, borrowed through model retirement.
   const iree_tokenizer_t* tokenizer;
-  // Shared capacity identity, borrowed through service retirement.
-  const void* capacity_domain;
+  // Number of distinct shared-capacity identities; zero declares no sharing.
+  iree_host_size_t capacity_domain_count;
+  // Borrowed non-NULL identities. Any equal member shares capacity across
+  // modalities. The array and its owners survive final model retirement.
+  const void* const* capacity_domains;
   // Optional copied parameter activity, queried only on serialized owner turns.
   loom_runtime_parameter_activity_t (*parameter_activity)(void* self);
 } loom_serve_recognition_generator_t;

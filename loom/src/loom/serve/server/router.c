@@ -442,26 +442,44 @@ static iree_status_t loom_serve_router_model(
   return iree_ok_status();
 }
 
+static bool loom_serve_router_shares_capacity(const loom_serve_service_t* lhs,
+                                              const loom_serve_service_t* rhs) {
+  for (iree_host_size_t i = 0; i < lhs->capacity_domain_count; ++i) {
+    for (iree_host_size_t j = 0; j < rhs->capacity_domain_count; ++j) {
+      if (lhs->capacity_domains[i] == rhs->capacity_domains[j]) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 static loom_serve_service_flags_t loom_serve_router_service_flags(
     const loom_serve_router_t* router, iree_host_size_t selected) {
-  const void* capacity_domain =
-      loom_serve_router_model_at(router, selected)->service.capacity_domain;
-  if (!capacity_domain) {
+  const loom_serve_service_t* service =
+      &loom_serve_router_model_at(router, selected)->service;
+  if (!service->capacity_domain_count) {
     return 0;
   }
   for (iree_host_size_t i = 0; i < router->capacity; ++i) {
     const loom_serve_registered_model_t* model =
         loom_serve_router_model_at(router, i);
-    if (i == selected || model->service.capacity_domain != capacity_domain) {
+    if (i == selected) {
       continue;
     }
     // Retirement still owns backing after service callbacks are gone. Its
     // ownership wake may release capacity; a quiescent failed release cannot.
+    if (model->phase != LOOM_SERVE_REGISTRATION_RETIRING &&
+        model->phase != LOOM_SERVE_REGISTRATION_READY) {
+      continue;
+    }
+    if (!loom_serve_router_shares_capacity(service, &model->service)) {
+      continue;
+    }
     if (model->phase == LOOM_SERVE_REGISTRATION_RETIRING ||
-        (model->phase == LOOM_SERVE_REGISTRATION_READY &&
-         (model->service.is_active(model->service.self) ||
-          model->parameter_operation ==
-              LOOM_SERVE_PARAMETER_OPERATION_ACTIVATING))) {
+        model->service.is_active(model->service.self) ||
+        model->parameter_operation ==
+            LOOM_SERVE_PARAMETER_OPERATION_ACTIVATING) {
       return LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY;
     }
   }

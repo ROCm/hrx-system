@@ -935,6 +935,10 @@ static void loom_serve_finite_set_observer(
 loom_serve_service_t loom_serve_finite_service_interface(
     loom_serve_finite_service_t* service) {
   static const iree_string_view_t input_modalities[] = {IREE_SVL("text")};
+  iree_host_size_t capacity_domain_count = 0;
+  const void* const* capacity_domains =
+      loom_serve_finite_model_capacity_domains(service->model,
+                                               &capacity_domain_count);
   return (loom_serve_service_t){
       .name = service->name,
       .self = service,
@@ -954,8 +958,8 @@ loom_serve_service_t loom_serve_finite_service_interface(
       .inspection = {.request_at = loom_serve_finite_request_at},
       .reconfiguration = loom_serve_execution_reconfiguration_interface(
           service->reconfiguration),
-      .capacity_domain = loom_serve_residency_cache(
-          loom_serve_finite_model_residency(service->model)),
+      .capacity_domain_count = capacity_domain_count,
+      .capacity_domains = capacity_domains,
       .telemetry = {.stream = service->telemetry.stream,
                     .counters = &service->telemetry.counters,
                     .latency = &service->telemetry.latency}};

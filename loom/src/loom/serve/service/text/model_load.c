@@ -508,7 +508,7 @@ iree_status_t loom_serve_text_load_allocate(
   iree_host_size_t model_size = 0, devices_offset = 0, pools_offset = 0;
   iree_host_size_t executions = 0, catalogs = 0, reports = 0;
   iree_host_size_t pool_indices = 0, execution_indices = 0, groups = 0;
-  iree_host_size_t residencies = 0, workspace_bytes = 0;
+  iree_host_size_t residencies = 0, domains = 0, workspace_bytes = 0;
   iree_host_size_t wait_semaphores = 0, wait_values = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(loom_serve_text_model_t), &model_size,
@@ -523,6 +523,7 @@ iree_status_t loom_serve_text_load_allocate(
       IREE_STRUCT_FIELD(device_count, uint32_t, &execution_indices),
       IREE_STRUCT_FIELD(device_count, loom_serve_residency_group_t*, &groups),
       IREE_STRUCT_FIELD(device_count, loom_serve_residency_t*, &residencies),
+      IREE_STRUCT_FIELD(device_count, const void*, &domains),
       IREE_STRUCT_FIELD_ALIGNED(device_count, uint64_t, iree_alignof(uint64_t),
                                 &workspace_bytes),
       IREE_STRUCT_FIELD(2 * device_count, iree_hal_semaphore_t*,
@@ -559,6 +560,7 @@ iree_status_t loom_serve_text_load_allocate(
     model->residency.execution_indices = (uint32_t*)(base + execution_indices);
     model->residency.groups = (loom_serve_residency_group_t**)(base + groups);
     model->residency.values = (loom_serve_residency_t**)(base + residencies);
+    model->residency.domains = (const void**)(base + domains);
     model->residency.workspace_bytes = (uint64_t*)(base + workspace_bytes);
     model->dependencies.semaphores =
         (iree_hal_semaphore_t**)(base + wait_semaphores);
@@ -573,6 +575,8 @@ iree_status_t loom_serve_text_load_allocate(
         ++pool_index;
       }
       if (pool_index == model->residency.count) {
+        model->residency.domains[pool_index] =
+            loom_serve_pool_residency_cache(pools[i]);
         model->residency.execution_indices[model->residency.count++] = i;
       }
       model->residency.pool_indices[i] = pool_index;

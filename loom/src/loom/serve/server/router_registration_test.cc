@@ -91,8 +91,8 @@ struct loom_serve_test_registration_dependency_t {
     // Whether the dependency implements explicit parameter warmup.
     bool activation = true;
   } capabilities;
-  // Optional shared pressure domain, configured before factory publication.
-  const void* capacity_domain = nullptr;
+  // Shared pressure domains configured before factory publication.
+  std::vector<const void*> capacity_domains;
   // Independently controlled parameter-readiness dependency.
   struct {
     // An accepted warmup still borrows the model until readiness is consumed.
@@ -137,7 +137,7 @@ struct loom_serve_test_registration_dependency_t {
       return iree_make_status(IREE_STATUS_UNAVAILABLE, "model prepare failed");
     }
     *service =
-        dependency->service.Interface(nullptr, dependency->capacity_domain);
+        dependency->service.Interface(nullptr, dependency->capacity_domains);
     service->kind = dependency->kind;
     if (service->kind == LOOM_SERVE_MODEL_KIND_ACTIVITY) {
       service->endpoint = nullptr;
@@ -171,6 +171,9 @@ struct loom_serve_test_registration_dependency_t {
   static void Destroy(void* self) {
     auto* operation =
         static_cast<loom_serve_test_registration_operation_t*>(self);
+    // Final model destruction retires the published span as well as callbacks.
+    std::vector<const void*>().swap(
+        operation->dependency->service.capacity_domains);
     ++operation->dependency->destroyed;
     delete operation;
   }
@@ -588,7 +591,7 @@ TEST_P(HttpRouterRegistrationTest,
     std::lock_guard<std::mutex> lock(managed_.mutex);
     managed_.parameters.active = false;
     managed_.parameters.memory.committed_bytes = 0;
-    managed_.capacity_domain = &a_;
+    managed_.capacity_domains = {&managed_, &a_};
   }
   Declare();
   const int operation =
@@ -1119,10 +1122,10 @@ TEST_P(HttpRouterRegistrationTest,
 }
 
 TEST_P(HttpRouterRegistrationTest,
-       RetirementKeepsSharedCapacityWaitersQueuedUntilOwnershipReturns) {
+       RetirementKeepsLateDomainWaitersQueuedUntilOwnershipReturns) {
   {
     std::lock_guard<std::mutex> lock(managed_.mutex);
-    managed_.capacity_domain = &a_;
+    managed_.capacity_domains = {&managed_, &a_};
   }
   Register();
   EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
@@ -1149,7 +1152,7 @@ TEST_P(HttpRouterRegistrationTest,
        RetirementDoesNotInventActivityInAnotherCapacityDomain) {
   {
     std::lock_guard<std::mutex> lock(managed_.mutex);
-    managed_.capacity_domain = &managed_;
+    managed_.capacity_domains = {&managed_, &other_};
   }
   Register();
   EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
@@ -1268,7 +1271,7 @@ TEST_P(HttpRouterRegistrationTest,
        ReleaseFailureRetainsOwnershipUntilExplicitRetry) {
   {
     std::lock_guard<std::mutex> lock(managed_.mutex);
-    managed_.capacity_domain = &a_;
+    managed_.capacity_domains = {&managed_, &a_};
   }
   managed_.fail_release = true;
   Register();

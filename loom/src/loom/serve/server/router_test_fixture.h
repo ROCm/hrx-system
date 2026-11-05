@@ -260,6 +260,8 @@ class ObservationClient {
 struct loom_serve_test_model_service_t {
   // Deployment identifier, borrowed for the router lifetime.
   const char* name;
+  // Published identity storage owned through this dependency's retirement.
+  std::vector<const void*> capacity_domains;
   // Accepted connection/request pairs owned only by serialized router turns.
   std::deque<std::pair<loom_serve_http_connection_t*,
                        const loom_serve_http_request_t*>>
@@ -458,7 +460,8 @@ struct loom_serve_test_model_service_t {
   }
 
   loom_serve_service_t Interface(const iree_tokenizer_t* tokenizer,
-                                 const void* capacity_domain) {
+                                 std::vector<const void*> domains) {
+    capacity_domains = std::move(domains);
     return {.name = iree_make_cstring_view(name),
             .self = this,
             .set_observer = SetObserver,
@@ -471,7 +474,8 @@ struct loom_serve_test_model_service_t {
             .endpoint = "/v1/test",
             .capabilities = {.reasoning = reasoning},
             .snapshot = Snapshot,
-            .capacity_domain = capacity_domain,
+            .capacity_domain_count = capacity_domains.size(),
+            .capacity_domains = capacity_domains.data(),
             .telemetry = {.counters = counters,
                           .latency = latency,
                           .sample = counters ? Sample : nullptr}};
@@ -524,10 +528,10 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
     IREE_ASSERT_OK(tokenizer_status);
     owner_ = std::thread([this] {
       const loom_serve_service_t services[] = {
-          a_.Interface(tokenizer_a_, &a_), b_.Interface(tokenizer_b_, &a_),
-          held_.Interface(tokenizer_a_, &a_),
-          other_.Interface(nullptr, nullptr),
-          escaped_.Interface(nullptr, nullptr)};
+          a_.Interface(tokenizer_a_, {&a_}),
+          b_.Interface(tokenizer_b_, {&b_, &a_}),
+          held_.Interface(tokenizer_a_, {&a_}), other_.Interface(nullptr, {}),
+          escaped_.Interface(nullptr, {})};
       loom_serve_registry_t* registry = nullptr;
       IREE_ASSERT_OK(loom_serve_registry_allocate(
           IREE_ARRAYSIZE(services), services, managed_capacity_, factory_,
@@ -642,15 +646,19 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
   // Second model's vocabulary proves utilities use the selected deployment.
   iree_tokenizer_t* tokenizer_b_ = nullptr;
   // First model dependency used only by serialized router turns.
-  loom_serve_test_model_service_t a_{"a"};
+  loom_serve_test_model_service_t a_{.name = "a"};
   // Second model dependency used only by serialized router turns.
-  loom_serve_test_model_service_t b_{"b", {}, true};
+  loom_serve_test_model_service_t b_{.name = "b",
+                                     .wait_for_shared_activity = true};
   // Explicitly held device-readiness dependencies, independent of a and b.
-  loom_serve_test_model_service_t held_{"held", {}, false, true};
+  loom_serve_test_model_service_t held_{.name = "held",
+                                        .hold_completion = true};
   // A second held dependency proves failure drains every accepted callback.
-  loom_serve_test_model_service_t other_{"other", {}, false, true};
+  loom_serve_test_model_service_t other_{.name = "other",
+                                         .hold_completion = true};
   // Valid deployment identifier requiring distinct metric label escaping.
-  loom_serve_test_model_service_t escaped_{R"(quoted"\name)", {}, true};
+  loom_serve_test_model_service_t escaped_{.name = R"(quoted"\name)",
+                                           .wait_for_shared_activity = true};
   // Outer application caller joining the production router's final release.
   std::thread owner_;
   // Terminal result published by joining owner_.

@@ -240,6 +240,8 @@ class ImageServiceFixture : public ::testing::Test {
   void AddImage(size_t index, iree_string_view_t name,
                 iree_duration_t heartbeat_interval) {
     gates_[index].http = &http_;
+    capacity_domains_[index] = loom_serve_pool_residency_cache(
+        loom_serve_device_group_pool_at(group_, executions_[1] ? index : 0));
     const loom_serve_image_generator_t generator = {
         .self = &gates_[index],
         .batch_limit = 1,
@@ -255,9 +257,8 @@ class ImageServiceFixture : public ::testing::Test {
         .try_admit = loom_serve_test_image_gate_t::Admit,
         .submit = loom_serve_test_image_gate_t::Submit,
         .complete = loom_serve_test_image_gate_t::Complete,
-        .capacity_domain =
-            loom_serve_pool_residency_cache(loom_serve_device_group_pool_at(
-                group_, executions_[1] ? index : 0)),
+        .capacity_domain_count = 1,
+        .capacity_domains = &capacity_domains_[index],
     };
     const loom_serve_image_service_options_t options = {
         .name = name,
@@ -400,6 +401,8 @@ class ImageServiceFixture : public ::testing::Test {
   bool occupied_ = false;
   // Model dependencies, alive until the services and executor retire.
   loom_serve_test_image_gate_t gates_[2];
+  // Stable identities borrowed by each model dependency through retirement.
+  const void* capacity_domains_[2] = {};
   // Production services kept alive until all telemetry readers finish.
   loom_serve_image_service_t* images_[2] = {};
   // Borrowed registry interfaces, valid until RetireImages.

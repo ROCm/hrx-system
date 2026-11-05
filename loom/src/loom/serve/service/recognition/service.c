@@ -732,7 +732,8 @@ loom_serve_service_t loom_serve_recognition_service_interface(
                        .output_modalities =
                            outputs[service->generator.outputs]},
       .snapshot = loom_serve_recognition_snapshot,
-      .capacity_domain = service->generator.capacity_domain,
+      .capacity_domain_count = service->generator.capacity_domain_count,
+      .capacity_domains = service->generator.capacity_domains,
       .telemetry = {.stream = service->telemetry,
                     .counters = &service->counters,
                     .latency = &service->latency}};

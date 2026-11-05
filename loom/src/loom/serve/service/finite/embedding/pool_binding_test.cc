@@ -37,7 +37,8 @@ class PoolBindingTest : public SourceEmbeddingServiceTest {
         host_, model_, loom_serve_embedding_protocol(), IREE_SV("fixture"), 16,
         16, 0, nullptr, host_allocator_, &service_));
     interface_ = loom_serve_finite_service_interface(service_);
-    EXPECT_EQ(interface_.capacity_domain,
+    ASSERT_EQ(interface_.capacity_domain_count, 1u);
+    EXPECT_EQ(interface_.capacity_domains[0],
               loom_serve_pool_residency_cache(isolated_));
   }
 

@@ -92,10 +92,11 @@ typedef struct loom_serve_image_generator_t {
   // Optional immutable input tokenizer, live through the model lifetime. Raw
   // HTTP utilities borrow it independently of the serialized invocation.
   const iree_tokenizer_t* tokenizer;
-  // Borrowed admission-policy owner identity shared with other generators and
-  // modalities. Equal non-NULL identities can release each other's pressure;
-  // NULL declares no shared capacity. Outlives this generator and its service.
-  const void* capacity_domain;
+  // Number of distinct shared-capacity identities; zero declares no sharing.
+  iree_host_size_t capacity_domain_count;
+  // Borrowed non-NULL identities. Any equal member shares capacity across
+  // modalities. The array and its owners survive final model retirement.
+  const void* const* capacity_domains;
 } loom_serve_image_generator_t;
 
 #ifdef __cplusplus

@@ -144,7 +144,7 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
     if (iree_any_bit_set(flags, LOOM_SERVE_REGISTRATION_PREPARE_FLAG_CANCEL)) {
       return iree_make_status(IREE_STATUS_CANCELLED, "preparation cancelled");
     }
-    *out_service = dependency->Interface(nullptr, nullptr);
+    *out_service = dependency->Interface(nullptr, {});
     out_service->set_observer = SetObserver;
     out_service->is_pending = IsPending;
     out_service->advance = Advance;
