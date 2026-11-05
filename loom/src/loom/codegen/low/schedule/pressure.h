@@ -363,6 +363,8 @@ typedef struct loom_low_schedule_candidate_score_t {
   loom_low_schedule_pressure_risk_t pressure_risk;
   // Descriptor-frontier facts discovered while scoring the candidate.
   uint16_t flags;
+  // The candidate closes headroom occupied by non-replayable storage.
+  bool consumes_non_replayable_headroom;
 } loom_low_schedule_candidate_score_t;
 
 enum loom_low_schedule_candidate_flag_bits_e {

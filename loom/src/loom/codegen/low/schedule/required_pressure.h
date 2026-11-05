@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Hard pressure contributed by required values in otherwise spillable banks.
+// Physical ownership and completion headroom in bounded register banks.
 
 #ifndef LOOM_CODEGEN_LOW_SCHEDULE_REQUIRED_PRESSURE_H_
 #define LOOM_CODEGEN_LOW_SCHEDULE_REQUIRED_PRESSURE_H_
@@ -21,8 +21,12 @@ extern "C" {
 struct loom_low_schedule_required_pressure_t {
   // Register units owned by live values that allocation cannot spill.
   uint64_t live_units;
+  // Live units without a direct replay recipe outside this domain.
+  uint64_t non_replayable_live_units;
   // Change in required ownership after the candidate completes.
   int64_t candidate_delta_units;
+  // Change in ownership without a direct replay recipe outside this domain.
+  int64_t non_replayable_candidate_delta_units;
   // Change in required ownership at the candidate's result-write boundary.
   int64_t candidate_write_delta_units;
   // Required result units overlapping all inputs before their reads.
@@ -30,6 +34,15 @@ struct loom_low_schedule_required_pressure_t {
   // True when the candidate creates a used result in this domain.
   bool candidate_opens_lifetime;
 };
+
+// Retains direct rematerialization eligibility once during graph construction.
+// A replayable packet needs no input storage from its result's physical bank;
+// captures in aliased register classes still occupy that bank. Structural
+// identities and multi-result packets retain their physical ownership, matching
+// allocation repair's single-result descriptor recipe boundary.
+void loom_low_schedule_required_pressure_classify_node(
+    loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_node_t* node);
 
 // Returns the required-pressure domain for a value, or NULL when it can spill
 // or its bank has no bounded completion domain.
@@ -58,6 +71,11 @@ static inline void loom_low_schedule_required_pressure_adjust_live(
                                                     value);
   if (record != NULL) {
     record->live_units += delta_units;
+    if (!iree_any_bit_set(
+            value->flags,
+            LOOM_LOW_SCHEDULE_VALUE_FLAG_REPLAYABLE_OUTSIDE_DOMAIN)) {
+      record->non_replayable_live_units += delta_units;
+    }
   }
 }
 
@@ -72,6 +90,11 @@ static inline void loom_low_schedule_required_pressure_adjust_candidate(
                                                     value);
   if (record != NULL) {
     record->candidate_delta_units += delta_units;
+    if (!iree_any_bit_set(
+            value->flags,
+            LOOM_LOW_SCHEDULE_VALUE_FLAG_REPLAYABLE_OUTSIDE_DOMAIN)) {
+      record->non_replayable_candidate_delta_units += delta_units;
+    }
     if (!after_writes) {
       record->candidate_write_delta_units += delta_units;
     }

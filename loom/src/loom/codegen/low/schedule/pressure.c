@@ -1174,6 +1174,7 @@ static void loom_low_schedule_reset_candidate_pressure_deltas(
     loom_low_schedule_required_pressure_t* record =
         &pressure_state->required_pressure[domain];
     record->candidate_delta_units = 0;
+    record->non_replayable_candidate_delta_units = 0;
     record->candidate_write_delta_units = 0;
     record->candidate_early_added_units = 0;
     record->candidate_opens_lifetime = false;

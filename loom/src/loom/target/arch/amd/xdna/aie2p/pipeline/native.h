@@ -183,6 +183,19 @@ typedef struct loom_aie2p_native_dma_completion_t {
   uint16_t selector;
 } loom_aie2p_native_dma_completion_t;
 
+// Repeated external-address patch bodies within one source worker occurrence.
+// The local descriptor fixes the routes, chain geometry, and local patch
+// policy; relocation bases, shim commands, and shim queue words remain call
+// arguments.
+typedef struct loom_aie2p_native_dma_submit_t {
+  // Worker occurrence owning these static submission sites.
+  iree_host_size_t worker;
+  // Number of static sites, independent of runtime loop trip counts.
+  iree_host_size_t use_count;
+  // One native leaf materialized on first use, or null before emission.
+  loom_symbol_ref_t function;
+} loom_aie2p_native_dma_submit_t;
+
 // One physical DMA endpoint reused after its prior transfer and any other
 // transfer sharing its completion semaphore have retired. Local and shim
 // descriptors have independent geometries and retirement identities.
@@ -202,6 +215,9 @@ typedef struct loom_aie2p_native_dma_descriptor_t {
   // Each issue patches this endpoint's address. Shared descriptors also patch
   // fixed offsets when their copies address different storage or record slots.
   bool address_dynamic;
+  // Most recent core worker's external-patch group. Earlier workers' tasks
+  // retain their own group after the descriptor moves to another occurrence.
+  loom_aie2p_native_dma_submit_t* submit_group;
 } loom_aie2p_native_dma_descriptor_t;
 
 typedef struct loom_aie2p_native_transfer_task_t
@@ -280,6 +296,8 @@ struct loom_aie2p_native_transfer_task_t {
   bool local_address_dynamic;
   // Every shim descriptor address is patched at each issue.
   bool shim_address_dynamic;
+  // Retained external-patch sharing group, or NULL for inline-only submissions.
+  loom_aie2p_native_dma_submit_t* submit_group;
   // Selected ordinary helper that submits both endpoint chains.
   loom_symbol_ref_t submit;
   // Selected ordinary helper that observes task completion.

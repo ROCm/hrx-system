@@ -90,6 +90,19 @@ iree_status_t loom_aie2p_worker_control_write(
     uint8_t packet_id, uint32_t register_offset, const loom_value_id_t* words,
     iree_host_size_t count);
 
+// Encodes the register address, payload length, and odd parity of a write
+// command. The admitted register offset fits 20 bits and count is 1..4 words.
+uint32_t loom_aie2p_worker_control_write_command(uint32_t register_offset,
+                                                 iree_host_size_t count);
+
+// Emits a write whose encoded command is a runtime operand. Shared DMA helpers
+// receive this operand from their callers instead of specializing the body for
+// every descriptor address. count matches the encoded command's payload length.
+iree_status_t loom_aie2p_worker_control_write_encoded(
+    loom_aie2p_worker_builder_t* context, loom_builder_t* builder,
+    uint8_t packet_id, loom_value_id_t command, const loom_value_id_t* words,
+    iree_host_size_t count);
+
 // Reads 1..4 consecutive registers from a 16-byte-aligned address through a
 // selected return route. The scalar stream has been drained before the request:
 // its packet header and values cannot interleave with outstanding task tokens.

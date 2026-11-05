@@ -6,6 +6,39 @@
 
 #include "loom/codegen/low/schedule/required_pressure.h"
 
+#include "loom/codegen/low/descriptor_traits.h"
+
+void loom_low_schedule_required_pressure_classify_node(
+    loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_node_t* node) {
+  if (node->descriptor == NULL || node->result_count != 1 ||
+      iree_any_bit_set(node->traits, LOOM_TRAIT_OBSERVABLE_EFFECT) ||
+      !loom_low_descriptor_result_can_rematerialize(
+          state->target.descriptor_set, node->descriptor, 0)) {
+    return;
+  }
+  loom_low_schedule_value_record_t* result =
+      &state->values[loom_low_schedule_node_const_result_ordinals(node)[0]];
+  if (!loom_low_schedule_value_requires_register(result)) {
+    return;
+  }
+  const uint16_t pressure_set = loom_low_reg_class_pressure_set_id(
+      &state->target.descriptor_set->reg_classes[result->register_class_id]);
+  const loom_value_ordinal_t* operands =
+      loom_low_schedule_node_const_operand_ordinals(node);
+  for (uint16_t i = 0; i < node->operand_count; ++i) {
+    const uint16_t input_class = state->values[operands[i]].register_class_id;
+    if (input_class == result->register_class_id ||
+        (input_class != LOOM_LOW_REG_CLASS_NONE && pressure_set != 0 &&
+         pressure_set ==
+             loom_low_reg_class_pressure_set_id(
+                 &state->target.descriptor_set->reg_classes[input_class]))) {
+      return;
+    }
+  }
+  result->flags |= LOOM_LOW_SCHEDULE_VALUE_FLAG_REPLAYABLE_OUTSIDE_DOMAIN;
+}
+
 void loom_low_schedule_required_pressure_score_candidate(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_pressure_state_t* pressure_state,

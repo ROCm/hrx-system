@@ -480,10 +480,12 @@ bool loom_low_schedule_candidate_score_less(
     const bool preserving_defers_materialization =
         lhs_consumes_completion_headroom ? rhs_defers_materialization
                                          : lhs_defers_materialization;
-    // Headroom priority must avoid a physical pressure cliff or reduce it.
-    // Moving equal debt between banks does not justify that priority. Blocked
-    // setup still needs a strict improvement to override its deferral.
-    if ((preserving->pressure_cliff_penalty == 0 ||
+    // Allocation cannot recreate non-replayable storage to make room for a
+    // missing completion operand. Its last slot takes priority over predicted
+    // downstream pressure. Replayable storage keeps the ordinary physical-cost
+    // ordering; blocked setup still needs a strict improvement to run early.
+    if ((consuming->consumes_non_replayable_headroom ||
+         preserving->pressure_cliff_penalty == 0 ||
          preserving->pressure_cliff_penalty <
              consuming->pressure_cliff_penalty) &&
         (!preserving_defers_materialization ||

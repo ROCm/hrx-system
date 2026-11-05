@@ -391,6 +391,38 @@ TEST_F(CandidatePolicyTest, CompletionHeadroomKeepsCrossBankPressureOrdering) {
   }
 }
 
+TEST_F(CandidatePolicyTest, NonReplayableHeadroomPrecedesPredictedPressure) {
+  auto completion = MakeConstrainedCandidate(3, 1);
+  completion.pressure_cliff_penalty = 16;
+  auto independent = MakeCandidate(0, 0);
+  independent.pressure_cliff_penalty = 12;
+  independent.flags =
+      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_CONSUMES_COMPLETION_HEADROOM;
+  independent.consumes_non_replayable_headroom = true;
+  for (const auto mode :
+       {LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT,
+        LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF,
+        LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION}) {
+    SCOPED_TRACE(mode);
+    // The missing operand must start before another stream fills the bank.
+    // Predicted downstream pressure does not mean this step cannot fit.
+    ExpectPreferred(mode, completion, independent);
+
+    auto overflowing = completion;
+    overflowing.flags |=
+        LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY;
+    ExpectPreferred(mode, independent, overflowing);
+
+    // A blocked materialization cannot spend this priority on new storage.
+    auto blocked = completion;
+    blocked.flags = LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_STORAGE_SETUP;
+    blocked.produced_live_value_count = 1;
+    blocked.produced_live_units = 1;
+    blocked.killed_live_units = 0;
+    ExpectPreferred(mode, independent, blocked);
+  }
+}
+
 TEST_F(CandidatePolicyTest,
        DeferredLeafCannotForceLargerPhysicalPressureCliff) {
   auto setup = MakeCandidate(0, 0);
