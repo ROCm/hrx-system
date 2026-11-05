@@ -1790,18 +1790,74 @@ def _build_amdgpu_core_descriptor_set_from_specs(
     )
 
 
-def _order_descriptor_sets_for_shared_views(
+def _order_descriptor_set_family_prefixes(
+    descriptor_sets: dict[str, DescriptorSet],
+    generator_targets: Sequence[str],
+    *,
+    owner: str,
+) -> None:
+    """Orders one nested descriptor family into a common ordinal space."""
+
+    family_sets = [
+        (generator_target, descriptor_sets[generator_target])
+        for generator_target in generator_targets
+        if generator_target in descriptor_sets
+    ]
+    if len(family_sets) < 2:
+        return
+    family_sets.sort(key=lambda item: len(item[1].descriptors))
+
+    canonical_keys: list[str] = []
+    previous_keys: frozenset[str] = frozenset()
+    for generator_target, descriptor_set in family_sets:
+        descriptor_keys = tuple(
+            descriptor.key for descriptor in descriptor_set.descriptors
+        )
+        descriptor_key_set = frozenset(descriptor_keys)
+        if len(descriptor_key_set) != len(descriptor_keys):
+            raise ValueError(
+                f"AMDGPU descriptor set '{generator_target}' has duplicate "
+                f"descriptor keys in {owner}"
+            )
+        if not previous_keys.issubset(descriptor_key_set):
+            raise ValueError(
+                f"AMDGPU descriptor sets in {owner} do not form nested ordinal prefixes"
+            )
+        canonical_keys.extend(
+            key for key in descriptor_keys if key not in previous_keys
+        )
+        previous_keys = descriptor_key_set
+
+    for generator_target, descriptor_set in family_sets:
+        descriptors_by_key = {
+            descriptor.key: descriptor for descriptor in descriptor_set.descriptors
+        }
+        prefix_keys = canonical_keys[: len(descriptors_by_key)]
+        if frozenset(prefix_keys) != frozenset(descriptors_by_key):
+            raise ValueError(
+                f"AMDGPU descriptor set '{generator_target}' cannot form a "
+                f"nested ordinal prefix in {owner}"
+            )
+        ordered_descriptors = tuple(descriptors_by_key[key] for key in prefix_keys)
+        if ordered_descriptors == descriptor_set.descriptors:
+            continue
+        descriptor_sets[generator_target] = replace(
+            descriptor_set,
+            descriptors=ordered_descriptors,
+        )
+
+
+def _order_descriptor_sets_for_shared_ordinals(
     descriptor_sets: Mapping[str, DescriptorSet],
 ) -> dict[str, DescriptorSet]:
-    """Orders exact descriptors behind their portable view prefixes."""
+    """Orders every shared descriptor family into one ordinal space."""
 
     infos_by_key = {info.key: info for info in AMDGPU_DESCRIPTOR_SET_INFOS}
-    view_sets_by_exact_target: dict[str, list[DescriptorSet]] = {}
+    portable_targets_by_exact_target: dict[str, list[str]] = {}
     for representation_info in AMDGPU_DESCRIPTOR_SET_INFOS:
         if not representation_info.member_generator_targets:
             continue
-        representation_set = descriptor_sets.get(representation_info.generator_target)
-        if representation_set is None:
+        if representation_info.generator_target not in descriptor_sets:
             continue
         for contract_key in amdgpu_descriptor_set_supported_target_contract_keys(
             representation_info
@@ -1809,47 +1865,30 @@ def _order_descriptor_sets_for_shared_views(
             exact_info = infos_by_key[contract_key]
             if exact_info.generator_target not in descriptor_sets:
                 continue
-            view_sets_by_exact_target.setdefault(
+            portable_targets_by_exact_target.setdefault(
                 exact_info.generator_target, []
-            ).append(representation_set)
+            ).append(representation_info.generator_target)
 
     ordered_sets = dict(descriptor_sets)
-    for exact_target, view_sets in view_sets_by_exact_target.items():
-        view_sets.sort(key=lambda view_set: (len(view_set.descriptors), view_set.key))
-        prefix_view = view_sets[-1]
-        prefix_keys = tuple(descriptor.key for descriptor in prefix_view.descriptors)
-        for view_set in view_sets[:-1]:
-            view_keys = tuple(descriptor.key for descriptor in view_set.descriptors)
-            if view_keys != prefix_keys[: len(view_keys)]:
-                raise ValueError(
-                    f"AMDGPU descriptor views '{view_set.key}' and "
-                    f"'{prefix_view.key}' cannot share a storage prefix for "
-                    f"exact target '{exact_target}'"
-                )
-
-        exact_set = descriptor_sets[exact_target]
-        exact_descriptors_by_key = {
-            descriptor.key: descriptor for descriptor in exact_set.descriptors
-        }
-        missing_keys = tuple(
-            key for key in prefix_keys if key not in exact_descriptors_by_key
+    for exact_target, portable_targets in portable_targets_by_exact_target.items():
+        _order_descriptor_set_family_prefixes(
+            ordered_sets,
+            (*portable_targets, exact_target),
+            owner=f"portable family for exact target '{exact_target}'",
         )
-        if missing_keys:
-            raise ValueError(
-                f"AMDGPU exact descriptor set '{exact_set.key}' is missing "
-                f"portable descriptors: {', '.join(missing_keys)}"
-            )
-        prefix_key_set = frozenset(prefix_keys)
-        ordered_sets[exact_target] = replace(
-            exact_set,
-            descriptors=(
-                *(exact_descriptors_by_key[key] for key in prefix_keys),
-                *(
-                    descriptor
-                    for descriptor in exact_set.descriptors
-                    if descriptor.key not in prefix_key_set
-                ),
-            ),
+
+    view_targets_by_storage_target: dict[str, list[str]] = {}
+    for info in AMDGPU_DESCRIPTOR_SET_INFOS:
+        if info.storage_generator_target is None:
+            continue
+        view_targets_by_storage_target.setdefault(
+            info.storage_generator_target, []
+        ).append(info.generator_target)
+    for storage_target, view_targets in view_targets_by_storage_target.items():
+        _order_descriptor_set_family_prefixes(
+            ordered_sets,
+            (storage_target, *view_targets),
+            owner=f"storage family '{storage_target}'",
         )
     return ordered_sets
 
@@ -1887,7 +1926,7 @@ def build_amdgpu_core_descriptor_sets_from_specs(
         )
         for target, builder, info in builders_and_infos
     }
-    return _order_descriptor_sets_for_shared_views(descriptor_sets)
+    return _order_descriptor_sets_for_shared_ordinals(descriptor_sets)
 
 
 def build_amdgpu_core_descriptor_set_from_specs(
