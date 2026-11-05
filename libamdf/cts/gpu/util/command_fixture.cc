@@ -59,8 +59,9 @@ amdf_status_t GpuCommandTest::MatchGpuEndpoint(amdf_endpoint_t* endpoint,
 }
 
 void GpuCommandTest::CreateMemory(amdf_memory_access_t access,
-                                  uint64_t byte_length, GpuMemory** out_memory,
-                                  amdf_memory_flags_t flags) {
+                                  uint64_t byte_length,
+                                  amdf_memory_flags_t flags,
+                                  GpuMemory** out_memory) {
   const amdf_memory_device_access_t attachment = {
       device_,
       {
@@ -85,6 +86,14 @@ void GpuCommandTest::CreateMemory(amdf_memory_access_t access,
   ASSERT_NO_FATAL_FAILURE(CreateMemory(system_scope_, creation, out_memory));
 }
 
+void GpuCommandTest::CreateMemory(amdf_memory_access_t access,
+                                  uint64_t byte_length,
+                                  GpuMemory** out_memory) {
+  CreateMemory(access, byte_length,
+               AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE,
+               out_memory);
+}
+
 void GpuCommandTest::CreateMemory(amdf_memory_scope_t* scope,
                                   const amdf_memory_create_info_t& create_info,
                                   GpuMemory** out_memory) {
@@ -93,34 +102,48 @@ void GpuCommandTest::CreateMemory(amdf_memory_scope_t* scope,
   *out_memory = &memory;
 }
 
-void GpuCommandTest::CreateQueue(GpuUserQueue** out_queue,
-                                 amdf_queue_producer_mode_t producer_mode,
-                                 const amdf_gpu_queue_scratch_t& scratch) {
-  CreateQueue(family_, out_queue, producer_mode, scratch);
+void GpuCommandTest::CreateQueue(GpuUserQueue** out_queue) {
+  CreateQueue(GpuUserQueueOptions{}, out_queue);
 }
 
-void GpuCommandTest::CreateQueue(
-    const amdf_queue_family_info_t& family, GpuUserQueue** out_queue,
-    amdf_queue_producer_mode_t producer_mode,
-    const amdf_gpu_queue_scratch_t& scratch,
-    amdf_user_queue_capabilities_t required_capabilities,
-    uint64_t ring_byte_length, amdf_gpu_user_queue_flags_t flags,
-    const void* next, amdf_queue_placement_t placement) {
-  auto& queue = queues_.emplace_back();
-  ASSERT_NO_FATAL_FAILURE(queue.Initialize(
-      api_, gpu_api_, device_, family, producer_mode, scratch,
-      required_capabilities, ring_byte_length, flags, next, placement));
-  *out_queue = &queue;
-}
-
-void GpuCommandTest::CreateQueue(GpuCommandQueue** out_queue,
-                                 uint64_t command_byte_length) {
-  CreateQueue(family_, out_queue, command_byte_length);
+void GpuCommandTest::CreateQueue(const GpuUserQueueOptions& options,
+                                 GpuUserQueue** out_queue) {
+  CreateQueue(family_, options, out_queue);
 }
 
 void GpuCommandTest::CreateQueue(const amdf_queue_family_info_t& family,
-                                 GpuCommandQueue** out_queue,
-                                 uint64_t command_byte_length) {
+                                 GpuUserQueue** out_queue) {
+  CreateQueue(family, GpuUserQueueOptions{}, out_queue);
+}
+
+void GpuCommandTest::CreateQueue(const amdf_queue_family_info_t& family,
+                                 const GpuUserQueueOptions& options,
+                                 GpuUserQueue** out_queue) {
+  auto& queue = queues_.emplace_back();
+  ASSERT_NO_FATAL_FAILURE(queue.Initialize(
+      api_, gpu_api_, device_, family, options.producer_mode, options.scratch,
+      options.required_capabilities, options.ring_byte_length, options.flags,
+      options.next, options.placement));
+  *out_queue = &queue;
+}
+
+void GpuCommandTest::CreateQueue(GpuCommandQueue** out_queue) {
+  CreateQueue(0, out_queue);
+}
+
+void GpuCommandTest::CreateQueue(uint64_t command_byte_length,
+                                 GpuCommandQueue** out_queue) {
+  CreateQueue(family_, command_byte_length, out_queue);
+}
+
+void GpuCommandTest::CreateQueue(const amdf_queue_family_info_t& family,
+                                 GpuCommandQueue** out_queue) {
+  CreateQueue(family, 0, out_queue);
+}
+
+void GpuCommandTest::CreateQueue(const amdf_queue_family_info_t& family,
+                                 uint64_t command_byte_length,
+                                 GpuCommandQueue** out_queue) {
   const auto publication =
       SelectGpuHostPublication(family, requirements_.publication_modes);
   ASSERT_NE(publication, 0u);

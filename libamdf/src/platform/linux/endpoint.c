@@ -346,7 +346,7 @@ static amdf_status_t amdf_linux_resolve_endpoint(
     amdf_platform_instance_t* instance, const amdf_endpoint_id_t* id,
     amdf_endpoint_info_t* info, uint32_t* out_host_numa_node,
     amdf_endpoint_pci_address_t* out_pci_address,
-    char device_path[AMDF_LINUX_DEVICE_PATH_CAPACITY]) {
+    char out_device_path[AMDF_LINUX_DEVICE_PATH_CAPACITY]) {
   char path[64];
   snprintf(path, sizeof(path), "dev/char/%u:%u", (uint32_t)(id->words[0] >> 32),
            (uint32_t)id->words[0]);
@@ -395,7 +395,7 @@ static amdf_status_t amdf_linux_resolve_endpoint(
     return amdf_make_api_status(AMDF_STATUS_CODE_NOT_FOUND);
   }
   const int path_length = snprintf(
-      device_path, AMDF_LINUX_DEVICE_PATH_CAPACITY, "/dev/%s/%s",
+      out_device_path, AMDF_LINUX_DEVICE_PATH_CAPACITY, "/dev/%s/%s",
       info->engine_kind == AMDF_ENGINE_KIND_XDNA ? "accel" : "dri", name);
   return (size_t)path_length < AMDF_LINUX_DEVICE_PATH_CAPACITY
              ? AMDF_STATUS_OK

@@ -46,8 +46,8 @@ static void amdf_windows_copy_endpoint_summary(
 
 amdf_status_t amdf_windows_endpoint_snapshot_enumerate(
     const amdf_kmt_api_t* api, uint32_t capacity,
-    amdf_endpoint_summary_t* summaries, uint32_t* out_count,
-    amdf_allocator_t host_allocator) {
+    amdf_allocator_t host_allocator, amdf_endpoint_summary_t* summaries,
+    uint32_t* out_count) {
   if ((size_t)capacity > SIZE_MAX / sizeof(*summaries)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
   }

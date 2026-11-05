@@ -59,9 +59,9 @@ TEST_P(AqlCompletionEventTest, DependentDispatchesRetireBeforeSignalReuse) {
   std::array<uint64_t, 2> indices = {};
   std::array<uint64_t, 2> descriptors = {};
   for (uint32_t i = 0; i < queues.size(); ++i) {
-    ASSERT_NO_FATAL_FAILURE(
-        CreateQueue(family_, &queues[i], AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-                    AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER, kRingBytes));
+    ASSERT_NO_FATAL_FAILURE(CreateQueue(
+        family_, GpuUserQueueOptions{.ring_byte_length = kRingBytes},
+        &queues[i]));
     ASSERT_NO_FATAL_FAILURE(PublishKernel(*queues[i], *kernel,
                                           i == 0 ? "producer" : "consumer",
                                           &indices[i], &descriptors[i]));

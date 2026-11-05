@@ -176,7 +176,7 @@ class GpuAtomicAddTest : public GpuCommandTest,
           CreateMemory(AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096,
                        &completion));
     } else {
-      ASSERT_NO_FATAL_FAILURE(CreateQueue(&pm4_queue, 32768));
+      ASSERT_NO_FATAL_FAILURE(CreateQueue(32768, &pm4_queue));
     }
     const uintptr_t host_address =
         reinterpret_cast<uintptr_t>(control->host.pointer);

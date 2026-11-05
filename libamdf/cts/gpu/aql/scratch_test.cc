@@ -100,9 +100,13 @@ TEST_P(AqlScratchServiceTest, FirmwareRequestsBackingAndReleasesPreviousRange) {
       .event = event_,
   };
   GpuUserQueue* queue = nullptr;
-  ASSERT_NO_FATAL_FAILURE(
-      CreateQueue(family_, &queue, AMDF_QUEUE_PRODUCER_MODE_SINGLE, initial,
-                  AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER, 4096, 0, &service));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(family_,
+                                      GpuUserQueueOptions{
+                                          .scratch = initial,
+                                          .ring_byte_length = 4096,
+                                          .next = &service,
+                                      },
+                                      &queue));
   uint64_t index = 0;
   uint64_t descriptor_address = 0;
   ASSERT_NO_FATAL_FAILURE(PublishKernel(*queue, *kernel, "private_kernel",

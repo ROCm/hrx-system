@@ -119,8 +119,8 @@ void Pm4SdmaFiniteStreamTest::RunCoherentStreams(
   Pm4ComputeProgram program = {};
   std::array<amdf_cache_operations_t, kTransferPhaseCount> sdma_operations = {};
   ASSERT_NO_FATAL_FAILURE(PrepareCoherentHandoff(kernel, PairQuery::kConcrete,
-                                                 kEdges, backings, &program,
-                                                 &sdma_operations));
+                                                 kEdges, backings,
+                                                 &sdma_operations, &program));
   auto& source = *backings[kSource].memory;
   auto& input = *backings[kInput].memory;
   auto& output = *backings[kOutput].memory;
@@ -137,15 +137,15 @@ void Pm4SdmaFiniteStreamTest::RunCoherentStreams(
   GpuUserQueue* pm4_queue = nullptr;
   GpuUserQueue* upload_queue = nullptr;
   GpuUserQueue* download_queue = nullptr;
-  ASSERT_NO_FATAL_FAILURE(
-      CreateQueue(family_, &pm4_queue, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-                  AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER, kRingByteLength));
   ASSERT_NO_FATAL_FAILURE(CreateQueue(
-      sdma_family_, &upload_queue, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-      AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER, kRingByteLength));
+      family_, GpuUserQueueOptions{.ring_byte_length = kRingByteLength},
+      &pm4_queue));
   ASSERT_NO_FATAL_FAILURE(CreateQueue(
-      sdma_family_, &download_queue, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-      AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER, kRingByteLength));
+      sdma_family_, GpuUserQueueOptions{.ring_byte_length = kRingByteLength},
+      &upload_queue));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(
+      sdma_family_, GpuUserQueueOptions{.ring_byte_length = kRingByteLength},
+      &download_queue));
   for (auto* queue : {upload_queue, download_queue}) {
     ASSERT_TRUE(amdf_device_id_is_equal(&pm4_queue->info.device_id,
                                         &queue->info.device_id));

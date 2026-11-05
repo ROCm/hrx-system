@@ -82,7 +82,7 @@ amdf_status_t amdf_platform_endpoint_open(
   if (amdf_status_is_ok(status)) {
     status = amdf_windows_query_endpoint_metadata(
         &instance->endpoint_metadata, &instance->kmt, endpoint->adapter,
-        physical_adapter_index, &endpoint->metadata, instance->host_allocator);
+        physical_adapter_index, instance->host_allocator, &endpoint->metadata);
   }
 
   if (amdf_status_is_ok(status)) {

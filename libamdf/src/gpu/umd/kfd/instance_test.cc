@@ -165,8 +165,8 @@ class KfdInstanceTest : public ::testing::Test {
     return amdf_gpu_umd_instance_prepare(&instance_, lifetime, allocator);
   }
 
-  amdf_status_t PrepareVm(uint32_t gpu_id, int* out_descriptor,
-                          amdf_gpu_kfd_topology_t* topology = nullptr) {
+  amdf_status_t PrepareVm(uint32_t gpu_id, amdf_gpu_kfd_topology_t* topology,
+                          int* out_descriptor) {
     amdf_platform_endpoint_t endpoint = {};
     endpoint.info.pci.device_id = 0x150e;
     amdf_gpu_kfd_topology_t local_topology = {};
@@ -183,12 +183,16 @@ class KfdInstanceTest : public ::testing::Test {
     return status;
   }
 
+  amdf_status_t PrepareVm(uint32_t gpu_id, int* out_descriptor) {
+    return PrepareVm(gpu_id, nullptr, out_descriptor);
+  }
+
   void PrepareEventVm(uint32_t gpu_id, amdf_gpu_kfd_topology_t* topology) {
     // The real host VA reservation must fit in the modeled GPU aperture.
     native_.device_info.virtual_address_max = UINT64_C(1) << 48;
     ASSERT_EQ(Prepare(), AMDF_STATUS_OK);
     int descriptor = -1;
-    ASSERT_EQ(PrepareVm(gpu_id, &descriptor, topology), AMDF_STATUS_OK);
+    ASSERT_EQ(PrepareVm(gpu_id, topology, &descriptor), AMDF_STATUS_OK);
   }
 
   amdf_status_t CreateEvent(const amdf_gpu_kfd_topology_t& topology,
@@ -256,7 +260,7 @@ TEST_F(KfdInstanceTest, NativeMemoryQueryPrecedesBootstrapAndPublication) {
   topology.vram.visible_byte_length = UINT64_C(256) << 20;
   topology.gtt_byte_length = UINT64_C(16) << 30;
   int descriptor = -7;
-  ASSERT_EQ(PrepareVm(11, &descriptor, &topology), AMDF_STATUS_OK);
+  ASSERT_EQ(PrepareVm(11, &topology, &descriptor), AMDF_STATUS_OK);
   EXPECT_EQ(native_.queried_descriptor, descriptor);
   EXPECT_EQ(topology.virtual_address.begin,
             native_.device_info.virtual_address_offset);
@@ -274,7 +278,7 @@ TEST_F(KfdInstanceTest, NativeMemoryQueryPrecedesBootstrapAndPublication) {
   native_.device_info.virtual_address_max = UINT64_C(1) << 45;
   native_.device_info.pte_fragment_size = 65536;
   topology.vram.visible_byte_length = topology.vram.total_byte_length;
-  ASSERT_EQ(PrepareVm(11, &descriptor, &topology), AMDF_STATUS_OK);
+  ASSERT_EQ(PrepareVm(11, &topology, &descriptor), AMDF_STATUS_OK);
   EXPECT_EQ(topology.virtual_address.end, UINT64_C(1) << 45);
   EXPECT_EQ(topology.virtual_address.fragment_size, 65536u);
   EXPECT_EQ(topology.memory_features,
@@ -283,7 +287,7 @@ TEST_F(KfdInstanceTest, NativeMemoryQueryPrecedesBootstrapAndPublication) {
   native_.device_info.ids_flags =
       AMDGPU_IDS_FLAGS_FUSION |
       (AMDGPU_IDS_FLAGS_MODE_PT << AMDGPU_IDS_FLAGS_MODE_SHIFT);
-  ASSERT_EQ(PrepareVm(11, &descriptor, &topology), AMDF_STATUS_OK);
+  ASSERT_EQ(PrepareVm(11, &topology, &descriptor), AMDF_STATUS_OK);
   EXPECT_EQ(topology.memory_features, 0u);
   EXPECT_TRUE(topology.integrated);
   EXPECT_EQ(native_.Count(Operation::kAcquire), 1u);
@@ -297,11 +301,11 @@ TEST_F(KfdInstanceTest, FailedMemoryQueryDoesNotAcquireOrPublishFacts) {
   topology.virtual_address.begin = 0x20000;
   const amdf_gpu_kfd_topology_t original = topology;
   int descriptor = -7;
-  EXPECT_EQ(PrepareVm(11, &descriptor, &topology), amdf_linux_error(EIO));
+  EXPECT_EQ(PrepareVm(11, &topology, &descriptor), amdf_linux_error(EIO));
   EXPECT_EQ(descriptor, -7);
   EXPECT_EQ(std::memcmp(&topology, &original, sizeof(topology)), 0);
   EXPECT_EQ(native_.Count(Operation::kAcquire), 0u);
-  EXPECT_EQ(PrepareVm(11, &descriptor, &topology), AMDF_STATUS_OK);
+  EXPECT_EQ(PrepareVm(11, &topology, &descriptor), AMDF_STATUS_OK);
   EXPECT_EQ(native_.Count(Operation::kOpenRender), 1u);
 }
 
@@ -338,7 +342,7 @@ TEST_F(KfdInstanceTest, InvalidNativeMemoryFactsNeverReachBootstrap) {
     amdf_gpu_kfd_topology_t topology = {.gpu_id = 11};
     const amdf_gpu_kfd_topology_t original = topology;
     int descriptor = -7;
-    EXPECT_EQ(PrepareVm(11, &descriptor, &topology),
+    EXPECT_EQ(PrepareVm(11, &topology, &descriptor),
               variant == 4 ? amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)
                            : amdf_linux_error(EPROTO));
     EXPECT_EQ(descriptor, -7);
@@ -454,7 +458,7 @@ TEST_F(KfdInstanceTest, FailedAcquisitionReleasesProgressBeforeRetry) {
   amdf_gpu_kfd_topology_t topology = {.gpu_id = 11};
   const amdf_gpu_kfd_topology_t original = topology;
   int descriptor = -7;
-  EXPECT_EQ(PrepareVm(11, &descriptor, &topology), amdf_linux_error(EIO));
+  EXPECT_EQ(PrepareVm(11, &topology, &descriptor), amdf_linux_error(EIO));
   EXPECT_EQ(descriptor, -7);
   EXPECT_EQ(std::memcmp(&topology, &original, sizeof(topology)), 0);
   native_.operations.clear();
@@ -471,7 +475,7 @@ TEST_F(KfdInstanceTest, FailedBootstrapReleaseNeverReacquiresConvertedVm) {
   amdf_gpu_kfd_topology_t topology = {.gpu_id = 11};
   const amdf_gpu_kfd_topology_t original = topology;
   int descriptor = -7;
-  EXPECT_EQ(PrepareVm(11, &descriptor, &topology), amdf_linux_error(EIO));
+  EXPECT_EQ(PrepareVm(11, &topology, &descriptor), amdf_linux_error(EIO));
   EXPECT_EQ(descriptor, -7);
   EXPECT_EQ(std::memcmp(&topology, &original, sizeof(topology)), 0);
   ASSERT_EQ(PrepareVm(11, &descriptor), AMDF_STATUS_OK);

@@ -177,13 +177,16 @@ void DeviceSdmaLookaheadTest::Run(const LookaheadCase& test_case) {
   GpuUserQueue* transfer = nullptr;
   for (auto** queue : {&publisher, &consumer}) {
     ASSERT_NO_FATAL_FAILURE(CreateQueue(
-        family_, queue, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-        AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER, kAqlRingByteLength));
+        family_, GpuUserQueueOptions{.ring_byte_length = kAqlRingByteLength},
+        queue));
   }
-  ASSERT_NO_FATAL_FAILURE(
-      CreateQueue(sdma_family_, &transfer, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-                  AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
-                      AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(
+      sdma_family_,
+      GpuUserQueueOptions{
+          .required_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
+                                   AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER,
+      },
+      &transfer));
   const auto& mapping = transfer->producer.info;
   uint64_t publisher_index = 0;
   uint64_t consumer_index = 0;

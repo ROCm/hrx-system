@@ -290,8 +290,9 @@ class GpuFilePoolTest : public DispatchTest {
 
   void PrepareDispatch() {
     ASSERT_NO_FATAL_FAILURE(this->CreateMemory(
-        kReadWrite, 4096, &control_,
-        AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE));
+        kReadWrite, 4096,
+        AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE,
+        &control_));
     std::memset(control_->host.pointer, 0, control_->info.byte_length);
     if constexpr (!kSdma) {
       kernel_ = kernels::transform::kKernels.Find(this->gpu_endpoint_info_);

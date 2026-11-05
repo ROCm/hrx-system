@@ -262,7 +262,7 @@ class GpuXdnaMemoryInteropTest : public ::testing::Test {
 
   void FindJointProfile(amdf_memory_profile_roles_t role,
                         amdf_memory_profile_t* out_profile,
-                        amdf_memory_access_capabilities_t* capabilities) {
+                        amdf_memory_access_capabilities_t* out_capabilities) {
     const amdf_memory_device_access_t devices[] = {xdna_access_, gpu_access_};
     out_profile->ordinal = AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN;
     for (uint32_t ordinal = 0;; ++ordinal) {
@@ -271,12 +271,13 @@ class GpuXdnaMemoryInteropTest : public ::testing::Test {
           .structure_size = sizeof(profile),
       };
       for (uint32_t i = 0; i < 2; ++i) {
-        capabilities[i] = {};
-        capabilities[i].type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
-        capabilities[i].structure_size = sizeof(capabilities[i]);
+        out_capabilities[i] = {};
+        out_capabilities[i].type =
+            AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
+        out_capabilities[i].structure_size = sizeof(out_capabilities[i]);
       }
       const amdf_status_t status = api_->memory_scope_query_device_profile(
-          system_scope_, ordinal, 2, devices, &profile, capabilities);
+          system_scope_, ordinal, 2, devices, &profile, out_capabilities);
       if (amdf_status_code(status) == AMDF_STATUS_CODE_OUT_OF_RANGE) {
         break;
       }
