@@ -55,6 +55,9 @@ class HipVirtualMemoryApiTest : public testing::Test {
     get_access_ = dso_.Resolve<decltype(&hipMemGetAccess)>("hipMemGetAccess");
     granularity_ = dso_.Resolve<decltype(&hipMemGetAllocationGranularity)>(
         "hipMemGetAllocationGranularity");
+    get_properties_ =
+        dso_.Resolve<decltype(&hipMemGetAllocationPropertiesFromHandle)>(
+            "hipMemGetAllocationPropertiesFromHandle");
     copy_ = dso_.Resolve<decltype(&hipMemcpy)>("hipMemcpy");
     ASSERT_NE(reserve_, nullptr);
     ASSERT_NE(close_, nullptr);
@@ -65,6 +68,7 @@ class HipVirtualMemoryApiTest : public testing::Test {
     ASSERT_NE(set_access_, nullptr);
     ASSERT_NE(get_access_, nullptr);
     ASSERT_NE(granularity_, nullptr);
+    ASSERT_NE(get_properties_, nullptr);
     ASSERT_NE(copy_, nullptr);
   }
 
@@ -127,6 +131,8 @@ class HipVirtualMemoryApiTest : public testing::Test {
   decltype(&hipMemGetAccess) get_access_ = nullptr;
   // Queries required physical and virtual mapping geometry.
   decltype(&hipMemGetAllocationGranularity) granularity_ = nullptr;
+  // Returns the public properties retained by a physical allocation handle.
+  decltype(&hipMemGetAllocationPropertiesFromHandle) get_properties_ = nullptr;
   // Performs completed copies through the public HIP pointer lookup path.
   decltype(&hipMemcpy) copy_ = nullptr;
 };
@@ -225,6 +231,49 @@ TEST_F(HipVirtualMemoryApiTest,
   ASSERT_EQ(hipSuccess, copy_(Address(1), update.data(), sizeof(update),
                               hipMemcpyHostToDevice));
   std::memcpy(observed.data(), Address(0), sizeof(observed));
+  EXPECT_EQ(observed, update);
+}
+
+TEST_F(HipVirtualMemoryApiTest,
+       NativeUncachedHostAccessPreservesTheSinglePointerContract) {
+  auto properties = Properties();
+  properties.type = hipMemAllocationTypeUncached;
+  properties.location = {.type = hipMemLocationTypeHost, .id = 0};
+  ASSERT_EQ(hipSuccess, granularity_(&unit_, &properties,
+                                     hipMemAllocationGranularityMinimum));
+  ASSERT_EQ(hipSuccess, reserve_(&address_, 3 * unit_, unit_, nullptr, 0));
+  ASSERT_EQ(hipSuccess, create_(&handles_[0], unit_, &properties, 0));
+  hipMemAllocationProp observed_properties = {};
+  ASSERT_EQ(hipSuccess, get_properties_(&observed_properties, handles_[0]));
+  EXPECT_EQ(observed_properties.type, hipMemAllocationTypeUncached);
+  EXPECT_EQ(observed_properties.requestedHandleType, hipMemHandleTypeNone);
+  EXPECT_EQ(observed_properties.location.type, hipMemLocationTypeHost);
+  EXPECT_EQ(observed_properties.location.id, 0);
+  ASSERT_EQ(hipSuccess, map_(address_, unit_, 0, handles_[0], 0));
+  mapped_[0] = true;
+  const hipMemAccessDesc access[] = {
+      {
+          .location = {.type = hipMemLocationTypeHost, .id = 0},
+          .flags = hipMemAccessFlagsProtReadWrite,
+      },
+      {
+          .location = {.type = hipMemLocationTypeDevice, .id = device_},
+          .flags = hipMemAccessFlagsProtReadWrite,
+      },
+  };
+  ASSERT_EQ(hipSuccess, set_access_(address_, unit_, access, 2));
+  ASSERT_EQ(hipSuccess, release_(handles_[0]));
+  handles_[0] = nullptr;
+  const std::array<uint32_t, 4> expected = {59, 61, 67, 71};
+  std::memcpy(address_, expected.data(), sizeof(expected));
+  std::array<uint32_t, 4> observed = {};
+  ASSERT_EQ(hipSuccess, copy_(observed.data(), address_, sizeof(observed),
+                              hipMemcpyDeviceToHost));
+  EXPECT_EQ(observed, expected);
+  const std::array<uint32_t, 4> update = {73, 79, 83, 89};
+  ASSERT_EQ(hipSuccess, copy_(address_, update.data(), sizeof(update),
+                              hipMemcpyHostToDevice));
+  std::memcpy(observed.data(), address_, sizeof(observed));
   EXPECT_EQ(observed, update);
 }
 

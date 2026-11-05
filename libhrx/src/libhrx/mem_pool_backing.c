@@ -80,6 +80,7 @@ typedef enum hrx_mem_pool_source_kind_e {
   HRX_MEM_POOL_SOURCE_DEVICE = 0,
   HRX_MEM_POOL_SOURCE_UNCACHED_DEVICE,
   HRX_MEM_POOL_SOURCE_HOST,
+  HRX_MEM_POOL_SOURCE_UNCACHED_HOST,
   HRX_MEM_POOL_SOURCE_SIGNAL,
   HRX_MEM_POOL_SOURCE_HOST_IMPORT,
   HRX_MEM_POOL_SOURCE_DEVICE_IMPORT,
@@ -99,6 +100,9 @@ static iree_hal_pool_t** hrx_mem_pool_backing_source_slot(
                             : &backing->uncached_device.ordinary;
     case HRX_MEM_POOL_SOURCE_HOST:
       return mapping_source ? &backing->host.mapping : &backing->host.ordinary;
+    case HRX_MEM_POOL_SOURCE_UNCACHED_HOST:
+      return mapping_source ? &backing->uncached_host.mapping
+                            : &backing->uncached_host.ordinary;
     case HRX_MEM_POOL_SOURCE_SIGNAL:
       return &backing->signals;
     case HRX_MEM_POOL_SOURCE_HOST_IMPORT:
@@ -118,6 +122,12 @@ static iree_status_t hrx_mem_pool_backing_create_source(
     hrx_buffer_usage_t usage, iree_hal_pool_t** out_pool) {
   const bool mapping_source =
       iree_any_bit_set(usage, HRX_BUFFER_USAGE_MAPPING_SOURCE);
+  const bool uncached = kind == HRX_MEM_POOL_SOURCE_UNCACHED_DEVICE ||
+                        kind == HRX_MEM_POOL_SOURCE_UNCACHED_HOST;
+  const bool host_coherent = kind == HRX_MEM_POOL_SOURCE_HOST ||
+                             kind == HRX_MEM_POOL_SOURCE_UNCACHED_HOST ||
+                             kind == HRX_MEM_POOL_SOURCE_SIGNAL ||
+                             kind == HRX_MEM_POOL_SOURCE_HOST_IMPORT;
   const iree_host_size_t device_count =
       mapping_source
           ? iree_hal_device_group_device_count(device->hal_device_group)
@@ -158,13 +168,9 @@ static iree_status_t hrx_mem_pool_backing_create_source(
                                 ? IREE_HAL_BUFFER_INTERFACE_HOST
                                 : IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS);
       }
-      if (kind == HRX_MEM_POOL_SOURCE_UNCACHED_DEVICE) {
-        family->requirements = IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED;
-      } else if (kind == HRX_MEM_POOL_SOURCE_HOST ||
-                 kind == HRX_MEM_POOL_SOURCE_SIGNAL ||
-                 kind == HRX_MEM_POOL_SOURCE_HOST_IMPORT) {
-        family->requirements = IREE_HAL_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST;
-      }
+      family->requirements =
+          (uncached ? IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED : 0) |
+          (host_coherent ? IREE_HAL_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST : 0);
       if (kind == HRX_MEM_POOL_SOURCE_SIGNAL &&
           family->family == iree_hal_queue_family(device->dispatch_queue)) {
         const iree_hal_atomic_operation_flags_t operations =
@@ -203,11 +209,9 @@ static iree_status_t hrx_mem_pool_backing_create_source(
     options.imports.class_count = 1;
     options.imports.classes = &import_class;
   }
-  const bool requires_host = kind == HRX_MEM_POOL_SOURCE_HOST ||
-                             kind == HRX_MEM_POOL_SOURCE_SIGNAL ||
-                             imports_host ||
-                             (kind == HRX_MEM_POOL_SOURCE_DEVICE &&
-                              device->type == HRX_ACCELERATOR_CPU);
+  const bool requires_host =
+      host_coherent || (kind == HRX_MEM_POOL_SOURCE_DEVICE &&
+                        device->type == HRX_ACCELERATOR_CPU);
   if (requires_host) {
     scope.host = host;
   } else if (!import_only && kind != HRX_MEM_POOL_SOURCE_UNCACHED_DEVICE) {
@@ -246,6 +250,9 @@ static iree_status_t hrx_mem_pool_backing_create_source(
       break;
     case HRX_MEM_POOL_SOURCE_HOST:
       options.trace_name = iree_make_cstring_view("hrx-host-source");
+      break;
+    case HRX_MEM_POOL_SOURCE_UNCACHED_HOST:
+      options.trace_name = iree_make_cstring_view("hrx-uncached-host-source");
       break;
     case HRX_MEM_POOL_SOURCE_SIGNAL:
       options.trace_name = iree_make_cstring_view("hrx-signal-source");
@@ -368,6 +375,8 @@ void hrx_mem_pool_backing_deinitialize(hrx_mem_pool_backing_t* backing) {
   iree_hal_pool_release(backing->uncached_device.mapping);
   iree_hal_pool_release(backing->host.ordinary);
   iree_hal_pool_release(backing->host.mapping);
+  iree_hal_pool_release(backing->uncached_host.ordinary);
+  iree_hal_pool_release(backing->uncached_host.mapping);
   iree_hal_pool_release(backing->signals);
   iree_hal_pool_release(backing->host_import_source);
   iree_hal_pool_release(backing->device_import_source);
@@ -402,9 +411,15 @@ iree_status_t hrx_mem_pool_backing_retain_allocation_source(
     hrx_device_t device, hrx_memory_type_t memory_type,
     hrx_buffer_usage_t usage, iree_hal_pool_t** out_pool) {
   hrx_mem_pool_source_kind_t kind = HRX_MEM_POOL_SOURCE_DEVICE;
-  if (iree_all_bits_set(memory_type, HRX_MEMORY_TYPE_HOST_LOCAL)) {
+  const bool host_local =
+      iree_all_bits_set(memory_type, HRX_MEMORY_TYPE_HOST_LOCAL);
+  const bool uncached =
+      iree_any_bit_set(memory_type, HRX_MEMORY_TYPE_DEVICE_UNCACHED);
+  if (host_local && uncached) {
+    kind = HRX_MEM_POOL_SOURCE_UNCACHED_HOST;
+  } else if (host_local) {
     kind = HRX_MEM_POOL_SOURCE_HOST;
-  } else if (iree_any_bit_set(memory_type, HRX_MEMORY_TYPE_DEVICE_UNCACHED)) {
+  } else if (uncached) {
     kind = HRX_MEM_POOL_SOURCE_UNCACHED_DEVICE;
   }
   return hrx_mem_pool_backing_retain_source(device, kind, usage, out_pool);
