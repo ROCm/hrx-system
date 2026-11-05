@@ -195,14 +195,14 @@ iree_status_t iree_hal_amdxdna_single_command_cache_entry_resize_signature(
   iree_device_size_t* binding_lengths = NULL;
   iree_status_t status = iree_ok_status();
   if (ctrl_word_count != 0) {
-    status = iree_allocator_malloc(
-        cache->host_allocator, ctrl_word_count * sizeof(*ctrl_words),
-        (void**)&ctrl_words);
+    status = iree_allocator_malloc(cache->host_allocator,
+                                   ctrl_word_count * sizeof(*ctrl_words),
+                                   (void**)&ctrl_words);
   }
   if (iree_status_is_ok(status) && binding_count != 0) {
-    status = iree_allocator_malloc(
-        cache->host_allocator, binding_count * sizeof(*binding_buffers),
-        (void**)&binding_buffers);
+    status = iree_allocator_malloc(cache->host_allocator,
+                                   binding_count * sizeof(*binding_buffers),
+                                   (void**)&binding_buffers);
   }
   if (iree_status_is_ok(status) && binding_count != 0) {
     status = iree_allocator_malloc(
@@ -210,14 +210,14 @@ iree_status_t iree_hal_amdxdna_single_command_cache_entry_resize_signature(
         (void**)&binding_device_addrs);
   }
   if (iree_status_is_ok(status) && binding_count != 0) {
-    status = iree_allocator_malloc(
-        cache->host_allocator, binding_count * sizeof(*binding_offsets),
-        (void**)&binding_offsets);
+    status = iree_allocator_malloc(cache->host_allocator,
+                                   binding_count * sizeof(*binding_offsets),
+                                   (void**)&binding_offsets);
   }
   if (iree_status_is_ok(status) && binding_count != 0) {
-    status = iree_allocator_malloc(
-        cache->host_allocator, binding_count * sizeof(*binding_lengths),
-        (void**)&binding_lengths);
+    status = iree_allocator_malloc(cache->host_allocator,
+                                   binding_count * sizeof(*binding_lengths),
+                                   (void**)&binding_lengths);
   }
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(cache->host_allocator, ctrl_words);
@@ -252,8 +252,7 @@ iree_status_t iree_hal_amdxdna_single_command_cache_create(
   memset(cache, 0, sizeof(*cache));
   cache->host_allocator = host_allocator;
   cache->max_entries =
-      max_entries ? max_entries
-                  : kAmdxdnaSingleCommandCacheDefaultMaxEntries;
+      max_entries ? max_entries : kAmdxdnaSingleCommandCacheDefaultMaxEntries;
   cache->max_retained_code_bytes =
       kAmdxdnaSingleCommandCacheDefaultMaxRetainedCodeBytes;
   iree_atomic_store(&cache->retained_code_bytes, 0, iree_memory_order_relaxed);
@@ -482,6 +481,29 @@ iree_hal_amdxdna_find_single_command_cache_descriptor_template_entry(
   return iree_ok_status();
 }
 
+iree_status_t
+iree_hal_amdxdna_find_single_command_cache_retired_descriptor_template_entry(
+    iree_hal_amdxdna_device_single_command_cache_t* cache,
+    iree_hal_amdxdna_native_queue_t* queue, uint32_t cu_index,
+    const iree_hal_amdxdna_u32_list_t* asm_inst,
+    const iree_hal_amdxdna_u32_list_t* patches, iree_host_size_t constant_count,
+    bool use_native_partial_elf, iree_host_size_t binding_count,
+    iree_hal_amdxdna_single_command_cache_entry_t** out_entry) {
+  *out_entry = NULL;
+  for (iree_host_size_t i = 0; i < cache->entry_count; ++i) {
+    iree_hal_amdxdna_single_command_cache_entry_t* entry = &cache->entries[i];
+    if (entry->src_executable_identity != 0) continue;
+    if (iree_hal_amdxdna_single_command_cache_descriptor_template_matches(
+            entry, queue, cu_index, asm_inst, patches, constant_count,
+            use_native_partial_elf, binding_count)) {
+      entry->last_use = ++cache->use_clock;
+      *out_entry = entry;
+      return iree_ok_status();
+    }
+  }
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_amdxdna_find_single_command_cache_executable_entry(
     iree_hal_amdxdna_device_single_command_cache_t* cache,
     iree_hal_amdxdna_native_queue_t* queue, uint32_t cu_index,
@@ -537,8 +559,7 @@ iree_status_t iree_hal_amdxdna_find_single_command_cache_reusable_entry(
   const iree_host_size_t max_entries =
       cache->max_entries ? cache->max_entries
                          : kAmdxdnaSingleCommandCacheDefaultMaxEntries;
-  const iree_host_size_t required_bytes =
-      ctrl_word_count * sizeof(uint32_t);
+  const iree_host_size_t required_bytes = ctrl_word_count * sizeof(uint32_t);
   const iree_host_size_t max_retained_code_bytes =
       cache->max_retained_code_bytes
           ? cache->max_retained_code_bytes
@@ -623,7 +644,8 @@ static iree_status_t iree_hal_amdxdna_single_command_cache_reserve(
   const iree_host_size_t old_capacity = cache->entry_capacity;
   IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
       cache->host_allocator, kAmdxdnaSingleCommandCacheInitialCapacity,
-      sizeof(*cache->entries), &cache->entry_capacity, (void**)&cache->entries));
+      sizeof(*cache->entries), &cache->entry_capacity,
+      (void**)&cache->entries));
   if (cache->entry_capacity > old_capacity) {
     memset(cache->entries + old_capacity, 0,
            (cache->entry_capacity - old_capacity) * sizeof(*cache->entries));
@@ -670,8 +692,7 @@ iree_hal_amdxdna_store_single_command_cache_entry_with_capacity(
   while (ctrl_code_buffer) {
     const iree_host_size_t retained_code_bytes =
         iree_hal_amdxdna_single_command_cache_retained_code_bytes(cache);
-    if (retained_code_bytes <=
-        max_retained_code_bytes - ctrl_code_capacity) {
+    if (retained_code_bytes <= max_retained_code_bytes - ctrl_code_capacity) {
       break;
     }
     iree_host_size_t lru_slot = IREE_HOST_SIZE_MAX;
@@ -753,8 +774,8 @@ iree_hal_amdxdna_store_single_command_cache_entry(
   return iree_hal_amdxdna_store_single_command_cache_entry_with_capacity(
       cache, queue, cu_index, ctrl_words, ctrl_word_count, binding_buffers,
       binding_device_addrs, binding_offsets, binding_lengths, binding_count,
-      ctrl_word_count * (iree_host_size_t)sizeof(*ctrl_words),
-      ctrl_code_buffer, command);
+      ctrl_word_count * (iree_host_size_t)sizeof(*ctrl_words), ctrl_code_buffer,
+      command);
 }
 
 void iree_hal_amdxdna_single_command_cache_entry_set_descriptor_template(
@@ -812,8 +833,8 @@ void iree_hal_amdxdna_single_command_cache_entry_set_executable_key(
 
 iree_status_t iree_hal_amdxdna_single_command_cache_entry_store_constants(
     iree_hal_amdxdna_device_single_command_cache_t* cache,
-    iree_hal_amdxdna_single_command_cache_entry_t* entry,
-    const void* constants, iree_host_size_t constant_count) {
+    iree_hal_amdxdna_single_command_cache_entry_t* entry, const void* constants,
+    iree_host_size_t constant_count) {
   IREE_ASSERT_ARGUMENT(cache);
   IREE_ASSERT_ARGUMENT(entry);
   if (constant_count == 0) {
@@ -827,9 +848,9 @@ iree_status_t iree_hal_amdxdna_single_command_cache_entry_store_constants(
     iree_allocator_free(cache->host_allocator, entry->owned_src_constants);
     entry->owned_src_constants = NULL;
     entry->src_constant_count = 0;
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-        cache->host_allocator, constant_count,
-        (void**)&entry->owned_src_constants));
+    IREE_RETURN_IF_ERROR(
+        iree_allocator_malloc(cache->host_allocator, constant_count,
+                              (void**)&entry->owned_src_constants));
   }
   memcpy(entry->owned_src_constants, constants, constant_count);
   entry->src_constant_count = constant_count;

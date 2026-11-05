@@ -224,9 +224,10 @@ static void iree_hal_amdxdna_chain_cache_apply_shared_code_memory_budget(
   if (max_shared_code_memory_bytes != 0 && budget != 0) {
     const iree_host_size_t non_chain =
         live_context_image_bytes + single_cache_code_bytes;
-    const iree_host_size_t chain_real = real_dev_heap_used_bytes > non_chain
-                                            ? real_dev_heap_used_bytes - non_chain
-                                            : 0;
+    const iree_host_size_t chain_real =
+        real_dev_heap_used_bytes > non_chain
+            ? real_dev_heap_used_bytes - non_chain
+            : 0;
     if (chain_real > budget) {
       const iree_host_size_t overshoot = chain_real - budget;
       const iree_host_size_t accounted_chain =
@@ -1021,9 +1022,8 @@ static bool iree_hal_amdxdna_ctrl_inputs_changed(
   const bool constants_changed =
       owned_constant_count != fresh->src_constant_count ||
       (fresh->src_constant_count != 0 &&
-       (owned_constants == NULL ||
-        memcmp(owned_constants, fresh->src_constants,
-               fresh->src_constant_count) != 0));
+       (owned_constants == NULL || memcmp(owned_constants, fresh->src_constants,
+                                          fresh->src_constant_count) != 0));
   const bool addrs_changed =
       fresh->binding_count != 0 &&
       (cached_binding_count != fresh->binding_count ||
@@ -1120,8 +1120,7 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_start_npu_cmd(
   bool txn_changed = false;
   const bool control_changed = iree_hal_amdxdna_ctrl_inputs_changed(
       cached->src_asm_inst, cached->src_constants, cached->src_constant_count,
-      cached->binding_device_addrs, cached->binding_count, fresh,
-      &txn_changed);
+      cached->binding_device_addrs, cached->binding_count, fresh, &txn_changed);
   const bool bindings_changed = iree_hal_amdxdna_ctrl_bindings_changed(
       cached->binding_buffers, cached->binding_offsets, cached->binding_lengths,
       cached->binding_count, fresh);
@@ -1356,8 +1355,7 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_single_partial_elf_cmd(
         "amdxdna PARTIAL_ELF single cache rewrite has incompatible shape");
   }
 
-  const size_t control_bytes =
-      fresh->src_asm_inst->count * sizeof(uint32_t);
+  const size_t control_bytes = fresh->src_asm_inst->count * sizeof(uint32_t);
   if (IREE_UNLIKELY(control_bytes > cached->ctrl_code_capacity)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -1488,8 +1486,7 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_chain_partial_elf_cmd(
   bool txn_changed = false;
   const bool code_changed = iree_hal_amdxdna_ctrl_inputs_changed(
       cached->src_asm_inst, cached->src_constants, cached->src_constant_count,
-      cached->binding_device_addrs, cached->binding_count, fresh,
-      &txn_changed);
+      cached->binding_device_addrs, cached->binding_count, fresh, &txn_changed);
   const bool bindings_changed = iree_hal_amdxdna_ctrl_bindings_changed(
       cached->binding_buffers, cached->binding_offsets, cached->binding_lengths,
       cached->binding_count, fresh);
@@ -1920,11 +1917,17 @@ static iree_status_t iree_hal_amdxdna_find_prepared_single_command(
     const iree_hal_amdxdna_chain_cmd_t* cmd,
     iree_hal_amdxdna_single_command_cache_entry_t** out_entry) {
   if (cmd->src_executable_identity != 0) {
-    return iree_hal_amdxdna_find_single_command_cache_executable_entry(
-        cache, queue, cmd->src_cu_idx.index, cmd->src_executable_identity,
-        cmd->src_entry_point, cmd->src_run_ordinal,
-        cmd->src_asm_inst ? cmd->src_asm_inst->count : 0, cmd->binding_count,
-        out_entry);
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdxdna_find_single_command_cache_executable_entry(
+            cache, queue, cmd->src_cu_idx.index, cmd->src_executable_identity,
+            cmd->src_entry_point, cmd->src_run_ordinal,
+            cmd->src_asm_inst ? cmd->src_asm_inst->count : 0,
+            cmd->binding_count, out_entry));
+    if (*out_entry) return iree_ok_status();
+    return iree_hal_amdxdna_find_single_command_cache_retired_descriptor_template_entry(
+        cache, queue, cmd->src_cu_idx.index, cmd->src_asm_inst,
+        cmd->src_patches, cmd->src_constant_count,
+        cmd->src_use_native_partial_elf, cmd->binding_count, out_entry);
   }
   return iree_hal_amdxdna_find_single_command_cache_descriptor_template_entry(
       cache, queue, cmd->src_cu_idx.index, cmd->src_asm_inst, cmd->src_patches,
@@ -1943,8 +1946,9 @@ static void iree_hal_amdxdna_bind_prepared_single_command_identity(
   iree_hal_amdxdna_single_command_cache_entry_set_executable_key(
       entry, cmd->src_executable_identity, cmd->src_entry_point,
       cmd->src_run_ordinal);
-  iree_status_ignore(iree_hal_amdxdna_single_command_cache_entry_store_constants(
-      cache, entry, cmd->src_constants, cmd->src_constant_count));
+  iree_status_ignore(
+      iree_hal_amdxdna_single_command_cache_entry_store_constants(
+          cache, entry, cmd->src_constants, cmd->src_constant_count));
 }
 
 static iree_status_t
@@ -1988,8 +1992,7 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
       }
     }
     if (iree_status_is_ok(status) &&
-        command_buffer->device->native_caps.max_shared_code_memory_bytes !=
-            0) {
+        command_buffer->device->native_caps.max_shared_code_memory_bytes != 0) {
       const iree_host_size_t max_bytes =
           command_buffer->device->native_caps.max_shared_code_memory_bytes;
       const iree_host_size_t reserve_bytes =
@@ -2014,12 +2017,20 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
     }
 
     if (iree_status_is_ok(status) && single_cache_entry) {
+      const bool rebind_retired_template =
+          cmd->src_executable_identity != 0 &&
+          single_cache_entry->src_executable_identity == 0;
       status = iree_hal_amdxdna_rewrite_cached_single_start_npu_cmd(
           command_buffer, single_command_cache, single_cache_entry, cmd);
       if (!iree_status_is_ok(status)) {
         iree_hal_amdxdna_single_command_cache_entry_discard(
             single_command_cache, single_cache_entry);
         single_cache_entry = NULL;
+      }
+      if (iree_status_is_ok(status) && rebind_retired_template) {
+        iree_hal_amdxdna_bind_prepared_single_command_identity(
+            single_command_cache, single_cache_entry, cmd,
+            single_cache_entry->ctrl_code_mapped_ptr);
       }
       if (iree_status_is_ok(status)) {
         iree_hal_amdxdna_single_command_cache_entry_acquire_in_flight(
@@ -2144,6 +2155,9 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
     status = iree_hal_amdxdna_find_prepared_single_command(
         single_command_cache, group->queue, cmd, &single_cache_entry);
   }
+  const bool reused_retired_template =
+      single_cache_entry && cmd->src_executable_identity != 0 &&
+      single_cache_entry->src_executable_identity == 0;
   // Shape reuse exists so anonymous (identity 0) PARTIAL_ELF dispatches can
   // share a same-shaped instruction BO instead of allocating on every miss.
   // Identified executables keep one prepared command per export: stealing
@@ -2159,8 +2173,7 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
         cmd->src_asm_inst->count, cmd->binding_count, &single_cache_entry);
     reused_partial_elf_shape = single_cache_entry != NULL;
   }
-  if (iree_status_is_ok(status) && !single_cache_entry &&
-      single_cache_locked) {
+  if (iree_status_is_ok(status) && !single_cache_entry && single_cache_locked) {
     status = iree_hal_amdxdna_find_single_command_cache_reusable_entry(
         single_command_cache, group->queue, cmd->src_cu_idx.index,
         cmd->src_asm_inst->count, /*use_native_partial_elf=*/true,
@@ -2174,7 +2187,8 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
     // entry's recorded identity has to follow it or a later exact-descriptor
     // lookup would match contents that are no longer there.
     if (iree_status_is_ok(status) &&
-        (reused_partial_elf_shape || repurposed_partial_elf_slot)) {
+        (reused_retired_template || reused_partial_elf_shape ||
+         repurposed_partial_elf_slot)) {
       iree_hal_amdxdna_bind_prepared_single_command_identity(
           single_command_cache, single_cache_entry, cmd,
           single_cache_entry->ctrl_code_mapped_ptr);

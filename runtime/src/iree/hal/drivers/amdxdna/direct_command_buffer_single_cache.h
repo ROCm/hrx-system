@@ -157,6 +157,19 @@ iree_hal_amdxdna_find_single_command_cache_descriptor_template_entry(
     bool use_native_partial_elf, iree_host_size_t binding_count,
     iree_hal_amdxdna_single_command_cache_entry_t** out_entry);
 
+// Finds an idle command whose executable has been destroyed and whose
+// cache-owned immutable descriptor exactly matches a newly created executable.
+// This allows equivalent executable objects to reclaim their prior native
+// command without treating it as a generic shape-compatible repurpose.
+iree_status_t
+iree_hal_amdxdna_find_single_command_cache_retired_descriptor_template_entry(
+    iree_hal_amdxdna_device_single_command_cache_t* cache,
+    iree_hal_amdxdna_native_queue_t* queue, uint32_t cu_index,
+    const iree_hal_amdxdna_u32_list_t* asm_inst,
+    const iree_hal_amdxdna_u32_list_t* patches, iree_host_size_t constant_count,
+    bool use_native_partial_elf, iree_host_size_t binding_count,
+    iree_hal_amdxdna_single_command_cache_entry_t** out_entry);
+
 // Finds a retained command recorded from the same executable export on the
 // same queue and CU with a matching command shape (control-word and binding
 // counts). Identity 0 never matches: callers without a cache_identity fall
@@ -254,8 +267,8 @@ void iree_hal_amdxdna_single_command_cache_entry_set_executable_key(
 // rewrite can detect constants-only changes without a full TXN memcmp.
 iree_status_t iree_hal_amdxdna_single_command_cache_entry_store_constants(
     iree_hal_amdxdna_device_single_command_cache_t* cache,
-    iree_hal_amdxdna_single_command_cache_entry_t* entry,
-    const void* constants, iree_host_size_t constant_count);
+    iree_hal_amdxdna_single_command_cache_entry_t* entry, const void* constants,
+    iree_host_size_t constant_count);
 
 void iree_hal_amdxdna_single_command_cache_entry_acquire_in_flight(
     iree_hal_amdxdna_single_command_cache_entry_t* entry);
