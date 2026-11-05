@@ -11,30 +11,16 @@
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=loom/docs/examples/example.shlib
+source "${script_dir}/../example.shlib"
+repo_root="${LOOM_EXAMPLE_REPO_ROOT}"
 
 if [[ "$#" -gt 1 ]]; then
   printf 'usage: %s [output-directory]\n' "$0" >&2
   exit 64
 fi
 
-if [[ -n "${RUNFILES_DIR:-}" ]]; then
-  workspace="${TEST_WORKSPACE:-_main}"
-  repo_root="${RUNFILES_DIR}/${workspace}"
-  export LOOM_FORMAT="${repo_root}/loom/src/loom/tools/loom-format/loom-format"
-  export LOOM_LINK="${repo_root}/loom/src/loom/tools/loom-link/loom-link"
-elif [[ -n "${LOOM_DOCS_TOOL_DIR:-}" ]]; then
-  repo_root="$(cd -- "${script_dir}/../../../.." && pwd -P)"
-  export LOOM_FORMAT="${LOOM_DOCS_TOOL_DIR}/loom-format"
-  export LOOM_LINK="${LOOM_DOCS_TOOL_DIR}/loom-link"
-else
-  repo_root="$(cd -- "${script_dir}/../../../.." && pwd -P)"
-  "${repo_root}/build_tools/bin/iree-bazel-build" \
-    --config=asan \
-    //loom/src/loom/tools/loom-format:loom-format \
-    //loom/src/loom/tools/loom-link:loom-link
-  export LOOM_FORMAT="${repo_root}/bazel-bin/loom/src/loom/tools/loom-format/loom-format"
-  export LOOM_LINK="${repo_root}/bazel-bin/loom/src/loom/tools/loom-link/loom-link"
-fi
+loom_example_configure_inputs tool:loom-format tool:loom-link
 
 output_dir="${1:-${TEST_UNDECLARED_OUTPUTS_DIR:-${repo_root}/build/loom-docs/examples/module-composition}}"
 mkdir -p -- "${output_dir}"

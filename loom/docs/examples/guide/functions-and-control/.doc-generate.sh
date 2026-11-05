@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2153  # Tool variables are populated by example.shlib.
 # Copyright 2026 The IREE Authors
 #
 # Licensed under the Apache License v2.0 with LLVM Exceptions.
@@ -10,30 +11,24 @@
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-repo_root="$(cd -- "${script_dir}/../../../../.." && pwd -P)"
+# shellcheck source=loom/docs/examples/example.shlib
+source "${script_dir}/../../example.shlib"
+repo_root="${LOOM_EXAMPLE_REPO_ROOT}"
 output_dir="${1:-${repo_root}/build/loom-docs/examples/guide/functions-and-control}"
 mkdir -p -- "${output_dir}"
 output_dir="$(cd -- "${output_dir}" && pwd -P)"
 
-if [[ -n "${LOOM_DOCS_TOOL_DIR:-}" ]]; then
-  loom_format="${LOOM_DOCS_TOOL_DIR}/loom-format"
-  loom_link="${LOOM_DOCS_TOOL_DIR}/loom-link"
-  loom_compile="${LOOM_DOCS_TOOL_DIR}/loom-compile"
-  loom_report="${LOOM_DOCS_TOOL_DIR}/loom-compile-report"
-  loom_benchmark="${LOOM_DOCS_TOOL_DIR}/loom-benchmark"
-else
-  "${repo_root}/build_tools/bin/iree-bazel-build" --config=asan \
-    //loom/src/loom/tools/loom-format \
-    //loom/src/loom/tools/loom-link \
-    //loom/src/loom/tools/loom-compile \
-    //loom/src/loom/tools/loom-benchmark \
-    //loom/py/loom/tools:loom-compile-report
-  loom_format="${repo_root}/bazel-bin/loom/src/loom/tools/loom-format/loom-format"
-  loom_link="${repo_root}/bazel-bin/loom/src/loom/tools/loom-link/loom-link"
-  loom_compile="${repo_root}/bazel-bin/loom/src/loom/tools/loom-compile/loom-compile"
-  loom_report="${repo_root}/bazel-bin/loom/py/loom/tools/loom-compile-report"
-  loom_benchmark="${repo_root}/bazel-bin/loom/src/loom/tools/loom-benchmark/loom-benchmark"
-fi
+loom_example_configure_inputs \
+  tool:loom-format \
+  tool:loom-link \
+  tool:loom-compile \
+  tool:loom-compile-report \
+  tool:loom-benchmark
+loom_format="${LOOM_FORMAT}"
+loom_link="${LOOM_LINK}"
+loom_compile="${LOOM_COMPILE}"
+loom_report="${LOOM_COMPILE_REPORT}"
+loom_benchmark="${LOOM_BENCHMARK}"
 
 cp -- "${script_dir}/read-ahead.loom" "${output_dir}/read-ahead.loom"
 cp -- "${script_dir}/read-ahead-tests.loom" "${output_dir}/read-ahead-tests.loom"

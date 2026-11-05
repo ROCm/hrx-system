@@ -6,6 +6,97 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2034  # Target configuration is consumed by the caller.
 
+LOOM_EXAMPLE_REPO_ROOT="$(
+  cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd -P
+)"
+
+loom_example_configure_inputs() {
+  local -a build_flags=(--config=asan)
+  local -a kinds=()
+  local -a names=()
+  local -a relative_paths=()
+  local -a variable_names=()
+  local -a build_targets=()
+  local argument kind name package variable_name
+  for argument in "$@"; do
+    case "${argument}" in
+      --config=*) build_flags+=("${argument}") ;;
+      tool:*|c-example:*)
+        kind="${argument%%:*}"
+        name="${argument#*:}"
+        case "${kind}/${name}" in
+          tool/loom-compile-report) package="loom/py/loom/tools" ;;
+          tool/*) package="loom/src/loom/tools/${name}" ;;
+          c-example/*) package="loom/binding/c/example" ;;
+        esac
+        if [[ "${kind}" == "tool" ]]; then
+          variable_name="${name#loom-}"
+          variable_name="LOOM_${variable_name//-/_}"
+        else
+          variable_name="LOOM_${name}"
+        fi
+        kinds+=("${kind}")
+        names+=("${name}")
+        relative_paths+=("${package}/${name}")
+        variable_names+=("${variable_name^^}")
+        build_targets+=("//${package}:${name}")
+        ;;
+      *)
+        printf 'unsupported documentation input: %s\n' "${argument}" >&2
+        return 64
+        ;;
+    esac
+  done
+  if ((${#names[@]} == 0)); then
+    printf 'at least one documentation input is required\n' >&2
+    return 64
+  fi
+
+  local mode="source"
+  if [[ -n "${RUNFILES_DIR:-}" ]]; then
+    mode="runfiles"
+  elif [[ -n "${LOOM_DOCS_TOOL_DIR:-}${LOOM_DOCS_C_EXAMPLE_DIR:-}" ]]; then
+    mode="installed"
+  fi
+
+  if [[ "${mode}" == "source" ]]; then
+    "${LOOM_EXAMPLE_REPO_ROOT}/build_tools/bin/iree-bazel-build" \
+      "${build_flags[@]}" "${build_targets[@]}"
+  fi
+
+  local index executable
+  for index in "${!names[@]}"; do
+    kind="${kinds[${index}]}"
+    name="${names[${index}]}"
+    case "${mode}/${kind}" in
+      runfiles/*)
+        executable="${LOOM_EXAMPLE_REPO_ROOT}/${relative_paths[${index}]}"
+        ;;
+      installed/tool)
+        if [[ -z "${LOOM_DOCS_TOOL_DIR:-}" ]]; then
+          printf 'LOOM_DOCS_TOOL_DIR is required for %s\n' "${name}" >&2
+          return 64
+        fi
+        executable="${LOOM_DOCS_TOOL_DIR}/${name}"
+        ;;
+      installed/c-example)
+        if [[ -z "${LOOM_DOCS_C_EXAMPLE_DIR:-}" ]]; then
+          printf 'LOOM_DOCS_C_EXAMPLE_DIR is required for %s\n' "${name}" >&2
+          return 64
+        fi
+        executable="${LOOM_DOCS_C_EXAMPLE_DIR}/${name}"
+        ;;
+      source/*)
+        executable="${LOOM_EXAMPLE_REPO_ROOT}/bazel-bin/${relative_paths[${index}]}"
+        ;;
+    esac
+    loom_example_require_tool "${executable}"
+    variable_name="${variable_names[${index}]}"
+    printf -v "${variable_name}" '%s' "${executable}"
+    export "${variable_name?}"
+  done
+}
+
 loom_example_configure_target() {
   LOOM_EXAMPLE_TARGET="$1"
   case "${LOOM_EXAMPLE_TARGET}" in
