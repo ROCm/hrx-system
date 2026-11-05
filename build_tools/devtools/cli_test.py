@@ -714,10 +714,37 @@ class CliTest(unittest.TestCase):
         plan = args.handler(args)
         description = normalized_plan_description(plan)
 
-        self.assertIn("bazel run --config=fuzzer", description)
-        self.assertIn("<Bazel launch script>", description)
-        self.assertIn("<corpus>", description)
-        self.assertIn("-artifact_prefix=<artifacts>/", description)
+        self.assertIn(
+            "bazel build --config=fuzzer "
+            "//runtime/src/iree/tokenizer:special_tokens_fuzz",
+            description,
+        )
+        self.assertIn(
+            "generate one canonical Bazel launch script per fuzzer", description
+        )
+        self.assertIn("run at most 1 launch scripts concurrently", description)
+
+    def test_bazel_fuzz_builds_exact_target_set_together(self):
+        args = cli.parse_arguments(
+            [
+                "bazel",
+                "fuzz",
+                "--workers=2",
+                "//z:decoder_fuzz",
+                "//a:parser_fuzz",
+                "--",
+                "-max_total_time=1",
+            ]
+        )
+
+        plan = args.handler(args)
+        description = normalized_plan_description(plan)
+
+        self.assertIn(
+            "bazel build --config=fuzzer //a:parser_fuzz //z:decoder_fuzz",
+            description,
+        )
+        self.assertIn("run at most 2 launch scripts concurrently", description)
 
     def test_bazel_fuzz_compile_only_stops_after_build(self):
         args = cli.parse_arguments(["bazel", "fuzz", "--compile-only", "//loom/..."])

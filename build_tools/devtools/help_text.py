@@ -521,9 +521,10 @@ deps; add --dep TARGET for anything inference misses.""",
     if command == "fuzz" and lane == "bazel":
         return CommandHelp(
             description="Build and run Bazel libFuzzer targets without holding the Bazel lock.",
-            arguments="Fuzz target or ... pattern, Bazel build options, followed by -- and fuzzer arguments.",
+            arguments="Exact fuzz targets or one ... pattern, Bazel build options, followed by -- and fuzzer arguments.",
             epilog="""Examples:
   python dev.py bazel fuzz //runtime/src/iree/tokenizer:special_tokens_fuzz
+  python dev.py bazel fuzz --workers=2 //path:parser_fuzz //path:schema_fuzz -- -max_total_time=60
   python dev.py bazel fuzz //runtime/src/iree/tokenizer/... -- -max_total_time=60
   python dev.py bazel fuzz --workers=4 --shard=0/4 //runtime/... -- -max_total_time=3600
   python dev.py bazel fuzz --workers=2 //loom/... -- -max_total_time=3600
@@ -531,6 +532,9 @@ deps; add --dep TARGET for anything inference misses.""",
 
 Campaigns build with --config=fuzzer, resolve executable paths with cquery, then
 run each fuzzer in a fresh child process with independent peak-memory accounting.
+An exact target set is analyzed and built in one Bazel invocation before any
+fuzzer starts. A recursive pattern remains a separate discovery boundary and
+cannot be combined with exact targets.
 --compile-only builds every compatible selected target with --config=asan and
 stops. This qualifies compilation and linking while reusing an ASAN build's
 dependency objects; use a campaign for full dependency coverage instrumentation.
@@ -905,17 +909,24 @@ fuzzer processes at once. The default is one worker.
 ```bash
 iree-bazel-fuzz //runtime/src/iree/tokenizer:special_tokens_fuzz
 iree-bazel-fuzz //runtime/src/iree/tokenizer:special_tokens_fuzz -- -max_total_time=60
+iree-bazel-fuzz --workers=2 //path:parser_fuzz //path:schema_fuzz -- -max_total_time=60
 iree-bazel-fuzz --workers=4 --shard=0/4 //runtime/... -- -max_total_time=3600
 iree-bazel-fuzz --workers=2 //loom/... -- -max_total_time=3600
 iree-bazel-fuzz --compile-only //...
 ```
 
-The recursive pattern is the campaign boundary. Run runtime and Loom campaigns
-independently so each can use an appropriate process count, shard layout,
-duration, and host. `//...` remains available for a deliberate whole-tree
-sweep. A caller with local Bazel packages outside that sweep can repeat
-`--ignore-directory=PATH`; the exclusion applies only to recursive target
-discovery and does not change ordinary Bazel build, run, or query behavior.
+Several exact labels form one target set. The launcher analyzes and builds the
+set in one Bazel invocation, generates every launch script, then starts fuzzer
+processes under the shared worker bound. This keeps Bazel work serialized while
+the binaries fuzz concurrently with independent corpus and artifact directories.
+
+A recursive pattern is an exclusive campaign boundary. Run runtime and Loom
+campaigns independently so each can use an appropriate process count, shard
+layout, duration, and host. `//...` remains available for a deliberate
+whole-tree sweep. A caller with local Bazel packages outside that sweep can
+repeat `--ignore-directory=PATH`; the exclusion applies only to recursive
+target discovery and does not change ordinary Bazel build, run, or query
+behavior.
 
 `--compile-only` retains recursive discovery, stable sharding, and incompatible
 target filtering, but builds with `--config=asan` and stops after one invocation.
