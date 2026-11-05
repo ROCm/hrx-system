@@ -13,6 +13,7 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
+#include "iree/testing/gtest.h"
 #include "loomc/loomc.h"
 #include "loomc/target/iree_hal.h"
 
@@ -98,12 +99,27 @@ struct IreeHalKernelExecution {
   loomc_launch_config_t launch_config;
 };
 
-// Compiles and loads a kernel through the public Loom C API and invokes
-// |execute| while all compiler and HAL owners remain alive. The callback must
-// wait for its submitted work before returning. Uses GTest assertions/skips.
-void RunIreeHalKernelExecutionTest(
-    const IreeHalKernelExecutionTarget& target,
-    const std::function<void(const IreeHalKernelExecution&)>& execute);
+// One application driver registry spans the suite. Each kernel execution owns
+// its devices, pools, and compiler state independently; native process-lifetime
+// connections stay with their registry-owned driver between executions.
+class IreeHalExecutionTest : public ::testing::Test {
+ protected:
+  static void SetUpTestSuite();
+  static void TearDownTestSuite();
+
+  // Compiles and loads a kernel through the public Loom C API and invokes
+  // |execute| while all compiler and HAL owners remain alive. The callback must
+  // wait for its submitted work before returning. Device creation must succeed
+  // on the test's declared hardware; explicit target capability skips are
+  // handled separately after creation.
+  void RunKernel(
+      const IreeHalKernelExecutionTarget& target,
+      const std::function<void(const IreeHalKernelExecution&)>& execute);
+
+ private:
+  // Suite-owned driver instances outlive every per-execution device.
+  static iree_hal_driver_registry_t* driver_registry_;
+};
 
 // Dispatches the selected kernel with two whole-buffer bindings and the given
 // push constants. Submission ordering is defined by the supplied semaphores.

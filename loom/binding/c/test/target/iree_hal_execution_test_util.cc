@@ -50,17 +50,6 @@ using TargetProfilePtr =
     HandlePtr<loomc_target_profile_t, loomc_target_profile_release>;
 using WorkspacePtr = HandlePtr<loomc_workspace_t, loomc_workspace_release>;
 
-void PrintIreeStatus(const char* label, const iree_status_t status) {
-  iree_status_code_t code = iree_status_code(status);
-  iree_string_view_t message = iree_status_message(status);
-  if (iree_string_view_is_empty(message)) {
-    std::fprintf(stderr, "%s: %s\n", label, iree_status_code_string(code));
-    return;
-  }
-  std::fprintf(stderr, "%s: %s: %.*s\n", label, iree_status_code_string(code),
-               static_cast<int>(message.size), message.data);
-}
-
 void PrintResultDiagnostics(const loomc_result_t* result) {
   if (result == nullptr) {
     std::fprintf(stderr, "loom result is null\n");
@@ -92,18 +81,6 @@ bool ResultSucceeded(const loomc_result_t* result, const char* label) {
   return true;
 }
 
-bool IsLiveSkipStatus(iree_status_code_t code) {
-  switch (code) {
-    case IREE_STATUS_NOT_FOUND:
-    case IREE_STATUS_FAILED_PRECONDITION:
-    case IREE_STATUS_UNAVAILABLE:
-    case IREE_STATUS_INCOMPATIBLE:
-      return true;
-    default:
-      return false;
-  }
-}
-
 const loomc_artifact_t* FindArtifact(const loomc_result_t* result,
                                      loomc_artifact_kind_t artifact_kind,
                                      loomc_string_view_t artifact_format) {
@@ -120,19 +97,13 @@ const loomc_artifact_t* FindArtifact(const loomc_result_t* result,
   return nullptr;
 }
 
-iree_status_t CreateLiveHalDevice(iree_string_view_t device_uri,
+iree_status_t CreateLiveHalDevice(iree_hal_driver_registry_t* registry,
+                                  iree_string_view_t device_uri,
                                   ProactorPoolPtr* out_proactor_pool,
                                   FrontierTrackerPtr* out_frontier_tracker,
                                   HalDeviceGroupPtr* out_device_group,
                                   HalDevicePtr* out_device) {
   iree_allocator_t host_allocator = iree_allocator_system();
-  iree_hal_driver_registry_t* registry = nullptr;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_driver_registry_allocate(host_allocator, &registry));
-  HandlePtr<iree_hal_driver_registry_t, iree_hal_driver_registry_free>
-      registry_ptr(registry);
-  IREE_RETURN_IF_ERROR(iree_hal_register_all_available_drivers(registry));
-
   iree_async_proactor_pool_t* proactor_pool = nullptr;
   iree_status_t status = iree_async_proactor_pool_create(
       iree_numa_node_count(), /*node_ids=*/nullptr,
@@ -442,7 +413,20 @@ iree_status_t DispatchIreeHalKernel(
   return status;
 }
 
-void RunIreeHalKernelExecutionTest(
+iree_hal_driver_registry_t* IreeHalExecutionTest::driver_registry_ = nullptr;
+
+void IreeHalExecutionTest::SetUpTestSuite() {
+  IREE_ASSERT_OK(iree_hal_driver_registry_allocate(iree_allocator_system(),
+                                                   &driver_registry_));
+  IREE_ASSERT_OK(iree_hal_register_all_available_drivers(driver_registry_));
+}
+
+void IreeHalExecutionTest::TearDownTestSuite() {
+  iree_hal_driver_registry_free(driver_registry_);
+  driver_registry_ = nullptr;
+}
+
+void IreeHalExecutionTest::RunKernel(
     const IreeHalKernelExecutionTarget& target,
     const std::function<void(const IreeHalKernelExecution&)>& execute) {
   ASSERT_NE(target.label, nullptr);
@@ -463,16 +447,9 @@ void RunIreeHalKernelExecutionTest(
   FrontierTrackerPtr frontier_tracker;
   HalDeviceGroupPtr device_group;
   HalDevicePtr device;
-  iree_status_t iree_status =
-      CreateLiveHalDevice(target.device_uri, &proactor_pool, &frontier_tracker,
-                          &device_group, &device);
-  if (!iree_status_is_ok(iree_status) && device.get() == nullptr &&
-      IsLiveSkipStatus(iree_status_code(iree_status))) {
-    PrintIreeStatus("IREE HAL device creation failed", iree_status);
-    iree_status_free(iree_status);
-    GTEST_SKIP() << "no live IREE HAL device is available for " << target.label;
-  }
-  IREE_ASSERT_OK(iree_status);
+  IREE_ASSERT_OK(CreateLiveHalDevice(driver_registry_, target.device_uri,
+                                     &proactor_pool, &frontier_tracker,
+                                     &device_group, &device));
   iree_hal_queue_t* transfer_queue = SelectProvisionedQueue(
       device.get(), IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER);
   ASSERT_NE(transfer_queue, nullptr);
