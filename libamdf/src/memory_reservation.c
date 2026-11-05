@@ -444,10 +444,28 @@ static amdf_status_t amdf_memory_reservation_apply(
   }
   memcpy(ordered, updates, update_count * sizeof(*ordered));
   qsort(ordered, update_count, sizeof(*ordered), amdf_memory_mapping_compare);
+  // Native providers need source runs, not the caller's page bookkeeping.
+  // Compact the already-owned sorted vector without crossing holes, source
+  // aliases or permission boundaries. Every original range was validated above.
+  uint32_t ordered_count = 1;
   for (uint32_t i = 1; i < update_count && amdf_status_is_ok(status); ++i) {
-    if (ordered[i].target_byte_offset <
-        ordered[i - 1].target_byte_offset + ordered[i - 1].byte_length) {
+    amdf_memory_mapping_update_t* previous = &ordered[ordered_count - 1];
+    const amdf_memory_mapping_update_t* current = &ordered[i];
+    const uint64_t previous_end =
+        previous->target_byte_offset + previous->byte_length;
+    if (current->target_byte_offset < previous_end) {
       status = amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+    } else if (current->target_byte_offset == previous_end &&
+               current->memory == previous->memory &&
+               current->memory_access_ordinal ==
+                   previous->memory_access_ordinal &&
+               current->access == previous->access &&
+               (current->memory == NULL ||
+                current->source_byte_offset ==
+                    previous->source_byte_offset + previous->byte_length)) {
+      previous->byte_length += current->byte_length;
+    } else {
+      ordered[ordered_count++] = *current;
     }
   }
   bool mutation_started = false;
@@ -456,9 +474,9 @@ static amdf_status_t amdf_memory_reservation_apply(
     status =
         queue != NULL
             ? queue->vtable->update_memory(
-                  queue, reservation, access_ordinal, update_count, ordered,
+                  queue, reservation, access_ordinal, ordered_count, ordered,
                   &mutation_started, &accepted_submission)
-            : target->vtable->update(reservation, access_ordinal, update_count,
+            : target->vtable->update(reservation, access_ordinal, ordered_count,
                                      ordered, &mutation_started);
   }
   if (!amdf_status_is_ok(status) && mutation_started) {

@@ -6,6 +6,7 @@
 
 #include "libamdf/src/memory_reservation.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <vector>
@@ -186,6 +187,149 @@ TEST_F(MemoryReservationTest, ValidatesTheWholeVectorBeforeNativeMutation) {
                                            original.size(), original.data()),
             AMDF_STATUS_OK);
   EXPECT_EQ(native_.update_count, 2u);
+}
+
+TEST_F(MemoryReservationTest, CoalescesOnlyContiguousMappingsAndDetaches) {
+  std::array<amdf_memory_mapping_update_t, 7> updates = {{
+      {
+          .byte_length = 4096,
+          .memory = memory_,
+          .access = AMDF_MEMORY_ACCESS_READ,
+      },
+      {
+          .target_byte_offset = 4096,
+          .byte_length = 4096,
+          .memory = memory_,
+          .access = AMDF_MEMORY_ACCESS_READ,
+          .source_byte_offset = 4096,
+      },
+      {
+          .target_byte_offset = 8192,
+          .byte_length = 8192,
+          .memory = memory_,
+          .access = AMDF_MEMORY_ACCESS_READ,
+          .source_byte_offset = 8192,
+      },
+      {
+          .target_byte_offset = 24576,
+          .byte_length = 4096,
+      },
+      {
+          .target_byte_offset = 28672,
+          .byte_length = 4096,
+      },
+      {
+          .target_byte_offset = 40960,
+          .byte_length = 4096,
+          .memory = memory_,
+          .access = AMDF_MEMORY_ACCESS_READ,
+      },
+      {
+          .target_byte_offset = 45056,
+          .byte_length = 4096,
+          .memory = memory_,
+          .access = AMDF_MEMORY_ACCESS_READ,
+      },
+  }};
+  std::reverse(updates.begin(), updates.end());
+  const auto original = updates;
+  ASSERT_EQ(amdf_memory_reservation_update(native_.reservation, 0,
+                                           updates.size(), updates.data()),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(std::memcmp(updates.data(), original.data(), sizeof(updates)), 0);
+  ASSERT_EQ(native_.updates.size(), 4u);
+  EXPECT_EQ(native_.updates[0].target_byte_offset, 0u);
+  EXPECT_EQ(native_.updates[0].byte_length, 16384u);
+  EXPECT_EQ(native_.updates[0].source_byte_offset, 0u);
+  EXPECT_EQ(native_.updates[0].memory, memory_);
+  EXPECT_EQ(native_.updates[0].access, AMDF_MEMORY_ACCESS_READ);
+  EXPECT_EQ(native_.updates[1].target_byte_offset, 24576u);
+  EXPECT_EQ(native_.updates[1].byte_length, 8192u);
+  EXPECT_EQ(native_.updates[1].memory, nullptr);
+  // Repeated source pages remain distinct aliases, even at adjacent addresses.
+  EXPECT_EQ(native_.updates[2].target_byte_offset, 40960u);
+  EXPECT_EQ(native_.updates[3].target_byte_offset, 45056u);
+  for (size_t i = 2; i < native_.updates.size(); ++i) {
+    EXPECT_EQ(native_.updates[i].byte_length, 4096u);
+    EXPECT_EQ(native_.updates[i].source_byte_offset, 0u);
+    EXPECT_EQ(native_.updates[i].memory, memory_);
+  }
+  // Coalescing an earlier run must not conceal an overlapping later range.
+  updates[4].target_byte_offset = 4096;
+  EXPECT_EQ(amdf_status_code(amdf_memory_reservation_update(
+                native_.reservation, 0, updates.size(), updates.data())),
+            AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  EXPECT_EQ(native_.update_count, 1u);
+}
+
+TEST_F(MemoryReservationTest,
+       PreservesSourcePermissionAndDestinationBoundaries) {
+  auto create = MakeMemoryCreateInfo(devices_[0]);
+  create.byte_length = 16384;
+  amdf_memory_t* other_memory = nullptr;
+  ASSERT_EQ(amdf_memory_create(&instance_.system_memory_scope, &create,
+                               &other_memory, nullptr),
+            AMDF_STATUS_OK);
+  const std::array<amdf_memory_mapping_update_t, 5> boundaries = {{
+      {
+          .target_byte_offset = 8192,
+          .byte_length = 4096,
+          .memory = memory_,
+          .access = AMDF_MEMORY_ACCESS_READ,
+          .source_byte_offset = 4096,
+      },
+      {
+          .target_byte_offset = 4096,
+          .byte_length = 4096,
+          .memory = memory_,
+          .access = AMDF_MEMORY_ACCESS_READ,
+          .source_byte_offset = 8192,
+      },
+      {
+          .target_byte_offset = 4096,
+          .byte_length = 4096,
+          .memory = other_memory,
+          .access = AMDF_MEMORY_ACCESS_READ,
+          .source_byte_offset = 4096,
+      },
+      {
+          .target_byte_offset = 4096,
+          .byte_length = 4096,
+          .memory = memory_,
+          .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+          .source_byte_offset = 4096,
+      },
+      {
+          .target_byte_offset = 4096,
+          .byte_length = 4096,
+      },
+  }};
+  for (const auto& boundary : boundaries) {
+    const amdf_memory_mapping_update_t updates[] = {
+        {
+            .byte_length = 4096,
+            .memory = memory_,
+            .access = AMDF_MEMORY_ACCESS_READ,
+        },
+        boundary,
+    };
+    EXPECT_EQ(
+        amdf_memory_reservation_update(native_.reservation, 0, 2, updates),
+        AMDF_STATUS_OK);
+    EXPECT_EQ(native_.updates.size(), 2u);
+    if (native_.updates.size() == 2) {
+      EXPECT_EQ(native_.updates[0].byte_length, 4096u);
+      EXPECT_EQ(native_.updates[1].target_byte_offset,
+                boundary.target_byte_offset);
+      EXPECT_EQ(native_.updates[1].memory, boundary.memory);
+      EXPECT_EQ(native_.updates[1].access, boundary.access);
+      EXPECT_EQ(native_.updates[1].source_byte_offset,
+                boundary.source_byte_offset);
+    }
+  }
+  EXPECT_EQ(amdf_memory_reservation_detach(native_.reservation, 0),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_memory_destroy(other_memory, nullptr), AMDF_STATUS_OK);
 }
 
 TEST_F(MemoryReservationTest,
