@@ -1109,6 +1109,8 @@ static const loom_low_lower_policy_t kX86Avx512FeaturesLowLowerPolicy = {
                            .user_data = NULL},
     .map_argument = {.fn = loom_x86_map_avx512_features_argument,
                      .user_data = NULL},
+    .source_type_supported = {.fn = loom_x86_source_type_supported,
+                              .user_data = NULL},
     .source_vector_carrier_supported =
         {
             .fn = loom_x86_avx512_source_vector_carrier_supported,
