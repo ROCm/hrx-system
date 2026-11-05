@@ -578,10 +578,12 @@ static uint32_t iree_math_reduce_radians_f32(uint32_t magnitude,
   const uint32_t significand =
       ((magnitude & UINT32_C(0xFFFFFF)) | UINT32_C(0x800000))
       << ((magnitude >> 23) & 7);
-  uint64_t low = significand * table[0];
+  // This limb intentionally retains the low 32 bits of the product. The
+  // following shift discards the high half before composing the 64-bit window.
+  const uint32_t low_limb = significand * table[0];
   const uint64_t middle = (uint64_t)significand * table[4];
   const uint64_t high = (uint64_t)significand * table[8];
-  low = ((high >> 32) | (low << 32)) + middle;
+  uint64_t low = ((high >> 32) | ((uint64_t)low_limb << 32)) + middle;
   const uint64_t rounded = (low + (UINT64_C(1) << 61)) >> 62;
   low -= rounded << 62;
   *out_remainder = (double)(int64_t)low * 0x1.921fb54442d18p-62;
