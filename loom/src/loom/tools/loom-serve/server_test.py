@@ -363,8 +363,8 @@ class ServerTest(unittest.TestCase):
                 shutil.copytree(PACKAGE, package, copy_function=shutil.copyfile)
                 document = json.loads((package / "model.json").read_text())
                 document["name"] = name
-                document["device"] = device_keys[index]
-                document["pool"] = pool_keys[1 - index]
+                document["devices"] = [device_keys[index]]
+                document["pools"] = [pool_keys[1 - index]]
                 (package / "model.json").write_text(json.dumps(document))
                 documents.append((package, document))
             settings = directory / "settings"
@@ -437,23 +437,23 @@ class ServerTest(unittest.TestCase):
                     [device["driver"] for device in devices], ["task", "task"]
                 )
                 self.assertEqual(
-                    {entry["id"]: entry["loom"]["pool"] for entry in snapshot["data"]},
-                    {"alpha": pool_keys[1], "beta": pool_keys[0]},
+                    {entry["id"]: entry["loom"]["pools"] for entry in snapshot["data"]},
+                    {"alpha": [pool_keys[1]], "beta": [pool_keys[0]]},
                 )
                 self.assertEqual(
                     {
-                        entry["id"]: entry["loom"]["device"]
+                        entry["id"]: entry["loom"]["devices"]
                         for entry in snapshot["data"]
                     },
-                    {"alpha": device_keys[0], "beta": device_keys[1]},
+                    {"alpha": [device_keys[0]], "beta": [device_keys[1]]},
                 )
 
                 # Both admission modes reject ambiguous/out-of-group bindings
                 # before publishing a slot, even when no model I/O is needed.
                 for admission in ("open", "drained"):
-                    for binding in ({}, {"device": "absent"}, {"device": 0}):
+                    for binding in ({}, {"devices": ["absent"]}, {"devices": 0}):
                         invalid = dict(documents[0][1])
-                        invalid.pop("device")
+                        invalid.pop("devices")
                         invalid.update(
                             name="invalid",
                             admission=admission,
@@ -463,12 +463,12 @@ class ServerTest(unittest.TestCase):
                         self.post(address, "/v1/models/register", invalid, expected=400)
                     for binding in (
                         {},
-                        {"pool": "absent"},
-                        {"pool": 0},
-                        {"pool": pool_keys[2]},
+                        {"pools": ["absent"]},
+                        {"pools": 0},
+                        {"pools": [pool_keys[2]]},
                     ):
                         invalid = dict(documents[1][1])
-                        invalid.pop("pool")
+                        invalid.pop("pools")
                         invalid.update(
                             name="invalid",
                             admission=admission,
@@ -563,7 +563,7 @@ class ServerTest(unittest.TestCase):
                 document["base_directory"] = str(package)
                 # Two execution devices now use the same explicit owner. No
                 # second pool or copied payload is introduced for the binding.
-                document["pool"] = pool_keys[0]
+                document["pools"] = [pool_keys[0]]
                 self.post(address, "/v1/models/register", document, expected=202)
                 before = reservations()
                 result = self.post(

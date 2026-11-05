@@ -159,6 +159,7 @@ loom_cc_test(
     name = "observation_test",
     srcs = ["observation_test.cc"],
     deps = [
+        ":configuration",
         ":observation",
         ":registry",
         "//loom/src/loom/runtime/telemetry:sample",
@@ -266,6 +267,7 @@ loom_cc_library(
         "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/base/internal:path",
         "//runtime/src/iree/base/internal:unicode",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/io:file_handle",
     ],
 )
@@ -356,6 +358,7 @@ loom_cc_library(
         "//loom/src/loom/serve/service/text:schedule",
         "//loom/src/loom/serve/service/text:service",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
     ],
 )
 
@@ -453,9 +456,11 @@ loom_cc_test(
         ":configuration",
         "//loom/src/loom/model:card",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/testing:temp_file",
+        "//runtime/src/iree/vm:test_support",
     ],
 )

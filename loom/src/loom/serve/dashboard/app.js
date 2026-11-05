@@ -438,25 +438,32 @@ function deviceLabel(device) {
   return device.key + (device.key_truncated ? "…" : "");
 }
 
+function updatePlacementLinks(container, indices, inventory, kind, label) {
+  if (!indices.length) {
+    container.textContent = `unassigned ${kind}`;
+    return;
+  }
+  if (container.children.length !== indices.length) {
+    container.replaceChildren(
+      ...indices.map(() => element("a", "device-link")),
+    );
+  }
+  indices.forEach((index, position) => {
+    const resource = inventory.get(index);
+    const link = container.children[position];
+    link.textContent = resource ? label(resource.source) : `${kind} ${index}`;
+    if (resource) link.href = `#${kind}-${index}`;
+    else link.removeAttribute("href");
+  });
+}
+
 function updatePlacement(state) {
-  const index = state.model.device;
-  const device = devices.get(index);
-  state.placement.textContent = device
-    ? deviceLabel(device.source)
-    : index === null || index === undefined
-      ? "unassigned"
-      : `device ${index}`;
-  if (device) state.placement.setAttribute("href", `#device-${index}`);
-  else state.placement.removeAttribute("href");
-  const poolIndex = state.model.pool;
-  const pool = pools.get(poolIndex);
-  state.poolPlacement.textContent = pool
-    ? poolLabel(pool.source)
-    : poolIndex === null || poolIndex === undefined
-      ? "unassigned pool"
-      : `pool ${poolIndex}`;
-  if (pool) state.poolPlacement.setAttribute("href", `#pool-${poolIndex}`);
-  else state.poolPlacement.removeAttribute("href");
+  updatePlacementLinks(
+    state.placement, state.model.devices, devices, "device", deviceLabel,
+  );
+  updatePlacementLinks(
+    state.poolPlacement, state.model.pools, pools, "pool", poolLabel,
+  );
 }
 
 function summarizeDevices() {
@@ -468,12 +475,14 @@ function summarizeDevices() {
   );
   for (const state of models.values()) {
     updatePlacement(state);
-    const totals = activity.get(state.model.device);
-    if (!totals) continue;
-    ++totals.models;
-    totals.active += state.model.active;
-    totals.queued += state.model.queued;
-    totals.held += state.model.held;
+    for (const index of state.model.devices) {
+      const totals = activity.get(index);
+      if (!totals) continue;
+      ++totals.models;
+      totals.active += state.model.active;
+      totals.queued += state.model.queued;
+      totals.held += state.model.held;
+    }
   }
   for (const [index, totals] of activity) {
     devices.get(index).activity.textContent =
@@ -631,8 +640,8 @@ function createModel(model) {
   );
   const identity = element("div");
   const kind = element("div", "kind", model.kind);
-  const placement = element("a", "device-link");
-  const poolPlacement = element("a", "device-link");
+  const placement = element("span");
+  const poolPlacement = element("span");
   kind.append(placement, poolPlacement);
   identity.append(name, kind);
   const phase = element("span", "phase", model.phase);

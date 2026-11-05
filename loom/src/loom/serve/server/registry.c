@@ -387,13 +387,10 @@ iree_status_t loom_serve_registry_register(
                             "registration provider has no model-card "
                             "preparation worker");
   }
-  iree_host_size_t device_index = 0;
-  IREE_RETURN_IF_ERROR(loom_serve_model_configuration_resolve_device(
-      configuration, registry->factory.device_names, &device_index));
-  iree_host_size_t pool_index = 0;
-  IREE_RETURN_IF_ERROR(loom_serve_model_configuration_resolve_pool(
-      configuration, registry->factory.pool_count, registry->factory.pools,
-      device_index, &pool_index));
+  IREE_RETURN_IF_ERROR(loom_serve_model_configuration_resolve_devices(
+      configuration, registry->factory.device_names));
+  IREE_RETURN_IF_ERROR(loom_serve_model_configuration_resolve_pools(
+      configuration, registry->factory.pool_count, registry->factory.pools));
   iree_host_size_t available = registry->capacity;
   for (iree_host_size_t i = 0; i < registry->capacity; ++i) {
     const iree_string_view_t name = registry->models[i].service.name;
@@ -409,29 +406,10 @@ iree_status_t loom_serve_registry_register(
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "model registration capacity is full");
   }
-  if (!configuration->device.size) {
-    const iree_string_view_t name =
-        registry->factory.device_names.values[device_index];
-    char* storage = NULL;
-    IREE_RETURN_IF_ERROR(iree_allocator_clone(
-        configuration->host_allocator,
-        iree_make_const_byte_span(name.data, name.size), (void**)&storage));
-    configuration->device = iree_make_string_view(storage, name.size);
-  }
-  if (!configuration->pool.size) {
-    const iree_string_view_t name = registry->factory.pools[pool_index].name;
-    char* storage = NULL;
-    IREE_RETURN_IF_ERROR(iree_allocator_clone(
-        configuration->host_allocator,
-        iree_make_const_byte_span(name.data, name.size), (void**)&storage));
-    configuration->pool = iree_make_string_view(storage, name.size);
-  }
   loom_serve_registered_model_t* model = &registry->models[available];
   IREE_RETURN_IF_ERROR(loom_runtime_telemetry_stream_allocate(
       128, registry->host_allocator, &model->stream));
   model->configuration = *configuration;
-  model->configuration.device_index = device_index;
-  model->configuration.pool_index = pool_index;
   memset(configuration, 0, sizeof(*configuration));
   model->closed = model->configuration.start_drained;
   model->incarnation = registry->next_incarnation++;

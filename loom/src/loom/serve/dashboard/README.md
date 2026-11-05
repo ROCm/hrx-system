@@ -31,8 +31,9 @@ Device and pool membership are immutable for the application lifetime. Device
 pages carry an index, deployment key, and hardware/backend labels. Pool pages
 carry their own index, key, consumer device indices, backing mode, and numeric
 topics supplied by [`server/resources.c`](../server/resources.c). Managed model
-pages reference their resolved device and pool indices; borrowed services
-without a binding use null. Each index is scoped to its inventory and stream
+pages contain ordered `devices` and `pools` arrays of resolved inventory indices;
+pool aliases repeat in execution order. Borrowed services without a binding use
+empty arrays. Each index is scoped to its inventory and stream
 server identity, not a physical device identifier. Keys are display labels capped at 256 bytes
 with an explicit truncation flag; truncation never merges owner identities.
 The resource sampler uses the same transport-independent typed sink as services;

@@ -247,8 +247,8 @@ the server reads its `path` and `format` without interpreting that transform.
 | `definition` | Required object specifying a modality, programs, assets and capacities. |
 | `model` | Optional local card reference with `path` and optional `preset`, `service`, `variant`, `partition`, and `programs` selectors. Programs and assets then come from the card. |
 | `admission` | `"open"` by default; `"drained"` registers metadata without reading programs, loading weights or allocating model storage. |
-| `device` | String key in the server's named device configuration; required when the group has more than one member. The `--device=URI` shortcut uses the key `device`. |
-| `pool` | String key in the server's pool inventory; required when more than one pool is configured. Its permitted devices must include the selected execution device. The `--device=URI` shortcut uses the key `pool`. |
+| `devices` | Nonempty array of unique keys in the server's device inventory, in source execution order. Required when that inventory has more than one member. Text and sequence deployments support multiple members; other modalities require one. The `--device=URI` shortcut uses the key `device`. |
+| `pools` | Nonempty array selecting one storage pool per execution member, in the same order. Repeated keys share backing. Required when more than one pool is configured; omission selects the sole pool for every member. Each pool must permit its corresponding execution device. The `--device=URI` shortcut uses the key `pool`. |
 | `base_directory` | Optional local file base; relative values resolve from the containing document. |
 
 Placement is a deployment property, outside the reusable `definition`. Drained
@@ -256,14 +256,14 @@ registrations still require valid device and pool selections. Names are resolved
 before publication or model I/O; `/v1/status` publishes the inventories under
 `server.resources.devices` and `server.resources.pools`, with each entry's `key`
 identifying the selection.
-A deployment executes on one selected device. The fetched model card can remain
-unchanged while separate deployment documents select different devices:
+A fetched model card can remain unchanged while deployment documents select
+different execution and storage owners:
 
 ```json
 {
   "name": "scout",
-  "device": "gpu0",
-  "pool": "interactive",
+  "devices": ["gpu0"],
+  "pools": ["interactive"],
   "model": {"path": "models/chat/model.json"},
   "definition": {"kind": "text"}
 }
@@ -271,7 +271,12 @@ unchanged while separate deployment documents select different devices:
 
 The selected card preset supplies the programs, assets, and settings omitted
 from `definition`. A second deployment can reference the same card with a
-different routing name, `device`, or `pool` key. Machine configuration is described in
+different routing name, `devices`, or `pools`. For a text source authored for
+three executions, `"devices":["gpu2","gpu0","gpu1"]` binds source execution
+ordinals 0, 1, and 2 in that order. `"pools":["shared","shared","private"]`
+shares backing between the first two executions and gives the third its own
+pool. Selecting more devices does not automatically partition a model: its
+source programs declare which execution runs each stage. Machine configuration is described in
 the [command reference](index.md#devices-and-listeners).
 
 Unknown fields, duplicate keys, wrong JSON types and wrong-modality fields

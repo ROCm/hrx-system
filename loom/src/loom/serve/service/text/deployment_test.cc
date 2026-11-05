@@ -198,6 +198,51 @@ class TextDeploymentTest : public SourceTextServiceTest {
   loom_serve_memory_statistics_t held_usage_ = {};
 };
 
+TEST_F(TextDeploymentTest, HttpRegistrationPreservesEveryPlacementMember) {
+  StartManaged();
+  for (const std::string pools :
+       {R"(["fixed1","fixed2","fixed0"])", R"(["fixed2","fixed2","fixed2"])"}) {
+    SCOPED_TRACE(pools);
+    auto declaration = Declaration("fixture-text", directory_, "drained",
+                                   R"(,"session_cache_capacity":4)");
+    const auto position = declaration.find(R"("pools":["pool0"])");
+    ASSERT_NE(position, std::string::npos);
+    declaration.replace(
+        position, std::string(R"("pools":["pool0"])").size(),
+        R"("devices":["device2","device0","device1"],"pools":)" + pools);
+    EXPECT_EQ(
+        Read(Send(declaration, "", "/v1/models/register")).find("HTTP/1.1 202"),
+        0u);
+    const auto declared = ModelStatus("fixture-text");
+    EXPECT_NE(declared.find(R"("devices":["device2","device0","device1"])"),
+              std::string::npos);
+    EXPECT_NE(declared.find(R"("pools":)" + pools), std::string::npos);
+    ASSERT_EQ(
+        Read(Send(R"({"model":"fixture-text"})", "", "/v1/models/undrain"))
+            .find("HTTP/1.1 200"),
+        0u);
+    const std::string prompt = "abxa";
+    const auto first = Content(Read(Send(Request(Message("user", prompt), 4),
+                                         "X-Loom-Session: placement\r\n")));
+    EXPECT_EQ(first, Oracle::Complete(prompt, 4, 12));
+    const auto next = Read(Send(
+        Request(Message("user", prompt) + "," + Message("assistant", first) +
+                    "," + Message("user", "bax"),
+                4),
+        "X-Loom-Session: placement\r\n"));
+    EXPECT_EQ(Content(next), Oracle::Complete(prompt + first + "#bax", 4, 12));
+    EXPECT_NE(next.find("\"cached_tokens\":" +
+                        std::to_string(prompt.size() + first.size() - 1)),
+              std::string::npos)
+        << next;
+    EXPECT_EQ(
+        Read(Send(R"({"model":"fixture-text"})", "", "/v1/models/unregister"))
+            .find("HTTP/1.1 202"),
+        0u);
+    WaitModelAbsent("fixture-text");
+  }
+}
+
 TEST_F(TextDeploymentTest, CompleteOwnerSetProducesRetainedHttpOutput) {
   IREE_ASSERT_OK(Load(ModelOptions()));
   ASSERT_NO_FATAL_FAILURE(CheckCapacityDomains());

@@ -505,7 +505,8 @@ TEST_P(HttpRouterRegistrationTest, LiveCreditDoesNotRetainRemovedModel) {
       const auto page = newcomer.WebSocketFrame();
       if (page.find("\"name\":\"dynamic\"") != std::string::npos) {
         EXPECT_NE(page.find("\"incarnation\":\"2\""), std::string::npos);
-        EXPECT_NE(page.find("\"device\":0"), std::string::npos);
+        EXPECT_NE(page.find("\"devices\":[0]"), std::string::npos);
+        EXPECT_NE(page.find("\"pools\":[0]"), std::string::npos);
         found = true;
       }
       newcomer.Ack(page);

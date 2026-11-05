@@ -8,11 +8,14 @@
 
 #include <algorithm>
 #include <string>
+#include <vector>
 
+#include "iree/hal/topology.h"
 #include "iree/io/file_contents.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
+#include "iree/vm/test_allocator.h"
 #include "loom/model/card.h"
 
 namespace {
@@ -93,7 +96,7 @@ TEST_P(CardConfigurationTest, DirectCardOwnsPresetWithoutReadingPrograms) {
   IREE_ASSERT_OK(Load(json));
   json.assign(json.size(), 'x');
   EXPECT_EQ(String(model_.name), "publisher/model");
-  EXPECT_EQ(model_.device_index, IREE_HOST_SIZE_MAX);
+  EXPECT_EQ(model_.devices.count, 0u);
   EXPECT_EQ(model_.pending_requests, 7u);
   EXPECT_EQ(String(model_.options), R"({"batch_units":64})");
   ASSERT_NE(model_.resolved_sources, nullptr);
@@ -457,19 +460,19 @@ TEST_F(ConfigurationTest, PackagesDoNotSupplyAFileBaseForCheckpoints) {
 
 TEST_F(ConfigurationTest, OmittedDeviceRequiresExactlyOneGroupMember) {
   IREE_ASSERT_OK(Parse(Document("embedding", R"(,"assets":".")")));
-  EXPECT_EQ(model_.device_index, IREE_HOST_SIZE_MAX);
-  iree_host_size_t index = 17;
+  EXPECT_EQ(model_.devices.count, 0u);
   const iree_string_view_t names[] = {IREE_SV("gpu"), IREE_SV("npu")};
   for (iree_host_size_t count : {0u, 2u}) {
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                          loom_serve_model_configuration_resolve_device(
-                              &model_, {count, names}, &index));
-    EXPECT_EQ(index, 17u);
+                          loom_serve_model_configuration_resolve_devices(
+                              &model_, {count, names}));
+    EXPECT_EQ(model_.devices.count, 0u);
   }
-  IREE_ASSERT_OK(loom_serve_model_configuration_resolve_device(
-      &model_, {1, names}, &index));
-  EXPECT_EQ(index, 0u);
-  EXPECT_EQ(model_.device_index, IREE_HOST_SIZE_MAX);
+  IREE_ASSERT_OK(
+      loom_serve_model_configuration_resolve_devices(&model_, {1, names}));
+  ASSERT_EQ(model_.devices.count, 1u);
+  EXPECT_EQ(model_.devices.values[0].index, 0u);
+  EXPECT_EQ(String(model_.devices.values[0].name), "gpu");
 }
 
 TEST_F(ConfigurationTest, ExplicitDeviceResolvesAtGroupAdmission) {
@@ -477,35 +480,78 @@ TEST_F(ConfigurationTest, ExplicitDeviceResolvesAtGroupAdmission) {
   for (iree_host_size_t index : {0u, 1u}) {
     IREE_ASSERT_OK(
         Parse(Document("embedding", R"(,"assets":".")",
-                       ",\"device\":\"" + String(names[index]) + "\"")));
-    EXPECT_EQ(String(model_.device), String(names[index]));
-    iree_host_size_t resolved = IREE_HOST_SIZE_MAX;
+                       ",\"devices\":[\"" + String(names[index]) + "\"]")));
+    ASSERT_EQ(model_.devices.count, 1u);
+    EXPECT_EQ(String(model_.devices.values[0].name), String(names[index]));
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                          loom_serve_model_configuration_resolve_device(
-                              &model_, {index, names}, &resolved));
-    EXPECT_EQ(resolved, IREE_HOST_SIZE_MAX);
-    IREE_ASSERT_OK(loom_serve_model_configuration_resolve_device(
-        &model_, {index + 1, names}, &resolved));
-    EXPECT_EQ(resolved, index);
+                          loom_serve_model_configuration_resolve_devices(
+                              &model_, {index, names}));
+    EXPECT_EQ(model_.devices.values[0].index, IREE_HOST_SIZE_MAX);
+    IREE_ASSERT_OK(loom_serve_model_configuration_resolve_devices(
+        &model_, {index + 1, names}));
+    EXPECT_EQ(model_.devices.values[0].index, index);
+  }
+}
+
+TEST_F(ConfigurationTest, TextAndSequenceKeepUniqueDeviceOrder) {
+  const iree_string_view_t names[] = {IREE_SV("first"), IREE_SV("second"),
+                                      IREE_SV("third")};
+  for (const char* kind : {"text", "sequence"}) {
+    SCOPED_TRACE(kind);
+    const std::string fields = std::string(kind) == "text"
+                                   ? R"(,"weights":"w","tokenizer":"t")"
+                                   : R"(,"weights":"w")";
+    IREE_ASSERT_OK(Parse(
+        Document(kind, fields, R"(,"devices":["third","first","second"])")));
+    IREE_ASSERT_OK(loom_serve_model_configuration_resolve_devices(
+        &model_, {IREE_ARRAYSIZE(names), names}));
+    ASSERT_EQ(model_.devices.count, 3u);
+    for (size_t i = 0; i < 3; ++i) {
+      EXPECT_EQ(model_.devices.values[i].index, (i + 2) % 3);
+      EXPECT_EQ(String(model_.devices.values[i].name),
+                String(names[(i + 2) % 3]));
+    }
+    for (const char* selection : {R"(,"devices":["first","unknown"])",
+                                  R"(,"devices":["first","f\u0069rst"])"}) {
+      IREE_ASSERT_OK(Parse(Document(kind, fields, selection)));
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                            loom_serve_model_configuration_resolve_devices(
+                                &model_, {IREE_ARRAYSIZE(names), names}));
+      for (size_t i = 0; i < model_.devices.count; ++i) {
+        EXPECT_EQ(model_.devices.values[i].index, IREE_HOST_SIZE_MAX);
+      }
+    }
+  }
+}
+
+TEST_F(ConfigurationTest, SingletonModalitiesRejectMultipleDevices) {
+  const iree_string_view_t names[] = {IREE_SV("first"), IREE_SV("second")};
+  for (const char* kind : {"image", "embedding", "decision", "speech",
+                           "recognition", "activity"}) {
+    SCOPED_TRACE(kind);
+    const auto fields = std::string(kind) == "image" ? R"(,"checkpoint":".")"
+                                                     : R"(,"assets":".")";
+    IREE_ASSERT_OK(
+        Parse(Document(kind, fields, R"(,"devices":["first","second"])")));
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          loom_serve_model_configuration_resolve_devices(
+                              &model_, {IREE_ARRAYSIZE(names), names}));
   }
 }
 
 TEST_F(ConfigurationTest, InvalidDeviceNamesRejectBeforeIo) {
   for (const char* field :
-       {R"(,"device":-1)", R"(,"device":1.5)", R"(,"device":0)",
-        R"(,"device":"")", R"(,"device":null)", R"(,"device":false)",
-        R"(,"device":18446744073709551615)",
-        R"(,"device":"gpu","device":"npu")"}) {
+       {R"(,"devices":-1)", R"(,"devices":1.5)", R"(,"devices":0)",
+        R"(,"devices":"gpu")", R"(,"devices":null)", R"(,"devices":false)",
+        R"(,"devices":[])", R"(,"devices":[""])", R"(,"devices":[0])",
+        R"(,"devices":["gpu",null])", R"(,"devices":["gpu\u0000"])",
+        R"(,"devices":["gpu"],"devices":["npu"])", R"(,"device":"gpu")"}) {
     SCOPED_TRACE(field);
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
         Parse(Document("embedding", R"(,"assets":".")", field)));
     EXPECT_EQ(model_.name.data, nullptr);
   }
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        Parse(Document("embedding", R"(,"assets":".")",
-                                       R"(,"device":18446744073709551616)")));
-  EXPECT_EQ(model_.name.data, nullptr);
 }
 
 TEST_F(ConfigurationTest, PoolSelectionIsIndependentOfExecutionPlacement) {
@@ -514,55 +560,176 @@ TEST_F(ConfigurationTest, PoolSelectionIsIndependentOfExecutionPlacement) {
       {IREE_SV("foreground"), 1},
       {IREE_SV("background"), 1},
   };
+  const iree_string_view_t names[] = {IREE_SV("gpu"), IREE_SV("npu")};
   IREE_ASSERT_OK(Parse(Document("embedding", R"(,"assets":".")")));
-  EXPECT_EQ(model_.pool_index, IREE_HOST_SIZE_MAX);
-  iree_host_size_t resolved = 17;
+  IREE_ASSERT_OK(
+      loom_serve_model_configuration_resolve_devices(&model_, {1, names}));
   for (iree_host_size_t count : {0u, 3u}) {
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                          loom_serve_model_configuration_resolve_pool(
-                              &model_, count, pools, 0, &resolved));
-    EXPECT_EQ(resolved, 17u);
-  }
-  IREE_ASSERT_OK(loom_serve_model_configuration_resolve_pool(&model_, 1, pools,
-                                                             1, &resolved));
-  EXPECT_EQ(resolved, 0u);
-  EXPECT_EQ(model_.pool_index, IREE_HOST_SIZE_MAX);
-
-  for (iree_host_size_t index = 0; index < IREE_ARRAYSIZE(pools); ++index) {
-    IREE_ASSERT_OK(
-        Parse(Document("embedding", R"(,"assets":".")",
-                       ",\"pool\":\"" + String(pools[index].name) + "\"")));
-    IREE_ASSERT_OK(loom_serve_model_configuration_resolve_pool(
-        &model_, IREE_ARRAYSIZE(pools), pools, 0, &resolved));
-    EXPECT_EQ(resolved, index);
-    EXPECT_EQ(String(model_.pool), String(pools[index].name));
-    if (index) {
-      resolved = 17;
-      IREE_EXPECT_STATUS_IS(
-          IREE_STATUS_INVALID_ARGUMENT,
-          loom_serve_model_configuration_resolve_pool(
-              &model_, IREE_ARRAYSIZE(pools), pools, 1, &resolved));
-      EXPECT_EQ(resolved, 17u);
-    }
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        loom_serve_model_configuration_resolve_pools(&model_, count, pools));
+    EXPECT_EQ(model_.pools.count, 0u);
   }
   IREE_ASSERT_OK(
-      Parse(Document("embedding", R"(,"assets":".")", R"(,"pool":"absent")")));
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_model_configuration_resolve_pool(
-          &model_, IREE_ARRAYSIZE(pools), pools, 0, &resolved));
-  EXPECT_EQ(resolved, 17u);
+      loom_serve_model_configuration_resolve_pools(&model_, 1, pools));
+  ASSERT_EQ(model_.pools.count, 1u);
+  EXPECT_EQ(model_.pools.values[0].index, 0u);
+  EXPECT_EQ(String(model_.pools.values[0].name), "shared");
+
+  for (iree_host_size_t index = 0; index < IREE_ARRAYSIZE(pools); ++index) {
+    for (const char* device : {"gpu", "npu"}) {
+      IREE_ASSERT_OK(Parse(Document("embedding", R"(,"assets":".")",
+                                    ",\"devices\":[\"" + std::string(device) +
+                                        "\"],\"pools\":[\"" +
+                                        String(pools[index].name) + "\"]")));
+      IREE_ASSERT_OK(loom_serve_model_configuration_resolve_devices(
+          &model_, {IREE_ARRAYSIZE(names), names}));
+      if (index && std::string(device) == "npu") {
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                              loom_serve_model_configuration_resolve_pools(
+                                  &model_, IREE_ARRAYSIZE(pools), pools));
+        EXPECT_EQ(model_.pools.values[0].index, IREE_HOST_SIZE_MAX);
+      } else {
+        IREE_ASSERT_OK(loom_serve_model_configuration_resolve_pools(
+            &model_, IREE_ARRAYSIZE(pools), pools));
+        EXPECT_EQ(model_.pools.values[0].index, index);
+        EXPECT_EQ(String(model_.pools.values[0].name),
+                  String(pools[index].name));
+      }
+    }
+  }
+  IREE_ASSERT_OK(Parse(
+      Document("embedding", R"(,"assets":".")", R"(,"pools":["absent"])")));
+  IREE_ASSERT_OK(
+      loom_serve_model_configuration_resolve_devices(&model_, {1, names}));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_model_configuration_resolve_pools(
+                            &model_, IREE_ARRAYSIZE(pools), pools));
+  EXPECT_EQ(model_.pools.values[0].index, IREE_HOST_SIZE_MAX);
+}
+
+TEST_F(ConfigurationTest,
+       PoolAliasesPreserveExecutionOrderAndCheckEveryMember) {
+  const iree_string_view_t devices[] = {IREE_SV("first"), IREE_SV("second")};
+  const loom_serve_pool_binding_t pools[] = {{IREE_SV("shared"), 3},
+                                             {IREE_SV("first-only"), 1}};
+  for (const char* selection : {R"(,"pools":["shared","shared"])", ""}) {
+    IREE_ASSERT_OK(Parse(
+        Document("text", R"(,"weights":"w","tokenizer":"t")",
+                 std::string(R"(,"devices":["second","first"])") + selection)));
+    IREE_ASSERT_OK(loom_serve_model_configuration_resolve_devices(
+        &model_, {IREE_ARRAYSIZE(devices), devices}));
+    IREE_ASSERT_OK(loom_serve_model_configuration_resolve_pools(
+        &model_, *selection ? IREE_ARRAYSIZE(pools) : 1, pools));
+    ASSERT_EQ(model_.pools.count, 2u);
+    for (size_t i = 0; i < 2; ++i) {
+      EXPECT_EQ(model_.devices.values[i].index, 1u - i);
+      EXPECT_EQ(model_.pools.values[i].index, 0u);
+      EXPECT_EQ(String(model_.pools.values[i].name), "shared");
+    }
+  }
+  for (const char* selection :
+       {R"(,"pools":["shared"])", R"(,"pools":["shared","unknown"])",
+        R"(,"pools":["first-only","shared"])", ""}) {
+    SCOPED_TRACE(selection);
+    IREE_ASSERT_OK(Parse(
+        Document("text", R"(,"weights":"w","tokenizer":"t")",
+                 std::string(R"(,"devices":["second","first"])") + selection)));
+    IREE_ASSERT_OK(loom_serve_model_configuration_resolve_devices(
+        &model_, {IREE_ARRAYSIZE(devices), devices}));
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          loom_serve_model_configuration_resolve_pools(
+                              &model_, IREE_ARRAYSIZE(pools), pools));
+    for (size_t i = 0; i < model_.pools.count; ++i) {
+      EXPECT_EQ(model_.pools.values[i].index, IREE_HOST_SIZE_MAX);
+    }
+  }
 }
 
 TEST_F(ConfigurationTest, InvalidPoolNamesRejectBeforeIo) {
   for (const char* field :
-       {R"(,"pool":0)", R"(,"pool":"")", R"(,"pool":null)", R"(,"pool":false)",
-        R"(,"pool":[])", R"(,"pool":{})", R"(,"pool":"a","pool":"b")"}) {
+       {R"(,"pools":0)", R"(,"pools":"a")", R"(,"pools":null)",
+        R"(,"pools":false)", R"(,"pools":[])", R"(,"pools":{})",
+        R"(,"pools":[""])", R"(,"pools":["a",0])",
+        R"(,"pools":["a"],"pools":["b"])", R"(,"pool":"a")"}) {
     SCOPED_TRACE(field);
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
         Parse(Document("embedding", R"(,"assets":".")", field)));
     EXPECT_EQ(model_.name.data, nullptr);
+  }
+}
+
+TEST_F(ConfigurationTest, PlacementArraysRespectTheDeploymentBound) {
+  const size_t maximum = IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT;
+  std::vector<std::string> keys;
+  for (size_t i = 0; i < maximum; ++i) {
+    keys.push_back("device" + std::to_string(i));
+  }
+  std::vector<iree_string_view_t> names;
+  std::string selection;
+  for (const auto& key : keys) {
+    if (!selection.empty()) {
+      selection += ",";
+    }
+    selection += "\"" + key + "\"";
+    names.push_back(iree_make_string_view(key.data(), key.size()));
+  }
+  IREE_ASSERT_OK(Parse(Document("text", R"(,"weights":"w","tokenizer":"t")",
+                                ",\"devices\":[" + selection + "]")));
+  IREE_ASSERT_OK(loom_serve_model_configuration_resolve_devices(
+      &model_, {names.size(), names.data()}));
+  ASSERT_EQ(model_.devices.count, maximum);
+  for (size_t i = 0; i < maximum; ++i) {
+    EXPECT_EQ(model_.devices.values[i].index, i);
+  }
+  selection += R"(,"extra")";
+  for (const char* field : {"devices", "pools"}) {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        Parse(Document("text", R"(,"weights":"w","tokenizer":"t")",
+                       ",\"" + std::string(field) + "\":[" + selection + "]")));
+    EXPECT_EQ(model_.devices.values, nullptr);
+    EXPECT_EQ(model_.pools.values, nullptr);
+  }
+}
+
+TEST_F(ConfigurationTest, PlacementAllocationFailuresReleaseEveryOwnedName) {
+  const iree_string_view_t devices[] = {IREE_SV("first"), IREE_SV("second")};
+  const loom_serve_pool_binding_t pool = {IREE_SV("shared"), 3};
+  for (const char* selection :
+       {R"(,"devices":["second","first"],"pools":["shared","shared"])",
+        R"(,"devices":["second","first"])", ""}) {
+    const auto json =
+        Document("text", R"(,"weights":"w","tokenizer":"t")", selection);
+    size_t count = 0;
+    for (size_t fail = 0; fail <= count; ++fail) {
+      SCOPED_TRACE(fail);
+      iree::vm::testing::CountingAllocator allocator(fail);
+      loom_serve_model_configuration_t configuration = {};
+      auto status = loom_serve_model_configuration_initialize(
+          iree_make_string_view(json.data(), json.size()), IREE_SV("/model"),
+          nullptr, allocator.allocator(), &configuration);
+      if (iree_status_is_ok(status)) {
+        status = loom_serve_model_configuration_resolve_devices(
+            &configuration, {*selection ? 2u : 1u, devices});
+      }
+      if (iree_status_is_ok(status)) {
+        status = loom_serve_model_configuration_resolve_pools(&configuration, 1,
+                                                              &pool);
+      }
+      loom_serve_model_configuration_deinitialize(&configuration);
+      if (!fail) {
+        IREE_ASSERT_OK(status);
+        count = allocator.allocation_count();
+        EXPECT_EQ(allocator.free_count(), count);
+      } else {
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+        EXPECT_EQ(allocator.allocation_count(), allocator.free_count() + 1);
+      }
+      EXPECT_EQ(configuration.devices.count, 0u);
+      EXPECT_EQ(configuration.pools.count, 0u);
+    }
   }
 }
 

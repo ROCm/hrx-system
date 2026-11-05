@@ -91,6 +91,21 @@ typedef struct loom_serve_image_configuration_t {
   uint32_t command_quantum;
 } loom_serve_image_configuration_t;
 
+// One machine-local resource selection owned by a deployment declaration.
+typedef struct loom_serve_model_binding_t {
+  // Owned decoded key in the application's immutable resource inventory.
+  iree_string_view_t name;
+  // Inventory ordinal assigned at admission; IREE_HOST_SIZE_MAX beforehand.
+  iree_host_size_t index;
+} loom_serve_model_binding_t;
+
+typedef struct loom_serve_model_bindings_t {
+  // Number of source-ordered members; zero means omitted before admission.
+  iree_host_size_t count;
+  // Owned entries and names, using the enclosing declaration's allocator.
+  loom_serve_model_binding_t* values;
+} loom_serve_model_bindings_t;
+
 // One source-defined deployment. Entries have independent logical state and
 // admission capacity; the executable supplies their device group. Authored
 // paths are retained unchanged, with a separate local directory base.
@@ -101,15 +116,12 @@ typedef struct loom_serve_model_configuration_t {
   loom_serve_model_kind_t kind;
   // Owned visible ASCII identifier used in JSON and HTTP header selectors.
   iree_string_view_t name;
-  // Owned machine-local device key; empty until singleton admission resolves
-  // it.
-  iree_string_view_t device;
-  // Resolved group ordinal, assigned once by registry admission. Not authored.
-  iree_host_size_t device_index;
-  // Owned machine-local pool key; independent of execution placement.
-  iree_string_view_t pool;
-  // Resolved storage owner ordinal, assigned once by registry admission.
-  iree_host_size_t pool_index;
+  // Unique execution members in source order. Omission requires a singleton
+  // application group. Member zero owns retained text state and feedback.
+  loom_serve_model_bindings_t devices;
+  // Storage owners parallel to devices. Repeated names share backing;
+  // omission requires one application pool permitting every selected device.
+  loom_serve_model_bindings_t pools;
   // Owned program paths, provider array/strings, local directory base, and
   // retained source package when registration supplied one.
   loom_serve_sources_t sources;
@@ -144,15 +156,15 @@ typedef struct loom_serve_model_configuration_t {
   };
 } loom_serve_model_configuration_t;
 
-// Parses a deployment with name, definition, optional model reference, device,
-// admission, and base_directory. A model reference selects a local portable
-// card. Its definition supplies kind and deployment overrides; cold resolution
-// supplies the program and asset closure and canonical preset defaults.
-// Direct definitions supply their own prepare/control paths, sources array,
-// modality-specific inputs/capacities, and source-owned options.
+// Parses a deployment with name, definition, optional model reference,
+// placement, admission, and base_directory. A model reference selects a local
+// portable card. Its definition supplies kind and deployment overrides; cold
+// resolution supplies the program and asset closure and canonical preset
+// defaults. Direct definitions supply their own prepare/control paths, sources
+// array, modality-specific inputs/capacities, and source-owned options.
 // Unknown, duplicate, wrong-kind and invalid fields reject before any model
 // I/O. Admission defaults to "open"; "drained" defers preparation. Device
-// selection is an application device key; membership is resolved separately.
+// and pool arrays select application keys; membership resolves at admission.
 // document_directory supplies the local base for file input; a relative
 // base_directory resolves within it. HTTP passes an empty document directory:
 // relative filesystem references then require an explicit absolute base.
@@ -188,21 +200,21 @@ iree_status_t loom_serve_model_configuration_load(
     iree_allocator_t host_allocator,
     loom_serve_model_configuration_t* out_model);
 
-// Resolves this deployment's device against the caller's immutable group keys.
-// Omission is accepted only with exactly one device. Both explicit and implied
-// bindings must name an available device. Does not mutate the declaration or
-// access source files/devices. Call once at admission, before publishing a
-// model.
-iree_status_t loom_serve_model_configuration_resolve_device(
-    const loom_serve_model_configuration_t* model,
-    iree_string_view_list_t device_names, iree_host_size_t* out_device_index);
+// Resolves unique source-ordered devices against immutable application keys.
+// Omission requires one device. Only text/sequence support multiple members.
+// Owns implied names and records ordinals without accessing source files or
+// native devices. Failure leaves the list unchanged. Call at admission.
+iree_status_t loom_serve_model_configuration_resolve_devices(
+    loom_serve_model_configuration_t* model,
+    iree_string_view_list_t device_names);
 
 // Resolves storage independently, then verifies that its declared consumers
-// include the already-resolved execution device. Omission requires one pool.
-iree_status_t loom_serve_model_configuration_resolve_pool(
-    const loom_serve_model_configuration_t* model, iree_host_size_t pool_count,
-    const loom_serve_pool_binding_t* pools, iree_host_size_t device_index,
-    iree_host_size_t* out_pool_index);
+// include each already-resolved execution device. Requires one binding per
+// device; aliases are valid. Omission requires one application pool. Failure
+// leaves the list unchanged.
+iree_status_t loom_serve_model_configuration_resolve_pools(
+    loom_serve_model_configuration_t* model, iree_host_size_t pool_count,
+    const loom_serve_pool_binding_t* pools);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -101,18 +101,17 @@ class ModelResolutionTest : public ::testing::Test {
 
 TEST_F(ModelResolutionTest, ResolvesDefaultsOnWorkerAndOwnsResult) {
   std::string deployment = kDeployment;
-  deployment.insert(deployment.find("\"name\""),
-                    R"("device":"gpu1","pool":"shared",)");
+  deployment.insert(
+      deployment.find("\"name\""),
+      R"("devices":["gpu1","gpu0"],"pools":["shared","shared"],)");
   Initialize(kCard, deployment);
   const iree_string_view_t names[] = {IREE_SV("gpu0"), IREE_SV("gpu1")};
-  IREE_ASSERT_OK(loom_serve_model_configuration_resolve_device(
-      &configuration_, {IREE_ARRAYSIZE(names), names},
-      &configuration_.device_index));
+  IREE_ASSERT_OK(loom_serve_model_configuration_resolve_devices(
+      &configuration_, {IREE_ARRAYSIZE(names), names}));
   const loom_serve_pool_binding_t pools[] = {{IREE_SV("shared"), 3},
                                              {IREE_SV("gpu0-only"), 1}};
-  IREE_ASSERT_OK(loom_serve_model_configuration_resolve_pool(
-      &configuration_, IREE_ARRAYSIZE(pools), pools,
-      configuration_.device_index, &configuration_.pool_index));
+  IREE_ASSERT_OK(loom_serve_model_configuration_resolve_pools(
+      &configuration_, IREE_ARRAYSIZE(pools), pools));
   loom_serve_model_resolution_t* resolution = nullptr;
   IREE_ASSERT_OK(loom_serve_model_resolution_start(
       Sink(), &configuration_, Observer(), allocator_, &resolution));
@@ -128,10 +127,18 @@ TEST_F(ModelResolutionTest, ResolvesDefaultsOnWorkerAndOwnsResult) {
   IREE_ASSERT_OK(status);
   EXPECT_EQ(resolution, nullptr);
   loom_serve_model_configuration_deinitialize(&configuration_);
-  EXPECT_EQ(resolved.device_index, 1u);
-  EXPECT_EQ(std::string(resolved.device.data, resolved.device.size), "gpu1");
-  EXPECT_EQ(resolved.pool_index, 0u);
-  EXPECT_EQ(std::string(resolved.pool.data, resolved.pool.size), "shared");
+  ASSERT_EQ(resolved.devices.count, 2u);
+  ASSERT_EQ(resolved.pools.count, 2u);
+  for (size_t i = 0; i < 2; ++i) {
+    EXPECT_EQ(resolved.devices.values[i].index, 1u - i);
+    EXPECT_EQ(std::string(resolved.devices.values[i].name.data,
+                          resolved.devices.values[i].name.size),
+              "gpu" + std::to_string(1 - i));
+    EXPECT_EQ(resolved.pools.values[i].index, 0u);
+    EXPECT_EQ(std::string(resolved.pools.values[i].name.data,
+                          resolved.pools.values[i].name.size),
+              "shared");
+  }
   EXPECT_EQ(resolved.text.rows, 2u);
   EXPECT_EQ(resolved.text.context_capacity, 64u);
   EXPECT_EQ(resolved.text.prefill_capacity, 32u);

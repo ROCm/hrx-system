@@ -6,6 +6,7 @@
 
 #include "loom/serve/server/model_registration.h"
 
+#include "iree/hal/topology.h"
 #include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/runtime/storage/memory.h"
 #include "loom/serve/service/finite/component.h"
@@ -204,9 +205,9 @@ static iree_status_t loom_serve_finite_registration_create(
   registration->host_allocator = host_allocator;
   registration->options = options;
   registration->device = loom_serve_device_group_at(
-      options->device_group, configuration->device_index);
+      options->device_group, configuration->devices.values[0].index);
   loom_serve_pool_t* pool = loom_serve_device_group_pool_at(
-      options->device_group, configuration->pool_index);
+      options->device_group, configuration->pools.values[0].index);
   registration->configuration = configuration;
   registration->observer = observer;
   registration->stream = stream;
@@ -382,9 +383,9 @@ static iree_status_t loom_serve_image_registration_create(
   registration->host_allocator = host_allocator;
   registration->options = options;
   registration->device = loom_serve_device_group_at(
-      options->device_group, configuration->device_index);
+      options->device_group, configuration->devices.values[0].index);
   loom_serve_pool_t* pool = loom_serve_device_group_pool_at(
-      options->device_group, configuration->pool_index);
+      options->device_group, configuration->pools.values[0].index);
   registration->configuration = configuration;
   registration->observer = observer;
   registration->stream = stream;
@@ -590,9 +591,9 @@ static iree_status_t loom_serve_speech_registration_create(
   registration->host_allocator = host_allocator;
   registration->options = options;
   registration->device = loom_serve_device_group_at(
-      options->device_group, configuration->device_index);
+      options->device_group, configuration->devices.values[0].index);
   loom_serve_pool_t* pool = loom_serve_device_group_pool_at(
-      options->device_group, configuration->pool_index);
+      options->device_group, configuration->pools.values[0].index);
   registration->configuration = configuration;
   registration->observer = observer;
   registration->stream = stream;
@@ -772,9 +773,9 @@ static iree_status_t loom_serve_recognition_registration_create(
       host_allocator, sizeof(*registration), (void**)&registration));
   registration->host_allocator = host_allocator;
   registration->device = loom_serve_device_group_at(
-      options->device_group, configuration->device_index);
+      options->device_group, configuration->devices.values[0].index);
   loom_serve_pool_t* pool = loom_serve_device_group_pool_at(
-      options->device_group, configuration->pool_index);
+      options->device_group, configuration->pools.values[0].index);
   registration->configuration = configuration;
   registration->observer = observer;
   registration->stream = stream;
@@ -1012,8 +1013,15 @@ static iree_status_t loom_serve_text_registration_create(
     loom_serve_registration_t* out_registration) {
   const loom_serve_model_registration_options_t* options = self;
   const loom_serve_text_configuration_t* text = &configuration->text;
-  loom_serve_pool_t* pool = loom_serve_device_group_pool_at(
-      options->device_group, configuration->pool_index);
+  loom_serve_device_t* devices[IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT];
+  loom_serve_pool_t* pools[IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT];
+  for (iree_host_size_t i = 0; i < configuration->devices.count; ++i) {
+    devices[i] = loom_serve_device_group_at(
+        options->device_group, configuration->devices.values[i].index);
+    pools[i] = loom_serve_device_group_pool_at(
+        options->device_group, configuration->pools.values[i].index);
+  }
+  loom_serve_pool_t* pool = pools[0];
   loom_serve_memory_pool_t* memory_pool = loom_serve_pool_memory(pool);
   const uint64_t cache_limit_bytes =
       memory_pool ? loom_serve_memory_pool_limit(memory_pool) : 0;
@@ -1029,8 +1037,7 @@ static iree_status_t loom_serve_text_registration_create(
       iree_allocator_malloc(host_allocator, total, (void**)&registration));
   registration->host_allocator = host_allocator;
   registration->options = options;
-  registration->device = loom_serve_device_group_at(
-      options->device_group, configuration->device_index);
+  registration->device = devices[0];
   registration->configuration = configuration;
   registration->observer = observer;
   registration->stream = stream;
@@ -1081,8 +1088,8 @@ static iree_status_t loom_serve_text_registration_create(
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_text_load_allocate(
-        1, &registration->device, &pool, &model_options, observer.wake,
-        observer.user_data, host_allocator, &registration->load);
+        configuration->devices.count, devices, pools, &model_options,
+        observer.wake, observer.user_data, host_allocator, &registration->load);
   }
   if (iree_status_is_ok(status)) {
     *out_registration = (loom_serve_registration_t){

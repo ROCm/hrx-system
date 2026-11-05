@@ -59,6 +59,9 @@ tokenizer utilities remain available according to their normal capabilities.
 Text also reports configured `context_length` and
 `limits.max_output_tokens`, not training context or total cache-pool capacity.
 `loom.input_tokens:true` advertises exact prepared-chat input counting.
+Managed deployments expose `loom.devices` and `loom.pools` as ordered arrays of
+inventory keys. The arrays remain visible while preparation or retirement is
+pending; pool aliases appear once per execution binding, not as distinct owners.
 Capabilities do not establish learned quality or support for every optional field.
 
 Prepared text models declare `reasoning` explicitly. Models with an effort

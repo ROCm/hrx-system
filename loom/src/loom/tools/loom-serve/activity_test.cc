@@ -209,19 +209,34 @@ class NativeActivityTest : public ::testing::Test {
                : FLAG_fixture_activity_device,
           role ? FLAG_fixture_transcription_pool : FLAG_fixture_activity_pool,
       };
-      iree_string_view_t* bindings[] = {&configuration.device,
-                                        &configuration.pool};
+      loom_serve_model_bindings_t* bindings[] = {&configuration.devices,
+                                                 &configuration.pools};
       for (size_t i = 0;
            i < IREE_ARRAYSIZE(bindings) && iree_status_is_ok(status); ++i) {
         const auto value = iree_make_cstring_view(names[i]);
-        iree_allocator_free(allocator_, (void*)bindings[i]->data);
-        *bindings[i] = {};
+        auto* bindings_list = bindings[i];
+        for (size_t j = 0; j < bindings_list->count; ++j) {
+          iree_allocator_free(allocator_,
+                              (void*)bindings_list->values[j].name.data);
+        }
+        iree_allocator_free(allocator_, bindings_list->values);
+        *bindings_list = {};
+        status =
+            iree_allocator_malloc(allocator_, sizeof(*bindings_list->values),
+                                  (void**)&bindings_list->values);
+        if (!iree_status_is_ok(status)) {
+          break;
+        }
+        bindings_list->count = 1;
         char* name = nullptr;
         status = iree_allocator_clone(
             allocator_, iree_make_const_byte_span(value.data, value.size),
             (void**)&name);
         if (iree_status_is_ok(status)) {
-          *bindings[i] = iree_make_string_view(name, value.size);
+          bindings_list->values[0] = {
+              .name = iree_make_string_view(name, value.size),
+              .index = IREE_HOST_SIZE_MAX,
+          };
         }
       }
     }

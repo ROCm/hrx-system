@@ -198,7 +198,7 @@ class SourceTextServiceTest : public ::testing::Test {
     // recurrent state would fit millions of endpoints in the production
     // default.
     return "{\"name\":\"" + name +
-           "\",\"pool\":\"pool0\",\"base_directory\":\"" +
+           "\",\"pools\":[\"pool0\"],\"base_directory\":\"" +
            std::filesystem::absolute(source).string() + "\",\"admission\":\"" +
            admission +
            "\",\"definition\":{\"kind\":\"text\",\"prepare\":\"prepare.loom\","

@@ -13,10 +13,16 @@
 #include "iree/vm/test_allocator.h"
 #include "loom/runtime/telemetry/sample.h"
 #include "loom/runtime/telemetry/stream.h"
+#include "loom/serve/server/configuration.h"
 #include "loom/serve/service/service.h"
 #include "loom/service/telemetry/record.h"
 
 namespace {
+
+const iree_string_view_t kDevices[] = {IREE_SV("first"), IREE_SV("second"),
+                                       IREE_SV("third")};
+const loom_serve_pool_binding_t kPools[] = {{IREE_SV("shared"), 7},
+                                            {IREE_SV("private"), 7}};
 
 class ObservationTest : public ::testing::Test {
  protected:
@@ -51,8 +57,22 @@ class ObservationTest : public ::testing::Test {
                     },
             },
     };
+    const loom_serve_registration_factory_t factory = {
+        .kinds = 1u << LOOM_SERVE_MODEL_KIND_TEXT,
+        .device_names = {IREE_ARRAYSIZE(kDevices), kDevices},
+        .pool_count = IREE_ARRAYSIZE(kPools),
+        .pools = kPools,
+        .create =
+            [](void*, const loom_serve_model_configuration_t*,
+               loom_serve_wake_callback_t, loom_runtime_telemetry_stream_t*,
+               iree_allocator_t, loom_serve_registration_t*) {
+              ADD_FAILURE() << "Drained observation must not prepare a model";
+              return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                      "unexpected model preparation");
+            },
+    };
     IREE_ASSERT_OK(loom_serve_registry_allocate(
-        1, &service, 130, {}, iree_allocator_system(), &registry_));
+        1, &service, 130, factory, iree_allocator_system(), &registry_));
     IREE_ASSERT_OK(loom_serve_observation_allocate(
         registry_, &resources_, allocator_.allocator(), &observation_));
     iree_string_builder_initialize_with_storage(storage_, sizeof(storage_),
@@ -106,6 +126,36 @@ class ObservationTest : public ::testing::Test {
   // Counts provider sampling, independently of observation-page reads.
   size_t samples_ = 0;
 };
+
+TEST_F(ObservationTest, ManagedPlacementCopiesCompleteOrderedMembership) {
+  loom_serve_model_configuration_t configuration = {};
+  IREE_ASSERT_OK(loom_serve_model_configuration_initialize(
+      IREE_SV(R"({"name":"placed","admission":"drained",
+        "devices":["third","first","second"],
+        "pools":["private","shared","shared"],
+        "definition":{"kind":"text","prepare":"prepare.loom",
+          "control":"control.loom","sources":["kernel.loom"],
+          "weights":"weights","tokenizer":"tokenizer.json"}})"),
+      IREE_SV("/model"), nullptr, iree_allocator_system(), &configuration));
+  iree_host_size_t index = 0;
+  auto status = loom_serve_registry_register(registry_, &configuration, &index);
+  loom_serve_model_configuration_deinitialize(&configuration);
+  IREE_ASSERT_OK(status);
+  EXPECT_EQ(index, 1u);
+  Sample(100);
+  iree_host_size_t cursor = 2;
+  loom_serve_observation_version_t version;
+  const auto page = Page(cursor, version);
+  EXPECT_NE(page.find(R"("name":"placed")"), std::string::npos);
+  EXPECT_NE(page.find(R"("devices":[2,0,1],"pools":[1,0,0])"),
+            std::string::npos);
+  // No preparation runs for a declared, drained model; the registry owns the
+  // binding metadata until this removal releases it.
+  IREE_ASSERT_OK(loom_serve_registry_remove(
+      loom_serve_registry_at(registry_, index), LOOM_SERVE_REMOVAL_DRAIN));
+  bool progress = false;
+  IREE_ASSERT_OK(loom_serve_registry_advance(registry_, index, {}, &progress));
+}
 
 TEST_F(ObservationTest, LifetimeEpochIsCopiedAndIndependentOfReaderAdmission) {
   const auto since = loom_runtime_telemetry_stream_identity(stream_).created_ns;

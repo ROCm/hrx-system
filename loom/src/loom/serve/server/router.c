@@ -168,6 +168,26 @@ static iree_status_t loom_serve_router_quote(iree_string_builder_t* output,
   return loom_json_write_escaped_string(&stream, value);
 }
 
+static iree_status_t loom_serve_router_bindings(
+    iree_string_builder_t* output,
+    const loom_serve_model_bindings_t* bindings) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "["));
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < bindings->count && iree_status_is_ok(status);
+       ++i) {
+    if (i) {
+      status = iree_string_builder_append_cstring(output, ",");
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_serve_router_quote(output, bindings->values[i].name);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_cstring(output, "]");
+  }
+  return status;
+}
+
 static iree_status_t loom_serve_router_tokenization_run(
     iree_task_process_t* process, const iree_task_worker_context_t* context,
     iree_task_process_drain_result_t* result) {
@@ -703,14 +723,14 @@ static iree_status_t loom_serve_router_describe_service(
   if (admission->incarnation) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         output,
-        ",\"incarnation\":%" PRIu64 ",\"registration\":\"%s\",\"device\":",
+        ",\"incarnation\":%" PRIu64 ",\"registration\":\"%s\",\"devices\":",
         admission->incarnation, loom_serve_registry_phase(admission)));
     IREE_RETURN_IF_ERROR(
-        loom_serve_router_quote(output, admission->configuration.device));
+        loom_serve_router_bindings(output, &admission->configuration.devices));
     IREE_RETURN_IF_ERROR(
-        iree_string_builder_append_cstring(output, ",\"pool\":"));
+        iree_string_builder_append_cstring(output, ",\"pools\":"));
     IREE_RETURN_IF_ERROR(
-        loom_serve_router_quote(output, admission->configuration.pool));
+        loom_serve_router_bindings(output, &admission->configuration.pools));
     if (!iree_status_is_ok(admission->status)) {
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           output, ",\"error\":{\"code\":%d,\"message\":",

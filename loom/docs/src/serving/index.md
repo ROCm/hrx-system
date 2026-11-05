@@ -133,9 +133,12 @@ loom-serve --devices=devices.json --model=chat-deployment.json
 
 The keys are operator-chosen names, not hardware types or ordinals. `gpu0` and
 `gpu1` can refer to different drivers. Each deployment selects execution with
-`"device": "gpu"` and storage with `"pool": "interactive"`. Each selector may be
-omitted only when its inventory contains exactly one entry. Pool membership must
-include the selected execution device. The portable model card and its programs
+`"devices": ["gpu"]` and storage with `"pools": ["interactive"]`. Each array may be
+omitted only when its inventory contains exactly one entry. Text and sequence
+deployments may select multiple unique devices in source execution order, with
+one pool per member; repeated pool keys share backing. Every selected pool must
+permit its corresponding device. Other modalities select exactly one device.
+The portable model card and its programs
 contain no machine placement. The same card can back several deployments with
 different names, devices, or pools. `/v1/status` publishes the independent inventories in
 `server.resources.devices` and `server.resources.pools`.

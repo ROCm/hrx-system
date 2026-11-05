@@ -144,6 +144,22 @@ static iree_status_t loom_serve_observation_epoch(
              : iree_string_builder_append_cstring(output, ",\"since_ns\":null");
 }
 
+static iree_status_t loom_serve_observation_bindings(
+    const loom_serve_model_bindings_t* bindings,
+    iree_string_builder_t* output) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "["));
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < bindings->count && iree_status_is_ok(status);
+       ++i) {
+    status = iree_string_builder_append_format(output, "%s%zu", i ? "," : "",
+                                               bindings->values[i].index);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_cstring(output, "]");
+  }
+  return status;
+}
+
 static iree_status_t loom_serve_observation_model(
     const loom_serve_registered_model_t* model, iree_host_size_t index,
     iree_string_builder_t* output) {
@@ -163,20 +179,14 @@ static iree_status_t loom_serve_observation_model(
       loom_serve_model_kind_name(service->kind)));
   IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
       &stream, iree_make_cstring_view(snapshot.phase)));
-  if (model->configuration.device.size) {
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        output, ",\"device\":%zu", model->configuration.device_index));
-  } else {
-    IREE_RETURN_IF_ERROR(
-        iree_string_builder_append_cstring(output, ",\"device\":null"));
-  }
-  if (model->configuration.pool.size) {
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        output, ",\"pool\":%zu", model->configuration.pool_index));
-  } else {
-    IREE_RETURN_IF_ERROR(
-        iree_string_builder_append_cstring(output, ",\"pool\":null"));
-  }
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(output, ",\"devices\":"));
+  IREE_RETURN_IF_ERROR(
+      loom_serve_observation_bindings(&model->configuration.devices, output));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(output, ",\"pools\":"));
+  IREE_RETURN_IF_ERROR(
+      loom_serve_observation_bindings(&model->configuration.pools, output));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output,
       ",\"queued\":%zu,\"active\":%zu,\"held\":%zu,\"admission_open\":%s,"

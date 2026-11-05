@@ -476,7 +476,8 @@ TEST_P(HttpRouterTest, LiveActivitySamplesOwnersWithoutAMetricsScrape) {
     const auto page = observer.WebSocketFrame();
     if (page.find("\"name\":\"held\"") != std::string::npos) {
       EXPECT_NE(page.find("\"phase\":\"held\""), std::string::npos);
-      EXPECT_NE(page.find("\"device\":null"), std::string::npos);
+      EXPECT_NE(page.find("\"devices\":[]"), std::string::npos);
+      EXPECT_NE(page.find("\"pools\":[]"), std::string::npos);
       EXPECT_NE(page.find("\"queued\":0,\"active\":1"), std::string::npos);
       EXPECT_NE(
           page.find("\"name\":\"oldest_active_age\",\"unit\":\"nanoseconds\","

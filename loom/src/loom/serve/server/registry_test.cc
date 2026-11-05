@@ -135,7 +135,7 @@ TEST_P(RegistryTest, FileRegistrationOwnsAuthoredPathsAndSelectedBase) {
           ? "//files/models/vectors"
           : std::filesystem::path(path_.path()).parent_path().string();
   const std::string document =
-      R"({"name":"vectors","admission":"drained","device":"second",)" +
+      R"({"name":"vectors","admission":"drained","devices":["second"],)" +
       std::string(explicit_base
                       ? R"("base_directory":"//files/models/vectors",)"
                       : "") +
@@ -165,9 +165,11 @@ TEST_P(RegistryTest, FileRegistrationOwnsAuthoredPathsAndSelectedBase) {
   EXPECT_TRUE(model->closed);
   EXPECT_EQ(String(model->service.name), "vectors");
   EXPECT_STREQ(model->service.endpoint, "/v1/embeddings");
-  EXPECT_EQ(model->configuration.device_index, 1u);
-  EXPECT_EQ(model->configuration.pool_index, 0u);
-  EXPECT_EQ(String(model->configuration.pool), "pool");
+  ASSERT_EQ(model->configuration.devices.count, 1u);
+  ASSERT_EQ(model->configuration.pools.count, 1u);
+  EXPECT_EQ(model->configuration.devices.values[0].index, 1u);
+  EXPECT_EQ(model->configuration.pools.values[0].index, 0u);
+  EXPECT_EQ(String(model->configuration.pools.values[0].name), "pool");
   const auto& sources = model->configuration.sources;
   EXPECT_EQ(String(sources.base_directory), expected_base);
   EXPECT_EQ(String(sources.prepare), "boot.loombc");
