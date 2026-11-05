@@ -71,11 +71,24 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "driver",
+    srcs = ["driver.c"],
+    hdrs = ["driver.h"],
+    deps = [
+        ":registry",
+        "//loom/src/loom/serve/runtime/host:wake",
+        "//loom/src/loom/serve/service",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "router",
     srcs = ["router.c"],
     hdrs = ["router.h"],
     deps = [
         ":configuration",
+        ":driver",
         ":maintenance",
         ":registry",
         ":resources",
@@ -108,6 +121,20 @@ loom_cc_library(
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/task",
         "//runtime/src/iree/tokenizer",
+    ],
+)
+
+loom_cc_test(
+    name = "driver_test",
+    srcs = ["driver_test.cc"],
+    deps = [
+        ":driver",
+        ":registry",
+        "//loom/src/loom/serve/runtime/host:wake",
+        "//loom/src/loom/serve/service",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

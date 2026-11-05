@@ -11,6 +11,7 @@
 #include "iree/base/threading/notification.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/serve/server/driver.h"
 #include "loom/serve/service/finite/decision/protocol.h"
 #include "loom/serve/service/finite/service.h"
 #include "loom/serve/testing/model.h"
@@ -50,8 +51,12 @@ class NativeDecisionServiceTest : public ::testing::Test {
         host, model_, loom_serve_decision_protocol(), IREE_SV("decision"), 3, 0,
         0, nullptr, iree_allocator_system(), &service_));
     interface_ = loom_serve_finite_service_interface(service_);
+    loom_serve_registry_t* registry = nullptr;
+    IREE_ASSERT_OK(loom_serve_registry_allocate(
+        1, &interface_, 0, {}, iree_allocator_system(), &registry));
+    loom_serve_driver_initialize(registry, &driver_);
     const loom_serve_wake_callback_t observer = {Wake, this};
-    interface_.set_observer(interface_.self, observer);
+    loom_serve_driver_set_observer(&driver_, observer);
     loom_serve_device_group_set_observer(group_, observer);
   }
 
@@ -64,10 +69,7 @@ class NativeDecisionServiceTest : public ::testing::Test {
     }
     iree_hal_buffer_release(std::exchange(target_, nullptr));
     if (service_) {
-      DriveUntil([&] { return !interface_.is_pending(interface_.self); },
-                 LOOM_SERVE_SERVICE_FLAG_STOPPING);
-      interface_.set_observer(interface_.self, {});
-      loom_serve_finite_service_free(std::exchange(service_, nullptr));
+      RetireService();
     }
     IREE_EXPECT_OK(
         loom_serve_finite_model_free(std::exchange(model_, nullptr)));
@@ -78,6 +80,7 @@ class NativeDecisionServiceTest : public ::testing::Test {
     iree_hal_semaphore_release(gate_);
     loom_serve_device_group_set_observer(group_, {});
     iree_notification_deinitialize(&notification_);
+    iree_status_free(driver_.status);
   }
 
   static void Wake(void* self) {
@@ -88,25 +91,39 @@ class NativeDecisionServiceTest : public ::testing::Test {
 
   template <typename Predicate>
   void DriveUntil(Predicate done, loom_serve_service_flags_t flags = 0) {
+    driver_.stopping |= (flags & LOOM_SERVE_SERVICE_FLAG_STOPPING) != 0;
     while (true) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
-      auto status = loom_serve_device_group_advance(group_);
+      driver_.status = iree_status_join(
+          driver_.status, loom_serve_device_group_advance(group_));
       bool progress = false;
-      status = iree_status_join(
-          status, interface_.advance(interface_.self, flags, &progress));
+      loom_serve_driver_advance(&driver_, {Wake, this}, {}, &progress);
+      loom_serve_driver_collect(&driver_, &progress);
       const bool complete = done();
-      if (complete || progress || !iree_status_is_ok(status)) {
+      if (complete || progress || !iree_status_is_ok(driver_.status)) {
         iree_notification_cancel_wait(&notification_);
       } else {
         iree_notification_commit_wait(&notification_, ticket,
                                       IREE_DURATION_ZERO,
                                       IREE_TIME_INFINITE_FUTURE);
       }
-      IREE_ASSERT_OK(status);
+      IREE_ASSERT_OK(iree_status_clone(driver_.status));
       if (complete) {
         break;
       }
     }
+  }
+
+  void RetireService() {
+    if (driver_.registry) {
+      ASSERT_NO_FATAL_FAILURE(
+          DriveUntil([&] { return !interface_.is_pending(interface_.self); },
+                     LOOM_SERVE_SERVICE_FLAG_STOPPING));
+      loom_serve_driver_set_observer(&driver_, {});
+      IREE_ASSERT_OK(
+          loom_serve_registry_free(std::exchange(driver_.registry, nullptr)));
+    }
+    loom_serve_finite_service_free(std::exchange(service_, nullptr));
   }
 
   void Open(size_t index, const char* text = kRequest) {
@@ -137,6 +154,8 @@ class NativeDecisionServiceTest : public ::testing::Test {
   loom_serve_finite_service_t* service_ = nullptr;
   // Owner-side operations, with no listener or HTTP notification.
   loom_serve_service_t interface_ = {};
+  // Shared production traversal and retirement policy, also used by HTTP.
+  loom_serve_driver_t driver_ = {};
   // Joined wake target for resource and service publications.
   iree_notification_t notification_;
   // Caller-owned receipts, including after service removal.
@@ -217,10 +236,7 @@ TEST_F(NativeDecisionServiceTest, DeviceOutputEscapesBeforeServiceRetirement) {
   for (auto*& call : calls_) {
     loom_serve_finite_call_close(std::exchange(call, nullptr));
   }
-  ASSERT_NO_FATAL_FAILURE(
-      DriveUntil([&] { return !interface_.is_pending(interface_.self); }));
-  interface_.set_observer(interface_.self, {});
-  loom_serve_finite_service_free(std::exchange(service_, nullptr));
+  ASSERT_NO_FATAL_FAILURE(RetireService());
   IREE_ASSERT_OK(loom_serve_finite_model_free(std::exchange(model_, nullptr)));
 
   // Accepted downstream captures, not the source model or caller receipts,

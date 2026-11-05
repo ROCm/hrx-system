@@ -44,6 +44,7 @@ loom_cc_library(
         "//loom/src/loom/serve/runtime/device",
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/server:driver",
         "//loom/src/loom/serve/server:registry",
         "//loom/src/loom/serve/server:resources",
         "//loom/src/loom/serve/server:router",
