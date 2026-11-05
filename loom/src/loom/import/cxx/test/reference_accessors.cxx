@@ -13,6 +13,40 @@ static unsigned local_alias_value(unsigned value) {
   return alias + value;
 }
 
+static unsigned& value_alias(unsigned& value) { return value; }
+
+static unsigned& increment_alias(unsigned& value) {
+  ++value;
+  return value;
+}
+
+static unsigned& branch_alias(bool condition, unsigned& value) {
+  if (condition) {
+    return value;
+  }
+  return value;
+}
+
+static unsigned& choose_alias(bool condition, unsigned& first,
+                              unsigned& second) {
+  return condition ? first : second;
+}
+
+static unsigned value_reference_results(bool condition, unsigned value) {
+  const unsigned snapshot = value_alias(value) + 10u;
+  const unsigned selected = branch_alias(condition, value) + 20u;
+  return snapshot + selected;
+}
+
+static unsigned mutable_reference_result(unsigned value) {
+  return increment_alias(value);
+}
+
+static unsigned mixed_reference_result(bool condition, unsigned first,
+                                       unsigned second) {
+  return choose_alias(condition, first, second);
+}
+
 static unsigned& at(unsigned* values, unsigned index) { return values[index]; }
 static unsigned observe(volatile unsigned& value) { return value; }
 static unsigned first(const unsigned (&values)[4]) { return values[0]; }
@@ -124,6 +158,10 @@ static unsigned reference_member_access(unsigned input) {
 
 LOOM_CHECK_CASE(reference_accessors) {
   const auto local = local_alias_value(4u);
+  const auto value_results = value_reference_results(true, 5u);
+  const auto mutable_result = mutable_reference_result(5u);
+  const auto mixed_first = mixed_reference_result(true, 7u, 11u);
+  const auto mixed_second = mixed_reference_result(false, 7u, 11u);
   const auto storage = storage_alias(11u, 4u, 2u);
   const auto forwarded = forwarded_alias(7u);
   const auto array = array_access(13u, 3);
@@ -131,6 +169,10 @@ LOOM_CHECK_CASE(reference_accessors) {
   const auto defaulted = default_reference_value(19u, 5u);
   const auto members = reference_member_access(5u);
   loom::check::expect_equal(local, 28u);
+  loom::check::expect_equal(value_results, 40u);
+  loom::check::expect_equal(mutable_result, 6u);
+  loom::check::expect_equal(mixed_first, 7u);
+  loom::check::expect_equal(mixed_second, 11u);
   loom::check::expect_equal(storage, 21u);
   loom::check::expect_equal(forwarded, 10u);
   loom::check::expect_equal(array, 15u);

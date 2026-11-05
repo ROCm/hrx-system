@@ -228,13 +228,21 @@ class ControlFlow final : private cxx::ASTVisitor {
   bool reference_written(cxx::Symbol* parameter) const;
   // Whether the implicit object itself must be addressable.
   bool receiver_requires_storage() const { return receiver_requires_storage_; }
-  // Whether every lvalue-reference return aliases the current object. A value
-  // receiver can preserve this reference as its existing SSA identity.
+  // Whether every reference return aliases the current object. A value
+  // receiver can preserve this identity through its existing SSA value.
   bool returns_current_receiver_reference() const {
     return reference_return_ == ReferenceReturn::CurrentReceiver;
   }
+  // Exact source parameter aliased by every reference return, when one exists.
+  // Callers can reuse that evaluated argument instead of inventing a result.
+  std::optional<size_t> reference_return_parameter() const {
+    if (reference_return_ != ReferenceReturn::Parameter) {
+      return std::nullopt;
+    }
+    return reference_return_parameter_;
+  }
   // Whether this reached call must materialize a self-reference result as
-  // durable storage for a caller-side lvalue use.
+  // durable storage for a caller-side identity use.
   bool call_result_requires_storage(cxx::AST* call) const {
     return storage_call_results_.contains(call);
   }
@@ -253,6 +261,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   enum class ReferenceReturn {
     None,
     CurrentReceiver,
+    Parameter,
     Storage,
   };
 
@@ -377,8 +386,10 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::unordered_set<cxx::AST*> storage_call_results_;
   // True when a direct or transitive use requires current-object identity.
   bool receiver_requires_storage_ = false;
-  // Common origin of every runtime lvalue-reference return seen in the body.
+  // Common origin of every runtime reference return seen in the body.
   ReferenceReturn reference_return_ = ReferenceReturn::None;
+  // Source ordinal retained when every reference return aliases one parameter.
+  size_t reference_return_parameter_ = 0;
   // Nested lvalue ownership and transitive component offsets computed once.
   std::unordered_map<cxx::ExpressionAST*, Destination> destinations_;
   // Memory record objects and member projections, including nested fields.

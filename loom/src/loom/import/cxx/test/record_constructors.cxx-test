@@ -233,6 +233,7 @@ func.def public @read_defaulted_definition() -> (i32) {
 struct Movable {
   unsigned value;
   void increment() && { ++value; }
+  Movable&& self() && { return static_cast<Movable&&>(*this); }
 };
 
 struct Outer {
@@ -276,23 +277,51 @@ unsigned extend_xvalue(unsigned value) {
   return reference.value;
 }
 
+template <typename T>
+struct RemoveReference { using Type = T; };
+template <typename T>
+struct RemoveReference<T&> { using Type = T; };
+template <typename T>
+struct RemoveReference<T&&> { using Type = T; };
+template <typename T>
+constexpr typename RemoveReference<T>::Type&& move(T&& value) {
+  return static_cast<typename RemoveReference<T>::Type&&>(value);
+}
+
+using MoveUInt4 = unsigned __attribute__((vector_size(16)));
+unsigned move_helper_record(unsigned value) {
+  Movable source{value};
+  return move(source).value;
+}
+unsigned move_helper_scalar(unsigned value) { return move(value); }
+unsigned move_helper_pointer(const unsigned* value) { return *move(value); }
+MoveUInt4 move_helper_vector(MoveUInt4 value) { return move(value); }
+unsigned move_helper_array(unsigned first, unsigned second) {
+  unsigned values[2] = {first, second};
+  return move(values)[1];
+}
+unsigned move_helper_member(unsigned value) {
+  Movable source{value};
+  return static_cast<Movable&&>(source).self().value;
+}
+
 // ----
 func.def public @move_sources(%choose: i1, %first: i32, %second: i32) -> (i32) {
   %outer_member_value = scalar.addi %first, %second : i32
   %conditional_value = scf.select %choose, %second, %first : i32
   %6 = index.constant 8 : offset
   %values_storage = buffer.alloca<private> align(4) %6 : buffer
-  %89 = index.constant 0 : offset
-  %13 = buffer.view %values_storage[%89] : buffer -> view<1xi32>
+  %124 = index.constant 0 : offset
+  %13 = buffer.view %values_storage[%124] : buffer -> view<1xi32>
   view.store %first, %13[0] : i32, view<1xi32>
-  %88 = index.constant 4 : offset
-  %19 = buffer.view %values_storage[%88] : buffer -> view<1xi32>
+  %123 = index.constant 4 : offset
+  %19 = buffer.view %values_storage[%123] : buffer -> view<1xi32>
   view.store %second, %19[0] : i32, view<1xi32>
   %20 = scalar.extui %choose : i1 to i32
   %21 = scalar.extsi %20 : i32 to i64
-  %90 = scalar.constant 2 : i64
-  %91 = scalar.shli %21, %90 : i64
-  %26 = scalar.assume %91 [range(%91, 0, 9223372036854775807)] : i64
+  %125 = scalar.constant 2 : i64
+  %126 = scalar.shli %21, %125 : i64
+  %26 = scalar.assume %126 [range(%126, 0, 9223372036854775807)] : i64
   %27 = index.cast %26 : i64 to offset
   %30 = index.assume %27 [range(%27, 0, 4)] : offset
   %31 = buffer.view %values_storage[%30] : buffer -> view<1xi32>
@@ -331,10 +360,75 @@ func.def public @extend_xvalue(%value: i32) -> (i32) {
   func.return %77 : i32
 }
 
-func.def @Movable__increment_value(%this_value: i32) -> (%this_value as i32) {
-  %85 = scalar.constant 1 : i32
-  %value = scalar.addi %this_value, %85 : i32
+func.def public @move_helper_record(%value: i32) -> (i32) {
+  func.call pure @move___Movable_(%value) : (i32)
   func.return %value : i32
+}
+
+func.def public @move_helper_scalar(%value: i32) -> (i32) {
+  func.call pure @move_unsigned_int_(%value) : (i32)
+  func.return %value : i32
+}
+
+func.def public @move_helper_pointer(%value: buffer, %value_byte_offset: offset) -> (i32) {
+  func.call pure @move_const_unsigned_int__(%value, %value_byte_offset) : (buffer, offset)
+  %90 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
+  %91 = view.load %90[0] : view<1xi32> -> i32
+  func.return %91 : i32
+}
+
+func.def public @move_helper_vector(%value: vector<4xi32>) -> (vector<4xi32>) {
+  func.call pure @move_unsigned_int___attribute____vector_size_4___sizeof_unsigned_int_____(%value) : (vector<4xi32>)
+  func.return %value : vector<4xi32>
+}
+
+func.def public @move_helper_array(%first: i32, %second: i32) -> (i32) {
+  %97 = index.constant 8 : offset
+  %values_storage = buffer.alloca<private> align(4) %97 : buffer
+  %values_storage_byte_offset = index.constant 0 : offset
+  %values_view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<2xi32>
+  %101 = index.constant 0 : index
+  view.store %first, %values_view[%101] : i32, view<2xi32>
+  %102 = index.constant 1 : index
+  view.store %second, %values_view[%102] : i32, view<2xi32>
+  func.call pure @move_unsigned_int_____2_(%values_storage, %values_storage_byte_offset) : (buffer, offset)
+  %107 = view.load %values_view[%102] : view<2xi32> -> i32
+  func.return %107 : i32
+}
+
+func.def public @move_helper_member(%value: i32) -> (i32) {
+  func.call pure @Movable__self_value(%value) : (i32)
+  func.return %value : i32
+}
+
+func.def @Movable__increment_value(%this_value: i32) -> (%this_value as i32) {
+  %112 = scalar.constant 1 : i32
+  %value = scalar.addi %this_value, %112 : i32
+  func.return %value : i32
+}
+
+func.def @move___Movable_(%value_value: i32) {
+  func.return
+}
+
+func.def @move_unsigned_int_(%value: i32) {
+  func.return
+}
+
+func.def @move_const_unsigned_int__(%value: buffer, %value_byte_offset: offset) {
+  func.return
+}
+
+func.def @move_unsigned_int___attribute____vector_size_4___sizeof_unsigned_int_____(%value: vector<4xi32>) {
+  func.return
+}
+
+func.def @move_unsigned_int_____2_(%value: buffer, %value_byte_offset: offset) {
+  func.return
+}
+
+func.def @Movable__self_value(%this_value: i32) {
+  func.return
 }
 
 // ====

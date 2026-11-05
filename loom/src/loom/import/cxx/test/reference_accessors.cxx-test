@@ -42,6 +42,95 @@ func.def public @local_alias(%value$0: i32, %values$1: vector<4xi32>, %lane: i32
 }
 
 // ====
+// A reference result that always aliases one parameter reuses the evaluated
+// argument. Mutable value-reference writeback becomes the same result value;
+// multiple return statements may retain one common origin. Mixed origins keep
+// durable pointer transport.
+static unsigned& value_alias(unsigned& value) { return value; }
+static unsigned& increment_alias(unsigned& value) { ++value; return value; }
+static unsigned& branch_alias(bool condition, unsigned& value) {
+  if (condition) return value;
+  return value;
+}
+static unsigned& choose_alias(bool condition, unsigned& first, unsigned& second) {
+  return condition ? first : second;
+}
+
+unsigned value_reference_results(bool condition, unsigned value) {
+  const unsigned snapshot = value_alias(value) + 10u;
+  const unsigned selected = branch_alias(condition, value) + 20u;
+  return snapshot + selected;
+}
+
+unsigned mutable_reference_result(unsigned value) {
+  return increment_alias(value);
+}
+
+unsigned mixed_reference_result(bool condition, unsigned first, unsigned second) {
+  return choose_alias(condition, first, second);
+}
+
+// ----
+func.def public @value_reference_results(%condition: i1, %value: i32) -> (i32) {
+  func.call pure @value_alias(%value) : (i32)
+  %3 = scalar.constant 10 : i32
+  %snapshot = scalar.addi %value, %3 : i32
+  func.call pure @branch_alias(%condition, %value) : (i1, i32)
+  %5 = scalar.constant 20 : i32
+  %selected = scalar.addi %value, %5 : i32
+  %7 = scalar.addi %snapshot, %selected : i32
+  func.return %7 : i32
+}
+
+func.def public @mutable_reference_result(%value$8: i32) -> (i32) {
+  %value$10 = func.call pure @increment_alias(%value$8) : (i32) -> (%value$8 as i32)
+  func.return %value$10 : i32
+}
+
+func.def public @mixed_reference_result(%condition: i1, %first: i32, %second: i32) -> (i32) {
+  %15 = index.constant 4 : offset
+  %first_storage = buffer.alloca<private> align(4) %15 : buffer
+  %first_storage_byte_offset = index.constant 0 : offset
+  %first_view = buffer.view %first_storage[%first_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %first, %first_view[0] : i32, view<1xi32>
+  %19 = index.constant 4 : offset
+  %second_storage = buffer.alloca<private> align(4) %19 : buffer
+  %second_storage_byte_offset = index.constant 0 : offset
+  %second_view = buffer.view %second_storage[%second_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %second, %second_view[0] : i32, view<1xi32>
+  %23, %24 = func.call pure @choose_alias(%condition, %first_storage, %first_storage_byte_offset, %second_storage, %second_storage_byte_offset) : (i1, buffer, offset, buffer, offset) -> (buffer, offset)
+  %25 = buffer.view %23[%24] : buffer -> view<1xi32>
+  %26 = view.load %25[0] : view<1xi32> -> i32
+  func.return %26 : i32
+}
+
+func.def @value_alias(%value: i32) {
+  func.return
+}
+
+func.def @branch_alias(%condition: i1, %value: i32) {
+  scf.if %condition {
+  } else {
+  }
+  func.return
+}
+
+func.def @increment_alias(%value$30: i32) -> (%value$30 as i32) {
+  %32 = scalar.constant 1 : i32
+  %value$33 = scalar.addi %value$30, %32 : i32
+  func.return %value$33 : i32
+}
+
+func.def @choose_alias(%condition: i1, %first: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset) -> (buffer, offset) {
+  %41, %42 = scf.if %condition -> (buffer, offset) {
+    scf.yield %first, %first_byte_offset : buffer, offset
+  } else {
+    scf.yield %second, %second_byte_offset : buffer, offset
+  }
+  func.return %41, %42 : buffer, offset
+}
+
+// ====
 static unsigned& at(unsigned* values, unsigned index) { return values[index]; }
 static unsigned observe(volatile unsigned& value) { return value; }
 static unsigned first(const unsigned (&values)[4]) { return values[0]; }
@@ -155,12 +244,12 @@ func.def @observe(%value$72: buffer, %value_byte_offset: offset) -> (i32) {
 }
 
 func.def @forward(%value: buffer, %value_byte_offset: offset) -> (buffer, offset) {
-  %81, %82 = func.call pure @identity(%value, %value_byte_offset) : (buffer, offset) -> (buffer, offset)
-  func.return %81, %82 : buffer, offset
+  func.call pure @identity(%value, %value_byte_offset) : (buffer, offset)
+  func.return %value, %value_byte_offset : buffer, offset
 }
 
-func.def @identity(%value: buffer, %value_byte_offset: offset) -> (buffer, offset) {
-  func.return %value, %value_byte_offset : buffer, offset
+func.def @identity(%value: buffer, %value_byte_offset: offset) {
+  func.return
 }
 
 // ====

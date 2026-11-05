@@ -40,11 +40,34 @@ DefaultDefined::DefaultDefined() = default;
 struct Movable {
   unsigned value;
   void increment() && { ++value; }
+  Movable&& self() && { return static_cast<Movable&&>(*this); }
 };
 
 struct MoveOuter {
   Movable member;
 };
+
+template <typename T>
+struct RemoveReference {
+  using Type = T;
+};
+
+template <typename T>
+struct RemoveReference<T&> {
+  using Type = T;
+};
+
+template <typename T>
+struct RemoveReference<T&&> {
+  using Type = T;
+};
+
+template <typename T>
+constexpr typename RemoveReference<T>::Type&& move(T&& value) {
+  return static_cast<typename RemoveReference<T>::Type&&>(value);
+}
+
+using MoveUInt4 = unsigned __attribute__((vector_size(16)));
 
 static unsigned sum(unsigned seed) {
   Packet packet(seed);
@@ -106,6 +129,38 @@ static unsigned extend_xvalue(unsigned value) {
   return reference.value;
 }
 
+static unsigned move_helper_record(unsigned value) {
+  Movable source{value};
+  return move(source).value;
+}
+
+static unsigned move_helper_scalar(unsigned value) { return move(value); }
+
+static unsigned move_helper_pointer(const unsigned* value) {
+  return *move(value);
+}
+
+static constexpr unsigned kMovePointerValue = 31u;
+
+static unsigned move_helper_pointer_value() {
+  return move_helper_pointer(&kMovePointerValue);
+}
+
+static unsigned move_helper_vector(unsigned value) {
+  MoveUInt4 values = {value, value + 1u, value + 2u, value + 3u};
+  return move(values)[2];
+}
+
+static unsigned move_helper_array(unsigned first, unsigned second) {
+  unsigned values[2] = {first, second};
+  return move(values)[1];
+}
+
+static unsigned move_helper_member(unsigned value) {
+  Movable source{value};
+  return static_cast<Movable&&>(source).self().value;
+}
+
 LOOM_CHECK_CASE(record_constructors) {
   const auto even = sum(2u);
   const auto odd = sum(3u);
@@ -119,6 +174,12 @@ LOOM_CHECK_CASE(record_constructors) {
   const auto mutated = mutate_xvalue(true, 13u);
   const auto aliased = alias_xvalue(17u);
   const auto extended = extend_xvalue(19u);
+  const auto helper_record = move_helper_record(23u);
+  const auto helper_scalar = move_helper_scalar(29u);
+  const auto helper_pointer = move_helper_pointer_value();
+  const auto helper_vector = move_helper_vector(37u);
+  const auto helper_array = move_helper_array(41u, 43u);
+  const auto helper_member = move_helper_member(47u);
   loom::check::expect_equal(even, 9u);
   loom::check::expect_equal(odd, 11u);
   loom::check::expect_equal(defaults, 4u);
@@ -131,4 +192,10 @@ LOOM_CHECK_CASE(record_constructors) {
   loom::check::expect_equal(mutated, 14u);
   loom::check::expect_equal(aliased, 18u);
   loom::check::expect_equal(extended, 21u);
+  loom::check::expect_equal(helper_record, 23u);
+  loom::check::expect_equal(helper_scalar, 29u);
+  loom::check::expect_equal(helper_pointer, 31u);
+  loom::check::expect_equal(helper_vector, 39u);
+  loom::check::expect_equal(helper_array, 43u);
+  loom::check::expect_equal(helper_member, 47u);
 }
