@@ -144,3 +144,84 @@ vm.module core(0.0) {
   }
 
 }
+
+// ====
+// Each reload's register lifetime ends at its call. The backing reference
+// cell remains an owner across both calls, including when reloads fold into
+// their ABI argument locations.
+// RUN: emit vm-dis
+
+vm.target<core> @vm
+
+type.decl import("provider", "object") @Object
+
+low.func.decl import(native, "get", module = "provider") target<vm.core>(@vm) abi(vm_function) @get() -> (reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "use", module = "provider") target<vm.core>(@vm) abi(vm_function) @use(%value: reg<vm.ref : ptr<@Object>>)
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @reload_twice() asm {
+  %slot = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
+  %value = low.func.call @get() : () -> (reg<vm.ref : ptr<@Object>>)
+  low.spill %value, %slot : reg<vm.ref : ptr<@Object>>, low.storage<private>
+  %first = low.reload %slot : low.storage<private> -> reg<vm.ref : ptr<@Object>>
+  low.func.call @use(%first) : (reg<vm.ref : ptr<@Object>>)
+  %second = low.reload %slot : low.storage<private> -> reg<vm.ref : ptr<@Object>>
+  low.func.call @use(%second) : (reg<vm.ref : ptr<@Object>>)
+  return
+}
+
+// ----
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "reload_twice"
+    string @string1 = "provider"
+    string @string2 = "object"
+    string @string3 = "provider"
+    string @string4 = "get"
+    string @string5 = "use"
+  }
+
+  section ref_types alignment(8) {
+    namespace @ref_group0 name(@string1) {
+      ref_type @ref_type0 name(@string2)
+    }
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 () -> ()
+    signature @signature1 () -> (ptr(@ref_type0))
+    signature @signature2 (ptr(@ref_type0)) -> ()
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+    callable @callable1 flags([]) depth(0) : @signature1
+    callable @callable2 flags([]) depth(0) : @signature2
+  }
+
+  section imports alignment(8) {
+    group @import_group0 module_name(@string3) {
+      import @import0 name(@string4) flags([]) : @callable1
+      import @import1 name(@string5) flags([]) : @callable2
+    }
+  }
+
+  section exports alignment(8) {
+    export @export0 name(@string0) : @callable0 = @function0
+  }
+
+  section functions alignment(8) {
+    func @function0 : @callable0 flags([has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 1, function_registers = 0, local_refs = 1, local_functions = 0) {
+    ^bb0:
+      control.block
+      control.call @import0 {direct_ref_move_mask = 0x0000}
+      ref.stack.store.move %r0, #r0
+      %r0 = ref.stack.load.retain #r0
+      control.call @import1 {direct_ref_move_mask = 0x0001}
+      %r0 = ref.stack.load.retain #r0
+      control.call @import1 {direct_ref_move_mask = 0x0001}
+      control.return
+    }
+  }
+
+}

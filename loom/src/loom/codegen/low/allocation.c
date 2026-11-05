@@ -432,11 +432,15 @@ loom_low_allocation_append_boundary_moves(
         boundary.location_count);
     const bool from_abi =
         direction == LOOM_LOW_ALLOCATION_BOUNDARY_DIRECTION_FROM_ABI;
+    // A folded reload names persistent storage, not the reloaded SSA value's
+    // temporary carrier. Its last use cannot consume the backing cell: another
+    // reload may observe that cell after this boundary.
     const bool consume_source =
         from_abi ||
-        loom_low_allocation_live_range_assignment_max_unit_end_point(
-            state->unit_liveness.end_points, state->unit_liveness.point_count,
-            assignment) <= point;
+        (assignment->location_kind != LOOM_LOW_ALLOCATION_LOCATION_STORAGE &&
+         loom_low_allocation_live_range_assignment_max_unit_end_point(
+             state->unit_liveness.end_points, state->unit_liveness.point_count,
+             assignment) <= point);
     loom_low_allocation_move_plan_append_assignment(
         &state->move_plan, from_abi ? &boundary : assignment, 0,
         from_abi ? assignment : &boundary, 0, assignment->location_count,
