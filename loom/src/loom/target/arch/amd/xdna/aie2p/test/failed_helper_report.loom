@@ -1,8 +1,11 @@
 aie2p.target<array> @device {device_profile = "amd.xdna.strix_halo.17f0_11"}
 
 // Nine loop-carried address indices exceed the eight-register hardware bank.
-// Rotating the values keeps each carrier live without unrelated memory work.
+// Indexed stores make every carrier observable while rotation keeps all nine
+// live across the backedge.
 low.func.def noinline target<amd.xdna.aie2p.core> @exhaust_indices(%iterations: reg<aie2p.er>) asm {
+  %scratch = storage {byte_alignment = 64, byte_length = 640} : low.storage<private>
+  %address = storage_address %scratch : low.storage<private> -> reg<aie2p.ep>
   %step = mov.short 1
   %offset0 = mov.static-byte-offset 64
   %index0 = mov.address-index %offset0
@@ -24,6 +27,15 @@ low.func.def noinline target<amd.xdna.aie2p.core> @exhaust_indices(%iterations: 
   %index8 = mov.address-index %offset8
   low.br ^loop(%iterations: reg<aie2p.er>, %index0: reg<aie2p.edj>, %index1: reg<aie2p.edj>, %index2: reg<aie2p.edj>, %index3: reg<aie2p.edj>, %index4: reg<aie2p.edj>, %index5: reg<aie2p.edj>, %index6: reg<aie2p.edj>, %index7: reg<aie2p.edj>, %index8: reg<aie2p.edj>)
 ^loop(%remaining: reg<aie2p.er>, %carried0: reg<aie2p.edj>, %carried1: reg<aie2p.edj>, %carried2: reg<aie2p.edj>, %carried3: reg<aie2p.edj>, %carried4: reg<aie2p.edj>, %carried5: reg<aie2p.edj>, %carried6: reg<aie2p.edj>, %carried7: reg<aie2p.edj>, %carried8: reg<aie2p.edj>):
+  st.i32.index %remaining, %address, %carried0
+  st.i32.index %remaining, %address, %carried1
+  st.i32.index %remaining, %address, %carried2
+  st.i32.index %remaining, %address, %carried3
+  st.i32.index %remaining, %address, %carried4
+  st.i32.index %remaining, %address, %carried5
+  st.i32.index %remaining, %address, %carried6
+  st.i32.index %remaining, %address, %carried7
+  st.i32.index %remaining, %address, %carried8
   %next = sub %remaining, %step
   low.cond_br %next, ^repeat, ^done : reg<aie2p.er>
 ^repeat:
