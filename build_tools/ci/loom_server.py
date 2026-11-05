@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePath
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
+from build_tools.ci import native_artifact_security
 from loom.packaging.python import release
 
 SERVER = "//loom/src/loom/tools/loom-serve"
@@ -212,6 +213,11 @@ def build_server(
             _windows_dependencies(readobj, candidate)
             if platform_name == release.WINDOWS_X86_64_PLATFORM
             else _linux_dependencies(readobj, candidate)
+        )
+        native_artifact_security.inspect_file(
+            readobj,
+            candidate,
+            executable=True,
         )
         output.mkdir(parents=True, exist_ok=False)
         destination = output / platform.binary_name

@@ -25,7 +25,10 @@ py_test(
 py_library(
     name = "loom_server",
     srcs = ["loom_server.py"],
-    deps = ["//loom/packaging/python:release_lib"],
+    deps = [
+        ":native_artifact_security",
+        "//loom/packaging/python:release_lib",
+    ],
 )
 
 py_library(
@@ -43,6 +46,18 @@ py_test(
         ":loom_server",
         ":loom_server_qualify",
     ],
+)
+
+py_library(
+    name = "native_artifact_security",
+    srcs = ["native_artifact_security.py"],
+)
+
+py_test(
+    name = "native_artifact_security_test",
+    size = "small",
+    srcs = ["native_artifact_security_test.py"],
+    deps = [":native_artifact_security"],
 )
 
 py_library(
@@ -253,6 +268,7 @@ test_suite(
         ":loom_release_test",
         ":loom_server_test",
         ":loom_wheel_test",
+        ":native_artifact_security_test",
         ":rocm_environment_test",
         ":vulkan_environment_test",
         ":windows_diagnostics_test",

@@ -118,6 +118,14 @@ jobs:
             --platform=win_amd64 --commit="$GITHUB_SHA" \
             --output=build/loom-sdk/server/windows --llvm-bin="$LLVM_ROOT/bin" \
             --bazel=bazel
+      - name: Qualify native artifact security
+        run: |
+          wheels=()
+          for wheel in wheel-artifact/*.whl build/loom-sdk/windows/"$PROFILE"/*.whl; do
+            wheels+=(--wheel "$wheel")
+          done
+          /usr/bin/python3 -m build_tools.ci.native_artifact_security \
+            --llvm-readobj "$LLVM_ROOT/bin/llvm-readobj" "${wheels[@]}"
       - name: Measure release artifacts
         if: inputs.profile == 'Release'
         env:
