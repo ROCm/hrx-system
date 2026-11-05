@@ -12,6 +12,7 @@
 #include <emmintrin.h>
 #include <linux/kfd_ioctl.h>
 #include <linux/sync_file.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -21,6 +22,11 @@
 #include "libamdf/src/gpu/umd/kfd/device.h"
 #include "libamdf/src/gpu/umd/kfd/memory.h"
 #include "libamdf/src/platform/linux/file.h"
+
+// amdgpu_bo_create_list_entry_array rejects larger validation lists before
+// resolving handles. Reserve one entry for the publication transport; this is
+// a native submission limit, not a limit on the caller's mapping transaction.
+#define AMDF_GPU_KFD_RESERVATION_BATCH_CAPACITY (128 * 1024 - 1)
 
 typedef struct amdf_gpu_kfd_reservation_target_t {
   // Live native consumer, borrowed through final removal.
@@ -431,59 +437,87 @@ void amdf_gpu_umd_memory_reservation_query_access(
   *out_required_access = 0;
 }
 
+static int amdf_gpu_kfd_reservation_source_compare(const void* lhs,
+                                                   const void* rhs) {
+  const uint32_t a = ((const struct drm_amdgpu_bo_list_entry*)lhs)->bo_handle;
+  const uint32_t b = ((const struct drm_amdgpu_bo_list_entry*)rhs)->bo_handle;
+  return (a > b) - (a < b);
+}
+
 amdf_status_t amdf_gpu_umd_memory_reservation_update(
     amdf_gpu_umd_memory_reservation_t* reservation, uint32_t access_ordinal,
     uint32_t update_count, const amdf_gpu_umd_mapping_update_t* updates,
     bool* mutation_started) {
   amdf_gpu_kfd_reservation_target_t* target =
       &reservation->targets[reservation->targets[access_ordinal].owner_ordinal];
-  if (update_count == UINT32_MAX) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
-  }
+  const uint32_t capacity =
+      update_count < AMDF_GPU_KFD_RESERVATION_BATCH_CAPACITY
+          ? update_count
+          : AMDF_GPU_KFD_RESERVATION_BATCH_CAPACITY;
   struct drm_amdgpu_bo_list_entry* sources = NULL;
   amdf_status_t status = amdf_calloc_array(
-      reservation->host_allocator, (size_t)update_count + 1, sizeof(*sources),
+      reservation->host_allocator, (size_t)capacity + 1, sizeof(*sources),
       amdf_alignof(struct drm_amdgpu_bo_list_entry), (void**)&sources);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  sources[0].bo_handle = target->transport_handle;
-  uint32_t source_count = 1;
-  for (uint32_t i = 0; i < update_count; ++i) {
-    if (updates[i].memory != NULL) {
-      sources[source_count++].bo_handle =
-          amdf_gpu_kfd_memory_mapping_handle(updates[i].memory, target->device);
-    }
-  }
   amdf_gpu_kfd_device_lock_memory(target->device,
                                   AMDF_GPU_KFD_MEMORY_PRIORITY_MAP);
   *mutation_started = true;
-  uint32_t source = 1;
-  for (uint32_t i = 0; i < update_count && amdf_status_is_ok(status); ++i) {
-    const amdf_gpu_umd_mapping_update_t* entry = &updates[i];
-    struct drm_amdgpu_gem_va update = {
-        .handle = entry->memory != NULL ? sources[source++].bo_handle : 0,
-        .operation =
-            entry->memory != NULL ? AMDGPU_VA_OP_REPLACE : AMDGPU_VA_OP_CLEAR,
-        .flags =
-            AMDGPU_VM_DELAY_UPDATE |
-            ((entry->access & AMDF_MEMORY_ACCESS_READ) ? AMDGPU_VM_PAGE_READABLE
-                                                       : 0) |
-            ((entry->access & AMDF_MEMORY_ACCESS_WRITE)
-                 ? AMDGPU_VM_PAGE_WRITEABLE
-                 : 0) |
-            ((entry->access & AMDF_MEMORY_ACCESS_EXECUTE)
-                 ? AMDGPU_VM_PAGE_EXECUTABLE
-                 : 0),
-        .va_address = reservation->address + entry->target_byte_offset,
-        .offset_in_bo = entry->source_byte_offset,
-        .map_size = entry->byte_length,
+  for (uint32_t first = 0; first < update_count && amdf_status_is_ok(status);) {
+    const uint32_t remaining = update_count - first;
+    const uint32_t count = remaining < capacity ? remaining : capacity;
+    sources[0] = (struct drm_amdgpu_bo_list_entry){
+        .bo_handle = target->transport_handle,
     };
-    status = amdf_gpu_kfd_reservation_ioctl(target, DRM_IOCTL_AMDGPU_GEM_VA,
-                                            &update);
-  }
-  if (amdf_status_is_ok(status)) {
-    status = amdf_gpu_kfd_reservation_publish(target, source_count, sources);
+    uint32_t source_count = 1;
+    for (uint32_t i = first; i < first + count && amdf_status_is_ok(status);
+         ++i) {
+      const amdf_gpu_umd_mapping_update_t* entry = &updates[i];
+      const uint32_t handle = entry->memory != NULL
+                                  ? amdf_gpu_kfd_memory_mapping_handle(
+                                        entry->memory, target->device)
+                                  : 0;
+      if (entry->memory != NULL) {
+        sources[source_count++] =
+            (struct drm_amdgpu_bo_list_entry){.bo_handle = handle};
+      }
+      struct drm_amdgpu_gem_va update = {
+          .handle = handle,
+          .operation =
+              entry->memory != NULL ? AMDGPU_VA_OP_REPLACE : AMDGPU_VA_OP_CLEAR,
+          .flags = AMDGPU_VM_DELAY_UPDATE |
+                   ((entry->access & AMDF_MEMORY_ACCESS_READ)
+                        ? AMDGPU_VM_PAGE_READABLE
+                        : 0) |
+                   ((entry->access & AMDF_MEMORY_ACCESS_WRITE)
+                        ? AMDGPU_VM_PAGE_WRITEABLE
+                        : 0) |
+                   ((entry->access & AMDF_MEMORY_ACCESS_EXECUTE)
+                        ? AMDGPU_VM_PAGE_EXECUTABLE
+                        : 0),
+          .va_address = reservation->address + entry->target_byte_offset,
+          .offset_in_bo = entry->source_byte_offset,
+          .map_size = entry->byte_length,
+      };
+      status = amdf_gpu_kfd_reservation_ioctl(target, DRM_IOCTL_AMDGPU_GEM_VA,
+                                              &update);
+    }
+    if (amdf_status_is_ok(status)) {
+      qsort(sources, source_count, sizeof(*sources),
+            amdf_gpu_kfd_reservation_source_compare);
+      uint32_t unique_count = 1;
+      for (uint32_t i = 1; i < source_count; ++i) {
+        if (sources[i].bo_handle != sources[unique_count - 1].bo_handle) {
+          sources[unique_count++] = sources[i];
+        }
+      }
+      // Complete this prefix before mutating the next one. Publishing a
+      // subset of handles after all mutations would leave later sources
+      // outside the validation list responsible for their translations.
+      status = amdf_gpu_kfd_reservation_publish(target, unique_count, sources);
+    }
+    first += count;
   }
   amdf_gpu_kfd_device_unlock_memory(target->device);
   amdf_free(reservation->host_allocator, sources);
