@@ -1,5 +1,7 @@
 func.decl import("runner") @execute_3(%stage: i32, %control: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer) -> (i64)
 
+func.decl import("runner") @buffer(%slot: i32) -> (hal.buffer)
+
 func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
 
 func.decl import("runner") @fence(%execution: i32, %work: i64) -> (hal.fence)
@@ -19,6 +21,17 @@ func.def public @step(%initialize: i32, %control: hal.buffer, %tokens: hal.buffe
     %decode = func.call @execute_3(%c1, %control, %tokens, %progress) : (i32, hal.buffer, hal.buffer, hal.buffer) -> (i64)
     scf.yield %decode : i64
   }
+  func.return %completion : i64
+}
+
+func.def public @indexed_step(%initialize: i32) -> (i64) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %control = func.call @buffer(%c0) : (i32) -> (hal.buffer)
+  %tokens = func.call @buffer(%c1) : (i32) -> (hal.buffer)
+  %progress = func.call @buffer(%c2) : (i32) -> (hal.buffer)
+  %completion = func.call @step(%initialize, %control, %tokens, %progress) : (i32, hal.buffer, hal.buffer, hal.buffer) -> (i64)
   func.return %completion : i64
 }
 

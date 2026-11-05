@@ -360,6 +360,14 @@ and speculative verifier work. Token capacity and independently advancing span
 capacity are separate. The source reports completed progress; native ownership
 commits it after readiness.
 
+Text control can obtain a retained storage reference with
+`runner.buffer(allocation_index) -> hal.buffer`. The index names the source's
+allocation record, independently of a stage's argument positions. An omitted
+root returns null; an unknown index fails before device work. Lookup does not
+allocate or establish readiness. Capacity growth replaces the directory before
+the next invocation, so subsequent lookups see the new roots. Previously returned
+references retain their old storage until their last consumer releases it.
+
 Resident capacity grows independently of those epoch shapes. Source control
 exports `resize_state(control_state, resident_capacity)`, returning replacement
 control state followed by the same five storage records used at preparation.

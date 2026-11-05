@@ -41,6 +41,10 @@ typedef struct loom_serve_module_t {
   loom_serve_module_feedback_t* feedback;
   // Number of registered feedback slots.
   iree_host_size_t feedback_count;
+  // Immutable source-visible directory extent, independent of stage arities.
+  iree_host_size_t buffer_count;
+  // Coallocated directory retaining each current model storage root.
+  iree_hal_buffer_t** buffers;
   // Owned name storage used by the export directory.
   char* names;
   // Owned lexically sorted export directory.
@@ -59,6 +63,18 @@ void loom_serve_module_bind_feedback(iree_vm_module_t* base,
                                      iree_byte_span_t destination) {
   loom_serve_module_t* module = (loom_serve_module_t*)base;
   module->feedback[slot].destination = destination;
+}
+
+void loom_serve_module_bind_buffers(iree_vm_module_t* base,
+                                    iree_hal_buffer_t* const* buffers) {
+  loom_serve_module_t* module = (loom_serve_module_t*)base;
+  for (iree_host_size_t i = 0; i < module->buffer_count; ++i) {
+    iree_hal_buffer_retain(buffers[i]);
+  }
+  for (iree_host_size_t i = 0; i < module->buffer_count; ++i) {
+    iree_hal_buffer_release(module->buffers[i]);
+    module->buffers[i] = buffers[i];
+  }
 }
 
 void loom_serve_module_clear_stages(iree_vm_module_t* base) {
@@ -95,6 +111,9 @@ static void loom_serve_module_destroy(iree_vm_module_t* base) {
   iree_allocator_free(module->host_allocator, module->exports);
   iree_allocator_free(module->host_allocator, module->names);
   iree_allocator_free(module->host_allocator, module->feedback);
+  for (iree_host_size_t i = 0; i < module->buffer_count; ++i) {
+    iree_hal_buffer_release(module->buffers[i]);
+  }
   iree_allocator_free(module->host_allocator, module);
 }
 
@@ -216,6 +235,18 @@ static iree_status_t loom_serve_module_start(
             ? loom_serve_module_feedback(module, &params->call, &value)
             : loom_serve_module_execute(module, params, &value));
     iree_vm_call_value_result_store(&params->call, 0, value);
+  } else if (params->function_ordinal == module->binding_capacity + 4) {
+    const uint32_t slot =
+        (uint32_t)iree_vm_call_value_argument_load(&params->call, 0);
+    if (slot >= module->buffer_count) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "runner buffer %u is not registered", slot);
+    }
+    iree_hal_buffer_t* buffer = module->buffers[slot];
+    iree_hal_buffer_retain(buffer);
+    void* owned = buffer;
+    iree_vm_ref_t result = iree_vm_ref_from_ptr_move(&owned, module->types[0]);
+    iree_vm_call_ref_result_store_move(&params->call, 0, &result);
   } else {
     const uint32_t index =
         (uint32_t)iree_vm_call_value_argument_load(&params->call, 0);
@@ -363,7 +394,8 @@ iree_status_t loom_serve_module_create(const iree_hal_module_types_t* types,
                                        iree_vm_module_t** out_module) {
   *out_module = NULL;
   if (!options.executions.count || options.executions.count > UINT32_MAX ||
-      !options.stages.count || options.binding_capacity == UINT16_MAX) {
+      !options.stages.count || options.binding_capacity == UINT16_MAX ||
+      options.buffers.count > UINT32_MAX) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "runner module requires executions, stages and "
                             "representable capacities");
@@ -383,13 +415,21 @@ iree_status_t loom_serve_module_create(const iree_hal_module_types_t* types,
     }
   }
   loom_serve_module_t* module = NULL;
+  iree_host_size_t allocation_size = 0, buffers_offset = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      sizeof(*module), &allocation_size,
+      IREE_STRUCT_FIELD(options.buffers.count, iree_hal_buffer_t*,
+                        &buffers_offset)));
   IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(host_allocator, sizeof(*module), (void**)&module));
+      iree_allocator_malloc(host_allocator, allocation_size, (void**)&module));
   module->host_allocator = host_allocator;
   module->types[0] = types->buffer;
   module->types[1] = types->fence;
   module->binding_capacity = options.binding_capacity;
-  const iree_host_size_t export_count = options.binding_capacity + 4;
+  module->buffer_count = options.buffers.count;
+  module->buffers = (iree_hal_buffer_t**)((uint8_t*)module + buffers_offset);
+  loom_serve_module_bind_buffers(&module->base, options.buffers.values);
+  const iree_host_size_t export_count = options.binding_capacity + 5;
   module->descriptor = (iree_vm_module_descriptor_t){
       .name = IREE_SVL("runner"),
       .flags = IREE_VM_MODULE_FLAG_LINKABLE,
@@ -449,15 +489,15 @@ iree_status_t loom_serve_module_create(const iree_hal_module_types_t* types,
       module->arguments[i] = (iree_vm_module_signature_type_t){
           IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0};
     }
-    // Signatures sort by field count, then type. execute_0 precedes the
+    // Signatures sort by field count, then type. execute_0 and buffer precede
     // two-field fence(i32, i64), execute_1(i32, buffer), and join(i32, fence).
     // Feedback's scalar offset sorts before execute_3's third reference.
     const iree_host_size_t feedback_ordinal =
-        iree_min(3, options.binding_capacity + 1) + 2;
+        iree_min(3, options.binding_capacity + 1) + 3;
     for (iree_host_size_t i = 0; i <= options.binding_capacity; ++i) {
       char* name = module->names + i * 16;
       const int length = snprintf(name, 16, "execute_%zu", i);
-      const iree_host_size_t ordinal = i + (i >= 1) + (i >= 2) + (i >= 3);
+      const iree_host_size_t ordinal = i + 2 * (i >= 1) + (i >= 2) + (i >= 3);
       module->callables[ordinal].signature = (iree_vm_module_signature_t){
           .arguments = {module->arguments, i + 1, 1, i, 0},
           .results = {&loom_serve_module_result, 1, 1, 0, 0},
@@ -499,8 +539,8 @@ iree_status_t loom_serve_module_create(const iree_hal_module_types_t* types,
         {IREE_VM_SCALAR_TYPE_I32, 0},
         {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 1},
     };
-    const iree_host_size_t join_ordinal = 2 + (options.binding_capacity >= 1);
-    module->callables[1].signature = (iree_vm_module_signature_t){
+    const iree_host_size_t join_ordinal = 3 + (options.binding_capacity >= 1);
+    module->callables[2].signature = (iree_vm_module_signature_t){
         .arguments = {fence_arguments, 2, 2, 0, 0},
         .results = {&fence_type, 1, 0, 1, 0},
     };
@@ -511,13 +551,26 @@ iree_status_t loom_serve_module_create(const iree_hal_module_types_t* types,
     module->descriptor.counts.callable_fields.ref_count += 2;
     module->exports[ordinal + 1] = (iree_vm_module_export_declaration_t){
         .export_name = IREE_SVL("fence"),
-        .callable_type_ordinal = 1,
+        .callable_type_ordinal = 2,
         .function_ordinal = ordinal + 1,
     };
     module->exports[ordinal + 2] = (iree_vm_module_export_declaration_t){
         .export_name = IREE_SVL("join"),
         .callable_type_ordinal = join_ordinal,
         .function_ordinal = ordinal + 2,
+    };
+    static const iree_vm_module_signature_type_t buffer_type = {
+        IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0};
+    module->callables[1].signature = (iree_vm_module_signature_t){
+        .arguments = {module->arguments, 1, 1, 0, 0},
+        .results = {&buffer_type, 1, 0, 1, 0},
+    };
+    module->descriptor.counts.callable_fields.value_count += 1;
+    module->descriptor.counts.callable_fields.ref_count += 1;
+    module->exports[ordinal + 3] = (iree_vm_module_export_declaration_t){
+        .export_name = IREE_SVL("buffer"),
+        .callable_type_ordinal = 1,
+        .function_ordinal = ordinal + 3,
     };
     qsort(module->exports, export_count, sizeof(*module->exports),
           loom_serve_module_compare_exports);

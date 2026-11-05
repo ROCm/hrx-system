@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "iree/vm/sync.h"
+#include "loom/serve/runtime/program/module.h"
 #include "loom/serve/service/text/model_instance.h"
 
 struct loom_serve_text_resize_t {
@@ -114,6 +115,11 @@ iree_status_t loom_serve_text_model_submit_resize(
   iree_status_t status =
       loom_serve_text_state_resize(&model->state, row_count, &resize->storage);
   if (iree_status_is_ok(status)) {
+    iree_hal_buffer_t* buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(buffers); ++i) {
+      buffers[i] = model->state.allocations[i].buffer;
+    }
+    loom_serve_module_bind_buffers(model->control.native_module, buffers);
     iree_vm_buffer_release(model->source.control_state);
     model->source.control_state = resize->control_state;
     resize->control_state = NULL;

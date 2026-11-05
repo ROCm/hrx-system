@@ -67,6 +67,13 @@ typedef struct loom_serve_module_options_t {
     // accepted feedback, including partial submission failure and teardown.
     const loom_serve_module_feedback_t* values;
   } feedback;
+  // Source-visible model storage, independent of stage argument positions.
+  struct {
+    // Immutable directory extent; zero exposes no model storage.
+    iree_host_size_t count;
+    // Entries copied and retained. Null entries represent omitted roots.
+    iree_hal_buffer_t* const* values;
+  } buffers;
 } loom_serve_module_options_t;
 
 // Creates the runner-local native "runner" module. execute_N exports
@@ -87,6 +94,10 @@ typedef struct loom_serve_module_options_t {
 // global device barrier. A null fence represents an empty dependency set.
 // Neither operation establishes ownership of storage referenced by other
 // operations.
+// buffer(i32 slot) -> hal.buffer returns a retained model storage reference,
+// including null for an omitted root. Unknown slots fail before queue work.
+// Lookup neither submits work nor imports readiness; the model's execution
+// dependencies protect its contents.
 //
 // The module retains every execution and stage command. Its declarations are
 // immutable. Per-invocation binding scratch lives in the process storage, so
@@ -106,6 +117,14 @@ iree_status_t loom_serve_module_create(const iree_hal_module_types_t* types,
 void loom_serve_module_bind_feedback(iree_vm_module_t* module,
                                      iree_host_size_t slot,
                                      iree_byte_span_t destination);
+
+// Replaces the complete model buffer directory between serialized invocations.
+// The extent is fixed at construction. Retains every new reference before
+// releasing the old generation, so roots may be shared or permuted. The owner
+// retires users of the previous layout and establishes replacement readiness
+// before dependent work. No allocation or queue work occurs.
+void loom_serve_module_bind_buffers(iree_vm_module_t* module,
+                                    iree_hal_buffer_t* const* buffers);
 
 // Rebinds the native stages of a module created above without changing its VM
 // declarations, process storage, feedback destinations or execution identities.

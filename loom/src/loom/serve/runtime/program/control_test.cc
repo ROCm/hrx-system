@@ -282,19 +282,22 @@ class ControlTest
                 iree_make_byte_span(outputs_[1].tokens.data(), kLengths[1]),
         },
     };
+    iree_hal_buffer_t* model_buffers[] = {buffers_[0][0], buffers_[0][1],
+                                          buffers_[0][2], nullptr};
     loom_serve_module_options_t options = {
         .binding_capacity = 12,
         .executions = {IREE_ARRAYSIZE(executions), executions},
         .stages = {IREE_ARRAYSIZE(stages), stages},
         .feedback = {IREE_ARRAYSIZE(feedback), feedback},
+        .buffers = {IREE_ARRAYSIZE(model_buffers), model_buffers},
     };
     IREE_RETURN_IF_ERROR(loom_serve_module_create(
         &types_, options, host_allocator_, &native_module_));
     const std::string path = directory_ + "/control.loom";
     iree_const_byte_span_t image;
-    const iree_string_view_t roots[] = {IREE_SVL("step"), IREE_SVL("fork"),
-                                        IREE_SVL("dependencies"),
-                                        IREE_SVL("peers")};
+    const iree_string_view_t roots[] = {
+        IREE_SVL("step"), IREE_SVL("fork"), IREE_SVL("dependencies"),
+        IREE_SVL("peers"), IREE_SVL("indexed_step")};
     const loom_serve_sources_t sources = {.base_directory = IREE_SV(".")};
     IREE_RETURN_IF_ERROR(loom_serve_jit_compile_vm(
         loom_serve_host_target_environment(host_), &sources,
@@ -672,6 +675,86 @@ TEST_P(ControlTest, IndexedArityFamilyRejectsBeforeSubmission) {
   EXPECT_EQ(completion, 1u);
   IREE_ASSERT_OK(Invoke(1, buffers_[0], &completion));
   EXPECT_EQ(completion, 2u);
+}
+
+TEST_P(ControlTest, SourceUsesReboundModelBuffers) {
+  iree_vm_function_t function = {};
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(
+      process_, IREE_SV("model"), IREE_SV("indexed_step"), &function));
+  for (size_t row = 0; row < buffers_.size(); ++row) {
+    inputs_[row].control = {3, 17, 99};
+    inputs_[row].tokens.fill(-1000);
+    inputs_[row].tokens[0] = 7 + static_cast<int32_t>(row);
+    inputs_[row].progress.fill(-2000);
+    iree_hal_buffer_t* model_buffers[] = {buffers_[row][0], buffers_[row][1],
+                                          buffers_[row][2], nullptr};
+    const auto before = loom_serve_execution_frontier(execution_);
+    loom_serve_module_bind_buffers(native_module_, model_buffers);
+    const auto after = loom_serve_execution_frontier(execution_);
+    for (size_t i = 0; i < IREE_ARRAYSIZE(before.values); ++i) {
+      EXPECT_EQ(before.values[i], after.values[i]);
+    }
+    uint64_t completion = 0;
+    IREE_ASSERT_OK(Upload(row, 0, 3, &completion));
+    iree_vm_variant_t argument = iree_vm_variant_from_i32(1);
+    IREE_ASSERT_OK(InvokeFunction(
+        function, iree_vm_variant_span_from_ptr(&argument, 1), &completion));
+    IREE_ASSERT_OK(Download(row, &completion));
+    IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
+    EXPECT_EQ(outputs_[row].control, (std::array<int32_t, 3>{21, 2, 99}));
+    EXPECT_EQ(outputs_[row].tokens[1], inputs_[row].tokens[0]);
+    EXPECT_EQ(outputs_[row].tokens[2], inputs_[row].tokens[0]);
+    EXPECT_EQ(outputs_[row].progress[0], 2);
+  }
+}
+
+TEST_P(ControlTest, ModelBufferReferencesSurviveDirectoryReplacement) {
+  inputs_[0].control = {11, 23, 37};
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(Upload(0, 0, 3, &completion));
+  IREE_ASSERT_OK(loom_serve_execution_drain(execution_));
+  iree_vm_function_t function = {};
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(process_, IREE_SV("runner"),
+                                                 IREE_SV("buffer"), &function));
+  const auto before = loom_serve_execution_frontier(execution_);
+  iree_vm_variant_t retained = {};
+  iree_vm_variant_t argument = iree_vm_variant_from_i32(0);
+  IREE_ASSERT_OK(iree_vm_invoke(invocation_, function,
+                                iree_vm_variant_span_from_ptr(&argument, 1),
+                                iree_vm_variant_span_from_ptr(&retained, 1)));
+  iree_hal_buffer_t* replacement[] = {nullptr, nullptr, nullptr, nullptr};
+  loom_serve_module_bind_buffers(native_module_, replacement);
+  iree_hal_buffer_release(buffers_[0][0]);
+  buffers_[0][0] = nullptr;
+  // Only the escaped VM result owns the old root: all queue work retired,
+  // and both the module directory and the original caller released it.
+  IREE_ASSERT_OK(iree_hal_buffer_ptr_from_variant_move(&types_, &retained,
+                                                       &buffers_[0][0]));
+  for (int32_t slot : {0, 3, -1, 4}) {
+    SCOPED_TRACE(slot);
+    argument = iree_vm_variant_from_i32(slot);
+    iree_vm_variant_t result = {};
+    IREE_EXPECT_STATUS_IS(
+        slot < 0 || slot >= 4 ? IREE_STATUS_OUT_OF_RANGE : IREE_STATUS_OK,
+        iree_vm_invoke(invocation_, function,
+                       iree_vm_variant_span_from_ptr(&argument, 1),
+                       iree_vm_variant_span_from_ptr(&result, 1)));
+    if (slot >= 0 && slot < 4) {
+      iree_hal_buffer_t* omitted = nullptr;
+      IREE_EXPECT_OK(
+          iree_hal_buffer_ptr_from_variant_move(&types_, &result, &omitted));
+      EXPECT_EQ(omitted, nullptr);
+      iree_hal_buffer_release(omitted);
+    }
+    iree_vm_variant_reset(&result);
+  }
+  const auto after = loom_serve_execution_frontier(execution_);
+  for (size_t i = 0; i < IREE_ARRAYSIZE(before.values); ++i) {
+    EXPECT_EQ(before.values[i], after.values[i]);
+  }
+  IREE_ASSERT_OK(Download(0, &completion));
+  IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
+  EXPECT_EQ(outputs_[0].control, inputs_[0].control);
 }
 
 TEST_P(ControlTest, FeedbackChecksBothExtentsAndAllowsSubranges) {

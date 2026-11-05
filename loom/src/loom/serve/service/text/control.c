@@ -95,11 +95,16 @@ iree_status_t loom_serve_text_control_initialize(
       {.destination = control->host.bytes[TEXT_HOST_RESULTS]},
       {.destination = control->host.bytes[TEXT_HOST_NEXT_RESULTS]},
   };
+  iree_hal_buffer_t* buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(buffers); ++i) {
+    buffers[i] = state->allocations[i].buffer;
+  }
   const loom_serve_module_options_t options = {
       .binding_capacity = 7,
       .executions = {execution_count, executions},
       .stages = {stage_count, stages},
       .feedback = {IREE_ARRAYSIZE(feedback), feedback},
+      .buffers = {IREE_ARRAYSIZE(buffers), buffers},
   };
   status = loom_serve_module_create(&source->types, options, host_allocator,
                                     &control->native_module);

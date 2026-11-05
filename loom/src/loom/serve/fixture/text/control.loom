@@ -3,6 +3,8 @@ config.def @fixture.fail_epoch = false : i1
 
 func.decl import("runner") @execute_1(%stage: i32, %buffer: hal.buffer) -> (i64)
 
+func.decl import("runner") @buffer(%slot: i32) -> (hal.buffer)
+
 func.decl import("runner") @fence(%execution: i32, %value: i64) -> (hal.fence)
 
 func.decl import("runner") @join(%execution: i32, %ready: hal.fence)
@@ -744,7 +746,9 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
     %ready = func.call @fence(%owner32, %work) : (i32, i64) -> (hal.fence)
     func.call @join(%c0, %ready) : (i32, hal.fence)
   }
-  %completion = func.call @execute_6(%stage, %residual, %metadata, %origins, %state, %tokens, %outputs) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+  %arena_slot = scalar.constant 1 : i32
+  %arena = func.call @buffer(%arena_slot) : (i32) -> (hal.buffer)
+  %completion = func.call @execute_6(%stage, %residual, %metadata, %origins, %arena, %tokens, %outputs) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
   %fail = config.get @fixture.fail_epoch : i1
   scf.if %fail {
     %error = buffer.constant utf8("fixture rejects epoch after accepted work") : buffer
