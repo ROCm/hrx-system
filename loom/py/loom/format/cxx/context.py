@@ -40,6 +40,7 @@ from loom.ir import (
     ShapedType,
     SignedEnumSetAttr,
     TypeKind,
+    Utf8Attr,
 )
 
 _OPS: tuple[Op, ...] = source_ops()
@@ -127,6 +128,30 @@ def _strip_outer_parentheses(expression: str) -> str:
     return expression[1:-1] if depth == 0 else expression
 
 
+def cxx_string_literal(contents: bytes | Utf8Attr) -> str:
+    """Quotes exact payload code units without greedy hexadecimal escapes."""
+
+    text = (
+        contents.value if isinstance(contents, Utf8Attr) else contents.decode("latin1")
+    )
+    prefix = "u8" if isinstance(contents, Utf8Attr) else ""
+    escaped: list[str] = []
+    for character in text:
+        if character in {'"', "\\"}:
+            escaped.append("\\" + character)
+        elif character in {"\n", "\r", "\t"}:
+            escaped.append({"\n": "\\n", "\r": "\\r", "\t": "\\t"}[character])
+        elif (
+            ord(character) < 32
+            or ord(character) == 127
+            or (not prefix and ord(character) >= 128)
+        ):
+            escaped.append(f"\\{ord(character):03o}")
+        else:
+            escaped.append(character)
+    return prefix + '"' + "".join(escaped) + '"'
+
+
 @dataclass(slots=True)
 class BufferInfo:
     root: int
@@ -155,6 +180,12 @@ class CxxRenderContext:
         self.uses: dict[int, list[tuple[Operation, int]]] = collections.defaultdict(
             list
         )
+        # Values consumed through a tied call need named writable C++ carriers.
+        self.mutable_carriers: set[int] = set()
+        # Function calls whose tied operands require source-parameter grouping.
+        self.tied_calls: list[Operation] = []
+        # Counted-loop induction values are C++ control variables, not state.
+        self.counted_loop_inductions: set[int] = set()
         self.parent_operations: dict[int, Operation] = {}
         # Dynamic view type identities become constructor arguments in C++.
         # Record those uses because they are not ordinary operation operands.
@@ -170,6 +201,12 @@ class CxxRenderContext:
                 self.use_blocks[operand].append(block)
                 self.users[operand].append(operation)
                 self.uses[operand].append((operation, operand_index))
+            if operation.name == "func.call" and operation.tied_results:
+                self.tied_calls.append(operation)
+            if operation.name == "scf.for":
+                self.counted_loop_inductions.add(
+                    operation.regions[0].blocks[0].arg_ids[0]
+                )
             for result in operation.results:
                 self.definitions[result] = operation
                 self.definition_blocks[result] = block
@@ -1286,6 +1323,7 @@ class CxxRenderContext:
             inlineable
             and statement_attribute is None
             and result_id not in self.assignment_targets
+            and result_id not in self.mutable_carriers
             and self.use_counts[result_id] == 1
             and result_id not in self.assumption_inputs
             and (
