@@ -166,8 +166,8 @@ TEST(AmdgpuTargetTest, ParsesArtifactKeyIdentity) {
   EXPECT_EQ(identity.amdhsa_features.xnack, LOOMC_AMDGPU_TARGET_FEATURE_OFF);
 
   LOOMC_EXPECT_OK(loomc_amdgpu_target_identity_parse_artifact_key(
-      loomc_make_cstring_view("gfx1250-a0"), &identity));
-  EXPECT_EQ(ToString(identity.target), "gfx1250-a0");
+      loomc_make_cstring_view("gfx1250-strict"), &identity));
+  EXPECT_EQ(ToString(identity.target), "gfx1250-strict");
   EXPECT_EQ(identity.amdhsa_features.sramecc,
             LOOMC_AMDGPU_TARGET_FEATURE_UNSUPPORTED);
   EXPECT_EQ(identity.amdhsa_features.xnack,
@@ -182,7 +182,7 @@ TEST(AmdgpuTargetTest, ParsesArtifactKeyIdentity) {
 TEST(AmdgpuTargetTest, TargetProfilePreservesCanonicalTarget) {
   TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
   const char* target_names[] = {
-      "gfx1250-a0",
+      "gfx1250-strict",
       "gfx1250",
       "gfx12-5-generic",
   };
@@ -318,7 +318,7 @@ TEST(AmdgpuTargetTest, HsaAdapterResolvesCanonicalIdentity) {
   LOOMC_EXPECT_OK(loomc_amdgpu_target_identity_from_hsa_isa_name(
       loomc_make_cstring_view("amdgcn-amd-amdhsa--gfx1250"),
       /*asic_revision=*/0, &identity));
-  EXPECT_EQ(ToString(identity.target), "gfx1250-a0");
+  EXPECT_EQ(ToString(identity.target), "gfx1250-strict");
 
   LOOMC_EXPECT_OK(loomc_amdgpu_target_identity_from_hsa_isa_name(
       loomc_make_cstring_view("amdgcn-amd-amdhsa--gfx1250"),

@@ -134,9 +134,9 @@ TEST(AmdgpuTargetIdentityTest, MissingTargetsAreNotEqual) {
       loom_amdgpu_target_identity_equal(&empty_identity, &empty_identity));
 }
 
-TEST(AmdgpuTargetIdentityTest, OverlayTargetsRemainExact) {
+TEST(AmdgpuTargetIdentityTest, StrictTargetRemainsExact) {
   loom_amdgpu_target_identity_t a0 = {};
-  loom_amdgpu_target_identity_initialize(LookupTarget("gfx1250-a0"), &a0);
+  loom_amdgpu_target_identity_initialize(LookupTarget("gfx1250-strict"), &a0);
   loom_amdgpu_target_identity_t b0 = {};
   loom_amdgpu_target_identity_initialize(LookupTarget("gfx1250"), &b0);
   loom_amdgpu_target_identity_t generic = {};
@@ -146,7 +146,8 @@ TEST(AmdgpuTargetIdentityTest, OverlayTargetsRemainExact) {
   EXPECT_FALSE(loom_amdgpu_target_identity_equal(&a0, &b0));
   EXPECT_FALSE(loom_amdgpu_target_identity_satisfies_requirement(&a0, &b0));
   EXPECT_FALSE(loom_amdgpu_target_identity_satisfies_requirement(&b0, &a0));
-  EXPECT_TRUE(loom_amdgpu_target_identity_satisfies_requirement(&a0, &generic));
+  EXPECT_FALSE(
+      loom_amdgpu_target_identity_satisfies_requirement(&a0, &generic));
   EXPECT_TRUE(loom_amdgpu_target_identity_satisfies_requirement(&b0, &generic));
 }
 

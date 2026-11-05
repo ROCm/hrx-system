@@ -102,6 +102,27 @@ TEST_F(SelectionTest, CanonicalTargetsAcceptExactAndProjectedArtifacts) {
   }
 }
 
+TEST_F(SelectionTest, StrictPhysicalTargetHasNoGenericFallback) {
+  iree_hal_amd_gpu_target_identity_t identity;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_target_identity_parse_artifact_key(
+      IREE_SV("gfx1250"), &identity));
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_target_identity_resolve_physical_target(0, &identity));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_device_spec_builder_add_executable_targets(
+      &builder_, &identity, 1));
+  Finalize();
+
+  const iree_hal_device_executable_spec_t* executable_spec =
+      iree_hal_device_spec_executables(spec_);
+  ASSERT_EQ(executable_spec->target_count, 1u);
+  EXPECT_TRUE(iree_string_view_equal(executable_spec->targets[0].target_key,
+                                     IREE_SV("gfx1250-strict")));
+  EXPECT_EQ(Select("gfx1250-strict").outcome,
+            IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED);
+  EXPECT_EQ(Select("gfx12-5-generic").outcome,
+            IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH);
+}
+
 TEST_F(SelectionTest, FeatureRequirementsFilterBeforeAmbiguityResolution) {
   Add(IREE_SV("gfx942:sramecc+:xnack-"));
   Add(IREE_SV("gfx942:sramecc+:xnack+"));

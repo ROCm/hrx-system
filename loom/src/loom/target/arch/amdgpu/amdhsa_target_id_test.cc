@@ -91,8 +91,9 @@ TEST(AmdhsaTargetIdTest, ProjectsCompilerTargetsToBackendProcessors) {
   EXPECT_EQ(FormatTargetId(identity),
             "amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-");
 
-  loom_amdgpu_target_identity_initialize(LookupTarget("gfx1250-a0"), &identity);
-  EXPECT_EQ(FormatTargetId(identity), "amdgcn-amd-amdhsa--gfx1250");
+  loom_amdgpu_target_identity_initialize(LookupTarget("gfx1250-strict"),
+                                         &identity);
+  EXPECT_EQ(FormatTargetId(identity), "amdgcn-amd-amdhsa--gfx1250-strict");
 }
 
 TEST(AmdhsaTargetIdTest, RoundTripsEveryProjectedCompilerIdentity) {

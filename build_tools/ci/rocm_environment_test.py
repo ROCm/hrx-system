@@ -207,8 +207,8 @@ class AmdgpuTargetSelectionTest(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            rocm_environment.target_map.exact_targets_for_selection("gfx1250-a0"),
-            ["gfx1250"],
+            rocm_environment.target_map.exact_targets_for_selection("gfx1250-strict"),
+            ["gfx1250-strict"],
         )
 
     def test_rejects_unknown_target_selector(self):

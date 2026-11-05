@@ -32,7 +32,6 @@ from loom.target.arch.amdgpu.target_catalog import (
     AMDGPU_GENERIC_CODE_OBJECT_INFOS,
     AMDGPU_PHYSICAL_TARGET_INFOS,
     AMDGPU_TARGET_ID_FEATURE_ORDER,
-    AMDGPU_TARGET_OVERLAY_INFOS,
     TARGET_ID_FEATURE_SRAMECC,
     TARGET_ID_FEATURE_XNACK,
     AmdgpuExactTargetInfo,
@@ -1762,6 +1761,18 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         ),
     ),
     gfx125x_processor_info(
+        "gfx1250-strict",
+        0x0EB,
+        elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
+        processor_flags=AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE,
+        lds_bank_service_models=(
+            AMDGPU_LDS_BANK_SERVICE_MODELS_WAVE32_B128_QUAD_PHASES
+        ),
+        matrix_coexecution_profile=(
+            AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_4_8_16
+        ),
+    ),
+    gfx125x_processor_info(
         "gfx1251",
         0x05A,
         descriptor_set_key="amdgpu.rdna4.gfx1251.core",
@@ -1988,10 +1999,10 @@ AMDGPU_TARGET_INFOS: tuple[AmdgpuTargetInfo, ...] = (
         default_for_descriptor_set=True,
     ),
     AmdgpuTargetInfo(
-        target="gfx1250-a0",
-        processor="gfx1250",
+        target="gfx1250-strict",
+        processor="gfx1250-strict",
         enum_value=24,
-        doc="RDNA 4 gfx1250 A0 target-overlay row.",
+        doc="RDNA 4 gfx1250 A0 strict target row.",
         default_for_descriptor_set=True,
         semantics=AmdgpuTargetSemantics(
             descriptor_set_key="amdgpu.rdna4.gfx1250_a0.core",
@@ -2200,23 +2211,15 @@ def amdgpu_target_instruction_constraints(
                 f"AMDGPU generic target {target.target} has no processor row "
                 f"for member {compatibility.exact_processor}"
             )
-        physical_target_names = tuple(
-            physical_target.target
-            for physical_target in AMDGPU_PHYSICAL_TARGET_INFOS
-            if physical_target.processor == member.processor
-        )
-        if not physical_target_names:
-            physical_target_names = (member.processor,)
-        for member_target_name in physical_target_names:
-            member_target = targets_by_name.get(member_target_name)
-            if member_target is None:
-                raise ValueError(
-                    f"AMDGPU generic target {target.target} has no target row "
-                    f"for member {member_target_name}"
-                )
-            constraints |= _amdgpu_target_local_instruction_constraints(
-                member_target, member
+        member_target = targets_by_name.get(member.processor)
+        if member_target is None:
+            raise ValueError(
+                f"AMDGPU generic target {target.target} has no target row "
+                f"for member {member.processor}"
             )
+        constraints |= _amdgpu_target_local_instruction_constraints(
+            member_target, member
+        )
     return constraints
 
 
@@ -2351,17 +2354,6 @@ def validate_amdgpu_target_rows(
         raise ValueError("AMDGPU target rows repeat a target enum value")
     if tuple(sorted(target_enum_values)) != tuple(range(1, len(targets) + 1)):
         raise ValueError("AMDGPU target enum values must be dense and one-based")
-    expected_overlay_targets = {
-        overlay.target
-        for overlay in AMDGPU_TARGET_OVERLAY_INFOS
-        if overlay.processor in targets_by_name
-    }
-    missing_overlay_targets = sorted(expected_overlay_targets - targets_by_name.keys())
-    if missing_overlay_targets:
-        raise ValueError(
-            "AMDGPU target rows omit canonical overlays: "
-            + ", ".join(missing_overlay_targets)
-        )
     for physical_target in AMDGPU_PHYSICAL_TARGET_INFOS:
         if physical_target.processor not in targets_by_name:
             continue
@@ -2500,17 +2492,19 @@ def validate_amdgpu_target_rows(
     for processor_name, physical_targets in physical_targets_by_processor.items():
         processor = processors_by_name[processor_name]
         first_target = physical_targets[0]
+        first_target_processor = processors_by_name[first_target.processor]
         first_models = (
             first_target.semantics.lds_bank_service_models
             if first_target.semantics.lds_bank_service_models is not None
-            else processor.features.lds_bank_service_models
+            else first_target_processor.features.lds_bank_service_models
         )
         portable_model_keys = set(first_models)
         for target in physical_targets[1:]:
+            target_processor_info = processors_by_name[target.processor]
             target_models = (
                 target.semantics.lds_bank_service_models
                 if target.semantics.lds_bank_service_models is not None
-                else processor.features.lds_bank_service_models
+                else target_processor_info.features.lds_bank_service_models
             )
             portable_model_keys.intersection_update(target_models)
         portable_models = tuple(
@@ -2871,20 +2865,11 @@ def validate_amdgpu_generic_contracts(
             generic_processor.instructions.base_constraints
         )
         for member in exact_members:
-            physical_target_names = tuple(
-                physical_target.target
-                for physical_target in AMDGPU_PHYSICAL_TARGET_INFOS
-                if physical_target.processor == member.processor
-            )
-            member_targets = (
-                tuple(targets_by_name[target] for target in physical_target_names)
-                if physical_target_names
-                else (targets_by_name[member.processor],)
-            )
-            for member_target in member_targets:
-                portable_instruction_constraints |= (
-                    _amdgpu_target_local_instruction_constraints(member_target, member)
+            portable_instruction_constraints |= (
+                _amdgpu_target_local_instruction_constraints(
+                    targets_by_name[member.processor], member
                 )
+            )
         generic_target = targets_by_name[generic_processor.processor]
         if generic_target.semantics.instruction_constraints != 0:
             raise ValueError(

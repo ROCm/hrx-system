@@ -20,7 +20,7 @@ LoomTargetProfileInfo = provider(
     doc = "Immutable Loom target identity shared by all target families.",
     fields = {
         "family": "Target fact family, such as amdgpu or spirv.",
-        "selector": "Family-owned exact, generic, or overlay target selector.",
+        "selector": "Family-owned exact or generic target selector.",
     },
 )
 
@@ -48,7 +48,7 @@ _loom_target_profile = rule(
         ),
         "selector": attr.string(
             mandatory = True,
-            doc = "Family-owned exact, generic, or overlay selector.",
+            doc = "Family-owned exact or generic selector.",
         ),
     },
     doc = "Declares one immutable Loom target identity profile.",
@@ -60,7 +60,7 @@ def loom_target_profile(name, family, selector, **kwargs):
     Args:
       name: Bazel target name.
       family: Target fact family accepted by the compiler.
-      selector: Family-owned exact, generic, or overlay selector.
+      selector: Family-owned exact or generic selector.
       **kwargs: Common rule attributes forwarded to the profile target.
     """
     if not family:
@@ -137,7 +137,7 @@ def loom_amdgpu_target_profile(name, target, **kwargs):
 
     Args:
       name: Bazel target name.
-      target: Exact, generic, or overlay AMDGPU target selector.
+      target: Exact or generic AMDGPU target selector.
       **kwargs: Common rule attributes forwarded to the profile target.
     """
     descriptor_set_capability = (

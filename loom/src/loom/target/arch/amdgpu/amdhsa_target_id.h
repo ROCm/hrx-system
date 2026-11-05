@@ -54,8 +54,7 @@ iree_status_t loom_amdgpu_amdhsa_target_id_parse(
 // Formats the AMDHSA code-object target ID projected from |identity| into
 // |arena|.
 //
-// The canonical compiler target is projected to its backend processor. Target
-// overlay semantics remain in the enclosing artifact identity.
+// The canonical compiler target is projected to its backend processor.
 iree_status_t loom_amdgpu_amdhsa_target_id_format(
     const loom_amdgpu_target_identity_t* identity,
     iree_arena_allocator_t* arena, iree_string_view_t* out_target_id);

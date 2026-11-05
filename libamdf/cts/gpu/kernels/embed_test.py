@@ -93,7 +93,7 @@ class EmbedTest(unittest.TestCase):
         for target, data in self.products.items():
             with self.subTest(target=target):
                 kernel = embed.extract_image(data, self.symbol)
-                processor = target.removesuffix("-a0")
+                processor = target
                 self.assertEqual(kernel.target, f"amdgcn-amd-amdhsa--{processor}")
                 self.assertEqual(kernel.metadata[".kernarg_segment_size"], 24)
                 self.assertEqual(kernel.metadata[".reqd_workgroup_size"], [64, 1, 1])

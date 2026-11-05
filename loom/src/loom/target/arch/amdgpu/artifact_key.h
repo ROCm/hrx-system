@@ -19,7 +19,7 @@ extern "C" {
 
 // Parses a canonical AMDGPU artifact key into a compiler-owned identity.
 //
-// The key begins with an exact, generic, or overlay compiler target and may
+// The key begins with an exact or generic compiler target and may
 // carry AMDHSA feature coordinates such as `:sramecc+:xnack-`.
 iree_status_t loom_amdgpu_artifact_key_parse(
     iree_string_view_t value, loom_amdgpu_target_identity_t* out_identity);

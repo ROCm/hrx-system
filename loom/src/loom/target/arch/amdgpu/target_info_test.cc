@@ -243,6 +243,7 @@ TEST(AmdgpuTargetInfoTest, MatchesAmdhsaGfx9PlusProcessorElfFlags) {
       {IREE_SV("gfx1200"), 0x048u},
       {IREE_SV("gfx1201"), 0x04Eu},
       {IREE_SV("gfx1250"), 0x549u},
+      {IREE_SV("gfx1250-strict"), 0x5EBu},
       {IREE_SV("gfx1251"), 0x55Au},
       {IREE_SV("gfx1310"), 0x050u},
       {IREE_SV("gfx9-generic"), 0x01000151u},
@@ -284,7 +285,7 @@ TEST(AmdgpuTargetInfoTest, ResolvesPhysicalObservationsToCanonicalTargets) {
       loom_amdgpu_target_info_lookup_physical_target(processor, 1, &b0));
   ASSERT_NE(a0, nullptr);
   ASSERT_NE(b0, nullptr);
-  EXPECT_TRUE(iree_string_view_equal(a0->name, IREE_SV("gfx1250-a0")));
+  EXPECT_TRUE(iree_string_view_equal(a0->name, IREE_SV("gfx1250-strict")));
   EXPECT_TRUE(iree_string_view_equal(b0->name, IREE_SV("gfx1250")));
 
   const loom_amdgpu_target_info_t* unknown = nullptr;
@@ -292,6 +293,15 @@ TEST(AmdgpuTargetInfoTest, ResolvesPhysicalObservationsToCanonicalTargets) {
       IREE_STATUS_INVALID_ARGUMENT,
       loom_amdgpu_target_info_lookup_physical_target(processor, 2, &unknown));
   EXPECT_EQ(unknown, nullptr);
+
+  processor = loom_amdgpu_target_info_find_processor(IREE_SV("gfx1250-strict"));
+  ASSERT_NE(processor, nullptr);
+  EXPECT_FALSE(loom_amdgpu_target_info_requires_physical_resolution(processor));
+  const loom_amdgpu_target_info_t* strict = nullptr;
+  IREE_ASSERT_OK(
+      loom_amdgpu_target_info_lookup_physical_target(processor, 0, &strict));
+  ASSERT_NE(strict, nullptr);
+  EXPECT_TRUE(iree_string_view_equal(strict->name, IREE_SV("gfx1250-strict")));
 
   const loom_amdgpu_processor_info_t* same_named_processor =
       loom_amdgpu_target_info_find_processor(IREE_SV("gfx1151"));
@@ -306,17 +316,22 @@ TEST(AmdgpuTargetInfoTest, ResolvesPhysicalObservationsToCanonicalTargets) {
       iree_string_view_equal(same_named_target->name, IREE_SV("gfx1151")));
 }
 
-TEST(AmdgpuTargetInfoTest, ResolvesOverlayTargetSemantics) {
+TEST(AmdgpuTargetInfoTest, ResolvesStrictTargetSemantics) {
   const loom_amdgpu_target_info_t* a0 =
-      loom_amdgpu_target_info_find_target(IREE_SV("gfx1250-a0"));
+      loom_amdgpu_target_info_find_target(IREE_SV("gfx1250-strict"));
   const loom_amdgpu_target_info_t* b0 =
       loom_amdgpu_target_info_find_target(IREE_SV("gfx1250"));
   ASSERT_NE(a0, nullptr);
   ASSERT_NE(b0, nullptr);
-  const loom_amdgpu_processor_info_t* processor =
+  const loom_amdgpu_processor_info_t* strict_processor =
       loom_amdgpu_target_info_target_processor(a0);
-  ASSERT_NE(processor, nullptr);
-  EXPECT_EQ(processor, loom_amdgpu_target_info_target_processor(b0));
+  ASSERT_NE(strict_processor, nullptr);
+  EXPECT_TRUE(iree_string_view_equal(strict_processor->name,
+                                     IREE_SV("gfx1250-strict")));
+  const loom_amdgpu_processor_info_t* base_processor =
+      loom_amdgpu_target_info_target_processor(b0);
+  ASSERT_NE(base_processor, nullptr);
+  EXPECT_TRUE(iree_string_view_equal(base_processor->name, IREE_SV("gfx1250")));
   EXPECT_NE(a0->lds_bank_service_model_set_ordinal,
             LOOM_AMDGPU_LDS_BANK_SERVICE_MODEL_SET_ORDINAL_NONE);
   EXPECT_NE(a0->instruction_constraints, 0u);

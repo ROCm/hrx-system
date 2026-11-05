@@ -107,9 +107,9 @@ iree_status_t iree_hal_amdgpu_device_library_target_candidates_from_agent_isa(
   IREE_ASSERT_ARGUMENT(out_candidates);
   memset(out_candidates, 0, sizeof(*out_candidates));
 
-  // A target-overlay artifact suppresses every fallback ISA for its physical
-  // target. Otherwise a lower-priority generic ISA could reintroduce the
-  // incompatible family artifact this variant exists to replace.
+  // An exact physical artifact suppresses every fallback ISA for its target.
+  // Otherwise a lower-priority generic ISA could reintroduce the incompatible
+  // family artifact this variant exists to replace.
   const iree_string_view_t variant_artifact =
       iree_hal_amdgpu_device_library_target_lookup_variant_for_physical_target(
           physical_identity);

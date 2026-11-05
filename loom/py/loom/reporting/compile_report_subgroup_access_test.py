@@ -191,7 +191,7 @@ def _sum_summaries(groups: list[dict[str, object]]) -> dict[str, object]:
 def _compile_report(
     groups: list[dict[str, object]],
     *,
-    target_key: str = "gfx1250-a0",
+    target_key: str = "gfx1250-strict",
     subgroup_size: int = 32,
 ) -> dict[str, object]:
     workload = {
@@ -248,7 +248,7 @@ def _compile_report(
     ("target_key", "subgroup_size"),
     [
         ("gfx942", 64),
-        ("gfx1250-a0", 32),
+        ("gfx1250-strict", 32),
     ],
 )
 def test_show_surfaces_exact_geometry_and_lane_formula(

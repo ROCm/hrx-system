@@ -15,7 +15,6 @@ from loom.target.arch.amdgpu.target_catalog import (
     AmdgpuExactTargetInfo,
     AmdgpuGenericCodeObjectInfo,
     AmdgpuPhysicalTargetInfo,
-    AmdgpuTargetOverlayInfo,
     generic_code_object_current_version,
     physical_target_info,
     processor_has_physical_target_infos,
@@ -48,8 +47,8 @@ def test_target_id_features_cover_exact_and_generic_processors() -> None:
     assert target_id_features_for_processor("gfx1151") == ()
 
 
-def test_target_overlay_selects_one_backend_processor() -> None:
-    assert target_processor("gfx1250-a0") == "gfx1250"
+def test_exact_targets_select_their_native_backend_processor() -> None:
+    assert target_processor("gfx1250-strict") == "gfx1250-strict"
     assert target_processor("gfx1250") == "gfx1250"
     assert target_processor("gfx12-5-generic") == "gfx12-5-generic"
     assert target_processor("gfx-future") is None
@@ -59,7 +58,7 @@ def test_physical_revision_resolves_to_canonical_target() -> None:
     assert processor_has_physical_target_infos("gfx1250")
     assert not processor_has_physical_target_infos("gfx1100")
     assert physical_target_info("gfx1250", 0) == AmdgpuPhysicalTargetInfo(
-        "gfx1250", 0, "gfx1250-a0"
+        "gfx1250", 0, "gfx1250-strict"
     )
     assert physical_target_info("gfx1250", 1) == AmdgpuPhysicalTargetInfo(
         "gfx1250", 1, "gfx1250"
@@ -73,17 +72,18 @@ def test_rejects_member_newer_than_generic_code_object() -> None:
             (AmdgpuGenericCodeObjectInfo("gfx-test-generic", 1),),
             (AmdgpuExactTargetInfo("gfx-test", "gfx-test-generic", 2),),
             (),
-            (),
         )
 
 
-def test_rejects_overlay_for_unknown_processor() -> None:
-    with pytest.raises(ValueError, match="unknown exact processor"):
+def test_rejects_unknown_physical_target() -> None:
+    with pytest.raises(ValueError, match="selects unknown exact target"):
         validate_amdgpu_target_catalog(
             (),
             (AmdgpuExactTargetInfo("gfx-test", "gfx-test", 0),),
-            (AmdgpuTargetOverlayInfo("gfx-test-a0", "gfx-future"),),
-            (),
+            (
+                AmdgpuPhysicalTargetInfo("gfx-test", 0, "gfx-future"),
+                AmdgpuPhysicalTargetInfo("gfx-test", 1, "gfx-test"),
+            ),
         )
 
 
@@ -95,9 +95,8 @@ def test_rejects_physical_target_from_another_processor() -> None:
                 AmdgpuExactTargetInfo("gfx-test-a", "gfx-test-a", 0),
                 AmdgpuExactTargetInfo("gfx-test-b", "gfx-test-b", 0),
             ),
-            (AmdgpuTargetOverlayInfo("gfx-test-a-a0", "gfx-test-a"),),
             (
-                AmdgpuPhysicalTargetInfo("gfx-test-b", 0, "gfx-test-a-a0"),
-                AmdgpuPhysicalTargetInfo("gfx-test-b", 1, "gfx-test-b"),
+                AmdgpuPhysicalTargetInfo("gfx-test-a", 0, "gfx-test-b"),
+                AmdgpuPhysicalTargetInfo("gfx-test-a", 1, "gfx-test-a"),
             ),
         )

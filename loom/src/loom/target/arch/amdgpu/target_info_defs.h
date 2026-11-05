@@ -722,9 +722,9 @@ typedef struct loom_amdgpu_processor_info_t {
   loom_amdgpu_processor_properties_t properties;
 } loom_amdgpu_processor_info_t;
 
-// One exact, generic, or overlay compiler target.
+// One exact or generic compiler target.
 typedef struct loom_amdgpu_target_info_t {
-  // Canonical target selector such as `gfx1151` or `gfx1250-a0`.
+  // Canonical target selector such as `gfx1151` or `gfx1250-strict`.
   iree_string_view_t name;
   // Numeric selector value used by amdgpu.target.
   uint32_t target_kind;
@@ -928,10 +928,8 @@ bool loom_amdgpu_processor_satisfies_code_object_requirement(
 
 // Returns true when |effective_target| satisfies |required_target|.
 //
-// Overlay and exact targets satisfy only identical exact requirements. Their
-// backend processors may additionally satisfy a generated generic code-object
-// target. A shared backend processor does not imply exact-target
-// substitutability.
+// Exact targets satisfy only identical exact requirements. Their backend
+// processors may additionally satisfy a generated generic code-object target.
 bool loom_amdgpu_target_satisfies_code_object_requirement(
     const loom_amdgpu_target_info_t* effective_target,
     const loom_amdgpu_target_info_t* required_target);

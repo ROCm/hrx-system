@@ -651,9 +651,9 @@ def test_residency_does_not_invent_missing_transition_evidence(missing: str) -> 
     )
 
 
-def test_resolves_overlay_target_to_its_processor_model() -> None:
+def test_resolves_strict_target_to_its_processor_model() -> None:
     document = parse_compile_report(
-        _compile_report(target_key="gfx1250-a0"), source="report.json"
+        _compile_report(target_key="gfx1250-strict"), source="report.json"
     )
 
     result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
@@ -880,7 +880,7 @@ def test_communication_advice_requires_single_subgroup_rendezvous_evidence(
     ("target_key", "subgroup_size"),
     [
         ("gfx942", 64),
-        ("gfx1250-a0", 32),
+        ("gfx1250-strict", 32),
     ],
 )
 def test_fragment_packet_expansion_cites_source_packets_and_pressure(
@@ -1075,7 +1075,7 @@ def test_gapped_fragment_packet_shape_does_not_recommend_widening() -> None:
 
 
 def test_unvalidated_bank_model_is_explicitly_opt_in() -> None:
-    report = _compile_report(target_key="gfx1250-a0", subgroup_size=32)
+    report = _compile_report(target_key="gfx1250-strict", subgroup_size=32)
     _add_bank_service_group(
         report,
         model_evidence="vendor-software-model-unvalidated",
@@ -1103,7 +1103,7 @@ def test_unvalidated_bank_model_is_explicitly_opt_in() -> None:
 
 
 def test_calibrated_exact_bank_conflict_is_high_confidence() -> None:
-    report = _compile_report(target_key="gfx1250-a0", subgroup_size=32)
+    report = _compile_report(target_key="gfx1250-strict", subgroup_size=32)
     _add_bank_service_group(
         report,
         model_evidence="silicon-calibrated-vendor-model",
@@ -1118,7 +1118,7 @@ def test_calibrated_exact_bank_conflict_is_high_confidence() -> None:
 
 
 def test_bank_suggestion_retains_proven_conflicts_with_unknown_packets() -> None:
-    report = _compile_report(target_key="gfx1250-a0", subgroup_size=32)
+    report = _compile_report(target_key="gfx1250-strict", subgroup_size=32)
     _add_bank_service_group(
         report,
         model_evidence="silicon-calibrated-vendor-model",
@@ -1142,7 +1142,7 @@ def test_bank_suggestion_retains_proven_conflicts_with_unknown_packets() -> None
 
 
 def test_bank_suggestion_rejects_unknown_model_evidence_class() -> None:
-    report = _compile_report(target_key="gfx1250-a0", subgroup_size=32)
+    report = _compile_report(target_key="gfx1250-strict", subgroup_size=32)
     _add_bank_service_group(
         report,
         model_evidence="unversioned-model",

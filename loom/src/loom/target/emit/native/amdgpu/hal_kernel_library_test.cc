@@ -1471,36 +1471,17 @@ TEST_F(AmdgpuHalKernelLibraryTest,
       .target_attrs = "features = [sramecc, -xnack]",
       .features_json = "\"features\":[\"sramecc+\",\"xnack-\"]",
   });
-
-  const iree_host_size_t target_count = loom_amdgpu_target_info_target_count();
-  for (iree_host_size_t target_ordinal = 0; target_ordinal < target_count;
-       ++target_ordinal) {
-    const loom_amdgpu_target_info_t* target =
-        loom_amdgpu_target_info_target_at(target_ordinal);
-    ASSERT_NE(target, nullptr);
-    bool shares_processor = false;
-    for (iree_host_size_t other_ordinal = 0; other_ordinal < target_count;
-         ++other_ordinal) {
-      const loom_amdgpu_target_info_t* other =
-          loom_amdgpu_target_info_target_at(other_ordinal);
-      ASSERT_NE(other, nullptr);
-      if (target != other &&
-          target->processor_ordinal == other->processor_ordinal) {
-        shares_processor = true;
-        break;
-      }
-    }
-    if (shares_processor) {
-      cases.push_back({
-          .target = target,
-          .target_attrs = {},
-          .features_json = {},
-      });
-    }
-  }
+  const loom_amdgpu_target_info_t* gfx1250_strict = nullptr;
+  IREE_ASSERT_OK(loom_amdgpu_target_info_lookup_target(
+      IREE_SV("gfx1250-strict"), &gfx1250_strict));
+  cases.push_back({
+      .target = gfx1250_strict,
+      .target_attrs = {},
+      .features_json = {},
+  });
 
   iree_host_size_t exercised_count = 0;
-  iree_host_size_t exercised_overlay_count = 0;
+  iree_host_size_t exercised_strict_count = 0;
   for (const TargetCase& test_case : cases) {
     SCOPED_TRACE(StringViewToString(test_case.target->name));
     const loom_amdgpu_processor_info_t* processor =
@@ -1583,8 +1564,8 @@ TEST_F(AmdgpuHalKernelLibraryTest,
       EXPECT_NE(manifest.find(test_case.features_json), std::string::npos)
           << manifest;
     }
-    if (!iree_string_view_equal(test_case.target->name, processor->name)) {
-      ++exercised_overlay_count;
+    if (test_case.target == gfx1250_strict) {
+      ++exercised_strict_count;
     }
 
     loom_amdgpu_hal_kernel_library_deinitialize(&library,
@@ -1593,7 +1574,7 @@ TEST_F(AmdgpuHalKernelLibraryTest,
     iree_arena_deinitialize(&target_id_arena);
   }
   EXPECT_GE(exercised_count, 1u);
-  EXPECT_GE(exercised_overlay_count, 1u);
+  EXPECT_GE(exercised_strict_count, 1u);
 }
 
 TEST_F(AmdgpuHalKernelLibraryTest, RecordsMatrixFeatureCapabilities) {

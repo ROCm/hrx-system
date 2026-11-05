@@ -49,7 +49,7 @@ typedef enum loom_amdgpu_target_kind_e {
   LOOM_AMDGPU_TARGET_KIND_GFX1201 = 21,
   LOOM_AMDGPU_TARGET_KIND_GFX1251 = 22,
   LOOM_AMDGPU_TARGET_KIND_GFX9_4_GENERIC = 23,
-  LOOM_AMDGPU_TARGET_KIND_GFX1250_A0 = 24,
+  LOOM_AMDGPU_TARGET_KIND_GFX1250_STRICT = 24,
   LOOM_AMDGPU_TARGET_KIND_GFX90A = 25,
   LOOM_AMDGPU_TARGET_KIND_COUNT_ = 26,
 } loom_amdgpu_target_kind_t;
@@ -61,7 +61,7 @@ typedef enum loom_amdgpu_target_features_e {
   LOOM_AMDGPU_TARGET_FEATURES_COUNT_ = 2,
 } loom_amdgpu_target_features_t;
 
-// LOOM_OP_AMDGPU_TARGET: AMDGPU target record. The selector chooses one exact, generic, or overlay target row; optional attrs preserve authored common facts and target-ID feature assertions.
+// LOOM_OP_AMDGPU_TARGET: AMDGPU target record. The selector chooses one exact or generic target row; optional attrs preserve authored common facts and target-ID feature assertions.
 // amdgpu.target<gfx11-generic> @gfx11_generic
 LOOM_DEFINE_ISA(loom_amdgpu_target_isa, LOOM_OP_AMDGPU_TARGET)
 LOOM_DEFINE_ATTR_SYMBOL(loom_amdgpu_target_symbol, 0)

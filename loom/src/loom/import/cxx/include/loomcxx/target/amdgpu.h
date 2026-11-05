@@ -20,8 +20,8 @@ struct amdhsa_features {
   loom::target::feature xnack = loom::target::feature::unspecified;
 };
 
-// Source-owned amdgpu.target definition. The kind names an exact, generic, or
-// overlay processor row; optional fields retain explicit author constraints.
+// Source-owned amdgpu.target definition. The kind names an exact or generic
+// processor row; optional fields retain explicit author constraints.
 struct [[loom::target("amdgpu.target")]] target {
   // Registered AMDGPU processor-row keyword, such as "gfx942".
   const char* kind;

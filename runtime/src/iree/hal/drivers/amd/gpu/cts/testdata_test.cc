@@ -40,14 +40,14 @@ TEST(TestdataTest, PrefersExactIdentityRegardlessOfRegistrationOrder) {
   }
 }
 
-TEST(TestdataTest, PreservesOverlayIdentityAndFeatureCompatibility) {
+TEST(TestdataTest, PreservesStrictIdentityAndFeatureCompatibility) {
   const std::vector<iree::hal::cts::ExecutableTarget> targets = {
       {"generic", "amdgpu", "gfx12-5-generic", nullptr},
-      {"a0", "amdgpu", "gfx1250-a0", nullptr},
+      {"a0", "amdgpu", "gfx1250-strict", nullptr},
       {"b0", "amdgpu", "gfx1250", nullptr},
       {"xnack", "amdgpu", "gfx942:xnack+", nullptr},
   };
-  for (const char* key : {"gfx1250-a0", "gfx1250"}) {
+  for (const char* key : {"gfx1250-strict", "gfx1250"}) {
     const auto* target = SelectExecutableTarget(targets, Identity(key));
     ASSERT_NE(target, nullptr);
     EXPECT_STREQ(target->target_key, key);
@@ -63,7 +63,7 @@ TEST(TestdataTest, PreservesOverlayIdentityAndFeatureCompatibility) {
 TEST(TestdataTest, ResolvesPhysicalRevisionAndReportsMissingPrograms) {
   iree::hal::cts::CtsRegistry::RegisterExecutableTarget(
       "lookup_fixture",
-      {"a0", "amdgpu", "gfx1250-a0", [](iree_string_view_t name) {
+      {"a0", "amdgpu", "gfx1250-strict", [](iree_string_view_t name) {
          return iree_string_view_equal(name, IREE_SV("program.bin"))
                     ? iree_make_const_byte_span("a0", 2)
                     : iree_const_byte_span_empty();

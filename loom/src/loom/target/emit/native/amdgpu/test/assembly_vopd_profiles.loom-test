@@ -53,7 +53,7 @@ low.func.def target<amdgpu.gfx12.generic.core>(@target) @gfx12_generic_vopd_minm
 // ====
 
 // RUN: emit amdgpu-assembly @gfx1250_a0_vopd_minmax_mnemonics
-amdgpu.target<gfx1250-a0> @target
+amdgpu.target<gfx1250-strict> @target
 
 low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@target) @gfx1250_a0_vopd_minmax_mnemonics(%lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>) asm {
   %min0 = v_min_f32 %lhs0, %rhs0

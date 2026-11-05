@@ -40,6 +40,7 @@ set(_IREE_AMDGPU_EXACT_TARGETS
   "gfx1200"
   "gfx1201"
   "gfx1250"
+  "gfx1250-strict"
   "gfx1251"
 )
 
@@ -56,6 +57,7 @@ set(_IREE_AMDGPU_CODE_OBJECT_TARGETS
   "gfx1172"
   "gfx12-generic"
   "gfx12-5-generic"
+  "gfx1250-strict"
 )
 
 set(_IREE_AMDGPU_DEVICE_BINARY_TARGETS
@@ -70,7 +72,7 @@ set(_IREE_AMDGPU_DEVICE_BINARY_TARGETS
   "gfx1171"
   "gfx1172"
   "gfx12-generic"
-  "gfx1250-a0"
+  "gfx1250-strict"
   "gfx12-5-generic"
 )
 
@@ -111,9 +113,10 @@ set(_IREE_AMDGPU_TARGET_CODE_OBJECT_gfx1172 "gfx1172")
 set(_IREE_AMDGPU_TARGET_CODE_OBJECT_gfx1200 "gfx12-generic")
 set(_IREE_AMDGPU_TARGET_CODE_OBJECT_gfx1201 "gfx12-generic")
 set(_IREE_AMDGPU_TARGET_CODE_OBJECT_gfx1250 "gfx12-5-generic")
+set(_IREE_AMDGPU_TARGET_CODE_OBJECT_gfx1250-strict "gfx1250-strict")
 set(_IREE_AMDGPU_TARGET_CODE_OBJECT_gfx1251 "gfx12-5-generic")
 set(_IREE_AMDGPU_TARGET_DEVICE_BINARY_VARIANTS_gfx1250
-  "gfx1250-a0"
+  "gfx1250-strict"
 )
 
 set(_IREE_AMDGPU_TARGET_FAMILIES
@@ -176,6 +179,7 @@ set(_IREE_AMDGPU_TARGET_FAMILY_dgpu_all
   "gfx1200"
   "gfx1201"
   "gfx1250"
+  "gfx1250-strict"
   "gfx1251"
 )
 set(_IREE_AMDGPU_TARGET_FAMILY_gfx900_dgpu
@@ -278,6 +282,7 @@ set(_IREE_AMDGPU_TARGET_FAMILY_gfx120X_all
 )
 set(_IREE_AMDGPU_TARGET_FAMILY_gfx125X_all
   "gfx1250"
+  "gfx1250-strict"
   "gfx1251"
 )
 set(_IREE_AMDGPU_TARGET_FAMILY_igpu_all

@@ -18,7 +18,7 @@ extern "C" {
 // Complete structured identity shared by profiles, compiler facts, and
 // target-native artifact construction.
 typedef struct loom_amdgpu_target_identity_t {
-  // Exact, generic, or overlay target selected for this identity.
+  // Exact or generic target selected for this identity.
   const loom_amdgpu_target_info_t* target;
 
   // Normalized AMDHSA target-ID feature states.

@@ -332,7 +332,7 @@ static iree_status_t iree_hal_amd_gpu_executable_admit(
         !iree_string_view_is_empty(kernel->gfx1250_revision)) {
       iree_string_view_t required_target;
       if (iree_string_view_equal(kernel->gfx1250_revision, IREE_SV("A0"))) {
-        required_target = IREE_SV("gfx1250-a0");
+        required_target = IREE_SV("gfx1250-strict");
       } else if (iree_string_view_equal(kernel->gfx1250_revision,
                                         IREE_SV("B0"))) {
         required_target = IREE_SV("gfx1250");
