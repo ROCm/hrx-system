@@ -200,6 +200,73 @@ TEST(PublicationTest, ReplacementSupportsVacantSlotsAndGrowingReadyExtent) {
   iree_hal_amd_gpu_publication_deinitialize(&publication);
 }
 
+TEST(PublicationTest, RetainedCallbackOutlivesReclaimedTables) {
+  struct Source {
+    // The native publication dependency is active before table replacement.
+    std::binary_semaphore entered{0};
+    // Releases the last callback access after both old tables are freed.
+    std::binary_semaphore resume{0};
+    // Read after joining the source's final callback access.
+    uint32_t count = 0;
+  } source;
+  auto first = std::make_unique<iree_hal_amd_gpu_publication_source_t>(
+      iree_hal_amd_gpu_publication_source_t{
+          .publish =
+              [](void* data) {
+                auto* source = static_cast<Source*>(data);
+                source->entered.release();
+                source->resume.acquire();
+                ++source->count;
+                return false;
+              },
+          .user_data = &source,
+      });
+  iree_hal_amd_gpu_publication_t publication;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_publication_initialize(
+      1, first.get(), {}, iree_allocator_system(), &publication));
+  iree_hal_amd_gpu_publication_notify(&publication, 0);
+  source.entered.acquire();
+
+  std::binary_semaphore peer_completed{0};
+  using Table = std::array<iree_hal_amd_gpu_publication_source_t,
+                           IREE_HAL_AMD_GPU_PUBLICATION_MAX_SOURCES>;
+  auto second = std::make_unique<Table>();
+  (*second)[0] = *first;
+  (*second)[258] = {
+      .publish =
+          [](void* data) {
+            static_cast<std::binary_semaphore*>(data)->release();
+            return false;
+          },
+      .user_data = &peer_completed,
+  };
+  iree_hal_amd_gpu_publication_set_sources(&publication, second->size(),
+                                           second->data());
+  first.reset();
+  iree_hal_amd_gpu_publication_notify(&publication, 258);
+
+  // Retaining the same callback across another handoff still needs no join.
+  // Shrink away the last ready word, leaving its notification as a stale hint.
+  Table third = {};
+  third[0] = (*second)[0];
+  third[128] = (*second)[258];
+  iree_hal_amd_gpu_publication_set_sources(&publication, 129, third.data());
+  second.reset();
+  source.resume.release();
+  iree_hal_amd_gpu_publication_notify(&publication, 128);
+  peer_completed.acquire();
+
+  // A later replacement can make the stale word observable again. Its hint
+  // already exists, so no new producer notification is needed for progress.
+  Table fourth = {};
+  fourth[258] = third[128];
+  iree_hal_amd_gpu_publication_set_sources(&publication, fourth.size(),
+                                           fourth.data());
+  peer_completed.acquire();
+  iree_hal_amd_gpu_publication_deinitialize(&publication);
+  EXPECT_EQ(source.count, 1u);
+}
+
 TEST(PublicationTest, ReadySuffixYieldsToAnotherQueue) {
   struct Source {
     // Shared ready-set owner, initialized before notification.
