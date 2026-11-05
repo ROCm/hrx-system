@@ -148,7 +148,7 @@ class SharedFileDeviceCache {
     if (!device_) {
       iree_hal_amd_fabric_t* fabric = nullptr;
       IREE_RETURN_IF_ERROR(memory_gate_->CreateFabric(
-          &fabric, maximum_native_allocation_, native_lifetime_));
+          maximum_native_allocation_, native_lifetime_, &fabric));
       device_ = std::make_unique<SharedGpuNativeDevice>(
           native_lifetime_, proactor_options_, fabric);
       device_->Initialize();

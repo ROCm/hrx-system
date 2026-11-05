@@ -157,7 +157,7 @@ class HostQueueTimestampTest
   }
 
   static iree_status_t InitializeDeviceWithStrategy(
-      TestLogicalDevice* out_device, CaptureStrategy strategy) {
+      CaptureStrategy strategy, TestLogicalDevice* out_device) {
     iree_hal_amdgpu_logical_device_options_t options;
     iree_hal_amdgpu_logical_device_options_initialize(&options);
     return out_device->Initialize(&options, &libhsa_, &topology_,
@@ -165,7 +165,7 @@ class HostQueueTimestampTest
   }
 
   iree_status_t InitializeDevice(TestLogicalDevice* out_device) const {
-    return InitializeDeviceWithStrategy(out_device, GetParam());
+    return InitializeDeviceWithStrategy(GetParam(), out_device);
   }
 
   static iree_allocator_t host_allocator_;
@@ -839,7 +839,7 @@ TEST_P(HostQueueTimestampTest, CaptureStrategiesAgreeOnTickOrderAndRate) {
 
   TestLogicalDevice pm4_device;
   IREE_ASSERT_OK(
-      InitializeDeviceWithStrategy(&pm4_device, CaptureStrategy::kPm4Packet));
+      InitializeDeviceWithStrategy(CaptureStrategy::kPm4Packet, &pm4_device));
   const iree_hal_amdgpu_physical_device_t* physical_device =
       pm4_device.first_physical_device();
   ASSERT_NE(physical_device, nullptr);
@@ -850,8 +850,8 @@ TEST_P(HostQueueTimestampTest, CaptureStrategiesAgreeOnTickOrderAndRate) {
   }
 
   TestLogicalDevice dispatch_device;
-  IREE_ASSERT_OK(InitializeDeviceWithStrategy(
-      &dispatch_device, CaptureStrategy::kCaptureDispatch));
+  IREE_ASSERT_OK(InitializeDeviceWithStrategy(CaptureStrategy::kCaptureDispatch,
+                                              &dispatch_device));
 
   uint64_t first_pm4_tick = 0;
   uint64_t dispatch_tick = 0;

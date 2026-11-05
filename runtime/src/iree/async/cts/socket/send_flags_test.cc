@@ -30,10 +30,10 @@ class SendFlagsTest : public SocketTestBase<> {
     iree_async_socket_t* listener = nullptr;
     iree_async_address_t destination = {};
     if (type == IREE_ASYNC_SOCKET_TYPE_TCP) {
-      EstablishConnectionWithOptions(&sender, &receiver, &listener,
-                                     IREE_ASYNC_SOCKET_OPTION_NO_DELAY |
+      EstablishConnectionWithOptions(IREE_ASYNC_SOCKET_OPTION_NO_DELAY |
                                          IREE_ASYNC_SOCKET_OPTION_ZERO_COPY,
-                                     IREE_ASYNC_SOCKET_OPTION_NONE);
+                                     IREE_ASYNC_SOCKET_OPTION_NONE, &sender,
+                                     &receiver, &listener);
     } else {
       IREE_ASSERT_OK(iree_async_socket_create(
           proactor_, type, IREE_ASYNC_SOCKET_OPTION_ZERO_COPY, &sender));
@@ -124,9 +124,8 @@ class SendFlagsTest : public SocketTestBase<> {
     iree_async_socket_t* server = nullptr;
     iree_async_socket_t* listener = nullptr;
     EstablishConnectionWithOptions(
-        &client, &server, &listener,
         socket_options | IREE_ASYNC_SOCKET_OPTION_NO_DELAY,
-        IREE_ASYNC_SOCKET_OPTION_NONE);
+        IREE_ASYNC_SOCKET_OPTION_NONE, &client, &server, &listener);
 
     struct SendState {
       // Poll owner used to issue the dependent write or cancellation.
@@ -250,9 +249,8 @@ TEST_P(SendFlagsTest, ZeroCopySendBasic) {
   iree_async_socket_t* server = nullptr;
   iree_async_socket_t* listener = nullptr;
   EstablishConnectionWithOptions(
-      &client, &server, &listener,
       IREE_ASYNC_SOCKET_OPTION_NO_DELAY | IREE_ASYNC_SOCKET_OPTION_ZERO_COPY,
-      IREE_ASYNC_SOCKET_OPTION_NONE);
+      IREE_ASYNC_SOCKET_OPTION_NONE, &client, &server, &listener);
 
   // Prepare send buffer with test pattern.
   const char* send_data = "Zero-copy send test data!";
@@ -310,9 +308,8 @@ TEST_P(SendFlagsTest, ZeroCopySendLargeBuffer) {
   iree_async_socket_t* server = nullptr;
   iree_async_socket_t* listener = nullptr;
   EstablishConnectionWithOptions(
-      &client, &server, &listener,
       IREE_ASYNC_SOCKET_OPTION_NO_DELAY | IREE_ASYNC_SOCKET_OPTION_ZERO_COPY,
-      IREE_ASYNC_SOCKET_OPTION_NONE);
+      IREE_ASYNC_SOCKET_OPTION_NONE, &client, &server, &listener);
 
   // Large buffer (64KB) to ensure kernel uses zero-copy path.
   const iree_host_size_t send_length = 64 * 1024;
@@ -430,9 +427,8 @@ TEST_P(SendFlagsTest, ZeroCopyWithMoreeFlag) {
   iree_async_socket_t* server = nullptr;
   iree_async_socket_t* listener = nullptr;
   EstablishConnectionWithOptions(
-      &client, &server, &listener,
       IREE_ASYNC_SOCKET_OPTION_NO_DELAY | IREE_ASYNC_SOCKET_OPTION_ZERO_COPY,
-      IREE_ASYNC_SOCKET_OPTION_NONE);
+      IREE_ASYNC_SOCKET_OPTION_NONE, &client, &server, &listener);
 
   // Send first message with MORE flag (ZC from socket option).
   const char* send_data1 = "ZeroCopy";
@@ -498,9 +494,8 @@ TEST_P(SendFlagsTest, ZeroCopyBufferSafetyOnCompletion) {
   iree_async_socket_t* server = nullptr;
   iree_async_socket_t* listener = nullptr;
   EstablishConnectionWithOptions(
-      &client, &server, &listener,
       IREE_ASYNC_SOCKET_OPTION_NO_DELAY | IREE_ASYNC_SOCKET_OPTION_ZERO_COPY,
-      IREE_ASYNC_SOCKET_OPTION_NONE);
+      IREE_ASYNC_SOCKET_OPTION_NONE, &client, &server, &listener);
 
   // Use a mutable buffer with a known pattern.
   const iree_host_size_t buffer_size = 4096;
@@ -581,9 +576,8 @@ TEST_P(SendFlagsTest, ZeroCopySendRegisteredSlab) {
   iree_async_socket_t* server = nullptr;
   iree_async_socket_t* listener = nullptr;
   EstablishConnectionWithOptions(
-      &client, &server, &listener,
       IREE_ASYNC_SOCKET_OPTION_NO_DELAY | IREE_ASYNC_SOCKET_OPTION_ZERO_COPY,
-      IREE_ASYNC_SOCKET_OPTION_NONE);
+      IREE_ASYNC_SOCKET_OPTION_NONE, &client, &server, &listener);
 
   // Acquire buffer from pool and fill with pattern.
   iree_async_buffer_lease_t lease;
@@ -655,9 +649,8 @@ TEST_P(SendFlagsTest, ZeroCopySendRegisteredLargeTransfer) {
   iree_async_socket_t* server = nullptr;
   iree_async_socket_t* listener = nullptr;
   EstablishConnectionWithOptions(
-      &client, &server, &listener,
       IREE_ASYNC_SOCKET_OPTION_NO_DELAY | IREE_ASYNC_SOCKET_OPTION_ZERO_COPY,
-      IREE_ASYNC_SOCKET_OPTION_NONE);
+      IREE_ASYNC_SOCKET_OPTION_NONE, &client, &server, &listener);
 
   // Track total bytes sent/received.
   iree_host_size_t total_sent = 0;
@@ -735,9 +728,8 @@ TEST_P(SendFlagsTest, ZeroCopySendPartialBuffer) {
   iree_async_socket_t* server = nullptr;
   iree_async_socket_t* listener = nullptr;
   EstablishConnectionWithOptions(
-      &client, &server, &listener,
       IREE_ASYNC_SOCKET_OPTION_NO_DELAY | IREE_ASYNC_SOCKET_OPTION_ZERO_COPY,
-      IREE_ASYNC_SOCKET_OPTION_NONE);
+      IREE_ASYNC_SOCKET_OPTION_NONE, &client, &server, &listener);
 
   // Acquire a full buffer.
   iree_async_buffer_lease_t lease;
@@ -821,9 +813,8 @@ TEST_P(SendFlagsTest, ScatterGatherFromRegistered) {
   iree_async_socket_t* server = nullptr;
   iree_async_socket_t* listener = nullptr;
   EstablishConnectionWithOptions(
-      &client, &server, &listener,
       IREE_ASYNC_SOCKET_OPTION_NO_DELAY | IREE_ASYNC_SOCKET_OPTION_ZERO_COPY,
-      IREE_ASYNC_SOCKET_OPTION_NONE);
+      IREE_ASYNC_SOCKET_OPTION_NONE, &client, &server, &listener);
 
   // Acquire 3 buffers for scatter-gather.
   iree_async_buffer_lease_t leases[3];
@@ -908,9 +899,8 @@ TEST_P(SendFlagsTest, ConcurrentRegisteredSends) {
   iree_async_socket_t* server = nullptr;
   iree_async_socket_t* listener = nullptr;
   EstablishConnectionWithOptions(
-      &client, &server, &listener,
       IREE_ASYNC_SOCKET_OPTION_NO_DELAY | IREE_ASYNC_SOCKET_OPTION_ZERO_COPY,
-      IREE_ASYNC_SOCKET_OPTION_NONE);
+      IREE_ASYNC_SOCKET_OPTION_NONE, &client, &server, &listener);
 
   const int kNumConcurrent = 4;
   iree_async_buffer_lease_t leases[kNumConcurrent];
@@ -1004,9 +994,8 @@ TEST_P(SendFlagsTest, ZeroCopySendUnregisteredFallback) {
   iree_async_socket_t* server = nullptr;
   iree_async_socket_t* listener = nullptr;
   EstablishConnectionWithOptions(
-      &client, &server, &listener,
       IREE_ASYNC_SOCKET_OPTION_NO_DELAY | IREE_ASYNC_SOCKET_OPTION_ZERO_COPY,
-      IREE_ASYNC_SOCKET_OPTION_NONE);
+      IREE_ASYNC_SOCKET_OPTION_NONE, &client, &server, &listener);
 
   // Use a heap buffer (no region).
   const iree_host_size_t send_length = 8192;
@@ -1082,9 +1071,8 @@ TEST_P(SendFlagsTest, ScatterGatherMixedRegistration) {
   iree_async_socket_t* server = nullptr;
   iree_async_socket_t* listener = nullptr;
   EstablishConnectionWithOptions(
-      &client, &server, &listener,
       IREE_ASYNC_SOCKET_OPTION_NO_DELAY | IREE_ASYNC_SOCKET_OPTION_ZERO_COPY,
-      IREE_ASYNC_SOCKET_OPTION_NONE);
+      IREE_ASYNC_SOCKET_OPTION_NONE, &client, &server, &listener);
 
   // Acquire one registered buffer from pool.
   iree_async_buffer_lease_t lease;
@@ -1153,9 +1141,9 @@ TEST_P(SendFlagsTest, ZeroCopyFallbackWhenCapabilityDisabled) {
   iree_async_socket_t* client = nullptr;
   iree_async_socket_t* server = nullptr;
   iree_async_socket_t* listener = nullptr;
-  EstablishConnectionWithOptions(&client, &server, &listener,
-                                 IREE_ASYNC_SOCKET_OPTION_NO_DELAY,
-                                 IREE_ASYNC_SOCKET_OPTION_NONE);
+  EstablishConnectionWithOptions(IREE_ASYNC_SOCKET_OPTION_NO_DELAY,
+                                 IREE_ASYNC_SOCKET_OPTION_NONE, &client,
+                                 &server, &listener);
 
   // Send data using same pattern as ZC tests.
   const iree_host_size_t send_length = 8192;
@@ -1259,9 +1247,8 @@ TEST_P(SendFlagsTest, ZeroCopySendMultipleSlabs) {
   iree_async_socket_t* server = nullptr;
   iree_async_socket_t* listener = nullptr;
   EstablishConnectionWithOptions(
-      &client, &server, &listener,
       IREE_ASYNC_SOCKET_OPTION_NO_DELAY | IREE_ASYNC_SOCKET_OPTION_ZERO_COPY,
-      IREE_ASYNC_SOCKET_OPTION_NONE);
+      IREE_ASYNC_SOCKET_OPTION_NONE, &client, &server, &listener);
 
   // Acquire buffers and fill with distinct patterns.
   iree_async_buffer_lease_t lease_a1;

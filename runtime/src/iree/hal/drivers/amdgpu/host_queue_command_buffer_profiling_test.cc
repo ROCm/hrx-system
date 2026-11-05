@@ -207,8 +207,8 @@ TEST_F(HostQueueCommandBufferProfilingTest,
 
   TwoDispatchCommandBuffer fixture;
   IREE_ASSERT_OK(CreateTwoDispatchCommandBuffer(
-      &test_device, &fixture,
-      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA));
+      &test_device, IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA,
+      &fixture));
   ASSERT_TRUE(iree_hal_amdgpu_pm4_command_buffer_isa(fixture.command_buffer));
   const iree_hal_amdgpu_pm4_command_buffer_profile_plan_t* first_profile_plan =
       iree_hal_amdgpu_pm4_command_buffer_profile_plan(
@@ -477,8 +477,8 @@ TEST_F(HostQueueCommandBufferProfilingTest,
 
   TwoDispatchCommandBuffer fixture;
   IREE_ASSERT_OK(CreateTwoDispatchCommandBuffer(
-      &test_device, &fixture,
-      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA));
+      &test_device, IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA,
+      &fixture));
   ASSERT_TRUE(iree_hal_amdgpu_pm4_command_buffer_isa(fixture.command_buffer));
 
   Ref<iree_hal_semaphore_t> command_buffer_signal;
@@ -624,8 +624,8 @@ TEST_F(HostQueueCommandBufferProfilingTest,
 
   TwoDispatchCommandBuffer fixture;
   IREE_ASSERT_OK(CreateTwoDispatchCommandBuffer(
-      &test_device, &fixture,
-      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA));
+      &test_device, IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA,
+      &fixture));
 
   iree_hal_amdgpu_physical_device_t* physical_device =
       test_device.logical_device()->physical_devices[0];

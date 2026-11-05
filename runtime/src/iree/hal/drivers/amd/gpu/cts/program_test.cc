@@ -210,10 +210,9 @@ class GpuProgramTest : public GpuNativeTest {
   }
 
   void Submit(uint32_t queue_index, uint32_t slot, uint32_t value,
-              const uint64_t* frontier,
-              iree_hal_amd_gpu_program_instance_t** out_instance,
-              uint32_t wait_slot = UINT32_MAX,
-              uint32_t release_slot = UINT32_MAX) {
+              const uint64_t* frontier, uint32_t wait_slot,
+              uint32_t release_slot,
+              iree_hal_amd_gpu_program_instance_t** out_instance) {
     auto& queue = queues_native_[queue_index];
     auto* instance =
         iree_hal_amd_gpu_program_try_acquire(&program_, queue_index, frontier);
@@ -313,6 +312,20 @@ class GpuProgramTest : public GpuNativeTest {
       *reinterpret_cast<volatile uint64_t*>(queue.mapping.doorbell_address) =
           queue.ring.reserved_words;
     }
+  }
+
+  void Submit(uint32_t queue_index, uint32_t slot, uint32_t value,
+              const uint64_t* frontier,
+              iree_hal_amd_gpu_program_instance_t** out_instance) {
+    Submit(queue_index, slot, value, frontier, UINT32_MAX, UINT32_MAX,
+           out_instance);
+  }
+
+  void Submit(uint32_t queue_index, uint32_t slot, uint32_t value,
+              const uint64_t* frontier, uint32_t wait_slot,
+              iree_hal_amd_gpu_program_instance_t** out_instance) {
+    Submit(queue_index, slot, value, frontier, wait_slot, UINT32_MAX,
+           out_instance);
   }
 
   void Wait(uint32_t queue_index, uint32_t slot) {
@@ -439,14 +452,14 @@ TEST_F(GpuProgramTest, PipelinedFixupsCloneAndCausalReuse) {
   // Queue 1 waits until queue 0 is executing the initial resident IB, copies
   // it while live, fully fixes up its own instance, and releases queue 0's
   // device-side gate. No host timing assumption establishes the overlap.
-  ASSERT_NO_FATAL_FAILURE(Submit(1, 2, 0x76543210, frontier, &clone, 9, 8));
+  ASSERT_NO_FATAL_FAILURE(Submit(1, 2, 0x76543210, frontier, 9, 8, &clone));
   EXPECT_NE(first, clone);
   EXPECT_NE(first->address, clone->address);
   // A device wait covers the last writer on queue 1, so queue 2 can acquire
   // that same instance while every host lease remains outstanding.
   frontier[1] = 1;
   iree_hal_amd_gpu_program_instance_t* joined = nullptr;
-  ASSERT_NO_FATAL_FAILURE(Submit(2, 3, 0xABCDE000, frontier, &joined, 2));
+  ASSERT_NO_FATAL_FAILURE(Submit(2, 3, 0xABCDE000, frontier, 2, &joined));
   EXPECT_EQ(clone, joined);
   iree_hal_amd_gpu_program_trim(&program_);
   EXPECT_EQ(program_.instances[1], clone);

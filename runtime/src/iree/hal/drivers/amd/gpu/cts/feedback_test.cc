@@ -24,8 +24,7 @@ class GpuFeedbackTest
   amdf_queue_command_type_t command_type() const override { return GetParam(); }
 
   void SetUp() override {
-    IREE_ASSERT_OK(memory_gate_.CreateFabric(&fabric_, UINT64_MAX,
-                                             AMDF_NATIVE_LIFETIME_PROCESS));
+    IREE_ASSERT_OK(memory_gate_.CreateFabric(&fabric_));
     memory_gate_.RequireCodeUpload();
     GpuNativeTest::SetUp();
     if (HasFatalFailure() || IsSkipped()) {

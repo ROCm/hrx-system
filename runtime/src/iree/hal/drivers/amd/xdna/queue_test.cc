@@ -334,15 +334,15 @@ TEST(XdnaQueueTest, DispatchValidatesImageBindingContractAtCapture) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE, dispatch({1, &binding}));
   iree_hal_buffer_release(buffer);
 
-  ASSERT_NO_FATAL_FAILURE(
-      harness.MakeBuffer(&buffer, IREE_HAL_MEMORY_ACCESS_WRITE,
-                         IREE_HAL_BUFFER_USAGE_STORAGE_READ));
+  ASSERT_NO_FATAL_FAILURE(harness.MakeBuffer(IREE_HAL_MEMORY_ACCESS_WRITE,
+                                             IREE_HAL_BUFFER_USAGE_STORAGE_READ,
+                                             &buffer));
   binding = iree_hal_make_buffer_ref(buffer, 0, 16);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED, dispatch({1, &binding}));
   iree_hal_buffer_release(buffer);
 
   ASSERT_NO_FATAL_FAILURE(harness.MakeBuffer(
-      &buffer, IREE_HAL_MEMORY_ACCESS_READ, IREE_HAL_BUFFER_USAGE_TRANSFER));
+      IREE_HAL_MEMORY_ACCESS_READ, IREE_HAL_BUFFER_USAGE_TRANSFER, &buffer));
   binding = iree_hal_make_buffer_ref(buffer, 0, 16);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED, dispatch({1, &binding}));
   iree_hal_buffer_release(buffer);
@@ -1612,9 +1612,9 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
   constexpr iree_host_size_t kLargeUpdateLength = 128 * 1024;
   iree_hal_buffer_t* transfer_buffer = nullptr;
   ASSERT_NO_FATAL_FAILURE(harness.MakeBuffer(
-      &transfer_buffer, IREE_HAL_MEMORY_ACCESS_ALL,
+      IREE_HAL_MEMORY_ACCESS_ALL,
       IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING,
-      kLargeUpdateLength));
+      kLargeUpdateLength, &transfer_buffer));
   std::array<uint8_t, 64> small_update;
   small_update.fill(0x5A);
   std::vector<uint8_t> large_update(kLargeUpdateLength, 0xA5);

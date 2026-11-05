@@ -56,9 +56,9 @@ TEST_P(SocketTest, LowLatencyAck_ConnectAndTransfer) {
   iree_async_socket_t* client = nullptr;
   iree_async_socket_t* server = nullptr;
   iree_async_socket_t* listener = nullptr;
-  EstablishConnectionWithOptions(&client, &server, &listener,
+  EstablishConnectionWithOptions(IREE_ASYNC_SOCKET_OPTION_LOW_LATENCY_ACK,
                                  IREE_ASYNC_SOCKET_OPTION_LOW_LATENCY_ACK,
-                                 IREE_ASYNC_SOCKET_OPTION_LOW_LATENCY_ACK);
+                                 &client, &server, &listener);
   uint8_t sent[] = {1, 2, 3, 4};
   iree_async_span_t send_span = iree_async_span_from_ptr(sent, sizeof(sent));
   iree_async_socket_send_operation_t send_op;

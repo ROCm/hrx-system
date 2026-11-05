@@ -75,8 +75,8 @@ class FileTransferStagingTest : public MemoryBackendTest,
     }
     IREE_ASSERT_OK(CreatePool(
         IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,
-        pool_.out(), UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
-        IREE_HAL_MEMORY_ACCESS_NONE));
+        UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+        IREE_HAL_MEMORY_ACCESS_NONE, pool_.out()));
     IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
         pool_, iree_hal_make_pool_reservation_request(8192, 4096),
         iree_infinite_timeout(), buffer_.out()));

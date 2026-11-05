@@ -121,8 +121,8 @@ class SlabCacheTest : public ::testing::Test {
 
   iree_status_t CreateCache(iree_hal_pool_t* parent, iree_device_size_t length,
                             uint32_t target, uint32_t maximum,
-                            iree_hal_pool_t** out_pool,
-                            iree_device_size_t minimum_cached_size = 0) {
+                            iree_device_size_t minimum_cached_size,
+                            iree_hal_pool_t** out_pool) {
     iree_hal_slab_cache_options_t options;
     iree_hal_slab_cache_options_initialize(&options);
     options.slab =
@@ -131,6 +131,12 @@ class SlabCacheTest : public ::testing::Test {
     options.target_count = target;
     options.max_count = maximum;
     return iree_hal_slab_cache_create(parent, &options, allocator_, out_pool);
+  }
+
+  iree_status_t CreateCache(iree_hal_pool_t* parent, iree_device_size_t length,
+                            uint32_t target, uint32_t maximum,
+                            iree_hal_pool_t** out_pool) {
+    return CreateCache(parent, length, target, maximum, 0, out_pool);
   }
 
   iree_status_t CreateChild(iree_hal_pool_t* parent, iree_device_size_t length,
@@ -725,7 +731,7 @@ TEST_F(SlabCacheTest, OversizedAndAlignmentBypassUseSameParent) {
 TEST_F(SlabCacheTest, SizeIntervalRoundsOnlyEligibleRequests) {
   iree_hal_pool_release(cache_);
   cache_ = nullptr;
-  IREE_ASSERT_OK(CreateCache(native_, 4096, 0, 4, &cache_, 2048));
+  IREE_ASSERT_OK(CreateCache(native_, 4096, 0, 4, 2048, &cache_));
   const iree_hal_pool_reservation_request_t requests[] = {
       iree_hal_make_pool_reservation_request(2047, kMinAlignment),
       iree_hal_make_pool_reservation_request(2048, kMinAlignment),
@@ -763,8 +769,8 @@ class ExactSlabCacheTest : public DeferredSlabCacheTest {
     DeferredSlabCacheTest::SetUp();
     iree_hal_pool_release(cache_);
     cache_ = nullptr;
-    IREE_ASSERT_OK(CreateCache(parent_, 4096, 0, 4, &cache_, 4096));
-    IREE_ASSERT_OK(CreateCache(cache_, 1024, 0, 4, &small_, 1024));
+    IREE_ASSERT_OK(CreateCache(parent_, 4096, 0, 4, 4096, &cache_));
+    IREE_ASSERT_OK(CreateCache(cache_, 1024, 0, 4, 1024, &small_));
     children_.push_back(small_);
   }
 

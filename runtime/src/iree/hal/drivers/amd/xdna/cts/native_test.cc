@@ -271,8 +271,8 @@ class XdnaNativeTest : public ::testing::Test {
   void ImportNativeFile(iree_string_view_t path,
                         iree_const_byte_span_t contents,
                         iree_hal_memory_access_t access,
-                        iree_hal_file_t** out_file,
-                        iree_async_proactor_t* file_proactor = nullptr) {
+                        iree_async_proactor_t* file_proactor,
+                        iree_hal_file_t** out_file) {
     IREE_ASSERT_OK(
         iree_io_file_contents_write(path, contents, iree_allocator_system()));
     iree_io_file_handle_t* handle = nullptr;
@@ -1058,11 +1058,11 @@ TEST_F(XdnaNativeTest, FilesRoundTripThroughDeferredDeviceOnlyBuffers) {
   ASSERT_NO_FATAL_FAILURE(
       ImportNativeFile(input_path.path_view(),
                        iree_make_const_byte_span(input.data(), sizeof(input)),
-                       IREE_HAL_MEMORY_ACCESS_READ, &input_file));
+                       IREE_HAL_MEMORY_ACCESS_READ, nullptr, &input_file));
   ASSERT_NO_FATAL_FAILURE(ImportNativeFile(
       output_path.path_view(),
       iree_make_const_byte_span(initial_output.data(), sizeof(initial_output)),
-      IREE_HAL_MEMORY_ACCESS_WRITE, &output_file));
+      IREE_HAL_MEMORY_ACCESS_WRITE, nullptr, &output_file));
 
   std::array<iree_hal_pool_reservation_request_t, 3> requests;
   requests.fill(iree_hal_make_pool_reservation_request(3 * kBytes, 64));
@@ -1169,7 +1169,7 @@ TEST_F(XdnaNativeTest, FileIoReturnsFromAnIndependentProactor) {
       ImportNativeFile(path.path_view(),
                        iree_make_const_byte_span(initial_contents.data(),
                                                  initial_contents.size()),
-                       IREE_HAL_MEMORY_ACCESS_ALL, &file, file_proactor));
+                       IREE_HAL_MEMORY_ACCESS_ALL, file_proactor, &file));
   iree_hal_semaphore_t* progress = nullptr;
   ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&progress));
   uint64_t read = 1, written = 2;
@@ -1214,7 +1214,7 @@ TEST_F(XdnaNativeTest, TruncatedFileFailsItsConsumerAndRetiresIo) {
       ImportNativeFile(path.path_view(),
                        iree_make_const_byte_span(initial_contents.data(),
                                                  initial_contents.size()),
-                       IREE_HAL_MEMORY_ACCESS_READ, &file));
+                       IREE_HAL_MEMORY_ACCESS_READ, nullptr, &file));
   // The imported file keeps its logical length, while the underlying file can
   // change externally. The queue must report short I/O instead of success.
   IREE_ASSERT_OK(iree_io_file_contents_write(

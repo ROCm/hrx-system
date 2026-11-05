@@ -133,9 +133,9 @@ class PoolCompositionTest : public ::testing::TestWithParam<
   iree_status_t CreateChild(iree_hal_pool_t* parent,
                             iree_device_size_t slab_size,
                             uint8_t frontier_capacity,
-                            iree_hal_pool_t** out_pool,
-                            iree_device_size_t block_size = 256,
-                            iree_allocator_t host_allocator = {}) {
+                            iree_device_size_t block_size,
+                            iree_allocator_t host_allocator,
+                            iree_hal_pool_t** out_pool) {
     if (!host_allocator.ctl) {
       host_allocator = allocator_;
     }
@@ -161,6 +161,22 @@ class PoolCompositionTest : public ::testing::TestWithParam<
       pools_.push_back(*out_pool);
     }
     return status;
+  }
+
+  iree_status_t CreateChild(iree_hal_pool_t* parent,
+                            iree_device_size_t slab_size,
+                            uint8_t frontier_capacity,
+                            iree_hal_pool_t** out_pool) {
+    return CreateChild(parent, slab_size, frontier_capacity, 256, {}, out_pool);
+  }
+
+  iree_status_t CreateChild(iree_hal_pool_t* parent,
+                            iree_device_size_t slab_size,
+                            uint8_t frontier_capacity,
+                            iree_device_size_t block_size,
+                            iree_hal_pool_t** out_pool) {
+    return CreateChild(parent, slab_size, frontier_capacity, block_size, {},
+                       out_pool);
   }
 
   static iree_hal_pool_stats_t Stats(iree_hal_pool_t* pool) {
@@ -249,7 +265,7 @@ TEST_P(PoolCompositionTest, SiblingReuseNeedsNoMetadataAllocation) {
   std::array<iree_hal_pool_t*, 2> children;
   for (auto& child : children) {
     IREE_ASSERT_OK(
-        CreateChild(source, 4096, 2, &child, 64, metadata_.allocator()));
+        CreateChild(source, 4096, 2, 64, metadata_.allocator(), &child));
   }
   const int64_t initial_live = metadata_.live;
   std::array<iree_hal_pool_reservation_request_t, 32> requests;
@@ -326,7 +342,7 @@ TEST_P(PoolCompositionTest, ReusedMetadataAdoptsSiblingHistory) {
   IREE_ASSERT_OK(CreateSource(0, 4096, 4096, &source));
   std::array<iree_hal_pool_t*, 2> children;
   for (auto& child : children) {
-    IREE_ASSERT_OK(CreateChild(source, 4096, 2, &child, 512));
+    IREE_ASSERT_OK(CreateChild(source, 4096, 2, 512, &child));
   }
   const auto request = iree_hal_make_pool_reservation_request(512, 16);
   for (uint64_t epoch = 0; epoch < 6; ++epoch) {
@@ -360,7 +376,7 @@ TEST_P(PoolCompositionTest, MetadataTrimRacesAcquisitionAndReturn) {
   IREE_ASSERT_OK(CreateSource(0, 4096, 4096, &source));
   iree_hal_pool_t* pool = nullptr;
   IREE_ASSERT_OK(
-      CreateChild(source, 4096, 2, &pool, 512, metadata_.allocator()));
+      CreateChild(source, 4096, 2, 512, metadata_.allocator(), &pool));
   auto exercise = [&](size_t i) {
     for (int j = 0; j < 64; ++j) {
       if (i == 0) {
@@ -558,7 +574,7 @@ TEST_P(PoolCompositionTest, FailedOverflowAcquisitionPreservesImmutableProofs) {
   iree_hal_pool_t* source = nullptr;
   IREE_ASSERT_OK(CreateSource(0, 4096, 4096, &source));
   iree_hal_pool_t* child = nullptr;
-  IREE_ASSERT_OK(CreateChild(source, 4096, 1, &child, 2048));
+  IREE_ASSERT_OK(CreateChild(source, 4096, 1, 2048, &child));
   std::array<iree_hal_pool_reservation_t, 2> reservations;
   iree_hal_pool_acquire_info_t info;
   iree_hal_pool_acquire_result_t result;
@@ -642,8 +658,8 @@ TEST_P(PoolCompositionTest,
     IREE_ASSERT_OK(CreateSource(0, 4096, 4096, &source));
     const uint8_t capacity = axis_count == 9 ? 8 : 1;
     iree_hal_pool_t* child = nullptr;
-    IREE_ASSERT_OK(CreateChild(source, 4096, capacity, &child, 2048,
-                               metadata_.allocator()));
+    IREE_ASSERT_OK(CreateChild(source, 4096, capacity, 2048,
+                               metadata_.allocator(), &child));
     std::array<iree_hal_pool_reservation_t, 2> reservations;
     iree_hal_pool_acquire_info_t info;
     iree_hal_pool_acquire_result_t result;
@@ -687,7 +703,7 @@ TEST_P(PoolCompositionTest,
     metadata_.fail = false;
 
     iree_hal_pool_t* sibling = nullptr;
-    IREE_ASSERT_OK(CreateChild(source, 4096, capacity, &sibling, 4096));
+    IREE_ASSERT_OK(CreateChild(source, 4096, capacity, 4096, &sibling));
     iree_hal_pool_reservation_t reused;
     IREE_ASSERT_OK(Acquire(sibling, 4096, nullptr,
                            IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER,
@@ -793,7 +809,7 @@ TEST_P(PoolCompositionTest, InteriorBackingPreservesNeighborBytes) {
   std::array<iree_hal_pool_t*, 2> children;
   std::array<iree_hal_pool_reservation_t, 2> reservations;
   for (size_t i = 0; i < children.size(); ++i) {
-    IREE_ASSERT_OK(CreateChild(source, 1024, 2, &children[i], 1024));
+    IREE_ASSERT_OK(CreateChild(source, 1024, 2, 1024, &children[i]));
     iree_hal_pool_acquire_info_t info;
     iree_hal_pool_acquire_result_t result;
     IREE_ASSERT_OK(Acquire(children[i], 1024, nullptr,
@@ -833,7 +849,7 @@ TEST_P(PoolCompositionTest, ParentPreparesAdvertisedChildAlignment) {
                          &anchor, &info, &result));
   ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
   iree_hal_pool_t* child = nullptr;
-  IREE_ASSERT_OK(CreateChild(source, 512, 2, &child, 64));
+  IREE_ASSERT_OK(CreateChild(source, 512, 2, 64, &child));
   iree_hal_pool_capabilities_t capabilities;
   iree_hal_pool_query_capabilities(child, &capabilities);
   iree_hal_pool_reservation_request_t request =
@@ -1044,7 +1060,7 @@ TEST_P(FixedBlockPoolCompositionTest,
   // Five 192-byte blocks leave a 64-byte tail whose original history must
   // survive even when every managed block acquires a different history.
   iree_hal_pool_t* child = nullptr;
-  IREE_ASSERT_OK(CreateChild(cache, 1024, 2, &child, 192));
+  IREE_ASSERT_OK(CreateChild(cache, 1024, 2, 192, &child));
   std::array<iree_hal_pool_reservation_request_t, 5> requests;
   requests.fill(iree_hal_make_pool_reservation_request(192, kMinAlignment));
   std::array<iree_hal_pool_reservation_t, 5> reservations;

@@ -17,7 +17,7 @@ TEST_F(MemoryBackendTest, TransientSlotsPreserveMixedNativeBindingsAndFacts) {
   native_.address_kinds[0] = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU;
   iree_hal_pool_t* pool = nullptr;
   IREE_ASSERT_OK(
-      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool, /*interfaces=*/0));
+      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, /*interfaces=*/0, &pool));
   const auto request = iree_hal_make_pool_reservation_request(64, 64);
   iree_hal_buffer_t* backing = nullptr;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(

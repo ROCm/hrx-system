@@ -51,10 +51,19 @@ class NativeMemoryGate {
 
   // Optional allocation limit is both advertised and enforced by the native
   // dependency; accepted backing still comes from the real driver.
-  iree_status_t CreateFabric(
-      iree_hal_amd_fabric_t** out_fabric,
-      uint64_t maximum_byte_length = UINT64_MAX,
-      amdf_native_lifetime_t lifetime = AMDF_NATIVE_LIFETIME_PROCESS);
+  iree_status_t CreateFabric(uint64_t maximum_byte_length,
+                             amdf_native_lifetime_t lifetime,
+                             iree_hal_amd_fabric_t** out_fabric);
+
+  iree_status_t CreateFabric(iree_hal_amd_fabric_t** out_fabric) {
+    return CreateFabric(UINT64_MAX, AMDF_NATIVE_LIFETIME_PROCESS, out_fabric);
+  }
+
+  iree_status_t CreateFabric(uint64_t maximum_byte_length,
+                             iree_hal_amd_fabric_t** out_fabric) {
+    return CreateFabric(maximum_byte_length, AMDF_NATIVE_LIFETIME_PROCESS,
+                        out_fabric);
+  }
 
   // Selects this serial fixture's forwarding policy before native operations.
   // All users must be quiescent before switching the process-wide API table.

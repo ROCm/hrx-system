@@ -24,9 +24,9 @@ TEST_F(MemoryBackendTest, RejectsAtomicPromisesAbsentFromNativeBuffers) {
       iree_hal_pool_t* pool = nullptr;
       IREE_EXPECT_STATUS_IS(
           IREE_STATUS_UNAVAILABLE,
-          CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool, /*interfaces=*/0,
+          CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, /*interfaces=*/0,
                      IREE_HAL_MEMORY_ACCESS_NONE, IREE_HAL_BUFFER_USAGE_STORAGE,
-                     atomics));
+                     atomics, &pool));
       EXPECT_EQ(pool, nullptr);
     }
   }
@@ -294,15 +294,15 @@ TEST_F(MemoryBackendTest, AtomicReachIsQualifiedIndependentlyForEachWidth) {
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNAVAILABLE,
-      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool, 0,
-                 IREE_HAL_MEMORY_ACCESS_NONE, 0, unsupported));
+      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, 0, IREE_HAL_MEMORY_ACCESS_NONE,
+                 0, unsupported, &pool));
   EXPECT_EQ(pool, nullptr);
   const iree_hal_atomic_operation_capabilities_t supported = {
       .device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT,
       .system_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
   };
-  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool, 0,
-                            IREE_HAL_MEMORY_ACCESS_NONE, 0, supported));
+  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, 0,
+                            IREE_HAL_MEMORY_ACCESS_NONE, 0, supported, &pool));
   const auto operations = iree_hal_pool_query_atomic_operations(
       pool, ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[0]));
   EXPECT_EQ(operations.device_scope_32, IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT);
@@ -326,8 +326,8 @@ TEST_F(MemoryBackendTest, ModularSubtractUsesNativeAddOnControlStorage) {
       .system_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_SUBTRACT,
   };
   iree_hal_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool, 0,
-                            IREE_HAL_MEMORY_ACCESS_NONE, 0, required));
+  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, 0,
+                            IREE_HAL_MEMORY_ACCESS_NONE, 0, required, &pool));
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       pool, iree_hal_make_pool_reservation_request(64, 64),
@@ -350,9 +350,10 @@ TEST_F(MemoryBackendTest, ModularSubtractUsesNativeAddOnControlStorage) {
   // A raw subtract instruction does not qualify our add-based implementation.
   native_.atomics[0] = {AMDF_ATOMIC_OPERATION_SUBTRACT,
                         AMDF_ATOMIC_OPERATION_SUBTRACT};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
-                        CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool, 0,
-                                   IREE_HAL_MEMORY_ACCESS_NONE, 0, required));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNAVAILABLE,
+      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, 0, IREE_HAL_MEMORY_ACCESS_NONE,
+                 0, required, &pool));
   EXPECT_EQ(pool, nullptr);
 }
 
@@ -375,7 +376,7 @@ TEST_F(MemoryBackendTest, AtomicWaitAndStoreAcceptOneWayUsage) {
     };
     iree_hal_pool_t* pool = nullptr;
     IREE_ASSERT_OK(
-        CreatePool(usage, &pool, 0, IREE_HAL_MEMORY_ACCESS_NONE, 0, required));
+        CreatePool(usage, 0, IREE_HAL_MEMORY_ACCESS_NONE, 0, required, &pool));
     EXPECT_TRUE(iree_hal_atomic_operation_capabilities_support(
         iree_hal_pool_query_atomic_operations(
             pool, ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[0])),
@@ -478,8 +479,8 @@ TEST_F(MemoryBackendTest, QueueShadersPreserveOrdinaryBackingAndCpSubset) {
       .device_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
   };
   iree_hal_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool, 0,
-                            IREE_HAL_MEMORY_ACCESS_NONE, 0, required));
+  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, 0,
+                            IREE_HAL_MEMORY_ACCESS_NONE, 0, required, &pool));
   const auto queue = ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[0]);
   EXPECT_TRUE(iree_hal_atomic_operation_capabilities_support(
       iree_hal_pool_query_atomic_operations(pool, queue), required));
@@ -677,9 +678,9 @@ TEST_F(MemoryBackendTest, ExactShaderPairsKeepCpuRmwAndNpuAccessSeparate) {
       .system_scope_64 = transactions,
   };
   iree_hal_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool, 0,
+  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, 0,
                             IREE_HAL_MEMORY_ACCESS_ALL,
-                            IREE_HAL_BUFFER_USAGE_STORAGE));
+                            IREE_HAL_BUFFER_USAGE_STORAGE, &pool));
   const auto queue = ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[0]);
   const auto program = ResolveScope(IREE_HAL_MEMORY_SITE_PROGRAM, families_[0]);
   const auto npu = ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[1]);

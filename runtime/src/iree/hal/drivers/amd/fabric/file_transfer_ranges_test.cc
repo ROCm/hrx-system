@@ -80,8 +80,8 @@ TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
     native_.host_mapping_features = kFeatures[i];
     IREE_ASSERT_OK(CreatePool(
         IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,
-        pools[i].out(), UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE,
-        IREE_HAL_MEMORY_ACCESS_NONE));
+        UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE,
+        IREE_HAL_MEMORY_ACCESS_NONE, pools[i].out()));
   }
   std::array<Ref<iree_hal_buffer_t>, 3> sources;
   std::array<uint8_t*, 3> source_contents;
@@ -244,9 +244,9 @@ TEST_F(MemoryBackendTest, FileIoUsesReplacedSplitAndCoalescedMappings) {
   }
   Ref<iree_hal_pool_t> pool;
   IREE_ASSERT_OK(
-      CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, pool.out(),
+      CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER,
                  UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE,
-                 IREE_HAL_MEMORY_ACCESS_NONE));
+                 IREE_HAL_MEMORY_ACCESS_NONE, pool.out()));
   std::array<Ref<iree_hal_buffer_t>, 2> sources;
   std::array<uint8_t*, 2> contents;
   for (size_t i = 0; i < sources.size(); ++i) {
@@ -262,7 +262,7 @@ TEST_F(MemoryBackendTest, FileIoUsesReplacedSplitAndCoalescedMappings) {
   }
   Ref<iree_hal_buffer_t> target;
   IREE_ASSERT_OK(
-      CreateReservation(target.out(), pool, IREE_HAL_BUFFER_USAGE_TRANSFER));
+      CreateReservation(pool, IREE_HAL_BUFFER_USAGE_TRANSFER, target.out()));
   const auto scope = ResolveScope(IREE_HAL_MEMORY_SITE_PROGRAM, families_[0]);
   auto map = [&](uint64_t position, uint64_t length, int source,
                  uint64_t source_offset) -> iree_status_t {

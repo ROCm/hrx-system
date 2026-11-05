@@ -1146,14 +1146,12 @@ class MemoryBackendTest : public ::testing::Test {
     iree_async_notification_release(notification_);
   }
 
-  iree_status_t CreatePool(
-      iree_hal_buffer_usage_t usage, iree_hal_pool_t** out_pool,
-      uint64_t interfaces = UINT64_C(1)
-                            << IREE_HAL_BUFFER_INTERFACE_XDNA_SHIM_DMA,
-      iree_hal_memory_access_t host_access = IREE_HAL_MEMORY_ACCESS_ALL,
-      iree_hal_buffer_usage_t cpu_usage = IREE_HAL_BUFFER_USAGE_NONE,
-      iree_hal_atomic_operation_capabilities_t atomics = {},
-      uint64_t cpu_interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_HOST) {
+  iree_status_t CreatePool(iree_hal_buffer_usage_t usage, uint64_t interfaces,
+                           iree_hal_memory_access_t host_access,
+                           iree_hal_buffer_usage_t cpu_usage,
+                           iree_hal_atomic_operation_capabilities_t atomics,
+                           uint64_t cpu_interfaces,
+                           iree_hal_pool_t** out_pool) {
     iree_hal_pool_family_access_t accesses[3] = {};
     accesses[0].family = families_[1];
     accesses[0].usage = usage;
@@ -1175,6 +1173,46 @@ class MemoryBackendTest : public ::testing::Test {
     scope.host.properties = IREE_HAL_HOST_MEMORY_PROPERTY_NONE;
     return iree_hal_slab_pool_create(group_, scope, &pool_options_, allocator_,
                                      out_pool);
+  }
+
+  iree_status_t CreatePool(iree_hal_buffer_usage_t usage,
+                           iree_hal_pool_t** out_pool) {
+    return CreatePool(
+        usage, UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_XDNA_SHIM_DMA,
+        IREE_HAL_MEMORY_ACCESS_ALL, IREE_HAL_BUFFER_USAGE_NONE, {},
+        UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_HOST, out_pool);
+  }
+
+  iree_status_t CreatePool(iree_hal_buffer_usage_t usage, uint64_t interfaces,
+                           iree_hal_pool_t** out_pool) {
+    return CreatePool(usage, interfaces, IREE_HAL_MEMORY_ACCESS_ALL,
+                      IREE_HAL_BUFFER_USAGE_NONE, {},
+                      UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_HOST, out_pool);
+  }
+
+  iree_status_t CreatePool(iree_hal_buffer_usage_t usage, uint64_t interfaces,
+                           iree_hal_memory_access_t host_access,
+                           iree_hal_pool_t** out_pool) {
+    return CreatePool(usage, interfaces, host_access,
+                      IREE_HAL_BUFFER_USAGE_NONE, {},
+                      UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_HOST, out_pool);
+  }
+
+  iree_status_t CreatePool(iree_hal_buffer_usage_t usage, uint64_t interfaces,
+                           iree_hal_memory_access_t host_access,
+                           iree_hal_buffer_usage_t cpu_usage,
+                           iree_hal_pool_t** out_pool) {
+    return CreatePool(usage, interfaces, host_access, cpu_usage, {},
+                      UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_HOST, out_pool);
+  }
+
+  iree_status_t CreatePool(iree_hal_buffer_usage_t usage, uint64_t interfaces,
+                           iree_hal_memory_access_t host_access,
+                           iree_hal_buffer_usage_t cpu_usage,
+                           iree_hal_atomic_operation_capabilities_t atomics,
+                           iree_hal_pool_t** out_pool) {
+    return CreatePool(usage, interfaces, host_access, cpu_usage, atomics,
+                      UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_HOST, out_pool);
   }
 
   uint32_t PhysicalNode(uint32_t device_ordinal) {
@@ -1230,10 +1268,9 @@ class MemoryBackendTest : public ::testing::Test {
     return iree_hal_memory_transition_query_info({contract}, pair);
   }
 
-  iree_status_t CreateReservation(
-      iree_hal_buffer_t** out_reservation,
-      iree_hal_pool_t* source_pool = nullptr,
-      iree_hal_buffer_usage_t usage = IREE_HAL_BUFFER_USAGE_STORAGE) {
+  iree_status_t CreateReservation(iree_hal_pool_t* source_pool,
+                                  iree_hal_buffer_usage_t usage,
+                                  iree_hal_buffer_t** out_reservation) {
     native_.mapping_enabled = true;
     binding_descriptions_[0] = {IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
                                 AMDF_MEMORY_ADDRESS_GPU};
@@ -1270,6 +1307,17 @@ class MemoryBackendTest : public ::testing::Test {
     }
     iree_hal_pool_release(owned_source);
     return status;
+  }
+
+  iree_status_t CreateReservation(iree_hal_buffer_t** out_reservation) {
+    return CreateReservation(nullptr, IREE_HAL_BUFFER_USAGE_STORAGE,
+                             out_reservation);
+  }
+
+  iree_status_t CreateReservation(iree_hal_pool_t* source_pool,
+                                  iree_hal_buffer_t** out_reservation) {
+    return CreateReservation(source_pool, IREE_HAL_BUFFER_USAGE_STORAGE,
+                             out_reservation);
   }
 
   // Native failures delivered through the production diagnostic sink.

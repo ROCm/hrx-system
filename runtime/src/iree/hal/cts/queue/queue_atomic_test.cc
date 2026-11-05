@@ -36,8 +36,8 @@ class QueueAtomicTest : public CtsTestBase<> {
       iree_hal_atomic_width_t width,
       iree_hal_atomic_operation_flags_t operation_flags,
       iree_hal_atomic_wait_condition_flags_t wait_condition_flags,
-      AtomicTestConfiguration* out_configuration,
-      iree_hal_atomic_flags_t scope_flags = IREE_HAL_ATOMIC_FLAG_NONE) {
+      iree_hal_atomic_flags_t scope_flags,
+      AtomicTestConfiguration* out_configuration) {
     const AtomicTestRequirements requirements = {
         .operation_flags = operation_flags,
         .wait_condition_flags = wait_condition_flags,
@@ -142,7 +142,7 @@ class QueueAtomicTest : public CtsTestBase<> {
         IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD;
     if (!SelectConfiguration(width, operation_flags,
                              IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_EQUAL,
-                             &configuration)) {
+                             IREE_HAL_ATOMIC_FLAG_NONE, &configuration)) {
       GTEST_SKIP() << "Device does not advertise the tested "
                       "queue/memory atomic operation set";
     }
@@ -277,7 +277,7 @@ class QueueAtomicTest : public CtsTestBase<> {
     AtomicTestConfiguration configuration;
     if (!SelectConfiguration(width, operation_flags,
                              IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_NONE,
-                             &configuration, scope_flags)) {
+                             scope_flags, &configuration)) {
       GTEST_SKIP() << "Device does not advertise the tested "
                       "queue/memory atomic operation set";
     }
@@ -338,7 +338,7 @@ class QueueAtomicTest : public CtsTestBase<> {
                              IREE_HAL_ATOMIC_OPERATION_FLAG_STORE |
                                  IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT,
                              IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL,
-                             &configuration, scope_flags)) {
+                             scope_flags, &configuration)) {
       GTEST_SKIP() << "Device does not advertise the tested "
                       "queue/memory atomic wait conditions";
     }
