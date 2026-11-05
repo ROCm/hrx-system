@@ -1121,6 +1121,228 @@ class MappingPublicationTest : public MemoryBackendTest {
   iree_hal_memory_scope_t scope_ = {};
 };
 
+TEST_F(MappingPublicationTest, NativeRunsPreserveOriginalViewOwnership) {
+  const auto backing_references =
+      iree_atomic_ref_count_load(&backing_->resource.ref_count);
+  const auto target_references =
+      iree_atomic_ref_count_load(&target_->resource.ref_count);
+  // Cancellation and successful resolution own the same captured views.
+  for (bool resolve : {false, true}) {
+    std::array<iree_hal_memory_mapping_t, 3> mappings;
+    for (size_t i = 0; i < mappings.size(); ++i) {
+      const uint64_t offset = (mappings.size() - i) * 4096;
+      mappings[i] = Mapping(0, 4096);
+      IREE_ASSERT_OK(iree_hal_buffer_subspan(target_, offset, 4096, allocator_,
+                                             &mappings[i].target));
+      IREE_ASSERT_OK(iree_hal_buffer_subspan(backing_, offset, 4096, allocator_,
+                                             &mappings[i].source));
+    }
+    iree_hal_memory_mapping_batch_t* batch = nullptr;
+    IREE_ASSERT_OK(iree_hal_memory_mapping_batch_create(
+        iree_hal_device_queue(cpu_device_, 0, 0), mappings.size(),
+        mappings.data(), 0, allocator_, &batch));
+    EXPECT_EQ(batch->update_count, 3u);
+    for (const auto& mapping : mappings) {
+      iree_hal_buffer_release(mapping.target);
+      iree_hal_buffer_release(mapping.source);
+    }
+    if (resolve) {
+      // Resolution may be repeated without changing captured ownership or
+      // reusing the previous compaction count as the original input count.
+      for (int pass = 0; pass < 2; ++pass) {
+        IREE_ASSERT_OK(iree_hal_memory_mapping_batch_resolve(batch));
+        ASSERT_EQ(batch->entry_count, 1u);
+        ASSERT_EQ(batch->update_count, 1u);
+        ASSERT_EQ(batch->entries[0].update_count, 1u);
+        const auto& update = batch->entries[0].updates[0];
+        EXPECT_EQ(update.target_range.byte_offset, 4096u);
+        EXPECT_EQ(update.target_range.byte_length, 12288u);
+        EXPECT_EQ(update.source.mapping_source.offset, 4096u);
+        EXPECT_NE(update.source.mapping_source.descriptor, nullptr);
+      }
+    }
+    for (const auto& mapping : mappings) {
+      EXPECT_EQ(iree_atomic_ref_count_load(&mapping.target->resource.ref_count),
+                1);
+      EXPECT_EQ(iree_atomic_ref_count_load(&mapping.source->resource.ref_count),
+                1);
+    }
+    iree_hal_memory_mapping_batch_release(batch);
+    EXPECT_EQ(iree_atomic_ref_count_load(&backing_->resource.ref_count),
+              backing_references);
+    EXPECT_EQ(iree_atomic_ref_count_load(&target_->resource.ref_count),
+              target_references);
+  }
+}
+
+TEST_F(MappingPublicationTest, CoalescesEachMappingOperation) {
+  enum class SourceKind { kRemoved, kNoAccess, kReadWrite };
+  for (auto operation : {IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE,
+                         IREE_HAL_MEMORY_MAPPING_OPERATION_BIND,
+                         IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND,
+                         IREE_HAL_MEMORY_MAPPING_OPERATION_PROTECT}) {
+    // Bound ranges can revoke all access without becoming logical removals.
+    // REPLACE also admits an explicitly absent source, while UNBIND requires
+    // it.
+    for (auto source_kind : {SourceKind::kRemoved, SourceKind::kNoAccess,
+                             SourceKind::kReadWrite}) {
+      const bool removal = source_kind == SourceKind::kRemoved;
+      if ((operation == IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND && !removal) ||
+          ((operation == IREE_HAL_MEMORY_MAPPING_OPERATION_BIND ||
+            operation == IREE_HAL_MEMORY_MAPPING_OPERATION_PROTECT) &&
+           removal)) {
+        continue;
+      }
+      std::array<iree_hal_memory_mapping_t, 2> mappings = {
+          Mapping(0, 4096), Mapping(4096, 4096, 4096)};
+      for (auto& mapping : mappings) {
+        mapping.operation = operation;
+        if (source_kind != SourceKind::kReadWrite) {
+          mapping.access = IREE_HAL_MEMORY_ACCESS_NONE;
+        }
+        if (removal) {
+          mapping.source = nullptr;
+          mapping.source_offset = 0;
+          mapping.access = IREE_HAL_MEMORY_ACCESS_NONE;
+        }
+      }
+      iree_hal_memory_mapping_batch_t* batch = nullptr;
+      IREE_ASSERT_OK(iree_hal_memory_mapping_batch_create(
+          iree_hal_device_queue(cpu_device_, 0, 0), mappings.size(),
+          mappings.data(), 0, allocator_, &batch));
+      IREE_ASSERT_OK(iree_hal_memory_mapping_batch_resolve(batch));
+      ASSERT_EQ(batch->entry_count, 1u);
+      ASSERT_EQ(batch->update_count, 1u);
+      ASSERT_EQ(batch->entries[0].update_count, 1u);
+      const auto& update = batch->entries[0].updates[0];
+      EXPECT_EQ(update.target_range.byte_offset, 0u);
+      EXPECT_EQ(update.target_range.byte_length, 8192u);
+      EXPECT_EQ(update.operation, operation);
+      EXPECT_EQ(update.access, mappings[0].access);
+      EXPECT_EQ(update.source.mapping_source.descriptor != nullptr,
+                mappings[0].source != nullptr);
+      iree_hal_memory_mapping_batch_release(batch);
+    }
+  }
+}
+
+TEST_F(MappingPublicationTest, PreservesNativeAndSemanticRunBoundaries) {
+  iree_hal_buffer_t* other_backing = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(8192, 4096),
+      iree_infinite_timeout(), &other_backing));
+  iree_hal_buffer_t* other_target = nullptr;
+  IREE_ASSERT_OK(CreateReservation(&other_target));
+  const auto baseline = Mapping(4096, 4096, 4096);
+  std::array<iree_hal_memory_mapping_t, 7> boundaries;
+  boundaries.fill(baseline);
+  boundaries[0].target_range.byte_offset = 8192;
+  boundaries[1].source_offset = 8192;
+  boundaries[2].source = other_backing;
+  boundaries[3].access = IREE_HAL_MEMORY_ACCESS_READ;
+  boundaries[4].operation = IREE_HAL_MEMORY_MAPPING_OPERATION_BIND;
+  boundaries[5].scope =
+      ResolveScope(IREE_HAL_MEMORY_SITE_PROGRAM, families_[1]);
+  boundaries[6].target = other_target;
+  for (const auto& boundary : boundaries) {
+    const iree_hal_memory_mapping_t mappings[] = {Mapping(0, 4096), boundary};
+    iree_hal_memory_mapping_batch_t* batch = nullptr;
+    IREE_ASSERT_OK(iree_hal_memory_mapping_batch_create(
+        iree_hal_device_queue(cpu_device_, 0, 0), IREE_ARRAYSIZE(mappings),
+        mappings, 0, allocator_, &batch));
+    IREE_ASSERT_OK(iree_hal_memory_mapping_batch_resolve(batch));
+    EXPECT_EQ(batch->update_count, 2u);
+    EXPECT_EQ(batch->entry_count, boundary.target == target_ ? 1u : 2u);
+    for (size_t e = 0; e < batch->entry_count; ++e) {
+      for (size_t i = 0; i < batch->entries[e].update_count; ++i) {
+        EXPECT_EQ(batch->entries[e].updates[i].target_range.byte_length, 4096u);
+      }
+    }
+    iree_hal_memory_mapping_batch_release(batch);
+  }
+  iree_hal_buffer_release(other_target);
+  iree_hal_buffer_release(other_backing);
+}
+
+TEST_F(MappingPublicationTest, CompactedEntriesKeepSeparateUpdateVectors) {
+  iree_hal_buffer_t* other_target = nullptr;
+  IREE_ASSERT_OK(CreateReservation(&other_target));
+  auto other_first = Mapping(4096, 4096, 8192);
+  auto other_second = Mapping(8192, 4096, 12288);
+  other_first.target = other_second.target = other_target;
+  const iree_hal_memory_mapping_t mappings[] = {
+      Mapping(0, 4096), other_first, Mapping(4096, 4096, 4096), other_second};
+  iree_hal_memory_mapping_batch_t* batch = nullptr;
+  IREE_ASSERT_OK(iree_hal_memory_mapping_batch_create(
+      iree_hal_device_queue(cpu_device_, 0, 0), IREE_ARRAYSIZE(mappings),
+      mappings, 0, allocator_, &batch));
+  IREE_ASSERT_OK(iree_hal_memory_mapping_batch_resolve(batch));
+  ASSERT_EQ(batch->entry_count, 2u);
+  ASSERT_EQ(batch->update_count, 2u);
+  for (size_t i = 0; i < batch->entry_count; ++i) {
+    const auto& entry = batch->entries[i];
+    ASSERT_EQ(entry.update_count, 1u);
+    const bool first = &entry.target->buffer == target_;
+    EXPECT_EQ(entry.updates[0].target_range.byte_offset, first ? 0u : 4096u);
+    EXPECT_EQ(entry.updates[0].source.mapping_source.offset,
+              first ? 0u : 8192u);
+    EXPECT_EQ(entry.updates[0].target_range.byte_length, 8192u);
+  }
+  iree_hal_memory_mapping_batch_release(batch);
+  iree_hal_buffer_release(other_target);
+}
+
+TEST_F(MappingPublicationTest, RejectsOverlapBeforePublishingCompactedPrefix) {
+  iree_hal_buffer_t* alias = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_buffer_subspan(target_, 4096, 8192, allocator_, &alias));
+  auto overlap = Mapping(0, 8192);
+  overlap.target = alias;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      Update({Mapping(0, 4096), Mapping(4096, 4096, 4096), overlap}));
+  EXPECT_EQ(native_.update_count, 0);
+  iree_hal_buffer_release(alias);
+}
+
+TEST_F(MappingPublicationTest,
+       CoalescedPublicationPreservesPartialReclamation) {
+  IREE_ASSERT_OK(
+      Update({Mapping(8192, 4096, 8192), Mapping(0, 4096),
+              Mapping(12288, 4096, 12288), Mapping(4096, 4096, 4096)}));
+  ASSERT_EQ(native_.last_updates.size(), 1u);
+  EXPECT_EQ(native_.last_updates[0].byte_length, 16384u);
+  const auto memory = native_.last_updates[0].memory;
+  // Publication does not make the native run an indivisible lifetime unit.
+  // Remove its middle, then reuse those bytes independently.
+  const iree_hal_memory_mapping_t removal[] = {
+      {.target = target_, .scope = scope_, .target_range = {4096, 4096}},
+      {.target = target_, .scope = scope_, .target_range = {8192, 4096}},
+  };
+  IREE_ASSERT_OK(Update({removal[0], removal[1]}));
+  ASSERT_EQ(native_.last_updates.size(), 1u);
+  EXPECT_EQ(native_.last_updates[0].byte_length, 8192u);
+  EXPECT_EQ(native_.last_updates[0].memory, nullptr);
+  for (uint64_t offset : {0u, 12288u}) {
+    iree_hal_amd_fabric_virtual_mapping_t mapping;
+    IREE_ASSERT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
+        iree_hal_buffer_virtual_view(target_), scope_.id, offset, 4096,
+        &mapping));
+    EXPECT_EQ(mapping.native.memory, memory);
+    EXPECT_EQ(mapping.native.source_byte_offset, offset);
+    EXPECT_EQ(mapping.native.byte_length, 4096u);
+  }
+  IREE_ASSERT_OK(
+      Update({Mapping(4096, 4096, 16384), Mapping(8192, 4096, 20480)}));
+  ASSERT_EQ(native_.last_updates.size(), 1u);
+  iree_hal_amd_fabric_virtual_mapping_t mapping;
+  IREE_ASSERT_OK(iree_hal_amd_fabric_virtual_buffer_query_source(
+      iree_hal_buffer_virtual_view(target_), scope_.id, 4096, 8192, &mapping));
+  EXPECT_EQ(mapping.native.memory, memory);
+  EXPECT_EQ(mapping.native.source_byte_offset, 16384u);
+  EXPECT_EQ(mapping.native.byte_length, 8192u);
+}
+
 TEST_F(MappingPublicationTest, AllocationFailurePrecedesNativeMutation) {
   IREE_ASSERT_OK(Update({Mapping(0, 16384)}));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -1578,7 +1800,10 @@ TEST_P(MappingPriorityTest, MappingOvertakesRemainingNativeSteps) {
   EXPECT_EQ(mapping_position - sequence.begin(),
             GetParam() == NativeBatchKind::kRollback ? 4 : 1);
   EXPECT_EQ(native_.update_count, 1);
-  EXPECT_EQ(native_.last_updates.size(), 2u);
+  ASSERT_EQ(native_.last_updates.size(), 1u);
+  EXPECT_EQ(native_.last_updates[0].target_byte_offset, 0u);
+  EXPECT_EQ(native_.last_updates[0].source_byte_offset, 0u);
+  EXPECT_EQ(native_.last_updates[0].byte_length, 8192u);
 
   native_.before_create = {};
   native_.before_destroy = {};

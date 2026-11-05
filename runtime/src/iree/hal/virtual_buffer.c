@@ -918,6 +918,28 @@ static int iree_hal_memory_mapping_compare(const void* lhs, const void* rhs) {
              : 0;
 }
 
+// Original views retain ownership independently of the native update vector.
+// Only committed source bindings identify contiguous bytes of one native owner;
+// the null source scratch populated during capture does not identify removals.
+static bool iree_hal_memory_mapping_updates_are_contiguous(
+    const iree_hal_memory_mapping_update_t* previous,
+    const iree_hal_memory_mapping_update_t* current) {
+  return previous->scope_id == current->scope_id &&
+         previous->operation == current->operation &&
+         previous->access == current->access &&
+         previous->target_range.byte_offset +
+                 previous->target_range.byte_length ==
+             current->target_range.byte_offset &&
+         previous->source.mapping_source.descriptor ==
+             current->source.mapping_source.descriptor &&
+         previous->source.mapping_source.granularity ==
+             current->source.mapping_source.granularity &&
+         (!previous->source.mapping_source.descriptor ||
+          previous->source.mapping_source.offset +
+                  previous->target_range.byte_length ==
+              current->source.mapping_source.offset);
+}
+
 static iree_status_t iree_hal_memory_mapping_batch_resolve_phase(
     iree_hal_memory_mapping_batch_storage_t* batch,
     iree_hal_memory_mapping_phase_t phase) {
@@ -950,19 +972,32 @@ static iree_status_t iree_hal_memory_mapping_batch_resolve_phase(
   if (iree_status_is_ok(status)) {
     iree_hal_memory_mapping_batch_entry_t* entries =
         (iree_hal_memory_mapping_batch_entry_t*)batch->base.entries;
-    for (iree_host_size_t i = 0; i < batch->base.update_count; ++i) {
+    const iree_host_size_t resolved_count = batch->base.update_count;
+    batch->base.update_count = 0;
+    for (iree_host_size_t i = 0; i < resolved_count; ++i) {
       const iree_hal_memory_mapping_resolved_t* resolved = &batch->resolved[i];
-      batch->updates[i] = resolved->update;
       if (!i || resolved->target != batch->resolved[i - 1].target ||
           resolved->projection != batch->resolved[i - 1].projection) {
         entries[batch->base.entry_count++] =
             (iree_hal_memory_mapping_batch_entry_t){
                 .target = resolved->target,
                 .projection = resolved->projection,
-                .updates = &batch->updates[i],
+                .updates = &batch->updates[batch->base.update_count],
             };
       }
-      ++entries[batch->base.entry_count - 1].update_count;
+      iree_hal_memory_mapping_batch_entry_t* entry =
+          &entries[batch->base.entry_count - 1];
+      if (phase == IREE_HAL_MEMORY_MAPPING_PHASE_COMMIT &&
+          entry->update_count &&
+          iree_hal_memory_mapping_updates_are_contiguous(
+              &batch->updates[batch->base.update_count - 1],
+              &resolved->update)) {
+        batch->updates[batch->base.update_count - 1].target_range.byte_length +=
+            resolved->update.target_range.byte_length;
+      } else {
+        batch->updates[batch->base.update_count++] = resolved->update;
+        ++entry->update_count;
+      }
     }
   }
   return status;

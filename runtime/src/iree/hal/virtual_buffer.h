@@ -219,6 +219,8 @@ typedef struct iree_hal_memory_mapping_t {
 // Resolved source identity and target coordinates for one native projection.
 // Public ranges and access have been validated and transient sources committed
 // before native update. Arrays are sorted by target offset and nonoverlapping.
+// Contiguous native ranges with identical scope, operation, and access are
+// coalesced independently of the original buffer views' ownership boundaries.
 typedef struct iree_hal_memory_mapping_update_t {
   // Exact admitted target site, preserved across native projection aliases.
   uint32_t scope_id;
@@ -381,7 +383,9 @@ IREE_API_EXPORT iree_status_t iree_hal_memory_mapping_batch_create(
 // Resolves all native targets and sources after prerequisite allocations have
 // committed. Validates original-view grants and bounds before translating into
 // root coordinates, grouping projections and rejecting overlaps through
-// aliases. Failure leaves all native mappings unchanged.
+// aliases. Contiguous updates with identical native sources and semantics are
+// coalesced without releasing any original view. Failure leaves all native
+// mappings unchanged.
 IREE_API_EXPORT iree_status_t
 iree_hal_memory_mapping_batch_resolve(iree_hal_memory_mapping_batch_t* batch);
 
