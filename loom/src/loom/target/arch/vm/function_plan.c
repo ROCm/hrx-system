@@ -153,10 +153,14 @@ static iree_status_t loom_vm_function_moves(
               ? storage->binding_locations[cell->location]
               : storage->move_locations[cell->location];
       if (reg->descriptor_reg_class_id == VM_CORE_REG_CLASS_ID_REF) {
+        const bool transfer = move->kind == LOOM_LOW_MOVE_KIND_TRANSFER;
         status = loom_vm_function_transfer_refs(
             stream,
-            is_store ? IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_RETAIN
-                     : IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_RETAIN,
+            is_store
+                ? (transfer ? IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_MOVE
+                            : IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_RETAIN)
+                : (transfer ? IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_MOVE
+                            : IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_RETAIN),
             location, (uint16_t)reg->location, 1);
       } else {
         status = loom_vm_function_transfer_stack(
@@ -164,12 +168,14 @@ static iree_status_t loom_vm_function_moves(
       }
       continue;
     }
-    // Value copies and ref retains share the same register-pair encoding.
-    // Ref copies acquire the new owner before replacing their destination.
+    // Register-pair encodings share operand locations. Allocation retains
+    // whether a reference source survives or transfers its complete carrier.
     const iree_vm_bytecode_value_copy_t instruction = {
         .opcode =
             move->source.descriptor_reg_class_id == VM_CORE_REG_CLASS_ID_REF
-                ? IREE_VM_BYTECODE_OPCODE_REF_RETAIN
+                ? (move->kind == LOOM_LOW_MOVE_KIND_TRANSFER
+                       ? IREE_VM_BYTECODE_OPCODE_REF_MOVE
+                       : IREE_VM_BYTECODE_OPCODE_REF_RETAIN)
                 : IREE_VM_BYTECODE_OPCODE_VALUE_COPY,
         .destination_v8 = (uint8_t)move->destination.location,
         .source_v8 = (uint8_t)move->source.location,
@@ -662,9 +668,8 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_vm_function_call(
     status = iree_io_stream_write(stream, sizeof(instruction), &instruction);
   }
   if (iree_status_is_ok(status)) {
-    // Reference copies retain their destination before replacing its owner,
-    // just as on CFG edges. Unused physical owners are released on overwrite
-    // or frame teardown; SSA does not promise destruction at last use.
+    // Returned ABI cells transfer into their assigned locations. The shared
+    // move plan preserves aliases until their last read and retires scratch.
     status =
         loom_vm_function_moves(frame->allocation.moves, moves->results.moves,
                                &scratch->storage, stream);

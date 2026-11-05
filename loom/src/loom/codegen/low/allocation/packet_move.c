@@ -193,6 +193,7 @@ loom_low_allocation_packet_move_append_relation(
       builder->context->move_plan, source_assignment,
       relation->source_unit_offset, destination_assignment,
       relation->result_unit_offset, relation->unit_count,
+      relation->cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_MOVE,
       &builder->raw_move_count);
   const iree_host_size_t live_unit_count = builder->raw_move_count - move_start;
   return live_unit_count == relation->unit_count

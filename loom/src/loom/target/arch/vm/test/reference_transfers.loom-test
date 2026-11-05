@@ -1,0 +1,146 @@
+// RUN: emit vm-dis
+
+vm.target<core> @vm
+
+low.func.decl import(native, "make", module = "provider") target<vm.core>(@vm) abi(vm_function) @make() -> (reg<vm.ref : buffer>)
+
+low.func.decl import(native, "consume", module = "provider") target<vm.core>(@vm) abi(vm_function) @consume(%value: reg<vm.ref : buffer>)
+
+// Explicit ownership transfer and its outgoing call both retire their source
+// cells. Detached placement exercises real transport instead of coalescing.
+low.func.def public target<vm.core>(@vm) abi(vm_function) @transfer() asm {
+  %created = low.func.call @make() : () -> (reg<vm.ref : buffer>)
+  %moved = move %created {detached = true} : reg<vm.ref : buffer> -> reg<vm.ref : buffer>
+  low.func.call @consume(%moved) : (reg<vm.ref : buffer>)
+  return
+}
+
+// ----
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "transfer"
+    string @string1 = "vm"
+    string @string2 = "buffer"
+    string @string3 = "provider"
+    string @string4 = "consume"
+    string @string5 = "make"
+  }
+
+  section ref_types alignment(8) {
+    namespace @ref_group0 name(@string1) {
+      ref_type @ref_type0 name(@string2)
+    }
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 () -> ()
+    signature @signature1 () -> (ref(@ref_type0))
+    signature @signature2 (ref(@ref_type0)) -> ()
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+    callable @callable1 flags([]) depth(0) : @signature1
+    callable @callable2 flags([]) depth(0) : @signature2
+  }
+
+  section imports alignment(8) {
+    group @import_group0 module_name(@string3) {
+      import @import0 name(@string4) flags([]) : @callable2
+      import @import1 name(@string5) flags([]) : @callable1
+    }
+  }
+
+  section exports alignment(8) {
+    export @export0 name(@string0) : @callable0 = @function0
+  }
+
+  section functions alignment(8) {
+    func @function0 : @callable0 flags([has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      control.call @import1 {direct_ref_move_mask = 0x0000}
+      %r1 = ref.move %r0
+      %r0 = ref.move %r1
+      control.call @import0 {direct_ref_move_mask = 0x0001}
+      control.return
+    }
+  }
+
+}
+
+// ====
+// RUN: emit vm-dis
+
+vm.target<core> @vm
+
+type.decl import("provider", "object") @Object
+
+func.decl import("provider", "get") target(@vm) @get() -> (ptr<@Object>)
+
+func.decl import("provider", "use") target(@vm) @use(%value: ptr<@Object>)
+
+// The first call needs a separate carrier while the caller keeps the value
+// live. The final call takes that carrier instead of leaving a hidden owner.
+func.def public target(@vm) @use_twice() {
+  %value = func.call @get() : () -> (ptr<@Object>)
+  func.call @use(%value) : (ptr<@Object>)
+  func.call @use(%value) : (ptr<@Object>)
+  func.return
+}
+
+// ----
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "use_twice"
+    string @string1 = "provider"
+    string @string2 = "object"
+    string @string3 = "provider"
+    string @string4 = "get"
+    string @string5 = "use"
+  }
+
+  section ref_types alignment(8) {
+    namespace @ref_group0 name(@string1) {
+      ref_type @ref_type0 name(@string2)
+    }
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 () -> ()
+    signature @signature1 () -> (ptr(@ref_type0))
+    signature @signature2 (ptr(@ref_type0)) -> ()
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+    callable @callable1 flags([]) depth(0) : @signature1
+    callable @callable2 flags([]) depth(0) : @signature2
+  }
+
+  section imports alignment(8) {
+    group @import_group0 module_name(@string3) {
+      import @import0 name(@string4) flags([]) : @callable1
+      import @import1 name(@string5) flags([]) : @callable2
+    }
+  }
+
+  section exports alignment(8) {
+    export @export0 name(@string0) : @callable0 = @function0
+  }
+
+  section functions alignment(8) {
+    func @function0 : @callable0 flags([has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      control.call @import0 {direct_ref_move_mask = 0x0000}
+      %r1 = ref.move %r0
+      %r0 = ref.retain %r1
+      control.call @import1 {direct_ref_move_mask = 0x0001}
+      %r0 = ref.move %r1
+      control.call @import1 {direct_ref_move_mask = 0x0001}
+      control.return
+    }
+  }
+
+}

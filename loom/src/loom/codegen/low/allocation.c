@@ -355,7 +355,7 @@ static iree_status_t loom_low_allocation_build_entry_moves(
     source.location_base = entry->location_base;
     loom_low_allocation_move_plan_append_assignment(
         &state->move_plan, &source, 0, destination, 0,
-        destination->location_count, &raw_move_count);
+        destination->location_count, /*consume_source=*/true, &raw_move_count);
     loom_low_allocation_target_constraints_record_location_extent(
         &state->target_constraints, source.descriptor_reg_class_id,
         source.location_kind, source.location_base, source.location_count);
@@ -432,10 +432,15 @@ loom_low_allocation_append_boundary_moves(
         boundary.location_count);
     const bool from_abi =
         direction == LOOM_LOW_ALLOCATION_BOUNDARY_DIRECTION_FROM_ABI;
+    const bool consume_source =
+        from_abi ||
+        loom_low_allocation_live_range_assignment_max_unit_end_point(
+            state->unit_liveness.end_points, state->unit_liveness.point_count,
+            assignment) <= point;
     loom_low_allocation_move_plan_append_assignment(
         &state->move_plan, from_abi ? &boundary : assignment, 0,
         from_abi ? assignment : &boundary, 0, assignment->location_count,
-        &raw_count);
+        consume_source, &raw_count);
   }
   IREE_RETURN_IF_ERROR(loom_low_allocation_move_plan_append_group(
       &state->move_plan, owner_op, point, point, raw_count, out_group,

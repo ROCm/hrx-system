@@ -272,10 +272,18 @@ void loom_low_allocation_move_plan_append_assignment(
     loom_low_allocation_move_plan_t* plan,
     const loom_low_allocation_assignment_t* source, uint32_t source_unit_offset,
     const loom_low_allocation_assignment_t* destination,
-    uint32_t destination_unit_offset, uint32_t unit_count,
+    uint32_t destination_unit_offset, uint32_t unit_count, bool consume_source,
     iree_host_size_t* inout_raw_move_count) {
   const loom_low_allocation_unit_liveness_t* unit_liveness =
       plan->context.unit_liveness;
+  const loom_low_move_kind_t move_kind =
+      consume_source && iree_any_bit_set(
+                            plan->context.descriptor_set
+                                ->reg_classes[source->descriptor_reg_class_id]
+                                .flags,
+                            LOOM_LOW_REG_CLASS_FLAG_REFERENCE)
+          ? LOOM_LOW_MOVE_KIND_TRANSFER
+          : LOOM_LOW_MOVE_KIND_COPY;
   for (uint32_t unit = 0; unit < unit_count; ++unit) {
     const uint32_t destination_unit = destination_unit_offset + unit;
     const uint32_t start_point =
@@ -294,6 +302,7 @@ void loom_low_allocation_move_plan_append_assignment(
             plan->context.descriptor_set, source, source_unit_offset + unit),
         .destination = loom_low_allocation_assignment_unit_location(
             plan->context.descriptor_set, destination, destination_unit),
+        .kind = move_kind,
     };
   }
 }
