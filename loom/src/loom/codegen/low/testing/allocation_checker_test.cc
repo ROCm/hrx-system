@@ -27,6 +27,7 @@ loom_liveness_interval_t MakeInterval(loom_value_id_t value_id,
       .end_point = end_point,
       .value_class = value_class,
       .unit_count = 1,
+      .definition_point = start_point,
   };
   return interval;
 }
@@ -236,6 +237,47 @@ class AllocationCheckerTest : public ::testing::Test {
 TEST_F(AllocationCheckerTest, AcceptsDisjointAssignments) {
   const loom_low_allocation_check_result_t result = Check();
   EXPECT_EQ(result.violation_count, 0u);
+}
+
+TEST_F(AllocationCheckerTest, AcceptsDefinedAssignmentFlags) {
+  static constexpr loom_low_allocation_assignment_flags_t kFlags[] = {
+      LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS,
+      LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_EXPANDED_EXECUTION_DEFINITION,
+      LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REQUIRES_REGISTER,
+      LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_ALL,
+  };
+  for (const loom_low_allocation_assignment_flags_t flags : kFlags) {
+    SCOPED_TRACE(flags);
+    assignments_[0].flags = flags;
+    EXPECT_EQ(Check().violation_count, 0u);
+  }
+}
+
+TEST_F(AllocationCheckerTest, RejectsUnknownAssignmentFlags) {
+  assignments_[0].flags = (loom_low_allocation_assignment_flags_t)(1u << 15);
+  const loom_low_allocation_check_result_t result = Check();
+  EXPECT_GT(result.violation_count, 0u);
+  EXPECT_EQ(result.first_violation.kind,
+            LOOM_LOW_ALLOCATION_CHECK_VIOLATION_ASSIGNMENT_SHAPE);
+}
+
+TEST_F(AllocationCheckerTest, RejectsRequiredRegisterInSpillSlot) {
+  assignments_[0].flags = LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REQUIRES_REGISTER;
+  assignments_[0].location_kind = LOOM_LOW_ALLOCATION_LOCATION_SPILL_SLOT;
+  const loom_low_allocation_check_result_t result = Check();
+  EXPECT_GT(result.violation_count, 0u);
+  EXPECT_EQ(result.first_violation.kind,
+            LOOM_LOW_ALLOCATION_CHECK_VIOLATION_ASSIGNMENT_SHAPE);
+}
+
+TEST_F(AllocationCheckerTest, RejectsExpandedDefinitionAwayFromDefinition) {
+  assignments_[0].flags =
+      LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_EXPANDED_EXECUTION_DEFINITION;
+  assignments_[0].start_point = 1;
+  const loom_low_allocation_check_result_t result = Check();
+  EXPECT_GT(result.violation_count, 0u);
+  EXPECT_EQ(result.first_violation.kind,
+            LOOM_LOW_ALLOCATION_CHECK_VIOLATION_ASSIGNMENT_SHAPE);
 }
 
 TEST_F(AllocationCheckerTest, AcceptsAcquisitionBeforeTiedSourceDefinition) {
