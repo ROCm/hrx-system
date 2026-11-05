@@ -48,6 +48,9 @@ static iree_status_t loom_bytecode_string_table_read_values(
     return loom_bytecode_reader_emit_count_exceeds(decoder, table_name, count,
                                                    count_limit, count_offset);
   }
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+      decoder, &cursor, table_name, count,
+      /*minimum_entry_length=*/1, /*minimum_trailing_length=*/0, count_offset));
 
   iree_string_view_t* values = NULL;
   if (count > 0) {

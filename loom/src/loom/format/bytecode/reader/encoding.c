@@ -71,6 +71,10 @@ static iree_status_t loom_bytecode_encoding_table_begin(
         validator->decoder, IREE_SV("encoding_families"), family_count,
         LOOM_BYTECODE_MAX_ENCODING_COUNT, family_count_offset);
   }
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+      validator->decoder, &table.cursor, IREE_SV("encoding_families"),
+      family_count, /*minimum_entry_length=*/1,
+      /*minimum_trailing_length=*/1, family_count_offset));
   if (family_count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         validator->scratch_arena, (iree_host_size_t)family_count,
@@ -110,6 +114,10 @@ static iree_status_t loom_bytecode_encoding_table_begin(
         validator->decoder, IREE_SV("encoding_instances"), instance_count,
         LOOM_BYTECODE_MAX_ENCODING_COUNT, instance_count_offset);
   }
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+      validator->decoder, &table.cursor, IREE_SV("encoding_instances"),
+      instance_count, /*minimum_entry_length=*/4,
+      /*minimum_trailing_length=*/0, instance_count_offset));
   // Parameters may reference only completed prior instances. The declared
   // total remains separate from the prefix available to attribute validation.
   validator->module_view->encodings.count = 0;

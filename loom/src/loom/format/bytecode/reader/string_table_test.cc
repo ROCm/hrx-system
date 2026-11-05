@@ -127,6 +127,20 @@ TEST_F(BytecodeStringTableTest, RejectsNonemptyStringZero) {
   EXPECT_EQ(error_count_, 1u);
 }
 
+TEST_F(BytecodeStringTableTest, RejectsCountBeforeRetainingViews) {
+  const uint8_t data[] = {0x02};  // Two strings with no length records.
+  const loom_bytecode_reader_section_t section =
+      MakeSection(LOOM_BYTECODE_SECTION_STRINGS, data, sizeof(data));
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DEFERRED,
+      loom_bytecode_string_table_read(&decoder_, &section, &scratch_arena_,
+                                      &storage_arena_, &module_view_));
+
+  EXPECT_EQ(error_count_, 1u);
+  EXPECT_EQ(storage_arena_.used_allocation_size, 0u);
+}
+
 TEST_F(BytecodeStringTableTest, RejectsDuplicateStrings) {
   const uint8_t data[] = {
       0x03,       // String count.

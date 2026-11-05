@@ -123,5 +123,19 @@ TEST_F(BytecodeOperationTest, RetainsResolvedOperations) {
   EXPECT_EQ(error_count_, 0u);
 }
 
+TEST_F(BytecodeOperationTest, RejectsCountBeforeResolvingOperations) {
+  const uint8_t data[] = {0x02};  // Two operations with no name records.
+  const loom_bytecode_reader_section_t section =
+      MakeSection(data, sizeof(data));
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DEFERRED,
+      loom_bytecode_operation_table_validate(
+          &decoder_, &context_, &module_view_, &scratch_arena_, &section));
+
+  EXPECT_EQ(error_count_, 1u);
+  EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
+}
+
 }  // namespace
 }  // namespace loom

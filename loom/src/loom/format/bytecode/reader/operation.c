@@ -46,6 +46,9 @@ static iree_status_t loom_bytecode_operation_table_begin(
         validator->decoder, IREE_SV("OPS"), count, LOOM_BYTECODE_MAX_OP_COUNT,
         count_offset);
   }
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+      validator->decoder, &table.cursor, IREE_SV("OPS"), count,
+      /*minimum_entry_length=*/1, /*minimum_trailing_length=*/0, count_offset));
   if (count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         validator->scratch_arena, (iree_host_size_t)count,

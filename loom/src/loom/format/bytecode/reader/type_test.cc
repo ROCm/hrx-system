@@ -225,6 +225,18 @@ class BytecodeTypeTest : public ::testing::Test {
   loom_module_t* module_ = nullptr;
 };
 
+TEST_F(BytecodeTypeTest, RejectsCountBeforeRetainingPlan) {
+  const uint8_t data[] = {
+      0x02,                     // Two types.
+      LOOM_BYTECODE_TYPE_NONE,  // Only one minimum record.
+  };
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED, BuildPlan(data, sizeof(data)));
+
+  EXPECT_EQ(error_count_, 1u);
+  EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
+}
+
 TEST_F(BytecodeTypeTest, BuildsAndMaterializesTopologicalPlan) {
   const uint8_t data[] = {
       0x03,

@@ -495,6 +495,11 @@ static iree_status_t loom_bytecode_reader_validate_file_header(
 static iree_status_t loom_bytecode_reader_read_module_directory(
     loom_bytecode_file_reader_t* reader, loom_bytecode_reader_cursor_t* cursor,
     uint64_t string_pool_length) {
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+      &reader->decoder, cursor, IREE_SV("MODULES"), reader->module_count,
+      /*minimum_entry_length=*/24,
+      /*minimum_trailing_length=*/string_pool_length,
+      /*count_offset=*/6));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       reader->arena, reader->module_count,
       sizeof(loom_bytecode_reader_module_t), (void**)&reader->modules));
@@ -644,6 +649,10 @@ static iree_status_t loom_bytecode_reader_read_section_directory(
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
         &reader->decoder, &cursor, summary_fields[i]));
   }
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+      &reader->decoder, &cursor, IREE_SV("SECTIONS"), section_count,
+      /*minimum_entry_length=*/32, /*minimum_trailing_length=*/0,
+      section_count_offset));
 
   loom_bytecode_reader_section_t* sections = NULL;
   if (section_count > 0) {

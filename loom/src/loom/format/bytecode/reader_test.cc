@@ -78,6 +78,33 @@ static iree_status_t DeferDiagnostic(void* user_data,
   return iree_status_from_code(IREE_STATUS_DEFERRED);
 }
 
+class ObservedBytecodeArena {
+ public:
+  explicit ObservedBytecodeArena(iree_host_size_t block_size) {
+    iree_arena_block_pool_initialize(block_size, {this, Allocate}, &block_pool);
+  }
+  ~ObservedBytecodeArena() { iree_arena_block_pool_deinitialize(&block_pool); }
+
+  // Largest backing allocation requested by bytecode reader scratch storage.
+  iree_host_size_t largest_allocation = 0;
+  // Reader scratch block pool using the observed backing allocator.
+  iree_arena_block_pool_t block_pool = {};
+
+ private:
+  static iree_status_t Allocate(void* self, iree_allocator_command_t command,
+                                const void* parameters, void** pointer) {
+    auto* observer = static_cast<ObservedBytecodeArena*>(self);
+    if (command != IREE_ALLOCATOR_COMMAND_FREE) {
+      const auto* allocation =
+          static_cast<const iree_allocator_alloc_params_t*>(parameters);
+      observer->largest_allocation =
+          iree_max(observer->largest_allocation, allocation->byte_length);
+    }
+    const iree_allocator_t system = iree_allocator_system();
+    return system.ctl(system.self, command, parameters, pointer);
+  }
+};
+
 static iree_status_t VerifyMaterializedModule(
     bool verify_module, const loom_bytecode_read_options_t& read_options,
     loom_bytecode_read_result_t* read_result, loom_module_t** inout_module) {
@@ -2707,6 +2734,52 @@ TEST_F(ReaderTest, AcceptsEmptyModuleMetadata) {
   EXPECT_EQ(result.first_module.string_count, 2u);
   EXPECT_EQ(result.first_module.symbol_count, 0u);
 
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsImpossibleModuleCountBeforeScratchAllocation) {
+  std::vector<uint8_t> bytes(24, 0);
+  std::memcpy(bytes.data(), LOOM_BYTECODE_MAGIC, LOOM_BYTECODE_MAGIC_LENGTH);
+  bytes[4] = LOOM_BYTECODE_FORMAT_VERSION;
+  bytes[5] = LOOM_BYTECODE_LOCATION_MODE_SOURCE_LOCATIONS;
+  bytes[6] = 0xFF;
+  bytes[7] = 0xFF;
+
+  ObservedBytecodeArena storage(4096);
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result = {0};
+  const loom_bytecode_index_options_t options = {
+      .diagnostic_sink = {CaptureDiagnostic, &error_ids},
+  };
+  IREE_ASSERT_OK(loom_bytecode_read_metadata(
+      iree_make_const_byte_span(bytes.data(), bytes.size()),
+      IREE_SV("test.loombc"), &context_, &storage.block_pool, &options,
+      &result));
+
+  EXPECT_EQ(result.error_count, 1u);
+  EXPECT_EQ(error_ids, (std::vector<std::string>{"ERR_BYTECODE_009"}));
+  EXPECT_LE(storage.largest_allocation, 4096u);
+}
+
+TEST_F(ReaderTest, RejectsImpossibleSectionCountBeforeScratchAllocation) {
+  loom_module_t* module = CreateModule("empty");
+  auto bytes = WriteModule(module);
+  bytes[(size_t)ModuleOffset(bytes)] = 127;
+
+  ObservedBytecodeArena storage(4096);
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result = {0};
+  const loom_bytecode_index_options_t options = {
+      .diagnostic_sink = {CaptureDiagnostic, &error_ids},
+  };
+  IREE_ASSERT_OK(loom_bytecode_read_metadata(
+      iree_make_const_byte_span(bytes.data(), bytes.size()),
+      IREE_SV("test.loombc"), &context_, &storage.block_pool, &options,
+      &result));
+
+  EXPECT_EQ(result.error_count, 1u);
+  EXPECT_EQ(error_ids, (std::vector<std::string>{"ERR_BYTECODE_009"}));
+  EXPECT_LE(storage.largest_allocation, 4096u);
   loom_module_free(module);
 }
 

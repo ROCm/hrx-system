@@ -752,6 +752,9 @@ static iree_status_t loom_bytecode_type_table_begin(
         decoder, IREE_SV("TYPES"), count, LOOM_BYTECODE_MAX_TYPE_COUNT,
         count_offset);
   }
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+      decoder, out_cursor, IREE_SV("TYPES"), count,
+      /*minimum_entry_length=*/1, /*minimum_trailing_length=*/0, count_offset));
   module_view->types.count = (iree_host_size_t)count;
   return iree_ok_status();
 }
