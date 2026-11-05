@@ -1,3 +1,36 @@
+// RUN: pass outline-pipeline-strands,cfg-simplify,outline-pipeline-strands
+
+// An effectful strand with no SSA values outlines without capture storage.
+// Both calls retain their order in the zero-argument worker.
+func.decl @begin()
+
+func.decl @finish()
+
+pipeline.def @no_captures() run() {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @begin() : ()
+    func.call @finish() : ()
+  }
+}
+
+// ----
+func.decl @begin()
+
+func.decl @finish()
+
+pipeline.def @no_captures() run() {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @__pipeline_strand_0() : ()
+  }
+}
+
+func.def inline @__pipeline_strand_0() {
+  func.call @begin() : ()
+  func.call @finish() : ()
+  func.return
+}
+
+// ====
 // RUN: pass inline-callables,outline-pipeline-strands,cfg-simplify
 
 // Ordinary inline helpers and outlining preserve execution placement. The

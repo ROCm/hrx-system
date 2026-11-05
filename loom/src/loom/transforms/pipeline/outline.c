@@ -145,7 +145,8 @@ static iree_status_t loom_pipeline_outline_body(
       module, source_body, arena, &domain));
   const iree_host_size_t capture_count =
       domain.value_count - domain.definition_count;
-  const loom_value_id_t* captures = domain.value_ids + domain.definition_count;
+  const loom_value_id_t* captures =
+      capture_count ? domain.value_ids + domain.definition_count : NULL;
   loom_local_value_domain_release(&domain);
 
   loom_type_t* capture_types = NULL;
