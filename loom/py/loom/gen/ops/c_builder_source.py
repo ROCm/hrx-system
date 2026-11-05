@@ -253,6 +253,141 @@ def _single_builder_type_result_exprs(op: Op) -> list[str]:
     return result_exprs
 
 
+def _format_builder_definition(prefix: str, c_params: list[str]) -> list[str]:
+    """Formats the opening lines of one generated builder definition."""
+    lines = [f"iree_status_t {prefix}_build("]
+    for i, param in enumerate(c_params):
+        terminator = "," if i < len(c_params) - 1 else ") {"
+        lines.append(f"    {param}{terminator}")
+    return lines
+
+
+def _generate_pattern_builder_implementation(
+    prefix: str,
+    enum_name: str,
+    pattern: str,
+) -> list[str]:
+    """Generates a typed wrapper around a shared fixed-shape builder."""
+    lines = _format_builder_definition(prefix, c_builder_model.build_pattern_c_param_list(pattern))
+    instance_flags = "instance_flags" if pattern.endswith("_WITH_FLAGS") else "0"
+    shape = pattern.removesuffix("_WITH_FLAGS")
+
+    if shape == "BINARY":
+        lines.append("  return loom_builder_build_binary_op(")
+        lines.append(f"      builder, {enum_name}, {instance_flags}, lhs, rhs, result_type,")
+        lines.append("      location, out_op);")
+    elif shape == "UNARY":
+        lines.append("  return loom_builder_build_unary_op(")
+        lines.append(f"      builder, {enum_name}, {instance_flags}, input, result_type,")
+        lines.append("      location, out_op);")
+    elif shape == "CAST":
+        lines.append("  (void)input_type;")
+        lines.append("  return loom_builder_build_unary_op(")
+        lines.append(f"      builder, {enum_name}, {instance_flags}, input, result_type,")
+        lines.append("      location, out_op);")
+    elif shape == "COMPARISON":
+        lines.append("  (void)operand_type;")
+        lines.append("  return loom_builder_build_comparison_op(")
+        lines.append(f"      builder, {enum_name}, {instance_flags}, predicate, lhs, rhs,")
+        lines.append("      result_type, location, out_op);")
+    else:
+        raise ValueError(f"unknown compact builder pattern '{pattern}'")
+
+    lines.append("}")
+    return lines
+
+
+def _fixed_shape_builder_parts(
+    op: Op,
+    params: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], str, str] | None:
+    """Returns operands, flags, and result type for a shared fixed-shape builder."""
+    layout = compute_layout(op)
+    if (
+        layout.segmented_operands
+        or layout.variadic_operand is not None
+        or layout.fixed_operand_count > 2
+        or layout.variadic_result is not None
+        or layout.fixed_result_count != 1
+        or op.successors
+        or op.regions
+        or c_queries.non_flags_attrs(op)
+        or c_builder_model.static_tied_results(op)
+        or c_builder_model.build_flag_params(params)
+    ):
+        return None
+
+    allowed_param_kinds = {
+        "instance_flags",
+        "operand",
+        "result_type",
+        "result_types",
+    }
+    if any(param["kind"] not in allowed_param_kinds for param in params):
+        return None
+
+    operand_params = sorted(
+        (param for param in params if param["kind"] == "operand"),
+        key=lambda param: int(param["index"]),
+    )
+    if len(operand_params) != layout.fixed_operand_count or any(param.get("optional") for param in operand_params):
+        return None
+
+    result_params = [param for param in params if param["kind"] in ("result_type", "result_types")]
+    if len(result_params) > 1:
+        return None
+    if result_params:
+        result_param = result_params[0]
+        result_type = _c_parameter_name(result_param["name"]) if result_param["kind"] == "result_type" else "result_type"
+    else:
+        fixed_constraints = fixed_result_type_constraints(op)
+        if fixed_constraints is None or len(fixed_constraints) != 1:
+            return None
+        result_type = _fixed_result_type_c_expr(fixed_constraints[0])
+        if result_type is None:
+            return None
+
+    instance_flag_params = [param for param in params if param["kind"] == "instance_flags"]
+    if len(instance_flag_params) > 1:
+        return None
+    instance_flags = _c_parameter_name(instance_flag_params[0]["name"]) if instance_flag_params else "0"
+    return operand_params, instance_flags, result_type
+
+
+def _generate_fixed_shape_builder_implementation(
+    op: Op,
+    prefix: str,
+    enum_name: str,
+    shared_enums: SharedEnumMap,
+) -> list[str] | None:
+    """Generates a typed wrapper when an op has a shared fixed shape."""
+    params = c_builder_model.extract_c_params(op, shared_enums)
+    parts = _fixed_shape_builder_parts(op, params)
+    if parts is None:
+        return None
+    operand_params, instance_flags, result_type = parts
+    layout = compute_layout(op)
+    lines = _format_builder_definition(
+        prefix,
+        c_builder_model.build_c_param_list(op, params, layout, prefix),
+    )
+    operands = [_c_parameter_name(param["name"]) for param in operand_params]
+
+    if not operands:
+        lines.append("  return loom_builder_build_nullary_op(")
+        lines.append(f"      builder, {enum_name}, {instance_flags}, {result_type}, location, out_op);")
+    elif len(operands) == 1:
+        lines.append("  return loom_builder_build_unary_op(")
+        lines.append(f"      builder, {enum_name}, {instance_flags}, {operands[0]}, {result_type},")
+        lines.append("      location, out_op);")
+    else:
+        lines.append("  return loom_builder_build_binary_op(")
+        lines.append(f"      builder, {enum_name}, {instance_flags}, {operands[0]}, {operands[1]},")
+        lines.append(f"      {result_type}, location, out_op);")
+    lines.append("}")
+    return lines
+
+
 def _generate_builder_implementation(
     op: Op,
     prefix: str,
@@ -1337,7 +1472,6 @@ def generate_builders_c(
     lines.append("#include <string.h>")
     lines.append("")
     lines.append('#include "loom/ir/module.h"')
-    lines.append('#include "loom/ops/builder_macros.h"')
     if any(c_builder_model.variadic_result_count_source(op) is not None or _has_result_backed_region(op) for op in ops):
         lines.append('#include "loom/ir/value_replacement.h"')
     if any(isinstance(element, StableKeyRef) for op in ops for element in c_builder_model.flatten_format(op.format)):
@@ -1358,24 +1492,11 @@ def generate_builders_c(
         enum_name = _c_enum_name(op)
         pattern = c_builder_model.detect_builder_pattern(op)
 
-        if pattern == "BINARY":
-            lines.append(f"LOOM_DEFINE_BINARY_OP_BUILDER({prefix}_build, {enum_name})")
-        elif pattern == "BINARY_WITH_FLAGS":
-            lines.append(f"LOOM_DEFINE_BINARY_OP_WITH_FLAGS_BUILDER({prefix}_build, {enum_name})")
-        elif pattern == "UNARY":
-            lines.append(f"LOOM_DEFINE_UNARY_OP_BUILDER({prefix}_build, {enum_name})")
-        elif pattern == "UNARY_WITH_FLAGS":
-            lines.append(f"LOOM_DEFINE_UNARY_OP_WITH_FLAGS_BUILDER({prefix}_build, {enum_name})")
-        elif pattern == "CAST":
-            lines.append(f"LOOM_DEFINE_CAST_OP_BUILDER({prefix}_build, {enum_name})")
-        elif pattern == "CAST_WITH_FLAGS":
-            lines.append(f"LOOM_DEFINE_CAST_OP_WITH_FLAGS_BUILDER({prefix}_build, {enum_name})")
-        elif pattern == "COMPARISON":
-            lines.append(f"LOOM_DEFINE_COMPARISON_OP_BUILDER({prefix}_build, {enum_name})")
-        elif pattern == "COMPARISON_WITH_FLAGS":
-            lines.append(f"LOOM_DEFINE_COMPARISON_OP_WITH_FLAGS_BUILDER({prefix}_build, {enum_name})")
+        if pattern is not None:
+            lines.extend(_generate_pattern_builder_implementation(prefix, enum_name, pattern))
         else:
-            lines.extend(_generate_builder_implementation(op, prefix, enum_name, shared_enums))
+            fixed_shape_lines = _generate_fixed_shape_builder_implementation(op, prefix, enum_name, shared_enums)
+            lines.extend(fixed_shape_lines if fixed_shape_lines is not None else _generate_builder_implementation(op, prefix, enum_name, shared_enums))
 
         lines.append("")
 

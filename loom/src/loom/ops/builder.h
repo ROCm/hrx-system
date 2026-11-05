@@ -301,6 +301,38 @@ iree_status_t loom_builder_define_results(loom_builder_t* builder,
                                           iree_host_size_t result_count,
                                           loom_value_id_t* result_storage);
 
+// Builds and finalizes a zero-operand, one-result operation with no attributes,
+// regions, successors, or tied results. Generated typed builders use this to
+// share the common construction path while preserving their public signatures.
+iree_status_t loom_builder_build_nullary_op(
+    loom_builder_t* builder, loom_op_kind_t kind, uint8_t instance_flags,
+    loom_type_t result_type, loom_location_id_t location, loom_op_t** out_op);
+
+// Builds and finalizes a one-operand, one-result operation with no attributes,
+// regions, successors, or tied results. Generated typed builders use this to
+// share the common construction path while preserving their public signatures.
+iree_status_t loom_builder_build_unary_op(
+    loom_builder_t* builder, loom_op_kind_t kind, uint8_t instance_flags,
+    loom_value_id_t input, loom_type_t result_type, loom_location_id_t location,
+    loom_op_t** out_op);
+
+// Builds and finalizes a two-operand, one-result operation with no attributes,
+// regions, successors, or tied results. Generated typed builders use this to
+// share the common construction path while preserving their public signatures.
+iree_status_t loom_builder_build_binary_op(
+    loom_builder_t* builder, loom_op_kind_t kind, uint8_t instance_flags,
+    loom_value_id_t lhs, loom_value_id_t rhs, loom_type_t result_type,
+    loom_location_id_t location, loom_op_t** out_op);
+
+// Builds and finalizes a two-operand, one-result comparison with one enum
+// predicate attribute and no regions, successors, or tied results. Generated
+// typed builders preserve their operand-type parameter at the public boundary;
+// the operation's SSA operands already carry that type in the module.
+iree_status_t loom_builder_build_comparison_op(
+    loom_builder_t* builder, loom_op_kind_t kind, uint8_t instance_flags,
+    uint8_t predicate, loom_value_id_t lhs, loom_value_id_t rhs,
+    loom_type_t result_type, loom_location_id_t location, loom_op_t** out_op);
+
 // Copies tied-result metadata into |op|.
 iree_status_t loom_builder_copy_tied_results(
     const loom_tied_result_t* tied_results, iree_host_size_t tied_result_count,
