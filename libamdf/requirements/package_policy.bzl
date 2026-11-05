@@ -45,6 +45,7 @@ PACKAGE_POLICIES = [
             "libamdf/cts/...",
             "libamdf/examples/...",
             "libamdf/src/...",
+            "libamdf/tool/...",
         ],
         build_requirements = [LIBAMDF],
     ),
@@ -104,6 +105,18 @@ PACKAGE_POLICIES = [
     package_policy(
         packages = ["libamdf/cts/gpu/peer/..."],
         run_requirements = [AMDGPU_PEERS_RESOURCE],
+    ),
+    package_policy(
+        packages = ["libamdf/tool/amdf-info/gpu"],
+        build_requirements = [LIBAMDF_GPU],
+        run_requirements = [AMDGPU_RESOURCE],
+        resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    ),
+    package_policy(
+        packages = ["libamdf/tool/amdf-info/xdna"],
+        build_requirements = [LIBAMDF_XDNA],
+        run_requirements = [XDNA_RESOURCE],
+        resource_group = GPU_DEVICE_RESOURCE_GROUP,
     ),
     package_policy(
         packages = [

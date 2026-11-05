@@ -88,3 +88,7 @@ amdf_cc_binary = macro(
     inherit_attrs = iree_cc_binary,
     attrs = {},
 )
+
+def amdf_cc_tool(**kwargs):
+    """Declares an executable distributed in the installed AMDF component."""
+    amdf_cc_binary(**kwargs)
