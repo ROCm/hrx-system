@@ -1,0 +1,1 @@
+j{"name":"activity","definition":{"kind":"activity","prepare":"//files/prepare.loom","control":"//files/control.loom","sources":["//files/source.loom"],"assets":"//files/assets"}}

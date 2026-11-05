@@ -4,14 +4,26 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
-load("//loom/build_tools/bazel:python.bzl", "loom_py_library")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_fuzz", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:python.bzl", "loom_py_library", "loom_py_test")
 
 package(
     default_visibility = ["//loom/src/loom/serve:implementation"],
     features = ["layering_check"],
     licenses = ["notice"],
 )
+
+MODEL_REGISTRATION_FUZZ_SEEDS = [
+    "//loom/src/loom/serve/server/testdata/registration_fuzz:activity.txt",
+    "//loom/src/loom/serve/server/testdata/registration_fuzz:decision.txt",
+    "//loom/src/loom/serve/server/testdata/registration_fuzz:embedding.txt",
+    "//loom/src/loom/serve/server/testdata/registration_fuzz:image.txt",
+    "//loom/src/loom/serve/server/testdata/registration_fuzz:package.txt",
+    "//loom/src/loom/serve/server/testdata/registration_fuzz:recognition.txt",
+    "//loom/src/loom/serve/server/testdata/registration_fuzz:sequence.txt",
+    "//loom/src/loom/serve/server/testdata/registration_fuzz:speech.txt",
+    "//loom/src/loom/serve/server/testdata/registration_fuzz:text.txt",
+]
 
 exports_files(
     [
@@ -267,6 +279,39 @@ loom_cc_library(
         "//runtime/src/iree/base/internal:path",
         "//runtime/src/iree/base/internal:unicode",
         "//runtime/src/iree/io:file_handle",
+    ],
+)
+
+loom_cc_fuzz(
+    name = "model_registration_fuzz",
+    srcs = ["model_registration_fuzz.cc"],
+    args = [
+        "-seed_inputs=" + ",".join([
+            "$(rootpath %s)" % seed
+            for seed in MODEL_REGISTRATION_FUZZ_SEEDS
+        ]),
+    ],
+    data = MODEL_REGISTRATION_FUZZ_SEEDS,
+    deps = [
+        ":configuration",
+        "//loom/src/loom/serve/server/http:package",
+        "//loom/src/loom/serve/transport/http:request",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_py_test(
+    name = "model_registration_fuzz_test",
+    size = "small",
+    srcs = ["model_registration_fuzz_test.py"],
+    args = ["$(rootpath :model_registration_fuzz)"] + [
+        "$(rootpath %s)" % seed
+        for seed in MODEL_REGISTRATION_FUZZ_SEEDS
+    ],
+    data = [":model_registration_fuzz"] + MODEL_REGISTRATION_FUZZ_SEEDS,
+    tags = [
+        "manual",
+        "skip-bazel_to_cmake",
     ],
 )
 

@@ -1,0 +1,6 @@
+pdeployment/request.json
+deployment/prepare.loom
+prepare
+deployment/source.loom
+source
+{"name":"package","definition":{"kind":"embedding","prepare":"prepare.loom","control":"control.loom","sources":["source.loom"],"assets":"assets"}}
