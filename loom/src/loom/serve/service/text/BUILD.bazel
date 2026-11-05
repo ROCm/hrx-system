@@ -705,6 +705,7 @@ loom_cc_library(
         "source.c",
         "stages.c",
         "state.c",
+        "state_memory.c",
         "state_resize.c",
         "variant.c",
         "warmup.c",
@@ -720,6 +721,7 @@ loom_cc_library(
         "source.h",
         "stages.h",
         "state.h",
+        "state_memory.h",
         "warmup.h",
     ],
     deps = [

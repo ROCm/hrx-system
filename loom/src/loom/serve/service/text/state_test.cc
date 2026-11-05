@@ -6,6 +6,7 @@
 
 #include "loom/serve/service/text/state.h"
 
+#include <algorithm>
 #include <memory>
 #include <vector>
 
@@ -406,6 +407,37 @@ TEST_P(TextStateTest, CarryFollowsSourceStride) {
                               (GetParam() & 4) ? 0 : 64);
   iree_unaligned_store_le_u64(bytes[0].data + offset + 16, 0);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Allocate());
+}
+
+TEST_P(TextStateTest, InitializationBatchesOnlyDeclaredBytes) {
+  iree_unaligned_store_le_u64(bytes[0].data + 16, 16);
+  IREE_ASSERT_OK(Allocate());
+  IREE_ASSERT_OK(loom_serve_execution_drain(execution));
+  std::vector<uint8_t> residual(64, 0xA5);
+  IREE_ASSERT_OK(Upload(state.residual, 0, residual));
+  const auto table_length = iree_hal_buffer_byte_length(state.epoch.buffers[2]);
+  std::vector<uint8_t> table(table_length, 0xD3);
+  IREE_ASSERT_OK(Upload(state.epoch.buffers[2], 0, table));
+  if (state.draft.row_table) {
+    IREE_ASSERT_OK(Upload(state.draft.row_table, 0, table));
+  }
+
+  // Exercise the production initializer against dirty storage: native zeroed
+  // pages cannot conceal a missing clear or an upload beyond its source span.
+  const auto before = loom_serve_execution_frontier(execution);
+  IREE_ASSERT_OK(loom_serve_text_memory_initialize(&state));
+  const auto after = loom_serve_execution_frontier(execution);
+  EXPECT_EQ(after.values[0], before.values[0] + 1);
+  EXPECT_EQ(after.values[1], before.values[1]);
+  IREE_ASSERT_OK(loom_serve_execution_drain(execution));
+  std::fill_n(residual.begin(), 16, 0);
+  ASSERT_NO_FATAL_FAILURE(CheckBytes(state.residual, 0, residual));
+  std::fill_n(table.begin(), 16, 0x31);
+  ASSERT_NO_FATAL_FAILURE(CheckBytes(state.epoch.buffers[2], 0, table));
+  if (state.draft.row_table) {
+    std::fill_n(table.begin(), 16, 0x72);
+    ASSERT_NO_FATAL_FAILURE(CheckBytes(state.draft.row_table, 0, table));
+  }
 }
 
 TEST_P(TextStateTest, PermanentRootsConsumeTheSharedPhysicalBudget) {

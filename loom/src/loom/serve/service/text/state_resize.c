@@ -190,11 +190,8 @@ iree_status_t loom_serve_text_state_resize(loom_serve_text_state_t* state,
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, loom_serve_text_state_validate_resize(state, row_count, storage));
-  const bool backed =
-      loom_serve_memory_operation_is_complete(state->memory.backing.operation);
-  IREE_ASSERT(backed && !state->prepared_reservations);
-  loom_serve_memory_operation_free(state->memory.backing.operation);
-  state->memory.backing.operation = NULL;
+  IREE_ASSERT(!state->prepared_reservations);
+  loom_serve_text_memory_complete_backing(&state->memory);
   const iree_host_size_t previous_count = state->row_count;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, loom_serve_text_state_resize_directories(
@@ -322,15 +319,6 @@ iree_status_t loom_serve_text_state_resize(loom_serve_text_state_t* state,
 }
 
 void loom_serve_text_state_complete_resize(loom_serve_text_state_t* state) {
-  for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
-       ++i) {
-    const bool complete = loom_serve_memory_operation_is_complete(
-        state->memory.growth.operations[i]);
-    IREE_ASSERT(complete);
-    loom_serve_memory_operation_free(state->memory.growth.operations[i]);
-    state->memory.growth.operations[i] = NULL;
-    iree_hal_semaphore_release(state->memory.growth.semaphores[i]);
-    state->memory.growth.semaphores[i] = NULL;
-  }
+  loom_serve_text_memory_complete_growth(&state->memory);
   loom_serve_text_storage_release_payloads(&state->storage);
 }

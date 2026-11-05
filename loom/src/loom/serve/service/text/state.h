@@ -11,6 +11,7 @@
 #include "loom/serve/runtime/execution/retirement.h"
 #include "loom/serve/runtime/storage/block_pool.h"
 #include "loom/serve/service/text/model.h"
+#include "loom/serve/service/text/state_memory.h"
 #include "loom/serve/service/text/storage.h"
 
 #ifdef __cplusplus
@@ -34,13 +35,6 @@ enum loom_serve_text_state_flag_bits_e {
   LOOM_SERVE_TEXT_STATE_FLAG_DRAFT = 1u << 1,
 };
 typedef uint32_t loom_serve_text_state_flags_t;
-
-// Next owner action after the current maintenance frontier succeeds.
-typedef enum loom_serve_text_trim_phase_e {
-  LOOM_SERVICE_TEXT_TRIM_COMPLETE,
-  LOOM_SERVICE_TEXT_TRIM_RELOCATE,
-  LOOM_SERVICE_TEXT_TRIM_RELEASE,
-} loom_serve_text_trim_phase_t;
 
 typedef struct loom_serve_text_state_t loom_serve_text_state_t;
 
@@ -166,46 +160,8 @@ struct loom_serve_text_state_t {
     // Reusable target/draft map uploads, at most two per participating row.
     iree_hal_transfer_operation_t* uploads;
   } cache;
-  // Physical commitment, separate from logical row/block ownership.
-  struct {
-    // Borrowed shared allocation domain for state and model parameters.
-    loom_serve_memory_pool_t* pool;
-    // Mutable virtual state only, excluding weights and execution workspace.
-    loom_runtime_storage_statistics_t statistics;
-    // Native backing changes exclude state mutation through their readiness.
-    struct {
-      // Owned native borrower, joined separately from failed queue readiness.
-      loom_serve_memory_operation_t* operation;
-      // Owned timeline imported before dependent transfers or maintenance.
-      iree_hal_semaphore_t* semaphore;
-      // Last admitted native readiness value.
-      uint64_t value;
-    } backing;
-    // Independent native mapping borrowers during cold reservation growth.
-    // Each owns its own readiness value; completion of one cannot publish
-    // another reservation's translations.
-    struct {
-      // Owned native operations, joined before replacing their directories.
-      loom_serve_memory_operation_t*
-          operations[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
-      // Owned readiness semaphores imported into the model timeline.
-      iree_hal_semaphore_t*
-          semaphores[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
-    } growth;
-    // Compaction spans native releases and device copies on one model owner.
-    struct {
-      // Action admitted after successful readiness of the preceding phase.
-      loom_serve_text_trim_phase_t phase;
-      // State-local release counter before this maintenance cut.
-      uint64_t released_before;
-    } trim;
-    // Optional reservations in source allocation order.
-    loom_serve_virtual_buffer_t*
-        buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
-    // Always-live initialized prefixes outside row-private storage.
-    iree_device_size_t
-        private_lengths[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
-  } memory;
+  // Native root backing and operations, independent of logical ownership.
+  loom_serve_text_memory_t memory;
   // Borrowed root containing private views, recurrent slots, and target KV.
   iree_hal_buffer_t* row_arena;
   // Borrowed model-wide residual root serialized by the execution timeline.
