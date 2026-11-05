@@ -12,7 +12,10 @@ from collections.abc import Hashable, Sequence
 from dataclasses import dataclass, field
 
 from loom.gen.support.string_pool import CStringPool
-from loom.gen.target.low.validation import validate_u16_table_count
+from loom.gen.target.low.validation import (
+    validate_asm_layout_counts,
+    validate_u16_table_count,
+)
 from loom.target.low_descriptors import (
     AsmOperandSegmentDelimiter,
     AsmResultValueType,
@@ -495,6 +498,13 @@ class CompiledAsmTableStorage:
         """Interns each form's exact table spans into this storage."""
 
         for asm_form in asm_forms:
+            validate_asm_layout_counts(
+                asm_form.mnemonic,
+                tied_result_count=len(asm_form.tied_results),
+                operand_segment_count=len(asm_form.operand_segments),
+                explicit_immediate_count=asm_form.explicit_immediate_count,
+                native_assembly_value_count=len(asm_form.native_assembly_values),
+            )
             result_type_start = None
             if asm_form.result_types:
                 result_type_start, _ = append_interned_sequence(

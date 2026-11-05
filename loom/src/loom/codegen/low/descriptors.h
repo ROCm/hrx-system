@@ -27,7 +27,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 70u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 71u
 
 // Sentinel for absent target-family or descriptor-set stable IDs.
 #define LOOM_LOW_STABLE_ID_NONE UINT64_C(0)
@@ -1501,7 +1501,7 @@ enum loom_low_asm_layout_flag_bits_e {
   // Positional fields are excluded when the form has a positional prefix.
   LOOM_LOW_ASM_LAYOUT_FLAG_REQUIRED_NAMED_IMMEDIATES = 1u << 2,
 };
-typedef uint16_t loom_low_asm_layout_flags_t;
+typedef uint8_t loom_low_asm_layout_flags_t;
 
 // Interned formatting spans shared by assembly forms in one storage provider.
 // Low assembly values follow canonical packet order. Descriptor rows own their
@@ -1522,19 +1522,19 @@ typedef struct loom_low_asm_layout_t {
   // First native assembly value row for this asm form.
   uint16_t native_assembly_value_start;
   // Number of default IR ownership rows, in descriptor constraint order.
-  uint16_t tied_result_count;
+  uint8_t tied_result_count;
   // Number of delimited input operand segments for this asm form.
-  uint16_t operand_segment_count;
+  uint8_t operand_segment_count;
   // Number of explicit spelling rows before the implicit descriptor suffix.
-  uint16_t explicit_immediate_count;
+  uint8_t explicit_immediate_count;
   // Number of native assembly value rows for this asm form.
-  uint16_t native_assembly_value_count;
+  uint8_t native_assembly_value_count;
   // Generation-owned syntax facts derived from the form and its descriptor.
   loom_low_asm_layout_flags_t flags;
 } loom_low_asm_layout_t;
 
-static_assert(sizeof(loom_low_asm_layout_t) == 20,
-              "loom_low_asm_layout_t must be 20 bytes");
+static_assert(sizeof(loom_low_asm_layout_t) == 16,
+              "loom_low_asm_layout_t must be 16 bytes");
 
 // Assembly identity remains separate from its shared formatting layout so
 // mnemonic lookup and packet selection do not load formatting spans.

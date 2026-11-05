@@ -1407,6 +1407,26 @@ def validate_descriptor_layout_counts(
         validate_u8(count, f"descriptor '{descriptor.key}' {name} count")
 
 
+def validate_asm_layout_counts(
+    mnemonic: str,
+    *,
+    tied_result_count: int,
+    operand_segment_count: int,
+    explicit_immediate_count: int,
+    native_assembly_value_count: int,
+) -> None:
+    """Checks assembly-form arities stored in compact layout rows."""
+
+    counts = (
+        ("tied result", tied_result_count),
+        ("operand segment", operand_segment_count),
+        ("explicit immediate", explicit_immediate_count),
+        ("native assembly value", native_assembly_value_count),
+    )
+    for name, count in counts:
+        validate_u8(count, f"asm form '{mnemonic}' {name} count")
+
+
 def validate_descriptor_operands(descriptor: Descriptor) -> DescriptorOperandLayout:
     validate_u16(
         len(descriptor.operands),

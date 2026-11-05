@@ -127,6 +127,34 @@ def test_descriptor_layout_counts_fit_compact_rows(field, description, count) ->
         validation.validate_descriptor_layout_counts(descriptor, operand_layout)
 
 
+@pytest.mark.parametrize(
+    ("field", "description"),
+    [
+        ("tied_result_count", "tied result"),
+        ("operand_segment_count", "operand segment"),
+        ("explicit_immediate_count", "explicit immediate"),
+        ("native_assembly_value_count", "native assembly value"),
+    ],
+)
+@pytest.mark.parametrize("count", [255, 256])
+def test_asm_layout_counts_fit_compact_rows(field, description, count) -> None:
+    counts = {
+        "tied_result_count": 0,
+        "operand_segment_count": 0,
+        "explicit_immediate_count": 0,
+        "native_assembly_value_count": 0,
+    }
+    counts[field] = count
+    if count == 256:
+        with pytest.raises(
+            ValueError,
+            match=re.escape(f"asm form 'test.add.i32' {description} count does not fit u8"),
+        ):
+            validation.validate_asm_layout_counts("test.add.i32", **counts)
+    else:
+        validation.validate_asm_layout_counts("test.add.i32", **counts)
+
+
 @pytest.mark.parametrize("alignment", [0, 3, 6, 65536])
 def test_operand_alignment_requires_representable_power_of_two(alignment) -> None:
     base = TEST_LOW_ADD_I32_DESCRIPTOR
