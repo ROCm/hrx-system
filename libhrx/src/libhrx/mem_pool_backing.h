@@ -45,6 +45,8 @@ typedef struct hrx_mem_pool_backing_t {
   hrx_mem_pool_sources_t uncached_device;
   // Retained sources with required coherent public host access.
   hrx_mem_pool_sources_t host;
+  // Retained sources with coherent host access and uncached device access.
+  hrx_mem_pool_sources_t uncached_host;
   // Retained fixed-block pool for coherent eight-byte native queue signals.
   iree_hal_pool_t* signals;
   // Retained import-only source for caller-owned host pointers.
@@ -73,11 +75,12 @@ iree_status_t hrx_mem_pool_backing_create_pool(hrx_device_t device,
 // Retains the device-owned source matching |memory_type| for an ordinary
 // allocation. The caller must release the returned pool. Host-local storage
 // receives required coherent host access; device-uncached storage receives a
-// hard uncached family requirement; all other storage prefers the device's
-// physical placement. MAPPING_SOURCE usage selects native backing that can be
-// aliased into explicit reservations on every device in the sealed group;
-// unsupported complete access sets fail construction. The returned pool
-// publishes its mapping geometry before any payload allocation.
+// hard uncached family requirement; their combination preserves both. All
+// other storage prefers the device's physical placement. MAPPING_SOURCE usage
+// selects native backing that can be aliased into explicit reservations on
+// every device in the sealed group; unsupported complete access sets fail
+// construction. The returned pool publishes its mapping geometry before any
+// payload allocation.
 iree_status_t hrx_mem_pool_backing_retain_allocation_source(
     hrx_device_t device, hrx_memory_type_t memory_type,
     hrx_buffer_usage_t usage, iree_hal_pool_t** out_pool);
