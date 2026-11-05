@@ -414,11 +414,20 @@ amdf_status_t AMDF_CALL amdf_gpu_user_queue_create(
       (family_info.publication_modes & AMDF_QUEUE_PUBLICATION_MODE_USER) == 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
+  amdf_queue_family_placement_info_t placement_info = {
+      .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_PLACEMENT_INFO,
+      .structure_size = sizeof(placement_info),
+  };
+  status = amdf_device_query_queue_family_placement_info(
+      device, create_info->queue_family_ordinal, &placement_info);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
   if ((create_info->required_capabilities &
        ~family_info.user_queue_capabilities) != 0 ||
       (create_info->placement != AMDF_QUEUE_PLACEMENT_DEFAULT &&
-       (family_info.placement_capabilities & (1u << create_info->placement)) ==
-           0) ||
+       (placement_info.placement_capabilities &
+        (1u << create_info->placement)) == 0) ||
       (family_info.producer_modes & (1u << create_info->producer_mode)) == 0 ||
       (family_info.priority_capabilities & (1u << create_info->priority)) ==
           0) {

@@ -20,6 +20,10 @@ amdf_status_t amdf_gpu_linux_dxg_query_memory_capabilities(
     const amdf_platform_endpoint_t* endpoint,
     amdf_gpu_dxg_memory_capabilities_t* out_capabilities);
 
+// Reads the selected physical adapter's local storage capacity in bytes.
+amdf_status_t amdf_gpu_linux_dxg_query_local_capacity(
+    const amdf_platform_endpoint_t* endpoint, uint64_t* out_capacity);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

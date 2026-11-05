@@ -86,6 +86,14 @@ are borrowed descriptors, not additional objects to destroy. Enumeration with
 zero capacity and null storage returns the required count with
 `BUFFER_TOO_SMALL` when any scopes exist.
 
+Explicit device creation establishes a physical scope's complete immutable
+metadata before exposing it. Later devices through the same endpoint reuse that
+descriptor without changing it. Destroying the device that first returned the
+scope does not invalidate the descriptor while its endpoint lives, but the
+descriptor retains no execution device. Allocations still require their actual
+storage device in the live access set and borrow those explicitly named devices.
+Scope queries perform no first-use initialization.
+
 For XDNA instruction storage, `context_enumerate_memory_scopes` returns a private
 scope borrowed from the explicitly created context. A HAL queries that scope
 with the context's device and EXECUTE access, allocates its instruction backing

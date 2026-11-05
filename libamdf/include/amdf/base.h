@@ -74,7 +74,7 @@ typedef uint32_t amdf_abi_version_t;
 #define AMDF_ABI_VERSION(N) ((amdf_abi_version_t)(N))
 
 /// Latest ABI version implemented by these headers.
-#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION(18)
+#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION(19)
 
 /// The unmangled symbol used to acquire the immutable API table.
 #define AMDF_QUERY_API_SYMBOL "amdf_query_api"
@@ -225,6 +225,8 @@ enum amdf_structure_type_e {
   AMDF_STRUCTURE_TYPE_MEMORY_PROGRAM_ATOMICS = 28,
   /// Exact operation sets sharing atomicity between two memory sites.
   AMDF_STRUCTURE_TYPE_MEMORY_PAIR_ATOMICS = 29,
+  /// Live queue-family placement and host-publication requirements.
+  AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_PLACEMENT_INFO = 30,
 };
 
 /// Identifier of an optional API table compiled into the providing library.

@@ -12,6 +12,7 @@
 #include "libamdf/src/endpoint.h"
 #include "libamdf/src/instance.h"
 #include "libamdf/src/platform/instance.h"
+#include "libamdf/src/structure.h"
 
 amdf_status_t amdf_device_initialize(amdf_device_t* device,
                                      const amdf_device_vtable_t* vtable,
@@ -58,6 +59,33 @@ amdf_status_t amdf_device_register_child(amdf_device_t* device) {
 
 void amdf_device_unregister_child(amdf_device_t* device) {
   amdf_child_tracker_unregister(&device->children);
+}
+
+amdf_status_t AMDF_CALL amdf_device_query_queue_family_placement_info(
+    amdf_device_t* device, uint32_t queue_family_ordinal,
+    amdf_queue_family_placement_info_t* out_info) {
+  if (device == NULL) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  const amdf_status_t status = amdf_structure_validate_output(
+      out_info, AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_PLACEMENT_INFO,
+      (uint32_t)sizeof(amdf_queue_family_placement_info_t));
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  if (queue_family_ordinal >=
+      amdf_endpoint_get_cached_info(device->endpoint)->queue_family_count) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
+  }
+  amdf_queue_family_placement_info_t info =
+      device->vtable->query_queue_family_placement(device,
+                                                   queue_family_ordinal);
+  info.type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_PLACEMENT_INFO;
+  info.structure_size = out_info->structure_size;
+  info.next = out_info->next;
+  info.ordinal = queue_family_ordinal;
+  *out_info = info;
+  return AMDF_STATUS_OK;
 }
 
 amdf_status_t AMDF_CALL amdf_device_destroy(amdf_device_t* device) {

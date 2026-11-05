@@ -108,8 +108,15 @@ class GpuUserQueueCapacityTest
 
 TEST_P(GpuUserQueueCapacityTest, CopiesAcrossWrapAndRetiredReuse) {
   const auto& test = GetParam();
+  amdf_queue_family_placement_info_t placement = {
+      .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_PLACEMENT_INFO,
+      .structure_size = sizeof(placement),
+  };
+  ASSERT_EQ(api_->device_query_queue_family_placement_info(
+                device_, family_.ordinal, &placement),
+            AMDF_STATUS_OK);
   if (test.placement != AMDF_QUEUE_PLACEMENT_DEFAULT &&
-      !(family_.placement_capabilities & (1u << test.placement))) {
+      !(placement.placement_capabilities & (1u << test.placement))) {
     GTEST_SKIP() << "family does not support requested ring placement";
   }
   if (test.byte_length != 0 &&
@@ -260,7 +267,14 @@ class GpuUserQueuePublicationTest : public GpuUserQueueCapacityTest {};
 
 TEST_P(GpuUserQueuePublicationTest, IncrementalStoresAcrossRingWrap) {
   const auto& test = GetParam();
-  if (!(family_.placement_capabilities & (1u << test.placement))) {
+  amdf_queue_family_placement_info_t placement = {
+      .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_PLACEMENT_INFO,
+      .structure_size = sizeof(placement),
+  };
+  ASSERT_EQ(api_->device_query_queue_family_placement_info(
+                device_, family_.ordinal, &placement),
+            AMDF_STATUS_OK);
+  if (!(placement.placement_capabilities & (1u << test.placement))) {
     GTEST_SKIP() << "family does not support requested ring placement";
   }
   const bool pm4 = test.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4;

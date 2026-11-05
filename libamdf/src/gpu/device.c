@@ -7,6 +7,7 @@
 #include "libamdf/src/gpu/device.h"
 
 #include <stddef.h>
+#include <string.h>
 
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/device.h"
@@ -17,6 +18,7 @@
 #include "libamdf/src/gpu/umd/instance.h"
 #include "libamdf/src/gpu/umd/native.h"
 #include "libamdf/src/instance.h"
+#include "libamdf/src/memory_scope.h"
 #include "libamdf/src/platform/instance.h"
 #include "libamdf/src/structure.h"
 
@@ -29,6 +31,9 @@ typedef struct amdf_gpu_device_t {
   const amdf_gpu_umd_api_t* umd_api;
   // Immutable identity, reset state, and achieved features from the provider.
   amdf_gpu_device_info_t info;
+  // Immutable placement facts established before publishing this device.
+  amdf_queue_family_placement_info_t
+      queue_placements[AMDF_GPU_QUEUE_FAMILY_CAPACITY];
 } amdf_gpu_device_t;
 
 _Static_assert(offsetof(amdf_gpu_device_t, base) == 0,
@@ -44,7 +49,25 @@ static amdf_status_t amdf_gpu_device_destroy_native(
   return status;
 }
 
+static amdf_queue_family_placement_info_t
+amdf_gpu_device_query_queue_family_placement(const amdf_device_t* base_device,
+                                             uint32_t queue_family_ordinal) {
+  const amdf_gpu_device_t* device = (const amdf_gpu_device_t*)base_device;
+  return device->queue_placements[queue_family_ordinal];
+}
+
+static amdf_status_t amdf_gpu_scope_sample_observation(
+    const amdf_memory_scope_t* scope,
+    amdf_memory_scope_observation_t* out_observation) {
+  amdf_platform_endpoint_t* platform =
+      amdf_endpoint_get_platform(scope->owner.endpoint);
+  return amdf_gpu_umd_api_for_endpoint(platform)->sample_memory_scope(
+      platform, scope->flags, out_observation);
+}
+
 static const amdf_device_vtable_t amdf_gpu_device_vtable = {
+    .query_queue_family_placement =
+        amdf_gpu_device_query_queue_family_placement,
     .query_memory_reservation_profile =
         amdf_gpu_device_query_memory_reservation_profile,
     .query_memory_profile = amdf_gpu_device_query_memory_profile,
@@ -108,6 +131,17 @@ amdf_status_t AMDF_CALL amdf_gpu_device_create(
           instance->gpu, amdf_endpoint_get_platform(endpoint), host_allocator,
           native_lifetime, &device->umd, &result);
     }
+    if (amdf_status_is_ok(status)) {
+      const amdf_memory_scope_t scope = {
+          .flags = result.memory.flags,
+          .capacity_byte_length =
+              (result.memory.flags & AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED)
+                  ? instance->system_memory_scope.capacity_byte_length
+                  : result.memory.capacity_byte_length,
+          .sample_observation = amdf_gpu_scope_sample_observation,
+      };
+      amdf_endpoint_publish_local_memory_scope(endpoint, &scope);
+    }
     amdf_platform_instance_unlock_native(instance->platform);
   }
   if (amdf_status_is_ok(status)) {
@@ -116,6 +150,8 @@ amdf_status_t AMDF_CALL amdf_gpu_device_create(
     device->info.id = result.id;
     device->info.reset_epoch = result.reset_epoch;
     device->info.features = result.features;
+    memcpy(device->queue_placements, result.queue_placements,
+           sizeof(device->queue_placements));
     *out_device = &device->base;
   } else {
     if (device->base.endpoint != NULL) {

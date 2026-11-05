@@ -68,7 +68,6 @@ amdf_dxg_provider_result_t FakeAdapterOpen(
     amdf_dxg_provider_gpu_properties_t* out_properties, uint32_t*) {
   current_state->operations.push_back(Operation::kOpenBridgeAdapter);
   EXPECT_EQ(open_info->adapter_handle, current_endpoint->adapter);
-  EXPECT_EQ(open_info->device_handle, current_state->device);
   EXPECT_EQ(open_info->physical_adapter_index,
             current_endpoint->physical_adapter_index);
   EXPECT_EQ(open_info->adapter_luid,

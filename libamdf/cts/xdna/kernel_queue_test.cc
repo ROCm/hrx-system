@@ -540,6 +540,17 @@ TEST_F(XdnaKernelQueueNotificationTest,
 }
 
 TEST_F(XdnaKernelQueueTest, SubmitsImmutableRangesAndReacquiresQueue) {
+  amdf_queue_family_placement_info_t placement = {
+      .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_PLACEMENT_INFO,
+      .structure_size = sizeof(placement),
+  };
+  ASSERT_EQ(api_->device_query_queue_family_placement_info(
+                device_, QueryKernelQueueFamily(), &placement),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(placement.placement_capabilities, 0u);
+  for (const auto requirements : placement.host_publication) {
+    EXPECT_EQ(requirements, AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN);
+  }
   const auto transaction = MakeNoOpTransaction();
   ASSERT_NO_FATAL_FAILURE(CreateInstructions(transaction, transaction));
   ASSERT_NO_FATAL_FAILURE(CreateQueue());

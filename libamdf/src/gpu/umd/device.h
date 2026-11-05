@@ -8,6 +8,7 @@
 #define AMDF_SRC_GPU_UMD_DEVICE_H_
 
 #include "amdf/gpu.h"
+#include "libamdf/src/gpu/endpoint_profile.h"
 #include "libamdf/src/gpu/umd/instance.h"
 #include "libamdf/src/platform/endpoint.h"
 
@@ -25,6 +26,17 @@ typedef struct amdf_gpu_umd_device_result_t {
   uint64_t reset_epoch;
   // Features supported by this materialized native device and lifetime policy.
   amdf_gpu_device_features_t features;
+  // Complete placement contracts in dense endpoint-family ordinal order.
+  // Kernel-only families have no explicit placement or host publication.
+  amdf_queue_family_placement_info_t
+      queue_placements[AMDF_GPU_QUEUE_FAMILY_CAPACITY];
+  // Physical storage facts qualified by explicit device creation.
+  struct {
+    // Shared-system identity and availability-query capabilities.
+    amdf_memory_scope_flags_t flags;
+    // Physical local bytes; SYSTEM_BACKED uses the instance's capacity.
+    uint64_t capacity_byte_length;
+  } memory;
 } amdf_gpu_umd_device_result_t;
 
 // Creates program-independent execution state borrowing the prepared instance

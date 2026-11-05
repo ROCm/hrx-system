@@ -84,15 +84,8 @@ AdapterProbeResult ExerciseAdapter(
   bool found_adapter = false;
   bool cleanup_succeeded = true;
   for (const D3DKMT_ADAPTERINFO& adapter_info : adapters) {
-    D3DKMT_CREATEDEVICE create = {.hAdapter = adapter_info.hAdapter};
-    if (amdf_linux_dxg_kmt_create_device(&kmt, &create) != 0 ||
-        create.hDevice == 0) {
-      continue;
-    }
-
     const amdf_dxg_provider_gpu_adapter_open_info_t open_info = {
         .adapter_handle = adapter_info.hAdapter,
-        .device_handle = create.hDevice,
         .physical_adapter_index = 0,
         .adapter_luid = (static_cast<uint64_t>(static_cast<uint32_t>(
                              adapter_info.AdapterLuid.HighPart))
@@ -121,10 +114,6 @@ AdapterProbeResult ExerciseAdapter(
       *out_error = "provider adapter open failed";
     }
 
-    D3DKMT_DESTROYDEVICE destroy = {.hDevice = create.hDevice};
-    if (amdf_linux_dxg_kmt_destroy_device(&kmt, &destroy) != 0) {
-      cleanup_succeeded = false;
-    }
     if (found_adapter || !out_error->empty()) {
       break;
     }

@@ -316,6 +316,9 @@ static bool amdf_gpu_kfd_user_queue_select_plan(
   amdf_gpu_kfd_user_queue_plans_t plans;
   amdf_gpu_kfd_target_user_queue_plans_initialize(
       &device->topology, device->page_size, device->cache_line_size, &plans);
+  const amdf_queue_family_placement_info_t placement =
+      amdf_gpu_kfd_target_user_queue_placement(&device->topology,
+                                               device->page_size);
   for (uint32_t i = 0; i < plans.count; ++i) {
     const amdf_gpu_kfd_user_queue_plan_t* plan = &plans.values[i];
     const amdf_gpu_queue_family_properties_t* family = &plan->family;
@@ -327,7 +330,7 @@ static bool amdf_gpu_kfd_user_queue_select_plan(
          ~family->user_queue_capabilities) == 0 &&
         (create_info->placement == AMDF_QUEUE_PLACEMENT_DEFAULT ||
          (create_info->placement <= AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL &&
-          (family->placement_capabilities & (1u << create_info->placement)) !=
+          (placement.placement_capabilities & (1u << create_info->placement)) !=
               0)) &&
         create_info->roles == family->roles &&
         (create_info->ring_byte_length == 0 ||

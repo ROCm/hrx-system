@@ -102,14 +102,6 @@ void amdf_gpu_kfd_target_user_queue_plans_initialize(
                                    &plan)) {
     plans.values[plans.count++] = plan;
   }
-  const amdf_queue_host_publication_flags_t local_publication =
-      topology->integrated ? AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN
-                           : amdf_gpu_kfd_hdp_host_publication(topology);
-  const bool host_visible_local =
-      topology->integrated ||
-      (topology->vram.total_byte_length != 0 &&
-       topology->vram.visible_byte_length >= topology->vram.total_byte_length &&
-       page_size <= 4096 && local_publication != 0);
   for (uint32_t i = 0; i < plans.count; ++i) {
     amdf_gpu_queue_family_properties_t* family = &plans.values[i].family;
     if (topology->properties.execution_resources.compute_units_per_resource !=
@@ -127,18 +119,36 @@ void amdf_gpu_kfd_target_user_queue_plans_initialize(
       family->user_queue_capabilities |=
           AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH;
     }
-    plans.values[i].family.placement_capabilities =
-        AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
-        (host_visible_local ? AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL : 0);
     plans.values[i].ring.placement = AMDF_QUEUE_PLACEMENT_HOST_LOCAL;
-    plans.values[i].family.host_publication[AMDF_QUEUE_PLACEMENT_DEFAULT] =
-        AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN;
-    plans.values[i].family.host_publication[AMDF_QUEUE_PLACEMENT_HOST_LOCAL] =
-        AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN;
-    plans.values[i].family.host_publication[AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL] =
-        host_visible_local ? local_publication
-                           : AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN;
   }
   amdf_gpu_kfd_restrict_user_queue_plans(topology, &plans);
   *out_plans = plans;
+}
+
+amdf_queue_family_placement_info_t amdf_gpu_kfd_target_user_queue_placement(
+    const amdf_gpu_kfd_topology_t* topology, size_t page_size) {
+  const amdf_queue_host_publication_flags_t local_publication =
+      topology->integrated ? AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN
+                           : amdf_gpu_kfd_hdp_host_publication(topology);
+  const bool host_visible_local =
+      topology->integrated ||
+      (topology->vram.total_byte_length != 0 &&
+       topology->vram.visible_byte_length >= topology->vram.total_byte_length &&
+       page_size <= 4096 && local_publication != 0);
+  return (amdf_queue_family_placement_info_t){
+      .placement_capabilities =
+          AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
+          (host_visible_local ? AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL
+                              : 0),
+      .host_publication =
+          {
+              [AMDF_QUEUE_PLACEMENT_DEFAULT] =
+                  AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN,
+              [AMDF_QUEUE_PLACEMENT_HOST_LOCAL] =
+                  AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN,
+              [AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL] =
+                  host_visible_local ? local_publication
+                                     : AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN,
+          },
+  };
 }

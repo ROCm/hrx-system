@@ -42,6 +42,11 @@ void amdf_device_unregister_child(amdf_device_t* device);
 // Destroys a device after dependent memory and tracked children are released.
 amdf_status_t AMDF_CALL amdf_device_destroy(amdf_device_t* device);
 
+// Copies complete queue placement facts established before device publication.
+amdf_status_t AMDF_CALL amdf_device_query_queue_family_placement_info(
+    amdf_device_t* device, uint32_t queue_family_ordinal,
+    amdf_queue_family_placement_info_t* out_info);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

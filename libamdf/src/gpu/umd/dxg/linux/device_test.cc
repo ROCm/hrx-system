@@ -28,6 +28,7 @@ enum class Operation {
   kCreateDevice,
   kOpenBridgeAdapter,
   kCreatePagingQueue,
+  kQueryLocalCapacity,
   kDestroyPagingQueue,
   kCloseBridgeAdapter,
   kDestroyDevice,
@@ -41,9 +42,12 @@ enum class FailureStage {
   kOpenBridgeAdapter,
   kCreatePagingQueue,
   kMalformedPagingQueue,
+  kLocalCapacity,
 };
 
 struct FakeState {
+  // Native package type used to distinguish local from system-backed storage.
+  bool is_discrete = false;
   // Construction stage that returns an injected failure.
   FailureStage failure_stage = FailureStage::kNone;
   // Number of paging-queue destruction calls that report a terminal failure.
@@ -120,6 +124,19 @@ extern "C" uint32_t __wrap_amdf_linux_dxg_connection_invoke(void* context,
     case 0x09: {
       auto* query = static_cast<D3DKMT_QUERYADAPTERINFO*>(arguments);
       EXPECT_EQ(query->hAdapter, current_endpoint->adapter);
+      if (query->Type == KMTQAITYPE_GETSEGMENTGROUPSIZE) {
+        current_state->operations.push_back(Operation::kQueryLocalCapacity);
+        EXPECT_EQ(query->PrivateDriverDataSize,
+                  sizeof(D3DKMT_SEGMENTGROUPSIZEINFO));
+        auto* sizes = static_cast<D3DKMT_SEGMENTGROUPSIZEINFO*>(
+            query->pPrivateDriverData);
+        EXPECT_EQ(sizes->PhysicalAdapterIndex,
+                  current_endpoint->physical_adapter_index);
+        sizes->LocalMemory = UINT64_C(8) << 30;
+        return current_state->failure_stage == FailureStage::kLocalCapacity
+                   ? static_cast<uint32_t>(kNativeFailure)
+                   : 0;
+      }
       if (query->Type == KMTQAITYPE_QUERY_GPUMMU_CAPS) {
         current_state->operations.push_back(
             Operation::kQueryMemoryCapabilities);
@@ -178,7 +195,6 @@ amdf_dxg_provider_result_t FakeAdapterOpen(
     uint32_t* out_native_status) {
   current_state->operations.push_back(Operation::kOpenBridgeAdapter);
   EXPECT_EQ(open_info->adapter_handle, current_endpoint->adapter);
-  EXPECT_EQ(open_info->device_handle, 0x10u);
   EXPECT_EQ(open_info->physical_adapter_index,
             current_endpoint->physical_adapter_index);
   EXPECT_EQ(open_info->adapter_luid,
@@ -195,7 +211,7 @@ amdf_dxg_provider_result_t FakeAdapterOpen(
   *out_properties = {
       .gfx_ip_major = 11,
       .gfx_ip_minor = 5,
-      .is_discrete = 0,
+      .is_discrete = current_state->is_discrete ? 1u : 0u,
       .platform_atomic_support = 1,
   };
   return AMDF_DXG_PROVIDER_RESULT_SUCCESS;
@@ -284,6 +300,8 @@ TEST_F(LinuxDxgDeviceTest, OwnsCompleteLogicalAndPagingDevice) {
   EXPECT_EQ(result.id.words[0], endpoint_.info.id.words[0]);
   EXPECT_EQ(result.id.words[1], UINT64_C(0x0000002000000010));
   EXPECT_EQ(result.reset_epoch, 1u);
+  EXPECT_EQ(result.memory.flags, AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED |
+                                     AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES);
   EXPECT_EQ(result.features, AMDF_GPU_DEVICE_FEATURE_HOST_REGISTRATION |
                                  AMDF_GPU_DEVICE_FEATURE_DEVICE_RECREATION |
                                  AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY);
@@ -311,6 +329,7 @@ class LinuxDxgDeviceConstructionFailureTest
 TEST_P(LinuxDxgDeviceConstructionFailureTest,
        RollsBackInReverseOrderAndPreservesOutputs) {
   state_.failure_stage = GetParam();
+  state_.is_discrete = true;
   auto* device = reinterpret_cast<amdf_gpu_umd_device_t*>(uintptr_t{1});
   amdf_gpu_umd_device_result_t result;
   std::memset(&result, 0xA5, sizeof(result));
@@ -336,7 +355,10 @@ TEST_P(LinuxDxgDeviceConstructionFailureTest,
   if (GetParam() > FailureStage::kOpenBridgeAdapter) {
     expected.push_back(Operation::kCreatePagingQueue);
   }
-  if (GetParam() == FailureStage::kMalformedPagingQueue) {
+  if (GetParam() == FailureStage::kLocalCapacity) {
+    expected.push_back(Operation::kQueryLocalCapacity);
+  }
+  if (GetParam() >= FailureStage::kMalformedPagingQueue) {
     expected.push_back(Operation::kDestroyPagingQueue);
   }
   if (GetParam() > FailureStage::kOpenBridgeAdapter) {
@@ -348,12 +370,28 @@ TEST_P(LinuxDxgDeviceConstructionFailureTest,
   EXPECT_EQ(state_.operations, expected);
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    NativeStage, LinuxDxgDeviceConstructionFailureTest,
-    ::testing::Values(
-        FailureStage::kMemoryCapabilities, FailureStage::kStoreCapabilities,
-        FailureStage::kCreateDevice, FailureStage::kOpenBridgeAdapter,
-        FailureStage::kCreatePagingQueue, FailureStage::kMalformedPagingQueue));
+INSTANTIATE_TEST_SUITE_P(NativeStage, LinuxDxgDeviceConstructionFailureTest,
+                         ::testing::Values(FailureStage::kMemoryCapabilities,
+                                           FailureStage::kStoreCapabilities,
+                                           FailureStage::kCreateDevice,
+                                           FailureStage::kOpenBridgeAdapter,
+                                           FailureStage::kCreatePagingQueue,
+                                           FailureStage::kMalformedPagingQueue,
+                                           FailureStage::kLocalCapacity));
+
+TEST_F(LinuxDxgDeviceTest, DiscreteDevicePublishesPhysicalScopeCapacity) {
+  state_.is_discrete = true;
+  amdf_gpu_umd_device_t* device = nullptr;
+  amdf_gpu_umd_device_result_t result = {};
+  ASSERT_EQ(amdf_gpu_linux_dxg_device_create(
+                nullptr, &endpoint_, instance_.host_allocator,
+                AMDF_NATIVE_LIFETIME_PROCESS, &device, &result),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(result.memory.flags, AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES);
+  EXPECT_EQ(result.memory.capacity_byte_length, UINT64_C(8) << 30);
+  EXPECT_EQ(state_.operations.back(), Operation::kQueryLocalCapacity);
+  EXPECT_EQ(amdf_gpu_linux_dxg_device_destroy(device), AMDF_STATUS_OK);
+}
 
 TEST_F(LinuxDxgDeviceTest, ConsumedPagingFailureRequiresOnlyHostOwnerRetry) {
   amdf_gpu_umd_device_t* device = nullptr;

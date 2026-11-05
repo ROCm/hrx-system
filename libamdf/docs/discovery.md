@@ -28,16 +28,22 @@ information identifies its architecture and compiler target; its native array
 geometry, context admission and instruction limits come from the live device
 query after explicit activation. GPU family information includes the hardware
 facts available through passive native metadata. Queue families describe native
-submission mechanisms; memory profiles require the live devices that will
-consume the storage. Returned records are complete: zero describes
-an absent capability, not a field waiting for an expensive query.
+submission mechanisms and static limits. Ring placement and host-publication
+costs come from `device_query_queue_family_placement_info` after explicit device
+creation; memory profiles require the live devices that will consume the storage.
+Returned records are complete: zero describes an absent capability, not a field
+waiting for an expensive query.
 
 For example, a HAL selecting shared CPU/GPU/NPU storage first filters hardware
 by identity and architecture, then explicitly creates the selected devices.
 It calls `memory_scope_query_device_profile` with their complete access set to
 obtain native allocation, registration and sharing capabilities. The caller
 can reject an unsuitable contract before acquiring memory. The query reserves
-no memory and does not guarantee allocation success.
+no memory and does not guarantee allocation success. Peer-memory qualification
+uses those live consumers too: a physical link or matching device architecture
+alone does not establish that one device can access another's backing. The
+profile admits the requested consumer set; `memory_scope_query_pair_info`
+qualifies visibility and atomic reach between their exact execution sites.
 
 CPU participation uses system-memory scopes and host mappings. There is no
 synthetic CPU endpoint or device to activate. Native-private scopes, such as an
@@ -152,6 +158,14 @@ family requires the KMT operations needed by its native path.
 performs no system call, and neither initializes nor waits for a device. A HAL
 can select by representation and publication mode instead of branching on the
 operating system.
+
+After activation, `device_query_queue_family_placement_info` reports the same
+family ordinal's supported ring placements and host-publication requirements.
+Those facts include native virtualization restrictions and whether publication
+requires a device-control read or kernel call. Device creation establishes the
+complete immutable record; the query takes no lock, performs no allocation or
+system call, and initializes no state. A runtime uses it before choosing and
+creating its queues. Kernel-only families expose no user-ring placement choices.
 
 ## Lifetime remains explicit
 

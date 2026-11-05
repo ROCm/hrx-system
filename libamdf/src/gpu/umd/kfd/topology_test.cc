@@ -21,6 +21,7 @@
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/endpoint_profile.h"
+#include "libamdf/src/gpu/umd/kfd/target/user_queue.h"
 #include "libamdf/src/platform/linux/endpoint.h"
 #include "libamdf/src/platform/linux/file.h"
 
@@ -43,8 +44,10 @@ struct NativeDeviceInfo {
               .heap_usage = UINT64_C(512) << 20,
           },
   };
-  // Real descriptor borrowed by the query and closed by profile construction.
+  // Real descriptor borrowed by an explicit native query.
   int descriptor = -1;
+  // Execution-file opens attempted by the operation under test.
+  uint32_t open_count = 0;
   // Error at native file opening, or zero for success.
   int open_error = 0;
   // Error at the metadata query, or zero for success.
@@ -66,6 +69,7 @@ extern "C" amdf_status_t __wrap_amdf_linux_endpoint_open_file(
   if (native_device_info == nullptr) {
     return __real_amdf_linux_endpoint_open_file(endpoint, out_descriptor);
   }
+  ++native_device_info->open_count;
   if (native_device_info->open_error != 0) {
     return amdf_linux_error(native_device_info->open_error);
   }
@@ -708,41 +712,54 @@ TEST_F(KfdTopologyTest, VirtualFunctionsKeepOnlyHostPublishedSystemRings) {
                   &endpoint_, amdf_allocator_system(), &profile),
               AMDF_STATUS_OK);
     EXPECT_EQ(profile->queue_family_count, 3u);
-    for (uint32_t i = 0; i < profile->queue_family_count; ++i) {
-      const auto& family = profile->queue_families[i];
-      EXPECT_EQ(family.placement_capabilities,
-                AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
-                    (mode != AMDGPU_IDS_FLAGS_MODE_VF
-                         ? AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL
-                         : 0));
-      EXPECT_EQ(family.host_publication[AMDF_QUEUE_PLACEMENT_HOST_LOCAL],
-                AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN);
-      EXPECT_EQ(family.host_publication[AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL] ==
-                    AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN,
-                mode == AMDGPU_IDS_FLAGS_MODE_VF);
-    }
     amdf_free(amdf_allocator_system(), profile);
-    EXPECT_EQ(fcntl(native_.descriptor, F_GETFD), -1);
-    EXPECT_EQ(errno, EBADF);
+
+    amdf_gpu_kfd_topology_t topology = {};
+    ASSERT_EQ(amdf_gpu_kfd_topology_initialize(
+                  &endpoint_, amdf_allocator_system(), &topology),
+              AMDF_STATUS_OK);
+    int descriptor = -1;
+    ASSERT_EQ(amdf_linux_endpoint_open_file(&endpoint_, &descriptor),
+              AMDF_STATUS_OK);
+    ASSERT_EQ(amdf_gpu_kfd_topology_query_memory(
+                  descriptor, endpoint_.info.pci.device_id, &topology),
+              AMDF_STATUS_OK);
+    const auto placement =
+        amdf_gpu_kfd_target_user_queue_placement(&topology, 4096);
+    EXPECT_EQ(placement.placement_capabilities,
+              AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
+                  (mode != AMDGPU_IDS_FLAGS_MODE_VF
+                       ? AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL
+                       : 0));
+    EXPECT_EQ(placement.host_publication[AMDF_QUEUE_PLACEMENT_HOST_LOCAL],
+              AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN);
+    EXPECT_EQ(placement.host_publication[AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL] ==
+                  AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN,
+              mode == AMDGPU_IDS_FLAGS_MODE_VF);
+    EXPECT_EQ(amdf_linux_file_close(&descriptor), AMDF_STATUS_OK);
+    amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
   }
   EXPECT_EQ(native_.query_count, 3u);
+  EXPECT_EQ(native_.open_count, 3u);
 }
 
-TEST_F(KfdTopologyTest, FailedNativeProfileQueryDoesNotPublishOrRetainFile) {
+TEST_F(KfdTopologyTest, DiscoveryDoesNotOpenExecutionFilesOrQueryLiveMemory) {
   WriteProperties("");
-  auto* const sentinel =
-      reinterpret_cast<amdf_gpu_endpoint_profile_t*>(uintptr_t{1});
   for (bool fail_open : {true, false}) {
     SCOPED_TRACE(fail_open);
     native_.open_error = fail_open ? EACCES : 0;
     native_.query_error = fail_open ? 0 : EIO;
-    auto* output = sentinel;
-    EXPECT_EQ(amdf_gpu_umd_create_endpoint_profile(
+    amdf_gpu_endpoint_profile_t* output = nullptr;
+    ASSERT_EQ(amdf_gpu_umd_create_endpoint_profile(
                   &endpoint_, amdf_allocator_system(), &output),
-              amdf_linux_error(fail_open ? EACCES : EIO));
-    EXPECT_EQ(output, sentinel);
+              AMDF_STATUS_OK);
+    EXPECT_EQ(output->info.compute.compute_unit_count, 304u);
+    EXPECT_GT(output->queue_family_count, 0u);
+    amdf_free(amdf_allocator_system(), output);
   }
-  EXPECT_EQ(native_.query_count, 1u);
+  EXPECT_EQ(native_.query_count, 0u);
+  EXPECT_EQ(native_.open_count, 0u);
+  EXPECT_EQ(native_.descriptor, -1);
 }
 
 TEST_F(KfdTopologyTest, ChangedGenerationReleasesUnpublishedPeerMetadata) {

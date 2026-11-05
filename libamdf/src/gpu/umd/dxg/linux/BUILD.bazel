@@ -191,6 +191,7 @@ amdf_cc_library(
     deps = [
         ":api_contract",
         ":device_state",
+        ":memory_profile",
         "//libamdf/src:allocator",
         "//libamdf/src/gpu/umd/dxg/wsl:provider",
     ],
@@ -206,11 +207,12 @@ amdf_cc_library(
     visibility = ["//libamdf/src/gpu/umd:__pkg__"],
     deps = [
         ":api_contract",
-        ":logical_device",
+        ":memory_profile",
         "//libamdf/src:allocator",
         "//libamdf/src:host_memory",
         "//libamdf/src/gpu:endpoint_profile",
         "//libamdf/src/gpu/umd:endpoint_profile",
+        "//libamdf/src/gpu/umd/dxg:adapter",
         "//libamdf/src/gpu/umd/dxg:endpoint_properties",
         "//libamdf/src/gpu/umd/dxg/wsl:provider",
         "//libamdf/src/platform/linux/dxg:endpoint",

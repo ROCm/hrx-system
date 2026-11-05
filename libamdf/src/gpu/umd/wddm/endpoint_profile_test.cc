@@ -21,6 +21,8 @@ constexpr NTSTATUS kSuccess = 0;
 constexpr NTSTATUS kFailure = static_cast<NTSTATUS>(0xC0000001u);
 
 struct FakeKmtState {
+  // Local-capacity queries, allowed only for explicit observations here.
+  uint32_t local_capacity_query_count = 0;
   // Number of successfully closed endpoint adapters.
   uint32_t adapter_close_success_count = 0;
   // Native result returned by memory-capability qualification.
@@ -43,6 +45,7 @@ FakeKmtState* current_state = nullptr;
 
 NTSTATUS APIENTRY FakeQueryAdapterInfo(const D3DKMT_QUERYADAPTERINFO* query) {
   if (query->Type == KMTQAITYPE_GETSEGMENTGROUPSIZE) {
+    ++current_state->local_capacity_query_count;
     EXPECT_EQ(query->hAdapter, 0x08u);
     EXPECT_EQ(query->PrivateDriverDataSize,
               sizeof(D3DKMT_SEGMENTGROUPSIZEINFO));
@@ -191,6 +194,9 @@ TEST_F(WindowsGpuEndpointProfileTest,
        DiscoveryDoesNotAcquireMemoryOrQueryGpuMmu) {
   amdf_test_wddm_provider_set_adapter_close_failures(0);
   EnableMemoryOperations();
+  amdf_test_wddm_provider_set_discrete(1);
+  instance_.kmt.create_device = UnexpectedMemoryOperation;
+  instance_.kmt.create_paging_queue = UnexpectedMemoryOperation;
   state_.memory_capabilities_status = kFailure;
   state_.virtual_address_bit_count = 0;
   instance_.kmt.update_gpu_virtual_address = UnexpectedMemoryOperation;
@@ -202,6 +208,7 @@ TEST_F(WindowsGpuEndpointProfileTest,
   ASSERT_NE(profile, nullptr);
   EXPECT_EQ(profile->info.gfx_ip.major, 11u);
   EXPECT_EQ(state_.memory_query_count, 0u);
+  EXPECT_EQ(state_.local_capacity_query_count, 0u);
   ASSERT_GT(profile->queue_family_count, 0u);
   for (uint32_t i = 0; i < profile->queue_family_count; ++i) {
     const auto& family = profile->queue_families[i];

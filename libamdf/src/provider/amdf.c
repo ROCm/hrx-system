@@ -30,6 +30,8 @@ static const amdf_api_t amdf_api = {
     .endpoint_close = amdf_endpoint_close,
     .query_extension = amdf_extension_query,
     .endpoint_query_queue_family_info = amdf_endpoint_query_queue_family_info,
+    .device_query_queue_family_placement_info =
+        amdf_device_query_queue_family_placement_info,
     .device_destroy = amdf_device_destroy,
     .instance_enumerate_memory_scopes = amdf_instance_enumerate_memory_scopes,
     .device_enumerate_memory_scopes = amdf_device_enumerate_memory_scopes,
