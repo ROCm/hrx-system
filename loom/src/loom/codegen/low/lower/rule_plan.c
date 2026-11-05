@@ -1571,15 +1571,16 @@ iree_status_t loom_low_lower_rule_plan_finalize(
       (uint16_t)(selected_plan->rule_set_index + 1u);
   uint32_t sequence_lane_count = 0;
   for (uint16_t i = 0; i < rule->emit_count; ++i) {
-    const loom_low_lower_emit_ref_t* emit_ref =
-        &rule_set->emit_refs[rule->action.emit_start + i];
-    const loom_low_lower_emit_t* emit = &rule_set->emits[emit_ref->emit_index];
+    const loom_low_lower_emit_ref_t emit_ref =
+        loom_low_lower_rule_set_emit_ref_at(
+            rule_set, (uint16_t)(rule->action.emit_start + i));
+    const loom_low_lower_emit_t* emit = &rule_set->emits[emit_ref.emit_index];
     loom_low_lower_resolved_emit_t* resolved = &resolved_emits[i];
     *resolved = (loom_low_lower_resolved_emit_t){.emit = emit};
-    if (emit_ref->descriptor_ref != LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
+    if (emit_ref.descriptor_ref != LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
       const loom_low_descriptor_t* descriptor = NULL;
       IREE_RETURN_IF_ERROR(loom_low_lower_rule_resolve_descriptor_ref(
-          &match_context, rule_set, emit_ref->descriptor_ref, &descriptor));
+          &match_context, rule_set, emit_ref.descriptor_ref, &descriptor));
       IREE_ASSERT(descriptor != NULL,
                   "generated target-low rule references a missing descriptor");
       resolved->descriptor.descriptor = descriptor;

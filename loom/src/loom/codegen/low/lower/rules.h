@@ -1199,7 +1199,16 @@ static inline uint16_t loom_low_lower_rule_emit_result_bind_ref_index(
   return (uint16_t)(start + result_ordinal);
 }
 
-// One emit-program position, pairing descriptor identity with shared behavior.
+// Packed storage for one emit-program position. The owning rule set supplies
+// the descriptor field width; the remaining high bits select shared behavior.
+typedef struct loom_low_lower_emit_ref_storage_t {
+  // Little-endian packed descriptor and behavior ordinals.
+  uint8_t bytes[3];
+} loom_low_lower_emit_ref_storage_t;
+static_assert(sizeof(loom_low_lower_emit_ref_storage_t) == 3,
+              "loom_low_lower_emit_ref_storage_t must be 3 bytes");
+
+// Decoded emit-program position used by compiler consumers.
 typedef struct loom_low_lower_emit_ref_t {
   // Rule-set-local descriptor ref, or NONE for structural register operations.
   loom_low_lower_descriptor_ref_t descriptor_ref;
@@ -1492,9 +1501,11 @@ typedef struct loom_low_lower_rule_set_t {
   // Number of rows in tied_results.
   uint16_t tied_result_count;
   // Emit refs addressed by rule emit-program spans.
-  const loom_low_lower_emit_ref_t* emit_refs;
+  const loom_low_lower_emit_ref_storage_t* emit_refs;
   // Number of rows in emit_refs.
   uint16_t emit_ref_count;
+  // Low bits occupied by the one-based descriptor ref in each emit-ref row.
+  uint8_t emit_ref_descriptor_bit_count;
   // Interned emit rows referenced by emit_refs.
   const loom_low_lower_emit_t* emits;
   // Number of rows in emits.
@@ -1519,10 +1530,29 @@ static inline bool loom_low_lower_rule_requires_root_producer_closure(
           (UINT64_C(1) << (rule_index % 64u))) != 0;
 }
 
+// Decodes one emit-program position from its rule-set-owned packed layout.
+static inline loom_low_lower_emit_ref_t loom_low_lower_rule_set_emit_ref_at(
+    const loom_low_lower_rule_set_t* rule_set, uint16_t emit_ref_index) {
+  const uint8_t* bytes = rule_set->emit_refs[emit_ref_index].bytes;
+  const uint32_t packed_ref = (uint32_t)bytes[0] | ((uint32_t)bytes[1] << 8) |
+                              ((uint32_t)bytes[2] << 16);
+  const uint32_t descriptor_mask =
+      (UINT32_C(1) << rule_set->emit_ref_descriptor_bit_count) - 1u;
+  return (loom_low_lower_emit_ref_t){
+      .descriptor_ref =
+          (loom_low_lower_descriptor_ref_t)((packed_ref & descriptor_mask) -
+                                            1u),
+      .emit_index =
+          (uint16_t)(packed_ref >> rule_set->emit_ref_descriptor_bit_count),
+  };
+}
+
 // Resolves one emit-program position to its interned emit row.
 static inline const loom_low_lower_emit_t* loom_low_lower_rule_set_emit_at(
     const loom_low_lower_rule_set_t* rule_set, uint16_t emit_ref_index) {
-  return &rule_set->emits[rule_set->emit_refs[emit_ref_index].emit_index];
+  const loom_low_lower_emit_ref_t emit_ref =
+      loom_low_lower_rule_set_emit_ref_at(rule_set, emit_ref_index);
+  return &rule_set->emits[emit_ref.emit_index];
 }
 
 // Resolves the trusted one-based payload referenced by |guard|.

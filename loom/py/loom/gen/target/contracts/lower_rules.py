@@ -676,6 +676,7 @@ def _generate_source(
     # Descriptor identity belongs to the program position, so instructions with
     # identical bindings share one behavior row across types and opcode families.
     unique_emits, emit_refs = _intern_rows(tuple(replace(row, descriptor=None) for row in table.emits))
+    emit_ref_descriptor_bit_count = lower_rule_rows.emit_ref_descriptor_bit_count(descriptor_refs, table.emits)
     emits_name = f"k{c_table_prefix}Emits"
     lines.extend(
         lower_rule_rows.emit_optional_array(
@@ -689,8 +690,16 @@ def _generate_source(
     lines.extend(
         lower_rule_rows.emit_optional_array(
             emit_refs_name,
-            "loom_low_lower_emit_ref_t",
-            [lower_rule_rows.emit_ref_row(descriptor_refs, row, ref) for row, ref in zip(table.emits, emit_refs, strict=True)],
+            "loom_low_lower_emit_ref_storage_t",
+            [
+                lower_rule_rows.emit_ref_row(
+                    descriptor_refs,
+                    row,
+                    ref,
+                    descriptor_bit_count=emit_ref_descriptor_bit_count,
+                )
+                for row, ref in zip(table.emits, emit_refs, strict=True)
+            ],
         )
     )
 
@@ -813,6 +822,7 @@ def _generate_source(
             emits_name=emits_name,
             emit_refs=emit_refs,
             emit_refs_name=emit_refs_name,
+            emit_ref_descriptor_bit_count=emit_ref_descriptor_bit_count,
             diagnostics_name=diagnostics_name,
         )
     )
