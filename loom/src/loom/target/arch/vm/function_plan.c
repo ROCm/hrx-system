@@ -783,7 +783,7 @@ static iree_status_t loom_vm_function_arguments(
   iree_status_t status = iree_ok_status();
   for (uint16_t i = 0; i < argument_count && iree_status_is_ok(status); ++i) {
     const bool is_ref =
-        signature->fields[i].kind_u16 == IREE_VM_BYTECODE_SIGNATURE_KIND_REF;
+        loom_vm_signature_kind_is_reference(signature->fields[i].kind_u16);
     const uint16_t ordinal = ordinals_by_bank[is_ref]++;
     if (ordinal < 16) {
       continue;

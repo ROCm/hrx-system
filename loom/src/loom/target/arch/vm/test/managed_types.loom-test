@@ -1,0 +1,180 @@
+// RUN: emit vm-dis
+
+vm.target<core> @vm
+
+// Payload ordinals sort independently of source names. Ownership stays in the
+// signature: a ref and a ptr to the same payload share only the payload ordinal.
+type.decl import("zeta", "storage") @Storage
+
+type.decl import("alpha", "view") @View
+
+type.decl import("alpha", "view") @ViewAlias
+
+func.decl import("native", "relay") target(@vm) @owned(%value: ref<@Storage>) -> (ref<@Storage>)
+
+func.decl import("native", "relay") target(@vm) @borrowed(%value: ptr<@Storage>) -> (ptr<@Storage>)
+
+func.decl import("native", "view") target(@vm) @view(%value: ptr<@View>) -> (ptr<@View>)
+
+func.def noinline target(@vm) @identity(%value: ptr<@View>) -> (ptr<@View>) {
+  func.return %value : ptr<@View>
+}
+
+func.def public target(@vm) @relay(%owner: ref<@Storage>, %borrow: ptr<@Storage>, %view: ptr<@View>) -> (ref<@Storage>, ptr<@Storage>, ptr<@View>) {
+  %owned = func.call @owned(%owner) : (ref<@Storage>) -> (ref<@Storage>)
+  %borrowed = func.call @borrowed(%borrow) : (ptr<@Storage>) -> (ptr<@Storage>)
+  %alias = func.call @view(%view) : (ptr<@View>) -> (ptr<@View>)
+  %result = func.call @identity(%alias) : (ptr<@View>) -> (ptr<@View>)
+  func.return %owned, %borrowed, %result : ref<@Storage>, ptr<@Storage>, ptr<@View>
+}
+
+// ----
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "relay"
+    string @string1 = "alpha"
+    string @string2 = "view"
+    string @string3 = "zeta"
+    string @string4 = "storage"
+    string @string5 = "native"
+    string @string6 = "relay"
+    string @string7 = "relay"
+    string @string8 = "view"
+  }
+
+  section ref_types alignment(8) {
+    namespace @ref_group0 name(@string1) {
+      ref_type @ref_type0 name(@string2)
+    }
+    namespace @ref_group1 name(@string3) {
+      ref_type @ref_type1 name(@string4)
+    }
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 (ref(@ref_type1)) -> (ref(@ref_type1))
+    signature @signature1 (ptr(@ref_type0)) -> (ptr(@ref_type0))
+    signature @signature2 (ptr(@ref_type1)) -> (ptr(@ref_type1))
+    signature @signature3 (ref(@ref_type1), ptr(@ref_type1), ptr(@ref_type0)) -> (ref(@ref_type1), ptr(@ref_type1), ptr(@ref_type0))
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+    callable @callable1 flags([]) depth(0) : @signature1
+    callable @callable2 flags([]) depth(0) : @signature2
+    callable @callable3 flags([]) depth(0) : @signature3
+  }
+
+  section imports alignment(8) {
+    group @import_group0 module_name(@string5) {
+      import @import0 name(@string6) flags([]) : @callable0
+      import @import1 name(@string7) flags([]) : @callable2
+      import @import2 name(@string8) flags([]) : @callable1
+    }
+  }
+
+  section exports alignment(8) {
+    export @export0 name(@string0) : @callable3 = @function1
+  }
+
+  section functions alignment(8) {
+    func @function0 : @callable1 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      control.return
+    }
+    func @function1 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 4, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      control.call @import0 {direct_ref_move_mask = 0x0001}
+      %r3 = ref.retain %r0
+      %r0 = ref.retain %r1
+      control.call @import1 {direct_ref_move_mask = 0x0001}
+      %r1 = ref.retain %r0
+      %r0 = ref.retain %r2
+      control.call @import2 {direct_ref_move_mask = 0x0001}
+      control.call @function0 {direct_ref_move_mask = 0x0001}
+      %r2 = ref.retain %r0
+      %r0 = ref.retain %r3
+      control.return
+    }
+  }
+
+}
+
+// ====
+// RUN: emit vm-dis
+
+vm.target<core> @vm
+
+type.decl import("native", "payload") @Payload
+
+// The seventeenth ptr crosses the direct reference-bank prefix in both
+// directions. A value-bank classification would lose the overflow operand.
+func.def public target(@vm) @reverse(%a0: ptr<@Payload>, %a1: ptr<@Payload>, %a2: ptr<@Payload>, %a3: ptr<@Payload>, %a4: ptr<@Payload>, %a5: ptr<@Payload>, %a6: ptr<@Payload>, %a7: ptr<@Payload>, %a8: ptr<@Payload>, %a9: ptr<@Payload>, %a10: ptr<@Payload>, %a11: ptr<@Payload>, %a12: ptr<@Payload>, %a13: ptr<@Payload>, %a14: ptr<@Payload>, %a15: ptr<@Payload>, %a16: ptr<@Payload>) -> (ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>) {
+  func.return %a16, %a15, %a14, %a13, %a12, %a11, %a10, %a9, %a8, %a7, %a6, %a5, %a4, %a3, %a2, %a1, %a0 : ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>, ptr<@Payload>
+}
+
+// ----
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "reverse"
+    string @string1 = "native"
+    string @string2 = "payload"
+  }
+
+  section ref_types alignment(8) {
+    namespace @ref_group0 name(@string1) {
+      ref_type @ref_type0 name(@string2)
+    }
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 (ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0)) -> (ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0), ptr(@ref_type0))
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+  }
+
+  section exports alignment(8) {
+    export @export0 name(@string0) : @callable0 = @function0
+  }
+
+  section functions alignment(8) {
+    func @function0 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 18, function_registers = 0, local_refs = 1, local_functions = 0) {
+    ^bb0:
+      control.block
+      %r16 = ref.abi.argument.load.move 0
+    ^bb1:
+      control.block
+      ref.stack.store.retain %r0, #r0
+      ref.abi.result.store.move %r0, 0
+      %r0 = ref.stack.load.move #r0
+      %r0 = ref.retain %r16
+      %r17 = ref.retain %r15
+      %r15 = ref.retain %r1
+      %r1 = ref.retain %r17
+      %r17 = ref.retain %r14
+      %r14 = ref.retain %r2
+      %r2 = ref.retain %r17
+      %r17 = ref.retain %r13
+      %r13 = ref.retain %r3
+      %r3 = ref.retain %r17
+      %r17 = ref.retain %r12
+      %r12 = ref.retain %r4
+      %r4 = ref.retain %r17
+      %r17 = ref.retain %r11
+      %r11 = ref.retain %r5
+      %r5 = ref.retain %r17
+      %r17 = ref.retain %r10
+      %r10 = ref.retain %r6
+      %r6 = ref.retain %r17
+      %r17 = ref.retain %r9
+      %r9 = ref.retain %r7
+      %r7 = ref.retain %r17
+      control.return
+    }
+  }
+
+}

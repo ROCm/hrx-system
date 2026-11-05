@@ -21,6 +21,12 @@
 extern "C" {
 #endif
 
+// Both declared ownership modes use the physical reference bank.
+static inline bool loom_vm_signature_kind_is_reference(uint16_t kind) {
+  return kind == IREE_VM_BYTECODE_SIGNATURE_KIND_REF ||
+         kind == IREE_VM_BYTECODE_SIGNATURE_KIND_PTR;
+}
+
 // Exact logical signature retained while building the program plan.
 typedef struct loom_vm_function_signature_t {
   // Physical argument/result counts. Program planning assigns descriptor_base.

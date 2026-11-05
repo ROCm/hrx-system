@@ -114,7 +114,9 @@ loom_cc_test(
     deps = [
         ":reference_plan",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:type_builders",
         "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/type",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",

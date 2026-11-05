@@ -61,32 +61,37 @@ class VMTypesTest : public ::testing::Test {
     return loom_type_dialect_opaque(name_id);
   }
 
+  // Shared storage for the source module.
   iree_arena_block_pool_t block_pool_ = {};
+  // Immutable managed-type descriptor registry.
   loom_context_t context_ = {};
+  // Source strings and native type identities.
   loom_module_t* module_ = nullptr;
 };
 
 TEST_F(VMTypesTest, MapsBuiltinBuffer) {
-  const loom_type_reference_key_t* key =
-      loom_vm_type_reference_key(module_, loom_type_buffer());
-  ASSERT_NE(key, nullptr);
-  EXPECT_TRUE(iree_string_view_equal(key->namespace_name, IREE_SV("vm")));
-  EXPECT_TRUE(iree_string_view_equal(key->type_name, IREE_SV("buffer")));
+  loom_type_reference_key_t key;
+  ASSERT_TRUE(loom_vm_type_reference_key(module_, loom_type_buffer(), &key));
+  EXPECT_TRUE(iree_string_view_equal(key.namespace_name, IREE_SV("vm")));
+  EXPECT_TRUE(iree_string_view_equal(key.type_name, IREE_SV("buffer")));
 }
 
 TEST_F(VMTypesTest, MapsDeclaredManagedReference) {
-  EXPECT_EQ(loom_vm_type_reference_key(module_,
-                                       InternOpaqueType(IREE_SV("test.ref"))),
-            &kResourceReference);
+  loom_type_reference_key_t key;
+  ASSERT_TRUE(loom_vm_type_reference_key(
+      module_, InternOpaqueType(IREE_SV("test.ref")), &key));
+  EXPECT_TRUE(iree_string_view_equal(key.namespace_name,
+                                     kResourceReference.namespace_name));
+  EXPECT_TRUE(
+      iree_string_view_equal(key.type_name, kResourceReference.type_name));
 }
 
 TEST_F(VMTypesTest, RejectsTypesWithoutReferenceABI) {
-  EXPECT_EQ(loom_vm_type_reference_key(module_,
-                                       loom_type_scalar(LOOM_SCALAR_TYPE_I32)),
-            nullptr);
-  EXPECT_EQ(loom_vm_type_reference_key(
-                module_, InternOpaqueType(IREE_SV("test.unknown"))),
-            nullptr);
+  loom_type_reference_key_t key;
+  EXPECT_FALSE(loom_vm_type_reference_key(
+      module_, loom_type_scalar(LOOM_SCALAR_TYPE_I32), &key));
+  EXPECT_FALSE(loom_vm_type_reference_key(
+      module_, InternOpaqueType(IREE_SV("test.unknown")), &key));
 }
 
 }  // namespace
