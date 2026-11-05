@@ -1714,15 +1714,13 @@ static iree_status_t loom_low_verify_structural_register_parts(
   return loom_low_verify_define_full_register_results(function_state, op);
 }
 
-static bool loom_low_verify_is_source_preserving_structural_op(
-    const loom_op_t* op) {
-  return loom_low_copy_isa(op) || loom_low_slice_isa(op) ||
-         loom_low_concat_isa(op);
+static bool loom_low_verify_is_partitioning_structural_op(const loom_op_t* op) {
+  return loom_low_slice_isa(op) || loom_low_concat_isa(op);
 }
 
-static iree_status_t loom_low_verify_reference_source_preserving_ops(
+static iree_status_t loom_low_verify_reference_partitioning_ops(
     loom_low_function_verify_state_t* function_state, const loom_op_t* op) {
-  if (!loom_low_verify_is_source_preserving_structural_op(op)) {
+  if (!loom_low_verify_is_partitioning_structural_op(op)) {
     return iree_ok_status();
   }
   const loom_module_t* module = function_state->state->module;
@@ -2186,7 +2184,7 @@ static iree_status_t loom_low_verify_walk_op(void* user_data, loom_op_t* op,
       IREE_RETURN_IF_ERROR(loom_low_verify_resource(function_state, op));
     }
     IREE_RETURN_IF_ERROR(
-        loom_low_verify_reference_source_preserving_ops(function_state, op));
+        loom_low_verify_reference_partitioning_ops(function_state, op));
     IREE_RETURN_IF_ERROR(
         loom_low_verify_structural_register_parts(function_state, op));
     if (loom_traits_are_compile_time_only(op->traits) &&

@@ -87,6 +87,7 @@ from loom.dsl import (
     CallLikeKind,
     ConditionForwardedCountMatchesBlockArgs,
     ConditionForwardedTypesMatchBlockArgs,
+    CopiedResult,
     Dialect,
     DirectBranchInterface,
     EnumCase,
@@ -1426,7 +1427,10 @@ low_copy = Op(
         "Explicit virtual-register copy used by lowering and allocation. Each "
         "copy produces a fresh virtual-register identity and may constrain the "
         "result to a different target register class with the same unit count "
-        "and semantic value type."
+        "and semantic value type. The result copies the source ownership mode "
+        "without consuming it: an owner creates an independent owner, while a "
+        "borrow remains borrowed. Managed copies cannot share their physical "
+        "carrier while both lifetimes remain live."
     ),
     operands=[Operand("source", REGISTER)],
     attrs=[
@@ -1441,6 +1445,7 @@ low_copy = Op(
     results=[Result("result", REGISTER, allocates=True)],
     structural_materialization=True,
     traits=[STORAGE_RELATION],
+    ownership_effects=[CopiedResult("result", "source")],
     verify="loom_low_copy_verify",
     facts="loom_low_copy_facts",
     format=[

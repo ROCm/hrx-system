@@ -390,6 +390,10 @@ enum loom_result_ownership_effect_e {
   LOOM_RESULT_OWNERSHIP_TIED = 5,
   // Result receives the exact ownership state of a consumed operand.
   LOOM_RESULT_OWNERSHIP_MOVED = 6,
+  // Result duplicates the source ownership state without consuming it. An
+  // owned source creates an independent owner; a borrowed source stays
+  // borrowed.
+  LOOM_RESULT_OWNERSHIP_COPIED = 7,
 };
 typedef uint8_t loom_result_ownership_effect_t;
 
@@ -1349,6 +1353,8 @@ static inline loom_value_slice_t loom_direct_branch_args(const loom_op_t* op) {
 // Generation proves that the complete operand and result lists are equally
 // sized positional tuples whose result types remap source-tuple references to
 // the corresponding result identities.
+// Each result copies the source ownership state without consuming it: an owner
+// creates an independent owner, while a borrow remains borrowed.
 bool loom_value_duplication_isa(const loom_module_t* module,
                                 const loom_op_t* op);
 

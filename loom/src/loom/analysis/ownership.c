@@ -111,7 +111,14 @@ bool loom_ownership_result_effect_at(
   }
   loom_result_ownership_effect_t effect = descriptor->ownership_effect;
   uint16_t source_operand_index = LOOM_OWNERSHIP_SOURCE_OPERAND_NONE;
+  if (loom_value_duplication_isa(module, op)) {
+    // The interface verifies a complete, positionally matching closed tuple.
+    // Each duplicate has its own identity and the same ownership mode.
+    effect = LOOM_RESULT_OWNERSHIP_COPIED;
+    source_operand_index = result_index;
+  }
   if (effect != LOOM_RESULT_OWNERSHIP_NONE &&
+      source_operand_index == LOOM_OWNERSHIP_SOURCE_OPERAND_NONE &&
       descriptor->ownership_source_operand_index !=
           LOOM_RESULT_OWNERSHIP_SOURCE_FIELD_NONE) {
     source_operand_index = descriptor->ownership_source_operand_index;

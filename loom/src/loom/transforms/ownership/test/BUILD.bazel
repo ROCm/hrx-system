@@ -19,6 +19,7 @@ loom_check_test_suite(
         "managed_references.loom-test",
         "ownership_lifetime.loom-test",
         "ownership_regions.loom-test",
+        "reference_copy.loom-test",
         "test_resource_lifetime.loom-test",
     ],
 )

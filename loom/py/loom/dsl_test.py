@@ -109,6 +109,7 @@ from loom.dsl import (
     CallLikeKind,
     Consume,
     ContractFamily,
+    CopiedResult,
     Dialect,
     DimIndexInBounds,
     ElementWidthAtLeastAttr,
@@ -3267,6 +3268,63 @@ class TestEffects:
 
 
 class TestOwnershipEffects:
+    def test_copied_result_preserves_each_source_identity(self) -> None:
+        op = Op(
+            "test.resource.copy_twice",
+            operands=[Operand("source", POOL)],
+            results=[Result("first", POOL), Result("second", POOL)],
+            ownership_effects=[
+                CopiedResult("first", "source"),
+                CopiedResult("second", "source"),
+            ],
+        )
+        assert [effect.source for effect in op.ownership_effects] == [
+            "source",
+            "source",
+        ]
+        assert not op.is_pure
+
+    def test_copied_result_requires_fixed_fields(self) -> None:
+        with _raises(ValueError, match="fixed operand/result"):
+            Op(
+                "test.resource.copy_many",
+                operands=[Operand("sources", POOL, variadic=True)],
+                results=[Result("results", POOL, variadic=True)],
+                ownership_effects=[CopiedResult("results", "sources")],
+            )
+
+    def test_copied_result_requires_a_declared_source(self) -> None:
+        with _raises(ValueError, match="not declared"):
+            Op(
+                "test.resource.copy",
+                operands=[Operand("source", POOL)],
+                results=[Result("result", POOL)],
+                ownership_effects=[CopiedResult("result", "missing")],
+            )
+
+    def test_copied_result_cannot_also_consume_its_source(self) -> None:
+        for consume in (Consume, dsl.Release, dsl.Discard, dsl.Escape, dsl.Move):
+            with _raises(ValueError, match="must remain live"):
+                Op(
+                    "test.resource.invalid_copy",
+                    operands=[Operand("source", POOL)],
+                    results=[Result("result", POOL)],
+                    ownership_effects=[
+                        consume("source"),
+                        CopiedResult("result", "source"),
+                    ],
+                )
+        with _raises(ValueError, match="must remain live"):
+            Op(
+                "test.resource.copy_and_move",
+                operands=[Operand("source", POOL)],
+                results=[Result("copy", POOL), Result("moved", POOL)],
+                ownership_effects=[
+                    CopiedResult("copy", "source"),
+                    MovedResult("moved", "source"),
+                ],
+            )
+
     def test_valid_operand_and_result_ownership_effects(self) -> None:
         op = Op(
             "test.resource.retain",

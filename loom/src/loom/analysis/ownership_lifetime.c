@@ -819,12 +819,17 @@ static iree_status_t loom_ownership_lifetime_apply_source_state_result(
     return loom_ownership_lifetime_emit_use_after_consume(
         state, op, effect->source_operand_index, source_value_id);
   }
-  loom_ownership_lifetime_state_bits_set(bits, source_ordinal,
-                                         LOOM_OWNERSHIP_LIFETIME_VALUE_UNKNOWN);
+  const bool copies_source = effect->effect == LOOM_RESULT_OWNERSHIP_COPIED;
+  if (!copies_source) {
+    loom_ownership_lifetime_state_bits_set(
+        bits, source_ordinal, LOOM_OWNERSHIP_LIFETIME_VALUE_UNKNOWN);
+  }
   loom_ownership_lifetime_state_bits_set(bits, result_ordinal, source_state);
   loom_ownership_lifetime_set_origin_arg(
       state, result_ordinal,
-      loom_ownership_lifetime_origin_arg(state, source_ordinal));
+      copies_source && source_state == LOOM_OWNERSHIP_LIFETIME_VALUE_OWNED
+          ? LOOM_OWNERSHIP_LIFETIME_ARG_INDEX_NONE
+          : loom_ownership_lifetime_origin_arg(state, source_ordinal));
   if (source_state != LOOM_OWNERSHIP_LIFETIME_VALUE_UNKNOWN) {
     loom_ownership_lifetime_mark_ever_seen(state, source_ordinal);
     loom_ownership_lifetime_mark_ever_seen(state, result_ordinal);
@@ -863,6 +868,7 @@ static iree_status_t loom_ownership_lifetime_apply_result_effect(
       return iree_ok_status();
     case LOOM_RESULT_OWNERSHIP_TIED:
     case LOOM_RESULT_OWNERSHIP_MOVED:
+    case LOOM_RESULT_OWNERSHIP_COPIED:
       return loom_ownership_lifetime_apply_source_state_result(state, bits, op,
                                                                effect);
     case LOOM_RESULT_OWNERSHIP_NONE:

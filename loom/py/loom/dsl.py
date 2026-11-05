@@ -207,6 +207,7 @@ __all__ = [
     "RetainedResult",
     "AliasResult",
     "MovedResult",
+    "CopiedResult",
     # Constraints.
     "Constraint",
     "OperandDictionary",
@@ -1683,6 +1684,7 @@ class ResultOwnershipEffectKind(Enum):
     RETAINED = "retained"
     ALIAS = "alias"
     MOVED = "moved"
+    COPIED = "copied"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1705,7 +1707,7 @@ class ResultOwnershipEffect:
 
     result: Name of the result field.
     kind: Ownership action applied to each value in the field.
-    source: Operand field used by aliasing and moved result effects.
+    source: Operand field used by aliasing, copied, and moved result effects.
     """
 
     result: str
@@ -1783,6 +1785,11 @@ def AliasResult(result: str, source: str) -> ResultOwnershipEffect:
 def MovedResult(result: str, source: str) -> ResultOwnershipEffect:
     """Result receives the exact ownership state of a consumed operand."""
     return ResultOwnershipEffect(result, ResultOwnershipEffectKind.MOVED, source)
+
+
+def CopiedResult(result: str, source: str) -> ResultOwnershipEffect:
+    """Duplicate an operand's ownership state without consuming the operand."""
+    return ResultOwnershipEffect(result, ResultOwnershipEffectKind.COPIED, source)
 
 
 # Type constraints that represent mutable resources (as opposed to
@@ -5429,6 +5436,8 @@ def _validate_ownership_effects(
     operand_effects: set[str] = set()
     result_effects: set[str] = set()
     moved_sources: set[str] = set()
+    copied_sources: set[str] = set()
+    consumed_sources: set[str] = set()
 
     for effect in ownership_effects:
         if isinstance(effect, OperandOwnershipEffect):
@@ -5438,6 +5447,11 @@ def _validate_ownership_effects(
                     f"'{effect.operand}'."
                 )
             operand_effects.add(effect.operand)
+            if effect.kind not in (
+                OperandOwnershipEffectKind.BORROW,
+                OperandOwnershipEffectKind.RETAIN,
+            ):
+                consumed_sources.add(effect.operand)
             if effect.operand not in operand_map:
                 raise ValueError(
                     f"Op '{op_name}': ownership effect references operand "
@@ -5461,6 +5475,7 @@ def _validate_ownership_effects(
         if effect.kind in (
             ResultOwnershipEffectKind.ALIAS,
             ResultOwnershipEffectKind.MOVED,
+            ResultOwnershipEffectKind.COPIED,
         ):
             if effect.source is None:
                 raise ValueError(
@@ -5488,11 +5503,13 @@ def _validate_ownership_effects(
                         f"only one moved result ownership effect."
                     )
                 moved_sources.add(effect.source)
+            elif effect.kind == ResultOwnershipEffectKind.COPIED:
+                copied_sources.add(effect.source)
         elif effect.source is not None:
             raise ValueError(
                 f"Op '{op_name}': ownership effect for result "
                 f"'{effect.result}' may not name a source operand unless it "
-                f"is an alias or moved effect."
+                f"is an alias, copied, or moved effect."
             )
 
     conflicting_sources = moved_sources & operand_effects
@@ -5501,6 +5518,13 @@ def _validate_ownership_effects(
         raise ValueError(
             f"Op '{op_name}': moved result source operand '{source}' may not "
             f"also declare an operand ownership effect."
+        )
+    conflicting_copies = copied_sources & (consumed_sources | moved_sources)
+    if conflicting_copies:
+        source = sorted(conflicting_copies)[0]
+        raise ValueError(
+            f"Op '{op_name}': copied result source operand '{source}' must "
+            f"remain live; the same operation cannot consume or move it."
         )
 
 
@@ -5765,13 +5789,15 @@ class DirectBranchInterface(NamedTuple):
 
 
 class ValueDuplicationInterface(NamedTuple):
-    """Interface for operations that create another owner of a value tuple.
+    """Interface for operations that duplicate a value tuple's ownership state.
 
-    Implementing operations consume one complete source tuple and produce one
+    Implementing operations observe one complete source tuple and produce one
     equally sized duplicate tuple. Positional result types match source types
     after remapping references from source tuple values to their corresponding
     duplicate tuple values. The interface promises a distinct ownership
-    identity, not disjoint physical storage or a particular lowering.
+    identity without consuming the source. An owned value creates an independent
+    owner; a borrowed value remains borrowed. Distinct identities do not require
+    disjoint physical storage when their lifetimes do not overlap.
 
     The generator proves the constrained shape, allowing C consumers to query
     one compact operation-vtable marker and use the generic operand and result
