@@ -305,3 +305,29 @@ func.def inline @__pipeline_strand_0(%width: index, %channel: channel<tile<[%wid
   channel.release %read : read<tile<[%width]xi32>>
   func.return
 }
+
+// ====
+// RUN: pass outline-pipeline-strands,test.realize-pipeline,symbol-dce,cfg-simplify
+
+// A single call to a declaration still needs a worker body. Realization clones
+// that body and preserves its external call and captured arguments.
+func.decl @consume(%value: i32)
+
+pipeline.def public @single_external_call() run(%value: i32) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @consume(%value) : (i32)
+  }
+}
+
+// ----
+func.decl @consume(%value: i32)
+
+func.def inline @__pipeline_worker_0(%value: i32) {
+  func.call @consume(%value) : (i32)
+  func.return
+}
+
+func.def public inline @__pipeline_engine_0(%6: i32) {
+  func.call @__pipeline_worker_0(%6) : (i32)
+  func.return
+}
