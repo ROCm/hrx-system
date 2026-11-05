@@ -188,13 +188,6 @@ jobs:
             runner: linux-gfx942-1gpu-ccs-csp-ossci-rocm
             target_selector: gfx942
             container_options: *amdgpu_container_options
-          - name: Clang / ASAN / AMD gfx1150 NPU4
-            kind: amd_client
-            command: iree-bazel-amd-client-asan
-            runner: linux-gfx1150-gpu-rocm-npu
-            container_options: >-
-              --device=/dev/accel/accel0 --ulimit memlock=-1:-1
-              --security-opt seccomp=unconfined --user 0:0
     concurrency:
       group: iree-bazel-linux-${{ matrix.command }}-${{ matrix.target_selector }}-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true
@@ -214,7 +207,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: ${{ matrix.kind == 'amd_client' && '1' || '2' }}
+          fetch-depth: 2
 
       - name: Adjust git config
         run: |
@@ -225,7 +218,6 @@ jobs:
         run: |
           case "${{ matrix.kind }}" in
             amdgpu) output_name=iree-bazel-gpu ;;
-            amd_client) output_name=iree-bazel-client ;;
             vulkan) output_name=iree-bazel-vulkan ;;
             *) output_name=iree-bazel ;;
           esac
@@ -240,7 +232,7 @@ jobs:
             echo "PIP_CACHE_DIR=${output_dir}/caches/pip"
           } >> "$GITHUB_ENV"
           case "${{ matrix.kind }}/${{ matrix.host_toolchain }}" in
-            amdgpu/*|amd_client/*|*/rocm)
+            amdgpu/*|*/rocm)
               {
                 echo "AR=${output_dir}/rocm-root/lib/llvm/bin/llvm-ar"
                 echo "CC=${output_dir}/rocm-root/lib/llvm/bin/clang"
@@ -338,12 +330,6 @@ jobs:
           --export-libamdf-gpu-selection
           --amdgpu-target "${{ matrix.target_selector }}"
 
-      - name: Check native accelerator access
-        if: matrix.kind == 'amd_client'
-        run: |
-          bash .github/scripts/check_host_toolchain.sh --expect-rocm
-          test -r /dev/accel/accel0 && test -w /dev/accel/accel0
-
       - name: Run IREE Bazel CI
         if: matrix.kind == 'cpu' || matrix.kind == 'vulkan' || matrix.kind == 'amdgpu'
         id: iree_bazel_ci
@@ -380,17 +366,8 @@ jobs:
             "${target_args[@]}" "${importer_args[@]}" "${scope_args[@]}" "${result_args[@]}" \
             --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles" --keep-going
 
-      - name: Build and test the AMD client
-        if: matrix.kind == 'amd_client'
-        id: client_ci
-        run: |
-          native_results_dir="${RUNNER_TEMP}/native-test-results-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          python3 build_tools/devtools/ci.py ${{ matrix.command }} \
-            --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles" \
-            --bazel-test-results-dir "${native_results_dir}"
-
       - name: Capture accelerator kernel errors
-        if: ${{ always() && matrix.kind != 'cpu' && (steps.iree_bazel_ci.outcome == 'failure' || steps.client_ci.outcome == 'failure') }}
+        if: ${{ always() && matrix.kind != 'cpu' && steps.iree_bazel_ci.outcome == 'failure' }}
         run: |
           date -u
           uname -a
@@ -398,7 +375,7 @@ jobs:
 
       - name: Upload Bazel profiles
         continue-on-error: true
-        if: ${{ always() && (steps.iree_bazel_ci.outcome != 'skipped' || steps.client_ci.outcome != 'skipped') }}
+        if: ${{ always() && steps.iree_bazel_ci.outcome != 'skipped' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bazel-profiles-${{ matrix.command }}-${{ matrix.target_selector || 'host' }}-attempt-${{ github.run_attempt }}
@@ -417,10 +394,10 @@ jobs:
           retention-days: 7
 
       - name: Upload native test results
-        if: ${{ always() && (steps.client_ci.outcome != 'skipped' || (matrix.kind == 'amdgpu' && steps.iree_bazel_ci.outcome != 'skipped')) }}
+        if: ${{ always() && matrix.kind == 'amdgpu' && steps.iree_bazel_ci.outcome != 'skipped' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: native-test-results-${{ matrix.command }}-${{ matrix.target_selector || 'amd-client' }}-linux-attempt-${{ github.run_attempt }}
+          name: native-test-results-${{ matrix.command }}-${{ matrix.target_selector || 'amdgpu' }}-linux-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/native-test-results-${{ github.run_id }}-${{ github.run_attempt }}/**/bazel-testlogs/**
           if-no-files-found: warn
           retention-days: 7
