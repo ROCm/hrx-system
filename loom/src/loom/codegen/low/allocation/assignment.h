@@ -50,6 +50,11 @@ enum loom_low_allocation_assignment_flag_bits_e {
   // immutable value requirement for every subsequent victim search. Producer
   // leases remain separate because spilling can release their reservations.
   LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REQUIRES_REGISTER = 1u << 2,
+  // Complete set of defined assignment flags.
+  LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_ALL =
+      LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS |
+      LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_EXPANDED_EXECUTION_DEFINITION |
+      LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REQUIRES_REGISTER,
 };
 typedef uint16_t loom_low_allocation_assignment_flags_t;
 
