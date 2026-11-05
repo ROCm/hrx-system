@@ -142,7 +142,7 @@ jobs:
         with:
           name: loom-sdk-checksums
           path: release-assets
-      - name: Upload only absent matching release assets
+      - name: Publish the verified GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

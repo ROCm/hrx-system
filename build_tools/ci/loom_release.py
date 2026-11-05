@@ -16,7 +16,6 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -28,6 +27,7 @@ from loom.packaging.python import release
 
 GITHUB_RELEASE_BODY_MAXIMUM = 125_000
 GITHUB_ASSET_PAGE_SIZE = 100
+_CATALOG_TAG = re.compile(r"github:([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@([^\s]+)")
 
 
 def github_release_body(identity: release.Identity, repository: str) -> str:
@@ -116,20 +116,188 @@ def _gh(*arguments: str) -> None:
     subprocess.run(["gh", *arguments], check=True)
 
 
+def _require_catalog_release(
+    repository: str,
+    revision: str,
+    identity: release.Identity,
+    artifacts: list[release.ReleaseArtifact],
+    token: str,
+) -> None:
+    """Requires an immutable catalog qualified with these exact SDK bytes."""
+    if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        raise ValueError("SDK release revision must be a full Git commit")
+    match = (
+        _CATALOG_TAG.fullmatch(identity.catalog)
+        if isinstance(identity.catalog, str)
+        else None
+    )
+    if match is None or match.group(2) != identity.tag:
+        raise ValueError(
+            "SDK release catalog must use its matching versioned GitHub tag"
+        )
+    catalog_repository, tag = match.groups()
+    api = f"https://api.github.com/repos/{catalog_repository}"
+    document = github_api.get_json(
+        f"{api}/releases/tags/" + urllib.parse.quote(tag, safe=""),
+        token,
+    )
+    prerelease = identity.release_channel is release.ReleaseChannel.PRERELEASE
+    if (
+        not isinstance(document, dict)
+        or document.get("tag_name") != tag
+        or document.get("draft") is not False
+        or document.get("prerelease") is not prerelease
+        or document.get("immutable") is not True
+    ):
+        raise ValueError(
+            "SDK release catalog tag is not a matching immutable public release"
+        )
+
+    reference = github_api.get_json(
+        f"{api}/git/ref/tags/" + urllib.parse.quote(tag, safe=""), token
+    )
+    if (
+        not isinstance(reference, dict)
+        or not isinstance(reference.get("object"), dict)
+        or reference["object"].get("type") != "commit"
+        or not isinstance(reference["object"].get("sha"), str)
+        or re.fullmatch(r"[0-9a-f]{40}", reference["object"]["sha"]) is None
+    ):
+        raise ValueError("SDK release catalog tag has an invalid Git reference")
+    catalog_revision = reference["object"]["sha"]
+    pin = json.loads(
+        github_api.get_bytes(
+            f"{api}/contents/build_tools/ci/sdk.json?ref={catalog_revision}",
+            token,
+            accept="application/vnd.github.raw+json",
+        )
+    )
+    expected_pin_keys = {
+        "repository",
+        "revision",
+        "run_id",
+        "artifact_id",
+        "release_tag",
+        "wheel",
+        "sha256",
+        "catalog",
+    }
+    wheels = [
+        artifact
+        for artifact in artifacts
+        if isinstance(artifact, release.Wheel)
+        and artifact.profile == "release"
+        and artifact.platform == release.LINUX_X86_64_PLATFORM
+    ]
+    if len(wheels) != 1:
+        raise ValueError("SDK release has no unique Linux Release wheel")
+    wheel = wheels[0]
+    if (
+        not isinstance(pin, dict)
+        or set(pin) != expected_pin_keys
+        or pin.get("repository") != repository
+        or pin.get("revision") != revision
+        or type(pin.get("run_id")) is not int
+        or pin["run_id"] <= 0
+        or type(pin.get("artifact_id")) is not int
+        or pin["artifact_id"] <= 0
+        or pin.get("release_tag") != identity.tag
+        or pin.get("wheel") != wheel.path.name
+        or pin.get("sha256") != wheel.digest
+        or pin.get("catalog") != identity.catalog
+    ):
+        raise ValueError(
+            "immutable catalog was not qualified with these exact SDK bytes"
+        )
+
+
+def _release_state(
+    document: object,
+    *,
+    tag: str,
+    title: str,
+    body: str,
+    prerelease: bool,
+) -> tuple[int, bool]:
+    expected = {
+        "tag_name": tag,
+        "name": title,
+        "body": body,
+        "prerelease": prerelease,
+    }
+    if not isinstance(document, dict) or any(
+        document.get(key) != value for key, value in expected.items()
+    ):
+        raise ValueError("Existing GitHub release has conflicting metadata")
+    release_id = document.get("id")
+    draft = document.get("draft")
+    if type(release_id) is not int or release_id <= 0 or type(draft) is not bool:
+        raise ValueError("GitHub returned an invalid release state")
+    if not draft and document.get("immutable") is not True:
+        raise ValueError(
+            "Published GitHub release is mutable; use a new version after enabling "
+            "repository release immutability"
+        )
+    return release_id, draft
+
+
+def _missing_release_assets(
+    api: str,
+    release_id: int,
+    token: str,
+    assets: dict[str, tuple[Path, str]],
+) -> list[str]:
+    names = set()
+    page = 1
+    while True:
+        records = github_api.get_json(
+            f"{api}/releases/{release_id}/assets?"
+            f"per_page={GITHUB_ASSET_PAGE_SIZE}&page={page}",
+            token,
+        )
+        if not isinstance(records, list):
+            raise ValueError("GitHub returned an invalid release asset inventory")
+        for record in records:
+            if not isinstance(record, dict) or not isinstance(record.get("name"), str):
+                raise ValueError("GitHub returned an invalid release asset record")
+            name = record["name"]
+            if name in names:
+                raise ValueError(f"Duplicate GitHub release asset: {name}")
+            names.add(name)
+            if name not in assets:
+                raise ValueError(
+                    f"Unexpected GitHub release artifact: {name}; use a new version"
+                )
+            if record.get("state") != "uploaded":
+                raise ValueError(
+                    f"Incomplete GitHub asset: {name}; review the failed upload"
+                )
+            if record.get("digest") != "sha256:" + assets[name][1]:
+                raise ValueError(
+                    f"Existing GitHub asset differs: {name}; use a new version"
+                )
+        if len(records) < GITHUB_ASSET_PAGE_SIZE:
+            break
+        page += 1
+    return [str(path) for name, (path, _) in assets.items() if name not in names]
+
+
 def publish_github(
     repository: str,
+    revision: str,
     tag: str,
     identity: release.Identity,
     artifacts: list[release.ReleaseArtifact],
     checksums: Path,
 ) -> None:
-    """Uploads absent assets after every existing counterpart matches."""
+    """Completes a verified draft and publishes its immutable asset set."""
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) or any(
         part in (".", "..") for part in repository.split("/")
     ):
         raise ValueError("GitHub repository must be OWNER/REPOSITORY")
     api = f"https://api.github.com/repos/{repository}"
     token = os.environ.get("GH_TOKEN", "")
+    _require_catalog_release(repository, revision, identity, artifacts, token)
     try:
         existing = github_api.get_json(
             f"{api}/releases/tags/{urllib.parse.quote(tag, safe='')}", token
@@ -144,6 +312,9 @@ def publish_github(
     }
     assets[checksums.name] = (checksums, _digest(checksums))
     prerelease = identity.release_channel is release.ReleaseChannel.PRERELEASE
+    title = f"Loom {tag}"
+    body = github_release_body(identity, repository)
+    created = existing is None
     if existing is None:
         options = ["--prerelease", "--latest=false"] if prerelease else []
         _gh(
@@ -154,79 +325,42 @@ def publish_github(
             "--repo",
             repository,
             "--verify-tag",
+            "--draft",
             "--title",
-            f"Loom {tag}",
+            title,
             "--notes",
-            github_release_body(identity, repository),
+            body,
             *options,
         )
-        return
-    if (
-        existing["tag_name"] != tag
-        or existing["draft"]
-        or existing["prerelease"] != prerelease
-    ):
-        raise ValueError(
-            "Existing GitHub release has conflicting tag or draft/prerelease status"
+        existing = github_api.get_json(
+            f"{api}/releases/tags/{urllib.parse.quote(tag, safe='')}", token
         )
-
-    names = set()
-    page = 1
-    while True:
-        records = github_api.get_json(
-            f"{api}/releases/{existing['id']}/assets?"
-            f"per_page={GITHUB_ASSET_PAGE_SIZE}&page={page}",
-            token,
-        )
-        for record in records:
-            name = record["name"]
-            if name in names:
-                raise ValueError(f"Duplicate GitHub release asset: {name}")
-            names.add(name)
-            if (
-                name.endswith(".whl")
-                or (
-                    name.startswith(
-                        tuple(f"{tool}-" for tool in release.STANDALONE_TOOLS)
-                    )
-                    and name.endswith(".zip")
-                )
-            ) and name not in assets:
-                raise ValueError(
-                    f"Unexpected GitHub release artifact: {name}; use a new version"
-                )
-            if name in assets and record["state"] != "uploaded":
-                raise ValueError(
-                    f"Incomplete GitHub asset: {name}; review the failed upload"
-                )
-        if len(records) < GITHUB_ASSET_PAGE_SIZE:
-            break
-        page += 1
-
-    # Finish every comparison before the first write. Stage one downloaded
-    # counterpart at a time so retry verification needs one extra asset's space.
-    for name in sorted(names & assets.keys()):
-        with tempfile.TemporaryDirectory(prefix="loom-release-") as temporary:
-            _gh(
-                "release",
-                "download",
-                tag,
-                "--repo",
-                repository,
-                "--pattern",
-                name,
-                "--dir",
-                temporary,
+    release_id, draft = _release_state(
+        existing, tag=tag, title=title, body=body, prerelease=prerelease
+    )
+    if created and not draft:
+        raise ValueError("New GitHub release did not remain a draft")
+    missing = _missing_release_assets(api, release_id, token, assets)
+    if not draft:
+        if missing:
+            raise ValueError(
+                "Published GitHub release has an incomplete asset set; use a new version"
             )
-            if _digest(Path(temporary) / name) != assets[name][1]:
-                raise ValueError(
-                    f"Existing GitHub asset differs: {name}; use a new version"
-                )
-    missing = [str(path) for name, (path, _) in assets.items() if name not in names]
+        print("GitHub release already contains identical immutable assets.")
+        return
     if missing:
         _gh("release", "upload", tag, *missing, "--repo", repository)
-    else:
-        print("GitHub release already contains identical assets.")
+        if _missing_release_assets(api, release_id, token, assets):
+            raise ValueError("GitHub release asset upload did not complete")
+    _gh("release", "edit", tag, "--repo", repository, "--draft=false")
+    published = github_api.get_json(
+        f"{api}/releases/tags/{urllib.parse.quote(tag, safe='')}", token
+    )
+    published_id, published_draft = _release_state(
+        published, tag=tag, title=title, body=body, prerelease=prerelease
+    )
+    if published_id != release_id or published_draft:
+        raise ValueError("GitHub release did not reach its immutable public state")
 
 
 def stage_pypi(
@@ -279,10 +413,13 @@ def main(argv: list[str] | None = None) -> int:
         "--description", type=Path, default=Path("loom/packaging/python/PYPI_README.md")
     )
     parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY"))
+    parser.add_argument("--revision", default=os.environ.get("GITHUB_SHA"))
     parser.add_argument("--output", type=Path, help="fresh PyPI upload directory")
     args = parser.parse_args(argv)
-    if args.operation == "github" and not args.repository:
-        parser.error("github requires --repository or GITHUB_REPOSITORY")
+    if args.operation == "github" and (not args.repository or not args.revision):
+        parser.error(
+            "github requires repository and revision from GitHub Actions or options"
+        )
     if args.operation == "pypi-stage" and args.output is None:
         parser.error("pypi-stage requires --output")
     try:
@@ -299,6 +436,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.operation == "github":
             publish_github(
                 args.repository,
+                args.revision,
                 args.tag,
                 identity,
                 artifacts,
