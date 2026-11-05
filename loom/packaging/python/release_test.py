@@ -359,7 +359,7 @@ class ReleaseTest(unittest.TestCase):
         arguments = (
             "prepare",
             "--version",
-            "1.2.4",
+            "1.2.4.dev0",
             "--catalog",
             "github:fixture/library@v1.2.4",
         )
@@ -367,7 +367,9 @@ class ReleaseTest(unittest.TestCase):
         self.assertEqual(self.version_file.read_bytes(), original)
         self.command(*arguments)
         identity = read_identity(self.version_file)
-        identity.check_tag("v1.2.4")
+        self.assertEqual(identity.version, "1.2.4.dev0")
+        with self.assertRaisesRegex(ValueError, "non-development"):
+            identity.check_tag("v1.2.4.dev0")
         self.assertEqual(identity.catalog, "github:fixture/library@v1.2.4")
         self.assertEqual(self.readme.read_text(), self.description)
         self.assertEqual(

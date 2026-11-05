@@ -75,6 +75,12 @@ matching `v`-prefixed Git tag. A `.devN` version is buildable but cannot pass th
 release gate. The gate also requires a catalog association, such as
 `github:ROCm/hrx-loom-library@v1.2.3`.
 
+The main branch carries the next planned SDK version as `X.Y.Z.dev0`. Advancing
+it after a stable release prevents ordinary CI artifacts from reusing the
+published version for different bytes. Its catalog remains an immutable commit
+and can advance independently as model changes qualify. A frozen release line
+replaces the development version with its first candidate version.
+
 The catalog supplies the default `loom-fetch --list` and picker contents.
 Several SDK versions may share a catalog reference when its models are qualified
 for those consumers. The identity checker validates the reference's syntax; it

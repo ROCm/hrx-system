@@ -291,7 +291,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     commands = parser.add_subparsers(dest="command", required=True)
     prepare = commands.add_parser(
-        "prepare", help="edit the release identity for branch review"
+        "prepare", help="edit the SDK identity for branch review"
     )
     prepare.add_argument("--version", required=True)
     prepare.add_argument("--catalog", required=True)
@@ -320,7 +320,6 @@ def main(argv: list[str] | None = None) -> int:
             identity = parse_identity(
                 {"package-version": args.version, "model-catalog": args.catalog}
             )
-            identity.check_tag(identity.tag)
             document = json.dumps(identity.document(), indent=2) + "\n"
             print(document, end="")
             if not args.dry_run:
