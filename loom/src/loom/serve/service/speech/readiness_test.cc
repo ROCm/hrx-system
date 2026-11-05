@@ -239,6 +239,12 @@ class SpeechReadinessTest : public ::testing::Test {
               test->actual_.runtime.vtable->set_observer(
                   test->actual_.runtime.self, wake);
             },
+        .has_requests =
+            [](void* self) {
+              auto* test = static_cast<SpeechReadinessTest*>(self);
+              return test->actual_.runtime.vtable->has_requests(
+                  test->actual_.runtime.self);
+            },
         .is_pending =
             [](void* self) {
               auto* test = static_cast<SpeechReadinessTest*>(self);

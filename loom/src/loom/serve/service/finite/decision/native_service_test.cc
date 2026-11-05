@@ -395,6 +395,7 @@ TEST_F(NativeDecisionServiceTest, DeviceOutputEscapesBeforeServiceRetirement) {
     IREE_ASSERT_OK(loom_serve_finite_call_status(calls_[0]));
   }
   EXPECT_FALSE(loom_serve_finite_call_is_complete(calls_[0]));
+  EXPECT_TRUE(interface_.runtime.vtable->has_requests(interface_.runtime.self));
   const auto* first = loom_serve_finite_call_output(calls_[0]);
   ASSERT_NE(first, nullptr);
   const auto* second = loom_serve_finite_call_output(calls_[1]);
@@ -533,8 +534,12 @@ TEST_F(NativeDecisionServiceTest, StopDuringPreparationJoinsInputBorrowers) {
 TEST_F(NativeDecisionServiceTest, NativeCallerUsesExecutorWithoutHostPolling) {
   Owner owner(*this);
   ASSERT_NO_FATAL_FAILURE(owner.Call([&] {
+    EXPECT_FALSE(
+        interface_.runtime.vtable->has_requests(interface_.runtime.self));
     ASSERT_NO_FATAL_FAILURE(Open(0));
     ASSERT_NO_FATAL_FAILURE(Open(1));
+    EXPECT_TRUE(
+        interface_.runtime.vtable->has_requests(interface_.runtime.self));
     for (size_t i = 0; i < 2; ++i) {
       loom_serve_finite_call_set_observer(calls_[i], {Wake, this});
     }
@@ -546,6 +551,8 @@ TEST_F(NativeDecisionServiceTest, NativeCallerUsesExecutorWithoutHostPolling) {
   ASSERT_NO_FATAL_FAILURE(owner.Call([&] {
     IREE_ASSERT_OK(loom_serve_finite_call_status(calls_[0]));
     IREE_ASSERT_OK(loom_serve_finite_call_status(calls_[1]));
+    EXPECT_FALSE(
+        interface_.runtime.vtable->has_requests(interface_.runtime.self));
     const auto* first = loom_serve_finite_call_output(calls_[0]);
     const auto* second = loom_serve_finite_call_output(calls_[1]);
     ASSERT_NE(first, nullptr);

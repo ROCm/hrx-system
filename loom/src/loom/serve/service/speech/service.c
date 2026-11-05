@@ -1300,6 +1300,20 @@ static void loom_serve_speech_set_observer(
   loom_serve_timer_set_observer(&service->timer, observer);
 }
 
+static bool loom_serve_speech_has_requests(void* self) {
+  const loom_serve_speech_service_t* service = self;
+  if (service->pending_count) {
+    return true;
+  }
+  for (iree_host_size_t i = 0;
+       service->rows && i < service->generator.request_capacity; ++i) {
+    if (service->rows[i].phase != SPEECH_ROW_EMPTY) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static bool loom_serve_speech_is_active(void* self) {
   const loom_serve_speech_service_t* service = self;
   return service->phase != SPEECH_PHASE_IDLE ||
@@ -1430,6 +1444,7 @@ loom_serve_service_t loom_serve_speech_service_interface(
     loom_serve_speech_service_t* service) {
   static const loom_runtime_service_vtable_t vtable = {
       .set_observer = loom_serve_speech_set_observer,
+      .has_requests = loom_serve_speech_has_requests,
       .is_pending = loom_serve_speech_is_pending,
       .is_active = loom_serve_speech_is_active,
       .advance = loom_serve_speech_advance,

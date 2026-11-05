@@ -314,6 +314,12 @@ struct loom_serve_test_model_service_t {
     return service->waiting;
   }
 
+  static bool HasRequests(void* self) {
+    auto* service = static_cast<loom_serve_test_model_service_t*>(self);
+    std::lock_guard<std::mutex> lock(service->mutex);
+    return !service->pending.empty();
+  }
+
   void WaitSubmitted() {
     std::unique_lock<std::mutex> lock(mutex);
     condition.wait(lock, [this] { return waiting; });
@@ -461,6 +467,7 @@ struct loom_serve_test_model_service_t {
                                  const void* capacity_domain) {
     static const loom_runtime_service_vtable_t vtable = {
         .set_observer = SetObserver,
+        .has_requests = HasRequests,
         .is_pending = IsPending,
         .is_active = IsActive,
         .advance = Advance,

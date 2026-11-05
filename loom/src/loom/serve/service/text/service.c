@@ -988,6 +988,13 @@ static void loom_serve_text_set_observer(
   loom_serve_timer_set_observer(&service->heartbeat.timer, observer);
 }
 
+static bool loom_serve_text_has_requests(void* self) {
+  loom_serve_text_service_t* service = self;
+  return service->pending.count || service->input_counts.count ||
+         service->control.consumer.self ||
+         loom_serve_text_heartbeat_read(&service->heartbeat).active_rows;
+}
+
 static bool loom_serve_text_is_pending(void* self) {
   loom_serve_text_service_t* service = self;
   return loom_serve_text_has_work(service) ||
@@ -1434,6 +1441,7 @@ loom_serve_service_t loom_serve_text_service_interface(
     loom_serve_text_service_t* service) {
   static const loom_runtime_service_vtable_t vtable = {
       .set_observer = loom_serve_text_set_observer,
+      .has_requests = loom_serve_text_has_requests,
       .is_pending = loom_serve_text_is_pending,
       .is_active = loom_serve_text_is_active,
       .advance = loom_serve_text_advance,

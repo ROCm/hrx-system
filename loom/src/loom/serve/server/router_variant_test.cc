@@ -147,6 +147,7 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
     *out_service = dependency->Interface(nullptr, nullptr);
     static const loom_runtime_service_vtable_t vtable = {
         .set_observer = SetObserver,
+        .has_requests = HasRequests,
         .is_pending = IsPending,
         .is_active = IsActive,
         .advance = Advance,

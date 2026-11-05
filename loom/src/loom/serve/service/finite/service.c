@@ -494,6 +494,11 @@ static void loom_serve_finite_select(loom_serve_finite_service_t* service) {
   loom_serve_finite_schedule_cpu(service, FINITE_BATCHING);
 }
 
+static bool loom_serve_finite_has_requests(void* self) {
+  const loom_serve_finite_service_t* service = self;
+  return service->pending_count || service->cohort_count;
+}
+
 static bool loom_serve_finite_is_active(void* self) {
   const loom_serve_finite_service_t* service = self;
   return service->phase != FINITE_IDLE && service->phase != FINITE_WAITING;
@@ -875,6 +880,7 @@ loom_serve_finite_service_interface_t loom_serve_finite_service_interface(
     loom_serve_finite_service_t* service) {
   static const loom_runtime_service_vtable_t vtable = {
       .set_observer = loom_serve_finite_set_observer,
+      .has_requests = loom_serve_finite_has_requests,
       .is_pending = loom_serve_finite_is_pending,
       .is_active = loom_serve_finite_is_active,
       .advance = loom_serve_finite_advance,

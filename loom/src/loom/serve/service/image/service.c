@@ -1064,6 +1064,12 @@ static void loom_serve_image_set_observer(
   service->generator.set_observer(service->generator.self, observer);
 }
 
+static bool loom_serve_image_has_requests(void* self) {
+  const loom_serve_image_service_t* service = self;
+  return service->pending_count ||
+         service->cohort.count != service->cohort.next;
+}
+
 static bool loom_serve_image_is_active(void* self) {
   const loom_serve_image_service_t* service = self;
   return service->phase == IMAGE_PHASE_PREPARING ||
@@ -1191,6 +1197,7 @@ loom_serve_service_t loom_serve_image_service_interface(
     loom_serve_image_service_t* service) {
   static const loom_runtime_service_vtable_t vtable = {
       .set_observer = loom_serve_image_set_observer,
+      .has_requests = loom_serve_image_has_requests,
       .is_pending = loom_serve_image_is_pending,
       .is_active = loom_serve_image_is_active,
       .advance = loom_serve_image_advance,

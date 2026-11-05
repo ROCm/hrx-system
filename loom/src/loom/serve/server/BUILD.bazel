@@ -129,6 +129,7 @@ loom_cc_test(
     name = "driver_test",
     srcs = ["driver_test.cc"],
     deps = [
+        ":configuration",
         ":driver",
         ":registry",
         "//loom/src/loom/runtime:wake",

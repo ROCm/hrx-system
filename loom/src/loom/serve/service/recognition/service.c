@@ -668,14 +668,19 @@ static bool loom_serve_recognition_is_active(void* self) {
          loom_serve_recognition_stream_service_is_active(service->streams);
 }
 
-static bool loom_serve_recognition_is_pending(void* self) {
+static bool loom_serve_recognition_has_requests(void* self) {
   loom_serve_recognition_service_t* service = self;
   for (iree_host_size_t i = 0; i < service->capacity; ++i) {
     if (service->rows[i].id) {
       return true;
     }
   }
-  return loom_serve_recognition_is_active(service);
+  return false;
+}
+
+static bool loom_serve_recognition_is_pending(void* self) {
+  return loom_serve_recognition_has_requests(self) ||
+         loom_serve_recognition_is_active(self);
 }
 
 static loom_service_snapshot_t loom_serve_recognition_snapshot(void* self) {
@@ -707,6 +712,7 @@ loom_serve_service_t loom_serve_recognition_service_interface(
     loom_serve_recognition_service_t* service) {
   static const loom_runtime_service_vtable_t vtable = {
       .set_observer = loom_serve_recognition_set_observer,
+      .has_requests = loom_serve_recognition_has_requests,
       .is_pending = loom_serve_recognition_is_pending,
       .is_active = loom_serve_recognition_is_active,
       .advance = loom_serve_recognition_advance,

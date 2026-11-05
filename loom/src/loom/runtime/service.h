@@ -32,6 +32,12 @@ typedef struct loom_runtime_service_vtable_t {
   // Installs the owner's nonblocking wake target before the first turn. The
   // owner clears it after all accepted asynchronous callbacks have retired.
   void (*set_observer)(void* self, loom_runtime_wake_callback_t observer);
+  // Whether accepted requests still own queue, execution, or delivery storage.
+  // Includes service-owned utility/control requests and blocked consumers;
+  // excludes idle retained history, maintenance, and observation callbacks.
+  // False permits graceful work to stop, but is_pending still governs storage
+  // retirement. Reads published owner facts, never task-owned mutable payloads.
+  bool (*has_requests)(void* self);
   // Whether an accepted asynchronous callback still borrows service storage.
   // True requires an eventual wake even after transport admission stops.
   bool (*is_pending)(void* self);

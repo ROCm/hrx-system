@@ -632,9 +632,8 @@ loom_runtime_service_flags_t loom_serve_registry_service_flags(
     return LOOM_RUNTIME_SERVICE_FLAG_STOPPING;
   }
   if (model->removal == LOOM_SERVE_REMOVAL_DRAIN) {
-    const loom_service_snapshot_t snapshot =
-        model->service.snapshot(model->service.runtime.self);
-    if (!snapshot.queued_requests && !snapshot.active_requests &&
+    if (!model->service.runtime.vtable->has_requests(
+            model->service.runtime.self) &&
         !model->tokenizer_count) {
       return LOOM_RUNTIME_SERVICE_FLAG_STOPPING;
     }
@@ -809,10 +808,9 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
       (model->parameter_operation == LOOM_SERVE_PARAMETER_OPERATION_WAITING ||
        model->parameter_operation ==
            LOOM_SERVE_PARAMETER_OPERATION_ACTIVATING)) {
-    const loom_service_snapshot_t snapshot =
-        model->service.snapshot(model->service.runtime.self);
     if (model->removal || !iree_status_is_ok(model->status) ||
-        (!snapshot.queued_requests && !snapshot.active_requests &&
+        (!model->service.runtime.vtable->has_requests(
+             model->service.runtime.self) &&
          !model->service.runtime.vtable->is_active(
              model->service.runtime.self))) {
       loom_serve_activation_phase_t phase = LOOM_SERVE_ACTIVATION_COMPLETE;
@@ -849,9 +847,8 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
   if (model->phase == LOOM_SERVE_REGISTRATION_READY &&
       (model->removal || !iree_status_is_ok(model->status)) &&
       model->parameter_operation == LOOM_SERVE_PARAMETER_OPERATION_NONE) {
-    const loom_service_snapshot_t snapshot =
-        model->service.snapshot(model->service.runtime.self);
-    if (!snapshot.queued_requests && !snapshot.active_requests &&
+    if (!model->service.runtime.vtable->has_requests(
+            model->service.runtime.self) &&
         !model->tokenizer_count && !model->held_count &&
         !model->service.runtime.vtable->is_pending(
             model->service.runtime.self)) {
@@ -865,9 +862,8 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
   if (model->phase == LOOM_SERVE_REGISTRATION_READY &&
       model->parameter_operation ==
           LOOM_SERVE_PARAMETER_OPERATION_DEACTIVATING) {
-    const loom_service_snapshot_t snapshot =
-        model->service.snapshot(model->service.runtime.self);
-    if (!snapshot.queued_requests && !snapshot.active_requests &&
+    if (!model->service.runtime.vtable->has_requests(
+            model->service.runtime.self) &&
         !model->service.runtime.vtable->is_active(
             model->service.runtime.self)) {
       bool complete = false;
