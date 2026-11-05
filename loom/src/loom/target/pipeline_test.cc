@@ -32,7 +32,7 @@ typedef struct PipelineRunCounts {
   // Number of retained call-graph specialization pass runs.
   int target_callgraph_specialization = 0;
   // Lexical pass-run ordinals of the expected call-graph specializations.
-  int target_callgraph_specialization_ordinals[4] = {};
+  int target_callgraph_specialization_ordinals[5] = {};
   // Number of semantic boundary-refinement pass runs.
   int boundary_refinement = 0;
   // Lexical pass-run ordinal of semantic boundary refinement.
@@ -45,6 +45,8 @@ typedef struct PipelineRunCounts {
   int preparatory_target_inlining_ordinal = 0;
   // Required source inlining after execution realization adds new helpers.
   int execution_target_inlining_ordinal = 0;
+  // Obsolete helper cleanup after physical-entry call reprojection.
+  int execution_cleanup_ordinal = 0;
   // Lexical pass-run ordinal of deferred source call completion.
   int resumed_target_inlining_ordinal = 0;
   // Lexical pass-run ordinal of the last target-required call inlining.
@@ -211,7 +213,7 @@ iree_status_t InspectPipelineRun(void* user_data, loom_op_t* op,
         count_context->module, loom_pass_run_options(op), IREE_SV("rewrite"));
   } else if (iree_string_view_equal(key,
                                     IREE_SV("specialize-target-callgraph"))) {
-    if (counts->target_callgraph_specialization < 4) {
+    if (counts->target_callgraph_specialization < 5) {
       counts->target_callgraph_specialization_ordinals
           [counts->target_callgraph_specialization] =
           count_context->current_run_ordinal;
@@ -315,6 +317,8 @@ iree_status_t InspectPipelineRun(void* user_data, loom_op_t* op,
     } else if (counts->source_to_low != 0) {
       ++counts->symbol_dce;
       counts->symbol_dce_ordinal = count_context->current_run_ordinal;
+    } else if (counts->execution_target_inlining_ordinal != 0) {
+      counts->execution_cleanup_ordinal = count_context->current_run_ordinal;
     }
   } else if (iree_string_view_equal(key,
                                     IREE_SV("sanitizer-insert-assertions"))) {
@@ -405,7 +409,7 @@ TEST_F(TargetPipelineTest, ZeroChecksStillMaterializesAuthoredAssertions) {
   EXPECT_EQ(counts.final_template_selection, 1);
   EXPECT_TRUE(
       iree_string_view_equal(counts.final_template_rewrite, IREE_SV("inline")));
-  EXPECT_EQ(counts.target_callgraph_specialization, 4);
+  EXPECT_EQ(counts.target_callgraph_specialization, 5);
   EXPECT_EQ(counts.boundary_refinement, 1);
   EXPECT_EQ(counts.pipeline_preparation, 2);
   EXPECT_EQ(counts.worker_outlining, 2);
@@ -438,8 +442,8 @@ TEST_F(TargetPipelineTest, ZeroChecksStillMaterializesAuthoredAssertions) {
   EXPECT_LT(counts.boundary_refinement_ordinal,
             counts.boundary_cleanup_ordinal);
   EXPECT_LT(counts.boundary_cleanup_ordinal,
-            counts.target_callgraph_specialization_ordinals[3]);
-  EXPECT_LT(counts.target_callgraph_specialization_ordinals[3],
+            counts.target_callgraph_specialization_ordinals[4]);
+  EXPECT_LT(counts.target_callgraph_specialization_ordinals[4],
             counts.first_target_legalization_ordinal);
   EXPECT_EQ(counts.view_transport_decomposition, 1);
   EXPECT_LT(counts.worker_outlining_ordinals[1],
@@ -468,6 +472,10 @@ TEST_F(TargetPipelineTest, ZeroChecksStillMaterializesAuthoredAssertions) {
   EXPECT_LT(counts.worker_outlining_ordinals[1],
             counts.execution_target_inlining_ordinal);
   EXPECT_LT(counts.execution_target_inlining_ordinal,
+            counts.target_callgraph_specialization_ordinals[3]);
+  EXPECT_LT(counts.target_callgraph_specialization_ordinals[3],
+            counts.execution_cleanup_ordinal);
+  EXPECT_LT(counts.execution_cleanup_ordinal,
             counts.boundary_refinement_ordinal);
   EXPECT_LT(counts.preparatory_target_inlining_ordinal,
             counts.first_scf_to_cfg_ordinal);

@@ -1340,15 +1340,41 @@ iree_status_t loom_aie2p_native_select_transfers(
     if (worker->execution != LOOM_AIE2P_NATIVE_EXECUTION_CORE) {
       continue;
     }
-    const loom_aie2p_native_worker_t* owner =
+    loom_aie2p_native_worker_t* owner =
         &context->workers[context->execution.workers[context->core_engines[i]]];
-    for (const loom_aie2p_native_distribution_command_t* command =
+    for (loom_aie2p_native_distribution_command_t* command =
              worker->distribution_commands;
          iree_status_is_ok(status) && valid && command;
          command = command->next) {
       status = loom_aie2p_native_select_control_route(
           context, realization, i, command->endpoint->tile, true, &next_source,
           next_controller, &valid);
+      if (iree_status_is_ok(status) && valid) {
+        loom_aie2p_native_retirement_t* group = owner->retirements;
+        for (; group; group = group->next) {
+          const loom_aie2p_native_distribution_command_t* source =
+              group->source;
+          if (source->endpoint->tile == command->endpoint->tile &&
+              source->endpoint->engine == command->endpoint->engine &&
+              source->direction == command->direction) {
+            break;
+          }
+        }
+        if (!group) {
+          status = iree_arena_allocate(arena, sizeof(*group), (void**)&group);
+          if (iree_status_is_ok(status)) {
+            *group = (loom_aie2p_native_retirement_t){
+                .next = owner->retirements,
+                .source = command,
+                .function = loom_symbol_ref_null()};
+            owner->retirements = group;
+          }
+        }
+        if (iree_status_is_ok(status)) {
+          ++group->use_count;
+          command->retirement = group;
+        }
+      }
     }
     for (iree_host_size_t j = 0; j < worker->channels.count; ++j) {
       const loom_aie2p_native_channel_access_t* access =

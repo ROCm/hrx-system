@@ -45,14 +45,14 @@ pipeline.def<kernel> public retain target(@device) @composed() run() {
 low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_5() asm {
   %44 = mov.local-address 458752
   %48 = mov.local-address 458756
-  %value$98 = mov.short 17
-  st %value$98, %48, 0
-  st %value$98, %44, 0
-  %53 = mov.local-address 458760
-  %value$101 = lda %44, 0
+  %value$102 = mov.short 17
+  st %value$102, %48, 0
+  st %value$102, %44, 0
+  %99 = mov.local-address 458760
+  %value$105 = lda %44, 0
   %increment = mov.short 29
-  %result = add.nc %value$101, %increment
-  st %result, %53, 0
+  %result = add.nc %value$105, %increment
+  st %result, %99, 0
   %81 = mov.short 1
   rel %81, 48
   low.br ^_bb1
