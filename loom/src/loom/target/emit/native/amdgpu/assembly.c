@@ -140,7 +140,9 @@ static iree_string_view_t loom_amdgpu_descriptor_key(
     const loom_native_assembly_packet_context_t* context) {
   return loom_native_assembly_descriptor_string(
       context->schedule->target.descriptor_set,
-      context->packet->descriptor->key_string_ref);
+      loom_low_descriptor_key_string_ref(
+          context->schedule->target.descriptor_set,
+          context->packet->descriptor));
 }
 
 static const loom_low_descriptor_view_t* loom_amdgpu_descriptor_view(

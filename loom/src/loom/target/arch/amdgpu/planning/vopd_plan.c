@@ -1322,7 +1322,9 @@ static iree_status_t loom_amdgpu_vopd_plan_write_packet_descriptor_json(
         "descriptor set");
   }
   iree_string_view_t descriptor_key = loom_low_descriptor_set_string(
-      plan->schedule->target.descriptor_set, packet.descriptor->key_string_ref);
+      plan->schedule->target.descriptor_set,
+      loom_low_descriptor_key_string_ref(plan->schedule->target.descriptor_set,
+                                         packet.descriptor));
   return loom_json_write_escaped_string(stream, descriptor_key);
 }
 

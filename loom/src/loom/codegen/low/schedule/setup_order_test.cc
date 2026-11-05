@@ -269,7 +269,7 @@ TEST(SetupMembershipTest, DescriptorMembershipPreservesRequiredReadPhases) {
     // Whether the input requires physical storage.
     bool input_required;
     // Result arity of the descriptor packet.
-    uint16_t result_count;
+    uint8_t result_count;
     // Whether setup ordering preserves required storage.
     bool ordered;
   } cases[] = {
@@ -294,7 +294,7 @@ TEST(SetupMembershipTest, DescriptorMembershipPreservesRequiredReadPhases) {
                  << " required=" << test_case.input_required
                  << " results=" << test_case.result_count);
     loom_low_descriptor_t descriptor = {
-        .operand_count = uint16_t(test_case.result_count + 1),
+        .operand_count = static_cast<uint8_t>(test_case.result_count + 1),
         .result_count = test_case.result_count,
     };
     if (test_case.flags & LOOM_LOW_SCHEDULE_NODE_FLAG_EARLY_CLOBBER) {
@@ -568,12 +568,12 @@ TEST_F(SetupOrderTest, ContinuationsConsumeRetainedStorageIdentity) {
     const uint8_t result_operand_count = constant ? 1 : 2;
     const loom_low_descriptor_t descriptors[] = {
         {
-            .operand_count = uint16_t(source_operand_count + 1),
+            .operand_count = static_cast<uint8_t>(source_operand_count + 1),
             .result_count = 1,
         },
         {
             .operand_start = 2,
-            .operand_count = uint16_t(result_operand_count + 1),
+            .operand_count = static_cast<uint8_t>(result_operand_count + 1),
             .result_count = 1,
             .layout_index = 1,
         },

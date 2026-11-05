@@ -247,6 +247,17 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   constexpr loom_string_ref_t kMatrixSmfmacTag = LOOM_STRING_REF(0, 115, 17);
   constexpr loom_string_ref_t kRegisterClassGpr = LOOM_STRING_REF(0, 132, 8);
   constexpr loom_string_ref_t kRegisterClassFpr = LOOM_STRING_REF(0, 140, 8);
+  const loom_low_descriptor_identity_t descriptor_identities[] = {
+      {.semantic_tag_string_ref = kRegisterCopyTag},
+      {.semantic_tag_string_ref = kMemoryGlobalTag},
+      {.semantic_tag_string_ref = kMemoryStackLoadTag},
+      {.semantic_tag_string_ref = kMemoryStackStoreTag},
+      {.semantic_tag_string_ref = kMatrixWmmaTag},
+      {.semantic_tag_string_ref = kMemoryGlobalTag},
+      {.semantic_tag_string_ref = kMatrixSwmmacTag},
+      {.semantic_tag_string_ref = kMatrixSmfmacTag},
+  };
+  const uint64_t descriptor_stable_ids[8] = {};
   loom_low_descriptor_t descriptors[8] = {};
   const loom_low_descriptor_layout_t layouts[] = {
       {},
@@ -254,16 +265,11 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       {.effect_start = 1, .effect_count = 1},
   };
   loom_low_descriptor_view_t descriptor_views[8] = {};
-  descriptors[0].semantic_tag_string_ref = kRegisterCopyTag;
-  descriptors[1].semantic_tag_string_ref = kMemoryGlobalTag;
-  descriptors[2].semantic_tag_string_ref = kMemoryStackLoadTag;
+  for (uint16_t i = 0; i < IREE_ARRAYSIZE(descriptors); ++i) {
+    descriptors[i].identity_ordinal = i;
+  }
   descriptors[2].layout_index = 1;
-  descriptors[3].semantic_tag_string_ref = kMemoryStackStoreTag;
   descriptors[3].layout_index = 2;
-  descriptors[4].semantic_tag_string_ref = kMatrixWmmaTag;
-  descriptors[5].semantic_tag_string_ref = kMemoryGlobalTag;
-  descriptors[6].semantic_tag_string_ref = kMatrixSwmmacTag;
-  descriptors[7].semantic_tag_string_ref = kMatrixSmfmacTag;
   const loom_low_effect_t effects[] = {
       {
           .kind = LOOM_LOW_EFFECT_KIND_READ,
@@ -327,8 +333,11 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   };
   loom_low_descriptor_set_t descriptor_set = {
       .stable_id = 1,
+      .descriptor_identities = descriptor_identities,
+      .descriptor_stable_ids = descriptor_stable_ids,
       .descriptors = descriptors,
       .descriptor_layouts = layouts,
+      .descriptor_identity_count = IREE_ARRAYSIZE(descriptor_identities),
       .descriptor_layout_count = IREE_ARRAYSIZE(layouts),
       .descriptor_views = descriptor_views,
       .descriptor_count = IREE_ARRAYSIZE(descriptors),

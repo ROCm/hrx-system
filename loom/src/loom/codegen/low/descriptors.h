@@ -27,7 +27,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 72u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 73u
 
 // Sentinel for absent target-family or descriptor-set stable IDs.
 #define LOOM_LOW_STABLE_ID_NONE UINT64_C(0)
@@ -1245,23 +1245,30 @@ enum loom_low_descriptor_op_kind_e {
 };
 typedef uint8_t loom_low_descriptor_op_kind_t;
 
-typedef struct loom_low_descriptor_t {
-  // Durable descriptor identity derived from the descriptor key. This is
-  // stable across descriptor table reordering and unrelated descriptor
-  // additions; descriptor-set ordinals are only transient row addresses.
-  uint64_t stable_id;
+// Canonical spelling metadata shared by descriptors with the same authored
+// identity. Durable stable IDs remain ordinal-indexed companion data so the
+// hot structural row does not pay another catalog indirection.
+typedef struct loom_low_descriptor_identity_t {
   // String-pool reference for the stable descriptor key.
   loom_string_ref_t key_string_ref;
-  // String-pool reference for the target mnemonic or packet name.
-  loom_string_ref_t mnemonic_string_ref;
   // String-pool reference for the primary semantic tag.
   loom_string_ref_t semantic_tag_string_ref;
+} loom_low_descriptor_identity_t;
+
+static_assert(sizeof(loom_low_descriptor_identity_t) == 8,
+              "descriptor identities must remain compact table rows");
+
+typedef struct loom_low_descriptor_t {
+  // String-pool reference for the target mnemonic or packet name.
+  loom_string_ref_t mnemonic_string_ref;
+  // Index into the descriptor set's shared identity catalog.
+  uint16_t identity_ordinal;
   // First index in the set's operand_indices for this descriptor.
   uint16_t operand_start;
   // Total number of operand/result rows for this descriptor.
-  uint16_t operand_count;
+  uint8_t operand_count;
   // Number of leading operand rows that define results.
-  uint16_t result_count;
+  uint8_t result_count;
   // Target-owned encoding identifier.
   uint16_t encoding_id;
   // Index into the set's shared descriptor_layouts table.
@@ -1270,13 +1277,15 @@ typedef struct loom_low_descriptor_t {
   loom_low_descriptor_flags_t flags;
 } loom_low_descriptor_t;
 
-static_assert(sizeof(loom_low_descriptor_t) == 32,
-              "loom_low_descriptor_t must be 32 bytes");
+static_assert(sizeof(loom_low_descriptor_t) == 16,
+              "loom_low_descriptor_t must be 16 bytes");
 
 // Immutable structural spans shared by instruction identities and target views.
-// Identity, operand binding and encoding-ID queries stay in the descriptor row;
-// consumers of these spans use the descriptor's layout_index. Empty spans have
-// start zero so unused offsets do not distinguish otherwise identical layouts.
+// Operand binding and encoding-ID queries stay in the descriptor row;
+// consumers of these spans use the descriptor's layout_index. Stable IDs use
+// the ordinal-indexed companion array, while key and semantic-tag queries use
+// the shared identity catalog. Empty spans have start zero so unused offsets
+// do not distinguish otherwise identical layouts.
 typedef struct loom_low_descriptor_layout_t {
   // First feature-mask word required by this descriptor.
   uint16_t feature_mask_word_start;
@@ -1661,10 +1670,18 @@ typedef struct loom_low_descriptor_set_t {
   loom_string_ref_t target_key_string_ref;
   // String-pool reference for the feature namespace key.
   loom_string_ref_t feature_key_string_ref;
+  // Shared descriptor identity slots indexed by each descriptor's identity
+  // ordinal. Generated catalogs fit in the uint16_t ordinal domain. Slots not
+  // referenced by a linked target family may be empty.
+  const loom_low_descriptor_identity_t* descriptor_identities;
+  // Durable stable IDs indexed directly by descriptor ordinal.
+  const uint64_t* descriptor_stable_ids;
   // Structural descriptor rows indexed by descriptor ordinal.
   const loom_low_descriptor_t* descriptors;
   // Interned structural layouts referenced by descriptor layout indices.
   const loom_low_descriptor_layout_t* descriptor_layouts;
+  // Exclusive upper bound of addressable descriptor identity ordinals.
+  uint32_t descriptor_identity_count;
   // Number of rows in the shared descriptor_layouts table.
   uint32_t descriptor_layout_count;
   // View-specific descriptor rows indexed by descriptor ordinal.
@@ -1851,6 +1868,48 @@ typedef struct loom_low_descriptor_set_t {
   // share a 16-byte aligned slot; byte counts are used only for verification.
   iree_alignas(16) loom_string_pool_t string_pool;
 } loom_low_descriptor_set_t;
+
+// Returns the shared identity metadata for a verified descriptor row.
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_descriptor_identity_t*
+loom_low_descriptor_identity(const loom_low_descriptor_set_t* descriptor_set,
+                             const loom_low_descriptor_t* descriptor) {
+  return &descriptor_set->descriptor_identities[descriptor->identity_ordinal];
+}
+
+// Returns the durable stable ID for a verified descriptor row.
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline uint64_t
+loom_low_descriptor_stable_id(const loom_low_descriptor_set_t* descriptor_set,
+                              const loom_low_descriptor_t* descriptor) {
+  const uint32_t descriptor_ordinal =
+      (uint32_t)(descriptor - descriptor_set->descriptors);
+  return descriptor_set->descriptor_stable_ids[descriptor_ordinal];
+}
+
+// Returns the durable stable ID for a verified descriptor ordinal.
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline uint64_t
+loom_low_descriptor_stable_id_at(
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint32_t descriptor_ordinal) {
+  return descriptor_set->descriptor_stable_ids[descriptor_ordinal];
+}
+
+// Returns the stable key reference for a verified descriptor row.
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_string_ref_t
+loom_low_descriptor_key_string_ref(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor) {
+  return loom_low_descriptor_identity(descriptor_set, descriptor)
+      ->key_string_ref;
+}
+
+// Returns the semantic-tag reference for a verified descriptor row.
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_string_ref_t
+loom_low_descriptor_semantic_tag_string_ref(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor) {
+  return loom_low_descriptor_identity(descriptor_set, descriptor)
+      ->semantic_tag_string_ref;
+}
 
 // Resolves the native assembly mnemonic selected by a verified asm form and
 // layout. Ordinary forms use their own mnemonic. Generated layouts instead

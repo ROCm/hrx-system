@@ -287,12 +287,15 @@ static iree_string_view_t loom_low_target_legalize_report_descriptor_key(
     const loom_low_target_legalize_function_state_t* state,
     const loom_target_contract_query_result_t* query_result) {
   const loom_low_descriptor_t* descriptor = query_result->selected_descriptor;
-  if (descriptor == NULL ||
-      descriptor->key_string_ref == LOOM_STRING_REF_NONE) {
+  if (descriptor == NULL) {
     return iree_string_view_empty();
   }
-  return loom_low_descriptor_set_string(state->source_binding.descriptor_set,
-                                        descriptor->key_string_ref);
+  const loom_string_ref_t key_string_ref = loom_low_descriptor_key_string_ref(
+      state->source_binding.descriptor_set, descriptor);
+  return key_string_ref == LOOM_STRING_REF_NONE
+             ? iree_string_view_empty()
+             : loom_low_descriptor_set_string(
+                   state->source_binding.descriptor_set, key_string_ref);
 }
 
 static bool loom_low_target_legalize_report_wants_rows(

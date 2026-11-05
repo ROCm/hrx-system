@@ -119,7 +119,8 @@ static iree_status_t loom_amdgpu_record_memory_packet_report(
       loom_low_descriptor_memory_effect_summary(descriptor_set,
                                                 packet->access.descriptor);
   const iree_string_view_t packet_key = loom_low_descriptor_set_string(
-      descriptor_set, packet->access.descriptor->key_string_ref);
+      descriptor_set, loom_low_descriptor_key_string_ref(
+                          descriptor_set, packet->access.descriptor));
   const loom_low_source_memory_operation_kind_t operation_kind =
       source->operation_kind;
   iree_string_view_t fallback_reason = iree_string_view_empty();
@@ -224,7 +225,8 @@ static iree_status_t loom_amdgpu_record_fragment_memory_access_report(
   const loom_low_descriptor_memory_effect_summary_t issued =
       loom_low_descriptor_memory_effect_summary(descriptor_set, descriptor);
   const iree_string_view_t packet_key = loom_low_descriptor_set_string(
-      descriptor_set, descriptor->key_string_ref);
+      descriptor_set,
+      loom_low_descriptor_key_string_ref(descriptor_set, descriptor));
   int64_t static_offset_bytes = plan->source.static_byte_offset;
   const bool has_static_offset = loom_amdgpu_fragment_memory_static_offset_i64(
       plan, access->register_index, access->element_index,
