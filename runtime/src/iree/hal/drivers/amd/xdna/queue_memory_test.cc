@@ -470,7 +470,7 @@ TEST(XdnaQueueMemoryTest, CachedWorkPassesPendingBackingOnSameQueue) {
   IREE_ASSERT_OK(iree_hal_queue_alloca(harness.queue, {},
                                        {1, &harness.done, &held_value}, pool, 1,
                                        &large, &pending));
-  ASSERT_EQ(deferred->pending.count, 1u);
+  ASSERT_EQ(deferred->PendingRequestCount(), 1u);
   uint64_t allocated_value = 2;
   IREE_ASSERT_OK(iree_hal_queue_alloca(harness.queue, {},
                                        {1, &progress, &allocated_value}, pool,
@@ -547,7 +547,7 @@ TEST(XdnaQueueMemoryTest, DeferredBackingFailureReachesSignal) {
   IREE_ASSERT_OK(iree_hal_queue_alloca(harness.queue, {},
                                        {1, &harness.done, &value}, deferred, 1,
                                        &request, &buffer));
-  ASSERT_EQ(deferred->pending.count, 1u);
+  ASSERT_EQ(deferred->PendingRequestCount(), 1u);
   std::thread completion([&] { deferred->FailOne(); });
   completion.join();
   uint64_t reached_value = 0;
@@ -596,9 +596,8 @@ TEST(XdnaQueueMemoryTest, CapacityReturnedBeforeDeferredResultIsObserved) {
   IREE_ASSERT_OK(iree_hal_queue_alloca(harness.queue, {},
                                        {1, &harness.done, &value}, deferred, 1,
                                        &request, &pending));
-  ASSERT_EQ(deferred->pending.count, 1u);
-  auto call = deferred->pending;
-  deferred->pending = {};
+  ASSERT_EQ(deferred->PendingRequestCount(), 1u);
+  auto call = deferred->TakeFirstAcquisition();
   iree_hal_pool_acquire_result_t result;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
       pool, call.count, call.requests, call.frontier, call.reservations,

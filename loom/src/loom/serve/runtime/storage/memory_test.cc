@@ -439,6 +439,118 @@ TEST_F(MemoryTest, FailedReservationGrowthKeepsBackingUntilCheckedDetach) {
   EXPECT_EQ(statistics[0].committed_bytes, 0u);
 }
 
+TEST_F(MemoryTest, NativeReturnAdmitsGrowthWhileIndependentAcquisitionIsHeld) {
+  ASSERT_NO_FATAL_FAILURE(
+      UseDeferredBacking(2 * kSlabSize, nullptr, /*distinct_classes=*/true));
+  const auto bulk = loom_serve_pool_weight_geometry(storage_owner);
+  const auto state = loom_serve_pool_state_geometry(storage_owner);
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(pool, bulk, kSlabSize, 256,
+                                                    &statistics[0], &first));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(pool, bulk, kSlabSize, 256,
+                                                    &statistics[1], &second));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+      pool, state, state.mapping_size, 256, &statistics[2], &third));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(first, 0, kSlabSize));
+  deferred_backing->defer = true;
+  const loom_serve_memory_range_t held = {second, 0, kSlabSize};
+  loom_serve_memory_admission_t admission;
+  loom_serve_memory_operation_t* operation = nullptr;
+  IREE_ASSERT_OK(loom_serve_memory_pool_commit_async(pool, 1, &held, nullptr, 0,
+                                                     &admission, &operation));
+  ASSERT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE);
+  deferred_backing->WaitForAcquisition();
+  deferred_backing->DeferReturns();
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_free(first));
+  first = nullptr;
+  const auto demand = loom_serve_virtual_buffer_missing_demand(third);
+  IREE_ASSERT_OK(loom_serve_memory_pool_prepare(pool, demand, &admission));
+  EXPECT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_DEFERRED);
+  deferred_backing->WaitForReturn();
+
+  iree_notification_t notification;
+  iree_notification_initialize(&notification);
+  loom_serve_memory_pool_set_observer(
+      pool,
+      [](void* context) {
+        iree_notification_post(static_cast<iree_notification_t*>(context),
+                               IREE_ALL_WAITERS);
+      },
+      &notification);
+  deferred_backing->CompleteReturns();
+  // The public owner keeps progressing capacity without joining the held
+  // acquisition. Native completion is the sole source of this new credit.
+  do {
+    const auto token = iree_notification_prepare_wait(&notification);
+    IREE_ASSERT_OK(loom_serve_memory_pool_prepare(pool, demand, &admission));
+    if (admission == LOOM_SERVE_MEMORY_ADMISSION_DEFERRED) {
+      iree_notification_commit_wait(&notification, token, IREE_DURATION_ZERO,
+                                    IREE_TIME_INFINITE_FUTURE);
+    } else {
+      iree_notification_cancel_wait(&notification);
+    }
+  } while (admission == LOOM_SERVE_MEMORY_ADMISSION_DEFERRED);
+  EXPECT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE);
+  EXPECT_FALSE(loom_serve_memory_operation_is_complete(operation));
+  loom_serve_memory_pool_set_observer(pool, nullptr, nullptr);
+  iree_notification_deinitialize(&notification);
+
+  // Submit C before releasing A. Both are independently accepted and their
+  // mapped output remains valid after the native captures complete.
+  const loom_serve_memory_range_t incoming = {third, 0, state.mapping_size};
+  loom_serve_memory_operation_t* incoming_operation = nullptr;
+  IREE_ASSERT_OK(loom_serve_memory_pool_commit_async(
+      pool, 1, &incoming, nullptr, 0, &admission, &incoming_operation));
+  ASSERT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE);
+  deferred_backing->ResumeAcquisitions();
+  for (auto* accepted : {operation, incoming_operation}) {
+    loom_serve_memory_operation_await(accepted);
+    IREE_EXPECT_OK(loom_serve_memory_operation_query_status(accepted));
+    loom_serve_memory_operation_free(accepted);
+  }
+  RoundTrip(loom_serve_virtual_buffer_handle(second), 0, 0x11223344);
+  RoundTrip(loom_serve_virtual_buffer_handle(third), 0, 0x55667788);
+}
+
+TEST_F(MemoryTest, PackedPageWordBoundariesReuseWithoutNewNativeBacking) {
+  ASSERT_NO_FATAL_FAILURE(UseDeferredBacking(6 * kSlabSize));
+  const auto state = loom_serve_pool_state_geometry(storage_owner);
+  constexpr uint64_t kPages = 65;
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+      pool, state, kPages * state.mapping_size, 256, &statistics[0], &first));
+  // Cross a bitmap word, then return both sides of that boundary. Every cycle
+  // fills those exact holes while preserving the still-mapped peer contents.
+  IREE_ASSERT_OK(
+      loom_serve_virtual_buffer_commit(first, 0, kPages * state.mapping_size));
+  const uint64_t retained =
+      loom_serve_memory_pool_statistics(pool).committed_bytes;
+  iree_hal_pool_stats_t initial_source;
+  iree_hal_pool_query_stats(deferred_backing, &initial_source);
+  for (uint64_t index : {0u, 62u, 63u, 64u}) {
+    RoundTrip(loom_serve_virtual_buffer_handle(first),
+              index * state.mapping_size, 0x12340000 + index);
+  }
+  for (uint64_t count : {1u, 63u, 64u, 65u}) {
+    loom_serve_virtual_buffer_begin_trim(first);
+    Keep(first, count * state.mapping_size,
+         (kPages - count) * state.mapping_size);
+    IREE_ASSERT_OK(loom_serve_virtual_buffer_trim(first));
+    if (count < kPages) {
+      CheckRetained(loom_serve_virtual_buffer_handle(first),
+                    64 * state.mapping_size, 0x12340040);
+    }
+    IREE_ASSERT_OK(
+        loom_serve_virtual_buffer_commit(first, 0, count * state.mapping_size));
+    iree_hal_pool_stats_t source;
+    iree_hal_pool_query_stats(deferred_backing, &source);
+    EXPECT_EQ(source.reserve_count, initial_source.reserve_count);
+    EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes,
+              retained);
+    RoundTrip(loom_serve_virtual_buffer_handle(first),
+              (count - 1) * state.mapping_size, 0x12340000 + count - 1);
+  }
+  deferred_backing->ResumeAcquisitions();
+}
+
 TEST_F(DedicatedNativeWorkerMemoryTest,
        HeldGrowthAndUnrelatedReturnDoNotCreateOtherClassCredit) {
   const auto bulk = loom_serve_pool_weight_geometry(storage_owner);
@@ -595,7 +707,7 @@ TEST_F(DedicatedNativeWorkerMemoryTest,
       pool, bulk, bulk.mapping_size, 256, &statistics[1], &second));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
       pool, state, cohort_bytes, 256, &statistics[2], &third));
-  std::array<loom_serve_memory_operation_t*, 4> operations = {};
+  std::array<loom_serve_memory_operation_t*, 5> operations = {};
   native.FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC, true);
   {
     loom_serve::testing::ScopedNativeHold hold(native,
@@ -628,8 +740,9 @@ TEST_F(DedicatedNativeWorkerMemoryTest,
     EXPECT_FALSE(loom_serve_memory_operation_is_complete(operations[1]));
     IREE_EXPECT_OK(loom_serve_memory_pool_query_status(pool));
 
-    // Publishing the unrelated failure must neither revoke the cohort's
-    // admission nor grant its still-unreconciled native charge to a retry.
+    // The failed constructor has returned its credit. A replacement parent
+    // accepts the cohort and retry while the unrelated bulk acquisition stays
+    // pending; neither needs a global source-publication boundary.
     const loom_serve_memory_range_t windows[] = {
         {third, 0, state.mapping_size},
         {third, state.mapping_size, cohort_bytes - state.mapping_size},
@@ -642,7 +755,10 @@ TEST_F(DedicatedNativeWorkerMemoryTest,
     }
     IREE_ASSERT_OK(loom_serve_memory_pool_prepare(
         pool, loom_serve_virtual_buffer_missing_demand(first), &admission));
-    EXPECT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_DEFERRED);
+    EXPECT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE);
+    IREE_ASSERT_OK(loom_serve_memory_pool_commit_async(
+        pool, 1, &failed, nullptr, 0, &commit_admission, &operations[4]));
+    EXPECT_EQ(commit_admission, LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE);
   }
   for (auto* operation : operations) {
     if (!operation) {
@@ -658,7 +774,6 @@ TEST_F(DedicatedNativeWorkerMemoryTest,
   RoundTrip(loom_serve_virtual_buffer_handle(second), 0, 0x12345678);
   RoundTrip(loom_serve_virtual_buffer_handle(third), state.mapping_size,
             0x87654321);
-  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(first, 0, failed_bytes));
   RoundTrip(loom_serve_virtual_buffer_handle(first), 0, 0x11223344);
   CheckRetained(loom_serve_virtual_buffer_handle(second), 0, 0x12345678);
   CheckRetained(loom_serve_virtual_buffer_handle(third), state.mapping_size,
@@ -1573,7 +1688,7 @@ TEST_F(DedicatedNativeWorkerMemoryTest,
     const auto pending = loom_serve_memory_pool_statistics(pool);
     EXPECT_EQ(pending.peak_bytes, kSlabSize);
     EXPECT_EQ(pending.pending_bytes, kSlabSize);
-    EXPECT_EQ(pending.committed_bytes, 0u);
+    EXPECT_EQ(pending.committed_bytes, kSlabSize);
     EXPECT_EQ(pending.releasing_bytes, 0u);
     loom_serve_memory_admission_t admission;
     IREE_ASSERT_OK(loom_serve_memory_pool_prepare(
@@ -1679,7 +1794,7 @@ TEST_F(MemoryTest, PendingCommitChargesBudgetAndLeavesPublishedStorageUsable) {
     uint64_t value = 0;
     IREE_EXPECT_OK(iree_hal_semaphore_query(ready, &value));
     EXPECT_EQ(value, 2u);
-    EXPECT_EQ(deferred_backing->pending.count, 0u);
+    EXPECT_EQ(deferred_backing->PendingRequestCount(), 0u);
     deferred_backing->ResumeAcquisitions();
   }
   iree_hal_semaphore_release(ready);
@@ -1748,8 +1863,6 @@ TEST_F(MemoryTest, DisjointMappingsFollowTheirReservationNotTheSharedPool) {
       pool, loom_serve_pool_weight_geometry(storage_owner), kSlabSize, 256,
       &statistics[1], &second));
   // Captures borrow private semaphores from the operations kept alive below.
-  auto& mapping_waits = mapping_queue.mapping_waits;
-  auto& mapping_signals = mapping_queue.mapping_signals;
   mapping_queue.observe_mappings = true;
   auto release_gate = [](iree_hal_semaphore_t* semaphore) {
     IREE_EXPECT_OK(iree_hal_semaphore_signal(semaphore, 1, nullptr));
@@ -1768,8 +1881,7 @@ TEST_F(MemoryTest, DisjointMappingsFollowTheirReservationNotTheSharedPool) {
     std::unique_ptr<iree_hal_semaphore_t, decltype(release_gate)> gate(
         semaphore, release_gate);
     mapping_queue.gate_next_mapping = semaphore;
-    mapping_waits.clear();
-    mapping_signals.clear();
+    mapping_queue.ClearMappings();
     loom_serve_memory_operation_t* operations[3] = {};
     loom_serve_memory_admission_t admission;
     if (release_first) {
@@ -1782,6 +1894,7 @@ TEST_F(MemoryTest, DisjointMappingsFollowTheirReservationNotTheSharedPool) {
           pool, 1, &range, nullptr, 0, &admission, &operations[0]));
       ASSERT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE);
     }
+    mapping_queue.WaitForMappings(1);
     if (release_next) {
       loom_serve_virtual_buffer_begin_trim(first);
       Keep(first, kSlabSize, kSlabSize);
@@ -1793,19 +1906,19 @@ TEST_F(MemoryTest, DisjointMappingsFollowTheirReservationNotTheSharedPool) {
           pool, 1, &next, nullptr, 0, &admission, &operations[1]));
       ASSERT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE);
     }
-    ASSERT_EQ(mapping_waits.size(), 2u);
-    EXPECT_NE(std::find(mapping_waits[1].begin(), mapping_waits[1].end(),
-                        mapping_signals[0]),
-              mapping_waits[1].end());
-    // The mapping owner emits dependencies even if physical allocation is
-    // still pending. No scheduling luck or native mapping race is required.
+    auto mappings = mapping_queue.WaitForMappings(2);
+    EXPECT_NE(std::find(mappings[1].waits.begin(), mappings[1].waits.end(),
+                        mappings[0].signal),
+              mappings[1].waits.end());
+    // The predecessor is captured before native allocation; mapping submission
+    // after allocation must still carry the exact target's dependency.
     EXPECT_FALSE(loom_serve_memory_operation_is_complete(operations[0]));
     const loom_serve_memory_range_t independent = {second, 0, kSlabSize};
     IREE_ASSERT_OK(loom_serve_memory_pool_commit_async(
         pool, 1, &independent, nullptr, 0, &admission, &operations[2]));
     ASSERT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE);
-    ASSERT_EQ(mapping_waits.size(), 3u);
-    EXPECT_EQ(mapping_waits[2].size(), 1u);  // Only its own allocation.
+    mappings = mapping_queue.WaitForMappings(3);
+    EXPECT_TRUE(mappings[2].waits.empty());
     loom_serve_memory_operation_await(operations[2]);
     IREE_ASSERT_OK(loom_serve_memory_operation_query_status(operations[2]));
     loom_serve_memory_operation_free(operations[2]);
@@ -1868,13 +1981,13 @@ TEST_F(MemoryTest, ArenaRangesShareMappingOrderButNotPhysicalOwnership) {
     IREE_ASSERT_OK(loom_serve_memory_pool_commit_async(
         pool, 1, &range, nullptr, 0, &admission, &operations[i]));
     ASSERT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE);
+    mapping_queue.WaitForMappings(i + 1);
   }
-  const auto& waits = mapping_queue.mapping_waits;
-  ASSERT_EQ(waits.size(), 3u);
-  EXPECT_NE(std::find(waits[1].begin(), waits[1].end(),
-                      mapping_queue.mapping_signals[0]),
-            waits[1].end());
-  EXPECT_EQ(waits[2].size(), 1u);
+  const auto mappings = mapping_queue.WaitForMappings(3);
+  EXPECT_NE(std::find(mappings[1].waits.begin(), mappings[1].waits.end(),
+                      mappings[0].signal),
+            mappings[1].waits.end());
+  EXPECT_TRUE(mappings[2].waits.empty());
   loom_serve_memory_operation_await(operations[2]);
   IREE_ASSERT_OK(loom_serve_memory_operation_query_status(operations[2]));
   EXPECT_FALSE(loom_serve_memory_operation_is_complete(operations[0]));
@@ -2033,8 +2146,8 @@ TEST_F(MemoryTest, FailedMappingKeepsSourcesUntilCheckedDetach) {
   IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(second, 0, kSlabSize));
   RoundTrip(loom_serve_virtual_buffer_handle(second), 0, 0x12345678);
 
-  // Mapping rejection cannot retire the allocation already accepted by the
-  // native queue. Keep it pending until the failed mapping has been observed.
+  // Mapping cannot start until its actual sources exist. The later rejection
+  // must keep those sources until checked detach establishes native safety.
   deferred_backing->defer = true;
   mapping_queue.fail_next_map = true;
   const loom_serve_memory_range_t range = {first, 0, kMappingBytes};
@@ -2044,7 +2157,7 @@ TEST_F(MemoryTest, FailedMappingKeepsSourcesUntilCheckedDetach) {
       pool, 1, &range, nullptr, 0, &commit_admission, &operation));
   ASSERT_EQ(commit_admission, LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE);
   deferred_backing->WaitForAcquisition();
-  EXPECT_FALSE(mapping_queue.fail_next_map);
+  EXPECT_TRUE(mapping_queue.fail_next_map);
   EXPECT_FALSE(loom_serve_memory_operation_is_complete(operation));
   deferred_backing->ResumeAcquisitions();
   loom_serve_memory_operation_await(operation);

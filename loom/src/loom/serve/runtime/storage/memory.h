@@ -11,6 +11,7 @@
 #include "iree/hal/api.h"
 #include "loom/runtime/storage/statistics.h"
 #include "loom/serve/runtime/host/wake.h"
+#include "loom/serve/runtime/storage/memory_geometry.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,41 +27,23 @@ typedef struct loom_serve_memory_arena_t loom_serve_memory_arena_t;
 typedef struct loom_serve_virtual_buffer_t loom_serve_virtual_buffer_t;
 typedef struct loom_serve_memory_operation_t loom_serve_memory_operation_t;
 
-// Virtual replacement and physical backing geometry qualified against one
-// mapping source and its targets. Logical tensor/block sizes are independent.
-typedef struct loom_serve_memory_geometry_t {
-  // Maximum independently allocated and replaced virtual extent in bytes.
-  iree_device_size_t mapping_size;
-  // Physical parent extent from which mapping sources are allocated.
-  iree_device_size_t backing_size;
-  // Common source/target alignment for physical extents and virtual addresses.
-  iree_device_size_t granularity;
-  // Minimum native extent, including source/target alignment.
-  iree_device_size_t minimum_size;
-} loom_serve_memory_geometry_t;
-
 // Additional physical ownership within one pool, not a reservation of credit.
 // Folds distinct roots/groups without enumerating their physical mappings.
 typedef struct loom_serve_memory_demand_t {
   // Fixed-size mappings packed into shared physical state backing.
   uint64_t packed_bytes;
-  // Exact reusable weight extents routed through the weight cache.
+  // Exact reusable whole-weight extents.
   uint64_t weight_bytes;
   // Exact extents bypassing both reusable size classes.
   uint64_t dedicated_bytes;
+  // Number of fixed physical slots, including shorter logical tails.
+  uint64_t packed_count;
+  // Source-quoted native cost of dedicated extents, including padding.
+  uint64_t dedicated_cost;
 } loom_serve_memory_demand_t;
 
 void loom_serve_memory_demand_add(loom_serve_memory_demand_t* demand,
                                   loom_serve_memory_demand_t additional);
-
-// Qualifies an explicit physical backing extent, or the source recommendation
-// when zero, against the native source and all targets in its scope. Mapping
-// and backing sizes are initially equal; pool policy may divide backing into
-// smaller independently replaced mappings.
-iree_status_t loom_serve_memory_pool_query_geometry(
-    const iree_hal_virtual_buffer_capabilities_t* capabilities,
-    iree_hal_pool_t* storage_pool, iree_device_size_t backing_size,
-    loom_serve_memory_geometry_t* out_geometry);
 
 // Retains the mapping-source pool and copies the exact virtual-target scope.
 // The sealed group and selected transfer queue outlive this pool. Geometries
@@ -366,14 +349,13 @@ iree_status_t loom_serve_memory_pool_commit_with_demand_async(
     uint64_t value, loom_serve_memory_admission_t* out_admission,
     loom_serve_memory_operation_t** out_operation);
 
-// Copies the unkept physical slab set of these distinct reservations and queues
-// its return to the shared cache. The caller has retired every consumer and
+// Copies the unkept physical slot set of these distinct reservations and queues
+// its return to the shared inventory. The caller has retired every consumer and
 // keeps reservations/accounting alive through operation completion. Kept slabs
 // remain usable. No other operation may edit selected slabs before completion.
-// The private mapping and deallocation completions join before optional
-// readiness is signaled. Inline readiness callbacks obey the same non-reentry
-// contract as commit_async. Capacity becomes reusable after the last captured
-// reference returns the slab to the cache; its notification wakes admission.
+// Private unmap completion precedes optional readiness. Inline readiness
+// callbacks obey the same non-reentry contract as commit_async. Collection
+// publishes returned slots before the next owner admission decision.
 // Physical backing remains cached until an explicit pool trim or destruction.
 // An empty set returns NULL and signals immediately.
 // Queue failures fail readiness and preserve unreleased ownership. A failed

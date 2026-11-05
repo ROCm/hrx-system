@@ -45,11 +45,37 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "backing_pages",
+    srcs = ["backing_pages.c"],
+    hdrs = ["backing_pages.h"],
+    visibility = ["//visibility:private"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:atomic_slist",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
+    name = "memory_geometry",
+    srcs = ["memory_geometry.c"],
+    hdrs = ["memory_geometry.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
     name = "memory",
     srcs = ["memory.c"],
     hdrs = ["memory.h"],
     deps = [
         ":backing_directory",
+        ":backing_pages",
+        ":memory_geometry",
         "//loom/src/loom/runtime/storage:statistics",
         "//loom/src/loom/serve/runtime/host:wake",
         "//runtime/src/iree/async",
@@ -57,9 +83,7 @@ loom_cc_library(
         "//runtime/src/iree/base/internal:atomic_slist",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/memory:slab_cache",
         "//runtime/src/iree/hal/memory:tlsf",
-        "//runtime/src/iree/hal/memory:tlsf_pool",
     ],
 )
 

@@ -526,7 +526,7 @@ TEST_F(DeferredFixedBlockPoolTest, RetainsReadyAndPendingBlocksAcrossGrowth) {
       },
       IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER));
   EXPECT_EQ(completions, 0);
-  ASSERT_EQ(parent_->pending.count, 1u);
+  ASSERT_EQ(parent_->PendingRequestCount(), 1u);
   EXPECT_EQ(memcmp(reservations, originals, sizeof(originals)), 0);
 
   // An independent release/acquisition progresses with native growth pending.
@@ -543,7 +543,7 @@ TEST_F(DeferredFixedBlockPoolTest, RetainsReadyAndPendingBlocksAcrossGrowth) {
   std::thread completing([&] { parent_->CompleteOne(); });
   completing.join();
   ASSERT_EQ(completions, 1);
-  EXPECT_EQ(parent_->pending.count, 0u);
+  EXPECT_EQ(parent_->PendingRequestCount(), 0u);
   EXPECT_EQ(infos[0].result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
   for (size_t i = 1; i < 3; ++i) {
     EXPECT_EQ(infos[i].result, IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT);
@@ -599,7 +599,7 @@ TEST_F(DeferredFixedBlockPoolTest, FailureRestoresPrefixAndExactHistory) {
           .user_data = &completions,
       },
       IREE_HAL_POOL_RESERVE_FLAG_NONE));
-  ASSERT_EQ(parent_->pending.count, 1u);
+  ASSERT_EQ(parent_->PendingRequestCount(), 1u);
   EXPECT_EQ(completions, 0);
   parent_->FailOne();
   EXPECT_EQ(completions, 1);

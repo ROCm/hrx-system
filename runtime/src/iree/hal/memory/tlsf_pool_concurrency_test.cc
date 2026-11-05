@@ -429,20 +429,20 @@ TEST_F(DeferredTLSFPoolTest, RetainsPrefixAcrossRegularAndDedicatedGrowth) {
       },
       IREE_HAL_POOL_RESERVE_FLAG_NONE));
   EXPECT_EQ(completions, 0);
-  ASSERT_EQ(parent_->pending.count, 1u);
+  ASSERT_EQ(parent_->PendingRequestCount(), 1u);
   EXPECT_EQ(memcmp(reservations, originals, sizeof(originals)), 0);
   CheckExistingCapacity(3520);
 
   std::thread regular([&] { parent_->CompleteOne(); });
   regular.join();
   EXPECT_EQ(completions, 0);
-  ASSERT_EQ(parent_->pending.count, 1u);
-  EXPECT_EQ(parent_->pending.requests[0].allocation_size, 8192u);
+  ASSERT_EQ(parent_->PendingRequestCount(), 1u);
+  EXPECT_EQ(parent_->FirstRequest().allocation_size, 8192u);
   EXPECT_EQ(memcmp(reservations, originals, sizeof(originals)), 0);
   std::thread dedicated([&] { parent_->CompleteOne(); });
   dedicated.join();
   EXPECT_EQ(completions, 1);
-  EXPECT_EQ(parent_->pending.count, 0u);
+  EXPECT_EQ(parent_->PendingRequestCount(), 0u);
   for (size_t i = 0; i < 3; ++i) {
     CheckReservationContents(requests[i].allocation_size, reservations[i]);
   }
@@ -489,7 +489,7 @@ TEST_F(DeferredTLSFPoolTest, FailureRestoresPrefixHistoryAndPublishesCapacity) {
       },
       IREE_HAL_POOL_RESERVE_FLAG_NONE));
   EXPECT_EQ(completions, 0);
-  ASSERT_EQ(parent_->pending.count, 1u);
+  ASSERT_EQ(parent_->PendingRequestCount(), 1u);
   parent_->FailOne();
   EXPECT_EQ(completions, 1);
   EXPECT_EQ(memcmp(reservations, originals, sizeof(originals)), 0);

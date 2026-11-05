@@ -274,7 +274,7 @@ TEST_F(DeferredSlabCacheTest, PendingPrefixSurvivesDeferredGrowth) {
       },
       IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER));
   EXPECT_EQ(completions, 0);
-  ASSERT_EQ(parent_->pending.count, 1u);
+  ASSERT_EQ(parent_->PendingRequestCount(), 1u);
   EXPECT_EQ(memcmp(reservations.data(), originals.data(), sizeof(originals)),
             0);
   iree_hal_pool_release_reservations(cache_, 1, &initial[1], nullptr);
@@ -332,7 +332,7 @@ TEST_F(DeferredSlabCacheTest, FailureRestoresExactPrefixAndNotifies) {
           .user_data = &completions,
       },
       IREE_HAL_POOL_RESERVE_FLAG_NONE));
-  ASSERT_EQ(parent_->pending.count, 1u);
+  ASSERT_EQ(parent_->PendingRequestCount(), 1u);
   parent_->FailOne();
   EXPECT_EQ(completions, 1);
   EXPECT_EQ(memcmp(reservations.data(), originals.data(), sizeof(originals)),
@@ -354,7 +354,7 @@ TEST_F(DeferredSlabCacheTest, FailureRestoresExactPrefixAndNotifies) {
 TEST_F(DeferredSlabCacheTest, RefillOwnsCacheUntilItsCallbackFinishes) {
   parent_->defer = true;
   IREE_ASSERT_OK(iree_hal_slab_cache_set_target(cache_, 1));
-  ASSERT_EQ(parent_->pending.count, 1u);
+  ASSERT_EQ(parent_->PendingRequestCount(), 1u);
   iree_hal_pool_release(cache_);
   cache_ = nullptr;
   parent_->CompleteOne();
@@ -368,15 +368,15 @@ TEST_F(DeferredSlabCacheTest, RefillOwnsCacheUntilItsCallbackFinishes) {
 TEST_F(DeferredSlabCacheTest, TrimInvalidatesRefillWithoutJoining) {
   parent_->defer = true;
   IREE_ASSERT_OK(iree_hal_slab_cache_set_target(cache_, 1));
-  ASSERT_EQ(parent_->pending.count, 1u);
+  ASSERT_EQ(parent_->PendingRequestCount(), 1u);
   iree_hal_pool_trim(cache_, IREE_HAL_POOL_TRIM_FLAG_ALL, 0);
   parent_->CompleteOne();
   iree_hal_slab_cache_stats_t stats;
   IREE_ASSERT_OK(iree_hal_slab_cache_query_stats(cache_, &stats));
   EXPECT_EQ(stats.ready_count, 0u);
-  EXPECT_EQ(parent_->pending.count, 0u);
+  EXPECT_EQ(parent_->PendingRequestCount(), 0u);
   IREE_ASSERT_OK(iree_hal_slab_cache_set_target(cache_, 1));
-  ASSERT_EQ(parent_->pending.count, 1u);
+  ASSERT_EQ(parent_->PendingRequestCount(), 1u);
   IREE_ASSERT_OK(iree_hal_slab_cache_set_target(cache_, 0));
   parent_->CompleteOne();
   IREE_ASSERT_OK(iree_hal_slab_cache_query_stats(cache_, &stats));
@@ -877,11 +877,11 @@ TEST_F(ExactSlabCacheTest,
           .user_data = &completions,
       },
       IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER));
-  ASSERT_EQ(parent_->pending.count, 1u);
-  EXPECT_EQ(parent_->pending.requests[0].allocation_size, 4096u);
+  ASSERT_EQ(parent_->PendingRequestCount(), 1u);
+  EXPECT_EQ(parent_->FirstRequest().allocation_size, 4096u);
   parent_->CompleteOne();
-  ASSERT_EQ(parent_->pending.count, 1u);
-  EXPECT_EQ(parent_->pending.requests[0].allocation_size, 768u);
+  ASSERT_EQ(parent_->PendingRequestCount(), 1u);
+  EXPECT_EQ(parent_->FirstRequest().allocation_size, 768u);
   EXPECT_EQ(completions, 0);
   parent_->FailOne();
   EXPECT_EQ(completions, 1);
