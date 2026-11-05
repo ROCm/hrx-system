@@ -10,6 +10,7 @@
 
 #include "iree/base/internal/json.h"
 #include "iree/base/threading/mutex.h"
+#include "iree/task/owner.h"
 #include "loom/serve/dashboard/assets.h"
 #include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/host/wake.h"
@@ -88,8 +89,8 @@ typedef struct loom_serve_router_log_reader_t {
 typedef struct loom_serve_router_t {
   // Allocator for independently owned utility jobs and routing output.
   iree_allocator_t host_allocator;
-  // Shared application workers, borrowed through final process release.
-  iree_task_executor_t* executor;
+  // Shared serialized compute owner, entered by transport and native callers.
+  iree_task_owner_t owner;
   // Transport owning network readiness and claimed request storage.
   loom_serve_http_server_t* server;
   // Common service/registration turn, serialized with transport admission.
@@ -124,25 +125,10 @@ typedef struct loom_serve_router_t {
     // Rotating formatting priority under the ordinary per-turn request quota.
     iree_host_size_t cursor;
   } logs;
-  // Cooperative process returning workers between bounded owner turns.
-  iree_task_process_t process;
-  // Nonblocking ownership guard: compute-slot wake budgets are not exclusion.
-  iree_slim_mutex_t mutex;
-  // All service readiness retired and every observer was detached.
-  bool completed;
   // Routing response scratch, used only by the exclusive turn owner.
   iree_string_builder_t output;
   // Accepted utility jobs, each holding one transport claim until CPU release.
   loom_serve_router_tokenization_t* tokenizations;
-  // Final process retirement, independent of drain completion.
-  struct {
-    // Joins the release callback's last access before stack storage dies.
-    iree_slim_mutex_t mutex;
-    // Wakes only the outer application caller, never a task worker.
-    iree_notification_t notification;
-    // The executor has relinquished all process and drain storage.
-    bool released;
-  } retirement;
 } loom_serve_router_t;
 
 static loom_serve_registered_model_t* loom_serve_router_model_at(
@@ -152,7 +138,7 @@ static loom_serve_registered_model_t* loom_serve_router_model_at(
 
 static void loom_serve_router_wake(void* user_data) {
   loom_serve_router_t* router = user_data;
-  iree_task_executor_schedule_process(router->executor, &router->process);
+  iree_task_owner_wake(&router->owner);
 }
 
 static iree_status_t loom_serve_router_quote(iree_string_builder_t* output,
@@ -239,7 +225,7 @@ static iree_status_t loom_serve_router_tokenization_accept(
   job->next = router->tokenizations;
   router->tokenizations = job;
   ++loom_serve_router_model_at(router, service_index)->tokenizer_count;
-  iree_task_executor_schedule_process(router->executor, &job->process);
+  iree_task_executor_schedule_process(router->owner.executor, &job->process);
   return iree_ok_status();
 }
 
@@ -731,7 +717,7 @@ static iree_status_t loom_serve_router_describe_server(
       "\"multipart_part_capacity\":%zu},\"held_request_capacity\":%zu,"
       "\"held_requests\":%zu,\"observer_capacity\":%zu,\"observers\":%zu,"
       "\"resources\":",
-      iree_task_executor_worker_count(router->executor),
+      iree_task_executor_worker_count(router->owner.executor),
       router->driver.capacity,
       loom_serve_http_server_connection_capacity(router->server),
       limits.header_byte_capacity, limits.body_byte_capacity,
@@ -1543,8 +1529,11 @@ static iree_status_t loom_serve_router_observe_model(void* self,
                                           &router->output, out_progress);
 }
 
-static void loom_serve_router_advance(loom_serve_router_t* router,
-                                      bool* out_progress) {
+static void loom_serve_router_advance(
+    void* self, const iree_task_worker_context_t* context,
+    iree_task_process_drain_result_t* result) {
+  loom_serve_router_t* router = self;
+  bool* out_progress = &result->did_work;
   router->driver.stopping |= loom_serve_http_server_is_stopping(router->server);
   router->driver.status = iree_status_join(
       router->driver.status,
@@ -1614,42 +1603,18 @@ static void loom_serve_router_advance(loom_serve_router_t* router,
                                    (loom_serve_wake_callback_t){0});
     loom_serve_http_server_set_observer(router->server,
                                         (loom_serve_wake_callback_t){0});
-    router->completed = true;
+    result->completed = true;
   }
 }
 
-static iree_status_t loom_serve_router_drain(
-    iree_task_process_t* process, const iree_task_worker_context_t* context,
-    iree_task_process_drain_result_t* result) {
-  loom_serve_router_t* router = process->user_data;
-  if (!iree_slim_mutex_try_lock(&router->mutex)) {
-    return iree_ok_status();
-  }
-  IREE_TRACE_ZONE_BEGIN(z0);
-  if (!router->completed) {
-    loom_serve_router_advance(router, &result->did_work);
-  }
-  result->completed = router->completed;
-  iree_slim_mutex_unlock(&router->mutex);
-  IREE_TRACE_ZONE_END(z0);
-  // Service failures initiate draining, not premature process completion.
-  return iree_ok_status();
-}
-
-static void loom_serve_router_released(iree_task_process_t* process) {
-  loom_serve_router_t* router = process->user_data;
-  iree_slim_mutex_lock(&router->retirement.mutex);
-  router->retirement.released = true;
-  iree_notification_post(&router->retirement.notification, IREE_ALL_WAITERS);
-  iree_slim_mutex_unlock(&router->retirement.mutex);
-}
-
-static bool loom_serve_router_is_released(void* user_data) {
-  loom_serve_router_t* router = user_data;
-  iree_slim_mutex_lock(&router->retirement.mutex);
-  const bool released = router->retirement.released;
-  iree_slim_mutex_unlock(&router->retirement.mutex);
-  return released;
+static void loom_serve_router_start(void* self) {
+  loom_serve_router_t* router = self;
+  const loom_serve_wake_callback_t observer = {loom_serve_router_wake, router};
+  loom_serve_maintenance_set_observer(&router->maintenance, observer);
+  loom_serve_device_group_set_observer(router->resources.device_group,
+                                       observer);
+  loom_serve_driver_set_observer(&router->driver, observer);
+  loom_serve_http_server_set_observer(router->server, observer);
 }
 
 iree_status_t loom_serve_router_run(iree_task_executor_t* executor,
@@ -1666,7 +1631,6 @@ iree_status_t loom_serve_router_run(iree_task_executor_t* executor,
   }
   loom_serve_router_t router = {
       .host_allocator = host_allocator,
-      .executor = executor,
       .server = server,
       .resources = options.resources,
       .request_capacity = options.request_quota,
@@ -1697,37 +1661,17 @@ iree_status_t loom_serve_router_run(iree_task_executor_t* executor,
     iree_allocator_free(host_allocator, router.held.values);
     return status;
   }
-  iree_slim_mutex_initialize(&router.mutex);
-  iree_slim_mutex_initialize(&router.retirement.mutex);
-  iree_notification_initialize(&router.retirement.notification);
   iree_string_builder_initialize(host_allocator, &router.output);
-  iree_task_process_initialize(loom_serve_router_drain, 0, 1, &router.process);
-  iree_task_process_set_flags(&router.process,
-                              IREE_TASK_PROCESS_FLAG_COMPUTE_SLOT);
-  router.process.user_data = &router;
-  router.process.release_fn = loom_serve_router_released;
-  loom_serve_maintenance_set_observer(
-      &router.maintenance,
-      (loom_serve_wake_callback_t){loom_serve_router_wake, &router});
-  loom_serve_device_group_set_observer(
-      router.resources.device_group,
-      (loom_serve_wake_callback_t){loom_serve_router_wake, &router});
-  loom_serve_driver_set_observer(
-      &router.driver,
-      (loom_serve_wake_callback_t){loom_serve_router_wake, &router});
-  loom_serve_http_server_set_observer(
-      server, (loom_serve_wake_callback_t){loom_serve_router_wake, &router});
-  iree_notification_await(&router.retirement.notification,
-                          loom_serve_router_is_released, &router,
-                          iree_infinite_timeout());
+  iree_task_owner_initialize(executor, loom_serve_router_advance, &router,
+                             &router.owner);
+  iree_task_owner_call(&router.owner, loom_serve_router_start, &router);
+  iree_task_owner_await(&router.owner);
   iree_string_builder_deinitialize(&router.output);
   loom_serve_maintenance_deinitialize(&router.maintenance);
   loom_serve_http_variants_free(router.variants);
   loom_serve_http_live_free(router.live);
   iree_allocator_free(host_allocator, router.logs.values);
   iree_allocator_free(host_allocator, router.held.values);
-  iree_notification_deinitialize(&router.retirement.notification);
-  iree_slim_mutex_deinitialize(&router.retirement.mutex);
-  iree_slim_mutex_deinitialize(&router.mutex);
+  iree_task_owner_deinitialize(&router.owner);
   return router.driver.status;
 }

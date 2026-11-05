@@ -59,7 +59,9 @@ iree_status_t loom_serve_finite_call_status(
 
 // Consumes caller ownership and drops interest without waiting. Accepted CPU
 // borrowers preserve input through release; queue captures retain independent
-// output storage. NULL is valid.
+// output storage. Device output can outlive service/model removal, but callers
+// release it before joining retirement of its enclosing resource group. NULL
+// is valid.
 void loom_serve_finite_call_close(loom_serve_finite_call_t* call);
 
 #ifdef __cplusplus

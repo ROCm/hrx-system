@@ -6,9 +6,11 @@
 #include <array>
 #include <cstdlib>
 #include <string>
+#include <type_traits>
 #include <utility>
 
 #include "iree/base/threading/notification.h"
+#include "iree/task/owner.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/serve/server/driver.h"
@@ -125,6 +127,93 @@ class NativeDecisionServiceTest : public ::testing::Test {
     }
     loom_serve_finite_service_free(std::exchange(service_, nullptr));
   }
+
+  // Real asynchronous composition: application threads enter for admission and
+  // observation; only the shared executor advances resources and services.
+  class Owner {
+   public:
+    explicit Owner(NativeDecisionServiceTest& fixture) : fixture_(fixture) {
+      iree_task_owner_initialize(
+          loom_serve_host_executor(loom_serve_device_host(fixture.device_)),
+          Advance, this, &owner_);
+      Call([&] {
+        const loom_serve_wake_callback_t observer = {Wake, this};
+        loom_serve_driver_set_observer(&fixture_.driver_, observer);
+        loom_serve_device_group_set_observer(fixture_.group_, observer);
+      });
+    }
+
+    ~Owner() {
+      Call([&] {
+        // Device results may outlive the model, but their pool credit must be
+        // returned before joining the whole resource owner's retirement.
+        for (auto*& call : fixture_.calls_) {
+          loom_serve_finite_call_close(std::exchange(call, nullptr));
+        }
+        fixture_.driver_.stopping = true;
+      });
+      iree_task_owner_await(&owner_);
+      iree_task_owner_deinitialize(&owner_);
+      const loom_serve_wake_callback_t observer = {
+          NativeDecisionServiceTest::Wake, &fixture_};
+      loom_serve_driver_set_observer(&fixture_.driver_, observer);
+      loom_serve_device_group_set_observer(fixture_.group_, observer);
+    }
+
+    template <typename Fn>
+    void Call(Fn&& call) {
+      using Callback = std::remove_reference_t<Fn>;
+      iree_task_owner_call(
+          &owner_, [](void* self) { (*static_cast<Callback*>(self))(); },
+          &call);
+    }
+
+    template <typename Predicate>
+    void WaitUntil(Predicate done) {
+      bool complete = false;
+      while (!complete) {
+        const auto ticket =
+            iree_notification_prepare_wait(&fixture_.notification_);
+        Call([&] { complete = done(); });
+        if (complete) {
+          iree_notification_cancel_wait(&fixture_.notification_);
+        } else {
+          iree_notification_commit_wait(&fixture_.notification_, ticket,
+                                        IREE_DURATION_ZERO,
+                                        IREE_TIME_INFINITE_FUTURE);
+        }
+      }
+    }
+
+   private:
+    static void Wake(void* self) {
+      iree_task_owner_wake(&static_cast<Owner*>(self)->owner_);
+    }
+
+    static void Advance(void* self, const iree_task_worker_context_t*,
+                        iree_task_process_drain_result_t* result) {
+      auto& owner = *static_cast<Owner*>(self);
+      auto& fixture = owner.fixture_;
+      fixture.driver_.status =
+          iree_status_join(fixture.driver_.status,
+                           loom_serve_device_group_advance(fixture.group_));
+      loom_serve_driver_advance(&fixture.driver_, {Wake, self}, {},
+                                &result->did_work);
+      bool pending =
+          loom_serve_driver_collect(&fixture.driver_, &result->did_work);
+      pending |= loom_serve_device_group_is_pending(fixture.group_);
+      if (fixture.driver_.stopping && !pending) {
+        loom_serve_driver_set_observer(&fixture.driver_, {});
+        loom_serve_device_group_set_observer(fixture.group_, {});
+        result->completed = true;
+      }
+    }
+
+    // Resource/model fixture, alive until this executor owner has retired.
+    NativeDecisionServiceTest& fixture_;
+    // Same enterable compute process used by the HTTP router.
+    iree_task_owner_t owner_;
+  };
 
   void Open(size_t index, const char* text = kRequest) {
     iree_string_builder_t body;
@@ -311,6 +400,38 @@ TEST_F(NativeDecisionServiceTest, StopDuringPreparationJoinsInputBorrowers) {
   EXPECT_EQ(iree_string_builder_view(&body).data, original.data);
   EXPECT_EQ(iree_string_builder_size(&body), original.size);
   iree_string_builder_deinitialize(&body);
+}
+
+TEST_F(NativeDecisionServiceTest, NativeCallerUsesExecutorWithoutHostPolling) {
+  Owner owner(*this);
+  ASSERT_NO_FATAL_FAILURE(owner.Call([&] {
+    ASSERT_NO_FATAL_FAILURE(Open(0));
+    ASSERT_NO_FATAL_FAILURE(Open(1));
+    for (size_t i = 0; i < 2; ++i) {
+      loom_serve_finite_call_set_observer(calls_[i], {Wake, this});
+    }
+  }));
+  owner.WaitUntil([&] {
+    return loom_serve_finite_call_is_complete(calls_[0]) &&
+           loom_serve_finite_call_is_complete(calls_[1]);
+  });
+  ASSERT_NO_FATAL_FAILURE(owner.Call([&] {
+    IREE_ASSERT_OK(loom_serve_finite_call_status(calls_[0]));
+    IREE_ASSERT_OK(loom_serve_finite_call_status(calls_[1]));
+    const auto* first = loom_serve_finite_call_output(calls_[0]);
+    const auto* second = loom_serve_finite_call_output(calls_[1]);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(first->result, second->result);
+    EXPECT_EQ(first->request_index, 0u);
+    EXPECT_EQ(second->request_index, 1u);
+    EXPECT_EQ(loom_serve_finite_result_ready(first->result).values[1], 0u);
+    ASSERT_NO_FATAL_FAILURE(Open(2));
+    loom_serve_finite_call_set_observer(calls_[2], {Wake, this});
+  }));
+  owner.WaitUntil(
+      [&] { return loom_serve_finite_call_is_complete(calls_[2]); });
+  owner.Call([&] { IREE_EXPECT_OK(loom_serve_finite_call_status(calls_[2])); });
 }
 
 }  // namespace
