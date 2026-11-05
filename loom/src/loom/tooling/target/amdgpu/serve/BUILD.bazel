@@ -254,41 +254,6 @@ loom_py_test(
 )
 
 loom_py_test(
-    name = "catalog_elastic_test",
-    size = "medium",
-    srcs = ["//loom/src/loom/serve/server:catalog_test.py"],
-    args = [
-        "--server=$(rootpath :loom-serve-test-tool)",
-        "--fixture=$(rootpath //loom/src/loom/serve/fixture/image:model.json)",
-        "--fixture=$(rootpath //loom/src/loom/serve/fixture/embedding:model.json)",
-        "--fixture=$(rootpath //loom/src/loom/serve/fixture/decision:model.json)",
-        "--fixture=$(rootpath //loom/src/loom/serve/fixture/speech:model.json)",
-        "--fixture=$(rootpath //loom/src/loom/serve/fixture/text:model.json)",
-        "--device=amdgpu",
-        "--driver=amd",
-        "--pool_backing=elastic",
-    ],
-    data = DECISION_SOURCES + EMBEDDING_SOURCES + IMAGE_SOURCES + SPEECH_SOURCES + TEXT_SOURCES + [
-        ":loom-serve-test-tool",
-    ],
-    main = "catalog_test.py",
-    resource_group = GPU_DEVICE_RESOURCE_GROUP,
-    tags = _GPU_TEST_TAGS,
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/execute:amdgpu_hal",
-    ] + _GPU_REQUIREMENTS) + select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
-    deps = [
-        "//loom/src/loom/serve/server:catalog_test_util",
-        "//loom/src/loom/serve/testing/loom_serve_testing:http",
-        "//loom/src/loom/serve/testing/loom_serve_testing:logs",
-        "//loom/src/loom/serve/testing/loom_serve_testing:workload",
-    ],
-)
-
-loom_py_test(
     name = "catalog_stress_test",
     size = "medium",
     srcs = [
@@ -304,7 +269,7 @@ loom_py_test(
         "--fixture=$(rootpath //loom/src/loom/serve/fixture/text:model.json)",
         "--device=amdgpu",
         "--driver=amd",
-        "--pool_backing=fixed",
+        "--pool_backing=elastic",
     ],
     data = DECISION_SOURCES + EMBEDDING_SOURCES + IMAGE_SOURCES + SPEECH_SOURCES + TEXT_SOURCES + [
         ":loom-serve-test-tool",

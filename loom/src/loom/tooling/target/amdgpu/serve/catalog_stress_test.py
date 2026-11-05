@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Sustained AMDGPU model catalog, connection, and request churn."""
+"""Exhaustive AMDGPU model catalog, lifecycle, connection, and request churn."""
 
 from loom.src.loom.serve.server.catalog_test import run_from_command_line
 
