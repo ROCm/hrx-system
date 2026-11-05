@@ -73,7 +73,7 @@ class ActionRunnerTest(unittest.TestCase):
             )
             return result, report.read_text(encoding="utf-8")
 
-    def test_enabled_policy_rejects_callback_outputs_before_inputs(self):
+    def test_default_policy_rejects_callback_outputs_before_inputs(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "completion.c"
             source.write_text(
@@ -84,7 +84,7 @@ class ActionRunnerTest(unittest.TestCase):
             result, output = self.run_analysis(
                 ["-x", "c", "-std=c11"],
                 source=str(source),
-                checks="iree-output-parameter-order",
+                checks=None,
                 warnings_as_errors="*",
             )
             self.assertNotEqual(result, 0, output)

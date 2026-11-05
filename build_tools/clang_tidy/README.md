@@ -140,10 +140,9 @@ the first output followed by a non-output parameter. It offers no automatic
 fix because changing a signature also requires updating its callers and every
 implementation of a callback contract.
 
-The check is registered but disabled in the repository policy while existing
-signatures and their callers are migrated. Explicitly enabling
-`iree-output-parameter-order` audits these declarations; removing its exclusion
-from `clang_tidy_config.yaml` enables repository-wide enforcement.
+The repository policy enables the check for every analyzed C and C++ source.
+Changing a public or callback signature therefore requires updating the entire
+contract and all callers in the same change.
 
 ### `iree-assert-output-call`
 
