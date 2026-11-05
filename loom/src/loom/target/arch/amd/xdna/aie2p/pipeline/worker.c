@@ -158,19 +158,10 @@ static uint32_t loom_aie2p_worker_odd_parity(uint32_t word) {
   return word | ((iree_math_count_ones_u32(word) & 1u) ^ 1u) << 31;
 }
 
-iree_status_t loom_aie2p_worker_control_write(
+static iree_status_t loom_aie2p_worker_control_write_packet(
     loom_aie2p_worker_builder_t* context, loom_builder_t* builder,
-    uint8_t packet_id, uint32_t register_offset, const loom_value_id_t* words,
-    iree_host_size_t count) {
-  loom_value_id_t route, command;
-  IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
-      context, builder, (int32_t)loom_aie2p_worker_odd_parity(packet_id),
-      &route));
-  IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
-      context, builder,
-      (int32_t)loom_aie2p_worker_odd_parity(register_offset |
-                                            (uint32_t)(count - 1) << 20),
-      &command));
+    loom_value_id_t route, loom_value_id_t command,
+    const loom_value_id_t* words, iree_host_size_t count) {
   const loom_value_id_t headers[] = {route, command};
   for (iree_host_size_t i = 0; i < 2; ++i) {
     IREE_RETURN_IF_ERROR(loom_aie2p_worker_op(
@@ -185,6 +176,40 @@ iree_status_t loom_aie2p_worker_control_write(
         &words[i], 1, loom_named_attr_slice_empty(), NULL, NULL));
   }
   return iree_ok_status();
+}
+
+iree_status_t loom_aie2p_worker_control_write(
+    loom_aie2p_worker_builder_t* context, loom_builder_t* builder,
+    uint8_t packet_id, uint32_t register_offset, const loom_value_id_t* words,
+    iree_host_size_t count) {
+  loom_value_id_t route, command;
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
+      context, builder, (int32_t)loom_aie2p_worker_odd_parity(packet_id),
+      &route));
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
+      context, builder,
+      (int32_t)loom_aie2p_worker_control_write_command(register_offset, count),
+      &command));
+  return loom_aie2p_worker_control_write_packet(context, builder, route,
+                                                command, words, count);
+}
+
+uint32_t loom_aie2p_worker_control_write_command(uint32_t register_offset,
+                                                 iree_host_size_t count) {
+  return loom_aie2p_worker_odd_parity(register_offset |
+                                      ((uint32_t)(count - 1) << 20));
+}
+
+iree_status_t loom_aie2p_worker_control_write_encoded(
+    loom_aie2p_worker_builder_t* context, loom_builder_t* builder,
+    uint8_t packet_id, loom_value_id_t command, const loom_value_id_t* words,
+    iree_host_size_t count) {
+  loom_value_id_t route;
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
+      context, builder, (int32_t)loom_aie2p_worker_odd_parity(packet_id),
+      &route));
+  return loom_aie2p_worker_control_write_packet(context, builder, route,
+                                                command, words, count);
 }
 
 iree_status_t loom_aie2p_worker_control_read(

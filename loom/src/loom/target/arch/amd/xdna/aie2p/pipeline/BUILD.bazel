@@ -152,6 +152,7 @@ loom_cc_library(
         "//loom/src/loom/target:facts_builder",
         "//loom/src/loom/target:function_version",
         "//loom/src/loom/target/arch/amd/xdna:error_defs",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p:call_abi",
         "//loom/src/loom/target/arch/amd/xdna/aie2p:target_facts",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/array:abi_layout",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/array:plan",

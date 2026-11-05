@@ -6,6 +6,7 @@
 
 #include "loom/analysis/storage_geometry.h"
 #include "loom/ops/channel/ops.h"
+#include "loom/target/arch/amd/xdna/aie2p/call_abi.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/switch.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
@@ -1175,6 +1176,56 @@ static iree_status_t loom_aie2p_native_reserve_transfer_bindings(
   return status;
 }
 
+// Final descriptor policies define the submission signature. A local
+// descriptor already proves matching routes, geometry, and local patch words.
+// Retain each source worker's sharing group once; different worker occurrences
+// may borrow the descriptor but do not prove repeated code in one body.
+static iree_status_t loom_aie2p_native_group_submissions(
+    loom_aie2p_native_context_t* context, iree_host_size_t worker_count) {
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; iree_status_is_ok(status) && i < worker_count;
+       ++i) {
+    loom_aie2p_native_worker_t* worker = &context->workers[i];
+    if (worker->execution != LOOM_AIE2P_NATIVE_EXECUTION_CORE) {
+      continue;
+    }
+    for (loom_aie2p_native_transfer_task_t* task = worker->transfer_tasks;
+         iree_status_is_ok(status) && task; task = task->next) {
+      // Queue-only and local-only patches are too short to reliably amortize
+      // native call overhead. Their constants also share within the caller.
+      if (!task->shim_descriptor->address_dynamic) {
+        continue;
+      }
+      const loom_aie2p_call_abi_requirements_t requirements = {
+          .scalar_count =
+              (uint16_t)(task->transfer_count *
+                             (2 + task->local_descriptor->address_dynamic) +
+                         1),
+          .pointer_count = (uint16_t)task->transfer_count,
+      };
+      if (!loom_aie2p_call_abi_requirements_fit(requirements)) {
+        continue;
+      }
+      loom_aie2p_native_dma_submit_t* group =
+          task->local_descriptor->submit_group;
+      if (!group || group->worker != i) {
+        status = iree_arena_allocate(context->pass->arena, sizeof(*group),
+                                     (void**)&group);
+        if (iree_status_is_ok(status)) {
+          *group = (loom_aie2p_native_dma_submit_t){
+              .worker = i, .function = loom_symbol_ref_null()};
+          task->local_descriptor->submit_group = group;
+        }
+      }
+      if (iree_status_is_ok(status)) {
+        ++group->use_count;
+        task->submit_group = group;
+      }
+    }
+  }
+  return status;
+}
+
 iree_status_t loom_aie2p_native_select_transfers(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization, bool* out_valid) {
@@ -1317,6 +1368,10 @@ iree_status_t loom_aie2p_native_select_transfers(
   }
   if (iree_status_is_ok(status) && valid) {
     status = loom_aie2p_native_reserve_transfer_bindings(
+        context, realization->invocations.worker_count);
+  }
+  if (iree_status_is_ok(status) && valid) {
+    status = loom_aie2p_native_group_submissions(
         context, realization->invocations.worker_count);
   }
   if (iree_status_is_ok(status) && valid) {
