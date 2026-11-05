@@ -127,6 +127,50 @@ TEST(VMExecutionTest, TransfersRefBanksWithExplicitOwnership) {
   iree_vm_environment_free(environment);
 }
 
+TEST(VMExecutionTest, PromotesReturnedBorrowBeforeReplacingItsLastAnchor) {
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+  iree_vm_ref_types_t types = {};
+  IREE_ASSERT_OK(iree_vm_ref_types_resolve(
+      iree_vm_environment_lookup_ref_type_table(environment, IREE_SV("vm")),
+      &types));
+  std::array<iree_vm_ref_t, IREE_VM_CALL_DIRECT_REGISTER_COUNT> direct = {};
+  std::array<iree_vm_ref_t, 1> overflow = {};
+  iree_vm_call_packet_t call = {};
+  call.ref_arguments.direct = call.ref_results.direct = direct.data();
+  call.ref_arguments.overflow = call.ref_results.overflow = overflow.data();
+  for (uint16_t ordinal : {uint16_t{15}, uint16_t{16}}) {
+    SCOPED_TRACE(ordinal);
+    uint8_t storage = 42;
+    int releases = 0;
+    iree_vm_buffer_t* buffer = nullptr;
+    IREE_ASSERT_OK(iree_vm_buffer_wrap(IREE_VM_BUFFER_ACCESS_FLAG_READ,
+                                       iree_make_byte_span(&storage, 1),
+                                       {[](void* user_data, iree_byte_span_t) {
+                                          ++*static_cast<int*>(user_data);
+                                        },
+                                        &releases},
+                                       iree_allocator_system(), &buffer));
+    void* expected_object = buffer;
+    iree_vm_ref_t* slot = ordinal < IREE_VM_CALL_DIRECT_REGISTER_COUNT
+                              ? &direct[ordinal]
+                              : &overflow[0];
+    *slot = iree_vm_buffer_ref_from_ptr_move(&types, &buffer);
+    iree_vm_ref_t borrowed = iree_vm_ref_null();
+    iree_vm_call_ref_argument_load_borrow(&call, ordinal, &borrowed);
+    iree_vm_call_ref_result_store_move(&call, ordinal, &borrowed);
+    EXPECT_TRUE(iree_vm_ref_is_null(borrowed));
+    EXPECT_EQ(slot->object, expected_object);
+    EXPECT_EQ(slot->type_and_state & IREE_VM_REF_STATE_MASK,
+              IREE_VM_REF_STATE_OWNED);
+    EXPECT_EQ(releases, 0);
+    iree_vm_ref_reset(slot);
+    EXPECT_EQ(releases, 1);
+  }
+  iree_vm_environment_free(environment);
+}
+
 TEST(VMExecutionTest, UnreachableResumeLeavesOutcomeUntouched) {
   iree_vm_execution_outcome_t outcome = IREE_VM_EXECUTION_OUTCOME_SUSPENDED;
   IREE_EXPECT_STATUS_IS(

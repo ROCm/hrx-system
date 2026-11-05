@@ -37,6 +37,11 @@ vm.module core(0.0) {
     string @string34 = "add"
     string @string35 = "missing"
     string @string36 = "select_refs"
+    string @string37 = "yield_mixed_left"
+    string @string38 = "yield_mixed_left_indirect"
+    string @string39 = "yield_mixed_right"
+    string @string40 = "yield_mixed_right_indirect"
+    string @string41 = "swap_borrowed_refs"
   }
 
   section ref_types alignment(8) {
@@ -57,6 +62,8 @@ vm.module core(0.0) {
     signature @signature8 (ref(@ref_type0)) -> (i64, i32)
     signature @signature9 (i32) -> (i32)
     signature @signature10 (i64, ref(@ref_type0), ref(@ref_type0)) -> (ref(@ref_type0))
+    signature @signature11 (ref(@ref_type0), ref(@ref_type0)) -> (ref(@ref_type0))
+    signature @signature12 (ref(@ref_type0), ref(@ref_type0)) -> (ref(@ref_type0), ref(@ref_type0))
   }
 
   section callable_types alignment(8) {
@@ -69,9 +76,11 @@ vm.module core(0.0) {
     callable @callable6 flags([yieldable]) depth(0) : @signature4
     callable @callable7 flags([]) depth(0) : @signature8
     callable @callable8 flags([]) depth(0) : @signature5
-    callable @callable9 flags([]) depth(0) : @signature10
-    callable @callable10 flags([]) depth(0) : @signature6
-    callable @callable11 flags([]) depth(0) : @signature7
+    callable @callable9 flags([yieldable]) depth(0) : @signature11
+    callable @callable10 flags([]) depth(0) : @signature12
+    callable @callable11 flags([]) depth(0) : @signature10
+    callable @callable12 flags([]) depth(0) : @signature6
+    callable @callable13 flags([]) depth(0) : @signature7
   }
 
   section imports alignment(8) {
@@ -86,8 +95,8 @@ vm.module core(0.0) {
     export @export1 name(@string1) : @callable8 = @function5
     export @export2 name(@string2) : @callable8 = @function4
     export @export3 name(@string3) : @callable8 = @function15
-    export @export4 name(@string4) : @callable11 = @function19
-    export @export5 name(@string5) : @callable10 = @function17
+    export @export4 name(@string4) : @callable13 = @function19
+    export @export5 name(@string5) : @callable12 = @function17
     export @export6 name(@string6) : @callable5 = @function7
     export @export7 name(@string7) : @callable4 = @function10
     export @export8 name(@string8) : @callable5 = @function8
@@ -99,10 +108,15 @@ vm.module core(0.0) {
     export @export14 name(@string14) : @callable1 = @function2
     export @export15 name(@string15) : @callable7 = @function23
     export @export16 name(@string16) : @callable3 = @function1
-    export @export17 name(@string36) : @callable9 = @function24
-    export @export18 name(@string17) : @callable1 = @function21
-    export @export19 name(@string18) : @callable2 = @function11
-    export @export20 name(@string19) : @callable6 = @function12
+    export @export17 name(@string36) : @callable11 = @function24
+    export @export18 name(@string41) : @callable10 = @function31
+    export @export19 name(@string17) : @callable1 = @function21
+    export @export20 name(@string37) : @callable9 = @function25
+    export @export21 name(@string38) : @callable9 = @function26
+    export @export22 name(@string39) : @callable9 = @function27
+    export @export23 name(@string40) : @callable9 = @function28
+    export @export24 name(@string18) : @callable2 = @function11
+    export @export25 name(@string19) : @callable6 = @function12
   }
 
   section functions alignment(8) {
@@ -218,14 +232,14 @@ vm.module core(0.0) {
       control.call @import1 {direct_ref_move_mask = 0x0000}
       control.return
     }
-    func @function16 : @callable10 flags([]) frame(local_bytes = 0, value_registers = 17, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function16 : @callable12 flags([]) frame(local_bytes = 0, value_registers = 17, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0) {
     ^bb0:
       control.block
       %v16 = value.abi.argument.load 0
       value.abi.result.store %v16, 0
       control.return
     }
-    func @function17 : @callable10 flags([has_call]) frame(local_bytes = 16, value_registers = 17, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function17 : @callable12 flags([has_call]) frame(local_bytes = 16, value_registers = 17, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0) {
     ^bb0:
       control.block
       %v16 = value.abi.argument.load 0
@@ -235,14 +249,14 @@ vm.module core(0.0) {
       value.abi.result.store %v16, 0
       control.return
     }
-    func @function18 : @callable11 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 17, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function18 : @callable13 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 17, function_registers = 0, local_refs = 0, local_functions = 0) {
     ^bb0:
       control.block
       %r16 = ref.abi.argument.load.move 0
       ref.abi.result.store.move %r16, 0
       control.return
     }
-    func @function19 : @callable11 flags([has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 17, function_registers = 0, local_refs = 2, local_functions = 0) {
+    func @function19 : @callable13 flags([has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 17, function_registers = 0, local_refs = 2, local_functions = 0) {
     ^bb0:
       control.block
       %r16 = ref.abi.argument.load.move 0
@@ -342,10 +356,69 @@ vm.module core(0.0) {
       %v1 = value.copy %v4
       control.return
     }
-    func @function24 : @callable9 flags([]) frame(local_bytes = 0, value_registers = 1, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function24 : @callable11 flags([]) frame(local_bytes = 0, value_registers = 1, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0) {
     ^bb0:
       control.block
       %r0 = ref.select %v0, %r0, %r1
+      control.return
+    }
+    func @function25 : @callable9 flags([yieldable, has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      control.call @function29 {direct_ref_move_mask = 0x0001}
+      control.return
+    }
+    func @function26 : @callable9 flags([yieldable, has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 2, function_registers = 1, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      %f0 = func.address @function29, @callable9
+      control.call.indirect %f0, @callable9 {direct_ref_move_mask = 0x0001}
+      control.return
+    }
+    func @function27 : @callable9 flags([yieldable, has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      control.call @function30 {direct_ref_move_mask = 0x0002}
+      control.return
+    }
+    func @function28 : @callable9 flags([yieldable, has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 2, function_registers = 1, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      %f0 = func.address @function30, @callable9
+      control.call.indirect %f0, @callable9 {direct_ref_move_mask = 0x0002}
+      control.return
+    }
+    func @function29 : @callable9 flags([yieldable]) frame(local_bytes = 0, value_registers = 0, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      ref.discard %r0
+      control.yield.s32 ^bb1
+    ^bb1:
+      control.block
+      %r0 = ref.move %r1
+      control.return
+    }
+    func @function30 : @callable9 flags([yieldable]) frame(local_bytes = 0, value_registers = 0, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      ref.discard %r1
+      control.yield.s32 ^bb1
+    ^bb1:
+      control.block
+      control.return
+    }
+    func @function31 : @callable10 flags([has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      control.call @function32 {direct_ref_move_mask = 0x0000}
+      control.return
+    }
+    func @function32 : @callable10 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 3, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      %r2 = ref.move %r0
+      %r0 = ref.move %r1
+      %r1 = ref.move %r2
       control.return
     }
   }

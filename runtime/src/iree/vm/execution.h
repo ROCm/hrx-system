@@ -150,8 +150,9 @@ typedef struct iree_vm_call_function_results_t {
 // every bank extent. Nonnull bases remain stable until the call completes or
 // unwinds; a yielding implementation preserves any needed bases in its frame.
 // Argument and result banks may alias. Implementations load every argument they
-// still need before storing overlapping results; moving refs to local owners
-// before publishing results also preserves their lifetime across replacement.
+// still need before storing overlapping results. Every borrowed reference
+// result must acquire an owner before publishing any overlapping result; an
+// earlier store can otherwise release a later borrow's last anchor.
 typedef struct iree_vm_call_packet_t {
   // Physical value argument banks.
   iree_vm_call_value_arguments_t value_arguments;

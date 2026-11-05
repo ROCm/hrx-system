@@ -348,6 +348,11 @@ static iree_status_t iree_vm_bytecode_publish_results(
   }
   const uint16_t direct_ref_count = iree_min(IREE_VM_CALL_DIRECT_REGISTER_COUNT,
                                              signature->result_ref_count_u16);
+  // An earlier result store may replace a later borrow's last caller anchor.
+  // Acquire every escaping owner before publishing any reference result.
+  for (uint16_t i = 0; i < direct_ref_count; ++i) {
+    state->refs[i] = iree_vm_ref_move(&state->refs[i]);
+  }
   for (uint16_t i = 0; i < direct_ref_count; ++i) {
     iree_vm_call_ref_result_store_move(&state->call, i, &state->refs[i]);
   }
