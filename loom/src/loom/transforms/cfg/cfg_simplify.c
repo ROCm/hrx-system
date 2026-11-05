@@ -28,6 +28,7 @@
 #include "loom/transforms/cfg/block_forwarding.h"
 #include "loom/transforms/cfg/block_fusion.h"
 #include "loom/transforms/cfg/branch_folding.h"
+#include "loom/transforms/cfg/dead_state.h"
 #include "loom/util/cfg_graph.h"
 #include "loom/util/dominance.h"
 #include "loom/util/fact_cfg.h"
@@ -47,6 +48,8 @@
     "Number of unreachable CFG blocks removed.")                         \
   V(statistics_type, block_args_removed, "block-args-removed",           \
     "Number of redundant CFG block arguments removed.")                  \
+  V(statistics_type, dead_ops_removed, "dead-ops-removed",               \
+    "Number of operations removed with unobserved CFG state.")           \
   V(statistics_type, blocks_fused, "blocks-fused",                       \
     "Number of single-predecessor CFG blocks fused into their "          \
     "predecessors.")                                                     \
@@ -1813,8 +1816,20 @@ static iree_status_t loom_cfg_simplify_process_cfg_region(
   if (*out_changed) {
     return iree_ok_status();
   }
-  return loom_cfg_simplify_remove_redundant_block_args(state, structure,
-                                                       out_changed);
+  IREE_RETURN_IF_ERROR(loom_cfg_simplify_remove_redundant_block_args(
+      state, structure, out_changed));
+  if (*out_changed) {
+    return iree_ok_status();
+  }
+  iree_host_size_t removed_arguments = 0;
+  iree_host_size_t removed_operations = 0;
+  IREE_RETURN_IF_ERROR(loom_cfg_eliminate_dead_state(
+      state->rewriter, graph, &state->value_domain, &removed_arguments,
+      &removed_operations));
+  state->statistics->block_args_removed += removed_arguments;
+  state->statistics->dead_ops_removed += removed_operations;
+  *out_changed = removed_arguments != 0 || removed_operations != 0;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_cfg_simplify_process_function_once(

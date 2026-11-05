@@ -335,8 +335,9 @@ func.def @compacts_cyclic_callback_arguments(%select: i1, %again: i1, %width: in
 // RUN: pass cfg-simplify
 
 // Replacing an earlier loop argument also changes the representative used by
-// the later loop. No consumer may resurrect the removed argument.
-func.def @forwards_replaced_identity_across_nested_loops(%n: i32, %inner_again: i1, %skip: i1, %stage_again: i1) {
+// the later loop. The returned recurrence remains observable, and no
+// consumer may resurrect a removed forwarding argument.
+func.def @forwards_replaced_identity_across_nested_loops(%n: i32, %inner_again: i1, %skip: i1, %stage_again: i1, %finished: i1) -> (i32) {
   cfg.br ^outer(%n: i32)
 ^outer(%a: i32):
   cfg.br ^inner(%a: i32)
@@ -358,11 +359,15 @@ func.def @forwards_replaced_identity_across_nested_loops(%n: i32, %inner_again: 
   %next = scalar.addi %c, %n : i32
   cfg.br ^latch(%next: i32)
 ^latch(%d: i32):
+  cfg.cond_br %finished, ^exit, ^repeat
+^repeat:
   cfg.br ^outer(%d: i32)
+^exit:
+  func.return %d : i32
 }
 
 // ----
-func.def @forwards_replaced_identity_across_nested_loops(%n: i32, %inner_again: i1, %skip: i1, %stage_again: i1) {
+func.def @forwards_replaced_identity_across_nested_loops(%n: i32, %inner_again: i1, %skip: i1, %stage_again: i1, %finished: i1) -> (i32) {
   cfg.br ^outer(%n: i32)
 ^outer(%a: i32):
   cfg.br ^inner
@@ -378,7 +383,11 @@ func.def @forwards_replaced_identity_across_nested_loops(%n: i32, %inner_again: 
   %next = scalar.addi %a, %n : i32
   cfg.br ^latch(%next: i32)
 ^latch(%d: i32):
+  cfg.cond_br %finished, ^exit, ^repeat
+^repeat:
   cfg.br ^outer(%d: i32)
+^exit:
+  func.return %d : i32
 }
 
 // ====
@@ -388,7 +397,7 @@ func.def @forwards_replaced_identity_across_nested_loops(%n: i32, %inner_again: 
 // The same lifetime contract applies to physical register values.
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @forwards_low_identity_across_nested_loops(%n: reg<test.i32>, %inner_again: reg<test.i32>, %skip: reg<test.i32>, %stage_again: reg<test.i32>) asm {
+low.func.def target<test.low.core>(@test_target) @forwards_low_identity_across_nested_loops(%n: reg<test.i32>, %inner_again: reg<test.i32>, %skip: reg<test.i32>, %stage_again: reg<test.i32>, %finished: reg<test.i32>) -> (reg<test.i32>) asm {
   low.br ^outer(%n: reg<test.i32>)
 ^outer(%a: reg<test.i32>):
   low.br ^inner(%a: reg<test.i32>)
@@ -410,13 +419,17 @@ low.func.def target<test.low.core>(@test_target) @forwards_low_identity_across_n
   %next = test.add.i32 %c, %n
   low.br ^latch(%next: reg<test.i32>)
 ^latch(%d: reg<test.i32>):
+  low.cond_br %finished, ^exit, ^repeat : reg<test.i32>
+^repeat:
   low.br ^outer(%d: reg<test.i32>)
+^exit:
+  return %d
 }
 
 // ----
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @forwards_low_identity_across_nested_loops(%n: reg<test.i32>, %inner_again: reg<test.i32>, %skip: reg<test.i32>, %stage_again: reg<test.i32>) asm {
+low.func.def target<test.low.core>(@test_target) @forwards_low_identity_across_nested_loops(%n: reg<test.i32>, %inner_again: reg<test.i32>, %skip: reg<test.i32>, %stage_again: reg<test.i32>, %finished: reg<test.i32>) -> (reg<test.i32>) asm {
   low.br ^outer(%n: reg<test.i32>)
 ^outer(%a: reg<test.i32>):
   low.br ^inner
@@ -432,7 +445,11 @@ low.func.def target<test.low.core>(@test_target) @forwards_low_identity_across_n
   %next = test.add.i32 %a, %n
   low.br ^latch(%next: reg<test.i32>)
 ^latch(%d: reg<test.i32>):
+  low.cond_br %finished, ^exit, ^repeat : reg<test.i32>
+^repeat:
   low.br ^outer(%d: reg<test.i32>)
+^exit:
+  return %d
 }
 
 // ====

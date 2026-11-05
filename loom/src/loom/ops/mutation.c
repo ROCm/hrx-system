@@ -78,7 +78,7 @@ bool loom_op_results_unused(const loom_module_t* module, const loom_op_t* op) {
   return true;
 }
 
-bool loom_op_is_trivially_dead(const loom_module_t* module,
+bool loom_op_is_dead_if_unused(const loom_module_t* module,
                                const loom_op_t* op) {
   if (op->result_count == 0) {
     return false;
@@ -108,7 +108,13 @@ bool loom_op_is_trivially_dead(const loom_module_t* module,
   if (loom_op_regions_have_hints(op)) {
     return false;
   }
-  return loom_op_results_unused(module, op);
+  return true;
+}
+
+bool loom_op_is_trivially_dead(const loom_module_t* module,
+                               const loom_op_t* op) {
+  return loom_op_is_dead_if_unused(module, op) &&
+         loom_op_results_unused(module, op);
 }
 
 iree_status_t loom_op_remove_results(loom_module_t* module, loom_op_t* op,

@@ -129,6 +129,20 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "dead_state",
+    srcs = ["dead_state.c"],
+    hdrs = ["dead_state.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/util:cfg_graph",
+    ],
+)
+
+loom_cc_library(
     name = "cfg_simplify",
     srcs = ["cfg_simplify.c"],
     hdrs = ["cfg_simplify.h"],
@@ -137,6 +151,7 @@ loom_cc_library(
         ":block_forwarding",
         ":block_fusion",
         ":branch_folding",
+        ":dead_state",
         "//loom/src/loom/analysis:cfg_condition_facts",
         "//loom/src/loom/analysis:cfg_value_identity",
         "//loom/src/loom/analysis:condition_fact_scope",
