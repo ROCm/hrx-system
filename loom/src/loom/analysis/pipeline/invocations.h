@@ -7,7 +7,7 @@
 #ifndef LOOM_ANALYSIS_PIPELINE_INVOCATIONS_H_
 #define LOOM_ANALYSIS_PIPELINE_INVOCATIONS_H_
 
-#include "loom/analysis/pipeline_workers.h"
+#include "loom/analysis/pipeline/workers.h"
 
 #ifdef __cplusplus
 extern "C" {

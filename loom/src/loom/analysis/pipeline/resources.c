@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/analysis/pipeline_resources.h"
+#include "loom/analysis/pipeline/resources.h"
 
 #include <stdlib.h>
 #include <string.h>

@@ -7,7 +7,7 @@
 #ifndef LOOM_ANALYSIS_PIPELINE_ARGUMENTS_H_
 #define LOOM_ANALYSIS_PIPELINE_ARGUMENTS_H_
 
-#include "loom/analysis/pipeline_resources.h"
+#include "loom/analysis/pipeline/resources.h"
 
 #ifdef __cplusplus
 extern "C" {

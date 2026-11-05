@@ -7,7 +7,7 @@
 #ifndef LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_PIPELINE_NATIVE_H_
 #define LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_PIPELINE_NATIVE_H_
 
-#include "loom/analysis/pipeline_execution.h"
+#include "loom/analysis/pipeline/execution.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/route.h"
 #include "loom/target/arch/amd/xdna/aie2p/facts.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_plan.h"

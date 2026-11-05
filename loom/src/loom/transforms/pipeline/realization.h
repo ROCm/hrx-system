@@ -7,8 +7,8 @@
 #ifndef LOOM_TRANSFORMS_PIPELINE_REALIZATION_H_
 #define LOOM_TRANSFORMS_PIPELINE_REALIZATION_H_
 
-#include "loom/analysis/pipeline_invocations.h"
-#include "loom/analysis/pipeline_workers.h"
+#include "loom/analysis/pipeline/invocations.h"
+#include "loom/analysis/pipeline/workers.h"
 #include "loom/pass/types.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/target/function_version.h"

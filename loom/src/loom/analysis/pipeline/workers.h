@@ -9,8 +9,8 @@
 
 #include "loom/analysis/channel_completion.h"
 #include "loom/analysis/kernel_synchronization_legality.h"
-#include "loom/analysis/pipeline_arguments.h"
-#include "loom/analysis/pipeline_resources.h"
+#include "loom/analysis/pipeline/arguments.h"
+#include "loom/analysis/pipeline/resources.h"
 #include "loom/util/cfg_graph.h"
 #include "loom/util/fact_cfg.h"
 

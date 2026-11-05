@@ -4,13 +4,13 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/analysis/pipeline_resources.h"
+#include "loom/analysis/pipeline/resources.h"
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/analysis/pipeline_arguments.h"
-#include "loom/analysis/pipeline_invocations.h"
-#include "loom/analysis/pipeline_workers.h"
+#include "loom/analysis/pipeline/arguments.h"
+#include "loom/analysis/pipeline/invocations.h"
+#include "loom/analysis/pipeline/workers.h"
 #include "loom/error/diagnostic.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
@@ -19,6 +19,7 @@
 #include "loom/ops/channel/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/index/ops.h"
+#include "loom/ops/op_registry.h"
 #include "loom/ops/pipeline/ops.h"
 #include "loom/ops/type_registry.h"
 #include "loom/rewrite/callable.h"
@@ -108,12 +109,7 @@ class PipelineConstructionTest : public ::testing::Test {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks_);
     iree_arena_initialize(&blocks_, &arena_);
     loom_context_initialize(iree_allocator_system(), &context_);
-    IREE_ASSERT_OK(loom_type_registry_register_common_types(&context_));
-    Register(LOOM_DIALECT_BUFFER, loom_buffer_dialect_vtables);
-    Register(LOOM_DIALECT_CHANNEL, loom_channel_dialect_vtables);
-    Register(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
-    Register(LOOM_DIALECT_INDEX, loom_index_dialect_vtables);
-    Register(LOOM_DIALECT_PIPELINE, loom_pipeline_dialect_vtables);
+    IREE_ASSERT_OK(loom_op_registry_register_all_dialects(&context_));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("construction"),
                                         &blocks_, nullptr,
@@ -127,14 +123,6 @@ class PipelineConstructionTest : public ::testing::Test {
     loom_context_deinitialize(&context_);
     iree_arena_deinitialize(&arena_);
     iree_arena_block_pool_deinitialize(&blocks_);
-  }
-
-  void Register(uint8_t id,
-                const loom_op_vtable_t* const* (*get)(iree_host_size_t*)) {
-    iree_host_size_t count;
-    const auto* vtables = get(&count);
-    IREE_ASSERT_OK(
-        loom_context_register_dialect(&context_, id, vtables, count));
   }
 
   loom_symbol_ref_t Symbol(const char* name) {

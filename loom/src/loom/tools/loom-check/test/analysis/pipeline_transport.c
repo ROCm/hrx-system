@@ -6,10 +6,10 @@
 
 #include <inttypes.h>
 
-#include "loom/analysis/pipeline_invocations.h"
-#include "loom/analysis/pipeline_resources.h"
-#include "loom/analysis/pipeline_schedule.h"
-#include "loom/analysis/pipeline_workers.h"
+#include "loom/analysis/pipeline/invocations.h"
+#include "loom/analysis/pipeline/resources.h"
+#include "loom/analysis/pipeline/schedule.h"
+#include "loom/analysis/pipeline/workers.h"
 #include "loom/analysis/source_storage_packing.h"
 #include "loom/ir/context.h"
 #include "loom/ops/kernel/ops.h"

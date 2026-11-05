@@ -7,7 +7,7 @@
 #ifndef LOOM_TRANSFORMS_PIPELINE_CONTROL_H_
 #define LOOM_TRANSFORMS_PIPELINE_CONTROL_H_
 
-#include "loom/analysis/pipeline_execution.h"
+#include "loom/analysis/pipeline/execution.h"
 #include "loom/transforms/pipeline/realization.h"
 
 #ifdef __cplusplus

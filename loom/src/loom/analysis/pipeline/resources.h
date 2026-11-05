@@ -8,7 +8,7 @@
 #define LOOM_ANALYSIS_PIPELINE_RESOURCES_H_
 
 #include "loom/analysis/channel_plan.h"
-#include "loom/analysis/pipeline_schedule.h"
+#include "loom/analysis/pipeline/schedule.h"
 #include "loom/analysis/source_storage_packing.h"
 #include "loom/error/emitter.h"
 #include "loom/util/fact_table.h"
