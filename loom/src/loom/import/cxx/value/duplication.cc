@@ -157,6 +157,7 @@ Value ValueDuplication::build_partition(Value source,
                         loom_tensor_duplicate_build);
   }
   IREE_ASSERT_UNREACHABLE("unknown source value kind");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 }  // namespace loom::cxx_import
