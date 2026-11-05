@@ -1904,9 +1904,9 @@ static void iree_hal_amd_gpu_pm4_complete_download(void* user_data) {
 
 static bool iree_hal_amd_gpu_pm4_retire(
     void* user_data, amdf_status_t wait_status,
+    iree_hal_amd_gpu_completion_scope_t* scope,
     iree_hal_amd_gpu_completion_wait_t* out_wait,
-    iree_hal_amd_gpu_completion_copy_t* out_copy,
-    iree_hal_amd_gpu_completion_scope_t* scope) {
+    iree_hal_amd_gpu_completion_copy_t* out_copy) {
   iree_hal_amd_gpu_pm4_queue_t* queue = user_data;
   if (!amdf_status_is_ok((amdf_status_t)iree_atomic_load(
           &queue->native_failure, iree_memory_order_relaxed)) ||

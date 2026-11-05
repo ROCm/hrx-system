@@ -86,9 +86,9 @@ typedef struct iree_hal_amd_gpu_completion_copy_t {
 // Failure does not establish native quiescence or permit releasing GPU storage.
 typedef bool (*iree_hal_amd_gpu_completion_fn_t)(
     void* user_data, amdf_status_t wait_status,
+    iree_hal_amd_gpu_completion_scope_t* scope,
     iree_hal_amd_gpu_completion_wait_t* out_wait,
-    iree_hal_amd_gpu_completion_copy_t* out_copy,
-    iree_hal_amd_gpu_completion_scope_t* scope);
+    iree_hal_amd_gpu_completion_copy_t* out_copy);
 
 // One completion source, such as queue retirement or shader reports. Only the
 // worker stores hints here; helpers discard their hints. The drain mutex

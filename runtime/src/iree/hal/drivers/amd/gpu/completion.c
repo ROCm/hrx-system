@@ -201,7 +201,7 @@ static bool iree_hal_amd_gpu_completion_drain(
         out_copy && !out_copy->fn ? out_copy : NULL;
     iree_hal_amd_gpu_completion_scope_t scope = {
         .completion = completion, .source = source, .fn = source->fn};
-    ready |= scope.fn(source->user_data, status, &wait, copy, &scope);
+    ready |= scope.fn(source->user_data, status, &scope, &wait, copy);
     iree_hal_amd_gpu_completion_scope_lock(&scope);
     if (out_has_wait) {
       // Another source can yield to a helper before observation begins. Pin

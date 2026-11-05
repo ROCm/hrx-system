@@ -162,9 +162,9 @@ void iree_hal_amd_gpu_feedback_fail(void* user_data,
 // Shader/native publication errors are reported once through the device sink.
 bool iree_hal_amd_gpu_feedback_poll(
     void* user_data, amdf_status_t wait_status,
+    iree_hal_amd_gpu_completion_scope_t* scope,
     iree_hal_amd_gpu_completion_wait_t* out_wait,
-    iree_hal_amd_gpu_completion_copy_t* out_copy,
-    iree_hal_amd_gpu_completion_scope_t* scope);
+    iree_hal_amd_gpu_completion_copy_t* out_copy);
 
 // Drains the ready prefix observed at entry before publishing host completion.
 // Called within the serialized completion drain; never waits for a reserved

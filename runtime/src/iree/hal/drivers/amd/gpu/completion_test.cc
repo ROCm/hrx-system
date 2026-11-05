@@ -130,9 +130,9 @@ class CompletionTest : public ::testing::Test {
     return {
         .fn =
             [](void* user_data, amdf_status_t status,
+               iree_hal_amd_gpu_completion_scope_t* scope,
                iree_hal_amd_gpu_completion_wait_t* out_wait,
-               iree_hal_amd_gpu_completion_copy_t* out_copy,
-               iree_hal_amd_gpu_completion_scope_t* scope) {
+               iree_hal_amd_gpu_completion_copy_t* out_copy) {
               return (*static_cast<Callback*>(user_data))(status);
             },
         .user_data = &callback,
@@ -145,9 +145,9 @@ class CompletionTest : public ::testing::Test {
     return {
         .fn =
             [](void* user_data, amdf_status_t status,
+               iree_hal_amd_gpu_completion_scope_t* scope,
                iree_hal_amd_gpu_completion_wait_t* out_wait,
-               iree_hal_amd_gpu_completion_copy_t* out_copy,
-               iree_hal_amd_gpu_completion_scope_t* scope) {
+               iree_hal_amd_gpu_completion_copy_t* out_copy) {
               return (*static_cast<WaitCallback*>(user_data))(status, out_wait);
             },
         .user_data = &callback,
@@ -159,9 +159,9 @@ class CompletionTest : public ::testing::Test {
     return {
         .fn =
             [](void* user_data, amdf_status_t,
+               iree_hal_amd_gpu_completion_scope_t* scope,
                iree_hal_amd_gpu_completion_wait_t*,
-               iree_hal_amd_gpu_completion_copy_t*,
-               iree_hal_amd_gpu_completion_scope_t* scope) {
+               iree_hal_amd_gpu_completion_copy_t*) {
               return (*static_cast<Callout*>(user_data))(scope);
             },
         .user_data = &callback,
@@ -174,9 +174,9 @@ class CompletionTest : public ::testing::Test {
     return {
         .fn =
             [](void* user_data, amdf_status_t,
+               iree_hal_amd_gpu_completion_scope_t* scope,
                iree_hal_amd_gpu_completion_wait_t* out_wait,
-               iree_hal_amd_gpu_completion_copy_t*,
-               iree_hal_amd_gpu_completion_scope_t* scope) {
+               iree_hal_amd_gpu_completion_copy_t*) {
               return (*static_cast<WaitCallout*>(user_data))(scope, out_wait);
             },
         .user_data = &callback,
@@ -696,9 +696,9 @@ struct StagingCopy {
     return {
         .fn =
             [](void* user_data, amdf_status_t status,
+               iree_hal_amd_gpu_completion_scope_t* scope,
                iree_hal_amd_gpu_completion_wait_t*,
-               iree_hal_amd_gpu_completion_copy_t* out_copy,
-               iree_hal_amd_gpu_completion_scope_t* scope) {
+               iree_hal_amd_gpu_completion_copy_t* out_copy) {
               auto& copy = *static_cast<StagingCopy*>(user_data);
               ++copy.calls;
               if (!amdf_status_is_ok(status)) {
@@ -774,9 +774,9 @@ TEST_F(CompletionTest, ContinuousDownloadsTakeTurnsAcrossSources) {
     sources[i] = {
         .fn =
             [](void* user_data, amdf_status_t,
+               iree_hal_amd_gpu_completion_scope_t* scope,
                iree_hal_amd_gpu_completion_wait_t*,
-               iree_hal_amd_gpu_completion_copy_t* out_copy,
-               iree_hal_amd_gpu_completion_scope_t* scope) {
+               iree_hal_amd_gpu_completion_copy_t* out_copy) {
               if (out_copy) {
                 *out_copy = {
                     .fn =
@@ -1787,9 +1787,9 @@ TEST(CompletionNativeEventTest, KernelWakeSharesOneWorkerAndJoinsShutdown) {
   iree_hal_amd_gpu_completion_source_t source = {
       .fn =
           [](void* user_data, amdf_status_t status,
+             iree_hal_amd_gpu_completion_scope_t* scope,
              iree_hal_amd_gpu_completion_wait_t* out_wait,
-             iree_hal_amd_gpu_completion_copy_t* out_copy,
-             iree_hal_amd_gpu_completion_scope_t* scope) {
+             iree_hal_amd_gpu_completion_copy_t* out_copy) {
             auto* state = static_cast<State*>(user_data);
             EXPECT_TRUE(amdf_status_is_ok(status));
             if (state->ready.exchange(false)) {

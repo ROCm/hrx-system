@@ -264,7 +264,7 @@ class CodeTest : public ::testing::Test {
           .fn = source.fn,
       };
       const bool ready =
-          source.fn(source.user_data, status, &wait, nullptr, &scope);
+          source.fn(source.user_data, status, &scope, &wait, nullptr);
       EXPECT_FALSE(iree_hal_amd_gpu_completion_scope_finish(&scope));
       iree_slim_mutex_unlock(&completion.drain_mutex);
       return ready;
@@ -372,7 +372,7 @@ TEST_F(CodeTest, StagingIsReleasedOnlyAfterCopyRetires) {
           .fn = source.fn,
       };
       const bool ready =
-          source.fn(source.user_data, status, &wait, nullptr, &scope);
+          source.fn(source.user_data, status, &scope, &wait, nullptr);
       EXPECT_FALSE(iree_hal_amd_gpu_completion_scope_finish(&scope));
       iree_slim_mutex_unlock(&completion.drain_mutex);
       return ready;

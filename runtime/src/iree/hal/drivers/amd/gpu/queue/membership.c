@@ -106,9 +106,9 @@ bool iree_hal_amd_gpu_queue_membership_deinitialize(
 
 static bool iree_hal_amd_gpu_queue_membership_poll_join(
     void* user_data, amdf_status_t status,
+    iree_hal_amd_gpu_completion_scope_t* scope,
     iree_hal_amd_gpu_completion_wait_t* out_wait,
-    iree_hal_amd_gpu_completion_copy_t* out_copy,
-    iree_hal_amd_gpu_completion_scope_t* scope) {
+    iree_hal_amd_gpu_completion_copy_t* out_copy) {
   iree_hal_amd_gpu_queue_membership_t* membership = user_data;
   bool completed = false;
   for (iree_hal_amd_gpu_queue_join_t* join = membership->joins; join;

@@ -1774,9 +1774,9 @@ static void iree_hal_amd_gpu_aql_complete_download(void* user_data) {
 
 static bool iree_hal_amd_gpu_aql_retire(
     void* user_data, amdf_status_t wait_status,
+    iree_hal_amd_gpu_completion_scope_t* scope,
     iree_hal_amd_gpu_completion_wait_t* out_wait,
-    iree_hal_amd_gpu_completion_copy_t* out_copy,
-    iree_hal_amd_gpu_completion_scope_t* scope) {
+    iree_hal_amd_gpu_completion_copy_t* out_copy) {
   iree_hal_amd_gpu_aql_queue_t* queue = user_data;
   uint64_t position = (uint64_t)iree_atomic_load(&queue->completed.count,
                                                  iree_memory_order_relaxed);

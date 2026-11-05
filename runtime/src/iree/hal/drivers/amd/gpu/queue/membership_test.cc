@@ -95,9 +95,9 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
               return iree_hal_amd_gpu_completion_source_t{
                   .fn =
                       [](void* data, amdf_status_t,
+                         iree_hal_amd_gpu_completion_scope_t* scope,
                          iree_hal_amd_gpu_completion_wait_t*,
-                         iree_hal_amd_gpu_completion_copy_t*,
-                         iree_hal_amd_gpu_completion_scope_t* scope) {
+                         iree_hal_amd_gpu_completion_copy_t*) {
                         auto* queue = static_cast<Queue*>(data);
                         if (queue == &queue->owner->provisioned_ &&
                             queue->owner->run_callout_.exchange(false)) {
