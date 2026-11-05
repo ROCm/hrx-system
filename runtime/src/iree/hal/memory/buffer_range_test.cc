@@ -292,6 +292,91 @@ TEST_P(BufferRangeTest, EnforcesVisibleRange) {
   EXPECT_EQ(128u, iree_hal_buffer_memory_view(buffer).offset);
 }
 
+TEST_P(BufferRangeTest, CapturesExactPreparedRangeWithoutAnotherBuffer) {
+  iree_hal_buffer_t* source = nullptr;
+  IREE_ASSERT_OK(Allocate(source_pool_, 4096, &source));
+  iree_hal_pool_t* child = nullptr;
+  IREE_ASSERT_OK(CreateChild(source, 128, 1024, 2, &child));
+  const auto request = iree_hal_make_pool_reservation_request(73, 1);
+  iree_hal_pool_reservation_t reservation;
+  iree_hal_pool_acquire_info_t info;
+  iree_hal_pool_acquire_result_t result;
+  IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
+      child, 1, &request, nullptr, &reservation, &info, &result,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+  ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
+  iree_hal_pool_reservation_view_t view;
+  ASSERT_TRUE(
+      iree_hal_pool_query_reservation_views(child, 1, &reservation, &view));
+
+  iree_hal_pool_buffer_range_t range;
+  IREE_ASSERT_OK(iree_hal_pool_buffer_range_capture(child, &request,
+                                                    &reservation, &range));
+  EXPECT_EQ(range.buffer, view.buffer);
+  EXPECT_EQ(range.offset, 128u);
+  EXPECT_EQ(range.length, 73u);
+  EXPECT_EQ(range.memory.offset, view.memory.offset);
+  EXPECT_EQ(range.memory.binding_offset, view.memory.binding_offset);
+  EXPECT_EQ(range.memory.bindings, view.memory.bindings);
+  EXPECT_EQ(range.memory.backing, view.memory.backing);
+  EXPECT_EQ(range.memory.contract, view.memory.contract);
+  EXPECT_EQ(range.memory.reuse_frontier, info.reuse_frontier);
+
+  // Qualification may narrow an allocator's range, but exact capture must
+  // preserve even the final byte of a non-aligned reservation.
+  iree_hal_pool_buffer_range_t aligned_range;
+  const iree_hal_asan_pool_options_t asan = {};
+  IREE_ASSERT_OK(iree_hal_pool_buffer_range_prepare(
+      child, &request, &reservation, 16, &asan, &aligned_range));
+  EXPECT_EQ(aligned_range.length, 64u);
+  iree_hal_pool_buffer_range_deinitialize(&aligned_range);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_pool_buffer_range_prepare(child, &request, &reservation, 3,
+                                         &asan, &aligned_range));
+  EXPECT_EQ(aligned_range.buffer, nullptr);
+
+  iree_hal_buffer_t* materialized = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_buffer_range_materialize(
+      &range, 0, range.length, info.reuse_frontier, {}, allocator_,
+      &materialized));
+  const uint8_t expected = 0xA7;
+  IREE_ASSERT_OK(iree_hal_buffer_map_write(materialized, 72, &expected, 1));
+  uint8_t actual = 0;
+  IREE_ASSERT_OK(iree_hal_buffer_map_read(source, 128 + 72, &actual, 1));
+  EXPECT_EQ(actual, expected);
+  iree_hal_pool_buffer_range_deinitialize(&range);
+  iree_hal_pool_release_reservations(child, 1, &reservation, nullptr);
+  IREE_ASSERT_OK(iree_hal_buffer_map_read(materialized, 72, &actual, 1));
+  EXPECT_EQ(actual, expected);
+  iree_hal_buffer_release(materialized);
+}
+
+TEST_P(BufferRangeTest, CapturesNativeReservationWithoutRoundingItsTail) {
+  iree_hal_pool_t* native = pools_.front();
+  const auto request = iree_hal_make_pool_reservation_request(73, 1);
+  iree_hal_pool_reservation_t reservation;
+  iree_hal_pool_acquire_info_t info;
+  iree_hal_pool_acquire_result_t result;
+  IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
+      native, 1, &request, nullptr, &reservation, &info, &result,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+  ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
+  iree_hal_pool_buffer_range_t range;
+  IREE_ASSERT_OK(iree_hal_pool_buffer_range_capture(native, &request,
+                                                    &reservation, &range));
+  EXPECT_EQ(range.offset, 0u);
+  EXPECT_EQ(range.length, 73u);
+  EXPECT_EQ(iree_hal_buffer_byte_length(range.buffer), range.length);
+  const uint8_t expected = 0x7A;
+  IREE_ASSERT_OK(iree_hal_buffer_map_write(range.buffer, 72, &expected, 1));
+  uint8_t actual = 0;
+  IREE_ASSERT_OK(iree_hal_buffer_map_read(range.buffer, 72, &actual, 1));
+  EXPECT_EQ(actual, expected);
+  iree_hal_pool_buffer_range_deinitialize(&range);
+  iree_hal_pool_release_reservations(native, 1, &reservation, nullptr);
+}
+
 TEST_P(BufferRangeTest, AlignsNativeCoordinatesWithinVisibleRange) {
   iree_hal_buffer_t* source = nullptr;
   IREE_ASSERT_OK(Allocate(source_pool_, 4096, &source));

@@ -13,15 +13,15 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Retained prepared range for an offset allocator. Ownership is one buffer
-// reference; explicitly managed allocation epochs remain the caller's
+// Retained prepared range for a pool or offset allocator. Ownership is one
+// buffer reference; explicitly managed allocation epochs remain the caller's
 // obligation, including a child pool holding an ordinary backing reservation.
 typedef struct iree_hal_pool_buffer_range_t {
-  // Source view retained once for the allocator's lifetime.
+  // Source view retained until this range is deinitialized.
   iree_hal_buffer_t* buffer;
   // First managed byte relative to the source view.
   iree_device_size_t offset;
-  // Managed extent after alignment of the supplied range's endpoints.
+  // Retained visible extent, optionally narrowed for allocator alignment.
   iree_device_size_t length;
   // Captured storage facts with offset at the first managed byte.
   iree_hal_buffer_memory_view_t memory;
@@ -36,6 +36,16 @@ iree_status_t iree_hal_pool_buffer_range_initialize(
     iree_hal_buffer_t* buffer, iree_device_size_t offset,
     iree_device_size_t length, iree_device_size_t alignment,
     const iree_hal_asan_pool_options_t* asan,
+    iree_hal_pool_buffer_range_t* out_range);
+
+// Retains a live reservation's complete prepared range without changing its
+// endpoints or memory contract. Uses the parent's existing view when available;
+// otherwise materializes a non-owning buffer. Failure leaves an empty output.
+// The caller keeps the parent token and deinitializes this range before
+// returning it. Borrowed reuse history remains valid for the token lifetime.
+iree_status_t iree_hal_pool_buffer_range_capture(
+    iree_hal_pool_t* pool, const iree_hal_pool_reservation_request_t* request,
+    const iree_hal_pool_reservation_t* reservation,
     iree_hal_pool_buffer_range_t* out_range);
 
 // Qualifies and retains a live reservation's prepared view, materializing a

@@ -796,8 +796,9 @@ iree_hal_pool_query_abandonment_status(const iree_hal_pool_t* pool);
 // pools remain usable and can acquire backing again after trimming to zero.
 //
 // Returning backing to a caching source does not necessarily release it to the
-// system. Concrete implementations forward |flags| to their backing providers;
-// the byte floor describes this pool's backing, not a shared provider's cache.
+// system. Composition owners trim shared backing caches explicitly; a child's
+// trim does not change its parent's retention policy. The byte floor describes
+// this pool's backing, not a shared provider's cache.
 // Reclamation is best-effort and does not report unused capacity as an error.
 IREE_API_EXPORT void iree_hal_pool_trim(iree_hal_pool_t* pool,
                                         iree_hal_pool_trim_flags_t flags,

@@ -209,10 +209,10 @@ static iree_status_t iree_hal_slab_cache_validate_request(
 
 static void iree_hal_slab_cache_destroy_entry(
     iree_hal_slab_cache_t* cache, iree_hal_slab_cache_entry_t* entry) {
+  iree_hal_pool_buffer_range_deinitialize(&entry->range);
   iree_hal_pool_release_reservations(cache->backing_pool, 1,
                                      &entry->reservation,
                                      iree_hal_slab_cache_entry_frontier(entry));
-  iree_hal_pool_buffer_range_deinitialize(&entry->range);
   iree_allocator_free(cache->host_allocator, entry);
 }
 
@@ -247,13 +247,11 @@ static iree_status_t iree_hal_slab_cache_prepare_entry(
                  parent->info.reuse_frontier->entry_count *
                      sizeof(parent->info.reuse_frontier->entries[0]));
     }
-    status = iree_hal_pool_materialize_reservations(
-        cache->backing_pool, 1, &parent->request, &entry->reservation,
-        IREE_HAL_POOL_MATERIALIZE_FLAG_NONE, &entry->range.buffer);
+    status = iree_hal_pool_buffer_range_capture(
+        cache->backing_pool, &parent->request, &entry->reservation,
+        &entry->range);
   }
   if (iree_status_is_ok(status)) {
-    entry->range.length = iree_hal_buffer_byte_length(entry->range.buffer);
-    entry->range.memory = iree_hal_buffer_memory_view(entry->range.buffer);
     entry->range.memory.reuse_frontier =
         iree_hal_slab_cache_entry_frontier(entry);
     iree_atomic_fetch_add(&cache->counters.committed,
@@ -265,12 +263,12 @@ static iree_status_t iree_hal_slab_cache_prepare_entry(
     iree_slim_mutex_unlock(&cache->mutex);
     *out_entry = entry;
   } else {
-    iree_hal_pool_release_reservations(cache->backing_pool, 1,
-                                       &parent->reservation,
-                                       parent->info.reuse_frontier);
     if (entry) {
       iree_hal_pool_buffer_range_deinitialize(&entry->range);
     }
+    iree_hal_pool_release_reservations(cache->backing_pool, 1,
+                                       &parent->reservation,
+                                       parent->info.reuse_frontier);
     iree_allocator_free(cache->host_allocator, entry);
   }
   return status;
