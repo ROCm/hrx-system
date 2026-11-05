@@ -133,6 +133,13 @@ TEST_F(BertCleanTextTest, RemovesReplacementChar) {
                         "ab", /*expect_pending_after_process=*/false);
 }
 
+TEST_F(BertCleanTextTest, MalformedUtf8ConsumesOneByteAtATime) {
+  const std::string input = {static_cast<char>(0xC0), static_cast<char>(0x80),
+                             static_cast<char>(0xF6), '@', 'A'};
+  TestWithAllChunkSizes(normalizer(), input, "@A",
+                        /*expect_pending_after_process=*/false);
+}
+
 TEST_F(BertCleanTextTest, TabToSpace) {
   // Tab is whitespace, not control - mapped to space.
   TestWithAllChunkSizes(normalizer(), "a\tb", "a b",

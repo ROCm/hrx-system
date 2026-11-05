@@ -83,6 +83,13 @@ TEST_F(StripAccentsNormalizerTest, SymbolsUnchanged) {
                         /*expect_pending_after_process=*/false);
 }
 
+TEST_F(StripAccentsNormalizerTest, MalformedUtf8ConsumesOneByteAtATime) {
+  const std::string input = {static_cast<char>(0xC0), static_cast<char>(0x80),
+                             static_cast<char>(0xF6), '@', 'A'};
+  TestWithAllChunkSizes(normalizer(), input, input,
+                        /*expect_pending_after_process=*/false);
+}
+
 //===----------------------------------------------------------------------===//
 // Precomposed Characters Pass Through Unchanged
 //===----------------------------------------------------------------------===//

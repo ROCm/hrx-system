@@ -415,18 +415,9 @@ static iree_status_t iree_tokenizer_normalizer_nfd_state_process(
       break;
     }
 
-    // Decode the next codepoint.
-    iree_host_size_t byte_count;
-    if ((*in_ptr & 0x80) == 0) {
-      byte_count = 1;
-    } else {
-      byte_count = iree_unicode_utf8_sequence_length(*in_ptr);
-    }
+    // Decode the next codepoint. Malformed sequences map to one replacement
+    // character and consume one byte.
     iree_host_size_t available = (iree_host_size_t)(in_end - in_ptr);
-    IREE_ASSERT(available >= byte_count,
-                "incomplete UTF-8 at end of normalizer input violates "
-                "interface contract");
-
     iree_string_view_t remaining_input = {
         (const char*)in_ptr,
         available,
@@ -445,7 +436,7 @@ static iree_status_t iree_tokenizer_normalizer_nfd_state_process(
 
     // Advance input pointer - we've committed to processing this codepoint.
     // The decomposed buffer will be drained on subsequent calls if needed.
-    in_ptr += byte_count;
+    in_ptr += decode_position;
   }
 
   *out_consumed = (iree_host_size_t)(in_ptr - (const uint8_t*)input.data);

@@ -413,6 +413,8 @@ typedef struct iree_tokenizer_regex_dfa_t {
 //   Callers must provide complete UTF-8 codepoints. Multi-byte sequences
 //   must not be split across chunks. The tokenizer entry point enforces this
 //   via its own UTF-8 carryover handling before invoking the regex executor.
+//   Malformed sequences are consumed one byte at a time as Unicode replacement
+//   characters so untrusted text cannot move execution outside a chunk.
 //
 // Usage:
 //   iree_tokenizer_regex_exec_state_t state;

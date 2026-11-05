@@ -1291,8 +1291,10 @@ static iree_status_t iree_tokenizer_regex_scan(
         // retained input first when the start belongs to an earlier chunk.
         IREE_RETURN_IF_ERROR(iree_tokenizer_regex_seek(
             state, state->match_start, &chunk, &base_offset, &position));
-        position +=
-            iree_unicode_utf8_sequence_length((uint8_t)chunk.data[position]);
+        // Malformed sequences decode as one replacement character. Advance by
+        // the bytes the decoder actually consumed instead of the byte's
+        // nominal sequence length so retry remains on a valid input position.
+        (void)iree_unicode_utf8_decode(chunk, &position);
         iree_tokenizer_regex_reset_to_start(state, dfa, base_offset + position);
         continue;
       } else {
@@ -1427,8 +1429,9 @@ iree_status_t iree_tokenizer_regex_exec_finalize(
     }
     if (!matched) {
       // An unfinished match can conceal a later complete match at EOF.
-      resume_position += iree_unicode_utf8_sequence_length(
-          (uint8_t)available_tail.data[resume_position - tail_start]);
+      iree_host_size_t tail_position = resume_position - tail_start;
+      (void)iree_unicode_utf8_decode(available_tail, &tail_position);
+      resume_position = tail_start + tail_position;
     }
     iree_tokenizer_regex_reset_to_start(state, dfa, resume_position);
     // Replay the unconsumed suffix through the same scan loop. Do not update

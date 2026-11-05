@@ -94,6 +94,14 @@ TEST_F(StripNormalizerTest, StripNeitherPassesThrough) {
                         /*expect_pending_after_process=*/false);
 }
 
+TEST_F(StripNormalizerTest, MalformedUtf8ConsumesOneByteAtATime) {
+  auto normalizer = CreateStrip(true, true);
+  const std::string input = {static_cast<char>(0xC0), static_cast<char>(0x80),
+                             static_cast<char>(0xF6), '@', 'A'};
+  TestWithAllChunkSizes(normalizer.get(), input, input,
+                        /*expect_pending_after_process=*/false);
+}
+
 //===----------------------------------------------------------------------===//
 // strip_left Behavior
 //===----------------------------------------------------------------------===//

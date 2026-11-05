@@ -99,6 +99,14 @@ TEST_F(LowercaseNormalizerTest, LongAsciiRun) {
                         /*expect_pending_after_process=*/false);
 }
 
+TEST_F(LowercaseNormalizerTest, MalformedUtf8ConsumesOneByteAtATime) {
+  const std::string input = {static_cast<char>(0xC0), static_cast<char>(0x80),
+                             static_cast<char>(0xF6), '@', 'A'};
+  const std::string expected = "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD@a";
+  TestWithAllChunkSizes(normalizer(), input, expected,
+                        /*expect_pending_after_process=*/false);
+}
+
 //===----------------------------------------------------------------------===//
 // UTF-8 Lowercasing (Non-ASCII)
 //===----------------------------------------------------------------------===//
