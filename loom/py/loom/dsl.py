@@ -255,6 +255,7 @@ __all__ = [
     "YieldTypesMatch",
     "YieldElementTypesMatch",
     "VariadicValuesMatch",
+    "ClosedValueTuple",
     "IterArgsMatchResults",
     "AttrMatchesElementType",
     "LiteralMatchesElementType",
@@ -279,6 +280,7 @@ __all__ = [
     "CallLikeInterface",
     "CallLikeKind",
     "DirectBranchInterface",
+    "ValueDuplicationInterface",
     "FuncLikeInterface",
     "InlinePolicy",
     "LoopLikeInterface",
@@ -301,6 +303,7 @@ __all__ = [
     "unary_op",
     "cast_op",
     "comparison_op",
+    "value_duplication_op",
 ]
 
 
@@ -2191,165 +2194,11 @@ def RanksMatch(a: str, b: str) -> Constraint:
 def _type_satisfies_field_constraint(
     value_type: Any, constraint: TypeConstraint
 ) -> bool:
-    from loom.ir import (
-        RegisterType,
-        ScalarType,
-        ScalarTypeKind,
-        ShapedType,
-        StorageType,
-        TypeKind,
-    )
+    # Import lazily because the verifier consumes declaration records from this
+    # module. Constraint predicates execute only after those records exist.
+    from loom.verify import type_satisfies_constraint
 
-    if constraint == REGISTER:
-        return isinstance(value_type, RegisterType)
-    if constraint == STORAGE:
-        return isinstance(value_type, StorageType)
-
-    if constraint == RANK_ONE_VECTOR:
-        return (
-            isinstance(value_type, ShapedType)
-            and value_type.type_kind == TypeKind.VECTOR
-            and value_type.rank == 1
-        )
-    if constraint == ALL_STATIC_VECTOR:
-        return (
-            isinstance(value_type, ShapedType)
-            and value_type.type_kind == TypeKind.VECTOR
-            and value_type.is_all_static
-        )
-    if constraint == ALL_STATIC_RANK_ONE_VECTOR:
-        return (
-            isinstance(value_type, ShapedType)
-            and value_type.type_kind == TypeKind.VECTOR
-            and value_type.rank == 1
-            and value_type.is_all_static
-        )
-    if constraint == INDEX_OR_NON_I1_INTEGER_SCALAR:
-        if not isinstance(value_type, ScalarType):
-            return False
-        scalar_kind = value_type.kind
-        return scalar_kind in {
-            ScalarTypeKind.INDEX,
-            ScalarTypeKind.I8,
-            ScalarTypeKind.I16,
-            ScalarTypeKind.I32,
-            ScalarTypeKind.I64,
-        }
-    if constraint == PAYLOAD_SCALAR:
-        if not isinstance(value_type, ScalarType):
-            return False
-        return value_type.kind in {
-            ScalarTypeKind.I1,
-            ScalarTypeKind.I8,
-            ScalarTypeKind.I16,
-            ScalarTypeKind.I32,
-            ScalarTypeKind.I64,
-            ScalarTypeKind.F8E4M3,
-            ScalarTypeKind.F8E5M2,
-            ScalarTypeKind.F16,
-            ScalarTypeKind.BF16,
-            ScalarTypeKind.F32,
-            ScalarTypeKind.F64,
-        }
-    if constraint == BITWISE_SCALAR:
-        if not isinstance(value_type, ScalarType):
-            return False
-        scalar_kind = value_type.kind
-        return scalar_kind == ScalarTypeKind.INDEX or scalar_kind in {
-            ScalarTypeKind.I8,
-            ScalarTypeKind.I16,
-            ScalarTypeKind.I32,
-            ScalarTypeKind.I64,
-            ScalarTypeKind.F8E4M3,
-            ScalarTypeKind.F8E5M2,
-            ScalarTypeKind.F16,
-            ScalarTypeKind.BF16,
-            ScalarTypeKind.F32,
-            ScalarTypeKind.F64,
-        }
-    if constraint == BYTE_PATTERN_SCALAR:
-        if not isinstance(value_type, ScalarType):
-            return False
-        return value_type.kind in {
-            ScalarTypeKind.I8,
-            ScalarTypeKind.I16,
-            ScalarTypeKind.I32,
-            ScalarTypeKind.I64,
-            ScalarTypeKind.F8E4M3,
-            ScalarTypeKind.F8E5M2,
-            ScalarTypeKind.F16,
-            ScalarTypeKind.BF16,
-            ScalarTypeKind.F32,
-            ScalarTypeKind.F64,
-        }
-    if not isinstance(value_type, ShapedType):
-        return False
-    element_kind = value_type.element_type.kind
-    if constraint == INDEX_OR_NON_I1_INTEGER_ELEMENT:
-        return element_kind in {
-            ScalarTypeKind.INDEX,
-            ScalarTypeKind.I8,
-            ScalarTypeKind.I16,
-            ScalarTypeKind.I32,
-            ScalarTypeKind.I64,
-        }
-    if constraint == BITWISE_ELEMENT:
-        return element_kind == ScalarTypeKind.INDEX or element_kind in {
-            ScalarTypeKind.I8,
-            ScalarTypeKind.I16,
-            ScalarTypeKind.I32,
-            ScalarTypeKind.I64,
-            ScalarTypeKind.F8E4M3,
-            ScalarTypeKind.F8E5M2,
-            ScalarTypeKind.F16,
-            ScalarTypeKind.BF16,
-            ScalarTypeKind.F32,
-            ScalarTypeKind.F64,
-        }
-    if constraint == BYTE_PATTERN_ELEMENT:
-        return element_kind in {
-            ScalarTypeKind.I8,
-            ScalarTypeKind.I16,
-            ScalarTypeKind.I32,
-            ScalarTypeKind.I64,
-            ScalarTypeKind.F8E4M3,
-            ScalarTypeKind.F8E5M2,
-            ScalarTypeKind.F16,
-            ScalarTypeKind.BF16,
-            ScalarTypeKind.F32,
-            ScalarTypeKind.F64,
-        }
-    if constraint == INTEGER_ELEMENT:
-        return element_kind in {
-            ScalarTypeKind.I1,
-            ScalarTypeKind.I8,
-            ScalarTypeKind.I16,
-            ScalarTypeKind.I32,
-            ScalarTypeKind.I64,
-        }
-    if constraint == FLOAT_ELEMENT:
-        return element_kind in {
-            ScalarTypeKind.F8E4M3,
-            ScalarTypeKind.F8E5M2,
-            ScalarTypeKind.F16,
-            ScalarTypeKind.BF16,
-            ScalarTypeKind.F32,
-            ScalarTypeKind.F64,
-        }
-    if constraint == I1_ELEMENT:
-        return element_kind == ScalarTypeKind.I1
-    if constraint == I8_ELEMENT:
-        return element_kind == ScalarTypeKind.I8
-    if constraint == I32_ELEMENT:
-        return element_kind == ScalarTypeKind.I32
-    if constraint == F16_OR_BF16_ELEMENT:
-        return element_kind in {
-            ScalarTypeKind.F16,
-            ScalarTypeKind.BF16,
-        }
-    if constraint == F32_ELEMENT:
-        return element_kind == ScalarTypeKind.F32
-    return False
+    return type_satisfies_constraint(value_type, constraint)
 
 
 def _has_field_constraint(name: str, constraint: TypeConstraint) -> Constraint:
@@ -2477,6 +2326,27 @@ def HasAllStaticRankOneVector(field: str) -> Constraint:
     """A field must have a vector type with an all-static rank-1 shape."""
 
     return _has_field_constraint(field, ALL_STATIC_RANK_ONE_VECTOR)
+
+
+def ClosedValueTuple(field: str, carrier: TypeConstraint) -> Constraint:
+    """A value field is the exact SSA dependency closure of its last value.
+
+    The field must be nonempty. Every value before the final carrier matches
+    one SSA reference embedded in the carrier type, preserving structural
+    order and repeated references. The carrier must satisfy ``carrier``.
+    """
+
+    from loom.error.structure import ERR_STRUCTURE_065
+
+    return Constraint(
+        "ClosedValueTuple",
+        (field,),
+        error=ERR_STRUCTURE_065,
+        data=carrier,
+        validate=constraint_validation.closed_value_tuple(
+            field, carrier, _type_satisfies_field_constraint
+        ),
+    )
 
 
 def _field_element_bitwidth(item: Any) -> int | None:
@@ -5806,6 +5676,28 @@ class DirectBranchInterface(NamedTuple):
     dest: str
 
 
+class ValueDuplicationInterface(NamedTuple):
+    """Interface for operations that create another owner of a value tuple.
+
+    Implementing operations consume one complete source tuple and produce one
+    equally sized duplicate tuple. Positional result types match source types
+    after remapping references from source tuple values to their corresponding
+    duplicate tuple values. The interface promises a distinct ownership
+    identity, not disjoint physical storage or a particular lowering.
+
+    The generator proves the constrained shape, allowing C consumers to query
+    one compact operation-vtable marker and use the generic operand and result
+    storage directly.
+    """
+
+    # Sole variadic operand field holding the complete source tuple.
+    sources: str
+    # Sole variadic result field holding the complete duplicate tuple.
+    duplicates: str
+    # Type family required of the trailing carrier in both closed tuples.
+    carrier: TypeConstraint
+
+
 class FuncLikeInterface(NamedTuple):
     """Interface for function-like ops (def, decl, template, ukernel).
 
@@ -7170,6 +7062,45 @@ class Op:
 # ============================================================================
 # These reduce boilerplate for common op patterns. They produce Op
 # instances — no class hierarchies, no metaclasses.
+
+
+def value_duplication_op(
+    name: str,
+    *,
+    group: Dialect,
+    carrier: TypeConstraint,
+    doc: str,
+    category: OpCategory | None = None,
+    examples: list[str] | tuple[str, ...] = (),
+) -> Op:
+    """Declare one dialect-owned closed-tuple ownership duplication op."""
+    from loom.assembly import COLON, Refs, TypesOf
+
+    return Op(
+        name,
+        group=group,
+        doc=doc,
+        operands=[Operand("sources", ANY, variadic=True)],
+        results=[Result("duplicates", ANY, variadic=True)],
+        constraints=[
+            ClosedValueTuple("sources", carrier),
+            ClosedValueTuple("duplicates", carrier),
+            VariadicValuesMatch("duplicates", "sources"),
+        ],
+        traits=[UNIQUE_IDENTITY, STORAGE_RELATION],
+        interfaces=[
+            ValueDuplicationInterface(
+                sources="sources",
+                duplicates="duplicates",
+                carrier=carrier,
+            )
+        ],
+        facts="loom_value_duplication_facts",
+        phase=OpPhase.EXECUTABLE,
+        category=category,
+        format=[Refs("sources"), COLON, TypesOf("duplicates")],
+        examples=examples,
+    )
 
 
 def binary_op(

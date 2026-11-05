@@ -27,6 +27,7 @@
 #include <string>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -56,9 +57,12 @@
 #include "loom/import/cxx/source/source.h"
 #include "loom/import/cxx/symbol/functions.h"
 #include "loom/import/cxx/symbol/immutable_objects.h"
+#include "loom/import/cxx/value/bindings.h"
 #include "loom/import/cxx/value/bitcast.h"
+#include "loom/import/cxx/value/duplication.h"
 #include "loom/import/cxx/value/initialization.h"
 #include "loom/import/cxx/value/objects.h"
+#include "loom/import/cxx/value/ownership.h"
 #include "loom/import/cxx/value/representation.h"
 #include "loom/import/cxx/value/scalar.h"
 #include "loom/import/cxx/value/signature.h"
@@ -323,7 +327,7 @@ class Translator final : private Initialization::Evaluation {
   void publish_receiver_member(cxx::FieldSymbol* field, Value value) override {
     auto* active = receiver(field);
     IREE_ASSERT(active && !active->storage);
-    values_[field] = value;
+    values_.set(field, value);
     receiver_owners_.at(field).complete = true;
   }
 
@@ -373,7 +377,7 @@ class Translator final : private Initialization::Evaluation {
         receiver_owners_.erase(found);
       }
       if (binding.previous_value) {
-        values_[binding.field] = *binding.previous_value;
+        values_.set(binding.field, *binding.previous_value);
       } else {
         values_.erase(binding.field);
       }
@@ -917,7 +921,7 @@ class Translator final : private Initialization::Evaluation {
                          parameter->type(), defined.source);
         }
       } else {
-        values_[parameter] = value;
+        values_.set(parameter, value);
       }
       ++parameter_index;
     }
@@ -1167,7 +1171,7 @@ class Translator final : private Initialization::Evaluation {
     }
     auto value =
         apply_constexpr_contract(expression(initializer), constexpr_contract);
-    values_[variable] = name(value, cxx::to_string(variable->name()));
+    values_.set(variable, name(value, cxx::to_string(variable->name())));
   }
 
   ConstexprContract initialize_condition(cxx::ExpressionAST* expression) {
@@ -1203,7 +1207,7 @@ class Translator final : private Initialization::Evaluation {
       storage_.store({found->second.view, std::nullopt}, value.ssa(),
                      decision->type(), owner);
     } else {
-      values_[decision] = name(value, cxx::to_string(decision->name()));
+      values_.set(decision, name(value, cxx::to_string(decision->name())));
     }
   }
 
@@ -1691,12 +1695,13 @@ class Translator final : private Initialization::Evaluation {
 
   void write(const ObjectLvalue& target, Value value, cxx::AST* owner) {
     if (auto* destination = std::get_if<Destination>(&target.location)) {
-      auto& binding = values_.at(destination->binding);
-      binding = name(destination->member
-                         ? value_arena_.replace(
-                               binding, destination->component_offset, value)
-                         : value,
-                     cxx::to_string(destination->binding->name()));
+      auto binding = values_.at(destination->binding);
+      values_.set(destination->binding,
+                  name(destination->member
+                           ? value_arena_.replace(
+                                 binding, destination->component_offset, value)
+                           : value,
+                       cxx::to_string(destination->binding->name())));
     } else if (auto* object =
                    std::get_if<StorageProjection>(&target.location)) {
       objects_.store(*object, value, target.type, owner);
@@ -1904,6 +1909,10 @@ class Translator final : private Initialization::Evaluation {
   struct ReferenceWriteback {
     // Once-evaluated lvalue receiving the mutable result.
     Lvalue target;
+    // Source value transported through the tied call operand.
+    Value source;
+    // Exact automatic owner slice replaced by the tied result.
+    ReferenceOrigin origin;
     // Admitted value representation transported through the call.
     const Partition* partition;
     // Unqualified source value type used to bind the tied result.
@@ -2055,9 +2064,15 @@ class Translator final : private Initialization::Evaluation {
       origins.push_back(*argument.origin);
     }
     if (argument.writeback_target) {
-      writebacks.push_back({std::move(*argument.writeback_target),
-                            argument.writeback_partition,
-                            argument.writeback_type, argument_offset});
+      IREE_ASSERT(argument.origin);
+      writebacks.push_back({
+          .target = std::move(*argument.writeback_target),
+          .source = argument.value,
+          .origin = *argument.origin,
+          .partition = argument.writeback_partition,
+          .value_type = argument.writeback_type,
+          .argument_offset = argument_offset,
+      });
     }
   }
 
@@ -2244,6 +2259,120 @@ class Translator final : private Initialization::Evaluation {
     } else if (receiver.target) {
       write(*receiver.target, value, owner);
     }
+  }
+
+  // Preserves source-level value copies before call results consume their tied
+  // operand identities. Only mutable value calls enter this path; ordinary
+  // calls retain their allocation-free argument emission.
+  void preserve_call_value_owners(
+      const std::optional<ReceiverArgument>& receiver,
+      std::span<const ReferenceWriteback> writebacks,
+      std::vector<loom_value_id_t>& arguments, cxx::AST* owner) {
+    const bool receiver_writeback = receiver &&
+                                    receiver->abi == ImplicitObjectABI::Value &&
+                                    !receiver->written_fields.empty();
+    if (!receiver_writeback && writebacks.empty()) {
+      return;
+    }
+
+    ValueDuplication duplication(unit_, diagnostics_, types_, value_arena_,
+                                 locations_, builder_);
+    ValueOwnership ownership(duplication);
+    std::vector<TiedValueConsumption> consumptions;
+    std::vector<std::optional<ReferenceOrigin>> consumption_origins;
+    consumptions.reserve(
+        (receiver_writeback ? receiver->written_fields.size() : 0) +
+        writebacks.size());
+    consumption_origins.reserve(consumptions.capacity());
+    if (receiver_writeback) {
+      const bool prvalue = !receiver->current && !receiver->target;
+      std::optional<ReferenceOrigin> receiver_origin;
+      if (!prvalue && !receiver->current) {
+        IREE_ASSERT_EQ(receiver->origins.size(), 1u);
+        receiver_origin = receiver->origins.front();
+      }
+      for (auto* field : receiver->written_fields) {
+        const auto& member = types_.member(field, owner);
+        consumptions.push_back({
+            .value = receiver->value->project(*member.partition,
+                                              member.component_offset),
+            .source_type = types_.unqualified_value(field->type()),
+            .argument_offset = member.component_offset,
+        });
+        if (prvalue) {
+          consumption_origins.push_back(std::nullopt);
+        } else if (receiver->current) {
+          consumption_origins.push_back(ReferenceOrigin{
+              field, 0, member.partition->component_count, true});
+        } else {
+          consumption_origins.push_back(
+              ReferenceOrigin{receiver_origin->binding,
+                              receiver_origin->begin + member.component_offset,
+                              receiver_origin->begin + member.component_offset +
+                                  member.partition->component_count,
+                              true});
+        }
+      }
+    }
+    for (const auto& writeback : writebacks) {
+      consumptions.push_back({
+          .value = writeback.source,
+          .source_type = writeback.value_type,
+          .argument_offset = writeback.argument_offset,
+      });
+      consumption_origins.push_back(writeback.origin);
+    }
+
+    std::unordered_map<cxx::Symbol*,
+                       std::unordered_map<loom_value_id_t, size_t>>
+        consumed_owner_counts;
+    for (size_t index = 0; index < consumptions.size(); ++index) {
+      ownership.add_owner(consumptions[index].value);
+      if (!consumption_origins[index]) {
+        continue;
+      }
+      auto origin = *consumption_origins[index];
+      auto components = consumptions[index].value.components();
+      IREE_ASSERT_EQ(origin.end - origin.begin, components.size());
+      for (auto component : components) {
+        ++consumed_owner_counts[origin.binding][component];
+      }
+    }
+
+    // Query only bindings carrying identities consumed by this call. Tied
+    // destination slices are replaced by results; another component or source
+    // binding carrying that identity remains an owner only if it is observed
+    // later in the source.
+    std::unordered_set<loom_value_id_t> queried_components;
+    for (const auto& consumption : consumptions) {
+      for (auto component : consumption.value.components()) {
+        if (!queried_components.insert(component).second) {
+          continue;
+        }
+        const auto* component_owners = values_.owners(component);
+        if (!component_owners) {
+          continue;
+        }
+        for (const auto& [binding, count] : *component_owners) {
+          if (!control_->value_has_later_lexical_use(binding, owner)) {
+            continue;
+          }
+          size_t consumed_count = 0;
+          if (auto consumed_binding = consumed_owner_counts.find(binding);
+              consumed_binding != consumed_owner_counts.end()) {
+            auto consumed_component = consumed_binding->second.find(component);
+            if (consumed_component != consumed_binding->second.end()) {
+              consumed_count = consumed_component->second;
+            }
+          }
+          if (count > consumed_count) {
+            ownership.add_owner_components({&component, 1});
+            break;
+          }
+        }
+      }
+    }
+    ownership.separate(consumptions, arguments, owner);
   }
 
   std::optional<Value> ordinary_call(cxx::CallExpressionAST* call,
@@ -2761,6 +2890,7 @@ class Translator final : private Initialization::Evaluation {
                      receiver->origins.end());
     }
     require_nonoverlapping_references(std::move(origins), call);
+    preserve_call_value_owners(receiver, writebacks, arguments, call);
 
     const bool returns_void =
         unit_.typeTraits().is_void(signature->returnType());
@@ -4912,8 +5042,8 @@ class Translator final : private Initialization::Evaluation {
               source_variable->explicitAlignment(), variable);
           auto spelling = cxx::to_string(variable->symbol->name());
           if (array) {
-            values_[variable->symbol] =
-                name(Value(allocation.pointer), spelling);
+            values_.set(variable->symbol,
+                        name(Value(allocation.pointer), spelling));
           } else {
             name(Value(allocation.pointer), spelling + "_storage");
             locals_[variable->symbol] = allocation;
@@ -5371,14 +5501,15 @@ class Translator final : private Initialization::Evaluation {
                           cxx::to_string(induction->name()));
     if (native_address) {
       std::array<loom_value_id_t, 1> components = {iteration};
-      values_[induction] = value_arena_.capture(
-          types_.partition(induction->type(), loop), components);
+      values_.set(induction,
+                  value_arena_.capture(
+                      types_.partition(induction->type(), loop), components));
     } else {
       loom_op_t* cast;
       check(loom_index_cast_build(&builder_, iteration, value_type(iteration),
                                   types_.get(induction->type(), loop), source,
                                   &cast));
-      values_[induction] = result(cast);
+      values_.set(induction, result(cast));
     }
     bind(written, body, 1);
     loop_body(loop->statement);
@@ -5443,8 +5574,8 @@ class Translator final : private Initialization::Evaluation {
             size_t index = 0) {
     for (auto* symbol : symbols) {
       const auto& partition = values_.at(symbol).partition();
-      values_[symbol] = name(region_value(region, index, partition),
-                             cxx::to_string(symbol->name()));
+      values_.set(symbol, name(region_value(region, index, partition),
+                               cxx::to_string(symbol->name())));
     }
   }
   void bind_values(const std::vector<cxx::Symbol*>& symbols,
@@ -5452,9 +5583,9 @@ class Translator final : private Initialization::Evaluation {
     for (auto* symbol : symbols) {
       const auto& partition = values_.at(symbol).partition();
       auto count = partition.component_count;
-      values_[symbol] =
-          name(value_arena_.capture(partition, {components, count}),
-               cxx::to_string(symbol->name()));
+      values_.set(symbol,
+                  name(value_arena_.capture(partition, {components, count}),
+                       cxx::to_string(symbol->name())));
       if (count) {
         components += count;
       }
@@ -5586,8 +5717,9 @@ class Translator final : private Initialization::Evaluation {
                     : Value(numeric_convert(result,
                                             source_value.converted->type,
                                             source_value.source->type, ast));
-            values_[source_value.binding] =
-                name(refined, cxx::to_string(source_value.binding->name()));
+            values_.set(
+                source_value.binding,
+                name(refined, cxx::to_string(source_value.binding->name())));
           }
         }
         return;
@@ -5752,7 +5884,7 @@ class Translator final : private Initialization::Evaluation {
   // execution regions and rejects construction-only memory queries there.
   size_t pipeline_strand_depth_ = 0;
   // Bound symbols, never identifier spellings, key source-to-SSA mappings.
-  std::unordered_map<cxx::Symbol*, Value> values_;
+  ValueBindings values_;
   // Storage-backed automatic objects retain one allocation across direct and
   // aliased accesses. They are not mutable SSA bindings at region edges.
   std::unordered_map<cxx::Symbol*, StorageAllocation> locals_;

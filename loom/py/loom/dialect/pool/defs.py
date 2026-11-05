@@ -28,6 +28,7 @@ from loom.dsl import (
     Reads,
     Result,
     Writes,
+    value_duplication_op,
 )
 
 # ============================================================================
@@ -199,10 +200,19 @@ pool_buffer = Op(
 # Registry: all pool ops in declaration order
 # ============================================================================
 
+pool_duplicate = value_duplication_op(
+    "pool.duplicate",
+    group=pool_ops,
+    carrier=POOL,
+    doc=("Create another local owner of a memory pool handle. The result refers to the same pool while retaining a distinct SSA ownership identity."),
+    examples=["%copy = pool.duplicate %source : pool"],
+)
+
 ALL_POOL_OPS: tuple[Op, ...] = (
     pool_load,
     pool_store,
     pool_pin,
     pool_unpin,
     pool_buffer,
+    pool_duplicate,
 )

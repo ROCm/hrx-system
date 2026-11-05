@@ -45,7 +45,8 @@ enum {
   LOOM_OP_INDEX_CTPOPI = LOOM_OP_KIND(LOOM_DIALECT_INDEX, 23),
   LOOM_OP_INDEX_CMP = LOOM_OP_KIND(LOOM_DIALECT_INDEX, 24),
   LOOM_OP_INDEX_CONSTEXPR = LOOM_OP_KIND(LOOM_DIALECT_INDEX, 25),
-  LOOM_OP_INDEX_COUNT_ = 26,
+  LOOM_OP_INDEX_DUPLICATE = LOOM_OP_KIND(LOOM_DIALECT_INDEX, 26),
+  LOOM_OP_INDEX_COUNT_ = 27,
 };
 
 // Address-domain comparison predicates.
@@ -549,6 +550,25 @@ iree_status_t loom_index_constexpr_build(
     loom_type_t result_type, loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_index_constexpr_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+
+// LOOM_OP_INDEX_DUPLICATE: Create another local owner of an index or offset value. The result preserves the address domain and facts while receiving a distinct SSA ownership identity.
+// %copy = index.duplicate %coordinate : index
+LOOM_DEFINE_ISA(loom_index_duplicate_isa, LOOM_OP_INDEX_DUPLICATE)
+LOOM_DEFINE_VARIADIC_OPERANDS(loom_index_duplicate_sources, 0)
+LOOM_DEFINE_VARIADIC_RESULTS(loom_index_duplicate_duplicates, 0)
+iree_status_t loom_index_duplicate_build(
+    loom_builder_t* builder,
+    const loom_value_id_t* sources,
+    iree_host_size_t sources_count,
+    const loom_type_t* result_types,
+    iree_host_size_t result_count,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_value_duplication_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,

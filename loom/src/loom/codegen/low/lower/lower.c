@@ -276,6 +276,39 @@ static iree_status_t loom_low_lower_bind_identity_results(
   return iree_ok_status();
 }
 
+static iree_status_t loom_low_lower_emit_value_duplication(
+    loom_low_lower_context_t* context, const loom_op_t* source_op) {
+  const loom_value_slice_t sources =
+      loom_value_duplication_sources(context->module, source_op);
+  const loom_value_slice_t duplicates =
+      loom_value_duplication_duplicates(context->module, source_op);
+  for (uint16_t i = 0; i < duplicates.count; ++i) {
+    // Type-only dependencies have no target-Low carrier. Their duplicated
+    // identities are consumed while source types are remapped.
+    if (!loom_low_lower_source_value_has_low_mapping(context,
+                                                     sources.values[i])) {
+      loom_low_lower_elide_value(context, duplicates.values[i]);
+      continue;
+    }
+    if (!loom_low_lower_source_value_storage_result_required(
+            context, duplicates.values[i])) {
+      loom_low_lower_elide_value(context, duplicates.values[i]);
+      continue;
+    }
+    const loom_value_id_t low_source =
+        loom_low_lower_lookup_value(context, sources.values[i]);
+    const loom_type_t low_type =
+        loom_low_lower_value_binding_type(context, duplicates.values[i]);
+    loom_op_t* low_copy_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_copy_build(
+        loom_low_lower_context_builder(context), low_source,
+        /*detached=*/false, low_type, source_op->location, &low_copy_op));
+    IREE_RETURN_IF_ERROR(loom_low_lower_bind_value(
+        context, duplicates.values[i], loom_low_copy_result(low_copy_op)));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_lower_emit_region_ops(
     loom_low_lower_context_t* context, loom_region_t* source_region,
     bool map_source_blocks);
@@ -564,6 +597,10 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_lower_structural_op(
     return loom_low_lower_bind_or_elide_alias(
         context, loom_op_const_operands(source_op)[0],
         loom_op_const_results(source_op)[0]);
+  }
+  if (loom_low_lower_source_value_storage_op_is_duplication(context, source_op,
+                                                            traits)) {
+    return loom_low_lower_emit_value_duplication(context, source_op);
   }
   if (loom_low_lower_source_op_is_callable_exit(context, source_op)) {
     const loom_value_id_t* values = loom_op_const_operands(source_op);

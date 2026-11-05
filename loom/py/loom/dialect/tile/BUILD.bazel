@@ -13,5 +13,9 @@ package(
 
 iree_py_library(
     name = "tile",
-    srcs = ["__init__.py"],
+    srcs = [
+        "__init__.py",
+        "defs.py",
+    ],
+    deps = ["//loom/py/loom:core"],
 )

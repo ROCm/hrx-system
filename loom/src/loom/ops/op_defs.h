@@ -253,6 +253,13 @@ enum loom_constraint_relation_e {
   // structural verification, before the ordinary relation interpreter.
   LOOM_RELATION_OPERAND_DICTIONARY,
 
+  // A value field contains the exact SSA-reference closure of its trailing
+  // carrier value. Values before the carrier match references embedded in the
+  // carrier type in structural order, including repeated references. The
+  // property slot stores the carrier's loom_type_constraint_t. Args: (value
+  // field). Used by ClosedValueTuple.
+  LOOM_RELATION_CLOSED_VALUE_TUPLE,
+
   LOOM_RELATION_COUNT_,
 };
 typedef uint8_t loom_constraint_relation_t;
@@ -1316,6 +1323,31 @@ static inline loom_value_slice_t loom_direct_branch_args(const loom_op_t* op) {
       .count = op->operand_count,
   };
 }
+
+//===----------------------------------------------------------------------===//
+// ValueDuplication interface
+//===----------------------------------------------------------------------===//
+
+// Returns true if |op| implements the generated ValueDuplication interface.
+// Generation proves that the complete operand and result lists are equally
+// sized positional tuples whose result types remap source-tuple references to
+// the corresponding result identities.
+bool loom_value_duplication_isa(const loom_module_t* module,
+                                const loom_op_t* op);
+
+// Returns the complete source tuple of a verified value-duplication op.
+loom_value_slice_t loom_value_duplication_sources(const loom_module_t* module,
+                                                  const loom_op_t* op);
+
+// Returns the complete result tuple of a verified value-duplication op.
+loom_value_slice_t loom_value_duplication_duplicates(
+    const loom_module_t* module, const loom_op_t* op);
+
+// Transfers each source fact tuple to its corresponding duplicate result.
+iree_status_t loom_value_duplication_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 
 //===----------------------------------------------------------------------===//
 // RegionBranch interface

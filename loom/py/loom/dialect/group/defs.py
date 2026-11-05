@@ -7,7 +7,16 @@
 """Communication-group operation definitions."""
 
 from loom.assembly import ARROW, COLON, Ref, ResultType, TypeOf
-from loom.dsl import GROUP, INDEX, Dialect, Op, Operand, Result, TypeDef
+from loom.dsl import (
+    GROUP,
+    INDEX,
+    Dialect,
+    Op,
+    Operand,
+    Result,
+    TypeDef,
+    value_duplication_op,
+)
 
 group_ops = Dialect(
     "group",
@@ -39,5 +48,13 @@ group_create = Op(
     examples=["%workers = group.create %worker_count : index -> group<[%worker_count]>"],
 )
 
+group_duplicate = value_duplication_op(
+    "group.duplicate",
+    group=group_ops,
+    carrier=GROUP,
+    doc=("Create another local owner of a communication group and its dependent dimensions. The duplicate names the same participant domain through a distinct SSA ownership identity."),
+    examples=["%copy_count, %copy = group.duplicate %count, %source : index, group<[%copy_count]>"],
+)
+
 ALL_GROUP_TYPES: tuple[TypeDef, ...] = ()
-ALL_GROUP_OPS: tuple[Op, ...] = (group_create,)
+ALL_GROUP_OPS: tuple[Op, ...] = (group_create, group_duplicate)

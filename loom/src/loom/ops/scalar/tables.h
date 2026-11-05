@@ -126,6 +126,7 @@ extern const loom_op_vtable_t loom_scalar_bitfield_extractu_vtable;
 extern const loom_op_vtable_t loom_scalar_bitfield_extracts_vtable;
 extern const loom_op_vtable_t loom_scalar_assume_vtable;
 extern const loom_op_vtable_t loom_scalar_constexpr_vtable;
+extern const loom_op_vtable_t loom_scalar_duplicate_vtable;
 
 #ifdef __cplusplus
 }  // extern "C"

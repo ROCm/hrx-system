@@ -13,10 +13,12 @@ from loom import ir
 from loom.builders import default_ops
 from loom.dsl import (
     REGISTER,
+    VIEW,
     BlockArgCount,
     BlockArgsMatchElementTypes,
     BlockArgsMatchTypes,
     BlockArgsSatisfy,
+    ClosedValueTuple,
     ConditionForwardedCountMatchesBlockArgs,
     ConditionForwardedTypesMatchBlockArgs,
     IterArgsMatchResults,
@@ -26,12 +28,29 @@ from loom.dsl import (
     YieldCountMatches,
     YieldTypesMatch,
 )
-from loom.ir import I32, RegisterType, ShapedType, StaticDim, TypeKind
+from loom.ir import (
+    ENCODING_LAYOUT_TYPE,
+    F32,
+    I32,
+    INDEX,
+    DynamicDim,
+    DynamicEncoding,
+    RegisterType,
+    ShapedType,
+    StaticDim,
+    TypeKind,
+)
 
 
 @dataclass(frozen=True)
 class _FakeValue:
     type: Any
+
+
+@dataclass(frozen=True)
+class _FakeIdentifiedValue:
+    type: Any
+    value_id: int
 
 
 @dataclass(frozen=True)
@@ -62,6 +81,24 @@ def test_same_encoding() -> None:
 
     assert constraint.check({"a": lhs, "b": same})[0]
     assert not constraint.check({"a": lhs, "b": other})[0]
+
+
+def test_closed_value_tuple_matches_exact_carrier_dependencies() -> None:
+    extent = _FakeIdentifiedValue(INDEX, 1)
+    layout = _FakeIdentifiedValue(ENCODING_LAYOUT_TYPE, 2)
+    carrier_type = ShapedType(
+        TypeKind.VIEW,
+        F32,
+        (DynamicDim(extent.value_id),),
+        DynamicEncoding(layout.value_id),
+    )
+    carrier = _FakeIdentifiedValue(carrier_type, 3)
+    constraint = ClosedValueTuple("values", VIEW)
+
+    assert constraint.check({"values": [extent, layout, carrier]})[0]
+    assert not constraint.check({"values": [extent, carrier]})[0]
+    assert not constraint.check({"values": [layout, extent, carrier]})[0]
+    assert not constraint.check({"values": [extent, extent, layout, carrier]})[0]
 
 
 def test_operand_dictionary_permutations() -> None:

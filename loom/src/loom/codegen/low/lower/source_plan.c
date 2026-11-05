@@ -183,6 +183,10 @@ static bool loom_low_lower_op_is_structural(
   if (loom_low_lower_source_value_storage_op_is_identity(context, op, traits)) {
     return true;
   }
+  if (loom_low_lower_source_value_storage_op_is_duplication(context, op,
+                                                            traits)) {
+    return true;
+  }
   if (is_callable_exit) {
     return true;
   }

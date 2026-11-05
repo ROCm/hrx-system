@@ -20,3 +20,39 @@ func.def @reject_move_source_reuse(%size: index) {
   test.resource.release %moved : pool
   func.return
 }
+
+// ====
+
+func.def @reject_extra_duplicate_dependency(%extra: f32, %value: f32) {
+  // ERROR@+2: STRUCTURE/065 {field_name="sources", carrier_constraint="integer or floating-point scalar"}
+  // ERROR@+1: STRUCTURE/065 {field_name="duplicates", carrier_constraint="integer or floating-point scalar"}
+  %extra_copy, %copy = scalar.duplicate %extra, %value : f32, f32
+  func.return
+}
+
+// ====
+
+func.def @reject_missing_duplicate_dependency(%m: index, %value: tensor<[%m]xf32>) {
+  // ERROR@+2: STRUCTURE/065 {field_name="sources", carrier_constraint="tensor"}
+  // ERROR@+1: STRUCTURE/065 {field_name="duplicates", carrier_constraint="tensor"}
+  %copy = tensor.duplicate %value : tensor<[%m]xf32>
+  func.return
+}
+
+// ====
+
+func.def @reject_reordered_duplicate_dependencies(%m: index, %n: index, %value: tile<[%m]x[%n]xf32>) {
+  // ERROR@+2: STRUCTURE/065 {field_name="sources", carrier_constraint="tile"}
+  // ERROR@+1: STRUCTURE/065 {field_name="duplicates", carrier_constraint="tile"}
+  %copy_n, %copy_m, %copy = tile.duplicate %n, %m, %value : index, index, tile<[%copy_m]x[%copy_n]xf32>
+  func.return
+}
+
+// ====
+
+func.def @reject_source_bound_duplicate_result(%m: index, %value: tensor<[%m]xf32>) {
+  // ERROR@+2: STRUCTURE/065 {field_name="duplicates", carrier_constraint="tensor"}
+  // ERROR@+1: TYPE/001
+  %copy_m, %copy = tensor.duplicate %m, %value : index, tensor<[%m]xf32>
+  func.return
+}

@@ -1028,5 +1028,39 @@ TEST(ControlFlowTest, IterationExitsStopAtTheirLoopAndExcludeUnreachablePaths) {
   }
 }
 
+TEST(ControlFlowTest, ValueUseAnalysisRetainsLaterLexicalUses) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    static void mutate(unsigned& value);
+    unsigned entry(unsigned value, unsigned count) {
+      mutate(value);
+      unsigned later = value;
+      mutate(value);
+      for (unsigned i = 0; i < count; ++i) {
+        later += value;
+        mutate(value);
+      }
+      return later;
+    }
+  )"),
+                IREE_SV("value_uses.cxx"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body,
+                       function->symbol);
+  auto calls = analysis.calls();
+  ASSERT_EQ(calls.size(), 3u);
+  auto* value = function->symbol->parameters()[0];
+
+  EXPECT_TRUE(analysis.value_has_later_lexical_use(value, calls[0].source));
+  EXPECT_TRUE(analysis.value_has_later_lexical_use(value, calls[1].source));
+  EXPECT_FALSE(analysis.value_has_later_lexical_use(value, calls[2].source));
+}
+
 }  // namespace
 }  // namespace loom::cxx_import

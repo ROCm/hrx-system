@@ -11,6 +11,7 @@ from loom.dialect.group.defs import (
     ALL_GROUP_OPS,
     ALL_GROUP_TYPES,
     group_create,
+    group_duplicate,
     group_ops,
 )
 
@@ -18,6 +19,7 @@ __all__ = [
     "group_ops",
     "group_type",
     "group_create",
+    "group_duplicate",
     "ALL_GROUP_OPS",
     "ALL_GROUP_TYPES",
 ]

@@ -24,7 +24,8 @@ enum {
   LOOM_OP_POOL_PIN = LOOM_OP_KIND(LOOM_DIALECT_POOL, 2),
   LOOM_OP_POOL_UNPIN = LOOM_OP_KIND(LOOM_DIALECT_POOL, 3),
   LOOM_OP_POOL_BUFFER = LOOM_OP_KIND(LOOM_DIALECT_POOL, 4),
-  LOOM_OP_POOL_COUNT_ = 5,
+  LOOM_OP_POOL_DUPLICATE = LOOM_OP_KIND(LOOM_DIALECT_POOL, 5),
+  LOOM_OP_POOL_COUNT_ = 6,
 };
 
 // LOOM_OP_POOL_LOAD: Read a page from the pool as a typed tile.
@@ -96,6 +97,25 @@ iree_status_t loom_pool_buffer_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
+
+// LOOM_OP_POOL_DUPLICATE: Create another local owner of a memory pool handle. The result refers to the same pool while retaining a distinct SSA ownership identity.
+// %copy = pool.duplicate %source : pool
+LOOM_DEFINE_ISA(loom_pool_duplicate_isa, LOOM_OP_POOL_DUPLICATE)
+LOOM_DEFINE_VARIADIC_OPERANDS(loom_pool_duplicate_sources, 0)
+LOOM_DEFINE_VARIADIC_RESULTS(loom_pool_duplicate_duplicates, 0)
+iree_status_t loom_pool_duplicate_build(
+    loom_builder_t* builder,
+    const loom_value_id_t* sources,
+    iree_host_size_t sources_count,
+    const loom_type_t* result_types,
+    iree_host_size_t result_count,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_value_duplication_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 
 // Returns the vtable array for the pool dialect.
 const loom_op_vtable_t* const* loom_pool_dialect_vtables(

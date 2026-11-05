@@ -83,6 +83,28 @@ def iter_value_bindings(
             pending.extend(binding_children(value))
 
 
+def iter_value_binding_occurrences(
+    value: Any,
+) -> Iterator[DynamicDim | DynamicEncoding | PredicateArg]:
+    """Visits every SSA binding occurrence in structural order.
+
+    Unlike :func:`iter_value_bindings`, this preserves repeated references and
+    does not collapse shared subgraphs. It mirrors ``loom_type_walk_value_refs``
+    for contracts whose positional representation must match the type's exact
+    SSA-reference sequence.
+    """
+    pending = [value]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, DynamicDim | DynamicEncoding):
+            yield value
+        elif isinstance(value, PredicateArg):
+            if value.tag == "value":
+                yield value
+        else:
+            pending.extend(reversed(tuple(binding_children(value))))
+
+
 def remap_value_bindings(
     roots: Iterable[Any], value_ids: Mapping[int, int]
 ) -> list[Any]:

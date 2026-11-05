@@ -27,7 +27,60 @@
 #include "loom/import/cxx/source/expressions.h"
 
 namespace loom::cxx_import {
+
+struct ControlFlow::ValueUseFacts {
+  // Final lexical source use for each automatic or current-field binding.
+  std::unordered_map<cxx::Symbol*, size_t> last_uses;
+};
+
 namespace {
+
+// Builds sparse future-use facts only for a function that reaches a mutable
+// tied call. The main control analysis stays unchanged for ordinary functions.
+class ValueUseAnalysis final : private cxx::ASTVisitor {
+ public:
+  ValueUseAnalysis(cxx::TranslationUnit& unit, std::span<cxx::AST* const> roots,
+                   std::unordered_map<cxx::Symbol*, size_t>& last_uses)
+      : unit_(unit), last_uses_(last_uses) {
+    for (auto* root : roots) {
+      accept(root);
+    }
+  }
+
+ private:
+  bool preVisit(cxx::AST* ast) override {
+    switch (ast->kind()) {
+      case cxx::ASTKind::ConstExpression:
+      case cxx::ASTKind::SizeofExpression:
+      case cxx::ASTKind::SizeofTypeExpression:
+      case cxx::ASTKind::AlignofTypeExpression:
+        return false;
+      default:
+        break;
+    }
+    if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(ast)) {
+      record(id->symbol, id);
+    } else if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(ast);
+               member && is_current_object(unit_, member->baseExpression)) {
+      record(member->symbol, member);
+    }
+    return true;
+  }
+
+  void record(cxx::Symbol* symbol, cxx::AST* source) {
+    if (!symbol) {
+      return;
+    }
+    auto position = source->firstSourceLocation().index();
+    auto [found, inserted] = last_uses_.try_emplace(symbol, position);
+    if (!inserted) {
+      found->second = std::max(found->second, size_t{position});
+    }
+  }
+
+  cxx::TranslationUnit& unit_;
+  std::unordered_map<cxx::Symbol*, size_t>& last_uses_;
+};
 
 bool operation_is(cxx::Symbol* symbol, std::string_view operation) {
   auto* binding = annotation(symbol, "op");
@@ -187,6 +240,39 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
     }
   }
   accept(body);
+}
+
+ControlFlow::~ControlFlow() = default;
+
+void ControlFlow::analyze_value_uses() const {
+  if (value_uses_) {
+    return;
+  }
+  value_uses_ = std::make_unique<ValueUseFacts>();
+  std::vector<cxx::AST*> roots;
+  IREE_ASSERT(function_);
+  auto* definition = function_->declaration();
+  IREE_ASSERT(definition);
+  auto* function_body = definition->functionBody;
+  if (function_->isConstructor() && cxx::isUserProvided(function_)) {
+    for (auto* initializer :
+         cxx::ListView{cxx::ctor_initializers(function_body)}) {
+      roots.push_back(initializer);
+    }
+  }
+  auto* body =
+      cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(function_body);
+  IREE_ASSERT(body);
+  roots.push_back(body->statement);
+  ValueUseAnalysis(unit_, roots, value_uses_->last_uses);
+}
+
+bool ControlFlow::value_has_later_lexical_use(cxx::Symbol* binding,
+                                              cxx::AST* owner) const {
+  analyze_value_uses();
+  auto found = value_uses_->last_uses.find(binding);
+  return found != value_uses_->last_uses.end() &&
+         found->second > owner->lastSourceLocation().index();
 }
 
 std::optional<Destination> ControlFlow::destination(

@@ -1076,6 +1076,9 @@ enum loom_op_vtable_flag_bits_e {
   // unconditional terminator with one successor and its complete operand list
   // is the positional successor payload.
   LOOM_OP_VTABLE_DIRECT_BRANCH = 1u << 14,
+  // The op implements the generated ValueDuplication interface: its complete
+  // operand tuple is duplicated positionally into its complete result tuple.
+  LOOM_OP_VTABLE_VALUE_DUPLICATION = 1u << 15,
 };
 typedef uint16_t loom_op_vtable_flags_t;
 

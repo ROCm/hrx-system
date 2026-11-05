@@ -4,12 +4,11 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Scalar analysis ops: value predicates and compile-time contracts.
+"""Scalar structural ops: ownership, predicates, and compile-time contracts.
 
-These ops preserve authored requirements on SSA values for analysis and
-specialization. Operations that reach code generation must explicitly define
-an executable identity contract; compile-time queries instead diagnose if
-specialization leaves them unresolved.
+These operations preserve authored requirements and ownership boundaries on
+SSA values. Executable structural operations define their lowering contract;
+compile-time queries instead diagnose if specialization leaves them unresolved.
 """
 
 from loom.assembly import COLON, PredicateList, Ref, Refs, TypeOf, TypesOf
@@ -25,13 +24,34 @@ from loom.dsl import (
     Result,
     SameType,
     VariadicValuesMatch,
+    value_duplication_op,
 )
 
 __all__ = [
     "scalar_assume",
     "scalar_constexpr",
+    "scalar_duplicate",
     "ALL_ANALYSIS_OPS",
 ]
+
+# ============================================================================
+# scalar.duplicate — distinct ownership identity
+# ============================================================================
+
+scalar_duplicate = value_duplication_op(
+    "scalar.duplicate",
+    group=scalar_ops,
+    carrier=PAYLOAD_SCALAR,
+    doc=(
+        "Create another local owner of a scalar value. The result has the "
+        "same logical value as its source and a distinct SSA "
+        "ownership identity. Allocation may coalesce non-overlapping source "
+        "and result storage; the operation does not promise disjoint storage."
+    ),
+    examples=[
+        "%copy = scalar.duplicate %value : i32",
+    ],
+)
 
 # ============================================================================
 # scalar.assume — predicate-constrained identity
@@ -88,4 +108,8 @@ scalar_constexpr = Op(
 # Registry
 # ============================================================================
 
-ALL_ANALYSIS_OPS: tuple[Op, ...] = (scalar_assume, scalar_constexpr)
+ALL_ANALYSIS_OPS: tuple[Op, ...] = (
+    scalar_assume,
+    scalar_constexpr,
+    scalar_duplicate,
+)

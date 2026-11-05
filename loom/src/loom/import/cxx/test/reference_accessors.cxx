@@ -42,6 +42,24 @@ static unsigned mutable_reference_result(unsigned value) {
   return increment_alias(value);
 }
 
+static unsigned stale_value_copy(unsigned value) {
+  const unsigned snapshot = value;
+  increment_alias(value);
+  return snapshot * 100u + value;
+}
+
+struct CopiedCounter {
+  unsigned value;
+  void bump() { ++value; }
+};
+
+static unsigned stale_receiver_copy(unsigned input) {
+  CopiedCounter counter{input};
+  const CopiedCounter snapshot = counter;
+  counter.bump();
+  return snapshot.value * 100u + counter.value;
+}
+
 static unsigned mixed_reference_result(bool condition, unsigned first,
                                        unsigned second) {
   return choose_alias(condition, first, second);
@@ -160,6 +178,8 @@ LOOM_CHECK_CASE(reference_accessors) {
   const auto local = local_alias_value(4u);
   const auto value_results = value_reference_results(true, 5u);
   const auto mutable_result = mutable_reference_result(5u);
+  const auto stale_value = stale_value_copy(5u);
+  const auto stale_receiver = stale_receiver_copy(5u);
   const auto mixed_first = mixed_reference_result(true, 7u, 11u);
   const auto mixed_second = mixed_reference_result(false, 7u, 11u);
   const auto storage = storage_alias(11u, 4u, 2u);
@@ -171,6 +191,8 @@ LOOM_CHECK_CASE(reference_accessors) {
   loom::check::expect_equal(local, 28u);
   loom::check::expect_equal(value_results, 40u);
   loom::check::expect_equal(mutable_result, 6u);
+  loom::check::expect_equal(stale_value, 506u);
+  loom::check::expect_equal(stale_receiver, 506u);
   loom::check::expect_equal(mixed_first, 7u);
   loom::check::expect_equal(mixed_second, 11u);
   loom::check::expect_equal(storage, 21u);

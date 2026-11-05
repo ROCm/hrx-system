@@ -90,6 +90,8 @@ DIALECT_REFERENCE_SPECS = (
     DialectReferenceSpec("command", "program"),
     DialectReferenceSpec("buffer", "program"),
     DialectReferenceSpec("view", "program"),
+    DialectReferenceSpec("tensor", "program"),
+    DialectReferenceSpec("tile", "program"),
     DialectReferenceSpec("vector", "program"),
     DialectReferenceSpec("index", "program"),
     DialectReferenceSpec("kernel", "program"),

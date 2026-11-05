@@ -84,6 +84,26 @@ func.def @assume_divisibility(%x: i64) -> (i64) {
 
 // ====
 
+// Value duplication forwards the complete source fact tuple without aliasing
+// the duplicate SSA ownership identity back to its source.
+func.def @duplicate_facts(%x: i32) -> (i64, i64, i64) {
+  %bounded = scalar.assume %x [range(%x, 16, 127), multiple_of(%x, 8)] : i32
+  %copy = scalar.duplicate %bounded : i32
+  %lo = test.fact_range_lo %copy : i32 -> i64
+  %hi = test.fact_range_hi %copy : i32 -> i64
+  %divisor = test.fact_divisor %copy : i32 -> i64
+  func.return %lo, %hi, %divisor : i64, i64, i64
+}
+// ----
+func.def @duplicate_facts(%x: i32) -> (i64, i64, i64) {
+  %lo = scalar.constant 16 : i64
+  %hi = scalar.constant 120 : i64
+  %divisor = scalar.constant 8 : i64
+  func.return %lo, %hi, %divisor : i64, i64, i64
+}
+
+// ====
+
 // scalar.assume consumes relational bounds from predicate values outside its
 // checked alias list, including relations where the external value is first.
 func.def @assume_relational_external_bounds(%value: i32, %upper0: i32, %lower0: i32) -> (i64, i64) {

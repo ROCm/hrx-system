@@ -331,6 +331,10 @@ CONSTRAINT_MAP: dict[str, tuple[str, str]] = {
         "LOOM_RELATION_VARIADIC_MATCH",
         "LOOM_PROPERTY_TYPE",
     ),
+    "ClosedValueTuple": (
+        "LOOM_RELATION_CLOSED_VALUE_TUPLE",
+        "$type_constraint_data",
+    ),
 }
 
 # Maps FieldKind to C field category value.

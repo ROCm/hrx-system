@@ -1059,6 +1059,26 @@ ERR_STRUCTURE_064 = ErrorDef(
     fix_hint="Choose an attribute value satisfying '{expected_constraint}'",
 )
 
+# ERR_STRUCTURE_065: Value tuple does not close over its carrier type.
+ERR_STRUCTURE_065 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=65,
+    severity=Severity.ERROR,
+    summary="Value tuple does not match its carrier dependencies.",
+    message=(
+        "value tuple '{field_name}' must contain exactly the SSA dependencies "
+        "referenced by its trailing {carrier_constraint} carrier"
+    ),
+    params=(
+        ErrorParam("field_name", ParamKind.STRING),
+        ErrorParam("carrier_constraint", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Place the carrier's dynamic dimensions and encoding references before "
+        "the carrier in structural order"
+    ),
+)
+
 ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_001,
     ERR_STRUCTURE_002,
@@ -1122,4 +1142,5 @@ ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_062,
     ERR_STRUCTURE_063,
     ERR_STRUCTURE_064,
+    ERR_STRUCTURE_065,
 )

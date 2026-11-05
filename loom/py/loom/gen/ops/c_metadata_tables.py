@@ -1279,6 +1279,8 @@ def generate_tables_c(
             vtable_flag_bits.append("LOOM_OP_VTABLE_HAS_SUCCESSOR_SELECTOR")
         if c_interfaces.op_implements_direct_branch(op):
             vtable_flag_bits.append("LOOM_OP_VTABLE_DIRECT_BRANCH")
+        if c_interfaces.op_implements_value_duplication(op):
+            vtable_flag_bits.append("LOOM_OP_VTABLE_VALUE_DUPLICATION")
         if any(attr.attr_type == ATTR_TYPE_PREDICATE_LIST for attr in non_flags):
             vtable_flag_bits.append("LOOM_OP_VTABLE_HAS_PREDICATE_LIST")
         if op.structural_materialization:

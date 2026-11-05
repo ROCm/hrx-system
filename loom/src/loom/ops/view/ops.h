@@ -32,7 +32,8 @@ enum {
   LOOM_OP_VIEW_ATOMIC_LOAD = LOOM_OP_KIND(LOOM_DIALECT_VIEW, 8),
   LOOM_OP_VIEW_ATOMIC_STORE = LOOM_OP_KIND(LOOM_DIALECT_VIEW, 9),
   LOOM_OP_VIEW_BITCAST = LOOM_OP_KIND(LOOM_DIALECT_VIEW, 10),
-  LOOM_OP_VIEW_COUNT_ = 11,
+  LOOM_OP_VIEW_DUPLICATE = LOOM_OP_KIND(LOOM_DIALECT_VIEW, 11),
+  LOOM_OP_VIEW_COUNT_ = 12,
 };
 
 // Intended future access kind for a prefetch hint.
@@ -432,6 +433,25 @@ iree_status_t loom_view_reinterpret_facts(
 iree_status_t loom_view_bitcast_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_VIEW_DUPLICATE: Create another local owner of a view and the dynamic dimensions and encoding referenced by its type. The duplicate addresses the same storage while retaining a distinct SSA ownership identity.
+// %copy = view.duplicate %source : view<4xf32>
+LOOM_DEFINE_ISA(loom_view_duplicate_isa, LOOM_OP_VIEW_DUPLICATE)
+LOOM_DEFINE_VARIADIC_OPERANDS(loom_view_duplicate_sources, 0)
+LOOM_DEFINE_VARIADIC_RESULTS(loom_view_duplicate_duplicates, 0)
+iree_status_t loom_view_duplicate_build(
+    loom_builder_t* builder,
+    const loom_value_id_t* sources,
+    iree_host_size_t sources_count,
+    const loom_type_t* result_types,
+    iree_host_size_t result_count,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_value_duplication_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 
 // Returns the vtable array for the view dialect.
 const loom_op_vtable_t* const* loom_view_dialect_vtables(

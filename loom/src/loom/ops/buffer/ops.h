@@ -37,7 +37,8 @@ enum {
   LOOM_OP_BUFFER_FENCE = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 13),
   LOOM_OP_BUFFER_CONSTANT = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 14),
   LOOM_OP_BUFFER_ALLOCA_INIT = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 15),
-  LOOM_OP_BUFFER_COUNT_ = 16,
+  LOOM_OP_BUFFER_DUPLICATE = LOOM_OP_KIND(LOOM_DIALECT_BUFFER, 16),
+  LOOM_OP_BUFFER_COUNT_ = 17,
 };
 
 // LOOM_OP_BUFFER_ALLOCA: Create a fixed-frame scratch buffer root in an allocatable memory space. Each execution produces a distinct storage identity; identical allocas must not be commoned. The byte length is the requested physical byte count for the execution. Targets requiring a static frame reserve its proven finite non-negative maximum. base_alignment is the minimum byte alignment of the root storage base. Target lowering determines which allocatable spaces are legal for the containing program kind. The execution frame owns the allocation; the result borrows that storage and has no explicit release obligation. An explicit pool selects the backing allocation resource; memory_space remains an access requirement that resource must satisfy. The pool is borrowed and does not extend the allocation lifetime. Omitting it uses the containing execution's allocation resource for that space, which must be unambiguous before materialization. Lowering cannot replace an explicit pool with an ambient allocation resource.
@@ -382,6 +383,25 @@ iree_status_t loom_buffer_alloca_init_facts(
 iree_status_t loom_buffer_alloca_init_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_BUFFER_DUPLICATE: Create another local owner of a buffer root. The duplicate identifies the same opaque storage and may lower to the same physical carrier, but remains a distinct SSA ownership identity.
+// %copy = buffer.duplicate %source : buffer
+LOOM_DEFINE_ISA(loom_buffer_duplicate_isa, LOOM_OP_BUFFER_DUPLICATE)
+LOOM_DEFINE_VARIADIC_OPERANDS(loom_buffer_duplicate_sources, 0)
+LOOM_DEFINE_VARIADIC_RESULTS(loom_buffer_duplicate_duplicates, 0)
+iree_status_t loom_buffer_duplicate_build(
+    loom_builder_t* builder,
+    const loom_value_id_t* sources,
+    iree_host_size_t sources_count,
+    const loom_type_t* result_types,
+    iree_host_size_t result_count,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_value_duplication_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 
 // Returns the vtable array for the buffer dialect.
 const loom_op_vtable_t* const* loom_buffer_dialect_vtables(

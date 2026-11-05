@@ -52,6 +52,15 @@ bool loom_low_lower_source_value_storage_op_is_identity(
                  .case_count == 0;
 }
 
+bool loom_low_lower_source_value_storage_op_is_duplication(
+    const loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_trait_flags_t traits) {
+  return loom_traits_have_storage_relation(traits) &&
+         loom_value_duplication_isa(context->module, source_op) &&
+         !loom_low_lower_source_value_storage_op_requires_emission(source_op,
+                                                                   traits);
+}
+
 static void loom_low_lower_mark_value_storage_required(
     loom_low_lower_context_t* context, loom_value_id_t source_value_id) {
   const loom_low_lower_value_flags_t required_flags =
@@ -100,6 +109,11 @@ static void loom_low_lower_mark_value_storage_required(
       IREE_ASSERT_EQ(result_ordinal, 0);
       IREE_ASSERT(defining_op->operand_count >= 1);
       source_value_id = loom_op_const_operands(defining_op)[0];
+      continue;
+    }
+    if (loom_low_lower_source_value_storage_op_is_duplication(
+            context, defining_op, traits)) {
+      source_value_id = loom_op_const_operands(defining_op)[result_ordinal];
       continue;
     }
     if (loom_buffer_assume_same_root_isa(defining_op)) {
@@ -618,6 +632,8 @@ void loom_low_lower_source_value_storage_mark_structural_demands(
     loom_trait_flags_t traits) {
   if (loom_traits_are_fact_identity(traits) ||
       loom_traits_are_value_alias(traits) ||
+      loom_low_lower_source_value_storage_op_is_duplication(context, source_op,
+                                                            traits) ||
       loom_buffer_assume_same_root_isa(source_op)) {
     const loom_value_id_t* results = loom_op_const_results(source_op);
     for (uint16_t i = 0; i < source_op->result_count; ++i) {
