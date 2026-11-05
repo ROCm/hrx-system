@@ -21,6 +21,7 @@ loom_check_test_suite(
         "collective_float_facts.loom-test",
         "dce.loom-test",
         "facts.loom-test",
+        "launch_dependent_types.loom-test",
         "roundtrip.loom-test",
         "subgroup_facts.loom-test",
         "verify.loom-test",

@@ -229,6 +229,9 @@ iree_status_t loom_command_launch_verify(const loom_module_t* module,
       .source_values = argument_ids,
       .target_values = loom_op_const_operands(op),
       .count = argument_count,
+      .flags = argument_count > 2
+                   ? LOOM_TYPE_VALUE_REMAP_FLAG_SOURCE_DEFINITION_SLICE
+                   : 0,
   };
   for (uint16_t i = 0; i < argument_count; ++i) {
     const loom_type_t actual_type =
