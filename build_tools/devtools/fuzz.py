@@ -13,7 +13,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
 FUZZ_CACHE_DIR_ENV = "IREE_FUZZ_CACHE"
 FUZZ_CACHE_DIR_NAME = "iree-fuzz-cache"
@@ -64,17 +64,24 @@ def bazel_fuzz_target_shard(target: str, shard_count: int) -> int:
 
 
 def bazel_fuzz_campaign_result_path(
-    target_pattern: str, shard_index: int, shard_count: int
+    targets: Sequence[str], shard_index: int, shard_count: int
 ) -> Path:
-    readable_pattern = (
-        target_pattern.removeprefix("//")
-        .replace("/...", "-all")
-        .replace("...", "all")
-        .replace(":", "-")
-        .replace("/", "-")
-    )
-    pattern_digest = hashlib.sha256(target_pattern.encode("utf-8")).hexdigest()[:8]
-    campaign_name = f"{sanitize_path_part(readable_pattern)}-{pattern_digest}"
+    canonical_targets = tuple(sorted(targets))
+    if len(canonical_targets) == 1:
+        readable_selection = (
+            canonical_targets[0]
+            .removeprefix("//")
+            .replace("/...", "-all")
+            .replace("...", "all")
+            .replace(":", "-")
+            .replace("/", "-")
+        )
+    else:
+        readable_selection = f"target-set-{len(canonical_targets)}"
+    selection_digest = hashlib.sha256(
+        "\0".join(canonical_targets).encode("utf-8")
+    ).hexdigest()[:8]
+    campaign_name = f"{sanitize_path_part(readable_selection)}-{selection_digest}"
     return (
         default_fuzz_cache_dir()
         / "campaigns"

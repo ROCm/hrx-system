@@ -39,7 +39,7 @@ class BazelTest(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(command.target, "//...")
+        self.assertEqual(command.targets, ["//..."])
         self.assertEqual(command.worker_count, 4)
         self.assertEqual(command.shard_index, 1)
         self.assertEqual(command.shard_count, 3)
@@ -49,6 +49,21 @@ class BazelTest(unittest.TestCase):
             [Path("local-experiments"), Path("vendor/workspaces")],
         )
         self.assertEqual(command.bazel_args, ["--config=asan"])
+        self.assertEqual(command.program_args, ["-max_total_time=60"])
+
+    def test_bazel_fuzz_parses_exact_target_set(self):
+        command = bazel_dev.parse_bazel_fuzz_args(
+            [
+                "--workers=2",
+                "//z:decoder_fuzz",
+                "//a:parser_fuzz",
+                "--",
+                "-max_total_time=60",
+            ]
+        )
+
+        self.assertEqual(command.targets, ["//a:parser_fuzz", "//z:decoder_fuzz"])
+        self.assertEqual(command.worker_count, 2)
         self.assertEqual(command.program_args, ["-max_total_time=60"])
 
     def test_bazel_fuzz_parses_compile_only(self):
@@ -71,6 +86,8 @@ class BazelTest(unittest.TestCase):
             ["--ignore-directory=/tmp", "//..."],
             ["--ignore-directory=../outside", "//..."],
             ["--ignore-directory=local-experiments", "//pkg:one_fuzz"],
+            ["//pkg:one_fuzz", "//pkg:one_fuzz"],
+            ["//pkg/...", "//other:one_fuzz"],
             ["--compile-only", "--workers=2", "//..."],
             ["--compile-only", "--result=result.json", "//..."],
             ["--compile-only", "//...", "--", "-runs=1"],
@@ -1202,23 +1219,13 @@ class BazelTest(unittest.TestCase):
                 step = bazel_dev.BazelFuzzStep(
                     "bazel",
                     bazel_dev.BazelFuzzCommand(
-                        target=launch.target,
+                        targets=[launch.target],
                         result_path=root / "result.json",
                     ),
                 )
-                with (
-                    mock.patch.object(
-                        bazel_dev.BazelFuzzStep,
-                        "generate_fuzzer_launch",
-                        return_value=(0, launch),
-                    ),
-                    mock.patch.object(
-                        bazel_dev,
-                        "prepare_bazel_process",
-                        return_value=(0, process_launch),
-                    ),
-                ):
-                    self.assertEqual(step.run(), exit_code)
+                self.assertEqual(
+                    step.run_fuzzer_processes([process_launch], []), exit_code
+                )
                 child = json.loads(output.read_text(encoding="utf-8"))
                 self.assertNotEqual(child["pid"], os.getpid())
                 self.assertEqual(Path(child["cwd"]), root)
@@ -1252,25 +1259,15 @@ class BazelTest(unittest.TestCase):
             step = bazel_dev.BazelFuzzStep(
                 "bazel",
                 bazel_dev.BazelFuzzCommand(
-                    target=launch.target,
+                    targets=[launch.target],
                     result_path=root / "result.json",
                 ),
             )
             handlers = {s: signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM)}
             with (
-                mock.patch.object(
-                    bazel_dev.BazelFuzzStep,
-                    "generate_fuzzer_launch",
-                    return_value=(0, launch),
-                ),
-                mock.patch.object(
-                    bazel_dev,
-                    "prepare_bazel_process",
-                    return_value=(0, process_launch),
-                ),
                 contextlib.redirect_stderr(io.StringIO()) as stderr,
             ):
-                self.assertEqual(step.run(), 127)
+                self.assertEqual(step.run_fuzzer_processes([process_launch], []), 127)
             self.assertIn("failed to start fuzzer", stderr.getvalue())
             self.assertFalse(script.exists())
             self.assertEqual({s: signal.getsignal(s) for s in handlers}, handlers)
@@ -1308,7 +1305,7 @@ class BazelTest(unittest.TestCase):
                     process.send_signal.assert_called_once_with(signum)
                 self.assertEqual({s: signal.getsignal(s) for s in handlers}, handlers)
 
-    def test_bazel_fuzz_builds_compatible_targets_before_launching(self):
+    def test_bazel_fuzz_exact_target_set_builds_before_launching(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
             temporary_path = Path(temporary_dir)
             targets = ["//a:a_fuzz", "//z:z_fuzz"]
@@ -1338,12 +1335,11 @@ class BazelTest(unittest.TestCase):
                 for index, target in enumerate(targets)
             }
             command = bazel_dev.BazelFuzzCommand(
-                target="//...",
+                targets=targets,
                 bazel_args=["--config=asan"],
                 program_args=["-runs=10"],
                 worker_count=2,
                 result_path=temporary_path / "result.json",
-                ignored_directories=[Path("local-experiments")],
             )
             step = bazel_dev.BazelFuzzStep("bazel", command)
             events = []
@@ -1399,29 +1395,7 @@ class BazelTest(unittest.TestCase):
                     ),
                 )
 
-            discovered = subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout=(
-                    "//z:z_fuzz\n//ignored:library\n//disabled:disabled_fuzz\n"
-                    "//a:a_fuzz\n"
-                ),
-                stderr="",
-            )
             with (
-                mock.patch.object(
-                    bazel_dev,
-                    "run_captured",
-                    return_value=discovered,
-                ) as query,
-                mock.patch.object(
-                    bazel_dev,
-                    "bazel_packages_under_directories",
-                    return_value=[
-                        "local-experiments/first",
-                        "local-experiments/second",
-                    ],
-                ),
                 mock.patch.object(bazel_dev, "run_quietly", side_effect=build),
                 mock.patch.object(
                     bazel_dev,
@@ -1450,24 +1424,13 @@ class BazelTest(unittest.TestCase):
                 result = step.run(verbose=True)
 
             self.assertEqual(result, 23)
-            query.assert_called_once_with(
-                [
-                    "bazel",
-                    "query",
-                    "--deleted_packages=local-experiments/first",
-                    "--deleted_packages=local-experiments/second",
-                    "//...",
-                ],
-                cwd=bazel_dev.REPO_ROOT,
-                env=None,
-            )
             self.assertEqual(
                 events[0],
                 (
                     "metadata",
-                    ["//a:a_fuzz", "//disabled:disabled_fuzz", "//z:z_fuzz"],
+                    targets,
                     ["--config=fuzzer", "--config=asan"],
-                    True,
+                    False,
                 ),
             )
             self.assertEqual(events[1][0], "build")
@@ -1502,14 +1465,18 @@ class BazelTest(unittest.TestCase):
             campaign = json.loads(
                 (temporary_path / "result.json").read_text(encoding="utf-8")
             )
+            self.assertEqual(campaign["incompatible_targets"], [])
+            self.assertEqual(campaign["format"], "iree.fuzz.campaign.v1")
+            self.assertEqual(campaign["target_patterns"], targets)
             self.assertEqual(
-                campaign["incompatible_targets"], ["//disabled:disabled_fuzz"]
+                [result["label"] for result in campaign["targets"]], targets
             )
 
     def test_bazel_fuzz_compile_only_builds_compatible_targets(self):
         command = bazel_dev.BazelFuzzCommand(
-            target="//...",
+            targets=["//..."],
             bazel_args=["--keep_going"],
+            ignored_directories=[Path("local-experiments")],
             compile_only=True,
         )
         step = bazel_dev.BazelFuzzStep("bazel", command)
@@ -1529,6 +1496,14 @@ class BazelTest(unittest.TestCase):
             ) as query,
             mock.patch.object(
                 bazel_dev,
+                "bazel_packages_under_directories",
+                return_value=[
+                    "local-experiments/first",
+                    "local-experiments/second",
+                ],
+            ),
+            mock.patch.object(
+                bazel_dev,
                 "resolve_bazel_launch_metadata_for_targets",
                 return_value=(0, metadata),
             ) as resolve_metadata,
@@ -1541,7 +1516,15 @@ class BazelTest(unittest.TestCase):
             self.assertEqual(step.run(), 0)
 
         query.assert_called_once_with(
-            ["bazel", "query", "//..."], cwd=bazel_dev.REPO_ROOT, env=None
+            [
+                "bazel",
+                "query",
+                "--deleted_packages=local-experiments/first",
+                "--deleted_packages=local-experiments/second",
+                "//...",
+            ],
+            cwd=bazel_dev.REPO_ROOT,
+            env=None,
         )
         resolve_metadata.assert_called_once_with(
             bazel="bazel",
@@ -1567,11 +1550,11 @@ class BazelTest(unittest.TestCase):
         generate_fuzzer_launch.assert_not_called()
         run_fuzzers.assert_not_called()
 
-    def test_bazel_fuzz_compile_only_builds_exact_target(self):
+    def test_bazel_fuzz_compile_only_builds_exact_target_set(self):
         step = bazel_dev.BazelFuzzStep(
             "bazel",
             bazel_dev.BazelFuzzCommand(
-                target="//pkg:parser_fuzz",
+                targets=["//pkg:decoder_fuzz", "//pkg:parser_fuzz"],
                 compile_only=True,
             ),
         )
@@ -1579,7 +1562,13 @@ class BazelTest(unittest.TestCase):
             self.assertEqual(step.run(), 0)
 
         build.assert_called_once_with(
-            ["bazel", "build", "--config=asan", "//pkg:parser_fuzz"],
+            [
+                "bazel",
+                "build",
+                "--config=asan",
+                "//pkg:decoder_fuzz",
+                "//pkg:parser_fuzz",
+            ],
             cwd=bazel_dev.REPO_ROOT,
             env=None,
             verbose=False,

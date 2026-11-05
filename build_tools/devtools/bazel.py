@@ -112,7 +112,10 @@ class BazelRunCommand(BazelTargetCommand):
 
 
 @dataclass(frozen=True)
-class BazelFuzzCommand(BazelTargetCommand):
+class BazelFuzzCommand:
+    targets: list[str]
+    bazel_args: list[str] = field(default_factory=list)
+    program_args: list[str] = field(default_factory=list)
     worker_count: int = 1
     shard_index: int = 0
     shard_count: int = 1
@@ -309,7 +312,7 @@ def bazel_packages_under_directories(
 
 def parse_bazel_fuzz_args(arguments: list[str]) -> BazelFuzzCommand:
     tool_args, fuzzer_args = split_program_args(arguments)
-    target = ""
+    targets = []
     bazel_args = []
     worker_count = 1
     shard_index = 0
@@ -337,13 +340,18 @@ def parse_bazel_fuzz_args(arguments: list[str]) -> BazelFuzzCommand:
             )
         elif arg.startswith("-"):
             bazel_args.append(arg)
-        elif not target:
-            target = arg
         else:
-            bazel_args.append(arg)
-    if not target:
-        raise ValueError("Target is required for bazel fuzz")
-    if ignored_directories and "..." not in target:
+            targets.append(arg)
+    if not targets:
+        raise ValueError("At least one target is required for bazel fuzz")
+    if len(set(targets)) != len(targets):
+        raise ValueError("Fuzz targets must be unique")
+    recursive_targets = [target for target in targets if "..." in target]
+    if recursive_targets and len(targets) != 1:
+        raise ValueError(
+            "A recursive fuzz target pattern cannot be combined with other targets"
+        )
+    if ignored_directories and not recursive_targets:
         raise ValueError("--ignore-directory requires a recursive target pattern")
     if compile_only and worker_count != 1:
         raise ValueError("--workers cannot be used with --compile-only")
@@ -352,7 +360,7 @@ def parse_bazel_fuzz_args(arguments: list[str]) -> BazelFuzzCommand:
     if compile_only and fuzzer_args:
         raise ValueError("fuzzer arguments cannot be used with --compile-only")
     return BazelFuzzCommand(
-        target=target,
+        targets=sorted(targets),
         bazel_args=bazel_args,
         program_args=fuzzer_args,
         worker_count=worker_count,
@@ -1430,8 +1438,8 @@ def write_fuzz_campaign_result(
             }
         )
     payload = {
-        "format": "iree.fuzz.campaign.v0",
-        "target_pattern": command.target,
+        "format": "iree.fuzz.campaign.v1",
+        "target_patterns": command.targets,
         "shard": {"index": command.shard_index, "count": command.shard_count},
         "worker_count": command.worker_count,
         "bazel_args": command.bazel_args,
@@ -1574,87 +1582,54 @@ class BazelFuzzStep:
         config = "asan" if self.command.compile_only else "fuzzer"
         return [f"--config={config}", *self.command.bazel_args]
 
+    @property
+    def recursive_pattern(self) -> str | None:
+        if len(self.command.targets) == 1 and "..." in self.command.targets[0]:
+            return self.command.targets[0]
+        return None
+
     def describe(self) -> str:
         lines = [
-            f"# bazel fuzz {self.command.target}",
+            "# bazel fuzz " + " ".join(self.command.targets),
             f"# select stable shard {self.command.shard_index}/{self.command.shard_count}",
         ]
-        if "..." in self.command.target:
+        if self.recursive_pattern is not None:
             query_args = []
             if self.command.ignored_directories:
                 query_args.append("--deleted_packages=<ignored local packages>")
             lines.append(
-                quote_command([self.bazel, "query", *query_args, self.command.target])
-            )
-            lines.append(
-                quote_command([self.bazel, "build", *self.bazel_args, "<fuzz targets>"])
-            )
-            if self.command.compile_only:
-                return "\n".join(lines)
-            lines.append("# generate one canonical Bazel launch script per fuzzer")
-            lines.append(
-                f"run at most {self.command.worker_count} launch scripts concurrently "
-                "without the Bazel lock"
-            )
-        else:
-            if self.command.compile_only:
-                lines.append(
-                    quote_command(
-                        [
-                            self.bazel,
-                            "build",
-                            *self.bazel_args,
-                            self.command.target,
-                        ]
-                    )
-                )
-                return "\n".join(lines)
-            lines.append("# build and generate canonical Bazel launch script")
-            lines.append(
                 quote_command(
-                    [
-                        self.bazel,
-                        "run",
-                        *self.bazel_args,
-                        "--script_path=<launch script>",
-                        "--norun_in_cwd",
-                        "--run_under=<host Python launcher>",
-                        self.command.target,
-                        "--",
-                        "<corpus>",
-                        "-artifact_prefix=<artifacts>/",
-                        *self.command.program_args,
-                    ]
+                    [self.bazel, "query", *query_args, self.recursive_pattern]
                 )
             )
-            lines.append("run " + quote_command(["<Bazel launch script>"]))
+            selected_targets = ["<fuzz targets>"]
+        else:
+            selected_targets = self.command.targets
+        lines.append(
+            quote_command([self.bazel, "build", *self.bazel_args, *selected_targets])
+        )
+        if self.command.compile_only:
+            return "\n".join(lines)
+        lines.append("# generate one canonical Bazel launch script per fuzzer")
+        lines.append(
+            f"run at most {self.command.worker_count} launch scripts concurrently "
+            "without the Bazel lock"
+        )
         return "\n".join(lines)
 
     def run(self, verbose: bool = False) -> int:
-        if "..." in self.command.target:
-            return self.run_target_pattern(verbose=verbose)
-        if (
-            fuzz.bazel_fuzz_target_shard(self.command.target, self.command.shard_count)
-            != self.command.shard_index
-        ):
+        if self.recursive_pattern is not None:
+            return self.run_target_pattern(self.recursive_pattern, verbose=verbose)
+        targets = self.select_shard(self.command.targets)
+        if not targets:
             if self.command.compile_only:
                 return 0
             return self.run_fuzzer_processes([], [])
         if self.command.compile_only:
-            return run_quietly(
-                [
-                    self.bazel,
-                    "build",
-                    *self.bazel_args,
-                    self.command.target,
-                ],
-                cwd=REPO_ROOT,
-                env=self.env,
-                verbose=verbose,
-            )
-        return self.run_target(self.command.target, verbose=verbose)
+            return self.build_targets(targets, verbose=verbose)
+        return self.run_targets(targets, verbose=verbose, skip_incompatible=False)
 
-    def run_target_pattern(self, *, verbose: bool) -> int:
+    def run_target_pattern(self, target_pattern: str, *, verbose: bool) -> int:
         try:
             ignored_packages = bazel_packages_under_directories(
                 REPO_ROOT, self.command.ignored_directories
@@ -1664,7 +1639,7 @@ class BazelFuzzStep:
             return 1
         query_args = [f"--deleted_packages={package}" for package in ignored_packages]
         discovered = run_captured(
-            [self.bazel, "query", *query_args, self.command.target],
+            [self.bazel, "query", *query_args, target_pattern],
             cwd=REPO_ROOT,
             env=self.env,
         )
@@ -1678,16 +1653,11 @@ class BazelFuzzStep:
         )
         if not discovered_targets:
             print(
-                f"dev.py: no fuzz targets found under {self.command.target}",
+                f"dev.py: no fuzz targets found under {target_pattern}",
                 file=sys.stderr,
             )
             return 1
-        targets = [
-            target
-            for target in discovered_targets
-            if fuzz.bazel_fuzz_target_shard(target, self.command.shard_count)
-            == self.command.shard_index
-        ]
+        targets = self.select_shard(discovered_targets)
         if self.command.shard_count > 1:
             print(
                 f"dev.py: fuzz shard {self.command.shard_index}/"
@@ -1698,13 +1668,30 @@ class BazelFuzzStep:
             if self.command.compile_only:
                 return 0
             return self.run_fuzzer_processes([], [])
+        return self.run_targets(targets, verbose=verbose, skip_incompatible=True)
+
+    def select_shard(self, targets: list[str]) -> list[str]:
+        return [
+            target
+            for target in targets
+            if fuzz.bazel_fuzz_target_shard(target, self.command.shard_count)
+            == self.command.shard_index
+        ]
+
+    def run_targets(
+        self,
+        targets: list[str],
+        *,
+        verbose: bool,
+        skip_incompatible: bool,
+    ) -> int:
         metadata_result, metadata_by_target = resolve_bazel_launch_metadata_for_targets(
             bazel=self.bazel,
             targets=targets,
             bazel_args=self.bazel_args,
             cwd=REPO_ROOT,
             env=self.env,
-            skip_incompatible=True,
+            skip_incompatible=skip_incompatible,
         )
         if metadata_result != 0 or metadata_by_target is None:
             return metadata_result
@@ -1721,16 +1708,10 @@ class BazelFuzzStep:
             if self.command.compile_only:
                 return 0
             return self.run_fuzzer_processes([], incompatible_targets)
-        build_result = run_quietly(
-            [self.bazel, "build", *self.bazel_args, *targets],
-            cwd=REPO_ROOT,
-            env=self.env,
-            verbose=verbose,
-        )
+        build_result = self.build_targets(targets, verbose=verbose)
         if build_result != 0:
             return build_result
         if self.command.compile_only:
-            print(f"dev.py: built {len(targets)} compatible fuzz target(s)")
             return 0
         fuzzer_launches = []
         for target in targets:
@@ -1757,17 +1738,16 @@ class BazelFuzzStep:
             fuzzer_processes.append(process_launch)
         return self.run_fuzzer_processes(fuzzer_processes, incompatible_targets)
 
-    def run_target(self, target: str, *, verbose: bool) -> int:
-        launch_result, launch = self.generate_fuzzer_launch(
-            target,
+    def build_targets(self, targets: list[str], *, verbose: bool) -> int:
+        build_result = run_quietly(
+            [self.bazel, "build", *self.bazel_args, *targets],
+            cwd=REPO_ROOT,
+            env=self.env,
             verbose=verbose,
         )
-        if launch_result != 0 or launch is None:
-            return launch_result
-        process_result, process_launch = prepare_bazel_process(launch, env=self.env)
-        if process_result != 0 or process_launch is None:
-            return process_result
-        return self.run_fuzzer_processes([process_launch], [])
+        if build_result == 0 and self.command.compile_only:
+            print(f"dev.py: built {len(targets)} fuzz target(s)")
+        return build_result
 
     def run_fuzzer_processes(
         self, processes: list[BazelProcess], incompatible_targets: list[str]
@@ -1776,7 +1756,7 @@ class BazelFuzzStep:
         result_path = self.command.result_path
         if result_path is None:
             result_path = fuzz.bazel_fuzz_campaign_result_path(
-                self.command.target,
+                self.command.targets,
                 self.command.shard_index,
                 self.command.shard_count,
             )
