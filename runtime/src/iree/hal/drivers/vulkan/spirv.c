@@ -1073,8 +1073,8 @@ iree_status_t iree_hal_vulkan_spirv_parse_bda_dispatch_metadata(
     const uint32_t* spirv_words, iree_host_size_t spirv_word_count,
     iree_host_size_t entry_point_count,
     const iree_hal_vulkan_spirv_compute_entry_point_t* entry_points,
-    iree_hal_vulkan_spirv_bda_dispatch_metadata_t* out_metadata,
-    iree_allocator_t host_allocator) {
+    iree_allocator_t host_allocator,
+    iree_hal_vulkan_spirv_bda_dispatch_metadata_t* out_metadata) {
   for (iree_host_size_t i = 0; i < entry_point_count; ++i) {
     iree_hal_vulkan_spirv_bda_dispatch_metadata_initialize(&out_metadata[i]);
   }

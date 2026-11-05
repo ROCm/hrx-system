@@ -1167,8 +1167,8 @@ static iree_status_t iree_hal_cmd_execute_dispatch_tiles_profiled(
 static iree_host_size_t iree_hal_cmd_block_processor_profile_snapshot_region(
     iree_hal_cmd_block_processor_context_t* context,
     const iree_hal_cmd_barrier_t* barrier, void** binding_ptrs,
-    iree_hal_task_profile_host_execution_event_info_t* out_events,
-    iree_host_size_t event_capacity) {
+    iree_host_size_t event_capacity,
+    iree_hal_task_profile_host_execution_event_info_t* out_events) {
   if (!context->profile.dispatches ||
       !iree_hal_task_profile_recorder_is_enabled(
           context->profile.recorder,
@@ -2274,8 +2274,8 @@ static void iree_hal_cmd_block_processor_handle_region_completion(
         (iree_hal_task_profile_host_execution_event_info_t*)iree_alloca(
             profile_event_capacity * sizeof(*profile_events));
     profile_event_count = iree_hal_cmd_block_processor_profile_snapshot_region(
-        context, completed_barrier, binding_ptrs, profile_events,
-        profile_event_capacity);
+        context, completed_barrier, binding_ptrs, profile_event_capacity,
+        profile_events);
   }
 
   // Find the next non-empty region using the summary table. Indirect dispatch
@@ -2759,11 +2759,11 @@ static void iree_hal_cmd_block_processor_setup_first_block(
 }
 
 void iree_hal_cmd_block_processor_context_initialize(
-    iree_hal_cmd_block_processor_context_t* out_context,
     const iree_hal_cmd_block_recording_t* recording,
     const iree_hal_cmd_binding_entry_t* binding_table,
     iree_host_size_t binding_table_length, iree_hal_cmd_block_state_t* state,
-    iree_host_size_t state_size) {
+    iree_host_size_t state_size,
+    iree_hal_cmd_block_processor_context_t* out_context) {
   memset(out_context, 0, sizeof(*out_context));
   out_context->recording = recording;
   out_context->binding_table = binding_table;
@@ -2936,9 +2936,9 @@ iree_status_t iree_hal_cmd_block_processor_context_allocate(
       (iree_hal_cmd_block_processor_context_t*)allocation;
   iree_hal_cmd_block_state_t* state =
       (iree_hal_cmd_block_state_t*)((uint8_t*)allocation + context_size);
-  iree_hal_cmd_block_processor_context_initialize(
-      context, recording, binding_table, binding_table_length, state,
-      state_size);
+  iree_hal_cmd_block_processor_context_initialize(recording, binding_table,
+                                                  binding_table_length, state,
+                                                  state_size, context);
   context->worker_count = worker_count;
   context->state_stride = state_stride;
   context->state_count = state_count;

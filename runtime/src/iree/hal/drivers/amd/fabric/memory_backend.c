@@ -345,9 +345,8 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_prepare_host_source(
     const iree_hal_amd_fabric_slab_pool_query_t* query,
     const amdf_memory_profile_t* profile,
     const iree_hal_amd_fabric_import_route_t* imports,
-    iree_hal_pool_host_access_t host,
-    iree_hal_amd_fabric_binding_request_t* out_source,
-    amdf_memory_flags_t* required_flags) {
+    iree_hal_pool_host_access_t host, amdf_memory_flags_t* inout_required_flags,
+    iree_hal_amd_fabric_binding_request_t* out_source) {
   *out_source = (iree_hal_amd_fabric_binding_request_t){0};
   if (!host.access ||
       (profile && !iree_all_bits_set(profile->supported_flags,
@@ -400,7 +399,7 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_prepare_host_source(
       .address_kind = AMDF_MEMORY_ADDRESS_HOST,
       .mapping_granularity = (uint32_t)capabilities.mapping_granularity,
   };
-  *required_flags |= capabilities.required_source_flags;
+  *inout_required_flags |= capabilities.required_source_flags;
   return iree_ok_status();
 }
 
@@ -543,7 +542,7 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_emit_plan(
   amdf_memory_flags_t required_flags = query->required_flags;
   iree_hal_amd_fabric_binding_request_t host_source;
   IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_slab_pool_prepare_host_source(
-      owner, query, profile, imports, host, &host_source, &required_flags));
+      owner, query, profile, imports, host, &required_flags, &host_source));
   const bool extra_host_source = host_source.mapping_granularity != 0;
   binding_count += extra_host_source;
   const uint16_t binding_offset = any_host_access ? 0 : 1;

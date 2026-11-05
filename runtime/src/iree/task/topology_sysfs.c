@@ -727,7 +727,7 @@ static uint32_t iree_sysfs_find_first_domain_processor(
 // domain containing all cores (graceful degradation).
 static iree_host_size_t iree_sysfs_enumerate_cache_domains(
     iree_host_size_t core_count, const uint32_t* core_map,
-    iree_sysfs_cache_domain_t* out_domains, iree_host_size_t max_domains) {
+    iree_host_size_t max_domains, iree_sysfs_cache_domain_t* out_domains) {
   if (core_count == 0 || max_domains == 0) {
     return 0;
   }
@@ -927,7 +927,7 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
     // Enumerate cache domains from the cores we found.
     iree_sysfs_cache_domain_t domains[IREE_TASK_TOPOLOGY_MAX_GROUP_COUNT];
     const iree_host_size_t domain_count = iree_sysfs_enumerate_cache_domains(
-        core_count, core_map, domains, IREE_ARRAYSIZE(domains));
+        core_count, core_map, IREE_ARRAYSIZE(domains), domains);
     if (domain_count > 1) {
       // SCATTER: Distribute cores evenly across domains using round-robin.
       // This maximizes memory bandwidth by utilizing multiple controllers.

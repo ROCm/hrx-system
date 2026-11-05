@@ -486,7 +486,7 @@ static hrx_status_t hrx_create_task_device(int group_count,
   iree_hal_executable_loader_t* loaders[8] = {NULL};
   iree_host_size_t loader_count = 0;
   status = iree_hal_create_all_available_executable_loaders(
-      IREE_ARRAYSIZE(loaders), &loader_count, loaders, alloc);
+      IREE_ARRAYSIZE(loaders), alloc, &loader_count, loaders);
   if (!iree_status_is_ok(status)) {
     iree_task_executor_release(executor);
     return hrx_status_from_iree(status);

@@ -825,7 +825,7 @@ static iree_status_t iree_hal_amd_gpu_metadata_printf_read_integer(
 
 static iree_status_t iree_hal_amd_gpu_metadata_parse_printf(
     iree_string_view_t value, iree_hal_amd_gpu_metadata_printf_t* out_record,
-    uint32_t* argument_sizes) {
+    uint32_t* out_argument_sizes) {
   IREE_RETURN_IF_ERROR(
       iree_hal_amd_gpu_metadata_printf_read_integer(&value, &out_record->id));
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_metadata_printf_read_integer(
@@ -838,12 +838,12 @@ static iree_status_t iree_hal_amd_gpu_metadata_parse_printf(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "AMDGPU printf argument has zero size");
     }
-    if (argument_sizes) {
-      argument_sizes[i] = size;
+    if (out_argument_sizes) {
+      out_argument_sizes[i] = size;
     }
   }
   out_record->format = value;
-  out_record->argument_sizes = argument_sizes;
+  out_record->argument_sizes = out_argument_sizes;
   return iree_ok_status();
 }
 

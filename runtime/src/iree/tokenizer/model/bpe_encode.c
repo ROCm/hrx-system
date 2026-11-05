@@ -42,9 +42,9 @@ static bool iree_tokenizer_bpe_emit_results(
 
 static iree_status_t iree_tokenizer_bpe_encode_segment(
     const iree_tokenizer_bpe_model_t* model, iree_tokenizer_bpe_state_t* state,
-    iree_string_view_t segment, iree_tokenizer_token_id_t* out_tokens,
-    iree_tokenizer_offset_t* out_offsets, iree_host_size_t max_tokens,
+    iree_string_view_t segment, iree_host_size_t max_tokens,
     iree_host_size_t segment_base_offset, bool is_partial,
+    iree_tokenizer_token_id_t* out_tokens, iree_tokenizer_offset_t* out_offsets,
     iree_host_size_t* out_token_count, bool* out_segment_complete) {
   *out_token_count = 0;
   *out_segment_complete = false;
@@ -185,8 +185,8 @@ iree_status_t iree_tokenizer_bpe_state_encode(
     iree_host_size_t tokens_for_segment = 0;
     bool segment_complete = false;
     status = iree_tokenizer_bpe_encode_segment(
-        model, bpe_state, segment_text, current_token_output,
-        current_offset_output, remaining_capacity, segment->start, is_partial,
+        model, bpe_state, segment_text, remaining_capacity, segment->start,
+        is_partial, current_token_output, current_offset_output,
         &tokens_for_segment, &segment_complete);
 
     total_tokens_written += tokens_for_segment;

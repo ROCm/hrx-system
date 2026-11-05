@@ -249,7 +249,7 @@ TEST_P(SpecialTokensLayoutTest, AlignedMetadataMatchesEveryToken) {
     iree_tokenizer_token_id_t id = -1;
     EXPECT_EQ(iree_tokenizer_special_tokens_match(
                   &tokens_, iree_make_string_view(content, sizeof(content)),
-                  &length, &id, &state),
+                  &state, &length, &id),
               IREE_TOKENIZER_SPECIAL_TOKENS_MATCHED);
     EXPECT_EQ(length, sizeof(content));
     EXPECT_EQ(id, i);
@@ -309,7 +309,7 @@ TEST_F(SpecialTokensMatchTest, ExactMatch) {
   iree_tokenizer_token_id_t id = 0;
 
   auto result = iree_tokenizer_special_tokens_match(
-      &special_tokens_, IREE_SV("<|endoftext|>"), &length, &id, &state_);
+      &special_tokens_, IREE_SV("<|endoftext|>"), &state_, &length, &id);
 
   EXPECT_EQ(result, IREE_TOKENIZER_SPECIAL_TOKENS_MATCHED);
   EXPECT_EQ(length, 13u);
@@ -321,7 +321,7 @@ TEST_F(SpecialTokensMatchTest, MatchWithTrailingText) {
   iree_tokenizer_token_id_t id = 0;
 
   auto result = iree_tokenizer_special_tokens_match(
-      &special_tokens_, IREE_SV("[CLS]hello world"), &length, &id, &state_);
+      &special_tokens_, IREE_SV("[CLS]hello world"), &state_, &length, &id);
 
   EXPECT_EQ(result, IREE_TOKENIZER_SPECIAL_TOKENS_MATCHED);
   EXPECT_EQ(length, 5u);
@@ -333,7 +333,7 @@ TEST_F(SpecialTokensMatchTest, NoMatchDifferentFirstByte) {
   iree_tokenizer_token_id_t id = 0;
 
   auto result = iree_tokenizer_special_tokens_match(
-      &special_tokens_, IREE_SV("hello world"), &length, &id, &state_);
+      &special_tokens_, IREE_SV("hello world"), &state_, &length, &id);
 
   EXPECT_EQ(result, IREE_TOKENIZER_SPECIAL_TOKENS_NO_MATCH);
 }
@@ -344,7 +344,7 @@ TEST_F(SpecialTokensMatchTest, NoMatchSameFirstByteDifferentContent) {
 
   // Starts with '<' but doesn't match any token.
   auto result = iree_tokenizer_special_tokens_match(
-      &special_tokens_, IREE_SV("<html>"), &length, &id, &state_);
+      &special_tokens_, IREE_SV("<html>"), &state_, &length, &id);
 
   EXPECT_EQ(result, IREE_TOKENIZER_SPECIAL_TOKENS_NO_MATCH);
 }
@@ -355,7 +355,7 @@ TEST_F(SpecialTokensMatchTest, NeedMorePartialPrefix) {
 
   // "<|" could be start of "<|endoftext|>" or "<|startoftext|>".
   auto result = iree_tokenizer_special_tokens_match(
-      &special_tokens_, IREE_SV("<|"), &length, &id, &state_);
+      &special_tokens_, IREE_SV("<|"), &state_, &length, &id);
 
   EXPECT_EQ(result, IREE_TOKENIZER_SPECIAL_TOKENS_NEED_MORE);
 }
@@ -366,7 +366,7 @@ TEST_F(SpecialTokensMatchTest, NeedMorePartialToken) {
 
   // Partial "<|endoftext|>" - could match if more data comes.
   auto result = iree_tokenizer_special_tokens_match(
-      &special_tokens_, IREE_SV("<|endof"), &length, &id, &state_);
+      &special_tokens_, IREE_SV("<|endof"), &state_, &length, &id);
 
   EXPECT_EQ(result, IREE_TOKENIZER_SPECIAL_TOKENS_NEED_MORE);
 }
@@ -392,7 +392,7 @@ TEST_F(SpecialTokensMatchTest, LongestMatchWins) {
 
   // Both "<s>" and "<special>" could match, but longest wins.
   auto result = iree_tokenizer_special_tokens_match(
-      &special_tokens, IREE_SV("<special>token"), &length, &id, &state_);
+      &special_tokens, IREE_SV("<special>token"), &state_, &length, &id);
 
   EXPECT_EQ(result, IREE_TOKENIZER_SPECIAL_TOKENS_MATCHED);
   EXPECT_EQ(length, 9u);  // "<special>" is 9 bytes.
@@ -406,7 +406,7 @@ TEST_F(SpecialTokensMatchTest, EmptyInput) {
   iree_tokenizer_token_id_t id = 0;
 
   auto result = iree_tokenizer_special_tokens_match(
-      &special_tokens_, iree_string_view_empty(), &length, &id, &state_);
+      &special_tokens_, iree_string_view_empty(), &state_, &length, &id);
 
   EXPECT_EQ(result, IREE_TOKENIZER_SPECIAL_TOKENS_NO_MATCH);
 }
@@ -419,7 +419,7 @@ TEST_F(SpecialTokensMatchTest, EmptySpecialTokens) {
   iree_tokenizer_token_id_t id = 0;
 
   auto result = iree_tokenizer_special_tokens_match(
-      &empty, IREE_SV("<|endoftext|>"), &length, &id, &state_);
+      &empty, IREE_SV("<|endoftext|>"), &state_, &length, &id);
 
   EXPECT_EQ(result, IREE_TOKENIZER_SPECIAL_TOKENS_NO_MATCH);
 
@@ -440,19 +440,19 @@ TEST_F(SpecialTokensMatchTest, StreamingContinuationFullMatch) {
   // Chunk 1: "<|" (2 bytes)
   ResetState();
   auto result = iree_tokenizer_special_tokens_match(
-      &special_tokens_, IREE_SV("<|"), &length, &id, &state_);
+      &special_tokens_, IREE_SV("<|"), &state_, &length, &id);
   EXPECT_EQ(result, IREE_TOKENIZER_SPECIAL_TOKENS_NEED_MORE);
   EXPECT_EQ(state_.match_position, 2u);
 
   // Chunk 2: "endoftext" (9 bytes) - continuation, state tracks progress
   result = iree_tokenizer_special_tokens_match(
-      &special_tokens_, IREE_SV("endoftext"), &length, &id, &state_);
+      &special_tokens_, IREE_SV("endoftext"), &state_, &length, &id);
   EXPECT_EQ(result, IREE_TOKENIZER_SPECIAL_TOKENS_NEED_MORE);
   EXPECT_EQ(state_.match_position, 11u);
 
   // Chunk 3: "|>" (2 bytes) - completes the match
   result = iree_tokenizer_special_tokens_match(&special_tokens_, IREE_SV("|>"),
-                                               &length, &id, &state_);
+                                               &state_, &length, &id);
   EXPECT_EQ(result, IREE_TOKENIZER_SPECIAL_TOKENS_MATCHED);
   EXPECT_EQ(length, 2u);  // Only NEW bytes consumed.
   EXPECT_EQ(id, 50256);
@@ -469,8 +469,8 @@ TEST_F(SpecialTokensMatchTest, StreamingContinuationByteByByte) {
   ResetState();
   for (size_t i = 0; i < token_len - 1; ++i) {
     auto result = iree_tokenizer_special_tokens_match(
-        &special_tokens_, iree_make_string_view(&token[i], 1), &length, &id,
-        &state_);
+        &special_tokens_, iree_make_string_view(&token[i], 1), &state_, &length,
+        &id);
     EXPECT_EQ(result, IREE_TOKENIZER_SPECIAL_TOKENS_NEED_MORE)
         << "Failed at byte " << i << " ('" << token[i] << "')";
     EXPECT_EQ(state_.match_position, i + 1);
@@ -479,7 +479,7 @@ TEST_F(SpecialTokensMatchTest, StreamingContinuationByteByByte) {
   // Final byte completes the match.
   auto result = iree_tokenizer_special_tokens_match(
       &special_tokens_, iree_make_string_view(&token[token_len - 1], 1),
-      &length, &id, &state_);
+      &state_, &length, &id);
   EXPECT_EQ(result, IREE_TOKENIZER_SPECIAL_TOKENS_MATCHED);
   EXPECT_EQ(length, 1u);
   EXPECT_EQ(id, 50256);
@@ -492,13 +492,13 @@ TEST_F(SpecialTokensMatchTest, StreamingContinuationMismatchMidway) {
 
   ResetState();
   auto result = iree_tokenizer_special_tokens_match(
-      &special_tokens_, IREE_SV("<|endof"), &length, &id, &state_);
+      &special_tokens_, IREE_SV("<|endof"), &state_, &length, &id);
   EXPECT_EQ(result, IREE_TOKENIZER_SPECIAL_TOKENS_NEED_MORE);
   EXPECT_EQ(state_.match_position, 7u);
 
   // Now provide "X" which doesn't match "t" (expected next byte).
   result = iree_tokenizer_special_tokens_match(&special_tokens_, IREE_SV("X"),
-                                               &length, &id, &state_);
+                                               &state_, &length, &id);
   EXPECT_EQ(result, IREE_TOKENIZER_SPECIAL_TOKENS_NO_MATCH);
   // State still has match_position for get_partial() reconstruction.
   EXPECT_EQ(state_.match_position, 7u);
@@ -511,7 +511,7 @@ TEST_F(SpecialTokensMatchTest, StreamingContinuationGetPartial) {
 
   ResetState();
   auto result = iree_tokenizer_special_tokens_match(
-      &special_tokens_, IREE_SV("<|endo"), &length, &id, &state_);
+      &special_tokens_, IREE_SV("<|endo"), &state_, &length, &id);
   EXPECT_EQ(result, IREE_TOKENIZER_SPECIAL_TOKENS_NEED_MORE);
   EXPECT_EQ(state_.match_position, 6u);
 
@@ -531,13 +531,13 @@ TEST_F(SpecialTokensMatchTest, StreamingContinuationMatchWithExtraData) {
 
   ResetState();
   auto result = iree_tokenizer_special_tokens_match(
-      &special_tokens_, IREE_SV("<|endoftext"), &length, &id, &state_);
+      &special_tokens_, IREE_SV("<|endoftext"), &state_, &length, &id);
   EXPECT_EQ(result, IREE_TOKENIZER_SPECIAL_TOKENS_NEED_MORE);
   EXPECT_EQ(state_.match_position, 11u);
 
   // Provide "|>extra" - should match and report only 2 bytes consumed.
   result = iree_tokenizer_special_tokens_match(
-      &special_tokens_, IREE_SV("|>extra"), &length, &id, &state_);
+      &special_tokens_, IREE_SV("|>extra"), &state_, &length, &id);
   EXPECT_EQ(result, IREE_TOKENIZER_SPECIAL_TOKENS_MATCHED);
   EXPECT_EQ(length, 2u);  // Only "|>" consumed, "extra" remains.
   EXPECT_EQ(id, 50256);
@@ -550,12 +550,12 @@ TEST_F(SpecialTokensMatchTest, StreamingContinuationEmptyChunk) {
 
   ResetState();
   auto result = iree_tokenizer_special_tokens_match(
-      &special_tokens_, IREE_SV("<|"), &length, &id, &state_);
+      &special_tokens_, IREE_SV("<|"), &state_, &length, &id);
   EXPECT_EQ(result, IREE_TOKENIZER_SPECIAL_TOKENS_NEED_MORE);
 
   // Empty continuation.
   result = iree_tokenizer_special_tokens_match(
-      &special_tokens_, iree_string_view_empty(), &length, &id, &state_);
+      &special_tokens_, iree_string_view_empty(), &state_, &length, &id);
   EXPECT_EQ(result, IREE_TOKENIZER_SPECIAL_TOKENS_NO_MATCH);
 }
 
@@ -618,7 +618,7 @@ class SpecialTokensFlagsTest : public ::testing::Test {
     iree_host_size_t length = 0;
     iree_tokenizer_token_id_t id = 0;
     auto result = iree_tokenizer_special_tokens_match(&special_tokens_, input,
-                                                      &length, &id, &state_);
+                                                      &state_, &length, &id);
     if (out_length) {
       *out_length = length;
     }

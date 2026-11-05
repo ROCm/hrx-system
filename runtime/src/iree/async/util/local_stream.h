@@ -96,8 +96,8 @@ iree_status_t iree_async_local_stream_send(
 // the caller validates its protocol and authorizes use.
 iree_status_t iree_async_local_stream_receive(
     iree_async_local_stream_t* stream, iree_byte_span_t data,
-    iree_host_size_t handle_count, iree_async_primitive_t* out_handles,
-    iree_async_local_stream_callback_t callback);
+    iree_host_size_t handle_count, iree_async_local_stream_callback_t callback,
+    iree_async_primitive_t* out_handles);
 
 // Closes admission and joins all ownership. An active transfer receives its
 // terminal callback before the deactivation callback. Call exactly once after

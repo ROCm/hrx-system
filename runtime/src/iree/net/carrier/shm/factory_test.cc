@@ -480,8 +480,8 @@ TEST_P(ShmFactoryTest, StopDuringImportWaitNeedsNoPeerProgress) {
   std::array<uint8_t, IREE_NET_SHM_BOOTSTRAP_OFFER_SIZE> offer;
   IREE_ASSERT_OK(iree_async_local_stream_receive(
       raw_.stream, iree_make_byte_span(offer.data(), offer.size()),
-      IREE_NET_SHM_STORAGE_HANDLE_COUNT, received_handles_,
-      {Transferred, this}));
+      IREE_NET_SHM_STORAGE_HANDLE_COUNT, {Transferred, this},
+      received_handles_));
   ASSERT_NO_FATAL_FAILURE(AwaitTransfer());
   iree_net_shm_region_layout_t layout;
   IREE_ASSERT_OK(iree_net_shm_bootstrap_decode_offer(
@@ -516,7 +516,7 @@ TEST_P(ShmFactoryTest, CancelAfterImportNeedsNoReadyOrPeerProgress) {
   std::array<uint8_t, IREE_NET_SHM_BOOTSTRAP_HEADER_SIZE> accept;
   IREE_ASSERT_OK(iree_async_local_stream_receive(
       raw_.stream, iree_make_byte_span(accept.data(), accept.size()), 0,
-      nullptr, {Transferred, this}));
+      {Transferred, this}, nullptr));
   ASSERT_NO_FATAL_FAILURE(AwaitTransfer());
   IREE_ASSERT_OK(iree_net_shm_bootstrap_decode_ack(
       iree_make_const_byte_span(accept.data(), accept.size()),

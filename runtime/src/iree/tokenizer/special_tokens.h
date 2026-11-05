@@ -251,9 +251,9 @@ struct iree_tokenizer_special_tokens_encode_state_t;
 iree_tokenizer_special_tokens_match_result_t
 iree_tokenizer_special_tokens_match(
     const iree_tokenizer_special_tokens_t* special_tokens,
-    iree_string_view_t input, iree_host_size_t* out_length,
-    iree_tokenizer_token_id_t* out_id,
-    struct iree_tokenizer_special_tokens_encode_state_t* state);
+    iree_string_view_t input,
+    struct iree_tokenizer_special_tokens_encode_state_t* state,
+    iree_host_size_t* out_length, iree_tokenizer_token_id_t* out_id);
 
 // Returns the number of bytes at the start of |input| that cannot begin any
 // special token. These bytes can be safely passed to the normalizer without

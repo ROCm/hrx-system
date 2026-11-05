@@ -109,8 +109,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
       iree_tokenizer_token_id_t id = 0;
       iree_string_view_t remaining =
           iree_make_string_view(input.data + i, size - i);
-      iree_tokenizer_special_tokens_match(&g_special_tokens, remaining, &length,
-                                          &id, &state);
+      iree_tokenizer_special_tokens_match(&g_special_tokens, remaining, &state,
+                                          &length, &id);
     }
   }
 
@@ -129,7 +129,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
       iree_string_view_t chunk = iree_make_string_view(input.data + offset, 1);
 
       auto result = iree_tokenizer_special_tokens_match(
-          &g_special_tokens, chunk, &length, &id, &state);
+          &g_special_tokens, chunk, &state, &length, &id);
 
       if (result == IREE_TOKENIZER_SPECIAL_TOKENS_MATCHED) {
         offset += length;
@@ -174,7 +174,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
           iree_make_string_view(input.data + offset, chunk_size);
 
       auto result = iree_tokenizer_special_tokens_match(
-          &g_special_tokens, chunk, &length, &id, &state);
+          &g_special_tokens, chunk, &state, &length, &id);
 
       if (result == IREE_TOKENIZER_SPECIAL_TOKENS_MATCHED) {
         offset += length;

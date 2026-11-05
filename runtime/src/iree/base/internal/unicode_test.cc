@@ -853,15 +853,15 @@ TEST(UnicodeComposeTest, AsciiPassthrough) {
   char buffer[64];
   iree_host_size_t length = 0;
   IREE_ASSERT_OK(iree_unicode_compose(iree_make_cstring_view("Hello World"),
-                                      buffer, sizeof(buffer), &length));
+                                      sizeof(buffer), buffer, &length));
   EXPECT_EQ(std::string(buffer, length), "Hello World");
 }
 
 TEST(UnicodeComposeTest, EmptyString) {
   char buffer[64];
   iree_host_size_t length = 0;
-  IREE_ASSERT_OK(iree_unicode_compose(iree_make_cstring_view(""), buffer,
-                                      sizeof(buffer), &length));
+  IREE_ASSERT_OK(iree_unicode_compose(iree_make_cstring_view(""),
+                                      sizeof(buffer), buffer, &length));
   EXPECT_EQ(length, 0u);
 }
 
@@ -874,7 +874,7 @@ TEST(UnicodeComposeTest, AlreadyComposed) {
   const char input[] = "caf\xC3\xA9";
   IREE_ASSERT_OK(
       iree_unicode_compose(iree_make_string_view(input, sizeof(input) - 1),
-                           buffer, sizeof(buffer), &length));
+                           sizeof(buffer), buffer, &length));
   EXPECT_EQ(std::string(buffer, length), std::string(input, sizeof(input) - 1));
 }
 
@@ -886,7 +886,7 @@ TEST(UnicodeComposeTest, DecomposedToComposed) {
   const char input[] = "cafe\xCC\x81";  // e + combining acute
   IREE_ASSERT_OK(
       iree_unicode_compose(iree_make_string_view(input, sizeof(input) - 1),
-                           buffer, sizeof(buffer), &length));
+                           sizeof(buffer), buffer, &length));
 
   // Should compose to "café" with precomposed é.
   const char expected[] = "caf\xC3\xA9";
@@ -903,7 +903,7 @@ TEST(UnicodeComposeTest, MultipleDecomposedCharacters) {
   const char input[] = "re\xCC\x81sume\xCC\x81";
   IREE_ASSERT_OK(
       iree_unicode_compose(iree_make_string_view(input, sizeof(input) - 1),
-                           buffer, sizeof(buffer), &length));
+                           sizeof(buffer), buffer, &length));
 
   // Should compose to "résumé" with precomposed é.
   const char expected[] = "r\xC3\xA9sum\xC3\xA9";
@@ -920,7 +920,7 @@ TEST(UnicodeComposeTest, MultipleMarksOnSameBase) {
   const char input[] = "o\xCC\x81\xCC\x88";
   IREE_ASSERT_OK(
       iree_unicode_compose(iree_make_string_view(input, sizeof(input) - 1),
-                           buffer, sizeof(buffer), &length));
+                           sizeof(buffer), buffer, &length));
 
   // o + acute composes to ó (U+00F3), diaeresis remains.
   // Expected: ó (C3 B3) + combining diaeresis (CC 88).
@@ -940,7 +940,7 @@ TEST(UnicodeComposeTest, CanonicalOrdering) {
   const char input1[] = "o\xCC\xA7\xCC\x81";  // cedilla + acute
   IREE_ASSERT_OK(
       iree_unicode_compose(iree_make_string_view(input1, sizeof(input1) - 1),
-                           buffer, sizeof(buffer), &length));
+                           sizeof(buffer), buffer, &length));
 
   // o + acute (CCC=230) + cedilla (CCC=202) is NOT canonical order.
   // Compose should reorder to cedilla + acute, then compose.
@@ -949,7 +949,7 @@ TEST(UnicodeComposeTest, CanonicalOrdering) {
   const char input2[] = "o\xCC\x81\xCC\xA7";  // acute + cedilla (wrong order)
   IREE_ASSERT_OK(
       iree_unicode_compose(iree_make_string_view(input2, sizeof(input2) - 1),
-                           buffer2, sizeof(buffer2), &length2));
+                           sizeof(buffer2), buffer2, &length2));
 
   // Both should produce the same canonical result.
   EXPECT_EQ(std::string(buffer, length), std::string(buffer2, length2));
@@ -963,7 +963,7 @@ TEST(UnicodeComposeTest, NonComposingMarks) {
   const char input[] = "x\xCC\x81";  // x + combining acute
   IREE_ASSERT_OK(
       iree_unicode_compose(iree_make_string_view(input, sizeof(input) - 1),
-                           buffer, sizeof(buffer), &length));
+                           sizeof(buffer), buffer, &length));
 
   // Should remain unchanged (x doesn't compose with acute).
   EXPECT_EQ(std::string(buffer, length), std::string(input, sizeof(input) - 1));
@@ -977,7 +977,7 @@ TEST(UnicodeComposeTest, CjkUnchanged) {
   const char input[] = "\xE4\xB8\xAD\xE6\x96\x87";  // 中文
   IREE_ASSERT_OK(
       iree_unicode_compose(iree_make_string_view(input, sizeof(input) - 1),
-                           buffer, sizeof(buffer), &length));
+                           sizeof(buffer), buffer, &length));
   EXPECT_EQ(std::string(buffer, length), std::string(input, sizeof(input) - 1));
 }
 
@@ -991,7 +991,7 @@ TEST(UnicodeComposeTest, MixedContent) {
   const char input[] = "Hello cafe\xCC\x81 \xE4\xB8\xAD\xE6\x96\x87";
   IREE_ASSERT_OK(
       iree_unicode_compose(iree_make_string_view(input, sizeof(input) - 1),
-                           buffer, sizeof(buffer), &length));
+                           sizeof(buffer), buffer, &length));
 
   // Expected: "Hello café 中文" with composed é.
   const char expected[] = "Hello caf\xC3\xA9 \xE4\xB8\xAD\xE6\x96\x87";
@@ -1005,7 +1005,7 @@ TEST(UnicodeComposeTest, BufferTooSmall) {
 
   // Buffer too small for output.
   iree_status_t status = iree_unicode_compose(
-      iree_make_cstring_view("Hello World"), buffer, sizeof(buffer), &length);
+      iree_make_cstring_view("Hello World"), sizeof(buffer), buffer, &length);
   EXPECT_THAT(Status(std::move(status)),
               StatusIs(StatusCode::kResourceExhausted));
 }
@@ -1028,7 +1028,7 @@ TEST(UnicodeComposeTest, BufferCapacityIsInputSize) {
   iree_host_size_t length = 0;
   IREE_ASSERT_OK(
       iree_unicode_compose(iree_make_string_view(input, sizeof(input) - 1),
-                           exact_buffer, sizeof(exact_buffer), &length));
+                           sizeof(exact_buffer), exact_buffer, &length));
   EXPECT_EQ(length, 5u);
   EXPECT_EQ(std::string(exact_buffer, length),
             std::string(expected, sizeof(expected) - 1));
@@ -1038,7 +1038,7 @@ TEST(UnicodeComposeTest, BufferCapacityIsInputSize) {
   length = 0;
   iree_status_t status =
       iree_unicode_compose(iree_make_string_view(input, sizeof(input) - 1),
-                           small_buffer, sizeof(small_buffer), &length);
+                           sizeof(small_buffer), small_buffer, &length);
   EXPECT_THAT(Status(std::move(status)),
               StatusIs(StatusCode::kResourceExhausted));
 
@@ -1047,7 +1047,7 @@ TEST(UnicodeComposeTest, BufferCapacityIsInputSize) {
   length = 0;
   IREE_ASSERT_OK(
       iree_unicode_compose(iree_make_string_view(input, sizeof(input) - 1),
-                           large_buffer, sizeof(large_buffer), &length));
+                           sizeof(large_buffer), large_buffer, &length));
   EXPECT_EQ(length, 5u);
   EXPECT_EQ(std::string(large_buffer, length),
             std::string(expected, sizeof(expected) - 1));
@@ -1061,7 +1061,7 @@ TEST(UnicodeComposeTest, GreekWithAccents) {
   const char input[] = "\xCE\xB1\xCC\x81";  // α + acute
   IREE_ASSERT_OK(
       iree_unicode_compose(iree_make_string_view(input, sizeof(input) - 1),
-                           buffer, sizeof(buffer), &length));
+                           sizeof(buffer), buffer, &length));
 
   // Should compose to ά (U+03AC).
   const char expected[] = "\xCE\xAC";
@@ -1077,7 +1077,7 @@ TEST(UnicodeComposeTest, Emoji) {
   const char input[] = "\xF0\x9F\x98\x80";  // 😀
   IREE_ASSERT_OK(
       iree_unicode_compose(iree_make_string_view(input, sizeof(input) - 1),
-                           buffer, sizeof(buffer), &length));
+                           sizeof(buffer), buffer, &length));
   EXPECT_EQ(std::string(buffer, length), std::string(input, sizeof(input) - 1));
 }
 
@@ -1090,7 +1090,7 @@ TEST(UnicodeComposeTest, HangulUnchanged) {
   const char input[] = "\xEA\xB0\x80";  // 가 (U+AC00)
   IREE_ASSERT_OK(
       iree_unicode_compose(iree_make_string_view(input, sizeof(input) - 1),
-                           buffer, sizeof(buffer), &length));
+                           sizeof(buffer), buffer, &length));
   EXPECT_EQ(std::string(buffer, length), std::string(input, sizeof(input) - 1));
 }
 
@@ -1108,7 +1108,7 @@ TEST(UnicodeComposeTest, MultipleCombiningSequences) {
 
   IREE_ASSERT_OK(
       iree_unicode_compose(iree_make_string_view(input, sizeof(input) - 1),
-                           buffer, sizeof(buffer), &length));
+                           sizeof(buffer), buffer, &length));
   EXPECT_EQ(std::string(buffer, length),
             std::string(expected, sizeof(expected) - 1));
 }
@@ -1129,7 +1129,7 @@ TEST(UnicodeComposeTest, ManyCombiningMarks) {
   // Should succeed - 10 marks is well under the 32-codepoint limit.
   IREE_ASSERT_OK(
       iree_unicode_compose(iree_make_string_view(input.data(), input.size()),
-                           buffer, sizeof(buffer), &length));
+                           sizeof(buffer), buffer, &length));
 
   // First acute should compose with 'a' to form 'á', rest remain.
   // á = U+00E1 = C3 A1
@@ -1154,7 +1154,7 @@ TEST(UnicodeComposeTest, CombiningSequenceLimitExceeded) {
   // Should fail - 36 codepoints (1 base + 35 marks) exceeds 32 limit.
   iree_status_t status =
       iree_unicode_compose(iree_make_string_view(input.data(), input.size()),
-                           buffer, sizeof(buffer), &length);
+                           sizeof(buffer), buffer, &length);
   EXPECT_THAT(Status(std::move(status)),
               StatusIs(StatusCode::kResourceExhausted));
 }
@@ -1174,7 +1174,7 @@ TEST(UnicodeComposeTest, LeadingCombiningMark) {
 
   IREE_ASSERT_OK(
       iree_unicode_compose(iree_make_string_view(input, sizeof(input) - 1),
-                           buffer, sizeof(buffer), &length));
+                           sizeof(buffer), buffer, &length));
   EXPECT_EQ(std::string(buffer, length),
             std::string(expected, sizeof(expected) - 1));
 }
@@ -1189,7 +1189,7 @@ TEST(UnicodeComposeTest, SingleCombiningMark) {
   // Should pass through unchanged.
   IREE_ASSERT_OK(
       iree_unicode_compose(iree_make_string_view(input, sizeof(input) - 1),
-                           buffer, sizeof(buffer), &length));
+                           sizeof(buffer), buffer, &length));
   EXPECT_EQ(std::string(buffer, length), std::string(input, sizeof(input) - 1));
 }
 
@@ -1208,7 +1208,7 @@ TEST(UnicodeComposeTest, CombiningSequenceLimitBoundary) {
   // Should succeed - exactly at the 32-codepoint limit.
   IREE_ASSERT_OK(
       iree_unicode_compose(iree_make_string_view(input.data(), input.size()),
-                           buffer, sizeof(buffer), &length));
+                           sizeof(buffer), buffer, &length));
 
   // First acute composes with 'a' to form 'á', rest remain.
   std::string expected = "\xC3\xA1";  // á
@@ -1233,8 +1233,8 @@ TEST(UnicodeComposeTest, InvalidUtf8BehaviorUndefined) {
   // We document that behavior is undefined, so we just verify it doesn't crash.
   // The actual result depends on implementation details.
   iree_status_t status = iree_unicode_compose(
-      iree_make_string_view(invalid_input, sizeof(invalid_input) - 1), buffer,
-      sizeof(buffer), &length);
+      iree_make_string_view(invalid_input, sizeof(invalid_input) - 1),
+      sizeof(buffer), buffer, &length);
 
   // Either succeeds (with replacement char) or fails (capacity issues).
   // We don't assert on the result, just that it doesn't crash.

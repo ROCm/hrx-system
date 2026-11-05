@@ -198,8 +198,8 @@ int Publisher(int, char**, const char* directory) {
     uint32_t ready = UINT32_MAX;
     Transfer enrolled;
     CheckStatus(iree_async_local_stream_receive(
-        peer.stream, iree_make_byte_span(&ready, sizeof(ready)), 0, nullptr,
-        enrolled.callback()));
+        peer.stream, iree_make_byte_span(&ready, sizeof(ready)), 0,
+        enrolled.callback(), nullptr));
     enrolled.Wait(peer.proactor);
     ROLE_CHECK(ready == round);
     while (iree_atomic_load(&state->idle_round, iree_memory_order_acquire) !=
@@ -216,7 +216,7 @@ int Publisher(int, char**, const char* directory) {
   Transfer joined;
   CheckStatus(iree_async_local_stream_receive(peer.stream,
                                               iree_make_byte_span(&finished, 1),
-                                              0, nullptr, joined.callback()));
+                                              0, joined.callback(), nullptr));
   joined.Wait(peer.proactor);
   ROLE_CHECK(finished == 1);
   ROLE_CHECK((uint32_t)iree_atomic_load(&state->notification.value,
@@ -247,8 +247,8 @@ int Observer(int, char**, const char* directory) {
   iree_async_primitive_t handles[kHandleCount] = {};
   Transfer offered;
   CheckStatus(iree_async_local_stream_receive(
-      peer.stream, iree_make_byte_span(&offer, 1), kHandleCount, handles,
-      offered.callback()));
+      peer.stream, iree_make_byte_span(&offer, 1), kHandleCount,
+      offered.callback(), handles));
   offered.Wait(peer.proactor);
   ROLE_CHECK(offer == 1);
   iree_shm_handle_t mapping_handle = {};

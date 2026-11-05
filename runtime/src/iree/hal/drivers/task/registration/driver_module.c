@@ -58,7 +58,7 @@ static iree_status_t iree_hal_task_driver_factory_try_create(
   iree_hal_executable_loader_t* loaders[8] = {NULL};
   iree_host_size_t loader_count = 0;
   iree_status_t status = iree_hal_create_all_available_executable_loaders(
-      IREE_ARRAYSIZE(loaders), &loader_count, loaders, host_allocator);
+      IREE_ARRAYSIZE(loaders), host_allocator, &loader_count, loaders);
 
   // TODO(benvanik): allow this to be injected to share across drivers.
   iree_hal_allocator_t* device_allocator = NULL;
