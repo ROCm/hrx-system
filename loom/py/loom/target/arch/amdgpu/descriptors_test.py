@@ -33,6 +33,8 @@ from loom.target.arch.amdgpu.descriptors import (
     _AMDGPU_RDNA3_5_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_RDNA4_GFX1250_A0_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_TRANS_DESCRIPTOR_KEYS,
     _AMDGPU_TRANS_PROXY_LATENCY_CYCLES,
     _COUNTER_ASYNC,
@@ -142,7 +144,7 @@ from loom.target.arch.amdgpu.descriptors import (
 )
 from loom.target.arch.amdgpu.descriptors.api import (
     _AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X,
-    _order_descriptor_sets_for_shared_views,
+    _order_descriptor_sets_for_shared_ordinals,
     _with_instruction_classes,
     _with_storage_lease_rows,
     amdgpu_core_descriptor_set_instruction_names,
@@ -412,7 +414,7 @@ def test_generic_descriptor_contracts_are_member_intersections() -> None:
     )
 
 
-def test_exact_descriptor_storage_orders_portable_view_as_prefix() -> None:
+def test_descriptor_families_share_nested_ordinal_prefixes() -> None:
     portable_a = Descriptor(
         key="amdgpu.test.a",
         mnemonic="portable_a",
@@ -441,7 +443,7 @@ def test_exact_descriptor_storage_orders_portable_view_as_prefix() -> None:
         descriptors=(exact_only, exact_a, exact_b),
     )
 
-    ordered_sets = _order_descriptor_sets_for_shared_views(
+    ordered_sets = _order_descriptor_sets_for_shared_ordinals(
         {
             "gfx11_generic": portable_set,
             "rdna3_5": exact_set,
@@ -454,6 +456,29 @@ def test_exact_descriptor_storage_orders_portable_view_as_prefix() -> None:
         exact_a,
         exact_only,
     )
+
+    storage_a = replace(portable_a, mnemonic="storage_a")
+    storage_b = replace(portable_b, mnemonic="storage_b")
+    view_a = replace(portable_a, mnemonic="view_a")
+    view_b = replace(portable_b, mnemonic="view_b")
+    storage_set = replace(
+        _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE,
+        descriptors=(storage_a, storage_b),
+    )
+    view_set = replace(
+        _AMDGPU_RDNA4_GFX1250_A0_CORE_DESCRIPTOR_SET_BASE,
+        descriptors=(view_b, view_a),
+    )
+
+    ordered_sets = _order_descriptor_sets_for_shared_ordinals(
+        {
+            "rdna4_gfx125x": storage_set,
+            "rdna4_gfx1250_a0": view_set,
+        }
+    )
+
+    assert ordered_sets["rdna4_gfx125x"] is storage_set
+    assert ordered_sets["rdna4_gfx1250_a0"].descriptors == (view_a, view_b)
 
 
 @pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)
