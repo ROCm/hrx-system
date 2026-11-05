@@ -1470,7 +1470,8 @@ TEST_P(WeightsTest, MutableGrowthReclaimsIdleParametersWithoutDiscardingState) {
   IREE_ASSERT_OK(
       loom_serve_memory_pool_try_commit(pool_, 1, &range, &state_admitted));
   if (!state_admitted) {
-    ASSERT_TRUE(loom_serve_memory_pool_is_pending(pool_));
+    // Reclamation can retire before this owner observes the denial. Join any
+    // remaining native work before the next admission attempt.
     IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
     IREE_ASSERT_OK(
         loom_serve_memory_pool_try_commit(pool_, 1, &range, &state_admitted));
